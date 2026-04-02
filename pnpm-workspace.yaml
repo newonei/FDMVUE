@@ -39,7 +39,7 @@ catalog:
   '@iconify/tailwind': ^1.2.0
   '@iconify/vue': ^5.0.0
   '@intlify/core-base': ^11.2.8
-  '@intlify/unplugin-vue-i18n': ^6.0.8
+  '@intlify/unplugin-vue-i18n': ^11.0.7
   '@jspm/generator': ^2.9.0
   '@manypkg/get-packages': ^3.1.0
   '@microsoft/fetch-event-source': ^2.0.1
