@@ -25,7 +25,8 @@ const tokenTheme = computed(() => {
 
   return {
     algorithm,
-    token: tokens,
+    // 通过展开 tokens 建立对 token 字段的响应依赖，避免首次渲染时 token 更新未触发 ConfigProvider 重渲染
+    token: { ...tokens },
   };
 });
 </script>

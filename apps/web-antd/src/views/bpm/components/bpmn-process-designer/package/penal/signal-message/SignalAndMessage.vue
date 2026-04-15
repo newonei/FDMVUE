@@ -122,7 +122,7 @@ const handleConfirm = (formData: { id: string; name: string }) => {
   initDataList();
 };
 
-// 补充"编辑"、"移除"功能。相关 issue：https://github.com/YunaiV/yudao-cloud/issues/270
+// 补充"编辑"、"移除"功能。（历史遗留说明）
 const removeObject = (type: any, row: any) => {
   confirm({
     title: '提示',

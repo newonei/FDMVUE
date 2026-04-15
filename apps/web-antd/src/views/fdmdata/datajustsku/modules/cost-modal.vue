@@ -1,0 +1,607 @@
+<script lang="ts" setup>
+import type {
+  BlankSkuCostMatrixKey,
+  DataJustSkuCost,
+  YogaBlankOptions,
+} from '#/api/fdmdata/datajustsku';
+
+import { computed, ref, watch } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
+
+import {
+  Button,
+  Checkbox,
+  Input,
+  InputNumber,
+  message,
+  Pagination,
+  Select,
+  Spin,
+  Table,
+  Tag,
+} from 'ant-design-vue';
+
+import {
+  createDataJustSkuCost,
+  deleteDataJustSkuCost,
+  getBlankCostMatrixKeys,
+  getDataJustSkuCostPage,
+  getYogaBlankOptions,
+  updateDataJustSkuCost,
+} from '#/api/fdmdata/datajustsku';
+
+function compositeKey(materialKey: string, productType: string, sizeText: string) {
+  return `${materialKey}\t${productType}\t${sizeText}`;
+}
+
+interface CostMatrixRow {
+  rowKey: string;
+  materialKey: string;
+  materialLabel: string;
+  productType: string;
+  productTypeLabel: string;
+  sizeText: string;
+  id?: number;
+  costPrice: number | null;
+  weightKg: number | null;
+  /** 卷包尺寸(cm)，同步聚水潭 l/w/h */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  remark: string;
+  baselineCost: number | null;
+  baselineWeight: number | null;
+  baselineLengthCm: number | null;
+  baselineWidthCm: number | null;
+  baselineHeightCm: number | null;
+  baselineRemark: string;
+}
+
+function numDirty(a: number | null | undefined, b: number | null | undefined) {
+  const na = a ?? null;
+  const nb = b ?? null;
+  if (na === null && nb === null) return false;
+  if (na === null || nb === null) return true;
+  return Number(na) !== Number(nb);
+}
+
+function isRowDirty(row: CostMatrixRow) {
+  const c = row.costPrice ?? null;
+  const bc = row.baselineCost ?? null;
+  const costChanged =
+    c === null && bc === null
+      ? false
+      : c === null || bc === null
+        ? true
+        : Number(c) !== Number(bc);
+  const w = row.weightKg ?? null;
+  const bw = row.baselineWeight ?? null;
+  const weightChanged =
+    w === null && bw === null
+      ? false
+      : w === null || bw === null
+        ? true
+        : Number(w) !== Number(bw);
+  const lwhChanged =
+    numDirty(row.lengthCm, row.baselineLengthCm) ||
+    numDirty(row.widthCm, row.baselineWidthCm) ||
+    numDirty(row.heightCm, row.baselineHeightCm);
+  return (
+    costChanged ||
+    weightChanged ||
+    lwhChanged ||
+    (row.remark ?? '') !== (row.baselineRemark ?? '')
+  );
+}
+
+const options = ref<YogaBlankOptions | null>(null);
+const matrixRows = ref<CostMatrixRow[]>([]);
+const loading = ref(false);
+const saving = ref(false);
+
+/** 筛选 */
+const filterMaterialKey = ref<string | undefined>(undefined);
+const filterProductType = ref<string | undefined>(undefined);
+const filterSizeKeyword = ref('');
+const onlyMissingCost = ref(false);
+
+/** 客户端分页（表格内展示） */
+const pageNo = ref(1);
+const pageSize = ref(50);
+
+const materialFilterOptions = computed(() =>
+  (options.value?.materials ?? []).map((m) => ({
+    label: m.abbr ? `${m.label}（${m.abbr}）` : m.label,
+    value: m.key,
+  })),
+);
+
+const typeFilterOptions = computed(() =>
+  (options.value?.productTypes ?? []).map((t) => ({
+    label: t.abbr ? `${t.label}（${t.abbr}）` : t.label,
+    value: t.key,
+  })),
+);
+
+const filteredRows = computed(() => {
+  let rows = matrixRows.value;
+  if (filterMaterialKey.value) {
+    rows = rows.filter((r) => r.materialKey === filterMaterialKey.value);
+  }
+  if (filterProductType.value) {
+    rows = rows.filter((r) => r.productType === filterProductType.value);
+  }
+  const kw = filterSizeKeyword.value.trim().toLowerCase();
+  if (kw) {
+    rows = rows.filter((r) => r.sizeText.toLowerCase().includes(kw));
+  }
+  if (onlyMissingCost.value) {
+    rows = rows.filter((r) => r.id == null);
+  }
+  return rows;
+});
+
+const filteredTotal = computed(() => filteredRows.value.length);
+
+const paginatedRows = computed(() => {
+  const start = (pageNo.value - 1) * pageSize.value;
+  return filteredRows.value.slice(start, start + pageSize.value);
+});
+
+const matrixStats = computed(() => {
+  const total = matrixRows.value.length;
+  const maintained = matrixRows.value.filter((r) => r.id != null).length;
+  const dirty = matrixRows.value.filter(isRowDirty).length;
+  return { total, maintained, dirty };
+});
+
+watch([filteredTotal, pageSize], () => {
+  const maxPage = Math.max(1, Math.ceil(filteredTotal.value / pageSize.value) || 1);
+  if (pageNo.value > maxPage) {
+    pageNo.value = maxPage;
+  }
+});
+
+watch(
+  () => [filterMaterialKey.value, filterProductType.value, filterSizeKeyword.value, onlyMissingCost.value],
+  () => {
+    pageNo.value = 1;
+  },
+);
+
+async function loadAllCosts(): Promise<DataJustSkuCost[]> {
+  const all: DataJustSkuCost[] = [];
+  let p = 1;
+  const ps = 200;
+  for (let i = 0; i < 100; i++) {
+    const res = await getDataJustSkuCostPage({ pageNo: p, pageSize: ps });
+    const list = res.list ?? [];
+    all.push(...list);
+    if (list.length < ps || all.length >= (res.total ?? 0)) {
+      break;
+    }
+    p++;
+  }
+  return all;
+}
+
+/**
+ * 仅展示「空白版列表」中已存在的 SKU 所对应的 材质+类型+尺寸 组合，再合并成本表数据。
+ */
+function buildMatrixFromSkuKeys(
+  keys: BlankSkuCostMatrixKey[],
+  opts: YogaBlankOptions,
+  costs: DataJustSkuCost[],
+): CostMatrixRow[] {
+  const matMap = new Map((opts.materials ?? []).map((m) => [m.key, m]));
+  const typeMap = new Map((opts.productTypes ?? []).map((t) => [t.key, t]));
+  const keySet = new Set(
+    keys.map((k) => compositeKey(k.materialKey, k.productType, k.sizeText)),
+  );
+  const costMap = new Map<string, DataJustSkuCost>();
+  for (const c of costs) {
+    const ck = compositeKey(c.materialKey, c.productType, c.sizeText);
+    if (!keySet.has(ck)) {
+      continue;
+    }
+    costMap.set(ck, c);
+  }
+  return keys.map((k) => {
+    const rowKey = compositeKey(k.materialKey, k.productType, k.sizeText);
+    const m = matMap.get(k.materialKey);
+    const t = typeMap.get(k.productType);
+    const ex = costMap.get(rowKey);
+    const cost = ex?.costPrice ?? null;
+    const weight = ex?.weightKg ?? null;
+    const len = ex?.lengthCm ?? null;
+    const wid = ex?.widthCm ?? null;
+    const hei = ex?.heightCm ?? null;
+    const remark = ex?.remark ?? '';
+    return {
+      rowKey,
+      materialKey: k.materialKey,
+      materialLabel: m?.label ?? k.materialKey,
+      productType: k.productType,
+      productTypeLabel: t?.label ?? k.productType,
+      sizeText: k.sizeText,
+      id: ex?.id,
+      costPrice: cost,
+      weightKg: weight,
+      lengthCm: len,
+      widthCm: wid,
+      heightCm: hei,
+      remark,
+      baselineCost: cost,
+      baselineWeight: weight,
+      baselineLengthCm: len,
+      baselineWidthCm: wid,
+      baselineHeightCm: hei,
+      baselineRemark: remark,
+    };
+  });
+}
+
+async function reloadMatrix() {
+  loading.value = true;
+  try {
+    const [opts, costs, keys] = await Promise.all([
+      getYogaBlankOptions(),
+      loadAllCosts(),
+      getBlankCostMatrixKeys(),
+    ]);
+    options.value = opts;
+    matrixRows.value = buildMatrixFromSkuKeys(keys ?? [], opts, costs);
+    pageNo.value = 1;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function saveDirtyRows() {
+  const dirty = matrixRows.value.filter(isRowDirty);
+  if (!dirty.length) {
+    message.info('没有需要保存的修改');
+    return;
+  }
+  saving.value = true;
+  try {
+    for (const row of dirty) {
+      const hasPrice = row.costPrice !== null && row.costPrice !== undefined;
+      const hasWeight = row.weightKg !== null && row.weightKg !== undefined;
+      const hasLwh =
+        row.lengthCm !== null && row.lengthCm !== undefined
+          ? true
+          : row.widthCm !== null && row.widthCm !== undefined
+            ? true
+            : row.heightCm !== null && row.heightCm !== undefined;
+      if (!hasPrice && !hasWeight && !hasLwh) {
+        if (row.id != null) {
+          await deleteDataJustSkuCost(row.id);
+          row.id = undefined;
+        }
+        row.baselineCost = null;
+        row.baselineWeight = null;
+        row.baselineLengthCm = null;
+        row.baselineWidthCm = null;
+        row.baselineHeightCm = null;
+        row.baselineRemark = row.remark;
+        continue;
+      }
+      const payload: DataJustSkuCost = {
+        id: row.id,
+        materialKey: row.materialKey,
+        productType: row.productType,
+        sizeText: row.sizeText,
+        costPrice: (hasPrice ? row.costPrice! : 0) as number,
+        weightKg: row.weightKg ?? undefined,
+        lengthCm: row.lengthCm ?? undefined,
+        widthCm: row.widthCm ?? undefined,
+        heightCm: row.heightCm ?? undefined,
+        remark: row.remark || undefined,
+      };
+      if (row.id != null) {
+        await updateDataJustSkuCost(payload);
+      } else {
+        const newId = await createDataJustSkuCost({
+          materialKey: row.materialKey,
+          productType: row.productType,
+          sizeText: row.sizeText,
+          costPrice: (hasPrice ? row.costPrice! : 0) as number,
+          weightKg: row.weightKg ?? undefined,
+          lengthCm: row.lengthCm ?? undefined,
+          widthCm: row.widthCm ?? undefined,
+          heightCm: row.heightCm ?? undefined,
+          remark: row.remark || undefined,
+        });
+        row.id = typeof newId === 'number' ? newId : Number(newId);
+      }
+      row.baselineCost = row.costPrice;
+      row.baselineWeight = row.weightKg;
+      row.baselineLengthCm = row.lengthCm;
+      row.baselineWidthCm = row.widthCm;
+      row.baselineHeightCm = row.heightCm;
+      row.baselineRemark = row.remark;
+    }
+    message.success(`已保存 ${dirty.length} 条`);
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** 表格纵向滚动高度（固定值，避免在模板中调用 min） */
+const tableBodyMaxHeight = 420;
+
+const columns = [
+  {
+    title: '材质',
+    key: 'mat',
+    width: 140,
+    ellipsis: true,
+  },
+  {
+    title: '空白版类型',
+    key: 'ptype',
+    width: 160,
+    ellipsis: true,
+  },
+  {
+    title: '尺寸',
+    dataIndex: 'sizeText',
+    key: 'sizeText',
+    width: 150,
+    ellipsis: true,
+  },
+  {
+    title: '成本价',
+    key: 'cost',
+    width: 140,
+  },
+  {
+    title: '重量(kg)',
+    key: 'weight',
+    width: 140,
+  },
+  {
+    title: '卷包长(cm)',
+    key: 'len',
+    width: 120,
+  },
+  {
+    title: '卷包宽(cm)',
+    key: 'wid',
+    width: 120,
+  },
+  {
+    title: '卷包高(cm)',
+    key: 'hei',
+    width: 120,
+  },
+  {
+    title: '备注',
+    key: 'remark',
+    width: 160,
+    ellipsis: true,
+  },
+  {
+    title: '状态',
+    key: 'st',
+    width: 88,
+  },
+];
+
+const [VbenModal, modalApi] = useVbenModal({
+  async onOpenChange(isOpen: boolean) {
+    if (!isOpen) {
+      options.value = null;
+      matrixRows.value = [];
+      filterMaterialKey.value = undefined;
+      filterProductType.value = undefined;
+      filterSizeKeyword.value = '';
+      onlyMissingCost.value = false;
+      return;
+    }
+    modalApi.lock();
+    try {
+      await reloadMatrix();
+    } finally {
+      modalApi.unlock();
+    }
+  },
+});
+
+function onPageChange(page: number, ps?: number) {
+  pageNo.value = page;
+  if (ps) {
+    pageSize.value = ps;
+  }
+}
+</script>
+
+<template>
+  <VbenModal
+    title="空白版 SKU 成本对照维护"
+    class="w-[min(1280px,calc(100vw-2rem))]"
+    :show-cancel-button="false"
+    :show-confirm-button="false"
+  >
+    <Spin :spinning="loading">
+      <div class="mb-3 space-y-3">
+        <p class="mb-0 text-sm text-muted-foreground">
+          列表中的每一行来自<strong>聚水潭 SKU · 空白版列表</strong>里<strong>已存在</strong>的 SKU（按材质键、类型键、尺寸原文去重）。请先在空白版中生成 SKU，再在此填写对应组合的成本价并保存。
+          <span class="block mt-1 text-xs">
+            <strong>卷包长/宽/高</strong>用于同步聚水潭的 l/w/h（商品卷起包装后的外尺寸）；<strong>尺寸列</strong>为规格原文（商品本身尺寸），二者不同。若仅维护卷包尺寸而未填成本，将按成本价 0 保存。
+          </span>
+          <span class="block mt-1 text-xs">
+            已<strong>逻辑删除</strong>的 SKU 不参与组合；成本表中已逻辑删除的记录不会合并展示。材质/类型展示名来自当前字典，键以货号为准。
+          </span>
+        </p>
+        <div
+          v-if="matrixStats.total === 0 && !loading"
+          class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+        >
+          当前空白版主数据中尚无 SKU，无法列出可维护的组合。请使用「空白版生成」入库后，再打开本弹窗维护成本。（若仅有成本表数据而无 SKU，也不会在此显示。）
+        </div>
+        <div
+          v-else-if="matrixStats.total > 0"
+          class="flex flex-wrap items-center gap-2 text-sm text-foreground/80"
+        >
+          <span>共 {{ matrixStats.total }} 条组合</span>
+          <span class="text-muted-foreground">|</span>
+          <span>已维护 {{ matrixStats.maintained }} 条</span>
+          <span class="text-muted-foreground">|</span>
+          <span>未保存修改 {{ matrixStats.dirty }} 条</span>
+        </div>
+
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="min-w-[160px]">
+            <div class="mb-1 text-xs text-muted-foreground">材质</div>
+            <Select
+              v-model:value="filterMaterialKey"
+              :options="materialFilterOptions"
+              allow-clear
+              placeholder="全部"
+              class="w-full min-w-[160px]"
+              show-search
+              option-filter-prop="label"
+            />
+          </div>
+          <div class="min-w-[180px]">
+            <div class="mb-1 text-xs text-muted-foreground">类型</div>
+            <Select
+              v-model:value="filterProductType"
+              :options="typeFilterOptions"
+              allow-clear
+              placeholder="全部"
+              class="w-full min-w-[180px]"
+              show-search
+              option-filter-prop="label"
+            />
+          </div>
+          <div class="min-w-[200px] flex-1">
+            <div class="mb-1 text-xs text-muted-foreground">尺寸关键字</div>
+            <Input
+              v-model:value="filterSizeKeyword"
+              allow-clear
+              placeholder="如 185*61"
+            />
+          </div>
+          <Checkbox v-model:checked="onlyMissingCost">仅未维护成本</Checkbox>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <Button type="primary" :loading="saving" @click="saveDirtyRows">
+            保存修改
+          </Button>
+          <Button :loading="loading" @click="reloadMatrix">重新加载</Button>
+        </div>
+      </div>
+
+      <Table
+        v-if="matrixStats.total > 0"
+        size="small"
+        :columns="columns"
+        :data-source="paginatedRows"
+        :pagination="false"
+        :scroll="{ x: 1280, y: tableBodyMaxHeight }"
+        row-key="rowKey"
+        bordered
+        class="cost-matrix-table"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'mat'">
+            <span :title="record.materialLabel">{{ record.materialLabel }}</span>
+          </template>
+          <template v-else-if="column.key === 'ptype'">
+            <span :title="record.productTypeLabel">{{
+              record.productTypeLabel
+            }}</span>
+          </template>
+          <template v-else-if="column.key === 'cost'">
+            <InputNumber
+              v-model:value="record.costPrice"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'weight'">
+            <InputNumber
+              v-model:value="record.weightKg"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'len'">
+            <InputNumber
+              v-model:value="record.lengthCm"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'wid'">
+            <InputNumber
+              v-model:value="record.widthCm"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'hei'">
+            <InputNumber
+              v-model:value="record.heightCm"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'remark'">
+            <Input
+              v-model:value="record.remark"
+              size="small"
+              placeholder="备注"
+            />
+          </template>
+          <template v-else-if="column.key === 'st'">
+            <Tag v-if="isRowDirty(record as CostMatrixRow)" color="orange">
+              未保存
+            </Tag>
+            <Tag v-else-if="record.id" color="success">已保存</Tag>
+            <Tag v-else color="default">未维护</Tag>
+          </template>
+        </template>
+      </Table>
+
+      <div
+        v-if="filteredTotal > 0"
+        class="mt-3 flex justify-end"
+      >
+        <Pagination
+          :current="pageNo"
+          :page-size="pageSize"
+          :total="filteredTotal"
+          :page-size-options="['20', '50', '100', '200']"
+          show-size-changer
+          @change="onPageChange"
+        />
+      </div>
+    </Spin>
+
+    <div class="mt-4 flex justify-end border-t border-border pt-3">
+      <Button @click="modalApi.close()">关闭</Button>
+    </div>
+  </VbenModal>
+</template>
+
+<style scoped>
+.cost-matrix-table :deep(.ant-input-number-input) {
+  text-align: left;
+}
+</style>

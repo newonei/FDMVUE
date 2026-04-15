@@ -116,7 +116,7 @@ function emitActivityChange() {
             class="h-full w-full rounded-lg object-cover"
           />
           <!-- 删除按钮 -->
-          <!-- TODO @芋艿：等待和 /Users/yunai/Java/yudao-ui-admin-vben-v5/apps/web-antd/src/views/mall/product/spu/components/spu-showcase.vue 进一步统一 -->
+          <!-- TODO：与商品 SPU 展示组件进一步统一 -->
           <IconifyIcon
             v-if="!disabled"
             icon="lucide:x"

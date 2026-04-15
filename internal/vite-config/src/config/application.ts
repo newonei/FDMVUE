@@ -44,7 +44,7 @@ function defineApplicationConfig(userConfigPromise?: DefineApplicationOptions) {
       nitroMockOptions: {},
       print: !isBuild,
       printInfoMap: {
-        Docs: 'https://doc.iocoder.cn/quick-start/',
+        Docs: 'https://www.feidemou.com',
       },
       pwa: true,
       pwaOptions: getDefaultPwaOptions(appTitle),

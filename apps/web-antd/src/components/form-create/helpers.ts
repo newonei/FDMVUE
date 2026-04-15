@@ -23,7 +23,7 @@ import {
 
 /** 编码表单 Conf */
 export function encodeConf(designerRef: any) {
-  // 关联案例：https://gitee.com/yudaocode/yudao-ui-admin-vue3/pulls/834/
+  // 关联案例：上游版本兼容处理
   return formCreate.toJson(designerRef.value.getOption());
 }
 

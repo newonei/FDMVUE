@@ -7,17 +7,10 @@ import { computed, onMounted, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { AuthenticationLoginExpiredModal, useVbenModal } from '@vben/common-ui';
-import { VBEN_DOC_URL, VBEN_GITHUB_URL } from '@vben/constants';
 import { isTenantEnable, useTabs, useWatermark } from '@vben/hooks';
-import {
-  AntdProfileOutlined,
-  BookOpenText,
-  CircleHelp,
-  SvgGithubIcon,
-} from '@vben/icons';
+import { AntdProfileOutlined } from '@vben/icons';
 import {
   BasicLayout,
-  Help,
   LockScreen,
   Notification,
   TenantDropdown,
@@ -52,10 +45,6 @@ const notifications = ref<NotificationItem[]>([]);
 const unreadCount = ref(0);
 const showDot = computed(() => unreadCount.value > 0);
 
-const [HelpModal, helpModalApi] = useVbenModal({
-  connectedComponent: Help,
-});
-
 const menus = computed(() => [
   {
     handler: () => {
@@ -63,31 +52,6 @@ const menus = computed(() => [
     },
     icon: AntdProfileOutlined,
     text: $t('ui.widgets.profile'),
-  },
-  {
-    handler: () => {
-      openWindow(VBEN_DOC_URL, {
-        target: '_blank',
-      });
-    },
-    icon: BookOpenText,
-    text: $t('ui.widgets.document'),
-  },
-  {
-    handler: () => {
-      openWindow(VBEN_GITHUB_URL, {
-        target: '_blank',
-      });
-    },
-    icon: SvgGithubIcon,
-    text: 'GitHub',
-  },
-  {
-    handler: () => {
-      helpModalApi.open();
-    },
-    icon: CircleHelp,
-    text: $t('ui.widgets.qa'),
   },
 ]);
 
@@ -268,5 +232,4 @@ watch(
       <LockScreen :avatar @to-login="handleLogout" />
     </template>
   </BasicLayout>
-  <HelpModal />
 </template>

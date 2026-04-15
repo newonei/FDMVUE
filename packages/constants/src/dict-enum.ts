@@ -146,6 +146,18 @@ const AI_DICT = {
   AI_MCP_CLIENT_NAME: 'ai_mcp_client_name', // AI MCP Client 名字
 } as const;
 
+/** ========== FDM-DATA - 飞德慕主数据 ========== */
+const FDM_DATA_DICT = {
+  /** 飞德慕成品类型（字典类型 YogaMat） */
+  YOGA_MAT: 'YogaMat',
+  /** 飞德慕材质（字典类型 material_type） */
+  MATERIAL_TYPE: 'material_type',
+  /** 飞德慕成品分类（字典类型 fdm_yoga_category，成品编码生成，与 YogaMat 独立） */
+  FDM_YOGA_CATEGORY: 'fdm_yoga_category',
+  /** 飞德慕颜色（货号颜色段） */
+  FDM_COLOR: 'fdm_color',
+} as const;
+
 /** ========== IOT - 物联网模块 ========== */
 const IOT_DICT = {
   IOT_ALERT_LEVEL: 'iot_alert_level', // IoT 告警级别
@@ -181,6 +193,7 @@ const DICT_TYPE = {
   ...BPM_DICT,
   ...CRM_DICT,
   ...ERP_DICT,
+  ...FDM_DATA_DICT,
   ...INFRA_DICT,
   ...IOT_DICT,
   ...MEMBER_DICT,

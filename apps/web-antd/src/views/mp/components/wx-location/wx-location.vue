@@ -22,7 +22,7 @@ const resolvedQqMapKey = computed(
 );
 
 const mapUrl = computed(() => {
-  return `https://map.qq.com/?type=marker&isopeninfowin=1&markertype=1&pointx=${props.locationY}&pointy=${props.locationX}&name=${props.label}&ref=yudao`;
+  return `https://map.qq.com/?type=marker&isopeninfowin=1&markertype=1&pointx=${props.locationY}&pointy=${props.locationX}&name=${props.label}&ref=fdm`;
 });
 
 const mapImageUrl = computed(() => {

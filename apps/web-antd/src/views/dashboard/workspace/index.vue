@@ -31,57 +31,12 @@ const userStore = useUserStore();
 const projectItems: WorkbenchProjectItem[] = [
   {
     color: '#6DB33F',
-    content: 'github.com/YunaiV/ruoyi-vue-pro',
+    content: '#',
     date: '2025-01-02',
-    group: 'Spring Boot 单体架构',
-    icon: 'simple-icons:springboot',
-    title: 'ruoyi-vue-pro',
-    url: 'https://github.com/YunaiV/ruoyi-vue-pro',
-  },
-  {
-    color: '#409EFF',
-    content: 'github.com/yudaocode/yudao-ui-admin-vue3',
-    date: '2025-02-03',
-    group: 'Vue3 + element-plus 管理后台',
-    icon: 'ep:element-plus',
-    title: 'yudao-ui-admin-vue3',
-    url: 'https://github.com/yudaocode/yudao-ui-admin-vue3',
-  },
-  {
-    color: '#ff4d4f',
-    content: 'github.com/yudaocode/yudao-mall-uniapp',
-    date: '2025-03-04',
-    group: 'Vue3 + uniapp 商城手机端',
-    icon: 'icon-park-outline:mall-bag',
-    title: 'yudao-mall-uniapp',
-    url: 'https://github.com/yudaocode/yudao-mall-uniapp',
-  },
-  {
-    color: '#1890ff',
-    content: 'github.com/YunaiV/yudao-cloud',
-    date: '2025-04-05',
-    group: 'Spring Cloud 微服务架构',
-    icon: 'material-symbols:cloud-outline',
-    title: 'yudao-cloud',
-    url: 'https://github.com/YunaiV/yudao-cloud',
-  },
-  {
-    color: '#e18525',
-    content: 'github.com/yudaocode/yudao-ui-admin-vben',
-    date: '2025-05-06',
-    group: 'Vue3 + vben5(antd) 管理后台',
-    icon: 'devicon:antdesign',
-    title: 'yudao-ui-admin-vben',
-    url: 'https://github.com/yudaocode/yudao-ui-admin-vben',
-  },
-  {
-    color: '#2979ff',
-    content: 'github.com/yudaocode/yudao-ui-admin-uniapp',
-    date: '2025-06-01',
-    group: 'Vue3 + uniapp 管理手机端',
-    icon: 'ant-design:mobile',
-    title: 'yudao-ui-admin-uniapp',
-    url: 'https://github.com/yudaocode/yudao-ui-admin-uniapp',
+    group: '飞德慕分析页',
+    icon: 'simple-icons:mall',
+    title: '飞德慕分析页',
+    url: '/analytics',
   },
 ];
 
@@ -93,118 +48,28 @@ const quickNavItems: WorkbenchQuickNavItem[] = [
     title: '首页',
     url: '/',
   },
-  {
-    color: '#ff6b6b',
-    icon: 'lucide:shopping-bag',
-    title: '商城中心',
-    url: '/mall',
-  },
-  {
-    color: '#7c3aed',
-    icon: 'tabler:ai',
-    title: 'AI 大模型',
-    url: '/ai',
-  },
-  {
-    color: '#3fb27f',
-    icon: 'simple-icons:erpnext',
-    title: 'ERP 系统',
-    url: '/erp',
-  },
-  {
-    color: '#4daf1bc9',
-    icon: 'simple-icons:civicrm',
-    title: 'CRM 系统',
-    url: '/crm',
-  },
-  {
-    color: '#1a73e8',
-    icon: 'fa-solid:hdd',
-    title: 'IoT 物联网',
-    url: '/iot',
-  },
 ];
 
 const todoItems = ref<WorkbenchTodoItem[]>([
   {
     completed: false,
-    content: `系统支持 JDK 8/17/21，Vue 2/3`,
-    date: '2024-07-15 09:30:00',
-    title: '技术兼容性',
-  },
-  {
-    completed: false,
-    content: `后端提供 Spring Boot 2.7/3.2 + Cloud 双架构`,
-    date: '2024-08-30 14:20:00',
-    title: '架构灵活性',
-  },
-  {
-    completed: false,
-    content: `全部开源，个人与企业可 100% 直接使用，无需授权`,
-    date: '2024-07-25 16:45:00',
-    title: '开源免授权',
-  },
-  {
-    completed: false,
-    content: `国内使用最广泛的快速开发平台，远超 10w+ 企业使用`,
-    date: '2024-07-10 11:15:00',
-    title: '广泛企业认可',
+    content: `开发`,
+    date: '2026-04-02 11:44:08',
+    title: '123321312',
   },
 ]);
 const trendItems: WorkbenchTrendItem[] = [
   {
     avatar: 'svg:avatar-1',
-    content: `在 <a>开源组</a> 创建了项目 <a>Vue</a>`,
+    content: `创建了项目`,
     date: '刚刚',
-    title: '威廉',
+    title: 'Owen',
   },
   {
     avatar: 'svg:avatar-2',
-    content: `关注了 <a>威廉</a> `,
+    content: `关注了 <a>Owen</a> `,
     date: '1个小时前',
-    title: '艾文',
-  },
-  {
-    avatar: 'svg:avatar-3',
-    content: `发布了 <a>个人动态</a> `,
-    date: '1天前',
-    title: '克里斯',
-  },
-  {
-    avatar: 'svg:avatar-4',
-    content: `发表文章 <a>如何编写一个Vite插件</a> `,
-    date: '2天前',
-    title: 'Vben',
-  },
-  {
-    avatar: 'svg:avatar-1',
-    content: `回复了 <a>杰克</a> 的问题 <a>如何进行项目优化？</a>`,
-    date: '3天前',
-    title: '皮特',
-  },
-  {
-    avatar: 'svg:avatar-2',
-    content: `关闭了问题 <a>如何运行项目</a> `,
-    date: '1周前',
-    title: '杰克',
-  },
-  {
-    avatar: 'svg:avatar-3',
-    content: `发布了 <a>个人动态</a> `,
-    date: '1周前',
-    title: '威廉',
-  },
-  {
-    avatar: 'svg:avatar-4',
-    content: `推送了代码到 <a>Github</a>`,
-    date: '2021-04-01 20:00',
-    title: '威廉',
-  },
-  {
-    avatar: 'svg:avatar-4',
-    content: `发表文章 <a>如何编写使用 Admin Vben</a> `,
-    date: '2021-03-01 20:00',
-    title: 'Vben',
+    title: 'Awen',
   },
 ];
 
@@ -235,7 +100,7 @@ function navTo(nav: WorkbenchProjectItem | WorkbenchQuickNavItem) {
       <template #title>
         早安, {{ userStore.userInfo?.nickname }}, 开始您一天的工作吧！
       </template>
-      <template #description> 今日晴，20℃ - 32℃！ </template>
+      <template #description>  </template>
     </WorkbenchHeader>
 
     <div class="mt-5 flex flex-col lg:flex-row">
