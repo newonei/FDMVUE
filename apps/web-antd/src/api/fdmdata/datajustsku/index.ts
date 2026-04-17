@@ -1,5 +1,4 @@
 import type { PageParam, PageResult } from '@vben/request';
-import type { Dayjs } from 'dayjs';
 
 import { requestClient } from '#/api/request';
 
@@ -200,11 +199,6 @@ export interface PatternOptions {
   sizeWidths: PatternOptionItem[];
 }
 
-export function getPatternOptions() {
-  return requestClient.get<PatternOptions>(
-    '/fdmdata/data-just-sku/pattern/options',
-  );
-}
 
 export interface PatternGenReq {
   /** 类型 */
@@ -241,19 +235,7 @@ export interface PatternImportResp {
   skipped: number;
 }
 
-export function previewPattern(data: PatternGenReq) {
-  return requestClient.post<PatternPreviewResp>(
-    '/fdmdata/data-just-sku/pattern/preview',
-    data,
-  );
-}
 
-export function importPattern(data: PatternGenReq) {
-  return requestClient.post<PatternImportResp>(
-    '/fdmdata/data-just-sku/pattern/import',
-    data,
-  );
-}
 
 /** 成品编码生成 */
 export interface FinishedGenReq {
@@ -331,6 +313,118 @@ export function deleteDataJustSkuCost(id: number) {
   return requestClient.delete<boolean>(`/fdmdata/data-just-sku-cost/delete?id=${id}`);
 }
 
+export interface BlankCostImportResp {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+}
+
+/** 空白版列表：导入 Excel，将成本价/重量/卷包长宽高写入成本对照维护 */
+export function importBlankCostExcel(file: File) {
+  return requestClient.upload<BlankCostImportResp>('/fdmdata/data-just-sku-cost/import-excel', {
+    file,
+  });
+}
+
+export interface BlankSkuImportResp {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+}
+
+/** 空白版列表：导入 Excel（主表），导入行默认置为已同步 */
+export function importBlankSkuExcel(file: File) {
+  return requestClient.upload<BlankSkuImportResp>('/fdmdata/data-just-sku/import-blank-excel', {
+    file,
+  });
+}
+
+/** 定制组合编码生成 */
+export interface CustomComboGenReq {
+  blankSkuIds: number[];
+  /** 图案 SKU 多选：每个勾选尺寸一条，与空白版长*宽匹配 */
+  patternSkuIds: number[];
+  qty?: number;
+  salePrice?: number;
+}
+
+export interface CustomComboPreviewResp {
+  rows: {
+    data: FdmdataDataJustSkuApi.DataJustSku;
+    existsInDb?: boolean;
+  }[];
+  willCreate: number;
+  willSkip: number;
+}
+
+export function previewCustomCombo(data: CustomComboGenReq) {
+  return requestClient.post<CustomComboPreviewResp>(
+    '/fdmdata/data-just-custom-combo/preview',
+    data,
+  );
+}
+
+export interface PatternImportResp {
+  created: number;
+  skipped: number;
+}
+
+export function importCustomCombo(data: CustomComboGenReq) {
+  return requestClient.post<PatternImportResp>(
+    '/fdmdata/data-just-custom-combo/import',
+    data,
+  );
+}
+
+export function syncCustomComboToJushuitanBatch(ids: number[]) {
+  return requestClient.post<JstSyncBatchResp>(
+    `/fdmdata/data-just-custom-combo/sync-jushuitan-batch?ids=${ids.join(',')}`,
+  );
+}
+
+export namespace FdmdataCustomComboApi {
+  export interface CustomComboRow {
+    id: number;
+    picUrl?: string;
+    productShortName?: string;
+    styleCode?: string;
+    itemCode?: string;
+    /** 对应实体编码（成品 itemCode，用于聚水潭 enty_sku_id） */
+    entyItemCode?: string;
+    productName?: string;
+    categoryName?: string;
+    costPrice?: number;
+    status?: number;
+    jstSkuId?: string;
+    createTime?: string;
+  }
+
+  export interface CustomComboChildRow {
+    id: number;
+    parentComboId?: number;
+    srcSkuId: string;
+    qty: number;
+    salePrice?: number;
+  }
+}
+
+export function getCustomComboPage(params: PageParam) {
+  return requestClient.get<PageResult<FdmdataCustomComboApi.CustomComboRow>>(
+    '/fdmdata/data-just-custom-combo/page',
+    { params },
+  );
+}
+
+/** 定制组合子商品（与聚水潭组合 childList 同源） */
+export function getCustomComboChildList(comboId: number) {
+  return requestClient.get<FdmdataCustomComboApi.CustomComboChildRow[]>(
+    '/fdmdata/data-just-custom-combo/child-list',
+    { params: { comboId } },
+  );
+}
+
 /** 成品 SKU 成本对照（按类型+尺寸） */
 export interface DataJustFinishedSkuCost {
   id?: number;
@@ -340,6 +434,12 @@ export interface DataJustFinishedSkuCost {
   costPrice: number;
   /** 重量（千克） */
   weightKg?: number;
+  /** 卷包长（厘米），同步聚水潭 l */
+  lengthCm?: number;
+  /** 卷包宽（厘米），同步聚水潭 w */
+  widthCm?: number;
+  /** 卷包高（厘米），同步聚水潭 h */
+  heightCm?: number;
   remark?: string;
 }
 

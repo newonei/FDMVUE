@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
 import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
 
 import { computed, ref } from 'vue';
@@ -8,17 +9,35 @@ import { useVbenModal } from '@vben/common-ui';
 import { message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
+import {
+  createDataJustPattern,
+  getDataJustPattern,
+  updateDataJustPattern,
+} from '#/api/fdmdata/datajustpattern';
 import { createDataJustSku, getDataJustSku, updateDataJustSku } from '#/api/fdmdata/datajustsku';
 import { $t } from '#/locales';
 
 import { useFormSchema } from '../data';
 
 const emit = defineEmits(['success']);
-const formData = ref<FdmdataDataJustSkuApi.DataJustSku>();
+
+/** 弹窗入参：直接传行，或 { row, listTab } */
+type FormOpenPayload =
+  | FdmdataDataJustSkuApi.DataJustSku
+  | {
+      row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern;
+      listTab: string;
+    };
+
+const formData = ref<FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern>();
+const listTab = ref<string>('blank');
+
 const getTitle = computed(() => {
+  const isPattern = listTab.value === 'pattern';
+  const subject = isPattern ? 'fdm-data 图案商品' : 'fdm-data 聚水潭 SKU 主数据';
   return formData.value?.id
-    ? $t('ui.actionTitle.edit', ['fdm-data 聚水潭 SKU 主数据'])
-    : $t('ui.actionTitle.create', ['fdm-data 聚水潭 SKU 主数据']);
+    ? $t('ui.actionTitle.edit', [subject])
+    : $t('ui.actionTitle.create', [subject]);
 });
 
 const [Form, formApi] = useVbenForm({
@@ -41,11 +60,16 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     modalApi.lock();
-    // 提交表单
-    const data = (await formApi.getValues()) as FdmdataDataJustSkuApi.DataJustSku;
     try {
-      await (formData.value?.id ? updateDataJustSku(data) : createDataJustSku(data));
-      // 关闭并提示
+      if (listTab.value === 'pattern') {
+        const data = (await formApi.getValues()) as FdmdataDataJustPatternApi.PatternSaveReq;
+        await (formData.value?.id
+          ? updateDataJustPattern(data)
+          : createDataJustPattern(data));
+      } else {
+        const data = (await formApi.getValues()) as FdmdataDataJustSkuApi.DataJustSku;
+        await (formData.value?.id ? updateDataJustSku(data) : createDataJustSku(data));
+      }
       await modalApi.close();
       emit('success');
       message.success($t('ui.actionMessage.operationSuccess'));
@@ -56,11 +80,16 @@ const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
       formData.value = undefined;
+      listTab.value = 'blank';
       return;
     }
-    // 加载数据
-    const data = modalApi.getData<FdmdataDataJustSkuApi.DataJustSku>();
-    if (!data || !data.id) {
+    const raw = modalApi.getData<FormOpenPayload>();
+    const tab =
+      raw && typeof raw === 'object' && 'listTab' in raw ? raw.listTab : 'blank';
+    listTab.value = tab ?? 'blank';
+    const row =
+      raw && typeof raw === 'object' && 'row' in raw ? raw.row : (raw as FdmdataDataJustSkuApi.DataJustSku);
+    if (!row || !row.id) {
       formData.value = undefined;
       await formApi.resetForm();
       await formApi.setValues({ status: 1 });
@@ -68,9 +97,12 @@ const [Modal, modalApi] = useVbenModal({
     }
     modalApi.lock();
     try {
-      formData.value = await getDataJustSku(data.id);
-      // 设置到 values
-      await formApi.setValues(formData.value);
+      if (listTab.value === 'pattern') {
+        formData.value = await getDataJustPattern(row.id);
+      } else {
+        formData.value = await getDataJustSku(row.id);
+      }
+      await formApi.setValues(formData.value as any);
     } finally {
       modalApi.unlock();
     }
@@ -82,4 +114,4 @@ const [Modal, modalApi] = useVbenModal({
   <Modal :title="getTitle">
     <Form class="mx-4" />
   </Modal>
-</template>
+</template>

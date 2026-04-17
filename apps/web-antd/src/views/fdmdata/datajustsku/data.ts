@@ -247,6 +247,8 @@ export type DataJustSkuGridColumnOptions = {
   blankPicPreview?: boolean;
   /** 成品编码列表 Tab：展示 picUrl 缩略图 */
   finishedPicPreview?: boolean;
+  /** 当前列表 Tab */
+  listTab?: 'blank' | 'pattern' | 'finished' | 'combo' | 'custom_combo';
 };
 
 /** 列表字段（与搜索一致：主信息 + 成本 + 状态 + 时间；其余在编辑中查看） */
@@ -288,9 +290,24 @@ export function buildDataJustSkuGridColumns(
     ...(options?.patternPicPreview ? [patternPicColumn] : []),
     {
       field: 'itemCode',
-      title: '商品编码',
+      title: options?.listTab === 'custom_combo' ? '组合商品编码' : '商品编码',
       minWidth: 140,
     },
+    ...(options?.listTab === 'custom_combo'
+      ? [
+          {
+            field: 'entyItemCode',
+            title: '对应实体编码',
+            minWidth: 160,
+          },
+          {
+            field: '_customComboChildren',
+            title: '子商品',
+            width: 100,
+            slots: { default: 'colCustomComboChildren' },
+          },
+        ]
+      : []),
     {
       field: 'productShortName',
       title: '商品简称',

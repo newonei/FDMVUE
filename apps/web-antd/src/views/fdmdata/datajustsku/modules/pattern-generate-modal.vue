@@ -7,14 +7,13 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { Button, Form, FormItem, Image, Input, Select, message, Spin, Table } from 'ant-design-vue';
 
+import type { PatternGenReq, PatternPreviewResp, PatternOptions } from '#/api/fdmdata/datajustsku';
+
 import {
-  getPatternOptions,
-  importPattern,
-  previewPattern,
-  type PatternOptions,
-  type PatternGenReq,
-  type PatternPreviewResp,
-} from '#/api/fdmdata/datajustsku';
+  getPatternEncodeOptions,
+  importPatternEncode,
+  previewPatternEncode,
+} from '#/api/fdmdata/datajustpattern';
 
 import {
   getDataJustPatternCostPage,
@@ -109,7 +108,7 @@ watch(
 async function loadOptions() {
   optionsLoading.value = true;
   try {
-    options.value = await getPatternOptions();
+    options.value = await getPatternEncodeOptions();
   } finally {
     optionsLoading.value = false;
   }
@@ -142,7 +141,7 @@ async function loadPreview() {
       picUrl: formState.picUrl,
       sizeTextBlock: (formState.sizeTextBlock ?? '').trim(),
     };
-    preview.value = await previewPattern(payload);
+    preview.value = await previewPatternEncode(payload);
   } finally {
     loadingPreview.value = false;
   }
@@ -164,7 +163,7 @@ async function handleGenerate() {
       picUrl: formState.picUrl,
       sizeTextBlock: (formState.sizeTextBlock ?? '').trim(),
     };
-    const res = await importPattern(payload);
+    const res = await importPatternEncode(payload);
     message.success(`生成完成：新增 ${res?.created ?? 0} 条，跳过 ${res?.skipped ?? 0} 条`);
     emit('success');
     await loadPreview();

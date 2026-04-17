@@ -45,10 +45,25 @@ interface CostMatrixRow {
   id?: number;
   costPrice: number | null;
   weightKg: number | null;
+  /** 卷包尺寸(cm)，同步聚水潭 l/w/h */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
   remark: string;
   baselineCost: number | null;
   baselineWeight: number | null;
+  baselineLengthCm: number | null;
+  baselineWidthCm: number | null;
+  baselineHeightCm: number | null;
   baselineRemark: string;
+}
+
+function numDirty(a: number | null | undefined, b: number | null | undefined) {
+  const na = a ?? null;
+  const nb = b ?? null;
+  if (na === null && nb === null) return false;
+  if (na === null || nb === null) return true;
+  return Number(na) !== Number(nb);
 }
 
 function isRowDirty(row: CostMatrixRow) {
@@ -68,7 +83,16 @@ function isRowDirty(row: CostMatrixRow) {
       : w === null || bw === null
         ? true
         : Number(w) !== Number(bw);
-  return costChanged || weightChanged || (row.remark ?? '') !== (row.baselineRemark ?? '');
+  const lwhChanged =
+    numDirty(row.lengthCm, row.baselineLengthCm) ||
+    numDirty(row.widthCm, row.baselineWidthCm) ||
+    numDirty(row.heightCm, row.baselineHeightCm);
+  return (
+    costChanged ||
+    weightChanged ||
+    lwhChanged ||
+    (row.remark ?? '') !== (row.baselineRemark ?? '')
+  );
 }
 
 const matrixRows = ref<CostMatrixRow[]>([]);
@@ -203,6 +227,9 @@ function buildMatrix(keys: FinishedSkuCostMatrixKey[], costs: DataJustFinishedSk
       const ex = costMap.get(rowKey);
       const cost = ex?.costPrice ?? null;
       const weight = ex?.weightKg ?? null;
+      const len = ex?.lengthCm ?? null;
+      const wid = ex?.widthCm ?? null;
+      const hei = ex?.heightCm ?? null;
       const remark = ex?.remark ?? '';
       rows.push({
         rowKey,
@@ -214,9 +241,15 @@ function buildMatrix(keys: FinishedSkuCostMatrixKey[], costs: DataJustFinishedSk
         id: ex?.id,
         costPrice: cost,
         weightKg: weight,
+        lengthCm: len,
+        widthCm: wid,
+        heightCm: hei,
         remark,
         baselineCost: cost,
         baselineWeight: weight,
+        baselineLengthCm: len,
+        baselineWidthCm: wid,
+        baselineHeightCm: hei,
         baselineRemark: remark,
       });
     }
@@ -246,13 +279,22 @@ async function saveDirtyRows() {
     for (const row of dirty) {
       const hasPrice = row.costPrice !== null && row.costPrice !== undefined;
       const hasWeight = row.weightKg !== null && row.weightKg !== undefined;
-      if (!hasPrice && !hasWeight) {
+      const hasLwh =
+        row.lengthCm !== null && row.lengthCm !== undefined
+          ? true
+          : row.widthCm !== null && row.widthCm !== undefined
+            ? true
+            : row.heightCm !== null && row.heightCm !== undefined;
+      if (!hasPrice && !hasWeight && !hasLwh) {
         if (row.id != null) {
           await deleteDataJustFinishedSkuCost(row.id);
           row.id = undefined;
         }
         row.baselineCost = null;
         row.baselineWeight = null;
+        row.baselineLengthCm = null;
+        row.baselineWidthCm = null;
+        row.baselineHeightCm = null;
         row.baselineRemark = row.remark;
         continue;
       }
@@ -263,6 +305,9 @@ async function saveDirtyRows() {
         sizeText: row.sizeText,
         costPrice: (row.costPrice ?? 0) as number,
         weightKg: row.weightKg ?? undefined,
+        lengthCm: row.lengthCm ?? undefined,
+        widthCm: row.widthCm ?? undefined,
+        heightCm: row.heightCm ?? undefined,
         remark: row.remark || undefined,
       };
       if (row.id != null) {
@@ -274,12 +319,18 @@ async function saveDirtyRows() {
           sizeText: row.sizeText,
           costPrice: (row.costPrice ?? 0) as number,
           weightKg: row.weightKg ?? undefined,
+          lengthCm: row.lengthCm ?? undefined,
+          widthCm: row.widthCm ?? undefined,
+          heightCm: row.heightCm ?? undefined,
           remark: row.remark || undefined,
         });
         row.id = typeof newId === 'number' ? newId : Number(newId);
       }
       row.baselineCost = row.costPrice;
       row.baselineWeight = row.weightKg;
+      row.baselineLengthCm = row.lengthCm;
+      row.baselineWidthCm = row.widthCm;
+      row.baselineHeightCm = row.heightCm;
       row.baselineRemark = row.remark;
     }
     message.success(`已保存 ${dirty.length} 条`);
@@ -296,6 +347,9 @@ const columns = [
   { title: '尺寸', dataIndex: 'sizeText', key: 'sizeText', width: 160, ellipsis: true },
   { title: '成本价', key: 'cost', width: 140 },
   { title: '重量(kg)', key: 'weight', width: 140 },
+  { title: '卷包长(cm)', key: 'len', width: 140 },
+  { title: '卷包宽(cm)', key: 'wid', width: 140 },
+  { title: '卷包高(cm)', key: 'hei', width: 140 },
   { title: '备注', key: 'remark', width: 160, ellipsis: true },
   { title: '状态', key: 'st', width: 88 },
 ];
@@ -404,7 +458,7 @@ function onPageChange(page: number, ps?: number) {
         :columns="columns"
         :data-source="paginatedRows"
         :pagination="false"
-        :scroll="{ x: 860, y: tableBodyMaxHeight }"
+        :scroll="{ x: 1280, y: tableBodyMaxHeight }"
         row-key="rowKey"
         bordered
       >
@@ -421,6 +475,33 @@ function onPageChange(page: number, ps?: number) {
           <template v-else-if="column.key === 'weight'">
             <InputNumber
               v-model:value="record.weightKg"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'len'">
+            <InputNumber
+              v-model:value="record.lengthCm"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'wid'">
+            <InputNumber
+              v-model:value="record.widthCm"
+              :min="0"
+              :precision="4"
+              class="w-full max-w-[130px]"
+              placeholder="未填"
+            />
+          </template>
+          <template v-else-if="column.key === 'hei'">
+            <InputNumber
+              v-model:value="record.heightCm"
               :min="0"
               :precision="4"
               class="w-full max-w-[130px]"
