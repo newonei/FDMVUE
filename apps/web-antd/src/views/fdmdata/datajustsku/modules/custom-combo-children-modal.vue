@@ -9,8 +9,7 @@ import { Table } from 'ant-design-vue';
 
 import { getCustomComboChildList } from '#/api/fdmdata/datajustsku';
 
-const comboId = ref<number>(0);
-const itemCode = ref<string>('');
+const titleItemCode = ref<string>('');
 const loading = ref(false);
 const rows = ref<FdmdataCustomComboApi.CustomComboChildRow[]>([]);
 
@@ -21,29 +20,37 @@ const columns = [
     key: 'srcSkuId',
     ellipsis: true,
   },
+  {
+    title: '数量',
+    dataIndex: 'qty',
+    key: 'qty',
+    width: 80,
+  },
+  {
+    title: '子项售价',
+    dataIndex: 'salePrice',
+    key: 'salePrice',
+    width: 100,
+  },
 ];
 
 const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
-      comboId.value = 0;
-      itemCode.value = '';
+      titleItemCode.value = '';
       rows.value = [];
       return;
     }
-    const data = modalApi.getData() as
-      | null
-      | undefined
-      | { comboId: number; itemCode?: string };
-    comboId.value = data?.comboId ?? 0;
-    itemCode.value = (data?.itemCode ?? '').trim();
-    if (!comboId.value) {
+    const data = modalApi.getData() as Record<string, unknown> | null | undefined;
+    titleItemCode.value = String(data?.itemCode ?? '').trim();
+    const comboId = Number(data?.comboId);
+    if (!comboId) {
       rows.value = [];
       return;
     }
     loading.value = true;
     try {
-      rows.value = await getCustomComboChildList(comboId.value);
+      rows.value = await getCustomComboChildList(comboId);
     } finally {
       loading.value = false;
     }
@@ -53,7 +60,7 @@ const [Modal, modalApi] = useVbenModal({
 
 <template>
   <Modal
-    :title="itemCode ? `子商品 · ${itemCode}` : '子商品'"
+    :title="titleItemCode ? `子商品 · ${titleItemCode}` : '子商品'"
     :show-confirm-button="false"
     class="w-[640px]"
   >

@@ -3,7 +3,7 @@ import type { ColumnsType } from 'ant-design-vue/es/table';
 
 import { computed, reactive, ref } from 'vue';
 
-import { useVbenModal } from '@vben/common-ui';
+import { confirm, useVbenModal } from '@vben/common-ui';
 import { DICT_TYPE } from '@vben/constants';
 import { getDictOptions } from '@vben/hooks';
 
@@ -156,12 +156,19 @@ function deleteSelectedTemplate() {
 }
 
 const formState = reactive({
+  materialKey: '',
   productType: '',
   category: '',
   patternCostId: undefined as number | undefined,
   colors: [] as string[],
 });
 
+const materialOptions = computed(() =>
+  (blankOptions.value?.materials ?? []).map((x) => ({
+    label: x.label,
+    value: x.key,
+  })),
+);
 const typeOptions = computed(() => getDictOptions(DICT_TYPE.YOGA_MAT, 'string'));
 const categoryOptions = computed(() =>
   getDictOptions(DICT_TYPE.FDM_YOGA_CATEGORY, 'string'),
@@ -170,6 +177,7 @@ const colorOptions = computed(() => getDictOptions(DICT_TYPE.FDM_COLOR, 'string'
 
 const previewList = computed(() => preview.value?.rows ?? []);
 const willCreate = computed(() => preview.value?.willCreate ?? 0);
+const willUpdate = computed(() => preview.value?.willUpdate ?? 0);
 const willSkip = computed(() => preview.value?.willSkip ?? 0);
 
 const selectedPatternCost = computed(() => {
@@ -267,6 +275,7 @@ const [VbenModal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
       preview.value = null;
+      formState.materialKey = '';
       formState.productType = '';
       formState.category = '';
       formState.patternCostId = undefined;
@@ -313,20 +322,24 @@ async function loadPreview() {
   loadingPreview.value = true;
   try {
     preview.value = await previewFinished({
+      materialKey: formState.materialKey,
       productType: formState.productType,
       category: formState.category,
       sizeTextBlock,
       patternCostId: formState.patternCostId!,
       colors: formState.colors,
     });
+    message.success(
+      `预览完成：将新增 ${willCreate.value} 条，将覆盖更新 ${willUpdate.value} 条`,
+    );
   } finally {
     loadingPreview.value = false;
   }
 }
 
 async function handleGenerate() {
-  if (willCreate.value === 0) {
-    message.warning('没有可入库的新增行，请先预览');
+  if (willCreate.value + willUpdate.value === 0) {
+    message.warning('没有可入库的新增/更新行，请先预览');
     return;
   }
   if (
@@ -342,17 +355,25 @@ async function handleGenerate() {
   } catch {
     return;
   }
+  if (willUpdate.value > 0) {
+    await confirm(
+      `将覆盖更新 ${willUpdate.value} 条已存在的成品编码记录（按商品编码 itemCode 匹配），确认继续？`,
+    );
+  }
   const sizeTextBlock = buildSizeTextBlock();
   generating.value = true;
   try {
     const res = await importFinished({
+      materialKey: formState.materialKey,
       productType: formState.productType,
       category: formState.category,
       sizeTextBlock,
       patternCostId: formState.patternCostId!,
       colors: formState.colors,
     });
-    message.success(`已入库 ${res.created} 条，跳过 ${res.skipped} 条`);
+    message.success(
+      `完成：新增 ${res.created} 条，更新 ${res.updated ?? 0} 条，跳过 ${res.skipped} 条`,
+    );
     emit('success');
     modalApi.close();
   } finally {
@@ -379,6 +400,21 @@ async function handleGenerate() {
 
     <Form ref="formRef" :model="formState" layout="vertical">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <FormItem
+          label="材质"
+          name="materialKey"
+          :rules="[{ required: true, message: '请选择材质' }]"
+        >
+          <Select
+            v-model:value="formState.materialKey"
+            allow-clear
+            placeholder="请选择（字典 material_type）"
+            :options="materialOptions"
+            show-search
+            option-filter-prop="label"
+          />
+        </FormItem>
+
         <FormItem
           label="成品类型"
           name="productType"

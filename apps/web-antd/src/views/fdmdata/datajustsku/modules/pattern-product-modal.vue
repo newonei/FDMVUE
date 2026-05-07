@@ -22,6 +22,7 @@ import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
 import {
   createDataJustPatternCost,
   getDataJustPatternCostPage,
+  updateDataJustPatternCost,
 } from '#/api/fdmdata/datajustpattern';
 
 const emit = defineEmits(['success']);
@@ -40,10 +41,20 @@ const createForm = reactive({
 const listLoading = ref(false);
 const list = ref<FdmdataDataJustPatternApi.PatternCost[]>([]);
 
+const editingId = ref<number | null>(null);
+const editingForm = reactive({
+  id: 0,
+  itemCode: '',
+  patternName: '',
+  picUrl: '',
+  remark: '',
+});
+
 const columns: ColumnsType = [
   { title: '预览图', key: 'pic', width: 120 },
   { title: '图案名称', dataIndex: 'patternName', key: 'patternName' },
   { title: '对照编码', dataIndex: 'itemCode', key: 'itemCode', width: 140 },
+  { title: '操作', key: 'actions', width: 160 },
 ];
 
 function normalizeItemCode(raw: string) {
@@ -61,6 +72,55 @@ async function reloadList() {
     list.value = res.list ?? [];
   } finally {
     listLoading.value = false;
+  }
+}
+
+function beginEdit(row: FdmdataDataJustPatternApi.PatternCost) {
+  if (!row?.id) return;
+  editingId.value = row.id;
+  editingForm.id = row.id;
+  editingForm.itemCode = normalizeItemCode(row.itemCode ?? '');
+  editingForm.patternName = (row.patternName ?? '').trim();
+  editingForm.picUrl = (row.picUrl ?? '').trim();
+  editingForm.remark = (row.remark ?? '').trim();
+}
+
+function cancelEdit() {
+  editingId.value = null;
+  editingForm.id = 0;
+  editingForm.itemCode = '';
+  editingForm.patternName = '';
+  editingForm.picUrl = '';
+  editingForm.remark = '';
+}
+
+async function saveEdit() {
+  const id = editingForm.id;
+  const itemCode = normalizeItemCode(editingForm.itemCode ?? '');
+  const patternName = (editingForm.patternName ?? '').trim();
+  const picUrl = (editingForm.picUrl ?? '').trim();
+  const remark = (editingForm.remark ?? '').trim();
+  if (!id) return;
+  if (!itemCode) return message.warning('请输入对照编码');
+  if (!patternName) return message.warning('请输入图案名称');
+  if (!isValidItemCode(itemCode)) {
+    return message.warning('对照编码仅支持 1~4 位大写英文字母（例如 ABCD）');
+  }
+  savingPattern.value = true;
+  try {
+    await updateDataJustPatternCost({
+      id,
+      itemCode,
+      patternName,
+      picUrl: picUrl || undefined,
+      remark: remark || undefined,
+    });
+    message.success('保存成功');
+    cancelEdit();
+    await reloadList();
+    emit('success');
+  } finally {
+    savingPattern.value = false;
   }
 }
 
@@ -98,6 +158,7 @@ async function handleCreatePattern() {
 const [VbenModal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      cancelEdit();
       createForm.styleCode = '';
       createForm.itemCode = '';
       createForm.productName = '';
@@ -177,10 +238,46 @@ const [VbenModal, modalApi] = useVbenModal({
                 <span v-else class="text-muted-foreground">-</span>
               </template>
               <template v-else-if="column.key === 'patternName'">
-                <span>{{ record.patternName }}</span>
+                <template v-if="editingId === record.id">
+                  <Input v-model:value="editingForm.patternName" allow-clear />
+                </template>
+                <template v-else>
+                  <span>{{ record.patternName }}</span>
+                </template>
               </template>
               <template v-else-if="column.key === 'itemCode'">
-                <span class="font-mono">{{ record.itemCode }}</span>
+                <template v-if="editingId === record.id">
+                  <Input
+                    v-model:value="editingForm.itemCode"
+                    placeholder="例如 ABCD"
+                    allow-clear
+                    @blur="editingForm.itemCode = normalizeItemCode(editingForm.itemCode as any)"
+                  />
+                </template>
+                <template v-else>
+                  <span class="font-mono">{{ record.itemCode }}</span>
+                </template>
+              </template>
+              <template v-else-if="column.key === 'actions'">
+                <template v-if="editingId === record.id">
+                  <div class="flex flex-wrap gap-2">
+                    <Button type="primary" size="small" :loading="savingPattern" @click="saveEdit">
+                      保存
+                    </Button>
+                    <Button size="small" @click="cancelEdit">取消</Button>
+                  </div>
+                  <div class="mt-2">
+                    <div class="mb-1 text-xs text-muted-foreground">图片</div>
+                    <ImageUpload v-model="editingForm.picUrl" :max-number="1" />
+                  </div>
+                  <div class="mt-2">
+                    <div class="mb-1 text-xs text-muted-foreground">备注</div>
+                    <Input v-model:value="editingForm.remark" allow-clear />
+                  </div>
+                </template>
+                <template v-else>
+                  <Button size="small" @click="beginEdit(record)">编辑</Button>
+                </template>
               </template>
             </template>
             <template #emptyText>

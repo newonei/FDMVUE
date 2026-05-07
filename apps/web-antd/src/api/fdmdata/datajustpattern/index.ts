@@ -183,6 +183,12 @@ export function createDataJustPatternCost(
   return requestClient.post<number>('/fdmdata/data-just-pattern-cost/create', data);
 }
 
+export function updateDataJustPatternCost(
+  data: FdmdataDataJustPatternApi.PatternCostCreateReq & { id: number },
+) {
+  return requestClient.put<boolean>('/fdmdata/data-just-pattern-cost/update', data);
+}
+
 export function deleteDataJustPatternCost(id: number) {
   return requestClient.delete(`/fdmdata/data-just-pattern-cost/delete?id=${id}`);
 }

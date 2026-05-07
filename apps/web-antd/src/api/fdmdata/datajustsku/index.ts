@@ -17,6 +17,7 @@ export namespace FdmdataDataJustSkuApi {
     attr1: string; // 其它属性1
     attr2: string; // 其它属性2
     attr3: string; // 其它属性3
+    materialKey?: string; // 材质 key（字典 material_type value，如 TPE/SUE）
     weightKg: number; // 重量（千克）
     lengthCm: number; // 长（厘米）
     widthCm: number; // 宽（厘米）
@@ -32,6 +33,9 @@ export namespace FdmdataDataJustSkuApi {
     creatorName?: string;
     createTime?: string;
   }
+
+  /** 成品编码（独立表） */
+  export type FinishedSku = DataJustSku;
 }
 
 /** 查询fdm-data 聚水潭 SKU 主数据分页 */
@@ -82,6 +86,65 @@ export function batchSetFinishedPic(data: { ids: number[]; picUrl: string }) {
   );
 }
 
+// =========================
+// 成品编码（独立表）：/fdmdata/data-just-finished-sku
+// =========================
+
+export function getFinishedSkuPage(params: PageParam) {
+  return requestClient.get<PageResult<FdmdataDataJustSkuApi.FinishedSku>>(
+    '/fdmdata/data-just-finished-sku/page',
+    { params },
+  );
+}
+
+export function getFinishedSku(id: number) {
+  return requestClient.get<FdmdataDataJustSkuApi.FinishedSku>(
+    `/fdmdata/data-just-finished-sku/get?id=${id}`,
+  );
+}
+
+export function createFinishedSku(data: FdmdataDataJustSkuApi.FinishedSku) {
+  return requestClient.post('/fdmdata/data-just-finished-sku/create', data);
+}
+
+export function updateFinishedSku(data: FdmdataDataJustSkuApi.FinishedSku) {
+  return requestClient.put('/fdmdata/data-just-finished-sku/update', data);
+}
+
+export function deleteFinishedSku(id: number) {
+  return requestClient.delete(`/fdmdata/data-just-finished-sku/delete?id=${id}`);
+}
+
+export function deleteFinishedSkuList(ids: number[]) {
+  return requestClient.delete(
+    `/fdmdata/data-just-finished-sku/delete-list?ids=${ids.join(',')}`,
+  );
+}
+
+export function batchSetFinishedSkuPic(data: { ids: number[]; picUrl: string }) {
+  return requestClient.put<boolean>(
+    '/fdmdata/data-just-finished-sku/batch-set-pic',
+    data,
+  );
+}
+
+export function exportFinishedSkuExcel(params: any) {
+  return requestClient.download('/fdmdata/data-just-finished-sku/export-excel', { params });
+}
+
+export function syncFinishedSkuToJushuitan(id: number) {
+  return requestClient.post<JstSyncResp>(
+    `/fdmdata/data-just-finished-sku/sync-jushuitan?id=${id}`,
+  );
+}
+
+/** 成品编码列表批量同步：后端一次聚水潭请求携带多条 items */
+export function syncFinishedSkuToJushuitanBatchV2(ids: number[]) {
+  return requestClient.post<JstSyncBatchResp>(
+    `/fdmdata/data-just-finished-sku/sync-jushuitan-batch?ids=${ids.join(',')}`,
+  );
+}
+
 /** 导出fdm-data 聚水潭 SKU 主数据 */
 export function exportDataJustSku(params: any) {
   return requestClient.download('/fdmdata/data-just-sku/export-excel', { params });
@@ -115,6 +178,13 @@ export interface JstSyncBatchResp {
 export function syncDataJustSkuToJushuitanBatch(ids: number[]) {
   return requestClient.post<JstSyncBatchResp>(
     `/fdmdata/data-just-sku/sync-jushuitan-batch?ids=${ids.join(',')}`,
+  );
+}
+
+/** 成品编码列表批量同步：后端一次聚水潭请求携带多条 items */
+export function syncFinishedSkuToJushuitanBatch(ids: number[]) {
+  return requestClient.post<JstSyncBatchResp>(
+    `/fdmdata/data-just-sku/sync-jushuitan-finished-batch?ids=${ids.join(',')}`,
   );
 }
 
@@ -227,11 +297,13 @@ export interface PatternPreviewRow {
 export interface PatternPreviewResp {
   rows: PatternPreviewRow[];
   willCreate: number;
+  willUpdate?: number;
   willSkip: number;
 }
 
 export interface PatternImportResp {
   created: number;
+  updated?: number;
   skipped: number;
 }
 
@@ -239,6 +311,8 @@ export interface PatternImportResp {
 
 /** 成品编码生成 */
 export interface FinishedGenReq {
+  /** 材质：字典 material_type value（如 TPE） */
+  materialKey: string;
   /** 字典 YogaMat value */
   productType: string;
   /** 字典 fdm_yoga_category（飞德慕成品分类）value（入库分类为字典 label） */
@@ -354,8 +428,14 @@ export interface CustomComboPreviewResp {
   rows: {
     data: FdmdataDataJustSkuApi.DataJustSku;
     existsInDb?: boolean;
+    matchedAccessoryItemCodes?: string[];
+    matchedAccessoryNames?: string[];
+    skippedAccessoryItemCodes?: string[];
+    skippedAccessoryNames?: string[];
+    message?: string;
   }[];
   willCreate: number;
+  willUpdate?: number;
   willSkip: number;
 }
 
@@ -368,12 +448,33 @@ export function previewCustomCombo(data: CustomComboGenReq) {
 
 export interface PatternImportResp {
   created: number;
+  updated?: number;
   skipped: number;
 }
 
 export function importCustomCombo(data: CustomComboGenReq) {
   return requestClient.post<PatternImportResp>(
     '/fdmdata/data-just-custom-combo/import',
+    data,
+  );
+}
+
+/** 组合商品编码生成（成品 + 配件，按规格匹配） */
+export interface StandardComboGenReq {
+  finishedSkuIds: number[];
+  accessoryIds: number[];
+}
+
+export function previewStandardCombo(data: StandardComboGenReq) {
+  return requestClient.post<CustomComboPreviewResp>(
+    '/fdmdata/data-just-sku/combo-standard/preview',
+    data,
+  );
+}
+
+export function importStandardCombo(data: StandardComboGenReq) {
+  return requestClient.post<PatternImportResp>(
+    '/fdmdata/data-just-sku/combo-standard/import',
     data,
   );
 }
@@ -396,8 +497,22 @@ export namespace FdmdataCustomComboApi {
     productName?: string;
     categoryName?: string;
     costPrice?: number;
+    /** 材质 key（material_type.value） */
+    materialKey?: string;
+    /** 天猫价（按 材质+规格+类型 匹配回填） */
+    tmallPrice?: number;
+    /** 拼多多价（按 材质+规格+类型 匹配回填） */
+    pddPrice?: number;
+    /** 抖音价（按 材质+规格+类型 匹配回填） */
+    douyinPrice?: number;
+    /** 商品号价（按 材质+规格+类型 匹配回填） */
+    sphPrice?: number;
+    /** 小红书价（按 材质+规格+类型 匹配回填） */
+    xhsPrice?: number;
     status?: number;
     jstSkuId?: string;
+    creator?: string;
+    creatorName?: string;
     createTime?: string;
   }
 
@@ -417,10 +532,85 @@ export function getCustomComboPage(params: PageParam) {
   );
 }
 
+export function exportCustomComboExcel(params: Record<string, unknown>) {
+  return requestClient.download('/fdmdata/data-just-custom-combo/export-excel', {
+    params,
+  });
+}
+
+export function deleteCustomCombo(id: number) {
+  return requestClient.delete(`/fdmdata/data-just-custom-combo/delete?id=${id}`);
+}
+
+export function deleteCustomComboList(ids: number[]) {
+  return requestClient.delete(
+    `/fdmdata/data-just-custom-combo/delete-list?ids=${ids.join(',')}`,
+  );
+}
+
+// =========================
+// 组合平台价（天猫/拼多多/抖音/小红书）：/fdmdata/data-just-combo-platform-price
+// =========================
+
+export interface ComboPlatformPriceUpsertReq {
+  materialKey: string;
+  /** 规格（组合 item_code 第一段） */
+  specText: string;
+  /** 类型（组合 item_code 最后一段） */
+  productType: string;
+  tmallPrice?: number | null;
+  pddPrice?: number | null;
+  douyinPrice?: number | null;
+  sphPrice?: number | null;
+  xhsPrice?: number | null;
+  remark?: string;
+}
+
+export function upsertComboPlatformPrice(data: ComboPlatformPriceUpsertReq) {
+  return requestClient.post<number>(
+    '/fdmdata/data-just-combo-platform-price/upsert',
+    data,
+  );
+}
+
+export interface ComboPlatformPriceMatrixKey {
+  materialKey: string;
+  specText: string;
+  productType: string;
+}
+
+export interface ComboPlatformPriceRow extends ComboPlatformPriceUpsertReq {
+  id?: number;
+  createTime?: string;
+}
+
+export function getComboPlatformPriceMatrixKeys() {
+  return requestClient.get<ComboPlatformPriceMatrixKey[]>(
+    '/fdmdata/data-just-combo-platform-price/combo-matrix-keys',
+  );
+}
+
+export function getComboPlatformPricePage(
+  params: PageParam & Partial<ComboPlatformPriceRow>,
+) {
+  return requestClient.get<PageResult<ComboPlatformPriceRow>>(
+    '/fdmdata/data-just-combo-platform-price/page',
+    { params },
+  );
+}
+
 /** 定制组合子商品（与聚水潭组合 childList 同源） */
 export function getCustomComboChildList(comboId: number) {
   return requestClient.get<FdmdataCustomComboApi.CustomComboChildRow[]>(
     '/fdmdata/data-just-custom-combo/child-list',
+    { params: { comboId } },
+  );
+}
+
+/** 兼容：旧标准组合曾挂在 SKU 表时可传 skuId；新数据请用 comboId */
+export function getStandardComboChildList(comboId: number) {
+  return requestClient.get<FdmdataCustomComboApi.CustomComboChildRow[]>(
+    '/fdmdata/data-just-sku/standard-combo-child-list',
     { params: { comboId } },
   );
 }
@@ -521,4 +711,3 @@ export function deleteDataJustPatternSkuCost(id: number) {
     `/fdmdata/data-just-pattern-sku-cost/delete?id=${id}`,
   );
 }
-

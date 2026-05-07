@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
+import type { FdmdataDataJustAccessoryApi } from '#/api/fdmdata/datajustaccessory';
 import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
 import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
 
@@ -19,11 +20,26 @@ import {
   syncDataJustPatternToJushuitan,
 } from '#/api/fdmdata/datajustpattern';
 import {
+  deleteDataJustAccessory,
+  deleteDataJustAccessoryList,
+  exportDataJustAccessoryExcel,
+  getDataJustAccessoryPage,
+} from '#/api/fdmdata/datajustaccessory';
+import {
+  deleteCustomCombo,
+  deleteCustomComboList,
   deleteDataJustSku,
   deleteDataJustSkuList,
+  deleteFinishedSku,
+  deleteFinishedSkuList,
+  exportCustomComboExcel,
   exportDataJustSku,
+  exportFinishedSkuExcel,
   getDataJustSkuPage,
+  getFinishedSkuPage,
   getCustomComboPage,
+  syncFinishedSkuToJushuitan,
+  syncFinishedSkuToJushuitanBatchV2,
   syncDataJustSkuToJushuitan,
   syncDataJustSkuToJushuitanBatch,
   syncCustomComboToJushuitanBatch,
@@ -35,6 +51,7 @@ import CostModal from './modules/cost-modal.vue';
 import BlankBatchPicModal from './modules/blank-batch-pic-modal.vue';
 import BlankImportModal from './modules/blank-import-modal.vue';
 import BlankSkuImportModal from './modules/blank-sku-import-modal.vue';
+import AccessorySkuImportModal from './modules/accessory-sku-import-modal.vue';
 import FinishedBatchPicModal from './modules/finished-batch-pic-modal.vue';
 import FinishedCostModal from './modules/finished-cost-modal.vue';
 import Form from './modules/form.vue';
@@ -45,15 +62,18 @@ import PatternProductModal from './modules/pattern-product-modal.vue';
 import YogaBlankModal from './modules/yoga-blank-modal.vue';
 import CustomComboChildrenModalComp from './modules/custom-combo-children-modal.vue';
 import CustomComboGenerateModalComp from './modules/custom-combo-generate-modal.vue';
+import StandardComboGenerateModalComp from './modules/standard-combo-generate-modal.vue';
+import ComboPlatformPriceModalComp from './modules/combo-platform-price-modal.vue';
 
-/** 与后端列表 Tab 一致：blank=排除其它 Tab 的款式前缀 */
-type SkuListTab = 'blank' | 'pattern' | 'finished' | 'combo' | 'custom_combo';
+/** 与后端列表 Tab 一致；配件列表独立表 fdm_data_just_accessory */
+type SkuListTab = 'blank' | 'pattern' | 'finished' | 'combo' | 'accessory' | 'custom_combo';
 
 const LIST_TAB_META: { key: SkuListTab; label: string; exportName: string }[] = [
   { key: 'blank', label: '空白版列表', exportName: '空白版SKU.xls' },
   { key: 'pattern', label: '图案列表', exportName: '图案SKU.xls' },
   { key: 'finished', label: '成品编码列表', exportName: '成品编码SKU.xls' },
   { key: 'combo', label: '组合编码列表', exportName: '组合编码SKU.xls' },
+  { key: 'accessory', label: '配件列表', exportName: '配件SKU.xls' },
   { key: 'custom_combo', label: '定制组合编码列表', exportName: '定制组合编码SKU.xls' },
 ];
 
@@ -64,14 +84,15 @@ const gridTableTitle = computed(() => {
   return row ? `聚水潭 SKU · ${row.label}` : '聚水潭 SKU';
 });
 
-async function onListTabChange(key: SkuListTab) {
+async function onListTabChange(key: string | number) {
+  const nextTab = key as SkuListTab;
   checkedIds.value = [];
   gridApi.setGridOptions({
     columns: buildDataJustSkuGridColumns({
-      listTab: key,
-      patternPicPreview: key === 'pattern',
-      blankPicPreview: key === 'blank',
-      finishedPicPreview: key === 'finished',
+      listTab: nextTab,
+      patternPicPreview: nextTab === 'pattern',
+      blankPicPreview: nextTab === 'blank',
+      finishedPicPreview: nextTab === 'finished',
     }),
   });
   await nextTick();
@@ -105,6 +126,11 @@ const [BlankImportModalComp, blankImportModalApi] = useVbenModal({
 
 const [BlankSkuImportModalComp, blankSkuImportModalApi] = useVbenModal({
   connectedComponent: BlankSkuImportModal,
+  destroyOnClose: true,
+});
+
+const [AccessorySkuImportModalComp, accessorySkuImportModalApi] = useVbenModal({
+  connectedComponent: AccessorySkuImportModal,
   destroyOnClose: true,
 });
 
@@ -143,20 +169,26 @@ const [CustomComboGenerateModal, customComboGenerateModalApi] = useVbenModal({
   destroyOnClose: true,
 });
 
+const [StandardComboGenerateModal, standardComboGenerateModalApi] = useVbenModal({
+  connectedComponent: StandardComboGenerateModalComp,
+  destroyOnClose: true,
+});
+
+const [ComboPlatformPriceModal, comboPlatformPriceModalApi] = useVbenModal({
+  connectedComponent: ComboPlatformPriceModalComp,
+  destroyOnClose: true,
+});
+
 const [CustomComboChildrenModal, customComboChildrenModalApi] = useVbenModal({
   connectedComponent: CustomComboChildrenModalComp,
   destroyOnClose: true,
 });
 
-function handleOpenCustomComboChildren(
-  row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern,
-) {
-  customComboChildrenModalApi
-    .setData({
-      comboId: row.id,
-      itemCode: (row as FdmdataDataJustSkuApi.DataJustSku).itemCode,
-    })
-    .open();
+function handleOpenComboChildren(data: {
+  comboId: number;
+  itemCode?: string;
+}) {
+  customComboChildrenModalApi.setData(data).open();
 }
 
 /** 刷新表格 */
@@ -184,6 +216,14 @@ function handleBlankSkuImportExcel() {
   blankSkuImportModalApi.setData(null).open();
 }
 
+function handleAccessorySkuImportExcel() {
+  accessorySkuImportModalApi.setData(null).open();
+}
+
+function handleCreate() {
+  formModalApi.setData({ listTab: activeListTab.value }).open();
+}
+
 function handleFinishedBatchSetPic() {
   finishedBatchPicModalApi.setData(checkedIds.value).open();
 }
@@ -208,13 +248,24 @@ function handleCustomComboGenerate() {
   customComboGenerateModalApi.setData(null).open();
 }
 
+function handleStandardComboGenerate() {
+  standardComboGenerateModalApi.setData(null).open();
+}
+
+function handleComboPlatformPriceMaintain() {
+  comboPlatformPriceModalApi.setData(null).open();
+}
+
 function handleFinishedCostMaintain() {
   finishedCostModalApi.setData(null).open();
 }
 
 /** 编辑（SKU 主表或图案表，由表单根据 listTab 分支） */
 function handleEdit(
-  row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern,
+  row:
+    | FdmdataDataJustSkuApi.DataJustSku
+    | FdmdataDataJustPatternApi.Pattern
+    | FdmdataDataJustAccessoryApi.Accessory,
 ) {
   formModalApi.setData({ row, listTab: activeListTab.value }).open();
 }
@@ -232,7 +283,17 @@ async function handleSyncJushuitan(
           ? `同步成功，聚水潭 SKU ID：${res.jstSkuId}`
           : '同步成功',
       );
-    } else if (activeListTab.value === 'custom_combo') {
+    } else if (activeListTab.value === 'finished') {
+      const res = await syncFinishedSkuToJushuitan(row.id!);
+      message.success(
+        res?.jstSkuId
+          ? `同步成功，聚水潭 SKU ID：${res.jstSkuId}`
+          : '同步成功',
+      );
+    } else if (
+      activeListTab.value === 'custom_combo' ||
+      activeListTab.value === 'combo'
+    ) {
       const res = await syncCustomComboToJushuitanBatch([row.id!]);
       const item = res.items?.[0];
       if (item?.success) {
@@ -283,7 +344,32 @@ async function handleSyncJushuitanBatch() {
   }
 }
 
-/** 定制组合：勾选后批量同步组合装到聚水潭（一次接口多条 items） */
+/** 成品编码列表：勾选后批量同步（后端一次聚水潭接口，items 多条） */
+async function handleSyncFinishedJushuitanBatch() {
+  if (isEmpty(checkedIds.value)) {
+    return;
+  }
+  const hideLoading = message.loading({
+    content: '正在批量同步到聚水潭…',
+    duration: 0,
+  });
+  try {
+    const res = await syncFinishedSkuToJushuitanBatchV2(checkedIds.value);
+    checkedIds.value = [];
+    if (res.failCount === 0) {
+      message.success(`批量同步完成，共 ${res.successCount} 条`);
+    } else {
+      message.warning(
+        `批量同步完成：成功 ${res.successCount} 条，失败 ${res.failCount} 条（失败原因见各条 message）`,
+      );
+    }
+    handleRefresh();
+  } finally {
+    hideLoading();
+  }
+}
+
+/** 标准组合 / 定制组合：勾选后批量同步组合装到聚水潭（一次接口多条 items） */
 async function handleSyncCustomComboBatch() {
   if (isEmpty(checkedIds.value)) {
     return;
@@ -310,7 +396,10 @@ async function handleSyncCustomComboBatch() {
 
 /** 删除（SKU 主表或图案表） */
 async function handleDelete(
-  row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern,
+  row:
+    | FdmdataDataJustSkuApi.DataJustSku
+    | FdmdataDataJustPatternApi.Pattern
+    | FdmdataDataJustAccessoryApi.Accessory,
 ) {
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.id]),
@@ -319,6 +408,15 @@ async function handleDelete(
   try {
     if (activeListTab.value === 'pattern') {
       await deleteDataJustPattern(row.id!);
+    } else if (activeListTab.value === 'accessory') {
+      await deleteDataJustAccessory(row.id!);
+    } else if (activeListTab.value === 'finished') {
+      await deleteFinishedSku(row.id!);
+    } else if (
+      activeListTab.value === 'custom_combo' ||
+      activeListTab.value === 'combo'
+    ) {
+      await deleteCustomCombo(row.id!);
     } else {
       await deleteDataJustSku(row.id!);
     }
@@ -339,6 +437,15 @@ async function handleDeleteBatch() {
   try {
     if (activeListTab.value === 'pattern') {
       await deleteDataJustPatternList(checkedIds.value);
+    } else if (activeListTab.value === 'accessory') {
+      await deleteDataJustAccessoryList(checkedIds.value);
+    } else if (activeListTab.value === 'finished') {
+      await deleteFinishedSkuList(checkedIds.value);
+    } else if (
+      activeListTab.value === 'custom_combo' ||
+      activeListTab.value === 'combo'
+    ) {
+      await deleteCustomComboList(checkedIds.value);
     } else {
       await deleteDataJustSkuList(checkedIds.value);
     }
@@ -354,7 +461,11 @@ const checkedIds = ref<number[]>([]);
 function handleRowCheckboxChange({
   records,
 }: {
-  records: (FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern)[];
+  records: (
+    | FdmdataDataJustSkuApi.DataJustSku
+    | FdmdataDataJustPatternApi.Pattern
+    | FdmdataDataJustAccessoryApi.Accessory
+  )[];
 }) {
   checkedIds.value = records.map((item) => item.id!);
 }
@@ -366,10 +477,20 @@ async function handleExport() {
   const data =
     activeListTab.value === 'pattern'
       ? await exportDataJustPatternExcel(formValues)
-      : await exportDataJustSku({
-          ...formValues,
-          listTab: activeListTab.value,
-        });
+      : activeListTab.value === 'accessory'
+        ? await exportDataJustAccessoryExcel(formValues as Record<string, unknown>)
+        : activeListTab.value === 'finished'
+          ? await exportFinishedSkuExcel(formValues)
+        : activeListTab.value === 'custom_combo' || activeListTab.value === 'combo'
+          ? await exportCustomComboExcel({
+              ...formValues,
+              categoryName:
+                activeListTab.value === 'combo' ? '组合' : '定制组合',
+            })
+          : await exportDataJustSku({
+              ...formValues,
+              listTab: activeListTab.value,
+            });
   downloadFileFromBlobPart({
     fileName: meta?.exportName ?? '聚水潭SKU.xls',
     source: data,
@@ -385,21 +506,41 @@ const [Grid, gridApi] = useVbenVxeGrid({
       listTab: activeListTab.value,
       patternPicPreview: activeListTab.value === 'pattern',
       blankPicPreview: activeListTab.value === 'blank',
+      finishedPicPreview: activeListTab.value === 'finished',
     }),
     height: 'auto',
     keepSource: true,
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          if (activeListTab.value === 'custom_combo') {
+          if (
+            activeListTab.value === 'custom_combo' ||
+            activeListTab.value === 'combo'
+          ) {
             return await getCustomComboPage({
+              pageNo: page.currentPage,
+              pageSize: page.pageSize,
+              ...formValues,
+              categoryName:
+                activeListTab.value === 'combo' ? '组合' : '定制组合',
+            } as any);
+          }
+          if (activeListTab.value === 'pattern') {
+            return await getDataJustPatternPage({
               pageNo: page.currentPage,
               pageSize: page.pageSize,
               ...formValues,
             } as any);
           }
-          if (activeListTab.value === 'pattern') {
-            return await getDataJustPatternPage({
+          if (activeListTab.value === 'accessory') {
+            return await getDataJustAccessoryPage({
+              pageNo: page.currentPage,
+              pageSize: page.pageSize,
+              ...formValues,
+            } as any);
+          }
+          if (activeListTab.value === 'finished') {
+            return await getFinishedSkuPage({
               pageNo: page.currentPage,
               pageSize: page.pageSize,
               ...formValues,
@@ -423,7 +564,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
       search: true,
     },
   } as VxeTableGridOptions<
-    FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern
+    | FdmdataDataJustSkuApi.DataJustSku
+    | FdmdataDataJustPatternApi.Pattern
+    | FdmdataDataJustAccessoryApi.Accessory
   >,
   gridEvents: {
     checkboxAll: handleRowCheckboxChange,
@@ -439,6 +582,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <BlankBatchPicModalComp @success="handleRefresh" />
     <BlankImportModalComp @success="handleRefresh" />
     <BlankSkuImportModalComp @success="handleRefresh" />
+    <AccessorySkuImportModalComp @success="handleRefresh" />
     <FinishedBatchPicModalComp @success="handleRefresh" />
     <CostMaintainModal />
     <PatternCostMaintainModal />
@@ -447,6 +591,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <PatternGenerateModal />
     <FinishedGenerateModal @success="handleRefresh" />
     <CustomComboGenerateModal @success="handleRefresh" />
+    <StandardComboGenerateModal @success="handleRefresh" />
+    <ComboPlatformPriceModal />
     <CustomComboChildrenModal />
     <Tabs
       v-model:active-key="activeListTab"
@@ -473,7 +619,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
               label: '查看',
               type: 'link',
               auth: ['fdmdata:data-just-sku:query'],
-              onClick: handleOpenCustomComboChildren.bind(null, row),
+              onClick: () =>
+                handleOpenComboChildren({
+                  comboId: row.id!,
+                  itemCode: row.itemCode,
+                }),
             },
           ]"
         />
@@ -512,6 +662,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
               onClick: handleSyncJushuitanBatch,
             },
             {
+              label: '批量同步聚水潭',
+              type: 'default',
+              auth: ['fdmdata:data-just-sku:update'],
+              ifShow: activeListTab === 'finished',
+              disabled: isEmpty(checkedIds),
+              onClick: handleSyncFinishedJushuitanBatch,
+            },
+            {
               label: '导入（成本对照）',
               type: 'default',
               auth: ['fdmdata:data-just-sku:update'],
@@ -526,6 +684,34 @@ const [Grid, gridApi] = useVbenVxeGrid({
               onClick: handleBlankSkuImportExcel,
             },
             {
+              label: '新增',
+              type: 'primary',
+              auth: ['fdmdata:data-just-sku:update'],
+              ifShow: activeListTab === 'accessory',
+              onClick: handleCreate,
+            },
+            {
+              label: '导入（配件列表）',
+              type: 'default',
+              auth: ['fdmdata:data-just-sku:update'],
+              ifShow: activeListTab === 'accessory',
+              onClick: handleAccessorySkuImportExcel,
+            },
+            {
+              label: '组合商品编码生成',
+              type: 'primary',
+              auth: ['fdmdata:data-just-sku:update'],
+              ifShow: activeListTab === 'combo',
+              onClick: handleStandardComboGenerate,
+            },
+            {
+              label: '电商平台价格对照',
+              type: 'default',
+              auth: ['fdmdata:data-just-sku:update'],
+              ifShow: activeListTab === 'combo',
+              onClick: handleComboPlatformPriceMaintain,
+            },
+            {
               label: '定制组合编码生成',
               type: 'primary',
               auth: ['fdmdata:data-just-sku:update'],
@@ -536,7 +722,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
               label: '批量同步组合装',
               type: 'default',
               auth: ['fdmdata:data-just-sku:update'],
-              ifShow: activeListTab === 'custom_combo',
+              ifShow:
+                activeListTab === 'custom_combo' || activeListTab === 'combo',
               disabled: isEmpty(checkedIds),
               onClick: handleSyncCustomComboBatch,
             },
@@ -610,13 +797,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
               type: 'link',
               icon: ACTION_ICON.EDIT,
               auth: ['fdmdata:data-just-sku:update'],
+              ifShow:
+                activeListTab !== 'combo' && activeListTab !== 'custom_combo',
               onClick: handleEdit.bind(null, row),
             },
             {
               label: '同步到聚水潭',
               type: 'link',
               auth: ['fdmdata:data-just-sku:update'],
-              ifShow: row.status === 1 || row.status === 3,
+              ifShow:
+                (row.status === 1 || row.status === 3) && activeListTab !== 'accessory',
               onClick: handleSyncJushuitan.bind(null, row),
             },
             {

@@ -5,7 +5,7 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { Button, Image, message } from 'ant-design-vue';
 
-import { batchSetFinishedPic } from '#/api/fdmdata/datajustsku';
+import { batchSetFinishedSkuPic } from '#/api/fdmdata/datajustsku';
 import ImageUpload from '#/components/upload/image-upload.vue';
 
 const emit = defineEmits(['success']);
@@ -37,7 +37,7 @@ async function handleConfirm() {
   }
   modalApi.lock();
   try {
-    await batchSetFinishedPic({ ids: selectedIds.value, picUrl: url });
+    await batchSetFinishedSkuPic({ ids: selectedIds.value, picUrl: url });
     message.success(`已批量设置 ${selectedIds.value.length} 条图片`);
     emit('success');
     modalApi.close();
