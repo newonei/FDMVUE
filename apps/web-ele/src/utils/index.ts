@@ -3,6 +3,9 @@ import type { Recordable } from '@vben/types';
 export * from './rangePickerProps';
 export * from './routerHelper';
 
+// 从共享包导出 URL 工具函数
+export { isUrl } from '@vben/utils';
+
 /**
  * 查找数组对象的某个下标
  * @param {Array} ary 查找的数组

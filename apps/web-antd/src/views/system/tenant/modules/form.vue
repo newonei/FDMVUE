@@ -65,7 +65,7 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       formData.value = await getTenant(data.id);
-      // @ts-ignore 特殊：上游组件类型问题（历史遗留）
+      // @ts-expect-error: special-case workaround for yudao-ui-admin-vben issue ID43CX
       formData.value.expireTime = String(formData.value.expireTime);
       // 设置到 values
       await formApi.setValues(formData.value);

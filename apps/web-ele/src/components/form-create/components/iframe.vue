@@ -1,6 +1,8 @@
 <!-- 网页 iframe 组件 (Element Plus 版本) -->
 <script lang="ts" setup>
-import { computed, ref, watch } from 'vue';
+import { computed } from 'vue';
+
+import { isUrl } from '#/utils';
 
 defineOptions({ name: 'IframeComponent' });
 
@@ -15,10 +17,6 @@ const props = withDefaults(defineProps<Props>(), {
   sandbox: '',
 });
 
-const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
-}>();
-
 // 接受父组件参数
 interface Props {
   modelValue?: string;
@@ -29,6 +27,7 @@ interface Props {
   allowfullscreen?: boolean;
   loading?: 'eager' | 'lazy';
   sandbox?: string;
+  // eslint-disable-next-line vue/require-default-prop
   formCreateInject?: any;
 }
 
@@ -37,19 +36,8 @@ const displayUrl = computed(() => props.url || props.modelValue || '');
 
 // 是否显示预览
 const showPreview = computed(() => {
-  return displayUrl.value && isValidUrl(displayUrl.value);
+  return displayUrl.value && isUrl(displayUrl.value);
 });
-
-// URL 验证
-function isValidUrl(url: string): boolean {
-  if (!url || url.trim() === '') return false;
-  try {
-    const urlObj = new URL(url);
-    return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
 </script>
 
 <template>
@@ -81,9 +69,9 @@ function isValidUrl(url: string): boolean {
 }
 
 .iframe-preview {
+  overflow: hidden;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
-  overflow: hidden;
 }
 
 .iframe-content {
@@ -96,8 +84,8 @@ function isValidUrl(url: string): boolean {
   align-items: center;
   justify-content: center;
   min-height: 200px;
+  background-color: #fafafa;
   border: 1px dashed #dcdfe6;
   border-radius: 4px;
-  background-color: #fafafa;
 }
 </style>

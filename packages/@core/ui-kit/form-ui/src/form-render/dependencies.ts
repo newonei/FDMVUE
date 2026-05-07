@@ -10,6 +10,7 @@ import { get, isBoolean, isFunction } from '@vben-core/shared/utils';
 
 import { useFormValues } from 'vee-validate';
 
+import { resolveFieldNamePath } from '../field-name';
 import { injectRenderFormProps } from './context';
 
 /**
@@ -22,8 +23,8 @@ function resolveValueByFieldName(
   fieldName: string,
 ) {
   // vee-validate：[] 表示禁用嵌套
-  if (fieldName.startsWith('[') && fieldName.endsWith(']')) {
-    const rawKey = fieldName.slice(1, -1);
+  const { rawKey } = resolveFieldNamePath(fieldName);
+  if (rawKey) {
     return values[rawKey];
   }
 
@@ -36,9 +37,11 @@ export default function useDependencies(
   const values = useFormValues();
 
   const formRenderProps = injectRenderFormProps();
+  const formApi = formRenderProps.form;
 
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const formApi = formRenderProps.form!;
+  if (!formApi) {
+    throw new Error('Form api is required in useDependencies');
+  }
 
   if (!values) {
     throw new Error('useDependencies should be used within <VbenForm>');
@@ -123,7 +126,7 @@ export default function useDependencies(
       }
 
       if (isFunction(trigger)) {
-        await trigger(formValues, formApi);
+        trigger(formValues, formApi);
       }
     },
     { deep: true, immediate: true },

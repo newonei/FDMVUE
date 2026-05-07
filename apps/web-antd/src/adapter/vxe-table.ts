@@ -1,6 +1,8 @@
 import type { VxeTableGridOptions } from '@vben/plugins/vxe-table';
 import type { Recordable } from '@vben/types';
 
+import type { ComponentPropsMap, ComponentType } from './component';
+
 import { h } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
@@ -10,7 +12,7 @@ import {
   AsyncVxeTable,
   createRequiredValidation,
   setupVbenVxeTable,
-  useVbenVxeGrid,
+  useVbenVxeGrid as useGrid,
 } from '@vben/plugins/vxe-table';
 import {
   erpCountInputFormatter,
@@ -199,7 +201,7 @@ setupVbenVxeTable({
     vxeUI.renderer.add('CellOperation', {
       renderTableDefault({ attrs, options, props }, { column, row }) {
         const defaultProps = { size: 'small', type: 'link', ...props };
-        let align = 'end';
+        let align: string;
         switch (column.align) {
           case 'center': {
             align = 'center';
@@ -363,10 +365,13 @@ setupVbenVxeTable({
   useVbenForm,
 });
 
-export { createRequiredValidation, useVbenVxeGrid };
+export { createRequiredValidation };
 
 export const [VxeTable, VxeColumn] = [AsyncVxeTable, AsyncVxeColumn];
 
 export * from '#/components/table-action';
+export const useVbenVxeGrid = <T extends Record<string, any>>(
+  ...rest: Parameters<typeof useGrid<T, ComponentType, ComponentPropsMap>>
+) => useGrid<T, ComponentType, ComponentPropsMap>(...rest);
 
 export type * from '@vben/plugins/vxe-table';

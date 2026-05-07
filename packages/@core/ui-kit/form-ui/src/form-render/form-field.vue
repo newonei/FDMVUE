@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { ZodType } from 'zod';
 
-import type { FormSchema, MaybeComponentProps } from '../types';
+import type {
+  FormActions,
+  FormFieldProps,
+  MaybeComponentProps,
+} from '../types';
 
 import { computed, nextTick, onUnmounted, useTemplateRef, watch } from 'vue';
 
@@ -26,7 +30,7 @@ import useDependencies from './dependencies';
 import FormLabel from './form-label.vue';
 import { isEventObjectLike } from './helper';
 
-interface Props extends FormSchema {}
+interface Props extends FormFieldProps {}
 
 const {
   colon,
@@ -48,6 +52,7 @@ const {
   modelPropName,
   renderComponentContent,
   rules,
+  help,
 } = defineProps<
   Props & {
     commonComponentProps: MaybeComponentProps;
@@ -62,6 +67,14 @@ const fieldComponentRef = useTemplateRef<HTMLInputElement>('fieldComponentRef');
 const formApi = formRenderProps.form;
 const compact = computed(() => formRenderProps.compact);
 const isInValid = computed(() => errors.value?.length > 0);
+
+function getFormApi(): FormActions {
+  if (!formApi) {
+    throw new Error('Form api is required in <FormField />');
+  }
+
+  return formApi;
+}
 
 const FieldComponent = computed(() => {
   const finalComponent = isString(component)
@@ -158,7 +171,7 @@ const fieldRules = computed(() => {
 
 const computedProps = computed(() => {
   const finalComponentProps = isFunction(componentProps)
-    ? componentProps(values.value, formApi!)
+    ? componentProps(values.value, getFormApi())
     : componentProps;
 
   return {
@@ -166,6 +179,18 @@ const computedProps = computed(() => {
     ...finalComponentProps,
     ...dynamicComponentProps.value,
   };
+});
+
+// 自定义帮助信息
+const computedHelp = computed(() => {
+  const helpContent = help;
+  if (!helpContent) {
+    return undefined;
+  }
+  return () =>
+    isFunction(helpContent)
+      ? helpContent(values.value, getFormApi())
+      : helpContent;
 });
 
 watch(
@@ -188,7 +213,7 @@ const customContentRender = computed(() => {
   if (!isFunction(renderComponentContent)) {
     return {};
   }
-  return renderComponentContent(values.value, formApi!);
+  return renderComponentContent(values.value, getFormApi());
 });
 
 const renderContentKey = computed(() => {
@@ -310,13 +335,13 @@ onUnmounted(() => {
           cn(
             'flex leading-6',
             {
-              'mr-2 flex-shrink-0 justify-end': !isVertical,
+              'mr-2 shrink-0 justify-end': !isVertical,
               'mb-1 flex-row': isVertical,
             },
             labelClass,
           )
         "
-        :help="help"
+        :help="computedHelp"
         :colon="colon"
         :label="label"
         :required="shouldRequired && !hideRequiredMark"
@@ -326,7 +351,7 @@ onUnmounted(() => {
           <VbenRenderContent :content="label" />
         </template>
       </FormLabel>
-      <div class="flex-auto overflow-hidden p-[1px]">
+      <div class="flex-auto overflow-hidden p-px">
         <div :class="cn('relative flex w-full items-center', wrapperClass)">
           <FormControl :class="cn(controlClass)">
             <slot
@@ -383,10 +408,10 @@ onUnmounted(() => {
           <div v-if="suffix" class="ml-1">
             <VbenRenderContent :content="suffix" />
           </div>
-          <FormDescription v-if="description" class="ml-1">
-            <VbenRenderContent :content="description" />
-          </FormDescription>
         </div>
+        <FormDescription v-if="description" class="text-xs">
+          <VbenRenderContent :content="description" />
+        </FormDescription>
 
         <Transition name="slide-up" v-if="!compact">
           <FormMessage class="absolute" />

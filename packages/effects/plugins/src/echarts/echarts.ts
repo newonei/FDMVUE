@@ -27,7 +27,6 @@ import {
   RadarChart,
 } from 'echarts/charts';
 import {
-  // 数据集组件
   DatasetComponent,
   DataZoomComponent,
   DataZoomInsideComponent,
@@ -38,12 +37,15 @@ import {
   TitleComponent,
   ToolboxComponent,
   TooltipComponent,
-  // 内置数据转换器组件 (filter, sort)
   TransformComponent,
   VisualMapComponent,
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
-import { LabelLayout, UniversalTransition } from 'echarts/features';
+import {
+  LabelLayout,
+  LegacyGridContainLabel,
+  UniversalTransition,
+} from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
 
 // 通过 ComposeOption 来组合出一个只有必须组件和图表的 Option 类型
@@ -78,6 +80,7 @@ echarts.use([
   FunnelChart,
   GaugeChart,
   LabelLayout,
+  LegacyGridContainLabel,
   UniversalTransition,
   CanvasRenderer,
   LegendComponent,
@@ -86,5 +89,6 @@ echarts.use([
   MapChart,
   GeoComponent,
 ]);
+export type { ECOption } from './types';
 
 export default echarts;

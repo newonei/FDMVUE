@@ -9,7 +9,7 @@
 
 ## 🐶 新手必读
 
-- nodejs > v20.19.0 | v22 | v24 && pnpm > 10.20.0 (强制使用pnpm)
+- nodejs >= v20.19.0（推荐 v22 / v24） && pnpm >= 10.32.1（强制使用 pnpm）
 - 演示地址【Vue3 + element-plus】：<http://dashboard-vue3.yudao.iocoder.cn>
 - 演示地址【Vue3 + vben5(ant-design-vue)】：<http://dashboard-vben.yudao.iocoder.cn>
 - 演示地址【Vue2 + element-ui】：<http://dashboard.yudao.iocoder.cn>
@@ -20,12 +20,12 @@
 
 **芋道**，以开发者为中心，打造中国第一流的快速开发平台，全部开源，个人与企业可 100% 免费使用。
 
-- 采用最新 [vue-vben-admin](https://github.com/vbenjs/vue-vben-admin) v5 实现
+- 采用最新 [vue-vben-admin](https://github.com/vbenjs/vue-vben-admin) v5.7.0 实现
 - 支持 [Ant Design Vue](https://www.antdv.com/) | [Element Plus](https://element-plus.org/zh-CN/) | [Naive UI](https://www.naiveui.com/) | [TDesign](https://tdesign.tencent.com/) 多种免费开源的中后台模版，具备如下特性：
 
 ![首页](.gitee/image/demo/vben.png)
 
-- **最新技术栈**：使用 Vue3、Vite7 等前端前沿技术开发
+- **最新技术栈**：使用 Vue3、Vite8 等前端前沿技术开发
 - **TypeScript**: 应用程序级 JavaScript 的语言
 - **主题**: 提供多套主题色彩，可配置自定义主题
 - **国际化**：内置完善的国际化方案
@@ -41,24 +41,24 @@
 
 | 框架 | 说明 | 版本 |
 | --- | --- | --- |
-| [Vue](https://staging-cn.vuejs.org/) | vue框架 | 3.5.27 |
-| [Vite](https://cn.vitejs.dev//) | 开发与构建工具 | 7.3.1 |
+| [Vue](https://staging-cn.vuejs.org/) | vue框架 | 3.5.30 |
+| [Vite](https://cn.vitejs.dev//) | 开发与构建工具 | 8.0.0 |
 | [Ant Design Vue](https://www.antdv.com/) | Ant Design Vue | 4.2.6 |
-| [Element Plus](https://element-plus.org/zh-CN/) | Element Plus | 2.13.1 |
-| [Naive UI](https://www.naiveui.com/) | Naive UI | 2.43.2 |
-| [TDesign](https://tdesign.tencent.com/) | TDesign | 1.18.0 |
+| [Element Plus](https://element-plus.org/zh-CN/) | Element Plus | 2.13.5 |
+| [Naive UI](https://www.naiveui.com/) | Naive UI | 2.44.1 |
+| [TDesign](https://tdesign.tencent.com/) | TDesign | 1.18.5 |
 | [TypeScript](https://www.typescriptlang.org/docs/) | JavaScript 超集 | 5.9.3 |
 | [pinia](https://pinia.vuejs.org/) | Vue 存储库替代 vuex5 | 3.0.4 |
-| [vueuse](https://vueuse.org/) | 常用工具集 | 14.1.0 |
-| [vue-i18n](https://kazupon.github.io/vue-i18n/zh/introduction.html/) | 国际化 | 11.2.8 |
-| [vue-router](https://router.vuejs.org/) | Vue 路由 | 4.6.4 |
-| [Tailwind CSS](https://tailwindcss.com/) | 原子 CSS | 3.4.19 |
+| [vueuse](https://vueuse.org/) | 常用工具集 | 14.2.1 |
+| [vue-i18n](https://kazupon.github.io/vue-i18n/zh/introduction.html/) | 国际化 | 11.3.0 |
+| [vue-router](https://router.vuejs.org/) | Vue 路由 | 5.0.3 |
+| [Tailwind CSS](https://tailwindcss.com/) | 原子 CSS | 4.2.1 |
 | [Iconify](https://iconify.design/) | 图标组件 | 5.0.0 |
-| [Iconify](https://icon-sets.iconify.design/) | 在线图标库 | 2.2.431 |
+| [Iconify](https://icon-sets.iconify.design/) | 在线图标库 | 2.2.449 |
 | [TinyMCE](https://www.tiny.cloud/) | 富文本编辑器 | 7.3.0 |
 | [Echarts](https://echarts.apache.org/) | 图表库 | 6.0.0 |
-| [axios](https://axios-http.com/) | http客户端 | 1.13.2 |
-| [dayjs](https://day.js.org/) | 日期处理库 | 1.11.19 |
+| [axios](https://axios-http.com/) | http客户端 | 1.13.6 |
+| [dayjs](https://day.js.org/) | 日期处理库 | 1.11.20 |
 | [vee-validate](https://vee-validate.logaretm.com/) | 表单验证 | 4.15.1 |
 | [zod](https://zod.dev/) | 数据验证 | 3.25.76 |
 
@@ -82,9 +82,9 @@
 
 ![功能分层](/.gitee/image/common/ruoyi-vue-pro-biz.png)
 
-- 通用模块（必选）：系统功能、基础设施
-- 通用模块（可选）：工作流程、支付系统、数据报表、会员中心
-- 业务系统（按需）：ERP 系统、CRM 系统、商城系统、微信公众号、AI 大模型
+* 通用模块（必选）：系统功能、基础设施
+* 通用模块（可选）：工作流程、支付系统、数据报表、会员中心
+* 业务系统（按需）：ERP 系统、CRM 系统、MES 系统、商城系统、微信公众号、AI 大模型、IoT 物联网
 
 ### 系统功能
 
@@ -219,6 +219,16 @@
 
 ![功能图](/.gitee/image/common/mall-preview.png)
 
+### 会员中心
+
+|     | 功能   | 描述                               |
+|-----|------|----------------------------------|
+| 🚀  | 会员管理 | 会员是 C 端的消费者，该功能用于会员的搜索与管理        |
+| 🚀  | 会员标签 | 对会员的标签进行创建、查询、修改、删除等操作           |
+| 🚀  | 会员等级 | 对会员的等级、成长值进行管理，可用于订单折扣等会员权益      |
+| 🚀  | 会员分组 | 对会员进行分组，用于用户画像、内容推送等运营手段         |
+| 🚀  | 积分签到 | 回馈给签到、消费等行为的积分，会员可订单抵现、积分兑换等途径消耗 |
+
 ### ERP 系统
 
 演示地址：<https://doc.iocoder.cn/erp-preview/>
@@ -231,6 +241,14 @@
 
 ![功能图](/.gitee/image/common/crm-feature.png)
 
+### MES 系统
+
+演示地址：<https://doc.iocoder.cn/mes-preview/>
+
+![功能图](/.gitee/image/common/mes-feature.png)
+
+![功能图](/.gitee/image/common/mes-preview.png)
+
 ### AI 大模型
 
 演示地址：<https://doc.iocoder.cn/ai-preview/>
@@ -238,3 +256,11 @@
 ![功能图](/.gitee/image/common/ai-feature.png)
 
 ![功能图](/.gitee/image/common/ai-preview.gif)
+
+### IoT 物联网
+
+演示地址：<https://doc.iocoder.cn/iot/build>
+
+![功能图](/.gitee/image/common/iot-feature.png)
+
+![预览图](/.gitee/image/common/iot-preview.png)
