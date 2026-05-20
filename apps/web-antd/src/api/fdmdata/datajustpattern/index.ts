@@ -93,7 +93,17 @@ export namespace FdmdataDataJustPatternApi {
   }
 }
 
-export function getDataJustPatternPage(params: PageParam) {
+export interface DataJustPatternPageParam extends PageParam {
+  styleCode?: string;
+  itemCode?: string;
+  productName?: string;
+  categoryName?: string;
+  status?: number;
+  /** 商品编码/名称/款式 OR 模糊（弹窗远程搜索） */
+  keyword?: string;
+}
+
+export function getDataJustPatternPage(params: DataJustPatternPageParam) {
   return requestClient.get<PageResult<FdmdataDataJustPatternApi.Pattern>>(
     '/fdmdata/data-just-pattern/page',
     { params },
@@ -139,11 +149,15 @@ export function importPatternEncode(data: PatternGenReq) {
   );
 }
 
-export function createDataJustPattern(data: FdmdataDataJustPatternApi.PatternSaveReq) {
+export function createDataJustPattern(
+  data: FdmdataDataJustPatternApi.PatternSaveReq,
+) {
   return requestClient.post<number>('/fdmdata/data-just-pattern/create', data);
 }
 
-export function updateDataJustPattern(data: FdmdataDataJustPatternApi.PatternSaveReq) {
+export function updateDataJustPattern(
+  data: FdmdataDataJustPatternApi.PatternSaveReq,
+) {
   return requestClient.put('/fdmdata/data-just-pattern/update', data);
 }
 
@@ -170,26 +184,59 @@ export function previewGenerateDataJustPatternFromCost(limit = 200) {
   );
 }
 
-export function getDataJustPatternCostPage(params: PageParam) {
+export interface DataJustPatternCostPageParam extends PageParam {
+  itemCode?: string;
+  patternName?: string;
+  /** 对照编码或图案名称 OR 模糊（弹窗远程搜索） */
+  keyword?: string;
+}
+
+export function getDataJustPatternCostPage(
+  params: DataJustPatternCostPageParam,
+) {
   return requestClient.get<PageResult<FdmdataDataJustPatternApi.PatternCost>>(
     '/fdmdata/data-just-pattern-cost/page',
     { params },
   );
 }
 
+export function getDataJustPatternCost(id: number) {
+  return requestClient.get<FdmdataDataJustPatternApi.PatternCost | null>(
+    '/fdmdata/data-just-pattern-cost/get',
+    { params: { id } },
+  );
+}
+
 export function createDataJustPatternCost(
   data: FdmdataDataJustPatternApi.PatternCostCreateReq,
 ) {
-  return requestClient.post<number>('/fdmdata/data-just-pattern-cost/create', data);
+  return requestClient.post<number>(
+    '/fdmdata/data-just-pattern-cost/create',
+    data,
+  );
 }
 
 export function updateDataJustPatternCost(
   data: FdmdataDataJustPatternApi.PatternCostCreateReq & { id: number },
 ) {
-  return requestClient.put<boolean>('/fdmdata/data-just-pattern-cost/update', data);
+  return requestClient.put<boolean>(
+    '/fdmdata/data-just-pattern-cost/update',
+    data,
+  );
 }
 
 export function deleteDataJustPatternCost(id: number) {
-  return requestClient.delete(`/fdmdata/data-just-pattern-cost/delete?id=${id}`);
+  return requestClient.delete(
+    `/fdmdata/data-just-pattern-cost/delete?id=${id}`,
+  );
 }
 
+/** 根据图案名称建议对照编码（拼音首字母 + 数字等，与后端 TinyPinyin 规则一致） */
+export function suggestDataJustPatternCostItemCode(patternName: string) {
+  return requestClient.get<string>(
+    '/fdmdata/data-just-pattern-cost/suggest-item-code',
+    {
+      params: { patternName },
+    },
+  );
+}

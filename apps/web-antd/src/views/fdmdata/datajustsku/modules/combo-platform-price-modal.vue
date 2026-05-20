@@ -29,7 +29,11 @@ import {
   upsertComboPlatformPrice,
 } from '#/api/fdmdata/datajustsku';
 
-function compositeKey(materialKey: string, specText: string, productType: string) {
+function compositeKey(
+  materialKey: string,
+  specText: string,
+  productType: string,
+) {
   return `${materialKey}\t${specText}\t${productType}`;
 }
 
@@ -45,12 +49,14 @@ interface MatrixRow {
   douyinPrice: number | null;
   sphPrice: number | null;
   xhsPrice: number | null;
+  jdPrice: number | null;
   remark: string;
   baselineTmall: number | null;
   baselinePdd: number | null;
   baselineDouyin: number | null;
   baselineSph: number | null;
   baselineXhs: number | null;
+  baselineJd: number | null;
   baselineRemark: string;
 }
 
@@ -69,6 +75,7 @@ function isRowDirty(row: MatrixRow) {
     numDirty(row.douyinPrice, row.baselineDouyin) ||
     numDirty(row.sphPrice, row.baselineSph) ||
     numDirty(row.xhsPrice, row.baselineXhs) ||
+    numDirty(row.jdPrice, row.baselineJd) ||
     (row.remark ?? '') !== (row.baselineRemark ?? '')
   );
 }
@@ -88,7 +95,9 @@ const pageNo = ref(1);
 const pageSize = ref(50);
 
 // 复用现有“材质”字典（与成品成本对照维护一致）
-const yogaMatDictOptions = computed(() => getDictOptions(DICT_TYPE.YOGA_MAT, 'string'));
+const yogaMatDictOptions = computed(() =>
+  getDictOptions(DICT_TYPE.YOGA_MAT, 'string'),
+);
 const yogaMatLabelMap = computed(() => {
   const m = new Map<string, string>();
   for (const opt of yogaMatDictOptions.value ?? []) {
@@ -110,7 +119,9 @@ const filteredRows = computed(() => {
   let rows = matrixRows.value ?? [];
   const mk = (filterMaterialKey.value ?? '').trim();
   if (mk) {
-    rows = rows.filter((r) => (r.materialKey ?? '').toUpperCase() === mk.toUpperCase());
+    rows = rows.filter(
+      (r) => (r.materialKey ?? '').toUpperCase() === mk.toUpperCase(),
+    );
   }
   const sk = (filterSpecKeyword.value ?? '').trim().toLowerCase();
   if (sk) {
@@ -132,16 +143,23 @@ const pageRows = computed(() => {
   return filteredRows.value.slice(start, start + pageSize.value);
 });
 
-watch([filterMaterialKey, filterSpecKeyword, filterTypeKeyword, onlyDirty], () => {
-  pageNo.value = 1;
-});
+watch(
+  [filterMaterialKey, filterSpecKeyword, filterTypeKeyword, onlyDirty],
+  () => {
+    pageNo.value = 1;
+  },
+);
 
 async function loadMatrix() {
   loading.value = true;
   try {
-    const keys: ComboPlatformPriceMatrixKey[] = await getComboPlatformPriceMatrixKeys();
+    const keys: ComboPlatformPriceMatrixKey[] =
+      await getComboPlatformPriceMatrixKeys();
     // 已维护的价格行（一次拉全量，前端做合并；数据量过大再考虑改服务端 join）
-    const page = await getComboPlatformPricePage({ pageNo: 1, pageSize: -1 } as any);
+    const page = await getComboPlatformPricePage({
+      pageNo: 1,
+      pageSize: -1,
+    } as any);
     const exists = page?.list ?? [];
     const index = new Map<string, ComboPlatformPriceRow>();
     for (const r of exists) {
@@ -156,12 +174,14 @@ async function loadMatrix() {
       const productType = String(k.productType ?? '').trim();
       if (!materialKey || !specText || !productType) continue;
       const hit = index.get(compositeKey(materialKey, specText, productType));
-      const materialLabel = yogaMatLabelMap.value.get(materialKey) ?? materialKey;
+      const materialLabel =
+        yogaMatLabelMap.value.get(materialKey) ?? materialKey;
       const tmall = (hit?.tmallPrice ?? null) as any;
       const pdd = (hit?.pddPrice ?? null) as any;
       const dy = (hit?.douyinPrice ?? null) as any;
       const sph = (hit?.sphPrice ?? null) as any;
       const xhs = (hit?.xhsPrice ?? null) as any;
+      const jd = (hit?.jdPrice ?? null) as any;
       const remark = String(hit?.remark ?? '');
       rows.push({
         rowKey: compositeKey(materialKey, specText, productType),
@@ -175,12 +195,14 @@ async function loadMatrix() {
         douyinPrice: dy === undefined ? null : dy,
         sphPrice: sph === undefined ? null : sph,
         xhsPrice: xhs === undefined ? null : xhs,
+        jdPrice: jd === undefined ? null : jd,
         remark,
         baselineTmall: tmall === undefined ? null : tmall,
         baselinePdd: pdd === undefined ? null : pdd,
         baselineDouyin: dy === undefined ? null : dy,
         baselineSph: sph === undefined ? null : sph,
         baselineXhs: xhs === undefined ? null : xhs,
+        baselineJd: jd === undefined ? null : jd,
         baselineRemark: remark,
       });
     }
@@ -208,6 +230,7 @@ async function saveAllDirty() {
         douyinPrice: r.douyinPrice,
         sphPrice: r.sphPrice,
         xhsPrice: r.xhsPrice,
+        jdPrice: r.jdPrice,
         remark: r.remark,
       });
       r.baselineTmall = r.tmallPrice ?? null;
@@ -215,6 +238,7 @@ async function saveAllDirty() {
       r.baselineDouyin = r.douyinPrice ?? null;
       r.baselineSph = r.sphPrice ?? null;
       r.baselineXhs = r.xhsPrice ?? null;
+      r.baselineJd = r.jdPrice ?? null;
       r.baselineRemark = r.remark ?? '';
     }
     message.success(`已保存 ${dirty.length} 条`);
@@ -232,9 +256,27 @@ function resetFilters() {
 }
 
 const columns = [
-  { title: '材质', dataIndex: 'materialLabel', key: 'materialLabel', width: 120, ellipsis: true },
-  { title: '规格', dataIndex: 'specText', key: 'specText', width: 140, ellipsis: true },
-  { title: '类型', dataIndex: 'productType', key: 'productType', width: 160, ellipsis: true },
+  {
+    title: '材质',
+    dataIndex: 'materialLabel',
+    key: 'materialLabel',
+    width: 120,
+    ellipsis: true,
+  },
+  {
+    title: '规格',
+    dataIndex: 'specText',
+    key: 'specText',
+    width: 140,
+    ellipsis: true,
+  },
+  {
+    title: '类型',
+    dataIndex: 'productType',
+    key: 'productType',
+    width: 160,
+    ellipsis: true,
+  },
   {
     title: '天猫价',
     dataIndex: 'tmallPrice',
@@ -254,7 +296,7 @@ const columns = [
     width: 120,
   },
   {
-    title: '商品号价',
+    title: '视频号价',
     dataIndex: 'sphPrice',
     key: 'sphPrice',
     width: 120,
@@ -265,7 +307,19 @@ const columns = [
     key: 'xhsPrice',
     width: 120,
   },
-  { title: '备注', dataIndex: 'remark', key: 'remark', width: 220, ellipsis: true },
+  {
+    title: '京东价',
+    dataIndex: 'jdPrice',
+    key: 'jdPrice',
+    width: 120,
+  },
+  {
+    title: '备注',
+    dataIndex: 'remark',
+    key: 'remark',
+    width: 220,
+    ellipsis: true,
+  },
   {
     title: '状态',
     key: 'dirty',
@@ -320,7 +374,9 @@ const [Modal, modalApi] = useVbenModal({
 
         <div class="ml-auto flex items-center gap-2">
           <Button :loading="loading" @click="loadMatrix">刷新</Button>
-          <Button :loading="saving" type="primary" @click="saveAllDirty">保存全部修改</Button>
+          <Button :loading="saving" type="primary" @click="saveAllDirty"
+            >保存全部修改</Button
+          >
         </div>
       </div>
 
@@ -332,7 +388,7 @@ const [Modal, modalApi] = useVbenModal({
           row-key="rowKey"
           size="small"
           bordered
-          :scroll="{ x: 1580, y: 640 }"
+          :scroll="{ x: 1700, y: 640 }"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'tmallPrice'">
@@ -375,16 +431,26 @@ const [Modal, modalApi] = useVbenModal({
                 style="width: 110px"
               />
             </template>
+            <template v-else-if="column.key === 'jdPrice'">
+              <InputNumber
+                v-model:value="record.jdPrice"
+                :min="0"
+                :precision="2"
+                style="width: 110px"
+              />
+            </template>
             <template v-else-if="column.key === 'remark'">
-              <Input v-model:value="record.remark" allow-clear placeholder="备注" />
+              <Input
+                v-model:value="record.remark"
+                allow-clear
+                placeholder="备注"
+              />
             </template>
           </template>
         </Table>
 
         <div class="mt-3 flex items-center justify-between">
-          <div class="text-sm text-muted-foreground">
-            共 {{ total }} 条
-          </div>
+          <div class="text-sm text-muted-foreground">共 {{ total }} 条</div>
           <Pagination
             v-model:current="pageNo"
             v-model:page-size="pageSize"
@@ -397,4 +463,3 @@ const [Modal, modalApi] = useVbenModal({
     </div>
   </Modal>
 </template>
-

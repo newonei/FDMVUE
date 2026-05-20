@@ -5,9 +5,23 @@ import { computed, reactive, ref, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
-import { Button, Form, FormItem, Image, Input, Select, message, Spin, Table } from 'ant-design-vue';
+import {
+  Button,
+  Form,
+  FormItem,
+  Image,
+  Input,
+  Select,
+  message,
+  Spin,
+  Table,
+} from 'ant-design-vue';
 
-import type { PatternGenReq, PatternPreviewResp, PatternOptions } from '#/api/fdmdata/datajustsku';
+import type {
+  PatternGenReq,
+  PatternPreviewResp,
+  PatternOptions,
+} from '#/api/fdmdata/datajustsku';
 
 import {
   getPatternEncodeOptions,
@@ -15,12 +29,7 @@ import {
   previewPatternEncode,
 } from '#/api/fdmdata/datajustpattern';
 
-import {
-  getDataJustPatternCostPage,
-  type FdmdataDataJustPatternApi,
-} from '#/api/fdmdata/datajustpattern';
-
-import ImageUpload from '#/components/upload/image-upload.vue';
+import { usePatternCostRemoteSelect } from '../composables/use-pattern-cost-remote-select';
 
 const emit = defineEmits(['success']);
 
@@ -43,18 +52,28 @@ const options = ref<PatternOptions | null>(null);
 const selectedLengths = ref<string[]>([]);
 const selectedWidths = ref<string[]>([]);
 
-const patternCostLoading = ref(false);
-const patternCostList = ref<FdmdataDataJustPatternApi.PatternCost[]>([]);
-// 选择的图案 ID 写入 formState.patternCostId，便于表单校验
-const patternKeyword = ref('');
+const {
+  patternCostLoading,
+  patternCostList,
+  patternCostSelectOptions,
+  onPatternSearch,
+  onPatternDropdownOpen,
+  resetPatternCostSelect,
+  ensureSelectedOption,
+} = usePatternCostRemoteSelect(() => formState.patternCostId);
 
 const columns: ColumnsType = [
   { title: '类型', dataIndex: 'type', key: 'type', width: 120 },
   { title: '尺寸', dataIndex: 'sizeText', key: 'sizeText', width: 140 },
   { title: '款式编码', dataIndex: 'styleCode', key: 'styleCode', width: 200 },
-  { title: '商品名称', dataIndex: 'productName', key: 'productName', width: 260 },
+  {
+    title: '商品名称',
+    dataIndex: 'productName',
+    key: 'productName',
+    width: 260,
+  },
   { title: '分类', dataIndex: 'categoryName', key: 'categoryName', width: 100 },
-  { title: '商品编码', dataIndex: 'itemCode', key: 'itemCode', width: 140 },
+  { title: '商品编码', dataIndex: 'itemCode', key: 'itemCode', width: 260 },
   { title: '图片', key: 'pic', width: 90 },
 ];
 
@@ -100,8 +119,9 @@ watch([selectedLengths, selectedWidths], () => {
 
 watch(
   () => formState.patternCostId,
-  () => {
-  syncPatternFromSelectedId();
+  async () => {
+    await ensureSelectedOption(formState.patternCostId);
+    syncPatternFromSelectedId();
   },
 );
 
@@ -111,22 +131,6 @@ async function loadOptions() {
     options.value = await getPatternEncodeOptions();
   } finally {
     optionsLoading.value = false;
-  }
-}
-
-async function loadPatternCostList(keyword?: string) {
-  patternCostLoading.value = true;
-  try {
-    const kw = (keyword ?? '').trim();
-    const page = await getDataJustPatternCostPage({
-      pageNo: 1,
-      pageSize: 20,
-      itemCode: kw || undefined,
-      patternName: kw || undefined,
-    });
-    patternCostList.value = page?.list ?? [];
-  } finally {
-    patternCostLoading.value = false;
   }
 }
 
@@ -164,7 +168,9 @@ async function handleGenerate() {
       sizeTextBlock: (formState.sizeTextBlock ?? '').trim(),
     };
     const res = await importPatternEncode(payload);
-    message.success(`生成完成：新增 ${res?.created ?? 0} 条，跳过 ${res?.skipped ?? 0} 条`);
+    message.success(
+      `生成完成：新增 ${res?.created ?? 0} 条，跳过 ${res?.skipped ?? 0} 条`,
+    );
     emit('success');
     await loadPreview();
   } finally {
@@ -184,14 +190,12 @@ const [VbenModal, modalApi] = useVbenModal({
     selectedLengths.value = [];
     selectedWidths.value = [];
     formState.patternCostId = undefined;
-    patternCostList.value = [];
-    patternKeyword.value = '';
+    resetPatternCostSelect();
     formState.sizeTextBlock = '';
     formState.patternName = '';
     formState.itemCodeAbbr = '';
     formState.picUrl = undefined;
     await loadOptions();
-    await loadPatternCostList();
   },
 });
 </script>
@@ -213,7 +217,12 @@ const [VbenModal, modalApi] = useVbenModal({
           <Select
             v-model:value="formState.type"
             :loading="optionsLoading"
-            :options="(options?.types ?? []).map((o) => ({ value: o.key, label: o.label }))"
+            :options="
+              (options?.types ?? []).map((o) => ({
+                value: o.key,
+                label: o.label,
+              }))
+            "
             placeholder="请选择类型"
             show-search
             option-filter-prop="label"
@@ -228,25 +237,25 @@ const [VbenModal, modalApi] = useVbenModal({
           <Select
             v-model:value="formState.patternCostId"
             :loading="patternCostLoading"
-            :options="
-              patternCostList.map((p) => ({
-                value: p.id,
-                label: `${p.patternName}（${p.itemCode}）`,
-              }))
-            "
-            placeholder="请选择已维护的图案（图案名称/对照编码）"
+            :options="patternCostSelectOptions"
+            placeholder="输入图案名称或对照编码搜索（至少 1 个字）"
             show-search
             option-filter-prop="label"
             :filter-option="false"
-            @search="(val: string) => { patternKeyword.value = val; loadPatternCostList(val); }"
-            @dropdownVisibleChange="(open: boolean) => { if (open) loadPatternCostList(patternKeyword.value); }"
+            :not-found-content="
+              patternCostLoading ? undefined : '请输入关键词搜索图案'
+            "
+            @search="onPatternSearch"
+            @dropdown-visible-change="onPatternDropdownOpen"
           />
         </FormItem>
 
-        <FormItem
-          label="对照编码"
-        >
-          <Input :value="formState.itemCodeAbbr" disabled placeholder="选择图案后自动带出" />
+        <FormItem label="对照编码">
+          <Input
+            :value="formState.itemCodeAbbr"
+            disabled
+            placeholder="选择图案后自动带出"
+          />
         </FormItem>
 
         <FormItem label="图片" name="picUrl">
@@ -275,7 +284,12 @@ const [VbenModal, modalApi] = useVbenModal({
               v-model:value="selectedLengths"
               mode="multiple"
               :loading="optionsLoading"
-              :options="(options?.sizeLengths ?? []).map((o) => ({ value: o.key, label: o.label }))"
+              :options="
+                (options?.sizeLengths ?? []).map((o) => ({
+                  value: o.key,
+                  label: o.label,
+                }))
+              "
               placeholder="请选择长度（可多选）"
               show-search
               option-filter-prop="label"
@@ -287,7 +301,12 @@ const [VbenModal, modalApi] = useVbenModal({
               v-model:value="selectedWidths"
               mode="multiple"
               :loading="optionsLoading"
-              :options="(options?.sizeWidths ?? []).map((o) => ({ value: o.key, label: o.label }))"
+              :options="
+                (options?.sizeWidths ?? []).map((o) => ({
+                  value: o.key,
+                  label: o.label,
+                }))
+              "
               placeholder="请选择宽度（可多选）"
               show-search
               option-filter-prop="label"
@@ -340,11 +359,15 @@ const [VbenModal, modalApi] = useVbenModal({
 
     <div class="mt-4 flex justify-end gap-2 border-t border-border pt-3">
       <Button :loading="loadingPreview" @click="loadPreview">重新预览</Button>
-      <Button type="primary" :loading="generating" :disabled="willCreate === 0" @click="handleGenerate">
+      <Button
+        type="primary"
+        :loading="generating"
+        :disabled="willCreate === 0"
+        @click="handleGenerate"
+      >
         确认生成
       </Button>
       <Button @click="modalApi.close()">关闭</Button>
     </div>
   </VbenModal>
 </template>
-

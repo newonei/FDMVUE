@@ -45,56 +45,52 @@ function accessoryEnumGridLabel(
   return hit?.label ?? raw;
 }
 
-/** 新增/修改的表单 */
+/** 新增/修改的表单（blank / pattern / finished 三个 Tab 共用，2 列布局） */
 export function useFormSchema(): VbenFormSchema[] {
+  const fullWidth = 'col-span-2';
   return [
+    // ── 隐藏字段 ──────────────────────────────────────────────
     {
       fieldName: 'id',
       component: 'Input',
-      dependencies: {
-        triggerFields: [''],
-        show: () => false,
-      },
+      dependencies: { triggerFields: [''], show: () => false },
     },
     {
       fieldName: '__listTab',
       component: 'Input',
-      dependencies: {
-        triggerFields: [''],
-        show: () => false,
-      },
+      dependencies: { triggerFields: [''], show: () => false },
     },
+
+    // ── 基本信息 ──────────────────────────────────────────────
     {
-      fieldName: 'picUrl',
-      label: '图片（URL 或存储路径）',
-      component: 'Input',
+      fieldName: '_divider_basic',
+      label: '',
+      component: 'Divider',
+      formItemClass: fullWidth,
       componentProps: {
-        placeholder: '请输入图片（URL 或存储路径）',
-      },
-    },
-    {
-      fieldName: 'productShortName',
-      label: '商品简称',
-      component: 'Input',
-      componentProps: {
-        placeholder: '请输入商品简称',
-      },
-    },
-    {
-      fieldName: 'styleCode',
-      label: '款式编码（纯文本，不关联他表）',
-      component: 'Input',
-      componentProps: {
-        placeholder: '请输入款式编码（纯文本，不关联他表）',
+        orientation: 'left',
+        plain: true,
+        children: '基本信息',
       },
     },
     {
       fieldName: 'itemCode',
-      label: '商品编码（租户内业务唯一标识）',
+      label: '商品编码',
       rules: 'required',
       component: 'Input',
+      help: '租户内业务唯一标识',
       componentProps: {
-        placeholder: '请输入商品编码（租户内业务唯一标识）',
+        allowClear: true,
+        placeholder: '请输入商品编码',
+      },
+    },
+    {
+      fieldName: 'styleCode',
+      label: '款式编码',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        placeholder: '请输入款式编码',
       },
     },
     {
@@ -102,7 +98,17 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '商品名称',
       component: 'Input',
       componentProps: {
+        allowClear: true,
         placeholder: '请输入商品名称',
+      },
+    },
+    {
+      fieldName: 'productShortName',
+      label: '商品简称',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        placeholder: '请输入商品简称',
       },
     },
     {
@@ -110,87 +116,179 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '颜色及规格',
       component: 'Input',
       componentProps: {
+        allowClear: true,
         placeholder: '请输入颜色及规格',
       },
     },
     {
       fieldName: 'categoryName',
-      label: '分类（文本）',
+      label: '分类',
       component: 'Input',
       componentProps: {
-        placeholder: '请输入分类（文本）',
+        allowClear: true,
+        placeholder: '请输入分类',
       },
     },
     {
       fieldName: 'costPrice',
       label: '成本价',
-      component: 'Input',
+      component: 'InputNumber',
       componentProps: {
+        min: 0,
+        precision: 2,
+        step: 0.01,
         placeholder: '请输入成本价',
       },
     },
     {
+      fieldName: 'picUrl',
+      label: '图片地址',
+      component: 'Input',
+      formItemClass: fullWidth,
+      componentProps: {
+        allowClear: true,
+        placeholder: '请输入图片 URL 或存储路径',
+      },
+    },
+
+    // ── 属性字段 ──────────────────────────────────────────────
+    {
+      fieldName: '_divider_attr',
+      label: '',
+      component: 'Divider',
+      formItemClass: fullWidth,
+      componentProps: {
+        orientation: 'left',
+        plain: true,
+        children: '属性字段',
+      },
+    },
+    {
       fieldName: 'attr1',
-      label: '其它属性1（尺寸）',
+      label: '属性1（尺寸）',
       component: 'Input',
       componentProps: {
+        allowClear: true,
         placeholder: '如 185*70*0.6cm',
       },
     },
     {
       fieldName: 'attr2',
-      label: '其它属性2（颜色）',
+      label: '属性2（颜色）',
       component: 'Input',
       componentProps: {
+        allowClear: true,
         placeholder: '如 薄荷绿',
       },
     },
     {
       fieldName: 'attr3',
-      label: '其它属性3（空白版填「空白版」）',
+      label: '属性3',
       component: 'Input',
+      // 空白版 tab 提示填「空白版」；图案/成品 tab 可留空
+      dependencies: {
+        triggerFields: ['__listTab'],
+        componentProps: (values) => ({
+          allowClear: true,
+          placeholder:
+            values?.__listTab === 'blank'
+              ? '空白版 SKU 填：空白版'
+              : '请输入属性3（可留空）',
+        }),
+      },
+    },
+
+    // ── 规格尺寸 ──────────────────────────────────────────────
+    {
+      fieldName: '_divider_size',
+      label: '',
+      component: 'Divider',
+      formItemClass: fullWidth,
       componentProps: {
-        placeholder: '空白版 SKU 填：空白版',
+        orientation: 'left',
+        plain: true,
+        children: '规格尺寸（卷包）',
       },
     },
     {
       fieldName: 'weightKg',
-      label: '重量（千克）',
-      component: 'Input',
+      label: '重量 (kg)',
+      component: 'InputNumber',
       componentProps: {
-        placeholder: '请输入重量（千克）',
+        min: 0,
+        precision: 3,
+        step: 0.001,
+        placeholder: '请输入重量',
       },
     },
     {
       fieldName: 'lengthCm',
-      label: '长（厘米）',
-      component: 'Input',
+      label: '长 (cm)',
+      component: 'InputNumber',
       componentProps: {
-        placeholder: '请输入长（厘米）',
+        min: 0,
+        precision: 2,
+        step: 0.01,
+        placeholder: '请输入长度',
       },
     },
     {
       fieldName: 'widthCm',
-      label: '宽（厘米）',
-      component: 'Input',
+      label: '宽 (cm)',
+      component: 'InputNumber',
       componentProps: {
-        placeholder: '请输入宽（厘米）',
+        min: 0,
+        precision: 2,
+        step: 0.01,
+        placeholder: '请输入宽度',
       },
     },
     {
       fieldName: 'heightCm',
-      label: '高（厘米）',
-      component: 'Input',
+      label: '高 (cm)',
+      component: 'InputNumber',
       componentProps: {
-        placeholder: '请输入高（厘米）',
+        min: 0,
+        precision: 2,
+        step: 0.01,
+        placeholder: '请输入高度',
       },
     },
+
+    // ── 备注 ──────────────────────────────────────────────────
     {
       fieldName: 'remark',
       label: '备注',
-      component: 'Input',
+      component: 'Textarea',
+      formItemClass: fullWidth,
       componentProps: {
+        allowClear: true,
+        rows: 2,
         placeholder: '请输入备注',
+      },
+    },
+
+    // ── 同步信息 ──────────────────────────────────────────────
+    {
+      fieldName: '_divider_sync',
+      label: '',
+      component: 'Divider',
+      formItemClass: fullWidth,
+      componentProps: {
+        orientation: 'left',
+        plain: true,
+        children: '聚水潭同步',
+      },
+    },
+    {
+      fieldName: 'status',
+      label: '同步状态',
+      rules: 'required',
+      component: 'RadioGroup',
+      componentProps: {
+        options: SYNC_STATUS_OPTIONS,
+        buttonStyle: 'solid',
+        optionType: 'button',
       },
     },
     {
@@ -204,127 +302,6 @@ export function useFormSchema(): VbenFormSchema[] {
       componentProps: {
         readonly: true,
         placeholder: '同步成功后由系统写入',
-      },
-    },
-    {
-      fieldName: 'status',
-      label: '聚水潭同步状态',
-      rules: 'required',
-      component: 'RadioGroup',
-      componentProps: {
-        options: SYNC_STATUS_OPTIONS,
-        buttonStyle: 'solid',
-        optionType: 'button',
-      },
-    },
-    {
-      fieldName: 'accessoryKind',
-      label: '配件品类',
-      component: 'Select',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        allowClear: true,
-        options: ACCESSORY_KIND_OPTIONS,
-      },
-    },
-    {
-      fieldName: 'matchType',
-      label: '匹配类型',
-      component: 'Select',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        allowClear: true,
-        options: ACCESSORY_MATCH_TYPE_OPTIONS,
-      },
-    },
-    {
-      fieldName: 'matchSpecLwKey',
-      label: '长宽匹配',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '如 200*100',
-      },
-    },
-    {
-      fieldName: 'matchSpecFullKey',
-      label: '完整规格',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '如 200*100*1',
-      },
-    },
-    {
-      fieldName: 'matchWidthCm',
-      label: '精确宽度',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '如 70',
-      },
-    },
-    {
-      fieldName: 'matchWidthMaxCm',
-      label: '宽度上限',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '如 80，表示 80 以内',
-      },
-    },
-    {
-      fieldName: 'matchBundleCount',
-      label: '条装数量',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '仅作标记，按勾选加入',
-      },
-    },
-    {
-      fieldName: 'matchRuleJson',
-      label: '规则 JSON',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '如 [\"183*70*0.6\",\"183*70*0.8\"]',
-      },
-    },
-    {
-      fieldName: 'matchRemark',
-      label: '规则备注',
-      component: 'Input',
-      dependencies: {
-        triggerFields: ['__listTab'],
-        show: (values) => values?.__listTab === 'accessory',
-      },
-      componentProps: {
-        placeholder: '请输入匹配规则备注',
       },
     },
   ];
@@ -657,7 +634,7 @@ export function useAccessoryFormSchema(): VbenFormSchema[] {
   ];
 }
 
-/** 列表的搜索表单（仅保留常用条件，其余字段在编辑弹窗中维护） */
+/** 列表的搜索表单（高频字段靠前；分类、创建时间靠后可配合表单「收起」） */
 export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
@@ -688,15 +665,6 @@ export function useGridFormSchema(): VbenFormSchema[] {
       },
     },
     {
-      fieldName: 'categoryName',
-      label: '分类',
-      component: 'Input',
-      componentProps: {
-        allowClear: true,
-        placeholder: '模糊查询分类',
-      },
-    },
-    {
       fieldName: 'status',
       label: '聚水潭同步',
       component: 'Select',
@@ -708,6 +676,15 @@ export function useGridFormSchema(): VbenFormSchema[] {
           { label: '同步失败', value: 3 },
         ],
         placeholder: '请选择',
+      },
+    },
+    {
+      fieldName: 'categoryName',
+      label: '分类',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        placeholder: '模糊查询分类',
       },
     },
     {
@@ -723,14 +700,20 @@ export function useGridFormSchema(): VbenFormSchema[] {
 }
 
 export type DataJustSkuGridColumnOptions = {
-  /** 图案列表 Tab：在商品编码前展示 picUrl 缩略图 */
-  patternPicPreview?: boolean;
   /** 空白版列表 Tab：展示 picUrl 缩略图 */
   blankPicPreview?: boolean;
   /** 成品编码列表 Tab：展示 picUrl 缩略图 */
   finishedPicPreview?: boolean;
   /** 当前列表 Tab */
-  listTab?: 'blank' | 'pattern' | 'finished' | 'combo' | 'accessory' | 'custom_combo';
+  listTab?:
+    | 'accessory'
+    | 'blank'
+    | 'combo'
+    | 'custom_combo'
+    | 'finished'
+    | 'pattern';
+  /** 图案列表 Tab：在商品编码前展示 picUrl 缩略图 */
+  patternPicPreview?: boolean;
 };
 
 /** 列表字段（与搜索一致：主信息 + 成本 + 状态 + 时间；其余在编辑中查看） */
@@ -740,12 +723,12 @@ export function buildDataJustSkuGridColumns(
   const blankPicColumn = {
     field: 'picUrl',
     title: '图片',
-    width: 76,
+    width: 64,
     cellRender: {
       name: 'CellImage',
       props: {
-        width: 48,
-        height: 48,
+        width: 40,
+        height: 40,
         class: 'rounded object-cover',
       },
     },
@@ -754,12 +737,12 @@ export function buildDataJustSkuGridColumns(
   const patternPicColumn = {
     field: 'picUrl',
     title: '图案',
-    width: 76,
+    width: 64,
     cellRender: {
       name: 'CellImage',
       props: {
-        width: 48,
-        height: 48,
+        width: 40,
+        height: 40,
         class: 'rounded object-cover',
       },
     },
@@ -770,8 +753,12 @@ export function buildDataJustSkuGridColumns(
 
   return [
     { type: 'checkbox', width: 40 },
-    ...(options?.blankPicPreview || options?.listTab === 'accessory' ? [blankPicColumn] : []),
-    ...(options?.finishedPicPreview || options?.listTab === 'combo' ? [blankPicColumn] : []),
+    ...(options?.blankPicPreview || options?.listTab === 'accessory'
+      ? [blankPicColumn]
+      : []),
+    ...(options?.finishedPicPreview || options?.listTab === 'combo'
+      ? [blankPicColumn]
+      : []),
     ...(options?.patternPicPreview ? [patternPicColumn] : []),
     {
       field: 'itemCode',
@@ -808,7 +795,8 @@ export function buildDataJustSkuGridColumns(
     {
       field: 'productName',
       title: '商品名称',
-      minWidth: 160,
+      minWidth: 180,
+      showOverflow: 'tooltip',
     },
     {
       field: 'styleCode',
@@ -853,12 +841,17 @@ export function buildDataJustSkuGridColumns(
           },
           {
             field: 'sphPrice',
-            title: '商品号价',
+            title: '视频号价',
             minWidth: 100,
           },
           {
             field: 'xhsPrice',
             title: '小红书价',
+            minWidth: 100,
+          },
+          {
+            field: 'jdPrice',
+            title: '京东价',
             minWidth: 100,
           },
         ]
@@ -938,7 +931,7 @@ export function buildDataJustSkuGridColumns(
     },
     {
       title: '操作',
-      width: 280,
+      width: 200,
       fixed: 'right',
       slots: { default: 'actions' },
     },

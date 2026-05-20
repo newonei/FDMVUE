@@ -169,10 +169,16 @@ function handleCancel() {
  * @returns 是否允许上传
  */
 async function beforeUpload(file: File) {
-  // 检查文件数量限制
+  // 检查文件数量限制（单图模式允许直接替换，避免须先删后传）
   if (fileList.value!.length >= props.maxNumber) {
-    message.error($t('ui.upload.maxNumber', [props.maxNumber]));
-    return Upload.LIST_IGNORE;
+    if (props.maxNumber === 1) {
+      fileList.value = [];
+      uploadList.value = [];
+      uploadNumber.value = 0;
+    } else {
+      message.error($t('ui.upload.maxNumber', [props.maxNumber]));
+      return Upload.LIST_IGNORE;
+    }
   }
 
   const { maxSize, accept } = props;

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { ColumnsType } from 'ant-design-vue/es/table';
 
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import { confirm, useVbenModal } from '@vben/common-ui';
 import { DICT_TYPE } from '@vben/constants';
@@ -20,25 +20,13 @@ import {
   Table,
 } from 'ant-design-vue';
 
-import {
-  getYogaBlankOptions,
-  importFinished,
-  previewFinished,
-  type PatternPreviewResp,
-  type YogaBlankOptions,
-} from '#/api/fdmdata/datajustsku';
-import {
-  getDataJustPatternCostPage,
-  type FdmdataDataJustPatternApi,
-} from '#/api/fdmdata/datajustpattern';
+import { getYogaBlankOptions, importFinished, previewFinished } from '#/api/fdmdata/datajustsku';
+import type { PatternPreviewResp, YogaBlankOptions } from '#/api/fdmdata/datajustsku';
+import { usePatternCostRemoteSelect } from '../composables/use-pattern-cost-remote-select';
 
 const emit = defineEmits(['success']);
 
 const formRef = ref();
-const patternCostLoading = ref(false);
-const patternCostList = ref<FdmdataDataJustPatternApi.PatternCost[]>([]);
-const patternKeyword = ref('');
-
 const loadingPreview = ref(false);
 const generating = ref(false);
 const preview = ref<PatternPreviewResp | null>(null);
@@ -77,17 +65,22 @@ function loadSizeTemplatesFromLocal() {
         name: String(x.name),
         lengths: Array.isArray(x.lengths) ? x.lengths.map(String) : [],
         widths: Array.isArray(x.widths) ? x.widths.map(String) : [],
-        thicknesses: Array.isArray(x.thicknesses) ? x.thicknesses.map(String) : [],
+        thicknesses: Array.isArray(x.thicknesses)
+          ? x.thicknesses.map(String)
+          : [],
         updatedAt: typeof x.updatedAt === 'number' ? x.updatedAt : Date.now(),
       }))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .toSorted((a, b) => b.updatedAt - a.updatedAt);
   } catch {
     sizeTemplates.value = [];
   }
 }
 
 function persistSizeTemplatesToLocal() {
-  localStorage.setItem(SIZE_TEMPLATE_STORAGE_KEY, JSON.stringify(sizeTemplates.value));
+  localStorage.setItem(
+    SIZE_TEMPLATE_STORAGE_KEY,
+    JSON.stringify(sizeTemplates.value),
+  );
 }
 
 const sizeTemplateOptions = computed(() =>
@@ -113,7 +106,11 @@ function saveCurrentSizeAsTemplate() {
     message.warning('请输入模板名称');
     return;
   }
-  if (!sizeLengths.value.length || !sizeWidths.value.length || !sizeThicknesses.value.length) {
+  if (
+    !sizeLengths.value.length ||
+    !sizeWidths.value.length ||
+    !sizeThicknesses.value.length
+  ) {
     message.warning('请先为长、宽、厚各至少选择一项，再保存模板');
     return;
   }
@@ -132,7 +129,9 @@ function saveCurrentSizeAsTemplate() {
     sizeTemplates.value.unshift(next);
   }
   // 重新按更新时间排序
-  sizeTemplates.value = [...sizeTemplates.value].sort((a, b) => b.updatedAt - a.updatedAt);
+  sizeTemplates.value = [...sizeTemplates.value].toSorted(
+    (a, b) => b.updatedAt - a.updatedAt,
+  );
   persistSizeTemplatesToLocal();
   selectedSizeTemplateName.value = name;
   message.success('尺寸模板已保存到本地');
@@ -163,17 +162,31 @@ const formState = reactive({
   colors: [] as string[],
 });
 
+const {
+  patternCostLoading,
+  patternCostList,
+  patternCostSelectOptions,
+  onPatternSearch,
+  onPatternDropdownOpen,
+  resetPatternCostSelect,
+  ensureSelectedOption,
+} = usePatternCostRemoteSelect(() => formState.patternCostId);
+
 const materialOptions = computed(() =>
   (blankOptions.value?.materials ?? []).map((x) => ({
     label: x.label,
     value: x.key,
   })),
 );
-const typeOptions = computed(() => getDictOptions(DICT_TYPE.YOGA_MAT, 'string'));
+const typeOptions = computed(() =>
+  getDictOptions(DICT_TYPE.YOGA_MAT, 'string'),
+);
 const categoryOptions = computed(() =>
   getDictOptions(DICT_TYPE.FDM_YOGA_CATEGORY, 'string'),
 );
-const colorOptions = computed(() => getDictOptions(DICT_TYPE.FDM_COLOR, 'string'));
+const colorOptions = computed(() =>
+  getDictOptions(DICT_TYPE.FDM_COLOR, 'string'),
+);
 
 const previewList = computed(() => preview.value?.rows ?? []);
 const willCreate = computed(() => preview.value?.willCreate ?? 0);
@@ -186,12 +199,19 @@ const selectedPatternCost = computed(() => {
   return patternCostList.value.find((p) => p.id === id) ?? null;
 });
 
+watch(
+  () => formState.patternCostId,
+  (id) => {
+    void ensureSelectedOption(id);
+  },
+);
+
 /** 长×宽×厚 笛卡尔积 → 与空白版相同的每行「长*宽*厚cm」文本块 */
 function buildSizeTextBlock(): string {
   const numSort = (a: string, b: string) => Number(a) - Number(b);
-  const lens = [...sizeLengths.value].sort(numSort);
-  const wids = [...sizeWidths.value].sort(numSort);
-  const thks = [...sizeThicknesses.value].sort(numSort);
+  const lens = [...sizeLengths.value].toSorted(numSort);
+  const wids = [...sizeWidths.value].toSorted(numSort);
+  const thks = [...sizeThicknesses.value].toSorted(numSort);
   const lines: string[] = [];
   for (const len of lens) {
     for (const wid of wids) {
@@ -237,39 +257,23 @@ const columns: ColumnsType = [
   { title: '分类', dataIndex: 'categoryName', key: 'categoryName', width: 100 },
   { title: '颜色', dataIndex: 'colorLabel', key: 'color', width: 88 },
   { title: '规格', dataIndex: 'sizeText', key: 'sizeText', width: 130 },
+  {
+    title: '颜色及规格',
+    dataIndex: 'colorSpec',
+    key: 'colorSpec',
+    width: 300,
+    ellipsis: true,
+  },
   { title: '款式编码', dataIndex: 'styleCode', key: 'styleCode', width: 200 },
-  { title: '商品名称', dataIndex: 'productName', key: 'productName', width: 260 },
+  {
+    title: '商品名称',
+    dataIndex: 'productName',
+    key: 'productName',
+    width: 260,
+  },
   { title: '商品编码', dataIndex: 'itemCode', key: 'itemCode', width: 200 },
   { title: '图片', key: 'pic', width: 90 },
 ];
-
-/** 与图案编码生成弹窗同源：/fdmdata/data-just-pattern-cost/page */
-async function loadPatternCostList(keyword?: string) {
-  patternCostLoading.value = true;
-  try {
-    const kw = (keyword ?? '').trim();
-    const page = await getDataJustPatternCostPage({
-      pageNo: 1,
-      pageSize: 20,
-      itemCode: kw || undefined,
-      patternName: kw || undefined,
-    });
-    patternCostList.value = page?.list ?? [];
-  } finally {
-    patternCostLoading.value = false;
-  }
-}
-
-function onPatternSearch(val: string) {
-  patternKeyword.value = val;
-  loadPatternCostList(val);
-}
-
-function onPatternDropdownOpen(open: boolean) {
-  if (open) {
-    loadPatternCostList(patternKeyword.value);
-  }
-}
 
 const [VbenModal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
@@ -280,8 +284,7 @@ const [VbenModal, modalApi] = useVbenModal({
       formState.category = '';
       formState.patternCostId = undefined;
       formState.colors = [];
-      patternCostList.value = [];
-      patternKeyword.value = '';
+      resetPatternCostSelect();
       blankOptions.value = null;
       sizeLengths.value = [];
       sizeWidths.value = [];
@@ -293,10 +296,7 @@ const [VbenModal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       loadSizeTemplatesFromLocal();
-      const [, opts] = await Promise.all([
-        loadPatternCostList(),
-        getYogaBlankOptions(),
-      ]);
+      const opts = await getYogaBlankOptions();
       blankOptions.value = opts;
     } finally {
       modalApi.unlock();
@@ -391,10 +391,15 @@ async function handleGenerate() {
   >
     <p class="mb-3 text-sm text-muted-foreground">
       图案与<strong>图案编码生成</strong>弹窗一致，来自接口
-      <code class="rounded bg-muted px-1">GET /fdmdata/data-just-pattern-cost/page</code>
-     （已维护的图案对照）。成品类型 <code class="rounded bg-muted px-1">YogaMat</code>；分类
-      <code class="rounded bg-muted px-1">fdm_yoga_category</code>（飞德慕成品分类，与成品类型独立）；尺寸与<strong>空白版生成</strong>相同：长/宽/厚三列多选（字典
-      <code class="rounded bg-muted px-1">fdm_yoga_blank_size_length</code>等），笛卡尔积生成规格；颜色
+      <code class="rounded bg-muted px-1"
+        >GET /fdmdata/data-just-pattern-cost/page</code
+      >
+      （已维护的图案对照）。成品类型
+      <code class="rounded bg-muted px-1">YogaMat</code>；分类
+      <code class="rounded bg-muted px-1">fdm_yoga_category</code
+      >（飞德慕成品分类，与成品类型独立）；尺寸与<strong>空白版生成</strong>相同：长/宽/厚三列多选（字典
+      <code class="rounded bg-muted px-1">fdm_yoga_blank_size_length</code
+      >等），笛卡尔积生成规格；颜色
       <code class="rounded bg-muted px-1">fdm_color</code>。
     </p>
 
@@ -438,16 +443,14 @@ async function handleGenerate() {
           <Select
             v-model:value="formState.patternCostId"
             :loading="patternCostLoading"
-            :options="
-              patternCostList.map((p) => ({
-                value: p.id,
-                label: `${p.patternName}（${p.itemCode}）`,
-              }))
-            "
-            placeholder="请选择已维护的图案（可搜索）"
+            :options="patternCostSelectOptions"
+            placeholder="输入图案名称或对照编码搜索（至少 1 个字）"
             show-search
             option-filter-prop="label"
             :filter-option="false"
+            :not-found-content="
+              patternCostLoading ? undefined : '请输入关键词搜索图案'
+            "
             @search="onPatternSearch"
             @dropdown-visible-change="onPatternDropdownOpen"
           />
@@ -470,7 +473,10 @@ async function handleGenerate() {
         </FormItem>
       </div>
 
-      <div v-if="selectedPatternCost?.picUrl" class="mb-3 flex items-center gap-2">
+      <div
+        v-if="selectedPatternCost?.picUrl"
+        class="mb-3 flex items-center gap-2"
+      >
         <span class="text-sm text-muted-foreground">图案预览</span>
         <Image
           :src="selectedPatternCost.picUrl"
@@ -496,13 +502,21 @@ async function handleGenerate() {
                 >
                   <p class="mb-0 text-foreground/90">
                     与空白版弹窗一致：选项来自
-                    <code class="rounded bg-muted px-1 font-mono text-xs">fdm_yoga_blank_size_length</code>
+                    <code class="rounded bg-muted px-1 font-mono text-xs"
+                      >fdm_yoga_blank_size_length</code
+                    >
                     /
-                    <code class="rounded bg-muted px-1 font-mono text-xs">fdm_yoga_blank_size_width</code>
+                    <code class="rounded bg-muted px-1 font-mono text-xs"
+                      >fdm_yoga_blank_size_width</code
+                    >
                     /
-                    <code class="rounded bg-muted px-1 font-mono text-xs">fdm_yoga_blank_size_thickness</code>
+                    <code class="rounded bg-muted px-1 font-mono text-xs"
+                      >fdm_yoga_blank_size_thickness</code
+                    >
                     ，所选数值做长×宽×厚全部组合，每行格式
-                    <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">长*宽*厚cm</code>。
+                    <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+                      >长*宽*厚cm</code
+                    >。
                   </p>
                 </div>
               </template>
@@ -518,7 +532,9 @@ async function handleGenerate() {
         <div class="space-y-3">
           <div class="flex flex-wrap items-end gap-2">
             <div class="min-w-[220px] flex-1">
-              <div class="mb-1 text-xs text-muted-foreground">尺寸模板（本地）</div>
+              <div class="mb-1 text-xs text-muted-foreground">
+                尺寸模板（本地）
+              </div>
               <Select
                 v-model:value="selectedSizeTemplateName"
                 :options="sizeTemplateOptions"
@@ -531,20 +547,33 @@ async function handleGenerate() {
             </div>
             <div class="min-w-[200px] flex-1">
               <div class="mb-1 text-xs text-muted-foreground">模板名称</div>
-              <Input v-model:value="newTemplateName" allow-clear placeholder="例如：常用-185/61/0.6" />
+              <Input
+                v-model:value="newTemplateName"
+                allow-clear
+                placeholder="例如：常用-185/61/0.6"
+              />
             </div>
             <Button @click="saveCurrentSizeAsTemplate">保存模板</Button>
-            <Button danger :disabled="!selectedSizeTemplateName" @click="deleteSelectedTemplate">
+            <Button
+              danger
+              :disabled="!selectedSizeTemplateName"
+              @click="deleteSelectedTemplate"
+            >
               删除模板
             </Button>
           </div>
 
-          <p v-if="sizeComboCount > 0" class="mb-0 text-xs text-muted-foreground">
+          <p
+            v-if="sizeComboCount > 0"
+            class="mb-0 text-xs text-muted-foreground"
+          >
             将生成 {{ sizeComboCount }} 种尺寸组合（所选长、宽、厚笛卡尔积）
           </p>
           <div class="grid gap-3 sm:grid-cols-3">
             <div>
-              <div class="mb-1.5 text-sm leading-none text-foreground">长（cm）</div>
+              <div class="mb-1.5 text-sm leading-none text-foreground">
+                长（cm）
+              </div>
               <Select
                 v-model:value="sizeLengths"
                 mode="multiple"
@@ -555,7 +584,9 @@ async function handleGenerate() {
               />
             </div>
             <div>
-              <div class="mb-1.5 text-sm leading-none text-foreground">宽（cm）</div>
+              <div class="mb-1.5 text-sm leading-none text-foreground">
+                宽（cm）
+              </div>
               <Select
                 v-model:value="sizeWidths"
                 mode="multiple"
@@ -566,7 +597,9 @@ async function handleGenerate() {
               />
             </div>
             <div>
-              <div class="mb-1.5 text-sm leading-none text-foreground">厚（cm）</div>
+              <div class="mb-1.5 text-sm leading-none text-foreground">
+                厚（cm）
+              </div>
               <Select
                 v-model:value="sizeThicknesses"
                 mode="multiple"
@@ -621,7 +654,7 @@ async function handleGenerate() {
         :columns="columns"
         :data-source="previewList"
         :pagination="false"
-        :scroll="{ x: 1100, y: 360 }"
+        :scroll="{ x: 1400, y: 360 }"
         row-key="itemCode"
         bordered
       >
@@ -642,7 +675,12 @@ async function handleGenerate() {
 
     <div class="mt-4 flex justify-end gap-2 border-t border-border pt-3">
       <Button :loading="loadingPreview" @click="loadPreview">预览</Button>
-      <Button type="primary" :loading="generating" :disabled="willCreate === 0" @click="handleGenerate">
+      <Button
+        type="primary"
+        :loading="generating"
+        :disabled="willCreate === 0"
+        @click="handleGenerate"
+      >
         确认生成
       </Button>
       <Button @click="modalApi.close()">关闭</Button>

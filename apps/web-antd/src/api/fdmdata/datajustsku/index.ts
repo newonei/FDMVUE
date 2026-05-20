@@ -76,7 +76,10 @@ export function deleteDataJustSkuList(ids: number[]) {
 }
 
 export function batchSetBlankPic(data: { ids: number[]; picUrl: string }) {
-  return requestClient.put<boolean>('/fdmdata/data-just-sku/batch-set-blank-pic', data);
+  return requestClient.put<boolean>(
+    '/fdmdata/data-just-sku/batch-set-blank-pic',
+    data,
+  );
 }
 
 export function batchSetFinishedPic(data: { ids: number[]; picUrl: string }) {
@@ -97,6 +100,23 @@ export function getFinishedSkuPage(params: PageParam) {
   );
 }
 
+/** 组合编码弹窗选成品：轻量分页（不填成本、不翻译），请带筛选条件且 pageSize≤200 */
+export function getFinishedSkuPageForComboPicker(
+  params: PageParam & {
+    categoryName?: string;
+    itemCode?: string;
+    materialKey?: string;
+    productName?: string;
+    status?: number;
+    styleCode?: string;
+  },
+) {
+  return requestClient.get<PageResult<FdmdataDataJustSkuApi.FinishedSku>>(
+    '/fdmdata/data-just-finished-sku/page-for-combo-picker',
+    { params },
+  );
+}
+
 export function getFinishedSku(id: number) {
   return requestClient.get<FdmdataDataJustSkuApi.FinishedSku>(
     `/fdmdata/data-just-finished-sku/get?id=${id}`,
@@ -112,7 +132,9 @@ export function updateFinishedSku(data: FdmdataDataJustSkuApi.FinishedSku) {
 }
 
 export function deleteFinishedSku(id: number) {
-  return requestClient.delete(`/fdmdata/data-just-finished-sku/delete?id=${id}`);
+  return requestClient.delete(
+    `/fdmdata/data-just-finished-sku/delete?id=${id}`,
+  );
 }
 
 export function deleteFinishedSkuList(ids: number[]) {
@@ -121,7 +143,10 @@ export function deleteFinishedSkuList(ids: number[]) {
   );
 }
 
-export function batchSetFinishedSkuPic(data: { ids: number[]; picUrl: string }) {
+export function batchSetFinishedSkuPic(data: {
+  ids: number[];
+  picUrl: string;
+}) {
   return requestClient.put<boolean>(
     '/fdmdata/data-just-finished-sku/batch-set-pic',
     data,
@@ -129,7 +154,10 @@ export function batchSetFinishedSkuPic(data: { ids: number[]; picUrl: string }) 
 }
 
 export function exportFinishedSkuExcel(params: any) {
-  return requestClient.download('/fdmdata/data-just-finished-sku/export-excel', { params });
+  return requestClient.download(
+    '/fdmdata/data-just-finished-sku/export-excel',
+    { params },
+  );
 }
 
 export function syncFinishedSkuToJushuitan(id: number) {
@@ -147,7 +175,9 @@ export function syncFinishedSkuToJushuitanBatchV2(ids: number[]) {
 
 /** 导出fdm-data 聚水潭 SKU 主数据 */
 export function exportDataJustSku(params: any) {
-  return requestClient.download('/fdmdata/data-just-sku/export-excel', { params });
+  return requestClient.download('/fdmdata/data-just-sku/export-excel', {
+    params,
+  });
 }
 
 /** 同步单条 SKU 到聚水潭 itemsku/upload */
@@ -169,9 +199,9 @@ export interface JstSyncBatchResp {
   items: {
     id: number;
     itemCode?: string;
-    success?: boolean;
     jstSkuId?: string;
     message?: string;
+    success?: boolean;
   }[];
 }
 
@@ -269,13 +299,12 @@ export interface PatternOptions {
   sizeWidths: PatternOptionItem[];
 }
 
-
 export interface PatternGenReq {
   /** 类型 */
   type: string;
   /** 图案名称 */
   patternName: string;
-  /** 对照编码（1~4位大写字母） */
+  /** 对照编码（1～48 位大写字母或数字，如拼音首字母 LDKD、8ZLDKD） */
   itemCodeAbbr: string;
   /** 图片（URL 或存储路径） */
   picUrl?: string;
@@ -292,6 +321,8 @@ export interface PatternPreviewRow {
   categoryName: string;
   picUrl?: string;
   colorLabel?: string;
+  /** 与入库 color_spec 一致 */
+  colorSpec?: string;
 }
 
 export interface PatternPreviewResp {
@@ -306,8 +337,6 @@ export interface PatternImportResp {
   updated?: number;
   skipped: number;
 }
-
-
 
 /** 成品编码生成 */
 export interface FinishedGenReq {
@@ -368,7 +397,9 @@ export function getBlankCostMatrixKeys() {
   );
 }
 
-export function getDataJustSkuCostPage(params: PageParam & Partial<DataJustSkuCost>) {
+export function getDataJustSkuCostPage(
+  params: PageParam & Partial<DataJustSkuCost>,
+) {
   return requestClient.get<PageResult<DataJustSkuCost>>(
     '/fdmdata/data-just-sku-cost/page',
     { params },
@@ -384,7 +415,9 @@ export function updateDataJustSkuCost(data: DataJustSkuCost) {
 }
 
 export function deleteDataJustSkuCost(id: number) {
-  return requestClient.delete<boolean>(`/fdmdata/data-just-sku-cost/delete?id=${id}`);
+  return requestClient.delete<boolean>(
+    `/fdmdata/data-just-sku-cost/delete?id=${id}`,
+  );
 }
 
 export interface BlankCostImportResp {
@@ -396,9 +429,12 @@ export interface BlankCostImportResp {
 
 /** 空白版列表：导入 Excel，将成本价/重量/卷包长宽高写入成本对照维护 */
 export function importBlankCostExcel(file: File) {
-  return requestClient.upload<BlankCostImportResp>('/fdmdata/data-just-sku-cost/import-excel', {
-    file,
-  });
+  return requestClient.upload<BlankCostImportResp>(
+    '/fdmdata/data-just-sku-cost/import-excel',
+    {
+      file,
+    },
+  );
 }
 
 export interface BlankSkuImportResp {
@@ -410,9 +446,12 @@ export interface BlankSkuImportResp {
 
 /** 空白版列表：导入 Excel（主表），导入行默认置为已同步 */
 export function importBlankSkuExcel(file: File) {
-  return requestClient.upload<BlankSkuImportResp>('/fdmdata/data-just-sku/import-blank-excel', {
-    file,
-  });
+  return requestClient.upload<BlankSkuImportResp>(
+    '/fdmdata/data-just-sku/import-blank-excel',
+    {
+      file,
+    },
+  );
 }
 
 /** 定制组合编码生成 */
@@ -427,12 +466,16 @@ export interface CustomComboGenReq {
 export interface CustomComboPreviewResp {
   rows: {
     data: FdmdataDataJustSkuApi.DataJustSku;
+    /** 对应实体编码（成品 itemCode，用于聚水潭 enty_sku_id） */
+    entyItemCode?: string;
     existsInDb?: boolean;
     matchedAccessoryItemCodes?: string[];
     matchedAccessoryNames?: string[];
+    /** 与 matchedAccessoryItemCodes 同序，缺省按 1 */
+    matchedAccessoryQtys?: number[];
+    message?: string;
     skippedAccessoryItemCodes?: string[];
     skippedAccessoryNames?: string[];
-    message?: string;
   }[];
   willCreate: number;
   willUpdate?: number;
@@ -460,9 +503,18 @@ export function importCustomCombo(data: CustomComboGenReq) {
 }
 
 /** 组合商品编码生成（成品 + 配件，按规格匹配） */
+export interface StandardComboAccessoryPickReq {
+  accessoryId: number;
+  /** 默认 1 */
+  qty?: number;
+}
+
 export interface StandardComboGenReq {
   finishedSkuIds: number[];
-  accessoryIds: number[];
+  /** 非空时优先；每项带数量，同步聚水潭子项 qty 与此一致 */
+  accessoryPicks?: StandardComboAccessoryPickReq[];
+  /** 当 accessoryPicks 为空时生效，每项数量视为 1 */
+  accessoryIds?: number[];
 }
 
 export function previewStandardCombo(data: StandardComboGenReq) {
@@ -505,10 +557,12 @@ export namespace FdmdataCustomComboApi {
     pddPrice?: number;
     /** 抖音价（按 材质+规格+类型 匹配回填） */
     douyinPrice?: number;
-    /** 商品号价（按 材质+规格+类型 匹配回填） */
+    /** 视频号价（按 材质+规格+类型 匹配回填） */
     sphPrice?: number;
     /** 小红书价（按 材质+规格+类型 匹配回填） */
     xhsPrice?: number;
+    /** 京东价（按 材质+规格+类型 匹配回填） */
+    jdPrice?: number;
     status?: number;
     jstSkuId?: string;
     creator?: string;
@@ -533,13 +587,18 @@ export function getCustomComboPage(params: PageParam) {
 }
 
 export function exportCustomComboExcel(params: Record<string, unknown>) {
-  return requestClient.download('/fdmdata/data-just-custom-combo/export-excel', {
-    params,
-  });
+  return requestClient.download(
+    '/fdmdata/data-just-custom-combo/export-excel',
+    {
+      params,
+    },
+  );
 }
 
 export function deleteCustomCombo(id: number) {
-  return requestClient.delete(`/fdmdata/data-just-custom-combo/delete?id=${id}`);
+  return requestClient.delete(
+    `/fdmdata/data-just-custom-combo/delete?id=${id}`,
+  );
 }
 
 export function deleteCustomComboList(ids: number[]) {
@@ -558,11 +617,12 @@ export interface ComboPlatformPriceUpsertReq {
   specText: string;
   /** 类型（组合 item_code 最后一段） */
   productType: string;
-  tmallPrice?: number | null;
-  pddPrice?: number | null;
-  douyinPrice?: number | null;
-  sphPrice?: number | null;
-  xhsPrice?: number | null;
+  tmallPrice?: null | number;
+  pddPrice?: null | number;
+  douyinPrice?: null | number;
+  sphPrice?: null | number;
+  xhsPrice?: null | number;
+  jdPrice?: null | number;
   remark?: string;
 }
 
@@ -691,7 +751,9 @@ export function getPatternCostMatrixKeys() {
   );
 }
 
-export function getDataJustPatternSkuCostPage(params: PageParam & Partial<DataJustPatternSkuCost>) {
+export function getDataJustPatternSkuCostPage(
+  params: PageParam & Partial<DataJustPatternSkuCost>,
+) {
   return requestClient.get<PageResult<DataJustPatternSkuCost>>(
     '/fdmdata/data-just-pattern-sku-cost/page',
     { params },
@@ -699,11 +761,17 @@ export function getDataJustPatternSkuCostPage(params: PageParam & Partial<DataJu
 }
 
 export function createDataJustPatternSkuCost(data: DataJustPatternSkuCost) {
-  return requestClient.post<number>('/fdmdata/data-just-pattern-sku-cost/create', data);
+  return requestClient.post<number>(
+    '/fdmdata/data-just-pattern-sku-cost/create',
+    data,
+  );
 }
 
 export function updateDataJustPatternSkuCost(data: DataJustPatternSkuCost) {
-  return requestClient.put<boolean>('/fdmdata/data-just-pattern-sku-cost/update', data);
+  return requestClient.put<boolean>(
+    '/fdmdata/data-just-pattern-sku-cost/update',
+    data,
+  );
 }
 
 export function deleteDataJustPatternSkuCost(id: number) {

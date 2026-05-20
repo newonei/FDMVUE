@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { ColumnsType } from 'ant-design-vue/es/table';
 
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import {
@@ -15,15 +15,15 @@ import {
   Table,
 } from 'ant-design-vue';
 
-import { getDataJustPattern, getDataJustPatternPage } from '#/api/fdmdata/datajustpattern';
 import {
-  getDataJustSkuPage,
-  importCustomCombo,
-  previewCustomCombo,
-  type CustomComboPreviewResp,
-  type FdmdataDataJustSkuApi,
-} from '#/api/fdmdata/datajustsku';
+  getDataJustPattern,
+  getDataJustPatternPage,
+} from '#/api/fdmdata/datajustpattern';
+import { getDataJustSkuPage, importCustomCombo, previewCustomCombo } from '#/api/fdmdata/datajustsku';
+import type { CustomComboPreviewResp, FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
 import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
+
+import { usePatternSkuRemoteSelect } from '../composables/use-pattern-sku-remote-select';
 
 const emit = defineEmits(['success']);
 
@@ -52,8 +52,16 @@ const blankQuery = reactive({
 });
 const blankStyleOptions = ref<{ label: string; value: string }[]>([]);
 const blankCategoryOptions = ref<{ label: string; value: string }[]>([]);
-const patternOptions = ref<{ label: string; value: number }[]>([]);
 const patternGroupName = ref<string>('');
+
+const {
+  patternSkuLoading,
+  patternSkuSelectOptions,
+  onPatternSkuSearch,
+  onPatternSkuDropdownOpen,
+  resetPatternSkuSelect,
+  ensureSelectedPatternSku,
+} = usePatternSkuRemoteSelect(() => formState.patternFamilySeedId);
 /** 当前图案系列下全部尺寸行 */
 const patternVariantRows = ref<FdmdataDataJustPatternApi.Pattern[]>([]);
 const selectedPatternSkuIds = ref<number[]>([]);
@@ -68,7 +76,7 @@ const patternSizeKeys = computed(() => {
       keys.add(k);
     }
   }
-  return [...keys].sort();
+  return [...keys].toSorted();
 });
 const patternSizeKeySet = computed(() => new Set(patternSizeKeys.value));
 
@@ -98,7 +106,9 @@ function extractSizeLWKey(raw: string | undefined) {
 }
 
 /** 图案系列名（不含尺寸）：如 图案-儿童游戏-185*68cm → 儿童游戏 */
-function resolvePatternGroupName(row: Partial<FdmdataDataJustPatternApi.Pattern> | null | undefined) {
+function resolvePatternGroupName(
+  row: Partial<FdmdataDataJustPatternApi.Pattern> | null | undefined,
+) {
   if (!row) {
     return '';
   }
@@ -113,14 +123,17 @@ function resolvePatternGroupName(row: Partial<FdmdataDataJustPatternApi.Pattern>
       return rest;
     }
   }
-  return ((row.productShortName ?? '').trim() || (row.productName ?? '').trim() || '');
+  return (
+    (row.productShortName ?? '').trim() || (row.productName ?? '').trim() || ''
+  );
 }
 
-function skuLabel(row: { itemCode?: string; productName?: string }) {
-  const code = row.itemCode ?? '';
-  const name = row.productName ?? '';
-  return `${code}｜${name}`;
-}
+watch(
+  () => formState.patternFamilySeedId,
+  (id) => {
+    void ensureSelectedPatternSku(id);
+  },
+);
 
 function selectAllBlanksInList() {
   blankSelectedIds.value = blankRows.value.map((r) => r.id);
@@ -151,8 +164,12 @@ function rebuildBlankFilterOptionsFromSource() {
       cats.add(cn);
     }
   }
-  blankStyleOptions.value = [...styles].sort().map((v) => ({ label: v, value: v }));
-  blankCategoryOptions.value = [...cats].sort().map((v) => ({ label: v, value: v }));
+  blankStyleOptions.value = [...styles]
+    .toSorted()
+    .map((v) => ({ label: v, value: v }));
+  blankCategoryOptions.value = [...cats]
+    .toSorted()
+    .map((v) => ({ label: v, value: v }));
 }
 
 /** 按当前条件在本地筛选（商品名称包含；款式、分类与下拉值精确一致） */
@@ -161,7 +178,9 @@ function applyBlankQueryFilters() {
   const pn = trimOrUndef(blankQuery.productName);
   if (pn) {
     const low = pn.toLowerCase();
-    rows = rows.filter((r) => (r.productName ?? '').toLowerCase().includes(low));
+    rows = rows.filter((r) =>
+      (r.productName ?? '').toLowerCase().includes(low),
+    );
   }
   const sc = trimOrUndef(blankQuery.styleCode);
   if (sc) {
@@ -228,20 +247,6 @@ function onBlankRowSelectionChange(keys: (string | number)[]) {
   blankSelectedIds.value = keys.map((k) => Number(k));
 }
 
-async function loadPatternOptions(keyword?: string) {
-  const kw = (keyword ?? '').trim();
-  const res = await getDataJustPatternPage({
-    pageNo: 1,
-    pageSize: 20,
-    itemCode: kw || undefined,
-    productName: kw || undefined,
-  } as any);
-  patternOptions.value = (res.list ?? []).map((r: FdmdataDataJustPatternApi.Pattern) => ({
-    label: skuLabel(r),
-    value: r.id,
-  }));
-}
-
 async function loadPatternFamilyVariants(seedId: number | undefined) {
   patternVariantRows.value = [];
   selectedPatternSkuIds.value = [];
@@ -267,12 +272,15 @@ async function loadPatternFamilyVariants(seedId: number | undefined) {
     const res = await getDataJustPatternPage({
       pageNo: 1,
       pageSize: -1,
-      productName: patternGroupName.value,
-    } as any);
+      keyword: patternGroupName.value,
+    });
     const list = (res.list ?? []).filter(
-      (r: FdmdataDataJustPatternApi.Pattern) => resolvePatternGroupName(r) === patternGroupName.value,
+      (r: FdmdataDataJustPatternApi.Pattern) =>
+        resolvePatternGroupName(r) === patternGroupName.value,
     );
-    list.sort((a, b) => extractSizeLWKey(a.attr1).localeCompare(extractSizeLWKey(b.attr1)));
+    list.sort((a, b) =>
+      extractSizeLWKey(a.attr1).localeCompare(extractSizeLWKey(b.attr1)),
+    );
     patternVariantRows.value = list;
   } finally {
     loadingPatternVariants.value = false;
@@ -282,11 +290,7 @@ async function loadPatternFamilyVariants(seedId: number | undefined) {
 
 async function handlePatternFamilyChange(v: unknown) {
   const id =
-    v == null || v === ''
-      ? undefined
-      : typeof v === 'number'
-        ? v
-        : Number(v);
+    v == null || v === '' ? undefined : typeof v === 'number' ? v : Number(v);
   await loadPatternFamilyVariants(id);
 }
 
@@ -310,15 +314,47 @@ const willCreate = computed(() => preview.value?.willCreate ?? 0);
 const willSkip = computed(() => preview.value?.willSkip ?? 0);
 
 const columns: ColumnsType = [
-  { title: '款式编码', dataIndex: ['data', 'styleCode'], key: 'styleCode', width: 220, ellipsis: true },
-  { title: '商品名称', dataIndex: ['data', 'productName'], key: 'productName', width: 260, ellipsis: true },
-  { title: '商品编码', dataIndex: ['data', 'itemCode'], key: 'itemCode', width: 220, ellipsis: true },
-  { title: '分类', dataIndex: ['data', 'categoryName'], key: 'categoryName', width: 120, ellipsis: true },
+  {
+    title: '款式编码',
+    dataIndex: ['data', 'styleCode'],
+    key: 'styleCode',
+    width: 220,
+    ellipsis: true,
+  },
+  {
+    title: '商品名称',
+    dataIndex: ['data', 'productName'],
+    key: 'productName',
+    width: 260,
+    ellipsis: true,
+  },
+  {
+    title: '商品编码',
+    dataIndex: ['data', 'itemCode'],
+    key: 'itemCode',
+    width: 220,
+    ellipsis: true,
+  },
+  {
+    title: '对应实体编码',
+    dataIndex: 'entyItemCode',
+    key: 'entyItemCode',
+    width: 200,
+    ellipsis: true,
+  },
+  {
+    title: '分类',
+    dataIndex: ['data', 'categoryName'],
+    key: 'categoryName',
+    width: 120,
+    ellipsis: true,
+  },
   {
     title: '状态',
     key: 'st',
     width: 120,
-    customRender: ({ record }: any) => (record.existsInDb ? '库中已存在' : '可入库'),
+    customRender: ({ record }: any) =>
+      record.existsInDb ? '库中已存在' : '可入库',
   },
 ];
 
@@ -335,7 +371,9 @@ async function handlePreview() {
       qty: formState.qty || 1,
       salePrice: formState.salePrice,
     });
-    message.success(`预览完成：将新增 ${willCreate.value} 条，跳过 ${willSkip.value} 条`);
+    message.success(
+      `预览完成：将新增 ${willCreate.value} 条，跳过 ${willSkip.value} 条`,
+    );
   } finally {
     loadingPreview.value = false;
   }
@@ -371,7 +409,7 @@ function reset() {
   blankSourceRows.value = [];
   blankSelectedIds.value = [];
   resetBlankQuery();
-  patternOptions.value = [];
+  resetPatternSkuSelect();
   blankStyleOptions.value = [];
   blankCategoryOptions.value = [];
   patternGroupName.value = '';
@@ -387,7 +425,7 @@ const [VbenModal, modalApi] = useVbenModal({
     }
     loadingOptions.value = true;
     try {
-      await Promise.all([fetchAllBlanksForModal(), loadPatternOptions()]);
+      await fetchAllBlanksForModal();
     } finally {
       loadingOptions.value = false;
     }
@@ -437,14 +475,26 @@ const [VbenModal, modalApi] = useVbenModal({
               />
             </div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <Button type="primary" size="small" :loading="loadingBlanks" @click="loadBlankList">
+              <Button
+                type="primary"
+                size="small"
+                :loading="loadingBlanks"
+                @click="loadBlankList"
+              >
                 查询
               </Button>
-              <Button size="small" @click="resetBlankQueryAndReload">重置条件</Button>
-              <Button size="small" @click="selectAllBlanksInList">全选当前结果</Button>
-              <Button size="small" @click="clearBlankSelection">清空勾选</Button>
+              <Button size="small" @click="resetBlankQueryAndReload"
+                >重置条件</Button
+              >
+              <Button size="small" @click="selectAllBlanksInList"
+                >全选当前结果</Button
+              >
+              <Button size="small" @click="clearBlankSelection"
+                >清空勾选</Button
+              >
               <span class="text-xs text-muted-foreground">
-                共 {{ blankRows.length }} 条，已选 {{ blankSelectedIds.length }} 条
+                共 {{ blankRows.length }} 条，已选
+                {{ blankSelectedIds.length }} 条
               </span>
             </div>
             <Table
@@ -460,37 +510,77 @@ const [VbenModal, modalApi] = useVbenModal({
                 onChange: onBlankRowSelectionChange,
               }"
               :columns="[
-                { title: '款式编码', dataIndex: 'styleCode', width: 200, ellipsis: true },
-                { title: '商品名称', dataIndex: 'productName', width: 220, ellipsis: true },
-                { title: '商品编码', dataIndex: 'itemCode', width: 180, ellipsis: true },
-                { title: '分类', dataIndex: 'categoryName', width: 120, ellipsis: true },
+                {
+                  title: '款式编码',
+                  dataIndex: 'styleCode',
+                  width: 200,
+                  ellipsis: true,
+                },
+                {
+                  title: '商品名称',
+                  dataIndex: 'productName',
+                  width: 220,
+                  ellipsis: true,
+                },
+                {
+                  title: '商品编码',
+                  dataIndex: 'itemCode',
+                  width: 180,
+                  ellipsis: true,
+                },
+                {
+                  title: '分类',
+                  dataIndex: 'categoryName',
+                  width: 120,
+                  ellipsis: true,
+                },
               ]"
             />
           </FormItem>
           <div class="flex flex-col gap-3">
             <FormItem required label="选择图案（系列）">
               <div class="mb-2 text-xs text-muted-foreground">
-                搜索并<strong>任选一条</strong>该系列的图案 SKU（仅用于识别图案名）；再在下方勾选要参与组合的<strong>图案尺寸</strong>（可多选）。组合子商品仍为 2 个：空白版 + 对应尺寸的图案 SKU。
+                搜索并<strong>任选一条</strong>该系列的图案
+                SKU（仅用于识别图案名）；再在下方勾选要参与组合的<strong>图案尺寸</strong>（可多选）。组合子商品仍为
+                2 个：空白版 + 对应尺寸的图案 SKU。
               </div>
               <Select
                 v-model:value="formState.patternFamilySeedId"
-                :options="patternOptions"
+                :loading="patternSkuLoading"
+                :options="patternSkuSelectOptions"
                 allow-clear
                 show-search
                 option-filter-prop="label"
-                placeholder="搜索商品编码/名称，任选一条同系列图案"
-                @search="(v: any) => loadPatternOptions(v)"
+                :filter-option="false"
+                placeholder="输入商品编码/名称/款式搜索（至少 1 个字），任选一条同系列图案"
+                :not-found-content="
+                  patternSkuLoading ? undefined : '请输入关键词搜索图案'
+                "
+                @search="onPatternSkuSearch"
+                @dropdown-visible-change="onPatternSkuDropdownOpen"
                 @change="handlePatternFamilyChange"
               />
-              <div v-if="patternGroupName" class="mt-2 text-xs text-muted-foreground">
-                当前系列：<strong>{{ patternGroupName }}</strong>；已加载 <strong>{{ patternVariantRows.length }}</strong>
+              <div
+                v-if="patternGroupName"
+                class="mt-2 text-xs text-muted-foreground"
+              >
+                当前系列：<strong>{{ patternGroupName }}</strong
+                >；已加载 <strong>{{ patternVariantRows.length }}</strong>
                 条尺寸行，请勾选参与组合的尺寸（长*宽匹配，忽略厚度）。
               </div>
             </FormItem>
-            <FormItem v-if="patternVariantRows.length" required label="图案尺寸（可多选）">
+            <FormItem
+              v-if="patternVariantRows.length"
+              required
+              label="图案尺寸（可多选）"
+            >
               <div class="mb-2 flex flex-wrap items-center gap-2">
-                <Button size="small" @click="selectAllPatternVariants">全选尺寸</Button>
-                <Button size="small" @click="clearPatternVariantSelection">清空勾选</Button>
+                <Button size="small" @click="selectAllPatternVariants"
+                  >全选尺寸</Button
+                >
+                <Button size="small" @click="clearPatternVariantSelection"
+                  >清空勾选</Button
+                >
                 <span class="text-xs text-muted-foreground">
                   已选 {{ selectedPatternSkuIds.length }} 条，匹配键：
                   <strong>{{ patternSizeKeys.join('、') || '—' }}</strong>
@@ -514,8 +604,18 @@ const [VbenModal, modalApi] = useVbenModal({
         </div>
         <!-- 子项数量 / 子项售价：按当前业务规则固定，不在弹窗中暴露 -->
         <div class="flex flex-wrap gap-2">
-          <Button type="primary" :loading="loadingPreview" @click="handlePreview">预览</Button>
-          <Button type="default" :disabled="!preview || willCreate === 0" :loading="generating" @click="handleGenerate">
+          <Button
+            type="primary"
+            :loading="loadingPreview"
+            @click="handlePreview"
+            >预览</Button
+          >
+          <Button
+            type="default"
+            :disabled="!preview || willCreate === 0"
+            :loading="generating"
+            @click="handleGenerate"
+          >
             确认入库
           </Button>
         </div>
@@ -527,11 +627,10 @@ const [VbenModal, modalApi] = useVbenModal({
         :columns="columns"
         :data-source="previewList"
         :pagination="false"
-        :scroll="{ x: 980, y: 'calc(100vh - 520px)' }"
+        :scroll="{ x: 1180, y: 'calc(100vh - 520px)' }"
         row-key="data.id"
         bordered
       />
     </Spin>
   </VbenModal>
 </template>
-

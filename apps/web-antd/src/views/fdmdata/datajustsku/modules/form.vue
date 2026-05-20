@@ -46,26 +46,30 @@ type FormOpenPayload =
     };
 
 const formData = ref<
-  FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern | FdmdataDataJustAccessoryApi.Accessory
+  | FdmdataDataJustSkuApi.DataJustSku
+  | FdmdataDataJustPatternApi.Pattern
+  | FdmdataDataJustAccessoryApi.Accessory
 >();
 const listTab = ref<string>('blank');
 
 const getTitle = computed(() => {
-  let subject = 'fdm-data 聚水潭 SKU 主数据';
-  if (listTab.value === 'pattern') {
-    subject = 'fdm-data 图案商品';
-  } else if (listTab.value === 'accessory') {
-    subject = 'fdm-data 配件商品';
-  }
+  const subjectMap: Record<string, string> = {
+    blank: '空白版 SKU',
+    pattern: '图案商品',
+    finished: '成品编码',
+    accessory: '配件商品',
+  };
+  const subject = subjectMap[listTab.value] ?? '聚水潭 SKU 主数据';
   return formData.value?.id
     ? $t('ui.actionTitle.edit', [subject])
     : $t('ui.actionTitle.create', [subject]);
 });
 
+/** 所有 tab 统一使用宽弹窗，accessory 稍宽 */
 const modalClass = computed(() =>
   listTab.value === 'accessory'
-    ? 'w-[920px] max-w-[calc(100vw-2rem)]'
-    : undefined,
+    ? 'w-[960px] max-w-[calc(100vw-2rem)]'
+    : 'w-[800px] max-w-[calc(100vw-2rem)]',
 );
 
 const [Form, formApi] = useVbenForm({
@@ -73,12 +77,13 @@ const [Form, formApi] = useVbenForm({
     componentProps: {
       class: 'w-full',
     },
-    formItemClass: 'col-span-2',
-    labelWidth: 80,
+    formItemClass: 'col-span-1',
+    labelWidth: 90,
   },
   layout: 'horizontal',
   schema: useFormSchema(),
   showDefaultActions: false,
+  wrapperClass: 'grid-cols-2 gap-x-4',
 });
 
 function setupFormByTab(tab: string) {
@@ -88,11 +93,12 @@ function setupFormByTab(tab: string) {
       componentProps: {
         class: 'w-full',
       },
-      formItemClass: isAccessory ? 'col-span-1' : 'col-span-2',
-      labelWidth: isAccessory ? 112 : 80,
+      // 所有 tab 统一 2 列，labelWidth 统一 90
+      formItemClass: 'col-span-1',
+      labelWidth: isAccessory ? 112 : 90,
     },
     schema: isAccessory ? useAccessoryFormSchema() : useFormSchema(),
-    wrapperClass: isAccessory ? 'grid-cols-2 gap-x-4' : 'grid-cols-1',
+    wrapperClass: 'grid-cols-2 gap-x-4',
   });
 }
 
@@ -105,30 +111,37 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       if (listTab.value === 'pattern') {
-        const data = (await formApi.getValues()) as FdmdataDataJustPatternApi.PatternSaveReq & {
-          __listTab?: string;
-        };
+        const data =
+          (await formApi.getValues()) as FdmdataDataJustPatternApi.PatternSaveReq & {
+            __listTab?: string;
+          };
         delete data.__listTab;
         await (formData.value?.id
           ? updateDataJustPattern(data)
           : createDataJustPattern(data));
       } else if (listTab.value === 'accessory') {
-        const data = (await formApi.getValues()) as FdmdataDataJustAccessoryApi.Accessory & {
-          __listTab?: string;
-        };
+        const data =
+          (await formApi.getValues()) as FdmdataDataJustAccessoryApi.Accessory & {
+            __listTab?: string;
+          };
         delete data.__listTab;
         await (formData.value?.id
           ? updateDataJustAccessory(data)
           : createDataJustAccessory(data));
       } else {
-        const data = (await formApi.getValues()) as FdmdataDataJustSkuApi.DataJustSku & {
-          __listTab?: string;
-        };
+        const data =
+          (await formApi.getValues()) as FdmdataDataJustSkuApi.DataJustSku & {
+            __listTab?: string;
+          };
         delete data.__listTab;
         if (listTab.value === 'finished') {
-          await (formData.value?.id ? updateFinishedSku(data) : createFinishedSku(data));
+          await (formData.value?.id
+            ? updateFinishedSku(data)
+            : createFinishedSku(data));
         } else {
-          await (formData.value?.id ? updateDataJustSku(data) : createDataJustSku(data));
+          await (formData.value?.id
+            ? updateDataJustSku(data)
+            : createDataJustSku(data));
         }
       }
       await modalApi.close();
@@ -146,7 +159,9 @@ const [Modal, modalApi] = useVbenModal({
     }
     const raw = modalApi.getData<FormOpenPayload>();
     const tab =
-      raw && typeof raw === 'object' && 'listTab' in raw ? raw.listTab : 'blank';
+      raw && typeof raw === 'object' && 'listTab' in raw
+        ? raw.listTab
+        : 'blank';
     listTab.value = tab ?? 'blank';
     setupFormByTab(listTab.value);
     await nextTick();
@@ -175,7 +190,10 @@ const [Modal, modalApi] = useVbenModal({
       } else {
         formData.value = await getDataJustSku(row.id);
       }
-      await formApi.setValues({ ...(formData.value as any), __listTab: listTab.value });
+      await formApi.setValues({
+        ...(formData.value as any),
+        __listTab: listTab.value,
+      });
     } finally {
       modalApi.unlock();
     }
