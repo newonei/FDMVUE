@@ -240,14 +240,12 @@ export function useFormSchema(): VbenFormSchema[] {
   });
 
   return [
+    // id 通过 CSS 隐藏即可；不挂 triggerFields 依赖，避免
+    // destroyOnClose 销毁阶段触发依赖重算导致 Vue 崩溃。
     {
       fieldName: 'id',
       component: 'Input',
       formItemClass: 'hidden',
-      dependencies: {
-        triggerFields: ['statDate'],
-        show: () => false,
-      },
     },
 
     section('basic', '基本信息'),
