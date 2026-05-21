@@ -19,8 +19,8 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
-import Form from './modules/form.vue';
 import EcShopDailyDashboard from './modules/ec-shop-daily-dashboard.vue';
+import Form from './modules/form.vue';
 import JdImportModal from './modules/jd-import-modal.vue';
 import TaobaoImportModal from './modules/taobao-import-modal.vue';
 
@@ -204,11 +204,24 @@ function getGridFormValuesForDashboard() {
         <h2 class="mb-0 text-lg font-semibold text-foreground">
           店铺后台日汇总管理
         </h2>
-        <Segmented
-          v-model:value="activeTab"
-          :options="[...viewModeOptions]"
-          class="ec-shop-daily-segmented"
-        />
+        <div class="flex flex-wrap items-center gap-2">
+          <TableAction
+            :actions="[
+              {
+                label: $t('ui.actionTitle.create', ['店铺日汇总']),
+                type: 'primary',
+                icon: ACTION_ICON.ADD,
+                auth: ['fdmdata:ec-shop-daily:create'],
+                onClick: handleCreate,
+              },
+            ]"
+          />
+          <Segmented
+            v-model:value="activeTab"
+            :options="[...viewModeOptions]"
+            class="ec-shop-daily-segmented"
+          />
+        </div>
       </header>
 
       <!-- 统计说明：默认收起，减少首屏占用 -->

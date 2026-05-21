@@ -74,9 +74,27 @@ export function getEcShopDaily(id: number) {
   );
 }
 
-/** 新增店铺后台日汇总 */
+/** 新增店铺后台日汇总（单条，页面表单） */
 export function createEcShopDaily(data: FdmdataEcShopDailyApi.EcShopDaily) {
   return requestClient.post('/fdmdata/ec-shop-daily/create', data);
+}
+
+/** 批量创建/覆盖结果（外部系统 JSON 数组） */
+export interface EcShopDailyBatchCreateResult {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+}
+
+/** 批量创建店铺后台日汇总（外部调用，body 为数组） */
+export function createEcShopDailyBatch(
+  items: FdmdataEcShopDailyApi.EcShopDaily[],
+) {
+  return requestClient.post<EcShopDailyBatchCreateResult>(
+    '/fdmdata/ec-shop-daily/create-batch',
+    items,
+  );
 }
 
 /** 修改店铺后台日汇总 */

@@ -16,7 +16,11 @@ import {
 } from '#/api/fdmdata/ecshopdaily';
 import { $t } from '#/locales';
 
-import { EC_SHOP_DAILY_CREATE_DEFAULTS, useFormSchema } from '../data';
+import {
+  buildEcShopDailySubmitPayload,
+  EC_SHOP_DAILY_CREATE_DEFAULTS,
+  useFormSchema,
+} from '../data';
 
 const emit = defineEmits(['success']);
 const formData = ref<FdmdataEcShopDailyApi.EcShopDaily>();
@@ -32,37 +36,25 @@ const [Form, formApi] = useVbenForm({
     componentProps: {
       class: 'w-full',
     },
-    // 纵向布局：标签在上、控件在下，避免双列 + horizontal 时标签宽度不足叠字
-    wrapperClass: 'grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2 sm:gap-y-3',
-    formItemClass: 'col-span-1 mb-2 min-w-0 sm:mb-3',
+    // 左标签 + 右控件；固定标签宽，避免与 grid 混用导致标签列被压成竖排
+    labelWidth: 132,
+    formItemClass: 'mb-3 min-w-0',
   },
-  layout: 'vertical',
+  layout: 'horizontal',
   schema: useFormSchema(),
   showDefaultActions: false,
 });
 
-function normalizeSubmitPayload(
-  raw: Record<string, any>,
-): FdmdataEcShopDailyApi.EcShopDaily {
+function normalizeStatDate(raw: Record<string, any>): string | undefined {
   const statDate = raw.statDate;
-  let statDateStr: string | undefined;
   if (statDate === undefined || statDate === null || statDate === '') {
-    statDateStr = undefined;
-  } else if (typeof statDate === 'string') {
-    statDateStr = statDate;
-  } else {
-    const d = dayjs(statDate);
-    statDateStr = d.isValid() ? d.format('YYYY-MM-DD') : undefined;
+    return undefined;
   }
-
-  return {
-    ...raw,
-    statDate: statDateStr as any,
-    shopId: raw.shopId == null ? '' : String(raw.shopId).trim(),
-    platformCode:
-      raw.platformCode == null ? '' : String(raw.platformCode).trim(),
-    currency: raw.currency == null ? 'CNY' : String(raw.currency),
-  } as FdmdataEcShopDailyApi.EcShopDaily;
+  if (typeof statDate === 'string') {
+    return statDate;
+  }
+  const d = dayjs(statDate);
+  return d.isValid() ? d.format('YYYY-MM-DD') : undefined;
 }
 
 const [Modal, modalApi] = useVbenModal({
@@ -73,7 +65,10 @@ const [Modal, modalApi] = useVbenModal({
     }
     modalApi.lock();
     const raw = await formApi.getValues();
-    const data = normalizeSubmitPayload(raw);
+    const data = buildEcShopDailySubmitPayload({
+      ...raw,
+      statDate: normalizeStatDate(raw),
+    });
     try {
       await (formData.value?.id
         ? updateEcShopDaily(data)
@@ -108,15 +103,42 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal :title="getTitle" :width="880" class="ec-shop-daily-modal">
-    <Form class="ec-shop-daily-form px-2 py-3" />
+  <Modal :title="getTitle" :width="920" class="ec-shop-daily-modal">
+    <div
+      class="ec-shop-daily-form-scroll max-h-[min(72vh,720px)] overflow-y-auto px-4 py-3"
+    >
+      <Form class="ec-shop-daily-form" />
+    </div>
   </Modal>
 </template>
 
 <style scoped>
-/* 纵向表单在弹窗内：标签允许换行，避免窄屏叠字 */
+.ec-shop-daily-form :deep(.ant-form-item) {
+  margin-bottom: 0;
+}
+
+.ec-shop-daily-form :deep(.ant-form-item-row) {
+  flex-wrap: nowrap;
+}
+
+.ec-shop-daily-form :deep(.ant-form-item-label) {
+  flex: 0 0 132px;
+  max-width: 132px;
+  padding-right: 8px;
+  overflow: visible;
+  text-align: right;
+}
+
 .ec-shop-daily-form :deep(.ant-form-item-label > label) {
-  line-height: 1.45;
+  height: auto;
+  line-height: 1.5;
+  word-break: keep-all;
   white-space: normal;
+}
+
+.ec-shop-daily-form :deep(.ant-form-item-control) {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
 }
 </style>

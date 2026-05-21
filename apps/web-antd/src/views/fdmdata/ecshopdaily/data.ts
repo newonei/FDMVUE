@@ -19,6 +19,7 @@ export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShop
   {
     currency: 'CNY',
     shopId: '',
+    shopName: '',
     orderCount: 0,
     paidOrderCount: 0,
     refundOrderCount: 0,
@@ -27,6 +28,146 @@ export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShop
     refundAmount: 0,
     marketingCost: 0,
   };
+
+/** 提交时可选整数字段（空则传 null） */
+const OPTIONAL_INT_FIELDS = [
+  'visitorCount',
+  'pageViewCount',
+  'buyerCount',
+  'avgStayDurationSec',
+  'productVisitorCount',
+  'productPageViewCount',
+  'paidProductCount',
+  'returningBuyerCount',
+  'productFavoriteBuyerCount',
+  'cartAddUserCount',
+  'reviewCount',
+  'positiveReviewCount',
+  'negativeReviewCount',
+  'reviewWithImageCount',
+  'pickupPackageCount',
+  'shippedPackageCount',
+  'deliveryPackageCount',
+  'signedPackageCount',
+] as const;
+
+/** 提交时可选金额字段（空则传 null） */
+const OPTIONAL_AMOUNT_FIELDS = [
+  'paymentConversionRate',
+  'avgOrderValue',
+  'bounceRate',
+  'avgPageViewPerVisitor',
+  'uvValue',
+  'returningBuyerPaidAmount',
+  'descMatchScore',
+  'logisticsServiceScore',
+  'serviceAttitudeScore',
+  'taobaokeCommission',
+  'diamondDisplayCost',
+  'trainAdCost',
+] as const;
+
+function requiredInt(raw: unknown, fallback = 0): number {
+  if (raw === '' || raw === null || raw === undefined) {
+    return fallback;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function requiredAmount(raw: unknown, fallback = 0): number {
+  if (raw === '' || raw === null || raw === undefined) {
+    return fallback;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function optionalInt(raw: unknown): number | null {
+  if (raw === '' || raw === null || raw === undefined) {
+    return null;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function optionalAmount(raw: unknown): number | null {
+  if (raw === '' || raw === null || raw === undefined) {
+    return null;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 与后端 EcShopDailySaveReqVO 对齐；净销售额由服务端计算，不提交。
+ */
+export function buildEcShopDailySubmitPayload(
+  raw: Record<string, any>,
+): FdmdataEcShopDailyApi.EcShopDaily {
+  const payload: Record<string, any> = {
+    id: raw.id,
+    statDate: raw.statDate,
+    platformCode: String(raw.platformCode ?? '').trim(),
+    shopId: String(raw.shopId ?? '').trim(),
+    shopName: String(raw.shopName ?? '').trim(),
+    currency: String(raw.currency ?? 'CNY'),
+    orderCount: requiredInt(raw.orderCount),
+    paidOrderCount: requiredInt(raw.paidOrderCount),
+    refundOrderCount: requiredInt(raw.refundOrderCount),
+    gmvAmount: requiredAmount(raw.gmvAmount),
+    paidAmount: requiredAmount(raw.paidAmount),
+    refundAmount: requiredAmount(raw.refundAmount),
+    marketingCost: requiredAmount(raw.marketingCost),
+    remark: String(raw.remark ?? '').trim() || undefined,
+  };
+  for (const key of OPTIONAL_INT_FIELDS) {
+    payload[key] = optionalInt(raw[key]);
+  }
+  for (const key of OPTIONAL_AMOUNT_FIELDS) {
+    payload[key] = optionalAmount(raw[key]);
+  }
+  return payload as FdmdataEcShopDailyApi.EcShopDaily;
+}
+
+function formInt(
+  fieldName: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
+  label: string,
+  required = false,
+): VbenFormSchema {
+  return {
+    fieldName,
+    label,
+    rules: required ? 'selectRequired' : undefined,
+    component: 'InputNumber',
+    componentProps: {
+      class: 'w-full',
+      min: 0,
+      precision: 0,
+      placeholder: required ? '0' : '可选',
+    },
+  };
+}
+
+function formAmount(
+  fieldName: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
+  label: string,
+  required = false,
+  precision = 2,
+): VbenFormSchema {
+  return {
+    fieldName,
+    label,
+    rules: required ? 'selectRequired' : undefined,
+    component: 'InputNumber',
+    componentProps: {
+      class: 'w-full',
+      min: 0,
+      precision,
+      placeholder: required ? '0.00' : '可选',
+    },
+  };
+}
 
 function formatAmount({ cellValue }: { cellValue: unknown }) {
   if (cellValue === null || cellValue === undefined || cellValue === '') {
@@ -83,7 +224,7 @@ function amountCol(
   };
 }
 
-/** 新增/修改表单 */
+/** 新增/修改表单（与 fdm_ec_shop_daily 全字段对齐，净销售额仅展示） */
 export function useFormSchema(): VbenFormSchema[] {
   return [
     {
@@ -98,7 +239,6 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'statDate',
       label: '统计日期',
       rules: 'selectRequired',
-      formItemClass: 'col-span-1',
       component: 'DatePicker',
       componentProps: {
         class: 'w-full',
@@ -109,13 +249,12 @@ export function useFormSchema(): VbenFormSchema[] {
     },
     {
       fieldName: 'platformCode',
-      label: '平台',
+      label: '平台编码',
       rules: 'required',
-      formItemClass: 'col-span-1',
       component: 'AutoComplete',
       componentProps: {
         allowClear: true,
-        placeholder: '选择或输入编码，如 TMALL',
+        placeholder: '如 TMALL、TAOBAO、JD',
         options: EC_PLATFORM_SUGGESTIONS,
         filterOption: (input: string, option?: { value: string }) =>
           (option?.value ?? '')
@@ -126,7 +265,6 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'shopId',
       label: '店铺 ID',
-      formItemClass: 'col-span-1',
       component: 'Input',
       componentProps: {
         allowClear: true,
@@ -137,11 +275,10 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'shopName',
       label: '店铺名称',
-      formItemClass: 'col-span-1',
       component: 'Input',
       componentProps: {
         allowClear: true,
-        placeholder: '可选',
+        placeholder: 'shop_id 为空时用于区分多店',
         maxlength: 128,
       },
     },
@@ -149,140 +286,77 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'currency',
       label: '币种',
       rules: 'selectRequired',
-      formItemClass: 'col-span-1',
       component: 'Select',
       componentProps: {
         allowClear: false,
         options: [{ label: 'CNY 人民币', value: 'CNY' }],
       },
     },
+    formInt('orderCount', '订单笔数', true),
+    formInt('paidOrderCount', '已支付订单笔数', true),
+    formInt('refundOrderCount', '退款完成订单笔数', true),
+    formAmount('gmvAmount', '成交额', true),
+    formAmount('paidAmount', '已支付金额', true),
+    formAmount('refundAmount', '退款金额', true),
     {
-      fieldName: 'orderCount',
-      label: '订单数',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
+      fieldName: 'netSalesAmount',
+      label: '净销售额',
       component: 'InputNumber',
       componentProps: {
         class: 'w-full',
-        min: 0,
-        precision: 0,
-        placeholder: '0',
-      },
-    },
-    {
-      fieldName: 'paidOrderCount',
-      label: '已支付单数',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 0,
-      },
-    },
-    {
-      fieldName: 'refundOrderCount',
-      label: '退款单数',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 0,
-      },
-    },
-    {
-      fieldName: 'gmvAmount',
-      label: '成交额',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
+        disabled: true,
         precision: 2,
-        placeholder: '0.00',
+        placeholder: '保存时自动计算',
+      },
+      dependencies: {
+        triggerFields: ['paidAmount', 'refundAmount'],
+        componentProps: (values) => {
+          const paid = Number(values.paidAmount ?? 0);
+          const refund = Number(values.refundAmount ?? 0);
+          const net = (paid - refund).toFixed(2);
+          return {
+            class: 'w-full',
+            disabled: true,
+            precision: 2,
+            value: Number.isFinite(Number(net)) ? Number(net) : undefined,
+          };
+        },
       },
     },
-    {
-      fieldName: 'paidAmount',
-      label: '已支付金额',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 2,
-      },
-    },
-    {
-      fieldName: 'refundAmount',
-      label: '退款金额',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 2,
-      },
-    },
-    {
-      fieldName: 'visitorCount',
-      label: '访客数',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 0,
-        placeholder: '可选',
-      },
-    },
-    {
-      fieldName: 'pageViewCount',
-      label: '浏览量',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 0,
-        placeholder: 'PV，可选',
-      },
-    },
-    {
-      fieldName: 'buyerCount',
-      label: '成交买家',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 0,
-        placeholder: '可选',
-      },
-    },
-    {
-      fieldName: 'marketingCost',
-      label: '营销花费',
-      rules: 'selectRequired',
-      formItemClass: 'col-span-1',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        min: 0,
-        precision: 2,
-        placeholder: '0.00',
-      },
-    },
+    formAmount('marketingCost', '营销花费', true),
+    formInt('visitorCount', '访客数'),
+    formInt('pageViewCount', '浏览量（PV）'),
+    formInt('buyerCount', '成交买家数'),
+    formAmount('paymentConversionRate', '支付转化率(%)', false, 4),
+    formAmount('avgOrderValue', '客单价'),
+    formAmount('bounceRate', '跳失率(%)', false, 4),
+    formInt('avgStayDurationSec', '平均停留时长(秒)'),
+    formAmount('avgPageViewPerVisitor', '人均浏览量'),
+    formAmount('uvValue', 'UV价值', false, 4),
+    formInt('productVisitorCount', '商品访客数'),
+    formInt('productPageViewCount', '商品浏览量'),
+    formInt('paidProductCount', '支付商品数'),
+    formInt('returningBuyerCount', '支付老买家数'),
+    formAmount('returningBuyerPaidAmount', '老买家支付金额'),
+    formInt('productFavoriteBuyerCount', '商品收藏买家数'),
+    formInt('cartAddUserCount', '加购人数'),
+    formInt('reviewCount', '评价数'),
+    formInt('positiveReviewCount', '正面评价数'),
+    formInt('negativeReviewCount', '负面评价数'),
+    formInt('reviewWithImageCount', '有图评价数'),
+    formAmount('descMatchScore', '描述相符评分'),
+    formAmount('logisticsServiceScore', '物流服务评分'),
+    formAmount('serviceAttitudeScore', '服务态度评分'),
+    formInt('pickupPackageCount', '揽收包裹数'),
+    formInt('shippedPackageCount', '发货包裹数'),
+    formInt('deliveryPackageCount', '派送包裹数'),
+    formInt('signedPackageCount', '签收成功包裹数'),
+    formAmount('taobaokeCommission', '淘宝客佣金'),
+    formAmount('diamondDisplayCost', '钻石展位消耗'),
+    formAmount('trainAdCost', '直通车消耗'),
     {
       fieldName: 'remark',
       label: '备注',
-      formItemClass: 'col-span-1 sm:col-span-2',
       component: 'Textarea',
       componentProps: {
         maxlength: 512,
