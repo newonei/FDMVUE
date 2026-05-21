@@ -19,8 +19,8 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
-import Form from './modules/form.vue';
 import EcShopDailyDashboard from './modules/ec-shop-daily-dashboard.vue';
+import Form from './modules/form.vue';
 import JdImportModal from './modules/jd-import-modal.vue';
 import TaobaoImportModal from './modules/taobao-import-modal.vue';
 

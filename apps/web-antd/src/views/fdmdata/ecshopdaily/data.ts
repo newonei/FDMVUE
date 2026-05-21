@@ -83,7 +83,7 @@ function requiredAmount(raw: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function optionalInt(raw: unknown): number | null {
+function optionalInt(raw: unknown): null | number {
   if (raw === '' || raw === null || raw === undefined) {
     return null;
   }
@@ -91,7 +91,7 @@ function optionalInt(raw: unknown): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
-function optionalAmount(raw: unknown): number | null {
+function optionalAmount(raw: unknown): null | number {
   if (raw === '' || raw === null || raw === undefined) {
     return null;
   }

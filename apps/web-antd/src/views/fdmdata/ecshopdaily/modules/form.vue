@@ -161,10 +161,10 @@ const [Modal, modalApi] = useVbenModal({
 }
 
 .ec-shop-daily-form :deep(.ant-form-item-label > label) {
-  line-height: 1.4;
-  white-space: normal;
-  word-break: keep-all;
   height: auto;
+  line-height: 1.4;
+  word-break: keep-all;
+  white-space: normal;
 }
 
 .ec-shop-daily-form :deep(.ant-form-item-control) {
@@ -180,7 +180,8 @@ const [Modal, modalApi] = useVbenModal({
   color: hsl(var(--foreground));
 }
 
-.ec-shop-daily-form :deep(.ant-divider-horizontal.ant-divider-with-text:first-child) {
+.ec-shop-daily-form
+  :deep(.ant-divider-horizontal.ant-divider-with-text:first-child) {
   margin-top: 0;
 }
 </style>
