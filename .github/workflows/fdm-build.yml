@@ -1,0 +1,99 @@
+name: Build FDM web-antd
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: prod
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fdm-build-${{ github.ref_name }}-${{ github.event.inputs.environment || 'prod' }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: ${{ vars.APP_NAME || 'fdmvue' }}
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'prod' }}
+  FRONTEND_APP: web-antd
+  FRONTEND_DIST: apps/web-antd/dist
+
+  # Build-time Vue settings. Keep the API URL relative so the browser goes
+  # through Nginx in production instead of calling 127.0.0.1:48080 directly.
+  FRONTEND_BASE_URL: ${{ vars.FRONTEND_BASE_URL || '' }}
+  FRONTEND_API_URL: ${{ vars.FRONTEND_API_URL || '/admin-api' }}
+
+jobs:
+  build:
+    name: Build web-antd
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      package_name: ${{ steps.package.outputs.package_name }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node and pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Override production env for CI
+        run: |
+          set -euo pipefail
+          # .env.production.local overrides .env.production at build time
+          # without committing server-specific values to the repo.
+          cat > "apps/${FRONTEND_APP}/.env.production.local" <<EOF
+          VITE_BASE=/
+          VITE_BASE_URL=${FRONTEND_BASE_URL}
+          VITE_GLOB_API_URL=${FRONTEND_API_URL}
+          VITE_UPLOAD_TYPE=server
+          VITE_COMPRESS=gzip
+          VITE_PWA=false
+          EOF
+          cat "apps/${FRONTEND_APP}/.env.production.local"
+
+      - name: Build dist
+        run: pnpm run build:antd
+
+      - name: Package release
+        id: package
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          package_name="${APP_NAME}-${DEPLOY_ENV}-${short_sha}.tar.gz"
+
+          rm -rf release
+          mkdir -p release/frontend
+          cp -a "${FRONTEND_DIST}/." release/frontend/
+
+          test -s release/frontend/index.html
+
+          tar -czf "${package_name}" -C release .
+          sha256sum "${package_name}" > "${package_name}.sha256"
+
+          echo "package_name=${package_name}" >> "${GITHUB_OUTPUT}"
+          ls -lh "${package_name}" "${package_name}.sha256"
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: |
+            ${{ steps.package.outputs.package_name }}
+            ${{ steps.package.outputs.package_name }}.sha256
+          if-no-files-found: error
+          retention-days: 14
