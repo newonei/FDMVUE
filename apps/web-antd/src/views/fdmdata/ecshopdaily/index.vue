@@ -24,9 +24,12 @@ import Form from './modules/form.vue';
 import JdImportModal from './modules/jd-import-modal.vue';
 import TaobaoImportModal from './modules/taobao-import-modal.vue';
 
+// destroyOnClose 已移除：
+// 每次销毁再重建会导致新实例的 onOpenChange(true) 在 getData() 同步前触发，
+// 出现空表单 + 自动弹出锁定弹窗的连锁 bug。
+// 表单值通过 onOpenChange 中的 setValues 手动重置，不依赖组件销毁。
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
-  destroyOnClose: true,
 });
 
 const [TaobaoImportModalComp, taobaoImportModalApi] = useVbenModal({

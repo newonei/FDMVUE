@@ -90,16 +90,23 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      // 1. 立即解锁，防止上一次 lock() 泄漏到下次打开（例如网络极慢时用户强关）。
+      modalApi.unlock();
       formData.value = undefined;
+      // 2. 关闭时重置表单值，防止关闭动画期间短暂显示上一次的内容。
+      void formApi.setValues(EC_SHOP_DAILY_CREATE_DEFAULTS as any, false);
       return;
     }
+
     const mySeq = ++openSeq;
     const row = modalApi.getData<FdmdataEcShopDailyApi.EcShopDaily>();
 
+    // 3. 打开时立即清空旧值（防止短暂显示上一条记录的数据）。
+    formData.value = undefined;
+    await formApi.setValues(EC_SHOP_DAILY_CREATE_DEFAULTS as any, false);
+
     // Create flow: no async work, no race window.
     if (!row?.id) {
-      formData.value = undefined;
-      await formApi.setValues(EC_SHOP_DAILY_CREATE_DEFAULTS as any, false);
       return;
     }
 
@@ -108,8 +115,8 @@ const [Modal, modalApi] = useVbenModal({
     try {
       const detail = await getEcShopDaily(row.id);
       // The modal may have been closed (or re-opened with a different row)
-      // while we were waiting; drop the stale result so we never touch a
-      // destroyed Form instance.
+      // while we were waiting; drop the stale result so we never touch the
+      // form with outdated data.
       if (mySeq !== openSeq) {
         return;
       }
@@ -127,7 +134,11 @@ const [Modal, modalApi] = useVbenModal({
         await modalApi.close();
       }
     } finally {
-      modalApi.unlock();
+      // 4. 只有当前请求才解锁，防止 stale 请求的 finally 把正在进行的请求的
+      //    lock 提前解掉（openSeq 已被后续打开递增时跳过）。
+      if (mySeq === openSeq) {
+        modalApi.unlock();
+      }
     }
   },
 });
