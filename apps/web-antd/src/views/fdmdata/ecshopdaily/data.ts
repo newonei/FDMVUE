@@ -227,15 +227,18 @@ function amountCol(
 /** 新增/修改表单（与 fdm_ec_shop_daily 全字段对齐，净销售额仅展示） */
 export function useFormSchema(): VbenFormSchema[] {
   const fullWidth = 'col-span-2 min-w-0';
+  // renderComponentContent 将 title 字符串注入 Divider 的 default 插槽；
+  // hideLabel 移除横向布局下的空 label 占位，让分隔线占满整行宽度。
   const section = (key: string, title: string): VbenFormSchema => ({
     fieldName: `_divider_${key}`,
     label: '',
+    hideLabel: true,
     component: 'Divider',
     formItemClass: fullWidth,
+    renderComponentContent: () => ({ default: () => title }),
     componentProps: {
       orientation: 'left',
       plain: true,
-      children: title,
     },
   });
 

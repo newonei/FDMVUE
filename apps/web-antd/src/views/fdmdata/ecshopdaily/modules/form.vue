@@ -45,7 +45,7 @@ const [Form, formApi] = useVbenForm({
       class: 'w-full',
     },
     formItemClass: 'col-span-1 min-w-0',
-    labelWidth: 110,
+    labelWidth: 120,
   },
   layout: 'horizontal',
   schema: useFormSchema(),
@@ -153,8 +153,8 @@ const [Modal, modalApi] = useVbenModal({
 }
 
 .ec-shop-daily-form :deep(.ant-form-item-label) {
-  flex: 0 0 110px;
-  max-width: 110px;
+  flex: 0 0 120px;
+  max-width: 120px;
   padding-right: 8px;
   overflow: visible;
   text-align: right;
