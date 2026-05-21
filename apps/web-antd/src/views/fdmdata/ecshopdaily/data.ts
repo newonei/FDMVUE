@@ -83,7 +83,7 @@ function requiredAmount(raw: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function optionalInt(raw: unknown): null | number {
+function optionalInt(raw: unknown): number | null {
   if (raw === '' || raw === null || raw === undefined) {
     return null;
   }
@@ -91,7 +91,7 @@ function optionalInt(raw: unknown): null | number {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
-function optionalAmount(raw: unknown): null | number {
+function optionalAmount(raw: unknown): number | null {
   if (raw === '' || raw === null || raw === undefined) {
     return null;
   }
@@ -226,15 +226,31 @@ function amountCol(
 
 /** 新增/修改表单（与 fdm_ec_shop_daily 全字段对齐，净销售额仅展示） */
 export function useFormSchema(): VbenFormSchema[] {
+  const fullWidth = 'col-span-2 min-w-0';
+  const section = (key: string, title: string): VbenFormSchema => ({
+    fieldName: `_divider_${key}`,
+    label: '',
+    component: 'Divider',
+    formItemClass: fullWidth,
+    componentProps: {
+      orientation: 'left',
+      plain: true,
+      children: title,
+    },
+  });
+
   return [
     {
       fieldName: 'id',
       component: 'Input',
+      formItemClass: 'hidden',
       dependencies: {
         triggerFields: ['statDate'],
         show: () => false,
       },
     },
+
+    section('basic', '基本信息'),
     {
       fieldName: 'statDate',
       label: '统计日期',
@@ -292,6 +308,8 @@ export function useFormSchema(): VbenFormSchema[] {
         options: [{ label: 'CNY 人民币', value: 'CNY' }],
       },
     },
+
+    section('sales', '订单与金额'),
     formInt('orderCount', '订单笔数', true),
     formInt('paidOrderCount', '已支付订单笔数', true),
     formInt('refundOrderCount', '退款完成订单笔数', true),
@@ -324,15 +342,19 @@ export function useFormSchema(): VbenFormSchema[] {
       },
     },
     formAmount('marketingCost', '营销花费', true),
+    formAmount('avgOrderValue', '客单价'),
+
+    section('traffic', '流量与转化'),
     formInt('visitorCount', '访客数'),
     formInt('pageViewCount', '浏览量（PV）'),
     formInt('buyerCount', '成交买家数'),
     formAmount('paymentConversionRate', '支付转化率(%)', false, 4),
-    formAmount('avgOrderValue', '客单价'),
     formAmount('bounceRate', '跳失率(%)', false, 4),
     formInt('avgStayDurationSec', '平均停留时长(秒)'),
     formAmount('avgPageViewPerVisitor', '人均浏览量'),
     formAmount('uvValue', 'UV价值', false, 4),
+
+    section('product', '商品与买家行为'),
     formInt('productVisitorCount', '商品访客数'),
     formInt('productPageViewCount', '商品浏览量'),
     formInt('paidProductCount', '支付商品数'),
@@ -340,6 +362,8 @@ export function useFormSchema(): VbenFormSchema[] {
     formAmount('returningBuyerPaidAmount', '老买家支付金额'),
     formInt('productFavoriteBuyerCount', '商品收藏买家数'),
     formInt('cartAddUserCount', '加购人数'),
+
+    section('review', '评价与服务质量'),
     formInt('reviewCount', '评价数'),
     formInt('positiveReviewCount', '正面评价数'),
     formInt('negativeReviewCount', '负面评价数'),
@@ -347,16 +371,23 @@ export function useFormSchema(): VbenFormSchema[] {
     formAmount('descMatchScore', '描述相符评分'),
     formAmount('logisticsServiceScore', '物流服务评分'),
     formAmount('serviceAttitudeScore', '服务态度评分'),
+
+    section('logistics', '物流包裹'),
     formInt('pickupPackageCount', '揽收包裹数'),
     formInt('shippedPackageCount', '发货包裹数'),
     formInt('deliveryPackageCount', '派送包裹数'),
     formInt('signedPackageCount', '签收成功包裹数'),
+
+    section('marketing', '营销投放'),
     formAmount('taobaokeCommission', '淘宝客佣金'),
     formAmount('diamondDisplayCost', '钻石展位消耗'),
     formAmount('trainAdCost', '直通车消耗'),
+
+    section('remark', '备注'),
     {
       fieldName: 'remark',
       label: '备注',
+      formItemClass: fullWidth,
       component: 'Textarea',
       componentProps: {
         maxlength: 512,
