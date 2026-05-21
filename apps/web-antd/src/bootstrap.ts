@@ -76,6 +76,22 @@ async function bootstrap(namespace: string) {
     }
   });
 
+  // 屏蔽 AntDV Tooltip/Popconfirm 底层 vc-trigger 在 onBeforeMount 阶段（非
+  // render 阶段）访问 arrowContent 插槽所触发的 Vue 响应式跟踪警告。
+  // 这是 AntDV 的框架内部 bug，不影响功能；但在表格右侧固定列（每行含
+  // Popconfirm 按钮）场景下，鼠标 hover 会以 60 fps 触发重绘，导致该警告
+  // 每秒输出 1000+ 次，console.warn 构建堆栈字符串的开销会使页面明显卡顿。
+  // warnHandler 仅在开发模式下生效，生产构建中 Vue 警告已被编译器移除。
+  app.config.warnHandler = (msg) => {
+    if (
+      msg.includes('"arrowContent"') &&
+      msg.includes('outside of the render function')
+    ) {
+      return;
+    }
+    console.warn(`[Vue warn]: ${msg}`);
+  };
+
   app.mount('#app');
 }
 
