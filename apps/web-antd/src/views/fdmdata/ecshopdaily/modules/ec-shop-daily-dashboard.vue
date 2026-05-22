@@ -14,11 +14,9 @@ import {
   Card,
   Col,
   Collapse,
-  Dropdown,
   Form,
   FormItem,
   Input,
-  Menu,
   RangePicker,
   Row,
   Select,
@@ -33,14 +31,19 @@ import { getEcShopDailyPage } from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
 import { EC_PLATFORM_SUGGESTIONS } from '../data';
-import { aggregateByMonth, aggregateByWeekStart, fmtAmount2, fmtPercent2, mergeRowsByStatDate, round2, sliceLastDays, sortedDailyFromMap, sumKpi } from '../dashboard-utils';
+import {
+  aggregateByMonth,
+  aggregateByWeekStart,
+  fmtAmount2,
+  fmtPercent2,
+  mergeRowsByStatDate,
+  round2,
+  sliceLastDays,
+  sortedDailyFromMap,
+  sumKpi,
+} from '../dashboard-utils';
 import type { EcShopDailyRow } from '../dashboard-utils';
 import EchartsBox from './echarts-box.vue';
-
-const props = defineProps<{
-  /** 与列表检索表单一致：用于「同步列表条件」 */
-  getGridFormValues: () => Promise<Record<string, unknown>>;
-}>();
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 40;
@@ -182,7 +185,7 @@ function ratioLineOption(
 ): ECOption {
   const dense = opts?.dense ?? false;
   const showPointLabels = opts?.showPointLabels ?? !dense;
-  const data = ratio.map((v) => (v == null ? null : round2(v)));
+  const data = ratio.map((v) => (v === null || v === undefined ? null : round2(v)));
   return {
     title: {
       text: title,
@@ -221,7 +224,7 @@ function ratioLineOption(
         label: {
           show: showPointLabels,
           formatter: (p: any) =>
-            p.value == null || p.value === '' ? '' : fmtPercent2(p.value),
+            p.value === null || p.value === undefined || p.value === '' ? '' : fmtPercent2(p.value),
           fontSize: 10,
         },
       },
@@ -392,23 +395,6 @@ async function loadRows() {
   }
 }
 
-async function syncFromGrid() {
-  const v = await props.getGridFormValues();
-  if (Array.isArray(v.statDate) && v.statDate.length === 2) {
-    const a = v.statDate[0] as unknown;
-    const b = v.statDate[1] as unknown;
-    dashForm.statDate = [
-      typeof a === 'string' ? a : dayjs(a as any).format('YYYY-MM-DD HH:mm:ss'),
-      typeof b === 'string' ? b : dayjs(b as any).format('YYYY-MM-DD HH:mm:ss'),
-    ] as [string, string];
-  }
-  const pc = String(v.platformCode ?? '').trim();
-  dashForm.platformCode = pc || undefined;
-  dashForm.shopId = String(v.shopId ?? '');
-  dashForm.shopName = String(v.shopName ?? '');
-  await loadRows();
-}
-
 function resetFilters() {
   dashForm.statDate = [
     dayjs().subtract(89, 'day').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
@@ -508,16 +494,6 @@ void loadRows();
               <Space wrap class="w-full justify-end">
                 <Button type="primary" @click="loadRows">查询</Button>
                 <Button @click="resetFilters">重置</Button>
-                <Dropdown>
-                  <Button>更多</Button>
-                  <template #overlay>
-                    <Menu>
-                      <Menu.Item key="sync" @click="syncFromGrid">
-                        与列表筛选同步
-                      </Menu.Item>
-                    </Menu>
-                  </template>
-                </Dropdown>
               </Space>
             </FormItem>
           </Col>
