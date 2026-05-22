@@ -185,45 +185,6 @@ function formatPercent({ cellValue }: { cellValue: unknown }) {
   return Number.isFinite(n) ? `${n.toFixed(2)}%` : String(cellValue);
 }
 
-function formatDecimal({ cellValue }: { cellValue: unknown }) {
-  if (cellValue === null || cellValue === undefined || cellValue === '') {
-    return '';
-  }
-  const n = Number(cellValue);
-  return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
-}
-
-function intCol(
-  field: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
-  title: string,
-  minWidth = 96,
-): NonNullable<
-  VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns']
->[number] {
-  return {
-    field,
-    title,
-    minWidth,
-    align: 'right',
-  };
-}
-
-function amountCol(
-  field: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
-  title: string,
-  minWidth = 104,
-): NonNullable<
-  VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns']
->[number] {
-  return {
-    field,
-    title,
-    minWidth,
-    align: 'right',
-    formatter: formatAmount,
-  };
-}
-
 /** 新增/修改表单（与 fdm_ec_shop_daily 全字段对齐，净销售额仅展示） */
 export function useFormSchema(): VbenFormSchema[] {
   const fullWidth = 'col-span-2 min-w-0';
@@ -442,16 +403,10 @@ export function useGridFormSchema(): VbenFormSchema[] {
   ];
 }
 
-/** 列表列 */
+/** 列表列（仅核心汇总字段；详细数据在编辑弹窗查看） */
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns'] {
   return [
-    { type: 'checkbox', width: 48, fixed: 'left' },
-    {
-      field: 'id',
-      title: 'ID',
-      width: 80,
-      fixed: 'left',
-    },
+    { type: 'checkbox', width: 40, fixed: 'left' },
     {
       field: 'statDate',
       title: '统计日',
@@ -468,18 +423,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       field: 'shopId',
       title: '店铺 ID',
       minWidth: 120,
-      showOverflow: true,
+      showOverflow: 'tooltip',
     },
     {
       field: 'shopName',
       title: '店铺名称',
       minWidth: 140,
-      showOverflow: true,
-    },
-    {
-      field: 'currency',
-      title: '币种',
-      width: 72,
+      showOverflow: 'tooltip',
     },
     {
       field: 'orderCount',
@@ -528,6 +478,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       formatter: formatAmount,
     },
     {
+      field: 'marketingCost',
+      title: '营销花费',
+      minWidth: 100,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
       field: 'visitorCount',
       title: '访客',
       minWidth: 80,
@@ -546,86 +503,11 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       align: 'right',
     },
     {
-      field: 'marketingCost',
-      title: '营销花费',
-      minWidth: 100,
-      align: 'right',
-      formatter: formatAmount,
-    },
-    {
       field: 'paymentConversionRate',
       title: '支付转化率',
       minWidth: 108,
       align: 'right',
       formatter: formatPercent,
-    },
-    amountCol('avgOrderValue', '客单价'),
-    {
-      field: 'bounceRate',
-      title: '跳失率',
-      minWidth: 88,
-      align: 'right',
-      formatter: formatPercent,
-    },
-    intCol('avgStayDurationSec', '停留时长(秒)', 112),
-    {
-      field: 'avgPageViewPerVisitor',
-      title: '人均浏览量',
-      minWidth: 104,
-      align: 'right',
-      formatter: formatDecimal,
-    },
-    {
-      field: 'uvValue',
-      title: 'UV价值',
-      minWidth: 96,
-      align: 'right',
-      formatter: formatDecimal,
-    },
-    intCol('productVisitorCount', '商品访客'),
-    intCol('productPageViewCount', '商品浏览量', 104),
-    intCol('paidProductCount', '支付商品数', 104),
-    intCol('returningBuyerCount', '支付老买家', 104),
-    amountCol('returningBuyerPaidAmount', '老买家支付额', 116),
-    intCol('productFavoriteBuyerCount', '收藏买家', 96),
-    intCol('cartAddUserCount', '加购人数'),
-    intCol('reviewCount', '评价数', 88),
-    intCol('positiveReviewCount', '正面评价', 96),
-    intCol('negativeReviewCount', '负面评价', 96),
-    intCol('reviewWithImageCount', '有图评价', 96),
-    {
-      field: 'descMatchScore',
-      title: '描述相符',
-      minWidth: 96,
-      align: 'right',
-      formatter: formatDecimal,
-    },
-    {
-      field: 'logisticsServiceScore',
-      title: '物流服务',
-      minWidth: 96,
-      align: 'right',
-      formatter: formatDecimal,
-    },
-    {
-      field: 'serviceAttitudeScore',
-      title: '服务态度',
-      minWidth: 96,
-      align: 'right',
-      formatter: formatDecimal,
-    },
-    intCol('pickupPackageCount', '揽收包裹', 96),
-    intCol('shippedPackageCount', '发货包裹', 96),
-    intCol('deliveryPackageCount', '派送包裹', 96),
-    intCol('signedPackageCount', '签收包裹', 96),
-    amountCol('taobaokeCommission', '淘宝客佣金', 108),
-    amountCol('diamondDisplayCost', '钻石展位', 104),
-    amountCol('trainAdCost', '直通车', 96),
-    {
-      field: 'remark',
-      title: '备注',
-      minWidth: 140,
-      showOverflow: true,
     },
     {
       field: 'createTime',

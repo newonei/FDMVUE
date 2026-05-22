@@ -7,7 +7,14 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 import { confirm, Page, useVbenModal } from '@vben/common-ui';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, Collapse, Dropdown, Menu, message, Segmented } from 'ant-design-vue';
+import {
+  Button,
+  Collapse,
+  Dropdown,
+  Menu,
+  message,
+  Segmented,
+} from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -43,7 +50,9 @@ const [JdImportModalComp, jdImportModalApi] = useVbenModal({
 
 // ─── View mode ─────────────────────────────────────────────────────────────────
 
-const dashboardRef = ref<InstanceType<typeof EcShopDailyDashboard> | null>(null);
+const dashboardRef = ref<InstanceType<typeof EcShopDailyDashboard> | null>(
+  null,
+);
 
 const viewModeOptions = [
   { label: '数据看板', value: 'dashboard' },
@@ -243,12 +252,7 @@ function getGridFormValuesForDashboard() {
           </p>
         </div>
         <div class="flex shrink-0 items-center gap-2">
-          <Button
-            type="primary"
-            @click="handleCreate"
-          >
-            新增
-          </Button>
+          <Button type="primary" @click="handleCreate"> 新增 </Button>
           <Segmented
             v-model:value="activeTab"
             :options="[...viewModeOptions]"
@@ -321,7 +325,10 @@ function getGridFormValuesForDashboard() {
                 <template #overlay>
                   <Menu @click="handleMoreMenuClick">
                     <Menu.Item key="export">导出</Menu.Item>
-                    <Menu.Item key="delete-batch" :disabled="checkedCount === 0">
+                    <Menu.Item
+                      key="delete-batch"
+                      :disabled="checkedCount === 0"
+                    >
                       <span :class="checkedCount > 0 ? 'text-red-500' : ''">
                         批量删除
                       </span>
