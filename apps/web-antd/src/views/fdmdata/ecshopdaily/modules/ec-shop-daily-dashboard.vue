@@ -449,14 +449,14 @@ void loadRows();
                 />
                 <Space :size="4" wrap class="flex-shrink-0">
                   <Button size="small" @click="applyQuickRange(7)">
-近7天
-</Button>
+                    近7天
+                  </Button>
                   <Button size="small" @click="applyQuickRange(30)">
-近30天
-</Button>
+                    近30天
+                  </Button>
                   <Button size="small" @click="applyQuickRange(90)">
-近90天
-</Button>
+                    近90天
+                  </Button>
                 </Space>
               </div>
             </FormItem>

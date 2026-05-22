@@ -19,10 +19,9 @@ export namespace FdmdataEcShopDailyBrushApi {
 }
 
 export function getEcShopDailyBrushPage(params: PageParam) {
-  return requestClient.get<PageResult<FdmdataEcShopDailyBrushApi.EcShopDailyBrush>>(
-    '/fdmdata/ec-shop-daily-brush/page',
-    { params },
-  );
+  return requestClient.get<
+    PageResult<FdmdataEcShopDailyBrushApi.EcShopDailyBrush>
+  >('/fdmdata/ec-shop-daily-brush/page', { params });
 }
 
 export function getEcShopDailyBrush(id: number) {

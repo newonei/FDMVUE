@@ -107,9 +107,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <FormModal @success="gridApi.query()" />
 
     <div class="brush-page flex min-h-0 flex-1 flex-col px-4 pb-4">
-      <header class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2">
+      <header
+        class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
+      >
         <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">店铺刷单记录管理</h2>
+          <h2 class="mb-1 text-lg font-semibold text-foreground">
+            店铺刷单记录管理
+          </h2>
           <p class="mb-0 text-xs text-muted-foreground">
             记录各店铺刷单明细，看板计算真实销售额时将自动扣除刷单本金
           </p>
@@ -126,7 +130,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
               v-memo="[checkedIdsMemoKey]"
               class="inline-flex items-center gap-2"
             >
-              <span v-if="checkedCount > 0" class="text-xs text-muted-foreground">
+              <span
+                v-if="checkedCount > 0"
+                class="text-xs text-muted-foreground"
+              >
                 已选 {{ checkedCount }} 条
               </span>
             </div>

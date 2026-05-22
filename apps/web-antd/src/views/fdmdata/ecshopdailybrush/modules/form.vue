@@ -42,10 +42,14 @@ const [Modal, modalApi] = useVbenModal({
     modalApi.lock();
     try {
       if (data.id) {
-        await updateEcShopDailyBrush(data as FdmdataEcShopDailyBrushApi.EcShopDailyBrush);
+        await updateEcShopDailyBrush(
+          data as FdmdataEcShopDailyBrushApi.EcShopDailyBrush,
+        );
         message.success($t('ui.actionMessage.updateSuccess', [data.id]));
       } else {
-        await createEcShopDailyBrush(data as FdmdataEcShopDailyBrushApi.EcShopDailyBrush);
+        await createEcShopDailyBrush(
+          data as FdmdataEcShopDailyBrushApi.EcShopDailyBrush,
+        );
         message.success($t('ui.actionMessage.createSuccess'));
       }
       emit('success');

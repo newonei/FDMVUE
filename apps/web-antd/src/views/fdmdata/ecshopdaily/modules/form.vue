@@ -106,7 +106,10 @@ import { computed } from 'vue';
 
 <template>
   <Modal :title="title" class="w-[860px]">
-    <div class="ec-shop-daily-form-body overflow-y-auto pr-1" style="max-height: 70vh">
+    <div
+      class="ec-shop-daily-form-body overflow-y-auto pr-1"
+      style="max-height: 70vh"
+    >
       <Form />
     </div>
   </Modal>
@@ -116,6 +119,7 @@ import { computed } from 'vue';
 .ec-shop-daily-form-body :deep(.ant-form-item-label > label) {
   white-space: nowrap;
 }
+
 /* label 固定宽度，与 labelWidth:120 对齐 */
 .ec-shop-daily-form-body :deep(.ant-form-item-label) {
   flex: 0 0 120px;
