@@ -53,47 +53,80 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'shopId',
       label: '店铺 ID',
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '无则留空', maxlength: 64 },
+      componentProps: {
+        allowClear: true,
+        placeholder: '无则留空',
+        maxlength: 64,
+      },
     },
     {
       fieldName: 'shopName',
       label: '店铺名称',
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '与日汇总店铺名称保持一致', maxlength: 128 },
+      componentProps: {
+        allowClear: true,
+        placeholder: '与日汇总店铺名称保持一致',
+        maxlength: 128,
+      },
     },
     {
       fieldName: 'brushOrderCount',
       label: '刷单单量',
       rules: 'selectRequired',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 0, placeholder: '0' },
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        precision: 0,
+        placeholder: '0',
+      },
     },
     {
       fieldName: 'brushPrincipal',
       label: '刷单本金',
       rules: 'selectRequired',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 2, placeholder: '买家实付金额' },
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        precision: 2,
+        placeholder: '买家实付金额',
+      },
     },
     {
       fieldName: 'brushCommission',
       label: '刷单佣金',
       rules: 'selectRequired',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 2, placeholder: '0.00' },
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        precision: 2,
+        placeholder: '0.00',
+      },
     },
     {
       fieldName: 'brushTotalCost',
       label: '刷单总成本',
       rules: 'selectRequired',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 2, placeholder: '本金+佣金+其他' },
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        precision: 2,
+        placeholder: '本金+佣金+其他',
+      },
     },
     {
       fieldName: 'remark',
       label: '备注',
       component: 'Textarea',
-      componentProps: { maxlength: 256, rows: 2, showCount: true, placeholder: '可选，如：商品/活动说明' },
+      componentProps: {
+        maxlength: 256,
+        rows: 2,
+        showCount: true,
+        placeholder: '可选，如：商品/活动说明',
+      },
     },
   ];
 }
@@ -129,7 +162,8 @@ export function useGridFormSchema(): VbenFormSchema[] {
 }
 
 function formatAmount({ cellValue }: { cellValue: unknown }) {
-  if (cellValue === null || cellValue === undefined || cellValue === '') return '';
+  if (cellValue === null || cellValue === undefined || cellValue === '')
+    return '';
   const n = Number(cellValue);
   return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
 }
@@ -138,16 +172,66 @@ function formatAmount({ cellValue }: { cellValue: unknown }) {
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyBrushApi.EcShopDailyBrush>['columns'] {
   return [
     { type: 'checkbox', width: 40, fixed: 'left' },
-    { field: 'statDate', title: '刷单日期', minWidth: 112, fixed: 'left' },
+    {
+      field: 'statDate',
+      title: '刷单日期',
+      minWidth: 112,
+      fixed: 'left',
+      formatter: ({ cellValue }: { cellValue: unknown }) =>
+        cellValue ? String(cellValue).slice(0, 10) : '',
+    },
     { field: 'platformCode', title: '平台', minWidth: 88, fixed: 'left' },
-    { field: 'shopId', title: '店铺 ID', minWidth: 120, showOverflow: 'tooltip' },
-    { field: 'shopName', title: '店铺名称', minWidth: 140, showOverflow: 'tooltip' },
-    { field: 'brushOrderCount', title: '刷单单量', minWidth: 96, align: 'right' },
-    { field: 'brushPrincipal', title: '刷单本金', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'brushCommission', title: '刷单佣金', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'brushTotalCost', title: '刷单总成本', minWidth: 108, align: 'right', formatter: formatAmount },
+    {
+      field: 'shopId',
+      title: '店铺 ID',
+      minWidth: 120,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'shopName',
+      title: '店铺名称',
+      minWidth: 140,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'brushOrderCount',
+      title: '刷单单量',
+      minWidth: 96,
+      align: 'right',
+    },
+    {
+      field: 'brushPrincipal',
+      title: '刷单本金',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'brushCommission',
+      title: '刷单佣金',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'brushTotalCost',
+      title: '刷单总成本',
+      minWidth: 108,
+      align: 'right',
+      formatter: formatAmount,
+    },
     { field: 'remark', title: '备注', minWidth: 140, showOverflow: 'tooltip' },
-    { field: 'createTime', title: '创建时间', minWidth: 156, formatter: 'formatDateTime' },
-    { title: '操作', width: 140, fixed: 'right', slots: { default: 'actions' } },
+    {
+      field: 'createTime',
+      title: '创建时间',
+      minWidth: 156,
+      formatter: 'formatDateTime',
+    },
+    {
+      title: '操作',
+      width: 140,
+      fixed: 'right',
+      slots: { default: 'actions' },
+    },
   ];
 }

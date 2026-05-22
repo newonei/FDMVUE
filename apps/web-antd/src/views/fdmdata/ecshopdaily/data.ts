@@ -206,7 +206,11 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'shopId',
       label: '店铺 ID',
       component: 'Input',
-      componentProps: { allowClear: true, placeholder: '无则留空', maxlength: 64 },
+      componentProps: {
+        allowClear: true,
+        placeholder: '无则留空',
+        maxlength: 64,
+      },
     },
     {
       fieldName: 'shopName',
@@ -240,7 +244,12 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'netSalesAmount',
       label: '净销售额',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', disabled: true, precision: 2, placeholder: '保存时自动计算' },
+      componentProps: {
+        class: 'w-full',
+        disabled: true,
+        precision: 2,
+        placeholder: '保存时自动计算',
+      },
       dependencies: {
         triggerFields: ['paidAmount', 'refundAmount'],
         componentProps: (values) => {
@@ -304,7 +313,12 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '备注',
       formItemClass: fullWidth,
       component: 'Textarea',
-      componentProps: { maxlength: 512, rows: 3, showCount: true, placeholder: '可选' },
+      componentProps: {
+        maxlength: 512,
+        rows: 3,
+        showCount: true,
+        placeholder: '可选',
+      },
     },
   ];
 }
@@ -340,13 +354,15 @@ export function useGridFormSchema(): VbenFormSchema[] {
 }
 
 function formatAmount({ cellValue }: { cellValue: unknown }) {
-  if (cellValue === null || cellValue === undefined || cellValue === '') return '';
+  if (cellValue === null || cellValue === undefined || cellValue === '')
+    return '';
   const n = Number(cellValue);
   return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
 }
 
 function formatPercent({ cellValue }: { cellValue: unknown }) {
-  if (cellValue === null || cellValue === undefined || cellValue === '') return '';
+  if (cellValue === null || cellValue === undefined || cellValue === '')
+    return '';
   const n = Number(cellValue);
   return Number.isFinite(n) ? `${n.toFixed(2)}%` : String(cellValue);
 }
@@ -355,23 +371,91 @@ function formatPercent({ cellValue }: { cellValue: unknown }) {
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns'] {
   return [
     { type: 'checkbox', width: 40, fixed: 'left' },
-    { field: 'statDate', title: '统计日', minWidth: 112, fixed: 'left' },
+    {
+      field: 'statDate',
+      title: '统计日',
+      minWidth: 112,
+      fixed: 'left',
+      formatter: ({ cellValue }: { cellValue: unknown }) =>
+        cellValue ? String(cellValue).slice(0, 10) : '',
+    },
     { field: 'platformCode', title: '平台', minWidth: 88, fixed: 'left' },
-    { field: 'shopId', title: '店铺 ID', minWidth: 120, showOverflow: 'tooltip' },
-    { field: 'shopName', title: '店铺名称', minWidth: 140, showOverflow: 'tooltip' },
+    {
+      field: 'shopId',
+      title: '店铺 ID',
+      minWidth: 120,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'shopName',
+      title: '店铺名称',
+      minWidth: 140,
+      showOverflow: 'tooltip',
+    },
     { field: 'orderCount', title: '订单数', minWidth: 88, align: 'right' },
     { field: 'paidOrderCount', title: '已支付', minWidth: 88, align: 'right' },
-    { field: 'refundOrderCount', title: '退款单', minWidth: 88, align: 'right' },
-    { field: 'gmvAmount', title: '成交额', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'paidAmount', title: '已支付额', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'refundAmount', title: '退款额', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'netSalesAmount', title: '净销售额', minWidth: 104, align: 'right', formatter: formatAmount },
-    { field: 'marketingCost', title: '营销花费', minWidth: 100, align: 'right', formatter: formatAmount },
+    {
+      field: 'refundOrderCount',
+      title: '退款单',
+      minWidth: 88,
+      align: 'right',
+    },
+    {
+      field: 'gmvAmount',
+      title: '成交额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'paidAmount',
+      title: '已支付额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'refundAmount',
+      title: '退款额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'netSalesAmount',
+      title: '净销售额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'marketingCost',
+      title: '营销花费',
+      minWidth: 100,
+      align: 'right',
+      formatter: formatAmount,
+    },
     { field: 'visitorCount', title: '访客', minWidth: 80, align: 'right' },
     { field: 'pageViewCount', title: '浏览量', minWidth: 88, align: 'right' },
     { field: 'buyerCount', title: '买家', minWidth: 80, align: 'right' },
-    { field: 'paymentConversionRate', title: '支付转化率', minWidth: 108, align: 'right', formatter: formatPercent },
-    { field: 'createTime', title: '创建时间', minWidth: 156, formatter: 'formatDateTime' },
-    { title: '操作', width: 140, fixed: 'right', slots: { default: 'actions' } },
+    {
+      field: 'paymentConversionRate',
+      title: '支付转化率',
+      minWidth: 108,
+      align: 'right',
+      formatter: formatPercent,
+    },
+    {
+      field: 'createTime',
+      title: '创建时间',
+      minWidth: 156,
+      formatter: 'formatDateTime',
+    },
+    {
+      title: '操作',
+      width: 140,
+      fixed: 'right',
+      slots: { default: 'actions' },
+    },
   ];
 }
