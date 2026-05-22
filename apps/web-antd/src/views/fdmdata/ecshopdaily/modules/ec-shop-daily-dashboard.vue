@@ -7,6 +7,8 @@
 <script lang="ts" setup>
 import type { ECOption } from '@vben/plugins/echarts';
 
+import type { EcShopDailyRow } from '../dashboard-utils';
+
 import { computed, reactive, ref } from 'vue';
 
 import {
@@ -24,13 +26,11 @@ import {
   Spin,
   Statistic,
 } from 'ant-design-vue';
-
 import dayjs from 'dayjs';
 
 import { getEcShopDailyPage } from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
-import { EC_PLATFORM_SUGGESTIONS } from '../data';
 import {
   aggregateByMonth,
   aggregateByWeekStart,
@@ -42,7 +42,7 @@ import {
   sortedDailyFromMap,
   sumKpi,
 } from '../dashboard-utils';
-import type { EcShopDailyRow } from '../dashboard-utils';
+import { EC_PLATFORM_SUGGESTIONS } from '../data';
 import EchartsBox from './echarts-box.vue';
 
 const PAGE_SIZE = 200;
@@ -59,10 +59,10 @@ const totalRemote = ref(0);
 const rawRows = ref<EcShopDailyRow[]>([]);
 
 const dashForm = reactive<{
-  statDate: [string, string] | undefined;
   platformCode: string | undefined;
   shopId: string;
   shopName: string;
+  statDate: [string, string] | undefined;
 }>({
   statDate: [
     dayjs().subtract(89, 'day').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
@@ -180,12 +180,14 @@ function dualLineOption(
 function ratioLineOption(
   title: string,
   cats: string[],
-  ratio: (number | null)[],
+  ratio: (null | number)[],
   opts?: LineChartOpts,
 ): ECOption {
   const dense = opts?.dense ?? false;
   const showPointLabels = opts?.showPointLabels ?? !dense;
-  const data = ratio.map((v) => (v === null || v === undefined ? null : round2(v)));
+  const data = ratio.map((v) =>
+    v === null || v === undefined ? null : round2(v),
+  );
   return {
     title: {
       text: title,
@@ -224,7 +226,9 @@ function ratioLineOption(
         label: {
           show: showPointLabels,
           formatter: (p: any) =>
-            p.value === null || p.value === undefined || p.value === '' ? '' : fmtPercent2(p.value),
+            p.value === null || p.value === undefined || p.value === ''
+              ? ''
+              : fmtPercent2(p.value),
           fontSize: 10,
         },
       },
@@ -287,7 +291,7 @@ function monthBarOption(
 
 const chart7 = computed<ECOption | null>(() => {
   const rows = last7.value;
-  if (!rows.length) return null;
+  if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
   const net = rows.map((r) => round2(r.netSalesAmount));
   const mkt = rows.map((r) => round2(r.marketingCost));
@@ -298,7 +302,7 @@ const chart7 = computed<ECOption | null>(() => {
 
 const chart30 = computed<ECOption | null>(() => {
   const rows = last30.value;
-  if (!rows.length) return null;
+  if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
   const net = rows.map((r) => round2(r.netSalesAmount));
   const mkt = rows.map((r) => round2(r.marketingCost));
@@ -307,7 +311,7 @@ const chart30 = computed<ECOption | null>(() => {
 
 const chart30Ratio = computed<ECOption | null>(() => {
   const rows = last30.value;
-  if (!rows.length) return null;
+  if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
   const ratio = rows.map((r) => {
     const net = Number(r.netSalesAmount ?? 0);
@@ -319,19 +323,19 @@ const chart30Ratio = computed<ECOption | null>(() => {
 
 const chartMonthBar = computed<ECOption | null>(() => {
   const m = monthAgg.value;
-  if (!m.labels.length) return null;
+  if (m.labels.length === 0) return null;
   return monthBarOption(m.labels, m.net, m.mkt);
 });
 
 const chartMonthRatio = computed<ECOption | null>(() => {
   const m = monthAgg.value;
-  if (!m.labels.length) return null;
+  if (m.labels.length === 0) return null;
   return ratioLineOption('月度费比', m.labels, m.ratio);
 });
 
 const chartWeek = computed<ECOption | null>(() => {
   const w = weekAgg.value;
-  if (!w.labels.length) return null;
+  if (w.labels.length === 0) return null;
   return dualLineOption(
     '近12周销售和费用（按周起始周一汇总）',
     w.labels,
@@ -345,7 +349,7 @@ const chartWeek = computed<ECOption | null>(() => {
 
 const chartWeekRatio = computed<ECOption | null>(() => {
   const w = weekAgg.value;
-  if (!w.labels.length) return null;
+  if (w.labels.length === 0) return null;
   return ratioLineOption('周费比', w.labels, w.ratio, { dense: true });
 });
 
@@ -444,15 +448,15 @@ void loadRows();
                   v-bind="rangePickerProps"
                 />
                 <Space :size="4" wrap class="flex-shrink-0">
-                  <Button size="small" @click="applyQuickRange(7)"
-                    >近7天</Button
-                  >
-                  <Button size="small" @click="applyQuickRange(30)"
-                    >近30天</Button
-                  >
-                  <Button size="small" @click="applyQuickRange(90)"
-                    >近90天</Button
-                  >
+                  <Button size="small" @click="applyQuickRange(7)">
+近7天
+</Button>
+                  <Button size="small" @click="applyQuickRange(30)">
+近30天
+</Button>
+                  <Button size="small" @click="applyQuickRange(90)">
+近90天
+</Button>
                 </Space>
               </div>
             </FormItem>
