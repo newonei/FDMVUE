@@ -136,7 +136,6 @@ function handleButtonClick(action: ActionItem) {
     action.onClick();
   }
 }
-
 </script>
 
 <template>
