@@ -149,8 +149,8 @@ async function handleDingTalkLogin() {
       (redirect as string) || '/',
     )}`;
     window.location.href = buildDingTalkOAuthUrl(redirectUri);
-  } catch (e) {
-    console.error('钉钉登录失败:', e);
+  } catch (error) {
+    console.error('钉钉登录失败:', error);
   } finally {
     dingtalkAutoLoading.value = false;
   }
@@ -168,9 +168,9 @@ async function tryDingTalkAutoLogin() {
     accessStore.setRefreshToken(token.refreshToken);
     const target = (redirect as string) || preferences.app.defaultHomePath;
     window.location.href = decodeURIComponent(target);
-  } catch (e) {
+  } catch (error) {
     // 失败仅 warn，降级到手动登录页
-    console.warn('钉钉工作台免登失败，降级为手动登录', e);
+    console.warn('钉钉工作台免登失败，降级为手动登录', error);
   } finally {
     dingtalkAutoLoading.value = false;
   }

@@ -130,8 +130,7 @@ const coreRoutes: RouteRecordRaw[] = [
    * meta.ignoreAccess 让守卫放行该路径，无需 token 即可访问。
    */
   {
-    component: () =>
-      import('#/views/_core/authentication/dingtalk-auth.vue'),
+    component: () => import('#/views/_core/authentication/dingtalk-auth.vue'),
     meta: {
       hideInBreadcrumb: true,
       hideInMenu: true,

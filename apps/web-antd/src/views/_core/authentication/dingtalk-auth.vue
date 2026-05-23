@@ -64,9 +64,9 @@ onMounted(async () => {
       ? redirect
       : userInfo?.homePath || preferences.app.defaultHomePath;
     window.location.href = target;
-  } catch (err: any) {
+  } catch (error: any) {
     status.value = 'error';
-    errorMsg.value = err?.message || '钉钉登录失败';
+    errorMsg.value = error?.message || '钉钉登录失败';
     message.error(errorMsg.value);
     setTimeout(() => router.replace('/auth/login'), 2500);
   }
@@ -91,9 +91,10 @@ onMounted(async () => {
   justify-content: center;
   height: 100vh;
 }
+
 .error {
+  line-height: 1.8;
   color: #ff4d4f;
   text-align: center;
-  line-height: 1.8;
 }
 </style>
