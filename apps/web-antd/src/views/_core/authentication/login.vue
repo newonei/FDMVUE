@@ -9,6 +9,7 @@ import { useRoute } from 'vue-router';
 import { AuthenticationLogin, Verification, z } from '@vben/common-ui';
 import { isCaptchaEnable, isTenantEnable } from '@vben/hooks';
 import { $t } from '@vben/locales';
+import { preferences } from '@vben/preferences';
 import { useAccessStore } from '@vben/stores';
 
 import {
@@ -19,6 +20,11 @@ import {
   socialAuthRedirect,
 } from '#/api/core/auth';
 import { useAuthStore } from '#/store';
+import {
+  buildDingTalkOAuthUrl,
+  isInDingTalk,
+  performDingTalkWorkbenchLogin,
+} from '#/utils/dingtalk';
 
 defineOptions({ name: 'Login' });
 
@@ -92,10 +98,21 @@ async function handleVerifySuccess({ captchaVerification }: any) {
 
 /** 处理第三方登录 */
 const redirect = query?.redirect;
+
+/** 是否正在执行钉钉免登（用于显示全屏遮罩） */
+const dingtalkAutoLoading = ref(false);
+
 async function handleThirdLogin(type: number) {
   if (type <= 0) {
     return;
   }
+
+  // 钉钉（type=20）走独立链路：钉钉客户端内免登，外部浏览器 OAuth
+  if (type === 20) {
+    await handleDingTalkLogin();
+    return;
+  }
+
   try {
     // 计算 redirectUri
     // tricky: type、redirect 需要先 encode 一次，否则钉钉回调会丢失。配合 social-login.vue#getUrlValue() 使用
@@ -112,9 +129,57 @@ async function handleThirdLogin(type: number) {
   }
 }
 
-/** 组件挂载时获取租户信息 */
-onMounted(() => {
-  fetchTenantList();
+/** 钉钉登录入口：内部走免登，外部走 OAuth */
+async function handleDingTalkLogin() {
+  try {
+    if (isInDingTalk()) {
+      dingtalkAutoLoading.value = true;
+      const token = await performDingTalkWorkbenchLogin();
+      if (!token) return;
+      accessStore.setAccessToken(token.accessToken);
+      accessStore.setRefreshToken(token.refreshToken);
+      // 用 location.href 强刷，触发守卫重新加载权限和动态路由
+      const target = (redirect as string) || preferences.app.defaultHomePath;
+      window.location.href = decodeURIComponent(target);
+      return;
+    }
+
+    // 外部浏览器：跳钉钉 OAuth
+    const redirectUri = `${location.origin}/user/auth?redirect=${encodeURIComponent(
+      (redirect as string) || '/',
+    )}`;
+    window.location.href = buildDingTalkOAuthUrl(redirectUri);
+  } catch (e) {
+    console.error('钉钉登录失败:', e);
+  } finally {
+    dingtalkAutoLoading.value = false;
+  }
+}
+
+/** 钉钉工作台进入时自动免登（无需用户点击） */
+async function tryDingTalkAutoLogin() {
+  if (accessStore.accessToken) return;
+  if (!isInDingTalk()) return;
+  dingtalkAutoLoading.value = true;
+  try {
+    const token = await performDingTalkWorkbenchLogin();
+    if (!token) return;
+    accessStore.setAccessToken(token.accessToken);
+    accessStore.setRefreshToken(token.refreshToken);
+    const target = (redirect as string) || preferences.app.defaultHomePath;
+    window.location.href = decodeURIComponent(target);
+  } catch (e) {
+    // 失败仅 warn，降级到手动登录页
+    console.warn('钉钉工作台免登失败，降级为手动登录', e);
+  } finally {
+    dingtalkAutoLoading.value = false;
+  }
+}
+
+/** 组件挂载时获取租户信息 + 尝试钉钉免登 */
+onMounted(async () => {
+  await fetchTenantList();
+  await tryDingTalkAutoLogin();
 });
 
 const formSchema = computed((): VbenFormSchema[] => {
@@ -188,5 +253,16 @@ const formSchema = computed((): VbenFormSchema[] => {
       mode="pop"
       @on-success="handleVerifySuccess"
     />
+
+    <!-- 钉钉工作台自动免登的全屏遮罩 -->
+    <div
+      v-if="dingtalkAutoLoading"
+      class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-white/95 dark:bg-gray-900/95"
+    >
+      <div
+        class="border-primary mb-4 h-12 w-12 animate-spin rounded-full border-4 border-t-transparent"
+      ></div>
+      <p class="text-base text-gray-700 dark:text-gray-200">正在钉钉免登...</p>
+    </div>
   </div>
 </template>

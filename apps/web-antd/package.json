@@ -55,6 +55,7 @@
     "cropperjs": "catalog:",
     "dayjs": "catalog:",
     "diagram-js": "catalog:",
+    "dingtalk-jsapi": "^2.15.3",
     "fast-xml-parser": "catalog:",
     "highlight.js": "catalog:",
     "pinia": "catalog:",
