@@ -114,6 +114,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     columns: useGridColumns(),
     height: 'auto',
+    autoResize: true, // 依赖 ResizeObserver 监听父容器尺寸变化
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -138,8 +139,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
 watch(activeTab, async (key) => {
   if (key !== 'table') return;
   tableMounted.value = true;
+  // 懒挂载 + flex 布局下，vxe-table 初次拿到的父容器高度可能还是 0。
+  // 多等几个 tick 让浏览器完成布局，再强制派发 resize，触发 vxe 的 autoResize 重算。
   await nextTick();
   await nextTick();
+  window.dispatchEvent(new Event('resize'));
   gridApi.query();
 });
 
