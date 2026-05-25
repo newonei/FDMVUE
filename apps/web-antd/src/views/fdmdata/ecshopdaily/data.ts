@@ -377,8 +377,14 @@ export function useGridFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'platformCode',
       label: '平台',
-      component: 'Input',
-      componentProps: { allowClear: true, placeholder: '如 TMALL、PDD' },
+      component: 'Select',
+      componentProps: {
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        placeholder: '全部平台',
+        options: EC_PLATFORM_SUGGESTIONS,
+      },
     },
     {
       fieldName: 'shopId',
