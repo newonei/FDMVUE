@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
@@ -18,6 +18,7 @@ import { $t } from '#/locales';
 import {
   buildEcShopDailySubmitPayload,
   EC_SHOP_DAILY_CREATE_DEFAULTS,
+  mapEcShopDailyToFormValues,
   useFormSchema,
 } from '../data';
 
@@ -64,14 +65,22 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       modalApi.unlock();
       formData.value = undefined;
-      void formApi.setValues(EC_SHOP_DAILY_CREATE_DEFAULTS as any, false);
+      await formApi.resetForm();
       return;
     }
     const mySeq = ++openSeq;
     const row = modalApi.getData<FdmdataEcShopDailyApi.EcShopDaily>();
     formData.value = undefined;
-    await formApi.setValues(EC_SHOP_DAILY_CREATE_DEFAULTS as any, false);
-    if (!row?.id) return;
+
+    if (!row?.id) {
+      await formApi.resetForm();
+      await formApi.setValues(
+        mapEcShopDailyToFormValues(EC_SHOP_DAILY_CREATE_DEFAULTS),
+        false,
+      );
+      return;
+    }
+
     modalApi.lock();
     try {
       const detail = await getEcShopDaily(row.id);
@@ -82,7 +91,11 @@ const [Modal, modalApi] = useVbenModal({
         return;
       }
       formData.value = detail;
-      await formApi.setValues(detail as any, false);
+      await formApi.resetForm();
+      await formApi.setValues(
+        mapEcShopDailyToFormValues({ ...row, ...detail }),
+        false,
+      );
     } catch (error) {
       if (mySeq === openSeq) {
         console.error('Load ecShopDaily detail failed', error);
@@ -98,10 +111,6 @@ const [Modal, modalApi] = useVbenModal({
 const title = computed(() =>
   formData.value?.id ? '修改店铺日汇总' : '新增店铺日汇总',
 );
-</script>
-
-<script lang="ts">
-import { computed } from 'vue';
 </script>
 
 <template>

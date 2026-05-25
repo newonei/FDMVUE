@@ -2,7 +2,51 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
+import dayjs from 'dayjs';
+
 import { getRangePickerDefaultProps } from '#/utils';
+
+/** 接口 LocalDate 可能为 YYYY-MM-DD 字符串或 [year, month, day] 数组 */
+export function normalizeStatDateForForm(
+  statDate: unknown,
+): string | undefined {
+  if (statDate === undefined || statDate === null || statDate === '') {
+    return undefined;
+  }
+  if (typeof statDate === 'string') {
+    const s = statDate.trim();
+    if (!s) return undefined;
+    const d = dayjs(s.length >= 10 ? s.slice(0, 10) : s);
+    return d.isValid() ? d.format('YYYY-MM-DD') : undefined;
+  }
+  if (Array.isArray(statDate) && statDate.length >= 3) {
+    const [y, m, d] = statDate;
+    const parsed = dayjs(
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+    );
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD') : undefined;
+  }
+  const d = dayjs(statDate as dayjs.ConfigType);
+  return d.isValid() ? d.format('YYYY-MM-DD') : undefined;
+}
+
+/** 详情/列表行 → 表单可回填的值（DatePicker、平台编码等） */
+export function mapEcShopDailyToFormValues(
+  detail: Partial<FdmdataEcShopDailyApi.EcShopDaily> & Record<string, unknown>,
+): Record<string, unknown> {
+  const platformRaw =
+    detail.platformCode ?? (detail.platform_code as string | undefined);
+  return {
+    ...detail,
+    statDate: normalizeStatDateForForm(detail.statDate),
+    platformCode:
+      platformRaw !== null &&
+      platformRaw !== undefined &&
+      String(platformRaw).trim() !== ''
+        ? String(platformRaw).trim()
+        : undefined,
+  };
+}
 
 /** 常用平台编码（供看板和表单下拉使用） */
 export const EC_PLATFORM_SUGGESTIONS = [
@@ -94,7 +138,7 @@ export function buildEcShopDailySubmitPayload(
 ): FdmdataEcShopDailyApi.EcShopDaily {
   const payload: Record<string, any> = {
     id: raw.id,
-    statDate: raw.statDate,
+    statDate: normalizeStatDateForForm(raw.statDate),
     platformCode: String(raw.platformCode ?? '').trim(),
     shopId: String(raw.shopId ?? '').trim(),
     shopName: String(raw.shopName ?? '').trim(),
@@ -191,15 +235,13 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'platformCode',
       label: '平台编码',
       rules: 'required',
-      component: 'AutoComplete',
+      component: 'Select',
       componentProps: {
         allowClear: true,
-        placeholder: '如 TMALL、TAOBAO、JD',
+        showSearch: true,
+        optionFilterProp: 'label',
+        placeholder: '如 TMALL、PDD、JD',
         options: EC_PLATFORM_SUGGESTIONS,
-        filterOption: (input: string, option?: { value: string }) =>
-          (option?.value ?? '')
-            .toLowerCase()
-            .includes((input || '').toLowerCase()),
       },
     },
     {
