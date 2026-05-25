@@ -2,7 +2,7 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
-import { computed, nextTick, ref, shallowRef, watch } from 'vue';
+import { computed, ref, shallowRef } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 
@@ -36,9 +36,6 @@ const viewModeOptions = [
 ] as const;
 
 const activeTab = ref<'dashboard' | 'table'>('dashboard');
-
-const dashboardMounted = ref(true);
-const tableMounted = ref(false);
 
 // ─── Checkbox state ────────────────────────────────────────────────────────────
 
@@ -114,7 +111,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     columns: useGridColumns(),
     height: 'auto',
-    autoResize: true, // 依赖 ResizeObserver 监听父容器尺寸变化
+    autoResize: true,
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -136,19 +133,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
   },
 });
 
-watch(activeTab, async (key) => {
-  if (key !== 'table') return;
-  tableMounted.value = true;
-  // 懒挂载 + flex 布局下，vxe-table 初次拿到的父容器高度可能还是 0。
-  // 多等几个 tick 让浏览器完成布局，再强制派发 resize，触发 vxe 的 autoResize 重算。
-  await nextTick();
-  await nextTick();
-  window.dispatchEvent(new Event('resize'));
-  gridApi.query();
-});
-
 function handleRefresh() {
-  if (tableMounted.value) gridApi.query();
+  gridApi.query();
   if (activeTab.value === 'dashboard' && dashboardRef.value) {
     void dashboardRef.value.reload?.();
   }
@@ -156,125 +142,104 @@ function handleRefresh() {
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <!--
+    布局策略（关键，吃过亏）：
+    - <Page auto-content-height> 已经会撑满可用高度并把内容区设成 flex
+    - 直接把 <Grid> 放进 <Page>（与 vben 模板生成的简单页面一致）才能让 vxe-table 的
+      height: 'auto' 拿到正确父高度
+    - 视图切换用 v-show（始终保留 DOM），避免懒挂载时 ResizeObserver 错过初次尺寸
+    - dashboard 区域只占可视层级，不参与 Grid 的高度计算
+  -->
+  <Page auto-content-height>
     <FormModal @success="handleRefresh" />
 
-    <div class="ec-shop-daily-page flex min-h-0 flex-1 flex-col px-4 pb-4">
-      <!-- 页头 -->
-      <header
-        class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3"
-      >
-        <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">
-            店铺后台日汇总管理
-          </h2>
-          <p class="mb-0 text-xs text-muted-foreground">
-            按店铺统计每日成交、退款、流量与营销投放数据
-          </p>
-        </div>
-        <div class="flex shrink-0 items-center gap-2">
-          <Button
-            v-if="activeTab === 'table'"
-            type="primary"
-            @click="handleCreate"
-          >
-            新增
-          </Button>
-          <Segmented
-            v-model:value="activeTab"
-            :options="[...viewModeOptions]"
-            class="ec-shop-daily-segmented"
-          />
-        </div>
-      </header>
-
-      <!-- 数据看板 -->
-      <div
-        v-if="dashboardMounted"
-        v-show="activeTab === 'dashboard'"
-        class="min-h-0 flex-1 overflow-auto pt-3"
-      >
-        <EcShopDailyDashboard ref="dashboardRef" />
+    <!-- 顶部工具栏：标题 + Tab 切换 + 新增按钮 -->
+    <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0 flex-1">
+        <h2 class="mb-1 text-lg font-semibold text-foreground">
+          店铺后台日汇总管理
+        </h2>
+        <p class="mb-0 text-xs text-muted-foreground">
+          按店铺统计每日成交、退款、流量与营销投放数据
+        </p>
       </div>
-
-      <!-- 数据表格（懒挂载） -->
-      <div
-        v-if="tableMounted"
-        v-show="activeTab === 'table'"
-        class="ec-shop-daily-grid min-h-0 flex-1"
-      >
-        <Grid table-title="店铺日汇总">
-          <template #toolbar-tools>
-            <div
-              v-memo="[checkedIdsMemoKey]"
-              class="inline-flex flex-wrap items-center gap-2"
-            >
-              <span
-                v-if="checkedCount > 0"
-                class="mr-1 text-xs text-muted-foreground"
-              >
-                已选 {{ checkedCount }} 条
-              </span>
-              <Button
-                v-if="checkedCount > 0"
-                danger
-                size="small"
-                @click="handleDeleteBatch"
-              >
-                批量删除
-              </Button>
-            </div>
-          </template>
-
-          <template #actions="{ row }">
-            <div v-memo="[row.id]">
-              <TableAction
-                :actions="[
-                  {
-                    label: $t('common.edit'),
-                    type: 'link',
-                    icon: ACTION_ICON.EDIT,
-                    auth: ['fdmdata:ec-shop-daily:update'],
-                    onClick: handleEdit.bind(null, row),
-                  },
-                  {
-                    label: $t('common.delete'),
-                    type: 'link',
-                    danger: true,
-                    icon: ACTION_ICON.DELETE,
-                    auth: ['fdmdata:ec-shop-daily:delete'],
-                    popConfirm: {
-                      title: $t('ui.actionMessage.deleteConfirm', [row.id]),
-                      confirm: handleDelete.bind(null, row),
-                    },
-                  },
-                ]"
-              />
-            </div>
-          </template>
-        </Grid>
+      <div class="flex shrink-0 items-center gap-2">
+        <Button
+          v-if="activeTab === 'table'"
+          type="primary"
+          @click="handleCreate"
+        >
+          新增
+        </Button>
+        <Segmented
+          v-model:value="activeTab"
+          :options="[...viewModeOptions]"
+          class="ec-shop-daily-segmented"
+        />
       </div>
     </div>
+
+    <!-- 数据看板（始终挂载，仅 v-show 切显示） -->
+    <div v-show="activeTab === 'dashboard'">
+      <EcShopDailyDashboard ref="dashboardRef" />
+    </div>
+
+    <!-- 数据表格（始终挂载，与简单参考页一致结构） -->
+    <Grid v-show="activeTab === 'table'" table-title="店铺日汇总">
+      <template #toolbar-tools>
+        <div
+          v-memo="[checkedIdsMemoKey]"
+          class="inline-flex flex-wrap items-center gap-2"
+        >
+          <span
+            v-if="checkedCount > 0"
+            class="mr-1 text-xs text-muted-foreground"
+          >
+            已选 {{ checkedCount }} 条
+          </span>
+          <Button
+            v-if="checkedCount > 0"
+            danger
+            size="small"
+            @click="handleDeleteBatch"
+          >
+            批量删除
+          </Button>
+        </div>
+      </template>
+
+      <template #actions="{ row }">
+        <div v-memo="[row.id]">
+          <TableAction
+            :actions="[
+              {
+                label: $t('common.edit'),
+                type: 'link',
+                icon: ACTION_ICON.EDIT,
+                auth: ['fdmdata:ec-shop-daily:update'],
+                onClick: handleEdit.bind(null, row),
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmdata:ec-shop-daily:delete'],
+                popConfirm: {
+                  title: $t('ui.actionMessage.deleteConfirm', [row.id]),
+                  confirm: handleDelete.bind(null, row),
+                },
+              },
+            ]"
+          />
+        </div>
+      </template>
+    </Grid>
   </Page>
 </template>
 
 <style scoped>
-.ec-shop-daily-page {
-  min-height: 0;
-}
-
 .ec-shop-daily-segmented :deep(.ant-segmented) {
   background: hsl(var(--muted) / 45%);
-}
-
-.ec-shop-daily-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.ec-shop-daily-grid :deep(.vben-vxe-grid) {
-  flex: 1 1 0;
-  min-height: 0;
 }
 </style>
