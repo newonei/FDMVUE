@@ -650,9 +650,10 @@ export function useGridFormSchema(): VbenFormSchema[] {
       fieldName: 'productName',
       label: '商品名称',
       component: 'Input',
+      help: '支持英文或中文逗号分隔多个关键词，匹配包含任一关键词的商品（如：软萌小马,8折萌熊）',
       componentProps: {
         allowClear: true,
-        placeholder: '模糊查询商品名称',
+        placeholder: '模糊查询，多个用逗号分隔',
       },
     },
     {
