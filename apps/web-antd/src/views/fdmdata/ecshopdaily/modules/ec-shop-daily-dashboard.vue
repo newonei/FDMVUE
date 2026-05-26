@@ -8,17 +8,18 @@
 import type { ECOption } from '@vben/plugins/echarts';
 
 import type { EcShopDailyRow } from '../dashboard-utils';
+import type { EcShopDailyOption } from '../data';
 
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 
 import {
+  AutoComplete,
   Button,
   Card,
   Col,
   Collapse,
   Form,
   FormItem,
-  Input,
   RangePicker,
   Row,
   Select,
@@ -28,7 +29,10 @@ import {
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
-import { getEcShopDailyPage } from '#/api/fdmdata/ecshopdaily';
+import {
+  getEcShopDailyPage,
+  getEcShopDailyShopNameOptions,
+} from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
 import {
@@ -57,10 +61,12 @@ const loading = ref(false);
 const truncated = ref(false);
 const totalRemote = ref(0);
 const rawRows = ref<EcShopDailyRow[]>([]);
+const shopNameOptions = ref<EcShopDailyOption[]>([]);
+let shopNameFetchSeq = 0;
+let shopNameSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
 const dashForm = reactive<{
   platformCode: string | undefined;
-  shopId: string;
   shopName: string;
   statDate: [string, string] | undefined;
 }>({
@@ -69,7 +75,6 @@ const dashForm = reactive<{
     dayjs().endOf('day').format('YYYY-MM-DD HH:mm:ss'),
   ],
   platformCode: undefined,
-  shopId: '',
   shopName: '',
 });
 
@@ -93,9 +98,7 @@ const filterSummary = computed(() => {
   const platform =
     platformOptions.find((o) => o.value === dashForm.platformCode)?.label ??
     (dashForm.platformCode?.trim() || '全部平台');
-  const shop =
-    dashForm.shopName?.trim() ||
-    (dashForm.shopId?.trim() ? `ID:${dashForm.shopId.trim()}` : '全部店铺');
+  const shop = dashForm.shopName?.trim() || '全部店铺';
   return `${start} ~ ${end} · ${platform} · ${shop}`;
 });
 
@@ -353,6 +356,45 @@ const chartWeekRatio = computed<ECOption | null>(() => {
   return ratioLineOption('周费比', w.labels, w.ratio, { dense: true });
 });
 
+async function fetchShopNameOptions(keyword = '') {
+  const seq = ++shopNameFetchSeq;
+  const platformCode = dashForm.platformCode?.trim() || undefined;
+  try {
+    const list = await getEcShopDailyShopNameOptions({
+      keyword: keyword.trim() || undefined,
+      limit: 50,
+      platformCode,
+    });
+    if (seq !== shopNameFetchSeq) return;
+    shopNameOptions.value = list.map((name) => ({
+      label: name,
+      value: name,
+    }));
+  } catch (error) {
+    if (seq !== shopNameFetchSeq) return;
+    console.error('Load ec shop daily dashboard shop name options failed', error);
+    shopNameOptions.value = [];
+  }
+}
+
+function handleShopNameSearch(keyword = '') {
+  if (shopNameSearchTimer) {
+    clearTimeout(shopNameSearchTimer);
+  }
+  shopNameSearchTimer = setTimeout(() => {
+    void fetchShopNameOptions(keyword);
+  }, 250);
+}
+
+function handleShopNameClear() {
+  dashForm.shopName = '';
+  handleShopNameSearch('');
+}
+
+function handlePlatformChange() {
+  handleShopNameSearch(dashForm.shopName);
+}
+
 function buildQueryPayload(): Record<string, unknown> {
   const p: Record<string, unknown> = {};
   if (dashForm.statDate?.[0] && dashForm.statDate?.[1]) {
@@ -361,7 +403,6 @@ function buildQueryPayload(): Record<string, unknown> {
   if (dashForm.platformCode?.trim()) {
     p.platformCode = dashForm.platformCode.trim();
   }
-  if (dashForm.shopId?.trim()) p.shopId = dashForm.shopId.trim();
   if (dashForm.shopName?.trim()) p.shopName = dashForm.shopName.trim();
   return p;
 }
@@ -405,8 +446,8 @@ function resetFilters() {
     dayjs().endOf('day').format('YYYY-MM-DD HH:mm:ss'),
   ];
   dashForm.platformCode = undefined;
-  dashForm.shopId = '';
   dashForm.shopName = '';
+  handleShopNameSearch('');
   void loadRows();
 }
 
@@ -421,11 +462,27 @@ function applyQuickRange(days: number) {
   void loadRows();
 }
 
+function applyYesterday() {
+  const yesterday = dayjs().subtract(1, 'day');
+  dashForm.statDate = [
+    yesterday.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+    yesterday.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+  ];
+  void loadRows();
+}
+
 defineExpose({
   reload: loadRows,
 });
 
+onBeforeUnmount(() => {
+  if (shopNameSearchTimer) {
+    clearTimeout(shopNameSearchTimer);
+  }
+});
+
 void loadRows();
+void fetchShopNameOptions();
 </script>
 
 <template>
@@ -448,6 +505,7 @@ void loadRows();
                   v-bind="rangePickerProps"
                 />
                 <Space :size="4" wrap class="flex-shrink-0">
+                  <Button size="small" @click="applyYesterday">昨天</Button>
                   <Button size="small" @click="applyQuickRange(7)">
                     近7天
                   </Button>
@@ -469,6 +527,7 @@ void loadRows();
                 placeholder="全部平台"
                 :options="platformOptions"
                 class="w-full"
+                @change="handlePlatformChange"
               />
             </FormItem>
           </Col>
@@ -477,23 +536,19 @@ void loadRows();
         <Row :gutter="[16, 12]" class="mt-1">
           <Col :xs="24" :sm="12" :md="8" :lg="7">
             <FormItem label="店铺名称" class="mb-0">
-              <Input
+              <AutoComplete
                 v-model:value="dashForm.shopName"
                 allow-clear
-                placeholder="模糊匹配"
+                :filter-option="false"
+                :options="shopNameOptions"
+                placeholder="输入关键词或选择店铺"
+                @clear="handleShopNameClear"
+                @focus="handleShopNameSearch('')"
+                @search="handleShopNameSearch"
               />
             </FormItem>
           </Col>
-          <Col :xs="24" :sm="12" :md="8" :lg="5">
-            <FormItem label="店铺 ID" class="mb-0">
-              <Input
-                v-model:value="dashForm.shopId"
-                allow-clear
-                placeholder="精确匹配"
-              />
-            </FormItem>
-          </Col>
-          <Col :xs="24" :md="8" :lg="12" :xl="12">
+          <Col :xs="24" :md="16" :lg="17" :xl="17">
             <FormItem label=" " class="mb-0 ec-filter-actions">
               <Space wrap class="w-full justify-end">
                 <Button type="primary" @click="loadRows">查询</Button>

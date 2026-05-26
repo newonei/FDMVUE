@@ -67,6 +67,22 @@ export function getEcShopDailyPage(params: PageParam) {
   );
 }
 
+export interface EcShopDailyShopNameOptionsParams {
+  keyword?: string;
+  limit?: number;
+  platformCode?: string;
+}
+
+/** 查询店铺名称下拉候选 */
+export function getEcShopDailyShopNameOptions(
+  params: EcShopDailyShopNameOptionsParams = {},
+) {
+  return requestClient.get<string[]>(
+    '/fdmdata/ec-shop-daily/shop-name-options',
+    { params },
+  );
+}
+
 /** 查询店铺后台日汇总详情 */
 export function getEcShopDaily(id: number) {
   return requestClient.get<FdmdataEcShopDailyApi.EcShopDaily>(

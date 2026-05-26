@@ -1,8 +1,10 @@
 <script lang="ts" setup>
+import type { EcShopDailyOption } from './data';
+
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
-import { computed, ref, shallowRef } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 
@@ -13,6 +15,7 @@ import {
   deleteEcShopDaily,
   deleteEcShopDailyList,
   getEcShopDailyPage,
+  getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
 import { $t } from '#/locales';
 
@@ -122,8 +125,51 @@ async function handleDeleteBatch() {
 
 // ─── Grid ──────────────────────────────────────────────────────────────────────
 
+const shopNameOptions = ref<EcShopDailyOption[]>([]);
+let shopNameFetchSeq = 0;
+let shopNameSearchTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function fetchShopNameOptions(keyword = '') {
+  const seq = ++shopNameFetchSeq;
+  let platformCode: string | undefined;
+  try {
+    const formValues = await gridApi.formApi.getValues();
+    platformCode = String(formValues.platformCode ?? '').trim() || undefined;
+  } catch {
+    platformCode = undefined;
+  }
+
+  try {
+    const list = await getEcShopDailyShopNameOptions({
+      keyword: keyword.trim() || undefined,
+      limit: 50,
+      platformCode,
+    });
+    if (seq !== shopNameFetchSeq) return;
+    shopNameOptions.value = list.map((name) => ({
+      label: name,
+      value: name,
+    }));
+  } catch (error) {
+    if (seq !== shopNameFetchSeq) return;
+    console.error('Load ec shop daily shop name options failed', error);
+    shopNameOptions.value = [];
+  }
+}
+
+function handleShopNameSearch(keyword = '') {
+  if (shopNameSearchTimer) {
+    clearTimeout(shopNameSearchTimer);
+  }
+  shopNameSearchTimer = setTimeout(() => {
+    void fetchShopNameOptions(keyword);
+  }, 250);
+}
+
 const [Grid, gridApi] = useVbenVxeGrid({
-  formOptions: { schema: useGridFormSchema() },
+  formOptions: {
+    schema: useGridFormSchema(shopNameOptions, handleShopNameSearch),
+  },
   gridOptions: {
     columns: useGridColumns(),
     height: 'auto',
@@ -155,6 +201,16 @@ function handleRefresh() {
     void dashboardRef.value.reload?.();
   }
 }
+
+onMounted(() => {
+  void fetchShopNameOptions();
+});
+
+onBeforeUnmount(() => {
+  if (shopNameSearchTimer) {
+    clearTimeout(shopNameSearchTimer);
+  }
+});
 </script>
 
 <template>

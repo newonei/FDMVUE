@@ -11,6 +11,8 @@ import { Descriptions, Divider, message, Tag } from 'ant-design-vue';
 
 import { getEcShopDaily } from '#/api/fdmdata/ecshopdaily';
 
+import { formatEcPlatformLabel } from '../data';
+
 defineOptions({ name: 'EcShopDailyDetailModal' });
 
 // openSeq 用于防止多次快速切换时旧请求覆盖新请求
@@ -67,7 +69,7 @@ const basicItems = computed(() => {
   if (!d) return [];
   return [
     item('统计日期', fmtDate((d as any).statDate)),
-    item('平台', d.platformCode ?? '-'),
+    item('平台', formatEcPlatformLabel(d.platformCode) || '-'),
     item('店铺ID', d.shopId ?? '-'),
     item('店铺名称', d.shopName ?? '-'),
     item('币种', d.currency ?? '-'),
@@ -233,7 +235,7 @@ const [Modal, modalApi] = useVbenModal({
 const title = computed(() => {
   const d = detail.value as any;
   if (!d) return '店铺日汇总详情';
-  return `店铺日汇总详情｜${fmtDate(d.statDate)}｜${d.platformCode ?? ''}｜${d.shopName ?? ''}`;
+  return `店铺日汇总详情｜${fmtDate(d.statDate)}｜${formatEcPlatformLabel(d.platformCode)}｜${d.shopName ?? ''}`;
 });
 </script>
 

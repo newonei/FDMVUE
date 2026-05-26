@@ -1,3 +1,5 @@
+import type { Ref } from 'vue';
+
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
@@ -50,14 +52,29 @@ export function mapEcShopDailyToFormValues(
 
 /** 常用平台编码（供看板和表单下拉使用） */
 export const EC_PLATFORM_SUGGESTIONS = [
-  { value: 'TAOBAO', label: '淘宝 TAOBAO' },
-  { value: 'TMALL', label: '天猫 TMALL' },
-  { value: 'PDD', label: '拼多多 PDD' },
-  { value: 'DOUYIN', label: '抖音 DOUYIN' },
-  { value: 'JD', label: '京东 JD' },
-  { value: 'XHS', label: '小红书 XHS' },
-  { value: 'SPH', label: '视频号 SPH' },
+  { value: 'TAOBAO', label: '淘宝' },
+  { value: 'TMALL', label: '天猫' },
+  { value: 'PDD', label: '拼多多' },
+  { value: 'DOUYIN', label: '抖音' },
+  { value: 'JD', label: '京东' },
+  { value: 'XHS', label: '小红书' },
+  { value: 'SPH', label: '视频号' },
 ];
+
+const EC_PLATFORM_LABEL_MAP = new Map(
+  EC_PLATFORM_SUGGESTIONS.map((item) => [item.value, item.label]),
+);
+
+export function formatEcPlatformLabel(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  const code = String(value).trim();
+  return EC_PLATFORM_LABEL_MAP.get(code) ?? code;
+}
+
+export interface EcShopDailyOption {
+  label: string;
+  value: string;
+}
 
 export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShopDaily> =
   {
@@ -233,14 +250,14 @@ export function useFormSchema(): VbenFormSchema[] {
     },
     {
       fieldName: 'platformCode',
-      label: '平台编码',
+      label: '平台',
       rules: 'required',
       component: 'Select',
       componentProps: {
         allowClear: true,
         showSearch: true,
         optionFilterProp: 'label',
-        placeholder: '如 TMALL、PDD、JD',
+        placeholder: '请选择平台',
         options: EC_PLATFORM_SUGGESTIONS,
       },
     },
@@ -366,7 +383,20 @@ export function useFormSchema(): VbenFormSchema[] {
 }
 
 /** 列表检索表单 */
-export function useGridFormSchema(): VbenFormSchema[] {
+export function useGridFormSchema(
+  shopNameOptions?: Ref<EcShopDailyOption[]>,
+  onShopNameSearch?: (keyword: string) => void,
+): VbenFormSchema[] {
+  const getShopNameAutoCompleteProps = () => ({
+    allowClear: true,
+    filterOption: false,
+    onClear: () => onShopNameSearch?.(''),
+    onFocus: () => onShopNameSearch?.(''),
+    onSearch: onShopNameSearch,
+    options: shopNameOptions?.value ?? [],
+    placeholder: '输入关键词或选择店铺',
+  });
+
   return [
     {
       fieldName: 'statDate',
@@ -387,16 +417,10 @@ export function useGridFormSchema(): VbenFormSchema[] {
       },
     },
     {
-      fieldName: 'shopId',
-      label: '店铺 ID',
-      component: 'Input',
-      componentProps: { allowClear: true, placeholder: '精确匹配' },
-    },
-    {
       fieldName: 'shopName',
       label: '店铺名称',
-      component: 'Input',
-      componentProps: { allowClear: true, placeholder: '模糊搜索' },
+      component: 'AutoComplete',
+      componentProps: getShopNameAutoCompleteProps,
     },
   ];
 }
@@ -437,7 +461,14 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       formatter: ({ cellValue }: { cellValue: unknown }) =>
         cellValue ? String(cellValue).slice(0, 10) : '',
     },
-    { field: 'platformCode', title: '平台', minWidth: 88, fixed: 'left' },
+    {
+      field: 'platformCode',
+      title: '平台',
+      minWidth: 88,
+      fixed: 'left',
+      formatter: ({ cellValue }: { cellValue: unknown }) =>
+        formatEcPlatformLabel(cellValue),
+    },
     {
       field: 'shopName',
       title: '店铺名称',
