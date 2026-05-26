@@ -408,11 +408,21 @@ function formatAmount({ cellValue }: { cellValue: unknown }) {
   return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
 }
 
-function formatPercent({ cellValue }: { cellValue: unknown }) {
-  if (cellValue === null || cellValue === undefined || cellValue === '')
-    return '';
-  const n = Number(cellValue);
-  return Number.isFinite(n) ? `${n.toFixed(2)}%` : String(cellValue);
+function asNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatRatioPercent(numerator: number, denominator: number): string {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return '';
+  if (denominator === 0) return '';
+  return `${((numerator / denominator) * 100).toFixed(2)}%`;
+}
+
+function formatRoi(numerator: number, denominator: number): string {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return '';
+  if (denominator === 0) return '';
+  return (numerator / denominator).toFixed(2);
 }
 
 /** 列表列（核心汇总字段；详细数据在编辑弹窗查看） */
@@ -429,38 +439,43 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
     },
     { field: 'platformCode', title: '平台', minWidth: 88, fixed: 'left' },
     {
-      field: 'shopId',
-      title: '店铺 ID',
-      minWidth: 120,
-      showOverflow: 'tooltip',
-    },
-    {
       field: 'shopName',
       title: '店铺名称',
-      minWidth: 140,
+      minWidth: 180,
       showOverflow: 'tooltip',
     },
-    { field: 'orderCount', title: '订单数', minWidth: 88, align: 'right' },
-    { field: 'paidOrderCount', title: '已支付', minWidth: 88, align: 'right' },
+
+    // ─── 真实口径（剔除刷单） ───────────────────────────────────────────────
     {
-      field: 'refundOrderCount',
-      title: '退款单',
-      minWidth: 88,
+      field: 'realNetSalesAmount',
+      title: '真实净销',
+      minWidth: 110,
       align: 'right',
+      formatter: ({ row }: any) => {
+        // 优先服务端 real 字段；否则按 paid-refund-brushPrincipal 兜底
+        const real = row?.realNetSalesAmount;
+        if (real !== undefined && real !== null && real !== '')
+          return formatAmount({ cellValue: real });
+        const paid = asNumber(row?.paidAmount);
+        const refund = asNumber(row?.refundAmount);
+        const brushPrincipal = asNumber(row?.brushPrincipal);
+        return formatAmount({ cellValue: paid - refund - brushPrincipal });
+      },
     },
     {
-      field: 'gmvAmount',
-      title: '成交额',
-      minWidth: 104,
+      field: 'realPaidAmount',
+      title: '真实支付',
+      minWidth: 110,
       align: 'right',
-      formatter: formatAmount,
-    },
-    {
-      field: 'paidAmount',
-      title: '已支付额',
-      minWidth: 104,
-      align: 'right',
-      formatter: formatAmount,
+      formatter: ({ row }: any) => {
+        const real = row?.realPaidAmount;
+        if (real !== undefined && real !== null && real !== '')
+          return formatAmount({ cellValue: real });
+        const paid = asNumber(row?.paidAmount);
+        const refund = asNumber(row?.refundAmount);
+        const brushPrincipal = asNumber(row?.brushPrincipal);
+        return formatAmount({ cellValue: paid - refund - brushPrincipal });
+      },
     },
     {
       field: 'refundAmount',
@@ -470,12 +485,46 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       formatter: formatAmount,
     },
     {
-      field: 'netSalesAmount',
-      title: '净销售额',
+      field: 'refundRate',
+      title: '退款率',
+      minWidth: 96,
+      align: 'right',
+      formatter: ({ row }: any) =>
+        formatRatioPercent(
+          asNumber(row?.refundAmount),
+          asNumber(row?.paidAmount),
+        ),
+    },
+    {
+      field: 'realPaidOrderCount',
+      title: '真实支付单',
+      minWidth: 104,
+      align: 'right',
+      formatter: ({ row }: any) => {
+        const real = row?.realPaidOrderCount;
+        if (real !== undefined && real !== null && real !== '')
+          return String(real);
+        const paidOrder = asNumber(row?.paidOrderCount);
+        const brushOrder = asNumber(row?.brushOrderCount);
+        const v = Math.max(paidOrder - brushOrder, 0);
+        return String(v);
+      },
+    },
+    {
+      field: 'brushPrincipal',
+      title: '刷单本金',
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
     },
+    {
+      field: 'brushOrderCount',
+      title: '刷单单量',
+      minWidth: 96,
+      align: 'right',
+    },
+
+    // ─── 投放效率 ─────────────────────────────────────────────────────────────
     {
       field: 'marketingCost',
       title: '营销花费',
@@ -483,25 +532,44 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       align: 'right',
       formatter: formatAmount,
     },
-    { field: 'visitorCount', title: '访客', minWidth: 80, align: 'right' },
-    { field: 'pageViewCount', title: '浏览量', minWidth: 88, align: 'right' },
-    { field: 'buyerCount', title: '买家', minWidth: 80, align: 'right' },
     {
-      field: 'paymentConversionRate',
-      title: '支付转化率',
-      minWidth: 108,
+      field: 'roi',
+      title: 'ROI',
+      minWidth: 88,
       align: 'right',
-      formatter: formatPercent,
+      formatter: ({ row }: any) => {
+        const realNet =
+          row?.realNetSalesAmount ??
+          asNumber(row?.paidAmount) -
+            asNumber(row?.refundAmount) -
+            asNumber(row?.brushPrincipal);
+        return formatRoi(asNumber(realNet), asNumber(row?.marketingCost));
+      },
     },
+
+    // ─── 流量效率 ─────────────────────────────────────────────────────────────
+    { field: 'visitorCount', title: '访客', minWidth: 80, align: 'right' },
     {
-      field: 'createTime',
-      title: '创建时间',
-      minWidth: 156,
-      formatter: 'formatDateTime',
+      field: 'realPaymentConversionRate',
+      title: '真实支付转化率',
+      minWidth: 132,
+      align: 'right',
+      formatter: ({ row }: any) => {
+        const realPaidOrder =
+          row?.realPaidOrderCount ??
+          Math.max(
+            asNumber(row?.paidOrderCount) - asNumber(row?.brushOrderCount),
+            0,
+          );
+        return formatRatioPercent(
+          asNumber(realPaidOrder),
+          asNumber(row?.visitorCount),
+        );
+      },
     },
     {
       title: '操作',
-      width: 140,
+      width: 160,
       fixed: 'right',
       slots: { default: 'actions' },
     },

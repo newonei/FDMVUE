@@ -17,12 +17,20 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
+import BrushForm from './modules/brush-form.vue';
+import DetailModal from './modules/detail-modal.vue';
 import EcShopDailyDashboard from './modules/ec-shop-daily-dashboard.vue';
 import Form from './modules/form.vue';
 
 // ─── Modal ─────────────────────────────────────────────────────────────────────
 
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
+const [BrushModal, brushModalApi] = useVbenModal({
+  connectedComponent: BrushForm,
+});
+const [Detail, detailModalApi] = useVbenModal({
+  connectedComponent: DetailModal,
+});
 
 // ─── View mode ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +80,14 @@ function handleCreate() {
 
 function handleEdit(row: FdmdataEcShopDailyApi.EcShopDaily) {
   formModalApi.setData(row).open();
+}
+
+function handleBrush(row: FdmdataEcShopDailyApi.EcShopDaily) {
+  brushModalApi.setData(row).open();
+}
+
+function handleDetail(row: FdmdataEcShopDailyApi.EcShopDaily) {
+  detailModalApi.setData(row).open();
 }
 
 async function handleDelete(row: FdmdataEcShopDailyApi.EcShopDaily) {
@@ -152,6 +168,8 @@ function handleRefresh() {
   -->
   <Page auto-content-height>
     <FormModal @success="handleRefresh" />
+    <BrushModal @success="handleRefresh" />
+    <Detail />
 
     <!-- 顶部工具栏：标题 + Tab 切换 + 新增按钮 -->
     <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -212,6 +230,20 @@ function handleRefresh() {
         <div v-memo="[row.id]">
           <TableAction
             :actions="[
+              {
+                label: '详情',
+                type: 'link',
+                icon: ACTION_ICON.VIEW,
+                onClick: handleDetail.bind(null, row),
+              },
+              {
+                label: '刷单',
+                type: 'link',
+                icon: ACTION_ICON.EDIT,
+                onClick: handleBrush.bind(null, row),
+              },
+            ]"
+            :drop-down-actions="[
               {
                 label: $t('common.edit'),
                 type: 'link',
