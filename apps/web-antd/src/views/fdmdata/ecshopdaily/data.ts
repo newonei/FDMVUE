@@ -4,9 +4,14 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
+import { markRaw } from 'vue';
+
 import dayjs from 'dayjs';
 
-import { getRangePickerDefaultProps } from '#/utils';
+import {
+  FdmDateRangePicker,
+  getYesterdayDateRange,
+} from '#/components/fdm-date-range-picker';
 
 /** 接口 LocalDate 可能为 YYYY-MM-DD 字符串或 [year, month, day] 数组 */
 export function normalizeStatDateForForm(
@@ -53,7 +58,6 @@ export function mapEcShopDailyToFormValues(
 /** 常用平台编码（供看板和表单下拉使用） */
 export const EC_PLATFORM_SUGGESTIONS = [
   { value: 'TAOBAO', label: '淘宝' },
-  { value: 'TMALL', label: '天猫' },
   { value: 'PDD', label: '拼多多' },
   { value: 'DOUYIN', label: '抖音' },
   { value: 'JD', label: '京东' },
@@ -62,7 +66,7 @@ export const EC_PLATFORM_SUGGESTIONS = [
 ];
 
 const EC_PLATFORM_LABEL_MAP = new Map(
-  EC_PLATFORM_SUGGESTIONS.map((item) => [item.value, item.label]),
+  EC_PLATFORM_SUGGESTIONS.map((item) => [item.value, item.label] as const),
 );
 
 export function formatEcPlatformLabel(value: unknown): string {
@@ -74,6 +78,10 @@ export function formatEcPlatformLabel(value: unknown): string {
 export interface EcShopDailyOption {
   label: string;
   value: string;
+}
+
+export interface EcShopDailyGridOptions {
+  hidePlatform?: boolean;
 }
 
 export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShopDaily> =
@@ -90,42 +98,6 @@ export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShop
     marketingCost: 0,
   };
 
-const OPTIONAL_INT_FIELDS = [
-  'visitorCount',
-  'pageViewCount',
-  'buyerCount',
-  'avgStayDurationSec',
-  'productVisitorCount',
-  'productPageViewCount',
-  'paidProductCount',
-  'returningBuyerCount',
-  'productFavoriteBuyerCount',
-  'cartAddUserCount',
-  'reviewCount',
-  'positiveReviewCount',
-  'negativeReviewCount',
-  'reviewWithImageCount',
-  'pickupPackageCount',
-  'shippedPackageCount',
-  'deliveryPackageCount',
-  'signedPackageCount',
-] as const;
-
-const OPTIONAL_AMOUNT_FIELDS = [
-  'paymentConversionRate',
-  'avgOrderValue',
-  'bounceRate',
-  'avgPageViewPerVisitor',
-  'uvValue',
-  'returningBuyerPaidAmount',
-  'descMatchScore',
-  'logisticsServiceScore',
-  'serviceAttitudeScore',
-  'taobaokeCommission',
-  'diamondDisplayCost',
-  'trainAdCost',
-] as const;
-
 function requiredInt(raw: unknown, fallback = 0): number {
   if (raw === '' || raw === null || raw === undefined) return fallback;
   const n = Number(raw);
@@ -136,18 +108,6 @@ function requiredAmount(raw: unknown, fallback = 0): number {
   if (raw === '' || raw === null || raw === undefined) return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function optionalInt(raw: unknown): null | number {
-  if (raw === '' || raw === null || raw === undefined) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-
-function optionalAmount(raw: unknown): null | number {
-  if (raw === '' || raw === null || raw === undefined) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
 }
 
 export function buildEcShopDailySubmitPayload(
@@ -167,14 +127,9 @@ export function buildEcShopDailySubmitPayload(
     paidAmount: requiredAmount(raw.paidAmount),
     refundAmount: requiredAmount(raw.refundAmount),
     marketingCost: requiredAmount(raw.marketingCost),
+    buyerCount: raw.buyerCount === '' ? null : requiredInt(raw.buyerCount, 0),
     remark: String(raw.remark ?? '').trim() || undefined,
   };
-  for (const key of OPTIONAL_INT_FIELDS) {
-    payload[key] = optionalInt(raw[key]);
-  }
-  for (const key of OPTIONAL_AMOUNT_FIELDS) {
-    payload[key] = optionalAmount(raw[key]);
-  }
   return payload as FdmdataEcShopDailyApi.EcShopDaily;
 }
 
@@ -325,46 +280,7 @@ export function useFormSchema(): VbenFormSchema[] {
       },
     },
     formAmount('marketingCost', '营销花费', true),
-    formAmount('avgOrderValue', '客单价'),
-
-    section('traffic', '流量与转化'),
-    formInt('visitorCount', '访客数'),
-    formInt('pageViewCount', '浏览量（PV）'),
     formInt('buyerCount', '成交买家数'),
-    formAmount('paymentConversionRate', '支付转化率(%)', false, 4),
-    formAmount('bounceRate', '跳失率(%)', false, 4),
-    formInt('avgStayDurationSec', '平均停留时长(秒)'),
-    formAmount('avgPageViewPerVisitor', '人均浏览量'),
-    formAmount('uvValue', 'UV价值', false, 4),
-
-    section('product', '商品与买家行为'),
-    formInt('productVisitorCount', '商品访客数'),
-    formInt('productPageViewCount', '商品浏览量'),
-    formInt('paidProductCount', '支付商品数'),
-    formInt('returningBuyerCount', '支付老买家数'),
-    formAmount('returningBuyerPaidAmount', '老买家支付金额'),
-    formInt('productFavoriteBuyerCount', '商品收藏买家数'),
-    formInt('cartAddUserCount', '加购人数'),
-
-    section('review', '评价与服务质量'),
-    formInt('reviewCount', '评价数'),
-    formInt('positiveReviewCount', '正面评价数'),
-    formInt('negativeReviewCount', '负面评价数'),
-    formInt('reviewWithImageCount', '有图评价数'),
-    formAmount('descMatchScore', '描述相符评分'),
-    formAmount('logisticsServiceScore', '物流服务评分'),
-    formAmount('serviceAttitudeScore', '服务态度评分'),
-
-    section('logistics', '物流包裹'),
-    formInt('pickupPackageCount', '揽收包裹数'),
-    formInt('shippedPackageCount', '发货包裹数'),
-    formInt('deliveryPackageCount', '派送包裹数'),
-    formInt('signedPackageCount', '签收成功包裹数'),
-
-    section('marketing', '营销投放'),
-    formAmount('taobaokeCommission', '淘宝客佣金'),
-    formAmount('diamondDisplayCost', '钻石展位消耗'),
-    formAmount('trainAdCost', '直通车消耗'),
 
     section('remark', '备注'),
     {
@@ -386,6 +302,7 @@ export function useFormSchema(): VbenFormSchema[] {
 export function useGridFormSchema(
   shopNameOptions?: Ref<EcShopDailyOption[]>,
   onShopNameSearch?: (keyword: string) => void,
+  options: EcShopDailyGridOptions = {},
 ): VbenFormSchema[] {
   const getShopNameAutoCompleteProps = () => ({
     allowClear: true,
@@ -397,14 +314,18 @@ export function useGridFormSchema(
     placeholder: '输入关键词或选择店铺',
   });
 
-  return [
+  const schema: VbenFormSchema[] = [
     {
       fieldName: 'statDate',
       label: '统计日期',
-      component: 'RangePicker',
-      componentProps: { ...getRangePickerDefaultProps(), allowClear: true },
+      component: markRaw(FdmDateRangePicker),
+      componentProps: { allowClear: false },
+      defaultValue: getYesterdayDateRange(),
     },
-    {
+  ];
+
+  if (!options.hidePlatform) {
+    schema.push({
       fieldName: 'platformCode',
       label: '平台',
       component: 'Select',
@@ -415,14 +336,19 @@ export function useGridFormSchema(
         placeholder: '全部平台',
         options: EC_PLATFORM_SUGGESTIONS,
       },
-    },
+    });
+  }
+
+  schema.push(
     {
       fieldName: 'shopName',
       label: '店铺名称',
       component: 'AutoComplete',
       componentProps: getShopNameAutoCompleteProps,
     },
-  ];
+  );
+
+  return schema;
 }
 
 function formatAmount({ cellValue }: { cellValue: unknown }) {
@@ -450,7 +376,9 @@ function formatRoi(numerator: number, denominator: number): string {
 }
 
 /** 列表列（核心汇总字段；详细数据在编辑弹窗查看） */
-export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns'] {
+export function useGridColumns(
+  options: EcShopDailyGridOptions = {},
+): VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns'] {
   return [
     { type: 'checkbox', width: 40, fixed: 'left' },
     {
@@ -466,6 +394,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       title: '平台',
       minWidth: 88,
       fixed: 'left',
+      visible: !options.hidePlatform,
       formatter: ({ cellValue }: { cellValue: unknown }) =>
         formatEcPlatformLabel(cellValue),
     },
@@ -578,26 +507,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyApi.EcSh
       },
     },
 
-    // ─── 流量效率 ─────────────────────────────────────────────────────────────
-    { field: 'visitorCount', title: '访客', minWidth: 80, align: 'right' },
-    {
-      field: 'realPaymentConversionRate',
-      title: '真实支付转化率',
-      minWidth: 132,
-      align: 'right',
-      formatter: ({ row }: any) => {
-        const realPaidOrder =
-          row?.realPaidOrderCount ??
-          Math.max(
-            asNumber(row?.paidOrderCount) - asNumber(row?.brushOrderCount),
-            0,
-          );
-        return formatRatioPercent(
-          asNumber(realPaidOrder),
-          asNumber(row?.visitorCount),
-        );
-      },
-    },
     {
       title: '操作',
       width: 160,

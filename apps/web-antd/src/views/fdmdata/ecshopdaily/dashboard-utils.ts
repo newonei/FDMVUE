@@ -54,8 +54,6 @@ export function mergeRowsByStatDate(
         realNetSalesAmount: realNetSalesAmountOf(r),
         brushPrincipal: round2(r.brushPrincipal),
         marketingCost: round2(r.marketingCost),
-        visitorCount: n(r.visitorCount),
-        pageViewCount: n(r.pageViewCount),
         buyerCount: n(r.buyerCount),
         realBuyerCount: n(r.realBuyerCount),
         orderCount: n(r.orderCount),
@@ -76,8 +74,6 @@ export function mergeRowsByStatDate(
     );
     ex.brushPrincipal = round2(n(ex.brushPrincipal) + n(r.brushPrincipal));
     ex.marketingCost = round2(n(ex.marketingCost) + n(r.marketingCost));
-    ex.visitorCount = n(ex.visitorCount) + n(r.visitorCount);
-    ex.pageViewCount = n(ex.pageViewCount) + n(r.pageViewCount);
     ex.buyerCount = n(ex.buyerCount) + n(r.buyerCount);
     ex.realBuyerCount = n(ex.realBuyerCount) + n(r.realBuyerCount);
     ex.orderCount = n(ex.orderCount) + n(r.orderCount);

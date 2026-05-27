@@ -10,7 +10,7 @@ import type { ECOption } from '@vben/plugins/echarts';
 import type { EcShopDailyRow } from '../dashboard-utils';
 import type { EcShopDailyOption } from '../data';
 
-import { computed, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   AutoComplete,
@@ -20,20 +20,21 @@ import {
   Collapse,
   Form,
   FormItem,
-  RangePicker,
   Row,
   Select,
   Space,
   Spin,
   Statistic,
 } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import {
   getEcShopDailyPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
-import { getRangePickerDefaultProps } from '#/utils';
+import {
+  FdmDateRangePicker,
+  getYesterdayDateRange,
+} from '#/components/fdm-date-range-picker';
 
 import {
   aggregateByMonth,
@@ -53,6 +54,16 @@ import EchartsBox from './echarts-box.vue';
 const PAGE_SIZE = 200;
 const MAX_PAGES = 40;
 
+const props = defineProps<{
+  platformCode?: string;
+}>();
+
+const fixedPlatformCode = computed(() => {
+  const code = String(props.platformCode ?? '').trim();
+  return code ? code.toUpperCase() : undefined;
+});
+const isFixedPlatform = computed(() => !!fixedPlatformCode.value);
+
 const platformOptions = EC_PLATFORM_SUGGESTIONS.map((p) => ({
   value: p.value,
   label: p.label,
@@ -71,15 +82,10 @@ const dashForm = reactive<{
   shopName: string;
   statDate: [string, string] | undefined;
 }>({
-  statDate: [
-    dayjs().subtract(89, 'day').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-    dayjs().endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-  ],
-  platformCode: undefined,
+  statDate: getYesterdayDateRange(),
+  platformCode: fixedPlatformCode.value,
   shopName: '',
 });
-
-const rangePickerProps = getRangePickerDefaultProps();
 
 const mergedSorted = computed(() =>
   sortedDailyFromMap(mergeRowsByStatDate(rawRows.value)),
@@ -96,9 +102,10 @@ const weekAgg = computed(() => aggregateByWeekStart(mergedSorted.value, 12));
 const filterSummary = computed(() => {
   const start = dashForm.statDate?.[0]?.slice(0, 10) ?? '—';
   const end = dashForm.statDate?.[1]?.slice(0, 10) ?? '—';
+  const platformCode = fixedPlatformCode.value ?? dashForm.platformCode?.trim();
   const platform =
-    platformOptions.find((o) => o.value === dashForm.platformCode)?.label ??
-    (dashForm.platformCode?.trim() || '全部平台');
+    platformOptions.find((o) => o.value === platformCode)?.label ??
+    (platformCode || '全部平台');
   const shop = dashForm.shopName?.trim() || '全部店铺';
   return `${start} ~ ${end} · ${platform} · ${shop}`;
 });
@@ -359,7 +366,8 @@ const chartWeekRatio = computed<ECOption | null>(() => {
 
 async function fetchShopNameOptions(keyword = '') {
   const seq = ++shopNameFetchSeq;
-  const platformCode = dashForm.platformCode?.trim() || undefined;
+  const platformCode =
+    fixedPlatformCode.value ?? (dashForm.platformCode?.trim() || undefined);
   try {
     const list = await getEcShopDailyShopNameOptions({
       keyword: keyword.trim() || undefined,
@@ -401,8 +409,10 @@ function buildQueryPayload(): Record<string, unknown> {
   if (dashForm.statDate?.[0] && dashForm.statDate?.[1]) {
     p.statDate = dashForm.statDate;
   }
-  if (dashForm.platformCode?.trim()) {
-    p.platformCode = dashForm.platformCode.trim();
+  const platformCode =
+    fixedPlatformCode.value ?? (dashForm.platformCode?.trim() || undefined);
+  if (platformCode) {
+    p.platformCode = platformCode;
   }
   if (dashForm.shopName?.trim()) p.shopName = dashForm.shopName.trim();
   return p;
@@ -442,35 +452,19 @@ async function loadRows() {
 }
 
 function resetFilters() {
-  dashForm.statDate = [
-    dayjs().subtract(89, 'day').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-    dayjs().endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-  ];
-  dashForm.platformCode = undefined;
+  dashForm.statDate = getYesterdayDateRange();
+  dashForm.platformCode = fixedPlatformCode.value;
   dashForm.shopName = '';
   handleShopNameSearch('');
   void loadRows();
 }
 
-function applyQuickRange(days: number) {
-  dashForm.statDate = [
-    dayjs()
-      .subtract(days - 1, 'day')
-      .startOf('day')
-      .format('YYYY-MM-DD HH:mm:ss'),
-    dayjs().endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-  ];
+watch(fixedPlatformCode, (platformCode) => {
+  dashForm.platformCode = platformCode;
+  dashForm.shopName = '';
+  handleShopNameSearch('');
   void loadRows();
-}
-
-function applyYesterday() {
-  const yesterday = dayjs().subtract(1, 'day');
-  dashForm.statDate = [
-    yesterday.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-    yesterday.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-  ];
-  void loadRows();
-}
+});
 
 defineExpose({
   reload: loadRows,
@@ -499,28 +493,13 @@ void fetchShopNameOptions();
         <Row :gutter="[16, 12]">
           <Col :xs="24" :lg="14" :xl="15">
             <FormItem label="统计日期" class="mb-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <RangePicker
-                  v-model:value="dashForm.statDate"
-                  class="min-w-[280px] flex-1"
-                  v-bind="rangePickerProps"
-                />
-                <Space :size="4" wrap class="flex-shrink-0">
-                  <Button size="small" @click="applyYesterday">昨天</Button>
-                  <Button size="small" @click="applyQuickRange(7)">
-                    近7天
-                  </Button>
-                  <Button size="small" @click="applyQuickRange(30)">
-                    近30天
-                  </Button>
-                  <Button size="small" @click="applyQuickRange(90)">
-                    近90天
-                  </Button>
-                </Space>
-              </div>
+              <FdmDateRangePicker
+                v-model:value="dashForm.statDate"
+                class="max-w-[360px]"
+              />
             </FormItem>
           </Col>
-          <Col :xs="24" :sm="12" :lg="6" :xl="5">
+          <Col v-if="!isFixedPlatform" :xs="24" :sm="12" :lg="6" :xl="5">
             <FormItem label="平台" class="mb-0">
               <Select
                 v-model:value="dashForm.platformCode"

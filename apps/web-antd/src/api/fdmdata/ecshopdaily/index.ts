@@ -25,46 +25,18 @@ export namespace FdmdataEcShopDailyApi {
     refundAmount?: number; // 退款金额
     netSalesAmount?: number; // 净销售额（服务端：已支付金额 − 退款金额，创建/更新勿传）
     realNetSalesAmount?: number; // 真实净销售额（剔除刷单）
-    visitorCount?: number; // 访客数
-    pageViewCount?: number; // 浏览量（PV）
     buyerCount?: number; // 成交买家数
     realBuyerCount?: number; // 真实成交买家数
     marketingCost?: number; // 营销花费
-    /** 支付转化率(%) */
-    paymentConversionRate?: number;
-    realPaymentConversionRate?: number;
-    avgOrderValue?: number;
-    realAvgOrderValue?: number;
-    /** 跳失率(%) */
-    bounceRate?: number;
-    /** 平均停留时长(秒) */
-    avgStayDurationSec?: number;
-    avgPageViewPerVisitor?: number;
-    uvValue?: number;
-    realUvValue?: number;
-    productVisitorCount?: number;
-    productPageViewCount?: number;
-    paidProductCount?: number;
-    returningBuyerCount?: number;
-    returningBuyerPaidAmount?: number;
-    productFavoriteBuyerCount?: number;
-    cartAddUserCount?: number;
-    reviewCount?: number;
-    positiveReviewCount?: number;
-    negativeReviewCount?: number;
-    reviewWithImageCount?: number;
-    descMatchScore?: number;
-    logisticsServiceScore?: number;
-    serviceAttitudeScore?: number;
-    pickupPackageCount?: number;
-    shippedPackageCount?: number;
-    deliveryPackageCount?: number;
-    signedPackageCount?: number;
-    taobaokeCommission?: number;
-    diamondDisplayCost?: number;
-    trainAdCost?: number;
     remark?: string; // 备注
     createTime?: string;
+  }
+
+  /** 店铺后台日汇总平台扩展详情 */
+  export interface EcShopDailyPlatformDetail {
+    platformCode?: string;
+    tableName?: string;
+    detail?: Record<string, any>;
   }
 }
 
@@ -96,6 +68,13 @@ export function getEcShopDailyShopNameOptions(
 export function getEcShopDaily(id: number) {
   return requestClient.get<FdmdataEcShopDailyApi.EcShopDaily>(
     `/fdmdata/ec-shop-daily/get?id=${id}`,
+  );
+}
+
+/** 查询平台扩展详情 */
+export function getEcShopDailyPlatformDetail(id: number) {
+  return requestClient.get<FdmdataEcShopDailyApi.EcShopDailyPlatformDetail>(
+    `/fdmdata/ec-shop-daily/platform-detail?id=${id}`,
   );
 }
 

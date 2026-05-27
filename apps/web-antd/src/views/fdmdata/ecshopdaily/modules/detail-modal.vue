@@ -9,7 +9,10 @@ import { useVbenModal } from '@vben/common-ui';
 
 import { Descriptions, Divider, message, Tag } from 'ant-design-vue';
 
-import { getEcShopDaily } from '#/api/fdmdata/ecshopdaily';
+import {
+  getEcShopDaily,
+  getEcShopDailyPlatformDetail,
+} from '#/api/fdmdata/ecshopdaily';
 
 import { formatEcPlatformLabel } from '../data';
 
@@ -19,6 +22,8 @@ defineOptions({ name: 'EcShopDailyDetailModal' });
 let openSeq = 0;
 
 const detail = ref<FdmdataEcShopDailyApi.EcShopDaily | null>(null);
+const platformDetail =
+  ref<FdmdataEcShopDailyApi.EcShopDailyPlatformDetail | null>(null);
 
 function fmtDate(value: any) {
   if (value === null || value === undefined || value === '') return '-';
@@ -41,12 +46,6 @@ function fmtAmount(value: any, precision = 2) {
   if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(precision) : String(value);
-}
-
-function fmtPercent(value: any) {
-  if (value === null || value === undefined || value === '') return '-';
-  const n = Number(value);
-  return Number.isFinite(n) ? `${n.toFixed(2)}%` : String(value);
 }
 
 type KvItem = {
@@ -100,76 +99,72 @@ const brushAndRealItems = computed(() => {
     item('真实支付金额', fmtAmount(d.realPaidAmount)),
     item('真实成交买家数', fmtNumber(d.realBuyerCount)),
     item('真实净销售额', fmtAmount(d.realNetSalesAmount)),
-    item('真实客单价', fmtAmount(d.realAvgOrderValue)),
-    item('真实支付转化率', fmtPercent(d.realPaymentConversionRate)),
-    item('真实UV价值', fmtAmount(d.realUvValue, 4)),
-  ];
-});
-
-const trafficItems = computed(() => {
-  const d = detail.value as any;
-  if (!d) return [];
-  return [
-    item('访客数(UV)', fmtNumber(d.visitorCount)),
-    item('浏览量(PV)', fmtNumber(d.pageViewCount)),
-    item('成交买家数', fmtNumber(d.buyerCount)),
-    item('支付转化率', fmtPercent(d.paymentConversionRate)),
-    item('客单价', fmtAmount(d.avgOrderValue)),
-    item('跳失率', fmtPercent(d.bounceRate)),
-    item('平均停留时长(秒)', fmtNumber(d.avgStayDurationSec)),
-    item('人均浏览量', fmtAmount(d.avgPageViewPerVisitor)),
-    item('UV价值', fmtAmount(d.uvValue, 4)),
-  ];
-});
-
-const productAndBuyerItems = computed(() => {
-  const d = detail.value as any;
-  if (!d) return [];
-  return [
-    item('商品访客数', fmtNumber(d.productVisitorCount)),
-    item('商品浏览量', fmtNumber(d.productPageViewCount)),
-    item('支付商品数', fmtNumber(d.paidProductCount)),
-    item('支付老买家数', fmtNumber(d.returningBuyerCount)),
-    item('老买家支付金额', fmtAmount(d.returningBuyerPaidAmount)),
-    item('商品收藏买家数', fmtNumber(d.productFavoriteBuyerCount)),
-    item('加购人数', fmtNumber(d.cartAddUserCount)),
-  ];
-});
-
-const reviewAndServiceItems = computed(() => {
-  const d = detail.value as any;
-  if (!d) return [];
-  return [
-    item('评价数', fmtNumber(d.reviewCount)),
-    item('正面评价数', fmtNumber(d.positiveReviewCount)),
-    item('负面评价数', fmtNumber(d.negativeReviewCount)),
-    item('有图评价数', fmtNumber(d.reviewWithImageCount)),
-    item('描述相符评分', fmtAmount(d.descMatchScore, 2)),
-    item('物流服务评分', fmtAmount(d.logisticsServiceScore, 2)),
-    item('服务态度评分', fmtAmount(d.serviceAttitudeScore, 2)),
-  ];
-});
-
-const logisticsItems = computed(() => {
-  const d = detail.value as any;
-  if (!d) return [];
-  return [
-    item('揽收包裹数', fmtNumber(d.pickupPackageCount)),
-    item('发货包裹数', fmtNumber(d.shippedPackageCount)),
-    item('派送包裹数', fmtNumber(d.deliveryPackageCount)),
-    item('签收成功包裹数', fmtNumber(d.signedPackageCount)),
   ];
 });
 
 const marketingItems = computed(() => {
   const d = detail.value as any;
   if (!d) return [];
-  return [
-    item('营销花费', fmtAmount(d.marketingCost)),
-    item('淘宝客佣金', fmtAmount(d.taobaokeCommission)),
-    item('钻石展位消耗', fmtAmount(d.diamondDisplayCost)),
-    item('直通车消耗', fmtAmount(d.trainAdCost)),
-  ];
+  return [item('营销花费', fmtAmount(d.marketingCost))];
+});
+
+const COMMON_DETAIL_KEYS = new Set([
+  'id',
+  'tenant_id',
+  'daily_id',
+  'stat_date',
+  'platform_code',
+  'shop_id',
+  'shop_name',
+  'source_sheet',
+  'source_row_no',
+  'raw_payload',
+  'create_time',
+  'update_time',
+  'creator',
+  'updater',
+  'deleted',
+]);
+
+function normalizePlatformValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function parseRawPayload(raw: unknown): Record<string, unknown> | null {
+  if (!raw) return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw !== 'string') return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const platformDetailItems = computed<KvItem[]>(() => {
+  const row = platformDetail.value?.detail ?? {};
+  const raw = parseRawPayload(row.raw_payload);
+  if (raw) {
+    return Object.entries(raw)
+      .filter(([, value]) => value !== null && value !== undefined && value !== '')
+      .map(([label, value]) => item(label, normalizePlatformValue(value)));
+  }
+  return Object.entries(row)
+    .filter(
+      ([key, value]) =>
+        !COMMON_DETAIL_KEYS.has(key) &&
+        value !== null &&
+        value !== undefined &&
+        value !== '',
+    )
+    .map(([key, value]) => item(key, normalizePlatformValue(value)));
 });
 
 const remarkItems = computed(() => {
@@ -201,6 +196,7 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       modalApi.unlock();
       detail.value = null;
+      platformDetail.value = null;
       return;
     }
     const mySeq = ++openSeq;
@@ -212,7 +208,10 @@ const [Modal, modalApi] = useVbenModal({
     }
     modalApi.lock();
     try {
-      const d = await getEcShopDaily(row.id);
+      const [d, pd] = await Promise.all([
+        getEcShopDaily(row.id),
+        getEcShopDailyPlatformDetail(row.id),
+      ]);
       if (mySeq !== openSeq) return;
       if (!d) {
         message.error('记录不存在或已被删除');
@@ -220,6 +219,7 @@ const [Modal, modalApi] = useVbenModal({
         return;
       }
       detail.value = d;
+      platformDetail.value = pd;
     } catch (error) {
       if (mySeq === openSeq) {
         console.error('Load ecShopDaily detail failed', error);
@@ -280,55 +280,7 @@ const title = computed(() => {
         </Descriptions.Item>
       </Descriptions>
 
-      <Divider orientation="left" plain>流量与转化</Divider>
-      <Descriptions :column="3" bordered size="small">
-        <Descriptions.Item
-          v-for="it in trafficItems"
-          :key="it.key"
-          :label="it.label"
-          :span="it.span"
-        >
-          {{ it.value }}
-        </Descriptions.Item>
-      </Descriptions>
-
-      <Divider orientation="left" plain>商品与买家行为</Divider>
-      <Descriptions :column="3" bordered size="small">
-        <Descriptions.Item
-          v-for="it in productAndBuyerItems"
-          :key="it.key"
-          :label="it.label"
-          :span="it.span"
-        >
-          {{ it.value }}
-        </Descriptions.Item>
-      </Descriptions>
-
-      <Divider orientation="left" plain>评价与服务质量</Divider>
-      <Descriptions :column="3" bordered size="small">
-        <Descriptions.Item
-          v-for="it in reviewAndServiceItems"
-          :key="it.key"
-          :label="it.label"
-          :span="it.span"
-        >
-          {{ it.value }}
-        </Descriptions.Item>
-      </Descriptions>
-
-      <Divider orientation="left" plain>物流包裹</Divider>
-      <Descriptions :column="3" bordered size="small">
-        <Descriptions.Item
-          v-for="it in logisticsItems"
-          :key="it.key"
-          :label="it.label"
-          :span="it.span"
-        >
-          {{ it.value }}
-        </Descriptions.Item>
-      </Descriptions>
-
-      <Divider orientation="left" plain>营销投放</Divider>
+      <Divider orientation="left" plain>营销</Divider>
       <Descriptions :column="3" bordered size="small">
         <Descriptions.Item
           v-for="it in marketingItems"
@@ -339,6 +291,20 @@ const title = computed(() => {
           {{ it.value }}
         </Descriptions.Item>
       </Descriptions>
+
+      <template v-if="platformDetailItems.length > 0">
+        <Divider orientation="left" plain>平台原始指标</Divider>
+        <Descriptions :column="3" bordered size="small">
+          <Descriptions.Item
+            v-for="it in platformDetailItems"
+            :key="it.key"
+            :label="it.label"
+            :span="it.span"
+          >
+            {{ it.value }}
+          </Descriptions.Item>
+        </Descriptions>
+      </template>
 
       <Divider orientation="left" plain>备注</Divider>
       <Descriptions :column="1" bordered size="small">
