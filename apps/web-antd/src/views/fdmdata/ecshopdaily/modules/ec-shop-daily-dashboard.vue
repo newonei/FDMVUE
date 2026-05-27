@@ -1,7 +1,7 @@
 <!--
   数据看板方案（仅前端，不改后端）：
   1. 使用现有分页接口 getEcShopDailyPage 按筛选条件循环拉取（单页 200 条，最多 40 页），在浏览器内合并、按日汇总（同日多店相加）。
-  2. 指标：净销售额 netSalesAmount、营销花费 marketingCost、退款 refundAmount、买家 buyerCount；费比 = 营销花费 / 净销售额。
+  2. 指标：真实净销售额 realNetSalesAmount、营销花费 marketingCost、退款 refundAmount、买家 buyerCount；费比 = 营销花费 / 真实净销售额。
   3. 后续若数据量极大，可增加后端聚合接口 /stats，看板改为单次请求即可。
 -->
 <script lang="ts" setup>
@@ -41,6 +41,7 @@ import {
   fmtAmount2,
   fmtPercent2,
   mergeRowsByStatDate,
+  realNetSalesAmountOf,
   round2,
   sliceLastDays,
   sortedDailyFromMap,
@@ -132,7 +133,7 @@ function dualLineOption(
       trigger: 'axis',
       valueFormatter: (v: unknown) => fmtAmount2(v),
     },
-    legend: { bottom: 4, data: ['实际销售额(净)', '营销花费'] },
+    legend: { bottom: 4, data: ['真实净销售额', '营销花费'] },
     grid: { left: 52, right: 20, top: 44, bottom: dense ? 68 : 52 },
     xAxis: {
       type: 'category',
@@ -149,7 +150,7 @@ function dualLineOption(
     },
     series: [
       {
-        name: '实际销售额(净)',
+        name: '真实净销售额',
         type: 'line',
         smooth: true,
         symbolSize: dense ? 4 : 6,
@@ -202,7 +203,7 @@ function ratioLineOption(
       trigger: 'axis',
       valueFormatter: (v: unknown) => fmtPercent2(v),
     },
-    legend: { bottom: 4, data: ['费比(营销/净销)'] },
+    legend: { bottom: 4, data: ['费比(营销/真实净销)'] },
     grid: { left: 52, right: 20, top: 44, bottom: dense ? 64 : 48 },
     xAxis: {
       type: 'category',
@@ -219,7 +220,7 @@ function ratioLineOption(
     },
     series: [
       {
-        name: '费比(营销/净销)',
+        name: '费比(营销/真实净销)',
         type: 'line',
         smooth: true,
         symbolSize: dense ? 4 : 6,
@@ -246,7 +247,7 @@ function monthBarOption(
 ): ECOption {
   return {
     title: {
-      text: '月度数据走势（净销售额 vs 营销花费）',
+      text: '月度数据走势（真实净销售额 vs 营销花费）',
       left: 8,
       top: 6,
       textStyle: { fontSize: 14, fontWeight: 600 },
@@ -255,7 +256,7 @@ function monthBarOption(
       trigger: 'axis',
       valueFormatter: (v: unknown) => fmtAmount2(v),
     },
-    legend: { bottom: 4, data: ['实际销售额(净)', '营销花费'] },
+    legend: { bottom: 4, data: ['真实净销售额', '营销花费'] },
     grid: { left: 52, right: 20, top: 44, bottom: 52 },
     xAxis: { type: 'category', data: labels },
     yAxis: {
@@ -265,7 +266,7 @@ function monthBarOption(
     },
     series: [
       {
-        name: '实际销售额(净)',
+        name: '真实净销售额',
         type: 'bar',
         data: net,
         itemStyle: { color: '#1677ff' },
@@ -296,7 +297,7 @@ const chart7 = computed<ECOption | null>(() => {
   const rows = last7.value;
   if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
-  const net = rows.map((r) => round2(r.netSalesAmount));
+  const net = rows.map((r) => realNetSalesAmountOf(r));
   const mkt = rows.map((r) => round2(r.marketingCost));
   return dualLineOption('过去7天数据', cats, net, mkt, {
     showPointLabels: true,
@@ -307,7 +308,7 @@ const chart30 = computed<ECOption | null>(() => {
   const rows = last30.value;
   if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
-  const net = rows.map((r) => round2(r.netSalesAmount));
+  const net = rows.map((r) => realNetSalesAmountOf(r));
   const mkt = rows.map((r) => round2(r.marketingCost));
   return dualLineOption('近30天数据走势图', cats, net, mkt, { dense: true });
 });
@@ -317,7 +318,7 @@ const chart30Ratio = computed<ECOption | null>(() => {
   if (rows.length === 0) return null;
   const cats = rows.map((r) => String(r.statDate).slice(0, 10));
   const ratio = rows.map((r) => {
-    const net = Number(r.netSalesAmount ?? 0);
+    const net = realNetSalesAmountOf(r);
     const m = Number(r.marketingCost ?? 0);
     return net > 0 ? (m / net) * 100 : null;
   });
@@ -578,7 +579,7 @@ void fetchShopNameOptions();
       <Col :xs="24" :sm="12" :lg="6">
         <Card size="small" class="kpi-card kpi-card--net h-full">
           <Statistic
-            title="净销售额（区间内合计）"
+            title="真实净销售额（剔除刷单）"
             :precision="2"
             :value="kpi.netSales"
             prefix="¥"

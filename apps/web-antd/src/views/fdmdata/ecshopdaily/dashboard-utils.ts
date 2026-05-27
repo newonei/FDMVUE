@@ -13,6 +13,12 @@ function n(v: unknown): number {
   return Number.isFinite(x) ? x : 0;
 }
 
+export function realNetSalesAmountOf(r: Partial<EcShopDailyRow>): number {
+  const real: unknown = r.realNetSalesAmount;
+  if (real !== null && real !== undefined && real !== '') return round2(real);
+  return round2(n(r.paidAmount) - n(r.refundAmount) - n(r.brushPrincipal));
+}
+
 /** 金额/比率统一保留两位小数 */
 export function round2(v: unknown): number {
   return Math.round(n(v) * 100) / 100;
@@ -42,28 +48,42 @@ export function mergeRowsByStatDate(
         statDate: key,
         gmvAmount: round2(r.gmvAmount),
         paidAmount: round2(r.paidAmount),
+        realPaidAmount: round2(r.realPaidAmount),
         refundAmount: round2(r.refundAmount),
         netSalesAmount: round2(r.netSalesAmount),
+        realNetSalesAmount: realNetSalesAmountOf(r),
+        brushPrincipal: round2(r.brushPrincipal),
         marketingCost: round2(r.marketingCost),
         visitorCount: n(r.visitorCount),
         pageViewCount: n(r.pageViewCount),
         buyerCount: n(r.buyerCount),
+        realBuyerCount: n(r.realBuyerCount),
         orderCount: n(r.orderCount),
         paidOrderCount: n(r.paidOrderCount),
+        realPaidOrderCount: n(r.realPaidOrderCount),
+        brushOrderCount: n(r.brushOrderCount),
         refundOrderCount: n(r.refundOrderCount),
       } as EcShopDailyRow);
       continue;
     }
     ex.gmvAmount = round2(n(ex.gmvAmount) + n(r.gmvAmount));
     ex.paidAmount = round2(n(ex.paidAmount) + n(r.paidAmount));
+    ex.realPaidAmount = round2(n(ex.realPaidAmount) + n(r.realPaidAmount));
     ex.refundAmount = round2(n(ex.refundAmount) + n(r.refundAmount));
     ex.netSalesAmount = round2(n(ex.netSalesAmount) + n(r.netSalesAmount));
+    ex.realNetSalesAmount = round2(
+      n(ex.realNetSalesAmount) + realNetSalesAmountOf(r),
+    );
+    ex.brushPrincipal = round2(n(ex.brushPrincipal) + n(r.brushPrincipal));
     ex.marketingCost = round2(n(ex.marketingCost) + n(r.marketingCost));
     ex.visitorCount = n(ex.visitorCount) + n(r.visitorCount);
     ex.pageViewCount = n(ex.pageViewCount) + n(r.pageViewCount);
     ex.buyerCount = n(ex.buyerCount) + n(r.buyerCount);
+    ex.realBuyerCount = n(ex.realBuyerCount) + n(r.realBuyerCount);
     ex.orderCount = n(ex.orderCount) + n(r.orderCount);
     ex.paidOrderCount = n(ex.paidOrderCount) + n(r.paidOrderCount);
+    ex.realPaidOrderCount = n(ex.realPaidOrderCount) + n(r.realPaidOrderCount);
+    ex.brushOrderCount = n(ex.brushOrderCount) + n(r.brushOrderCount);
     ex.refundOrderCount = n(ex.refundOrderCount) + n(r.refundOrderCount);
   }
   return map;
@@ -101,7 +121,7 @@ export function sumKpi(rows: EcShopDailyRow[]) {
   let refund = 0;
   let buyers = 0;
   for (const r of rows) {
-    netSales += n(r.netSalesAmount);
+    netSales += realNetSalesAmountOf(r);
     marketing += n(r.marketingCost);
     refund += n(r.refundAmount);
     buyers += n(r.buyerCount);
@@ -131,7 +151,7 @@ export function aggregateByMonth(sorted: EcShopDailyRow[]): {
     if (!dk) continue;
     const ym = dk.slice(0, 7);
     const b = buckets.get(ym) ?? { net: 0, mkt: 0 };
-    b.net = round2(b.net + n(r.netSalesAmount));
+    b.net = round2(b.net + realNetSalesAmountOf(r));
     b.mkt = round2(b.mkt + n(r.marketingCost));
     buckets.set(ym, b);
   }
@@ -157,7 +177,7 @@ export function aggregateByWeekStart(
     if (!dk) continue;
     const ws = dayjs(dk).startOf('isoWeek').format('YYYY-MM-DD');
     const b = buckets.get(ws) ?? { net: 0, mkt: 0 };
-    b.net = round2(b.net + n(r.netSalesAmount));
+    b.net = round2(b.net + realNetSalesAmountOf(r));
     b.mkt = round2(b.mkt + n(r.marketingCost));
     buckets.set(ws, b);
   }
