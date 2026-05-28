@@ -74,12 +74,12 @@ const usePlatformAnalysisDashboard = computed(() =>
 const pageTitle = computed(() =>
   fixedPlatformCode.value
     ? `${fixedPlatformLabel.value}店铺后台日汇总`
-    : '店铺后台日汇总管理',
+    : '全部平台汇总',
 );
 const tableTitle = computed(() =>
   fixedPlatformCode.value
     ? `${fixedPlatformLabel.value}店铺日汇总`
-    : '店铺日汇总',
+    : '全部平台日汇总',
 );
 
 const dashboardRef = ref<{ reload?: () => Promise<void> | void } | null>(null);

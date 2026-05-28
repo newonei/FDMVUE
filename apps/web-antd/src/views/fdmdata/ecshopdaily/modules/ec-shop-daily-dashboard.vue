@@ -1,72 +1,516 @@
-<!--
-  数据看板方案（仅前端，不改后端）：
-  1. 使用现有分页接口 getEcShopDailyPage 按筛选条件循环拉取（单页 200 条，最多 40 页），在浏览器内合并、按日汇总（同日多店相加）。
-  2. 指标：真实净销售额 realNetSalesAmount、营销花费 marketingCost、退款 refundAmount、买家 buyerCount；费比 = 营销花费 / 真实净销售额。
-  3. 后续若数据量极大，可增加后端聚合接口 /stats，看板改为单次请求即可。
--->
 <script lang="ts" setup>
 import type { ECOption } from '@vben/plugins/echarts';
 
 import type { EcShopDailyRow } from '../dashboard-utils';
 import type { EcShopDailyOption } from '../data';
+import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 
+import dayjs from 'dayjs';
+import isoWeek from 'dayjs/plugin/isoWeek';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   AutoComplete,
   Button,
-  Card,
   Col,
-  Collapse,
   Form,
   FormItem,
   Row,
   Select,
   Space,
   Spin,
-  Statistic,
+  Tag,
+  Tooltip,
 } from 'ant-design-vue';
 
 import {
   getEcShopDailyPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
-import {
-  FdmDateRangePicker,
-  getYesterdayDateRange,
-} from '#/components/fdm-date-range-picker';
+import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
 
 import {
-  aggregateByMonth,
-  aggregateByWeekStart,
   fmtAmount2,
   fmtPercent2,
-  mergeRowsByStatDate,
+  normalizeStatDateKey,
   realNetSalesAmountOf,
   round2,
-  sliceLastDays,
-  sortedDailyFromMap,
-  sumKpi,
 } from '../dashboard-utils';
-import { EC_PLATFORM_SUGGESTIONS } from '../data';
+import {
+  EC_PLATFORM_SUGGESTIONS,
+  formatEcPlatformLabel,
+} from '../data';
 import EchartsBox from './echarts-box.vue';
 
+dayjs.extend(isoWeek);
+
+defineOptions({ name: 'EcShopDailyDashboard' });
+
 const PAGE_SIZE = 200;
-const MAX_PAGES = 40;
+const MAX_PAGES = 80;
 
 const props = defineProps<{
   platformCode?: string;
 }>();
+
+interface Bucket {
+  brushAmount: number;
+  brushOrders: number;
+  buyers: number;
+  gmv: number;
+  marketing: number;
+  paid: number;
+  paidOrders: number;
+  realOrders: number;
+  refund: number;
+  refundOrders: number;
+  sales: number;
+  shopKeys: Set<string>;
+}
+
+interface AggregateResult {
+  buckets: Bucket[];
+  labels: string[];
+}
+
+interface PlatformBucket extends Bucket {
+  platformCode: string;
+}
+
+function currentYearToTodayRange(): FdmDateRange {
+  return [
+    dayjs().startOf('year').format('YYYY-MM-DD'),
+    dayjs().format('YYYY-MM-DD'),
+  ];
+}
+
+function asNumber(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = Number(String(value).replace(/,/g, '').replace('%', '').trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function asInt(value: unknown): number {
+  return Math.trunc(asNumber(value));
+}
+
+function realOrderCountOf(row: Partial<EcShopDailyRow>): number {
+  if (row.realPaidOrderCount !== null && row.realPaidOrderCount !== undefined) {
+    return Math.max(0, asInt(row.realPaidOrderCount));
+  }
+  return Math.max(
+    0,
+    asInt(row.paidOrderCount) - asInt(row.brushOrderCount),
+  );
+}
+
+function platformCodeOf(row: Partial<EcShopDailyRow>): string {
+  return String(row.platformCode ?? '').trim().toUpperCase() || 'UNKNOWN';
+}
+
+function shopKeyOf(row: Partial<EcShopDailyRow>): string {
+  const platform = platformCodeOf(row);
+  const shopId = String(row.shopId ?? '').trim();
+  const shopName = String(row.shopName ?? '').trim();
+  return `${platform}|${shopId || shopName}`;
+}
+
+function newBucket(): Bucket {
+  return {
+    brushAmount: 0,
+    brushOrders: 0,
+    buyers: 0,
+    gmv: 0,
+    marketing: 0,
+    paid: 0,
+    paidOrders: 0,
+    realOrders: 0,
+    refund: 0,
+    refundOrders: 0,
+    sales: 0,
+    shopKeys: new Set<string>(),
+  };
+}
+
+function addRow(bucket: Bucket, row: EcShopDailyRow) {
+  bucket.sales = round2(bucket.sales + realNetSalesAmountOf(row));
+  bucket.marketing = round2(bucket.marketing + asNumber(row.marketingCost));
+  bucket.refund = round2(bucket.refund + asNumber(row.refundAmount));
+  bucket.paid = round2(bucket.paid + asNumber(row.paidAmount));
+  bucket.gmv = round2(bucket.gmv + asNumber(row.gmvAmount));
+  bucket.brushAmount = round2(
+    bucket.brushAmount + asNumber(row.brushPrincipal),
+  );
+  bucket.paidOrders += asInt(row.paidOrderCount);
+  bucket.realOrders += realOrderCountOf(row);
+  bucket.brushOrders += asInt(row.brushOrderCount);
+  bucket.refundOrders += asInt(row.refundOrderCount);
+  bucket.buyers += asInt(row.buyerCount);
+  bucket.shopKeys.add(shopKeyOf(row));
+}
+
+function mergeBucket(target: Bucket, source: Bucket) {
+  target.sales = round2(target.sales + source.sales);
+  target.marketing = round2(target.marketing + source.marketing);
+  target.refund = round2(target.refund + source.refund);
+  target.paid = round2(target.paid + source.paid);
+  target.gmv = round2(target.gmv + source.gmv);
+  target.brushAmount = round2(target.brushAmount + source.brushAmount);
+  target.paidOrders += source.paidOrders;
+  target.realOrders += source.realOrders;
+  target.brushOrders += source.brushOrders;
+  target.refundOrders += source.refundOrders;
+  target.buyers += source.buyers;
+  for (const key of source.shopKeys) target.shopKeys.add(key);
+}
+
+function bucketRows(rows: EcShopDailyRow[]): Bucket {
+  const bucket = newBucket();
+  for (const row of rows) addRow(bucket, row);
+  return bucket;
+}
+
+function aggregateByKey(
+  rows: EcShopDailyRow[],
+  keyOf: (dateKey: string, row: EcShopDailyRow) => string,
+  maxCount?: number,
+): AggregateResult {
+  const map = new Map<string, Bucket>();
+  for (const row of rows) {
+    const dateKey = normalizeStatDateKey(row.statDate);
+    if (!dateKey) continue;
+    const key = keyOf(dateKey, row);
+    const bucket = map.get(key) ?? newBucket();
+    addRow(bucket, row);
+    map.set(key, bucket);
+  }
+  const labels = [...map.keys()].toSorted();
+  const slicedLabels = maxCount ? labels.slice(-maxCount) : labels;
+  return {
+    buckets: slicedLabels.map((label) => map.get(label)!),
+    labels: slicedLabels,
+  };
+}
+
+function ratioPercent(numerator: number, denominator: number): null | number {
+  if (denominator <= 0) return null;
+  return round2((numerator / denominator) * 100);
+}
+
+function ratioText(value: null | number | undefined): string {
+  if (value === null || value === undefined) return '-';
+  return fmtPercent2(value);
+}
+
+function amountShort(value: unknown): string {
+  const n = round2(value);
+  const abs = Math.abs(n);
+  if (abs >= 100_000_000) return `${round2(n / 100_000_000)}亿`;
+  if (abs >= 10_000) return `${round2(n / 10_000)}万`;
+  return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+}
+
+function numberShort(value: unknown): string {
+  const n = asNumber(value);
+  const abs = Math.abs(n);
+  if (abs >= 100_000_000) return `${round2(n / 100_000_000)}亿`;
+  if (abs >= 10_000) return `${round2(n / 10_000)}万`;
+  return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+}
+
+function moneyText(value: unknown): string {
+  return `¥${amountShort(value)}`;
+}
+
+function channelOf(platformCode: string): 'ec' | 'media' {
+  return ['DOUYIN', 'SPH', 'XHS'].includes(platformCode) ? 'media' : 'ec';
+}
+
+function platformLabel(platformCode: string): string {
+  if (platformCode === 'UNKNOWN') return '未识别平台';
+  return formatEcPlatformLabel(platformCode) || platformCode;
+}
+
+function metricTone(value: null | number, goodMax: number, warnMax: number) {
+  if (value === null) return 'default';
+  if (value <= goodMax) return 'success';
+  if (value <= warnMax) return 'warning';
+  return 'error';
+}
+
+function chartGrid(dense = false) {
+  return {
+    bottom: dense ? 70 : 54,
+    left: 58,
+    right: 36,
+    top: 58,
+  };
+}
+
+function moneyAxisLabel(v: number): string {
+  return amountShort(v);
+}
+
+function monthOverviewOption(agg: AggregateResult): ECOption {
+  const sales = agg.buckets.map((b) => round2(b.sales));
+  const marketing = agg.buckets.map((b) => round2(b.marketing));
+  const ratio = agg.buckets.map((b) => ratioPercent(b.marketing, b.sales));
+  return {
+    color: ['#2563eb', '#22c55e', '#f97316'],
+    grid: chartGrid(),
+    legend: { top: 12, data: ['实际销售额', '营销费用', '营销费比'] },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) =>
+        typeof value === 'number' ? fmtAmount2(value) : String(value ?? ''),
+    },
+    xAxis: { type: 'category', data: agg.labels },
+    yAxis: [
+      {
+        name: '金额',
+        type: 'value',
+        axisLabel: { formatter: moneyAxisLabel },
+        splitLine: { lineStyle: { type: 'dashed' } },
+      },
+      {
+        name: '费比',
+        type: 'value',
+        axisLabel: { formatter: (v: number) => `${round2(v)}%` },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '实际销售额',
+        type: 'bar',
+        barMaxWidth: 42,
+        data: sales,
+        label: {
+          show: true,
+          position: 'top',
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+      {
+        name: '营销费用',
+        type: 'bar',
+        barMaxWidth: 42,
+        data: marketing,
+        label: {
+          show: true,
+          position: 'top',
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+      {
+        name: '营销费比',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        data: ratio,
+        label: {
+          show: true,
+          formatter: (p: any) =>
+            p.value === null || p.value === undefined ? '' : fmtPercent2(p.value),
+          fontSize: 10,
+        },
+      },
+    ],
+  };
+}
+
+function dualMoneyLineOption(
+  labels: string[],
+  firstName: string,
+  first: number[],
+  secondName: string,
+  second: number[],
+  colors: [string, string] = ['#2563eb', '#06b6d4'],
+): ECOption {
+  return {
+    color: colors,
+    grid: chartGrid(true),
+    legend: { top: 12, data: [firstName, secondName] },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) => fmtAmount2(value),
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: labels,
+      axisLabel: { fontSize: 10, hideOverlap: true, rotate: 35 },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: moneyAxisLabel },
+      splitLine: { lineStyle: { type: 'dashed' } },
+    },
+    series: [
+      {
+        name: firstName,
+        type: 'line',
+        smooth: true,
+        symbolSize: 5,
+        data: first,
+        label: {
+          show: true,
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+      {
+        name: secondName,
+        type: 'line',
+        smooth: true,
+        symbolSize: 5,
+        data: second,
+        label: {
+          show: true,
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+    ],
+  };
+}
+
+function ratioLineOption(
+  labels: string[],
+  series: { color: string; data: (null | number)[]; name: string }[],
+): ECOption {
+  return {
+    color: series.map((item) => item.color),
+    grid: chartGrid(true),
+    legend: { top: 12, data: series.map((item) => item.name) },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) => fmtPercent2(value),
+    },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: labels,
+      axisLabel: { fontSize: 10, hideOverlap: true, rotate: 35 },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: (v: number) => `${round2(v)}%` },
+      splitLine: { lineStyle: { type: 'dashed' } },
+    },
+    series: series.map((item) => ({
+      connectNulls: false,
+      data: item.data,
+      label: {
+        show: true,
+        formatter: (p: any) =>
+          p.value === null || p.value === undefined ? '' : fmtPercent2(p.value),
+        fontSize: 10,
+      },
+      name: item.name,
+      smooth: true,
+      symbolSize: 5,
+      type: 'line',
+    })),
+  };
+}
+
+function platformContributionOption(rows: PlatformBucket[]): ECOption {
+  const labels = rows.map((row) => platformLabel(row.platformCode));
+  return {
+    color: ['#2563eb', '#22c55e', '#f97316'],
+    grid: { bottom: 34, left: 80, right: 28, top: 42 },
+    legend: { top: 8, data: ['实际销售额', '营销费用', '营销费比'] },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) => fmtAmount2(value),
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { formatter: moneyAxisLabel },
+      splitLine: { lineStyle: { type: 'dashed' } },
+    },
+    yAxis: { type: 'category', data: labels },
+    series: [
+      {
+        name: '实际销售额',
+        type: 'bar',
+        data: rows.map((row) => round2(row.sales)),
+        label: {
+          show: true,
+          position: 'right',
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+      {
+        name: '营销费用',
+        type: 'bar',
+        data: rows.map((row) => round2(row.marketing)),
+        label: {
+          show: true,
+          position: 'right',
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+    ],
+  };
+}
+
+function topShopOption(
+  shops: { label: string; platformCode: string; sales: number }[],
+): ECOption {
+  return {
+    color: ['#8b5cf6'],
+    grid: { bottom: 34, left: 132, right: 34, top: 24 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        const item = Array.isArray(params) ? params[0] : params;
+        const row = shops[item.dataIndex];
+        return `${row.label}<br/>平台：${platformLabel(row.platformCode)}<br/>实际销售额：¥${fmtAmount2(row.sales)}`;
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { formatter: moneyAxisLabel },
+      splitLine: { lineStyle: { type: 'dashed' } },
+    },
+    yAxis: {
+      type: 'category',
+      data: shops.map((shop) => shop.label),
+      axisLabel: {
+        formatter: (value: string) =>
+          value.length > 10 ? `${value.slice(0, 10)}...` : value,
+      },
+    },
+    series: [
+      {
+        name: '实际销售额',
+        type: 'bar',
+        data: shops.map((shop) => round2(shop.sales)),
+        label: {
+          show: true,
+          position: 'right',
+          formatter: (p: any) => amountShort(p.value),
+          fontSize: 10,
+        },
+      },
+    ],
+  };
+}
 
 const fixedPlatformCode = computed(() => {
   const code = String(props.platformCode ?? '').trim();
   return code ? code.toUpperCase() : undefined;
 });
 const isFixedPlatform = computed(() => !!fixedPlatformCode.value);
-
-const platformOptions = EC_PLATFORM_SUGGESTIONS.map((p) => ({
-  value: p.value,
-  label: p.label,
+const platformOptions = EC_PLATFORM_SUGGESTIONS.map((item) => ({
+  label: item.label,
+  value: item.value,
 }));
 
 const loading = ref(false);
@@ -80,298 +524,258 @@ let shopNameSearchTimer: ReturnType<typeof setTimeout> | undefined;
 const dashForm = reactive<{
   platformCode: string | undefined;
   shopName: string;
-  statDate: [string, string] | undefined;
+  statDate: FdmDateRange;
 }>({
-  statDate: getYesterdayDateRange(),
   platformCode: fixedPlatformCode.value,
   shopName: '',
+  statDate: currentYearToTodayRange(),
 });
 
-const mergedSorted = computed(() =>
-  sortedDailyFromMap(mergeRowsByStatDate(rawRows.value)),
+const sortedRows = computed(() =>
+  [...rawRows.value].toSorted((a, b) =>
+    normalizeStatDateKey(a.statDate).localeCompare(
+      normalizeStatDateKey(b.statDate),
+    ),
+  ),
 );
 
-const kpi = computed(() => sumKpi(mergedSorted.value));
+const dateAgg = computed(() =>
+  aggregateByKey(sortedRows.value, (dateKey) => dateKey),
+);
+const last30Agg = computed(() => {
+  const keys = dateAgg.value.labels.slice(-30);
+  const keySet = new Set(keys);
+  return aggregateByKey(
+    sortedRows.value.filter((row) =>
+      keySet.has(normalizeStatDateKey(row.statDate)),
+    ),
+    (dateKey) => dateKey,
+  );
+});
+const monthAgg = computed(() =>
+  aggregateByKey(sortedRows.value, (dateKey) => dateKey.slice(0, 7)),
+);
+const weekAgg = computed(() =>
+  aggregateByKey(
+    sortedRows.value,
+    (dateKey) => dayjs(dateKey).startOf('isoWeek').format('YYYY-MM-DD'),
+    12,
+  ),
+);
 
-const last7 = computed(() => sliceLastDays(mergedSorted.value, 7));
-const last30 = computed(() => sliceLastDays(mergedSorted.value, 30));
+const kpi = computed(() => {
+  const bucket = bucketRows(sortedRows.value);
+  const feeRatio = ratioPercent(bucket.marketing, bucket.sales);
+  const refundRatio = ratioPercent(bucket.refund, bucket.paid);
+  const brushRatio = ratioPercent(bucket.brushAmount, bucket.paid);
+  const aov =
+    bucket.realOrders > 0 ? round2(bucket.sales / bucket.realOrders) : 0;
+  return {
+    ...bucket,
+    aov,
+    brushRatio,
+    feeRatio,
+    refundRatio,
+    shopCount: bucket.shopKeys.size,
+  };
+});
 
-const monthAgg = computed(() => aggregateByMonth(mergedSorted.value));
-const weekAgg = computed(() => aggregateByWeekStart(mergedSorted.value, 12));
+const platformAgg = computed<PlatformBucket[]>(() => {
+  const map = new Map<string, PlatformBucket>();
+  for (const row of sortedRows.value) {
+    const code = platformCodeOf(row);
+    const bucket =
+      map.get(code) ??
+      ({
+        ...newBucket(),
+        platformCode: code,
+      } as PlatformBucket);
+    addRow(bucket, row);
+    map.set(code, bucket);
+  }
+  return [...map.values()].toSorted((a, b) => b.sales - a.sales);
+});
+
+const platformCount = computed(() => platformAgg.value.length);
+const topPlatform = computed(() => platformAgg.value[0]);
+
+const channelLast30 = computed(() => {
+  const labels = last30Agg.value.labels;
+  const ecMap = new Map<string, Bucket>();
+  const mediaMap = new Map<string, Bucket>();
+  const keySet = new Set(labels);
+  for (const row of sortedRows.value) {
+    const dateKey = normalizeStatDateKey(row.statDate);
+    if (!keySet.has(dateKey)) continue;
+    const targetMap =
+      channelOf(platformCodeOf(row)) === 'media' ? mediaMap : ecMap;
+    const bucket = targetMap.get(dateKey) ?? newBucket();
+    addRow(bucket, row);
+    targetMap.set(dateKey, bucket);
+  }
+  const ecBuckets = labels.map((label) => ecMap.get(label) ?? newBucket());
+  const mediaBuckets = labels.map((label) => mediaMap.get(label) ?? newBucket());
+  return { ecBuckets, labels, mediaBuckets };
+});
+
+const topShopAgg = computed(() => {
+  const map = new Map<
+    string,
+    { label: string; platformCode: string; sales: number }
+  >();
+  for (const row of sortedRows.value) {
+    const shopName = String(row.shopName ?? '').trim() || '未命名店铺';
+    const platformCode = platformCodeOf(row);
+    const key = `${platformCode}|${shopName}`;
+    const item = map.get(key) ?? {
+      label: shopName,
+      platformCode,
+      sales: 0,
+    };
+    item.sales = round2(item.sales + realNetSalesAmountOf(row));
+    map.set(key, item);
+  }
+  return [...map.values()].toSorted((a, b) => b.sales - a.sales).slice(0, 8);
+});
+
+const latestDate = computed(() => dateAgg.value.labels.at(-1) ?? '-');
 
 const filterSummary = computed(() => {
-  const start = dashForm.statDate?.[0]?.slice(0, 10) ?? '—';
-  const end = dashForm.statDate?.[1]?.slice(0, 10) ?? '—';
-  const platformCode = fixedPlatformCode.value ?? dashForm.platformCode?.trim();
-  const platform =
-    platformOptions.find((o) => o.value === platformCode)?.label ??
-    (platformCode || '全部平台');
+  const platformCode =
+    fixedPlatformCode.value ?? dashForm.platformCode?.trim();
+  const platform = platformCode ? platformLabel(platformCode) : '全部平台';
   const shop = dashForm.shopName?.trim() || '全部店铺';
-  return `${start} ~ ${end} · ${platform} · ${shop}`;
+  return `${dashForm.statDate[0]} ~ ${dashForm.statDate[1]} · ${platform} · ${shop}`;
 });
 
 const dataSummary = computed(() => {
-  const days = mergedSorted.value.length;
-  if (!days && !loading.value) {
-    return '暂无数据，请调整筛选或先在表格中录入';
+  if (!sortedRows.value.length && !loading.value) {
+    return '暂无数据，请调整筛选条件或先在表格中录入';
   }
-  return `合并后 ${days} 个统计日 · 拉取原始记录 ${rawRows.value.length} 条`;
+  return `合并 ${dateAgg.value.labels.length} 个统计日 · 原始记录 ${rawRows.value.length} 条 · 覆盖 ${platformCount.value} 个平台`;
 });
 
-type LineChartOpts = { dense?: boolean; showPointLabels?: boolean };
+const insightItems = computed(() => [
+  {
+    label: '营销费比',
+    tone: metricTone(kpi.value.feeRatio, 20, 30),
+    value: ratioText(kpi.value.feeRatio),
+  },
+  {
+    label: '退款率',
+    tone: metricTone(kpi.value.refundRatio, 15, 25),
+    value: ratioText(kpi.value.refundRatio),
+  },
+  {
+    label: '真实客单价',
+    tone: 'processing',
+    value: moneyText(kpi.value.aov),
+  },
+  {
+    label: '刷单金额占比',
+    tone: metricTone(kpi.value.brushRatio, 3, 8),
+    value: ratioText(kpi.value.brushRatio),
+  },
+  {
+    label: '活跃店铺',
+    tone: 'default',
+    value: `${kpi.value.shopCount} 家`,
+  },
+  {
+    label: '最高平台',
+    tone: 'processing',
+    value: topPlatform.value
+      ? `${platformLabel(topPlatform.value.platformCode)} ${amountShort(topPlatform.value.sales)}`
+      : '-',
+  },
+  {
+    label: '最新统计日',
+    tone: 'default',
+    value: latestDate.value,
+  },
+]);
 
-function dualLineOption(
-  title: string,
-  cats: string[],
-  net: number[],
-  mkt: number[],
-  opts?: LineChartOpts,
-): ECOption {
-  const dense = opts?.dense ?? false;
-  const showPointLabels = opts?.showPointLabels ?? !dense;
-  return {
-    title: {
-      text: title,
-      left: 8,
-      top: 6,
-      textStyle: { fontSize: 14, fontWeight: 600 },
-    },
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (v: unknown) => fmtAmount2(v),
-    },
-    legend: { bottom: 4, data: ['真实净销售额', '营销花费'] },
-    grid: { left: 52, right: 20, top: 44, bottom: dense ? 68 : 52 },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: cats,
-      axisLabel: dense
-        ? { rotate: 35, interval: 'auto', fontSize: 10, hideOverlap: true }
-        : {},
-    },
-    yAxis: {
-      type: 'value',
-      splitLine: { lineStyle: { type: 'dashed' } },
-      axisLabel: { formatter: (v: number) => fmtAmount2(v) },
-    },
-    series: [
-      {
-        name: '真实净销售额',
-        type: 'line',
-        smooth: true,
-        symbolSize: dense ? 4 : 6,
-        data: net,
-        itemStyle: { color: '#1677ff' },
-        label: {
-          show: showPointLabels,
-          position: 'top',
-          formatter: (p: any) => fmtAmount2(p.value),
-          fontSize: 10,
-        },
-      },
-      {
-        name: '营销花费',
-        type: 'line',
-        smooth: true,
-        symbolSize: dense ? 4 : 6,
-        data: mkt,
-        itemStyle: { color: '#52c41a' },
-        label: {
-          show: showPointLabels,
-          position: 'bottom',
-          formatter: (p: any) => fmtAmount2(p.value),
-          fontSize: 10,
-        },
-      },
-    ],
-  };
-}
+const chartMonthOverview = computed<ECOption | null>(() =>
+  monthAgg.value.labels.length ? monthOverviewOption(monthAgg.value) : null,
+);
 
-function ratioLineOption(
-  title: string,
-  cats: string[],
-  ratio: (null | number)[],
-  opts?: LineChartOpts,
-): ECOption {
-  const dense = opts?.dense ?? false;
-  const showPointLabels = opts?.showPointLabels ?? !dense;
-  const data = ratio.map((v) =>
-    v === null || v === undefined ? null : round2(v),
-  );
-  return {
-    title: {
-      text: title,
-      left: 8,
-      top: 6,
-      textStyle: { fontSize: 14, fontWeight: 600 },
-    },
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (v: unknown) => fmtPercent2(v),
-    },
-    legend: { bottom: 4, data: ['费比(营销/真实净销)'] },
-    grid: { left: 52, right: 20, top: 44, bottom: dense ? 64 : 48 },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: cats,
-      axisLabel: dense
-        ? { rotate: 35, interval: 'auto', fontSize: 10, hideOverlap: true }
-        : {},
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { formatter: (v: number) => `${round2(v).toFixed(2)}%` },
-      splitLine: { lineStyle: { type: 'dashed' } },
-    },
-    series: [
-      {
-        name: '费比(营销/真实净销)',
-        type: 'line',
-        smooth: true,
-        symbolSize: dense ? 4 : 6,
-        data,
-        connectNulls: false,
-        itemStyle: { color: '#1677ff' },
-        label: {
-          show: showPointLabels,
-          formatter: (p: any) =>
-            p.value === null || p.value === undefined || p.value === ''
-              ? ''
-              : fmtPercent2(p.value),
-          fontSize: 10,
-        },
-      },
-    ],
-  };
-}
-
-function monthBarOption(
-  labels: string[],
-  net: number[],
-  mkt: number[],
-): ECOption {
-  return {
-    title: {
-      text: '月度数据走势（真实净销售额 vs 营销花费）',
-      left: 8,
-      top: 6,
-      textStyle: { fontSize: 14, fontWeight: 600 },
-    },
-    tooltip: {
-      trigger: 'axis',
-      valueFormatter: (v: unknown) => fmtAmount2(v),
-    },
-    legend: { bottom: 4, data: ['真实净销售额', '营销花费'] },
-    grid: { left: 52, right: 20, top: 44, bottom: 52 },
-    xAxis: { type: 'category', data: labels },
-    yAxis: {
-      type: 'value',
-      splitLine: { lineStyle: { type: 'dashed' } },
-      axisLabel: { formatter: (v: number) => fmtAmount2(v) },
-    },
-    series: [
-      {
-        name: '真实净销售额',
-        type: 'bar',
-        data: net,
-        itemStyle: { color: '#1677ff' },
-        label: {
-          show: true,
-          position: 'top',
-          fontSize: 10,
-          formatter: (p: any) => fmtAmount2(p.value),
-        },
-      },
-      {
-        name: '营销花费',
-        type: 'bar',
-        data: mkt,
-        itemStyle: { color: '#52c41a' },
-        label: {
-          show: true,
-          position: 'top',
-          fontSize: 10,
-          formatter: (p: any) => fmtAmount2(p.value),
-        },
-      },
-    ],
-  };
-}
-
-const chart7 = computed<ECOption | null>(() => {
-  const rows = last7.value;
-  if (rows.length === 0) return null;
-  const cats = rows.map((r) => String(r.statDate).slice(0, 10));
-  const net = rows.map((r) => realNetSalesAmountOf(r));
-  const mkt = rows.map((r) => round2(r.marketingCost));
-  return dualLineOption('过去7天数据', cats, net, mkt, {
-    showPointLabels: true,
-  });
-});
-
-const chart30 = computed<ECOption | null>(() => {
-  const rows = last30.value;
-  if (rows.length === 0) return null;
-  const cats = rows.map((r) => String(r.statDate).slice(0, 10));
-  const net = rows.map((r) => realNetSalesAmountOf(r));
-  const mkt = rows.map((r) => round2(r.marketingCost));
-  return dualLineOption('近30天数据走势图', cats, net, mkt, { dense: true });
-});
-
-const chart30Ratio = computed<ECOption | null>(() => {
-  const rows = last30.value;
-  if (rows.length === 0) return null;
-  const cats = rows.map((r) => String(r.statDate).slice(0, 10));
-  const ratio = rows.map((r) => {
-    const net = realNetSalesAmountOf(r);
-    const m = Number(r.marketingCost ?? 0);
-    return net > 0 ? (m / net) * 100 : null;
-  });
-  return ratioLineOption('过去30天费比', cats, ratio, { dense: true });
-});
-
-const chartMonthBar = computed<ECOption | null>(() => {
-  const m = monthAgg.value;
-  if (m.labels.length === 0) return null;
-  return monthBarOption(m.labels, m.net, m.mkt);
-});
-
-const chartMonthRatio = computed<ECOption | null>(() => {
-  const m = monthAgg.value;
-  if (m.labels.length === 0) return null;
-  return ratioLineOption('月度费比', m.labels, m.ratio);
-});
+const chartPlatformContribution = computed<ECOption | null>(() =>
+  platformAgg.value.length
+    ? platformContributionOption(platformAgg.value.slice(0, 8))
+    : null,
+);
 
 const chartWeek = computed<ECOption | null>(() => {
-  const w = weekAgg.value;
-  if (w.labels.length === 0) return null;
-  return dualLineOption(
-    '近12周销售和费用（按周起始周一汇总）',
-    w.labels,
-    w.net,
-    w.mkt,
-    {
-      dense: true,
-    },
+  const agg = weekAgg.value;
+  if (!agg.labels.length) return null;
+  return dualMoneyLineOption(
+    agg.labels,
+    '实际销售额',
+    agg.buckets.map((b) => round2(b.sales)),
+    '营销费用',
+    agg.buckets.map((b) => round2(b.marketing)),
   );
 });
 
-const chartWeekRatio = computed<ECOption | null>(() => {
-  const w = weekAgg.value;
-  if (w.labels.length === 0) return null;
-  return ratioLineOption('周费比', w.labels, w.ratio, { dense: true });
+const chartLast30Ratio = computed<ECOption | null>(() => {
+  const agg = last30Agg.value;
+  if (!agg.labels.length) return null;
+  return ratioLineOption(agg.labels, [
+    {
+      color: '#6366f1',
+      data: agg.buckets.map((b) => ratioPercent(b.marketing, b.sales)),
+      name: '营销费比',
+    },
+    {
+      color: '#f97316',
+      data: agg.buckets.map((b) => ratioPercent(b.refund, b.paid)),
+      name: '退款率',
+    },
+  ]);
 });
+
+const chartChannelSales = computed<ECOption | null>(() => {
+  const agg = channelLast30.value;
+  if (!agg.labels.length) return null;
+  return dualMoneyLineOption(
+    agg.labels,
+    '电商渠道销售额',
+    agg.ecBuckets.map((b) => round2(b.sales)),
+    '新媒体渠道销售额',
+    agg.mediaBuckets.map((b) => round2(b.sales)),
+    ['#2563eb', '#06b6d4'],
+  );
+});
+
+const chartChannelRatio = computed<ECOption | null>(() => {
+  const agg = channelLast30.value;
+  if (!agg.labels.length) return null;
+  return ratioLineOption(agg.labels, [
+    {
+      color: '#2563eb',
+      data: agg.ecBuckets.map((b) => ratioPercent(b.marketing, b.sales)),
+      name: '电商渠道费比',
+    },
+    {
+      color: '#06b6d4',
+      data: agg.mediaBuckets.map((b) => ratioPercent(b.marketing, b.sales)),
+      name: '新媒体渠道费比',
+    },
+  ]);
+});
+
+const chartTopShop = computed<ECOption | null>(() =>
+  topShopAgg.value.length ? topShopOption(topShopAgg.value) : null,
+);
 
 async function fetchShopNameOptions(keyword = '') {
   const seq = ++shopNameFetchSeq;
   const platformCode =
-    fixedPlatformCode.value ?? (dashForm.platformCode?.trim() || undefined);
+    fixedPlatformCode.value ?? dashForm.platformCode?.trim() ?? undefined;
   try {
     const list = await getEcShopDailyShopNameOptions({
       keyword: keyword.trim() || undefined,
-      limit: 50,
+      limit: 80,
       platformCode,
     });
     if (seq !== shopNameFetchSeq) return;
@@ -401,21 +805,20 @@ function handleShopNameClear() {
 }
 
 function handlePlatformChange() {
-  handleShopNameSearch(dashForm.shopName);
+  dashForm.shopName = '';
+  handleShopNameSearch('');
 }
 
 function buildQueryPayload(): Record<string, unknown> {
-  const p: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = {};
   if (dashForm.statDate?.[0] && dashForm.statDate?.[1]) {
-    p.statDate = dashForm.statDate;
+    payload.statDate = dashForm.statDate;
   }
   const platformCode =
-    fixedPlatformCode.value ?? (dashForm.platformCode?.trim() || undefined);
-  if (platformCode) {
-    p.platformCode = platformCode;
-  }
-  if (dashForm.shopName?.trim()) p.shopName = dashForm.shopName.trim();
-  return p;
+    fixedPlatformCode.value ?? dashForm.platformCode?.trim() ?? undefined;
+  if (platformCode) payload.platformCode = platformCode;
+  if (dashForm.shopName?.trim()) payload.shopName = dashForm.shopName.trim();
+  return payload;
 }
 
 async function loadRows() {
@@ -437,14 +840,10 @@ async function loadRows() {
       totalRemote.value = total;
       const list = res.list ?? [];
       acc.push(...list);
-      if (list.length < PAGE_SIZE || acc.length >= total) {
-        break;
-      }
+      if (list.length < PAGE_SIZE || acc.length >= total) break;
       pageNo++;
     }
-    if (pageNo >= MAX_PAGES && acc.length < total) {
-      truncated.value = true;
-    }
+    if (pageNo >= MAX_PAGES && acc.length < total) truncated.value = true;
     rawRows.value = acc;
   } finally {
     loading.value = false;
@@ -452,7 +851,7 @@ async function loadRows() {
 }
 
 function resetFilters() {
-  dashForm.statDate = getYesterdayDateRange();
+  dashForm.statDate = currentYearToTodayRange();
   dashForm.platformCode = fixedPlatformCode.value;
   dashForm.shopName = '';
   handleShopNameSearch('');
@@ -471,9 +870,7 @@ defineExpose({
 });
 
 onBeforeUnmount(() => {
-  if (shopNameSearchTimer) {
-    clearTimeout(shopNameSearchTimer);
-  }
+  if (shopNameSearchTimer) clearTimeout(shopNameSearchTimer);
 });
 
 void loadRows();
@@ -482,290 +879,370 @@ void fetchShopNameOptions();
 
 <template>
   <Spin :spinning="loading">
-    <!-- 筛选面板 -->
-    <Card size="small" class="ec-filter-panel mb-4 border-border shadow-sm">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span class="text-sm font-semibold text-foreground">筛选条件</span>
-        <span class="text-xs text-muted-foreground">{{ filterSummary }}</span>
+    <div class="all-dashboard">
+      <section class="filter-panel">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="text-sm font-semibold text-foreground">筛选条件</div>
+            <div class="mt-1 text-xs text-muted-foreground">
+              {{ filterSummary }}
+            </div>
+          </div>
+          <Tag color="blue">基于全平台通用主表统计</Tag>
+        </div>
+
+        <Form layout="vertical">
+          <Row :gutter="[16, 12]">
+            <Col :xs="24" :lg="9" :xl="8">
+              <FormItem label="统计日期" class="mb-0">
+                <FdmDateRangePicker
+                  v-model:value="dashForm.statDate"
+                  class="w-full"
+                />
+              </FormItem>
+            </Col>
+            <Col v-if="!isFixedPlatform" :xs="24" :sm="12" :lg="5" :xl="4">
+              <FormItem label="平台" class="mb-0">
+                <Select
+                  v-model:value="dashForm.platformCode"
+                  allow-clear
+                  class="w-full"
+                  option-filter-prop="label"
+                  :options="platformOptions"
+                  placeholder="全部平台"
+                  show-search
+                  @change="handlePlatformChange"
+                />
+              </FormItem>
+            </Col>
+            <Col :xs="24" :sm="12" :lg="6" :xl="6">
+              <FormItem label="店铺名称" class="mb-0">
+                <AutoComplete
+                  v-model:value="dashForm.shopName"
+                  allow-clear
+                  :filter-option="false"
+                  :options="shopNameOptions"
+                  placeholder="输入关键词或选择店铺"
+                  @clear="handleShopNameClear"
+                  @focus="handleShopNameSearch('')"
+                  @search="handleShopNameSearch"
+                />
+              </FormItem>
+            </Col>
+            <Col :xs="24" :lg="isFixedPlatform ? 9 : 4" :xl="isFixedPlatform ? 10 : 6">
+              <FormItem label=" " class="mb-0 filter-actions">
+                <Space wrap class="w-full justify-end">
+                  <Button type="primary" @click="loadRows">查询</Button>
+                  <Button @click="resetFilters">重置</Button>
+                </Space>
+              </FormItem>
+            </Col>
+          </Row>
+        </Form>
+      </section>
+
+      <div
+        v-if="truncated"
+        class="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+      >
+        已截断：服务端共 {{ totalRemote }} 条，当前仅拉取前
+        {{ PAGE_SIZE * MAX_PAGES }} 条参与统计。
       </div>
 
-      <Form layout="vertical" class="ec-filter-form">
-        <Row :gutter="[16, 12]">
-          <Col :xs="24" :lg="14" :xl="15">
-            <FormItem label="统计日期" class="mb-0">
-              <FdmDateRangePicker
-                v-model:value="dashForm.statDate"
-                class="max-w-[360px]"
-              />
-            </FormItem>
-          </Col>
-          <Col v-if="!isFixedPlatform" :xs="24" :sm="12" :lg="6" :xl="5">
-            <FormItem label="平台" class="mb-0">
-              <Select
-                v-model:value="dashForm.platformCode"
-                allow-clear
-                placeholder="全部平台"
-                :options="platformOptions"
-                class="w-full"
-                @change="handlePlatformChange"
-              />
-            </FormItem>
-          </Col>
-        </Row>
+      <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span class="text-sm font-semibold text-foreground">全平台核心指标</span>
+        <span class="text-xs text-muted-foreground">{{ dataSummary }}</span>
+      </div>
 
-        <Row :gutter="[16, 12]" class="mt-1">
-          <Col :xs="24" :sm="12" :md="8" :lg="7">
-            <FormItem label="店铺名称" class="mb-0">
-              <AutoComplete
-                v-model:value="dashForm.shopName"
-                allow-clear
-                :filter-option="false"
-                :options="shopNameOptions"
-                placeholder="输入关键词或选择店铺"
-                @clear="handleShopNameClear"
-                @focus="handleShopNameSearch('')"
-                @search="handleShopNameSearch"
-              />
-            </FormItem>
-          </Col>
-          <Col :xs="24" :md="16" :lg="17" :xl="17">
-            <FormItem label=" " class="mb-0 ec-filter-actions">
-              <Space wrap class="w-full justify-end">
-                <Button type="primary" @click="loadRows">查询</Button>
-                <Button @click="resetFilters">重置</Button>
-              </Space>
-            </FormItem>
-          </Col>
-        </Row>
-      </Form>
-    </Card>
+      <section class="kpi-grid">
+        <div class="kpi-card kpi-card--sales">
+          <div class="kpi-title">总实际销售额</div>
+          <Tooltip :title="`¥${fmtAmount2(kpi.sales)}`">
+            <div class="kpi-value">{{ moneyText(kpi.sales) }}</div>
+          </Tooltip>
+          <div class="kpi-desc">已剔除退款与刷单影响</div>
+        </div>
+        <div class="kpi-card kpi-card--marketing">
+          <div class="kpi-title">总营销费用</div>
+          <Tooltip :title="`¥${fmtAmount2(kpi.marketing)}`">
+            <div class="kpi-value">{{ moneyText(kpi.marketing) }}</div>
+          </Tooltip>
+          <div class="kpi-desc">全平台推广投放合计</div>
+        </div>
+        <div class="kpi-card kpi-card--refund">
+          <div class="kpi-title">总退款金额</div>
+          <Tooltip :title="`¥${fmtAmount2(kpi.refund)}`">
+            <div class="kpi-value">{{ moneyText(kpi.refund) }}</div>
+          </Tooltip>
+          <div class="kpi-desc">按主表退款金额汇总</div>
+        </div>
+        <div class="kpi-card kpi-card--orders">
+          <div class="kpi-title">真实订单</div>
+          <Tooltip :title="numberShort(kpi.realOrders)">
+            <div class="kpi-value">{{ numberShort(kpi.realOrders) }}</div>
+          </Tooltip>
+          <div class="kpi-desc">支付订单扣除刷单订单</div>
+        </div>
+      </section>
 
-    <div
-      v-if="truncated"
-      class="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
-    >
-      已截断：服务端共 {{ totalRemote }} 条，当前仅拉取前
-      {{ PAGE_SIZE * MAX_PAGES }} 条参与统计。
+      <section class="insight-strip">
+        <div
+          v-for="item in insightItems"
+          :key="item.label"
+          class="insight-item"
+        >
+          <span class="insight-label">{{ item.label }}</span>
+          <Tag :color="item.tone">{{ item.value }}</Tag>
+        </div>
+      </section>
+
+      <Row :gutter="[16, 16]" class="mb-4">
+        <Col :xs="24" :xl="14">
+          <section class="chart-panel">
+            <div class="chart-title">月度经营总览</div>
+            <EchartsBox
+              v-if="chartMonthOverview"
+              :height="340"
+              :option="chartMonthOverview"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :xs="24" :xl="10">
+          <section class="chart-panel">
+            <div class="chart-title">平台贡献排行</div>
+            <EchartsBox
+              v-if="chartPlatformContribution"
+              :height="340"
+              :option="chartPlatformContribution"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :span="24">
+          <section class="chart-panel">
+            <div class="chart-title">过去十二周销售与营销费用</div>
+            <EchartsBox v-if="chartWeek" :height="320" :option="chartWeek" />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :xs="24" :xl="12">
+          <section class="chart-panel">
+            <div class="chart-title">近30天费比与退款率</div>
+            <EchartsBox
+              v-if="chartLast30Ratio"
+              :height="300"
+              :option="chartLast30Ratio"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :xs="24" :xl="12">
+          <section class="chart-panel">
+            <div class="chart-title">近30天电商与新媒体销售额</div>
+            <EchartsBox
+              v-if="chartChannelSales"
+              :height="300"
+              :option="chartChannelSales"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :xs="24" :xl="12">
+          <section class="chart-panel">
+            <div class="chart-title">近30天渠道营销费比</div>
+            <EchartsBox
+              v-if="chartChannelRatio"
+              :height="300"
+              :option="chartChannelRatio"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+        <Col :xs="24" :xl="12">
+          <section class="chart-panel">
+            <div class="chart-title">店铺销售贡献 Top 8</div>
+            <EchartsBox
+              v-if="chartTopShop"
+              :height="300"
+              :option="chartTopShop"
+            />
+            <div v-else class="empty-block">暂无数据</div>
+          </section>
+        </Col>
+      </Row>
     </div>
-
-    <!-- 核心指标 -->
-    <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-      <span class="text-sm font-semibold text-foreground">核心指标</span>
-      <span class="text-xs text-muted-foreground">{{ dataSummary }}</span>
-    </div>
-
-    <Row :gutter="[16, 16]" class="mb-4">
-      <Col :xs="24" :sm="12" :lg="6">
-        <Card size="small" class="kpi-card kpi-card--net h-full">
-          <Statistic
-            title="真实净销售额（剔除刷单）"
-            :precision="2"
-            :value="kpi.netSales"
-            prefix="¥"
-            :value-style="{
-              color: '#0d9488',
-              fontWeight: 700,
-              fontSize: '22px',
-            }"
-          />
-        </Card>
-      </Col>
-      <Col :xs="24" :sm="12" :lg="6">
-        <Card size="small" class="kpi-card kpi-card--mkt h-full">
-          <Statistic
-            title="营销花费（合计）"
-            :precision="2"
-            :value="kpi.marketing"
-            prefix="¥"
-            :value-style="{
-              color: '#ca8a04',
-              fontWeight: 700,
-              fontSize: '22px',
-            }"
-          />
-        </Card>
-      </Col>
-      <Col :xs="24" :sm="12" :lg="6">
-        <Card size="small" class="kpi-card kpi-card--refund h-full">
-          <Statistic
-            title="退款金额（合计）"
-            :precision="2"
-            :value="kpi.refund"
-            prefix="¥"
-            :value-style="{
-              color: '#ea580c',
-              fontWeight: 700,
-              fontSize: '22px',
-            }"
-          />
-        </Card>
-      </Col>
-      <Col :xs="24" :sm="12" :lg="6">
-        <Card size="small" class="kpi-card kpi-card--buyer h-full">
-          <Statistic
-            title="买家数（合计）"
-            :precision="0"
-            :value="kpi.buyers"
-            :value-style="{ fontWeight: 700, fontSize: '22px' }"
-          />
-        </Card>
-      </Col>
-    </Row>
-
-    <!-- 首屏图表 -->
-    <Row :gutter="[16, 16]" class="mb-4">
-      <Col :xs="24" :lg="12">
-        <Card size="small" class="chart-card h-full" title="过去7天">
-          <EchartsBox v-if="chart7" :option="chart7" :height="300" />
-          <div v-else class="py-8 text-center text-sm text-muted-foreground">
-            暂无数据
-          </div>
-        </Card>
-      </Col>
-      <Col :xs="24" :lg="12">
-        <Card size="small" class="chart-card h-full" title="近30天走势">
-          <EchartsBox v-if="chart30" :option="chart30" :height="300" />
-          <div v-else class="py-8 text-center text-sm text-muted-foreground">
-            暂无数据
-          </div>
-        </Card>
-      </Col>
-      <Col :span="24">
-        <Card size="small" class="chart-card" title="过去30天费比">
-          <EchartsBox
-            v-if="chart30Ratio"
-            :option="chart30Ratio"
-            :height="280"
-          />
-        </Card>
-      </Col>
-    </Row>
-
-    <!-- 更多分析 -->
-    <Collapse ghost class="ec-more-charts">
-      <Collapse.Panel key="more" header="更多分析（月度 / 周度）">
-        <Row :gutter="[16, 16]">
-          <Col :xs="24" :lg="12">
-            <Card size="small" class="chart-card h-full">
-              <EchartsBox
-                v-if="chartMonthBar"
-                :option="chartMonthBar"
-                :height="300"
-              />
-              <div
-                v-else
-                class="py-6 text-center text-sm text-muted-foreground"
-              >
-                暂无数据
-              </div>
-            </Card>
-          </Col>
-          <Col :xs="24" :lg="12">
-            <Card size="small" class="chart-card h-full">
-              <EchartsBox
-                v-if="chartMonthRatio"
-                :option="chartMonthRatio"
-                :height="300"
-              />
-              <div
-                v-else
-                class="py-6 text-center text-sm text-muted-foreground"
-              >
-                暂无数据
-              </div>
-            </Card>
-          </Col>
-          <Col :xs="24" :lg="12">
-            <Card size="small" class="chart-card h-full">
-              <EchartsBox v-if="chartWeek" :option="chartWeek" :height="280" />
-              <div
-                v-else
-                class="py-6 text-center text-sm text-muted-foreground"
-              >
-                暂无数据
-              </div>
-            </Card>
-          </Col>
-          <Col :xs="24" :lg="12">
-            <Card size="small" class="chart-card h-full">
-              <EchartsBox
-                v-if="chartWeekRatio"
-                :option="chartWeekRatio"
-                :height="280"
-              />
-              <div
-                v-else
-                class="py-6 text-center text-sm text-muted-foreground"
-              >
-                暂无数据
-              </div>
-            </Card>
-          </Col>
-        </Row>
-      </Collapse.Panel>
-    </Collapse>
   </Spin>
 </template>
 
 <style scoped>
-.ec-filter-panel :deep(.ant-card-body) {
-  padding: 16px;
-  background: hsl(var(--muted) / 25%);
+.all-dashboard {
+  --sales-color: #2563eb;
+  --marketing-color: #16a34a;
+  --refund-color: #ea580c;
+  --orders-color: #7c3aed;
 }
 
-.ec-filter-form :deep(.ant-form-item-label > label) {
+.filter-panel,
+.chart-panel,
+.insight-strip,
+.kpi-card {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  box-shadow: 0 6px 18px rgb(15 23 42 / 5%);
+}
+
+.filter-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.filter-panel :deep(.ant-form-item-label > label) {
   font-size: 13px;
   color: hsl(var(--muted-foreground));
 }
 
-.ec-filter-actions :deep(.ant-form-item-label) {
+.filter-actions :deep(.ant-form-item-label) {
   visibility: hidden;
 }
 
-@media (max-width: 768px) {
-  .ec-filter-actions :deep(.ant-form-item-label) {
-    display: none;
-  }
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .kpi-card {
-  border-left-style: solid;
-  border-left-width: 3px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 18px;
+  border-top-width: 3px;
 }
 
-.kpi-card--net {
-  border-left-color: #0d9488;
+.kpi-card--sales {
+  border-top-color: var(--sales-color);
 }
 
-.kpi-card--mkt {
-  border-left-color: #ca8a04;
+.kpi-card--marketing {
+  border-top-color: var(--marketing-color);
 }
 
 .kpi-card--refund {
-  border-left-color: #ea580c;
+  border-top-color: var(--refund-color);
 }
 
-.kpi-card--buyer {
-  border-left-color: #94a3b8;
+.kpi-card--orders {
+  border-top-color: var(--orders-color);
 }
 
-.chart-card :deep(.ant-card-head) {
-  min-height: 40px;
-  padding: 0 12px;
-}
-
-.chart-card :deep(.ant-card-head-title) {
+.kpi-title {
+  margin-bottom: 18px;
   font-size: 14px;
   font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
-.chart-card :deep(.ant-card-body) {
-  padding: 8px 12px 12px;
+.kpi-value {
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: 38px;
+  font-weight: 760;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ec-more-charts :deep(.ant-collapse-header) {
-  padding: 8px 0 !important;
+.kpi-card--sales .kpi-value {
+  color: var(--sales-color);
+}
+
+.kpi-card--marketing .kpi-value {
+  color: var(--marketing-color);
+}
+
+.kpi-card--refund .kpi-value {
+  color: var(--refund-color);
+}
+
+.kpi-card--orders .kpi-value {
+  color: var(--orders-color);
+}
+
+.kpi-desc {
+  margin-top: 14px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insight-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+}
+
+.insight-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  padding: 4px 8px;
+  border: 1px solid hsl(var(--border) / 70%);
+  border-radius: 6px;
+  background: hsl(var(--muted) / 22%);
+}
+
+.insight-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chart-panel {
+  min-width: 0;
+  height: 100%;
+  padding: 12px;
+}
+
+.chart-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 650;
+  color: hsl(var(--foreground));
+}
+
+.empty-block {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
-  font-weight: 500;
+}
+
+@media (max-width: 1200px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-actions :deep(.ant-form-item-label) {
+    display: none;
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi-value {
+    font-size: 32px;
+  }
 }
 </style>
