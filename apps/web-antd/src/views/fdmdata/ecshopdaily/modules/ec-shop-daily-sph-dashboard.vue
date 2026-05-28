@@ -111,6 +111,10 @@ function ratioLabel(value: null | number | undefined): string {
   return `${round2(value).toFixed(2)}%`;
 }
 
+function metricTitle(description: string, value: string): string {
+  return `${description} 当前值：${value}`;
+}
+
 function newBucket(): SphBucket {
   return {
     actualTransaction: 0,
@@ -255,12 +259,42 @@ const dataSummary = computed(() => {
 const diagnosticItems = computed(() => {
   const kpi = rangeKpi.value;
   return [
-    { label: '订单成交率', value: ratioLabel(kpi.orderPayRate), tone: 'blue' },
-    { label: '用户成交率', value: ratioLabel(kpi.userPayRate), tone: 'cyan' },
-    { label: '实际成交占比', value: ratioLabel(kpi.actualRate), tone: 'green' },
-    { label: '退款率', value: ratioLabel(kpi.refundRatio), tone: kpi.refundRatio !== null && kpi.refundRatio <= 15 ? 'green' : 'red' },
-    { label: '客单价', value: `¥${fmtAmount2(kpi.avgOrderValue)}`, tone: 'purple' },
-    { label: '下单人数', value: fullNumber(kpi.orderUserCount), tone: 'geekblue' },
+    {
+      description: '订单成交率 = 成交订单数 / 下单订单数，用于观察订单从下单到成交的转化效率。',
+      label: '订单成交率',
+      value: ratioLabel(kpi.orderPayRate),
+      tone: 'blue',
+    },
+    {
+      description: '用户成交率 = 成交人数 / 下单人数，用于观察用户从下单到成交的转化效率。',
+      label: '用户成交率',
+      value: ratioLabel(kpi.userPayRate),
+      tone: 'cyan',
+    },
+    {
+      description: '实际成交占比 = 实际成交金额 / 成交金额，用于观察扣除异常影响后的成交质量。',
+      label: '实际成交占比',
+      value: ratioLabel(kpi.actualRate),
+      tone: 'green',
+    },
+    {
+      description: '退款率 = 退款金额 / 成交金额，用于观察退款对视频号成交的影响。',
+      label: '退款率',
+      value: ratioLabel(kpi.refundRatio),
+      tone: kpi.refundRatio !== null && kpi.refundRatio <= 15 ? 'green' : 'red',
+    },
+    {
+      description: '客单价 = 成交金额 / 成交订单数，用于衡量单笔成交价值。',
+      label: '客单价',
+      value: `¥${fmtAmount2(kpi.avgOrderValue)}`,
+      tone: 'purple',
+    },
+    {
+      description: '下单人数为当前筛选范围内产生下单行为的用户数汇总。',
+      label: '下单人数',
+      value: fullNumber(kpi.orderUserCount),
+      tone: 'geekblue',
+    },
   ];
 });
 
@@ -502,25 +536,53 @@ void fetchShopNameOptions();
     <div class="sph-kpi-grid mb-4">
       <Card class="sph-kpi sph-kpi--transaction" size="small">
         <div class="sph-kpi-title">{{ yearLabel }}成交金额</div>
-        <Tooltip :title="fullMoney(rangeKpi.transactionAmount)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '成交金额为视频号平台成交金额口径汇总，用于观察交易规模。',
+              fullMoney(rangeKpi.transactionAmount),
+            )
+          "
+        >
           <div class="sph-kpi-value">{{ kpiMoney(rangeKpi.transactionAmount) }}</div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--actual" size="small">
         <div class="sph-kpi-title">{{ yearLabel }}实际成交金额</div>
-        <Tooltip :title="fullMoney(rangeKpi.actualTransaction)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '实际成交金额为视频号扣除异常或退款影响后的成交口径。',
+              fullMoney(rangeKpi.actualTransaction),
+            )
+          "
+        >
           <div class="sph-kpi-value">{{ kpiMoney(rangeKpi.actualTransaction) }}</div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--orders" size="small">
         <div class="sph-kpi-title">成交订单数</div>
-        <Tooltip :title="fullNumber(rangeKpi.paidOrderCount)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '成交订单数为当前筛选范围内完成成交的订单数量。',
+              fullNumber(rangeKpi.paidOrderCount),
+            )
+          "
+        >
           <div class="sph-kpi-value">{{ amountShort(rangeKpi.paidOrderCount) }}</div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--refund" size="small">
         <div class="sph-kpi-title">退款金额</div>
-        <Tooltip :title="fullMoney(rangeKpi.refundAmount)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '退款金额为视频号当前筛选范围内退款金额合计。',
+              fullMoney(rangeKpi.refundAmount),
+            )
+          "
+        >
           <div class="sph-kpi-value">{{ kpiMoney(rangeKpi.refundAmount) }}</div>
         </Tooltip>
       </Card>
@@ -530,7 +592,9 @@ void fetchShopNameOptions();
       <div class="diagnosis-grid">
         <div v-for="item in diagnosticItems" :key="item.label" class="diagnosis-item">
           <span class="diagnosis-label">{{ item.label }}</span>
-          <Tag :color="item.tone" class="diagnosis-value">{{ item.value }}</Tag>
+          <Tooltip :title="metricTitle(item.description, item.value)">
+            <Tag :color="item.tone" class="diagnosis-value">{{ item.value }}</Tag>
+          </Tooltip>
         </div>
       </div>
     </Card>

@@ -38,6 +38,79 @@ export namespace FdmdataEcShopDailyApi {
     tableName?: string;
     detail?: Record<string, any>;
   }
+
+  export interface EcShopDailySummaryMetric {
+    avgOrderValue?: number;
+    brushAmount?: number;
+    brushOrderCount?: number;
+    brushRatio?: number;
+    buyerCount?: number;
+    costRatio?: number;
+    gmvAmount?: number;
+    marketingCost?: number;
+    paidAmount?: number;
+    paidOrderCount?: number;
+    realOrderCount?: number;
+    refundAmount?: number;
+    refundOrderCount?: number;
+    refundRatio?: number;
+    roi?: number;
+    salesAmount?: number;
+  }
+
+  export interface EcShopDailySummaryPeriod {
+    endDate?: string;
+    periodKey: string;
+    periodLabel: string;
+    startDate?: string;
+  }
+
+  export interface EcShopDailySummaryShop {
+    channelType?: string;
+    costRatio?: number;
+    marketingCost?: number;
+    platformCode?: string;
+    platformLabel?: string;
+    salesAmount?: number;
+    shopId?: string;
+    shopKey: string;
+    shopName: string;
+  }
+
+  export interface EcShopDailySummaryRow extends EcShopDailySummaryMetric {
+    channelType?: string;
+    endDate?: string;
+    growthRate?: number;
+    periodKey: string;
+    periodLabel: string;
+    platformCode?: string;
+    platformLabel?: string;
+    salesShare?: number;
+    shopId?: string;
+    shopKey: string;
+    shopName: string;
+    startDate?: string;
+  }
+
+  export interface EcShopDailySummaryRanking {
+    highCostRatio?: EcShopDailySummaryRow[];
+    highRefundRatio?: EcShopDailySummaryRow[];
+    salesTop?: EcShopDailySummaryRow[];
+    zeroSalesWithCost?: EcShopDailySummaryRow[];
+  }
+
+  export interface EcShopDailySummary {
+    channelTotals?: Record<string, EcShopDailySummaryMetric>;
+    dataMaxDate?: string;
+    endDate?: string;
+    periodType?: string;
+    periods: EcShopDailySummaryPeriod[];
+    rankings?: EcShopDailySummaryRanking;
+    rows: EcShopDailySummaryRow[];
+    shops: EcShopDailySummaryShop[];
+    startDate?: string;
+    totals?: EcShopDailySummaryMetric;
+  }
 }
 
 /** 查询店铺后台日汇总分页 */
@@ -95,6 +168,30 @@ export function getEcShopDailyPlatformDetailPage(
 }
 
 /** 新增店铺后台日汇总（单条，页面表单） */
+export interface EcShopDailySummaryParams {
+  channelType?: 'ALL' | 'EC' | 'MEDIA' | string;
+  hideEmptyPeriod?: boolean;
+  periodType?: 'DAY' | 'WEEK' | 'MONTH' | string;
+  platformCode?: string;
+  shopNames?: string;
+  statDate?: string[];
+}
+
+/** 店铺经营汇总分析 */
+export function getEcShopDailySummary(params: EcShopDailySummaryParams) {
+  return requestClient.get<FdmdataEcShopDailyApi.EcShopDailySummary>(
+    '/fdmdata/ec-shop-daily/summary',
+    { params },
+  );
+}
+
+/** 导出店铺经营汇总分析 */
+export function exportEcShopDailySummary(params: EcShopDailySummaryParams) {
+  return requestClient.download('/fdmdata/ec-shop-daily/summary-export-excel', {
+    params,
+  });
+}
+
 export function createEcShopDaily(data: FdmdataEcShopDailyApi.EcShopDaily) {
   return requestClient.post('/fdmdata/ec-shop-daily/create', data);
 }

@@ -138,6 +138,10 @@ function ratioLabel(value: null | number | undefined): string {
   return `${round2(value).toFixed(2)}%`;
 }
 
+function metricTitle(description: string, value: string): string {
+  return `${description} 当前值：${value}`;
+}
+
 function newBucket(): DouyinBucket {
   return {
     actualSales: 0,
@@ -372,51 +376,61 @@ const diagnosticItems = computed(() => {
   }).length;
   return [
     {
+      description: '投放费比 = 投放消耗 / 实际销售额，用于衡量广告投放成本压力。',
       label: '投放费比',
       value: ratioLabel(kpi.adRatio),
       tone: kpi.adRatio !== null && kpi.adRatio <= 20 ? 'green' : 'orange',
     },
     {
+      description: '支出占比 = 总支出费用 / 实际销售额，支出包含投放、佣金及平台扣点等费用。',
       label: '支出占比',
       value: ratioLabel(kpi.expenseRatio),
       tone: kpi.expenseRatio !== null && kpi.expenseRatio <= 30 ? 'green' : 'red',
     },
     {
+      description: '退款率 = 退款金额 / 支付金额，用于观察售后退款对成交的影响。',
       label: '退款率',
       value: ratioLabel(kpi.refundRatio),
       tone: kpi.refundRatio !== null && kpi.refundRatio <= 20 ? 'green' : 'red',
     },
     {
+      description: '客单价 = 实际销售额 / 成交订单数，用于衡量单笔成交价值。',
       label: '客单价',
       value: `¥${fmtAmount2(kpi.avgOrderValue)}`,
       tone: 'blue',
     },
     {
+      description: '自播销售占比 = 自播支付金额 / 支付金额，用于观察自播渠道贡献。',
       label: '自播销售占比',
       value: ratioLabel(kpi.selfShare),
       tone: 'cyan',
     },
     {
+      description: '达人销售占比 = 达人支付金额 / 支付金额，用于观察达人带货贡献。',
       label: '达人销售占比',
       value: ratioLabel(kpi.talentShare),
       tone: 'purple',
     },
     {
+      description: '近 30 天内投放费比达到或超过 25% 的天数。',
       label: '高费比天数',
       value: `${highAdDays} 天`,
       tone: highAdDays > 0 ? 'orange' : 'green',
     },
     {
+      description: '近 30 天内退款率达到或超过 20% 的天数。',
       label: '高退款天数',
       value: `${highRefundDays} 天`,
       tone: highRefundDays > 0 ? 'red' : 'green',
     },
     {
+      description: '达人商品点击率 = 达人商品点击人数 / 达人商品曝光人数，用于观察达人商品承接效率。',
       label: '达人商品点击率',
       value: ratioLabel(kpi.clickRate),
       tone: 'geekblue',
     },
     {
+      description: '当前数据集中最新一条统计日期。',
       label: '最新统计日',
       value: latest ? statDateOf(latest) : '-',
       tone: 'default',
@@ -862,7 +876,14 @@ void fetchShopNameOptions();
       <div class="douyin-kpi-grid mb-4">
         <Card class="douyin-kpi douyin-kpi--sales" size="small">
           <div class="douyin-kpi-title">{{ yearLabel }}销售额</div>
-          <Tooltip :title="fullMoney(rangeKpi.actualSales)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '销售额按抖音明细表实际销售额口径汇总，用于观察真实经营收入规模。',
+                fullMoney(rangeKpi.actualSales),
+              )
+            "
+          >
             <div class="douyin-kpi-value">
               {{ kpiMoney(rangeKpi.actualSales) }}
             </div>
@@ -870,7 +891,14 @@ void fetchShopNameOptions();
         </Card>
         <Card class="douyin-kpi douyin-kpi--expense" size="small">
           <div class="douyin-kpi-title">{{ yearLabel }}支出费用</div>
-          <Tooltip :title="fullMoney(rangeKpi.expense)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '支出费用包含投放消耗、平台佣金、达人佣金等费用合计。',
+                fullMoney(rangeKpi.expense),
+              )
+            "
+          >
             <div class="douyin-kpi-value">
               {{ kpiMoney(rangeKpi.expense) }}
             </div>
@@ -878,7 +906,14 @@ void fetchShopNameOptions();
         </Card>
         <Card class="douyin-kpi douyin-kpi--transaction" size="small">
           <div class="douyin-kpi-title">成交金额</div>
-          <Tooltip :title="fullMoney(rangeKpi.transactionAmount)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '成交金额为抖音成交口径金额，未必等同于扣除退款后的实际销售额。',
+                fullMoney(rangeKpi.transactionAmount),
+              )
+            "
+          >
             <div class="douyin-kpi-value">
               {{ kpiMoney(rangeKpi.transactionAmount) }}
             </div>
@@ -886,7 +921,14 @@ void fetchShopNameOptions();
         </Card>
         <Card class="douyin-kpi douyin-kpi--refund" size="small">
           <div class="douyin-kpi-title">退款金额</div>
-          <Tooltip :title="fullMoney(rangeKpi.refundPayment)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '退款金额按抖音退款口径汇总，用于观察退款对支付成交的影响。',
+                fullMoney(rangeKpi.refundPayment),
+              )
+            "
+          >
             <div class="douyin-kpi-value">
               {{ kpiMoney(rangeKpi.refundPayment) }}
             </div>
@@ -894,7 +936,14 @@ void fetchShopNameOptions();
         </Card>
         <Card class="douyin-kpi douyin-kpi--orders" size="small">
           <div class="douyin-kpi-title">{{ yearLabel }}实际订单量</div>
-          <Tooltip :title="fullNumber(rangeKpi.orderCount)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '实际订单量为当前筛选范围内成交订单数量汇总。',
+                fullNumber(rangeKpi.orderCount),
+              )
+            "
+          >
             <div class="douyin-kpi-value">
               {{ kpiNumber(rangeKpi.orderCount) }}
             </div>
@@ -910,9 +959,11 @@ void fetchShopNameOptions();
             class="diagnosis-item"
           >
             <span class="diagnosis-label">{{ item.label }}</span>
-            <Tag :color="item.tone" class="diagnosis-value">
-              {{ item.value }}
-            </Tag>
+            <Tooltip :title="metricTitle(item.description, item.value)">
+              <Tag :color="item.tone" class="diagnosis-value">
+                {{ item.value }}
+              </Tag>
+            </Tooltip>
           </div>
         </div>
       </Card>

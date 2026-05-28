@@ -20,6 +20,7 @@ import {
   Spin,
   Statistic,
   Tag,
+  Tooltip,
 } from 'ant-design-vue';
 
 import {
@@ -124,6 +125,10 @@ function amountShort(value: unknown): string {
 function ratioLabel(value: null | number | undefined): string {
   if (value === null || value === undefined) return '-';
   return `${round2(value).toFixed(2)}%`;
+}
+
+function metricTitle(description: string, value: string): string {
+  return `${description} 当前值：${value}`;
 }
 
 function newBucket(): PeriodBucket {
@@ -245,26 +250,31 @@ const diagnosticItems = computed(() => {
   }).length;
   return [
     {
+      description: '投产比 = 实际销售额 / 营销推广费，用于衡量投放产出效率。',
       label: '投产比',
       value: kpi.roi === null ? '-' : `${kpi.roi.toFixed(2)}`,
       tone: kpi.roi !== null && kpi.roi >= 4 ? 'green' : 'gold',
     },
     {
+      description: '推广占比 = 营销推广费 / 实际销售额，用于观察推广成本占销售额比例。',
       label: '推广占比',
       value: ratioLabel(kpi.promoRatio),
       tone: kpi.promoRatio !== null && kpi.promoRatio <= 25 ? 'green' : 'orange',
     },
     {
+      description: '退款占比 = 退款金额 / 支付金额，用于观察退款对成交金额的影响。',
       label: '退款占比',
       value: ratioLabel(kpi.refundRatio),
       tone: kpi.refundRatio !== null && kpi.refundRatio <= 20 ? 'green' : 'red',
     },
     {
+      description: '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
       label: '真实客单价',
       value: `¥${fmtAmount2(kpi.realAov)}`,
       tone: 'blue',
     },
     {
+      description: '当前筛选范围近 30 天内实际销售额最高的日期。',
       label: '近30天销售高点',
       value: peak
         ? `${normalizeStatDateKey(peak.statDate)} · ¥${amountShort(
@@ -274,11 +284,13 @@ const diagnosticItems = computed(() => {
       tone: 'blue',
     },
     {
+      description: '近 30 天内推广占比达到或超过 30% 的天数，用于提示投放成本风险。',
       label: '高费比天数',
       value: `${riskyDays} 天`,
       tone: riskyDays > 0 ? 'orange' : 'green',
     },
     {
+      description: '当前数据集中最新一条统计日期。',
       label: '最新统计日',
       value: latest ? normalizeStatDateKey(latest.statDate) : '-',
       tone: 'default',
@@ -672,41 +684,77 @@ void fetchShopNameOptions();
     <Row :gutter="[16, 16]" class="mb-4">
       <Col :xs="24" :sm="12" :xl="6">
         <Card class="taobao-kpi taobao-kpi--sales h-full" size="small">
-          <Statistic
-            title="实际销售额"
-            :precision="2"
-            :value="rangeKpi.netSales"
-            prefix="¥"
-          />
+          <Tooltip
+            :title="
+              metricTitle(
+                '实际销售额按真实净销售口径统计，已剔除退款和刷单金额影响。',
+                `¥${fmtAmount2(rangeKpi.netSales)}`,
+              )
+            "
+          >
+            <Statistic
+              title="实际销售额"
+              :precision="2"
+              :value="rangeKpi.netSales"
+              prefix="¥"
+            />
+          </Tooltip>
         </Card>
       </Col>
       <Col :xs="24" :sm="12" :xl="6">
         <Card class="taobao-kpi taobao-kpi--marketing h-full" size="small">
-          <Statistic
-            title="营销推广费"
-            :precision="2"
-            :value="rangeKpi.marketing"
-            prefix="¥"
-          />
+          <Tooltip
+            :title="
+              metricTitle(
+                '营销推广费为当前筛选范围内店铺推广投放费用合计。',
+                `¥${fmtAmount2(rangeKpi.marketing)}`,
+              )
+            "
+          >
+            <Statistic
+              title="营销推广费"
+              :precision="2"
+              :value="rangeKpi.marketing"
+              prefix="¥"
+            />
+          </Tooltip>
         </Card>
       </Col>
       <Col :xs="24" :sm="12" :xl="6">
         <Card class="taobao-kpi taobao-kpi--refund h-full" size="small">
-          <Statistic
-            title="退款金额"
-            :precision="2"
-            :value="rangeKpi.refund"
-            prefix="¥"
-          />
+          <Tooltip
+            :title="
+              metricTitle(
+                '退款金额为当前筛选范围内已归集的退款金额合计。',
+                `¥${fmtAmount2(rangeKpi.refund)}`,
+              )
+            "
+          >
+            <Statistic
+              title="退款金额"
+              :precision="2"
+              :value="rangeKpi.refund"
+              prefix="¥"
+            />
+          </Tooltip>
         </Card>
       </Col>
       <Col :xs="24" :sm="12" :xl="6">
         <Card class="taobao-kpi taobao-kpi--orders h-full" size="small">
-          <Statistic
-            title="真实订单"
-            :precision="0"
-            :value="rangeKpi.realOrders"
-          />
+          <Tooltip
+            :title="
+              metricTitle(
+                '真实订单 = 支付订单数 - 刷单订单数，用于观察真实成交规模。',
+                amountShort(rangeKpi.realOrders),
+              )
+            "
+          >
+            <Statistic
+              title="真实订单"
+              :precision="0"
+              :value="rangeKpi.realOrders"
+            />
+          </Tooltip>
         </Card>
       </Col>
     </Row>
@@ -719,9 +767,11 @@ void fetchShopNameOptions();
           class="diagnosis-item"
         >
           <span class="diagnosis-label">{{ item.label }}</span>
-          <Tag :color="item.tone" class="diagnosis-value">
-            {{ item.value }}
-          </Tag>
+          <Tooltip :title="metricTitle(item.description, item.value)">
+            <Tag :color="item.tone" class="diagnosis-value">
+              {{ item.value }}
+            </Tag>
+          </Tooltip>
         </div>
       </div>
     </Card>

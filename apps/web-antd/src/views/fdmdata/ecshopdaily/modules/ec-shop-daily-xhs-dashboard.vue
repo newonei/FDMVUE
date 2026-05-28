@@ -167,6 +167,10 @@ function ratioLabel(value: null | number | undefined): string {
   return `${round2(value).toFixed(2)}%`;
 }
 
+function metricTitle(description: string, value: string): string {
+  return `${description} 当前值：${value}`;
+}
+
 function newBucket(): XhsBucket {
   return {
     addCartUsers: 0,
@@ -377,15 +381,60 @@ const dataSummary = computed(() => {
 const diagnosticItems = computed(() => {
   const kpi = rangeKpi.value;
   return [
-    { label: '支付转化率', value: ratioLabel(kpi.paymentConversion), tone: 'blue' },
-    { label: '商品点击率', value: ratioLabel(kpi.productClickRate), tone: 'geekblue' },
-    { label: '笔记支付转化', value: ratioLabel(kpi.noteConversion), tone: 'magenta' },
-    { label: '退款订单占比', value: ratioLabel(kpi.refundOrderRatio), tone: kpi.refundOrderRatio !== null && kpi.refundOrderRatio <= 15 ? 'green' : 'red' },
-    { label: '推广占比', value: ratioLabel(kpi.promotionRatio), tone: kpi.promotionRatio !== null && kpi.promotionRatio <= 25 ? 'green' : 'orange' },
-    { label: '客单价', value: `¥${fmtAmount2(kpi.avgOrderValue)}`, tone: 'purple' },
-    { label: '内容互动率', value: ratioLabel(kpi.engagementRate), tone: 'cyan' },
-    { label: '客服回复率', value: ratioLabel(kpi.replyRate), tone: 'green' },
-    { label: '询购转化率', value: ratioLabel(kpi.inquiryRate), tone: 'gold' },
+    {
+      description: '支付转化率用于衡量访客到支付的转化效率，优先使用平台原始转化率。',
+      label: '支付转化率',
+      value: ratioLabel(kpi.paymentConversion),
+      tone: 'blue',
+    },
+    {
+      description: '商品点击率用于衡量商品页点击承接能力，优先使用平台原始商品点击率。',
+      label: '商品点击率',
+      value: ratioLabel(kpi.productClickRate),
+      tone: 'geekblue',
+    },
+    {
+      description: '笔记支付转化用于观察内容笔记带来的支付转化效率。',
+      label: '笔记支付转化',
+      value: ratioLabel(kpi.noteConversion),
+      tone: 'magenta',
+    },
+    {
+      description: '退款订单占比 = 退款订单数 / 支付订单数，用于观察售后压力。',
+      label: '退款订单占比',
+      value: ratioLabel(kpi.refundOrderRatio),
+      tone: kpi.refundOrderRatio !== null && kpi.refundOrderRatio <= 15 ? 'green' : 'red',
+    },
+    {
+      description: '推广占比 = 推广费用 / 实际成交金额，用于观察投放成本占比。',
+      label: '推广占比',
+      value: ratioLabel(kpi.promotionRatio),
+      tone: kpi.promotionRatio !== null && kpi.promotionRatio <= 25 ? 'green' : 'orange',
+    },
+    {
+      description: '客单价 = 实际成交金额 / 支付订单数，用于衡量单笔成交价值。',
+      label: '客单价',
+      value: `¥${fmtAmount2(kpi.avgOrderValue)}`,
+      tone: 'purple',
+    },
+    {
+      description: '内容互动率 = 点赞、收藏、评论、分享等互动 / 阅读量，用于观察内容吸引力。',
+      label: '内容互动率',
+      value: ratioLabel(kpi.engagementRate),
+      tone: 'cyan',
+    },
+    {
+      description: '客服回复率用于衡量询单后客服响应覆盖情况。',
+      label: '客服回复率',
+      value: ratioLabel(kpi.replyRate),
+      tone: 'green',
+    },
+    {
+      description: '询购转化率 = 询购订单数 / 会话数，用于观察咨询到购买的转化效率。',
+      label: '询购转化率',
+      value: ratioLabel(kpi.inquiryRate),
+      tone: 'gold',
+    },
   ];
 });
 
@@ -648,25 +697,53 @@ void fetchShopNameOptions();
     <div class="xhs-kpi-grid mb-4">
       <Card class="xhs-kpi xhs-kpi--transaction" size="small">
         <div class="xhs-kpi-title">{{ yearLabel }}实际成交金额</div>
-        <Tooltip :title="fullMoney(rangeKpi.transaction)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '实际成交金额为小红书平台成交金额口径汇总，用于观察销售规模。',
+              fullMoney(rangeKpi.transaction),
+            )
+          "
+        >
           <div class="xhs-kpi-value">{{ kpiMoney(rangeKpi.transaction) }}</div>
         </Tooltip>
       </Card>
       <Card class="xhs-kpi xhs-kpi--note" size="small">
         <div class="xhs-kpi-title">{{ yearLabel }}笔记支付金额</div>
-        <Tooltip :title="fullMoney(rangeKpi.notePaid)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '笔记支付金额为由内容笔记引导产生的支付金额，用于衡量内容成交贡献。',
+              fullMoney(rangeKpi.notePaid),
+            )
+          "
+        >
           <div class="xhs-kpi-value">{{ kpiMoney(rangeKpi.notePaid) }}</div>
         </Tooltip>
       </Card>
       <Card class="xhs-kpi xhs-kpi--orders" size="small">
         <div class="xhs-kpi-title">{{ yearLabel }}总支付件数</div>
-        <Tooltip :title="fullNumber(rangeKpi.paidOrders)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '总支付件数为当前筛选范围内已支付商品件数或订单件数汇总。',
+              fullNumber(rangeKpi.paidOrders),
+            )
+          "
+        >
           <div class="xhs-kpi-value">{{ amountShort(rangeKpi.paidOrders) }}</div>
         </Tooltip>
       </Card>
       <Card class="xhs-kpi xhs-kpi--visitors" size="small">
         <div class="xhs-kpi-title">总访客数</div>
-        <Tooltip :title="fullNumber(rangeKpi.visitors)">
+        <Tooltip
+          :title="
+            metricTitle(
+              '总访客数为当前筛选范围内访问店铺或商品的去重访客数汇总。',
+              fullNumber(rangeKpi.visitors),
+            )
+          "
+        >
           <div class="xhs-kpi-value">{{ amountShort(rangeKpi.visitors) }}</div>
         </Tooltip>
       </Card>
@@ -676,7 +753,9 @@ void fetchShopNameOptions();
       <div class="diagnosis-grid">
         <div v-for="item in diagnosticItems" :key="item.label" class="diagnosis-item">
           <span class="diagnosis-label">{{ item.label }}</span>
-          <Tag :color="item.tone" class="diagnosis-value">{{ item.value }}</Tag>
+          <Tooltip :title="metricTitle(item.description, item.value)">
+            <Tag :color="item.tone" class="diagnosis-value">{{ item.value }}</Tag>
+          </Tooltip>
         </div>
       </div>
     </Card>

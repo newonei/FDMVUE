@@ -238,6 +238,10 @@ function metricTone(value: null | number, goodMax: number, warnMax: number) {
   return 'error';
 }
 
+function metricTitle(description: string, value: string): string {
+  return `${description} 当前值：${value}`;
+}
+
 function chartGrid(dense = false) {
   return {
     bottom: dense ? 70 : 54,
@@ -657,31 +661,37 @@ const dataSummary = computed(() => {
 
 const insightItems = computed(() => [
   {
+    description: '营销费比 = 营销费用 / 实际销售额，用于观察推广投入强度。',
     label: '营销费比',
     tone: metricTone(kpi.value.feeRatio, 20, 30),
     value: ratioText(kpi.value.feeRatio),
   },
   {
+    description: '退款率 = 退款金额 / 支付金额，用于观察售后退款压力。',
     label: '退款率',
     tone: metricTone(kpi.value.refundRatio, 15, 25),
     value: ratioText(kpi.value.refundRatio),
   },
   {
+    description: '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
     label: '真实客单价',
     tone: 'processing',
     value: moneyText(kpi.value.aov),
   },
   {
+    description: '刷单金额占比 = 刷单本金 / 支付金额，用于识别非真实成交占用比例。',
     label: '刷单金额占比',
     tone: metricTone(kpi.value.brushRatio, 3, 8),
     value: ratioText(kpi.value.brushRatio),
   },
   {
+    description: '当前筛选范围内产生有效统计数据的店铺数量。',
     label: '活跃店铺',
     tone: 'default',
     value: `${kpi.value.shopCount} 家`,
   },
   {
+    description: '当前筛选范围内实际销售额最高的平台。',
     label: '最高平台',
     tone: 'processing',
     value: topPlatform.value
@@ -689,6 +699,7 @@ const insightItems = computed(() => [
       : '-',
   },
   {
+    description: '当前数据集中最新一条统计日期。',
     label: '最新统计日',
     tone: 'default',
     value: latestDate.value,
@@ -957,28 +968,56 @@ void fetchShopNameOptions();
       <section class="kpi-grid">
         <div class="kpi-card kpi-card--sales">
           <div class="kpi-title">总实际销售额</div>
-          <Tooltip :title="`¥${fmtAmount2(kpi.sales)}`">
+          <Tooltip
+            :title="
+              metricTitle(
+                '实际销售额按真实净销售口径统计，已剔除退款与刷单金额影响。',
+                `¥${fmtAmount2(kpi.sales)}`,
+              )
+            "
+          >
             <div class="kpi-value">{{ moneyText(kpi.sales) }}</div>
           </Tooltip>
           <div class="kpi-desc">已剔除退款与刷单影响</div>
         </div>
         <div class="kpi-card kpi-card--marketing">
           <div class="kpi-title">总营销费用</div>
-          <Tooltip :title="`¥${fmtAmount2(kpi.marketing)}`">
+          <Tooltip
+            :title="
+              metricTitle(
+                '营销费用为当前筛选范围内各平台推广投放费用合计。',
+                `¥${fmtAmount2(kpi.marketing)}`,
+              )
+            "
+          >
             <div class="kpi-value">{{ moneyText(kpi.marketing) }}</div>
           </Tooltip>
           <div class="kpi-desc">全平台推广投放合计</div>
         </div>
         <div class="kpi-card kpi-card--refund">
           <div class="kpi-title">总退款金额</div>
-          <Tooltip :title="`¥${fmtAmount2(kpi.refund)}`">
+          <Tooltip
+            :title="
+              metricTitle(
+                '退款金额为当前筛选范围内主表退款金额字段汇总。',
+                `¥${fmtAmount2(kpi.refund)}`,
+              )
+            "
+          >
             <div class="kpi-value">{{ moneyText(kpi.refund) }}</div>
           </Tooltip>
           <div class="kpi-desc">按主表退款金额汇总</div>
         </div>
         <div class="kpi-card kpi-card--orders">
           <div class="kpi-title">真实订单</div>
-          <Tooltip :title="numberShort(kpi.realOrders)">
+          <Tooltip
+            :title="
+              metricTitle(
+                '真实订单 = 支付订单数 - 刷单订单数，用于观察真实成交订单规模。',
+                numberShort(kpi.realOrders),
+              )
+            "
+          >
             <div class="kpi-value">{{ numberShort(kpi.realOrders) }}</div>
           </Tooltip>
           <div class="kpi-desc">支付订单扣除刷单订单</div>
@@ -992,7 +1031,9 @@ void fetchShopNameOptions();
           class="insight-item"
         >
           <span class="insight-label">{{ item.label }}</span>
-          <Tag :color="item.tone">{{ item.value }}</Tag>
+          <Tooltip :title="metricTitle(item.description, item.value)">
+            <Tag :color="item.tone">{{ item.value }}</Tag>
+          </Tooltip>
         </div>
       </section>
 
