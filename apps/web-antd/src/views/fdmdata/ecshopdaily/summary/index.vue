@@ -1152,6 +1152,7 @@ onBeforeUnmount(() => {
 }
 
 .matrix-scroll {
+  height: 560px;
   overflow: auto;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
@@ -1293,6 +1294,10 @@ onBeforeUnmount(() => {
 
   .kpi-grid {
     grid-template-columns: 1fr;
+  }
+
+  .matrix-scroll {
+    height: 420px;
   }
 }
 </style>
