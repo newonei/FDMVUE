@@ -78,6 +78,22 @@ export function getEcShopDailyPlatformDetail(id: number) {
   );
 }
 
+export interface EcShopDailyPlatformDetailPageParams extends PageParam {
+  platformCode: string;
+  shopName?: string;
+  statDate?: string[];
+}
+
+/** 查询平台扩展明细分页 */
+export function getEcShopDailyPlatformDetailPage(
+  params: EcShopDailyPlatformDetailPageParams,
+) {
+  return requestClient.get<PageResult<Record<string, any>>>(
+    '/fdmdata/ec-shop-daily/platform-detail-page',
+    { params },
+  );
+}
+
 /** 新增店铺后台日汇总（单条，页面表单） */
 export function createEcShopDaily(data: FdmdataEcShopDailyApi.EcShopDaily) {
   return requestClient.post('/fdmdata/ec-shop-daily/create', data);

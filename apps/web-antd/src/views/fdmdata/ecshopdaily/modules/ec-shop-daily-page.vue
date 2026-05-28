@@ -34,6 +34,10 @@ import {
 import BrushForm from './brush-form.vue';
 import DetailModal from './detail-modal.vue';
 import EcShopDailyDashboard from './ec-shop-daily-dashboard.vue';
+import EcShopDailyDouyinDashboard from './ec-shop-daily-douyin-dashboard.vue';
+import EcShopDailySphDashboard from './ec-shop-daily-sph-dashboard.vue';
+import EcShopDailyTaobaoDashboard from './ec-shop-daily-taobao-dashboard.vue';
+import EcShopDailyXhsDashboard from './ec-shop-daily-xhs-dashboard.vue';
 import Form from './form.vue';
 
 defineOptions({ name: 'EcShopDailyPage' });
@@ -64,6 +68,9 @@ const fixedPlatformLabel = computed(() =>
     ? formatEcPlatformLabel(fixedPlatformCode.value)
     : '',
 );
+const usePlatformAnalysisDashboard = computed(() =>
+  ['JD', 'PDD', 'TAOBAO'].includes(fixedPlatformCode.value ?? ''),
+);
 const pageTitle = computed(() =>
   fixedPlatformCode.value
     ? `${fixedPlatformLabel.value}店铺后台日汇总`
@@ -75,9 +82,7 @@ const tableTitle = computed(() =>
     : '店铺日汇总',
 );
 
-const dashboardRef = ref<InstanceType<typeof EcShopDailyDashboard> | null>(
-  null,
-);
+const dashboardRef = ref<{ reload?: () => Promise<void> | void } | null>(null);
 
 const viewModeOptions = [
   { label: '数据看板', value: 'dashboard' },
@@ -293,7 +298,26 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-show="activeTab === 'dashboard'">
+      <EcShopDailyDouyinDashboard
+        v-if="fixedPlatformCode === 'DOUYIN'"
+        ref="dashboardRef"
+      />
+      <EcShopDailyXhsDashboard
+        v-else-if="fixedPlatformCode === 'XHS'"
+        ref="dashboardRef"
+      />
+      <EcShopDailySphDashboard
+        v-else-if="fixedPlatformCode === 'SPH'"
+        ref="dashboardRef"
+      />
+      <EcShopDailyTaobaoDashboard
+        v-else-if="usePlatformAnalysisDashboard"
+        ref="dashboardRef"
+        :platform-code="fixedPlatformCode"
+        :platform-label="fixedPlatformLabel"
+      />
       <EcShopDailyDashboard
+        v-else
         ref="dashboardRef"
         :platform-code="fixedPlatformCode"
       />
