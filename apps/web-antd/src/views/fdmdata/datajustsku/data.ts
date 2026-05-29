@@ -2,6 +2,7 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
 
+import { getSimpleUserList } from '#/api/system/user';
 import { getRangePickerDefaultProps } from '#/utils';
 
 const SYNC_STATUS_OPTIONS = [
@@ -686,6 +687,19 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         placeholder: '模糊查询分类',
+      },
+    },
+    {
+      fieldName: 'creator',
+      label: '创建人',
+      component: 'ApiSelect',
+      componentProps: {
+        allowClear: true,
+        showSearch: true,
+        api: getSimpleUserList,
+        labelField: 'nickname',
+        valueField: 'id',
+        placeholder: '请选择创建人',
       },
     },
     {
