@@ -121,6 +121,14 @@ export function getEcShopDailyPage(params: PageParam) {
   );
 }
 
+/** 鏌ヨ搴楅摵鍚庡彴鏃ユ眹鎬诲垪琛ㄦ眹鎬?*/
+export function getEcShopDailyPageSummary(params: PageParam) {
+  return requestClient.get<FdmdataEcShopDailyApi.EcShopDaily>(
+    '/fdmdata/ec-shop-daily/page-summary',
+    { params },
+  );
+}
+
 export interface EcShopDailyShopNameOptionsParams {
   keyword?: string;
   limit?: number;
@@ -171,7 +179,7 @@ export function getEcShopDailyPlatformDetailPage(
 export interface EcShopDailySummaryParams {
   channelType?: 'ALL' | 'EC' | 'MEDIA' | string;
   hideEmptyPeriod?: boolean;
-  periodType?: 'DAY' | 'WEEK' | 'MONTH' | string;
+  periodType?: 'DAY' | 'MONTH' | 'WEEK' | string;
   platformCode?: string;
   shopNames?: string;
   statDate?: string[];

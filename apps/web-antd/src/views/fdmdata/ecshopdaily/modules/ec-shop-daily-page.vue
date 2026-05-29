@@ -14,6 +14,7 @@ import {
 } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button, message, Segmented } from 'ant-design-vue';
 
@@ -21,7 +22,9 @@ import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   deleteEcShopDaily,
   deleteEcShopDailyList,
+  exportEcShopDaily,
   getEcShopDailyPage,
+  getEcShopDailyPageSummary,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
 import { $t } from '#/locales';
@@ -64,9 +67,7 @@ const fixedPlatformCode = computed(() =>
 );
 const isFixedPlatformPage = computed(() => !!fixedPlatformCode.value);
 const fixedPlatformLabel = computed(() =>
-  fixedPlatformCode.value
-    ? formatEcPlatformLabel(fixedPlatformCode.value)
-    : '',
+  fixedPlatformCode.value ? formatEcPlatformLabel(fixedPlatformCode.value) : '',
 );
 const usePlatformAnalysisDashboard = computed(() =>
   ['JD', 'PDD', 'TAOBAO'].includes(fixedPlatformCode.value ?? ''),
@@ -82,7 +83,7 @@ const tableTitle = computed(() =>
     : '全部平台日汇总',
 );
 
-const dashboardRef = ref<{ reload?: () => Promise<void> | void } | null>(null);
+const dashboardRef = ref<null | { reload?: () => Promise<void> | void }>(null);
 
 const viewModeOptions = [
   { label: '数据看板', value: 'dashboard' },
@@ -90,6 +91,9 @@ const viewModeOptions = [
 ] as const;
 
 const activeTab = ref<'dashboard' | 'table'>('dashboard');
+const exporting = ref(false);
+const summaryLoading = ref(false);
+const summaryRow = ref<FdmdataEcShopDailyApi.EcShopDaily | null>(null);
 
 const checkedIds = shallowRef<number[]>([]);
 const checkedCount = computed(() => checkedIds.value.length);
@@ -162,6 +166,113 @@ async function handleDeleteBatch() {
   }
 }
 
+function buildTableQueryParams(
+  formValues: Record<string, any> = {},
+  page?: { pageNo: number; pageSize: number },
+) {
+  return {
+    ...page,
+    ...formValues,
+    ...(fixedPlatformCode.value
+      ? { platformCode: fixedPlatformCode.value }
+      : {}),
+  };
+}
+
+async function handleExport() {
+  exporting.value = true;
+  try {
+    const formValues = await gridApi.formApi.getValues();
+    const data = await exportEcShopDaily(buildTableQueryParams(formValues));
+    downloadFileFromBlobPart({
+      fileName: `${fixedPlatformCode.value ? fixedPlatformLabel.value : '全部平台'}店铺后台日汇总.xls`,
+      source: data,
+    });
+  } finally {
+    exporting.value = false;
+  }
+}
+
+function toNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatAmountValue(value: unknown): string {
+  const n = toNumber(value);
+  return n.toFixed(2);
+}
+
+function formatIntegerValue(value: unknown): string {
+  return String(Math.trunc(toNumber(value)));
+}
+
+function formatPercentValue(numerator: unknown, denominator: unknown): string {
+  const n = toNumber(numerator);
+  const d = toNumber(denominator);
+  return d === 0 ? '' : `${((n / d) * 100).toFixed(2)}%`;
+}
+
+function formatRoiValue(numerator: unknown, denominator: unknown): string {
+  const n = toNumber(numerator);
+  const d = toNumber(denominator);
+  return d === 0 ? '' : (n / d).toFixed(2);
+}
+
+function getSummaryFieldValue(field: string): string {
+  const row = summaryRow.value;
+  if (summaryLoading.value && field === 'statDate') return '汇总中...';
+  if (!row) return field === 'statDate' ? '合计' : '';
+  if (field === 'statDate') return '合计';
+  if (field === 'platformCode') {
+    return fixedPlatformCode.value ? fixedPlatformLabel.value : '全部平台';
+  }
+  if (field === 'shopName') return '当前筛选';
+  if (field === 'refundRate') {
+    return formatPercentValue(row.refundAmount, row.paidAmount);
+  }
+  if (field === 'roi') {
+    return formatRoiValue(row.realNetSalesAmount, row.marketingCost);
+  }
+  if (
+    [
+      'brushPrincipal',
+      'gmvAmount',
+      'marketingCost',
+      'netSalesAmount',
+      'paidAmount',
+      'realNetSalesAmount',
+      'realPaidAmount',
+      'refundAmount',
+    ].includes(field)
+  ) {
+    return formatAmountValue(row[field as keyof typeof row]);
+  }
+  if (
+    [
+      'brushOrderCount',
+      'buyerCount',
+      'orderCount',
+      'paidOrderCount',
+      'realBuyerCount',
+      'realPaidOrderCount',
+      'refundOrderCount',
+    ].includes(field)
+  ) {
+    return formatIntegerValue(row[field as keyof typeof row]);
+  }
+  return '';
+}
+
+function footerMethod({ columns }: { columns: any[] }) {
+  return [
+    columns.map((column) => {
+      if (column.type === 'checkbox') return '';
+      return getSummaryFieldValue(column.field);
+    }),
+  ];
+}
+
 const shopNameOptions = ref<EcShopDailyOption[]>([]);
 let shopNameFetchSeq = 0;
 let shopNameSearchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -216,18 +327,28 @@ const [Grid, gridApi] = useVbenVxeGrid({
     height: 'auto',
     autoResize: true,
     keepSource: false,
+    showFooter: true,
     stripe: true,
+    footerMethod,
     proxyConfig: {
       ajax: {
-        query: async ({ page }, formValues) =>
-          getEcShopDailyPage({
+        query: async ({ page }, formValues) => {
+          const params = buildTableQueryParams(formValues, {
             pageNo: page.currentPage,
             pageSize: page.pageSize,
-            ...formValues,
-            ...(fixedPlatformCode.value
-              ? { platformCode: fixedPlatformCode.value }
-              : {}),
-          }),
+          });
+          summaryLoading.value = true;
+          try {
+            const [pageResult, summary] = await Promise.all([
+              getEcShopDailyPage(params),
+              getEcShopDailyPageSummary(params),
+            ]);
+            summaryRow.value = summary;
+            return pageResult;
+          } finally {
+            summaryLoading.value = false;
+          }
+        },
       },
     },
     rowConfig: { keyField: 'id', isHover: true },
@@ -325,6 +446,14 @@ onBeforeUnmount(() => {
 
     <Grid v-show="activeTab === 'table'" :table-title="tableTitle">
       <template #toolbar-tools>
+        <Button
+          :loading="exporting"
+          class="mr-2"
+          size="small"
+          @click="handleExport"
+        >
+          导出 Excel
+        </Button>
         <div
           v-memo="[checkedIdsMemoKey]"
           class="inline-flex flex-wrap items-center gap-2"

@@ -339,14 +339,12 @@ export function useGridFormSchema(
     });
   }
 
-  schema.push(
-    {
-      fieldName: 'shopName',
-      label: '店铺名称',
-      component: 'AutoComplete',
-      componentProps: getShopNameAutoCompleteProps,
-    },
-  );
+  schema.push({
+    fieldName: 'shopName',
+    label: '店铺名称',
+    component: 'AutoComplete',
+    componentProps: getShopNameAutoCompleteProps,
+  });
 
   return schema;
 }
@@ -375,6 +373,36 @@ function formatRoi(numerator: number, denominator: number): string {
   return (numerator / denominator).toFixed(2);
 }
 
+const GRID_COLUMN_HELP: Record<string, string> = {
+  brushOrderCount:
+    '刷单单量：当前统计日录入的刷单订单数量；用于从支付订单中剔除刷单影响。',
+  brushPrincipal:
+    '刷单本金：当前统计日录入的刷单本金/金额；真实销售口径会从销售金额中剔除该金额。',
+  marketingCost:
+    '营销花费：平台推广、投放、佣金等营销费用汇总；不同平台来源字段不同，统一进入主表 marketing_cost。',
+  platformCode: '平台：平台编码转中文展示。天猫数据已并入淘宝平台。',
+  realNetSalesAmount:
+    '真实净销 = 已支付金额 - 退款金额 - 刷单本金。优先使用服务端 real_net_sales_amount 字段。',
+  realPaidAmount:
+    '真实支付 = 已支付金额 - 退款金额 - 刷单本金。用于剔除退款和刷单后的支付口径。',
+  realPaidOrderCount:
+    '真实支付单 = 已支付订单笔数 - 刷单单量，最小值按 0 处理。',
+  refundAmount:
+    '退款额：平台退款金额。抖音优先使用退款时间口径；其他平台按成功退款金额或退款金额归集。',
+  refundRate: '退款率 = 退款金额 / 已支付金额 × 100%。',
+  roi: 'ROI = 真实净销 / 营销花费。营销花费为 0 时不展示。',
+  shopName:
+    '店铺名称：shopId 可匹配 fdm_just_shop 时由后端回填；未匹配时使用传入店铺名称。',
+  statDate: '统计日：平台数据归属日期，按自然日汇总。',
+};
+
+function columnHelp(field: string) {
+  const content = GRID_COLUMN_HELP[field];
+  return content
+    ? { content, icon: 'vxe-icon-question-circle-fill' }
+    : undefined;
+}
+
 /** 列表列（核心汇总字段；详细数据在编辑弹窗查看） */
 export function useGridColumns(
   options: EcShopDailyGridOptions = {},
@@ -384,6 +412,7 @@ export function useGridColumns(
     {
       field: 'statDate',
       title: '统计日',
+      titleSuffix: columnHelp('statDate'),
       minWidth: 112,
       fixed: 'left',
       formatter: ({ cellValue }: { cellValue: unknown }) =>
@@ -392,6 +421,7 @@ export function useGridColumns(
     {
       field: 'platformCode',
       title: '平台',
+      titleSuffix: columnHelp('platformCode'),
       minWidth: 88,
       fixed: 'left',
       visible: !options.hidePlatform,
@@ -401,6 +431,7 @@ export function useGridColumns(
     {
       field: 'shopName',
       title: '店铺名称',
+      titleSuffix: columnHelp('shopName'),
       minWidth: 180,
       showOverflow: 'tooltip',
     },
@@ -409,6 +440,7 @@ export function useGridColumns(
     {
       field: 'realNetSalesAmount',
       title: '真实净销',
+      titleSuffix: columnHelp('realNetSalesAmount'),
       minWidth: 110,
       align: 'right',
       formatter: ({ row }: any) => {
@@ -425,6 +457,7 @@ export function useGridColumns(
     {
       field: 'realPaidAmount',
       title: '真实支付',
+      titleSuffix: columnHelp('realPaidAmount'),
       minWidth: 110,
       align: 'right',
       formatter: ({ row }: any) => {
@@ -440,6 +473,7 @@ export function useGridColumns(
     {
       field: 'refundAmount',
       title: '退款额',
+      titleSuffix: columnHelp('refundAmount'),
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
@@ -447,6 +481,7 @@ export function useGridColumns(
     {
       field: 'refundRate',
       title: '退款率',
+      titleSuffix: columnHelp('refundRate'),
       minWidth: 96,
       align: 'right',
       formatter: ({ row }: any) =>
@@ -458,6 +493,7 @@ export function useGridColumns(
     {
       field: 'realPaidOrderCount',
       title: '真实支付单',
+      titleSuffix: columnHelp('realPaidOrderCount'),
       minWidth: 104,
       align: 'right',
       formatter: ({ row }: any) => {
@@ -473,6 +509,7 @@ export function useGridColumns(
     {
       field: 'brushPrincipal',
       title: '刷单本金',
+      titleSuffix: columnHelp('brushPrincipal'),
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
@@ -480,6 +517,7 @@ export function useGridColumns(
     {
       field: 'brushOrderCount',
       title: '刷单单量',
+      titleSuffix: columnHelp('brushOrderCount'),
       minWidth: 96,
       align: 'right',
     },
@@ -488,6 +526,7 @@ export function useGridColumns(
     {
       field: 'marketingCost',
       title: '营销花费',
+      titleSuffix: columnHelp('marketingCost'),
       minWidth: 100,
       align: 'right',
       formatter: formatAmount,
@@ -495,6 +534,7 @@ export function useGridColumns(
     {
       field: 'roi',
       title: 'ROI',
+      titleSuffix: columnHelp('roi'),
       minWidth: 88,
       align: 'right',
       formatter: ({ row }: any) => {

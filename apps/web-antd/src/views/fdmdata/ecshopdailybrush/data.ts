@@ -168,6 +168,29 @@ function formatAmount({ cellValue }: { cellValue: unknown }) {
   return Number.isFinite(n) ? n.toFixed(2) : String(cellValue);
 }
 
+const BRUSH_COLUMN_HELP: Record<string, string> = {
+  brushCommission: '刷单佣金：刷单产生的佣金或服务费，参与刷单总成本分析。',
+  brushOrderCount:
+    '刷单单量：当前统计日录入的刷单订单数量；主表真实订单会按 paid_order_count - brush_order_count 计算。',
+  brushPrincipal:
+    '刷单本金：刷单本金/金额；主表真实销售额会按 paid_amount - refund_amount - brush_principal 计算。',
+  brushTotalCost:
+    '刷单总成本 = 刷单本金 + 刷单佣金 + 其他刷单相关费用。用于评估刷单成本。',
+  createTime: '创建时间：该刷单记录写入系统的时间。',
+  platformCode: '平台：刷单记录归属的平台编码。',
+  remark: '备注：刷单说明或来源补充。',
+  shopId: '店铺 ID：店铺内部或平台编号，可用于匹配 fdm_just_shop 店铺名称。',
+  shopName: '店铺名称：刷单记录归属店铺。',
+  statDate: '刷单日期：刷单数据归属的统计日期。',
+};
+
+function columnHelp(field: string) {
+  const content = BRUSH_COLUMN_HELP[field];
+  return content
+    ? { content, icon: 'vxe-icon-question-circle-fill' }
+    : undefined;
+}
+
 /** 列表列 */
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyBrushApi.EcShopDailyBrush>['columns'] {
   return [
@@ -175,33 +198,44 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyBrushApi
     {
       field: 'statDate',
       title: '刷单日期',
+      titleSuffix: columnHelp('statDate'),
       minWidth: 112,
       fixed: 'left',
       formatter: ({ cellValue }: { cellValue: unknown }) =>
         cellValue ? String(cellValue).slice(0, 10) : '',
     },
-    { field: 'platformCode', title: '平台', minWidth: 88, fixed: 'left' },
+    {
+      field: 'platformCode',
+      title: '平台',
+      titleSuffix: columnHelp('platformCode'),
+      minWidth: 88,
+      fixed: 'left',
+    },
     {
       field: 'shopId',
       title: '店铺 ID',
+      titleSuffix: columnHelp('shopId'),
       minWidth: 120,
       showOverflow: 'tooltip',
     },
     {
       field: 'shopName',
       title: '店铺名称',
+      titleSuffix: columnHelp('shopName'),
       minWidth: 140,
       showOverflow: 'tooltip',
     },
     {
       field: 'brushOrderCount',
       title: '刷单单量',
+      titleSuffix: columnHelp('brushOrderCount'),
       minWidth: 96,
       align: 'right',
     },
     {
       field: 'brushPrincipal',
       title: '刷单本金',
+      titleSuffix: columnHelp('brushPrincipal'),
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
@@ -209,6 +243,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyBrushApi
     {
       field: 'brushCommission',
       title: '刷单佣金',
+      titleSuffix: columnHelp('brushCommission'),
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
@@ -216,14 +251,22 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcShopDailyBrushApi
     {
       field: 'brushTotalCost',
       title: '刷单总成本',
+      titleSuffix: columnHelp('brushTotalCost'),
       minWidth: 108,
       align: 'right',
       formatter: formatAmount,
     },
-    { field: 'remark', title: '备注', minWidth: 140, showOverflow: 'tooltip' },
+    {
+      field: 'remark',
+      title: '备注',
+      titleSuffix: columnHelp('remark'),
+      minWidth: 140,
+      showOverflow: 'tooltip',
+    },
     {
       field: 'createTime',
       title: '创建时间',
+      titleSuffix: columnHelp('createTime'),
       minWidth: 156,
       formatter: 'formatDateTime',
     },

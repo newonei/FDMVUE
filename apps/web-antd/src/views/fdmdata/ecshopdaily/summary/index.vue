@@ -1,11 +1,10 @@
 <script lang="ts" setup>
 import type { ECOption } from '@vben/plugins/echarts';
 
-import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
+import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 
-import dayjs from 'dayjs';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 import { downloadFileFromBlobPart } from '@vben/utils';
@@ -25,6 +24,7 @@ import {
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import {
   exportEcShopDailySummary,
@@ -83,12 +83,46 @@ const VIEW_MODE_OPTIONS = [
 
 const METRIC_DESCRIPTIONS: Record<string, string> = {
   avgOrderValue: '客单价 = 实际销售额 / 真实订单数，用于观察订单质量。',
-  brushRatio: '刷单占比 = 刷单金额 / 实际销售额，用于识别刷单对经营口径的影响。',
+  brushRatio:
+    '刷单占比 = 刷单金额 / 实际销售额，用于识别刷单对经营口径的影响。',
   costRatio: '费比 = 营销费用 / 实际销售额，越高说明获客成本压力越大。',
   refundRatio: '退款率 = 退款金额 / 支付金额，用于观察退款风险。',
   roi: '投产比 = 实际销售额 / 营销费用，越高说明投放效率越好。',
   salesAmount: '实际销售额使用主表真实净销售额，已剔除刷单金额影响。',
 };
+
+const MATRIX_VIEW_DESCRIPTIONS: Record<string, string> = {
+  COST_RATIO: '费比 = 营销费用 / 实际销售额 × 100%。',
+  MARKETING: '营销费 = 各平台推广投放费用汇总。',
+  ORDER: '订单 = 真实订单数 = 已支付订单数 - 刷单单量。',
+  REFUND: '退款 = 退款金额；退款率 = 退款金额 / 支付金额 × 100%。',
+  SALES: METRIC_DESCRIPTIONS.salesAmount,
+  SUMMARY: '综合展示实际销售额、营销费用、费比三项核心指标。',
+};
+
+const DAILY_COLUMN_DESCRIPTIONS: Record<string, string> = {
+  costRatio: MATRIX_VIEW_DESCRIPTIONS.COST_RATIO,
+  marketingCost: MATRIX_VIEW_DESCRIPTIONS.MARKETING,
+  periodLabel: '日期：当前抽屉内按日聚合展示。',
+  realOrderCount: MATRIX_VIEW_DESCRIPTIONS.ORDER,
+  refundAmount: '退款金额：当前日期店铺退款金额汇总。',
+  salesAmount: METRIC_DESCRIPTIONS.salesAmount,
+};
+
+function tableHeader(label: string, description: string) {
+  return () =>
+    h(
+      Tooltip,
+      { title: description },
+      {
+        default: () =>
+          h('span', { class: 'summary-table-header-help' }, [
+            label,
+            h('span', { class: 'summary-table-header-icon' }, '?'),
+          ]),
+      },
+    );
+}
 
 const filters = reactive({
   channelType: 'ALL',
@@ -274,6 +308,13 @@ const visibleShops = computed(() => {
   return shops.value.slice(0, 12);
 });
 
+const matrixHeaderTitle = computed(() => {
+  const option = VIEW_MODE_OPTIONS.find(
+    (item) => item.value === viewMode.value,
+  );
+  return `${option?.label ?? '综合'}：${MATRIX_VIEW_DESCRIPTIONS[viewMode.value] ?? ''}`;
+});
+
 const rowsByPeriod = computed(() => {
   const map = new Map<string, SummaryRow[]>();
   for (const row of rows.value) {
@@ -293,11 +334,13 @@ const rowsByPeriodShop = computed(() => {
 });
 
 const summaryGroups = computed<SummaryGroup[]>(() => {
-  const platforms = PLATFORM_OPTIONS.filter((item) => item.value).map((item) => ({
-    key: `PLATFORM:${item.value}`,
-    label: item.label,
-    platformCode: item.value || undefined,
-  }));
+  const platforms = PLATFORM_OPTIONS.filter((item) => item.value).map(
+    (item) => ({
+      key: `PLATFORM:${item.value}`,
+      label: item.label,
+      platformCode: item.value || undefined,
+    }),
+  );
   return [
     { key: 'TOTAL', label: '总计' },
     { channelType: 'EC', key: 'CHANNEL:EC', label: '电商合计' },
@@ -337,9 +380,12 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
       n(metric.brushOrderCount) + n(item.brushOrderCount);
     metric.buyerCount = n(metric.buyerCount) + n(item.buyerCount);
   }
-  metric.costRatio = divPercent(n(metric.marketingCost), n(metric.salesAmount)) ?? undefined;
-  metric.refundRatio = divPercent(n(metric.refundAmount), n(metric.paidAmount)) ?? undefined;
-  metric.brushRatio = divPercent(n(metric.brushAmount), n(metric.salesAmount)) ?? undefined;
+  metric.costRatio =
+    divPercent(n(metric.marketingCost), n(metric.salesAmount)) ?? undefined;
+  metric.refundRatio =
+    divPercent(n(metric.refundAmount), n(metric.paidAmount)) ?? undefined;
+  metric.brushRatio =
+    divPercent(n(metric.brushAmount), n(metric.salesAmount)) ?? undefined;
   metric.avgOrderValue =
     n(metric.realOrderCount) > 0
       ? round2(n(metric.salesAmount) / n(metric.realOrderCount))
@@ -362,7 +408,10 @@ function periodMetric(periodKey: string, group?: SummaryGroup): SummaryMetric {
   return aggregateMetrics(list);
 }
 
-function shopPeriodMetric(periodKey: string, shop: SummaryShop): SummaryRow | undefined {
+function shopPeriodMetric(
+  periodKey: string,
+  shop: SummaryShop,
+): SummaryRow | undefined {
   return rowsByPeriodShop.value.get(`${periodKey}|${shop.shopKey}`);
 }
 
@@ -437,8 +486,12 @@ const kpiCards = computed(() => [
 
 const insightItems = computed(() => {
   const topShop = shops.value[0];
-  const highCostCount = rows.value.filter((row) => n(row.costRatio) >= 30).length;
-  const highRefundCount = rows.value.filter((row) => n(row.refundRatio) >= 30).length;
+  const highCostCount = rows.value.filter(
+    (row) => n(row.costRatio) >= 30,
+  ).length;
+  const highRefundCount = rows.value.filter(
+    (row) => n(row.refundRatio) >= 30,
+  ).length;
   const zeroSalesCostCount = rows.value.filter(
     (row) => n(row.salesAmount) <= 0 && n(row.marketingCost) > 0,
   ).length;
@@ -453,7 +506,9 @@ const insightItems = computed(() => {
       color: 'green',
       desc: '销售额最高的店铺，用于快速定位主要贡献来源。',
       label: 'TOP 店铺',
-      value: topShop ? `${topShop.shopName} ${amountText(topShop.salesAmount)}` : '-',
+      value: topShop
+        ? `${topShop.shopName} ${amountText(topShop.salesAmount)}`
+        : '-',
     },
     {
       color: highCostCount > 0 ? 'red' : 'green',
@@ -485,7 +540,11 @@ const trendChart = computed<ECOption | null>(() => {
     grid: { bottom: 42, left: 58, right: 56, top: 42 },
     legend: { top: 4 },
     tooltip: { trigger: 'axis' },
-    xAxis: { axisLabel: { rotate: labels.length > 10 ? 35 : 0 }, data: labels, type: 'category' },
+    xAxis: {
+      axisLabel: { rotate: labels.length > 10 ? 35 : 0 },
+      data: labels,
+      type: 'category',
+    },
     yAxis: [
       { name: '金额', type: 'value' },
       { name: '费比', type: 'value' },
@@ -520,19 +579,27 @@ const channelChart = computed<ECOption | null>(() => {
     grid: { bottom: 42, left: 58, right: 26, top: 42 },
     legend: { top: 4 },
     tooltip: { trigger: 'axis' },
-    xAxis: { axisLabel: { rotate: labels.length > 10 ? 35 : 0 }, data: labels, type: 'category' },
+    xAxis: {
+      axisLabel: { rotate: labels.length > 10 ? 35 : 0 },
+      data: labels,
+      type: 'category',
+    },
     yAxis: { name: '销售额', type: 'value' },
     series: [
       {
         data: periods.value.map((item) =>
-          round2(periodMetric(item.periodKey, { channelType: 'EC' }).salesAmount),
+          round2(
+            periodMetric(item.periodKey, { channelType: 'EC' }).salesAmount,
+          ),
         ),
         name: '电商销售额',
         type: 'bar',
       },
       {
         data: periods.value.map((item) =>
-          round2(periodMetric(item.periodKey, { channelType: 'MEDIA' }).salesAmount),
+          round2(
+            periodMetric(item.periodKey, { channelType: 'MEDIA' }).salesAmount,
+          ),
         ),
         name: '新媒体销售额',
         type: 'bar',
@@ -573,7 +640,11 @@ const ratioChart = computed<ECOption | null>(() => {
     grid: { bottom: 42, left: 44, right: 28, top: 36 },
     legend: { top: 4 },
     tooltip: { trigger: 'axis' },
-    xAxis: { axisLabel: { rotate: labels.length > 10 ? 35 : 0 }, data: labels, type: 'category' },
+    xAxis: {
+      axisLabel: { rotate: labels.length > 10 ? 35 : 0 },
+      data: labels,
+      type: 'category',
+    },
     yAxis: { name: '%', type: 'value' },
     series: [
       {
@@ -598,43 +669,51 @@ const riskRows = computed(() => [
     reason: '费比偏高',
     row: item,
   })),
-  ...(summary.value.rankings?.highRefundRatio ?? []).slice(0, 5).map((item) => ({
-    metric: percentText(item.refundRatio),
-    reason: '退款率偏高',
-    row: item,
-  })),
-  ...(summary.value.rankings?.zeroSalesWithCost ?? []).slice(0, 5).map((item) => ({
-    metric: `¥${amountText(item.marketingCost)}`,
-    reason: '零销售有费用',
-    row: item,
-  })),
+  ...(summary.value.rankings?.highRefundRatio ?? [])
+    .slice(0, 5)
+    .map((item) => ({
+      metric: percentText(item.refundRatio),
+      reason: '退款率偏高',
+      row: item,
+    })),
+  ...(summary.value.rankings?.zeroSalesWithCost ?? [])
+    .slice(0, 5)
+    .map((item) => ({
+      metric: `¥${amountText(item.marketingCost)}`,
+      reason: '零销售有费用',
+      row: item,
+    })),
 ]);
 
 const dailyColumns = [
-  { dataIndex: 'periodLabel', title: '日期', width: 110 },
+  {
+    dataIndex: 'periodLabel',
+    title: tableHeader('日期', DAILY_COLUMN_DESCRIPTIONS.periodLabel),
+    width: 110,
+  },
   {
     dataIndex: 'salesAmount',
-    title: '实际销售额',
+    title: tableHeader('实际销售额', DAILY_COLUMN_DESCRIPTIONS.salesAmount),
     customRender: ({ text }: { text: number }) => `¥${fullAmountText(text)}`,
   },
   {
     dataIndex: 'marketingCost',
-    title: '营销费用',
+    title: tableHeader('营销费用', DAILY_COLUMN_DESCRIPTIONS.marketingCost),
     customRender: ({ text }: { text: number }) => `¥${fullAmountText(text)}`,
   },
   {
     dataIndex: 'costRatio',
-    title: '费比',
+    title: tableHeader('费比', DAILY_COLUMN_DESCRIPTIONS.costRatio),
     customRender: ({ text }: { text: number }) => percentText(text),
   },
   {
     dataIndex: 'refundAmount',
-    title: '退款金额',
+    title: tableHeader('退款金额', DAILY_COLUMN_DESCRIPTIONS.refundAmount),
     customRender: ({ text }: { text: number }) => `¥${fullAmountText(text)}`,
   },
   {
     dataIndex: 'realOrderCount',
-    title: '真实订单',
+    title: tableHeader('真实订单', DAILY_COLUMN_DESCRIPTIONS.realOrderCount),
     customRender: ({ text }: { text: number }) => intText(text),
   },
 ];
@@ -810,7 +889,11 @@ onBeforeUnmount(() => {
             当前筛选范围内暂无明显风险
           </div>
           <div v-else class="risk-list">
-            <div v-for="item in riskRows" :key="`${item.reason}-${item.row.periodKey}-${item.row.shopKey}`" class="risk-item">
+            <div
+              v-for="item in riskRows"
+              :key="`${item.reason}-${item.row.periodKey}-${item.row.shopKey}`"
+              class="risk-item"
+            >
               <Tag :color="item.reason === '费比偏高' ? 'red' : 'orange'">
                 {{ item.reason }}
               </Tag>
@@ -846,11 +929,17 @@ onBeforeUnmount(() => {
             <table class="summary-matrix">
               <thead>
                 <tr>
-                  <th class="sticky-col period-col">周期</th>
+                  <th
+                    class="sticky-col period-col"
+                    title="周期：按当前选择的日、周、月聚合。"
+                  >
+                    周期
+                  </th>
                   <th
                     v-for="group in summaryGroups"
                     :key="group.key"
                     class="summary-col"
+                    :title="`${group.label} · ${matrixHeaderTitle}`"
                   >
                     {{ group.label }}
                   </th>
@@ -858,7 +947,7 @@ onBeforeUnmount(() => {
                     v-for="shop in visibleShops"
                     :key="shop.shopKey"
                     class="shop-col"
-                    :title="`${shop.platformLabel} · ${shop.shopName}`"
+                    :title="`${shop.platformLabel} · ${shop.shopName} · ${matrixHeaderTitle}`"
                   >
                     <span>{{ shop.shopName }}</span>
                     <em>{{ shop.platformLabel }}</em>
@@ -879,13 +968,26 @@ onBeforeUnmount(() => {
                   >
                     <div v-if="viewMode === 'SUMMARY'" class="metric-lines">
                       <strong>
-                        ¥{{ amountText(periodMetric(period.periodKey, group).salesAmount) }}
+                        ¥{{
+                          amountText(
+                            periodMetric(period.periodKey, group).salesAmount,
+                          )
+                        }}
                       </strong>
                       <span>
-                        费 ¥{{ amountText(periodMetric(period.periodKey, group).marketingCost) }}
+                        费 ¥{{
+                          amountText(
+                            periodMetric(period.periodKey, group).marketingCost,
+                          )
+                        }}
                       </span>
                       <span>
-                        比 {{ percentText(periodMetric(period.periodKey, group).costRatio) }}
+                        比
+                        {{
+                          percentText(
+                            periodMetric(period.periodKey, group).costRatio,
+                          )
+                        }}
                       </span>
                     </div>
                     <span v-else>
@@ -899,22 +1001,37 @@ onBeforeUnmount(() => {
                     :class="cellClass(shopPeriodMetric(period.periodKey, shop))"
                     @click="openDailyDrawer(period, shop)"
                   >
-                    <div
-                      v-if="viewMode === 'SUMMARY'"
-                      class="metric-lines"
-                    >
+                    <div v-if="viewMode === 'SUMMARY'" class="metric-lines">
                       <strong>
-                        {{ moneyTextOrDash(shopPeriodMetric(period.periodKey, shop)?.salesAmount) }}
+                        {{
+                          moneyTextOrDash(
+                            shopPeriodMetric(period.periodKey, shop)
+                              ?.salesAmount,
+                          )
+                        }}
                       </strong>
                       <span>
-                        费 {{ moneyTextOrDash(shopPeriodMetric(period.periodKey, shop)?.marketingCost) }}
+                        费
+                        {{
+                          moneyTextOrDash(
+                            shopPeriodMetric(period.periodKey, shop)
+                              ?.marketingCost,
+                          )
+                        }}
                       </span>
                       <span>
-                        比 {{ percentText(shopPeriodMetric(period.periodKey, shop)?.costRatio) }}
+                        比
+                        {{
+                          percentText(
+                            shopPeriodMetric(period.periodKey, shop)?.costRatio,
+                          )
+                        }}
                       </span>
                     </div>
                     <span v-else>
-                      {{ metricValue(shopPeriodMetric(period.periodKey, shop)) }}
+                      {{
+                        metricValue(shopPeriodMetric(period.periodKey, shop))
+                      }}
                     </span>
                   </td>
                 </tr>
@@ -949,9 +1066,9 @@ onBeforeUnmount(() => {
 
 .page-heading {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
   margin-bottom: 12px;
 }
 
@@ -964,13 +1081,13 @@ onBeforeUnmount(() => {
 .page-heading p,
 .section-sub {
   margin: 0;
-  color: hsl(var(--muted-foreground));
   font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 .page-range {
-  color: hsl(var(--muted-foreground));
   font-size: 13px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -980,21 +1097,21 @@ onBeforeUnmount(() => {
 .kpi-card,
 .matrix-panel,
 .risk-panel {
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  background: hsl(var(--card));
   box-shadow: 0 6px 18px rgb(15 23 42 / 5%);
 }
 
 .filter-panel {
-  margin-bottom: 16px;
   padding: 16px;
+  margin-bottom: 16px;
 }
 
 .filter-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .kpi-grid {
@@ -1006,8 +1123,8 @@ onBeforeUnmount(() => {
 
 .kpi-card {
   min-width: 0;
-  overflow: hidden;
   padding: 18px;
+  overflow: hidden;
   border-top-width: 3px;
 }
 
@@ -1019,19 +1136,19 @@ onBeforeUnmount(() => {
 
 .kpi-value {
   overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 34px;
   font-weight: 780;
   line-height: 1.12;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .kpi-sub {
   margin-top: 12px;
   overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
   text-overflow: ellipsis;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -1071,20 +1188,20 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 16px;
   padding: 12px;
+  margin-bottom: 16px;
 }
 
 .insight {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   min-width: 150px;
   padding: 4px 8px;
+  font-size: 12px;
+  background: hsl(var(--muted) / 20%);
   border: 1px solid hsl(var(--border) / 70%);
   border-radius: 6px;
-  background: hsl(var(--muted) / 20%);
-  font-size: 12px;
 }
 
 .chart-panel {
@@ -1099,10 +1216,30 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.summary-table-header-help {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.summary-table-header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 1;
+  color: hsl(var(--muted-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+}
+
 .risk-panel,
 .matrix-panel {
-  margin-bottom: 16px;
   padding: 14px;
+  margin-bottom: 16px;
 }
 
 .risk-list {
@@ -1114,17 +1251,17 @@ onBeforeUnmount(() => {
 
 .risk-item {
   display: flex;
-  min-width: 0;
-  align-items: center;
   gap: 8px;
+  align-items: center;
+  min-width: 0;
   padding: 8px 10px;
   border: 1px solid hsl(var(--border) / 70%);
   border-radius: 6px;
 }
 
 .risk-main {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1138,17 +1275,17 @@ onBeforeUnmount(() => {
 
 .matrix-head {
   display: flex;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
   margin-bottom: 12px;
 }
 
 .matrix-tools {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .matrix-scroll {
@@ -1161,16 +1298,16 @@ onBeforeUnmount(() => {
 .summary-matrix {
   width: max-content;
   min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
   font-size: 12px;
+  border-spacing: 0;
+  border-collapse: separate;
 }
 
 .summary-matrix th,
 .summary-matrix td {
+  background: hsl(var(--card));
   border-right: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
 }
 
 .summary-matrix thead th {
@@ -1179,9 +1316,9 @@ onBeforeUnmount(() => {
   z-index: 2;
   height: 54px;
   padding: 8px;
-  background: hsl(var(--muted) / 35%);
   font-weight: 650;
   white-space: nowrap;
+  background: hsl(var(--muted) / 35%);
 }
 
 .sticky-col {
@@ -1201,9 +1338,9 @@ onBeforeUnmount(() => {
 .period-col span {
   display: block;
   margin-top: 4px;
-  color: hsl(var(--muted-foreground));
   font-size: 11px;
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
 
 .summary-col,
@@ -1224,17 +1361,17 @@ onBeforeUnmount(() => {
 .shop-col em {
   display: block;
   margin-top: 3px;
-  color: hsl(var(--muted-foreground));
   font-style: normal;
   font-weight: 400;
+  color: hsl(var(--muted-foreground));
 }
 
 .metric-cell {
   height: 64px;
   padding: 8px;
-  cursor: default;
   vertical-align: middle;
   white-space: nowrap;
+  cursor: default;
 }
 
 .shop-cell {
@@ -1252,8 +1389,8 @@ onBeforeUnmount(() => {
 }
 
 .metric-lines strong {
-  color: #2563eb;
   font-size: 13px;
+  color: #2563eb;
 }
 
 .metric-lines span {
