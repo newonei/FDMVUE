@@ -9,7 +9,7 @@ import { confirm, DocAlert, Page } from '@vben/common-ui';
 import { ProductSpuStatusEnum } from '@vben/constants';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { message, Tabs } from 'antdv-next';
+import { message, TabPane, Tabs } from 'antdv-next';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -107,26 +107,23 @@ async function handleStatusChange(
   newStatus: number,
   row: MallSpuApi.Spu,
 ): Promise<boolean | undefined> {
-  return new Promise((resolve, reject) => {
-    // 二次确认
-    const text = newStatus ? '上架' : '下架';
-    confirm({
+  // 二次确认
+  const text = newStatus ? '上架' : '下架';
+  try {
+    await confirm({
       content: `确认要${text + row.name}吗?`,
-    })
-      .then(async () => {
-        // 更新状态
-        await updateStatus({
-          id: row.id!,
-          status: newStatus,
-        });
-        // 提示并返回成功
-        message.success(`${text}成功`);
-        resolve(true);
-      })
-      .catch(() => {
-        reject(new Error('取消操作'));
-      });
+    });
+  } catch {
+    return false;
+  }
+  // 更新状态
+  await updateStatus({
+    id: row.id!,
+    status: newStatus,
   });
+  // 提示并返回成功
+  message.success(`${text}成功`);
+  return true;
 }
 
 /** 添加到仓库 / 回收站的状态 */

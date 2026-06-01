@@ -79,6 +79,13 @@ const emits = defineEmits<{
   findReturnTaskNodes: [nodeList: SimpleFlowNode[]];
 }>();
 
+// 定义 TreeSelect 的默认属性映射
+const defaultProps = {
+  children: 'children',
+  label: 'name',
+  value: 'id',
+};
+
 const deptLevelLabel = computed(() => {
   let label = '部门负责人来源';
   if (
@@ -111,6 +118,7 @@ const [Drawer, drawerApi] = useVbenDrawer({
 // TODO @jason：和 antd 对应的文件，逻辑有点不一样；
 
 // 节点名称配置
+// @ts-expect-error unused
 const { nodeName, showInput, clickIcon, changeNodeName, inputRef } =
   useNodeName(BpmNodeTypeEnum.USER_TASK_NODE);
 
@@ -693,12 +701,9 @@ onMounted(() => {
             >
               <ElTreeSelect
                 v-model="configForm.deptIds"
-                :tree-data="deptTreeOptions"
-                :field-names="{
-                  label: 'name',
-                  value: 'id',
-                  children: 'children',
-                }"
+                :data="deptTreeOptions"
+                node-key="id"
+                :props="defaultProps"
                 empty-text="加载中，请稍等..."
                 multiple
                 :check-strictly="true"

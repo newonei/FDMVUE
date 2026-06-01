@@ -1,4 +1,5 @@
 export * from './api-component';
+export * from './barcode';
 export * from './captcha';
 export * from './card/comparison-card';
 export * from './card/statistic-card';
@@ -27,9 +28,11 @@ export {
   VbenButtonGroup,
   VbenCheckbox,
   VbenCheckButtonGroup,
+  VbenCollapsibleParams,
   VbenContextMenu,
   VbenCountToAnimator,
   VbenFullScreen,
+  VbenIconButton,
   VbenInputPassword,
   VbenLoading,
   VbenLogo,
@@ -38,5 +41,9 @@ export {
   VbenSpinner,
 } from '@vben-core/shadcn-ui';
 
-export type { FlattenedItem } from '@vben-core/shadcn-ui';
+export type {
+  CollapsibleParamSchema,
+  CollapsibleParamsProps,
+  FlattenedItem,
+} from '@vben-core/shadcn-ui';
 export { globalShareState } from '@vben-core/shared/global-state';

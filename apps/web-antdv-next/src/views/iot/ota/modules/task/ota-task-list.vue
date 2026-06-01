@@ -5,6 +5,7 @@ import type { OtaTask } from '#/api/iot/ota/task';
 
 import { onMounted, reactive, ref } from 'vue';
 
+import { IoTOtaTaskStatusEnum } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 import { formatDate } from '@vben/utils';
 
@@ -20,7 +21,6 @@ import {
 } from 'antdv-next';
 
 import { getOtaTaskPage } from '#/api/iot/ota/task';
-import { IoTOtaTaskStatusEnum } from '#/views/iot/utils/constants';
 
 import OtaTaskDetail from './ota-task-detail.vue';
 import OtaTaskForm from './ota-task-form.vue';
@@ -143,7 +143,7 @@ const columns: TableColumnsType = [
     dataIndex: 'createTime',
     key: 'createTime',
     align: 'center' as const,
-    customRender: ({ text }: any) => formatDate(text, 'YYYY-MM-DD HH:mm:ss'),
+    render: ({ text }: any) => formatDate(text, 'YYYY-MM-DD HH:mm:ss'),
   },
   {
     title: '任务描述',
