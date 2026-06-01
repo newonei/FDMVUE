@@ -46,6 +46,7 @@ import {
 } from '../data';
 import BrushForm from './brush-form.vue';
 import DetailModal from './detail-modal.vue';
+import DouyinImportModal from './douyin-import-modal.vue';
 import EcShopDailyDashboard from './ec-shop-daily-dashboard.vue';
 import EcShopDailyDouyinDashboard from './ec-shop-daily-douyin-dashboard.vue';
 import EcShopDailySphDashboard from './ec-shop-daily-sph-dashboard.vue';
@@ -65,6 +66,9 @@ const [BrushModal, brushModalApi] = useVbenModal({
 });
 const [Detail, detailModalApi] = useVbenModal({
   connectedComponent: DetailModal,
+});
+const [DouyinImportModalComp, douyinImportModalApi] = useVbenModal({
+  connectedComponent: DouyinImportModal,
 });
 
 const fixedPlatformCode = computed(() =>
@@ -143,7 +147,11 @@ function handleCreate() {
   formModalApi.setData({ platformCode: fixedPlatformCode.value }).open();
 }
 
-function handleImportPlaceholder() {
+function handleImport() {
+  if (fixedPlatformCode.value === 'DOUYIN') {
+    douyinImportModalApi.open();
+    return;
+  }
   message.info(importPlaceholderText.value);
 }
 
@@ -487,6 +495,7 @@ onBeforeUnmount(() => {
   <Page auto-content-height>
     <FormModal @success="handleRefresh" />
     <BrushModal @success="handleRefresh" />
+    <DouyinImportModalComp @success="handleRefresh" />
     <Detail />
 
     <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -501,7 +510,7 @@ onBeforeUnmount(() => {
       <div class="flex shrink-0 items-center gap-2">
         <Button
           v-if="activeTab === 'table' && fixedPlatformCode"
-          @click="handleImportPlaceholder"
+          @click="handleImport"
         >
           <template #icon>
             <IconifyIcon icon="lucide:upload" />

@@ -309,3 +309,19 @@ export function importJdEcShopDailyExcel(
     },
   );
 }
+
+/** 导入抖音电商经营数据 Excel（成交概览表第 2 行汇总数据） */
+export function importDouyinEcShopDailyExcel(
+  file: File,
+  shopName: string,
+  shopId?: string,
+) {
+  return requestClient.upload<EcShopDailyTaobaoImportResult>(
+    '/fdmdata/ec-shop-daily/import-douyin-excel',
+    {
+      file,
+      shopName,
+      shopId: shopId ?? '',
+    },
+  );
+}
