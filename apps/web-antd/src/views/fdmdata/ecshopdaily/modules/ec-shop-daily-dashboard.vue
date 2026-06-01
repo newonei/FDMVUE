@@ -108,8 +108,8 @@ function platformCodeOf(row: Partial<EcShopDailyRow>): string {
   );
 }
 
-function isTaobaoPlatform(platformCode: string): boolean {
-  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
+function usesGmvCalculationBase(platformCode: string): boolean {
+  return ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode);
 }
 
 function shopKeyOf(row: Partial<EcShopDailyRow>): string {
@@ -145,7 +145,7 @@ function addRow(bucket: Bucket, row: EcShopDailyRow) {
   bucket.gmv = round2(bucket.gmv + asNumber(row.gmvAmount));
   bucket.amountBase = round2(
     bucket.amountBase +
-      (isTaobaoPlatform(platformCodeOf(row))
+      (usesGmvCalculationBase(platformCodeOf(row))
         ? asNumber(row.gmvAmount)
         : asNumber(row.paidAmount)),
   );
@@ -667,7 +667,7 @@ const insightItems = computed(() => [
   },
   {
     description:
-      '退款率：淘宝按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察售后退款压力。',
+      '退款率：淘宝/抖音按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察售后退款压力。',
     label: '退款率',
     tone: metricTone(kpi.value.refundRatio, 15, 25),
     value: ratioText(kpi.value.refundRatio),
@@ -681,7 +681,7 @@ const insightItems = computed(() => [
   },
   {
     description:
-      '刷单金额占比：淘宝按刷单本金 / 成交额(GMV)，其他平台按刷单本金 / 支付金额，用于识别非真实成交占用比例。',
+      '刷单金额占比：淘宝/抖音按刷单本金 / 成交额(GMV)，其他平台按刷单本金 / 支付金额，用于识别非真实成交占用比例。',
     label: '刷单金额占比',
     tone: metricTone(kpi.value.brushRatio, 3, 8),
     value: ratioText(kpi.value.brushRatio),

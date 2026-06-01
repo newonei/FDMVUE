@@ -82,8 +82,8 @@ const usePlatformAnalysisDashboard = computed(() =>
   ['JD', 'PDD', 'TAOBAO', 'TMALL'].includes(fixedPlatformCode.value ?? ''),
 );
 
-function isTaobaoPlatform(platformCode: string | undefined): boolean {
-  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
+function usesGmvCalculationBase(platformCode: string | undefined): boolean {
+  return ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode ?? '');
 }
 
 const pageTitle = computed(() =>
@@ -312,7 +312,7 @@ function getSummaryFieldValue(field: string): string {
   }
   if (field === 'shopName') return '当前筛选';
   if (field === 'refundRate') {
-    const refundBase = isTaobaoPlatform(fixedPlatformCode.value)
+    const refundBase = usesGmvCalculationBase(fixedPlatformCode.value)
       ? row.gmvAmount
       : row.paidAmount;
     return formatPercentValue(row.refundAmount, refundBase);

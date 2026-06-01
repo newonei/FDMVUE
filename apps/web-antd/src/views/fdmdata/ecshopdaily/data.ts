@@ -1359,9 +1359,9 @@ function netSalesPreviewSchema(): VbenFormSchema {
         const platformCode = String(values.platformCode ?? '')
           .trim()
           .toUpperCase();
-        const isTaobao = platformCode === 'TAOBAO' || platformCode === 'TMALL';
+        const useGmvBase = ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode);
         const amountBase = Number(
-          (isTaobao
+          (useGmvBase
             ? (values.gmvAmount ?? values.paidAmount)
             : (values.paidAmount ?? values.gmvAmount)) ?? 0,
         );
@@ -1603,15 +1603,15 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function isTaobaoRow(row: Record<string, any> | undefined): boolean {
+function usesGmvCalculationBase(row: Record<string, any> | undefined): boolean {
   const platformCode = String(row?.platformCode ?? row?.platform_code ?? '')
     .trim()
     .toUpperCase();
-  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
+  return ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode);
 }
 
 function amountCalculationBase(row: Record<string, any> | undefined): number {
-  return isTaobaoRow(row)
+  return usesGmvCalculationBase(row)
     ? asNumber(row?.gmvAmount ?? row?.gmv_amount)
     : asNumber(row?.paidAmount ?? row?.paid_amount);
 }
@@ -1648,15 +1648,15 @@ const GRID_COLUMN_HELP: Record<string, string> = {
     '营销花费：平台推广、投放、佣金等营销费用汇总；不同平台来源字段不同，统一进入主表 marketing_cost。',
   platformCode: '平台：平台编码转中文展示。天猫数据已并入淘宝平台。',
   realNetSalesAmount:
-    '真实净销 = 净销售额 = 金额计算基数 - 退款金额 - 刷单本金；淘宝金额计算基数为成交额(GMV)，其他平台为已支付金额。',
+    '真实净销 = 净销售额 = 金额计算基数 - 退款金额 - 刷单本金；淘宝/抖音金额计算基数为成交额(GMV)，其他平台为已支付金额。',
   realPaidAmount:
-    '真实支付 = 金额计算基数 - 退款金额 - 刷单本金；淘宝金额计算基数为成交额(GMV)，其他平台为已支付金额。',
+    '真实支付 = 金额计算基数 - 退款金额 - 刷单本金；淘宝/抖音金额计算基数为成交额(GMV)，其他平台为已支付金额。',
   realPaidOrderCount:
     '真实支付单 = 已支付订单笔数 - 刷单单量，最小值按 0 处理。',
   refundAmount:
     '退款额：平台退款金额。抖音优先使用退款时间口径；其他平台按成功退款金额或退款金额归集。',
   refundRate:
-    '退款率：淘宝 = 退款金额 / 成交额(GMV) × 100%；其他平台 = 退款金额 / 已支付金额 × 100%。',
+    '退款率：淘宝/抖音 = 退款金额 / 成交额(GMV) × 100%；其他平台 = 退款金额 / 已支付金额 × 100%。',
   roi: 'ROI = 真实净销 / 营销花费。营销花费为 0 时不展示。',
   shopName:
     '店铺名称：shopId 可匹配 fdm_just_shop 时由后端回填；未匹配时使用传入店铺名称。',
