@@ -23,8 +23,8 @@ export namespace FdmdataEcShopDailyApi {
     paidAmount?: number; // 已支付金额
     realPaidAmount?: number; // 真实支付金额
     refundAmount?: number; // 退款金额
-    netSalesAmount?: number; // 净销售额（服务端：已支付金额 − 退款金额，创建/更新勿传）
-    realNetSalesAmount?: number; // 真实净销售额（剔除刷单）
+    netSalesAmount?: number; // 净销售额（服务端：金额计算基数 − 退款金额 − 刷单本金；淘宝基数为 GMV，创建/更新勿传）
+    realNetSalesAmount?: number; // 真实净销售额（同净销售额）
     buyerCount?: number; // 成交买家数
     realBuyerCount?: number; // 真实成交买家数
     marketingCost?: number; // 营销花费
@@ -51,6 +51,7 @@ export namespace FdmdataEcShopDailyApi {
     paidAmount?: number;
     paidOrderCount?: number;
     realOrderCount?: number;
+    refundBaseAmount?: number;
     refundAmount?: number;
     refundOrderCount?: number;
     refundRatio?: number;

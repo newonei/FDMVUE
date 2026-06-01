@@ -3,9 +3,9 @@ import type { ECOption } from '@vben/plugins/echarts';
 
 import type { EcShopDailyRow } from '../dashboard-utils';
 import type { EcShopDailyOption } from '../data';
+
 import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 
-import dayjs from 'dayjs';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
@@ -22,6 +22,7 @@ import {
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import {
   getEcShopDailyPage,
@@ -29,7 +30,6 @@ import {
 } from '#/api/fdmdata/ecshopdaily';
 import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
 
-import { formatEcPlatformLabel } from '../data';
 import {
   fmtAmount2,
   fmtPercent2,
@@ -40,13 +40,10 @@ import {
   sliceLastDays,
   sortedDailyFromMap,
 } from '../dashboard-utils';
+import { formatEcPlatformLabel } from '../data';
 import EchartsBox from './echarts-box.vue';
 
 defineOptions({ name: 'EcShopDailyTaobaoDashboard' });
-
-const PAGE_SIZE = 200;
-const MAX_PAGES = 40;
-const DEFAULT_PLATFORM_CODE = 'TAOBAO';
 
 const props = withDefaults(
   defineProps<{
@@ -58,6 +55,9 @@ const props = withDefaults(
     platformLabel: '',
   },
 );
+const PAGE_SIZE = 200;
+const MAX_PAGES = 40;
+const DEFAULT_PLATFORM_CODE = 'TAOBAO';
 
 const currentPlatformCode = computed(() => {
   const code = String(props.platformCode ?? DEFAULT_PLATFORM_CODE)
@@ -74,6 +74,7 @@ const currentPlatformLabel = computed(
 
 interface PeriodBucket {
   brush: number;
+  gmvAmount: number;
   marketing: number;
   netSales: number;
   paidAmount: number;
@@ -134,6 +135,7 @@ function metricTitle(description: string, value: string): string {
 function newBucket(): PeriodBucket {
   return {
     brush: 0,
+    gmvAmount: 0,
     marketing: 0,
     netSales: 0,
     paidAmount: 0,
@@ -146,6 +148,7 @@ function addRow(bucket: PeriodBucket, row: EcShopDailyRow) {
   bucket.netSales = round2(bucket.netSales + realNetSalesAmountOf(row));
   bucket.marketing = round2(bucket.marketing + asNumber(row.marketingCost));
   bucket.refund = round2(bucket.refund + asNumber(row.refundAmount));
+  bucket.gmvAmount = round2(bucket.gmvAmount + asNumber(row.gmvAmount));
   bucket.paidAmount = round2(bucket.paidAmount + asNumber(row.paidAmount));
   bucket.brush = round2(bucket.brush + asNumber(row.brushPrincipal));
   bucket.realOrders += realOrderCountOf(row);
@@ -198,7 +201,7 @@ const rangeKpi = computed(() => {
   const bucket = newBucket();
   for (const row of mergedSorted.value) addRow(bucket, row);
   const promoRatio = ratioPercent(bucket.marketing, bucket.netSales);
-  const refundRatio = ratioPercent(bucket.refund, bucket.paidAmount);
+  const refundRatio = ratioPercent(bucket.refund, bucket.gmvAmount);
   const roi = roiValue(bucket.netSales, bucket.marketing);
   const realAov =
     bucket.realOrders > 0 ? round2(bucket.netSales / bucket.realOrders) : 0;
@@ -236,11 +239,12 @@ const dataSummary = computed(() => {
 const diagnosticItems = computed(() => {
   const kpi = rangeKpi.value;
   const latest = mergedSorted.value.at(-1);
-  const peak = last30Rows.value.reduce<EcShopDailyRow | undefined>(
-    (max, row) =>
-      !max || realNetSalesAmountOf(row) > realNetSalesAmountOf(max) ? row : max,
-    undefined,
-  );
+  let peak: EcShopDailyRow | undefined;
+  for (const row of last30Rows.value) {
+    if (!peak || realNetSalesAmountOf(row) > realNetSalesAmountOf(peak)) {
+      peak = row;
+    }
+  }
   const riskyDays = last30Rows.value.filter((row) => {
     const promoRatio = ratioPercent(
       asNumber(row.marketingCost),
@@ -256,19 +260,23 @@ const diagnosticItems = computed(() => {
       tone: kpi.roi !== null && kpi.roi >= 4 ? 'green' : 'gold',
     },
     {
-      description: '推广占比 = 营销推广费 / 实际销售额，用于观察推广成本占销售额比例。',
+      description:
+        '推广占比 = 营销推广费 / 实际销售额，用于观察推广成本占销售额比例。',
       label: '推广占比',
       value: ratioLabel(kpi.promoRatio),
-      tone: kpi.promoRatio !== null && kpi.promoRatio <= 25 ? 'green' : 'orange',
+      tone:
+        kpi.promoRatio !== null && kpi.promoRatio <= 25 ? 'green' : 'orange',
     },
     {
-      description: '退款占比 = 退款金额 / 支付金额，用于观察退款对成交金额的影响。',
+      description:
+        '退款占比 = 退款金额 / 成交额(GMV)，用于观察退款对成交金额的影响。',
       label: '退款占比',
       value: ratioLabel(kpi.refundRatio),
       tone: kpi.refundRatio !== null && kpi.refundRatio <= 20 ? 'green' : 'red',
     },
     {
-      description: '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
+      description:
+        '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
       label: '真实客单价',
       value: `¥${fmtAmount2(kpi.realAov)}`,
       tone: 'blue',
@@ -284,7 +292,8 @@ const diagnosticItems = computed(() => {
       tone: 'blue',
     },
     {
-      description: '近 30 天内推广占比达到或超过 30% 的天数，用于提示投放成本风险。',
+      description:
+        '近 30 天内推广占比达到或超过 30% 的天数，用于提示投放成本风险。',
       label: '高费比天数',
       value: `${riskyDays} 天`,
       tone: riskyDays > 0 ? 'orange' : 'green',
@@ -331,7 +340,7 @@ function moneyTrendOption(
   buckets: PeriodBucket[],
   extra?: { paid?: boolean; type?: 'bar' | 'line' },
 ): ECOption | null {
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const chartType = extra?.type ?? 'line';
   const marketingName = extra?.paid ? '营销费用总额' : '营销费用';
   const option = baseChartOption(title) as any;
@@ -394,7 +403,7 @@ function ratioTrendOption(
   ratioOf: (bucket: PeriodBucket) => null | number,
   seriesName = '费比',
 ): ECOption | null {
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption(title) as any;
   option.xAxis.data = labels;
   option.tooltip.valueFormatter = (value: unknown) => fmtPercent2(value);
@@ -420,7 +429,7 @@ function ratioTrendOption(
 }
 
 function amountStructureOption(): ECOption | null {
-  if (!mergedSorted.value.length) return null;
+  if (mergedSorted.value.length === 0) return null;
   const kpi = rangeKpi.value;
   return {
     title: {
@@ -828,8 +837,8 @@ void fetchShopNameOptions();
 }
 
 .taobao-filter :deep(.ant-form-item-label > label) {
-  color: hsl(var(--muted-foreground));
   font-size: 13px;
+  color: hsl(var(--muted-foreground));
 }
 
 .taobao-filter-actions :deep(.ant-form-item-label) {
@@ -849,17 +858,17 @@ void fetchShopNameOptions();
 }
 
 .taobao-kpi :deep(.ant-statistic-title) {
-  color: #111827;
   font-size: 14px;
   font-weight: 600;
+  color: #111827;
 }
 
 .taobao-kpi :deep(.ant-statistic-content) {
   margin-top: 22px;
   font-size: clamp(30px, 3.1vw, 48px);
   font-weight: 800;
-  letter-spacing: 0;
   line-height: 1.05;
+  letter-spacing: 0;
 }
 
 .taobao-kpi--sales :deep(.ant-statistic-content) {
@@ -892,21 +901,21 @@ void fetchShopNameOptions();
 
 .diagnosis-item {
   display: flex;
-  min-width: 0;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  min-width: 0;
   padding: 8px 10px;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
-  background: hsl(var(--background));
 }
 
 .diagnosis-label {
   overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  font-size: 13px;
   text-overflow: ellipsis;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 

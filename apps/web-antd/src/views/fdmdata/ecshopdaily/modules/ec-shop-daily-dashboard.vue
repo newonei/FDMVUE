@@ -3,10 +3,9 @@ import type { ECOption } from '@vben/plugins/echarts';
 
 import type { EcShopDailyRow } from '../dashboard-utils';
 import type { EcShopDailyOption } from '../data';
+
 import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 
-import dayjs from 'dayjs';
-import isoWeek from 'dayjs/plugin/isoWeek';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
@@ -22,6 +21,8 @@ import {
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
+import isoWeek from 'dayjs/plugin/isoWeek';
 
 import {
   getEcShopDailyPage,
@@ -36,22 +37,19 @@ import {
   realNetSalesAmountOf,
   round2,
 } from '../dashboard-utils';
-import {
-  EC_PLATFORM_SUGGESTIONS,
-  formatEcPlatformLabel,
-} from '../data';
+import { EC_PLATFORM_SUGGESTIONS, formatEcPlatformLabel } from '../data';
 import EchartsBox from './echarts-box.vue';
 
-dayjs.extend(isoWeek);
-
 defineOptions({ name: 'EcShopDailyDashboard' });
-
-const PAGE_SIZE = 200;
-const MAX_PAGES = 80;
 
 const props = defineProps<{
   platformCode?: string;
 }>();
+
+dayjs.extend(isoWeek);
+
+const PAGE_SIZE = 200;
+const MAX_PAGES = 80;
 
 interface Bucket {
   brushAmount: number;
@@ -59,6 +57,7 @@ interface Bucket {
   buyers: number;
   gmv: number;
   marketing: number;
+  amountBase: number;
   paid: number;
   paidOrders: number;
   realOrders: number;
@@ -86,7 +85,7 @@ function currentYearToTodayRange(): FdmDateRange {
 
 function asNumber(value: unknown): number {
   if (value === null || value === undefined || value === '') return 0;
-  const n = Number(String(value).replace(/,/g, '').replace('%', '').trim());
+  const n = Number(String(value).replaceAll(',', '').replace('%', '').trim());
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -98,14 +97,19 @@ function realOrderCountOf(row: Partial<EcShopDailyRow>): number {
   if (row.realPaidOrderCount !== null && row.realPaidOrderCount !== undefined) {
     return Math.max(0, asInt(row.realPaidOrderCount));
   }
-  return Math.max(
-    0,
-    asInt(row.paidOrderCount) - asInt(row.brushOrderCount),
-  );
+  return Math.max(0, asInt(row.paidOrderCount) - asInt(row.brushOrderCount));
 }
 
 function platformCodeOf(row: Partial<EcShopDailyRow>): string {
-  return String(row.platformCode ?? '').trim().toUpperCase() || 'UNKNOWN';
+  return (
+    String(row.platformCode ?? '')
+      .trim()
+      .toUpperCase() || 'UNKNOWN'
+  );
+}
+
+function isTaobaoPlatform(platformCode: string): boolean {
+  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
 }
 
 function shopKeyOf(row: Partial<EcShopDailyRow>): string {
@@ -122,6 +126,7 @@ function newBucket(): Bucket {
     buyers: 0,
     gmv: 0,
     marketing: 0,
+    amountBase: 0,
     paid: 0,
     paidOrders: 0,
     realOrders: 0,
@@ -138,6 +143,12 @@ function addRow(bucket: Bucket, row: EcShopDailyRow) {
   bucket.refund = round2(bucket.refund + asNumber(row.refundAmount));
   bucket.paid = round2(bucket.paid + asNumber(row.paidAmount));
   bucket.gmv = round2(bucket.gmv + asNumber(row.gmvAmount));
+  bucket.amountBase = round2(
+    bucket.amountBase +
+      (isTaobaoPlatform(platformCodeOf(row))
+        ? asNumber(row.gmvAmount)
+        : asNumber(row.paidAmount)),
+  );
   bucket.brushAmount = round2(
     bucket.brushAmount + asNumber(row.brushPrincipal),
   );
@@ -147,21 +158,6 @@ function addRow(bucket: Bucket, row: EcShopDailyRow) {
   bucket.refundOrders += asInt(row.refundOrderCount);
   bucket.buyers += asInt(row.buyerCount);
   bucket.shopKeys.add(shopKeyOf(row));
-}
-
-function mergeBucket(target: Bucket, source: Bucket) {
-  target.sales = round2(target.sales + source.sales);
-  target.marketing = round2(target.marketing + source.marketing);
-  target.refund = round2(target.refund + source.refund);
-  target.paid = round2(target.paid + source.paid);
-  target.gmv = round2(target.gmv + source.gmv);
-  target.brushAmount = round2(target.brushAmount + source.brushAmount);
-  target.paidOrders += source.paidOrders;
-  target.realOrders += source.realOrders;
-  target.brushOrders += source.brushOrders;
-  target.refundOrders += source.refundOrders;
-  target.buyers += source.buyers;
-  for (const key of source.shopKeys) target.shopKeys.add(key);
 }
 
 function bucketRows(rows: EcShopDailyRow[]): Bucket {
@@ -317,7 +313,9 @@ function monthOverviewOption(agg: AggregateResult): ECOption {
         label: {
           show: true,
           formatter: (p: any) =>
-            p.value === null || p.value === undefined ? '' : fmtPercent2(p.value),
+            p.value === null || p.value === undefined
+              ? ''
+              : fmtPercent2(p.value),
           fontSize: 10,
         },
       },
@@ -570,8 +568,8 @@ const weekAgg = computed(() =>
 const kpi = computed(() => {
   const bucket = bucketRows(sortedRows.value);
   const feeRatio = ratioPercent(bucket.marketing, bucket.sales);
-  const refundRatio = ratioPercent(bucket.refund, bucket.paid);
-  const brushRatio = ratioPercent(bucket.brushAmount, bucket.paid);
+  const refundRatio = ratioPercent(bucket.refund, bucket.amountBase);
+  const brushRatio = ratioPercent(bucket.brushAmount, bucket.amountBase);
   const aov =
     bucket.realOrders > 0 ? round2(bucket.sales / bucket.realOrders) : 0;
   return {
@@ -618,7 +616,9 @@ const channelLast30 = computed(() => {
     targetMap.set(dateKey, bucket);
   }
   const ecBuckets = labels.map((label) => ecMap.get(label) ?? newBucket());
-  const mediaBuckets = labels.map((label) => mediaMap.get(label) ?? newBucket());
+  const mediaBuckets = labels.map(
+    (label) => mediaMap.get(label) ?? newBucket(),
+  );
   return { ecBuckets, labels, mediaBuckets };
 });
 
@@ -645,15 +645,14 @@ const topShopAgg = computed(() => {
 const latestDate = computed(() => dateAgg.value.labels.at(-1) ?? '-');
 
 const filterSummary = computed(() => {
-  const platformCode =
-    fixedPlatformCode.value ?? dashForm.platformCode?.trim();
+  const platformCode = fixedPlatformCode.value ?? dashForm.platformCode?.trim();
   const platform = platformCode ? platformLabel(platformCode) : '全部平台';
   const shop = dashForm.shopName?.trim() || '全部店铺';
   return `${dashForm.statDate[0]} ~ ${dashForm.statDate[1]} · ${platform} · ${shop}`;
 });
 
 const dataSummary = computed(() => {
-  if (!sortedRows.value.length && !loading.value) {
+  if (sortedRows.value.length === 0 && !loading.value) {
     return '暂无数据，请调整筛选条件或先在表格中录入';
   }
   return `合并 ${dateAgg.value.labels.length} 个统计日 · 原始记录 ${rawRows.value.length} 条 · 覆盖 ${platformCount.value} 个平台`;
@@ -667,19 +666,22 @@ const insightItems = computed(() => [
     value: ratioText(kpi.value.feeRatio),
   },
   {
-    description: '退款率 = 退款金额 / 支付金额，用于观察售后退款压力。',
+    description:
+      '退款率：淘宝按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察售后退款压力。',
     label: '退款率',
     tone: metricTone(kpi.value.refundRatio, 15, 25),
     value: ratioText(kpi.value.refundRatio),
   },
   {
-    description: '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
+    description:
+      '真实客单价 = 实际销售额 / 真实订单数，用于衡量单笔真实订单价值。',
     label: '真实客单价',
     tone: 'processing',
     value: moneyText(kpi.value.aov),
   },
   {
-    description: '刷单金额占比 = 刷单本金 / 支付金额，用于识别非真实成交占用比例。',
+    description:
+      '刷单金额占比：淘宝按刷单本金 / 成交额(GMV)，其他平台按刷单本金 / 支付金额，用于识别非真实成交占用比例。',
     label: '刷单金额占比',
     tone: metricTone(kpi.value.brushRatio, 3, 8),
     value: ratioText(kpi.value.brushRatio),
@@ -707,18 +709,18 @@ const insightItems = computed(() => [
 ]);
 
 const chartMonthOverview = computed<ECOption | null>(() =>
-  monthAgg.value.labels.length ? monthOverviewOption(monthAgg.value) : null,
+  monthAgg.value.labels.length > 0 ? monthOverviewOption(monthAgg.value) : null,
 );
 
 const chartPlatformContribution = computed<ECOption | null>(() =>
-  platformAgg.value.length
+  platformAgg.value.length > 0
     ? platformContributionOption(platformAgg.value.slice(0, 8))
     : null,
 );
 
 const chartWeek = computed<ECOption | null>(() => {
   const agg = weekAgg.value;
-  if (!agg.labels.length) return null;
+  if (agg.labels.length === 0) return null;
   return dualMoneyLineOption(
     agg.labels,
     '实际销售额',
@@ -730,7 +732,7 @@ const chartWeek = computed<ECOption | null>(() => {
 
 const chartLast30Ratio = computed<ECOption | null>(() => {
   const agg = last30Agg.value;
-  if (!agg.labels.length) return null;
+  if (agg.labels.length === 0) return null;
   return ratioLineOption(agg.labels, [
     {
       color: '#6366f1',
@@ -739,7 +741,7 @@ const chartLast30Ratio = computed<ECOption | null>(() => {
     },
     {
       color: '#f97316',
-      data: agg.buckets.map((b) => ratioPercent(b.refund, b.paid)),
+      data: agg.buckets.map((b) => ratioPercent(b.refund, b.amountBase)),
       name: '退款率',
     },
   ]);
@@ -747,7 +749,7 @@ const chartLast30Ratio = computed<ECOption | null>(() => {
 
 const chartChannelSales = computed<ECOption | null>(() => {
   const agg = channelLast30.value;
-  if (!agg.labels.length) return null;
+  if (agg.labels.length === 0) return null;
   return dualMoneyLineOption(
     agg.labels,
     '电商渠道销售额',
@@ -760,7 +762,7 @@ const chartChannelSales = computed<ECOption | null>(() => {
 
 const chartChannelRatio = computed<ECOption | null>(() => {
   const agg = channelLast30.value;
-  if (!agg.labels.length) return null;
+  if (agg.labels.length === 0) return null;
   return ratioLineOption(agg.labels, [
     {
       color: '#2563eb',
@@ -776,7 +778,7 @@ const chartChannelRatio = computed<ECOption | null>(() => {
 });
 
 const chartTopShop = computed<ECOption | null>(() =>
-  topShopAgg.value.length ? topShopOption(topShopAgg.value) : null,
+  topShopAgg.value.length > 0 ? topShopOption(topShopAgg.value) : null,
 );
 
 async function fetchShopNameOptions(keyword = '') {
@@ -796,7 +798,10 @@ async function fetchShopNameOptions(keyword = '') {
     }));
   } catch (error) {
     if (seq !== shopNameFetchSeq) return;
-    console.error('Load ec shop daily dashboard shop name options failed', error);
+    console.error(
+      'Load ec shop daily dashboard shop name options failed',
+      error,
+    );
     shopNameOptions.value = [];
   }
 }
@@ -940,7 +945,11 @@ void fetchShopNameOptions();
                 />
               </FormItem>
             </Col>
-            <Col :xs="24" :lg="isFixedPlatform ? 9 : 4" :xl="isFixedPlatform ? 10 : 6">
+            <Col
+              :xs="24"
+              :lg="isFixedPlatform ? 9 : 4"
+              :xl="isFixedPlatform ? 10 : 6"
+            >
               <FormItem label=" " class="mb-0 filter-actions">
                 <Space wrap class="w-full justify-end">
                   <Button type="primary" @click="loadRows">查询</Button>
@@ -1128,15 +1137,15 @@ void fetchShopNameOptions();
 .chart-panel,
 .insight-strip,
 .kpi-card {
+  background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  background: hsl(var(--card));
   box-shadow: 0 6px 18px rgb(15 23 42 / 5%);
 }
 
 .filter-panel {
-  margin-bottom: 16px;
   padding: 16px;
+  margin-bottom: 16px;
 }
 
 .filter-panel :deep(.ant-form-item-label > label) {
@@ -1157,8 +1166,8 @@ void fetchShopNameOptions();
 
 .kpi-card {
   min-width: 0;
-  overflow: hidden;
   padding: 18px;
+  overflow: hidden;
   border-top-width: 3px;
 }
 
@@ -1187,11 +1196,11 @@ void fetchShopNameOptions();
 
 .kpi-value {
   overflow: hidden;
-  color: hsl(var(--foreground));
+  text-overflow: ellipsis;
   font-size: 38px;
   font-weight: 760;
   line-height: 1.1;
-  text-overflow: ellipsis;
+  color: hsl(var(--foreground));
   white-space: nowrap;
 }
 
@@ -1214,9 +1223,9 @@ void fetchShopNameOptions();
 .kpi-desc {
   margin-top: 14px;
   overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
   text-overflow: ellipsis;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -1224,24 +1233,24 @@ void fetchShopNameOptions();
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 16px;
   padding: 12px;
+  margin-bottom: 16px;
 }
 
 .insight-item {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   min-width: 150px;
   padding: 4px 8px;
+  background: hsl(var(--muted) / 22%);
   border: 1px solid hsl(var(--border) / 70%);
   border-radius: 6px;
-  background: hsl(var(--muted) / 22%);
 }
 
 .insight-label {
-  color: hsl(var(--muted-foreground));
   font-size: 12px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -1260,11 +1269,11 @@ void fetchShopNameOptions();
 
 .empty-block {
   display: flex;
-  min-height: 220px;
   align-items: center;
   justify-content: center;
-  color: hsl(var(--muted-foreground));
+  min-height: 220px;
   font-size: 13px;
+  color: hsl(var(--muted-foreground));
 }
 
 @media (max-width: 1200px) {

@@ -86,7 +86,8 @@ const METRIC_DESCRIPTIONS: Record<string, string> = {
   brushRatio:
     '刷单占比 = 刷单金额 / 实际销售额，用于识别刷单对经营口径的影响。',
   costRatio: '费比 = 营销费用 / 实际销售额，越高说明获客成本压力越大。',
-  refundRatio: '退款率 = 退款金额 / 支付金额，用于观察退款风险。',
+  refundRatio:
+    '退款率：淘宝按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察退款风险。',
   roi: '投产比 = 实际销售额 / 营销费用，越高说明投放效率越好。',
   salesAmount: '实际销售额使用主表真实净销售额，已剔除刷单金额影响。',
 };
@@ -95,7 +96,8 @@ const MATRIX_VIEW_DESCRIPTIONS: Record<string, string> = {
   COST_RATIO: '费比 = 营销费用 / 实际销售额 × 100%。',
   MARKETING: '营销费 = 各平台推广投放费用汇总。',
   ORDER: '订单 = 真实订单数 = 已支付订单数 - 刷单单量。',
-  REFUND: '退款 = 退款金额；退款率 = 退款金额 / 支付金额 × 100%。',
+  REFUND:
+    '退款 = 退款金额；退款率：淘宝按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额。',
   SALES: METRIC_DESCRIPTIONS.salesAmount,
   SUMMARY: '综合展示实际销售额、营销费用、费比三项核心指标。',
 };
@@ -357,6 +359,7 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
     gmvAmount: 0,
     marketingCost: 0,
     paidAmount: 0,
+    refundBaseAmount: 0,
     paidOrderCount: 0,
     realOrderCount: 0,
     refundAmount: 0,
@@ -364,11 +367,20 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
     salesAmount: 0,
   };
   for (const item of list) {
+    const platformCode = String(item.platformCode ?? '')
+      .trim()
+      .toUpperCase();
     metric.salesAmount = round2(n(metric.salesAmount) + n(item.salesAmount));
     metric.marketingCost = round2(
       n(metric.marketingCost) + n(item.marketingCost),
     );
     metric.paidAmount = round2(n(metric.paidAmount) + n(item.paidAmount));
+    metric.refundBaseAmount = round2(
+      n(metric.refundBaseAmount) +
+        (platformCode === 'TAOBAO' || platformCode === 'TMALL'
+          ? n(item.gmvAmount)
+          : n(item.paidAmount)),
+    );
     metric.refundAmount = round2(n(metric.refundAmount) + n(item.refundAmount));
     metric.brushAmount = round2(n(metric.brushAmount) + n(item.brushAmount));
     metric.gmvAmount = round2(n(metric.gmvAmount) + n(item.gmvAmount));
@@ -383,7 +395,7 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
   metric.costRatio =
     divPercent(n(metric.marketingCost), n(metric.salesAmount)) ?? undefined;
   metric.refundRatio =
-    divPercent(n(metric.refundAmount), n(metric.paidAmount)) ?? undefined;
+    divPercent(n(metric.refundAmount), n(metric.refundBaseAmount)) ?? undefined;
   metric.brushRatio =
     divPercent(n(metric.brushAmount), n(metric.salesAmount)) ?? undefined;
   metric.avgOrderValue =

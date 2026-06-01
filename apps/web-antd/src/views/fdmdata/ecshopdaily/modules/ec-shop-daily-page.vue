@@ -1,8 +1,13 @@
 <script lang="ts" setup>
+import type { PageParam } from '@vben/request';
+
 import type { EcShopDailyOption } from '../data';
 
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
+import type {
+  EcShopDailyPlatformDetailPageParams,
+  FdmdataEcShopDailyApi,
+} from '#/api/fdmdata/ecshopdaily';
 
 import {
   computed,
@@ -25,11 +30,13 @@ import {
   exportEcShopDaily,
   getEcShopDailyPage,
   getEcShopDailyPageSummary,
+  getEcShopDailyPlatformDetailPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
 import { $t } from '#/locales';
 
 import {
+  DETAIL_FIELD_PREFIX,
   formatEcPlatformLabel,
   useGridColumns,
   useGridFormSchema,
@@ -70,8 +77,13 @@ const fixedPlatformLabel = computed(() =>
   fixedPlatformCode.value ? formatEcPlatformLabel(fixedPlatformCode.value) : '',
 );
 const usePlatformAnalysisDashboard = computed(() =>
-  ['JD', 'PDD', 'TAOBAO'].includes(fixedPlatformCode.value ?? ''),
+  ['JD', 'PDD', 'TAOBAO', 'TMALL'].includes(fixedPlatformCode.value ?? ''),
 );
+
+function isTaobaoPlatform(platformCode: string | undefined): boolean {
+  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
+}
+
 const pageTitle = computed(() =>
   fixedPlatformCode.value
     ? `${fixedPlatformLabel.value}店铺后台日汇总`
@@ -179,6 +191,58 @@ function buildTableQueryParams(
   };
 }
 
+function normalizeKeyPart(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeDateKey(value: unknown): string {
+  if (Array.isArray(value) && value.length >= 3) {
+    const [year, month, day] = value;
+    return [
+      String(year).padStart(4, '0'),
+      String(month).padStart(2, '0'),
+      String(day).padStart(2, '0'),
+    ].join('-');
+  }
+  return normalizeKeyPart(value).slice(0, 10);
+}
+
+function detailMergeKey(row: Record<string, any>) {
+  return [
+    normalizeDateKey(row.statDate ?? row.stat_date),
+    normalizeKeyPart(row.platformCode ?? row.platform_code).toUpperCase(),
+    normalizeKeyPart(row.shopId ?? row.shop_id),
+    normalizeKeyPart(row.shopName ?? row.shop_name),
+  ].join('|');
+}
+
+function mergePlatformDetailRows(
+  rows: FdmdataEcShopDailyApi.EcShopDaily[],
+  details: Record<string, any>[],
+) {
+  if (rows.length === 0 || details.length === 0) return rows;
+  const byDailyId = new Map<string, Record<string, any>>();
+  const byBizKey = new Map<string, Record<string, any>>();
+
+  for (const detail of details) {
+    if (detail.daily_id !== null && detail.daily_id !== undefined) {
+      byDailyId.set(String(detail.daily_id), detail);
+    }
+    byBizKey.set(detailMergeKey(detail), detail);
+  }
+
+  return rows.map((row) => {
+    const detail =
+      byDailyId.get(String(row.id)) ?? byBizKey.get(detailMergeKey(row as any));
+    if (!detail) return row;
+    const merged: Record<string, any> = { ...row };
+    for (const [key, value] of Object.entries(detail)) {
+      merged[`${DETAIL_FIELD_PREFIX}${key}`] = value;
+    }
+    return merged as FdmdataEcShopDailyApi.EcShopDaily;
+  });
+}
+
 async function handleExport() {
   exporting.value = true;
   try {
@@ -229,7 +293,10 @@ function getSummaryFieldValue(field: string): string {
   }
   if (field === 'shopName') return '当前筛选';
   if (field === 'refundRate') {
-    return formatPercentValue(row.refundAmount, row.paidAmount);
+    const refundBase = isTaobaoPlatform(fixedPlatformCode.value)
+      ? row.gmvAmount
+      : row.paidAmount;
+    return formatPercentValue(row.refundAmount, refundBase);
   }
   if (field === 'roi') {
     return formatRoiValue(row.realNetSalesAmount, row.marketingCost);
@@ -323,7 +390,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
     }),
   },
   gridOptions: {
-    columns: useGridColumns({ hidePlatform: isFixedPlatformPage.value }),
+    columns: useGridColumns({
+      hidePlatform: isFixedPlatformPage.value,
+      platformCode: fixedPlatformCode.value,
+    }),
     height: 'auto',
     autoResize: true,
     keepSource: false,
@@ -336,14 +406,29 @@ const [Grid, gridApi] = useVbenVxeGrid({
           const params = buildTableQueryParams(formValues, {
             pageNo: page.currentPage,
             pageSize: page.pageSize,
-          });
+          }) as PageParam & Record<string, any>;
           summaryLoading.value = true;
           try {
-            const [pageResult, summary] = await Promise.all([
+            const detailPromise = fixedPlatformCode.value
+              ? getEcShopDailyPlatformDetailPage({
+                  ...params,
+                  pageNo: 1,
+                  pageSize: -1,
+                  platformCode: fixedPlatformCode.value,
+                } as EcShopDailyPlatformDetailPageParams)
+              : Promise.resolve(null);
+            const [pageResult, summary, detailResult] = await Promise.all([
               getEcShopDailyPage(params),
               getEcShopDailyPageSummary(params),
+              detailPromise,
             ]);
             summaryRow.value = summary;
+            if (detailResult?.list) {
+              pageResult.list = mergePlatformDetailRows(
+                pageResult.list,
+                detailResult.list,
+              );
+            }
             return pageResult;
           } finally {
             summaryLoading.value = false;

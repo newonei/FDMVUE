@@ -82,6 +82,7 @@ export interface EcShopDailyOption {
 
 export interface EcShopDailyGridOptions {
   hidePlatform?: boolean;
+  platformCode?: string;
 }
 
 export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShopDaily> =
@@ -265,11 +266,25 @@ export function useFormSchema(): VbenFormSchema[] {
         placeholder: '保存时自动计算',
       },
       dependencies: {
-        triggerFields: ['paidAmount', 'refundAmount'],
+        triggerFields: [
+          'platformCode',
+          'gmvAmount',
+          'paidAmount',
+          'refundAmount',
+          'brushPrincipal',
+        ],
         componentProps: (values) => {
-          const paid = Number(values.paidAmount ?? 0);
+          const platformCode = String(values.platformCode ?? '')
+            .trim()
+            .toUpperCase();
+          const isTaobao =
+            platformCode === 'TAOBAO' || platformCode === 'TMALL';
+          const amountBase = Number(
+            (isTaobao ? values.gmvAmount : values.paidAmount) ?? 0,
+          );
           const refund = Number(values.refundAmount ?? 0);
-          const net = Number((paid - refund).toFixed(2));
+          const brushPrincipal = Number(values.brushPrincipal ?? 0);
+          const net = Number((amountBase - refund - brushPrincipal).toFixed(2));
           return {
             class: 'w-full',
             disabled: true,
@@ -361,6 +376,19 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function isTaobaoRow(row: Record<string, any> | undefined): boolean {
+  const platformCode = String(row?.platformCode ?? row?.platform_code ?? '')
+    .trim()
+    .toUpperCase();
+  return platformCode === 'TAOBAO' || platformCode === 'TMALL';
+}
+
+function amountCalculationBase(row: Record<string, any> | undefined): number {
+  return isTaobaoRow(row)
+    ? asNumber(row?.gmvAmount ?? row?.gmv_amount)
+    : asNumber(row?.paidAmount ?? row?.paid_amount);
+}
+
 function formatRatioPercent(numerator: number, denominator: number): string {
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return '';
   if (denominator === 0) return '';
@@ -373,6 +401,17 @@ function formatRoi(numerator: number, denominator: number): string {
   return (numerator / denominator).toFixed(2);
 }
 
+function formatDetailValue({ cellValue }: { cellValue: unknown }) {
+  if (cellValue === null || cellValue === undefined || cellValue === '')
+    return '';
+  if (typeof cellValue === 'number') {
+    return Number.isInteger(cellValue)
+      ? String(cellValue)
+      : cellValue.toFixed(2);
+  }
+  return String(cellValue);
+}
+
 const GRID_COLUMN_HELP: Record<string, string> = {
   brushOrderCount:
     '刷单单量：当前统计日录入的刷单订单数量；用于从支付订单中剔除刷单影响。',
@@ -382,14 +421,15 @@ const GRID_COLUMN_HELP: Record<string, string> = {
     '营销花费：平台推广、投放、佣金等营销费用汇总；不同平台来源字段不同，统一进入主表 marketing_cost。',
   platformCode: '平台：平台编码转中文展示。天猫数据已并入淘宝平台。',
   realNetSalesAmount:
-    '真实净销 = 已支付金额 - 退款金额 - 刷单本金。优先使用服务端 real_net_sales_amount 字段。',
+    '真实净销 = 净销售额 = 金额计算基数 - 退款金额 - 刷单本金；淘宝金额计算基数为成交额(GMV)，其他平台为已支付金额。',
   realPaidAmount:
-    '真实支付 = 已支付金额 - 退款金额 - 刷单本金。用于剔除退款和刷单后的支付口径。',
+    '真实支付 = 金额计算基数 - 退款金额 - 刷单本金；淘宝金额计算基数为成交额(GMV)，其他平台为已支付金额。',
   realPaidOrderCount:
     '真实支付单 = 已支付订单笔数 - 刷单单量，最小值按 0 处理。',
   refundAmount:
     '退款额：平台退款金额。抖音优先使用退款时间口径；其他平台按成功退款金额或退款金额归集。',
-  refundRate: '退款率 = 退款金额 / 已支付金额 × 100%。',
+  refundRate:
+    '退款率：淘宝 = 退款金额 / 成交额(GMV) × 100%；其他平台 = 退款金额 / 已支付金额 × 100%。',
   roi: 'ROI = 真实净销 / 营销花费。营销花费为 0 时不展示。',
   shopName:
     '店铺名称：shopId 可匹配 fdm_just_shop 时由后端回填；未匹配时使用传入店铺名称。',
@@ -403,7 +443,189 @@ function columnHelp(field: string) {
     : undefined;
 }
 
-/** 列表列（核心汇总字段；详细数据在编辑弹窗查看） */
+export const DETAIL_FIELD_PREFIX = '__detail__';
+
+function detailField(column: string) {
+  return `${DETAIL_FIELD_PREFIX}${column}`;
+}
+
+const PLATFORM_DETAIL_COLUMNS: Record<string, Array<[string, string]>> = {
+  DOUYIN: [
+    ['actual_sales_amount', '实际销售额'],
+    ['brush_amount', '刷单金额'],
+    ['brush_order_count', '刷单量'],
+    ['ad_cost', '投放消耗'],
+    ['platform_commission', '平台佣金'],
+    ['talent_commission', '达人佣金'],
+    ['ad_cost_ratio', '投放费比'],
+    ['expense_amount', '支出金额'],
+    ['transaction_amount', '成交金额'],
+    ['paid_amount', '用户支付金额'],
+    ['smart_coupon_amount', '智能优惠券金额'],
+    ['platform_subsidy_amount', '电商平台补贴金额'],
+    ['paid_order_count', '成交订单数'],
+    ['buyer_count', '成交人数'],
+    ['avg_order_value', '客单价'],
+    ['refund_amount_payment_time', '退款金额(支付时间)'],
+    ['refund_amount_refund_time', '退款金额(退款时间)'],
+  ],
+  JD: [
+    ['visitor_count', '访客数'],
+    ['page_view_count', '浏览量'],
+    ['paid_amount', '支付金额'],
+    ['buyer_count', '支付买家数'],
+    ['payment_conversion_rate', '支付转化率'],
+    ['avg_order_value', '客单价'],
+    ['success_refund_amount', '成功退款金额'],
+    ['marketing_cost', '营销花费'],
+    ['promotion_red_packet_amount', '推广红包'],
+    ['brush_principal', '刷单本金'],
+    ['brush_order_count', '刷单单量'],
+    ['brush_commission', '刷单佣金'],
+    ['brush_total_cost_with_platform_fee', '刷单总成本（加平台扣点）'],
+    ['actual_cost', '实际花费'],
+    ['actual_sales_amount', '实际销售额'],
+    ['cost_ratio', '花费占比'],
+  ],
+  PDD: [
+    ['visitor_count', '访客数'],
+    ['page_view_count', '浏览量'],
+    ['paid_amount', '支付金额'],
+    ['buyer_count', '支付买家数'],
+    ['payment_conversion_rate', '支付转化率'],
+    ['avg_order_value', '客单价'],
+    ['success_refund_amount', '成功退款金额'],
+    ['marketing_cost', '营销花费'],
+    ['promotion_red_packet_amount', '推广红包金额'],
+    ['brush_principal', '刷单本金'],
+    ['brush_order_count', '刷单单量'],
+    ['brush_commission', '刷单佣金'],
+    [
+      'brush_total_cost_with_platform_fee_shipping',
+      '刷单总成本（平台扣点+运费）',
+    ],
+    ['actual_sales_amount', '实际销售额'],
+    ['marketing_cost_2', '营销费用总额'],
+    ['cost_ratio', '花费占比'],
+    ['marketing_cost_3', '营销费用'],
+  ],
+  SPH: [
+    ['source_time', '时间'],
+    ['transaction_amount', '成交金额'],
+    ['paid_order_count', '成交订单数'],
+    ['buyer_count', '成交人数'],
+    ['order_amount', '下单金额'],
+    ['order_count', '下单订单数'],
+    ['refund_amount', '退款金额'],
+    ['refund_amount_2', '成交退款金额'],
+    ['order_user_count', '下单人数'],
+    ['avg_order_value', '客单价'],
+    ['transaction_amount_2', '实际成交金额'],
+  ],
+  TAOBAO: [
+    ['source_date', '日期'],
+    ['visitor_count', '访客数'],
+    ['page_view_count', '浏览量'],
+    ['paid_amount', '支付金额'],
+    ['buyer_count', '支付买家数'],
+    ['payment_conversion_rate', '支付转化率'],
+    ['avg_order_value', '客单价'],
+    ['bounce_rate', '跳失率'],
+    ['avg_stay_duration', '平均停留时长'],
+    ['page_view_count_2', '人均浏览量'],
+    ['uv_value', 'UV价值'],
+    ['product_visitor_count', '商品访客数'],
+    ['product_page_view_count', '商品浏览量'],
+    ['paid_product_count', '支付商品数'],
+    ['returning_buyer_count', '支付老买家数'],
+    ['returning_buyer_paid_amount', '老买家支付金额'],
+    ['product_favorite_buyer_count', '商品收藏买家数'],
+    ['metric_bda235c9', '加购人数'],
+    ['success_refund_amount', '成功退款金额'],
+    ['review_count', '评价数'],
+    ['review_count_2', '正面评价数'],
+    ['review_count_3', '负面评价数'],
+    ['review_count_4', '有图评价数'],
+    ['desc_match_score', '描述相符评分'],
+    ['logistics_service_score', '物流服务评分'],
+    ['service_attitude_score', '服务态度评分'],
+    ['pickup_package_count', '揽收包裹数'],
+    ['shipped_package_count', '发货包裹数'],
+    ['delivery_package_count', '派送包裹数'],
+    ['signed_package_count', '签收成功包裹数'],
+    ['taobaoke_commission', '淘宝客佣金'],
+    ['diamond_display_cost', '钻石展位消耗'],
+    ['keyword_ad_cost', '关键词推广消耗'],
+    ['audience_ad_cost', '人群推广消耗'],
+    ['short_video_ad_cost', '超级短视频'],
+    ['sitewide_ad_cost', '全站推广'],
+    ['wanxiangtai_cost', '万相台消耗'],
+    ['brush_principal', '刷单本金'],
+    ['brush_order_count', '刷单单量'],
+    ['brush_commission', '刷单佣金'],
+    [
+      'brush_total_cost_with_platform_fee_shipping',
+      '刷单总成本（平台扣点+运费）',
+    ],
+    ['metric_46482545', '真实订单数'],
+    ['metric_10e8e840', '加购率'],
+    ['metric_f45d7950', '退款占比'],
+    ['metric_8f7e3a1a', '好评率'],
+    ['metric_302543c3', '差评率'],
+    ['metric_ce0485cc', '揽收率'],
+    ['marketing_cost', '营销费用总额'],
+    ['cost_ratio', '花费占比'],
+    ['actual_sales_amount', '实际销售额'],
+    ['content_visitor_count', '内容引导访客数'],
+    ['content_seed_transaction_amount', '内容引导种草成交金额'],
+  ],
+  XHS: [
+    ['transaction_amount', '实际成交金额'],
+    ['paid_order_count', '实际支付订单数'],
+    ['paid_amount', '支付金额'],
+    ['paid_order_count_2', '支付订单数'],
+    ['paid_item_count', '支付件数'],
+    ['buyer_count', '支付买家数'],
+    ['visitor_count', '总访客数'],
+    ['page_view_count', '总浏览量'],
+    ['avg_order_value', '客单价'],
+    ['product_page_view_count', '商品浏览量'],
+    ['product_visitor_count', '商品访客数'],
+    ['metric_e3ccf5de', '新增加购人数'],
+    ['metric_0a4c5554', '新增加购件数'],
+    ['wishlist_count', '新增加入心愿单人数'],
+    ['pv', '商品点击率（PV）'],
+    ['payment_conversion_rate_uv', '支付转化率（UV）'],
+    ['payment_conversion_rate_pv', '支付转化率（PV）'],
+    ['refund_amount', '退款金额'],
+    ['paid_amount_2', '笔记支付金额'],
+    ['paid_order_count_3', '笔记支付订单数'],
+    ['payment_conversion_rate', '笔记支付转化率'],
+    ['promotion_cost', '推广花费'],
+    ['brush_principal', '补单本金'],
+    ['brush_order_count', '补单订单量'],
+    ['brush_commission', '补单佣金'],
+  ],
+};
+
+function usePlatformDetailColumns(platformCode?: string) {
+  const columns =
+    PLATFORM_DETAIL_COLUMNS[
+      String(platformCode ?? '')
+        .trim()
+        .toUpperCase()
+    ] ?? [];
+  return columns.map(([column, title]) => ({
+    field: detailField(column),
+    title: `明细·${title}`,
+    minWidth: 120,
+    align: 'right' as const,
+    visible: false,
+    formatter: formatDetailValue,
+  }));
+}
+
+/** 列表列（核心汇总字段；详细数据默认隐藏，可在列设置中显示） */
 export function useGridColumns(
   options: EcShopDailyGridOptions = {},
 ): VxeTableGridOptions<FdmdataEcShopDailyApi.EcShopDaily>['columns'] {
@@ -444,14 +666,12 @@ export function useGridColumns(
       minWidth: 110,
       align: 'right',
       formatter: ({ row }: any) => {
-        // 优先服务端 real 字段；否则按 paid-refund-brushPrincipal 兜底
-        const real = row?.realNetSalesAmount;
-        if (real !== undefined && real !== null && real !== '')
-          return formatAmount({ cellValue: real });
-        const paid = asNumber(row?.paidAmount);
+        const amountBase = amountCalculationBase(row);
         const refund = asNumber(row?.refundAmount);
         const brushPrincipal = asNumber(row?.brushPrincipal);
-        return formatAmount({ cellValue: paid - refund - brushPrincipal });
+        return formatAmount({
+          cellValue: amountBase - refund - brushPrincipal,
+        });
       },
     },
     {
@@ -461,13 +681,12 @@ export function useGridColumns(
       minWidth: 110,
       align: 'right',
       formatter: ({ row }: any) => {
-        const real = row?.realPaidAmount;
-        if (real !== undefined && real !== null && real !== '')
-          return formatAmount({ cellValue: real });
-        const paid = asNumber(row?.paidAmount);
+        const amountBase = amountCalculationBase(row);
         const refund = asNumber(row?.refundAmount);
         const brushPrincipal = asNumber(row?.brushPrincipal);
-        return formatAmount({ cellValue: paid - refund - brushPrincipal });
+        return formatAmount({
+          cellValue: amountBase - refund - brushPrincipal,
+        });
       },
     },
     {
@@ -487,7 +706,7 @@ export function useGridColumns(
       formatter: ({ row }: any) =>
         formatRatioPercent(
           asNumber(row?.refundAmount),
-          asNumber(row?.paidAmount),
+          amountCalculationBase(row),
         ),
     },
     {
@@ -539,13 +758,14 @@ export function useGridColumns(
       align: 'right',
       formatter: ({ row }: any) => {
         const realNet =
-          row?.realNetSalesAmount ??
-          asNumber(row?.paidAmount) -
-            asNumber(row?.refundAmount) -
-            asNumber(row?.brushPrincipal);
+          amountCalculationBase(row) -
+          asNumber(row?.refundAmount) -
+          asNumber(row?.brushPrincipal);
         return formatRoi(asNumber(realNet), asNumber(row?.marketingCost));
       },
     },
+
+    ...usePlatformDetailColumns(options.platformCode),
 
     {
       title: '操作',

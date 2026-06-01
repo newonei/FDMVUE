@@ -14,9 +14,14 @@ function n(v: unknown): number {
 }
 
 export function realNetSalesAmountOf(r: Partial<EcShopDailyRow>): number {
-  const real: unknown = r.realNetSalesAmount;
-  if (real !== null && real !== undefined && real !== '') return round2(real);
-  return round2(n(r.paidAmount) - n(r.refundAmount) - n(r.brushPrincipal));
+  const platformCode = String(r.platformCode ?? '')
+    .trim()
+    .toUpperCase();
+  const amountBase =
+    platformCode === 'TAOBAO' || platformCode === 'TMALL'
+      ? n(r.gmvAmount)
+      : n(r.paidAmount);
+  return round2(amountBase - n(r.refundAmount) - n(r.brushPrincipal));
 }
 
 /** 金额/比率统一保留两位小数 */
@@ -50,7 +55,7 @@ export function mergeRowsByStatDate(
         paidAmount: round2(r.paidAmount),
         realPaidAmount: round2(r.realPaidAmount),
         refundAmount: round2(r.refundAmount),
-        netSalesAmount: round2(r.netSalesAmount),
+        netSalesAmount: realNetSalesAmountOf(r),
         realNetSalesAmount: realNetSalesAmountOf(r),
         brushPrincipal: round2(r.brushPrincipal),
         marketingCost: round2(r.marketingCost),
@@ -68,7 +73,7 @@ export function mergeRowsByStatDate(
     ex.paidAmount = round2(n(ex.paidAmount) + n(r.paidAmount));
     ex.realPaidAmount = round2(n(ex.realPaidAmount) + n(r.realPaidAmount));
     ex.refundAmount = round2(n(ex.refundAmount) + n(r.refundAmount));
-    ex.netSalesAmount = round2(n(ex.netSalesAmount) + n(r.netSalesAmount));
+    ex.netSalesAmount = round2(n(ex.netSalesAmount) + realNetSalesAmountOf(r));
     ex.realNetSalesAmount = round2(
       n(ex.realNetSalesAmount) + realNetSalesAmountOf(r),
     );
@@ -141,7 +146,7 @@ export function aggregateByMonth(sorted: EcShopDailyRow[]): {
   net: number[];
   ratio: (null | number)[];
 } {
-  const buckets = new Map<string, { mkt: number; net: number; }>();
+  const buckets = new Map<string, { mkt: number; net: number }>();
   for (const r of sorted) {
     const dk = normalizeStatDateKey(r.statDate);
     if (!dk) continue;
@@ -152,9 +157,17 @@ export function aggregateByMonth(sorted: EcShopDailyRow[]): {
     buckets.set(ym, b);
   }
   const labels = [...buckets.keys()].toSorted();
-  const net = labels.map((k) => round2(buckets.get(k)!.net));
-  const mkt = labels.map((k) => round2(buckets.get(k)!.mkt));
-  const ratio = labels.map((_, i) => expenseRatioPct(mkt[i]!, net[i]!));
+  const net: number[] = [];
+  const mkt: number[] = [];
+  const ratio: (null | number)[] = [];
+  for (const label of labels) {
+    const bucket = buckets.get(label);
+    const netValue = round2(bucket?.net ?? 0);
+    const mktValue = round2(bucket?.mkt ?? 0);
+    net.push(netValue);
+    mkt.push(mktValue);
+    ratio.push(expenseRatioPct(mktValue, netValue));
+  }
   return { labels, net, mkt, ratio };
 }
 
@@ -167,7 +180,7 @@ export function aggregateByWeekStart(
   net: number[];
   ratio: (null | number)[];
 } {
-  const buckets = new Map<string, { mkt: number; net: number; }>();
+  const buckets = new Map<string, { mkt: number; net: number }>();
   for (const r of sorted) {
     const dk = normalizeStatDateKey(r.statDate);
     if (!dk) continue;
@@ -178,8 +191,16 @@ export function aggregateByWeekStart(
     buckets.set(ws, b);
   }
   const labels = [...buckets.keys()].toSorted().slice(-maxWeeks);
-  const net = labels.map((k) => round2(buckets.get(k)!.net));
-  const mkt = labels.map((k) => round2(buckets.get(k)!.mkt));
-  const ratio = labels.map((_, i) => expenseRatioPct(mkt[i]!, net[i]!));
+  const net: number[] = [];
+  const mkt: number[] = [];
+  const ratio: (null | number)[] = [];
+  for (const label of labels) {
+    const bucket = buckets.get(label);
+    const netValue = round2(bucket?.net ?? 0);
+    const mktValue = round2(bucket?.mkt ?? 0);
+    net.push(netValue);
+    mkt.push(mktValue);
+    ratio.push(expenseRatioPct(mktValue, netValue));
+  }
   return { labels, net, mkt, ratio };
 }
