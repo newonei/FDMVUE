@@ -53,6 +53,7 @@ import EcShopDailySphDashboard from './ec-shop-daily-sph-dashboard.vue';
 import EcShopDailyTaobaoDashboard from './ec-shop-daily-taobao-dashboard.vue';
 import EcShopDailyXhsDashboard from './ec-shop-daily-xhs-dashboard.vue';
 import Form from './form.vue';
+import JdImportModal from './jd-import-modal.vue';
 
 defineOptions({ name: 'EcShopDailyPage' });
 
@@ -69,6 +70,9 @@ const [Detail, detailModalApi] = useVbenModal({
 });
 const [DouyinImportModalComp, douyinImportModalApi] = useVbenModal({
   connectedComponent: DouyinImportModal,
+});
+const [JdImportModalComp, jdImportModalApi] = useVbenModal({
+  connectedComponent: JdImportModal,
 });
 
 const fixedPlatformCode = computed(() =>
@@ -150,6 +154,10 @@ function handleCreate() {
 function handleImport() {
   if (fixedPlatformCode.value === 'DOUYIN') {
     douyinImportModalApi.open();
+    return;
+  }
+  if (fixedPlatformCode.value === 'JD') {
+    jdImportModalApi.open();
     return;
   }
   message.info(importPlaceholderText.value);
@@ -496,6 +504,7 @@ onBeforeUnmount(() => {
     <FormModal @success="handleRefresh" />
     <BrushModal @success="handleRefresh" />
     <DouyinImportModalComp @success="handleRefresh" />
+    <JdImportModalComp @success="handleRefresh" />
     <Detail />
 
     <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
