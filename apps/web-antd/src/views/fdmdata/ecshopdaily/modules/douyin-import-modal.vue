@@ -14,15 +14,14 @@ defineOptions({ name: 'EcShopDailyDouyinImportModal' });
 
 const emit = defineEmits(['success']);
 
-const shopName = ref('');
 const shopId = ref('');
 let selectedFile: File | null = null;
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
-    const name = shopName.value.trim();
-    if (!name) {
-      message.warning('请输入店铺名称');
+    const id = shopId.value.trim();
+    if (!id) {
+      message.warning('请输入店铺ID');
       return;
     }
     if (!selectedFile) {
@@ -31,11 +30,7 @@ const [Modal, modalApi] = useVbenModal({
     }
     modalApi.lock();
     try {
-      const res = await importDouyinEcShopDailyExcel(
-        selectedFile,
-        name,
-        shopId.value.trim(),
-      );
+      const res = await importDouyinEcShopDailyExcel(selectedFile, id);
       await modalApi.close();
       emit('success');
       message.success(
@@ -47,7 +42,6 @@ const [Modal, modalApi] = useVbenModal({
   },
   onOpenChange(isOpen: boolean) {
     if (!isOpen) {
-      shopName.value = '';
       shopId.value = '';
       selectedFile = null;
     }
@@ -64,16 +58,8 @@ function beforeUpload(file: FileType) {
   <Modal title="抖音 Excel 导入" class="w-[560px] max-w-[calc(100vw-2rem)]">
     <div class="space-y-3 px-1">
       <div>
-        <div class="mb-1 text-sm font-medium">店铺名称</div>
-        <Input
-          v-model:value="shopName"
-          allow-clear
-          placeholder="请输入店铺名称"
-        />
-      </div>
-      <div>
         <div class="mb-1 text-sm font-medium">店铺ID</div>
-        <Input v-model:value="shopId" allow-clear placeholder="可不填" />
+        <Input v-model:value="shopId" allow-clear placeholder="请输入店铺ID" />
       </div>
       <div>
         <div class="mb-1 text-sm font-medium">Excel 文件</div>

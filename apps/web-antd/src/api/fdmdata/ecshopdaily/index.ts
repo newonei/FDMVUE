@@ -281,15 +281,15 @@ export interface EcShopDailyTaobaoImportResult {
 /** 导入淘宝生意参谋 Excel（第 8 行标题、其后全部有效数据行） */
 export function importTaobaoEcShopDailyExcel(
   file: File,
-  shopName: string,
-  shopId?: string,
+  shopId: string,
+  shopName = '',
 ) {
   return requestClient.upload<EcShopDailyTaobaoImportResult>(
     '/fdmdata/ec-shop-daily/import-taobao-excel',
     {
       file,
+      shopId,
       shopName,
-      shopId: shopId ?? '',
     },
   );
 }
@@ -297,15 +297,15 @@ export function importTaobaoEcShopDailyExcel(
 /** 导入京东商智 Excel（第 1 行标题、其后全部有效数据行） */
 export function importJdEcShopDailyExcel(
   file: File,
-  shopName: string,
-  shopId?: string,
+  shopId: string,
+  shopName = '',
 ) {
   return requestClient.upload<EcShopDailyTaobaoImportResult>(
     '/fdmdata/ec-shop-daily/import-jd-excel',
     {
       file,
+      shopId,
       shopName,
-      shopId: shopId ?? '',
     },
   );
 }
@@ -313,15 +313,15 @@ export function importJdEcShopDailyExcel(
 /** 导入抖音电商经营数据 Excel（成交概览表第 2 行汇总数据） */
 export function importDouyinEcShopDailyExcel(
   file: File,
-  shopName: string,
-  shopId?: string,
+  shopId: string,
+  shopName = '',
 ) {
   return requestClient.upload<EcShopDailyTaobaoImportResult>(
     '/fdmdata/ec-shop-daily/import-douyin-excel',
     {
       file,
+      shopId,
       shopName,
-      shopId: shopId ?? '',
     },
   );
 }
