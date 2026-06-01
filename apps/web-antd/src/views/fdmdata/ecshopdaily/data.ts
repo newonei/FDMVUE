@@ -284,6 +284,12 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         detailField: 'promotion_red_packet_amount',
       },
       {
+        fieldName: 'rebateReturnAmount',
+        label: '反佣反货金',
+        kind: 'amount',
+        detailField: 'rebate_return_amount',
+      },
+      {
         fieldName: 'brushPrincipal',
         label: '刷单本金',
         kind: 'amount',
