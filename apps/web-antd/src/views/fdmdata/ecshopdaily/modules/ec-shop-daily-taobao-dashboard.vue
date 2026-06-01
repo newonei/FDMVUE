@@ -26,6 +26,7 @@ import dayjs from 'dayjs';
 
 import {
   getEcShopDailyPage,
+  getEcShopDailyPlatformDetailPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
 import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
@@ -79,6 +80,7 @@ interface PeriodBucket {
   netSales: number;
   paidAmount: number;
   realOrders: number;
+  buyers: number;
   refund: number;
 }
 
@@ -93,6 +95,35 @@ function asNumber(value: unknown): number {
   if (value === null || value === undefined || value === '') return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function stringKey(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function rowDetailKey(row: Partial<EcShopDailyRow>): string {
+  const dateKey = normalizeStatDateKey(row.statDate);
+  if (!dateKey) return '';
+  return [dateKey, stringKey(row.shopId), stringKey(row.shopName)].join('|');
+}
+
+function detailRowKey(row: Record<string, any>): string {
+  const dateKey = normalizeStatDateKey(row.statDate ?? row.stat_date);
+  if (!dateKey) return '';
+  return [
+    dateKey,
+    stringKey(row.shopId ?? row.shop_id),
+    stringKey(row.shopName ?? row.shop_name),
+  ].join('|');
+}
+
+function rowIdKey(id: unknown): string {
+  const value = stringKey(id);
+  return value ? `id:${value}` : '';
+}
+
+function isPddDashboard(): boolean {
+  return currentPlatformCode.value === 'PDD';
 }
 
 function realOrderCountOf(row: Partial<EcShopDailyRow>): number {
@@ -140,6 +171,7 @@ function newBucket(): PeriodBucket {
     netSales: 0,
     paidAmount: 0,
     realOrders: 0,
+    buyers: 0,
     refund: 0,
   };
 }
@@ -152,6 +184,7 @@ function addRow(bucket: PeriodBucket, row: EcShopDailyRow) {
   bucket.paidAmount = round2(bucket.paidAmount + asNumber(row.paidAmount));
   bucket.brush = round2(bucket.brush + asNumber(row.brushPrincipal));
   bucket.realOrders += realOrderCountOf(row);
+  bucket.buyers += Math.trunc(asNumber(row.buyerCount));
 }
 
 function aggregateByKey(
@@ -206,6 +239,22 @@ const rangeKpi = computed(() => {
   const realAov =
     bucket.realOrders > 0 ? round2(bucket.netSales / bucket.realOrders) : 0;
   return { ...bucket, promoRatio, realAov, refundRatio, roi };
+});
+
+const orderKpi = computed(() => {
+  if (isPddDashboard()) {
+    return {
+      description:
+        '买家数为当前筛选范围内支付买家数合计，用于观察成交用户规模。',
+      title: '买家数',
+      value: rangeKpi.value.buyers,
+    };
+  }
+  return {
+    description: '真实订单 = 支付订单数 - 刷单订单数，用于观察真实成交规模。',
+    title: '真实订单',
+    value: rangeKpi.value.realOrders,
+  };
 });
 
 const monthAgg = computed(() =>
@@ -585,6 +634,48 @@ function buildQueryPayload(): Record<string, unknown> {
   return params;
 }
 
+async function loadPddPromotionRedPackets(
+  base: Record<string, unknown>,
+): Promise<Map<string, number>> {
+  if (!isPddDashboard()) return new Map();
+  const res = await getEcShopDailyPlatformDetailPage({
+    ...base,
+    pageNo: 1,
+    pageSize: -1,
+    platformCode: currentPlatformCode.value,
+  } as any);
+  const map = new Map<string, number>();
+  for (const row of res.list ?? []) {
+    const amount = asNumber(
+      row.promotionRedPacketAmount ?? row.promotion_red_packet_amount,
+    );
+    if (amount === 0) continue;
+
+    const keys = [rowIdKey(row.dailyId ?? row.daily_id), detailRowKey(row)];
+    for (const key of keys) {
+      if (!key) continue;
+      map.set(key, round2((map.get(key) ?? 0) + amount));
+    }
+  }
+  return map;
+}
+
+function subtractPddPromotionRedPackets(
+  rows: EcShopDailyRow[],
+  promotionMap: Map<string, number>,
+): EcShopDailyRow[] {
+  if (!isPddDashboard() || promotionMap.size === 0) return rows;
+  return rows.map((row) => {
+    const promotion =
+      promotionMap.get(rowIdKey(row.id)) ?? promotionMap.get(rowDetailKey(row));
+    if (!promotion) return row;
+    return {
+      ...row,
+      marketingCost: round2(asNumber(row.marketingCost) - promotion),
+    };
+  });
+}
+
 async function loadRows() {
   loading.value = true;
   truncated.value = false;
@@ -592,6 +683,7 @@ async function loadRows() {
   try {
     const base = buildQueryPayload();
     const acc: EcShopDailyRow[] = [];
+    const promotionMapPromise = loadPddPromotionRedPackets(base);
     let pageNo = 1;
     let total = 0;
     while (pageNo <= MAX_PAGES) {
@@ -608,7 +700,10 @@ async function loadRows() {
       pageNo++;
     }
     if (pageNo >= MAX_PAGES && acc.length < total) truncated.value = true;
-    rawRows.value = acc;
+    rawRows.value = subtractPddPromotionRedPackets(
+      acc,
+      await promotionMapPromise,
+    );
   } finally {
     loading.value = false;
   }
@@ -752,16 +847,13 @@ void fetchShopNameOptions();
         <Card class="taobao-kpi taobao-kpi--orders h-full" size="small">
           <Tooltip
             :title="
-              metricTitle(
-                '真实订单 = 支付订单数 - 刷单订单数，用于观察真实成交规模。',
-                amountShort(rangeKpi.realOrders),
-              )
+              metricTitle(orderKpi.description, amountShort(orderKpi.value))
             "
           >
             <Statistic
-              title="真实订单"
+              :title="orderKpi.title"
               :precision="0"
-              :value="rangeKpi.realOrders"
+              :value="orderKpi.value"
             />
           </Tooltip>
         </Card>

@@ -25,10 +25,14 @@ export namespace FdmdataEcShopDailyApi {
     refundAmount?: number; // 退款金额
     netSalesAmount?: number; // 净销售额（服务端：金额计算基数 − 退款金额 − 刷单本金；淘宝基数为 GMV，创建/更新勿传）
     realNetSalesAmount?: number; // 真实净销售额（同净销售额）
+    visitorCount?: number; // 访客数
+    pageViewCount?: number; // 浏览量
     buyerCount?: number; // 成交买家数
     realBuyerCount?: number; // 真实成交买家数
     marketingCost?: number; // 营销花费
     remark?: string; // 备注
+    detailPayload?: Record<string, any>; // 平台明细字段
+    rawPayload?: any; // 平台原始数据
     createTime?: string;
   }
 
@@ -37,6 +41,12 @@ export namespace FdmdataEcShopDailyApi {
     platformCode?: string;
     tableName?: string;
     detail?: Record<string, any>;
+  }
+
+  export interface EcShopDailyShopOption {
+    label?: string;
+    shopId: string;
+    shopName: string;
   }
 
   export interface EcShopDailySummaryMetric {
@@ -142,6 +152,18 @@ export function getEcShopDailyShopNameOptions(
 ) {
   return requestClient.get<string[]>(
     '/fdmdata/ec-shop-daily/shop-name-options',
+    { params },
+  );
+}
+
+export type EcShopDailyShopOptionsParams = EcShopDailyShopNameOptionsParams;
+
+/** Query shop ID options from fdm_just_shop */
+export function getEcShopDailyShopOptions(
+  params: EcShopDailyShopOptionsParams = {},
+) {
+  return requestClient.get<FdmdataEcShopDailyApi.EcShopDailyShopOption[]>(
+    '/fdmdata/ec-shop-daily/shop-options',
     { params },
   );
 }

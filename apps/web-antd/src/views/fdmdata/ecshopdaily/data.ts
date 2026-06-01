@@ -65,9 +65,10 @@ export const EC_PLATFORM_SUGGESTIONS = [
   { value: 'SPH', label: '视频号' },
 ];
 
-const EC_PLATFORM_LABEL_MAP = new Map(
-  EC_PLATFORM_SUGGESTIONS.map((item) => [item.value, item.label] as const),
-);
+const EC_PLATFORM_LABEL_MAP = new Map([
+  ...EC_PLATFORM_SUGGESTIONS.map((item) => [item.value, item.label] as const),
+  ['TMALL', '淘宝'] as const,
+]);
 
 export function formatEcPlatformLabel(value: unknown): string {
   if (value === null || value === undefined || value === '') return '';
@@ -75,9 +76,27 @@ export function formatEcPlatformLabel(value: unknown): string {
   return EC_PLATFORM_LABEL_MAP.get(code) ?? code;
 }
 
+export function normalizeEcPlatformCode(raw: unknown): string | undefined {
+  const code = String(raw ?? '').trim();
+  return code ? code.toUpperCase() : undefined;
+}
+
 export interface EcShopDailyOption {
   label: string;
   value: string;
+}
+
+export interface EcShopDailyShopSelectOption extends EcShopDailyOption {
+  shopId: string;
+  shopName: string;
+}
+
+export interface EcShopDailyFormOptions {
+  fixedPlatform?: boolean;
+  onShopSearch?: (keyword: string) => void;
+  platformCode?: string;
+  shopOptions?: Ref<EcShopDailyShopSelectOption[]>;
+  shopOptionsLoading?: Ref<boolean>;
 }
 
 export interface EcShopDailyGridOptions {
@@ -99,6 +118,949 @@ export const EC_SHOP_DAILY_CREATE_DEFAULTS: Partial<FdmdataEcShopDailyApi.EcShop
     marketingCost: 0,
   };
 
+type EcShopDailyFormFieldKind = 'amount' | 'int' | 'percent' | 'text';
+
+interface EcShopDailyPlatformFormField {
+  detailField?: string;
+  fieldName: string;
+  kind: EcShopDailyFormFieldKind;
+  label: string;
+  placeholder?: string;
+  precision?: number;
+  required?: boolean;
+}
+
+interface EcShopDailyPlatformFormProfile {
+  fields: EcShopDailyPlatformFormField[];
+  importTemplate: string;
+  label: string;
+}
+
+const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
+  string,
+  EcShopDailyPlatformFormProfile
+> = {
+  DOUYIN: {
+    label: '抖音',
+    importTemplate: '抖音电商经营数据 Excel',
+    fields: [
+      {
+        fieldName: 'gmvAmount',
+        label: '成交金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'transaction_amount',
+      },
+      {
+        fieldName: 'paidAmount',
+        label: '用户支付金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'paid_amount',
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '成交订单数',
+        kind: 'int',
+        required: true,
+        detailField: 'paid_order_count',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '成交人数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '退款金额(支付时间)',
+        kind: 'amount',
+        required: true,
+        detailField: 'refund_amount_payment_time',
+      },
+      {
+        fieldName: 'refundSuccessAmount',
+        label: '退款金额(退款时间)',
+        kind: 'amount',
+        detailField: 'refund_amount_refund_time',
+      },
+      {
+        fieldName: 'marketingCost',
+        label: '支出金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'expense_amount',
+      },
+      {
+        fieldName: 'adCost',
+        label: '投放消耗',
+        kind: 'amount',
+        detailField: 'ad_cost',
+      },
+      {
+        fieldName: 'platformCommission',
+        label: '平台佣金',
+        kind: 'amount',
+        detailField: 'platform_commission',
+      },
+      {
+        fieldName: 'talentCommission',
+        label: '达人佣金',
+        kind: 'amount',
+        detailField: 'talent_commission',
+      },
+      {
+        fieldName: 'brushPrincipal',
+        label: '刷单金额',
+        kind: 'amount',
+        detailField: 'brush_amount',
+      },
+      {
+        fieldName: 'brushOrderCount',
+        label: '刷单量',
+        kind: 'int',
+        detailField: 'brush_order_count',
+      },
+    ],
+  },
+  JD: {
+    label: '京东',
+    importTemplate: '京东商智 Excel（第 1 行标题）',
+    fields: [
+      {
+        fieldName: 'visitorCount',
+        label: '访客数',
+        kind: 'int',
+        detailField: 'visitor_count',
+      },
+      {
+        fieldName: 'pageViewCount',
+        label: '浏览量',
+        kind: 'int',
+        detailField: 'page_view_count',
+      },
+      {
+        fieldName: 'paidAmount',
+        label: '成交金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'paid_amount',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '成交客户数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '成交单量',
+        kind: 'int',
+        required: true,
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '退款金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'success_refund_amount',
+      },
+      {
+        fieldName: 'refundOrderCount',
+        label: '退款单量',
+        kind: 'int',
+      },
+      {
+        fieldName: 'marketingCost',
+        label: '营销费用',
+        kind: 'amount',
+        required: true,
+        detailField: 'marketing_cost',
+      },
+      {
+        fieldName: 'promotionRedPacketAmount',
+        label: '推广红包',
+        kind: 'amount',
+        detailField: 'promotion_red_packet_amount',
+      },
+      {
+        fieldName: 'brushPrincipal',
+        label: '刷单本金',
+        kind: 'amount',
+        detailField: 'brush_principal',
+      },
+      {
+        fieldName: 'brushOrderCount',
+        label: '刷单单量',
+        kind: 'int',
+        detailField: 'brush_order_count',
+      },
+      {
+        fieldName: 'brushCommission',
+        label: '刷单佣金',
+        kind: 'amount',
+        detailField: 'brush_commission',
+      },
+      {
+        fieldName: 'brushTotalCostWithPlatformFee',
+        label: '刷单总成本（加平台扣点）',
+        kind: 'amount',
+        detailField: 'brush_total_cost_with_platform_fee',
+      },
+    ],
+  },
+  PDD: {
+    label: '拼多多',
+    importTemplate: '拼多多经营数据 Excel',
+    fields: [
+      {
+        fieldName: 'visitorCount',
+        label: '访客数',
+        kind: 'int',
+        detailField: 'visitor_count',
+      },
+      {
+        fieldName: 'pageViewCount',
+        label: '浏览量',
+        kind: 'int',
+        detailField: 'page_view_count',
+      },
+      {
+        fieldName: 'paidAmount',
+        label: '支付金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'paid_amount',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '支付买家数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '支付订单数',
+        kind: 'int',
+        required: true,
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '成功退款金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'success_refund_amount',
+      },
+      {
+        fieldName: 'marketingCost',
+        label: '营销花费',
+        kind: 'amount',
+        required: true,
+        detailField: 'marketing_cost',
+      },
+      {
+        fieldName: 'promotionRedPacketAmount',
+        label: '推广红包金额',
+        kind: 'amount',
+        detailField: 'promotion_red_packet_amount',
+      },
+      {
+        fieldName: 'brushPrincipal',
+        label: '刷单本金',
+        kind: 'amount',
+        detailField: 'brush_principal',
+      },
+      {
+        fieldName: 'brushOrderCount',
+        label: '刷单单量',
+        kind: 'int',
+        detailField: 'brush_order_count',
+      },
+      {
+        fieldName: 'brushCommission',
+        label: '刷单佣金',
+        kind: 'amount',
+        detailField: 'brush_commission',
+      },
+      {
+        fieldName: 'brushTotalCostWithPlatformFeeShipping',
+        label: '刷单总成本（平台扣点+运费）',
+        kind: 'amount',
+        detailField: 'brush_total_cost_with_platform_fee_shipping',
+      },
+    ],
+  },
+  SPH: {
+    label: '视频号',
+    importTemplate: '视频号交易数据 Excel',
+    fields: [
+      {
+        fieldName: 'gmvAmount',
+        label: '成交金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'transaction_amount',
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '成交订单数',
+        kind: 'int',
+        required: true,
+        detailField: 'paid_order_count',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '成交人数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'orderAmount',
+        label: '下单金额',
+        kind: 'amount',
+        detailField: 'order_amount',
+      },
+      {
+        fieldName: 'orderCount',
+        label: '下单订单数',
+        kind: 'int',
+        required: true,
+        detailField: 'order_count',
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '退款金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'refund_amount',
+      },
+      {
+        fieldName: 'refundAmount2',
+        label: '成交退款金额',
+        kind: 'amount',
+        detailField: 'refund_amount_2',
+      },
+      {
+        fieldName: 'orderUserCount',
+        label: '下单人数',
+        kind: 'int',
+        detailField: 'order_user_count',
+      },
+      {
+        fieldName: 'transactionAmount2',
+        label: '实际成交金额',
+        kind: 'amount',
+        detailField: 'transaction_amount_2',
+      },
+    ],
+  },
+  TAOBAO: {
+    label: '淘宝',
+    importTemplate: '淘宝生意参谋 Excel（第 8 行标题）',
+    fields: [
+      {
+        fieldName: 'orderCount',
+        label: '订单笔数',
+        kind: 'int',
+        required: true,
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '真实订单数',
+        kind: 'int',
+        required: true,
+        detailField: 'metric_46482545',
+      },
+      {
+        fieldName: 'refundOrderCount',
+        label: '退款完成订单笔数',
+        kind: 'int',
+      },
+      {
+        fieldName: 'gmvAmount',
+        label: '成交额(GMV)',
+        kind: 'amount',
+        required: true,
+      },
+      {
+        fieldName: 'paidAmount',
+        label: '支付金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'paid_amount',
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '成功退款金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'success_refund_amount',
+      },
+      {
+        fieldName: 'marketingCost',
+        label: '营销费用总额',
+        kind: 'amount',
+        required: true,
+        detailField: 'marketing_cost',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '支付买家数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'visitorCount',
+        label: '访客数',
+        kind: 'int',
+        detailField: 'visitor_count',
+      },
+      {
+        fieldName: 'pageViewCount',
+        label: '浏览量',
+        kind: 'int',
+        detailField: 'page_view_count',
+      },
+      {
+        fieldName: 'paymentConversionRate',
+        label: '支付转化率',
+        kind: 'percent',
+        detailField: 'payment_conversion_rate',
+      },
+      {
+        fieldName: 'avgOrderValue',
+        label: '客单价',
+        kind: 'amount',
+        detailField: 'avg_order_value',
+      },
+      {
+        fieldName: 'bounceRate',
+        label: '跳失率',
+        kind: 'percent',
+        detailField: 'bounce_rate',
+      },
+      {
+        fieldName: 'avgStayDurationSec',
+        label: '平均停留时长',
+        kind: 'text',
+        detailField: 'avg_stay_duration',
+      },
+      {
+        fieldName: 'pageViewCountPerUser',
+        label: '人均浏览量',
+        kind: 'int',
+        detailField: 'page_view_count_2',
+      },
+      {
+        fieldName: 'uvValue',
+        label: 'UV 价值',
+        kind: 'amount',
+        detailField: 'uv_value',
+      },
+      {
+        fieldName: 'productVisitorCount',
+        label: '商品访客数',
+        kind: 'int',
+        detailField: 'product_visitor_count',
+      },
+      {
+        fieldName: 'productPageViewCount',
+        label: '商品浏览量',
+        kind: 'int',
+        detailField: 'product_page_view_count',
+      },
+      {
+        fieldName: 'paidProductCount',
+        label: '支付商品数',
+        kind: 'int',
+        detailField: 'paid_product_count',
+      },
+      {
+        fieldName: 'returningBuyerCount',
+        label: '支付老买家数',
+        kind: 'int',
+        detailField: 'returning_buyer_count',
+      },
+      {
+        fieldName: 'returningBuyerPaidAmount',
+        label: '老买家支付金额',
+        kind: 'amount',
+        detailField: 'returning_buyer_paid_amount',
+      },
+      {
+        fieldName: 'productFavoriteBuyerCount',
+        label: '商品收藏买家数',
+        kind: 'int',
+        detailField: 'product_favorite_buyer_count',
+      },
+      {
+        fieldName: 'cartAddUserCount',
+        label: '加购人数',
+        kind: 'int',
+        detailField: 'metric_bda235c9',
+      },
+      {
+        fieldName: 'cartAddRate',
+        label: '加购率',
+        kind: 'percent',
+        detailField: 'metric_10e8e840',
+      },
+      {
+        fieldName: 'refundRate',
+        label: '退款占比',
+        kind: 'percent',
+        detailField: 'metric_f45d7950',
+      },
+      {
+        fieldName: 'reviewCount',
+        label: '评价数',
+        kind: 'int',
+        detailField: 'review_count',
+      },
+      {
+        fieldName: 'positiveReviewCount',
+        label: '正面评价数',
+        kind: 'int',
+        detailField: 'review_count_2',
+      },
+      {
+        fieldName: 'negativeReviewCount',
+        label: '负面评价数',
+        kind: 'int',
+        detailField: 'review_count_3',
+      },
+      {
+        fieldName: 'imageReviewCount',
+        label: '有图评价数',
+        kind: 'int',
+        detailField: 'review_count_4',
+      },
+      {
+        fieldName: 'descMatchScore',
+        label: '描述相符评分',
+        kind: 'amount',
+        detailField: 'desc_match_score',
+      },
+      {
+        fieldName: 'logisticsServiceScore',
+        label: '物流服务评分',
+        kind: 'amount',
+        detailField: 'logistics_service_score',
+      },
+      {
+        fieldName: 'serviceAttitudeScore',
+        label: '服务态度评分',
+        kind: 'amount',
+        detailField: 'service_attitude_score',
+      },
+      {
+        fieldName: 'positiveReviewRate',
+        label: '好评率',
+        kind: 'percent',
+        detailField: 'metric_8f7e3a1a',
+      },
+      {
+        fieldName: 'negativeReviewRate',
+        label: '差评率',
+        kind: 'percent',
+        detailField: 'metric_302543c3',
+      },
+      {
+        fieldName: 'pickupPackageCount',
+        label: '揽收包裹数',
+        kind: 'int',
+        detailField: 'pickup_package_count',
+      },
+      {
+        fieldName: 'shippedPackageCount',
+        label: '发货包裹数',
+        kind: 'int',
+        detailField: 'shipped_package_count',
+      },
+      {
+        fieldName: 'deliveryPackageCount',
+        label: '派送包裹数',
+        kind: 'int',
+        detailField: 'delivery_package_count',
+      },
+      {
+        fieldName: 'signedPackageCount',
+        label: '签收成功包裹数',
+        kind: 'int',
+        detailField: 'signed_package_count',
+      },
+      {
+        fieldName: 'pickupRate',
+        label: '揽收率',
+        kind: 'percent',
+        detailField: 'metric_ce0485cc',
+      },
+      {
+        fieldName: 'taobaokeCommission',
+        label: '淘宝客佣金',
+        kind: 'amount',
+        detailField: 'taobaoke_commission',
+      },
+      {
+        fieldName: 'diamondDisplayCost',
+        label: '钻石展位消耗',
+        kind: 'amount',
+        detailField: 'diamond_display_cost',
+      },
+      {
+        fieldName: 'keywordAdCost',
+        label: '关键词推广消耗',
+        kind: 'amount',
+        detailField: 'keyword_ad_cost',
+      },
+      {
+        fieldName: 'audienceAdCost',
+        label: '人群推广消耗',
+        kind: 'amount',
+        detailField: 'audience_ad_cost',
+      },
+      {
+        fieldName: 'shortVideoAdCost',
+        label: '超级短视频',
+        kind: 'amount',
+        detailField: 'short_video_ad_cost',
+      },
+      {
+        fieldName: 'sitewideAdCost',
+        label: '全站推广',
+        kind: 'amount',
+        detailField: 'sitewide_ad_cost',
+      },
+      {
+        fieldName: 'wanxiangtaiCost',
+        label: '万相台消耗',
+        kind: 'amount',
+        detailField: 'wanxiangtai_cost',
+      },
+      {
+        fieldName: 'contentVisitorCount',
+        label: '内容引导访客数',
+        kind: 'int',
+        detailField: 'content_visitor_count',
+      },
+      {
+        fieldName: 'contentSeedTransactionAmount',
+        label: '内容引导种草成交金额',
+        kind: 'amount',
+        detailField: 'content_seed_transaction_amount',
+      },
+      {
+        fieldName: 'actualSalesAmount',
+        label: '实际销售额',
+        kind: 'amount',
+        detailField: 'actual_sales_amount',
+      },
+      {
+        fieldName: 'costRatio',
+        label: '花费占比',
+        kind: 'percent',
+        detailField: 'cost_ratio',
+      },
+      {
+        fieldName: 'parentRecord',
+        label: '父记录',
+        kind: 'text',
+        detailField: 'parent_record',
+      },
+      {
+        fieldName: 'brushPrincipal',
+        label: '刷单本金',
+        kind: 'amount',
+        detailField: 'brush_principal',
+      },
+      {
+        fieldName: 'brushOrderCount',
+        label: '刷单单量',
+        kind: 'int',
+        detailField: 'brush_order_count',
+      },
+      {
+        fieldName: 'brushCommission',
+        label: '刷单佣金',
+        kind: 'amount',
+        detailField: 'brush_commission',
+      },
+      {
+        fieldName: 'brushTotalCostWithPlatformFeeShipping',
+        label: '刷单总成本（平台扣点+运费）',
+        kind: 'amount',
+        detailField: 'brush_total_cost_with_platform_fee_shipping',
+      },
+      {
+        fieldName: 'brushOrderCount2',
+        label: '刷单单量（备用）',
+        kind: 'int',
+        detailField: 'brush_order_count_2',
+      },
+      {
+        fieldName: 'brushTotalCostWithPlatformFeeShipping2',
+        label: '刷单总成本（备用）',
+        kind: 'amount',
+        detailField: 'brush_total_cost_with_platform_fee_shipping_2',
+      },
+      {
+        fieldName: 'returningBuyerSalesRatio',
+        label: '老顾客销售占比',
+        kind: 'percent',
+        detailField: 'metric_a328447d',
+      },
+      {
+        fieldName: 'favoriteRate',
+        label: '收藏率',
+        kind: 'percent',
+        detailField: 'metric_240d5d4b',
+      },
+      {
+        fieldName: 'consultingUv',
+        label: '咨询人数',
+        kind: 'int',
+        detailField: 'consulting_uv',
+      },
+      {
+        fieldName: 'consultRate',
+        label: '咨询转化率',
+        kind: 'percent',
+        detailField: 'consult_rate',
+      },
+      {
+        fieldName: 'customerCount',
+        label: '客服人数',
+        kind: 'int',
+        detailField: 'customer_count',
+      },
+      {
+        fieldName: 'customerConvertRate',
+        label: '客服转化率',
+        kind: 'percent',
+        detailField: 'customer_convert_rate',
+      },
+      {
+        fieldName: 'shopCustomer',
+        label: '店铺粉丝',
+        kind: 'int',
+        detailField: 'shop_customer',
+      },
+      {
+        fieldName: 'collectProductCount',
+        label: '收藏商品数',
+        kind: 'int',
+        detailField: 'collect_product_count',
+      },
+      {
+        fieldName: 'releaseItemCount',
+        label: '商品数',
+        kind: 'int',
+        detailField: 'release_item_count',
+      },
+      {
+        fieldName: 'postVideoCheckCnt',
+        label: '审核视频数',
+        kind: 'int',
+        detailField: 'post_video_check_cnt',
+      },
+      {
+        fieldName: 'successRefundRate',
+        label: '退款率',
+        kind: 'percent',
+        detailField: 'success_refund_rate',
+      },
+      {
+        fieldName: 'orderRefundRate',
+        label: '订单退款率',
+        kind: 'percent',
+        detailField: 'order_refund_rate',
+      },
+      {
+        fieldName: 'realPayRefundRate',
+        label: '真实支付退款率',
+        kind: 'percent',
+        detailField: 'real_pay_refund_rate',
+      },
+      {
+        fieldName: 'gotInTime48hRate',
+        label: '48小时发货率',
+        kind: 'percent',
+        detailField: 'got_in_time_48h_rate',
+      },
+      {
+        fieldName: 'gotInTime24hRate',
+        label: '24小时发货率',
+        kind: 'percent',
+        detailField: 'got_in_time_24h_rate',
+      },
+      {
+        fieldName: 'replyAvgTime',
+        label: '平均响应时间',
+        kind: 'text',
+        detailField: 'reply_avg_time',
+      },
+      {
+        fieldName: 'avgSignTimeHh',
+        label: '平均签收时间',
+        kind: 'text',
+        detailField: 'avg_sign_time_hh',
+      },
+      {
+        fieldName: 'refundFinishDuration',
+        label: '平均退款完成时长',
+        kind: 'text',
+        detailField: 'refund_finish_duration',
+      },
+    ],
+  },
+  XHS: {
+    label: '小红书',
+    importTemplate: '小红书经营数据 Excel',
+    fields: [
+      {
+        fieldName: 'gmvAmount',
+        label: '实际成交金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'transaction_amount',
+      },
+      {
+        fieldName: 'paidAmount',
+        label: '支付金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'paid_amount',
+      },
+      {
+        fieldName: 'paidOrderCount',
+        label: '支付订单数',
+        kind: 'int',
+        required: true,
+        detailField: 'paid_order_count_2',
+      },
+      {
+        fieldName: 'paidItemCount',
+        label: '支付件数',
+        kind: 'int',
+        detailField: 'paid_item_count',
+      },
+      {
+        fieldName: 'buyerCount',
+        label: '支付买家数',
+        kind: 'int',
+        detailField: 'buyer_count',
+      },
+      {
+        fieldName: 'visitorCount',
+        label: '总访客数',
+        kind: 'int',
+        detailField: 'visitor_count',
+      },
+      {
+        fieldName: 'pageViewCount',
+        label: '总浏览量',
+        kind: 'int',
+        detailField: 'page_view_count',
+      },
+      {
+        fieldName: 'productVisitorCount',
+        label: '商品访客数',
+        kind: 'int',
+        detailField: 'product_visitor_count',
+      },
+      {
+        fieldName: 'productPageViewCount',
+        label: '商品浏览量',
+        kind: 'int',
+        detailField: 'product_page_view_count',
+      },
+      {
+        fieldName: 'cartAddUserCount',
+        label: '新增加购人数',
+        kind: 'int',
+        detailField: 'metric_e3ccf5de',
+      },
+      {
+        fieldName: 'cartAddItemCount',
+        label: '新增加购件数',
+        kind: 'int',
+        detailField: 'metric_0a4c5554',
+      },
+      {
+        fieldName: 'wishlistCount',
+        label: '新加入心愿单人数',
+        kind: 'int',
+        detailField: 'wishlist_count',
+      },
+      {
+        fieldName: 'refundAmount',
+        label: '退款金额',
+        kind: 'amount',
+        required: true,
+        detailField: 'refund_amount',
+      },
+      {
+        fieldName: 'marketingCost',
+        label: '推广花费',
+        kind: 'amount',
+        required: true,
+        detailField: 'promotion_cost',
+      },
+      {
+        fieldName: 'brushPrincipal',
+        label: '补单本金',
+        kind: 'amount',
+        detailField: 'brush_principal',
+      },
+      {
+        fieldName: 'brushOrderCount',
+        label: '补单订单量',
+        kind: 'int',
+        detailField: 'brush_order_count',
+      },
+      {
+        fieldName: 'brushCommission',
+        label: '补单佣金',
+        kind: 'amount',
+        detailField: 'brush_commission',
+      },
+    ],
+  },
+};
+
+export function getEcShopDailyPlatformFormProfile(platformCode?: string) {
+  const code = normalizeEcPlatformCode(platformCode);
+  if (code === 'TMALL') return EC_SHOP_DAILY_PLATFORM_FORM_PROFILES.TAOBAO;
+  return code ? EC_SHOP_DAILY_PLATFORM_FORM_PROFILES[code] : undefined;
+}
+
+export function getEcShopDailyImportPlaceholder(platformCode?: string): string {
+  const profile = getEcShopDailyPlatformFormProfile(platformCode);
+  if (!profile) return '请选择具体平台后再导入 Excel。';
+  return `${profile.label} Excel 导入入口已预留，后续会按「${profile.importTemplate}」字段模板接入导入实现。`;
+}
+
+export function getEcShopDailyCreateDefaults(
+  platformCode?: string,
+): Partial<FdmdataEcShopDailyApi.EcShopDaily> {
+  const code = normalizeEcPlatformCode(platformCode);
+  const profile = getEcShopDailyPlatformFormProfile(code);
+  if (!profile) {
+    return {
+      ...EC_SHOP_DAILY_CREATE_DEFAULTS,
+      platformCode: code,
+    };
+  }
+  return {
+    currency: 'CNY',
+    platformCode: code,
+    refundOrderCount: 0,
+    shopId: '',
+    shopName: '',
+    ...(code === 'SPH' ? { marketingCost: 0 } : {}),
+  };
+}
+
 function requiredInt(raw: unknown, fallback = 0): number {
   if (raw === '' || raw === null || raw === undefined) return fallback;
   const n = Number(raw);
@@ -111,33 +1073,196 @@ function requiredAmount(raw: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function hasValue(raw: unknown): boolean {
+  return raw !== '' && raw !== null && raw !== undefined;
+}
+
+function firstValue(raw: Record<string, any>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = raw[key];
+    if (hasValue(value)) return value;
+  }
+  return undefined;
+}
+
+function setIfBlank(raw: Record<string, any>, key: string, value: unknown) {
+  if (!hasValue(raw[key]) && hasValue(value)) {
+    raw[key] = value;
+  }
+}
+
+function optionalInt(raw: unknown): number | undefined {
+  if (!hasValue(raw)) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.trunc(n) : undefined;
+}
+
+function optionalAmount(raw: unknown): number | undefined {
+  if (!hasValue(raw)) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function sumAmountFields(raw: Record<string, any>, keys: string[]) {
+  let hasAny = false;
+  let total = 0;
+  for (const key of keys) {
+    const value = optionalAmount(raw[key]);
+    if (value === undefined) continue;
+    hasAny = true;
+    total += value;
+  }
+  return hasAny ? Number(total.toFixed(2)) : undefined;
+}
+
+function normalizeSubmitRaw(
+  raw: Record<string, any>,
+  fixedPlatformCode?: string,
+) {
+  const normalized: Record<string, any> = { ...raw };
+  const platformCode = normalizeEcPlatformCode(
+    normalized.platformCode ?? fixedPlatformCode,
+  );
+  normalized.platformCode = platformCode ?? '';
+
+  setIfBlank(normalized, 'gmvAmount', firstValue(normalized, 'paidAmount'));
+  setIfBlank(normalized, 'paidAmount', firstValue(normalized, 'gmvAmount'));
+  setIfBlank(
+    normalized,
+    'orderCount',
+    firstValue(normalized, 'paidOrderCount'),
+  );
+  setIfBlank(
+    normalized,
+    'paidOrderCount',
+    firstValue(normalized, 'orderCount'),
+  );
+  setIfBlank(normalized, 'refundOrderCount', 0);
+
+  switch (platformCode) {
+    case 'DOUYIN': {
+      setIfBlank(normalized, 'marketingCost', normalized.expenseAmount);
+      setIfBlank(
+        normalized,
+        'marketingCost',
+        sumAmountFields(normalized, [
+          'adCost',
+          'platformCommission',
+          'talentCommission',
+        ]),
+      );
+      setIfBlank(normalized, 'refundAmount', normalized.refundSuccessAmount);
+      break;
+    }
+    case 'SPH': {
+      setIfBlank(normalized, 'paidAmount', normalized.gmvAmount);
+      setIfBlank(normalized, 'buyerCount', normalized.orderUserCount);
+      break;
+    }
+    case 'TAOBAO':
+    case 'TMALL': {
+      setIfBlank(
+        normalized,
+        'marketingCost',
+        sumAmountFields(normalized, [
+          'taobaokeCommission',
+          'diamondDisplayCost',
+          'keywordAdCost',
+          'audienceAdCost',
+          'shortVideoAdCost',
+          'sitewideAdCost',
+          'wanxiangtaiCost',
+        ]),
+      );
+      break;
+    }
+    // No default
+  }
+  setIfBlank(normalized, 'refundAmount', 0);
+  setIfBlank(normalized, 'marketingCost', 0);
+
+  return normalized;
+}
+
+function buildPlatformDetailPayload(
+  raw: Record<string, any>,
+  platformCode?: string,
+) {
+  const profile = getEcShopDailyPlatformFormProfile(platformCode);
+  const detailPayload: Record<string, unknown> = {};
+  for (const field of profile?.fields ?? []) {
+    if (!field.detailField) continue;
+    const value = raw[field.fieldName];
+    if (hasValue(value)) {
+      detailPayload[field.detailField] = value;
+    }
+  }
+  return detailPayload;
+}
+
+export function mapEcShopDailyPlatformDetailToFormValues(
+  platformCode: string | undefined,
+  detail: Record<string, any> | undefined,
+) {
+  const profile = getEcShopDailyPlatformFormProfile(platformCode);
+  const values: Record<string, unknown> = {};
+  if (!profile || !detail) return values;
+  for (const field of profile.fields) {
+    if (!field.detailField) continue;
+    const value = detail[field.detailField];
+    if (hasValue(value)) {
+      values[field.fieldName] = value;
+    }
+  }
+  return values;
+}
+
 export function buildEcShopDailySubmitPayload(
   raw: Record<string, any>,
+  fixedPlatformCode?: string,
 ): FdmdataEcShopDailyApi.EcShopDaily {
+  const normalized = normalizeSubmitRaw(raw, fixedPlatformCode);
   const payload: Record<string, any> = {
-    id: raw.id,
-    statDate: normalizeStatDateForForm(raw.statDate),
-    platformCode: String(raw.platformCode ?? '').trim(),
-    shopId: String(raw.shopId ?? '').trim(),
-    shopName: String(raw.shopName ?? '').trim(),
-    currency: String(raw.currency ?? 'CNY'),
-    orderCount: requiredInt(raw.orderCount),
-    paidOrderCount: requiredInt(raw.paidOrderCount),
-    refundOrderCount: requiredInt(raw.refundOrderCount),
-    gmvAmount: requiredAmount(raw.gmvAmount),
-    paidAmount: requiredAmount(raw.paidAmount),
-    refundAmount: requiredAmount(raw.refundAmount),
-    marketingCost: requiredAmount(raw.marketingCost),
-    buyerCount: raw.buyerCount === '' ? null : requiredInt(raw.buyerCount, 0),
-    remark: String(raw.remark ?? '').trim() || undefined,
+    id: normalized.id,
+    statDate: normalizeStatDateForForm(normalized.statDate),
+    platformCode: String(normalized.platformCode ?? '').trim(),
+    shopId: String(normalized.shopId ?? '').trim(),
+    shopName: String(normalized.shopName ?? '').trim(),
+    currency: String(normalized.currency ?? 'CNY'),
+    orderCount: requiredInt(normalized.orderCount),
+    paidOrderCount: requiredInt(normalized.paidOrderCount),
+    refundOrderCount: requiredInt(normalized.refundOrderCount),
+    gmvAmount: requiredAmount(normalized.gmvAmount),
+    paidAmount: requiredAmount(normalized.paidAmount),
+    refundAmount: requiredAmount(normalized.refundAmount),
+    marketingCost: requiredAmount(normalized.marketingCost),
+    remark: String(normalized.remark ?? '').trim() || undefined,
   };
+  const buyerCount = optionalInt(normalized.buyerCount);
+  const visitorCount = optionalInt(normalized.visitorCount);
+  const pageViewCount = optionalInt(normalized.pageViewCount);
+  const brushOrderCount = optionalInt(normalized.brushOrderCount);
+  const brushPrincipal = optionalAmount(normalized.brushPrincipal);
+  if (buyerCount !== undefined) payload.buyerCount = buyerCount;
+  if (visitorCount !== undefined) payload.visitorCount = visitorCount;
+  if (pageViewCount !== undefined) payload.pageViewCount = pageViewCount;
+  if (brushOrderCount !== undefined) payload.brushOrderCount = brushOrderCount;
+  if (brushPrincipal !== undefined) payload.brushPrincipal = brushPrincipal;
+
+  const detailPayload = buildPlatformDetailPayload(
+    normalized,
+    payload.platformCode,
+  );
+  if (Object.keys(detailPayload).length > 0) {
+    payload.detailPayload = detailPayload;
+  }
   return payload as FdmdataEcShopDailyApi.EcShopDaily;
 }
 
 // ─── 表单 schema helpers ─────────────────────────────────────────────────────
 
 function formInt(
-  fieldName: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
+  fieldName: string,
   label: string,
   required = false,
 ): VbenFormSchema {
@@ -156,7 +1281,7 @@ function formInt(
 }
 
 function formAmount(
-  fieldName: keyof FdmdataEcShopDailyApi.EcShopDaily & string,
+  fieldName: string,
   label: string,
   required = false,
   precision = 2,
@@ -175,8 +1300,93 @@ function formAmount(
   };
 }
 
+function formText(
+  fieldName: string,
+  label: string,
+  required = false,
+): VbenFormSchema {
+  return {
+    fieldName,
+    label,
+    rules: required ? 'required' : undefined,
+    component: 'Input',
+    componentProps: {
+      allowClear: true,
+      class: 'w-full',
+      maxlength: 128,
+      placeholder: required ? `请输入${label}` : '可选',
+    },
+  };
+}
+
+function platformFormFieldSchema(
+  field: EcShopDailyPlatformFormField,
+): VbenFormSchema {
+  if (field.kind === 'int') {
+    return formInt(field.fieldName, field.label, field.required);
+  }
+  if (field.kind === 'text') {
+    return formText(field.fieldName, field.label, field.required);
+  }
+  return formAmount(
+    field.fieldName,
+    field.label,
+    field.required,
+    field.precision ?? (field.kind === 'percent' ? 4 : 2),
+  );
+}
+
+function netSalesPreviewSchema(): VbenFormSchema {
+  return {
+    fieldName: 'netSalesAmount',
+    label: '净销售额',
+    component: 'InputNumber',
+    componentProps: {
+      class: 'w-full',
+      disabled: true,
+      precision: 2,
+      placeholder: '保存时自动计算',
+    },
+    dependencies: {
+      triggerFields: [
+        'platformCode',
+        'gmvAmount',
+        'paidAmount',
+        'refundAmount',
+        'brushPrincipal',
+      ],
+      componentProps: (values) => {
+        const platformCode = String(values.platformCode ?? '')
+          .trim()
+          .toUpperCase();
+        const isTaobao = platformCode === 'TAOBAO' || platformCode === 'TMALL';
+        const amountBase = Number(
+          (isTaobao
+            ? (values.gmvAmount ?? values.paidAmount)
+            : (values.paidAmount ?? values.gmvAmount)) ?? 0,
+        );
+        const refund = Number(values.refundAmount ?? 0);
+        const brushPrincipal = Number(values.brushPrincipal ?? 0);
+        const net = Number((amountBase - refund - brushPrincipal).toFixed(2));
+        return {
+          class: 'w-full',
+          disabled: true,
+          precision: 2,
+          value: Number.isFinite(net) ? net : undefined,
+        };
+      },
+    },
+  };
+}
+
 /** 新增/修改表单 */
-export function useFormSchema(): VbenFormSchema[] {
+export function useFormSchema(
+  options: EcShopDailyFormOptions = {},
+): VbenFormSchema[] {
+  const platformCode = normalizeEcPlatformCode(options.platformCode);
+  const platformProfile = getEcShopDailyPlatformFormProfile(platformCode);
+  const isFixedPlatform = !!platformCode && !!options.fixedPlatform;
+  const isPddPlatform = platformCode === 'PDD';
   const fullWidth = 'col-span-2 min-w-0';
   const section = (key: string, title: string): VbenFormSchema => ({
     fieldName: `_divider_${key}`,
@@ -187,8 +1397,44 @@ export function useFormSchema(): VbenFormSchema[] {
     renderComponentContent: () => ({ default: () => title }),
     componentProps: { orientation: 'left', plain: true },
   });
+  const getPddShopIdSelectProps = (
+    _values: Record<string, unknown>,
+    formApi: {
+      setValues?: (
+        values: Record<string, unknown>,
+        shouldValidate?: boolean,
+      ) => Promise<void> | void;
+    },
+  ) => ({
+    allowClear: true,
+    class: 'w-full',
+    filterOption: false,
+    loading: options.shopOptionsLoading?.value ?? false,
+    onClear: () => {
+      void formApi.setValues?.({ shopId: '', shopName: '' }, false);
+      options.onShopSearch?.('');
+    },
+    onFocus: () => options.onShopSearch?.(''),
+    onSearch: options.onShopSearch,
+    onSelect: (value: unknown, option: any) => {
+      const shopId = String(value ?? '').trim();
+      const selected = options.shopOptions?.value.find(
+        (item) => item.value === shopId,
+      );
+      void formApi.setValues?.(
+        {
+          shopId,
+          shopName: option?.shopName ?? selected?.shopName ?? '',
+        },
+        false,
+      );
+    },
+    options: options.shopOptions?.value ?? [],
+    placeholder: '请选择店铺',
+    showSearch: true,
+  });
 
-  return [
+  const schema: VbenFormSchema[] = [
     { fieldName: 'id', component: 'Input', formItemClass: 'hidden' },
 
     section('basic', '基本信息'),
@@ -210,7 +1456,8 @@ export function useFormSchema(): VbenFormSchema[] {
       rules: 'required',
       component: 'Select',
       componentProps: {
-        allowClear: true,
+        allowClear: !isFixedPlatform,
+        disabled: isFixedPlatform,
         showSearch: true,
         optionFilterProp: 'label',
         placeholder: '请选择平台',
@@ -220,12 +1467,15 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'shopId',
       label: '店铺 ID',
-      component: 'Input',
-      componentProps: {
-        allowClear: true,
-        placeholder: '无则留空',
-        maxlength: 64,
-      },
+      rules: isPddPlatform ? 'selectRequired' : undefined,
+      component: isPddPlatform ? 'Select' : 'Input',
+      componentProps: isPddPlatform
+        ? getPddShopIdSelectProps
+        : {
+            allowClear: true,
+            placeholder: '无则留空',
+            maxlength: 64,
+          },
     },
     {
       fieldName: 'shopName',
@@ -233,7 +1483,10 @@ export function useFormSchema(): VbenFormSchema[] {
       component: 'Input',
       componentProps: {
         allowClear: true,
-        placeholder: 'shop_id 为空时用于区分多店',
+        disabled: isPddPlatform,
+        placeholder: isPddPlatform
+          ? '选择店铺后自动带出'
+          : 'shop_id 为空时用于区分多店',
         maxlength: 128,
       },
     },
@@ -247,70 +1500,44 @@ export function useFormSchema(): VbenFormSchema[] {
         options: [{ label: 'CNY 人民币', value: 'CNY' }],
       },
     },
-
-    section('sales', '订单与金额'),
-    formInt('orderCount', '订单笔数', true),
-    formInt('paidOrderCount', '已支付订单笔数', true),
-    formInt('refundOrderCount', '退款完成订单笔数', true),
-    formAmount('gmvAmount', '成交额', true),
-    formAmount('paidAmount', '已支付金额', true),
-    formAmount('refundAmount', '退款金额', true),
-    {
-      fieldName: 'netSalesAmount',
-      label: '净销售额',
-      component: 'InputNumber',
-      componentProps: {
-        class: 'w-full',
-        disabled: true,
-        precision: 2,
-        placeholder: '保存时自动计算',
-      },
-      dependencies: {
-        triggerFields: [
-          'platformCode',
-          'gmvAmount',
-          'paidAmount',
-          'refundAmount',
-          'brushPrincipal',
-        ],
-        componentProps: (values) => {
-          const platformCode = String(values.platformCode ?? '')
-            .trim()
-            .toUpperCase();
-          const isTaobao =
-            platformCode === 'TAOBAO' || platformCode === 'TMALL';
-          const amountBase = Number(
-            (isTaobao ? values.gmvAmount : values.paidAmount) ?? 0,
-          );
-          const refund = Number(values.refundAmount ?? 0);
-          const brushPrincipal = Number(values.brushPrincipal ?? 0);
-          const net = Number((amountBase - refund - brushPrincipal).toFixed(2));
-          return {
-            class: 'w-full',
-            disabled: true,
-            precision: 2,
-            value: Number.isFinite(net) ? net : undefined,
-          };
-        },
-      },
-    },
-    formAmount('marketingCost', '营销花费', true),
-    formInt('buyerCount', '成交买家数'),
-
-    section('remark', '备注'),
-    {
-      fieldName: 'remark',
-      label: '备注',
-      formItemClass: fullWidth,
-      component: 'Textarea',
-      componentProps: {
-        maxlength: 512,
-        rows: 3,
-        showCount: true,
-        placeholder: '可选',
-      },
-    },
   ];
+
+  if (platformProfile) {
+    schema.push(
+      section('platform', `${platformProfile.label}新增字段`),
+      ...platformProfile.fields.map((field) => platformFormFieldSchema(field)),
+      section('calculated', '系统计算'),
+      netSalesPreviewSchema(),
+    );
+  } else {
+    schema.push(
+      section('sales', '订单与金额'),
+      formInt('orderCount', '订单笔数', true),
+      formInt('paidOrderCount', '已支付订单笔数', true),
+      formInt('refundOrderCount', '退款完成订单笔数', true),
+      formAmount('gmvAmount', '成交额', true),
+      formAmount('paidAmount', '已支付金额', true),
+      formAmount('refundAmount', '退款金额', true),
+      netSalesPreviewSchema(),
+      formAmount('marketingCost', '营销花费', true),
+      formInt('buyerCount', '成交买家数'),
+    );
+  }
+
+  schema.push(section('remark', '备注'), {
+    fieldName: 'remark',
+    label: '备注',
+    formItemClass: fullWidth,
+    component: 'Textarea',
+    componentProps: {
+      maxlength: 512,
+      rows: 3,
+      showCount: true,
+      placeholder: '可选',
+    },
+  });
+
+  return schema;
 }
 
 /** 列表检索表单 */

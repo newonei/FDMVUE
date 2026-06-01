@@ -19,6 +19,7 @@ import {
 } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button, message, Segmented } from 'ant-design-vue';
@@ -38,6 +39,8 @@ import { $t } from '#/locales';
 import {
   DETAIL_FIELD_PREFIX,
   formatEcPlatformLabel,
+  getEcShopDailyImportPlaceholder,
+  normalizeEcPlatformCode,
   useGridColumns,
   useGridFormSchema,
 } from '../data';
@@ -64,13 +67,8 @@ const [Detail, detailModalApi] = useVbenModal({
   connectedComponent: DetailModal,
 });
 
-function normalizePlatformCode(raw: unknown): string | undefined {
-  const code = String(raw ?? '').trim();
-  return code ? code.toUpperCase() : undefined;
-}
-
 const fixedPlatformCode = computed(() =>
-  normalizePlatformCode(props.platformCode),
+  normalizeEcPlatformCode(props.platformCode),
 );
 const isFixedPlatformPage = computed(() => !!fixedPlatformCode.value);
 const fixedPlatformLabel = computed(() =>
@@ -93,6 +91,15 @@ const tableTitle = computed(() =>
   fixedPlatformCode.value
     ? `${fixedPlatformLabel.value}店铺日汇总`
     : '全部平台日汇总',
+);
+const createButtonText = computed(() =>
+  fixedPlatformCode.value ? `新增${fixedPlatformLabel.value}` : '新增',
+);
+const importButtonText = computed(() =>
+  fixedPlatformCode.value ? `${fixedPlatformLabel.value}导入` : '导入',
+);
+const importPlaceholderText = computed(() =>
+  getEcShopDailyImportPlaceholder(fixedPlatformCode.value),
 );
 
 const dashboardRef = ref<null | { reload?: () => Promise<void> | void }>(null);
@@ -133,7 +140,11 @@ function handleRowCheckboxChange({
 }
 
 function handleCreate() {
-  formModalApi.setData(null).open();
+  formModalApi.setData({ platformCode: fixedPlatformCode.value }).open();
+}
+
+function handleImportPlaceholder() {
+  message.info(importPlaceholderText.value);
 }
 
 function handleEdit(row: FdmdataEcShopDailyApi.EcShopDaily) {
@@ -489,11 +500,23 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex shrink-0 items-center gap-2">
         <Button
+          v-if="activeTab === 'table' && fixedPlatformCode"
+          @click="handleImportPlaceholder"
+        >
+          <template #icon>
+            <IconifyIcon icon="lucide:upload" />
+          </template>
+          {{ importButtonText }}
+        </Button>
+        <Button
           v-if="activeTab === 'table'"
           type="primary"
           @click="handleCreate"
         >
-          新增
+          <template #icon>
+            <IconifyIcon icon="lucide:plus" />
+          </template>
+          {{ createButtonText }}
         </Button>
         <Segmented
           v-model:value="activeTab"
@@ -537,6 +560,9 @@ onBeforeUnmount(() => {
           size="small"
           @click="handleExport"
         >
+          <template #icon>
+            <IconifyIcon icon="lucide:download" />
+          </template>
           导出 Excel
         </Button>
         <div
