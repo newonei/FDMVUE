@@ -170,9 +170,6 @@ function divPercent(numerator: number, denominator: number): null | number {
 
 function amountText(value: unknown): string {
   const num = round2(value);
-  const abs = Math.abs(num);
-  if (abs >= 100_000_000) return `${round2(num / 100_000_000)}亿`;
-  if (abs >= 10_000) return `${round2(num / 10_000)}万`;
   return num.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 

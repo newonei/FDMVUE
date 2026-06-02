@@ -96,10 +96,7 @@ function getNumber(row: DetailRow, ...keys: string[]): number {
 
 function amountShort(value: unknown): string {
   const n = round2(value);
-  const abs = Math.abs(n);
-  if (abs >= 100_000_000) return `${round2(n / 100_000_000)}亿`;
-  if (abs >= 10_000) return `${round2(n / 10_000)}万`;
-  return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+  return n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
 function kpiMoney(value: unknown): string {
