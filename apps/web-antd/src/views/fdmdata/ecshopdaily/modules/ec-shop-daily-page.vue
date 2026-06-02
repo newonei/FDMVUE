@@ -87,7 +87,7 @@ const usePlatformAnalysisDashboard = computed(() =>
 );
 
 function usesGmvCalculationBase(platformCode: string | undefined): boolean {
-  return ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode ?? '');
+  return ['DOUYIN', 'TAOBAO', 'TMALL', 'XHS'].includes(platformCode ?? '');
 }
 
 const pageTitle = computed(() =>

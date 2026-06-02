@@ -87,7 +87,7 @@ const METRIC_DESCRIPTIONS: Record<string, string> = {
     '刷单占比 = 刷单金额 / 实际销售额，用于识别刷单对经营口径的影响。',
   costRatio: '费比 = 营销费用 / 实际销售额，越高说明获客成本压力越大。',
   refundRatio:
-    '退款率：淘宝/抖音按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察退款风险。',
+    '退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察退款风险。',
   roi: '投产比 = 实际销售额 / 营销费用，越高说明投放效率越好。',
   salesAmount: '实际销售额使用主表真实净销售额，已剔除刷单金额影响。',
 };
@@ -97,7 +97,7 @@ const MATRIX_VIEW_DESCRIPTIONS: Record<string, string> = {
   MARKETING: '营销费 = 各平台推广投放费用汇总。',
   ORDER: '订单 = 真实订单数 = 已支付订单数 - 刷单单量。',
   REFUND:
-    '退款 = 退款金额；退款率：淘宝/抖音按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额。',
+    '退款 = 退款金额；退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额。',
   SALES: METRIC_DESCRIPTIONS.salesAmount,
   SUMMARY: '综合展示实际销售额、营销费用、费比三项核心指标。',
 };
@@ -377,7 +377,7 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
     metric.paidAmount = round2(n(metric.paidAmount) + n(item.paidAmount));
     metric.refundBaseAmount = round2(
       n(metric.refundBaseAmount) +
-        (['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode)
+        (['DOUYIN', 'TAOBAO', 'TMALL', 'XHS'].includes(platformCode)
           ? n(item.gmvAmount)
           : n(item.paidAmount)),
     );

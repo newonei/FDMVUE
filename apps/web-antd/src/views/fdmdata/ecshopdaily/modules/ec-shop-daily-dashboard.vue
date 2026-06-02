@@ -109,7 +109,7 @@ function platformCodeOf(row: Partial<EcShopDailyRow>): string {
 }
 
 function usesGmvCalculationBase(platformCode: string): boolean {
-  return ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode);
+  return ['DOUYIN', 'TAOBAO', 'TMALL', 'XHS'].includes(platformCode);
 }
 
 function shopKeyOf(row: Partial<EcShopDailyRow>): string {
@@ -667,7 +667,7 @@ const insightItems = computed(() => [
   },
   {
     description:
-      '退款率：淘宝/抖音按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察售后退款压力。',
+      '退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察售后退款压力。',
     label: '退款率',
     tone: metricTone(kpi.value.refundRatio, 15, 25),
     value: ratioText(kpi.value.refundRatio),
@@ -681,7 +681,7 @@ const insightItems = computed(() => [
   },
   {
     description:
-      '刷单金额占比：淘宝/抖音按刷单本金 / 成交额(GMV)，其他平台按刷单本金 / 支付金额，用于识别非真实成交占用比例。',
+      '刷单金额占比：淘宝/抖音/小红书按刷单本金 / 成交额(GMV)，其他平台按刷单本金 / 支付金额，用于识别非真实成交占用比例。',
     label: '刷单金额占比',
     tone: metricTone(kpi.value.brushRatio, 3, 8),
     value: ratioText(kpi.value.brushRatio),
@@ -970,7 +970,9 @@ void fetchShopNameOptions();
       </div>
 
       <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <span class="text-sm font-semibold text-foreground">全平台核心指标</span>
+        <span class="text-sm font-semibold text-foreground"
+          >全平台核心指标</span
+        >
         <span class="text-xs text-muted-foreground">{{ dataSummary }}</span>
       </div>
 

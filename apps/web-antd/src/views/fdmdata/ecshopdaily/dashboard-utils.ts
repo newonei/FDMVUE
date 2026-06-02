@@ -17,7 +17,7 @@ export function realNetSalesAmountOf(r: Partial<EcShopDailyRow>): number {
   const platformCode = String(r.platformCode ?? '')
     .trim()
     .toUpperCase();
-  const amountBase = ['DOUYIN', 'TAOBAO', 'TMALL'].includes(platformCode)
+  const amountBase = ['DOUYIN', 'TAOBAO', 'TMALL', 'XHS'].includes(platformCode)
     ? n(r.gmvAmount)
     : n(r.paidAmount);
   return round2(amountBase - n(r.refundAmount) - n(r.brushPrincipal));
