@@ -1191,13 +1191,12 @@ void fetchShopNameOptions();
 }
 
 .kpi-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 38px;
+  overflow-wrap: anywhere;
+  font-size: clamp(24px, 2vw, 34px);
   font-weight: 760;
-  line-height: 1.1;
+  line-height: 1.15;
   color: hsl(var(--foreground));
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .kpi-card--sales .kpi-value {

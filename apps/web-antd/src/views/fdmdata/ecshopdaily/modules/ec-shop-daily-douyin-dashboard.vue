@@ -1047,14 +1047,13 @@ void fetchShopNameOptions();
 }
 
 .douyin-kpi-value {
-  overflow: hidden;
-  margin-top: 28px;
-  font-size: clamp(30px, 3vw, 48px);
+  margin-top: 22px;
+  overflow-wrap: anywhere;
+  font-size: clamp(24px, 2vw, 34px);
   font-weight: 850;
   letter-spacing: 0;
-  line-height: 1.05;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.15;
+  white-space: normal;
 }
 
 .douyin-kpi--sales .douyin-kpi-value {
