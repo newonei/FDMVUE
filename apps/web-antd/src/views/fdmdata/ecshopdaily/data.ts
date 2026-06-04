@@ -1713,6 +1713,7 @@ const PLATFORM_DETAIL_COLUMNS: Record<string, Array<[string, string]>> = {
     ['success_refund_amount', '成功退款金额'],
     ['marketing_cost', '营销花费'],
     ['promotion_red_packet_amount', '推广红包'],
+    ['rebate_return_amount', '反佣反货金'],
     ['brush_principal', '刷单本金'],
     ['brush_order_count', '刷单单量'],
     ['brush_commission', '刷单佣金'],
@@ -1856,7 +1857,7 @@ function usePlatformDetailColumns(platformCode?: string) {
     title: `明细·${title}`,
     minWidth: 120,
     align: 'right' as const,
-    visible: false,
+    visible: column === 'rebate_return_amount',
     formatter: formatDetailValue,
   }));
 }
