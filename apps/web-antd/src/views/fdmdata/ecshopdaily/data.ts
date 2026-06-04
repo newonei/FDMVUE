@@ -159,6 +159,12 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         detailField: 'paid_amount',
       },
       {
+        fieldName: 'orderAmount',
+        label: '下单金额',
+        kind: 'amount',
+        detailField: 'order_amount',
+      },
+      {
         fieldName: 'paidOrderCount',
         label: '成交订单数',
         kind: 'int',
@@ -516,6 +522,12 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         detailField: 'buyer_count',
       },
       {
+        fieldName: 'orderUserCount',
+        label: '下单人数',
+        kind: 'int',
+        detailField: 'order_user_count',
+      },
+      {
         fieldName: 'visitorCount',
         label: '访客数',
         kind: 'int',
@@ -580,6 +592,12 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         label: '支付商品数',
         kind: 'int',
         detailField: 'paid_product_count',
+      },
+      {
+        fieldName: 'paidItemCount',
+        label: '支付件数',
+        kind: 'int',
+        detailField: 'paid_item_count',
       },
       {
         fieldName: 'returningBuyerCount',
@@ -738,12 +756,6 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         detailField: 'sitewide_ad_cost',
       },
       {
-        fieldName: 'wanxiangtaiCost',
-        label: '万相台消耗',
-        kind: 'amount',
-        detailField: 'wanxiangtai_cost',
-      },
-      {
         fieldName: 'contentVisitorCount',
         label: '内容引导访客数',
         kind: 'int',
@@ -796,18 +808,6 @@ const EC_SHOP_DAILY_PLATFORM_FORM_PROFILES: Record<
         label: '刷单总成本（平台扣点+运费）',
         kind: 'amount',
         detailField: 'brush_total_cost_with_platform_fee_shipping',
-      },
-      {
-        fieldName: 'brushOrderCount2',
-        label: '刷单单量（备用）',
-        kind: 'int',
-        detailField: 'brush_order_count_2',
-      },
-      {
-        fieldName: 'brushTotalCostWithPlatformFeeShipping2',
-        label: '刷单总成本（备用）',
-        kind: 'amount',
-        detailField: 'brush_total_cost_with_platform_fee_shipping_2',
       },
       {
         fieldName: 'returningBuyerSalesRatio',
@@ -1177,7 +1177,6 @@ function normalizeSubmitRaw(
           'audienceAdCost',
           'shortVideoAdCost',
           'sitewideAdCost',
-          'wanxiangtaiCost',
         ]),
       );
       break;
@@ -1762,7 +1761,9 @@ const PLATFORM_DETAIL_COLUMNS: Record<string, Array<[string, string]>> = {
     ['visitor_count', '访客数'],
     ['page_view_count', '浏览量'],
     ['paid_amount', '支付金额'],
+    ['order_amount', '下单金额'],
     ['buyer_count', '支付买家数'],
+    ['order_user_count', '下单人数'],
     ['payment_conversion_rate', '支付转化率'],
     ['avg_order_value', '客单价'],
     ['bounce_rate', '跳失率'],
@@ -1772,6 +1773,7 @@ const PLATFORM_DETAIL_COLUMNS: Record<string, Array<[string, string]>> = {
     ['product_visitor_count', '商品访客数'],
     ['product_page_view_count', '商品浏览量'],
     ['paid_product_count', '支付商品数'],
+    ['paid_item_count', '支付件数'],
     ['returning_buyer_count', '支付老买家数'],
     ['returning_buyer_paid_amount', '老买家支付金额'],
     ['product_favorite_buyer_count', '商品收藏买家数'],
@@ -1794,7 +1796,6 @@ const PLATFORM_DETAIL_COLUMNS: Record<string, Array<[string, string]>> = {
     ['audience_ad_cost', '人群推广消耗'],
     ['short_video_ad_cost', '超级短视频'],
     ['sitewide_ad_cost', '全站推广'],
-    ['wanxiangtai_cost', '万相台消耗'],
     ['brush_principal', '刷单本金'],
     ['brush_order_count', '刷单单量'],
     ['brush_commission', '刷单佣金'],

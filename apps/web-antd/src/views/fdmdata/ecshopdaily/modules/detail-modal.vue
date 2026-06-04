@@ -302,6 +302,9 @@ const COMMON_DETAIL_KEYS = new Set([
   'updater',
 ]);
 
+const HIDDEN_PLATFORM_DETAIL_KEYS = new Set(['wanxiangtai_cost']);
+const HIDDEN_PLATFORM_DETAIL_LABELS = new Set(['万相台消耗']);
+
 function normalizePlatformValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '-';
   if (typeof value === 'object') return JSON.stringify(value);
@@ -330,7 +333,11 @@ const platformDetailItems = computed<KvItem[]>(() => {
   if (raw) {
     return Object.entries(raw)
       .filter(
-        ([, value]) => value !== null && value !== undefined && value !== '',
+        ([label, value]) =>
+          !HIDDEN_PLATFORM_DETAIL_LABELS.has(label) &&
+          value !== null &&
+          value !== undefined &&
+          value !== '',
       )
       .map(([label, value]) => item(label, normalizePlatformValue(value)));
   }
@@ -338,6 +345,7 @@ const platformDetailItems = computed<KvItem[]>(() => {
     .filter(
       ([key, value]) =>
         !COMMON_DETAIL_KEYS.has(key) &&
+        !HIDDEN_PLATFORM_DETAIL_KEYS.has(key) &&
         value !== null &&
         value !== undefined &&
         value !== '',

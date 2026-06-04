@@ -126,13 +126,14 @@ function isPddDashboard(): boolean {
   return currentPlatformCode.value === 'PDD';
 }
 
+function isTaobaoDashboard(): boolean {
+  return ['TAOBAO', 'TMALL'].includes(currentPlatformCode.value);
+}
+
 function realOrderCountOf(row: Partial<EcShopDailyRow>): number {
-  if (row.realPaidOrderCount !== null && row.realPaidOrderCount !== undefined) {
-    return Math.max(0, Math.trunc(asNumber(row.realPaidOrderCount)));
-  }
   return Math.max(
     0,
-    Math.trunc(asNumber(row.paidOrderCount) - asNumber(row.brushOrderCount)),
+    Math.trunc(asNumber(row.buyerCount) - asNumber(row.brushOrderCount)),
   );
 }
 
@@ -251,7 +252,7 @@ const orderKpi = computed(() => {
     };
   }
   return {
-    description: '真实订单 = 支付订单数 - 刷单订单数，用于观察真实成交规模。',
+    description: '真实订单 = 支付买家数 - 刷单订单数，用于观察真实成交规模。',
     title: '真实订单',
     value: rangeKpi.value.realOrders,
   };
@@ -660,6 +661,45 @@ async function loadPddPromotionRedPackets(
   return map;
 }
 
+async function loadTaobaoDetailBuyerCounts(
+  base: Record<string, unknown>,
+): Promise<Map<string, number>> {
+  if (!isTaobaoDashboard()) return new Map();
+  const res = await getEcShopDailyPlatformDetailPage({
+    ...base,
+    pageNo: 1,
+    pageSize: -1,
+    platformCode: currentPlatformCode.value,
+  } as any);
+  const map = new Map<string, number>();
+  for (const row of res.list ?? []) {
+    const buyerCount = asNumber(row.buyerCount ?? row.buyer_count);
+    const keys = [rowIdKey(row.dailyId ?? row.daily_id), detailRowKey(row)];
+    for (const key of keys) {
+      if (!key) continue;
+      map.set(key, Math.trunc(buyerCount));
+    }
+  }
+  return map;
+}
+
+function applyTaobaoDetailBuyerCounts(
+  rows: EcShopDailyRow[],
+  buyerCountMap: Map<string, number>,
+): EcShopDailyRow[] {
+  if (!isTaobaoDashboard() || buyerCountMap.size === 0) return rows;
+  return rows.map((row) => {
+    const detailBuyerCount =
+      buyerCountMap.get(rowIdKey(row.id)) ??
+      buyerCountMap.get(rowDetailKey(row));
+    if (detailBuyerCount === undefined) return row;
+    return {
+      ...row,
+      buyerCount: detailBuyerCount,
+    };
+  });
+}
+
 function subtractPddPromotionRedPackets(
   rows: EcShopDailyRow[],
   promotionMap: Map<string, number>,
@@ -684,6 +724,7 @@ async function loadRows() {
     const base = buildQueryPayload();
     const acc: EcShopDailyRow[] = [];
     const promotionMapPromise = loadPddPromotionRedPackets(base);
+    const taobaoBuyerCountMapPromise = loadTaobaoDetailBuyerCounts(base);
     let pageNo = 1;
     let total = 0;
     while (pageNo <= MAX_PAGES) {
@@ -701,7 +742,7 @@ async function loadRows() {
     }
     if (pageNo >= MAX_PAGES && acc.length < total) truncated.value = true;
     rawRows.value = subtractPddPromotionRedPackets(
-      acc,
+      applyTaobaoDetailBuyerCounts(acc, await taobaoBuyerCountMapPromise),
       await promotionMapPromise,
     );
   } finally {
