@@ -1610,6 +1610,25 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+export function getDisplayMarketingCost(row: Record<string, any> | undefined) {
+  const marketingCost = asNumber(row?.marketingCost ?? row?.marketing_cost);
+  const platformCode = String(row?.platformCode ?? row?.platform_code ?? '')
+    .trim()
+    .toUpperCase();
+  if (platformCode !== 'JD') return marketingCost;
+  const promotionRedPacket = asNumber(
+    row?.promotionRedPacketAmount ??
+      row?.promotion_red_packet_amount ??
+      row?.[`${DETAIL_FIELD_PREFIX}promotion_red_packet_amount`],
+  );
+  const rebateReturn = asNumber(
+    row?.rebateReturnAmount ??
+      row?.rebate_return_amount ??
+      row?.[`${DETAIL_FIELD_PREFIX}rebate_return_amount`],
+  );
+  return marketingCost - promotionRedPacket - rebateReturn;
+}
+
 function usesGmvCalculationBase(row: Record<string, any> | undefined): boolean {
   const platformCode = String(row?.platformCode ?? row?.platform_code ?? '')
     .trim()
@@ -1985,7 +2004,8 @@ export function useGridColumns(
       titleSuffix: columnHelp('marketingCost'),
       minWidth: 100,
       align: 'right',
-      formatter: formatAmount,
+      formatter: ({ row }: any) =>
+        formatAmount({ cellValue: getDisplayMarketingCost(row) }),
     },
     {
       field: 'roi',
@@ -1998,7 +2018,7 @@ export function useGridColumns(
           amountCalculationBase(row) -
           asNumber(row?.refundAmount) -
           asNumber(row?.brushPrincipal);
-        return formatRoi(asNumber(realNet), asNumber(row?.marketingCost));
+        return formatRoi(asNumber(realNet), getDisplayMarketingCost(row));
       },
     },
 

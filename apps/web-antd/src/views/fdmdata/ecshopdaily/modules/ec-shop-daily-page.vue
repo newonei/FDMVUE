@@ -40,6 +40,7 @@ import {
   DETAIL_FIELD_PREFIX,
   formatEcPlatformLabel,
   getEcShopDailyImportPlaceholder,
+  getDisplayMarketingCost,
   normalizeEcPlatformCode,
   useGridColumns,
   useGridFormSchema,
@@ -121,6 +122,7 @@ const activeTab = ref<'dashboard' | 'table'>('dashboard');
 const exporting = ref(false);
 const summaryLoading = ref(false);
 const summaryRow = ref<FdmdataEcShopDailyApi.EcShopDaily | null>(null);
+const jdSummaryMarketingCost = ref<number | undefined>();
 
 const checkedIds = shallowRef<number[]>([]);
 const checkedCount = computed(() => checkedIds.value.length);
@@ -310,6 +312,11 @@ function formatRoiValue(numerator: unknown, denominator: unknown): string {
   return d === 0 ? '' : (n / d).toFixed(2);
 }
 
+function getSummaryMarketingCost() {
+  if (fixedPlatformCode.value === 'JD') return jdSummaryMarketingCost.value;
+  return summaryRow.value?.marketingCost;
+}
+
 function getSummaryFieldValue(field: string): string {
   const row = summaryRow.value;
   if (summaryLoading.value && field === 'statDate') return '汇总中...';
@@ -326,13 +333,15 @@ function getSummaryFieldValue(field: string): string {
     return formatPercentValue(row.refundAmount, refundBase);
   }
   if (field === 'roi') {
-    return formatRoiValue(row.realNetSalesAmount, row.marketingCost);
+    return formatRoiValue(row.realNetSalesAmount, getSummaryMarketingCost());
+  }
+  if (field === 'marketingCost') {
+    return formatAmountValue(getSummaryMarketingCost());
   }
   if (
     [
       'brushPrincipal',
       'gmvAmount',
-      'marketingCost',
       'netSalesAmount',
       'paidAmount',
       'realNetSalesAmount',
@@ -450,6 +459,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
               detailPromise,
             ]);
             summaryRow.value = summary;
+            jdSummaryMarketingCost.value =
+              fixedPlatformCode.value === 'JD' && detailResult?.list
+                ? detailResult.list.reduce(
+                    (sum, detail) => sum + getDisplayMarketingCost(detail),
+                    0,
+                  )
+                : undefined;
             if (detailResult?.list) {
               pageResult.list = mergePlatformDetailRows(
                 pageResult.list,

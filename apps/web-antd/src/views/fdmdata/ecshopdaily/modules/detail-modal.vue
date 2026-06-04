@@ -14,7 +14,7 @@ import {
   getEcShopDailyPlatformDetail,
 } from '#/api/fdmdata/ecshopdaily';
 
-import { formatEcPlatformLabel } from '../data';
+import { formatEcPlatformLabel, getDisplayMarketingCost } from '../data';
 
 defineOptions({ name: 'EcShopDailyDetailModal' });
 
@@ -281,7 +281,19 @@ const brushAndRealItems = computed(() => {
 const marketingItems = computed(() => {
   const d = detail.value as any;
   if (!d) return [];
-  return [item('营销花费', fmtAmount(d.marketingCost))];
+  const platformRow = platformDetail.value?.detail ?? {};
+  return [
+    item(
+      '营销花费',
+      fmtAmount(
+        getDisplayMarketingCost({
+          ...platformRow,
+          marketingCost: d.marketingCost,
+          platformCode: d.platformCode,
+        }),
+      ),
+    ),
+  ];
 });
 
 const COMMON_DETAIL_KEYS = new Set([
