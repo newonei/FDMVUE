@@ -1672,6 +1672,7 @@ const GRID_COLUMN_HELP: Record<string, string> = {
     '刷单本金：当前统计日录入的刷单本金/金额；真实销售口径会从销售金额中剔除该金额。',
   marketingCost:
     '营销花费：平台推广、投放、佣金等营销费用汇总；不同平台来源字段不同，统一进入主表 marketing_cost。',
+  costRatio: '花费占比 = 实际营销花费 / 真实净销 × 100%。',
   platformCode: '平台：平台编码转中文展示。天猫数据已并入淘宝平台。',
   realNetSalesAmount:
     '真实净销 = 净销售额 = 金额计算基数 - 退款金额 - 刷单本金；淘宝/抖音/小红书金额计算基数为成交额(GMV)，其他平台为已支付金额。',
@@ -2004,8 +2005,34 @@ export function useGridColumns(
       titleSuffix: columnHelp('marketingCost'),
       minWidth: 100,
       align: 'right',
+      visible: options.platformCode !== 'JD',
       formatter: ({ row }: any) =>
         formatAmount({ cellValue: getDisplayMarketingCost(row) }),
+    },
+    {
+      field: 'actualMarketingCost',
+      title: '实际营销花费',
+      titleSuffix: columnHelp('marketingCost'),
+      minWidth: 124,
+      align: 'right',
+      visible: options.platformCode === 'JD',
+      formatter: ({ row }: any) =>
+        formatAmount({ cellValue: getDisplayMarketingCost(row) }),
+    },
+    {
+      field: 'costRatio',
+      title: '花费占比',
+      titleSuffix: columnHelp('costRatio'),
+      minWidth: 96,
+      align: 'right',
+      visible: options.platformCode === 'JD',
+      formatter: ({ row }: any) => {
+        const realNet =
+          amountCalculationBase(row) -
+          asNumber(row?.refundAmount) -
+          asNumber(row?.brushPrincipal);
+        return formatRatioPercent(getDisplayMarketingCost(row), realNet);
+      },
     },
     {
       field: 'roi',

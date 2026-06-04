@@ -338,6 +338,12 @@ function getSummaryFieldValue(field: string): string {
   if (field === 'marketingCost') {
     return formatAmountValue(getSummaryMarketingCost());
   }
+  if (field === 'actualMarketingCost') {
+    return formatAmountValue(getSummaryMarketingCost());
+  }
+  if (field === 'costRatio') {
+    return formatPercentValue(getSummaryMarketingCost(), row.realNetSalesAmount);
+  }
   if (
     [
       'brushPrincipal',
