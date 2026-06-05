@@ -57,6 +57,26 @@ function requiredAmount(fieldName: string, label: string): VbenFormSchema {
   };
 }
 
+function calculateBrushTotalCost(values: Record<string, any>) {
+  const principal = Number(values.brushPrincipal ?? 0);
+  const commission = Number(values.brushCommission ?? 0);
+  const total = Number((principal + commission).toFixed(2));
+  return Number.isFinite(total) ? total : 0;
+}
+
+function brushCostAmount(fieldName: string, label: string): VbenFormSchema {
+  const schema = requiredAmount(fieldName, label);
+  schema.componentProps = {
+    ...schema.componentProps,
+    onChange: () => {
+      setTimeout(() => {
+        void syncBrushTotalCost();
+      }, 0);
+    },
+  };
+  return schema;
+}
+
 function useBrushFormSchema(): VbenFormSchema[] {
   const fullWidth = 'col-span-2 min-w-0';
   return [
@@ -95,28 +115,14 @@ function useBrushFormSchema(): VbenFormSchema[] {
     },
 
     requiredInt('brushOrderCount', '刷单单量'),
-    requiredAmount('brushPrincipal', '刷单本金'),
-    requiredAmount('brushCommission', '刷单佣金'),
+    brushCostAmount('brushPrincipal', '刷单本金'),
+    brushCostAmount('brushCommission', '刷单佣金'),
     {
       fieldName: 'brushTotalCost',
       label: '刷单总成本',
       rules: 'selectRequired',
       component: 'InputNumber',
       componentProps: { class: 'w-full', disabled: true, precision: 2 },
-      dependencies: {
-        triggerFields: ['brushPrincipal', 'brushCommission'],
-        componentProps: (values) => {
-          const p = Number(values.brushPrincipal ?? 0);
-          const c = Number(values.brushCommission ?? 0);
-          const total = Number((p + c).toFixed(2));
-          return {
-            class: 'w-full',
-            disabled: true,
-            precision: 2,
-            value: Number.isFinite(total) ? total : undefined,
-          };
-        },
-      },
     },
     {
       fieldName: 'remark',
@@ -141,6 +147,15 @@ const [Form, formApi] = useVbenForm({
   // 与主表弹窗保持一致（有些 VbenFormProps 泛型会丢失 labelWidth 的类型提示）
   commonConfig: { labelWidth: 120, colon: true },
 });
+
+async function syncBrushTotalCost() {
+  const values = await formApi.getValues().catch(() => ({}));
+  await formApi.setFieldValue(
+    'brushTotalCost',
+    calculateBrushTotalCost(values),
+    false,
+  );
+}
 
 async function loadExistingBrushByBizKey(
   row: FdmdataEcShopDailyApi.EcShopDaily,
@@ -168,7 +183,7 @@ function buildSubmitPayload(
 ): FdmdataEcShopDailyBrushApi.EcShopDailyBrush {
   const principal = Number(raw.brushPrincipal ?? 0);
   const commission = Number(raw.brushCommission ?? 0);
-  const total = Number((principal + commission).toFixed(2));
+  const total = calculateBrushTotalCost(raw);
   return {
     id: raw.id ? Number(raw.id) : undefined,
     statDate: raw.statDate,
@@ -185,6 +200,7 @@ function buildSubmitPayload(
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    await syncBrushTotalCost();
     const { valid } = await formApi.validate();
     if (!valid) return;
     const raw = await formApi.getValues();
@@ -231,6 +247,7 @@ const [Modal, modalApi] = useVbenModal({
         brushOrderCount: 0,
         brushPrincipal: 0,
         brushCommission: 0,
+        brushTotalCost: 0,
         remark: '',
       };
 
@@ -250,6 +267,7 @@ const [Modal, modalApi] = useVbenModal({
       formData.value = existed ?? undefined;
       await formApi.resetForm();
       await formApi.setValues(merged as any, false);
+      await syncBrushTotalCost();
     } catch (error) {
       if (mySeq === openSeq) {
         console.error('Load ecShopDailyBrush failed', error);
