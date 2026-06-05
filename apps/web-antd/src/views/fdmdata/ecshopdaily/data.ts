@@ -1651,18 +1651,7 @@ export function getDisplayMarketingCost(row: Record<string, any> | undefined) {
   if (platformCode === 'TAOBAO' || platformCode === 'TMALL') {
     return getTaobaoDisplayMarketingCost(row) ?? marketingCost;
   }
-  if (platformCode !== 'JD') return marketingCost;
-  const promotionRedPacket = asNumber(
-    row?.promotionRedPacketAmount ??
-      row?.promotion_red_packet_amount ??
-      row?.[`${DETAIL_FIELD_PREFIX}promotion_red_packet_amount`],
-  );
-  const rebateReturn = asNumber(
-    row?.rebateReturnAmount ??
-      row?.rebate_return_amount ??
-      row?.[`${DETAIL_FIELD_PREFIX}rebate_return_amount`],
-  );
-  return marketingCost - promotionRedPacket - rebateReturn;
+  return marketingCost;
 }
 
 function usesGmvCalculationBase(row: Record<string, any> | undefined): boolean {
