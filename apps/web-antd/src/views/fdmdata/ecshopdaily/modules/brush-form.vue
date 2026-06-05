@@ -60,7 +60,7 @@ function requiredAmount(fieldName: string, label: string): VbenFormSchema {
 function calculateBrushTotalCost(values: Record<string, any>) {
   const principal = Number(values.brushPrincipal ?? 0);
   const commission = Number(values.brushCommission ?? 0);
-  const total = Number((principal + commission).toFixed(2));
+  const total = Number((principal * 0.055 + commission).toFixed(2));
   return Number.isFinite(total) ? total : 0;
 }
 
