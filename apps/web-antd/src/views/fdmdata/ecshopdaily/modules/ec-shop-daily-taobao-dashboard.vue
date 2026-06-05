@@ -41,7 +41,7 @@ import {
   sliceLastDays,
   sortedDailyFromMap,
 } from '../dashboard-utils';
-import { formatEcPlatformLabel } from '../data';
+import { formatEcPlatformLabel, getDisplayMarketingCost } from '../data';
 import EchartsBox from './echarts-box.vue';
 
 defineOptions({ name: 'EcShopDailyTaobaoDashboard' });
@@ -179,7 +179,7 @@ function newBucket(): PeriodBucket {
 
 function addRow(bucket: PeriodBucket, row: EcShopDailyRow) {
   bucket.netSales = round2(bucket.netSales + realNetSalesAmountOf(row));
-  bucket.marketing = round2(bucket.marketing + asNumber(row.marketingCost));
+  bucket.marketing = round2(bucket.marketing + getDisplayMarketingCost(row as any));
   bucket.refund = round2(bucket.refund + asNumber(row.refundAmount));
   bucket.gmvAmount = round2(bucket.gmvAmount + asNumber(row.gmvAmount));
   bucket.paidAmount = round2(bucket.paidAmount + asNumber(row.paidAmount));
@@ -297,7 +297,7 @@ const diagnosticItems = computed(() => {
   }
   const riskyDays = last30Rows.value.filter((row) => {
     const promoRatio = ratioPercent(
-      asNumber(row.marketingCost),
+      getDisplayMarketingCost(row as any),
       realNetSalesAmountOf(row),
     );
     return promoRatio !== null && promoRatio >= 30;

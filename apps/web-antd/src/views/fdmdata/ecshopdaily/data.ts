@@ -1610,11 +1610,47 @@ function asNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function hasMarketingValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function detailOrDirectNumber(row: Record<string, any> | undefined, field: string): number {
+  return asNumber(row?.[`${DETAIL_FIELD_PREFIX}${field}`] ?? row?.[field]);
+}
+
+function getTaobaoDisplayMarketingCost(row: Record<string, any> | undefined) {
+  const detailFields = [
+    'taobaoke_commission',
+    'keyword_ad_cost',
+    'audience_ad_cost',
+    'short_video_ad_cost',
+    'sitewide_ad_cost',
+    'brush_principal',
+    'brush_commission',
+  ];
+  const hasDetailValue = detailFields.some((field) =>
+    hasMarketingValue(row?.[`${DETAIL_FIELD_PREFIX}${field}`] ?? row?.[field]),
+  );
+  if (!hasDetailValue) return undefined;
+  return (
+    detailOrDirectNumber(row, 'taobaoke_commission') +
+    detailOrDirectNumber(row, 'keyword_ad_cost') +
+    detailOrDirectNumber(row, 'audience_ad_cost') +
+    detailOrDirectNumber(row, 'short_video_ad_cost') +
+    detailOrDirectNumber(row, 'sitewide_ad_cost') +
+    detailOrDirectNumber(row, 'brush_principal') * 0.055 +
+    detailOrDirectNumber(row, 'brush_commission')
+  );
+}
+
 export function getDisplayMarketingCost(row: Record<string, any> | undefined) {
   const marketingCost = asNumber(row?.marketingCost ?? row?.marketing_cost);
   const platformCode = String(row?.platformCode ?? row?.platform_code ?? '')
     .trim()
     .toUpperCase();
+  if (platformCode === 'TAOBAO' || platformCode === 'TMALL') {
+    return getTaobaoDisplayMarketingCost(row) ?? marketingCost;
+  }
   if (platformCode !== 'JD') return marketingCost;
   const promotionRedPacket = asNumber(
     row?.promotionRedPacketAmount ??
@@ -1690,8 +1726,16 @@ const GRID_COLUMN_HELP: Record<string, string> = {
   statDate: '统计日：平台数据归属日期，按自然日汇总。',
 };
 
-function columnHelp(field: string) {
-  const content = GRID_COLUMN_HELP[field];
+const TAOBAO_MARKETING_COST_HELP =
+  '营销花费 = 淘宝客佣金 + 关键词推广消耗 + 人群推广消耗 + 超级短视频 + 全站推广 + 刷单本金 * 0.055 + 刷单佣金。';
+
+function columnHelp(field: string, platformCode?: string) {
+  const normalizedPlatform = String(platformCode ?? '').trim().toUpperCase();
+  const content =
+    field === 'marketingCost' &&
+    (normalizedPlatform === 'TAOBAO' || normalizedPlatform === 'TMALL')
+      ? TAOBAO_MARKETING_COST_HELP
+      : GRID_COLUMN_HELP[field];
   return content
     ? { content, icon: 'vxe-icon-question-circle-fill' }
     : undefined;
@@ -2002,7 +2046,7 @@ export function useGridColumns(
     {
       field: 'marketingCost',
       title: '营销花费',
-      titleSuffix: columnHelp('marketingCost'),
+      titleSuffix: columnHelp('marketingCost', options.platformCode),
       minWidth: 100,
       align: 'right',
       visible: options.platformCode !== 'JD',
@@ -2012,7 +2056,7 @@ export function useGridColumns(
     {
       field: 'actualMarketingCost',
       title: '实际营销花费',
-      titleSuffix: columnHelp('marketingCost'),
+      titleSuffix: columnHelp('marketingCost', options.platformCode),
       minWidth: 124,
       align: 'right',
       visible: options.platformCode === 'JD',
