@@ -100,7 +100,7 @@ jobs:
             ${{ steps.package.outputs.package_name }}
             ${{ steps.package.outputs.package_name }}.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   publish_oss:
     name: Upload to Aliyun OSS
