@@ -1147,17 +1147,16 @@ function normalizeSubmitRaw(
 
   switch (platformCode) {
     case 'DOUYIN': {
-      setIfBlank(normalized, 'marketingCost', normalized.expenseAmount);
-      setIfBlank(
-        normalized,
-        'marketingCost',
-        sumAmountFields(normalized, [
-          'adCost',
-          'platformCommission',
-          'talentCommission',
-        ]),
-      );
-      setIfBlank(normalized, 'refundAmount', normalized.refundSuccessAmount);
+      const marketingCost = sumAmountFields(normalized, [
+        'adCost',
+        'platformCommission',
+        'talentCommission',
+      ]);
+      if (marketingCost !== undefined) {
+        normalized.marketingCost = marketingCost;
+      } else {
+        setIfBlank(normalized, 'marketingCost', normalized.expenseAmount);
+      }
       break;
     }
     case 'SPH': {
@@ -1227,10 +1226,21 @@ export function buildEcShopDailySubmitPayload(
   fixedPlatformCode?: string,
 ): FdmdataEcShopDailyApi.EcShopDaily {
   const normalized = normalizeSubmitRaw(raw, fixedPlatformCode);
+  const platformCode = String(normalized.platformCode ?? '').trim();
+  const refundAmount =
+    platformCode === 'DOUYIN'
+      ? firstValue(
+          normalized,
+          'refundSuccessAmount',
+          'refundAmountRefundTime',
+          'refund_amount_refund_time',
+          'refundAmount',
+        )
+      : normalized.refundAmount;
   const payload: Record<string, any> = {
     id: normalized.id,
     statDate: normalizeStatDateForForm(normalized.statDate),
-    platformCode: String(normalized.platformCode ?? '').trim(),
+    platformCode,
     shopId: String(normalized.shopId ?? '').trim(),
     shopName: String(normalized.shopName ?? '').trim(),
     currency: String(normalized.currency ?? 'CNY'),
@@ -1239,7 +1249,7 @@ export function buildEcShopDailySubmitPayload(
     refundOrderCount: requiredInt(normalized.refundOrderCount),
     gmvAmount: requiredAmount(normalized.gmvAmount),
     paidAmount: requiredAmount(normalized.paidAmount),
-    refundAmount: requiredAmount(normalized.refundAmount),
+    refundAmount: requiredAmount(refundAmount),
     marketingCost: requiredAmount(normalized.marketingCost),
     remark: String(normalized.remark ?? '').trim() || undefined,
   };
