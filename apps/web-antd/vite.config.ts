@@ -14,6 +14,11 @@ export default defineConfig(async () => {
             target: 'http://localhost:48080/admin-api',
             ws: true,
           },
+          '/print-prep-api': {
+            changeOrigin: true,
+            rewrite: (path) => path.replace(/^\/print-prep-api/, ''),
+            target: 'http://192.168.10.144:8090',
+          },
         },
       },
     },

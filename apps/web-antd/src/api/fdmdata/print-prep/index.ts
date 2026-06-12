@@ -1,10 +1,38 @@
 import { uploadFile } from '#/api/infra/file';
 
-const DEFAULT_PRINT_PREP_API_BASE = 'http://192.168.10.144:8090';
+const DEFAULT_PRINT_PREP_API_BASE = '/print-prep-api';
+const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
 
 export const PRINT_PREP_API_BASE = (
   import.meta.env.VITE_PRINT_PREP_API_BASE || DEFAULT_PRINT_PREP_API_BASE
 ).replace(/\/+$/, '');
+
+function joinPrintPrepApiUrl(value: string) {
+  if (!value) return PRINT_PREP_API_BASE || '/';
+  if (ABSOLUTE_HTTP_URL_RE.test(PRINT_PREP_API_BASE)) {
+    return new URL(value, `${PRINT_PREP_API_BASE}/`).href;
+  }
+  const path = value.startsWith('/') ? value : `/${value}`;
+  return `${PRINT_PREP_API_BASE}${path}`;
+}
+
+function resolvePrintPrepApiUrl(value: string) {
+  const text = value.trim();
+  if (!text) return '';
+  if (ABSOLUTE_HTTP_URL_RE.test(text)) {
+    if (ABSOLUTE_HTTP_URL_RE.test(PRINT_PREP_API_BASE)) return text;
+    const parsed = new URL(text);
+    if (
+      typeof window !== 'undefined' &&
+      parsed.origin === window.location.origin &&
+      parsed.pathname.startsWith(`${PRINT_PREP_API_BASE}/`)
+    ) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return joinPrintPrepApiUrl(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+  }
+  return joinPrintPrepApiUrl(text);
+}
 
 export type PrintPrepOutputFileKey =
   | 'ai'
@@ -180,7 +208,7 @@ export function resolvePrintPrepAssetUrl(url?: string) {
   if (!url) return '';
   const value = url.trim();
   if (!value || /^[a-z]:[\\/]/i.test(value)) return '';
-  return new URL(value, PRINT_PREP_API_BASE).href;
+  return resolvePrintPrepApiUrl(value);
 }
 
 export function getPrintPrepFileLocation(file?: PrintPrepApi.FileInfo) {
@@ -270,7 +298,7 @@ async function readErrorMessage(response: Response) {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${PRINT_PREP_API_BASE}${path}`, {
+  const response = await fetch(resolvePrintPrepApiUrl(path), {
     ...init,
     headers: {
       Accept: 'application/json',
@@ -284,7 +312,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function fetchBlob(path: string, form: FormData): Promise<Blob> {
-  const response = await fetch(`${PRINT_PREP_API_BASE}${path}`, {
+  const response = await fetch(resolvePrintPrepApiUrl(path), {
     method: 'POST',
     body: form,
   });
