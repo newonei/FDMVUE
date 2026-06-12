@@ -1,6 +1,6 @@
 import { uploadFile } from '#/api/infra/file';
 
-const DEFAULT_PRINT_PREP_API_BASE = 'http://127.0.0.1:8090';
+const DEFAULT_PRINT_PREP_API_BASE = 'http://192.168.10.144:8090';
 
 export const PRINT_PREP_API_BASE = (
   import.meta.env.VITE_PRINT_PREP_API_BASE || DEFAULT_PRINT_PREP_API_BASE
