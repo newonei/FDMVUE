@@ -97,8 +97,14 @@ interface GeneratedUploadSource {
   mimeType: string;
 }
 
+type CachedPrintPrepFormState = Partial<PrintPrepFormState> & {
+  aiProviderDefaultMigrated?: boolean;
+  aiPreprocessProvider?: string;
+};
+
 const FORM_CACHE_KEY = 'fdm_print_prep_vue_form_state_v1';
 const DISABLED_AI_PROVIDERS = new Set(['grok_imagine', 'wan2_6']);
+const DEFAULT_AI_PROVIDER: AiProvider = 'ark_seedream';
 const PILATES_PREVIEW_RATIO = 1815 / 2920;
 const PILATES_MASK_PREVIEW_URL = '/print-prep/pilates-mask.png';
 const PILATES_OUTLINE_PREVIEW_URL = '/print-prep/pilates-outline.png';
@@ -150,7 +156,7 @@ const managedAiPromptMarkers = [
 const formState = reactive<PrintPrepFormState>({
   addYugaLogo: true,
   aiPreprocessPrompt: defaultAiPrompts.普拉提垫,
-  aiPreprocessProvider: 'gpt_image_2',
+  aiPreprocessProvider: DEFAULT_AI_PROVIDER,
   aiPreprocessSize: '4K',
   aiReferenceUrl: '',
   backgroundMode: 'preserve',
@@ -389,8 +395,8 @@ function normalizeOptions(data: PrintPrepApi.OptionsResp) {
 }
 
 function normalizeProvider(value: unknown): AiProvider {
-  if (typeof value !== 'string') return 'gpt_image_2';
-  if (DISABLED_AI_PROVIDERS.has(value)) return 'gpt_image_2';
+  if (typeof value !== 'string') return DEFAULT_AI_PROVIDER;
+  if (DISABLED_AI_PROVIDERS.has(value)) return DEFAULT_AI_PROVIDER;
   if (
     [
       'ark_seedream',
@@ -403,26 +409,36 @@ function normalizeProvider(value: unknown): AiProvider {
   ) {
     return value as AiProvider;
   }
-  return 'gpt_image_2';
+  return DEFAULT_AI_PROVIDER;
+}
+
+function normalizeCachedProvider(cache: CachedPrintPrepFormState): AiProvider {
+  if (cache.aiPreprocessProvider === 'gpt_image_2' && !cache.aiProviderDefaultMigrated) {
+    return DEFAULT_AI_PROVIDER;
+  }
+  return normalizeProvider(cache.aiPreprocessProvider);
 }
 
 function loadFormCache() {
   try {
-    const raw = JSON.parse(localStorage.getItem(FORM_CACHE_KEY) || '{}') as Partial<
-      PrintPrepFormState & { aiPreprocessProvider?: string }
-    >;
+    const raw = JSON.parse(
+      localStorage.getItem(FORM_CACHE_KEY) || '{}',
+    ) as CachedPrintPrepFormState;
     Object.assign(formState, {
       ...raw,
-      aiPreprocessProvider: normalizeProvider(raw.aiPreprocessProvider),
+      aiPreprocessProvider: normalizeCachedProvider(raw),
       aiReferenceUrl: '',
     });
   } catch {
-    formState.aiPreprocessProvider = 'gpt_image_2';
+    formState.aiPreprocessProvider = DEFAULT_AI_PROVIDER;
   }
 }
 
 function saveFormCache() {
-  const cache: Partial<PrintPrepFormState> = { ...formState };
+  const cache: CachedPrintPrepFormState = {
+    ...formState,
+    aiProviderDefaultMigrated: true,
+  };
   delete cache.aiReferenceUrl;
   localStorage.setItem(FORM_CACHE_KEY, JSON.stringify(cache));
 }
