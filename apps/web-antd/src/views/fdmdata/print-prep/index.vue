@@ -108,6 +108,9 @@ const DEFAULT_AI_PROVIDER: AiProvider = 'ark_seedream';
 const PILATES_PREVIEW_RATIO = 1815 / 2920;
 const PILATES_MASK_PREVIEW_URL = '/print-prep/pilates-mask.png';
 const PILATES_OUTLINE_PREVIEW_URL = '/print-prep/pilates-outline.png';
+const PILATES_DEFAULT_PLACEMENT_SCALE = 1.18;
+const PILATES_FIXED_REFERENCE_URL =
+  'https://hbfdm.oss-cn-wuhan-lr.aliyuncs.com/%E7%A9%BA%E6%9D%BF-%E6%99%AE%E6%8B%89%E6%8F%90.png';
 
 const fallbackProductSizes: Record<ProductType, string[]> = {
   大号鼠标垫: [
@@ -141,8 +144,16 @@ const defaultAiPrompts: Record<'default' | ProductType, string> = {
     '去掉截图界面、黑边和靠边水印；去掉平台水印、文字标识和角落Logo；背景按上方“背景处理方式”执行；保持原图主体、颜色、光影、构图和真实细节不变；不要重绘、不要换风格、不要新增物体、不要裁切主体；输出高清清晰，不能模糊、低清、像素化、过度磨皮或AI涂抹。',
   麂皮绒垫:
     '只对原图做高清清晰化；原图区域的画风、颜色、光影、纹理、构图、人物/主体、产品形状都不要改变；不要重绘、不要换风格、不要AI插画化、不要美化改脸、不要新增物体；背景不足时只在原图外侧延展原背景，匹配原背景的纹理、透视、景深、噪点、光线和色彩，扩成麂皮绒垫183x68横版比例；不要拉伸、裁切、移动或放大主体；去掉截图界面、黑边、平台水印和靠边可去除文字标识；输出高清清晰，不能模糊、低清、像素化、过度磨皮或AI涂抹。',
-  普拉提垫:
-    '为普拉提T形垫生成竖版超幅底图，不是最终裁切图；底图要比61x100成品和约64x103出血画布更大，上、下、左、右四周都要扩出真实连续背景，方便Python后续上下左右移动取景窗口，不会露出虚化或空白。不要画T形边框、不要画YUGA、不要画辅助线。系统会先上传一张构图参考图，参考图里被缩小下移的原图位置可以参考，但四周虚化/渐变/填充只是临时占位，AI必须重新生成真实连续场景，不能照抄虚化渐变。上方把手区域约占画面上方40%-45%，必须是连续清晰的原背景/床品/墙面/窗帘/房间场景；画面上方38%以内不要出现头发、脸、皮肤、衣服、身体或枕头边缘，不能是灰黑虚化渐变或抽象填充。左右边缘也必须保留宽的连续真实背景或床品安全边，因为主体后续可能会左右移动。人物脸、头发、枕头和白色衣服放在下方宽主体区，脸要清晰但不能大头贴，头脸约占画面宽度18%-28%，左右各留22%-30%连续背景或床品，底部留干净区域给Python贴YUGA。只通过扩背景和缩小主体来适配模具，保持人物身份、五官、发型、光影和真实摄影质感；去掉截图界面、黑边、平台水印、文字标识和角落Logo；所有边缘都要有连续图像内容，不能出现灰块、白块、硬矩形边、空白带、Logo或水印；输出高清清晰，不能模糊、低清、像素化、过度磨皮或AI涂抹。',
+  普拉提垫: [
+    '为普拉提T形垫生成竖版超幅安全底图，不是最终裁切图；这张底图后续会以约1.18倍套入模板，并允许上下左右继续偏移约20%，所以四边必须有足够真实连续背景安全区。',
+    '底图必须比61x100成品和约64x103出血画布更大，上、下、左、右都要扩出可裁切的真实场景内容；任何位置移动裁切时都不能露出白边、灰块、透明、空白带、硬矩形边或虚化占位。',
+    '顶部把手区域要一直铺满到画布最上边，画面上方45%-50%只能是连续清晰的原背景/墙面/床品/窗帘/房间场景，不要出现头发、脸、皮肤、衣服、身体或枕头边缘。',
+    '所有扩出来的背景必须和原图一样清晰，保持同一焦距、景深、噪点、纹理、透视和光影；禁止用模糊背景、柔焦过渡、涂抹补边、拉伸放大、低清渐变、上下分层拼接或水平接缝来填充顶部、边缘或底部。',
+    '左右两侧和底部也必须预留大面积连续背景：人物左右各留35%-45%真实背景或床品，底部留18%-22%干净背景给Python后续贴YUGA，不能让人物或黑衣服贴到边缘。',
+    '人物主体要明显缩小并放在下方宽主体区，脸清晰但不能大头贴，头脸约占画面宽度14%-20%；只通过扩背景和缩小主体适配模具，不要改变人物身份、五官、发型、服装、光影和真实摄影质感。',
+    '公网参考图固定为空板普拉提框架，只用于理解T形边界和安全区域，不能复制空板的白底、黑线、轮廓或空板样式；客户上传图片才是人物、五官、服装、姿势、光影和真实场景的唯一来源。',
+    '不要把客户照片作为小矩形贴在新背景中，最终必须是一张连续完整的摄影扩背景图，不能出现相框感、照片贴照片、灰块、白块或渐变占位。不要画T形边框、不要画YUGA、不要画辅助线；去掉截图界面、黑边、平台水印、文字标识和角落Logo；输出高清清晰，不能模糊、低清、像素化、过度磨皮或AI涂抹。',
+  ].join(''),
 };
 
 const managedAiPromptMarkers = [
@@ -151,6 +162,7 @@ const managedAiPromptMarkers = [
   '去掉截图界面、黑边和靠边水印',
   '不用Topaz，直接由AI完成高清清晰化处理',
   '为普拉提T形垫生成竖版超幅底图',
+  '为普拉提T形垫生成竖版超幅安全底图',
 ];
 
 const formState = reactive<PrintPrepFormState>({
@@ -158,7 +170,7 @@ const formState = reactive<PrintPrepFormState>({
   aiPreprocessPrompt: defaultAiPrompts.普拉提垫,
   aiPreprocessProvider: DEFAULT_AI_PROVIDER,
   aiPreprocessSize: '4K',
-  aiReferenceUrl: '',
+  aiReferenceUrl: PILATES_FIXED_REFERENCE_URL,
   backgroundMode: 'preserve',
   customerPrompt: '',
   layoutMode: 'pilates_template',
@@ -170,7 +182,7 @@ const formState = reactive<PrintPrepFormState>({
   orientation: 'portrait',
   placementOffsetX: 0,
   placementOffsetY: 0,
-  placementScale: 1,
+  placementScale: PILATES_DEFAULT_PLACEMENT_SCALE,
   printProductType: '普拉提垫',
   printSize: '61x100',
   removeBlackBars: true,
@@ -293,7 +305,7 @@ const placementPreviewAspectRatio = computed(() =>
 const placementPreviewImageStyle = computed(() => ({
   '--placement-offset-x': `${getEffectivePlacementOffsetX()}%`,
   '--placement-offset-y': `${getEffectivePlacementOffsetY()}%`,
-  '--placement-scale': String(clampNumber(formState.placementScale || 1, 0.5, 3)),
+  '--placement-scale': String(getEffectivePlacementScale()),
 }));
 
 const downloadLinks = computed(() => {
@@ -374,6 +386,15 @@ function getEffectivePlacementOffsetY() {
   return Number(
     (clampNumber(formState.placementOffsetY, -100, 100) * getPreviewOffsetFactor()).toFixed(2),
   );
+}
+
+function getEffectivePlacementScale() {
+  const requestedScale = clampNumber(formState.placementScale || 1, isPilates.value ? 1 : 0.5, 3);
+  if (!isPilatesTemplatePreview.value) return requestedScale;
+  const offsetX = Math.abs(getEffectivePlacementOffsetX());
+  const offsetY = Math.abs(getEffectivePlacementOffsetY());
+  const requiredScale = 1 + (Math.max(offsetX, offsetY) / 50);
+  return Number(clampNumber(Math.max(requestedScale, requiredScale), 1, 3).toFixed(2));
 }
 
 function parsePrintSizeRatio() {
@@ -464,8 +485,16 @@ function loadFormCache() {
       aiPreprocessProvider: normalizeCachedProvider(raw),
       aiReferenceUrl: '',
     });
+    formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
+    if (isPilates.value && Number(formState.placementScale || 1) <= 1) {
+      formState.placementScale = PILATES_DEFAULT_PLACEMENT_SCALE;
+    }
+    refreshAiPreprocessPromptForProduct();
   } catch {
     formState.aiPreprocessProvider = DEFAULT_AI_PROVIDER;
+    formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
+    formState.placementScale = isPilates.value ? PILATES_DEFAULT_PLACEMENT_SCALE : 1;
+    refreshAiPreprocessPromptForProduct();
   }
 }
 
@@ -625,7 +654,7 @@ function drawPlacementImage(
 ) {
   const scale =
     Math.max(width / image.naturalWidth, height / image.naturalHeight) *
-    clampNumber(formState.placementScale || 1, 0.5, 3);
+    getEffectivePlacementScale();
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
   const centerX =
@@ -641,50 +670,24 @@ function drawPlacementImage(
   );
 }
 
-function drawImageCover(
+function drawPlacementBleedBackground(
   context: CanvasRenderingContext2D,
   image: HTMLImageElement,
-  x: number,
-  y: number,
   width: number,
   height: number,
-  scaleFactor = 1,
 ) {
-  const naturalWidth = Math.max(1, image.naturalWidth);
-  const naturalHeight = Math.max(1, image.naturalHeight);
-  const scale = Math.max(width / naturalWidth, height / naturalHeight) * scaleFactor;
-  const drawWidth = naturalWidth * scale;
-  const drawHeight = naturalHeight * scale;
+  context.save();
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * 1.22;
+  const drawWidth = image.naturalWidth * scale;
+  const drawHeight = image.naturalHeight * scale;
   context.drawImage(
     image,
-    x + width / 2 - drawWidth / 2,
-    y + height / 2 - drawHeight / 2,
+    width / 2 - drawWidth / 2,
+    height / 2 - drawHeight / 2,
     drawWidth,
     drawHeight,
   );
-}
-
-function drawImageContain(
-  context: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  scaleFactor = 1,
-) {
-  const naturalWidth = Math.max(1, image.naturalWidth);
-  const naturalHeight = Math.max(1, image.naturalHeight);
-  const scale = Math.min(width / naturalWidth, height / naturalHeight) * scaleFactor;
-  const drawWidth = naturalWidth * scale;
-  const drawHeight = naturalHeight * scale;
-  context.drawImage(
-    image,
-    x + width / 2 - drawWidth / 2,
-    y + height / 2 - drawHeight / 2,
-    drawWidth,
-    drawHeight,
-  );
+  context.restore();
 }
 
 function canvasToBlob(
@@ -732,6 +735,7 @@ async function renderLocalPlacementPreviewBlob({
   if (!artworkContext) throw new Error('浏览器不支持生成网页预览图');
 
   if (isPilatesTemplatePreview.value) {
+    drawPlacementBleedBackground(artworkContext, image, canvasWidth, canvasHeight);
     drawPlacementImage(artworkContext, image, canvasWidth, canvasHeight);
     try {
       const mask = await loadCanvasImage(PILATES_MASK_PREVIEW_URL);
@@ -768,71 +772,6 @@ async function renderLocalPlacementPreviewBlob({
   const blob = await canvasToBlob(canvas, mimeType);
   if (cache) latestPlacementPreviewBlob.value = blob;
   return blob;
-}
-
-async function renderPilatesCompositionReferenceBlob() {
-  if (!selectedFile.value) throw new Error('请先选择客户图片');
-  const canvasWidth = 900;
-  const canvasHeight = Math.max(1, Math.round(canvasWidth / PILATES_PREVIEW_RATIO));
-  const canvas = document.createElement('canvas');
-  canvas.width = canvasWidth;
-  canvas.height = canvasHeight;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('浏览器不支持生成普拉提构图参考图');
-
-  const fileUrl = URL.createObjectURL(selectedFile.value);
-  let image: HTMLImageElement;
-  try {
-    image = await loadCanvasImage(fileUrl);
-  } finally {
-    URL.revokeObjectURL(fileUrl);
-  }
-
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvasWidth, canvasHeight);
-
-  const artworkCanvas = document.createElement('canvas');
-  artworkCanvas.width = canvasWidth;
-  artworkCanvas.height = canvasHeight;
-  const artworkContext = artworkCanvas.getContext('2d');
-  if (!artworkContext) throw new Error('浏览器不支持生成普拉提构图参考图');
-
-  artworkContext.save();
-  applyPilatesPreviewClip(artworkContext, canvasWidth, canvasHeight);
-  artworkContext.globalAlpha = 0.2;
-  artworkContext.filter = 'blur(18px)';
-  drawImageCover(artworkContext, image, 0, 0, canvasWidth, canvasHeight, 1.16);
-  artworkContext.filter = 'none';
-  artworkContext.globalAlpha = 1;
-  drawImageContain(
-    artworkContext,
-    image,
-    canvasWidth * 0.14,
-    canvasHeight * 0.43,
-    canvasWidth * 0.72,
-    canvasHeight * 0.39,
-    1.03,
-  );
-  artworkContext.restore();
-
-  try {
-    const mask = await loadCanvasImage(PILATES_MASK_PREVIEW_URL);
-    artworkContext.globalCompositeOperation = 'destination-in';
-    artworkContext.drawImage(mask, 0, 0, canvasWidth, canvasHeight);
-    artworkContext.globalCompositeOperation = 'source-over';
-  } catch {
-    // Fallback clipping above still keeps the reference inside the T shape.
-  }
-  context.drawImage(artworkCanvas, 0, 0);
-
-  try {
-    const outline = await loadCanvasImage(PILATES_OUTLINE_PREVIEW_URL);
-    context.drawImage(outline, 0, 0, canvasWidth, canvasHeight);
-  } catch {
-    strokePilatesPreviewGuide(context, canvasWidth, canvasHeight);
-  }
-
-  return canvasToBlob(canvas, 'image/png');
 }
 
 function clearGeneratedUploads() {
@@ -978,29 +917,10 @@ function buildReferenceUploadFileName() {
   return `${sanitizeFileToken(formState.orderNo, 'adjusted_preview')}_reference.png`;
 }
 
-function buildPilatesCompositionReferenceFileName() {
-  return `${sanitizeFileToken(formState.orderNo, 'pilates')}_composition_reference.png`;
-}
-
-async function ensurePilatesCompositionReference() {
-  if (!isPilatesTemplatePreview.value || formState.aiReferenceUrl.trim()) return;
-  referenceUploading.value = true;
-  taskState.status = '普拉提构图参考图上传中';
-  taskState.message = '正在根据客户图和普拉提框架生成 AI 构图参考图。';
-  try {
-    const blob = await renderPilatesCompositionReferenceBlob();
-    const data = await uploadPrintPrepReferenceBlob({
-      blob,
-      fileName: buildPilatesCompositionReferenceFileName(),
-    });
-    const url = data.url || data.upload?.url || '';
-    if (!url) throw new Error('上传成功但没有返回公网 URL');
-    formState.aiReferenceUrl = url;
-    saveFormCache();
-    message.info('已自动上传普拉提构图参考图');
-  } finally {
-    referenceUploading.value = false;
-  }
+function normalizeAiReferenceUrlForSubmit() {
+  const url = formState.aiReferenceUrl.trim();
+  if (isPilates.value) return PILATES_FIXED_REFERENCE_URL;
+  return url;
 }
 
 async function uploadCurrentPreviewReference() {
@@ -1068,10 +988,18 @@ function updateProductDefaults() {
   if (isPilates.value) {
     formState.backgroundMode = 'preserve';
     formState.orientation = 'portrait';
+    formState.aiReferenceUrl = PILATES_FIXED_REFERENCE_URL;
   } else if (formState.printProductType === '麂皮绒垫') {
     formState.backgroundMode = 'preserve';
     formState.orientation = 'landscape';
+    if (formState.aiReferenceUrl === PILATES_FIXED_REFERENCE_URL) formState.aiReferenceUrl = '';
   }
+  if (!isPilates.value && formState.aiReferenceUrl === PILATES_FIXED_REFERENCE_URL) {
+    formState.aiReferenceUrl = '';
+  }
+  formState.placementScale = isPilates.value ? PILATES_DEFAULT_PLACEMENT_SCALE : 1;
+  formState.placementOffsetX = 0;
+  formState.placementOffsetY = 0;
   formState.targetLongPx = defaultLongPx[formState.printProductType] || 6000;
   refreshAiPreprocessPromptForProduct();
 }
@@ -1084,6 +1012,7 @@ function onFileChange(event: Event) {
   finalResult.value = null;
   reportJson.value = '';
   errorMessage.value = '';
+  formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
   latestPlacementPreviewBlob.value = null;
   clearGeneratedUploads();
   clearPreviewDebounce();
@@ -1108,7 +1037,7 @@ function appendBaseFields(form: FormData) {
   form.append('customer_prompt', formState.customerPrompt.trim());
   form.append('background_mode', formState.backgroundMode);
   form.append('ai_preprocess_size', formState.aiPreprocessSize);
-  form.append('ai_reference_url', formState.aiReferenceUrl.trim());
+  form.append('ai_reference_url', normalizeAiReferenceUrlForSubmit());
   form.append('super_resolution_provider', formState.superResolutionProvider);
   form.append('upscale_factor', '4');
   form.append('min_enhanced_long_px', '6000');
@@ -1132,7 +1061,7 @@ function appendLayoutFields(form: FormData) {
   form.append('foreground_scale', '0.96');
   form.append('layout_mode', formState.layoutMode);
   form.append('template_id', formState.templateId);
-  form.append('placement_scale', String(formState.placementScale || 1));
+  form.append('placement_scale', String(getEffectivePlacementScale()));
   form.append('placement_offset_x', String(getEffectivePlacementOffsetX()));
   form.append('placement_offset_y', String(getEffectivePlacementOffsetY()));
   form.append('customer_prompt', formState.customerPrompt.trim());
@@ -1261,7 +1190,6 @@ async function handleCreateBase() {
   taskState.status = 'AI 底图提交中';
   taskState.message = '正在提交 AI 底图任务';
   try {
-    await ensurePilatesCompositionReference();
     taskState.status = 'AI 底图提交中';
     taskState.message = '正在提交 AI 底图任务';
     const form = new FormData();
@@ -1364,7 +1292,7 @@ function reuseHistory(item: PrintPrepApi.HistoryItem) {
 }
 
 function resetPlacement() {
-  formState.placementScale = 1;
+  formState.placementScale = isPilates.value ? PILATES_DEFAULT_PLACEMENT_SCALE : 1;
   formState.placementOffsetX = 0;
   formState.placementOffsetY = 0;
 }
@@ -1375,8 +1303,9 @@ function nudgePlacement(
 ) {
   if (!canAdjustPlacement()) return;
   if (key === 'placementScale') {
+    const minScale = isPilates.value ? 1 : 0.5;
     formState.placementScale = Number(
-      clampNumber(Number(formState.placementScale || 1) + delta, 0.5, 3).toFixed(2),
+      clampNumber(Number(formState.placementScale || 1) + delta, minScale, 3).toFixed(2),
     );
     return;
   }
@@ -1630,14 +1559,14 @@ onBeforeUnmount(() => {
                       <Slider
                         v-model:value="formState.placementScale"
                         :disabled="!baseImagePath || isBusy"
-                        :min="0.5"
+                        :min="isPilates ? 1 : 0.5"
                         :max="3"
                         :step="0.05"
                       />
                       <InputNumber
                         v-model:value="formState.placementScale"
                         :disabled="!baseImagePath || isBusy"
-                        :min="0.5"
+                        :min="isPilates ? 1 : 0.5"
                         :max="3"
                         :step="0.05"
                       />
@@ -1778,10 +1707,12 @@ onBeforeUnmount(() => {
                     <Input
                       v-model:value="formState.aiReferenceUrl"
                       allow-clear
+                      :disabled="isPilates"
                       placeholder="可留空；本字段不会写入本地缓存"
                     />
                     <Space class="reference-actions" wrap>
                       <Button
+                        v-if="!isPilates"
                         size="small"
                         :disabled="!baseImageUrl || isBusy"
                         :loading="referenceUploading"
@@ -1912,6 +1843,15 @@ onBeforeUnmount(() => {
                   class="placement-preview-mask"
                   :class="{ 'is-pilates': isPilatesTemplatePreview }"
                 >
+                  <img
+                    v-if="isPilatesTemplatePreview"
+                    class="placement-preview-bleed"
+                    :src="baseImageUrl"
+                    alt=""
+                    crossorigin="anonymous"
+                    draggable="false"
+                    @error="handleBaseImageLoadError"
+                  />
                   <img
                     class="placement-preview-image"
                     :src="baseImageUrl"
@@ -2255,6 +2195,19 @@ onBeforeUnmount(() => {
   pointer-events: none;
   object-fit: cover;
   transform: translate(-50%, -50%) scale(var(--placement-scale, 1));
+  transform-origin: center center;
+}
+
+.placement-preview-bleed {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  object-fit: cover;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.22);
   transform-origin: center center;
 }
 
