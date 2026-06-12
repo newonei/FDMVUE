@@ -264,12 +264,8 @@ const placementPreviewAspectRatio = computed(() =>
     : `${getPrintSizeRatio()}`,
 );
 const placementPreviewImageStyle = computed(() => ({
-  '--placement-offset-x': `${
-    clampNumber(formState.placementOffsetX, -100, 100) * getPreviewOffsetFactor()
-  }%`,
-  '--placement-offset-y': `${
-    clampNumber(formState.placementOffsetY, -100, 100) * getPreviewOffsetFactor()
-  }%`,
+  '--placement-offset-x': `${getEffectivePlacementOffsetX()}%`,
+  '--placement-offset-y': `${getEffectivePlacementOffsetY()}%`,
   '--placement-scale': String(clampNumber(formState.placementScale || 1, 0.5, 3)),
 }));
 
@@ -339,6 +335,18 @@ function clampNumber(value: unknown, min: number, max: number) {
 
 function getPreviewOffsetFactor() {
   return isPilatesTemplatePreview.value ? 0.45 : 0.5;
+}
+
+function getEffectivePlacementOffsetX() {
+  return Number(
+    (clampNumber(formState.placementOffsetX, -100, 100) * getPreviewOffsetFactor()).toFixed(2),
+  );
+}
+
+function getEffectivePlacementOffsetY() {
+  return Number(
+    (clampNumber(formState.placementOffsetY, -100, 100) * getPreviewOffsetFactor()).toFixed(2),
+  );
 }
 
 function parsePrintSizeRatio() {
@@ -594,11 +602,9 @@ function drawPlacementImage(
   const drawWidth = image.naturalWidth * scale;
   const drawHeight = image.naturalHeight * scale;
   const centerX =
-    width / 2 +
-    width * ((clampNumber(formState.placementOffsetX, -100, 100) * getPreviewOffsetFactor()) / 100);
+    width / 2 + width * (getEffectivePlacementOffsetX() / 100);
   const centerY =
-    height / 2 +
-    height * ((clampNumber(formState.placementOffsetY, -100, 100) * getPreviewOffsetFactor()) / 100);
+    height / 2 + height * (getEffectivePlacementOffsetY() / 100);
   context.drawImage(
     image,
     centerX - drawWidth / 2,
@@ -1100,8 +1106,8 @@ function appendLayoutFields(form: FormData) {
   form.append('layout_mode', formState.layoutMode);
   form.append('template_id', formState.templateId);
   form.append('placement_scale', String(formState.placementScale || 1));
-  form.append('placement_offset_x', String(formState.placementOffsetX || 0));
-  form.append('placement_offset_y', String(formState.placementOffsetY || 0));
+  form.append('placement_offset_x', String(getEffectivePlacementOffsetX()));
+  form.append('placement_offset_y', String(getEffectivePlacementOffsetY()));
   form.append('customer_prompt', formState.customerPrompt.trim());
   form.append('background_mode', formState.backgroundMode);
 }
@@ -2200,10 +2206,16 @@ onBeforeUnmount(() => {
 }
 
 .placement-preview-mask.is-pilates {
+  /* stylelint-disable order/properties-order, property-no-vendor-prefix */
+  -webkit-mask-image: url('/print-prep/pilates-mask.png');
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: 100% 100%;
   mask-image: url('/print-prep/pilates-mask.png');
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: 100% 100%;
+  /* stylelint-enable order/properties-order, property-no-vendor-prefix */
 }
 
 .placement-preview-image {
