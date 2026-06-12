@@ -241,16 +241,43 @@ const isBusy = computed(
 const canCreateBase = computed(() => !!selectedFile.value && !isBusy.value);
 const canCreateLayout = computed(() => !!baseImagePath.value && !isBusy.value);
 
+const baseImageLoadFailed = ref(false);
 const baseFile = computed(() => {
   const files = baseResult.value?.files;
   return files?.base_image || files?.super_resolved || files?.ai_preprocessed || null;
 });
+const basePreviewFile = computed(() => {
+  const files = baseResult.value?.files;
+  return files?.base_preview || baseFile.value;
+});
+function getDerivedBasePreviewLocation(file: PrintPrepApi.FileInfo | null) {
+  const location = file ? getPrintPrepFileLocation(file) : '';
+  return location.replace(/_base_image\.(?:png|jpe?g|webp)$/i, '_base_preview.jpg');
+}
 const baseImagePath = computed(() => baseFile.value?.path || '');
+const basePreferredImageUrl = computed(() =>
+  resolveAssetUrl(
+    baseResult.value?.files?.base_preview
+      ? getPrintPrepFileLocation(basePreviewFile.value || undefined)
+      : getDerivedBasePreviewLocation(baseFile.value),
+  ),
+);
+const baseFallbackImageUrl = computed(() =>
+  resolveAssetUrl(baseFile.value ? getPrintPrepFileLocation(baseFile.value) : undefined),
+);
 const baseImageUrl = computed(
   () =>
-    uploadedFileMap.value.base_image ||
-    resolveAssetUrl(baseFile.value ? getPrintPrepFileLocation(baseFile.value) : undefined),
+    (baseImageLoadFailed.value ? baseFallbackImageUrl.value : basePreferredImageUrl.value) ||
+    baseFallbackImageUrl.value,
 );
+function handleBaseImageLoadError() {
+  if (!baseImageLoadFailed.value && baseFallbackImageUrl.value) {
+    baseImageLoadFailed.value = true;
+  }
+}
+watch(basePreferredImageUrl, () => {
+  baseImageLoadFailed.value = false;
+});
 const finalPreviewUrl = computed(() =>
   uploadedFileMap.value.preview ||
   resolveAssetUrl(finalResult.value?.files?.preview?.url),
@@ -1892,6 +1919,7 @@ onBeforeUnmount(() => {
                     :style="placementPreviewImageStyle"
                     crossorigin="anonymous"
                     draggable="false"
+                    @error="handleBaseImageLoadError"
                   />
                 </div>
                 <img
@@ -1915,7 +1943,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="baseImageUrl" class="preview-block">
               <div class="preview-title">AI 底图</div>
-              <img :src="baseImageUrl" alt="AI 底图" />
+              <img :src="baseImageUrl" alt="AI 底图" @error="handleBaseImageLoadError" />
             </div>
             <div v-if="finalPreviewUrl" class="preview-block">
               <div class="preview-title">最终预览图</div>

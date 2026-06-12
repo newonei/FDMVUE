@@ -123,6 +123,7 @@ export namespace PrintPrepApi {
   export interface ResultFiles {
     original_upload?: FileInfo;
     base_image?: FileInfo;
+    base_preview?: FileInfo;
     ai_preprocessed?: FileInfo;
     super_resolved?: FileInfo;
     preview?: FileInfo;
