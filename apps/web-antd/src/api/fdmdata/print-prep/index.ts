@@ -203,6 +203,13 @@ export namespace PrintPrepApi {
     size_cm?: string;
     template_id?: string;
   }
+
+  export interface HistoryResp {
+    count?: number;
+    items?: HistoryItem[];
+    list?: HistoryItem[];
+    total?: number;
+  }
 }
 
 export function resolvePrintPrepAssetUrl(url?: string) {
@@ -358,7 +365,7 @@ export function getPrintPrepJob(jobId: string) {
 }
 
 export function getPrintPrepHistory() {
-  return fetchJson<PrintPrepApi.HistoryItem[] | { list?: PrintPrepApi.HistoryItem[] }>(
+  return fetchJson<PrintPrepApi.HistoryItem[] | PrintPrepApi.HistoryResp>(
     '/api/v1/print-prep/history',
   );
 }
