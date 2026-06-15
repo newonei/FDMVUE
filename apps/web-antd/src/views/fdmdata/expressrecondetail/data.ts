@@ -67,6 +67,17 @@ function formatWeight({ cellValue }: { cellValue: unknown }) {
   return Number.isFinite(n) ? n.toFixed(3) : String(cellValue);
 }
 
+const statusLabelMap = new Map(
+  EXPRESS_RECON_STATUS_OPTIONS.map((item) => [item.value, item.label]),
+);
+
+function formatStatus({ cellValue }: { cellValue: unknown }) {
+  if (cellValue === null || cellValue === undefined || cellValue === '') {
+    return '';
+  }
+  return statusLabelMap.get(String(cellValue)) ?? String(cellValue);
+}
+
 export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailApi.ExpressReconDetail>['columns'] {
   return [
     {
@@ -77,10 +88,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       showOverflow: 'tooltip',
     },
     {
+      field: 'orderItems',
+      title: '查看商品',
+      width: 100,
+      fixed: 'left',
+      slots: { default: 'colOrderItems' },
+    },
+    {
       field: 'status',
       title: '状态',
       minWidth: 110,
       fixed: 'left',
+      formatter: formatStatus,
     },
     {
       field: 'statusMessage',

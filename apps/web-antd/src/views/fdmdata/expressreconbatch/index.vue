@@ -2,8 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataExpressReconBatchApi } from '#/api/fdmdata/expressreconbatch';
 
-import { onBeforeUnmount } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -19,17 +19,60 @@ import {
   getExpressReconBatchPage,
   recalculateExpressReconBatch,
 } from '#/api/fdmdata/expressreconbatch';
+import {
+  getExpressReconPeriod,
+  type FdmdataExpressReconPeriodApi,
+} from '#/api/fdmdata/expressreconperiod';
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
-import ImportModal from './modules/import-modal.vue';
+import ReconcileModal from './modules/reconcile-modal.vue';
 
 defineOptions({ name: 'FdmdataExpressReconBatch' });
 
+const route = useRoute();
 const router = useRouter();
-const [ImportModalComp, importModalApi] = useVbenModal({
-  connectedComponent: ImportModal,
+const [ReconcileModalComp, reconcileModalApi] = useVbenModal({
+  connectedComponent: ReconcileModal,
 });
+
+const currentPeriod = ref<
+  FdmdataExpressReconPeriodApi.ExpressReconPeriod | undefined
+>();
+
+function getRoutePeriodId() {
+  const raw = route.query.periodId;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+const periodId = computed(() => getRoutePeriodId());
+
+async function loadPeriod() {
+  const id = periodId.value;
+  if (!id) {
+    currentPeriod.value = undefined;
+    return;
+  }
+  try {
+    currentPeriod.value = await getExpressReconPeriod(id);
+  } catch {
+    currentPeriod.value = undefined;
+  }
+}
+
+function openReconcileModal() {
+  if (!periodId.value) {
+    message.warning('请先从「对账账期」进入某个账期再上传账单');
+    return;
+  }
+  reconcileModalApi.setData({ periodId: periodId.value }).open();
+}
+
+function goBackToPeriod() {
+  router.push({ path: '/fdmdata/express-recon/period' });
+}
 
 const pollTimers = new Map<number, number>();
 
@@ -43,6 +86,7 @@ async function handleDelete(row: FdmdataExpressReconBatchApi.ExpressReconBatch) 
     await deleteExpressReconBatch(row.id);
     message.success($t('ui.actionMessage.deleteSuccess', [row.id]));
     gridApi.query();
+    void loadPeriod();
   } finally {
     hideLoading();
   }
@@ -61,6 +105,7 @@ async function handleRecalculate(
       ).toFixed(2)}`,
     );
     gridApi.query();
+    void loadPeriod();
   } finally {
     hideLoading();
   }
@@ -83,7 +128,7 @@ async function handleExport() {
   });
 }
 
-function handleImportSubmitted(batchId?: number) {
+function handleReconcileSubmitted(batchId?: number) {
   gridApi.query();
   if (batchId) {
     startPollImportBatch(batchId);
@@ -100,13 +145,14 @@ function startPollImportBatch(batchId: number) {
 
       if (batch.status === 'RECONCILED') {
         stopPollImportBatch(batchId);
-        message.success(`导入对账完成：${batch.batchNo}`);
+        message.success(`对账完成：${batch.batchNo}`);
+        void loadPeriod();
         return;
       }
 
       if (batch.status === 'FAILED') {
         stopPollImportBatch(batchId);
-        message.error(batch.remark || `导入对账失败：${batch.batchNo}`);
+        message.error(batch.remark || `对账失败：${batch.batchNo}`);
         return;
       }
 
@@ -151,6 +197,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
+            periodId: periodId.value,
           }),
       },
     },
@@ -158,22 +205,48 @@ const [Grid, gridApi] = useVbenVxeGrid({
     toolbarConfig: { refresh: true, search: true },
   } as VxeTableGridOptions<FdmdataExpressReconBatchApi.ExpressReconBatch>,
 });
+
+watch(
+  periodId,
+  () => {
+    void loadPeriod();
+    gridApi.query();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
-    <ImportModalComp @success="handleImportSubmitted" />
+    <ReconcileModalComp @success="handleReconcileSubmitted" />
 
     <div class="express-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
         <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">
-            快递费对账批次
+          <h2 class="mb-1 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Button
+              v-if="periodId"
+              type="link"
+              class="!h-auto !p-0"
+              @click="goBackToPeriod"
+            >
+              <IconifyIcon icon="lucide:arrow-left" />
+            </Button>
+            快递公司对账
           </h2>
-          <p class="mb-0 text-xs text-muted-foreground">
-            导入订单明细和快递账单，按运单号汇总重量并计算预估费用。
+          <p v-if="currentPeriod" class="mb-0 text-xs text-muted-foreground">
+            账期：{{ currentPeriod.periodName }}
+            <template v-if="currentPeriod.billMonth">
+              · {{ currentPeriod.billMonth }}</template
+            >
+            · 订单 {{ currentPeriod.orderCount ?? 0 }} 单 · 已对账
+            {{ currentPeriod.reconciledWaybillCount ?? 0 }} · 未对账
+            {{ currentPeriod.unreconciledWaybillCount ?? 0 }}
+          </p>
+          <p v-else class="mb-0 text-xs text-muted-foreground">
+            按账单运单匹配账期订单池，逐家快递公司分别对账。
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -183,11 +256,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
             </template>
             导出批次
           </Button>
-          <Button type="primary" @click="importModalApi.open()">
+          <Button v-if="periodId" type="primary" @click="openReconcileModal">
             <template #icon>
               <IconifyIcon icon="lucide:upload" />
             </template>
-            导入并对账
+            上传账单对账
           </Button>
         </div>
       </header>

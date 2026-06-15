@@ -50,6 +50,32 @@ interface SummaryGroup {
   platformCode?: string;
 }
 
+interface WeeklyCompareColumn {
+  isTotal?: boolean;
+  key: string;
+  platformLabel?: string;
+  shop?: SummaryShop;
+  title: string;
+}
+
+type WeeklyComparePeriodKey = 'current' | 'previous';
+
+type WeeklyCompareRowKey =
+  | 'costRatioDelta'
+  | 'currentCostRatio'
+  | 'currentMarketingCost'
+  | 'currentSales'
+  | 'previousCostRatio'
+  | 'previousMarketingCost'
+  | 'previousSales'
+  | 'salesGrowth';
+
+interface WeeklyCompareRow {
+  className?: string;
+  key: WeeklyCompareRowKey;
+  label: string;
+}
+
 const PERIOD_OPTIONS = [
   { label: '日', value: 'DAY' },
   { label: '周', value: 'WEEK' },
@@ -81,7 +107,7 @@ const VIEW_MODE_OPTIONS = [
   { label: '订单', value: 'ORDER' },
 ];
 
-const METRIC_DESCRIPTIONS: Record<string, string> = {
+const METRIC_DESCRIPTIONS = {
   avgOrderValue: '客单价 = 实际销售额 / 真实订单数，用于观察订单质量。',
   brushRatio:
     '刷单占比 = 刷单金额 / 实际销售额，用于识别刷单对经营口径的影响。',
@@ -90,9 +116,9 @@ const METRIC_DESCRIPTIONS: Record<string, string> = {
     '退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察退款风险。',
   roi: '投产比 = 实际销售额 / 营销费用，越高说明投放效率越好。',
   salesAmount: '实际销售额使用主表真实净销售额，已剔除刷单金额影响。',
-};
+} satisfies Record<string, string>;
 
-const MATRIX_VIEW_DESCRIPTIONS: Record<string, string> = {
+const MATRIX_VIEW_DESCRIPTIONS = {
   COST_RATIO: '费比 = 营销费用 / 实际销售额 × 100%。',
   MARKETING: '营销费 = 各平台推广投放费用汇总。',
   ORDER: '订单 = 真实订单数 = 已支付订单数 - 刷单单量。',
@@ -100,16 +126,16 @@ const MATRIX_VIEW_DESCRIPTIONS: Record<string, string> = {
     '退款 = 退款金额；退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额。',
   SALES: METRIC_DESCRIPTIONS.salesAmount,
   SUMMARY: '综合展示实际销售额、营销费用、费比三项核心指标。',
-};
+} satisfies Record<string, string>;
 
-const DAILY_COLUMN_DESCRIPTIONS: Record<string, string> = {
+const DAILY_COLUMN_DESCRIPTIONS = {
   costRatio: MATRIX_VIEW_DESCRIPTIONS.COST_RATIO,
   marketingCost: MATRIX_VIEW_DESCRIPTIONS.MARKETING,
   periodLabel: '日期：当前抽屉内按日聚合展示。',
   realOrderCount: MATRIX_VIEW_DESCRIPTIONS.ORDER,
   refundAmount: '退款金额：当前日期店铺退款金额汇总。',
   salesAmount: METRIC_DESCRIPTIONS.salesAmount,
-};
+} satisfies Record<string, string>;
 
 function tableHeader(label: string, description: string) {
   return () =>
@@ -141,6 +167,12 @@ const filters = reactive({
 const loading = ref(false);
 const exporting = ref(false);
 const summary = ref<Summary>({
+  periods: [],
+  rows: [],
+  shops: [],
+});
+const weeklyCompareLoading = ref(false);
+const weeklyCompareSummary = ref<Summary>({
   periods: [],
   rows: [],
   shops: [],
@@ -199,6 +231,14 @@ function ratioText(value: unknown): string {
   return round2(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
+function signedPercentText(value: null | number | undefined): string {
+  if (value === null || value === undefined) return '-';
+  return `${round2(value).toLocaleString('zh-CN', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })}%`;
+}
+
 function normalizeDateValue(value: unknown): string | undefined {
   if (value === null || value === undefined || value === '') return undefined;
   if (Array.isArray(value) && value.length >= 3) {
@@ -222,6 +262,31 @@ function normalizeDateRangeValue(value: unknown): FdmDateRange {
   ];
 }
 
+function startOfIsoWeek(value = dayjs()) {
+  const weekdayOffset = (value.day() + 6) % 7;
+  return value.startOf('day').subtract(weekdayOffset, 'day');
+}
+
+const weeklyComparePeriods = computed(() => {
+  const currentWeekStart = startOfIsoWeek();
+  const previousStart = currentWeekStart.subtract(2, 'week');
+  const previousEnd = currentWeekStart.subtract(8, 'day');
+  const currentStart = currentWeekStart.subtract(1, 'week');
+  const currentEnd = currentWeekStart.subtract(1, 'day');
+  return {
+    current: {
+      endDate: currentEnd.format('YYYY-MM-DD'),
+      label: '上周',
+      startDate: currentStart.format('YYYY-MM-DD'),
+    },
+    previous: {
+      endDate: previousEnd.format('YYYY-MM-DD'),
+      label: '上上周',
+      startDate: previousStart.format('YYYY-MM-DD'),
+    },
+  };
+});
+
 function buildParams() {
   const statDate = normalizeDateRangeValue(filters.statDate);
   return {
@@ -234,10 +299,28 @@ function buildParams() {
   };
 }
 
+function buildWeeklyCompareParams() {
+  const periods = weeklyComparePeriods.value;
+  return {
+    channelType: filters.channelType,
+    hideEmptyPeriod: false,
+    periodType: 'WEEK',
+    platformCode: filters.platformCode || undefined,
+    shopNames: filters.shopNames.join(',') || undefined,
+    statDate: [periods.previous.startDate, periods.current.endDate],
+  };
+}
+
 async function loadSummary() {
   loading.value = true;
+  weeklyCompareLoading.value = true;
   try {
-    summary.value = await getEcShopDailySummary(buildParams());
+    const [summaryData, weeklyCompareData] = await Promise.all([
+      getEcShopDailySummary(buildParams()),
+      getEcShopDailySummary(buildWeeklyCompareParams()),
+    ]);
+    summary.value = summaryData;
+    weeklyCompareSummary.value = weeklyCompareData;
     if (summary.value.startDate && summary.value.endDate) {
       filters.statDate = normalizeDateRangeValue([
         summary.value.startDate,
@@ -246,6 +329,7 @@ async function loadSummary() {
     }
   } finally {
     loading.value = false;
+    weeklyCompareLoading.value = false;
   }
 }
 
@@ -301,6 +385,33 @@ const periods = computed(() => summary.value.periods ?? []);
 const rows = computed(() => summary.value.rows ?? []);
 const shops = computed(() => summary.value.shops ?? []);
 const totals = computed(() => summary.value.totals ?? {});
+const weeklyCompareRowsRaw = computed(() => weeklyCompareSummary.value.rows ?? []);
+const weeklyCompareShops = computed(() => weeklyCompareSummary.value.shops ?? []);
+
+const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() => [
+  ...weeklyCompareShops.value.map((shop) => ({
+    key: shop.shopKey,
+    platformLabel: shop.platformLabel,
+    shop,
+    title: shop.shopName,
+  })),
+  {
+    isTotal: true,
+    key: 'TOTAL',
+    title: '合计',
+  },
+]);
+
+const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
+  { key: 'previousSales', label: '上上周' },
+  { key: 'currentSales', label: '上周' },
+  { className: 'is-emphasis', key: 'salesGrowth', label: '环比' },
+  { key: 'previousMarketingCost', label: '上上周营销费用' },
+  { key: 'currentMarketingCost', label: '上周营销费用' },
+  { key: 'previousCostRatio', label: '上上周费比' },
+  { key: 'currentCostRatio', label: '上周费比' },
+  { className: 'is-emphasis', key: 'costRatioDelta', label: '幅度' },
+];
 
 const visibleShops = computed(() => {
   if (showAllShops.value || filters.shopNames.length > 0) return shops.value;
@@ -311,7 +422,11 @@ const matrixHeaderTitle = computed(() => {
   const option = VIEW_MODE_OPTIONS.find(
     (item) => item.value === viewMode.value,
   );
-  return `${option?.label ?? '综合'}：${MATRIX_VIEW_DESCRIPTIONS[viewMode.value] ?? ''}`;
+  const description =
+    MATRIX_VIEW_DESCRIPTIONS[
+      viewMode.value as keyof typeof MATRIX_VIEW_DESCRIPTIONS
+    ] ?? '';
+  return `${option?.label ?? '综合'}：${description}`;
 });
 
 const rowsByPeriod = computed(() => {
@@ -406,7 +521,119 @@ function aggregateMetrics(list: SummaryRow[]): SummaryMetric {
   return metric;
 }
 
-function periodMetric(periodKey: string, group?: SummaryGroup): SummaryMetric {
+function isDateRangeOverlap(
+  row: SummaryRow,
+  range: { endDate: string; startDate: string },
+) {
+  const rowStart = normalizeDateValue(row.startDate);
+  const rowEnd = normalizeDateValue(row.endDate);
+  return Boolean(
+    rowStart &&
+      rowEnd &&
+      rowStart <= range.endDate &&
+      rowEnd >= range.startDate,
+  );
+}
+
+function weeklyRowsInPeriod(periodKey: WeeklyComparePeriodKey) {
+  const range = weeklyComparePeriods.value[periodKey];
+  return weeklyCompareRowsRaw.value.filter((row) =>
+    isDateRangeOverlap(row, range),
+  );
+}
+
+function weeklyMetric(
+  periodKey: WeeklyComparePeriodKey,
+  column: WeeklyCompareColumn,
+): SummaryMetric | undefined {
+  const rowsInPeriod = weeklyRowsInPeriod(periodKey);
+  if (column.isTotal) return aggregateMetrics(rowsInPeriod);
+  return rowsInPeriod.find((row) => row.shopKey === column.shop?.shopKey);
+}
+
+function growthPercent(current: unknown, previous: unknown): null | number {
+  const previousValue = n(previous);
+  if (previousValue === 0) return null;
+  return round2(((n(current) - previousValue) / previousValue) * 100);
+}
+
+function ratioDelta(
+  current: null | number | undefined,
+  previous: null | number | undefined,
+): null | number {
+  if (current === null || current === undefined) return null;
+  if (previous === null || previous === undefined) return null;
+  return round2(n(current) - n(previous));
+}
+
+function weeklyCompareCellValue(
+  rowKey: WeeklyCompareRowKey,
+  column: WeeklyCompareColumn,
+) {
+  const previous = weeklyMetric('previous', column);
+  const current = weeklyMetric('current', column);
+  switch (rowKey) {
+    case 'costRatioDelta': {
+      return signedPercentText(
+        ratioDelta(current?.costRatio, previous?.costRatio),
+      );
+    }
+    case 'currentCostRatio': {
+      return percentText(current?.costRatio);
+    }
+    case 'currentMarketingCost': {
+      return moneyTextOrDash(current?.marketingCost);
+    }
+    case 'currentSales': {
+      return moneyTextOrDash(current?.salesAmount);
+    }
+    case 'previousCostRatio': {
+      return percentText(previous?.costRatio);
+    }
+    case 'previousMarketingCost': {
+      return moneyTextOrDash(previous?.marketingCost);
+    }
+    case 'previousSales': {
+      return moneyTextOrDash(previous?.salesAmount);
+    }
+    case 'salesGrowth': {
+      return signedPercentText(
+        growthPercent(current?.salesAmount, previous?.salesAmount),
+      );
+    }
+    default: {
+      return '-';
+    }
+  }
+}
+
+function weeklyCompareCellClass(
+  rowKey: WeeklyCompareRowKey,
+  column: WeeklyCompareColumn,
+) {
+  if (rowKey !== 'salesGrowth' && rowKey !== 'costRatioDelta') {
+    return column.isTotal ? 'is-total' : '';
+  }
+  const previous = weeklyMetric('previous', column);
+  const current = weeklyMetric('current', column);
+  const value =
+    rowKey === 'salesGrowth'
+      ? growthPercent(current?.salesAmount, previous?.salesAmount)
+      : ratioDelta(current?.costRatio, previous?.costRatio);
+  if (value === null || value === undefined) {
+    return column.isTotal ? 'is-total' : '';
+  }
+  return [
+    column.isTotal ? 'is-total' : '',
+    value > 0 ? 'is-positive' : '',
+    value < 0 ? 'is-negative' : '',
+  ];
+}
+
+function periodMetric(
+  periodKey: string,
+  group?: Partial<SummaryGroup>,
+): SummaryMetric {
   let list = rowsByPeriod.value.get(periodKey) ?? [];
   if (group?.channelType) {
     list = list.filter((item) => item.channelType === group.channelType);
@@ -865,6 +1092,74 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
+        <section class="weekly-compare-panel">
+          <div class="matrix-head">
+            <div>
+              <div class="section-title">近两周店铺对比</div>
+              <div class="section-sub">
+                {{ weeklyComparePeriods.previous.label }}
+                {{ weeklyComparePeriods.previous.startDate }} ~
+                {{ weeklyComparePeriods.previous.endDate }} 对比
+                {{ weeklyComparePeriods.current.label }}
+                {{ weeklyComparePeriods.current.startDate }} ~
+                {{ weeklyComparePeriods.current.endDate }}
+              </div>
+            </div>
+            <Tag color="gold">周环比</Tag>
+          </div>
+          <Spin :spinning="weeklyCompareLoading">
+            <div
+              v-if="weeklyCompareColumns.length <= 1"
+              class="empty-block weekly-empty"
+            >
+              近两周暂无可对比店铺数据
+            </div>
+            <div v-else class="weekly-compare-scroll">
+              <table class="weekly-compare-table">
+                <thead>
+                  <tr>
+                    <th class="sticky-col compare-row-label">店铺</th>
+                    <th
+                      v-for="column in weeklyCompareColumns"
+                      :key="column.key"
+                      class="weekly-shop-col"
+                      :class="{ 'is-total': column.isTotal }"
+                      :title="
+                        column.isTotal
+                          ? '合计'
+                          : `${column.platformLabel} · ${column.title}`
+                      "
+                    >
+                      <span>{{ column.title }}</span>
+                      <em v-if="column.platformLabel">{{
+                        column.platformLabel
+                      }}</em>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="row in weeklyCompareDisplayRows"
+                    :key="row.key"
+                    :class="row.className"
+                  >
+                    <th class="sticky-col compare-row-label">
+                      {{ row.label }}
+                    </th>
+                    <td
+                      v-for="column in weeklyCompareColumns"
+                      :key="column.key"
+                      :class="weeklyCompareCellClass(row.key, column)"
+                    >
+                      {{ weeklyCompareCellValue(row.key, column) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Spin>
+        </section>
+
         <Row :gutter="[16, 16]" class="mb-4">
           <Col :xl="14" :xs="24">
             <section class="chart-panel">
@@ -1105,7 +1400,8 @@ onBeforeUnmount(() => {
 .insight-strip,
 .kpi-card,
 .matrix-panel,
-.risk-panel {
+.risk-panel,
+.weekly-compare-panel {
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
@@ -1246,9 +1542,98 @@ onBeforeUnmount(() => {
 }
 
 .risk-panel,
-.matrix-panel {
+.matrix-panel,
+.weekly-compare-panel {
   padding: 14px;
   margin-bottom: 16px;
+}
+
+.weekly-compare-scroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.weekly-compare-table {
+  width: max-content;
+  min-width: 100%;
+  font-size: 12px;
+  border-spacing: 0;
+  border-collapse: separate;
+}
+
+.weekly-compare-table th,
+.weekly-compare-table td {
+  height: 32px;
+  padding: 6px 8px;
+  text-align: center;
+  white-space: nowrap;
+  background: hsl(var(--card));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.weekly-compare-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 104px;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+  background: #facc15;
+}
+
+.weekly-compare-table thead th span,
+.weekly-compare-table thead th em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weekly-compare-table thead th em {
+  margin-top: 2px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.weekly-compare-table tbody th {
+  font-weight: 650;
+  text-align: left;
+  background: hsl(var(--muted) / 28%);
+}
+
+.weekly-compare-table tbody tr.is-emphasis th,
+.weekly-compare-table tbody tr.is-emphasis td {
+  background: #fde68a;
+}
+
+.weekly-compare-table td.is-total,
+.weekly-compare-table th.is-total {
+  background: #fef08a;
+}
+
+.weekly-compare-table td.is-positive {
+  color: #b45309;
+}
+
+.weekly-compare-table td.is-negative {
+  color: #dc2626;
+}
+
+.compare-row-label {
+  left: 0;
+  z-index: 3;
+  width: 142px;
+  min-width: 142px;
+  max-width: 142px;
+}
+
+.weekly-empty {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
 }
 
 .risk-list {

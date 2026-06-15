@@ -4,29 +4,44 @@ import type { FdmdataExpressReconDetailApi } from '#/api/fdmdata/expressrecondet
 
 import { useRoute } from 'vue-router';
 
-import { Page } from '@vben/common-ui';
+import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button } from 'ant-design-vue';
 
-import { useVbenVxeGrid } from '#/adapter/vxe-table';
+import { TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   exportExpressReconDetailExcel,
   getExpressReconDetailPage,
 } from '#/api/fdmdata/expressrecondetail';
 
 import { useGridColumns, useGridFormSchema } from './data';
+import OrderItemsModal from './modules/order-items-modal.vue';
 
 defineOptions({ name: 'FdmdataExpressReconDetail' });
 
 const route = useRoute();
+const [OrderItemsModalComp, orderItemsModalApi] = useVbenModal({
+  connectedComponent: OrderItemsModal,
+});
 
 function getRouteBatchId() {
   const raw = route.query.batchId;
   const value = Array.isArray(raw) ? raw[0] : raw;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function handleOpenOrderItems(row: FdmdataExpressReconDetailApi.ExpressReconDetail) {
+  const batchId = row.batchId ?? getRouteBatchId();
+  if (!batchId || !row.waybillNo) return;
+  orderItemsModalApi
+    .setData({
+      batchId,
+      waybillNo: row.waybillNo,
+    })
+    .open();
 }
 
 async function handleExport() {
@@ -68,6 +83,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 <template>
   <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+    <OrderItemsModalComp />
+
     <div class="express-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
@@ -93,7 +110,20 @@ const [Grid, gridApi] = useVbenVxeGrid({
           class="express-vxe-wrapper"
           grid-class="express-vxe-grid"
           table-title="对账明细"
-        />
+        >
+          <template #colOrderItems="{ row }">
+            <TableAction
+              :actions="[
+                {
+                  label: '查看',
+                  type: 'link',
+                  auth: ['fdmdata:express-recon-detail:query'],
+                  onClick: () => handleOpenOrderItems(row),
+                },
+              ]"
+            />
+          </template>
+        </Grid>
       </div>
     </div>
   </Page>

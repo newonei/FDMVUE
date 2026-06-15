@@ -5,6 +5,7 @@ import { requestClient } from '#/api/request';
 export namespace FdmdataExpressReconBatchApi {
   export interface ExpressReconBatch {
     id?: number;
+    periodId?: number;
     batchNo?: string;
     batchName?: string;
     carrierCode?: string;
@@ -40,13 +41,11 @@ export namespace FdmdataExpressReconBatchApi {
     diffAmount: number;
   }
 
-  export interface ImportParams {
-    orderFile: File;
+  export interface ReconcileParams {
+    periodId: number;
     billFile: File;
     templateId?: number;
     batchName?: string;
-    billMonth?: string;
-    carrierCode?: string;
   }
 }
 
@@ -68,16 +67,17 @@ export function deleteExpressReconBatch(id: number) {
   );
 }
 
-export function importAndReconcileExpress(params: FdmdataExpressReconBatchApi.ImportParams) {
+export function reconcileCarrierExpress(
+  params: FdmdataExpressReconBatchApi.ReconcileParams,
+) {
   const formData = new FormData();
-  formData.append('orderFile', params.orderFile);
+  formData.append('periodId', String(params.periodId));
   formData.append('billFile', params.billFile);
-  if (params.templateId !== undefined) formData.append('templateId', String(params.templateId));
+  if (params.templateId !== undefined)
+    formData.append('templateId', String(params.templateId));
   if (params.batchName) formData.append('batchName', params.batchName);
-  if (params.billMonth) formData.append('billMonth', params.billMonth);
-  if (params.carrierCode) formData.append('carrierCode', params.carrierCode);
   return requestClient.post<FdmdataExpressReconBatchApi.ImportResult>(
-    '/fdmdata/express-recon-batch/import-and-reconcile',
+    '/fdmdata/express-recon-batch/reconcile',
     formData,
     { headers: { 'Content-Type': 'multipart/form-data' } },
   );
@@ -98,4 +98,8 @@ export function exportExpressReconBatchExcel(params: Record<string, unknown>) {
   return requestClient.download('/fdmdata/express-recon-batch/export-excel', {
     params,
   });
+}
+
+export function downloadExpressBillTemplate() {
+  return requestClient.download('/fdmdata/express-recon-batch/bill-template');
 }
