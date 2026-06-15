@@ -51,8 +51,10 @@ interface SummaryGroup {
 }
 
 interface WeeklyCompareColumn {
+  isPlatform?: boolean;
   isTotal?: boolean;
   key: string;
+  platformCode?: string;
   platformLabel?: string;
   shop?: SummaryShop;
   title: string;
@@ -388,18 +390,35 @@ const totals = computed(() => summary.value.totals ?? {});
 const weeklyCompareRowsRaw = computed(() => weeklyCompareSummary.value.rows ?? []);
 const weeklyCompareShops = computed(() => weeklyCompareSummary.value.shops ?? []);
 
+const weeklyComparePlatformColumns = computed<WeeklyCompareColumn[]>(() => {
+  const presentPlatformCodes = new Set<string>();
+  for (const row of weeklyCompareRowsRaw.value) {
+    if (row.platformCode) presentPlatformCodes.add(row.platformCode);
+  }
+  return PLATFORM_OPTIONS.filter(
+    (item) => item.value && presentPlatformCodes.has(item.value),
+  ).map((item) => ({
+    isPlatform: true,
+    key: `PLATFORM:${item.value}`,
+    platformCode: item.value,
+    platformLabel: '平台汇总',
+    title: item.label,
+  }));
+});
+
 const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() => [
+  {
+    isTotal: true,
+    key: 'TOTAL',
+    title: '合计',
+  },
+  ...weeklyComparePlatformColumns.value,
   ...weeklyCompareShops.value.map((shop) => ({
     key: shop.shopKey,
     platformLabel: shop.platformLabel,
     shop,
     title: shop.shopName,
   })),
-  {
-    isTotal: true,
-    key: 'TOTAL',
-    title: '合计',
-  },
 ]);
 
 const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
@@ -548,7 +567,25 @@ function weeklyMetric(
 ): SummaryMetric | undefined {
   const rowsInPeriod = weeklyRowsInPeriod(periodKey);
   if (column.isTotal) return aggregateMetrics(rowsInPeriod);
+  if (column.isPlatform) {
+    return aggregateMetrics(
+      rowsInPeriod.filter((row) => row.platformCode === column.platformCode),
+    );
+  }
   return rowsInPeriod.find((row) => row.shopKey === column.shop?.shopKey);
+}
+
+function weeklyCompareColumnClasses(column: WeeklyCompareColumn) {
+  return [
+    column.isPlatform ? 'is-platform' : '',
+    column.isTotal ? 'is-total' : '',
+  ];
+}
+
+function weeklyCompareColumnTitle(column: WeeklyCompareColumn) {
+  if (column.isTotal) return '合计';
+  if (column.isPlatform) return `${column.title} · 平台汇总`;
+  return `${column.platformLabel} · ${column.title}`;
 }
 
 function growthPercent(current: unknown, previous: unknown): null | number {
@@ -611,8 +648,9 @@ function weeklyCompareCellClass(
   rowKey: WeeklyCompareRowKey,
   column: WeeklyCompareColumn,
 ) {
+  const columnClasses = weeklyCompareColumnClasses(column);
   if (rowKey !== 'salesGrowth' && rowKey !== 'costRatioDelta') {
-    return column.isTotal ? 'is-total' : '';
+    return columnClasses;
   }
   const previous = weeklyMetric('previous', column);
   const current = weeklyMetric('current', column);
@@ -621,10 +659,10 @@ function weeklyCompareCellClass(
       ? growthPercent(current?.salesAmount, previous?.salesAmount)
       : ratioDelta(current?.costRatio, previous?.costRatio);
   if (value === null || value === undefined) {
-    return column.isTotal ? 'is-total' : '';
+    return columnClasses;
   }
   return [
-    column.isTotal ? 'is-total' : '',
+    ...columnClasses,
     value > 0 ? 'is-positive' : '',
     value < 0 ? 'is-negative' : '',
   ];
@@ -1109,7 +1147,7 @@ onBeforeUnmount(() => {
           </div>
           <Spin :spinning="weeklyCompareLoading">
             <div
-              v-if="weeklyCompareColumns.length <= 1"
+              v-if="weeklyCompareRowsRaw.length === 0"
               class="empty-block weekly-empty"
             >
               近两周暂无可对比店铺数据
@@ -1123,12 +1161,8 @@ onBeforeUnmount(() => {
                       v-for="column in weeklyCompareColumns"
                       :key="column.key"
                       class="weekly-shop-col"
-                      :class="{ 'is-total': column.isTotal }"
-                      :title="
-                        column.isTotal
-                          ? '合计'
-                          : `${column.platformLabel} · ${column.title}`
-                      "
+                      :class="weeklyCompareColumnClasses(column)"
+                      :title="weeklyCompareColumnTitle(column)"
                     >
                       <span>{{ column.title }}</span>
                       <em v-if="column.platformLabel">{{
@@ -1608,6 +1642,11 @@ onBeforeUnmount(() => {
 .weekly-compare-table tbody tr.is-emphasis th,
 .weekly-compare-table tbody tr.is-emphasis td {
   background: #fde68a;
+}
+
+.weekly-compare-table td.is-platform,
+.weekly-compare-table th.is-platform {
+  background: #dbeafe;
 }
 
 .weekly-compare-table td.is-total,
