@@ -173,6 +173,7 @@ const summary = ref<Summary>({
   rows: [],
   shops: [],
 });
+const weeklyCompareExporting = ref(false);
 const weeklyCompareLoading = ref(false);
 const weeklyCompareSummary = ref<Summary>({
   periods: [],
@@ -345,6 +346,136 @@ async function handleExport() {
     });
   } finally {
     exporting.value = false;
+  }
+}
+
+function escapeExcelCell(value: unknown): string {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function weeklyCompareExportColumnTitle(column: WeeklyCompareColumn): string {
+  if (column.isTotal) return '合计';
+  if (column.isPlatform) return `${column.title}平台汇总`;
+  return column.platformLabel ? `${column.title}（${column.platformLabel}）` : column.title;
+}
+
+function plainExcelNumberText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(round2(value));
+}
+
+function plainExcelPercentText(value: null | number | undefined): string {
+  if (value === null || value === undefined) return '-';
+  return `${plainExcelNumberText(value)}%`;
+}
+
+function weeklyCompareExportCellValue(
+  rowKey: WeeklyCompareRowKey,
+  column: WeeklyCompareColumn,
+) {
+  const previous = weeklyMetric('previous', column);
+  const current = weeklyMetric('current', column);
+  switch (rowKey) {
+    case 'costRatioDelta': {
+      return plainExcelPercentText(
+        ratioDelta(current?.costRatio, previous?.costRatio),
+      );
+    }
+    case 'currentCostRatio': {
+      return plainExcelPercentText(current?.costRatio);
+    }
+    case 'currentMarketingCost': {
+      return plainExcelNumberText(current?.marketingCost);
+    }
+    case 'currentSales': {
+      return plainExcelNumberText(current?.salesAmount);
+    }
+    case 'previousCostRatio': {
+      return plainExcelPercentText(previous?.costRatio);
+    }
+    case 'previousMarketingCost': {
+      return plainExcelNumberText(previous?.marketingCost);
+    }
+    case 'previousSales': {
+      return plainExcelNumberText(previous?.salesAmount);
+    }
+    case 'salesGrowth': {
+      return plainExcelPercentText(
+        growthPercent(current?.salesAmount, previous?.salesAmount),
+      );
+    }
+    default: {
+      return '-';
+    }
+  }
+}
+
+function buildWeeklyCompareExcelHtml() {
+  const columns = weeklyCompareColumns.value;
+  const comparePeriods = weeklyComparePeriods.value;
+  const title = '近两周店铺对比';
+  const rangeText =
+    `${comparePeriods.previous.label} ${comparePeriods.previous.startDate} ~ ${comparePeriods.previous.endDate}` +
+    ` 对比 ${comparePeriods.current.label} ${comparePeriods.current.startDate} ~ ${comparePeriods.current.endDate}`;
+  const headerCells = [
+    '店铺',
+    ...columns.map((column) => weeklyCompareExportColumnTitle(column)),
+  ]
+    .map((cell) => `<th>${escapeExcelCell(cell)}</th>`)
+    .join('');
+  const bodyRows = weeklyCompareDisplayRows
+    .map((row) => {
+      const cells = [
+        row.label,
+        ...columns.map((column) =>
+          weeklyCompareExportCellValue(row.key, column),
+        ),
+      ]
+        .map((cell) => `<td>${escapeExcelCell(cell)}</td>`)
+        .join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('');
+  return `\uFEFF<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      table { border-collapse: collapse; font-family: Arial, "Microsoft YaHei", sans-serif; }
+      th, td { border: 1px solid #999; padding: 6px 8px; text-align: center; white-space: nowrap; }
+      th { background: #facc15; font-weight: 700; }
+      .title { font-size: 16px; font-weight: 700; text-align: left; }
+      .range { color: #666; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <tr><td class="title" colspan="${columns.length + 1}">${escapeExcelCell(title)}</td></tr>
+      <tr><td class="range" colspan="${columns.length + 1}">${escapeExcelCell(rangeText)}</td></tr>
+      <tr>${headerCells}</tr>
+      ${bodyRows}
+    </table>
+  </body>
+</html>`;
+}
+
+function handleWeeklyCompareExport() {
+  if (weeklyCompareRowsRaw.value.length === 0) return;
+  weeklyCompareExporting.value = true;
+  try {
+    const comparePeriods = weeklyComparePeriods.value;
+    const blob = new Blob([buildWeeklyCompareExcelHtml()], {
+      type: 'application/vnd.ms-excel;charset=utf-8',
+    });
+    downloadFileFromBlobPart({
+      fileName: `近两周店铺对比_${comparePeriods.previous.startDate}_${comparePeriods.current.endDate}.xls`,
+      source: blob,
+    });
+  } finally {
+    weeklyCompareExporting.value = false;
   }
 }
 
@@ -1143,7 +1274,17 @@ onBeforeUnmount(() => {
                 {{ weeklyComparePeriods.current.endDate }}
               </div>
             </div>
-            <Tag color="gold">周环比</Tag>
+            <div class="matrix-tools">
+              <Tag color="gold">周环比</Tag>
+              <Button
+                size="small"
+                :disabled="weeklyCompareRowsRaw.length === 0"
+                :loading="weeklyCompareExporting"
+                @click="handleWeeklyCompareExport"
+              >
+                导出 Excel
+              </Button>
+            </div>
           </div>
           <Spin :spinning="weeklyCompareLoading">
             <div
