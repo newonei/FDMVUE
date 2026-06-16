@@ -17,6 +17,7 @@ export namespace FdmdataExpressReconDetailApi {
     expressCompany?: string;
     estimatedWeight?: number;
     billWeight?: number;
+    weightDiff?: number;
     estimatedAmount?: number;
     actualAmount?: number;
     diffAmount?: number;

@@ -30,17 +30,29 @@ export function useGridFormSchema(): VbenFormSchema[] {
       fieldName: 'status',
       label: '状态',
       component: 'Select',
-      componentProps: { allowClear: true, options: EXPRESS_RECON_STATUS_OPTIONS },
+      componentProps: {
+        allowClear: true,
+        options: EXPRESS_RECON_STATUS_OPTIONS,
+      },
+    },
+    {
+      fieldName: 'feeDiffRateOver30',
+      label: '费用偏差>30%',
+      component: 'Switch',
+      componentProps: {
+        checkedChildren: '是',
+        unCheckedChildren: '否',
+      },
     },
     {
       fieldName: 'diffAmountMin',
-      label: '差额下限',
+      label: '费用差额下限',
       component: 'InputNumber',
       componentProps: { class: 'w-full', precision: 2 },
     },
     {
       fieldName: 'diffAmountMax',
-      label: '差额上限',
+      label: '费用差额上限',
       component: 'InputNumber',
       componentProps: { class: 'w-full', precision: 2 },
     },
@@ -88,6 +100,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       showOverflow: 'tooltip',
     },
     {
+      field: 'shopName',
+      title: '店铺',
+      minWidth: 160,
+      fixed: 'left',
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'orderItems',
       title: '查看商品',
       width: 100,
@@ -107,12 +126,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       minWidth: 180,
       showOverflow: 'tooltip',
     },
-    {
-      field: 'shopName',
-      title: '店铺',
-      minWidth: 160,
-      showOverflow: 'tooltip',
-    },
     { field: 'provinceNorm', title: '订单省份', minWidth: 100 },
     { field: 'billProvince', title: '账单省份', minWidth: 100 },
     {
@@ -125,6 +138,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
     {
       field: 'billWeight',
       title: '账单重量',
+      minWidth: 100,
+      align: 'right',
+      formatter: formatWeight,
+    },
+    {
+      field: 'weightDiff',
+      title: '重量差额',
       minWidth: 100,
       align: 'right',
       formatter: formatWeight,
@@ -145,7 +165,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
     },
     {
       field: 'diffAmount',
-      title: '差额',
+      title: '费用差额',
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,

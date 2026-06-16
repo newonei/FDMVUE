@@ -32,13 +32,19 @@ export function getExpressFeeTemplate(id: number) {
 export function createExpressFeeTemplate(
   data: FdmdataExpressFeeTemplateApi.ExpressFeeTemplate,
 ) {
-  return requestClient.post<number>('/fdmdata/express-fee-template/create', data);
+  return requestClient.post<number>(
+    '/fdmdata/express-fee-template/create',
+    data,
+  );
 }
 
 export function updateExpressFeeTemplate(
   data: FdmdataExpressFeeTemplateApi.ExpressFeeTemplate,
 ) {
-  return requestClient.put<boolean>('/fdmdata/express-fee-template/update', data);
+  return requestClient.put<boolean>(
+    '/fdmdata/express-fee-template/update',
+    data,
+  );
 }
 
 export function deleteExpressFeeTemplate(id: number) {
@@ -53,8 +59,14 @@ export async function getExpressFeeTemplateOptions() {
     pageNo: 1,
     pageSize: 100,
   } as PageParam & { enabled: number });
-  return page.list.map((item) => ({
-    label: `${item.templateName ?? item.templateCode}（${item.carrierName ?? ''}）`,
-    value: item.id!,
-  }));
+  return page.list
+    .toSorted((a, b) => {
+      const aIsZto = a.carrierCode === 'ZTO' ? 0 : 1;
+      const bIsZto = b.carrierCode === 'ZTO' ? 0 : 1;
+      return aIsZto - bIsZto || Number(b.id ?? 0) - Number(a.id ?? 0);
+    })
+    .map((item) => ({
+      label: `${item.templateName ?? item.templateCode}（${item.carrierName ?? ''}）`,
+      value: item.id!,
+    }));
 }
