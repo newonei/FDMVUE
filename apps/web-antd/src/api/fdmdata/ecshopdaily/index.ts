@@ -101,6 +101,15 @@ export namespace FdmdataEcShopDailyApi {
     shopKey: string;
     shopName: string;
     startDate?: string;
+    previousSalesAmount?: number;
+    salesGrowthRate?: number;
+    previousMarketingCost?: number;
+    marketingCostGrowthRate?: number;
+    previousRealOrderCount?: number;
+    realOrderCountGrowthRate?: number;
+    previousCostRatio?: number;
+    costRatioDelta?: number;
+    costRatioDirection?: string;
   }
 
   export interface EcShopDailySummaryRanking {
