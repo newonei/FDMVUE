@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import type {
   PrintPrepApi,
-  PrintPrepOutputFileKey,
 } from '#/api/fdmdata/print-prep';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
@@ -33,7 +32,6 @@ import {
 import {
   createPrintPrepBaseJob,
   createPrintPrepLayoutJob,
-  fetchPrintPrepOutputBlob,
   getPrintPrepHistory,
   getPrintPrepJob,
   getPrintPrepOptions,
@@ -41,7 +39,6 @@ import {
   PRINT_PREP_OUTPUT_FILE_DEFINITIONS,
   PRINT_PREP_API_BASE,
   resolvePrintPrepAssetUrl,
-  uploadPrintPrepOutputBlob,
   uploadPrintPrepReferenceBlob,
 } from '#/api/fdmdata/print-prep';
 
@@ -88,15 +85,6 @@ interface PrintPrepFormState {
   templateId: 'pilates_yuga_t_100x61';
 }
 
-interface GeneratedUploadSource {
-  blob?: Blob;
-  file?: PrintPrepApi.FileInfo;
-  fileName: string;
-  key: PrintPrepOutputFileKey;
-  label: string;
-  mimeType: string;
-}
-
 type CachedPrintPrepFormState = Partial<PrintPrepFormState> & {
   aiProviderDefaultMigrated?: boolean;
   aiPreprocessProvider?: string;
@@ -111,6 +99,7 @@ const PILATES_OUTLINE_PREVIEW_URL = '/print-prep/pilates-outline.png';
 const PILATES_DEFAULT_PLACEMENT_SCALE = 1.18;
 const PILATES_FIXED_REFERENCE_URL =
   'https://hbfdm.oss-cn-wuhan-lr.aliyuncs.com/%E7%A9%BA%E6%9D%BF-%E6%99%AE%E6%8B%89%E6%8F%90.png';
+const FINAL_OUTPUT_FILE_KEYS = new Set(['preview', 'jpg', 'pdf', 'ai', 'report']);
 
 const fallbackProductSizes: Record<ProductType, string[]> = {
   大号鼠标垫: [
@@ -209,11 +198,6 @@ const finalResult = ref<PrintPrepApi.PrintPrepResult | null>(null);
 const reportJson = ref('');
 const historyList = ref<PrintPrepApi.HistoryItem[]>([]);
 const errorMessage = ref('');
-const uploadedFileMap = ref<Partial<Record<PrintPrepOutputFileKey, string>>>({});
-const uploadErrors = ref<Partial<Record<PrintPrepOutputFileKey, string>>>({});
-const uploadTargetKeys = ref<PrintPrepOutputFileKey[]>([]);
-const uploadingGeneratedFiles = ref(false);
-const uploadingFileKey = ref<'' | PrintPrepOutputFileKey>('');
 
 const taskState = reactive({
   elapsedSeconds: 0,
@@ -247,9 +231,7 @@ const sizeOptions = computed(() =>
   })),
 );
 const isPilates = computed(() => formState.printProductType === '普拉提垫');
-const isBusy = computed(
-  () => baseLoading.value || layoutLoading.value || uploadingGeneratedFiles.value,
-);
+const isBusy = computed(() => baseLoading.value || layoutLoading.value);
 const canCreateBase = computed(() => !!selectedFile.value && !isBusy.value);
 const canCreateLayout = computed(() => !!baseImagePath.value && !isBusy.value);
 
@@ -290,10 +272,24 @@ function handleBaseImageLoadError() {
 watch(basePreferredImageUrl, () => {
   baseImageLoadFailed.value = false;
 });
-const finalPreviewUrl = computed(() =>
-  uploadedFileMap.value.preview ||
-  resolveAssetUrl(finalResult.value?.files?.preview?.url),
-);
+
+function getOutputFileDisplayPath(file: PrintPrepApi.FileInfo) {
+  return (
+    file.absolute_path ||
+    file.local_path ||
+    file.localTempPath ||
+    file.local_temp_path ||
+    file.file_path ||
+    file.path ||
+    file.url ||
+    ''
+  );
+}
+
+const finalPreviewUrl = computed(() => {
+  const preview = finalResult.value?.files?.preview;
+  return resolveAssetUrl(preview ? getPrintPrepFileLocation(preview) : undefined);
+});
 const isPilatesTemplatePreview = computed(
   () => isPilates.value && formState.layoutMode === 'pilates_template',
 );
@@ -308,36 +304,31 @@ const placementPreviewImageStyle = computed(() => ({
   '--placement-scale': String(getEffectivePlacementScale()),
 }));
 
-const downloadLinks = computed(() => {
-  return PRINT_PREP_OUTPUT_FILE_DEFINITIONS.map((item) => ({
-    ...item,
-    url: uploadedFileMap.value[item.key],
-  }))
-    .filter((item) => item.url);
+const sharedCopyInfo = computed(() => finalResult.value?.shared_copy);
+const outputDirectoryPath = computed(
+  () => sharedCopyInfo.value?.directory || finalResult.value?.local_directory || '',
+);
+const outputDirectoryLabel = computed(() =>
+  sharedCopyInfo.value?.directory ? '共享目录' : '后端输出目录',
+);
+const outputPathItems = computed(() => {
+  const files = finalResult.value?.files;
+  if (!files) return [];
+  const items: Array<{ key: string; label: string; path: string; url: string }> = [];
+  for (const definition of PRINT_PREP_OUTPUT_FILE_DEFINITIONS) {
+    if (!FINAL_OUTPUT_FILE_KEYS.has(definition.key)) continue;
+    const file = files[definition.key as keyof PrintPrepApi.ResultFiles];
+    const path = file ? getOutputFileDisplayPath(file) : '';
+    if (!path) continue;
+    items.push({
+      key: definition.key,
+      label: definition.label,
+      path,
+      url: resolveAssetUrl(getPrintPrepFileLocation(file)),
+    });
+  }
+  return items;
 });
-
-const uploadOutputItems = computed(() =>
-  PRINT_PREP_OUTPUT_FILE_DEFINITIONS.filter(
-    (item) =>
-      uploadTargetKeys.value.includes(item.key) ||
-      uploadedFileMap.value[item.key] ||
-      uploadErrors.value[item.key],
-  ).map((item) => {
-    const url = uploadedFileMap.value[item.key];
-    const error = uploadErrors.value[item.key];
-    const isCurrent = uploadingGeneratedFiles.value && uploadingFileKey.value === item.key;
-    return {
-      ...item,
-      error,
-      status: error ? 'failed' : url ? 'success' : isCurrent ? 'uploading' : 'pending',
-      url,
-    };
-  }),
-);
-
-const hasUploadFailures = computed(() =>
-  Object.keys(uploadErrors.value).some((key) => !!uploadErrors.value[key as PrintPrepOutputFileKey]),
-);
 
 const resultSummary = computed(() => {
   const data = finalResult.value;
@@ -540,44 +531,12 @@ function setError(error: unknown, prefix: string) {
   message.error(errorMessage.value);
 }
 
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function sanitizeFileToken(value: unknown, fallback: string) {
   const text = String(value || '')
     .trim()
     .replace(/[^A-Za-z0-9._-]+/g, '_')
     .replace(/^_+|_+$/g, '');
   return text || fallback;
-}
-
-function getOrderToken(result?: PrintPrepApi.PrintPrepResult | null) {
-  return sanitizeFileToken(result?.order_no || formState.orderNo, 'no-order');
-}
-
-function getUploadTimestamp() {
-  return new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-}
-
-function getFileExt(file: PrintPrepApi.FileInfo | undefined, fallback: string) {
-  const location = getPrintPrepFileLocation(file).split('?')[0] || '';
-  const match = /\.([A-Za-z0-9]+)$/.exec(location);
-  return (match?.[1] || fallback).toLowerCase();
-}
-
-function buildUploadFileName(
-  definition: (typeof PRINT_PREP_OUTPUT_FILE_DEFINITIONS)[number],
-  result: PrintPrepApi.PrintPrepResult,
-  file?: PrintPrepApi.FileInfo,
-) {
-  const orderToken = getOrderToken(result);
-  const ext = getFileExt(file, definition.fallbackExt);
-  return `${orderToken}_${definition.namePart}.${ext}`;
-}
-
-function buildUploadDirectory(result: PrintPrepApi.PrintPrepResult) {
-  return `print-prep/${getOrderToken(result)}/${getUploadTimestamp()}`;
 }
 
 function loadCanvasImage(url: string) {
@@ -774,145 +733,6 @@ async function renderLocalPlacementPreviewBlob({
   return blob;
 }
 
-function clearGeneratedUploads() {
-  uploadedFileMap.value = {};
-  uploadErrors.value = {};
-  uploadTargetKeys.value = [];
-  uploadingGeneratedFiles.value = false;
-  uploadingFileKey.value = '';
-}
-
-async function buildGeneratedUploadSources(
-  result: PrintPrepApi.PrintPrepResult,
-): Promise<GeneratedUploadSource[]> {
-  const files = {
-    ...(baseResult.value?.files || {}),
-    ...(result.files || {}),
-  } as PrintPrepApi.ResultFiles;
-  const finalFiles = result.files || {};
-
-  const sources: GeneratedUploadSource[] = [];
-  for (const definition of PRINT_PREP_OUTPUT_FILE_DEFINITIONS) {
-    const file =
-      definition.key === 'preview'
-        ? finalFiles.preview
-        : files[definition.key as keyof PrintPrepApi.ResultFiles];
-    if (file && getPrintPrepFileLocation(file)) {
-      sources.push({
-        file,
-        fileName: buildUploadFileName(definition, result, file),
-        key: definition.key,
-        label: definition.label,
-        mimeType: definition.mimeType,
-      });
-      continue;
-    }
-    if (definition.key === 'preview' && !latestPlacementPreviewBlob.value) {
-      try {
-        await renderLocalPlacementPreviewBlob();
-      } catch (error) {
-        console.warn('local placement preview fallback failed', error);
-      }
-    }
-    if (definition.key === 'preview' && latestPlacementPreviewBlob.value) {
-      sources.push({
-        blob: latestPlacementPreviewBlob.value,
-        fileName: buildUploadFileName(definition, result),
-        key: definition.key,
-        label: definition.label,
-        mimeType: definition.mimeType,
-      });
-      continue;
-    }
-    if (definition.key === 'report' && result.report !== undefined) {
-      sources.push({
-        blob: new Blob([safeJson(result.report)], {
-          type: definition.mimeType,
-        }),
-        fileName: buildUploadFileName(definition, result),
-        key: definition.key,
-        label: definition.label,
-        mimeType: definition.mimeType,
-      });
-    }
-  }
-  return sources;
-}
-
-async function uploadGeneratedFiles(options: { retryFailedOnly?: boolean } = {}) {
-  const result = finalResult.value;
-  if (!result) return;
-
-  const allSources = await buildGeneratedUploadSources(result);
-  uploadTargetKeys.value = allSources.map((source) => source.key);
-  if (allSources.length === 0) {
-    message.warning('没有可上传的制版输出文件');
-    return;
-  }
-
-  const sources = options.retryFailedOnly
-    ? allSources.filter((source) => uploadErrors.value[source.key])
-    : allSources;
-  if (sources.length === 0) {
-    message.success('没有需要重试上传的文件');
-    return;
-  }
-
-  if (!options.retryFailedOnly) {
-    uploadedFileMap.value = {};
-    uploadErrors.value = {};
-  }
-
-  const directory = buildUploadDirectory(result);
-  uploadingGeneratedFiles.value = true;
-  taskState.status = '上传系统文件库中';
-  taskState.message = '正在把制版输出文件上传到当前系统文件库。';
-
-  for (const source of sources) {
-    uploadingFileKey.value = source.key;
-    uploadErrors.value = {
-      ...uploadErrors.value,
-      [source.key]: undefined,
-    };
-    try {
-      const blob =
-        source.blob || (source.file ? (await fetchPrintPrepOutputBlob(source.file)).blob : null);
-      if (!blob) throw new Error('没有可上传的文件内容');
-      const url = await uploadPrintPrepOutputBlob({
-        blob,
-        directory,
-        fileName: source.fileName,
-        mimeType: source.mimeType,
-      });
-      uploadedFileMap.value = {
-        ...uploadedFileMap.value,
-        [source.key]: url,
-      };
-    } catch (error) {
-      uploadErrors.value = {
-        ...uploadErrors.value,
-        [source.key]: errorText(error),
-      };
-    }
-  }
-
-  uploadingFileKey.value = '';
-  uploadingGeneratedFiles.value = false;
-  if (hasUploadFailures.value) {
-    taskState.status = '部分文件上传失败';
-    taskState.message = '部分文件未上传到系统文件库，可点击重新上传结果文件。';
-    message.warning('部分制版输出文件上传失败');
-  } else {
-    taskState.status = '文件已上传系统库';
-    taskState.message = '下载入口已切换为当前系统文件库 URL。';
-    message.success('制版输出文件已上传到系统文件库');
-  }
-}
-
-function retryUploadGeneratedFiles() {
-  void uploadGeneratedFiles({ retryFailedOnly: true });
-}
-
 function buildReferenceUploadFileName() {
   return `${sanitizeFileToken(formState.orderNo, 'adjusted_preview')}_reference.png`;
 }
@@ -961,22 +781,21 @@ async function copyReferenceUrl() {
     message.warning('当前没有公网参考图 URL');
     return;
   }
-  await navigator.clipboard.writeText(url);
-  message.success('公网参考图 URL 已复制');
+  await copyTextToClipboard(url, '公网参考图 URL 已复制');
 }
 
-function uploadStatusColor(status: string) {
-  if (status === 'success') return 'success';
-  if (status === 'failed') return 'error';
-  if (status === 'uploading') return 'processing';
-  return 'default';
+async function copyTextToClipboard(text: string, successMessage: string) {
+  const value = text.trim();
+  if (!value) {
+    message.warning('没有可复制的内容');
+    return;
+  }
+  await navigator.clipboard.writeText(value);
+  message.success(successMessage);
 }
 
-function uploadStatusText(status: string) {
-  if (status === 'success') return '已上传';
-  if (status === 'failed') return '失败';
-  if (status === 'uploading') return '上传中';
-  return '等待上传';
+function copyOutputPath(path: string, label: string) {
+  void copyTextToClipboard(path, `${label}已复制`);
 }
 
 function updateProductDefaults() {
@@ -991,7 +810,7 @@ function updateProductDefaults() {
     formState.aiReferenceUrl = PILATES_FIXED_REFERENCE_URL;
   } else if (formState.printProductType === '麂皮绒垫') {
     formState.backgroundMode = 'preserve';
-    formState.orientation = 'landscape';
+    formState.orientation = 'portrait';
     if (formState.aiReferenceUrl === PILATES_FIXED_REFERENCE_URL) formState.aiReferenceUrl = '';
   }
   if (!isPilates.value && formState.aiReferenceUrl === PILATES_FIXED_REFERENCE_URL) {
@@ -1014,7 +833,6 @@ function onFileChange(event: Event) {
   errorMessage.value = '';
   formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
   latestPlacementPreviewBlob.value = null;
-  clearGeneratedUploads();
   clearPreviewDebounce();
   previewLoading.value = false;
   if (originalPreviewUrl.value) URL.revokeObjectURL(originalPreviewUrl.value);
@@ -1094,7 +912,6 @@ function schedulePlacementPreview() {
   finalResult.value = null;
   reportJson.value = safeJson(baseResult.value?.report);
   latestPlacementPreviewBlob.value = null;
-  clearGeneratedUploads();
   clearPreviewDebounce();
   refreshPlacementPreview('贴图位置已调整，网页预览已即时更新。');
 }
@@ -1184,7 +1001,6 @@ async function handleCreateBase() {
   finalResult.value = null;
   reportJson.value = '';
   latestPlacementPreviewBlob.value = null;
-  clearGeneratedUploads();
   clearPreviewDebounce();
   previewLoading.value = false;
   taskState.status = 'AI 底图提交中';
@@ -1216,7 +1032,6 @@ async function handleCreateBase() {
 async function handleCreateLayout() {
   layoutLoading.value = true;
   errorMessage.value = '';
-  clearGeneratedUploads();
   taskState.status = '最终文件提交中';
   taskState.message = '正在基于 AI 底图生成印刷文件';
   try {
@@ -1229,10 +1044,9 @@ async function handleCreateLayout() {
       finalResult.value = result;
       reportJson.value = safeJson(result.report);
       taskState.status = '印刷文件已生成';
-      taskState.message = '印刷文件已生成，正在上传到系统文件库。';
+      taskState.message = '印刷文件已生成，可在下方复制共享路径。';
       message.success('印刷文件已生成');
     });
-    await uploadGeneratedFiles();
     saveFormCache();
   } catch (error) {
     setError(error, '生成最终文件失败');
@@ -1282,7 +1096,6 @@ function reuseHistory(item: PrintPrepApi.HistoryItem) {
   };
   finalResult.value = null;
   latestPlacementPreviewBlob.value = null;
-  clearGeneratedUploads();
   historyOpen.value = false;
   taskState.status = '已复用历史底图';
   taskState.message = '正在基于历史 AI 底图生成套入预览。';
@@ -1755,7 +1568,7 @@ onBeforeUnmount(() => {
             <Button
               type="primary"
               :disabled="!canCreateLayout"
-              :loading="layoutLoading || uploadingGeneratedFiles"
+              :loading="layoutLoading"
               @click="handleCreateLayout"
             >
               <template #icon>
@@ -1896,54 +1709,59 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            v-if="uploadOutputItems.length > 0 || uploadingGeneratedFiles"
+            v-if="outputDirectoryPath || outputPathItems.length > 0 || sharedCopyInfo?.error"
             class="download-panel"
           >
             <div class="download-header">
-              <div class="section-title">系统文件下载</div>
-              <Button
-                v-if="hasUploadFailures"
-                size="small"
-                :loading="uploadingGeneratedFiles"
-                @click="retryUploadGeneratedFiles"
-              >
-                <template #icon>
-                  <IconifyIcon icon="lucide:refresh-cw" />
-                </template>
-                重新上传结果文件
-              </Button>
+              <div class="section-title">共享路径</div>
             </div>
             <Alert
-              v-if="uploadingGeneratedFiles"
               class="mb-3"
               show-icon
               type="info"
-              message="正在上传到系统文件库，成功后下载按钮会自动启用。"
+              message="生成后的文件已保留在制版后端输出目录；当前已关闭上传云存储。"
             />
-            <Space v-if="downloadLinks.length > 0" wrap>
-              <Button
-                v-for="link in downloadLinks"
-                :key="link.key"
-                :href="link.url"
-                target="_blank"
-              >
-                <template #icon>
-                  <IconifyIcon icon="lucide:download" />
-                </template>
-                {{ link.label }}
-              </Button>
-            </Space>
-            <div class="upload-status-list">
+            <Alert
+              v-if="sharedCopyInfo?.error"
+              class="mb-3"
+              show-icon
+              type="warning"
+              :message="`共享目录处理失败：${sharedCopyInfo.error}`"
+            />
+            <div v-if="outputDirectoryPath" class="output-path-list">
+              <div class="output-path-item output-path-item--directory">
+                <span class="output-path-name">{{ outputDirectoryLabel }}</span>
+                <Input :value="outputDirectoryPath" readonly />
+                <Button @click="copyOutputPath(outputDirectoryPath, outputDirectoryLabel)">
+                  <template #icon>
+                    <IconifyIcon icon="lucide:copy" />
+                  </template>
+                  复制
+                </Button>
+              </div>
+            </div>
+            <div v-if="outputPathItems.length > 0" class="output-path-list">
               <div
-                v-for="item in uploadOutputItems"
+                v-for="item in outputPathItems"
                 :key="item.key"
-                class="upload-status-item"
+                class="output-path-item"
               >
-                <span class="upload-status-name">{{ item.label }}</span>
-                <Tag :color="uploadStatusColor(item.status)">
-                  {{ uploadStatusText(item.status) }}
-                </Tag>
-                <span v-if="item.error" class="upload-error">{{ item.error }}</span>
+                <span class="output-path-name">{{ item.label }}</span>
+                <Input :value="item.path" readonly />
+                <Space>
+                  <Button @click="copyOutputPath(item.path, item.label)">
+                    <template #icon>
+                      <IconifyIcon icon="lucide:copy" />
+                    </template>
+                    复制
+                  </Button>
+                  <Button v-if="item.url" :href="item.url" target="_blank">
+                    <template #icon>
+                      <IconifyIcon icon="lucide:external-link" />
+                    </template>
+                    打开
+                  </Button>
+                </Space>
               </div>
             </div>
           </div>
@@ -2270,37 +2088,39 @@ onBeforeUnmount(() => {
   border-bottom: 0;
 }
 
-.download-header > :last-child {
-  margin-right: 12px;
-}
-
 .download-panel :deep(.ant-space) {
   padding: 12px 12px 0;
 }
 
-.upload-status-list {
+.output-path-list {
   display: grid;
   gap: 8px;
   padding: 12px 12px 0;
 }
 
-.upload-status-item {
+.output-path-item {
   display: grid;
-  grid-template-columns: minmax(90px, 140px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(90px, 140px) minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-height: 28px;
 }
 
-.upload-status-name {
-  font-weight: 600;
-  color: #334155;
+.output-path-item :deep(.ant-input) {
+  font-family:
+    Consolas,
+    Monaco,
+    monospace;
+  font-size: 12px;
 }
 
-.upload-error {
-  font-size: 12px;
-  color: #dc2626;
-  overflow-wrap: anywhere;
+.output-path-item :deep(.ant-space) {
+  padding: 0;
+}
+
+.output-path-name {
+  font-weight: 600;
+  color: #334155;
 }
 
 .report-json {
@@ -2381,12 +2201,12 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .upload-status-item {
-    grid-template-columns: 1fr auto;
+  .output-path-item {
+    grid-template-columns: 1fr;
   }
 
-  .upload-error {
-    grid-column: 1 / -1;
+  .output-path-item :deep(.ant-space) {
+    padding: 0;
   }
 }
 </style>
