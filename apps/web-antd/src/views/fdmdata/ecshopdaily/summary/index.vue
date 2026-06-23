@@ -116,6 +116,20 @@ interface WeeklyCompareRow {
   label: string;
 }
 
+type MonthlyTableRowKey =
+  | 'costRatio'
+  | 'marketingCost'
+  | 'realOrderCount'
+  | 'refundAmount'
+  | 'refundRatio'
+  | 'salesAmount';
+
+interface MonthlyTableRow {
+  className?: string;
+  key: MonthlyTableRowKey;
+  label: string;
+}
+
 type AbnormalRankingMode = 'COST_RATIO_RISE' | 'COUNT_GROWTH' | 'SALES_DROP';
 
 type PlatformVisualMetricMode =
@@ -266,6 +280,13 @@ const summary = ref<Summary>({
 const weeklyCompareExporting = ref(false);
 const weeklyCompareLoading = ref(false);
 const weeklyCompareSummary = ref<Summary>({
+  periods: [],
+  rows: [],
+  shops: [],
+});
+const monthlyTableExporting = ref(false);
+const monthlyTableLoading = ref(false);
+const monthlySummary = ref<Summary>({
   periods: [],
   rows: [],
   shops: [],
@@ -492,6 +513,14 @@ function buildWeeklyCompareParams() {
   };
 }
 
+function buildMonthlyTableParams() {
+  return {
+    ...buildParams(),
+    hideEmptyPeriod: false,
+    periodType: 'MONTH',
+  };
+}
+
 function maxCompletedPeriodEndDate() {
   const today = dayjs().startOf('day');
   if (filters.periodType === 'MONTH') {
@@ -522,13 +551,16 @@ function buildExportParams() {
 async function loadSummary() {
   loading.value = true;
   weeklyCompareLoading.value = true;
+  monthlyTableLoading.value = true;
   try {
-    const [summaryData, weeklyCompareData] = await Promise.all([
+    const [summaryData, weeklyCompareData, monthlyData] = await Promise.all([
       getEcShopDailySummary(buildParams()),
       getEcShopDailySummary(buildWeeklyCompareParams()),
+      getEcShopDailySummary(buildMonthlyTableParams()),
     ]);
     summary.value = summaryData;
     weeklyCompareSummary.value = weeklyCompareData;
+    monthlySummary.value = monthlyData;
     if (summary.value.startDate && summary.value.endDate) {
       filters.statDate = normalizeDateRangeValue([
         summary.value.startDate,
@@ -538,6 +570,7 @@ async function loadSummary() {
   } finally {
     loading.value = false;
     weeklyCompareLoading.value = false;
+    monthlyTableLoading.value = false;
   }
 }
 
@@ -734,12 +767,17 @@ const weeklyCompareRowsRaw = computed(
 const weeklyCompareShops = computed(
   () => weeklyCompareSummary.value.shops ?? [],
 );
+const monthlyRowsRaw = computed(() => monthlySummary.value.rows ?? []);
+const monthlyShops = computed(() => monthlySummary.value.shops ?? []);
+const monthlyPeriods = computed(() => monthlySummary.value.periods ?? []);
 
-const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() => {
+function buildShopPlatformColumns(
+  shops0: SummaryShop[],
+): WeeklyCompareColumn[] {
   const sourceIndex = new Map(
-    weeklyCompareShops.value.map((shop, index) => [shop.shopKey, index]),
+    shops0.map((shop, index) => [shop.shopKey, index]),
   );
-  const sortedShops = [...weeklyCompareShops.value].sort((a, b) => {
+  const sortedShops = [...shops0].sort((a, b) => {
     const platformOrder =
       weeklyComparePlatformOrder(a.platformCode) -
       weeklyComparePlatformOrder(b.platformCode);
@@ -806,6 +844,24 @@ const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() => {
     });
   }
   return columns;
+}
+
+const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() =>
+  buildShopPlatformColumns(weeklyCompareShops.value),
+);
+
+const monthlyTableColumns = computed<WeeklyCompareColumn[]>(() =>
+  buildShopPlatformColumns(monthlyShops.value),
+);
+
+const monthlyRowsByPeriod = computed(() => {
+  const map = new Map<string, SummaryRow[]>();
+  for (const row of monthlyRowsRaw.value) {
+    const list = map.get(row.periodKey) ?? [];
+    list.push(row);
+    map.set(row.periodKey, list);
+  }
+  return map;
 });
 
 const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
@@ -817,6 +873,15 @@ const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
   { key: 'previousCostRatio', label: '上上周费比' },
   { key: 'currentCostRatio', label: '上周费比' },
   { className: 'is-emphasis', key: 'costRatioDelta', label: '幅度' },
+];
+
+const monthlyTableMetricRows: MonthlyTableRow[] = [
+  { key: 'salesAmount', label: '销售额' },
+  { key: 'marketingCost', label: '营销费用' },
+  { className: 'is-ratio-row', key: 'costRatio', label: '费比' },
+  { key: 'realOrderCount', label: '销售件数' },
+  { key: 'refundAmount', label: '退款金额' },
+  { className: 'is-ratio-row', key: 'refundRatio', label: '退款率' },
 ];
 
 const visibleShops = computed(() => {
@@ -1061,6 +1126,182 @@ function weeklyCompareCellClass(
   ];
 }
 
+function monthlyRowsInPeriod(periodKey: string) {
+  return monthlyRowsByPeriod.value.get(periodKey) ?? [];
+}
+
+function monthlyMetric(
+  periodKey: string,
+  column: WeeklyCompareColumn,
+): SummaryMetric | undefined {
+  const rows0 = monthlyRowsInPeriod(periodKey);
+  if (column.type === 'total') {
+    return aggregateMetricsOrUndefined(rows0);
+  }
+  if (column.type === 'platform') {
+    return aggregateMetricsOrUndefined(
+      rows0.filter(
+        (row) =>
+          weeklyComparePlatformCode(row.platformCode) === column.platformCode,
+      ),
+    );
+  }
+  if (!column.shop) return undefined;
+  return rows0.find((row) => row.shopKey === column.shop?.shopKey);
+}
+
+function monthlyTableCellValue(
+  rowKey: MonthlyTableRowKey,
+  periodKey: string,
+  column: WeeklyCompareColumn,
+) {
+  const metric = monthlyMetric(periodKey, column);
+  switch (rowKey) {
+    case 'costRatio': {
+      return percentText(metric?.costRatio);
+    }
+    case 'marketingCost': {
+      return moneyTextOrDash(metric?.marketingCost);
+    }
+    case 'realOrderCount': {
+      return metric ? intText(metric.realOrderCount) : '-';
+    }
+    case 'refundAmount': {
+      return moneyTextOrDash(metric?.refundAmount);
+    }
+    case 'refundRatio': {
+      return percentText(metric?.refundRatio);
+    }
+    case 'salesAmount': {
+      return moneyTextOrDash(metric?.salesAmount);
+    }
+    default: {
+      return '-';
+    }
+  }
+}
+
+function monthlyTableExportCellValue(
+  rowKey: MonthlyTableRowKey,
+  periodKey: string,
+  column: WeeklyCompareColumn,
+) {
+  const metric = monthlyMetric(periodKey, column);
+  switch (rowKey) {
+    case 'costRatio': {
+      return plainExcelPercentText(metric?.costRatio);
+    }
+    case 'marketingCost': {
+      return plainExcelNumberText(metric?.marketingCost);
+    }
+    case 'realOrderCount': {
+      return metric ? intText(metric.realOrderCount) : '-';
+    }
+    case 'refundAmount': {
+      return plainExcelNumberText(metric?.refundAmount);
+    }
+    case 'refundRatio': {
+      return plainExcelPercentText(metric?.refundRatio);
+    }
+    case 'salesAmount': {
+      return plainExcelNumberText(metric?.salesAmount);
+    }
+    default: {
+      return '-';
+    }
+  }
+}
+
+const monthlyTableRangeText = computed(() => {
+  const startDate =
+    normalizeDateValue(monthlySummary.value.startDate) ||
+    normalizeDateValue(filters.statDate[0]) ||
+    '-';
+  const endDate =
+    normalizeDateValue(monthlySummary.value.endDate) ||
+    normalizeDateValue(filters.statDate[1]) ||
+    '-';
+  return `${startDate} ~ ${endDate}`;
+});
+
+const summaryRangeText = computed(() => {
+  const startDate =
+    normalizeDateValue(summary.value.startDate) ||
+    normalizeDateValue(filters.statDate[0]) ||
+    '-';
+  const endDate =
+    normalizeDateValue(summary.value.endDate) ||
+    normalizeDateValue(filters.statDate[1]) ||
+    '-';
+  return `${startDate} ~ ${endDate}`;
+});
+
+function buildMonthlyTableExcelHtml() {
+  const columns = monthlyTableColumns.value;
+  const headers = [
+    '月份',
+    '日期范围',
+    '指标',
+    ...columns.map((column) => weeklyCompareExportColumnTitle(column)),
+  ];
+  const headerCells = headers
+    .map((header) => `<th>${escapeExcelCell(header)}</th>`)
+    .join('');
+  const bodyRows = monthlyPeriods.value
+    .flatMap((period) =>
+      monthlyTableMetricRows.map((row) => {
+        const cells = [
+          period.periodLabel,
+          periodRangeText(period),
+          row.label,
+          ...columns.map((column) =>
+            monthlyTableExportCellValue(row.key, period.periodKey, column),
+          ),
+        ]
+          .map((cell) => `<td>${escapeExcelCell(cell)}</td>`)
+          .join('');
+        return `<tr>${cells}</tr>`;
+      }),
+    )
+    .join('');
+  return `\uFEFF<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      table { border-collapse: collapse; font-family: Arial, "Microsoft YaHei", sans-serif; }
+      th, td { border: 1px solid #999; padding: 6px 8px; text-align: center; white-space: nowrap; }
+      th { background: #facc15; font-weight: 700; }
+      .title { font-size: 16px; font-weight: 700; text-align: left; }
+      .range { color: #666; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <tr><td class="title" colspan="${headers.length}">${escapeExcelCell('月度店铺平台汇总')}</td></tr>
+      <tr><td class="range" colspan="${headers.length}">${escapeExcelCell(monthlyTableRangeText.value)}</td></tr>
+      <tr>${headerCells}</tr>
+      ${bodyRows}
+    </table>
+  </body>
+</html>`;
+}
+
+function handleMonthlyTableExport() {
+  if (monthlyRowsRaw.value.length === 0) return;
+  monthlyTableExporting.value = true;
+  try {
+    const blob = new Blob([buildMonthlyTableExcelHtml()], {
+      type: 'application/vnd.ms-excel;charset=utf-8',
+    });
+    downloadFileFromBlobPart({
+      fileName: `月度店铺平台汇总_${monthlySummary.value.startDate ?? filters.statDate[0]}_${monthlySummary.value.endDate ?? filters.statDate[1]}.xls`,
+      source: blob,
+    });
+  } finally {
+    monthlyTableExporting.value = false;
+  }
+}
+
 const periodTypeLabel = computed(() =>
   filters.periodType === 'MONTH' ? '月数据' : '周数据',
 );
@@ -1070,8 +1311,10 @@ const compareBasisText = computed(() =>
 );
 
 function periodRangeText(period: SummaryPeriod): string {
-  if (!period.startDate || !period.endDate) return '-';
-  return `${period.startDate} ~ ${period.endDate}`;
+  const startDate = normalizeDateValue(period.startDate);
+  const endDate = normalizeDateValue(period.endDate);
+  if (!startDate || !endDate) return '-';
+  return `${startDate} ~ ${endDate}`;
 }
 
 function previousPeriod(periodKey: string): SummaryPeriod | undefined {
@@ -2202,8 +2445,7 @@ onBeforeUnmount(() => {
             <p>按周、月查看各店铺销售、投放、退款和销售件数表现</p>
           </div>
           <div class="page-range">
-            {{ summary.startDate || filters.statDate[0] }} ~
-            {{ summary.endDate || filters.statDate[1] }}
+            {{ summaryRangeText }}
           </div>
         </div>
 
@@ -2367,6 +2609,98 @@ onBeforeUnmount(() => {
                       {{ weeklyCompareCellValue(row.key, column) }}
                     </td>
                   </tr>
+                </tbody>
+              </table>
+            </div>
+          </Spin>
+        </section>
+
+        <section class="monthly-table-panel">
+          <div class="matrix-head">
+            <div>
+              <div class="section-title">月度店铺平台汇总</div>
+              <div class="section-sub">
+                {{
+                  monthlyTableRangeText
+                }}，按月展示每个店铺、平台汇总与合计数据
+              </div>
+            </div>
+            <div class="matrix-tools">
+              <Tag color="blue">月度</Tag>
+              <Button
+                size="small"
+                :disabled="monthlyRowsRaw.length === 0"
+                :loading="monthlyTableExporting"
+                @click="handleMonthlyTableExport"
+              >
+                导出 Excel
+              </Button>
+            </div>
+          </div>
+          <Spin :spinning="monthlyTableLoading">
+            <div
+              v-if="monthlyRowsRaw.length === 0"
+              class="empty-block monthly-empty"
+            >
+              暂无月度店铺平台汇总数据
+            </div>
+            <div v-else class="monthly-table-scroll">
+              <table class="monthly-table">
+                <thead>
+                  <tr>
+                    <th class="sticky-col monthly-month-col">月份</th>
+                    <th class="sticky-col monthly-metric-col">指标</th>
+                    <th
+                      v-for="column in monthlyTableColumns"
+                      :key="column.key"
+                      class="monthly-shop-col"
+                      :class="weeklyCompareColumnClasses(column)"
+                      :title="weeklyCompareColumnTitle(column)"
+                    >
+                      <span>{{ column.title }}</span>
+                      <em
+                        v-if="column.type === 'shop' && column.platformLabel"
+                        >{{ column.platformLabel }}</em
+                      >
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template
+                    v-for="period in monthlyPeriods"
+                    :key="period.periodKey"
+                  >
+                    <tr
+                      v-for="(row, rowIndex) in monthlyTableMetricRows"
+                      :key="`${period.periodKey}:${row.key}`"
+                      :class="row.className"
+                    >
+                      <th
+                        v-if="rowIndex === 0"
+                        class="sticky-col monthly-month-col"
+                        :rowspan="monthlyTableMetricRows.length"
+                      >
+                        {{ period.periodLabel }}
+                        <span>{{ periodRangeText(period) }}</span>
+                      </th>
+                      <th class="sticky-col monthly-metric-col">
+                        {{ row.label }}
+                      </th>
+                      <td
+                        v-for="column in monthlyTableColumns"
+                        :key="column.key"
+                        :class="weeklyCompareColumnClasses(column)"
+                      >
+                        {{
+                          monthlyTableCellValue(
+                            row.key,
+                            period.periodKey,
+                            column,
+                          )
+                        }}
+                      </td>
+                    </tr>
+                  </template>
                 </tbody>
               </table>
             </div>
@@ -2879,7 +3213,8 @@ onBeforeUnmount(() => {
 .risk-panel,
 .matrix-panel,
 .compare-panel,
-.weekly-compare-panel {
+.weekly-compare-panel,
+.monthly-table-panel {
   padding: 14px;
   margin-bottom: 16px;
 }
@@ -3013,6 +3348,131 @@ onBeforeUnmount(() => {
 }
 
 .weekly-empty {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.monthly-table-scroll {
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.monthly-table {
+  width: max-content;
+  min-width: 100%;
+  font-size: 12px;
+  border-spacing: 0;
+  border-collapse: separate;
+}
+
+.monthly-table th,
+.monthly-table td {
+  height: 32px;
+  padding: 6px 8px;
+  text-align: center;
+  white-space: nowrap;
+  background: hsl(var(--card));
+  border-right: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.monthly-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 110px;
+  max-width: 120px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: normal;
+  background: #facc15;
+}
+
+.monthly-table thead th span,
+.monthly-table thead th em {
+  display: block;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.monthly-table thead th em {
+  margin-top: 2px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.monthly-table tbody th {
+  font-weight: 650;
+  text-align: left;
+  background: hsl(var(--muted) / 28%);
+}
+
+.monthly-table tbody tr.is-ratio-row th,
+.monthly-table tbody tr.is-ratio-row td {
+  background: #fef3c7;
+}
+
+.monthly-table thead th.is-platform-summary {
+  background: #93c5fd;
+}
+
+.monthly-table thead th.is-total-summary {
+  color: #854d0e;
+  background: #fef08a;
+}
+
+.monthly-table tbody td.is-platform-summary {
+  font-weight: 650;
+  background: #dbeafe;
+}
+
+.monthly-table tbody td.is-total-summary {
+  font-weight: 700;
+  background: #fef9c3;
+}
+
+.monthly-table tbody tr.is-ratio-row td.is-platform-summary {
+  background: #bfdbfe;
+}
+
+.monthly-table tbody tr.is-ratio-row td.is-total-summary {
+  background: #fde68a;
+}
+
+.monthly-month-col {
+  left: 0;
+  z-index: 3;
+  width: 138px;
+  min-width: 138px;
+  max-width: 138px;
+}
+
+.monthly-metric-col {
+  left: 138px;
+  z-index: 3;
+  width: 96px;
+  min-width: 96px;
+  max-width: 96px;
+}
+
+.monthly-table thead .monthly-month-col,
+.monthly-table thead .monthly-metric-col {
+  z-index: 4;
+  background: #facc15;
+}
+
+.monthly-table tbody .monthly-month-col span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+  white-space: normal;
+}
+
+.monthly-empty {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
