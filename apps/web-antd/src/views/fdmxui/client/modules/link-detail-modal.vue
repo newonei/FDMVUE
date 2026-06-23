@@ -1,11 +1,12 @@
 <script lang="ts" setup>
 import type { FdmxuiClientApi } from '#/api/fdmxui/client';
 
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Empty, message, Modal, Tag } from 'ant-design-vue';
+import { useClipboard } from '@vueuse/core';
+import { Button, Empty, message, Modal, QRCode, Tag } from 'ant-design-vue';
 
 defineOptions({ name: 'FdmxuiClientLinkDetailModal' });
 
@@ -28,8 +29,23 @@ const subscriptionLinks = computed(() =>
   ].filter((item): item is { label: string; value: string } => !!item.value),
 );
 
+const { copy } = useClipboard({ legacy: true });
+const qrModalOpen = ref(false);
+const qrModalTitle = ref('');
+const qrModalValue = ref('');
+
 function close() {
   emit('update:open', false);
+}
+
+function showQrCode(text?: string, label = '普通订阅') {
+  if (!text) {
+    message.warning(`没有可展示的${label}`);
+    return;
+  }
+  qrModalTitle.value = `${label}二维码`;
+  qrModalValue.value = text;
+  qrModalOpen.value = true;
 }
 
 async function copyText(text?: string, label = '内容') {
@@ -37,8 +53,12 @@ async function copyText(text?: string, label = '内容') {
     message.warning(`没有可复制的${label}`);
     return;
   }
-  await navigator.clipboard.writeText(text);
-  message.success(`${label}已复制`);
+  try {
+    await copy(text);
+    message.success(`${label}已复制`);
+  } catch {
+    message.error(`${label}复制失败，请手动选择内容复制`);
+  }
 }
 
 function parseLinks(value?: string) {
@@ -105,12 +125,24 @@ function getDisplayName(link: string, index: number) {
             <div class="min-w-0 break-all font-mono text-xs leading-5">
               {{ item.value }}
             </div>
-            <Button size="small" @click="copyText(item.value, item.label)">
-              <template #icon>
-                <IconifyIcon icon="lucide:copy" />
-              </template>
-              复制
-            </Button>
+            <div class="flex flex-wrap justify-end gap-2">
+              <Button size="small" @click="copyText(item.value, item.label)">
+                <template #icon>
+                  <IconifyIcon icon="lucide:copy" />
+                </template>
+                复制
+              </Button>
+              <Button
+                v-if="item.label === '普通订阅'"
+                size="small"
+                @click="showQrCode(item.value, item.label)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:qr-code" />
+                </template>
+                二维码
+              </Button>
+            </div>
           </div>
         </div>
       </section>
@@ -130,7 +162,10 @@ function getDisplayName(link: string, index: number) {
           </Button>
         </div>
 
-        <Empty v-if="protocolLinks.length === 0" description="暂无协议链接，请先刷新订阅链接" />
+        <Empty
+          v-if="protocolLinks.length === 0"
+          description="暂无协议链接，请先刷新订阅链接"
+        />
 
         <div v-else class="space-y-3">
           <div
@@ -153,13 +188,31 @@ function getDisplayName(link: string, index: number) {
                   复制
                 </Button>
               </div>
-              <div class="break-all font-mono text-xs leading-5 text-muted-foreground">
+              <div
+                class="break-all font-mono text-xs leading-5 text-muted-foreground"
+              >
                 {{ link }}
               </div>
             </div>
           </div>
         </div>
       </section>
+    </div>
+  </Modal>
+
+  <Modal
+    v-model:open="qrModalOpen"
+    :footer="null"
+    class="w-[360px] max-w-[calc(100vw-2rem)]"
+    :title="qrModalTitle"
+  >
+    <div class="flex flex-col items-center gap-3">
+      <QRCode :value="qrModalValue" error-level="M" :size="240" />
+      <div
+        class="max-w-full break-all text-center font-mono text-xs leading-5 text-muted-foreground"
+      >
+        {{ qrModalValue }}
+      </div>
     </div>
   </Modal>
 </template>
