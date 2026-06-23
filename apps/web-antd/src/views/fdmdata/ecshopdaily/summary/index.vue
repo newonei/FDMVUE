@@ -91,9 +91,11 @@ interface ShopDiagnosticRow {
 
 interface WeeklyCompareColumn {
   key: string;
+  platformCode?: string;
   platformLabel?: string;
-  shop: SummaryShop;
+  shop?: SummaryShop;
   title: string;
+  type: 'platform' | 'shop' | 'total';
 }
 
 type WeeklyComparePeriodKey = 'current' | 'previous';
@@ -114,10 +116,7 @@ interface WeeklyCompareRow {
   label: string;
 }
 
-type AbnormalRankingMode =
-  | 'COST_RATIO_RISE'
-  | 'COUNT_GROWTH'
-  | 'SALES_DROP';
+type AbnormalRankingMode = 'COST_RATIO_RISE' | 'COUNT_GROWTH' | 'SALES_DROP';
 
 type PlatformVisualMetricMode =
   | 'COST_RATIO'
@@ -145,6 +144,37 @@ const PLATFORM_OPTIONS = [
   { label: '小红书', value: 'XHS' },
   { label: '视频号', value: 'SPH' },
 ];
+
+const WEEKLY_COMPARE_PLATFORM_ORDER = [
+  'TAOBAO',
+  'JD',
+  'DOUYIN',
+  'PDD',
+  'XHS',
+  'SPH',
+];
+
+const WEEKLY_COMPARE_SHOP_ORDER_ALIASES = [
+  ['天猫-古米梵实际销售额', '天猫古米梵'],
+  ['天猫-月迦实际销售额', '天猫月迦'],
+  ['天猫-YUGA实际销售额', '天猫YUGA'],
+  ['淘宝-飞德慕瑜伽实际销售额', '淘宝飞德慕瑜伽'],
+  ['淘宝-YUGA品牌店'],
+  ['京东-月迦运动户外', '京-月迦运动户外'],
+  ['京-古米梵自营', '京东-古米梵自营', '京-古米梵'],
+  ['抖-YUGA运动旗舰店', '抖音-YUGA运动旗舰店'],
+  ['拼-古米梵旗舰店', '拼多多-古米梵旗舰店'],
+  ['拼-月迦旗舰店', '拼多多-月迦旗舰店', '拼-月迦瑜伽旗舰店'],
+  ['拼-古米梵飞岩专卖店', '拼多多-古米梵飞岩专卖店'],
+  ['拼-YUGA飞德慕专卖店', '拼多多-YUGA飞德慕专卖店'],
+  ['拼-月迦飞德慕专卖店', '拼多多-月迦飞德慕专卖店'],
+] as const;
+
+const WEEKLY_COMPARE_SHOP_ORDER_PATTERNS =
+  WEEKLY_COMPARE_SHOP_ORDER_ALIASES.map((aliases, index) => ({
+    index,
+    names: aliases.map((name) => normalizeWeeklyCompareName(name)),
+  }));
 
 const VIEW_MODE_OPTIONS = [
   { label: '综合', value: 'SUMMARY' },
@@ -333,6 +363,86 @@ function normalizeDateRangeValue(value: unknown): FdmDateRange {
   ];
 }
 
+function normalizeWeeklyCompareName(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replaceAll('实际销售额', '')
+    .replaceAll('销售额', '')
+    .replaceAll('京东', '京')
+    .replaceAll('抖音', '抖')
+    .replaceAll('拼多多', '拼')
+    .replace(/[\s\-_/\\—–]+/g, '');
+}
+
+function weeklyComparePlatformCode(platformCode?: string): string {
+  const code = String(platformCode ?? '')
+    .trim()
+    .toUpperCase();
+  return code === 'TMALL' ? 'TAOBAO' : code;
+}
+
+function weeklyComparePlatformOrder(platformCode?: string): number {
+  const index = WEEKLY_COMPARE_PLATFORM_ORDER.indexOf(
+    weeklyComparePlatformCode(platformCode),
+  );
+  return index === -1 ? WEEKLY_COMPARE_PLATFORM_ORDER.length : index;
+}
+
+function weeklyComparePlatformLabel(
+  platformCode?: string,
+  fallback?: string,
+): string {
+  const code = weeklyComparePlatformCode(platformCode);
+  if (!code) return fallback || '未知平台';
+  if (code === 'TAOBAO') return '淘宝天猫';
+  return (
+    PLATFORM_OPTIONS.find((item) => item.value === code)?.label ||
+    fallback ||
+    code ||
+    '未知平台'
+  );
+}
+
+function weeklyComparePlatformSummaryTitle(
+  platformCode?: string,
+  fallback?: string,
+): string {
+  const code = weeklyComparePlatformCode(platformCode);
+  if (code === 'TAOBAO') return '淘宝天猫销售额';
+  const label = weeklyComparePlatformLabel(code, fallback);
+  return `${label}渠道销售额`;
+}
+
+function weeklyCompareShopOrderIndex(shop: SummaryShop): number {
+  const platformLabel = weeklyComparePlatformLabel(
+    shop.platformCode,
+    shop.platformLabel,
+  );
+  const candidates = [
+    shop.shopName,
+    shop.shopKey,
+    shop.shopId,
+    `${platformLabel}${shop.shopName}`,
+    `${shop.platformLabel ?? ''}${shop.shopName}`,
+    `${weeklyComparePlatformCode(shop.platformCode)}${shop.shopName}`,
+  ]
+    .filter(Boolean)
+    .map((item) => normalizeWeeklyCompareName(item));
+  for (const candidate of candidates) {
+    for (const pattern of WEEKLY_COMPARE_SHOP_ORDER_PATTERNS) {
+      if (
+        pattern.names.some(
+          (name) => candidate === name || candidate.includes(name),
+        )
+      ) {
+        return pattern.index;
+      }
+    }
+  }
+  return WEEKLY_COMPARE_SHOP_ORDER_PATTERNS.length;
+}
+
 function startOfIsoWeek(value = dayjs()) {
   const weekdayOffset = (value.day() + 6) % 7;
   return value.startOf('day').subtract(weekdayOffset, 'day');
@@ -458,7 +568,7 @@ function escapeExcelCell(value: unknown): string {
 }
 
 function weeklyCompareExportColumnTitle(column: WeeklyCompareColumn): string {
-  return column.platformLabel
+  return column.type === 'shop' && column.platformLabel
     ? `${column.title}（${column.platformLabel}）`
     : column.title;
 }
@@ -618,17 +728,85 @@ const periods = computed(() => summary.value.periods ?? []);
 const rows = computed(() => summary.value.rows ?? []);
 const shops = computed(() => summary.value.shops ?? []);
 const totals = computed(() => summary.value.totals ?? {});
-const weeklyCompareRowsRaw = computed(() => weeklyCompareSummary.value.rows ?? []);
-const weeklyCompareShops = computed(() => weeklyCompareSummary.value.shops ?? []);
-
-const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() =>
-  weeklyCompareShops.value.map((shop) => ({
-    key: shop.shopKey,
-    platformLabel: shop.platformLabel,
-    shop,
-    title: shop.shopName,
-  })),
+const weeklyCompareRowsRaw = computed(
+  () => weeklyCompareSummary.value.rows ?? [],
 );
+const weeklyCompareShops = computed(
+  () => weeklyCompareSummary.value.shops ?? [],
+);
+
+const weeklyCompareColumns = computed<WeeklyCompareColumn[]>(() => {
+  const sourceIndex = new Map(
+    weeklyCompareShops.value.map((shop, index) => [shop.shopKey, index]),
+  );
+  const sortedShops = [...weeklyCompareShops.value].sort((a, b) => {
+    const platformOrder =
+      weeklyComparePlatformOrder(a.platformCode) -
+      weeklyComparePlatformOrder(b.platformCode);
+    if (platformOrder !== 0) return platformOrder;
+    const shopOrder =
+      weeklyCompareShopOrderIndex(a) - weeklyCompareShopOrderIndex(b);
+    if (shopOrder !== 0) return shopOrder;
+    return (
+      (sourceIndex.get(a.shopKey) ?? 0) - (sourceIndex.get(b.shopKey) ?? 0)
+    );
+  });
+
+  const groups = new Map<
+    string,
+    { platformCode: string; platformLabel: string; shops: SummaryShop[] }
+  >();
+  for (const shop of sortedShops) {
+    const platformCode = weeklyComparePlatformCode(shop.platformCode);
+    const platformLabel = weeklyComparePlatformLabel(
+      platformCode,
+      shop.platformLabel,
+    );
+    const group = groups.get(platformCode) ?? {
+      platformCode,
+      platformLabel,
+      shops: [],
+    };
+    group.shops.push(shop);
+    groups.set(platformCode, group);
+  }
+
+  const columns: WeeklyCompareColumn[] = [];
+  for (const group of [...groups.values()].sort(
+    (a, b) =>
+      weeklyComparePlatformOrder(a.platformCode) -
+      weeklyComparePlatformOrder(b.platformCode),
+  )) {
+    columns.push(
+      ...group.shops.map((shop) => ({
+        key: `SHOP:${shop.shopKey}`,
+        platformCode: group.platformCode,
+        platformLabel: shop.platformLabel,
+        shop,
+        title: shop.shopName,
+        type: 'shop' as const,
+      })),
+      {
+        key: `PLATFORM:${group.platformCode}`,
+        platformCode: group.platformCode,
+        platformLabel: group.platformLabel,
+        title: weeklyComparePlatformSummaryTitle(
+          group.platformCode,
+          group.platformLabel,
+        ),
+        type: 'platform',
+      },
+    );
+  }
+  if (columns.length > 0) {
+    columns.push({
+      key: 'TOTAL',
+      title: '合计',
+      type: 'total',
+    });
+  }
+  return columns;
+});
 
 const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
   { key: 'previousSales', label: '上上周' },
@@ -772,9 +950,9 @@ function isDateRangeOverlap(
   const rowEnd = normalizeDateValue(row.endDate);
   return Boolean(
     rowStart &&
-      rowEnd &&
-      rowStart <= range.endDate &&
-      rowEnd >= range.startDate,
+    rowEnd &&
+    rowStart <= range.endDate &&
+    rowEnd >= range.startDate,
   );
 }
 
@@ -789,17 +967,33 @@ function weeklyMetric(
   periodKey: WeeklyComparePeriodKey,
   column: WeeklyCompareColumn,
 ): SummaryMetric | undefined {
-  return weeklyRowsInPeriod(periodKey).find(
-    (row) => row.shopKey === column.shop.shopKey,
-  );
+  const rows0 = weeklyRowsInPeriod(periodKey);
+  if (column.type === 'total') {
+    return aggregateMetricsOrUndefined(rows0);
+  }
+  if (column.type === 'platform') {
+    return aggregateMetricsOrUndefined(
+      rows0.filter(
+        (row) =>
+          weeklyComparePlatformCode(row.platformCode) === column.platformCode,
+      ),
+    );
+  }
+  if (!column.shop) return undefined;
+  return rows0.find((row) => row.shopKey === column.shop?.shopKey);
 }
 
-function weeklyCompareColumnClasses() {
-  return [];
+function weeklyCompareColumnClasses(column: WeeklyCompareColumn) {
+  return [
+    column.type === 'platform' ? 'is-platform-summary' : '',
+    column.type === 'total' ? 'is-total-summary' : '',
+  ];
 }
 
 function weeklyCompareColumnTitle(column: WeeklyCompareColumn) {
-  return `${column.platformLabel} · ${column.title}`;
+  return column.type === 'shop' && column.platformLabel
+    ? `${column.platformLabel} · ${column.title}`
+    : column.title;
 }
 
 function weeklyCompareCellValue(
@@ -847,7 +1041,7 @@ function weeklyCompareCellClass(
   rowKey: WeeklyCompareRowKey,
   column: WeeklyCompareColumn,
 ) {
-  const columnClasses = weeklyCompareColumnClasses();
+  const columnClasses = weeklyCompareColumnClasses(column);
   if (rowKey !== 'salesGrowth' && rowKey !== 'costRatioDelta') {
     return columnClasses;
   }
@@ -920,10 +1114,7 @@ function compareValueClass(value: null | number | undefined) {
   return value > 0 ? 'compare-up' : 'compare-down';
 }
 
-function renderCompareText(
-  text: string,
-  value: null | number | undefined,
-) {
+function renderCompareText(text: string, value: null | number | undefined) {
   return h('span', { class: compareValueClass(value) }, text);
 }
 
@@ -933,8 +1124,10 @@ function naturalPeriodEnd(period: SummaryPeriod): string | undefined {
   if (!startDate) return endDate;
   const start = dayjs(startDate);
   if (!start.isValid()) return endDate;
-  if (filters.periodType === 'MONTH') return start.endOf('month').format('YYYY-MM-DD');
-  if (filters.periodType === 'WEEK') return start.add(6, 'day').format('YYYY-MM-DD');
+  if (filters.periodType === 'MONTH')
+    return start.endOf('month').format('YYYY-MM-DD');
+  if (filters.periodType === 'WEEK')
+    return start.add(6, 'day').format('YYYY-MM-DD');
   return endDate;
 }
 
@@ -979,7 +1172,9 @@ const platformCompareRows = computed<CompareTableRow[]>(() => {
     ];
     for (const platformCode of platformCodes) {
       result.push({
-        current: aggregateMetrics(rowsForPlatform(period.periodKey, platformCode)),
+        current: aggregateMetrics(
+          rowsForPlatform(period.periodKey, platformCode),
+        ),
         dateRange: periodRangeText(period),
         key: `PLATFORM:${period.periodKey}:${platformCode}`,
         periodKey: period.periodKey,
@@ -1110,12 +1305,16 @@ const platformVisualRows = computed<PlatformVisualRow[]>(() => {
     }
   }
   return [...platformCodes].map((platformCode) => ({
-    current: aggregateMetrics(rowsForPlatform(currentPeriod.periodKey, platformCode)),
+    current: aggregateMetrics(
+      rowsForPlatform(currentPeriod.periodKey, platformCode),
+    ),
     key: platformCode,
     platformCode,
     platformLabel: platformLabelOf(platformCode),
     previous: previous
-      ? aggregateMetricsOrUndefined(rowsForPlatform(previous.periodKey, platformCode))
+      ? aggregateMetricsOrUndefined(
+          rowsForPlatform(previous.periodKey, platformCode),
+        )
       : undefined,
   }));
 });
@@ -1318,7 +1517,9 @@ const shopCompareColumns = computed(() =>
 );
 
 function plainExcelPointText(value: null | number | undefined): string {
-  return value === null || value === undefined ? '-' : plainExcelNumberText(value);
+  return value === null || value === undefined
+    ? '-'
+    : plainExcelNumberText(value);
 }
 
 function costRatioDirectionText(value: null | number | undefined): string {
@@ -2138,13 +2339,14 @@ onBeforeUnmount(() => {
                       v-for="column in weeklyCompareColumns"
                       :key="column.key"
                       class="weekly-shop-col"
-                      :class="weeklyCompareColumnClasses()"
+                      :class="weeklyCompareColumnClasses(column)"
                       :title="weeklyCompareColumnTitle(column)"
                     >
                       <span>{{ column.title }}</span>
-                      <em v-if="column.platformLabel">{{
-                        column.platformLabel
-                      }}</em>
+                      <em
+                        v-if="column.type === 'shop' && column.platformLabel"
+                        >{{ column.platformLabel }}</em
+                      >
                     </th>
                   </tr>
                 </thead>
@@ -2735,19 +2937,19 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 2;
-  min-width: 104px;
-  max-width: 132px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 110px;
+  max-width: 120px;
   font-weight: 700;
+  line-height: 1.25;
+  white-space: normal;
   background: #facc15;
 }
 
 .weekly-compare-table thead th span,
 .weekly-compare-table thead th em {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-all;
+  white-space: normal;
 }
 
 .weekly-compare-table thead th em {
@@ -2764,6 +2966,33 @@ onBeforeUnmount(() => {
 
 .weekly-compare-table tbody tr.is-emphasis th,
 .weekly-compare-table tbody tr.is-emphasis td {
+  background: #fde68a;
+}
+
+.weekly-compare-table thead th.is-platform-summary {
+  background: #93c5fd;
+}
+
+.weekly-compare-table thead th.is-total-summary {
+  color: #854d0e;
+  background: #fef08a;
+}
+
+.weekly-compare-table tbody td.is-platform-summary {
+  font-weight: 650;
+  background: #dbeafe;
+}
+
+.weekly-compare-table tbody td.is-total-summary {
+  font-weight: 700;
+  background: #fef9c3;
+}
+
+.weekly-compare-table tbody tr.is-emphasis td.is-platform-summary {
+  background: #bfdbfe;
+}
+
+.weekly-compare-table tbody tr.is-emphasis td.is-total-summary {
   background: #fde68a;
 }
 

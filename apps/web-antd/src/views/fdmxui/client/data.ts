@@ -34,6 +34,14 @@ function formatQuota({ cellValue }: { cellValue: unknown }) {
   return value > 0 ? `${value} GB` : '不限';
 }
 
+function formatUserOptionLabel(item: Record<string, unknown>) {
+  const nickname = String(item.nickname ?? item.username ?? item.id ?? '用户');
+  const username = String(item.username ?? '');
+  const mobile = String(item.mobile ?? '');
+  const extra = [username, mobile].filter(Boolean).join(' / ');
+  return extra ? `${nickname}（${extra}）` : nickname;
+}
+
 export function useFormSchema(
   onPanelChange: (panelId?: number) => void,
   inboundOptions: SelectOption[],
@@ -46,10 +54,13 @@ export function useFormSchema(
       rules: 'required',
       componentProps: {
         api: getSimpleUserList,
+        labelFn: formatUserOptionLabel,
         labelField: 'nickname',
         valueField: 'id',
         allowClear: true,
         class: '!w-full',
+        showSearch: true,
+        optionFilterProp: 'label',
         placeholder: '请选择系统用户',
       },
     },
@@ -135,9 +146,12 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'ApiSelect',
       componentProps: {
         api: getSimpleUserList,
+        labelFn: formatUserOptionLabel,
         labelField: 'nickname',
         valueField: 'id',
         allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
         placeholder: '请选择系统用户',
       },
     },
