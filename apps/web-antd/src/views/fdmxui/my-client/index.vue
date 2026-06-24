@@ -172,10 +172,16 @@ const [Grid] = useVbenVxeGrid({
   <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
     <LinkDetailModal v-model:open="linkDetailOpen" :client="linkDetailClient" />
 
-    <div class="fdmxui-my-client-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
-      <header class="flex flex-shrink-0 items-start justify-between gap-3 pt-3 pb-2">
+    <div
+      class="fdmxui-my-client-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4"
+    >
+      <header
+        class="flex flex-shrink-0 items-start justify-between gap-3 pt-3 pb-2"
+      >
         <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">我的3XUI订阅</h2>
+          <h2 class="mb-1 text-lg font-semibold text-foreground">
+            我的3XUI订阅
+          </h2>
         </div>
       </header>
 
@@ -192,7 +198,6 @@ const [Grid] = useVbenVxeGrid({
                   label: '协议链接',
                   type: 'link',
                   icon: 'lucide:qr-code',
-                  auth: ['fdmxui:client:self-query'],
                   onClick: handleShowLinks.bind(null, row),
                 },
               ]"
