@@ -115,9 +115,10 @@ export function useFormSchema(
       label: '订单号',
       component: 'Input',
       componentProps: {
-        allowClear: true,
+        allowClear: false,
+        disabled: true,
         maxlength: 64,
-        placeholder: '请输入订单号',
+        placeholder: '订单号不允许修改',
       },
       rules: 'required',
     },
@@ -331,6 +332,20 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       showOverflow: 'tooltip',
     },
     {
+      field: 'productionSent',
+      title: '是否制作发出',
+      fixed: 'left',
+      width: 120,
+      slots: {
+        default: ({ row }) =>
+          h(
+            Tag,
+            { color: Number(row.productionSent) === 1 ? 'blue' : 'default' },
+            () => formatProductionSent(row.productionSent),
+          ),
+      },
+    },
+    {
       field: 'shopName',
       title: '店铺',
       minWidth: 130,
@@ -402,19 +417,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       title: '跟进人',
       minWidth: 110,
       showOverflow: 'tooltip',
-    },
-    {
-      field: 'productionSent',
-      title: '是否制作发出',
-      minWidth: 120,
-      slots: {
-        default: ({ row }) =>
-          h(
-            Tag,
-            { color: Number(row.productionSent) === 1 ? 'blue' : 'default' },
-            () => formatProductionSent(row.productionSent),
-          ),
-      },
     },
     {
       field: 'status',
