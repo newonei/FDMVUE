@@ -2,6 +2,8 @@ import type { AxiosRequestConfig, PageParam, PageResult } from '@vben/request';
 
 import { requestClient } from '#/api/request';
 
+export const FILE_UPLOAD_TIMEOUT = 5 * 60 * 1000;
+
 /** Axios 上传进度事件 */
 export type AxiosProgressEvent = AxiosRequestConfig['onUploadProgress'];
 
@@ -74,5 +76,8 @@ export function uploadFile(
   if (!data.directory) {
     delete data.directory;
   }
-  return requestClient.upload('/infra/file/upload', data, { onUploadProgress });
+  return requestClient.upload('/infra/file/upload', data, {
+    onUploadProgress,
+    timeout: FILE_UPLOAD_TIMEOUT,
+  });
 }

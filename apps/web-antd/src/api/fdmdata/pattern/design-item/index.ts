@@ -12,7 +12,7 @@ export namespace FdmdataPatternDesignItemApi {
     previewImageUrl?: string;
     productSpec?: string;
     quantity?: number;
-    orderDate?: string;
+    orderDate?: number | string;
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
@@ -33,7 +33,7 @@ export namespace FdmdataPatternDesignItemApi {
   export interface BatchCreateReq {
     orderNo: string;
     shopName?: string;
-    orderDate?: string;
+    orderDate?: number | string;
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
@@ -46,6 +46,36 @@ export namespace FdmdataPatternDesignItemApi {
     keyword?: string;
     limit?: number;
   }
+}
+
+function toOrderDateTimestamp(value: number | string | undefined) {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value === 'number') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const matched = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+  );
+  if (!matched) return undefined;
+  const [, year, month, day, hour = '0', minute = '0', second = '0'] = matched;
+  return new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  ).getTime();
+}
+
+function normalizeOrderDate<T extends { orderDate?: number | string }>(
+  data: T,
+) {
+  return {
+    ...data,
+    orderDate: toOrderDateTimestamp(data.orderDate),
+  };
 }
 
 export function getFdmdataPatternDesignItemPage(params: PageParam) {
@@ -63,7 +93,10 @@ export function getFdmdataPatternDesignItem(id: number) {
 export function createFdmdataPatternDesignItem(
   data: FdmdataPatternDesignItemApi.PatternDesignItem,
 ) {
-  return requestClient.post<number>('/fdmdata/pattern/design-item/create', data);
+  return requestClient.post<number>(
+    '/fdmdata/pattern/design-item/create',
+    normalizeOrderDate(data),
+  );
 }
 
 export function createFdmdataPatternDesignItemBatch(
@@ -71,14 +104,17 @@ export function createFdmdataPatternDesignItemBatch(
 ) {
   return requestClient.post<number[]>(
     '/fdmdata/pattern/design-item/create-batch',
-    data,
+    normalizeOrderDate(data),
   );
 }
 
 export function updateFdmdataPatternDesignItem(
   data: FdmdataPatternDesignItemApi.PatternDesignItem,
 ) {
-  return requestClient.put<boolean>('/fdmdata/pattern/design-item/update', data);
+  return requestClient.put<boolean>(
+    '/fdmdata/pattern/design-item/update',
+    normalizeOrderDate(data),
+  );
 }
 
 export function deleteFdmdataPatternDesignItem(id: number) {

@@ -7,7 +7,12 @@ import { computed, unref } from 'vue';
 import { useAppConfig } from '@vben/hooks';
 import { $t } from '@vben/locales';
 
-import { createFile, getFilePresignedUrl, uploadFile } from '#/api/infra/file';
+import {
+  createFile,
+  FILE_UPLOAD_TIMEOUT,
+  getFilePresignedUrl,
+  uploadFile,
+} from '#/api/infra/file';
 import { baseRequestClient } from '#/api/request';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
@@ -114,6 +119,8 @@ export function useUpload(directory?: string) {
           headers: {
             'Content-Type': file.type,
           },
+          onUploadProgress,
+          timeout: FILE_UPLOAD_TIMEOUT,
         })
         .then(() => {
           // 1.4. 记录文件信息到后端（异步）
