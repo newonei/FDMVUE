@@ -343,12 +343,12 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       showOverflow: 'tooltip',
     },
     {
-      field: 'previewImageUrl',
-      title: '设计图',
+      field: 'previewImage',
+      title: '预览图',
       width: 100,
       slots: {
         default: ({ row }) =>
-          row.designImageUrl
+          row.previewImageUrl
             ? h(Image, {
                 height: 64,
                 preview: {
@@ -367,8 +367,14 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       },
     },
     {
+      field: 'previewImageUrl',
+      title: '预览图 URL',
+      minWidth: 220,
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'designImageUrl',
-      title: '设计图 URL',
+      title: '原图 URL',
       minWidth: 260,
       showOverflow: 'tooltip',
     },

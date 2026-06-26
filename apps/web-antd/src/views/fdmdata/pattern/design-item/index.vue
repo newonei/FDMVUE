@@ -22,11 +22,19 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
-import Form from './modules/form.vue';
+import CreateForm from './modules/create-form.vue';
+import EditForm from './modules/edit-form.vue';
 
 defineOptions({ name: 'FdmdataPatternDesignItem' });
 
-const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
+const [CreateFormModal, createFormModalApi] = useVbenModal({
+  connectedComponent: CreateForm,
+  destroyOnClose: true,
+});
+const [EditFormModal, editFormModalApi] = useVbenModal({
+  connectedComponent: EditForm,
+  destroyOnClose: true,
+});
 const checkedRows = shallowRef<FdmdataPatternDesignItemApi.PatternDesignItem[]>(
   [],
 );
@@ -35,11 +43,11 @@ const checkedCount = computed(() => checkedRows.value.length);
 const FILENAME_INVALID_CHARS = /[<>:"/\\|?*]/g;
 
 function handleCreate() {
-  formModalApi.setData(null).open();
+  createFormModalApi.open();
 }
 
 function handleEdit(row: FdmdataPatternDesignItemApi.PatternDesignItem) {
-  formModalApi.setData(row).open();
+  editFormModalApi.setData(row).open();
 }
 
 async function handleDelete(row: FdmdataPatternDesignItemApi.PatternDesignItem) {
@@ -276,7 +284,8 @@ onBeforeUnmount(() => {
 
 <template>
   <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
-    <FormModal @success="gridApi.query()" />
+    <CreateFormModal @success="gridApi.query()" />
+    <EditFormModal @success="gridApi.query()" />
 
     <div class="pattern-design-item-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
       <header

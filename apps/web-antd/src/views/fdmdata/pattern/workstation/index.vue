@@ -64,6 +64,8 @@ const serviceStatus = ref<'error' | 'loading' | 'ready'>('loading');
 const serviceMessage = ref('正在连接识别服务');
 let autoSyncTimer: number | undefined;
 const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
+const PATTERN_IMAGE_PLACEHOLDER =
+  'data:image/svg+xml;charset=utf-8,%3Csvg xmlns%3D%22http://www.w3.org/2000/svg%22 width%3D%22240%22 height%3D%22160%22 viewBox%3D%220 0 240 160%22%3E%3Crect width%3D%22240%22 height%3D%22160%22 fill%3D%22%23f8fafc%22/%3E%3Cpath d%3D%22M78 106l38-44 34 44H78z%22 fill%3D%22%23d9e2ec%22/%3E%3Ccircle cx%3D%22155%22 cy%3D%2254%22 r%3D%2216%22 fill%3D%22%23d9e2ec%22/%3E%3Ctext x%3D%22120%22 y%3D%22138%22 text-anchor%3D%22middle%22 fill%3D%22%2394a3b8%22 font-size%3D%2214%22%3E%E6%97%A0%E9%A2%84%E8%A7%88%E5%9B%BE%3C/text%3E%3C/svg%3E';
 
 const bestMatch = computed(() => matchResult.value?.best_match || null);
 const candidates = computed(() => matchResult.value?.top_candidates || []);
@@ -350,10 +352,9 @@ function resolveDisplayImageUrl(url?: string) {
 }
 
 function candidateImageUrl(candidate: PatternRecognitionApi.Candidate) {
-  return resolveDisplayImageUrl(
-    candidate.preview_image_url ||
-      candidate.local_image_url ||
-      candidate.design_image_url,
+  return (
+    resolveDisplayImageUrl(candidate.preview_image_url ?? undefined) ||
+    PATTERN_IMAGE_PLACEHOLDER
   );
 }
 
