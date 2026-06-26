@@ -65,6 +65,7 @@ let resettingBatchRows = false;
 const formData = ref<
   FdmdataPatternDesignItemApi.PatternDesignItem | undefined
 >();
+const modalMode = ref<'create' | 'edit'>('create');
 const designImageUrl = ref('');
 const designPreviewImageUrl = ref('');
 const batchUploadUrls = ref<string[]>([]);
@@ -79,7 +80,7 @@ const { httpRequest: uploadDesignPreviewImage } = useUpload(
   'fdmdata/pattern/design-item/preview',
 );
 
-const isEdit = computed(() => !!formData.value?.id);
+const isEdit = computed(() => modalMode.value === 'edit');
 let shopNameFetchSeq = 0;
 let shopNameSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -461,6 +462,55 @@ function validateBatchRows() {
   return true;
 }
 
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function normalizeOrderDateForForm(value: number | string | undefined) {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value === 'string') return value;
+  if (!Number.isFinite(value)) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+  ].join('-') + ` ${[
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+    padDatePart(date.getSeconds()),
+  ].join(':')}`;
+}
+
+function buildEditFormValues(
+  record: FdmdataPatternDesignItemApi.PatternDesignItem,
+) {
+  return {
+    ...PATTERN_DESIGN_ITEM_DEFAULTS,
+    ...record,
+    orderDate: normalizeOrderDateForForm(record.orderDate),
+    productionSent: Number(record.productionSent ?? 0),
+    quantity: Number(record.quantity ?? 1),
+    status: Number(record.status ?? 0),
+  };
+}
+
+async function applyEditValues(
+  record: FdmdataPatternDesignItemApi.PatternDesignItem,
+) {
+  formData.value = record;
+  designImageUrl.value = record.designImageUrl ?? '';
+  designPreviewImageUrl.value = record.previewImageUrl ?? '';
+  setPreviewUrlForDesignImage(
+    record.designImageUrl ?? '',
+    record.previewImageUrl,
+  );
+  ensureShopNameOption(record.shopName);
+  await nextTick();
+  await editFormApi.setValues(buildEditFormValues(record) as any, false);
+}
+
 async function submitEdit() {
   const { valid } = await editFormApi.validate();
   if (!valid) return false;
@@ -560,44 +610,46 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      openSeq++;
       modalApi.unlock();
       shopNameFetchSeq++;
       shopNameOptions.value = [];
       shopNameOptionsLoading.value = false;
       await resetModalState();
+      modalMode.value = 'create';
       return;
     }
     const mySeq = ++openSeq;
     const row = modalApi.getData<FdmdataPatternDesignItemApi.PatternDesignItem>();
+    const rowId = row?.id;
+    modalMode.value = rowId ? 'edit' : 'create';
     shopNameFetchSeq++;
     shopNameOptions.value = [];
     shopNameOptionsLoading.value = false;
     await resetModalState();
+    modalMode.value = rowId ? 'edit' : 'create';
     void fetchShopNameOptions();
-    if (!row?.id) {
+    if (!rowId) {
       await applyCreateDefaults();
       return;
     }
+    await applyEditValues(row);
     modalApi.lock();
     try {
-      const detail = await getFdmdataPatternDesignItem(row.id);
+      const detail = await getFdmdataPatternDesignItem(rowId);
       if (mySeq !== openSeq) return;
       if (!detail) {
         message.error('图案识别订单设计图不存在或已被删除');
         await modalApi.close();
         return;
       }
-      formData.value = detail;
-      designImageUrl.value = detail.designImageUrl ?? '';
-      designPreviewImageUrl.value = detail.previewImageUrl ?? '';
-      setPreviewUrlForDesignImage(
-        detail.designImageUrl ?? '',
-        detail.previewImageUrl,
-      );
-      ensureShopNameOption(detail.shopName);
-      await nextTick();
-      await editFormApi.setValues(detail as any, false);
+      await applyEditValues(detail);
       void fetchShopNameOptions(detail.shopName ?? '');
+    } catch (error) {
+      if (mySeq === openSeq) {
+        console.error('Load pattern design item detail failed', error);
+        message.warning('详情加载失败，已显示列表中的记录信息');
+      }
     } finally {
       if (mySeq === openSeq) modalApi.unlock();
     }
@@ -619,7 +671,7 @@ const title = computed(() =>
 
 <template>
   <Modal :title="title" class="w-[1080px] max-w-[calc(100vw-2rem)]">
-    <template v-if="isEdit">
+    <div v-show="isEdit">
       <EditForm />
 
       <div class="design-image-panel">
@@ -658,9 +710,9 @@ const title = computed(() =>
           </div>
         </div>
       </div>
-    </template>
+    </div>
 
-    <template v-else>
+    <div v-show="!isEdit">
       <BatchForm />
 
       <div class="batch-upload-panel">
@@ -775,7 +827,7 @@ const title = computed(() =>
           </div>
         </div>
       </div>
-    </template>
+    </div>
   </Modal>
 </template>
 

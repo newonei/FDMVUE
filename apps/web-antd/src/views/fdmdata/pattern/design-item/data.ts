@@ -351,8 +351,16 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
           row.designImageUrl
             ? h(Image, {
                 height: 64,
-                preview: { src: row.designImageUrl },
-                src: getPatternDesignImagePreviewUrl(row.previewImageUrl),
+                preview: {
+                  src: getPatternDesignImagePreviewUrl(
+                    row.previewImageUrl,
+                    'preview',
+                  ),
+                },
+                src: getPatternDesignImagePreviewUrl(
+                  row.previewImageUrl,
+                  'thumb',
+                ),
                 width: 64,
               })
             : '',

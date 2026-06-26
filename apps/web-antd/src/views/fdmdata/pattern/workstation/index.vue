@@ -63,6 +63,7 @@ const autoSync = ref(true);
 const serviceStatus = ref<'error' | 'loading' | 'ready'>('loading');
 const serviceMessage = ref('正在连接识别服务');
 let autoSyncTimer: number | undefined;
+const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
 
 const bestMatch = computed(() => matchResult.value?.best_match || null);
 const candidates = computed(() => matchResult.value?.top_candidates || []);
@@ -340,9 +341,19 @@ function progressPercent(candidate: PatternRecognitionApi.Candidate) {
   );
 }
 
+function resolveDisplayImageUrl(url?: string) {
+  const value = String(url ?? '').trim();
+  if (!value) return '';
+  return ABSOLUTE_HTTP_URL_RE.test(value)
+    ? value
+    : resolvePatternRecognitionAssetUrl(value);
+}
+
 function candidateImageUrl(candidate: PatternRecognitionApi.Candidate) {
-  return resolvePatternRecognitionAssetUrl(
-    candidate.local_image_url || candidate.design_image_url,
+  return resolveDisplayImageUrl(
+    candidate.preview_image_url ||
+      candidate.local_image_url ||
+      candidate.design_image_url,
   );
 }
 

@@ -50,6 +50,7 @@ export namespace PatternRecognitionApi {
 
   export interface Candidate {
     design_image_url: string;
+    preview_image_url?: null | string;
     detail_score?: null | number;
     embedding_score?: null | number;
     feature_score?: null | number;
