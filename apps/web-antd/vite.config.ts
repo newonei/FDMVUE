@@ -19,6 +19,11 @@ export default defineConfig(async () => {
             rewrite: (path) => path.replace(/^\/print-prep-api/, ''),
             target: 'http://192.168.10.144:8090',
           },
+          '/pattern-recognition-api': {
+            changeOrigin: true,
+            rewrite: (path) => path.replace(/^\/pattern-recognition-api/, ''),
+            target: 'http://127.0.0.1:8000',
+          },
         },
       },
     },
