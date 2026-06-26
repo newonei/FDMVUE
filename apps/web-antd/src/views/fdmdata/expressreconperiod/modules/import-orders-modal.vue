@@ -15,7 +15,7 @@ defineOptions({ name: 'ExpressReconImportOrdersModal' });
 const emit = defineEmits<{ success: [periodId?: number] }>();
 
 const periodName = ref('');
-const billMonth = ref('');
+const orderMonth = ref('');
 const orderFileName = ref('');
 let orderFile: File | null = null;
 
@@ -25,14 +25,18 @@ const [Modal, modalApi] = useVbenModal({
       message.warning('请选择订单明细 Excel');
       return;
     }
+    if (!orderMonth.value.trim()) {
+      message.warning('请输入发货月份');
+      return;
+    }
     modalApi.lock();
     try {
       const res = await importExpressReconOrders({
         orderFile,
         periodName: periodName.value.trim(),
-        billMonth: billMonth.value.trim(),
+        orderMonth: orderMonth.value.trim(),
       });
-      message.success(`订单导入任务已提交，账期号：${res.periodNo}`);
+      message.success(`订单导入任务已提交，订单池：${res.periodNo}`);
       emit('success', res.periodId);
       await modalApi.close();
     } finally {
@@ -48,7 +52,7 @@ const [Modal, modalApi] = useVbenModal({
 
 function reset() {
   periodName.value = '';
-  billMonth.value = '';
+  orderMonth.value = '';
   orderFile = null;
   orderFileName.value = '';
 }
@@ -61,23 +65,23 @@ function beforeOrderUpload(file: FileType) {
 </script>
 
 <template>
-  <Modal title="导入当月订单（新建账期）" class="w-[560px] max-w-[calc(100vw-2rem)]">
+  <Modal title="导入发货订单" class="w-[560px] max-w-[calc(100vw-2rem)]">
     <div class="space-y-4 px-1">
       <p class="mb-0 text-xs text-muted-foreground">
-        一份整月订单只需导入一次，生成一个账期；之后可在账期下分别上传各家快递公司的对账单。
+        按发货月份导入订单池；同一发货月份重复导入时会替换原订单明细。
       </p>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
-          <div class="mb-1 text-sm font-medium">账期名称</div>
+          <div class="mb-1 text-sm font-medium">订单池名称</div>
           <Input
             v-model:value="periodName"
             allow-clear
-            placeholder="可选，如 2026年5月订单"
+            placeholder="可选，如 2026年5月发货订单"
           />
         </div>
         <div>
-          <div class="mb-1 text-sm font-medium">账单月份</div>
-          <Input v-model:value="billMonth" allow-clear placeholder="如 2026-05" />
+          <div class="mb-1 text-sm font-medium">发货月份</div>
+          <Input v-model:value="orderMonth" allow-clear placeholder="如 2026-05" />
         </div>
       </div>
       <div>

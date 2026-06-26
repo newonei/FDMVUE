@@ -45,6 +45,7 @@ const emit = defineEmits([
   'update:value',
   'update:modelValue',
   'delete',
+  'success',
 ]);
 const { accept, helpText, maxNumber, maxSize } = toRefs(props);
 const isInnerOperate = ref<boolean>(false);
@@ -74,37 +75,82 @@ const isActMsg = ref<boolean>(true); // 文件类型错误提示
 const isFirstRender = ref<boolean>(true); // 是否第一次渲染
 const uploadNumber = ref<number>(0); // 上传文件计数器
 const uploadList = ref<any[]>([]); // 临时上传列表
+let uploadQueue: Promise<void> = Promise.resolve();
+
+function getDisplayUrl(url: string | undefined, usage: 'preview' | 'thumb') {
+  const value = String(url ?? '').trim();
+  if (!value) return '';
+  return props.previewUrlTransform?.(value, usage) || value;
+}
+
+function getResponseUrl(res: any) {
+  if (isString(res)) return res;
+  if (!isObject(res)) return '';
+  if (isString(res.url)) return res.url;
+  if (isString(res.data)) return res.data;
+  if (isObject(res.data) && isString(res.data.url)) return res.data.url;
+  return '';
+}
+
+function getResponsePreviewUrl(res: any) {
+  if (!isObject(res)) return '';
+  if (isString(res.previewUrl)) return res.previewUrl;
+  if (isObject(res.data) && isString(res.data.previewUrl)) {
+    return res.data.previewUrl;
+  }
+  return '';
+}
+
+async function enqueueUpload<T>(task: () => Promise<T>) {
+  const currentTask = uploadQueue.then(task, task);
+  uploadQueue = currentTask.then(
+    () => undefined,
+    () => undefined,
+  );
+  return currentTask;
+}
 
 watch(
   currentValue,
   async (v) => {
+    if (!v || (Array.isArray(v) && v.length === 0)) {
+      isInnerOperate.value = false;
+      fileList.value = [];
+      uploadList.value = [];
+      uploadNumber.value = 0;
+      return;
+    }
     if (isInnerOperate.value) {
       isInnerOperate.value = false;
       return;
     }
     let value: string | string[] = [];
-    if (v) {
-      if (Array.isArray(v)) {
-        value = v;
-      } else {
-        value.push(v);
-      }
-      fileList.value = value
-        .map((item, i) => {
-          if (item && isString(item)) {
-            return {
-              uid: `${-i}`,
-              name: item.slice(Math.max(0, item.lastIndexOf('/') + 1)),
-              status: UploadResultStatus.DONE,
-              url: item,
-            };
-          } else if (item && isObject(item)) {
-            return item;
-          }
-          return null;
-        })
-        .filter(Boolean) as UploadProps['fileList'];
+    if (Array.isArray(v)) {
+      value = v;
+    } else {
+      value.push(v);
     }
+    fileList.value = value
+      .map((item, i) => {
+        if (item && isString(item)) {
+          return {
+            uid: `${-i}`,
+            name: item.slice(Math.max(0, item.lastIndexOf('/') + 1)),
+            status: UploadResultStatus.DONE,
+            thumbUrl: getDisplayUrl(item, 'thumb'),
+            url: item,
+          };
+        } else if (item && isObject(item)) {
+          const uploadFile = item as unknown as UploadFile;
+          return {
+            ...uploadFile,
+            thumbUrl:
+              uploadFile.thumbUrl || getDisplayUrl(uploadFile.url, 'thumb'),
+          };
+        }
+        return null;
+      })
+      .filter(Boolean) as UploadProps['fileList'];
     if (!isFirstRender.value) {
       emit('change', value);
       isFirstRender.value = false;
@@ -133,7 +179,9 @@ async function handlePreview(file: UploadFile) {
   if (!file.url && !file.preview) {
     file.preview = await getBase64<string>(file.originFileObj!);
   }
-  previewImage.value = file.url || file.preview || '';
+  previewImage.value = file.url
+    ? getDisplayUrl(file.url, 'preview')
+    : file.preview || '';
   previewOpen.value = true;
   previewTitle.value =
     file.name ||
@@ -211,12 +259,13 @@ async function customRequest(info: UploadRequestOption) {
     api = useUpload(props.directory).httpRequest;
   }
   try {
-    // 上传文件
-    const progressEvent: AxiosProgressEvent = (e) => {
-      const percent = Math.trunc((e.loaded / e.total!) * 100);
-      info.onProgress!({ percent });
-    };
-    const res = await api?.(info.file as File, progressEvent);
+    const res = await enqueueUpload(async () => {
+      const progressEvent: AxiosProgressEvent = (e) => {
+        const percent = Math.trunc((e.loaded / e.total!) * 100);
+        info.onProgress!({ percent });
+      };
+      return await api?.(info.file as File, progressEvent);
+    });
 
     // 处理上传成功后的逻辑
     handleUploadSuccess(res, info.file as File);
@@ -243,16 +292,23 @@ function handleUploadSuccess(res: any, file: File) {
   }
 
   // 添加到临时上传列表
-  const fileUrl = res?.url || res?.data || res;
+  const fileUrl = getResponseUrl(res);
+  const previewUrl = getResponsePreviewUrl(res);
   uploadList.value.push({
     name: file.name,
-    url: fileUrl,
+    response: res,
     status: UploadResultStatus.DONE,
+    thumbUrl: getDisplayUrl(previewUrl || fileUrl, 'thumb'),
     uid: file.name + Date.now(),
+    url: fileUrl,
   });
+  emit('success', { file, previewUrl, response: res, url: fileUrl });
 
-  // 检查是否所有文件都上传完成
-  if (uploadList.value.length >= uploadNumber.value) {
+  flushUploadedListIfReady();
+}
+
+function flushUploadedListIfReady() {
+  if (uploadNumber.value > 0 && uploadList.value.length >= uploadNumber.value) {
     fileList.value?.push(...uploadList.value);
     uploadList.value = [];
     uploadNumber.value = 0;
@@ -272,6 +328,7 @@ function handleUploadError(error: any) {
   message.error($t('ui.upload.uploadError'));
   // 上传失败时减少计数器
   uploadNumber.value = Math.max(0, uploadNumber.value - 1);
+  flushUploadedListIfReady();
 }
 
 /**

@@ -81,14 +81,12 @@ onBeforeUnmount(() => {
 });
 
 function handleReconcile(row: FdmdataExpressReconPeriodApi.ExpressReconPeriod) {
-  if (!row.id) return;
   if (row.status !== 'READY') {
-    message.warning('账期订单尚未导入完成，暂不能对账');
+    message.warning('订单池尚未导入完成，暂不能对账');
     return;
   }
   router.push({
     path: '/fdmdata/express-recon/batch',
-    query: { periodId: row.id },
   });
 }
 
@@ -148,16 +146,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
         <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">对账账期</h2>
+          <h2 class="mb-1 text-lg font-semibold text-foreground">发货订单池</h2>
           <p class="mb-0 text-xs text-muted-foreground">
-            整月订单导入一次形成账期，再在账期下分别上传多家快递公司的对账单进行对账。
+            按发货月份维护订单池；快递账单对账时会在全局订单池内按运单号匹配。
           </p>
         </div>
         <Button type="primary" @click="importOrdersModalApi.open()">
           <template #icon>
             <IconifyIcon icon="lucide:upload" />
           </template>
-          导入当月订单
+          导入发货订单
         </Button>
       </header>
 
@@ -165,7 +163,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
         <Grid
           class="express-vxe-wrapper"
           grid-class="express-vxe-grid"
-          table-title="对账账期"
+          table-title="发货订单池"
         >
           <template #colUnreconciled="{ row }">
             <Tag
@@ -182,7 +180,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
             <TableAction
               :actions="[
                 {
-                  label: '快递对账',
+                  label: '账单对账',
                   type: 'link',
                   icon: 'lucide:truck',
                   auth: ['fdmdata:express-recon-batch:reconcile'],
@@ -202,7 +200,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   icon: ACTION_ICON.DELETE,
                   auth: ['fdmdata:express-recon-period:delete'],
                   popConfirm: {
-                    title: '删除账期会同时删除其下所有快递对账与订单池，确认删除？',
+                    title: '删除订单池会删除其订单明细；历史挂接到该订单池的旧批次也会删除，确认删除？',
                     confirm: handleDelete.bind(null, row),
                   },
                 },

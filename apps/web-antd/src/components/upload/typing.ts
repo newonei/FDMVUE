@@ -16,7 +16,7 @@ export interface FileUploadProps {
   api?: (
     file: File,
     onUploadProgress?: AxiosProgressEvent,
-  ) => Promise<AxiosResponse>;
+  ) => Promise<AxiosResponse | Record<string, unknown> | string>;
   directory?: string; // 上传的目录
   disabled?: boolean;
   drag?: boolean; // 是否支持拖拽上传
@@ -26,6 +26,10 @@ export interface FileUploadProps {
   modelValue?: string | string[]; // v-model 支持
   maxSize?: number; // 文件最大多少MB
   multiple?: boolean; // 是否支持多选
+  previewUrlTransform?: (
+    url: string,
+    usage: 'preview' | 'thumb',
+  ) => string; // 预览 URL 转换，不影响实际返回值
   resultField?: string; // support xxx.xxx.xx
   returnText?: boolean; // 是否返回文件文本内容
   showDescription?: boolean; // 是否显示下面的描述

@@ -8,6 +8,7 @@ export namespace FdmdataExpressReconPeriodApi {
     periodNo?: string;
     periodName?: string;
     billMonth?: string;
+    orderMonth?: string;
     orderFileName?: string;
     status?: string;
     orderCount?: number;
@@ -21,13 +22,14 @@ export namespace FdmdataExpressReconPeriodApi {
   export interface ImportOrdersResult {
     periodId: number;
     periodNo: string;
+    orderMonth?: string;
     status?: string;
   }
 
   export interface ImportOrdersParams {
     orderFile: File;
     periodName?: string;
-    billMonth?: string;
+    orderMonth?: string;
   }
 
   export interface UnreconciledWaybill {
@@ -66,7 +68,7 @@ export function importExpressReconOrders(
   const formData = new FormData();
   formData.append('orderFile', params.orderFile);
   if (params.periodName) formData.append('periodName', params.periodName);
-  if (params.billMonth) formData.append('billMonth', params.billMonth);
+  if (params.orderMonth) formData.append('orderMonth', params.orderMonth);
   return requestClient.post<FdmdataExpressReconPeriodApi.ImportOrdersResult>(
     '/fdmdata/express-recon-period/import-orders',
     formData,

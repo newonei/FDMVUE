@@ -23,13 +23,14 @@ const periodId = ref<number | undefined>();
 const templateId = ref<number | undefined>();
 const templateOptions = ref<{ label: string; value: number }[]>([]);
 const batchName = ref('');
+const billMonth = ref('');
 const billFileName = ref('');
 let billFile: File | null = null;
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
-    if (!periodId.value) {
-      message.warning('缺少账期信息');
+    if (!billMonth.value.trim()) {
+      message.warning('请输入账单所属期');
       return;
     }
     if (!billFile) {
@@ -40,6 +41,7 @@ const [Modal, modalApi] = useVbenModal({
     try {
       const res = await reconcileCarrierExpress({
         periodId: periodId.value,
+        billMonth: billMonth.value.trim(),
         billFile,
         templateId: templateId.value,
         batchName: batchName.value.trim(),
@@ -69,6 +71,7 @@ function reset() {
   periodId.value = undefined;
   templateId.value = undefined;
   batchName.value = '';
+  billMonth.value = '';
   billFile = null;
   billFileName.value = '';
 }
@@ -89,8 +92,16 @@ async function handleDownloadTemplate() {
   <Modal title="上传账单对账" class="w-[560px] max-w-[calc(100vw-2rem)]">
     <div class="space-y-4 px-1">
       <p class="mb-0 text-xs text-muted-foreground">
-        选择该快递公司的计费模板并上传其当月对账单，系统将以账单运单匹配本账期订单池。
+        选择该快递公司的计费模板并上传月度账单，系统将在全局订单池内按运单号匹配并识别重复计费。
       </p>
+      <div>
+        <div class="mb-1 text-sm font-medium">账单所属期</div>
+        <Input
+          v-model:value="billMonth"
+          allow-clear
+          placeholder="如 2026-06"
+        />
+      </div>
       <div>
         <div class="mb-1 text-sm font-medium">计费模板（对应快递公司）</div>
         <Select

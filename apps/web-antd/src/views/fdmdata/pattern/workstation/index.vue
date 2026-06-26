@@ -31,11 +31,23 @@ import {
 
 defineOptions({ name: 'FdmdataPatternWorkstation' });
 
+type CaptureUploadStage =
+  | 'error'
+  | 'idle'
+  | 'processing'
+  | 'ready'
+  | 'success'
+  | 'uploading';
+
 const captureFile = ref<File | null>(null);
 const capturePreviewUrl = ref('');
 const matching = ref(false);
 const matchResult = ref<null | PatternRecognitionApi.UploadMatchResponse>(null);
 const matchError = ref('');
+const uploadStage = ref<CaptureUploadStage>('idle');
+const uploadPercent = ref(0);
+const uploadLoaded = ref(0);
+const uploadTotal = ref(0);
 
 const currentCaptureId = ref('');
 const selectedOrderNo = ref('');
@@ -57,6 +69,56 @@ const candidates = computed(() => matchResult.value?.top_candidates || []);
 const selectedCandidate = computed(() =>
   candidates.value.find((item) => item.item_id === selectedItemId.value),
 );
+const uploadPercentDisplay = computed(() =>
+  uploadStage.value === 'processing' || uploadStage.value === 'success'
+    ? 100
+    : uploadPercent.value,
+);
+const uploadProgressStatus = computed(() => {
+  if (uploadStage.value === 'error') return 'exception';
+  if (uploadStage.value === 'success') return 'success';
+  return 'active';
+});
+const uploadStageMeta = computed(() => {
+  switch (uploadStage.value) {
+    case 'error': {
+      return { color: 'error', text: '失败' };
+    }
+    case 'processing': {
+      return { color: 'processing', text: '识别中' };
+    }
+    case 'ready': {
+      return { color: 'default', text: '待上传' };
+    }
+    case 'success': {
+      return { color: 'success', text: '完成' };
+    }
+    case 'uploading': {
+      return { color: 'processing', text: '上传中' };
+    }
+    default: {
+      return { color: 'default', text: '未选择' };
+    }
+  }
+});
+const uploadProgressText = computed(() => {
+  const file = captureFile.value;
+  if (!file) return '等待选择实拍图';
+  const total = uploadTotal.value || file.size;
+  if (uploadStage.value === 'uploading') {
+    return `已上传 ${formatBytes(uploadLoaded.value)} / ${formatBytes(total)}`;
+  }
+  if (uploadStage.value === 'processing') {
+    return '实拍图上传完成，识别服务正在比对设计图';
+  }
+  if (uploadStage.value === 'success') {
+    return '上传识别完成';
+  }
+  if (uploadStage.value === 'error') {
+    return matchError.value || '上传或识别失败';
+  }
+  return `文件大小 ${formatBytes(file.size)}`;
+});
 const canConfirm = computed(
   () =>
     !!currentCaptureId.value &&
@@ -75,9 +137,7 @@ function setCapturePreview(file: File | null) {
   }
 }
 
-function beforeCaptureUpload(file: File) {
-  captureFile.value = file;
-  setCapturePreview(file);
+function resetRecognitionState() {
   matchResult.value = null;
   matchError.value = '';
   confirmResult.value = null;
@@ -85,7 +145,36 @@ function beforeCaptureUpload(file: File) {
   selectedOrderNo.value = '';
   selectedItemId.value = '';
   currentCaptureId.value = '';
+}
+
+function resetUploadProgress(stage: CaptureUploadStage = 'idle') {
+  uploadStage.value = stage;
+  uploadPercent.value = 0;
+  uploadLoaded.value = 0;
+  uploadTotal.value = captureFile.value?.size ?? 0;
+}
+
+function beforeCaptureUpload(file: File) {
+  if (matching.value) {
+    message.warning('当前实拍图正在上传识别，请稍后再选择');
+    return false;
+  }
+  captureFile.value = file;
+  setCapturePreview(file);
+  resetRecognitionState();
+  resetUploadProgress('ready');
   return false;
+}
+
+function clearCaptureFile() {
+  if (matching.value) {
+    message.warning('正在上传识别，暂时不能清空');
+    return;
+  }
+  captureFile.value = null;
+  setCapturePreview(null);
+  resetRecognitionState();
+  resetUploadProgress('idle');
 }
 
 async function refreshHealth() {
@@ -143,27 +232,48 @@ async function startMatch() {
     return;
   }
   matching.value = true;
-  matchError.value = '';
-  matchResult.value = null;
-  confirmResult.value = null;
-  confirmError.value = '';
-  currentCaptureId.value = '';
-  selectedOrderNo.value = '';
-  selectedItemId.value = '';
+  resetRecognitionState();
+  resetUploadProgress('uploading');
   try {
     const form = new FormData();
     form.append('file', captureFile.value);
-    const data = await uploadPatternCapture(form);
+    const data = await uploadPatternCapture(form, {
+      onUploadComplete: () => {
+        uploadStage.value = 'processing';
+        uploadPercent.value = 100;
+        uploadTotal.value = uploadTotal.value || captureFile.value?.size || 0;
+        uploadLoaded.value = uploadTotal.value;
+      },
+      onUploadProgress: ({ loaded, percent, total }) => {
+        uploadLoaded.value = loaded;
+        if (total) uploadTotal.value = total;
+        uploadPercent.value = percent;
+        if (percent < 100) {
+          uploadStage.value = 'uploading';
+        }
+      },
+      timeoutMs: 0,
+    });
     matchResult.value = data;
     currentCaptureId.value = data.capture_id;
     if (data.best_match) {
       selectCandidate(data.best_match);
     }
+    uploadStage.value = 'success';
+    uploadPercent.value = 100;
     message.success('识别完成');
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
-    matchError.value =
-      text === 'index_not_built' ? '请先同步订单并建立索引' : text;
+    const uploaded =
+      uploadPercent.value >= 100 || uploadStage.value === 'processing';
+    matchError.value = (() => {
+      if (text === 'index_not_built') return '请先同步订单并建立索引';
+      if (uploaded && /timeout|超时|连接失败|network/i.test(text)) {
+        return `实拍图已上传完成，但识别结果没有及时返回：${text}。请稍后重试，或查看识别服务日志确认结果。`;
+      }
+      return text;
+    })();
+    uploadStage.value = 'error';
     message.error(`识别失败：${matchError.value}`);
   } finally {
     matching.value = false;
@@ -202,6 +312,17 @@ function formatScore(score: unknown) {
 
 function formatOptionalScore(score: null | number | undefined) {
   return score === null || score === undefined ? '-' : formatScore(score);
+}
+
+function formatBytes(size?: number) {
+  const value = Number(size) || 0;
+  if (value >= 1024 * 1024) {
+    return `${(value / 1024 / 1024).toFixed(2)} MB`;
+  }
+  if (value >= 1024) {
+    return `${(value / 1024).toFixed(2)} KB`;
+  }
+  return `${value} B`;
 }
 
 function decisionMeta(decision?: string) {
@@ -293,6 +414,7 @@ onBeforeUnmount(() => {
           <UploadDragger
             accept="image/*"
             :before-upload="beforeCaptureUpload"
+            :disabled="matching"
             :max-count="1"
             :show-upload-list="false"
           >
@@ -300,7 +422,48 @@ onBeforeUnmount(() => {
               <IconifyIcon icon="lucide:image-plus" />
             </p>
             <p class="upload-title">{{ captureFile?.name || '选择或拖入实拍图' }}</p>
+            <p class="upload-subtitle">
+              上传完成后会自动进入图案识别，请等待结果返回。
+            </p>
           </UploadDragger>
+
+          <div v-if="captureFile" class="upload-queue">
+            <div class="upload-queue-header">
+              <span>上传队列</span>
+              <Button
+                size="small"
+                type="link"
+                :disabled="matching"
+                @click="clearCaptureFile"
+              >
+                清空
+              </Button>
+            </div>
+            <div class="upload-file-row">
+              <div class="upload-file-icon">
+                <IconifyIcon icon="lucide:file-image" />
+              </div>
+              <div class="upload-file-main">
+                <div class="upload-file-title">
+                  <span class="upload-file-name">{{ captureFile.name }}</span>
+                  <Tag :color="uploadStageMeta.color">
+                    {{ uploadStageMeta.text }}
+                  </Tag>
+                </div>
+                <Progress
+                  :percent="uploadPercentDisplay"
+                  :show-info="false"
+                  :status="uploadProgressStatus"
+                  size="small"
+                />
+                <div class="upload-file-meta">
+                  <span>{{ uploadProgressText }}</span>
+                  <span>{{ uploadPercentDisplay }}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <Button
             class="mt-4 w-full"
             type="primary"
@@ -311,7 +474,7 @@ onBeforeUnmount(() => {
             <template #icon>
               <IconifyIcon icon="lucide:scan-search" />
             </template>
-            开始识别
+            {{ matching ? '上传识别中' : '开始上传并识别' }}
           </Button>
           <div v-if="capturePreviewUrl" class="capture-preview">
             <Image :src="capturePreviewUrl" />
@@ -500,6 +663,82 @@ onBeforeUnmount(() => {
   margin: 0;
   font-weight: 600;
   color: #334155;
+}
+
+.upload-subtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.upload-queue {
+  margin-top: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.upload-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.upload-file-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+}
+
+.upload-file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  color: #2563eb;
+  background: #eff6ff;
+  border-radius: 8px;
+}
+
+.upload-file-main {
+  min-width: 0;
+}
+
+.upload-file-title,
+.upload-file-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.upload-file-title {
+  margin-bottom: 8px;
+}
+
+.upload-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.upload-file-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .capture-preview {

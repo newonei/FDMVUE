@@ -36,12 +36,54 @@ export function useGridFormSchema(): VbenFormSchema[] {
       },
     },
     {
-      fieldName: 'feeDiffRateOver30',
-      label: '费用偏差>30%',
+      fieldName: 'duplicateBilled',
+      label: '重复计费',
       component: 'Switch',
       componentProps: {
         checkedChildren: '是',
         unCheckedChildren: '否',
+      },
+    },
+    {
+      fieldName: 'feeDiffRateOver30',
+      label: '金额偏差超阈值',
+      component: 'Switch',
+      componentProps: {
+        checkedChildren: '是',
+        unCheckedChildren: '否',
+      },
+    },
+    {
+      fieldName: 'feeDiffRateThresholdPercent',
+      label: '金额偏差阈值',
+      component: 'InputNumber',
+      defaultValue: 30,
+      componentProps: {
+        addonAfter: '%',
+        class: 'w-full',
+        min: 0,
+        precision: 2,
+      },
+    },
+    {
+      fieldName: 'weightDiffRateOver30',
+      label: '重量偏差超阈值',
+      component: 'Switch',
+      componentProps: {
+        checkedChildren: '是',
+        unCheckedChildren: '否',
+      },
+    },
+    {
+      fieldName: 'weightDiffRateThresholdPercent',
+      label: '重量偏差阈值',
+      component: 'InputNumber',
+      defaultValue: 30,
+      componentProps: {
+        addonAfter: '%',
+        class: 'w-full',
+        min: 0,
+        precision: 2,
       },
     },
     {
@@ -77,6 +119,13 @@ function formatWeight({ cellValue }: { cellValue: unknown }) {
     return '';
   const n = Number(cellValue);
   return Number.isFinite(n) ? n.toFixed(3) : String(cellValue);
+}
+
+function formatPercent({ cellValue }: { cellValue: unknown }) {
+  if (cellValue === null || cellValue === undefined || cellValue === '')
+    return '';
+  const n = Number(cellValue);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : String(cellValue);
 }
 
 const statusLabelMap = new Map(
@@ -121,11 +170,19 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       formatter: formatStatus,
     },
     {
+      field: 'duplicateBilled',
+      title: '重复计费',
+      width: 100,
+      fixed: 'left',
+      slots: { default: 'colDuplicate' },
+    },
+    {
       field: 'statusMessage',
       title: '说明',
       minWidth: 180,
       showOverflow: 'tooltip',
     },
+    { field: 'orderMonth', title: '发货月份', minWidth: 100 },
     { field: 'provinceNorm', title: '订单省份', minWidth: 100 },
     { field: 'billProvince', title: '账单省份', minWidth: 100 },
     {
@@ -150,6 +207,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       formatter: formatWeight,
     },
     {
+      field: 'weightDiffRate',
+      title: '重量偏差率',
+      minWidth: 110,
+      align: 'right',
+      formatter: formatPercent,
+    },
+    {
       field: 'estimatedAmount',
       title: '预估费用',
       minWidth: 104,
@@ -169,6 +233,37 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconDetailA
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,
+    },
+    {
+      field: 'duplicateAmount',
+      title: '重复金额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'payableAmount',
+      title: '应付金额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'duplicateSourceBatchNo',
+      title: '重复来源批次',
+      minWidth: 170,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'duplicateSourceBillMonth',
+      title: '来源账单期',
+      minWidth: 110,
+    },
+    {
+      field: 'duplicateSourceCarrierName',
+      title: '来源快递',
+      minWidth: 120,
+      showOverflow: 'tooltip',
     },
     {
       field: 'internalOrderNos',

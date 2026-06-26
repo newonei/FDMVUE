@@ -25,13 +25,13 @@ export function useGridFormSchema(): VbenFormSchema[] {
   return [
     {
       fieldName: 'periodName',
-      label: '账期名称',
+      label: '订单池名称',
       component: 'Input',
       componentProps: { allowClear: true },
     },
     {
-      fieldName: 'billMonth',
-      label: '账单月份',
+      fieldName: 'orderMonth',
+      label: '发货月份',
       component: 'Input',
       componentProps: { allowClear: true, placeholder: '如 2026-05' },
     },
@@ -54,12 +54,12 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconPeriodA
   return [
     {
       field: 'periodName',
-      title: '账期名称',
+      title: '订单池名称',
       minWidth: 200,
       fixed: 'left',
       showOverflow: 'tooltip',
     },
-    { field: 'billMonth', title: '账单月份', minWidth: 100 },
+    { field: 'orderMonth', title: '发货月份', minWidth: 100 },
     {
       field: 'status',
       title: '状态',
@@ -98,6 +98,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconPeriodA
       minWidth: 160,
       formatter: 'formatDateTime',
     },
-    { title: '操作', width: 240, fixed: 'right', slots: { default: 'actions' } },
+    { title: '操作', width: 180, fixed: 'right', slots: { default: 'actions' } },
   ];
 }

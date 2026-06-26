@@ -87,7 +87,7 @@ const [Modal, modalApi] = useVbenModal({
     <div class="px-1 pb-2">
       <div class="mb-2 flex items-center justify-between">
         <span class="text-xs text-muted-foreground">
-          账期订单池中尚未被任何快递账单对账的运单（共 {{ rows.length }} 单）。
+          当前订单池中尚未被任何快递账单命中的运单（共 {{ rows.length }} 单）。
         </span>
         <Button size="small" :disabled="rows.length === 0" @click="handleExport">
           <template #icon>

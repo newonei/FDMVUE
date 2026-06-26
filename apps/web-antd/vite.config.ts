@@ -21,8 +21,10 @@ export default defineConfig(async () => {
           },
           '/pattern-recognition-api': {
             changeOrigin: true,
+            proxyTimeout: 10 * 60 * 1000,
             rewrite: (path) => path.replace(/^\/pattern-recognition-api/, ''),
             target: 'http://127.0.0.1:8000',
+            timeout: 10 * 60 * 1000,
           },
         },
       },

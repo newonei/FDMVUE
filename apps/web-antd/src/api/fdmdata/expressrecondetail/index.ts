@@ -10,6 +10,7 @@ export namespace FdmdataExpressReconDetailApi {
     feeRuleId?: number;
     waybillNo?: string;
     shopName?: string;
+    orderMonth?: string;
     orderProvince?: string;
     billProvince?: string;
     provinceNorm?: string;
@@ -18,9 +19,18 @@ export namespace FdmdataExpressReconDetailApi {
     estimatedWeight?: number;
     billWeight?: number;
     weightDiff?: number;
+    weightDiffRate?: number;
+    weightWarning?: number;
     estimatedAmount?: number;
     actualAmount?: number;
     diffAmount?: number;
+    duplicateBilled?: number;
+    duplicateAmount?: number;
+    payableAmount?: number;
+    duplicateSourceBatchId?: number;
+    duplicateSourceBatchNo?: string;
+    duplicateSourceBillMonth?: string;
+    duplicateSourceCarrierName?: string;
     status?: string;
     statusMessage?: string;
     internalOrderNos?: string;

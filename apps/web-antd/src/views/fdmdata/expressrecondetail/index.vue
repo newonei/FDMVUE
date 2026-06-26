@@ -8,7 +8,7 @@ import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button } from 'ant-design-vue';
+import { Button, Tag } from 'ant-design-vue';
 
 import { TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -76,6 +76,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
       },
     },
     rowConfig: { keyField: 'id', isHover: true },
+    rowClassName: ({ row }) => {
+      if (row.duplicateBilled === 1) return 'express-row-duplicate';
+      if (row.weightWarning === 1) return 'express-row-weight-warning';
+      return '';
+    },
     toolbarConfig: { refresh: true, search: true },
   } as VxeTableGridOptions<FdmdataExpressReconDetailApi.ExpressReconDetail>,
 });
@@ -123,6 +128,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
               ]"
             />
           </template>
+          <template #colDuplicate="{ row }">
+            <Tag v-if="row.duplicateBilled === 1" color="error">重复</Tag>
+            <span v-else>-</span>
+          </template>
         </Grid>
       </div>
     </div>
@@ -161,6 +170,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 .express-grid :deep(.vxe-grid) {
   height: 100%;
+}
+
+.express-grid :deep(.express-row-duplicate) {
+  background-color: #fff1f0;
+}
+
+.express-grid :deep(.express-row-weight-warning) {
+  background-color: #fff7e6;
 }
 
 @media (max-width: 768px) {

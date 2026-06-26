@@ -2,8 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataExpressReconBatchApi } from '#/api/fdmdata/expressreconbatch';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -19,59 +19,24 @@ import {
   getExpressReconBatchPage,
   recalculateExpressReconBatch,
 } from '#/api/fdmdata/expressreconbatch';
-import {
-  getExpressReconPeriod,
-  type FdmdataExpressReconPeriodApi,
-} from '#/api/fdmdata/expressreconperiod';
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
 import ReconcileModal from './modules/reconcile-modal.vue';
+import ShopSummaryModal from './modules/shop-summary-modal.vue';
 
 defineOptions({ name: 'FdmdataExpressReconBatch' });
 
-const route = useRoute();
 const router = useRouter();
 const [ReconcileModalComp, reconcileModalApi] = useVbenModal({
   connectedComponent: ReconcileModal,
 });
-
-const currentPeriod = ref<
-  FdmdataExpressReconPeriodApi.ExpressReconPeriod | undefined
->();
-
-function getRoutePeriodId() {
-  const raw = route.query.periodId;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-const periodId = computed(() => getRoutePeriodId());
-
-async function loadPeriod() {
-  const id = periodId.value;
-  if (!id) {
-    currentPeriod.value = undefined;
-    return;
-  }
-  try {
-    currentPeriod.value = await getExpressReconPeriod(id);
-  } catch {
-    currentPeriod.value = undefined;
-  }
-}
+const [ShopSummaryModalComp, shopSummaryModalApi] = useVbenModal({
+  connectedComponent: ShopSummaryModal,
+});
 
 function openReconcileModal() {
-  if (!periodId.value) {
-    message.warning('请先从「对账账期」进入某个账期再上传账单');
-    return;
-  }
-  reconcileModalApi.setData({ periodId: periodId.value }).open();
-}
-
-function goBackToPeriod() {
-  router.push({ path: '/fdmdata/express-recon/period' });
+  reconcileModalApi.open();
 }
 
 const pollTimers = new Map<number, number>();
@@ -86,7 +51,6 @@ async function handleDelete(row: FdmdataExpressReconBatchApi.ExpressReconBatch) 
     await deleteExpressReconBatch(row.id);
     message.success($t('ui.actionMessage.deleteSuccess', [row.id]));
     gridApi.query();
-    void loadPeriod();
   } finally {
     hideLoading();
   }
@@ -105,7 +69,6 @@ async function handleRecalculate(
       ).toFixed(2)}`,
     );
     gridApi.query();
-    void loadPeriod();
   } finally {
     hideLoading();
   }
@@ -128,6 +91,11 @@ async function handleExport() {
   });
 }
 
+async function handleOpenShopSummary() {
+  const formValues = await gridApi.formApi.getValues();
+  shopSummaryModalApi.setData(formValues).open();
+}
+
 function handleReconcileSubmitted(batchId?: number) {
   gridApi.query();
   if (batchId) {
@@ -146,7 +114,6 @@ function startPollImportBatch(batchId: number) {
       if (batch.status === 'RECONCILED') {
         stopPollImportBatch(batchId);
         message.success(`对账完成：${batch.batchNo}`);
-        void loadPeriod();
         return;
       }
 
@@ -197,7 +164,6 @@ const [Grid, gridApi] = useVbenVxeGrid({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
-            periodId: periodId.value,
           }),
       },
     },
@@ -205,20 +171,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
     toolbarConfig: { refresh: true, search: true },
   } as VxeTableGridOptions<FdmdataExpressReconBatchApi.ExpressReconBatch>,
 });
-
-watch(
-  periodId,
-  () => {
-    void loadPeriod();
-    gridApi.query();
-  },
-  { immediate: true },
-);
 </script>
 
 <template>
   <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
     <ReconcileModalComp @success="handleReconcileSubmitted" />
+    <ShopSummaryModalComp />
 
     <div class="express-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
       <header
@@ -226,37 +184,26 @@ watch(
       >
         <div class="min-w-0 flex-1">
           <h2 class="mb-1 flex items-center gap-2 text-lg font-semibold text-foreground">
-            <Button
-              v-if="periodId"
-              type="link"
-              class="!h-auto !p-0"
-              @click="goBackToPeriod"
-            >
-              <IconifyIcon icon="lucide:arrow-left" />
-            </Button>
-            快递公司对账
+            快递账单对账
           </h2>
-          <p v-if="currentPeriod" class="mb-0 text-xs text-muted-foreground">
-            账期：{{ currentPeriod.periodName }}
-            <template v-if="currentPeriod.billMonth">
-              · {{ currentPeriod.billMonth }}</template
-            >
-            · 订单 {{ currentPeriod.orderCount ?? 0 }} 单 · 已对账
-            {{ currentPeriod.reconciledWaybillCount ?? 0 }} · 未对账
-            {{ currentPeriod.unreconciledWaybillCount ?? 0 }}
-          </p>
-          <p v-else class="mb-0 text-xs text-muted-foreground">
-            按账单运单匹配账期订单池，逐家快递公司分别对账。
+          <p class="mb-0 text-xs text-muted-foreground">
+            按快递公司和账单所属期上传月度账单，系统在全局订单池内匹配并剔除重复计费。
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <Button @click="handleOpenShopSummary">
+            <template #icon>
+              <IconifyIcon icon="lucide:table-properties" />
+            </template>
+            店铺汇总
+          </Button>
           <Button @click="handleExport">
             <template #icon>
               <IconifyIcon icon="lucide:download" />
             </template>
             导出批次
           </Button>
-          <Button v-if="periodId" type="primary" @click="openReconcileModal">
+          <Button type="primary" @click="openReconcileModal">
             <template #icon>
               <IconifyIcon icon="lucide:upload" />
             </template>

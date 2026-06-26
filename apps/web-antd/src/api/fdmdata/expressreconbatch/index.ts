@@ -22,9 +22,13 @@ export namespace FdmdataExpressReconBatchApi {
     provinceMismatchCount?: number;
     ruleMissingCount?: number;
     diffCount?: number;
+    duplicateWaybillCount?: number;
+    weightWarningCount?: number;
     estimatedAmount?: number;
     actualAmount?: number;
     diffAmount?: number;
+    duplicateAmount?: number;
+    payableAmount?: number;
     remark?: string;
     createTime?: string;
   }
@@ -42,10 +46,22 @@ export namespace FdmdataExpressReconBatchApi {
   }
 
   export interface ReconcileParams {
-    periodId: number;
+    periodId?: number;
+    billMonth: string;
     billFile: File;
     templateId?: number;
     batchName?: string;
+  }
+
+  export interface ShopSummary {
+    shopName?: string;
+    waybillCount?: number;
+    duplicateWaybillCount?: number;
+    weightWarningCount?: number;
+    estimatedAmount?: number;
+    actualAmount?: number;
+    duplicateAmount?: number;
+    payableAmount?: number;
   }
 }
 
@@ -71,7 +87,8 @@ export function reconcileCarrierExpress(
   params: FdmdataExpressReconBatchApi.ReconcileParams,
 ) {
   const formData = new FormData();
-  formData.append('periodId', String(params.periodId));
+  if (params.periodId !== undefined) formData.append('periodId', String(params.periodId));
+  formData.append('billMonth', params.billMonth);
   formData.append('billFile', params.billFile);
   if (params.templateId !== undefined)
     formData.append('templateId', String(params.templateId));
@@ -98,6 +115,20 @@ export function exportExpressReconBatchExcel(params: Record<string, unknown>) {
   return requestClient.download('/fdmdata/express-recon-batch/export-excel', {
     params,
   });
+}
+
+export function getExpressReconShopSummary(params: Record<string, unknown>) {
+  return requestClient.get<FdmdataExpressReconBatchApi.ShopSummary[]>(
+    '/fdmdata/express-recon-batch/shop-summary',
+    { params },
+  );
+}
+
+export function exportExpressReconShopSummaryExcel(params: Record<string, unknown>) {
+  return requestClient.download(
+    '/fdmdata/express-recon-batch/export-shop-summary-excel',
+    { params },
+  );
 }
 
 export function downloadExpressBillTemplate() {

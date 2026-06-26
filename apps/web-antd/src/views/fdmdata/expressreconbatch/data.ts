@@ -35,9 +35,15 @@ export function useGridFormSchema(): VbenFormSchema[] {
     },
     {
       fieldName: 'billMonth',
-      label: '账单月份',
+      label: '账单所属期',
       component: 'Input',
       componentProps: { allowClear: true, placeholder: '如 2026-05' },
+    },
+    {
+      fieldName: 'carrierName',
+      label: '快递公司',
+      component: 'Input',
+      componentProps: { allowClear: true },
     },
     {
       fieldName: 'status',
@@ -89,7 +95,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconBatchAp
       showOverflow: 'tooltip',
     },
     { field: 'carrierName', title: '快递公司', minWidth: 110 },
-    { field: 'billMonth', title: '账单月份', minWidth: 100 },
+    { field: 'billMonth', title: '账单所属期', minWidth: 110 },
     { field: 'status', title: '状态', minWidth: 96, formatter: formatBatchStatus },
     {
       field: 'totalWaybillCount',
@@ -107,6 +113,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconBatchAp
       field: 'diffCount',
       title: '差额数',
       minWidth: 88,
+      align: 'right',
+    },
+    {
+      field: 'duplicateWaybillCount',
+      title: '重复计费',
+      minWidth: 96,
+      align: 'right',
+    },
+    {
+      field: 'weightWarningCount',
+      title: '重量预警',
+      minWidth: 96,
       align: 'right',
     },
     {
@@ -132,6 +150,20 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconBatchAp
     {
       field: 'diffAmount',
       title: '差额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'duplicateAmount',
+      title: '重复金额',
+      minWidth: 104,
+      align: 'right',
+      formatter: formatAmount,
+    },
+    {
+      field: 'payableAmount',
+      title: '应付金额',
       minWidth: 104,
       align: 'right',
       formatter: formatAmount,

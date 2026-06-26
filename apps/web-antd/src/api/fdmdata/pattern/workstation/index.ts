@@ -36,6 +36,18 @@ function resolvePatternRecognitionApiUrl(value: string) {
 }
 
 export namespace PatternRecognitionApi {
+  export interface UploadProgressEvent {
+    loaded: number;
+    percent: number;
+    total?: number;
+  }
+
+  export interface UploadOptions {
+    onUploadComplete?: () => void;
+    onUploadProgress?: (event: UploadProgressEvent) => void;
+    timeoutMs?: number;
+  }
+
   export interface Candidate {
     design_image_url: string;
     detail_score?: null | number;
@@ -117,6 +129,20 @@ async function readErrorMessage(response: Response) {
   }
 }
 
+function readErrorMessageFromText(
+  text: string,
+  status: number,
+  statusText: string,
+) {
+  if (!text) return statusText || `HTTP ${status}`;
+  try {
+    const data = JSON.parse(text);
+    return data.detail || data.message || data.msg || text;
+  } catch {
+    return text;
+  }
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has('Accept')) {
@@ -133,6 +159,70 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+function xhrPostJson<T>(
+  path: string,
+  body: FormData,
+  options: PatternRecognitionApi.UploadOptions = {},
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = resolvePatternRecognitionApiUrl(path);
+    let uploadCompleteNotified = false;
+
+    function notifyUploadComplete() {
+      if (uploadCompleteNotified) return;
+      uploadCompleteNotified = true;
+      options.onUploadComplete?.();
+    }
+
+    xhr.open('POST', url);
+    xhr.timeout = options.timeoutMs ?? 0;
+    xhr.setRequestHeader('Accept', 'application/json');
+
+    xhr.upload.addEventListener('progress', (event) => {
+      const total = event.lengthComputable ? event.total : undefined;
+      const percent = total
+        ? Math.min(100, Math.round((event.loaded / total) * 100))
+        : 0;
+      options.onUploadProgress?.({
+        loaded: event.loaded,
+        percent,
+        total,
+      });
+      if (total && event.loaded >= total) {
+        notifyUploadComplete();
+      }
+    });
+
+    xhr.upload.addEventListener('load', () => {
+      notifyUploadComplete();
+    });
+
+    xhr.addEventListener('load', () => {
+      const text = String(xhr.responseText || '');
+      if (xhr.status >= 200 && xhr.status < 400) {
+        try {
+          resolve((text ? JSON.parse(text) : {}) as T);
+        } catch (error) {
+          reject(new Error('识别服务返回内容不是有效 JSON', { cause: error }));
+        }
+        return;
+      }
+      reject(new Error(readErrorMessageFromText(text, xhr.status, xhr.statusText)));
+    });
+
+    xhr.addEventListener('timeout', () => {
+      reject(new Error('识别请求超时'));
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('识别服务连接失败'));
+    });
+
+    xhr.send(body);
+  });
+}
+
 export function getPatternRecognitionHealth() {
   return fetchJson<PatternRecognitionApi.HealthResponse>('/api/health');
 }
@@ -144,13 +234,14 @@ export function syncPatternRecognitionOrders(incremental = true) {
   );
 }
 
-export function uploadPatternCapture(form: FormData) {
-  return fetchJson<PatternRecognitionApi.UploadMatchResponse>(
+export function uploadPatternCapture(
+  form: FormData,
+  options?: PatternRecognitionApi.UploadOptions,
+) {
+  return xhrPostJson<PatternRecognitionApi.UploadMatchResponse>(
     '/api/match/upload',
-    {
-      body: form,
-      method: 'POST',
-    },
+    form,
+    options,
   );
 }
 
