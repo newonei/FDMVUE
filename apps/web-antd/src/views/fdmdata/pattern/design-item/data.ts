@@ -18,6 +18,7 @@ export const PATTERN_DESIGN_ITEM_DEFAULTS: Partial<FdmdataPatternDesignItemApi.P
     quantity: 1,
     importSequence: 0,
     productionSent: 0,
+    downloaded: 0,
     status: 0,
   };
 
@@ -29,6 +30,11 @@ export const PATTERN_DESIGN_ITEM_STATUS_OPTIONS = [
 export const PRODUCTION_SENT_OPTIONS = [
   { label: '未发出', value: 0 },
   { label: '已发出', value: 1 },
+];
+
+export const DOWNLOADED_OPTIONS = [
+  { label: '未下载', value: 0 },
+  { label: '已下载', value: 1 },
 ];
 
 export interface PatternDesignItemShopOption {
@@ -61,6 +67,23 @@ function formatStatus(value: unknown) {
 
 function formatProductionSent(value: unknown) {
   return Number(value) === 1 ? '已发出' : '未发出';
+}
+
+function formatDownloaded(value: unknown) {
+  return Number(value) === 1 ? '已下载' : '未下载';
+}
+
+function formatItemNoWithTotal(
+  row: FdmdataPatternDesignItemApi.PatternDesignItem,
+) {
+  const itemNo = String(row.itemNo ?? '').trim();
+  const total = Number(row.orderItemCount ?? 0);
+  const parsedItemNo = Number.parseInt(itemNo, 10);
+  const current =
+    Number.isFinite(parsedItemNo) && parsedItemNo > 0
+      ? String(parsedItemNo)
+      : itemNo || '-';
+  return total > 0 ? `${current}/${total}` : current;
 }
 
 function getShopNameSelectProps(options: ShopNameSelectOptions = {}) {
@@ -303,6 +326,16 @@ export function useGridFormSchema(
       },
     },
     {
+      fieldName: 'downloaded',
+      label: '是否下载',
+      component: 'Select',
+      componentProps: {
+        allowClear: true,
+        options: DOWNLOADED_OPTIONS,
+        placeholder: '请选择是否下载',
+      },
+    },
+    {
       fieldName: 'status',
       label: '状态',
       component: 'Select',
@@ -346,6 +379,20 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       },
     },
     {
+      field: 'downloaded',
+      title: '是否下载',
+      fixed: 'left',
+      width: 100,
+      slots: {
+        default: ({ row }) =>
+          h(
+            Tag,
+            { color: Number(row.downloaded) === 1 ? 'blue' : 'default' },
+            () => formatDownloaded(row.downloaded),
+          ),
+      },
+    },
+    {
       field: 'shopName',
       title: '店铺',
       minWidth: 130,
@@ -356,6 +403,9 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
       title: '图案明细号',
       minWidth: 140,
       showOverflow: 'tooltip',
+      slots: {
+        default: ({ row }) => formatItemNoWithTotal(row),
+      },
     },
     {
       field: 'previewImage',

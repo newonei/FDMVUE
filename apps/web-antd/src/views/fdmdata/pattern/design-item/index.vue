@@ -18,6 +18,7 @@ import {
   exportFdmdataPatternDesignItemExcel,
   getFdmdataPatternDesignItemPage,
   getFdmdataPatternDesignItemShopNameOptions,
+  markFdmdataPatternDesignItemDownloaded,
 } from '#/api/fdmdata/pattern/design-item';
 import { $t } from '#/locales';
 
@@ -152,7 +153,21 @@ function triggerOriginalImageDownload(url: string, fileName: string) {
   link.remove();
 }
 
-function handleDownloadOriginal(
+async function markRowsDownloaded(
+  rows: FdmdataPatternDesignItemApi.PatternDesignItem[],
+) {
+  const ids = rows
+    .map((row) => row.id)
+    .filter((id): id is number => typeof id === 'number');
+  if (ids.length === 0) return;
+
+  await markFdmdataPatternDesignItemDownloaded(ids);
+  rows.forEach((row) => {
+    row.downloaded = 1;
+  });
+}
+
+async function handleDownloadOriginal(
   row: FdmdataPatternDesignItemApi.PatternDesignItem,
   index = 0,
 ) {
@@ -163,9 +178,15 @@ function handleDownloadOriginal(
   }
 
   triggerOriginalImageDownload(url, getOriginalImageFileName(row, index));
+  try {
+    await markRowsDownloaded([row]);
+  } catch (error) {
+    console.error('Mark pattern design item downloaded failed', error);
+    message.warning('原图已开始下载，但标记已下载失败');
+  }
 }
 
-function handleBatchDownloadOriginal() {
+async function handleBatchDownloadOriginal() {
   if (checkedRows.value.length === 0) {
     message.warning('请先勾选要下载的图案明细');
     return;
@@ -186,9 +207,20 @@ function handleBatchDownloadOriginal() {
     );
   });
 
+  let markSuccess = true;
+  try {
+    await markRowsDownloaded(downloadableRows);
+  } catch (error) {
+    markSuccess = false;
+    console.error('Mark pattern design items downloaded failed', error);
+    message.warning('原图已开始下载，但标记已下载失败');
+  }
+
   const skippedCount = checkedRows.value.length - downloadableRows.length;
   message.success(
     `已开始下载 ${downloadableRows.length} 张原图${
+      markSuccess ? '，并标记为已下载' : ''
+    }${
       skippedCount > 0 ? `，${skippedCount} 条没有原图 URL` : ''
     }`,
   );

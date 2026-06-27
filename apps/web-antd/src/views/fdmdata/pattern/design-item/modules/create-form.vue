@@ -10,8 +10,10 @@ import { IconifyIcon } from '@vben/icons';
 import { Button, Empty, Image, Input, InputNumber, message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
-import { createFdmdataPatternDesignItemBatch } from '#/api/fdmdata/pattern/design-item';
-import { uploadFile } from '#/api/infra/file';
+import {
+  createFdmdataPatternDesignItemBatch,
+  uploadFdmdataPatternDesignItemDesignImage,
+} from '#/api/fdmdata/pattern/design-item';
 import ImageUpload from '#/components/upload/image-upload.vue';
 import { $t } from '#/locales';
 
@@ -36,16 +38,14 @@ interface BatchRow {
 }
 
 interface UploadSuccessPayload {
+  designImageUrl?: string;
   previewUrl?: string;
+  previewImageUrl?: string;
   response?: unknown;
   url?: string;
 }
 
 const SOURCE_IMAGE_MAX_SIZE_MB = 256;
-const PREVIEW_IMAGE_MAX_SIDE = 720;
-const PREVIEW_IMAGE_QUALITY = 0.76;
-const DESIGN_IMAGE_DIRECTORY = 'fdmdata/pattern/design-item';
-const DESIGN_PREVIEW_IMAGE_DIRECTORY = 'fdmdata/pattern/design-item/preview';
 
 let rowSeq = 0;
 let resettingBatchRows = false;
@@ -77,9 +77,13 @@ function extractUploadUrl(res: unknown): string {
   if (!res || typeof res !== 'object') return '';
   const record = res as Record<string, any>;
   if (typeof record.url === 'string') return record.url;
+  if (typeof record.designImageUrl === 'string') return record.designImageUrl;
   if (typeof record.data === 'string') return record.data;
   if (record.data && typeof record.data === 'object') {
-    return typeof record.data.url === 'string' ? record.data.url : '';
+    if (typeof record.data.url === 'string') return record.data.url;
+    return typeof record.data.designImageUrl === 'string'
+      ? record.data.designImageUrl
+      : '';
   }
   return '';
 }
@@ -88,64 +92,16 @@ function extractUploadPreviewUrl(res: unknown): string {
   if (!res || typeof res !== 'object') return '';
   const record = res as Record<string, any>;
   if (typeof record.previewUrl === 'string') return record.previewUrl;
+  if (typeof record.previewImageUrl === 'string') return record.previewImageUrl;
   if (record.data && typeof record.data === 'object') {
-    return typeof record.data.previewUrl === 'string'
-      ? record.data.previewUrl
+    if (typeof record.data.previewUrl === 'string') {
+      return record.data.previewUrl;
+    }
+    return typeof record.data.previewImageUrl === 'string'
+      ? record.data.previewImageUrl
       : '';
   }
   return '';
-}
-
-function canvasToBlob(
-  canvas: HTMLCanvasElement,
-  type: string,
-  quality: number,
-) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob);
-          return;
-        }
-        reject(new Error('图片生成失败'));
-      },
-      type,
-      quality,
-    );
-  });
-}
-
-async function buildResizedImageFile(
-  file: File,
-  maxSide: number,
-  quality: number,
-  suffixName: string,
-) {
-  if (!file.type.startsWith('image/')) return undefined;
-  const bitmap = await createImageBitmap(file);
-  try {
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('图片生成失败');
-    context.fillStyle = '#fff';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await canvasToBlob(canvas, 'image/jpeg', quality);
-    const basename = file.name.replace(/\.[^.]+$/, '') || 'design-image';
-    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    return new File([blob], `${basename}-${suffix}-${suffixName}.jpg`, {
-      lastModified: Date.now(),
-      type: 'image/jpeg',
-    });
-  } finally {
-    bitmap.close();
-  }
 }
 
 function extractPatternDesignImageUrls(
@@ -164,39 +120,15 @@ async function uploadDesignImageWithPreview(
   file: File,
   onUploadProgress?: AxiosProgressEvent,
 ) {
-  const originalRes = await uploadFile(
-    { directory: DESIGN_IMAGE_DIRECTORY, file },
+  const uploadRes = await uploadFdmdataPatternDesignItemDesignImage(
+    file,
     onUploadProgress,
   );
-  const designUrl = extractUploadUrl(originalRes);
-  let previewUrl = extractUploadPreviewUrl(originalRes);
-
-  if (designUrl && !previewUrl) {
-    try {
-      const previewFile = await buildResizedImageFile(
-        file,
-        PREVIEW_IMAGE_MAX_SIDE,
-        PREVIEW_IMAGE_QUALITY,
-        'preview',
-      );
-      if (previewFile) {
-        previewUrl = extractUploadUrl(
-          await uploadFile({
-            directory: DESIGN_PREVIEW_IMAGE_DIRECTORY,
-            file: previewFile,
-          }),
-        );
-      }
-    } catch (error) {
-      console.error('Create pattern design preview image failed', error);
-      message.warning('预览图生成失败，请重新上传或检查图片格式');
-    }
-  }
 
   return {
-    previewUrl,
-    response: originalRes,
-    url: designUrl,
+    previewUrl: uploadRes.previewImageUrl,
+    response: uploadRes,
+    url: uploadRes.designImageUrl,
   };
 }
 

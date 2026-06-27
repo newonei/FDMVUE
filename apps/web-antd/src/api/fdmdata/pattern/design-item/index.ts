@@ -1,6 +1,10 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { AxiosProgressEvent } from '#/api/infra/file';
+
 import { requestClient } from '#/api/request';
+
+const DESIGN_IMAGE_UPLOAD_TIMEOUT = 30 * 60 * 1000;
 
 export namespace FdmdataPatternDesignItemApi {
   export interface PatternDesignItem {
@@ -16,8 +20,10 @@ export namespace FdmdataPatternDesignItemApi {
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    downloaded?: number;
     status?: number;
     remark?: string;
+    orderItemCount?: number;
     createTime?: string;
     updateTime?: string;
   }
@@ -37,6 +43,7 @@ export namespace FdmdataPatternDesignItemApi {
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    downloaded?: number;
     status?: number;
     remark?: string;
     items: BatchCreateItem[];
@@ -45,6 +52,11 @@ export namespace FdmdataPatternDesignItemApi {
   export interface ShopNameOptionsParams {
     keyword?: string;
     limit?: number;
+  }
+
+  export interface UploadResp {
+    designImageUrl: string;
+    previewImageUrl: string;
   }
 }
 
@@ -90,6 +102,20 @@ export function getFdmdataPatternDesignItem(id: number) {
   );
 }
 
+export function uploadFdmdataPatternDesignItemDesignImage(
+  file: File,
+  onUploadProgress?: AxiosProgressEvent,
+) {
+  return requestClient.upload<FdmdataPatternDesignItemApi.UploadResp>(
+    '/fdmdata/pattern/design-item/upload-design-image',
+    { file },
+    {
+      onUploadProgress,
+      timeout: DESIGN_IMAGE_UPLOAD_TIMEOUT,
+    },
+  );
+}
+
 export function createFdmdataPatternDesignItem(
   data: FdmdataPatternDesignItemApi.PatternDesignItem,
 ) {
@@ -114,6 +140,13 @@ export function updateFdmdataPatternDesignItem(
   return requestClient.put<boolean>(
     '/fdmdata/pattern/design-item/update',
     normalizeOrderDate(data),
+  );
+}
+
+export function markFdmdataPatternDesignItemDownloaded(ids: number[]) {
+  return requestClient.put<boolean>(
+    '/fdmdata/pattern/design-item/mark-downloaded',
+    { ids },
   );
 }
 
