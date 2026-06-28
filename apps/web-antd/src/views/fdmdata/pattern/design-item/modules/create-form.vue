@@ -45,7 +45,7 @@ interface UploadSuccessPayload {
   url?: string;
 }
 
-const SOURCE_IMAGE_MAX_SIZE_MB = 256;
+const SOURCE_IMAGE_MAX_SIZE_MB = 1024;
 
 let rowSeq = 0;
 let resettingBatchRows = false;

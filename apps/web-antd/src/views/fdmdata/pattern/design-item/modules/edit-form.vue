@@ -36,7 +36,7 @@ interface UploadSuccessPayload {
   url?: string;
 }
 
-const SOURCE_IMAGE_MAX_SIZE_MB = 256;
+const SOURCE_IMAGE_MAX_SIZE_MB = 1024;
 
 let openSeq = 0;
 const formData = ref<
