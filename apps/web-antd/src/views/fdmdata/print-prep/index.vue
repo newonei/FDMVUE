@@ -4,6 +4,7 @@ import type {
 } from '#/api/fdmdata/print-prep';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -32,31 +33,45 @@ import {
 import {
   createPrintPrepBaseJob,
   createPrintPrepLayoutJob,
+  getPrintPrepFileLocation,
   getPrintPrepHistory,
   getPrintPrepJob,
   getPrintPrepOptions,
-  getPrintPrepFileLocation,
-  PRINT_PREP_OUTPUT_FILE_DEFINITIONS,
   PRINT_PREP_API_BASE,
+  PRINT_PREP_OUTPUT_FILE_DEFINITIONS,
   resolvePrintPrepAssetUrl,
   uploadPrintPrepReferenceBlob,
 } from '#/api/fdmdata/print-prep';
 
 defineOptions({ name: 'FdmdataPrintPrep' });
 
-type ProductType = '大号鼠标垫' | '麂皮绒垫' | '普拉提垫' | '小号鼠标垫';
+const props = withDefaults(defineProps<PrintPrepWorkbenchProps>(), {
+  mode: 'default',
+});
+const route = useRoute();
+type ProductType = '大号鼠标垫' | '小号鼠标垫' | '普拉提垫' | '麂皮绒垫';
+type WorkbenchMode = 'default' | 'mouse-pad';
 type AiProvider =
   | 'ark_seedream'
   | 'gpt_image_2'
-  | 'nanobanana'
   | 'nanobanana2'
+  | 'nanobanana'
   | 'nanobanana_pro'
   | 'none';
 type AiSize = '1K' | '2K' | '4K';
 type BackgroundMode = 'clean' | 'preserve';
 type LayoutMode = 'pilates_template' | 'standard';
 type LogoColor = 'auto' | 'black' | 'white';
-type Orientation = 'auto' | 'landscape' | 'portrait';
+type BleedMode = 'per_side' | 'total';
+type Orientation = 'as_is' | 'auto' | 'landscape' | 'portrait';
+
+interface PrintPrepWorkbenchProps {
+  mode?: WorkbenchMode;
+}
+
+const isMousePadMode =
+  props.mode === 'mouse-pad' ||
+  String(route.path || '').includes('/fdmsheji/mouse-pad-print-prep');
 
 interface PrintPrepFormState {
   addYugaLogo: boolean;
@@ -65,6 +80,10 @@ interface PrintPrepFormState {
   aiPreprocessSize: AiSize;
   aiReferenceUrl: string;
   backgroundMode: BackgroundMode;
+  bleedCm: number;
+  bleedMode: BleedMode;
+  customTrimHeightCm: number;
+  customTrimWidthCm: number;
   customerPrompt: string;
   layoutMode: LayoutMode;
   lightBackground: boolean;
@@ -86,11 +105,13 @@ interface PrintPrepFormState {
 }
 
 type CachedPrintPrepFormState = Partial<PrintPrepFormState> & {
-  aiProviderDefaultMigrated?: boolean;
   aiPreprocessProvider?: string;
+  aiProviderDefaultMigrated?: boolean;
 };
 
-const FORM_CACHE_KEY = 'fdm_print_prep_vue_form_state_v1';
+const formCacheKey = isMousePadMode
+  ? 'fdm_mouse_pad_print_prep_vue_form_state_v1'
+  : 'fdm_print_prep_vue_form_state_v1';
 const DISABLED_AI_PROVIDERS = new Set(['grok_imagine', 'wan2_6']);
 const DEFAULT_AI_PROVIDER: AiProvider = 'ark_seedream';
 const PILATES_PREVIEW_RATIO = 1815 / 2920;
@@ -99,7 +120,7 @@ const PILATES_OUTLINE_PREVIEW_URL = '/print-prep/pilates-outline.png';
 const PILATES_DEFAULT_PLACEMENT_SCALE = 1.18;
 const PILATES_FIXED_REFERENCE_URL =
   'https://hbfdm.oss-cn-wuhan-lr.aliyuncs.com/%E7%A9%BA%E6%9D%BF-%E6%99%AE%E6%8B%89%E6%8F%90.png';
-const FINAL_OUTPUT_FILE_KEYS = new Set(['preview', 'jpg', 'pdf', 'ai', 'report']);
+const FINAL_OUTPUT_FILE_KEYS = new Set(['ai', 'jpg', 'pdf', 'preview', 'report']);
 
 const fallbackProductSizes: Record<ProductType, string[]> = {
   大号鼠标垫: [
@@ -156,28 +177,32 @@ const managedAiPromptMarkers = [
 
 const formState = reactive<PrintPrepFormState>({
   addYugaLogo: true,
-  aiPreprocessPrompt: defaultAiPrompts.普拉提垫,
+  aiPreprocessPrompt: isMousePadMode ? defaultAiPrompts.大号鼠标垫 : defaultAiPrompts.普拉提垫,
   aiPreprocessProvider: DEFAULT_AI_PROVIDER,
   aiPreprocessSize: '4K',
-  aiReferenceUrl: PILATES_FIXED_REFERENCE_URL,
+  aiReferenceUrl: isMousePadMode ? '' : PILATES_FIXED_REFERENCE_URL,
   backgroundMode: 'preserve',
+  bleedCm: 1.5,
+  bleedMode: isMousePadMode ? 'total' : 'per_side',
+  customTrimHeightCm: isMousePadMode ? 30 : 100,
+  customTrimWidthCm: isMousePadMode ? 60 : 61,
   customerPrompt: '',
-  layoutMode: 'pilates_template',
+  layoutMode: isMousePadMode ? 'standard' : 'pilates_template',
   lightBackground: false,
   logoColor: 'auto',
   logoStyle: 'regular',
   logoText: 'YUGA',
   orderNo: '',
-  orientation: 'portrait',
+  orientation: isMousePadMode ? 'as_is' : 'portrait',
   placementOffsetX: 0,
   placementOffsetY: 0,
   placementScale: PILATES_DEFAULT_PLACEMENT_SCALE,
-  printProductType: '普拉提垫',
-  printSize: '61x100',
+  printProductType: isMousePadMode ? '大号鼠标垫' : '普拉提垫',
+  printSize: isMousePadMode ? '60x30' : '61x100',
   removeBlackBars: true,
   removeEdgeWatermark: true,
   superResolutionProvider: 'none',
-  targetLongPx: 12_000,
+  targetLongPx: isMousePadMode ? 6000 : 12_000,
   templateId: 'pilates_yuga_t_100x61',
 });
 
@@ -193,8 +218,8 @@ const historyOpen = ref(false);
 const selectedFile = ref<File | null>(null);
 const originalPreviewUrl = ref('');
 const latestPlacementPreviewBlob = ref<Blob | null>(null);
-const baseResult = ref<PrintPrepApi.PrintPrepResult | null>(null);
-const finalResult = ref<PrintPrepApi.PrintPrepResult | null>(null);
+const baseResult = ref<null | PrintPrepApi.PrintPrepResult>(null);
+const finalResult = ref<null | PrintPrepApi.PrintPrepResult>(null);
 const reportJson = ref('');
 const historyList = ref<PrintPrepApi.HistoryItem[]>([]);
 const errorMessage = ref('');
@@ -209,6 +234,7 @@ const taskState = reactive({
 let pollToken = 0;
 let previewDebounceTimer: number | undefined;
 let placementDrag:
+  | undefined
   | {
       pointerId: number;
       startOffsetX: number;
@@ -218,11 +244,14 @@ let placementDrag:
       target: HTMLElement;
       targetHeight: number;
       targetWidth: number;
-    }
-  | undefined;
+    };
 
+const mousePadProductTypes = new Set<ProductType>(['大号鼠标垫', '小号鼠标垫']);
+const isMousePadStandalone = computed(() => isMousePadMode);
 const productOptions = computed(() =>
-  Object.keys(productSizes.value).map((value) => ({ label: value, value })),
+  Object.keys(productSizes.value)
+    .filter((value) => !isMousePadMode || mousePadProductTypes.has(value as ProductType))
+    .map((value) => ({ label: value, value })),
 );
 const sizeOptions = computed(() =>
   (productSizes.value[formState.printProductType] || []).map((value) => ({
@@ -244,7 +273,7 @@ const basePreviewFile = computed(() => {
   const files = baseResult.value?.files;
   return files?.base_preview || baseFile.value;
 });
-function getDerivedBasePreviewLocation(file: PrintPrepApi.FileInfo | null) {
+function getDerivedBasePreviewLocation(file: null | PrintPrepApi.FileInfo) {
   const location = file ? getPrintPrepFileLocation(file) : '';
   return location.replace(/_base_image\.(?:png|jpe?g|webp)$/i, '_base_preview.jpg');
 }
@@ -350,6 +379,15 @@ const resultSummary = computed(() => {
         : '-',
     },
     { label: '出血', value: data.bleed_cm ? `${data.bleed_cm}cm` : '-' },
+    {
+      label: '出血模式',
+      value:
+        data.bleed_mode === 'total' || data.bleed_mode === '总增量'
+          ? '总增量'
+          : (data.bleed_mode
+            ? '单边出血'
+            : '-'),
+    },
   ];
 });
 
@@ -362,6 +400,71 @@ function clampNumber(value: unknown, min: number, max: number) {
   if (!Number.isFinite(numeric)) return min;
   return Math.min(max, Math.max(min, numeric));
 }
+
+function formatCmValue(value: number) {
+  return Number(value.toFixed(2)).toString();
+}
+
+function parseSizeText(value: string) {
+  const match = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/.exec(value || '');
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { height, width };
+}
+
+function defaultBleedCm(productType = formState.printProductType) {
+  return productType === '小号鼠标垫' ? 1 : 1.5;
+}
+
+function getEffectiveBleedCm() {
+  const fallback = defaultBleedCm();
+  return Number(clampNumber(formState.bleedCm || fallback, 0.1, 20).toFixed(2));
+}
+
+function syncCustomPrintSizeFromFields() {
+  if (!isMousePadMode) return;
+  const width = clampNumber(formState.customTrimWidthCm, 1, 500);
+  const height = clampNumber(formState.customTrimHeightCm, 1, 500);
+  formState.customTrimWidthCm = Number(width.toFixed(2));
+  formState.customTrimHeightCm = Number(height.toFixed(2));
+  formState.bleedCm = getEffectiveBleedCm();
+  formState.bleedMode = 'total';
+  formState.printSize = `${formatCmValue(formState.customTrimWidthCm)}x${formatCmValue(
+    formState.customTrimHeightCm,
+  )}`;
+}
+
+function hydrateCustomSizeFromPrintSize() {
+  const parsed = parseSizeText(formState.printSize);
+  if (!parsed) {
+    syncCustomPrintSizeFromFields();
+    return;
+  }
+  formState.customTrimWidthCm = Number(clampNumber(parsed.width, 1, 500).toFixed(2));
+  formState.customTrimHeightCm = Number(clampNumber(parsed.height, 1, 500).toFixed(2));
+  syncCustomPrintSizeFromFields();
+}
+
+const outputSizeCm = computed(() => {
+  const parsed = parseSizeText(formState.printSize) || {
+    height: formState.customTrimHeightCm,
+    width: formState.customTrimWidthCm,
+  };
+  const bleed = getEffectiveBleedCm();
+  const bleedExtra = formState.bleedMode === 'total' ? bleed : bleed * 2;
+  return {
+    height: Number((parsed.height + bleedExtra).toFixed(2)),
+    width: Number((parsed.width + bleedExtra).toFixed(2)),
+  };
+});
+
+const outputSizeLabel = computed(
+  () => `${formatCmValue(outputSizeCm.value.width)} x ${formatCmValue(outputSizeCm.value.height)}cm`,
+);
 
 function getPreviewOffsetFactor() {
   return isPilatesTemplatePreview.value ? 0.45 : 0.5;
@@ -389,13 +492,9 @@ function getEffectivePlacementScale() {
 }
 
 function parsePrintSizeRatio() {
-  const match = /(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/.exec(
-    formState.printSize || '',
-  );
-  if (!match) return 1;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!width || !height) return 1;
+  const parsed = parseSizeText(formState.printSize || '');
+  if (!parsed) return 1;
+  const { height, width } = isMousePadMode ? outputSizeCm.value : parsed;
   if (formState.orientation === 'portrait') return Math.min(width, height) / Math.max(width, height);
   if (formState.orientation === 'landscape') return Math.max(width, height) / Math.min(width, height);
   return width / height;
@@ -448,8 +547,8 @@ function normalizeProvider(value: unknown): AiProvider {
     [
       'ark_seedream',
       'gpt_image_2',
-      'nanobanana2',
       'nanobanana',
+      'nanobanana2',
       'nanobanana_pro',
       'none',
     ].includes(value)
@@ -469,13 +568,24 @@ function normalizeCachedProvider(cache: CachedPrintPrepFormState): AiProvider {
 function loadFormCache() {
   try {
     const raw = JSON.parse(
-      localStorage.getItem(FORM_CACHE_KEY) || '{}',
+      localStorage.getItem(formCacheKey) || '{}',
     ) as CachedPrintPrepFormState;
     Object.assign(formState, {
       ...raw,
       aiPreprocessProvider: normalizeCachedProvider(raw),
       aiReferenceUrl: '',
     });
+    if (isMousePadMode) {
+      if (!mousePadProductTypes.has(formState.printProductType)) {
+        formState.printProductType = '大号鼠标垫';
+      }
+      formState.layoutMode = 'standard';
+      formState.orientation = 'as_is';
+      formState.aiReferenceUrl = '';
+      formState.backgroundMode = 'preserve';
+      formState.bleedMode = 'total';
+      hydrateCustomSizeFromPrintSize();
+    }
     formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
     if (isPilates.value && Number(formState.placementScale || 1) <= 1) {
       formState.placementScale = PILATES_DEFAULT_PLACEMENT_SCALE;
@@ -485,6 +595,14 @@ function loadFormCache() {
     formState.aiPreprocessProvider = DEFAULT_AI_PROVIDER;
     formState.aiReferenceUrl = isPilates.value ? PILATES_FIXED_REFERENCE_URL : '';
     formState.placementScale = isPilates.value ? PILATES_DEFAULT_PLACEMENT_SCALE : 1;
+    if (isMousePadMode) {
+      formState.aiReferenceUrl = '';
+      formState.backgroundMode = 'preserve';
+      formState.layoutMode = 'standard';
+      formState.orientation = 'as_is';
+      formState.bleedMode = 'total';
+      syncCustomPrintSizeFromFields();
+    }
     refreshAiPreprocessPromptForProduct();
   }
 }
@@ -495,7 +613,7 @@ function saveFormCache() {
     aiProviderDefaultMigrated: true,
   };
   delete cache.aiReferenceUrl;
-  localStorage.setItem(FORM_CACHE_KEY, JSON.stringify(cache));
+  localStorage.setItem(formCacheKey, JSON.stringify(cache));
 }
 
 function resolveAssetUrl(url?: string) {
@@ -534,8 +652,8 @@ function setError(error: unknown, prefix: string) {
 function sanitizeFileToken(value: unknown, fallback: string) {
   const text = String(value || '')
     .trim()
-    .replace(/[^A-Za-z0-9._-]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replaceAll(/[^A-Za-z0-9._-]+/g, '_')
+    .replaceAll(/^_+|_+$/g, '');
   return text || fallback;
 }
 
@@ -799,6 +917,23 @@ function copyOutputPath(path: string, label: string) {
 }
 
 function updateProductDefaults() {
+  if (isMousePadMode) {
+    if (!mousePadProductTypes.has(formState.printProductType)) {
+      formState.printProductType = '大号鼠标垫';
+    }
+    formState.layoutMode = 'standard';
+    formState.orientation = 'as_is';
+    formState.aiReferenceUrl = '';
+    formState.backgroundMode = 'preserve';
+    formState.bleedMode = 'total';
+    formState.placementScale = 1;
+    formState.placementOffsetX = 0;
+    formState.placementOffsetY = 0;
+    formState.targetLongPx = formState.targetLongPx || 6000;
+    syncCustomPrintSizeFromFields();
+    refreshAiPreprocessPromptForProduct();
+    return;
+  }
   const sizes = productSizes.value[formState.printProductType] || [];
   if (!sizes.includes(formState.printSize)) {
     formState.printSize = sizes[0] || '';
@@ -841,9 +976,14 @@ function onFileChange(event: Event) {
 
 function appendBaseFields(form: FormData) {
   if (!selectedFile.value) throw new Error('请先选择客户图片');
+  syncCustomPrintSizeFromFields();
   form.append('file', selectedFile.value);
   form.append('product_type', formState.printProductType);
   form.append('size_cm', formState.printSize);
+  if (isMousePadMode) {
+    form.append('bleed_cm', String(getEffectiveBleedCm()));
+    form.append('bleed_mode', formState.bleedMode);
+  }
   form.append('order_no', formState.orderNo.trim());
   form.append('orientation', formState.orientation);
   form.append('light_background', String(formState.lightBackground));
@@ -865,9 +1005,14 @@ function appendBaseFields(form: FormData) {
 
 function appendLayoutFields(form: FormData) {
   if (!baseImagePath.value) throw new Error('请先生成 AI 底图');
+  syncCustomPrintSizeFromFields();
   form.append('base_image_path', baseImagePath.value);
   form.append('product_type', formState.printProductType);
   form.append('size_cm', formState.printSize);
+  if (isMousePadMode) {
+    form.append('bleed_cm', String(getEffectiveBleedCm()));
+    form.append('bleed_mode', formState.bleedMode);
+  }
   form.append('order_no', formState.orderNo.trim());
   form.append('orientation', formState.orientation);
   form.append('light_background', String(formState.lightBackground));
@@ -1081,6 +1226,11 @@ function reuseHistory(item: PrintPrepApi.HistoryItem) {
   }
   formState.printProductType = (item.product_type as ProductType) || formState.printProductType;
   formState.printSize = item.size_cm || formState.printSize;
+  if (isMousePadMode) {
+    formState.bleedCm = Number(item.bleed_cm || formState.bleedCm || defaultBleedCm());
+    formState.bleedMode = item.bleed_mode === 'per_side' ? 'per_side' : 'total';
+    hydrateCustomSizeFromPrintSize();
+  }
   formState.orderNo = item.order_no || '';
   formState.layoutMode = (item.layout_mode as LayoutMode) || formState.layoutMode;
   formState.templateId =
@@ -1135,6 +1285,17 @@ watch(
 );
 
 watch(
+  () => [
+    formState.customTrimWidthCm,
+    formState.customTrimHeightCm,
+    formState.bleedCm,
+  ],
+  () => {
+    syncCustomPrintSizeFromFields();
+  },
+);
+
+watch(
   formState,
   () => {
     saveFormCache();
@@ -1157,6 +1318,10 @@ watch(
   () => [
     formState.printProductType,
     formState.printSize,
+    formState.customTrimWidthCm,
+    formState.customTrimHeightCm,
+    formState.bleedCm,
+    formState.bleedMode,
     formState.layoutMode,
     formState.templateId,
     formState.orientation,
@@ -1187,14 +1352,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Page auto-content-height description="上传客户图案，先生成 AI 底图，再基于底图导出 JPG / PDF / AI-compatible 印刷文件。">
+  <Page
+    auto-content-height
+    :description="
+      isMousePadStandalone
+        ? '鼠标垫独立制版：自定义成品尺寸和出血位，先让 AI 按输出画布扩图，再由 Python 导出印刷文件。'
+        : '上传客户图案，先生成 AI 底图，再基于底图导出 JPG / PDF / AI-compatible 印刷文件。'
+    "
+  >
     <div class="print-prep-page">
       <div class="prep-grid">
         <Card class="prep-card" :bordered="false">
           <template #title>
             <div class="card-title">
               <IconifyIcon icon="lucide:printer" />
-              <span>印刷文件制版工作台</span>
+              <span>{{ isMousePadStandalone ? '鼠标垫制版工作台' : '印刷文件制版工作台' }}</span>
             </div>
           </template>
           <template #extra>
@@ -1212,6 +1384,13 @@ onBeforeUnmount(() => {
             type="info"
             :message="`Python 制版后端：${PRINT_PREP_API_BASE}`"
           />
+          <Alert
+            v-if="isMousePadStandalone"
+            class="mb-4"
+            show-icon
+            type="success"
+            :message="`输出画布：${outputSizeLabel}（成品宽 + 出血位，成品高 + 出血位）`"
+          />
 
           <Form layout="vertical">
             <div class="form-grid">
@@ -1225,7 +1404,7 @@ onBeforeUnmount(() => {
                 />
               </FormItem>
 
-              <FormItem label="产品类型">
+              <FormItem :label="isMousePadStandalone ? '鼠标垫类型' : '产品类型'">
                 <Select
                   v-model:value="formState.printProductType"
                   :loading="optionsLoading"
@@ -1233,12 +1412,51 @@ onBeforeUnmount(() => {
                 />
               </FormItem>
 
-              <FormItem label="成品尺寸">
+              <FormItem v-if="!isMousePadStandalone" label="成品尺寸">
                 <Select
                   v-model:value="formState.printSize"
                   :loading="optionsLoading"
                   :options="sizeOptions"
                 />
+              </FormItem>
+
+              <FormItem v-if="isMousePadStandalone" label="成品尺寸与出血" class="full">
+                <div class="mouse-size-grid">
+                  <InputNumber
+                    v-model:value="formState.customTrimWidthCm"
+                    class="w-full"
+                    :min="1"
+                    :max="500"
+                    :precision="2"
+                    :step="1"
+                    addon-after="cm"
+                    placeholder="宽"
+                  />
+                  <InputNumber
+                    v-model:value="formState.customTrimHeightCm"
+                    class="w-full"
+                    :min="1"
+                    :max="500"
+                    :precision="2"
+                    :step="1"
+                    addon-after="cm"
+                    placeholder="高"
+                  />
+                  <InputNumber
+                    v-model:value="formState.bleedCm"
+                    class="w-full"
+                    :min="0.1"
+                    :max="20"
+                    :precision="2"
+                    :step="0.1"
+                    addon-after="cm"
+                    placeholder="出血"
+                  />
+                </div>
+                <div class="size-output-note">
+                  成品 {{ formState.printSize }}cm，出血 {{ getEffectiveBleedCm() }}cm，AI
+                  输出画布 {{ outputSizeLabel }}
+                </div>
               </FormItem>
 
               <FormItem label="订单编号">
@@ -1255,7 +1473,7 @@ onBeforeUnmount(() => {
                 />
               </FormItem>
 
-              <FormItem label="制版模式">
+              <FormItem v-if="!isMousePadStandalone" label="制版模式">
                 <Select
                   v-model:value="formState.layoutMode"
                   :options="[
@@ -1265,7 +1483,7 @@ onBeforeUnmount(() => {
                 />
               </FormItem>
 
-              <FormItem v-if="isPilates" label="普拉提模板">
+              <FormItem v-if="isPilates && !isMousePadStandalone" label="普拉提模板">
                 <Select
                   v-model:value="formState.templateId"
                   :options="[
@@ -1274,7 +1492,7 @@ onBeforeUnmount(() => {
                 />
               </FormItem>
 
-              <FormItem label="方向">
+              <FormItem v-if="!isMousePadStandalone" label="方向">
                 <Select
                   v-model:value="formState.orientation"
                   :options="[
@@ -1851,6 +2069,19 @@ onBeforeUnmount(() => {
   border-radius: 6px;
 }
 
+.mouse-size-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.size-output-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
 .advanced-collapse {
   margin-top: 4px;
   background: transparent;
@@ -2182,6 +2413,10 @@ onBeforeUnmount(() => {
   }
 
   .range-row {
+    grid-template-columns: 1fr;
+  }
+
+  .mouse-size-grid {
     grid-template-columns: 1fr;
   }
 

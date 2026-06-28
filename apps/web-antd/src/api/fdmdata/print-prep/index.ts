@@ -157,6 +157,8 @@ export namespace PrintPrepApi {
 
   export interface PrintPrepResult {
     bleed_cm?: number;
+    bleed_margin_cm?: number;
+    bleed_mode?: string;
     canvas_size_cm?: {
       height?: number;
       width?: number;
@@ -194,6 +196,9 @@ export namespace PrintPrepApi {
 
   export interface HistoryItem {
     background_mode?: string;
+    bleed_cm?: number;
+    bleed_margin_cm?: number;
+    bleed_mode?: string;
     customer_prompt?: string;
     directory?: string;
     files?: ResultFiles;
