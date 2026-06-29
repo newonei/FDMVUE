@@ -98,6 +98,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconPeriodA
       minWidth: 160,
       formatter: 'formatDateTime',
     },
-    { title: '操作', width: 180, fixed: 'right', slots: { default: 'actions' } },
+    { title: '操作', width: 300, fixed: 'right', slots: { default: 'actions' } },
   ];
 }
