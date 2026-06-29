@@ -231,6 +231,7 @@ async function submitEdit() {
     productionSent: Number(formValues.productionSent ?? 0),
     status: 0,
   } as FdmdataPatternDesignItemApi.PatternDesignItem;
+  delete data.recognitionStatus;
   await updateFdmdataPatternDesignItem(data);
   message.success($t('ui.actionMessage.updateSuccess', [data.id]));
   return true;

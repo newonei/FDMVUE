@@ -311,6 +311,7 @@ async function submitBatchCreate() {
     ...(data as FdmdataPatternDesignItemApi.BatchCreateReq),
     items,
     productionSent: Number(data.productionSent ?? 0),
+    recognitionStatus: 0,
     status: 0,
   });
   message.success($t('ui.actionMessage.createSuccess'));

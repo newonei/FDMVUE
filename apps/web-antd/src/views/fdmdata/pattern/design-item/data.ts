@@ -27,6 +27,12 @@ export const PATTERN_DESIGN_ITEM_STATUS_OPTIONS = [
   { label: '停用', value: 1 },
 ];
 
+export const RECOGNITION_STATUS_OPTIONS = [
+  { label: '待识别', value: 0 },
+  { label: '部分识别', value: 1 },
+  { label: '已完成', value: 2 },
+];
+
 export const PRODUCTION_SENT_OPTIONS = [
   { label: '未发出', value: 0 },
   { label: '已发出', value: 1 },
@@ -65,8 +71,20 @@ function formatStatus(value: unknown) {
   return Number(value) === 1 ? '停用' : '启用';
 }
 
+function formatRecognitionStatus(value: unknown) {
+  if (Number(value) === 2) return '已完成';
+  if (Number(value) === 1) return '部分识别';
+  return '待识别';
+}
+
 function formatProductionSent(value: unknown) {
   return Number(value) === 1 ? '已发出' : '未发出';
+}
+
+function recognitionStatusColor(value: unknown) {
+  if (Number(value) === 2) return 'green';
+  if (Number(value) === 1) return 'orange';
+  return 'default';
 }
 
 function formatDownloaded(value: unknown) {
@@ -326,6 +344,16 @@ export function useGridFormSchema(
       },
     },
     {
+      fieldName: 'recognitionStatus',
+      label: '识别状态',
+      component: 'Select',
+      componentProps: {
+        allowClear: true,
+        options: RECOGNITION_STATUS_OPTIONS,
+        placeholder: '请选择识别状态',
+      },
+    },
+    {
       fieldName: 'downloaded',
       label: '是否下载',
       component: 'Select',
@@ -375,6 +403,20 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataPatternDesignItemAp
             Tag,
             { color: Number(row.productionSent) === 1 ? 'blue' : 'default' },
             () => formatProductionSent(row.productionSent),
+          ),
+      },
+    },
+    {
+      field: 'recognitionStatus',
+      title: '识别状态',
+      fixed: 'left',
+      width: 120,
+      slots: {
+        default: ({ row }) =>
+          h(
+            Tag,
+            { color: recognitionStatusColor(row.recognitionStatus) },
+            () => formatRecognitionStatus(row.recognitionStatus),
           ),
       },
     },

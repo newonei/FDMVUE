@@ -20,6 +20,7 @@ export namespace FdmdataPatternDesignItemApi {
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    recognitionStatus?: number;
     downloaded?: number;
     status?: number;
     remark?: string;
@@ -43,6 +44,7 @@ export namespace FdmdataPatternDesignItemApi {
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    recognitionStatus?: number;
     downloaded?: number;
     status?: number;
     remark?: string;
