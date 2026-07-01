@@ -1148,7 +1148,7 @@ onMounted(() => {
             </div>
             <div>
               <Divider content-position="left">跳过表达式</Divider>
-              <FormItem prop="skipExpression">
+              <FormItem name="skipExpression">
                 <Textarea
                   v-model:value="configForm.skipExpression"
                   allow-clear
