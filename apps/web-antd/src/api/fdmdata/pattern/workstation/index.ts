@@ -58,6 +58,7 @@ export namespace PatternRecognitionApi {
     item_no: string;
     local_image_url: string;
     order_no: string;
+    order_item_count?: number;
     patch_score?: null | number;
     pattern_group_id: string;
     quantity: number;
@@ -99,9 +100,23 @@ export namespace PatternRecognitionApi {
 
   export interface SyncOrdersResponse {
     active_model_id?: string;
+    active_device?: string;
     indexed_orders?: number;
     orders_changed?: number;
+    orders_metadata_only?: number;
+    orders_seen?: number;
     orders_synced?: number;
+  }
+
+  export interface SyncJobResponse {
+    error?: null | string;
+    finished_at?: null | string;
+    incremental?: boolean;
+    job_id?: null | string;
+    message?: string;
+    result?: null | SyncOrdersResponse;
+    started_at?: null | string;
+    status: 'failed' | 'idle' | 'queued' | 'running' | 'success' | string;
   }
 
   export interface HealthResponse {
@@ -232,6 +247,20 @@ export function syncPatternRecognitionOrders(incremental = true) {
   return fetchJson<PatternRecognitionApi.SyncOrdersResponse>(
     incremental ? '/api/admin/sync-orders/incremental' : '/api/admin/sync-orders',
     { method: 'POST' },
+  );
+}
+
+export function startPatternRecognitionSyncJob(incremental = true) {
+  return fetchJson<PatternRecognitionApi.SyncJobResponse>(
+    `/api/admin/sync-orders/job?incremental=${incremental ? 'true' : 'false'}`,
+    { method: 'POST' },
+  );
+}
+
+export function getPatternRecognitionSyncJob(jobId?: null | string) {
+  const query = jobId ? `?job_id=${encodeURIComponent(jobId)}` : '';
+  return fetchJson<PatternRecognitionApi.SyncJobResponse>(
+    `/api/admin/sync-orders/job${query}`,
   );
 }
 

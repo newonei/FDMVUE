@@ -23,9 +23,10 @@ import {
 import {
   confirmPatternMatch,
   getPatternRecognitionHealth,
+  getPatternRecognitionSyncJob,
   PATTERN_RECOGNITION_API_BASE,
   resolvePatternRecognitionAssetUrl,
-  syncPatternRecognitionOrders,
+  startPatternRecognitionSyncJob,
   uploadPatternCapture,
 } from '#/api/fdmdata/pattern/workstation';
 
@@ -82,6 +83,45 @@ const uploadProgressStatus = computed(() => {
   if (uploadStage.value === 'success') return 'success';
   return 'active';
 });
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isSyncJobPending(status?: string) {
+  return status === 'queued' || status === 'running';
+}
+
+function formatSyncResult(
+  incremental: boolean,
+  data: PatternRecognitionApi.SyncOrdersResponse,
+) {
+  const changed = data.orders_changed ?? data.orders_synced ?? 0;
+  return incremental
+    ? `增量同步完成：新增/变更 ${changed} 条，索引 ${data.indexed_orders ?? '-'} 条`
+    : `全量重建完成：${data.orders_synced ?? data.orders_seen ?? '-'} 条订单，模型 ${data.active_model_id || '-'}`;
+}
+
+async function waitForSyncJob(
+  jobId: string,
+  incremental: boolean,
+  silent: boolean,
+) {
+  let latest = await getPatternRecognitionSyncJob(jobId);
+  for (let index = 0; index < 3600; index += 1) {
+    if (!isSyncJobPending(latest.status)) {
+      return latest;
+    }
+    if (!silent) {
+      syncStatus.value =
+        latest.message ||
+        (incremental ? '正在增量同步订单' : '正在全量重建索引');
+    }
+    await sleep(2000);
+    latest = await getPatternRecognitionSyncJob(jobId);
+  }
+  throw new Error('同步任务等待超时');
+}
 const uploadStageMeta = computed(() => {
   switch (uploadStage.value) {
     case 'error': {
@@ -206,19 +246,39 @@ async function runSync(incremental: boolean, silent = false) {
     syncStatus.value = incremental ? '正在增量同步订单' : '正在全量重建索引';
   }
   try {
-    const data = await syncPatternRecognitionOrders(incremental);
+    const started = await startPatternRecognitionSyncJob(incremental);
+    if (!started.job_id) {
+      throw new Error(started.error || started.message || '同步任务创建失败');
+    }
+    if (!silent && started.message) {
+      syncStatus.value = started.message;
+    }
+
+    const completed = await waitForSyncJob(
+      started.job_id,
+      incremental,
+      silent,
+    );
+    if (completed.status !== 'success') {
+      throw new Error(completed.error || completed.message || '同步失败');
+    }
+    const data = completed.result || {};
     const changed = data.orders_changed ?? data.orders_synced ?? 0;
     if (!silent || changed > 0) {
-      syncStatus.value = incremental
-        ? `增量同步完成：新增/变更 ${changed} 条，索引 ${data.indexed_orders ?? '-'} 条`
-        : `全量重建完成：${data.orders_synced ?? '-'} 条订单，模型 ${data.active_model_id || '-'}`;
+      syncStatus.value = completed.message || formatSyncResult(incremental, data);
     }
     if (!silent) {
       message.success(incremental ? '增量同步完成' : '全量重建完成');
     }
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
-    if (text === 'sync_in_progress') return;
+    if (text === 'sync_in_progress') {
+      if (!silent) {
+        syncStatus.value = '已有同步任务正在执行，请稍后再试';
+        message.info(syncStatus.value);
+      }
+      return;
+    }
     if (!silent) {
       syncStatus.value = `同步失败：${text}`;
       message.error(syncStatus.value);
@@ -315,6 +375,28 @@ function formatScore(score: unknown) {
 
 function formatOptionalScore(score: null | number | undefined) {
   return score === null || score === undefined ? '-' : formatScore(score);
+}
+
+function parseItemNoNumber(itemNo: unknown) {
+  const parsed = Number.parseInt(String(itemNo ?? '').trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function formatCandidateItemNoWithTotal(
+  candidate: PatternRecognitionApi.Candidate,
+) {
+  const itemNo = String(candidate.item_no ?? '').trim();
+  const rawTotal = Number(candidate.order_item_count ?? 0);
+  const parsedItemNo = parseItemNoNumber(itemNo);
+  const total = Math.max(
+    Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : 0,
+    parsedItemNo ?? 0,
+    1,
+  );
+  if (parsedItemNo) {
+    return `${parsedItemNo}/${total}`;
+  }
+  return itemNo ? `${itemNo}/${total}` : '-';
 }
 
 function formatBytes(size?: number) {
@@ -543,7 +625,7 @@ onBeforeUnmount(() => {
               <div class="candidate-body">
                 <div class="candidate-title">
                   <strong>{{ candidate.order_no }}</strong>
-                  <Tag>{{ candidate.item_no }}</Tag>
+                  <Tag>{{ formatCandidateItemNoWithTotal(candidate) }}</Tag>
                   <Tag color="processing">{{ formatScore(candidate.score) }}</Tag>
                 </div>
                 <div class="score-line">
