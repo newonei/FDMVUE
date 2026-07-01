@@ -2,6 +2,7 @@
 import type {
   PrintPrepApi,
 } from '#/api/fdmdata/print-prep';
+import type { PrintPrepPromptApi } from '#/api/fdmdata/print-prep-prompt';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
@@ -22,10 +23,13 @@ import {
   Input,
   InputNumber,
   message,
+  Modal,
+  Popconfirm,
   Select,
   Slider,
   Space,
   Switch,
+  Table,
   Tag,
   Textarea,
 } from 'ant-design-vue';
@@ -42,6 +46,12 @@ import {
   resolvePrintPrepAssetUrl,
   uploadPrintPrepReferenceBlob,
 } from '#/api/fdmdata/print-prep';
+import {
+  createPrintPrepPrompt,
+  deletePrintPrepPrompt,
+  listPrintPrepPrompts,
+  updatePrintPrepPrompt,
+} from '#/api/fdmdata/print-prep-prompt';
 
 defineOptions({ name: 'FdmdataPrintPrep' });
 
@@ -64,9 +74,19 @@ type LayoutMode = 'pilates_template' | 'standard';
 type LogoColor = 'auto' | 'black' | 'white';
 type BleedMode = 'per_side' | 'total';
 type Orientation = 'as_is' | 'auto' | 'landscape' | 'portrait';
+type PromptScene = 'all' | 'mouse-pad' | 'print-prep';
 
 interface PrintPrepWorkbenchProps {
   mode?: WorkbenchMode;
+}
+
+interface PromptLibraryFormState {
+  content: string;
+  id?: number;
+  name: string;
+  remark: string;
+  scene: PromptScene;
+  sort: number;
 }
 
 const isMousePadMode =
@@ -121,6 +141,16 @@ const PILATES_DEFAULT_PLACEMENT_SCALE = 1.18;
 const PILATES_FIXED_REFERENCE_URL =
   'https://hbfdm.oss-cn-wuhan-lr.aliyuncs.com/%E7%A9%BA%E6%9D%BF-%E6%99%AE%E6%8B%89%E6%8F%90.png';
 const FINAL_OUTPUT_FILE_KEYS = new Set(['ai', 'jpg', 'pdf', 'preview', 'report']);
+const promptSceneLabelMap: Record<PromptScene, string> = {
+  all: '通用',
+  'mouse-pad': '鼠标垫',
+  'print-prep': '普通制版',
+};
+const promptSceneOptions = [
+  { label: promptSceneLabelMap.all, value: 'all' },
+  { label: promptSceneLabelMap['print-prep'], value: 'print-prep' },
+  { label: promptSceneLabelMap['mouse-pad'], value: 'mouse-pad' },
+];
 
 const fallbackProductSizes: Record<ProductType, string[]> = {
   大号鼠标垫: [
@@ -214,6 +244,11 @@ const layoutLoading = ref(false);
 const referenceUploading = ref(false);
 const historyLoading = ref(false);
 const historyOpen = ref(false);
+const promptLibraryLoading = ref(false);
+const promptManagerOpen = ref(false);
+const promptSaving = ref(false);
+const promptDeletingId = ref<number>();
+const selectedPromptId = ref<number>();
 
 const selectedFile = ref<File | null>(null);
 const originalPreviewUrl = ref('');
@@ -223,6 +258,14 @@ const finalResult = ref<null | PrintPrepApi.PrintPrepResult>(null);
 const reportJson = ref('');
 const historyList = ref<PrintPrepApi.HistoryItem[]>([]);
 const errorMessage = ref('');
+const promptLibraryList = ref<PrintPrepPromptApi.Row[]>([]);
+const promptForm = reactive<PromptLibraryFormState>({
+  content: '',
+  name: '',
+  remark: '',
+  scene: isMousePadMode ? 'mouse-pad' : 'print-prep',
+  sort: 0,
+});
 
 const taskState = reactive({
   elapsedSeconds: 0,
@@ -248,10 +291,19 @@ let placementDrag:
 
 const mousePadProductTypes = new Set<ProductType>(['大号鼠标垫', '小号鼠标垫']);
 const isMousePadStandalone = computed(() => isMousePadMode);
+const currentPromptScene = computed<PromptScene>(() =>
+  isMousePadMode ? 'mouse-pad' : 'print-prep',
+);
 const productOptions = computed(() =>
   Object.keys(productSizes.value)
     .filter((value) => !isMousePadMode || mousePadProductTypes.has(value as ProductType))
     .map((value) => ({ label: value, value })),
+);
+const promptLibraryOptions = computed(() =>
+  promptLibraryList.value.map((item) => ({
+    label: `${item.name} · ${getPromptSceneLabel(item.scene)}`,
+    value: item.id,
+  })),
 );
 const sizeOptions = computed(() =>
   (productSizes.value[formState.printProductType] || []).map((value) => ({
@@ -263,6 +315,12 @@ const isPilates = computed(() => formState.printProductType === '普拉提垫');
 const isBusy = computed(() => baseLoading.value || layoutLoading.value);
 const canCreateBase = computed(() => !!selectedFile.value && !isBusy.value);
 const canCreateLayout = computed(() => !!baseImagePath.value && !isBusy.value);
+const promptLibraryColumns = [
+  { dataIndex: 'name', key: 'name', title: '名称', width: 150 },
+  { dataIndex: 'scene', key: 'scene', title: '适用', width: 96 },
+  { dataIndex: 'content', key: 'content', title: '内容' },
+  { key: 'action', title: '操作', width: 168 },
+];
 
 const baseImageLoadFailed = ref(false);
 const baseFile = computed(() => {
@@ -537,6 +595,167 @@ function normalizeOptions(data: PrintPrepApi.OptionsResp) {
     if (Object.keys(next).length > 0) {
       productSizes.value = { ...fallbackProductSizes, ...next };
     }
+  }
+}
+
+function getPromptSceneLabel(scene?: string) {
+  return promptSceneLabelMap[(scene || 'all') as PromptScene] || scene || promptSceneLabelMap.all;
+}
+
+function filterPromptOption(input: string, option: unknown) {
+  const label =
+    typeof option === 'object' && option && 'label' in option
+      ? (option as { label?: unknown }).label
+      : '';
+  return String(label).toLowerCase().includes(input.toLowerCase());
+}
+
+function buildPromptName(content: string) {
+  const firstLine = content
+    .trim()
+    .split(/\r?\n/u)[0]
+    ?.trim();
+  if (!firstLine) return '客户提示词';
+  return firstLine.length > 30 ? `${firstLine.slice(0, 30)}...` : firstLine;
+}
+
+function resetPromptForm(row?: PrintPrepPromptApi.Row) {
+  promptForm.id = row?.id;
+  promptForm.name = row?.name || '';
+  promptForm.content = row?.content || '';
+  promptForm.scene = ((row?.scene as PromptScene | undefined) || currentPromptScene.value);
+  promptForm.sort = row?.sort || 0;
+  promptForm.remark = row?.remark || '';
+}
+
+async function loadPromptLibrary() {
+  promptLibraryLoading.value = true;
+  try {
+    promptLibraryList.value = await listPrintPrepPrompts({
+      includeCommon: true,
+      scene: currentPromptScene.value,
+    });
+    if (
+      selectedPromptId.value &&
+      !promptLibraryList.value.some((item) => item.id === selectedPromptId.value)
+    ) {
+      selectedPromptId.value = undefined;
+    }
+  } catch (error) {
+    console.warn('print prep prompt library unavailable', error);
+    message.warning('客户提示词库加载失败，请检查后端接口或数据库补丁');
+  } finally {
+    promptLibraryLoading.value = false;
+  }
+}
+
+function applySelectedCustomerPrompt() {
+  const item = promptLibraryList.value.find((row) => row.id === selectedPromptId.value);
+  if (!item) {
+    message.warning('请先选择一个客户提示词');
+    return;
+  }
+  formState.customerPrompt = item.content;
+  message.success('已应用客户提示词');
+}
+
+function openPromptManager() {
+  promptManagerOpen.value = true;
+  if (promptLibraryList.value.length === 0) {
+    void loadPromptLibrary();
+  }
+}
+
+function openCreatePromptFromCurrent() {
+  const content = formState.customerPrompt.trim();
+  if (!content) {
+    message.warning('客户要求为空，不能保存到提示词库');
+    return;
+  }
+  resetPromptForm({
+    content,
+    id: 0,
+    name: buildPromptName(content),
+    scene: currentPromptScene.value,
+  });
+  promptForm.id = undefined;
+  promptManagerOpen.value = true;
+}
+
+function editPrompt(row: PrintPrepPromptApi.Row) {
+  resetPromptForm(row);
+}
+
+function toPromptRow(record: unknown) {
+  return record as PrintPrepPromptApi.Row;
+}
+
+function editPromptRecord(record: unknown) {
+  editPrompt(toPromptRow(record));
+}
+
+function applyPromptRecord(record: unknown) {
+  selectedPromptId.value = toPromptRow(record).id;
+  applySelectedCustomerPrompt();
+}
+
+function isPromptRecordDeleting(record: unknown) {
+  return promptDeletingId.value === toPromptRow(record).id;
+}
+
+async function removePromptRecord(record: unknown) {
+  await removePrompt(toPromptRow(record));
+}
+
+async function savePromptForm() {
+  const content = promptForm.content.trim();
+  if (!content) {
+    message.warning('提示词内容不能为空');
+    return;
+  }
+  const name = promptForm.name.trim() || buildPromptName(content);
+  promptForm.name = name;
+  promptSaving.value = true;
+  try {
+    const payload: PrintPrepPromptApi.SaveReq = {
+      content,
+      name,
+      remark: promptForm.remark.trim() || undefined,
+      scene: promptForm.scene || 'all',
+      sort: Number(promptForm.sort || 0),
+    };
+    let nextSelectedId = promptForm.id;
+    if (promptForm.id) {
+      await updatePrintPrepPrompt({ ...payload, id: promptForm.id });
+      message.success('客户提示词已更新');
+    } else {
+      nextSelectedId = await createPrintPrepPrompt(payload);
+      message.success('客户提示词已保存');
+    }
+    await loadPromptLibrary();
+    selectedPromptId.value = nextSelectedId;
+    resetPromptForm();
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    message.error(`客户提示词保存失败：${text}`);
+  } finally {
+    promptSaving.value = false;
+  }
+}
+
+async function removePrompt(row: PrintPrepPromptApi.Row) {
+  promptDeletingId.value = row.id;
+  try {
+    await deletePrintPrepPrompt(row.id);
+    message.success('客户提示词已删除');
+    if (selectedPromptId.value === row.id) selectedPromptId.value = undefined;
+    if (promptForm.id === row.id) resetPromptForm();
+    await loadPromptLibrary();
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    message.error(`客户提示词删除失败：${text}`);
+  } finally {
+    promptDeletingId.value = undefined;
   }
 }
 
@@ -1341,7 +1560,7 @@ watch(
 
 onMounted(async () => {
   loadFormCache();
-  await loadOptions();
+  await Promise.all([loadOptions(), loadPromptLibrary()]);
 });
 
 onBeforeUnmount(() => {
@@ -1566,6 +1785,22 @@ onBeforeUnmount(() => {
               </FormItem>
 
               <FormItem label="客户要求" class="full">
+                <div class="customer-prompt-tools">
+                  <Select
+                    v-model:value="selectedPromptId"
+                    allow-clear
+                    show-search
+                    :filter-option="filterPromptOption"
+                    :loading="promptLibraryLoading"
+                    :options="promptLibraryOptions"
+                    placeholder="从客户提示词库选择"
+                  />
+                  <Button :disabled="!selectedPromptId" @click="applySelectedCustomerPrompt">
+                    应用
+                  </Button>
+                  <Button @click="openCreatePromptFromCurrent">保存当前</Button>
+                  <Button @click="openPromptManager">管理词库</Button>
+                </div>
                 <Textarea
                   v-model:value="formState.customerPrompt"
                   :rows="3"
@@ -2021,6 +2256,90 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </Drawer>
+      <Modal
+        v-model:open="promptManagerOpen"
+        title="客户提示词库"
+        width="940px"
+        :footer="null"
+        :destroy-on-close="false"
+      >
+        <div class="prompt-library-modal">
+          <div class="prompt-library-form">
+            <div class="prompt-form-row">
+              <Input v-model:value="promptForm.name" placeholder="提示词名称" />
+              <Select v-model:value="promptForm.scene" :options="promptSceneOptions" />
+              <InputNumber
+                v-model:value="promptForm.sort"
+                :min="0"
+                :max="9999"
+                placeholder="排序"
+              />
+            </div>
+            <Textarea
+              v-model:value="promptForm.content"
+              :rows="4"
+              placeholder="客户提示词内容"
+            />
+            <Input v-model:value="promptForm.remark" placeholder="备注，可不填" />
+            <Space>
+              <Button type="primary" :loading="promptSaving" @click="savePromptForm">
+                {{ promptForm.id ? '更新提示词' : '保存提示词' }}
+              </Button>
+              <Button @click="resetPromptForm()">新建空白</Button>
+              <Button :loading="promptLibraryLoading" @click="loadPromptLibrary">
+                刷新
+              </Button>
+            </Space>
+          </div>
+
+          <Table
+            size="small"
+            row-key="id"
+            :columns="promptLibraryColumns"
+            :data-source="promptLibraryList"
+            :loading="promptLibraryLoading"
+            :pagination="{ pageSize: 6, showSizeChanger: false }"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'scene'">
+                <Tag>{{ getPromptSceneLabel(record.scene) }}</Tag>
+              </template>
+              <template v-else-if="column.key === 'content'">
+                <span class="prompt-content-cell">{{ record.content }}</span>
+              </template>
+              <template v-else-if="column.key === 'action'">
+                <Space>
+                  <Button type="link" size="small" @click="editPromptRecord(record)">
+                    编辑
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    @click="applyPromptRecord(record)"
+                  >
+                    应用
+                  </Button>
+                  <Popconfirm
+                    title="确认删除这个提示词？"
+                    ok-text="删除"
+                    cancel-text="取消"
+                    @confirm="removePromptRecord(record)"
+                  >
+                    <Button
+                      danger
+                      type="link"
+                      size="small"
+                      :loading="isPromptRecordDeleting(record)"
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              </template>
+            </template>
+          </Table>
+        </div>
+      </Modal>
     </div>
   </Page>
 </template>
@@ -2067,6 +2386,39 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid #d9d9d9;
   border-radius: 6px;
+}
+
+.customer-prompt-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.prompt-library-modal,
+.prompt-library-form {
+  display: grid;
+  gap: 12px;
+}
+
+.prompt-library-form {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.prompt-form-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 150px 110px;
+  gap: 8px;
+}
+
+.prompt-content-cell {
+  display: -webkit-box;
+  max-width: 440px;
+  overflow: hidden;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .mouse-size-grid {
@@ -2417,6 +2769,11 @@ onBeforeUnmount(() => {
   }
 
   .mouse-size-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-prompt-tools,
+  .prompt-form-row {
     grid-template-columns: 1fr;
   }
 
