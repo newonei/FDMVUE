@@ -50,6 +50,15 @@ const uploadPercent = ref(0);
 const uploadLoaded = ref(0);
 const uploadTotal = ref(0);
 
+const cameraVideoRef = ref<HTMLVideoElement | null>(null);
+const cameraCanvasRef = ref<HTMLCanvasElement | null>(null);
+const cameraStream = ref<MediaStream | null>(null);
+const cameraDevices = ref<MediaDeviceInfo[]>([]);
+const selectedCameraDeviceId = ref('');
+const cameraStarting = ref(false);
+const cameraError = ref('');
+const cameraStatusText = ref('正在准备摄像头');
+
 const currentCaptureId = ref('');
 const selectedOrderNo = ref('');
 const selectedItemId = ref('');
@@ -83,6 +92,10 @@ const uploadProgressStatus = computed(() => {
   if (uploadStage.value === 'success') return 'success';
   return 'active';
 });
+const cameraReady = computed(() => !!cameraStream.value);
+const canCaptureFromCamera = computed(
+  () => cameraReady.value && !cameraStarting.value && !matching.value,
+);
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -197,15 +210,19 @@ function resetUploadProgress(stage: CaptureUploadStage = 'idle') {
   uploadTotal.value = captureFile.value?.size ?? 0;
 }
 
+function setCaptureFile(file: File) {
+  captureFile.value = file;
+  setCapturePreview(file);
+  resetRecognitionState();
+  resetUploadProgress('ready');
+}
+
 function beforeCaptureUpload(file: File) {
   if (matching.value) {
     message.warning('当前实拍图正在上传识别，请稍后再选择');
     return false;
   }
-  captureFile.value = file;
-  setCapturePreview(file);
-  resetRecognitionState();
-  resetUploadProgress('ready');
+  setCaptureFile(file);
   return false;
 }
 
@@ -287,6 +304,195 @@ async function runSync(incremental: boolean, silent = false) {
     incrementalSyncLoading.value = false;
     fullSyncLoading.value = false;
   }
+}
+
+function isCameraSupported() {
+  return !!navigator.mediaDevices?.getUserMedia;
+}
+
+function describeCameraError(error: unknown) {
+  if (!(error instanceof DOMException)) {
+    return error instanceof Error ? error.message : String(error || '摄像头启动失败');
+  }
+  if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+    return '摄像头权限被拒绝。请使用 HTTPS 打开工作站，或在 Chrome 中放行当前 HTTP 地址后允许摄像头。';
+  }
+  if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+    return '未检测到可用摄像头，请确认摄像头已连接到当前电脑。';
+  }
+  if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+    return '摄像头无法读取，可能正在被其他程序占用。';
+  }
+  if (error.name === 'OverconstrainedError') {
+    return '当前摄像头不支持请求的画面参数，已尝试切换默认摄像头。';
+  }
+  return error.message || error.name || '摄像头启动失败';
+}
+
+async function loadCameraDevices(preferredDeviceId = '') {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    cameraDevices.value = devices.filter((device) => device.kind === 'videoinput');
+    if (
+      preferredDeviceId &&
+      cameraDevices.value.some((device) => device.deviceId === preferredDeviceId)
+    ) {
+      selectedCameraDeviceId.value = preferredDeviceId;
+    } else if (!selectedCameraDeviceId.value && cameraDevices.value[0]) {
+      selectedCameraDeviceId.value = cameraDevices.value[0].deviceId;
+    }
+  } catch (error) {
+    cameraError.value = `摄像头列表读取失败：${describeCameraError(error)}`;
+  }
+}
+
+function stopCamera(silent = false) {
+  if (cameraStream.value) {
+    cameraStream.value.getTracks().forEach((track) => track.stop());
+  }
+  cameraStream.value = null;
+  if (cameraVideoRef.value) {
+    cameraVideoRef.value.srcObject = null;
+  }
+  if (!silent) {
+    cameraStatusText.value = '摄像头已停止';
+  }
+}
+
+async function startCamera(deviceId = selectedCameraDeviceId.value) {
+  if (!isCameraSupported()) {
+    cameraError.value =
+      '当前浏览器或访问地址不允许调用摄像头。请使用 HTTPS 工作站地址，或用 Chrome 放行当前 HTTP 地址。';
+    cameraStatusText.value = '摄像头不可用';
+    return;
+  }
+
+  cameraStarting.value = true;
+  cameraError.value = '';
+  cameraStatusText.value = '正在打开摄像头';
+  stopCamera(true);
+
+  const video: MediaTrackConstraints = {
+    height: { ideal: 1080 },
+    width: { ideal: 1920 },
+  };
+  if (deviceId) {
+    video.deviceId = { exact: deviceId };
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video,
+    });
+    cameraStream.value = stream;
+    if (cameraVideoRef.value) {
+      cameraVideoRef.value.srcObject = stream;
+      await cameraVideoRef.value.play();
+    }
+    const [track] = stream.getVideoTracks();
+    const activeDeviceId = track?.getSettings?.().deviceId || deviceId;
+    await loadCameraDevices(activeDeviceId || '');
+    cameraStatusText.value = '摄像头已开启，按 Enter 直接拍照上传';
+  } catch (error) {
+    if (
+      deviceId &&
+      error instanceof DOMException &&
+      (error.name === 'OverconstrainedError' || error.name === 'NotFoundError')
+    ) {
+      selectedCameraDeviceId.value = '';
+      await startCamera('');
+      return;
+    }
+    stopCamera(true);
+    cameraError.value = describeCameraError(error);
+    cameraStatusText.value = '摄像头启动失败';
+  } finally {
+    cameraStarting.value = false;
+  }
+}
+
+async function handleCameraDeviceChange() {
+  if (cameraStream.value) {
+    await startCamera(selectedCameraDeviceId.value);
+  }
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type = 'image/jpeg',
+  quality = 0.92,
+) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+}
+
+function makeCameraFilename() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+  ].join('');
+  const time = [
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join('');
+  return `camera-${date}-${time}.jpg`;
+}
+
+async function captureAndUploadFromCamera() {
+  if (matching.value) return;
+  const video = cameraVideoRef.value;
+  const canvas = cameraCanvasRef.value;
+  if (!cameraStream.value || !video || !canvas) {
+    message.warning('请先启用摄像头');
+    return;
+  }
+  if (!video.videoWidth || !video.videoHeight) {
+    message.warning('摄像头画面尚未就绪，请稍后再试');
+    return;
+  }
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    message.error('拍照失败，浏览器无法创建画布');
+    return;
+  }
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const blob = await canvasToBlob(canvas);
+  if (!blob) {
+    message.error('拍照失败，未生成图片');
+    return;
+  }
+  const file = new File([blob], makeCameraFilename(), {
+    lastModified: Date.now(),
+    type: 'image/jpeg',
+  });
+  setCaptureFile(file);
+  await startMatch();
+}
+
+function shouldIgnoreEnterTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  return !!target.closest(
+    'input, textarea, select, button, a, [contenteditable="true"]',
+  );
+}
+
+function handleCameraEnter(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.repeat || event.isComposing) return;
+  if (shouldIgnoreEnterTarget(event.target)) return;
+  if (!canCaptureFromCamera.value) return;
+  event.preventDefault();
+  void captureAndUploadFromCamera();
 }
 
 async function startMatch() {
@@ -442,6 +648,9 @@ function candidateImageUrl(candidate: PatternRecognitionApi.Candidate) {
 
 onMounted(() => {
   void refreshHealth();
+  void loadCameraDevices();
+  void startCamera();
+  document.addEventListener('keydown', handleCameraEnter);
   autoSyncTimer = window.setInterval(() => {
     if (autoSync.value) {
       void runSync(true, true);
@@ -453,6 +662,8 @@ onBeforeUnmount(() => {
   if (autoSyncTimer) {
     window.clearInterval(autoSyncTimer);
   }
+  document.removeEventListener('keydown', handleCameraEnter);
+  stopCamera(true);
   if (capturePreviewUrl.value) {
     URL.revokeObjectURL(capturePreviewUrl.value);
   }
@@ -505,6 +716,78 @@ onBeforeUnmount(() => {
               <span>上传实拍图</span>
             </div>
           </template>
+
+          <div class="camera-panel">
+            <div class="camera-preview-box">
+              <video
+                ref="cameraVideoRef"
+                autoplay
+                class="camera-video"
+                muted
+                playsinline
+              ></video>
+              <canvas ref="cameraCanvasRef" hidden></canvas>
+              <div v-if="!cameraReady" class="camera-placeholder">
+                <IconifyIcon icon="lucide:video" />
+                <span>{{ cameraStatusText }}</span>
+              </div>
+            </div>
+
+            <div class="camera-controls">
+              <label class="camera-select-field">
+                <span>摄像头</span>
+                <select
+                  v-model="selectedCameraDeviceId"
+                  :disabled="cameraStarting || matching || cameraDevices.length === 0"
+                  @change="handleCameraDeviceChange"
+                >
+                  <option value="">默认摄像头</option>
+                  <option
+                    v-for="(device, index) in cameraDevices"
+                    :key="device.deviceId || index"
+                    :value="device.deviceId"
+                  >
+                    {{ device.label || `摄像头 ${index + 1}` }}
+                  </option>
+                </select>
+              </label>
+              <div class="camera-actions">
+                <Button
+                  :disabled="matching"
+                  :loading="cameraStarting"
+                  @click="startCamera()"
+                >
+                  <template #icon>
+                    <IconifyIcon icon="lucide:video" />
+                  </template>
+                  启用
+                </Button>
+                <Button
+                  :disabled="!cameraReady || matching"
+                  @click="stopCamera(false)"
+                >
+                  <template #icon>
+                    <IconifyIcon icon="lucide:video-off" />
+                  </template>
+                  停止
+                </Button>
+                <Button
+                  type="primary"
+                  :disabled="!canCaptureFromCamera"
+                  @click="captureAndUploadFromCamera"
+                >
+                  <template #icon>
+                    <IconifyIcon icon="lucide:camera" />
+                  </template>
+                  拍照上传
+                </Button>
+              </div>
+            </div>
+            <div class="camera-status" :class="{ error: !!cameraError }">
+              {{ cameraError || cameraStatusText }}
+            </div>
+          </div>
+
           <UploadDragger
             accept="image/*"
             :before-upload="beforeCaptureUpload"
@@ -747,6 +1030,90 @@ onBeforeUnmount(() => {
   border-radius: 8px;
 }
 
+.camera-panel {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.camera-preview-box {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #0f172a;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  align-content: center;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.camera-placeholder svg {
+  width: 32px;
+  height: 32px;
+}
+
+.camera-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.camera-select-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.camera-select-field select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+}
+
+.camera-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.camera-actions :deep(.ant-btn) {
+  padding-inline: 8px;
+}
+
+.camera-status {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.camera-status.error {
+  color: #dc2626;
+}
+
 .upload-icon {
   margin-bottom: 8px;
   font-size: 34px;
@@ -964,6 +1331,10 @@ onBeforeUnmount(() => {
 
   .summary-panel {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .camera-actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>
