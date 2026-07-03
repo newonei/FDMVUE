@@ -34,6 +34,8 @@ export interface Employee {
 export interface Indicator {
   dimension: string;
   dimensionId?: number;
+  dimensionType?: number;
+  dimensionWeight?: number;
   id: number;
   name: string;
   scoreMode: string;
@@ -72,10 +74,26 @@ export interface AssessmentTemplate {
 }
 
 export interface IndicatorScoreState {
+  attachmentIds?: string;
   final?: number;
+  histories?: Record<string, { comment?: string; score?: number }>;
   remark?: string;
   self?: number;
+  scoreComment?: string;
   supervisor?: number;
+}
+
+export interface ScoreSummary {
+  comment?: string;
+  nodeKey?: string;
+  nodeName?: string;
+  scoreWeight?: number;
+  scorerRoleType?: number;
+  scorerUserId?: number;
+  submitTime?: string;
+  taskId?: number;
+  taskType?: number;
+  totalScore?: number;
 }
 
 export interface InterviewRecord {
@@ -105,6 +123,7 @@ export interface AssessmentInstance {
   resultConfirmed?: boolean;
   resultObjection?: string;
   resultVisible: boolean;
+  scoreSummaries?: ScoreSummary[];
   selfScore?: number;
   status: InstanceStatus;
   stayTime: string;

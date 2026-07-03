@@ -62,16 +62,34 @@ export namespace FdmPerformanceAssessmentApi {
   };
 
   export interface Score {
+    attachmentIds?: string;
     coefficient?: number;
     dimensionId?: number;
     id?: number;
+    nodeKey?: string;
+    nodeName?: string;
     score?: number;
     scoreComment?: string;
+    scoreWeight?: number;
     scorerRoleType?: number;
     scorerUserId?: number;
     status?: number;
     submitTime?: string;
+    taskId?: number;
     templateIndicatorId?: number;
+  }
+
+  export interface ScoreSummary {
+    comment?: string;
+    nodeKey?: string;
+    nodeName?: string;
+    scoreWeight?: number;
+    scorerRoleType?: number;
+    scorerUserId?: number;
+    submitTime?: string;
+    taskId?: number;
+    taskType?: number;
+    totalScore?: number;
   }
 
   export interface Instance {
@@ -99,6 +117,7 @@ export namespace FdmPerformanceAssessmentApi {
     resultVisible?: boolean;
     resultVisibleTime?: string;
     scores?: Score[];
+    scoreSummaries?: ScoreSummary[];
     status?: number;
     templateId?: number;
     templateSnapshotJson?: string;
@@ -268,6 +287,12 @@ export function getFdmPerformanceAssessmentBatch(id: number) {
   return requestClient.get<FdmPerformanceAssessmentApi.Batch>(
     '/fdmperformance/assessment/batch/get',
     { params: { id } },
+  );
+}
+
+export function deleteFdmPerformanceAssessmentBatch(id: number) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/assessment/batch/delete?id=${id}`,
   );
 }
 

@@ -7,9 +7,13 @@ import { useRouter } from 'vue-router';
 import { Button, Card, Input, Modal, Popconfirm, Space, Table, Tag, message } from 'ant-design-vue';
 
 import {
+  createFdmPerformanceTemplateGroup,
   deleteFdmPerformanceTemplate,
+  deleteFdmPerformanceTemplateGroup,
   duplicateFdmPerformanceTemplate,
+  getFdmPerformanceTemplateGroupSimpleList,
   getFdmPerformanceTemplatePage,
+  type FdmPerformanceTemplateApi,
 } from '#/api/fdmperformance/template';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -20,12 +24,18 @@ defineOptions({ name: 'FdmPerformanceTemplates' });
 
 const router = useRouter();
 const { performancePath } = usePerformancePath();
+const ALL_GROUP_NAME = '全部考评表';
 const keyword = ref('');
-const activeGroup = ref('全部考评表');
+const groupKeyword = ref('');
+const newGroupName = ref('');
+const activeGroup = ref(ALL_GROUP_NAME);
 const selectedRowKeys = ref<number[]>([]);
 const previewOpen = ref(false);
 const loading = ref(false);
+const groupCreating = ref(false);
 const apiTemplates = ref<ReturnType<typeof mapApiTemplate>[]>([]);
+const apiTemplateGroups = ref<FdmPerformanceTemplateApi.TemplateGroup[]>([]);
+type TemplateGroupItem = { count: number; id?: number; name: string };
 
 const templates = computed(() => apiTemplates.value);
 
@@ -42,22 +52,34 @@ const columns: TableColumnsType = [
 const filteredTemplates = computed(() => {
   const text = keyword.value.trim();
   return templates.value.filter((item) => {
-    const groupMatched = activeGroup.value === '全部考评表' || item.group === activeGroup.value;
+    const groupMatched = activeGroup.value === ALL_GROUP_NAME || item.group === activeGroup.value;
     const textMatched = !text || [item.name, item.group, item.scoringRule].some((value) => value.includes(text));
     return groupMatched && textMatched;
   });
 });
 
-const templateGroups = computed(() => {
+const templateGroups = computed<TemplateGroupItem[]>(() => {
   const counts = new Map<string, number>();
   templates.value.forEach((item) => counts.set(item.group, (counts.get(item.group) || 0) + 1));
+  const names = new Set<string>();
+  const groupIdMap = new Map<string, number>();
+  apiTemplateGroups.value.forEach((group) => {
+    if (group.name) {
+      names.add(group.name);
+      groupIdMap.set(group.name, group.id);
+    }
+  });
+  counts.forEach((_, name) => names.add(name));
+  const searchText = groupKeyword.value.trim();
   return [
-    { count: templates.value.length, name: '全部考评表' },
-    ...Array.from(counts.entries()).map(([name, count]) => ({ count, name })),
+    { count: templates.value.length, name: ALL_GROUP_NAME },
+    ...Array.from(names)
+      .filter((name) => !searchText || name.includes(searchText))
+      .map((name) => ({ count: counts.get(name) || 0, id: groupIdMap.get(name), name })),
   ];
 });
 const activeGroupTitle = computed(() =>
-  activeGroup.value === '全部考评表' ? '全部考评表' : `${activeGroup.value}考评表`,
+  activeGroup.value === ALL_GROUP_NAME ? ALL_GROUP_NAME : `${activeGroup.value}考评表`,
 );
 const previewRows = computed(() => {
   const keys = selectedRowKeys.value.length
@@ -73,7 +95,16 @@ const rowSelection = computed(() => ({
 }));
 
 function createTemplate() {
-  router.push(performancePath('/templates/new/edit'));
+  const group = activeGroup.value === ALL_GROUP_NAME ? undefined : activeGroup.value;
+  router.push({
+    path: performancePath('/templates/new/edit'),
+    query: group ? { group } : undefined,
+  });
+}
+
+function selectGroup(name: string) {
+  activeGroup.value = name;
+  selectedRowKeys.value = [];
 }
 
 async function copyTemplate(id: number) {
@@ -98,7 +129,7 @@ function openBatchPreview() {
 }
 
 function aiGenerateTemplate() {
-  const group = activeGroup.value === '全部考评表' ? '未分类考评表' : activeGroup.value;
+  const group = activeGroup.value === ALL_GROUP_NAME ? '未分类考评表' : activeGroup.value;
   router.push({
     path: performancePath('/templates/new/edit'),
     query: {
@@ -106,6 +137,53 @@ function aiGenerateTemplate() {
       group,
     },
   });
+}
+
+async function createTemplateGroup() {
+  const name = newGroupName.value.trim();
+  if (!name) {
+    message.warning('请输入分组名称');
+    return;
+  }
+  if (name === ALL_GROUP_NAME) {
+    message.warning('不能使用系统分组名称');
+    return;
+  }
+  if (templateGroups.value.some((group) => group.name === name)) {
+    groupKeyword.value = '';
+    selectGroup(name);
+    newGroupName.value = '';
+    message.info('分组已存在，已为你选中');
+    return;
+  }
+  groupCreating.value = true;
+  try {
+    await createFdmPerformanceTemplateGroup({ name });
+    await loadTemplateGroups();
+    groupKeyword.value = '';
+    selectGroup(name);
+    newGroupName.value = '';
+    message.success('已新增考评表分组');
+  } finally {
+    groupCreating.value = false;
+  }
+}
+
+function canDeleteTemplateGroup(group: TemplateGroupItem) {
+  return Boolean(group.id) && group.name !== ALL_GROUP_NAME && group.name !== '未分类考评表';
+}
+
+async function removeTemplateGroup(group: TemplateGroupItem) {
+  if (!group.id) {
+    return;
+  }
+  await deleteFdmPerformanceTemplateGroup(group.id);
+  if (activeGroup.value === group.name) {
+    selectGroup(ALL_GROUP_NAME);
+  }
+  selectedRowKeys.value = [];
+  await Promise.all([loadTemplates(), loadTemplateGroups()]);
+  message.success('已删除考评表分组');
 }
 
 async function loadTemplates() {
@@ -122,7 +200,13 @@ async function loadTemplates() {
   }
 }
 
-onMounted(loadTemplates);
+async function loadTemplateGroups() {
+  apiTemplateGroups.value = await getFdmPerformanceTemplateGroupSimpleList();
+}
+
+onMounted(async () => {
+  await Promise.all([loadTemplates(), loadTemplateGroups()]);
+});
 </script>
 
 <template>
@@ -138,19 +222,34 @@ onMounted(loadTemplates);
 
     <div class="template-layout">
       <Card class="group-panel">
-        <Input allow-clear placeholder="考评表分组" />
+        <Input v-model:value="groupKeyword" allow-clear placeholder="搜索考评表分组" />
+        <div class="group-create">
+          <Input v-model:value="newGroupName" placeholder="输入新分组名称" @press-enter="createTemplateGroup" />
+          <Button :loading="groupCreating" type="primary" @click="createTemplateGroup">添加</Button>
+        </div>
         <div class="group-list">
-          <button
+          <div
             v-for="group in templateGroups"
             :key="group.name"
             class="group-item"
             :class="{ active: activeGroup === group.name }"
-            type="button"
-            @click="activeGroup = group.name"
+            role="button"
+            tabindex="0"
+            @click="selectGroup(group.name)"
+            @keydown.enter="selectGroup(group.name)"
           >
             <span>{{ group.name }}</span>
-            <em>{{ group.count }}</em>
-          </button>
+            <span class="group-meta" @click.stop>
+              <em>{{ group.count }}</em>
+              <Popconfirm
+                v-if="canDeleteTemplateGroup(group)"
+                title="确认删除该分组？该分组下的考评表会移入未分类。"
+                @confirm="removeTemplateGroup(group)"
+              >
+                <Button class="group-delete" danger size="small" type="link">删除</Button>
+              </Popconfirm>
+            </span>
+          </div>
         </div>
       </Card>
 
@@ -227,6 +326,12 @@ onMounted(loadTemplates);
   gap: 12px;
 }
 
+.group-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+}
+
 .group-list {
   display: grid;
   gap: 4px;
@@ -255,6 +360,23 @@ onMounted(loadTemplates);
 .group-item em {
   color: #94a3b8;
   font-style: normal;
+}
+
+.group-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group-delete {
+  height: 24px;
+  padding: 0;
+  opacity: 0;
+}
+
+.group-item:hover .group-delete,
+.group-item.active .group-delete {
+  opacity: 1;
 }
 
 .toolbar {

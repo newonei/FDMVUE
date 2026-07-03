@@ -1,24 +1,22 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { Button, Card, Empty, Input, InputNumber, Modal, Space, Table, Tag, message } from 'ant-design-vue';
+import { Button, Card, Empty, Input, Modal, Space, Table, Tag, message } from 'ant-design-vue';
 
 import {
   confirmMyFdmPerformanceAssessmentIndicators,
   confirmMyFdmPerformanceAssessmentResult,
-  getFdmPerformanceAssessmentTaskPage,
   getMyFdmPerformanceAssessmentInstancePage,
   submitMyFdmPerformanceAssessmentResultObjection,
-  submitMyFdmPerformanceAssessmentScore,
   type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import { apiPeriodKeyToText, buildApiScoreItems, mapApiInstance } from '../shared/api-adapter';
-import type { AssessmentInstance, Indicator } from '../shared/model';
+import { apiPeriodKeyToText, mapApiInstance } from '../shared/api-adapter';
+import type { AssessmentInstance } from '../shared/model';
 import { instanceStatusMetaMap } from '../shared/model';
 import { usePerformancePath } from '../shared/route';
 
@@ -26,10 +24,6 @@ defineOptions({ name: 'FdmPerformanceMy' });
 
 const router = useRouter();
 const { performancePath } = usePerformancePath();
-const scoreModalOpen = ref(false);
-const activeInstanceId = ref<number>();
-const activeScoreTaskId = ref<number>();
-const scoreInputs = reactive<Record<number, number>>({});
 const objectionModalOpen = ref(false);
 const objectionInstanceId = ref<number>();
 const objectionText = ref('对评分结果有异议，需要绩效管理员复核评分依据和等级系数。');
@@ -50,12 +44,6 @@ const myTodos = computed(() =>
       (item.resultVisible && !item.resultConfirmed && !item.resultObjection),
   ),
 );
-const activeInstance = computed(() => myInstances.value.find((item) => item.id === activeInstanceId.value));
-const activeIndicators = computed(() =>
-  activeInstance.value
-    ? extractSnapshotIndicators(apiInstances.value.find((item) => item.id === activeInstance.value?.id)?.apiRaw)
-    : [],
-);
 
 const columns: TableColumnsType = [
   { dataIndex: 'batch', title: '考核名称' },
@@ -65,44 +53,18 @@ const columns: TableColumnsType = [
   { dataIndex: 'finalScore', title: '考核结果', width: 120 },
   { dataIndex: 'grade', title: '绩效等级', width: 120 },
   { dataIndex: 'confirm', title: '确认状态', width: 120 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 240 },
 ];
 
 function getInstanceMeta(status: unknown) {
   return instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || instanceStatusMetaMap.indicatorConfirm;
 }
 
-async function openSelfScore(id: number) {
-  activeInstanceId.value = id;
-  const taskPage = await getFdmPerformanceAssessmentTaskPage({
-    instanceId: id,
-    pageNo: 1,
-    pageSize: -1,
-    status: 0,
-    taskType: 2,
+function openSelfScore(item: Record<string, any>) {
+  router.push({
+    path: performancePath(`/batches/${item.batch.id}/instances/${item.id}`),
+    query: { scoreType: 'self', source: 'my' },
   });
-  activeScoreTaskId.value = taskPage.list?.[0]?.id;
-  Object.keys(scoreInputs).forEach((key) => delete scoreInputs[Number(key)]);
-  activeIndicators.value.forEach((indicator) => {
-    scoreInputs[indicator.id] =
-      activeInstance.value?.indicatorScores?.[indicator.id]?.self ??
-      activeInstance.value?.indicatorScores?.[indicator.id]?.final ??
-      90;
-  });
-  scoreModalOpen.value = true;
-}
-
-async function submitSelfScore() {
-  if (!activeInstanceId.value) return;
-  await submitMyFdmPerformanceAssessmentScore({
-    instanceId: activeInstanceId.value,
-    items: buildApiScoreItems(activeIndicators.value, { ...scoreInputs }),
-    scorerRoleType: 1,
-    taskId: activeScoreTaskId.value,
-  });
-  await loadMyPerformance();
-  scoreModalOpen.value = false;
-  message.success('自评已提交');
 }
 
 async function confirmIndicators(instanceId: number) {
@@ -132,29 +94,6 @@ async function saveObjection() {
   await loadMyPerformance();
   objectionModalOpen.value = false;
   message.success('已提交结果异议');
-}
-
-function extractSnapshotIndicators(instance?: FdmPerformanceAssessmentApi.Instance): Indicator[] {
-  if (!instance?.templateSnapshotJson) return [];
-  try {
-    const snapshot = JSON.parse(instance.templateSnapshotJson) as { dimensions?: any[] };
-    return (snapshot.dimensions || []).flatMap((dimension) =>
-      (dimension.indicators || []).map((indicator: any) => ({
-        dimension: dimension.name,
-        dimensionId: Number(dimension.id || 0),
-        id: Number(indicator.id || indicator.indicatorId || 0),
-        name: indicator.name,
-        scoreMode: indicator.scoringMethod === 2 ? '评分组' : '手动评分',
-        standard: indicator.standard || '',
-        status: indicator.status === 1 ? 'stopped' : 'enabled',
-        tags: [dimension.name],
-        templateIndicatorId: Number(indicator.id || 0),
-        weight: Number(indicator.weight || 0),
-      })),
-    );
-  } catch {
-    return [];
-  }
 }
 
 async function loadMyPerformance() {
@@ -196,7 +135,7 @@ onMounted(loadMyPerformance);
             <Button v-if="item.status === 'indicatorConfirm'" type="primary" @click="confirmIndicators(item.id)">
               确认指标
             </Button>
-            <Button v-else-if="item.status === 'selfScore'" type="primary" @click="openSelfScore(item.id)">
+            <Button v-else-if="item.status === 'selfScore'" type="primary" @click="openSelfScore(item)">
               去自评
             </Button>
             <Space v-else>
@@ -242,7 +181,7 @@ onMounted(loadMyPerformance);
           <template v-else-if="column.dataIndex === 'action'">
             <Space>
               <Button v-if="record.status === 'indicatorConfirm'" size="small" type="link" @click="confirmIndicators(record.id)">确认指标</Button>
-              <Button v-if="record.status === 'selfScore'" size="small" type="link" @click="openSelfScore(record.id)">自评</Button>
+              <Button v-if="record.status === 'selfScore'" size="small" type="link" @click="openSelfScore(record)">自评</Button>
               <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" size="small" type="link" @click="confirmResult(record.id)">确认结果</Button>
               <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" danger size="small" type="link" @click="openObjection(record.id)">提交异议</Button>
               <Button
@@ -262,18 +201,6 @@ onMounted(loadMyPerformance);
         </template>
       </Table>
     </Card>
-
-    <Modal v-model:open="scoreModalOpen" title="员工自评" width="760px" @ok="submitSelfScore">
-      <div class="score-list">
-        <div v-for="indicator in activeIndicators" :key="indicator.id" class="score-row">
-          <div>
-            <strong>{{ indicator.name }}</strong>
-            <span>{{ indicator.dimension }} · 权重 {{ indicator.weight }}%</span>
-          </div>
-          <InputNumber v-model:value="scoreInputs[indicator.id]" :max="120" :min="0" addon-after="分" />
-        </div>
-      </div>
-    </Modal>
 
     <Modal v-model:open="objectionModalOpen" title="提交结果异议" @ok="saveObjection">
       <Input.TextArea v-model:value="objectionText" :rows="4" />
@@ -329,43 +256,8 @@ onMounted(loadMyPerformance);
   font-weight: 650;
 }
 
-.score-form {
-  display: grid;
-  gap: 10px;
-}
-
-.score-list {
-  display: grid;
-  gap: 12px;
-}
-
-.score-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  gap: 16px;
-  align-items: center;
-  padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-
-.score-row > div {
-  display: grid;
-  gap: 4px;
-}
-
-.score-row span {
-  color: #64748b;
-  font-size: 12px;
-}
-
 @media (max-width: 960px) {
   .my-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .score-row {
     grid-template-columns: 1fr;
   }
 }

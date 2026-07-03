@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router';
 import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'ant-design-vue';
 
 import {
+  deleteFdmPerformanceAssessmentBatch,
   type FdmPerformanceAssessmentApi,
   getFdmPerformanceAssessmentBatchPage,
   importFdmPerformanceAssessmentHistory,
@@ -142,6 +143,21 @@ async function importHistoryFromApi() {
   }
 }
 
+function deleteBatch(record: AssessmentBatch) {
+  Modal.confirm({
+    title: '删除已发起考核',
+    content: `确认删除「${record.name}」？删除后会同步清理该批次下的被考核人、任务、评分、结果和日志记录。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      await deleteFdmPerformanceAssessmentBatch(record.id);
+      message.success('已删除考核记录');
+      await loadApiData();
+    },
+  });
+}
+
 onMounted(loadApiData);
 </script>
 
@@ -171,6 +187,7 @@ onMounted(loadApiData);
           <template v-else-if="column.dataIndex === 'action'">
             <Space>
               <Button size="small" type="link" @click="router.push(performancePath(`/batches/${record.id}`))">查看</Button>
+              <Button danger size="small" type="link" @click="deleteBatch(record as AssessmentBatch)">删除</Button>
             </Space>
           </template>
         </template>

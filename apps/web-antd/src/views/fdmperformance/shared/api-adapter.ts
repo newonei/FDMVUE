@@ -12,6 +12,7 @@ import type {
   InstanceStatus,
   InterviewRecord,
   ParticipantScope,
+  ScoreSummary,
 } from './model';
 
 import { defaultTemplateFlowNode } from './model';
@@ -158,6 +159,7 @@ export function mapApiInstance(
   instance: FdmPerformanceAssessmentApi.Instance,
 ): AssessmentInstance {
   const indicatorScores = buildIndicatorScores(instance.scores || []);
+  const scoreSummaries = mapScoreSummaries(instance.scoreSummaries);
   return {
     currentExecutor: instance.currentNodeName,
     employeeId: Number(instance.userId || 0),
@@ -176,10 +178,11 @@ export function mapApiInstance(
         ? '已提交结果异议，等待绩效管理员处理'
         : undefined),
     resultVisible: Boolean(instance.resultVisible),
-    selfScore: averageRoleScore(instance.scores, 1),
+    scoreSummaries,
+    selfScore: getRoleSummaryScore(scoreSummaries, 1, 2),
     status: instanceStatusMap[Number(instance.status)] || 'indicatorConfirm',
     stayTime: instance.resultVisibleTime ? '已公示' : '处理中',
-    supervisorScore: averageRoleScore(instance.scores, 2),
+    supervisorScore: getRoleSummaryScore(scoreSummaries, 2, 3),
     templateId: Number(instance.templateId || 0) || undefined,
   };
 }
@@ -209,10 +212,14 @@ function getLatestLogReason(
 export function buildApiScoreItems(
   indicators: Indicator[],
   scores: Record<number, number>,
+  comments: Record<number, string> = {},
+  attachmentIds: Record<number, string> = {},
 ): FdmPerformanceAssessmentApi.ScoreItemReq[] {
   return indicators.map((indicator) => ({
+    attachmentIds: attachmentIds[indicator.id],
     dimensionId: Number(indicator.dimensionId || indicator.id),
     score: scores[indicator.id] ?? 0,
+    scoreComment: comments[indicator.id],
     templateIndicatorId: Number(indicator.templateIndicatorId || indicator.id),
   }));
 }
@@ -225,6 +232,8 @@ function mapApiTemplateIndicator(
   return {
     dimension: dimension.name,
     dimensionId: Number(dimension.id || id),
+    dimensionType: Number(dimension.dimensionType || 1),
+    dimensionWeight: Number(dimension.weight || 0),
     id,
     name: indicator.name,
     scoreMode: indicator.scoringMethod === 2 ? '评分组' : '手动评分',
@@ -242,24 +251,51 @@ function buildIndicatorScores(scores: FdmPerformanceAssessmentApi.Score[]) {
     const indicatorId = Number(score.templateIndicatorId || 0);
     if (!indicatorId) return;
     const key = instanceRoleScoreKeyMap[Number(score.scorerRoleType)];
+    const historyKey = String(score.taskId || score.nodeKey || score.scorerRoleType || 'score');
+    const current = result[indicatorId] || {};
     result[indicatorId] = {
-      ...(result[indicatorId] || {}),
+      ...current,
+      attachmentIds: score.attachmentIds || current.attachmentIds,
       final: Number(score.score || 0),
+      histories: {
+        ...(current.histories || {}),
+        [historyKey]: {
+          comment: score.scoreComment,
+          score: Number(score.score || 0),
+        },
+      },
+      remark: score.scoreComment || current.remark,
+      scoreComment: score.scoreComment || current.scoreComment,
       ...(key ? { [key]: Number(score.score || 0) } : {}),
     };
   });
   return result;
 }
 
-function averageRoleScore(
-  scores: FdmPerformanceAssessmentApi.Score[] | undefined,
+function mapScoreSummaries(scores?: FdmPerformanceAssessmentApi.ScoreSummary[]): ScoreSummary[] {
+  return (scores || []).map((item) => ({
+    comment: item.comment,
+    nodeKey: item.nodeKey,
+    nodeName: item.nodeName,
+    scoreWeight: item.scoreWeight,
+    scorerRoleType: item.scorerRoleType,
+    scorerUserId: item.scorerUserId,
+    submitTime: item.submitTime,
+    taskId: item.taskId,
+    taskType: item.taskType,
+    totalScore: item.totalScore,
+  }));
+}
+
+function getRoleSummaryScore(
+  scores: ScoreSummary[],
   scorerRoleType: number,
+  taskType: number,
 ) {
-  const values = (scores || [])
-    .filter((item) => item.scorerRoleType === scorerRoleType && typeof item.score === 'number')
-    .map((item) => Number(item.score));
-  if (!values.length) return undefined;
-  return Number((values.reduce((sum, item) => sum + item, 0) / values.length).toFixed(1));
+  const matched = [...scores]
+    .reverse()
+    .find((item) => item.scorerRoleType === scorerRoleType || item.taskType === taskType);
+  return matched?.totalScore;
 }
 
 function buildScoringRule(dimensions: FdmPerformanceTemplateApi.Dimension[]) {

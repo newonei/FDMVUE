@@ -12,8 +12,11 @@ import { Button, Card, Checkbox, Form, Input, InputNumber, Modal, Radio, Select,
 import { SimpleProcessDesigner } from '#/views/bpm/components/simple-process-design';
 import { CandidateStrategy } from '#/views/bpm/components/simple-process-design/consts';
 import {
+  createFdmPerformanceFlowPreset,
   createFdmPerformanceTemplate,
+  getFdmPerformanceFlowPresetSimpleList,
   getFdmPerformanceTemplate,
+  getFdmPerformanceTemplateGroupSimpleList,
   getFdmPerformanceTemplatePage,
   updateFdmPerformanceTemplate,
   type FdmPerformanceTemplateApi,
@@ -65,6 +68,8 @@ const apiIndicators = ref<PerformanceIndicator[]>([]);
 const apiTemplateIndicators = ref<PerformanceIndicator[]>([]);
 const localDraftIndicators = ref<PerformanceIndicator[]>([]);
 const apiTemplates = ref<AssessmentTemplate[]>([]);
+const apiTemplateGroups = ref<FdmPerformanceTemplateApi.TemplateGroup[]>([]);
+const flowPresetList = ref<FdmPerformanceTemplateApi.FlowPreset[]>([]);
 const apiDeptList = ref<SystemDeptApi.Dept[]>([]);
 const apiPostList = ref<SystemPostApi.Post[]>([]);
 const apiRoleList = ref<SystemRoleApi.Role[]>([]);
@@ -124,6 +129,13 @@ const designerRef = ref<{
   validate?: () => Promise<boolean>;
 }>();
 const flowRenderKey = ref(0);
+const selectedFlowPresetId = ref<number>();
+const flowPresetModalOpen = ref(false);
+const flowPresetSaving = ref(false);
+const flowPresetDraft = reactive({
+  name: '',
+  remark: '',
+});
 const dimensionModalOpen = ref(false);
 const templateSettingOpen = ref(false);
 const dedupeEnabled = ref(true);
@@ -179,7 +191,15 @@ provide('processInstance', {});
 
 const periodOptions = ['月度', '季度', '半年度', '年度', '试用期', '日', '自定义'].map((value) => ({ label: value, value }));
 const groupOptions = computed(() =>
-  Array.from(new Set(sourceTemplates.value.map((item) => item.group).concat([draft.group || '未分类考评表']))).map((value) => ({
+  Array.from(
+    new Set(
+      apiTemplateGroups.value
+        .map((item) => item.name)
+        .concat(sourceTemplates.value.map((item) => item.group))
+        .concat([draft.group || '未分类考评表'])
+        .filter((name): name is string => Boolean(name)),
+    ),
+  ).map((value) => ({
     label: value,
     value,
   })),
@@ -206,6 +226,12 @@ const userGroupOptions = computed(() =>
   effectiveUserGroups.value.map((group) => ({
     label: group.name,
     value: group.name,
+  })),
+);
+const flowPresetOptions = computed(() =>
+  flowPresetList.value.map((item) => ({
+    label: item.name,
+    value: Number(item.id),
   })),
 );
 const userGroupMemberMap = computed(() =>
@@ -349,6 +375,78 @@ function resetDefaultFlow() {
   draft.flowNode = cloneFlowNode(defaultFlow);
   flowRenderKey.value += 1;
   message.success('已恢复默认绩效流程');
+}
+
+function getCurrentEditableFlow() {
+  const currentFlow = designerRef.value?.getCurrentFlowData?.();
+  return cloneFlowNode(currentFlow || processData.value || draft.flowNode || defaultTemplateFlowNode);
+}
+
+function parsePresetFlow(preset: FdmPerformanceTemplateApi.FlowPreset) {
+  if (!preset.simpleFlowJson) {
+    return undefined;
+  }
+  try {
+    return cloneFlowNode(JSON.parse(preset.simpleFlowJson) as SimpleFlowNode);
+  } catch (error) {
+    console.warn('解析流程预设失败', error);
+    return undefined;
+  }
+}
+
+function applySelectedFlowPreset(presetId?: unknown) {
+  const normalizedPresetId = Number(presetId);
+  if (!Number.isFinite(normalizedPresetId) || normalizedPresetId <= 0) {
+    return;
+  }
+  const preset = flowPresetList.value.find((item) => Number(item.id) === normalizedPresetId);
+  const flowNode = preset ? parsePresetFlow(preset) : undefined;
+  if (!flowNode) {
+    message.warning('流程预设数据不完整，无法应用');
+    return;
+  }
+  processData.value = flowNode;
+  draft.flowNode = cloneFlowNode(flowNode);
+  flowRenderKey.value += 1;
+  message.success('已应用流程预设，可继续调整节点执行人');
+}
+
+function openFlowPresetModal() {
+  const currentFlow = getCurrentEditableFlow();
+  if (!currentFlow) {
+    message.warning('当前流程为空，无法保存为预设');
+    return;
+  }
+  flowPresetDraft.name = draft.name ? `${draft.name}-流程` : '绩效考核流程';
+  flowPresetDraft.remark = '';
+  flowPresetModalOpen.value = true;
+}
+
+async function saveFlowPreset() {
+  const name = flowPresetDraft.name.trim();
+  if (!name) {
+    message.warning('请填写流程预设名称');
+    return;
+  }
+  const currentFlow = getCurrentEditableFlow();
+  flowPresetSaving.value = true;
+  try {
+    await createFdmPerformanceFlowPreset({
+      flowNodes: buildFlowNodes(currentFlow),
+      name,
+      remark: flowPresetDraft.remark.trim(),
+      simpleFlowJson: JSON.stringify(currentFlow),
+      sort: flowPresetList.value.length * 10,
+      status: 0,
+    });
+    flowPresetList.value = await getFdmPerformanceFlowPresetSimpleList();
+    const created = flowPresetList.value.find((item) => item.name === name);
+    selectedFlowPresetId.value = created?.id;
+    flowPresetModalOpen.value = false;
+    message.success('流程预设已保存');
+  } finally {
+    flowPresetSaving.value = false;
+  }
 }
 
 function openDimensionModal() {
@@ -890,7 +988,7 @@ function parseUserGroupsSetting(settings?: FdmPerformanceSettingApi.Setting[]) {
 async function loadTemplateData() {
   loading.value = true;
   try {
-    const [users, depts, posts, roles, tags, indicators, templates, settings] = await Promise.all([
+    const [users, depts, posts, roles, tags, indicators, templates, groups, settings, flowPresets] = await Promise.all([
       getSimpleUserList(),
       getSimpleDeptList(),
       getSimplePostList(),
@@ -898,7 +996,9 @@ async function loadTemplateData() {
       getFdmPerformanceIndicatorTagList({ status: 0 }),
       getFdmPerformanceIndicatorPage({ pageNo: 1, pageSize: 200, status: 0 }),
       getFdmPerformanceTemplatePage({ pageNo: 1, pageSize: 200 }),
+      getFdmPerformanceTemplateGroupSimpleList(),
       getFdmPerformanceSettingList(),
+      getFdmPerformanceFlowPresetSimpleList(),
     ]);
     apiDeptList.value = depts || [];
     apiPostList.value = posts || [];
@@ -924,6 +1024,8 @@ async function loadTemplateData() {
     apiIndicatorTags.value = apiIndicatorTagRows.value.map((item) => item.name || '').filter(Boolean);
     apiIndicators.value = (indicators.list || []).map(mapApiIndicator);
     apiTemplates.value = (templates.list || []).map(mapApiTemplate);
+    apiTemplateGroups.value = groups || [];
+    flowPresetList.value = flowPresets || [];
     if (routeId.value === 'new') {
       applyApiTemplate();
     } else {
@@ -1223,7 +1325,16 @@ watch(
             <h3>考核流程</h3>
             <p>复用当前系统 BPM 的仿钉钉简易流程组件，维护考评表的完整审批和评分链路。</p>
           </div>
-          <Space>
+          <Space wrap>
+            <Select
+              v-model:value="selectedFlowPresetId"
+              allow-clear
+              class="flow-preset-select"
+              :options="flowPresetOptions"
+              placeholder="选择流程预设"
+              @change="applySelectedFlowPreset"
+            />
+            <Button @click="openFlowPresetModal">保存为流程预设</Button>
             <Button @click="resetDefaultFlow">恢复默认流程</Button>
             <Button @click="dedupeSelectedIndicators">去重设置</Button>
             <Button @click="templateSettingOpen = true">流程设置</Button>
@@ -1326,6 +1437,22 @@ watch(
         <Button v-else type="primary" @click="saveTemplate">保存</Button>
       </div>
     </Card>
+
+    <Modal
+      v-model:open="flowPresetModalOpen"
+      :confirm-loading="flowPresetSaving"
+      title="保存流程预设"
+      @ok="saveFlowPreset"
+    >
+      <Form layout="vertical">
+        <Form.Item label="流程预设名称" required>
+          <Input v-model:value="flowPresetDraft.name" :maxlength="128" placeholder="例如：月度绩效标准流程" />
+        </Form.Item>
+        <Form.Item label="备注">
+          <Input v-model:value="flowPresetDraft.remark" :maxlength="512" placeholder="可填写适用部门或场景" />
+        </Form.Item>
+      </Form>
+    </Modal>
 
     <Modal v-model:open="dimensionModalOpen" title="添加考核维度" @ok="addDimension">
       <Form layout="vertical">
@@ -1610,6 +1737,10 @@ watch(
 }
 
 .scorer-select {
+  width: 220px;
+}
+
+.flow-preset-select {
   width: 220px;
 }
 

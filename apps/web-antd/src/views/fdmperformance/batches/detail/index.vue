@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
@@ -9,7 +9,6 @@ import {
   Card,
   Empty,
   Input,
-  InputNumber,
   Modal,
   Progress,
   Select,
@@ -26,32 +25,27 @@ import {
   getFdmPerformanceAssessmentBatch,
   getFdmPerformanceAssessmentChangeLogPage,
   getFdmPerformanceAssessmentInstancePage,
-  getFdmPerformanceAssessmentTaskPage,
   publishFdmPerformanceAssessmentResult,
   recordFdmPerformanceAssessmentInterview,
   remindFdmPerformanceAssessmentTasks,
   startFdmPerformanceAssessmentScoring,
   submitFdmPerformanceAssessmentHrReview,
   submitFdmPerformanceAssessmentResultObjection,
-  submitFdmPerformanceAssessmentScore,
   type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplate } from '#/api/fdmperformance/template';
 
 import PerformanceShell from '../../shared/PerformanceShell.vue';
 import {
-  buildApiScoreItems,
   mapApiBatch,
   mapApiInstance,
   mapApiTemplate,
-  mapApiTemplateIndicators,
 } from '../../shared/api-adapter';
 import {
   type AssessmentBatch,
   type AssessmentInstance,
   type AssessmentTemplate,
   type Employee,
-  type Indicator,
   batchStatusMetaMap,
   instanceStatusMetaMap,
 } from '../../shared/model';
@@ -62,6 +56,7 @@ defineOptions({ name: 'FdmPerformanceBatchDetail' });
 const route = useRoute();
 const router = useRouter();
 const { performancePath } = usePerformancePath();
+
 const activeTab = ref('people');
 const keyword = ref('');
 const statusFilter = ref<string>();
@@ -69,22 +64,15 @@ const selectedRowKeys = ref<number[]>([]);
 const apiLoading = ref(false);
 const reminding = ref(false);
 const apiBatch = ref<AssessmentBatch>();
-const apiTemplateIndicators = ref<Indicator[]>([]);
 const apiTemplateMap = ref(new Map<number, AssessmentTemplate>());
-const apiTemplateIndicatorMap = ref(new Map<number, Indicator[]>());
 const apiRows = ref<(AssessmentInstance & { employee?: Employee })[]>([]);
-const apiTasks = ref<FdmPerformanceAssessmentApi.Task[]>([]);
-const scoreModalOpen = ref(false);
-const scoringInstanceId = ref<number>();
-const scoringTaskId = ref<number>();
-const scoringType = ref<'self' | 'supervisor'>('self');
-const scoreInputs = reactive<Record<number, number>>({});
 const interviewModalOpen = ref(false);
 const interviewInstanceId = ref<number>();
 const interviewConclusion = ref('已完成绩效沟通，后续动作同步到行动计划');
 const objectionModalOpen = ref(false);
 const objectionInstanceId = ref<number>();
 const objectionText = ref('对评分结果有异议，需要绩效管理员复核评分依据和等级系数。');
+
 const tabs = [
   { key: 'people', label: '考核人员' },
   { key: 'interview', label: '面谈' },
@@ -94,19 +82,13 @@ const tabs = [
 ];
 
 const batch = computed(() => apiBatch.value);
+const rows = computed(() => apiRows.value);
 const templateDescription = computed(() => {
   const templates = Array.from(apiTemplateMap.value.values());
   if (templates.length === 0) return '查看考核执行详情';
   if (templates.length === 1) return `考评表：${templates[0]!.name}`;
   return `考评表：${templates[0]!.name} 等 ${templates.length} 张`;
 });
-const templateIndicators = computed(() => {
-  const templateId = scoringInstanceId.value
-    ? rows.value.find((item) => item.id === scoringInstanceId.value)?.templateId
-    : batch.value?.templateId;
-  return getTemplateIndicators(templateId);
-});
-const rows = computed(() => apiRows.value);
 const filteredRows = computed(() => {
   const text = keyword.value.trim();
   return rows.value.filter((item) => {
@@ -129,11 +111,7 @@ const gradeRows = computed(() =>
   filteredRows.value.map((item) => ({
     ...item,
     coefficient: item.grade ? (resolvePerformanceCoefficient(item.grade) ?? '-') : '-',
-    visible: item.resultVisible
-      ? '已公示'
-      : item.status === 'finished'
-        ? '管理员可见'
-        : item.status === 'pendingPublish' ? '待公示' : '未生成',
+    visible: item.resultVisible ? '已公示' : item.status === 'pendingPublish' ? '待公示' : '处理中',
   })),
 );
 const analysisRows = computed(() => {
@@ -150,7 +128,7 @@ const analysisRows = computed(() => {
       dept,
       resultRate: Math.round((items.filter((item) => isResultProcessed(item)).length / total) * 100),
       scoreRate: Math.round(
-        (items.filter((item) => item.selfScore || item.supervisorScore || item.finalScore).length / total) * 100,
+        (items.filter((item) => item.selfScore !== undefined || item.supervisorScore !== undefined || item.finalScore !== undefined).length / total) * 100,
       ),
     };
   });
@@ -161,12 +139,12 @@ const peopleColumns: TableColumnsType = [
   { dataIndex: 'dept', title: '部门', width: 160 },
   { dataIndex: 'template', title: '考评表', width: 260 },
   { dataIndex: 'progress', title: '考核进度', width: 120 },
-  { dataIndex: 'nodeName', title: '当前流程', width: 140 },
+  { dataIndex: 'nodeName', title: '当前流程', width: 160 },
   { dataIndex: 'currentExecutor', title: '当前执行人', width: 140 },
   { dataIndex: 'stayTime', title: '停留时间', width: 120 },
   { dataIndex: 'result', title: '考核结果', width: 120 },
   { dataIndex: 'grade', title: '绩效等级', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 240 },
 ];
 const interviewColumns: TableColumnsType = [
   { dataIndex: 'employee', title: '被考核人', width: 180 },
@@ -174,7 +152,7 @@ const interviewColumns: TableColumnsType = [
   { dataIndex: 'status', title: '面谈状态', width: 140 },
   { dataIndex: 'nodeName', title: '当前流程', width: 160 },
   { dataIndex: 'currentExecutor', title: '当前执行人', width: 140 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 190 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
 ];
 const confirmColumns: TableColumnsType = [
   { dataIndex: 'employee', title: '被考核人', width: 180 },
@@ -182,7 +160,7 @@ const confirmColumns: TableColumnsType = [
   { dataIndex: 'status', title: '确认状态', width: 140 },
   { dataIndex: 'finalScore', title: '考核结果', width: 120 },
   { dataIndex: 'grade', title: '绩效等级', width: 120 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 190 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
 ];
 const gradeColumns: TableColumnsType = [
   { dataIndex: 'employee', title: '被考核人', width: 180 },
@@ -199,6 +177,7 @@ const analysisColumns: TableColumnsType = [
   { dataIndex: 'scoreRate', title: '评分完成', width: 240 },
   { dataIndex: 'resultRate', title: '结果处理', width: 240 },
 ];
+
 const statusOptions = Object.entries(instanceStatusMetaMap).map(([value, meta]) => ({
   label: meta.label,
   value,
@@ -209,15 +188,6 @@ const rowSelection = computed(() => ({
     selectedRowKeys.value = keys.map(Number);
   },
 }));
-const pendingTaskMap = computed(() => {
-  const result = new Map<string, FdmPerformanceAssessmentApi.Task>();
-  apiTasks.value.forEach((task) => {
-    if (task.status === 0 && task.instanceId && task.taskType) {
-      result.set(`${task.instanceId}:${task.taskType}`, task);
-    }
-  });
-  return result;
-});
 
 function isResultProcessed(item: AssessmentInstance) {
   return item.resultVisible || item.status === 'finished';
@@ -235,11 +205,6 @@ function getTemplateName(templateId?: number) {
   return templateId ? apiTemplateMap.value.get(templateId)?.name || '-' : '-';
 }
 
-function getTemplateIndicators(templateId?: number) {
-  if (!templateId) return apiTemplateIndicators.value;
-  return apiTemplateIndicatorMap.value.get(templateId) || apiTemplateIndicators.value;
-}
-
 function resolvePerformanceCoefficient(grade?: string) {
   if (grade === '卓越') return 2;
   if (grade === '优秀') return 1.5;
@@ -249,40 +214,12 @@ function resolvePerformanceCoefficient(grade?: string) {
   return undefined;
 }
 
-function getScoreTaskType(type: 'self' | 'supervisor') {
-  return type === 'self' ? 2 : 3;
-}
-
-function getPendingScoreTask(instanceId: number, type: 'self' | 'supervisor') {
-  return pendingTaskMap.value.get(`${instanceId}:${getScoreTaskType(type)}`);
-}
-
 function openScore(instanceId: number, type: 'self' | 'supervisor') {
-  scoringInstanceId.value = instanceId;
-  scoringTaskId.value = getPendingScoreTask(instanceId, type)?.id;
-  scoringType.value = type;
-  Object.keys(scoreInputs).forEach((key) => delete scoreInputs[Number(key)]);
-  const instance = rows.value.find((item) => item.id === instanceId);
-  templateIndicators.value.forEach((indicator) => {
-    scoreInputs[indicator.id] =
-      instance?.indicatorScores?.[indicator.id]?.[type] ??
-      instance?.indicatorScores?.[indicator.id]?.final ??
-      (type === 'self' ? 88 : 92);
+  if (!batch.value) return;
+  router.push({
+    path: performancePath(`/batches/${batch.value.id}/instances/${instanceId}`),
+    query: { scoreType: type },
   });
-  scoreModalOpen.value = true;
-}
-
-async function submitScore() {
-  if (!scoringInstanceId.value) return;
-  await submitFdmPerformanceAssessmentScore({
-    instanceId: scoringInstanceId.value,
-    items: buildApiScoreItems(templateIndicators.value, { ...scoreInputs }),
-    scorerRoleType: scoringType.value === 'self' ? 1 : 2,
-    taskId: scoringTaskId.value,
-  });
-  await loadApiData();
-  scoreModalOpen.value = false;
-  message.success('评分已提交');
 }
 
 async function confirmIndicators() {
@@ -416,7 +353,7 @@ async function loadApiData() {
   if (!batchId) return;
   apiLoading.value = true;
   try {
-    const [batchResp, instancePage, processLogPage, taskPage] = await Promise.all([
+    const [batchResp, instancePage, processLogPage] = await Promise.all([
       getFdmPerformanceAssessmentBatch(batchId),
       getFdmPerformanceAssessmentInstancePage({
         batchId,
@@ -428,14 +365,7 @@ async function loadApiData() {
         pageNo: 1,
         pageSize: -1,
       }),
-      getFdmPerformanceAssessmentTaskPage({
-        batchId,
-        pageNo: 1,
-        pageSize: -1,
-        status: 0,
-      }),
     ]);
-    apiTasks.value = taskPage.list || [];
     const processLogMap = buildProcessLogMap(processLogPage.list || []);
     apiRows.value = instancePage.list.map((item) => ({
       ...mapApiInstance({
@@ -460,15 +390,8 @@ async function loadApiData() {
     if (templateIds.length) {
       const templateResponses = await Promise.all(templateIds.map((templateId) => getFdmPerformanceTemplate(templateId)));
       apiTemplateMap.value = new Map(templateResponses.map((item) => [Number(item.id), mapApiTemplate(item)]));
-      apiTemplateIndicatorMap.value = new Map(
-        templateResponses.map((item) => [Number(item.id), mapApiTemplateIndicators(item)]),
-      );
-      const firstTemplateId = Number(batchResp.templateIds?.[0] || templateIds[0]);
-      apiTemplateIndicators.value = apiTemplateIndicatorMap.value.get(firstTemplateId) || [];
     } else {
-      apiTemplateIndicators.value = [];
       apiTemplateMap.value = new Map();
-      apiTemplateIndicatorMap.value = new Map();
     }
   } finally {
     apiLoading.value = false;
@@ -563,27 +486,15 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">
-              {{ record.employee?.name }}
-            </template>
-            <template v-else-if="column.dataIndex === 'dept'">
-              {{ record.employee?.dept }}
-            </template>
-            <template v-else-if="column.dataIndex === 'template'">
-              {{ getTemplateName(record.templateId || batch.templateId) }}
-            </template>
-            <template v-else-if="column.dataIndex === 'progress'">
-              {{ record.progress }}/8
-            </template>
+            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
+            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
+            <template v-else-if="column.dataIndex === 'template'">{{ getTemplateName(record.templateId || batch.templateId) }}</template>
+            <template v-else-if="column.dataIndex === 'progress'">{{ record.progress }}/8</template>
             <template v-else-if="column.dataIndex === 'nodeName'">
               <Tag :color="getInstanceMeta(record.status).color">{{ record.nodeName }}</Tag>
             </template>
-            <template v-else-if="column.dataIndex === 'result'">
-              {{ record.finalScore ?? '-' }}
-            </template>
-            <template v-else-if="column.dataIndex === 'grade'">
-              {{ record.grade ?? '-' }}
-            </template>
+            <template v-else-if="column.dataIndex === 'result'">{{ record.finalScore ?? '-' }}</template>
+            <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
             <template v-else-if="column.dataIndex === 'action'">
               <Space>
                 <Button v-if="record.status === 'selfScore'" size="small" type="link" @click="openScore(record.id, 'self')">自评</Button>
@@ -607,12 +518,8 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">
-              {{ record.employee?.name }}
-            </template>
-            <template v-else-if="column.dataIndex === 'dept'">
-              {{ record.employee?.dept }}
-            </template>
+            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
+            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
             <template v-else-if="column.dataIndex === 'status'">
               <Tag :color="record.interviewRecords?.length ? 'green' : 'default'">
                 {{ record.interviewRecords?.length ? `已面谈 ${record.interviewRecords.length} 次` : '未面谈' }}
@@ -638,23 +545,15 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">
-              {{ record.employee?.name }}
-            </template>
-            <template v-else-if="column.dataIndex === 'dept'">
-              {{ record.employee?.dept }}
-            </template>
+            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
+            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
             <template v-else-if="column.dataIndex === 'status'">
               <Tag :color="record.resultObjection ? 'red' : record.resultConfirmed ? 'green' : record.resultVisible ? 'blue' : record.status === 'hrReview' ? 'orange' : 'default'">
                 {{ record.resultObjection ? '结果异议' : record.resultConfirmed ? '已确认' : record.resultVisible ? '待确认' : record.status === 'hrReview' ? '待审核' : '处理中' }}
               </Tag>
             </template>
-            <template v-else-if="column.dataIndex === 'finalScore'">
-              {{ record.finalScore ?? '-' }}
-            </template>
-            <template v-else-if="column.dataIndex === 'grade'">
-              {{ record.grade ?? '-' }}
-            </template>
+            <template v-else-if="column.dataIndex === 'finalScore'">{{ record.finalScore ?? '-' }}</template>
+            <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
             <template v-else-if="column.dataIndex === 'action'">
               <Space>
                 <Button v-if="record.status === 'hrReview'" size="small" type="link" @click="approveReview(record.id)">审核通过</Button>
@@ -669,11 +568,11 @@ watch(() => route.params.id, loadApiData);
 
         <div v-else-if="activeTab === 'grade'" class="grade-section">
           <div class="grade-grid">
-            <div><strong>卓越</strong><span>111-120分 / 系数2.00</span></div>
-            <div><strong>优秀</strong><span>101-110分 / 系数1.50</span></div>
-            <div><strong>平均</strong><span>91-100分 / 系数1.00</span></div>
-            <div><strong>及格</strong><span>81-90分 / 系数0.80</span></div>
-            <div><strong>不及格</strong><span>0-80分 / 系数0</span></div>
+            <div><strong>卓越</strong><span>111-120 分 / 系数 2.00</span></div>
+            <div><strong>优秀</strong><span>101-110 分 / 系数 1.50</span></div>
+            <div><strong>平均</strong><span>91-100 分 / 系数 1.00</span></div>
+            <div><strong>及格</strong><span>81-90 分 / 系数 0.80</span></div>
+            <div><strong>不及格</strong><span>0-80 分 / 系数 0</span></div>
           </div>
           <Table
             :columns="gradeColumns"
@@ -683,18 +582,10 @@ watch(() => route.params.id, loadApiData);
             row-key="id"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.dataIndex === 'employee'">
-                {{ record.employee?.name }}
-              </template>
-              <template v-else-if="column.dataIndex === 'dept'">
-                {{ record.employee?.dept }}
-              </template>
-              <template v-else-if="column.dataIndex === 'finalScore'">
-                {{ record.finalScore ?? '-' }}
-              </template>
-              <template v-else-if="column.dataIndex === 'grade'">
-                {{ record.grade ?? '-' }}
-              </template>
+              <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
+              <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
+              <template v-else-if="column.dataIndex === 'finalScore'">{{ record.finalScore ?? '-' }}</template>
+              <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
               <template v-else-if="column.dataIndex === 'visible'">
                 <Tag :color="record.resultVisible ? 'green' : 'default'">{{ record.visible }}</Tag>
               </template>
@@ -726,18 +617,6 @@ watch(() => route.params.id, loadApiData);
       </Card>
     </template>
     <Empty v-else description="未找到考核批次" />
-
-    <Modal v-model:open="scoreModalOpen" :title="scoringType === 'self' ? '提交自评' : '提交主管评分'" width="760px" @ok="submitScore">
-      <div class="score-list">
-        <div v-for="indicator in templateIndicators" :key="indicator.id" class="score-row">
-          <div>
-            <strong>{{ indicator.name }}</strong>
-            <span>{{ indicator.dimension }} · 权重 {{ indicator.weight }}%</span>
-          </div>
-          <InputNumber v-model:value="scoreInputs[indicator.id]" :max="120" :min="0" addon-after="分" />
-        </div>
-      </div>
-    </Modal>
 
     <Modal v-model:open="interviewModalOpen" title="记录面谈" @ok="saveInterviewRecord">
       <div class="score-form">
@@ -842,41 +721,11 @@ watch(() => route.params.id, loadApiData);
   gap: 10px;
 }
 
-.score-list {
-  display: grid;
-  gap: 12px;
-}
-
-.score-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  gap: 16px;
-  align-items: center;
-  padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-
-.score-row > div {
-  display: grid;
-  gap: 4px;
-}
-
-.score-row span {
-  color: #64748b;
-  font-size: 12px;
-}
-
 @media (max-width: 960px) {
   .summary-grid,
   .batch-title,
   .filter-row,
   .grade-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .score-row {
     grid-template-columns: 1fr;
   }
 }

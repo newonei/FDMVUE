@@ -13,7 +13,6 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Progress,
   Radio,
   Select,
   Space,
@@ -881,9 +880,6 @@ onMounted(loadSettings);
           <div class="toolbar-row">
             <Input v-model:value="keyword" allow-clear placeholder="搜索人员" />
             <Space>
-              <span class="quota-text">被考核人员使用额度</span>
-              <Progress :percent="100" :show-info="false" class="quota-progress" status="active" />
-              <strong>52/50</strong>
               <Button type="link" @click="downloadAvailableUsers">下载名单</Button>
               <Button type="primary" @click="openSystemUserManagement">人员管理</Button>
             </Space>
@@ -1346,13 +1342,8 @@ onMounted(loadSettings);
   display: none;
 }
 
-.quota-text,
 .muted {
   color: #64748b;
-}
-
-.quota-progress {
-  width: 90px;
 }
 
 .avatar {

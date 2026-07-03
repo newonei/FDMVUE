@@ -108,6 +108,25 @@ export namespace FdmPerformanceTemplateApi {
 
   export type TemplateSaveReq = Omit<Template, 'createTime' | 'updateTime'>;
 
+  export type FlowPresetPageParams = PageParam & {
+    name?: string;
+    status?: number;
+  };
+
+  export interface FlowPreset {
+    createTime?: string;
+    flowNodes?: FlowNode[];
+    id?: number;
+    name: string;
+    remark?: string;
+    simpleFlowJson: string;
+    sort?: number;
+    status?: number;
+    updateTime?: string;
+  }
+
+  export type FlowPresetSaveReq = Omit<FlowPreset, 'createTime' | 'updateTime'>;
+
   export interface SimpleTemplate {
     groupId?: number;
     groupName?: string;
@@ -115,6 +134,17 @@ export namespace FdmPerformanceTemplateApi {
     name: string;
     periodType?: number;
     status?: number;
+  }
+
+  export interface TemplateGroup {
+    id: number;
+    name: string;
+    sort?: number;
+  }
+
+  export interface TemplateGroupSaveReq {
+    name: string;
+    sort?: number;
   }
 }
 
@@ -139,6 +169,24 @@ export function getFdmPerformanceTemplateSimpleList() {
   );
 }
 
+export function getFdmPerformanceTemplateGroupSimpleList() {
+  return requestClient.get<FdmPerformanceTemplateApi.TemplateGroup[]>(
+    '/fdmperformance/template/group/simple-list',
+  );
+}
+
+export function createFdmPerformanceTemplateGroup(
+  data: FdmPerformanceTemplateApi.TemplateGroupSaveReq,
+) {
+  return requestClient.post<number>('/fdmperformance/template/group/create', data);
+}
+
+export function deleteFdmPerformanceTemplateGroup(id: number) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/template/group/delete?id=${id}`,
+  );
+}
+
 export function createFdmPerformanceTemplate(
   data: FdmPerformanceTemplateApi.TemplateSaveReq,
 ) {
@@ -157,4 +205,41 @@ export function duplicateFdmPerformanceTemplate(id: number) {
 
 export function deleteFdmPerformanceTemplate(id: number) {
   return requestClient.delete<boolean>(`/fdmperformance/template/delete?id=${id}`);
+}
+
+export function getFdmPerformanceFlowPresetPage(
+  params: FdmPerformanceTemplateApi.FlowPresetPageParams,
+) {
+  return requestClient.get<PageResult<FdmPerformanceTemplateApi.FlowPreset>>(
+    '/fdmperformance/flow-preset/page',
+    { params },
+  );
+}
+
+export function getFdmPerformanceFlowPreset(id: number) {
+  return requestClient.get<FdmPerformanceTemplateApi.FlowPreset>(
+    `/fdmperformance/flow-preset/get?id=${id}`,
+  );
+}
+
+export function getFdmPerformanceFlowPresetSimpleList() {
+  return requestClient.get<FdmPerformanceTemplateApi.FlowPreset[]>(
+    '/fdmperformance/flow-preset/simple-list',
+  );
+}
+
+export function createFdmPerformanceFlowPreset(
+  data: FdmPerformanceTemplateApi.FlowPresetSaveReq,
+) {
+  return requestClient.post<number>('/fdmperformance/flow-preset/create', data);
+}
+
+export function updateFdmPerformanceFlowPreset(
+  data: FdmPerformanceTemplateApi.FlowPresetSaveReq,
+) {
+  return requestClient.put<boolean>('/fdmperformance/flow-preset/update', data);
+}
+
+export function deleteFdmPerformanceFlowPreset(id: number) {
+  return requestClient.delete<boolean>(`/fdmperformance/flow-preset/delete?id=${id}`);
 }
