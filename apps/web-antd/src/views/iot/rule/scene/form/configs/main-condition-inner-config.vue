@@ -111,7 +111,7 @@ const serviceConfig = computed(() => {
  * @param value 字段值
  */
 function updateConditionField(field: any, value: any) {
-  (condition.value as any)[field] = value;
+  Object.assign(condition.value, { [field]: value });
 }
 
 /**
@@ -265,9 +265,7 @@ function handlePropertyChange(propertyInfo: any) {
                 triggerType === IotRuleSceneTriggerTypeEnum.DEVICE_EVENT_POST
               "
               :value="condition.value"
-              @update:value="
-                (value) => updateConditionField('value', value)
-              "
+              @update:value="(value) => updateConditionField('value', value)"
               placeholder="留空则事件发生即匹配"
             />
             <!-- 普通值输入 -->

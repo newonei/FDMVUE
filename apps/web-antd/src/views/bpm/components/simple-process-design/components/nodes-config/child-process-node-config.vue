@@ -66,6 +66,9 @@ const currentNode = useWatchNode(props);
 /** 节点名称配置 */
 const { nodeName, showInput, clickIcon, changeNodeName, inputRef } =
   useNodeName(BpmNodeTypeEnum.CHILD_PROCESS_NODE);
+function setInputRef(el: unknown) {
+  inputRef.value = el as HTMLInputElement | null;
+}
 // 激活的 Tab 标签页
 const activeTabName = ref('child');
 // 子流程表单配置
@@ -183,6 +186,12 @@ const multiFormFieldOptions = computed(() => {
     (item) => item.type === 'select' || item.type === 'checkbox',
   );
 });
+const multiInstanceSourceNumber = computed({
+  get: () => Number(configForm.value.multiInstanceSource || 1),
+  set: (value?: number) => {
+    configForm.value.multiInstanceSource = String(value || '');
+  },
+});
 const childFormFieldOptions = ref<any[]>([]);
 
 /** 保存配置 */
@@ -196,7 +205,9 @@ const saveConfig = async () => {
     (option) => option.key === configForm.value.calledProcessDefinitionKey,
   );
 
-  currentNode.value.name = nodeName.value!;
+  if (nodeName.value) {
+    currentNode.value.name = nodeName.value;
+  }
   if (currentNode.value.childProcessSetting) {
     // 1. 是否异步
     currentNode.value.childProcessSetting.async = configForm.value.async;
@@ -293,7 +304,7 @@ const showChildProcessNodeConfig = (node: SimpleFlowNode) => {
       if (configForm.value.timeoutType === DelayTypeEnum.FIXED_TIME_DURATION) {
         const strTimeDuration =
           node.childProcessSetting.timeoutSetting.timeExpression ?? '';
-        const parseTime = strTimeDuration.slice(2, -1);
+        const parseTime = strTimeDuration.match(/\d+/)?.[0] ?? '';
         const parseTimeUnit = strTimeDuration.slice(-1);
         configForm.value.timeDuration = Number.parseInt(parseTime);
         configForm.value.timeUnit = convertTimeUnit(parseTimeUnit);
@@ -359,12 +370,12 @@ const loadFormInfo = async () => {
 };
 
 const getIsoTimeDuration = () => {
-  let strTimeDuration = 'PT';
+  let strTimeDuration = 'P';
   if (configForm.value.timeUnit === TimeUnitType.MINUTE) {
-    strTimeDuration += `${configForm.value.timeDuration}M`;
+    strTimeDuration += `T${configForm.value.timeDuration}M`;
   }
   if (configForm.value.timeUnit === TimeUnitType.HOUR) {
-    strTimeDuration += `${configForm.value.timeDuration}H`;
+    strTimeDuration += `T${configForm.value.timeDuration}H`;
   }
   if (configForm.value.timeUnit === TimeUnitType.DAY) {
     strTimeDuration += `${configForm.value.timeDuration}D`;
@@ -391,7 +402,7 @@ onMounted(async () => {
       <div class="config-header">
         <Input
           v-if="showInput"
-          ref="inputRef"
+          :ref="setInputRef"
           type="text"
           class="focus:border-blue-500 focus:shadow-[0_0_0_2px_rgba(24,144,255,0.2)] focus:outline-none"
           @blur="changeNodeName()"
@@ -678,7 +689,6 @@ onMounted(async () => {
                     class="w-24"
                     v-model:value="configForm.timeDuration"
                     :min="1"
-                    controls-position="right"
                   />
                 </FormItem>
               </Col>
@@ -802,10 +812,7 @@ onMounted(async () => {
               trigger: 'change',
             }"
           >
-            <InputNumber
-              v-model:value="configForm.multiInstanceSource"
-              :min="1"
-            />
+            <InputNumber v-model:value="multiInstanceSourceNumber" :min="1" />
           </FormItem>
           <FormItem
             v-if="

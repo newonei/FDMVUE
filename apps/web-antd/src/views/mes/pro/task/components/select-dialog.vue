@@ -95,7 +95,11 @@ async function applyPreSelection() {
   }
   const rows = gridApi.grid.getData() as MesProTaskApi.Task[];
   for (const row of rows) {
-    if (row.id === undefined || !preSelectedIds.value.includes(row.id)) {
+    if (
+      row.id === undefined ||
+      row.id === null ||
+      !preSelectedIds.value.includes(row.id)
+    ) {
       continue;
     }
     if (multiple.value) {
@@ -167,7 +171,10 @@ async function resetQueryState() {
   await gridApi.grid.clearRadioRow();
   await gridApi.formApi.resetForm();
   if (externalWorkOrderId.value) {
-    await gridApi.formApi.setFieldValue('workOrderId', externalWorkOrderId.value);
+    await gridApi.formApi.setFieldValue(
+      'workOrderId',
+      externalWorkOrderId.value,
+    );
   }
   if (externalWorkstationId.value) {
     await gridApi.formApi.setFieldValue(

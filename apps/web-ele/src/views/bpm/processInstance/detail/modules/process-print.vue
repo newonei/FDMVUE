@@ -2,7 +2,7 @@
 import type { BpmProcessInstanceApi } from '#/api/bpm/processInstance';
 import type { SystemAreaApi } from '#/api/system/area';
 
-import { computed, ref } from 'vue';
+import { computed, ref, shallowRef } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { DICT_TYPE } from '@vben/constants';
@@ -19,6 +19,7 @@ import { getAreaTree } from '#/api/system/area';
 import { getSimpleDeptList } from '#/api/system/dept';
 import { getSimpleUserList } from '#/api/system/user';
 import { decodeFields } from '#/components/form-create';
+import { registerComponent } from '#/utils';
 
 const userStore = useUserStore();
 
@@ -54,6 +55,7 @@ const userName = computed(() => userStore.userInfo?.nickname ?? '');
 const printTime = ref(formatDate(new Date(), 'YYYY-MM-DD HH:mm'));
 const formFields = ref<FormFieldItem[]>([]);
 const printDataMap = ref<Record<string, string>>({});
+const BusinessFormComponent = shallowRef<any>();
 
 /** 打印配置 */
 const printObj = ref({
@@ -93,6 +95,17 @@ async function fetchPrintData(id: string) {
   printTime.value = formatDate(new Date(), 'YYYY-MM-DD HH:mm');
   initPrintDataMap();
   await parseFormFields();
+  initBusinessFormComponent();
+}
+
+/** 初始化业务表单组件 */
+function initBusinessFormComponent() {
+  const businessFormPath =
+    printData.value?.processInstance.processDefinition?.formCustomViewPath ||
+    '';
+  BusinessFormComponent.value = businessFormPath
+    ? registerComponent(businessFormPath)
+    : undefined;
 }
 
 /** 解析表单字段 */
@@ -234,7 +247,9 @@ function createFileLinkHtml(file: unknown) {
   linkEl.setAttribute('href', String(url));
   linkEl.setAttribute('target', '_blank');
   linkEl.setAttribute('rel', 'noopener noreferrer');
-  const fallbackName = String(url).slice(Math.max(0, String(url).lastIndexOf('/') + 1)) || String(url);
+  const fallbackName =
+    String(url).slice(Math.max(0, String(url).lastIndexOf('/') + 1)) ||
+    String(url);
   const recordName = record ? getRecordValue(record, 'name') : undefined;
   linkEl.textContent = recordName ? String(recordName) : fallbackName;
   return linkEl.outerHTML;
@@ -247,16 +262,14 @@ function renderFileListHtml(value: unknown) {
     .join('<br/>');
 }
 
-function mapValuesWithOptions(
-  value: unknown,
-  options: FormFieldOption[] = [],
-) {
+function mapValuesWithOptions(value: unknown, options: FormFieldOption[] = []) {
   const values = toValueArray(value);
   const labels = values
     .map((item) => {
       const matched = options.find(
         (option) =>
-          option?.value === item || String(option?.value ?? '') === String(item),
+          option?.value === item ||
+          String(option?.value ?? '') === String(item),
       );
       return escapeHtml(matched?.label ?? String(item));
     })
@@ -300,9 +313,15 @@ function mapValueWithLabelMap(
  * @returns 打印展示时使用的区域、部门、用户名称映射
  */
 async function loadPrintLookupMaps(formFieldsObj: FormFieldRule[]) {
-  const hasAreaSelect = formFieldsObj.some((item) => item.type === 'AreaSelect');
-  const hasUserSelect = formFieldsObj.some((item) => item.type === 'UserSelect');
-  const hasDeptSelect = formFieldsObj.some((item) => item.type === 'DeptSelect');
+  const hasAreaSelect = formFieldsObj.some(
+    (item) => item.type === 'AreaSelect',
+  );
+  const hasUserSelect = formFieldsObj.some(
+    (item) => item.type === 'UserSelect',
+  );
+  const hasDeptSelect = formFieldsObj.some(
+    (item) => item.type === 'DeptSelect',
+  );
 
   const [areaList, userList, deptList] = await Promise.all([
     hasAreaSelect ? getAreaTree() : Promise.resolve([]),
@@ -335,7 +354,7 @@ function formatPrintField(
   rule: FormFieldRule,
   value: unknown,
   lookupMaps: PrintLookupMaps,
-){
+) {
   const type = String(rule.type ?? '');
 
   switch (type) {
@@ -387,8 +406,9 @@ function formatPrintField(
       } as const;
       const rawValueType = String(getRuleProp(rule, 'valueType') ?? '');
       const valueType =
-        (valueTypeMap as Record<string, 'boolean' | 'number' | 'string'>)[rawValueType] ??
-        'string';
+        (valueTypeMap as Record<string, 'boolean' | 'number' | 'string'>)[
+          rawValueType
+        ] ?? 'string';
       const options = getDictOptions(dictType, valueType);
       return mapValuesWithOptions(value, options);
     }
@@ -402,10 +422,9 @@ function formatPrintField(
     }
     case 'IframeComponent': {
       const propsObj = rule.props;
-      const propsUrl =
-        isPrintableRecord(propsObj)
-          ? String(getRecordValue(propsObj, 'url') ?? '')
-          : '';
+      const propsUrl = isPrintableRecord(propsObj)
+        ? String(getRecordValue(propsObj, 'url') ?? '')
+        : '';
       const iframeUrl = isEmptyValue(value) ? propsUrl : String(value ?? '');
       return iframeUrl ? createFileLinkHtml(iframeUrl) : '';
     }
@@ -446,7 +465,9 @@ function initPrintDataMap() {
   printDataMap.value.startUserDept =
     printData.value.processInstance.startUser?.deptName || '';
   printDataMap.value.processName = printData.value.processInstance.name;
-  printDataMap.value.processNum = String(printData.value.processInstance.id ?? '');
+  printDataMap.value.processNum = String(
+    printData.value.processInstance.id ?? '',
+  );
   printDataMap.value.startTime = formatDate(
     printData.value.processInstance.startTime,
   );
@@ -587,6 +608,22 @@ function getPrintTemplateHTML() {
                 <div v-html="item.html"></div>
               </td>
             </tr>
+          </tbody>
+        </table>
+        <!-- 业务表单：独立成块渲染，不嵌入表格单元格，避免宽度与分页受限 -->
+        <div
+          v-if="BusinessFormComponent && formFields.length === 0"
+          class="mt-3"
+        >
+          <component
+            :is="BusinessFormComponent"
+            :id="printData.processInstance.businessKey"
+            :readonly="true"
+            :print-mode="true"
+          />
+        </div>
+        <table class="mt-3 w-full border-collapse">
+          <tbody>
             <tr>
               <td
                 class="w-full border border-black p-1.5 text-center"

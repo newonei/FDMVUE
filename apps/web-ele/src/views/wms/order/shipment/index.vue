@@ -11,7 +11,11 @@ import {
   OrderStatusEnum,
   OrderUpdateStatusList,
 } from '@vben/constants';
-import { downloadFileFromBlobPart, formatDateTime } from '@vben/utils';
+import {
+  downloadFileFromBlobPart,
+  formatDateTime,
+  isUndefined,
+} from '@vben/utils';
 
 import { ElLoading, ElMessage } from 'element-plus';
 
@@ -60,7 +64,8 @@ const [DetailModal, detailModalApi] = useVbenModal({
 /** 清空展开明细缓存 */
 function clearDetailMap() {
   for (const id of Object.keys(detailMap)) {
-    delete detailMap[Number(id)];
+    const key = Number(id);
+    Reflect.deleteProperty(detailMap, key);
   }
 }
 
@@ -105,8 +110,12 @@ async function handleExpandChange(
   if (!expanded) {
     return;
   }
-  delete detailMap[row.id!];
-  detailMap[row.id!] = await getShipmentOrderDetailListByOrderId(row.id!);
+  const key = row.id;
+  if (isUndefined(key)) {
+    return;
+  }
+  Reflect.deleteProperty(detailMap, key);
+  detailMap[key] = await getShipmentOrderDetailListByOrderId(key);
 }
 
 /** 判断出库单是否可修改 */

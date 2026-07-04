@@ -4,10 +4,12 @@ import { ref, watch } from 'vue';
 import {
   Button,
   Checkbox,
+  CheckboxGroup,
   DatePicker,
   Input,
   InputNumber,
   Radio,
+  RadioGroup,
   TabPane,
   Tabs,
 } from 'antdv-next';
@@ -309,7 +311,7 @@ watch(
             </RadioGroup>
           </div>
           <div v-if="cronMode[f.key] === 'appoint'">
-            <Checkbox.Group
+            <CheckboxGroup
               v-model:value="cronAppoint[f.key]"
               :key="`group-${f.key}`"
             >
@@ -320,7 +322,7 @@ watch(
               >
                 {{ pad(n - 1) }}
               </Checkbox>
-            </Checkbox.Group>
+            </CheckboxGroup>
           </div>
         </TabPane>
       </Tabs>

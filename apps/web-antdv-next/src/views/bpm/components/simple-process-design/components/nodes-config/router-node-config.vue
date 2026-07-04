@@ -19,7 +19,6 @@ import {
   message,
   Row,
   Select,
-  SelectOption,
 } from 'antdv-next';
 
 import { ConditionType } from '../../consts';
@@ -42,6 +41,11 @@ const currentNode = useWatchNode(props);
 /** 节点名称 */
 const { nodeName, showInput, clickIcon, changeNodeName, inputRef } =
   useNodeName(BpmNodeTypeEnum.ROUTER_BRANCH_NODE);
+
+function setInputRef(el: unknown) {
+  inputRef.value = el as HTMLInputElement | null;
+}
+
 const routerGroups = ref<RouterSetting[]>([]);
 const nodeOptions = ref<any[]>([]);
 const conditionRef = ref<any[]>([]);
@@ -203,7 +207,7 @@ defineExpose({ openDrawer }); // 暴露方法给父组件
     <template #title>
       <div class="flex items-center">
         <Input
-          ref="inputRef"
+          :ref="setInputRef"
           v-if="showInput"
           type="text"
           class="mr-2 w-48"
@@ -237,25 +241,20 @@ defineExpose({ openDrawer }); // 暴露方法给父组件
               <FormItem
                 class="mb-0 ml-4 inline-block w-48"
                 :name="['routerGroups', index, 'nodeId']"
-                :rules="{
-                  required: true,
-                  message: '路由目标节点不能为空',
-                  trigger: 'change',
-                }"
+                :rules="[
+                  {
+                    required: true,
+                    message: '路由目标节点不能为空',
+                    trigger: 'change',
+                  },
+                ]"
               >
                 <Select
                   v-model:value="item.nodeId"
                   placeholder="请选择路由目标节点"
                   allow-clear
-                >
-                  <SelectOption
-                    v-for="node in nodeOptions"
-                    :key="node.value"
-                    :value="node.value"
-                  >
-                    {{ node.label }}
-                  </SelectOption>
-                </Select>
+                  :options="nodeOptions"
+                />
               </FormItem>
             </div>
             <Button

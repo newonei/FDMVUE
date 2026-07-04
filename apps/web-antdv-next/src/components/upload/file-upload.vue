@@ -33,7 +33,9 @@ const props = withDefaults(defineProps<FileUploadProps>(), {
   multiple: false,
   api: undefined,
   resultField: '',
+  returnText: false,
   showDescription: false,
+  showDownloadIcon: true,
 });
 const emit = defineEmits([
   'change',
@@ -148,9 +150,6 @@ function handleUploadError(error: any) {
  * @returns 是否允许上传
  */
 async function beforeUpload(file: File) {
-  const fileContent = await file.text();
-  emit('returnText', fileContent);
-
   // 检查文件数量限制
   if (fileList.value!.length >= props.maxNumber) {
     message.error($t('ui.upload.maxNumber', [props.maxNumber]));
@@ -177,6 +176,10 @@ async function beforeUpload(file: File) {
 
   // 只有在验证通过后才增加计数器
   uploadNumber.value++;
+  if (props.returnText) {
+    const fileContent = await file.text();
+    emit('returnText', fileContent);
+  }
   return true;
 }
 
@@ -294,7 +297,7 @@ function getValue() {
       :show-upload-list="{
         showPreviewIcon: true,
         showRemoveIcon: true,
-        showDownloadIcon: true,
+        showDownloadIcon,
       }"
       @remove="handleRemove"
       @preview="handlePreview"

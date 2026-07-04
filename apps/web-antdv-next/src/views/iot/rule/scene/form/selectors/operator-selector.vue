@@ -19,8 +19,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
-  (e: 'change', value: string): void;
+  (e: 'change' | 'update:modelValue', value: string): void;
 }>();
 
 const localValue = useVModel(props, 'modelValue', emit);
@@ -47,7 +46,7 @@ const allOperators = [
     label: IotRuleSceneTriggerConditionParameterOperatorEnum.NOT_EQUALS.name,
     symbol: '≠',
     description: '值不相等时触发',
-    example: 'power != false',
+    example: 'power !== false',
     supportedTypes: [
       IoTDataSpecsDataTypeEnum.INT,
       IoTDataSpecsDataTypeEnum.FLOAT,
@@ -204,6 +203,13 @@ const availableOperators = computed(() => {
     (op.supportedTypes as any[]).includes(props.propertyType || ''),
   );
 });
+const availableOperatorOptions = computed(() =>
+  availableOperators.value.map((operator) => ({
+    label: operator.label,
+    value: operator.value,
+    raw: operator,
+  })),
+);
 
 // 计算属性：当前选中的操作符
 const selectedOperator = computed(() => {
@@ -239,39 +245,36 @@ watch(
 <template>
   <div class="w-full">
     <Select
-      v-model="localValue"
+      v-model:value="localValue"
       placeholder="请选择操作符"
       @change="handleChange"
       class="w-full"
+      option-label-prop="label"
+      :options="availableOperatorOptions"
     >
-      <SelectOption
-        v-for="operator in availableOperators"
-        :key="operator.value"
-        :label="operator.label"
-        :value="operator.value"
-      >
-        <div class="py-4px flex w-full items-center justify-between">
-          <div class="gap-8px flex items-center">
-            <div class="text-14px font-500 text-primary">
-              {{ operator.label }}
+      <template #optionRender="{ option }">
+        <div class="py-[4px] flex w-full items-center justify-between">
+          <div class="gap-[8px] flex items-center">
+            <div class="text-[14px] font-medium text-foreground">
+              {{ option.data.raw.label }}
             </div>
             <div
-              class="text-12px px-6px py-2px rounded-4px bg-primary-light-9 font-mono text-primary"
+              class="text-[12px] px-[6px] py-[2px] rounded-[4px] bg-primary-light-9 font-mono text-primary"
             >
-              {{ operator.symbol }}
+              {{ option.data.raw.symbol }}
             </div>
           </div>
-          <div class="text-12px text-secondary">
-            {{ operator.description }}
+          <div class="text-[12px] text-muted-foreground">
+            {{ option.data.raw.description }}
           </div>
         </div>
-      </SelectOption>
+      </template>
     </Select>
   </div>
 </template>
 
 <style scoped>
-:deep(.el-select-dropdown__item) {
+:deep(.ant-select-item-option-content) {
   height: auto;
   padding: 8px 20px;
 }

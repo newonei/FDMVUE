@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { Demo03StudentApi } from '#/api/infra/demo/demo03/normal';
+import type { Demo03StudentApi } from '#/api/infra/demo/demo03/inner';
 
 import { computed, ref } from 'vue';
 
@@ -8,8 +8,8 @@ import { DICT_TYPE } from '@vben/constants';
 import { getDictOptions } from '@vben/hooks';
 
 import {
-  DatePicker,
   Form,
+  FormItem,
   Input,
   message,
   Radio,
@@ -17,11 +17,12 @@ import {
   Tabs,
 } from 'antdv-next';
 
+import { DatePicker } from '#/adapter/component/date-picker';
 import {
   createDemo03Student,
   getDemo03Student,
   updateDemo03Student,
-} from '#/api/infra/demo/demo03/normal';
+} from '#/api/infra/demo/demo03/inner';
 import { Tinymce as RichTextarea } from '#/components/tinymce';
 import { $t } from '#/locales';
 

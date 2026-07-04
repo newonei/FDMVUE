@@ -2,12 +2,15 @@ import type {
   BarSeriesOption,
   HeatmapSeriesOption,
   LineSeriesOption,
+  MapSeriesOption,
   PieSeriesOption,
   RadarSeriesOption,
   ScatterSeriesOption,
 } from 'echarts/charts';
 import type {
   DatasetComponentOption,
+  DataZoomComponentOption,
+  GeoComponentOption,
   GridComponentOption,
   LegendComponentOption,
   TitleComponentOption,
@@ -20,10 +23,13 @@ import type { ComposeOption } from 'echarts/core';
 export type ECOption = ComposeOption<
   | BarSeriesOption
   | DatasetComponentOption
+  | DataZoomComponentOption
+  | GeoComponentOption
   | GridComponentOption
   | HeatmapSeriesOption
   | LegendComponentOption
   | LineSeriesOption
+  | MapSeriesOption
   | PieSeriesOption
   | RadarSeriesOption
   | ScatterSeriesOption

@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { FormType } from '../data';
+
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { MesWmOutsourceIssueDetailApi } from '#/api/mes/wm/outsourceissue/detail';
 import type { MesWmOutsourceIssueLineApi } from '#/api/mes/wm/outsourceissue/line';
@@ -17,7 +19,7 @@ import {
 } from '#/api/mes/wm/outsourceissue/line';
 import { $t } from '#/locales';
 
-import { type FormType, useLineGridColumns } from '../data';
+import { useLineGridColumns } from '../data';
 import DetailForm from './detail-form.vue';
 import DetailList from './detail-list.vue';
 import LineForm from './line-form.vue';
@@ -27,7 +29,8 @@ const props = defineProps<{
   issueId: number;
 }>();
 
-const isEditable = computed(() => // 是否可编辑明细行
+const isEditable = computed(() =>
+  // 是否可编辑明细行
   ['create', 'update'].includes(props.formType),
 );
 const isStock = computed(() => props.formType === 'stock'); // 是否为拣货模式
@@ -48,7 +51,8 @@ const [DetailFormModal, detailFormModalApi] = useVbenModal({
 /** 刷新表格 */
 function handleRefresh() {
   for (const id of Object.keys(detailMap)) {
-    delete detailMap[Number(id)];
+    const key = Number(id);
+    Reflect.deleteProperty(detailMap, key);
   }
   gridApi.query();
 }
@@ -93,7 +97,9 @@ function openDetailForm(lineId: number, itemId?: number, detailId?: number) {
 }
 
 /** 获取已展开行的发料明细 */
-function getExpandedDetails(row: MesWmOutsourceIssueLineApi.OutsourceIssueLine) {
+function getExpandedDetails(
+  row: MesWmOutsourceIssueLineApi.OutsourceIssueLine,
+) {
   return detailMap[row.id!] || [];
 }
 

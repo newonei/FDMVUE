@@ -19,7 +19,6 @@ import {
   RadioGroup,
   Row,
   Select,
-  SelectOption,
   TabPane,
   Tabs,
   TextArea,
@@ -74,6 +73,10 @@ const currentNode = useWatchNode(props);
 // 节点名称
 const { nodeName, showInput, clickIcon, changeNodeName, inputRef } =
   useNodeName(BpmNodeTypeEnum.COPY_TASK_NODE);
+
+function setInputRef(el: unknown) {
+  inputRef.value = el as HTMLInputElement | null;
+}
 
 // 激活的 Tab 标签页
 const activeTabName = ref('user');
@@ -209,7 +212,7 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
       <div class="config-header">
         <Input
           v-if="showInput"
-          ref="inputRef"
+          :ref="setInputRef"
           type="text"
           class="focus:border-blue-500 focus:shadow-[0_0_0_2px_rgba(24,144,255,0.2)] focus:outline-none"
           @blur="changeNodeName()"
@@ -259,18 +262,11 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
             >
               <Select
                 v-model:value="configForm.roleIds"
-                clearable
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in roleOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+                :options="roleOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -306,18 +302,11 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
             >
               <Select
                 v-model:value="configForm.postIds"
-                clearable
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in postOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id!"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+                :options="postOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+              />
             </FormItem>
             <FormItem
               v-if="configForm.candidateStrategy === CandidateStrategy.USER"
@@ -326,18 +315,11 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
             >
               <Select
                 v-model:value="configForm.userIds"
-                clearable
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in userOptions"
-                  :key="item.id"
-                  :label="item.nickname"
-                  :value="item.id"
-                >
-                  {{ item.nickname }}
-                </SelectOption>
-              </Select>
+                :options="userOptions"
+                :field-names="{ label: 'nickname', value: 'id' }"
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -348,18 +330,11 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
             >
               <Select
                 v-model:value="configForm.userGroups"
-                clearable
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in userGroupOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+                :options="userGroupOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -368,17 +343,17 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
               label="表单内用户字段"
               name="formUser"
             >
-              <Select v-model:value="configForm.formUser" clearable>
-                <SelectOption
-                  v-for="(item, idx) in userFieldOnFormOptions"
-                  :key="idx"
-                  :label="item.title"
-                  :value="item.field"
-                  :disabled="!item.required"
-                >
-                  {{ item.title }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.formUser"
+                :options="
+                  userFieldOnFormOptions.map((item) => ({
+                    label: item.title,
+                    value: item.field,
+                    disabled: !item.required,
+                  }))
+                "
+                allow-clear
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -388,17 +363,17 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
               label="表单内部门字段"
               name="formDept"
             >
-              <Select v-model:value="configForm.formDept" clearable>
-                <SelectOption
-                  v-for="(item, idx) in deptFieldOnFormOptions"
-                  :key="idx"
-                  :label="item.title"
-                  :value="item.field"
-                  :disabled="!item.required"
-                >
-                  {{ item.title }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.formDept"
+                allow-clear
+                :options="[
+                  ...deptFieldOnFormOptions.map((item) => ({
+                    label: item.title,
+                    value: item.field,
+                    disabled: !item.required,
+                  })),
+                ]"
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -414,16 +389,11 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
               :label="deptLevelLabel!"
               name="deptLevel"
             >
-              <Select v-model:value="configForm.deptLevel" clearable>
-                <SelectOption
-                  v-for="(item, index) in MULTI_LEVEL_DEPT"
-                  :key="index"
-                  :label="item.label"
-                  :value="item.value"
-                >
-                  {{ item.label }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.deptLevel"
+                allow-clear
+                :options="MULTI_LEVEL_DEPT"
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -432,7 +402,7 @@ defineExpose({ showCopyTaskNodeConfig }); // 暴露方法给父组件
               label="流程表达式"
               name="expression"
             >
-              <TextArea v-model:value="configForm.expression" clearable />
+              <TextArea v-model:value="configForm.expression" allow-clear />
             </FormItem>
           </Form>
         </div>

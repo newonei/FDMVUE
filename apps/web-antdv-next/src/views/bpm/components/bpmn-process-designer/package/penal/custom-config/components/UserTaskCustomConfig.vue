@@ -20,11 +20,11 @@ import { IconifyIcon } from '@vben/icons';
 import {
   Button,
   Divider,
+  FormItem,
   Input,
   Radio,
   RadioGroup,
   Select,
-  SelectOption,
   Switch,
 } from 'antdv-next';
 
@@ -447,7 +447,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <Divider orientation="left">审批类型</Divider>
+    <Divider title-placement="left">审批类型</Divider>
     <FormItem name="approveType" label="审批类型">
       <RadioGroup v-model:value="approveType.value">
         <Radio
@@ -460,7 +460,7 @@ onMounted(async () => {
       </RadioGroup>
     </FormItem>
 
-    <Divider orientation="left">审批人拒绝时</Divider>
+    <Divider title-placement="left">审批人拒绝时</Divider>
     <FormItem name="rejectHandlerType" label="处理方式">
       <RadioGroup
         v-model:value="rejectHandlerType"
@@ -487,18 +487,12 @@ onMounted(async () => {
         style="width: 100%"
         @change="updateReturnNodeId"
         placeholder="请选择驳回节点"
-      >
-        <SelectOption
-          v-for="item in returnTaskList"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.name }}
-        </SelectOption>
-      </Select>
+        :options="returnTaskList"
+        :field-names="{ label: 'name', value: 'id' }"
+      />
     </FormItem>
 
-    <Divider orientation="left">审批人为空时</Divider>
+    <Divider title-placement="left">审批人为空时</Divider>
     <FormItem name="assignEmptyHandlerType">
       <RadioGroup
         v-model:value="assignEmptyHandlerType"
@@ -524,18 +518,12 @@ onMounted(async () => {
         mode="multiple"
         style="width: 100%"
         @change="updateAssignEmptyUserIds"
-      >
-        <SelectOption
-          v-for="item in userOptions"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.nickname }}
-        </SelectOption>
-      </Select>
+        :options="userOptions"
+        :field-names="{ label: 'nickname', value: 'id' }"
+      />
     </FormItem>
 
-    <Divider orientation="left">审批人与提交人为同一人时</Divider>
+    <Divider title-placement="left">审批人与提交人为同一人时</Divider>
     <RadioGroup
       v-model:value="assignStartUserHandlerType"
       @change="updateAssignStartUserHandlerType"
@@ -552,7 +540,7 @@ onMounted(async () => {
       </div>
     </RadioGroup>
 
-    <Divider orientation="left">操作按钮</Divider>
+    <Divider title-placement="left">操作按钮</Divider>
     <div class="mt-2 text-sm">
       <!-- 头部标题行 -->
       <div
@@ -599,7 +587,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <Divider orientation="left">字段权限</Divider>
+    <Divider title-placement="left">字段权限</Divider>
     <div v-if="formType === BpmModelFormType.NORMAL" class="mt-2 text-sm">
       <!-- 头部标题行 -->
       <div
@@ -675,7 +663,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <Divider orientation="left">是否需要签名</Divider>
+    <Divider title-placement="left">是否需要签名</Divider>
     <FormItem name="signEnable">
       <Switch
         v-model:checked="signEnable.value"
@@ -685,7 +673,7 @@ onMounted(async () => {
       />
     </FormItem>
 
-    <Divider orientation="left">审批意见</Divider>
+    <Divider title-placement="left">审批意见</Divider>
     <FormItem name="reasonRequire">
       <Switch
         v-model:checked="reasonRequire.value"

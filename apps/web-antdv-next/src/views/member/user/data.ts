@@ -1,7 +1,7 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 
-import { h } from 'vue';
+import { h, markRaw } from 'vue';
 
 import { CommonStatusEnum, DICT_TYPE } from '@vben/constants';
 import { getDictOptions } from '@vben/hooks';
@@ -13,7 +13,7 @@ import { z } from '#/adapter/form';
 import { getSimpleGroupList } from '#/api/member/group';
 import { getSimpleLevelList } from '#/api/member/level';
 import { getSimpleTagList } from '#/api/member/tag';
-import { getAreaTree } from '#/api/system/area';
+import { AreaCascader } from '#/components/area';
 import { getRangePickerDefaultProps } from '#/utils';
 
 /** 新增/修改的表单 */
@@ -35,6 +35,17 @@ export function useFormSchema(): VbenFormSchema[] {
         placeholder: '请输入手机号',
       },
       rules: 'required',
+    },
+    {
+      fieldName: 'email',
+      label: '邮箱',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        maxlength: 50,
+        placeholder: '请输入邮箱',
+      },
+      rules: z.string().email('邮箱格式不正确').or(z.literal('')).optional(),
     },
     {
       fieldName: 'status',
@@ -91,11 +102,13 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'areaId',
       label: '所在地',
-      component: 'ApiTreeSelect',
+      component: markRaw(AreaCascader),
       componentProps: {
-        api: getAreaTree,
-        fieldNames: { label: 'name', value: 'id', children: 'children' },
+        allowClear: true,
+        changeOnSelect: true,
+        class: '!w-full',
         placeholder: '请选择所在地',
+        showSearch: true,
       },
     },
     {
@@ -150,6 +163,15 @@ export function useGridFormSchema(): VbenFormSchema[] {
       component: 'Input',
       componentProps: {
         placeholder: '请输入手机号',
+        allowClear: true,
+      },
+    },
+    {
+      fieldName: 'email',
+      label: '邮箱',
+      component: 'Input',
+      componentProps: {
+        placeholder: '请输入邮箱',
         allowClear: true,
       },
     },
@@ -235,6 +257,11 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       field: 'mobile',
       title: '手机号',
       minWidth: 120,
+    },
+    {
+      field: 'email',
+      title: '邮箱',
+      minWidth: 180,
     },
     {
       field: 'nickname',
@@ -396,6 +423,7 @@ export function useBalanceFormSchema(): VbenFormSchema[] {
       component: 'InputNumber',
       rules: 'required',
       componentProps: {
+        class: '!w-full',
         min: 0,
         precision: 2,
         step: 0.1,
@@ -471,6 +499,7 @@ export function usePointFormSchema(): VbenFormSchema[] {
       component: 'InputNumber',
       rules: 'required',
       componentProps: {
+        class: '!w-full',
         min: 0,
         precision: 0,
         placeholder: '请输入变动积分',

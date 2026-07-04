@@ -19,8 +19,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void;
-  (e: 'change', value: string): void;
+  (e: 'change' | 'update:modelValue', value: string): void;
 }>();
 
 const localValue = useVModel(props, 'modelValue', emit);
@@ -47,7 +46,7 @@ const allOperators = [
     label: IotRuleSceneTriggerConditionParameterOperatorEnum.NOT_EQUALS.name,
     symbol: '≠',
     description: '值不相等时触发',
-    example: 'power != false',
+    example: 'power !== false',
     supportedTypes: [
       IoTDataSpecsDataTypeEnum.INT,
       IoTDataSpecsDataTypeEnum.FLOAT,

@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+// oxlint-disable unicorn/no-nested-ternary
 import type { FormType } from '../data';
 
 import type { ErpPurchaseOrderApi } from '#/api/erp/purchase/order';
@@ -51,7 +52,6 @@ const formData = ref<
 const formType = ref<FormType>('create'); // 表单类型：'create' | 'edit' | 'detail'
 const itemFormRef = ref<InstanceType<typeof ItemForm>>();
 
-/* eslint-disable unicorn/no-nested-ternary */
 const getTitle = computed(() =>
   formType.value === 'create'
     ? $t('ui.actionTitle.create', ['采购退货'])
@@ -206,6 +206,7 @@ const [Modal, modalApi] = useVbenModal({
   <Modal
     :title="getTitle"
     class="w-3/4"
+    :close-on-click-modal="false"
     :show-confirm-button="formType !== 'detail'"
   >
     <Form class="mx-3">

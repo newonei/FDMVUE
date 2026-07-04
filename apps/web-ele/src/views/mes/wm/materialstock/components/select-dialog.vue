@@ -43,18 +43,18 @@ const searchItemTypeId = ref<number>();
 /** 当前 props 是否带预过滤 */
 const showAlert = computed(
   () =>
-    props.batchId != null ||
-    props.warehouseId != null ||
+    props.batchId !== null ||
+    props.warehouseId !== null ||
     props.virtualFilter === 'only',
 );
 
 /** 预过滤提示文字 */
 const alertTitle = computed(() => {
   const parts: string[] = [];
-  if (props.batchId != null) {
+  if (props.batchId !== null) {
     parts.push('批次');
   }
-  if (props.warehouseId != null) {
+  if (props.warehouseId !== null) {
     parts.push('仓库');
   }
   if (props.virtualFilter === 'only') {
@@ -118,7 +118,11 @@ async function applyPreSelection() {
   }
   const rows = gridApi.grid.getData() as MesWmMaterialStockApi.MaterialStock[];
   for (const row of rows) {
-    if (row.id === undefined || !preSelectedIds.value.includes(row.id)) {
+    if (
+      row.id === undefined ||
+      row.id === null ||
+      !preSelectedIds.value.includes(row.id)
+    ) {
       continue;
     }
     if (multiple.value) {

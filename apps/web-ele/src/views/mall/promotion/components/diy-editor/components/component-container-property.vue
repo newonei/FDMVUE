@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Ref } from 'vue';
+
 import type { ComponentStyle } from '../util';
 
 import { useVModel } from '@vueuse/core';
@@ -26,6 +28,7 @@ defineOptions({ name: 'ComponentContainer' });
 const props = defineProps<{ modelValue: ComponentStyle }>();
 const emit = defineEmits(['update:modelValue']);
 const formData = useVModel(props, 'modelValue', emit);
+const formStyleValues = formData as unknown as Ref<Record<string, number>>;
 
 const treeData: any[] = [
   {
@@ -131,7 +134,7 @@ function handleSliderChange(prop: string) {
     </ElTabPane>
 
     <!-- 每个组件的通用内容 -->
-    <ElTabPane label="样式" lazy>
+    <ElTabPane label="样式">
       <ElCard header="组件样式" class="property-group">
         <ElForm :model="formData" label-width="80px">
           <ElFormItem label="组件背景" prop="bgType">
@@ -169,7 +172,7 @@ function handleSliderChange(prop: string) {
                 class="mb-0 w-full"
               >
                 <ElSlider
-                  v-model="formData[data.prop]"
+                  v-model="formStyleValues[data.prop]"
                   :max="100"
                   :min="0"
                   show-input

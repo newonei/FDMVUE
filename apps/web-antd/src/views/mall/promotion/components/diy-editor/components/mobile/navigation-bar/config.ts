@@ -1,4 +1,26 @@
+import type { Rect } from '../../../../magic-cube-editor/util';
 import type { DiyComponent } from '../../../util';
+
+export const NAVIGATION_BAR_SHOW_TYPES = ['always', 'scroll'] as const;
+export type NavigationBarShowType = (typeof NAVIGATION_BAR_SHOW_TYPES)[number];
+export const isNavigationBarShowType = (
+  showType: unknown,
+): showType is NavigationBarShowType =>
+  NAVIGATION_BAR_SHOW_TYPES.includes(showType as NavigationBarShowType);
+const NAVIGATION_BAR_SCROLL_SHOW_VALUES = new Set<unknown>([
+  0,
+  '0',
+  false,
+  'false',
+]);
+export const isNavigationBarAlwaysShow = (
+  property: Pick<NavigationBarProperty, 'alwaysShow' | 'showType'>,
+) => {
+  if (isNavigationBarShowType(property.showType)) {
+    return property.showType === 'always';
+  }
+  return !NAVIGATION_BAR_SCROLL_SHOW_VALUES.has(property.alwaysShow);
+};
 
 /** 顶部导航栏属性 */
 export interface NavigationBarProperty {
@@ -6,7 +28,8 @@ export interface NavigationBarProperty {
   bgColor: string; // 背景颜色
   bgImg: string; // 图片链接
   styleType: 'inner' | 'normal'; // 样式类型：默认 | 沉浸式
-  alwaysShow: boolean; // 常驻显示
+  showType: NavigationBarShowType; // 显示方式：常驻显示 | 滚动显示
+  alwaysShow?: boolean | number | string; // 兼容旧版移动端：是否常驻显示
   mpCells: NavigationBarCellProperty[]; // 小程序单元格列表
   otherCells: NavigationBarCellProperty[]; // 其它平台单元格列表
   _local: {
@@ -16,12 +39,8 @@ export interface NavigationBarProperty {
 }
 
 /** 顶部导航栏 - 单元格 属性 */
-export interface NavigationBarCellProperty {
+export interface NavigationBarCellProperty extends Rect {
   type: 'image' | 'search' | 'text'; // 类型：文字 | 图片 | 搜索框
-  width: number; // 宽度
-  height: number; // 高度
-  top: number; // 顶部位置
-  left: number; // 左侧位置
   text: string; // 文字内容
   textColor: string; // 文字颜色
   imgUrl: string; // 图片地址
@@ -43,6 +62,7 @@ export const component = {
     bgColor: '#fff',
     bgImg: '',
     styleType: 'normal',
+    showType: 'always',
     alwaysShow: true,
     mpCells: [
       {

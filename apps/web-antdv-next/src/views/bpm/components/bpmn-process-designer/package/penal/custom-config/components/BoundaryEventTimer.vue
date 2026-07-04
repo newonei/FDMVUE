@@ -10,7 +10,6 @@ import {
   RadioGroup,
   Row,
   Select,
-  SelectOption,
   Switch,
   TypographyText,
 } from 'antdv-next';
@@ -219,7 +218,7 @@ watch(
 
 <template>
   <div>
-    <Divider orientation="left">审批人超时未处理时</Divider>
+    <Divider title-placement="left">审批人超时未处理时</Divider>
     <FormItem label="启用开关" name="timeoutHandlerEnable">
       <Switch
         v-model:checked="timeoutHandlerEnable"
@@ -264,7 +263,6 @@ watch(
               class="mr-2 mt-0.5"
               v-model:value="timeDuration"
               :min="1"
-              controls-position="right"
               @change="
                 () => {
                   updateTimeModdle();
@@ -277,18 +275,10 @@ watch(
         <Col>
           <Select
             v-model:value="timeUnit"
+            :options="TIME_UNIT_TYPES"
             class="mr-2 !w-24"
             @change="onTimeUnitChange"
-          >
-            <SelectOption
-              v-for="item in TIME_UNIT_TYPES"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            >
-              {{ item.label }}
-            </SelectOption>
-          </Select>
+          />
           <TypographyText class="mr-2 mt-2 inline-flex text-sm">
             未处理
           </TypographyText>

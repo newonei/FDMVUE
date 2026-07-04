@@ -2,13 +2,15 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeGridPropTypes } from '#/adapter/vxe-table';
 import type { MallDeliveryPickUpStoreApi } from '#/api/mall/trade/delivery/pickUpStore';
 
+import { markRaw } from 'vue';
+
 import { DeliveryTypeEnum, DICT_TYPE } from '@vben/constants';
 import { getDictOptions } from '@vben/hooks';
 import { convertToInteger, formatToFraction } from '@vben/utils';
 
 import { getSimpleDeliveryExpressList } from '#/api/mall/trade/delivery/express';
 import { getSimpleDeliveryPickUpStoreList } from '#/api/mall/trade/delivery/pickUpStore';
-import { getAreaTree } from '#/api/system/area';
+import { AreaCascader } from '#/components/area';
 import { getRangePickerDefaultProps } from '#/utils';
 
 /** 关联数据 */
@@ -306,6 +308,7 @@ export function usePriceFormSchema(): VbenFormSchema[] {
       label: '订单调价',
       component: 'InputNumber',
       componentProps: {
+        class: '!w-full',
         placeholder: '请输入订单调价',
         step: 0.1,
         precision: 2,
@@ -367,14 +370,13 @@ export function useAddressFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'receiverAreaId',
       label: '所在地',
-      component: 'ApiTreeSelect',
+      component: markRaw(AreaCascader),
       componentProps: {
-        api: getAreaTree,
-        labelField: 'name',
-        valueField: 'id',
-        childrenField: 'children',
+        allowClear: true,
+        changeOnSelect: true,
+        class: '!w-full',
         placeholder: '请选择收件人所在地',
-        treeDefaultExpandAll: true,
+        showSearch: true,
       },
       rules: 'required',
     },
