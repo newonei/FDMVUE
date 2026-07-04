@@ -11,7 +11,6 @@ import {
   Button,
   Card,
   Empty,
-  Image,
   message,
   Progress,
   Space,
@@ -91,7 +90,7 @@ const selectedCandidateRank = computed(() => {
   const index = candidates.value.findIndex(
     (item) => item.item_id === candidate.item_id,
   );
-  return index >= 0 ? index + 1 : 0;
+  return index !== -1 ? index + 1 : 0;
 });
 const selectedMatchImageUrl = computed(() => {
   const candidate = selectedComparisonCandidate.value;
@@ -296,18 +295,15 @@ async function runSync(incremental: boolean, silent = false) {
       syncStatus.value = started.message;
     }
 
-    const completed = await waitForSyncJob(
-      started.job_id,
-      incremental,
-      silent,
-    );
+    const completed = await waitForSyncJob(started.job_id, incremental, silent);
     if (completed.status !== 'success') {
       throw new Error(completed.error || completed.message || '同步失败');
     }
     const data = completed.result || {};
     const changed = data.orders_changed ?? data.orders_synced ?? 0;
     if (!silent || changed > 0) {
-      syncStatus.value = completed.message || formatSyncResult(incremental, data);
+      syncStatus.value =
+        completed.message || formatSyncResult(incremental, data);
     }
     if (!silent) {
       message.success(incremental ? '增量同步完成' : '全量重建完成');
@@ -337,7 +333,9 @@ function isCameraSupported() {
 
 function describeCameraError(error: unknown) {
   if (!(error instanceof DOMException)) {
-    return error instanceof Error ? error.message : String(error || '摄像头启动失败');
+    return error instanceof Error
+      ? error.message
+      : String(error || '摄像头启动失败');
   }
   if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
     return '摄像头权限被拒绝。请使用 HTTPS 打开工作站，或在 Chrome 中放行当前 HTTP 地址后允许摄像头。';
@@ -358,10 +356,14 @@ async function loadCameraDevices(preferredDeviceId = '') {
   if (!navigator.mediaDevices?.enumerateDevices) return;
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    cameraDevices.value = devices.filter((device) => device.kind === 'videoinput');
+    cameraDevices.value = devices.filter(
+      (device) => device.kind === 'videoinput',
+    );
     if (
       preferredDeviceId &&
-      cameraDevices.value.some((device) => device.deviceId === preferredDeviceId)
+      cameraDevices.value.some(
+        (device) => device.deviceId === preferredDeviceId,
+      )
     ) {
       selectedCameraDeviceId.value = preferredDeviceId;
     } else if (!selectedCameraDeviceId.value && cameraDevices.value[0]) {
@@ -643,7 +645,8 @@ function formatBytes(size?: number) {
 
 function decisionMeta(decision?: string) {
   if (decision === 'auto_match') return { color: 'success', text: '自动匹配' };
-  if (decision === 'manual_review') return { color: 'warning', text: '人工复核' };
+  if (decision === 'manual_review')
+    return { color: 'warning', text: '人工复核' };
   if (decision === 'no_match') return { color: 'error', text: '无可靠候选' };
   return { color: 'default', text: decision || '待识别' };
 }
@@ -711,14 +714,32 @@ onBeforeUnmount(() => {
         <div class="min-w-0">
           <h2>图案识别工作站</h2>
           <div class="header-meta">
-            <Tag :color="serviceStatus === 'ready' ? 'success' : serviceStatus === 'loading' ? 'processing' : 'error'">
-              {{ serviceStatus === 'ready' ? '识别服务在线' : serviceStatus === 'loading' ? '连接中' : '识别服务异常' }}
+            <Tag
+              :color="
+                serviceStatus === 'ready'
+                  ? 'success'
+                  : serviceStatus === 'loading'
+                    ? 'processing'
+                    : 'error'
+              "
+            >
+              {{
+                serviceStatus === 'ready'
+                  ? '识别服务在线'
+                  : serviceStatus === 'loading'
+                    ? '连接中'
+                    : '识别服务异常'
+              }}
             </Tag>
             <span>{{ serviceMessage }}</span>
           </div>
         </div>
         <Space wrap>
-          <Switch v-model:checked="autoSync" checked-children="自动同步" un-checked-children="手动同步" />
+          <Switch
+            v-model:checked="autoSync"
+            checked-children="自动同步"
+            un-checked-children="手动同步"
+          />
           <Button :loading="incrementalSyncLoading" @click="runSync(true)">
             <template #icon>
               <IconifyIcon icon="lucide:refresh-cw" />
@@ -748,16 +769,31 @@ onBeforeUnmount(() => {
             <div class="card-title">
               <IconifyIcon icon="lucide:camera" />
               <span>当前摄像头画面</span>
-              <Tag :color="capturePreviewUrl ? uploadStageMeta.color : cameraReady ? 'success' : 'default'">
-                {{ capturePreviewUrl ? uploadStageMeta.text : cameraReady ? '实时' : '待开启' }}
+              <Tag
+                :color="
+                  capturePreviewUrl
+                    ? uploadStageMeta.color
+                    : cameraReady
+                      ? 'success'
+                      : 'default'
+                "
+              >
+                {{
+                  capturePreviewUrl
+                    ? uploadStageMeta.text
+                    : cameraReady
+                      ? '实时'
+                      : '待开启'
+                }}
               </Tag>
             </div>
           </template>
 
           <div class="compare-image-frame capture-frame">
-            <Image
+            <img
               v-if="capturePreviewUrl"
-              class="compare-main-image"
+              alt="当前实拍图"
+              class="compare-main-img"
               :src="capturePreviewUrl"
             />
             <video
@@ -768,7 +804,10 @@ onBeforeUnmount(() => {
               muted
               playsinline
             ></video>
-            <div v-if="!capturePreviewUrl && !cameraReady" class="camera-placeholder">
+            <div
+              v-if="!capturePreviewUrl && !cameraReady"
+              class="camera-placeholder"
+            >
               <IconifyIcon icon="lucide:video" />
               <span>{{ cameraStatusText }}</span>
             </div>
@@ -780,7 +819,9 @@ onBeforeUnmount(() => {
               <span>摄像头</span>
               <select
                 v-model="selectedCameraDeviceId"
-                :disabled="cameraStarting || matching || cameraDevices.length === 0"
+                :disabled="
+                  cameraStarting || matching || cameraDevices.length === 0
+                "
                 @change="handleCameraDeviceChange"
               >
                 <option value="">默认摄像头</option>
@@ -840,7 +881,9 @@ onBeforeUnmount(() => {
             <p class="upload-icon">
               <IconifyIcon icon="lucide:image-plus" />
             </p>
-            <p class="upload-title">{{ captureFile?.name || '选择或拖入实拍图' }}</p>
+            <p class="upload-title">
+              {{ captureFile?.name || '选择或拖入实拍图' }}
+            </p>
             <p class="upload-subtitle">
               上传完成后会自动进入图案识别，请等待结果返回。
             </p>
@@ -923,15 +966,21 @@ onBeforeUnmount(() => {
             <div class="summary-panel">
               <div>
                 <span>最佳订单</span>
-                <strong>{{ selectedComparisonCandidate.order_no || '-' }}</strong>
+                <strong>{{
+                  selectedComparisonCandidate.order_no || '-'
+                }}</strong>
               </div>
               <div>
                 <span>图案明细</span>
-                <strong>{{ selectedComparisonCandidate.item_no || '-' }}</strong>
+                <strong>{{
+                  selectedComparisonCandidate.item_no || '-'
+                }}</strong>
               </div>
               <div>
                 <span>排名</span>
-                <strong>{{ selectedCandidateRank || '-' }}/{{ candidates.length || '-' }}</strong>
+                <strong>{{ selectedCandidateRank || '-' }}/{{
+                    candidates.length || '-'
+                  }}</strong>
               </div>
               <div>
                 <span>图片质量</span>
@@ -940,18 +989,30 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="compare-image-frame match-frame">
-              <Image
-                class="compare-main-image"
-                :src="selectedMatchImageUrl"
-                :fallback="PATTERN_IMAGE_PLACEHOLDER"
+              <img
+                alt="最高相似图"
+                class="compare-main-img match-main-img"
+                :src="selectedMatchImageUrl || PATTERN_IMAGE_PLACEHOLDER"
               />
             </div>
 
             <div class="score-line score-line-large">
-              DINO {{ formatOptionalScore(selectedComparisonCandidate.embedding_score) }} /
-              分区 {{ formatOptionalScore(selectedComparisonCandidate.patch_score) }} /
-              局部 {{ formatOptionalScore(selectedComparisonCandidate.feature_score) }} /
-              细节 {{ formatOptionalScore(selectedComparisonCandidate.detail_score) }}
+              DINO
+              {{
+                formatOptionalScore(selectedComparisonCandidate.embedding_score)
+              }}
+              / 分区
+              {{
+                formatOptionalScore(selectedComparisonCandidate.patch_score)
+              }}
+              / 局部
+              {{
+                formatOptionalScore(selectedComparisonCandidate.feature_score)
+              }}
+              / 细节
+              {{
+                formatOptionalScore(selectedComparisonCandidate.detail_score)
+              }}
             </div>
             <Progress
               :percent="progressPercent(selectedComparisonCandidate)"
@@ -963,7 +1024,8 @@ onBeforeUnmount(() => {
               <div class="selected-info">
                 <span>当前选择</span>
                 <strong>
-                  {{ selectedComparisonCandidate.order_no }} / {{ selectedComparisonCandidate.item_no }}
+                  {{ selectedComparisonCandidate.order_no }} /
+                  {{ selectedComparisonCandidate.item_no }}
                 </strong>
               </div>
               <Space wrap>
@@ -1018,7 +1080,10 @@ onBeforeUnmount(() => {
             :class="{ selected: candidate.item_id === selectedItemId }"
           >
             <div class="candidate-rank">{{ index + 1 }}</div>
-            <img :src="candidateImageUrl(candidate)" :alt="candidate.order_no" />
+            <img
+              :src="candidateImageUrl(candidate)"
+              :alt="candidate.order_no"
+            />
             <div class="candidate-body">
               <div class="candidate-title">
                 <strong>{{ candidate.order_no }}</strong>
@@ -1035,11 +1100,15 @@ onBeforeUnmount(() => {
               <Progress
                 :percent="progressPercent(candidate)"
                 size="small"
-                :format="() => `${candidate.recognized_count}/${candidate.quantity}`"
+                :format="
+                  () => `${candidate.recognized_count}/${candidate.quantity}`
+                "
               />
             </div>
             <Button
-              :type="candidate.item_id === selectedItemId ? 'primary' : 'default'"
+              :type="
+                candidate.item_id === selectedItemId ? 'primary' : 'default'
+              "
               @click="selectCandidate(candidate)"
             >
               {{ candidate.item_id === selectedItemId ? '已选中' : '选择' }}
@@ -1097,9 +1166,9 @@ onBeforeUnmount(() => {
 
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   gap: 16px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .compare-card,
@@ -1131,27 +1200,47 @@ onBeforeUnmount(() => {
 }
 
 .capture-frame {
+  height: clamp(180px, 16vw, 260px);
+  min-height: 180px;
   background: #0f172a;
 }
 
+.best-match-card {
+  min-width: 0;
+}
+
 .match-frame {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 12px;
+  margin: 0 auto;
+  overflow: visible;
   background: #f8fafc;
 }
 
-.compare-main-image,
-.compare-main-image :deep(.ant-image-img),
 .camera-video {
   width: 100%;
   height: 100%;
 }
 
-.compare-main-image {
-  display: block;
-}
-
-.compare-main-image :deep(.ant-image-img),
 .camera-video {
   object-fit: contain;
+}
+
+.compare-main-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.match-main-img {
+  width: auto !important;
+  max-width: 100%;
+  height: auto !important;
+  max-height: min(72vh, 680px);
+  object-position: center center;
 }
 
 .camera-placeholder {
@@ -1171,15 +1260,14 @@ onBeforeUnmount(() => {
 }
 
 .camera-controls {
-  display: flex;
+  display: grid;
   gap: 10px;
-  align-items: end;
 }
 
 .camera-select-field {
   display: grid;
-  gap: 6px;
   flex: 1;
+  gap: 6px;
   min-width: 220px;
   font-size: 12px;
   color: #64748b;
@@ -1199,7 +1287,6 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  width: min(360px, 46%);
 }
 
 .camera-actions :deep(.ant-btn) {
@@ -1217,12 +1304,12 @@ onBeforeUnmount(() => {
 }
 
 .manual-upload-dragger :deep(.ant-upload-drag) {
-  padding: 12px;
+  padding: 10px;
 }
 
 .upload-icon {
-  margin-bottom: 8px;
-  font-size: 34px;
+  margin-bottom: 6px;
+  font-size: 26px;
   color: #2563eb;
 }
 
@@ -1233,7 +1320,7 @@ onBeforeUnmount(() => {
 }
 
 .upload-subtitle {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   font-size: 12px;
   color: #64748b;
 }
@@ -1420,8 +1507,7 @@ onBeforeUnmount(() => {
   }
 
   .camera-controls {
-    flex-direction: column;
-    align-items: stretch;
+    display: grid;
   }
 
   .camera-actions {
