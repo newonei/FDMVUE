@@ -1,6 +1,11 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
+import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+import type { FdmPerformanceSettingApi } from '#/api/fdmperformance/setting';
+import type { SystemDeptApi } from '#/api/system/dept';
+import type { SystemUserApi } from '#/api/system/user';
+
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
@@ -11,6 +16,7 @@ import {
   Divider,
   Form,
   Input,
+  message,
   Modal,
   Popconfirm,
   Radio,
@@ -18,9 +24,8 @@ import {
   Space,
   Switch,
   Table,
-  Tag,
   Tabs,
-  message,
+  Tag,
 } from 'ant-design-vue';
 
 import {
@@ -28,15 +33,13 @@ import {
   getFdmPerformanceAssessmentChangeLogPage,
   stopFdmPerformanceAssessmentInstances,
   transferFdmPerformanceAssessmentTasks,
-  type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import {
   batchSaveFdmPerformanceSetting,
   getFdmPerformanceSettingList,
-  type FdmPerformanceSettingApi,
 } from '#/api/fdmperformance/setting';
-import { getSimpleDeptList, type SystemDeptApi } from '#/api/system/dept';
-import { getSimpleUserList, type SystemUserApi } from '#/api/system/user';
+import { getSimpleDeptList } from '#/api/system/dept';
+import { getSimpleUserList } from '#/api/system/user';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
@@ -212,20 +215,46 @@ const defaultSettings = (): SettingsState => ({
     dingCallbackEnabled: false,
   },
   menu: {
-    items: ['首页', '目标地图', '行动计划', '考评表', '发起考核', '已发起考核', '指标库', '数据中心', '我的绩效', '系统设置'],
+    items: [
+      '首页',
+      '目标地图',
+      '行动计划',
+      '考评表',
+      '发起考核',
+      '已发起考核',
+      '指标库',
+      '数据中心',
+      '我的绩效',
+      '系统设置',
+    ],
   },
   userGroups: {
     groups: [],
   },
 });
 
-const settingMeta: Record<keyof SettingsState, { name: string; sort: number; remark: string }> = {
+const settingMeta: Record<
+  keyof SettingsState,
+  { name: string; remark: string; sort: number; }
+> = {
   userGroups: { name: '用户组', sort: 5, remark: '智能绩效可使用人员用户组' },
-  relation: { name: '关系识别', sort: 10, remark: '主管、部门、角色关系识别规则' },
-  performance: { name: '绩效考核', sort: 20, remark: '绩效考核默认规则、字段和等级展示' },
+  relation: {
+    name: '关系识别',
+    sort: 10,
+    remark: '主管、部门、角色关系识别规则',
+  },
+  performance: {
+    name: '绩效考核',
+    sort: 20,
+    remark: '绩效考核默认规则、字段和等级展示',
+  },
   actions: { name: '行动计划', sort: 30, remark: '行动计划任务规则' },
   reminders: { name: '提醒设置', sort: 40, remark: '绩效提醒规则' },
-  integration: { name: '数据连接', sort: 50, remark: '钉钉回调与考勤同步配置' },
+  integration: {
+    name: '数据连接',
+    sort: 50,
+    remark: '复用系统钉钉接入，管理绩效侧待办与数据开关',
+  },
   menu: { name: '菜单排序', sort: 60, remark: '智能绩效菜单排序' },
 };
 
@@ -246,7 +275,6 @@ const editingFieldIndex = ref<number>();
 const excludedUserId = ref<number>();
 const logDetailOpen = ref(false);
 const selectedLog = ref<FdmPerformanceAssessmentApi.ChangeLog>();
-const callbackInputRef = ref();
 const stopEmployeeId = ref<number>();
 const stopBatchId = ref<number>();
 const transferFrom = ref<number>();
@@ -300,7 +328,10 @@ const settingGroups: Array<{
 ];
 
 const pageTitle = computed(
-  () => settingGroups.flatMap((group) => group.items).find((item) => item.key === activeKey.value)?.label ?? '系统设置',
+  () =>
+    settingGroups
+      .flatMap((group) => group.items)
+      .find((item) => item.key === activeKey.value)?.label ?? '系统设置',
 );
 
 const deptNameMap = computed(() => {
@@ -320,7 +351,9 @@ const deptNameMap = computed(() => {
 });
 const formalEmployeeRows = computed<EmployeeRow[]>(() =>
   apiUsers.value.map((item, index) => ({
-    dept: item.deptId ? (deptNameMap.value.get(item.deptId) ?? `部门 ${item.deptId}`) : '未分配部门',
+    dept: item.deptId
+      ? (deptNameMap.value.get(item.deptId) ?? `部门 ${item.deptId}`)
+      : '未分配部门',
     id: item.id ?? index + 1,
     name: item.nickname || item.username,
     post: item.postIds?.length ? `岗位 ${item.postIds.join(',')}` : '普通员工',
@@ -329,20 +362,34 @@ const formalEmployeeRows = computed<EmployeeRow[]>(() =>
 );
 const employeeRows = computed(() => {
   const text = keyword.value.trim();
-  return formalEmployeeRows.value
-    .filter((item) => !text || [item.name, item.dept, item.post, item.role].some((value) => value.includes(text)));
+  return formalEmployeeRows.value.filter(
+    (item) =>
+      !text ||
+      [item.name, item.dept, item.post, item.role].some((value) =>
+        value.includes(text),
+      ),
+  );
 });
 const employeeOptions = computed(() =>
-  formalEmployeeRows.value.map((item) => ({ label: `${item.name} · ${item.dept}`, value: item.id })),
+  formalEmployeeRows.value.map((item) => ({
+    label: `${item.name} · ${item.dept}`,
+    value: item.id,
+  })),
 );
 const employeeNameOptions = computed(() =>
-  formalEmployeeRows.value.map((item) => ({ label: `${item.name} · ${item.dept}`, value: item.id })),
+  formalEmployeeRows.value.map((item) => ({
+    label: `${item.name} · ${item.dept}`,
+    value: item.id,
+  })),
 );
-const employeeById = computed(() => new Map(formalEmployeeRows.value.map((item) => [item.id, item])));
-const excludedEmployeeRows = computed(() =>
-  settings.performance.excludedUserIds
-    .map((id) => employeeById.value.get(id))
-    .filter(Boolean) as EmployeeRow[],
+const employeeById = computed(
+  () => new Map(formalEmployeeRows.value.map((item) => [item.id, item])),
+);
+const excludedEmployeeRows = computed(
+  () =>
+    settings.performance.excludedUserIds
+      .map((id) => employeeById.value.get(id))
+      .filter((item): item is EmployeeRow => Boolean(item)),
 );
 const excludedUserOptions = computed(() => {
   const excluded = new Set(settings.performance.excludedUserIds);
@@ -354,7 +401,10 @@ const stopBatchOptions = computed(() => {
   if (!stopEmployeeId.value) return [];
   return apiBatches.value
     .filter((batch) => ![-1, 50, 100].includes(batch.status ?? 0))
-    .map((batch) => ({ label: batch.name || `考核 ${batch.id}`, value: batch.id }));
+    .map((batch) => ({
+      label: batch.name || `考核 ${batch.id}`,
+      value: batch.id,
+    }));
 });
 
 const employeeColumns: TableColumnsType = [
@@ -377,10 +427,16 @@ const userGroupRows = computed<UserGroupRow[]>(() => {
   const text = userGroupKeyword.value.trim();
   const rows: UserGroupRow[] = [
     buildUserGroupRow(allUsersGroup.value, undefined, true),
-    ...settings.userGroups.groups.map((group, index) => buildUserGroupRow(group, index, false)),
+    ...settings.userGroups.groups.map((group, index) =>
+      buildUserGroupRow(group, index, false),
+    ),
   ];
   return rows.filter(
-    (item) => !text || [item.name, item.members, item.desc, item.typeText].some((value) => value.includes(text)),
+    (item) =>
+      !text ||
+      [item.name, item.members, item.desc, item.typeText].some((value) =>
+        value.includes(text),
+      ),
   );
 });
 const userGroupColumns: TableColumnsType = [
@@ -390,7 +446,9 @@ const userGroupColumns: TableColumnsType = [
   { dataIndex: 'desc', title: '描述' },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
 ];
-const previewUserGroupMemberRows = computed(() => resolveUserGroupMemberRows(previewUserGroup.value));
+const previewUserGroupMemberRows = computed(() =>
+  resolveUserGroupMemberRows(previewUserGroup.value),
+);
 
 const gradeRows = [
   { name: '不及格', range: '0 ≤ 分数 ≤ 80，系数 0' },
@@ -405,7 +463,13 @@ const gradeColumns: TableColumnsType = [
 ];
 
 const fieldRows = computed(() => settings.performance.fieldSettings);
-const fieldTypeOptions = ['文本类型', '数字类型', '长文本类型', '日期类型', '附件类型'].map((value) => ({
+const fieldTypeOptions = [
+  '文本类型',
+  '数字类型',
+  '长文本类型',
+  '日期类型',
+  '附件类型',
+].map((value) => ({
   label: value,
   value,
 }));
@@ -433,12 +497,17 @@ const operatorNameMap = computed(() => {
 });
 const logs = computed(() =>
   apiLogs.value.map((item) => ({
-    actor: item.operatorUserId ? (operatorNameMap.value.get(item.operatorUserId) ?? `${item.operatorUserId}`) : '-',
+    actor: item.operatorUserId
+      ? (operatorNameMap.value.get(item.operatorUserId) ??
+        `${item.operatorUserId}`)
+      : '-',
     content: formatLogContent(item),
     id: item.id,
     module: '绩效考核',
     time: item.createTime || '-',
-    type: item.operationType ? (operationTypeText[item.operationType] ?? item.operationType) : '-',
+    type: item.operationType
+      ? (operationTypeText[item.operationType] ?? item.operationType)
+      : '-',
   })),
 );
 const logColumns: TableColumnsType = [
@@ -457,22 +526,32 @@ const statusTags = computed(() =>
   })),
 );
 
-function normalizeUserGroup(group?: Partial<UserGroupSetting>): UserGroupSetting {
+function normalizeUserGroup(
+  group?: Partial<UserGroupSetting>,
+): UserGroupSetting {
   return {
     desc: group?.desc?.trim() ?? '',
-    memberIds: Array.isArray(group?.memberIds) ? group.memberIds.filter((id) => Number.isFinite(Number(id))) : [],
+    memberIds: Array.isArray(group?.memberIds)
+      ? group.memberIds.filter((id) => Number.isFinite(Number(id)))
+      : [],
     name: group?.name?.trim() ?? '',
     type: group?.type === 'dynamic' ? 'dynamic' : 'static',
   };
 }
 
-function buildUserGroupRow(group: UserGroupSetting, index?: number, system = false): UserGroupRow {
+function buildUserGroupRow(
+  group: UserGroupSetting,
+  index?: number,
+  system = false,
+): UserGroupRow {
   const normalized = normalizeUserGroup(group);
   return {
     ...normalized,
     group: normalized,
     index,
-    members: system ? '所有可使用人员' : resolveUserGroupMemberNames(normalized),
+    members: system
+      ? '所有可使用人员'
+      : resolveUserGroupMemberNames(normalized),
     system,
     typeText: normalized.type === 'dynamic' ? '动态用户组' : '静态用户组',
   };
@@ -480,7 +559,9 @@ function buildUserGroupRow(group: UserGroupSetting, index?: number, system = fal
 
 function resolveUserGroupMemberRows(group?: UserGroupSetting): EmployeeRow[] {
   const ids = group?.memberIds ?? [];
-  return ids.map((id) => employeeById.value.get(id)).filter(Boolean) as EmployeeRow[];
+  return ids
+    .map((id) => employeeById.value.get(id))
+    .filter((item): item is EmployeeRow => Boolean(item));
 }
 
 function resolveUserGroupMemberNames(group?: UserGroupSetting) {
@@ -489,7 +570,9 @@ function resolveUserGroupMemberNames(group?: UserGroupSetting) {
     return '暂无成员';
   }
   const names = rows.map((item) => item.name);
-  return names.length > 4 ? `${names.slice(0, 4).join('、')} 等${names.length}人` : names.join('、');
+  return names.length > 4
+    ? `${names.slice(0, 4).join('、')} 等${names.length}人`
+    : names.join('、');
 }
 
 function resetUserGroupEditor(group?: UserGroupSetting) {
@@ -502,7 +585,9 @@ function resetUserGroupEditor(group?: UserGroupSetting) {
 
 function openUserGroupModal(index?: number) {
   editingUserGroupIndex.value = index;
-  resetUserGroupEditor(typeof index === 'number' ? settings.userGroups.groups[index] : undefined);
+  resetUserGroupEditor(
+    typeof index === 'number' ? settings.userGroups.groups[index] : undefined,
+  );
   userGroupModalOpen.value = true;
 }
 
@@ -513,7 +598,8 @@ function saveUserGroup() {
     return;
   }
   const duplicated = settings.userGroups.groups.some(
-    (group, index) => group.name === payload.name && index !== editingUserGroupIndex.value,
+    (group, index) =>
+      group.name === payload.name && index !== editingUserGroupIndex.value,
   );
   if (duplicated || payload.name === allUsersGroup.value.name) {
     message.warning('用户组名称不能重复');
@@ -571,11 +657,19 @@ function resolveImportedMemberIds(value = '') {
   const names = value
     .split(/[|、，;；]/)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter((item) => Boolean(item));
   const employees = formalEmployeeRows.value;
   return names
-    .map((name) => employees.find((item) => item.name === name || item.name.includes(name) || name.includes(item.name))?.id)
-    .filter(Boolean) as number[];
+    .map(
+      (name) =>
+        employees.find(
+          (item) =>
+            item.name === name ||
+            item.name.includes(name) ||
+            name.includes(item.name),
+        )?.id,
+    )
+    .filter((id): id is number => Boolean(id));
 }
 
 function importUserGroups(event: Event) {
@@ -585,11 +679,11 @@ function importUserGroups(event: Event) {
     return;
   }
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.addEventListener('load', () => {
     const lines = String(reader.result || '')
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter(Boolean);
+      .filter((line) => Boolean(line));
     const imported = lines
       .filter((line, index) => !(index === 0 && line.includes('用户组')))
       .map((line) => {
@@ -607,7 +701,10 @@ function importUserGroups(event: Event) {
       input.value = '';
       return;
     }
-    const exists = new Set([allUsersGroup.value.name, ...settings.userGroups.groups.map((group) => group.name)]);
+    const exists = new Set([
+      allUsersGroup.value.name,
+      ...settings.userGroups.groups.map((group) => group.name),
+    ]);
     imported.forEach((group) => {
       if (!exists.has(group.name)) {
         settings.userGroups.groups.push(group);
@@ -616,12 +713,12 @@ function importUserGroups(event: Event) {
     });
     message.success(`已导入 ${imported.length} 个用户组，保存设置后生效`);
     input.value = '';
-  };
-  reader.onerror = () => {
+  });
+  reader.addEventListener('error', () => {
     message.error('用户组文件读取失败');
     input.value = '';
-  };
-  reader.readAsText(file, 'utf-8');
+  });
+  reader.readAsText(file, 'utf8');
 }
 
 function toCsvCell(value: unknown) {
@@ -630,8 +727,12 @@ function toCsvCell(value: unknown) {
 }
 
 function downloadCsv(filename: string, rows: unknown[][]) {
-  const content = rows.map((row) => row.map(toCsvCell).join(',')).join('\r\n');
-  const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' });
+  const content = rows
+    .map((row) => row.map((cell) => toCsvCell(cell)).join(','))
+    .join('\r\n');
+  const blob = new Blob([`\uFEFF${content}`], {
+    type: 'text/csv;charset=utf-8;',
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -643,7 +744,12 @@ function downloadCsv(filename: string, rows: unknown[][]) {
 function downloadAvailableUsers() {
   downloadCsv('智能绩效可使用人员.csv', [
     ['姓名', '部门', '角色', '岗位'],
-    ...formalEmployeeRows.value.map((item) => [item.name, item.dept, item.role, item.post]),
+    ...formalEmployeeRows.value.map((item) => [
+      item.name,
+      item.dept,
+      item.role,
+      item.post,
+    ]),
   ]);
 }
 
@@ -659,7 +765,11 @@ function resetFieldEditor(field?: FieldSetting) {
 
 function openFieldModal(index?: number) {
   editingFieldIndex.value = index;
-  resetFieldEditor(typeof index === 'number' ? settings.performance.fieldSettings[index] : undefined);
+  resetFieldEditor(
+    typeof index === 'number'
+      ? settings.performance.fieldSettings[index]
+      : undefined,
+  );
   fieldModalOpen.value = true;
 }
 
@@ -670,7 +780,8 @@ function saveField() {
     return;
   }
   const duplicated = settings.performance.fieldSettings.some(
-    (item, index) => item.field === fieldName && index !== editingFieldIndex.value,
+    (item, index) =>
+      item.field === fieldName && index !== editingFieldIndex.value,
   );
   if (duplicated) {
     message.warning('字段名称不能重复');
@@ -682,7 +793,11 @@ function saveField() {
     type: fieldEditor.type,
   };
   if (typeof editingFieldIndex.value === 'number') {
-    settings.performance.fieldSettings.splice(editingFieldIndex.value, 1, payload);
+    settings.performance.fieldSettings.splice(
+      editingFieldIndex.value,
+      1,
+      payload,
+    );
   } else {
     settings.performance.fieldSettings.push(payload);
   }
@@ -715,16 +830,8 @@ function addExcludedUser() {
 }
 
 function removeExcludedUser(id: number) {
-  settings.performance.excludedUserIds = settings.performance.excludedUserIds.filter((item) => item !== id);
-}
-
-async function copyText(value: string, label: string) {
-  if (!value) {
-    message.warning(`${label}为空`);
-    return;
-  }
-  await navigator.clipboard.writeText(value);
-  message.success(`${label}已复制`);
+  settings.performance.excludedUserIds =
+    settings.performance.excludedUserIds.filter((item) => item !== id);
 }
 
 function moveMenuItem(index: number, offset: -1 | 1) {
@@ -767,7 +874,10 @@ function formatLogContent(item: FdmPerformanceAssessmentApi.ChangeLog) {
 
 function parseSettingValue(row: FdmPerformanceSettingApi.Setting) {
   const key = row.settingKey as keyof SettingsState;
-  if (!Object.prototype.hasOwnProperty.call(settings, key) || !row.settingValue) {
+  if (
+    !Object.prototype.hasOwnProperty.call(settings, key) ||
+    !row.settingValue
+  ) {
     return;
   }
   try {
@@ -777,14 +887,24 @@ function parseSettingValue(row: FdmPerformanceSettingApi.Setting) {
   }
 }
 
+function sanitizeIntegrationSettings() {
+  settings.integration.appId = '';
+  settings.integration.appSecret = '';
+  settings.integration.callbackUrl = '';
+  settings.integration.attendanceSyncEnabled = false;
+}
+
 function toSaveReqList(): FdmPerformanceSettingApi.SettingSaveReq[] {
-  return (Object.keys(settingMeta) as Array<keyof SettingsState>).map((key) => ({
-    settingKey: key,
-    settingName: settingMeta[key].name,
-    settingValue: JSON.stringify(settings[key]),
-    sort: settingMeta[key].sort,
-    remark: settingMeta[key].remark,
-  }));
+  sanitizeIntegrationSettings();
+  return (Object.keys(settingMeta) as Array<keyof SettingsState>).map(
+    (key) => ({
+      settingKey: key,
+      settingName: settingMeta[key].name,
+      settingValue: JSON.stringify(settings[key]),
+      sort: settingMeta[key].sort,
+      remark: settingMeta[key].remark,
+    }),
+  );
 }
 
 async function loadSettings() {
@@ -880,11 +1000,20 @@ onMounted(loadSettings);
           <div class="toolbar-row">
             <Input v-model:value="keyword" allow-clear placeholder="搜索人员" />
             <Space>
-              <Button type="link" @click="downloadAvailableUsers">下载名单</Button>
-              <Button type="primary" @click="openSystemUserManagement">人员管理</Button>
+              <Button type="link" @click="downloadAvailableUsers">
+下载名单
+</Button>
+              <Button type="primary" @click="openSystemUserManagement">
+人员管理
+</Button>
             </Space>
           </div>
-          <Table :columns="employeeColumns" :data-source="employeeRows" :pagination="{ pageSize: 10 }" row-key="id">
+          <Table
+            :columns="employeeColumns"
+            :data-source="employeeRows"
+            :pagination="{ pageSize: 10 }"
+            row-key="id"
+          >
             <template #bodyCell="{ column, record }">
               <template v-if="column.dataIndex === 'name'">
                 <Space>
@@ -901,7 +1030,11 @@ onMounted(loadSettings);
 
         <template v-else-if="activeKey === 'userGroups'">
           <div class="toolbar-row">
-            <Input v-model:value="userGroupKeyword" allow-clear placeholder="搜索用户组" />
+            <Input
+              v-model:value="userGroupKeyword"
+              allow-clear
+              placeholder="搜索用户组"
+            />
             <Space>
               <input
                 ref="userGroupImportRef"
@@ -914,14 +1047,30 @@ onMounted(loadSettings);
               <Button type="primary" @click="openUserGroupModal()">添加</Button>
             </Space>
           </div>
-          <Table :columns="userGroupColumns" :data-source="userGroupRows" :pagination="false" row-key="name">
+          <Table
+            :columns="userGroupColumns"
+            :data-source="userGroupRows"
+            :pagination="false"
+            row-key="name"
+          >
             <template #bodyCell="{ column, record }">
               <template v-if="column.dataIndex === 'action'">
                 <Space>
-                  <Button :disabled="record.system" size="small" type="link" @click="openUserGroupModal(record.index)">
+                  <Button
+                    :disabled="record.system"
+                    size="small"
+                    type="link"
+                    @click="openUserGroupModal(record.index)"
+                  >
                     编辑
                   </Button>
-                  <Button size="small" type="link" @click="openUserGroupPreview(record.group)">预览成员</Button>
+                  <Button
+                    size="small"
+                    type="link"
+                    @click="openUserGroupPreview(record.group)"
+                    >
+预览成员
+</Button>
                   <Popconfirm
                     v-if="!record.system"
                     title="确定移除该用户组？"
@@ -929,7 +1078,9 @@ onMounted(loadSettings);
                   >
                     <Button danger size="small" type="link">移除</Button>
                   </Popconfirm>
-                  <Button v-else danger disabled size="small" type="link">移除</Button>
+                  <Button v-else danger disabled size="small" type="link">
+移除
+</Button>
                 </Space>
               </template>
             </template>
@@ -942,8 +1093,12 @@ onMounted(loadSettings);
             <Checkbox v-model:checked="settings.relation.useDirectSupervisor">
               使用钉钉通讯录员工信息的「直属主管」
             </Checkbox>
-            <Checkbox v-model:checked="settings.relation.useMainDeptSupervisor">使用主部门的主管</Checkbox>
-            <Checkbox v-model:checked="settings.relation.useDeptSupervisor">使用钉钉通讯录部门的「部门主管」</Checkbox>
+            <Checkbox v-model:checked="settings.relation.useMainDeptSupervisor">
+使用主部门的主管
+</Checkbox>
+            <Checkbox v-model:checked="settings.relation.useDeptSupervisor">
+使用钉钉通讯录部门的「部门主管」
+</Checkbox>
           </section>
           <section class="form-section">
             <h3>角色查询设置</h3>
@@ -963,8 +1118,12 @@ onMounted(loadSettings);
           </section>
           <section class="form-section">
             <h3>入转调离</h3>
-            <Checkbox v-model:checked="settings.relation.onboardReminder">入职提醒</Checkbox>
-            <Checkbox v-model:checked="settings.relation.resignedReminder">离职提醒</Checkbox>
+            <Checkbox v-model:checked="settings.relation.onboardReminder">
+入职提醒
+</Checkbox>
+            <Checkbox v-model:checked="settings.relation.resignedReminder">
+离职提醒
+</Checkbox>
           </section>
         </template>
 
@@ -977,7 +1136,9 @@ onMounted(loadSettings);
                   <Space direction="vertical">
                     <Radio value="mixed">合并计算量化和行为价值观</Radio>
                     <Radio value="split">分开计算量化和行为价值观</Radio>
-                    <Radio value="multiply">分开计算量化和行为价值观，结果相乘</Radio>
+                    <Radio value="multiply">
+分开计算量化和行为价值观，结果相乘
+</Radio>
                   </Space>
                 </Radio.Group>
               </section>
@@ -987,31 +1148,76 @@ onMounted(loadSettings);
               </section>
             </Tabs.TabPane>
             <Tabs.TabPane key="grade" tab="绩效结果和等级">
-              <Checkbox v-model:checked="settings.performance.defaultGradeEnabled">开启默认绩效等级</Checkbox>
-              <Table :columns="gradeColumns" :data-source="gradeRows" :pagination="false" row-key="name" />
+              <Checkbox
+                v-model:checked="settings.performance.defaultGradeEnabled"
+                >
+开启默认绩效等级
+</Checkbox>
+              <Table
+                :columns="gradeColumns"
+                :data-source="gradeRows"
+                :pagination="false"
+                row-key="name"
+              />
               <Divider />
               <div class="check-list">
-                <Checkbox v-model:checked="settings.performance.showTotalScore">考核总分</Checkbox>
-                <Checkbox v-model:checked="settings.performance.showGrade">绩效等级</Checkbox>
-                <Checkbox v-model:checked="settings.performance.showCoefficient">绩效系数</Checkbox>
-                <Checkbox v-model:checked="settings.performance.syncResultToProfile">同步考核结果到员工档案</Checkbox>
+                <Checkbox v-model:checked="settings.performance.showTotalScore">
+考核总分
+</Checkbox>
+                <Checkbox v-model:checked="settings.performance.showGrade">
+绩效等级
+</Checkbox>
+                <Checkbox v-model:checked="settings.performance.showCoefficient">
+绩效系数
+</Checkbox>
+                <Checkbox
+                  v-model:checked="settings.performance.syncResultToProfile"
+                  >
+同步考核结果到员工档案
+</Checkbox>
               </div>
             </Tabs.TabPane>
             <Tabs.TabPane key="fields" tab="字段设置">
               <div class="toolbar-row">
                 <span class="muted">控制考评表指标字段的默认展示和启停状态。</span>
-                <Button type="primary" @click="openFieldModal()">添加字段</Button>
+                <Button type="primary" @click="openFieldModal()">
+添加字段
+</Button>
               </div>
-              <Table :columns="fieldColumns" :data-source="fieldRows" :pagination="false" row-key="field">
+              <Table
+                :columns="fieldColumns"
+                :data-source="fieldRows"
+                :pagination="false"
+                row-key="field"
+              >
                 <template #bodyCell="{ column, index, record }">
                   <template v-if="column.dataIndex === 'enabled'">
-                    <Tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用中' : '停用' }}</Tag>
+                    <Tag :color="record.enabled ? 'green' : 'default'">
+{{
+                      record.enabled ? '启用中' : '停用'
+                    }}
+</Tag>
                   </template>
                   <template v-else-if="column.dataIndex === 'action'">
                     <Space>
-                      <Button size="small" type="link" @click="openFieldModal(index)">编辑</Button>
-                      <Button size="small" type="link" @click="toggleField(index)">{{ record.enabled ? '停用' : '启用' }}</Button>
-                      <Popconfirm title="确认删除该字段？" @confirm="removeField(index)">
+                      <Button
+                        size="small"
+                        type="link"
+                        @click="openFieldModal(index)"
+                        >
+编辑
+</Button>
+                      <Button
+                        size="small"
+                        type="link"
+                        @click="toggleField(index)"
+                        >
+{{ record.enabled ? '停用' : '启用' }}
+</Button>
+                      <Popconfirm
+                        title="确认删除该字段？"
+                        @confirm="removeField(index)"
+                      >
                         <Button danger size="small" type="link">删除</Button>
                       </Popconfirm>
                     </Space>
@@ -1021,19 +1227,37 @@ onMounted(loadSettings);
             </Tabs.TabPane>
             <Tabs.TabPane key="defaults" tab="默认值设置">
               <div class="check-list">
-                <Checkbox v-model:checked="settings.performance.defaultDimensionWeight">默认开启维度权重参与计算</Checkbox>
-                <Checkbox v-model:checked="settings.performance.defaultResultInput">新增指标时，默认开启结果值录入</Checkbox>
-                <Checkbox v-model:checked="settings.performance.allowCalibrationViewer">
+                <Checkbox
+                  v-model:checked="settings.performance.defaultDimensionWeight"
+                  >
+默认开启维度权重参与计算
+</Checkbox>
+                <Checkbox
+                  v-model:checked="settings.performance.defaultResultInput"
+                  >
+新增指标时，默认开启结果值录入
+</Checkbox>
+                <Checkbox
+                  v-model:checked="settings.performance.allowCalibrationViewer"
+                >
                   设置校准流程时，默认开启允许等级校准人查看详情
                 </Checkbox>
-                <Checkbox v-model:checked="settings.performance.reuseLastSignature">签字默认复用上一次签名</Checkbox>
+                <Checkbox
+                  v-model:checked="settings.performance.reuseLastSignature"
+                  >
+签字默认复用上一次签名
+</Checkbox>
               </div>
             </Tabs.TabPane>
             <Tabs.TabPane key="resigned" tab="离职人员设置">
-              <Checkbox v-model:checked="settings.performance.autoRemoveResigned">
+              <Checkbox
+                v-model:checked="settings.performance.autoRemoveResigned"
+              >
                 离职人员自动从考评表被考核人员中移除
               </Checkbox>
-              <p class="muted">仅对考评表中的被考核人员生效；发起中的考核不自动变更执行人。</p>
+              <p class="muted">
+                仅对考评表中的被考核人员生效；发起中的考核不自动变更执行人。
+              </p>
             </Tabs.TabPane>
             <Tabs.TabPane key="excluded" tab="无需考核人员">
               <div class="toolbar-row">
@@ -1047,46 +1271,94 @@ onMounted(loadSettings);
                 />
                 <Button type="primary" @click="addExcludedUser">添加</Button>
               </div>
-              <Table :columns="excludedColumns" :data-source="excludedEmployeeRows" :pagination="false" row-key="id">
+              <Table
+                :columns="excludedColumns"
+                :data-source="excludedEmployeeRows"
+                :pagination="false"
+                row-key="id"
+              >
                 <template #bodyCell="{ column, record }">
                   <template v-if="column.dataIndex === 'action'">
-                    <Button danger size="small" type="link" @click="removeExcludedUser(record.id)">移除</Button>
+                    <Button
+                      danger
+                      size="small"
+                      type="link"
+                      @click="removeExcludedUser(record.id)"
+                      >
+移除
+</Button>
                   </template>
                 </template>
               </Table>
             </Tabs.TabPane>
             <Tabs.TabPane key="library" tab="指标库设置">
-              <Checkbox v-model:checked="settings.performance.duplicateIndicatorName">指标库重名</Checkbox>
+              <Checkbox
+                v-model:checked="settings.performance.duplicateIndicatorName"
+                >
+指标库重名
+</Checkbox>
             </Tabs.TabPane>
           </Tabs>
         </template>
 
         <template v-else-if="activeKey === 'actions'">
           <div class="check-list">
-            <Checkbox v-model:checked="settings.actions.syncTaskTodo">同步任务到钉钉待办</Checkbox>
-            <Checkbox v-model:checked="settings.actions.taskRequiredOwner">负责人必填</Checkbox>
-            <Checkbox v-model:checked="settings.actions.dueRequired">截止时间必填</Checkbox>
-            <Checkbox v-model:checked="settings.actions.participantEditable">任务参与人可以编辑任务</Checkbox>
-            <Checkbox v-model:checked="settings.actions.stopReminderAfterCycle">周期结束后未完成的任务不再提醒</Checkbox>
-            <Checkbox v-model:checked="settings.actions.subtaskEnabled">启用子任务</Checkbox>
+            <Checkbox v-model:checked="settings.actions.syncTaskTodo">
+同步任务到钉钉待办
+</Checkbox>
+            <Checkbox v-model:checked="settings.actions.taskRequiredOwner">
+负责人必填
+</Checkbox>
+            <Checkbox v-model:checked="settings.actions.dueRequired">
+截止时间必填
+</Checkbox>
+            <Checkbox v-model:checked="settings.actions.participantEditable">
+任务参与人可以编辑任务
+</Checkbox>
+            <Checkbox v-model:checked="settings.actions.stopReminderAfterCycle">
+周期结束后未完成的任务不再提醒
+</Checkbox>
+            <Checkbox v-model:checked="settings.actions.subtaskEnabled">
+启用子任务
+</Checkbox>
           </div>
           <Divider />
           <div class="status-row">
-            <Tag v-for="item in statusTags" :key="item.label" :color="item.color">{{ item.label }}</Tag>
+            <Tag
+              v-for="item in statusTags"
+              :key="item.label"
+              :color="item.color"
+              >
+{{ item.label }}
+</Tag>
           </div>
         </template>
 
         <template v-else-if="activeKey === 'reminders'">
           <section class="form-section">
             <h3>绩效提醒设置</h3>
-            <Checkbox v-model:checked="settings.reminders.notifyHrTodo">开启待办事项提醒</Checkbox>
-            <Checkbox v-model:checked="settings.reminders.resultValueUpdateReminder">结果值更新提醒</Checkbox>
-            <Checkbox v-model:checked="settings.reminders.resignedMessageReminder">离职消息提醒</Checkbox>
+            <Checkbox v-model:checked="settings.reminders.notifyHrTodo">
+开启待办事项提醒
+</Checkbox>
+            <Checkbox
+              v-model:checked="settings.reminders.resultValueUpdateReminder"
+              >
+结果值更新提醒
+</Checkbox>
+            <Checkbox
+              v-model:checked="settings.reminders.resignedMessageReminder"
+              >
+离职消息提醒
+</Checkbox>
           </section>
           <section class="form-section">
             <h3>提醒对象</h3>
             <Select
-              :options="['优先最小管理员', '考评表管理员', '人事管理员'].map((value) => ({ label: value, value }))"
+              :options="
+                ['优先最小管理员', '考评表管理员', '人事管理员'].map(
+                  (value) => ({ label: value, value }),
+                )
+              "
               v-model:value="settings.reminders.reminderTarget"
               class="select-control"
             />
@@ -1095,18 +1367,74 @@ onMounted(loadSettings);
 
         <template v-else-if="activeKey === 'integration'">
           <section class="form-section">
-            <h3>开发者信息</h3>
-            <div class="kv-list">
-              <span>AppId</span><Input v-model:value="settings.integration.appId" placeholder="无" /><Button type="link" @click="copyText(settings.integration.appId, 'AppId')">复制</Button>
-              <span>AppSecret</span><Input v-model:value="settings.integration.appSecret" placeholder="无" /><Button type="link" @click="copyText(settings.integration.appSecret, 'AppSecret')">复制</Button>
-              <span>回调地址</span><Input ref="callbackInputRef" v-model:value="settings.integration.callbackUrl" placeholder="无" /><Button type="link" @click="callbackInputRef?.focus?.()">编辑</Button>
+            <h3>钉钉连接状态</h3>
+            <div class="integration-status">
+              <div class="integration-status-item">
+                <div>
+                  <strong>应用配置</strong>
+                  <Tag color="processing">复用系统配置</Tag>
+                </div>
+                <p class="muted">
+                  AppId、AppSecret、AgentId
+                  统一从系统钉钉接入读取，本页面不再重复保存密钥。
+                </p>
+              </div>
+              <div class="integration-status-item">
+                <div>
+                  <strong>通讯录关系</strong>
+                  <Tag color="success">由钉钉模块同步</Tag>
+                </div>
+                <p class="muted">
+                  直属主管、部门主管等关系继续使用系统组织架构和钉钉同步结果。
+                </p>
+              </div>
+              <div class="integration-status-item">
+                <div>
+                  <strong>事件回调</strong>
+                  <Tag>依赖系统事件流</Tag>
+                </div>
+                <p class="muted">
+                  钉钉事件流和通讯录回调由系统钉钉模块维护，绩效只消费同步后的数据。
+                </p>
+              </div>
             </div>
-            <Checkbox v-model:checked="settings.integration.dingCallbackEnabled">开启待办回调</Checkbox>
+          </section>
+          <section class="form-section">
+            <h3>绩效待办</h3>
+            <div class="switch-list">
+              <div class="switch-row">
+                <div>
+                  <strong>同步绩效待办到钉钉</strong>
+                  <p class="muted">
+                    创建确认、评分、审核等任务时，同步生成钉钉待办。
+                  </p>
+                </div>
+                <Switch v-model:checked="settings.actions.syncTaskTodo" />
+              </div>
+              <div class="switch-row">
+                <div>
+                  <strong>接收钉钉待办回调</strong>
+                  <p class="muted">
+                    需要系统钉钉事件流已启用；用于后续把钉钉侧待办状态回写到绩效任务。
+                  </p>
+                </div>
+                <Switch
+                  v-model:checked="settings.integration.dingCallbackEnabled"
+                />
+              </div>
+            </div>
           </section>
           <section class="form-section">
             <h3>钉钉考勤数据</h3>
-            <p class="muted">当前未开启考勤数据同步，无法引入考勤数据作为考核指标的结果值。</p>
-            <Switch v-model:checked="settings.integration.attendanceSyncEnabled" />
+            <div class="switch-row">
+              <div>
+                <strong>允许考勤数据作为指标结果值</strong>
+                <p class="muted">
+                  当前尚未接入考勤数据同步接口，暂不能作为指标自动结果值。
+                </p>
+              </div>
+              <Switch :checked="false" disabled />
+            </div>
           </section>
         </template>
 
@@ -1115,8 +1443,20 @@ onMounted(loadSettings);
             <div v-for="(item, index) in settings.menu.items" :key="item">
               <span>{{ item }}</span>
               <Space>
-                <Button :disabled="index === 0" size="small" @click="moveMenuItem(index, -1)">上移</Button>
-                <Button :disabled="index === settings.menu.items.length - 1" size="small" @click="moveMenuItem(index, 1)">下移</Button>
+                <Button
+                  :disabled="index === 0"
+                  size="small"
+                  @click="moveMenuItem(index, -1)"
+                  >
+上移
+</Button>
+                <Button
+                  :disabled="index === settings.menu.items.length - 1"
+                  size="small"
+                  @click="moveMenuItem(index, 1)"
+                  >
+下移
+</Button>
               </Space>
             </div>
           </div>
@@ -1126,13 +1466,32 @@ onMounted(loadSettings);
           <div class="toolbar-row">
             <Space>
               <Input value="2026-06-29 至 2026-06-29" />
-              <Select value="全部" :options="['全部', '设置', '绩效考核'].map((value) => ({ label: value, value }))" />
+              <Select
+                value="全部"
+                :options="
+                  ['全部', '设置', '绩效考核'].map((value) => ({
+                    label: value,
+                    value,
+                  }))
+                "
+              />
             </Space>
           </div>
-          <Table :columns="logColumns" :data-source="logs" :pagination="{ pageSize: 20 }" row-key="id">
+          <Table
+            :columns="logColumns"
+            :data-source="logs"
+            :pagination="{ pageSize: 20 }"
+            row-key="id"
+          >
             <template #bodyCell="{ column, record }">
               <template v-if="column.dataIndex === 'action'">
-                <Button size="small" type="link" @click="openLogDetail(record.id)">查看</Button>
+                <Button
+                  size="small"
+                  type="link"
+                  @click="openLogDetail(record.id)"
+                  >
+查看
+</Button>
               </template>
             </template>
           </Table>
@@ -1168,7 +1527,13 @@ onMounted(loadSettings);
                   />
                 </div>
               </div>
-              <Button :disabled="!stopEmployeeId" type="primary" @click="stopAssessment">停止考核</Button>
+              <Button
+                :disabled="!stopEmployeeId"
+                type="primary"
+                @click="stopAssessment"
+                >
+停止考核
+</Button>
             </Tabs.TabPane>
             <Tabs.TabPane key="transfer" tab="绩效数据转交">
               <div class="step-box">
@@ -1211,7 +1576,10 @@ onMounted(loadSettings);
     >
       <Form layout="vertical">
         <Form.Item required label="用户组名称">
-          <Input v-model:value="userGroupEditor.name" placeholder="请输入用户组名称" />
+          <Input
+            v-model:value="userGroupEditor.name"
+            placeholder="请输入用户组名称"
+          />
         </Form.Item>
         <Form.Item required label="用户组类型">
           <Select
@@ -1232,7 +1600,11 @@ onMounted(loadSettings);
           />
         </Form.Item>
         <Form.Item label="描述">
-          <Input.TextArea v-model:value="userGroupEditor.desc" :rows="3" placeholder="请输入描述" />
+          <Input.TextArea
+            v-model:value="userGroupEditor.desc"
+            :rows="3"
+            placeholder="请输入描述"
+          />
         </Form.Item>
       </Form>
     </Modal>
@@ -1254,10 +1626,16 @@ onMounted(loadSettings);
     >
       <Form layout="vertical">
         <Form.Item required label="字段名称">
-          <Input v-model:value="fieldEditor.field" placeholder="请输入字段名称" />
+          <Input
+            v-model:value="fieldEditor.field"
+            placeholder="请输入字段名称"
+          />
         </Form.Item>
         <Form.Item required label="字段类型">
-          <Select v-model:value="fieldEditor.type" :options="fieldTypeOptions" />
+          <Select
+            v-model:value="fieldEditor.type"
+            :options="fieldTypeOptions"
+          />
         </Form.Item>
         <Form.Item label="字段状态">
           <Switch v-model:checked="fieldEditor.enabled" />
@@ -1265,15 +1643,44 @@ onMounted(loadSettings);
       </Form>
     </Modal>
 
-    <Modal v-model:open="logDetailOpen" title="操作日志详情" :footer="null" width="720px">
+    <Modal
+      v-model:open="logDetailOpen"
+      title="操作日志详情"
+      :footer="null"
+      width="720px"
+    >
       <div v-if="selectedLog" class="log-detail">
-        <div><span>操作时间</span><strong>{{ selectedLog.createTime || '-' }}</strong></div>
-        <div><span>操作类型</span><strong>{{ selectedLog.operationType || '-' }}</strong></div>
-        <div><span>操作人</span><strong>{{ selectedLog.operatorUserId ? operatorNameMap.get(selectedLog.operatorUserId) || selectedLog.operatorUserId : '-' }}</strong></div>
-        <div><span>对象</span><strong>{{ selectedLog.targetTable || '-' }} #{{ selectedLog.targetId || '-' }}</strong></div>
-        <div class="full"><span>摘要</span><pre>{{ formatLogContent(selectedLog) }}</pre></div>
-        <div v-if="selectedLog.beforeJson" class="full"><span>变更前</span><pre>{{ selectedLog.beforeJson }}</pre></div>
-        <div v-if="selectedLog.afterJson" class="full"><span>变更后</span><pre>{{ selectedLog.afterJson }}</pre></div>
+        <div>
+          <span>操作时间</span><strong>{{ selectedLog.createTime || '-' }}</strong>
+        </div>
+        <div>
+          <span>操作类型</span><strong>{{ selectedLog.operationType || '-' }}</strong>
+        </div>
+        <div>
+          <span>操作人</span><strong>{{
+            selectedLog.operatorUserId
+              ? operatorNameMap.get(selectedLog.operatorUserId) ||
+                selectedLog.operatorUserId
+              : '-'
+          }}</strong>
+        </div>
+        <div>
+          <span>对象</span><strong>{{ selectedLog.targetTable || '-' }} #{{
+              selectedLog.targetId || '-'
+            }}</strong>
+        </div>
+        <div class="full">
+          <span>摘要</span>
+          <pre>{{ formatLogContent(selectedLog) }}</pre>
+        </div>
+        <div v-if="selectedLog.beforeJson" class="full">
+          <span>变更前</span>
+          <pre>{{ selectedLog.beforeJson }}</pre>
+        </div>
+        <div v-if="selectedLog.afterJson" class="full">
+          <span>变更后</span>
+          <pre>{{ selectedLog.afterJson }}</pre>
+        </div>
       </div>
     </Modal>
   </PerformanceShell>
@@ -1288,8 +1695,8 @@ onMounted(loadSettings);
 
 .settings-menu {
   display: grid;
-  align-content: start;
   gap: 18px;
+  align-content: start;
   padding: 14px;
   background: #fff;
   border: 1px solid #edf0f4;
@@ -1298,9 +1705,9 @@ onMounted(loadSettings);
 
 .settings-menu h3 {
   margin: 0 0 6px;
-  color: #64748b;
   font-size: 13px;
   font-weight: 600;
+  color: #64748b;
 }
 
 .settings-menu button {
@@ -1310,10 +1717,10 @@ onMounted(loadSettings);
   padding: 0 12px;
   color: #111827;
   text-align: left;
+  cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 6px;
-  cursor: pointer;
 }
 
 .settings-menu button.active {
@@ -1327,9 +1734,9 @@ onMounted(loadSettings);
 
 .toolbar-row {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
   margin-bottom: 14px;
 }
 
@@ -1370,9 +1777,9 @@ onMounted(loadSettings);
 
 .form-section h3 {
   margin: 0;
-  color: #111827;
   font-size: 15px;
   font-weight: 650;
+  color: #111827;
 }
 
 .form-section p {
@@ -1396,16 +1803,43 @@ onMounted(loadSettings);
   max-width: 100%;
 }
 
-.kv-list {
+.integration-status,
+.switch-list {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) 80px;
-  gap: 10px;
-  align-items: center;
-  max-width: 560px;
+  gap: 12px;
 }
 
-.kv-list span {
-  color: #64748b;
+.integration-status-item,
+.switch-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 820px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+}
+
+.integration-status-item {
+  align-items: flex-start;
+}
+
+.integration-status-item > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.integration-status-item p,
+.switch-row p {
+  margin-top: 6px;
+}
+
+.switch-row > div {
+  min-width: 0;
 }
 
 .menu-list {
@@ -1416,9 +1850,9 @@ onMounted(loadSettings);
 
 .menu-list > div {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
   min-height: 44px;
   padding: 0 12px;
   border: 1px solid #edf0f4;
@@ -1478,20 +1912,25 @@ onMounted(loadSettings);
 
 .step-box h3 {
   margin: 0 0 10px;
-  color: #111827;
   font-size: 16px;
   font-weight: 650;
+  color: #111827;
 }
 
 @media (max-width: 960px) {
   .settings-layout,
-  .toolbar-row,
-  .kv-list {
+  .toolbar-row {
     grid-template-columns: 1fr;
   }
 
   .toolbar-row {
     align-items: stretch;
+  }
+
+  .integration-status-item,
+  .switch-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>
