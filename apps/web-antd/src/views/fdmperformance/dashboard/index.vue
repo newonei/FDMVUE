@@ -9,17 +9,17 @@ import { IconifyIcon } from '@vben/icons';
 import { Button, Card, Empty, Space, Statistic, Table, Tag } from 'ant-design-vue';
 
 import {
+  type FdmPerformanceAssessmentApi,
   getFdmPerformanceAssessmentBatchPage,
   getFdmPerformanceAssessmentResultPage,
   getFdmPerformanceAssessmentTaskPage,
-  type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceIndicatorPage } from '#/api/fdmperformance/indicator';
 import { getFdmPerformanceTemplatePage } from '#/api/fdmperformance/template';
 
-import PerformanceShell from '../shared/PerformanceShell.vue';
 import { mapApiBatch } from '../shared/api-adapter';
 import { batchStatusMetaMap } from '../shared/model';
+import PerformanceShell from '../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../shared/route';
 
 defineOptions({ name: 'FdmPerformanceDashboard' });
@@ -55,7 +55,7 @@ const resultRows = computed(() =>
     grade: item.gradeName || '-',
     id: item.id,
     score: item.totalScore ?? '-',
-    title: `用户${item.userId || '-'}`,
+    title: item.userName || `用户${item.userId || '-'}`,
   })),
 );
 const batchRows = computed(() =>

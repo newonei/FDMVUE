@@ -82,6 +82,31 @@ const candidates = computed(() => matchResult.value?.top_candidates || []);
 const selectedCandidate = computed(() =>
   candidates.value.find((item) => item.item_id === selectedItemId.value),
 );
+const selectedComparisonCandidate = computed(
+  () => selectedCandidate.value || bestMatch.value || null,
+);
+const selectedCandidateRank = computed(() => {
+  const candidate = selectedComparisonCandidate.value;
+  if (!candidate) return 0;
+  const index = candidates.value.findIndex(
+    (item) => item.item_id === candidate.item_id,
+  );
+  return index >= 0 ? index + 1 : 0;
+});
+const selectedMatchImageUrl = computed(() => {
+  const candidate = selectedComparisonCandidate.value;
+  return candidate ? candidateFullImageUrl(candidate) : '';
+});
+const selectedCandidateProgressText = computed(() => {
+  const candidate = selectedComparisonCandidate.value;
+  return candidate
+    ? `${candidate.recognized_count}/${candidate.quantity}`
+    : '0/0';
+});
+const imageQualityText = computed(() => {
+  if (!matchResult.value) return '-';
+  return matchResult.value.image_quality?.ok ? '合格' : '需复核';
+});
 const uploadPercentDisplay = computed(() =>
   uploadStage.value === 'processing' || uploadStage.value === 'success'
     ? 100
@@ -639,10 +664,19 @@ function resolveDisplayImageUrl(url?: string) {
     : resolvePatternRecognitionAssetUrl(value);
 }
 
+function candidateFullImageUrl(candidate: PatternRecognitionApi.Candidate) {
+  return (
+    resolveDisplayImageUrl(candidate.design_image_url) ||
+    resolveDisplayImageUrl(candidate.preview_image_url ?? undefined) ||
+    resolveDisplayImageUrl(candidate.local_image_url) ||
+    PATTERN_IMAGE_PLACEHOLDER
+  );
+}
+
 function candidateImageUrl(candidate: PatternRecognitionApi.Candidate) {
   return (
     resolveDisplayImageUrl(candidate.preview_image_url ?? undefined) ||
-    PATTERN_IMAGE_PLACEHOLDER
+    candidateFullImageUrl(candidate)
   );
 }
 
@@ -708,87 +742,95 @@ onBeforeUnmount(() => {
         :description="syncStatus"
       />
 
-      <div class="workstation-grid">
-        <Card class="upload-card" :bordered="false">
+      <div class="comparison-grid">
+        <Card class="compare-card capture-card" :bordered="false">
           <template #title>
             <div class="card-title">
               <IconifyIcon icon="lucide:camera" />
-              <span>上传实拍图</span>
+              <span>当前摄像头画面</span>
+              <Tag :color="capturePreviewUrl ? uploadStageMeta.color : cameraReady ? 'success' : 'default'">
+                {{ capturePreviewUrl ? uploadStageMeta.text : cameraReady ? '实时' : '待开启' }}
+              </Tag>
             </div>
           </template>
 
-          <div class="camera-panel">
-            <div class="camera-preview-box">
-              <video
-                ref="cameraVideoRef"
-                autoplay
-                class="camera-video"
-                muted
-                playsinline
-              ></video>
-              <canvas ref="cameraCanvasRef" hidden></canvas>
-              <div v-if="!cameraReady" class="camera-placeholder">
-                <IconifyIcon icon="lucide:video" />
-                <span>{{ cameraStatusText }}</span>
-              </div>
+          <div class="compare-image-frame capture-frame">
+            <Image
+              v-if="capturePreviewUrl"
+              class="compare-main-image"
+              :src="capturePreviewUrl"
+            />
+            <video
+              v-show="!capturePreviewUrl"
+              ref="cameraVideoRef"
+              autoplay
+              class="camera-video"
+              muted
+              playsinline
+            ></video>
+            <div v-if="!capturePreviewUrl && !cameraReady" class="camera-placeholder">
+              <IconifyIcon icon="lucide:video" />
+              <span>{{ cameraStatusText }}</span>
             </div>
+            <canvas ref="cameraCanvasRef" hidden></canvas>
+          </div>
 
-            <div class="camera-controls">
-              <label class="camera-select-field">
-                <span>摄像头</span>
-                <select
-                  v-model="selectedCameraDeviceId"
-                  :disabled="cameraStarting || matching || cameraDevices.length === 0"
-                  @change="handleCameraDeviceChange"
+          <div class="camera-controls">
+            <label class="camera-select-field">
+              <span>摄像头</span>
+              <select
+                v-model="selectedCameraDeviceId"
+                :disabled="cameraStarting || matching || cameraDevices.length === 0"
+                @change="handleCameraDeviceChange"
+              >
+                <option value="">默认摄像头</option>
+                <option
+                  v-for="(device, index) in cameraDevices"
+                  :key="device.deviceId || index"
+                  :value="device.deviceId"
                 >
-                  <option value="">默认摄像头</option>
-                  <option
-                    v-for="(device, index) in cameraDevices"
-                    :key="device.deviceId || index"
-                    :value="device.deviceId"
-                  >
-                    {{ device.label || `摄像头 ${index + 1}` }}
-                  </option>
-                </select>
-              </label>
-              <div class="camera-actions">
-                <Button
-                  :disabled="matching"
-                  :loading="cameraStarting"
-                  @click="startCamera()"
-                >
-                  <template #icon>
-                    <IconifyIcon icon="lucide:video" />
-                  </template>
-                  启用
-                </Button>
-                <Button
-                  :disabled="!cameraReady || matching"
-                  @click="stopCamera(false)"
-                >
-                  <template #icon>
-                    <IconifyIcon icon="lucide:video-off" />
-                  </template>
-                  停止
-                </Button>
-                <Button
-                  type="primary"
-                  :disabled="!canCaptureFromCamera"
-                  @click="captureAndUploadFromCamera"
-                >
-                  <template #icon>
-                    <IconifyIcon icon="lucide:camera" />
-                  </template>
-                  拍照上传
-                </Button>
-              </div>
+                  {{ device.label || `摄像头 ${index + 1}` }}
+                </option>
+              </select>
+            </label>
+            <div class="camera-actions">
+              <Button
+                :disabled="matching"
+                :loading="cameraStarting"
+                @click="startCamera()"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:video" />
+                </template>
+                启用
+              </Button>
+              <Button
+                :disabled="!cameraReady || matching"
+                @click="stopCamera(false)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:video-off" />
+                </template>
+                停止
+              </Button>
+              <Button
+                type="primary"
+                :disabled="!canCaptureFromCamera"
+                @click="captureAndUploadFromCamera"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:camera" />
+                </template>
+                拍照上传
+              </Button>
             </div>
-            <div class="camera-status" :class="{ error: !!cameraError }">
-              {{ cameraError || cameraStatusText }}
-            </div>
+          </div>
+          <div class="camera-status" :class="{ error: !!cameraError }">
+            {{ cameraError || cameraStatusText }}
           </div>
 
           <UploadDragger
+            class="manual-upload-dragger"
             accept="image/*"
             :before-upload="beforeCaptureUpload"
             :disabled="matching"
@@ -842,7 +884,7 @@ onBeforeUnmount(() => {
           </div>
 
           <Button
-            class="mt-4 w-full"
+            class="w-full"
             type="primary"
             :disabled="!captureFile"
             :loading="matching"
@@ -853,23 +895,22 @@ onBeforeUnmount(() => {
             </template>
             {{ matching ? '上传识别中' : '开始上传并识别' }}
           </Button>
-          <div v-if="capturePreviewUrl" class="capture-preview">
-            <Image :src="capturePreviewUrl" />
-          </div>
           <Alert
             v-if="matchError"
-            class="mt-4"
             show-icon
             type="error"
             :message="matchError"
           />
         </Card>
 
-        <Card class="result-card" :bordered="false">
+        <Card class="compare-card best-match-card" :bordered="false">
           <template #title>
             <div class="card-title">
               <IconifyIcon icon="lucide:badge-check" />
-              <span>匹配结果</span>
+              <span>最高相似图</span>
+              <Tag v-if="selectedComparisonCandidate" color="processing">
+                {{ formatScore(selectedComparisonCandidate.score) }}
+              </Tag>
             </div>
           </template>
           <template #extra>
@@ -878,99 +919,135 @@ onBeforeUnmount(() => {
             </Tag>
           </template>
 
-          <div v-if="matchResult" class="summary-panel">
-            <div>
-              <span>最佳订单</span>
-              <strong>{{ bestMatch?.order_no || '-' }}</strong>
-            </div>
-            <div>
-              <span>图案明细</span>
-              <strong>{{ bestMatch?.item_no || '-' }}</strong>
-            </div>
-            <div>
-              <span>相似度</span>
-              <strong>{{ bestMatch ? formatScore(bestMatch.score) : '-' }}</strong>
-            </div>
-            <div>
-              <span>图片质量</span>
-              <strong>{{ matchResult.image_quality?.ok ? '合格' : '需复核' }}</strong>
-            </div>
-          </div>
-
-          <div v-if="candidates.length > 0" class="candidate-list">
-            <div
-              v-for="candidate in candidates"
-              :key="candidate.item_id"
-              class="candidate-item"
-              :class="{ selected: candidate.item_id === selectedItemId }"
-            >
-              <img :src="candidateImageUrl(candidate)" :alt="candidate.order_no" />
-              <div class="candidate-body">
-                <div class="candidate-title">
-                  <strong>{{ candidate.order_no }}</strong>
-                  <Tag>{{ formatCandidateItemNoWithTotal(candidate) }}</Tag>
-                  <Tag color="processing">{{ formatScore(candidate.score) }}</Tag>
-                </div>
-                <div class="score-line">
-                  DINO {{ formatOptionalScore(candidate.embedding_score) }} / 分区
-                  {{ formatOptionalScore(candidate.patch_score) }} / 局部
-                  {{ formatOptionalScore(candidate.feature_score) }} / 细节
-                  {{ formatOptionalScore(candidate.detail_score) }}
-                </div>
-                <Progress
-                  :percent="progressPercent(candidate)"
-                  size="small"
-                  :format="() => `${candidate.recognized_count}/${candidate.quantity}`"
-                />
-                <div class="candidate-status">状态：{{ candidate.status }}</div>
+          <template v-if="selectedComparisonCandidate">
+            <div class="summary-panel">
+              <div>
+                <span>最佳订单</span>
+                <strong>{{ selectedComparisonCandidate.order_no || '-' }}</strong>
               </div>
-              <Button
-                :type="candidate.item_id === selectedItemId ? 'primary' : 'default'"
-                @click="selectCandidate(candidate)"
-              >
-                选择
-              </Button>
+              <div>
+                <span>图案明细</span>
+                <strong>{{ selectedComparisonCandidate.item_no || '-' }}</strong>
+              </div>
+              <div>
+                <span>排名</span>
+                <strong>{{ selectedCandidateRank || '-' }}/{{ candidates.length || '-' }}</strong>
+              </div>
+              <div>
+                <span>图片质量</span>
+                <strong>{{ imageQualityText }}</strong>
+              </div>
             </div>
-          </div>
-          <Empty v-else description="暂无结果" />
 
-          <div class="confirm-panel">
-            <div class="selected-info">
-              <span>当前选择</span>
-              <strong>
-                {{ selectedCandidate ? `${selectedCandidate.order_no} / ${selectedCandidate.item_no}` : '-' }}
-              </strong>
+            <div class="compare-image-frame match-frame">
+              <Image
+                class="compare-main-image"
+                :src="selectedMatchImageUrl"
+                :fallback="PATTERN_IMAGE_PLACEHOLDER"
+              />
             </div>
-            <Button
-              type="primary"
-              :disabled="!canConfirm"
-              :loading="confirmLoading"
-              @click="submitConfirm"
-            >
-              <template #icon>
-                <IconifyIcon icon="lucide:package-check" />
-              </template>
-              确认打包 / 下一个
-            </Button>
-          </div>
 
-          <Alert
-            v-if="confirmError"
-            class="mt-3"
-            show-icon
-            type="error"
-            :message="confirmError"
-          />
-          <Alert
-            v-if="confirmResult"
-            class="mt-3"
-            show-icon
-            :type="confirmResult.ready_to_ship ? 'success' : 'info'"
-            :message="`已分配到订单 ${confirmResult.allocated_order_no} / 图案 ${confirmResult.allocated_item_no}`"
-            :description="`图案进度 ${confirmResult.recognized_count}/${confirmResult.quantity}，订单状态 ${confirmResult.order_status}${confirmResult.removed_from_index ? '，该图案已完成并从识别索引移除' : '，该图案仍需继续识别'}`"
-          />
+            <div class="score-line score-line-large">
+              DINO {{ formatOptionalScore(selectedComparisonCandidate.embedding_score) }} /
+              分区 {{ formatOptionalScore(selectedComparisonCandidate.patch_score) }} /
+              局部 {{ formatOptionalScore(selectedComparisonCandidate.feature_score) }} /
+              细节 {{ formatOptionalScore(selectedComparisonCandidate.detail_score) }}
+            </div>
+            <Progress
+              :percent="progressPercent(selectedComparisonCandidate)"
+              size="small"
+              :format="() => selectedCandidateProgressText"
+            />
+
+            <div class="confirm-panel">
+              <div class="selected-info">
+                <span>当前选择</span>
+                <strong>
+                  {{ selectedComparisonCandidate.order_no }} / {{ selectedComparisonCandidate.item_no }}
+                </strong>
+              </div>
+              <Space wrap>
+                <Button
+                  type="primary"
+                  :disabled="!canConfirm"
+                  :loading="confirmLoading"
+                  @click="submitConfirm"
+                >
+                  <template #icon>
+                    <IconifyIcon icon="lucide:package-check" />
+                  </template>
+                  确认打包 / 下一个
+                </Button>
+              </Space>
+            </div>
+
+            <Alert
+              v-if="confirmError"
+              show-icon
+              type="error"
+              :message="confirmError"
+            />
+            <Alert
+              v-if="confirmResult"
+              show-icon
+              :type="confirmResult.ready_to_ship ? 'success' : 'info'"
+              :message="`已分配到订单 ${confirmResult.allocated_order_no} / 图案 ${confirmResult.allocated_item_no}`"
+              :description="`图案进度 ${confirmResult.recognized_count}/${confirmResult.quantity}，订单状态 ${confirmResult.order_status}${confirmResult.removed_from_index ? '，该图案已完成并从识别索引移除' : '，该图案仍需继续识别'}`"
+            />
+          </template>
+          <Empty v-else description="暂无匹配结果" />
         </Card>
       </div>
+
+      <Card class="candidate-results-card" :bordered="false">
+        <template #title>
+          <div class="card-title">
+            <IconifyIcon icon="lucide:list-checks" />
+            <span>候选结果</span>
+            <Tag v-if="candidates.length > 0" color="processing">
+              第一条已同步放大到右侧
+            </Tag>
+          </div>
+        </template>
+
+        <div v-if="candidates.length > 0" class="candidate-list">
+          <div
+            v-for="(candidate, index) in candidates"
+            :key="candidate.item_id"
+            class="candidate-item"
+            :class="{ selected: candidate.item_id === selectedItemId }"
+          >
+            <div class="candidate-rank">{{ index + 1 }}</div>
+            <img :src="candidateImageUrl(candidate)" :alt="candidate.order_no" />
+            <div class="candidate-body">
+              <div class="candidate-title">
+                <strong>{{ candidate.order_no }}</strong>
+                <Tag>{{ formatCandidateItemNoWithTotal(candidate) }}</Tag>
+                <Tag color="processing">{{ formatScore(candidate.score) }}</Tag>
+                <Tag>{{ candidate.status }}</Tag>
+              </div>
+              <div class="score-line">
+                DINO {{ formatOptionalScore(candidate.embedding_score) }} / 分区
+                {{ formatOptionalScore(candidate.patch_score) }} / 局部
+                {{ formatOptionalScore(candidate.feature_score) }} / 细节
+                {{ formatOptionalScore(candidate.detail_score) }}
+              </div>
+              <Progress
+                :percent="progressPercent(candidate)"
+                size="small"
+                :format="() => `${candidate.recognized_count}/${candidate.quantity}`"
+              />
+            </div>
+            <Button
+              :type="candidate.item_id === selectedItemId ? 'primary' : 'default'"
+              @click="selectCandidate(candidate)"
+            >
+              {{ candidate.item_id === selectedItemId ? '已选中' : '选择' }}
+            </Button>
+          </div>
+        </div>
+        <Empty v-else description="暂无结果" />
+      </Card>
     </div>
   </Page>
 </template>
@@ -1018,41 +1095,62 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.workstation-grid {
+.comparison-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 
-.upload-card,
-.result-card {
+.compare-card,
+.candidate-results-card {
   border-radius: 8px;
 }
 
-.camera-panel {
-  display: grid;
-  gap: 12px;
-  padding-bottom: 14px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid #eef2f7;
+.compare-card :deep(.ant-card-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
 }
 
-.camera-preview-box {
+.candidate-results-card {
+  margin-top: 16px;
+}
+
+.compare-image-frame {
   position: relative;
   display: grid;
   place-items: center;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: clamp(320px, 34vw, 460px);
+  min-height: 320px;
   overflow: hidden;
-  background: #0f172a;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
 }
 
+.capture-frame {
+  background: #0f172a;
+}
+
+.match-frame {
+  background: #f8fafc;
+}
+
+.compare-main-image,
+.compare-main-image :deep(.ant-image-img),
 .camera-video {
   width: 100%;
   height: 100%;
+}
+
+.compare-main-image {
+  display: block;
+}
+
+.compare-main-image :deep(.ant-image-img),
+.camera-video {
   object-fit: contain;
 }
 
@@ -1073,13 +1171,16 @@ onBeforeUnmount(() => {
 }
 
 .camera-controls {
-  display: grid;
+  display: flex;
   gap: 10px;
+  align-items: end;
 }
 
 .camera-select-field {
   display: grid;
   gap: 6px;
+  flex: 1;
+  min-width: 220px;
   font-size: 12px;
   color: #64748b;
 }
@@ -1098,6 +1199,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  width: min(360px, 46%);
 }
 
 .camera-actions :deep(.ant-btn) {
@@ -1112,6 +1214,10 @@ onBeforeUnmount(() => {
 
 .camera-status.error {
   color: #dc2626;
+}
+
+.manual-upload-dragger :deep(.ant-upload-drag) {
+  padding: 12px;
 }
 
 .upload-icon {
@@ -1202,25 +1308,11 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
-.capture-preview {
-  margin-top: 14px;
-  overflow: hidden;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-
-.capture-preview :deep(.ant-image),
-.capture-preview :deep(.ant-image-img) {
-  display: block;
-  width: 100%;
-}
-
 .summary-panel {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 12px;
-  margin-bottom: 14px;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -1240,6 +1332,10 @@ onBeforeUnmount(() => {
   color: #0f172a;
 }
 
+.score-line-large {
+  padding: 0 2px;
+}
+
 .candidate-list {
   display: grid;
   gap: 10px;
@@ -1247,10 +1343,10 @@ onBeforeUnmount(() => {
 
 .candidate-item {
   display: grid;
-  grid-template-columns: 132px minmax(0, 1fr) auto;
+  grid-template-columns: 44px 76px minmax(0, 1fr) 96px;
   gap: 12px;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -1261,9 +1357,21 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 2px rgb(37 99 235 / 12%);
 }
 
+.candidate-rank {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  font-weight: 700;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+}
+
 .candidate-item img {
-  width: 132px;
-  height: 92px;
+  width: 76px;
+  height: 58px;
   object-fit: contain;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
@@ -1299,7 +1407,6 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding-top: 14px;
-  margin-top: 14px;
   border-top: 1px solid #eef2f7;
 }
 
@@ -1308,8 +1415,17 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1180px) {
-  .workstation-grid {
+  .comparison-grid {
     grid-template-columns: 1fr;
+  }
+
+  .camera-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-actions {
+    width: 100%;
   }
 }
 
@@ -1324,6 +1440,12 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .candidate-rank {
+    width: 100%;
+    height: 28px;
+    border-radius: 6px;
+  }
+
   .candidate-item img {
     width: 100%;
     height: 180px;
@@ -1335,6 +1457,10 @@ onBeforeUnmount(() => {
 
   .camera-actions {
     grid-template-columns: 1fr;
+  }
+
+  .compare-image-frame {
+    height: 320px;
   }
 }
 </style>

@@ -252,6 +252,7 @@ export namespace FdmPerformanceAssessmentApi {
     templateId?: number;
     totalScore?: number;
     userId?: number;
+    userName?: string;
   }
 
   export type ChangeLogPageParams = PageParam & {

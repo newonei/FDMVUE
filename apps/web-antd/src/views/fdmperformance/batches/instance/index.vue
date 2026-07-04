@@ -13,6 +13,7 @@ import {
   Empty,
   Input,
   InputNumber,
+  message,
   Modal,
   Progress,
   Select,
@@ -20,15 +21,14 @@ import {
   Table,
   Tag,
   Upload,
-  message,
 } from 'ant-design-vue';
 
-import { uploadFile } from '#/api/infra/file';
 import {
   confirmFdmPerformanceAssessmentIndicators,
   confirmFdmPerformanceAssessmentResult,
   confirmMyFdmPerformanceAssessmentIndicators,
   confirmMyFdmPerformanceAssessmentResult,
+  type FdmPerformanceAssessmentApi,
   getFdmPerformanceAssessmentBatch,
   getFdmPerformanceAssessmentInstance,
   getFdmPerformanceAssessmentTaskPage,
@@ -41,12 +41,11 @@ import {
   submitFdmPerformanceAssessmentScore,
   submitMyFdmPerformanceAssessmentScore,
   transferFdmPerformanceAssessmentTasks,
-  type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplate } from '#/api/fdmperformance/template';
+import { uploadFile } from '#/api/infra/file';
 import { getSimpleUserList, type SystemUserApi } from '#/api/system/user';
 
-import PerformanceShell from '../../shared/PerformanceShell.vue';
 import {
   buildApiScoreItems,
   extractFlowStagesFromSimpleNode,
@@ -62,9 +61,10 @@ import {
   type Employee,
   type FlowStage,
   type Indicator,
-  type ScoreSummary,
   instanceStatusMetaMap,
+  type ScoreSummary,
 } from '../../shared/model';
+import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../../shared/route';
 
 defineOptions({ name: 'FdmPerformanceInstanceDetail' });
@@ -103,11 +103,11 @@ const CORE_FLOW_STAGE_ALIASES: Record<string, string[]> = {
   Performance_Self_Score: ['自评', '员工自评'],
 };
 const FLOW_JUMPABLE_NODE_KEYS = new Set([
-  'Performance_Indicator_Confirm',
   'Performance_Executing',
-  'Performance_Self_Score',
-  'Performance_Manager_Score',
   'Performance_Hr_Approve',
+  'Performance_Indicator_Confirm',
+  'Performance_Manager_Score',
+  'Performance_Self_Score',
 ]);
 
 const route = useRoute();
@@ -169,13 +169,20 @@ const canManageFlow = computed(() =>
   && Boolean(currentPendingTask.value)
   && !['canceled', 'finished'].includes(String(instance.value?.status || '')),
 );
+const isActiveScoreStatus = computed(() =>
+  (activeScoreType.value === 'self' && instance.value?.status === 'selfScore') ||
+  (activeScoreType.value === 'supervisor' && instance.value?.status === 'supervisorScore'),
+);
+const scoreEditorVisible = computed(() => Boolean(instance.value && isActiveScoreStatus.value));
 const canScore = computed(() => {
-  if (!instance.value || !activeScoreTask.value) return false;
+  if (!instance.value || !activeScoreTask.value || !isActiveScoreStatus.value) return false;
   if (!currentUserId.value || Number(activeScoreTask.value.assigneeUserId) !== currentUserId.value) return false;
-  return (
-    (activeScoreType.value === 'self' && instance.value.status === 'selfScore') ||
-    (activeScoreType.value === 'supervisor' && instance.value.status === 'supervisorScore')
-  );
+  return true;
+});
+const scoreEditorReadonlyText = computed(() => {
+  if (!scoreEditorVisible.value || canScore.value) return '';
+  if (!activeScoreTask.value) return '当前评分节点未生成待办任务，请检查流程配置或回退流程后重新处理。';
+  return `当前待办处理人：${getUserDisplayName(activeScoreTask.value.assigneeUserId)}，当前账号不能提交评分；管理员可先进行流程转交。`;
 });
 const scoreActionLabel = computed(() => activeScoreType.value === 'self' ? '提交自评' : '提交主管评分');
 
@@ -214,15 +221,25 @@ const flowItems = computed(() =>
 
 const scoreSummaries = computed(() => instance.value?.scoreSummaries || []);
 const historySummaries = computed(() => scoreSummaries.value);
+const calculatedFinalScore = computed(() => calculateSummaryFinalScore(scoreSummaries.value));
 const scoreSummaryCards = computed<ScoreSummaryCard[]>(() => {
   const finalScore = instance.value?.finalScore;
   const cards: ScoreSummaryCard[] = [];
+  const summaryFinalScore = calculatedFinalScore.value;
   if (finalScore !== undefined && finalScore !== null) {
     cards.push({
       cardType: 'final',
       nodeName: '绩效总分',
       scoreWeight: undefined,
       totalScore: finalScore,
+    });
+  } else if (scoreSummaries.value.length > 1 && summaryFinalScore !== undefined) {
+    cards.push({
+      cardType: 'final',
+      comment: hasSummaryWeight(scoreSummaries.value) ? '按评分节点权重汇总' : '取最后评分节点总分',
+      nodeName: '绩效总分',
+      scoreWeight: undefined,
+      totalScore: summaryFinalScore,
     });
   }
   return [...cards, ...scoreSummaries.value];
@@ -265,13 +282,15 @@ const scoreColumns = computed<TableColumnsType>(() => {
     columns.push({
       dataIndex: getSummaryColumnKey(summary),
       title: getSummaryLabel(summary),
-      width: 150,
+      width: 220,
     });
   });
-  columns.push(
-    { dataIndex: 'currentScore', title: '当前评分', width: 150 },
-    { dataIndex: 'scoreComment', title: '评分说明', width: 260 },
-  );
+  if (scoreEditorVisible.value) {
+    columns.push(
+      { dataIndex: 'currentScore', title: '当前评分', width: 150 },
+      { dataIndex: 'scoreComment', title: '评分说明', width: 260 },
+    );
+  }
   return columns;
 });
 
@@ -362,7 +381,23 @@ function getSummaryColumnKey(summary: ScoreSummary) {
   return `summary_${summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score'}`;
 }
 
+function getSummaryNodeName(summary: ScoreSummary) {
+  if (summary.nodeName) return summary.nodeName;
+  if (summary.scorerRoleType === 1 || summary.taskType === 2) return '员工自评';
+  if (summary.scorerRoleType === 2 || summary.taskType === 3) return '主管评分';
+  return '评分';
+}
+
+function getSummaryUserName(summary: ScoreSummary) {
+  if (summary.scorerRoleType === 1 || summary.taskType === 2) {
+    return employee.value?.name || getUserDisplayName(summary.scorerUserId);
+  }
+  return getUserDisplayName(summary.scorerUserId);
+}
+
 function getSummaryLabel(summary: ScoreSummary) {
+  const userName = getSummaryUserName(summary);
+  if (userName && userName !== '-') return `${getSummaryNodeName(summary)}-${userName}`;
   const nodeName = summary.nodeName || (summary.scorerRoleType === 1 ? '自评' : summary.scorerRoleType === 2 ? '主管评分' : '评分');
   return summary.scorerUserId ? `${nodeName}-用户${summary.scorerUserId}` : nodeName;
 }
@@ -372,6 +407,20 @@ function getSummaryScore(record: Record<string, any>, columnKey: string) {
   if (!summary) return '-';
   const historyKey = String(summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score');
   return instance.value?.indicatorScores?.[record.id]?.histories?.[historyKey]?.score ?? '-';
+}
+
+function getSummaryComment(record: Record<string, any>, columnKey: string) {
+  const summary = historySummaries.value.find((item) => getSummaryColumnKey(item) === columnKey);
+  if (!summary) return '';
+  const historyKey = String(summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score');
+  return instance.value?.indicatorScores?.[record.id]?.histories?.[historyKey]?.comment || '';
+}
+
+function getActiveScoreHistoryKey() {
+  const task = activeScoreTask.value;
+  return task
+    ? String(task.id || task.nodeKey || getScoreTaskType(activeScoreType.value))
+    : String(getScoreTaskType(activeScoreType.value));
 }
 
 function getDimensionTitle(group: DimensionGroup) {
@@ -388,6 +437,23 @@ function normalizeIndicatorScore(indicator: Pick<Indicator, 'dimensionType'>, sc
   return isDeductionIndicator(indicator) ? -Math.abs(value) : value;
 }
 
+function hasSummaryWeight(summaries: ScoreSummary[]) {
+  return summaries.some((summary) => summary.scoreWeight !== undefined && summary.scoreWeight !== null);
+}
+
+function calculateSummaryFinalScore(summaries: ScoreSummary[]) {
+  const scoredSummaries = summaries.filter((summary) => summary.totalScore !== undefined && summary.totalScore !== null);
+  if (!scoredSummaries.length) return undefined;
+  if (!hasSummaryWeight(scoredSummaries)) {
+    return scoredSummaries.at(-1)?.totalScore;
+  }
+  const total = scoredSummaries.reduce(
+    (sum, summary) => sum + Number(summary.totalScore || 0) * Number(summary.scoreWeight || 0) / 100,
+    0,
+  );
+  return Number(total.toFixed(2));
+}
+
 function isScoreCommentRequired(indicator: Pick<Indicator, 'dimensionType'>) {
   return ![3, 4].includes(Number(indicator.dimensionType || 0));
 }
@@ -402,10 +468,11 @@ function initScoreDraft() {
   Object.keys(scoreAttachments).forEach((key) => delete scoreAttachments[Number(key)]);
 
   const type = activeScoreType.value;
+  const historyKey = getActiveScoreHistoryKey();
   templateIndicators.value.forEach((indicator) => {
     const state = instance.value?.indicatorScores?.[indicator.id];
     scoreInputs[indicator.id] = state?.[type] ?? state?.final ?? 0;
-    scoreComments[indicator.id] = state?.scoreComment || '';
+    scoreComments[indicator.id] = state?.histories?.[historyKey]?.comment || '';
     scoreAttachments[indicator.id] = state?.attachmentIds || '';
   });
   const currentSummary = scoreSummaries.value.find((item) => item.taskId === activeScoreTask.value?.id);
@@ -733,8 +800,7 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
             :key="stage.id || index"
           >
             <div
-              :class="[
-                'flow-node-card',
+              class="flow-node-card" :class="[
                 `flow-node-card--${getFlowStageStatus(index)}`,
                 { 'flow-node-card--clickable': isJumpableFlowStage(stage) },
               ]"
@@ -764,7 +830,7 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         </Card>
       </div>
 
-      <Card v-if="canScore" class="node-score-card">
+      <Card v-if="scoreEditorVisible" class="node-score-card">
         <div class="node-score-head">
           <div>
             <strong>{{ scoreActionLabel }}</strong>
@@ -775,8 +841,12 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
             <strong>{{ currentNodeTotal }}</strong>
           </div>
         </div>
+        <div v-if="scoreEditorReadonlyText" class="score-editor-warning">
+          {{ scoreEditorReadonlyText }}
+        </div>
         <Input.TextArea
           v-model:value="nodeComment"
+          :disabled="!canScore"
           :rows="3"
           placeholder="请输入本次评分总评"
         />
@@ -825,12 +895,16 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
               </Space>
             </template>
             <template v-else-if="String(column.dataIndex).startsWith('summary_')">
-              {{ getSummaryScore(record, String(column.dataIndex)) }}
+              <div class="summary-history-cell">
+                <strong>{{ getSummaryScore(record, String(column.dataIndex)) }}</strong>
+                <span>{{ getSummaryComment(record, String(column.dataIndex)) || '暂无评分说明' }}</span>
+              </div>
             </template>
             <template v-else-if="column.dataIndex === 'currentScore'">
               <InputNumber
-                v-if="canScore"
+                v-if="scoreEditorVisible"
                 v-model:value="scoreInputs[record.id]"
+                :disabled="!canScore"
                 :max="120"
                 :min="0"
                 :precision="2"
@@ -847,8 +921,9 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
             </template>
             <template v-else-if="column.dataIndex === 'scoreComment'">
               <Input.TextArea
-                v-if="canScore"
+                v-if="scoreEditorVisible"
                 v-model:value="scoreComments[record.id]"
+                :disabled="!canScore"
                 :placeholder="isScoreCommentRequired(record) ? '请输入评分说明(必填)' : '请输入评分说明(选填)'"
                 :rows="3"
               />
@@ -1100,6 +1175,31 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
 .node-score-head strong {
   font-size: 20px;
   color: #111827;
+}
+
+.score-editor-warning {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  color: #ad6800;
+  background: #fff7e6;
+  border: 1px solid #ffd591;
+  border-radius: 6px;
+}
+
+.summary-history-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.summary-history-cell strong {
+  font-weight: 650;
+  color: #111827;
+}
+
+.summary-history-cell span {
+  color: #64748b;
+  white-space: pre-wrap;
 }
 
 .multi-line {
