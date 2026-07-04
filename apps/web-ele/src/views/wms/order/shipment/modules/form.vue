@@ -5,15 +5,12 @@ import type { VxeTableInstance } from '#/adapter/vxe-table';
 import type { WmsWarehouseApi } from '#/api/wms/md/warehouse';
 import type { WmsShipmentOrderApi } from '#/api/wms/order/shipment';
 import type { WmsShipmentOrderDetailApi } from '#/api/wms/order/shipment/detail';
-import type { InventorySelectRow } from '#/views/wms/inventory/components/inventory-select.vue';
+import type { InventorySelectRow } from '#/views/wms/inventory/components';
 
 import { computed, nextTick, ref } from 'vue';
 
 import { confirm, useVbenModal } from '@vben/common-ui';
-import {
-  OrderStatusEnum,
-  OrderUpdateStatusList,
-} from '@vben/constants';
+import { OrderStatusEnum, OrderUpdateStatusList } from '@vben/constants';
 import { isEqual } from '@vben/utils';
 
 import { ElInputNumber, ElMessage } from 'element-plus';

@@ -26,7 +26,6 @@ import {
   Form,
   FormItem,
   Select,
-  SelectOption,
   TextArea,
   TreeSelect,
 } from 'antdv-next';
@@ -126,7 +125,6 @@ const resetTaskForm = () => {
     (ex: any) => ex.$type === `${prefix}:CandidateParam`,
   )?.value;
   if (candidateParamStr && candidateParamStr.length > 0) {
-    // eslint-disable-next-line unicorn/prefer-switch
     if (userTaskForm.value.candidateStrategy === CandidateStrategy.EXPRESSION) {
       // 特殊：流程表达式，只有一个 input 输入框
       // @ts-expect-error: expression strategy stores a scalar in an array-shaped field
@@ -192,7 +190,7 @@ const resetTaskForm = () => {
 
   // 改用通过extensionElements来存储数据
 
-  // if (businessObject.candidateStrategy != undefined) {
+  // if (businessObject.candidateStrategy !== undefined) {
   //   userTaskForm.value.candidateStrategy = parseInt(
   //     businessObject.candidateStrategy,
   //   ) as any;
@@ -356,15 +354,8 @@ onBeforeUnmount(() => {
         allow-clear
         style="width: 100%"
         @change="changeCandidateStrategy"
-      >
-        <SelectOption
-          v-for="(dict, index) in CANDIDATE_STRATEGY"
-          :key="index"
-          :value="dict.value"
-        >
-          {{ dict.label }}
-        </SelectOption>
-      </Select>
+        :options="CANDIDATE_STRATEGY"
+      />
     </FormItem>
     <FormItem
       v-if="userTaskForm.candidateStrategy === CandidateStrategy.ROLE"
@@ -377,15 +368,9 @@ onBeforeUnmount(() => {
         mode="multiple"
         style="width: 100%"
         @change="updateElementTask"
-      >
-        <SelectOption
-          v-for="item in roleOptions"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.name }}
-        </SelectOption>
-      </Select>
+        :options="roleOptions"
+        :field-names="{ label: 'name', value: 'id' }"
+      />
     </FormItem>
     <FormItem
       v-if="
@@ -419,15 +404,9 @@ onBeforeUnmount(() => {
         mode="multiple"
         style="width: 100%"
         @change="updateElementTask"
-      >
-        <SelectOption
-          v-for="item in postOptions"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.name }}
-        </SelectOption>
-      </Select>
+        :options="postOptions"
+        :field-names="{ label: 'name', value: 'id' }"
+      />
     </FormItem>
     <FormItem
       v-if="userTaskForm.candidateStrategy === CandidateStrategy.USER"
@@ -440,15 +419,9 @@ onBeforeUnmount(() => {
         mode="multiple"
         style="width: 100%"
         @change="updateElementTask"
-      >
-        <SelectOption
-          v-for="item in userOptions"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.nickname }}
-        </SelectOption>
-      </Select>
+        :options="userOptions"
+        :field-names="{ label: 'nickname', value: 'id' }"
+      />
     </FormItem>
     <FormItem
       v-if="userTaskForm.candidateStrategy === CandidateStrategy.USER_GROUP"
@@ -461,15 +434,9 @@ onBeforeUnmount(() => {
         mode="multiple"
         style="width: 100%"
         @change="updateElementTask"
-      >
-        <SelectOption
-          v-for="item in userGroupOptions"
-          :key="item.id"
-          :value="item.id"
-        >
-          {{ item.name }}
-        </SelectOption>
-      </Select>
+        :options="userGroupOptions"
+        :field-names="{ label: 'name', value: 'id' }"
+      />
     </FormItem>
     <FormItem
       v-if="userTaskForm.candidateStrategy === CandidateStrategy.FORM_USER"
@@ -478,19 +445,17 @@ onBeforeUnmount(() => {
     >
       <Select
         v-model:value="userTaskForm.candidateParam"
+        :options="
+          userFieldOnFormOptions.map((item) => ({
+            label: item.title,
+            value: item.field,
+            disabled: !item.required,
+          }))
+        "
         allow-clear
         style="width: 100%"
         @change="handleFormUserChange"
-      >
-        <SelectOption
-          v-for="(item, idx) in userFieldOnFormOptions"
-          :key="idx"
-          :value="item.field"
-          :disabled="!item.required"
-        >
-          {{ item.title }}
-        </SelectOption>
-      </Select>
+      />
     </FormItem>
     <FormItem
       v-if="
@@ -504,16 +469,14 @@ onBeforeUnmount(() => {
         allow-clear
         style="width: 100%"
         @change="updateElementTask"
-      >
-        <SelectOption
-          v-for="(item, idx) in deptFieldOnFormOptions"
-          :key="idx"
-          :value="item.field"
-          :disabled="!item.required"
-        >
-          {{ item.title }}
-        </SelectOption>
-      </Select>
+        :options="[
+          ...deptFieldOnFormOptions.map((item) => ({
+            label: item.title,
+            value: item.field,
+            disabled: !item.required,
+          })),
+        ]"
+      />
     </FormItem>
     <FormItem
       v-if="
@@ -528,15 +491,12 @@ onBeforeUnmount(() => {
       :label="deptLevelLabel!"
       name="deptLevel"
     >
-      <Select v-model:value="deptLevel" allow-clear @change="updateElementTask">
-        <SelectOption
-          v-for="(item, index) in MULTI_LEVEL_DEPT"
-          :key="index"
-          :value="item.value"
-        >
-          {{ item.label }}
-        </SelectOption>
-      </Select>
+      <Select
+        v-model:value="deptLevel"
+        allow-clear
+        @change="updateElementTask"
+        :options="MULTI_LEVEL_DEPT"
+      />
     </FormItem>
     <FormItem
       v-if="userTaskForm.candidateStrategy === CandidateStrategy.EXPRESSION"

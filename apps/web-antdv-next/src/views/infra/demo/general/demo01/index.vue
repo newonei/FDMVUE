@@ -18,6 +18,7 @@ import {
 import {
   Button,
   Form,
+  FormItem,
   Input,
   message,
   Pagination,
@@ -153,6 +154,12 @@ async function handleExport() {
 
 /** 初始化 */
 const { hiddenSearchBar, tableToolbarRef, tableRef } = useTableToolbar();
+function setTableToolbarRef(el: any) {
+  tableToolbarRef.value = el;
+}
+function setTableRef(el: any) {
+  tableRef.value = el;
+}
 onMounted(() => {
   getList();
 });
@@ -180,18 +187,12 @@ onMounted(() => {
             placeholder="请选择性别"
             allow-clear
             class="w-full"
-          >
-            <SelectOption
-              v-for="dict in getDictOptions(
-                DICT_TYPE.SYSTEM_USER_SEX,
-                'number',
-              )"
-              :key="dict.value"
-              :value="dict.value"
-            >
-              {{ dict.label }}
-            </SelectOption>
-          </Select>
+            :options="[
+              ...getDictOptions(DICT_TYPE.SYSTEM_USER_SEX, 'number').map(
+                (dict) => ({ label: dict.label, value: dict.value as any }),
+              ),
+            ]"
+          />
         </FormItem>
         <FormItem label="创建时间" name="createTime">
           <RangePicker
@@ -213,7 +214,7 @@ onMounted(() => {
     <ContentWrap title="示例联系人">
       <template #extra>
         <VbenVxeTableToolbar
-          ref="tableToolbarRef"
+          :ref="setTableToolbarRef"
           v-model:hidden-search="hiddenSearchBar"
         >
           <Button
@@ -249,7 +250,7 @@ onMounted(() => {
         </VbenVxeTableToolbar>
       </template>
       <VxeTable
-        ref="tableRef"
+        :ref="setTableRef"
         :data="list"
         show-overflow
         :loading="loading"

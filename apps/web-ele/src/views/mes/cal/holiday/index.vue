@@ -97,7 +97,12 @@ function getLunarInfo(day: string) {
       termName,
     };
   } catch {
-    return { lunarFestival: '', lunarText: '', solarFestival: '', termName: '' };
+    return {
+      lunarFestival: '',
+      lunarText: '',
+      solarFestival: '',
+      termName: '',
+    };
   }
 }
 
@@ -153,14 +158,20 @@ onMounted(getList);
                 {{ data.day.split('-')[2] }}
               </span>
               <ElTag
-                v-if="holidaySet.has(data.day)"
+                v-if="data.type === 'current-month' && holidaySet.has(data.day)"
                 effect="dark"
                 size="small"
                 type="success"
               >
                 休
               </ElTag>
-              <ElTag v-else effect="dark" size="small">班</ElTag>
+              <ElTag
+                v-else-if="data.type === 'current-month'"
+                effect="dark"
+                size="small"
+              >
+                班
+              </ElTag>
             </div>
             <div
               class="mt-1 text-xs"

@@ -126,7 +126,6 @@ const resetTaskForm = () => {
     (ex: any) => ex.$type === `${prefix}:CandidateParam`,
   )?.value;
   if (candidateParamStr && candidateParamStr.length > 0) {
-    // eslint-disable-next-line unicorn/prefer-switch
     if (userTaskForm.value.candidateStrategy === CandidateStrategy.EXPRESSION) {
       // 特殊：流程表达式，只有一个 input 输入框
       // @ts-expect-error: expression strategy stores a scalar in an array-shaped field
@@ -192,7 +191,7 @@ const resetTaskForm = () => {
 
   // 改用通过extensionElements来存储数据
 
-  // if (businessObject.candidateStrategy != undefined) {
+  // if (businessObject.candidateStrategy !== undefined) {
   //   userTaskForm.value.candidateStrategy = parseInt(
   //     businessObject.candidateStrategy,
   //   ) as any;

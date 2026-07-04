@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import type { NavigationBarProperty } from './components/mobile/navigation-bar/config';
 import type { DiyComponent, DiyComponentLibrary, PageConfig } from './util';
 
 import { onMounted, ref, unref, watch } from 'vue';
@@ -10,6 +11,7 @@ import { cloneDeep, isEmpty, isString } from '@vben/utils';
 import { useQRCode } from '@vueuse/integrations/useQRCode';
 import {
   ElAside,
+  ElButton,
   ElCard,
   ElContainer,
   ElHeader,
@@ -26,7 +28,11 @@ import statusBarImg from '#/assets/imgs/diy/statusBar.png';
 import ComponentContainer from './components/component-container.vue';
 import ComponentLibrary from './components/component-library.vue';
 import { componentConfigs, components } from './components/mobile';
-import { component as NAVIGATION_BAR_COMPONENT } from './components/mobile/navigation-bar/config';
+import {
+  isNavigationBarAlwaysShow,
+  isNavigationBarShowType,
+  component as NAVIGATION_BAR_COMPONENT,
+} from './components/mobile/navigation-bar/config';
 import { component as PAGE_CONFIG_COMPONENT } from './components/mobile/page-config/config';
 import { component as TAB_BAR_COMPONENT } from './components/mobile/tab-bar/config';
 
@@ -54,7 +60,6 @@ const qrcode = useQRCode(props.previewUrl, {
   margin: 4,
 }); // 预览二维码
 
-const componentLibrary = ref(); // 左侧组件库
 const pageConfigComponent = ref<DiyComponent<any>>(
   cloneDeep(PAGE_CONFIG_COMPONENT),
 ); // 页面设置组件
@@ -66,6 +71,21 @@ const tabBarComponent = ref<DiyComponent<any>>(cloneDeep(TAB_BAR_COMPONENT)); //
 const selectedComponent = ref<DiyComponent<any>>(); // 选中的组件，默认选中顶部导航栏
 const selectedComponentIndex = ref<number>(-1); // 选中的组件索引
 const pageComponents = ref<DiyComponent<any>[]>([]); // 组件列表
+
+// 兼容历史装修数据：旧版只有 alwaysShow，新增 showType 后统一转成枚举并继续输出 alwaysShow。
+function normalizeNavigationBarProperty(property: NavigationBarProperty) {
+  const navigationBarProperty = cloneDeep(property);
+  if (!isNavigationBarShowType(navigationBarProperty.showType)) {
+    navigationBarProperty.showType = isNavigationBarAlwaysShow(
+      navigationBarProperty,
+    )
+      ? 'always'
+      : 'scroll';
+  }
+  navigationBarProperty.alwaysShow =
+    navigationBarProperty.showType === 'always';
+  return navigationBarProperty;
+}
 
 /**
  * 监听传入的页面配置
@@ -83,9 +103,10 @@ watch(
       (typeof modelValue !== 'string' && modelValue?.page) ||
       PAGE_CONFIG_COMPONENT.property;
     // noinspection SuspiciousTypeOfGuard
-    navigationBarComponent.value.property =
+    navigationBarComponent.value.property = normalizeNavigationBarProperty(
       (typeof modelValue !== 'string' && modelValue?.navigationBar) ||
-      NAVIGATION_BAR_COMPONENT.property;
+        NAVIGATION_BAR_COMPONENT.property,
+    );
     // noinspection SuspiciousTypeOfGuard
     tabBarComponent.value.property =
       (typeof modelValue !== 'string' && modelValue?.tabBar) ||
@@ -343,11 +364,7 @@ onMounted(() => {
       <ElContainer class="editor-container h-[calc(100vh-135px)]">
         <!-- 左侧：组件库（ComponentLibrary） -->
         <ElAside width="261px" class="editor-left">
-          <ComponentLibrary
-            v-if="libs && libs.length > 0"
-            ref="componentLibrary"
-            :list="libs"
-          />
+          <ComponentLibrary v-if="libs && libs.length > 0" :list="libs" />
         </ElAside>
         <!-- 中心：设计区域（ComponentContainer） -->
         <div

@@ -94,8 +94,10 @@ const [Modal, modalApi] = useVbenModal({
       // 设置到 values
       await formApi.setValues(formData.value as any);
       await gridApi.grid.reloadData(
-        (formData.value!.statuses =
-          formData.value?.statuses?.concat(DEFAULT_STATUSES)) as any,
+        (formData.value!.statuses = [
+          ...formData.value.statuses,
+          ...DEFAULT_STATUSES,
+        ]) as any,
       );
     } finally {
       modalApi.unlock();
@@ -108,7 +110,7 @@ async function handleAddStatus() {
   formData.value!.statuses!.splice(-3, 0, {
     name: '',
     percent: undefined,
-  } as any);
+  });
   await nextTick();
   await gridApi.grid.reloadData(formData.value!.statuses as any);
 }
@@ -128,7 +130,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
       mode: 'cell',
     },
     columns: useFormColumns(),
-    data: formData.value?.statuses?.concat(DEFAULT_STATUSES),
+    data: formData.value?.statuses
+      ? [...formData.value.statuses, ...DEFAULT_STATUSES]
+      : undefined,
     border: true,
     showOverflow: true,
     autoResize: true,
@@ -152,9 +156,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <Form class="mx-4">
       <template #statuses>
         <Grid class="w-full">
-          <template #defaultStatus="{ row, rowIndex }">
+          <template #endStatus="{ row, rowIndex }">
             <span>
-              {{ row.defaultStatus ? '结束' : `阶段${rowIndex + 1}` }}
+              {{ row.endStatus ? '结束' : `阶段${rowIndex + 1}` }}
             </span>
           </template>
           <template #name="{ row }">

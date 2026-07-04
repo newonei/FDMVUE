@@ -8,7 +8,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
 import { isTenantEnable, useTabs, useWatermark } from '@vben/hooks';
-import { AntdProfileOutlined } from '@vben/icons';
+import { AntdProfileOutlined, IconifyIcon } from '@vben/icons';
 import {
   BasicLayout,
   LockScreen,
@@ -20,7 +20,7 @@ import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { formatDateTime } from '@vben/utils';
 
-import { message } from 'ant-design-vue';
+import { message, Tooltip } from 'ant-design-vue';
 
 import {
   getUnreadNotifyMessageCount,
@@ -119,6 +119,12 @@ function handleNotificationOpen(open: boolean) {
   }
   handleNotificationGetList();
   handleNotificationGetUnreadCount();
+}
+
+/** 打开 IM 聊天 */
+function handleOpenImHome() {
+  const { href } = router.resolve({ name: 'ImHome' });
+  window.open(href, '_blank');
 }
 
 // 租户列表
@@ -266,6 +272,17 @@ watch(
           @success="handleTenantChange"
         />
       </div>
+    </template>
+    <template #header-right-900>
+      <Tooltip title="IM 聊天">
+        <button
+          class="hover:bg-accent hover:text-accent-foreground mr-1 inline-flex size-8 items-center justify-center rounded-md transition-colors"
+          type="button"
+          @click="handleOpenImHome"
+        >
+          <IconifyIcon class="size-4" icon="lucide:message-circle" />
+        </button>
+      </Tooltip>
     </template>
     <template #extra>
       <AuthenticationLoginExpiredModal

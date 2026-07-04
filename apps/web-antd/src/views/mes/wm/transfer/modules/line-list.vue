@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { FormType } from '../data';
+
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { MesWmTransferDetailApi } from '#/api/mes/wm/transfer/detail';
 import type { MesWmTransferLineApi } from '#/api/mes/wm/transfer/line';
@@ -18,7 +20,7 @@ import {
 import { $t } from '#/locales';
 import { PrinterLabel } from '#/views/mes/wm/barcode/components';
 
-import { type FormType, useLineGridColumns } from '../data';
+import { useLineGridColumns } from '../data';
 import DetailForm from './detail-form.vue';
 import DetailList from './detail-list.vue';
 import LineForm from './line-form.vue';
@@ -49,7 +51,8 @@ const [DetailFormModal, detailFormModalApi] = useVbenModal({
 /** 刷新表格 */
 function handleRefresh() {
   for (const id of Object.keys(detailMap)) {
-    delete detailMap[Number(id)];
+    const key = Number(id);
+    Reflect.deleteProperty(detailMap, key);
   }
   gridApi.query();
 }

@@ -252,6 +252,9 @@ const moddleExtensions = computed(() => {
 const initBpmnModeler = () => {
   if (bpmnModeler) return;
   const data: any = document.querySelector('#bpmnCanvas');
+  if (!data) {
+    return;
+  }
   // console.log(data, 'data');
   // console.log(props.keyboard, 'props.keyboard');
   // console.log(additionalModules, 'additionalModules()');
@@ -268,7 +271,7 @@ const initBpmnModeler = () => {
     // propertiesPanel: {
     // parent: '#js-properties-panel'
     // },
-    keyboard: props.keyboard ? { bindTo: document } : null,
+    keyboard: props.keyboard ? { bind: true } : null,
     // additionalModules: additionalModules.value,
     additionalModules: additionalModules.value as any[],
     moddleExtensions: moddleExtensions.value,
@@ -399,16 +402,14 @@ const setEncoded = (type: string, data: string) => {
 };
 
 // 加载本地文件
-const importLocalFile = () => {
+const importLocalFile = async () => {
   const file = refFile.value.files[0];
-  const reader = new FileReader();
-  // eslint-disable-next-line unicorn/prefer-blob-reading-methods
-  reader.readAsText(file);
-  reader.addEventListener('load', function () {
-    const xmlStr = this.result;
-    createNewDiagram(xmlStr);
-    emit('save', xmlStr);
-  });
+  if (!file) {
+    return;
+  }
+  const xmlStr = await file.text();
+  createNewDiagram(xmlStr);
+  emit('save', xmlStr);
 };
 /* ------------------------------------------------ refs methods ------------------------------------------------------ */
 const downloadProcessAsXml = () => {

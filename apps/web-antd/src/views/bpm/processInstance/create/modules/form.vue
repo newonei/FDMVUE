@@ -64,13 +64,12 @@ const detailForm = ref<ProcessFormData>({
 const fApi = ref<any>();
 
 const startUserSelectTasks = ref<UserTask[]>([]);
-const startUserSelectAssignees = ref<Record<string, string[]>>({});
-const tempStartUserSelectAssignees = ref<Record<string, string[]>>({});
+const startUserSelectAssignees = ref<Record<string, number[]>>({});
+const tempStartUserSelectAssignees = ref<Record<string, number[]>>({});
 
 const bpmnXML = ref<string | undefined>(undefined);
 const simpleJson = ref<string | undefined>(undefined);
 
-const timelineRef = ref<any>();
 const activeTab = ref('form');
 const activityNodes = ref<BpmProcessInstanceApi.ApprovalNodeInfo[]>([]);
 const processInstanceStartLoading = ref(false);
@@ -133,7 +132,7 @@ async function initProcessInfo(row: any, formVariables?: any) {
     if (formVariables) {
       for (const key in formVariables) {
         if (!allowedFields.has(key)) {
-          delete formVariables[key];
+          delete formVariables.key;
         }
       }
     }
@@ -294,6 +293,7 @@ defineExpose({ initProcessInfo });
             class="flex-1 overflow-auto"
           >
             <form-create
+              v-if="detailForm.rule.length > 0"
               :rule="detailForm.rule"
               v-model:api="fApi"
               v-model="detailForm.value"
@@ -303,7 +303,6 @@ defineExpose({ initProcessInfo });
           </Col>
           <Col :xs="24" :sm="24" :md="6" :lg="6" :xl="6">
             <ProcessInstanceTimeline
-              ref="timelineRef"
               :activity-nodes="activityNodes"
               :show-status-icon="false"
               @select-user-confirm="selectUserConfirm"

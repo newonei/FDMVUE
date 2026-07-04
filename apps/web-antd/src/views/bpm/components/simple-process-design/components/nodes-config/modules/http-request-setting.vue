@@ -59,9 +59,9 @@ function addHttpResponseSetting(responseSetting: Record<string, string>[]) {
 /** 删除 HTTP 请求返回值设置项 */
 function deleteHttpResponseSetting(
   responseSetting: Record<string, string>[],
-  index: number,
+  index: number | string,
 ) {
-  responseSetting.splice(index, 1);
+  responseSetting.splice(Number(index), 1);
 }
 </script>
 <template>
@@ -157,7 +157,7 @@ function deleteHttpResponseSetting(
             <IconifyIcon
               class="size-4 cursor-pointer text-red-500"
               icon="lucide:trash-2"
-              @click="deleteHttpResponseSetting(setting.response!, index)"
+              @click="deleteHttpResponseSetting(setting.response, index)"
             />
           </div>
         </Col>

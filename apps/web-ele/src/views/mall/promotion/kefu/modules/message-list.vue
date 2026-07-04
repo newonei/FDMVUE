@@ -4,9 +4,9 @@ import type { Emoji } from './tools/emoji';
 import type { MallKefuConversationApi } from '#/api/mall/promotion/kefu/conversation';
 import type { MallKefuMessageApi } from '#/api/mall/promotion/kefu/message';
 
-import { computed, KeFuMessageContentTypeEnum, reactive, ref, toRefs, unref, watch } from 'vue';
+import { computed, reactive, ref, toRefs, unref, watch } from 'vue';
 
-import { UserTypeEnum } from '@vben/constants';
+import { KeFuMessageContentTypeEnum, UserTypeEnum } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 import { formatDate, isEmpty, jsonParse } from '@vben/utils';
 
@@ -415,7 +415,7 @@ function showTime(item: MallKefuMessageApi.Message, index: number) {
             :rows="4"
             class="border-none p-2"
             placeholder="输入消息，Enter发送，Shift+Enter换行"
-            @keyup.enter="handleSendMessage"
+            @keydown.enter.exact.prevent="handleSendMessage"
             :input-style="{ boxShadow: 'none' }"
           />
         </div>

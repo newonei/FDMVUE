@@ -13,6 +13,7 @@ import {
   AntdProfileOutlined,
   BookOpenText,
   CircleHelp,
+  IconifyIcon,
   SvgGithubIcon,
 } from '@vben/icons';
 import {
@@ -27,7 +28,7 @@ import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { formatDateTime, openWindow } from '@vben/utils';
 
-import { message } from 'antdv-next';
+import { message, Tooltip } from 'antdv-next';
 
 import {
   getUnreadNotifyMessageCount,
@@ -156,6 +157,12 @@ function handleNotificationOpen(open: boolean) {
   handleNotificationGetUnreadCount();
 }
 
+/** 打开 IM 聊天 */
+function handleOpenImHome() {
+  const { href } = router.resolve({ name: 'ImHome' });
+  window.open(href, '_blank');
+}
+
 // 租户列表
 const tenants = ref<SystemTenantApi.Tenant[]>([]);
 const tenantEnable = computed(
@@ -201,6 +208,31 @@ onMounted(() => {
     1000 * 60 * 2,
   );
 });
+
+const handleClick = (item: NotificationItem) => {
+  // 如果通知项有链接，点击时跳转
+  if (item.link) {
+    navigateTo(item.link, item.query, item.state);
+  }
+};
+
+function navigateTo(
+  link: string,
+  query?: Record<string, any>,
+  state?: Record<string, any>,
+) {
+  if (link.startsWith('http://') || link.startsWith('https://')) {
+    // 外部链接，在新标签页打开
+    window.open(link, '_blank');
+  } else {
+    // 内部路由链接，支持 query 参数和 state
+    router.push({
+      path: link,
+      query: query || {},
+      state,
+    });
+  }
+}
 
 watch(
   () => ({
@@ -264,6 +296,7 @@ watch(
         @view-all="handleNotificationViewAll"
         @open="handleNotificationOpen"
         @read="handleNotificationRead"
+        @on-click="handleClick"
       />
     </template>
     <template #header-right-1>
@@ -275,6 +308,17 @@ watch(
           @success="handleTenantChange"
         />
       </div>
+    </template>
+    <template #header-right-900>
+      <Tooltip title="IM 聊天">
+        <button
+          class="hover:bg-accent hover:text-accent-foreground mr-1 inline-flex size-8 items-center justify-center rounded-md transition-colors"
+          type="button"
+          @click="handleOpenImHome"
+        >
+          <IconifyIcon class="size-4" icon="lucide:message-circle" />
+        </button>
+      </Tooltip>
     </template>
     <template #extra>
       <AuthenticationLoginExpiredModal

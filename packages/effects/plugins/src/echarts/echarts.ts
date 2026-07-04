@@ -1,24 +1,3 @@
-import type {
-  // 系列类型的定义后缀都为 SeriesOption
-  BarSeriesOption,
-  GaugeSeriesOption,
-  HeatmapSeriesOption,
-  LineSeriesOption,
-  MapSeriesOption,
-  ScatterSeriesOption,
-} from 'echarts/charts';
-import type {
-  DatasetComponentOption,
-  DataZoomComponentOption,
-  GeoComponentOption,
-  GridComponentOption,
-  // 组件类型的定义后缀都为 ComponentOption
-  TitleComponentOption,
-  TooltipComponentOption,
-  VisualMapComponentOption,
-} from 'echarts/components';
-import type { ComposeOption } from 'echarts/core';
-
 import {
   BarChart,
   FunnelChart,
@@ -52,23 +31,6 @@ import {
 } from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
 
-// 通过 ComposeOption 来组合出一个只有必须组件和图表的 Option 类型
-type ECOption = ComposeOption<
-  | BarSeriesOption
-  | DatasetComponentOption
-  | DataZoomComponentOption
-  | GaugeSeriesOption
-  | GeoComponentOption
-  | GridComponentOption
-  | HeatmapSeriesOption
-  | LineSeriesOption
-  | MapSeriesOption
-  | ScatterSeriesOption
-  | TitleComponentOption
-  | TooltipComponentOption
-  | VisualMapComponentOption
->;
-
 // 注册必须的组件
 echarts.use([
   TitleComponent,
@@ -97,6 +59,5 @@ echarts.use([
   MapChart,
   GeoComponent,
 ]);
-export type { ECOption } from './types';
 
 export default echarts;

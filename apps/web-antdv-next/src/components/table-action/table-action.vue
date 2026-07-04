@@ -11,7 +11,15 @@ import { IconifyIcon } from '@vben/icons';
 import { $t } from '@vben/locales';
 import { isBoolean, isFunction } from '@vben/utils';
 
-import { Button, Dropdown, Menu, Popconfirm, Space, Tooltip } from 'antdv-next';
+import {
+  Button,
+  Dropdown,
+  Menu,
+  MenuItem,
+  Popconfirm,
+  Space,
+  Tooltip,
+} from 'antdv-next';
 
 const props = defineProps({
   actions: {
@@ -180,15 +188,15 @@ watch(
     <Dropdown v-if="getDropdownList.length > 0" :trigger="['hover']">
       <slot name="more">
         <Button type="link">
+          {{ $t('page.action.more') }}
           <template #icon>
-            {{ $t('page.action.more') }}
             <IconifyIcon icon="lucide:ellipsis-vertical" />
           </template>
         </Button>
       </slot>
       <template #popupRender>
         <Menu>
-          <Menu.Item
+          <MenuItem
             v-for="(action, index) in getDropdownList"
             :key="index"
             :disabled="action.disabled"
@@ -225,7 +233,7 @@ watch(
                 {{ action.label }}
               </div>
             </template>
-          </Menu.Item>
+          </MenuItem>
         </Menu>
       </template>
     </Dropdown>

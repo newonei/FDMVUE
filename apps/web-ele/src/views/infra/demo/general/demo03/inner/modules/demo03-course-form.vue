@@ -36,9 +36,12 @@ defineExpose({
       tableRef.value?.getRemoveRecords() as Demo03StudentApi.Demo03Course[];
     const insertRecords =
       tableRef.value?.getInsertRecords() as Demo03StudentApi.Demo03Course[];
-    return data
-      .filter((row) => !removeRecords.some((removed) => removed.id === row.id))
-      ?.concat(insertRecords.map((row: any) => ({ ...row, id: undefined })));
+    return [
+      ...data.filter(
+        (row) => !removeRecords.some((removed) => removed.id === row.id),
+      ),
+      ...insertRecords.map((row: any) => ({ ...row, id: undefined })),
+    ];
   },
 });
 
@@ -73,7 +76,7 @@ watch(
           size="small"
           type="danger"
           link
-          @click="onDelete(row as any)"
+          @click="onDelete(row)"
           v-access:code="['infra:demo03-student:delete']"
         >
           {{ $t('ui.actionTitle.delete') }}

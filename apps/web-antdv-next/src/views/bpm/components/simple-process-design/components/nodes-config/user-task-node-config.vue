@@ -28,7 +28,6 @@ import {
   RadioGroup,
   Row,
   Select,
-  SelectOption,
   Switch,
   TabPane,
   Tabs,
@@ -147,6 +146,20 @@ const userFieldOnFormOptions = computed(() => {
 const deptFieldOnFormOptions = computed(() => {
   return formFieldOptions.filter((item) => item.type === 'DeptSelect');
 });
+
+const userFieldSelectOptions = computed(() =>
+  userFieldOnFormOptions.value.map((item) => ({
+    ...item,
+    disabled: !item.required,
+  })),
+);
+
+const deptFieldSelectOptions = computed(() =>
+  deptFieldOnFormOptions.value.map((item) => ({
+    ...item,
+    disabled: !item.required,
+  })),
+);
 
 // 操作按钮设置
 const {
@@ -416,7 +429,7 @@ function showUserTaskNodeConfig(node: SimpleFlowNode) {
   configForm.value.timeoutHandlerEnable = node.timeoutHandler?.enable;
   if (node.timeoutHandler?.enable && node.timeoutHandler?.timeDuration) {
     const strTimeDuration = node.timeoutHandler.timeDuration;
-    const parseTime = strTimeDuration.slice(2, -1);
+    const parseTime = strTimeDuration.match(/\d+/)?.[0] ?? '';
     const parseTimeUnit = strTimeDuration.slice(-1);
     configForm.value.timeDuration = Number.parseInt(parseTime);
     timeUnit.value = convertTimeUnit(parseTimeUnit);
@@ -562,12 +575,12 @@ function useTimeoutHandler() {
     if (!configForm.value.timeoutHandlerEnable) {
       return undefined;
     }
-    let strTimeDuration = 'PT';
+    let strTimeDuration = 'P';
     if (timeUnit.value === TimeUnitType.MINUTE) {
-      strTimeDuration += `${configForm.value.timeDuration}M`;
+      strTimeDuration += `T${configForm.value.timeDuration}M`;
     }
     if (timeUnit.value === TimeUnitType.HOUR) {
-      strTimeDuration += `${configForm.value.timeDuration}H`;
+      strTimeDuration += `T${configForm.value.timeDuration}H`;
     }
     if (timeUnit.value === TimeUnitType.DAY) {
       strTimeDuration += `${configForm.value.timeDuration}D`;
@@ -697,18 +710,11 @@ onMounted(() => {
             >
               <Select
                 v-model:value="configForm.roleIds"
-                clearable
+                :options="roleOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in roleOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -744,18 +750,11 @@ onMounted(() => {
             >
               <Select
                 v-model:value="configForm.postIds"
-                clearable
+                :options="postOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in postOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id!"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+              />
             </FormItem>
             <FormItem
               v-if="configForm.candidateStrategy === CandidateStrategy.USER"
@@ -764,18 +763,11 @@ onMounted(() => {
             >
               <Select
                 v-model:value="configForm.userIds"
-                clearable
+                :options="userOptions"
+                :field-names="{ label: 'nickname', value: 'id' }"
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in userOptions"
-                  :key="item.id"
-                  :label="item.nickname"
-                  :value="item.id"
-                >
-                  {{ item.nickname }}
-                </SelectOption>
-              </Select>
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -786,18 +778,11 @@ onMounted(() => {
             >
               <Select
                 v-model:value="configForm.userGroups"
-                clearable
+                :options="userGroupOptions"
+                :field-names="{ label: 'name', value: 'id' }"
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in userGroupOptions"
-                  :key="item.id"
-                  :label="item.name"
-                  :value="item.id"
-                >
-                  {{ item.name }}
-                </SelectOption>
-              </Select>
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -806,17 +791,12 @@ onMounted(() => {
               label="表单内用户字段"
               name="formUser"
             >
-              <Select v-model:value="configForm.formUser" clearable>
-                <SelectOption
-                  v-for="(item, idx) in userFieldOnFormOptions"
-                  :key="idx"
-                  :label="item.title"
-                  :value="item.field"
-                  :disabled="!item.required"
-                >
-                  {{ item.title }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.formUser"
+                :options="userFieldSelectOptions"
+                :field-names="{ label: 'title', value: 'field' }"
+                allow-clear
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -826,17 +806,12 @@ onMounted(() => {
               label="表单内部门字段"
               name="formDept"
             >
-              <Select v-model:value="configForm.formDept" clearable>
-                <SelectOption
-                  v-for="(item, idx) in deptFieldOnFormOptions"
-                  :key="idx"
-                  :label="item.title"
-                  :value="item.field"
-                  :disabled="!item.required"
-                >
-                  {{ item.title }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.formDept"
+                :options="deptFieldSelectOptions"
+                :field-names="{ label: 'title', value: 'field' }"
+                allow-clear
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -852,16 +827,11 @@ onMounted(() => {
               :label="deptLevelLabel!"
               name="deptLevel"
             >
-              <Select v-model:value="configForm.deptLevel" clearable>
-                <SelectOption
-                  v-for="(item, index) in MULTI_LEVEL_DEPT"
-                  :key="index"
-                  :label="item.label"
-                  :value="item.value"
-                >
-                  {{ item.label }}
-                </SelectOption>
-              </Select>
+              <Select
+                v-model:value="configForm.deptLevel"
+                :options="MULTI_LEVEL_DEPT"
+                allow-clear
+              />
             </FormItem>
             <FormItem
               v-if="
@@ -943,16 +913,12 @@ onMounted(() => {
                 label="驳回节点"
                 name="returnNodeId"
               >
-                <Select v-model:value="configForm.returnNodeId" clearable>
-                  <SelectOption
-                    v-for="item in returnTaskList"
-                    :key="item.id"
-                    :label="item.name"
-                    :value="item.id"
-                  >
-                    {{ item.name }}
-                  </SelectOption>
-                </Select>
+                <Select
+                  v-model:value="configForm.returnNodeId"
+                  :options="returnTaskList"
+                  :field-names="{ label: 'name', value: 'id' }"
+                  allow-clear
+                />
               </FormItem>
             </div>
 
@@ -1014,26 +980,17 @@ onMounted(() => {
                         class="mr-2 mt-0.5"
                         v-model:value="configForm.timeDuration"
                         :min="1"
-                        controls-position="right"
                       />
                     </FormItem>
                   </Col>
                   <Col>
                     <Select
                       v-model:value="timeUnit"
+                      :options="TIME_UNIT_TYPES"
                       class="mr-2"
                       :style="{ width: '100px' }"
                       @change="timeUnitChange"
-                    >
-                      <SelectOption
-                        v-for="item in TIME_UNIT_TYPES"
-                        :key="item.value"
-                        :label="item.label"
-                        :value="item.value"
-                      >
-                        {{ item.label }}
-                      </SelectOption>
-                    </Select>
+                    />
                     <TypographyText class="mr-2 mt-2 inline-flex text-sm">
                       未处理
                     </TypographyText>
@@ -1087,18 +1044,11 @@ onMounted(() => {
             >
               <Select
                 v-model:value="configForm.assignEmptyHandlerUserIds"
-                clearable
+                :options="userOptions"
+                :field-names="{ label: 'nickname', value: 'id' }"
+                allow-clear
                 mode="multiple"
-              >
-                <SelectOption
-                  v-for="item in userOptions"
-                  :key="item.id"
-                  :label="item.nickname"
-                  :value="item.id"
-                >
-                  {{ item.nickname }}
-                </SelectOption>
-              </Select>
+              />
             </FormItem>
 
             <div v-if="currentNode.type === BpmNodeTypeEnum.USER_TASK_NODE">

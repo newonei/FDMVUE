@@ -61,8 +61,8 @@ interface LoopInstanceForm {
 }
 
 const loopInstanceForm = ref<LoopInstanceForm>({});
-const bpmnElement = ref<any>(null);
-const multiLoopInstance = ref<any>(null);
+const bpmnElement = ref<any | null>(null);
+const multiLoopInstance = ref<any | null>(null);
 declare global {
   interface Window {
     bpmnInstances?: () => any;
@@ -72,7 +72,6 @@ declare global {
 const bpmnInstances = () => (window as any)?.bpmnInstances;
 
 // @ts-expect-error: retained for legacy multi-instance mode compatibility
-// eslint-disable-next-line unused-imports/no-unused-vars
 const getElementLoop = (businessObject: any): void => {
   if (!businessObject.loopCharacteristics) {
     loopCharacteristics.value = 'Null';
@@ -276,7 +275,7 @@ const approveMethod = ref<ApproveMethodType | undefined>();
 const approveRatio = ref<number>(100);
 const otherExtensions = ref<any[]>([]);
 const getElementLoopNew = (): void => {
-  if (props.type === 'UserTask') {
+  if (props.type === 'UserTask' && bpmnElement.value) {
     const loopCharacteristics =
       bpmnElement.value.businessObject?.loopCharacteristics;
     const extensionElements =
@@ -320,6 +319,9 @@ const onApproveRatioChange = (): void => {
   updateLoopCharacteristics();
 };
 const updateLoopCharacteristics = (): void => {
+  if (!bpmnElement.value) {
+    return;
+  }
   // 根据ApproveMethod生成multiInstanceLoopCharacteristics节点
   if (approveMethod.value === ApproveMethodType.RANDOM_SELECT_ONE_APPROVE) {
     bpmnInstances().modeling.updateProperties(toRaw(bpmnElement.value), {
@@ -367,9 +369,11 @@ const updateLoopCharacteristics = (): void => {
           body: `\${ nrOfCompletedInstances >= nrOfInstances }`,
         });
     }
-    bpmnInstances().modeling.updateProperties(toRaw(bpmnElement.value), {
-      loopCharacteristics: toRaw(multiLoopInstance.value),
-    });
+    if (multiLoopInstance.value) {
+      bpmnInstances().modeling.updateProperties(toRaw(bpmnElement.value), {
+        loopCharacteristics: toRaw(multiLoopInstance.value),
+      });
+    }
   }
 
   // 添加ApproveMethod到ExtensionElements
@@ -447,15 +451,12 @@ watch(
         <Select
           v-model:value="loopCharacteristics"
           @change="changeLoopCharacteristicsType"
-        >
-          <SelectOption value="ParallelMultiInstance">
-            并行多重事件
-          </SelectOption>
-          <SelectOption value="SequentialMultiInstance">
-            时序多重事件
-          </SelectOption>
-          <SelectOption value="Null">无</SelectOption>
-        </Select>
+          :options="[
+            { label: '并行多重事件', value: 'ParallelMultiInstance' },
+            { label: '时序多重事件', value: 'SequentialMultiInstance' },
+            { label: '无', value: 'Null' },
+          ]"
+        />
       </FormItem>
       <template
         v-if="

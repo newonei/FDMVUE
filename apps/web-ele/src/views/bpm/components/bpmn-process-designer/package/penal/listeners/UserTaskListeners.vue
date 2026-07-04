@@ -38,7 +38,7 @@ interface Props {
   type?: string;
 }
 
-const prefix = inject<string>('prefix');
+const prefix = inject<string>('prefix', 'flowable');
 
 const elementListenersList = ref<any[]>([]);
 const listenerEventTypeObject = ref(eventType);
@@ -237,10 +237,10 @@ const selectProcessListener = (listener: any) => {
     bpmnElement.businessObject?.extensionElements?.values?.filter(
       (ex: any) => ex.$type !== `${prefix}:TaskListener`,
     ) ?? [];
-  updateElementExtensions(
-    bpmnElement,
-    otherExtensionList.value?.concat(bpmnElementListeners.value),
-  );
+  updateElementExtensions(bpmnElement, [
+    ...otherExtensionList.value,
+    ...bpmnElementListeners.value,
+  ]);
 };
 
 const [ListenerDrawer, listenerDrawerApi] = useVbenDrawer({
@@ -324,7 +324,7 @@ watch(
 );
 </script>
 <template>
-  <div class="-mx-2 mb-2">
+  <div class="-mx-2">
     <ListenerGrid>
       <template #action="{ row, rowIndex }">
         <ElButton

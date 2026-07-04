@@ -30,8 +30,8 @@ export namespace ThingModelApi {
     required?: boolean;
     dataType?: string;
     description?: string;
-    dataSpecs?: any;
-    dataSpecsList?: any[];
+    dataSpecs?: ThingModelDataSpecs;
+    dataSpecsList?: ThingModelPropertyDataSpecs[];
   }
 
   /** IoT 物模型服务 */
@@ -52,6 +52,7 @@ export namespace ThingModelApi {
     name?: string;
     required?: boolean;
     type?: string;
+    dataType?: string;
     description?: string;
     outputParams?: Param[];
     method?: string;
@@ -64,8 +65,8 @@ export namespace ThingModelApi {
     direction?: string;
     paraOrder?: number;
     dataType?: string;
-    dataSpecs?: any;
-    dataSpecsList?: any[];
+    dataSpecs?: ThingModelDataSpecs;
+    dataSpecsList?: ThingModelPropertyDataSpecs[];
   }
 
   /** IoT 物模型 TSL 响应 */
@@ -78,19 +79,35 @@ export namespace ThingModelApi {
   }
 
   /** IoT 数据定义（数值型） */
-  export interface DataSpecsNumberData {
+  export interface ThingModelDataSpecs {
+    accessMode?: string;
+    childDataType?: string;
+    dataSpecs?: ThingModelDataSpecs;
+    dataSpecsList?: ThingModelPropertyDataSpecs[];
+    dataType?: string;
+    defaultValue?: string;
+    description?: string;
+    identifier?: string;
+    length?: number | string;
     min?: number | string;
     max?: number | string;
+    name?: string;
+    precise?: string;
+    required?: boolean;
+    size?: number | string;
     step?: number | string;
     unit?: string;
     unitName?: string;
+    value?: number | string;
   }
 
+  /** IoT 数据定义（数值型） */
+  export type DataSpecsNumberData = ThingModelDataSpecs;
+
   /** IoT 数据定义（枚举/布尔型） */
-  export interface DataSpecsEnumOrBoolData {
-    value: number | string;
-    name: string;
-  }
+  export type DataSpecsEnumOrBoolData = ThingModelDataSpecs;
+
+  export type ThingModelPropertyDataSpecs = Property & ThingModelDataSpecs;
 }
 
 /** 生成「必填 + 数字」类校验器：拼到 size / length / 枚举值上 */

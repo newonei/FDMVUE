@@ -31,6 +31,7 @@ import {
   ElForm,
   ElFormItem,
   ElImage,
+  ElImageViewer,
   ElInput,
   ElMessage,
   ElOption,
@@ -55,6 +56,7 @@ import {
   transferTask,
 } from '#/api/bpm/task';
 import { setConfAndFields2 } from '#/components/form-create';
+import { FileUpload } from '#/components/upload';
 import { $t } from '#/locales';
 
 import Signature from './signature.vue';
@@ -93,6 +95,24 @@ const popOverVisible: any = ref({
   deleteSign: false,
 }); // 气泡卡是否展示
 const returnList = ref([] as any); // 退回节点
+const APPROVAL_ATTACHMENT_FILE_TYPES = [
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'txt',
+  'pdf',
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'bmp',
+  'webp',
+];
+const APPROVAL_ATTACHMENT_FILE_SIZE = 5;
+const APPROVAL_ATTACHMENT_DIRECTORY = 'bpm/task-attachment';
 
 /** 创建流程表达式 */
 function openSignatureModal() {
@@ -119,6 +139,7 @@ const approveReasonForm: any = reactive({
   reason: '',
   signPicUrl: '',
   nextAssignees: {},
+  attachments: [],
 });
 const approveReasonRule: Record<string, any> = computed(() => {
   return {
@@ -141,6 +162,7 @@ const approveReasonRule: Record<string, any> = computed(() => {
 const rejectFormRef = ref<FormInstance>();
 const rejectReasonForm = reactive({
   reason: '',
+  attachments: [],
 }); // 拒绝表单
 const rejectReasonRule: any = computed(() => {
   return {
@@ -278,7 +300,7 @@ async function openPopover(type: string) {
     }
   }
   Object.keys(popOverVisible.value).forEach((item) => {
-    if (popOverVisible.value[item]) popOverVisible.value[item] = item === type;
+    popOverVisible.value[item] = item === type;
   });
   if (type === 'approve') {
     // 当前任务有节点表单时，等 form-create 的 fApi 就绪后再计算下一个节点；
@@ -298,6 +320,14 @@ async function openPopover(type: string) {
 function closePopover(type: string, formRef: any | FormInstance) {
   if (formRef) {
     formRef.resetFields();
+  }
+  if (type === 'approve') {
+    approveReasonForm.reason = '';
+    approveReasonForm.attachments = [];
+    approveReasonForm.signPicUrl = '';
+  } else if (type === 'reject') {
+    rejectReasonForm.reason = '';
+    rejectReasonForm.attachments = [];
   }
   if (popOverVisible.value[type]) popOverVisible.value[type] = false;
   nextAssigneesActivityNode.value = [];
@@ -334,7 +364,9 @@ async function initNextAssigneesFormField() {
           BpmCandidateStrategyEnum.START_USER_SELECT ===
             node.candidateStrategy) ||
         // 情况二：当前节点是审批人自选
-        BpmCandidateStrategyEnum.APPROVE_USER_SELECT === node.candidateStrategy
+        (isEmpty(node.candidateUsers) &&
+          BpmCandidateStrategyEnum.APPROVE_USER_SELECT ===
+            node.candidateStrategy)
       ) {
         nextAssigneesActivityNode.value.push(node);
       }
@@ -376,7 +408,10 @@ function validateNextAssignees() {
   }
   // 如果需要自选审批人，则校验每个节点是否都已配置审批人
   for (const item of nextAssigneesActivityNode.value) {
-    if (isEmpty(approveReasonForm.nextAssignees[item.id])) {
+    if (
+      isEmpty(item.candidateUsers) &&
+      isEmpty(approveReasonForm.nextAssignees[item.id])
+    ) {
       ElMessage.warning('下一个节点的审批人不能为空!');
       return false;
     }
@@ -410,6 +445,7 @@ async function handleAudit(pass: boolean, formRef: FormInstance | undefined) {
       const data = {
         id: runningTask.value.id,
         reason: approveReasonForm.reason,
+        attachments: approveReasonForm.attachments,
         variables, // 审批通过, 把修改的字段值赋于流程实例变量
         nextAssignees: approveReasonForm.nextAssignees, // 下个自选节点选择的审批人信息
       } as any;
@@ -423,6 +459,9 @@ async function handleAudit(pass: boolean, formRef: FormInstance | undefined) {
         await formCreateApi.validate();
       }
       await approveTask(data);
+      approveReasonForm.reason = '';
+      approveReasonForm.attachments = [];
+      approveReasonForm.signPicUrl = '';
       popOverVisible.value.approve = false;
       nextAssigneesActivityNode.value = [];
       // 清理 Timeline 组件中的自定义审批人数据
@@ -435,8 +474,11 @@ async function handleAudit(pass: boolean, formRef: FormInstance | undefined) {
       const data = {
         id: runningTask.value.id,
         reason: rejectReasonForm.reason,
+        attachments: rejectReasonForm.attachments,
       };
       await rejectTask(data);
+      rejectReasonForm.reason = '';
+      rejectReasonForm.attachments = [];
       popOverVisible.value.reject = false;
       ElMessage.success('审批不通过成功');
     }
@@ -757,6 +799,34 @@ function handleSignFinish(url: string) {
   approveFormRef.value?.validateField('signPicUrl');
 }
 
+/** 判断文件是否为图片类型 */
+function isImageUrl(url: string) {
+  return /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(url.split(/[?#]/)[0] || '');
+}
+
+/** 附件图片预览 */
+const imagePreviewVisible = ref(false);
+const imagePreviewUrl = ref('');
+
+/** 处理文件预览 */
+function handleFilePreview(file: any) {
+  if (!file?.url && !file?.response) {
+    ElMessage.warning('文件地址不存在，无法预览');
+    return;
+  }
+  const url = file.url || file?.response?.url || file?.response;
+  if (!url) {
+    ElMessage.warning('文件地址不存在，无法预览');
+    return;
+  }
+  if (isImageUrl(url)) {
+    imagePreviewUrl.value = url;
+    imagePreviewVisible.value = true;
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
 // TODO @jason：handlePopoverVisible 需要要有么？
 
 defineExpose({ loadTodoTask });
@@ -814,9 +884,10 @@ defineExpose({ loadTodoTask });
               prop="nextAssignees"
               v-if="nextAssigneesActivityNode.length > 0"
             >
-              <div class="-mb-8 -mt-3.5 ml-2.5">
+              <div>
                 <ProcessInstanceTimeline
                   ref="nextAssigneesTimelineRef"
+                  embedded
                   :activity-nodes="nextAssigneesActivityNode"
                   :show-status-icon="false"
                   :enable-approve-user-select="true"
@@ -849,6 +920,19 @@ defineExpose({ loadTodoTask });
                 :rows="4"
               />
             </ElFormItem>
+            <ElFormItem label="上传附件/图片" prop="attachments">
+              <FileUpload
+                v-model:value="approveReasonForm.attachments"
+                :accept="APPROVAL_ATTACHMENT_FILE_TYPES"
+                :directory="APPROVAL_ATTACHMENT_DIRECTORY"
+                :max-number="10"
+                :max-size="APPROVAL_ATTACHMENT_FILE_SIZE"
+                :multiple="true"
+                :show-description="true"
+                help-text="支持多文件/图片上传"
+                @preview="handleFilePreview"
+              />
+            </ElFormItem>
             <ElFormItem>
               <ElSpace>
                 <ElButton
@@ -873,7 +957,7 @@ defineExpose({ loadTodoTask });
       <ElPopover
         :visible="popOverVisible.reject"
         placement="top"
-        :popper-style="{ minWidth: '400px' }"
+        :popper-style="{ minWidth: '500px' }"
         trigger="click"
         v-if="
           runningTask &&
@@ -905,6 +989,19 @@ defineExpose({ loadTodoTask });
                 v-model="rejectReasonForm.reason"
                 placeholder="请输入审批意见"
                 :rows="4"
+              />
+            </ElFormItem>
+            <ElFormItem label="上传附件/图片" prop="attachments">
+              <FileUpload
+                v-model:value="rejectReasonForm.attachments"
+                :accept="APPROVAL_ATTACHMENT_FILE_TYPES"
+                :directory="APPROVAL_ATTACHMENT_DIRECTORY"
+                :max-number="10"
+                :max-size="APPROVAL_ATTACHMENT_FILE_SIZE"
+                :multiple="true"
+                :show-description="true"
+                help-text="支持多文件/图片上传"
+                @preview="handleFilePreview"
               />
             </ElFormItem>
             <ElFormItem>
@@ -1472,4 +1569,12 @@ defineExpose({ loadTodoTask });
 
   <!-- 签名弹窗 -->
   <SignatureModal @success="handleSignFinish" />
+
+  <!-- 图片预览弹窗 -->
+  <ElImageViewer
+    v-if="imagePreviewVisible"
+    :url-list="[imagePreviewUrl]"
+    @close="imagePreviewVisible = false"
+    :z-index="9999"
+  />
 </template>

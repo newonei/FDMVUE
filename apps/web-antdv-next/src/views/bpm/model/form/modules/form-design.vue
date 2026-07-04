@@ -15,26 +15,27 @@ import {
   Radio,
   RadioGroup,
   Select,
-  SelectOption,
   Tooltip,
 } from 'antdv-next';
 
 import { getForm } from '#/api/bpm/form';
 import { setConfAndFields2 } from '#/components/form-create';
-type Rule = any;
-const props = defineProps({
-  formList: {
-    type: Array<BpmFormApi.Form>,
-    required: true,
-  },
-});
+
+type FormCreateRule = {
+  [key: string]: unknown;
+  props?: Record<string, unknown>;
+};
+
+defineProps<{
+  formList: BpmFormApi.Form[];
+}>();
 
 const formRef = ref();
 
 const modelData = defineModel<any>(); // 创建本地数据副本
 const formPreview = ref({
   formData: {} as any,
-  rule: [],
+  rule: [] as FormCreateRule[],
   option: {
     submitBtn: false,
     resetBtn: false,
@@ -42,7 +43,7 @@ const formPreview = ref({
   },
 }); // 表单预览数据
 
-const rules: Record<string, Rule[]> = {
+const rules: Record<string, any[]> = {
   formType: [{ required: true, message: '表单类型不能为空', trigger: 'blur' }],
   formId: [{ required: true, message: '流程表单不能为空', trigger: 'blur' }],
   formCustomCreatePath: [
@@ -61,7 +62,7 @@ watch(
       const data = await getForm(newFormId);
       setConfAndFields2(formPreview.value, data.conf, data.fields);
       // 设置只读
-      formPreview.value.rule.forEach((item: any) => {
+      formPreview.value.rule.forEach((item) => {
         item.props = { ...item.props, disabled: true };
       });
     } else {
@@ -107,16 +108,12 @@ defineExpose({ validate });
       name="formId"
       class="mb-5"
     >
-      <Select v-model:value="modelData.formId" allow-clear>
-        <SelectOption
-          v-for="form in props.formList"
-          :key="form.id"
-          :value="form.id"
-        >
-          {{ form.name }}
-        </SelectOption>
-        >
-      </Select>
+      <Select
+        v-model:value="modelData.formId"
+        allow-clear
+        :options="formList"
+        :field-names="{ label: 'name', value: 'id' }"
+      />
     </FormItem>
     <FormItem
       v-if="modelData.formType === BpmModelFormType.CUSTOM"

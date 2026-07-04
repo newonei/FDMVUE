@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { Demo03StudentApi } from '#/api/infra/demo/demo03/normal';
+import type { Demo03StudentApi } from '#/api/infra/demo/demo03/inner';
 
 import { onMounted, reactive, ref } from 'vue';
 
@@ -32,7 +32,7 @@ import {
   deleteDemo03StudentList,
   exportDemo03Student,
   getDemo03StudentPage,
-} from '#/api/infra/demo/demo03/normal';
+} from '#/api/infra/demo/demo03/inner';
 import { DictTag } from '#/components/dict-tag';
 import { $t } from '#/locales';
 import { getRangePickerDefaultProps } from '#/utils';
@@ -157,6 +157,12 @@ async function handleExport() {
 
 /** 初始化 */
 const { hiddenSearchBar, tableToolbarRef, tableRef } = useTableToolbar();
+function setTableToolbarRef(el: any) {
+  tableToolbarRef.value = el;
+}
+function setTableRef(el: any) {
+  tableRef.value = el;
+}
 onMounted(() => {
   getList();
 });
@@ -217,7 +223,7 @@ onMounted(() => {
     <ContentWrap title="学生">
       <template #extra>
         <VbenVxeTableToolbar
-          ref="tableToolbarRef"
+          :ref="setTableToolbarRef"
           v-model:hidden-search="hiddenSearchBar"
         >
           <Button
@@ -253,7 +259,7 @@ onMounted(() => {
         </VbenVxeTableToolbar>
       </template>
       <VxeTable
-        ref="tableRef"
+        :ref="setTableRef"
         :data="list"
         show-overflow
         :loading="loading"

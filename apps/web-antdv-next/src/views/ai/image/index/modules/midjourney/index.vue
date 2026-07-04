@@ -92,6 +92,7 @@ async function handleGenerateImage() {
     const req = {
       prompt: prompt.value,
       modelId: matchedModel.id,
+      base64Array: [],
       width: imageSize.width,
       height: imageSize.height,
       version: selectVersion.value,
@@ -214,15 +215,8 @@ defineExpose({ settingValues });
         class="!w-80"
         allow-clear
         placeholder="请选择版本"
-      >
-        <SelectOption
-          v-for="item in versionList"
-          :key="item.value"
-          :value="item.value"
-        >
-          {{ item.label }}
-        </SelectOption>
-      </Select>
+        :options="versionList"
+      />
     </Space>
   </div>
 

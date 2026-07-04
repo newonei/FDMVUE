@@ -9,6 +9,22 @@ import { useVbenDrawer } from '@vben/common-ui';
 import { BpmNodeTypeEnum } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 
+import {
+  ElButton,
+  ElDatePicker,
+  ElDivider,
+  ElForm,
+  ElFormItem,
+  ElInput,
+  ElInputNumber,
+  ElOption,
+  ElRadio,
+  ElRadioButton,
+  ElRadioGroup,
+  ElSelect,
+  ElSwitch,
+} from 'element-plus';
+
 import { getForm } from '#/api/bpm/form';
 import { getModelList } from '#/api/bpm/model';
 
@@ -170,6 +186,12 @@ const multiFormFieldOptions = computed(() => {
     (item) => item.type === 'select' || item.type === 'checkbox',
   );
 });
+const multiInstanceSourceNumber = computed({
+  get: () => Number(configForm.value.multiInstanceSource || 1),
+  set: (value?: number) => {
+    configForm.value.multiInstanceSource = String(value || '');
+  },
+});
 const childFormFieldOptions = ref<any[]>([]);
 
 /** 保存配置 */
@@ -280,7 +302,7 @@ const showChildProcessNodeConfig = (node: SimpleFlowNode) => {
       if (configForm.value.timeoutType === DelayTypeEnum.FIXED_TIME_DURATION) {
         const strTimeDuration =
           node.childProcessSetting.timeoutSetting.timeExpression ?? '';
-        const parseTime = strTimeDuration.slice(2, -1);
+        const parseTime = strTimeDuration.match(/\d+/)?.[0] ?? '';
         const parseTimeUnit = strTimeDuration.slice(-1);
         configForm.value.timeDuration = Number.parseInt(parseTime);
         configForm.value.timeUnit = convertTimeUnit(parseTimeUnit);
@@ -346,12 +368,12 @@ const loadFormInfo = async () => {
 };
 
 const getIsoTimeDuration = () => {
-  let strTimeDuration = 'PT';
+  let strTimeDuration = 'P';
   if (configForm.value.timeUnit === TimeUnitType.MINUTE) {
-    strTimeDuration += `${configForm.value.timeDuration}M`;
+    strTimeDuration += `T${configForm.value.timeDuration}M`;
   }
   if (configForm.value.timeUnit === TimeUnitType.HOUR) {
-    strTimeDuration += `${configForm.value.timeDuration}H`;
+    strTimeDuration += `T${configForm.value.timeDuration}H`;
   }
   if (configForm.value.timeUnit === TimeUnitType.DAY) {
     strTimeDuration += `${configForm.value.timeDuration}D`;
@@ -436,7 +458,7 @@ onMounted(async () => {
           >
             <div class="mr-2 mt-1">
               <ElFormItem
-                :prop="['inVariables', index, 'source']"
+                :prop="`inVariables.${index}.source`"
                 :rules="{
                   required: true,
                   message: '变量不能为空',
@@ -455,7 +477,7 @@ onMounted(async () => {
             </div>
             <div class="mr-2 mt-1">
               <ElFormItem
-                :prop="['inVariables', index, 'target']"
+                :prop="`inVariables.${index}.target`"
                 :rules="{
                   required: true,
                   message: '变量不能为空',
@@ -504,7 +526,7 @@ onMounted(async () => {
           >
             <div class="mr-2 mt-1">
               <ElFormItem
-                :prop="['outVariables', index, 'source']"
+                :prop="`outVariables.${index}.source`"
                 :rules="{
                   required: true,
                   message: '变量不能为空',
@@ -523,7 +545,7 @@ onMounted(async () => {
             </div>
             <div class="mr-2 mt-1">
               <ElFormItem
-                :prop="['outVariables', index, 'target']"
+                :prop="`outVariables.${index}.target`"
                 :rules="{
                   required: true,
                   message: '变量不能为空',
@@ -721,7 +743,7 @@ onMounted(async () => {
               trigger: 'change',
             }"
           >
-            <ElInputNumber v-model="configForm.multiInstanceSource" :min="1" />
+            <ElInputNumber v-model="multiInstanceSourceNumber" :min="1" />
           </ElFormItem>
           <ElFormItem
             v-if="
