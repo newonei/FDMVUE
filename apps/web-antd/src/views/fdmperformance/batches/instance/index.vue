@@ -4,6 +4,9 @@ import type { TableColumnsType } from 'ant-design-vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
+import { useUserStore } from '@vben/stores';
+
 import {
   Button,
   Card,
@@ -12,8 +15,8 @@ import {
   InputNumber,
   Modal,
   Progress,
+  Select,
   Space,
-  Steps,
   Table,
   Tag,
   Upload,
@@ -30,14 +33,18 @@ import {
   getFdmPerformanceAssessmentInstance,
   getFdmPerformanceAssessmentTaskPage,
   getMyFdmPerformanceAssessmentInstance,
+  jumpFdmPerformanceAssessmentTask,
   publishFdmPerformanceAssessmentResult,
   recordFdmPerformanceAssessmentInterview,
+  skipFdmPerformanceAssessmentTask,
   submitFdmPerformanceAssessmentHrReview,
   submitFdmPerformanceAssessmentScore,
   submitMyFdmPerformanceAssessmentScore,
+  transferFdmPerformanceAssessmentTasks,
   type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplate } from '#/api/fdmperformance/template';
+import { getSimpleUserList, type SystemUserApi } from '#/api/system/user';
 
 import PerformanceShell from '../../shared/PerformanceShell.vue';
 import {
@@ -53,6 +60,7 @@ import {
   type AssessmentInstance,
   type AssessmentTemplate,
   type Employee,
+  type FlowStage,
   type Indicator,
   type ScoreSummary,
   instanceStatusMetaMap,
@@ -76,9 +84,36 @@ interface ScoreSummaryCard extends ScoreSummary {
 }
 
 const DEDUCTION_DIMENSION_TYPE = 4;
+const CORE_FLOW_STAGES: FlowStage[] = [
+  { id: 'Performance_Indicator_Create', name: '指标制定', owner: '考评表管理员' },
+  { id: 'Performance_Indicator_Confirm', name: '指标确认', owner: '被考核人' },
+  { id: 'Performance_Executing', name: '执行中', owner: '被考核人' },
+  { id: 'Performance_Self_Score', name: '员工自评', owner: '被考核人' },
+  { id: 'Performance_Manager_Score', name: '主管评分', owner: '直接主管' },
+  { id: 'Performance_Hr_Approve', name: '人事审核', owner: '绩效管理员' },
+  { id: 'Performance_Result_Confirm', name: '结果确认', owner: '被考核人' },
+];
+const CORE_FLOW_STAGE_ALIASES: Record<string, string[]> = {
+  Performance_Executing: ['执行'],
+  Performance_Hr_Approve: ['人事审核', '审批', '审核'],
+  Performance_Indicator_Confirm: ['指标确认'],
+  Performance_Indicator_Create: ['指标制定'],
+  Performance_Manager_Score: ['主管评分', '上级评分', '直接主管评分'],
+  Performance_Result_Confirm: ['结果确认'],
+  Performance_Self_Score: ['自评', '员工自评'],
+};
+const FLOW_JUMPABLE_NODE_KEYS = new Set([
+  'Performance_Indicator_Confirm',
+  'Performance_Executing',
+  'Performance_Self_Score',
+  'Performance_Manager_Score',
+  'Performance_Hr_Approve',
+]);
 
 const route = useRoute();
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const { performancePath } = usePerformancePath();
 
 const apiLoading = ref(false);
@@ -87,6 +122,10 @@ const reviewRemark = ref('');
 const interviewModalOpen = ref(false);
 const interviewConclusion = ref('已完成绩效沟通，后续动作同步到行动计划');
 const nodeComment = ref('');
+const flowActionLoading = ref(false);
+const transferModalOpen = ref(false);
+const transferTargetUserId = ref<number>();
+const transferReason = ref('');
 
 const scoreInputs = reactive<Record<number, number>>({});
 const scoreComments = reactive<Record<number, string>>({});
@@ -98,6 +137,7 @@ const apiEmployee = ref<Employee>();
 const apiTemplate = ref<AssessmentTemplate>();
 const apiTemplateIndicators = ref<Indicator[]>([]);
 const apiTasks = ref<FdmPerformanceAssessmentApi.Task[]>([]);
+const simpleUsers = ref<SystemUserApi.User[]>([]);
 
 const batch = computed(() => apiBatch.value);
 const instance = computed(() => apiInstance.value);
@@ -116,8 +156,22 @@ const activeScoreType = computed<ScoreType>(() => {
   return instance.value?.status === 'supervisorScore' ? 'supervisor' : 'self';
 });
 const activeScoreTask = computed(() => getPendingScoreTask(activeScoreType.value));
+const currentUserId = computed(() => Number(userStore.userInfo?.id || 0));
+const pendingTasks = computed(() => {
+  const instanceId = instance.value?.id;
+  return apiTasks.value.filter((task) => task.status === 0 && task.instanceId === instanceId);
+});
+const currentPendingTask = computed(() => activeScoreTask.value || pendingTasks.value[0]);
+const canOperateFlow = computed(() => hasAccessByCodes(['fdmperformance:assessment:cancel']));
+const canManageFlow = computed(() =>
+  !isMyMode.value
+  && canOperateFlow.value
+  && Boolean(currentPendingTask.value)
+  && !['canceled', 'finished'].includes(String(instance.value?.status || '')),
+);
 const canScore = computed(() => {
   if (!instance.value || !activeScoreTask.value) return false;
+  if (!currentUserId.value || Number(activeScoreTask.value.assigneeUserId) !== currentUserId.value) return false;
   return (
     (activeScoreType.value === 'self' && instance.value.status === 'selfScore') ||
     (activeScoreType.value === 'supervisor' && instance.value.status === 'supervisorScore')
@@ -125,9 +179,20 @@ const canScore = computed(() => {
 });
 const scoreActionLabel = computed(() => activeScoreType.value === 'self' ? '提交自评' : '提交主管评分');
 
+const transferUserOptions = computed(() =>
+  simpleUsers.value
+    .filter((user) => user.id !== undefined && user.id !== null)
+    .map((user) => ({
+      label: user.nickname || user.username || `用户${user.id}`,
+      value: Number(user.id),
+    })),
+);
+
 const flowStages = computed(() => {
-  if (instance.value?.flowSnapshot?.length) return instance.value.flowSnapshot;
-  return extractFlowStagesFromSimpleNode(template.value?.flowNode);
+  const stages = instance.value?.flowSnapshot?.length
+    ? instance.value.flowSnapshot
+    : extractFlowStagesFromSimpleNode(template.value?.flowNode);
+  return normalizeFlowStagesForDisplay(stages);
 });
 const currentFlowIndex = computed(() =>
   Math.min(Math.max((instance.value?.progress || 1) - 1, 0), Math.max(flowStages.value.length - 1, 0)),
@@ -224,6 +289,75 @@ function getPendingScoreTask(type: ScoreType) {
   return apiTasks.value.find((task) => task.status === 0 && task.instanceId === instanceId && task.taskType === taskType);
 }
 
+function getUserDisplayName(userId?: number) {
+  if (!userId) return '-';
+  const user = simpleUsers.value.find((item) => Number(item.id) === Number(userId));
+  return user?.nickname || user?.username || `用户${userId}`;
+}
+
+function getFlowStageStatus(index: number) {
+  if (index < currentFlowIndex.value) return 'done';
+  if (index === currentFlowIndex.value) return 'active';
+  return 'pending';
+}
+
+function getFlowStageOwner(stage: { owner?: string }, index: number) {
+  if (index === currentFlowIndex.value && currentPendingTask.value?.assigneeUserId) {
+    return getUserDisplayName(currentPendingTask.value.assigneeUserId);
+  }
+  return stage.owner || flowItems.value[index]?.description || '-';
+}
+
+function getTaskTypeLabel(taskType?: number) {
+  const labelMap: Record<number, string> = {
+    1: '指标确认',
+    2: '员工自评',
+    3: '主管评分',
+    4: '人事审核',
+    5: '结果确认',
+  };
+  return taskType ? labelMap[taskType] || `任务${taskType}` : '-';
+}
+
+function getCoreFlowStageIndex(stage: FlowStage) {
+  const id = String(stage.id || '');
+  const name = String(stage.name || '');
+  const exactIndex = CORE_FLOW_STAGES.findIndex((item) => item.id === id);
+  if (exactIndex >= 0) return exactIndex;
+  return CORE_FLOW_STAGES.findIndex((item) =>
+    (CORE_FLOW_STAGE_ALIASES[item.id] || [item.name]).some((alias) => name.includes(alias)),
+  );
+}
+
+function normalizeFlowStagesForDisplay(stages: FlowStage[] = []) {
+  const result = CORE_FLOW_STAGES.map((stage) => ({ ...stage }));
+  const extraStages: FlowStage[] = [];
+  stages.forEach((stage) => {
+    const coreIndex = getCoreFlowStageIndex(stage);
+    if (coreIndex >= 0) {
+      const coreStage = result[coreIndex];
+      if (!coreStage) {
+        extraStages.push(stage);
+        return;
+      }
+      result[coreIndex] = {
+        ...coreStage,
+        ...stage,
+        id: coreStage.id,
+        name: stage.name || coreStage.name,
+        owner: stage.owner || coreStage.owner,
+      };
+      return;
+    }
+    extraStages.push(stage);
+  });
+  if (extraStages.length) {
+    const hrIndex = result.findIndex((stage) => stage.id === 'Performance_Hr_Approve');
+    result.splice(hrIndex < 0 ? result.length : hrIndex, 0, ...extraStages);
+  }
+  return result;
+}
+
 function getSummaryColumnKey(summary: ScoreSummary) {
   return `summary_${summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score'}`;
 }
@@ -290,6 +424,123 @@ async function confirmIndicators() {
   await request(instance.value.id);
   await loadApiData();
   message.success('指标已确认');
+}
+
+async function ensureSimpleUsers() {
+  if (simpleUsers.value.length > 0) return;
+  simpleUsers.value = await getSimpleUserList();
+}
+
+async function openTransferModal() {
+  if (!currentPendingTask.value) {
+    message.warning('当前没有可转交的待办');
+    return;
+  }
+  await ensureSimpleUsers();
+  transferTargetUserId.value = undefined;
+  transferReason.value = '';
+  transferModalOpen.value = true;
+}
+
+async function submitTransfer() {
+  if (!instance.value || !batch.value || !currentPendingTask.value) return;
+  if (!currentPendingTask.value.assigneeUserId) {
+    message.warning('当前待办没有处理人，不能转交');
+    return;
+  }
+  if (!transferTargetUserId.value) {
+    message.warning('请选择接收人');
+    return;
+  }
+  flowActionLoading.value = true;
+  try {
+    const count = await transferFdmPerformanceAssessmentTasks({
+      batchId: batch.value.id,
+      fromUserId: Number(currentPendingTask.value.assigneeUserId),
+      instanceId: instance.value.id,
+      reason: transferReason.value,
+      taskId: currentPendingTask.value.id,
+      toUserId: transferTargetUserId.value,
+    });
+    transferModalOpen.value = false;
+    await loadApiData();
+    if (count > 0) {
+      message.success('流程已转交');
+    } else {
+      message.warning('没有可转交的待办，可能已被处理');
+    }
+  } finally {
+    flowActionLoading.value = false;
+  }
+}
+
+function skipCurrentTask() {
+  if (!instance.value || !currentPendingTask.value) {
+    message.warning('当前没有可跳过的待办');
+    return;
+  }
+  Modal.confirm({
+    content: `将跳过当前节点「${currentPendingTask.value.nodeName || getTaskTypeLabel(currentPendingTask.value.taskType)}」，并自动流转到下一节点。`,
+    okText: '确认跳过',
+    onOk: async () => {
+      flowActionLoading.value = true;
+      try {
+        await skipFdmPerformanceAssessmentTask({
+          instanceId: instance.value!.id,
+          reason: '流程管理员跳过当前节点',
+          taskId: currentPendingTask.value!.id,
+        });
+        await loadApiData();
+        message.success('当前节点已跳过');
+      } finally {
+        flowActionLoading.value = false;
+      }
+    },
+    title: '跳过当前流程节点',
+  });
+}
+
+function isJumpableFlowStage(stage: FlowStage) {
+  return canManageFlow.value && FLOW_JUMPABLE_NODE_KEYS.has(String(stage.id || ''));
+}
+
+function getFlowStageTaskType(stage: FlowStage) {
+  const taskTypeMap: Record<string, number> = {
+    Performance_Hr_Approve: 4,
+    Performance_Indicator_Confirm: 1,
+    Performance_Manager_Score: 3,
+    Performance_Self_Score: 2,
+  };
+  return taskTypeMap[String(stage.id || '')];
+}
+
+function jumpToFlowStage(stage: FlowStage, index: number) {
+  if (!instance.value || !isJumpableFlowStage(stage)) return;
+  if (index === currentFlowIndex.value) {
+    message.info('当前已经在该流程节点');
+    return;
+  }
+  Modal.confirm({
+    content: `将流程跳转到「${stage.name}」。目标节点及之后已有评分和结果会失效，需要重新处理。`,
+    okText: '确认跳转',
+    onOk: async () => {
+      flowActionLoading.value = true;
+      try {
+        await jumpFdmPerformanceAssessmentTask({
+          instanceId: instance.value!.id,
+          reason: `流程管理员跳转至${stage.name}`,
+          targetNodeKey: stage.id,
+          targetNodeName: stage.name,
+          targetTaskType: getFlowStageTaskType(stage),
+        });
+        await loadApiData();
+        message.success('流程已跳转');
+      } finally {
+        flowActionLoading.value = false;
+      }
+    },
+    title: `跳转到${stage.name}`,
+  });
 }
 
 async function submitScore() {
@@ -412,6 +663,7 @@ async function loadApiData() {
       apiBatch.value.templateId = templateId;
     }
     initScoreDraft();
+    void ensureSimpleUsers().catch(() => undefined);
   } finally {
     apiLoading.value = false;
   }
@@ -457,7 +709,7 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         <Card><div class="metric-card"><span>绩效等级</span><strong>{{ instance.grade ?? '-' }}</strong></div></Card>
       </div>
 
-      <Card :loading="apiLoading">
+      <Card :loading="apiLoading" class="flow-card">
         <div class="instance-head">
           <Space>
             <Tag :color="getInstanceMeta(instance.status).color">{{ getInstanceMeta(instance.status).label }}</Tag>
@@ -466,7 +718,35 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           </Space>
           <Progress :percent="scorePercent" />
         </div>
-        <Steps :current="currentFlowIndex" :items="flowItems" size="small" />
+        <div v-if="canManageFlow" class="flow-toolbar">
+          <span>
+            当前待办：{{ currentPendingTask?.nodeName || getTaskTypeLabel(currentPendingTask?.taskType) }}
+          </span>
+          <Space>
+            <Button :loading="flowActionLoading" @click="openTransferModal">流程转交</Button>
+            <Button danger :loading="flowActionLoading" @click="skipCurrentTask">跳过节点</Button>
+          </Space>
+        </div>
+        <div class="flow-node-list">
+          <template
+            v-for="(stage, index) in flowStages"
+            :key="stage.id || index"
+          >
+            <div
+              :class="[
+                'flow-node-card',
+                `flow-node-card--${getFlowStageStatus(index)}`,
+                { 'flow-node-card--clickable': isJumpableFlowStage(stage) },
+              ]"
+              @click="jumpToFlowStage(stage, index)"
+            >
+              <span class="flow-node-dot">{{ index + 1 }}</span>
+              <strong>{{ stage.name }}</strong>
+              <em>{{ getFlowStageOwner(stage, index) }}</em>
+            </div>
+            <span v-if="index < flowStages.length - 1" class="flow-node-arrow">›</span>
+          </template>
+        </div>
       </Card>
 
       <div v-if="scoreSummaryCards.length" class="score-summary-grid">
@@ -612,6 +892,33 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
     </template>
     <Empty v-else description="未找到该考核记录" />
 
+    <Modal
+      v-model:open="transferModalOpen"
+      :confirm-loading="flowActionLoading"
+      title="流程转交"
+      @ok="submitTransfer"
+    >
+      <Space direction="vertical" class="modal-form">
+        <div>
+          <strong>当前节点</strong>
+          <span>{{ currentPendingTask?.nodeName || getTaskTypeLabel(currentPendingTask?.taskType) }}</span>
+        </div>
+        <div>
+          <strong>原处理人</strong>
+          <span>{{ getUserDisplayName(currentPendingTask?.assigneeUserId) }}</span>
+        </div>
+        <Select
+          v-model:value="transferTargetUserId"
+          :options="transferUserOptions"
+          allow-clear
+          option-filter-prop="label"
+          placeholder="请选择接收人"
+          show-search
+        />
+        <Input.TextArea v-model:value="transferReason" :rows="3" placeholder="请输入转交原因（选填）" />
+      </Space>
+    </Modal>
+
     <Modal v-model:open="interviewModalOpen" title="记录面谈" @ok="saveInterviewRecord">
       <Input.TextArea v-model:value="interviewConclusion" :rows="4" />
     </Modal>
@@ -640,20 +947,20 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
 }
 
 .metric-card strong {
-  color: #111827;
   font-size: 22px;
   font-weight: 650;
+  color: #111827;
 }
 
 .score-summary-card strong {
-  color: #111827;
   font-size: 28px;
   font-weight: 700;
+  color: #111827;
 }
 
 .score-summary-card em {
-  color: #64748b;
   font-style: normal;
+  color: #64748b;
 }
 
 .final-score-card {
@@ -666,6 +973,10 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   color: #fff;
 }
 
+.flow-card {
+  overflow: hidden;
+}
+
 .instance-head,
 .node-score-head {
   display: grid;
@@ -673,6 +984,103 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   gap: 24px;
   align-items: center;
   margin-bottom: 22px;
+}
+
+.flow-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.flow-toolbar > span {
+  font-weight: 500;
+  color: #475569;
+}
+
+.flow-node-list {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+.flow-node-card {
+  display: grid;
+  grid-template-columns: 28px minmax(120px, 1fr);
+  gap: 2px 10px;
+  align-items: center;
+  min-width: 170px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.flow-node-card strong {
+  font-weight: 650;
+  color: #111827;
+}
+
+.flow-node-card em {
+  grid-column: 2;
+  font-style: normal;
+  color: #64748b;
+}
+
+.flow-node-card--active {
+  background: #eff6ff;
+  border-color: #1677ff;
+}
+
+.flow-node-card--clickable {
+  cursor: pointer;
+}
+
+.flow-node-card--clickable:hover {
+  background: #f8fbff;
+  border-color: #4096ff;
+}
+
+.flow-node-card--done .flow-node-dot {
+  color: #fff;
+  background: #52c41a;
+}
+
+.flow-node-card--active .flow-node-dot {
+  color: #fff;
+  background: #1677ff;
+}
+
+.flow-node-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 999px;
+}
+
+.flow-node-arrow {
+  font-size: 26px;
+  color: #cbd5e1;
+}
+
+.modal-form {
+  width: 100%;
+}
+
+.modal-form > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 12px;
 }
 
 .node-score-card,
@@ -690,8 +1098,8 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
 }
 
 .node-score-head strong {
-  color: #111827;
   font-size: 20px;
+  color: #111827;
 }
 
 .multi-line {
@@ -717,9 +1125,15 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   .summary-grid,
   .score-summary-grid,
   .instance-head,
+  .flow-toolbar,
   .node-score-head,
   .record-list > div {
     grid-template-columns: 1fr;
+  }
+
+  .flow-toolbar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .node-score-head > div:last-child {

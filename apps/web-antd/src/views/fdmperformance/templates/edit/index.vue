@@ -7,7 +7,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { BpmModelFormType } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Card, Checkbox, Form, Input, InputNumber, Modal, Radio, Select, Space, Steps, Switch, Table, Tag, message } from 'ant-design-vue';
+import { Button, Card, Checkbox, Form, Input, InputNumber, Modal, Radio, Select, Space, Steps, Switch, Table, Tag, Tooltip, message } from 'ant-design-vue';
 
 import { SimpleProcessDesigner } from '#/views/bpm/components/simple-process-design';
 import { CandidateStrategy } from '#/views/bpm/components/simple-process-design/consts';
@@ -123,6 +123,7 @@ const importKeyword = ref('');
 const importDimension = ref<string>();
 const importTag = ref<string>();
 const importSelectedIndicatorIds = ref<number[]>([]);
+const activeImportDimension = ref<string>();
 const processData = ref<SimpleFlowNode>(draft.flowNode);
 const designerRef = ref<{
   getCurrentFlowData?: () => SimpleFlowNode | undefined;
@@ -153,6 +154,15 @@ const dimensionDraft = reactive({
   type: '量化指标 100%',
   weight: 20,
 });
+const configHelpText = {
+  dimensionWeight: '启用后先按维度权重折算维度得分，再进入评分节点权重汇总；关闭后按指标贡献分直接汇总。',
+  enabledTemplateCount: '当前处于启用状态的考评表数量，用于判断本配置会影响多少可发起模板。',
+  examDescription: '启用后在考评表中展示考核说明相关内容，方便评分人查看填写要求。',
+  scorerStrategy: '统一评分人会让所有指标使用同一评分人；按指标设置时，每个指标可单独指定评分人。',
+  scoreCalculate: '加扣计算按贡献分直接累加：普通/加分项累加，扣分项按负数计入。加权平均按权重折算；其他方式为规则预留。',
+  totalLimit: '启用后最终总分受规则上限/下限约束，避免加分或扣分后超出考评表允许范围。',
+  unlimitedIndicatorWeight: '启用后维度内指标权重不强制合计 100，适合贡献分、加分项和扣分项；关闭后需按权重合计校验。',
+};
 
 const designerDeptList = computed(() => apiDeptList.value);
 const designerPostList = computed(() => apiPostList.value);
@@ -247,12 +257,17 @@ const scorerOptions = ['直接主管', '部门负责人', '考评表管理员', 
   label: value,
   value,
 }));
+const scoreModeOptions = ['手动评分', '按分数区间对应', '输入框手动输入', '设置评分组'].map((value) => ({
+  label: value,
+  value,
+}));
 const tagOptions = computed(() =>
   Array.from(new Set([...apiIndicatorTags.value, ...sourceIndicators.value.flatMap((item) => item.tags)])).map((value) => ({
     label: value,
     value,
   })),
 );
+const scoreNodeDimensionNames = new Set(['主管评分']);
 
 const indicatorColumns = [
   { dataIndex: 'checked', title: '', width: 48 },
@@ -278,9 +293,10 @@ const weightTotal = computed(() => selectedIndicators.value.reduce((sum, item) =
 const dimensions = computed(() =>
   Array.from(
     new Set(
-      ['加分项', '业绩指标', '过程指标', '主管评分']
+      ['加分项', '业绩指标', '过程指标', '自我管理']
         .concat(draft.customDimensions || [])
-        .concat(sourceIndicators.value.map((item) => item.dimension)),
+        .concat(sourceIndicators.value.map((item) => item.dimension))
+        .filter((dimension) => !scoreNodeDimensionNames.has(dimension)),
     ),
   ),
 );
@@ -294,6 +310,9 @@ const participantPreview = computed(() =>
 const importIndicatorRows = computed(() => {
   const text = importKeyword.value.trim();
   return sourceIndicators.value.filter((item) => {
+    if (scoreNodeDimensionNames.has(item.dimension)) {
+      return false;
+    }
     const textMatched =
       !text ||
       [item.name, item.dimension, item.standard, item.tags.join(',')]
@@ -347,6 +366,10 @@ function getDimensionIndicators(dimension: string) {
     return rows;
   }
   return rows.filter((item) => selectedIndicatorIds.value.includes(item.id) || item.weight > 0);
+}
+
+function isLocalDraftIndicator(record: Record<string, any>) {
+  return Number(record.id) < 0 || !record.indicatorId;
 }
 
 function cloneFlowNode(node: SimpleFlowNode) {
@@ -458,23 +481,61 @@ function openDimensionModal() {
   dimensionModalOpen.value = true;
 }
 
-function openImportModal() {
-  importSelectedIndicatorIds.value = [...selectedIndicatorIds.value];
+function openImportModal(dimension?: string) {
+  activeImportDimension.value = dimension;
+  importSelectedIndicatorIds.value = dimension
+    ? selectedIndicatorIds.value.filter((id) => sourceIndicators.value.find((item) => item.id === id)?.dimension === dimension)
+    : [...selectedIndicatorIds.value];
   importKeyword.value = '';
-  importDimension.value = undefined;
+  importDimension.value = dimension;
   importTag.value = undefined;
   importModalOpen.value = true;
 }
 
 function confirmImportIndicators() {
-  selectedIndicatorIds.value = Array.from(new Set(importSelectedIndicatorIds.value));
-  selectedIndicatorIds.value.forEach((id) => {
+  if (activeImportDimension.value) {
+    const activeDimension = activeImportDimension.value;
+    const replaceableIds = new Set(
+      sourceIndicators.value
+        .filter((item) => item.dimension === activeDimension && Number(item.id) > 0)
+        .map((item) => item.id),
+    );
+    selectedIndicatorIds.value = Array.from(
+      new Set([
+        ...selectedIndicatorIds.value.filter((id) => !replaceableIds.has(id)),
+        ...importSelectedIndicatorIds.value,
+      ]),
+    );
+  } else {
+    selectedIndicatorIds.value = Array.from(new Set(importSelectedIndicatorIds.value));
+  }
+  importSelectedIndicatorIds.value.forEach((id) => {
     if (!scorerRules[id]) {
       scorerRules[id] = '直接主管';
     }
   });
   importModalOpen.value = false;
-  message.success(`已导入 ${selectedIndicatorIds.value.length} 个指标`);
+  message.success(`已导入 ${importSelectedIndicatorIds.value.length} 个指标`);
+  activeImportDimension.value = undefined;
+}
+
+function addManualIndicator(dimension: string) {
+  const newIndicatorId = Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
+  const sameDimensionCount = getDimensionIndicators(dimension).length + 1;
+  const indicator: PerformanceIndicator = {
+    dimension,
+    id: newIndicatorId,
+    name: `${dimension}指标${sameDimensionCount}`,
+    scoreMode: '手动评分',
+    standard: '请补充考核标准',
+    status: 'enabled',
+    tags: [draft.group, dimension].filter(Boolean),
+    weight: dimension === '加分项' || dimension === '扣分项' ? 0 : 10,
+  };
+  localDraftIndicators.value.unshift(indicator);
+  scorerRules[newIndicatorId] = '直接主管';
+  selectedIndicatorIds.value = Array.from(new Set([...selectedIndicatorIds.value, newIndicatorId]));
+  message.success(`已在「${dimension}」下新增指标`);
 }
 
 async function ensureIndicatorTag(name: string) {
@@ -518,9 +579,9 @@ async function generateIndicatorsByAI() {
       weight: 30,
     },
     {
-      dimension: '主管评分',
+      dimension: '自我管理',
       name: `${groupName}协作与复盘质量`,
-      standard: '主管结合协作响应、复盘沉淀、风险预警和主动改进情况评分。',
+      standard: '结合协作响应、复盘沉淀、风险预警和主动改进情况评分。',
       weight: 20,
     },
   ];
@@ -595,6 +656,10 @@ function addDimension() {
   const name = dimensionDraft.name.trim();
   if (!name) {
     message.warning('请填写维度名称');
+    return;
+  }
+  if (scoreNodeDimensionNames.has(name)) {
+    message.warning('主管评分属于考核流程中的评分节点，不需要作为指标维度添加');
     return;
   }
   draft.customDimensions = Array.from(new Set([...(draft.customDimensions || []), name]));
@@ -704,7 +769,6 @@ function getDimensionType(dimension: string) {
   if (dimension === '一票否决') return 5;
   if (dimension === '加减分项') return 6;
   if (dimension === '计划') return 7;
-  if (dimension === '主管评分') return 2;
   return 1;
 }
 
@@ -1160,22 +1224,42 @@ watch(
 
       <div class="config-strip">
         <button type="button" :class="{ active: totalLimitEnabled }" @click="totalLimitEnabled = !totalLimitEnabled">
-          总分限制
+          <span class="config-option-text">总分限制</span>
+          <Tooltip :title="configHelpText.totalLimit">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+          </Tooltip>
         </button>
         <button type="button" class="active" @click="scoreCalculateRule = scoreCalculateRule === '加扣计算' ? '加权平均' : '加扣计算'">
-          计分方式：{{ scoreCalculateRule }}
+          <span class="config-option-text">计分方式：{{ scoreCalculateRule }}</span>
+          <Tooltip :title="configHelpText.scoreCalculate">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+          </Tooltip>
         </button>
         <button type="button" :class="{ active: dimensionWeightEnabled }" @click="dimensionWeightEnabled = !dimensionWeightEnabled">
-          维度权重参与计算
+          <span class="config-option-text">维度权重参与计算</span>
+          <Tooltip :title="configHelpText.dimensionWeight">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+          </Tooltip>
         </button>
         <button type="button" :class="{ active: unlimitedIndicatorWeight }" @click="unlimitedIndicatorWeight = !unlimitedIndicatorWeight">
-          不限制所有指标权重
+          <span class="config-option-text">不限制所有指标权重</span>
+          <Tooltip :title="configHelpText.unlimitedIndicatorWeight">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+          </Tooltip>
         </button>
         <label>
-          考核说明
+          <span class="config-option-text">考核说明</span>
+          <Tooltip :title="configHelpText.examDescription">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+          </Tooltip>
           <Switch v-model:checked="examDescriptionEnabled" size="small" />
         </label>
-        <span>已启用 {{ enabledTemplateCount }} 张考评表</span>
+        <span class="enabled-template-count">
+          已启用 {{ enabledTemplateCount }} 张考评表
+          <Tooltip :title="configHelpText.enabledTemplateCount">
+            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+          </Tooltip>
+        </span>
       </div>
 
       <section v-if="currentStep === 0" class="form-panel">
@@ -1272,7 +1356,6 @@ watch(
         <div class="panel-toolbar">
           <Space>
             <Button @click="router.push(performancePath('/indicators'))">维护指标库</Button>
-            <Button type="primary" @click="openImportModal">指标库导入</Button>
             <Button @click="generateIndicatorsByAI">AI生成</Button>
             <Button @click="openDimensionModal">添加考核维度</Button>
           </Space>
@@ -1302,8 +1385,22 @@ watch(
                     @change="toggleIndicator(record.id, $event.target.checked)"
                   />
                 </template>
+                <template v-else-if="column.dataIndex === 'name' && isLocalDraftIndicator(record)">
+                  <Input v-model:value="record.name" placeholder="请输入指标名称" size="small" />
+                </template>
+                <template v-else-if="column.dataIndex === 'standard' && isLocalDraftIndicator(record)">
+                  <Input.TextArea
+                    v-model:value="record.standard"
+                    auto-size
+                    placeholder="请输入考核标准"
+                    size="small"
+                  />
+                </template>
                 <template v-else-if="column.dataIndex === 'weight'">
                   <InputNumber v-model:value="record.weight" :max="100" :min="0" addon-after="%" />
+                </template>
+                <template v-else-if="column.dataIndex === 'scoreMode' && isLocalDraftIndicator(record)">
+                  <Select v-model:value="record.scoreMode" :options="scoreModeOptions" size="small" />
                 </template>
                 <template v-else-if="column.dataIndex === 'scorer'">
                   <Select
@@ -1315,6 +1412,16 @@ watch(
                 </template>
               </template>
             </Table>
+            <div class="dimension-footer-actions">
+              <Button size="small" type="link" @click="addManualIndicator(dimension)">
+                <template #icon><IconifyIcon icon="lucide:plus" /></template>
+                新增指标
+              </Button>
+              <Button size="small" type="link" @click="openImportModal(dimension)">
+                <template #icon><IconifyIcon icon="lucide:download" /></template>
+                指标库导入
+              </Button>
+            </div>
           </Card>
         </div>
       </section>
@@ -1471,12 +1578,19 @@ watch(
       </Form>
     </Modal>
 
-    <Modal v-model:open="importModalOpen" title="指标库导入" width="980px" @ok="confirmImportIndicators">
+    <Modal
+      v-model:open="importModalOpen"
+      :title="activeImportDimension ? `从指标库导入到：${activeImportDimension}` : '指标库导入'"
+      width="980px"
+      @cancel="activeImportDimension = undefined"
+      @ok="confirmImportIndicators"
+    >
       <div class="import-toolbar">
         <Input v-model:value="importKeyword" allow-clear placeholder="搜索指标名称、考核标准、标签" />
         <Select
           v-model:value="importDimension"
           allow-clear
+          :disabled="Boolean(activeImportDimension)"
           :options="dimensions.map((value) => ({ label: value, value }))"
           placeholder="指标类型"
         />
@@ -1537,26 +1651,51 @@ watch(
         <section>
           <h3>指标计算</h3>
           <div class="modal-setting-row">
-            <span>总分限制</span>
+            <span class="setting-label-with-help">
+              总分限制
+              <Tooltip :title="configHelpText.totalLimit">
+                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+              </Tooltip>
+            </span>
             <Switch v-model:checked="totalLimitEnabled" />
           </div>
           <div class="modal-setting-row">
-            <span>计分方式</span>
+            <span class="setting-label-with-help">
+              计分方式
+              <Tooltip :title="configHelpText.scoreCalculate">
+                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+              </Tooltip>
+            </span>
             <Select
               v-model:value="scoreCalculateRule"
               :options="['加扣计算', '加权平均', '分数区间对应', '结果相乘'].map((value) => ({ label: value, value }))"
             />
           </div>
           <div class="modal-setting-row">
-            <span>维度权重参与计算</span>
+            <span class="setting-label-with-help">
+              维度权重参与计算
+              <Tooltip :title="configHelpText.dimensionWeight">
+                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+              </Tooltip>
+            </span>
             <Switch v-model:checked="dimensionWeightEnabled" />
           </div>
           <div class="modal-setting-row">
-            <span>不限制所有指标权重</span>
+            <span class="setting-label-with-help">
+              不限制所有指标权重
+              <Tooltip :title="configHelpText.unlimitedIndicatorWeight">
+                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+              </Tooltip>
+            </span>
             <Switch v-model:checked="unlimitedIndicatorWeight" />
           </div>
           <div class="modal-setting-row">
-            <span>评分人策略</span>
+            <span class="setting-label-with-help">
+              评分人策略
+              <Tooltip :title="configHelpText.scorerStrategy">
+                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+              </Tooltip>
+            </span>
             <Select
               v-model:value="scorerStrategy"
               :options="[
@@ -1595,19 +1734,22 @@ watch(
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
-  margin: -8px 0 18px;
   padding: 10px 0 14px;
+  margin: -8px 0 18px;
   border-bottom: 1px solid #edf0f4;
 }
 
 .config-strip button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   min-height: 30px;
   padding: 0 10px;
   color: #374151;
+  cursor: pointer;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
-  cursor: pointer;
 }
 
 .config-strip button.active {
@@ -1618,14 +1760,28 @@ watch(
 
 .config-strip label {
   display: inline-flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   min-height: 30px;
   color: #374151;
 }
 
-.config-strip span {
+.config-strip .config-option-text {
+  color: inherit;
+}
+
+.config-strip .enabled-template-count {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   color: #94a3b8;
+}
+
+.config-help-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: #94a3b8;
+  cursor: help;
 }
 
 .full {
@@ -1656,14 +1812,14 @@ watch(
 
 .participant-preview span {
   margin-right: 4px;
-  color: #64748b;
   font-size: 12px;
+  color: #64748b;
 }
 
 .setting-row {
   display: flex;
-  align-items: center;
   gap: 14px;
+  align-items: center;
   min-height: 42px;
 }
 
@@ -1680,16 +1836,16 @@ watch(
 
 .panel-toolbar {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 
 .panel-toolbar h3 {
   margin: 0;
-  color: #111827;
   font-size: 16px;
   font-weight: 650;
+  color: #111827;
   letter-spacing: 0;
 }
 
@@ -1701,6 +1857,24 @@ watch(
 .dimension-list {
   display: grid;
   gap: 14px;
+}
+
+.dimension-footer-actions {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 0 0;
+  border-top: 1px solid #edf0f4;
+}
+
+.dimension-footer-actions :deep(.ant-btn) {
+  padding-inline: 0;
+}
+
+.dimension-footer-actions :deep(.ant-btn .anticon + span),
+.dimension-footer-actions :deep(.ant-btn span + span) {
+  margin-inline-start: 4px;
 }
 
 .import-toolbar {
@@ -1727,13 +1901,13 @@ watch(
 }
 
 .scorer-strategy-panel strong {
-  color: #111827;
   font-weight: 650;
+  color: #111827;
 }
 
 .scorer-strategy-panel span {
-  color: #64748b;
   font-size: 12px;
+  color: #64748b;
 }
 
 .scorer-select {
@@ -1763,15 +1937,15 @@ watch(
 .flow-guide-panel,
 .flow-inspector {
   display: grid;
-  align-content: start;
   gap: 12px;
+  align-content: start;
   padding: 14px;
 }
 
 .flow-guide-title {
-  color: #111827;
   font-size: 14px;
   font-weight: 650;
+  color: #111827;
 }
 
 .flow-guide-item {
@@ -1797,15 +1971,15 @@ watch(
 
 .flow-guide-item strong,
 .inspector-block strong {
-  color: #111827;
   font-size: 14px;
+  color: #111827;
 }
 
 .flow-guide-item p {
   margin: 4px 0 0;
-  color: #64748b;
   font-size: 12px;
   line-height: 1.6;
+  color: #64748b;
 }
 
 .flow-canvas-panel {
@@ -1823,13 +1997,13 @@ watch(
 
 .flow-canvas-head > div {
   display: inline-flex;
-  align-items: baseline;
   gap: 8px;
+  align-items: baseline;
 }
 
 .flow-canvas-head span {
-  color: #94a3b8;
   font-size: 12px;
+  color: #94a3b8;
 }
 
 .flow-canvas {
@@ -1856,14 +2030,14 @@ watch(
 }
 
 .inspector-block span {
-  color: #64748b;
   font-size: 12px;
+  color: #64748b;
 }
 
 .footer-actions {
   display: flex;
-  justify-content: center;
   gap: 10px;
+  justify-content: center;
   padding-top: 24px;
 }
 
@@ -1885,9 +2059,9 @@ watch(
 
 .setting-modal-grid h3 {
   margin: 0;
-  color: #111827;
   font-size: 15px;
   font-weight: 650;
+  color: #111827;
 }
 
 .modal-setting-row {
@@ -1899,6 +2073,12 @@ watch(
 
 .modal-setting-row span {
   color: #64748b;
+}
+
+.setting-label-with-help {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
 }
 
 @media (max-width: 1280px) {
@@ -1917,8 +2097,8 @@ watch(
 
 @media (max-width: 760px) {
   .panel-toolbar {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
 
   .flow-guide-panel {

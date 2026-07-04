@@ -191,8 +191,25 @@ export namespace FdmPerformanceAssessmentApi {
   export interface TransferReq {
     batchId?: number;
     fromUserId: number;
+    instanceId?: number;
     reason?: string;
+    taskId?: number;
     toUserId: number;
+  }
+
+  export interface TaskSkipReq {
+    instanceId: number;
+    reason?: string;
+    taskId?: number;
+  }
+
+  export interface TaskJumpReq {
+    assigneeUserId?: number;
+    instanceId: number;
+    reason?: string;
+    targetNodeKey: string;
+    targetNodeName?: string;
+    targetTaskType?: number;
   }
 
   export interface RemindReq {
@@ -462,6 +479,24 @@ export function transferFdmPerformanceAssessmentTasks(
 ) {
   return requestClient.post<number>(
     '/fdmperformance/assessment/task/transfer',
+    data,
+  );
+}
+
+export function skipFdmPerformanceAssessmentTask(
+  data: FdmPerformanceAssessmentApi.TaskSkipReq,
+) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/skip',
+    data,
+  );
+}
+
+export function jumpFdmPerformanceAssessmentTask(
+  data: FdmPerformanceAssessmentApi.TaskJumpReq,
+) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/jump',
     data,
   );
 }

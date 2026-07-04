@@ -39,7 +39,7 @@ const editingIndicator = reactive<Indicator>({
   weight: 0,
 });
 
-const dimensions = ['业绩指标', '过程指标', '主管评分', '加分项', '扣分项', '一票否决'];
+const dimensions = ['业绩指标', '过程指标', '自我管理', '加分项', '扣分项', '一票否决'];
 const indicators = computed(() => apiIndicators.value);
 const allTags = computed(() =>
   Array.from(
