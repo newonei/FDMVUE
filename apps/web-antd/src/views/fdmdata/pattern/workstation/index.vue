@@ -78,9 +78,7 @@ const PATTERN_IMAGE_PLACEHOLDER =
 
 const bestMatch = computed(() => matchResult.value?.best_match || null);
 const candidates = computed(() => matchResult.value?.top_candidates || []);
-const selectedCandidate = computed(() =>
-  candidates.value.find((item) => item.item_id === selectedItemId.value),
-);
+const selectedCandidate = ref<null | PatternRecognitionApi.Candidate>(null);
 const selectedComparisonCandidate = computed(
   () => selectedCandidate.value || bestMatch.value || null,
 );
@@ -94,7 +92,7 @@ const selectedCandidateRank = computed(() => {
 });
 const selectedMatchImageUrl = computed(() => {
   const candidate = selectedComparisonCandidate.value;
-  return candidate ? candidateFullImageUrl(candidate) : '';
+  return candidate ? candidatePreviewImageUrl(candidate) : '';
 });
 const selectedCandidateProgressText = computed(() => {
   const candidate = selectedComparisonCandidate.value;
@@ -222,6 +220,7 @@ function resetRecognitionState() {
   matchError.value = '';
   confirmResult.value = null;
   confirmError.value = '';
+  selectedCandidate.value = null;
   selectedOrderNo.value = '';
   selectedItemId.value = '';
   currentCaptureId.value = '';
@@ -577,8 +576,18 @@ async function startMatch() {
 }
 
 function selectCandidate(candidate: PatternRecognitionApi.Candidate) {
+  selectedCandidate.value = candidate;
   selectedOrderNo.value = candidate.order_no;
   selectedItemId.value = candidate.item_id;
+}
+
+function isSelectedCandidate(candidate: PatternRecognitionApi.Candidate) {
+  const selected = selectedComparisonCandidate.value;
+  return (
+    !!selected &&
+    selected.order_no === candidate.order_no &&
+    selected.item_id === candidate.item_id
+  );
 }
 
 async function submitConfirm() {
@@ -667,9 +676,8 @@ function resolveDisplayImageUrl(url?: string) {
     : resolvePatternRecognitionAssetUrl(value);
 }
 
-function candidateFullImageUrl(candidate: PatternRecognitionApi.Candidate) {
+function candidatePreviewImageUrl(candidate: PatternRecognitionApi.Candidate) {
   return (
-    resolveDisplayImageUrl(candidate.design_image_url) ||
     resolveDisplayImageUrl(candidate.preview_image_url ?? undefined) ||
     resolveDisplayImageUrl(candidate.local_image_url) ||
     PATTERN_IMAGE_PLACEHOLDER
@@ -677,10 +685,7 @@ function candidateFullImageUrl(candidate: PatternRecognitionApi.Candidate) {
 }
 
 function candidateImageUrl(candidate: PatternRecognitionApi.Candidate) {
-  return (
-    resolveDisplayImageUrl(candidate.preview_image_url ?? undefined) ||
-    candidateFullImageUrl(candidate)
-  );
+  return candidatePreviewImageUrl(candidate);
 }
 
 onMounted(() => {
@@ -992,6 +997,8 @@ onBeforeUnmount(() => {
               <img
                 alt="最高相似图"
                 class="compare-main-img match-main-img"
+                decoding="async"
+                fetchpriority="high"
                 :src="selectedMatchImageUrl || PATTERN_IMAGE_PLACEHOLDER"
               />
             </div>
@@ -1075,9 +1082,14 @@ onBeforeUnmount(() => {
         <div v-if="candidates.length > 0" class="candidate-list">
           <div
             v-for="(candidate, index) in candidates"
-            :key="candidate.item_id"
+            :key="`${candidate.order_no}-${candidate.item_id}`"
             class="candidate-item"
-            :class="{ selected: candidate.item_id === selectedItemId }"
+            :class="{ selected: isSelectedCandidate(candidate) }"
+            role="button"
+            tabindex="0"
+            @click="selectCandidate(candidate)"
+            @keydown.enter.prevent="selectCandidate(candidate)"
+            @keydown.space.prevent="selectCandidate(candidate)"
           >
             <div class="candidate-rank">{{ index + 1 }}</div>
             <img
@@ -1106,12 +1118,10 @@ onBeforeUnmount(() => {
               />
             </div>
             <Button
-              :type="
-                candidate.item_id === selectedItemId ? 'primary' : 'default'
-              "
-              @click="selectCandidate(candidate)"
+              :type="isSelectedCandidate(candidate) ? 'primary' : 'default'"
+              @click.stop="selectCandidate(candidate)"
             >
-              {{ candidate.item_id === selectedItemId ? '已选中' : '选择' }}
+              {{ isSelectedCandidate(candidate) ? '已选中' : '选择' }}
             </Button>
           </div>
         </div>
@@ -1437,11 +1447,19 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .candidate-item.selected {
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgb(37 99 235 / 12%);
+}
+
+.candidate-item:hover {
+  border-color: #93c5fd;
 }
 
 .candidate-rank {
