@@ -200,11 +200,23 @@ const formRules: Record<string, Rule[]> = reactive({
   maxRemindCount: [
     { required: true, message: '提醒次数不能为空', trigger: 'blur' },
   ],
-  assignEmptyHandlerType: [{ required: true }],
+  assignEmptyHandlerType: [
+    {
+      required: true,
+      message: '请选择审批人为空时的处理方式',
+      trigger: 'change',
+    },
+  ],
   assignEmptyHandlerUserIds: [
     { required: true, message: '用户不能为空', trigger: 'change' },
   ],
-  assignStartUserHandlerType: [{ required: true }],
+  assignStartUserHandlerType: [
+    {
+      required: true,
+      message: '请选择审批人与提交人为同一人时的处理方式',
+      trigger: 'change',
+    },
+  ],
 });
 
 const {
@@ -219,6 +231,30 @@ const {
   getShowText,
 } = useNodeForm(currentNode.value.type);
 const configForm = tempConfigForm as Ref<UserTaskFormType>;
+
+function formatUserOptionLabel(item: any) {
+  return [
+    item?.nickname || item?.name || item?.username || `用户${item?.id ?? ''}`,
+    item?.deptName || item?.dept || item?.deptNameText,
+    item?.postName || item?.post,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function filterUserOption(input: string, option?: any) {
+  const keyword = String(input ?? '')
+    .trim()
+    .toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+  const text = [option?.label, option?.value, option?.key]
+    .filter((value) => value !== undefined && value !== null)
+    .join(' ')
+    .toLowerCase();
+  return text.includes(keyword);
+}
 
 // 改变审批人设置策略
 function changeCandidateStrategy() {
@@ -766,15 +802,18 @@ onMounted(() => {
               <Select
                 v-model:value="configForm.userIds"
                 allow-clear
+                :filter-option="filterUserOption"
                 mode="multiple"
+                option-filter-prop="label"
+                show-search
               >
                 <SelectOption
                   v-for="item in userOptions"
                   :key="item.id"
-                  :label="item.nickname"
+                  :label="formatUserOptionLabel(item)"
                   :value="item.id"
                 >
-                  {{ item.nickname }}
+                  {{ formatUserOptionLabel(item) }}
                 </SelectOption>
               </Select>
             </FormItem>
@@ -1088,15 +1127,18 @@ onMounted(() => {
               <Select
                 v-model:value="configForm.assignEmptyHandlerUserIds"
                 allow-clear
+                :filter-option="filterUserOption"
                 mode="multiple"
+                option-filter-prop="label"
+                show-search
               >
                 <SelectOption
                   v-for="item in userOptions"
                   :key="item.id"
-                  :label="item.nickname"
+                  :label="formatUserOptionLabel(item)"
                   :value="item.id"
                 >
-                  {{ item.nickname }}
+                  {{ formatUserOptionLabel(item) }}
                 </SelectOption>
               </Select>
             </FormItem>

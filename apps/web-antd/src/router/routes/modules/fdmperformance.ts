@@ -8,6 +8,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       title: '智能绩效',
       icon: 'lucide:chart-no-axes-combined',
+      hideInMenu: true,
       order: 20,
     },
     children: [
@@ -55,7 +56,8 @@ const routes: RouteRecordRaw[] = [
           hideInMenu: true,
           icon: 'lucide:pencil-line',
         },
-        component: () => import('#/views/fdmperformance/templates/edit/index.vue'),
+        component: () =>
+          import('#/views/fdmperformance/templates/edit/index.vue'),
       },
       {
         path: 'launch',
@@ -83,7 +85,8 @@ const routes: RouteRecordRaw[] = [
           hideInMenu: true,
           icon: 'lucide:list-checks',
         },
-        component: () => import('#/views/fdmperformance/batches/detail/index.vue'),
+        component: () =>
+          import('#/views/fdmperformance/batches/detail/index.vue'),
       },
       {
         path: 'batches/:batchId/instances/:instanceId',
@@ -112,8 +115,7 @@ const routes: RouteRecordRaw[] = [
           title: '数据中心',
           icon: 'lucide:chart-column',
         },
-        component: () =>
-          import('#/views/fdmperformance/data-center/index.vue'),
+        component: () => import('#/views/fdmperformance/data-center/index.vue'),
       },
       {
         path: 'my',

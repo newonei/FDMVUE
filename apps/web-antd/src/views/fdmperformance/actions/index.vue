@@ -1,14 +1,18 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
+import type { FdmPerformanceActionPlanApi } from '#/api/fdmperformance/action-plan';
+
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   Button,
   Card,
+  DatePicker,
   Form,
   Input,
   InputNumber,
+  message,
   Modal,
   Popconfirm,
   Progress,
@@ -16,11 +20,7 @@ import {
   Space,
   Table,
   Tag,
-  message,
 } from 'ant-design-vue';
-
-import { getSimpleUserList } from '#/api/system/user';
-import type { FdmPerformanceActionPlanApi } from '#/api/fdmperformance/action-plan';
 
 import {
   createFdmPerformanceActionPlan,
@@ -30,6 +30,7 @@ import {
   updateFdmPerformanceActionPlanStatus,
 } from '#/api/fdmperformance/action-plan';
 import { getFdmPerformanceGoalList } from '#/api/fdmperformance/goal';
+import { getSimpleUserList } from '#/api/system/user';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
@@ -95,12 +96,21 @@ const columns: TableColumnsType = [
 
 const rows = computed<ActionDisplay[]>(() => actionRows.value);
 
-const processingCount = computed(() => rows.value.filter((item) => item.status === 1).length);
-const pendingCount = computed(() => rows.value.filter((item) => item.status === 0).length);
-const doneCount = computed(() => rows.value.filter((item) => item.status === 2).length);
+const processingCount = computed(
+  () => rows.value.filter((item) => item.status === 1).length,
+);
+const pendingCount = computed(
+  () => rows.value.filter((item) => item.status === 0).length,
+);
+const doneCount = computed(
+  () => rows.value.filter((item) => item.status === 2).length,
+);
 
 const employeeOptions = computed(() =>
-  users.value.map((item) => ({ label: item.nickname || `用户${item.id}`, value: item.id })),
+  users.value.map((item) => ({
+    label: item.nickname || `用户${item.id}`,
+    value: item.id,
+  })),
 );
 const goalOptions = computed(() =>
   goals.value.map((item) => ({ label: item.name, value: item.id })),
@@ -110,7 +120,10 @@ const statusOptions = Object.entries(statusMeta).map(([value, meta]) => ({
   value: Number(value),
 }));
 
-function optionLabel(options: { label: string; value: SelectValue }[], value?: SelectValue) {
+function optionLabel(
+  options: { label: string; value: SelectValue }[],
+  value?: SelectValue,
+) {
   return options.find((item) => item.value === value)?.label?.split(' · ')[0];
 }
 
@@ -126,7 +139,10 @@ function getTaskStatusMeta(status: ActionPlanStatus) {
 }
 
 async function loadOptions() {
-  const [userList, goalList] = await Promise.all([getSimpleUserList(), getFdmPerformanceGoalList()]);
+  const [userList, goalList] = await Promise.all([
+    getSimpleUserList(),
+    getFdmPerformanceGoalList(),
+  ]);
   users.value = userList;
   goals.value = goalList || [];
 }
@@ -203,21 +219,28 @@ async function save() {
     return;
   }
   const req: FdmPerformanceActionPlanApi.ActionPlanSaveReq = {
-    assigneeUserId: typeof editingTask.assigneeValue === 'number' ? editingTask.assigneeValue : undefined,
-    assigneeUserName: optionLabel(employeeOptions.value, editingTask.assigneeValue),
+    assigneeUserId:
+      typeof editingTask.assigneeValue === 'number'
+        ? editingTask.assigneeValue
+        : undefined,
+    assigneeUserName: optionLabel(
+      employeeOptions.value,
+      editingTask.assigneeValue,
+    ),
     deadline: editingTask.deadline,
-    goalId: typeof editingTask.goalValue === 'number' ? editingTask.goalValue : undefined,
+    goalId:
+      typeof editingTask.goalValue === 'number'
+        ? editingTask.goalValue
+        : undefined,
     id: editingTask.id,
     name: editingTask.name,
     progress: editingTask.progress,
     sourceType: 3,
     status: editingTask.status,
   };
-  if (req.id) {
-    await updateFdmPerformanceActionPlan(req);
-  } else {
-    await createFdmPerformanceActionPlan(req);
-  }
+  await (req.id
+    ? updateFdmPerformanceActionPlan(req)
+    : createFdmPerformanceActionPlan(req));
   await loadActions();
   modalOpen.value = false;
   message.success('行动计划已保存');
@@ -249,10 +272,18 @@ onMounted(loadPage);
     </template>
 
     <div class="metric-grid">
-      <Card><strong>{{ rows.length }}</strong><span>全部任务</span></Card>
-      <Card><strong>{{ pendingCount }}</strong><span>待处理</span></Card>
-      <Card><strong>{{ processingCount }}</strong><span>进行中</span></Card>
-      <Card><strong>{{ doneCount }}</strong><span>已完成</span></Card>
+      <Card>
+        <strong>{{ rows.length }}</strong><span>全部任务</span>
+      </Card>
+      <Card>
+        <strong>{{ pendingCount }}</strong><span>待处理</span>
+      </Card>
+      <Card>
+        <strong>{{ processingCount }}</strong><span>进行中</span>
+      </Card>
+      <Card>
+        <strong>{{ doneCount }}</strong><span>已完成</span>
+      </Card>
     </div>
 
     <Card title="任务列表">
@@ -288,7 +319,13 @@ onMounted(loadPage);
           <Button @click="resetActionFilters">重置</Button>
         </Space>
       </div>
-      <Table :columns="columns" :data-source="rows" :loading="loading" :pagination="false" row-key="id">
+      <Table
+        :columns="columns"
+        :data-source="rows"
+        :loading="loading"
+        :pagination="false"
+        row-key="id"
+      >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'goalId'">
             {{ record.goalName || goalName(record.goalId) }}
@@ -297,15 +334,45 @@ onMounted(loadPage);
             <Progress :percent="record.progress" size="small" />
           </template>
           <template v-else-if="column.dataIndex === 'status'">
-            <Tag :color="getTaskStatusMeta(record.status).color">{{ getTaskStatusMeta(record.status).label }}</Tag>
+            <Tag :color="getTaskStatusMeta(record.status).color">
+              {{ getTaskStatusMeta(record.status).label }}
+            </Tag>
           </template>
           <template v-else-if="column.dataIndex === 'action'">
             <Space>
-              <Button size="small" type="link" @click="openEdit(record as ActionDisplay)">编辑</Button>
-              <Button size="small" type="link" @click="updateStatus(record.id, 1)">开始</Button>
-              <Button size="small" type="link" @click="updateStatus(record.id, 2)">完成</Button>
-              <Button danger size="small" type="link" @click="updateStatus(record.id, 3)">放弃</Button>
-              <Popconfirm title="确认删除该任务？" @confirm="removeTask(record.id)">
+              <Button
+                size="small"
+                type="link"
+                @click="openEdit(record as ActionDisplay)"
+              >
+                编辑
+              </Button>
+              <Button
+                size="small"
+                type="link"
+                @click="updateStatus(record.id, 1)"
+              >
+                开始
+              </Button>
+              <Button
+                size="small"
+                type="link"
+                @click="updateStatus(record.id, 2)"
+              >
+                完成
+              </Button>
+              <Button
+                danger
+                size="small"
+                type="link"
+                @click="updateStatus(record.id, 3)"
+              >
+                放弃
+              </Button>
+              <Popconfirm
+                title="确认删除该任务？"
+                @confirm="removeTask(record.id)"
+              >
                 <Button danger size="small" type="link">删除</Button>
               </Popconfirm>
             </Space>
@@ -314,22 +381,51 @@ onMounted(loadPage);
       </Table>
     </Card>
 
-    <Modal v-model:open="modalOpen" title="行动计划任务" width="720px" @ok="save">
+    <Modal
+      v-model:open="modalOpen"
+      title="行动计划任务"
+      width="720px"
+      @ok="save"
+    >
       <Form layout="vertical">
         <Form.Item label="任务名称" required>
-          <Input v-model:value="editingTask.name" placeholder="请输入任务名称" />
+          <Input
+            v-model:value="editingTask.name"
+            placeholder="请输入任务名称"
+          />
         </Form.Item>
         <Form.Item label="负责人" required>
-          <Select v-model:value="editingTask.assigneeValue" :options="employeeOptions" show-search />
+          <Select
+            v-model:value="editingTask.assigneeValue"
+            :options="employeeOptions"
+            show-search
+          />
         </Form.Item>
         <Form.Item label="关联目标">
-          <Select v-model:value="editingTask.goalValue" allow-clear :options="goalOptions" />
+          <Select
+            v-model:value="editingTask.goalValue"
+            allow-clear
+            :options="goalOptions"
+          />
         </Form.Item>
         <Form.Item label="截止时间">
-          <Input v-model:value="editingTask.deadline" placeholder="YYYY-MM-DD" />
+          <DatePicker
+            v-model:value="editingTask.deadline"
+            allow-clear
+            class="full"
+            format="YYYY-MM-DD"
+            placeholder="请选择截止时间"
+            value-format="YYYY-MM-DD"
+          />
         </Form.Item>
         <Form.Item label="进度">
-          <InputNumber v-model:value="editingTask.progress" :max="100" :min="0" addon-after="%" class="full" />
+          <InputNumber
+            v-model:value="editingTask.progress"
+            :max="100"
+            :min="0"
+            addon-after="%"
+            class="full"
+          />
         </Form.Item>
         <Form.Item label="状态">
           <Select v-model:value="editingTask.status" :options="statusOptions" />
@@ -348,7 +444,9 @@ onMounted(loadPage);
 
 .filter-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.3fr) minmax(160px, 1fr) minmax(160px, 1fr) minmax(140px, 0.8fr) auto;
+  grid-template-columns:
+    minmax(180px, 1.3fr) minmax(160px, 1fr) minmax(160px, 1fr)
+    minmax(140px, 0.8fr) auto;
   gap: 12px;
   align-items: center;
   margin-bottom: 14px;
@@ -360,9 +458,9 @@ onMounted(loadPage);
 }
 
 .metric-grid strong {
-  color: #1677ff;
   font-size: 28px;
   font-weight: 650;
+  color: #1677ff;
 }
 
 .metric-grid span {

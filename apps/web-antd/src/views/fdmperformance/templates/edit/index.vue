@@ -1,4 +1,17 @@
 <script lang="ts" setup>
+import type {
+  AssessmentTemplate,
+  Employee,
+  Indicator,
+} from '../../shared/model';
+
+import type { FdmPerformanceIndicatorApi } from '#/api/fdmperformance/indicator';
+import type { FdmPerformanceSettingApi } from '#/api/fdmperformance/setting';
+import type { FdmPerformanceTemplateApi } from '#/api/fdmperformance/template';
+import type { SystemDeptApi } from '#/api/system/dept';
+import type { SystemPostApi } from '#/api/system/post';
+import type { SystemRoleApi } from '#/api/system/role';
+import type { SystemUserApi } from '#/api/system/user';
 import type { SimpleFlowNode } from '#/views/bpm/components/simple-process-design';
 
 import { computed, onMounted, provide, reactive, ref, watch } from 'vue';
@@ -7,10 +20,33 @@ import { useRoute, useRouter } from 'vue-router';
 import { BpmModelFormType } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Card, Checkbox, Form, Input, InputNumber, Modal, Radio, Select, Space, Steps, Switch, Table, Tag, Tooltip, message } from 'ant-design-vue';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Radio,
+  Select,
+  Space,
+  Steps,
+  Switch,
+  Table,
+  Tag,
+  Tooltip,
+} from 'ant-design-vue';
 
-import { SimpleProcessDesigner } from '#/views/bpm/components/simple-process-design';
-import { CandidateStrategy } from '#/views/bpm/components/simple-process-design/consts';
+import {
+  createFdmPerformanceIndicator,
+  createFdmPerformanceIndicatorTag,
+  getFdmPerformanceIndicatorPage,
+  getFdmPerformanceIndicatorTagList,
+} from '#/api/fdmperformance/indicator';
+import { getFdmPerformanceSettingList } from '#/api/fdmperformance/setting';
 import {
   createFdmPerformanceFlowPreset,
   createFdmPerformanceTemplate,
@@ -19,32 +55,17 @@ import {
   getFdmPerformanceTemplateGroupSimpleList,
   getFdmPerformanceTemplatePage,
   updateFdmPerformanceTemplate,
-  type FdmPerformanceTemplateApi,
 } from '#/api/fdmperformance/template';
-import {
-  createFdmPerformanceIndicator,
-  createFdmPerformanceIndicatorTag,
-  getFdmPerformanceIndicatorPage,
-  getFdmPerformanceIndicatorTagList,
-  type FdmPerformanceIndicatorApi,
-} from '#/api/fdmperformance/indicator';
-import {
-  getFdmPerformanceSettingList,
-  type FdmPerformanceSettingApi,
-} from '#/api/fdmperformance/setting';
-import { getSimpleDeptList, type SystemDeptApi } from '#/api/system/dept';
-import { getSimplePostList, type SystemPostApi } from '#/api/system/post';
-import { getSimpleRoleList, type SystemRoleApi } from '#/api/system/role';
-import { getSimpleUserList, type SystemUserApi } from '#/api/system/user';
+import { getSimpleDeptList } from '#/api/system/dept';
+import { getSimplePostList } from '#/api/system/post';
+import { getSimpleRoleList } from '#/api/system/role';
+import { getSimpleUserList } from '#/api/system/user';
+import { SimpleProcessDesigner } from '#/views/bpm/components/simple-process-design';
+import { CandidateStrategy } from '#/views/bpm/components/simple-process-design/consts';
 
-import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { apiPeriodTextToType, mapApiTemplate } from '../../shared/api-adapter';
-import {
-  type AssessmentTemplate,
-  type Employee,
-  type Indicator,
-  defaultTemplateFlowNode,
-} from '../../shared/model';
+import { defaultTemplateFlowNode } from '../../shared/model';
+import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../../shared/route';
 
 defineOptions({ name: 'FdmPerformanceTemplateEdit' });
@@ -53,7 +74,11 @@ const route = useRoute();
 const router = useRouter();
 const { performancePath } = usePerformancePath();
 
-type PerformanceEmployee = Employee & { deptId?: number; postId?: number };
+type PerformanceEmployee = Employee & {
+  deptId?: number;
+  postId?: number;
+  username?: string;
+};
 type PerformanceIndicator = Indicator & { indicatorId?: number };
 interface UserGroupSetting {
   desc: string;
@@ -78,14 +103,20 @@ const userGroupSettings = ref<UserGroupSetting[]>([]);
 const apiIndicatorTagRows = ref<FdmPerformanceIndicatorApi.IndicatorTag[]>([]);
 const apiIndicatorTags = ref<string[]>([]);
 const loading = ref(false);
-const sourceEmployees = computed<PerformanceEmployee[]>(() => apiEmployees.value);
+const sourceEmployees = computed<PerformanceEmployee[]>(
+  () => apiEmployees.value,
+);
 const sourceTemplates = computed(() => apiTemplates.value);
 const sourceIndicators = computed<PerformanceIndicator[]>(() => {
   const rows = new Map<number, PerformanceIndicator>();
-  [...apiIndicators.value, ...apiTemplateIndicators.value, ...localDraftIndicators.value].forEach((item) => {
+  [
+    ...apiIndicators.value,
+    ...apiTemplateIndicators.value,
+    ...localDraftIndicators.value,
+  ].forEach((item) => {
     rows.set(item.id, item);
   });
-  return Array.from(rows.values());
+  return [...rows.values()];
 });
 
 function cloneTemplate(template?: AssessmentTemplate): AssessmentTemplate {
@@ -111,13 +142,27 @@ function cloneTemplate(template?: AssessmentTemplate): AssessmentTemplate {
 
 const draft = reactive<AssessmentTemplate>(cloneTemplate());
 const currentStep = ref(0);
-const selectedIndicatorIds = ref<number[]>(draft.indicatorIds?.length ? [...draft.indicatorIds] : []);
-const scorerRules = reactive<Record<number, string>>({ ...(draft.scorerRules || {}) });
-const participantMode = ref<'department' | 'people' | 'role' | 'userGroup'>(draft.participantScope?.mode || 'people');
-const selectedPeopleIds = ref<number[]>(draft.participantScope?.peopleIds?.length ? [...draft.participantScope.peopleIds] : [...draft.participants]);
-const selectedDeptNames = ref<string[]>(draft.participantScope?.deptNames || []);
-const selectedRoleNames = ref<string[]>(draft.participantScope?.roleNames || []);
-const selectedUserGroupNames = ref<string[]>(draft.participantScope?.userGroupNames || []);
+const selectedIndicatorIds = ref<number[]>(
+  draft.indicatorIds?.length ? [...draft.indicatorIds] : [],
+);
+const scorerRules = reactive<Record<number, string>>({ ...draft.scorerRules });
+const participantMode = ref<'department' | 'people' | 'role' | 'userGroup'>(
+  draft.participantScope?.mode || 'people',
+);
+const selectedPeopleIds = ref<number[]>(
+  draft.participantScope?.peopleIds?.length
+    ? [...draft.participantScope.peopleIds]
+    : [...draft.participants],
+);
+const selectedDeptNames = ref<string[]>(
+  draft.participantScope?.deptNames || [],
+);
+const selectedRoleNames = ref<string[]>(
+  draft.participantScope?.roleNames || [],
+);
+const selectedUserGroupNames = ref<string[]>(
+  draft.participantScope?.userGroupNames || [],
+);
 const importModalOpen = ref(false);
 const importKeyword = ref('');
 const importDimension = ref<string>();
@@ -147,26 +192,54 @@ const unlimitedIndicatorWeight = ref(true);
 const totalLimitEnabled = ref(false);
 const resultVisibleRule = ref('评分结束后自动公示');
 const scoreCalculateRule = ref('加扣计算');
-const scorerStrategy = ref<'byIndicator' | 'unified'>(draft.scorerStrategy || 'unified');
-const unifiedScorer = ref(Object.values(draft.scorerRules || {})[0] || '直接主管');
+const scorerStrategy = ref<'byIndicator' | 'unified'>(
+  draft.scorerStrategy || 'unified',
+);
+const unifiedScorer = ref(
+  Object.values(draft.scorerRules || {})[0] || '直接主管',
+);
 const dimensionDraft = reactive({
   name: '',
   type: '量化指标 100%',
   weight: 20,
 });
 const configHelpText = {
-  dimensionWeight: '启用后先按维度权重折算维度得分，再进入评分节点权重汇总；关闭后按指标贡献分直接汇总。',
-  enabledTemplateCount: '当前处于启用状态的考评表数量，用于判断本配置会影响多少可发起模板。',
-  examDescription: '启用后在考评表中展示考核说明相关内容，方便评分人查看填写要求。',
-  scorerStrategy: '统一评分人会让所有指标使用同一评分人；按指标设置时，每个指标可单独指定评分人。',
-  scoreCalculate: '加扣计算按贡献分直接累加：普通/加分项累加，扣分项按负数计入。加权平均按权重折算；其他方式为规则预留。',
-  totalLimit: '启用后最终总分受规则上限/下限约束，避免加分或扣分后超出考评表允许范围。',
-  unlimitedIndicatorWeight: '启用后维度内指标权重不强制合计 100，适合贡献分、加分项和扣分项；关闭后需按权重合计校验。',
+  dimensionWeight:
+    '启用后先按维度权重折算维度得分，再进入评分节点权重汇总；关闭后按指标贡献分直接汇总。',
+  enabledTemplateCount:
+    '当前处于启用状态的考评表数量，用于判断本配置会影响多少可发起模板。',
+  examDescription:
+    '启用后在考评表中展示考核说明相关内容，方便评分人查看填写要求。',
+  scorerStrategy:
+    '统一评分人会让所有指标使用同一评分人；按指标设置时，每个指标可单独指定评分人。',
+  scoreCalculate:
+    '加扣计算按贡献分直接累加：普通/加分项累加，扣分项按负数计入。加权平均按权重折算；其他方式为规则预留。',
+  totalLimit:
+    '启用后最终总分受规则上限/下限约束，避免加分或扣分后超出考评表允许范围。',
+  unlimitedIndicatorWeight:
+    '启用后维度内指标权重不强制合计 100，适合贡献分、加分项和扣分项；关闭后需按权重合计校验。',
 };
 
+const deptNameMap = computed(
+  () => new Map(apiDeptList.value.map((item) => [Number(item.id), item.name])),
+);
+const postNameMap = computed(
+  () => new Map(apiPostList.value.map((item) => [Number(item.id), item.name])),
+);
 const designerDeptList = computed(() => apiDeptList.value);
 const designerPostList = computed(() => apiPostList.value);
-const designerUserList = computed(() => apiUserList.value);
+const designerUserList = computed(() =>
+  apiUserList.value.map((item) => {
+    const postId = Number(item.postIds?.[0] || 0) || undefined;
+    return {
+      ...item,
+      deptName: item.deptId
+        ? deptNameMap.value.get(Number(item.deptId))
+        : undefined,
+      postName: postId ? postNameMap.value.get(postId) : undefined,
+    };
+  }),
+);
 const designerRoleList = computed(() => apiRoleList.value);
 const effectiveUserGroups = computed<UserGroupSetting[]>(() => [
   {
@@ -199,35 +272,84 @@ provide('startDeptIds', []);
 provide('tasks', []);
 provide('processInstance', {});
 
-const periodOptions = ['月度', '季度', '半年度', '年度', '试用期', '日', '自定义'].map((value) => ({ label: value, value }));
+const periodOptions = [
+  '月度',
+  '季度',
+  '半年度',
+  '年度',
+  '试用期',
+  '日',
+  '自定义',
+].map((value) => ({ label: value, value }));
 const groupOptions = computed(() =>
-  Array.from(
-    new Set(
-      apiTemplateGroups.value
-        .map((item) => item.name)
-        .concat(sourceTemplates.value.map((item) => item.group))
-        .concat([draft.group || '未分类考评表'])
-        .filter((name): name is string => Boolean(name)),
+  [
+    ...new Set(
+      [
+        ...apiTemplateGroups.value.map((item) => item.name),
+        ...sourceTemplates.value.map((item) => item.group),
+        draft.group || '未分类考评表',
+      ].filter(Boolean) as string[],
     ),
-  ).map((value) => ({
+  ].map((value) => ({
     label: value,
     value,
   })),
 );
+function normalizeSearchText(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function buildEmployeeLabel(item: PerformanceEmployee) {
+  return [item.name, item.dept || '未分配部门', item.post || '未分配岗位']
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function buildEmployeeSearchText(item: PerformanceEmployee) {
+  return [
+    item.name,
+    item.username,
+    item.dept,
+    item.post,
+    item.id,
+    item.deptId,
+    item.postId,
+  ]
+    .filter((value) => value !== undefined && value !== null && value !== '')
+    .join(' ');
+}
+
+function filterEmployeeOption(input: string, option?: any) {
+  const keyword = normalizeSearchText(input);
+  if (!keyword) {
+    return true;
+  }
+  return normalizeSearchText(
+    `${option?.label ?? ''} ${option?.searchText ?? ''} ${option?.value ?? ''}`,
+  ).includes(keyword);
+}
+
 const employeeOptions = computed(() =>
   sourceEmployees.value.map((item) => ({
-    label: `${item.name} · ${item.dept || '未分配部门'}`,
+    label: buildEmployeeLabel(item),
+    searchText: buildEmployeeSearchText(item),
     value: item.id,
   })),
 );
 const deptOptions = computed(() =>
-  Array.from(new Set(sourceEmployees.value.map((item) => item.dept).filter(Boolean))).map((value) => ({
+  [
+    ...new Set(sourceEmployees.value.map((item) => item.dept).filter(Boolean)),
+  ].map((value) => ({
     label: value,
     value,
   })),
 );
 const roleOptions = computed(() =>
-  Array.from(new Set(sourceEmployees.value.map((item) => item.post).filter(Boolean))).map((value) => ({
+  [
+    ...new Set(sourceEmployees.value.map((item) => item.post).filter(Boolean)),
+  ].map((value) => ({
     label: value,
     value,
   })),
@@ -244,25 +366,45 @@ const flowPresetOptions = computed(() =>
     value: Number(item.id),
   })),
 );
-const userGroupMemberMap = computed(() =>
-  new Map(effectiveUserGroups.value.map((group) => [group.name, group.memberIds])),
+const userGroupMemberMap = computed(
+  () =>
+    new Map(
+      effectiveUserGroups.value.map((group) => [group.name, group.memberIds]),
+    ),
 );
 const adminOptions = computed(() =>
   sourceEmployees.value.map((item) => ({
-    label: `${item.name} · ${item.dept || '未分配部门'}`,
+    label: buildEmployeeLabel(item),
+    searchText: buildEmployeeSearchText(item),
     value: String(item.id),
   })),
 );
-const scorerOptions = ['直接主管', '部门负责人', '考评表管理员', '被考核人', '指定评分人'].map((value) => ({
+const scorerOptions = [
+  '直接主管',
+  '部门负责人',
+  '考评表管理员',
+  '被考核人',
+  '指定评分人',
+].map((value) => ({
   label: value,
   value,
 }));
-const scoreModeOptions = ['手动评分', '按分数区间对应', '输入框手动输入', '设置评分组'].map((value) => ({
+const scoreModeOptions = [
+  '手动评分',
+  '按分数区间对应',
+  '输入框手动输入',
+  '设置评分组',
+].map((value) => ({
   label: value,
   value,
 }));
 const tagOptions = computed(() =>
-  Array.from(new Set([...apiIndicatorTags.value, ...sourceIndicators.value.flatMap((item) => item.tags)])).map((value) => ({
+  [
+    ...new Set([
+      ...apiIndicatorTags.value,
+      ...sourceIndicators.value.flatMap((item) => item.tags),
+    ]),
+  ].map((value) => ({
     label: value,
     value,
   })),
@@ -287,25 +429,35 @@ const importIndicatorColumns = [
 ];
 
 const selectedIndicators = computed(() =>
-  sourceIndicators.value.filter((item) => selectedIndicatorIds.value.includes(item.id)),
-);
-const weightTotal = computed(() => selectedIndicators.value.reduce((sum, item) => sum + item.weight, 0));
-const dimensions = computed(() =>
-  Array.from(
-    new Set(
-      ['加分项', '业绩指标', '过程指标', '自我管理']
-        .concat(draft.customDimensions || [])
-        .concat(sourceIndicators.value.map((item) => item.dimension))
-        .filter((dimension) => !scoreNodeDimensionNames.has(dimension)),
-    ),
+  sourceIndicators.value.filter((item) =>
+    selectedIndicatorIds.value.includes(item.id),
   ),
 );
+const weightTotal = computed(() =>
+  selectedIndicators.value.reduce((sum, item) => sum + item.weight, 0),
+);
+const dimensions = computed(() => [
+  ...new Set(
+    [
+      '加分项',
+      '业绩指标',
+      '过程指标',
+      '自我管理',
+      ...(draft.customDimensions || []),
+      ...sourceIndicators.value.map((item) => item.dimension),
+    ].filter((dimension) => !scoreNodeDimensionNames.has(dimension)),
+  ),
+]);
 const flowNodeCount = computed(() => countFlowNodes(processData.value));
-const enabledTemplateCount = computed(() => sourceTemplates.value.filter((item) => item.status === 'enabled').length);
-const participantPreview = computed(() =>
-  resolveParticipantIds()
-    .map((id) => findEmployee(id))
-    .filter((item): item is PerformanceEmployee => Boolean(item)),
+const enabledTemplateCount = computed(
+  () =>
+    sourceTemplates.value.filter((item) => item.status === 'enabled').length,
+);
+const participantPreview = computed(
+  () =>
+    resolveParticipantIds()
+      .map((id) => findEmployee(id))
+      .filter(Boolean) as PerformanceEmployee[],
 );
 const importIndicatorRows = computed(() => {
   const text = importKeyword.value.trim();
@@ -318,7 +470,8 @@ const importIndicatorRows = computed(() => {
       [item.name, item.dimension, item.standard, item.tags.join(',')]
         .filter(Boolean)
         .some((value) => value.includes(text));
-    const dimensionMatched = !importDimension.value || item.dimension === importDimension.value;
+    const dimensionMatched =
+      !importDimension.value || item.dimension === importDimension.value;
     const tagMatched = !importTag.value || item.tags.includes(importTag.value);
     return textMatched && dimensionMatched && tagMatched;
   });
@@ -353,19 +506,21 @@ const flowGuideItems = [
 ];
 
 function toggleIndicator(id: number, checked: boolean) {
-  if (checked) {
-    selectedIndicatorIds.value = Array.from(new Set([...selectedIndicatorIds.value, id]));
-  } else {
-    selectedIndicatorIds.value = selectedIndicatorIds.value.filter((item) => item !== id);
-  }
+  selectedIndicatorIds.value = checked
+    ? [...new Set([...selectedIndicatorIds.value, id])]
+    : selectedIndicatorIds.value.filter((item) => item !== id);
 }
 
 function getDimensionIndicators(dimension: string) {
-  const rows = sourceIndicators.value.filter((item) => item.dimension === dimension);
+  const rows = sourceIndicators.value.filter(
+    (item) => item.dimension === dimension,
+  );
   if (!partialIndicatorOnly.value) {
     return rows;
   }
-  return rows.filter((item) => selectedIndicatorIds.value.includes(item.id) || item.weight > 0);
+  return rows.filter(
+    (item) => selectedIndicatorIds.value.includes(item.id) || item.weight > 0,
+  );
 }
 
 function isLocalDraftIndicator(record: Record<string, any>) {
@@ -380,7 +535,9 @@ function countFlowNodes(node?: SimpleFlowNode): number {
   if (!node) {
     return 0;
   }
-  const conditionCount = node.conditionNodes?.reduce((sum, item) => sum + countFlowNodes(item), 0) ?? 0;
+  const conditionCount =
+    node.conditionNodes?.reduce((sum, item) => sum + countFlowNodes(item), 0) ??
+    0;
   return 1 + conditionCount + countFlowNodes(node.childNode);
 }
 
@@ -402,7 +559,12 @@ function resetDefaultFlow() {
 
 function getCurrentEditableFlow() {
   const currentFlow = designerRef.value?.getCurrentFlowData?.();
-  return cloneFlowNode(currentFlow || processData.value || draft.flowNode || defaultTemplateFlowNode);
+  return cloneFlowNode(
+    currentFlow ||
+      processData.value ||
+      draft.flowNode ||
+      defaultTemplateFlowNode,
+  );
 }
 
 function parsePresetFlow(preset: FdmPerformanceTemplateApi.FlowPreset) {
@@ -422,7 +584,9 @@ function applySelectedFlowPreset(presetId?: unknown) {
   if (!Number.isFinite(normalizedPresetId) || normalizedPresetId <= 0) {
     return;
   }
-  const preset = flowPresetList.value.find((item) => Number(item.id) === normalizedPresetId);
+  const preset = flowPresetList.value.find(
+    (item) => Number(item.id) === normalizedPresetId,
+  );
   const flowNode = preset ? parsePresetFlow(preset) : undefined;
   if (!flowNode) {
     message.warning('流程预设数据不完整，无法应用');
@@ -484,7 +648,11 @@ function openDimensionModal() {
 function openImportModal(dimension?: string) {
   activeImportDimension.value = dimension;
   importSelectedIndicatorIds.value = dimension
-    ? selectedIndicatorIds.value.filter((id) => sourceIndicators.value.find((item) => item.id === id)?.dimension === dimension)
+    ? selectedIndicatorIds.value.filter(
+        (id) =>
+          sourceIndicators.value.find((item) => item.id === id)?.dimension ===
+          dimension,
+      )
     : [...selectedIndicatorIds.value];
   importKeyword.value = '';
   importDimension.value = dimension;
@@ -497,17 +665,19 @@ function confirmImportIndicators() {
     const activeDimension = activeImportDimension.value;
     const replaceableIds = new Set(
       sourceIndicators.value
-        .filter((item) => item.dimension === activeDimension && Number(item.id) > 0)
+        .filter(
+          (item) => item.dimension === activeDimension && Number(item.id) > 0,
+        )
         .map((item) => item.id),
     );
-    selectedIndicatorIds.value = Array.from(
-      new Set([
+    selectedIndicatorIds.value = [
+      ...new Set([
         ...selectedIndicatorIds.value.filter((id) => !replaceableIds.has(id)),
         ...importSelectedIndicatorIds.value,
       ]),
-    );
+    ];
   } else {
-    selectedIndicatorIds.value = Array.from(new Set(importSelectedIndicatorIds.value));
+    selectedIndicatorIds.value = [...new Set(importSelectedIndicatorIds.value)];
   }
   importSelectedIndicatorIds.value.forEach((id) => {
     if (!scorerRules[id]) {
@@ -520,7 +690,8 @@ function confirmImportIndicators() {
 }
 
 function addManualIndicator(dimension: string) {
-  const newIndicatorId = Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
+  const newIndicatorId =
+    Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
   const sameDimensionCount = getDimensionIndicators(dimension).length + 1;
   const indicator: PerformanceIndicator = {
     dimension,
@@ -534,13 +705,17 @@ function addManualIndicator(dimension: string) {
   };
   localDraftIndicators.value.unshift(indicator);
   scorerRules[newIndicatorId] = '直接主管';
-  selectedIndicatorIds.value = Array.from(new Set([...selectedIndicatorIds.value, newIndicatorId]));
+  selectedIndicatorIds.value = [
+    ...new Set([...selectedIndicatorIds.value, newIndicatorId]),
+  ];
   message.success(`已在「${dimension}」下新增指标`);
 }
 
 async function ensureIndicatorTag(name: string) {
   const tagName = name.trim();
-  const existed = apiIndicatorTagRows.value.find((item) => item.name === tagName && item.id);
+  const existed = apiIndicatorTagRows.value.find(
+    (item) => item.name === tagName && item.id,
+  );
   if (existed?.id) {
     return Number(existed.id);
   }
@@ -559,7 +734,9 @@ async function ensureIndicatorTag(name: string) {
     status: 0,
     tagType: 3,
   });
-  apiIndicatorTags.value = apiIndicatorTagRows.value.map((item) => item.name || '').filter(Boolean);
+  apiIndicatorTags.value = apiIndicatorTagRows.value
+    .map((item) => item.name || '')
+    .filter(Boolean);
   return Number(id);
 }
 
@@ -569,7 +746,8 @@ async function generateIndicatorsByAI() {
     {
       dimension: '业绩指标',
       name: `${groupName}核心目标达成率`,
-      standard: '目标达成率 X：X>=110% 得120，100%<=X<110% 得110，90%<=X<100% 得100，80%<=X<90% 得80，X<80% 得60。',
+      standard:
+        '目标达成率 X：X>=110% 得120，100%<=X<110% 得110，90%<=X<100% 得100，80%<=X<90% 得80，X<80% 得60。',
       weight: 40,
     },
     {
@@ -589,7 +767,8 @@ async function generateIndicatorsByAI() {
   message.loading('正在生成指标并写入指标库...', 1);
   for (const item of generated) {
     const existed = sourceIndicators.value.find(
-      (indicator) => indicator.dimension === item.dimension && indicator.name === item.name,
+      (indicator) =>
+        indicator.dimension === item.dimension && indicator.name === item.name,
     );
     if (existed) {
       createdIds.push(existed.id);
@@ -597,8 +776,11 @@ async function generateIndicatorsByAI() {
     }
     const dimensionTagId = await ensureIndicatorTag(item.dimension);
     const aiTagId = await ensureIndicatorTag('AI生成');
-    const groupTagId = groupName === '通用' ? undefined : await ensureIndicatorTag(groupName);
-    const tagIds = Array.from(new Set([dimensionTagId, aiTagId, groupTagId].filter(Boolean))) as number[];
+    const groupTagId =
+      groupName === '通用' ? undefined : await ensureIndicatorTag(groupName);
+    const tagIds = [
+      ...new Set([dimensionTagId, aiTagId, groupTagId].filter(Boolean)),
+    ] as number[];
     const id = await createFdmPerformanceIndicator({
       name: item.name,
       remark: `来自考评表「${draft.name || groupName}」AI生成`,
@@ -622,7 +804,9 @@ async function generateIndicatorsByAI() {
     scorerRules[id] = '直接主管';
     createdIds.push(id);
   }
-  selectedIndicatorIds.value = Array.from(new Set([...selectedIndicatorIds.value, ...createdIds]));
+  selectedIndicatorIds.value = [
+    ...new Set([...selectedIndicatorIds.value, ...createdIds]),
+  ];
   message.success(`已生成 ${createdIds.length} 个指标库指标`);
 }
 
@@ -639,17 +823,25 @@ function dedupeSelectedIndicators() {
   });
   const removed = selectedIndicatorIds.value.length - deduped.length;
   selectedIndicatorIds.value = deduped;
-  message.success(removed > 0 ? `已去除 ${removed} 个重复指标` : '当前没有重复指标');
+  message.success(
+    removed > 0 ? `已去除 ${removed} 个重复指标` : '当前没有重复指标',
+  );
 }
 
 function togglePartialIndicators() {
   partialIndicatorOnly.value = !partialIndicatorOnly.value;
   if (partialIndicatorOnly.value) {
     selectedIndicatorIds.value = selectedIndicators.value
-      .filter((item) => item.weight > 0 && !['加分项', '扣分项', '一票否决'].includes(item.dimension))
+      .filter(
+        (item) =>
+          item.weight > 0 &&
+          !['一票否决', '加分项', '扣分项'].includes(item.dimension),
+      )
       .map((item) => item.id);
   }
-  message.success(partialIndicatorOnly.value ? '已切换为仅评部分指标' : '已恢复全部指标展示');
+  message.success(
+    partialIndicatorOnly.value ? '已切换为仅评部分指标' : '已恢复全部指标展示',
+  );
 }
 
 function addDimension() {
@@ -662,8 +854,11 @@ function addDimension() {
     message.warning('主管评分属于考核流程中的评分节点，不需要作为指标维度添加');
     return;
   }
-  draft.customDimensions = Array.from(new Set([...(draft.customDimensions || []), name]));
-  const newIndicatorId = Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
+  draft.customDimensions = [
+    ...new Set([...(draft.customDimensions || []), name]),
+  ];
+  const newIndicatorId =
+    Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
   const indicator: PerformanceIndicator = {
     dimension: name,
     id: newIndicatorId,
@@ -676,7 +871,9 @@ function addDimension() {
   };
   localDraftIndicators.value.unshift(indicator);
   scorerRules[newIndicatorId] = '直接主管';
-  selectedIndicatorIds.value = Array.from(new Set([...selectedIndicatorIds.value, newIndicatorId]));
+  selectedIndicatorIds.value = [
+    ...new Set([...selectedIndicatorIds.value, newIndicatorId]),
+  ];
   dimensionModalOpen.value = false;
   message.success('已添加考核维度');
 }
@@ -695,15 +892,17 @@ function resolveParticipantIds() {
       .filter((item) => selectedRoleNames.value.includes(item.post))
       .map((item) => item.id);
   }
-  return Array.from(
-    new Set(
-      selectedUserGroupNames.value.flatMap((name) => userGroupMemberMap.value.get(name) || []),
+  return [
+    ...new Set(
+      selectedUserGroupNames.value.flatMap(
+        (name) => userGroupMemberMap.value.get(name) || [],
+      ),
     ),
-  );
+  ];
 }
 
 function applyParticipantScope() {
-  draft.participants = Array.from(new Set(resolveParticipantIds()));
+  draft.participants = [...new Set(resolveParticipantIds())];
   draft.participantScope = {
     deptNames: [...selectedDeptNames.value],
     mode: participantMode.value,
@@ -717,10 +916,12 @@ function findEmployee(id?: number) {
   return sourceEmployees.value.find((item) => item.id === id);
 }
 
-function mapApiIndicator(item: FdmPerformanceIndicatorApi.Indicator): PerformanceIndicator {
+function mapApiIndicator(
+  item: FdmPerformanceIndicatorApi.Indicator,
+): PerformanceIndicator {
   const tagNames = (item.tagIds || [])
     .map((id) => apiIndicatorTagRows.value.find((tag) => tag.id === id)?.name)
-    .filter((tag): tag is string => Boolean(tag));
+    .filter(Boolean) as string[];
   return {
     dimension: tagNames[0] || '指标库',
     id: Number(item.id || 0),
@@ -729,12 +930,14 @@ function mapApiIndicator(item: FdmPerformanceIndicatorApi.Indicator): Performanc
     scoreMode: '手动评分',
     standard: item.standard || '',
     status: item.status === 1 ? 'stopped' : 'enabled',
-    tags: tagNames.length ? tagNames : ['指标库'],
+    tags: tagNames.length > 0 ? tagNames : ['指标库'],
     weight: 0,
   };
 }
 
-function mapTemplateIndicators(template: FdmPerformanceTemplateApi.Template): PerformanceIndicator[] {
+function mapTemplateIndicators(
+  template: FdmPerformanceTemplateApi.Template,
+): PerformanceIndicator[] {
   return (template.dimensions || []).flatMap((dimension) =>
     (dimension.indicators || []).map((item) => ({
       dimension: dimension.name,
@@ -759,8 +962,12 @@ function getResultVisibleRuleValue() {
 }
 
 function applyResultVisibleRule(value?: number) {
-  resultVisibleRule.value =
-    value === 2 ? '人事审核后手动公示' : value === 3 ? '仅管理员可见' : '评分结束后自动公示';
+  const ruleMap: Record<number, string> = {
+    1: '评分结束后自动公示',
+    2: '人事审核后手动公示',
+    3: '仅管理员可见',
+  };
+  resultVisibleRule.value = ruleMap[value || 1] || ruleMap[1]!;
 }
 
 function getDimensionType(dimension: string) {
@@ -793,7 +1000,7 @@ function buildDimensions(): FdmPerformanceTemplateApi.Dimension[] {
             scoreMode: item.scoreMode,
             tags: item.tags,
           }),
-          indicatorId: item.indicatorId && item.indicatorId > 0 ? item.indicatorId : item.id > 0 ? item.id : undefined,
+          indicatorId: resolveIndicatorId(item),
           name: item.name,
           requiredFlag: false,
           scorerRuleJson: JSON.stringify({
@@ -824,10 +1031,23 @@ function buildDimensions(): FdmPerformanceTemplateApi.Dimension[] {
         }),
         sort: index * 10,
         status: 0,
-        weight: indicators.reduce((sum, item) => sum + Number(item.weight || 0), 0),
+        weight: indicators.reduce(
+          (sum, item) => sum + Number(item.weight || 0),
+          0,
+        ),
       };
     })
     .filter((dimension) => dimension.indicators.length > 0);
+}
+
+function resolveIndicatorId(item: PerformanceIndicator) {
+  if (item.indicatorId && item.indicatorId > 0) {
+    return item.indicatorId;
+  }
+  if (item.id > 0) {
+    return item.id;
+  }
+  return undefined;
 }
 
 function buildFlowNodes(node?: SimpleFlowNode) {
@@ -862,20 +1082,24 @@ function buildFlowNodes(node?: SimpleFlowNode) {
 }
 
 function extractCandidateUserIds(node: SimpleFlowNode) {
-  if (node.candidateStrategy !== CandidateStrategy.USER || !node.candidateParam) {
+  if (
+    node.candidateStrategy !== CandidateStrategy.USER ||
+    !node.candidateParam
+  ) {
     return undefined;
   }
   const userIds = node.candidateParam
     .split(',')
     .map((item) => Number(item.trim()))
     .filter((item) => Number.isFinite(item) && item > 0);
-  return userIds.length ? userIds : undefined;
+  return userIds.length > 0 ? userIds : undefined;
 }
 
 function resolvePerformanceFlowMeta(node: SimpleFlowNode) {
   const name = node.name || '';
   const showText = node.showText || '';
-  const scoreWeight = Number(name.match(/(\d+(?:\.\d+)?)%/)?.[1] || 0) || undefined;
+  const scoreWeight =
+    Number(name.match(/(\d+(?:\.\d+)?)%/)?.[1] || 0) || undefined;
   if (name.includes('指标制定')) {
     return { assigneeType: 3, scoreWeight, stageType: 1, taskType: 1 };
   }
@@ -908,11 +1132,50 @@ function resolvePerformanceFlowMeta(node: SimpleFlowNode) {
 
 function buildGradeRules(): FdmPerformanceTemplateApi.GradeRule[] {
   return [
-    { coefficient: 0, gradeName: 'C', includeMax: false, includeMin: true, maxScore: 30, minScore: 0, sort: 10 },
-    { coefficient: 0.8, gradeName: 'C+', includeMax: false, includeMin: true, maxScore: 40, minScore: 30, sort: 20 },
-    { coefficient: 1, gradeName: 'B', includeMax: false, includeMin: true, maxScore: 110, minScore: 40, sort: 30 },
-    { coefficient: 1.5, gradeName: 'A', includeMax: false, includeMin: true, maxScore: 115, minScore: 110, sort: 40 },
-    { coefficient: 2, gradeName: 'A+', includeMax: false, includeMin: true, minScore: 115, sort: 50 },
+    {
+      coefficient: 0,
+      gradeName: 'C',
+      includeMax: false,
+      includeMin: true,
+      maxScore: 30,
+      minScore: 0,
+      sort: 10,
+    },
+    {
+      coefficient: 0.8,
+      gradeName: 'C+',
+      includeMax: false,
+      includeMin: true,
+      maxScore: 40,
+      minScore: 30,
+      sort: 20,
+    },
+    {
+      coefficient: 1,
+      gradeName: 'B',
+      includeMax: false,
+      includeMin: true,
+      maxScore: 110,
+      minScore: 40,
+      sort: 30,
+    },
+    {
+      coefficient: 1.5,
+      gradeName: 'A',
+      includeMax: false,
+      includeMin: true,
+      maxScore: 115,
+      minScore: 110,
+      sort: 40,
+    },
+    {
+      coefficient: 2,
+      gradeName: 'A+',
+      includeMax: false,
+      includeMin: true,
+      minScore: 115,
+      sort: 50,
+    },
   ];
 }
 
@@ -920,7 +1183,9 @@ function buildTemplateSaveReq(): FdmPerformanceTemplateApi.TemplateSaveReq {
   const participants = buildParticipants();
   const dimensionsPayload = buildDimensions();
   return {
-    ...(routeId.value !== 'new' && Number(routeId.value) > 0 ? { id: Number(routeId.value) } : {}),
+    ...(routeId.value !== 'new' && Number(routeId.value) > 0
+      ? { id: Number(routeId.value) }
+      : {}),
     autoLaunch: draft.autoLaunch,
     communicationFeedback: true,
     dimensions: dimensionsPayload,
@@ -936,7 +1201,9 @@ function buildTemplateSaveReq(): FdmPerformanceTemplateApi.TemplateSaveReq {
       autoLaunch: draft.autoLaunch,
       participantScope: draft.participantScope,
     }),
-    managerUserIds: draft.admins.map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0),
+    managerUserIds: draft.admins
+      .map(Number)
+      .filter((item) => Number.isFinite(item) && item > 0),
     name: draft.name.trim(),
     participants,
     periodType: apiPeriodTextToType(draft.periodType),
@@ -952,7 +1219,9 @@ function applyDraft(nextTemplate?: AssessmentTemplate) {
   const next = cloneTemplate(nextTemplate);
   Object.assign(draft, next);
   selectedIndicatorIds.value = [...(next.indicatorIds || [])];
-  Object.keys(scorerRules).forEach((key) => delete scorerRules[Number(key)]);
+  Object.keys(scorerRules).forEach((key) =>
+    Reflect.deleteProperty(scorerRules, key),
+  );
   Object.entries(next.scorerRules || {}).forEach(([id, scorer]) => {
     scorerRules[Number(id)] = scorer;
   });
@@ -972,23 +1241,24 @@ function applyDraft(nextTemplate?: AssessmentTemplate) {
 function applyApiTemplate(template?: FdmPerformanceTemplateApi.Template) {
   if (!template) {
     const next = cloneTemplate();
-    const defaultEmployee = sourceEmployees.value[0];
     const aiGenerated = route.query.ai === '1';
-    const queryGroup = typeof route.query.group === 'string' ? route.query.group : '';
+    const queryGroup =
+      typeof route.query.group === 'string' ? route.query.group : '';
     const groupName = queryGroup || '未分类考评表';
     if (aiGenerated) {
       const shortGroupName = groupName.replace('考评表', '') || '通用';
       next.name = `${shortGroupName}-AI生成考评表`;
       next.group = groupName;
-      next.scoringRule = 'AI生成草稿：请从真实指标库导入指标，并确认权重、评分人和流程。';
+      next.scoringRule =
+        'AI生成草稿：请从真实指标库导入指标，并确认权重、评分人和流程。';
     }
-    next.admins = defaultEmployee ? [String(defaultEmployee.id)] : [];
+    next.admins = [];
     next.indicatorIds = [];
-    next.participants = defaultEmployee ? [defaultEmployee.id] : [];
+    next.participants = [];
     next.participantScope = {
       deptNames: [],
       mode: 'people',
-      peopleIds: defaultEmployee ? [defaultEmployee.id] : [],
+      peopleIds: [],
       roleNames: [],
       userGroupNames: [],
     };
@@ -1004,7 +1274,9 @@ function applyApiTemplate(template?: FdmPerformanceTemplateApi.Template) {
   localDraftIndicators.value = [];
   mapped.admins = (template.managerUserIds || []).map(String);
   mapped.indicatorIds = indicators.map((item) => item.id);
-  mapped.participants = (template.participants || []).map((item) => Number(item.userId));
+  mapped.participants = (template.participants || []).map((item) =>
+    Number(item.userId),
+  );
   mapped.participantScope = mapped.participantScope || {
     deptNames: [],
     mode: 'people',
@@ -1016,17 +1288,17 @@ function applyApiTemplate(template?: FdmPerformanceTemplateApi.Template) {
   applyResultVisibleRule(template.resultVisibleRule);
 }
 
-function normalizeUserGroupSetting(group?: Partial<UserGroupSetting>): UserGroupSetting {
+function normalizeUserGroupSetting(
+  group?: Partial<UserGroupSetting>,
+): UserGroupSetting {
   return {
     desc: group?.desc || '',
     memberIds: Array.isArray(group?.memberIds)
-      ? Array.from(
-          new Set(
-            group.memberIds
-              .map((id) => Number(id))
-              .filter((id) => Number.isFinite(id)),
+      ? [
+          ...new Set(
+            group.memberIds.map(Number).filter((id) => Number.isFinite(id)),
           ),
-        )
+        ]
       : [],
     name: group?.name?.trim() || '',
     type: group?.type === 'dynamic' ? 'dynamic' : 'static',
@@ -1039,7 +1311,9 @@ function parseUserGroupsSetting(settings?: FdmPerformanceSettingApi.Setting[]) {
     return [];
   }
   try {
-    const parsed = JSON.parse(setting.settingValue) as { groups?: Partial<UserGroupSetting>[] };
+    const parsed = JSON.parse(setting.settingValue) as {
+      groups?: Partial<UserGroupSetting>[];
+    };
     return (parsed.groups || [])
       .map((group) => normalizeUserGroupSetting(group))
       .filter((group) => group.name);
@@ -1052,7 +1326,18 @@ function parseUserGroupsSetting(settings?: FdmPerformanceSettingApi.Setting[]) {
 async function loadTemplateData() {
   loading.value = true;
   try {
-    const [users, depts, posts, roles, tags, indicators, templates, groups, settings, flowPresets] = await Promise.all([
+    const [
+      users,
+      depts,
+      posts,
+      roles,
+      tags,
+      indicators,
+      templates,
+      groups,
+      settings,
+      flowPresets,
+    ] = await Promise.all([
       getSimpleUserList(),
       getSimpleDeptList(),
       getSimplePostList(),
@@ -1069,8 +1354,12 @@ async function loadTemplateData() {
     apiRoleList.value = roles || [];
     apiUserList.value = users || [];
     userGroupSettings.value = parseUserGroupsSetting(settings);
-    const deptMap = new Map(apiDeptList.value.map((item) => [item.id, item.name]));
-    const postMap = new Map(apiPostList.value.map((item) => [item.id, item.name]));
+    const deptMap = new Map(
+      apiDeptList.value.map((item) => [item.id, item.name]),
+    );
+    const postMap = new Map(
+      apiPostList.value.map((item) => [item.id, item.name]),
+    );
     apiEmployees.value = apiUserList.value
       .filter((item) => item.id)
       .map((item) => {
@@ -1080,14 +1369,21 @@ async function loadTemplateData() {
           deptId: item.deptId,
           id: Number(item.id),
           name: item.nickname || item.username,
+          username: item.username,
           post: postId ? postMap.get(postId) || '未分配岗位' : '未分配岗位',
           postId,
         };
       });
     apiIndicatorTagRows.value = tags || [];
-    apiIndicatorTags.value = apiIndicatorTagRows.value.map((item) => item.name || '').filter(Boolean);
-    apiIndicators.value = (indicators.list || []).map(mapApiIndicator);
-    apiTemplates.value = (templates.list || []).map(mapApiTemplate);
+    apiIndicatorTags.value = apiIndicatorTagRows.value
+      .map((item) => item.name || '')
+      .filter(Boolean);
+    apiIndicators.value = (indicators.list || []).map((item) =>
+      mapApiIndicator(item),
+    );
+    apiTemplates.value = (templates.list || []).map((item) =>
+      mapApiTemplate(item),
+    );
     apiTemplateGroups.value = groups || [];
     flowPresetList.value = flowPresets || [];
     if (routeId.value === 'new') {
@@ -1128,7 +1424,12 @@ async function saveTemplate() {
         scorerRules[id] = unifiedScorer.value;
       });
     }
-    draft.scorerRules = Object.fromEntries(selectedIndicatorIds.value.map((id) => [id, scorerRules[id] || unifiedScorer.value]));
+    draft.scorerRules = Object.fromEntries(
+      selectedIndicatorIds.value.map((id) => [
+        id,
+        scorerRules[id] || unifiedScorer.value,
+      ]),
+    );
     draft.scorerStrategy = scorerStrategy.value;
     draft.scoringRule = `已选 ${selectedIndicators.value.length} 个指标，总权重 ${weightTotal.value}%`;
     const payload = buildTemplateSaveReq();
@@ -1138,7 +1439,7 @@ async function saveTemplate() {
       return;
     }
     if (payload.dimensions.length === 0) {
-      message.warning('请至少导入或新增一个考核指标');
+      message.warning('请先勾选要参与考核的指标，或在维度下新增/导入指标');
       currentStep.value = 1;
       return;
     }
@@ -1166,7 +1467,7 @@ async function saveTemplate() {
       responseData: error?.response?.data,
       status: error?.status || error?.response?.status,
     };
-    console.error('保存考评表失败 ' + JSON.stringify(errorDebugInfo));
+    console.error(`保存考评表失败 ${JSON.stringify(errorDebugInfo)}`);
     message.error(errorMessage);
   }
 }
@@ -1180,7 +1481,10 @@ function goLaunch() {
     message.warning('请先保存考评表后再发起考核');
     return;
   }
-  router.push({ path: performancePath('/launch'), query: { templateId: draft.id } });
+  router.push({
+    path: performancePath('/launch'),
+    query: { templateId: draft.id },
+  });
 }
 
 onMounted(loadTemplateData);
@@ -1223,34 +1527,73 @@ watch(
       />
 
       <div class="config-strip">
-        <button type="button" :class="{ active: totalLimitEnabled }" @click="totalLimitEnabled = !totalLimitEnabled">
+        <button
+          type="button"
+          :class="{ active: totalLimitEnabled }"
+          @click="totalLimitEnabled = !totalLimitEnabled"
+        >
           <span class="config-option-text">总分限制</span>
           <Tooltip :title="configHelpText.totalLimit">
-            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+            <IconifyIcon
+              class="config-help-icon"
+              icon="lucide:circle-help"
+              @click.stop
+            />
           </Tooltip>
         </button>
-        <button type="button" class="active" @click="scoreCalculateRule = scoreCalculateRule === '加扣计算' ? '加权平均' : '加扣计算'">
+        <button
+          type="button"
+          class="active"
+          @click="
+            scoreCalculateRule =
+              scoreCalculateRule === '加扣计算' ? '加权平均' : '加扣计算'
+          "
+        >
           <span class="config-option-text">计分方式：{{ scoreCalculateRule }}</span>
           <Tooltip :title="configHelpText.scoreCalculate">
-            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+            <IconifyIcon
+              class="config-help-icon"
+              icon="lucide:circle-help"
+              @click.stop
+            />
           </Tooltip>
         </button>
-        <button type="button" :class="{ active: dimensionWeightEnabled }" @click="dimensionWeightEnabled = !dimensionWeightEnabled">
+        <button
+          type="button"
+          :class="{ active: dimensionWeightEnabled }"
+          @click="dimensionWeightEnabled = !dimensionWeightEnabled"
+        >
           <span class="config-option-text">维度权重参与计算</span>
           <Tooltip :title="configHelpText.dimensionWeight">
-            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+            <IconifyIcon
+              class="config-help-icon"
+              icon="lucide:circle-help"
+              @click.stop
+            />
           </Tooltip>
         </button>
-        <button type="button" :class="{ active: unlimitedIndicatorWeight }" @click="unlimitedIndicatorWeight = !unlimitedIndicatorWeight">
+        <button
+          type="button"
+          :class="{ active: unlimitedIndicatorWeight }"
+          @click="unlimitedIndicatorWeight = !unlimitedIndicatorWeight"
+        >
           <span class="config-option-text">不限制所有指标权重</span>
           <Tooltip :title="configHelpText.unlimitedIndicatorWeight">
-            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+            <IconifyIcon
+              class="config-help-icon"
+              icon="lucide:circle-help"
+              @click.stop
+            />
           </Tooltip>
         </button>
         <label>
           <span class="config-option-text">考核说明</span>
           <Tooltip :title="configHelpText.examDescription">
-            <IconifyIcon class="config-help-icon" icon="lucide:circle-help" @click.stop />
+            <IconifyIcon
+              class="config-help-icon"
+              icon="lucide:circle-help"
+              @click.stop
+            />
           </Tooltip>
           <Switch v-model:checked="examDescriptionEnabled" size="small" />
         </label>
@@ -1268,13 +1611,24 @@ watch(
             <Input v-model:value="draft.name" placeholder="请输入考评表名称" />
           </Form.Item>
           <Form.Item label="考核周期" required>
-            <Radio.Group v-model:value="draft.periodType" :options="periodOptions" />
+            <Radio.Group
+              v-model:value="draft.periodType"
+              :options="periodOptions"
+            />
           </Form.Item>
           <Form.Item label="考评表分组" required>
             <Select v-model:value="draft.group" :options="groupOptions" />
           </Form.Item>
           <Form.Item label="考评表管理员">
-            <Select v-model:value="draft.admins" :options="adminOptions" mode="multiple" />
+            <Select
+              v-model:value="draft.admins"
+              allow-clear
+              :filter-option="filterEmployeeOption"
+              mode="multiple"
+              option-filter-prop="label"
+              :options="adminOptions"
+              show-search
+            />
           </Form.Item>
           <Form.Item label="被考核人员" required>
             <div class="participant-scope">
@@ -1287,9 +1641,13 @@ watch(
               <Select
                 v-if="participantMode === 'people'"
                 v-model:value="selectedPeopleIds"
+                allow-clear
+                :filter-option="filterEmployeeOption"
                 :options="employeeOptions"
                 mode="multiple"
+                option-filter-prop="label"
                 placeholder="请选择被考核人员"
+                show-search
               />
               <Select
                 v-else-if="participantMode === 'department'"
@@ -1314,13 +1672,20 @@ watch(
               />
               <div class="participant-preview">
                 <span>预览 {{ participantPreview.length }} 人</span>
-                <Tag v-for="employee in participantPreview.slice(0, 8)" :key="employee?.id">
+                <Tag
+                  v-for="employee in participantPreview.slice(0, 8)"
+                  :key="employee?.id"
+                >
                   {{ employee?.name }} · {{ employee?.dept }}
                 </Tag>
-                <Tag v-if="participantPreview.length > 8">+{{ participantPreview.length - 8 }}</Tag>
+                <Tag v-if="participantPreview.length > 8">
+                  +{{ participantPreview.length - 8 }}
+                </Tag>
               </div>
             </div>
-            <div class="hint">发起考核时会按当前范围生成被考核人员，保存后作为正式考评表模板使用。</div>
+            <div class="hint">
+              发起考核时会按当前范围生成被考核人员，保存后作为正式考评表模板使用。
+            </div>
           </Form.Item>
           <div class="setting-row">
             <span>自动发起考核</span>
@@ -1330,7 +1695,13 @@ watch(
             <span>结果展示规则</span>
             <Select
               v-model:value="resultVisibleRule"
-              :options="['评分结束后自动公示', '人事审核后手动公示', '仅管理员可见'].map((value) => ({ label: value, value }))"
+              :options="
+                [
+                  '评分结束后自动公示',
+                  '人事审核后手动公示',
+                  '仅管理员可见',
+                ].map((value) => ({ label: value, value }))
+              "
               class="inline-select"
             />
           </div>
@@ -1355,15 +1726,24 @@ watch(
       <section v-if="currentStep === 1" class="indicator-panel">
         <div class="panel-toolbar">
           <Space>
-            <Button @click="router.push(performancePath('/indicators'))">维护指标库</Button>
+            <Button @click="router.push(performancePath('/indicators'))">
+              维护指标库
+            </Button>
             <Button @click="generateIndicatorsByAI">AI生成</Button>
             <Button @click="openDimensionModal">添加考核维度</Button>
           </Space>
           <Space>
             <Tag v-if="partialIndicatorOnly" color="blue">仅评部分指标</Tag>
-            <Tag :color="weightTotal === 100 ? 'green' : 'orange'">当前总权重 {{ weightTotal }}%</Tag>
+            <Tag :color="weightTotal === 100 ? 'green' : 'orange'">
+              当前总权重 {{ weightTotal }}%
+            </Tag>
           </Space>
         </div>
+        <Alert
+          show-icon
+          type="info"
+          message="指标库列表只是候选项，只有已勾选的指标会保存到考评表。可以在对应维度下手动新增指标，或从指标库导入后再勾选。"
+        />
 
         <div class="dimension-list">
           <Card
@@ -1385,10 +1765,23 @@ watch(
                     @change="toggleIndicator(record.id, $event.target.checked)"
                   />
                 </template>
-                <template v-else-if="column.dataIndex === 'name' && isLocalDraftIndicator(record)">
-                  <Input v-model:value="record.name" placeholder="请输入指标名称" size="small" />
+                <template
+                  v-else-if="
+                    column.dataIndex === 'name' && isLocalDraftIndicator(record)
+                  "
+                >
+                  <Input
+                    v-model:value="record.name"
+                    placeholder="请输入指标名称"
+                    size="small"
+                  />
                 </template>
-                <template v-else-if="column.dataIndex === 'standard' && isLocalDraftIndicator(record)">
+                <template
+                  v-else-if="
+                    column.dataIndex === 'standard' &&
+                    isLocalDraftIndicator(record)
+                  "
+                >
                   <Input.TextArea
                     v-model:value="record.standard"
                     auto-size
@@ -1397,15 +1790,32 @@ watch(
                   />
                 </template>
                 <template v-else-if="column.dataIndex === 'weight'">
-                  <InputNumber v-model:value="record.weight" :max="100" :min="0" addon-after="%" />
+                  <InputNumber
+                    v-model:value="record.weight"
+                    :max="100"
+                    :min="0"
+                    addon-after="%"
+                  />
                 </template>
-                <template v-else-if="column.dataIndex === 'scoreMode' && isLocalDraftIndicator(record)">
-                  <Select v-model:value="record.scoreMode" :options="scoreModeOptions" size="small" />
+                <template
+                  v-else-if="
+                    column.dataIndex === 'scoreMode' &&
+                    isLocalDraftIndicator(record)
+                  "
+                >
+                  <Select
+                    v-model:value="record.scoreMode"
+                    :options="scoreModeOptions"
+                    size="small"
+                  />
                 </template>
                 <template v-else-if="column.dataIndex === 'scorer'">
                   <Select
                     v-model:value="scorerRules[record.id]"
-                    :disabled="scorerStrategy === 'unified' || !selectedIndicatorIds.includes(record.id)"
+                    :disabled="
+                      scorerStrategy === 'unified' ||
+                      !selectedIndicatorIds.includes(record.id)
+                    "
                     :options="scorerOptions"
                     size="small"
                   />
@@ -1413,12 +1823,22 @@ watch(
               </template>
             </Table>
             <div class="dimension-footer-actions">
-              <Button size="small" type="link" @click="addManualIndicator(dimension)">
+              <Button
+                size="small"
+                type="link"
+                @click="addManualIndicator(dimension)"
+              >
                 <template #icon><IconifyIcon icon="lucide:plus" /></template>
                 新增指标
               </Button>
-              <Button size="small" type="link" @click="openImportModal(dimension)">
-                <template #icon><IconifyIcon icon="lucide:download" /></template>
+              <Button
+                size="small"
+                type="link"
+                @click="openImportModal(dimension)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:download" />
+                </template>
                 指标库导入
               </Button>
             </div>
@@ -1430,7 +1850,10 @@ watch(
         <div class="panel-toolbar">
           <div>
             <h3>考核流程</h3>
-            <p>复用当前系统 BPM 的仿钉钉简易流程组件，维护考评表的完整审批和评分链路。</p>
+            <p>
+              复用当前系统 BPM
+              的仿钉钉简易流程组件，维护考评表的完整审批和评分链路。
+            </p>
           </div>
           <Space wrap>
             <Select
@@ -1445,7 +1868,10 @@ watch(
             <Button @click="resetDefaultFlow">恢复默认流程</Button>
             <Button @click="dedupeSelectedIndicators">去重设置</Button>
             <Button @click="templateSettingOpen = true">流程设置</Button>
-            <Button :type="partialIndicatorOnly ? 'primary' : 'default'" @click="togglePartialIndicators">
+            <Button
+              :type="partialIndicatorOnly ? 'primary' : 'default'"
+              @click="togglePartialIndicators"
+            >
               仅评部分指标
             </Button>
           </Space>
@@ -1466,7 +1892,9 @@ watch(
             :options="scorerOptions"
             class="scorer-select"
           />
-          <Tag v-else color="blue">在指标行的评分方式和指定评分人字段中分别维护</Tag>
+          <Tag v-else color="blue">
+            在指标行的评分方式和指定评分人字段中分别维护
+          </Tag>
         </div>
 
         <div class="flow-workbench">
@@ -1516,7 +1944,11 @@ watch(
             <div class="flow-guide-title">配置说明</div>
             <div class="inspector-block">
               <span>执行人来源</span>
-              <strong>{{ scorerStrategy === 'unified' ? `统一评分人：${unifiedScorer}` : '按指标设置评分人' }}</strong>
+              <strong>{{
+                scorerStrategy === 'unified'
+                  ? `统一评分人：${unifiedScorer}`
+                  : '按指标设置评分人'
+              }}</strong>
             </div>
             <div class="inspector-block">
               <span>评分权重</span>
@@ -1524,11 +1956,17 @@ watch(
             </div>
             <div class="inspector-block">
               <span>指标范围</span>
-              <strong>{{ partialIndicatorOnly ? '仅评已选计分指标' : '全部指标参与当前考评表配置' }}</strong>
+              <strong>{{
+                partialIndicatorOnly
+                  ? '仅评已选计分指标'
+                  : '全部指标参与当前考评表配置'
+              }}</strong>
             </div>
             <div class="inspector-block">
               <span>重复指标</span>
-              <strong>{{ dedupeEnabled ? '保存前可手动去重' : '允许重复指标' }}</strong>
+              <strong>{{
+                dedupeEnabled ? '保存前可手动去重' : '允许重复指标'
+              }}</strong>
             </div>
             <div class="inspector-block">
               <span>实例生成</span>
@@ -1539,8 +1977,12 @@ watch(
       </section>
 
       <div class="footer-actions">
-        <Button :disabled="currentStep === 0" @click="currentStep -= 1">上一步</Button>
-        <Button v-if="currentStep < 2" type="primary" @click="currentStep += 1">下一步</Button>
+        <Button :disabled="currentStep === 0" @click="currentStep -= 1">
+          上一步
+        </Button>
+        <Button v-if="currentStep < 2" type="primary" @click="currentStep += 1">
+          下一步
+        </Button>
         <Button v-else type="primary" @click="saveTemplate">保存</Button>
       </div>
     </Card>
@@ -1553,40 +1995,80 @@ watch(
     >
       <Form layout="vertical">
         <Form.Item label="流程预设名称" required>
-          <Input v-model:value="flowPresetDraft.name" :maxlength="128" placeholder="例如：月度绩效标准流程" />
+          <Input
+            v-model:value="flowPresetDraft.name"
+            :maxlength="128"
+            placeholder="例如：月度绩效标准流程"
+          />
         </Form.Item>
         <Form.Item label="备注">
-          <Input v-model:value="flowPresetDraft.remark" :maxlength="512" placeholder="可填写适用部门或场景" />
+          <Input
+            v-model:value="flowPresetDraft.remark"
+            :maxlength="512"
+            placeholder="可填写适用部门或场景"
+          />
         </Form.Item>
       </Form>
     </Modal>
 
-    <Modal v-model:open="dimensionModalOpen" title="添加考核维度" @ok="addDimension">
+    <Modal
+      v-model:open="dimensionModalOpen"
+      title="添加考核维度"
+      @ok="addDimension"
+    >
       <Form layout="vertical">
         <Form.Item label="维度名称" required>
-          <Input v-model:value="dimensionDraft.name" placeholder="请输入维度名称" />
+          <Input
+            v-model:value="dimensionDraft.name"
+            placeholder="请输入维度名称"
+          />
         </Form.Item>
         <Form.Item label="维度类型">
           <Select
             v-model:value="dimensionDraft.type"
-            :options="['量化指标 100%', '其他指标', '加分项', '扣分项', '一票否决', '加减分项', '计划', '自定义维度'].map((value) => ({ label: value, value }))"
+            :options="
+              [
+                '量化指标 100%',
+                '其他指标',
+                '加分项',
+                '扣分项',
+                '一票否决',
+                '加减分项',
+                '计划',
+                '自定义维度',
+              ].map((value) => ({ label: value, value }))
+            "
           />
         </Form.Item>
         <Form.Item label="维度权重">
-          <InputNumber v-model:value="dimensionDraft.weight" :max="100" :min="0" addon-after="%" class="full" />
+          <InputNumber
+            v-model:value="dimensionDraft.weight"
+            :max="100"
+            :min="0"
+            addon-after="%"
+            class="full"
+          />
         </Form.Item>
       </Form>
     </Modal>
 
     <Modal
       v-model:open="importModalOpen"
-      :title="activeImportDimension ? `从指标库导入到：${activeImportDimension}` : '指标库导入'"
+      :title="
+        activeImportDimension
+          ? `从指标库导入到：${activeImportDimension}`
+          : '指标库导入'
+      "
       width="980px"
       @cancel="activeImportDimension = undefined"
       @ok="confirmImportIndicators"
     >
       <div class="import-toolbar">
-        <Input v-model:value="importKeyword" allow-clear placeholder="搜索指标名称、考核标准、标签" />
+        <Input
+          v-model:value="importKeyword"
+          allow-clear
+          placeholder="搜索指标名称、考核标准、标签"
+        />
         <Select
           v-model:value="importDimension"
           allow-clear
@@ -1622,7 +2104,12 @@ watch(
       </Table>
     </Modal>
 
-    <Modal v-model:open="templateSettingOpen" title="考评表设置" width="760px" @ok="saveTemplate">
+    <Modal
+      v-model:open="templateSettingOpen"
+      title="考评表设置"
+      width="760px"
+      @ok="saveTemplate"
+    >
       <div class="setting-modal-grid">
         <section>
           <h3>发起与结果</h3>
@@ -1634,7 +2121,13 @@ watch(
             <span>评分结果</span>
             <Select
               v-model:value="resultVisibleRule"
-              :options="['评分结束后自动公示', '人事审核后手动公示', '仅管理员可见'].map((value) => ({ label: value, value }))"
+              :options="
+                [
+                  '评分结束后自动公示',
+                  '人事审核后手动公示',
+                  '仅管理员可见',
+                ].map((value) => ({ label: value, value }))
+              "
             />
           </div>
           <div class="modal-setting-row">
@@ -1654,7 +2147,10 @@ watch(
             <span class="setting-label-with-help">
               总分限制
               <Tooltip :title="configHelpText.totalLimit">
-                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+                <IconifyIcon
+                  class="config-help-icon"
+                  icon="lucide:circle-help"
+                />
               </Tooltip>
             </span>
             <Switch v-model:checked="totalLimitEnabled" />
@@ -1663,19 +2159,29 @@ watch(
             <span class="setting-label-with-help">
               计分方式
               <Tooltip :title="configHelpText.scoreCalculate">
-                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+                <IconifyIcon
+                  class="config-help-icon"
+                  icon="lucide:circle-help"
+                />
               </Tooltip>
             </span>
             <Select
               v-model:value="scoreCalculateRule"
-              :options="['加扣计算', '加权平均', '分数区间对应', '结果相乘'].map((value) => ({ label: value, value }))"
+              :options="
+                ['加扣计算', '加权平均', '分数区间对应', '结果相乘'].map(
+                  (value) => ({ label: value, value }),
+                )
+              "
             />
           </div>
           <div class="modal-setting-row">
             <span class="setting-label-with-help">
               维度权重参与计算
               <Tooltip :title="configHelpText.dimensionWeight">
-                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+                <IconifyIcon
+                  class="config-help-icon"
+                  icon="lucide:circle-help"
+                />
               </Tooltip>
             </span>
             <Switch v-model:checked="dimensionWeightEnabled" />
@@ -1684,7 +2190,10 @@ watch(
             <span class="setting-label-with-help">
               不限制所有指标权重
               <Tooltip :title="configHelpText.unlimitedIndicatorWeight">
-                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+                <IconifyIcon
+                  class="config-help-icon"
+                  icon="lucide:circle-help"
+                />
               </Tooltip>
             </span>
             <Switch v-model:checked="unlimitedIndicatorWeight" />
@@ -1693,7 +2202,10 @@ watch(
             <span class="setting-label-with-help">
               评分人策略
               <Tooltip :title="configHelpText.scorerStrategy">
-                <IconifyIcon class="config-help-icon" icon="lucide:circle-help" />
+                <IconifyIcon
+                  class="config-help-icon"
+                  icon="lucide:circle-help"
+                />
               </Tooltip>
             </span>
             <Select
