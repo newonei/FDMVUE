@@ -142,6 +142,11 @@ function cloneTemplate(template?: AssessmentTemplate): AssessmentTemplate {
 
 const draft = reactive<AssessmentTemplate>(cloneTemplate());
 const currentStep = ref(0);
+const templateStepMap: Record<string, number> = {
+  basic: 0,
+  flow: 2,
+  indicators: 1,
+};
 const selectedIndicatorIds = ref<number[]>(
   draft.indicatorIds?.length ? [...draft.indicatorIds] : [],
 );
@@ -1288,6 +1293,14 @@ function applyApiTemplate(template?: FdmPerformanceTemplateApi.Template) {
   applyResultVisibleRule(template.resultVisibleRule);
 }
 
+function applyRouteStep() {
+  const step = route.query.step;
+  if (typeof step !== 'string') return;
+  const nextStep = templateStepMap[step];
+  if (nextStep === undefined) return;
+  currentStep.value = nextStep;
+}
+
 function normalizeUserGroupSetting(
   group?: Partial<UserGroupSetting>,
 ): UserGroupSetting {
@@ -1391,6 +1404,7 @@ async function loadTemplateData() {
     } else {
       applyApiTemplate(await getFdmPerformanceTemplate(Number(routeId.value)));
     }
+    applyRouteStep();
   } finally {
     loading.value = false;
   }
@@ -1491,6 +1505,10 @@ onMounted(loadTemplateData);
 watch(
   () => [route.path, route.params.id],
   () => loadTemplateData(),
+);
+watch(
+  () => route.query.step,
+  () => applyRouteStep(),
 );
 </script>
 

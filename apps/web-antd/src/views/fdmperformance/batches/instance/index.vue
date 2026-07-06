@@ -1,7 +1,20 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import type {
+  AssessmentBatch,
+  AssessmentInstance,
+  AssessmentTemplate,
+  Employee,
+  FlowStage,
+  Indicator,
+  ScoreSummary,
+} from '../../shared/model';
+
+import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+import type { SystemUserApi } from '#/api/system/user';
+
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -10,9 +23,11 @@ import { useUserStore } from '@vben/stores';
 import {
   Button,
   Card,
+  Dropdown,
   Empty,
   Input,
   InputNumber,
+  Menu,
   message,
   Modal,
   Progress,
@@ -28,7 +43,6 @@ import {
   confirmFdmPerformanceAssessmentResult,
   confirmMyFdmPerformanceAssessmentIndicators,
   confirmMyFdmPerformanceAssessmentResult,
-  type FdmPerformanceAssessmentApi,
   getFdmPerformanceAssessmentBatch,
   getFdmPerformanceAssessmentInstance,
   getFdmPerformanceAssessmentTaskPage,
@@ -44,7 +58,7 @@ import {
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplate } from '#/api/fdmperformance/template';
 import { uploadFile } from '#/api/infra/file';
-import { getSimpleUserList, type SystemUserApi } from '#/api/system/user';
+import { getSimpleUserList } from '#/api/system/user';
 
 import {
   buildApiScoreItems,
@@ -54,16 +68,7 @@ import {
   mapApiTemplate,
   mapApiTemplateIndicators,
 } from '../../shared/api-adapter';
-import {
-  type AssessmentBatch,
-  type AssessmentInstance,
-  type AssessmentTemplate,
-  type Employee,
-  type FlowStage,
-  type Indicator,
-  instanceStatusMetaMap,
-  type ScoreSummary,
-} from '../../shared/model';
+import { instanceStatusMetaMap } from '../../shared/model';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../../shared/route';
 
@@ -83,9 +88,15 @@ interface ScoreSummaryCard extends ScoreSummary {
   cardType?: 'final';
 }
 
+type ScrollTarget = HTMLElement | { $el?: HTMLElement };
+
 const DEDUCTION_DIMENSION_TYPE = 4;
 const CORE_FLOW_STAGES: FlowStage[] = [
-  { id: 'Performance_Indicator_Create', name: '指标制定', owner: '考评表管理员' },
+  {
+    id: 'Performance_Indicator_Create',
+    name: '指标制定',
+    owner: '考评表管理员',
+  },
   { id: 'Performance_Indicator_Confirm', name: '指标确认', owner: '被考核人' },
   { id: 'Performance_Executing', name: '执行中', owner: '被考核人' },
   { id: 'Performance_Self_Score', name: '员工自评', owner: '被考核人' },
@@ -126,6 +137,8 @@ const flowActionLoading = ref(false);
 const transferModalOpen = ref(false);
 const transferTargetUserId = ref<number>();
 const transferReason = ref('');
+const flowCardRef = ref<null | ScrollTarget>(null);
+const processRecordRef = ref<null | ScrollTarget>(null);
 
 const scoreInputs = reactive<Record<number, number>>({});
 const scoreComments = reactive<Record<number, string>>({});
@@ -155,36 +168,61 @@ const activeScoreType = computed<ScoreType>(() => {
   if (requestedScoreType.value) return requestedScoreType.value;
   return instance.value?.status === 'supervisorScore' ? 'supervisor' : 'self';
 });
-const activeScoreTask = computed(() => getPendingScoreTask(activeScoreType.value));
+const activeScoreTask = computed(() =>
+  getPendingScoreTask(activeScoreType.value),
+);
 const currentUserId = computed(() => Number(userStore.userInfo?.id || 0));
 const pendingTasks = computed(() => {
   const instanceId = instance.value?.id;
-  return apiTasks.value.filter((task) => task.status === 0 && task.instanceId === instanceId);
+  return apiTasks.value.filter(
+    (task) => task.status === 0 && task.instanceId === instanceId,
+  );
 });
-const currentPendingTask = computed(() => activeScoreTask.value || pendingTasks.value[0]);
-const canOperateFlow = computed(() => hasAccessByCodes(['fdmperformance:assessment:cancel']));
-const canManageFlow = computed(() =>
-  !isMyMode.value
-  && canOperateFlow.value
-  && Boolean(currentPendingTask.value)
-  && !['canceled', 'finished'].includes(String(instance.value?.status || '')),
+const currentPendingTask = computed(
+  () => activeScoreTask.value || pendingTasks.value[0],
 );
-const isActiveScoreStatus = computed(() =>
-  (activeScoreType.value === 'self' && instance.value?.status === 'selfScore') ||
-  (activeScoreType.value === 'supervisor' && instance.value?.status === 'supervisorScore'),
+const canOperateFlow = computed(() =>
+  hasAccessByCodes(['fdmperformance:assessment:cancel']),
 );
-const scoreEditorVisible = computed(() => Boolean(instance.value && isActiveScoreStatus.value));
+const canManageFlow = computed(
+  () =>
+    !isMyMode.value &&
+    canOperateFlow.value &&
+    Boolean(currentPendingTask.value) &&
+    !['canceled', 'finished'].includes(String(instance.value?.status || '')),
+);
+const canShowAdminMoreMenu = computed(
+  () => !isMyMode.value && canOperateFlow.value && Boolean(instance.value),
+);
+const isActiveScoreStatus = computed(
+  () =>
+    (activeScoreType.value === 'self' &&
+      instance.value?.status === 'selfScore') ||
+    (activeScoreType.value === 'supervisor' &&
+      instance.value?.status === 'supervisorScore'),
+);
+const scoreEditorVisible = computed(() =>
+  Boolean(instance.value && isActiveScoreStatus.value),
+);
 const canScore = computed(() => {
-  if (!instance.value || !activeScoreTask.value || !isActiveScoreStatus.value) return false;
-  if (!currentUserId.value || Number(activeScoreTask.value.assigneeUserId) !== currentUserId.value) return false;
+  if (!instance.value || !activeScoreTask.value || !isActiveScoreStatus.value)
+    return false;
+  if (
+    !currentUserId.value ||
+    Number(activeScoreTask.value.assigneeUserId) !== currentUserId.value
+  )
+    return false;
   return true;
 });
 const scoreEditorReadonlyText = computed(() => {
   if (!scoreEditorVisible.value || canScore.value) return '';
-  if (!activeScoreTask.value) return '当前评分节点未生成待办任务，请检查流程配置或回退流程后重新处理。';
+  if (!activeScoreTask.value)
+    return '当前评分节点未生成待办任务，请检查流程配置或回退流程后重新处理。';
   return `当前待办处理人：${getUserDisplayName(activeScoreTask.value.assigneeUserId)}，当前账号不能提交评分；管理员可先进行流程转交。`;
 });
-const scoreActionLabel = computed(() => activeScoreType.value === 'self' ? '提交自评' : '提交主管评分');
+const scoreActionLabel = computed(() =>
+  activeScoreType.value === 'self' ? '提交自评' : '提交主管评分',
+);
 
 const transferUserOptions = computed(() =>
   simpleUsers.value
@@ -202,16 +240,26 @@ const flowStages = computed(() => {
   return normalizeFlowStagesForDisplay(stages);
 });
 const currentFlowIndex = computed(() =>
-  Math.min(Math.max((instance.value?.progress || 1) - 1, 0), Math.max(flowStages.value.length - 1, 0)),
+  Math.min(
+    Math.max((instance.value?.progress || 1) - 1, 0),
+    Math.max(flowStages.value.length - 1, 0),
+  ),
 );
 const scorePercent = computed(() =>
-  Math.round(((currentFlowIndex.value + 1) / Math.max(flowStages.value.length, 1)) * 100),
+  Math.round(
+    ((currentFlowIndex.value + 1) / Math.max(flowStages.value.length, 1)) * 100,
+  ),
 );
 const flowItems = computed(() =>
   flowStages.value.map((stage, index) => {
     const stepNo = index + 1;
     const progress = instance.value?.progress || 1;
-    const prefix = stepNo < progress ? '已完成' : stepNo === progress ? '当前节点' : '待处理';
+    let prefix = '待处理';
+    if (stepNo < progress) {
+      prefix = '已完成';
+    } else if (stepNo === progress) {
+      prefix = '当前节点';
+    }
     return {
       description: `${prefix} · ${stage.owner}`,
       title: stage.name,
@@ -220,8 +268,12 @@ const flowItems = computed(() =>
 );
 
 const scoreSummaries = computed(() => instance.value?.scoreSummaries || []);
-const historySummaries = computed(() => scoreSummaries.value);
-const calculatedFinalScore = computed(() => calculateSummaryFinalScore(scoreSummaries.value));
+const historySummaries = computed(() =>
+  scoreSummaries.value.toSorted(compareScoreSummary),
+);
+const calculatedFinalScore = computed(() =>
+  calculateSummaryFinalScore(scoreSummaries.value),
+);
 const scoreSummaryCards = computed<ScoreSummaryCard[]>(() => {
   const finalScore = instance.value?.finalScore;
   const cards: ScoreSummaryCard[] = [];
@@ -233,10 +285,15 @@ const scoreSummaryCards = computed<ScoreSummaryCard[]>(() => {
       scoreWeight: undefined,
       totalScore: finalScore,
     });
-  } else if (scoreSummaries.value.length > 1 && summaryFinalScore !== undefined) {
+  } else if (
+    scoreSummaries.value.length > 1 &&
+    summaryFinalScore !== undefined
+  ) {
     cards.push({
       cardType: 'final',
-      comment: hasSummaryWeight(scoreSummaries.value) ? '按评分节点权重汇总' : '取最后评分节点总分',
+      comment: hasSummaryWeight(scoreSummaries.value)
+        ? '按评分节点权重汇总'
+        : '取最后评分节点总分',
       nodeName: '绩效总分',
       scoreWeight: undefined,
       totalScore: summaryFinalScore,
@@ -248,7 +305,9 @@ const scoreSummaryCards = computed<ScoreSummaryCard[]>(() => {
 const dimensionGroups = computed<DimensionGroup[]>(() => {
   const groupMap = new Map<string, DimensionGroup>();
   templateIndicators.value.forEach((indicator) => {
-    const key = String(indicator.dimensionId || indicator.dimension || 'default');
+    const key = String(
+      indicator.dimensionId || indicator.dimension || 'default',
+    );
     const current = groupMap.get(key) || {
       dimensionId: indicator.dimensionId,
       dimensionType: indicator.dimensionType,
@@ -259,13 +318,17 @@ const dimensionGroups = computed<DimensionGroup[]>(() => {
     current.indicators.push(indicator);
     groupMap.set(key, current);
   });
-  return Array.from(groupMap.values());
+  return [...groupMap.values()];
 });
 
 const currentNodeTotal = computed(() =>
   Number(
     templateIndicators.value
-      .reduce((sum, indicator) => sum + normalizeIndicatorScore(indicator, scoreInputs[indicator.id]), 0)
+      .reduce(
+        (sum, indicator) =>
+          sum + normalizeIndicatorScore(indicator, scoreInputs[indicator.id]),
+        0,
+      )
       .toFixed(2),
   ),
 );
@@ -280,22 +343,52 @@ const scoreColumns = computed<TableColumnsType>(() => {
   ];
   historySummaries.value.forEach((summary) => {
     columns.push({
-      dataIndex: getSummaryColumnKey(summary),
+      children: [
+        {
+          dataIndex: getSummaryScoreColumnKey(summary),
+          title: '评分',
+          width: 100,
+        },
+        {
+          dataIndex: getSummaryCommentColumnKey(summary),
+          title: '说明',
+          width: 240,
+        },
+      ],
       title: getSummaryLabel(summary),
-      width: 220,
     });
   });
   if (scoreEditorVisible.value) {
     columns.push(
-      { dataIndex: 'currentScore', title: '当前评分', width: 150 },
-      { dataIndex: 'scoreComment', title: '评分说明', width: 260 },
+      {
+        dataIndex: 'currentScore',
+        title: renderRequiredTitle('当前评分'),
+        width: 150,
+      },
+      {
+        dataIndex: 'scoreComment',
+        title: renderRequiredTitle('评分说明'),
+        width: 260,
+      },
     );
   }
   return columns;
 });
 
+const scoreTableScrollX = computed(() => {
+  const baseWidth = 1030;
+  const historyWidth = historySummaries.value.length * 340;
+  const editorWidth = scoreEditorVisible.value ? 410 : 0;
+  return Math.max(1280, baseWidth + historyWidth + editorWidth);
+});
+
 function getInstanceMeta(status: unknown) {
-  return instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || { color: 'default', label: '未知' };
+  return (
+    instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || {
+      color: 'default',
+      label: '未知',
+    }
+  );
 }
 
 function getScoreTaskType(type: ScoreType) {
@@ -305,12 +398,19 @@ function getScoreTaskType(type: ScoreType) {
 function getPendingScoreTask(type: ScoreType) {
   const instanceId = instance.value?.id;
   const taskType = getScoreTaskType(type);
-  return apiTasks.value.find((task) => task.status === 0 && task.instanceId === instanceId && task.taskType === taskType);
+  return apiTasks.value.find(
+    (task) =>
+      task.status === 0 &&
+      task.instanceId === instanceId &&
+      task.taskType === taskType,
+  );
 }
 
 function getUserDisplayName(userId?: number) {
   if (!userId) return '-';
-  const user = simpleUsers.value.find((item) => Number(item.id) === Number(userId));
+  const user = simpleUsers.value.find(
+    (item) => Number(item.id) === Number(userId),
+  );
   return user?.nickname || user?.username || `用户${userId}`;
 }
 
@@ -321,7 +421,10 @@ function getFlowStageStatus(index: number) {
 }
 
 function getFlowStageOwner(stage: { owner?: string }, index: number) {
-  if (index === currentFlowIndex.value && currentPendingTask.value?.assigneeUserId) {
+  if (
+    index === currentFlowIndex.value &&
+    currentPendingTask.value?.assigneeUserId
+  ) {
     return getUserDisplayName(currentPendingTask.value.assigneeUserId);
   }
   return stage.owner || flowItems.value[index]?.description || '-';
@@ -342,9 +445,11 @@ function getCoreFlowStageIndex(stage: FlowStage) {
   const id = String(stage.id || '');
   const name = String(stage.name || '');
   const exactIndex = CORE_FLOW_STAGES.findIndex((item) => item.id === id);
-  if (exactIndex >= 0) return exactIndex;
+  if (exactIndex !== -1) return exactIndex;
   return CORE_FLOW_STAGES.findIndex((item) =>
-    (CORE_FLOW_STAGE_ALIASES[item.id] || [item.name]).some((alias) => name.includes(alias)),
+    (CORE_FLOW_STAGE_ALIASES[item.id] || [item.name]).some((alias) =>
+      name.includes(alias),
+    ),
   );
 }
 
@@ -353,7 +458,7 @@ function normalizeFlowStagesForDisplay(stages: FlowStage[] = []) {
   const extraStages: FlowStage[] = [];
   stages.forEach((stage) => {
     const coreIndex = getCoreFlowStageIndex(stage);
-    if (coreIndex >= 0) {
+    if (coreIndex !== -1) {
       const coreStage = result[coreIndex];
       if (!coreStage) {
         extraStages.push(stage);
@@ -370,15 +475,38 @@ function normalizeFlowStagesForDisplay(stages: FlowStage[] = []) {
     }
     extraStages.push(stage);
   });
-  if (extraStages.length) {
-    const hrIndex = result.findIndex((stage) => stage.id === 'Performance_Hr_Approve');
-    result.splice(hrIndex < 0 ? result.length : hrIndex, 0, ...extraStages);
+  if (extraStages.length > 0) {
+    const hrIndex = result.findIndex(
+      (stage) => stage.id === 'Performance_Hr_Approve',
+    );
+    result.splice(hrIndex === -1 ? result.length : hrIndex, 0, ...extraStages);
   }
   return result;
 }
 
 function getSummaryColumnKey(summary: ScoreSummary) {
   return `summary_${summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score'}`;
+}
+
+function getSummaryScoreColumnKey(summary: ScoreSummary) {
+  return `${getSummaryColumnKey(summary)}_score`;
+}
+
+function getSummaryCommentColumnKey(summary: ScoreSummary) {
+  return `${getSummaryColumnKey(summary)}_comment`;
+}
+
+function getScoreSummaryOrder(summary: ScoreSummary) {
+  if (summary.scorerRoleType === 1 || summary.taskType === 2) return 20;
+  if (summary.scorerRoleType === 2 || summary.taskType === 3) return 30;
+  if (summary.taskType === 4) return 40;
+  return summary.taskType || 99;
+}
+
+function compareScoreSummary(left: ScoreSummary, right: ScoreSummary) {
+  const orderDiff = getScoreSummaryOrder(left) - getScoreSummaryOrder(right);
+  if (orderDiff !== 0) return orderDiff;
+  return Number(left.taskId || 0) - Number(right.taskId || 0);
 }
 
 function getSummaryNodeName(summary: ScoreSummary) {
@@ -397,23 +525,57 @@ function getSummaryUserName(summary: ScoreSummary) {
 
 function getSummaryLabel(summary: ScoreSummary) {
   const userName = getSummaryUserName(summary);
-  if (userName && userName !== '-') return `${getSummaryNodeName(summary)}-${userName}`;
-  const nodeName = summary.nodeName || (summary.scorerRoleType === 1 ? '自评' : summary.scorerRoleType === 2 ? '主管评分' : '评分');
-  return summary.scorerUserId ? `${nodeName}-用户${summary.scorerUserId}` : nodeName;
+  if (userName && userName !== '-')
+    return `${getSummaryNodeName(summary)}-${userName}`;
+  const roleNodeNameMap: Record<number, string> = {
+    1: '自评',
+    2: '主管评分',
+  };
+  const nodeName =
+    summary.nodeName ||
+    roleNodeNameMap[Number(summary.scorerRoleType)] ||
+    '评分';
+  return summary.scorerUserId
+    ? `${nodeName}-用户${summary.scorerUserId}`
+    : nodeName;
+}
+
+function getSummaryByColumnKey(columnKey: string) {
+  return historySummaries.value.find((item) => {
+    const baseKey = getSummaryColumnKey(item);
+    return (
+      baseKey === columnKey ||
+      getSummaryScoreColumnKey(item) === columnKey ||
+      getSummaryCommentColumnKey(item) === columnKey
+    );
+  });
+}
+
+function getSummaryHistory(record: Record<string, any>, columnKey: string) {
+  const summary = getSummaryByColumnKey(columnKey);
+  if (!summary) return undefined;
+  const historyKey = String(
+    summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score',
+  );
+  return instance.value?.indicatorScores?.[record.id]?.histories?.[historyKey];
 }
 
 function getSummaryScore(record: Record<string, any>, columnKey: string) {
-  const summary = historySummaries.value.find((item) => getSummaryColumnKey(item) === columnKey);
-  if (!summary) return '-';
-  const historyKey = String(summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score');
-  return instance.value?.indicatorScores?.[record.id]?.histories?.[historyKey]?.score ?? '-';
+  const history = getSummaryHistory(record, columnKey);
+  return history?.score ?? '-';
 }
 
 function getSummaryComment(record: Record<string, any>, columnKey: string) {
-  const summary = historySummaries.value.find((item) => getSummaryColumnKey(item) === columnKey);
-  if (!summary) return '';
-  const historyKey = String(summary.taskId || summary.nodeKey || summary.scorerRoleType || 'score');
-  return instance.value?.indicatorScores?.[record.id]?.histories?.[historyKey]?.comment || '';
+  const history = getSummaryHistory(record, columnKey);
+  return history?.comment || '';
+}
+
+function isSummaryScoreColumn(columnKey: string) {
+  return columnKey.startsWith('summary_') && columnKey.endsWith('_score');
+}
+
+function isSummaryCommentColumn(columnKey: string) {
+  return columnKey.startsWith('summary_') && columnKey.endsWith('_comment');
 }
 
 function getActiveScoreHistoryKey() {
@@ -432,23 +594,35 @@ function isDeductionIndicator(indicator: Pick<Indicator, 'dimensionType'>) {
   return indicator.dimensionType === DEDUCTION_DIMENSION_TYPE;
 }
 
-function normalizeIndicatorScore(indicator: Pick<Indicator, 'dimensionType'>, score?: number) {
+function normalizeIndicatorScore(
+  indicator: Pick<Indicator, 'dimensionType'>,
+  score?: number,
+) {
   const value = Number(score || 0);
   return isDeductionIndicator(indicator) ? -Math.abs(value) : value;
 }
 
 function hasSummaryWeight(summaries: ScoreSummary[]) {
-  return summaries.some((summary) => summary.scoreWeight !== undefined && summary.scoreWeight !== null);
+  return summaries.some(
+    (summary) =>
+      summary.scoreWeight !== undefined && summary.scoreWeight !== null,
+  );
 }
 
 function calculateSummaryFinalScore(summaries: ScoreSummary[]) {
-  const scoredSummaries = summaries.filter((summary) => summary.totalScore !== undefined && summary.totalScore !== null);
-  if (!scoredSummaries.length) return undefined;
+  const scoredSummaries = summaries.filter(
+    (summary) =>
+      summary.totalScore !== undefined && summary.totalScore !== null,
+  );
+  if (scoredSummaries.length === 0) return undefined;
   if (!hasSummaryWeight(scoredSummaries)) {
     return scoredSummaries.at(-1)?.totalScore;
   }
   const total = scoredSummaries.reduce(
-    (sum, summary) => sum + Number(summary.totalScore || 0) * Number(summary.scoreWeight || 0) / 100,
+    (sum, summary) =>
+      sum +
+      (Number(summary.totalScore || 0) * Number(summary.scoreWeight || 0)) /
+        100,
     0,
   );
   return Number(total.toFixed(2));
@@ -458,14 +632,30 @@ function isScoreCommentRequired(indicator: Pick<Indicator, 'dimensionType'>) {
   return ![3, 4].includes(Number(indicator.dimensionType || 0));
 }
 
+function renderRequiredTitle(label: string) {
+  return h('span', { class: 'required-column-title' }, [
+    h('span', { class: 'required-marker' }, '*'),
+    label,
+  ]);
+}
+
 function getAttachmentCount(value?: string) {
-  return (value || '').split(',').map((item) => item.trim()).filter(Boolean).length;
+  return (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean).length;
 }
 
 function initScoreDraft() {
-  Object.keys(scoreInputs).forEach((key) => delete scoreInputs[Number(key)]);
-  Object.keys(scoreComments).forEach((key) => delete scoreComments[Number(key)]);
-  Object.keys(scoreAttachments).forEach((key) => delete scoreAttachments[Number(key)]);
+  Object.keys(scoreInputs).forEach((key) =>
+    Reflect.deleteProperty(scoreInputs, key),
+  );
+  Object.keys(scoreComments).forEach((key) =>
+    Reflect.deleteProperty(scoreComments, key),
+  );
+  Object.keys(scoreAttachments).forEach((key) =>
+    Reflect.deleteProperty(scoreAttachments, key),
+  );
 
   const type = activeScoreType.value;
   const historyKey = getActiveScoreHistoryKey();
@@ -475,12 +665,55 @@ function initScoreDraft() {
     scoreComments[indicator.id] = state?.histories?.[historyKey]?.comment || '';
     scoreAttachments[indicator.id] = state?.attachmentIds || '';
   });
-  const currentSummary = scoreSummaries.value.find((item) => item.taskId === activeScoreTask.value?.id);
+  const currentSummary = scoreSummaries.value.find(
+    (item) => item.taskId === activeScoreTask.value?.id,
+  );
   nodeComment.value = currentSummary?.comment || '';
 }
 
 function goBack() {
-  router.push(isMyMode.value ? performancePath('/my') : performancePath(`/batches/${batch.value?.id || ''}`));
+  router.push(
+    isMyMode.value
+      ? performancePath('/my')
+      : performancePath(`/batches/${batch.value?.id || ''}`),
+  );
+}
+
+function scrollTargetIntoView(target: null | ScrollTarget) {
+  const element = target instanceof HTMLElement ? target : target?.$el;
+  element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openTemplateEditor(step: 'basic' | 'flow' | 'indicators') {
+  if (!template.value?.id) {
+    message.warning('当前考评表信息未加载完成');
+    return;
+  }
+  router.push({
+    path: performancePath(`/templates/${template.value.id}/edit`),
+    query: { step },
+  });
+}
+
+function scrollToFlowActions() {
+  scrollTargetIntoView(flowCardRef.value);
+  message.info('可在流程区域转交、跳过当前节点，或点击可回退节点调整流程');
+}
+
+function scrollToProcessRecords() {
+  scrollTargetIntoView(processRecordRef.value);
+}
+
+function resetFlowToIndicatorConfirm() {
+  const targetIndex = flowStages.value.findIndex(
+    (stage) => stage.id === 'Performance_Indicator_Confirm',
+  );
+  const targetStage = flowStages.value[targetIndex];
+  if (!targetStage) {
+    message.warning('未找到指标确认节点，无法重置流程');
+    return;
+  }
+  jumpToFlowStage(targetStage, targetIndex);
 }
 
 async function confirmIndicators() {
@@ -568,7 +801,9 @@ function skipCurrentTask() {
 }
 
 function isJumpableFlowStage(stage: FlowStage) {
-  return canManageFlow.value && FLOW_JUMPABLE_NODE_KEYS.has(String(stage.id || ''));
+  return (
+    canManageFlow.value && FLOW_JUMPABLE_NODE_KEYS.has(String(stage.id || ''))
+  );
 }
 
 function getFlowStageTaskType(stage: FlowStage) {
@@ -613,7 +848,8 @@ function jumpToFlowStage(stage: FlowStage, index: number) {
 async function submitScore() {
   if (!instance.value || !canScore.value) return;
   const missingComment = templateIndicators.value.find(
-    (indicator) => isScoreCommentRequired(indicator) && !scoreComments[indicator.id]?.trim(),
+    (indicator) =>
+      isScoreCommentRequired(indicator) && !scoreComments[indicator.id]?.trim(),
   );
   if (missingComment) {
     message.warning(`请填写「${missingComment.name}」的评分说明`);
@@ -621,11 +857,18 @@ async function submitScore() {
   }
   submittingScore.value = true;
   try {
-    const request = isMyMode.value ? submitMyFdmPerformanceAssessmentScore : submitFdmPerformanceAssessmentScore;
+    const request = isMyMode.value
+      ? submitMyFdmPerformanceAssessmentScore
+      : submitFdmPerformanceAssessmentScore;
     await request({
       comment: nodeComment.value,
       instanceId: instance.value.id,
-      items: buildApiScoreItems(templateIndicators.value, { ...scoreInputs }, { ...scoreComments }, { ...scoreAttachments }),
+      items: buildApiScoreItems(
+        templateIndicators.value,
+        { ...scoreInputs },
+        { ...scoreComments },
+        { ...scoreAttachments },
+      ),
       scorerRoleType: activeScoreType.value === 'self' ? 1 : 2,
       taskId: activeScoreTask.value?.id,
     });
@@ -648,7 +891,9 @@ async function approveReview() {
 
 async function publish() {
   if (!batch.value || !instance.value) return;
-  await publishFdmPerformanceAssessmentResult(batch.value.id, [instance.value.id]);
+  await publishFdmPerformanceAssessmentResult(batch.value.id, [
+    instance.value.id,
+  ]);
   await loadApiData();
   message.success('结果已公示');
 }
@@ -676,10 +921,10 @@ async function saveInterviewRecord() {
 
 async function handleIndicatorUpload(indicatorId: number, options: any) {
   try {
-    const result = await uploadFile({
+    const result = (await uploadFile({
       directory: 'fdmperformance/score',
       file: options.file as File,
-    }) as { id?: number; path?: string; url?: string };
+    })) as { id?: number; path?: string; url?: string };
     const value = String(result.id || result.url || result.path || '');
     if (value) {
       scoreAttachments[indicatorId] = [scoreAttachments[indicatorId], value]
@@ -722,7 +967,9 @@ async function loadApiData() {
       name: instanceResp.userName || `用户${instanceResp.userId}`,
       post: instanceResp.postName || '-',
     };
-    const templateId = Number(instanceResp.templateId || batchResp.templateIds?.[0] || 0);
+    const templateId = Number(
+      instanceResp.templateId || batchResp.templateIds?.[0] || 0,
+    );
     if (templateId) {
       const templateResp = await getFdmPerformanceTemplate(templateId);
       apiTemplate.value = mapApiTemplate(templateResp);
@@ -737,18 +984,34 @@ async function loadApiData() {
 }
 
 onMounted(loadApiData);
-watch(() => [route.params.batchId, route.params.instanceId, route.query.source], loadApiData);
+watch(
+  () => [route.params.batchId, route.params.instanceId, route.query.source],
+  loadApiData,
+);
 watch([activeScoreType, templateIndicators, instance], initScoreDraft);
 </script>
 
 <template>
   <PerformanceShell
-    :description="batch && template ? `${batch.name} · ${template.name}` : '单人绩效考核工作台'"
+    :description="
+      batch && template
+        ? `${batch.name} · ${template.name}`
+        : '单人绩效考核工作台'
+    "
     :title="employee ? `${employee.name}的绩效考核` : '考核详情'"
   >
     <template #actions>
-      <Button @click="goBack">{{ isMyMode ? '返回我的绩效' : '返回批次' }}</Button>
-      <Button v-if="instance?.status === 'indicatorConfirm'" @click="confirmIndicators">确认指标</Button>
+      <Button @click="goBack">
+{{
+        isMyMode ? '返回我的绩效' : '返回批次'
+      }}
+</Button>
+      <Button
+        v-if="instance?.status === 'indicatorConfirm'"
+        @click="confirmIndicators"
+        >
+确认指标
+</Button>
       <Button
         v-if="canScore"
         :loading="submittingScore"
@@ -757,29 +1020,98 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
       >
         {{ scoreActionLabel }}
       </Button>
-      <Button v-if="instance?.status === 'hrReview'" type="primary" @click="approveReview">人事审核通过</Button>
-      <Button v-if="instance?.status === 'pendingPublish'" type="primary" @click="publish">公示结果</Button>
       <Button
-        v-if="instance?.resultVisible && !instance?.resultConfirmed && !instance?.resultObjection"
+        v-if="instance?.status === 'hrReview'"
+        type="primary"
+        @click="approveReview"
+        >
+人事审核通过
+</Button>
+      <Button
+        v-if="instance?.status === 'pendingPublish'"
+        type="primary"
+        @click="publish"
+        >
+公示结果
+</Button>
+      <Button
+        v-if="
+          instance?.resultVisible &&
+          !instance?.resultConfirmed &&
+          !instance?.resultObjection
+        "
         type="primary"
         @click="confirmResult"
       >
         确认结果
       </Button>
+      <Dropdown
+        v-if="canShowAdminMoreMenu"
+        :trigger="['click']"
+        placement="bottomRight"
+      >
+        <Button>...</Button>
+        <template #overlay>
+          <Menu>
+            <Menu.Item key="rules" @click="openTemplateEditor('basic')">
+              考核规则
+            </Menu.Item>
+            <Menu.Item key="flow" @click="scrollToFlowActions">
+              调整流程
+            </Menu.Item>
+            <Menu.Item
+              key="reset"
+              :disabled="!canManageFlow"
+              @click="resetFlowToIndicatorConfirm"
+            >
+              重置流程
+            </Menu.Item>
+            <Menu.Item
+              key="indicators"
+              @click="openTemplateEditor('indicators')"
+            >
+              调整指标
+            </Menu.Item>
+            <Menu.Item key="records" @click="scrollToProcessRecords">
+              记录
+            </Menu.Item>
+          </Menu>
+        </template>
+      </Dropdown>
     </template>
 
     <template v-if="batch && instance && employee">
       <div class="summary-grid">
-        <Card><div class="metric-card"><span>被考核人</span><strong>{{ employee.name }}</strong></div></Card>
-        <Card><div class="metric-card"><span>部门/岗位</span><strong>{{ employee.dept }} / {{ employee.post }}</strong></div></Card>
-        <Card><div class="metric-card"><span>考核结果</span><strong>{{ instance.finalScore ?? '-' }}</strong></div></Card>
-        <Card><div class="metric-card"><span>绩效等级</span><strong>{{ instance.grade ?? '-' }}</strong></div></Card>
+        <Card>
+<div class="metric-card">
+            <span>被考核人</span><strong>{{ employee.name }}</strong>
+          </div>
+</Card>
+        <Card>
+<div class="metric-card">
+            <span>部门/岗位</span><strong>{{ employee.dept }} / {{ employee.post }}</strong>
+          </div>
+</Card>
+        <Card>
+<div class="metric-card">
+            <span>考核结果</span><strong>{{ instance.finalScore ?? '-' }}</strong>
+          </div>
+</Card>
+        <Card>
+<div class="metric-card">
+            <span>绩效等级</span><strong>{{ instance.grade ?? '-' }}</strong>
+          </div>
+</Card>
       </div>
 
-      <Card :loading="apiLoading" class="flow-card">
+      <Card ref="flowCardRef" :loading="apiLoading" class="flow-card">
         <div class="instance-head">
           <Space>
-            <Tag :color="getInstanceMeta(instance.status).color">{{ getInstanceMeta(instance.status).label }}</Tag>
+            <Tag :color="getInstanceMeta(instance.status).color">
+{{
+              getInstanceMeta(instance.status).label
+            }}
+</Tag>
             <span>{{ instance.nodeName }}</span>
             <span>{{ instance.currentExecutor || '暂无待处理人' }}</span>
           </Space>
@@ -787,11 +1119,18 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         </div>
         <div v-if="canManageFlow" class="flow-toolbar">
           <span>
-            当前待办：{{ currentPendingTask?.nodeName || getTaskTypeLabel(currentPendingTask?.taskType) }}
+            当前待办：{{
+              currentPendingTask?.nodeName ||
+              getTaskTypeLabel(currentPendingTask?.taskType)
+            }}
           </span>
           <Space>
-            <Button :loading="flowActionLoading" @click="openTransferModal">流程转交</Button>
-            <Button danger :loading="flowActionLoading" @click="skipCurrentTask">跳过节点</Button>
+            <Button :loading="flowActionLoading" @click="openTransferModal">
+流程转交
+</Button>
+            <Button danger :loading="flowActionLoading" @click="skipCurrentTask">
+跳过节点
+</Button>
           </Space>
         </div>
         <div class="flow-node-list">
@@ -800,7 +1139,8 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
             :key="stage.id || index"
           >
             <div
-              class="flow-node-card" :class="[
+              class="flow-node-card"
+              :class="[
                 `flow-node-card--${getFlowStageStatus(index)}`,
                 { 'flow-node-card--clickable': isJumpableFlowStage(stage) },
               ]"
@@ -860,7 +1200,15 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         <template #title>
           <Space>
             <span>{{ getDimensionTitle(group) }}</span>
-            <Tag>{{ group.dimensionType === 3 ? '加分项' : group.dimensionType === 4 ? '扣分项' : '量化指标 100%' }}</Tag>
+            <Tag>
+{{
+              group.dimensionType === 3
+                ? '加分项'
+                : group.dimensionType === 4
+                  ? '扣分项'
+                  : '量化指标 100%'
+            }}
+</Tag>
           </Space>
         </template>
         <Table
@@ -868,7 +1216,7 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           :data-source="group.indicators"
           :loading="apiLoading"
           :pagination="false"
-          :scroll="{ x: 1280 }"
+          :scroll="{ x: scoreTableScrollX }"
           row-key="id"
           size="small"
         >
@@ -877,27 +1225,44 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
               <div class="multi-line">{{ record.standard || '-' }}</div>
             </template>
             <template v-else-if="column.dataIndex === 'weight'">
-              <strong>{{ record.weight || '-' }}{{ record.weight ? '%' : '' }}</strong>
+              <strong>{{ record.weight || '-'
+                }}{{ record.weight ? '%' : '' }}</strong>
             </template>
             <template v-else-if="column.dataIndex === 'remark'">
               {{ record.tags?.join(' / ') || '-' }}
             </template>
             <template v-else-if="column.dataIndex === 'attachment'">
               <Space direction="vertical" size="small">
-                <span>{{ getAttachmentCount(scoreAttachments[record.id] || instance.indicatorScores?.[record.id]?.attachmentIds) }} 个附件</span>
+                <span>{{
+                    getAttachmentCount(
+                      scoreAttachments[record.id] ||
+                        instance.indicatorScores?.[record.id]?.attachmentIds,
+                    )
+                  }}
+                  个附件</span>
                 <Upload
                   v-if="canScore"
-                  :custom-request="(options) => handleIndicatorUpload(record.id, options)"
+                  :custom-request="
+                    (options) => handleIndicatorUpload(record.id, options)
+                  "
                   :show-upload-list="false"
                 >
                   <Button size="small">上传附件</Button>
                 </Upload>
               </Space>
             </template>
-            <template v-else-if="String(column.dataIndex).startsWith('summary_')">
-              <div class="summary-history-cell">
-                <strong>{{ getSummaryScore(record, String(column.dataIndex)) }}</strong>
-                <span>{{ getSummaryComment(record, String(column.dataIndex)) || '暂无评分说明' }}</span>
+            <template
+              v-else-if="isSummaryScoreColumn(String(column.dataIndex))"
+            >
+              <strong>{{
+                getSummaryScore(record, String(column.dataIndex))
+              }}</strong>
+            </template>
+            <template
+              v-else-if="isSummaryCommentColumn(String(column.dataIndex))"
+            >
+              <div class="summary-comment-cell">
+                {{ getSummaryComment(record, String(column.dataIndex)) || '-' }}
               </div>
             </template>
             <template v-else-if="column.dataIndex === 'currentScore'">
@@ -912,50 +1277,81 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
               />
               <span v-else>
                 {{
-                  instance.indicatorScores?.[record.id]?.final
-                    ?? instance.indicatorScores?.[record.id]?.supervisor
-                    ?? instance.indicatorScores?.[record.id]?.self
-                    ?? '-'
+                  instance.indicatorScores?.[record.id]?.final ??
+                  instance.indicatorScores?.[record.id]?.supervisor ??
+                  instance.indicatorScores?.[record.id]?.self ??
+                  '-'
                 }}
               </span>
             </template>
             <template v-else-if="column.dataIndex === 'scoreComment'">
-              <Input.TextArea
-                v-if="scoreEditorVisible"
-                v-model:value="scoreComments[record.id]"
-                :disabled="!canScore"
-                :placeholder="isScoreCommentRequired(record) ? '请输入评分说明(必填)' : '请输入评分说明(选填)'"
-                :rows="3"
-              />
-              <span v-else>{{ instance.indicatorScores?.[record.id]?.scoreComment || '-' }}</span>
+              <div v-if="scoreEditorVisible" class="required-field-cell">
+                <span
+                  v-if="isScoreCommentRequired(record)"
+                  class="required-marker"
+                  >*</span>
+                <Input.TextArea
+                  v-model:value="scoreComments[record.id]"
+                  :disabled="!canScore"
+                  :placeholder="
+                    isScoreCommentRequired(record)
+                      ? '请输入评分说明(必填)'
+                      : '请输入评分说明(选填)'
+                  "
+                  :rows="3"
+                />
+              </div>
+              <span v-else>{{
+                instance.indicatorScores?.[record.id]?.scoreComment || '-'
+              }}</span>
             </template>
           </template>
         </Table>
       </Card>
 
-      <Card title="过程记录">
+      <Card ref="processRecordRef" title="过程记录">
         <div class="record-list">
           <div>
             <strong>指标确认</strong>
-            <span>{{ instance.progress >= 2 ? '被考核人已收到指标确认任务' : '未开始' }}</span>
+            <span>{{
+              instance.progress >= 2 ? '被考核人已收到指标确认任务' : '未开始'
+            }}</span>
           </div>
           <div>
             <strong>自评</strong>
-            <span>{{ instance.selfScore !== undefined ? `${instance.selfScore} 分` : '待被考核人提交' }}</span>
+            <span>{{
+              instance.selfScore !== undefined
+                ? `${instance.selfScore} 分`
+                : '待被考核人提交'
+            }}</span>
           </div>
           <div>
             <strong>主管评分</strong>
-            <span>{{ instance.supervisorScore !== undefined ? `${instance.supervisorScore} 分` : '待直接主管评分' }}</span>
+            <span>{{
+              instance.supervisorScore !== undefined
+                ? `${instance.supervisorScore} 分`
+                : '待直接主管评分'
+            }}</span>
           </div>
           <div>
             <strong>人事审核</strong>
-            <Input.TextArea v-model:value="reviewRemark" :rows="3" placeholder="填写审核备注" />
+            <Input.TextArea
+              v-model:value="reviewRemark"
+              :rows="3"
+              placeholder="填写审核备注"
+            />
           </div>
           <div>
             <strong>面谈记录</strong>
             <Space direction="vertical">
-              <span>{{ instance.interviewRecords?.length ? `${instance.interviewRecords.length} 条记录` : '暂未记录面谈' }}</span>
-              <Button size="small" @click="interviewModalOpen = true">记录面谈</Button>
+              <span>{{
+                instance.interviewRecords?.length
+                  ? `${instance.interviewRecords.length} 条记录`
+                  : '暂未记录面谈'
+              }}</span>
+              <Button size="small" @click="interviewModalOpen = true">
+记录面谈
+</Button>
             </Space>
           </div>
           <div v-if="instance.resultObjection">
@@ -976,11 +1372,16 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
       <Space direction="vertical" class="modal-form">
         <div>
           <strong>当前节点</strong>
-          <span>{{ currentPendingTask?.nodeName || getTaskTypeLabel(currentPendingTask?.taskType) }}</span>
+          <span>{{
+            currentPendingTask?.nodeName ||
+            getTaskTypeLabel(currentPendingTask?.taskType)
+          }}</span>
         </div>
         <div>
           <strong>原处理人</strong>
-          <span>{{ getUserDisplayName(currentPendingTask?.assigneeUserId) }}</span>
+          <span>{{
+            getUserDisplayName(currentPendingTask?.assigneeUserId)
+          }}</span>
         </div>
         <Select
           v-model:value="transferTargetUserId"
@@ -990,11 +1391,19 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           placeholder="请选择接收人"
           show-search
         />
-        <Input.TextArea v-model:value="transferReason" :rows="3" placeholder="请输入转交原因（选填）" />
+        <Input.TextArea
+          v-model:value="transferReason"
+          :rows="3"
+          placeholder="请输入转交原因（选填）"
+        />
       </Space>
     </Modal>
 
-    <Modal v-model:open="interviewModalOpen" title="记录面谈" @ok="saveInterviewRecord">
+    <Modal
+      v-model:open="interviewModalOpen"
+      title="记录面谈"
+      @ok="saveInterviewRecord"
+    >
       <Input.TextArea v-model:value="interviewConclusion" :rows="4" />
     </Modal>
   </PerformanceShell>
@@ -1186,18 +1595,29 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   border-radius: 6px;
 }
 
-.summary-history-cell {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
+.required-column-title {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
 }
 
-.summary-history-cell strong {
-  font-weight: 650;
-  color: #111827;
+.required-field-cell {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
 }
 
-.summary-history-cell span {
+.required-marker {
+  font-weight: 600;
+  line-height: 1;
+  color: #ff4d4f;
+}
+
+.required-field-cell .required-marker {
+  padding-top: 6px;
+}
+
+.summary-comment-cell {
   color: #64748b;
   white-space: pre-wrap;
 }
