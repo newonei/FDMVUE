@@ -12,6 +12,7 @@ import {
   Card,
   Empty,
   message,
+  Modal,
   Progress,
   Space,
   Switch,
@@ -201,8 +202,10 @@ const canConfirm = computed(
   () =>
     !!currentCaptureId.value &&
     !!selectedOrderNo.value &&
-    !!selectedItemId.value &&
-    matchResult.value?.decision !== 'no_match',
+    !!selectedItemId.value,
+);
+const needsLowSimilarityConfirm = computed(
+  () => matchResult.value?.decision === 'no_match',
 );
 
 function setCapturePreview(file: File | null) {
@@ -590,7 +593,7 @@ function isSelectedCandidate(candidate: PatternRecognitionApi.Candidate) {
   );
 }
 
-async function submitConfirm() {
+async function doSubmitConfirm() {
   if (!canConfirm.value) return;
   confirmLoading.value = true;
   confirmError.value = '';
@@ -608,6 +611,23 @@ async function submitConfirm() {
   } finally {
     confirmLoading.value = false;
   }
+}
+
+function submitConfirm() {
+  if (!canConfirm.value || confirmLoading.value) return;
+  if (!needsLowSimilarityConfirm.value) {
+    void doSubmitConfirm();
+    return;
+  }
+
+  Modal.confirm({
+    title: '相似度过低，是否人工核验通过？',
+    content:
+      '当前识别结果为无可靠候选。请确认已人工核对实拍图与所选候选图案一致，再继续确认打包 / 下一个。',
+    okText: '人工核验通过',
+    cancelText: '取消',
+    onOk: () => doSubmitConfirm(),
+  });
 }
 
 function formatScore(score: unknown) {
