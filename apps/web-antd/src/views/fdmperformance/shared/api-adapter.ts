@@ -1,6 +1,3 @@
-import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
-import type { FdmPerformanceTemplateApi } from '#/api/fdmperformance/template';
-
 import type {
   AssessmentBatch,
   AssessmentInstance,
@@ -14,6 +11,9 @@ import type {
   ParticipantScope,
   ScoreSummary,
 } from './model';
+
+import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+import type { FdmPerformanceTemplateApi } from '#/api/fdmperformance/template';
 
 import { defaultTemplateFlowNode } from './model';
 
@@ -62,7 +62,9 @@ export function apiPeriodTypeToText(periodType?: number) {
 export function apiPeriodTextToType(periodType?: string) {
   return (
     Number(
-      Object.entries(periodTypeTextMap).find(([, label]) => label === periodType)?.[0],
+      Object.entries(periodTypeTextMap).find(
+        ([, label]) => label === periodType,
+      )?.[0],
     ) || 1
   );
 }
@@ -79,13 +81,20 @@ export function periodTextToApiKey(periodText: string) {
 }
 
 export function mapApiTemplate(
-  template: FdmPerformanceTemplateApi.Template | FdmPerformanceTemplateApi.SimpleTemplate,
+  template:
+    | FdmPerformanceTemplateApi.SimpleTemplate
+    | FdmPerformanceTemplateApi.Template,
 ): AssessmentTemplate {
   const fullTemplate = template as FdmPerformanceTemplateApi.Template;
   const dimensions = fullTemplate.dimensions || [];
-  const participants = (fullTemplate.participants || []).map((item) => Number(item.userId));
+  const participants = (fullTemplate.participants || []).map((item) =>
+    Number(item.userId),
+  );
   const launchRule = fullTemplate.launchRuleJson
-    ? safeParse<{ participantScope?: Partial<ParticipantScope> }>(fullTemplate.launchRuleJson, {})
+    ? safeParse<{ participantScope?: Partial<ParticipantScope> }>(
+        fullTemplate.launchRuleJson,
+        {},
+      )
     : {};
   return {
     admins: (fullTemplate.managerUserIds || []).map((id) => `用户${id}`),
@@ -97,12 +106,15 @@ export function mapApiTemplate(
     group: fullTemplate.groupName || '未分类考评表',
     id: Number(template.id || 0),
     indicatorIds: dimensions.flatMap((dimension) =>
-      (dimension.indicators || []).map(
-        (indicator) => Number(indicator.id || indicator.indicatorId || 0),
+      (dimension.indicators || []).map((indicator) =>
+        Number(indicator.id || indicator.indicatorId || 0),
       ),
     ),
     name: template.name,
-    participantScope: normalizeParticipantScope(launchRule.participantScope, participants),
+    participantScope: normalizeParticipantScope(
+      launchRule.participantScope,
+      participants,
+    ),
     participants,
     periodType: apiPeriodTypeToText(template.periodType),
     scoringRule: buildScoringRule(dimensions),
@@ -115,27 +127,39 @@ function normalizeParticipantScope(
   scope: Partial<ParticipantScope> | undefined,
   participantIds: number[],
 ): ParticipantScope {
-  const mode = ['department', 'people', 'role', 'userGroup'].includes(scope?.mode || '')
+  const mode = ['department', 'people', 'role', 'userGroup'].includes(
+    scope?.mode || '',
+  )
     ? (scope?.mode as ParticipantScope['mode'])
     : 'people';
-  const peopleIds = Array.isArray(scope?.peopleIds) && scope.peopleIds.length
-    ? scope.peopleIds.map(Number).filter((id) => Number.isFinite(id))
-    : participantIds;
+  const peopleIds =
+    Array.isArray(scope?.peopleIds) && scope.peopleIds.length > 0
+      ? scope.peopleIds.map(Number).filter((id) => Number.isFinite(id))
+      : participantIds;
   return {
-    deptNames: Array.isArray(scope?.deptNames) ? scope.deptNames.filter(Boolean) : [],
+    deptNames: Array.isArray(scope?.deptNames)
+      ? scope.deptNames.filter(Boolean)
+      : [],
     mode,
     peopleIds,
-    roleNames: Array.isArray(scope?.roleNames) ? scope.roleNames.filter(Boolean) : [],
-    userGroupNames: Array.isArray(scope?.userGroupNames) ? scope.userGroupNames.filter(Boolean) : [],
+    roleNames: Array.isArray(scope?.roleNames)
+      ? scope.roleNames.filter(Boolean)
+      : [],
+    userGroupNames: Array.isArray(scope?.userGroupNames)
+      ? scope.userGroupNames.filter(Boolean)
+      : [],
   };
 }
 
 export function mapApiTemplateIndicators(
   template?: FdmPerformanceTemplateApi.Template,
 ) {
-  if (!template?.dimensions?.length) return [];
-  return template.dimensions.flatMap((dimension) =>
-    (dimension.indicators || []).map((indicator) => mapApiTemplateIndicator(dimension, indicator)),
+  const dimensions = template?.dimensions || [];
+  if (dimensions.length === 0) return [];
+  return dimensions.flatMap((dimension) =>
+    (dimension.indicators || []).map((indicator) =>
+      mapApiTemplateIndicator(dimension, indicator),
+    ),
   );
 }
 
@@ -146,7 +170,8 @@ export function mapApiBatch(
   return {
     finishedCount: batch.finishedCount || 0,
     id: batch.id,
-    instanceCount: batch.instanceCount || instances.length,
+    instanceCount:
+      batch.instanceCount || (instances.length > 0 ? instances.length : 0),
     instances,
     name: batch.name || `${apiPeriodKeyToText(batch.periodKey)}绩效考核`,
     period: apiPeriodKeyToText(batch.periodKey),
@@ -166,9 +191,15 @@ export function mapApiInstance(
     finalScore: instance.finalScore,
     flowSnapshot: parseFlowSnapshotJson(instance.flowSnapshotJson),
     grade: instance.gradeName,
+    gradeAdjusted: Boolean(instance.gradeAdjusted),
+    gradeAdjustReason: instance.gradeAdjustReason,
+    gradeAdjustTime: instance.gradeAdjustTime,
+    gradeAdjustUserId: instance.gradeAdjustUserId,
     id: instance.id,
     indicatorScores,
-    interviewRecords: mapChangeLogsToInterviewRecords(instance.interviewRecords),
+    interviewRecords: mapChangeLogsToInterviewRecords(
+      instance.interviewRecords,
+    ),
     nodeName: instance.currentNodeName || '未开始',
     progress: instance.progressCurrent || 1,
     resultConfirmed: Boolean(instance.resultConfirmed),
@@ -178,11 +209,21 @@ export function mapApiInstance(
         ? '已提交结果异议，等待绩效管理员处理'
         : undefined),
     resultVisible: Boolean(instance.resultVisible),
+    reviewCcUserIds: instance.reviewCcUserIds,
+    reviewDeadline: instance.reviewDeadline,
+    reviewEmployeeConfirmTime: instance.reviewEmployeeConfirmTime,
+    reviewEmployeeUserId: instance.reviewEmployeeUserId,
+    reviewReason: instance.reviewReason,
+    reviewRequired: Boolean(instance.reviewRequired),
+    reviewStatus: instance.reviewStatus,
+    reviewSupervisorConfirmTime: instance.reviewSupervisorConfirmTime,
+    reviewSupervisorUserId: instance.reviewSupervisorUserId,
     scoreSummaries,
     selfScore: getRoleSummaryScore(scoreSummaries, 1, 2),
     status: instanceStatusMap[Number(instance.status)] || 'indicatorConfirm',
     stayTime: instance.resultVisibleTime ? '已公示' : '处理中',
     supervisorScore: getRoleSummaryScore(scoreSummaries, 2, 3),
+    systemGradeName: instance.systemGradeName,
     templateId: Number(instance.templateId || 0) || undefined,
   };
 }
@@ -204,7 +245,9 @@ function getLatestLogReason(
 ) {
   const log = logs?.[0];
   if (!log) return undefined;
-  const payload = log.afterJson ? safeParse<Record<string, unknown>>(log.afterJson, {}) : {};
+  const payload = log.afterJson
+    ? safeParse<Record<string, unknown>>(log.afterJson, {})
+    : {};
   const value = payload[jsonKey];
   return typeof value === 'string' && value.trim() ? value : log.reason;
 }
@@ -251,14 +294,16 @@ function buildIndicatorScores(scores: FdmPerformanceAssessmentApi.Score[]) {
     const indicatorId = Number(score.templateIndicatorId || 0);
     if (!indicatorId) return;
     const key = instanceRoleScoreKeyMap[Number(score.scorerRoleType)];
-    const historyKey = String(score.taskId || score.nodeKey || score.scorerRoleType || 'score');
+    const historyKey = String(
+      score.taskId || score.nodeKey || score.scorerRoleType || 'score',
+    );
     const current = result[indicatorId] || {};
     result[indicatorId] = {
       ...current,
       attachmentIds: score.attachmentIds || current.attachmentIds,
       final: Number(score.score || 0),
       histories: {
-        ...(current.histories || {}),
+        ...current.histories,
         [historyKey]: {
           comment: score.scoreComment,
           score: Number(score.score || 0),
@@ -272,7 +317,9 @@ function buildIndicatorScores(scores: FdmPerformanceAssessmentApi.Score[]) {
   return result;
 }
 
-function mapScoreSummaries(scores?: FdmPerformanceAssessmentApi.ScoreSummary[]): ScoreSummary[] {
+function mapScoreSummaries(
+  scores?: FdmPerformanceAssessmentApi.ScoreSummary[],
+): ScoreSummary[] {
   return (scores || []).map((item) => ({
     comment: item.comment,
     nodeKey: item.nodeKey,
@@ -293,13 +340,16 @@ function getRoleSummaryScore(
   taskType: number,
 ) {
   const matched = [...scores]
-    .reverse()
-    .find((item) => item.scorerRoleType === scorerRoleType || item.taskType === taskType);
+    .toReversed()
+    .find(
+      (item) =>
+        item.scorerRoleType === scorerRoleType || item.taskType === taskType,
+    );
   return matched?.totalScore;
 }
 
 function buildScoringRule(dimensions: FdmPerformanceTemplateApi.Dimension[]) {
-  if (!dimensions.length) return '未配置评分规则';
+  if (dimensions.length === 0) return '未配置评分规则';
   return dimensions
     .map((item) => `${item.name}${item.weight ? `${item.weight}%` : ''}`)
     .join(' + ');
@@ -318,7 +368,8 @@ export function extractFlowStagesFromSimpleNode(node?: unknown): FlowStage[] {
   const stages: FlowStage[] = [];
   const visit = (current?: ApiSimpleFlowNode) => {
     if (!current) return;
-    const id = String(current.id || current.name || stages.length);
+    const fallbackId = stages.length > 0 ? stages.length : 0;
+    const id = String(current.id || current.name || fallbackId);
     if (!['EndEvent', 'StartUserNode'].includes(id)) {
       stages.push({
         id,
@@ -344,7 +395,7 @@ function normalizeFlowStages(items: unknown[]): FlowStage[] {
         owner: String(row.owner || row.showText || '按节点配置'),
       };
     })
-    .filter((item): item is FlowStage => Boolean(item));
+    .filter(Boolean) as FlowStage[];
 }
 
 function parseFlowSnapshotJson(raw?: string): FlowStage[] | undefined {
@@ -363,7 +414,7 @@ function parseFlowSnapshotJson(raw?: string): FlowStage[] | undefined {
       return normalizeFlowStages(row.nodes);
     }
     const stages = extractFlowStagesFromSimpleNode(parsed);
-    return stages.length ? stages : undefined;
+    return stages.length > 0 ? stages : undefined;
   }
   return undefined;
 }

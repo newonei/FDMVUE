@@ -39,6 +39,7 @@ import {
 } from 'ant-design-vue';
 
 import {
+  confirmFdmPerformanceAssessmentGradeReview,
   confirmFdmPerformanceAssessmentIndicators,
   confirmFdmPerformanceAssessmentResult,
   confirmMyFdmPerformanceAssessmentIndicators,
@@ -137,6 +138,8 @@ const flowActionLoading = ref(false);
 const transferModalOpen = ref(false);
 const transferTargetUserId = ref<number>();
 const transferReason = ref('');
+const gradeReviewComment = ref('');
+const gradeReviewSubmitting = ref(false);
 const flowCardRef = ref<null | ScrollTarget>(null);
 const processRecordRef = ref<null | ScrollTarget>(null);
 
@@ -178,8 +181,17 @@ const pendingTasks = computed(() => {
     (task) => task.status === 0 && task.instanceId === instanceId,
   );
 });
+const pendingGradeReviewTask = computed(() =>
+  pendingTasks.value.find((task) => [6, 7].includes(Number(task.taskType))),
+);
 const currentPendingTask = computed(
   () => activeScoreTask.value || pendingTasks.value[0],
+);
+const canConfirmGradeReview = computed(
+  () =>
+    Boolean(pendingGradeReviewTask.value) &&
+    Number(pendingGradeReviewTask.value?.assigneeUserId) ===
+      currentUserId.value,
 );
 const canOperateFlow = computed(() =>
   hasAccessByCodes(['fdmperformance:assessment:cancel']),
@@ -437,8 +449,43 @@ function getTaskTypeLabel(taskType?: number) {
     3: '主管评分',
     4: '人事审核',
     5: '结果确认',
+    6: '绩效复盘员工确认',
+    7: '绩效复盘主管确认',
   };
   return taskType ? labelMap[taskType] || `任务${taskType}` : '-';
+}
+
+function getGradeReviewStatusText() {
+  if (!instance.value?.reviewRequired) return '未触发';
+  const statusMap: Record<number, string> = {
+    1: '待确认',
+    2: '已完成',
+    3: '已取消',
+  };
+  return statusMap[Number(instance.value.reviewStatus || 0)] || '待确认';
+}
+
+function getGradeReviewStatusColor() {
+  if (!instance.value?.reviewRequired) return 'default';
+  const colorMap: Record<number, string> = {
+    1: 'orange',
+    2: 'green',
+    3: 'default',
+  };
+  return colorMap[Number(instance.value.reviewStatus || 0)] || 'orange';
+}
+
+function getConfirmTimeText(value?: string) {
+  return value || '待确认';
+}
+
+function getReviewCcUserNames(value?: string) {
+  const userIds = (value || '')
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0);
+  if (userIds.length === 0) return '-';
+  return userIds.map((userId) => getUserDisplayName(userId)).join('、');
 }
 
 function getCoreFlowStageIndex(stage: FlowStage) {
@@ -908,6 +955,22 @@ async function confirmResult() {
   message.success('结果已确认');
 }
 
+async function submitGradeReviewConfirm() {
+  if (!pendingGradeReviewTask.value) return;
+  gradeReviewSubmitting.value = true;
+  try {
+    await confirmFdmPerformanceAssessmentGradeReview({
+      comment: gradeReviewComment.value,
+      taskId: pendingGradeReviewTask.value.id,
+    });
+    gradeReviewComment.value = '';
+    await loadApiData();
+    message.success('绩效复盘已确认');
+  } finally {
+    gradeReviewSubmitting.value = false;
+  }
+}
+
 async function saveInterviewRecord() {
   if (!instance.value) return;
   await recordFdmPerformanceAssessmentInterview({
@@ -1002,16 +1065,14 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   >
     <template #actions>
       <Button @click="goBack">
-{{
-        isMyMode ? '返回我的绩效' : '返回批次'
-      }}
-</Button>
+        {{ isMyMode ? '返回我的绩效' : '返回批次' }}
+      </Button>
       <Button
         v-if="instance?.status === 'indicatorConfirm'"
         @click="confirmIndicators"
-        >
-确认指标
-</Button>
+      >
+        确认指标
+      </Button>
       <Button
         v-if="canScore"
         :loading="submittingScore"
@@ -1024,16 +1085,16 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         v-if="instance?.status === 'hrReview'"
         type="primary"
         @click="approveReview"
-        >
-人事审核通过
-</Button>
+      >
+        人事审核通过
+      </Button>
       <Button
         v-if="instance?.status === 'pendingPublish'"
         type="primary"
         @click="publish"
-        >
-公示结果
-</Button>
+      >
+        公示结果
+      </Button>
       <Button
         v-if="
           instance?.resultVisible &&
@@ -1044,6 +1105,14 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         @click="confirmResult"
       >
         确认结果
+      </Button>
+      <Button
+        v-if="canConfirmGradeReview"
+        :loading="gradeReviewSubmitting"
+        type="primary"
+        @click="submitGradeReviewConfirm"
+      >
+        确认绩效复盘
       </Button>
       <Dropdown
         v-if="canShowAdminMoreMenu"
@@ -1083,35 +1152,33 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
     <template v-if="batch && instance && employee">
       <div class="summary-grid">
         <Card>
-<div class="metric-card">
+          <div class="metric-card">
             <span>被考核人</span><strong>{{ employee.name }}</strong>
           </div>
-</Card>
+        </Card>
         <Card>
-<div class="metric-card">
+          <div class="metric-card">
             <span>部门/岗位</span><strong>{{ employee.dept }} / {{ employee.post }}</strong>
           </div>
-</Card>
+        </Card>
         <Card>
-<div class="metric-card">
+          <div class="metric-card">
             <span>考核结果</span><strong>{{ instance.finalScore ?? '-' }}</strong>
           </div>
-</Card>
+        </Card>
         <Card>
-<div class="metric-card">
+          <div class="metric-card">
             <span>绩效等级</span><strong>{{ instance.grade ?? '-' }}</strong>
           </div>
-</Card>
+        </Card>
       </div>
 
       <Card ref="flowCardRef" :loading="apiLoading" class="flow-card">
         <div class="instance-head">
           <Space>
             <Tag :color="getInstanceMeta(instance.status).color">
-{{
-              getInstanceMeta(instance.status).label
-            }}
-</Tag>
+              {{ getInstanceMeta(instance.status).label }}
+            </Tag>
             <span>{{ instance.nodeName }}</span>
             <span>{{ instance.currentExecutor || '暂无待处理人' }}</span>
           </Space>
@@ -1126,11 +1193,15 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           </span>
           <Space>
             <Button :loading="flowActionLoading" @click="openTransferModal">
-流程转交
-</Button>
-            <Button danger :loading="flowActionLoading" @click="skipCurrentTask">
-跳过节点
-</Button>
+              流程转交
+            </Button>
+            <Button
+              danger
+              :loading="flowActionLoading"
+              @click="skipCurrentTask"
+            >
+              跳过节点
+            </Button>
           </Space>
         </div>
         <div class="flow-node-list">
@@ -1170,6 +1241,72 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
         </Card>
       </div>
 
+      <Card
+        v-if="instance.reviewRequired"
+        class="grade-review-card"
+        title="绩效复盘"
+      >
+        <div class="grade-review-grid">
+          <div>
+            <span>当前等级</span>
+            <strong>{{ instance.grade || '-' }}</strong>
+          </div>
+          <div>
+            <span>复盘状态</span>
+            <Tag :color="getGradeReviewStatusColor()">
+              {{ getGradeReviewStatusText() }}
+            </Tag>
+          </div>
+          <div>
+            <span>截止时间</span>
+            <strong>{{ instance.reviewDeadline || '-' }}</strong>
+          </div>
+          <div>
+            <span>员工确认</span>
+            <strong>
+              {{ getUserDisplayName(instance.reviewEmployeeUserId) }}
+              · {{ getConfirmTimeText(instance.reviewEmployeeConfirmTime) }}
+            </strong>
+          </div>
+          <div>
+            <span>主管确认</span>
+            <strong>
+              {{ getUserDisplayName(instance.reviewSupervisorUserId) }}
+              · {{ getConfirmTimeText(instance.reviewSupervisorConfirmTime) }}
+            </strong>
+          </div>
+          <div>
+            <span>抄送人员</span>
+            <strong>{{
+              getReviewCcUserNames(instance.reviewCcUserIds)
+            }}</strong>
+          </div>
+        </div>
+        <div class="grade-review-reason">
+          <span>复盘原因</span>
+          <p>{{ instance.reviewReason || '-' }}</p>
+        </div>
+        <div v-if="canConfirmGradeReview" class="grade-review-confirm">
+          <Input.TextArea
+            v-model:value="gradeReviewComment"
+            :rows="3"
+            placeholder="填写本次复盘确认说明（选填）"
+          />
+          <Button
+            :loading="gradeReviewSubmitting"
+            type="primary"
+            @click="submitGradeReviewConfirm"
+          >
+            确认绩效复盘
+          </Button>
+        </div>
+        <div v-else-if="pendingGradeReviewTask" class="grade-review-pending">
+          当前待确认人：{{
+            getUserDisplayName(pendingGradeReviewTask.assigneeUserId)
+          }}
+        </div>
+      </Card>
+
       <Card v-if="scoreEditorVisible" class="node-score-card">
         <div class="node-score-head">
           <div>
@@ -1201,14 +1338,14 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           <Space>
             <span>{{ getDimensionTitle(group) }}</span>
             <Tag>
-{{
-              group.dimensionType === 3
-                ? '加分项'
-                : group.dimensionType === 4
-                  ? '扣分项'
-                  : '量化指标 100%'
-            }}
-</Tag>
+              {{
+                group.dimensionType === 3
+                  ? '加分项'
+                  : group.dimensionType === 4
+                    ? '扣分项'
+                    : '量化指标 100%'
+              }}
+            </Tag>
           </Space>
         </template>
         <Table
@@ -1350,8 +1487,8 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
                   : '暂未记录面谈'
               }}</span>
               <Button size="small" @click="interviewModalOpen = true">
-记录面谈
-</Button>
+                记录面谈
+              </Button>
             </Space>
           </div>
           <div v-if="instance.resultObjection">
@@ -1641,9 +1778,62 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   border-bottom: 1px solid #f1f5f9;
 }
 
+.grade-review-card {
+  border-color: #ffd591;
+}
+
+.grade-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.grade-review-grid > div,
+.grade-review-reason {
+  display: grid;
+  gap: 6px;
+}
+
+.grade-review-grid span,
+.grade-review-reason span,
+.grade-review-pending {
+  color: #64748b;
+}
+
+.grade-review-grid strong {
+  font-weight: 650;
+  color: #111827;
+}
+
+.grade-review-reason {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.grade-review-reason p {
+  margin: 0;
+  color: #111827;
+  white-space: pre-wrap;
+}
+
+.grade-review-confirm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.grade-review-pending {
+  margin-top: 14px;
+}
+
 @media (max-width: 960px) {
   .summary-grid,
   .score-summary-grid,
+  .grade-review-grid,
+  .grade-review-confirm,
   .instance-head,
   .flow-toolbar,
   .node-score-head,

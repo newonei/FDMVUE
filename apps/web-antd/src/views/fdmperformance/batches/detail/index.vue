@@ -1,14 +1,28 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, ref, watch } from 'vue';
+import type {
+  AssessmentBatch,
+  AssessmentInstance,
+  AssessmentTemplate,
+  Employee,
+} from '../../shared/model';
+
+import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+import type { SystemUserApi } from '#/api/system/user';
+
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+
+import { useAccess } from '@vben/access';
 
 import {
   Button,
   Card,
+  DatePicker,
   Empty,
   Input,
+  message,
   Modal,
   Progress,
   Select,
@@ -16,10 +30,10 @@ import {
   Statistic,
   Table,
   Tag,
-  message,
 } from 'ant-design-vue';
 
 import {
+  adjustFdmPerformanceAssessmentGrade,
   confirmFdmPerformanceAssessmentIndicators,
   confirmFdmPerformanceAssessmentResult,
   getFdmPerformanceAssessmentBatch,
@@ -31,30 +45,24 @@ import {
   startFdmPerformanceAssessmentScoring,
   submitFdmPerformanceAssessmentHrReview,
   submitFdmPerformanceAssessmentResultObjection,
-  type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplate } from '#/api/fdmperformance/template';
+import { getSimpleUserList } from '#/api/system/user';
 
-import PerformanceShell from '../../shared/PerformanceShell.vue';
 import {
   mapApiBatch,
   mapApiInstance,
   mapApiTemplate,
 } from '../../shared/api-adapter';
-import {
-  type AssessmentBatch,
-  type AssessmentInstance,
-  type AssessmentTemplate,
-  type Employee,
-  batchStatusMetaMap,
-  instanceStatusMetaMap,
-} from '../../shared/model';
+import { batchStatusMetaMap, instanceStatusMetaMap } from '../../shared/model';
+import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../../shared/route';
 
 defineOptions({ name: 'FdmPerformanceBatchDetail' });
 
 const route = useRoute();
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
 const { performancePath } = usePerformancePath();
 
 const activeTab = ref('people');
@@ -66,12 +74,31 @@ const reminding = ref(false);
 const apiBatch = ref<AssessmentBatch>();
 const apiTemplateMap = ref(new Map<number, AssessmentTemplate>());
 const apiRows = ref<(AssessmentInstance & { employee?: Employee })[]>([]);
+const simpleUsers = ref<SystemUserApi.User[]>([]);
 const interviewModalOpen = ref(false);
 const interviewInstanceId = ref<number>();
 const interviewConclusion = ref('已完成绩效沟通，后续动作同步到行动计划');
 const objectionModalOpen = ref(false);
 const objectionInstanceId = ref<number>();
-const objectionText = ref('对评分结果有异议，需要绩效管理员复核评分依据和等级系数。');
+const objectionText = ref(
+  '对评分结果有异议，需要绩效管理员复核评分依据和等级系数。',
+);
+const gradeAdjustModalOpen = ref(false);
+const gradeAdjustSubmitting = ref(false);
+const gradeAdjustRecord = ref<AssessmentInstance & { employee?: Employee }>();
+const gradeAdjustForm = reactive<{
+  ccUserIds: number[];
+  gradeName: string;
+  reason: string;
+  reviewDeadline?: string;
+  supervisorUserId?: number;
+}>({
+  ccUserIds: [],
+  gradeName: 'B',
+  reason: '',
+  reviewDeadline: undefined,
+  supervisorUserId: undefined,
+});
 
 const tabs = [
   { key: 'people', label: '考核人员' },
@@ -83,8 +110,11 @@ const tabs = [
 
 const batch = computed(() => apiBatch.value);
 const rows = computed(() => apiRows.value);
+const canAdjustGrade = computed(() =>
+  hasAccessByCodes(['fdmperformance:assessment:cancel']),
+);
 const templateDescription = computed(() => {
-  const templates = Array.from(apiTemplateMap.value.values());
+  const templates = [...apiTemplateMap.value.values()];
   if (templates.length === 0) return '查看考核执行详情';
   if (templates.length === 1) return `考评表：${templates[0]!.name}`;
   return `考评表：${templates[0]!.name} 等 ${templates.length} 张`;
@@ -94,25 +124,57 @@ const filteredRows = computed(() => {
   return rows.value.filter((item) => {
     const textMatched =
       !text ||
-      [item.employee?.name, item.employee?.dept, item.employee?.post, item.nodeName]
+      [
+        item.employee?.name,
+        item.employee?.dept,
+        item.employee?.post,
+        item.nodeName,
+      ]
         .filter(Boolean)
         .some((value) => value!.includes(text));
-    const statusMatched = !statusFilter.value || item.status === statusFilter.value;
+    const statusMatched =
+      !statusFilter.value || item.status === statusFilter.value;
     return textMatched && statusMatched;
   });
 });
-const completed = computed(() => rows.value.filter((item) => isResultProcessed(item)).length);
-const pendingPublishRows = computed(() => filteredRows.value.filter((item) => item.status === 'pendingPublish'));
-const pendingReviewRows = computed(() => filteredRows.value.filter((item) => item.status === 'hrReview'));
+const completed = computed(
+  () => rows.value.filter((item) => isResultProcessed(item)).length,
+);
+const pendingPublishRows = computed(() =>
+  filteredRows.value.filter((item) => item.status === 'pendingPublish'),
+);
+const pendingReviewRows = computed(() =>
+  filteredRows.value.filter((item) => item.status === 'hrReview'),
+);
 const pendingConfirmRows = computed(() =>
-  filteredRows.value.filter((item) => item.resultVisible && !item.resultConfirmed),
+  filteredRows.value.filter(
+    (item) => item.resultVisible && !item.resultConfirmed,
+  ),
 );
 const gradeRows = computed(() =>
   filteredRows.value.map((item) => ({
     ...item,
-    coefficient: item.grade ? (resolvePerformanceCoefficient(item.grade) ?? '-') : '-',
-    visible: item.resultVisible ? '已公示' : item.status === 'pendingPublish' ? '待公示' : '处理中',
+    coefficient: item.grade
+      ? (resolvePerformanceCoefficient(item.grade) ?? '-')
+      : '-',
+    reviewStatusLabel: getReviewStatusLabel(item),
+    visible: getResultVisibleLabel(item),
+    /*
+      ? '已公示'
+        ? '待公示'
+        : '处理中',
+    */
   })),
+);
+const userOptions = computed(() =>
+  simpleUsers.value
+    .filter((user) => user.id !== undefined && user.id !== null)
+    .map((user) => ({
+      label: `${user.nickname || user.username || `用户${user.id}`} · ${
+        user.deptName || '未分配部门'
+      }`,
+      value: Number(user.id),
+    })),
 );
 const analysisRows = computed(() => {
   const grouped = new Map<string, typeof rows.value>();
@@ -120,15 +182,26 @@ const analysisRows = computed(() => {
     const dept = item.employee?.dept || '未分组';
     grouped.set(dept, [...(grouped.get(dept) || []), item]);
   });
-  return Array.from(grouped.entries()).map(([dept, items]) => {
+  return [...grouped.entries()].map(([dept, items]) => {
     const total = Math.max(items.length, 1);
     return {
-      confirmRate: Math.round((items.filter((item) => item.progress >= 2).length / total) * 100),
+      confirmRate: Math.round(
+        (items.filter((item) => item.progress >= 2).length / total) * 100,
+      ),
       count: items.length,
       dept,
-      resultRate: Math.round((items.filter((item) => isResultProcessed(item)).length / total) * 100),
+      resultRate: Math.round(
+        (items.filter((item) => isResultProcessed(item)).length / total) * 100,
+      ),
       scoreRate: Math.round(
-        (items.filter((item) => item.selfScore !== undefined || item.supervisorScore !== undefined || item.finalScore !== undefined).length / total) * 100,
+        (items.filter(
+          (item) =>
+            item.selfScore !== undefined ||
+            item.supervisorScore !== undefined ||
+            item.finalScore !== undefined,
+        ).length /
+          total) *
+          100,
       ),
     };
   });
@@ -165,10 +238,13 @@ const confirmColumns: TableColumnsType = [
 const gradeColumns: TableColumnsType = [
   { dataIndex: 'employee', title: '被考核人', width: 180 },
   { dataIndex: 'dept', title: '部门', width: 160 },
-  { dataIndex: 'finalScore', title: '考核结果', width: 120 },
-  { dataIndex: 'grade', title: '绩效等级', width: 120 },
+  { dataIndex: 'finalScore', title: '考核总分', width: 120 },
+  { dataIndex: 'systemGradeName', title: '默认等级', width: 120 },
+  { dataIndex: 'grade', title: '当前等级', width: 120 },
   { dataIndex: 'coefficient', title: '绩效系数', width: 120 },
+  { dataIndex: 'reviewStatus', title: '绩效复盘', width: 120 },
   { dataIndex: 'visible', title: '结果状态', width: 140 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
 ];
 const analysisColumns: TableColumnsType = [
   { dataIndex: 'dept', title: '部门信息', width: 180 },
@@ -178,10 +254,12 @@ const analysisColumns: TableColumnsType = [
   { dataIndex: 'resultRate', title: '结果处理', width: 240 },
 ];
 
-const statusOptions = Object.entries(instanceStatusMetaMap).map(([value, meta]) => ({
-  label: meta.label,
-  value,
-}));
+const statusOptions = Object.entries(instanceStatusMetaMap).map(
+  ([value, meta]) => ({
+    label: meta.label,
+    value,
+  }),
+);
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
   onChange: (keys: (number | string)[]) => {
@@ -194,11 +272,21 @@ function isResultProcessed(item: AssessmentInstance) {
 }
 
 function getInstanceMeta(status: unknown) {
-  return instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || { color: 'default', label: '未知' };
+  return (
+    instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || {
+      color: 'default',
+      label: '未知',
+    }
+  );
 }
 
 function getBatchMeta(status: unknown) {
-  return batchStatusMetaMap[status as keyof typeof batchStatusMetaMap] || { color: 'default', label: '未知' };
+  return (
+    batchStatusMetaMap[status as keyof typeof batchStatusMetaMap] || {
+      color: 'default',
+      label: '未知',
+    }
+  );
 }
 
 function getTemplateName(templateId?: number) {
@@ -206,12 +294,118 @@ function getTemplateName(templateId?: number) {
 }
 
 function resolvePerformanceCoefficient(grade?: string) {
+  if (grade === 'A') return 1.2;
+  if (grade === 'B') return 1;
+  if (grade === 'C') return 0.8;
   if (grade === '卓越') return 2;
   if (grade === '优秀') return 1.5;
   if (grade === '平均') return 1;
   if (grade === '及格') return 0.8;
   if (grade === '不及格') return 0;
   return undefined;
+}
+
+function getReviewStatusLabel(
+  item: Pick<AssessmentInstance, 'reviewRequired' | 'reviewStatus'>,
+) {
+  if (!item.reviewRequired) return '未触发';
+  const statusMap: Record<number, string> = {
+    1: '待确认',
+    2: '已完成',
+    3: '已取消',
+  };
+  return statusMap[Number(item.reviewStatus || 0)] || '待确认';
+}
+
+function getReviewStatusColor(
+  item: Pick<AssessmentInstance, 'reviewRequired' | 'reviewStatus'>,
+) {
+  if (!item.reviewRequired) return 'default';
+  const colorMap: Record<number, string> = {
+    1: 'orange',
+    2: 'green',
+    3: 'default',
+  };
+  return colorMap[Number(item.reviewStatus || 0)] || 'orange';
+}
+
+function getResultVisibleLabel(item: Record<string, any>) {
+  if (item.resultVisible) return '已公示';
+  if (item.status === 'pendingPublish') return '待公示';
+  return '处理中';
+}
+
+function getResultConfirmStatusColor(item: Record<string, any>) {
+  if (item.resultObjection) return 'red';
+  if (item.resultConfirmed) return 'green';
+  if (item.resultVisible) return 'blue';
+  if (item.status === 'hrReview') return 'orange';
+  return 'default';
+}
+
+function getResultConfirmStatusLabel(item: Record<string, any>) {
+  if (item.resultObjection) return '结果异议';
+  if (item.resultConfirmed) return '已确认';
+  if (item.resultVisible) return '待确认';
+  if (item.status === 'hrReview') return '待审核';
+  return '处理中';
+}
+
+function getGradeColor(grade?: string) {
+  if (grade === 'C') return 'red';
+  if (grade === 'A') return 'green';
+  return 'blue';
+}
+
+async function ensureSimpleUsers() {
+  if (simpleUsers.value.length > 0) return;
+  simpleUsers.value = await getSimpleUserList();
+}
+
+async function openGradeAdjust(record: Record<string, any>) {
+  await ensureSimpleUsers();
+  const currentRecord = record as AssessmentInstance & { employee?: Employee };
+  gradeAdjustRecord.value = currentRecord;
+  gradeAdjustForm.gradeName = currentRecord.grade || 'B';
+  gradeAdjustForm.reason = currentRecord.gradeAdjustReason || '';
+  gradeAdjustForm.supervisorUserId = currentRecord.reviewSupervisorUserId;
+  gradeAdjustForm.ccUserIds = (currentRecord.reviewCcUserIds || '')
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item) && item > 0);
+  gradeAdjustForm.reviewDeadline = currentRecord.reviewDeadline;
+  gradeAdjustModalOpen.value = true;
+}
+
+async function saveGradeAdjust() {
+  if (!gradeAdjustRecord.value) return;
+  if (gradeAdjustForm.gradeName === 'C' && !gradeAdjustForm.supervisorUserId) {
+    message.warning('C 级绩效复盘必须指定主管确认人');
+    return;
+  }
+  gradeAdjustSubmitting.value = true;
+  try {
+    await adjustFdmPerformanceAssessmentGrade({
+      ccUserIds:
+        gradeAdjustForm.gradeName === 'C' ? gradeAdjustForm.ccUserIds : [],
+      gradeName: gradeAdjustForm.gradeName,
+      instanceId: gradeAdjustRecord.value.id,
+      reason: gradeAdjustForm.reason,
+      reviewDeadline:
+        gradeAdjustForm.gradeName === 'C'
+          ? gradeAdjustForm.reviewDeadline
+          : undefined,
+      supervisorUserId:
+        gradeAdjustForm.gradeName === 'C'
+          ? gradeAdjustForm.supervisorUserId
+          : undefined,
+    });
+    gradeAdjustModalOpen.value = false;
+    await loadApiData();
+    message.success('绩效等级已调整');
+  } finally {
+    gradeAdjustSubmitting.value = false;
+  }
 }
 
 function openScore(instanceId: number, type: 'self' | 'supervisor') {
@@ -224,8 +418,12 @@ function openScore(instanceId: number, type: 'self' | 'supervisor') {
 
 async function confirmIndicators() {
   if (!batch.value) return;
-  const targets = rows.value.filter((item) => item.status === 'indicatorConfirm');
-  await Promise.all(targets.map((item) => confirmFdmPerformanceAssessmentIndicators(item.id)));
+  const targets = rows.value.filter(
+    (item) => item.status === 'indicatorConfirm',
+  );
+  await Promise.all(
+    targets.map((item) => confirmFdmPerformanceAssessmentIndicators(item.id)),
+  );
   await loadApiData();
   message.success('指标已确认，进入执行中');
 }
@@ -244,12 +442,16 @@ async function approveReview(instanceId: number) {
 }
 
 async function approveSelected() {
-  const ids = selectedRowKeys.value.length
-    ? selectedRowKeys.value
-    : pendingReviewRows.value.map((item) => item.id);
+  const ids =
+    selectedRowKeys.value.length > 0
+      ? selectedRowKeys.value
+      : pendingReviewRows.value.map((item) => item.id);
   await Promise.all(
     ids
-      .filter((id) => rows.value.find((item) => item.id === id)?.status === 'hrReview')
+      .filter(
+        (id) =>
+          rows.value.find((item) => item.id === id)?.status === 'hrReview',
+      )
       .map((id) => submitFdmPerformanceAssessmentHrReview({ instanceId: id })),
   );
   await loadApiData();
@@ -257,12 +459,25 @@ async function approveSelected() {
   message.success('已批量审核可处理人员');
 }
 
+function resolveBatchActionSourceIds(
+  targetIds: number[] | undefined,
+  fallbackIds: number[],
+) {
+  if (targetIds && targetIds.length > 0) return targetIds;
+  if (selectedRowKeys.value.length > 0) return selectedRowKeys.value;
+  return fallbackIds;
+}
+
 async function publishSelected(targetIds?: number[]) {
   if (!batch.value) return;
-  const sourceIds = targetIds?.length
-    ? targetIds
-    : selectedRowKeys.value.length ? selectedRowKeys.value : pendingPublishRows.value.map((item) => item.id);
-  const ids = sourceIds.filter((id) => rows.value.find((item) => item.id === id)?.status === 'pendingPublish');
+  const sourceIds = resolveBatchActionSourceIds(
+    targetIds,
+    pendingPublishRows.value.map((item) => item.id),
+  );
+  const ids = sourceIds.filter(
+    (id) =>
+      rows.value.find((item) => item.id === id)?.status === 'pendingPublish',
+  );
   if (ids.length === 0) {
     message.info('暂无可公示的已审核人员');
     return;
@@ -275,10 +490,15 @@ async function publishSelected(targetIds?: number[]) {
 
 async function remindSelected(targetIds?: number[]) {
   if (!batch.value) return;
-  const sourceIds = targetIds?.length
-    ? targetIds
-    : selectedRowKeys.value.length ? selectedRowKeys.value : filteredRows.value.map((item) => item.id);
-  const ids = [...new Set(sourceIds.filter((id) => rows.value.some((item) => item.id === id)))];
+  const sourceIds = resolveBatchActionSourceIds(
+    targetIds,
+    filteredRows.value.map((item) => item.id),
+  );
+  const ids = [
+    ...new Set(
+      sourceIds.filter((id) => rows.value.some((item) => item.id === id)),
+    ),
+  ];
   if (ids.length === 0) {
     message.info('暂无可催办人员');
     return;
@@ -319,7 +539,8 @@ async function saveInterviewRecord() {
 
 function openObjection(instanceId: number) {
   objectionInstanceId.value = instanceId;
-  objectionText.value = '对评分结果有异议，需要绩效管理员复核评分依据和等级系数。';
+  objectionText.value =
+    '对评分结果有异议，需要绩效管理员复核评分依据和等级系数。';
   objectionModalOpen.value = true;
 }
 
@@ -341,7 +562,9 @@ async function confirmResult(instanceId: number) {
 }
 
 function canStartScoring() {
-  return rows.value.some((item) => ['executing', 'indicatorConfirm'].includes(item.status));
+  return rows.value.some((item) =>
+    ['executing', 'indicatorConfirm'].includes(item.status),
+  );
 }
 
 function canConfirmIndicators() {
@@ -370,7 +593,7 @@ async function loadApiData() {
     apiRows.value = instancePage.list.map((item) => ({
       ...mapApiInstance({
         ...item,
-        ...(processLogMap.get(item.id) || {}),
+        ...processLogMap.get(item.id),
       }),
       employee: {
         dept: item.deptName || '-',
@@ -382,14 +605,24 @@ async function loadApiData() {
     apiBatch.value = mapApiBatch(batchResp, apiRows.value);
     const templateIds = [
       ...new Set(
-        [...(batchResp.templateIds || []), ...instancePage.list.map((item) => Number(item.templateId || 0))]
+        [
+          ...(batchResp.templateIds || []),
+          ...instancePage.list.map((item) => Number(item.templateId || 0)),
+        ]
           .map(Number)
           .filter((item) => Number.isFinite(item) && item > 0),
       ),
     ];
-    if (templateIds.length) {
-      const templateResponses = await Promise.all(templateIds.map((templateId) => getFdmPerformanceTemplate(templateId)));
-      apiTemplateMap.value = new Map(templateResponses.map((item) => [Number(item.id), mapApiTemplate(item)]));
+    if (templateIds.length > 0) {
+      const templateResponses = await Promise.all(
+        templateIds.map((templateId) => getFdmPerformanceTemplate(templateId)),
+      );
+      apiTemplateMap.value = new Map(
+        templateResponses.map((item) => [
+          Number(item.id),
+          mapApiTemplate(item),
+        ]),
+      );
     } else {
       apiTemplateMap.value = new Map();
     }
@@ -401,7 +634,10 @@ async function loadApiData() {
 function buildProcessLogMap(logs: FdmPerformanceAssessmentApi.ChangeLog[]) {
   const result = new Map<
     number,
-    Pick<FdmPerformanceAssessmentApi.Instance, 'interviewRecords' | 'resultObjections'>
+    Pick<
+      FdmPerformanceAssessmentApi.Instance,
+      'interviewRecords' | 'resultObjections'
+    >
   >();
   logs.forEach((log) => {
     if (!log.instanceId) return;
@@ -427,19 +663,50 @@ watch(() => route.params.id, loadApiData);
     :title="batch?.name || '考核详情'"
   >
     <template #actions>
-      <Button @click="router.push(performancePath('/batches'))">返回列表</Button>
-      <Button :loading="reminding" @click="() => remindSelected()">DING催办</Button>
-      <Button :disabled="!canConfirmIndicators()" @click="confirmIndicators">确认指标</Button>
-      <Button :disabled="!canStartScoring()" @click="startScoring">发起评分</Button>
-      <Button :disabled="pendingReviewRows.length === 0" @click="approveSelected">批量审核</Button>
-      <Button :disabled="pendingPublishRows.length === 0" type="primary" @click="() => publishSelected()">公示结果</Button>
+      <Button @click="router.push(performancePath('/batches'))">
+返回列表
+</Button>
+      <Button :loading="reminding" @click="() => remindSelected()">
+DING催办
+</Button>
+      <Button :disabled="!canConfirmIndicators()" @click="confirmIndicators">
+确认指标
+</Button>
+      <Button :disabled="!canStartScoring()" @click="startScoring">
+发起评分
+</Button>
+      <Button
+        :disabled="pendingReviewRows.length === 0"
+        @click="approveSelected"
+        >
+批量审核
+</Button>
+      <Button
+        :disabled="pendingPublishRows.length === 0"
+        type="primary"
+        @click="() => publishSelected()"
+        >
+公示结果
+</Button>
     </template>
 
     <template v-if="batch">
       <div class="summary-grid">
         <Card><Statistic :value="rows.length" title="参与人员" /></Card>
-        <Card><Statistic :value="rows.filter((item) => item.status === 'selfScore').length" title="待自评" /></Card>
-        <Card><Statistic :value="rows.filter((item) => item.status === 'supervisorScore').length" title="待主管评分" /></Card>
+        <Card>
+<Statistic
+            :value="rows.filter((item) => item.status === 'selfScore').length"
+            title="待自评"
+        />
+</Card>
+        <Card>
+<Statistic
+            :value="
+              rows.filter((item) => item.status === 'supervisorScore').length
+            "
+            title="待主管评分"
+        />
+</Card>
         <Card><Statistic :value="completed" title="结果已公示" /></Card>
       </div>
 
@@ -447,9 +714,15 @@ watch(() => route.params.id, loadApiData);
         <div class="batch-title">
           <Space>
             <strong>{{ batch.name }}</strong>
-            <Tag :color="getBatchMeta(batch.status).color">{{ getBatchMeta(batch.status).label }}</Tag>
+            <Tag :color="getBatchMeta(batch.status).color">
+{{
+              getBatchMeta(batch.status).label
+            }}
+</Tag>
           </Space>
-          <Progress :percent="Math.round((completed / Math.max(rows.length, 1)) * 100)" />
+          <Progress
+            :percent="Math.round((completed / Math.max(rows.length, 1)) * 100)"
+          />
         </div>
 
         <div class="tab-row">
@@ -465,7 +738,11 @@ watch(() => route.params.id, loadApiData);
         </div>
 
         <div class="filter-row">
-          <Input v-model:value="keyword" allow-clear placeholder="搜索被考核人、部门、岗位" />
+          <Input
+            v-model:value="keyword"
+            allow-clear
+            placeholder="搜索被考核人、部门、岗位"
+          />
           <Select
             v-model:value="statusFilter"
             allow-clear
@@ -473,7 +750,8 @@ watch(() => route.params.id, loadApiData);
             placeholder="筛选状态"
           />
           <span>已选 {{ selectedRowKeys.length }} 人</span>
-          <span>待公示 {{ pendingPublishRows.length }} 人，待确认 {{ pendingConfirmRows.length }} 人</span>
+          <span>待公示 {{ pendingPublishRows.length }} 人，待确认
+            {{ pendingConfirmRows.length }} 人</span>
         </div>
 
         <Table
@@ -486,23 +764,96 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
-            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
-            <template v-else-if="column.dataIndex === 'template'">{{ getTemplateName(record.templateId || batch.templateId) }}</template>
-            <template v-else-if="column.dataIndex === 'progress'">{{ record.progress }}/8</template>
+            <template v-if="column.dataIndex === 'employee'">
+{{
+              record.employee?.name
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'dept'">
+{{
+              record.employee?.dept
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'template'">
+{{
+              getTemplateName(record.templateId || batch.templateId)
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'progress'">
+{{ record.progress }}/8
+</template>
             <template v-else-if="column.dataIndex === 'nodeName'">
-              <Tag :color="getInstanceMeta(record.status).color">{{ record.nodeName }}</Tag>
+              <Tag :color="getInstanceMeta(record.status).color">
+{{
+                record.nodeName
+              }}
+</Tag>
             </template>
-            <template v-else-if="column.dataIndex === 'result'">{{ record.finalScore ?? '-' }}</template>
-            <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
+            <template v-else-if="column.dataIndex === 'result'">
+{{
+              record.finalScore ?? '-'
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'grade'">
+{{
+              record.grade ?? '-'
+            }}
+</template>
             <template v-else-if="column.dataIndex === 'action'">
               <Space>
-                <Button v-if="record.status === 'selfScore'" size="small" type="link" @click="openScore(record.id, 'self')">自评</Button>
-                <Button v-if="record.status === 'supervisorScore'" size="small" type="link" @click="openScore(record.id, 'supervisor')">主管评分</Button>
-                <Button v-if="record.status === 'hrReview'" size="small" type="link" @click="approveReview(record.id)">审核通过</Button>
-                <Button v-if="record.status === 'pendingPublish'" size="small" type="link" @click="publishSelected([record.id])">公示结果</Button>
-                <Button v-if="record.resultVisible && !record.resultConfirmed" size="small" type="link" @click="confirmResult(record.id)">确认结果</Button>
-                <Button size="small" type="link" @click="router.push(performancePath(`/batches/${batch.id}/instances/${record.id}`))">查看</Button>
+                <Button
+                  v-if="record.status === 'selfScore'"
+                  size="small"
+                  type="link"
+                  @click="openScore(record.id, 'self')"
+                  >
+自评
+</Button>
+                <Button
+                  v-if="record.status === 'supervisorScore'"
+                  size="small"
+                  type="link"
+                  @click="openScore(record.id, 'supervisor')"
+                  >
+主管评分
+</Button>
+                <Button
+                  v-if="record.status === 'hrReview'"
+                  size="small"
+                  type="link"
+                  @click="approveReview(record.id)"
+                  >
+审核通过
+</Button>
+                <Button
+                  v-if="record.status === 'pendingPublish'"
+                  size="small"
+                  type="link"
+                  @click="publishSelected([record.id])"
+                  >
+公示结果
+</Button>
+                <Button
+                  v-if="record.resultVisible && !record.resultConfirmed"
+                  size="small"
+                  type="link"
+                  @click="confirmResult(record.id)"
+                  >
+确认结果
+</Button>
+                <Button
+                  size="small"
+                  type="link"
+                  @click="
+                    router.push(
+                      performancePath(
+                        `/batches/${batch.id}/instances/${record.id}`,
+                      ),
+                    )
+                  "
+                  >
+查看
+</Button>
               </Space>
             </template>
           </template>
@@ -518,18 +869,60 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
-            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
+            <template v-if="column.dataIndex === 'employee'">
+{{
+              record.employee?.name
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'dept'">
+{{
+              record.employee?.dept
+            }}
+</template>
             <template v-else-if="column.dataIndex === 'status'">
-              <Tag :color="record.interviewRecords?.length ? 'green' : 'default'">
-                {{ record.interviewRecords?.length ? `已面谈 ${record.interviewRecords.length} 次` : '未面谈' }}
+              <Tag :color="getResultConfirmStatusColor(record)">
+                {{ getResultConfirmStatusLabel(record) }}
+                <!--
+                :color="record.interviewRecords?.length ? 'green' : 'default'"
+              >
+                {{
+                  record.interviewRecords?.length
+                    ? `已面谈 ${record.interviewRecords.length} 次`
+                    : '未面谈'
+                }}
+                -->
               </Tag>
             </template>
             <template v-else-if="column.dataIndex === 'action'">
               <Space>
-                <Button :loading="reminding" size="small" type="link" @click="() => remindSelected([record.id])">DING催办</Button>
-                <Button size="small" type="link" @click="openInterviewRecord(record.id)">记录面谈</Button>
-                <Button size="small" type="link" @click="router.push(performancePath(`/batches/${batch.id}/instances/${record.id}`))">查看</Button>
+                <Button
+                  :loading="reminding"
+                  size="small"
+                  type="link"
+                  @click="() => remindSelected([record.id])"
+                  >
+DING催办
+</Button>
+                <Button
+                  size="small"
+                  type="link"
+                  @click="openInterviewRecord(record.id)"
+                  >
+记录面谈
+</Button>
+                <Button
+                  size="small"
+                  type="link"
+                  @click="
+                    router.push(
+                      performancePath(
+                        `/batches/${batch.id}/instances/${record.id}`,
+                      ),
+                    )
+                  "
+                  >
+查看
+</Button>
               </Space>
             </template>
           </template>
@@ -545,22 +938,109 @@ watch(() => route.params.id, loadApiData);
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
-            <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
+            <template v-if="column.dataIndex === 'employee'">
+{{
+              record.employee?.name
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'dept'">
+{{
+              record.employee?.dept
+            }}
+</template>
             <template v-else-if="column.dataIndex === 'status'">
-              <Tag :color="record.resultObjection ? 'red' : record.resultConfirmed ? 'green' : record.resultVisible ? 'blue' : record.status === 'hrReview' ? 'orange' : 'default'">
-                {{ record.resultObjection ? '结果异议' : record.resultConfirmed ? '已确认' : record.resultVisible ? '待确认' : record.status === 'hrReview' ? '待审核' : '处理中' }}
+              <Tag
+                :color="
+                  record.resultObjection
+                    ? 'red'
+                    : record.resultConfirmed
+                      ? 'green'
+                      : record.resultVisible
+                        ? 'blue'
+                        : record.status === 'hrReview'
+                          ? 'orange'
+                          : 'default'
+                "
+              >
+                {{
+                  record.resultObjection
+                    ? '结果异议'
+                    : record.resultConfirmed
+                      ? '已确认'
+                      : record.resultVisible
+                        ? '待确认'
+                        : record.status === 'hrReview'
+                          ? '待审核'
+                          : '处理中'
+                }}
               </Tag>
             </template>
-            <template v-else-if="column.dataIndex === 'finalScore'">{{ record.finalScore ?? '-' }}</template>
-            <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
+            <template v-else-if="column.dataIndex === 'finalScore'">
+{{
+              record.finalScore ?? '-'
+            }}
+</template>
+            <template v-else-if="column.dataIndex === 'grade'">
+{{
+              record.grade ?? '-'
+            }}
+</template>
             <template v-else-if="column.dataIndex === 'action'">
               <Space>
-                <Button v-if="record.status === 'hrReview'" size="small" type="link" @click="approveReview(record.id)">审核通过</Button>
-                <Button v-if="record.status === 'pendingPublish'" size="small" type="link" @click="publishSelected([record.id])">公示结果</Button>
-                <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" size="small" type="link" @click="confirmResult(record.id)">确认结果</Button>
-                <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" danger size="small" type="link" @click="openObjection(record.id)">提交异议</Button>
-                <Button size="small" type="link" @click="router.push(performancePath(`/batches/${batch.id}/instances/${record.id}`))">查看</Button>
+                <Button
+                  v-if="record.status === 'hrReview'"
+                  size="small"
+                  type="link"
+                  @click="approveReview(record.id)"
+                  >
+审核通过
+</Button>
+                <Button
+                  v-if="record.status === 'pendingPublish'"
+                  size="small"
+                  type="link"
+                  @click="publishSelected([record.id])"
+                  >
+公示结果
+</Button>
+                <Button
+                  v-if="
+                    record.resultVisible &&
+                    !record.resultConfirmed &&
+                    !record.resultObjection
+                  "
+                  size="small"
+                  type="link"
+                  @click="confirmResult(record.id)"
+                  >
+确认结果
+</Button>
+                <Button
+                  v-if="
+                    record.resultVisible &&
+                    !record.resultConfirmed &&
+                    !record.resultObjection
+                  "
+                  danger
+                  size="small"
+                  type="link"
+                  @click="openObjection(record.id)"
+                  >
+提交异议
+</Button>
+                <Button
+                  size="small"
+                  type="link"
+                  @click="
+                    router.push(
+                      performancePath(
+                        `/batches/${batch.id}/instances/${record.id}`,
+                      ),
+                    )
+                  "
+                  >
+查看
+</Button>
               </Space>
             </template>
           </template>
@@ -568,11 +1048,9 @@ watch(() => route.params.id, loadApiData);
 
         <div v-else-if="activeTab === 'grade'" class="grade-section">
           <div class="grade-grid">
-            <div><strong>卓越</strong><span>111-120 分 / 系数 2.00</span></div>
-            <div><strong>优秀</strong><span>101-110 分 / 系数 1.50</span></div>
-            <div><strong>平均</strong><span>91-100 分 / 系数 1.00</span></div>
-            <div><strong>及格</strong><span>81-90 分 / 系数 0.80</span></div>
-            <div><strong>不及格</strong><span>0-80 分 / 系数 0</span></div>
+            <div><strong>A</strong><span>绩效优秀 / 系数 1.20</span></div>
+            <div><strong>B</strong><span>默认等级 / 系数 1.00</span></div>
+            <div><strong>C</strong><span>需绩效复盘 / 系数 0.80</span></div>
           </div>
           <Table
             :columns="gradeColumns"
@@ -582,12 +1060,55 @@ watch(() => route.params.id, loadApiData);
             row-key="id"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.dataIndex === 'employee'">{{ record.employee?.name }}</template>
-              <template v-else-if="column.dataIndex === 'dept'">{{ record.employee?.dept }}</template>
-              <template v-else-if="column.dataIndex === 'finalScore'">{{ record.finalScore ?? '-' }}</template>
-              <template v-else-if="column.dataIndex === 'grade'">{{ record.grade ?? '-' }}</template>
+              <template v-if="column.dataIndex === 'employee'">
+{{
+                record.employee?.name
+              }}
+</template>
+              <template v-else-if="column.dataIndex === 'dept'">
+{{
+                record.employee?.dept
+              }}
+</template>
+              <template v-else-if="column.dataIndex === 'finalScore'">
+{{
+                record.finalScore ?? '-'
+              }}
+</template>
+              <template v-else-if="column.dataIndex === 'systemGradeName'">
+{{
+                record.systemGradeName || 'B'
+              }}
+</template>
+              <template v-else-if="column.dataIndex === 'grade'">
+                <Space>
+                  <Tag :color="getGradeColor(record.grade)">
+                    {{ record.grade || 'B' }}
+                  </Tag>
+                  <Tag v-if="record.gradeAdjusted" color="orange">人工调整</Tag>
+                </Space>
+              </template>
+              <template v-else-if="column.dataIndex === 'reviewStatus'">
+                <Tag :color="getReviewStatusColor(record)">
+                  {{ record.reviewStatusLabel }}
+                </Tag>
+              </template>
               <template v-else-if="column.dataIndex === 'visible'">
-                <Tag :color="record.resultVisible ? 'green' : 'default'">{{ record.visible }}</Tag>
+                <Tag :color="record.resultVisible ? 'green' : 'default'">
+{{
+                  record.visible
+                }}
+</Tag>
+              </template>
+              <template v-else-if="column.dataIndex === 'action'">
+                <Button
+                  v-if="canAdjustGrade"
+                  size="small"
+                  type="link"
+                  @click="openGradeAdjust(record)"
+                >
+                  调整等级
+                </Button>
               </template>
             </template>
           </Table>
@@ -618,18 +1139,98 @@ watch(() => route.params.id, loadApiData);
     </template>
     <Empty v-else description="未找到考核批次" />
 
-    <Modal v-model:open="interviewModalOpen" title="记录面谈" @ok="saveInterviewRecord">
+    <Modal
+      v-model:open="interviewModalOpen"
+      title="记录面谈"
+      @ok="saveInterviewRecord"
+    >
       <div class="score-form">
         <span>面谈结论</span>
         <Input.TextArea v-model:value="interviewConclusion" :rows="4" />
       </div>
     </Modal>
 
-    <Modal v-model:open="objectionModalOpen" title="提交结果异议" @ok="saveObjection">
+    <Modal
+      v-model:open="objectionModalOpen"
+      title="提交结果异议"
+      @ok="saveObjection"
+    >
       <div class="score-form">
         <span>异议说明</span>
         <Input.TextArea v-model:value="objectionText" :rows="4" />
       </div>
+    </Modal>
+
+    <Modal
+      v-model:open="gradeAdjustModalOpen"
+      :confirm-loading="gradeAdjustSubmitting"
+      title="调整绩效等级"
+      @ok="saveGradeAdjust"
+    >
+      <Space direction="vertical" class="modal-form">
+        <div>
+          <strong>被考核人</strong>
+          <span>{{ gradeAdjustRecord?.employee?.name || '-' }}</span>
+        </div>
+        <div>
+          <strong>当前得分</strong>
+          <span>{{ gradeAdjustRecord?.finalScore ?? '-' }}</span>
+        </div>
+        <div>
+          <strong>绩效等级</strong>
+          <Select
+            v-model:value="gradeAdjustForm.gradeName"
+            :options="[
+              { label: 'A', value: 'A' },
+              { label: 'B', value: 'B' },
+              { label: 'C', value: 'C' },
+            ]"
+          />
+        </div>
+        <div>
+          <strong>调整原因</strong>
+          <Input.TextArea
+            v-model:value="gradeAdjustForm.reason"
+            :rows="3"
+            placeholder="请输入等级调整原因"
+          />
+        </div>
+        <template v-if="gradeAdjustForm.gradeName === 'C'">
+          <div>
+            <strong>主管确认人</strong>
+            <Select
+              v-model:value="gradeAdjustForm.supervisorUserId"
+              :options="userOptions"
+              allow-clear
+              option-filter-prop="label"
+              placeholder="请选择主管确认人"
+              show-search
+            />
+          </div>
+          <div>
+            <strong>抄送人员</strong>
+            <Select
+              v-model:value="gradeAdjustForm.ccUserIds"
+              :options="userOptions"
+              allow-clear
+              mode="multiple"
+              option-filter-prop="label"
+              placeholder="请选择抄送人员"
+              show-search
+            />
+          </div>
+          <div>
+            <strong>截止时间</strong>
+            <DatePicker
+              v-model:value="gradeAdjustForm.reviewDeadline"
+              show-time
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              placeholder="请选择复盘确认截止时间"
+              style="width: 100%"
+            />
+          </div>
+        </template>
+      </Space>
     </Modal>
   </PerformanceShell>
 </template>
@@ -662,14 +1263,14 @@ watch(() => route.params.id, loadApiData);
   min-height: 42px;
   padding: 0;
   color: #374151;
+  cursor: pointer;
   background: transparent;
   border: 0;
-  cursor: pointer;
 }
 
 .tab-row button.active {
-  color: #1677ff;
   font-weight: 600;
+  color: #1677ff;
 }
 
 .tab-row button.active::after {
@@ -678,8 +1279,8 @@ watch(() => route.params.id, loadApiData);
   bottom: -1px;
   left: 0;
   height: 2px;
-  background: #1677ff;
   content: '';
+  background: #1677ff;
 }
 
 .filter-row {
@@ -701,7 +1302,7 @@ watch(() => route.params.id, loadApiData);
 
 .grade-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   padding: 24px 0;
 }
@@ -719,6 +1320,17 @@ watch(() => route.params.id, loadApiData);
 .score-form {
   display: grid;
   gap: 10px;
+}
+
+.modal-form {
+  width: 100%;
+}
+
+.modal-form > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
 }
 
 @media (max-width: 960px) {

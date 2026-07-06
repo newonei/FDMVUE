@@ -115,6 +115,10 @@ export interface AssessmentInstance {
   finalScore?: number;
   flowSnapshot?: FlowStage[];
   grade?: string;
+  gradeAdjusted?: boolean;
+  gradeAdjustReason?: string;
+  gradeAdjustTime?: string;
+  gradeAdjustUserId?: number;
   id: number;
   indicatorScores?: Record<number, IndicatorScoreState>;
   interviewRecords?: InterviewRecord[];
@@ -123,11 +127,21 @@ export interface AssessmentInstance {
   resultConfirmed?: boolean;
   resultObjection?: string;
   resultVisible: boolean;
+  reviewCcUserIds?: string;
+  reviewDeadline?: string;
+  reviewEmployeeConfirmTime?: string;
+  reviewEmployeeUserId?: number;
+  reviewReason?: string;
+  reviewRequired?: boolean;
+  reviewStatus?: number;
+  reviewSupervisorConfirmTime?: string;
+  reviewSupervisorUserId?: number;
   scoreSummaries?: ScoreSummary[];
   selfScore?: number;
   status: InstanceStatus;
   stayTime: string;
   supervisorScore?: number;
+  systemGradeName?: string;
   templateId?: number;
 }
 
@@ -174,7 +188,10 @@ export interface PerformanceDataRecord {
   published: number;
 }
 
-export const batchStatusMetaMap: Record<BatchStatus, { color: string; label: string }> = {
+export const batchStatusMetaMap: Record<
+  BatchStatus,
+  { color: string; label: string }
+> = {
   canceled: { color: 'red', label: '已取消' },
   executing: { color: 'blue', label: '执行中' },
   finished: { color: 'green', label: '已结束' },
@@ -185,7 +202,10 @@ export const batchStatusMetaMap: Record<BatchStatus, { color: string; label: str
   scoring: { color: 'gold', label: '评分中' },
 };
 
-export const instanceStatusMetaMap: Record<InstanceStatus, { color: string; label: string }> = {
+export const instanceStatusMetaMap: Record<
+  InstanceStatus,
+  { color: string; label: string }
+> = {
   canceled: { color: 'red', label: '已取消' },
   executing: { color: 'blue', label: '执行中' },
   finished: { color: 'green', label: '已结束' },

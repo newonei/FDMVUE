@@ -102,6 +102,10 @@ export namespace FdmPerformanceAssessmentApi {
     deptName?: string;
     finalScore?: number;
     flowSnapshotJson?: string;
+    gradeAdjusted?: boolean;
+    gradeAdjustReason?: string;
+    gradeAdjustTime?: string;
+    gradeAdjustUserId?: number;
     gradeName?: string;
     id: number;
     interviewRecords?: ChangeLog[];
@@ -116,9 +120,19 @@ export namespace FdmPerformanceAssessmentApi {
     resultObjections?: ChangeLog[];
     resultVisible?: boolean;
     resultVisibleTime?: string;
+    reviewCcUserIds?: string;
+    reviewDeadline?: string;
+    reviewEmployeeConfirmTime?: string;
+    reviewEmployeeUserId?: number;
+    reviewReason?: string;
+    reviewRequired?: boolean;
+    reviewStatus?: number;
+    reviewSupervisorConfirmTime?: string;
+    reviewSupervisorUserId?: number;
     scores?: Score[];
     scoreSummaries?: ScoreSummary[];
     status?: number;
+    systemGradeName?: string;
     templateId?: number;
     templateSnapshotJson?: string;
     userId?: number;
@@ -227,6 +241,20 @@ export namespace FdmPerformanceAssessmentApi {
   export interface ResultObjectionReq {
     instanceId: number;
     reason: string;
+  }
+
+  export interface GradeAdjustReq {
+    ccUserIds?: number[];
+    gradeName: string;
+    instanceId: number;
+    reason?: string;
+    reviewDeadline?: string;
+    supervisorUserId?: number;
+  }
+
+  export interface GradeReviewConfirmReq {
+    comment?: string;
+    taskId: number;
   }
 
   export type ResultPageParams = PageParam & {
@@ -369,7 +397,9 @@ export function confirmFdmPerformanceAssessmentIndicators(instanceId: number) {
   );
 }
 
-export function confirmMyFdmPerformanceAssessmentIndicators(instanceId: number) {
+export function confirmMyFdmPerformanceAssessmentIndicators(
+  instanceId: number,
+) {
   return requestClient.post<boolean>(
     `/fdmperformance/assessment/my/indicator/confirm?instanceId=${instanceId}`,
   );
@@ -412,22 +442,49 @@ export function publishFdmPerformanceAssessmentResult(
   batchId: number,
   instanceIds?: number[],
 ) {
-  return requestClient.post<boolean>('/fdmperformance/assessment/result/publish', {
-    batchId,
-    instanceIds,
-  });
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/result/publish',
+    {
+      batchId,
+      instanceIds,
+    },
+  );
 }
 
 export function confirmFdmPerformanceAssessmentResult(instanceId: number) {
-  return requestClient.post<boolean>('/fdmperformance/assessment/result/confirm', {
-    instanceId,
-  });
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/result/confirm',
+    {
+      instanceId,
+    },
+  );
 }
 
 export function confirmMyFdmPerformanceAssessmentResult(instanceId: number) {
-  return requestClient.post<boolean>('/fdmperformance/assessment/my/result/confirm', {
-    instanceId,
-  });
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/my/result/confirm',
+    {
+      instanceId,
+    },
+  );
+}
+
+export function adjustFdmPerformanceAssessmentGrade(
+  data: FdmPerformanceAssessmentApi.GradeAdjustReq,
+) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/grade/adjust',
+    data,
+  );
+}
+
+export function confirmFdmPerformanceAssessmentGradeReview(
+  data: FdmPerformanceAssessmentApi.GradeReviewConfirmReq,
+) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/grade-review/confirm',
+    data,
+  );
 }
 
 export function recordFdmPerformanceAssessmentInterview(
