@@ -5,10 +5,16 @@ import { useRoute } from 'vue-router';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
-const props = defineProps<{
-  description?: string;
-  title: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    compact?: boolean;
+    description?: string;
+    title: string;
+  }>(),
+  {
+    compact: true,
+  },
+);
 
 const route = useRoute();
 
@@ -27,13 +33,14 @@ const coreNavItems = [
 
 const activePath = computed(() => route.path);
 const basePath = computed(() => '/fdmperformance');
+const isCompact = computed(() => props.compact);
 const navItems = computed(() => coreNavItems);
 </script>
 
 <template>
   <Page auto-content-height>
     <div class="performance-shell">
-      <div class="performance-header">
+      <div v-if="!isCompact" class="performance-header">
         <div>
           <div class="performance-brand">
             <span class="brand-mark">
@@ -49,17 +56,25 @@ const navItems = computed(() => coreNavItems);
         </div>
       </div>
 
-      <div class="performance-nav">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.path"
-          class="nav-item"
-          :class="{ active: activePath.startsWith(`${basePath}${item.path}`) }"
-          :to="`${basePath}${item.path}`"
-        >
-          <IconifyIcon :icon="item.icon" />
-          <span>{{ item.title }}</span>
-        </RouterLink>
+      <div
+        class="performance-nav-row"
+        :class="{ 'performance-nav-row--compact': isCompact }"
+      >
+        <div class="performance-nav">
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.path"
+            class="nav-item"
+            :class="{ active: activePath.startsWith(`${basePath}${item.path}`) }"
+            :to="`${basePath}${item.path}`"
+          >
+            <IconifyIcon :icon="item.icon" />
+            <span>{{ item.title }}</span>
+          </RouterLink>
+        </div>
+        <div v-if="isCompact" class="header-actions compact-actions">
+          <slot name="actions" />
+        </div>
       </div>
 
       <main class="performance-main">
@@ -124,11 +139,24 @@ p {
   gap: 8px;
 }
 
+.performance-nav-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 0;
+}
+
+.performance-nav-row--compact {
+  align-items: center;
+  padding: 10px 0;
+}
+
 .performance-nav {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 14px 0;
 }
 
 .nav-item {
@@ -152,5 +180,22 @@ p {
 .performance-main {
   display: grid;
   gap: 14px;
+}
+
+.compact-actions {
+  flex-shrink: 0;
+  align-items: center;
+  min-height: 36px;
+}
+
+@media (max-width: 1200px) {
+  .performance-nav-row--compact {
+    align-items: flex-start;
+    flex-direction: column-reverse;
+  }
+
+  .compact-actions {
+    align-self: flex-end;
+  }
 }
 </style>

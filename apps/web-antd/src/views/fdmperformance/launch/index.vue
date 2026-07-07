@@ -306,6 +306,7 @@ watch(
 
 <template>
   <PerformanceShell
+    :compact="false"
     description="按考评表和时间周期发起一次绩效考核，生成被考核人的个人考核实例。"
     title="发起考核"
   >
