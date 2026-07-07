@@ -235,7 +235,7 @@ const defaultSettings = (): SettingsState => ({
 
 const settingMeta: Record<
   keyof SettingsState,
-  { name: string; remark: string; sort: number; }
+  { name: string; remark: string; sort: number }
 > = {
   userGroups: { name: '用户组', sort: 5, remark: '智能绩效可使用人员用户组' },
   relation: {
@@ -385,11 +385,10 @@ const employeeNameOptions = computed(() =>
 const employeeById = computed(
   () => new Map(formalEmployeeRows.value.map((item) => [item.id, item])),
 );
-const excludedEmployeeRows = computed(
-  () =>
-    settings.performance.excludedUserIds
-      .map((id) => employeeById.value.get(id))
-      .filter((item): item is EmployeeRow => Boolean(item)),
+const excludedEmployeeRows = computed(() =>
+  settings.performance.excludedUserIds
+    .map((id) => employeeById.value.get(id))
+    .filter((item): item is EmployeeRow => item !== undefined),
 );
 const excludedUserOptions = computed(() => {
   const excluded = new Set(settings.performance.excludedUserIds);
@@ -451,11 +450,11 @@ const previewUserGroupMemberRows = computed(() =>
 );
 
 const gradeRows = [
-  { name: '不及格', range: '0 ≤ 分数 ≤ 80，系数 0' },
-  { name: '及格', range: '81 ≤ 分数 ≤ 90，系数 0.80' },
-  { name: '平均', range: '91 ≤ 分数 ≤ 100，系数 1.00' },
-  { name: '优秀', range: '101 ≤ 分数 ≤ 110，系数 1.50' },
-  { name: '卓越', range: '111 ≤ 分数 ≤ 120，系数 2.00' },
+  { name: 'C', range: '0 ≤ 分数 < 30，系数 0.00' },
+  { name: 'C+', range: '30 ≤ 分数 < 40，系数 0.80' },
+  { name: 'B', range: '40 ≤ 分数 < 110，系数 1.00' },
+  { name: 'A', range: '110 ≤ 分数 < 115，系数 1.50' },
+  { name: 'A+', range: '115 ≤ 分数，系数 2.00' },
 ];
 const gradeColumns: TableColumnsType = [
   { dataIndex: 'name', title: '等级名称', width: 160 },
@@ -561,7 +560,7 @@ function resolveUserGroupMemberRows(group?: UserGroupSetting): EmployeeRow[] {
   const ids = group?.memberIds ?? [];
   return ids
     .map((id) => employeeById.value.get(id))
-    .filter((item): item is EmployeeRow => Boolean(item));
+    .filter((item): item is EmployeeRow => item !== undefined);
 }
 
 function resolveUserGroupMemberNames(group?: UserGroupSetting) {
@@ -657,7 +656,7 @@ function resolveImportedMemberIds(value = '') {
   const names = value
     .split(/[|、，;；]/)
     .map((item) => item.trim())
-    .filter((item) => Boolean(item));
+    .filter(Boolean);
   const employees = formalEmployeeRows.value;
   return names
     .map(
@@ -669,7 +668,7 @@ function resolveImportedMemberIds(value = '') {
             name.includes(item.name),
         )?.id,
     )
-    .filter((id): id is number => Boolean(id));
+    .filter((id): id is number => id !== undefined);
 }
 
 function importUserGroups(event: Event) {
@@ -683,7 +682,7 @@ function importUserGroups(event: Event) {
     const lines = String(reader.result || '')
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => Boolean(line));
+      .filter(Boolean);
     const imported = lines
       .filter((line, index) => !(index === 0 && line.includes('用户组')))
       .map((line) => {
@@ -921,7 +920,7 @@ async function loadSettings() {
     apiDepts.value = depts || [];
     apiBatches.value = batchPage.list || [];
     apiLogs.value = logPage.list || [];
-    (rows || []).forEach(parseSettingValue);
+    (rows || []).forEach((row) => parseSettingValue(row));
   } finally {
     loading.value = false;
   }
@@ -1001,11 +1000,11 @@ onMounted(loadSettings);
             <Input v-model:value="keyword" allow-clear placeholder="搜索人员" />
             <Space>
               <Button type="link" @click="downloadAvailableUsers">
-下载名单
-</Button>
+                下载名单
+              </Button>
               <Button type="primary" @click="openSystemUserManagement">
-人员管理
-</Button>
+                人员管理
+              </Button>
             </Space>
           </div>
           <Table
@@ -1068,9 +1067,9 @@ onMounted(loadSettings);
                     size="small"
                     type="link"
                     @click="openUserGroupPreview(record.group)"
-                    >
-预览成员
-</Button>
+                  >
+                    预览成员
+                  </Button>
                   <Popconfirm
                     v-if="!record.system"
                     title="确定移除该用户组？"
@@ -1079,8 +1078,8 @@ onMounted(loadSettings);
                     <Button danger size="small" type="link">移除</Button>
                   </Popconfirm>
                   <Button v-else danger disabled size="small" type="link">
-移除
-</Button>
+                    移除
+                  </Button>
                 </Space>
               </template>
             </template>
@@ -1094,11 +1093,11 @@ onMounted(loadSettings);
               使用钉钉通讯录员工信息的「直属主管」
             </Checkbox>
             <Checkbox v-model:checked="settings.relation.useMainDeptSupervisor">
-使用主部门的主管
-</Checkbox>
+              使用主部门的主管
+            </Checkbox>
             <Checkbox v-model:checked="settings.relation.useDeptSupervisor">
-使用钉钉通讯录部门的「部门主管」
-</Checkbox>
+              使用钉钉通讯录部门的「部门主管」
+            </Checkbox>
           </section>
           <section class="form-section">
             <h3>角色查询设置</h3>
@@ -1119,11 +1118,11 @@ onMounted(loadSettings);
           <section class="form-section">
             <h3>入转调离</h3>
             <Checkbox v-model:checked="settings.relation.onboardReminder">
-入职提醒
-</Checkbox>
+              入职提醒
+            </Checkbox>
             <Checkbox v-model:checked="settings.relation.resignedReminder">
-离职提醒
-</Checkbox>
+              离职提醒
+            </Checkbox>
           </section>
         </template>
 
@@ -1137,8 +1136,8 @@ onMounted(loadSettings);
                     <Radio value="mixed">合并计算量化和行为价值观</Radio>
                     <Radio value="split">分开计算量化和行为价值观</Radio>
                     <Radio value="multiply">
-分开计算量化和行为价值观，结果相乘
-</Radio>
+                      分开计算量化和行为价值观，结果相乘
+                    </Radio>
                   </Space>
                 </Radio.Group>
               </section>
@@ -1150,9 +1149,9 @@ onMounted(loadSettings);
             <Tabs.TabPane key="grade" tab="绩效结果和等级">
               <Checkbox
                 v-model:checked="settings.performance.defaultGradeEnabled"
-                >
-开启默认绩效等级
-</Checkbox>
+              >
+                开启默认绩效等级
+              </Checkbox>
               <Table
                 :columns="gradeColumns"
                 :data-source="gradeRows"
@@ -1162,27 +1161,29 @@ onMounted(loadSettings);
               <Divider />
               <div class="check-list">
                 <Checkbox v-model:checked="settings.performance.showTotalScore">
-考核总分
-</Checkbox>
+                  考核总分
+                </Checkbox>
                 <Checkbox v-model:checked="settings.performance.showGrade">
-绩效等级
-</Checkbox>
-                <Checkbox v-model:checked="settings.performance.showCoefficient">
-绩效系数
-</Checkbox>
+                  绩效等级
+                </Checkbox>
+                <Checkbox
+                  v-model:checked="settings.performance.showCoefficient"
+                >
+                  绩效系数
+                </Checkbox>
                 <Checkbox
                   v-model:checked="settings.performance.syncResultToProfile"
-                  >
-同步考核结果到员工档案
-</Checkbox>
+                >
+                  同步考核结果到员工档案
+                </Checkbox>
               </div>
             </Tabs.TabPane>
             <Tabs.TabPane key="fields" tab="字段设置">
               <div class="toolbar-row">
                 <span class="muted">控制考评表指标字段的默认展示和启停状态。</span>
                 <Button type="primary" @click="openFieldModal()">
-添加字段
-</Button>
+                  添加字段
+                </Button>
               </div>
               <Table
                 :columns="fieldColumns"
@@ -1193,10 +1194,8 @@ onMounted(loadSettings);
                 <template #bodyCell="{ column, index, record }">
                   <template v-if="column.dataIndex === 'enabled'">
                     <Tag :color="record.enabled ? 'green' : 'default'">
-{{
-                      record.enabled ? '启用中' : '停用'
-                    }}
-</Tag>
+                      {{ record.enabled ? '启用中' : '停用' }}
+                    </Tag>
                   </template>
                   <template v-else-if="column.dataIndex === 'action'">
                     <Space>
@@ -1204,16 +1203,16 @@ onMounted(loadSettings);
                         size="small"
                         type="link"
                         @click="openFieldModal(index)"
-                        >
-编辑
-</Button>
+                      >
+                        编辑
+                      </Button>
                       <Button
                         size="small"
                         type="link"
                         @click="toggleField(index)"
-                        >
-{{ record.enabled ? '停用' : '启用' }}
-</Button>
+                      >
+                        {{ record.enabled ? '停用' : '启用' }}
+                      </Button>
                       <Popconfirm
                         title="确认删除该字段？"
                         @confirm="removeField(index)"
@@ -1229,14 +1228,14 @@ onMounted(loadSettings);
               <div class="check-list">
                 <Checkbox
                   v-model:checked="settings.performance.defaultDimensionWeight"
-                  >
-默认开启维度权重参与计算
-</Checkbox>
+                >
+                  默认开启维度权重参与计算
+                </Checkbox>
                 <Checkbox
                   v-model:checked="settings.performance.defaultResultInput"
-                  >
-新增指标时，默认开启结果值录入
-</Checkbox>
+                >
+                  新增指标时，默认开启结果值录入
+                </Checkbox>
                 <Checkbox
                   v-model:checked="settings.performance.allowCalibrationViewer"
                 >
@@ -1244,9 +1243,9 @@ onMounted(loadSettings);
                 </Checkbox>
                 <Checkbox
                   v-model:checked="settings.performance.reuseLastSignature"
-                  >
-签字默认复用上一次签名
-</Checkbox>
+                >
+                  签字默认复用上一次签名
+                </Checkbox>
               </div>
             </Tabs.TabPane>
             <Tabs.TabPane key="resigned" tab="离职人员设置">
@@ -1284,9 +1283,9 @@ onMounted(loadSettings);
                       size="small"
                       type="link"
                       @click="removeExcludedUser(record.id)"
-                      >
-移除
-</Button>
+                    >
+                      移除
+                    </Button>
                   </template>
                 </template>
               </Table>
@@ -1294,9 +1293,9 @@ onMounted(loadSettings);
             <Tabs.TabPane key="library" tab="指标库设置">
               <Checkbox
                 v-model:checked="settings.performance.duplicateIndicatorName"
-                >
-指标库重名
-</Checkbox>
+              >
+                指标库重名
+              </Checkbox>
             </Tabs.TabPane>
           </Tabs>
         </template>
@@ -1304,23 +1303,23 @@ onMounted(loadSettings);
         <template v-else-if="activeKey === 'actions'">
           <div class="check-list">
             <Checkbox v-model:checked="settings.actions.syncTaskTodo">
-同步任务到钉钉待办
-</Checkbox>
+              同步任务到钉钉待办
+            </Checkbox>
             <Checkbox v-model:checked="settings.actions.taskRequiredOwner">
-负责人必填
-</Checkbox>
+              负责人必填
+            </Checkbox>
             <Checkbox v-model:checked="settings.actions.dueRequired">
-截止时间必填
-</Checkbox>
+              截止时间必填
+            </Checkbox>
             <Checkbox v-model:checked="settings.actions.participantEditable">
-任务参与人可以编辑任务
-</Checkbox>
+              任务参与人可以编辑任务
+            </Checkbox>
             <Checkbox v-model:checked="settings.actions.stopReminderAfterCycle">
-周期结束后未完成的任务不再提醒
-</Checkbox>
+              周期结束后未完成的任务不再提醒
+            </Checkbox>
             <Checkbox v-model:checked="settings.actions.subtaskEnabled">
-启用子任务
-</Checkbox>
+              启用子任务
+            </Checkbox>
           </div>
           <Divider />
           <div class="status-row">
@@ -1328,9 +1327,9 @@ onMounted(loadSettings);
               v-for="item in statusTags"
               :key="item.label"
               :color="item.color"
-              >
-{{ item.label }}
-</Tag>
+            >
+              {{ item.label }}
+            </Tag>
           </div>
         </template>
 
@@ -1338,18 +1337,18 @@ onMounted(loadSettings);
           <section class="form-section">
             <h3>绩效提醒设置</h3>
             <Checkbox v-model:checked="settings.reminders.notifyHrTodo">
-开启待办事项提醒
-</Checkbox>
+              开启待办事项提醒
+            </Checkbox>
             <Checkbox
               v-model:checked="settings.reminders.resultValueUpdateReminder"
-              >
-结果值更新提醒
-</Checkbox>
+            >
+              结果值更新提醒
+            </Checkbox>
             <Checkbox
               v-model:checked="settings.reminders.resignedMessageReminder"
-              >
-离职消息提醒
-</Checkbox>
+            >
+              离职消息提醒
+            </Checkbox>
           </section>
           <section class="form-section">
             <h3>提醒对象</h3>
@@ -1447,16 +1446,16 @@ onMounted(loadSettings);
                   :disabled="index === 0"
                   size="small"
                   @click="moveMenuItem(index, -1)"
-                  >
-上移
-</Button>
+                >
+                  上移
+                </Button>
                 <Button
                   :disabled="index === settings.menu.items.length - 1"
                   size="small"
                   @click="moveMenuItem(index, 1)"
-                  >
-下移
-</Button>
+                >
+                  下移
+                </Button>
               </Space>
             </div>
           </div>
@@ -1489,9 +1488,9 @@ onMounted(loadSettings);
                   size="small"
                   type="link"
                   @click="openLogDetail(record.id)"
-                  >
-查看
-</Button>
+                >
+                  查看
+                </Button>
               </template>
             </template>
           </Table>
@@ -1531,9 +1530,9 @@ onMounted(loadSettings);
                 :disabled="!stopEmployeeId"
                 type="primary"
                 @click="stopAssessment"
-                >
-停止考核
-</Button>
+              >
+                停止考核
+              </Button>
             </Tabs.TabPane>
             <Tabs.TabPane key="transfer" tab="绩效数据转交">
               <div class="step-box">

@@ -202,6 +202,7 @@ export function mapApiInstance(
     ),
     nodeName: instance.currentNodeName || '未开始',
     progress: instance.progressCurrent || 1,
+    progressTotal: instance.progressTotal,
     resultConfirmed: Boolean(instance.resultConfirmed),
     resultObjection:
       getLatestLogReason(instance.resultObjections, 'reason') ||

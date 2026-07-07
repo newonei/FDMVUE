@@ -150,6 +150,7 @@ export namespace FdmPerformanceAssessmentApi {
   export interface Task {
     assigneeUserId?: number;
     batchId?: number;
+    createTime?: string;
     dueTime?: string;
     finishComment?: string;
     finishTime?: string;
@@ -254,6 +255,7 @@ export namespace FdmPerformanceAssessmentApi {
 
   export interface GradeReviewConfirmReq {
     comment?: string;
+    reviewFormJson?: string;
     taskId: number;
   }
 
@@ -339,6 +341,12 @@ export function getFdmPerformanceAssessmentBatch(id: number) {
 export function deleteFdmPerformanceAssessmentBatch(id: number) {
   return requestClient.delete<boolean>(
     `/fdmperformance/assessment/batch/delete?id=${id}`,
+  );
+}
+
+export function deleteFdmPerformanceAssessmentInstance(id: number) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/assessment/instance/delete?id=${id}`,
   );
 }
 

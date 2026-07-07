@@ -89,9 +89,41 @@ interface ScoreSummaryCard extends ScoreSummary {
   cardType?: 'final';
 }
 
+interface GradeReviewInterviewForm {
+  entryDate: string;
+  improvementTarget: string;
+  interviewee: string;
+  interviewer: string;
+  missedIndicators: string;
+  position: string;
+  reasonAnalysis: string;
+  supportNeeded: string;
+  workCompletion: string;
+}
+
+interface GradeReviewRecord {
+  form?: GradeReviewInterviewForm;
+  rawComment?: string;
+  task: FdmPerformanceAssessmentApi.Task;
+  title: string;
+}
+
 type ScrollTarget = HTMLElement | { $el?: HTMLElement };
 
 const DEDUCTION_DIMENSION_TYPE = 4;
+const GRADE_REVIEW_REQUIRED_FIELDS: Array<
+  [keyof GradeReviewInterviewForm, string]
+> = [
+  ['interviewee', '被访谈人'],
+  ['entryDate', '入职时间'],
+  ['position', '岗位'],
+  ['interviewer', '访谈人'],
+  ['workCompletion', '本月工作完成情况'],
+  ['reasonAnalysis', '主要原因分析'],
+  ['missedIndicators', '主要未达标指标'],
+  ['improvementTarget', '下月改进方向与目标'],
+  ['supportNeeded', '需要获得的帮助'],
+];
 const CORE_FLOW_STAGES: FlowStage[] = [
   {
     id: 'Performance_Indicator_Create',
@@ -138,7 +170,9 @@ const flowActionLoading = ref(false);
 const transferModalOpen = ref(false);
 const transferTargetUserId = ref<number>();
 const transferReason = ref('');
-const gradeReviewComment = ref('');
+const gradeReviewForm = reactive<GradeReviewInterviewForm>(
+  createEmptyGradeReviewForm(),
+);
 const gradeReviewSubmitting = ref(false);
 const flowCardRef = ref<null | ScrollTarget>(null);
 const processRecordRef = ref<null | ScrollTarget>(null);
@@ -192,6 +226,27 @@ const canConfirmGradeReview = computed(
     Boolean(pendingGradeReviewTask.value) &&
     Number(pendingGradeReviewTask.value?.assigneeUserId) ===
       currentUserId.value,
+);
+const gradeReviewRecords = computed<GradeReviewRecord[]>(() =>
+  apiTasks.value
+    .filter(
+      (task) =>
+        [6, 7].includes(Number(task.taskType)) &&
+        Number(task.status) === 1 &&
+        Boolean(task.finishComment),
+    )
+    .toSorted(
+      (left, right) => Number(left.taskType || 0) - Number(right.taskType || 0),
+    )
+    .map((task) => {
+      const form = parseGradeReviewForm(task.finishComment);
+      return {
+        form,
+        rawComment: form ? undefined : task.finishComment,
+        task,
+        title: getTaskTypeLabel(task.taskType),
+      };
+    }),
 );
 const canOperateFlow = computed(() =>
   hasAccessByCodes(['fdmperformance:assessment:cancel']),
@@ -486,6 +541,86 @@ function getReviewCcUserNames(value?: string) {
     .filter((item) => Number.isFinite(item) && item > 0);
   if (userIds.length === 0) return '-';
   return userIds.map((userId) => getUserDisplayName(userId)).join('、');
+}
+
+function createEmptyGradeReviewForm(): GradeReviewInterviewForm {
+  return {
+    entryDate: '',
+    improvementTarget: '',
+    interviewee: '',
+    interviewer: '',
+    missedIndicators: '',
+    position: '',
+    reasonAnalysis: '',
+    supportNeeded: '',
+    workCompletion: '',
+  };
+}
+
+function resetGradeReviewForm() {
+  Object.assign(gradeReviewForm, createEmptyGradeReviewForm());
+  fillGradeReviewDefaults();
+}
+
+function fillGradeReviewDefaults() {
+  if (!gradeReviewForm.interviewee && employee.value?.name) {
+    gradeReviewForm.interviewee = employee.value.name;
+  }
+  if (
+    !gradeReviewForm.position &&
+    employee.value?.post &&
+    employee.value.post !== '-'
+  ) {
+    gradeReviewForm.position = employee.value.post;
+  }
+  const currentUserFallback = currentUserId.value
+    ? `用户${currentUserId.value}`
+    : '';
+  const currentUserName = getUserDisplayName(currentUserId.value);
+  if (
+    currentUserName &&
+    currentUserName !== '-' &&
+    (!gradeReviewForm.interviewer ||
+      gradeReviewForm.interviewer === currentUserFallback)
+  ) {
+    gradeReviewForm.interviewer = currentUserName;
+  }
+}
+
+function validateGradeReviewForm() {
+  fillGradeReviewDefaults();
+  const missingField = GRADE_REVIEW_REQUIRED_FIELDS.find(([key]) => {
+    const value = gradeReviewForm[key];
+    return !String(value || '').trim();
+  });
+  if (missingField) {
+    message.warning(`请填写${missingField[1]}`);
+    return false;
+  }
+  return true;
+}
+
+function buildGradeReviewCommentSummary() {
+  return `C级绩效面谈表：${gradeReviewForm.interviewee}`;
+}
+
+function parseGradeReviewForm(
+  comment?: string,
+): GradeReviewInterviewForm | undefined {
+  if (!comment) return undefined;
+  try {
+    const parsed = JSON.parse(comment) as Partial<GradeReviewInterviewForm>;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    if (!('workCompletion' in parsed) && !('reasonAnalysis' in parsed)) {
+      return undefined;
+    }
+    return {
+      ...createEmptyGradeReviewForm(),
+      ...parsed,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function getCoreFlowStageIndex(stage: FlowStage) {
@@ -957,13 +1092,15 @@ async function confirmResult() {
 
 async function submitGradeReviewConfirm() {
   if (!pendingGradeReviewTask.value) return;
+  if (!validateGradeReviewForm()) return;
   gradeReviewSubmitting.value = true;
   try {
     await confirmFdmPerformanceAssessmentGradeReview({
-      comment: gradeReviewComment.value,
+      comment: buildGradeReviewCommentSummary(),
+      reviewFormJson: JSON.stringify({ ...gradeReviewForm }),
       taskId: pendingGradeReviewTask.value.id,
     });
-    gradeReviewComment.value = '';
+    resetGradeReviewForm();
     await loadApiData();
     message.success('绩效复盘已确认');
   } finally {
@@ -1018,7 +1155,6 @@ async function loadApiData() {
         instanceId,
         pageNo: 1,
         pageSize: -1,
-        status: 0,
       }),
     ]);
     apiTasks.value = taskPage.list || [];
@@ -1052,6 +1188,9 @@ watch(
   loadApiData,
 );
 watch([activeScoreType, templateIndicators, instance], initScoreDraft);
+watch([employee, currentUserId, simpleUsers], fillGradeReviewDefaults, {
+  immediate: true,
+});
 </script>
 
 <template>
@@ -1286,13 +1425,133 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
           <span>复盘原因</span>
           <p>{{ instance.reviewReason || '-' }}</p>
         </div>
+        <div v-if="gradeReviewRecords.length" class="grade-review-records">
+          <div
+            v-for="record in gradeReviewRecords"
+            :key="record.task.id"
+            class="grade-review-record"
+          >
+            <div class="grade-review-record-head">
+              <strong>{{ record.title }}</strong>
+              <span>
+                {{ getUserDisplayName(record.task.assigneeUserId) }}
+                · {{ getConfirmTimeText(record.task.finishTime) }}
+              </span>
+            </div>
+            <div v-if="record.form" class="grade-review-readonly">
+              <div>
+                <span>被访谈人</span><strong>{{ record.form.interviewee || '-' }}</strong>
+              </div>
+              <div>
+                <span>入职时间</span><strong>{{ record.form.entryDate || '-' }}</strong>
+              </div>
+              <div>
+                <span>岗位</span><strong>{{ record.form.position || '-' }}</strong>
+              </div>
+              <div>
+                <span>访谈人</span><strong>{{ record.form.interviewer || '-' }}</strong>
+              </div>
+              <div class="grade-review-readonly-block">
+                <span>一、你觉得你的本月工作完成情况如何</span>
+                <p>{{ record.form.workCompletion || '-' }}</p>
+              </div>
+              <div class="grade-review-readonly-block">
+                <span>二、你觉得主要原因是什么（原因分析：客观 + 主观）</span>
+                <p>{{ record.form.reasonAnalysis || '-' }}</p>
+              </div>
+              <div class="grade-review-readonly-block">
+                <span>三、本月绩效评级为C，主要未达标指标有哪些（告诉被访谈人）</span>
+                <p>{{ record.form.missedIndicators || '-' }}</p>
+              </div>
+              <div class="grade-review-readonly-block">
+                <span>四、下个月，你觉得怎么做才能不得C（改进方向与目标）</span>
+                <p>{{ record.form.improvementTarget || '-' }}</p>
+              </div>
+              <div class="grade-review-readonly-block">
+                <span>五、你需要获得怎样的帮助（辅导措施）</span>
+                <p>{{ record.form.supportNeeded || '-' }}</p>
+              </div>
+            </div>
+            <p v-else class="grade-review-legacy-comment">
+              {{ record.rawComment }}
+            </p>
+          </div>
+        </div>
         <div v-if="canConfirmGradeReview" class="grade-review-confirm">
-          <Input.TextArea
-            v-model:value="gradeReviewComment"
-            :rows="3"
-            placeholder="填写本次复盘确认说明（选填）"
-          />
+          <div class="grade-review-form-title">C级绩效面谈表</div>
+          <div class="grade-review-form-meta">
+            <label>
+              <span><span class="required-marker">*</span>被访谈人</span>
+              <Input v-model:value="gradeReviewForm.interviewee" />
+            </label>
+            <label>
+              <span><span class="required-marker">*</span>入职时间</span>
+              <Input
+                v-model:value="gradeReviewForm.entryDate"
+                placeholder="请填写入职时间"
+              />
+            </label>
+            <label>
+              <span><span class="required-marker">*</span>岗位</span>
+              <Input v-model:value="gradeReviewForm.position" />
+            </label>
+            <label>
+              <span><span class="required-marker">*</span>访谈人</span>
+              <Input v-model:value="gradeReviewForm.interviewer" />
+            </label>
+          </div>
+          <label class="grade-review-form-item">
+            <span>
+              <span class="required-marker">*</span>
+              一、你觉得你的本月工作完成情况如何
+            </span>
+            <Input.TextArea
+              v-model:value="gradeReviewForm.workCompletion"
+              :rows="3"
+            />
+          </label>
+          <label class="grade-review-form-item">
+            <span>
+              <span class="required-marker">*</span>
+              二、你觉得主要原因是什么（原因分析：客观 + 主观）
+            </span>
+            <Input.TextArea
+              v-model:value="gradeReviewForm.reasonAnalysis"
+              :rows="3"
+            />
+          </label>
+          <label class="grade-review-form-item">
+            <span>
+              <span class="required-marker">*</span>
+              三、本月绩效评级为C，主要未达标指标有哪些（告诉被访谈人）
+            </span>
+            <Input.TextArea
+              v-model:value="gradeReviewForm.missedIndicators"
+              :rows="3"
+            />
+          </label>
+          <label class="grade-review-form-item">
+            <span>
+              <span class="required-marker">*</span>
+              四、下个月，你觉得怎么做才能不得C（改进方向与目标）
+            </span>
+            <Input.TextArea
+              v-model:value="gradeReviewForm.improvementTarget"
+              :rows="3"
+            />
+          </label>
+          <label class="grade-review-form-item">
+            <span>
+              <span class="required-marker">*</span>
+              五、你需要获得怎样的帮助（辅导措施）
+            </span>
+            <Input.TextArea
+              v-model:value="gradeReviewForm.supportNeeded"
+              :rows="3"
+            />
+          </label>
           <Button
+            class="grade-review-submit"
             :loading="gradeReviewSubmitting"
             type="primary"
             @click="submitGradeReviewConfirm"
@@ -1819,10 +2078,92 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
 
 .grade-review-confirm {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: start;
+  padding: 16px;
   margin-top: 14px;
+  background: #fffdf7;
+  border: 1px solid #ffe7ba;
+  border-radius: 8px;
+}
+
+.grade-review-form-title,
+.grade-review-record-head strong {
+  font-weight: 650;
+  color: #111827;
+}
+
+.grade-review-form-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.grade-review-form-meta label,
+.grade-review-form-item {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+}
+
+.grade-review-form-item {
+  line-height: 1.5;
+}
+
+.grade-review-submit {
+  justify-self: end;
+}
+
+.grade-review-records {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.grade-review-record {
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.grade-review-record-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.grade-review-record-head span,
+.grade-review-readonly span,
+.grade-review-legacy-comment {
+  color: #64748b;
+}
+
+.grade-review-readonly {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.grade-review-readonly > div {
+  display: grid;
+  gap: 4px;
+}
+
+.grade-review-readonly strong,
+.grade-review-readonly p {
+  color: #111827;
+}
+
+.grade-review-readonly-block {
+  grid-column: 1 / -1;
+}
+
+.grade-review-readonly p,
+.grade-review-legacy-comment {
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .grade-review-pending {
@@ -1834,6 +2175,8 @@ watch([activeScoreType, templateIndicators, instance], initScoreDraft);
   .score-summary-grid,
   .grade-review-grid,
   .grade-review-confirm,
+  .grade-review-form-meta,
+  .grade-review-readonly,
   .instance-head,
   .flow-toolbar,
   .node-score-head,

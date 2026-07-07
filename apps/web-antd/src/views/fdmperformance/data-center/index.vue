@@ -1,15 +1,25 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
+import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { Button, Card, Progress, Space, Statistic, Table, Tag, message } from 'ant-design-vue';
+import {
+  Button,
+  Card,
+  message,
+  Progress,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+} from 'ant-design-vue';
 
 import {
   getFdmPerformanceAssessmentBatchPage,
   getFdmPerformanceAssessmentInstancePage,
-  type FdmPerformanceAssessmentApi,
 } from '#/api/fdmperformance/assessment';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -21,8 +31,10 @@ type PerformanceDataRecord = {
   avgScore: number;
   dept: string;
   gradeA: number;
+  gradeAPlus: number;
   gradeB: number;
   gradeC: number;
+  gradeCPlus: number;
   headcount: number;
   published: number;
 };
@@ -39,34 +51,75 @@ const columns: TableColumnsType = [
   { dataIndex: 'headcount', title: '参与人数', width: 120 },
   { dataIndex: 'published', title: '已公示', width: 120 },
   { dataIndex: 'avgScore', title: '平均分', width: 120 },
-  { dataIndex: 'gradeA', title: '卓越/优秀', width: 110 },
-  { dataIndex: 'gradeB', title: '平均', width: 100 },
-  { dataIndex: 'gradeC', title: '待改进', width: 100 },
+  { dataIndex: 'gradeAPlus', title: 'A+', width: 80 },
+  { dataIndex: 'gradeA', title: 'A', width: 80 },
+  { dataIndex: 'gradeB', title: 'B', width: 80 },
+  { dataIndex: 'gradeCPlus', title: 'C+', width: 80 },
+  { dataIndex: 'gradeC', title: 'C', width: 80 },
   { dataIndex: 'publishedRate', title: '公示进度', width: 240 },
 ];
 
-const totalHeadcount = computed(() => records.value.reduce((sum, item) => sum + item.headcount, 0));
-const publishedCount = computed(() => records.value.reduce((sum, item) => sum + item.published, 0));
+const totalHeadcount = computed(() =>
+  records.value.reduce((sum, item) => sum + item.headcount, 0),
+);
+const publishedCount = computed(() =>
+  records.value.reduce((sum, item) => sum + item.published, 0),
+);
 const avgScore = computed(() => {
-  const weighted = records.value.reduce((sum, item) => sum + item.avgScore * item.published, 0);
+  const weighted = records.value.reduce(
+    (sum, item) => sum + item.avgScore * item.published,
+    0,
+  );
   return Number((weighted / Math.max(publishedCount.value, 1)).toFixed(1));
 });
-const publishedRate = computed(() => Math.round((publishedCount.value / Math.max(totalHeadcount.value, 1)) * 100));
+const publishedRate = computed(() =>
+  Math.round((publishedCount.value / Math.max(totalHeadcount.value, 1)) * 100),
+);
 const gradeDistribution = computed(() => {
+  const gradeAPlus = records.value.reduce(
+    (sum, item) => sum + item.gradeAPlus,
+    0,
+  );
   const gradeA = records.value.reduce((sum, item) => sum + item.gradeA, 0);
   const gradeB = records.value.reduce((sum, item) => sum + item.gradeB, 0);
+  const gradeCPlus = records.value.reduce(
+    (sum, item) => sum + item.gradeCPlus,
+    0,
+  );
   const gradeC = records.value.reduce((sum, item) => sum + item.gradeC, 0);
   return [
-    { color: '#1677ff', label: '卓越/优秀', value: gradeA },
-    { color: '#52c41a', label: '平均', value: gradeB },
-    { color: '#faad14', label: '待改进', value: gradeC },
+    { color: '#1677ff', label: 'A+', value: gradeAPlus },
+    { color: '#52c41a', label: 'A', value: gradeA },
+    { color: '#13c2c2', label: 'B', value: gradeB },
+    { color: '#faad14', label: 'C+', value: gradeCPlus },
+    { color: '#ff4d4f', label: 'C', value: gradeC },
   ];
 });
 
 function exportReport() {
-  const header = ['部门', '参与人数', '已公示', '平均分', '卓越/优秀', '平均', '待改进'];
+  const header = [
+    '部门',
+    '参与人数',
+    '已公示',
+    '平均分',
+    'A+',
+    'A',
+    'B',
+    'C+',
+    'C',
+  ];
   const lines = records.value.map((item) =>
-    [item.dept, item.headcount, item.published, item.avgScore, item.gradeA, item.gradeB, item.gradeC].join(','),
+    [
+      item.dept,
+      item.headcount,
+      item.published,
+      item.avgScore,
+      item.gradeAPlus,
+      item.gradeA,
+      item.gradeB,
+      item.gradeCPlus,
+      item.gradeC,
+    ].join(','),
   );
   const blob = new Blob([`\uFEFF${[header.join(','), ...lines].join('\n')}`], {
     type: 'text/csv;charset=utf-8',
@@ -81,14 +134,19 @@ function exportReport() {
 }
 
 function buildApiRecords(): PerformanceDataRecord[] {
-  const grouped = new Map<string, PerformanceDataRecord & { scoreTotal: number }>();
+  const grouped = new Map<
+    string,
+    PerformanceDataRecord & { scoreTotal: number }
+  >();
   apiInstances.value.forEach((instance) => {
     const dept = instance.deptName || '未分配部门';
     const current = grouped.get(dept) || {
       avgScore: 0,
       dept,
+      gradeAPlus: 0,
       gradeA: 0,
       gradeB: 0,
+      gradeCPlus: 0,
       gradeC: 0,
       headcount: 0,
       published: 0,
@@ -98,18 +156,24 @@ function buildApiRecords(): PerformanceDataRecord[] {
     if (instance.resultVisible && typeof instance.finalScore === 'number') {
       current.published += 1;
       current.scoreTotal += Number(instance.finalScore);
-      if (['A', 'A+', '优秀', '卓越'].includes(instance.gradeName || '')) {
+      if (['A+', '卓越'].includes(instance.gradeName || '')) {
+        current.gradeAPlus += 1;
+      } else if (['A', '优秀'].includes(instance.gradeName || '')) {
         current.gradeA += 1;
       } else if (['B', '平均'].includes(instance.gradeName || '')) {
         current.gradeB += 1;
+      } else if (['C+', '及格'].includes(instance.gradeName || '')) {
+        current.gradeCPlus += 1;
       } else {
         current.gradeC += 1;
       }
     }
-    current.avgScore = Number((current.scoreTotal / Math.max(current.published, 1)).toFixed(1));
+    current.avgScore = Number(
+      (current.scoreTotal / Math.max(current.published, 1)).toFixed(1),
+    );
     grouped.set(dept, current);
   });
-  return Array.from(grouped.values()).map(({ scoreTotal, ...item }) => item);
+  return [...grouped.values()].map(({ scoreTotal, ...item }) => item);
 }
 
 async function loadDataCenter() {
@@ -137,13 +201,17 @@ onMounted(loadDataCenter);
     <template #actions>
       <Button @click="loadDataCenter">刷新</Button>
       <Button @click="exportReport">导出</Button>
-      <Button type="primary" @click="router.push(performancePath('/batches'))">查看考核批次</Button>
+      <Button type="primary" @click="router.push(performancePath('/batches'))">
+查看考核批次
+</Button>
     </template>
 
     <div class="metric-grid">
       <Card><Statistic :value="totalHeadcount" title="参与人数" /></Card>
       <Card><Statistic :value="avgScore" title="平均分" /></Card>
-      <Card><Statistic :value="publishedRate" suffix="%" title="结果公示率" /></Card>
+      <Card>
+<Statistic :value="publishedRate" suffix="%" title="结果公示率" />
+</Card>
       <Card><Statistic :value="batchTotal" title="考核批次" /></Card>
     </div>
 
@@ -153,7 +221,12 @@ onMounted(loadDataCenter);
           <div v-for="item in gradeDistribution" :key="item.label">
             <span>{{ item.label }}</span>
             <div class="bar-track">
-              <i :style="{ background: item.color, width: `${Math.min(item.value * 4, 100)}%` }" />
+              <i
+                :style="{
+                  background: item.color,
+                  width: `${Math.min(item.value * 4, 100)}%`,
+                }"
+              ></i>
             </div>
             <strong>{{ item.value }}人</strong>
           </div>
@@ -172,13 +245,26 @@ onMounted(loadDataCenter);
     </div>
 
     <Card title="部门绩效分析">
-      <Table :columns="columns" :data-source="records" :loading="loading" :pagination="false" row-key="dept">
+      <Table
+        :columns="columns"
+        :data-source="records"
+        :loading="loading"
+        :pagination="false"
+        row-key="dept"
+      >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'avgScore'">
             <strong>{{ record.avgScore }}</strong>
           </template>
           <template v-else-if="column.dataIndex === 'publishedRate'">
-            <Progress :percent="Math.round((record.published / Math.max(record.headcount, 1)) * 100)" size="small" />
+            <Progress
+              :percent="
+                Math.round(
+                  (record.published / Math.max(record.headcount, 1)) * 100,
+                )
+              "
+              size="small"
+            />
           </template>
         </template>
       </Table>

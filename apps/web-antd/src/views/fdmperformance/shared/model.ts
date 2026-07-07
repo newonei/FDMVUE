@@ -123,7 +123,15 @@ export interface AssessmentInstance {
   indicatorScores?: Record<number, IndicatorScoreState>;
   interviewRecords?: InterviewRecord[];
   nodeName: string;
+  pendingTaskAssigneeName?: string;
+  pendingTaskAssigneeUserId?: number;
+  pendingTaskCreateTime?: string;
+  pendingTaskId?: number;
+  pendingTaskNodeKey?: string;
+  pendingTaskNodeName?: string;
+  pendingTaskType?: number;
   progress: number;
+  progressTotal?: number;
   resultConfirmed?: boolean;
   resultObjection?: string;
   resultVisible: boolean;
