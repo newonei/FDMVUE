@@ -9,6 +9,7 @@ export namespace FdmdataEcInvoiceApplyApi {
     platformCode?: string;
     platformName?: string;
     shopName?: string;
+    shopCompanyName?: string;
     tradeLink?: string;
     invoiceCode?: string;
     invoiceNo?: string;
@@ -21,6 +22,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     applySource?: string;
     startTime?: string;
     applyGmtCreate?: string;
+    orderFinishTime?: string;
+    invoiceDueTime?: string;
     invoiceDate?: string;
     payerName?: string;
     payerRegisterNo?: string;
@@ -33,6 +36,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     status?: number;
     applyStatus?: number;
     invoiceStatus?: number;
+    platformStatusText?: string;
+    countdownText?: string;
     failDataStatus?: number;
     delayApplyFlag?: number;
     punishFlag?: number;

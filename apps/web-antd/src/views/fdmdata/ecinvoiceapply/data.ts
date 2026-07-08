@@ -22,6 +22,10 @@ export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoi
 export const INVOICE_TYPE_OPTIONS = [
   { label: '蓝票', value: 'blue' },
   { label: '红票', value: 'red' },
+  { label: '电子普票', value: '电子普票' },
+  { label: '电子专票', value: '电子专票' },
+  { label: '普通发票', value: '普通发票' },
+  { label: '增值税专用发票', value: '增值税专用发票' },
 ];
 
 function formatAmount({ cellValue }: { cellValue: unknown }) {
@@ -63,6 +67,12 @@ export function useFormSchema(): VbenFormSchema[] {
       componentProps: { allowClear: true, maxlength: 128 },
     },
     {
+      fieldName: 'shopCompanyName',
+      label: '店铺主体公司',
+      component: 'Input',
+      componentProps: { allowClear: true, maxlength: 128 },
+    },
+    {
       fieldName: 'title',
       label: '发票抬头',
       component: 'Input',
@@ -100,6 +110,30 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'applyGmtCreate',
       label: '申请创建时间',
+      component: 'DatePicker',
+      componentProps: {
+        class: 'w-full',
+        allowClear: true,
+        format: 'YYYY-MM-DD HH:mm:ss',
+        showTime: true,
+        valueFormat: 'YYYY-MM-DD HH:mm:ss',
+      },
+    },
+    {
+      fieldName: 'orderFinishTime',
+      label: '订单完成时间',
+      component: 'DatePicker',
+      componentProps: {
+        class: 'w-full',
+        allowClear: true,
+        format: 'YYYY-MM-DD HH:mm:ss',
+        showTime: true,
+        valueFormat: 'YYYY-MM-DD HH:mm:ss',
+      },
+    },
+    {
+      fieldName: 'invoiceDueTime',
+      label: '开票截止时间',
       component: 'DatePicker',
       componentProps: {
         class: 'w-full',
@@ -219,6 +253,18 @@ export function useFormSchema(): VbenFormSchema[] {
       componentProps: { class: 'w-full', precision: 0 },
     },
     {
+      fieldName: 'platformStatusText',
+      label: '平台状态',
+      component: 'Input',
+      componentProps: { allowClear: true, maxlength: 64 },
+    },
+    {
+      fieldName: 'countdownText',
+      label: '开票倒计时',
+      component: 'Input',
+      componentProps: { allowClear: true, maxlength: 128 },
+    },
+    {
       fieldName: 'rightsDueDate',
       label: '维权到期时间',
       component: 'DatePicker',
@@ -269,6 +315,18 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: { allowClear: true },
     },
     {
+      fieldName: 'shopName',
+      label: '店铺名称',
+      component: 'Input',
+      componentProps: { allowClear: true },
+    },
+    {
+      fieldName: 'shopCompanyName',
+      label: '店铺主体公司',
+      component: 'Input',
+      componentProps: { allowClear: true },
+    },
+    {
       fieldName: 'title',
       label: '发票抬头',
       component: 'Input',
@@ -293,6 +351,12 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: { class: 'w-full', precision: 0 },
     },
     {
+      fieldName: 'platformStatusText',
+      label: '平台状态',
+      component: 'Input',
+      componentProps: { allowClear: true },
+    },
+    {
       fieldName: 'startTime',
       label: '开始日期',
       component: 'RangePicker',
@@ -301,6 +365,18 @@ export function useGridFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'applyGmtCreate',
       label: '申请时间',
+      component: 'RangePicker',
+      componentProps: { ...getRangePickerDefaultProps(), allowClear: true },
+    },
+    {
+      fieldName: 'orderFinishTime',
+      label: '完成时间',
+      component: 'RangePicker',
+      componentProps: { ...getRangePickerDefaultProps(), allowClear: true },
+    },
+    {
+      fieldName: 'invoiceDueTime',
+      label: '开票截止',
       component: 'RangePicker',
       componentProps: { ...getRangePickerDefaultProps(), allowClear: true },
     },
@@ -318,6 +394,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       showOverflow: 'tooltip',
     },
     { field: 'platformCode', title: '平台', minWidth: 90 },
+    {
+      field: 'shopName',
+      title: '店铺',
+      minWidth: 150,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'shopCompanyName',
+      title: '店铺主体公司',
+      minWidth: 180,
+      showOverflow: 'tooltip',
+    },
     {
       field: 'title',
       title: '发票抬头',
@@ -350,6 +438,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
     { field: 'applyStatus', title: '申请状态', minWidth: 90 },
     { field: 'invoiceStatus', title: '开票状态', minWidth: 90 },
     {
+      field: 'platformStatusText',
+      title: '平台状态',
+      minWidth: 110,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'countdownText',
+      title: '开票倒计时',
+      minWidth: 140,
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'printInvoiceFlag',
       title: '可打印',
       minWidth: 80,
@@ -365,6 +465,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
     {
       field: 'applyGmtCreate',
       title: '申请时间',
+      minWidth: 160,
+      formatter: 'formatDateTime',
+    },
+    {
+      field: 'orderFinishTime',
+      title: '订单完成时间',
+      minWidth: 160,
+      formatter: 'formatDateTime',
+    },
+    {
+      field: 'invoiceDueTime',
+      title: '开票截止时间',
       minWidth: 160,
       formatter: 'formatDateTime',
     },

@@ -1,10 +1,12 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
+import type { AssessmentBatch, AssessmentTemplate, BatchStatus } from '../shared/model';
+
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'ant-design-vue';
+import { Button, Card, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag } from 'ant-design-vue';
 
 import {
   deleteFdmPerformanceAssessmentBatch,
@@ -14,10 +16,9 @@ import {
 } from '#/api/fdmperformance/assessment';
 import { getFdmPerformanceTemplateSimpleList } from '#/api/fdmperformance/template';
 
-import PerformanceShell from '../shared/PerformanceShell.vue';
 import { mapApiBatch, mapApiTemplate } from '../shared/api-adapter';
-import type { AssessmentBatch, AssessmentTemplate } from '../shared/model';
 import { batchStatusMetaMap } from '../shared/model';
+import PerformanceShell from '../shared/PerformanceShell.vue';
 import { usePerformancePath } from '../shared/route';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
@@ -25,11 +26,24 @@ defineOptions({ name: 'FdmPerformanceBatches' });
 const router = useRouter();
 const { performancePath } = usePerformancePath();
 const keyword = ref('');
-const groupMode = ref('不分组');
+const groupMode = ref<'period' | 'template'>('period');
 const apiLoading = ref(false);
 const historyImporting = ref(false);
 const historyImportOpen = ref(false);
-const apiBatches = ref<(AssessmentBatch & { finishedCount?: number; instanceCount?: number })[]>([]);
+type BatchTableRow = AssessmentBatch & { finishedCount?: number; instanceCount?: number };
+type PeriodGroupRow = {
+  children: BatchTableRow[];
+  finishedCount: number;
+  id: string;
+  instanceCount: number;
+  name: string;
+  period: string;
+  rowType: 'period-group';
+  status: BatchStatus;
+};
+type BatchDisplayRow = BatchTableRow | PeriodGroupRow;
+
+const apiBatches = ref<BatchTableRow[]>([]);
 const apiTemplates = ref<AssessmentTemplate[]>([]);
 const historyImportForm = reactive<FdmPerformanceAssessmentApi.HistoryImportReq>({
   defaultScore: 90,
@@ -38,6 +52,10 @@ const historyImportForm = reactive<FdmPerformanceAssessmentApi.HistoryImportReq>
   periodType: 1,
   templateIds: [],
 });
+const groupModeOptions = [
+  { label: '按月份分组', value: 'period' },
+  { label: '组内按考评表', value: 'template' },
+];
 
 const columns: TableColumnsType = [
   { dataIndex: 'name', title: '考核名称' },
@@ -52,28 +70,94 @@ function getBatchMeta(status: unknown) {
   return batchStatusMetaMap[status as keyof typeof batchStatusMetaMap];
 }
 
-const filteredBatches = computed(() => {
+function isPeriodGroupRow(record: unknown): record is PeriodGroupRow {
+  if (!record || typeof record !== 'object') {
+    return false;
+  }
+  return (
+    'rowType' in record &&
+    (record as { rowType?: unknown }).rowType === 'period-group'
+  );
+}
+
+function getComparablePeriod(period: string) {
+  return period || '';
+}
+
+function getFilteredBatchRows() {
   const text = keyword.value.trim();
-  const rows = text
-    ? apiBatches.value.filter((item) => item.name.includes(text) || item.period.includes(text))
+  return text
+    ? apiBatches.value.filter((item) => {
+        const templateName = getTemplateName(item.templateId) || '';
+        return item.name.includes(text) || item.period.includes(text) || templateName.includes(text);
+      })
     : apiBatches.value;
-  return [...rows].sort((a, b) => {
-    if (groupMode.value === '按周期') {
-      return b.period.localeCompare(a.period);
-    }
-    if (groupMode.value === '按考评表') {
-      return (getTemplateName(a.templateId) || '').localeCompare(getTemplateName(b.templateId) || '');
-    }
-    return b.id - a.id;
+}
+
+function resolveGroupStatus(children: BatchTableRow[]): BatchStatus {
+  const priority: BatchStatus[] = [
+    'scoring',
+    'hrReview',
+    'pendingPublish',
+    'resultVisible',
+    'executing',
+    'indicatorConfirm',
+    'finished',
+    'canceled',
+  ];
+  return priority.find((status) => children.some((item) => item.status === status)) || children[0]?.status || 'executing';
+}
+
+const filteredBatches = computed<BatchDisplayRow[]>(() => {
+  const rows = [...getFilteredBatchRows()];
+  const groups = new Map<string, BatchTableRow[]>();
+  rows.forEach((item) => {
+    const period = item.period || '未设置周期';
+    const children = groups.get(period) || [];
+    children.push(item);
+    groups.set(period, children);
   });
+
+  return [...groups.entries()]
+    .map(([period, children]) => {
+      const sortedChildren = children.sort((a, b) => {
+        const templateCompare = (getTemplateName(a.templateId) || '').localeCompare(getTemplateName(b.templateId) || '');
+        return groupMode.value === 'template' ? templateCompare || b.id - a.id : b.id - a.id;
+      });
+      return {
+        children: sortedChildren,
+        finishedCount: sortedChildren.reduce((sum, item) => sum + (item.finishedCount || 0), 0),
+        id: `period-${period}`,
+        instanceCount: sortedChildren.reduce((sum, item) => sum + getInstanceCount(item), 0),
+        name: `${period}绩效考核`,
+        period,
+        rowType: 'period-group' as const,
+        status: resolveGroupStatus(sortedChildren),
+      };
+    })
+    .sort((a, b) => getComparablePeriod(b.period).localeCompare(getComparablePeriod(a.period)));
 });
 
-function getTemplateName(templateId: number) {
+function getTemplateName(templateId?: number) {
   return apiTemplates.value.find((item) => item.id === templateId)?.name;
 }
 
-function getInstanceCount(record: AssessmentBatch & { instanceCount?: number }) {
+function getInstanceCount(record: BatchTableRow) {
   return record.instanceCount ?? record.instances?.length ?? 0;
+}
+
+function getGroupTemplateSummary(record: PeriodGroupRow) {
+  const names = record.children.map((item) => getTemplateName(item.templateId) || '未命名考评表');
+  return `共 ${record.children.length} 张考评表：${names.join('、')}`;
+}
+
+function getGroupStatusSummary(record: PeriodGroupRow) {
+  const statusLabels = [...new Set(record.children.map((item) => getBatchMeta(item.status)?.label || item.status))];
+  return statusLabels.length > 1 ? statusLabels.join(' / ') : statusLabels[0];
+}
+
+function getRowKey(record: BatchDisplayRow) {
+  return isPeriodGroupRow(record) ? record.id : `batch-${record.id}`;
 }
 
 const templateOptions = computed(() =>
@@ -164,7 +248,7 @@ onMounted(loadApiData);
 <template>
   <PerformanceShell description="查看已发起绩效考核批次，并进入详情处理评分、确认和结果公示。" title="已发起考核">
     <template #actions>
-      <Select v-model:value="groupMode" :options="['不分组', '按考评表', '按周期'].map((value) => ({ label: value, value }))" style="width: 160px" />
+      <Select v-model:value="groupMode" :options="groupModeOptions" style="width: 160px" />
       <Button :loading="historyImporting" @click="openHistoryImport">导入历史绩效</Button>
       <Button type="primary" @click="router.push(performancePath('/launch'))">发起考核</Button>
     </template>
@@ -173,19 +257,23 @@ onMounted(loadApiData);
       <div class="toolbar">
         <Input v-model:value="keyword" allow-clear placeholder="搜索考核名称" />
       </div>
-      <Table :columns="columns" :data-source="filteredBatches" :loading="apiLoading" :pagination="{ pageSize: 10 }" row-key="id">
+      <Table :columns="columns" :data-source="filteredBatches" :loading="apiLoading" :pagination="{ pageSize: 10 }" :row-key="getRowKey">
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'templateId'">
-            {{ getTemplateName(record.templateId) }}
+            <span v-if="isPeriodGroupRow(record)" class="group-summary">{{ getGroupTemplateSummary(record) }}</span>
+            <span v-else>{{ getTemplateName(record.templateId) }}</span>
           </template>
           <template v-else-if="column.dataIndex === 'instances'">
-            {{ getInstanceCount(record as AssessmentBatch & { instanceCount?: number }) }}
+            {{ isPeriodGroupRow(record) ? record.instanceCount : getInstanceCount(record as BatchTableRow) }}
           </template>
           <template v-else-if="column.dataIndex === 'status'">
-            <Tag :color="getBatchMeta(record.status).color">{{ getBatchMeta(record.status).label }}</Tag>
+            <Tag :color="getBatchMeta(record.status).color">
+              {{ isPeriodGroupRow(record) ? getGroupStatusSummary(record) : getBatchMeta(record.status).label }}
+            </Tag>
           </template>
           <template v-else-if="column.dataIndex === 'action'">
-            <Space>
+            <span v-if="isPeriodGroupRow(record)" class="group-action-tip">展开查看批次</span>
+            <Space v-else>
               <Button size="small" type="link" @click="router.push(performancePath(`/batches/${record.id}`))">查看</Button>
               <Button danger size="small" type="link" @click="deleteBatch(record as AssessmentBatch)">删除</Button>
             </Space>
@@ -236,5 +324,18 @@ onMounted(loadApiData);
 
 .toolbar :deep(.ant-input-affix-wrapper) {
   width: 260px;
+}
+
+.group-summary,
+.group-action-tip {
+  color: #64748b;
+}
+
+.group-summary {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

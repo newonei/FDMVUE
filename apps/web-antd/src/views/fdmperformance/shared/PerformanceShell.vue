@@ -13,6 +13,7 @@ const props = withDefaults(
   }>(),
   {
     compact: true,
+    description: '',
   },
 );
 
@@ -52,7 +53,7 @@ const navItems = computed(() => coreNavItems);
           <p v-if="props.description">{{ props.description }}</p>
         </div>
         <div class="header-actions">
-          <slot name="actions" />
+          <slot name="actions"></slot>
         </div>
       </div>
 
@@ -73,12 +74,12 @@ const navItems = computed(() => coreNavItems);
           </RouterLink>
         </div>
         <div v-if="isCompact" class="header-actions compact-actions">
-          <slot name="actions" />
+          <slot name="actions"></slot>
         </div>
       </div>
 
       <main class="performance-main">
-        <slot />
+        <slot></slot>
       </main>
     </div>
   </Page>
@@ -86,7 +87,11 @@ const navItems = computed(() => coreNavItems);
 
 <style scoped>
 .performance-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: calc(100vh - 96px);
+  overflow-x: hidden;
 }
 
 .performance-header {
@@ -136,6 +141,7 @@ p {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  min-width: 0;
   gap: 8px;
 }
 
@@ -144,6 +150,7 @@ p {
   gap: 12px;
   align-items: flex-start;
   justify-content: space-between;
+  min-width: 0;
   padding: 14px 0;
 }
 
@@ -157,6 +164,7 @@ p {
   flex: 1;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .nav-item {
@@ -180,6 +188,10 @@ p {
 .performance-main {
   display: grid;
   gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .compact-actions {

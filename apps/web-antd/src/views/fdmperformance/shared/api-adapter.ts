@@ -341,7 +341,7 @@ function getRoleSummaryScore(
   taskType: number,
 ) {
   const matched = [...scores]
-    .toReversed()
+    .reverse()
     .find(
       (item) =>
         item.scorerRoleType === scorerRoleType || item.taskType === taskType,

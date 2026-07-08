@@ -9,6 +9,7 @@ import type {
 } from '../../shared/model';
 
 import type { FdmPerformanceAssessmentApi } from '#/api/fdmperformance/assessment';
+import type { FdmPerformanceTemplateApi } from '#/api/fdmperformance/template';
 import type { SystemUserApi } from '#/api/system/user';
 
 import { computed, onMounted, reactive, ref, watch } from 'vue';
@@ -77,6 +78,7 @@ const keyword = ref('');
 const statusFilter = ref<string>();
 const selectedRowKeys = ref<number[]>([]);
 const apiLoading = ref(false);
+const batchLoadError = ref('');
 const reminding = ref(false);
 const apiBatch = ref<AssessmentBatch>();
 const apiTemplateMap = ref(new Map<number, AssessmentTemplate>());
@@ -290,7 +292,7 @@ const peopleColumns: TableColumnsType = [
   { dataIndex: 'stayTime', title: '停留时间', width: 120 },
   { dataIndex: 'result', title: '考核结果', width: 120 },
   { dataIndex: 'grade', title: '绩效等级', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 470 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
 ];
 const interviewColumns: TableColumnsType = [
   { dataIndex: 'employee', title: '被考核人', width: 180 },
@@ -378,13 +380,29 @@ function resolveUserOptionLabel(user: SystemUserApi.User) {
   }`;
 }
 
-function parseLocalDateTime(value?: string) {
-  if (!value) return undefined;
-  const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+function parseLocalDateTime(value?: Date | null | number | string) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value;
+  }
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+  const normalizedValue = /^\d+$/.test(value) ? Number(value) : value;
+  if (typeof normalizedValue === 'number') {
+    const date = new Date(normalizedValue);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }
+  const date = new Date(
+    normalizedValue.includes('T')
+      ? normalizedValue
+      : normalizedValue.replace(' ', 'T'),
+  );
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function formatStayDuration(createTime?: string) {
+function formatStayDuration(createTime?: Date | null | number | string) {
   const date = parseLocalDateTime(createTime);
   if (!date) return '-';
   const diff = Math.max(Date.now() - date.getTime(), 0);
@@ -819,15 +837,78 @@ function canConfirmIndicators() {
   return rows.value.some((item) => item.status === 'indicatorConfirm');
 }
 
+function parseTemplateSnapshot(
+  snapshotJson?: string,
+): FdmPerformanceTemplateApi.Template | undefined {
+  if (!snapshotJson) return undefined;
+  try {
+    const template = JSON.parse(
+      snapshotJson,
+    ) as FdmPerformanceTemplateApi.Template;
+    return template?.id ? template : undefined;
+  } catch (error) {
+    console.warn('[fdmperformance] parse template snapshot failed', error);
+    return undefined;
+  }
+}
+
+async function buildTemplateMap(
+  templateIds: number[],
+  instances: FdmPerformanceAssessmentApi.Instance[],
+) {
+  const templateMap = new Map<number, AssessmentTemplate>();
+  instances.forEach((item) => {
+    try {
+      const snapshot = parseTemplateSnapshot(item.templateSnapshotJson);
+      if (!snapshot?.id) return;
+      templateMap.set(Number(snapshot.id), mapApiTemplate(snapshot));
+    } catch (error) {
+      console.warn(
+        '[fdmperformance] map template snapshot failed',
+        item.id,
+        error,
+      );
+    }
+  });
+
+  await Promise.all(
+    templateIds.map(async (templateId) => {
+      try {
+        const template = await getFdmPerformanceTemplate(templateId);
+        templateMap.set(Number(template.id || templateId), mapApiTemplate(template));
+      } catch (error) {
+        console.warn(
+          `[fdmperformance] load template ${templateId} failed, fallback to snapshot`,
+          error,
+        );
+      }
+    }),
+  );
+
+  return templateMap;
+}
+
 async function loadApiData() {
   const batchId = Number(route.params.id);
-  if (!batchId) return;
+  batchLoadError.value = '';
+  if (!Number.isFinite(batchId) || batchId <= 0) {
+    apiBatch.value = undefined;
+    apiRows.value = [];
+    apiTemplateMap.value = new Map();
+    batchLoadError.value =
+      '考核批次编号无效，请从“已发起考核”列表进入具体批次';
+    return;
+  }
   apiLoading.value = true;
+  apiBatch.value = undefined;
+  apiRows.value = [];
+  apiTemplateMap.value = new Map();
   try {
     const shouldLoadUsers = simpleUsers.value.length === 0;
-    const [batchResp, instancePage, processLogPage, pendingTaskPage, users] =
+    const batchResp = await getFdmPerformanceAssessmentBatch(batchId);
+    apiBatch.value = mapApiBatch(batchResp, []);
+    const [instancePage, processLogPage, pendingTaskPage, users] =
       await Promise.all([
-        getFdmPerformanceAssessmentBatch(batchId),
         getFdmPerformanceAssessmentInstancePage({
           batchId,
           pageNo: 1,
@@ -837,21 +918,39 @@ async function loadApiData() {
           batchId,
           pageNo: 1,
           pageSize: -1,
+        }).catch((error) => {
+          console.warn('[fdmperformance] load change logs failed', error);
+          return { list: [] };
         }),
         getFdmPerformanceAssessmentTaskPage({
           batchId,
           pageNo: 1,
           pageSize: -1,
           status: 0,
+        }).catch((error) => {
+          console.warn('[fdmperformance] load pending tasks failed', error);
+          return { list: [] };
         }),
         shouldLoadUsers
-          ? getSimpleUserList()
+          ? getSimpleUserList().catch((error) => {
+              console.warn('[fdmperformance] load simple users failed', error);
+              return [];
+            })
           : Promise.resolve(simpleUsers.value),
       ]);
     simpleUsers.value = users;
-    const processLogMap = buildProcessLogMap(processLogPage.list || []);
-    const pendingTaskMap = buildPendingTaskMap(pendingTaskPage.list || []);
-    apiRows.value = instancePage.list.map((item) => {
+    const instances = Array.isArray(instancePage?.list)
+      ? instancePage.list
+      : [];
+    const processLogs = Array.isArray(processLogPage?.list)
+      ? processLogPage.list
+      : [];
+    const pendingTasks = Array.isArray(pendingTaskPage?.list)
+      ? pendingTaskPage.list
+      : [];
+    const processLogMap = buildProcessLogMap(processLogs);
+    const pendingTaskMap = buildPendingTaskMap(pendingTasks);
+    apiRows.value = instances.map((item) => {
       const mapped = mapApiInstance({
         ...item,
         ...processLogMap.get(item.id),
@@ -890,25 +989,21 @@ async function loadApiData() {
       ...new Set(
         [
           ...(batchResp.templateIds || []),
-          ...instancePage.list.map((item) => Number(item.templateId || 0)),
+          ...instances.map((item) => Number(item.templateId || 0)),
         ]
           .map(Number)
           .filter((item) => Number.isFinite(item) && item > 0),
       ),
     ];
-    if (templateIds.length > 0) {
-      const templateResponses = await Promise.all(
-        templateIds.map((templateId) => getFdmPerformanceTemplate(templateId)),
-      );
-      apiTemplateMap.value = new Map(
-        templateResponses.map((item) => [
-          Number(item.id),
-          mapApiTemplate(item),
-        ]),
-      );
-    } else {
-      apiTemplateMap.value = new Map();
-    }
+    apiTemplateMap.value = await buildTemplateMap(
+      templateIds,
+      instances,
+    );
+  } catch (error) {
+    console.error(error);
+    batchLoadError.value =
+      '考核详情加载失败，请确认该批次是否存在，或查看后端 /assessment/batch/get 接口错误';
+    message.error('加载考核详情失败，请检查该批次是否仍存在或接口是否返回异常');
   } finally {
     apiLoading.value = false;
   }
@@ -1037,12 +1132,13 @@ watch(() => route.params.id, loadApiData);
 
         <Table
           v-if="activeTab === 'people'"
+          class="performance-table"
           :columns="peopleColumns"
           :data-source="filteredRows"
           :loading="apiLoading"
           :pagination="{ pageSize: 10 }"
           :row-selection="rowSelection"
-          :scroll="{ x: 1500 }"
+          :scroll="{ x: 1600 }"
           row-key="id"
         >
           <template #bodyCell="{ column, record }">
@@ -1084,7 +1180,7 @@ watch(() => route.params.id, loadApiData);
               {{ record.grade ?? '-' }}
             </template>
             <template v-else-if="column.dataIndex === 'action'">
-              <Space wrap>
+              <div class="table-actions">
                 <Button
                   v-if="record.status === 'selfScore'"
                   size="small"
@@ -1189,7 +1285,7 @@ watch(() => route.params.id, loadApiData);
                 >
                   删除
                 </Button>
-              </Space>
+              </div>
             </template>
           </template>
         </Table>
@@ -1452,7 +1548,8 @@ watch(() => route.params.id, loadApiData);
         <Empty v-else description="当前暂无数据" />
       </Card>
     </template>
-    <Empty v-else description="未找到考核批次" />
+    <Empty v-else-if="apiLoading" description="正在加载考核详情" />
+    <Empty v-else :description="batchLoadError || '未找到考核批次'" />
 
     <Modal
       v-model:open="interviewModalOpen"
@@ -1651,6 +1748,7 @@ watch(() => route.params.id, loadApiData);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
 }
 
 .batch-title {
@@ -1659,6 +1757,7 @@ watch(() => route.params.id, loadApiData);
   gap: 24px;
   align-items: center;
   margin-bottom: 12px;
+  min-width: 0;
 }
 
 .tab-row {
@@ -1700,6 +1799,11 @@ watch(() => route.params.id, loadApiData);
   gap: 12px;
   align-items: center;
   margin-bottom: 14px;
+  min-width: 0;
+}
+
+.filter-row > * {
+  min-width: 0;
 }
 
 .filter-row span {
@@ -1714,6 +1818,45 @@ watch(() => route.params.id, loadApiData);
 .employee-cell span {
   font-size: 12px;
   color: #64748b;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: center;
+  max-width: 220px;
+  line-height: 1.4;
+}
+
+.table-actions :deep(.ant-btn) {
+  height: auto;
+  padding-inline: 0;
+  white-space: nowrap;
+}
+
+.performance-table {
+  width: 100%;
+  min-width: 0;
+}
+
+:deep(.ant-card),
+:deep(.ant-card-body),
+:deep(.ant-table-wrapper) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+:deep(.ant-table-wrapper) {
+  overflow: hidden;
+}
+
+:deep(.ant-table-content) {
+  overflow-x: auto !important;
+}
+
+:deep(.ant-table-cell) {
+  word-break: break-word;
 }
 
 .grade-section {

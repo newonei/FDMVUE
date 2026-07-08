@@ -414,6 +414,18 @@ const tagOptions = computed(() =>
     value,
   })),
 );
+const libraryDimensionOptions = computed(() =>
+  [
+    ...new Set(
+      apiIndicators.value
+        .map((item) => item.dimension)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ].map((value) => ({
+    label: value,
+    value,
+  })),
+);
 const scoreNodeDimensionNames = new Set(['主管评分']);
 
 const indicatorColumns = [
@@ -449,7 +461,9 @@ const dimensions = computed(() => [
       '过程指标',
       '自我管理',
       ...(draft.customDimensions || []),
-      ...sourceIndicators.value.map((item) => item.dimension),
+      ...apiTemplateIndicators.value.map((item) => item.dimension),
+      ...localDraftIndicators.value.map((item) => item.dimension),
+      ...selectedIndicators.value.map((item) => item.dimension),
     ].filter((dimension) => !scoreNodeDimensionNames.has(dimension)),
   ),
 ]);
@@ -466,7 +480,7 @@ const participantPreview = computed(
 );
 const importIndicatorRows = computed(() => {
   const text = importKeyword.value.trim();
-  return sourceIndicators.value.filter((item) => {
+  return apiIndicators.value.filter((item) => {
     if (scoreNodeDimensionNames.has(item.dimension)) {
       return false;
     }
@@ -517,19 +531,52 @@ function toggleIndicator(id: number, checked: boolean) {
 }
 
 function getDimensionIndicators(dimension: string) {
-  const rows = sourceIndicators.value.filter(
-    (item) => item.dimension === dimension,
-  );
-  if (!partialIndicatorOnly.value) {
-    return rows;
-  }
-  return rows.filter(
-    (item) => selectedIndicatorIds.value.includes(item.id) || item.weight > 0,
+  return sourceIndicators.value.filter(
+    (item) =>
+      item.dimension === dimension &&
+      selectedIndicatorIds.value.includes(item.id),
   );
 }
 
 function isLocalDraftIndicator(record: Record<string, any>) {
   return Number(record.id) < 0 || !record.indicatorId;
+}
+
+function getNextLocalIndicatorId() {
+  return Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
+}
+
+function cloneLibraryIndicatorToDimension(
+  source: PerformanceIndicator,
+  dimension: string,
+) {
+  const sourceIndicatorId = resolveIndicatorId(source);
+  const existed = sourceIndicators.value.find((item) => {
+    if (item.dimension !== dimension) {
+      return false;
+    }
+    const itemSourceIndicatorId = resolveIndicatorId(item);
+    if (sourceIndicatorId && itemSourceIndicatorId) {
+      return itemSourceIndicatorId === sourceIndicatorId;
+    }
+    return item.name === source.name;
+  });
+  if (existed) {
+    return existed.id;
+  }
+
+  const newIndicatorId = getNextLocalIndicatorId();
+  const indicator: PerformanceIndicator = {
+    ...source,
+    dimension,
+    dimensionId: undefined,
+    id: newIndicatorId,
+    indicatorId: sourceIndicatorId,
+    tags: [...new Set([dimension, ...source.tags])],
+    templateIndicatorId: undefined,
+  };
+  localDraftIndicators.value.unshift(indicator);
+  return newIndicatorId;
 }
 
 function cloneFlowNode(node: SimpleFlowNode) {
@@ -652,51 +699,53 @@ function openDimensionModal() {
 
 function openImportModal(dimension?: string) {
   activeImportDimension.value = dimension;
-  importSelectedIndicatorIds.value = dimension
-    ? selectedIndicatorIds.value.filter(
-        (id) =>
-          sourceIndicators.value.find((item) => item.id === id)?.dimension ===
-          dimension,
-      )
-    : [...selectedIndicatorIds.value];
+  importSelectedIndicatorIds.value = [];
   importKeyword.value = '';
-  importDimension.value = dimension;
+  importDimension.value = undefined;
   importTag.value = undefined;
   importModalOpen.value = true;
 }
 
 function confirmImportIndicators() {
-  if (activeImportDimension.value) {
-    const activeDimension = activeImportDimension.value;
-    const replaceableIds = new Set(
-      sourceIndicators.value
-        .filter(
-          (item) => item.dimension === activeDimension && Number(item.id) > 0,
-        )
-        .map((item) => item.id),
-    );
-    selectedIndicatorIds.value = [
-      ...new Set([
-        ...selectedIndicatorIds.value.filter((id) => !replaceableIds.has(id)),
-        ...importSelectedIndicatorIds.value,
-      ]),
-    ];
-  } else {
-    selectedIndicatorIds.value = [...new Set(importSelectedIndicatorIds.value)];
+  const checkedIndicators = importSelectedIndicatorIds.value
+    .map((id) => apiIndicators.value.find((item) => item.id === id))
+    .filter(Boolean) as PerformanceIndicator[];
+  if (checkedIndicators.length === 0) {
+    message.warning('请选择需要导入的指标');
+    return;
   }
-  importSelectedIndicatorIds.value.forEach((id) => {
+
+  const importedIds = activeImportDimension.value
+    ? checkedIndicators.map((item) =>
+        cloneLibraryIndicatorToDimension(item, activeImportDimension.value!),
+      )
+    : checkedIndicators.map((item) => item.id);
+  selectedIndicatorIds.value = [
+    ...new Set([...selectedIndicatorIds.value, ...importedIds]),
+  ];
+
+  importedIds.forEach((id) => {
     if (!scorerRules[id]) {
       scorerRules[id] = '直接主管';
     }
   });
+  importSelectedIndicatorIds.value = [];
   importModalOpen.value = false;
-  message.success(`已导入 ${importSelectedIndicatorIds.value.length} 个指标`);
+  message.success(
+    `已导入 ${importedIds.length} 个指标${
+      activeImportDimension.value ? `到「${activeImportDimension.value}」` : ''
+    }`,
+  );
   activeImportDimension.value = undefined;
 }
 
+function closeImportModal() {
+  activeImportDimension.value = undefined;
+  importSelectedIndicatorIds.value = [];
+}
+
 function addManualIndicator(dimension: string) {
-  const newIndicatorId =
-    Math.min(0, ...localDraftIndicators.value.map((item) => item.id)) - 1;
+  const newIndicatorId = getNextLocalIndicatorId();
   const sameDimensionCount = getDimensionIndicators(dimension).length + 1;
   const indicator: PerformanceIndicator = {
     dimension,
@@ -2078,9 +2127,16 @@ watch(
           : '指标库导入'
       "
       width="980px"
-      @cancel="activeImportDimension = undefined"
+      @cancel="closeImportModal"
       @ok="confirmImportIndicators"
     >
+      <Alert
+        v-if="activeImportDimension"
+        class="import-target-alert"
+        show-icon
+        type="info"
+        :message="`将选中的指标导入到「${activeImportDimension}」维度，确认后才会加入当前考评表。`"
+      />
       <div class="import-toolbar">
         <Input
           v-model:value="importKeyword"
@@ -2090,9 +2146,8 @@ watch(
         <Select
           v-model:value="importDimension"
           allow-clear
-          :disabled="Boolean(activeImportDimension)"
-          :options="dimensions.map((value) => ({ label: value, value }))"
-          placeholder="指标类型"
+          :options="libraryDimensionOptions"
+          placeholder="指标库分类"
         />
         <Select
           v-model:value="importTag"
@@ -2411,6 +2466,10 @@ watch(
   display: grid;
   grid-template-columns: minmax(260px, 1fr) 160px 180px;
   gap: 10px;
+  margin-bottom: 12px;
+}
+
+.import-target-alert {
   margin-bottom: 12px;
 }
 
