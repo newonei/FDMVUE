@@ -494,7 +494,7 @@ onMounted(async () => {
             </Form.Item>
           </Form>
           <Alert
-            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_HR_REVIEW、JIXIAO_EMPLOYEE_CONFIRM 五个用户任务 key。"
+            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_EMPLOYEE_CONFIRM、JIXIAO_HR_REVIEW 五个用户任务 key。"
             show-icon
             type="warning"
           />

@@ -49,8 +49,8 @@ const bpmStepKeys = [
   'JIXIAO_INDICATOR_CONFIRM',
   'JIXIAO_SELF_SCORE',
   'JIXIAO_SUPERVISOR_SCORE',
-  'JIXIAO_HR_REVIEW',
   'JIXIAO_EMPLOYEE_CONFIRM',
+  'JIXIAO_HR_REVIEW',
 ];
 
 type ProcessStepStatus = 'error' | 'finish' | 'process' | 'wait';
@@ -97,14 +97,14 @@ const processSteps = computed(() => {
       title: '主管评分',
     },
     {
-      description: '人事',
-      key: 'JIXIAO_HR_REVIEW',
-      title: '人事审核',
-    },
-    {
       description: detail?.userName || '被考核人',
       key: 'JIXIAO_EMPLOYEE_CONFIRM',
       title: '员工确认',
+    },
+    {
+      description: '人事',
+      key: 'JIXIAO_HR_REVIEW',
+      title: '人事审核',
     },
     {
       description: detail?.result?.grade
