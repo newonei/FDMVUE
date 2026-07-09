@@ -1,264 +1,249 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, ref } from 'vue';
+import type { JixiaoApi } from '#/api/fdmperformance';
+
+import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { Button, Card, Empty, Input, Modal, Space, Table, Tag, message } from 'ant-design-vue';
+import {
+  Button,
+  Drawer,
+  Empty,
+  Form,
+  message,
+  Space,
+  Table,
+  Tag,
+  Textarea,
+} from 'ant-design-vue';
 
 import {
-  confirmMyFdmPerformanceAssessmentIndicators,
-  confirmMyFdmPerformanceAssessmentResult,
-  getMyFdmPerformanceAssessmentInstancePage,
-  submitMyFdmPerformanceAssessmentResultObjection,
-  type FdmPerformanceAssessmentApi,
-} from '#/api/fdmperformance/assessment';
+  getMyInstancePage,
+  getMyPendingReview,
+  getMyResults,
+  submitReview,
+} from '#/api/fdmperformance';
 
+import {
+  GRADE_OPTIONS,
+  INSTANCE_STATUS_MAP,
+  REVIEW_STATUS_MAP,
+  TASK_LABELS,
+} from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import { apiPeriodKeyToText, mapApiInstance } from '../shared/api-adapter';
-import type { AssessmentInstance } from '../shared/model';
-import { instanceStatusMetaMap } from '../shared/model';
-import { usePerformancePath } from '../shared/route';
 
 defineOptions({ name: 'FdmPerformanceMy' });
 
 const router = useRouter();
-const { performancePath } = usePerformancePath();
-const objectionModalOpen = ref(false);
-const objectionInstanceId = ref<number>();
-const objectionText = ref('对评分结果有异议，需要绩效管理员复核评分依据和等级系数。');
 const loading = ref(false);
-const apiInstances = ref<(AssessmentInstance & {
-  apiRaw: FdmPerformanceAssessmentApi.Instance;
-  batch: { id: number; name: string };
-  employee: { dept?: string; name?: string };
-})[]>([]);
+const reviewOpen = ref(false);
+const instances = ref<JixiaoApi.Instance[]>([]);
+const results = ref<JixiaoApi.Result[]>([]);
+const pendingReview = ref<JixiaoApi.Review>();
+const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
+  improvementPlan: '',
+  missedIndicators: '',
+  reasonAnalysis: '',
+  reviewId: 0,
+  supportNeeded: '',
+  workCompletion: '',
+});
 
-const myInstances = computed(() => apiInstances.value);
-const myResults = computed(() => myInstances.value.filter((item) => item.resultVisible));
-const myTodos = computed(() =>
-  myInstances.value.filter(
-    (item) =>
-      item.status === 'indicatorConfirm' ||
-      item.status === 'selfScore' ||
-      (item.resultVisible && !item.resultConfirmed && !item.resultObjection),
-  ),
-);
-
-const columns: TableColumnsType = [
-  { dataIndex: 'batch', title: '考核名称' },
-  { dataIndex: 'nodeName', title: '当前流程', width: 160 },
-  { dataIndex: 'currentExecutor', title: '当前执行人', width: 140 },
-  { dataIndex: 'progress', title: '进度', width: 100 },
-  { dataIndex: 'finalScore', title: '考核结果', width: 120 },
-  { dataIndex: 'grade', title: '绩效等级', width: 120 },
-  { dataIndex: 'confirm', title: '确认状态', width: 120 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 240 },
+const instanceColumns: TableColumnsType = [
+  { dataIndex: 'currentTaskName', title: '当前节点', width: 150 },
+  { dataIndex: 'supervisorUserName', title: '主管', width: 150 },
+  { dataIndex: 'finalScore', title: '主管汇总分', width: 120 },
+  { dataIndex: 'status', title: '状态', width: 100 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 100 },
 ];
 
-function getInstanceMeta(status: unknown) {
-  return instanceStatusMetaMap[status as keyof typeof instanceStatusMetaMap] || instanceStatusMetaMap.indicatorConfirm;
+const resultColumns: TableColumnsType = [
+  { dataIndex: 'publicTime', title: '公示时间' },
+  { dataIndex: 'supervisorUserName', title: '主管' },
+  { dataIndex: 'finalScore', title: '最终分' },
+  { dataIndex: 'grade', title: '等级' },
+  { dataIndex: 'employeeConfirmed', title: '确认状态' },
+];
+
+function instanceStatus(status?: number): { color: string; text: string } {
+  return INSTANCE_STATUS_MAP[status ?? 1] ?? { color: 'default', text: '-' };
 }
 
-function openSelfScore(item: Record<string, any>) {
-  router.push({
-    path: performancePath(`/batches/${item.batch.id}/instances/${item.id}`),
-    query: { scoreType: 'self', source: 'my' },
-  });
-}
-
-async function confirmIndicators(instanceId: number) {
-  await confirmMyFdmPerformanceAssessmentIndicators(instanceId);
-  await loadMyPerformance();
-  message.success('指标已确认，进入执行中');
-}
-
-async function confirmResult(instanceId: number) {
-  await confirmMyFdmPerformanceAssessmentResult(instanceId);
-  await loadMyPerformance();
-  message.success('结果已确认');
-}
-
-function openObjection(instanceId: number) {
-  objectionInstanceId.value = instanceId;
-  objectionText.value = '对评分结果有异议，需要绩效管理员复核评分依据和等级系数。';
-  objectionModalOpen.value = true;
-}
-
-async function saveObjection() {
-  if (!objectionInstanceId.value) return;
-  await submitMyFdmPerformanceAssessmentResultObjection({
-    instanceId: objectionInstanceId.value,
-    reason: objectionText.value,
-  });
-  await loadMyPerformance();
-  objectionModalOpen.value = false;
-  message.success('已提交结果异议');
-}
-
-async function loadMyPerformance() {
+async function load() {
   loading.value = true;
   try {
-    const page = await getMyFdmPerformanceAssessmentInstancePage({
-      pageNo: 1,
-      pageSize: 100,
-    });
-    apiInstances.value = (page.list || []).map((item) => ({
-      ...mapApiInstance(item),
-      apiRaw: item,
-      batch: {
-        id: Number(item.batchId || 0),
-        name:
-          item.batchName ||
-          (item.periodKey ? `${apiPeriodKeyToText(item.periodKey)}绩效考核` : `考核批次 ${item.batchId || '-'}`),
-      },
-      employee: { dept: item.deptName, name: item.userName },
-    }));
+    const [myInstances, myResults, review] = await Promise.all([
+      getMyInstancePage({ pageNo: 1, pageSize: 10 }),
+      getMyResults(),
+      getMyPendingReview(),
+    ]);
+    instances.value = myInstances.list;
+    results.value = myResults;
+    pendingReview.value = review;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(loadMyPerformance);
+function openInstance(record: JixiaoApi.Instance) {
+  router.push(
+    `/fdmperformance/batches/${record.batchId}/instances/${record.id}`,
+  );
+}
+
+function openReview() {
+  if (!pendingReview.value?.id) return;
+  Object.assign(reviewForm, {
+    improvementPlan: pendingReview.value.improvementPlan || '',
+    missedIndicators: pendingReview.value.missedIndicators || '',
+    reasonAnalysis: pendingReview.value.reasonAnalysis || '',
+    reviewId: pendingReview.value.id,
+    supportNeeded: pendingReview.value.supportNeeded || '',
+    workCompletion: pendingReview.value.workCompletion || '',
+  });
+  reviewOpen.value = true;
+}
+
+async function submitReviewForm() {
+  await submitReview(reviewForm);
+  message.success('复盘已提交');
+  reviewOpen.value = false;
+  await load();
+}
+
+onMounted(load);
 </script>
 
 <template>
-  <PerformanceShell description="员工视角查看自己的待办、当前考核和已公示结果。" title="我的绩效">
-    <div class="my-grid">
-      <Card title="我的待办">
-        <div v-if="myTodos.length" class="todo-list">
-          <div v-for="item in myTodos" :key="item.id" class="todo-item">
-            <div>
-              <strong>{{ item.batch.name }}</strong>
-              <span>{{ item.nodeName }} · {{ item.stayTime }}</span>
-            </div>
-            <Button v-if="item.status === 'indicatorConfirm'" type="primary" @click="confirmIndicators(item.id)">
-              确认指标
-            </Button>
-            <Button v-else-if="item.status === 'selfScore'" type="primary" @click="openSelfScore(item)">
-              去自评
-            </Button>
-            <Space v-else>
-              <Button type="primary" @click="confirmResult(item.id)">确认结果</Button>
-              <Button danger @click="openObjection(item.id)">提交异议</Button>
-            </Space>
-          </div>
-        </div>
-        <Empty v-else description="暂无需要处理的待办" />
-      </Card>
-      <Card title="我的考核结果">
-        <div v-if="myResults.length" class="result-card">
-          <strong>{{ myResults[0]!.finalScore }}</strong>
-          <span>{{ myResults[0]!.grade }}</span>
-        </div>
-        <Empty v-else description="暂无考核结果" />
-      </Card>
+  <PerformanceShell title="我的绩效">
+    <div v-if="pendingReview" class="review-banner">
+      <div>
+        <strong>C 级绩效复盘待提交</strong>
+        <span>
+          状态：{{ REVIEW_STATUS_MAP[pendingReview.status || 0]?.text }}
+        </span>
+      </div>
+      <Button type="primary" @click="openReview">填写面谈表</Button>
     </div>
 
-    <Card title="我的考核">
-      <Table :columns="columns" :data-source="myInstances" :loading="loading" :pagination="false" row-key="id">
+    <div class="panel">
+      <div class="panel-head">
+        <strong>当前考核</strong>
+      </div>
+      <Table
+        :columns="instanceColumns"
+        :data-source="instances"
+        :loading="loading"
+        :pagination="false"
+        row-key="id"
+      >
+        <template #emptyText>
+          <Empty description="暂无当前考核" />
+        </template>
         <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'batch'">
-            {{ record.batch.name }}
+          <template v-if="column.dataIndex === 'currentTaskName'">
+            {{
+              TASK_LABELS[record.currentTaskKey] ||
+              record.currentTaskName ||
+              '-'
+            }}
           </template>
-          <template v-else-if="column.dataIndex === 'nodeName'">
-            <Tag :color="getInstanceMeta(record.status).color">{{ record.nodeName }}</Tag>
-          </template>
-          <template v-else-if="column.dataIndex === 'progress'">
-            {{ record.progress }}/8
-          </template>
-          <template v-else-if="column.dataIndex === 'finalScore'">
-            {{ record.finalScore ?? '-' }}
-          </template>
-          <template v-else-if="column.dataIndex === 'grade'">
-            {{ record.grade ?? '-' }}
-          </template>
-          <template v-else-if="column.dataIndex === 'confirm'">
-            <Tag :color="record.resultObjection ? 'red' : record.resultConfirmed ? 'green' : record.resultVisible ? 'blue' : 'default'">
-              {{ record.resultObjection ? '结果异议' : record.resultConfirmed ? '已确认' : record.resultVisible ? '待确认' : '-' }}
+          <template v-else-if="column.dataIndex === 'status'">
+            <Tag :color="instanceStatus(record.status).color">
+              {{ instanceStatus(record.status).text }}
             </Tag>
           </template>
           <template v-else-if="column.dataIndex === 'action'">
-            <Space>
-              <Button v-if="record.status === 'indicatorConfirm'" size="small" type="link" @click="confirmIndicators(record.id)">确认指标</Button>
-              <Button v-if="record.status === 'selfScore'" size="small" type="link" @click="openSelfScore(record)">自评</Button>
-              <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" size="small" type="link" @click="confirmResult(record.id)">确认结果</Button>
-              <Button v-if="record.resultVisible && !record.resultConfirmed && !record.resultObjection" danger size="small" type="link" @click="openObjection(record.id)">提交异议</Button>
-              <Button
-                size="small"
-                type="link"
-                @click="
-                  router.push({
-                    path: performancePath(`/batches/${record.batch.id}/instances/${record.id}`),
-                    query: { source: 'my' },
-                  })
-                "
-              >
-                查看
-              </Button>
-            </Space>
+            <Button size="small" type="link" @click="openInstance(record)">
+处理
+</Button>
           </template>
         </template>
       </Table>
-    </Card>
+    </div>
 
-    <Modal v-model:open="objectionModalOpen" title="提交结果异议" @ok="saveObjection">
-      <Input.TextArea v-model:value="objectionText" :rows="4" />
-    </Modal>
+    <div class="panel">
+      <div class="panel-head">
+        <strong>已公示结果</strong>
+      </div>
+      <Table
+        :columns="resultColumns"
+        :data-source="results"
+        :loading="loading"
+        :pagination="false"
+        row-key="id"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'grade'">
+            <Tag :color="record.grade === 'C' ? 'red' : 'blue'">
+              {{
+                GRADE_OPTIONS.find((item) => item.value === record.grade)
+                  ?.label || record.grade
+              }}
+            </Tag>
+          </template>
+          <template v-else-if="column.dataIndex === 'employeeConfirmed'">
+            <Tag :color="record.employeeConfirmed ? 'green' : 'orange'">
+              {{ record.employeeConfirmed ? '已确认' : '待确认' }}
+            </Tag>
+          </template>
+        </template>
+      </Table>
+    </div>
+
+    <Drawer v-model:open="reviewOpen" :width="640" title="C 级绩效面谈表">
+      <Form layout="vertical">
+        <Form.Item label="一、你觉得你的本月工作完成情况如何" required>
+          <Textarea v-model:value="reviewForm.workCompletion" :rows="3" />
+        </Form.Item>
+        <Form.Item label="二、你觉得主要原因是什么（客观 + 主观）" required>
+          <Textarea v-model:value="reviewForm.reasonAnalysis" :rows="3" />
+        </Form.Item>
+        <Form.Item label="三、本月主要未达标指标有哪些" required>
+          <Textarea v-model:value="reviewForm.missedIndicators" :rows="3" />
+        </Form.Item>
+        <Form.Item label="四、下个月如何避免 C 级" required>
+          <Textarea v-model:value="reviewForm.improvementPlan" :rows="3" />
+        </Form.Item>
+        <Form.Item label="五、你需要获得怎样的帮助" required>
+          <Textarea v-model:value="reviewForm.supportNeeded" :rows="3" />
+        </Form.Item>
+      </Form>
+      <template #footer>
+        <Space>
+          <Button @click="reviewOpen = false">取消</Button>
+          <Button type="primary" @click="submitReviewForm">提交</Button>
+        </Space>
+      </template>
+    </Drawer>
   </PerformanceShell>
 </template>
 
 <style scoped>
-.my-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 14px;
+.panel,
+.review-banner {
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
 }
 
-.todo-list {
-  display: grid;
-  gap: 12px;
-}
-
-.todo-item {
+.review-banner {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid #f1f5f9;
+  background: #fff7e6;
+  border-color: #ffd591;
 }
 
-.todo-item strong,
-.todo-item span {
-  display: block;
-}
-
-.todo-item span {
-  margin-top: 4px;
-  color: #64748b;
-}
-
-.result-card {
+.review-banner div {
   display: grid;
-  place-items: center;
-  min-height: 160px;
+  gap: 4px;
 }
 
-.result-card strong {
-  color: #1677ff;
-  font-size: 42px;
-}
-
-.result-card span {
-  color: #16a34a;
-  font-size: 22px;
-  font-weight: 650;
-}
-
-@media (max-width: 960px) {
-  .my-grid {
-    grid-template-columns: 1fr;
-  }
+.panel-head {
+  margin-bottom: 10px;
 }
 </style>

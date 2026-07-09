@@ -1,340 +1,347 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemDeptApi } from '#/api/system/dept';
 
-import { Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'ant-design-vue';
+import { onMounted, reactive, ref } from 'vue';
+
+import { handleTree } from '@vben/utils';
 
 import {
-  createFdmPerformanceIndicator,
-  createFdmPerformanceIndicatorTag,
-  deleteFdmPerformanceIndicator,
-  getFdmPerformanceIndicatorPage,
-  getFdmPerformanceIndicatorTagList,
-  updateFdmPerformanceIndicator,
-  type FdmPerformanceIndicatorApi,
-} from '#/api/fdmperformance/indicator';
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Textarea,
+  TreeSelect,
+} from 'ant-design-vue';
 
+import {
+  createIndicator,
+  deleteIndicator,
+  getIndicatorPage,
+  updateIndicator,
+} from '#/api/fdmperformance';
+import { getSimpleDeptList } from '#/api/system/dept';
+
+import { SCORE_METHOD_OPTIONS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import type { Indicator } from '../shared/model';
 
 defineOptions({ name: 'FdmPerformanceIndicators' });
 
-const keyword = ref('');
-const modalOpen = ref(false);
-const tagManagerOpen = ref(false);
-const tagKeyword = ref('');
-const newTagName = ref('');
 const loading = ref(false);
-const apiIndicators = ref<Indicator[]>([]);
-const apiTags = ref<FdmPerformanceIndicatorApi.IndicatorTag[]>([]);
-const editingIndicator = reactive<Indicator>({
-  dimension: '业绩指标',
-  id: 0,
+const deptLoading = ref(false);
+const drawerOpen = ref(false);
+const rows = ref<JixiaoApi.Indicator[]>([]);
+const deptTreeOptions = ref<SystemDeptApi.Dept[]>([]);
+const deptNameMap = ref<Record<number, string>>({});
+const total = ref(0);
+
+const query = reactive({
+  deptId: undefined as number | undefined,
+  dimensionName: '',
   name: '',
-  scoreMode: '手动评分',
-  standard: '',
-  status: 'enabled',
-  tags: [],
-  weight: 0,
+  pageNo: 1,
+  pageSize: 10,
+  status: undefined as number | undefined,
 });
 
-const dimensions = ['业绩指标', '过程指标', '自我管理', '加分项', '扣分项', '一票否决'];
-const indicators = computed(() => apiIndicators.value);
-const allTags = computed(() =>
-  Array.from(
-    new Set([
-      ...apiTags.value.map((item) => item.name || ''),
-      ...indicators.value.flatMap((item) => item.tags),
-    ]),
-  ).filter(Boolean),
-);
-const tagOptions = computed(() => allTags.value.map((value) => ({ label: value, value })));
-const filteredTags = computed(() => {
-  const text = tagKeyword.value.trim();
-  return allTags.value.filter((item) => !text || item.includes(text));
+const form = reactive<JixiaoApi.Indicator>({
+  defaultWeight: 0,
+  dimensionName: '业绩指标',
+  name: '',
+  scoreMethod: 'NUMBER',
+  standard: '',
+  status: 0,
 });
+
+const deptFieldNames = { children: 'children', label: 'name', value: 'id' };
+
 const columns: TableColumnsType = [
-  { dataIndex: 'name', title: '指标名称', width: 220 },
-  { dataIndex: 'dimension', title: '指标类型', width: 140 },
+  { dataIndex: 'name', title: '指标名称', width: 180 },
+  { dataIndex: 'dimensionName', title: '维度', width: 140 },
+  { dataIndex: 'deptId', title: '部门', width: 140 },
   { dataIndex: 'standard', title: '考核标准' },
-  { dataIndex: 'weight', title: '权重', width: 100 },
-  { dataIndex: 'scoreMode', title: '评分方式', width: 120 },
-  { dataIndex: 'tags', title: '标签', width: 220 },
-  { dataIndex: 'status', title: '状态', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
+  { dataIndex: 'defaultWeight', title: '默认权重', width: 100 },
+  { dataIndex: 'scoreMethod', title: '评分方式', width: 120 },
+  { dataIndex: 'status', title: '状态', width: 90 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 150 },
 ];
 
-const filteredIndicators = computed(() => {
-  const text = keyword.value.trim();
-  if (!text) return indicators.value;
-  return indicators.value.filter((item) =>
-    [item.name, item.dimension, item.standard, item.tags.join(',')].some((value) => value.includes(text)),
-  );
-});
-
-function openCreate() {
-  Object.assign(editingIndicator, {
-    dimension: '业绩指标',
-    id: 0,
-    name: '',
-    scoreMode: '手动评分',
-    standard: '',
-    status: 'enabled',
-    tags: [],
-    weight: 0,
-  });
-  modalOpen.value = true;
-}
-
-function openEdit(record: Indicator) {
-  Object.assign(editingIndicator, JSON.parse(JSON.stringify(record)));
-  modalOpen.value = true;
-}
-
-async function save() {
-  if (!editingIndicator.name.trim() || !editingIndicator.standard.trim()) {
-    message.warning('请填写指标名称和考核标准');
-    return;
-  }
-  const tagIds = await ensureTagIds(editingIndicator.tags);
-  const payload = {
-    id: editingIndicator.id || undefined,
-    name: editingIndicator.name,
-    remark: JSON.stringify({
-      dimension: editingIndicator.dimension,
-      scoreMode: editingIndicator.scoreMode,
-      weight: editingIndicator.weight,
-    }),
-    sourceType: 1,
-    standard: editingIndicator.standard,
-    status: editingIndicator.status === 'enabled' ? 0 : 1,
-    tagIds,
-  };
-  if (payload.id) {
-    await updateFdmPerformanceIndicator(payload);
-  } else {
-    await createFdmPerformanceIndicator(payload);
-  }
-  await loadIndicators();
-  modalOpen.value = false;
-  message.success('指标已保存');
-}
-
-async function addTag() {
-  const tag = newTagName.value.trim();
-  if (!tag) {
-    message.warning('请填写标签名称');
-    return;
-  }
-  if (!apiTags.value.some((item) => item.name === tag)) {
-    await createFdmPerformanceIndicatorTag({
-      name: tag,
-      sort: apiTags.value.length * 10,
-      status: 0,
-      tagType: 1,
-    });
-    await loadTags();
-  }
-  newTagName.value = '';
-  message.success('标签已添加');
-}
-
-async function removeIndicator(id: number) {
-  await deleteFdmPerformanceIndicator(id);
-  await loadIndicators();
-  message.success('指标已删除');
-}
-
-function parseIndicatorRemark(remark?: string) {
-  try {
-    return remark ? JSON.parse(remark) as Partial<Indicator> : {};
-  } catch {
-    return {};
-  }
-}
-
-function mapApiIndicator(item: FdmPerformanceIndicatorApi.Indicator): Indicator {
-  const extra = parseIndicatorRemark(item.remark);
-  const tags = (item.tagIds || [])
-    .map((id) => apiTags.value.find((tag) => tag.id === id)?.name)
-    .filter((tag): tag is string => Boolean(tag));
-  return {
-    dimension: extra.dimension || tags[0] || '业绩指标',
-    id: Number(item.id || 0),
-    name: item.name || '未命名指标',
-    scoreMode: extra.scoreMode || '手动评分',
-    standard: item.standard || '',
-    status: item.status === 1 ? 'stopped' : 'enabled',
-    tags,
-    weight: Number(extra.weight || 0),
-  };
-}
-
-async function ensureTagIds(tags: string[]) {
-  const ids: number[] = [];
-  for (const tag of tags.map((item) => item.trim()).filter(Boolean)) {
-    const existed = apiTags.value.find((item) => item.name === tag);
-    if (existed?.id) {
-      ids.push(existed.id);
-      continue;
+function buildDeptNameMap(list: SystemDeptApi.Dept[]) {
+  const map: Record<number, string> = {};
+  const walk = (items: SystemDeptApi.Dept[]) => {
+    for (const item of items) {
+      if (item.id !== undefined) {
+        map[item.id] = item.name;
+      }
+      if (item.children?.length) {
+        walk(item.children);
+      }
     }
-    const id = await createFdmPerformanceIndicatorTag({
-      name: tag,
-      sort: apiTags.value.length * 10,
-      status: 0,
-      tagType: 1,
-    });
-    ids.push(id);
-    apiTags.value.push({ id, name: tag, status: 0, tagType: 1 });
+  };
+  walk(list);
+  return map;
+}
+
+function deptName(deptId?: number) {
+  if (!deptId) {
+    return '-';
   }
-  return ids;
+  return deptNameMap.value[deptId] || `#${deptId}`;
 }
 
-async function loadTags() {
-  apiTags.value = await getFdmPerformanceIndicatorTagList({ status: 0 });
+async function loadDepartments() {
+  deptLoading.value = true;
+  try {
+    const data = await getSimpleDeptList();
+    deptNameMap.value = buildDeptNameMap(data);
+    deptTreeOptions.value = handleTree(data) as SystemDeptApi.Dept[];
+  } finally {
+    deptLoading.value = false;
+  }
 }
 
-async function loadIndicators() {
+function resetForm() {
+  Object.assign(form, {
+    defaultWeight: 0,
+    deptId: undefined,
+    dimensionName: '业绩指标',
+    id: undefined,
+    name: '',
+    remark: '',
+    scoreMethod: 'NUMBER',
+    standard: '',
+    status: 0,
+  });
+}
+
+async function load() {
   loading.value = true;
   try {
-    await loadTags();
-    const page = await getFdmPerformanceIndicatorPage({
-      name: keyword.value.trim() || undefined,
-      pageNo: 1,
-      pageSize: 200,
-    });
-    apiIndicators.value = (page.list || []).map(mapApiIndicator);
+    const data = await getIndicatorPage(query);
+    rows.value = data.list;
+    total.value = data.total;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(loadIndicators);
+function openCreate() {
+  resetForm();
+  drawerOpen.value = true;
+}
+
+function openEdit(record: JixiaoApi.Indicator) {
+  resetForm();
+  Object.assign(form, record);
+  drawerOpen.value = true;
+}
+
+async function save() {
+  if (!form.name?.trim() || !form.dimensionName?.trim()) {
+    message.warning('请填写指标名称和维度');
+    return;
+  }
+  await (form.id ? updateIndicator(form) : createIndicator(form));
+  message.success('已保存');
+  drawerOpen.value = false;
+  await load();
+}
+
+async function remove(id?: number) {
+  if (!id) return;
+  await deleteIndicator(id);
+  message.success('已删除');
+  await load();
+}
+
+function handleTableChange(pagination: any) {
+  query.pageNo = pagination.current;
+  query.pageSize = pagination.pageSize;
+  load();
+}
+
+onMounted(() => {
+  loadDepartments();
+  load();
+});
 </script>
 
 <template>
-  <PerformanceShell
-    description="管理可被考评表复用的绩效指标，支持按维度、标签和评分方式维护。"
-    title="指标库"
-  >
+  <PerformanceShell title="指标库">
     <template #actions>
-      <Button @click="tagManagerOpen = true">标签管理</Button>
       <Button type="primary" @click="openCreate">新增指标</Button>
     </template>
 
-    <Card>
-      <div class="toolbar">
-        <Input v-model:value="keyword" allow-clear placeholder="搜索指标名称、类型、标签" />
-      </div>
-      <Table
-        :columns="columns"
-        :data-source="filteredIndicators"
-        :loading="loading"
-        :pagination="{ pageSize: 10 }"
-        row-key="id"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'weight'">
-            {{ record.weight }}%
-          </template>
-          <template v-else-if="column.dataIndex === 'tags'">
-            <Space :size="4" wrap>
-              <Tag v-for="tag in record.tags" :key="tag">{{ tag }}</Tag>
-            </Space>
-          </template>
-          <template v-else-if="column.dataIndex === 'status'">
-            <Tag :color="record.status === 'enabled' ? 'green' : 'default'">
-              {{ record.status === 'enabled' ? '启用中' : '停用' }}
-            </Tag>
-          </template>
-          <template v-else-if="column.dataIndex === 'action'">
-            <Space>
-              <Button size="small" type="link" @click="openEdit(record as Indicator)">编辑</Button>
-              <Button danger size="small" type="link" @click="removeIndicator(record.id)">删除</Button>
-            </Space>
-          </template>
-        </template>
-      </Table>
-    </Card>
+    <div class="filter-bar">
+      <Input v-model:value="query.name" allow-clear placeholder="指标名称" />
+      <Input
+        v-model:value="query.dimensionName"
+        allow-clear
+        placeholder="维度"
+      />
+      <TreeSelect
+        v-model:value="query.deptId"
+        allow-clear
+        :field-names="deptFieldNames"
+        :loading="deptLoading"
+        placeholder="选择部门"
+        show-search
+        tree-default-expand-all
+        :tree-data="deptTreeOptions"
+        tree-node-filter-prop="name"
+      />
+      <Select
+        v-model:value="query.status"
+        allow-clear
+        :options="[
+          { label: '启用', value: 0 },
+          { label: '停用', value: 1 },
+        ]"
+        placeholder="状态"
+      />
+      <Button type="primary" @click="load">查询</Button>
+    </div>
 
-    <Modal v-model:open="modalOpen" title="指标设置" width="720px" @ok="save">
+    <Table
+      :columns="columns"
+      :data-source="rows"
+      :loading="loading"
+      :pagination="{ current: query.pageNo, pageSize: query.pageSize, total }"
+      row-key="id"
+      size="middle"
+      @change="handleTableChange"
+    >
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.dataIndex === 'defaultWeight'">
+          {{ record.defaultWeight || 0 }}%
+        </template>
+        <template v-else-if="column.dataIndex === 'status'">
+          <Tag :color="record.status === 0 ? 'green' : 'red'">
+            {{ record.status === 0 ? '启用' : '停用' }}
+          </Tag>
+        </template>
+        <template v-else-if="column.dataIndex === 'deptId'">
+          {{ deptName(record.deptId) }}
+        </template>
+        <template v-else-if="column.dataIndex === 'scoreMethod'">
+          {{
+            SCORE_METHOD_OPTIONS.find(
+              (item) => item.value === record.scoreMethod,
+            )?.label || record.scoreMethod
+          }}
+        </template>
+        <template v-else-if="column.dataIndex === 'action'">
+          <Space>
+            <Button size="small" type="link" @click="openEdit(record)">
+编辑
+</Button>
+            <Popconfirm title="确认删除该指标？" @confirm="remove(record.id)">
+              <Button danger size="small" type="link">删除</Button>
+            </Popconfirm>
+          </Space>
+        </template>
+      </template>
+    </Table>
+
+    <Drawer
+      v-model:open="drawerOpen"
+      destroy-on-close
+      :width="520"
+      title="指标编辑"
+      @close="resetForm"
+    >
       <Form layout="vertical">
         <Form.Item label="指标名称" required>
-          <Input v-model:value="editingIndicator.name" placeholder="请输入指标名称" />
+          <Input v-model:value="form.name" />
         </Form.Item>
-        <Form.Item label="指标类型" required>
-          <Select v-model:value="editingIndicator.dimension" :options="dimensions.map((value) => ({ label: value, value }))" />
+        <Form.Item label="维度" required>
+          <Input
+            v-model:value="form.dimensionName"
+            placeholder="如：业绩指标、工作态度"
+          />
         </Form.Item>
-        <Form.Item label="权重">
-          <InputNumber v-model:value="editingIndicator.weight" :max="100" :min="0" addon-after="%" class="full" />
+        <Form.Item label="部门">
+          <TreeSelect
+            v-model:value="form.deptId"
+            allow-clear
+            :field-names="deptFieldNames"
+            :loading="deptLoading"
+            placeholder="选择部门"
+            show-search
+            tree-default-expand-all
+            :tree-data="deptTreeOptions"
+            tree-node-filter-prop="name"
+          />
+        </Form.Item>
+        <Form.Item label="考核标准">
+          <Textarea v-model:value="form.standard" :rows="5" />
+        </Form.Item>
+        <Form.Item label="默认权重">
+          <InputNumber
+            v-model:value="form.defaultWeight"
+            :max="100"
+            :min="0"
+            class="full"
+            addon-after="%"
+          />
         </Form.Item>
         <Form.Item label="评分方式">
           <Select
-            v-model:value="editingIndicator.scoreMode"
-            :options="['手动评分', '按分数区间对应', '输入框手动输入', '设置评分组'].map((value) => ({ label: value, value }))"
+            v-model:value="form.scoreMethod"
+            :options="SCORE_METHOD_OPTIONS"
           />
         </Form.Item>
-        <Form.Item label="考核标准" required>
-          <Input.TextArea v-model:value="editingIndicator.standard" :rows="5" placeholder="请输入考核标准" />
-        </Form.Item>
-        <Form.Item label="标签">
+        <Form.Item label="状态">
           <Select
-            v-model:value="editingIndicator.tags"
-            :options="tagOptions"
-            mode="tags"
-            placeholder="输入标签后回车"
+            v-model:value="form.status"
+            :options="[
+              { label: '启用', value: 0 },
+              { label: '停用', value: 1 },
+            ]"
           />
+        </Form.Item>
+        <Form.Item label="备注">
+          <Input v-model:value="form.remark" />
         </Form.Item>
       </Form>
-    </Modal>
-
-    <Modal v-model:open="tagManagerOpen" title="标签管理" width="680px" @ok="tagManagerOpen = false">
-      <div class="tag-manager">
-        <div class="tag-create-row">
-          <Input v-model:value="newTagName" placeholder="填写岗位或部门标签名称" />
-          <Button type="primary" @click="addTag">添加标签</Button>
-        </div>
-        <Input v-model:value="tagKeyword" allow-clear placeholder="搜索标签" />
-        <div class="tag-cloud">
-          <Tag v-for="tag in filteredTags" :key="tag" color="blue">{{ tag }}</Tag>
-        </div>
-      </div>
-    </Modal>
+      <template #footer>
+        <Space>
+          <Button @click="drawerOpen = false">取消</Button>
+          <Button type="primary" @click="save">保存</Button>
+        </Space>
+      </template>
+    </Drawer>
   </PerformanceShell>
 </template>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  max-width: 360px;
-  margin-bottom: 14px;
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 160px 180px 120px auto;
+  gap: 8px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
 }
 
 .full {
   width: 100%;
 }
 
-.tag-manager {
-  display: grid;
-  gap: 12px;
-}
-
-.tag-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  gap: 10px;
-}
-
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 120px;
-  padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+@media (max-width: 900px) {
+  .filter-bar {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

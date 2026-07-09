@@ -1,518 +1,601 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
-import type { FdmPerformanceTemplateApi } from '#/api/fdmperformance/template';
+import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemUserApi } from '#/api/system/user';
 
-import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
-
-import { formatDateTime } from '@vben/utils';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  Alert,
   Button,
-  Card,
+  Divider,
+  Drawer,
+  Form,
   Input,
+  InputNumber,
   message,
-  Modal,
   Popconfirm,
+  Select,
   Space,
   Table,
   Tag,
+  Textarea,
 } from 'ant-design-vue';
 
+import { getSimpleProcessDefinitionList } from '#/api/bpm/definition';
 import {
-  createFdmPerformanceTemplateGroup,
-  deleteFdmPerformanceTemplate,
-  deleteFdmPerformanceTemplateGroup,
-  duplicateFdmPerformanceTemplate,
-  getFdmPerformanceTemplateGroupSimpleList,
-  getFdmPerformanceTemplatePage,
-} from '#/api/fdmperformance/template';
+  deleteTemplate,
+  disableTemplate,
+  enableTemplate,
+  getEnabledIndicators,
+  getTemplate,
+  getTemplatePage,
+  saveTemplate,
+  validateTemplateProcess,
+} from '#/api/fdmperformance';
+import { getSimpleUserList } from '#/api/system/user';
 
-import { mapApiTemplate } from '../shared/api-adapter';
+import {
+  PERIOD_OPTIONS,
+  SCORE_METHOD_OPTIONS,
+  TEMPLATE_STATUS_MAP,
+} from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import { usePerformancePath } from '../shared/route';
 
 defineOptions({ name: 'FdmPerformanceTemplates' });
 
-const router = useRouter();
-const { performancePath } = usePerformancePath();
-const ALL_GROUP_NAME = '全部考评表';
-const keyword = ref('');
-const groupKeyword = ref('');
-const newGroupName = ref('');
-const activeGroup = ref(ALL_GROUP_NAME);
-const selectedRowKeys = ref<number[]>([]);
-const previewOpen = ref(false);
 const loading = ref(false);
-const groupCreating = ref(false);
-const apiTemplates = ref<ReturnType<typeof mapApiTemplate>[]>([]);
-const apiTemplateGroups = ref<FdmPerformanceTemplateApi.TemplateGroup[]>([]);
-type TemplateGroupItem = { count: number; id?: number; name: string };
+const drawerOpen = ref(false);
+const users = ref<SystemUserApi.User[]>([]);
+const indicators = ref<JixiaoApi.Indicator[]>([]);
+const processDefinitions = ref<any[]>([]);
+const rows = ref<JixiaoApi.Template[]>([]);
+const total = ref(0);
+const query = reactive({
+  name: '',
+  pageNo: 1,
+  pageSize: 10,
+  periodType: undefined as string | undefined,
+  status: undefined as number | undefined,
+});
+const form = reactive<JixiaoApi.Template>({
+  dimensions: [],
+  name: '',
+  periodType: 'MONTH',
+  persons: [],
+  processDefinitionKey: '',
+  remark: '',
+  status: 0,
+});
 
-const templates = computed(() => apiTemplates.value);
+const userOptions = computed(() =>
+  users.value.map((item) => ({
+    label: `${item.nickname || item.username} (${item.id})`,
+    value: item.id,
+  })),
+);
+const indicatorOptions = computed(() =>
+  indicators.value.map((item) => ({
+    label: `${item.name} / ${item.dimensionName}`,
+    value: item.id,
+  })),
+);
+const processOptions = computed(() =>
+  processDefinitions.value.map((item) => ({
+    label: `${item.name || item.key} (${item.key})`,
+    value: item.key,
+  })),
+);
 
 const columns: TableColumnsType = [
   { dataIndex: 'name', title: '考评表名称' },
-  { dataIndex: 'participants', title: '参与人数', width: 120 },
-  { dataIndex: 'periodType', title: '周期类型', width: 120 },
-  { dataIndex: 'autoLaunch', title: '自动发起考核', width: 140 },
-  { dataIndex: 'status', title: '状态', width: 100 },
-  { dataIndex: 'updatedAt', title: '更新时间', width: 170 },
+  { dataIndex: 'periodType', title: '周期', width: 120 },
+  { dataIndex: 'processDefinitionKey', title: 'BPM 流程', width: 210 },
+  { dataIndex: 'status', title: '状态', width: 90 },
+  { dataIndex: 'createTime', title: '创建时间', width: 180 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 260 },
 ];
 
-const filteredTemplates = computed(() => {
-  const text = keyword.value.trim();
-  return templates.value.filter((item) => {
-    const groupMatched =
-      activeGroup.value === ALL_GROUP_NAME || item.group === activeGroup.value;
-    const textMatched =
-      !text ||
-      [item.name, item.group, item.scoringRule].some((value) =>
-        value.includes(text),
-      );
-    return groupMatched && textMatched;
-  });
-});
-
-const templateGroups = computed<TemplateGroupItem[]>(() => {
-  const counts = new Map<string, number>();
-  templates.value.forEach((item) =>
-    counts.set(item.group, (counts.get(item.group) || 0) + 1),
-  );
-  const names = new Set<string>();
-  const groupIdMap = new Map<string, number>();
-  apiTemplateGroups.value.forEach((group) => {
-    if (group.name) {
-      names.add(group.name);
-      groupIdMap.set(group.name, group.id);
-    }
-  });
-  counts.forEach((_, name) => names.add(name));
-  const searchText = groupKeyword.value.trim();
-  return [
-    { count: templates.value.length, name: ALL_GROUP_NAME },
-    ...[...names]
-      .filter((name) => !searchText || name.includes(searchText))
-      .map((name) => ({
-        count: counts.get(name) || 0,
-        id: groupIdMap.get(name),
-        name,
-      })),
-  ];
-});
-const activeGroupTitle = computed(() =>
-  activeGroup.value === ALL_GROUP_NAME
-    ? ALL_GROUP_NAME
-    : `${activeGroup.value}考评表`,
-);
-const previewRows = computed(() => {
-  const keys =
-    selectedRowKeys.value.length > 0
-      ? new Set(selectedRowKeys.value)
-      : new Set(filteredTemplates.value.map((item) => item.id));
-  return filteredTemplates.value.filter((item) => keys.has(item.id));
-});
-const rowSelection = computed(() => ({
-  selectedRowKeys: selectedRowKeys.value,
-  onChange: (keys: (number | string)[]) => {
-    selectedRowKeys.value = keys.map(Number);
-  },
-}));
-
-function createTemplate() {
-  const group =
-    activeGroup.value === ALL_GROUP_NAME ? undefined : activeGroup.value;
-  router.push({
-    path: performancePath('/templates/new/edit'),
-    query: group ? { group } : undefined,
-  });
+function statusMeta(status?: number): { color: string; text: string } {
+  return TEMPLATE_STATUS_MAP[status ?? 0] ?? { color: 'default', text: '-' };
 }
 
-function selectGroup(name: string) {
-  activeGroup.value = name;
-  selectedRowKeys.value = [];
-}
-
-function formatTemplateTime(value?: number | string) {
-  if (!value) {
-    return '-';
-  }
-  return (formatDateTime(value) as string) || String(value);
-}
-
-async function copyTemplate(id: number) {
-  await duplicateFdmPerformanceTemplate(id);
-  await loadTemplates();
-  message.success('已复制考评表');
-}
-
-async function removeTemplate(id: number) {
-  await deleteFdmPerformanceTemplate(id);
-  selectedRowKeys.value = selectedRowKeys.value.filter((item) => item !== id);
-  await loadTemplates();
-  message.success('已删除考评表');
-}
-
-function openBatchPreview() {
-  if (filteredTemplates.value.length === 0) {
-    message.warning('当前分组没有可预览的考评表');
-    return;
-  }
-  previewOpen.value = true;
-}
-
-function aiGenerateTemplate() {
-  const group =
-    activeGroup.value === ALL_GROUP_NAME ? '未分类考评表' : activeGroup.value;
-  router.push({
-    path: performancePath('/templates/new/edit'),
-    query: {
-      ai: '1',
-      group,
-    },
-  });
-}
-
-async function createTemplateGroup() {
-  const name = newGroupName.value.trim();
-  if (!name) {
-    message.warning('请输入分组名称');
-    return;
-  }
-  if (name === ALL_GROUP_NAME) {
-    message.warning('不能使用系统分组名称');
-    return;
-  }
-  if (templateGroups.value.some((group) => group.name === name)) {
-    groupKeyword.value = '';
-    selectGroup(name);
-    newGroupName.value = '';
-    message.info('分组已存在，已为你选中');
-    return;
-  }
-  groupCreating.value = true;
-  try {
-    await createFdmPerformanceTemplateGroup({ name });
-    await loadTemplateGroups();
-    groupKeyword.value = '';
-    selectGroup(name);
-    newGroupName.value = '';
-    message.success('已新增考评表分组');
-  } finally {
-    groupCreating.value = false;
-  }
-}
-
-function canDeleteTemplateGroup(group: TemplateGroupItem) {
-  return (
-    Boolean(group.id) &&
-    group.name !== ALL_GROUP_NAME &&
-    group.name !== '未分类考评表'
-  );
-}
-
-async function removeTemplateGroup(group: TemplateGroupItem) {
-  if (!group.id) {
-    return;
-  }
-  await deleteFdmPerformanceTemplateGroup(group.id);
-  if (activeGroup.value === group.name) {
-    selectGroup(ALL_GROUP_NAME);
-  }
-  selectedRowKeys.value = [];
-  await Promise.all([loadTemplates(), loadTemplateGroups()]);
-  message.success('已删除考评表分组');
-}
-
-async function loadTemplates() {
+async function load() {
   loading.value = true;
   try {
-    const page = await getFdmPerformanceTemplatePage({
-      name: keyword.value.trim() || undefined,
-      pageNo: 1,
-      pageSize: 100,
-    });
-    apiTemplates.value = (page.list || []).map((item) => mapApiTemplate(item));
+    const data = await getTemplatePage(query);
+    rows.value = data.list;
+    total.value = data.total;
   } finally {
     loading.value = false;
   }
 }
 
-async function loadTemplateGroups() {
-  apiTemplateGroups.value = await getFdmPerformanceTemplateGroupSimpleList();
+async function loadOptions() {
+  const [userList, indicatorList, processData] = await Promise.all([
+    getSimpleUserList(),
+    getEnabledIndicators(),
+    getSimpleProcessDefinitionList() as any,
+  ]);
+  users.value = userList;
+  indicators.value = indicatorList;
+  processDefinitions.value = Array.isArray(processData)
+    ? processData
+    : processData?.list || [];
+}
+
+function resetForm() {
+  Object.assign(form, {
+    dimensions: [],
+    id: undefined,
+    name: '',
+    periodType: 'MONTH',
+    persons: [],
+    processDefinitionKey: '',
+    remark: '',
+    status: 0,
+  });
+}
+
+function openCreate() {
+  resetForm();
+  addPerson();
+  addDimension();
+  drawerOpen.value = true;
+}
+
+async function openEdit(record: JixiaoApi.Template) {
+  resetForm();
+  const detail = await getTemplate(record.id!);
+  Object.assign(form, detail);
+  form.persons ||= [];
+  form.dimensions ||= [];
+  drawerOpen.value = true;
+}
+
+function addPerson() {
+  form.persons ||= [];
+  form.persons.push({});
+}
+
+function removePerson(index: number) {
+  form.persons?.splice(index, 1);
+}
+
+function addDimension() {
+  form.dimensions ||= [];
+  form.dimensions.push({
+    indicators: [],
+    name: '业绩指标',
+    sort: form.dimensions.length,
+    weight: 0,
+  });
+}
+
+function removeDimension(index: number) {
+  form.dimensions?.splice(index, 1);
+}
+
+function addIndicator(dimension: JixiaoApi.TemplateDimension) {
+  dimension.indicators ||= [];
+  dimension.indicators.push({
+    name: '',
+    scoreMethod: 'NUMBER',
+    sort: dimension.indicators.length,
+    status: 0,
+    weight: 0,
+  });
+}
+
+function removeIndicator(
+  dimension: JixiaoApi.TemplateDimension,
+  index: number,
+) {
+  dimension.indicators?.splice(index, 1);
+}
+
+function fillIndicator(
+  item: JixiaoApi.TemplateIndicator,
+  indicatorId?: number,
+) {
+  const source = indicators.value.find(
+    (indicator) => indicator.id === indicatorId,
+  );
+  item.indicatorId = indicatorId;
+  if (!source) return;
+  item.name = source.name;
+  item.standard = source.standard;
+  item.weight = source.defaultWeight || item.weight || 0;
+  item.scoreMethod = source.scoreMethod || 'NUMBER';
+}
+
+async function save() {
+  if (!form.name?.trim() || !form.processDefinitionKey) {
+    message.warning('请填写基础信息和流程定义');
+    return;
+  }
+  await saveTemplate(form);
+  message.success('已保存');
+  drawerOpen.value = false;
+  await load();
+}
+
+async function enable(id?: number) {
+  if (!id) return;
+  await enableTemplate(id);
+  message.success('已启用');
+  await load();
+}
+
+async function disable(id?: number) {
+  if (!id) return;
+  await disableTemplate(id);
+  message.success('已停用');
+  await load();
+}
+
+async function validateProcess(id?: number) {
+  if (!id) return;
+  await validateTemplateProcess(id);
+  message.success('流程节点校验通过');
+}
+
+async function remove(id?: number) {
+  if (!id) return;
+  await deleteTemplate(id);
+  message.success('已删除');
+  await load();
+}
+
+function handleTableChange(pagination: any) {
+  query.pageNo = pagination.current;
+  query.pageSize = pagination.pageSize;
+  load();
 }
 
 onMounted(async () => {
-  await Promise.all([loadTemplates(), loadTemplateGroups()]);
+  await loadOptions();
+  await load();
 });
 </script>
 
 <template>
-  <PerformanceShell
-    description="维护各岗位考评表模板，编辑后进入基础信息、考核指标和考核流程三步配置。"
-    title="考评表"
-  >
+  <PerformanceShell title="考评表">
     <template #actions>
-      <Button @click="openBatchPreview">批量预览</Button>
-      <Button @click="aiGenerateTemplate">AI生成</Button>
-      <Button type="primary" @click="createTemplate">新增考评表</Button>
+      <Button type="primary" @click="openCreate">新增考评表</Button>
     </template>
 
-    <div class="template-layout">
-      <Card class="group-panel">
-        <Input
-          v-model:value="groupKeyword"
-          allow-clear
-          placeholder="搜索考评表分组"
-        />
-        <div class="group-create">
-          <Input
-            v-model:value="newGroupName"
-            placeholder="输入新分组名称"
-            @press-enter="createTemplateGroup"
-          />
-          <Button
-            :loading="groupCreating"
-            type="primary"
-            @click="createTemplateGroup"
-          >
-            添加
-          </Button>
-        </div>
-        <div class="group-list">
-          <div
-            v-for="group in templateGroups"
-            :key="group.name"
-            class="group-item"
-            :class="{ active: activeGroup === group.name }"
-            role="button"
-            tabindex="0"
-            @click="selectGroup(group.name)"
-            @keydown.enter="selectGroup(group.name)"
-          >
-            <span>{{ group.name }}</span>
-            <span class="group-meta" @click.stop>
-              <em>{{ group.count }}</em>
-              <Popconfirm
-                v-if="canDeleteTemplateGroup(group)"
-                title="确认删除该分组？该分组下的考评表会移入未分类。"
-                @confirm="removeTemplateGroup(group)"
-              >
-                <Button class="group-delete" danger size="small" type="link">删除</Button>
-              </Popconfirm>
-            </span>
-          </div>
-        </div>
-      </Card>
-
-      <Card class="table-panel" :title="activeGroupTitle">
-        <div class="toolbar">
-          <Input
-            v-model:value="keyword"
-            allow-clear
-            placeholder="请输入考评表名称"
-          />
-        </div>
-        <Table
-          :columns="columns"
-          :data-source="filteredTemplates"
-          :loading="loading"
-          :pagination="{ pageSize: 10 }"
-          :row-selection="rowSelection"
-          row-key="id"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'participants'">
-              {{ record.participants.length }}
-            </template>
-            <template v-else-if="column.dataIndex === 'autoLaunch'">
-              {{ record.autoLaunch ? '已开启' : '未开启' }}
-            </template>
-            <template v-else-if="column.dataIndex === 'status'">
-              <Tag :color="record.status === 'enabled' ? 'green' : 'default'">
-                {{ record.status === 'enabled' ? '启用' : '草稿' }}
-              </Tag>
-            </template>
-            <template v-else-if="column.dataIndex === 'updatedAt'">
-              {{ formatTemplateTime(record.updatedAt) }}
-            </template>
-            <template v-else-if="column.dataIndex === 'action'">
-              <Space>
-                <Button
-                  size="small"
-                  type="link"
-                  @click="
-                    router.push(performancePath(`/templates/${record.id}/edit`))
-                  "
-                >
-                  编辑
-                </Button>
-                <Button
-                  size="small"
-                  type="link"
-                  @click="copyTemplate(record.id)"
-                >
-                  复制
-                </Button>
-                <Button
-                  size="small"
-                  type="link"
-                  @click="
-                    router.push({
-                      path: performancePath('/launch'),
-                      query: { templateId: record.id },
-                    })
-                  "
-                >
-                  发起考核
-                </Button>
-                <Popconfirm
-                  title="确认删除该考评表？"
-                  @confirm="removeTemplate(record.id)"
-                >
-                  <Button danger size="small" type="link">删除</Button>
-                </Popconfirm>
-              </Space>
-            </template>
-          </template>
-        </Table>
-      </Card>
+    <div class="filter-bar">
+      <Input v-model:value="query.name" allow-clear placeholder="考评表名称" />
+      <Select
+        v-model:value="query.periodType"
+        allow-clear
+        :options="PERIOD_OPTIONS"
+        placeholder="考核周期"
+      />
+      <Select
+        v-model:value="query.status"
+        allow-clear
+        :options="[
+          { label: '草稿', value: 0 },
+          { label: '启用', value: 1 },
+          { label: '停用', value: 2 },
+        ]"
+        placeholder="状态"
+      />
+      <Button type="primary" @click="load">查询</Button>
     </div>
 
-    <Modal
-      v-model:open="previewOpen"
-      title="批量预览考评表"
-      width="900px"
-      :footer="null"
+    <Table
+      :columns="columns"
+      :data-source="rows"
+      :loading="loading"
+      :pagination="{ current: query.pageNo, pageSize: query.pageSize, total }"
+      row-key="id"
+      @change="handleTableChange"
     >
-      <div class="preview-list">
-        <Card v-for="item in previewRows" :key="item.id" size="small">
-          <div class="preview-card">
-            <div>
-              <strong>{{ item.name }}</strong>
-              <p>
-                {{ item.group }} · {{ item.periodType }} ·
-                {{ item.scoringRule }}
-              </p>
+      <template #bodyCell="{ column, record }">
+        <template v-if="column.dataIndex === 'periodType'">
+          {{
+            PERIOD_OPTIONS.find((item) => item.value === record.periodType)
+              ?.label
+          }}
+        </template>
+        <template v-else-if="column.dataIndex === 'status'">
+          <Tag :color="statusMeta(record.status).color">
+            {{ statusMeta(record.status).text }}
+          </Tag>
+        </template>
+        <template v-else-if="column.dataIndex === 'action'">
+          <Space>
+            <Button size="small" type="link" @click="openEdit(record)">
+编辑
+</Button>
+            <Button
+              size="small"
+              type="link"
+              @click="validateProcess(record.id)"
+            >
+              校验流程
+            </Button>
+            <Button
+              v-if="record.status !== 1"
+              size="small"
+              type="link"
+              @click="enable(record.id)"
+            >
+              启用
+            </Button>
+            <Button v-else size="small" type="link" @click="disable(record.id)">
+              停用
+            </Button>
+            <Popconfirm title="确认删除该考评表？" @confirm="remove(record.id)">
+              <Button danger size="small" type="link">删除</Button>
+            </Popconfirm>
+          </Space>
+        </template>
+      </template>
+    </Table>
+
+    <Drawer
+      v-model:open="drawerOpen"
+      destroy-on-close
+      :width="980"
+      title="考评表编辑"
+      @close="resetForm"
+    >
+      <div class="editor">
+        <section>
+          <h2>基础信息</h2>
+          <Form layout="vertical">
+            <div class="form-grid">
+              <Form.Item label="考评表名称" required>
+                <Input v-model:value="form.name" />
+              </Form.Item>
+              <Form.Item label="考核周期" required>
+                <Select
+                  v-model:value="form.periodType"
+                  :options="PERIOD_OPTIONS"
+                />
+              </Form.Item>
+              <Form.Item label="状态">
+                <Select
+                  v-model:value="form.status"
+                  :options="[
+                    { label: '草稿', value: 0 },
+                    { label: '启用', value: 1 },
+                    { label: '停用', value: 2 },
+                  ]"
+                />
+              </Form.Item>
             </div>
-            <Space>
-              <Tag>{{ item.participants.length }}人</Tag>
-              <Tag :color="item.autoLaunch ? 'blue' : 'default'">
-                {{ item.autoLaunch ? '自动发起' : '手动发起' }}
-              </Tag>
-              <Button
-                size="small"
-                type="link"
-                @click="
-                  router.push(performancePath(`/templates/${item.id}/edit`))
-                "
-              >
-                编辑
-              </Button>
-            </Space>
+            <Form.Item label="备注">
+              <Input v-model:value="form.remark" />
+            </Form.Item>
+          </Form>
+        </section>
+
+        <section>
+          <div class="section-title">
+            <h2>人员与主管</h2>
+            <Button size="small" @click="addPerson">添加人员</Button>
           </div>
-        </Card>
+          <div class="rows">
+            <div
+              v-for="(person, index) in form.persons"
+              :key="index"
+              class="person-row"
+            >
+              <Select
+                v-model:value="person.userId"
+                show-search
+                :filter-option="false"
+                :options="userOptions"
+                placeholder="被考核人"
+              />
+              <Select
+                v-model:value="person.supervisorUserId"
+                show-search
+                :filter-option="false"
+                :options="userOptions"
+                placeholder="直属主管"
+              />
+              <Select
+                v-model:value="person.superiorSupervisorUserId"
+                allow-clear
+                show-search
+                :filter-option="false"
+                :options="userOptions"
+                placeholder="主管上级"
+              />
+              <Button danger @click="removePerson(index)">移除</Button>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">
+            <h2>维度指标</h2>
+            <Button size="small" @click="addDimension">添加维度</Button>
+          </div>
+          <Alert
+            message="最终得分按所有启用指标的权重汇总，启用前后端会校验指标权重合计为 100。"
+            show-icon
+            type="info"
+          />
+          <div
+            v-for="(dimension, dimensionIndex) in form.dimensions"
+            :key="dimensionIndex"
+            class="dimension-block"
+          >
+            <div class="dimension-head">
+              <Input v-model:value="dimension.name" placeholder="维度名称" />
+              <InputNumber
+                v-model:value="dimension.weight"
+                :min="0"
+                class="weight"
+                addon-after="%"
+              />
+              <Button @click="addIndicator(dimension)">添加指标</Button>
+              <Button danger @click="removeDimension(dimensionIndex)">
+删除维度
+</Button>
+            </div>
+            <div
+              v-for="(item, indicatorIndex) in dimension.indicators"
+              :key="indicatorIndex"
+              class="indicator-row"
+            >
+              <Select
+                :value="item.indicatorId"
+                allow-clear
+                :options="indicatorOptions"
+                placeholder="从指标库选择"
+                @change="(value) => fillIndicator(item, value as number)"
+              />
+              <Input v-model:value="item.name" placeholder="指标名称" />
+              <InputNumber
+                v-model:value="item.weight"
+                :max="100"
+                :min="0"
+                addon-after="%"
+              />
+              <Select
+                v-model:value="item.scoreMethod"
+                :options="SCORE_METHOD_OPTIONS"
+              />
+              <Textarea
+                v-model:value="item.standard"
+                :rows="2"
+                placeholder="考核标准"
+              />
+              <Button
+                danger
+                @click="removeIndicator(dimension, indicatorIndex)"
+              >
+                删除
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>流程绑定</h2>
+          <Form layout="vertical">
+            <Form.Item label="BPM 流程定义 key" required>
+              <Select
+                v-model:value="form.processDefinitionKey"
+                show-search
+                :filter-option="false"
+                :options="processOptions"
+                placeholder="选择已部署流程"
+              />
+            </Form.Item>
+          </Form>
+          <Alert
+            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_HR_REVIEW、JIXIAO_EMPLOYEE_CONFIRM 五个用户任务 key。"
+            show-icon
+            type="warning"
+          />
+        </section>
       </div>
-    </Modal>
+
+      <Divider />
+      <Space>
+        <Button @click="drawerOpen = false">取消</Button>
+        <Button type="primary" @click="save">保存</Button>
+      </Space>
+    </Drawer>
   </PerformanceShell>
 </template>
 
 <style scoped>
-.template-layout {
+.filter-bar {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(180px, 1fr) 160px 120px auto;
+  gap: 8px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
 }
 
-.group-panel :deep(.ant-card-body) {
+.editor {
   display: grid;
+  gap: 22px;
+}
+
+section {
+  min-width: 0;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 650;
+  color: #111827;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 120px;
   gap: 12px;
 }
 
-.group-create {
+.section-title,
+.dimension-head,
+.person-row,
+.indicator-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+  align-items: center;
+}
+
+.section-title {
+  grid-template-columns: 1fr auto;
+}
+
+.rows {
+  display: grid;
   gap: 8px;
 }
 
-.group-list {
-  display: grid;
-  gap: 4px;
+.person-row {
+  grid-template-columns: 1fr 1fr 1fr auto;
 }
 
-.group-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.dimension-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  margin-top: 10px;
+  background: #fafafa;
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+}
+
+.dimension-head {
+  grid-template-columns: minmax(160px, 1fr) 130px auto auto;
+}
+
+.indicator-row {
+  grid-template-columns: 180px minmax(160px, 1fr) 120px 130px minmax(
+      240px,
+      1.4fr
+    ) auto;
+}
+
+.weight {
   width: 100%;
-  height: 36px;
-  padding: 0 12px;
-  color: #374151;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
 }
 
-.group-item.active {
-  color: #1677ff;
-  background: #eaf3ff;
-}
-
-.group-item em {
-  font-style: normal;
-  color: #94a3b8;
-}
-
-.group-meta {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.group-delete {
-  height: 24px;
-  padding: 0;
-  opacity: 0;
-}
-
-.group-item:hover .group-delete,
-.group-item.active .group-delete {
-  opacity: 1;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 14px;
-}
-
-.toolbar :deep(.ant-input-affix-wrapper) {
-  width: 260px;
-}
-
-.preview-list {
-  display: grid;
-  gap: 10px;
-}
-
-.preview-card {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.preview-card p {
-  margin: 6px 0 0;
-  color: #64748b;
-}
-
-@media (max-width: 960px) {
-  .template-layout {
+@media (max-width: 1100px) {
+  .filter-bar,
+  .form-grid,
+  .person-row,
+  .dimension-head,
+  .indicator-row {
     grid-template-columns: 1fr;
   }
 }
