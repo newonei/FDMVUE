@@ -40,9 +40,10 @@ export const REVIEW_STATUS_MAP: Record<
   number,
   { color: string; text: string }
 > = {
-  0: { color: 'orange', text: '待提交' },
-  1: { color: 'green', text: '已提交' },
+  0: { color: 'orange', text: '待主管填写' },
+  1: { color: 'processing', text: '待员工确认' },
   2: { color: 'default', text: '已关闭' },
+  3: { color: 'green', text: '已完成' },
 };
 
 export const TASK_LABELS: Record<string, string> = {

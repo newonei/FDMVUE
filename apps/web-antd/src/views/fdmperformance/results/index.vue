@@ -75,10 +75,12 @@ const resultColumns: TableColumnsType = [
 const reviewColumns: TableColumnsType = [
   { dataIndex: 'userName', title: '员工' },
   { dataIndex: 'supervisorUserName', title: '主管' },
+  { dataIndex: 'triggerGrade', title: '触发等级', width: 100 },
   { dataIndex: 'bossUserName', title: '老板' },
   { dataIndex: 'generalManagerUserName', title: '总经理' },
   { dataIndex: 'status', title: '状态', width: 100 },
-  { dataIndex: 'submittedTime', title: '提交时间', width: 180 },
+  { dataIndex: 'submittedTime', title: '主管提交时间', width: 180 },
+  { dataIndex: 'employeeConfirmedTime', title: '员工确认时间', width: 180 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 100 },
 ];
 
@@ -197,7 +199,15 @@ onMounted(() => {
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'grade'">
-          <Tag :color="record.grade === 'C' ? 'red' : 'blue'">
+          <Tag
+            :color="
+              record.grade === 'C'
+                ? 'red'
+                : record.grade === 'C+'
+                  ? 'orange'
+                  : 'blue'
+            "
+          >
             {{ record.grade }}
           </Tag>
         </template>
@@ -229,15 +239,16 @@ onMounted(() => {
     </Table>
 
     <div class="section-head">
-      <strong>C 级绩效复盘</strong>
+      <strong>C / C+ 绩效复盘</strong>
       <Space>
         <Select
           v-model:value="reviewQuery.status"
           allow-clear
           :options="[
-            { label: '待提交', value: 0 },
-            { label: '已提交', value: 1 },
+            { label: '待主管填写', value: 0 },
+            { label: '待员工确认', value: 1 },
             { label: '已关闭', value: 2 },
+            { label: '已完成', value: 3 },
           ]"
           placeholder="状态"
           style="width: 130px"
@@ -264,10 +275,15 @@ onMounted(() => {
             {{ reviewStatus(record.status).text }}
           </Tag>
         </template>
+        <template v-else-if="column.dataIndex === 'triggerGrade'">
+          <Tag :color="record.triggerGrade === 'C' ? 'red' : 'orange'">
+            {{ record.triggerGrade || '-' }}
+          </Tag>
+        </template>
         <template v-else-if="column.dataIndex === 'action'">
           <Button size="small" type="link" @click="openReview(record)">
-查看
-</Button>
+            查看
+          </Button>
         </template>
       </template>
     </Table>
@@ -283,10 +299,11 @@ onMounted(() => {
       </Form>
     </Modal>
 
-    <Drawer v-model:open="reviewOpen" :width="640" title="C 级绩效复盘">
+    <Drawer v-model:open="reviewOpen" :width="640" title="绩效复盘">
       <Form v-if="activeReview" layout="vertical">
         <Form.Item label="员工">{{ activeReview.userName }}</Form.Item>
-        <Form.Item label="一、本月工作完成情况">
+        <Form.Item label="触发等级">{{ activeReview.triggerGrade }}</Form.Item>
+        <Form.Item label="一、员工对本月工作完成情况的评价">
           <Textarea disabled :rows="3" :value="activeReview.workCompletion" />
         </Form.Item>
         <Form.Item label="二、原因分析">
@@ -298,7 +315,7 @@ onMounted(() => {
         <Form.Item label="四、改进方向与目标">
           <Textarea disabled :rows="3" :value="activeReview.improvementPlan" />
         </Form.Item>
-        <Form.Item label="五、辅导措施">
+        <Form.Item label="五、主管提供的辅导与支持措施">
           <Textarea disabled :rows="3" :value="activeReview.supportNeeded" />
         </Form.Item>
       </Form>

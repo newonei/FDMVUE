@@ -5,7 +5,7 @@ import { requestClient } from '#/api/request';
 export namespace JixiaoApi {
   export interface Indicator {
     createTime?: string;
-    defaultWeight?: number;
+    defaultWeight?: number | string;
     deptId?: number;
     dimensionName?: string;
     id?: number;
@@ -35,6 +35,7 @@ export namespace JixiaoApi {
   }
 
   export interface TemplateIndicator {
+    actionPlanEnabled?: boolean;
     dimensionId?: number;
     dimensionName?: string;
     id?: number;
@@ -119,6 +120,11 @@ export namespace JixiaoApi {
   };
 
   export interface InstanceIndicator {
+    actionPlanCompletedTime?: string;
+    actionPlanCompletedUserId?: number;
+    actionPlanCompletedUserName?: string;
+    actionPlanEnabled?: boolean;
+    actionPlanStatus?: number;
     dimensionName?: string;
     id?: number;
     indicatorId?: number;
@@ -159,6 +165,8 @@ export namespace JixiaoApi {
   export interface Instance {
     batchId?: number;
     currentTaskId?: string;
+    currentTaskAssigneeUserId?: number;
+    currentTaskAssigneeUserName?: string;
     currentTaskKey?: string;
     currentTaskName?: string;
     deptId?: number;
@@ -192,6 +200,29 @@ export namespace JixiaoApi {
     instanceId: number;
     reason?: string;
     taskId: string;
+  }
+
+  export interface IndicatorActionCompleteReq {
+    instanceIndicatorId: number;
+  }
+
+  export interface TaskTransferReq {
+    assigneeUserId: number;
+    instanceId: number;
+    reason: string;
+    taskId: string;
+  }
+
+  export interface TaskReturnNode {
+    name: string;
+    taskDefinitionKey: string;
+  }
+
+  export interface TaskReturnReq {
+    instanceId: number;
+    reason: string;
+    targetTaskDefinitionKey: string;
+    taskId?: string;
   }
 
   export interface ScoreItemReq {
@@ -257,6 +288,10 @@ export namespace JixiaoApi {
     generalManagerUserId?: number;
     generalManagerUserName?: string;
     id?: number;
+    closedTime?: string;
+    employeeConfirmedTime?: string;
+    employeeConfirmedUserId?: number;
+    employeeConfirmedUserName?: string;
     improvementPlan?: string;
     instanceId?: number;
     missedIndicators?: string;
@@ -264,11 +299,14 @@ export namespace JixiaoApi {
     resultId?: number;
     status?: number;
     submittedTime?: string;
+    supervisorSubmittedUserId?: number;
+    supervisorSubmittedUserName?: string;
     superiorSupervisorUserId?: number;
     superiorSupervisorUserName?: string;
     supervisorUserId?: number;
     supervisorUserName?: string;
     supportNeeded?: string;
+    triggerGrade?: string;
     userId?: number;
     userName?: string;
     workCompletion?: string;
@@ -286,6 +324,10 @@ export namespace JixiaoApi {
     reviewId: number;
     supportNeeded: string;
     workCompletion: string;
+  }
+
+  export interface ReviewConfirmReq {
+    reviewId: number;
   }
 
   export interface Setting {
@@ -411,6 +453,12 @@ export function getBatch(id: number) {
   );
 }
 
+export function deleteBatch(id: number) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/assessment/batch/delete?id=${id}`,
+  );
+}
+
 export function getInstancePage(params: JixiaoApi.InstancePageParams) {
   return requestClient.get<PageResult<JixiaoApi.Instance>>(
     '/fdmperformance/assessment/instance/page',
@@ -439,6 +487,15 @@ export function confirmIndicatorTask(data: JixiaoApi.TaskReq) {
   );
 }
 
+export function completeIndicatorAction(
+  data: JixiaoApi.IndicatorActionCompleteReq,
+) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/indicator-action/complete',
+    data,
+  );
+}
+
 export function submitSelfScore(data: JixiaoApi.ScoreSubmitReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/self-score',
@@ -463,6 +520,27 @@ export function submitHrReview(data: JixiaoApi.HrReviewReq) {
 export function confirmEmployeeResult(data: JixiaoApi.TaskReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/employee-confirm',
+    data,
+  );
+}
+
+export function transferTask(data: JixiaoApi.TaskTransferReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/transfer',
+    data,
+  );
+}
+
+export function getReturnableTaskNodes(instanceId: number) {
+  return requestClient.get<JixiaoApi.TaskReturnNode[]>(
+    '/fdmperformance/assessment/task/returnable-nodes',
+    { params: { instanceId } },
+  );
+}
+
+export function returnTask(data: JixiaoApi.TaskReturnReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/return',
     data,
   );
 }
@@ -511,14 +589,24 @@ export function getReview(id: number) {
   });
 }
 
-export function getMyPendingReview() {
-  return requestClient.get<JixiaoApi.Review>(
-    '/fdmperformance/review/my-pending',
+export function getMyPendingReviews() {
+  return requestClient.get<JixiaoApi.Review[]>(
+    '/fdmperformance/review/my-pending-confirm',
+  );
+}
+
+export function getMyPendingSupervisorReviews() {
+  return requestClient.get<JixiaoApi.Review[]>(
+    '/fdmperformance/review/my-pending-supervisor',
   );
 }
 
 export function submitReview(data: JixiaoApi.ReviewSubmitReq) {
   return requestClient.post<boolean>('/fdmperformance/review/submit', data);
+}
+
+export function confirmReview(data: JixiaoApi.ReviewConfirmReq) {
+  return requestClient.post<boolean>('/fdmperformance/review/confirm', data);
 }
 
 export function getSetting() {

@@ -6,9 +6,22 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { Button, Input, Select, Space, Table, Tag } from 'ant-design-vue';
+import {
+  Button,
+  Input,
+  message,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tag,
+} from 'ant-design-vue';
 
-import { getBatchPage, getInstancePage } from '#/api/fdmperformance';
+import {
+  deleteBatch,
+  getBatchPage,
+  getInstancePage,
+} from '#/api/fdmperformance';
 
 import { INSTANCE_STATUS_MAP } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -44,7 +57,7 @@ const batchColumns: TableColumnsType = [
   { dataIndex: 'totalCount', title: '人数', width: 90 },
   { dataIndex: 'status', title: '状态', width: 100 },
   { dataIndex: 'createTime', title: '发起时间', width: 180 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 120 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 170 },
 ];
 
 const instanceColumns: TableColumnsType = [
@@ -92,6 +105,19 @@ function openInstance(record: JixiaoApi.Instance) {
   router.push(
     `/fdmperformance/batches/${record.batchId}/instances/${record.id}`,
   );
+}
+
+async function removeBatch(record: JixiaoApi.Batch) {
+  if (!record.id) return;
+  await deleteBatch(record.id);
+  message.success('已删除');
+  if (selectedBatch.value?.id === record.id) {
+    selectedBatch.value = undefined;
+    instances.value = [];
+    instanceTotal.value = 0;
+    instanceQuery.batchId = undefined;
+  }
+  await loadBatches();
 }
 
 function changeBatchPage(pagination: any) {
@@ -154,9 +180,19 @@ onMounted(loadBatches);
           </Tag>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
-          <Button size="small" type="link" @click="loadInstances(record)">
-            查看人员
-          </Button>
+          <Space>
+            <Button size="small" type="link" @click="loadInstances(record)">
+              查看人员
+            </Button>
+            <Popconfirm
+              title="删除后会终止流程并删除本批次数据，确认删除？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="removeBatch(record)"
+            >
+              <Button danger size="small" type="link">删除</Button>
+            </Popconfirm>
+          </Space>
         </template>
       </template>
     </Table>
@@ -199,8 +235,8 @@ onMounted(loadBatches);
           </template>
           <template v-else-if="column.dataIndex === 'action'">
             <Button size="small" type="link" @click="openInstance(record)">
-详情
-</Button>
+              详情
+            </Button>
           </template>
         </template>
       </Table>

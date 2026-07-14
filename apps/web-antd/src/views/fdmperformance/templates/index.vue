@@ -9,12 +9,13 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import {
   Alert,
   Button,
-  Divider,
+  Checkbox,
   Drawer,
   Form,
   Input,
   InputNumber,
   message,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -47,6 +48,10 @@ defineOptions({ name: 'FdmPerformanceTemplates' });
 
 const loading = ref(false);
 const drawerOpen = ref(false);
+const indicatorImportOpen = ref(false);
+const indicatorImportKeyword = ref('');
+const indicatorImportDimension = ref<JixiaoApi.TemplateDimension>();
+const selectedIndicatorIds = ref<number[]>([]);
 const users = ref<SystemUserApi.User[]>([]);
 const indicators = ref<JixiaoApi.Indicator[]>([]);
 const processDefinitions = ref<any[]>([]);
@@ -75,18 +80,41 @@ const userOptions = computed(() =>
     value: item.id,
   })),
 );
-const indicatorOptions = computed(() =>
-  indicators.value.map((item) => ({
-    label: `${item.name} / ${item.dimensionName}`,
-    value: item.id,
-  })),
-);
 const processOptions = computed(() =>
   processDefinitions.value.map((item) => ({
     label: `${item.name || item.key} (${item.key})`,
     value: item.key,
   })),
 );
+const indicatorImportRows = computed(() => {
+  const keyword = indicatorImportKeyword.value.trim().toLowerCase();
+  if (!keyword) return indicators.value;
+  return indicators.value.filter((indicator) =>
+    [indicator.name, indicator.dimensionName, indicator.standard].some(
+      (value) => value?.toLowerCase().includes(keyword),
+    ),
+  );
+});
+const currentDimensionIndicatorIds = computed(() => {
+  const ids =
+    indicatorImportDimension.value?.indicators
+      ?.map((item) => item.indicatorId)
+      .filter((id): id is number => typeof id === 'number') ?? [];
+  return new Set(ids);
+});
+const importRowSelection = computed(() => ({
+  selectedRowKeys: selectedIndicatorIds.value,
+  getCheckboxProps: (record: JixiaoApi.Indicator) => ({
+    disabled: Boolean(
+      record.id && currentDimensionIndicatorIds.value.has(record.id),
+    ),
+  }),
+  onChange: (keys: Array<number | string>) => {
+    selectedIndicatorIds.value = keys
+      .map(Number)
+      .filter((key) => Number.isFinite(key));
+  },
+}));
 
 const columns: TableColumnsType = [
   { dataIndex: 'name', title: '考评表名称' },
@@ -95,6 +123,13 @@ const columns: TableColumnsType = [
   { dataIndex: 'status', title: '状态', width: 90 },
   { dataIndex: 'createTime', title: '创建时间', width: 180 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 260 },
+];
+const indicatorImportColumns: TableColumnsType = [
+  { dataIndex: 'dimensionName', title: '指标维度', width: 150 },
+  { dataIndex: 'name', title: '指标名称', width: 180 },
+  { dataIndex: 'defaultWeight', title: '默认权重', width: 110 },
+  { dataIndex: 'scoreMethod', title: '评分方式', width: 120 },
+  { dataIndex: 'standard', title: '考核标准' },
 ];
 
 function statusMeta(status?: number): { color: string; text: string } {
@@ -180,6 +215,7 @@ function removeDimension(index: number) {
 function addIndicator(dimension: JixiaoApi.TemplateDimension) {
   dimension.indicators ||= [];
   dimension.indicators.push({
+    actionPlanEnabled: false,
     name: '',
     scoreMethod: 'NUMBER',
     sort: dimension.indicators.length,
@@ -195,19 +231,65 @@ function removeIndicator(
   dimension.indicators?.splice(index, 1);
 }
 
-function fillIndicator(
-  item: JixiaoApi.TemplateIndicator,
-  indicatorId?: number,
-) {
-  const source = indicators.value.find(
-    (indicator) => indicator.id === indicatorId,
+function openIndicatorImport(dimension: JixiaoApi.TemplateDimension) {
+  indicatorImportDimension.value = dimension;
+  indicatorImportKeyword.value = '';
+  selectedIndicatorIds.value = [];
+  indicatorImportOpen.value = true;
+}
+
+function scoreMethodText(method?: string) {
+  return (
+    SCORE_METHOD_OPTIONS.find((item) => item.value === method)?.label ||
+    method ||
+    '-'
   );
-  item.indicatorId = indicatorId;
-  if (!source) return;
-  item.name = source.name;
-  item.standard = source.standard;
-  item.weight = source.defaultWeight || item.weight || 0;
-  item.scoreMethod = source.scoreMethod || 'NUMBER';
+}
+
+function normalizeWeight(value?: number | string) {
+  const weight = Number(value ?? 0);
+  return Number.isFinite(weight) ? weight : 0;
+}
+
+function insertImportedIndicators() {
+  const dimension = indicatorImportDimension.value;
+  if (!dimension) return;
+  if (selectedIndicatorIds.value.length === 0) {
+    message.warning('请选择要导入的指标');
+    return;
+  }
+  dimension.indicators ||= [];
+  const selected = indicators.value.filter(
+    (indicator) =>
+      typeof indicator.id === 'number' &&
+      selectedIndicatorIds.value.includes(indicator.id),
+  );
+  const existingIds = new Set(
+    dimension.indicators
+      .map((item) => item.indicatorId)
+      .filter((id): id is number => typeof id === 'number'),
+  );
+  const startSort = dimension.indicators.length;
+  const importedIndicators: JixiaoApi.TemplateIndicator[] = selected
+    .filter((indicator) => indicator.id && !existingIds.has(indicator.id))
+    .map((indicator, index) => ({
+      actionPlanEnabled: false,
+      indicatorId: indicator.id,
+      name: indicator.name,
+      scoreMethod: indicator.scoreMethod || 'NUMBER',
+      sort: startSort + index,
+      standard: indicator.standard,
+      status: 0,
+      weight: normalizeWeight(indicator.defaultWeight),
+    }));
+
+  if (importedIndicators.length === 0) {
+    message.warning('所选指标已在当前维度中');
+    return;
+  }
+  dimension.indicators.push(...importedIndicators);
+  message.success(`已插入 ${importedIndicators.length} 个指标`);
+  indicatorImportOpen.value = false;
 }
 
 async function save() {
@@ -310,8 +392,8 @@ onMounted(async () => {
         <template v-else-if="column.dataIndex === 'action'">
           <Space>
             <Button size="small" type="link" @click="openEdit(record)">
-编辑
-</Button>
+              编辑
+            </Button>
             <Button
               size="small"
               type="link"
@@ -341,7 +423,9 @@ onMounted(async () => {
     <Drawer
       v-model:open="drawerOpen"
       destroy-on-close
-      :width="980"
+      :body-style="{ overflow: 'auto', padding: '24px' }"
+      root-class-name="template-editor-drawer"
+      width="100vw"
       title="考评表编辑"
       @close="resetForm"
     >
@@ -420,7 +504,7 @@ onMounted(async () => {
             <Button size="small" @click="addDimension">添加维度</Button>
           </div>
           <Alert
-            message="最终得分按所有启用指标的权重汇总，启用前后端会校验指标权重合计为 100。"
+            message="最终得分按所有启用指标汇总；勾选“参与行动计划”后，员工确认指标时会立即收到对应钉钉待办。行动计划与考核流程并行，不影响后续节点。"
             show-icon
             type="info"
           />
@@ -437,23 +521,25 @@ onMounted(async () => {
                 class="weight"
                 addon-after="%"
               />
-              <Button @click="addIndicator(dimension)">添加指标</Button>
+              <Button @click="addIndicator(dimension)">添加自填指标</Button>
+              <Button @click="openIndicatorImport(dimension)">
+                指标库导入
+              </Button>
               <Button danger @click="removeDimension(dimensionIndex)">
-删除维度
-</Button>
+                删除维度
+              </Button>
             </div>
             <div
               v-for="(item, indicatorIndex) in dimension.indicators"
               :key="indicatorIndex"
               class="indicator-row"
             >
-              <Select
-                :value="item.indicatorId"
-                allow-clear
-                :options="indicatorOptions"
-                placeholder="从指标库选择"
-                @change="(value) => fillIndicator(item, value as number)"
-              />
+              <Tag
+                :color="item.indicatorId ? 'blue' : 'default'"
+                class="indicator-source"
+              >
+                {{ item.indicatorId ? '指标库' : '自填' }}
+              </Tag>
               <Input v-model:value="item.name" placeholder="指标名称" />
               <InputNumber
                 v-model:value="item.weight"
@@ -470,6 +556,9 @@ onMounted(async () => {
                 :rows="2"
                 placeholder="考核标准"
               />
+              <Checkbox v-model:checked="item.actionPlanEnabled">
+                参与行动计划
+              </Checkbox>
               <Button
                 danger
                 @click="removeIndicator(dimension, indicatorIndex)"
@@ -501,12 +590,58 @@ onMounted(async () => {
         </section>
       </div>
 
-      <Divider />
-      <Space>
-        <Button @click="drawerOpen = false">取消</Button>
-        <Button type="primary" @click="save">保存</Button>
-      </Space>
+      <template #footer>
+        <Space>
+          <Button @click="drawerOpen = false">取消</Button>
+          <Button type="primary" @click="save">保存</Button>
+        </Space>
+      </template>
     </Drawer>
+
+    <Modal
+      v-model:open="indicatorImportOpen"
+      destroy-on-close
+      :width="920"
+      title="指标库导入"
+      @cancel="indicatorImportOpen = false"
+    >
+      <Input
+        v-model:value="indicatorImportKeyword"
+        allow-clear
+        class="import-filter"
+        placeholder="搜索指标名称、维度或考核标准"
+      />
+      <Table
+        :columns="indicatorImportColumns"
+        :data-source="indicatorImportRows"
+        :pagination="{ pageSize: 8, showSizeChanger: false }"
+        :row-selection="importRowSelection"
+        :scroll="{ y: 420 }"
+        row-key="id"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'defaultWeight'">
+            {{ normalizeWeight(record.defaultWeight) }}%
+          </template>
+          <template v-else-if="column.dataIndex === 'scoreMethod'">
+            {{ scoreMethodText(record.scoreMethod) }}
+          </template>
+        </template>
+      </Table>
+      <template #footer>
+        <Space>
+          <Button @click="indicatorImportOpen = false">取消</Button>
+          <Button
+            :disabled="selectedIndicatorIds.length === 0"
+            type="primary"
+            @click="insertImportedIndicators"
+          >
+            插入
+          </Button>
+        </Space>
+      </template>
+    </Modal>
   </PerformanceShell>
 </template>
 
@@ -576,14 +711,21 @@ h2 {
 }
 
 .dimension-head {
-  grid-template-columns: minmax(160px, 1fr) 130px auto auto;
+  grid-template-columns: minmax(160px, 1fr) 130px auto auto auto;
 }
 
 .indicator-row {
-  grid-template-columns: 180px minmax(160px, 1fr) 120px 130px minmax(
-      240px,
-      1.4fr
-    ) auto;
+  grid-template-columns:
+    90px minmax(160px, 1fr) 120px 130px minmax(240px, 1.4fr)
+    140px auto;
+}
+
+.indicator-source {
+  justify-self: start;
+}
+
+.import-filter {
+  margin-bottom: 12px;
 }
 
 .weight {
