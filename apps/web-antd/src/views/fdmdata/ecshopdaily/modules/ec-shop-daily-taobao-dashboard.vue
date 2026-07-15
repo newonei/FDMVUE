@@ -126,6 +126,10 @@ function isPddDashboard(): boolean {
   return currentPlatformCode.value === 'PDD';
 }
 
+function isJdDashboard(): boolean {
+  return currentPlatformCode.value === 'JD';
+}
+
 function isTaobaoDashboard(): boolean {
   return ['TAOBAO', 'TMALL'].includes(currentPlatformCode.value);
 }
@@ -179,7 +183,9 @@ function newBucket(): PeriodBucket {
 
 function addRow(bucket: PeriodBucket, row: EcShopDailyRow) {
   bucket.netSales = round2(bucket.netSales + realNetSalesAmountOf(row));
-  bucket.marketing = round2(bucket.marketing + getDisplayMarketingCost(row as any));
+  bucket.marketing = round2(
+    bucket.marketing + getDisplayMarketingCost(row as any),
+  );
   bucket.refund = round2(bucket.refund + asNumber(row.refundAmount));
   bucket.gmvAmount = round2(bucket.gmvAmount + asNumber(row.gmvAmount));
   bucket.paidAmount = round2(bucket.paidAmount + asNumber(row.paidAmount));
@@ -661,6 +667,28 @@ async function loadPddPromotionRedPackets(
   return map;
 }
 
+async function loadJdActualMarketingCosts(
+  base: Record<string, unknown>,
+): Promise<Map<string, number>> {
+  if (!isJdDashboard()) return new Map();
+  const res = await getEcShopDailyPlatformDetailPage({
+    ...base,
+    pageNo: 1,
+    pageSize: -1,
+    platformCode: currentPlatformCode.value,
+  } as any);
+  const map = new Map<string, number>();
+  for (const row of res.list ?? []) {
+    const actualMarketingCost = getDisplayMarketingCost(row);
+    const keys = [rowIdKey(row.dailyId ?? row.daily_id), detailRowKey(row)];
+    for (const key of keys) {
+      if (!key) continue;
+      map.set(key, round2((map.get(key) ?? 0) + actualMarketingCost));
+    }
+  }
+  return map;
+}
+
 async function loadTaobaoDetailBuyerCounts(
   base: Record<string, unknown>,
 ): Promise<Map<string, number>> {
@@ -700,6 +728,21 @@ function applyTaobaoDetailBuyerCounts(
   });
 }
 
+function applyJdActualMarketingCosts(
+  rows: EcShopDailyRow[],
+  actualMarketingCostMap: Map<string, number>,
+): EcShopDailyRow[] {
+  if (!isJdDashboard()) return rows;
+  return rows.map((row) => ({
+    ...row,
+    marketingCost: round2(
+      actualMarketingCostMap.get(rowIdKey(row.id)) ??
+        actualMarketingCostMap.get(rowDetailKey(row)) ??
+        0,
+    ),
+  }));
+}
+
 function subtractPddPromotionRedPackets(
   rows: EcShopDailyRow[],
   promotionMap: Map<string, number>,
@@ -724,6 +767,7 @@ async function loadRows() {
     const base = buildQueryPayload();
     const acc: EcShopDailyRow[] = [];
     const promotionMapPromise = loadPddPromotionRedPackets(base);
+    const jdActualMarketingCostMapPromise = loadJdActualMarketingCosts(base);
     const taobaoBuyerCountMapPromise = loadTaobaoDetailBuyerCounts(base);
     let pageNo = 1;
     let total = 0;
@@ -741,9 +785,18 @@ async function loadRows() {
       pageNo++;
     }
     if (pageNo >= MAX_PAGES && acc.length < total) truncated.value = true;
-    rawRows.value = subtractPddPromotionRedPackets(
-      applyTaobaoDetailBuyerCounts(acc, await taobaoBuyerCountMapPromise),
-      await promotionMapPromise,
+    const [promotionMap, jdActualMarketingCostMap, taobaoBuyerCountMap] =
+      await Promise.all([
+        promotionMapPromise,
+        jdActualMarketingCostMapPromise,
+        taobaoBuyerCountMapPromise,
+      ]);
+    rawRows.value = applyJdActualMarketingCosts(
+      subtractPddPromotionRedPackets(
+        applyTaobaoDetailBuyerCounts(acc, taobaoBuyerCountMap),
+        promotionMap,
+      ),
+      jdActualMarketingCostMap,
     );
   } finally {
     loading.value = false;

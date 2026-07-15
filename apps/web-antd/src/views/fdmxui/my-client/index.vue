@@ -113,7 +113,7 @@ function useGridColumns(): VxeTableGridOptions<FdmxuiClientApi.Client>['columns'
     },
     {
       field: 'subscriptionUrl',
-      title: '普通订阅',
+      title: 'SUB',
       minWidth: 260,
       showOverflow: 'tooltip',
     },
@@ -195,7 +195,7 @@ const [Grid] = useVbenVxeGrid({
             <TableAction
               :actions="[
                 {
-                  label: '协议链接',
+                  label: '订阅信息',
                   type: 'link',
                   icon: 'lucide:qr-code',
                   onClick: handleShowLinks.bind(null, row),

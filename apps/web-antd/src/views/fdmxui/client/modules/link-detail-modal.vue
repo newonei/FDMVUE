@@ -21,13 +21,11 @@ const emit = defineEmits<{
 
 const protocolLinks = computed(() => parseLinks(props.client?.subLinks));
 
-const subscriptionLinks = computed(() =>
-  [
-    { label: '普通订阅', value: props.client?.subscriptionUrl },
-    { label: 'JSON订阅', value: props.client?.jsonSubscriptionUrl },
-    { label: 'Clash订阅', value: props.client?.clashSubscriptionUrl },
-  ].filter((item): item is { label: string; value: string } => !!item.value),
-);
+const subscriptionLinks = computed(() => [
+  { label: 'SUB', value: props.client?.subscriptionUrl },
+  { label: 'JSON', value: props.client?.jsonSubscriptionUrl },
+  { label: 'CLASH', value: props.client?.clashSubscriptionUrl },
+]);
 
 const { copy } = useClipboard({ legacy: true });
 const qrModalOpen = ref(false);
@@ -38,7 +36,7 @@ function close() {
   emit('update:open', false);
 }
 
-function showQrCode(text?: string, label = '普通订阅') {
+function showQrCode(text?: string, label = 'SUB') {
   if (!text) {
     message.warning(`没有可展示的${label}`);
     return;
@@ -113,7 +111,7 @@ function getDisplayName(link: string, index: number) {
     @cancel="close"
   >
     <div class="flex max-h-[72vh] min-h-0 flex-col gap-4 overflow-y-auto pr-1">
-      <section v-if="subscriptionLinks.length > 0" class="space-y-3">
+      <section class="space-y-3">
         <div class="text-sm font-medium text-foreground">订阅入口</div>
         <div class="space-y-2">
           <div
@@ -122,18 +120,26 @@ function getDisplayName(link: string, index: number) {
             class="grid gap-2 rounded border border-border p-3 md:grid-cols-[88px_minmax(0,1fr)_auto]"
           >
             <Tag class="m-0 w-fit">{{ item.label }}</Tag>
-            <div class="min-w-0 break-all font-mono text-xs leading-5">
-              {{ item.value }}
+            <div
+              class="min-w-0 break-all font-mono text-xs leading-5"
+              :class="{ 'text-muted-foreground': !item.value }"
+            >
+              {{ item.value || '暂无订阅地址' }}
             </div>
             <div class="flex flex-wrap justify-end gap-2">
-              <Button size="small" @click="copyText(item.value, item.label)">
+              <Button
+                :disabled="!item.value"
+                size="small"
+                @click="copyText(item.value, item.label)"
+              >
                 <template #icon>
                   <IconifyIcon icon="lucide:copy" />
                 </template>
                 复制
               </Button>
               <Button
-                v-if="item.label === '普通订阅'"
+                v-if="item.label === 'SUB'"
+                :disabled="!item.value"
                 size="small"
                 @click="showQrCode(item.value, item.label)"
               >

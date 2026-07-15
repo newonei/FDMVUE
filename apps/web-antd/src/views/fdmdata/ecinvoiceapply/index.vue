@@ -2,6 +2,8 @@
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
 
+import { computed, ref } from 'vue';
+
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
@@ -11,7 +13,7 @@ import { Button, message } from 'ant-design-vue';
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   deleteEcInvoiceApply,
-  exportEcInvoiceApplyExcel,
+  exportEcInvoiceApplyEtaxExcel,
   getEcInvoiceApplyPage,
 } from '#/api/fdmdata/ecinvoiceapply';
 import { $t } from '#/locales';
@@ -22,6 +24,53 @@ import Form from './modules/form.vue';
 defineOptions({ name: 'EcInvoiceApply' });
 
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
+const selectedRows = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply[]>([]);
+const exportLoading = ref(false);
+
+const selectedCompanyNames = computed(() =>
+  selectedRows.value.map((row) => row.shopCompanyName?.trim() ?? ''),
+);
+const selectedCompanyName = computed(() => {
+  if (!selectedCompanyNames.value.every(Boolean)) return '';
+  const companyNames = new Set(selectedCompanyNames.value);
+  return companyNames.size === 1 ? ([...companyNames][0] ?? '') : '';
+});
+const canExport = computed(
+  () => selectedRows.value.length > 0 && Boolean(selectedCompanyName.value),
+);
+
+function clearSelectedRows() {
+  selectedRows.value = [];
+}
+
+function validateSelectedRows(showMessage = false) {
+  if (selectedRows.value.length === 0) {
+    if (showMessage) message.warning('请选择需要批量开票的申请记录');
+    return false;
+  }
+  if (selectedCompanyNames.value.some((companyName) => !companyName)) {
+    if (showMessage) {
+      message.warning('所选记录存在店铺主体公司为空的数据，请先完善公司配置');
+    }
+    return false;
+  }
+  if (new Set(selectedCompanyNames.value).size > 1) {
+    if (showMessage) {
+      message.warning('一次只能选择同一店铺主体公司的开票申请，请重新选择');
+    }
+    return false;
+  }
+  return true;
+}
+
+function handleRowCheckboxChange({
+  records,
+}: {
+  records: FdmdataEcInvoiceApplyApi.EcInvoiceApply[];
+}) {
+  selectedRows.value = [...records];
+  if (selectedRows.value.length > 0) validateSelectedRows(true);
+}
 
 function handleCreate() {
   formModalApi.setData(null).open();
@@ -47,12 +96,27 @@ async function handleDelete(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
 }
 
 async function handleExport() {
-  const formValues = await gridApi.formApi.getValues();
-  const data = await exportEcInvoiceApplyExcel(formValues);
-  downloadFileFromBlobPart({
-    fileName: '电商发票申请.xls',
-    source: data,
-  });
+  if (!validateSelectedRows(true)) return;
+
+  const ids = selectedRows.value
+    .map((row) => row.id)
+    .filter((id): id is number => typeof id === 'number');
+  if (ids.length !== selectedRows.value.length) {
+    message.warning('所选申请数据无效，请刷新列表后重试');
+    return;
+  }
+
+  const companyName = selectedCompanyName.value;
+  exportLoading.value = true;
+  try {
+    const data = await exportEcInvoiceApplyEtaxExcel(ids);
+    downloadFileFromBlobPart({
+      fileName: `${companyName}-电子税务局批量开票模板.xlsx`,
+      source: data,
+    });
+  } finally {
+    exportLoading.value = false;
+  }
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
@@ -65,17 +129,23 @@ const [Grid, gridApi] = useVbenVxeGrid({
     stripe: true,
     proxyConfig: {
       ajax: {
-        query: async ({ page }, formValues) =>
-          getEcInvoiceApplyPage({
+        query: async ({ page }, formValues) => {
+          clearSelectedRows();
+          return getEcInvoiceApplyPage({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
-          }),
+          });
+        },
       },
     },
     rowConfig: { keyField: 'id', isHover: true },
     toolbarConfig: { refresh: true, search: true },
   } as VxeTableGridOptions<FdmdataEcInvoiceApplyApi.EcInvoiceApply>,
+  gridEvents: {
+    checkboxAll: handleRowCheckboxChange,
+    checkboxChange: handleRowCheckboxChange,
+  },
 });
 </script>
 
@@ -96,11 +166,15 @@ const [Grid, gridApi] = useVbenVxeGrid({
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <Button @click="handleExport">
+          <Button
+            :disabled="!canExport"
+            :loading="exportLoading"
+            @click="handleExport"
+          >
             <template #icon>
               <IconifyIcon icon="lucide:download" />
             </template>
-            导出
+            导出电子税务局模板（{{ selectedRows.length }}）
           </Button>
           <Button type="primary" @click="handleCreate">
             <template #icon>

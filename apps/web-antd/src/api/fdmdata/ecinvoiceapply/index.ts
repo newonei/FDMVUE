@@ -109,3 +109,10 @@ export function exportEcInvoiceApplyExcel(params: Record<string, unknown>) {
     params,
   });
 }
+
+export function exportEcInvoiceApplyEtaxExcel(ids: number[]) {
+  return requestClient.download('/fdmdata/ecinvoiceapply/export-etax-excel', {
+    data: { ids },
+    method: 'POST',
+  });
+}
