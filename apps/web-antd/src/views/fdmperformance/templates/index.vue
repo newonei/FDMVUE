@@ -2,6 +2,7 @@
 import type { TableColumnsType } from 'ant-design-vue';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemDeptApi } from '#/api/system/dept';
 import type { SystemUserApi } from '#/api/system/user';
 
 import { computed, onMounted, reactive, ref } from 'vue';
@@ -35,6 +36,7 @@ import {
   saveTemplate,
   validateTemplateProcess,
 } from '#/api/fdmperformance';
+import { getSimpleDeptList } from '#/api/system/dept';
 import { getSimpleUserList } from '#/api/system/user';
 
 import {
@@ -50,8 +52,11 @@ const loading = ref(false);
 const drawerOpen = ref(false);
 const indicatorImportOpen = ref(false);
 const indicatorImportKeyword = ref('');
+const indicatorImportCategory = ref<string>();
+const indicatorImportDeptId = ref<number>();
 const indicatorImportDimension = ref<JixiaoApi.TemplateDimension>();
 const selectedIndicatorIds = ref<number[]>([]);
+const departments = ref<SystemDeptApi.Dept[]>([]);
 const users = ref<SystemUserApi.User[]>([]);
 const indicators = ref<JixiaoApi.Indicator[]>([]);
 const processDefinitions = ref<any[]>([]);
@@ -86,14 +91,66 @@ const processOptions = computed(() =>
     value: item.key,
   })),
 );
+const departmentOptions = computed(() => {
+  const options: Array<{ label: string; value: number }> = [];
+  const walk = (items: SystemDeptApi.Dept[]) => {
+    for (const item of items) {
+      if (item.id !== undefined) {
+        options.push({ label: item.name, value: item.id });
+      }
+      if (item.children?.length) {
+        walk(item.children);
+      }
+    }
+  };
+  walk(departments.value);
+  return options;
+});
+const departmentNameMap = computed(
+  () =>
+    new Map(
+      departmentOptions.value.map((item) => [item.value, item.label] as const),
+    ),
+);
+const indicatorImportDepartmentRows = computed(() => {
+  if (indicatorImportDeptId.value === undefined) return indicators.value;
+  return indicators.value.filter(
+    (indicator) =>
+      !indicator.deptId || indicator.deptId === indicatorImportDeptId.value,
+  );
+});
+const indicatorImportCategories = computed(() => {
+  const countMap = new Map<string, number>();
+  for (const indicator of indicatorImportDepartmentRows.value) {
+    const category = indicatorDimensionName(indicator.dimensionName);
+    countMap.set(category, (countMap.get(category) || 0) + 1);
+  }
+  return [
+    {
+      count: indicatorImportDepartmentRows.value.length,
+      label: '全部指标',
+      value: undefined,
+    },
+    ...[...countMap.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, 'zh-CN'))
+      .map(([label, count]) => ({ count, label, value: label })),
+  ];
+});
 const indicatorImportRows = computed(() => {
   const keyword = indicatorImportKeyword.value.trim().toLowerCase();
-  if (!keyword) return indicators.value;
-  return indicators.value.filter((indicator) =>
-    [indicator.name, indicator.dimensionName, indicator.standard].some(
+  return indicatorImportDepartmentRows.value.filter((indicator) => {
+    if (
+      indicatorImportCategory.value &&
+      indicatorDimensionName(indicator.dimensionName) !==
+        indicatorImportCategory.value
+    ) {
+      return false;
+    }
+    if (!keyword) return true;
+    return [indicator.name, indicator.dimensionName, indicator.standard].some(
       (value) => value?.toLowerCase().includes(keyword),
-    ),
-  );
+    );
+  });
 });
 const currentDimensionIndicatorIds = computed(() => {
   const ids =
@@ -103,6 +160,7 @@ const currentDimensionIndicatorIds = computed(() => {
   return new Set(ids);
 });
 const importRowSelection = computed(() => ({
+  preserveSelectedRowKeys: true,
   selectedRowKeys: selectedIndicatorIds.value,
   getCheckboxProps: (record: JixiaoApi.Indicator) => ({
     disabled: Boolean(
@@ -125,11 +183,12 @@ const columns: TableColumnsType = [
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 260 },
 ];
 const indicatorImportColumns: TableColumnsType = [
-  { dataIndex: 'dimensionName', title: '指标维度', width: 150 },
-  { dataIndex: 'name', title: '指标名称', width: 180 },
-  { dataIndex: 'defaultWeight', title: '默认权重', width: 110 },
-  { dataIndex: 'scoreMethod', title: '评分方式', width: 120 },
-  { dataIndex: 'standard', title: '考核标准' },
+  { dataIndex: 'dimensionName', title: '指标维度', width: 110 },
+  { dataIndex: 'name', title: '指标名称', width: 150 },
+  { dataIndex: 'deptId', title: '适用部门', width: 120 },
+  { dataIndex: 'defaultWeight', title: '默认权重', width: 90 },
+  { dataIndex: 'scoreMethod', title: '评分方式', width: 100 },
+  { dataIndex: 'standard', title: '考核标准', width: 180 },
 ];
 
 function statusMeta(status?: number): { color: string; text: string } {
@@ -148,13 +207,16 @@ async function load() {
 }
 
 async function loadOptions() {
-  const [userList, indicatorList, processData] = await Promise.all([
-    getSimpleUserList(),
-    getEnabledIndicators(),
-    getSimpleProcessDefinitionList() as any,
-  ]);
+  const [userList, indicatorList, processData, departmentList] =
+    await Promise.all([
+      getSimpleUserList(),
+      getEnabledIndicators(),
+      getSimpleProcessDefinitionList() as any,
+      getSimpleDeptList(),
+    ]);
   users.value = userList;
   indicators.value = indicatorList;
+  departments.value = departmentList;
   processDefinitions.value = Array.isArray(processData)
     ? processData
     : processData?.list || [];
@@ -234,8 +296,19 @@ function removeIndicator(
 function openIndicatorImport(dimension: JixiaoApi.TemplateDimension) {
   indicatorImportDimension.value = dimension;
   indicatorImportKeyword.value = '';
+  indicatorImportCategory.value = undefined;
+  indicatorImportDeptId.value = undefined;
   selectedIndicatorIds.value = [];
   indicatorImportOpen.value = true;
+}
+
+function indicatorDimensionName(dimensionName?: string) {
+  return dimensionName?.trim() || '未分类';
+}
+
+function departmentName(deptId?: number) {
+  if (!deptId) return '通用';
+  return departmentNameMap.value.get(deptId) || `部门 #${deptId}`;
 }
 
 function scoreMethodText(method?: string) {
@@ -474,23 +547,23 @@ onMounted(async () => {
               <Select
                 v-model:value="person.userId"
                 show-search
-                :filter-option="false"
                 :options="userOptions"
+                option-filter-prop="label"
                 placeholder="被考核人"
               />
               <Select
                 v-model:value="person.supervisorUserId"
                 show-search
-                :filter-option="false"
                 :options="userOptions"
+                option-filter-prop="label"
                 placeholder="直属主管"
               />
               <Select
                 v-model:value="person.superiorSupervisorUserId"
                 allow-clear
                 show-search
-                :filter-option="false"
                 :options="userOptions"
+                option-filter-prop="label"
                 placeholder="主管上级"
               />
               <Button danger @click="removePerson(index)">移除</Button>
@@ -576,8 +649,8 @@ onMounted(async () => {
               <Select
                 v-model:value="form.processDefinitionKey"
                 show-search
-                :filter-option="false"
                 :options="processOptions"
+                option-filter-prop="label"
                 placeholder="选择已部署流程"
               />
             </Form.Item>
@@ -601,45 +674,82 @@ onMounted(async () => {
     <Modal
       v-model:open="indicatorImportOpen"
       destroy-on-close
-      :width="920"
+      :width="1080"
       title="指标库导入"
       @cancel="indicatorImportOpen = false"
     >
-      <Input
-        v-model:value="indicatorImportKeyword"
-        allow-clear
-        class="import-filter"
-        placeholder="搜索指标名称、维度或考核标准"
-      />
-      <Table
-        :columns="indicatorImportColumns"
-        :data-source="indicatorImportRows"
-        :pagination="{ pageSize: 8, showSizeChanger: false }"
-        :row-selection="importRowSelection"
-        :scroll="{ y: 420 }"
-        row-key="id"
-        size="small"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'defaultWeight'">
-            {{ normalizeWeight(record.defaultWeight) }}%
-          </template>
-          <template v-else-if="column.dataIndex === 'scoreMethod'">
-            {{ scoreMethodText(record.scoreMethod) }}
-          </template>
-        </template>
-      </Table>
-      <template #footer>
-        <Space>
-          <Button @click="indicatorImportOpen = false">取消</Button>
-          <Button
-            :disabled="selectedIndicatorIds.length === 0"
-            type="primary"
-            @click="insertImportedIndicators"
+      <div class="import-toolbar">
+        <Input
+          v-model:value="indicatorImportKeyword"
+          allow-clear
+          placeholder="搜索指标名称、维度或考核标准"
+        />
+        <Select
+          v-model:value="indicatorImportDeptId"
+          :options="departmentOptions"
+          allow-clear
+          option-filter-prop="label"
+          placeholder="全部部门"
+          show-search
+        />
+      </div>
+      <div class="indicator-import-layout">
+        <aside class="indicator-category-panel">
+          <div class="category-title">指标分类</div>
+          <div class="category-list">
+            <button
+              v-for="category in indicatorImportCategories"
+              :key="category.value || '__all__'"
+              :aria-pressed="indicatorImportCategory === category.value"
+              class="category-item" :class="[
+                { active: indicatorImportCategory === category.value },
+              ]"
+              type="button"
+              @click="indicatorImportCategory = category.value"
+            >
+              <span>{{ category.label }}</span>
+              <span class="category-count">{{ category.count }}</span>
+            </button>
+          </div>
+        </aside>
+        <div class="indicator-import-table">
+          <Table
+            :columns="indicatorImportColumns"
+            :data-source="indicatorImportRows"
+            :pagination="{ pageSize: 8, showSizeChanger: false }"
+            :row-selection="importRowSelection"
+            :scroll="{ x: 780, y: 420 }"
+            row-key="id"
+            size="small"
           >
-            插入
-          </Button>
-        </Space>
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.dataIndex === 'deptId'">
+                {{ departmentName(record.deptId) }}
+              </template>
+              <template v-else-if="column.dataIndex === 'defaultWeight'">
+                {{ normalizeWeight(record.defaultWeight) }}%
+              </template>
+              <template v-else-if="column.dataIndex === 'scoreMethod'">
+                {{ scoreMethodText(record.scoreMethod) }}
+              </template>
+            </template>
+          </Table>
+        </div>
+      </div>
+      <template #footer>
+        <div class="import-footer">
+          <span>已选择 {{ selectedIndicatorIds.length }} 项</span>
+          <Space>
+            <Button @click="indicatorImportOpen = false">取消</Button>
+            <Button
+              :disabled="selectedIndicatorIds.length === 0"
+              type="primary"
+              @click="insertImportedIndicators"
+            >
+              插入
+            </Button>
+          </Space>
+        </div>
       </template>
     </Modal>
   </PerformanceShell>
@@ -724,8 +834,80 @@ h2 {
   justify-self: start;
 }
 
-.import-filter {
-  margin-bottom: 12px;
+.import-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 180px;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.indicator-import-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.indicator-category-panel {
+  min-width: 0;
+  padding-right: 14px;
+  border-right: 1px solid #edf0f4;
+}
+
+.category-title {
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #646a73;
+}
+
+.category-list {
+  display: grid;
+  gap: 4px;
+}
+
+.category-item {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  color: #3c4149;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.category-item:hover,
+.category-item:focus-visible {
+  background: #f3f5f7;
+  outline: none;
+}
+
+.category-item.active {
+  font-weight: 600;
+  color: #1677ff;
+  background: #eaf3ff;
+}
+
+.category-count {
+  min-width: 24px;
+  font-size: 12px;
+  color: #8f959e;
+  text-align: right;
+}
+
+.indicator-import-table {
+  min-width: 0;
+}
+
+.import-footer {
+  display: flex;
+  color: #646a73;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .weight {
@@ -738,6 +920,34 @@ h2 {
   .person-row,
   .dimension-head,
   .indicator-row {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-import-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .indicator-category-panel {
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid #edf0f4;
+  }
+
+  .category-list {
+    display: flex;
+    padding-bottom: 10px;
+    overflow-x: auto;
+  }
+
+  .category-item {
+    width: auto;
+    min-width: 120px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .import-toolbar {
     grid-template-columns: 1fr;
   }
 }

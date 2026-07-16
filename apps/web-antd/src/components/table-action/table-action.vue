@@ -145,24 +145,47 @@ function handleButtonClick(action: ActionItem) {
         v-for="(action, index) in getActions"
         :key="getActionKey(action, index)"
       >
-        <Popconfirm
-          v-if="action.popConfirm"
-          v-bind="getPopConfirmProps(action.popConfirm)"
-        >
-          <template v-if="action.popConfirm.icon" #icon>
-            <IconifyIcon :icon="action.popConfirm.icon" />
-          </template>
-          <Tooltip v-bind="getTooltipProps(action.tooltip)">
-            <Button v-bind="getButtonProps(action)">
+        <template v-if="action.popConfirm">
+          <Popconfirm v-bind="getPopConfirmProps(action.popConfirm)">
+            <template v-if="action.popConfirm.icon" #icon>
+              <IconifyIcon :icon="action.popConfirm.icon" />
+            </template>
+            <Tooltip
+              v-if="action.tooltip"
+              v-bind="getTooltipProps(action.tooltip)"
+            >
+              <Button v-bind="getButtonProps(action)">
+                <template v-if="action.icon" #icon>
+                  <IconifyIcon :icon="action.icon" />
+                </template>
+                {{ action.label }}
+              </Button>
+            </Tooltip>
+            <Button v-else v-bind="getButtonProps(action)">
+              <template v-if="action.icon" #icon>
+                <IconifyIcon :icon="action.icon" />
+              </template>
+              {{ action.label }}
+            </Button>
+          </Popconfirm>
+        </template>
+        <template v-else>
+          <Tooltip
+            v-if="action.tooltip"
+            v-bind="getTooltipProps(action.tooltip)"
+          >
+            <Button
+              v-bind="getButtonProps(action)"
+              @click="handleButtonClick(action)"
+            >
               <template v-if="action.icon" #icon>
                 <IconifyIcon :icon="action.icon" />
               </template>
               {{ action.label }}
             </Button>
           </Tooltip>
-        </Popconfirm>
-        <Tooltip v-else v-bind="getTooltipProps(action.tooltip)">
           <Button
+            v-else
             v-bind="getButtonProps(action)"
             @click="handleButtonClick(action)"
           >
@@ -171,7 +194,7 @@ function handleButtonClick(action: ActionItem) {
             </template>
             {{ action.label }}
           </Button>
-        </Tooltip>
+        </template>
       </template>
     </Space>
 

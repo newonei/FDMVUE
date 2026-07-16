@@ -29,7 +29,7 @@ const [Form, formApi] = useVbenForm({
   showDefaultActions: false,
   layout: 'horizontal',
   wrapperClass: 'grid-cols-1 md:grid-cols-2',
-  commonConfig: { labelWidth: 110, colon: true },
+  commonConfig: { labelWidth: 90, colon: true },
 });
 
 const [Modal, modalApi] = useVbenModal({
@@ -60,12 +60,14 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       modalApi.unlock();
       formData.value = undefined;
+      await formApi.resetForm();
       await formApi.setValues(EC_INVOICE_APPLY_DEFAULTS as any, false);
       return;
     }
     const mySeq = ++openSeq;
     const row = modalApi.getData<FdmdataEcInvoiceApplyApi.EcInvoiceApply>();
     formData.value = undefined;
+    await formApi.resetForm();
     await formApi.setValues(EC_INVOICE_APPLY_DEFAULTS as any, false);
     if (!row?.id) return;
     modalApi.lock();
@@ -91,7 +93,7 @@ const title = computed(() =>
 </script>
 
 <template>
-  <Modal :title="title" class="w-[920px] max-w-[calc(100vw-2rem)]">
+  <Modal :title="title" class="w-[760px] max-w-[calc(100vw-2rem)]">
     <Form />
   </Modal>
 </template>

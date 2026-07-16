@@ -76,16 +76,23 @@ async function bootstrap(namespace: string) {
     }
   });
 
-  // 屏蔽 AntDV Tooltip/Popconfirm 底层 vc-trigger 在 onBeforeMount 阶段（非
-  // render 阶段）访问 arrowContent 插槽所触发的 Vue 响应式跟踪警告。
-  // 这是 AntDV 的框架内部 bug，不影响功能；但在表格右侧固定列（每行含
-  // Popconfirm 按钮）场景下，鼠标 hover 会以 60 fps 触发重绘，导致该警告
-  // 每秒输出 1000+ 次，console.warn 构建堆栈字符串的开销会使页面明显卡顿。
+  // 屏蔽 AntDV Tooltip/Popconfirm 底层 vc-trigger 在非 render 阶段访问插槽
+  // 所触发的 Vue 响应式跟踪误报。ecinvoiceapply 的 VXE 自动尺寸计算会放大
+  // default/element 警告，console.warn 构建大量堆栈会使开发页面明显卡顿。
+  // 下列已确认的 AntDV 插槽仅在该路由过滤，避免掩盖其他页面真正的问题。
   // warnHandler 仅在开发模式下生效，生产构建中 Vue 警告已被编译器移除。
+  const ecInvoiceApplySlotWarningPattern =
+    /Slot "(?:clearIcon|default|downHandler|element|empty|upHandler)" invoked outside of the render function/;
   app.config.warnHandler = (msg) => {
+    const isOutsideRenderSlotWarning = msg.includes(
+      'outside of the render function',
+    );
+    const isEcInvoiceApplySlotWarning =
+      router.currentRoute.value.path === '/dev/ecinvoiceapply' &&
+      ecInvoiceApplySlotWarningPattern.test(msg);
     if (
-      msg.includes('"arrowContent"') &&
-      msg.includes('outside of the render function')
+      isOutsideRenderSlotWarning &&
+      (msg.includes('"arrowContent"') || isEcInvoiceApplySlotWarning)
     ) {
       return;
     }

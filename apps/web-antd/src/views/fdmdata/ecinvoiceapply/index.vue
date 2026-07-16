@@ -4,7 +4,7 @@ import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
 
 import { computed, ref } from 'vue';
 
-import { Page, useVbenModal } from '@vben/common-ui';
+import { confirm, Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
@@ -82,6 +82,12 @@ function handleEdit(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
 
 async function handleDelete(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
   if (!row.id) return;
+  try {
+    await confirm($t('ui.actionMessage.deleteConfirm', [row.id]));
+  } catch {
+    return;
+  }
+
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.id]),
     duration: 0,
@@ -207,10 +213,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   danger: true,
                   icon: ACTION_ICON.DELETE,
                   auth: ['fdmdata:ecinvoiceapply:delete'],
-                  popConfirm: {
-                    title: $t('ui.actionMessage.deleteConfirm', [row.id]),
-                    confirm: handleDelete.bind(null, row),
-                  },
+                  onClick: handleDelete.bind(null, row),
                 },
               ]"
             />

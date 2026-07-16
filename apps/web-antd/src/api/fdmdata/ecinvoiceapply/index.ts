@@ -18,6 +18,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     invoiceType?: string;
     title?: string;
     amount?: number;
+    quantity?: number;
+    unitPrice?: number;
     serialNo?: string;
     applySource?: string;
     startTime?: string;

@@ -3,7 +3,9 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
+
+import { IconifyIcon } from '@vben/icons';
 
 import {
   Alert,
@@ -19,19 +21,18 @@ import {
   Tag,
 } from 'ant-design-vue';
 
-import {
-  getEnabledTemplates,
-  getLaunchPreview,
-  launchAssessment,
-} from '#/api/fdmperformance';
+import { getLaunchPreview, launchAssessment } from '#/api/fdmperformance';
 
 import { PERIOD_OPTIONS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import TemplatePickerModal from './components/TemplatePickerModal.vue';
 
 defineOptions({ name: 'FdmPerformanceLaunch' });
 
 const submitting = ref(false);
-const templates = ref<JixiaoApi.Template[]>([]);
+const templateLoading = ref(false);
+const templatePickerOpen = ref(false);
+const selectedTemplate = ref<JixiaoApi.TemplateSelectItem>();
 const preview = ref<JixiaoApi.LaunchPreview>();
 const form = reactive<JixiaoApi.LaunchReq>({
   name: '',
@@ -39,15 +40,6 @@ const form = reactive<JixiaoApi.LaunchReq>({
   templateId: undefined as unknown as number,
 });
 
-const templateOptions = computed(() =>
-  templates.value.map((item) => ({
-    label: item.name,
-    value: item.id,
-  })),
-);
-const selectedTemplate = computed(() =>
-  templates.value.find((item) => item.id === form.templateId),
-);
 const selectedPeriodType = computed(
   () => preview.value?.periodType || selectedTemplate.value?.periodType || '',
 );
@@ -194,20 +186,24 @@ function syncPeriodKey(periodType?: string) {
   syncBatchName();
 }
 
-async function loadTemplates() {
-  templates.value = await getEnabledTemplates();
-}
-
-async function chooseTemplate(templateId?: number) {
+async function chooseTemplate(template: JixiaoApi.TemplateSelectItem) {
+  if (form.templateId === template.id && preview.value) {
+    selectedTemplate.value = template;
+    return;
+  }
+  selectedTemplate.value = template;
+  form.templateId = template.id;
   preview.value = undefined;
   form.periodKey = '';
   form.name = '';
-  if (!templateId) {
-    return;
+  syncPeriodKey(template.periodType);
+  templateLoading.value = true;
+  try {
+    preview.value = await getLaunchPreview(template.id);
+    syncPeriodKey(preview.value.periodType);
+  } finally {
+    templateLoading.value = false;
   }
-  syncPeriodKey(selectedTemplate.value?.periodType);
-  preview.value = await getLaunchPreview(templateId);
-  syncPeriodKey(preview.value.periodType);
 }
 
 function handlePeriodChange() {
@@ -227,8 +223,6 @@ async function submit() {
     submitting.value = false;
   }
 }
-
-onMounted(loadTemplates);
 </script>
 
 <template>
@@ -243,12 +237,27 @@ onMounted(loadTemplates);
       <Form layout="vertical">
         <div class="form-grid">
           <Form.Item label="考评表" required>
-            <Select
-              v-model:value="form.templateId"
-              :options="templateOptions"
-              placeholder="选择已启用考评表"
-              @change="(value) => chooseTemplate(Number(value))"
-            />
+            <button
+              :aria-busy="templateLoading"
+              class="template-trigger" :class="[{ 'has-value': selectedTemplate }]"
+              :disabled="templateLoading"
+              type="button"
+              @click="templatePickerOpen = true"
+            >
+              <span v-if="selectedTemplate" class="template-trigger-content">
+                <strong>{{ selectedTemplate.name }}</strong>
+                <span>
+                  {{
+                    PERIOD_OPTIONS.find(
+                      (item) => item.value === selectedTemplate?.periodType,
+                    )?.label || selectedTemplate.periodType
+                  }}
+                  · {{ selectedTemplate.personCount }} 人
+                </span>
+              </span>
+              <span v-else class="template-placeholder">点击选择考评表</span>
+              <IconifyIcon icon="lucide:chevron-right" />
+            </button>
           </Form.Item>
           <Form.Item label="周期标识" required>
             <Select
@@ -322,6 +331,12 @@ onMounted(loadTemplates);
         </template>
       </Table>
     </div>
+
+    <TemplatePickerModal
+      v-model:open="templatePickerOpen"
+      :selected="selectedTemplate"
+      @confirm="chooseTemplate"
+    />
   </PerformanceShell>
 </template>
 
@@ -338,6 +353,66 @@ onMounted(loadTemplates);
   display: grid;
   grid-template-columns: 1.2fr 160px 1.2fr 140px 140px;
   gap: 12px;
+}
+
+.template-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 14px;
+  color: #8c8c8c;
+  text-align: left;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.template-trigger:hover,
+.template-trigger:focus-visible {
+  border-color: #4096ff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(5 145 255 / 10%);
+}
+
+.template-trigger:disabled {
+  cursor: wait;
+  background: #f5f5f5;
+}
+
+.template-trigger.has-value {
+  color: #1f2329;
+}
+
+.template-trigger-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.template-trigger-content strong,
+.template-trigger-content span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-trigger-content span {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.template-placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {

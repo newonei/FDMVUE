@@ -3,7 +3,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   Button,
@@ -22,6 +22,7 @@ import {
 
 import {
   adjustGrade,
+  batchPublishResults,
   getResultPage,
   getReviewPage,
   publishResult,
@@ -33,6 +34,7 @@ import PerformanceShell from '../shared/PerformanceShell.vue';
 defineOptions({ name: 'FdmPerformanceResults' });
 
 const resultLoading = ref(false);
+const batchPublishing = ref(false);
 const reviewLoading = ref(false);
 const adjustOpen = ref(false);
 const reviewOpen = ref(false);
@@ -41,6 +43,7 @@ const reviews = ref<JixiaoApi.Review[]>([]);
 const activeReview = ref<JixiaoApi.Review>();
 const resultTotal = ref(0);
 const reviewTotal = ref(0);
+const selectedResultIds = ref<number[]>([]);
 const resultQuery = reactive({
   batchId: undefined as number | undefined,
   grade: undefined as string | undefined,
@@ -60,6 +63,18 @@ const adjustForm = reactive<JixiaoApi.GradeAdjustReq>({
   reason: '',
   resultId: 0,
 });
+const resultRowSelection = computed(() => ({
+  preserveSelectedRowKeys: true,
+  selectedRowKeys: selectedResultIds.value,
+  getCheckboxProps: (record: JixiaoApi.Result) => ({
+    disabled: !canPublishResult(record),
+  }),
+  onChange: (keys: Array<number | string>) => {
+    selectedResultIds.value = keys
+      .map(Number)
+      .filter((key) => Number.isFinite(key));
+  },
+}));
 
 const resultColumns: TableColumnsType = [
   { dataIndex: 'userName', title: '员工' },
@@ -86,6 +101,10 @@ const reviewColumns: TableColumnsType = [
 
 function reviewStatus(status?: number): { color: string; text: string } {
   return REVIEW_STATUS_MAP[status ?? 0] ?? { color: 'default', text: '-' };
+}
+
+function canPublishResult(record: JixiaoApi.Result) {
+  return typeof record.id === 'number' && record.publicStatus !== 1;
 }
 
 async function loadResults() {
@@ -135,8 +154,27 @@ async function submitPublish(record: JixiaoApi.Result) {
     return;
   }
   await publishResult({ resultId: record.id });
+  selectedResultIds.value = selectedResultIds.value.filter(
+    (id) => id !== record.id,
+  );
   message.success('结果已公示');
   await loadResults();
+}
+
+async function submitBatchPublish() {
+  if (selectedResultIds.value.length === 0) {
+    return;
+  }
+  const resultIds = [...selectedResultIds.value];
+  batchPublishing.value = true;
+  try {
+    await batchPublishResults({ resultIds });
+    selectedResultIds.value = [];
+    message.success(`已批量公示 ${resultIds.length} 条绩效结果`);
+    await loadResults();
+  } finally {
+    batchPublishing.value = false;
+  }
 }
 
 function openReview(record: JixiaoApi.Review) {
@@ -183,12 +221,38 @@ onMounted(() => {
         style="width: 130px"
       />
       <Button type="primary" @click="loadResults">查询结果</Button>
+      <div class="batch-actions">
+        <span class="selected-count">
+          已选择 {{ selectedResultIds.length }} 项
+        </span>
+        <Button
+          :disabled="selectedResultIds.length === 0"
+          size="small"
+          type="link"
+          @click="selectedResultIds = []"
+        >
+          清空
+        </Button>
+        <Popconfirm
+          :title="`确认公示选中的 ${selectedResultIds.length} 条绩效结果？`"
+          @confirm="submitBatchPublish"
+        >
+          <Button
+            :disabled="selectedResultIds.length === 0"
+            :loading="batchPublishing"
+            type="primary"
+          >
+            批量公示
+          </Button>
+        </Popconfirm>
+      </div>
     </div>
 
     <Table
       :columns="resultColumns"
       :data-source="results"
       :loading="resultLoading"
+      :row-selection="resultRowSelection"
       :pagination="{
         current: resultQuery.pageNo,
         pageSize: resultQuery.pageSize,
@@ -227,7 +291,7 @@ onMounted(() => {
               调整等级
             </Button>
             <Popconfirm
-              v-if="record.publicStatus !== 1"
+              v-if="canPublishResult(record)"
               title="确认公示该绩效结果？"
               @confirm="submitPublish(record)"
             >
@@ -327,6 +391,7 @@ onMounted(() => {
 .filter-bar,
 .section-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   padding: 12px;
@@ -337,6 +402,19 @@ onMounted(() => {
 
 .filter-bar > * {
   max-width: 180px;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  max-width: none;
+  margin-left: auto;
+}
+
+.selected-count {
+  color: #60666f;
+  white-space: nowrap;
 }
 
 .section-head {
@@ -352,6 +430,11 @@ onMounted(() => {
 
   .filter-bar > * {
     max-width: none;
+  }
+
+  .batch-actions {
+    justify-content: flex-end;
+    margin-left: 0;
   }
 }
 </style>

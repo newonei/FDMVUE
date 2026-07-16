@@ -77,6 +77,23 @@ export namespace JixiaoApi {
     status?: number;
   };
 
+  export interface TemplateSelectItem {
+    deptIds: number[];
+    deptNames: string[];
+    id: number;
+    indicatorCount: number;
+    name: string;
+    periodType: string;
+    personCount: number;
+    updateTime?: string;
+  }
+
+  export type TemplateSelectPageParams = PageParam & {
+    deptId?: number;
+    keyword?: string;
+    periodType?: string;
+  };
+
   export interface LaunchReq {
     endDate?: string;
     name: string;
@@ -245,6 +262,28 @@ export namespace JixiaoApi {
     taskId: string;
   }
 
+  export type HrReviewPendingPageParams = PageParam;
+
+  export interface HrReviewPendingItem {
+    batchId?: number;
+    batchName?: string;
+    finalScore?: number;
+    instanceId?: number;
+    periodKey?: string;
+    supervisorUserId?: number;
+    supervisorUserName?: string;
+    taskAssigneeUserId?: number;
+    taskAssigneeUserName?: string;
+    taskId?: string;
+    templateName?: string;
+    userId?: number;
+    userName?: string;
+  }
+
+  export interface HrReviewBatchReq {
+    instanceIds: number[];
+  }
+
   export type ResultPageParams = PageParam & {
     batchId?: number;
     grade?: string;
@@ -260,6 +299,10 @@ export namespace JixiaoApi {
 
   export interface ResultPublishReq {
     resultId: number;
+  }
+
+  export interface ResultBatchPublishReq {
+    resultIds: number[];
   }
 
   export interface GradeLog {
@@ -397,6 +440,15 @@ export function getEnabledTemplates() {
   );
 }
 
+export function getTemplateSelectPage(
+  params: JixiaoApi.TemplateSelectPageParams,
+) {
+  return requestClient.get<PageResult<JixiaoApi.TemplateSelectItem>>(
+    '/fdmperformance/template/select-page',
+    { params },
+  );
+}
+
 export function saveTemplate(data: JixiaoApi.Template) {
   return requestClient.post<number>('/fdmperformance/template/save', data);
 }
@@ -517,6 +569,22 @@ export function submitHrReview(data: JixiaoApi.HrReviewReq) {
   );
 }
 
+export function getHrReviewPendingPage(
+  params: JixiaoApi.HrReviewPendingPageParams,
+) {
+  return requestClient.get<PageResult<JixiaoApi.HrReviewPendingItem>>(
+    '/fdmperformance/assessment/hr-review/pending-page',
+    { params },
+  );
+}
+
+export function batchHrReview(data: JixiaoApi.HrReviewBatchReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/hr-review/batch',
+    data,
+  );
+}
+
 export function confirmEmployeeResult(data: JixiaoApi.TaskReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/employee-confirm',
@@ -567,6 +635,13 @@ export function adjustGrade(data: JixiaoApi.GradeAdjustReq) {
 
 export function publishResult(data: JixiaoApi.ResultPublishReq) {
   return requestClient.post<boolean>('/fdmperformance/result/publish', data);
+}
+
+export function batchPublishResults(data: JixiaoApi.ResultBatchPublishReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/result/batch-publish',
+    data,
+  );
 }
 
 export function getGradeLogPage(params: JixiaoApi.GradeLogPageParams) {

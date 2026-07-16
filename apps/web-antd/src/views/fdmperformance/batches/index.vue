@@ -6,6 +6,8 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
+import { useUserStore } from '@vben/stores';
+
 import {
   Button,
   Input,
@@ -14,6 +16,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
 } from 'ant-design-vue';
 
@@ -21,14 +24,19 @@ import {
   deleteBatch,
   getBatchPage,
   getInstancePage,
+  getSetting,
 } from '#/api/fdmperformance';
 
 import { INSTANCE_STATUS_MAP } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import HrReviewQueue from './components/HrReviewQueue.vue';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
 
 const router = useRouter();
+const userStore = useUserStore();
+const activeTab = ref('batches');
+const isPerformanceHr = ref(false);
 const loading = ref(false);
 const instanceLoading = ref(false);
 const batches = ref<JixiaoApi.Batch[]>([]);
@@ -132,77 +140,40 @@ function changeInstancePage(pagination: any) {
   loadInstances();
 }
 
-onMounted(loadBatches);
+async function initialize() {
+  const [setting] = await Promise.all([getSetting(), loadBatches()]);
+  const currentUserId = Number(
+    userStore.userInfo?.id ?? userStore.userInfo?.userId ?? 0,
+  );
+  isPerformanceHr.value = (setting.hrUserIds || []).includes(currentUserId);
+  if (isPerformanceHr.value) {
+    activeTab.value = 'hr-review';
+  }
+}
+
+onMounted(initialize);
 </script>
 
 <template>
   <PerformanceShell title="考核管理">
-    <div class="filter-bar">
-      <Input
-        v-model:value="batchQuery.name"
-        allow-clear
-        placeholder="批次名称"
-      />
-      <Input
-        v-model:value="batchQuery.periodKey"
-        allow-clear
-        placeholder="周期"
-      />
-      <Select
-        v-model:value="batchQuery.status"
-        allow-clear
-        :options="[
-          { label: '进行中', value: 1 },
-          { label: '已完成', value: 2 },
-          { label: '已取消', value: 3 },
-        ]"
-        placeholder="状态"
-      />
-      <Button type="primary" @click="loadBatches">查询</Button>
-    </div>
-
-    <Table
-      :columns="batchColumns"
-      :data-source="batches"
-      :loading="loading"
-      :pagination="{
-        current: batchQuery.pageNo,
-        pageSize: batchQuery.pageSize,
-        total: batchTotal,
-      }"
-      row-key="id"
-      @change="changeBatchPage"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'status'">
-          <Tag :color="instanceStatus(record.status).color">
-            {{ instanceStatus(record.status).text }}
-          </Tag>
-        </template>
-        <template v-else-if="column.dataIndex === 'action'">
-          <Space>
-            <Button size="small" type="link" @click="loadInstances(record)">
-              查看人员
-            </Button>
-            <Popconfirm
-              title="删除后会终止流程并删除本批次数据，确认删除？"
-              ok-text="删除"
-              cancel-text="取消"
-              @confirm="removeBatch(record)"
-            >
-              <Button danger size="small" type="link">删除</Button>
-            </Popconfirm>
-          </Space>
-        </template>
-      </template>
-    </Table>
-
-    <div v-if="selectedBatch" class="instance-panel">
-      <div class="panel-head">
-        <strong>{{ selectedBatch.name }} / 单人实例</strong>
-        <Space>
+    <Tabs v-model:active-key="activeTab" class="management-tabs">
+      <Tabs.TabPane v-if="isPerformanceHr" key="hr-review" tab="待人事审核">
+        <HrReviewQueue />
+      </Tabs.TabPane>
+      <Tabs.TabPane key="batches" tab="考核批次">
+        <div class="filter-bar">
+          <Input
+            v-model:value="batchQuery.name"
+            allow-clear
+            placeholder="批次名称"
+          />
+          <Input
+            v-model:value="batchQuery.periodKey"
+            allow-clear
+            placeholder="周期"
+          />
           <Select
-            v-model:value="instanceQuery.status"
+            v-model:value="batchQuery.status"
             allow-clear
             :options="[
               { label: '进行中', value: 1 },
@@ -210,37 +181,92 @@ onMounted(loadBatches);
               { label: '已取消', value: 3 },
             ]"
             placeholder="状态"
-            style="width: 120px"
-            @change="loadInstances()"
           />
-        </Space>
-      </div>
-      <Table
-        :columns="instanceColumns"
-        :data-source="instances"
-        :loading="instanceLoading"
-        :pagination="{
-          current: instanceQuery.pageNo,
-          pageSize: instanceQuery.pageSize,
-          total: instanceTotal,
-        }"
-        row-key="id"
-        @change="changeInstancePage"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'status'">
-            <Tag :color="instanceStatus(record.status).color">
-              {{ instanceStatus(record.status).text }}
-            </Tag>
+          <Button type="primary" @click="loadBatches">查询</Button>
+        </div>
+
+        <Table
+          :columns="batchColumns"
+          :data-source="batches"
+          :loading="loading"
+          :pagination="{
+            current: batchQuery.pageNo,
+            pageSize: batchQuery.pageSize,
+            total: batchTotal,
+          }"
+          row-key="id"
+          @change="changeBatchPage"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.dataIndex === 'status'">
+              <Tag :color="instanceStatus(record.status).color">
+                {{ instanceStatus(record.status).text }}
+              </Tag>
+            </template>
+            <template v-else-if="column.dataIndex === 'action'">
+              <Space>
+                <Button size="small" type="link" @click="loadInstances(record)">
+                  查看人员
+                </Button>
+                <Popconfirm
+                  title="删除后会终止流程并删除本批次数据，确认删除？"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  @confirm="removeBatch(record)"
+                >
+                  <Button danger size="small" type="link">删除</Button>
+                </Popconfirm>
+              </Space>
+            </template>
           </template>
-          <template v-else-if="column.dataIndex === 'action'">
-            <Button size="small" type="link" @click="openInstance(record)">
-              详情
-            </Button>
-          </template>
-        </template>
-      </Table>
-    </div>
+        </Table>
+
+        <div v-if="selectedBatch" class="instance-panel">
+          <div class="panel-head">
+            <strong>{{ selectedBatch.name }} / 单人实例</strong>
+            <Space>
+              <Select
+                v-model:value="instanceQuery.status"
+                allow-clear
+                :options="[
+                  { label: '进行中', value: 1 },
+                  { label: '已完成', value: 2 },
+                  { label: '已取消', value: 3 },
+                ]"
+                placeholder="状态"
+                style="width: 120px"
+                @change="loadInstances()"
+              />
+            </Space>
+          </div>
+          <Table
+            :columns="instanceColumns"
+            :data-source="instances"
+            :loading="instanceLoading"
+            :pagination="{
+              current: instanceQuery.pageNo,
+              pageSize: instanceQuery.pageSize,
+              total: instanceTotal,
+            }"
+            row-key="id"
+            @change="changeInstancePage"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.dataIndex === 'status'">
+                <Tag :color="instanceStatus(record.status).color">
+                  {{ instanceStatus(record.status).text }}
+                </Tag>
+              </template>
+              <template v-else-if="column.dataIndex === 'action'">
+                <Button size="small" type="link" @click="openInstance(record)">
+                  详情
+                </Button>
+              </template>
+            </template>
+          </Table>
+        </div>
+      </Tabs.TabPane>
+    </Tabs>
   </PerformanceShell>
 </template>
 
@@ -251,6 +277,10 @@ onMounted(loadBatches);
   background: #fff;
   border: 1px solid #edf0f4;
   border-radius: 8px;
+}
+
+.management-tabs {
+  min-width: 0;
 }
 
 .filter-bar {
