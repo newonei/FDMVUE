@@ -35,6 +35,12 @@ export function getShopCompany(id: number) {
   );
 }
 
+export function getShopCompanySimpleList() {
+  return requestClient.get<FdmdataShopCompanyApi.ShopCompany[]>(
+    '/fdmdata/shop-company/simple-list',
+  );
+}
+
 export function createShopCompany(
   data: FdmdataShopCompanyApi.ShopCompany,
 ) {

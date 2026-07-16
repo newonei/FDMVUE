@@ -1,7 +1,10 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
+import type { FdmdataShopCompanyApi } from '#/api/fdmdata/shopcompany';
 
+import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
+import { getShopCompanySimpleList } from '#/api/fdmdata/shopcompany';
 import { getRangePickerDefaultProps } from '#/utils';
 
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
@@ -27,6 +30,58 @@ function formatAmount({ cellValue }: { cellValue: unknown }) {
 
 function formatBoolean({ cellValue }: { cellValue: unknown }) {
   return cellValue ? '是' : '否';
+}
+
+const companySelectProps = {
+  api: getDataCompanySimpleList,
+  labelField: 'companyName',
+  valueField: 'id',
+  allowClear: true,
+  showSearch: true,
+  optionFilterProp: 'label',
+};
+
+async function getShopNameOptions() {
+  const relations = await getShopCompanySimpleList();
+  const options = new Map<
+    string,
+    { platforms: Set<string>; value: string }
+  >();
+
+  const addOption = (
+    value: string | undefined,
+    relation: FdmdataShopCompanyApi.ShopCompany,
+  ) => {
+    const trimmedValue = value?.trim();
+    if (!trimmedValue) return;
+    const key = trimmedValue.toLocaleLowerCase();
+    const current = options.get(key) ?? {
+      platforms: new Set<string>(),
+      value: trimmedValue,
+    };
+    const platform = (
+      relation.platformName ||
+      relation.platformCode ||
+      ''
+    ).trim();
+    if (platform) current.platforms.add(platform);
+    options.set(key, current);
+  };
+
+  relations.forEach((relation) => {
+    addOption(relation.shopName, relation);
+    addOption(relation.shopAlias, relation);
+  });
+
+  return [...options.values()]
+    .sort((left, right) => left.value.localeCompare(right.value, 'zh-CN'))
+    .map(({ platforms, value }) => ({
+      label:
+        platforms.size > 0
+          ? `${value}（${[...platforms].join('/')}）`
+          : value,
+      value,
+    }));
 }
 
 export function useFormSchema(): VbenFormSchema[] {
@@ -69,6 +124,16 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '店铺',
       component: 'Input',
       componentProps: { allowClear: true, maxlength: 128 },
+      rules: 'required',
+    },
+    {
+      fieldName: 'companyId',
+      label: '公司主体',
+      component: 'ApiSelect',
+      componentProps: {
+        ...companySelectProps,
+        placeholder: '请选择公司主体',
+      },
       rules: 'required',
     },
     {
@@ -153,8 +218,16 @@ export function useGridFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'shopName',
       label: '店铺名称',
-      component: 'Input',
-      componentProps: { allowClear: true },
+      component: 'ApiSelect',
+      componentProps: {
+        api: getShopNameOptions,
+        labelField: 'label',
+        valueField: 'value',
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        placeholder: '请选择店铺',
+      },
     },
     {
       fieldName: 'shopCompanyName',

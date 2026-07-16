@@ -21,7 +21,7 @@ import {
   Tag,
 } from 'ant-design-vue';
 
-import { getLaunchPreview, launchAssessment } from '#/api/fdmperformance';
+import { batchLaunchAssessments, getLaunchPreview } from '#/api/fdmperformance';
 
 import { PERIOD_OPTIONS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -29,23 +29,41 @@ import TemplatePickerModal from './components/TemplatePickerModal.vue';
 
 defineOptions({ name: 'FdmPerformanceLaunch' });
 
+type LaunchRow = JixiaoApi.LaunchBatchItem & {
+  template: JixiaoApi.TemplateSelectItem;
+};
+
 const submitting = ref(false);
-const templateLoading = ref(false);
+const previewLoading = ref(false);
 const templatePickerOpen = ref(false);
-const selectedTemplate = ref<JixiaoApi.TemplateSelectItem>();
+const launchRows = ref<LaunchRow[]>([]);
 const preview = ref<JixiaoApi.LaunchPreview>();
-const form = reactive<JixiaoApi.LaunchReq>({
-  name: '',
-  periodKey: '',
-  templateId: undefined as unknown as number,
+const previewTemplateId = ref<number>();
+const commonForm = reactive<Omit<JixiaoApi.LaunchBatchReq, 'items'>>({
+  endDate: undefined,
+  remark: '',
+  startDate: undefined,
 });
 
-const selectedPeriodType = computed(
-  () => preview.value?.periodType || selectedTemplate.value?.periodType || '',
+const selectedTemplates = computed(() =>
+  launchRows.value.map((item) => item.template),
 );
-const periodKeyOptions = computed(() =>
-  buildPeriodOptions(selectedPeriodType.value),
+const totalPersonCount = computed(() =>
+  launchRows.value.reduce(
+    (total, item) => total + item.template.personCount,
+    0,
+  ),
 );
+
+const launchColumns: TableColumnsType = [
+  { dataIndex: 'template', title: '考评表', width: 230 },
+  { dataIndex: 'periodType', title: '考核周期', width: 100 },
+  { dataIndex: 'periodKey', title: '周期标识', width: 180 },
+  { dataIndex: 'personCount', title: '人数', width: 80 },
+  { dataIndex: 'indicatorCount', title: '指标', width: 80 },
+  { dataIndex: 'name', title: '批次名称', width: 260 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 130 },
+];
 
 const personColumns: TableColumnsType = [
   { dataIndex: 'userName', title: '被考核人' },
@@ -69,6 +87,14 @@ const flatIndicators = computed(() =>
     })),
   ),
 );
+
+function periodLabel(periodType?: string) {
+  return (
+    PERIOD_OPTIONS.find((item) => item.value === periodType)?.label ||
+    periodType ||
+    '-'
+  );
+}
 
 function pad2(value: number) {
   return String(value).padStart(2, '0');
@@ -169,56 +195,96 @@ function getDefaultPeriodKey(periodType?: string) {
   return '';
 }
 
-function syncBatchName() {
-  if (!selectedTemplate.value?.name || !form.periodKey) return;
-  form.name = `${selectedTemplate.value.name}-${form.periodKey}`;
+function createLaunchRow(
+  template: JixiaoApi.TemplateSelectItem,
+  existing?: LaunchRow,
+): LaunchRow {
+  const periodOptions = buildPeriodOptions(template.periodType);
+  const existingPeriodKey = existing?.periodKey;
+  const periodKey =
+    existingPeriodKey &&
+    periodOptions.some((option) => option.value === existingPeriodKey)
+      ? existingPeriodKey
+      : getDefaultPeriodKey(template.periodType);
+  return {
+    name: existing?.name || `${template.name}-${periodKey}`,
+    periodKey,
+    template,
+    templateId: template.id,
+  };
 }
 
-function syncPeriodKey(periodType?: string) {
-  const options = buildPeriodOptions(periodType);
-  if (options.length === 0) {
-    form.periodKey = '';
-    return;
+function confirmTemplates(templates: JixiaoApi.TemplateSelectItem[]) {
+  const existingMap = new Map(
+    launchRows.value.map((item) => [item.templateId, item]),
+  );
+  launchRows.value = templates.map((template) =>
+    createLaunchRow(template, existingMap.get(template.id)),
+  );
+  if (
+    previewTemplateId.value &&
+    !launchRows.value.some(
+      (item) => item.templateId === previewTemplateId.value,
+    )
+  ) {
+    preview.value = undefined;
+    previewTemplateId.value = undefined;
   }
-  if (!options.some((item) => item.value === form.periodKey)) {
-    form.periodKey = getDefaultPeriodKey(periodType) || options[0]?.value || '';
-  }
-  syncBatchName();
 }
 
-async function chooseTemplate(template: JixiaoApi.TemplateSelectItem) {
-  if (form.templateId === template.id && preview.value) {
-    selectedTemplate.value = template;
-    return;
+function changePeriod(record: Record<string, any>) {
+  const row = record as LaunchRow;
+  row.name = `${row.template.name}-${row.periodKey}`;
+}
+
+function removeTemplate(templateId: number) {
+  launchRows.value = launchRows.value.filter(
+    (item) => item.templateId !== templateId,
+  );
+  if (previewTemplateId.value === templateId) {
+    preview.value = undefined;
+    previewTemplateId.value = undefined;
   }
-  selectedTemplate.value = template;
-  form.templateId = template.id;
+}
+
+async function openPreview(record: Record<string, any>) {
+  const row = record as LaunchRow;
+  previewTemplateId.value = row.templateId;
   preview.value = undefined;
-  form.periodKey = '';
-  form.name = '';
-  syncPeriodKey(template.periodType);
-  templateLoading.value = true;
+  previewLoading.value = true;
   try {
-    preview.value = await getLaunchPreview(template.id);
-    syncPeriodKey(preview.value.periodType);
+    preview.value = await getLaunchPreview(row.templateId);
   } finally {
-    templateLoading.value = false;
+    previewLoading.value = false;
   }
-}
-
-function handlePeriodChange() {
-  syncBatchName();
 }
 
 async function submit() {
-  if (!form.templateId || !form.name?.trim() || !form.periodKey?.trim()) {
-    message.warning('请选择考评表并填写批次名称、周期标识');
+  if (launchRows.value.length === 0) {
+    message.warning('请至少选择一张考评表');
+    return;
+  }
+  const invalidRow = launchRows.value.find(
+    (item) => !item.periodKey?.trim() || !item.name?.trim(),
+  );
+  if (invalidRow) {
+    message.warning(`请完善“${invalidRow.template.name}”的周期和批次名称`);
     return;
   }
   submitting.value = true;
   try {
-    await launchAssessment(form);
-    message.success('已发起考核');
+    const batchIds = await batchLaunchAssessments({
+      ...commonForm,
+      items: launchRows.value.map((item) => ({
+        name: item.name.trim(),
+        periodKey: item.periodKey.trim(),
+        templateId: item.templateId,
+      })),
+    });
+    message.success(`已发起 ${batchIds.length} 个考核批次`);
+    launchRows.value = [];
+    preview.value = undefined;
+    previewTemplateId.value = undefined;
   } finally {
     submitting.value = false;
   }
@@ -228,66 +294,133 @@ async function submit() {
 <template>
   <PerformanceShell title="发起考核">
     <Alert
-      message="发起后系统会为每个被考核人创建一个独立 BPM 流程实例，并冻结人员主管关系与指标快照。"
+      message="可一次选择多张考评表。系统会先校验全部考评表和周期，再为每名被考核人创建独立 BPM 流程实例。"
       show-icon
       type="info"
     />
 
     <div class="launch-panel">
       <Form layout="vertical">
-        <div class="form-grid">
-          <Form.Item label="考评表" required>
-            <button
-              :aria-busy="templateLoading"
-              class="template-trigger" :class="[{ 'has-value': selectedTemplate }]"
-              :disabled="templateLoading"
-              type="button"
-              @click="templatePickerOpen = true"
-            >
-              <span v-if="selectedTemplate" class="template-trigger-content">
-                <strong>{{ selectedTemplate.name }}</strong>
-                <span>
-                  {{
-                    PERIOD_OPTIONS.find(
-                      (item) => item.value === selectedTemplate?.periodType,
-                    )?.label || selectedTemplate.periodType
-                  }}
-                  · {{ selectedTemplate.personCount }} 人
-                </span>
+        <Form.Item label="考评表" required>
+          <button
+            class="template-trigger"
+            :class="[{ 'has-value': launchRows.length > 0 }]"
+            type="button"
+            @click="templatePickerOpen = true"
+          >
+            <span v-if="launchRows.length" class="template-trigger-content">
+              <strong>已选择 {{ launchRows.length }} 张考评表</strong>
+              <span>
+                共 {{ totalPersonCount }} 人次，可继续添加或移除考评表
               </span>
-              <span v-else class="template-placeholder">点击选择考评表</span>
-              <IconifyIcon icon="lucide:chevron-right" />
-            </button>
-          </Form.Item>
-          <Form.Item label="周期标识" required>
-            <Select
-              v-model:value="form.periodKey"
-              :disabled="!selectedPeriodType"
-              :options="periodKeyOptions"
-              option-filter-prop="label"
-              placeholder="请选择周期"
-              show-search
-              @change="handlePeriodChange"
+            </span>
+            <span v-else class="template-placeholder">
+              点击选择一张或多张考评表
+            </span>
+            <IconifyIcon icon="lucide:chevron-right" />
+          </button>
+        </Form.Item>
+
+        <div v-if="launchRows.length" class="launch-list">
+          <Table
+            :columns="launchColumns"
+            :data-source="launchRows"
+            :pagination="false"
+            :scroll="{ x: 1060 }"
+            row-key="templateId"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.dataIndex === 'template'">
+                <div class="template-cell">
+                  <strong :title="record.template.name">
+                    {{ record.template.name }}
+                  </strong>
+                  <span :title="record.template.deptNames.join('、')">
+                    {{
+                      record.template.deptNames.length
+                        ? record.template.deptNames.join('、')
+                        : '未设置部门'
+                    }}
+                  </span>
+                </div>
+              </template>
+              <template v-else-if="column.dataIndex === 'periodType'">
+                <Tag color="blue">
+                  {{ periodLabel(record.template.periodType) }}
+                </Tag>
+              </template>
+              <template v-else-if="column.dataIndex === 'periodKey'">
+                <Select
+                  v-model:value="record.periodKey"
+                  :options="buildPeriodOptions(record.template.periodType)"
+                  class="period-select"
+                  option-filter-prop="label"
+                  show-search
+                  @change="changePeriod(record)"
+                />
+              </template>
+              <template v-else-if="column.dataIndex === 'personCount'">
+                {{ record.template.personCount }}
+              </template>
+              <template v-else-if="column.dataIndex === 'indicatorCount'">
+                {{ record.template.indicatorCount }}
+              </template>
+              <template v-else-if="column.dataIndex === 'name'">
+                <Input v-model:value="record.name" />
+              </template>
+              <template v-else-if="column.dataIndex === 'action'">
+                <Space>
+                  <Button
+                    :loading="
+                      previewLoading && previewTemplateId === record.templateId
+                    "
+                    size="small"
+                    type="link"
+                    @click="openPreview(record)"
+                  >
+                    预览
+                  </Button>
+                  <Button
+                    danger
+                    size="small"
+                    type="link"
+                    @click="removeTemplate(record.templateId)"
+                  >
+                    移除
+                  </Button>
+                </Space>
+              </template>
+            </template>
+          </Table>
+        </div>
+
+        <div class="shared-grid">
+          <Form.Item label="开始日期">
+            <Input
+              v-model:value="commonForm.startDate"
+              placeholder="YYYY-MM-DD"
             />
           </Form.Item>
-          <Form.Item label="批次名称" required>
-            <Input v-model:value="form.name" />
-          </Form.Item>
-          <Form.Item label="开始日期">
-            <Input v-model:value="form.startDate" placeholder="YYYY-MM-DD" />
-          </Form.Item>
           <Form.Item label="结束日期">
-            <Input v-model:value="form.endDate" placeholder="YYYY-MM-DD" />
+            <Input
+              v-model:value="commonForm.endDate"
+              placeholder="YYYY-MM-DD"
+            />
+          </Form.Item>
+          <Form.Item label="备注">
+            <Input v-model:value="commonForm.remark" />
           </Form.Item>
         </div>
-        <Form.Item label="备注">
-          <Input v-model:value="form.remark" />
-        </Form.Item>
-        <Space>
-          <Button :loading="submitting" type="primary" @click="submit">
-            批量发起
-          </Button>
-        </Space>
+
+        <Button
+          :disabled="launchRows.length === 0"
+          :loading="submitting"
+          type="primary"
+          @click="submit"
+        >
+          批量发起{{ launchRows.length ? `（${launchRows.length}）` : '' }}
+        </Button>
       </Form>
     </div>
 
@@ -297,10 +430,7 @@ async function submit() {
           {{ preview.templateName }}
         </Descriptions.Item>
         <Descriptions.Item label="周期">
-          {{
-            PERIOD_OPTIONS.find((item) => item.value === preview?.periodType)
-              ?.label || preview.periodType
-          }}
+          {{ periodLabel(preview.periodType) }}
         </Descriptions.Item>
         <Descriptions.Item label="流程定义">
           {{ preview.processDefinitionKey }}
@@ -334,8 +464,8 @@ async function submit() {
 
     <TemplatePickerModal
       v-model:open="templatePickerOpen"
-      :selected="selectedTemplate"
-      @confirm="chooseTemplate"
+      :selected="selectedTemplates"
+      @confirm="confirmTemplates"
     />
   </PerformanceShell>
 </template>
@@ -349,17 +479,21 @@ async function submit() {
   border-radius: 8px;
 }
 
-.form-grid {
+.launch-list {
+  margin-bottom: 16px;
+}
+
+.shared-grid {
   display: grid;
-  grid-template-columns: 1.2fr 160px 1.2fr 140px 140px;
+  grid-template-columns: 180px 180px minmax(240px, 1fr);
   gap: 12px;
 }
 
 .template-trigger {
   display: flex;
   width: 100%;
-  min-height: 32px;
-  padding: 5px 11px;
+  min-height: 44px;
+  padding: 6px 11px;
   font-size: 14px;
   color: #8c8c8c;
   text-align: left;
@@ -381,29 +515,28 @@ async function submit() {
   box-shadow: 0 0 0 2px rgb(5 145 255 / 10%);
 }
 
-.template-trigger:disabled {
-  cursor: wait;
-  background: #f5f5f5;
-}
-
 .template-trigger.has-value {
   color: #1f2329;
 }
 
-.template-trigger-content {
+.template-trigger-content,
+.template-cell {
   display: flex;
   min-width: 0;
   flex-direction: column;
 }
 
 .template-trigger-content strong,
-.template-trigger-content span {
+.template-trigger-content span,
+.template-cell strong,
+.template-cell span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.template-trigger-content span {
+.template-trigger-content span,
+.template-cell span {
   margin-top: 2px;
   font-size: 12px;
   color: #8c8c8c;
@@ -415,8 +548,12 @@ async function submit() {
   white-space: nowrap;
 }
 
-@media (max-width: 1100px) {
-  .form-grid {
+.period-select {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .shared-grid {
     grid-template-columns: 1fr;
   }
 }

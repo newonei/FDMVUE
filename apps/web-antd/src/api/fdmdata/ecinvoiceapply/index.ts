@@ -9,6 +9,7 @@ export namespace FdmdataEcInvoiceApplyApi {
     platformCode?: string;
     platformName?: string;
     shopName?: string;
+    companyId?: number;
     shopCompanyName?: string;
     tradeLink?: string;
     invoiceCode?: string;

@@ -8,26 +8,11 @@ import { useRouter } from 'vue-router';
 
 import { useUserStore } from '@vben/stores';
 
-import {
-  Button,
-  Input,
-  message,
-  Popconfirm,
-  Select,
-  Space,
-  Table,
-  Tabs,
-  Tag,
-} from 'ant-design-vue';
+import { Button, DatePicker, Select, Table, Tabs, Tag } from 'ant-design-vue';
 
-import {
-  deleteBatch,
-  getBatchPage,
-  getInstancePage,
-  getSetting,
-} from '#/api/fdmperformance';
+import { getInstancePage, getSetting } from '#/api/fdmperformance';
 
-import { INSTANCE_STATUS_MAP } from '../shared/constants';
+import { TASK_LABELS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 import HrReviewQueue from './components/HrReviewQueue.vue';
 
@@ -37,68 +22,66 @@ const router = useRouter();
 const userStore = useUserStore();
 const activeTab = ref('batches');
 const isPerformanceHr = ref(false);
-const loading = ref(false);
 const instanceLoading = ref(false);
-const batches = ref<JixiaoApi.Batch[]>([]);
 const instances = ref<JixiaoApi.Instance[]>([]);
-const selectedBatch = ref<JixiaoApi.Batch>();
-const batchTotal = ref(0);
 const instanceTotal = ref(0);
-const batchQuery = reactive({
-  name: '',
-  pageNo: 1,
-  pageSize: 10,
-  periodKey: '',
-  status: undefined as number | undefined,
-});
-const instanceQuery = reactive({
-  batchId: undefined as number | undefined,
-  pageNo: 1,
-  pageSize: 10,
-  status: undefined as number | undefined,
-});
 
-const batchColumns: TableColumnsType = [
-  { dataIndex: 'name', title: '批次名称' },
-  { dataIndex: 'templateName', title: '考评表', width: 180 },
-  { dataIndex: 'periodKey', title: '周期', width: 120 },
-  { dataIndex: 'totalCount', title: '人数', width: 90 },
-  { dataIndex: 'status', title: '状态', width: 100 },
-  { dataIndex: 'createTime', title: '发起时间', width: 180 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 170 },
-];
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const instanceQuery = reactive({
+  pageNo: 1,
+  pageSize: 10,
+  periodKey: currentMonthKey(),
+  status: undefined as number | undefined,
+});
 
 const instanceColumns: TableColumnsType = [
-  { dataIndex: 'userName', title: '被考核人' },
-  { dataIndex: 'supervisorUserName', title: '主管' },
-  { dataIndex: 'currentTaskName', title: '当前节点' },
-  { dataIndex: 'finalScore', title: '主管汇总分', width: 120 },
-  { dataIndex: 'status', title: '状态', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 100 },
+  { dataIndex: 'userName', title: '被考核人', width: 140 },
+  { dataIndex: 'deptName', ellipsis: true, title: '部门', width: 160 },
+  { dataIndex: 'currentTaskName', title: '当前流程', width: 150 },
+  {
+    dataIndex: 'currentTaskAssigneeUserName',
+    title: '当前执行人',
+    width: 150,
+  },
+  { dataIndex: 'finalScore', title: '考核结果', width: 110 },
+  { dataIndex: 'grade', title: '绩效等级', width: 100 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 90 },
 ];
 
-function instanceStatus(status?: number): { color: string; text: string } {
-  return INSTANCE_STATUS_MAP[status ?? 1] ?? { color: 'default', text: '-' };
+function currentFlow(record: JixiaoApi.Instance) {
+  if (record.status === 2) return '考核结束';
+  if (record.status === 3) return '已取消';
+  return (
+    TASK_LABELS[record.currentTaskKey || ''] ||
+    record.currentTaskName ||
+    '等待流程处理'
+  );
 }
 
-async function loadBatches() {
-  loading.value = true;
-  try {
-    const data = await getBatchPage(batchQuery);
-    batches.value = data.list;
-    batchTotal.value = data.total;
-  } finally {
-    loading.value = false;
+function currentExecutor(record: JixiaoApi.Instance) {
+  if (record.status !== 1) return '-';
+  if (record.currentTaskAssigneeUserName) {
+    return record.currentTaskAssigneeUserName;
   }
+  if (record.currentTaskKey === 'JIXIAO_HR_REVIEW') {
+    return '绩效 HR';
+  }
+  return '待分配';
 }
 
-async function loadInstances(batch?: JixiaoApi.Batch) {
-  if (batch) {
-    selectedBatch.value = batch;
-    instanceQuery.batchId = batch.id;
-    instanceQuery.pageNo = 1;
-  }
-  if (!instanceQuery.batchId) return;
+function gradeColor(grade?: string) {
+  if (grade === 'A+') return 'green';
+  if (grade === 'A') return 'cyan';
+  if (grade === 'C+') return 'orange';
+  if (grade === 'C') return 'red';
+  return 'blue';
+}
+
+async function loadInstances() {
   instanceLoading.value = true;
   try {
     const data = await getInstancePage(instanceQuery);
@@ -109,29 +92,24 @@ async function loadInstances(batch?: JixiaoApi.Batch) {
   }
 }
 
+function searchInstances() {
+  instanceQuery.pageNo = 1;
+  void loadInstances();
+}
+
+function changePeriodMonth() {
+  searchInstances();
+}
+
+function monthLabel(periodKey: string) {
+  const [year, month] = periodKey.split('-');
+  return year && month ? `${year}年${month}月` : periodKey;
+}
+
 function openInstance(record: JixiaoApi.Instance) {
   router.push(
     `/fdmperformance/batches/${record.batchId}/instances/${record.id}`,
   );
-}
-
-async function removeBatch(record: JixiaoApi.Batch) {
-  if (!record.id) return;
-  await deleteBatch(record.id);
-  message.success('已删除');
-  if (selectedBatch.value?.id === record.id) {
-    selectedBatch.value = undefined;
-    instances.value = [];
-    instanceTotal.value = 0;
-    instanceQuery.batchId = undefined;
-  }
-  await loadBatches();
-}
-
-function changeBatchPage(pagination: any) {
-  batchQuery.pageNo = pagination.current;
-  batchQuery.pageSize = pagination.pageSize;
-  loadBatches();
 }
 
 function changeInstancePage(pagination: any) {
@@ -141,7 +119,7 @@ function changeInstancePage(pagination: any) {
 }
 
 async function initialize() {
-  const [setting] = await Promise.all([getSetting(), loadBatches()]);
+  const [setting] = await Promise.all([getSetting(), loadInstances()]);
   const currentUserId = Number(
     userStore.userInfo?.id ?? userStore.userInfo?.userId ?? 0,
   );
@@ -160,84 +138,34 @@ onMounted(initialize);
       <Tabs.TabPane v-if="isPerformanceHr" key="hr-review" tab="待人事审核">
         <HrReviewQueue />
       </Tabs.TabPane>
-      <Tabs.TabPane key="batches" tab="考核批次">
+      <Tabs.TabPane key="batches" tab="月度考核">
         <div class="filter-bar">
-          <Input
-            v-model:value="batchQuery.name"
-            allow-clear
-            placeholder="批次名称"
-          />
-          <Input
-            v-model:value="batchQuery.periodKey"
-            allow-clear
-            placeholder="周期"
+          <DatePicker
+            v-model:value="instanceQuery.periodKey"
+            :allow-clear="false"
+            format="YYYY年MM月"
+            :input-read-only="true"
+            picker="month"
+            placeholder="选择月份"
+            value-format="YYYY-MM"
+            @change="changePeriodMonth"
           />
           <Select
-            v-model:value="batchQuery.status"
+            v-model:value="instanceQuery.status"
             allow-clear
             :options="[
               { label: '进行中', value: 1 },
               { label: '已完成', value: 2 },
               { label: '已取消', value: 3 },
             ]"
-            placeholder="状态"
+            placeholder="全部状态"
           />
-          <Button type="primary" @click="loadBatches">查询</Button>
+          <Button type="primary" @click="searchInstances">查询</Button>
         </div>
 
-        <Table
-          :columns="batchColumns"
-          :data-source="batches"
-          :loading="loading"
-          :pagination="{
-            current: batchQuery.pageNo,
-            pageSize: batchQuery.pageSize,
-            total: batchTotal,
-          }"
-          row-key="id"
-          @change="changeBatchPage"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.dataIndex === 'status'">
-              <Tag :color="instanceStatus(record.status).color">
-                {{ instanceStatus(record.status).text }}
-              </Tag>
-            </template>
-            <template v-else-if="column.dataIndex === 'action'">
-              <Space>
-                <Button size="small" type="link" @click="loadInstances(record)">
-                  查看人员
-                </Button>
-                <Popconfirm
-                  title="删除后会终止流程并删除本批次数据，确认删除？"
-                  ok-text="删除"
-                  cancel-text="取消"
-                  @confirm="removeBatch(record)"
-                >
-                  <Button danger size="small" type="link">删除</Button>
-                </Popconfirm>
-              </Space>
-            </template>
-          </template>
-        </Table>
-
-        <div v-if="selectedBatch" class="instance-panel">
+        <div class="instance-panel">
           <div class="panel-head">
-            <strong>{{ selectedBatch.name }} / 单人实例</strong>
-            <Space>
-              <Select
-                v-model:value="instanceQuery.status"
-                allow-clear
-                :options="[
-                  { label: '进行中', value: 1 },
-                  { label: '已完成', value: 2 },
-                  { label: '已取消', value: 3 },
-                ]"
-                placeholder="状态"
-                style="width: 120px"
-                @change="loadInstances()"
-              />
-            </Space>
+            <strong>{{ monthLabel(instanceQuery.periodKey) }}考核人员</strong>
           </div>
           <Table
             :columns="instanceColumns"
@@ -248,14 +176,30 @@ onMounted(initialize);
               pageSize: instanceQuery.pageSize,
               total: instanceTotal,
             }"
+            :scroll="{ x: 1100 }"
             row-key="id"
             @change="changeInstancePage"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.dataIndex === 'status'">
-                <Tag :color="instanceStatus(record.status).color">
-                  {{ instanceStatus(record.status).text }}
+              <template v-if="column.dataIndex === 'deptName'">
+                {{ record[column.dataIndex] || '-' }}
+              </template>
+              <template v-else-if="column.dataIndex === 'currentTaskName'">
+                {{ currentFlow(record) }}
+              </template>
+              <template
+                v-else-if="column.dataIndex === 'currentTaskAssigneeUserName'"
+              >
+                {{ currentExecutor(record) }}
+              </template>
+              <template v-else-if="column.dataIndex === 'finalScore'">
+                {{ record.finalScore ?? '-' }}
+              </template>
+              <template v-else-if="column.dataIndex === 'grade'">
+                <Tag v-if="record.grade" :color="gradeColor(record.grade)">
+                  {{ record.grade }}
                 </Tag>
+                <span v-else>-</span>
               </template>
               <template v-else-if="column.dataIndex === 'action'">
                 <Button size="small" type="link" @click="openInstance(record)">
@@ -285,7 +229,7 @@ onMounted(initialize);
 
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 160px 130px auto;
+  grid-template-columns: 180px 140px auto;
   gap: 8px;
 }
 

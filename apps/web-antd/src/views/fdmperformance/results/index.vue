@@ -7,6 +7,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
   Button,
+  DatePicker,
   Drawer,
   Form,
   InputNumber,
@@ -44,6 +45,13 @@ const activeReview = ref<JixiaoApi.Review>();
 const resultTotal = ref(0);
 const reviewTotal = ref(0);
 const selectedResultIds = ref<number[]>([]);
+
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const periodKey = ref(currentMonthKey());
 const resultQuery = reactive({
   batchId: undefined as number | undefined,
   grade: undefined as string | undefined,
@@ -110,7 +118,10 @@ function canPublishResult(record: JixiaoApi.Result) {
 async function loadResults() {
   resultLoading.value = true;
   try {
-    const data = await getResultPage(resultQuery);
+    const data = await getResultPage({
+      ...resultQuery,
+      periodKey: periodKey.value,
+    });
     results.value = data.list;
     resultTotal.value = data.total;
   } finally {
@@ -121,7 +132,10 @@ async function loadResults() {
 async function loadReviews() {
   reviewLoading.value = true;
   try {
-    const data = await getReviewPage(reviewQuery);
+    const data = await getReviewPage({
+      ...reviewQuery,
+      periodKey: periodKey.value,
+    });
     reviews.value = data.list;
     reviewTotal.value = data.total;
   } finally {
@@ -182,6 +196,24 @@ function openReview(record: JixiaoApi.Review) {
   reviewOpen.value = true;
 }
 
+function searchResults() {
+  resultQuery.pageNo = 1;
+  selectedResultIds.value = [];
+  void loadResults();
+}
+
+function filterReviews() {
+  reviewQuery.pageNo = 1;
+  void loadReviews();
+}
+
+function changePeriodMonth() {
+  resultQuery.pageNo = 1;
+  reviewQuery.pageNo = 1;
+  selectedResultIds.value = [];
+  void Promise.all([loadResults(), loadReviews()]);
+}
+
 function changeResultPage(pagination: any) {
   resultQuery.pageNo = pagination.current;
   resultQuery.pageSize = pagination.pageSize;
@@ -195,14 +227,23 @@ function changeReviewPage(pagination: any) {
 }
 
 onMounted(() => {
-  loadResults();
-  loadReviews();
+  void Promise.all([loadResults(), loadReviews()]);
 });
 </script>
 
 <template>
   <PerformanceShell title="结果与复盘">
     <div class="filter-bar">
+      <DatePicker
+        v-model:value="periodKey"
+        :allow-clear="false"
+        format="YYYY年MM月"
+        :input-read-only="true"
+        picker="month"
+        placeholder="选择月份"
+        value-format="YYYY-MM"
+        @change="changePeriodMonth"
+      />
       <InputNumber v-model:value="resultQuery.userId" placeholder="员工 ID" />
       <Select
         v-model:value="resultQuery.grade"
@@ -220,7 +261,7 @@ onMounted(() => {
         placeholder="公示状态"
         style="width: 130px"
       />
-      <Button type="primary" @click="loadResults">查询结果</Button>
+      <Button type="primary" @click="searchResults">查询结果</Button>
       <div class="batch-actions">
         <span class="selected-count">
           已选择 {{ selectedResultIds.length }} 项
@@ -316,7 +357,7 @@ onMounted(() => {
           ]"
           placeholder="状态"
           style="width: 130px"
-          @change="loadReviews"
+          @change="filterReviews"
         />
       </Space>
     </div>

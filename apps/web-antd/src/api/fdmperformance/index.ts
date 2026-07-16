@@ -103,6 +103,19 @@ export namespace JixiaoApi {
     templateId: number;
   }
 
+  export interface LaunchBatchItem {
+    name: string;
+    periodKey: string;
+    templateId: number;
+  }
+
+  export interface LaunchBatchReq {
+    endDate?: string;
+    items: LaunchBatchItem[];
+    remark?: string;
+    startDate?: string;
+  }
+
   export interface LaunchPreview {
     dimensions?: TemplateDimension[];
     periodType?: string;
@@ -187,8 +200,10 @@ export namespace JixiaoApi {
     currentTaskKey?: string;
     currentTaskName?: string;
     deptId?: number;
+    deptName?: string;
     finalScore?: number;
     finishTime?: string;
+    grade?: string;
     id?: number;
     indicators?: InstanceIndicator[];
     processDefinitionKey?: string;
@@ -202,12 +217,14 @@ export namespace JixiaoApi {
     supervisorUserId?: number;
     supervisorUserName?: string;
     templateId?: number;
+    templateName?: string;
     userId?: number;
     userName?: string;
   }
 
   export type InstancePageParams = PageParam & {
     batchId?: number;
+    periodKey?: string;
     status?: number;
     supervisorUserId?: number;
     userId?: number;
@@ -287,6 +304,7 @@ export namespace JixiaoApi {
   export type ResultPageParams = PageParam & {
     batchId?: number;
     grade?: string;
+    periodKey?: string;
     publicStatus?: number;
     userId?: number;
   };
@@ -356,6 +374,7 @@ export namespace JixiaoApi {
   }
 
   export type ReviewPageParams = PageParam & {
+    periodKey?: string;
     status?: number;
     userId?: number;
   };
@@ -487,6 +506,13 @@ export function getLaunchPreview(templateId: number) {
 
 export function launchAssessment(data: JixiaoApi.LaunchReq) {
   return requestClient.post<number>('/fdmperformance/assessment/launch', data);
+}
+
+export function batchLaunchAssessments(data: JixiaoApi.LaunchBatchReq) {
+  return requestClient.post<number[]>(
+    '/fdmperformance/assessment/launch-batch',
+    data,
+  );
 }
 
 export function getBatchPage(params: JixiaoApi.BatchPageParams) {

@@ -8,11 +8,11 @@ import { IconifyIcon } from '@vben/icons';
 
 import {
   Button,
+  Checkbox,
   Empty,
   Input,
   Modal,
   Pagination,
-  Radio,
   Select,
   Spin,
   Tag,
@@ -28,11 +28,11 @@ defineOptions({ name: 'JixiaoTemplatePickerModal' });
 
 const props = defineProps<{
   open: boolean;
-  selected?: JixiaoApi.TemplateSelectItem;
+  selected?: JixiaoApi.TemplateSelectItem[];
 }>();
 
 const emit = defineEmits<{
-  confirm: [template: JixiaoApi.TemplateSelectItem];
+  confirm: [templates: JixiaoApi.TemplateSelectItem[]];
   'update:open': [open: boolean];
 }>();
 
@@ -41,7 +41,7 @@ const loading = ref(false);
 const departmentsLoaded = ref(false);
 const rows = ref<JixiaoApi.TemplateSelectItem[]>([]);
 const departments = ref<SystemDeptApi.Dept[]>([]);
-const draftSelected = ref<JixiaoApi.TemplateSelectItem>();
+const draftSelected = ref<JixiaoApi.TemplateSelectItem[]>([]);
 const total = ref(0);
 let latestRequestId = 0;
 const query = reactive<JixiaoApi.TemplateSelectPageParams>({
@@ -67,6 +67,9 @@ const departmentOptions = computed(() => {
   walk(departments.value);
   return options;
 });
+const selectedIds = computed(
+  () => new Set(draftSelected.value.map((item) => item.id)),
+);
 
 function periodLabel(periodType?: string) {
   return (
@@ -101,7 +104,7 @@ async function loadDepartments() {
 }
 
 async function initialize() {
-  draftSelected.value = props.selected;
+  draftSelected.value = [...(props.selected || [])];
   rows.value = [];
   total.value = 0;
   Object.assign(query, {
@@ -114,8 +117,18 @@ async function initialize() {
   await Promise.allSettled([loadTemplates(), loadDepartments()]);
 }
 
-function selectTemplate(item: JixiaoApi.TemplateSelectItem) {
-  draftSelected.value = item;
+function toggleTemplate(item: JixiaoApi.TemplateSelectItem) {
+  if (selectedIds.value.has(item.id)) {
+    draftSelected.value = draftSelected.value.filter(
+      (selected) => selected.id !== item.id,
+    );
+    return;
+  }
+  draftSelected.value = [...draftSelected.value, item];
+}
+
+function removeTemplate(id: number) {
+  draftSelected.value = draftSelected.value.filter((item) => item.id !== id);
 }
 
 function handleSearch() {
@@ -146,7 +159,7 @@ function close() {
 }
 
 function confirm() {
-  if (!draftSelected.value) return;
+  if (draftSelected.value.length === 0) return;
   emit('confirm', draftSelected.value);
   close();
 }
@@ -204,19 +217,18 @@ watch(
               <div
                 v-for="item in rows"
                 :key="item.id"
-                :aria-checked="draftSelected?.id === item.id"
-                class="template-row" :class="[
-                  { 'is-selected': draftSelected?.id === item.id },
-                ]"
-                role="radio"
+                :aria-checked="selectedIds.has(item.id)"
+                class="template-row"
+                :class="[{ 'is-selected': selectedIds.has(item.id) }]"
+                role="checkbox"
                 tabindex="0"
-                @click="selectTemplate(item)"
-                @keydown.enter.prevent="selectTemplate(item)"
-                @keydown.space.prevent="selectTemplate(item)"
+                @click="toggleTemplate(item)"
+                @keydown.enter.prevent="toggleTemplate(item)"
+                @keydown.space.prevent="toggleTemplate(item)"
               >
-                <Radio
-                  :checked="draftSelected?.id === item.id"
-                  @change="selectTemplate(item)"
+                <Checkbox
+                  :checked="selectedIds.has(item.id)"
+                  @change="toggleTemplate(item)"
                   @click.stop
                 />
                 <div class="template-content">
@@ -240,7 +252,7 @@ watch(
                   </div>
                 </div>
                 <IconifyIcon
-                  v-if="draftSelected?.id === item.id"
+                  v-if="selectedIds.has(item.id)"
                   class="selected-icon"
                   icon="lucide:check"
                 />
@@ -268,14 +280,14 @@ watch(
 
       <aside class="selected-pane">
         <div class="selected-heading">
-          <span>已选择 {{ draftSelected ? 1 : 0 }} 项</span>
-          <Tooltip v-if="draftSelected" title="清空选择">
+          <span>已选择 {{ draftSelected.length }} 项</span>
+          <Tooltip v-if="draftSelected.length" title="清空选择">
             <Button
               aria-label="清空选择"
               shape="circle"
               size="small"
               type="text"
-              @click="draftSelected = undefined"
+              @click="draftSelected = []"
             >
               <template #icon>
                 <IconifyIcon icon="lucide:x" />
@@ -284,26 +296,43 @@ watch(
           </Tooltip>
         </div>
 
-        <div v-if="draftSelected" class="selected-summary">
-          <div class="selected-name">{{ draftSelected.name }}</div>
-          <div class="summary-line">
-            <span>考核周期</span>
-            <strong>{{ periodLabel(draftSelected.periodType) }}</strong>
-          </div>
-          <div class="summary-line">
-            <span>被考核人</span>
-            <strong>{{ draftSelected.personCount }} 人</strong>
-          </div>
-          <div class="summary-line">
-            <span>考核指标</span>
-            <strong>{{ draftSelected.indicatorCount }} 项</strong>
-          </div>
-          <div class="selected-departments">
-            {{
-              draftSelected.deptNames.length
-                ? draftSelected.deptNames.join('、')
-                : '未设置部门'
-            }}
+        <div v-if="draftSelected.length" class="selected-list">
+          <div
+            v-for="item in draftSelected"
+            :key="item.id"
+            class="selected-summary"
+          >
+            <div class="selected-name-row">
+              <div class="selected-name" :title="item.name">
+                {{ item.name }}
+              </div>
+              <Button
+                :aria-label="`移除${item.name}`"
+                shape="circle"
+                size="small"
+                type="text"
+                @click="removeTemplate(item.id)"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:x" />
+                </template>
+              </Button>
+            </div>
+            <div class="summary-line">
+              <span>考核周期</span>
+              <strong>{{ periodLabel(item.periodType) }}</strong>
+            </div>
+            <div class="summary-line">
+              <span>人员 / 指标</span>
+              <strong>
+                {{ item.personCount }} 人 / {{ item.indicatorCount }} 项
+              </strong>
+            </div>
+            <div class="selected-departments">
+              {{
+                item.deptNames.length ? item.deptNames.join('、') : '未设置部门'
+              }}
+            </div>
           </div>
         </div>
         <Empty v-else class="empty-selection" description="尚未选择考评表" />
@@ -312,7 +341,11 @@ watch(
 
     <template #footer>
       <Button @click="close">取消</Button>
-      <Button :disabled="!draftSelected" type="primary" @click="confirm">
+      <Button
+        :disabled="draftSelected.length === 0"
+        type="primary"
+        @click="confirm"
+      >
         确定
       </Button>
     </template>
@@ -427,6 +460,7 @@ watch(
 }
 
 .selected-pane {
+  min-width: 0;
   padding: 20px;
   background: #fafbfc;
 }
@@ -441,6 +475,11 @@ watch(
   justify-content: space-between;
 }
 
+.selected-list {
+  max-height: 430px;
+  overflow-y: auto;
+}
+
 .selected-summary {
   padding: 16px;
   margin-top: 16px;
@@ -449,11 +488,19 @@ watch(
   border-radius: 6px;
 }
 
-.selected-name {
-  padding-bottom: 12px;
+.selected-name-row {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 10px;
   margin-bottom: 12px;
-  font-size: 15px;
   border-bottom: 1px solid #edf0f4;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selected-name {
+  min-width: 0;
+  font-size: 15px;
 }
 
 .summary-line {
