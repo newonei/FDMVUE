@@ -290,6 +290,7 @@ onMounted(() => {
     </div>
 
     <Table
+      class="performance-compact-table"
       :columns="resultColumns"
       :data-source="results"
       :loading="resultLoading"
@@ -297,9 +298,11 @@ onMounted(() => {
       :pagination="{
         current: resultQuery.pageNo,
         pageSize: resultQuery.pageSize,
+        size: 'small',
         total: resultTotal,
       }"
       row-key="id"
+      size="small"
       @change="changeResultPage"
     >
       <template #bodyCell="{ column, record }">
@@ -363,15 +366,18 @@ onMounted(() => {
     </div>
 
     <Table
+      class="performance-compact-table"
       :columns="reviewColumns"
       :data-source="reviews"
       :loading="reviewLoading"
       :pagination="{
         current: reviewQuery.pageNo,
         pageSize: reviewQuery.pageSize,
+        size: 'small',
         total: reviewTotal,
       }"
       row-key="id"
+      size="small"
       @change="changeReviewPage"
     >
       <template #bodyCell="{ column, record }">

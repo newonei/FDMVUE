@@ -244,11 +244,13 @@ onMounted(load);
     <div class="panel">
       <div class="panel-head"><strong>当前考核</strong></div>
       <Table
+        class="performance-compact-table"
         :columns="instanceColumns"
         :data-source="instances"
         :loading="loading"
         :pagination="false"
         row-key="id"
+        size="small"
       >
         <template #emptyText><Empty description="暂无当前考核" /></template>
         <template #bodyCell="{ column, record }">
@@ -276,11 +278,13 @@ onMounted(load);
     <div class="panel">
       <div class="panel-head"><strong>已公示结果</strong></div>
       <Table
+        class="performance-compact-table"
         :columns="resultColumns"
         :data-source="results"
         :loading="loading"
         :pagination="false"
         row-key="id"
+        size="small"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'grade'">

@@ -168,16 +168,19 @@ onMounted(initialize);
             <strong>{{ monthLabel(instanceQuery.periodKey) }}考核人员</strong>
           </div>
           <Table
+            class="performance-compact-table"
             :columns="instanceColumns"
             :data-source="instances"
             :loading="instanceLoading"
             :pagination="{
               current: instanceQuery.pageNo,
               pageSize: instanceQuery.pageSize,
+              size: 'small',
               total: instanceTotal,
             }"
             :scroll="{ x: 1100 }"
             row-key="id"
+            size="small"
             @change="changeInstancePage"
           >
             <template #bodyCell="{ column, record }">

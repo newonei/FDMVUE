@@ -443,11 +443,18 @@ onMounted(async () => {
     </div>
 
     <Table
+      class="performance-compact-table"
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :pagination="{ current: query.pageNo, pageSize: query.pageSize, total }"
+      :pagination="{
+        current: query.pageNo,
+        pageSize: query.pageSize,
+        size: 'small',
+        total,
+      }"
       row-key="id"
+      size="small"
       @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
@@ -701,9 +708,8 @@ onMounted(async () => {
               v-for="category in indicatorImportCategories"
               :key="category.value || '__all__'"
               :aria-pressed="indicatorImportCategory === category.value"
-              class="category-item" :class="[
-                { active: indicatorImportCategory === category.value },
-              ]"
+              class="category-item"
+              :class="[{ active: indicatorImportCategory === category.value }]"
               type="button"
               @click="indicatorImportCategory = category.value"
             >

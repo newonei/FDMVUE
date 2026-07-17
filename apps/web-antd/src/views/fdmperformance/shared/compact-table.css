@@ -1,0 +1,41 @@
+.performance-compact-table .ant-table {
+  font-size: 13px;
+}
+
+.performance-compact-table .ant-table-thead > tr > th {
+  padding: 8px 10px !important;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.performance-compact-table .ant-table-tbody > tr > td {
+  padding: 7px 10px !important;
+  line-height: 20px;
+}
+
+.performance-compact-table .ant-table-selection-column {
+  width: 40px;
+  min-width: 40px;
+  padding-right: 8px !important;
+  padding-left: 8px !important;
+}
+
+.performance-compact-table .ant-tag {
+  padding-inline: 6px;
+  margin-inline-end: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.performance-compact-table .ant-btn-link {
+  height: 24px;
+  padding-inline: 3px;
+  font-size: 13px;
+}
+
+.performance-compact-table .ant-pagination {
+  margin: 10px 0 2px;
+  font-size: 12px;
+}

@@ -133,17 +133,20 @@ onMounted(load);
     </div>
 
     <Table
+      class="performance-compact-table"
       :columns="columns"
       :data-source="rows"
       :loading="loading"
       :pagination="{
         current: query.pageNo,
         pageSize: query.pageSize,
+        size: 'small',
         total,
       }"
       :row-selection="rowSelection"
       :scroll="{ x: 970 }"
       row-key="instanceId"
+      size="small"
       @change="changePage"
     >
       <template #bodyCell="{ column, record }">
