@@ -207,8 +207,11 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'payerRegisterNo',
       label: '税号',
       component: 'Input',
-      componentProps: { allowClear: true, maxlength: 64 },
-      rules: 'required',
+      componentProps: {
+        allowClear: true,
+        maxlength: 64,
+        placeholder: '个人抬头可不填',
+      },
     },
     {
       fieldName: 'invoiceStatus',
