@@ -3,6 +3,8 @@ import type { PageParam, PageResult } from '@vben/request';
 import { requestClient } from '#/api/request';
 
 export namespace FdmdataEcInvoiceApplyApi {
+  export type DateTimeValue = number | string;
+
   export interface EcInvoiceApply {
     id?: number;
     tid?: string;
@@ -24,10 +26,10 @@ export namespace FdmdataEcInvoiceApplyApi {
     serialNo?: string;
     applySource?: string;
     startTime?: string;
-    applyGmtCreate?: string;
-    orderFinishTime?: string;
-    invoiceDueTime?: string;
-    invoiceDate?: string;
+    applyGmtCreate?: DateTimeValue | null;
+    orderFinishTime?: DateTimeValue | null;
+    invoiceDueTime?: DateTimeValue | null;
+    invoiceDate?: DateTimeValue | null;
     payerName?: string;
     payerRegisterNo?: string;
     payerPhone?: string;
@@ -50,7 +52,7 @@ export namespace FdmdataEcInvoiceApplyApi {
     invalidInvoiceFlag?: boolean;
     xmlFileUpload?: boolean;
     xmlFileSendMessage?: boolean;
-    rightsDueDate?: string;
+    rightsDueDate?: DateTimeValue | null;
     rightsProcessType?: number;
     businessType?: number;
     agentId?: number;
@@ -62,8 +64,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     bizErrorDesc?: string;
     message?: string;
     rawJson?: string;
-    createTime?: string;
-    updateTime?: string;
+    createTime?: DateTimeValue;
+    updateTime?: DateTimeValue;
   }
 }
 

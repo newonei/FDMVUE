@@ -3,6 +3,8 @@ import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
 import type { FdmdataShopCompanyApi } from '#/api/fdmdata/shopcompany';
 
+import { formatDateTime } from '@vben/utils';
+
 import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 import { getShopCompanySimpleList } from '#/api/fdmdata/shopcompany';
 import { getRangePickerDefaultProps } from '#/utils';
@@ -32,6 +34,23 @@ function formatBoolean({ cellValue }: { cellValue: unknown }) {
   return cellValue ? '是' : '否';
 }
 
+function formatOptionalDateTime({ cellValue }: { cellValue: unknown }) {
+  if (cellValue === null || cellValue === undefined || cellValue === '') {
+    return '';
+  }
+  if (typeof cellValue === 'number') {
+    return cellValue <= 0 ? '' : formatDateTime(cellValue);
+  }
+  if (typeof cellValue === 'string') {
+    const value = cellValue.trim();
+    if (!value || value === '0' || /^1970-01-01(?:[ T]|$)/.test(value)) {
+      return '';
+    }
+    return formatDateTime(value);
+  }
+  return '';
+}
+
 const companySelectProps = {
   api: getDataCompanySimpleList,
   labelField: 'companyName',
@@ -43,10 +62,7 @@ const companySelectProps = {
 
 async function getShopNameOptions() {
   const relations = await getShopCompanySimpleList();
-  const options = new Map<
-    string,
-    { platforms: Set<string>; value: string }
-  >();
+  const options = new Map<string, { platforms: Set<string>; value: string }>();
 
   const addOption = (
     value: string | undefined,
@@ -74,12 +90,10 @@ async function getShopNameOptions() {
   });
 
   return [...options.values()]
-    .sort((left, right) => left.value.localeCompare(right.value, 'zh-CN'))
+    .toSorted((left, right) => left.value.localeCompare(right.value, 'zh-CN'))
     .map(({ platforms, value }) => ({
       label:
-        platforms.size > 0
-          ? `${value}（${[...platforms].join('/')}）`
-          : value,
+        platforms.size > 0 ? `${value}（${[...platforms].join('/')}）` : value,
       value,
     }));
 }
@@ -122,16 +136,28 @@ export function useFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'shopName',
       label: '店铺',
-      component: 'Input',
-      componentProps: { allowClear: true, maxlength: 128 },
+      component: 'ApiSelect',
+      formItemClass: 'col-span-2',
+      componentProps: {
+        api: getShopNameOptions,
+        labelField: 'label',
+        valueField: 'value',
+        class: 'w-full',
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        placeholder: '请选择店铺',
+      },
       rules: 'required',
     },
     {
       fieldName: 'companyId',
       label: '公司主体',
       component: 'ApiSelect',
+      formItemClass: 'col-span-2',
       componentProps: {
         ...companySelectProps,
+        class: 'w-full',
         placeholder: '请选择公司主体',
       },
       rules: 'required',
@@ -161,7 +187,13 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'unitPrice',
       label: '单价',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0.01, precision: 2 },
+      componentProps: {
+        class: 'w-full',
+        disabled: true,
+        min: 0.01,
+        placeholder: '根据总金额和数量自动计算',
+        precision: 2,
+      },
       rules: 'required',
     },
     {
@@ -375,19 +407,19 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       field: 'applyGmtCreate',
       title: '申请时间',
       minWidth: 160,
-      formatter: 'formatDateTime',
+      formatter: formatOptionalDateTime,
     },
     {
       field: 'orderFinishTime',
       title: '订单完成时间',
       minWidth: 160,
-      formatter: 'formatDateTime',
+      formatter: formatOptionalDateTime,
     },
     {
       field: 'invoiceDueTime',
       title: '开票截止时间',
       minWidth: 160,
-      formatter: 'formatDateTime',
+      formatter: formatOptionalDateTime,
     },
     {
       field: 'createTime',

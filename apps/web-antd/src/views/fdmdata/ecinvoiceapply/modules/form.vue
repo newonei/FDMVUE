@@ -24,16 +24,49 @@ const emit = defineEmits<{ success: [] }>();
 let openSeq = 0;
 const formData = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply | undefined>();
 
+function calculateUnitPrice(amount: unknown, quantity: unknown) {
+  const normalizedAmount = Number(amount);
+  const normalizedQuantity = Number(quantity);
+  if (
+    !Number.isFinite(normalizedAmount) ||
+    !Number.isFinite(normalizedQuantity) ||
+    normalizedAmount <= 0 ||
+    normalizedQuantity <= 0
+  ) {
+    return undefined;
+  }
+  return (
+    Math.round((normalizedAmount / normalizedQuantity + Number.EPSILON) * 100) /
+    100
+  );
+}
+
+async function syncUnitPrice(values: Record<string, unknown>) {
+  const unitPrice = calculateUnitPrice(values.amount, values.quantity);
+  if (values.unitPrice === unitPrice) return;
+  await formApi.setFieldValue('unitPrice', unitPrice, false);
+}
+
 const [Form, formApi] = useVbenForm({
   schema: useFormSchema(),
   showDefaultActions: false,
   layout: 'horizontal',
   wrapperClass: 'grid-cols-1 md:grid-cols-2',
   commonConfig: { labelWidth: 90, colon: true },
+  async handleValuesChange(values, changedFields) {
+    if (
+      !changedFields.includes('amount') &&
+      !changedFields.includes('quantity')
+    ) {
+      return;
+    }
+    await syncUnitPrice(values);
+  },
 });
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    await syncUnitPrice(await formApi.getValues());
     const { valid } = await formApi.validate();
     if (!valid) return;
     const data = await formApi.getValues();
