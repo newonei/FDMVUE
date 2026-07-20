@@ -1,12 +1,11 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
-import type { FdmdataShopCompanyApi } from '#/api/fdmdata/shopcompany';
 
 import { formatDateTime } from '@vben/utils';
 
 import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
-import { getShopCompanySimpleList } from '#/api/fdmdata/shopcompany';
+import { getEcShopDailyShopOptions } from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
@@ -61,41 +60,18 @@ const companySelectProps = {
 };
 
 async function getShopNameOptions() {
-  const relations = await getShopCompanySimpleList();
-  const options = new Map<string, { platforms: Set<string>; value: string }>();
+  const shops = await getEcShopDailyShopOptions({ limit: 200 });
+  const options = new Map<string, string>();
 
-  const addOption = (
-    value: string | undefined,
-    relation: FdmdataShopCompanyApi.ShopCompany,
-  ) => {
-    const trimmedValue = value?.trim();
-    if (!trimmedValue) return;
-    const key = trimmedValue.toLocaleLowerCase();
-    const current = options.get(key) ?? {
-      platforms: new Set<string>(),
-      value: trimmedValue,
-    };
-    const platform = (
-      relation.platformName ||
-      relation.platformCode ||
-      ''
-    ).trim();
-    if (platform) current.platforms.add(platform);
-    options.set(key, current);
-  };
-
-  relations.forEach((relation) => {
-    addOption(relation.shopName, relation);
-    addOption(relation.shopAlias, relation);
+  shops.forEach((shop) => {
+    const shopName = shop.shopName?.trim();
+    if (!shopName) return;
+    options.set(shopName.toLocaleLowerCase(), shopName);
   });
 
   return [...options.values()]
-    .toSorted((left, right) => left.value.localeCompare(right.value, 'zh-CN'))
-    .map(({ platforms, value }) => ({
-      label:
-        platforms.size > 0 ? `${value}（${[...platforms].join('/')}）` : value,
-      value,
-    }));
+    .toSorted((left, right) => left.localeCompare(right, 'zh-CN'))
+    .map((value) => ({ label: value, value }));
 }
 
 export function useFormSchema(): VbenFormSchema[] {
