@@ -11,7 +11,7 @@ import { getRangePickerDefaultProps } from '#/utils';
 
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
   {
-    invoiceType: 'blue',
+    invoiceType: '普通发票',
     applySource: '手工录入',
     delayApplyFlag: 0,
     punishFlag: 0,
@@ -112,11 +112,6 @@ export function useFormSchema(): VbenFormSchema[] {
       formItemClass: 'hidden',
     },
     {
-      fieldName: 'invoiceType',
-      component: 'Input',
-      formItemClass: 'hidden',
-    },
-    {
       fieldName: 'applySource',
       component: 'Input',
       formItemClass: 'hidden',
@@ -193,6 +188,19 @@ export function useFormSchema(): VbenFormSchema[] {
         min: 0.01,
         placeholder: '根据总金额和数量自动计算',
         precision: 2,
+      },
+      rules: 'required',
+    },
+    {
+      fieldName: 'invoiceType',
+      label: '发票类型',
+      component: 'Select',
+      componentProps: {
+        class: 'w-full',
+        options: [
+          { label: '普票', value: '普通发票' },
+          { label: '专票', value: '增值税专用发票' },
+        ],
       },
       rules: 'required',
     },
