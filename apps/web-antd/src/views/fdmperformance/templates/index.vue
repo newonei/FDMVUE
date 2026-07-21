@@ -85,6 +85,38 @@ const userOptions = computed(() =>
     value: item.id,
   })),
 );
+
+type PersonRole = 'employee' | 'manager' | 'supervisor';
+
+function personUserOptions(person: JixiaoApi.TemplatePerson, role: PersonRole) {
+  const blockedIds =
+    role === 'employee'
+      ? [person.supervisorUserId, person.superiorSupervisorUserId]
+      : role === 'supervisor'
+        ? [person.userId, person.superiorSupervisorUserId]
+        : [person.userId, person.supervisorUserId];
+  return userOptions.value.map((option) => ({
+    ...option,
+    disabled: blockedIds.some((id) => id === option.value),
+  }));
+}
+
+function personRelationError(person: JixiaoApi.TemplatePerson) {
+  if (!person.userId || !person.supervisorUserId) {
+    return '请完整选择被考核人和直属主管';
+  }
+  if (person.userId === person.supervisorUserId) {
+    return '被考核人不能与直属主管相同';
+  }
+  if (person.superiorSupervisorUserId === person.userId) {
+    return '主管上级不能是被考核人本人';
+  }
+  if (person.superiorSupervisorUserId === person.supervisorUserId) {
+    return '主管上级不能与直属主管相同';
+  }
+  return undefined;
+}
+
 const processOptions = computed(() =>
   processDefinitions.value.map((item) => ({
     label: `${item.name || item.key} (${item.key})`,
@@ -370,6 +402,14 @@ async function save() {
     message.warning('请填写基础信息和流程定义');
     return;
   }
+  const invalidPersonIndex =
+    form.persons?.findIndex((person) => !!personRelationError(person)) ?? -1;
+  if (invalidPersonIndex >= 0) {
+    message.warning(
+      `人员与主管第 ${invalidPersonIndex + 1} 行：${personRelationError(form.persons![invalidPersonIndex]!)}`,
+    );
+    return;
+  }
   await saveTemplate(form);
   message.success('已保存');
   drawerOpen.value = false;
@@ -549,31 +589,39 @@ onMounted(async () => {
             <div
               v-for="(person, index) in form.persons"
               :key="index"
-              class="person-row"
+              class="person-item"
             >
-              <Select
-                v-model:value="person.userId"
-                show-search
-                :options="userOptions"
-                option-filter-prop="label"
-                placeholder="被考核人"
-              />
-              <Select
-                v-model:value="person.supervisorUserId"
-                show-search
-                :options="userOptions"
-                option-filter-prop="label"
-                placeholder="直属主管"
-              />
-              <Select
-                v-model:value="person.superiorSupervisorUserId"
-                allow-clear
-                show-search
-                :options="userOptions"
-                option-filter-prop="label"
-                placeholder="主管上级"
-              />
-              <Button danger @click="removePerson(index)">移除</Button>
+              <div class="person-row">
+                <Select
+                  v-model:value="person.userId"
+                  show-search
+                  :options="personUserOptions(person, 'employee')"
+                  option-filter-prop="label"
+                  placeholder="被考核人"
+                  :status="personRelationError(person) ? 'error' : undefined"
+                />
+                <Select
+                  v-model:value="person.supervisorUserId"
+                  show-search
+                  :options="personUserOptions(person, 'supervisor')"
+                  option-filter-prop="label"
+                  placeholder="直属主管"
+                  :status="personRelationError(person) ? 'error' : undefined"
+                />
+                <Select
+                  v-model:value="person.superiorSupervisorUserId"
+                  allow-clear
+                  show-search
+                  :options="personUserOptions(person, 'manager')"
+                  option-filter-prop="label"
+                  placeholder="主管上级（可选）"
+                  :status="personRelationError(person) ? 'error' : undefined"
+                />
+                <Button danger @click="removePerson(index)">移除</Button>
+              </div>
+              <div v-if="personRelationError(person)" class="relation-error">
+                {{ personRelationError(person) }}
+              </div>
             </div>
           </div>
         </section>
@@ -812,8 +860,18 @@ h2 {
   gap: 8px;
 }
 
+.person-item {
+  display: grid;
+  gap: 4px;
+}
+
 .person-row {
   grid-template-columns: 1fr 1fr 1fr auto;
+}
+
+.relation-error {
+  font-size: 12px;
+  color: #ff4d4f;
 }
 
 .dimension-block {

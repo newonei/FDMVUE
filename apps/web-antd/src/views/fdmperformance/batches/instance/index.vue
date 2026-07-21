@@ -85,6 +85,25 @@ const SCORE_MAX = 100;
 const managerScoreEnabled = computed(
   () => instance.value?.managerScoreEnabled === true,
 );
+const managerRelationInvalid = computed(() => {
+  const detail = instance.value;
+  const managerUserId = detail?.superiorSupervisorUserId;
+  return (
+    managerUserId !== undefined &&
+    managerUserId !== null &&
+    (managerUserId === detail?.userId ||
+      managerUserId === detail?.supervisorUserId)
+  );
+});
+const managerRelationWarning = computed(() => {
+  const detail = instance.value;
+  if (!detail || !managerRelationInvalid.value) return '';
+  const repeatedRole =
+    detail.superiorSupervisorUserId === detail.userId
+      ? '被考核人本人'
+      : '直属主管';
+  return `主管上级“${detail.superiorSupervisorUserName || '-'}”与${repeatedRole}重复。为防止同一人重复或给自己评分，本实例不会进入上级评分节点；请修正考评表人员关系后重新发起考核。`;
+});
 const indicatorColumns = computed<TableColumnsType>(() => {
   const columns: TableColumnsType = [
     { dataIndex: 'dimensionName', fixed: 'left', title: '维度', width: 120 },
@@ -564,6 +583,13 @@ onMounted(load);
           </Tag>
         </Space>
       </div>
+      <Alert
+        v-if="managerRelationInvalid"
+        class="manager-relation-alert"
+        :message="managerRelationWarning"
+        show-icon
+        type="warning"
+      />
       <div class="process-scroll">
         <Steps
           :current="currentProcessStep"
@@ -596,6 +622,7 @@ onMounted(load);
         </Descriptions.Item>
         <Descriptions.Item label="主管上级">
           {{ instance.superiorSupervisorUserName || '-' }}
+          <Tag v-if="managerRelationInvalid" color="warning">关系无效</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="流程实例">
           {{ instance.processInstanceId || '-' }}
@@ -851,6 +878,10 @@ onMounted(load);
 .process-scroll {
   padding-bottom: 4px;
   overflow: auto hidden;
+}
+
+.manager-relation-alert {
+  margin-bottom: 12px;
 }
 
 .transfer-form {
