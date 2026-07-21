@@ -34,6 +34,7 @@ import {
   getReturnableTaskNodes,
   returnTask,
   submitHrReview,
+  submitManagerScore,
   submitSelfScore,
   submitSupervisorScore,
   transferTask,
@@ -69,35 +70,45 @@ const returnForm = reactive({
 const PERFORMANCE_HR_CODES = ['fdmperformance:hr'];
 type ScoreRow = {
   indicator: JixiaoApi.InstanceIndicator;
+  managerComment?: string;
+  managerScore?: number;
   selfComment?: string;
   selfScore?: number;
   supervisorComment?: string;
   supervisorScore?: number;
 };
 const scoreRows = ref<ScoreRow[]>([]);
-const bpmStepIndexes: Record<string, number> = {
-  JIXIAO_EMPLOYEE_CONFIRM: 3,
-  JIXIAO_HR_REVIEW: 4,
-  JIXIAO_INDICATOR_CONFIRM: 0,
-  JIXIAO_SELF_SCORE: 1,
-  JIXIAO_SUPERVISOR_SCORE: 2,
-};
 
 type ProcessStepStatus = 'error' | 'finish' | 'process' | 'wait';
 
 const SCORE_MAX = 100;
-
-const indicatorColumns: TableColumnsType = [
-  { dataIndex: 'dimensionName', fixed: 'left', title: '维度', width: 120 },
-  { dataIndex: 'name', fixed: 'left', title: '指标', width: 180 },
-  { dataIndex: 'standard', title: '考核标准', width: 260 },
-  { dataIndex: 'weight', title: '权重/基准分', width: 120 },
-  { dataIndex: 'actionPlan', title: '行动计划', width: 180 },
-  { dataIndex: 'selfScore', title: '员工自评(50%)', width: 130 },
-  { dataIndex: 'selfComment', title: '自评说明', width: 220 },
-  { dataIndex: 'supervisorScore', title: '主管评分(50%)', width: 130 },
-  { dataIndex: 'supervisorComment', title: '主管说明', width: 220 },
-];
+const managerScoreEnabled = computed(
+  () => instance.value?.managerScoreEnabled === true,
+);
+const indicatorColumns = computed<TableColumnsType>(() => {
+  const columns: TableColumnsType = [
+    { dataIndex: 'dimensionName', fixed: 'left', title: '维度', width: 120 },
+    { dataIndex: 'name', fixed: 'left', title: '指标', width: 180 },
+    { dataIndex: 'standard', title: '考核标准', width: 260 },
+    { dataIndex: 'weight', title: '权重/基准分', width: 120 },
+    { dataIndex: 'actionPlan', title: '行动计划', width: 180 },
+    { dataIndex: 'selfScore', title: '员工自评(50%)', width: 130 },
+    { dataIndex: 'selfComment', title: '自评说明', width: 220 },
+    {
+      dataIndex: 'supervisorScore',
+      title: managerScoreEnabled.value ? '主管评分(40%)' : '主管评分(50%)',
+      width: 130,
+    },
+    { dataIndex: 'supervisorComment', title: '主管说明', width: 220 },
+  ];
+  if (managerScoreEnabled.value) {
+    columns.push(
+      { dataIndex: 'managerScore', title: '上级评分(10%)', width: 130 },
+      { dataIndex: 'managerComment', title: '上级说明', width: 220 },
+    );
+  }
+  return columns;
+});
 
 const actionPlanIndicators = computed(() =>
   (instance.value?.indicators || []).filter((item) => item.actionPlanEnabled),
@@ -106,9 +117,11 @@ const pendingActionPlanIndicators = computed(() =>
   actionPlanIndicators.value.filter((item) => item.actionPlanStatus !== 1),
 );
 const canScore = computed(() =>
-  ['JIXIAO_SELF_SCORE', 'JIXIAO_SUPERVISOR_SCORE'].includes(
-    instance.value?.currentTaskKey || '',
-  ),
+  [
+    'JIXIAO_MANAGER_SCORE',
+    'JIXIAO_SELF_SCORE',
+    'JIXIAO_SUPERVISOR_SCORE',
+  ].includes(instance.value?.currentTaskKey || ''),
 );
 const canApproveCurrent = computed(() =>
   [
@@ -122,6 +135,9 @@ const canEditSelfScore = computed(
 );
 const canEditSupervisorScore = computed(
   () => instance.value?.currentTaskKey === 'JIXIAO_SUPERVISOR_SCORE',
+);
+const canEditManagerScore = computed(
+  () => instance.value?.currentTaskKey === 'JIXIAO_MANAGER_SCORE',
 );
 const isPerformanceAdmin = computed(() =>
   hasAccessByCodes(PERFORMANCE_HR_CODES),
@@ -147,7 +163,7 @@ const returnNodeOptions = computed(() =>
 
 const processSteps = computed(() => {
   const detail = instance.value;
-  return [
+  const steps = [
     {
       description: detail?.userName || '被考核人',
       key: 'JIXIAO_INDICATOR_CONFIRM',
@@ -163,6 +179,15 @@ const processSteps = computed(() => {
       key: 'JIXIAO_SUPERVISOR_SCORE',
       title: '主管评分',
     },
+  ];
+  if (managerScoreEnabled.value) {
+    steps.push({
+      description: detail?.superiorSupervisorUserName || '主管上级',
+      key: 'JIXIAO_MANAGER_SCORE',
+      title: '上级评分',
+    });
+  }
+  steps.push(
     {
       description: detail?.userName || '被考核人',
       key: 'JIXIAO_EMPLOYEE_CONFIRM',
@@ -185,21 +210,26 @@ const processSteps = computed(() => {
       key: 'JIXIAO_RESULT_PUBLISH',
       title: '结果公示',
     },
-  ];
+  );
+  return steps;
 });
 
 const currentProcessStep = computed(() => {
   const detail = instance.value;
   const taskKey = detail?.currentTaskKey || '';
-  const taskIndex = bpmStepIndexes[taskKey];
-  if (taskIndex !== undefined) {
+  const taskIndex = processSteps.value.findIndex(
+    (step) => step.key === taskKey,
+  );
+  if (taskIndex !== -1) {
     return taskIndex;
   }
   if (detail?.result?.publicStatus === 1 || detail?.publicTime) {
     return processSteps.value.length - 1;
   }
   if (detail?.status === 2) {
-    return 5;
+    return processSteps.value.findIndex(
+      (step) => step.key === 'JIXIAO_GRADE_ADJUST',
+    );
   }
   return 0;
 });
@@ -255,11 +285,21 @@ function baselineScore(record: Record<string, any> | ScoreRow) {
   return Number(row.indicator.weight || 0);
 }
 
-function validateScoreRows(isSelfScore: boolean) {
+function scoreValue(row: ScoreRow, taskKey: string) {
+  if (taskKey === 'JIXIAO_SELF_SCORE') return row.selfScore;
+  if (taskKey === 'JIXIAO_MANAGER_SCORE') return row.managerScore;
+  return row.supervisorScore;
+}
+
+function scoreComment(row: ScoreRow, taskKey: string) {
+  if (taskKey === 'JIXIAO_SELF_SCORE') return row.selfComment;
+  if (taskKey === 'JIXIAO_MANAGER_SCORE') return row.managerComment;
+  return row.supervisorComment;
+}
+
+function validateScoreRows(taskKey: string) {
   for (const row of scoreRows.value) {
-    const score = Number(
-      (isSelfScore ? row.selfScore : row.supervisorScore) ?? 0,
-    );
+    const score = Number(scoreValue(row, taskKey) ?? 0);
     if (Number.isNaN(score) || score < 0 || score > SCORE_MAX) {
       message.warning(
         `${row.indicator.name || '指标'}评分必须在 0-${SCORE_MAX} 分之间`,
@@ -279,8 +319,11 @@ async function load() {
     for (const indicator of instance.value.indicators || []) {
       const selfScore = scoreOf(indicator.id, 'SELF');
       const supervisorScore = scoreOf(indicator.id, 'SUPERVISOR');
+      const managerScore = scoreOf(indicator.id, 'MANAGER');
       scoreRows.value.push({
         indicator,
+        managerComment: managerScore?.comment,
+        managerScore: managerScore?.score,
         selfComment: selfScore?.comment,
         selfScore: selfScore?.score,
         supervisorComment: supervisorScore?.comment,
@@ -374,15 +417,13 @@ async function approveCurrent() {
 async function submitScore() {
   const req = taskReq();
   if (!req || !instance.value) return;
-  const isSelfScore = instance.value.currentTaskKey === 'JIXIAO_SELF_SCORE';
-  if (!validateScoreRows(isSelfScore)) return;
+  const taskKey = instance.value.currentTaskKey || '';
+  if (!validateScoreRows(taskKey)) return;
   const items = scoreRows.value.map((row) => {
-    const score = isSelfScore ? row.selfScore : row.supervisorScore;
-    const comment = isSelfScore ? row.selfComment : row.supervisorComment;
     return {
-      comment,
+      comment: scoreComment(row, taskKey),
       instanceIndicatorId: row.indicator.id!,
-      score: Number(score || 0),
+      score: Number(scoreValue(row, taskKey) || 0),
     };
   });
   submitting.value = true;
@@ -391,6 +432,8 @@ async function submitScore() {
       await submitSelfScore({ ...req, items });
     } else if (instance.value.currentTaskKey === 'JIXIAO_SUPERVISOR_SCORE') {
       await submitSupervisorScore({ ...req, items });
+    } else if (instance.value.currentTaskKey === 'JIXIAO_MANAGER_SCORE') {
+      await submitManagerScore({ ...req, items });
     }
     message.success('评分已提交');
     await load();
@@ -584,7 +627,7 @@ onMounted(load);
         :data-source="scoreRows"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: 1420 }"
+        :scroll="{ x: managerScoreEnabled ? 1770 : 1420 }"
         row-key="indicator.id"
         size="small"
       >
@@ -667,6 +710,28 @@ onMounted(load);
             />
             <span v-else class="readonly-comment">
               {{ record.supervisorComment || '-' }}
+            </span>
+          </template>
+          <template v-else-if="column.dataIndex === 'managerScore'">
+            <InputNumber
+              v-if="canEditManagerScore"
+              v-model:value="record.managerScore"
+              :max="SCORE_MAX"
+              :min="0"
+              class="score-input"
+              addon-after="分"
+            />
+            <span v-else>{{ record.managerScore ?? '-' }}</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'managerComment'">
+            <Textarea
+              v-if="canEditManagerScore"
+              v-model:value="record.managerComment"
+              :rows="2"
+              placeholder="填写上级说明"
+            />
+            <span v-else class="readonly-comment">
+              {{ record.managerComment || '-' }}
             </span>
           </template>
         </template>

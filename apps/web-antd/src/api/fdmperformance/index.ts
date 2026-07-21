@@ -184,6 +184,7 @@ export namespace JixiaoApi {
     grade?: string;
     id?: number;
     instanceId?: number;
+    periodKey?: string;
     publicStatus?: number;
     publicTime?: string;
     supervisorUserId?: number;
@@ -206,6 +207,8 @@ export namespace JixiaoApi {
     grade?: string;
     id?: number;
     indicators?: InstanceIndicator[];
+    managerScoreEnabled?: boolean;
+    periodKey?: string;
     processDefinitionKey?: string;
     processInstanceId?: string;
     publicTime?: string;
@@ -551,6 +554,12 @@ export function getMyInstancePage(params: JixiaoApi.InstancePageParams) {
   );
 }
 
+export function deleteInstance(id: number) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/assessment/instance/delete?id=${id}`,
+  );
+}
+
 export function getInstance(id: number) {
   return requestClient.get<JixiaoApi.Instance>(
     '/fdmperformance/assessment/instance/get',
@@ -584,6 +593,13 @@ export function submitSelfScore(data: JixiaoApi.ScoreSubmitReq) {
 export function submitSupervisorScore(data: JixiaoApi.ScoreSubmitReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/supervisor-score',
+    data,
+  );
+}
+
+export function submitManagerScore(data: JixiaoApi.ScoreSubmitReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/manager-score',
     data,
   );
 }

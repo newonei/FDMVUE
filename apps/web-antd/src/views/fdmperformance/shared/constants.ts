@@ -52,4 +52,5 @@ export const TASK_LABELS: Record<string, string> = {
   JIXIAO_INDICATOR_CONFIRM: '指标确认',
   JIXIAO_SELF_SCORE: '员工自评',
   JIXIAO_SUPERVISOR_SCORE: '主管评分',
+  JIXIAO_MANAGER_SCORE: '上级评分',
 };

@@ -62,6 +62,7 @@ const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
 
 const instanceColumns: TableColumnsType = [
   { dataIndex: 'currentTaskName', title: '当前节点', width: 160 },
+  { dataIndex: 'periodKey', title: '考核周期', width: 130 },
   { dataIndex: 'supervisorUserName', title: '主管', width: 150 },
   { dataIndex: 'finalScore', title: '主管汇总分', width: 120 },
   { dataIndex: 'status', title: '状态', width: 100 },
@@ -70,6 +71,7 @@ const instanceColumns: TableColumnsType = [
 
 const resultColumns: TableColumnsType = [
   { dataIndex: 'publicTime', title: '公示时间' },
+  { dataIndex: 'periodKey', title: '考核周期' },
   { dataIndex: 'supervisorUserName', title: '主管' },
   { dataIndex: 'finalScore', title: '最终分' },
   { dataIndex: 'grade', title: '等级' },
@@ -84,6 +86,20 @@ function gradeColor(grade?: string) {
   if (grade === 'C') return 'red';
   if (grade === 'C+') return 'orange';
   return 'blue';
+}
+
+function periodLabel(periodKey?: string) {
+  if (!periodKey) return '-';
+  const month = /^(\d{4})-(\d{2})$/.exec(periodKey);
+  if (month) return `${month[1]}年${month[2]}月`;
+  const quarter = /^(\d{4})-Q([1-4])$/.exec(periodKey);
+  if (quarter) return `${quarter[1]}年第${quarter[2]}季度`;
+  const halfYear = /^(\d{4})-H([12])$/.exec(periodKey);
+  if (halfYear) {
+    return `${halfYear[1]}年${halfYear[2] === '1' ? '上' : '下'}半年`;
+  }
+  if (/^\d{4}$/.test(periodKey)) return `${periodKey}年度`;
+  return periodKey;
 }
 
 async function load() {
@@ -261,6 +277,9 @@ onMounted(load);
               '-'
             }}
           </template>
+          <template v-else-if="column.dataIndex === 'periodKey'">
+            {{ periodLabel(record.periodKey) }}
+          </template>
           <template v-else-if="column.dataIndex === 'status'">
             <Tag :color="instanceStatus(record.status).color">
               {{ instanceStatus(record.status).text }}
@@ -287,7 +306,10 @@ onMounted(load);
         size="small"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'grade'">
+          <template v-if="column.dataIndex === 'periodKey'">
+            {{ periodLabel(record.periodKey) }}
+          </template>
+          <template v-else-if="column.dataIndex === 'grade'">
             <Tag :color="gradeColor(record.grade)">
               {{
                 GRADE_OPTIONS.find((item) => item.value === record.grade)

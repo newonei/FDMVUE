@@ -132,7 +132,7 @@ const indicatorImportCategories = computed(() => {
       value: undefined,
     },
     ...[...countMap.entries()]
-      .sort(([left], [right]) => left.localeCompare(right, 'zh-CN'))
+      .toSorted(([left], [right]) => left.localeCompare(right, 'zh-CN'))
       .map(([label, count]) => ({ count, label, value: label })),
   ];
 });
@@ -663,7 +663,7 @@ onMounted(async () => {
             </Form.Item>
           </Form>
           <Alert
-            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_EMPLOYEE_CONFIRM、JIXIAO_HR_REVIEW 五个用户任务 key。"
+            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_MANAGER_SCORE、JIXIAO_EMPLOYEE_CONFIRM、JIXIAO_HR_REVIEW 六个用户任务 key；上级评分节点按是否配置主管上级条件执行。"
             show-icon
             type="warning"
           />
@@ -873,6 +873,8 @@ h2 {
 
 .category-item {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   min-height: 36px;
   padding: 7px 10px;
@@ -882,14 +884,12 @@ h2 {
   background: transparent;
   border: 0;
   border-radius: 4px;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .category-item:hover,
 .category-item:focus-visible {
-  background: #f3f5f7;
   outline: none;
+  background: #f3f5f7;
 }
 
 .category-item.active {
@@ -911,9 +911,9 @@ h2 {
 
 .import-footer {
   display: flex;
-  color: #646a73;
   align-items: center;
   justify-content: space-between;
+  color: #646a73;
 }
 
 .weight {
@@ -946,9 +946,9 @@ h2 {
   }
 
   .category-item {
+    gap: 12px;
     width: auto;
     min-width: 120px;
-    gap: 12px;
   }
 }
 

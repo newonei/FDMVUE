@@ -8,9 +8,23 @@ import { useRouter } from 'vue-router';
 
 import { useUserStore } from '@vben/stores';
 
-import { Button, DatePicker, Select, Table, Tabs, Tag } from 'ant-design-vue';
+import {
+  Button,
+  DatePicker,
+  message,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+} from 'ant-design-vue';
 
-import { getInstancePage, getSetting } from '#/api/fdmperformance';
+import {
+  deleteInstance,
+  getInstancePage,
+  getSetting,
+} from '#/api/fdmperformance';
 
 import { TASK_LABELS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -23,6 +37,7 @@ const userStore = useUserStore();
 const activeTab = ref('batches');
 const isPerformanceHr = ref(false);
 const instanceLoading = ref(false);
+const deletingInstanceId = ref<number>();
 const instances = ref<JixiaoApi.Instance[]>([]);
 const instanceTotal = ref(0);
 
@@ -49,7 +64,7 @@ const instanceColumns: TableColumnsType = [
   },
   { dataIndex: 'finalScore', title: '考核结果', width: 110 },
   { dataIndex: 'grade', title: '绩效等级', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 90 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
 ];
 
 function currentFlow(record: JixiaoApi.Instance) {
@@ -110,6 +125,21 @@ function openInstance(record: JixiaoApi.Instance) {
   router.push(
     `/fdmperformance/batches/${record.batchId}/instances/${record.id}`,
   );
+}
+
+async function removeInstance(record: JixiaoApi.Instance) {
+  if (!record.id) return;
+  deletingInstanceId.value = record.id;
+  try {
+    await deleteInstance(record.id);
+    message.success('考核已删除');
+    if (instances.value.length === 1 && instanceQuery.pageNo > 1) {
+      instanceQuery.pageNo -= 1;
+    }
+    await loadInstances();
+  } finally {
+    deletingInstanceId.value = undefined;
+  }
 }
 
 function changeInstancePage(pagination: any) {
@@ -205,9 +235,33 @@ onMounted(initialize);
                 <span v-else>-</span>
               </template>
               <template v-else-if="column.dataIndex === 'action'">
-                <Button size="small" type="link" @click="openInstance(record)">
-                  详情
-                </Button>
+                <Space :size="0">
+                  <Button
+                    size="small"
+                    type="link"
+                    @click="openInstance(record)"
+                  >
+                    详情
+                  </Button>
+                  <Popconfirm
+                    ok-type="danger"
+                    title="确认删除该考核？删除后评分、结果和复盘数据将无法恢复。"
+                    @confirm="removeInstance(record)"
+                  >
+                    <Button
+                      danger
+                      :disabled="
+                        deletingInstanceId !== undefined &&
+                        deletingInstanceId !== record.id
+                      "
+                      :loading="deletingInstanceId === record.id"
+                      size="small"
+                      type="link"
+                    >
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
               </template>
             </template>
           </Table>
