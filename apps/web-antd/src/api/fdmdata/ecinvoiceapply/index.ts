@@ -1,5 +1,7 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { AxiosProgressEvent } from '#/api/infra/file';
+
 import { requestClient } from '#/api/request';
 
 export namespace FdmdataEcInvoiceApplyApi {
@@ -30,6 +32,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     orderFinishTime?: DateTimeValue | null;
     invoiceDueTime?: DateTimeValue | null;
     invoiceDate?: DateTimeValue | null;
+    invoiceFileUrl?: string;
+    invoiceFileName?: string;
     payerName?: string;
     payerRegisterNo?: string;
     payerPhone?: string;
@@ -101,6 +105,18 @@ export function updateEcInvoiceApply(
   data: FdmdataEcInvoiceApplyApi.EcInvoiceApply,
 ) {
   return requestClient.put<boolean>('/fdmdata/ecinvoiceapply/update', data);
+}
+
+export function uploadEcInvoiceApplyPdf(
+  id: number,
+  file: File,
+  onUploadProgress?: AxiosProgressEvent,
+) {
+  return requestClient.upload<boolean>(
+    '/fdmdata/ecinvoiceapply/upload-invoice-pdf',
+    { file, id },
+    { onUploadProgress, timeout: 5 * 60 * 1000 },
+  );
 }
 
 export function deleteEcInvoiceApply(id: number) {

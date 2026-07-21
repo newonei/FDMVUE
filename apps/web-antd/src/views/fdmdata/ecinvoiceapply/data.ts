@@ -11,6 +11,8 @@ import { getRangePickerDefaultProps } from '#/utils';
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
   {
     invoiceType: '普通发票',
+    // 新申请默认未开票，开票状态由实际开票流程更新，用户无需手工填写。
+    invoiceStatus: 0,
     applySource: '手工录入',
     delayApplyFlag: 0,
     punishFlag: 0,
@@ -31,6 +33,22 @@ function formatAmount({ cellValue }: { cellValue: unknown }) {
 
 function formatBoolean({ cellValue }: { cellValue: unknown }) {
   return cellValue ? '是' : '否';
+}
+
+const invoiceStatusOptions = [
+  { label: '未开票', value: 0 },
+  { label: '已开票', value: 1 },
+];
+
+function formatInvoiceStatus({ cellValue }: { cellValue: unknown }) {
+  if (cellValue === null || cellValue === undefined || cellValue === '') {
+    return '未开票';
+  }
+  const status = Number(cellValue);
+  return (
+    invoiceStatusOptions.find((item) => item.value === status)?.label ??
+    String(cellValue)
+  );
 }
 
 function formatOptionalDateTime({ cellValue }: { cellValue: unknown }) {
@@ -197,25 +215,16 @@ export function useFormSchema(): VbenFormSchema[] {
         placeholder: '个人抬头可不填',
       },
     },
+    // 状态和开票日期由开票流程维护，保留为隐藏字段以便编辑时原值不丢失。
     {
       fieldName: 'invoiceStatus',
-      label: '开票状态',
       component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 0 },
-      rules: 'required',
+      formItemClass: 'hidden',
     },
     {
       fieldName: 'invoiceDate',
-      label: '开票日期',
-      component: 'DatePicker',
-      componentProps: {
-        class: 'w-full',
-        allowClear: true,
-        format: 'YYYY-MM-DD HH:mm:ss',
-        showTime: true,
-        valueFormat: 'YYYY-MM-DD HH:mm:ss',
-      },
-      rules: 'required',
+      component: 'Input',
+      formItemClass: 'hidden',
     },
   ];
 }
@@ -275,8 +284,12 @@ export function useGridFormSchema(): VbenFormSchema[] {
     {
       fieldName: 'invoiceStatus',
       label: '开票状态',
-      component: 'InputNumber',
-      componentProps: { class: 'w-full', precision: 0 },
+      component: 'Select',
+      componentProps: {
+        class: 'w-full',
+        allowClear: true,
+        options: invoiceStatusOptions,
+      },
     },
     {
       fieldName: 'platformStatusText',
@@ -364,7 +377,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
     { field: 'invoiceNo', title: '发票号码', minWidth: 130 },
     { field: 'orderPayStatus', title: '支付状态', minWidth: 90 },
     { field: 'applyStatus', title: '申请状态', minWidth: 90 },
-    { field: 'invoiceStatus', title: '开票状态', minWidth: 90 },
+    {
+      field: 'invoiceStatus',
+      title: '开票状态',
+      minWidth: 90,
+      formatter: formatInvoiceStatus,
+    },
+    {
+      field: 'invoiceFileUrl',
+      title: '附件',
+      width: 90,
+      slots: { default: 'attachment' },
+    },
     {
       field: 'platformStatusText',
       title: '平台状态',
@@ -416,7 +440,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
     },
     {
       title: '操作',
-      width: 140,
+      width: 230,
       fixed: 'right',
       slots: { default: 'actions' },
     },

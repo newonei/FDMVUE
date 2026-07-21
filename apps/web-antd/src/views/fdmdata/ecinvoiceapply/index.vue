@@ -15,6 +15,7 @@ import {
   deleteEcInvoiceApply,
   exportEcInvoiceApplyEtaxExcel,
   getEcInvoiceApplyPage,
+  uploadEcInvoiceApplyPdf,
 } from '#/api/fdmdata/ecinvoiceapply';
 import { $t } from '#/locales';
 
@@ -26,6 +27,9 @@ defineOptions({ name: 'EcInvoiceApply' });
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
 const selectedRows = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply[]>([]);
 const exportLoading = ref(false);
+const uploadingInvoiceIds = ref<Set<number>>(new Set());
+
+const MAX_INVOICE_PDF_SIZE = 20 * 1024 * 1024;
 
 const selectedCompanyNames = computed(() =>
   selectedRows.value.map((row) => row.shopCompanyName?.trim() ?? ''),
@@ -78,6 +82,93 @@ function handleCreate() {
 
 function handleEdit(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
   formModalApi.setData(row).open();
+}
+
+function isInvoicePdfUploading(id?: number) {
+  return typeof id === 'number' && uploadingInvoiceIds.value.has(id);
+}
+
+function setInvoicePdfUploading(id: number, uploading: boolean) {
+  const next = new Set(uploadingInvoiceIds.value);
+  if (uploading) {
+    next.add(id);
+  } else {
+    next.delete(id);
+  }
+  uploadingInvoiceIds.value = next;
+}
+
+function handleUploadInvoicePdf(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
+  if (!row.id || isInvoicePdfUploading(row.id)) return;
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,application/pdf';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      message.error('请选择 PDF 格式的发票文件');
+      return;
+    }
+    if (file.size > MAX_INVOICE_PDF_SIZE) {
+      message.error('发票 PDF 不能超过 20 MB');
+      return;
+    }
+
+    setInvoicePdfUploading(row.id!, true);
+    const hideLoading = message.loading({
+      content: `正在上传 ${file.name}`,
+      duration: 0,
+    });
+    try {
+      await uploadEcInvoiceApplyPdf(row.id!, file);
+      message.success('发票 PDF 上传成功，已标记为已开票');
+      await gridApi.query();
+    } finally {
+      hideLoading();
+      setInvoicePdfUploading(row.id!, false);
+    }
+  });
+  input.click();
+}
+
+function sanitizeAttachmentFileName(value: string) {
+  return value.replaceAll(/[\\/:*?"<>|]/g, '_');
+}
+
+function buildAttachmentDownloadUrl(url: string, fileName: string) {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    parsed.searchParams.set('attname', fileName);
+    return parsed.toString();
+  } catch {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}attname=${encodeURIComponent(fileName)}`;
+  }
+}
+
+function handleDownloadInvoicePdf(
+  row: FdmdataEcInvoiceApplyApi.EcInvoiceApply,
+) {
+  const url = row.invoiceFileUrl?.trim();
+  if (!url) {
+    message.warning('当前记录还没有上传发票附件');
+    return;
+  }
+  const fallbackName = `发票-${row.tid || row.id || '附件'}.pdf`;
+  const fileName = sanitizeAttachmentFileName(
+    row.invoiceFileName?.trim() || fallbackName,
+  );
+  const link = document.createElement('a');
+  link.href = buildAttachmentDownloadUrl(url, fileName);
+  link.download = fileName;
+  link.rel = 'noopener noreferrer';
+  link.target = '_blank';
+  link.style.display = 'none';
+  document.body.append(link);
+  link.click();
+  link.remove();
 }
 
 async function handleDelete(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
@@ -197,9 +288,32 @@ const [Grid, gridApi] = useVbenVxeGrid({
           grid-class="invoice-vxe-grid"
           table-title="电商发票申请"
         >
+          <template #attachment="{ row }">
+            <Button
+              v-if="row.invoiceFileUrl"
+              size="small"
+              type="link"
+              @click="handleDownloadInvoicePdf(row)"
+            >
+              <template #icon>
+                <IconifyIcon icon="lucide:paperclip" />
+              </template>
+              下载
+            </Button>
+            <span v-else class="text-muted-foreground">-</span>
+          </template>
           <template #actions="{ row }">
             <TableAction
               :actions="[
+                {
+                  label: '上传',
+                  type: 'link',
+                  icon: ACTION_ICON.UPLOAD,
+                  loading: isInvoicePdfUploading(row.id),
+                  disabled: isInvoicePdfUploading(row.id),
+                  auth: ['fdmdata:ecinvoiceapply:update'],
+                  onClick: handleUploadInvoicePdf.bind(null, row),
+                },
                 {
                   label: $t('common.edit'),
                   type: 'link',
