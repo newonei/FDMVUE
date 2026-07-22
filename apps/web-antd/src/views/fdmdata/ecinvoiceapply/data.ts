@@ -381,12 +381,14 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       field: 'invoiceStatus',
       title: '开票状态',
       minWidth: 90,
+      fixed: 'left',
       formatter: formatInvoiceStatus,
     },
     {
       field: 'invoiceFileUrl',
       title: '附件',
       width: 90,
+      fixed: 'left',
       slots: { default: 'attachment' },
     },
     {
