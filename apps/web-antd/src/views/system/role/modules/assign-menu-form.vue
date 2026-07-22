@@ -21,7 +21,9 @@ import { useAssignMenuFormSchema } from '../data';
 
 const emit = defineEmits(['success']);
 
-const menuTree = ref<SystemMenuApi.Menu[]>([]); // 菜单树
+type MenuTreeNode = SystemMenuApi.Menu & { children?: MenuTreeNode[] };
+
+const menuTree = ref<MenuTreeNode[]>([]); // 菜单树
 const menuLoading = ref(false); // 加载菜单列表
 const isAllSelected = ref(false); // 全选状态
 const isExpanded = ref(false); // 展开状态
@@ -52,7 +54,7 @@ const [Modal, modalApi] = useVbenModal({
     try {
       await assignRoleMenu({
         roleId: data.id,
-        menuIds: data.menuIds,
+        menuIds: includeAncestorMenuIds((data.menuIds ?? []) as number[]),
       });
       // 关闭并提示
       await modalApi.close();
@@ -91,10 +93,36 @@ async function loadMenuTree() {
   menuLoading.value = true;
   try {
     const data = await getSimpleMenusList();
-    menuTree.value = handleTree(data) as SystemMenuApi.Menu[];
+    menuTree.value = handleTree(data) as MenuTreeNode[];
   } finally {
     menuLoading.value = false;
   }
+}
+
+/** 补齐已选菜单的祖先，避免半选目录未提交后导致整组路由消失。 */
+function includeAncestorMenuIds(menuIds: number[]): number[] {
+  const parentIdMap = new Map<number, number>();
+  const collectParentIds = (nodes: MenuTreeNode[]) => {
+    nodes.forEach((node) => {
+      parentIdMap.set(node.id, node.parentId);
+      if (node.children?.length) {
+        collectParentIds(node.children);
+      }
+    });
+  };
+  collectParentIds(menuTree.value);
+
+  const result = new Set(menuIds);
+  menuIds.forEach((menuId) => {
+    const visited = new Set<number>();
+    let parentId = parentIdMap.get(menuId);
+    while (parentId && !visited.has(parentId)) {
+      result.add(parentId);
+      visited.add(parentId);
+      parentId = parentIdMap.get(parentId);
+    }
+  });
+  return [...result];
 }
 
 /** 全选/全不选 */
