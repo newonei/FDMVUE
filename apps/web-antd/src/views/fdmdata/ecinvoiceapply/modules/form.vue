@@ -16,6 +16,7 @@ import {
 import { $t } from '#/locales';
 
 import { EC_INVOICE_APPLY_DEFAULTS, useFormSchema } from '../data';
+import { normalizeLocalDateForForm } from '../local-date';
 
 defineOptions({ name: 'EcInvoiceApplyForm' });
 
@@ -91,6 +92,7 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      ++openSeq;
       modalApi.unlock();
       formData.value = undefined;
       await formApi.resetForm();
@@ -113,7 +115,19 @@ const [Modal, modalApi] = useVbenModal({
         return;
       }
       formData.value = detail;
-      await formApi.setValues(detail as any, false);
+      await formApi.setValues(
+        {
+          ...detail,
+          startTime: normalizeLocalDateForForm(detail.startTime),
+        } as any,
+        false,
+      );
+    } catch (error) {
+      if (mySeq === openSeq) {
+        console.error('Load ecInvoiceApply detail failed', error);
+        message.error('加载电商发票申请详情失败，请稍后再试');
+        await modalApi.close();
+      }
     } finally {
       if (mySeq === openSeq) modalApi.unlock();
     }

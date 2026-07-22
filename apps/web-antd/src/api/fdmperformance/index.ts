@@ -23,6 +23,12 @@ export namespace JixiaoApi {
     status?: number;
   };
 
+  export interface IndicatorImportResult {
+    created: number;
+    skipped: number;
+    total: number;
+  }
+
   export interface TemplatePerson {
     deptId?: number;
     id?: number;
@@ -440,6 +446,32 @@ export function updateIndicator(data: JixiaoApi.Indicator) {
 export function deleteIndicator(id: number) {
   return requestClient.delete<boolean>(
     `/fdmperformance/indicator/delete?id=${id}`,
+  );
+}
+
+export function downloadIndicatorImportTemplate() {
+  return requestClient.download('/fdmperformance/indicator/import-template');
+}
+
+export function importIndicators(
+  file: File,
+  dimensionName: string,
+  deptId?: number,
+) {
+  const data: {
+    deptId?: number;
+    dimensionName: string;
+    file: File;
+  } = {
+    dimensionName,
+    file,
+  };
+  if (deptId !== undefined) {
+    data.deptId = deptId;
+  }
+  return requestClient.upload<JixiaoApi.IndicatorImportResult>(
+    '/fdmperformance/indicator/import',
+    data,
   );
 }
 

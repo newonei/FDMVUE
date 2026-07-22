@@ -1,12 +1,17 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
+import type {
+  FileType,
+  UploadFile,
+} from 'ant-design-vue/es/upload/interface';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemDeptApi } from '#/api/system/dept';
 
 import { onMounted, reactive, ref } from 'vue';
 
-import { handleTree } from '@vben/utils';
+import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
 
 import {
   Button,
@@ -15,6 +20,7 @@ import {
   Input,
   InputNumber,
   message,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -22,12 +28,15 @@ import {
   Tag,
   Textarea,
   TreeSelect,
+  Upload,
 } from 'ant-design-vue';
 
 import {
   createIndicator,
   deleteIndicator,
+  downloadIndicatorImportTemplate,
   getIndicatorPage,
+  importIndicators,
   updateIndicator,
 } from '#/api/fdmperformance';
 import { getSimpleDeptList } from '#/api/system/dept';
@@ -40,6 +49,11 @@ defineOptions({ name: 'FdmPerformanceIndicators' });
 const loading = ref(false);
 const deptLoading = ref(false);
 const drawerOpen = ref(false);
+const importOpen = ref(false);
+const importLoading = ref(false);
+const templateLoading = ref(false);
+const importFile = ref<File>();
+const importFileList = ref<UploadFile[]>([]);
 const rows = ref<JixiaoApi.Indicator[]>([]);
 const deptTreeOptions = ref<SystemDeptApi.Dept[]>([]);
 const deptNameMap = ref<Record<number, string>>({});
@@ -61,6 +75,11 @@ const form = reactive<JixiaoApi.Indicator>({
   scoreMethod: 'NUMBER',
   standard: '',
   status: 0,
+});
+
+const importForm = reactive({
+  deptId: undefined as number | undefined,
+  dimensionName: '业绩指标',
 });
 
 const deptFieldNames = { children: 'children', label: 'name', value: 'id' };
@@ -140,6 +159,66 @@ function openCreate() {
   drawerOpen.value = true;
 }
 
+function openImport() {
+  importFile.value = undefined;
+  importFileList.value = [];
+  importForm.deptId = undefined;
+  importForm.dimensionName = '业绩指标';
+  importOpen.value = true;
+}
+
+function beforeImportUpload(file: FileType) {
+  importFile.value = file as File;
+  importFileList.value = [file as UploadFile];
+  return false;
+}
+
+function removeImportFile() {
+  importFile.value = undefined;
+  importFileList.value = [];
+  return true;
+}
+
+async function handleDownloadTemplate() {
+  templateLoading.value = true;
+  try {
+    const data = await downloadIndicatorImportTemplate();
+    downloadFileFromBlobPart({
+      fileName: '绩效指标导入模板.xlsx',
+      source: data,
+    });
+  } finally {
+    templateLoading.value = false;
+  }
+}
+
+async function submitImport() {
+  if (!importFile.value) {
+    message.warning('请选择 Excel 文件');
+    return;
+  }
+  if (!importForm.dimensionName.trim()) {
+    message.warning('请填写默认维度');
+    return;
+  }
+  importLoading.value = true;
+  try {
+    const result = await importIndicators(
+      importFile.value,
+      importForm.dimensionName.trim(),
+      importForm.deptId,
+    );
+    message.success(
+      `导入完成：读取 ${result.total} 项，新增 ${result.created} 项，跳过 ${result.skipped} 项`,
+    );
+    importOpen.value = false;
+    query.pageNo = 1;
+    await load();
+  } finally {
+    importLoading.value = false;
+  }
+}
+
 function openEdit(record: JixiaoApi.Indicator) {
   resetForm();
   Object.assign(form, record);
@@ -179,7 +258,13 @@ onMounted(() => {
 <template>
   <PerformanceShell title="指标库">
     <template #actions>
-      <Button type="primary" @click="openCreate">新增指标</Button>
+      <Space>
+        <Button @click="openImport">
+          <IconifyIcon class="action-icon" icon="lucide:file-up" />
+          批量导入
+        </Button>
+        <Button type="primary" @click="openCreate">新增指标</Button>
+      </Space>
     </template>
 
     <div class="filter-bar">
@@ -321,6 +406,66 @@ onMounted(() => {
         </Space>
       </template>
     </Drawer>
+
+    <Modal
+      v-model:open="importOpen"
+      :confirm-loading="importLoading"
+      :mask-closable="!importLoading"
+      ok-text="开始导入"
+      title="批量导入指标"
+      :width="600"
+      @ok="submitImport"
+    >
+      <Form layout="vertical">
+        <Form.Item label="Excel 文件" required>
+          <div class="template-download">
+            <Button
+              :loading="templateLoading"
+              size="small"
+              type="link"
+              @click="handleDownloadTemplate"
+            >
+              <IconifyIcon class="action-icon" icon="lucide:download" />
+              下载模板
+            </Button>
+          </div>
+          <Upload.Dragger
+            accept=".xls,.xlsx"
+            :before-upload="beforeImportUpload"
+            :disabled="importLoading"
+            :file-list="importFileList"
+            :max-count="1"
+            @remove="removeImportFile"
+          >
+            <IconifyIcon class="upload-icon" icon="lucide:file-spreadsheet" />
+            <div class="upload-title">选择 Excel 文件</div>
+            <div class="upload-hint">.xls / .xlsx</div>
+          </Upload.Dragger>
+        </Form.Item>
+        <Form.Item label="默认维度" required>
+          <Input
+            v-model:value="importForm.dimensionName"
+            :disabled="importLoading"
+            :maxlength="64"
+            placeholder="如：业绩指标"
+          />
+        </Form.Item>
+        <Form.Item label="归属部门">
+          <TreeSelect
+            v-model:value="importForm.deptId"
+            allow-clear
+            :disabled="importLoading"
+            :field-names="deptFieldNames"
+            :loading="deptLoading"
+            placeholder="不选择则导入为通用指标"
+            show-search
+            tree-default-expand-all
+            :tree-data="deptTreeOptions"
+            tree-node-filter-prop="name"
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
   </PerformanceShell>
 </template>
 
@@ -337,6 +482,35 @@ onMounted(() => {
 
 .full {
   width: 100%;
+}
+
+.action-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.upload-icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+  color: #1677ff;
+}
+
+.template-download {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.upload-title {
+  color: #1f2329;
+  font-weight: 500;
+}
+
+.upload-hint {
+  margin-top: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {

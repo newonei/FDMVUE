@@ -8,6 +8,8 @@ import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 import { getEcShopDailyShopOptions } from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
+import { normalizeLocalDateForForm } from './local-date';
+
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
   {
     invoiceType: '普通发票',
@@ -66,6 +68,10 @@ function formatOptionalDateTime({ cellValue }: { cellValue: unknown }) {
     return formatDateTime(value);
   }
   return '';
+}
+
+function formatStartDate({ cellValue }: { cellValue: unknown }) {
+  return normalizeLocalDateForForm(cellValue) ?? '';
 }
 
 const companySelectProps = {
@@ -361,6 +367,12 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       formatter: formatAmount,
     },
     {
+      field: 'quantity',
+      title: '数量',
+      minWidth: 90,
+      align: 'right',
+    },
+    {
       field: 'payerName',
       title: '付款方',
       minWidth: 180,
@@ -413,8 +425,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       field: 'startTime',
       title: '开始日期',
       minWidth: 110,
-      formatter: ({ cellValue }: { cellValue: unknown }) =>
-        cellValue ? String(cellValue).slice(0, 10) : '',
+      formatter: formatStartDate,
     },
     {
       field: 'applyGmtCreate',
