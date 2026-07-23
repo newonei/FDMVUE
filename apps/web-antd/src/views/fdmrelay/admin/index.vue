@@ -7,6 +7,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import { confirm, Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { formatDateTime } from '@vben/utils';
 
 import { useClipboard } from '@vueuse/core';
 import {
@@ -36,6 +37,7 @@ import { TableAction } from '#/adapter/vxe-table';
 import {
   getRelayApiKeyPage,
   getRelayConfig,
+  getRelayGroups,
   getRelayUsagePage,
   getRelayUsageStats,
   getRelayUserPage,
@@ -62,7 +64,9 @@ const configSaving = ref(false);
 const connectionTesting = ref(false);
 const hasAdminApiKey = ref(false);
 const configured = ref(false);
-const configUpdateTime = ref<string>();
+const configUpdateTime = ref<FdmRelayApi.DateTimeValue>();
+const loadedConfigEnabled = ref(false);
+const loadedDefaultGroupId = ref<number>();
 const connectionResult = ref<FdmRelayApi.ConnectionTestResult>();
 const configForm = reactive<FdmRelayApi.ConfigSaveRequest>({
   enabled: true,
@@ -82,6 +86,37 @@ const configForm = reactive<FdmRelayApi.ConfigSaveRequest>({
   defaultRateLimit1d: 0,
   defaultRateLimit7d: 0,
 });
+const groupLoading = ref(false);
+const groups = ref<FdmRelayApi.Group[]>([]);
+const canLoadGroups = computed(
+  () =>
+    hasAdminApiKey.value &&
+    Boolean(configForm.adminBaseUrl.trim()) &&
+    Boolean(configForm.publicBaseUrl.trim()),
+);
+const isStandardGroup = (group: FdmRelayApi.Group) =>
+  group.subscriptionType?.toLowerCase() === 'standard';
+const selectableGroups = computed(() => groups.value.filter(isStandardGroup));
+const groupOptions = computed(() => {
+  const options: Array<{
+    disabled?: boolean;
+    label: string;
+    value: number;
+  }> = groups.value.map((group) => ({
+    disabled: !isStandardGroup(group),
+    label: `${group.name} · ${group.platform.toUpperCase()} · ${isStandardGroup(group) ? '标准计费' : '订阅制（不可直接分配）'} · ID ${group.id}`,
+    value: group.id,
+  }));
+  const selected = configForm.defaultGroupId;
+  if (selected && !groups.value.some((group) => group.id === selected)) {
+    options.push({
+      disabled: true,
+      label: `已保存分组 · ID ${selected}（当前不可用）`,
+      value: selected,
+    });
+  }
+  return options;
+});
 
 const statsLoading = ref(false);
 const stats = ref<FdmRelayApi.UsageStats>({});
@@ -89,7 +124,9 @@ const stats = ref<FdmRelayApi.UsageStats>({});
 const userLoading = ref(false);
 const users = ref<FdmRelayApi.UserBinding[]>([]);
 const userQuery = reactive({
-  keyword: '',
+  userId: undefined as number | undefined,
+  remoteUserId: undefined as number | undefined,
+  shadowEmail: '',
   provisionStatus: undefined as string | undefined,
   remoteStatus: undefined as string | undefined,
 });
@@ -104,7 +141,7 @@ const userPagination = reactive({
 const keyLoading = ref(false);
 const keys = ref<FdmRelayApi.ApiKey[]>([]);
 const keyQuery = reactive({
-  keyword: '',
+  name: '',
   status: undefined as string | undefined,
   userId: undefined as number | undefined,
 });
@@ -115,13 +152,19 @@ const keyPagination = reactive({
   showSizeChanger: true,
   showTotal: (total: number) => `共 ${total} 条`,
 });
+const keyFilterOptions = computed(() =>
+  keys.value.map((key) => ({
+    label: `${key.name} · ${key.username || key.nickname || `用户 ${key.userId ?? '-'}`} · ${maskedKey(key)}`,
+    value: key.id,
+  })),
+);
 
 const usageLoading = ref(false);
 const usageLogs = ref<FdmRelayApi.UsageLog[]>([]);
 const usageQuery = reactive({
-  keyword: '',
+  userId: undefined as number | undefined,
+  apiKeyId: undefined as number | undefined,
   model: '',
-  statusCode: undefined as number | undefined,
   createTime: undefined as [string, string] | undefined,
 });
 const usagePagination = reactive({
@@ -231,8 +274,32 @@ function formatMoney(value?: number) {
   return `¥${Number(value ?? 0).toFixed(4)}`;
 }
 
-function formatTime(value?: string) {
-  return value || '-';
+function formatTime(value?: FdmRelayApi.DateTimeValue) {
+  if (value === undefined || value === null || value === '') return '-';
+  const normalized =
+    typeof value === 'string' && /^\d{13}$/.test(value) ? Number(value) : value;
+  return formatDateTime(normalized) || '-';
+}
+
+function toApiBaseUrl(value?: string) {
+  const origin = String(value || '').replace(/\/+$/, '');
+  return origin ? `${origin}/v1` : '-';
+}
+
+function isHttpsOrigin(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.pathname === '/' &&
+      !url.search &&
+      !url.hash &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
 }
 
 function normalizeStatus(value: unknown) {
@@ -251,7 +318,13 @@ function statusColor(value: unknown) {
   if (['0', 'DISABLED', 'ERROR', 'FAILED', 'REVOKED'].includes(status)) {
     return 'error';
   }
-  if (['PENDING', 'SYNCING', 'UNKNOWN'].includes(status)) return 'warning';
+  if (
+    ['ACTIVATING', 'DISABLING', 'PENDING', 'SYNCING', 'UNKNOWN'].includes(
+      status,
+    )
+  ) {
+    return 'warning';
+  }
   return 'default';
 }
 
@@ -262,14 +335,20 @@ function statusText(value: unknown) {
     '0': '停用',
     '1': '启用',
     ACTIVE: '启用',
+    ACTIVATING: '启用中',
     AVAILABLE: '可用',
     DISABLED: '停用',
+    DISABLING: '停用中',
     ENABLED: '启用',
     ERROR: '异常',
     FAILED: '失败',
     PENDING: '待同步',
+    PROCESSING: '处理中',
+    PROVISIONING: '开通中',
     REVOKED: '已吊销',
+    REVOKING: '吊销中',
     SUCCESS: '成功',
+    SUCCEEDED: '成功',
     SYNCED: '已同步',
     SYNCING: '同步中',
   };
@@ -321,8 +400,49 @@ async function loadConfig() {
     hasAdminApiKey.value = Boolean(data.hasAdminApiKey);
     configured.value = Boolean(data.configured);
     configUpdateTime.value = data.updateTime;
+    loadedConfigEnabled.value = Boolean(data.enabled);
+    loadedDefaultGroupId.value = data.defaultGroupId;
   } finally {
     configLoading.value = false;
+  }
+}
+
+async function loadGroups(showFeedback = false) {
+  if (!canLoadGroups.value) {
+    groups.value = [];
+    return false;
+  }
+  groupLoading.value = true;
+  try {
+    groups.value = (await getRelayGroups()) ?? [];
+    const selectedAvailable = selectableGroups.value.some(
+      (group) => group.id === configForm.defaultGroupId,
+    );
+    if (!selectedAvailable && selectableGroups.value.length === 1) {
+      configForm.defaultGroupId = selectableGroups.value[0]!.id;
+      if (showFeedback) {
+        message.info(
+          `已选择唯一标准分组“${selectableGroups.value[0]!.name}”，请点击“保存配置”使其生效`,
+        );
+      }
+      return true;
+    }
+    if (
+      showFeedback &&
+      configForm.defaultGroupId &&
+      !selectableGroups.value.some(
+        (group) => group.id === configForm.defaultGroupId,
+      )
+    ) {
+      message.warning('已保存的默认分组当前不可用或为订阅制，请重新选择');
+    } else if (showFeedback && selectableGroups.value.length === 0) {
+      message.warning(
+        'Sub2API 中没有可直接分配的活动 OpenAI 标准分组，请先创建或启用一个标准分组',
+      );
+    }
+    return false;
+  } finally {
+    groupLoading.value = false;
   }
 }
 
@@ -331,9 +451,23 @@ async function handleSaveConfig() {
     message.warning('请填写管理端地址和对外 API 地址');
     return;
   }
+  if (
+    !isHttpsOrigin(configForm.adminBaseUrl.trim()) ||
+    !isHttpsOrigin(configForm.publicBaseUrl.trim())
+  ) {
+    message.warning(
+      '管理端地址和对外 API 地址必须是 HTTPS Origin，不能包含路径、查询或片段',
+    );
+    return;
+  }
   if (!hasAdminApiKey.value && !configForm.adminApiKey?.trim()) {
     message.warning('首次配置必须填写 Sub2API 管理员 API Key');
     return;
+  }
+  if (loadedConfigEnabled.value && !configForm.enabled) {
+    await confirm(
+      '停用后，系统会异步禁用所有 Sub2API 远端用户；再次启用配置不会自动恢复，需由管理员逐个显式启用。确认继续？',
+    );
   }
   configSaving.value = true;
   try {
@@ -344,8 +478,27 @@ async function handleSaveConfig() {
       adminApiKey: configForm.adminApiKey?.trim() || undefined,
     });
     configForm.adminApiKey = '';
-    message.success('中转站配置已保存');
     await loadConfig();
+    const autoSelected = await loadGroups();
+    if (autoSelected) {
+      await saveRelayConfig({
+        ...configForm,
+        adminApiKey: undefined,
+      });
+      await loadConfig();
+      message.success('中转站配置已保存，并已自动配置唯一 OpenAI 分组');
+    } else if (
+      configForm.defaultGroupId &&
+      selectableGroups.value.some(
+        (group) => group.id === configForm.defaultGroupId,
+      )
+    ) {
+      message.success('中转站配置已保存');
+    } else if (configForm.defaultGroupId) {
+      message.warning('连接配置已保存，但原默认分组不可用，请重新选择并保存');
+    } else {
+      message.warning('连接配置已保存，请选择默认 OpenAI 分组后再次保存');
+    }
   } finally {
     configSaving.value = false;
     configForm.adminApiKey = '';
@@ -408,7 +561,7 @@ async function handleToggleUser(row: Record<string, any>) {
   await confirm(`确认${enabled ? '停用' : '启用'}该用户的中转站访问？`);
   await updateRelayUserStatus({
     id: row.id,
-    status: enabled ? 0 : 1,
+    status: enabled ? 'disabled' : 'active',
   });
   message.success(`用户已${enabled ? '停用' : '启用'}`);
   await loadUsers();
@@ -494,13 +647,27 @@ function handleUsagePageChange(page: TablePage) {
 async function refreshAll() {
   initialLoading.value = true;
   try {
-    await Promise.allSettled([
-      loadConfig(),
-      loadStats(),
+    const [configResult] = await Promise.allSettled([loadConfig()]);
+    const refreshResults = await Promise.allSettled([
       loadUsers(),
       loadKeys(),
-      loadUsage(),
+      canLoadGroups.value ? loadGroups() : Promise.resolve(false),
     ]);
+    const groupResult = refreshResults[2];
+    if (groupResult?.status === 'fulfilled' && groupResult.value) {
+      message.warning('已识别唯一 OpenAI 标准分组；请点击“保存配置”完成生效');
+    }
+    if (
+      configResult?.status === 'fulfilled' &&
+      configured.value &&
+      configForm.enabled
+    ) {
+      await Promise.allSettled([loadStats(), loadUsage()]);
+    } else {
+      stats.value = {};
+      usageLogs.value = [];
+      usagePagination.total = 0;
+    }
   } finally {
     initialLoading.value = false;
   }
@@ -583,6 +750,7 @@ onMounted(refreshAll);
                   <div class="mt-3 flex justify-end gap-2">
                     <Button @click="activeTab = 'config'">前往配置</Button>
                     <Button
+                      v-access:code="['fdmrelay:config:test']"
                       type="primary"
                       :loading="connectionTesting"
                       @click="handleTestConnection"
@@ -656,6 +824,12 @@ onMounted(refreshAll);
               show-icon
               type="warning"
             />
+            <Alert
+              class="mb-4"
+              message="停用中转站会异步禁用全部远端用户；重新启用配置后，仍需管理员逐个显式恢复用户。"
+              show-icon
+              type="info"
+            />
             <Card :loading="configLoading" size="small">
               <Form :label-col="{ span: 7 }" :wrapper-col="{ span: 17 }">
                 <Row :gutter="16">
@@ -671,24 +845,34 @@ onMounted(refreshAll);
                       <Input
                         v-model:value="configForm.adminBaseUrl"
                         allow-clear
-                        placeholder="http://43.166.1.93:8080"
+                        placeholder="https://ai.xin1.cc"
                       />
                     </Form.Item>
                     <Form.Item label="对外 API 地址" required>
                       <Input
                         v-model:value="configForm.publicBaseUrl"
                         allow-clear
-                        placeholder="https://api.example.com/v1"
+                        placeholder="https://ai.xin1.cc"
                       />
                     </Form.Item>
                     <Form.Item label="接入模式" required>
                       <Select
                         v-model:value="configForm.mode"
                         :options="[
-                          { label: '用户 JWT（推荐）', value: 'USER_JWT' },
-                          { label: '管理员桥接', value: 'ADMIN_BRIDGE' },
+                          { label: '用户 JWT（兼容原版）', value: 'USER_JWT' },
+                          {
+                            label: '管理员桥接（需原子所有权扩展）',
+                            value: 'ADMIN_BRIDGE',
+                          },
                         ]"
                       />
+                      <div
+                        v-if="configForm.mode === 'ADMIN_BRIDGE'"
+                        class="mt-1 text-xs text-warning"
+                      >
+                        扩展必须声明并执行 atomic_owner_guard；原版 Sub2API
+                        请使用“用户 JWT”。
+                      </div>
                     </Form.Item>
                     <Form.Item
                       label="管理员 API Key"
@@ -721,12 +905,42 @@ onMounted(refreshAll);
                     </Form.Item>
                   </Col>
                   <Col :xs="24" :lg="12">
-                    <Form.Item label="默认分组 ID">
-                      <InputNumber
-                        v-model:value="configForm.defaultGroupId"
-                        class="w-full"
-                        :min="1"
-                      />
+                    <Form.Item label="默认 OpenAI 分组" required>
+                      <div class="flex gap-2">
+                        <Select
+                          v-model:value="configForm.defaultGroupId"
+                          class="min-w-0 flex-1"
+                          :disabled="!canLoadGroups"
+                          :loading="groupLoading"
+                          :options="groupOptions"
+                          placeholder="请从 Sub2API 读取分组"
+                        />
+                        <Button
+                          :disabled="!canLoadGroups"
+                          :loading="groupLoading"
+                          @click="loadGroups(true)"
+                        >
+                          刷新
+                        </Button>
+                      </div>
+                      <div class="mt-1 text-xs text-muted-foreground">
+                        读取 Sub2API 的活动 OpenAI
+                        分组；只有一个标准计费分组时自动选择，订阅制分组需另行开通订阅。
+                        <span v-if="!canLoadGroups">
+                          首次配置会先保存连接，再自动识别唯一分组。
+                        </span>
+                        <span v-else-if="!configured" class="text-warning">
+                          连接已保存，但默认分组尚未生效。
+                        </span>
+                        <span
+                          v-else-if="
+                            configForm.defaultGroupId !== loadedDefaultGroupId
+                          "
+                          class="text-warning"
+                        >
+                          当前选择尚未保存。
+                        </span>
+                      </div>
                     </Form.Item>
                     <Form.Item label="默认余额">
                       <InputNumber
@@ -788,12 +1002,14 @@ onMounted(refreshAll);
                 </Row>
                 <div class="flex flex-wrap justify-end gap-2 border-t pt-4">
                   <Button
+                    v-access:code="['fdmrelay:config:test']"
                     :loading="connectionTesting"
                     @click="handleTestConnection"
                   >
-                    测试已保存配置
+                    测试 Sub2API 连接
                   </Button>
                   <Button
+                    v-access:code="['fdmrelay:config:update']"
                     type="primary"
                     :loading="configSaving"
                     @click="handleSaveConfig"
@@ -829,11 +1045,23 @@ onMounted(refreshAll);
 
           <Tabs.TabPane key="users" tab="用户映射">
             <div class="mb-3 flex flex-wrap gap-2">
+              <InputNumber
+                v-model:value="userQuery.userId"
+                class="w-36"
+                :min="1"
+                placeholder="系统用户 ID"
+              />
+              <InputNumber
+                v-model:value="userQuery.remoteUserId"
+                class="w-36"
+                :min="1"
+                placeholder="远端用户 ID"
+              />
               <Input
-                v-model:value="userQuery.keyword"
+                v-model:value="userQuery.shadowEmail"
                 allow-clear
-                class="w-64"
-                placeholder="用户名、昵称、邮箱"
+                class="w-56"
+                placeholder="影子邮箱"
                 @press-enter="loadUsers(true)"
               />
               <Select
@@ -842,9 +1070,11 @@ onMounted(refreshAll);
                 class="w-36"
                 placeholder="开通状态"
                 :options="[
-                  { label: '已同步', value: 'SYNCED' },
-                  { label: '待同步', value: 'PENDING' },
-                  { label: '同步失败', value: 'FAILED' },
+                  { label: '已开通', value: 'ACTIVE' },
+                  { label: '启用中', value: 'ACTIVATING' },
+                  { label: '开通中', value: 'PROVISIONING' },
+                  { label: '异常', value: 'ERROR' },
+                  { label: '已吊销', value: 'REVOKED' },
                 ]"
               />
               <Select
@@ -853,15 +1083,17 @@ onMounted(refreshAll);
                 class="w-32"
                 placeholder="远端状态"
                 :options="[
-                  { label: '启用', value: 'ACTIVE' },
-                  { label: '停用', value: 'DISABLED' },
+                  { label: '启用', value: 'active' },
+                  { label: '停用', value: 'disabled' },
                 ]"
               />
               <Button type="primary" @click="loadUsers(true)">查询</Button>
               <Button
                 @click="
                   Object.assign(userQuery, {
-                    keyword: '',
+                    userId: undefined,
+                    remoteUserId: undefined,
+                    shadowEmail: '',
                     provisionStatus: undefined,
                     remoteStatus: undefined,
                   });
@@ -891,9 +1123,8 @@ onMounted(refreshAll);
                     }}
                   </div>
                   <div class="text-xs text-muted-foreground">
-                    ID {{ record.userId
-                    }}<span v-if="record.username">
-                      · {{ record.username }}</span>
+                    <span>ID {{ record.userId }}</span>
+                    <span v-if="record.username"> · {{ record.username }}</span>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'mapping'">
@@ -947,15 +1178,31 @@ onMounted(refreshAll);
                         label: '同步',
                         type: 'link',
                         auth: ['fdmrelay:user:sync'],
+                        disabled: [
+                          'ACTIVATING',
+                          'DISABLING',
+                          'PROVISIONING',
+                        ].includes(normalizeStatus(record.provisionStatus)),
                         onClick: handleSyncUser.bind(null, record),
                       },
                       {
-                        label: isEnabledStatus(record.remoteStatus)
-                          ? '停用'
-                          : '启用',
+                        label:
+                          normalizeStatus(record.provisionStatus) ===
+                          'ACTIVATING'
+                            ? '重试启用'
+                            : isEnabledStatus(record.remoteStatus)
+                              ? '停用'
+                              : '启用',
                         type: 'link',
                         danger: isEnabledStatus(record.remoteStatus),
                         auth: ['fdmrelay:user:update-status'],
+                        disabled:
+                          record.remoteUserId == null ||
+                          ['DISABLING', 'PROVISIONING'].includes(
+                            normalizeStatus(record.provisionStatus),
+                          ) ||
+                          (!isEnabledStatus(record.remoteStatus) &&
+                            !configForm.enabled),
                         onClick: handleToggleUser.bind(null, record),
                       },
                     ]"
@@ -974,10 +1221,10 @@ onMounted(refreshAll);
             />
             <div class="mb-3 flex flex-wrap gap-2">
               <Input
-                v-model:value="keyQuery.keyword"
+                v-model:value="keyQuery.name"
                 allow-clear
                 class="w-60"
-                placeholder="密钥名称、用户"
+                placeholder="密钥名称"
                 @press-enter="loadKeys(true)"
               />
               <InputNumber
@@ -992,16 +1239,16 @@ onMounted(refreshAll);
                 class="w-32"
                 placeholder="状态"
                 :options="[
-                  { label: '启用', value: 'ACTIVE' },
-                  { label: '停用', value: 'DISABLED' },
-                  { label: '已吊销', value: 'REVOKED' },
+                  { label: '启用', value: 'active' },
+                  { label: '停用', value: 'disabled' },
+                  { label: '已吊销', value: 'revoked' },
                 ]"
               />
               <Button type="primary" @click="loadKeys(true)">查询</Button>
               <Button
                 @click="
                   Object.assign(keyQuery, {
-                    keyword: '',
+                    name: '',
                     status: undefined,
                     userId: undefined,
                   });
@@ -1079,7 +1326,11 @@ onMounted(refreshAll);
                         label: '轮换',
                         type: 'link',
                         auth: ['fdmrelay:api-key:rotate'],
-                        disabled: normalizeStatus(record.status) === 'REVOKED',
+                        disabled:
+                          !configForm.enabled ||
+                          ['REVOKED', 'EXPIRED'].includes(
+                            normalizeStatus(record.status),
+                          ),
                         onClick: handleRotateKey.bind(null, record),
                       },
                       {
@@ -1099,29 +1350,26 @@ onMounted(refreshAll);
 
           <Tabs.TabPane key="usage" tab="用量明细">
             <div class="mb-3 flex flex-wrap gap-2">
-              <Input
-                v-model:value="usageQuery.keyword"
+              <InputNumber
+                v-model:value="usageQuery.userId"
+                class="w-36"
+                :min="1"
+                placeholder="用户 ID"
+              />
+              <Select
+                v-model:value="usageQuery.apiKeyId"
                 allow-clear
-                class="w-56"
-                placeholder="用户、Key、请求 ID"
-                @press-enter="loadUsage(true)"
+                class="w-64"
+                option-filter-prop="label"
+                :options="keyFilterOptions"
+                placeholder="选择 API Key"
+                show-search
               />
               <Input
                 v-model:value="usageQuery.model"
                 allow-clear
                 class="w-44"
                 placeholder="模型"
-              />
-              <Select
-                v-model:value="usageQuery.statusCode"
-                allow-clear
-                class="w-32"
-                placeholder="状态码"
-                :options="[
-                  { label: '2xx', value: 200 },
-                  { label: '4xx', value: 400 },
-                  { label: '5xx', value: 500 },
-                ]"
               />
               <DatePicker.RangePicker
                 v-model:value="usageQuery.createTime"
@@ -1131,9 +1379,9 @@ onMounted(refreshAll);
               <Button
                 @click="
                   Object.assign(usageQuery, {
-                    keyword: '',
+                    userId: undefined,
+                    apiKeyId: undefined,
                     model: '',
-                    statusCode: undefined,
                     createTime: undefined,
                   });
                   loadUsage(true);
@@ -1182,12 +1430,10 @@ onMounted(refreshAll);
                   }}
                 </template>
                 <template v-else-if="column.key === 'inputTokens'">
-                  {{ formatNumber(record.inputTokens ?? record.promptTokens) }}
+                  {{ formatNumber(record.promptTokens) }}
                 </template>
                 <template v-else-if="column.key === 'outputTokens'">
-                  {{
-                    formatNumber(record.outputTokens ?? record.completionTokens)
-                  }}
+                  {{ formatNumber(record.completionTokens) }}
                 </template>
                 <template v-else-if="column.key === 'totalTokens'">
                   {{ formatNumber(record.totalTokens) }}
@@ -1246,7 +1492,7 @@ onMounted(refreshAll);
       </Input.Group>
       <div v-if="secretResult?.publicBaseUrl" class="mt-3 text-sm">
         API 地址：<span class="break-all font-mono">{{
-          secretResult.publicBaseUrl
+          toApiBaseUrl(secretResult.publicBaseUrl)
         }}</span>
       </div>
       <div class="mt-5 flex flex-wrap items-center justify-between gap-3">

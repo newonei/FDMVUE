@@ -4,6 +4,7 @@ import { requestClient } from '#/api/request';
 
 export namespace FdmRelayApi {
   export type ConfigMode = 'ADMIN_BRIDGE' | 'USER_JWT';
+  export type DateTimeValue = number | string;
 
   export interface Config {
     id?: number;
@@ -24,7 +25,7 @@ export namespace FdmRelayApi {
     defaultRateLimit5h?: number;
     defaultRateLimit1d?: number;
     defaultRateLimit7d?: number;
-    updateTime?: string;
+    updateTime?: DateTimeValue;
   }
 
   /** 管理员 API Key 仅允许写入，任何查询响应都不包含该字段。 */
@@ -52,7 +53,15 @@ export namespace FdmRelayApi {
     message?: string;
     latencyMillis?: number;
     version?: string;
-    testTime?: string;
+    testTime?: DateTimeValue;
+  }
+
+  export interface Group {
+    id: number;
+    name: string;
+    platform: string;
+    status: string;
+    subscriptionType: string;
   }
 
   export interface UserBinding {
@@ -70,14 +79,22 @@ export namespace FdmRelayApi {
     usedBalance?: number;
     concurrency?: number;
     rpmLimit?: number;
-    lastSyncTime?: string;
+    lastSyncTime?: DateTimeValue;
     lastErrorCode?: string;
-    createTime?: string;
+    createTime?: DateTimeValue;
+  }
+
+  export interface UserBindingPageRequest extends PageParam {
+    userId?: number;
+    remoteUserId?: number;
+    shadowEmail?: string;
+    remoteStatus?: string;
+    provisionStatus?: string;
   }
 
   export interface UserStatusUpdateRequest {
     id: number;
-    status: number | string;
+    status: 'active' | 'disabled';
   }
 
   export interface ApiKey {
@@ -98,16 +115,32 @@ export namespace FdmRelayApi {
     rateLimit5h?: number;
     rateLimit1d?: number;
     rateLimit7d?: number;
-    expiresAt?: string;
-    lastUsedAt?: string;
+    expiresAt?: DateTimeValue;
+    lastUsedAt?: DateTimeValue;
     provisionStatus?: number | string;
-    lastSyncTime?: string;
+    lastSyncTime?: DateTimeValue;
     lastErrorCode?: string;
-    createTime?: string;
+    createTime?: DateTimeValue;
+  }
+
+  export interface ApiKeyPageRequest extends PageParam {
+    userId?: number;
+    remoteKeyId?: number;
+    name?: string;
+    status?: string;
+    groupId?: number;
+    provisionStatus?: string;
+  }
+
+  export interface MyApiKeyPageRequest extends PageParam {
+    name?: string;
+    status?: string;
+    groupId?: number;
+    provisionStatus?: string;
   }
 
   export interface MyApiKeyCreateRequest {
-    requestId?: string;
+    requestId: string;
     name: string;
     groupId?: number;
     quota?: number;
@@ -123,6 +156,7 @@ export namespace FdmRelayApi {
     /** 只在创建或轮换成功的本次响应中返回。 */
     apiKey: string;
     publicBaseUrl?: string;
+    operationId?: string;
   }
 
   export interface UsageStats {
@@ -137,6 +171,7 @@ export namespace FdmRelayApi {
     outputTokens?: number;
     totalTokens?: number;
     totalCost?: number;
+    balance?: number;
     quota?: number;
     usedQuota?: number;
     remainingQuota?: number;
@@ -169,9 +204,16 @@ export namespace FdmRelayApi {
     status?: number | string;
     statusCode?: number;
     errorMessage?: string;
-    requestTime?: string;
-    createdAt?: string;
-    createTime?: string;
+    requestTime?: DateTimeValue;
+    createdAt?: DateTimeValue;
+    createTime?: DateTimeValue;
+  }
+
+  export interface UsagePageRequest extends PageParam {
+    userId?: number;
+    apiKeyId?: number;
+    model?: string;
+    createTime?: [string, string];
   }
 
   export interface PublicModel {
@@ -209,7 +251,11 @@ export function testRelayConnection() {
   );
 }
 
-export function getRelayUserPage(params: PageParam & Record<string, unknown>) {
+export function getRelayGroups() {
+  return requestClient.get<FdmRelayApi.Group[]>('/fdmrelay/config/groups');
+}
+
+export function getRelayUserPage(params: FdmRelayApi.UserBindingPageRequest) {
   return requestClient.get<PageResult<FdmRelayApi.UserBinding>>(
     '/fdmrelay/user/page',
     { params },
@@ -226,9 +272,7 @@ export function updateRelayUserStatus(
   return requestClient.put<boolean>('/fdmrelay/user/update-status', data);
 }
 
-export function getRelayApiKeyPage(
-  params: PageParam & Record<string, unknown>,
-) {
+export function getRelayApiKeyPage(params: FdmRelayApi.ApiKeyPageRequest) {
   return requestClient.get<PageResult<FdmRelayApi.ApiKey>>(
     '/fdmrelay/api-key/page',
     { params },
@@ -247,9 +291,7 @@ export function revokeRelayApiKey(id: number) {
   );
 }
 
-export function getMyRelayApiKeyPage(
-  params: PageParam & Record<string, unknown>,
-) {
+export function getMyRelayApiKeyPage(params: FdmRelayApi.MyApiKeyPageRequest) {
   return requestClient.get<PageResult<FdmRelayApi.ApiKey>>(
     '/fdmrelay/api-key/my-page',
     { params },
@@ -279,7 +321,7 @@ export function getRelayUsageStats(params?: Record<string, unknown>) {
   });
 }
 
-export function getRelayUsagePage(params: PageParam & Record<string, unknown>) {
+export function getRelayUsagePage(params: FdmRelayApi.UsagePageRequest) {
   return requestClient.get<PageResult<FdmRelayApi.UsageLog>>(
     '/fdmrelay/usage/page',
     { params },
@@ -293,9 +335,7 @@ export function getMyRelayUsageSummary(params?: Record<string, unknown>) {
   );
 }
 
-export function getMyRelayUsagePage(
-  params: PageParam & Record<string, unknown>,
-) {
+export function getMyRelayUsagePage(params: FdmRelayApi.UsagePageRequest) {
   return requestClient.get<PageResult<FdmRelayApi.UsageLog>>(
     '/fdmrelay/usage/my-page',
     { params },
