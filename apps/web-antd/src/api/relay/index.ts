@@ -107,6 +107,7 @@ export namespace FdmRelayApi {
   }
 
   export interface MyApiKeyCreateRequest {
+    requestId?: string;
     name: string;
     groupId?: number;
     quota?: number;

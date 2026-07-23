@@ -76,7 +76,7 @@ const usageLogs = ref<FdmRelayApi.UsageLog[]>([]);
 const usageQuery = reactive({
   model: '',
   statusCode: undefined as number | undefined,
-  createTime: [] as string[],
+  createTime: undefined as [string, string] | undefined,
 });
 const usagePagination = reactive({
   current: 1,
@@ -88,6 +88,7 @@ const usagePagination = reactive({
 
 const createModalOpen = ref(false);
 const createSubmitting = ref(false);
+const createRequestId = ref('');
 const createForm = reactive({
   name: '',
   expiresInDays: undefined as number | undefined,
@@ -229,7 +230,7 @@ function statusText(value: unknown) {
   );
 }
 
-function maskedKey(row: FdmRelayApi.ApiKey) {
+function maskedKey(row: Record<string, any>) {
   if (row.maskedKey) return row.maskedKey;
   if (row.keyPrefix || row.keyLast4) {
     return `${row.keyPrefix || 'sk-'}••••••••${row.keyLast4 || ''}`;
@@ -251,6 +252,13 @@ function splitIpLines(value: string) {
         .filter(Boolean),
     ),
   );
+}
+
+function newRequestId() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `relay-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 async function copyText(value: string, label: string) {
@@ -309,6 +317,7 @@ function handleKeyPageChange(page: TablePage) {
 }
 
 function openCreateModal() {
+  createRequestId.value = newRequestId();
   Object.assign(createForm, {
     name: '',
     expiresInDays: undefined,
@@ -335,6 +344,7 @@ async function handleCreateKey() {
     const ipWhitelist = splitIpLines(createForm.ipWhitelistText);
     const ipBlacklist = splitIpLines(createForm.ipBlacklistText);
     const result = await createMyRelayApiKey({
+      requestId: createRequestId.value,
       name,
       expiresInDays: createForm.expiresInDays,
       ipWhitelist: ipWhitelist.length > 0 ? ipWhitelist : undefined,
@@ -348,14 +358,14 @@ async function handleCreateKey() {
   }
 }
 
-async function handleRotateKey(row: FdmRelayApi.ApiKey) {
+async function handleRotateKey(row: Record<string, any>) {
   await confirm(`确认轮换密钥“${row.name}”？旧密钥将按后端策略失效。`);
   const result = await rotateMyRelayApiKey(row.id);
   showSecret(result);
   await loadKeys();
 }
 
-async function handleRevokeKey(row: FdmRelayApi.ApiKey) {
+async function handleRevokeKey(row: Record<string, any>) {
   await confirm(`确认吊销密钥“${row.name}”？吊销后无法恢复。`);
   await revokeMyRelayApiKey(row.id);
   message.success('密钥已吊销');
@@ -531,8 +541,8 @@ onMounted(refreshAll);
               <template #emptyText>
                 <Empty description="还没有 API Key">
                   <Button type="primary" @click="openCreateModal">
-立即创建
-</Button>
+                    立即创建
+                  </Button>
                 </Empty>
               </template>
               <template #bodyCell="{ column, record }">
@@ -541,10 +551,8 @@ onMounted(refreshAll);
                 </template>
                 <template v-else-if="column.key === 'status'">
                   <Tag :color="statusColor(record.status)">
-{{
-                    statusText(record.status)
-                  }}
-</Tag>
+                    {{ statusText(record.status) }}
+                  </Tag>
                 </template>
                 <template v-else-if="column.key === 'quota'">
                   <div>
@@ -628,7 +636,7 @@ onMounted(refreshAll);
                   Object.assign(usageQuery, {
                     model: '',
                     statusCode: undefined,
-                    createTime: [],
+                    createTime: undefined,
                   });
                   loadUsage(true);
                 "
@@ -643,7 +651,9 @@ onMounted(refreshAll);
               :pagination="usagePagination"
               :row-key="
                 (row: FdmRelayApi.UsageLog) =>
-                  row.id || row.requestId || row.createdAt
+                  String(
+                    row.id ?? row.requestId ?? `${row.userId}-${row.createdAt}`,
+                  )
               "
               :scroll="{ x: 1550 }"
               size="middle"
@@ -715,8 +725,8 @@ onMounted(refreshAll);
                       @click="copyText(apiBaseUrl, 'API 地址')"
                     >
                       <template #icon>
-<IconifyIcon icon="lucide:copy" />
-</template>
+                        <IconifyIcon icon="lucide:copy" />
+                      </template>
                       复制
                     </Button>
                   </div>
@@ -746,7 +756,9 @@ onMounted(refreshAll);
             <Card class="mt-4" size="small" title="认证方式">
               <p class="text-sm text-muted-foreground">
                 在请求头中设置
-                <code class="rounded bg-muted px-1 py-0.5">Authorization: Bearer &lt;YOUR_API_KEY&gt;</code>。 请勿把 API Key 提交到公开仓库或发送给他人。
+                <code class="rounded bg-muted px-1 py-0.5"
+                  >Authorization: Bearer &lt;YOUR_API_KEY&gt;</code
+                >。 请勿把 API Key 提交到公开仓库或发送给他人。
               </p>
             </Card>
 
@@ -856,8 +868,8 @@ onMounted(refreshAll);
       </div>
       <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
         <Checkbox v-model:checked="secretAcknowledged">
-我已安全保存此 Key
-</Checkbox>
+          我已安全保存此 Key
+        </Checkbox>
         <Button
           type="primary"
           :disabled="!secretAcknowledged"

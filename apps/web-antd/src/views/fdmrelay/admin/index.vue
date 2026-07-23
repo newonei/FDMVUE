@@ -122,7 +122,7 @@ const usageQuery = reactive({
   keyword: '',
   model: '',
   statusCode: undefined as number | undefined,
-  createTime: [] as string[],
+  createTime: undefined as [string, string] | undefined,
 });
 const usagePagination = reactive({
   current: 1,
@@ -282,7 +282,7 @@ function isEnabledStatus(value: unknown) {
   );
 }
 
-function maskedKey(row: FdmRelayApi.ApiKey) {
+function maskedKey(row: Record<string, any>) {
   if (row.maskedKey) return row.maskedKey;
   if (row.keyPrefix || row.keyLast4) {
     return `${row.keyPrefix || 'sk-'}••••••••${row.keyLast4 || ''}`;
@@ -397,13 +397,13 @@ function handleUserPageChange(page: TablePage) {
   void loadUsers();
 }
 
-async function handleSyncUser(row: FdmRelayApi.UserBinding) {
+async function handleSyncUser(row: Record<string, any>) {
   await syncRelayUser(row.id);
   message.success('用户同步完成');
   await Promise.all([loadUsers(), loadStats()]);
 }
 
-async function handleToggleUser(row: FdmRelayApi.UserBinding) {
+async function handleToggleUser(row: Record<string, any>) {
   const enabled = isEnabledStatus(row.remoteStatus);
   await confirm(`确认${enabled ? '停用' : '启用'}该用户的中转站访问？`);
   await updateRelayUserStatus({
@@ -442,14 +442,14 @@ function showSecret(result: FdmRelayApi.ApiKeySecretResult) {
   secretModalOpen.value = true;
 }
 
-async function handleRotateKey(row: FdmRelayApi.ApiKey) {
+async function handleRotateKey(row: Record<string, any>) {
   await confirm(`确认轮换密钥“${row.name}”？旧密钥将按后端策略失效。`);
   const result = await rotateRelayApiKey(row.id);
   showSecret(result);
   await loadKeys();
 }
 
-async function handleRevokeKey(row: FdmRelayApi.ApiKey) {
+async function handleRevokeKey(row: Record<string, any>) {
   await confirm(`确认吊销密钥“${row.name}”？吊销后无法恢复。`);
   await revokeRelayApiKey(row.id);
   message.success('密钥已吊销');
@@ -599,9 +599,7 @@ onMounted(refreshAll);
                       <div class="mb-2 flex justify-between text-sm">
                         <span>额度使用</span>
                         <span>
-                          {{
-                            formatNumber(stats.quotaUsed ?? stats.usedQuota)
-                          }}
+                          {{ formatNumber(stats.quotaUsed ?? stats.usedQuota) }}
                           /
                           {{
                             formatNumber(
@@ -895,7 +893,8 @@ onMounted(refreshAll);
                   <div class="text-xs text-muted-foreground">
                     ID {{ record.userId
                     }}<span v-if="record.username">
-                      · {{ record.username }}</span>
+                      · {{ record.username }}</span
+                    >
                   </div>
                 </template>
                 <template v-else-if="column.key === 'mapping'">
@@ -1041,10 +1040,8 @@ onMounted(refreshAll);
                 </template>
                 <template v-else-if="column.key === 'status'">
                   <Tag :color="statusColor(record.status)">
-{{
-                    statusText(record.status)
-                  }}
-</Tag>
+                    {{ statusText(record.status) }}
+                  </Tag>
                 </template>
                 <template v-else-if="column.key === 'group'">
                   {{ record.groupName || record.groupId || '-' }}
@@ -1138,7 +1135,7 @@ onMounted(refreshAll);
                     keyword: '',
                     model: '',
                     statusCode: undefined,
-                    createTime: [],
+                    createTime: undefined,
                   });
                   loadUsage(true);
                 "
@@ -1153,7 +1150,9 @@ onMounted(refreshAll);
               :pagination="usagePagination"
               :row-key="
                 (row: FdmRelayApi.UsageLog) =>
-                  row.id || row.requestId || row.createdAt
+                  String(
+                    row.id ?? row.requestId ?? `${row.userId}-${row.createdAt}`,
+                  )
               "
               :scroll="{ x: 1700 }"
               size="middle"
@@ -1253,8 +1252,8 @@ onMounted(refreshAll);
       </div>
       <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
         <Checkbox v-model:checked="secretAcknowledged">
-我已安全保存此 Key
-</Checkbox>
+          我已安全保存此 Key
+        </Checkbox>
         <Button
           type="primary"
           :disabled="!secretAcknowledged"
