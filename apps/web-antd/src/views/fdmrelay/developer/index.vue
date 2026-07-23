@@ -244,14 +244,14 @@ function quotaPercent(used?: number, total?: number) {
 }
 
 function splitIpLines(value: string) {
-  return Array.from(
-    new Set(
+  return [
+    ...new Set(
       value
         .split(/[\n,，;；]+/)
         .map((item) => item.trim())
         .filter(Boolean),
     ),
-  );
+  ];
 }
 
 function newRequestId() {
@@ -756,9 +756,7 @@ onMounted(refreshAll);
             <Card class="mt-4" size="small" title="认证方式">
               <p class="text-sm text-muted-foreground">
                 在请求头中设置
-                <code class="rounded bg-muted px-1 py-0.5"
-                  >Authorization: Bearer &lt;YOUR_API_KEY&gt;</code
-                >。 请勿把 API Key 提交到公开仓库或发送给他人。
+                <code class="rounded bg-muted px-1 py-0.5">Authorization: Bearer &lt;YOUR_API_KEY&gt;</code>。 请勿把 API Key 提交到公开仓库或发送给他人。
               </p>
             </Card>
 

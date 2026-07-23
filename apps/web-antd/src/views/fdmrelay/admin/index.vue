@@ -893,8 +893,7 @@ onMounted(refreshAll);
                   <div class="text-xs text-muted-foreground">
                     ID {{ record.userId
                     }}<span v-if="record.username">
-                      · {{ record.username }}</span
-                    >
+                      · {{ record.username }}</span>
                   </div>
                 </template>
                 <template v-else-if="column.key === 'mapping'">
