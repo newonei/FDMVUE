@@ -21,6 +21,13 @@ export namespace FdmdataExtensionReleaseApi {
     createTime?: string;
     updateTime?: string;
   }
+
+  export interface PackageUploadResp {
+    url: string;
+    fileName: string;
+    sha256: string;
+    size: number;
+  }
 }
 
 export function getExtensionReleasePage(params: PageParam) {
@@ -39,6 +46,14 @@ export function createExtensionRelease(
   data: FdmdataExtensionReleaseApi.ExtensionRelease,
 ) {
   return requestClient.post<number>('/fdmdata/extension-release/create', data);
+}
+
+export function uploadExtensionReleasePackage(file: File) {
+  return requestClient.upload<FdmdataExtensionReleaseApi.PackageUploadResp>(
+    '/fdmdata/extension-release/upload-package',
+    { file },
+    { timeout: 5 * 60 * 1000 },
+  );
 }
 
 export function updateExtensionRelease(
