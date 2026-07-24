@@ -137,3 +137,14 @@ export function exportEcInvoiceApplyEtaxExcel(ids: number[]) {
     method: 'POST',
   });
 }
+
+export function downloadEcInvoiceApplyPdfZip(ids: number[]) {
+  return requestClient.download(
+    '/fdmdata/ecinvoiceapply/download-invoice-pdfs',
+    {
+      data: { ids },
+      method: 'POST',
+      timeout: 5 * 60 * 1000,
+    },
+  );
+}

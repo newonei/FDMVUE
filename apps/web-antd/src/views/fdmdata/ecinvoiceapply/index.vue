@@ -9,10 +9,12 @@ import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button, message } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   deleteEcInvoiceApply,
+  downloadEcInvoiceApplyPdfZip,
   exportEcInvoiceApplyEtaxExcel,
   getEcInvoiceApplyPage,
   uploadEcInvoiceApplyPdf,
@@ -27,9 +29,17 @@ defineOptions({ name: 'EcInvoiceApply' });
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
 const selectedRows = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply[]>([]);
 const exportLoading = ref(false);
+const attachmentDownloadLoading = ref(false);
 const uploadingInvoiceIds = ref<Set<number>>(new Set());
 
 const MAX_INVOICE_PDF_SIZE = 20 * 1024 * 1024;
+const MAX_BATCH_ATTACHMENT_COUNT = 100;
+
+const selectedAttachmentRows = computed(() =>
+  selectedRows.value.filter(
+    (row) => typeof row.id === 'number' && Boolean(row.invoiceFileUrl?.trim()),
+  ),
+);
 
 const selectedCompanyNames = computed(() =>
   selectedRows.value.map((row) => row.shopCompanyName?.trim() ?? ''),
@@ -73,7 +83,6 @@ function handleRowCheckboxChange({
   records: FdmdataEcInvoiceApplyApi.EcInvoiceApply[];
 }) {
   selectedRows.value = [...records];
-  if (selectedRows.value.length > 0) validateSelectedRows(true);
 }
 
 function handleCreate() {
@@ -171,6 +180,41 @@ function handleDownloadInvoicePdf(
   link.remove();
 }
 
+async function handleBatchDownloadInvoicePdfs() {
+  if (selectedRows.value.length === 0) {
+    message.warning('请先勾选需要下载附件的申请记录');
+    return;
+  }
+  if (selectedAttachmentRows.value.length === 0) {
+    message.warning('所选记录均未上传发票附件');
+    return;
+  }
+  if (selectedAttachmentRows.value.length > MAX_BATCH_ATTACHMENT_COUNT) {
+    message.warning(`单次最多下载 ${MAX_BATCH_ATTACHMENT_COUNT} 个发票附件`);
+    return;
+  }
+
+  const ids = selectedAttachmentRows.value.map((row) => row.id as number);
+  const skippedCount = selectedRows.value.length - ids.length;
+  attachmentDownloadLoading.value = true;
+  try {
+    const data = await downloadEcInvoiceApplyPdfZip(ids);
+    downloadFileFromBlobPart({
+      fileName: `电商发票附件-${dayjs().format('YYYYMMDDHHmmss')}.zip`,
+      source: data,
+    });
+    if (skippedCount > 0) {
+      message.warning(
+        `已下载 ${ids.length} 个附件，另有 ${skippedCount} 条记录尚未上传附件，已跳过`,
+      );
+    } else {
+      message.success(`已打包下载 ${ids.length} 个发票附件`);
+    }
+  } finally {
+    attachmentDownloadLoading.value = false;
+  }
+}
+
 async function handleDelete(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
   if (!row.id) return;
   try {
@@ -263,6 +307,16 @@ const [Grid, gridApi] = useVbenVxeGrid({
           </p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            :disabled="selectedRows.length === 0"
+            :loading="attachmentDownloadLoading"
+            @click="handleBatchDownloadInvoicePdfs"
+          >
+            <template #icon>
+              <IconifyIcon icon="lucide:files" />
+            </template>
+            批量下载附件（{{ selectedAttachmentRows.length }}）
+          </Button>
           <Button
             :disabled="!canExport"
             :loading="exportLoading"
