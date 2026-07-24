@@ -405,6 +405,7 @@ export namespace JixiaoApi {
     bossUserId?: number;
     bossUserName?: string;
     detailUrlPrefix?: string;
+    dingtalkTaskReminderEnabled?: boolean;
     dingtalkTodoEnabled?: boolean;
     generalManagerUserId?: number;
     generalManagerUserName?: string;

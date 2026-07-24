@@ -26,6 +26,7 @@ const users = ref<SystemUserApi.User[]>([]);
 const form = reactive<JixiaoApi.Setting>({
   bossUserId: undefined,
   detailUrlPrefix: '',
+  dingtalkTaskReminderEnabled: true,
   dingtalkTodoEnabled: false,
   generalManagerUserId: undefined,
   hrUserIds: [],
@@ -49,6 +50,7 @@ async function load() {
     Object.assign(form, {
       bossUserId: setting.bossUserId,
       detailUrlPrefix: setting.detailUrlPrefix,
+      dingtalkTaskReminderEnabled: setting.dingtalkTaskReminderEnabled ?? true,
       dingtalkTodoEnabled: setting.dingtalkTodoEnabled,
       generalManagerUserId: setting.generalManagerUserId,
       hrUserIds: setting.hrUserIds || [],
@@ -101,9 +103,14 @@ onMounted(load);
             />
           </Form.Item>
         </div>
-        <Form.Item label="钉钉 C 级复盘待办">
-          <Switch v-model:checked="form.dingtalkTodoEnabled" />
-        </Form.Item>
+        <div class="form-grid">
+          <Form.Item label="钉钉流程节点提醒">
+            <Switch v-model:checked="form.dingtalkTaskReminderEnabled" />
+          </Form.Item>
+          <Form.Item label="钉钉行动计划与复盘待办">
+            <Switch v-model:checked="form.dingtalkTodoEnabled" />
+          </Form.Item>
+        </div>
         <Form.Item label="绩效详情 URL 前缀">
           <Input
             v-model:value="form.detailUrlPrefix"
@@ -112,8 +119,8 @@ onMounted(load);
         </Form.Item>
         <Space>
           <Button :loading="loading" type="primary" @click="submit">
-保存设置
-</Button>
+            保存设置
+          </Button>
         </Space>
       </Form>
     </div>

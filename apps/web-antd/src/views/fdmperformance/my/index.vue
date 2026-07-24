@@ -61,6 +61,7 @@ const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
 });
 
 const instanceColumns: TableColumnsType = [
+  { dataIndex: 'userName', title: '被考核人', width: 140 },
   { dataIndex: 'currentTaskName', title: '当前节点', width: 160 },
   { dataIndex: 'periodKey', title: '考核周期', width: 130 },
   { dataIndex: 'supervisorUserName', title: '主管', width: 150 },
