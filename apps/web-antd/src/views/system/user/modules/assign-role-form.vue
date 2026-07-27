@@ -1,17 +1,22 @@
 <script lang="ts" setup>
+import type { FdmAuthzApi } from '#/api/fdm-authz';
 import type { SystemUserApi } from '#/api/system/user';
+
+import { ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 
-import { message } from 'ant-design-vue';
+import { Alert, message, Tag } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
-import { assignUserRole, getUserRoleList } from '#/api/system/permission';
+import { getUserRoleDetail } from '#/api/fdm-authz';
+import { assignUserRole } from '#/api/system/permission';
 import { $t } from '#/locales';
 
 import { useAssignRoleFormSchema } from '../data';
 
 const emit = defineEmits(['success']);
+const inheritedRoles = ref<FdmAuthzApi.InheritedRole[]>([]);
 const [Form, formApi] = useVbenForm({
   commonConfig: {
     componentProps: {
@@ -37,7 +42,7 @@ const [Modal, modalApi] = useVbenModal({
     try {
       await assignUserRole({
         userId: values.id,
-        roleIds: values.roleIds,
+        roleIds: values.directRoleIds ?? [],
       });
       // 关闭并提示
       await modalApi.close();
@@ -49,6 +54,7 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      inheritedRoles.value = [];
       return;
     }
     // 加载数据
@@ -58,11 +64,12 @@ const [Modal, modalApi] = useVbenModal({
     }
     modalApi.lock();
     try {
-      const roleIds = await getUserRoleList(data.id);
+      const detail = await getUserRoleDetail(data.id);
+      inheritedRoles.value = detail.inheritedRoles ?? [];
       // 设置到 values
       await formApi.setValues({
         ...data,
-        roleIds,
+        directRoleIds: detail.directRoleIds ?? [],
       });
     } finally {
       modalApi.unlock();
@@ -74,5 +81,24 @@ const [Modal, modalApi] = useVbenModal({
 <template>
   <Modal title="分配角色">
     <Form class="mx-4" />
+    <div class="mx-4 mt-4">
+      <Alert
+        class="mb-3"
+        description="继承角色由部门配置自动维护，员工调离来源部门后会自动失效，无法在这里修改。"
+        message="部门继承角色（只读）"
+        show-icon
+        type="info"
+      />
+      <div v-if="inheritedRoles.length > 0" class="flex flex-wrap gap-2">
+        <Tag
+          v-for="role in inheritedRoles"
+          :key="`${role.deptId}-${role.roleId}`"
+          color="blue"
+        >
+          {{ role.roleName }} · 来自{{ role.deptName }}
+        </Tag>
+      </div>
+      <div v-else class="text-sm text-gray-500">暂无部门继承角色</div>
+    </div>
   </Modal>
 </template>

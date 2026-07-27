@@ -14,10 +14,16 @@ import { deleteDept, deleteDeptList, getDeptList } from '#/api/system/dept';
 import { $t } from '#/locales';
 
 import { useGridColumns } from './data';
+import AssignRoleForm from './modules/assign-role-form.vue';
 import Form from './modules/form.vue';
 
 const [FormModal, formModalApi] = useVbenModal({
   connectedComponent: Form,
+  destroyOnClose: true,
+});
+
+const [AssignRoleModal, assignRoleModalApi] = useVbenModal({
+  connectedComponent: AssignRoleForm,
   destroyOnClose: true,
 });
 
@@ -46,6 +52,11 @@ function handleAppend(row: SystemDeptApi.Dept) {
 /** 编辑部门 */
 function handleEdit(row: SystemDeptApi.Dept) {
   formModalApi.setData(row).open();
+}
+
+/** 配置部门角色 */
+function handleAssignRole(row: SystemDeptApi.Dept) {
+  assignRoleModalApi.setData(row).open();
 }
 
 /** 删除部门 */
@@ -129,6 +140,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
 <template>
   <Page auto-content-height>
     <FormModal @success="handleRefresh" />
+    <AssignRoleModal @success="handleRefresh" />
     <Grid table-title="部门列表">
       <template #toolbar-tools>
         <TableAction
@@ -173,6 +185,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
               icon: ACTION_ICON.EDIT,
               auth: ['system:dept:update'],
               onClick: handleEdit.bind(null, row),
+            },
+            {
+              label: '配置角色',
+              type: 'link',
+              auth: ['system:permission:assign-user-role'],
+              onClick: handleAssignRole.bind(null, row),
             },
             {
               label: $t('common.delete'),
