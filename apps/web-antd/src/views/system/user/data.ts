@@ -218,8 +218,9 @@ export function useAssignRoleFormSchema(): VbenFormSchema[] {
       },
     },
     {
-      fieldName: 'roleIds',
-      label: '角色',
+      fieldName: 'directRoleIds',
+      help: '这里只编辑个人直接授予的角色，部门继承角色在下方只读展示。',
+      label: '个人角色',
       component: 'ApiSelect',
       componentProps: {
         api: getSimpleRoleList,
