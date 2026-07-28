@@ -1,14 +1,11 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
-import type {
-  FileType,
-  UploadFile,
-} from 'ant-design-vue/es/upload/interface';
+import type { FileType, UploadFile } from 'ant-design-vue/es/upload/interface';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemDeptApi } from '#/api/system/dept';
 
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
@@ -34,6 +31,7 @@ import {
 import {
   createIndicator,
   deleteIndicator,
+  deleteIndicatorList,
   downloadIndicatorImportTemplate,
   getIndicatorPage,
   importIndicators,
@@ -47,6 +45,7 @@ import PerformanceShell from '../shared/PerformanceShell.vue';
 defineOptions({ name: 'FdmPerformanceIndicators' });
 
 const loading = ref(false);
+const batchDeleting = ref(false);
 const deptLoading = ref(false);
 const drawerOpen = ref(false);
 const importOpen = ref(false);
@@ -58,6 +57,7 @@ const rows = ref<JixiaoApi.Indicator[]>([]);
 const deptTreeOptions = ref<SystemDeptApi.Dept[]>([]);
 const deptNameMap = ref<Record<number, string>>({});
 const total = ref(0);
+const selectedIndicatorIds = ref<number[]>([]);
 
 const query = reactive({
   deptId: undefined as number | undefined,
@@ -94,6 +94,16 @@ const columns: TableColumnsType = [
   { dataIndex: 'status', title: '状态', width: 90 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 150 },
 ];
+
+const rowSelection = computed(() => ({
+  preserveSelectedRowKeys: true,
+  selectedRowKeys: selectedIndicatorIds.value,
+  onChange: (keys: Array<number | string>) => {
+    selectedIndicatorIds.value = keys
+      .map(Number)
+      .filter((key) => Number.isFinite(key));
+  },
+}));
 
 function buildDeptNameMap(list: SystemDeptApi.Dept[]) {
   const map: Record<number, string> = {};
@@ -239,8 +249,34 @@ async function save() {
 async function remove(id?: number) {
   if (!id) return;
   await deleteIndicator(id);
+  selectedIndicatorIds.value = selectedIndicatorIds.value.filter(
+    (selectedId) => selectedId !== id,
+  );
   message.success('已删除');
   await load();
+}
+
+async function removeSelected() {
+  if (selectedIndicatorIds.value.length === 0) return;
+  const ids = [...selectedIndicatorIds.value];
+  batchDeleting.value = true;
+  try {
+    await deleteIndicatorList(ids);
+    selectedIndicatorIds.value = [];
+    const selectedIdSet = new Set(ids);
+    if (
+      rows.value.length > 0 &&
+      rows.value.every(
+        (row) => typeof row.id === 'number' && selectedIdSet.has(row.id),
+      )
+    ) {
+      query.pageNo = Math.max(1, query.pageNo - 1);
+    }
+    message.success(`已删除 ${ids.length} 个指标`);
+    await load();
+  } finally {
+    batchDeleting.value = false;
+  }
 }
 
 function handleTableChange(pagination: any) {
@@ -259,6 +295,30 @@ onMounted(() => {
   <PerformanceShell title="指标库">
     <template #actions>
       <Space>
+        <span v-if="selectedIndicatorIds.length" class="selected-count">
+          已选择 {{ selectedIndicatorIds.length }} 项
+        </span>
+        <Button
+          v-if="selectedIndicatorIds.length"
+          size="small"
+          type="link"
+          @click="selectedIndicatorIds = []"
+        >
+          清空
+        </Button>
+        <Popconfirm
+          :title="`确认删除选中的 ${selectedIndicatorIds.length} 个指标？已被考评表使用的指标不能删除。`"
+          @confirm="removeSelected"
+        >
+          <Button
+            danger
+            :disabled="selectedIndicatorIds.length === 0"
+            :loading="batchDeleting"
+          >
+            <IconifyIcon class="action-icon" icon="lucide:trash-2" />
+            批量删除
+          </Button>
+        </Popconfirm>
         <Button @click="openImport">
           <IconifyIcon class="action-icon" icon="lucide:file-up" />
           批量导入
@@ -302,6 +362,7 @@ onMounted(() => {
       :data-source="rows"
       :loading="loading"
       :pagination="{ current: query.pageNo, pageSize: query.pageSize, total }"
+      :row-selection="rowSelection"
       row-key="id"
       size="middle"
       @change="handleTableChange"
@@ -328,8 +389,8 @@ onMounted(() => {
         <template v-else-if="column.dataIndex === 'action'">
           <Space>
             <Button size="small" type="link" @click="openEdit(record)">
-编辑
-</Button>
+              编辑
+            </Button>
             <Popconfirm title="确认删除该指标？" @confirm="remove(record.id)">
               <Button danger size="small" type="link">删除</Button>
             </Popconfirm>
@@ -489,6 +550,11 @@ onMounted(() => {
   height: 16px;
 }
 
+.selected-count {
+  font-size: 13px;
+  color: #595959;
+}
+
 .upload-icon {
   width: 32px;
   height: 32px;
@@ -503,14 +569,14 @@ onMounted(() => {
 }
 
 .upload-title {
-  color: #1f2329;
   font-weight: 500;
+  color: #1f2329;
 }
 
 .upload-hint {
   margin-top: 4px;
-  color: #8c8c8c;
   font-size: 12px;
+  color: #8c8c8c;
 }
 
 @media (max-width: 900px) {

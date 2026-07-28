@@ -2,11 +2,14 @@
 import type { TableColumnsType } from 'ant-design-vue';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemDeptApi } from '#/api/system/dept';
+import type { SystemUserApi } from '#/api/system/user';
 
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useUserStore } from '@vben/stores';
+import { handleTree } from '@vben/utils';
 
 import {
   Button,
@@ -25,6 +28,8 @@ import {
   getInstancePage,
   getSetting,
 } from '#/api/fdmperformance';
+import { getSimpleDeptList } from '#/api/system/dept';
+import { getSimpleUserList } from '#/api/system/user';
 
 import { TASK_LABELS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -40,6 +45,8 @@ const instanceLoading = ref(false);
 const deletingInstanceId = ref<number>();
 const instances = ref<JixiaoApi.Instance[]>([]);
 const instanceTotal = ref(0);
+const users = ref<SystemUserApi.UserSimple[]>([]);
+const departments = ref<SystemDeptApi.Dept[]>([]);
 
 function currentMonthKey() {
   const now = new Date();
@@ -50,12 +57,59 @@ const instanceQuery = reactive({
   pageNo: 1,
   pageSize: 10,
   periodKey: currentMonthKey(),
+  deptId: undefined as number | undefined,
   status: undefined as number | undefined,
+  userId: undefined as number | undefined,
 });
 
-const instanceColumns: TableColumnsType = [
-  { dataIndex: 'userName', title: '被考核人', width: 140 },
-  { dataIndex: 'deptName', ellipsis: true, title: '部门', width: 160 },
+const userFilterOptions = computed(() =>
+  users.value.map((user) => ({
+    text: `${user.nickname || user.username} (${user.id})`,
+    value: user.id,
+  })),
+);
+
+interface DeptFilterOption {
+  children?: DeptFilterOption[];
+  text: string;
+  value: number;
+}
+
+const deptFilterOptions = computed(() => {
+  const toFilterOptions = (items: SystemDeptApi.Dept[]): DeptFilterOption[] =>
+    items.flatMap((item) => {
+      if (item.id === undefined) return [];
+      const children = item.children?.length
+        ? toFilterOptions(item.children)
+        : undefined;
+      return [{ children, text: item.name, value: item.id }];
+    });
+  return toFilterOptions(handleTree(departments.value) as SystemDeptApi.Dept[]);
+});
+
+const instanceColumns = computed<TableColumnsType>(() => [
+  {
+    dataIndex: 'userName',
+    filteredValue:
+      instanceQuery.userId === undefined ? null : [instanceQuery.userId],
+    filterMultiple: false,
+    filterSearch: true,
+    filters: userFilterOptions.value,
+    title: '被考核人',
+    width: 140,
+  },
+  {
+    dataIndex: 'deptName',
+    ellipsis: true,
+    filteredValue:
+      instanceQuery.deptId === undefined ? null : [instanceQuery.deptId],
+    filterMode: 'tree',
+    filterMultiple: false,
+    filterSearch: true,
+    filters: deptFilterOptions.value,
+    title: '部门',
+    width: 160,
+  },
   { dataIndex: 'currentTaskName', title: '当前流程', width: 150 },
   {
     dataIndex: 'currentTaskAssigneeUserName',
@@ -65,7 +119,7 @@ const instanceColumns: TableColumnsType = [
   { dataIndex: 'finalScore', title: '考核结果', width: 110 },
   { dataIndex: 'grade', title: '绩效等级', width: 100 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
-];
+]);
 
 function currentFlow(record: JixiaoApi.Instance) {
   if (record.status === 2) return '考核结束';
@@ -142,14 +196,32 @@ async function removeInstance(record: JixiaoApi.Instance) {
   }
 }
 
-function changeInstancePage(pagination: any) {
-  instanceQuery.pageNo = pagination.current;
+function selectedFilterId(filters: Record<string, any>, key: string) {
+  const value = filters[key]?.[0];
+  return value === undefined ? undefined : Number(value);
+}
+
+function changeInstancePage(pagination: any, filters: Record<string, any>) {
+  const userId = selectedFilterId(filters, 'userName');
+  const deptId = selectedFilterId(filters, 'deptName');
+  const filterChanged =
+    userId !== instanceQuery.userId || deptId !== instanceQuery.deptId;
+  instanceQuery.userId = userId;
+  instanceQuery.deptId = deptId;
+  instanceQuery.pageNo = filterChanged ? 1 : pagination.current;
   instanceQuery.pageSize = pagination.pageSize;
-  loadInstances();
+  void loadInstances();
 }
 
 async function initialize() {
-  const [setting] = await Promise.all([getSetting(), loadInstances()]);
+  const [setting, userList, departmentList] = await Promise.all([
+    getSetting(),
+    getSimpleUserList(),
+    getSimpleDeptList(),
+    loadInstances(),
+  ]);
+  users.value = userList;
+  departments.value = departmentList;
   const currentUserId = Number(
     userStore.userInfo?.id ?? userStore.userInfo?.userId ?? 0,
   );

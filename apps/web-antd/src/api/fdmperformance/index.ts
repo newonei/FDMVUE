@@ -234,6 +234,7 @@ export namespace JixiaoApi {
 
   export type InstancePageParams = PageParam & {
     batchId?: number;
+    deptId?: number;
     periodKey?: string;
     status?: number;
     supervisorUserId?: number;
@@ -448,6 +449,12 @@ export function updateIndicator(data: JixiaoApi.Indicator) {
 export function deleteIndicator(id: number) {
   return requestClient.delete<boolean>(
     `/fdmperformance/indicator/delete?id=${id}`,
+  );
+}
+
+export function deleteIndicatorList(ids: number[]) {
+  return requestClient.delete<boolean>(
+    `/fdmperformance/indicator/delete-list?ids=${ids.join(',')}`,
   );
 }
 
