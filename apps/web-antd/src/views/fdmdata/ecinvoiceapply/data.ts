@@ -8,6 +8,7 @@ import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 import { getEcShopDailyShopOptions } from '#/api/fdmdata/ecshopdaily';
 import { getRangePickerDefaultProps } from '#/utils';
 
+import { isInvoiceApplyLocked } from './invoice-lock';
 import { normalizeLocalDateForForm } from './local-date';
 
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
@@ -42,7 +43,16 @@ const invoiceStatusOptions = [
   { label: '已开票', value: 1 },
 ];
 
-function formatInvoiceStatus({ cellValue }: { cellValue: unknown }) {
+function formatInvoiceStatus({
+  cellValue,
+  row,
+}: {
+  cellValue: unknown;
+  row: FdmdataEcInvoiceApplyApi.EcInvoiceApply;
+}) {
+  if (isInvoiceApplyLocked(row)) {
+    return '已开票';
+  }
   if (cellValue === null || cellValue === undefined || cellValue === '') {
     return '未开票';
   }

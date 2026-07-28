@@ -16,6 +16,7 @@ import {
 import { $t } from '#/locales';
 
 import { EC_INVOICE_APPLY_DEFAULTS, useFormSchema } from '../data';
+import { isInvoiceApplyLocked } from '../invoice-lock';
 import { normalizeLocalDateForForm } from '../local-date';
 
 defineOptions({ name: 'EcInvoiceApplyForm' });
@@ -111,6 +112,11 @@ const [Modal, modalApi] = useVbenModal({
       if (mySeq !== openSeq) return;
       if (!detail) {
         message.error('电商发票申请不存在或已被删除');
+        await modalApi.close();
+        return;
+      }
+      if (isInvoiceApplyLocked(detail)) {
+        message.warning('该订单已开票，不允许修改');
         await modalApi.close();
         return;
       }

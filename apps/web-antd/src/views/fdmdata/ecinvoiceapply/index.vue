@@ -22,6 +22,7 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
+import { isInvoiceApplyLocked } from './invoice-lock';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'EcInvoiceApply' });
@@ -90,6 +91,10 @@ function handleCreate() {
 }
 
 function handleEdit(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
+  if (isInvoiceApplyLocked(row)) {
+    message.warning('该订单已开票，不允许修改');
+    return;
+  }
   formModalApi.setData(row).open();
 }
 
@@ -372,6 +377,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   label: $t('common.edit'),
                   type: 'link',
                   icon: ACTION_ICON.EDIT,
+                  disabled: isInvoiceApplyLocked(row),
+                  tooltip: isInvoiceApplyLocked(row)
+                    ? '已开票记录不能修改'
+                    : undefined,
                   auth: ['fdmdata:ecinvoiceapply:update'],
                   onClick: handleEdit.bind(null, row),
                 },
