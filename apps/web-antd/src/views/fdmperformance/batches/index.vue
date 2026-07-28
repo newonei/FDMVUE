@@ -154,9 +154,6 @@ async function initialize() {
     userStore.userInfo?.id ?? userStore.userInfo?.userId ?? 0,
   );
   isPerformanceHr.value = (setting.hrUserIds || []).includes(currentUserId);
-  if (isPerformanceHr.value) {
-    activeTab.value = 'hr-review';
-  }
 }
 
 onMounted(initialize);
@@ -165,9 +162,6 @@ onMounted(initialize);
 <template>
   <PerformanceShell title="考核管理">
     <Tabs v-model:active-key="activeTab" class="management-tabs">
-      <Tabs.TabPane v-if="isPerformanceHr" key="hr-review" tab="待人事审核">
-        <HrReviewQueue />
-      </Tabs.TabPane>
       <Tabs.TabPane key="batches" tab="月度考核">
         <div class="filter-bar">
           <DatePicker
@@ -266,6 +260,9 @@ onMounted(initialize);
             </template>
           </Table>
         </div>
+      </Tabs.TabPane>
+      <Tabs.TabPane v-if="isPerformanceHr" key="hr-review" tab="待人事审核">
+        <HrReviewQueue />
       </Tabs.TabPane>
     </Tabs>
   </PerformanceShell>

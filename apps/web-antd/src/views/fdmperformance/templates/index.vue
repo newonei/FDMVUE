@@ -63,6 +63,7 @@ const processDefinitions = ref<any[]>([]);
 const rows = ref<JixiaoApi.Template[]>([]);
 const total = ref(0);
 const query = reactive({
+  deptId: undefined as number | undefined,
   name: '',
   pageNo: 1,
   pageSize: 10,
@@ -236,6 +237,11 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function search() {
+  query.pageNo = 1;
+  void load();
 }
 
 async function loadOptions() {
@@ -464,6 +470,14 @@ onMounted(async () => {
     <div class="filter-bar">
       <Input v-model:value="query.name" allow-clear placeholder="考评表名称" />
       <Select
+        v-model:value="query.deptId"
+        allow-clear
+        :options="departmentOptions"
+        option-filter-prop="label"
+        placeholder="部门"
+        show-search
+      />
+      <Select
         v-model:value="query.periodType"
         allow-clear
         :options="PERIOD_OPTIONS"
@@ -479,7 +493,7 @@ onMounted(async () => {
         ]"
         placeholder="状态"
       />
-      <Button type="primary" @click="load">查询</Button>
+      <Button type="primary" @click="search">查询</Button>
     </div>
 
     <Table
@@ -812,7 +826,7 @@ onMounted(async () => {
 <style scoped>
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 160px 120px auto;
+  grid-template-columns: minmax(180px, 1fr) 180px 160px 120px auto;
   gap: 8px;
   padding: 12px;
   background: #fff;

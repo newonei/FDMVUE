@@ -78,6 +78,7 @@ export namespace JixiaoApi {
   }
 
   export type TemplatePageParams = PageParam & {
+    deptId?: number;
     name?: string;
     periodType?: string;
     status?: number;
