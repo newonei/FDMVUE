@@ -5,7 +5,7 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemDeptApi } from '#/api/system/dept';
 import type { SystemUserApi } from '#/api/system/user';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -40,6 +40,8 @@ import { getSimpleDeptList } from '#/api/system/dept';
 import { getSimpleUserList } from '#/api/system/user';
 
 import {
+  PERFORMANCE_DEFAULT_PAGE_SIZE,
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
   PERIOD_OPTIONS,
   SCORE_METHOD_OPTIONS,
   TEMPLATE_STATUS_MAP,
@@ -56,6 +58,10 @@ const indicatorImportCategory = ref<string>();
 const indicatorImportDeptId = ref<number>();
 const indicatorImportDimension = ref<JixiaoApi.TemplateDimension>();
 const selectedIndicatorIds = ref<number[]>([]);
+const indicatorImportPagination = reactive({
+  current: 1,
+  pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
+});
 const departments = ref<SystemDeptApi.Dept[]>([]);
 const users = ref<SystemUserApi.User[]>([]);
 const indicators = ref<JixiaoApi.Indicator[]>([]);
@@ -207,6 +213,13 @@ const importRowSelection = computed(() => ({
   },
 }));
 
+watch(
+  [indicatorImportKeyword, indicatorImportCategory, indicatorImportDeptId],
+  () => {
+    indicatorImportPagination.current = 1;
+  },
+);
+
 const columns: TableColumnsType = [
   { dataIndex: 'name', title: '考评表名称' },
   { dataIndex: 'periodType', title: '周期', width: 120 },
@@ -336,6 +349,7 @@ function openIndicatorImport(dimension: JixiaoApi.TemplateDimension) {
   indicatorImportKeyword.value = '';
   indicatorImportCategory.value = undefined;
   indicatorImportDeptId.value = undefined;
+  indicatorImportPagination.current = 1;
   selectedIndicatorIds.value = [];
   indicatorImportOpen.value = true;
 }
@@ -450,9 +464,17 @@ async function remove(id?: number) {
 }
 
 function handleTableChange(pagination: any) {
-  query.pageNo = pagination.current;
+  const pageSizeChanged = query.pageSize !== pagination.pageSize;
+  query.pageNo = pageSizeChanged ? 1 : pagination.current;
   query.pageSize = pagination.pageSize;
-  load();
+  void load();
+}
+
+function handleIndicatorImportTableChange(pagination: any) {
+  const pageSizeChanged =
+    indicatorImportPagination.pageSize !== pagination.pageSize;
+  indicatorImportPagination.current = pageSizeChanged ? 1 : pagination.current;
+  indicatorImportPagination.pageSize = pagination.pageSize;
 }
 
 onMounted(async () => {
@@ -504,6 +526,8 @@ onMounted(async () => {
       :pagination="{
         current: query.pageNo,
         pageSize: query.pageSize,
+        pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
         size: 'small',
         total,
       }"
@@ -784,11 +808,17 @@ onMounted(async () => {
           <Table
             :columns="indicatorImportColumns"
             :data-source="indicatorImportRows"
-            :pagination="{ pageSize: 8, showSizeChanger: false }"
+            :pagination="{
+              current: indicatorImportPagination.current,
+              pageSize: indicatorImportPagination.pageSize,
+              pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+              showSizeChanger: true,
+            }"
             :row-selection="importRowSelection"
             :scroll="{ x: 780, y: 420 }"
             row-key="id"
             size="small"
+            @change="handleIndicatorImportTableChange"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.dataIndex === 'deptId'">

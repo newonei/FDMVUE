@@ -10,6 +10,8 @@ import { Button, message, Popconfirm, Space, Table, Tag } from 'ant-design-vue';
 
 import { batchHrReview, getHrReviewPendingPage } from '#/api/fdmperformance';
 
+import { PERFORMANCE_PAGE_SIZE_OPTIONS } from '../../shared/constants';
+
 defineOptions({ name: 'FdmPerformanceHrReviewQueue' });
 
 const router = useRouter();
@@ -89,9 +91,10 @@ function openInstance(record: JixiaoApi.HrReviewPendingItem) {
 }
 
 function changePage(pagination: any) {
-  query.pageNo = pagination.current;
+  const pageSizeChanged = query.pageSize !== pagination.pageSize;
+  query.pageNo = pageSizeChanged ? 1 : pagination.current;
   query.pageSize = pagination.pageSize;
-  load();
+  void load();
 }
 
 onMounted(load);
@@ -140,6 +143,8 @@ onMounted(load);
       :pagination="{
         current: query.pageNo,
         pageSize: query.pageSize,
+        pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
         size: 'small',
         total,
       }"

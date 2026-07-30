@@ -39,7 +39,10 @@ import {
 } from '#/api/fdmperformance';
 import { getSimpleDeptList } from '#/api/system/dept';
 
-import { SCORE_METHOD_OPTIONS } from '../shared/constants';
+import {
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
+  SCORE_METHOD_OPTIONS,
+} from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceIndicators' });
@@ -280,9 +283,10 @@ async function removeSelected() {
 }
 
 function handleTableChange(pagination: any) {
-  query.pageNo = pagination.current;
+  const pageSizeChanged = query.pageSize !== pagination.pageSize;
+  query.pageNo = pageSizeChanged ? 1 : pagination.current;
   query.pageSize = pagination.pageSize;
-  load();
+  void load();
 }
 
 onMounted(() => {
@@ -361,7 +365,13 @@ onMounted(() => {
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :pagination="{ current: query.pageNo, pageSize: query.pageSize, total }"
+      :pagination="{
+        current: query.pageNo,
+        pageSize: query.pageSize,
+        pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
+        total,
+      }"
       :row-selection="rowSelection"
       row-key="id"
       size="middle"

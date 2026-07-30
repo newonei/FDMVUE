@@ -29,7 +29,11 @@ import {
   publishResult,
 } from '#/api/fdmperformance';
 
-import { GRADE_OPTIONS, REVIEW_STATUS_MAP } from '../shared/constants';
+import {
+  GRADE_OPTIONS,
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
+  REVIEW_STATUS_MAP,
+} from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceResults' });
@@ -215,15 +219,17 @@ function changePeriodMonth() {
 }
 
 function changeResultPage(pagination: any) {
-  resultQuery.pageNo = pagination.current;
+  const pageSizeChanged = resultQuery.pageSize !== pagination.pageSize;
+  resultQuery.pageNo = pageSizeChanged ? 1 : pagination.current;
   resultQuery.pageSize = pagination.pageSize;
-  loadResults();
+  void loadResults();
 }
 
 function changeReviewPage(pagination: any) {
-  reviewQuery.pageNo = pagination.current;
+  const pageSizeChanged = reviewQuery.pageSize !== pagination.pageSize;
+  reviewQuery.pageNo = pageSizeChanged ? 1 : pagination.current;
   reviewQuery.pageSize = pagination.pageSize;
-  loadReviews();
+  void loadReviews();
 }
 
 onMounted(() => {
@@ -298,6 +304,8 @@ onMounted(() => {
       :pagination="{
         current: resultQuery.pageNo,
         pageSize: resultQuery.pageSize,
+        pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
         size: 'small',
         total: resultTotal,
       }"
@@ -373,6 +381,8 @@ onMounted(() => {
       :pagination="{
         current: reviewQuery.pageNo,
         pageSize: reviewQuery.pageSize,
+        pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+        showSizeChanger: true,
         size: 'small',
         total: reviewTotal,
       }"

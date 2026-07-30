@@ -22,7 +22,11 @@ import {
 import { getTemplateSelectPage } from '#/api/fdmperformance';
 import { getSimpleDeptList } from '#/api/system/dept';
 
-import { PERIOD_OPTIONS } from '../../shared/constants';
+import {
+  PERFORMANCE_DEFAULT_PAGE_SIZE,
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
+  PERIOD_OPTIONS,
+} from '../../shared/constants';
 
 defineOptions({ name: 'JixiaoTemplatePickerModal' });
 
@@ -36,7 +40,6 @@ const emit = defineEmits<{
   'update:open': [open: boolean];
 }>();
 
-const PAGE_SIZE = 20;
 const loading = ref(false);
 const departmentsLoaded = ref(false);
 const rows = ref<JixiaoApi.TemplateSelectItem[]>([]);
@@ -48,7 +51,7 @@ const query = reactive<JixiaoApi.TemplateSelectPageParams>({
   deptId: undefined,
   keyword: '',
   pageNo: 1,
-  pageSize: PAGE_SIZE,
+  pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
   periodType: undefined,
 });
 
@@ -111,7 +114,7 @@ async function initialize() {
     deptId: undefined,
     keyword: '',
     pageNo: 1,
-    pageSize: PAGE_SIZE,
+    pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
     periodType: undefined,
   });
   await Promise.allSettled([loadTemplates(), loadDepartments()]);
@@ -149,8 +152,10 @@ function handleFilterChange() {
   void loadTemplates();
 }
 
-function handlePageChange(page: number) {
-  query.pageNo = page;
+function handlePageChange(page: number, pageSize: number) {
+  const pageSizeChanged = query.pageSize !== pageSize;
+  query.pageNo = pageSizeChanged ? 1 : page;
+  query.pageSize = pageSize;
   void loadTemplates();
 }
 
@@ -267,10 +272,11 @@ watch(
         </div>
 
         <Pagination
-          v-if="total > PAGE_SIZE"
+          v-if="total > PERFORMANCE_DEFAULT_PAGE_SIZE"
           :current="query.pageNo"
-          :page-size="PAGE_SIZE"
-          :show-size-changer="false"
+          :page-size="query.pageSize"
+          :page-size-options="PERFORMANCE_PAGE_SIZE_OPTIONS"
+          show-size-changer
           :total="total"
           class="pagination"
           show-less-items
@@ -362,10 +368,10 @@ watch(
 
 .template-browser {
   display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 20px 20px 16px;
   border-right: 1px solid #edf0f4;
-  flex-direction: column;
 }
 
 .filter-row {
@@ -389,12 +395,12 @@ watch(
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 24px;
   gap: 8px;
+  align-items: center;
   min-height: 72px;
   padding: 10px 8px;
   cursor: pointer;
-  border-bottom: 1px solid #f0f2f5;
   outline: none;
-  align-items: center;
+  border-bottom: 1px solid #f0f2f5;
 }
 
 .template-row:hover,
@@ -413,19 +419,19 @@ watch(
 .template-name,
 .selected-name {
   overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
   color: #1f2329;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .template-meta {
   display: flex;
   gap: 10px;
+  align-items: center;
   margin-top: 5px;
   font-size: 12px;
   color: #646a73;
-  align-items: center;
 }
 
 .template-meta :deep(.ant-tag) {
@@ -433,11 +439,11 @@ watch(
 }
 
 .department-names {
-  overflow: hidden;
   margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   color: #8f959e;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -447,15 +453,15 @@ watch(
 
 .empty-list {
   display: flex;
-  min-height: 372px;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
+  min-height: 372px;
 }
 
 .pagination {
-  margin-top: auto;
   padding-top: 14px;
+  margin-top: auto;
   text-align: right;
 }
 
@@ -467,12 +473,12 @@ watch(
 
 .selected-heading {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   min-height: 32px;
   padding-bottom: 12px;
   font-weight: 600;
   border-bottom: 1px solid #e8ebef;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .selected-list {
@@ -491,11 +497,11 @@ watch(
 .selected-name-row {
   display: flex;
   gap: 8px;
+  align-items: center;
+  justify-content: space-between;
   padding-bottom: 10px;
   margin-bottom: 12px;
   border-bottom: 1px solid #edf0f4;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .selected-name {
@@ -505,10 +511,10 @@ watch(
 
 .summary-line {
   display: flex;
+  justify-content: space-between;
   margin-top: 10px;
   font-size: 13px;
   color: #646a73;
-  justify-content: space-between;
 }
 
 .summary-line strong {

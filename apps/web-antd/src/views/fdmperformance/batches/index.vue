@@ -31,7 +31,10 @@ import {
 import { getSimpleDeptList } from '#/api/system/dept';
 import { getSimpleUserList } from '#/api/system/user';
 
-import { TASK_LABELS } from '../shared/constants';
+import {
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
+  TASK_LABELS,
+} from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 import HrReviewQueue from './components/HrReviewQueue.vue';
 
@@ -206,9 +209,11 @@ function changeInstancePage(pagination: any, filters: Record<string, any>) {
   const deptId = selectedFilterId(filters, 'deptName');
   const filterChanged =
     userId !== instanceQuery.userId || deptId !== instanceQuery.deptId;
+  const pageSizeChanged = instanceQuery.pageSize !== pagination.pageSize;
   instanceQuery.userId = userId;
   instanceQuery.deptId = deptId;
-  instanceQuery.pageNo = filterChanged ? 1 : pagination.current;
+  instanceQuery.pageNo =
+    filterChanged || pageSizeChanged ? 1 : pagination.current;
   instanceQuery.pageSize = pagination.pageSize;
   void loadInstances();
 }
@@ -271,6 +276,8 @@ onMounted(initialize);
             :pagination="{
               current: instanceQuery.pageNo,
               pageSize: instanceQuery.pageSize,
+              pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+              showSizeChanger: true,
               size: 'small',
               total: instanceTotal,
             }"

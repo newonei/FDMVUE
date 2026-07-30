@@ -6,6 +6,9 @@ export const PERIOD_OPTIONS = [
   { label: '试用期', value: 'PROBATION' },
 ];
 
+export const PERFORMANCE_DEFAULT_PAGE_SIZE = 10;
+export const PERFORMANCE_PAGE_SIZE_OPTIONS = ['10', '20', '50', '100'];
+
 export const SCORE_METHOD_OPTIONS = [
   { label: '百分制', value: 'NUMBER' },
   { label: '等级换算', value: 'LEVEL' },
