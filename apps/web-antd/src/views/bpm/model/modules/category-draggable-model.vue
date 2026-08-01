@@ -10,7 +10,12 @@ import { confirm, EllipsisText, useVbenModal } from '@vben/common-ui';
 import { BpmModelFormType } from '@vben/constants';
 import { IconifyIcon } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
-import { cloneDeep, formatDateTime, isEqual } from '@vben/utils';
+import {
+  cloneDeep,
+  downloadFileFromBlobPart,
+  formatDateTime,
+  isEqual,
+} from '@vben/utils';
 
 import { useDebounceFn } from '@vueuse/core';
 import { useSortable } from '@vueuse/integrations/useSortable';
@@ -31,6 +36,7 @@ import {
   cleanModel,
   deleteModel,
   deployModel,
+  exportModel,
   updateModelSortBatch,
   updateModelState,
 } from '#/api/bpm/model';
@@ -81,6 +87,9 @@ const hasPermiDelete = computed(() => {
 });
 const hasPermiDeploy = computed(() => {
   return hasAccessByCodes(['bpm:model:deploy']);
+});
+const hasPermiExport = computed(() => {
+  return hasAccessByCodes(['bpm:model:export']);
 });
 
 const [Grid, gridApi] = useVbenVxeGrid({
@@ -315,6 +324,10 @@ function handleModelCommand(command: string, row: any) {
       handleDelete(row);
       break;
     }
+    case 'handleExport': {
+      handleExportModel(row);
+      break;
+    }
     case 'handleReport': {
       handleReport(row);
       break;
@@ -322,6 +335,21 @@ function handleModelCommand(command: string, row: any) {
     default: {
       break;
     }
+  }
+}
+
+/** 导出模型 */
+async function handleExportModel(row: any) {
+  const hideLoading = message.loading({ content: '正在导出...', duration: 0 });
+  try {
+    const data = await exportModel(row.id);
+    downloadFileFromBlobPart({
+      fileName: `${row.key || row.name || 'model'}.json`,
+      source: JSON.stringify(data, null, 2),
+    });
+    message.success('导出成功');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -691,6 +719,9 @@ function handleRenameSuccess() {
                       @click="(e) => handleModelCommand(e.key as string, row)"
                     >
                       <Menu.Item key="handleCopy"> 复制 </Menu.Item>
+                      <Menu.Item v-if="hasPermiExport" key="handleExport">
+                        导出
+                      </Menu.Item>
                       <Menu.Item key="handleDefinitionList"> 历史 </Menu.Item>
 
                       <Menu.Item
