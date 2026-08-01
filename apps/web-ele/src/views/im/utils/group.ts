@@ -229,33 +229,25 @@ function computeCellRectsSmall(
     case 2: {
       // 居中 1 行（留上下空白）
       const y = target / 4;
-      rects.push(
-        { x: divider, y, w: s, h: s },
-        { x: divider + step, y, w: s, h: s },
-      );
+      rects.push({ x: divider, y, w: s, h: s });
+      rects.push({ x: divider + step, y, w: s, h: s });
       break;
     }
     case 3: {
       // 上 1 居中 + 下 2
       rects.push({ x: target / 4, y: divider, w: s, h: s });
       const y1 = divider + step;
-      rects.push(
-        { x: divider, y: y1, w: s, h: s },
-        { x: divider + step, y: y1, w: s, h: s },
-      );
+      rects.push({ x: divider, y: y1, w: s, h: s });
+      rects.push({ x: divider + step, y: y1, w: s, h: s });
       break;
     }
     case 4: {
       // 2×2 满铺
-      rects.push(
-        { x: divider, y: divider, w: s, h: s },
-        { x: divider + step, y: divider, w: s, h: s },
-      );
+      rects.push({ x: divider, y: divider, w: s, h: s });
+      rects.push({ x: divider + step, y: divider, w: s, h: s });
       const y1 = divider + step;
-      rects.push(
-        { x: divider, y: y1, w: s, h: s },
-        { x: divider + step, y: y1, w: s, h: s },
-      );
+      rects.push({ x: divider, y: y1, w: s, h: s });
+      rects.push({ x: divider + step, y: y1, w: s, h: s });
       break;
     }
   }
@@ -270,7 +262,11 @@ function computeCellRectsMedium(
 ): CellRect[] {
   const s = (target - 4 * divider) / 3;
   const step = s + divider;
-  const xs = [divider, divider + step, divider + 2 * step] as const;
+  const xs: [number, number, number] = [
+    divider,
+    divider + step,
+    divider + 2 * step,
+  ];
   // 2 行高 + 1 行间 div
   const totalH = 2 * s + divider;
   const y0 = (target - totalH) / 2;
@@ -279,24 +275,20 @@ function computeCellRectsMedium(
   if (count === 5) {
     // 上 2 居中（左右对称留白） + 下 3 左右贴边
     const upX0 = (target - 2 * s - divider) / 2;
-    rects.push(
-      { x: upX0, y: y0, w: s, h: s },
-      { x: upX0 + step, y: y0, w: s, h: s },
-      { x: xs[0], y: y1, w: s, h: s },
-      { x: xs[1], y: y1, w: s, h: s },
-      { x: xs[2], y: y1, w: s, h: s },
-    );
+    rects.push({ x: upX0, y: y0, w: s, h: s });
+    rects.push({ x: upX0 + step, y: y0, w: s, h: s });
+    rects.push({ x: xs[0], y: y1, w: s, h: s });
+    rects.push({ x: xs[1], y: y1, w: s, h: s });
+    rects.push({ x: xs[2], y: y1, w: s, h: s });
     return rects;
   }
   // count === 6：上 3 + 下 3 满铺
-  rects.push(
-    { x: xs[0], y: y0, w: s, h: s },
-    { x: xs[1], y: y0, w: s, h: s },
-    { x: xs[2], y: y0, w: s, h: s },
-    { x: xs[0], y: y1, w: s, h: s },
-    { x: xs[1], y: y1, w: s, h: s },
-    { x: xs[2], y: y1, w: s, h: s },
-  );
+  rects.push({ x: xs[0], y: y0, w: s, h: s });
+  rects.push({ x: xs[1], y: y0, w: s, h: s });
+  rects.push({ x: xs[2], y: y0, w: s, h: s });
+  rects.push({ x: xs[0], y: y1, w: s, h: s });
+  rects.push({ x: xs[1], y: y1, w: s, h: s });
+  rects.push({ x: xs[2], y: y1, w: s, h: s });
   return rects;
 }
 
@@ -308,41 +300,45 @@ function computeCellRectsLarge(
 ): CellRect[] {
   const s = (target - 4 * divider) / 3;
   const step = s + divider;
-  const xs = [divider, divider + step, divider + 2 * step] as const;
-  const ys = [divider, divider + step, divider + 2 * step] as const;
+  const xs: [number, number, number] = [
+    divider,
+    divider + step,
+    divider + 2 * step,
+  ];
+  const ys: [number, number, number] = [
+    divider,
+    divider + step,
+    divider + 2 * step,
+  ];
   const rects: CellRect[] = [];
   if (count === 7) {
     // 上 1 居中 + 中 3 + 下 3
-    rects.push(
-      { x: xs[1], y: ys[0], w: s, h: s },
-      { x: xs[0], y: ys[1], w: s, h: s },
-      { x: xs[1], y: ys[1], w: s, h: s },
-      { x: xs[2], y: ys[1], w: s, h: s },
-      { x: xs[0], y: ys[2], w: s, h: s },
-      { x: xs[1], y: ys[2], w: s, h: s },
-      { x: xs[2], y: ys[2], w: s, h: s },
-    );
+    rects.push({ x: xs[1], y: ys[0], w: s, h: s });
+    rects.push({ x: xs[0], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[1], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[2], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[0], y: ys[2], w: s, h: s });
+    rects.push({ x: xs[1], y: ys[2], w: s, h: s });
+    rects.push({ x: xs[2], y: ys[2], w: s, h: s });
     return rects;
   }
   if (count === 8) {
     // 上 2 居中 + 中 3 + 下 3
     const upX0 = (target - 2 * s - divider) / 2;
-    rects.push(
-      { x: upX0, y: ys[0], w: s, h: s },
-      { x: upX0 + step, y: ys[0], w: s, h: s },
-      { x: xs[0], y: ys[1], w: s, h: s },
-      { x: xs[1], y: ys[1], w: s, h: s },
-      { x: xs[2], y: ys[1], w: s, h: s },
-      { x: xs[0], y: ys[2], w: s, h: s },
-      { x: xs[1], y: ys[2], w: s, h: s },
-      { x: xs[2], y: ys[2], w: s, h: s },
-    );
+    rects.push({ x: upX0, y: ys[0], w: s, h: s });
+    rects.push({ x: upX0 + step, y: ys[0], w: s, h: s });
+    rects.push({ x: xs[0], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[1], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[2], y: ys[1], w: s, h: s });
+    rects.push({ x: xs[0], y: ys[2], w: s, h: s });
+    rects.push({ x: xs[1], y: ys[2], w: s, h: s });
+    rects.push({ x: xs[2], y: ys[2], w: s, h: s });
     return rects;
   }
   // count === 9：3×3 满铺
-  for (const y of ys) {
-    for (const x of xs) {
-      rects.push({ x, y, w: s, h: s });
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      rects.push({ x: xs[col]!, y: ys[row]!, w: s, h: s });
     }
   }
   return rects;

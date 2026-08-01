@@ -1,20 +1,12 @@
-import type {
-  AudioMessage,
-  FileMessage,
-  ImageMessage,
-  QuoteMessage,
-  VideoMessage,
-} from '../../utils/message';
 import type { Conversation, Message } from '../types';
 
 import type { AxiosProgressEvent } from '#/api/infra/file';
 
 import { isOpenableUrl } from '@vben/utils';
 
-import { ElMessage } from 'element-plus';
+import { ElMessage as message } from 'element-plus';
 
 import { uploadFile } from '#/api/infra/file';
-import { getCurrentUserId } from '#/views/im/utils/auth';
 
 import {
   MESSAGE_FILE_MAX_MB,
@@ -23,27 +15,26 @@ import {
   MESSAGE_VOICE_MAX_MB,
 } from '../../utils/config';
 import { ImContentType, ImMessageStatus } from '../../utils/constants';
-import { getConversationKey } from '../../utils/conversation';
+import { type DbClient, getDb } from '../../utils/db';
 import {
+  type AudioMessage,
   BLOB_URL_PREFIX,
+  type FileMessage,
   generateClientMessageId,
+  type ImageMessage,
   parseMessage,
+  type QuoteMessage,
   serializeMessage,
+  type VideoMessage,
   withQuotePayload,
 } from '../../utils/message';
-import { useConversationStore } from '../store/conversationStore';
 import { useMessageStore } from '../store/messageStore';
 import { useMessageSender } from './useMessageSender';
-import { useMuteOverlay } from './useMuteOverlay';
 
 type UploadProgressEvent = Parameters<NonNullable<AxiosProgressEvent>>[0];
 
 /** 单条媒体 payload 联合（覆盖 IMAGE / FILE / VOICE / VIDEO 四种） */
-export type MediaPayload =
-  | AudioMessage
-  | FileMessage
-  | ImageMessage
-  | VideoMessage;
+type MediaPayload = AudioMessage | FileMessage | ImageMessage | VideoMessage;
 
 /**
  * 媒体特定的元数据上下文：首发 / 重传共用入参；不同 type 关心不同字段
@@ -52,13 +43,13 @@ export type MediaPayload =
  * - videoProbe：视频元信息（首发由 probeVideoFile 解出，重传从旧 VideoMessage 直接拷字段）
  * - videoCoverUrl：视频封面真实 URL；占位阶段不设（避免传 blob 当 poster 在部分浏览器退化），commit 阶段由 cover 上传结果填入；重传时从旧 VideoMessage.coverUrl 复用，旧值若是 blob 会被跳过
  */
-export interface MediaTypeContext {
+interface MediaTypeContext {
   voiceDuration?: number;
   videoProbe?: { duration?: number; height?: number; width?: number };
   videoCoverUrl?: string;
 }
 
-export interface MediaTypeHandler {
+interface MediaTypeHandler {
   /** 中文名，仅日志用（替代之前散落 9 处的 kind 字符串） */
   kind: string;
   /** 由 file + url + context 生成 payload；占位时 url 是 blob URL，commit 时是真实 url */
@@ -120,7 +111,7 @@ export const mediaTypeHandlers: Partial<Record<number, MediaTypeHandler>> = {
 };
 
 /** 单次媒体上传的入参（image / file / voice 走 uploadAndSendMedia；video 走低层 helper 自行组装） */
-export interface UploadAndSendMediaOptions {
+interface UploadAndSendMediaOptions {
   file: File;
   /** 对齐 ImContentType；mediaTypeHandlers 必须有对应项 */
   type: number;
@@ -148,21 +139,16 @@ export interface UploadAndSendMediaOptions {
 /** 按内容类型映射体积上限（MB）；未识别类型返回 0 表示不限 */
 function resolveMediaMaxMb(type: number): number {
   switch (type) {
-    case ImContentType.FILE: {
+    case ImContentType.FILE:
       return MESSAGE_FILE_MAX_MB;
-    }
-    case ImContentType.IMAGE: {
+    case ImContentType.IMAGE:
       return MESSAGE_IMAGE_MAX_MB;
-    }
-    case ImContentType.VIDEO: {
+    case ImContentType.VIDEO:
       return MESSAGE_VIDEO_MAX_MB;
-    }
-    case ImContentType.VOICE: {
+    case ImContentType.VOICE:
       return MESSAGE_VOICE_MAX_MB;
-    }
-    default: {
+    default:
       return 0;
-    }
   }
 }
 
@@ -181,9 +167,7 @@ export function ensureMediaSizeWithinLimit(
 }
 
 export const useMediaUploader = () => {
-  const conversationStore = useConversationStore();
   const messageStore = useMessageStore();
-  const muteOverlay = useMuteOverlay();
   const { sendRaw } = useMessageSender();
 
   /**
@@ -192,17 +176,37 @@ export const useMediaUploader = () => {
    * 用 createObjectURL(file) 生成临时 blob URL 喂给 buildContent；占位 status=SENDING + uploadProgress=0；
    * file 挂在 _localFile 上供失败重试时重走上传
    */
-  const insertMediaPlaceholder = (opts: {
+  const insertMediaPlaceholder = async (opts: {
     buildContent: (blobUrl: string) => string;
     conversation: Conversation;
     existingClientMessageId?: string;
     file: File;
     type: number;
-  }): { blobUrl: string; clientMessageId: string } => {
+  }): Promise<
+    | undefined
+    | {
+        blobUrl: string;
+        clientMessageId: string;
+        commit: (realContent: string) => Promise<void>;
+      }
+  > => {
     const { conversation } = opts;
+    const db = getDb();
     const blobUrl = URL.createObjectURL(opts.file);
     const clientMessageId =
       opts.existingClientMessageId || generateClientMessageId();
+    const result = {
+      clientMessageId,
+      blobUrl,
+      commit: (realContent: string) =>
+        commitMediaPlaceholder({
+          type: opts.type,
+          conversation,
+          clientMessageId,
+          realContent,
+          db,
+        }),
+    };
     if (opts.existingClientMessageId) {
       messageStore.patchMessage(
         conversation.type,
@@ -215,7 +219,7 @@ export const useMediaUploader = () => {
           _localFile: opts.file,
         },
       );
-      return { clientMessageId, blobUrl };
+      return result;
     }
     const placeholder: Message = {
       clientMessageId,
@@ -223,14 +227,14 @@ export const useMediaUploader = () => {
       content: opts.buildContent(blobUrl),
       status: ImMessageStatus.SENDING,
       sendTime: Date.now(),
-      senderId: getCurrentUserId(),
+      senderId: db.userId,
       targetId: conversation.targetId,
       selfSend: true,
       uploadProgress: 0,
       _localFile: opts.file,
     };
-    void messageStore
-      .insertMessage(
+    try {
+      const inserted = await messageStore.insertMessage(
         {
           type: conversation.type,
           targetId: conversation.targetId,
@@ -238,9 +242,17 @@ export const useMediaUploader = () => {
           avatar: conversation.avatar || '',
         },
         placeholder,
-      )
-      .catch(() => undefined);
-    return { clientMessageId, blobUrl };
+        db,
+      );
+      if (!inserted) {
+        URL.revokeObjectURL(blobUrl);
+        return undefined;
+      }
+    } catch (error) {
+      URL.revokeObjectURL(blobUrl);
+      throw error;
+    }
+    return result;
   };
 
   /**
@@ -291,10 +303,6 @@ export const useMediaUploader = () => {
     };
   };
 
-  /** 取媒体类型中文名（仅日志用）；未注册 type 退化为通用「媒体」 */
-  const getMediaKind = (type: number): string =>
-    mediaTypeHandlers[type]?.kind ?? '媒体';
-
   /**
    * 按 type 取 handler，缺则抛错（程序错误集中在这一处）
    *
@@ -310,46 +318,6 @@ export const useMediaUploader = () => {
   };
 
   /**
-   * 上传完成后的收口校验：会话仍是占位时锁定的那个 + 当前未被禁言；任一不满足 markMediaFailed + 返回 false
-   *
-   * image / file / voice / video 链路都要在「拿到真实 url 后、调 sendRaw 之前」过一遍这两道
-   */
-  const verifyMediaUploadStillAllowed = (
-    conversation: Conversation,
-    startKey: string,
-    type: number,
-    clientMessageId: string,
-  ): boolean => {
-    const activeConversation = conversationStore.activeConversation;
-    if (
-      !activeConversation ||
-      getConversationKey(activeConversation) !== startKey
-    ) {
-      console.warn(`[IM] ${getMediaKind(type)}上传期间切换了会话，放弃发送`, {
-        startKey,
-      });
-      markMediaFailed(
-        conversation.type,
-        conversation.targetId,
-        clientMessageId,
-      );
-      return false;
-    }
-    if (muteOverlay.value) {
-      console.warn(`[IM] ${getMediaKind(type)}上传期间被禁言，放弃发送`, {
-        startKey,
-      });
-      markMediaFailed(
-        conversation.type,
-        conversation.targetId,
-        clientMessageId,
-      );
-      return false;
-    }
-    return true;
-  };
-
-  /**
    * 占位完成后用真实 url 替换 content，再走 sendRaw 完成发送
    *
    * 上传成功 → patch content → sendRaw 复用 existingClientMessageId；store 内部 revoke 旧 blob URL
@@ -357,6 +325,7 @@ export const useMediaUploader = () => {
   const commitMediaPlaceholder = async (opts: {
     clientMessageId: string;
     conversation: Conversation;
+    db: DbClient;
     realContent: string;
     type: number;
   }): Promise<void> => {
@@ -366,12 +335,12 @@ export const useMediaUploader = () => {
       opts.clientMessageId,
       { content: opts.realContent },
     );
-    // 显式传 conversation 而非依赖 sendRaw 内部取 active：
-    // verifyMediaUploadStillAllowed 与 sendRaw 之间存在微秒窗口，期间用户切会话也能保证发到原会话
+    // 显式传入占位消息所属会话，确保上传完成后仍发送到原会话
     await sendRaw(opts.type, opts.realContent, {
       existingClientMessageId: opts.clientMessageId,
       targetId: opts.conversation.targetId,
       conversation: opts.conversation,
+      db: opts.db,
     });
   };
 
@@ -392,10 +361,9 @@ export const useMediaUploader = () => {
       return '';
     }
     // 体积上限拦截：大文件浏览器内截帧 / 解码可致 OOM；超限直接 warning，不进入占位 / 上传链路
-    if (!ensureMediaSizeWithinLimit(opts.file, opts.type, ElMessage.warning)) {
+    if (!ensureMediaSizeWithinLimit(opts.file, opts.type, message.warning)) {
       return '';
     }
-    const startKey = getConversationKey(conversation);
     const context = opts.context ?? {};
     const buildContent = (url: string): string =>
       serializeMessage(
@@ -403,13 +371,24 @@ export const useMediaUploader = () => {
       );
 
     // 1. 立即占位
-    const { clientMessageId } = insertMediaPlaceholder({
-      file: opts.file,
-      type: opts.type,
-      conversation,
-      buildContent,
-      existingClientMessageId: opts.existingClientMessageId,
-    });
+    let placeholder: Awaited<ReturnType<typeof insertMediaPlaceholder>>;
+    try {
+      placeholder = await insertMediaPlaceholder({
+        file: opts.file,
+        type: opts.type,
+        conversation,
+        buildContent,
+        existingClientMessageId: opts.existingClientMessageId,
+      });
+      if (!placeholder) {
+        return '';
+      }
+    } catch (error) {
+      console.error('[IM] 媒体消息占位写入失败', error);
+      message.warning('消息保存失败，请重试');
+      return '';
+    }
+    const clientMessageId = placeholder.clientMessageId;
 
     // 2. 上传：进度回调 patch uploadProgress；失败保留 _localFile 供重试
     let url: string | undefined;
@@ -418,8 +397,8 @@ export const useMediaUploader = () => {
         { file: opts.file },
         createUploadProgressHandler(conversation, clientMessageId),
       );
-    } catch (error) {
-      console.error(`[IM] ${handler.kind}上传失败`, error);
+    } catch (e) {
+      console.error(`[IM] ${handler.kind}上传失败`, e);
     }
     if (!url) {
       markMediaFailed(
@@ -431,7 +410,7 @@ export const useMediaUploader = () => {
     }
     if (!isOpenableUrl(url)) {
       console.warn(`[IM] ${handler.kind}上传返回了不支持打开的 URL`, { url });
-      ElMessage.warning('上传返回的文件地址不支持打开');
+      message.warning('上传返回的文件地址不支持打开');
       markMediaFailed(
         conversation.type,
         conversation.targetId,
@@ -440,25 +419,8 @@ export const useMediaUploader = () => {
       return clientMessageId;
     }
 
-    // 3. 上传期间会话切换 / 用户登出 / 被禁言：任一情况都放弃发送，占位置 FAILED
-    if (
-      !verifyMediaUploadStillAllowed(
-        conversation,
-        startKey,
-        opts.type,
-        clientMessageId,
-      )
-    ) {
-      return clientMessageId;
-    }
-
-    // 4. patch content + sendRaw 收尾
-    await commitMediaPlaceholder({
-      type: opts.type,
-      conversation,
-      clientMessageId,
-      realContent: buildContent(url),
-    });
+    // 3. patch content + sendRaw 收尾
+    await placeholder.commit(buildContent(url));
     return clientMessageId;
   };
 
@@ -466,10 +428,7 @@ export const useMediaUploader = () => {
     uploadAndSendMedia,
     insertMediaPlaceholder,
     markMediaFailed,
-    commitMediaPlaceholder,
     createUploadProgressHandler,
-    verifyMediaUploadStillAllowed,
-    getMediaKind,
     requireMediaHandler,
   };
 };

@@ -8,6 +8,8 @@ import type { ImRtcApi } from '#/api/im/rtc';
 
 import { computed, ref } from 'vue';
 
+import { isEqual } from '@vben/utils';
+
 import { defineStore } from 'pinia';
 
 import { getCurrentUserId } from '#/views/im/utils/auth';
@@ -20,9 +22,12 @@ import {
 import { useFriendStore } from './friendStore';
 import { useGroupStore } from './groupStore';
 
+type ImRtcCallRespVO = ImRtcApi.RtcCallRespVO;
+type ImRtcGroupCallRespVO = ImRtcApi.RtcGroupCallRespVO;
+
 type GroupActiveCallCache = {
   participantsLoaded?: boolean; // 是否已拉取完整参与者列表
-} & ImRtcApi.RtcGroupCallRespVO;
+} & ImRtcGroupCallRespVO;
 
 // RTC_CALL 通话信令载荷；按 status 区分子类型语义
 export interface ImRtcCallNotification {
@@ -81,7 +86,7 @@ export const useRtcStore = defineStore('imRtc', () => {
   /** 当前阶段 */
   const stage = ref<ImRtcCallStageValue>(ImRtcCallStage.IDLE);
   /** 当前通话；invite / accept / refreshToken 拿到的完整信息 */
-  const call = ref<ImRtcApi.RtcCallRespVO | null>(null);
+  const call = ref<ImRtcCallRespVO | null>(null);
   /** 来电载荷；仅 INCOMING 阶段使用；status 固定 INVITING，其它字段 INVITE 专属 */
   const incomingPayload = ref<ImRtcCallNotification | null>(null);
   /** 进入 RUNNING 的时间戳；用于通话时长展示；reset 时清零 */
@@ -124,9 +129,7 @@ export const useRtcStore = defineStore('imRtc', () => {
   });
 
   /** 私聊场景对端 userId：自己是主叫则取首个 invitee，否则取 inviter */
-  function resolvePrivatePeerUserId(
-    c: ImRtcApi.RtcCallRespVO,
-  ): number | undefined {
+  function resolvePrivatePeerUserId(c: ImRtcCallRespVO): number | undefined {
     const myId = getCurrentUserId();
     return c.inviterId === myId ? c.inviteeIds?.[0] : c.inviterId;
   }
@@ -158,7 +161,7 @@ export const useRtcStore = defineStore('imRtc', () => {
    * 群通话：发起人直接进 RUNNING 多人卡片视图，房内可能只有自己，等其他人陆续加入；
    * 私聊：按 status 走；RUNNING（已加入已有通话场景）→ RUNNING；CREATED → INVITING 等被叫接通
    */
-  function startInviting(data: ImRtcApi.RtcCallRespVO) {
+  function startInviting(data: ImRtcCallRespVO) {
     call.value = data;
     // 群通话场景写入本地胶囊条缓存
     syncGroupActiveCall(data);
@@ -195,7 +198,7 @@ export const useRtcStore = defineStore('imRtc', () => {
   }
 
   /** 进入通话中阶段 */
-  function enterRunning(data: ImRtcApi.RtcCallRespVO) {
+  function enterRunning(data: ImRtcCallRespVO) {
     call.value = data;
     // 离开 INCOMING 阶段；清空来电载荷
     incomingPayload.value = null;
@@ -264,7 +267,7 @@ export const useRtcStore = defineStore('imRtc', () => {
    * 胶囊条不实时刷新 joinedUserIds / inviteeIds，展开 / 加入时再走 getActiveCall 接口拉最新
    */
   function setGroupCall(
-    payload: ImRtcApi.RtcGroupCallRespVO,
+    payload: ImRtcGroupCallRespVO,
     participantsLoaded?: boolean,
   ) {
     if (!payload?.groupId) {
@@ -319,8 +322,8 @@ export const useRtcStore = defineStore('imRtc', () => {
 
   /** 两条群通话摘要内容相等（room / mediaType / inviterId / 两个 userId 数组逐项相等） */
   function isSameGroupCall(
-    a: ImRtcApi.RtcGroupCallRespVO,
-    b: ImRtcApi.RtcGroupCallRespVO,
+    a: ImRtcGroupCallRespVO,
+    b: ImRtcGroupCallRespVO,
   ): boolean {
     if (
       a.room !== b.room ||
@@ -330,17 +333,9 @@ export const useRtcStore = defineStore('imRtc', () => {
       return false;
     }
     return (
-      isSameNumberList(a.joinedUserIds ?? [], b.joinedUserIds ?? []) &&
-      isSameNumberList(a.inviteeIds ?? [], b.inviteeIds ?? [])
+      isEqual(a.joinedUserIds ?? [], b.joinedUserIds ?? []) &&
+      isEqual(a.inviteeIds ?? [], b.inviteeIds ?? [])
     );
-  }
-
-  /** 判断两个用户编号列表是否逐项相等 */
-  function isSameNumberList(a: number[], b: number[]): boolean {
-    if (a.length !== b.length) {
-      return false;
-    }
-    return a.every((item, index) => item === b[index]);
   }
 
   /** 群通话结束：从 groupActiveCalls 移除；胶囊条消失 */
@@ -357,9 +352,7 @@ export const useRtcStore = defineStore('imRtc', () => {
   }
 
   /** 获取群当前活跃通话；用于胶囊条按 groupId 查询 */
-  function getGroupCall(
-    groupId: number,
-  ): ImRtcApi.RtcGroupCallRespVO | undefined {
+  function getGroupCall(groupId: number): ImRtcGroupCallRespVO | undefined {
     return groupActiveCalls.value.get(groupId);
   }
 
@@ -487,10 +480,10 @@ export const useRtcStore = defineStore('imRtc', () => {
     markUserLeft,
     isUserLeft,
     setGroupCall,
-    isGroupCallParticipantsLoaded,
-    clearGroupCallCache,
     removeGroupCall,
     getGroupCall,
+    isGroupCallParticipantsLoaded,
+    clearGroupCallCache,
     applyParticipantConnected,
     applyParticipantDisconnected,
     applyParticipantRejected,

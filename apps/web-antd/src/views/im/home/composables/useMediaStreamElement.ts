@@ -33,7 +33,6 @@ export function useMediaStreamElement<T extends HTMLMediaElement>(
       syncStream();
       return;
     }
-
     if (el) {
       el.srcObject = null;
     }

@@ -1,3 +1,6 @@
+import type { ImGroupRequestApi } from '#/api/im/group/request';
+import type { ImManagerChannelApi } from '#/api/im/manager/channel';
+
 // ==================== WebSocket 帧 / 事件 ====================
 
 // 后端 WebSocket 统一帧结构：{ type, content }
@@ -110,6 +113,8 @@ export interface Conversation {
   silent?: boolean; // 是否免打扰（不展示未读徽标 + 不响提示音）
   atMe?: boolean; // 群聊：是否有人 @我
   atAll?: boolean; // 群聊：是否有人 @全体成员
+  atMessageId?: number; // 最近一次未读 @我的消息编号，用于点击提醒后定位
+  atAllMessageId?: number; // 最近一次未读 @全体成员的消息编号，用于点击提醒后定位
   reportedReadMessageId?: number; // 已上报到服务端的最大已读消息编号
   draft?: {
     html: string; // 输入框 HTML
@@ -238,6 +243,9 @@ export interface GroupMember {
   isOwner?: boolean; // 是否群主（前端从 Group.ownerUserId 计算）
 }
 
+/** 群成员 IndexedDB 存储结构 */
+export type GroupMemberDO = GroupMember;
+
 // ==================== 好友 ====================
 
 // 好友实体（前端内部结构）
@@ -258,6 +266,9 @@ export interface Friend {
   addTime?: number; // 添加好友时间（毫秒时间戳；后端为 LocalDateTime 字符串，在 convertFriend 转换）
   deleteTime?: number; // 删除好友时间（毫秒时间戳；后端为 LocalDateTime 字符串，在 convertFriend 转换）
 }
+
+/** 好友 IndexedDB 存储结构 */
+export type FriendDO = Friend;
 
 /**
  * 好友申请记录（前端内部结构，对齐后端 ImFriendRequestApi.FriendRequestRespVO）
@@ -280,6 +291,15 @@ export interface FriendRequest {
   toNickname?: string; // 接收方昵称
   toAvatar?: string; // 接收方头像
 }
+
+/** 好友申请 IndexedDB 存储结构 */
+export type FriendRequestDO = FriendRequest;
+
+/** 加群申请 IndexedDB 存储结构 */
+export type GroupRequestDO = ImGroupRequestApi.GroupRequestRespVO;
+
+/** 频道 IndexedDB 存储结构 */
+export type ChannelDO = ImManagerChannelApi.Channel;
 
 // ==================== 用户名片 ====================
 

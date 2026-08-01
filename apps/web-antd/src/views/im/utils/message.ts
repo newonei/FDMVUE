@@ -1,4 +1,3 @@
-// oxlint-disable no-console
 import type {
   Conversation,
   GroupLite,
@@ -10,7 +9,6 @@ import type { ImConversationTypeValue } from './constants';
 
 import { useUserStore } from '@vben/stores';
 
-import tipAudioUrl from '#/assets/audio/im/message-tip.mp3';
 import { getCurrentUserId } from '#/views/im/utils/auth';
 
 import { useFriendStore } from '../home/store/friendStore';
@@ -52,8 +50,7 @@ export const generateClientMessageId = (): string => {
 /**
  * 私聊消息 / DTO 的对端 userId：自己发的对端是 receiver，别人发的对端是 sender
  *
- * 收口 4 处旧 inline（websocketStore.convertPrivateMessage / handlePrivateMessage / computeFriendPeerId
- * 和 useMessagePuller.getPrivatePeerId），结构类型只要 senderId / receiverId 两个字段，REST 与 WS DTO 都满足
+ * WebSocket 与 HTTP pull 共用；结构类型只要求 senderId / receiverId，REST 与 WS DTO 都满足
  */
 export function getPrivateMessagePeerId(
   message: { receiverId: number; senderId: number },
@@ -67,7 +64,7 @@ export function getPrivateMessagePeerId(
 // ==================== 文本片段（tip 文案 + TEXT 气泡共用） ====================
 // 既用于灰条 tip（"XX 邀请 YY 加入群聊"），也用于 TEXT 气泡正文（@xxx 高亮 + URL 自动识别）。
 // mention 段携带 userId 用于挂点击弹 UserInfoCard；link 段携带 href 用于 <a> 跳转；
-// text 段是纯文本兜底。渲染层（tip-segments.vue）按 type 分发统一处理。
+// text 段是纯文本兜底。渲染层（TipSegments.vue）按 type 分发统一处理。
 
 export type TipSegment =
   | { href: string; text: string; type: 'link' }
@@ -82,7 +79,7 @@ export const tipMention = (userId: number, text: string): TipSegment => ({
   text,
 });
 
-export const tipLink = (href: string, text: string): TipSegment => ({
+const tipLink = (href: string, text: string): TipSegment => ({
   type: 'link',
   href,
   text,
@@ -92,7 +89,7 @@ export const segmentsToText = (segments: TipSegment[]): string =>
   segments.map((s) => s.text).join('');
 
 /** 多个 userId 用同一个分隔符插值成 segments，每个 user 单独成 mention 段 */
-export function joinMentionSegments(
+function joinMentionSegments(
   userIds: number[],
   separator: string,
   resolveName: (userId: number) => string,
@@ -151,7 +148,7 @@ export function parseTextSegments(
   // 「@张三丰」不能被「@张三」截胡，候选按 name 长度倒序
   const sortedMentions =
     mentions.length > 1
-      ? mentions.toSorted((a, b) => b.name.length - a.name.length)
+      ? [...mentions].toSorted((a, b) => b.name.length - a.name.length)
       : mentions;
   const out: TipSegment[] = [];
   let buffer = '';
@@ -355,7 +352,7 @@ export interface FaceMessage extends Quotable {
 }
 
 /** 合并转发的单条内嵌消息快照（对齐后端 MergeMessage.Item） */
-export interface MergeMessageItem {
+interface MergeMessageItem {
   /** 原消息编号；仅做溯源标识 */
   messageId: number;
   /** 发送人编号 */
@@ -463,7 +460,7 @@ function mapMessageToMergeItem(
 }
 
 /** 合并转发标题：私聊「{对方} 和 {自己} 的聊天记录」；群聊「{群名} 的聊天记录」 */
-export function buildMergeTitle(conversation: Conversation): string {
+function buildMergeTitle(conversation: Conversation): string {
   if (conversation.type === ImConversationType.GROUP) {
     return `${conversation.name || '群聊'} 的聊天记录`;
   }
@@ -485,7 +482,7 @@ export function buildMergeMessagePayload(
 }
 
 /** 「添加到表情」的可发起源：FACE / IMAGE 都允许（GIF 图片也常被收藏） */
-export interface AddableFacePayload {
+interface AddableFacePayload {
   url: string;
   width: number;
   height: number;
@@ -634,13 +631,15 @@ export const getQuoteFromMessage = (content: string): null | QuoteMessage => {
 export const parseRecallMessageId = (content: string): number => {
   try {
     const parsed = JSON.parse(content);
-    return parsed?.messageId === null ? 0 : Number(parsed.messageId);
+    return parsed?.messageId != null ? Number(parsed.messageId) : 0;
   } catch {
     return 0;
   }
 };
 
 // ==================== 新消息提示音 ====================
+
+import tipAudioUrl from '#/assets/audio/im/message-tip.mp3';
 
 /**
  * 新消息提示音，带 1 秒节流：短时间内多条消息只响一次，避免疲劳轰炸。
@@ -677,7 +676,7 @@ export const playAudioTip = () => {
 /**
  * 按文件扩展名挑文件图标 + 颜色，对齐微信观感
  *
- * message-item.vue（主气泡）和 reply-preview.vue（引用预览）共用同一份映射，避免视觉两处不一致
+ * MessageItem.vue（主气泡）和 ReplyPreview.vue（引用预览）共用同一份映射，避免视觉两处不一致
  */
 export function getFileIconInfo(filename: string | undefined): {
   color: string;
@@ -1101,15 +1100,6 @@ export function resolveRtcCallPrivateBubbleText(
         : '通话已结束';
     }
   }
-}
-
-/** 会话内通话事件文案 */
-export function resolveRtcCallTipText(message: {
-  content?: string;
-  selfSend?: boolean;
-  type?: number;
-}): string {
-  return segmentsToText(resolveRtcCallTipSegments(message));
 }
 
 /**

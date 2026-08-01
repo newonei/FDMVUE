@@ -1,5 +1,6 @@
+import type { DbClient } from '../../utils/db';
 import type { QuoteMessage, TextMessage } from '../../utils/message';
-import type { Conversation, Message } from '../types';
+import type { Conversation, Message, MessageDO } from '../types';
 
 import { readChannelMessages as apiReadChannelMessages } from '#/api/im/message/channel';
 import {
@@ -13,7 +14,6 @@ import {
   recallPrivateMessage as apiRecallPrivateMessage,
   sendPrivateMessage as apiSendPrivateMessage,
 } from '#/api/im/message/private';
-import { getCurrentUserId } from '#/views/im/utils/auth';
 
 import {
   MESSAGE_GROUP_READ_ENABLED,
@@ -24,7 +24,7 @@ import {
   ImConversationType,
   ImMessageStatus,
 } from '../../utils/constants';
-import { getClientConversationId } from '../../utils/db';
+import { getClientConversationId, getDb } from '../../utils/db';
 import {
   generateClientMessageId,
   serializeMessage,
@@ -54,6 +54,7 @@ interface SendExtOptions {
    * 这里跳过 buildLocalMessage / insertMessage，直接拿这个 id 走 ackMessage 收尾，避免重复插入两条
    */
   existingClientMessageId?: string;
+  db?: DbClient; // 发送任务开始时捕获的数据库；媒体上传完成后继续写回同一用户分区
 }
 
 /**
@@ -74,6 +75,7 @@ export const useMessageSender = () => {
     atUserIds?: number[];
     clientMessageId: string;
     content: string;
+    senderId: number;
     targetId: number;
     type: number;
   }): Message => {
@@ -83,7 +85,7 @@ export const useMessageSender = () => {
       content: opts.content,
       status: ImMessageStatus.SENDING,
       sendTime: Date.now(),
-      senderId: getCurrentUserId(),
+      senderId: opts.senderId,
       targetId: opts.targetId,
       selfSend: true,
       atUserIds: opts.atUserIds,
@@ -112,6 +114,7 @@ export const useMessageSender = () => {
     if (!realTarget) {
       return false;
     }
+    const db = options?.db ?? getDb();
 
     // 2. 准备 clientMessageId：媒体上传链路在 step 1 已经 insertMessage 占位，这里直接复用 id；其余场景走默认乐观插入
     let clientMessageId: string;
@@ -119,13 +122,15 @@ export const useMessageSender = () => {
       clientMessageId = options.existingClientMessageId;
       // 占位若已被删除（上传期间用户右键删除 / 撤回 / removeMessage 等）则放弃发送，
       // 否则 sendRaw 仍会把消息推到服务端，导致"本地无气泡 / 对方却收到一条"
-      const stillExists = messageStore
-        .getMessageList(conversation.type, realTarget)
-        .some(
-          (message) =>
-            message.clientMessageId === clientMessageId && !message._ackMerging,
-        );
-      if (!stillExists) {
+      const cachedMessage = messageStore
+        .getMessages(getClientConversationId(conversation.type, realTarget))
+        .find((message) => message.clientMessageId === clientMessageId);
+      const storedMessage = await db.getByIndex<{ clientMessageId: string }>(
+        'messages',
+        'clientMessageId',
+        clientMessageId,
+      );
+      if (cachedMessage?._ackMerging || !storedMessage) {
         return false;
       }
     } else {
@@ -133,6 +138,7 @@ export const useMessageSender = () => {
       const message = buildLocalMessage({
         clientMessageId,
         content,
+        senderId: db.userId,
         targetId: realTarget,
         type,
         atUserIds: options?.atUserIds,
@@ -144,7 +150,7 @@ export const useMessageSender = () => {
         avatar: conversation.avatar || '',
       };
       void messageStore
-        .insertMessage(conversationInfo, message)
+        .insertMessage(conversationInfo, message, db)
         .catch(() => undefined);
     }
 
@@ -158,13 +164,19 @@ export const useMessageSender = () => {
           content,
         });
         void messageStore
-          .ackMessage(conversation.type, realTarget, clientMessageId, {
-            id: data.id,
-            sendTime: new Date(data.sendTime).getTime(),
-            status: data.status,
-            receiptStatus: data.receiptStatus,
-            content: data.content,
-          })
+          .ackMessage(
+            conversation.type,
+            realTarget,
+            clientMessageId,
+            {
+              id: data.id,
+              sendTime: new Date(data.sendTime).getTime(),
+              status: data.status,
+              receiptStatus: data.receiptStatus,
+              content: data.content,
+            },
+            db,
+          )
           .catch(() => undefined);
       } else if (conversation.type === ImConversationType.GROUP) {
         const data = await apiSendGroupMessage({
@@ -176,14 +188,20 @@ export const useMessageSender = () => {
           receipt: options?.receipt,
         });
         void messageStore
-          .ackMessage(conversation.type, realTarget, clientMessageId, {
-            id: data.id,
-            sendTime: new Date(data.sendTime).getTime(),
-            status: data.status,
-            receiptStatus: data.receiptStatus,
-            readCount: data.readCount,
-            content: data.content,
-          })
+          .ackMessage(
+            conversation.type,
+            realTarget,
+            clientMessageId,
+            {
+              id: data.id,
+              sendTime: new Date(data.sendTime).getTime(),
+              status: data.status,
+              receiptStatus: data.receiptStatus,
+              readCount: data.readCount,
+              content: data.content,
+            },
+            db,
+          )
           .catch(() => undefined);
       }
       return true;
@@ -193,17 +211,39 @@ export const useMessageSender = () => {
         { type, realTarget, clientMessageId },
         error,
       );
-      void messageStore
-        .ackMessage(conversation.type, realTarget, clientMessageId, {
-          status: ImMessageStatus.FAILED,
-        })
+      await messageStore
+        .ackMessage(
+          conversation.type,
+          realTarget,
+          clientMessageId,
+          {
+            status: ImMessageStatus.FAILED,
+          },
+          db,
+        )
         .catch(() => undefined);
-      return false;
+      const appliedMessage = messageStore
+        .getMessages(getClientConversationId(conversation.type, realTarget))
+        .find((message) => message.clientMessageId === clientMessageId);
+      if (appliedMessage) {
+        return (
+          appliedMessage.status === ImMessageStatus.NORMAL &&
+          !!appliedMessage.id
+        );
+      }
+      const storedMessage = await db.getByIndex<MessageDO>(
+        'messages',
+        'clientMessageId',
+        clientMessageId,
+      );
+      return (
+        storedMessage?.status === ImMessageStatus.NORMAL && !!storedMessage.id
+      );
     }
   };
 
   /**
-   * 发送文本消息（最常用的快捷入口）：message-input.vue 文本回车走这里
+   * 发送文本消息（最常用的快捷入口）：MessageInput.vue 文本回车走这里
    * 返回值：成功 true / 失败 false / 空文本 false（与 sendRaw 对齐，转发场景按返回值判断）
    */
   const send = async (
@@ -259,14 +299,16 @@ export const useMessageSender = () => {
     if (!conversation) {
       return;
     }
-    let loadedMaxMessageId = 0;
-    for (const message of messageStore.getMessages(
-      getClientConversationId(conversation.type, conversation.targetId),
-    )) {
-      if (message.id && message.id > loadedMaxMessageId) {
-        loadedMaxMessageId = message.id;
-      }
-    }
+    const db = getDb();
+    const loadedMaxMessageId = messageStore
+      .getMessages(
+        getClientConversationId(conversation.type, conversation.targetId),
+      )
+      .reduce<number>(
+        (maxMessageId, message) =>
+          message.id && message.id > maxMessageId ? message.id : maxMessageId,
+        0,
+      );
     const maxMessageId = Math.max(
       loadedMaxMessageId,
       conversation.lastMessageId || 0,
@@ -280,6 +322,8 @@ export const useMessageSender = () => {
       conversationStore.markConversationRead(
         conversation.type,
         conversation.targetId,
+        undefined,
+        db,
       );
       return;
     }
@@ -291,6 +335,7 @@ export const useMessageSender = () => {
       conversation.type,
       conversation.targetId,
       maxMessageId,
+      db,
     );
     if (!maxMessageId) {
       return;
@@ -317,6 +362,7 @@ export const useMessageSender = () => {
         conversation.type,
         conversation.targetId,
         maxMessageId,
+        db,
       );
     } catch (error) {
       console.error(
@@ -346,30 +392,37 @@ export const useMessageSender = () => {
     if (!MESSAGE_PRIVATE_READ_ENABLED) {
       return;
     }
-    const cachedMaxReadId = messageStore.getPrivateReadMaxId(peerId);
-    if (cachedMaxReadId !== undefined) {
-      if (cachedMaxReadId > 0) {
-        messageStore.applyMessageReadReceipt({
-          conversationType: ImConversationType.PRIVATE,
-          targetId: peerId,
-          privateReadMaxId: cachedMaxReadId,
-        });
-      }
-      return;
-    }
+    const db = getDb();
     try {
+      const cachedMaxReadId = messageStore.getPrivateReadMaxId(peerId);
+      if (cachedMaxReadId !== undefined) {
+        if (cachedMaxReadId > 0) {
+          await messageStore.applyMessageReadReceipt(
+            {
+              conversationType: ImConversationType.PRIVATE,
+              targetId: peerId,
+              privateReadMaxId: cachedMaxReadId,
+            },
+            db,
+          );
+        }
+        return;
+      }
       // 拉取对方已读到的最大消息 id
       const maxReadId = await apiGetPrivateMaxReadMessageId(peerId);
-      messageStore.updatePrivateReadMaxId(peerId, maxReadId);
       if (!maxReadId) {
+        messageStore.updatePrivateReadMaxId(peerId, maxReadId);
         return;
       }
       // applyMessageReadReceipt 内部把 ≤ maxReadId 的本端消息回执更新为 DONE
-      messageStore.applyMessageReadReceipt({
-        conversationType: ImConversationType.PRIVATE,
-        targetId: peerId,
-        privateReadMaxId: maxReadId,
-      });
+      await messageStore.applyMessageReadReceipt(
+        {
+          conversationType: ImConversationType.PRIVATE,
+          targetId: peerId,
+          privateReadMaxId: maxReadId,
+        },
+        db,
+      );
     } catch (error) {
       console.warn('[IM] 拉取对方已读位置失败', { peerId }, error);
     }

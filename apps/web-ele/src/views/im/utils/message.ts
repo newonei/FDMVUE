@@ -1,4 +1,3 @@
-// oxlint-disable no-console
 import type {
   Conversation,
   GroupLite,
@@ -6,11 +5,9 @@ import type {
   QuoteMessage,
   User,
 } from '../home/types';
-import type { ImConversationTypeValue } from './constants';
 
 import { useUserStore } from '@vben/stores';
 
-import tipAudioUrl from '#/assets/audio/im/message-tip.mp3';
 import { getCurrentUserId } from '#/views/im/utils/auth';
 
 import { useFriendStore } from '../home/store/friendStore';
@@ -18,6 +15,7 @@ import { useGroupStore } from '../home/store/groupStore';
 import {
   ImContentType,
   ImConversationType,
+  type ImConversationTypeValue,
   ImRtcCallEndReason,
 } from './constants';
 import { formatCallDuration } from './time';
@@ -52,8 +50,7 @@ export const generateClientMessageId = (): string => {
 /**
  * 私聊消息 / DTO 的对端 userId：自己发的对端是 receiver，别人发的对端是 sender
  *
- * 收口 4 处旧 inline（websocketStore.convertPrivateMessage / handlePrivateMessage / computeFriendPeerId
- * 和 useMessagePuller.getPrivatePeerId），结构类型只要 senderId / receiverId 两个字段，REST 与 WS DTO 都满足
+ * WebSocket 与 HTTP pull 共用；结构类型只要求 senderId / receiverId，REST 与 WS DTO 都满足
  */
 export function getPrivateMessagePeerId(
   message: { receiverId: number; senderId: number },
@@ -67,7 +64,7 @@ export function getPrivateMessagePeerId(
 // ==================== 文本片段（tip 文案 + TEXT 气泡共用） ====================
 // 既用于灰条 tip（"XX 邀请 YY 加入群聊"），也用于 TEXT 气泡正文（@xxx 高亮 + URL 自动识别）。
 // mention 段携带 userId 用于挂点击弹 UserInfoCard；link 段携带 href 用于 <a> 跳转；
-// text 段是纯文本兜底。渲染层（tip-segments.vue）按 type 分发统一处理。
+// text 段是纯文本兜底。渲染层（TipSegments.vue）按 type 分发统一处理。
 
 export type TipSegment =
   | { href: string; text: string; type: 'link' }
@@ -82,7 +79,7 @@ export const tipMention = (userId: number, text: string): TipSegment => ({
   text,
 });
 
-export const tipLink = (href: string, text: string): TipSegment => ({
+const tipLink = (href: string, text: string): TipSegment => ({
   type: 'link',
   href,
   text,
@@ -92,7 +89,7 @@ export const segmentsToText = (segments: TipSegment[]): string =>
   segments.map((s) => s.text).join('');
 
 /** 多个 userId 用同一个分隔符插值成 segments，每个 user 单独成 mention 段 */
-export function joinMentionSegments(
+function joinMentionSegments(
   userIds: number[],
   separator: string,
   resolveName: (userId: number) => string,
@@ -151,7 +148,7 @@ export function parseTextSegments(
   // 「@张三丰」不能被「@张三」截胡，候选按 name 长度倒序
   const sortedMentions =
     mentions.length > 1
-      ? mentions.toSorted((a, b) => b.name.length - a.name.length)
+      ? [...mentions].sort((a, b) => b.name.length - a.name.length)
       : mentions;
   const out: TipSegment[] = [];
   let buffer = '';
@@ -172,14 +169,14 @@ export function parseTextSegments(
       if (matched) {
         if (matched.ambiguous) {
           // 同字面量对应多 userId，无法判定意图；整段累入 buffer 让短前缀候选没机会再扫这段
-          buffer += `@${matched.name}`;
+          buffer += '@' + matched.name;
         } else {
           flush();
           // 渲染统一走 displayName（即真实昵称），让历史 content 里残留的备注 / 群昵称也收敛到 nickname
           out.push(
             tipMention(
               matched.userId,
-              `@${matched.displayName || matched.name}`,
+              '@' + (matched.displayName || matched.name),
             ),
           );
         }
@@ -355,7 +352,7 @@ export interface FaceMessage extends Quotable {
 }
 
 /** 合并转发的单条内嵌消息快照（对齐后端 MergeMessage.Item） */
-export interface MergeMessageItem {
+interface MergeMessageItem {
   /** 原消息编号；仅做溯源标识 */
   messageId: number;
   /** 发送人编号 */
@@ -463,7 +460,7 @@ function mapMessageToMergeItem(
 }
 
 /** 合并转发标题：私聊「{对方} 和 {自己} 的聊天记录」；群聊「{群名} 的聊天记录」 */
-export function buildMergeTitle(conversation: Conversation): string {
+function buildMergeTitle(conversation: Conversation): string {
   if (conversation.type === ImConversationType.GROUP) {
     return `${conversation.name || '群聊'} 的聊天记录`;
   }
@@ -485,7 +482,7 @@ export function buildMergeMessagePayload(
 }
 
 /** 「添加到表情」的可发起源：FACE / IMAGE 都允许（GIF 图片也常被收藏） */
-export interface AddableFacePayload {
+interface AddableFacePayload {
   url: string;
   width: number;
   height: number;
@@ -634,13 +631,15 @@ export const getQuoteFromMessage = (content: string): null | QuoteMessage => {
 export const parseRecallMessageId = (content: string): number => {
   try {
     const parsed = JSON.parse(content);
-    return parsed?.messageId === null ? 0 : Number(parsed.messageId);
+    return parsed?.messageId != null ? Number(parsed.messageId) : 0;
   } catch {
     return 0;
   }
 };
 
 // ==================== 新消息提示音 ====================
+
+import tipAudioUrl from '#/assets/audio/im/message-tip.mp3';
 
 /**
  * 新消息提示音，带 1 秒节流：短时间内多条消息只响一次，避免疲劳轰炸。
@@ -663,12 +662,10 @@ export const playAudioTip = () => {
     __tipAudio.currentTime = 0;
     const playPromise = __tipAudio.play();
     if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise.catch((error) =>
-        console.debug('[IM] playAudioTip 失败', error),
-      );
+      playPromise.catch((e) => console.debug('[IM] playAudioTip 失败', e));
     }
-  } catch (error) {
-    console.debug('[IM] playAudioTip 失败', error);
+  } catch (e) {
+    console.debug('[IM] playAudioTip 失败', e);
   }
 };
 
@@ -677,7 +674,7 @@ export const playAudioTip = () => {
 /**
  * 按文件扩展名挑文件图标 + 颜色，对齐微信观感
  *
- * message-item.vue（主气泡）和 reply-preview.vue（引用预览）共用同一份映射，避免视觉两处不一致
+ * MessageItem.vue（主气泡）和 ReplyPreview.vue（引用预览）共用同一份映射，避免视觉两处不一致
  */
 export function getFileIconInfo(filename: string | undefined): {
   color: string;
@@ -802,43 +799,36 @@ export function resolveGroupNotificationSegments(
   );
 
   switch (message.type) {
-    case ImContentType.GROUP_ADMIN_ADD: {
+    case ImContentType.GROUP_ADMIN_ADD:
       return [
         operatorSegment,
         tipText(' 将 '),
         ...memberSegments,
         tipText(' 设为管理员'),
       ];
-    }
-    case ImContentType.GROUP_ADMIN_REMOVE: {
+    case ImContentType.GROUP_ADMIN_REMOVE:
       return [
         operatorSegment,
         tipText(' 撤销了 '),
         ...memberSegments,
         tipText(' 的管理员身份'),
       ];
-    }
-    case ImContentType.GROUP_BANNED: {
+    case ImContentType.GROUP_BANNED:
       return [
         operatorSegment,
         tipText(payload.banned ? ' 封禁了该群' : ' 解封了该群'),
       ];
-    }
-    case ImContentType.GROUP_CANCEL_MUTED: {
+    case ImContentType.GROUP_CANCEL_MUTED:
       return [operatorSegment, tipText(' 关闭了全群禁言')];
-    }
-    case ImContentType.GROUP_CREATE: {
+    case ImContentType.GROUP_CREATE:
       return [operatorSegment, tipText(' 创建了群聊')];
-    }
-    case ImContentType.GROUP_DISSOLVE: {
+    case ImContentType.GROUP_DISSOLVE:
       return [operatorSegment, tipText(' 解散了群聊')];
-    }
-    case ImContentType.GROUP_INFO_UPDATE: {
+    case ImContentType.GROUP_INFO_UPDATE:
       return payload.newAvatar
         ? [operatorSegment, tipText(' 更换了群头像')]
         : [operatorSegment, tipText(' 更新了群信息')];
-    }
-    case ImContentType.GROUP_MEMBER_CANCEL_MUTED: {
+    case ImContentType.GROUP_MEMBER_CANCEL_MUTED:
       return payload.mutedUserId
         ? [
             operatorSegment,
@@ -847,19 +837,16 @@ export function resolveGroupNotificationSegments(
             tipText(' 的禁言'),
           ]
         : [];
-    }
-    case ImContentType.GROUP_MEMBER_INVITE: {
+    case ImContentType.GROUP_MEMBER_INVITE:
       return [
         operatorSegment,
         tipText(' 邀请 '),
         ...memberSegments,
         tipText(' 加入群聊'),
       ];
-    }
-    case ImContentType.GROUP_MEMBER_KICK: {
+    case ImContentType.GROUP_MEMBER_KICK:
       return [operatorSegment, tipText(' 移出了 '), ...memberSegments];
-    }
-    case ImContentType.GROUP_MEMBER_MUTED: {
+    case ImContentType.GROUP_MEMBER_MUTED:
       return payload.mutedUserId
         ? [
             operatorSegment,
@@ -868,35 +855,27 @@ export function resolveGroupNotificationSegments(
             tipText(' 禁言'),
           ]
         : [];
-    }
-    case ImContentType.GROUP_MEMBER_NICKNAME_UPDATE: {
+    case ImContentType.GROUP_MEMBER_NICKNAME_UPDATE:
       return [
         operatorSegment,
         tipText(` 修改群昵称为 "${payload.displayUserName ?? ''}"`),
       ];
-    }
-    case ImContentType.GROUP_MEMBER_QUIT: {
+    case ImContentType.GROUP_MEMBER_QUIT:
       return [operatorSegment, tipText(' 退出了群聊')];
-    }
-    case ImContentType.GROUP_MESSAGE_PIN: {
+    case ImContentType.GROUP_MESSAGE_PIN:
       return [operatorSegment, tipText(' 置顶了一条消息')];
-    }
-    case ImContentType.GROUP_MESSAGE_UNPIN: {
+    case ImContentType.GROUP_MESSAGE_UNPIN:
       return [operatorSegment, tipText(' 取消了一条置顶消息')];
-    }
-    case ImContentType.GROUP_MUTED: {
+    case ImContentType.GROUP_MUTED:
       return [operatorSegment, tipText(' 开启了全群禁言')];
-    }
-    case ImContentType.GROUP_NAME_UPDATE: {
+    case ImContentType.GROUP_NAME_UPDATE:
       return [
         operatorSegment,
         tipText(` 将群名修改为 "${payload.newName ?? ''}"`),
       ];
-    }
-    case ImContentType.GROUP_NOTICE_UPDATE: {
+    case ImContentType.GROUP_NOTICE_UPDATE:
       return [operatorSegment, tipText(' 更新了群公告')];
-    }
-    case ImContentType.GROUP_OWNER_TRANSFER: {
+    case ImContentType.GROUP_OWNER_TRANSFER:
       return payload.newOwnerUserId
         ? [
             operatorSegment,
@@ -907,10 +886,8 @@ export function resolveGroupNotificationSegments(
             ),
           ]
         : [];
-    }
-    default: {
+    default:
       return [];
-    }
   }
 }
 
@@ -936,15 +913,12 @@ export function resolveFriendNotificationSegments(message: {
   type?: number;
 }): TipSegment[] {
   switch (message.type) {
-    case ImContentType.FRIEND_ADD: {
+    case ImContentType.FRIEND_ADD:
       return [tipText('你们已经是好友了，开始聊天吧')];
-    }
-    case ImContentType.FRIEND_DELETE: {
+    case ImContentType.FRIEND_DELETE:
       return [tipText('你已删除好友')];
-    }
-    default: {
+    default:
       return [];
-    }
   }
 }
 
@@ -1073,43 +1047,27 @@ export function resolveRtcCallPrivateBubbleText(
   const hasDuration = duration > 0;
   const isOperator = payload.operatorUserId === getCurrentUserId();
   switch (payload.endReason) {
-    case ImRtcCallEndReason.BUSY: {
+    case ImRtcCallEndReason.BUSY:
       return isOperator ? '忙线未接听' : '对方忙线中';
-    }
-    case ImRtcCallEndReason.CANCEL: {
+    case ImRtcCallEndReason.CANCEL:
       return isOperator ? '已取消' : '对方已取消';
-    }
-    case ImRtcCallEndReason.ERROR: {
+    case ImRtcCallEndReason.ERROR:
       return hasDuration
         ? `通话中断 ${formatCallDuration(duration)}`
         : '通话中断';
-    }
-    case ImRtcCallEndReason.HANGUP: {
+    case ImRtcCallEndReason.HANGUP:
       return hasDuration
         ? `通话时长 ${formatCallDuration(duration)}`
         : '通话中断';
-    }
-    case ImRtcCallEndReason.NO_ANSWER: {
+    case ImRtcCallEndReason.NO_ANSWER:
       return isOperator ? '未接听' : '对方未接听';
-    }
-    case ImRtcCallEndReason.REJECT: {
+    case ImRtcCallEndReason.REJECT:
       return isOperator ? '已拒绝' : '对方已拒绝';
-    }
-    default: {
+    default:
       return hasDuration
         ? `通话时长 ${formatCallDuration(duration)}`
         : '通话已结束';
-    }
   }
-}
-
-/** 会话内通话事件文案 */
-export function resolveRtcCallTipText(message: {
-  content?: string;
-  selfSend?: boolean;
-  type?: number;
-}): string {
-  return segmentsToText(resolveRtcCallTipSegments(message));
 }
 
 /**
@@ -1119,23 +1077,17 @@ export function resolveRtcCallTipText(message: {
  */
 export function resolveCallEndReasonText(reason: number | undefined): string {
   switch (reason) {
-    case ImRtcCallEndReason.BUSY: {
+    case ImRtcCallEndReason.BUSY:
       return '对方忙线中';
-    }
-    case ImRtcCallEndReason.CANCEL: {
+    case ImRtcCallEndReason.CANCEL:
       return '对方已取消';
-    }
-    case ImRtcCallEndReason.ERROR: {
+    case ImRtcCallEndReason.ERROR:
       return '通话异常';
-    }
-    case ImRtcCallEndReason.HANGUP: {
+    case ImRtcCallEndReason.HANGUP:
       return '通话已结束';
-    }
-    case ImRtcCallEndReason.REJECT: {
+    case ImRtcCallEndReason.REJECT:
       return '对方已拒绝';
-    }
-    default: {
+    default:
       return '通话已断开';
-    }
   }
 }

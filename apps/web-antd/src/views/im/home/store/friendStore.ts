@@ -1,4 +1,11 @@
-import type { Friend, FriendLite, FriendRequest } from '../types';
+import type { DbClient } from '../../utils/db';
+import type {
+  Friend,
+  FriendDO,
+  FriendLite,
+  FriendRequest,
+  FriendRequestDO,
+} from '../types';
 
 import type { ImFriendApi } from '#/api/im/friend';
 import type { ImFriendRequestApi } from '#/api/im/friend/request';
@@ -31,29 +38,34 @@ import {
   ImConversationType,
   ImFriendRequestHandleResult,
 } from '../../utils/constants';
-import { getDb, StorageKeys } from '../../utils/db';
+import { getDb, initDb, StorageKeys } from '../../utils/db';
 import { runIncrementalPull } from '../../utils/pull';
+import {
+  isResourceRequestPending,
+  ResourceRequestKey,
+  ResourceRequestMode,
+  runResourceRequest,
+} from '../../utils/resourceRequest';
 import { getFriendDisplayName } from '../../utils/user';
 import { useConversationStore } from './conversationStore';
 
-type PendingRequest = { epoch: number; promise: Promise<void>; userId: number };
+type ImFriendRespVO = ImFriendApi.FriendRespVO;
+type ImFriendRequestApplyReqVO = ImFriendRequestApi.FriendRequestApplyReqVO;
+type ImFriendRequestRespVO = ImFriendRequestApi.FriendRequestRespVO;
 
-/** 当前正在进行的好友列表拉取；多 dispatcher 同时触发时复用同一 Promise，避免雪崩重拉 */
-let pendingFetchFriends: null | PendingRequest = null;
-/** 当前正在进行的好友申请列表拉取；多端连续多条申请到达时复用同一 Promise，避免雪崩重拉 */
-let pendingFetchRequests: null | PendingRequest = null;
-/** 当前正在进行的「加载更多申请」请求 */
-let pendingLoadMoreRequests: null | PendingRequest = null;
-/** 当前正在进行的好友详情请求 */
-const pendingFetchFriendInfos = new Map<string, Promise<void>>();
-
-/** clear() 时递增；旧账号那次还没返回的请求 resolve 后比对一致才写 store，防跨账号数据泄漏 */
-let storeEpoch = 0;
-
-/** 构建好友详情请求去重 key */
-function getPendingFriendInfoKey(userId: number, friendUserId: number): string {
-  return `${userId}:${friendUserId}`;
+/** 在好友列表拉取期间合并一次关系事件尾随刷新 */
+function queueFriendListRefreshAfterPending(
+  fetch: () => Promise<unknown>,
+): void {
+  if (isResourceRequestPending(ResourceRequestKey.FRIEND_LIST)) {
+    void fetch().catch(() => undefined);
+  }
 }
+
+/** 当前好友申请分页任务；首页和加载更多互斥执行 */
+let requestTask: null | Promise<void> = null;
+/** 当前正在进行的好友详情请求 */
+const pendingFetchFriendInfos = new Map<number, Promise<void>>();
 
 /** 好友通知 payload（对齐后端 BaseFriendNotification + 子类裁减后的字段） */
 export interface FriendNotificationPayload {
@@ -136,13 +148,6 @@ export const useFriendStore = defineStore('imFriendStore', {
         return !!entry && entry.status !== CommonStatusEnum.DISABLE;
       };
     },
-    /** 我的黑名单（blocked=true 且 ENABLE） */
-    getBlockedFriendList: (state): Friend[] => {
-      return state.friends.filter(
-        (friend) =>
-          friend.status !== CommonStatusEnum.DISABLE && friend.blocked === true,
-      );
-    },
     /** 未处理申请数（接收方=我）—— 实时派生，「新的朋友」红点用 */
     getUnhandledRequestCount: (state): number => {
       const currentUserId = getCurrentUserId();
@@ -161,8 +166,8 @@ export const useFriendStore = defineStore('imFriendStore', {
     async loadFriendData(): Promise<boolean> {
       try {
         const [friends, friendRequests] = await Promise.all([
-          getDb().getAll<Friend>('friends'),
-          getDb().getAll<FriendRequest>('friendRequests'),
+          getDb().getAll<FriendDO>('friends'),
+          getDb().getAll<FriendRequestDO>('friendRequests'),
         ]);
         if (friends.length > 0) {
           this.friends = friends;
@@ -182,44 +187,48 @@ export const useFriendStore = defineStore('imFriendStore', {
     },
 
     /** 保存好友列表 */
-    saveFriendList(): void {
-      void getDb()
-        .transaction(['friends'], 'readwrite', async (tx) => {
-          const db = getDb();
-          await db.clearStore('friends', tx);
-          for (const friend of this.friends) {
-            if (friend.id) {
-              await db.put('friends', friend, tx);
-            }
+    async saveFriendList(
+      friends: Friend[],
+      db: DbClient = getDb(),
+    ): Promise<void> {
+      await db.transaction(['friends'], 'readwrite', async (tx) => {
+        await db.clearStore('friends', tx);
+        for (const friend of friends) {
+          if (friend.id) {
+            await db.put('friends', friend, tx);
           }
-        })
-        .catch((error) =>
-          console.warn('[IM friendStore] 本地好友缓存写入失败', error),
-        );
+        }
+      });
     },
 
     /** 保存单个好友 */
-    async saveFriendRecord(friend: Friend | undefined): Promise<void> {
+    async saveFriendRecord(
+      friend: Friend | undefined,
+      db: DbClient = getDb(),
+    ): Promise<void> {
       if (!friend?.id) {
         return;
       }
-      await getDb().put('friends', friend);
+      await db.put('friends', friend);
     },
 
     /** 保存单个好友 */
-    saveFriend(friend: Friend | undefined): void {
-      void this.saveFriendRecord(friend).catch((error) =>
+    saveFriend(friend: Friend | undefined, db: DbClient = getDb()): void {
+      void this.saveFriendRecord(friend, db).catch((error) =>
         console.warn('[IM friendStore] 本地好友写入失败', error),
       );
     },
 
     /** 保存好友申请列表 */
-    saveFriendRequestList(): void {
-      void getDb()
+    saveFriendRequestList(
+      requests?: FriendRequest[],
+      db: DbClient = getDb(),
+    ): void {
+      const snapshot = requests ?? [...this.friendRequests];
+      void db
         .transaction(['friendRequests'], 'readwrite', async (tx) => {
-          const db = getDb();
           await db.clearStore('friendRequests', tx);
-          for (const request of this.friendRequests) {
+          for (const request of snapshot) {
             await db.put('friendRequests', request, tx);
           }
         })
@@ -231,16 +240,20 @@ export const useFriendStore = defineStore('imFriendStore', {
     /** 保存单条好友申请 */
     async saveFriendRequestRecord(
       request: FriendRequest | undefined,
+      db: DbClient = getDb(),
     ): Promise<void> {
       if (!request) {
         return;
       }
-      await getDb().put('friendRequests', request);
+      await db.put('friendRequests', request);
     },
 
     /** 保存单条好友申请 */
-    saveFriendRequest(request: FriendRequest | undefined): void {
-      void this.saveFriendRequestRecord(request).catch((error) =>
+    saveFriendRequest(
+      request: FriendRequest | undefined,
+      db: DbClient = getDb(),
+    ): void {
+      void this.saveFriendRequestRecord(request, db).catch((error) =>
         console.warn('[IM friendStore] 本地好友申请写入失败', error),
       );
     },
@@ -250,26 +263,16 @@ export const useFriendStore = defineStore('imFriendStore', {
     /** 从后端拉取并覆盖本地列表（含 DISABLE 历史好友给已删对话兜底）；只同步 ENABLE 的会话信息，DISABLE 的不动 —— cascade 清会话由 WS dispatcher 按 payload.clear 处理，避免 fetchFriendList 覆盖用户「不清空聊天记录」的选择 */
     async fetchFriendList(force = false) {
       if (this.loaded && !force) {
-        return;
+        return this.friends;
       }
-      // 快照 epoch；clear() 之后到 .then 之间触发的 epoch++ 表示账号已切，旧结果不能写入新 store
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      if (
-        pendingFetchFriends?.epoch === requestEpoch &&
-        pendingFetchFriends.userId === requestUserId
-      ) {
-        return pendingFetchFriends.promise;
-      }
-      const promise = apiGetMyFriendList()
-        .then((list) => {
-          if (
-            requestEpoch !== storeEpoch ||
-            getCurrentUserId() !== requestUserId
-          ) {
-            return;
-          }
-          this.friends = (list || []).map((friend) => convertFriend(friend));
+      return runResourceRequest(
+        ResourceRequestKey.FRIEND_LIST,
+        async () => {
+          const db = await initDb();
+          const friends = ((await apiGetMyFriendList()) || []).map(
+            convertFriend,
+          );
+          this.friends = friends;
           this.loaded = true;
           const conversationStore = useConversationStore();
           for (const friend of this.friends) {
@@ -284,24 +287,16 @@ export const useFriendStore = defineStore('imFriendStore', {
                 avatar: friend.avatar,
                 silent: friend.silent,
               },
+              db,
             );
           }
-          this.saveFriendList();
-        })
-        .finally(() => {
-          if (
-            pendingFetchFriends?.epoch === requestEpoch &&
-            pendingFetchFriends.userId === requestUserId
-          ) {
-            pendingFetchFriends = null;
-          }
-        });
-      pendingFetchFriends = {
-        epoch: requestEpoch,
-        userId: requestUserId,
-        promise,
-      };
-      return promise;
+          await this.saveFriendList(friends, db).catch((error) =>
+            console.warn('[IM friendStore] 本地好友缓存写入失败', error),
+          );
+          return friends;
+        },
+        { mode: ResourceRequestMode.SINGLE_FLIGHT, refreshAfterPending: force },
+      );
     },
 
     /**
@@ -310,66 +305,47 @@ export const useFriendStore = defineStore('imFriendStore', {
      * 含已删除好友，按 status 走 upsert
      */
     async pullFriends() {
-      // 快照 epoch；账号在拉取途中切换（clear() → epoch++）时丢弃旧账号那几页结果，防跨账号数据泄漏
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      const isActive = () =>
-        requestEpoch === storeEpoch && getCurrentUserId() === requestUserId;
+      const db = await initDb();
       await runIncrementalPull(
+        db,
         StorageKeys.settings.friendPullCursor,
         apiPullMyFriendList,
         async (records) => {
-          if (!isActive()) {
-            return false;
-          }
           await Promise.all(
-            records.map((vo) => this.upsertFriendForPull(convertFriend(vo))),
+            records.map((vo) =>
+              this.upsertFriendForPull(convertFriend(vo), db),
+            ),
           );
           return true;
         },
-        isActive,
       );
       // 置 loaded，供通讯录页 fetchFriendList(force=false) 复用缓存而非重复全量拉
-      if (isActive()) {
-        this.loaded = true;
-      }
+      this.loaded = true;
     },
 
     /** 按 friendUserId 获取详情并合并到本地（保证 nickname / avatar 最新） */
     async fetchFriendInfo(friendUserId: number) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      if (!requestUserId) {
-        return;
-      }
-      const key = getPendingFriendInfoKey(requestUserId, friendUserId);
-      const inflight = pendingFetchFriendInfos.get(key);
+      const inflight = pendingFetchFriendInfos.get(friendUserId);
       if (inflight) {
         return inflight;
       }
       const promise = (async () => {
         try {
+          const db = await initDb();
           const data = await apiGetFriend(friendUserId);
           if (!data) {
             return;
           }
-          // clear() 已切账号：旧请求的好友详情不能再 upsert 进新账号的 friends
-          if (
-            requestEpoch !== storeEpoch ||
-            getCurrentUserId() !== requestUserId
-          ) {
-            return;
-          }
-          this.upsertFriend(convertFriend(data));
+          await this.upsertFriendForPull(convertFriend(data), db);
         } catch (error) {
           console.warn('[IM friendStore] fetchFriendInfo 失败', error);
         }
       })().finally(() => {
-        if (pendingFetchFriendInfos.get(key) === promise) {
-          pendingFetchFriendInfos.delete(key);
+        if (pendingFetchFriendInfos.get(friendUserId) === promise) {
+          pendingFetchFriendInfos.delete(friendUserId);
         }
       });
-      pendingFetchFriendInfos.set(key, promise);
+      pendingFetchFriendInfos.set(friendUserId, promise);
       return promise;
     },
 
@@ -377,27 +353,32 @@ export const useFriendStore = defineStore('imFriendStore', {
 
     /** 发起好友申请：成功后等待对方同意（不直接落地为好友） */
     async applyFriendRequest(
-      reqVO: ImFriendRequestApi.FriendRequestApplyReqVO,
+      reqVO: ImFriendRequestApplyReqVO,
     ): Promise<null | number> {
       return await apiApplyFriendRequest(reqVO);
     },
 
     /** 同意一条好友申请；后端会双向落库 + 推 FRIEND_ADD，本端等通知到达再 upsertFriend */
     async agreeFriendRequest(requestId: number) {
+      const db = await initDb();
       await apiAgreeFriendRequest(requestId);
       await this.applyHandleResult(
         requestId,
         ImFriendRequestHandleResult.AGREED,
+        undefined,
+        db,
       );
     },
 
     /** 拒绝一条好友申请 */
     async refuseFriendRequest(requestId: number, handleContent?: string) {
+      const db = await initDb();
       await apiRefuseFriendRequest(requestId, handleContent);
       await this.applyHandleResult(
         requestId,
         ImFriendRequestHandleResult.REFUSED,
         handleContent,
+        db,
       );
     },
 
@@ -406,6 +387,7 @@ export const useFriendStore = defineStore('imFriendStore', {
       requestId: number,
       result: number,
       handleContent?: string,
+      db: DbClient = getDb(),
     ): Promise<void> {
       const request = this.getFriendRequest(requestId);
       if (request) {
@@ -414,108 +396,70 @@ export const useFriendStore = defineStore('imFriendStore', {
           request.handleContent = handleContent;
         }
         request.handleTime = Date.now();
-        this.saveFriendRequest(request);
+        this.saveFriendRequest(request, db);
         return;
       }
-      await this.fetchFriendRequest(requestId);
+      await this.fetchFriendRequest(requestId, db);
     },
 
-    /** 拉取「我相关」的好友申请列表首页（页面打开 / 收到 FRIEND_REQUEST_RECEIVED 时刷新）；pending 期间复用同一 Promise */
+    /** 拉取「我相关」的好友申请列表首页；pending 期间复用同一 Promise */
     async fetchFriendRequestList() {
-      if (pendingFetchRequests) {
-        const currentUserId = getCurrentUserId();
-        if (
-          pendingFetchRequests.epoch === storeEpoch &&
-          pendingFetchRequests.userId === currentUserId
-        ) {
-          return pendingFetchRequests.promise;
-        }
+      if (requestTask) {
+        return requestTask;
       }
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      const promise = apiGetMyFriendRequestList(FRIEND_REQUEST_PAGE_SIZE)
-        .then((list) => {
-          if (
-            requestEpoch !== storeEpoch ||
-            getCurrentUserId() !== requestUserId
-          ) {
-            return;
-          }
-          const items = (list || []).map((request) =>
-            convertFriendRequest(request),
-          );
-          this.friendRequests = items;
-          // 不足一页即没有更多；满页可能还有，等 loadMore 拉到 0 条再确定
-          this.hasMoreFriendRequests = items.length >= FRIEND_REQUEST_PAGE_SIZE;
-          this.saveFriendRequestList();
-        })
-        .finally(() => {
-          if (
-            pendingFetchRequests?.epoch === requestEpoch &&
-            pendingFetchRequests.userId === requestUserId
-          ) {
-            pendingFetchRequests = null;
-          }
-        });
-      pendingFetchRequests = {
-        epoch: requestEpoch,
-        userId: requestUserId,
-        promise,
-      };
+      const promise = (async () => {
+        const db = await initDb();
+        const list = await apiGetMyFriendRequestList(FRIEND_REQUEST_PAGE_SIZE);
+        const items = (list || []).map(convertFriendRequest);
+        this.friendRequests = items.toSorted(
+          (left, right) => right.id - left.id,
+        );
+        // 不足一页即没有更多；满页可能还有，等 loadMore 拉到 0 条再确定
+        this.hasMoreFriendRequests = items.length >= FRIEND_REQUEST_PAGE_SIZE;
+        this.saveFriendRequestList(undefined, db);
+      })().finally(() => {
+        if (requestTask === promise) {
+          requestTask = null;
+        }
+      });
+      requestTask = promise;
       return promise;
     },
 
     /** 加载更多申请（按本地最旧 requestId 游标分页）；无更多 / pending 中直接返回 */
     async loadMoreFriendRequestList() {
-      const requestUserId = getCurrentUserId();
-      const hasSameFetchPending =
-        pendingFetchRequests?.epoch === storeEpoch &&
-        pendingFetchRequests.userId === requestUserId;
-      if (!this.hasMoreFriendRequests || hasSameFetchPending) {
+      if (!this.hasMoreFriendRequests) {
         return;
       }
-      if (
-        pendingLoadMoreRequests?.epoch === storeEpoch &&
-        pendingLoadMoreRequests.userId === requestUserId
-      ) {
-        return pendingLoadMoreRequests.promise;
+      if (requestTask) {
+        return requestTask;
       }
       const oldest = this.friendRequests[this.friendRequests.length - 1];
       if (!oldest) {
         return this.fetchFriendRequestList();
       }
-      const requestEpoch = storeEpoch;
-      const promise = apiGetMyFriendRequestList(
-        FRIEND_REQUEST_PAGE_SIZE,
-        oldest.id,
-      )
-        .then((list) => {
-          if (
-            requestEpoch !== storeEpoch ||
-            getCurrentUserId() !== requestUserId
-          ) {
-            return;
-          }
-          const items = (list || []).map((request) =>
-            convertFriendRequest(request),
-          );
-          this.friendRequests.push(...items);
-          this.hasMoreFriendRequests = items.length >= FRIEND_REQUEST_PAGE_SIZE;
-          this.saveFriendRequestList();
-        })
-        .finally(() => {
-          if (
-            pendingLoadMoreRequests?.epoch === requestEpoch &&
-            pendingLoadMoreRequests.userId === requestUserId
-          ) {
-            pendingLoadMoreRequests = null;
-          }
-        });
-      pendingLoadMoreRequests = {
-        epoch: requestEpoch,
-        userId: requestUserId,
-        promise,
-      };
+      const promise = (async () => {
+        const db = await initDb();
+        const list = await apiGetMyFriendRequestList(
+          FRIEND_REQUEST_PAGE_SIZE,
+          oldest.id,
+        );
+        const items = (list || []).map(convertFriendRequest);
+        const currentIds = new Set(
+          this.friendRequests.map((request) => request.id),
+        );
+        const additions = items.filter(
+          (request) => !currentIds.has(request.id),
+        );
+        this.friendRequests.push(...additions);
+        this.hasMoreFriendRequests = items.length >= FRIEND_REQUEST_PAGE_SIZE;
+        this.saveFriendRequestList(undefined, db);
+      })().finally(() => {
+        if (requestTask === promise) {
+          requestTask = null;
+        }
+      });
+      requestTask = promise;
       return promise;
     },
 
@@ -525,33 +469,23 @@ export const useFriendStore = defineStore('imFriendStore', {
     },
 
     /** 按 id 从后端单查并 upsert 到本地（dispatcher 兜底用，避免全量重拉）；后端带越权过滤 */
-    async fetchFriendRequest(requestId: number) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
+    async fetchFriendRequest(requestId: number, db: DbClient = getDb()) {
       const data = await apiGetMyFriendRequest(requestId);
       if (!data) {
         return;
       }
-      // clear() 已切账号：旧请求的申请记录不能再写进新账号的 friendRequests
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
-      this.upsertFriendRequest(convertFriendRequest(data));
-    },
-
-    /** 合并单条好友申请：已有则按 id 覆盖；新记录按 id 倒序插入（比本地最旧还老则跳过，留给 loadMore 带回） */
-    upsertFriendRequest(next: FriendRequest) {
-      void this.upsertFriendRequestForPull(next).catch((error) =>
-        console.warn('[IM friendStore] 本地好友申请写入失败', error),
-      );
+      await this.upsertFriendRequestForPull(convertFriendRequest(data), db);
     },
 
     /** 合并单条好友申请 */
-    async upsertFriendRequestForPull(next: FriendRequest): Promise<void> {
+    async upsertFriendRequestForPull(
+      next: FriendRequest,
+      db: DbClient = getDb(),
+    ): Promise<void> {
       const existing = this.getFriendRequest(next.id);
       if (existing) {
         Object.assign(existing, next);
-        await this.saveFriendRequestRecord(existing);
+        await this.saveFriendRequestRecord(existing, db);
         return;
       }
       // 比本地最旧 id 还老：不入列表，让 loadMore 自然带回，避免破坏 id 倒序 / 后续 loadMore 重复 push
@@ -568,30 +502,24 @@ export const useFriendStore = defineStore('imFriendStore', {
       } else {
         this.friendRequests.splice(insertIndex, 0, next);
       }
-      await this.saveFriendRequestRecord(next);
+      await this.saveFriendRequestRecord(next, db);
     },
 
     /** 增量拉取好友申请变更并合并（重连 / 离线补偿）；按 update_time + id 游标，已处理的按 handleResult 覆盖 */
     async pullFriendRequests() {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      const isActive = () =>
-        requestEpoch === storeEpoch && getCurrentUserId() === requestUserId;
+      const db = await initDb();
       await runIncrementalPull(
+        db,
         StorageKeys.settings.friendRequestPullCursor,
-        apiPullMyFriendRequestList,
+        (params) => apiPullMyFriendRequestList(params),
         async (records) => {
-          if (!isActive()) {
-            return false;
-          }
           await Promise.all(
             records.map((vo) =>
-              this.upsertFriendRequestForPull(convertFriendRequest(vo)),
+              this.upsertFriendRequestForPull(convertFriendRequest(vo), db),
             ),
           );
           return true;
         },
-        isActive,
       );
     },
 
@@ -599,23 +527,15 @@ export const useFriendStore = defineStore('imFriendStore', {
 
     /** 删除好友（单向软删，本端置 DISABLE）；clear=true 时级联清理本地相关数据（如私聊会话），并透传后端给多端同步 */
     async deleteFriend(friendUserId: number, clear: boolean = true) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
+      const db = await initDb();
       await apiDeleteFriend(friendUserId, clear);
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
-      this.removeFriend(friendUserId, clear);
+      this.removeFriend(friendUserId, clear, db);
     },
 
     /** 切换免打扰：同步会话的 silent 字段，避免会话列表 silent 图标等 1210 推到才更新 */
     async setFriendSilent(friendUserId: number, silent: boolean) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
+      const db = await initDb();
       await apiUpdateFriend({ friendUserId, silent });
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
       const friend = this.getFriend(friendUserId);
       if (friend) {
         friend.silent = silent;
@@ -624,66 +544,40 @@ export const useFriendStore = defineStore('imFriendStore', {
           ImConversationType.PRIVATE,
           friendUserId,
           { silent },
+          db,
         );
-        this.saveFriend(friend);
-      }
-    },
-
-    /** 切换联系人置顶 */
-    async setFriendPinned(friendUserId: number, pinned: boolean) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
-      await apiUpdateFriend({ friendUserId, pinned });
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
-      const friend = this.getFriend(friendUserId);
-      if (friend) {
-        friend.pinned = pinned;
-        this.saveFriend(friend);
+        this.saveFriend(friend, db);
       }
     },
 
     /** 拉黑好友：本端乐观更新 + 调接口；后端 FRIEND_BLOCK 推到时由 dispatcher 兜底同步多端 */
     async blockFriend(friendUserId: number) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
+      const db = await initDb();
       await apiBlockFriend(friendUserId);
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
       const friend = this.getFriend(friendUserId);
       if (friend) {
         friend.blocked = true;
-        this.saveFriend(friend);
+        this.saveFriend(friend, db);
       }
     },
 
     /** 移出黑名单：本端乐观更新 + 调接口；后端 FRIEND_UNBLOCK 推到时由 dispatcher 兜底同步多端 */
     async unblockFriend(friendUserId: number) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
+      const db = await initDb();
       await apiUnblockFriend(friendUserId);
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
       const friend = this.getFriend(friendUserId);
       if (friend) {
         friend.blocked = false;
-        this.saveFriend(friend);
+        this.saveFriend(friend, db);
       }
     },
 
     /** 修改好友展示备注（仅自己可见） */
     async setFriendDisplayName(friendUserId: number, displayName: string) {
-      const requestEpoch = storeEpoch;
-      const requestUserId = getCurrentUserId();
       const value = displayName.trim();
       // 后端 displayName 语义：null/undefined = 不改，"" = 清空，所以这里直接传 value（可能是空串）
+      const db = await initDb();
       await apiUpdateFriend({ friendUserId, displayName: value });
-      if (requestEpoch !== storeEpoch || getCurrentUserId() !== requestUserId) {
-        return;
-      }
       const friend = this.getFriend(friendUserId);
       if (friend) {
         friend.displayName = value;
@@ -691,11 +585,10 @@ export const useFriendStore = defineStore('imFriendStore', {
         conversationStore.updateConversation(
           ImConversationType.PRIVATE,
           friendUserId,
-          {
-            name: getFriendDisplayName(friend),
-          },
+          { name: getFriendDisplayName(friend) },
+          db,
         );
-        this.saveFriend(friend);
+        this.saveFriend(friend, db);
       }
     },
 
@@ -707,21 +600,24 @@ export const useFriendStore = defineStore('imFriendStore', {
     },
 
     /** 本地合并 / 新增某个好友 */
-    async upsertFriendForPull(friend: Friend): Promise<void> {
+    async upsertFriendForPull(
+      friend: Friend,
+      db: DbClient = getDb(),
+    ): Promise<void> {
       const index = this.friends.findIndex(
         (existing) => existing.friendUserId === friend.friendUserId,
       );
-      if (index === -1) {
-        this.friends.push({
-          ...friend,
-          status: friend.status ?? CommonStatusEnum.ENABLE,
-        });
-      } else {
+      if (index !== -1) {
         this.friends[index] = {
           ...this.friends[index],
           ...friend,
           status: friend.status ?? CommonStatusEnum.ENABLE,
         };
+      } else {
+        this.friends.push({
+          ...friend,
+          status: friend.status ?? CommonStatusEnum.ENABLE,
+        });
       }
       const conversationStore = useConversationStore();
       const merged = this.getFriend(friend.friendUserId);
@@ -733,12 +629,17 @@ export const useFriendStore = defineStore('imFriendStore', {
           avatar: friend.avatar,
           silent: friend.silent,
         },
+        db,
       );
-      await this.saveFriendRecord(merged);
+      await this.saveFriendRecord(merged, db);
     },
 
     /** 本地标记删除（WebSocket FRIEND_DELETE 事件触发；clear=true 时级联清相关数据如私聊会话） */
-    removeFriend(friendUserId: number, clear: boolean = true) {
+    removeFriend(
+      friendUserId: number,
+      clear: boolean = true,
+      db: DbClient = getDb(),
+    ) {
       const friend = this.getFriend(friendUserId);
       if (friend) {
         // blocked 不动，跟后端 deleteFriend0「删好友期间保留拉黑状态」对齐
@@ -747,27 +648,25 @@ export const useFriendStore = defineStore('imFriendStore', {
       }
       if (clear) {
         const conversationStore = useConversationStore();
-        conversationStore.removePrivateConversation(friendUserId);
+        void conversationStore
+          .removePrivateConversation(friendUserId, db)
+          .catch((error) =>
+            console.warn('[IM friendStore] 私聊会话删除失败', error),
+          );
       }
-      this.saveFriend(friend);
+      this.saveFriend(friend, db);
     },
 
     // ==================== WebSocket 事件 dispatcher（1201-1210 段） ====================
 
     /** FRIEND_REQUEST_RECEIVED(1203)：收到新申请；payload 已带申请方昵称 / 头像，按 requestId 直推 push 进列表 */
     applyFriendRequestReceivedNotification(payload: FriendNotificationPayload) {
-      if (!payload.requestId) {
-        return;
-      }
       const currentUserId = getCurrentUserId();
       const existingIndex = this.friendRequests.findIndex(
         (item) => item.id === payload.requestId,
       );
       if (existingIndex !== -1) {
-        const existing = this.friendRequests.splice(existingIndex, 1)[0];
-        if (!existing) {
-          return;
-        }
+        const existing = this.friendRequests.splice(existingIndex, 1)[0]!;
         const next = {
           ...existing,
           fromUserId: payload.operatorUserId,
@@ -784,7 +683,7 @@ export const useFriendStore = defineStore('imFriendStore', {
         return;
       }
       const next = {
-        id: payload.requestId,
+        id: payload.requestId!,
         fromUserId: payload.operatorUserId,
         toUserId: currentUserId,
         handleResult: ImFriendRequestHandleResult.UNHANDLED,
@@ -800,24 +699,22 @@ export const useFriendStore = defineStore('imFriendStore', {
 
     /** FRIEND_REQUEST_APPROVED(1201)：我的申请被同意；按 requestId 更新状态（FRIEND_ADD 会另外推） */
     applyFriendRequestApprovedNotification(payload: FriendNotificationPayload) {
-      if (!payload.requestId) {
-        return;
-      }
       void this.applyHandleResult(
-        payload.requestId,
+        payload.requestId!,
         ImFriendRequestHandleResult.AGREED,
+      ).catch((error) =>
+        console.warn('[IM friendStore] 好友申请同意状态写入失败', error),
       );
     },
 
     /** FRIEND_REQUEST_REJECTED(1202)：我的申请被拒绝；按 requestId 更新状态 */
     applyFriendRequestRejectedNotification(payload: FriendNotificationPayload) {
-      if (!payload.requestId) {
-        return;
-      }
       void this.applyHandleResult(
-        payload.requestId,
+        payload.requestId!,
         ImFriendRequestHandleResult.REFUSED,
         payload.handleContent,
+      ).catch((error) =>
+        console.warn('[IM friendStore] 好友申请拒绝状态写入失败', error),
       );
     },
 
@@ -830,10 +727,13 @@ export const useFriendStore = defineStore('imFriendStore', {
       _payload: FriendNotificationPayload,
       peerUserId: number,
     ) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       if (this.isActiveFriend(peerUserId)) {
         return;
       }
-      void this.fetchFriendInfo(peerUserId);
+      void this.fetchFriendInfo(peerUserId).catch((error) =>
+        console.warn('[IM friendStore] 好友详情补拉失败', error),
+      );
     },
 
     /**
@@ -844,11 +744,13 @@ export const useFriendStore = defineStore('imFriendStore', {
       payload: FriendNotificationPayload,
       peerUserId: number,
     ) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       this.removeFriend(peerUserId, payload.clear !== false);
     },
 
     /** FRIEND_BLOCK(1207)：拉黑；多端同步 */
     applyFriendBlockNotification(payload: FriendNotificationPayload) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       const friend = this.getFriend(payload.friendUserId);
       if (friend) {
         friend.blocked = true;
@@ -858,6 +760,7 @@ export const useFriendStore = defineStore('imFriendStore', {
 
     /** FRIEND_UNBLOCK(1208)：移出黑名单；多端同步 */
     applyFriendUnblockNotification(payload: FriendNotificationPayload) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       const friend = this.getFriend(payload.friendUserId);
       if (friend) {
         friend.blocked = false;
@@ -867,22 +770,24 @@ export const useFriendStore = defineStore('imFriendStore', {
 
     /** FRIEND_INFO_UPDATED(1209)：好友资料变更（昵称 / 头像）；重拉详情 */
     applyFriendInfoUpdatedNotification(payload: FriendNotificationPayload) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       void this.fetchFriendInfo(payload.friendUserId);
     },
 
     /** FRIEND_UPDATE(1210)：批量更新（备注 / 免打扰 / 联系人置顶）；多端同步 */
     applyFriendUpdateNotification(payload: FriendNotificationPayload) {
+      queueFriendListRefreshAfterPending(() => this.fetchFriendList(true));
       const friend = this.getFriend(payload.friendUserId);
       if (!friend) {
         return;
       }
-      if (payload.displayName !== null) {
+      if (payload.displayName != null) {
         friend.displayName = payload.displayName;
       }
-      if (payload.silent !== null) {
+      if (payload.silent != null) {
         friend.silent = payload.silent;
       }
-      if (payload.pinned !== null) {
+      if (payload.pinned != null) {
         friend.pinned = payload.pinned;
       }
       const conversationStore = useConversationStore();
@@ -897,22 +802,19 @@ export const useFriendStore = defineStore('imFriendStore', {
       this.saveFriend(friend);
     },
 
-    /** 清空好友内存状态，并废弃未返回请求（pending Promise 置空 + storeEpoch++） */
+    /** 清空好友内存状态，并废弃未返回请求 */
     clear() {
       this.friends = [];
       this.friendRequests = [];
       this.loaded = false;
       this.hasMoreFriendRequests = true;
-      pendingFetchFriends = null;
-      pendingFetchRequests = null;
-      pendingLoadMoreRequests = null;
+      requestTask = null;
       pendingFetchFriendInfos.clear();
-      storeEpoch++;
     },
   },
 });
 
-function convertFriend(vo: ImFriendApi.FriendRespVO): Friend {
+function convertFriend(vo: ImFriendRespVO): Friend {
   return {
     id: vo.id,
     friendUserId: vo.friendUserId,
@@ -931,9 +833,7 @@ function convertFriend(vo: ImFriendApi.FriendRespVO): Friend {
   };
 }
 
-function convertFriendRequest(
-  vo: ImFriendRequestApi.FriendRequestRespVO,
-): FriendRequest {
+function convertFriendRequest(vo: ImFriendRequestRespVO): FriendRequest {
   return {
     id: vo.id,
     fromUserId: vo.fromUserId,
@@ -950,8 +850,6 @@ function convertFriendRequest(
     toAvatar: vo.toAvatar,
   };
 }
-
-export const useFriendStoreWithOut = () => useFriendStore();
 
 // dev: 让 Pinia 的 actions / state 改动支持 HMR，避免每次改 store 都得硬刷
 if (import.meta.hot) {

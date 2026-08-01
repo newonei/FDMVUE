@@ -26,12 +26,14 @@ import {
 import {
   getCardLabelInfo,
   parseMessage,
-  resolveFriendNotificationText,
-  resolveGroupNotificationText,
-  resolveRtcCallLastContent,
   segmentsToText,
   tipMention,
   tipText,
+} from './message';
+import {
+  resolveFriendNotificationText,
+  resolveGroupNotificationText,
+  resolveRtcCallLastContent,
 } from './message';
 import { getSenderDisplayName } from './user';
 

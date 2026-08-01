@@ -7,14 +7,6 @@
 // ====================================================================
 
 import type { Message } from '../home/types';
-import type {
-  CardMessage,
-  FaceMessage,
-  FileMessage,
-  MaterialMessage,
-  TextMessage,
-  TipSegment,
-} from './message';
 
 import {
   ImContentType,
@@ -24,14 +16,22 @@ import {
   isRtcCallTip,
 } from './constants';
 import {
+  type CardMessage,
+  type FaceMessage,
+  type FileMessage,
   getCardLabelInfo,
+  type MaterialMessage,
   parseMessage,
+  segmentsToText,
+  type TextMessage,
+  tipMention,
+  type TipSegment,
+  tipText,
+} from './message';
+import {
   resolveFriendNotificationText,
   resolveGroupNotificationText,
   resolveRtcCallLastContent,
-  segmentsToText,
-  tipMention,
-  tipText,
 } from './message';
 import { getSenderDisplayName } from './user';
 
@@ -125,12 +125,10 @@ export function summarizeMessageContent(
   opts?: { withFileName?: boolean },
 ): string {
   switch (message.type) {
-    case ImContentType.CARD: {
+    case ImContentType.CARD:
       return `[${getCardLabelInfo(parseMessage<CardMessage>(message.content)).label}]`;
-    }
-    case ImContentType.FACE: {
+    case ImContentType.FACE:
       return buildFacePreviewText(parseMessage<FaceMessage>(message.content));
-    }
     case ImContentType.FILE: {
       if (opts?.withFileName) {
         const file = parseMessage<FileMessage>(message.content);
@@ -138,32 +136,25 @@ export function summarizeMessageContent(
       }
       return '[文件]';
     }
-    case ImContentType.IMAGE: {
+    case ImContentType.IMAGE:
       return '[图片]';
-    }
     case ImContentType.MATERIAL: {
       const material = parseMessage<MaterialMessage>(message.content);
       return material?.title ? `[频道] ${material.title}` : '[频道]';
     }
-    case ImContentType.MERGE: {
+    case ImContentType.MERGE:
       return '[聊天记录]';
-    }
     case ImContentType.RTC_CALL_END:
-    case ImContentType.RTC_CALL_START: {
+    case ImContentType.RTC_CALL_START:
       return '[语音通话]';
-    }
-    case ImContentType.TEXT: {
+    case ImContentType.TEXT:
       return parseMessage<TextMessage>(message.content)?.content ?? '';
-    }
-    case ImContentType.VIDEO: {
+    case ImContentType.VIDEO:
       return '[视频]';
-    }
-    case ImContentType.VOICE: {
+    case ImContentType.VOICE:
       return '[语音]';
-    }
-    default: {
+    default:
       return '';
-    }
   }
 }
 
