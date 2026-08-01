@@ -354,7 +354,7 @@ const toolGroups: WorkbenchToolGroup[] = [
         group: '采购质检',
         icon: 'carbon:price',
         title: '材料价格表',
-        url: '/analytics',
+        url: '/dashboard/analytics',
       },
       {
         color: '#f59e0b',
@@ -404,7 +404,7 @@ const toolGroups: WorkbenchToolGroup[] = [
         group: '数据看板',
         icon: 'ion:bar-chart-outline',
         title: '内部分析页',
-        url: '/analytics',
+        url: '/dashboard/analytics',
       },
       {
         color: '#f2c811',
@@ -431,7 +431,7 @@ const toolGroups: WorkbenchToolGroup[] = [
         group: '数据看板',
         icon: 'carbon:chart-scatter',
         title: '广告 ROI',
-        url: '/analytics',
+        url: '/dashboard/analytics',
       },
       {
         color: '#16a34a',
@@ -440,7 +440,7 @@ const toolGroups: WorkbenchToolGroup[] = [
         group: '数据看板',
         icon: 'carbon:inventory-management',
         title: '库存毛利',
-        url: '/analytics',
+        url: '/dashboard/analytics',
       },
     ],
   },
@@ -498,7 +498,7 @@ const quickNavItems: WorkbenchQuickNavItem[] = [
     color: '#00d8ff',
     icon: 'ion:bar-chart-outline',
     title: '分析页',
-    url: '/analytics',
+    url: '/dashboard/analytics',
   },
   {
     color: '#1d4ed8',

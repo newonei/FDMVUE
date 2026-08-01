@@ -1,7 +1,12 @@
-import { initPreferences } from '@vben/preferences';
+import {
+  initPreferences,
+  preferences,
+  updatePreferences,
+} from '@vben/preferences';
 import { unmountGlobalLoading } from '@vben/utils';
 
 import { overridesPreferences, preferencesExtension } from './preferences';
+import { resolveLegacyRoutePath } from './router/legacy-route-redirects';
 
 /**
  * 应用初始化完成之后再进行页面加载渲染
@@ -19,6 +24,16 @@ async function initApplication() {
     namespace,
     overrides: overridesPreferences,
   });
+
+  // Dashboard children changed from top-level paths (/analytics, /workspace)
+  // to nested paths in v2026.07. Migrate persisted preferences before the
+  // router is imported so an old default home path cannot land on the 404 page.
+  const migratedHomePath = resolveLegacyRoutePath(
+    preferences.app.defaultHomePath,
+  );
+  if (migratedHomePath !== preferences.app.defaultHomePath) {
+    updatePreferences({ app: { defaultHomePath: migratedHomePath } });
+  }
 
   // 启动应用并挂载
   // vue应用主要逻辑及视图
