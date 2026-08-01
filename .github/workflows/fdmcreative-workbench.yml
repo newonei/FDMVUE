@@ -1,0 +1,54 @@
+name: Verify FDM Creative Workbench
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/dependabot.yml'
+      - '.github/workflows/fdmcreative-workbench.yml'
+      - 'apps/web-antd/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web-antd/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, test and build web-antd
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Setup Node and pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Typecheck fdmai and fdmcreative
+        run: pnpm --filter @vben/web-antd run typecheck:fdmcreative
+
+      - name: Unit test workflow rules
+        run: >-
+          pnpm exec vitest run
+          apps/web-antd/src/views/fdmcreative/workbench/editor/graph
+          --dom
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Playwright workbench smoke
+        run: pnpm exec playwright test --config apps/web-antd/playwright.config.ts
+
+      - name: Build web-antd
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: pnpm run build:antd

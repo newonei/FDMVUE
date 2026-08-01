@@ -5,6 +5,11 @@ updates:
     schedule:
       interval: daily
     groups:
+      antv-x6:
+        patterns:
+          - '@antv/x6'
+          - '@antv/x6-*'
+        update-types: [minor, patch]
       non-breaking-changes:
         update-types: [minor, patch]
 

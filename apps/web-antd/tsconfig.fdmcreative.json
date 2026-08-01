@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/api/fdmai/**/*.ts",
+    "src/api/fdmcreative/**/*.ts",
+    "src/router/routes/modules/fdmcreative.ts",
+    "src/views/fdmai/**/*.ts",
+    "src/views/fdmai/**/*.vue",
+    "src/views/fdmcreative/**/*.ts",
+    "src/views/fdmcreative/**/*.vue"
+  ]
+}

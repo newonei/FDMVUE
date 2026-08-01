@@ -1,4 +1,3 @@
-export * from './biz-ai-enum';
 export * from './biz-bpm-enum';
 export * from './biz-erp-enum';
 export * from './biz-infra-enum';
