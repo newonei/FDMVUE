@@ -25,6 +25,11 @@ async function initApplication() {
     overrides: overridesPreferences,
   });
 
+  // web-antd 不启用 Ant Design 全局紧凑算法；迁移旧缓存，避免表单再次整体变矮。
+  if (preferences.app.compact) {
+    updatePreferences({ app: { compact: false } });
+  }
+
   // Dashboard children changed from top-level paths (/analytics, /workspace)
   // to nested paths in v2026.07. Migrate persisted preferences before the
   // router is imported so an old default home path cannot land on the 404 page.

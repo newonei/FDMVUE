@@ -6,6 +6,7 @@ import { computed, inject, onBeforeUnmount, ref } from 'vue';
 import { IconifyIcon } from '@vben/icons';
 
 import { CREATIVE_NODE_MAP, getCreativeNodeVisual } from '../graph/catalog';
+import { nodeRunStatusLabel } from '../node-run-status';
 
 interface WorkbenchNodeData {
   config?: Record<string, unknown>;
@@ -51,16 +52,7 @@ const nodeStyle = computed(() => ({
   width: `${size.value.width}px`,
 }));
 const statusText = computed(() => {
-  const labels: Record<string, string> = {
-    CANCEL_REQUESTED: '取消中',
-    CANCELED: '已取消',
-    FAILED: '失败',
-    QUEUED: '排队中',
-    RUNNING: '生成中',
-    STALE: '需更新',
-    SUCCEEDED: '已完成',
-  };
-  return labels[data.value.status ?? ''] ?? '待运行';
+  return nodeRunStatusLabel(data.value.status);
 });
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -481,9 +473,18 @@ const plannerTags = computed(() => {
   color: #dc2626;
 }
 
+.status-label.status-archiving_ai,
+.status-label.status-pending,
+.status-label.status-queued,
 .status-label.status-running,
-.status-label.status-queued {
+.status-label.status-waiting_ai {
   color: #1677ff;
+}
+
+.status-label.status-blocked,
+.status-label.status-cancel_requested,
+.status-label.status-stale {
+  color: #d97706;
 }
 
 .node-body,
@@ -628,8 +629,11 @@ const plannerTags = computed(() => {
   border-radius: 999px;
 }
 
+.status-dot.status-archiving_ai,
+.status-dot.status-pending,
+.status-dot.status-queued,
 .status-dot.status-running,
-.status-dot.status-queued {
+.status-dot.status-waiting_ai {
   background: #1677ff;
 }
 
@@ -641,6 +645,8 @@ const plannerTags = computed(() => {
   background: #ef4444;
 }
 
+.status-dot.status-blocked,
+.status-dot.status-cancel_requested,
 .status-dot.status-stale {
   background: #f59e0b;
 }

@@ -1,5 +1,7 @@
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
+import { isPortTypeCompatible } from './workflow-utils';
+
 export interface CreativeNodeTemplate {
   color: string;
   defaultConfig?: Record<string, unknown>;
@@ -8,6 +10,11 @@ export interface CreativeNodeTemplate {
   label: string;
   ports: FdmCreativeApi.WorkflowPort[];
   type: string;
+}
+
+export interface CreativeQuickConnectOption {
+  targetPortId: string;
+  template: CreativeNodeTemplate;
 }
 
 export type CreativeNodeVariant =
@@ -320,6 +327,26 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
 export const CREATIVE_NODE_MAP = new Map(
   CREATIVE_NODE_CATALOG.map((item) => [item.type, item]),
 );
+
+export function getQuickConnectOptions(
+  sourceType: FdmCreativeApi.PortType,
+): CreativeQuickConnectOption[] {
+  return CREATIVE_NODE_CATALOG.flatMap((template) => {
+    const targetPort = template.ports
+      .filter(
+        (port) =>
+          port.direction === 'INPUT' &&
+          isPortTypeCompatible(sourceType, port.type),
+      )
+      .sort((left, right) => {
+        const leftExact = left.type === sourceType ? 1 : 0;
+        const rightExact = right.type === sourceType ? 1 : 0;
+        if (leftExact !== rightExact) return rightExact - leftExact;
+        return Number(Boolean(right.required)) - Number(Boolean(left.required));
+      })[0];
+    return targetPort ? [{ targetPortId: targetPort.id, template }] : [];
+  });
+}
 
 export const NODE_GROUPS = [
   {

@@ -76,7 +76,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -96,10 +96,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
 
-    <div class="fdmxui-panel-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -125,86 +125,39 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </div>
       </header>
 
-      <div class="fdmxui-panel-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="fdmxui-panel-vxe-wrapper"
-          grid-class="fdmxui-panel-vxe-grid"
-          table-title="3XUI面板"
-        >
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '检测连接',
-                  type: 'link',
-                  icon: 'lucide:refresh-cw',
-                  auth: ['fdmxui:panel:update'],
-                  onClick: handleCheckConnection.bind(null, row),
+      <Grid table-title="3XUI面板">
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '检测连接',
+                type: 'link',
+                icon: 'lucide:refresh-cw',
+                auth: ['fdmxui:panel:update'],
+                onClick: handleCheckConnection.bind(null, row),
+              },
+              {
+                label: $t('common.edit'),
+                type: 'link',
+                icon: ACTION_ICON.EDIT,
+                auth: ['fdmxui:panel:update'],
+                onClick: handleEdit.bind(null, row),
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmxui:panel:delete'],
+                popConfirm: {
+                  title: $t('ui.actionMessage.deleteConfirm', [row.id]),
+                  confirm: handleDelete.bind(null, row),
                 },
-                {
-                  label: $t('common.edit'),
-                  type: 'link',
-                  icon: ACTION_ICON.EDIT,
-                  auth: ['fdmxui:panel:update'],
-                  onClick: handleEdit.bind(null, row),
-                },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmxui:panel:delete'],
-                  popConfirm: {
-                    title: $t('ui.actionMessage.deleteConfirm', [row.id]),
-                    confirm: handleDelete.bind(null, row),
-                  },
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.fdmxui-panel-page,
-.fdmxui-panel-grid {
-  min-height: 0;
-}
-
-.fdmxui-panel-page {
-  height: 100%;
-}
-
-.fdmxui-panel-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.fdmxui-panel-grid :deep(.fdmxui-panel-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.fdmxui-panel-grid :deep(.fdmxui-panel-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.fdmxui-panel-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .fdmxui-panel-grid {
-    min-height: 520px;
-  }
-}
-</style>

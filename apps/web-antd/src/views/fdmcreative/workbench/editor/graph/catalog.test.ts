@@ -4,6 +4,7 @@ import {
   CREATIVE_NODE_CATALOG,
   CREATIVE_NODE_MAP,
   getCreativeNodeVisual,
+  getQuickConnectOptions,
 } from './catalog';
 
 describe('creative node catalog', () => {
@@ -70,6 +71,39 @@ describe('creative node catalog', () => {
         type: 'content-plan',
       }),
     );
+  });
+
+  it('offers only type-compatible targets for quick connection', () => {
+    const contentPlanTargets = getQuickConnectOptions('content-plan');
+    expect(contentPlanTargets.map((item) => item.template.type)).toEqual([
+      'image-plan-item',
+      'video-plan-item',
+    ]);
+
+    const imageTargets = getQuickConnectOptions('image-asset');
+    expect(imageTargets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetPortId: 'reference',
+          template: expect.objectContaining({ type: 'image-to-image' }),
+        }),
+        expect.objectContaining({
+          targetPortId: 'first-frame',
+          template: expect.objectContaining({ type: 'image-to-video' }),
+        }),
+        expect.objectContaining({
+          targetPortId: 'image',
+          template: expect.objectContaining({ type: 'artifact-collection' }),
+        }),
+        expect.objectContaining({
+          targetPortId: 'images',
+          template: expect.objectContaining({ type: 'image-collection' }),
+        }),
+      ]),
+    );
+    expect(
+      imageTargets.some((item) => item.template.type === 'video-trim'),
+    ).toBe(false);
   });
 
   it('keeps every visual variant within the compact workbench limits', () => {

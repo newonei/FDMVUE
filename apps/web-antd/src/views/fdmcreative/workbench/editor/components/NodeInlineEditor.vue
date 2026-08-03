@@ -22,6 +22,7 @@ import {
 import { FileUpload } from '#/components/upload';
 
 import { CREATIVE_NODE_MAP } from '../graph/catalog';
+import { normalizeModelIdentifier } from '../model-identifier';
 
 type InlineEditorPlacement = 'above' | 'below';
 type SchemaScalar = number | string;
@@ -245,12 +246,19 @@ const effectiveStatus = computed(
 const isRunning = computed(
   () =>
     props.busy ||
-    ['CREATED', 'PENDING', 'RUNNING', 'WAITING_AI'].includes(
-      effectiveStatus.value,
-    ),
+    [
+      'ARCHIVING_AI',
+      'BLOCKED',
+      'CANCEL_REQUESTED',
+      'CREATED',
+      'PENDING',
+      'RUNNING',
+      'WAITING_AI',
+    ].includes(effectiveStatus.value),
 );
 const statusMeta = computed(() => {
   const map: Record<string, { color?: string; label: string }> = {
+    ARCHIVING_AI: { color: 'processing', label: '结果归档中' },
     BLOCKED: { color: 'orange', label: '等待依赖' },
     CANCEL_REQUESTED: { color: 'orange', label: '取消中' },
     CANCELED: { label: '已取消' },
@@ -278,23 +286,36 @@ const expectedModality = computed<FdmAiApi.Modality | undefined>(() => {
   return undefined;
 });
 const availableModels = computed(() =>
-  props.modelOptions.filter(
-    (item) =>
-      item.enabled &&
-      (!expectedModality.value || item.modality === expectedModality.value),
-  ),
+  props.modelOptions.filter((item) => {
+    if (
+      !item.enabled ||
+      (expectedModality.value && item.modality !== expectedModality.value)
+    ) {
+      return false;
+    }
+    if (!isPlanner.value) return true;
+    if (!item.capabilities.includes('STRUCTURED_OUTPUT')) return false;
+    const referenceAssetIds = config.value.referenceAssetIds;
+    return !(
+      Array.isArray(referenceAssetIds) &&
+      referenceAssetIds.length > 0 &&
+      !item.capabilities.includes('IMAGE_INPUT')
+    );
+  }),
 );
 const modelSelectOptions = computed(() =>
-  availableModels.value.map((item) => ({
-    label: item.name,
-    value: item.id,
-  })),
+  availableModels.value.flatMap((item) => {
+    const value = normalizeModelIdentifier(item.id);
+    return value ? [{ label: item.name, value }] : [];
+  }),
 );
 const selectedModelId = computed(() =>
-  asNumber(config.value.logicalModelId ?? config.value.modelId),
+  normalizeModelIdentifier(config.value.logicalModelId ?? config.value.modelId),
 );
 const selectedModel = computed(() =>
-  availableModels.value.find((item) => item.id === selectedModelId.value),
+  availableModels.value.find(
+    (item) => normalizeModelIdentifier(item.id) === selectedModelId.value,
+  ),
 );
 const frameSlots = computed(() => {
   const capabilities = selectedModel.value?.capabilities ?? [];

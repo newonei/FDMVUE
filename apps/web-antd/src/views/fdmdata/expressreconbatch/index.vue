@@ -154,7 +154,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -174,11 +174,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <ReconcileModalComp @success="handleReconcileSubmitted" />
     <ShopSummaryModalComp />
 
-    <div class="express-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -212,89 +212,42 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </div>
       </header>
 
-      <div class="express-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="express-vxe-wrapper"
-          grid-class="express-vxe-grid"
-          table-title="对账批次"
-        >
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '明细',
-                  type: 'link',
-                  icon: 'lucide:list-checks',
-                  auth: ['fdmdata:express-recon-detail:query'],
-                  onClick: handleViewDetail.bind(null, row),
+      <Grid table-title="对账批次">
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '明细',
+                type: 'link',
+                icon: 'lucide:list-checks',
+                auth: ['fdmdata:express-recon-detail:query'],
+                onClick: handleViewDetail.bind(null, row),
+              },
+              {
+                label: '重算',
+                type: 'link',
+                icon: 'lucide:refresh-cw',
+                auth: ['fdmdata:express-recon-batch:create'],
+                popConfirm: {
+                  title: '确认按当前计费规则重新计算该批次？',
+                  confirm: handleRecalculate.bind(null, row),
                 },
-                {
-                  label: '重算',
-                  type: 'link',
-                  icon: 'lucide:refresh-cw',
-                  auth: ['fdmdata:express-recon-batch:create'],
-                  popConfirm: {
-                    title: '确认按当前计费规则重新计算该批次？',
-                    confirm: handleRecalculate.bind(null, row),
-                  },
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmdata:express-recon-batch:delete'],
+                popConfirm: {
+                  title: $t('ui.actionMessage.deleteConfirm', [row.id]),
+                  confirm: handleDelete.bind(null, row),
                 },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmdata:express-recon-batch:delete'],
-                  popConfirm: {
-                    title: $t('ui.actionMessage.deleteConfirm', [row.id]),
-                    confirm: handleDelete.bind(null, row),
-                  },
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.express-page,
-.express-grid {
-  min-height: 0;
-}
-
-.express-page {
-  height: 100%;
-}
-
-.express-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.express-grid :deep(.express-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.express-grid :deep(.express-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.express-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .express-grid {
-    min-height: 520px;
-  }
-}
-</style>

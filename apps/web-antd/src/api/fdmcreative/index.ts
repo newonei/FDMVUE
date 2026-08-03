@@ -17,6 +17,7 @@ export namespace FdmCreativeApi {
     | 'RUNNING'
     | 'SUCCEEDED';
   export type NodeRunStatus =
+    | 'ARCHIVING_AI'
     | 'BLOCKED'
     | 'CANCEL_REQUESTED'
     | 'CANCELED'
@@ -175,7 +176,7 @@ export namespace FdmCreativeApi {
 
   export interface PlanPreviewReq {
     imageCount?: number;
-    logicalModelId?: number;
+    logicalModelId?: string;
     mode: PlanMode;
     plan?: ContentPlan;
     projectId: number;
@@ -375,7 +376,7 @@ export function syncContentPlan(planRevisionId: number) {
 }
 
 export function refineCreativePrompt(data: {
-  logicalModelId?: number;
+  logicalModelId?: string;
   projectId: number;
   prompt: string;
 }) {

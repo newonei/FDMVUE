@@ -1,6 +1,12 @@
 <script lang="ts" setup>
 import type { CSSProperties } from 'vue';
 
+import type { CreativeQuickConnectOption } from './graph/catalog';
+import type {
+  WorkbenchBlankConnectionRequest,
+  WorkbenchGraphAdapter,
+} from './graph/graph-adapter';
+
 import type { FdmAiApi } from '#/api/fdmai';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 import type { AxiosProgressEvent } from '#/api/infra/file';
@@ -60,12 +66,12 @@ import { uploadFile } from '#/api/infra/file';
 
 import { calculateInlineEditorPosition } from './components/node-editor/inline-editor-position';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
+import { normalizeModelIdentifier } from './model-identifier';
 import { CREATIVE_NODE_CATALOG, NODE_GROUPS } from './graph/catalog';
 import {
   createWorkbenchGraph,
   MAX_WORKBENCH_NODES,
 } from './graph/graph-adapter';
-import type { WorkbenchGraphAdapter } from './graph/graph-adapter';
 import {
   EMPTY_WORKFLOW,
   planSummary,
@@ -82,6 +88,7 @@ const canvasShellRef = ref<HTMLElement>();
 const inlineEditorRef = ref<HTMLElement>();
 const minimapRef = ref<HTMLElement>();
 const nodeLibraryRef = ref<HTMLElement>();
+const quickConnectRef = ref<HTMLElement>();
 const taskQueueRef = ref<HTMLElement>();
 const adapter = ref<WorkbenchGraphAdapter>();
 const loading = ref(true);
@@ -102,6 +109,8 @@ const runningExecution = ref<FdmCreativeApi.ExecutionDetail>();
 const taskDrawerOpen = ref(false);
 const modelOptions = ref<FdmAiApi.ModelOption[]>([]);
 const projectAssets = ref<FdmCreativeApi.CreativeAsset[]>([]);
+const quickConnectRequest = ref<WorkbenchBlankConnectionRequest>();
+const quickConnectSearch = ref('');
 let executionTimer: ReturnType<typeof setTimeout> | undefined;
 let planTimer: ReturnType<typeof setTimeout> | undefined;
 let promptRefineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -117,6 +126,8 @@ const inlineEditorPosition = reactive({
   visible: false,
   width: 700,
 });
+
+const quickConnectPosition = reactive({ left: 16, top: 16 });
 
 const planner = reactive({
   imageCount: 4,
@@ -144,6 +155,19 @@ const inlineEditorStyle = computed<CSSProperties>(() => ({
   visibility: inlineEditorPosition.visible ? 'visible' : 'hidden',
   width: `${inlineEditorPosition.width}px`,
 }));
+const quickConnectStyle = computed<CSSProperties>(() => ({
+  left: `${quickConnectPosition.left}px`,
+  top: `${quickConnectPosition.top}px`,
+}));
+const filteredQuickConnectOptions = computed(() => {
+  const keyword = quickConnectSearch.value.trim().toLowerCase();
+  return (quickConnectRequest.value?.options ?? []).filter(
+    ({ template }) =>
+      !keyword ||
+      template.label.toLowerCase().includes(keyword) ||
+      template.description.toLowerCase().includes(keyword),
+  );
+});
 const summary = computed(() => planSummary(pendingPlan.value?.plan));
 const saveStatus = computed(() => {
   if (saving.value) return '保存中…';
@@ -180,9 +204,14 @@ const selectedResultNodeRun = computed(() =>
 const inlineEditorBusy = computed(
   () =>
     plannerBusy.value ||
-    ['PENDING', 'RUNNING', 'WAITING_AI'].includes(
-      selectedResultNodeRun.value?.status ?? '',
-    ),
+    [
+      'ARCHIVING_AI',
+      'BLOCKED',
+      'CANCEL_REQUESTED',
+      'PENDING',
+      'RUNNING',
+      'WAITING_AI',
+    ].includes(selectedResultNodeRun.value?.status ?? ''),
 );
 const inlineEditorProgress = computed(() => {
   const status = selectedResultNodeRun.value?.status;
@@ -375,6 +404,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 async function initialize() {
   const generation = ++initializationGeneration;
   const requestedProjectId = projectId.value;
+  closeQuickConnect();
   adapter.value?.disposeWorkbenchGraph();
   adapter.value = undefined;
   selectedNode.value = undefined;
@@ -417,10 +447,12 @@ async function initialize() {
       },
       {
         onChange: () => (dirty.value = true),
+        onConnectToBlank: openQuickConnect,
         onNodeGeometryChange: (nodeId) => {
           if (nodeId === selectedNode.value?.id) scheduleInlineEditorPosition();
         },
         onSelectionChange: (node) => {
+          if (node) closeQuickConnect();
           selectedNode.value = node;
           syncPlannerControls(node);
           if (node) {
@@ -429,7 +461,19 @@ async function initialize() {
             inlineEditorPosition.visible = false;
           }
         },
-        onViewportChange: scheduleInlineEditorPosition,
+        onViewportChange: () => {
+          scheduleInlineEditorPosition();
+          const request = quickConnectRequest.value;
+          if (!request || !adapter.value) return;
+          const clientPoint = adapter.value.graph.localToClient(
+            request.graphPoint,
+          );
+          request.clientPoint = {
+            x: clientPoint.x,
+            y: clientPoint.y,
+          };
+          void nextTick(updateQuickConnectPosition);
+        },
         onZoom: (zoom) => {
           zoomPercent.value = Math.round(zoom * 100);
         },
@@ -462,6 +506,74 @@ function addNode(type: string) {
         ? '画布中只能有一个 AI 内容规划节点'
         : `画布最多支持 ${MAX_WORKBENCH_NODES} 个节点`,
     );
+  }
+}
+
+function updateQuickConnectPosition() {
+  const request = quickConnectRequest.value;
+  const shell = canvasShellRef.value;
+  if (!request || !shell) return;
+  const shellRect = shell.getBoundingClientRect();
+  const popupRect = quickConnectRef.value?.getBoundingClientRect();
+  const popupWidth = popupRect?.width || 320;
+  const popupHeight = popupRect?.height || 380;
+  const anchorX = request.clientPoint.x - shellRect.left;
+  const anchorY = request.clientPoint.y - shellRect.top;
+  const preferredTop = anchorY + 12;
+  quickConnectPosition.left = Math.max(
+    12,
+    Math.min(anchorX + 12, shellRect.width - popupWidth - 12),
+  );
+  quickConnectPosition.top = Math.max(
+    12,
+    Math.min(
+      preferredTop + popupHeight <= shellRect.height
+        ? preferredTop
+        : anchorY - popupHeight - 12,
+      shellRect.height - popupHeight - 12,
+    ),
+  );
+}
+
+function openQuickConnect(request: WorkbenchBlankConnectionRequest) {
+  adapter.value?.clearSelection();
+  inlineEditorPosition.visible = false;
+  quickConnectSearch.value = '';
+  quickConnectRequest.value = request;
+  void nextTick(() => {
+    updateQuickConnectPosition();
+    quickConnectRef.value?.querySelector('input')?.focus();
+  });
+}
+
+function closeQuickConnect() {
+  quickConnectRequest.value = undefined;
+  quickConnectSearch.value = '';
+}
+
+function createQuickConnectedNode(option: CreativeQuickConnectOption) {
+  const request = quickConnectRequest.value;
+  const graphAdapter = adapter.value;
+  if (!request || !graphAdapter) return;
+  const created = graphAdapter.addConnectedNode(request, option);
+  closeQuickConnect();
+  if (!created) {
+    message.warning('该节点当前无法创建或连接，请检查节点上限与端口类型');
+  }
+}
+
+function chooseFirstQuickConnectOption() {
+  const option = filteredQuickConnectOptions.value[0];
+  if (option) createQuickConnectedNode(option);
+}
+
+function handleQuickConnectPointerDown(event: PointerEvent) {
+  if (
+    quickConnectRequest.value &&
+    event.target instanceof Node &&
+    !quickConnectRef.value?.contains(event.target)
+  ) {
+    closeQuickConnect();
   }
 }
 
@@ -539,8 +651,9 @@ function plannerConfig() {
 }
 
 function plannerLogicalModelId() {
-  const value = plannerConfig().logicalModelId ?? plannerConfig().modelId;
-  return typeof value === 'number' ? value : undefined;
+  return normalizeModelIdentifier(
+    plannerConfig().logicalModelId ?? plannerConfig().modelId,
+  );
 }
 
 function plannerReferenceAssetIds() {
@@ -548,6 +661,43 @@ function plannerReferenceAssetIds() {
   return Array.isArray(value)
     ? value.filter((item): item is number => typeof item === 'number')
     : undefined;
+}
+
+function selectedPlannerModel() {
+  const logicalModelId = plannerLogicalModelId();
+  if (!logicalModelId) return undefined;
+  return modelOptions.value.find(
+    (item) => normalizeModelIdentifier(item.id) === logicalModelId,
+  );
+}
+
+function validateSelectedPlannerModel(
+  requiredCapability: FdmAiApi.Capability,
+  requireImageInput = false,
+) {
+  const logicalModelId = plannerLogicalModelId();
+  if (!logicalModelId) return true;
+  const model = selectedPlannerModel();
+  if (!model) {
+    message.warning('所选模型已被删除或停用，请重新选择模型');
+    return false;
+  }
+  if (
+    model.modality !== 'TEXT' ||
+    !model.capabilities.includes(requiredCapability)
+  ) {
+    message.warning(`所选模型不支持 ${requiredCapability}，请更换模型`);
+    return false;
+  }
+  if (
+    requireImageInput &&
+    (plannerReferenceAssetIds()?.length ?? 0) > 0 &&
+    !model.capabilities.includes('IMAGE_INPUT')
+  ) {
+    message.warning('所选模型不支持参考图片理解，请更换模型或移除参考图片');
+    return false;
+  }
+  return true;
 }
 
 function syncPlannerControls(node?: FdmCreativeApi.WorkflowNode) {
@@ -672,12 +822,13 @@ function handleWorkbenchKeydown(event: KeyboardEvent) {
   const hasOpenPopup = document.querySelector(
     '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-modal-wrap',
   );
-  if (
-    event.key === 'Escape' &&
-    !event.defaultPrevented &&
-    !hasOpenPopup &&
-    selectedNode.value
-  ) {
+  if (event.key !== 'Escape' || event.defaultPrevented || hasOpenPopup) return;
+  if (quickConnectRequest.value) {
+    event.preventDefault();
+    closeQuickConnect();
+    return;
+  }
+  if (selectedNode.value) {
     event.preventDefault();
     closeInlineEditor();
   }
@@ -736,6 +887,7 @@ async function previewPlan() {
     message.warning('单次规划的图片与视频内容项合计不能超过 20 个');
     return;
   }
+  if (!validateSelectedPlannerModel('STRUCTURED_OUTPUT', true)) return;
   if (!ensurePlannerNode()) return;
   plannerBusy.value = true;
   try {
@@ -843,6 +995,7 @@ async function polishPrompt() {
     message.warning('请先输入需要润色的创作需求');
     return;
   }
+  if (!validateSelectedPlannerModel('CHAT')) return;
   if (!ensurePlannerNode()) return;
   promptRefineBusy.value = true;
   try {
@@ -980,6 +1133,7 @@ watch(taskQueueRef, () => void nextTick(scheduleInlineEditorPosition), {
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('keydown', handleWorkbenchKeydown);
+  window.addEventListener('pointerdown', handleQuickConnectPointerDown, true);
   void initialize();
 });
 
@@ -987,6 +1141,11 @@ onBeforeUnmount(() => {
   initializationGeneration += 1;
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('keydown', handleWorkbenchKeydown);
+  window.removeEventListener(
+    'pointerdown',
+    handleQuickConnectPointerDown,
+    true,
+  );
   inlineEditorResizeObserver?.disconnect();
   if (inlineEditorFrame !== undefined) cancelAnimationFrame(inlineEditorFrame);
   if (executionTimer) clearTimeout(executionTimer);
@@ -1126,6 +1285,76 @@ onBeforeUnmount(() => {
           <div ref="canvasRef" class="graph-canvas"></div>
         </Spin>
 
+        <section
+          v-if="quickConnectRequest"
+          ref="quickConnectRef"
+          class="quick-connect-menu"
+          :style="quickConnectStyle"
+          data-testid="quick-connect-menu"
+          @click.stop
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <header class="quick-connect-menu__header">
+            <div>
+              <strong>选择下一个节点</strong>
+              <span>选择后将在此处创建，并自动完成连线</span>
+            </div>
+            <Button
+              aria-label="关闭节点选择器"
+              class="quick-connect-menu__close"
+              size="small"
+              type="text"
+              @click="closeQuickConnect"
+            >
+              <IconifyIcon icon="lucide:x" />
+            </Button>
+          </header>
+
+          <Input
+            v-model:value="quickConnectSearch"
+            allow-clear
+            class="quick-connect-menu__search"
+            placeholder="搜索兼容节点"
+            @keydown.enter.prevent="chooseFirstQuickConnectOption"
+          >
+            <template #prefix>
+              <IconifyIcon icon="lucide:search" />
+            </template>
+          </Input>
+
+          <div
+            v-if="filteredQuickConnectOptions.length"
+            class="quick-connect-menu__list"
+          >
+            <button
+              v-for="option in filteredQuickConnectOptions"
+              :key="`${option.template.type}:${option.targetPortId}`"
+              class="quick-connect-option"
+              :style="{ '--node-accent': option.template.color }"
+              type="button"
+              @click="createQuickConnectedNode(option)"
+            >
+              <span class="quick-connect-option__icon">
+                <IconifyIcon :icon="option.template.icon" />
+              </span>
+              <span class="quick-connect-option__content">
+                <strong>{{ option.template.label }}</strong>
+                <small>{{ option.template.description }}</small>
+              </span>
+              <span class="quick-connect-option__action">
+                自动连线
+                <IconifyIcon icon="lucide:arrow-right" />
+              </span>
+            </button>
+          </div>
+          <Empty
+            v-else
+            class="quick-connect-menu__empty"
+            description="没有匹配的兼容节点"
+          />
+        </section>
+
         <div class="minimap-wrap">
           <div ref="minimapRef" class="minimap"></div>
           <div class="minimap-controls">
@@ -1173,7 +1402,7 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <section v-else class="prompt-dock">
+        <section v-else-if="!quickConnectRequest" class="prompt-dock">
           <div class="prompt-input-row">
             <Tooltip title="AI 润色提示词">
               <Button
@@ -1686,6 +1915,190 @@ onBeforeUnmount(() => {
   border: 2px solid #6d5dfc;
   border-radius: 10px;
   box-shadow: 0 0 0 3px rgb(109 93 252 / 10%);
+}
+
+.quick-connect-menu {
+  position: absolute;
+  z-index: 32;
+  display: flex;
+  flex-direction: column;
+  width: 336px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  padding: 12px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 98%);
+  border: 1px solid #dfe6f1;
+  border-radius: 14px;
+  box-shadow:
+    0 20px 48px rgb(15 23 42 / 18%),
+    0 3px 10px rgb(15 23 42 / 8%);
+  backdrop-filter: blur(18px);
+  transform-origin: top left;
+  animation: quick-connect-enter 140ms ease-out;
+}
+
+.quick-connect-menu__header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.quick-connect-menu__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quick-connect-menu__header strong {
+  font-size: 14px;
+  line-height: 22px;
+  color: #172033;
+}
+
+.quick-connect-menu__header span {
+  font-size: 11px;
+  line-height: 18px;
+  color: #8995a8;
+}
+
+.quick-connect-menu__close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #7a879a;
+}
+
+.quick-connect-menu__search {
+  height: 36px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  background: #f8fafc;
+  border-color: #e4eaf2;
+  border-radius: 9px;
+}
+
+.quick-connect-menu__search :deep(.ant-input) {
+  font-size: 12px;
+  background: transparent;
+}
+
+.quick-connect-menu__search :deep(.ant-input-prefix) {
+  color: #98a4b5;
+}
+
+.quick-connect-menu__list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  max-height: min(318px, calc(100vh - 250px));
+  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.quick-connect-option {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  padding: 8px;
+  color: #334155;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.quick-connect-option:hover,
+.quick-connect-option:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--node-accent) 7%, white);
+  border-color: color-mix(in srgb, var(--node-accent) 24%, #e5eaf1);
+  transform: translateX(1px);
+}
+
+.quick-connect-option__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--node-accent);
+  background: color-mix(in srgb, var(--node-accent) 11%, white);
+  border-radius: 9px;
+}
+
+.quick-connect-option__icon :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+.quick-connect-option__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quick-connect-option__content strong {
+  font-size: 12px;
+  line-height: 18px;
+  color: #243047;
+}
+
+.quick-connect-option__content small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 16px;
+  color: #8b97aa;
+  white-space: nowrap;
+}
+
+.quick-connect-option__action {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 10px;
+  color: #7b88a0;
+  white-space: nowrap;
+}
+
+.quick-connect-menu__empty {
+  margin: 14px 0 4px;
+}
+
+.quick-connect-menu__empty :deep(.ant-empty-image) {
+  height: 48px;
+}
+
+.quick-connect-menu__empty :deep(.ant-empty-description) {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+@keyframes quick-connect-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .node-inline-editor-host {

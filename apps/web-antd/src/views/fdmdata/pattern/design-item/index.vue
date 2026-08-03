@@ -279,7 +279,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -315,11 +315,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <CreateFormModal @success="gridApi.query()" />
     <EditFormModal @success="gridApi.query()" />
 
-    <div class="pattern-design-item-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -356,95 +356,48 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="pattern-design-item-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="pattern-design-item-vxe-wrapper"
-          grid-class="pattern-design-item-vxe-grid"
-          table-title="图案识别订单设计图"
-        >
-          <template #toolbar-tools>
-            <span
-              v-if="checkedCount > 0"
-              class="text-xs text-muted-foreground"
-            >
-              已选 {{ checkedCount }} 条
-            </span>
-          </template>
+      <Grid table-title="图案识别订单设计图">
+        <template #toolbar-tools>
+          <span
+            v-if="checkedCount > 0"
+            class="text-xs text-muted-foreground"
+          >
+            已选 {{ checkedCount }} 条
+          </span>
+        </template>
 
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '下载原图',
-                  type: 'link',
-                  icon: ACTION_ICON.DOWNLOAD,
-                  disabled: !row.designImageUrl,
-                  onClick: handleDownloadOriginal.bind(null, row),
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '下载原图',
+                type: 'link',
+                icon: ACTION_ICON.DOWNLOAD,
+                disabled: !row.designImageUrl,
+                onClick: handleDownloadOriginal.bind(null, row),
+              },
+              {
+                label: $t('common.edit'),
+                type: 'link',
+                icon: ACTION_ICON.EDIT,
+                auth: ['fdmdata:pattern-design-item:update'],
+                onClick: handleEdit.bind(null, row),
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmdata:pattern-design-item:delete'],
+                popConfirm: {
+                  title: $t('ui.actionMessage.deleteConfirm', [row.id]),
+                  confirm: handleDelete.bind(null, row),
                 },
-                {
-                  label: $t('common.edit'),
-                  type: 'link',
-                  icon: ACTION_ICON.EDIT,
-                  auth: ['fdmdata:pattern-design-item:update'],
-                  onClick: handleEdit.bind(null, row),
-                },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmdata:pattern-design-item:delete'],
-                  popConfirm: {
-                    title: $t('ui.actionMessage.deleteConfirm', [row.id]),
-                    confirm: handleDelete.bind(null, row),
-                  },
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.pattern-design-item-page,
-.pattern-design-item-grid {
-  min-height: 0;
-}
-
-.pattern-design-item-page {
-  height: 100%;
-}
-
-.pattern-design-item-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.pattern-design-item-grid :deep(.pattern-design-item-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.pattern-design-item-grid :deep(.pattern-design-item-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.pattern-design-item-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .pattern-design-item-grid {
-    min-height: 520px;
-  }
-}
-</style>

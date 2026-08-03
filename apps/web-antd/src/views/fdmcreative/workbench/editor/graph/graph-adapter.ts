@@ -1,3 +1,8 @@
+import type {
+  CreativeNodeTemplate,
+  CreativeQuickConnectOption,
+} from './catalog';
+
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 import {
@@ -15,8 +20,11 @@ import {
 import { register } from '@antv/x6-vue-shape';
 
 import WorkbenchNode from '../components/WorkbenchNode.vue';
-import { CREATIVE_NODE_MAP, getCreativeNodeVisual } from './catalog';
-import type { CreativeNodeTemplate } from './catalog';
+import {
+  CREATIVE_NODE_MAP,
+  getQuickConnectOptions as getCatalogQuickConnectOptions,
+  getCreativeNodeVisual,
+} from './catalog';
 import {
   EMPTY_WORKFLOW,
   isEditableTarget,
@@ -177,8 +185,23 @@ export interface WorkbenchClientRect {
   y: number;
 }
 
+export interface WorkbenchPoint {
+  x: number;
+  y: number;
+}
+
+export interface WorkbenchBlankConnectionRequest {
+  clientPoint: WorkbenchPoint;
+  graphPoint: WorkbenchPoint;
+  options: CreativeQuickConnectOption[];
+  sourceNodeId: string;
+  sourcePortId: string;
+  sourcePortType: FdmCreativeApi.PortType;
+}
+
 export interface WorkbenchGraphCallbacks {
   onChange?: () => void;
+  onConnectToBlank?: (request: WorkbenchBlankConnectionRequest) => void;
   onNodeGeometryChange?: (nodeId: string) => void;
   onSelectionChange?: (node?: FdmCreativeApi.WorkflowNode) => void;
   onViewportChange?: () => void;
@@ -194,6 +217,7 @@ export interface WorkbenchGraphElements {
 export class WorkbenchGraphAdapter {
   readonly graph: Graph;
   private readonly callbacks: WorkbenchGraphCallbacks;
+  private readonly connectingEdgeIds = new Set<string>();
   private readonly dnd: Dnd;
   private readonly scroller: Scroller;
   private suppressChange = false;
@@ -209,13 +233,14 @@ export class WorkbenchGraphAdapter {
       autoResize: true,
       background: { color: '#f8fafc' },
       connecting: {
-        allowBlank: false,
+        allowBlank: ({ edge }) =>
+          Boolean(edge && this.connectingEdgeIds.has(edge.id)),
         allowEdge: false,
         allowLoop: false,
         allowNode: false,
         allowPort: true,
-        createEdge: () =>
-          new Shape.Edge({
+        createEdge: () => {
+          const edge = new Shape.Edge({
             attrs: {
               line: {
                 stroke: '#4f7cff',
@@ -226,7 +251,10 @@ export class WorkbenchGraphAdapter {
             },
             connector: { name: 'smooth', args: { direction: 'H' } },
             zIndex: 1,
-          }),
+          });
+          this.connectingEdgeIds.add(edge.id);
+          return edge;
+        },
         highlight: true,
         snap: { radius: 28 },
         validateConnection: ({
@@ -250,6 +278,41 @@ export class WorkbenchGraphAdapter {
             targetNodeId: targetCell.id,
             targetPortId: targetPort,
           });
+        },
+        validateEdge: ({ edge, type }) => {
+          // Existing edges may be reconnected to another valid port, but
+          // neither terminal is ever allowed to remain on blank canvas.
+          if (type !== 'target') return Boolean(edge.getSourceCellId());
+          if (edge.getTargetCellId()) {
+            this.connectingEdgeIds.delete(edge.id);
+            return true;
+          }
+          if (!this.connectingEdgeIds.has(edge.id)) return false;
+          const sourceNodeId = edge.getSourceCellId();
+          const sourcePortId = edge.getSourcePortId();
+          if (!sourceNodeId || !sourcePortId) return false;
+          const sourceNode = this.workflowNodeFromCell(sourceNodeId);
+          const sourcePort = sourceNode?.ports.find(
+            (port) => port.id === sourcePortId && port.direction === 'OUTPUT',
+          );
+          if (!sourcePort) return false;
+          const graphPoint = edge.getTargetPoint();
+          const clientPoint = this.graph.localToClient(graphPoint);
+          const request: WorkbenchBlankConnectionRequest = {
+            clientPoint: { x: clientPoint.x, y: clientPoint.y },
+            graphPoint: { x: graphPoint.x, y: graphPoint.y },
+            options: this.getQuickConnectOptions(sourceNodeId, sourcePortId),
+            sourceNodeId,
+            sourcePortId,
+            sourcePortType: sourcePort.type,
+          };
+          // Wait until X6 removes the rejected temporary edge and closes its
+          // internal `add-edge` history batch before opening the Vue picker.
+          queueMicrotask(() => {
+            this.connectingEdgeIds.delete(edge.id);
+            this.callbacks.onConnectToBlank?.(request);
+          });
+          return false;
         },
       },
       container: elements.container,
@@ -313,6 +376,62 @@ export class WorkbenchGraphAdapter {
     );
     this.bindEvents();
     this.bindShortcuts();
+  }
+
+  addConnectedNode(
+    request: WorkbenchBlankConnectionRequest,
+    selectedOption: CreativeQuickConnectOption,
+  ) {
+    const option = this.getQuickConnectOptions(
+      request.sourceNodeId,
+      request.sourcePortId,
+    ).find(
+      (item) =>
+        item.template.type === selectedOption.template.type &&
+        item.targetPortId === selectedOption.targetPortId,
+    );
+    if (!option) return undefined;
+    const visual = getCreativeNodeVisual(option.template.type);
+    const inputPorts = option.template.ports.filter(
+      (port) => port.direction === 'INPUT',
+    );
+    const inputIndex = Math.max(
+      0,
+      inputPorts.findIndex((port) => port.id === option.targetPortId),
+    );
+    const targetPortOffset =
+      (visual.height * (inputIndex + 1)) / (inputPorts.length + 1);
+    let definition: FdmCreativeApi.WorkflowNode | undefined;
+    this.graph.batchUpdate('quick-connect-node', () => {
+      definition = this.addNode(option.template.type, {
+        x: request.graphPoint.x + 24,
+        y: request.graphPoint.y - targetPortOffset,
+      });
+      if (!definition) return;
+      const connection = {
+        definition: this.serializeDefinition(),
+        sourceNodeId: request.sourceNodeId,
+        sourcePortId: request.sourcePortId,
+        targetNodeId: definition.id,
+        targetPortId: option.targetPortId,
+      };
+      if (!validateWorkflowConnection(connection)) {
+        this.graph.removeNode(definition.id);
+        definition = undefined;
+        return;
+      }
+      this.graph.addEdge(
+        toX6Edge({
+          id: createLocalId('edge'),
+          sourceNodeId: connection.sourceNodeId,
+          sourcePortId: connection.sourcePortId,
+          targetNodeId: connection.targetNodeId,
+          targetPortId: connection.targetPortId,
+        }),
+      );
+    });
+    if (definition) this.graph.select(definition.id);
+    return definition;
   }
 
   addNode(type: string, position?: { x: number; y: number }) {
@@ -633,6 +752,21 @@ export class WorkbenchGraphAdapter {
     return this.normalizeClientRect(this.graph.localToClient(node.getBBox()));
   }
 
+  getQuickConnectOptions(sourceNodeId: string, sourcePortId: string) {
+    if (this.graph.getNodes().length >= MAX_WORKBENCH_NODES) return [];
+    const sourceNode = this.workflowNodeFromCell(sourceNodeId);
+    const sourcePort = sourceNode?.ports.find(
+      (port) => port.id === sourcePortId && port.direction === 'OUTPUT',
+    );
+    if (!sourcePort) return [];
+    const hasPlanner = this.graph
+      .getNodes()
+      .some((node) => node.getData()?.type === 'content-planner');
+    return getCatalogQuickConnectOptions(sourcePort.type).filter(
+      (option) => option.template.type !== 'content-planner' || !hasPlanner,
+    );
+  }
+
   redo() {
     if (this.graph.canRedo()) this.graph.redo();
   }
@@ -753,8 +887,16 @@ export class WorkbenchGraphAdapter {
     const changed = () => {
       if (!this.suppressChange) this.callbacks.onChange?.();
     };
-    this.graph.on('cell:added', changed);
-    this.graph.on('cell:removed', changed);
+    this.graph.on('cell:added', ({ cell }) => {
+      if (!this.connectingEdgeIds.has(cell.id)) changed();
+    });
+    this.graph.on('cell:removed', ({ cell }) => {
+      if (this.connectingEdgeIds.has(cell.id)) {
+        queueMicrotask(() => this.connectingEdgeIds.delete(cell.id));
+      } else {
+        changed();
+      }
+    });
     this.graph.on('node:change:position', ({ node }) => {
       changed();
       this.callbacks.onNodeGeometryChange?.(node.id);

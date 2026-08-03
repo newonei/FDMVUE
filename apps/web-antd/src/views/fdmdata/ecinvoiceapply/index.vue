@@ -58,9 +58,33 @@ function clearSelectedRows() {
   selectedRows.value = [];
 }
 
+function buildOrderKey(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
+  const tid = row.tid?.trim();
+  if (!tid) return undefined;
+  const platform = (row.platformCode?.trim() || 'MANUAL').toUpperCase();
+  let normalizedPlatform = platform;
+  if (['TAOBAO', 'TB', 'TM', 'TMALL'].includes(platform)) {
+    normalizedPlatform = 'TAOBAO';
+  } else if (['DOUYIN', 'DY'].includes(platform)) {
+    normalizedPlatform = 'DY';
+  } else if (['SPH', 'VIDEO_CHANNEL', 'WECHAT', 'WX'].includes(platform)) {
+    normalizedPlatform = 'SPH';
+  }
+  return `${normalizedPlatform}|${tid.toLocaleLowerCase()}`;
+}
+
 function validateSelectedRows(showMessage = false) {
   if (selectedRows.value.length === 0) {
     if (showMessage) message.warning('请选择需要批量开票的申请记录');
+    return false;
+  }
+  const orderKeys = selectedRows.value
+    .map(buildOrderKey)
+    .filter((key): key is string => Boolean(key));
+  if (new Set(orderKeys).size !== orderKeys.length) {
+    if (showMessage) {
+      message.warning('同一订单只能选择一条，避免重复开票');
+    }
     return false;
   }
   if (selectedCompanyNames.value.some((companyName) => !companyName)) {
@@ -222,6 +246,10 @@ async function handleBatchDownloadInvoicePdfs() {
 
 async function handleDelete(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
   if (!row.id) return;
+  if (isInvoiceApplyLocked(row)) {
+    message.warning('该订单已开票，不允许删除');
+    return;
+  }
   try {
     await confirm($t('ui.actionMessage.deleteConfirm', [row.id]));
   } catch {
@@ -266,11 +294,16 @@ async function handleExport() {
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
-  formOptions: { schema: useGridFormSchema() },
+  formOptions: {
+    collapsed: true,
+    collapsedRows: 2,
+    schema: useGridFormSchema(),
+    showCollapseButton: true,
+  },
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -296,148 +329,97 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
 
-    <div class="invoice-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
-      <header
-        class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
+    <div>
+      <Grid
+        table-title="电商发票申请"
+        table-title-help="管理电商平台发票申请、开票状态和付款方开票信息。"
       >
-        <div class="min-w-0 flex-1">
-          <h2 class="mb-1 text-lg font-semibold text-foreground">
-            电商发票申请
-          </h2>
-          <p class="mb-0 text-xs text-muted-foreground">
-            管理电商平台发票申请、开票状态和付款方开票信息。
-          </p>
-        </div>
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
-            :disabled="selectedRows.length === 0"
-            :loading="attachmentDownloadLoading"
-            @click="handleBatchDownloadInvoicePdfs"
-          >
-            <template #icon>
-              <IconifyIcon icon="lucide:files" />
-            </template>
-            批量下载附件（{{ selectedAttachmentRows.length }}）
-          </Button>
-          <Button
-            :disabled="!canExport"
-            :loading="exportLoading"
-            @click="handleExport"
-          >
-            <template #icon>
-              <IconifyIcon icon="lucide:download" />
-            </template>
-            导出电子税务局模板（{{ selectedRows.length }}）
-          </Button>
-          <Button type="primary" @click="handleCreate">
-            <template #icon>
-              <IconifyIcon icon="lucide:plus" />
-            </template>
-            新增
-          </Button>
-        </div>
-      </header>
-
-      <div class="invoice-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="invoice-vxe-wrapper"
-          grid-class="invoice-vxe-grid"
-          table-title="电商发票申请"
-        >
-          <template #attachment="{ row }">
+        <template #toolbar-tools>
+          <div class="flex flex-wrap items-center gap-2">
             <Button
-              v-if="row.invoiceFileUrl"
-              size="small"
-              type="link"
-              @click="handleDownloadInvoicePdf(row)"
+              :disabled="selectedRows.length === 0"
+              :loading="attachmentDownloadLoading"
+              @click="handleBatchDownloadInvoicePdfs"
             >
               <template #icon>
-                <IconifyIcon icon="lucide:paperclip" />
+                <IconifyIcon icon="lucide:files" />
               </template>
-              下载
+              批量下载附件（{{ selectedAttachmentRows.length }}）
             </Button>
-            <span v-else class="text-muted-foreground">-</span>
-          </template>
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '上传',
-                  type: 'link',
-                  icon: ACTION_ICON.UPLOAD,
-                  loading: isInvoicePdfUploading(row.id),
-                  disabled: isInvoicePdfUploading(row.id),
-                  auth: ['fdmdata:ecinvoiceapply:update'],
-                  onClick: handleUploadInvoicePdf.bind(null, row),
-                },
-                {
-                  label: $t('common.edit'),
-                  type: 'link',
-                  icon: ACTION_ICON.EDIT,
-                  disabled: isInvoiceApplyLocked(row),
-                  tooltip: isInvoiceApplyLocked(row)
-                    ? '已开票记录不能修改'
-                    : undefined,
-                  auth: ['fdmdata:ecinvoiceapply:update'],
-                  onClick: handleEdit.bind(null, row),
-                },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmdata:ecinvoiceapply:delete'],
-                  onClick: handleDelete.bind(null, row),
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+            <Button
+              :disabled="!canExport"
+              :loading="exportLoading"
+              @click="handleExport"
+            >
+              <template #icon>
+                <IconifyIcon icon="lucide:download" />
+              </template>
+              导出电子税务局模板（{{ selectedRows.length }}）
+            </Button>
+            <Button type="primary" @click="handleCreate">
+              <template #icon>
+                <IconifyIcon icon="lucide:plus" />
+              </template>
+              新增
+            </Button>
+          </div>
+        </template>
+        <template #attachment="{ row }">
+          <Button
+            v-if="row.invoiceFileUrl"
+            size="small"
+            type="link"
+            @click="handleDownloadInvoicePdf(row)"
+          >
+            <template #icon>
+              <IconifyIcon icon="lucide:paperclip" />
+            </template>
+            下载
+          </Button>
+          <span v-else class="text-muted-foreground">-</span>
+        </template>
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '上传',
+                type: 'link',
+                icon: ACTION_ICON.UPLOAD,
+                loading: isInvoicePdfUploading(row.id),
+                disabled: isInvoicePdfUploading(row.id),
+                auth: ['fdmdata:ecinvoiceapply:update'],
+                onClick: handleUploadInvoicePdf.bind(null, row),
+              },
+              {
+                label: $t('common.edit'),
+                type: 'link',
+                icon: ACTION_ICON.EDIT,
+                disabled: isInvoiceApplyLocked(row),
+                tooltip: isInvoiceApplyLocked(row)
+                  ? '已开票记录不能修改'
+                  : undefined,
+                auth: ['fdmdata:ecinvoiceapply:update'],
+                onClick: handleEdit.bind(null, row),
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                disabled: isInvoiceApplyLocked(row),
+                tooltip: isInvoiceApplyLocked(row)
+                  ? '已开票记录不能删除'
+                  : undefined,
+                auth: ['fdmdata:ecinvoiceapply:delete'],
+                onClick: handleDelete.bind(null, row),
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.invoice-page,
-.invoice-grid {
-  min-height: 0;
-}
-
-.invoice-page {
-  height: 100%;
-}
-
-.invoice-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.invoice-grid :deep(.invoice-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.invoice-grid :deep(.invoice-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.invoice-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .invoice-grid {
-    min-height: 520px;
-  }
-}
-</style>

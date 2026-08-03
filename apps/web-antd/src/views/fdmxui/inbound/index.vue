@@ -8,10 +8,7 @@ import { IconifyIcon } from '@vben/icons';
 import { Button, message } from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import {
-  getFdmxuiInboundPage,
-  syncFdmxuiInbound,
-} from '#/api/fdmxui/inbound';
+import { getFdmxuiInboundPage, syncFdmxuiInbound } from '#/api/fdmxui/inbound';
 
 import { useGridColumns, useGridFormSchema } from './data';
 
@@ -42,7 +39,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -62,8 +59,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
-    <div class="fdmxui-inbound-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+  <Page auto-content-height>
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -80,54 +77,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </div>
       </header>
 
-      <div class="fdmxui-inbound-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="fdmxui-inbound-vxe-wrapper"
-          grid-class="fdmxui-inbound-vxe-grid"
-          table-title="3XUI节点"
-        />
-      </div>
+      <Grid table-title="3XUI节点" />
     </div>
   </Page>
 </template>
-
-<style scoped>
-.fdmxui-inbound-page,
-.fdmxui-inbound-grid {
-  min-height: 0;
-}
-
-.fdmxui-inbound-page {
-  height: 100%;
-}
-
-.fdmxui-inbound-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.fdmxui-inbound-grid :deep(.fdmxui-inbound-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.fdmxui-inbound-grid :deep(.fdmxui-inbound-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.fdmxui-inbound-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .fdmxui-inbound-grid {
-    min-height: 520px;
-  }
-}
-</style>

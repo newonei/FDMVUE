@@ -8,7 +8,6 @@ import dayjs from 'dayjs';
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 
 import {
-  AutoComplete,
   Button,
   Card,
   Col,
@@ -25,6 +24,7 @@ import {
   getEcShopDailyPlatformDetailPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
+import { FdmAutoComplete as AutoComplete } from '#/components/fdm-auto-complete';
 import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
 
 import {

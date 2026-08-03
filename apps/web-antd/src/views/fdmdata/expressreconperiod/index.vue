@@ -117,7 +117,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -137,11 +137,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <ImportOrdersModalComp @success="handleImported" />
     <UnreconciledModalComp />
 
-    <div class="express-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -159,91 +159,50 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </Button>
       </header>
 
-      <div class="express-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="express-vxe-wrapper"
-          grid-class="express-vxe-grid"
-          table-title="发货订单池"
-        >
-          <template #colUnreconciled="{ row }">
-            <Tag
-              v-if="(row.unreconciledWaybillCount ?? 0) > 0"
-              color="warning"
-              class="cursor-pointer"
-              @click="handleUnreconciled(row)"
-            >
-              {{ row.unreconciledWaybillCount }}
-            </Tag>
-            <span v-else>0</span>
-          </template>
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '账单对账',
-                  type: 'link',
-                  icon: 'lucide:truck',
-                  auth: ['fdmdata:express-recon-batch:reconcile'],
-                  onClick: handleReconcile.bind(null, row),
+      <Grid table-title="发货订单池">
+        <template #colUnreconciled="{ row }">
+          <Tag
+            v-if="(row.unreconciledWaybillCount ?? 0) > 0"
+            color="warning"
+            class="cursor-pointer"
+            @click="handleUnreconciled(row)"
+          >
+            {{ row.unreconciledWaybillCount }}
+          </Tag>
+          <span v-else>0</span>
+        </template>
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '账单对账',
+                type: 'link',
+                icon: 'lucide:truck',
+                auth: ['fdmdata:express-recon-batch:reconcile'],
+                onClick: handleReconcile.bind(null, row),
+              },
+              {
+                label: '未对账运单',
+                type: 'link',
+                icon: 'lucide:file-warning',
+                auth: ['fdmdata:express-recon-period:query'],
+                onClick: handleUnreconciled.bind(null, row),
+              },
+              {
+                label: $t('common.delete'),
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmdata:express-recon-period:delete'],
+                popConfirm: {
+                  title: '删除订单池会删除其订单明细；历史挂接到该订单池的旧批次也会删除，确认删除？',
+                  confirm: handleDelete.bind(null, row),
                 },
-                {
-                  label: '未对账运单',
-                  type: 'link',
-                  icon: 'lucide:file-warning',
-                  auth: ['fdmdata:express-recon-period:query'],
-                  onClick: handleUnreconciled.bind(null, row),
-                },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmdata:express-recon-period:delete'],
-                  popConfirm: {
-                    title: '删除订单池会删除其订单明细；历史挂接到该订单池的旧批次也会删除，确认删除？',
-                    confirm: handleDelete.bind(null, row),
-                  },
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.express-page,
-.express-grid {
-  min-height: 0;
-}
-
-.express-page {
-  height: 100%;
-}
-
-.express-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.express-grid :deep(.express-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.express-grid :deep(.express-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.express-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-</style>

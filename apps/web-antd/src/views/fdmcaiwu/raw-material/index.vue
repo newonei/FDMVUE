@@ -197,7 +197,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: gridColumns,
-    height: '100%',
+    height: '600px',
     keepSource: false,
     proxyConfig: {
       ajax: {
@@ -253,7 +253,7 @@ async function handleSave() {
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <Modal
       v-model:open="editOpen"
       :confirm-loading="saving"
@@ -301,9 +301,7 @@ async function handleSave() {
       </Form>
     </Modal>
 
-    <div
-      class="raw-material-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4"
-    >
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -317,93 +315,48 @@ async function handleSave() {
         </div>
       </header>
 
-      <div class="raw-material-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="raw-material-vxe-wrapper"
-          grid-class="raw-material-vxe-grid"
-          table-title="原材料价格"
-        >
-          <template #category="{ row }">
-            <Tag>{{ formatCategory(row.category) }}</Tag>
-          </template>
-          <template #unitPrice="{ row }">
-            <span class="font-medium">{{
-              formatUnitPrice(row.unitPricePerKg)
-            }}</span>
-          </template>
-          <template #enabled="{ row }">
-            <Tag :color="row.enabled ? 'success' : 'default'">
-              {{ row.enabled ? '启用' : '停用' }}
-            </Tag>
-          </template>
-          <template #source="{ row }">
-            <span class="source-text" :title="formatSource(row)">
-              {{ formatSource(row) }}
-            </span>
-          </template>
-          <template #actions="{ row }">
-            <Button
-              v-access:code="['fdmcaiwu:raw-material:update']"
-              size="small"
-              type="link"
-              @click="handleEdit(row)"
-            >
-              <template #icon>
-                <IconifyIcon icon="lucide:pencil" />
-              </template>
-              编辑
-            </Button>
-          </template>
-        </Grid>
-      </div>
+      <Grid table-title="原材料价格">
+        <template #category="{ row }">
+          <Tag>{{ formatCategory(row.category) }}</Tag>
+        </template>
+        <template #unitPrice="{ row }">
+          <span class="font-medium">{{
+            formatUnitPrice(row.unitPricePerKg)
+          }}</span>
+        </template>
+        <template #enabled="{ row }">
+          <Tag :color="row.enabled ? 'success' : 'default'">
+            {{ row.enabled ? '启用' : '停用' }}
+          </Tag>
+        </template>
+        <template #source="{ row }">
+          <span class="source-text" :title="formatSource(row)">
+            {{ formatSource(row) }}
+          </span>
+        </template>
+        <template #actions="{ row }">
+          <Button
+            v-access:code="['fdmcaiwu:raw-material:update']"
+            size="small"
+            type="link"
+            @click="handleEdit(row)"
+          >
+            <template #icon>
+              <IconifyIcon icon="lucide:pencil" />
+            </template>
+            编辑
+          </Button>
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
 
 <style scoped>
-.raw-material-page,
-.raw-material-grid {
-  min-height: 0;
-}
-
-.raw-material-page {
-  height: 100%;
-}
-
-.raw-material-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.raw-material-grid :deep(.raw-material-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.raw-material-grid :deep(.raw-material-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.raw-material-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
 .source-text {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (max-width: 768px) {
-  .raw-material-grid {
-    min-height: 520px;
-  }
 }
 </style>

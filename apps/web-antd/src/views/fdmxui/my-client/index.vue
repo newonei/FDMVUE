@@ -149,7 +149,7 @@ const [Grid] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -169,12 +169,10 @@ const [Grid] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <LinkDetailModal v-model:open="linkDetailOpen" :client="linkDetailClient" />
 
-    <div
-      class="fdmxui-my-client-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4"
-    >
+    <div>
       <header
         class="flex flex-shrink-0 items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -185,67 +183,20 @@ const [Grid] = useVbenVxeGrid({
         </div>
       </header>
 
-      <div class="fdmxui-my-client-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="fdmxui-my-client-vxe-wrapper"
-          grid-class="fdmxui-my-client-vxe-grid"
-          table-title="我的3XUI订阅"
-        >
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '订阅信息',
-                  type: 'link',
-                  icon: 'lucide:qr-code',
-                  onClick: handleShowLinks.bind(null, row),
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+      <Grid table-title="我的3XUI订阅">
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '订阅信息',
+                type: 'link',
+                icon: 'lucide:qr-code',
+                onClick: handleShowLinks.bind(null, row),
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.fdmxui-my-client-page,
-.fdmxui-my-client-grid {
-  min-height: 0;
-}
-
-.fdmxui-my-client-page {
-  height: 100%;
-}
-
-.fdmxui-my-client-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.fdmxui-my-client-grid :deep(.fdmxui-my-client-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.fdmxui-my-client-grid :deep(.fdmxui-my-client-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.fdmxui-my-client-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .fdmxui-my-client-grid {
-    min-height: 520px;
-  }
-}
-</style>

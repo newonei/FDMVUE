@@ -9,7 +9,6 @@ import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
-  AutoComplete,
   Button,
   Col,
   Form,
@@ -28,6 +27,7 @@ import {
   getEcShopDailyPage,
   getEcShopDailyShopNameOptions,
 } from '#/api/fdmdata/ecshopdaily';
+import { FdmAutoComplete as AutoComplete } from '#/components/fdm-auto-complete';
 import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
 
 import {

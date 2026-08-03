@@ -1,4 +1,25 @@
+import type { Page } from 'playwright/test';
+
 import { expect, test } from 'playwright/test';
+
+interface SerializedWorkflow {
+  edges: Array<{
+    id: string;
+    sourceNodeId: string;
+    sourcePortId: string;
+    targetNodeId: string;
+    targetPortId: string;
+  }>;
+  nodes: Array<{ id: string; type: string }>;
+}
+
+async function readFixtureWorkflow(page: Page) {
+  return page.evaluate(() => {
+    const value = document.body.dataset.workflowDefinition;
+    if (!value) throw new Error('fixture workflow definition is missing');
+    return JSON.parse(value) as SerializedWorkflow;
+  });
+}
 
 test('renders a native X6 mixed-media workflow without an iframe', async ({
   page,
@@ -100,4 +121,100 @@ test('opens one fixed-size inline editor and closes it with all supported gestur
   });
   await expect(editor).toHaveCount(0);
   await expect(page.getByTestId('prompt-dock')).toBeVisible();
+});
+
+test('creates and connects a selected node after dropping a real X6 port on blank canvas', async ({
+  page,
+}) => {
+  await page.goto(
+    '/e2e/fixtures/fdmcreative-workbench.html?scenario=quick-connect',
+  );
+  const documentBody = page.locator('html > body');
+  await expect(documentBody).toHaveAttribute('data-ready', 'true');
+
+  const before = await readFixtureWorkflow(page);
+  expect(before.nodes).toHaveLength(6);
+  expect(before.edges).toHaveLength(5);
+
+  const sourcePort = page
+    .locator(
+      '.graph-canvas [data-cell-id="content-planner"] .x6-port-body[port="plan"]',
+    )
+    .first();
+  const sourceBox = await sourcePort.boundingBox();
+  const canvasBox = await page
+    .locator('.graph-canvas .x6-graph-svg')
+    .first()
+    .boundingBox();
+  if (!sourceBox || !canvasBox) {
+    throw new Error('quick-connect source port or canvas is not visible');
+  }
+
+  const dropPoint = {
+    x: canvasBox.x + canvasBox.width - 48,
+    y: canvasBox.y + canvasBox.height - 72,
+  };
+  await page.mouse.move(
+    sourceBox.x + sourceBox.width / 2,
+    sourceBox.y + sourceBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(dropPoint.x, dropPoint.y, { steps: 12 });
+  await page.mouse.up();
+
+  const picker = page.getByTestId('quick-connect-menu');
+  await expect(picker).toBeVisible();
+  await expect(page.getByTestId('quick-connect-search')).toBeFocused();
+  await expect(
+    page.getByTestId('quick-connect-option-image-plan-item'),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId('quick-connect-option-video-plan-item'),
+  ).toBeVisible();
+  await expect(page.getByTestId('quick-connect-option-video-trim')).toHaveCount(
+    0,
+  );
+  await expect(documentBody).toHaveAttribute('data-node-count', '6');
+  await expect(documentBody).toHaveAttribute('data-edge-count', '5');
+  expect(await readFixtureWorkflow(page)).toEqual(before);
+
+  await page.getByTestId('quick-connect-option-image-plan-item').click();
+  await expect(picker).toHaveCount(0);
+  await expect(documentBody).toHaveAttribute('data-node-count', '7');
+  await expect(documentBody).toHaveAttribute('data-edge-count', '6');
+  await expect(documentBody).toHaveAttribute('data-selected-cell-count', '1');
+
+  const afterCreate = await readFixtureWorkflow(page);
+  const beforeNodeIds = new Set(before.nodes.map((node) => node.id));
+  const createdNode = afterCreate.nodes.find(
+    (node) => !beforeNodeIds.has(node.id),
+  );
+  expect(createdNode).toMatchObject({ type: 'image-plan-item' });
+  expect(afterCreate.edges).toContainEqual(
+    expect.objectContaining({
+      sourceNodeId: 'content-planner',
+      sourcePortId: 'plan',
+      targetNodeId: createdNode?.id,
+      targetPortId: 'plan',
+    }),
+  );
+
+  await page.getByTestId('quick-connect-undo').click();
+  await expect(documentBody).toHaveAttribute('data-node-count', '6');
+  await expect(documentBody).toHaveAttribute('data-edge-count', '5');
+  expect(await readFixtureWorkflow(page)).toEqual(before);
+
+  await page.getByTestId('quick-connect-redo').click();
+  await expect(documentBody).toHaveAttribute('data-node-count', '7');
+  await expect(documentBody).toHaveAttribute('data-edge-count', '6');
+  const afterRedo = await readFixtureWorkflow(page);
+  expect(afterRedo.nodes).toContainEqual(createdNode);
+  expect(afterRedo.edges).toContainEqual(
+    expect.objectContaining({
+      sourceNodeId: 'content-planner',
+      sourcePortId: 'plan',
+      targetNodeId: createdNode?.id,
+      targetPortId: 'plan',
+    }),
+  );
 });

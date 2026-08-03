@@ -72,7 +72,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
-    height: '100%',
+    height: '600px',
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -92,11 +92,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <FormModal @success="gridApi.query()" />
     <LinkDetailModal v-model:open="linkDetailOpen" :client="linkDetailClient" />
 
-    <div class="fdmxui-client-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -113,88 +113,41 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </div>
       </header>
 
-      <div class="fdmxui-client-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="fdmxui-client-vxe-wrapper"
-          grid-class="fdmxui-client-vxe-grid"
-          table-title="3XUI客户端"
-        >
-          <template #actions="{ row }">
-            <TableAction
-              :actions="[
-                {
-                  label: '协议链接',
-                  type: 'link',
-                  icon: 'lucide:qr-code',
-                  auth: ['fdmxui:client:query'],
-                  onClick: handleShowLinks.bind(null, row),
+      <Grid table-title="3XUI客户端">
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '协议链接',
+                type: 'link',
+                icon: 'lucide:qr-code',
+                auth: ['fdmxui:client:query'],
+                onClick: handleShowLinks.bind(null, row),
+              },
+              {
+                label: '刷新',
+                type: 'link',
+                icon: 'lucide:refresh-cw',
+                auth: ['fdmxui:client:refresh-links'],
+                disabled: row.status === 2,
+                onClick: handleRefreshLinks.bind(null, row),
+              },
+              {
+                label: '回收',
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmxui:client:recycle'],
+                disabled: row.status === 2,
+                popConfirm: {
+                  title: `确认回收客户端 ${row.xuiEmail || row.id}？`,
+                  confirm: handleRecycle.bind(null, row),
                 },
-                {
-                  label: '刷新',
-                  type: 'link',
-                  icon: 'lucide:refresh-cw',
-                  auth: ['fdmxui:client:refresh-links'],
-                  disabled: row.status === 2,
-                  onClick: handleRefreshLinks.bind(null, row),
-                },
-                {
-                  label: '回收',
-                  type: 'link',
-                  danger: true,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmxui:client:recycle'],
-                  disabled: row.status === 2,
-                  popConfirm: {
-                    title: `确认回收客户端 ${row.xuiEmail || row.id}？`,
-                    confirm: handleRecycle.bind(null, row),
-                  },
-                },
-              ]"
-            />
-          </template>
-        </Grid>
-      </div>
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
-
-<style scoped>
-.fdmxui-client-page,
-.fdmxui-client-grid {
-  min-height: 0;
-}
-
-.fdmxui-client-page {
-  height: 100%;
-}
-
-.fdmxui-client-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
-}
-
-.fdmxui-client-grid :deep(.fdmxui-client-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.fdmxui-client-grid :deep(.fdmxui-client-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.fdmxui-client-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
-@media (max-width: 768px) {
-  .fdmxui-client-grid {
-    min-height: 520px;
-  }
-}
-</style>

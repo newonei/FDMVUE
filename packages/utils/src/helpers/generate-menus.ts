@@ -110,8 +110,24 @@ function convertServerMenuToRouteRecordStringComponent(
 ): RouteRecordStringComponent[] {
   const menus: RouteRecordStringComponent[] = [];
   menuList.forEach((menu) => {
+    const external = isHttpUrl(menu.path);
+    const componentName = menu.componentName?.trim();
+    let finalName =
+      componentName || `${external ? 'External' : 'Menu'}_${menu.id}`;
+
+    // componentName 是后端显式配置的全局路由标识，重复时保留诊断并使用 id 兜底。
+    // 目录、外链等没有 componentName 的菜单则直接使用稳定的 id 标识，显示名称允许重复。
+    if (componentName && nameSet.has(finalName)) {
+      finalName = `${componentName}_${menu.id}`;
+      console.error(
+        `menu componentName duplicate: ${componentName}, id: ${menu.id}`,
+        menu,
+      );
+    }
+    nameSet.add(finalName);
+
     // 处理外链菜单（顶级或子级）
-    if (isHttpUrl(menu.path)) {
+    if (external) {
       // add by 芋艿：如果有 ?_iframe 参数，则作为内嵌页面处理
       // 如果有 _iframe 参数，则使用 iframeSrc；如果没有，则使用 link
       const url = new URL(menu.path);
@@ -134,7 +150,7 @@ function convertServerMenuToRouteRecordStringComponent(
           order: menu.sort,
           title: menu.name,
         },
-        name: menu.name,
+        name: finalName,
         path: `${menu.id}`,
       };
       menus.push(urlMenu);
@@ -158,14 +174,6 @@ function convertServerMenuToRouteRecordStringComponent(
     if (!menu.path.startsWith('/')) {
       menu.path = `/${menu.path}`;
     }
-
-    // add by 芋艿：防止 name 重复，只有在 name 重复时，才自动添加 id
-    let finalName = menu.componentName || menu.name;
-    if (nameSet.has(finalName)) {
-      finalName = menu.name + menu.id;
-      console.error(`menu name duplicate: ${menu.name}, id: ${menu.id}`, menu);
-    }
-    nameSet.add(finalName);
 
     // add by 芋艿：处理 menu.component 中的 query 参数
     // https://doc.vben.pro/guide/essentials/route.html#query

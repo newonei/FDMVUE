@@ -68,6 +68,7 @@ import { isEmpty } from '@vben/utils';
 
 import { message, Modal, notification } from 'ant-design-vue';
 
+import { FdmAutoComplete } from '#/components/fdm-auto-complete';
 import { Tinymce as RichTextarea } from '#/components/tinymce';
 import { FileUpload, ImageUpload } from '#/components/upload';
 type AdapterUploadProps = UploadProps & {
@@ -80,9 +81,6 @@ type AdapterUploadProps = UploadProps & {
   onHandleChange?: (event: UploadChangeParam) => void;
 };
 
-const AutoComplete = defineAsyncComponent(
-  () => import('ant-design-vue/es/auto-complete'),
-);
 const Button = defineAsyncComponent(() => import('ant-design-vue/es/button'));
 const Checkbox = defineAsyncComponent(
   () => import('ant-design-vue/es/checkbox'),
@@ -695,7 +693,7 @@ async function initComponentAdapter() {
       optionsPropName: 'treeData',
       visibleEvent: 'onVisibleChange',
     }),
-    AutoComplete,
+    AutoComplete: FdmAutoComplete,
     Cascader,
     Checkbox,
     CheckboxGroup,

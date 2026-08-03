@@ -4,7 +4,10 @@ import { createRouter, createWebHistory } from 'vue-router';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { generateMenus } from '../generate-menus';
+import {
+  convertServerMenuToRouteRecordStringComponent,
+  generateMenus,
+} from '../generate-menus';
 
 // Nested route setup to test child inclusion and hideChildrenInMenu functionality
 
@@ -229,5 +232,163 @@ describe('generateMenus', () => {
     const emptyRoutes: any[] = [];
     const menus = generateMenus(emptyRoutes, router);
     expect(menus).toEqual([]);
+  });
+});
+
+describe('convertServerMenuToRouteRecordStringComponent', () => {
+  function createDuplicateDirectoryMenus() {
+    return [
+      {
+        children: [
+          {
+            children: [],
+            component: '',
+            componentName: '',
+            id: 101,
+            name: '基础数据',
+            parentId: 100,
+            path: 'base-data',
+            visible: true,
+          },
+        ],
+        component: '',
+        componentName: '',
+        id: 100,
+        name: 'ERP 系统',
+        parentId: 0,
+        path: '/erp',
+        visible: true,
+      },
+      {
+        children: [
+          {
+            children: [],
+            component: '',
+            componentName: '',
+            id: 201,
+            name: '基础数据',
+            parentId: 200,
+            path: 'base-data',
+            visible: true,
+          },
+        ],
+        component: '',
+        componentName: '',
+        id: 200,
+        name: 'WMS 系统',
+        parentId: 0,
+        path: '/wms',
+        visible: true,
+      },
+    ] as any;
+  }
+
+  it('uses id-based names for same-title directories under different parents', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const routes = convertServerMenuToRouteRecordStringComponent(
+        createDuplicateDirectoryMenus(),
+      );
+
+      expect(routes[0]?.name).toBe('Menu_100');
+      expect(routes[0]?.children?.[0]?.name).toBe('Menu_101');
+      expect(routes[1]?.name).toBe('Menu_200');
+      expect(routes[1]?.children?.[0]?.name).toBe('Menu_201');
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('keeps generated names stable when server menu order changes', () => {
+    const forward = convertServerMenuToRouteRecordStringComponent(
+      createDuplicateDirectoryMenus(),
+    );
+    const reverse = convertServerMenuToRouteRecordStringComponent(
+      createDuplicateDirectoryMenus().toReversed(),
+    );
+    const toNameByPath = (
+      routes: ReturnType<typeof convertServerMenuToRouteRecordStringComponent>,
+    ) =>
+      Object.fromEntries(
+        routes.flatMap((route) => [
+          [route.path, route.name],
+          ...((route.children ?? []).map((child) => [
+            child.path,
+            child.name,
+          ]) as [string, unknown][]),
+        ]),
+      );
+
+    expect(toNameByPath(reverse)).toEqual(toNameByPath(forward));
+  });
+
+  it('uses stable id-based names for same-title external links', () => {
+    const routes = convertServerMenuToRouteRecordStringComponent([
+      {
+        componentName: '',
+        id: 301,
+        name: '帮助中心',
+        parentId: 0,
+        path: 'https://example.com/help',
+        visible: true,
+      },
+      {
+        componentName: '',
+        id: 302,
+        name: '帮助中心',
+        parentId: 0,
+        path: 'https://example.org/help',
+        visible: true,
+      },
+    ] as any);
+
+    expect(routes.map((route) => route.name)).toEqual([
+      'External_301',
+      'External_302',
+    ]);
+    expect(routes.map((route) => route.meta.title)).toEqual([
+      '帮助中心',
+      '帮助中心',
+    ]);
+  });
+
+  it('still reports duplicate non-empty component names', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const routes = convertServerMenuToRouteRecordStringComponent([
+        {
+          component: 'first/index',
+          componentName: 'SharedPage',
+          id: 401,
+          name: '页面一',
+          parentId: 0,
+          path: '/first',
+          visible: true,
+        },
+        {
+          component: 'second/index',
+          componentName: 'SharedPage',
+          id: 402,
+          name: '页面二',
+          parentId: 0,
+          path: '/second',
+          visible: true,
+        },
+      ] as any);
+
+      expect(routes.map((route) => route.name)).toEqual([
+        'SharedPage',
+        'SharedPage_402',
+      ]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'menu componentName duplicate: SharedPage, id: 402',
+        expect.objectContaining({ id: 402 }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

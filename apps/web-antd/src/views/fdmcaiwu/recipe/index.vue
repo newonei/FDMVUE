@@ -366,7 +366,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: gridColumns,
-    height: '100%',
+    height: '600px',
     keepSource: false,
     proxyConfig: {
       ajax: {
@@ -691,7 +691,7 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page auto-content-height>
     <Modal
       v-model:open="editOpen"
       :confirm-loading="saving"
@@ -938,7 +938,7 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
       </div>
     </Modal>
 
-    <div class="recipe-page flex h-full min-h-0 flex-1 flex-col px-4 pb-4">
+    <div>
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -960,106 +960,67 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
         </Button>
       </header>
 
-      <div class="recipe-grid min-h-0 flex-1 overflow-hidden">
-        <Grid
-          class="recipe-vxe-wrapper"
-          grid-class="recipe-vxe-grid"
-          table-title="配方成本"
-        >
-          <template #productType="{ row }">
-            <Tag>{{ formatProductType(row.productType) }}</Tag>
-          </template>
-          <template #densityType="{ row }">
-            {{ formatDensityType(row.densityType) }}
-          </template>
-          <template #yieldRate="{ row }">
-            {{ formatYieldRate(row.materialYieldRate) }}
-          </template>
-          <template #batchWeight="{ row }">
-            {{ formatWeight(row.batchWeightKg) }}
-          </template>
-          <template #batchCost="{ row }">
-            {{ formatMoney(row.batchCostYuan, 4) }}
-          </template>
-          <template #rawUnitCost="{ row }">
-            {{ formatUnitCost(row.rawUnitCostPerKg, true) }}
-          </template>
-          <template #effectiveUnitCost="{ row }">
-            <strong :class="{ 'effective-cost': row.costAvailable }">
-              {{ formatUnitCost(row.effectiveUnitCostPerKg) }}
-            </strong>
-          </template>
-          <template #status="{ row }">
-            <Tag v-if="!row.enabled">已停用</Tag>
-            <Tag v-else-if="row.costAvailable" color="success">可报价</Tag>
-            <Tag v-else color="error">成本阻断</Tag>
-          </template>
-          <template #blockedReasons="{ row }">
-            <Tooltip :title="getBlockedReason(row)">
-              <span class="blocked-reason">{{ getBlockedReason(row) }}</span>
-            </Tooltip>
-          </template>
-          <template #actions="{ row }">
-            <Space :size="0">
-              <Button
-                v-access:code="['fdmcaiwu:recipe:update']"
-                size="small"
-                type="link"
-                @click="handleEdit(row)"
-              >
-                编辑
-              </Button>
-              <Button
-                v-access:code="['fdmcaiwu:recipe:delete']"
-                danger
-                size="small"
-                type="link"
-                @click="handleDelete(row)"
-              >
-                删除
-              </Button>
-            </Space>
-          </template>
-        </Grid>
-      </div>
+      <Grid table-title="配方成本">
+        <template #productType="{ row }">
+          <Tag>{{ formatProductType(row.productType) }}</Tag>
+        </template>
+        <template #densityType="{ row }">
+          {{ formatDensityType(row.densityType) }}
+        </template>
+        <template #yieldRate="{ row }">
+          {{ formatYieldRate(row.materialYieldRate) }}
+        </template>
+        <template #batchWeight="{ row }">
+          {{ formatWeight(row.batchWeightKg) }}
+        </template>
+        <template #batchCost="{ row }">
+          {{ formatMoney(row.batchCostYuan, 4) }}
+        </template>
+        <template #rawUnitCost="{ row }">
+          {{ formatUnitCost(row.rawUnitCostPerKg, true) }}
+        </template>
+        <template #effectiveUnitCost="{ row }">
+          <strong :class="{ 'effective-cost': row.costAvailable }">
+            {{ formatUnitCost(row.effectiveUnitCostPerKg) }}
+          </strong>
+        </template>
+        <template #status="{ row }">
+          <Tag v-if="!row.enabled">已停用</Tag>
+          <Tag v-else-if="row.costAvailable" color="success">可报价</Tag>
+          <Tag v-else color="error">成本阻断</Tag>
+        </template>
+        <template #blockedReasons="{ row }">
+          <Tooltip :title="getBlockedReason(row)">
+            <span class="blocked-reason">{{ getBlockedReason(row) }}</span>
+          </Tooltip>
+        </template>
+        <template #actions="{ row }">
+          <Space :size="0">
+            <Button
+              v-access:code="['fdmcaiwu:recipe:update']"
+              size="small"
+              type="link"
+              @click="handleEdit(row)"
+            >
+              编辑
+            </Button>
+            <Button
+              v-access:code="['fdmcaiwu:recipe:delete']"
+              danger
+              size="small"
+              type="link"
+              @click="handleDelete(row)"
+            >
+              删除
+            </Button>
+          </Space>
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>
 
 <style scoped>
-.recipe-page,
-.recipe-grid {
-  min-height: 0;
-}
-
-.recipe-page {
-  height: 100%;
-}
-
-.recipe-grid {
-  display: flex;
-  flex-direction: column;
-  min-height: 440px;
-}
-
-.recipe-grid :deep(.recipe-vxe-wrapper) {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.recipe-grid :deep(.recipe-vxe-grid) {
-  flex: 1 1 auto;
-  height: 100% !important;
-  min-height: 0;
-}
-
-.recipe-grid :deep(.vxe-grid) {
-  height: 100%;
-}
-
 .blocked-reason {
   display: block;
   overflow: hidden;
@@ -1130,10 +1091,6 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
 @media (max-width: 768px) {
   .base-form-grid {
     grid-template-columns: 1fr;
-  }
-
-  .recipe-grid {
-    min-height: 540px;
   }
 }
 </style>

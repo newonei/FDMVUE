@@ -26,6 +26,15 @@ const emit = defineEmits<{ success: [] }>();
 let openSeq = 0;
 const formData = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply | undefined>();
 
+function setTidDisabled(disabled: boolean) {
+  formApi.updateSchema([
+    {
+      fieldName: 'tid',
+      componentProps: { disabled },
+    },
+  ]);
+}
+
 function calculateUnitPrice(amount: unknown, quantity: unknown) {
   const normalizedAmount = Number(amount);
   const normalizedQuantity = Number(quantity);
@@ -96,6 +105,7 @@ const [Modal, modalApi] = useVbenModal({
       ++openSeq;
       modalApi.unlock();
       formData.value = undefined;
+      setTidDisabled(false);
       await formApi.resetForm();
       await formApi.setValues(EC_INVOICE_APPLY_DEFAULTS as any, false);
       return;
@@ -103,6 +113,7 @@ const [Modal, modalApi] = useVbenModal({
     const mySeq = ++openSeq;
     const row = modalApi.getData<FdmdataEcInvoiceApplyApi.EcInvoiceApply>();
     formData.value = undefined;
+    setTidDisabled(Boolean(row?.id));
     await formApi.resetForm();
     await formApi.setValues(EC_INVOICE_APPLY_DEFAULTS as any, false);
     if (!row?.id) return;
