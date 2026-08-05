@@ -85,6 +85,21 @@ const SCORE_MAX = 100;
 const managerScoreEnabled = computed(
   () => instance.value?.managerScoreEnabled === true,
 );
+const scoreSummary = computed(() => {
+  const sum = (field: keyof Pick<ScoreRow, 'managerScore' | 'selfScore' | 'supervisorScore'>) => {
+    const values = scoreRows.value
+      .map((row) => row[field])
+      .filter((score): score is number => score !== undefined && score !== null);
+    if (values.length === 0) return undefined;
+    return Number(values.reduce((total, score) => total + score, 0).toFixed(2));
+  };
+
+  return {
+    manager: sum('managerScore'),
+    self: sum('selfScore'),
+    supervisor: sum('supervisorScore'),
+  };
+});
 const managerRelationInvalid = computed(() => {
   const detail = instance.value;
   const managerUserId = detail?.superiorSupervisorUserId;
@@ -265,8 +280,8 @@ const canReturn = computed(
 );
 const returnWarning = computed(() =>
   isCompletedInstance.value
-    ? '回退后将撤销公示并创建修订流程，旧流程历史仍会保留；目标节点之后的评分、等级、确认和复盘状态将失效，指标行动计划不受影响。'
-    : '回退后，目标节点之后的评分和确认状态将失效；指标行动计划不受影响。',
+    ? '回退后将撤销公示并创建修订流程，旧流程历史仍会保留；已填写的评分和说明将保留并在对应节点自动带出，最终分、等级、确认和复盘状态将重新处理，指标行动计划不受影响。'
+    : '回退后，已填写的评分和说明将保留并在对应节点自动带出；流程提交状态和最终结果将按回退节点重新处理，指标行动计划不受影响。',
 );
 
 function statusMeta(status?: number): { color: string; text: string } {
@@ -634,6 +649,15 @@ onMounted(load);
           <Tag :color="statusMeta(instance.status).color">
             {{ statusMeta(instance.status).text }}
           </Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="员工自评汇总（50%）">
+          {{ scoreSummary.self ?? '-' }}
+        </Descriptions.Item>
+        <Descriptions.Item label="主管评分汇总（50%）">
+          {{ scoreSummary.supervisor ?? '-' }}
+        </Descriptions.Item>
+        <Descriptions.Item v-if="managerScoreEnabled" label="上级评分汇总（10%）">
+          {{ scoreSummary.manager ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item label="最终分">
           {{ instance.finalScore ?? '-' }}
