@@ -709,6 +709,13 @@ export function getMyResults() {
   );
 }
 
+export function getMyResultPage(params: JixiaoApi.ResultPageParams) {
+  return requestClient.get<PageResult<JixiaoApi.Result>>(
+    '/fdmperformance/result/my-page',
+    { params },
+  );
+}
+
 export function adjustGrade(data: JixiaoApi.GradeAdjustReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/result/grade-adjust',

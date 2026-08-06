@@ -25,13 +25,15 @@ import {
   getMyInstancePage,
   getMyPendingReviews,
   getMyPendingSupervisorReviews,
-  getMyResults,
+  getMyResultPage,
   submitReview,
 } from '#/api/fdmperformance';
 
 import {
   GRADE_OPTIONS,
   INSTANCE_STATUS_MAP,
+  PERFORMANCE_DEFAULT_PAGE_SIZE,
+  PERFORMANCE_PAGE_SIZE_OPTIONS,
   TASK_LABELS,
 } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
@@ -42,7 +44,8 @@ type ReviewMode = 'confirm' | 'submit';
 
 const route = useRoute();
 const router = useRouter();
-const loading = ref(false);
+const instanceLoading = ref(false);
+const resultLoading = ref(false);
 const reviewOpen = ref(false);
 const reviewMode = ref<ReviewMode>('submit');
 const activeReview = ref<JixiaoApi.Review>();
@@ -50,6 +53,16 @@ const supervisorReviews = ref<JixiaoApi.Review[]>([]);
 const employeeReviews = ref<JixiaoApi.Review[]>([]);
 const instances = ref<JixiaoApi.Instance[]>([]);
 const results = ref<JixiaoApi.Result[]>([]);
+const instanceTotal = ref(0);
+const resultTotal = ref(0);
+const instanceQuery = reactive({
+  pageNo: 1,
+  pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
+});
+const resultQuery = reactive({
+  pageNo: 1,
+  pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
+});
 const handledReviewRouteKey = ref('');
 const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
   improvementPlan: '',
@@ -103,24 +116,54 @@ function periodLabel(periodKey?: string) {
   return periodKey;
 }
 
-async function load() {
-  loading.value = true;
+async function loadInstances() {
+  instanceLoading.value = true;
   try {
-    const [myInstances, myResults, supervisorPending, employeePending] =
-      await Promise.all([
-        getMyInstancePage({ pageNo: 1, pageSize: 10 }),
-        getMyResults(),
-        getMyPendingSupervisorReviews(),
-        getMyPendingReviews(),
-      ]);
-    instances.value = myInstances.list;
-    results.value = myResults;
-    supervisorReviews.value = supervisorPending || [];
-    employeeReviews.value = employeePending || [];
-    syncRouteReviewAction();
+    const data = await getMyInstancePage(instanceQuery);
+    instances.value = data.list;
+    instanceTotal.value = data.total;
   } finally {
-    loading.value = false;
+    instanceLoading.value = false;
   }
+}
+
+async function loadResults() {
+  resultLoading.value = true;
+  try {
+    const data = await getMyResultPage(resultQuery);
+    results.value = data.list;
+    resultTotal.value = data.total;
+  } finally {
+    resultLoading.value = false;
+  }
+}
+
+async function loadReviews() {
+  const [supervisorPending, employeePending] = await Promise.all([
+    getMyPendingSupervisorReviews(),
+    getMyPendingReviews(),
+  ]);
+  supervisorReviews.value = supervisorPending || [];
+  employeeReviews.value = employeePending || [];
+  syncRouteReviewAction();
+}
+
+async function load() {
+  await Promise.all([loadInstances(), loadResults(), loadReviews()]);
+}
+
+function changeInstancePage(pagination: any) {
+  const pageSizeChanged = instanceQuery.pageSize !== pagination.pageSize;
+  instanceQuery.pageNo = pageSizeChanged ? 1 : pagination.current;
+  instanceQuery.pageSize = pagination.pageSize;
+  void loadInstances();
+}
+
+function changeResultPage(pagination: any) {
+  const pageSizeChanged = resultQuery.pageSize !== pagination.pageSize;
+  resultQuery.pageNo = pageSizeChanged ? 1 : pagination.current;
+  resultQuery.pageSize = pagination.pageSize;
+  void loadResults();
 }
 
 function openInstance(record: JixiaoApi.Instance) {
@@ -194,7 +237,7 @@ async function submitReviewForm() {
   await submitReview(reviewForm);
   message.success('复盘已提交，等待员工确认');
   reviewOpen.value = false;
-  await load();
+  await loadReviews();
 }
 
 function confirmActiveReview() {
@@ -208,7 +251,7 @@ function confirmActiveReview() {
       await confirmReview({ reviewId: review.id! });
       message.success('绩效复盘已确认');
       reviewOpen.value = false;
-      await load();
+      await loadReviews();
     },
     title: '确认绩效复盘',
   });
@@ -264,10 +307,18 @@ onMounted(load);
         class="performance-compact-table"
         :columns="instanceColumns"
         :data-source="instances"
-        :loading="loading"
-        :pagination="false"
+        :loading="instanceLoading"
+        :pagination="{
+          current: instanceQuery.pageNo,
+          pageSize: instanceQuery.pageSize,
+          pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+          showSizeChanger: true,
+          size: 'small',
+          total: instanceTotal,
+        }"
         row-key="id"
         size="small"
+        @change="changeInstancePage"
       >
         <template #emptyText><Empty description="暂无当前考核" /></template>
         <template #bodyCell="{ column, record }">
@@ -301,11 +352,20 @@ onMounted(load);
         class="performance-compact-table"
         :columns="resultColumns"
         :data-source="results"
-        :loading="loading"
-        :pagination="false"
+        :loading="resultLoading"
+        :pagination="{
+          current: resultQuery.pageNo,
+          pageSize: resultQuery.pageSize,
+          pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+          showSizeChanger: true,
+          size: 'small',
+          total: resultTotal,
+        }"
         row-key="id"
         size="small"
+        @change="changeResultPage"
       >
+        <template #emptyText><Empty description="暂无已公示结果" /></template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'periodKey'">
             {{ periodLabel(record.periodKey) }}
