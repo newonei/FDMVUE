@@ -53,6 +53,7 @@ vite.config.ts.*
 .cursor
 
 # AI
+/.codex-tmp/
 .agent
 .agents
 .claude
