@@ -24,7 +24,9 @@ export function formatSpecification(
   thickness: unknown,
 ): string {
   if (![length, width, thickness].every((item) => hasValue(item))) return '—';
-  return `${length} × ${width} × ${thickness} mm`;
+  return `${[length, width, thickness]
+    .map((item) => formatCompactDecimal(item, '', 2))
+    .join(' × ')} mm`;
 }
 
 export function formatProductType(value?: string): string {
@@ -80,6 +82,22 @@ export function formatExactMoney(value: unknown): string {
 export function formatDecimal(value: unknown, unit = ''): string {
   if (!hasValue(value)) return '—';
   return `${String(value)}${unit ? ` ${unit}` : ''}`;
+}
+
+export function formatCompactDecimal(
+  value: unknown,
+  unit = '',
+  maximumFractionDigits = 4,
+): string {
+  if (!hasValue(value)) return '—';
+  const numberValue = Number(value);
+  const formattedValue = Number.isFinite(numberValue)
+    ? numberValue.toLocaleString('zh-CN', {
+        maximumFractionDigits,
+        useGrouping: false,
+      })
+    : String(value);
+  return `${formattedValue}${unit ? ` ${unit}` : ''}`;
 }
 
 export function formatMaterialUnitCost(value: unknown): string {

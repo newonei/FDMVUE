@@ -5,7 +5,8 @@ import type { FileType } from 'ant-design-vue/es/upload/interface';
 import type { FdmcaiwuBatchQuotationApi } from '#/api/fdmcaiwu/batch-quotation';
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onActivated, onMounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -38,11 +39,25 @@ import { formatMaterialUnitCost, hasValue } from '../quotation/data';
 
 defineOptions({ name: 'FdmcaiwuBatchQuotation' });
 
+const props = withDefaults(
+  defineProps<{
+    embedded?: boolean;
+  }>(),
+  {
+    embedded: false,
+  },
+);
+
+const route = useRoute();
+const router = useRouter();
+
 interface BatchFormModel {
   defaultQuantity: number;
   defaultRecipeId?: number;
   includeStrap: boolean;
   includeSupplement: boolean;
+  profitMode: string;
+  profitRatePercent: number;
 }
 
 interface PreviewRow {
@@ -84,7 +99,9 @@ interface PreviewRow {
   rowNo: number;
   remarks: string;
   slicingLaborPerKg: string;
-  specification: string;
+  lengthMm: string;
+  thicknessMm: string;
+  widthMm: string;
   status: 'FAILED' | 'SUCCESS';
   strapCostPerPiece: string;
   totalCost: string;
@@ -118,7 +135,18 @@ const formState = reactive<BatchFormModel>({
   defaultRecipeId: undefined,
   includeStrap: false,
   includeSupplement: false,
+  profitMode: 'GROSS_MARGIN',
+  profitRatePercent: 20,
 });
+
+const profitModeOptions = computed(() =>
+  quotationOptions.value.profitModes.length > 0
+    ? quotationOptions.value.profitModes
+    : [
+        { label: '毛利率', value: 'GROSS_MARGIN' },
+        { label: '加价率', value: 'MARKUP' },
+      ],
+);
 
 function isRecipeCostAvailable(recipe?: FdmcaiwuQuotationApi.RecipeOption) {
   if (!recipe || recipe.costBlockReasons?.length) return false;
@@ -168,8 +196,8 @@ function buildOptions(): FdmcaiwuBatchQuotationApi.CalculateOptions {
     defaultRecipeId: formState.defaultRecipeId,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
-    profitMode: 'GROSS_MARGIN',
-    profitRate: 0,
+    profitMode: formState.profitMode,
+    profitRate: Number((formState.profitRatePercent / 100).toFixed(6)),
   };
   return options;
 }
@@ -238,11 +266,11 @@ function firstValue(
   row: FdmcaiwuBatchQuotationApi.ResultRow,
   ...fields: string[]
 ) {
-  return fields.map((field) => row[field]).find(hasValue);
+  return fields.map((field) => row[field]).find((value) => hasValue(value));
 }
 
 function joinMessages(value: unknown) {
-  if (Array.isArray(value)) return value.filter((item) => Boolean(item)).join('；');
+  if (Array.isArray(value)) return value.filter(Boolean).join('；');
   return hasValue(value) ? String(value) : '';
 }
 
@@ -253,21 +281,45 @@ function isSuccessRow(row: FdmcaiwuBatchQuotationApi.ResultRow) {
   );
 }
 
+function getSpecificationDimensions(
+  row: FdmcaiwuBatchQuotationApi.ResultRow,
+): [string, string, string] {
+  const explicitDimensions = [
+    firstValue(row, 'productLengthMm', 'lengthMm'),
+    firstValue(row, 'productWidthMm', 'widthMm'),
+    firstValue(row, 'productThicknessMm', 'thicknessMm'),
+  ];
+  if (explicitDimensions.every((value) => hasValue(value))) {
+    return [
+      formatNumber(explicitDimensions[0], 3),
+      formatNumber(explicitDimensions[1], 3),
+      formatNumber(explicitDimensions[2], 3),
+    ];
+  }
+
+  const specification = String(
+    row.specification || row.originalSpecification || '',
+  ).trim();
+  const match = specification.match(
+    /^(\d+(?:\.\d+)?)\s*[×xX*＊]\s*(\d+(?:\.\d+)?)\s*[×xX*＊]\s*(\d+(?:\.\d+)?)\s*(?:mm|毫米)?$/i,
+  );
+  return match
+    ? [
+        formatNumber(match[1], 3),
+        formatNumber(match[2], 3),
+        formatNumber(match[3], 3),
+      ]
+    : ['—', '—', '—'];
+}
+
 const previewRows = computed<PreviewRow[]>(() =>
   (result.value?.rows ?? []).map((row, index) => {
     const rowNo = Number(row.rowNumber ?? index + 1);
     const success = isSuccessRow(row);
-    const length = firstValue(row, 'productLengthMm', 'lengthMm');
-    const width = firstValue(row, 'productWidthMm', 'widthMm');
-    const thickness = firstValue(row, 'productThicknessMm', 'thicknessMm');
-    const fallbackSpecification = [length, width, thickness].every(hasValue)
-      ? `${length} × ${width} × ${thickness} mm`
-      : '—';
-    const recipe = [row.recipeCode, row.recipeName]
-      .filter((item) => Boolean(item))
-      .join(' · ');
+    const [lengthMm, widthMm, thicknessMm] = getSpecificationDimensions(row);
+    const recipe = [row.recipeCode, row.recipeName].filter(Boolean).join(' · ');
     const mould = [row.mouldProfileCode, row.mouldProfileName]
-      .filter((item) => Boolean(item))
+      .filter(Boolean)
       .join(' · ');
     return {
       allocationCostPerKg: formatMoney(firstValue(row, 'allocationCostPerKg')),
@@ -303,6 +355,7 @@ const previewRows = computed<PreviewRow[]>(() =>
         ) || (success ? '' : '计算失败'),
       foamingLaborPerKg: formatMoney(firstValue(row, 'foamingLaborPerKg')),
       key: `${rowNo}-${index}`,
+      lengthMm,
       materialCost: formatMoney(firstValue(row, 'materialCost')),
       materialUnitCostPerKg: formatMoney(
         firstValue(row, 'materialUnitCostPerKg', 'kgUnitPrice'),
@@ -348,7 +401,6 @@ const previewRows = computed<PreviewRow[]>(() =>
       rowNo,
       slicingLaborPerKg: formatMoney(firstValue(row, 'slicingLaborPerKg')),
       sizeClass: formatSizeClass(firstValue(row, 'sizeClass')),
-      specification: String(row.specification || fallbackSpecification),
       status: success ? 'SUCCESS' : 'FAILED',
       strapCostPerPiece: formatMoney(firstValue(row, 'strapCostPerPiece')),
       totalCost: formatMoney(
@@ -365,10 +417,12 @@ const previewRows = computed<PreviewRow[]>(() =>
         0,
       ),
       thicknessClass: formatThicknessClass(firstValue(row, 'thicknessClass')),
+      thicknessMm,
       verticalCutCostPerPiece: formatMoney(
         firstValue(row, 'verticalCutCostPerPiece', 'verticalCutCost'),
       ),
       warnings: joinMessages(row.warnings),
+      widthMm,
       unitQuote: formatMoney(firstValue(row, 'unitQuote')),
     };
   }),
@@ -384,12 +438,13 @@ const previewColumns: TableColumnsType<PreviewRow> = [
     title: '状态',
     width: 80,
   },
+  { dataIndex: 'lengthMm', key: 'lengthMm', title: '长度(mm)', width: 100 },
+  { dataIndex: 'widthMm', key: 'widthMm', title: '宽度(mm)', width: 100 },
   {
-    dataIndex: 'specification',
-    fixed: 'left',
-    key: 'specification',
-    title: '规格',
-    width: 180,
+    dataIndex: 'thicknessMm',
+    key: 'thicknessMm',
+    title: '厚度(mm)',
+    width: 100,
   },
   { dataIndex: 'recipe', key: 'recipe', title: '配方', width: 210 },
   { dataIndex: 'quantity', key: 'quantity', title: '数量', width: 80 },
@@ -646,6 +701,18 @@ function validateForm() {
   ) {
     return '默认数量必须为大于 0 的整数';
   }
+  if (
+    !Number.isFinite(formState.profitRatePercent) ||
+    formState.profitRatePercent < 0
+  ) {
+    return '利润率必须大于或等于 0';
+  }
+  if (
+    formState.profitMode === 'GROSS_MARGIN' &&
+    formState.profitRatePercent >= 100
+  ) {
+    return '毛利率必须小于 100%';
+  }
   return '';
 }
 
@@ -757,6 +824,8 @@ function handleResetParameters() {
     defaultRecipeId: undefined,
     includeStrap: false,
     includeSupplement: false,
+    profitMode: 'GROSS_MARGIN',
+    profitRatePercent: 20,
   });
   const defaults = quotationOptions.value.costDefaults;
   formState.includeStrap = defaults?.includeStrap ?? false;
@@ -769,13 +838,55 @@ function handleResetParameters() {
     : quotationOptions.value.recipes.find(isRecipeCostAvailable)?.id;
 }
 
-onMounted(loadOptions);
+const legacyRedirecting = ref(false);
+
+async function redirectToUnifiedQuotation() {
+  if (
+    props.embedded ||
+    legacyRedirecting.value ||
+    route.path !== '/caiwu/batch-quotation'
+  ) {
+    return;
+  }
+
+  legacyRedirecting.value = true;
+  try {
+    await router.replace({
+      path: '/caiwu/quotation',
+      query: {
+        ...route.query,
+        mode: 'batch',
+      },
+    });
+  } finally {
+    legacyRedirecting.value = false;
+  }
+}
+
+onMounted(() => {
+  if (!props.embedded) {
+    void redirectToUnifiedQuotation();
+    return;
+  }
+  void loadOptions();
+});
+
+onActivated(() => {
+  if (!props.embedded) {
+    void redirectToUnifiedQuotation();
+  }
+});
 </script>
 
 <template>
-  <Page
-    title="批量报价"
-    description="从 Excel 导入规格，逐行自动选择总计成本最低的可行模具，并导出完整工艺与成本明细。"
+  <component
+    :is="props.embedded ? 'div' : Page"
+    :description="
+      props.embedded
+        ? undefined
+        : '从 Excel 的长度、宽度、厚度三列导入尺寸，逐行自动选择总计成本最低的可行模具，并导出完整工艺与成本明细。'
+    "
+    :title="props.embedded ? undefined : '批量报价'"
   >
     <div class="batch-page">
       <Alert
@@ -783,7 +894,7 @@ onMounted(loadOptions);
         show-icon
         type="info"
         message="计算口径"
-        description="Excel 中的配方或数量留空时使用下方全局默认值；每条规格都会遍历可用模具并选择单位总成本最低的可行方案。"
+        description="Excel 中的长度(mm)、宽度(mm)、厚度(mm)需分别填写；配方或数量留空时使用下方全局默认值。每条尺寸都会遍历可用模具并选择单位总成本最低的可行方案。"
       />
 
       <Alert
@@ -827,7 +938,7 @@ onMounted(loadOptions);
             </p>
             <p class="ant-upload-text">点击或拖拽 Excel 到这里</p>
             <p class="ant-upload-hint">
-              新文件会替换当前文件，服务端将校验标题和每一行规格
+              模板按长度(mm)、宽度(mm)、厚度(mm)三列填写，不要合并为“长×宽×厚”
             </p>
           </Upload.Dragger>
 
@@ -873,6 +984,27 @@ onMounted(loadOptions);
                 />
               </div>
 
+              <div class="field">
+                <label>利润模式</label>
+                <Select
+                  v-model:value="formState.profitMode"
+                  class="w-full"
+                  :options="profitModeOptions"
+                />
+              </div>
+
+              <div class="field">
+                <label>利润率（%）</label>
+                <InputNumber
+                  v-model:value="formState.profitRatePercent"
+                  addon-after="%"
+                  class="w-full"
+                  :max="formState.profitMode === 'GROSS_MARGIN' ? 99.99 : 1000"
+                  :min="0"
+                  :precision="2"
+                />
+              </div>
+
               <div class="switch-field">
                 <Switch v-model:checked="formState.includeSupplement" />
                 <span>剩余厚度允许补片</span>
@@ -888,7 +1020,7 @@ onMounted(loadOptions);
               show-icon
               type="info"
               message="逐行自动解析成本规则"
-              description="Excel 每一行都按自己的配方读取KG成本、固定合格率与工艺路线，再按规格解析大小垫和厚垫工费；这里不再设置全批统一合格率或加工费。"
+              description="Excel 每一行都按自己的配方读取KG成本、固定合格率与工艺路线，再根据长度、宽度、厚度判断大小垫和厚垫工费；这里不再设置全批统一合格率或加工费。"
             />
 
             <div class="setup-actions">
@@ -903,7 +1035,7 @@ onMounted(loadOptions);
                 <template #icon>
                   <IconifyIcon icon="lucide:calculator" />
                 </template>
-                预检并批量计算
+                校验并批量报价
               </Button>
             </div>
           </Spin>
@@ -995,7 +1127,7 @@ onMounted(loadOptions);
               :pagination="{ defaultPageSize: 50, showSizeChanger: true }"
               row-key="key"
               size="small"
-              :scroll="{ x: 4300, y: 600 }"
+              :scroll="{ x: 4420, y: 600 }"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'status'">
@@ -1024,7 +1156,7 @@ onMounted(loadOptions);
         </Spin>
       </Card>
     </div>
-  </Page>
+  </component>
 </template>
 
 <style scoped>

@@ -11,6 +11,7 @@ import { convertServerMenuToRouteRecordStringComponent } from '@vben/utils';
 
 import { BasicLayout, IFrameView } from '#/layouts';
 
+import { hideLegacyBatchQuotationMenu } from './legacy-batch-quotation-menu';
 import { filterRetiredOfficialAiMenus } from './retired-official-ai-menus';
 
 const forbiddenComponent = () => import('#/views/_core/fallback/forbidden.vue');
@@ -31,7 +32,7 @@ async function generateAccess(options: GenerateMenuAndRoutesOptions) {
       // 补充说明：accessStore.accessMenus 一开始是 AppRouteRecordRaw 类型（后端加载），后面被赋值成 MenuRecordRaw 类型（前端转换）
       const accessMenus = accessStore.accessMenus as AppRouteRecordRaw[];
       return convertServerMenuToRouteRecordStringComponent(
-        filterRetiredOfficialAiMenus(accessMenus),
+        hideLegacyBatchQuotationMenu(filterRetiredOfficialAiMenus(accessMenus)),
       );
     },
     // 可以指定没有权限跳转403页面

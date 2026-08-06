@@ -5,7 +5,9 @@ import type { Rule } from 'ant-design-vue/es/form';
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
 
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
@@ -13,6 +15,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Descriptions,
   DescriptionsItem,
   Empty,
@@ -21,11 +24,13 @@ import {
   InputNumber,
   message,
   RadioGroup,
+  Segmented,
   Select,
   Spin,
   Switch,
   Table,
   Tag,
+  Tabs,
 } from 'ant-design-vue';
 
 import {
@@ -34,6 +39,7 @@ import {
 } from '#/api/fdmcaiwu/quotation';
 
 import {
+  formatCompactDecimal,
   formatDecimal,
   formatDensityType,
   formatExactMoney,
@@ -47,10 +53,12 @@ import {
   hasValue,
   RESULT_COST_FIELDS,
 } from './data';
+import BatchQuotationPanel from '../batch-quotation/index.vue';
 
 defineOptions({ name: 'FdmcaiwuQuotation' });
 
 type MouldSelectionMode = 'AUTO' | 'MANUAL';
+type QuotationMode = 'batch' | 'single';
 
 interface QuotationFormModel {
   includeStrap: boolean;
@@ -82,6 +90,65 @@ const FALLBACK_PROFIT_MODES = [
   { label: '加价率', value: 'MARKUP' },
 ];
 
+const route = useRoute();
+const router = useRouter();
+const { hasAccessByCodes } = useAccess();
+const canUseBatchQuotation = hasAccessByCodes([
+  'fdmcaiwu:batch-quotation:query',
+]);
+const initialQuotationMode: QuotationMode =
+  route.query.mode === 'batch' && canUseBatchQuotation ? 'batch' : 'single';
+const activeQuotationMode = ref<QuotationMode>(initialQuotationMode);
+const batchPanelMounted = ref(initialQuotationMode === 'batch');
+const quotationModeOptions = computed(() => [
+  {
+    label: '单笔报价',
+    value: 'single',
+  },
+  ...(canUseBatchQuotation
+    ? [
+        {
+          label: 'Excel 批量报价',
+          value: 'batch',
+        },
+      ]
+    : []),
+]);
+const pageDescription = computed(() =>
+  activeQuotationMode.value === 'batch'
+    ? '从 Excel 导入多条规格，逐行完成工艺选模与报价，并导出冻结批次结果。'
+    : '输入任意成品规格和配方，系统自动解析合格率与工费规则，比较全部可行模具后返回最低完整成本。',
+);
+
+function normalizeQuotationMode(value: unknown): QuotationMode {
+  return value === 'batch' && canUseBatchQuotation ? 'batch' : 'single';
+}
+
+function setQuotationMode(value: string | number) {
+  const nextMode = normalizeQuotationMode(value);
+  activeQuotationMode.value = nextMode;
+  if (nextMode === 'batch') {
+    batchPanelMounted.value = true;
+  }
+  void router.replace({
+    query: {
+      ...route.query,
+      mode: nextMode,
+    },
+  });
+}
+
+watch(
+  () => route.query.mode,
+  (value) => {
+    const nextMode = normalizeQuotationMode(value);
+    activeQuotationMode.value = nextMode;
+    if (nextMode === 'batch') {
+      batchPanelMounted.value = true;
+    }
+  },
+);
+
 const mouldSelectionModeOptions = [
   { label: '自动选择最低成本可行模具', value: 'AUTO' },
   { label: '手动指定模具', value: 'MANUAL' },
@@ -93,6 +160,7 @@ const calculating = ref(false);
 const optionsError = ref('');
 const requestError = ref('');
 const result = ref<FdmcaiwuQuotationApi.CalculateResp>();
+const activeResultTab = ref('overview');
 const quotationOptions = ref<FdmcaiwuQuotationApi.Options>({
   costDefaults: undefined,
   mouldProfiles: [],
@@ -235,7 +303,6 @@ const formRules: Record<string, Rule[]> = {
         if (formState.mouldSelectionMode === 'MANUAL' && !hasValue(value)) {
           throw new Error('手动模式必须选择模具');
         }
-        return;
       },
       trigger: 'change',
     },
@@ -283,7 +350,6 @@ const formRules: Record<string, Rule[]> = {
         if (formState.profitMode === 'GROSS_MARGIN' && numberValue >= 100) {
           throw new Error('毛利率必须小于 100%');
         }
-        return;
       },
       trigger: 'change',
     },
@@ -307,7 +373,6 @@ const formRules: Record<string, Rule[]> = {
         if (!isRecipeCostAvailable(recipe)) {
           throw new Error(getRecipeBlockReason(recipe));
         }
-        return;
       },
       trigger: 'change',
     },
@@ -328,6 +393,7 @@ function handleProfitModeChange() {
 function handleReset() {
   Object.assign(formState, createInitialFormFromOptions());
   result.value = undefined;
+  activeResultTab.value = 'overview';
   requestError.value = '';
   nextTick(() => formRef.value?.clearValidate());
 }
@@ -433,6 +499,11 @@ async function runCalculation() {
     const response = await calculateQuotation(payload);
     if (requestSeq !== calculateRequestSeq) return;
     result.value = response;
+    activeResultTab.value =
+      response.status?.toLowerCase() === 'blocked' &&
+      response.candidateMoulds?.length
+        ? 'moulds'
+        : 'overview';
     if (response.status?.toLowerCase() === 'calculated') {
       message.success('动态报价计算完成');
     }
@@ -517,10 +588,7 @@ const processCards = computed(() => {
         data?.mouldThicknessMm,
       ),
       title: '1. 选中模具',
-      value:
-        [data?.mouldProfileCode, data?.mouldProfileName]
-          .filter(Boolean)
-          .join(' · ') || '—',
+      value: data?.mouldProfileCode || '—',
     },
     {
       key: 'board',
@@ -542,7 +610,7 @@ const processCards = computed(() => {
     },
     {
       key: 'layers',
-      note: `余厚 ${formatDecimal(data?.remainingThicknessMm, 'mm')}`,
+      note: `余厚 ${formatCompactDecimal(data?.remainingThicknessMm, 'mm', 2)}`,
       title: '4. 层数与补片',
       value: `${data?.fullLayers ?? '—'} 个完整层 + ${
         data?.supplementPieces ?? 0
@@ -689,37 +757,19 @@ const candidateRows = computed<CandidateTableRow[]>(() =>
 );
 
 const candidateColumns = [
-  { key: 'status', title: '状态', width: 92, fixed: 'left' as const },
+  { key: 'status', title: '状态', width: 82, fixed: 'left' as const },
   {
     dataIndex: 'profileLabel',
     key: 'profileLabel',
     title: '模具档案',
-    width: 210,
+    width: 250,
     fixed: 'left' as const,
-  },
-  {
-    dataIndex: 'mouldSpecification',
-    key: 'mouldSpecification',
-    title: '模具尺寸',
-    width: 210,
-  },
-  {
-    dataIndex: 'boardSpecification',
-    key: 'boardSpecification',
-    title: '板材尺寸',
-    width: 210,
   },
   {
     dataIndex: 'layoutSummary',
     key: 'layoutSummary',
     title: '排版',
-    width: 180,
-  },
-  {
-    dataIndex: 'layerSummary',
-    key: 'layerSummary',
-    title: '层数 / 补片',
-    width: 220,
+    width: 160,
   },
   {
     dataIndex: 'totalPiecesPerBoard',
@@ -731,18 +781,12 @@ const candidateColumns = [
     dataIndex: 'utilizationText',
     key: 'utilizationText',
     title: '利用率',
-    width: 100,
+    width: 90,
   },
   {
     key: 'unitCost',
     title: '单位成本',
-    width: 130,
-  },
-  {
-    dataIndex: 'rejectReasonText',
-    key: 'rejectReasonText',
-    title: '不可行原因 / 提醒',
-    width: 260,
+    width: 120,
   },
   {
     key: 'action',
@@ -772,16 +816,79 @@ function formatThicknessClass(value?: string) {
   return value || '—';
 }
 
+const resultContextItems = computed(() => [
+  {
+    key: 'product',
+    label: '成品规格',
+    value: formatSpecification(
+      result.value?.productLengthMm,
+      result.value?.productWidthMm,
+      result.value?.productThicknessMm,
+    ),
+  },
+  {
+    key: 'recipe',
+    label: '配方',
+    value:
+      [result.value?.recipeCode, result.value?.recipeName]
+        .filter(Boolean)
+        .join(' · ') || '—',
+  },
+  {
+    key: 'terms',
+    label: '报价条件',
+    value: `${result.value?.quantity ?? '—'} 条 · ${formatProfitMode(
+      result.value?.profitMode,
+    )} ${resultProfitRate.value}`,
+  },
+]);
+
+const productionFacts = computed(() => [
+  {
+    key: 'classification',
+    label: '产品判定',
+    value: `${formatSizeClass(result.value?.sizeClass)} · ${formatThicknessClass(
+      result.value?.thicknessClass,
+    )}`,
+  },
+  {
+    key: 'yield',
+    label: '材料合格率',
+    value: formatRate(result.value?.materialYieldRate),
+  },
+  {
+    key: 'charge',
+    label: '标准投料量',
+    value: formatCompactDecimal(result.value?.chargeWeightKg, 'kg', 3),
+  },
+  {
+    key: 'material',
+    label: '单片材料用量',
+    value: formatCompactDecimal(result.value?.materialKgPerPiece, 'kg/片', 4),
+  },
+]);
+
 onMounted(loadOptions);
 </script>
 
 <template>
-  <Page
-    title="动态工艺报价"
-    description="输入任意成品规格和配方，系统自动解析合格率与工费规则，比较全部可行模具后返回最低完整成本。"
-  >
+  <Page title="产品报价" :description="pageDescription">
     <div class="quotation-page">
-      <div class="quotation-layout">
+      <div v-if="quotationModeOptions.length > 1" class="quotation-mode-bar">
+        <div class="quotation-mode-copy">
+          <div class="quotation-mode-title">报价方式</div>
+          <div class="quotation-mode-description">
+            单条快速测算，或通过 Excel 一次处理多条规格
+          </div>
+        </div>
+        <Segmented
+          :value="activeQuotationMode"
+          :options="quotationModeOptions"
+          @change="setQuotationMode"
+        />
+      </div>
+
+      <div v-show="activeQuotationMode === 'single'" class="quotation-layout">
         <Card class="control-card" :bordered="false">
           <template #title>
             <div class="card-title">
@@ -846,10 +953,8 @@ onMounted(loadOptions);
                       合格率 {{ formatRate(selectedRecipe.materialYieldRate) }}
                     </Tag>
                     <Tag>
-{{
-                      selectedRecipe.processRouteCode || '未配置工艺路线'
-                    }}
-</Tag>
+                      {{ selectedRecipe.processRouteCode || '未配置工艺路线' }}
+                    </Tag>
                     <Tag
                       :color="
                         isRecipeCostAvailable(selectedRecipe)
@@ -865,12 +970,23 @@ onMounted(loadOptions);
                     </Tag>
                     <span>
                       批次
-                      {{ formatDecimal(selectedRecipe.batchWeightKg, 'kg') }} /
+                      {{
+                        formatCompactDecimal(
+                          selectedRecipe.batchWeightKg,
+                          'kg',
+                          3,
+                        )
+                      }}
+                      /
                       {{
                         formatMoney(selectedRecipe.batchCostYuan)
                       }}，原始公斤成本
                       {{
-                        formatDecimal(selectedRecipe.rawUnitCostPerKg, '元/kg')
+                        formatCompactDecimal(
+                          selectedRecipe.rawUnitCostPerKg,
+                          '元/kg',
+                          4,
+                        )
                       }}，计价成本
                       {{ formatMaterialUnitCost(selectedRecipe.unitCostPerKg) }}
                     </span>
@@ -1115,23 +1231,18 @@ onMounted(loadOptions);
                 </template>
               </Alert>
 
-              <div class="summary-grid">
-                <div class="summary-item cost-summary">
-                  <div class="summary-label">单位成本</div>
-                  <div class="summary-value">
-                    {{ formatMoney(summaryValues.unitCost.display) }}
-                  </div>
-                  <div class="summary-exact">
-                    精确值 {{ formatExactMoney(summaryValues.unitCost.exact) }}
-                  </div>
-                </div>
+              <div
+                v-if="normalizedResultStatus === 'calculated'"
+                class="summary-grid"
+              >
                 <div class="summary-item quote-summary">
                   <div class="summary-label">建议单位报价</div>
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.unitQuote.display) }}
                   </div>
-                  <div class="summary-exact">
-                    精确值 {{ formatExactMoney(summaryValues.unitQuote.exact) }}
+                  <div class="summary-caption">
+                    {{ formatProfitMode(result.profitMode) }}
+                    {{ resultProfitRate }}
                   </div>
                 </div>
                 <div class="summary-item total-summary">
@@ -1139,299 +1250,450 @@ onMounted(loadOptions);
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.totalQuote.display) }}
                   </div>
-                  <div class="summary-exact">
-                    精确值
-                    {{ formatExactMoney(summaryValues.totalQuote.exact) }}
+                  <div class="summary-caption">
+                    {{ result.quantity ?? '—' }} 条
                   </div>
+                </div>
+                <div class="summary-item cost-summary">
+                  <div class="summary-label">单位成本</div>
+                  <div class="summary-value">
+                    {{ formatMoney(summaryValues.unitCost.display) }}
+                  </div>
+                  <div class="summary-caption">精确值收纳在计算依据</div>
                 </div>
               </div>
 
-              <section class="result-section">
-                <div class="result-section-title">工艺计算链</div>
-                <div class="process-flow">
-                  <div
-                    v-for="(item, index) in processCards"
-                    :key="item.key"
-                    class="process-stage"
-                  >
-                    <div class="process-stage-title">{{ item.title }}</div>
-                    <div class="process-stage-value">{{ item.value }}</div>
-                    <div class="process-stage-note">{{ item.note }}</div>
-                    <IconifyIcon
-                      v-if="index < processCards.length - 1"
-                      class="process-arrow"
-                      icon="lucide:chevron-right"
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">本次解析规则</div>
-                <Descriptions bordered :column="3" size="small">
-                  <DescriptionsItem label="有效宽度">
-                    {{ formatDecimal(result.effectiveWidthMm, 'mm') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="大小垫分类">
-                    {{ formatSizeClass(result.sizeClass) }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="厚度分类">
-                    {{ formatThicknessClass(result.thicknessClass) }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="配方合格率">
-                    {{ formatRate(result.materialYieldRate) }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="工艺路线">
-                    {{ result.processRouteCode || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="工费规则">
-                    {{ result.processCostRuleCode || '—' }} ·
-                    {{ result.processCostRuleVersion || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="发泡人工">
-                    {{ formatDecimal(result.foamingLaborPerKg, '元/kg') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="开片人工">
-                    {{ formatDecimal(result.slicingLaborPerKg, '元/kg') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="费用分摊">
-                    {{ formatDecimal(result.allocationCostPerKg, '元/kg') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="立切">
-                    {{ formatDecimal(result.verticalCutCostPerPiece, '元/条') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="复合">
-                    {{ formatDecimal(result.compositeCostPerPiece, '元/条') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="压花">
-                    {{ formatDecimal(result.embossCostPerPiece, '元/条') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="冲床">
-                    {{ formatDecimal(result.punchCostPerPiece, '元/条') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="包装人工">
-                    {{ formatDecimal(result.packingLaborPerPiece, '元/条') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="批量发货">
-                    {{
-                      formatDecimal(
-                        result.batchShippingOperationCostPerPiece,
-                        '元/条',
-                      )
-                    }}
-                  </DescriptionsItem>
-                </Descriptions>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">选中模具与排版详情</div>
-                <Descriptions bordered :column="3" size="small">
-                  <DescriptionsItem label="模具档案">
-                    {{ result.mouldProfileCode || '—' }} ·
-                    {{ result.mouldProfileName || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="模具尺寸">
-                    {{
-                      formatSpecification(
-                        result.mouldLengthMm,
-                        result.mouldWidthMm,
-                        result.mouldThicknessMm,
-                      )
-                    }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="板材尺寸">
-                    {{
-                      formatSpecification(
-                        result.boardLengthMm,
-                        result.boardWidthMm,
-                        result.boardThicknessMm,
-                      )
-                    }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="排版方向">
-                    {{ formatLayoutOrientation(result.layoutOrientation) }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="排版行列">
-                    {{ result.layoutColumns ?? '—' }} 列 ×
-                    {{ result.layoutRows ?? '—' }} 行
-                  </DescriptionsItem>
-                  <DescriptionsItem label="每层片数">
-                    {{ result.piecesPerLayer ?? '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="完整层数">
-                    {{ result.fullLayers ?? '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="剩余厚度">
-                    {{ formatDecimal(result.remainingThicknessMm, 'mm') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="补片数">
-                    {{ result.supplementPieces ?? '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="每板片数">
-                    {{ result.totalPiecesPerBoard ?? '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="体积利用率">
-                    {{ formatRate(result.volumeUtilizationRate) }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="单片材料用量">
-                    {{ formatDecimal(result.materialKgPerPiece, 'kg/片') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="模具标准投料量">
-                    {{ formatDecimal(result.chargeWeightKg, 'kg') }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="标准投料量来源">
-                    {{ result.chargeWeightSource || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="材料成本来源">
-                    {{ result.materialUnitCostSource || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="原始公斤成本">
-                    {{
-                      formatDecimal(result.rawMaterialUnitCostPerKg, '元/kg')
-                    }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="配方公斤成本">
-                    {{ formatMaterialUnitCost(result.materialUnitCostPerKg) }}
-                  </DescriptionsItem>
-                </Descriptions>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">配方原材料成本明细</div>
-                <div class="result-section-subtitle">
-                  当前单价来自原材料价格维护；配方公斤成本由这些明细实时汇总并按两位四舍五入。
-                </div>
-                <Table
-                  :columns="ingredientCostColumns"
-                  :data-source="ingredientCostRows"
-                  :pagination="false"
-                  row-key="key"
-                  :scroll="{ x: 850 }"
-                  size="small"
-                >
-                  <template #emptyText>
-                    <Empty description="服务端未返回配方原材料成本明细" />
-                  </template>
-                </Table>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">成本汇总</div>
-                <Table
-                  :columns="costColumns"
-                  :data-source="costRows"
-                  :pagination="false"
-                  row-key="key"
-                  size="small"
-                >
-                  <template #emptyText>
-                    <Empty description="当前结果没有成本汇总" />
-                  </template>
-                </Table>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">完整计算步骤</div>
-                <Table
-                  :columns="calculationStepColumns"
-                  :data-source="calculationStepRows"
-                  :pagination="false"
-                  row-key="key"
-                  :scroll="{ x: 850 }"
-                  size="small"
-                >
-                  <template #emptyText>
-                    <Empty description="服务端未返回计算步骤" />
-                  </template>
-                </Table>
-              </section>
-
-              <section class="result-section">
-                <div class="result-section-title">
-                  候选模具
-                  <span class="section-count">
-                    {{ candidateRows.length }} 个
-                  </span>
-                </div>
-                <Table
-                  :columns="candidateColumns"
-                  :data-source="candidateRows"
-                  :pagination="false"
-                  row-key="key"
-                  :scroll="{ x: 1900 }"
-                  size="small"
-                >
-                  <template #bodyCell="{ column, record }">
-                    <template v-if="column.key === 'status'">
-                      <Tag v-if="record.selected" color="blue">当前</Tag>
-                      <Tag v-else-if="record.feasible" color="success">
-                        可行
-                      </Tag>
-                      <Tag v-else color="error">不可行</Tag>
-                    </template>
-                    <template v-else-if="column.key === 'unitCost'">
-                      {{ formatMoney(record.unitCostDisplay) }}
-                    </template>
-                    <template v-else-if="column.key === 'action'">
-                      <Button
-                        size="small"
-                        type="link"
-                        :disabled="!record.feasible"
-                        :loading="
-                          calculating &&
-                          formState.mouldSelectionMode === 'MANUAL' &&
-                          formState.mouldProfileId === record.mouldProfileId
-                        "
-                        @click="handleUseCandidate(record)"
+              <Tabs
+                v-model:active-key="activeResultTab"
+                class="result-tabs"
+                :animated="false"
+              >
+                <Tabs.TabPane key="overview" tab="方案概览">
+                  <section class="tab-section">
+                    <div class="context-grid">
+                      <div
+                        v-for="item in resultContextItems"
+                        :key="item.key"
+                        class="context-item"
                       >
-                        {{ record.selected ? '锁定并重算' : '使用并重算' }}
-                      </Button>
-                    </template>
-                  </template>
-                  <template #emptyText>
-                    <Empty description="服务端未返回候选模具" />
-                  </template>
-                </Table>
-              </section>
+                        <div class="context-label">{{ item.label }}</div>
+                        <div class="context-value">{{ item.value }}</div>
+                      </div>
+                    </div>
+                  </section>
 
-              <section class="result-section">
-                <div class="result-section-title">计算口径与来源</div>
-                <Descriptions bordered :column="2" size="small">
-                  <DescriptionsItem label="配方">
-                    {{ result.recipeCode || '—' }} ·
-                    {{ result.recipeName || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="利润口径">
-                    {{ formatProfitMode(result.profitMode) }} /
-                    {{ resultProfitRate }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="计算口径">
-                    {{ result.calculationProfile || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="排版算法">
-                    {{ result.layoutAlgorithmVersion || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="补片算法">
-                    {{ result.supplementAlgorithmVersion || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="工费规则版本">
-                    {{ result.processCostRuleVersion || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="模具来源版本">
-                    {{ result.mouldSourceVersion || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="配方来源" :span="2">
-                    {{ result.recipeSourceVersion || '—' }} ·
-                    {{ result.recipeSourceLocation || '—' }}
-                  </DescriptionsItem>
-                  <DescriptionsItem label="模具来源" :span="2">
-                    {{ result.mouldSourceLocation || '—' }}
-                  </DescriptionsItem>
-                </Descriptions>
-              </section>
+                  <section class="tab-section">
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">工艺路径</div>
+                        <div class="tab-section-subtitle">
+                          从选模到每板产量，保留本次方案的关键计算链
+                        </div>
+                      </div>
+                    </div>
+                    <div class="process-flow">
+                      <div
+                        v-for="(item, index) in processCards"
+                        :key="item.key"
+                        class="process-stage"
+                      >
+                        <div class="process-stage-title">{{ item.title }}</div>
+                        <div class="process-stage-value">{{ item.value }}</div>
+                        <div class="process-stage-note">{{ item.note }}</div>
+                        <IconifyIcon
+                          v-if="index < processCards.length - 1"
+                          class="process-arrow"
+                          icon="lucide:chevron-right"
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="tab-section">
+                    <div class="tab-section-title">生产关键指标</div>
+                    <div class="fact-grid">
+                      <div
+                        v-for="item in productionFacts"
+                        :key="item.key"
+                        class="fact-item"
+                      >
+                        <span class="fact-label">{{ item.label }}</span>
+                        <strong class="fact-value">{{ item.value }}</strong>
+                      </div>
+                    </div>
+                  </section>
+                </Tabs.TabPane>
+
+                <Tabs.TabPane key="cost" tab="成本明细">
+                  <section class="tab-section">
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">单位成本构成</div>
+                        <div class="tab-section-subtitle">
+                          展示金额用于日常报价，精确金额用于核算复核
+                        </div>
+                      </div>
+                      <Tag>{{ costRows.length }} 项</Tag>
+                    </div>
+                    <Table
+                      :columns="costColumns"
+                      :data-source="costRows"
+                      :pagination="false"
+                      row-key="key"
+                      size="small"
+                    >
+                      <template #emptyText>
+                        <Empty description="当前结果没有成本汇总" />
+                      </template>
+                    </Table>
+                  </section>
+
+                  <section class="tab-section">
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">配方原材料</div>
+                        <div class="tab-section-subtitle">
+                          当前单价来自原材料价格维护，共
+                          {{ ingredientCostRows.length }} 项
+                        </div>
+                      </div>
+                    </div>
+                    <Table
+                      :columns="ingredientCostColumns"
+                      :data-source="ingredientCostRows"
+                      :pagination="false"
+                      row-key="key"
+                      :scroll="{ x: 850 }"
+                      size="small"
+                    >
+                      <template #emptyText>
+                        <Empty description="服务端未返回配方原材料成本明细" />
+                      </template>
+                    </Table>
+                  </section>
+                </Tabs.TabPane>
+
+                <Tabs.TabPane key="moulds" tab="模具比选">
+                  <section class="tab-section">
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">候选模具方案</div>
+                        <div class="tab-section-subtitle">
+                          当前方案置顶；可切换任一可行模具并立即重算
+                        </div>
+                      </div>
+                      <Tag>{{ candidateRows.length }} 个</Tag>
+                    </div>
+                    <Table
+                      :columns="candidateColumns"
+                      :data-source="candidateRows"
+                      :pagination="false"
+                      row-key="key"
+                      :scroll="{ x: 930 }"
+                      size="small"
+                    >
+                      <template #bodyCell="{ column, record }">
+                        <template v-if="column.key === 'status'">
+                          <Tag v-if="record.selected" color="blue">当前</Tag>
+                          <Tag v-else-if="record.feasible" color="success">
+                            可行
+                          </Tag>
+                          <Tag v-else color="error">不可行</Tag>
+                        </template>
+                        <template v-else-if="column.key === 'unitCost'">
+                          {{ formatMoney(record.unitCostDisplay) }}
+                        </template>
+                        <template v-else-if="column.key === 'action'">
+                          <Button
+                            size="small"
+                            type="link"
+                            :disabled="!record.feasible"
+                            :loading="
+                              calculating &&
+                              formState.mouldSelectionMode === 'MANUAL' &&
+                              formState.mouldProfileId === record.mouldProfileId
+                            "
+                            @click="handleUseCandidate(record)"
+                          >
+                            {{ record.selected ? '锁定并重算' : '使用并重算' }}
+                          </Button>
+                        </template>
+                      </template>
+                      <template #expandedRowRender="{ record }">
+                        <div class="candidate-expanded">
+                          <Descriptions
+                            size="small"
+                            :column="{ xs: 1, sm: 1, md: 2, lg: 2, xl: 2 }"
+                          >
+                            <DescriptionsItem label="模具尺寸">
+                              {{ record.mouldSpecification }}
+                            </DescriptionsItem>
+                            <DescriptionsItem label="板材尺寸">
+                              {{ record.boardSpecification }}
+                            </DescriptionsItem>
+                            <DescriptionsItem label="层数 / 补片">
+                              {{ record.layerSummary }}
+                            </DescriptionsItem>
+                            <DescriptionsItem label="不可行原因 / 提醒">
+                              {{ record.rejectReasonText }}
+                            </DescriptionsItem>
+                          </Descriptions>
+                        </div>
+                      </template>
+                      <template #emptyText>
+                        <Empty description="服务端未返回候选模具" />
+                      </template>
+                    </Table>
+                  </section>
+                </Tabs.TabPane>
+
+                <Tabs.TabPane key="audit" tab="计算依据">
+                  <div class="audit-intro">
+                    日常报价无需展开以下内容；需要核算、追溯或排查时再按项查看。
+                  </div>
+                  <Collapse class="audit-collapse">
+                    <Collapse.Panel key="exact" header="精确金额">
+                      <Descriptions bordered :column="1" size="small">
+                        <DescriptionsItem label="单位成本精确值">
+                          {{ formatExactMoney(summaryValues.unitCost.exact) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="建议单位报价精确值">
+                          {{ formatExactMoney(summaryValues.unitQuote.exact) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="报价总额精确值">
+                          {{ formatExactMoney(summaryValues.totalQuote.exact) }}
+                        </DescriptionsItem>
+                      </Descriptions>
+                    </Collapse.Panel>
+
+                    <Collapse.Panel key="rules" header="本次解析规则与费率">
+                      <Descriptions
+                        bordered
+                        :column="{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3 }"
+                        size="small"
+                      >
+                        <DescriptionsItem label="有效宽度">
+                          {{ formatDecimal(result.effectiveWidthMm, 'mm') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="大小垫分类">
+                          {{ formatSizeClass(result.sizeClass) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="厚度分类">
+                          {{ formatThicknessClass(result.thicknessClass) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="配方合格率">
+                          {{ formatRate(result.materialYieldRate) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="工艺路线">
+                          {{ result.processRouteCode || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="工费规则">
+                          {{ result.processCostRuleCode || '—' }} ·
+                          {{ result.processCostRuleVersion || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="发泡人工">
+                          {{ formatDecimal(result.foamingLaborPerKg, '元/kg') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="开片人工">
+                          {{ formatDecimal(result.slicingLaborPerKg, '元/kg') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="费用分摊">
+                          {{
+                            formatDecimal(result.allocationCostPerKg, '元/kg')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="立切">
+                          {{
+                            formatDecimal(
+                              result.verticalCutCostPerPiece,
+                              '元/条',
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="复合">
+                          {{
+                            formatDecimal(result.compositeCostPerPiece, '元/条')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="压花">
+                          {{
+                            formatDecimal(result.embossCostPerPiece, '元/条')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="冲床">
+                          {{ formatDecimal(result.punchCostPerPiece, '元/条') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="包装人工">
+                          {{
+                            formatDecimal(result.packingLaborPerPiece, '元/条')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="批量发货">
+                          {{
+                            formatDecimal(
+                              result.batchShippingOperationCostPerPiece,
+                              '元/条',
+                            )
+                          }}
+                        </DescriptionsItem>
+                      </Descriptions>
+                    </Collapse.Panel>
+
+                    <Collapse.Panel key="layout" header="选中模具与排版详情">
+                      <Descriptions
+                        bordered
+                        :column="{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3 }"
+                        size="small"
+                      >
+                        <DescriptionsItem label="模具档案">
+                          {{ result.mouldProfileCode || '—' }} ·
+                          {{ result.mouldProfileName || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="模具尺寸">
+                          {{
+                            formatSpecification(
+                              result.mouldLengthMm,
+                              result.mouldWidthMm,
+                              result.mouldThicknessMm,
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="板材尺寸">
+                          {{
+                            formatSpecification(
+                              result.boardLengthMm,
+                              result.boardWidthMm,
+                              result.boardThicknessMm,
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="排版方向">
+                          {{
+                            formatLayoutOrientation(result.layoutOrientation)
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="排版行列">
+                          {{ result.layoutColumns ?? '—' }} 列 ×
+                          {{ result.layoutRows ?? '—' }} 行
+                        </DescriptionsItem>
+                        <DescriptionsItem label="每层片数">
+                          {{ result.piecesPerLayer ?? '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="完整层数">
+                          {{ result.fullLayers ?? '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="剩余厚度">
+                          {{ formatDecimal(result.remainingThicknessMm, 'mm') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="补片数">
+                          {{ result.supplementPieces ?? '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="每板片数">
+                          {{ result.totalPiecesPerBoard ?? '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="体积利用率">
+                          {{ formatRate(result.volumeUtilizationRate) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="单片材料用量">
+                          {{
+                            formatDecimal(result.materialKgPerPiece, 'kg/片')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="模具标准投料量">
+                          {{ formatDecimal(result.chargeWeightKg, 'kg') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="标准投料量来源">
+                          {{ result.chargeWeightSource || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="材料成本来源">
+                          {{ result.materialUnitCostSource || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="原始公斤成本">
+                          {{
+                            formatDecimal(
+                              result.rawMaterialUnitCostPerKg,
+                              '元/kg',
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="配方公斤成本">
+                          {{
+                            formatMaterialUnitCost(result.materialUnitCostPerKg)
+                          }}
+                        </DescriptionsItem>
+                      </Descriptions>
+                    </Collapse.Panel>
+
+                    <Collapse.Panel
+                      key="steps"
+                      :header="`完整计算步骤 (${calculationStepRows.length})`"
+                    >
+                      <Table
+                        :columns="calculationStepColumns"
+                        :data-source="calculationStepRows"
+                        :pagination="false"
+                        row-key="key"
+                        :scroll="{ x: 850 }"
+                        size="small"
+                      >
+                        <template #emptyText>
+                          <Empty description="服务端未返回计算步骤" />
+                        </template>
+                      </Table>
+                    </Collapse.Panel>
+
+                    <Collapse.Panel key="sources" header="计算口径与数据来源">
+                      <Descriptions
+                        bordered
+                        :column="{ xs: 1, sm: 1, md: 2, lg: 2, xl: 2 }"
+                        size="small"
+                      >
+                        <DescriptionsItem label="配方">
+                          {{ result.recipeCode || '—' }} ·
+                          {{ result.recipeName || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="利润口径">
+                          {{ formatProfitMode(result.profitMode) }} /
+                          {{ resultProfitRate }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="计算口径">
+                          {{ result.calculationProfile || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="排版算法">
+                          {{ result.layoutAlgorithmVersion || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="补片算法">
+                          {{ result.supplementAlgorithmVersion || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="工费规则版本">
+                          {{ result.processCostRuleVersion || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="模具来源版本">
+                          {{ result.mouldSourceVersion || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="配方来源" :span="2">
+                          {{ result.recipeSourceVersion || '—' }} ·
+                          {{ result.recipeSourceLocation || '—' }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="模具来源" :span="2">
+                          {{ result.mouldSourceLocation || '—' }}
+                        </DescriptionsItem>
+                      </Descriptions>
+                    </Collapse.Panel>
+                  </Collapse>
+                </Tabs.TabPane>
+              </Tabs>
             </div>
           </Spin>
         </Card>
+      </div>
+
+      <div
+        v-if="batchPanelMounted"
+        v-show="activeQuotationMode === 'batch'"
+        class="batch-mode-panel"
+      >
+        <BatchQuotationPanel embedded />
       </div>
     </div>
   </Page>
@@ -1444,11 +1706,48 @@ onMounted(loadOptions);
   margin: 0 auto;
 }
 
+.quotation-mode-bar {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 10px;
+}
+
+.quotation-mode-copy {
+  min-width: 0;
+}
+
+.quotation-mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text, #1f1f1f);
+}
+
+.quotation-mode-description {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.batch-mode-panel {
+  min-width: 0;
+}
+
 .quotation-layout {
   display: grid;
-  grid-template-columns: minmax(470px, 0.9fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(430px, 0.82fr) minmax(0, 1.55fr);
   gap: 16px;
   align-items: start;
+}
+
+.result-card,
+.result-content {
+  min-width: 0;
 }
 
 .card-title {
@@ -1485,7 +1784,7 @@ onMounted(loadOptions);
 }
 
 .section-title,
-.result-section-title {
+.tab-section-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--ant-color-text, #1f1f1f);
@@ -1494,7 +1793,7 @@ onMounted(loadOptions);
 .section-subtitle,
 .section-count,
 .switch-hint,
-.summary-exact,
+.summary-caption,
 .process-stage-note {
   font-size: 12px;
   color: var(--ant-color-text-secondary, #8c8c8c);
@@ -1579,8 +1878,9 @@ onMounted(loadOptions);
 }
 
 .summary-item {
+  position: relative;
   min-width: 0;
-  padding: 18px;
+  padding: 16px 18px;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
   border-radius: 10px;
@@ -1588,18 +1888,21 @@ onMounted(loadOptions);
 
 .cost-summary {
   background: rgb(22 119 255 / 6%);
+  border-top: 3px solid var(--ant-color-primary, #1677ff);
 }
 
 .quote-summary {
   background: rgb(82 196 26 / 7%);
+  border-top: 3px solid #52c41a;
 }
 
 .total-summary {
   background: rgb(250 173 20 / 8%);
+  border-top: 3px solid #faad14;
 }
 
 .summary-label {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   font-size: 13px;
   color: var(--ant-color-text-secondary, #8c8c8c);
 }
@@ -1612,30 +1915,100 @@ onMounted(loadOptions);
   line-height: 1.25;
   color: var(--ant-color-text, #1f1f1f);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.summary-exact {
+.summary-caption {
   margin-top: 8px;
   overflow-wrap: anywhere;
 }
 
-.result-section {
+.result-tabs {
+  min-width: 0;
+  margin-top: 18px;
+}
+
+.result-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+
+.result-tabs :deep(.ant-tabs-tab) {
+  padding-top: 8px;
+  padding-bottom: 10px;
+}
+
+.tab-section + .tab-section {
   margin-top: 24px;
 }
 
-.result-section-title {
-  margin-bottom: 10px;
+.tab-section-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 
-.result-section-subtitle {
-  margin: -4px 0 10px;
+.tab-section-subtitle {
+  margin-top: 3px;
   font-size: 12px;
   color: var(--ant-color-text-secondary, #8c8c8c);
 }
 
-.section-count {
-  margin-left: 6px;
-  font-weight: 400;
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.context-item {
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.context-label,
+.fact-label {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.context-value {
+  margin-top: 5px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ant-color-text, #1f1f1f);
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.fact-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border-left: 3px solid var(--ant-color-primary, #1677ff);
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  border-radius: 6px;
+}
+
+.fact-value {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ant-color-text, #1f1f1f);
+  overflow-wrap: anywhere;
 }
 
 .process-flow {
@@ -1647,8 +2020,8 @@ onMounted(loadOptions);
 .process-stage {
   position: relative;
   min-width: 0;
-  min-height: 116px;
-  padding: 14px;
+  min-height: 102px;
+  padding: 12px;
   background: var(--ant-color-fill-quaternary, #fafafa);
   border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
   border-radius: 8px;
@@ -1661,8 +2034,8 @@ onMounted(loadOptions);
 }
 
 .process-stage-value {
-  margin-top: 9px;
-  font-size: 14px;
+  margin-top: 7px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
   color: var(--ant-color-text, #1f1f1f);
@@ -1670,7 +2043,7 @@ onMounted(loadOptions);
 }
 
 .process-stage-note {
-  margin-top: 7px;
+  margin-top: 5px;
   overflow-wrap: anywhere;
 }
 
@@ -1692,13 +2065,43 @@ onMounted(loadOptions);
   margin-top: 4px;
 }
 
-@media (max-width: 1380px) {
+.audit-intro {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ant-color-text-secondary, #595959);
+  background: rgb(22 119 255 / 5%);
+  border: 1px solid rgb(22 119 255 / 15%);
+  border-radius: 8px;
+}
+
+.audit-collapse {
+  overflow: hidden;
+  background: transparent;
+  border-color: var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.audit-collapse :deep(.ant-collapse-header) {
+  font-weight: 600;
+}
+
+.candidate-expanded {
+  padding: 4px 10px;
+}
+
+@media (max-width: 1180px) {
   .quotation-layout {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 900px) {
+  .fact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .process-flow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1709,9 +2112,25 @@ onMounted(loadOptions);
 }
 
 @media (max-width: 720px) {
+  .quotation-mode-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .quotation-mode-bar :deep(.ant-segmented) {
+    width: 100%;
+  }
+
+  .quotation-mode-bar :deep(.ant-segmented-item) {
+    flex: 1;
+    text-align: center;
+  }
+
   .form-grid,
   .dimension-grid,
   .cost-grid,
+  .context-grid,
+  .fact-grid,
   .summary-grid,
   .process-flow {
     grid-template-columns: 1fr;
