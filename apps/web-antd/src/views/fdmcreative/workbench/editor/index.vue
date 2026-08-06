@@ -51,6 +51,7 @@ import {
   createCreativeAsset,
   getCreativeAssetPage,
   getCreativeExecution,
+  getCreativeExecutionPage,
   getCreativeProject,
   getLatestContentPlan,
   getWorkflowDraft,
@@ -66,7 +67,7 @@ import { uploadFile } from '#/api/infra/file';
 
 import { calculateInlineEditorPosition } from './components/node-editor/inline-editor-position';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
-import { normalizeModelIdentifier } from './model-identifier';
+import { resolveConnectedImageReferences } from './connected-image-references';
 import { CREATIVE_NODE_CATALOG, NODE_GROUPS } from './graph/catalog';
 import {
   createWorkbenchGraph,
@@ -77,6 +78,8 @@ import {
   planSummary,
   validateWorkflowDefinition,
 } from './graph/workflow-utils';
+import { normalizeModelIdentifier } from './model-identifier';
+import { extractPromptText } from './prompt-text-output';
 
 defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
 
@@ -95,6 +98,7 @@ const loading = ref(true);
 const saving = ref(false);
 const publishing = ref(false);
 const dirty = ref(false);
+const graphRevision = ref(0);
 const lastSavedAt = ref<Date>();
 const zoomPercent = ref(100);
 const project = ref<FdmCreativeApi.Project>();
@@ -106,6 +110,9 @@ const promptRefineBusy = ref(false);
 const planModalOpen = ref(false);
 const pendingPlan = ref<FdmCreativeApi.PlanPreviewResp>();
 const runningExecution = ref<FdmCreativeApi.ExecutionDetail>();
+const latestNodeRunsByNodeId = ref<
+  Record<string, FdmCreativeApi.NodeRun | undefined>
+>({});
 const taskDrawerOpen = ref(false);
 const modelOptions = ref<FdmAiApi.ModelOption[]>([]);
 const projectAssets = ref<FdmCreativeApi.CreativeAsset[]>([]);
@@ -196,9 +203,9 @@ const filteredGroups = computed(() => {
 });
 const selectedResultNodeRun = computed(() =>
   selectedNode.value
-    ? runningExecution.value?.nodeRuns?.find(
+    ? (runningExecution.value?.nodeRuns?.find(
         (nodeRun) => nodeRun.nodeId === selectedNode.value?.id,
-      )
+      ) ?? latestNodeRunsByNodeId.value[selectedNode.value.id])
     : undefined,
 );
 const inlineEditorBusy = computed(
@@ -250,6 +257,99 @@ const resultAssets = computed(() => {
           : false)),
   );
 });
+const generatedImageAssetsByNodeId = computed(() => {
+  const result = new Map<string, FdmCreativeApi.CreativeAsset[]>();
+  const nodeRunById = new Map(
+    (runningExecution.value?.nodeRuns ?? []).map((nodeRun) => [
+      nodeRun.id,
+      nodeRun,
+    ]),
+  );
+  for (const asset of projectAssets.value) {
+    if (asset.kind !== 'IMAGE' || !asset.sourceNodeRunId) continue;
+    const nodeRun = nodeRunById.get(asset.sourceNodeRunId);
+    if (!nodeRun) continue;
+    const values = result.get(nodeRun.nodeId) ?? [];
+    values.push(asset);
+    result.set(nodeRun.nodeId, values);
+  }
+  for (const values of result.values()) {
+    values.sort((left, right) => left.id - right.id);
+  }
+  return result;
+});
+const connectedImageReferences = computed(() => {
+  // X6 owns the graph state, so this revision makes edge/config changes reactive.
+  void graphRevision.value;
+  const graphAdapter = adapter.value;
+  const nodeId = selectedNode.value?.id;
+  if (!graphAdapter || !nodeId) return [];
+  return resolveConnectedImageReferences(
+    graphAdapter.serializeDefinition(),
+    nodeId,
+    projectAssets.value,
+    generatedImageAssetsByNodeId.value,
+  );
+});
+const connectedTextSources = computed(() => {
+  void graphRevision.value;
+  const graphAdapter = adapter.value;
+  const node = selectedNode.value;
+  if (!graphAdapter || !node) return [];
+  const textInputPorts = new Map(
+    node.ports
+      .filter(
+        (port) =>
+          port.direction === 'INPUT' &&
+          ['creative-brief', 'prompt-text'].includes(port.type),
+      )
+      .map(
+        (port) =>
+          [port.id, port.type as 'creative-brief' | 'prompt-text'] as const,
+      ),
+  );
+  if (!textInputPorts.size) return [];
+  const definition = graphAdapter.serializeDefinition();
+  const nodes = new Map(definition.nodes.map((item) => [item.id, item]));
+  return definition.edges.flatMap((edge) => {
+    const portType = textInputPorts.get(edge.targetPortId);
+    if (edge.targetNodeId !== node.id || !portType) return [];
+    const source = nodes.get(edge.sourceNodeId);
+    if (!source) return [];
+    const nodeRun = latestNodeRunsByNodeId.value[source.id];
+    const configuredPreview = [
+      source.config.prompt,
+      source.config.brief,
+      source.config.description,
+    ].find(
+      (value): value is string =>
+        typeof value === 'string' && Boolean(value.trim()),
+    );
+    return [
+      {
+        id: edge.id,
+        name: source.name,
+        portType,
+        preview:
+          portType === 'prompt-text'
+            ? extractPromptText(nodeRun?.outputJson)
+            : configuredPreview?.trim(),
+        status: nodeRun?.status,
+      },
+    ];
+  });
+});
+const connectedPromptInputCount = computed(
+  () =>
+    connectedTextSources.value.filter(
+      (source) => source.portType === 'prompt-text',
+    ).length,
+);
+const resultText = computed(() =>
+  selectedNode.value?.type === 'prompt-generator'
+    ? extractPromptText(selectedResultNodeRun.value?.outputJson)
+    : undefined,
+);
 
 function collectOutputReferences(
   value: unknown,
@@ -305,10 +405,31 @@ function syncAssetNodePreviews() {
 function syncExecutionNodePreviews() {
   const graphAdapter = adapter.value;
   const execution = runningExecution.value;
-  if (!graphAdapter || !execution?.nodeRuns) return;
-  const nodeRunById = new Map(
-    execution.nodeRuns.map((item) => [item.id, item]),
+  if (!graphAdapter) return;
+  const latestNodeRuns = Object.values(latestNodeRunsByNodeId.value).filter(
+    (item): item is FdmCreativeApi.NodeRun => Boolean(item),
   );
+  if (!execution?.nodeRuns && latestNodeRuns.length === 0) return;
+  const nodeRunById = new Map(
+    [...(execution?.nodeRuns ?? []), ...latestNodeRuns].map((item) => [
+      item.id,
+      item,
+    ]),
+  );
+  for (const nodeRun of latestNodeRuns) {
+    const graphNodeType = graphAdapter.graph
+      .getCellById(nodeRun.nodeId)
+      ?.getData()?.type;
+    if (
+      nodeRun.nodeType !== 'prompt-generator' &&
+      graphNodeType !== 'prompt-generator'
+    ) {
+      continue;
+    }
+    graphAdapter.setNodeDisplayData(nodeRun.nodeId, {
+      outputText: extractPromptText(nodeRun.outputJson),
+    });
+  }
   for (const asset of projectAssets.value) {
     if (!asset.sourceNodeRunId || !asset.url) continue;
     const nodeRun = nodeRunById.get(asset.sourceNodeRunId);
@@ -318,6 +439,58 @@ function syncExecutionNodePreviews() {
       assetType: asset.kind,
       previewUrl: asset.url,
     });
+  }
+}
+
+function mergeLatestNodeRuns(execution: FdmCreativeApi.ExecutionDetail) {
+  if (!execution.nodeRuns?.length) return;
+  const next = { ...latestNodeRunsByNodeId.value };
+  for (const nodeRun of execution.nodeRuns) {
+    next[nodeRun.nodeId] = nodeRun;
+  }
+  latestNodeRunsByNodeId.value = next;
+}
+
+async function restoreLatestExecution(
+  targetProjectId: number,
+  generation: number,
+) {
+  try {
+    const page = await getCreativeExecutionPage({
+      pageNo: 1,
+      pageSize: 1,
+      projectId: targetProjectId,
+    });
+    const latest = page.list[0];
+    if (
+      !latest ||
+      generation !== initializationGeneration ||
+      runningExecution.value
+    ) {
+      return;
+    }
+    const execution = await getCreativeExecution(latest.id);
+    if (
+      generation !== initializationGeneration ||
+      targetProjectId !== projectId.value ||
+      runningExecution.value
+    ) {
+      return;
+    }
+    runningExecution.value = execution;
+    mergeLatestNodeRuns(execution);
+    for (const nodeRun of execution.nodeRuns ?? []) {
+      adapter.value?.setNodeStatus(nodeRun.nodeId, nodeRun.status);
+    }
+    syncExecutionNodePreviews();
+    if (['CANCEL_REQUESTED', 'CREATED', 'RUNNING'].includes(execution.status)) {
+      executionTimer = setTimeout(
+        () => void monitorExecution(execution.id, targetProjectId),
+        2500,
+      );
+    }
+  } catch {
+    // Historical results accelerate the editor, but never block opening a draft.
   }
 }
 
@@ -409,6 +582,7 @@ async function initialize() {
   adapter.value = undefined;
   selectedNode.value = undefined;
   runningExecution.value = undefined;
+  latestNodeRunsByNodeId.value = {};
   pendingPlan.value = undefined;
   projectAssets.value = [];
   planModalOpen.value = false;
@@ -446,7 +620,10 @@ async function initialize() {
         minimapContainer: minimapRef.value,
       },
       {
-        onChange: () => (dirty.value = true),
+        onChange: () => {
+          dirty.value = true;
+          graphRevision.value += 1;
+        },
         onConnectToBlank: openQuickConnect,
         onNodeGeometryChange: (nodeId) => {
           if (nodeId === selectedNode.value?.id) scheduleInlineEditorPosition();
@@ -483,6 +660,7 @@ async function initialize() {
     syncAssetNodePreviews();
     dirty.value = false;
     void restoreLatestPlan(requestedProjectId, generation);
+    void restoreLatestExecution(requestedProjectId, generation);
   } finally {
     if (generation === initializationGeneration) loading.value = false;
   }
@@ -596,7 +774,9 @@ function setConfig(key: string, value: unknown) {
       ? selectedConfig.value.userOverrides.map(String)
       : [],
   );
-  userOverrides.add(key);
+  if (key !== 'promptReferenceBindings') {
+    userOverrides.add(key);
+  }
   updateSelected({
     config: {
       ...selectedConfig.value,
@@ -1069,6 +1249,7 @@ async function monitorExecution(id: number, targetProjectId = projectId.value) {
   const execution = await getCreativeExecution(id);
   if (targetProjectId !== projectId.value) return;
   runningExecution.value = execution;
+  mergeLatestNodeRuns(execution);
   void nextTick(scheduleInlineEditorPosition);
   for (const node of execution.nodeRuns ?? []) {
     adapter.value?.setNodeStatus(node.nodeId, node.status);
@@ -1380,6 +1561,9 @@ onBeforeUnmount(() => {
         >
           <NodeInlineEditor
             :busy="inlineEditorBusy"
+            :connected-references="connectedImageReferences"
+            :connected-prompt-input-count="connectedPromptInputCount"
+            :connected-text-sources="connectedTextSources"
             :error-message="selectedResultNodeRun?.errorMessage"
             :execution-status="runningExecution?.status"
             :model-options="modelOptions"
@@ -1389,6 +1573,7 @@ onBeforeUnmount(() => {
             :progress="inlineEditorProgress"
             :project-assets="projectAssets"
             :result-assets="resultAssets"
+            :result-text="resultText"
             :upload-accept="inputUploadAccept"
             :upload-api="uploadInputAsset"
             :upload-max-size="inputUploadMaxSize"

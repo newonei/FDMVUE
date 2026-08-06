@@ -24,6 +24,8 @@ import {
   CREATIVE_NODE_MAP,
   getQuickConnectOptions as getCatalogQuickConnectOptions,
   getCreativeNodeVisual,
+  normalizeCreativeNodeConfig,
+  normalizeCreativeNodePorts,
 } from './catalog';
 import {
   EMPTY_WORKFLOW,
@@ -33,6 +35,7 @@ import {
 
 const NODE_SHAPE = 'fdm-creative-vue-node';
 const DEFAULT_NODE_VISUAL = getCreativeNodeVisual('creative-brief');
+const PROMPT_PORT_COLOR = '#7c3aed';
 export const MAX_WORKBENCH_NODES = 300;
 let registered = false;
 
@@ -96,6 +99,7 @@ function toX6Ports(ports: FdmCreativeApi.WorkflowPort[]) {
 }
 
 function portColor(type: FdmCreativeApi.PortType) {
+  if (type === 'prompt-text') return PROMPT_PORT_COLOR;
   if (type.includes('image')) return '#16a34a';
   if (type.includes('video') || type === 'timeline') return '#0d9488';
   if (type === 'artifact-set') return '#64748b';
@@ -103,6 +107,7 @@ function portColor(type: FdmCreativeApi.PortType) {
 }
 
 function edgeColor(edge: FdmCreativeApi.WorkflowEdge) {
+  if (edge.sourcePortId === 'prompt') return PROMPT_PORT_COLOR;
   if (edge.sourcePortId === 'item' || edge.sourcePortId === 'plan') {
     return '#1677ff';
   }
@@ -137,17 +142,18 @@ function templateNode(
 
 function toX6Node(node: FdmCreativeApi.WorkflowNode) {
   const visual = getCreativeNodeVisual(node.type);
+  const ports = normalizeCreativeNodePorts(node.type, node.ports);
   return {
     data: {
-      config: node.config,
+      config: normalizeCreativeNodeConfig(node.type, node.config),
       name: node.name,
-      ports: node.ports,
+      ports,
       status: 'IDLE',
       type: node.type,
     },
     height: visual.height,
     id: node.id,
-    ports: toX6Ports(node.ports),
+    ports: toX6Ports(ports),
     shape: NODE_SHAPE,
     width: visual.width,
     x: node.x,
@@ -833,8 +839,19 @@ export class WorkbenchGraphAdapter {
   setNodeDisplayData(id: string, display: Record<string, unknown>) {
     const node = this.graph.getCellById(id);
     if (!node?.isNode()) return;
+    const currentDisplay = node.getData()?.display;
     node.setData(
-      { ...node.getData(), display },
+      {
+        ...node.getData(),
+        display: {
+          ...(currentDisplay &&
+          typeof currentDisplay === 'object' &&
+          !Array.isArray(currentDisplay)
+            ? currentDisplay
+            : {}),
+          ...display,
+        },
+      },
       { ignoreHistory: true, workbenchRuntime: true },
     );
   }
@@ -908,7 +925,19 @@ export class WorkbenchGraphAdapter {
     this.graph.on('node:change:data', ({ options }) => {
       if (!options?.workbenchRuntime) changed();
     });
-    this.graph.on('edge:connected', changed);
+    this.graph.on('edge:connected', ({ edge }) => {
+      const sourceNodeId = edge.getSourceCellId();
+      const sourcePortId = edge.getSourcePortId();
+      const sourcePort = sourceNodeId
+        ? this.workflowNodeFromCell(sourceNodeId)?.ports.find(
+            (port) => port.direction === 'OUTPUT' && port.id === sourcePortId,
+          )
+        : undefined;
+      if (sourcePort) {
+        edge.attr('line/stroke', portColor(sourcePort.type));
+      }
+      changed();
+    });
     this.graph.on('scale', ({ sx }) => {
       this.callbacks.onZoom?.(sx);
       this.scheduleViewportChange();

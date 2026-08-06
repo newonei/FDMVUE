@@ -36,6 +36,7 @@ export namespace FdmCreativeApi {
     | 'image-asset'
     | 'image-list'
     | 'image-plan-item'
+    | 'prompt-text'
     | 'timeline'
     | 'video-asset'
     | 'video-list'

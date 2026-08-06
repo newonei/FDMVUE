@@ -1,5 +1,26 @@
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
+const SINGLE_PROMPT_INPUT_NODE_TYPES = new Set([
+  'first-last-frame-to-video',
+  'image-edit',
+  'image-generate',
+  'image-to-image',
+  'image-to-video',
+  'video-generate',
+]);
+const SINGLE_MEDIA_INPUT_PORTS = new Set([
+  'first-last-frame-to-video:first-frame',
+  'first-last-frame-to-video:last-frame',
+  'image-edit:image',
+  'image-resize:image',
+  'image-to-video:first-frame',
+  'video-frame-extract:video',
+  'video-normalize:video',
+  'video-transition:first',
+  'video-transition:second',
+  'video-trim:video',
+]);
+
 export const EMPTY_WORKFLOW: FdmCreativeApi.WorkflowDefinition = {
   edges: [],
   nodes: [],
@@ -78,6 +99,25 @@ export function validateWorkflowConnection(input: ConnectionValidationInput) {
   if (source.direction !== 'OUTPUT' || target.direction !== 'INPUT')
     return false;
   if (!isPortTypeCompatible(source.type, target.type)) return false;
+  const targetNode = definition.nodes.find((node) => node.id === targetNodeId);
+  const alreadyHasTargetInput = definition.edges.some(
+    (edge) =>
+      edge.targetNodeId === targetNodeId && edge.targetPortId === targetPortId,
+  );
+  if (
+    target.id === 'prompt' &&
+    target.type === 'prompt-text' &&
+    SINGLE_PROMPT_INPUT_NODE_TYPES.has(targetNode?.type ?? '') &&
+    alreadyHasTargetInput
+  ) {
+    return false;
+  }
+  if (
+    SINGLE_MEDIA_INPUT_PORTS.has(`${targetNode?.type ?? ''}:${target.id}`) &&
+    alreadyHasTargetInput
+  ) {
+    return false;
+  }
   if (
     definition.edges.some(
       (edge) =>

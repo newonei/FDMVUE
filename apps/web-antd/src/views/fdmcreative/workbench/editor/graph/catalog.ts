@@ -22,6 +22,7 @@ export type CreativeNodeVariant =
   | 'compact'
   | 'compose'
   | 'generate'
+  | 'llm'
   | 'plan-item'
   | 'planner';
 
@@ -33,7 +34,7 @@ export interface CreativeNodeVisual {
 
 const ASSET_NODE_TYPES = new Set(['image-input', 'video-input']);
 const PLAN_ITEM_NODE_TYPES = new Set(['image-plan-item', 'video-plan-item']);
-const GENERATE_NODE_TYPES = new Set([
+const AI_GENERATE_NODE_TYPES = new Set([
   'first-last-frame-to-video',
   'image-edit',
   'image-generate',
@@ -41,6 +42,39 @@ const GENERATE_NODE_TYPES = new Set([
   'image-to-video',
   'video-generate',
 ]);
+const RESULT_PREVIEW_NODE_TYPES = new Set([
+  ...AI_GENERATE_NODE_TYPES,
+  'image-resize',
+  'video-frame-extract',
+  'video-normalize',
+  'video-transition',
+  'video-trim',
+]);
+
+/**
+ * Restore ports that were added after a draft was saved while retaining ports
+ * owned by future versions or external providers. Canonical fields always win
+ * so legacy required flags and port types cannot keep a restored graph invalid.
+ */
+export function normalizeCreativeNodePorts(
+  type: string,
+  ports: FdmCreativeApi.WorkflowPort[],
+) {
+  const canonicalPorts = CREATIVE_NODE_MAP.get(type)?.ports;
+  if (!canonicalPorts) return ports.map((port) => ({ ...port }));
+
+  const canonicalIds = new Set(canonicalPorts.map((port) => port.id));
+  const restoredCanonicalPorts = canonicalPorts.map((canonicalPort) => {
+    const persistedPort = ports.find((port) => port.id === canonicalPort.id);
+    if (!persistedPort) return { ...canonicalPort };
+    const { required: _legacyRequired, ...persistedFields } = persistedPort;
+    return { ...persistedFields, ...canonicalPort };
+  });
+  const unknownPorts = ports
+    .filter((port) => !canonicalIds.has(port.id))
+    .map((port) => ({ ...port }));
+  return [...restoredCanonicalPorts, ...unknownPorts];
+}
 const COMPOSE_NODE_TYPES = new Set([
   'asset-library-output',
   'output',
@@ -59,10 +93,13 @@ export function getCreativeNodeVisual(type: string): CreativeNodeVisual {
   if (type === 'content-planner') {
     return { height: 224, variant: 'planner', width: 184 };
   }
+  if (type === 'prompt-generator') {
+    return { height: 176, variant: 'llm', width: 202 };
+  }
   if (PLAN_ITEM_NODE_TYPES.has(type)) {
     return { height: 156, variant: 'plan-item', width: 178 };
   }
-  if (GENERATE_NODE_TYPES.has(type)) {
+  if (RESULT_PREVIEW_NODE_TYPES.has(type)) {
     return { height: 158, variant: 'generate', width: 202 };
   }
   if (COMPOSE_NODE_TYPES.has(type)) {
@@ -129,6 +166,39 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     type: 'content-planner',
   },
   {
+    color: '#7c3aed',
+    defaultConfig: {
+      language: 'ZH_CN',
+      prompt: '',
+      targetType: 'GENERAL',
+    },
+    description: '输入可复用的静态提示词，可连接到多个图像或视频生成节点',
+    icon: 'lucide:text-cursor-input',
+    label: '提示词文本',
+    ports: [output('prompt', 'prompt-text')],
+    type: 'prompt-input',
+  },
+  {
+    color: '#7c3aed',
+    defaultConfig: {
+      language: 'ZH_CN',
+      prompt: '',
+      systemPrompt:
+        '你是 FDM 专业图像与视频提示词工程师。请把任务和上下文转换为可直接交给下游生成模型的提示词，只输出最终提示词，不要解释，也不要使用 Markdown 代码块。',
+      targetType: 'GENERAL',
+    },
+    description: '根据生成要求、上下文、创作需求和参考图生成专业提示词',
+    icon: 'lucide:bot',
+    label: '提示词生成器',
+    ports: [
+      input('brief', 'creative-brief'),
+      input('context', 'prompt-text'),
+      input('reference', 'image-asset'),
+      output('prompt', 'prompt-text'),
+    ],
+    type: 'prompt-generator',
+  },
+  {
     color: '#8b5cf6',
     description: '一张图片的构图、光线和生成提示词',
     icon: 'lucide:file-image',
@@ -156,7 +226,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:image-plus',
     label: '图片生成',
     ports: [
-      input('item', 'image-plan-item', true),
+      input('item', 'image-plan-item'),
+      input('prompt', 'prompt-text'),
       output('asset', 'image-asset'),
     ],
     type: 'image-generate',
@@ -167,7 +238,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:images',
     label: '参考图生图',
     ports: [
-      input('item', 'image-plan-item', true),
+      input('item', 'image-plan-item'),
+      input('prompt', 'prompt-text'),
       input('reference', 'image-asset', true),
       output('asset', 'image-asset'),
     ],
@@ -179,6 +251,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:paintbrush',
     label: '图片编辑',
     ports: [
+      input('prompt', 'prompt-text'),
       input('image', 'image-asset', true),
       output('asset', 'image-asset'),
     ],
@@ -186,7 +259,12 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#0d9488',
-    defaultConfig: { height: 1024, resizeMode: 'contain', width: 1024 },
+    defaultConfig: {
+      format: 'png',
+      height: 1024,
+      resizeMode: 'FIT',
+      width: 1024,
+    },
     description: '在本地受控流程中裁剪、缩放或调整图片比例',
     icon: 'lucide:scan',
     label: '图片裁剪缩放',
@@ -202,7 +280,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:video',
     label: '视频生成',
     ports: [
-      input('item', 'video-plan-item', true),
+      input('item', 'video-plan-item'),
+      input('prompt', 'prompt-text'),
       output('asset', 'video-asset'),
     ],
     type: 'video-generate',
@@ -213,7 +292,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:image-play',
     label: '图生视频',
     ports: [
-      input('item', 'video-plan-item', true),
+      input('item', 'video-plan-item'),
+      input('prompt', 'prompt-text'),
       input('first-frame', 'image-asset', true),
       output('asset', 'video-asset'),
     ],
@@ -225,7 +305,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     icon: 'lucide:gallery-horizontal-end',
     label: '首尾帧视频',
     ports: [
-      input('item', 'video-plan-item', true),
+      input('item', 'video-plan-item'),
+      input('prompt', 'prompt-text'),
       input('first-frame', 'image-asset', true),
       input('last-frame', 'image-asset', true),
       output('asset', 'video-asset'),
@@ -245,8 +326,41 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     type: 'video-trim',
   },
   {
+    color: '#be123c',
+    defaultConfig: { frameMode: 'FIRST', timeSeconds: 0 },
+    description: '从视频首帧、尾帧或指定时间抽取一张图片',
+    icon: 'lucide:gallery-horizontal',
+    label: '视频抽帧',
+    ports: [
+      input('video', 'video-asset', true),
+      output('asset', 'image-asset'),
+    ],
+    type: 'video-frame-extract',
+  },
+  {
+    color: '#9f1239',
+    defaultConfig: {
+      fps: 30,
+      height: 720,
+      resizeMode: 'FIT',
+      width: 1280,
+    },
+    description: '统一视频的尺寸、帧率、像素格式和音频编码，便于稳定合成',
+    icon: 'lucide:scan-line',
+    label: '视频规格统一',
+    ports: [
+      input('video', 'video-asset', true),
+      output('asset', 'video-asset'),
+    ],
+    type: 'video-normalize',
+  },
+  {
     color: '#b45309',
-    defaultConfig: { offsetSeconds: 4, transitionSeconds: 1 },
+    defaultConfig: {
+      offsetSeconds: 4,
+      transition: '淡化',
+      transitionSeconds: 1,
+    },
     description: '为两个视频片段添加基础淡化转场',
     icon: 'lucide:blend',
     label: '视频转场',
@@ -259,7 +373,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#ea580c',
-    description: '排序、裁剪、基础转场并导出 MP4',
+    description: '按输入顺序拼接视频片段并导出 MP4',
     icon: 'lucide:film',
     label: '视频合成',
     ports: [
@@ -287,6 +401,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     label: '视频时间线',
     ports: [
       input('videos', 'video-list', true),
+      output('ordered-videos', 'video-list'),
       output('timeline', 'timeline'),
     ],
     type: 'video-timeline',
@@ -311,7 +426,14 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     description: '预览并保存到素材库或下载',
     icon: 'lucide:download',
     label: '成果输出',
-    ports: [input('artifacts', 'artifact-set', true)],
+    ports: [
+      input('artifacts', 'artifact-set'),
+      input('images', 'image-list'),
+      input('image', 'image-asset'),
+      input('videos', 'video-list'),
+      input('video', 'video-asset'),
+      input('timeline', 'timeline'),
+    ],
     type: 'output',
   },
   {
@@ -319,7 +441,14 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     description: '把最终成果保存到 FDM 私有素材库',
     icon: 'lucide:archive',
     label: '保存到素材库',
-    ports: [input('artifacts', 'artifact-set', true)],
+    ports: [
+      input('artifacts', 'artifact-set'),
+      input('images', 'image-list'),
+      input('image', 'image-asset'),
+      input('videos', 'video-list'),
+      input('video', 'video-asset'),
+      input('timeline', 'timeline'),
+    ],
     type: 'asset-library-output',
   },
 ];
@@ -327,6 +456,17 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
 export const CREATIVE_NODE_MAP = new Map(
   CREATIVE_NODE_CATALOG.map((item) => [item.type, item]),
 );
+
+/** Fill fields introduced after a draft was saved without overwriting user values. */
+export function normalizeCreativeNodeConfig(
+  type: string,
+  config: Record<string, unknown> | undefined,
+) {
+  return {
+    ...(CREATIVE_NODE_MAP.get(type)?.defaultConfig ?? {}),
+    ...(config ?? {}),
+  };
+}
 
 export function getQuickConnectOptions(
   sourceType: FdmCreativeApi.PortType,
@@ -355,6 +495,11 @@ export const NODE_GROUPS = [
     types: ['creative-brief', 'image-input', 'video-input', 'brand-input'],
   },
   {
+    key: 'llm',
+    label: '提示词与 LLM',
+    types: ['prompt-input', 'prompt-generator'],
+  },
+  {
     key: 'plan',
     label: 'AI 规划',
     types: ['content-planner', 'image-plan-item', 'video-plan-item'],
@@ -372,6 +517,8 @@ export const NODE_GROUPS = [
       'image-to-video',
       'first-last-frame-to-video',
       'video-trim',
+      'video-frame-extract',
+      'video-normalize',
       'video-transition',
       'video-compose',
     ],

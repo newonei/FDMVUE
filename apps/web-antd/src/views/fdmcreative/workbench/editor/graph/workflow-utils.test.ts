@@ -47,6 +47,77 @@ const definition: FdmCreativeApi.WorkflowDefinition = {
   viewport: { x: 0, y: 0, zoom: 1 },
 };
 
+function node(
+  id: string,
+  type: string,
+  ports: FdmCreativeApi.WorkflowPort[],
+): FdmCreativeApi.WorkflowNode {
+  return {
+    config: {},
+    height: 120,
+    id,
+    name: id,
+    ports,
+    type,
+    width: 180,
+    x: 0,
+    y: 0,
+  };
+}
+
+function promptWorkflow(
+  target: FdmCreativeApi.WorkflowNode,
+  edges: FdmCreativeApi.WorkflowEdge[] = [],
+): FdmCreativeApi.WorkflowDefinition {
+  return {
+    edges,
+    nodes: [
+      node('prompt-a', 'prompt-generator', [
+        { direction: 'OUTPUT', id: 'prompt', type: 'prompt-text' },
+      ]),
+      node('prompt-b', 'prompt-generator', [
+        { direction: 'OUTPUT', id: 'prompt', type: 'prompt-text' },
+      ]),
+      target,
+    ],
+    schemaVersion: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+}
+
+function mediaWorkflow(
+  targetType: string,
+  targetPortId: string,
+  targetPortType: FdmCreativeApi.PortType,
+): FdmCreativeApi.WorkflowDefinition {
+  const sourcePortType =
+    targetPortType === 'video-list' ? 'video-asset' : targetPortType;
+  return {
+    edges: [
+      {
+        id: 'media-edge-a',
+        sourceNodeId: 'media-a',
+        sourcePortId: 'asset',
+        targetNodeId: 'target',
+        targetPortId,
+      },
+    ],
+    nodes: [
+      node('media-a', 'media-input', [
+        { direction: 'OUTPUT', id: 'asset', type: sourcePortType },
+      ]),
+      node('media-b', 'media-input', [
+        { direction: 'OUTPUT', id: 'asset', type: sourcePortType },
+      ]),
+      node('target', targetType, [
+        { direction: 'INPUT', id: targetPortId, type: targetPortType },
+      ]),
+    ],
+    schemaVersion: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+}
+
 describe('workflow graph rules', () => {
   it('supports single media flowing into a typed list input', () => {
     expect(isPortTypeCompatible('image-asset', 'image-list')).toBe(true);
@@ -64,6 +135,126 @@ describe('workflow graph rules', () => {
       }),
     ).toBe(false);
     expect(createsCycle(definition, 'b', 'a')).toBe(true);
+  });
+
+  it('accepts only one prompt-text edge on a generation prompt input', () => {
+    const target = node('image', 'image-generate', [
+      { direction: 'INPUT', id: 'prompt', type: 'prompt-text' },
+    ]);
+    const firstEdge: FdmCreativeApi.WorkflowEdge = {
+      id: 'prompt-edge-a',
+      sourceNodeId: 'prompt-a',
+      sourcePortId: 'prompt',
+      targetNodeId: 'image',
+      targetPortId: 'prompt',
+    };
+    const firstDefinition = promptWorkflow(target);
+    expect(
+      validateWorkflowConnection({ ...firstEdge, definition: firstDefinition }),
+    ).toBe(true);
+
+    const secondDefinition = promptWorkflow(target, [firstEdge]);
+    expect(
+      validateWorkflowConnection({
+        definition: secondDefinition,
+        sourceNodeId: 'prompt-b',
+        sourcePortId: 'prompt',
+        targetNodeId: 'image',
+        targetPortId: 'prompt',
+      }),
+    ).toBe(false);
+  });
+
+  it('allows multiple prompt contexts and image references on a prompt generator', () => {
+    const target = node('generator', 'prompt-generator', [
+      { direction: 'INPUT', id: 'context', type: 'prompt-text' },
+      { direction: 'INPUT', id: 'reference', type: 'image-asset' },
+    ]);
+    const contextEdge: FdmCreativeApi.WorkflowEdge = {
+      id: 'context-edge-a',
+      sourceNodeId: 'prompt-a',
+      sourcePortId: 'prompt',
+      targetNodeId: 'generator',
+      targetPortId: 'context',
+    };
+    const contextDefinition = promptWorkflow(target, [contextEdge]);
+    expect(
+      validateWorkflowConnection({
+        definition: contextDefinition,
+        sourceNodeId: 'prompt-b',
+        sourcePortId: 'prompt',
+        targetNodeId: 'generator',
+        targetPortId: 'context',
+      }),
+    ).toBe(true);
+
+    const referenceDefinition: FdmCreativeApi.WorkflowDefinition = {
+      ...contextDefinition,
+      edges: [
+        {
+          id: 'reference-edge-a',
+          sourceNodeId: 'image-a',
+          sourcePortId: 'asset',
+          targetNodeId: 'generator',
+          targetPortId: 'reference',
+        },
+      ],
+      nodes: [
+        node('image-a', 'image-input', [
+          { direction: 'OUTPUT', id: 'asset', type: 'image-asset' },
+        ]),
+        node('image-b', 'image-input', [
+          { direction: 'OUTPUT', id: 'asset', type: 'image-asset' },
+        ]),
+        target,
+      ],
+    };
+    expect(
+      validateWorkflowConnection({
+        definition: referenceDefinition,
+        sourceNodeId: 'image-b',
+        sourcePortId: 'asset',
+        targetNodeId: 'generator',
+        targetPortId: 'reference',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts only one edge on scalar media inputs', () => {
+    for (const [targetType, targetPortId, targetPortType] of [
+      ['first-last-frame-to-video', 'first-frame', 'image-asset'],
+      ['first-last-frame-to-video', 'last-frame', 'image-asset'],
+      ['image-edit', 'image', 'image-asset'],
+      ['image-resize', 'image', 'image-asset'],
+      ['image-to-video', 'first-frame', 'image-asset'],
+      ['video-frame-extract', 'video', 'video-asset'],
+      ['video-normalize', 'video', 'video-asset'],
+      ['video-transition', 'first', 'video-asset'],
+      ['video-transition', 'second', 'video-asset'],
+      ['video-trim', 'video', 'video-asset'],
+    ] as const) {
+      expect(
+        validateWorkflowConnection({
+          definition: mediaWorkflow(targetType, targetPortId, targetPortType),
+          sourceNodeId: 'media-b',
+          sourcePortId: 'asset',
+          targetNodeId: 'target',
+          targetPortId,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('keeps collection inputs multi-edge', () => {
+    expect(
+      validateWorkflowConnection({
+        definition: mediaWorkflow('video-compose', 'videos', 'video-list'),
+        sourceNodeId: 'media-b',
+        sourcePortId: 'asset',
+        targetNodeId: 'target',
+        targetPortId: 'videos',
+      }),
+    ).toBe(true);
   });
 
   it('summarizes mixed image and video plans', () => {

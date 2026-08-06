@@ -21,6 +21,18 @@ interface DetailRow {
   value: string;
 }
 
+const PROMPT_TARGET_LABELS: Record<string, string> = {
+  GENERAL: '通用',
+  IMAGE: '图片',
+  NEGATIVE: '负向',
+  VIDEO: '视频',
+};
+const PROMPT_LANGUAGE_LABELS: Record<string, string> = {
+  AUTO: '自动语言',
+  EN: '英文',
+  ZH_CN: '中文',
+};
+
 const getNode = inject<() => Node>('getNode');
 const node = getNode?.();
 const data = ref<WorkbenchNodeData>(
@@ -80,8 +92,10 @@ const config = computed(() => data.value.config ?? {});
 const display = computed(() => data.value.display ?? {});
 const imageConfig = computed(() => asRecord(config.value.image));
 const videoConfig = computed(() => asRecord(config.value.video));
+const outputText = computed(() => firstValue(display.value.outputText));
 const prompt = computed(() =>
   firstValue(
+    visual.value.variant === 'llm' ? outputText.value : undefined,
     config.value.prompt,
     config.value.description,
     template.value?.description,
@@ -108,6 +122,7 @@ const isVideoMedia = computed(() => {
       'video-compose',
       'video-generate',
       'video-input',
+      'video-normalize',
       'video-transition',
       'video-trim',
     ].includes(nodeType.value)
@@ -136,6 +151,7 @@ const plannerMode = computed(() => {
 const headerMeta = computed(() => {
   if (data.value.status && data.value.status !== 'IDLE')
     return statusText.value;
+  if (visual.value.variant === 'llm') return outputText.value ? '已输出' : 'AI';
   if (visual.value.variant === 'planner') return 'AI';
   if (visual.value.variant === 'plan-item') return '脚本';
   if (visual.value.variant === 'asset') {
@@ -210,6 +226,22 @@ const detailRows = computed<DetailRow[]>(() => {
   } else if (type === 'video-trim') {
     add('开始', config.value.startSeconds, '0 秒');
     add('时长', config.value.durationSeconds, '5 秒');
+  } else if (type === 'video-frame-extract') {
+    const modeLabels: Record<string, string> = {
+      FIRST: '首帧',
+      LAST: '尾帧',
+      TIME: '指定时间',
+    };
+    add('位置', modeLabels[firstValue(config.value.frameMode)] ?? '首帧');
+    if (firstValue(config.value.frameMode) === 'TIME') {
+      add('时间', `${firstValue(config.value.timeSeconds) || 0} 秒`);
+    }
+  } else if (type === 'video-normalize') {
+    const width = firstValue(config.value.width);
+    const height = firstValue(config.value.height);
+    add('尺寸', width && height ? `${width} × ${height}` : '1280 × 720');
+    add('帧率', `${firstValue(config.value.fps) || 30} FPS`);
+    add('适配', config.value.resizeMode, 'FIT');
   } else if (type === 'video-transition') {
     add('转场', config.value.transition, '淡化');
     add('时长', config.value.transitionSeconds, '1 秒');
@@ -225,6 +257,12 @@ const plannerTags = computed(() => {
   if (imageCount) tags.push(`图 ${imageCount}`);
   if (videoCount) tags.push(`片 ${videoCount}`);
   return tags;
+});
+const llmTags = computed(() => {
+  return [
+    PROMPT_TARGET_LABELS[firstValue(config.value.targetType)] ?? '通用',
+    PROMPT_LANGUAGE_LABELS[firstValue(config.value.language)] ?? '中文',
+  ];
 });
 </script>
 
@@ -354,9 +392,16 @@ const plannerTags = computed(() => {
       <div v-if="visual.variant === 'planner'" class="planner-tags">
         <span v-for="tag in plannerTags" :key="tag">{{ tag }}</span>
       </div>
+      <div v-if="visual.variant === 'llm'" class="llm-tags">
+        <span v-for="tag in llmTags" :key="tag">{{ tag }}</span>
+      </div>
       <div v-if="visual.variant === 'planner'" class="planner-action">
         <IconifyIcon icon="lucide:sparkles" />
         生成内容方案
+      </div>
+      <div v-if="visual.variant === 'llm'" class="llm-action">
+        <IconifyIcon :icon="outputText ? 'lucide:check' : 'lucide:sparkles'" />
+        {{ outputText ? '查看生成提示词' : '生成提示词' }}
       </div>
 
       <footer>
@@ -368,6 +413,13 @@ const plannerTags = computed(() => {
         </span>
         <span v-if="videoConfig.durationSeconds">
           {{ videoConfig.durationSeconds }} 秒
+        </span>
+        <span v-else-if="nodeType === 'prompt-generator'">
+          {{
+            config.logicalModelId
+              ? `模型 #${config.logicalModelId}`
+              : '自动路由'
+          }}
         </span>
         <span v-else-if="config.modelName">{{ config.modelName }}</span>
       </footer>
@@ -524,6 +576,16 @@ const plannerTags = computed(() => {
   border-radius: 6px;
 }
 
+.creative-node--llm .prompt {
+  min-height: 42px;
+  padding: 6px 7px;
+  -webkit-line-clamp: 2;
+  color: #514168;
+  background: linear-gradient(145deg, #fbf9ff, #f8f7fc);
+  border: 1px solid #eee8f8;
+  border-radius: 6px;
+}
+
 .detail-list {
   display: grid;
   gap: 0;
@@ -571,6 +633,19 @@ const plannerTags = computed(() => {
   gap: 4px;
 }
 
+.llm-tags {
+  display: flex;
+  gap: 4px;
+}
+
+.llm-tags span {
+  padding: 2px 6px;
+  font-size: 9px;
+  color: #6d28d9;
+  background: #f4efff;
+  border-radius: 999px;
+}
+
 .planner-tags span {
   padding: 2px 6px;
   font-size: 10px;
@@ -590,6 +665,26 @@ const plannerTags = computed(() => {
   color: white;
   background: linear-gradient(90deg, #8b5cf6, #a855f7);
   border-radius: 6px;
+}
+
+.llm-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 25px;
+  margin-top: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6d28d9;
+  background: #f4efff;
+  border: 1px solid #e7dcff;
+  border-radius: 6px;
+}
+
+.llm-action :deep(svg) {
+  width: 11px;
+  height: 11px;
+  margin-right: 4px;
 }
 
 .planner-action :deep(svg) {

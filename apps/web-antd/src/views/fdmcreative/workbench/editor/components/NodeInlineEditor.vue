@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { ConnectedImageReference } from '../connected-image-references';
+
 import type { FdmAiApi } from '#/api/fdmai';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 import type { FileUploadProps } from '#/components/upload/typing';
@@ -11,6 +13,8 @@ import {
   Button,
   Input,
   InputNumber,
+  Mentions,
+  message,
   Progress,
   Select,
   Switch,
@@ -21,8 +25,19 @@ import {
 
 import { FileUpload } from '#/components/upload';
 
+import {
+  invalidPromptImageReferenceNumbers,
+  normalizePromptReferenceBindings,
+  reconcilePromptReferenceBindings,
+} from '../connected-image-references';
 import { CREATIVE_NODE_MAP } from '../graph/catalog';
+import { inlineNodeConfigValidationError } from '../inline-node-validation';
 import { normalizeModelIdentifier } from '../model-identifier';
+import {
+  getVideoFrameConfigSlots,
+  supportsNodeModel,
+} from '../node-model-filter';
+import { nodeRunStatusLabel } from '../node-run-status';
 
 type InlineEditorPlacement = 'above' | 'below';
 type SchemaScalar = number | string;
@@ -46,8 +61,19 @@ interface AssetChangePayload {
   value: unknown;
 }
 
+interface ConnectedTextSource {
+  id: string;
+  name: string;
+  portType: 'creative-brief' | 'prompt-text';
+  preview?: string;
+  status?: FdmCreativeApi.NodeRunStatus;
+}
+
 interface Props {
   busy?: boolean;
+  connectedReferences?: ConnectedImageReference[];
+  connectedPromptInputCount?: number;
+  connectedTextSources?: ConnectedTextSource[];
   errorMessage?: string;
   executionStatus?: FdmCreativeApi.ExecutionStatus;
   modelOptions?: FdmAiApi.ModelOption[];
@@ -57,6 +83,7 @@ interface Props {
   progress?: number;
   projectAssets?: FdmCreativeApi.CreativeAsset[];
   resultAssets?: FdmCreativeApi.CreativeAsset[];
+  resultText?: string;
   readonly?: boolean;
   uploadAccept?: string[];
   uploadApi?: FileUploadProps['api'];
@@ -66,6 +93,9 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   busy: false,
+  connectedReferences: () => [],
+  connectedPromptInputCount: 0,
+  connectedTextSources: () => [],
   errorMessage: undefined,
   executionStatus: undefined,
   modelOptions: () => [],
@@ -74,6 +104,7 @@ const props = withDefaults(defineProps<Props>(), {
   progress: undefined,
   projectAssets: () => [],
   resultAssets: () => [],
+  resultText: undefined,
   readonly: false,
   uploadAccept: () => [],
   uploadApi: undefined,
@@ -118,7 +149,9 @@ const VIDEO_AI_TYPES = new Set([
 const VIDEO_TYPES = new Set([
   ...VIDEO_AI_TYPES,
   'video-compose',
+  'video-frame-extract',
   'video-input',
+  'video-normalize',
   'video-plan-item',
   'video-timeline',
   'video-transition',
@@ -152,6 +185,26 @@ const PLAN_MODE_OPTIONS = [
   { label: '视频', value: 'VIDEO_SEQUENCE' },
   { label: '图片 + 视频', value: 'MIXED' },
 ];
+const PROMPT_TARGET_OPTIONS = [
+  { label: '通用提示词', value: 'GENERAL' },
+  { label: '图片提示词', value: 'IMAGE' },
+  { label: '视频提示词', value: 'VIDEO' },
+];
+const PROMPT_LANGUAGE_OPTIONS = [
+  { label: '自动语言', value: 'AUTO' },
+  { label: '中文', value: 'ZH_CN' },
+  { label: '英文', value: 'EN' },
+];
+const FRAME_MODE_OPTIONS = [
+  { label: '首帧', value: 'FIRST' },
+  { label: '指定时间', value: 'TIME' },
+  { label: '尾帧', value: 'LAST' },
+];
+const RESIZE_MODE_OPTIONS = [
+  { label: '完整适配', value: 'FIT' },
+  { label: '铺满裁切', value: 'FILL' },
+  { label: '拉伸填充', value: 'STRETCH' },
+];
 const SHOT_SIZE_OPTIONS = ['特写', '近景', '中景', '全景', '远景'].map(
   (value) => ({ label: value, value }),
 );
@@ -163,9 +216,10 @@ const CAMERA_OPTIONS = [
   '横向平移',
   '跟随运动',
 ].map((value) => ({ label: value, value }));
-const TRANSITION_OPTIONS = ['无', '淡化', '叠化', '擦除', '闪白'].map(
-  (value) => ({ label: value, value }),
-);
+const TRANSITION_OPTIONS = ['淡化', '叠化', '擦除', '闪白'].map((value) => ({
+  label: value,
+  value,
+}));
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -201,6 +255,10 @@ const isAssetInput = computed(() =>
   ['image-input', 'video-input'].includes(props.node.type),
 );
 const isPlanner = computed(() => props.node.type === 'content-planner');
+const isPromptGenerator = computed(
+  () => props.node.type === 'prompt-generator',
+);
+const isPromptInput = computed(() => props.node.type === 'prompt-input');
 const isPlanItem = computed(() =>
   ['image-plan-item', 'video-plan-item'].includes(props.node.type),
 );
@@ -214,19 +272,38 @@ const isComposeNode = computed(() => COMPOSE_TYPES.has(props.node.type));
 const isAiNode = computed(
   () =>
     isPlanner.value ||
+    isPromptGenerator.value ||
     IMAGE_AI_TYPES.has(props.node.type) ||
     VIDEO_AI_TYPES.has(props.node.type),
 );
-const supportsPrompt = computed(
+const supportsNegativePrompt = computed(
   () =>
-    !isAssetInput.value &&
-    !isComposeNode.value &&
-    props.node.type !== 'image-resize',
+    IMAGE_AI_TYPES.has(props.node.type) ||
+    VIDEO_AI_TYPES.has(props.node.type) ||
+    isPlanItem.value,
+);
+const supportsPrompt = computed(() =>
+  [
+    'brand-input',
+    'content-planner',
+    'creative-brief',
+    'image-edit',
+    'image-generate',
+    'image-plan-item',
+    'image-to-image',
+    'prompt-generator',
+    'prompt-input',
+    'video-generate',
+    'video-plan-item',
+    'image-to-video',
+    'first-last-frame-to-video',
+  ].includes(props.node.type),
 );
 const supportsReferences = computed(
   () =>
     isAssetInput.value ||
     isPlanner.value ||
+    isPromptGenerator.value ||
     IMAGE_AI_TYPES.has(props.node.type) ||
     VIDEO_AI_TYPES.has(props.node.type),
 );
@@ -280,7 +357,7 @@ const visibleError = computed(
 );
 
 const expectedModality = computed<FdmAiApi.Modality | undefined>(() => {
-  if (isPlanner.value) return 'TEXT';
+  if (isPlanner.value || isPromptGenerator.value) return 'TEXT';
   if (IMAGE_AI_TYPES.has(props.node.type)) return 'IMAGE';
   if (VIDEO_AI_TYPES.has(props.node.type)) return 'VIDEO';
   return undefined;
@@ -293,12 +370,22 @@ const availableModels = computed(() =>
     ) {
       return false;
     }
+    if (
+      !supportsNodeModel(
+        item,
+        props.node.type,
+        Array.from(
+          { length: effectiveReferenceCount() },
+          (_, index) => index + 1,
+        ),
+      )
+    ) {
+      return false;
+    }
     if (!isPlanner.value) return true;
     if (!item.capabilities.includes('STRUCTURED_OUTPUT')) return false;
-    const referenceAssetIds = config.value.referenceAssetIds;
     return !(
-      Array.isArray(referenceAssetIds) &&
-      referenceAssetIds.length > 0 &&
+      effectiveReferenceCount() > 0 &&
       !item.capabilities.includes('IMAGE_INPUT')
     );
   }),
@@ -312,31 +399,54 @@ const modelSelectOptions = computed(() =>
 const selectedModelId = computed(() =>
   normalizeModelIdentifier(config.value.logicalModelId ?? config.value.modelId),
 );
+const configuredSelectedModel = computed(() =>
+  props.modelOptions.find(
+    (item) => normalizeModelIdentifier(item.id) === selectedModelId.value,
+  ),
+);
 const selectedModel = computed(() =>
   availableModels.value.find(
     (item) => normalizeModelIdentifier(item.id) === selectedModelId.value,
   ),
 );
+const modelSelectionError = computed(() => {
+  if (!selectedModelId.value) return undefined;
+  const model = configuredSelectedModel.value;
+  if (!model) return '已选择的逻辑模型不存在或当前租户不可见，请重新选择';
+  if (!model.enabled) return '已选择的逻辑模型已停用，请重新选择';
+  if (expectedModality.value && model.modality !== expectedModality.value) {
+    return `当前模型模态为 ${model.modality}，此节点需要 ${expectedModality.value}`;
+  }
+  if (isPromptGenerator.value && !model.capabilities.includes('CHAT')) {
+    return '当前模型不支持 CHAT，不能用于提示词生成';
+  }
+  if (
+    (isPromptGenerator.value || isPlanner.value) &&
+    effectiveReferenceCount() > 0 &&
+    !model.capabilities.includes('IMAGE_INPUT')
+  ) {
+    return '当前模型不支持图片输入，请移除参考图或选择视觉理解模型';
+  }
+  if (isPlanner.value && !model.capabilities.includes('STRUCTURED_OUTPUT')) {
+    return '当前模型不支持结构化输出，不能用于内容规划';
+  }
+  if (
+    !supportsNodeModel(
+      model,
+      props.node.type,
+      Array.from(
+        { length: effectiveReferenceCount() },
+        (_, index) => index + 1,
+      ),
+    )
+  ) {
+    return '当前模型不具备此节点所需能力，请重新选择';
+  }
+  return undefined;
+});
 const frameSlots = computed(() => {
   const capabilities = selectedModel.value?.capabilities ?? [];
-  const supportsFirstFrame =
-    ['first-last-frame-to-video', 'image-to-video'].includes(props.node.type) ||
-    (props.node.type === 'video-generate' &&
-      capabilities.some((item) =>
-        ['FIRST_FRAME_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO'].includes(item),
-      ));
-  const supportsLastFrame =
-    props.node.type === 'first-last-frame-to-video' ||
-    (props.node.type === 'video-generate' &&
-      capabilities.includes('FIRST_LAST_FRAME_TO_VIDEO'));
-  if (!supportsFirstFrame) return [];
-  return [
-    { key: 'firstFrameAssetId', label: '首帧' },
-    ...(supportsLastFrame ? [{ key: 'lastFrameAssetId', label: '尾帧' }] : []),
-  ] as Array<{
-    key: 'firstFrameAssetId' | 'lastFrameAssetId';
-    label: string;
-  }>;
+  return getVideoFrameConfigSlots(props.node.type, capabilities);
 });
 const hasFrameSlots = computed(() => frameSlots.value.length > 0);
 
@@ -359,12 +469,133 @@ const selectedInputAssetId = computed(() => asNumber(config.value.assetId));
 const referenceAssetIds = computed(() =>
   asNumberList(config.value.referenceAssetIds),
 );
-const referenceAssets = computed(() =>
+const connectedAssetIds = computed(
+  () =>
+    new Set(
+      props.connectedReferences
+        .map((reference) => reference.assetId)
+        .filter((id): id is number => typeof id === 'number'),
+    ),
+);
+const manualReferenceAssets = computed(() =>
   referenceAssetIds.value
+    .filter((id) => !connectedAssetIds.value.has(id))
     .map((id) => assetById.value.get(id))
     .filter(
       (asset): asset is FdmCreativeApi.CreativeAsset => asset !== undefined,
     ),
+);
+const manualReferenceAssetOptions = computed(() =>
+  imageAssetOptions.value.filter(
+    (option) => !connectedAssetIds.value.has(option.value),
+  ),
+);
+const storedPromptReferenceBindings = computed(() =>
+  normalizePromptReferenceBindings(config.value.promptReferenceBindings),
+);
+const activeReferenceCandidates = computed(() => [
+  ...props.connectedReferences.map((reference) => ({
+    assetId: reference.assetId,
+    bindingKey: reference.bindingKey,
+    connected: true,
+    key: reference.key,
+    mimeType: reference.mimeType,
+    name: reference.name,
+    sourceNodeName: reference.sourceNodeName,
+    url: reference.url,
+  })),
+  ...manualReferenceAssets.value.map((asset) => ({
+    assetId: asset.id,
+    bindingKey: `ASSET:${asset.id}`,
+    connected: false,
+    key: `manual:${asset.id}`,
+    mimeType: asset.mimeType,
+    name: asset.name,
+    sourceNodeName: undefined,
+    url: asset.url,
+  })),
+]);
+const synchronizedPromptReferenceBindings = computed(() =>
+  reconcilePromptReferenceBindings(
+    activeReferenceCandidates.value.map((reference) => reference.bindingKey),
+    storedPromptReferenceBindings.value,
+  ),
+);
+const displayedReferences = computed(() =>
+  activeReferenceCandidates.value.map((reference) => ({
+    ...reference,
+    alias:
+      synchronizedPromptReferenceBindings.value.find(
+        (binding) => binding.bindingKey === reference.bindingKey,
+      )?.alias ?? '图片',
+  })),
+);
+const promptMentionOptions = computed(() =>
+  displayedReferences.value.map((reference) => ({
+    label: `${reference.alias} · ${reference.name}`,
+    value: reference.alias,
+  })),
+);
+const promptReferenceError = computed(() => {
+  const invalid = invalidPromptImageReferenceNumbers(
+    asString(config.value.prompt),
+    displayedReferences.value.map((reference) =>
+      Number(reference.alias.replace('图片', '')),
+    ),
+  );
+  return invalid.length > 0
+    ? `提示词中的 ${invalid.map((index) => `@图片${index}`).join('、')} 没有对应的参考图片，请重新选择或连接图片`
+    : undefined;
+});
+const promptTemplateError = computed(() => {
+  if (!isPromptGenerator.value) return undefined;
+  const prompt = asString(config.value.prompt);
+  const variablePattern = /\{\{([^{}]+)\}\}/g;
+  const variables = [...prompt.matchAll(variablePattern)].map((match) =>
+    match[1]?.trim().toLowerCase(),
+  );
+  const invalid = variables.filter(
+    (variable) => variable && !['brief', 'context', 'input'].includes(variable),
+  );
+  if (invalid.length > 0) {
+    return `不支持的模板变量：${[...new Set(invalid)].map((item) => `{{${item}}}`).join('、')}`;
+  }
+  const unmatched = prompt.replace(variablePattern, '');
+  if (unmatched.includes('{{') || unmatched.includes('}}')) {
+    return '模板变量格式不完整，请使用 {{input}}、{{context}} 或 {{brief}}';
+  }
+  return undefined;
+});
+const nodeValidationError = computed(
+  () =>
+    promptReferenceError.value ||
+    modelSelectionError.value ||
+    promptTemplateError.value ||
+    inlineNodeConfigValidationError(props.node.type, config.value) ||
+    (isPromptGenerator.value &&
+    !asString(config.value.prompt).trim() &&
+    props.connectedTextSources.length === 0
+      ? '请填写提示词生成要求，或连接创作需求 / 上游提示词节点'
+      : undefined),
+);
+
+function effectiveReferenceCount() {
+  return displayedReferences.value.length;
+}
+
+watch(
+  synchronizedPromptReferenceBindings,
+  (bindings) => {
+    if (
+      props.readonly ||
+      JSON.stringify(bindings) ===
+        JSON.stringify(storedPromptReferenceBindings.value)
+    ) {
+      return;
+    }
+    emit('configChange', 'promptReferenceBindings', bindings);
+  },
+  { flush: 'post', immediate: true },
 );
 
 function frameAssetId(slot: 'firstFrameAssetId' | 'lastFrameAssetId') {
@@ -377,6 +608,20 @@ function assetPreview(asset?: FdmCreativeApi.CreativeAsset) {
 
 function emitConfig(key: string, value: unknown) {
   if (!props.readonly) emit('configChange', key, value);
+}
+
+function changePrompt(value: string) {
+  const normalized = value.replace(
+    /\{\{\s*(input|context|brief)\s*\}\}/gi,
+    (_, variable: string) => `{{${variable.toLowerCase()}}}`,
+  );
+  emitConfig('prompt', normalized.slice(0, 1000));
+}
+
+function appendPromptVariable(variable: 'brief' | 'context' | 'input') {
+  const prompt = asString(config.value.prompt).trimEnd();
+  const separator = prompt ? ' ' : '';
+  changePrompt(`${prompt}${separator}{{${variable}}}`);
 }
 
 function emitNestedConfig(
@@ -450,17 +695,20 @@ function commitNameEvent(event: Event) {
 }
 
 function runNode() {
-  if (!props.readonly && !isRunning.value) emit('run', props.node.id);
+  if (!props.readonly && !isRunning.value && !nodeValidationError.value) {
+    emit('run', props.node.id);
+  }
 }
 
 function runDownstream() {
-  if (!props.readonly && !isRunning.value) {
+  if (!props.readonly && !isRunning.value && !nodeValidationError.value) {
     emit('runDownstream', props.node.id);
   }
 }
 
 function promptLabel() {
   if (isPlanner.value) return '创作总提示词';
+  if (isPromptGenerator.value) return '提示词生成要求';
   if (props.node.type === 'video-plan-item') return '片段脚本';
   if (props.node.type === 'image-plan-item') return '图片提示词';
   if (isVideoNode.value) return '视频提示词';
@@ -470,9 +718,22 @@ function promptLabel() {
 
 function promptPlaceholder() {
   if (isPlanner.value) return '描述创作目标、商品卖点、受众与整体视觉风格…';
+  if (isPromptGenerator.value)
+    return '例如：把 {{input}} 扩写为可直接用于图片模型的专业提示词，并保持主体和风格一致…';
   if (isVideoNode.value) return '描述主体动作、场景变化、镜头运动与画面连续性…';
   if (isImageNode.value) return '描述主体、场景、构图、光线、材质和画面风格…';
   return '输入该节点需要处理的内容…';
+}
+
+async function copyResultText() {
+  const text = props.resultText?.trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    message.success('提示词已复制');
+  } catch {
+    message.error('复制失败，请手动选择文本复制');
+  }
 }
 
 function parseSchemaFields(schemaText?: string): SchemaField[] {
@@ -536,9 +797,19 @@ function schemaSelectValue(key: string) {
     : undefined;
 }
 
-function formatAssetMeta(asset: FdmCreativeApi.CreativeAsset) {
-  if (asset.mimeType) return asset.mimeType.replace('image/', '').toUpperCase();
-  return asset.kind === 'VIDEO' ? '视频素材' : '图片素材';
+function formatReferenceMeta(reference: {
+  connected: boolean;
+  mimeType?: string;
+  sourceNodeName?: string;
+}) {
+  if (reference.connected) {
+    return reference.sourceNodeName
+      ? `来自连线 · ${reference.sourceNodeName}`
+      : '来自连线';
+  }
+  return reference.mimeType
+    ? reference.mimeType.replace('image/', '').toUpperCase()
+    : '补充素材';
 }
 
 function hasOpenPopup() {
@@ -751,34 +1022,43 @@ function handleEditorEscape() {
 
         <div v-else class="reference-strip">
           <article
-            v-for="asset in referenceAssets"
-            :key="asset.id"
+            v-for="reference in displayedReferences"
+            :key="reference.key"
             class="reference-card"
+            :class="{ 'reference-card--connected': reference.connected }"
           >
             <div class="reference-image">
-              <img v-if="asset.url" :alt="asset.name" :src="asset.url" />
+              <img
+                v-if="reference.url"
+                :alt="reference.name"
+                :src="reference.url"
+              />
               <IconifyIcon v-else icon="lucide:image" />
+              <span class="reference-alias">@{{ reference.alias }}</span>
               <button
-                v-if="!readonly"
+                v-if="!readonly && !reference.connected && reference.assetId"
                 aria-label="移除参考素材"
                 type="button"
-                @click="removeReferenceAsset(asset.id)"
+                @click="removeReferenceAsset(reference.assetId)"
               >
                 <IconifyIcon icon="lucide:x" />
               </button>
             </div>
-            <strong :title="asset.name">{{ asset.name }}</strong>
-            <span>{{ formatAssetMeta(asset) }}</span>
+            <strong :title="reference.name">{{ reference.name }}</strong>
+            <span class="reference-origin">
+              <IconifyIcon v-if="reference.connected" icon="lucide:link-2" />
+              {{ formatReferenceMeta(reference) }}
+            </span>
           </article>
           <Select
             class="reference-add"
             :disabled="readonly"
             :max-tag-count="0"
             mode="multiple"
-            :options="imageAssetOptions"
-            placeholder="添加素材"
+            :options="manualReferenceAssetOptions"
+            placeholder="补充素材"
             show-search
-            :value="referenceAssetIds"
+            :value="manualReferenceAssets.map((asset) => asset.id)"
             @change="changeReferenceAssets"
           >
             <template #suffixIcon>
@@ -795,19 +1075,34 @@ function handleEditorEscape() {
       <section v-if="supportsPrompt" class="editor-section prompt-section">
         <div class="section-heading">
           <strong>{{ promptLabel() }}</strong>
+          <span
+            v-if="
+              isPromptGenerator
+                ? connectedTextSources.length
+                : connectedPromptInputCount
+            "
+          >
+            <IconifyIcon icon="lucide:workflow" />
+            {{
+              isPromptGenerator
+                ? connectedTextSources.length
+                : connectedPromptInputCount
+            }}
+            个上游输入
+          </span>
           <span>{{ asString(config.prompt).length }} / 1000</span>
         </div>
         <div class="prompt-field">
-          <Textarea
-            :auto-size="{
-              minRows: isPlanner ? 4 : 3,
-              maxRows: expanded ? 8 : 5,
-            }"
+          <Mentions
             :disabled="readonly"
             :maxlength="1000"
+            :options="promptMentionOptions"
             :placeholder="promptPlaceholder()"
+            prefix="@"
+            :rows="isPlanner ? 4 : expanded ? 5 : 3"
+            split=" "
             :value="asString(config.prompt)"
-            @change="emitConfig('prompt', $event.target.value)"
+            @change="changePrompt"
           />
           <Tooltip title="提示词润色由上层工作台接入">
             <span class="prompt-sparkle">
@@ -815,7 +1110,77 @@ function handleEditorEscape() {
             </span>
           </Tooltip>
         </div>
+        <div v-if="displayedReferences.length" class="prompt-reference-tip">
+          <IconifyIcon icon="lucide:at-sign" />
+          输入 @ 可引用已连接图片，例如“将 @图片1 的图案替换为 @图片2”。
+        </div>
+        <div v-if="isPromptGenerator" class="prompt-template-tip">
+          <IconifyIcon icon="lucide:braces" />
+          <span>
+            可用 <code v-text="'{{input}}'"></code>、<code
+              v-text="'{{context}}'"
+            ></code>
+            和
+            <code v-text="'{{brief}}'"></code>；未写变量时，上游文本会自动附加。
+          </span>
+        </div>
+        <div v-if="isPromptGenerator" class="template-variable-row">
+          <span>插入变量</span>
+          <button type="button" @click="appendPromptVariable('input')">
+            input · 首选输入
+          </button>
+          <button type="button" @click="appendPromptVariable('context')">
+            context · 上游提示词
+          </button>
+          <button type="button" @click="appendPromptVariable('brief')">
+            brief · 创作需求
+          </button>
+        </div>
+        <div
+          v-if="isPromptGenerator && connectedTextSources.length"
+          class="connected-text-sources"
+        >
+          <article v-for="source in connectedTextSources" :key="source.id">
+            <span class="text-source-icon">
+              <IconifyIcon
+                :icon="
+                  source.portType === 'prompt-text'
+                    ? 'lucide:sparkles'
+                    : 'lucide:message-square-text'
+                "
+              />
+            </span>
+            <div>
+              <strong>{{ source.name }}</strong>
+              <small :title="source.preview">
+                {{
+                  source.preview ||
+                  (source.portType === 'prompt-text'
+                    ? '运行时读取上游生成结果'
+                    : '读取创作需求')
+                }}
+              </small>
+            </div>
+            <Tag v-if="source.status">
+              {{ nodeRunStatusLabel(source.status) }}
+            </Tag>
+          </article>
+        </div>
+        <div
+          v-else-if="connectedPromptInputCount"
+          class="prompt-template-tip prompt-template-tip--connected"
+        >
+          <IconifyIcon icon="lucide:link-2" />
+          <span
+            >执行时使用上游生成的提示词，本地提示词仅作为未连接时的备用值。</span
+          >
+        </div>
+        <div v-if="promptReferenceError" class="prompt-reference-error">
+          <IconifyIcon icon="lucide:circle-alert" />
+          {{ promptReferenceError }}
+        </div>
         <button
+          v-if="supportsNegativePrompt"
           class="fold-row"
           type="button"
           @click="negativePromptOpen = !negativePromptOpen"
@@ -875,6 +1240,15 @@ function handleEditorEscape() {
         <IconifyIcon icon="lucide:circle-alert" />
         <span>{{ visibleError }}</span>
       </section>
+      <section
+        v-if="
+          nodeValidationError && nodeValidationError !== promptReferenceError
+        "
+        class="execution-error validation-error"
+      >
+        <IconifyIcon icon="lucide:shield-alert" />
+        <span>{{ nodeValidationError }}</span>
+      </section>
 
       <section v-if="advancedOpen" class="advanced-panel">
         <div class="advanced-heading">
@@ -887,6 +1261,19 @@ function handleEditorEscape() {
             收起
           </Button>
         </div>
+        <label v-if="isPromptGenerator" class="system-prompt-field">
+          <span>
+            系统指令
+            <small>定义角色、约束与输出质量；不会作为下游提示词直接输出</small>
+          </span>
+          <Textarea
+            :auto-size="{ minRows: 3, maxRows: 6 }"
+            :disabled="readonly"
+            placeholder="你是一名专业的图像与视频提示词工程师…"
+            :value="asString(config.systemPrompt)"
+            @change="emitConfig('systemPrompt', $event.target.value)"
+          />
+        </label>
         <div v-if="schemaFields.length" class="schema-grid">
           <label
             v-for="field in schemaFields"
@@ -932,9 +1319,22 @@ function handleEditorEscape() {
             />
           </label>
         </div>
-        <div v-else class="advanced-empty">
+        <div v-else-if="!isPromptGenerator" class="advanced-empty">
           <IconifyIcon icon="lucide:sliders-horizontal" />
           <span>选择带参数 Schema 的逻辑模型后，将自动显示可用控件。</span>
+        </div>
+      </section>
+
+      <section v-if="resultText" class="editor-section text-result-section">
+        <div class="section-heading">
+          <strong>输出提示词</strong>
+          <Button size="small" type="text" @click="copyResultText">
+            <IconifyIcon icon="lucide:copy" />
+            复制
+          </Button>
+        </div>
+        <div class="text-result">
+          <pre>{{ resultText }}</pre>
         </div>
       </section>
 
@@ -977,8 +1377,11 @@ function handleEditorEscape() {
         class="toolbar-model"
         :disabled="readonly"
         :options="modelSelectOptions"
-        placeholder="自动路由模型"
+        :placeholder="
+          isPromptGenerator ? '自动路由 · TEXT / CHAT' : '自动路由模型'
+        "
         show-search
+        :status="modelSelectionError ? 'error' : undefined"
         :value="selectedModelId"
         @change="emitConfig('logicalModelId', $event)"
       />
@@ -1011,6 +1414,23 @@ function handleEditorEscape() {
         />
       </template>
 
+      <template v-else-if="isPromptGenerator || isPromptInput">
+        <Select
+          class="toolbar-control toolbar-control--wide"
+          :disabled="readonly"
+          :options="PROMPT_TARGET_OPTIONS"
+          :value="asString(config.targetType, 'GENERAL')"
+          @change="emitConfig('targetType', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="PROMPT_LANGUAGE_OPTIONS"
+          :value="asString(config.language, 'ZH_CN')"
+          @change="emitConfig('language', $event)"
+        />
+      </template>
+
       <template v-else-if="isImageNode">
         <Select
           class="toolbar-control"
@@ -1019,9 +1439,9 @@ function handleEditorEscape() {
           :value="asString(currentMediaValue('aspectRatio', '1:1'))"
           @change="emitMediaConfig('aspectRatio', $event)"
         >
-          <template #suffixIcon
-            ><IconifyIcon icon="lucide:rectangle-horizontal"
-          /></template>
+          <template #suffixIcon>
+            <IconifyIcon icon="lucide:rectangle-horizontal" />
+          </template>
         </Select>
         <InputNumber
           addon-before="数量"
@@ -1034,7 +1454,11 @@ function handleEditorEscape() {
         />
       </template>
 
-      <template v-else-if="isVideoNode && !isComposeNode">
+      <template
+        v-else-if="
+          VIDEO_AI_TYPES.has(node.type) || node.type === 'video-plan-item'
+        "
+      >
         <Select
           class="toolbar-control"
           :disabled="readonly"
@@ -1074,27 +1498,7 @@ function handleEditorEscape() {
       </template>
 
       <template v-else-if="node.type === 'video-compose'">
-        <Select
-          class="toolbar-control"
-          :disabled="readonly"
-          :options="RESOLUTION_OPTIONS"
-          :value="asString(config.resolution, '1080P')"
-          @change="emitConfig('resolution', $event)"
-        />
-        <Select
-          class="toolbar-control"
-          :disabled="readonly"
-          :options="TRANSITION_OPTIONS"
-          :value="asString(config.transition, '淡化')"
-          @change="emitConfig('transition', $event)"
-        />
-        <Select
-          class="toolbar-control"
-          :disabled="readonly"
-          :options="[{ label: 'MP4', value: 'MP4' }]"
-          :value="asString(config.format, 'MP4')"
-          @change="emitConfig('format', $event)"
-        />
+        <Tag>MP4 · 按输入顺序拼接</Tag>
       </template>
 
       <template v-else-if="node.type === 'image-resize'">
@@ -1115,6 +1519,85 @@ function handleEditorEscape() {
           :min="64"
           :value="asNumber(config.height) ?? 1024"
           @change="emitConfig('height', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="RESIZE_MODE_OPTIONS"
+          :value="asString(config.resizeMode, 'FIT').toUpperCase()"
+          @change="emitConfig('resizeMode', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="[
+            { label: 'PNG', value: 'png' },
+            { label: 'JPEG', value: 'jpeg' },
+          ]"
+          :value="asString(config.format, 'png').toLowerCase()"
+          @change="emitConfig('format', $event)"
+        />
+      </template>
+
+      <template v-else-if="node.type === 'video-frame-extract'">
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="FRAME_MODE_OPTIONS"
+          :value="asString(config.frameMode, 'FIRST')"
+          @change="emitConfig('frameMode', $event)"
+        />
+        <InputNumber
+          v-if="asString(config.frameMode, 'FIRST') === 'TIME'"
+          addon-before="秒"
+          class="toolbar-number"
+          :disabled="readonly"
+          :max="86_400"
+          :min="0"
+          :step="0.1"
+          :value="asNumber(config.timeSeconds) ?? 0"
+          @change="emitConfig('timeSeconds', $event)"
+        />
+      </template>
+
+      <template v-else-if="node.type === 'video-normalize'">
+        <InputNumber
+          addon-before="宽"
+          class="toolbar-number"
+          :disabled="readonly"
+          :max="8192"
+          :min="64"
+          :precision="0"
+          :step="2"
+          :value="asNumber(config.width) ?? 1280"
+          @change="emitConfig('width', $event)"
+        />
+        <InputNumber
+          addon-before="高"
+          class="toolbar-number"
+          :disabled="readonly"
+          :max="8192"
+          :min="64"
+          :precision="0"
+          :step="2"
+          :value="asNumber(config.height) ?? 720"
+          @change="emitConfig('height', $event)"
+        />
+        <InputNumber
+          addon-before="FPS"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="120"
+          :min="1"
+          :value="asNumber(config.fps) ?? 30"
+          @change="emitConfig('fps', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="RESIZE_MODE_OPTIONS"
+          :value="asString(config.resizeMode, 'FIT')"
+          @change="emitConfig('resizeMode', $event)"
         />
       </template>
 
@@ -1153,6 +1636,15 @@ function handleEditorEscape() {
           :value="asNumber(config.transitionSeconds) ?? 1"
           @change="emitConfig('transitionSeconds', $event)"
         />
+        <InputNumber
+          addon-before="开始"
+          class="toolbar-number"
+          :disabled="readonly"
+          :min="0"
+          :step="0.1"
+          :value="asNumber(config.offsetSeconds) ?? 4"
+          @change="emitConfig('offsetSeconds', $event)"
+        />
       </template>
 
       <Select
@@ -1178,16 +1670,20 @@ function handleEditorEscape() {
       <Button
         v-if="!readonly && expanded"
         class="downstream-button"
-        :disabled="isRunning"
+        :disabled="isRunning || Boolean(nodeValidationError)"
         @click="runDownstream"
       >
         从此向下运行
       </Button>
-      <Tooltip :title="isRunning ? '节点正在执行' : '运行当前节点'">
+      <Tooltip
+        :title="
+          nodeValidationError || (isRunning ? '节点正在执行' : '运行当前节点')
+        "
+      >
         <Button
           v-if="!readonly"
           class="run-button"
-          :disabled="isRunning"
+          :disabled="isRunning || Boolean(nodeValidationError)"
           :loading="isRunning"
           shape="circle"
           type="primary"
@@ -1486,6 +1982,10 @@ function handleEditorEscape() {
   min-width: 0;
 }
 
+.reference-card--connected .reference-image {
+  border-color: color-mix(in srgb, var(--editor-accent) 42%, #e3e8f1);
+}
+
 .reference-image {
   position: relative;
   display: grid;
@@ -1522,6 +2022,23 @@ function handleEditorEscape() {
   border-radius: 999px;
 }
 
+.reference-alias {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  max-width: calc(100% - 6px);
+  padding: 1px 5px;
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 15px;
+  color: white;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgb(15 23 42 / 72%);
+  border-radius: 4px;
+}
+
 .reference-card:hover .reference-image > button {
   display: grid;
 }
@@ -1542,6 +2059,19 @@ function handleEditorEscape() {
 .reference-card > span {
   font-size: 9px;
   color: #a0aaba;
+}
+
+.reference-origin {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.reference-origin :deep(svg) {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  color: var(--editor-accent);
 }
 
 .reference-add {
@@ -1638,16 +2168,19 @@ function handleEditorEscape() {
   position: relative;
 }
 
-.prompt-field :deep(textarea.ant-input) {
-  padding: 9px 36px 9px 10px;
-  font-size: 12px;
-  line-height: 20px;
-  resize: none;
+.prompt-field :deep(.ant-mentions) {
   border-color: #cbd8eb;
   border-radius: 8px;
 }
 
-.prompt-field :deep(textarea.ant-input:focus) {
+.prompt-field :deep(.ant-mentions textarea) {
+  padding: 9px 36px 9px 10px;
+  font-size: 12px;
+  line-height: 20px;
+  resize: none;
+}
+
+.prompt-field :deep(.ant-mentions-focused) {
   border-color: var(--editor-accent);
   box-shadow: 0 0 0 2px
     color-mix(in srgb, var(--editor-accent) 12%, transparent);
@@ -1667,6 +2200,147 @@ function handleEditorEscape() {
 .prompt-sparkle :deep(svg) {
   width: 15px;
   height: 15px;
+}
+
+.prompt-reference-tip,
+.prompt-reference-error,
+.prompt-template-tip {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.prompt-reference-tip {
+  color: #64748b;
+}
+
+.prompt-reference-error {
+  color: #dc2626;
+}
+
+.prompt-template-tip {
+  padding: 6px 8px;
+  color: #65518f;
+  background: #faf7ff;
+  border: 1px solid #eee6ff;
+  border-radius: 7px;
+}
+
+.prompt-template-tip--connected {
+  color: #166534;
+  background: #f2fbf5;
+  border-color: #d8f1df;
+}
+
+.prompt-template-tip code {
+  padding: 1px 4px;
+  font-size: 10px;
+  color: #6d28d9;
+  background: #f1eaff;
+  border-radius: 3px;
+}
+
+.template-variable-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-top: 7px;
+}
+
+.template-variable-row > span {
+  margin-right: 2px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.template-variable-row button {
+  padding: 2px 7px;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 17px;
+  color: #6d28d9;
+  cursor: pointer;
+  background: #f7f3ff;
+  border: 1px solid #e8ddff;
+  border-radius: 999px;
+}
+
+.template-variable-row button:hover {
+  background: #efe7ff;
+  border-color: #d9c6ff;
+}
+
+.connected-text-sources {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.connected-text-sources article {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 7px;
+  background: #fbfcfe;
+  border: 1px solid #e6ebf3;
+  border-radius: 7px;
+}
+
+.text-source-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  color: #7c3aed;
+  background: #f2ecff;
+  border-radius: 6px;
+}
+
+.connected-text-sources article > div {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.connected-text-sources strong,
+.connected-text-sources small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connected-text-sources strong {
+  font-size: 10px;
+  color: #344258;
+}
+
+.connected-text-sources small {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.connected-text-sources :deep(.ant-tag) {
+  flex: 0 0 auto;
+  padding-inline: 4px;
+  margin: 0;
+  font-size: 9px;
+  line-height: 17px;
+}
+
+.prompt-reference-tip :deep(svg),
+.prompt-reference-error :deep(svg),
+.prompt-template-tip :deep(svg) {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
 }
 
 .fold-row {
@@ -1695,6 +2369,32 @@ function handleEditorEscape() {
   margin-top: 7px;
   font-size: 12px;
   line-height: 20px;
+}
+
+.system-prompt-field {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.system-prompt-field > span {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+  color: #344258;
+}
+
+.system-prompt-field small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.system-prompt-field :deep(textarea) {
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .compose-summary {
@@ -1742,6 +2442,12 @@ function handleEditorEscape() {
   border-radius: 7px;
 }
 
+.validation-error {
+  color: #92400e;
+  background: #fffaf0;
+  border-color: #fde3b4;
+}
+
 .execution-error :deep(svg) {
   flex: none;
   margin-top: 1px;
@@ -1783,6 +2489,35 @@ function handleEditorEscape() {
   font-size: 9px;
   white-space: nowrap;
   background: linear-gradient(transparent, rgb(15 23 42 / 75%));
+}
+
+.text-result-section .section-heading :deep(.ant-btn) {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  height: 24px;
+  margin-left: auto;
+  color: var(--editor-accent);
+  font-size: 11px;
+}
+
+.text-result {
+  max-height: 180px;
+  overflow: auto;
+  background: linear-gradient(145deg, #fbf9ff, #f7f9fc);
+  border: 1px solid #e6defa;
+  border-radius: 8px;
+}
+
+.text-result pre {
+  margin: 0;
+  padding: 10px 11px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 19px;
+  color: #3f315e;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .advanced-panel {
