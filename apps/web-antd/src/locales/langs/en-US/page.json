@@ -9,8 +9,8 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "analytics": "Analytics",
-    "workspace": "Workspace"
+    "analytics": "Home",
+    "workspace": "Company Dashboard"
   },
   "action": {
     "action": "Action",

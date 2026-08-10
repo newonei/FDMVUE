@@ -9,8 +9,8 @@
   },
   "dashboard": {
     "title": "概览",
-    "analytics": "分析页",
-    "workspace": "工作台"
+    "analytics": "首页",
+    "workspace": "公司看板"
   },
   "action": {
     "action": "操作",

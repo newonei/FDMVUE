@@ -24,6 +24,14 @@ export function getNoticePage(params: PageParam) {
   );
 }
 
+/** 查询当前用户可见的已发布公告 */
+export function getPublishedNoticePage(params: PageParam) {
+  return requestClient.get<PageResult<SystemNoticeApi.Notice>>(
+    '/system/notice/published-page',
+    { params },
+  );
+}
+
 /** 查询公告详情 */
 export function getNotice(id: number) {
   return requestClient.get<SystemNoticeApi.Notice>(
