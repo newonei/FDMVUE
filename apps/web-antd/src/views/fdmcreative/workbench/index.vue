@@ -9,6 +9,7 @@ import { useRouter } from 'vue-router';
 
 import { IconifyIcon } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
+import { formatDateTime } from '@vben/utils';
 
 import {
   Button,
@@ -74,6 +75,19 @@ const userOptions = computed(() =>
   })),
 );
 
+function creatorName(record: Record<string, unknown>) {
+  const row = record as unknown as FdmCreativeApi.Project;
+  const creatorId = row.creator || row.ownerUserId;
+  const creator = users.value.find(
+    (item) => Number(item.id) === Number(creatorId),
+  );
+  return creator
+    ? `${creator.nickname || creator.username} (${creator.id})`
+    : creatorId
+      ? String(creatorId)
+      : '—';
+}
+
 const ownerName = computed(() => {
   const ownerId = ownerMember.value?.userId ?? shareProject.value?.ownerUserId;
   const owner = users.value.find((item) => Number(item.id) === Number(ownerId));
@@ -86,6 +100,7 @@ const ownerName = computed(() => {
 
 const columns: TableColumnsType = [
   { dataIndex: 'name', title: '项目名称', width: 230 },
+  { dataIndex: 'creator', title: '创建人', width: 160 },
   { dataIndex: 'description', title: '创作说明' },
   { dataIndex: 'draftVersion', title: '草稿版本', width: 100 },
   { dataIndex: 'status', title: '状态', width: 100 },
@@ -102,6 +117,11 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+async function loadUsers() {
+  if (users.value.length > 0) return;
+  users.value = await getSimpleUserList();
 }
 
 function resetForm() {
@@ -238,7 +258,10 @@ function handleTableChange(pagination: TablePaginationConfig) {
   void load();
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadUsers();
+});
 </script>
 
 <template>
@@ -299,10 +322,16 @@ onMounted(load);
         <template v-else-if="column.dataIndex === 'description'">
           <span class="description">{{ record.description || '—' }}</span>
         </template>
+        <template v-else-if="column.dataIndex === 'creator'">
+          <span>{{ creatorName(record) }}</span>
+        </template>
         <template v-else-if="column.dataIndex === 'status'">
           <Tag :color="record.status === 'ACTIVE' ? 'blue' : 'default'">
             {{ record.status === 'ACTIVE' ? '进行中' : '已归档' }}
           </Tag>
+        </template>
+        <template v-else-if="column.dataIndex === 'updateTime'">
+          <span>{{ formatDateTime(record.updateTime) || '—' }}</span>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
           <Space>
@@ -455,8 +484,8 @@ onMounted(load);
   display: inline-block;
   max-width: 520px;
   overflow: hidden;
-  color: #64748b;
   text-overflow: ellipsis;
+  color: #64748b;
   white-space: nowrap;
 }
 

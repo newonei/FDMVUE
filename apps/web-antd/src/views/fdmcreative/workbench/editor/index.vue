@@ -79,6 +79,7 @@ import {
   validateWorkflowDefinition,
 } from './graph/workflow-utils';
 import { normalizeModelIdentifier } from './model-identifier';
+import { supportsNodeModel } from './node-model-filter';
 import { extractPromptText } from './prompt-text-output';
 
 defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
@@ -124,6 +125,17 @@ let promptRefineTimer: ReturnType<typeof setTimeout> | undefined;
 let inlineEditorFrame: number | undefined;
 let inlineEditorResizeObserver: ResizeObserver | undefined;
 let initializationGeneration = 0;
+
+const MODEL_NODE_TYPES = new Set([
+  'content-planner',
+  'first-last-frame-to-video',
+  'image-edit',
+  'image-generate',
+  'image-to-image',
+  'image-to-video',
+  'prompt-generator',
+  'video-generate',
+]);
 
 const inlineEditorPosition = reactive({
   anchorLeft: 350,
@@ -308,7 +320,7 @@ const connectedTextSources = computed(() => {
           [port.id, port.type as 'creative-brief' | 'prompt-text'] as const,
       ),
   );
-  if (!textInputPorts.size) return [];
+  if (textInputPorts.size === 0) return [];
   const definition = graphAdapter.serializeDefinition();
   const nodes = new Map(definition.nodes.map((item) => [item.id, item]));
   return definition.edges.flatMap((edge) => {
@@ -657,6 +669,7 @@ async function initialize() {
       },
     );
     adapter.value.restoreDefinition(draft?.definition ?? EMPTY_WORKFLOW);
+    ensureDefaultModels();
     syncAssetNodePreviews();
     dirty.value = false;
     void restoreLatestPlan(requestedProjectId, generation);
@@ -821,6 +834,60 @@ function ensurePlannerNode() {
     },
   });
   return true;
+}
+
+function defaultModelForNode(node: FdmCreativeApi.WorkflowNode) {
+  const referenceAssetIds = Array.isArray(node.config.referenceAssetIds)
+    ? node.config.referenceAssetIds.filter(
+        (item): item is number => typeof item === 'number',
+      )
+    : [];
+  return modelOptions.value.find((model) => {
+    if (node.type === 'content-planner') {
+      return (
+        model.modality === 'TEXT' &&
+        model.capabilities.includes('STRUCTURED_OUTPUT') &&
+        (referenceAssetIds.length === 0 ||
+          model.capabilities.includes('IMAGE_INPUT'))
+      );
+    }
+    return supportsNodeModel(model, node.type, referenceAssetIds);
+  });
+}
+
+function ensureDefaultModel(node: FdmCreativeApi.WorkflowNode) {
+  if (!MODEL_NODE_TYPES.has(node.type)) return true;
+  if (plannerLogicalModelIdForNode(node)) return true;
+  const defaultModel = defaultModelForNode(node);
+  const logicalModelId = normalizeModelIdentifier(defaultModel?.id);
+  if (!logicalModelId) return false;
+  adapter.value?.updateNode(node.id, {
+    config: { ...node.config, logicalModelId },
+  });
+  return true;
+}
+
+function plannerLogicalModelIdForNode(node: FdmCreativeApi.WorkflowNode) {
+  return normalizeModelIdentifier(
+    node.config.logicalModelId ?? node.config.modelId,
+  );
+}
+
+function ensureDefaultModels() {
+  const graphAdapter = adapter.value;
+  if (!graphAdapter) return false;
+  let allConfigured = true;
+  for (const node of graphAdapter.serializeDefinition().nodes) {
+    if (!ensureDefaultModel(node)) allConfigured = false;
+  }
+  return allConfigured;
+}
+
+function ensurePlannerDefaultModel() {
+  const plannerNode = adapter.value
+    ?.serializeDefinition()
+    .nodes.find((node) => node.type === 'content-planner');
+  return plannerNode ? ensureDefaultModel(plannerNode) : false;
 }
 
 function plannerConfig() {
@@ -1067,8 +1134,11 @@ async function previewPlan() {
     message.warning('单次规划的图片与视频内容项合计不能超过 20 个');
     return;
   }
+  if (!ensurePlannerNode() || !ensurePlannerDefaultModel()) {
+    message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
+    return;
+  }
   if (!validateSelectedPlannerModel('STRUCTURED_OUTPUT', true)) return;
-  if (!ensurePlannerNode()) return;
   plannerBusy.value = true;
   try {
     const response = await previewContentPlan({
@@ -1136,6 +1206,10 @@ function schedulePlanSync(
 async function applyPlan() {
   const preview = pendingPlan.value;
   if (!preview?.planRevisionId || !preview.plan) return;
+  if (!ensurePlannerNode() || !ensurePlannerDefaultModel()) {
+    message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
+    return;
+  }
   const validated = await previewContentPlan({
     imageCount:
       planner.mode === 'VIDEO_SEQUENCE' ? undefined : planner.imageCount,
@@ -1175,8 +1249,11 @@ async function polishPrompt() {
     message.warning('请先输入需要润色的创作需求');
     return;
   }
+  if (!ensurePlannerNode() || !ensurePlannerDefaultModel()) {
+    message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
+    return;
+  }
   if (!validateSelectedPlannerModel('CHAT')) return;
-  if (!ensurePlannerNode()) return;
   promptRefineBusy.value = true;
   try {
     const result = await refineCreativePrompt({
@@ -1234,6 +1311,10 @@ function executionProgress(execution?: FdmCreativeApi.Execution) {
 }
 
 async function run(scope: FdmCreativeApi.ExecutionScope, startNodeId?: string) {
+  if (!ensureDefaultModels()) {
+    message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
+    return;
+  }
   if (dirty.value && !(await saveDraft(false))) return;
   const id = await runCreativeWorkflow({
     expectedDraftVersion: draftVersion.value,

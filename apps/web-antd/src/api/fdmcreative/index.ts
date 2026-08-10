@@ -45,6 +45,7 @@ export namespace FdmCreativeApi {
   export interface Project {
     coverAssetId?: number;
     createTime?: string;
+    creator?: string;
     currentRevisionId?: number;
     description?: string;
     draftVersion: number;

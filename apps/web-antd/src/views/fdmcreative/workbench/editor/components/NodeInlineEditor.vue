@@ -287,16 +287,16 @@ const supportsPrompt = computed(() =>
     'brand-input',
     'content-planner',
     'creative-brief',
+    'first-last-frame-to-video',
     'image-edit',
     'image-generate',
     'image-plan-item',
     'image-to-image',
+    'image-to-video',
     'prompt-generator',
     'prompt-input',
     'video-generate',
     'video-plan-item',
-    'image-to-video',
-    'first-last-frame-to-video',
   ].includes(props.node.type),
 );
 const supportsReferences = computed(
@@ -399,6 +399,7 @@ const modelSelectOptions = computed(() =>
 const selectedModelId = computed(() =>
   normalizeModelIdentifier(config.value.logicalModelId ?? config.value.modelId),
 );
+
 const configuredSelectedModel = computed(() =>
   props.modelOptions.find(
     (item) => normalizeModelIdentifier(item.id) === selectedModelId.value,
@@ -584,6 +585,17 @@ function effectiveReferenceCount() {
 }
 
 watch(
+  [availableModels, selectedModelId],
+  () => {
+    if (props.readonly || !isAiNode.value || selectedModelId.value) return;
+    const defaultModel = availableModels.value[0];
+    const logicalModelId = normalizeModelIdentifier(defaultModel?.id);
+    if (logicalModelId) emit('configChange', 'logicalModelId', logicalModelId);
+  },
+  { immediate: true },
+);
+
+watch(
   synchronizedPromptReferenceBindings,
   (bindings) => {
     if (
@@ -611,7 +623,7 @@ function emitConfig(key: string, value: unknown) {
 }
 
 function changePrompt(value: string) {
-  const normalized = value.replace(
+  const normalized = value.replaceAll(
     /\{\{\s*(input|context|brief)\s*\}\}/gi,
     (_, variable: string) => `{{${variable.toLowerCase()}}}`,
   );
@@ -923,9 +935,7 @@ function handleEditorEscape() {
             {{ isAssetInput ? '素材' : hasFrameSlots ? '参考帧' : '参考素材' }}
           </strong>
           <span v-if="isPlanner">用于保持角色、商品和视觉风格一致</span>
-          <span v-else-if="!isAssetInput"
-            >可选，模型能力不支持时会在执行前提示</span
-          >
+          <span v-else-if="!isAssetInput">可选，模型能力不支持时会在执行前提示</span>
         </div>
 
         <div v-if="isAssetInput" class="single-asset-row">
@@ -1171,9 +1181,7 @@ function handleEditorEscape() {
           class="prompt-template-tip prompt-template-tip--connected"
         >
           <IconifyIcon icon="lucide:link-2" />
-          <span
-            >执行时使用上游生成的提示词，本地提示词仅作为未连接时的备用值。</span
-          >
+          <span>执行时使用上游生成的提示词，本地提示词仅作为未连接时的备用值。</span>
         </div>
         <div v-if="promptReferenceError" class="prompt-reference-error">
           <IconifyIcon icon="lucide:circle-alert" />
@@ -2029,11 +2037,11 @@ function handleEditorEscape() {
   max-width: calc(100% - 6px);
   padding: 1px 5px;
   overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 9px;
   font-weight: 650;
   line-height: 15px;
   color: white;
-  text-overflow: ellipsis;
   white-space: nowrap;
   background: rgb(15 23 42 / 72%);
   border-radius: 4px;
@@ -2497,8 +2505,8 @@ function handleEditorEscape() {
   align-items: center;
   height: 24px;
   margin-left: auto;
-  color: var(--editor-accent);
   font-size: 11px;
+  color: var(--editor-accent);
 }
 
 .text-result {
@@ -2510,14 +2518,14 @@ function handleEditorEscape() {
 }
 
 .text-result pre {
-  margin: 0;
   padding: 10px 11px;
+  margin: 0;
   font-family: inherit;
   font-size: 11px;
   line-height: 19px;
   color: #3f315e;
-  white-space: pre-wrap;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .advanced-panel {
