@@ -319,7 +319,7 @@ export function importJdEcShopDailyExcel(
   );
 }
 
-/** 导入抖音电商经营数据 Excel（成交概览表第 2 行汇总数据） */
+/** 导入抖音电商经营数据 Excel（成交概览：载体类型=全部、投放时段=不限） */
 export function importDouyinEcShopDailyExcel(
   file: File,
   shopId: string,
