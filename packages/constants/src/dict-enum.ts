@@ -139,6 +139,8 @@ const AI_DICT = {
 
 /** ========== FDM-DATA - 飞德慕主数据 ========== */
 const FDM_DATA_DICT = {
+  /** 电商发票开票项目（字典类型 fptype） */
+  FDM_EC_INVOICE_ITEM: 'fptype',
   /** 飞德慕成品类型（字典类型 YogaMat） */
   YOGA_MAT: 'YogaMat',
   /** 飞德慕材质（字典类型 material_type） */

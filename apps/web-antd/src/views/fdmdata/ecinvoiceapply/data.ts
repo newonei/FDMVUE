@@ -2,6 +2,8 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataEcInvoiceApplyApi } from '#/api/fdmdata/ecinvoiceapply';
 
+import { DICT_TYPE } from '@vben/constants';
+import { getDictOptions } from '@vben/hooks';
 import { formatDateTime } from '@vben/utils';
 
 import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
@@ -14,6 +16,7 @@ import { normalizeLocalDateForForm } from './local-date';
 export const EC_INVOICE_APPLY_DEFAULTS: Partial<FdmdataEcInvoiceApplyApi.EcInvoiceApply> =
   {
     invoiceType: '普通发票',
+    invoiceItem: '瑜伽垫',
     // 新申请默认未开票，开票状态由实际开票流程更新，用户无需手工填写。
     invoiceStatus: 0,
     applySource: '手工录入',
@@ -215,6 +218,20 @@ export function useFormSchema(): VbenFormSchema[] {
       rules: 'required',
     },
     {
+      fieldName: 'invoiceItem',
+      label: '开票项目',
+      component: 'Select',
+      componentProps: {
+        class: 'w-full',
+        allowClear: false,
+        showSearch: true,
+        optionFilterProp: 'label',
+        options: getDictOptions(DICT_TYPE.FDM_EC_INVOICE_ITEM, 'string'),
+        placeholder: '请选择开票项目',
+      },
+      rules: 'required',
+    },
+    {
       fieldName: 'title',
       label: '发票抬头',
       component: 'Input',
@@ -229,6 +246,18 @@ export function useFormSchema(): VbenFormSchema[] {
         allowClear: true,
         maxlength: 64,
         placeholder: '个人抬头可不填',
+      },
+    },
+    {
+      fieldName: 'remark',
+      label: '备注',
+      component: 'Textarea',
+      formItemClass: 'col-span-2',
+      componentProps: {
+        maxlength: 230,
+        placeholder: '请输入备注',
+        rows: 3,
+        showCount: true,
       },
     },
     // 状态和开票日期由开票流程维护，保留为隐藏字段以便编辑时原值不丢失。
@@ -314,6 +343,19 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: { allowClear: true },
     },
     {
+      fieldName: 'invoiceItem',
+      label: '开票项目',
+      component: 'Select',
+      componentProps: {
+        class: 'w-full',
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        options: getDictOptions(DICT_TYPE.FDM_EC_INVOICE_ITEM, 'string'),
+        placeholder: '请选择开票项目',
+      },
+    },
+    {
       fieldName: 'startTime',
       label: '开始日期',
       component: 'RangePicker',
@@ -396,6 +438,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
     },
     { field: 'applySource', title: '申请来源', minWidth: 100 },
     { field: 'invoiceType', title: '发票类型', minWidth: 96 },
+    {
+      field: 'invoiceItem',
+      title: '开票项目',
+      minWidth: 110,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'remark',
+      title: '备注',
+      minWidth: 160,
+      showOverflow: 'tooltip',
+    },
     { field: 'invoiceNo', title: '发票号码', minWidth: 130 },
     { field: 'orderPayStatus', title: '支付状态', minWidth: 90 },
     { field: 'applyStatus', title: '申请状态', minWidth: 90 },

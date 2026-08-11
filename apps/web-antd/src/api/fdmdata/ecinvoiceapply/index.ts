@@ -21,6 +21,7 @@ export namespace FdmdataEcInvoiceApplyApi {
     invoiceId?: string;
     invoiceKind?: number;
     invoiceType?: string;
+    invoiceItem?: string;
     title?: string;
     amount?: number;
     quantity?: number;
@@ -64,6 +65,7 @@ export namespace FdmdataEcInvoiceApplyApi {
     buyerNick?: string;
     sellerRemark?: string;
     invoiceAmountRemark?: string;
+    remark?: string;
     failedReason?: string;
     bizErrorDesc?: string;
     message?: string;
