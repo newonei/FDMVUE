@@ -37,7 +37,7 @@ describe('workbench node', () => {
     listeners.get('change:data')?.();
     await nextTick();
     expect(statusLabel()?.textContent?.trim()).toBe('模型生成中');
-    expect(statusLabel()?.classList.contains('status-waiting_ai')).toBe(true);
+    expect(statusLabel()?.classList.contains('status-waiting-ai')).toBe(true);
 
     nodeData.status = 'ARCHIVING_AI';
     listeners.get('change:data')?.();

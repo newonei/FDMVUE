@@ -90,6 +90,14 @@ export interface ConnectionValidationInput {
   targetPortId: string;
 }
 
+export interface AutoConnectTargetInput {
+  definition: FdmCreativeApi.WorkflowDefinition;
+  preferredTargetPortIds?: string[];
+  sourceNodeId: string;
+  sourcePortId: string;
+  targetNodeId: string;
+}
+
 export function validateWorkflowConnection(input: ConnectionValidationInput) {
   const { definition, sourceNodeId, sourcePortId, targetNodeId, targetPortId } =
     input;
@@ -130,6 +138,51 @@ export function validateWorkflowConnection(input: ConnectionValidationInput) {
     return false;
   }
   return !createsCycle(definition, sourceNodeId, targetNodeId);
+}
+
+/**
+ * Resolves a node-body drop to the first valid input port. Preferred ids are
+ * normally ordered by their distance from the pointer, while validation still
+ * enforces type compatibility, scalar occupancy, duplicate and cycle rules.
+ */
+export function findAutoConnectTargetPort(input: AutoConnectTargetInput) {
+  const {
+    definition,
+    preferredTargetPortIds = [],
+    sourceNodeId,
+    sourcePortId,
+    targetNodeId,
+  } = input;
+  const targetNode = definition.nodes.find((node) => node.id === targetNodeId);
+  if (!targetNode) return undefined;
+
+  const preferredOrder = new Map(
+    preferredTargetPortIds.map((portId, index) => [portId, index]),
+  );
+  const inputPorts = targetNode.ports
+    .filter((port) => port.direction === 'INPUT')
+    .map((port, index) => ({ index, port }))
+    .toSorted((left, right) => {
+      const leftPriority = preferredOrder.get(left.port.id);
+      const rightPriority = preferredOrder.get(right.port.id);
+      if (leftPriority !== undefined || rightPriority !== undefined) {
+        return (
+          (leftPriority ?? Number.MAX_SAFE_INTEGER) -
+          (rightPriority ?? Number.MAX_SAFE_INTEGER)
+        );
+      }
+      return left.index - right.index;
+    });
+
+  return inputPorts.find(({ port }) =>
+    validateWorkflowConnection({
+      definition,
+      sourceNodeId,
+      sourcePortId,
+      targetNodeId,
+      targetPortId: port.id,
+    }),
+  )?.port.id;
 }
 
 export function validateWorkflowDefinition(

@@ -34,6 +34,43 @@ export function inlineNodeConfigValidationError(
   ) {
     return '请填写提示词文本';
   }
+  if (['image-loop', 'video-loop'].includes(nodeType)) {
+    const count = config.count ?? 4;
+    const startIndex = config.startIndex ?? 1;
+    const batchSize = config.batchSize ?? 1;
+    if (
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > 20
+    ) {
+      return '循环次数必须是 1 到 20 之间的整数';
+    }
+    if (
+      typeof startIndex !== 'number' ||
+      !Number.isInteger(startIndex) ||
+      startIndex < 1
+    ) {
+      return '循环起始序号必须是正整数';
+    }
+    if (
+      typeof batchSize !== 'number' ||
+      !Number.isInteger(batchSize) ||
+      batchSize < 1 ||
+      batchSize > 20
+    ) {
+      return '每轮素材数必须是 1 到 20 之间的整数';
+    }
+  }
+  if (
+    ['image-select', 'video-select'].includes(nodeType) &&
+    config.mode === 'INDEX' &&
+    (typeof config.index !== 'number' ||
+      !Number.isInteger(config.index) ||
+      config.index < 1)
+  ) {
+    return '素材选择序号必须是正整数';
+  }
   if (nodeType !== 'video-normalize') return undefined;
 
   const width = configuredNumber(

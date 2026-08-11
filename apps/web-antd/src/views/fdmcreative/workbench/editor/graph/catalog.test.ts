@@ -8,9 +8,19 @@ import {
   NODE_GROUPS,
   normalizeCreativeNodeConfig,
   normalizeCreativeNodePorts,
+  normalizeCreativeWorkflowEdges,
 } from './catalog';
 
 describe('creative node catalog', () => {
+  it('uses unique port ids within every node', () => {
+    for (const node of CREATIVE_NODE_CATALOG) {
+      expect(
+        new Set(node.ports.map((port) => port.id)).size,
+        `${node.type} contains duplicate port ids`,
+      ).toBe(node.ports.length);
+    }
+  });
+
   it('matches every node type supported by the creative backend', () => {
     expect(new Set(CREATIVE_NODE_CATALOG.map((node) => node.type))).toEqual(
       new Set([
@@ -24,19 +34,25 @@ describe('creative node catalog', () => {
         'image-edit',
         'image-generate',
         'image-input',
+        'image-loop',
         'image-plan-item',
         'image-resize',
+        'image-select',
         'image-to-image',
         'image-to-video',
         'output',
         'prompt-input',
         'prompt-generator',
+        'prompt-template',
+        'random-prompt',
         'video-compose',
         'video-frame-extract',
         'video-generate',
         'video-input',
+        'video-loop',
         'video-normalize',
         'video-plan-item',
+        'video-select',
         'video-timeline',
         'video-transition',
         'video-trim',
@@ -51,7 +67,11 @@ describe('creative node catalog', () => {
 
     expect(imageToImage.ports).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'reference', required: true }),
+        expect.objectContaining({
+          id: 'reference',
+          required: true,
+          type: 'image-list',
+        }),
       ]),
     );
     expect(imageToVideo.ports).toEqual(
@@ -97,7 +117,11 @@ describe('creative node catalog', () => {
     expect(normalized).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'item', required: false }),
-        expect.objectContaining({ id: 'reference', required: true }),
+        expect.objectContaining({
+          id: 'reference',
+          required: true,
+          type: 'image-list',
+        }),
         expect.objectContaining({
           direction: 'INPUT',
           id: 'prompt',
@@ -203,7 +227,7 @@ describe('creative node catalog', () => {
       expect.objectContaining({
         direction: 'INPUT',
         id: 'reference',
-        type: 'image-asset',
+        type: 'image-list',
       }),
       expect.objectContaining({
         direction: 'OUTPUT',
@@ -234,8 +258,108 @@ describe('creative node catalog', () => {
     expect(NODE_GROUPS).toContainEqual({
       key: 'llm',
       label: '提示词与 LLM',
-      types: ['prompt-input', 'prompt-generator'],
+      types: [
+        'prompt-input',
+        'random-prompt',
+        'prompt-template',
+        'prompt-generator',
+      ],
     });
+  });
+
+  it('declares random prompt candidates as a multi-input local node', () => {
+    expect(CREATIVE_NODE_MAP.get('random-prompt')).toMatchObject({
+      defaultConfig: {
+        language: 'ZH_CN',
+        prompts: '',
+        targetType: 'GENERAL',
+      },
+      ports: [
+        expect.objectContaining({
+          direction: 'INPUT',
+          id: 'prompts',
+          type: 'prompt-text',
+        }),
+        expect.objectContaining({
+          direction: 'OUTPUT',
+          id: 'prompt',
+          type: 'prompt-text',
+        }),
+      ],
+    });
+  });
+
+  it('exposes executable loop and media-routing nodes', () => {
+    expect(NODE_GROUPS).toContainEqual({
+      key: 'flow',
+      label: '流程控制与批处理',
+      types: ['image-loop', 'video-loop', 'image-select', 'video-select'],
+    });
+    expect(CREATIVE_NODE_MAP.get('image-loop')).toMatchObject({
+      defaultConfig: { batchSize: 1, count: 4, startIndex: 1 },
+      ports: expect.arrayContaining([
+        expect.objectContaining({ id: 'selected-images', type: 'image-list' }),
+        expect.objectContaining({ id: 'result-prompt', type: 'prompt-text' }),
+      ]),
+    });
+    expect(CREATIVE_NODE_MAP.get('image-select')?.ports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: 'INPUT',
+          id: 'images',
+          type: 'image-list',
+        }),
+        expect.objectContaining({
+          direction: 'OUTPUT',
+          id: 'image',
+          type: 'image-asset',
+        }),
+      ]),
+    );
+  });
+
+  it('uses distinct input and output ids on the image collection', () => {
+    expect(CREATIVE_NODE_MAP.get('image-collection')?.ports).toEqual([
+      expect.objectContaining({
+        direction: 'INPUT',
+        id: 'images',
+        type: 'image-list',
+      }),
+      expect.objectContaining({
+        direction: 'OUTPUT',
+        id: 'ordered-images',
+        type: 'image-list',
+      }),
+    ]);
+  });
+
+  it('migrates legacy image-collection output edges on restore', () => {
+    expect(
+      normalizeCreativeWorkflowEdges(
+        [
+          {
+            config: {},
+            height: 100,
+            id: 'collection',
+            name: '图片集合',
+            ports: [],
+            type: 'image-collection',
+            width: 100,
+            x: 0,
+            y: 0,
+          },
+        ],
+        [
+          {
+            id: 'edge',
+            sourceNodeId: 'collection',
+            sourcePortId: 'images',
+            targetNodeId: 'target',
+            targetPortId: 'reference',
+          },
+        ],
+      ),
+    ).toEqual([expect.objectContaining({ sourcePortId: 'ordered-images' })]);
   });
 
   it('declares executable video preprocessing and an ordered timeline output', () => {
@@ -329,6 +453,17 @@ describe('creative node catalog', () => {
     expect(
       imageTargets.some((item) => item.template.type === 'video-trim'),
     ).toBe(false);
+
+    const imageListTargets = getQuickConnectOptions('image-list');
+    expect(
+      imageListTargets.map((item) => [item.template.type, item.targetPortId]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['image-generate', 'reference'],
+        ['image-to-image', 'reference'],
+        ['prompt-generator', 'reference'],
+      ]),
+    );
 
     const videoTargets = getQuickConnectOptions('video-asset');
     expect(videoTargets).toEqual(

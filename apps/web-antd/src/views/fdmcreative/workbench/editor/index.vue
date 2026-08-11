@@ -27,16 +27,12 @@ import { IconifyIcon } from '@vben/icons';
 import {
   Alert,
   Button,
-  Collapse,
-  Drawer,
   Empty,
   Input,
   InputNumber,
   message,
   Modal,
-  Progress,
   Segmented,
-  Space,
   Spin,
   Switch,
   Tag,
@@ -65,10 +61,12 @@ import {
 } from '#/api/fdmcreative';
 import { uploadFile } from '#/api/infra/file';
 
-import { calculateInlineEditorPosition } from './components/node-editor/inline-editor-position';
+import ExecutionTaskPanel from './components/ExecutionTaskPanel.vue';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
+import NodeLibraryPanel from './components/NodeLibraryPanel.vue';
+import WorkbenchTopbar from './components/WorkbenchTopbar.vue';
 import { resolveConnectedImageReferences } from './connected-image-references';
-import { CREATIVE_NODE_CATALOG, NODE_GROUPS } from './graph/catalog';
+import { CREATIVE_NODE_CATALOG } from './graph/catalog';
 import {
   createWorkbenchGraph,
   MAX_WORKBENCH_NODES,
@@ -78,22 +76,26 @@ import {
   planSummary,
   validateWorkflowDefinition,
 } from './graph/workflow-utils';
+import { aggregateLoopNodeRuns, canvasNodeIdForRun } from './loop-run';
 import { normalizeModelIdentifier } from './model-identifier';
 import { supportsNodeModel } from './node-model-filter';
 import { extractPromptText } from './prompt-text-output';
+import { useExecutionEventStream } from './use-execution-event-stream';
 
 defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
+
+interface NodeLibraryPanelExpose {
+  getElement: () => HTMLElement | undefined;
+}
 
 const route = useRoute();
 const router = useRouter();
 const projectId = computed(() => Number(route.params.projectId));
 const canvasRef = ref<HTMLElement>();
 const canvasShellRef = ref<HTMLElement>();
-const inlineEditorRef = ref<HTMLElement>();
 const minimapRef = ref<HTMLElement>();
-const nodeLibraryRef = ref<HTMLElement>();
+const nodeLibraryRef = ref<NodeLibraryPanelExpose>();
 const quickConnectRef = ref<HTMLElement>();
-const taskQueueRef = ref<HTMLElement>();
 const adapter = ref<WorkbenchGraphAdapter>();
 const loading = ref(true);
 const saving = ref(false);
@@ -105,7 +107,6 @@ const zoomPercent = ref(100);
 const project = ref<FdmCreativeApi.Project>();
 const draftVersion = ref(0);
 const selectedNode = ref<FdmCreativeApi.WorkflowNode>();
-const librarySearch = ref('');
 const plannerBusy = ref(false);
 const promptRefineBusy = ref(false);
 const planModalOpen = ref(false);
@@ -114,16 +115,14 @@ const runningExecution = ref<FdmCreativeApi.ExecutionDetail>();
 const latestNodeRunsByNodeId = ref<
   Record<string, FdmCreativeApi.NodeRun | undefined>
 >({});
-const taskDrawerOpen = ref(false);
 const modelOptions = ref<FdmAiApi.ModelOption[]>([]);
 const projectAssets = ref<FdmCreativeApi.CreativeAsset[]>([]);
 const quickConnectRequest = ref<WorkbenchBlankConnectionRequest>();
 const quickConnectSearch = ref('');
 let executionTimer: ReturnType<typeof setTimeout> | undefined;
+let executionEventRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let planTimer: ReturnType<typeof setTimeout> | undefined;
 let promptRefineTimer: ReturnType<typeof setTimeout> | undefined;
-let inlineEditorFrame: number | undefined;
-let inlineEditorResizeObserver: ResizeObserver | undefined;
 let initializationGeneration = 0;
 
 const MODEL_NODE_TYPES = new Set([
@@ -137,15 +136,6 @@ const MODEL_NODE_TYPES = new Set([
   'video-generate',
 ]);
 
-const inlineEditorPosition = reactive({
-  anchorLeft: 350,
-  left: 16,
-  placement: 'bottom' as 'bottom' | 'top',
-  top: 16,
-  visible: false,
-  width: 700,
-});
-
 const quickConnectPosition = reactive({ left: 16, top: 16 });
 
 const planner = reactive({
@@ -156,6 +146,29 @@ const planner = reactive({
 });
 
 const selectedConfig = computed(() => selectedNode.value?.config ?? {});
+const currentUserRole = computed(() => project.value?.currentUserRole);
+const canEdit = computed(() =>
+  ['EDITOR', 'OWNER'].includes(currentUserRole.value ?? ''),
+);
+const canRun = computed(
+  () => Boolean(currentUserRole.value) && currentUserRole.value !== 'VIEWER',
+);
+const canRunSelectedNode = computed(
+  () =>
+    canRun.value &&
+    (canEdit.value || selectedNode.value?.type !== 'content-planner'),
+);
+const currentUserRoleLabel = computed(() => {
+  const role = currentUserRole.value;
+  return role
+    ? {
+        EDITOR: '编辑者',
+        OWNER: '所有者',
+        RUNNER: '运行者',
+        VIEWER: '只读',
+      }[role]
+    : '';
+});
 const inputUploadAccept = computed(() =>
   selectedNode.value?.type === 'video-input'
     ? ['mp4', 'mov', 'webm']
@@ -164,16 +177,6 @@ const inputUploadAccept = computed(() =>
 const inputUploadMaxSize = computed(() =>
   selectedNode.value?.type === 'video-input' ? 500 : 25,
 );
-const inlineEditorPlacement = computed(() =>
-  inlineEditorPosition.placement === 'top' ? 'above' : 'below',
-);
-const inlineEditorStyle = computed<CSSProperties>(() => ({
-  '--inline-editor-anchor-left': `${inlineEditorPosition.anchorLeft}px`,
-  left: `${inlineEditorPosition.left}px`,
-  top: `${inlineEditorPosition.top}px`,
-  visibility: inlineEditorPosition.visible ? 'visible' : 'hidden',
-  width: `${inlineEditorPosition.width}px`,
-}));
 const quickConnectStyle = computed<CSSProperties>(() => ({
   left: `${quickConnectPosition.left}px`,
   top: `${quickConnectPosition.top}px`,
@@ -199,23 +202,27 @@ const saveStatus = computed(() => {
   }
   return '已保存';
 });
-const filteredGroups = computed(() => {
-  const keyword = librarySearch.value.trim().toLowerCase();
-  return NODE_GROUPS.map((group) => ({
-    ...group,
-    nodes: group.types
-      .map((type) => CREATIVE_NODE_CATALOG.find((item) => item.type === type)!)
-      .filter(
-        (node) =>
-          !keyword ||
-          node.label.toLowerCase().includes(keyword) ||
-          node.description.toLowerCase().includes(keyword),
-      ),
-  })).filter((group) => group.nodes.length > 0);
+const aggregatedRunningNodeRuns = computed(() =>
+  aggregateLoopNodeRuns(runningExecution.value?.nodeRuns ?? []),
+);
+const activeExecutionId = computed(() => {
+  const execution = runningExecution.value;
+  return execution &&
+    ['CANCEL_REQUESTED', 'CREATED', 'RUNNING'].includes(execution.status)
+    ? execution.id
+    : undefined;
+});
+const { state: executionStreamState } = useExecutionEventStream({
+  executionId: () => activeExecutionId.value,
+  onError: (_error, context) => {
+    if (!context.reconnecting) scheduleExecutionRefresh(500);
+  },
+  onEvent: () => scheduleExecutionRefresh(),
+  onReady: () => scheduleExecutionRefresh(),
 });
 const selectedResultNodeRun = computed(() =>
   selectedNode.value
-    ? (runningExecution.value?.nodeRuns?.find(
+    ? (aggregatedRunningNodeRuns.value.find(
         (nodeRun) => nodeRun.nodeId === selectedNode.value?.id,
       ) ?? latestNodeRunsByNodeId.value[selectedNode.value.id])
     : undefined,
@@ -241,7 +248,10 @@ const inlineEditorProgress = computed(() => {
 const visibleResultNodeRuns = computed(() => {
   const nodeRuns = runningExecution.value?.nodeRuns ?? [];
   return selectedNode.value
-    ? nodeRuns.filter((nodeRun) => nodeRun.nodeId === selectedNode.value?.id)
+    ? nodeRuns.filter(
+        (nodeRun) =>
+          canvasNodeIdForRun(nodeRun.nodeId) === selectedNode.value?.id,
+      )
     : nodeRuns;
 });
 const resultAssets = computed(() => {
@@ -271,22 +281,61 @@ const resultAssets = computed(() => {
 });
 const generatedImageAssetsByNodeId = computed(() => {
   const result = new Map<string, FdmCreativeApi.CreativeAsset[]>();
-  const nodeRunById = new Map(
-    (runningExecution.value?.nodeRuns ?? []).map((nodeRun) => [
-      nodeRun.id,
-      nodeRun,
-    ]),
+  const metadataForwardingTypes = new Set([
+    'image-collection',
+    'image-loop',
+    'image-select',
+  ]);
+  const orderedNodeIds = new Set<string>();
+  const nodeRuns = runningExecution.value?.nodeRuns ?? [];
+  const nodeRunById = new Map(nodeRuns.map((nodeRun) => [nodeRun.id, nodeRun]));
+  const append = (nodeId: string, asset: FdmCreativeApi.CreativeAsset) => {
+    const canvasNodeId = canvasNodeIdForRun(nodeId);
+    const values = result.get(canvasNodeId) ?? [];
+    if (!values.some((item) => item.id === asset.id)) values.push(asset);
+    result.set(canvasNodeId, values);
+  };
+  const imageAssetById = new Map(
+    projectAssets.value
+      .filter((asset) => asset.kind === 'IMAGE')
+      .map((asset) => [asset.id, asset]),
   );
+  for (const nodeRun of nodeRuns) {
+    if (
+      !nodeRun.outputJson ||
+      !nodeRun.nodeType ||
+      !metadataForwardingTypes.has(nodeRun.nodeType)
+    ) {
+      continue;
+    }
+    const assetIds = new Set<number>();
+    try {
+      collectOutputReferences(
+        JSON.parse(nodeRun.outputJson),
+        assetIds,
+        new Set(),
+      );
+    } catch {
+      continue;
+    }
+    if (assetIds.size > 0) {
+      orderedNodeIds.add(canvasNodeIdForRun(nodeRun.nodeId));
+    }
+    for (const assetId of assetIds) {
+      const asset = imageAssetById.get(assetId);
+      if (asset) append(nodeRun.nodeId, asset);
+    }
+  }
   for (const asset of projectAssets.value) {
     if (asset.kind !== 'IMAGE' || !asset.sourceNodeRunId) continue;
     const nodeRun = nodeRunById.get(asset.sourceNodeRunId);
     if (!nodeRun) continue;
-    const values = result.get(nodeRun.nodeId) ?? [];
-    values.push(asset);
-    result.set(nodeRun.nodeId, values);
+    append(nodeRun.nodeId, asset);
   }
-  for (const values of result.values()) {
-    values.sort((left, right) => left.id - right.id);
+  for (const [nodeId, values] of result) {
+    if (!orderedNodeIds.has(nodeId)) {
+      values.sort((left, right) => left.id - right.id);
+    }
   }
   return result;
 });
@@ -358,7 +407,13 @@ const connectedPromptInputCount = computed(
     ).length,
 );
 const resultText = computed(() =>
-  selectedNode.value?.type === 'prompt-generator'
+  [
+    'image-loop',
+    'prompt-generator',
+    'prompt-template',
+    'random-prompt',
+    'video-loop',
+  ].includes(selectedNode.value?.type ?? '')
     ? extractPromptText(selectedResultNodeRun.value?.outputJson)
     : undefined,
 );
@@ -419,7 +474,7 @@ function syncExecutionNodePreviews() {
   const execution = runningExecution.value;
   if (!graphAdapter) return;
   const latestNodeRuns = Object.values(latestNodeRunsByNodeId.value).filter(
-    (item): item is FdmCreativeApi.NodeRun => Boolean(item),
+    (item): item is FdmCreativeApi.NodeRun => item !== undefined,
   );
   if (!execution?.nodeRuns && latestNodeRuns.length === 0) return;
   const nodeRunById = new Map(
@@ -429,16 +484,23 @@ function syncExecutionNodePreviews() {
     ]),
   );
   for (const nodeRun of latestNodeRuns) {
+    const canvasNodeId = canvasNodeIdForRun(nodeRun.nodeId);
     const graphNodeType = graphAdapter.graph
-      .getCellById(nodeRun.nodeId)
+      .getCellById(canvasNodeId)
       ?.getData()?.type;
     if (
       nodeRun.nodeType !== 'prompt-generator' &&
-      graphNodeType !== 'prompt-generator'
+      ![
+        'image-loop',
+        'prompt-generator',
+        'prompt-template',
+        'random-prompt',
+        'video-loop',
+      ].includes(graphNodeType ?? '')
     ) {
       continue;
     }
-    graphAdapter.setNodeDisplayData(nodeRun.nodeId, {
+    graphAdapter.setNodeDisplayData(canvasNodeId, {
       outputText: extractPromptText(nodeRun.outputJson),
     });
   }
@@ -446,7 +508,7 @@ function syncExecutionNodePreviews() {
     if (!asset.sourceNodeRunId || !asset.url) continue;
     const nodeRun = nodeRunById.get(asset.sourceNodeRunId);
     if (!nodeRun) continue;
-    graphAdapter.setNodeDisplayData(nodeRun.nodeId, {
+    graphAdapter.setNodeDisplayData(canvasNodeIdForRun(nodeRun.nodeId), {
       assetName: asset.name,
       assetType: asset.kind,
       previewUrl: asset.url,
@@ -457,7 +519,7 @@ function syncExecutionNodePreviews() {
 function mergeLatestNodeRuns(execution: FdmCreativeApi.ExecutionDetail) {
   if (!execution.nodeRuns?.length) return;
   const next = { ...latestNodeRunsByNodeId.value };
-  for (const nodeRun of execution.nodeRuns) {
+  for (const nodeRun of aggregateLoopNodeRuns(execution.nodeRuns)) {
     next[nodeRun.nodeId] = nodeRun;
   }
   latestNodeRunsByNodeId.value = next;
@@ -491,14 +553,14 @@ async function restoreLatestExecution(
     }
     runningExecution.value = execution;
     mergeLatestNodeRuns(execution);
-    for (const nodeRun of execution.nodeRuns ?? []) {
+    for (const nodeRun of aggregateLoopNodeRuns(execution.nodeRuns ?? [])) {
       adapter.value?.setNodeStatus(nodeRun.nodeId, nodeRun.status);
     }
     syncExecutionNodePreviews();
     if (['CANCEL_REQUESTED', 'CREATED', 'RUNNING'].includes(execution.status)) {
       executionTimer = setTimeout(
-        () => void monitorExecution(execution.id, targetProjectId),
-        2500,
+        () => refreshExecutionInBackground(execution.id, targetProjectId),
+        15_000,
       );
     }
   } catch {
@@ -599,6 +661,7 @@ async function initialize() {
   projectAssets.value = [];
   planModalOpen.value = false;
   if (executionTimer) clearTimeout(executionTimer);
+  if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
   if (planTimer) clearTimeout(planTimer);
   if (promptRefineTimer) clearTimeout(promptRefineTimer);
   if (!Number.isFinite(requestedProjectId)) {
@@ -628,30 +691,23 @@ async function initialize() {
     adapter.value = createWorkbenchGraph(
       {
         container: canvasRef.value,
-        dndContainer: nodeLibraryRef.value,
+        dndContainer: nodeLibraryRef.value?.getElement(),
         minimapContainer: minimapRef.value,
+        readonly: !canEdit.value,
       },
       {
         onChange: () => {
+          if (!canEdit.value) return;
           dirty.value = true;
           graphRevision.value += 1;
         },
         onConnectToBlank: openQuickConnect,
-        onNodeGeometryChange: (nodeId) => {
-          if (nodeId === selectedNode.value?.id) scheduleInlineEditorPosition();
-        },
         onSelectionChange: (node) => {
           if (node) closeQuickConnect();
           selectedNode.value = node;
           syncPlannerControls(node);
-          if (node) {
-            void nextTick(scheduleInlineEditorPosition);
-          } else {
-            inlineEditorPosition.visible = false;
-          }
         },
         onViewportChange: () => {
-          scheduleInlineEditorPosition();
           const request = quickConnectRequest.value;
           if (!request || !adapter.value) return;
           const clientPoint = adapter.value.graph.localToClient(
@@ -669,7 +725,7 @@ async function initialize() {
       },
     );
     adapter.value.restoreDefinition(draft?.definition ?? EMPTY_WORKFLOW);
-    ensureDefaultModels();
+    if (canEdit.value) ensureDefaultModels();
     syncAssetNodePreviews();
     dirty.value = false;
     void restoreLatestPlan(requestedProjectId, generation);
@@ -680,6 +736,7 @@ async function initialize() {
 }
 
 function startDrag(type: string, event: MouseEvent) {
+  if (!canEdit.value) return;
   const template = CREATIVE_NODE_CATALOG.find((item) => item.type === type);
   if (template && adapter.value?.startDrag(template, event) === false) {
     message.warning(
@@ -691,6 +748,7 @@ function startDrag(type: string, event: MouseEvent) {
 }
 
 function addNode(type: string) {
+  if (!canEdit.value) return;
   if (!adapter.value?.addNode(type, { x: 180, y: 160 })) {
     message.warning(
       type === 'content-planner'
@@ -727,8 +785,8 @@ function updateQuickConnectPosition() {
 }
 
 function openQuickConnect(request: WorkbenchBlankConnectionRequest) {
+  if (!canEdit.value) return;
   adapter.value?.clearSelection();
-  inlineEditorPosition.visible = false;
   quickConnectSearch.value = '';
   quickConnectRequest.value = request;
   void nextTick(() => {
@@ -743,6 +801,7 @@ function closeQuickConnect() {
 }
 
 function createQuickConnectedNode(option: CreativeQuickConnectOption) {
+  if (!canEdit.value) return;
   const request = quickConnectRequest.value;
   const graphAdapter = adapter.value;
   if (!request || !graphAdapter) return;
@@ -772,6 +831,7 @@ function updateSelected(patch: {
   config?: Record<string, unknown>;
   name?: string;
 }) {
+  if (!canEdit.value) return;
   if (!selectedNode.value) return;
   adapter.value?.updateNode(selectedNode.value.id, patch);
   selectedNode.value = {
@@ -782,6 +842,7 @@ function updateSelected(patch: {
 }
 
 function setConfig(key: string, value: unknown) {
+  if (!canEdit.value) return;
   const userOverrides = new Set(
     Array.isArray(selectedConfig.value.userOverrides)
       ? selectedConfig.value.userOverrides.map(String)
@@ -800,6 +861,7 @@ function setConfig(key: string, value: unknown) {
 }
 
 function setNodeName(value?: string) {
+  if (!canEdit.value) return;
   const normalized = value?.trim() || selectedNode.value?.id || '未命名节点';
   setConfig('name', normalized);
   updateSelected({ name: normalized });
@@ -962,41 +1024,7 @@ function syncPlannerControls(node?: FdmCreativeApi.WorkflowNode) {
   if (typeof videoCount === 'number') planner.videoCount = videoCount;
 }
 
-function updateInlineEditorPosition() {
-  const graphAdapter = adapter.value;
-  const shell = canvasShellRef.value;
-  if (!graphAdapter || !shell || !selectedNode.value) {
-    inlineEditorPosition.visible = false;
-    return;
-  }
-  const shellRect = shell.getBoundingClientRect();
-  const canvasRect = graphAdapter.getCanvasClientRect();
-  const editorHeight =
-    inlineEditorRef.value?.getBoundingClientRect().height || 320;
-  const position = calculateInlineEditorPosition({
-    canvasRect,
-    editorHeight,
-    obstacleRects: taskQueueRef.value
-      ? [taskQueueRef.value.getBoundingClientRect()]
-      : [],
-    preferredWidth: 700,
-  });
-  Object.assign(inlineEditorPosition, position, {
-    left: position.left + canvasRect.left - shellRect.left,
-    top: position.top + canvasRect.top - shellRect.top,
-  });
-}
-
-function scheduleInlineEditorPosition() {
-  if (inlineEditorFrame !== undefined) return;
-  inlineEditorFrame = requestAnimationFrame(() => {
-    inlineEditorFrame = undefined;
-    updateInlineEditorPosition();
-  });
-}
-
 function closeInlineEditor() {
-  inlineEditorPosition.visible = false;
   selectedNode.value = undefined;
   adapter.value?.clearSelection();
 }
@@ -1018,7 +1046,6 @@ function handleInlineConfigChange(key: string, value: unknown) {
       planner.videoCount = value;
     }
   }
-  void nextTick(scheduleInlineEditorPosition);
 }
 
 function handleInlineAssetChange(payload: { key: string; value: unknown }) {
@@ -1036,11 +1063,14 @@ function handleInlineAssetChange(payload: { key: string; value: unknown }) {
       payload.key,
     )
   ) {
-    const assetId = Array.isArray(payload.value)
-      ? payload.value.find((item): item is number => typeof item === 'number')
-      : typeof payload.value === 'number'
-        ? payload.value
-        : undefined;
+    let assetId: number | undefined;
+    if (Array.isArray(payload.value)) {
+      assetId = payload.value.find(
+        (item): item is number => typeof item === 'number',
+      );
+    } else if (typeof payload.value === 'number') {
+      assetId = payload.value;
+    }
     const asset = projectAssets.value.find((item) => item.id === assetId);
     if (asset) {
       adapter.value?.setNodeDisplayData(selectedNode.value.id, {
@@ -1082,7 +1112,13 @@ function handleWorkbenchKeydown(event: KeyboardEvent) {
 }
 
 async function saveDraft(showMessage = true) {
+  if (!canEdit.value) {
+    if (showMessage) message.warning('当前项目角色为只读，不能保存草稿');
+    return false;
+  }
   if (!adapter.value || saving.value) return false;
+  const targetProjectId = projectId.value;
+  const targetGeneration = initializationGeneration;
   saving.value = true;
   try {
     const definition = adapter.value.serializeDefinition();
@@ -1093,8 +1129,14 @@ async function saveDraft(showMessage = true) {
     const savedDraft = await saveWorkflowDraft({
       definition,
       expectedDraftVersion: draftVersion.value,
-      projectId: projectId.value,
+      projectId: targetProjectId,
     });
+    if (
+      targetProjectId !== projectId.value ||
+      targetGeneration !== initializationGeneration
+    ) {
+      return false;
+    }
     draftVersion.value = savedDraft.draftVersion;
     dirty.value = false;
     lastSavedAt.value = new Date();
@@ -1109,6 +1151,7 @@ async function saveDraft(showMessage = true) {
 }
 
 async function publish() {
+  if (!canEdit.value) return;
   if (dirty.value && !(await saveDraft(false))) return;
   publishing.value = true;
   try {
@@ -1123,6 +1166,7 @@ async function publish() {
 }
 
 async function previewPlan() {
+  if (!canEdit.value) return;
   if (!planner.prompt.trim()) {
     message.warning('请先输入完整创作需求');
     return;
@@ -1204,6 +1248,7 @@ function schedulePlanSync(
 }
 
 async function applyPlan() {
+  if (!canEdit.value) return;
   const preview = pendingPlan.value;
   if (!preview?.planRevisionId || !preview.plan) return;
   if (!ensurePlannerNode() || !ensurePlannerDefaultModel()) {
@@ -1245,6 +1290,7 @@ async function applyPlan() {
 }
 
 async function polishPrompt() {
+  if (!canEdit.value) return;
   if (!planner.prompt.trim()) {
     message.warning('请先输入需要润色的创作需求');
     return;
@@ -1311,18 +1357,36 @@ function executionProgress(execution?: FdmCreativeApi.Execution) {
 }
 
 async function run(scope: FdmCreativeApi.ExecutionScope, startNodeId?: string) {
-  if (!ensureDefaultModels()) {
+  const targetProjectId = projectId.value;
+  const targetGeneration = initializationGeneration;
+  if (!canRun.value) {
+    message.warning('当前项目角色没有运行权限');
+    return;
+  }
+  if (canEdit.value && !ensureDefaultModels()) {
     message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
     return;
   }
   if (dirty.value && !(await saveDraft(false))) return;
+  if (
+    targetProjectId !== projectId.value ||
+    targetGeneration !== initializationGeneration
+  ) {
+    return;
+  }
   const id = await runCreativeWorkflow({
     expectedDraftVersion: draftVersion.value,
-    projectId: projectId.value,
+    projectId: targetProjectId,
     scope,
     startNodeId,
   });
-  await monitorExecution(id, projectId.value);
+  if (
+    targetProjectId !== projectId.value ||
+    targetGeneration !== initializationGeneration
+  ) {
+    return;
+  }
+  await monitorExecution(id, targetProjectId);
 }
 
 async function monitorExecution(id: number, targetProjectId = projectId.value) {
@@ -1331,25 +1395,61 @@ async function monitorExecution(id: number, targetProjectId = projectId.value) {
   if (targetProjectId !== projectId.value) return;
   runningExecution.value = execution;
   mergeLatestNodeRuns(execution);
-  void nextTick(scheduleInlineEditorPosition);
-  for (const node of execution.nodeRuns ?? []) {
+  for (const node of aggregateLoopNodeRuns(execution.nodeRuns ?? [])) {
     adapter.value?.setNodeStatus(node.nodeId, node.status);
   }
   syncExecutionNodePreviews();
   if (['CANCEL_REQUESTED', 'CREATED', 'RUNNING'].includes(execution.status)) {
+    if (executionTimer) clearTimeout(executionTimer);
     executionTimer = setTimeout(
-      () => void monitorExecution(id, targetProjectId),
-      2500,
+      () => refreshExecutionInBackground(id, targetProjectId),
+      15_000,
     );
   } else {
     await refreshProjectAssets(targetProjectId);
   }
 }
 
+function refreshExecutionInBackground(
+  id: number,
+  targetProjectId = projectId.value,
+) {
+  void monitorExecution(id, targetProjectId).catch(() => {
+    if (targetProjectId !== projectId.value || activeExecutionId.value !== id) {
+      return;
+    }
+    if (executionTimer) clearTimeout(executionTimer);
+    executionTimer = setTimeout(
+      () => refreshExecutionInBackground(id, targetProjectId),
+      15_000,
+    );
+  });
+}
+
+function scheduleExecutionRefresh(delay = 160) {
+  const execution = runningExecution.value;
+  if (!execution || execution.id !== activeExecutionId.value) return;
+  if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
+  const targetProjectId = projectId.value;
+  executionEventRefreshTimer = setTimeout(() => {
+    executionEventRefreshTimer = undefined;
+    refreshExecutionInBackground(execution.id, targetProjectId);
+  }, delay);
+}
+
 async function cancelRun() {
-  if (!runningExecution.value) return;
-  await cancelCreativeExecution(runningExecution.value.id);
-  await monitorExecution(runningExecution.value.id, projectId.value);
+  const executionId = runningExecution.value?.id;
+  if (!executionId || !canRun.value) return;
+  const targetProjectId = projectId.value;
+  const targetGeneration = initializationGeneration;
+  await cancelCreativeExecution(executionId);
+  if (
+    targetProjectId !== projectId.value ||
+    targetGeneration !== initializationGeneration
+  ) {
+    return;
+  }
+  await monitorExecution(executionId, targetProjectId);
 }
 
 function goBack() {
@@ -1374,24 +1474,6 @@ watch(
   () => route.params.projectId,
   () => void initialize(),
 );
-watch(
-  inlineEditorRef,
-  (element) => {
-    inlineEditorResizeObserver?.disconnect();
-    inlineEditorResizeObserver = undefined;
-    if (!element) return;
-    inlineEditorResizeObserver = new ResizeObserver(
-      scheduleInlineEditorPosition,
-    );
-    inlineEditorResizeObserver.observe(element);
-    scheduleInlineEditorPosition();
-  },
-  { flush: 'post' },
-);
-watch(taskQueueRef, () => void nextTick(scheduleInlineEditorPosition), {
-  flush: 'post',
-});
-
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('keydown', handleWorkbenchKeydown);
@@ -1408,9 +1490,8 @@ onBeforeUnmount(() => {
     handleQuickConnectPointerDown,
     true,
   );
-  inlineEditorResizeObserver?.disconnect();
-  if (inlineEditorFrame !== undefined) cancelAnimationFrame(inlineEditorFrame);
   if (executionTimer) clearTimeout(executionTimer);
+  if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
   if (planTimer) clearTimeout(planTimer);
   if (promptRefineTimer) clearTimeout(promptRefineTimer);
   adapter.value?.disposeWorkbenchGraph();
@@ -1419,130 +1500,35 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="workbench-editor">
-    <header class="topbar">
-      <div class="topbar__start">
-        <Tooltip title="返回项目列表">
-          <Button class="icon-button" type="text" @click="goBack">
-            <IconifyIcon icon="lucide:arrow-left" />
-          </Button>
-        </Tooltip>
-        <strong class="workbench-title">节点式视频图案工作台</strong>
-        <div class="project-name">
-          <span>{{ project?.name || '未命名项目' }}</span>
-          <IconifyIcon icon="lucide:pencil" />
-        </div>
-        <button
-          v-access:code="['fdmcreative:workflow:update']"
-          class="save-state"
-          :class="{ dirty }"
-          :disabled="saving"
-          :title="dirty ? '点击保存当前草稿' : '草稿已保存，点击可再次保存'"
-          type="button"
-          @click="saveDraft()"
-        >
-          <i></i>{{ saveStatus }}
-        </button>
-      </div>
-      <Space class="canvas-controls" :size="2">
-        <Tooltip title="撤销">
-          <Button class="icon-button" type="text" @click="adapter?.undo()">
-            <IconifyIcon icon="lucide:undo-2" />
-          </Button>
-        </Tooltip>
-        <Tooltip title="重做">
-          <Button class="icon-button" type="text" @click="adapter?.redo()">
-            <IconifyIcon icon="lucide:redo-2" />
-          </Button>
-        </Tooltip>
-        <Tooltip title="缩小">
-          <Button
-            class="icon-button"
-            type="text"
-            @click="adapter?.zoomBy(-0.1)"
-          >
-            <IconifyIcon icon="lucide:minus" />
-          </Button>
-        </Tooltip>
-        <span class="zoom-value">{{ zoomPercent }}%</span>
-        <Tooltip title="放大">
-          <Button class="icon-button" type="text" @click="adapter?.zoomBy(0.1)">
-            <IconifyIcon icon="lucide:plus" />
-          </Button>
-        </Tooltip>
-        <Tooltip title="适配画布">
-          <Button class="icon-button" type="text" @click="adapter?.fit()">
-            <IconifyIcon icon="lucide:scan" />
-          </Button>
-        </Tooltip>
-      </Space>
-      <Space>
-        <Button
-          v-access:code="['fdmcreative:execution:run']"
-          @click="run('FULL')"
-        >
-          <IconifyIcon icon="lucide:play" />
-          试运行
-        </Button>
-        <Button
-          v-access:code="['fdmcreative:workflow:publish']"
-          :loading="publishing"
-          type="primary"
-          @click="publish"
-        >
-          <IconifyIcon icon="lucide:workflow" />
-          发布任务
-          <IconifyIcon icon="lucide:chevron-down" />
-        </Button>
-      </Space>
-    </header>
+    <WorkbenchTopbar
+      :can-edit="canEdit"
+      :can-run="canRun"
+      :dirty="dirty"
+      :project-name="project?.name"
+      :publishing="publishing"
+      :role-label="currentUserRoleLabel"
+      :save-status="saveStatus"
+      :saving="saving"
+      :zoom-percent="zoomPercent"
+      @back="goBack"
+      @fit="adapter?.fit()"
+      @publish="publish"
+      @redo="adapter?.redo()"
+      @run="run('FULL')"
+      @save="saveDraft()"
+      @undo="adapter?.undo()"
+      @zoom-by="adapter?.zoomBy($event)"
+    />
 
-    <div class="editor-body">
-      <aside ref="nodeLibraryRef" class="node-library">
-        <div class="panel-title">
-          <strong>节点库</strong><IconifyIcon icon="lucide:panel-left-close" />
-        </div>
-        <Input
-          v-model:value="librarySearch"
-          allow-clear
-          placeholder="搜索节点"
-          size="small"
-        >
-          <template #prefix><IconifyIcon icon="lucide:search" /></template>
-        </Input>
-        <Collapse
-          :default-active-key="NODE_GROUPS.map((group) => group.key)"
-          ghost
-        >
-          <Collapse.Panel
-            v-for="group in filteredGroups"
-            :key="group.key"
-            :header="group.label"
-          >
-            <button
-              v-for="node in group.nodes"
-              :key="node.type"
-              class="library-node"
-              :style="{ '--accent': node.color }"
-              :title="node.description"
-              @dblclick="addNode(node.type)"
-              @mousedown="startDrag(node.type, $event)"
-            >
-              <span><IconifyIcon :icon="node.icon" /></span>
-              <strong>{{ node.label }}</strong>
-              <IconifyIcon
-                class="library-chevron"
-                icon="lucide:chevron-right"
-              />
-            </button>
-          </Collapse.Panel>
-        </Collapse>
-      </aside>
+    <div class="editor-body" :class="{ 'has-inspector': selectedNode }">
+      <NodeLibraryPanel
+        ref="nodeLibraryRef"
+        :readonly="!canEdit"
+        @node-add="addNode"
+        @node-drag-start="startDrag"
+      />
 
-      <main
-        ref="canvasShellRef"
-        class="canvas-shell"
-        :class="{ 'has-inline-editor': selectedNode }"
-      >
+      <main ref="canvasShellRef" class="canvas-shell">
         <Spin :spinning="loading" tip="正在加载画布…">
           <div ref="canvasRef" class="graph-canvas"></div>
         </Spin>
@@ -1633,42 +1619,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div
-          v-if="selectedNode"
-          ref="inlineEditorRef"
-          class="node-inline-editor-host"
-          :class="`node-inline-editor-host--${inlineEditorPlacement}`"
-          :style="inlineEditorStyle"
+        <section
+          v-if="!selectedNode && !quickConnectRequest && canEdit"
+          class="prompt-dock"
         >
-          <NodeInlineEditor
-            :busy="inlineEditorBusy"
-            :connected-references="connectedImageReferences"
-            :connected-prompt-input-count="connectedPromptInputCount"
-            :connected-text-sources="connectedTextSources"
-            :error-message="selectedResultNodeRun?.errorMessage"
-            :execution-status="runningExecution?.status"
-            :model-options="modelOptions"
-            :node="selectedNode"
-            :node-run="selectedResultNodeRun"
-            :placement="inlineEditorPlacement"
-            :progress="inlineEditorProgress"
-            :project-assets="projectAssets"
-            :result-assets="resultAssets"
-            :result-text="resultText"
-            :upload-accept="inputUploadAccept"
-            :upload-api="uploadInputAsset"
-            :upload-max-size="inputUploadMaxSize"
-            :width="inlineEditorPosition.width"
-            @asset-change="handleInlineAssetChange"
-            @close="closeInlineEditor"
-            @config-change="handleInlineConfigChange"
-            @name-change="setNodeName"
-            @run="handleInlineRun"
-            @run-downstream="handleInlineRunDownstream"
-          />
-        </div>
-
-        <section v-else-if="!quickConnectRequest" class="prompt-dock">
           <div class="prompt-input-row">
             <Tooltip title="AI 润色提示词">
               <Button
@@ -1730,31 +1684,43 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <button
-          v-if="runningExecution"
-          ref="taskQueueRef"
-          class="task-queue"
-          type="button"
-          @click="taskDrawerOpen = true"
-        >
-          <header>
-            <strong><IconifyIcon icon="lucide:list-checks" /> 任务队列</strong>
-            <span>{{ executionProgress(runningExecution) }}%</span>
-          </header>
-          <Progress
-            :percent="executionProgress(runningExecution)"
-            :show-info="false"
-            size="small"
-          />
-          <div
-            v-for="nodeRun in (runningExecution.nodeRuns || []).slice(0, 3)"
-            :key="nodeRun.id"
-          >
-            <span>{{ nodeRun.nodeType || nodeRun.nodeId }}</span>
-            <Tag>{{ nodeRun.status }}</Tag>
-          </div>
-        </button>
+        <ExecutionTaskPanel
+          :allow-cancel="canRun"
+          :execution="runningExecution"
+          :stream-state="executionStreamState"
+          @cancel="cancelRun"
+        />
       </main>
+
+      <aside v-if="selectedNode" class="inspector-panel">
+        <NodeInlineEditor
+          :busy="inlineEditorBusy"
+          :can-run="canRunSelectedNode"
+          :connected-references="connectedImageReferences"
+          :connected-prompt-input-count="connectedPromptInputCount"
+          :connected-text-sources="connectedTextSources"
+          :error-message="selectedResultNodeRun?.errorMessage"
+          :execution-status="runningExecution?.status"
+          :model-options="modelOptions"
+          :node="selectedNode"
+          :node-run="selectedResultNodeRun"
+          :progress="inlineEditorProgress"
+          :project-assets="projectAssets"
+          :readonly="!canEdit"
+          :result-assets="resultAssets"
+          :result-text="resultText"
+          :upload-accept="inputUploadAccept"
+          :upload-api="uploadInputAsset"
+          :upload-max-size="inputUploadMaxSize"
+          variant="panel"
+          @asset-change="handleInlineAssetChange"
+          @close="closeInlineEditor"
+          @config-change="handleInlineConfigChange"
+          @name-change="setNodeName"
+          @run="handleInlineRun"
+          @run-downstream="handleInlineRunDownstream"
+        />
+      </aside>
     </div>
 
     <Modal
@@ -1834,12 +1800,14 @@ onBeforeUnmount(() => {
               v-model:value="item.prompt"
               :auto-size="{ minRows: 3, maxRows: 7 }"
               class="plan-prompt"
+              :disabled="!canEdit"
               placeholder="正向提示词"
             />
             <Textarea
               v-model:value="item.negativePrompt"
               :auto-size="{ minRows: 2, maxRows: 4 }"
               class="plan-prompt"
+              :disabled="!canEdit"
               placeholder="负向提示词（可选）"
             />
             <small v-if="item.purpose">{{ item.purpose }}</small>
@@ -1849,6 +1817,7 @@ onBeforeUnmount(() => {
           <Button @click="planModalOpen = false">继续调整</Button>
           <Button
             v-access:code="['fdmcreative:plan:apply']"
+            :disabled="!canEdit"
             type="primary"
             @click="applyPlan"
           >
@@ -1857,36 +1826,6 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </Modal>
-
-    <Drawer v-model:open="taskDrawerOpen" title="当前任务" :width="440">
-      <template v-if="runningExecution">
-        <div class="task-heading">
-          <div>
-            <strong>#{{ runningExecution.id }}</strong>
-            <Tag>{{ runningExecution.status }}</Tag>
-          </div>
-          <Button
-            v-access:code="['fdmcreative:execution:cancel']"
-            v-if="['CREATED', 'RUNNING'].includes(runningExecution.status)"
-            danger
-            size="small"
-            @click="cancelRun"
-          >
-            取消运行
-          </Button>
-        </div>
-        <Progress :percent="executionProgress(runningExecution)" />
-        <div
-          v-for="node in runningExecution.nodeRuns"
-          :key="node.id"
-          class="task-node"
-        >
-          <span>{{ node.nodeType || node.nodeId }}</span>
-          <Tag>{{ node.status }}</Tag>
-        </div>
-      </template>
-      <Empty v-else description="当前没有运行任务" />
-    </Drawer>
   </div>
 </template>
 
@@ -1898,220 +1837,21 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: 60px minmax(0, 1fr);
   overflow: hidden;
-  color: #172033;
-  background: #f7f9fc;
-}
-
-.topbar {
-  z-index: 5;
-  display: grid;
-  grid-template-columns: minmax(500px, 1fr) auto minmax(420px, 1fr);
-  gap: 16px;
-  align-items: center;
-  padding: 0 20px;
-  background: #fff;
-  border-bottom: 1px solid #e5eaf1;
-  box-shadow: 0 2px 10px rgb(15 23 42 / 4%);
-}
-
-.topbar > :last-child {
-  justify-self: end;
-}
-
-.topbar__start,
-.project-name {
-  display: flex;
-  align-items: center;
-}
-
-.topbar__start {
-  gap: 10px;
-  min-width: 0;
-}
-
-.workbench-title {
-  flex: none;
-  font-size: 15px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.project-name {
-  gap: 8px;
-  min-width: 0;
-  height: 34px;
-  padding: 0 12px;
-  color: #334155;
-  background: #f8fafc;
-  border: 1px solid #e5eaf1;
-  border-radius: 9px;
-}
-
-.project-name span {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.project-name :deep(svg) {
-  width: 13px;
-  height: 13px;
-  color: #64748b;
-}
-
-.save-state {
-  display: inline-flex;
-  flex: none;
-  gap: 5px;
-  align-items: center;
-  padding: 4px 6px;
-  font-size: 10px;
-  color: #64748b;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-}
-
-.save-state:hover {
-  background: #f8fafc;
-}
-
-.save-state i {
-  width: 8px;
-  height: 8px;
-  background: #16a34a;
-  border-radius: 999px;
-}
-
-.save-state.dirty {
-  color: #d97706;
-}
-
-.save-state.dirty i {
-  background: #f59e0b;
-}
-
-.icon-button :deep(svg) {
-  width: 17px;
-  height: 17px;
-}
-
-.canvas-controls {
-  height: 36px;
-  padding: 0 4px;
-  background: #fff;
-  border: 1px solid #e5eaf1;
-  border-radius: 9px;
-  box-shadow: 0 2px 8px rgb(15 23 42 / 4%);
-}
-
-.zoom-value {
-  min-width: 44px;
-  font-size: 11px;
-  color: #475569;
-  text-align: center;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
 }
 
 .editor-body {
   display: grid;
   grid-template-columns: clamp(196px, 11.6vw, 222px) minmax(0, 1fr);
   min-height: 0;
+  transition: grid-template-columns 160ms ease;
 }
 
-.node-library {
-  z-index: 3;
-  min-height: 0;
-  padding: 14px 12px;
-  overflow: auto;
-  background: rgb(255 255 255 / 97%);
-  border-right: 1px solid #e5eaf1;
-}
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 28px;
-  margin-bottom: 8px;
-}
-
-.panel-title strong {
-  font-size: 14px;
-}
-
-.panel-title > :last-child:not(strong) {
-  width: 14px;
-  height: 14px;
-  color: #94a3b8;
-}
-
-.property-title {
-  margin-bottom: 0;
-}
-
-.node-library :deep(.ant-collapse-header) {
-  min-height: 32px;
-  padding: 7px 0 !important;
-  font-size: 12px;
-  font-weight: 600;
-  color: #526074 !important;
-}
-
-.node-library :deep(.ant-collapse-content-box) {
-  padding: 0 0 6px !important;
-}
-
-.library-node {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-  min-height: 40px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  text-align: left;
-  cursor: grab;
-  background: #fff;
-  border: 1px solid #e5eaf1;
-  border-left: 2px solid var(--accent);
-  border-radius: 7px;
-  transition: 0.16s ease;
-}
-
-.library-node:hover {
-  border-color: #bdd1f5;
-  box-shadow: 0 3px 10px rgb(37 99 235 / 8%);
-  transform: translateY(-1px);
-}
-
-.library-node > span {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, white);
-  border-radius: 6px;
-}
-
-.library-node strong {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.library-chevron {
-  flex: none;
-  width: 13px;
-  height: 13px;
-  color: #94a3b8;
+.editor-body.has-inspector {
+  grid-template-columns:
+    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
+    clamp(440px, 28vw, 540px);
 }
 
 .minimap-wrap {
@@ -2121,10 +1861,10 @@ onBeforeUnmount(() => {
   z-index: 7;
   width: 176px;
   padding: 7px;
-  background: rgb(255 255 255 / 94%);
-  border: 1px solid #dce5f1;
+  background: hsl(var(--card) / 94%);
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 10%);
   backdrop-filter: blur(12px);
 }
 
@@ -2132,8 +1872,8 @@ onBeforeUnmount(() => {
   width: 160px;
   height: 116px;
   overflow: hidden;
-  background: #f8fafc;
-  border: 1px solid #e5eaf1;
+  background: hsl(var(--muted) / 38%);
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
 }
 
@@ -2144,7 +1884,7 @@ onBeforeUnmount(() => {
   height: 28px;
   margin-top: 4px;
   font-size: 10px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .minimap-controls :deep(.ant-btn) {
@@ -2158,6 +1898,17 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: hsl(var(--muted) / 20%);
+}
+
+.inspector-panel {
+  z-index: 4;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--card));
+  border-left: 1px solid hsl(var(--border));
+  box-shadow: -8px 0 24px hsl(var(--foreground) / 4%);
 }
 
 .canvas-shell :deep(.ant-spin-nested-loading),
@@ -2174,6 +1925,17 @@ onBeforeUnmount(() => {
   min-height: 0 !important;
   margin: 0;
   overflow: hidden;
+}
+
+.graph-canvas :deep(.x6-node.x6-available-node .creative-node) {
+  border-color: #4f7cff;
+  box-shadow:
+    0 0 0 3px rgb(79 124 255 / 16%),
+    0 8px 22px rgb(37 99 235 / 14%);
+}
+
+.graph-canvas :deep(.x6-available-magnet) {
+  stroke-width: 3;
 }
 
 .graph-canvas :deep(.x6-widget-selection-box) {
@@ -2193,12 +1955,13 @@ onBeforeUnmount(() => {
   max-height: calc(100% - 24px);
   padding: 12px;
   overflow: hidden;
-  background: rgb(255 255 255 / 98%);
-  border: 1px solid #dfe6f1;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card) / 98%);
+  border: 1px solid hsl(var(--border));
   border-radius: 14px;
   box-shadow:
-    0 20px 48px rgb(15 23 42 / 18%),
-    0 3px 10px rgb(15 23 42 / 8%);
+    0 20px 48px hsl(var(--foreground) / 18%),
+    0 3px 10px hsl(var(--foreground) / 8%);
   backdrop-filter: blur(18px);
   transform-origin: top left;
   animation: quick-connect-enter 140ms ease-out;
@@ -2222,13 +1985,13 @@ onBeforeUnmount(() => {
 .quick-connect-menu__header strong {
   font-size: 14px;
   line-height: 22px;
-  color: #172033;
+  color: hsl(var(--foreground));
 }
 
 .quick-connect-menu__header span {
   font-size: 11px;
   line-height: 18px;
-  color: #8995a8;
+  color: hsl(var(--muted-foreground));
 }
 
 .quick-connect-menu__close {
@@ -2236,15 +1999,15 @@ onBeforeUnmount(() => {
   width: 26px;
   height: 26px;
   padding: 0;
-  color: #7a879a;
+  color: hsl(var(--muted-foreground));
 }
 
 .quick-connect-menu__search {
   height: 36px;
   margin-bottom: 8px;
   font-size: 12px;
-  background: #f8fafc;
-  border-color: #e4eaf2;
+  background: hsl(var(--muted) / 38%);
+  border-color: hsl(var(--border));
   border-radius: 9px;
 }
 
@@ -2254,7 +2017,7 @@ onBeforeUnmount(() => {
 }
 
 .quick-connect-menu__search :deep(.ant-input-prefix) {
-  color: #98a4b5;
+  color: hsl(var(--muted-foreground));
 }
 
 .quick-connect-menu__list {
@@ -2276,7 +2039,7 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 58px;
   padding: 8px;
-  color: #334155;
+  color: hsl(var(--foreground) / 86%);
   text-align: left;
   cursor: pointer;
   background: transparent;
@@ -2291,8 +2054,8 @@ onBeforeUnmount(() => {
 .quick-connect-option:hover,
 .quick-connect-option:focus-visible {
   outline: none;
-  background: color-mix(in srgb, var(--node-accent) 7%, white);
-  border-color: color-mix(in srgb, var(--node-accent) 24%, #e5eaf1);
+  background: color-mix(in srgb, var(--node-accent) 7%, hsl(var(--card)));
+  border-color: color-mix(in srgb, var(--node-accent) 24%, hsl(var(--border)));
   transform: translateX(1px);
 }
 
@@ -2302,7 +2065,7 @@ onBeforeUnmount(() => {
   width: 36px;
   height: 36px;
   color: var(--node-accent);
-  background: color-mix(in srgb, var(--node-accent) 11%, white);
+  background: color-mix(in srgb, var(--node-accent) 11%, hsl(var(--card)));
   border-radius: 9px;
 }
 
@@ -2321,7 +2084,7 @@ onBeforeUnmount(() => {
 .quick-connect-option__content strong {
   font-size: 12px;
   line-height: 18px;
-  color: #243047;
+  color: hsl(var(--foreground) / 90%);
 }
 
 .quick-connect-option__content small {
@@ -2329,7 +2092,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   font-size: 10px;
   line-height: 16px;
-  color: #8b97aa;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -2338,7 +2101,7 @@ onBeforeUnmount(() => {
   gap: 3px;
   align-items: center;
   font-size: 10px;
-  color: #7b88a0;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -2352,7 +2115,7 @@ onBeforeUnmount(() => {
 
 .quick-connect-menu__empty :deep(.ant-empty-description) {
   font-size: 11px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 @keyframes quick-connect-enter {
@@ -2367,152 +2130,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.node-inline-editor-host {
-  position: absolute;
-  z-index: 20;
-  max-width: calc(100% - 32px);
-  pointer-events: none;
-  filter: none;
-  transform-origin: center top;
-  animation: inline-editor-enter 150ms ease-out;
-}
-
-.node-inline-editor-host--above {
-  transform-origin: center bottom;
-}
-
-.node-inline-editor-host > * {
-  pointer-events: auto;
-}
-
-@keyframes inline-editor-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.selected-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px;
-  margin-bottom: 14px;
-  background: #f8fafc;
-  border: 1px solid #e8eef6;
-  border-radius: 9px;
-}
-
-.selected-heading > div {
-  display: flex;
-  flex-direction: column;
-}
-
-.selected-heading span {
-  font-size: 9px;
-  color: #94a3b8;
-}
-
-.selected-heading strong {
-  font-size: 13px;
-}
-
-.input-asset-upload {
-  display: block;
-  margin-top: 8px;
-}
-
-.run-summary {
-  padding: 12px;
-  background: #f8fafc;
-  border-radius: 9px;
-}
-
-.result-heading,
-.result-meta > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.result-heading {
-  margin-bottom: 10px;
-}
-
-.result-heading > div,
-.result-meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.result-heading span,
-.result-meta > span {
-  font-size: 10px;
-  color: #94a3b8;
-}
-
-.result-list {
-  display: grid;
-  gap: 10px;
-}
-
-.result-card {
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid #e5eaf1;
-  border-radius: 10px;
-}
-
-.result-preview {
-  display: grid;
-  place-items: center;
-  min-height: 120px;
-  overflow: hidden;
-  background: #0f172a;
-}
-
-.result-preview :deep(.ant-image),
-.result-preview :deep(.ant-image-img),
-.result-preview video {
-  display: block;
-  width: 100%;
-  max-height: 220px;
-  object-fit: contain;
-}
-
-.result-meta {
-  gap: 4px;
-  padding: 9px;
-}
-
-.result-meta > strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.node-run,
-.task-node,
-.task-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 0;
-  border-bottom: 1px solid #edf1f6;
-}
-
-.task-heading {
-  padding-top: 0;
-  margin-bottom: 14px;
-}
-
 .prompt-dock {
   position: absolute;
   bottom: 22px;
@@ -2524,10 +2141,10 @@ onBeforeUnmount(() => {
   width: min(700px, calc(100% - 400px));
   min-width: 540px;
   padding: 9px 10px 8px;
-  background: rgb(255 255 255 / 96%);
-  border: 1px solid #dce5f1;
+  background: hsl(var(--card) / 96%);
+  border: 1px solid hsl(var(--border));
   border-radius: 16px;
-  box-shadow: 0 14px 36px rgb(15 23 42 / 14%);
+  box-shadow: 0 14px 36px hsl(var(--foreground) / 14%);
   backdrop-filter: blur(16px);
   transform: translateX(-50%);
 }
@@ -2553,8 +2170,8 @@ onBeforeUnmount(() => {
   flex: none;
   width: 36px;
   height: 36px;
-  color: #7c3aed;
-  background: #f3efff;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
 }
 
 .prompt-ai :deep(svg) {
@@ -2586,58 +2203,13 @@ onBeforeUnmount(() => {
   gap: 5px;
   align-items: center;
   font-size: 10px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .plan-button {
   flex: none;
   width: 38px;
   height: 38px;
-}
-
-.task-queue {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 7;
-  width: 320px;
-  padding: 10px 12px;
-  text-align: left;
-  cursor: pointer;
-  background: rgb(255 255 255 / 96%);
-  border: 1px solid #dce5f1;
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgb(15 23 42 / 12%);
-  backdrop-filter: blur(14px);
-}
-
-.task-queue header,
-.task-queue > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.task-queue header {
-  margin-bottom: 6px;
-  font-size: 11px;
-}
-
-.task-queue header strong {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-}
-
-.task-queue header span {
-  color: #1677ff;
-}
-
-.task-queue > div {
-  min-height: 27px;
-  font-size: 9px;
-  color: #64748b;
-  border-top: 1px solid #f0f3f7;
 }
 
 .plan-summary {
@@ -2649,8 +2221,8 @@ onBeforeUnmount(() => {
 .plan-summary span {
   padding: 5px 9px;
   font-size: 12px;
-  color: #475569;
-  background: #f1f5f9;
+  color: hsl(var(--foreground) / 78%);
+  background: hsl(var(--muted) / 48%);
   border-radius: 7px;
 }
 
@@ -2664,8 +2236,8 @@ onBeforeUnmount(() => {
 
 .plan-items article {
   padding: 12px;
-  background: #fbfdff;
-  border: 1px solid #e5ebf3;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 10px;
 }
 
@@ -2678,14 +2250,14 @@ onBeforeUnmount(() => {
 .plan-items header span:last-child {
   margin-left: auto;
   font-size: 11px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .plan-items p {
   margin: 8px 0 4px;
   font-size: 12px;
   line-height: 19px;
-  color: #334155;
+  color: hsl(var(--foreground) / 86%);
 }
 
 .plan-diff {
@@ -2701,7 +2273,7 @@ onBeforeUnmount(() => {
 }
 
 .plan-items small {
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .plan-actions {
@@ -2712,16 +2284,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1500px) {
-  .topbar {
-    grid-template-columns: minmax(390px, 1fr) auto minmax(380px, 1fr);
-  }
-
   .prompt-dock {
     width: min(700px, calc(100% - 360px));
-  }
-
-  .canvas-shell.has-inline-editor .task-queue {
-    width: 240px;
   }
 }
 
@@ -2730,14 +2294,8 @@ onBeforeUnmount(() => {
     grid-template-columns: 190px minmax(0, 1fr);
   }
 
-  .topbar {
-    grid-template-columns: minmax(260px, 1fr) auto minmax(330px, 1fr);
-    padding: 0 10px;
-  }
-
-  .save-state,
-  .topbar__start .project-name {
-    display: none;
+  .editor-body.has-inspector {
+    grid-template-columns: 190px minmax(0, 1fr) 400px;
   }
 
   .prompt-dock {

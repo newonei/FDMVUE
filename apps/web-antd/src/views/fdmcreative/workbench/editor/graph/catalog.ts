@@ -75,6 +75,23 @@ export function normalizeCreativeNodePorts(
     .map((port) => ({ ...port }));
   return [...restoredCanonicalPorts, ...unknownPorts];
 }
+
+/** Migrates edge endpoints whose legacy node used the same id for input and output. */
+export function normalizeCreativeWorkflowEdges(
+  nodes: FdmCreativeApi.WorkflowNode[],
+  edges: FdmCreativeApi.WorkflowEdge[],
+) {
+  const nodeTypes = new Map(nodes.map((node) => [node.id, node.type]));
+  return edges.map((edge) => ({
+    ...edge,
+    sourcePortId:
+      nodeTypes.get(edge.sourceNodeId) === 'image-collection' &&
+      edge.sourcePortId === 'images'
+        ? 'ordered-images'
+        : edge.sourcePortId,
+  }));
+}
+
 const COMPOSE_NODE_TYPES = new Set([
   'asset-library-output',
   'output',
@@ -179,6 +196,36 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     type: 'prompt-input',
   },
   {
+    color: '#6d28d9',
+    defaultConfig: {
+      language: 'ZH_CN',
+      prompts: '',
+      targetType: 'GENERAL',
+    },
+    description: '从多行候选或多个上游提示词中随机选择一个，每次执行重新抽取',
+    icon: 'lucide:shuffle',
+    label: '随机提示词',
+    ports: [input('prompts', 'prompt-text'), output('prompt', 'prompt-text')],
+    type: 'random-prompt',
+  },
+  {
+    color: '#6d28d9',
+    defaultConfig: {
+      language: 'ZH_CN',
+      prompt: '{{input}}',
+      targetType: 'GENERAL',
+    },
+    description: '在本地合并上游提示词和创作需求，不调用模型',
+    icon: 'lucide:braces',
+    label: '提示词模板',
+    ports: [
+      input('input', 'prompt-text'),
+      input('brief', 'creative-brief'),
+      output('prompt', 'prompt-text'),
+    ],
+    type: 'prompt-template',
+  },
+  {
     color: '#7c3aed',
     defaultConfig: {
       language: 'ZH_CN',
@@ -193,7 +240,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     ports: [
       input('brief', 'creative-brief'),
       input('context', 'prompt-text'),
-      input('reference', 'image-asset'),
+      input('reference', 'image-list'),
       output('prompt', 'prompt-text'),
     ],
     type: 'prompt-generator',
@@ -228,6 +275,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     ports: [
       input('item', 'image-plan-item'),
       input('prompt', 'prompt-text'),
+      input('reference', 'image-list'),
       output('asset', 'image-asset'),
     ],
     type: 'image-generate',
@@ -240,7 +288,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     ports: [
       input('item', 'image-plan-item'),
       input('prompt', 'prompt-text'),
-      input('reference', 'image-asset', true),
+      input('reference', 'image-list', true),
       output('asset', 'image-asset'),
     ],
     type: 'image-to-image',
@@ -390,9 +438,77 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     label: '图片集合',
     ports: [
       input('images', 'image-list', true),
-      output('images', 'image-list'),
+      output('ordered-images', 'image-list'),
     ],
     type: 'image-collection',
+  },
+  {
+    color: '#475569',
+    defaultConfig: { index: 1, mode: 'FIRST' },
+    description: '从图片集合中按首张、末张或序号选出一张图片',
+    icon: 'lucide:mouse-pointer-2',
+    label: '图片选择',
+    ports: [
+      input('images', 'image-list', true),
+      output('image', 'image-asset'),
+    ],
+    type: 'image-select',
+  },
+  {
+    color: '#44403c',
+    defaultConfig: { index: 1, mode: 'FIRST' },
+    description: '从视频集合中按首个、末个或序号选出一个视频',
+    icon: 'lucide:mouse-pointer-2',
+    label: '视频选择',
+    ports: [
+      input('videos', 'video-list', true),
+      output('video', 'video-asset'),
+    ],
+    type: 'video-select',
+  },
+  {
+    color: '#d97706',
+    defaultConfig: {
+      batchSize: 1,
+      count: 4,
+      language: 'ZH_CN',
+      promptTemplate: '{{input}}\n{{brief}}\n{{item}}',
+      startIndex: 1,
+      variations: '',
+    },
+    description: '按轮次切换变化提示词和图片，串行重复运行整个下游分支',
+    icon: 'lucide:repeat-2',
+    label: '图片循环',
+    ports: [
+      input('prompt', 'prompt-text'),
+      input('brief', 'creative-brief'),
+      input('images', 'image-list'),
+      output('result-prompt', 'prompt-text'),
+      output('selected-images', 'image-list'),
+    ],
+    type: 'image-loop',
+  },
+  {
+    color: '#b45309',
+    defaultConfig: {
+      batchSize: 1,
+      count: 4,
+      language: 'ZH_CN',
+      promptTemplate: '{{input}}\n{{brief}}\n{{item}}',
+      startIndex: 1,
+      variations: '',
+    },
+    description: '按轮次切换变化提示词和视频，串行重复运行整个下游分支',
+    icon: 'lucide:refresh-cw',
+    label: '视频循环',
+    ports: [
+      input('prompt', 'prompt-text'),
+      input('brief', 'creative-brief'),
+      input('videos', 'video-list'),
+      output('result-prompt', 'prompt-text'),
+      output('selected-videos', 'video-list'),
+    ],
+    type: 'video-loop',
   },
   {
     color: '#57534e',
@@ -463,8 +579,8 @@ export function normalizeCreativeNodeConfig(
   config: Record<string, unknown> | undefined,
 ) {
   return {
-    ...(CREATIVE_NODE_MAP.get(type)?.defaultConfig ?? {}),
-    ...(config ?? {}),
+    ...CREATIVE_NODE_MAP.get(type)?.defaultConfig,
+    ...config,
   };
 }
 
@@ -478,7 +594,7 @@ export function getQuickConnectOptions(
           port.direction === 'INPUT' &&
           isPortTypeCompatible(sourceType, port.type),
       )
-      .sort((left, right) => {
+      .toSorted((left, right) => {
         const leftExact = left.type === sourceType ? 1 : 0;
         const rightExact = right.type === sourceType ? 1 : 0;
         if (leftExact !== rightExact) return rightExact - leftExact;
@@ -497,7 +613,17 @@ export const NODE_GROUPS = [
   {
     key: 'llm',
     label: '提示词与 LLM',
-    types: ['prompt-input', 'prompt-generator'],
+    types: [
+      'prompt-input',
+      'random-prompt',
+      'prompt-template',
+      'prompt-generator',
+    ],
+  },
+  {
+    key: 'flow',
+    label: '流程控制与批处理',
+    types: ['image-loop', 'video-loop', 'image-select', 'video-select'],
   },
   {
     key: 'plan',

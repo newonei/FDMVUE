@@ -1,3 +1,5 @@
+import type { Edge, Node } from '@antv/x6';
+
 import type {
   CreativeNodeTemplate,
   CreativeQuickConnectOption,
@@ -26,9 +28,11 @@ import {
   getCreativeNodeVisual,
   normalizeCreativeNodeConfig,
   normalizeCreativeNodePorts,
+  normalizeCreativeWorkflowEdges,
 } from './catalog';
 import {
   EMPTY_WORKFLOW,
+  findAutoConnectTargetPort,
   isEditableTarget,
   validateWorkflowConnection,
 } from './workflow-utils';
@@ -218,6 +222,7 @@ export interface WorkbenchGraphElements {
   container: HTMLElement;
   dndContainer?: HTMLElement;
   minimapContainer: HTMLElement;
+  readonly?: boolean;
 }
 
 export class WorkbenchGraphAdapter {
@@ -225,6 +230,11 @@ export class WorkbenchGraphAdapter {
   private readonly callbacks: WorkbenchGraphCallbacks;
   private readonly connectingEdgeIds = new Set<string>();
   private readonly dnd: Dnd;
+  private readonly pendingNodeTargetPorts = new Map<
+    string,
+    Map<string, string>
+  >();
+  private readonly readOnly: boolean;
   private readonly scroller: Scroller;
   private suppressChange = false;
   private viewportFrame?: number;
@@ -235,16 +245,21 @@ export class WorkbenchGraphAdapter {
   ) {
     registerWorkbenchShapes();
     this.callbacks = callbacks;
+    this.readOnly = elements.readonly === true;
+    const borderToken = getComputedStyle(elements.container)
+      .getPropertyValue('--border')
+      .trim();
     this.graph = new Graph({
       autoResize: true,
-      background: { color: '#f8fafc' },
+      background: { color: 'transparent' },
       connecting: {
         allowBlank: ({ edge }) =>
+          !this.readOnly &&
           Boolean(edge && this.connectingEdgeIds.has(edge.id)),
         allowEdge: false,
         allowLoop: false,
-        allowNode: false,
-        allowPort: true,
+        allowNode: ({ type }) => !this.readOnly && type === 'target',
+        allowPort: !this.readOnly,
         createEdge: () => {
           const edge = new Shape.Edge({
             attrs: {
@@ -262,37 +277,73 @@ export class WorkbenchGraphAdapter {
           return edge;
         },
         highlight: true,
-        snap: { radius: 28 },
+        snap: false,
         validateConnection: ({
+          edge,
           sourceCell,
           sourcePort,
           targetCell,
           targetPort,
+          type,
         }) => {
-          if (
-            !sourceCell?.isNode() ||
-            !targetCell?.isNode() ||
-            !sourcePort ||
-            !targetPort
-          ) {
+          if (this.readOnly) return false;
+          if (!sourceCell?.isNode() || !targetCell?.isNode() || !sourcePort) {
             return false;
           }
+          const definition = this.connectionDefinition(edge?.id);
+          let resolvedTargetPort = targetPort ?? undefined;
+          if (!resolvedTargetPort) {
+            if (type !== 'target' || !edge) return false;
+            resolvedTargetPort = findAutoConnectTargetPort({
+              definition,
+              preferredTargetPortIds: this.preferredInputPortIds(
+                targetCell,
+                edge.getTargetPoint(),
+              ),
+              sourceNodeId: sourceCell.id,
+              sourcePortId: sourcePort,
+              targetNodeId: targetCell.id,
+            });
+            if (!resolvedTargetPort) return false;
+            const targetPorts =
+              this.pendingNodeTargetPorts.get(edge.id) ?? new Map();
+            targetPorts.set(targetCell.id, resolvedTargetPort);
+            this.pendingNodeTargetPorts.set(edge.id, targetPorts);
+          }
           return validateWorkflowConnection({
-            definition: this.serializeDefinition(),
+            definition,
             sourceNodeId: sourceCell.id,
             sourcePortId: sourcePort,
             targetNodeId: targetCell.id,
-            targetPortId: targetPort,
+            targetPortId: resolvedTargetPort,
           });
         },
         validateEdge: ({ edge, type }) => {
+          if (this.readOnly) return false;
           // Existing edges may be reconnected to another valid port, but
           // neither terminal is ever allowed to remain on blank canvas.
-          if (type !== 'target') return Boolean(edge.getSourceCellId());
-          if (edge.getTargetCellId()) {
+          if (type !== 'target') {
+            this.pendingNodeTargetPorts.delete(edge.id);
+            return Boolean(edge.getSourceCellId());
+          }
+          const targetNodeId = edge.getTargetCellId();
+          if (targetNodeId) {
+            if (!edge.getTargetPortId()) {
+              const targetPortId = this.resolvePendingTargetPort(edge);
+              if (!targetPortId) {
+                this.pendingNodeTargetPorts.delete(edge.id);
+                return false;
+              }
+              edge.setTarget(
+                { cell: targetNodeId, port: targetPortId },
+                { ui: true },
+              );
+            }
+            this.pendingNodeTargetPorts.delete(edge.id);
             this.connectingEdgeIds.delete(edge.id);
             return true;
           }
+          this.pendingNodeTargetPorts.delete(edge.id);
           if (!this.connectingEdgeIds.has(edge.id)) return false;
           const sourceNodeId = edge.getSourceCellId();
           const sourcePortId = edge.getSourcePortId();
@@ -323,12 +374,20 @@ export class WorkbenchGraphAdapter {
       },
       container: elements.container,
       grid: {
-        args: { color: '#d7e0ed', thickness: 1 },
+        args: {
+          color: borderToken ? `hsl(${borderToken})` : '#d7e0ed',
+          thickness: 1,
+        },
         size: 16,
         type: 'dot',
         visible: true,
       },
-      interacting: { edgeLabelMovable: false },
+      interacting: {
+        edgeLabelMovable: false,
+        edgeMovable: !this.readOnly,
+        magnetConnectable: !this.readOnly,
+        nodeMovable: !this.readOnly,
+      },
       mousewheel: {
         enabled: true,
         global: false,
@@ -388,6 +447,7 @@ export class WorkbenchGraphAdapter {
     request: WorkbenchBlankConnectionRequest,
     selectedOption: CreativeQuickConnectOption,
   ) {
+    if (this.readOnly) return undefined;
     const option = this.getQuickConnectOptions(
       request.sourceNodeId,
       request.sourcePortId,
@@ -441,6 +501,7 @@ export class WorkbenchGraphAdapter {
   }
 
   addNode(type: string, position?: { x: number; y: number }) {
+    if (this.readOnly) return undefined;
     const template = CREATIVE_NODE_MAP.get(type);
     if (
       !template ||
@@ -458,6 +519,7 @@ export class WorkbenchGraphAdapter {
   }
 
   applyPlanAsBatch(plan: FdmCreativeApi.ContentPlan) {
+    if (this.readOnly) return;
     const videoItems = plan.items.filter((item) => item.kind === 'VIDEO');
     const needsVideoCompose = videoItems.length > 0;
     const desiredItemIds = new Set(plan.items.map((item) => item.itemId));
@@ -759,6 +821,7 @@ export class WorkbenchGraphAdapter {
   }
 
   getQuickConnectOptions(sourceNodeId: string, sourcePortId: string) {
+    if (this.readOnly) return [];
     if (this.graph.getNodes().length >= MAX_WORKBENCH_NODES) return [];
     const sourceNode = this.workflowNodeFromCell(sourceNodeId);
     const sourcePort = sourceNode?.ports.find(
@@ -774,7 +837,7 @@ export class WorkbenchGraphAdapter {
   }
 
   redo() {
-    if (this.graph.canRedo()) this.graph.redo();
+    if (!this.readOnly && this.graph.canRedo()) this.graph.redo();
   }
 
   restoreDefinition(
@@ -785,7 +848,11 @@ export class WorkbenchGraphAdapter {
     this.graph.batchUpdate('restore-workflow', () => {
       this.graph.clearCells();
       this.graph.addNodes(definition.nodes.map(toX6Node));
-      this.graph.addEdges(definition.edges.map(toX6Edge));
+      this.graph.addEdges(
+        normalizeCreativeWorkflowEdges(definition.nodes, definition.edges).map(
+          (edge) => toX6Edge(edge),
+        ),
+      );
       this.graph.zoomTo(definition.viewport.zoom || 1);
       this.graph.translate(
         definition.viewport.x || 0,
@@ -867,6 +934,7 @@ export class WorkbenchGraphAdapter {
   }
 
   startDrag(template: CreativeNodeTemplate, event: MouseEvent) {
+    if (this.readOnly) return false;
     if (
       this.graph.getNodes().length >= MAX_WORKBENCH_NODES ||
       (template.type === 'content-planner' &&
@@ -883,13 +951,14 @@ export class WorkbenchGraphAdapter {
   }
 
   undo() {
-    if (this.graph.canUndo()) this.graph.undo();
+    if (!this.readOnly && this.graph.canUndo()) this.graph.undo();
   }
 
   updateNode(
     id: string,
     patch: { config?: Record<string, unknown>; name?: string },
   ) {
+    if (this.readOnly) return;
     const node = this.graph.getCellById(id);
     if (!node?.isNode()) return;
     node.setData({ ...node.getData(), ...patch });
@@ -954,17 +1023,25 @@ export class WorkbenchGraphAdapter {
 
   private bindShortcuts() {
     this.graph.bindKey(['backspace', 'delete'], (event) => {
-      if (isEditableTarget(event.target)) return;
+      if (this.readOnly || isEditableTarget(event.target)) return;
       const cells = this.graph.getSelectedCells();
       if (cells.length > 0) this.graph.removeCells(cells);
     });
     this.graph.bindKey(['ctrl+z', 'meta+z'], (event) => {
-      if (!isEditableTarget(event.target) && this.graph.canUndo()) {
+      if (
+        !this.readOnly &&
+        !isEditableTarget(event.target) &&
+        this.graph.canUndo()
+      ) {
         this.graph.undo();
       }
     });
     this.graph.bindKey(['ctrl+shift+z', 'meta+shift+z'], (event) => {
-      if (!isEditableTarget(event.target) && this.graph.canRedo()) {
+      if (
+        !this.readOnly &&
+        !isEditableTarget(event.target) &&
+        this.graph.canRedo()
+      ) {
         this.graph.redo();
       }
     });
@@ -974,8 +1051,19 @@ export class WorkbenchGraphAdapter {
       }
     });
     this.graph.bindKey(['ctrl+v', 'meta+v'], (event) => {
-      if (!isEditableTarget(event.target)) this.graph.paste({ offset: 28 });
+      if (!this.readOnly && !isEditableTarget(event.target)) {
+        this.graph.paste({ offset: 28 });
+      }
     });
+  }
+
+  private connectionDefinition(edgeId?: string) {
+    const definition = this.serializeDefinition();
+    if (!edgeId) return definition;
+    return {
+      ...definition,
+      edges: definition.edges.filter((edge) => edge.id !== edgeId),
+    };
   }
 
   private createClientRect(
@@ -1003,6 +1091,63 @@ export class WorkbenchGraphAdapter {
     y: number;
   }): WorkbenchClientRect {
     return this.createClientRect(rect.x, rect.y, rect.width, rect.height);
+  }
+
+  private preferredInputPortIds(targetCell: Node, point: WorkbenchPoint) {
+    const targetNode = this.workflowNodeFromCell(targetCell.id);
+    const inputPorts =
+      targetNode?.ports.filter((port) => port.direction === 'INPUT') ?? [];
+    const layouts = targetCell.getPortsPosition('input');
+    const origin = targetCell.getBBox().getOrigin();
+    return inputPorts
+      .map((port, index) => {
+        const position = layouts[port.id]?.position;
+        return {
+          distance: position
+            ? Math.hypot(
+                origin.x + position.x - point.x,
+                origin.y + position.y - point.y,
+              )
+            : Number.MAX_SAFE_INTEGER,
+          index,
+          portId: port.id,
+        };
+      })
+      .toSorted(
+        (left, right) =>
+          left.distance - right.distance || left.index - right.index,
+      )
+      .map((item) => item.portId);
+  }
+
+  private resolvePendingTargetPort(edge: Edge) {
+    const sourceNodeId = edge.getSourceCellId();
+    const sourcePortId = edge.getSourcePortId();
+    const targetNodeId = edge.getTargetCellId();
+    if (!sourceNodeId || !sourcePortId || !targetNodeId) return undefined;
+
+    const definition = this.connectionDefinition(edge.id);
+    const rememberedPortId = this.pendingNodeTargetPorts
+      .get(edge.id)
+      ?.get(targetNodeId);
+    if (
+      rememberedPortId &&
+      validateWorkflowConnection({
+        definition,
+        sourceNodeId,
+        sourcePortId,
+        targetNodeId,
+        targetPortId: rememberedPortId,
+      })
+    ) {
+      return rememberedPortId;
+    }
+    return findAutoConnectTargetPort({
+      definition,
+      sourceNodeId,
+      sourcePortId,
+      targetNodeId,
+    });
   }
 
   private readonly scheduleViewportChange = () => {

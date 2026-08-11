@@ -47,6 +47,7 @@ export namespace FdmCreativeApi {
     createTime?: string;
     creator?: string;
     currentRevisionId?: number;
+    currentUserRole: ProjectMemberRole;
     description?: string;
     draftVersion: number;
     id: number;

@@ -40,6 +40,7 @@ import {
 import { nodeRunStatusLabel } from '../node-run-status';
 
 type InlineEditorPlacement = 'above' | 'below';
+type InlineEditorVariant = 'floating' | 'panel';
 type SchemaScalar = number | string;
 
 interface SchemaField {
@@ -71,6 +72,7 @@ interface ConnectedTextSource {
 
 interface Props {
   busy?: boolean;
+  canRun?: boolean;
   connectedReferences?: ConnectedImageReference[];
   connectedPromptInputCount?: number;
   connectedTextSources?: ConnectedTextSource[];
@@ -88,11 +90,13 @@ interface Props {
   uploadAccept?: string[];
   uploadApi?: FileUploadProps['api'];
   uploadMaxSize?: number;
+  variant?: InlineEditorVariant;
   width?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   busy: false,
+  canRun: true,
   connectedReferences: () => [],
   connectedPromptInputCount: 0,
   connectedTextSources: () => [],
@@ -109,6 +113,7 @@ const props = withDefaults(defineProps<Props>(), {
   uploadAccept: () => [],
   uploadApi: undefined,
   uploadMaxSize: undefined,
+  variant: 'floating',
   width: 700,
 });
 
@@ -165,6 +170,8 @@ const COMPOSE_TYPES = new Set([
   'video-compose',
   'video-timeline',
 ]);
+const LOOP_TYPES = new Set(['image-loop', 'video-loop']);
+const MEDIA_SELECTOR_TYPES = new Set(['image-select', 'video-select']);
 const ASPECT_RATIO_OPTIONS = ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'].map(
   (value) => ({ label: value, value }),
 );
@@ -259,6 +266,8 @@ const isPromptGenerator = computed(
   () => props.node.type === 'prompt-generator',
 );
 const isPromptInput = computed(() => props.node.type === 'prompt-input');
+const isRandomPrompt = computed(() => props.node.type === 'random-prompt');
+const isPromptTemplate = computed(() => props.node.type === 'prompt-template');
 const isPlanItem = computed(() =>
   ['image-plan-item', 'video-plan-item'].includes(props.node.type),
 );
@@ -269,6 +278,16 @@ const isImageNode = computed(
 );
 const isVideoNode = computed(() => VIDEO_TYPES.has(props.node.type));
 const isComposeNode = computed(() => COMPOSE_TYPES.has(props.node.type));
+const isLoop = computed(() => LOOP_TYPES.has(props.node.type));
+const isMediaSelector = computed(() =>
+  MEDIA_SELECTOR_TYPES.has(props.node.type),
+);
+const configuredRandomPromptCount = computed(
+  () =>
+    asString(config.value.prompts)
+      .split(/\r?\n/)
+      .filter((item) => Boolean(item.trim())).length,
+);
 const isAiNode = computed(
   () =>
     isPlanner.value ||
@@ -295,6 +314,7 @@ const supportsPrompt = computed(() =>
     'image-to-video',
     'prompt-generator',
     'prompt-input',
+    'prompt-template',
     'video-generate',
     'video-plan-item',
   ].includes(props.node.type),
@@ -310,7 +330,7 @@ const supportsReferences = computed(
 
 const editorStyle = computed(() => ({
   '--editor-accent': template.value?.color ?? '#6d5dfc',
-  width: `${props.width}px`,
+  width: props.variant === 'panel' ? '100%' : `${props.width}px`,
 }));
 
 const effectiveStatus = computed(
@@ -549,7 +569,7 @@ const promptReferenceError = computed(() => {
     : undefined;
 });
 const promptTemplateError = computed(() => {
-  if (!isPromptGenerator.value) return undefined;
+  if (!isPromptGenerator.value && !isPromptTemplate.value) return undefined;
   const prompt = asString(config.value.prompt);
   const variablePattern = /\{\{([^{}]+)\}\}/g;
   const variables = [...prompt.matchAll(variablePattern)].map((match) =>
@@ -707,13 +727,13 @@ function commitNameEvent(event: Event) {
 }
 
 function runNode() {
-  if (!props.readonly && !isRunning.value && !nodeValidationError.value) {
+  if (props.canRun && !isRunning.value && !nodeValidationError.value) {
     emit('run', props.node.id);
   }
 }
 
 function runDownstream() {
-  if (!props.readonly && !isRunning.value && !nodeValidationError.value) {
+  if (props.canRun && !isRunning.value && !nodeValidationError.value) {
     emit('runDownstream', props.node.id);
   }
 }
@@ -721,6 +741,7 @@ function runDownstream() {
 function promptLabel() {
   if (isPlanner.value) return '创作总提示词';
   if (isPromptGenerator.value) return '提示词生成要求';
+  if (isPromptTemplate.value) return '提示词模板';
   if (props.node.type === 'video-plan-item') return '片段脚本';
   if (props.node.type === 'image-plan-item') return '图片提示词';
   if (isVideoNode.value) return '视频提示词';
@@ -732,6 +753,8 @@ function promptPlaceholder() {
   if (isPlanner.value) return '描述创作目标、商品卖点、受众与整体视觉风格…';
   if (isPromptGenerator.value)
     return '例如：把 {{input}} 扩写为可直接用于图片模型的专业提示词，并保持主体和风格一致…';
+  if (isPromptTemplate.value)
+    return '例如：{{brief}}\n{{input}}；未写变量时会自动追加上游文本…';
   if (isVideoNode.value) return '描述主体动作、场景变化、镜头运动与画面连续性…';
   if (isImageNode.value) return '描述主体、场景、构图、光线、材质和画面风格…';
   return '输入该节点需要处理的内容…';
@@ -842,6 +865,7 @@ function handleEditorEscape() {
     class="node-inline-editor"
     :class="[
       `node-inline-editor--${placement}`,
+      `node-inline-editor--${variant}`,
       { 'is-expanded': expanded, 'is-readonly': readonly },
     ]"
     :data-node-id="node.id"
@@ -935,7 +959,9 @@ function handleEditorEscape() {
             {{ isAssetInput ? '素材' : hasFrameSlots ? '参考帧' : '参考素材' }}
           </strong>
           <span v-if="isPlanner">用于保持角色、商品和视觉风格一致</span>
-          <span v-else-if="!isAssetInput">可选，模型能力不支持时会在执行前提示</span>
+          <span v-else-if="!isAssetInput">
+            可选，模型能力不支持时会在执行前提示
+          </span>
         </div>
 
         <div v-if="isAssetInput" class="single-asset-row">
@@ -1124,7 +1150,10 @@ function handleEditorEscape() {
           <IconifyIcon icon="lucide:at-sign" />
           输入 @ 可引用已连接图片，例如“将 @图片1 的图案替换为 @图片2”。
         </div>
-        <div v-if="isPromptGenerator" class="prompt-template-tip">
+        <div
+          v-if="isPromptGenerator || isPromptTemplate"
+          class="prompt-template-tip"
+        >
           <IconifyIcon icon="lucide:braces" />
           <span>
             可用 <code v-text="'{{input}}'"></code>、<code
@@ -1134,7 +1163,10 @@ function handleEditorEscape() {
             <code v-text="'{{brief}}'"></code>；未写变量时，上游文本会自动附加。
           </span>
         </div>
-        <div v-if="isPromptGenerator" class="template-variable-row">
+        <div
+          v-if="isPromptGenerator || isPromptTemplate"
+          class="template-variable-row"
+        >
           <span>插入变量</span>
           <button type="button" @click="appendPromptVariable('input')">
             input · 首选输入
@@ -1147,7 +1179,10 @@ function handleEditorEscape() {
           </button>
         </div>
         <div
-          v-if="isPromptGenerator && connectedTextSources.length"
+          v-if="
+            (isPromptGenerator || isPromptTemplate) &&
+            connectedTextSources.length
+          "
           class="connected-text-sources"
         >
           <article v-for="source in connectedTextSources" :key="source.id">
@@ -1181,7 +1216,9 @@ function handleEditorEscape() {
           class="prompt-template-tip prompt-template-tip--connected"
         >
           <IconifyIcon icon="lucide:link-2" />
-          <span>执行时使用上游生成的提示词，本地提示词仅作为未连接时的备用值。</span>
+          <span>
+            执行时使用上游生成的提示词，本地提示词仅作为未连接时的备用值。
+          </span>
         </div>
         <div v-if="promptReferenceError" class="prompt-reference-error">
           <IconifyIcon icon="lucide:circle-alert" />
@@ -1210,6 +1247,113 @@ function handleEditorEscape() {
           :value="asString(config.negativePrompt)"
           @change="emitConfig('negativePrompt', $event.target.value)"
         />
+      </section>
+
+      <section
+        v-if="isRandomPrompt"
+        class="editor-section random-prompt-section"
+      >
+        <div class="section-heading">
+          <strong>候选提示词</strong>
+          <span>每行一个，每次执行都会重新随机抽取</span>
+        </div>
+        <Textarea
+          :auto-size="{ minRows: 5, maxRows: expanded ? 14 : 8 }"
+          :disabled="readonly"
+          :maxlength="10_000"
+          placeholder="产品正面特写，柔和棚拍光线&#10;产品侧面特写，突出材质纹理&#10;产品俯拍构图，简洁背景"
+          :value="asString(config.prompts)"
+          @change="emitConfig('prompts', $event.target.value)"
+        />
+        <div class="prompt-template-tip">
+          <IconifyIcon icon="lucide:shuffle" />
+          <span>
+            当前 {{ configuredRandomPromptCount }} 条手动候选
+            <span v-if="connectedTextSources.length">
+              ，另有 {{ connectedTextSources.length }} 个已连接上游候选
+            </span>
+            。重复内容会自动去重。
+          </span>
+        </div>
+      </section>
+
+      <section v-if="isLoop" class="editor-section loop-section">
+        <div class="section-heading">
+          <strong>批次循环设置</strong>
+          <span>每轮完成整个下游分支后，再开始下一轮</span>
+        </div>
+        <div class="loop-setting-grid">
+          <label>
+            <span>循环次数</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="20"
+              :min="1"
+              :precision="0"
+              :value="asNumber(config.count) ?? 4"
+              @change="emitConfig('count', $event)"
+            />
+          </label>
+          <label>
+            <span>起始序号</span>
+            <InputNumber
+              :disabled="readonly"
+              :min="1"
+              :precision="0"
+              :value="asNumber(config.startIndex) ?? 1"
+              @change="emitConfig('startIndex', $event)"
+            />
+          </label>
+          <label>
+            <span>每轮素材数</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="20"
+              :min="1"
+              :precision="0"
+              :value="asNumber(config.batchSize) ?? 1"
+              @change="emitConfig('batchSize', $event)"
+            />
+          </label>
+        </div>
+        <div class="loop-variation-field">
+          <div class="section-heading">
+            <strong>变化项</strong>
+            <span>每行一项；不足时会从第一项循环使用</span>
+          </div>
+          <Textarea
+            :auto-size="{ minRows: 4, maxRows: expanded ? 10 : 6 }"
+            :disabled="readonly"
+            placeholder="正面视角&#10;侧面视角&#10;俯拍视角"
+            :value="asString(config.variations)"
+            @change="emitConfig('variations', $event.target.value)"
+          />
+        </div>
+        <div class="prompt-template-tip">
+          <IconifyIcon icon="lucide:braces" />
+          <span>
+            模板支持
+            <code v-text="'{{input}}'"></code>、
+            <code v-text="'{{brief}}'"></code>、
+            <code v-text="'{{item}}'"></code>、
+            <code v-text="'{{index}}'"></code>
+            和 <code v-text="'{{total}}'"></code>。
+          </span>
+        </div>
+        <div v-if="expanded" class="loop-variation-field">
+          <div class="section-heading">
+            <strong>循环提示词模板</strong>
+            <span>控制上游文本、变化项和轮次变量的组合方式</span>
+          </div>
+          <Textarea
+            :auto-size="{ minRows: 3, maxRows: 8 }"
+            :disabled="readonly"
+            :value="
+              asString(config.promptTemplate, '{{input}}\n{{brief}}\n{{item}}')
+            "
+            @change="emitConfig('promptTemplate', $event.target.value)"
+          />
+        </div>
       </section>
 
       <section v-if="isComposeNode" class="editor-section compose-section">
@@ -1422,7 +1566,14 @@ function handleEditorEscape() {
         />
       </template>
 
-      <template v-else-if="isPromptGenerator || isPromptInput">
+      <template
+        v-else-if="
+          isPromptGenerator ||
+          isPromptInput ||
+          isRandomPrompt ||
+          isPromptTemplate
+        "
+      >
         <Select
           class="toolbar-control toolbar-control--wide"
           :disabled="readonly"
@@ -1436,6 +1587,35 @@ function handleEditorEscape() {
           :options="PROMPT_LANGUAGE_OPTIONS"
           :value="asString(config.language, 'ZH_CN')"
           @change="emitConfig('language', $event)"
+        />
+      </template>
+
+      <template v-else-if="isLoop">
+        <Tag color="orange"> 串行 {{ asNumber(config.count) ?? 4 }} 轮 </Tag>
+        <Tag> 每轮 {{ asNumber(config.batchSize) ?? 1 }} 个素材 </Tag>
+      </template>
+
+      <template v-else-if="isMediaSelector">
+        <Select
+          class="toolbar-control toolbar-control--wide"
+          :disabled="readonly"
+          :options="[
+            { label: '选择第一个', value: 'FIRST' },
+            { label: '选择最后一个', value: 'LAST' },
+            { label: '按序号选择', value: 'INDEX' },
+          ]"
+          :value="asString(config.mode, 'FIRST')"
+          @change="emitConfig('mode', $event)"
+        />
+        <InputNumber
+          v-if="asString(config.mode, 'FIRST') === 'INDEX'"
+          addon-before="序号"
+          class="toolbar-number"
+          :disabled="readonly"
+          :min="1"
+          :precision="0"
+          :value="asNumber(config.index) ?? 1"
+          @change="emitConfig('index', $event)"
         />
       </template>
 
@@ -1676,7 +1856,7 @@ function handleEditorEscape() {
 
       <div class="toolbar-spacer"></div>
       <Button
-        v-if="!readonly && expanded"
+        v-if="canRun && expanded"
         class="downstream-button"
         :disabled="isRunning || Boolean(nodeValidationError)"
         @click="runDownstream"
@@ -1689,7 +1869,7 @@ function handleEditorEscape() {
         "
       >
         <Button
-          v-if="!readonly"
+          v-if="canRun"
           class="run-button"
           :disabled="isRunning || Boolean(nodeValidationError)"
           :loading="isRunning"
@@ -1715,13 +1895,13 @@ function handleEditorEscape() {
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 132px);
   overflow: visible;
-  color: #172033;
-  background: rgb(255 255 255 / 99%);
-  border: 1px solid #cbd8eb;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card) / 99%);
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   box-shadow:
-    0 18px 45px rgb(26 50 84 / 14%),
-    0 3px 10px rgb(26 50 84 / 8%);
+    0 18px 45px hsl(var(--foreground) / 14%),
+    0 3px 10px hsl(var(--foreground) / 8%);
   transition: width 180ms ease;
 }
 
@@ -1739,24 +1919,56 @@ function handleEditorEscape() {
   transform: translateX(-50%);
 }
 
+.node-inline-editor--panel {
+  width: 100% !important;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.node-inline-editor--panel::before,
+.node-inline-editor--panel::after {
+  display: none;
+}
+
+.node-inline-editor--panel .editor-content,
+.node-inline-editor--panel.is-expanded .editor-content {
+  max-height: none;
+  overflow: hidden auto;
+}
+
+.node-inline-editor--panel .editor-section {
+  min-width: 0;
+}
+
+.node-inline-editor--panel .editor-toolbar {
+  flex-wrap: wrap;
+  align-content: center;
+  overflow-x: hidden;
+}
+
 .node-inline-editor--below::before {
   top: -10px;
-  border-bottom: 10px solid #cbd8eb;
+  border-bottom: 10px solid hsl(var(--border));
 }
 
 .node-inline-editor--below::after {
   top: -8px;
-  border-bottom: 9px solid white;
+  border-bottom: 9px solid hsl(var(--card));
 }
 
 .node-inline-editor--above::before {
   bottom: -10px;
-  border-top: 10px solid #cbd8eb;
+  border-top: 10px solid hsl(var(--border));
 }
 
 .node-inline-editor--above::after {
   bottom: -8px;
-  border-top: 9px solid white;
+  border-top: 9px solid hsl(var(--card));
 }
 
 .editor-header {
@@ -1765,7 +1977,7 @@ function handleEditorEscape() {
   align-items: center;
   height: 46px;
   padding: 0 12px;
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid hsl(var(--border) / 72%);
 }
 
 .editor-node-icon {
@@ -1793,7 +2005,7 @@ function handleEditorEscape() {
   align-items: center;
   min-width: 0;
   padding: 0;
-  color: #172033;
+  color: hsl(var(--foreground));
   cursor: text;
   background: transparent;
   border: 0;
@@ -1811,7 +2023,7 @@ function handleEditorEscape() {
   flex: none;
   width: 12px;
   height: 12px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .node-name-input {
@@ -1838,7 +2050,7 @@ function handleEditorEscape() {
   width: 28px;
   height: 28px;
   padding: 0;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .header-action :deep(svg) {
@@ -1882,7 +2094,7 @@ function handleEditorEscape() {
 
 .editor-section {
   padding: 12px 14px;
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid hsl(var(--border) / 72%);
 }
 
 .section-heading {
@@ -1897,7 +2109,7 @@ function handleEditorEscape() {
   flex: none;
   font-size: 12px;
   font-weight: 650;
-  color: #26344b;
+  color: hsl(var(--foreground) / 88%);
 }
 
 .section-heading span {
@@ -1905,7 +2117,7 @@ function handleEditorEscape() {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
-  color: #9aa6b6;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -1924,8 +2136,8 @@ function handleEditorEscape() {
   width: 122px;
   height: 90px;
   overflow: hidden;
-  background: #f5f7fb;
-  border: 1px solid #e5eaf2;
+  background: hsl(var(--muted) / 42%);
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 8px;
 }
 
@@ -1945,7 +2157,7 @@ function handleEditorEscape() {
   width: 100%;
   height: 100%;
   font-size: 10px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .asset-empty :deep(svg) {
@@ -1971,7 +2183,7 @@ function handleEditorEscape() {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 11px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -1991,7 +2203,11 @@ function handleEditorEscape() {
 }
 
 .reference-card--connected .reference-image {
-  border-color: color-mix(in srgb, var(--editor-accent) 42%, #e3e8f1);
+  border-color: color-mix(
+    in srgb,
+    var(--editor-accent) 42%,
+    hsl(var(--border))
+  );
 }
 
 .reference-image {
@@ -2001,9 +2217,9 @@ function handleEditorEscape() {
   width: 92px;
   height: 64px;
   overflow: hidden;
-  color: #a6b1c1;
-  background: #f3f6fa;
-  border: 1px solid #e3e8f1;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 48%);
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 7px;
 }
 
@@ -2066,7 +2282,7 @@ function handleEditorEscape() {
 
 .reference-card > span {
   font-size: 9px;
-  color: #a0aaba;
+  color: hsl(var(--muted-foreground));
 }
 
 .reference-origin {
@@ -2095,8 +2311,8 @@ function handleEditorEscape() {
   width: 92px;
   height: 64px !important;
   padding: 0 8px !important;
-  color: #64748b;
-  background: #fafbfc !important;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 28%) !important;
   border-style: dashed !important;
 }
 
@@ -2136,9 +2352,9 @@ function handleEditorEscape() {
   width: 96px;
   height: 66px;
   overflow: hidden;
-  color: #9aa6b6;
-  background: #f5f7fa;
-  border: 1px solid #e2e8f0;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 42%);
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 7px;
 }
 
@@ -2167,8 +2383,8 @@ function handleEditorEscape() {
   padding: 8px 10px;
   font-size: 10px;
   line-height: 16px;
-  color: #718096;
-  background: #f8fafc;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 34%);
   border-radius: 7px;
 }
 
@@ -2177,7 +2393,7 @@ function handleEditorEscape() {
 }
 
 .prompt-field :deep(.ant-mentions) {
-  border-color: #cbd8eb;
+  border-color: hsl(var(--border));
   border-radius: 8px;
 }
 
@@ -2222,7 +2438,7 @@ function handleEditorEscape() {
 }
 
 .prompt-reference-tip {
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .prompt-reference-error {
@@ -2231,23 +2447,24 @@ function handleEditorEscape() {
 
 .prompt-template-tip {
   padding: 6px 8px;
-  color: #65518f;
-  background: #faf7ff;
-  border: 1px solid #eee6ff;
+  color: color-mix(in srgb, var(--editor-accent) 58%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--editor-accent) 6%, hsl(var(--card)));
+  border: 1px solid
+    color-mix(in srgb, var(--editor-accent) 18%, hsl(var(--border)));
   border-radius: 7px;
 }
 
 .prompt-template-tip--connected {
-  color: #166534;
-  background: #f2fbf5;
-  border-color: #d8f1df;
+  color: color-mix(in srgb, #16a34a 68%, hsl(var(--foreground)));
+  background: color-mix(in srgb, #16a34a 8%, hsl(var(--card)));
+  border-color: color-mix(in srgb, #16a34a 20%, hsl(var(--border)));
 }
 
 .prompt-template-tip code {
   padding: 1px 4px;
   font-size: 10px;
-  color: #6d28d9;
-  background: #f1eaff;
+  color: color-mix(in srgb, var(--editor-accent) 78%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--editor-accent) 12%, hsl(var(--card)));
   border-radius: 3px;
 }
 
@@ -2262,7 +2479,7 @@ function handleEditorEscape() {
 .template-variable-row > span {
   margin-right: 2px;
   font-size: 10px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .template-variable-row button {
@@ -2270,16 +2487,21 @@ function handleEditorEscape() {
   font-family: inherit;
   font-size: 9px;
   line-height: 17px;
-  color: #6d28d9;
+  color: color-mix(in srgb, var(--editor-accent) 78%, hsl(var(--foreground)));
   cursor: pointer;
-  background: #f7f3ff;
-  border: 1px solid #e8ddff;
+  background: color-mix(in srgb, var(--editor-accent) 8%, hsl(var(--card)));
+  border: 1px solid
+    color-mix(in srgb, var(--editor-accent) 20%, hsl(var(--border)));
   border-radius: 999px;
 }
 
 .template-variable-row button:hover {
-  background: #efe7ff;
-  border-color: #d9c6ff;
+  background: color-mix(in srgb, var(--editor-accent) 14%, hsl(var(--card)));
+  border-color: color-mix(
+    in srgb,
+    var(--editor-accent) 32%,
+    hsl(var(--border))
+  );
 }
 
 .connected-text-sources {
@@ -2295,8 +2517,8 @@ function handleEditorEscape() {
   align-items: center;
   min-width: 0;
   padding: 6px 7px;
-  background: #fbfcfe;
-  border: 1px solid #e6ebf3;
+  background: hsl(var(--muted) / 28%);
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 7px;
 }
 
@@ -2306,8 +2528,8 @@ function handleEditorEscape() {
   place-items: center;
   width: 23px;
   height: 23px;
-  color: #7c3aed;
-  background: #f2ecff;
+  color: color-mix(in srgb, var(--editor-accent) 78%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--editor-accent) 12%, hsl(var(--card)));
   border-radius: 6px;
 }
 
@@ -2326,12 +2548,12 @@ function handleEditorEscape() {
 
 .connected-text-sources strong {
   font-size: 10px;
-  color: #344258;
+  color: hsl(var(--foreground) / 86%);
 }
 
 .connected-text-sources small {
   font-size: 9px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .connected-text-sources :deep(.ant-tag) {
@@ -2360,17 +2582,17 @@ function handleEditorEscape() {
   padding: 0 8px;
   margin-top: 7px;
   font-size: 11px;
-  color: #526178;
+  color: hsl(var(--foreground) / 78%);
   cursor: pointer;
-  background: #fafbfc;
-  border: 1px solid #e5eaf1;
+  background: hsl(var(--muted) / 28%);
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 7px;
 }
 
 .fold-row > span {
   margin-left: auto;
   font-size: 10px;
-  color: #8b5cf6;
+  color: var(--editor-accent);
 }
 
 .negative-prompt {
@@ -2391,13 +2613,13 @@ function handleEditorEscape() {
   align-items: baseline;
   font-size: 12px;
   font-weight: 600;
-  color: #344258;
+  color: hsl(var(--foreground) / 86%);
 }
 
 .system-prompt-field small {
   font-size: 10px;
   font-weight: 400;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .system-prompt-field :deep(textarea) {
@@ -2405,13 +2627,39 @@ function handleEditorEscape() {
   line-height: 18px;
 }
 
+.loop-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.loop-setting-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.loop-setting-grid :deep(.ant-input-number) {
+  width: 100%;
+}
+
+.loop-variation-field {
+  margin-top: 12px;
+}
+
 .compose-summary {
   display: flex;
   gap: 10px;
   align-items: center;
   padding: 10px;
-  background: linear-gradient(135deg, #f6fbff, #f8f7ff);
-  border: 1px solid #e5ecf5;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--editor-accent) 5%, hsl(var(--card))),
+    hsl(var(--muted) / 28%)
+  );
+  border: 1px solid hsl(var(--border) / 72%);
   border-radius: 8px;
 }
 
@@ -2433,7 +2681,7 @@ function handleEditorEscape() {
 .compose-summary p {
   margin: 3px 0 0;
   font-size: 11px;
-  color: #7a8799;
+  color: hsl(var(--muted-foreground));
 }
 
 .execution-error {
@@ -2444,16 +2692,16 @@ function handleEditorEscape() {
   margin: 10px 14px 0;
   font-size: 11px;
   line-height: 17px;
-  color: #b42318;
-  background: #fff1f0;
-  border: 1px solid #ffccc7;
+  color: color-mix(in srgb, #ef4444 76%, hsl(var(--foreground)));
+  background: color-mix(in srgb, #ef4444 9%, hsl(var(--card)));
+  border: 1px solid color-mix(in srgb, #ef4444 28%, hsl(var(--border)));
   border-radius: 7px;
 }
 
 .validation-error {
-  color: #92400e;
-  background: #fffaf0;
-  border-color: #fde3b4;
+  color: color-mix(in srgb, #f59e0b 72%, hsl(var(--foreground)));
+  background: color-mix(in srgb, #f59e0b 9%, hsl(var(--card)));
+  border-color: color-mix(in srgb, #f59e0b 28%, hsl(var(--border)));
 }
 
 .execution-error :deep(svg) {
@@ -2473,8 +2721,8 @@ function handleEditorEscape() {
   height: 62px;
   overflow: hidden;
   color: white;
-  background: #e9eef5;
-  border: 1px solid #dbe4ee;
+  background: hsl(var(--muted) / 52%);
+  border: 1px solid hsl(var(--border));
   border-radius: 7px;
 }
 
@@ -2512,8 +2760,13 @@ function handleEditorEscape() {
 .text-result {
   max-height: 180px;
   overflow: auto;
-  background: linear-gradient(145deg, #fbf9ff, #f7f9fc);
-  border: 1px solid #e6defa;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--editor-accent) 5%, hsl(var(--card))),
+    hsl(var(--muted) / 28%)
+  );
+  border: 1px solid
+    color-mix(in srgb, var(--editor-accent) 18%, hsl(var(--border)));
   border-radius: 8px;
 }
 
@@ -2523,15 +2776,15 @@ function handleEditorEscape() {
   font-family: inherit;
   font-size: 11px;
   line-height: 19px;
-  color: #3f315e;
-  word-break: break-word;
+  color: hsl(var(--foreground) / 86%);
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .advanced-panel {
   padding: 12px 14px 14px;
-  background: #fbfcfe;
-  border-bottom: 1px solid #e9eef5;
+  background: hsl(var(--muted) / 24%);
+  border-bottom: 1px solid hsl(var(--border) / 72%);
 }
 
 .advanced-heading {
@@ -2553,7 +2806,7 @@ function handleEditorEscape() {
 
 .advanced-heading span {
   font-size: 10px;
-  color: #98a3b3;
+  color: hsl(var(--muted-foreground));
 }
 
 .schema-grid {
@@ -2575,7 +2828,7 @@ function handleEditorEscape() {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 10px;
-  color: #5e6a7d;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -2585,7 +2838,7 @@ function handleEditorEscape() {
 
 .schema-field > span :deep(svg) {
   flex: none;
-  color: #9ba7b7;
+  color: hsl(var(--muted-foreground));
 }
 
 .schema-field > :deep(.ant-input-number),
@@ -2600,8 +2853,8 @@ function handleEditorEscape() {
   justify-content: center;
   min-height: 48px;
   font-size: 11px;
-  color: #98a3b3;
-  border: 1px dashed #dce3ed;
+  color: hsl(var(--muted-foreground));
+  border: 1px dashed hsl(var(--border));
   border-radius: 7px;
 }
 
@@ -2614,7 +2867,7 @@ function handleEditorEscape() {
   padding: 9px 12px;
   overflow-x: auto;
   scrollbar-width: thin;
-  background: #fbfcfe;
+  background: hsl(var(--muted) / 24%);
   border-radius: 0 0 12px 12px;
 }
 

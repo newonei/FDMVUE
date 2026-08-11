@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createsCycle,
+  findAutoConnectTargetPort,
   isPortTypeCompatible,
   planSummary,
   validateWorkflowConnection,
@@ -165,10 +166,75 @@ describe('workflow graph rules', () => {
     ).toBe(false);
   });
 
+  it('resolves a node-body drop to the nearest compatible input port', () => {
+    const autoConnectDefinition: FdmCreativeApi.WorkflowDefinition = {
+      edges: [],
+      nodes: [
+        node('image-source', 'image-input', [
+          { direction: 'OUTPUT', id: 'asset', type: 'image-asset' },
+        ]),
+        node('video-target', 'first-last-frame-to-video', [
+          { direction: 'INPUT', id: 'first-frame', type: 'image-asset' },
+          { direction: 'INPUT', id: 'last-frame', type: 'image-asset' },
+          { direction: 'INPUT', id: 'prompt', type: 'prompt-text' },
+        ]),
+      ],
+      schemaVersion: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+
+    expect(
+      findAutoConnectTargetPort({
+        definition: autoConnectDefinition,
+        preferredTargetPortIds: ['last-frame', 'first-frame'],
+        sourceNodeId: 'image-source',
+        sourcePortId: 'asset',
+        targetNodeId: 'video-target',
+      }),
+    ).toBe('last-frame');
+  });
+
+  it('skips an occupied scalar port when auto-connecting to a node body', () => {
+    const autoConnectDefinition: FdmCreativeApi.WorkflowDefinition = {
+      edges: [
+        {
+          id: 'first-frame-edge',
+          sourceNodeId: 'image-a',
+          sourcePortId: 'asset',
+          targetNodeId: 'video-target',
+          targetPortId: 'first-frame',
+        },
+      ],
+      nodes: [
+        node('image-a', 'image-input', [
+          { direction: 'OUTPUT', id: 'asset', type: 'image-asset' },
+        ]),
+        node('image-b', 'image-input', [
+          { direction: 'OUTPUT', id: 'asset', type: 'image-asset' },
+        ]),
+        node('video-target', 'first-last-frame-to-video', [
+          { direction: 'INPUT', id: 'first-frame', type: 'image-asset' },
+          { direction: 'INPUT', id: 'last-frame', type: 'image-asset' },
+        ]),
+      ],
+      schemaVersion: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+
+    expect(
+      findAutoConnectTargetPort({
+        definition: autoConnectDefinition,
+        sourceNodeId: 'image-b',
+        sourcePortId: 'asset',
+        targetNodeId: 'video-target',
+      }),
+    ).toBe('last-frame');
+  });
+
   it('allows multiple prompt contexts and image references on a prompt generator', () => {
     const target = node('generator', 'prompt-generator', [
       { direction: 'INPUT', id: 'context', type: 'prompt-text' },
-      { direction: 'INPUT', id: 'reference', type: 'image-asset' },
+      { direction: 'INPUT', id: 'reference', type: 'image-list' },
     ]);
     const contextEdge: FdmCreativeApi.WorkflowEdge = {
       id: 'context-edge-a',
@@ -214,6 +280,56 @@ describe('workflow graph rules', () => {
         definition: referenceDefinition,
         sourceNodeId: 'image-b',
         sourcePortId: 'asset',
+        targetNodeId: 'generator',
+        targetPortId: 'reference',
+      }),
+    ).toBe(true);
+  });
+
+  it('allows multiple upstream candidates on a random prompt node', () => {
+    const target = node('random', 'random-prompt', [
+      { direction: 'INPUT', id: 'prompts', type: 'prompt-text' },
+      { direction: 'OUTPUT', id: 'prompt', type: 'prompt-text' },
+    ]);
+    const firstEdge: FdmCreativeApi.WorkflowEdge = {
+      id: 'random-edge-a',
+      sourceNodeId: 'prompt-a',
+      sourcePortId: 'prompt',
+      targetNodeId: 'random',
+      targetPortId: 'prompts',
+    };
+    const randomDefinition = promptWorkflow(target, [firstEdge]);
+
+    expect(
+      validateWorkflowConnection({
+        definition: randomDefinition,
+        sourceNodeId: 'prompt-b',
+        sourcePortId: 'prompt',
+        targetNodeId: 'random',
+        targetPortId: 'prompts',
+      }),
+    ).toBe(true);
+  });
+
+  it('connects an image collection directly to multi-reference generation', () => {
+    const collection = node('collection', 'image-collection', [
+      { direction: 'OUTPUT', id: 'ordered-images', type: 'image-list' },
+    ]);
+    const generator = node('generator', 'image-generate', [
+      { direction: 'INPUT', id: 'reference', type: 'image-list' },
+    ]);
+    const imageCollectionWorkflow: FdmCreativeApi.WorkflowDefinition = {
+      edges: [],
+      nodes: [collection, generator],
+      schemaVersion: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+
+    expect(
+      validateWorkflowConnection({
+        definition: imageCollectionWorkflow,
+        sourceNodeId: 'collection',
+        sourcePortId: 'ordered-images',
         targetNodeId: 'generator',
         targetPortId: 'reference',
       }),

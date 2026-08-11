@@ -192,6 +192,21 @@ const detailRows = computed<DetailRow[]>(() => {
       config.value.outputCount,
       '1 张',
     );
+  } else if (['image-loop', 'video-loop'].includes(type)) {
+    add('循环', `${config.value.count ?? 4} 轮`);
+    add('批次', `每轮 ${config.value.batchSize ?? 1} 个`);
+  } else if (type === 'random-prompt') {
+    const candidateCount = String(config.value.prompts ?? '')
+      .split(/\r?\n/)
+      .filter((item) => Boolean(item.trim())).length;
+    add('候选', `${candidateCount} 条`);
+    add('选择', '每次执行随机');
+  } else if (['image-select', 'video-select'].includes(type)) {
+    const mode = String(config.value.mode ?? 'FIRST');
+    let selectionLabel = '第一个';
+    if (mode === 'LAST') selectionLabel = '最后一个';
+    if (mode === 'INDEX') selectionLabel = `第 ${config.value.index ?? 1} 个`;
+    add('选择', selectionLabel);
   } else if (
     ['first-last-frame-to-video', 'image-to-video', 'video-generate'].includes(
       type,
@@ -283,7 +298,7 @@ const llmTags = computed(() => {
       </strong>
       <span
         class="status-label"
-        :class="`status-${data.status?.toLowerCase() || 'idle'}`"
+        :class="`status-${data.status?.toLowerCase().replaceAll('_', '-') || 'idle'}`"
       >
         {{ headerMeta }}
       </span>
@@ -407,7 +422,7 @@ const llmTags = computed(() => {
       <footer>
         <span class="node-state">
           <i
-            :class="`status-dot status-${data.status?.toLowerCase() || 'idle'}`"
+            :class="`status-dot status-${data.status?.toLowerCase().replaceAll('_', '-') || 'idle'}`"
           ></i>
           {{ statusText }}
         </span>
@@ -456,11 +471,12 @@ const llmTags = computed(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  color: #172033;
-  background: rgb(255 255 255 / 98%);
-  border: 1px solid color-mix(in srgb, var(--node-accent) 36%, #dbe4ee);
+  color: hsl(var(--foreground));
+  background: hsl(var(--card) / 98%);
+  border: 1px solid
+    color-mix(in srgb, var(--node-accent) 36%, hsl(var(--border)));
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 8%);
 }
 
 .node-header {
@@ -470,7 +486,7 @@ const llmTags = computed(() => {
   align-items: center;
   min-width: 0;
   padding: 0 8px;
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid hsl(var(--border) / 72%);
 }
 
 .node-header > strong {
@@ -504,7 +520,7 @@ const llmTags = computed(() => {
   flex: none;
   width: 15px;
   height: 15px;
-  color: #a8b3c2;
+  color: hsl(var(--muted-foreground));
 }
 
 .status-label {
@@ -513,7 +529,7 @@ const llmTags = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 10px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
@@ -525,16 +541,16 @@ const llmTags = computed(() => {
   color: #dc2626;
 }
 
-.status-label.status-archiving_ai,
+.status-label.status-archiving-ai,
 .status-label.status-pending,
 .status-label.status-queued,
 .status-label.status-running,
-.status-label.status-waiting_ai {
+.status-label.status-waiting-ai {
   color: #1677ff;
 }
 
 .status-label.status-blocked,
-.status-label.status-cancel_requested,
+.status-label.status-cancel-requested,
 .status-label.status-stale {
   color: #d97706;
 }
@@ -562,7 +578,7 @@ const llmTags = computed(() => {
   -webkit-line-clamp: 2;
   font-size: 11px;
   line-height: 16px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   -webkit-box-orient: vertical;
 }
 
@@ -570,9 +586,9 @@ const llmTags = computed(() => {
   min-height: 68px;
   padding: 7px;
   -webkit-line-clamp: 4;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #edf1f6;
+  color: hsl(var(--foreground) / 82%);
+  background: hsl(var(--muted) / 38%);
+  border: 1px solid hsl(var(--border) / 66%);
   border-radius: 6px;
 }
 
@@ -580,9 +596,10 @@ const llmTags = computed(() => {
   min-height: 42px;
   padding: 6px 7px;
   -webkit-line-clamp: 2;
-  color: #514168;
-  background: linear-gradient(145deg, #fbf9ff, #f8f7fc);
-  border: 1px solid #eee8f8;
+  color: color-mix(in srgb, var(--node-accent) 58%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--node-accent) 6%, hsl(var(--card)));
+  border: 1px solid
+    color-mix(in srgb, var(--node-accent) 18%, hsl(var(--border)));
   border-radius: 6px;
 }
 
@@ -591,7 +608,7 @@ const llmTags = computed(() => {
   gap: 0;
   margin: 0;
   overflow: hidden;
-  border: 1px solid #edf1f6;
+  border: 1px solid hsl(var(--border) / 66%);
   border-radius: 6px;
 }
 
@@ -601,7 +618,7 @@ const llmTags = computed(() => {
   align-items: center;
   min-height: 23px;
   padding: 0 6px;
-  border-bottom: 1px solid #edf1f6;
+  border-bottom: 1px solid hsl(var(--border) / 66%);
 }
 
 .detail-list > div:last-child {
@@ -620,11 +637,11 @@ const llmTags = computed(() => {
 }
 
 .detail-list dt {
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .detail-list dd {
-  color: #475569;
+  color: hsl(var(--foreground) / 78%);
 }
 
 .planner-tags {
@@ -641,16 +658,16 @@ const llmTags = computed(() => {
 .llm-tags span {
   padding: 2px 6px;
   font-size: 9px;
-  color: #6d28d9;
-  background: #f4efff;
+  color: color-mix(in srgb, var(--node-accent) 72%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--node-accent) 12%, hsl(var(--card)));
   border-radius: 999px;
 }
 
 .planner-tags span {
   padding: 2px 6px;
   font-size: 10px;
-  color: #6d28d9;
-  background: #f4efff;
+  color: color-mix(in srgb, var(--node-accent) 72%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--node-accent) 12%, hsl(var(--card)));
   border-radius: 999px;
 }
 
@@ -675,9 +692,10 @@ const llmTags = computed(() => {
   margin-top: auto;
   font-size: 10px;
   font-weight: 600;
-  color: #6d28d9;
-  background: #f4efff;
-  border: 1px solid #e7dcff;
+  color: color-mix(in srgb, var(--node-accent) 72%, hsl(var(--foreground)));
+  background: color-mix(in srgb, var(--node-accent) 12%, hsl(var(--card)));
+  border: 1px solid
+    color-mix(in srgb, var(--node-accent) 24%, hsl(var(--border)));
   border-radius: 6px;
 }
 
@@ -701,7 +719,7 @@ const llmTags = computed(() => {
   min-height: 16px;
   margin-top: auto;
   font-size: 10px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .node-body footer > span {
@@ -720,15 +738,15 @@ const llmTags = computed(() => {
 .status-dot {
   width: 6px;
   height: 6px;
-  background: #cbd5e1;
+  background: hsl(var(--muted-foreground) / 52%);
   border-radius: 999px;
 }
 
-.status-dot.status-archiving_ai,
+.status-dot.status-archiving-ai,
 .status-dot.status-pending,
 .status-dot.status-queued,
 .status-dot.status-running,
-.status-dot.status-waiting_ai {
+.status-dot.status-waiting-ai {
   background: #1677ff;
 }
 
@@ -741,7 +759,7 @@ const llmTags = computed(() => {
 }
 
 .status-dot.status-blocked,
-.status-dot.status-cancel_requested,
+.status-dot.status-cancel-requested,
 .status-dot.status-stale {
   background: #f59e0b;
 }
@@ -753,7 +771,7 @@ const llmTags = computed(() => {
   min-height: 0;
   margin: 8px 8px 0;
   overflow: hidden;
-  background: #f3f6fa;
+  background: hsl(var(--muted) / 52%);
   border-radius: 6px;
 }
 
@@ -769,7 +787,7 @@ const llmTags = computed(() => {
   display: grid;
   gap: 7px;
   place-items: center;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .asset-placeholder :deep(svg) {
@@ -804,7 +822,7 @@ const llmTags = computed(() => {
 
 .asset-caption span {
   font-size: 10px;
-  color: #94a3b8;
+  color: hsl(var(--muted-foreground));
 }
 
 .compose-preview {
@@ -815,8 +833,12 @@ const llmTags = computed(() => {
   overflow: hidden;
   color: var(--node-accent);
   background:
-    linear-gradient(145deg, rgb(255 255 255 / 8%), rgb(15 23 42 / 10%)),
-    color-mix(in srgb, var(--node-accent) 9%, #f8fafc);
+    linear-gradient(
+      145deg,
+      hsl(var(--card) / 8%),
+      hsl(var(--foreground) / 10%)
+    ),
+    color-mix(in srgb, var(--node-accent) 9%, hsl(var(--card)));
   border-radius: 6px;
 }
 
@@ -848,7 +870,7 @@ const llmTags = computed(() => {
 
 .compose-placeholder span {
   font-size: 10px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .preview-caption {
@@ -872,8 +894,8 @@ const llmTags = computed(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #f1f5f9;
-  border: 1px solid #edf1f6;
+  background: hsl(var(--muted) / 52%);
+  border: 1px solid hsl(var(--border) / 66%);
   border-radius: 6px;
 }
 
