@@ -241,6 +241,10 @@ export namespace JixiaoApi {
     userId?: number;
   };
 
+  export interface InstanceRemindReq {
+    instanceIds: number[];
+  }
+
   export interface TaskReq {
     instanceId: number;
     reason?: string;
@@ -598,6 +602,13 @@ export function getMyInstancePage(params: JixiaoApi.InstancePageParams) {
 export function deleteInstance(id: number) {
   return requestClient.delete<boolean>(
     `/fdmperformance/assessment/instance/delete?id=${id}`,
+  );
+}
+
+export function remindInstances(data: JixiaoApi.InstanceRemindReq) {
+  return requestClient.post<number>(
+    '/fdmperformance/assessment/instance/remind',
+    data,
   );
 }
 

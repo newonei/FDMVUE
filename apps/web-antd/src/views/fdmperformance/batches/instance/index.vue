@@ -46,6 +46,9 @@ import PerformanceShell from '../../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceInstanceDetail' });
 
+const props = defineProps<{
+  id?: number | string;
+}>();
 const route = useRoute();
 const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
@@ -347,7 +350,15 @@ function validateScoreRows(taskKey: string) {
 async function load() {
   loading.value = true;
   try {
-    const id = Number(route.params.instanceId);
+    const routeInstanceId = route.params.instanceId;
+    const rawInstanceId =
+      props.id ??
+      (Array.isArray(routeInstanceId) ? routeInstanceId[0] : routeInstanceId);
+    const id = Number(rawInstanceId);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      message.error('考核实例 ID 无效');
+      return;
+    }
     instance.value = await getInstance(id);
     scoreRows.value = [];
     for (const indicator of instance.value.indicators || []) {

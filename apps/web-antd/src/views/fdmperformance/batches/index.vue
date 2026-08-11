@@ -27,6 +27,7 @@ import {
   deleteInstance,
   getInstancePage,
   getSetting,
+  remindInstances,
 } from '#/api/fdmperformance';
 import { getSimpleDeptList } from '#/api/system/dept';
 import { getSimpleUserList } from '#/api/system/user';
@@ -46,9 +47,11 @@ const activeTab = ref('batches');
 const isPerformanceHr = ref(false);
 const instanceLoading = ref(false);
 const deletingInstanceId = ref<number>();
+const reminding = ref(false);
 const instances = ref<JixiaoApi.Instance[]>([]);
 const instanceTotal = ref(0);
-const users = ref<SystemUserApi.UserSimple[]>([]);
+const selectedInstanceIds = ref<number[]>([]);
+const users = ref<SystemUserApi.User[]>([]);
 const departments = ref<SystemDeptApi.Dept[]>([]);
 
 function currentMonthKey() {
@@ -66,10 +69,16 @@ const instanceQuery = reactive({
 });
 
 const userFilterOptions = computed(() =>
-  users.value.map((user) => ({
-    text: `${user.nickname || user.username} (${user.id})`,
-    value: user.id,
-  })),
+  users.value.flatMap((user) =>
+    user.id === undefined
+      ? []
+      : [
+          {
+            text: `${user.nickname || user.username} (${user.id})`,
+            value: user.id,
+          },
+        ],
+  ),
 );
 
 interface DeptFilterOption {
@@ -124,6 +133,23 @@ const instanceColumns = computed<TableColumnsType>(() => [
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
 ]);
 
+function canRemind(record: JixiaoApi.Instance) {
+  return record.status === 1 && typeof record.id === 'number';
+}
+
+const rowSelection = computed(() => ({
+  preserveSelectedRowKeys: true,
+  selectedRowKeys: selectedInstanceIds.value,
+  getCheckboxProps: (record: JixiaoApi.Instance) => ({
+    disabled: !canRemind(record),
+  }),
+  onChange: (keys: Array<number | string>) => {
+    selectedInstanceIds.value = keys
+      .map(Number)
+      .filter((key) => Number.isSafeInteger(key) && key > 0);
+  },
+}));
+
 function currentFlow(record: JixiaoApi.Instance) {
   if (record.status === 2) return '考核结束';
   if (record.status === 3) return '已取消';
@@ -164,7 +190,12 @@ async function loadInstances() {
   }
 }
 
+function clearSelection() {
+  selectedInstanceIds.value = [];
+}
+
 function searchInstances() {
+  clearSelection();
   instanceQuery.pageNo = 1;
   void loadInstances();
 }
@@ -189,6 +220,9 @@ async function removeInstance(record: JixiaoApi.Instance) {
   deletingInstanceId.value = record.id;
   try {
     await deleteInstance(record.id);
+    selectedInstanceIds.value = selectedInstanceIds.value.filter(
+      (id) => id !== record.id,
+    );
     message.success('考核已删除');
     if (instances.value.length === 1 && instanceQuery.pageNo > 1) {
       instanceQuery.pageNo -= 1;
@@ -196,6 +230,19 @@ async function removeInstance(record: JixiaoApi.Instance) {
     await loadInstances();
   } finally {
     deletingInstanceId.value = undefined;
+  }
+}
+
+async function remindSelected() {
+  if (selectedInstanceIds.value.length === 0) return;
+  const instanceIds = [...selectedInstanceIds.value];
+  reminding.value = true;
+  try {
+    const recipientCount = await remindInstances({ instanceIds });
+    selectedInstanceIds.value = [];
+    message.success(`已提交 ${recipientCount} 位当前处理人的钉钉催办消息`);
+  } finally {
+    reminding.value = false;
   }
 }
 
@@ -212,6 +259,9 @@ function changeInstancePage(pagination: any, filters: Record<string, any>) {
   const pageSizeChanged = instanceQuery.pageSize !== pagination.pageSize;
   instanceQuery.userId = userId;
   instanceQuery.deptId = deptId;
+  if (filterChanged) {
+    selectedInstanceIds.value = [];
+  }
   instanceQuery.pageNo =
     filterChanged || pageSizeChanged ? 1 : pagination.current;
   instanceQuery.pageSize = pagination.pageSize;
@@ -267,6 +317,31 @@ onMounted(initialize);
         <div class="instance-panel">
           <div class="panel-head">
             <strong>{{ monthLabel(instanceQuery.periodKey) }}考核人员</strong>
+            <Space wrap>
+              <span class="selected-count">
+                已选择 {{ selectedInstanceIds.length }} 项
+              </span>
+              <Button
+                v-if="selectedInstanceIds.length > 0"
+                size="small"
+                type="link"
+                @click="clearSelection"
+              >
+                清空
+              </Button>
+              <Popconfirm
+                :title="`确认向所选 ${selectedInstanceIds.length} 条考核的当前处理人发送钉钉催办消息？`"
+                @confirm="remindSelected"
+              >
+                <Button
+                  :disabled="selectedInstanceIds.length === 0"
+                  :loading="reminding"
+                  type="primary"
+                >
+                  钉钉催办
+                </Button>
+              </Popconfirm>
+            </Space>
           </div>
           <Table
             class="performance-compact-table"
@@ -281,6 +356,7 @@ onMounted(initialize);
               size: 'small',
               total: instanceTotal,
             }"
+            :row-selection="rowSelection"
             :scroll="{ x: 1100 }"
             row-key="id"
             size="small"
@@ -372,6 +448,11 @@ onMounted(initialize);
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.selected-count {
+  color: #64748b;
+  font-size: 13px;
 }
 
 @media (max-width: 900px) {
