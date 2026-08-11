@@ -41,6 +41,7 @@ import {
 } from '#/api/fdmdingtalk/approval';
 
 import AttachmentList from './attachment-list.vue';
+import BusinessDocumentView from './business-document-view.vue';
 import { useGridColumns, useGridFormSchema } from './data';
 
 defineOptions({ name: 'FdmDingtalkApproval' });
@@ -923,7 +924,10 @@ function resultMeta(value?: string) {
           </Descriptions.Item>
         </Descriptions>
 
-        <Divider orientation="left">审批表单</Divider>
+        <Divider orientation="left">业务单据（金智 CRM）</Divider>
+        <BusinessDocumentView :document="detail.businessDocument" root />
+
+        <Divider orientation="left">钉钉审批表单（流程快照）</Divider>
         <Descriptions
           v-if="detailFormComponents.length"
           bordered

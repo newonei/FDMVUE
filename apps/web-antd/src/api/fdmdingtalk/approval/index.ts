@@ -5,6 +5,14 @@ import { requestClient } from '#/api/request';
 export namespace DingTalkApprovalApi {
   export type Scope = 'CC' | 'DONE' | 'STARTED' | 'TODO';
 
+  export type JsonValue =
+    | boolean
+    | JsonValue[]
+    | null
+    | number
+    | string
+    | { [key: string]: JsonValue };
+
   export interface PageParams extends PageParam {
     endTime?: number;
     keyword?: string;
@@ -81,7 +89,19 @@ export namespace DingTalkApprovalApi {
     userId?: string;
   }
 
+  export interface BusinessDocument {
+    dataType?: number;
+    documentName?: string;
+    fieldNames?: Record<string, string>;
+    message?: string;
+    msgId?: string;
+    record?: JsonValue;
+    source: 'JINZHI_CRM';
+    status: 'AVAILABLE' | 'NO_MAPPING' | 'NOT_FOUND' | 'UNAVAILABLE';
+  }
+
   export interface Detail extends Approval {
+    businessDocument?: BusinessDocument;
     formComponents?: FormComponent[];
     operationRecords?: OperationRecord[];
     tasks?: Task[];
