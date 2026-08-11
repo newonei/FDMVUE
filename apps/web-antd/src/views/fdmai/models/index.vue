@@ -696,6 +696,7 @@ function testStatusLabel(status?: string) {
     DOWNLOADING: '结果归档中',
     FAILED: '失败',
     QUEUED: '排队中',
+    RESULT_RECEIVED: '结果已接收',
     RUNNING: '运行中',
     SUBMISSION_UNKNOWN: '提交状态未知',
     SUBMITTING: '提交中',
@@ -712,7 +713,8 @@ function testStatusColor(status?: string) {
   if (normalized === 'SUBMISSION_UNKNOWN') return 'orange';
   if (normalized === 'CANCELED') return 'default';
   if (normalized.startsWith('CANCEL')) return 'warning';
-  if (['DOWNLOADING', 'RUNNING'].includes(normalized)) return 'processing';
+  if (['DOWNLOADING', 'RESULT_RECEIVED', 'RUNNING'].includes(normalized))
+    return 'processing';
   return 'blue';
 }
 
@@ -1180,7 +1182,7 @@ onBeforeUnmount(stopTestPolling);
       </template>
     </Modal>
 
-    <Modal v-model:open="syncOpen" :title="'从服务商同步模型'" :width="1080">
+    <Modal v-model:open="syncOpen" title="从服务商同步模型" :width="1080">
       <Form layout="vertical">
         <div class="sync-provider-row">
           <Form.Item class="provider-field" label="服务商账号" required>

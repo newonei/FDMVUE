@@ -50,6 +50,7 @@ const STATUS_OPTIONS = [
   'SUBMITTING',
   'WAITING_PROVIDER',
   'RUNNING',
+  'RESULT_RECEIVED',
   'DOWNLOADING',
   'SUCCEEDED',
   'FAILED',
@@ -66,6 +67,7 @@ const STATUS_LABELS: Record<string, string> = {
   DOWNLOADING: '归档下载中',
   FAILED: '失败',
   QUEUED: '排队中',
+  RESULT_RECEIVED: '结果已接收',
   RUNNING: '运行中',
   SUBMISSION_UNKNOWN: '提交状态未知',
   SUBMITTING: '提交中',
@@ -164,7 +166,8 @@ function statusColor(status?: string) {
   if (normalized === 'SUBMISSION_UNKNOWN') return 'orange';
   if (normalized === 'CANCELED') return 'default';
   if (normalized.startsWith('CANCEL')) return 'warning';
-  if (['RUNNING', 'DOWNLOADING'].includes(normalized)) return 'processing';
+  if (['DOWNLOADING', 'RESULT_RECEIVED', 'RUNNING'].includes(normalized))
+    return 'processing';
   return 'blue';
 }
 
@@ -636,9 +639,9 @@ onMounted(async () => {
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.dataIndex === 'status'">
-                  <Tag :color="statusColor(record.status)">{{
-                    record.status
-                  }}</Tag>
+                  <Tag :color="statusColor(record.status)">
+                    {{ record.status }}
+                  </Tag>
                 </template>
                 <template v-else-if="column.dataIndex === 'retryable'">
                   {{ record.retryable ? '是' : '否' }}
@@ -712,8 +715,9 @@ onMounted(async () => {
                 <pre
                   v-if="output.metadata && Object.keys(output.metadata).length"
                   class="metadata"
-                  >{{ safeJson(output.metadata) }}</pre
                 >
+                  {{ safeJson(output.metadata) }}
+                </pre>
               </article>
             </div>
             <Empty v-else description="暂无输出" />
