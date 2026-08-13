@@ -61,6 +61,8 @@ type MouldSelectionMode = 'AUTO' | 'MANUAL';
 type QuotationMode = 'batch' | 'single';
 
 interface QuotationFormModel {
+  includeCarton: boolean;
+  includeOpp: boolean;
   includeStrap: boolean;
   includeSupplement: boolean;
   mouldProfileId?: number;
@@ -174,8 +176,10 @@ let optionsInitialized = false;
 
 function createInitialForm(): QuotationFormModel {
   return {
+    includeCarton: false,
+    includeOpp: false,
     includeStrap: false,
-    includeSupplement: false,
+    includeSupplement: true,
     mouldProfileId: undefined,
     mouldSelectionMode: 'AUTO',
     productLengthMm: undefined,
@@ -191,8 +195,10 @@ function createInitialForm(): QuotationFormModel {
 function createInitialFormFromOptions(): QuotationFormModel {
   const next = createInitialForm();
   const defaults = quotationOptions.value.costDefaults;
+  next.includeCarton = defaults?.includeCarton ?? false;
+  next.includeOpp = defaults?.includeOpp ?? false;
   next.includeStrap = defaults?.includeStrap ?? false;
-  next.includeSupplement = defaults?.includeSupplement ?? false;
+  next.includeSupplement = defaults?.includeSupplement ?? true;
   const defaultRecipe = quotationOptions.value.recipes.find(
     (item) => String(item.id) === String(defaults?.recipeId),
   );
@@ -472,6 +478,8 @@ function buildCalculateRequest():
   }
 
   return {
+    includeCarton: formState.includeCarton,
+    includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
     mouldProfileId:
@@ -1079,7 +1087,7 @@ onMounted(loadOptions);
               <div class="section-heading">
                 <span class="section-index">3</span>
                 <div>
-                  <div class="section-title">补片与报价</div>
+                  <div class="section-title">补片、辅料与报价</div>
                   <div class="section-subtitle">
                     补片由余厚规则判断，报价基于服务端精确单位成本
                   </div>
@@ -1093,6 +1101,26 @@ onMounted(loadOptions);
                     <span class="switch-hint">
                       {{
                         formState.includeSupplement ? '计入补片' : '不计补片'
+                      }}
+                    </span>
+                  </div>
+                </FormItem>
+
+                <FormItem label="计入OPP膜">
+                  <div class="switch-field">
+                    <Switch v-model:checked="formState.includeOpp" />
+                    <span class="switch-hint">
+                      {{ formState.includeOpp ? '计入OPP膜成本' : '不计OPP膜' }}
+                    </span>
+                  </div>
+                </FormItem>
+
+                <FormItem label="计入外箱">
+                  <div class="switch-field">
+                    <Switch v-model:checked="formState.includeCarton" />
+                    <span class="switch-hint">
+                      {{
+                        formState.includeCarton ? '计入外箱成本' : '不计外箱'
                       }}
                     </span>
                   </div>
@@ -1491,6 +1519,10 @@ onMounted(loadOptions);
                           {{ result.processCostRuleCode || '—' }} ·
                           {{ result.processCostRuleVersion || '—' }}
                         </DescriptionsItem>
+                        <DescriptionsItem label="辅料价格来源">
+                          {{ result.accessoryPriceSourceVersion || '—' }} ·
+                          {{ result.accessoryPriceSourceLocation || '—' }}
+                        </DescriptionsItem>
                         <DescriptionsItem label="发泡人工">
                           {{ formatDecimal(result.foamingLaborPerKg, '元/kg') }}
                         </DescriptionsItem>
@@ -1535,6 +1567,17 @@ onMounted(loadOptions);
                               '元/条',
                             )
                           }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="OPP膜">
+                          {{ formatDecimal(result.oppCostPerPiece, '元/片') }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="外箱">
+                          {{
+                            formatDecimal(result.cartonCostPerPiece, '元/片')
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="绑带">
+                          {{ formatDecimal(result.strapCostPerPiece, '元/片') }}
                         </DescriptionsItem>
                       </Descriptions>
                     </Collapse.Panel>

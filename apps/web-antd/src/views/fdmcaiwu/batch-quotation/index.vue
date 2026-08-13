@@ -54,6 +54,8 @@ const router = useRouter();
 interface BatchFormModel {
   defaultQuantity: number;
   defaultRecipeId?: number;
+  includeCarton: boolean;
+  includeOpp: boolean;
   includeStrap: boolean;
   includeSupplement: boolean;
   profitMode: string;
@@ -133,8 +135,10 @@ const quotationOptions = ref<FdmcaiwuQuotationApi.Options>({
 const formState = reactive<BatchFormModel>({
   defaultQuantity: 1,
   defaultRecipeId: undefined,
+  includeCarton: false,
+  includeOpp: false,
   includeStrap: false,
-  includeSupplement: false,
+  includeSupplement: true,
   profitMode: 'GROSS_MARGIN',
   profitRatePercent: 20,
 });
@@ -194,6 +198,8 @@ function buildOptions(): FdmcaiwuBatchQuotationApi.CalculateOptions {
   const options: FdmcaiwuBatchQuotationApi.CalculateOptions = {
     defaultQuantity: formState.defaultQuantity,
     defaultRecipeId: formState.defaultRecipeId,
+    includeCarton: formState.includeCarton,
+    includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
     profitMode: formState.profitMode,
@@ -591,13 +597,13 @@ const previewColumns: TableColumnsType<PreviewRow> = [
   {
     dataIndex: 'oppCostPerPiece',
     key: 'oppCostPerPiece',
-    title: 'OPP袋',
+    title: 'OPP膜',
     width: 90,
   },
   {
     dataIndex: 'cartonCostPerPiece',
     key: 'cartonCostPerPiece',
-    title: '纸箱',
+    title: '外箱',
     width: 90,
   },
   {
@@ -728,8 +734,10 @@ async function loadOptions() {
       recipes: data?.recipes ?? [],
     };
     const defaults = data?.costDefaults;
+    formState.includeCarton = defaults?.includeCarton ?? false;
+    formState.includeOpp = defaults?.includeOpp ?? false;
     formState.includeStrap = defaults?.includeStrap ?? false;
-    formState.includeSupplement = defaults?.includeSupplement ?? false;
+    formState.includeSupplement = defaults?.includeSupplement ?? true;
     const defaultRecipe = data?.recipes?.find(
       (recipe) => String(recipe.id) === String(defaults?.recipeId),
     );
@@ -822,14 +830,18 @@ function handleResetParameters() {
   Object.assign(formState, {
     defaultQuantity: 1,
     defaultRecipeId: undefined,
+    includeCarton: false,
+    includeOpp: false,
     includeStrap: false,
-    includeSupplement: false,
+    includeSupplement: true,
     profitMode: 'GROSS_MARGIN',
     profitRatePercent: 20,
   });
   const defaults = quotationOptions.value.costDefaults;
+  formState.includeCarton = defaults?.includeCarton ?? false;
+  formState.includeOpp = defaults?.includeOpp ?? false;
   formState.includeStrap = defaults?.includeStrap ?? false;
-  formState.includeSupplement = defaults?.includeSupplement ?? false;
+  formState.includeSupplement = defaults?.includeSupplement ?? true;
   const defaultRecipe = quotationOptions.value.recipes.find(
     (recipe) => String(recipe.id) === String(defaults?.recipeId),
   );
@@ -1007,7 +1019,15 @@ onActivated(() => {
 
               <div class="switch-field">
                 <Switch v-model:checked="formState.includeSupplement" />
-                <span>剩余厚度允许补片</span>
+                <span>计入半层余厚补片</span>
+              </div>
+              <div class="switch-field">
+                <Switch v-model:checked="formState.includeOpp" />
+                <span>计入OPP膜成本</span>
+              </div>
+              <div class="switch-field">
+                <Switch v-model:checked="formState.includeCarton" />
+                <span>计入外箱成本</span>
               </div>
               <div class="switch-field">
                 <Switch v-model:checked="formState.includeStrap" />

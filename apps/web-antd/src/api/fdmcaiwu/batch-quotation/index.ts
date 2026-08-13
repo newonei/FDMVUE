@@ -8,6 +8,8 @@ export namespace FdmcaiwuBatchQuotationApi {
   export interface CalculateOptions {
     defaultQuantity?: number;
     defaultRecipeId?: number;
+    includeCarton?: boolean;
+    includeOpp?: boolean;
     includeStrap?: boolean;
     includeSupplement?: boolean;
     profitMode?: string;

@@ -1,13 +1,15 @@
 <script lang="ts" setup>
-import type { TableColumnsType } from 'ant-design-vue';
+import type { FormInstance, TableColumnsType } from 'ant-design-vue';
+import type { Rule } from 'ant-design-vue/es/form';
 
 import type { FdmcaiwuStandardQuotationApi } from '#/api/fdmcaiwu/standard-quotation';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -17,8 +19,11 @@ import {
   Divider,
   Drawer,
   Empty,
+  Form,
+  FormItem,
   InputNumber,
   message,
+  Modal,
   Select,
   Spin,
   Statistic,
@@ -30,6 +35,7 @@ import {
 
 import {
   calculateStandardQuotation,
+  createStandardQuotationSpecification,
   getStandardQuotationOptions,
 } from '#/api/fdmcaiwu/standard-quotation';
 
@@ -40,11 +46,17 @@ type QuotationEntry = FdmcaiwuStandardQuotationApi.QuotationEntry;
 type SpecificationRow = FdmcaiwuStandardQuotationApi.SpecificationRow;
 
 interface FormModel {
+  includeCarton: boolean;
+  includeOpp: boolean;
   includeStrap: boolean;
   includeSupplement: boolean;
-  profitMode: string;
-  profitRatePercent: number;
   quantity: number;
+}
+
+interface CreateSpecificationFormModel {
+  lengthMm?: number;
+  thicknessMm?: number;
+  widthMm?: number;
 }
 
 interface DisplayRow extends SpecificationRow {
@@ -99,11 +111,6 @@ const PRODUCT_TYPES: NormalizedProductType[] = [
   },
 ];
 
-const PROFIT_MODE_OPTIONS = [
-  { label: '毛利率', value: 'GROSS_MARGIN' },
-  { label: '加价率', value: 'MARKUP' },
-];
-
 const STATUS_FILTER_OPTIONS = [
   { label: '全部状态', value: 'ALL' },
   { label: '仅看已报价', value: 'CALCULATED' },
@@ -112,6 +119,7 @@ const STATUS_FILTER_OPTIONS = [
 ];
 
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
 const canCalculate = hasAccessByCodes([
   'fdmcaiwu:standard-quotation:calculate',
 ]);
@@ -127,6 +135,71 @@ const rows = ref<SpecificationRow[]>([]);
 const detailOpen = ref(false);
 const selectedDetail = ref<SelectedDetail>();
 const calculatedSignature = ref('');
+const createSpecificationOpen = ref(false);
+const createSpecificationSaving = ref(false);
+const createSpecificationFormRef = ref<FormInstance>();
+const createSpecificationForm = reactive<CreateSpecificationFormModel>({
+  lengthMm: undefined,
+  thicknessMm: undefined,
+  widthMm: undefined,
+});
+
+const isSuperAdmin = computed(() =>
+  (userStore.userRoles ?? []).includes('super_admin'),
+);
+
+/**
+ * 新增规格同时校验登录角色和后端下发能力，避免菜单权限误配造成越权入口。
+ */
+const canCreateSpecification = computed(
+  () =>
+    isSuperAdmin.value &&
+    (options.value?.capabilities?.canCreateSpecification ??
+      result.value?.capabilities?.canCreateSpecification ??
+      false),
+);
+
+const positiveDimensionRule: Rule = {
+  required: true,
+  trigger: ['blur', 'change'],
+  type: 'number',
+  validator: async (_rule, value) => {
+    if (value === undefined || value === null) {
+      throw new Error('请输入规格尺寸');
+    }
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error('规格尺寸必须大于 0');
+    }
+  },
+};
+
+const createSpecificationRules: Record<
+  keyof CreateSpecificationFormModel,
+  Rule[]
+> = {
+  lengthMm: [positiveDimensionRule],
+  thicknessMm: [positiveDimensionRule],
+  widthMm: [positiveDimensionRule],
+};
+
+/**
+ * 报价明细包含成本、配方及模具信息，必须同时通过登录角色与服务端能力校验。
+ * 不复用菜单权限，避免部门经理因拥有超低价权限而获得明细查看能力。
+ */
+const canViewQuoteDetail = computed(
+  () =>
+    isSuperAdmin.value &&
+    (result.value?.capabilities?.canViewQuoteDetail ??
+      options.value?.capabilities?.canViewQuoteDetail ??
+      false),
+);
+
+const canViewUltraLowPrice = computed(
+  () =>
+    result.value?.capabilities?.canViewUltraLowPrice ??
+    options.value?.capabilities?.canViewUltraLowPrice ??
+    false,
+);
 
 const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
   {
@@ -173,19 +246,47 @@ const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
   },
   ...productTypes.value.map((product, index) => {
     const toneClass = index % 2 === 0 ? 'matrix-header-a' : 'matrix-header-b';
+    const productColumns = [
+      {
+        align: 'center' as const,
+        className: 'matrix-weight-cell',
+        customHeaderCell: () => ({
+          class: `matrix-header ${toneClass}`,
+        }),
+        key: `weight:${product.productCode}`,
+        title: '克重',
+        width: 96,
+      },
+      {
+        align: 'center' as const,
+        className: `matrix-price-cell ${
+          canViewUltraLowPrice.value ? '' : 'matrix-product-end-cell'
+        }`,
+        customHeaderCell: () => ({
+          class: `matrix-header ${toneClass} ${
+            canViewUltraLowPrice.value ? '' : 'matrix-product-end-cell'
+          }`,
+        }),
+        key: `regular:${product.productCode}`,
+        title: '常规价',
+        width: 112,
+      },
+    ];
+    if (canViewUltraLowPrice.value) {
+      productColumns.push({
+        align: 'center' as const,
+        className:
+          'matrix-price-cell matrix-ultra-low-cell matrix-product-end-cell',
+        customHeaderCell: () => ({
+          class: `matrix-header ${toneClass} matrix-header-ultra-low matrix-product-end-cell`,
+        }),
+        key: `ultra:${product.productCode}`,
+        title: '超低价',
+        width: 112,
+      });
+    }
     return {
-      children: [
-        {
-          align: 'center' as const,
-          className: 'matrix-price-cell matrix-product-end-cell',
-          customHeaderCell: () => ({
-            class: `matrix-header ${toneClass} matrix-product-end-cell`,
-          }),
-          key: `price:${product.productCode}`,
-          title: '价格(元/片)',
-          width: 130,
-        },
-      ],
+      children: productColumns,
       customHeaderCell: () => ({
         class: `matrix-header matrix-product-group ${toneClass}`,
       }),
@@ -196,10 +297,10 @@ const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
 ]);
 
 const formState = reactive<FormModel>({
+  includeCarton: false,
+  includeOpp: false,
   includeStrap: false,
-  includeSupplement: false,
-  profitMode: 'GROSS_MARGIN',
-  profitRatePercent: 20,
+  includeSupplement: true,
   quantity: 1,
 });
 
@@ -264,7 +365,7 @@ function normalizeStatus(
   value: unknown,
 ): FdmcaiwuStandardQuotationApi.CellStatus {
   const status = String(value ?? '').toUpperCase();
-  if (['CALCULATED', 'SUCCESS', 'SUCCEEDED'].includes(status)) {
+  if (['CALCULATED', 'SUCCEEDED', 'SUCCESS'].includes(status)) {
     return 'CALCULATED';
   }
   if (['NOT_CONFIGURED', 'UNCONFIGURED'].includes(status)) {
@@ -334,7 +435,16 @@ function getAdditionalCost(
 }
 
 function isPriceColumn(columnKey: unknown) {
-  return String(columnKey ?? '').startsWith('price:');
+  const key = String(columnKey ?? '');
+  return key.startsWith('regular:') || key.startsWith('ultra:');
+}
+
+function isWeightColumn(columnKey: unknown) {
+  return String(columnKey ?? '').startsWith('weight:');
+}
+
+function isUltraLowColumn(columnKey: unknown) {
+  return String(columnKey ?? '').startsWith('ultra:');
 }
 
 function productCodeFromColumn(columnKey: unknown) {
@@ -366,12 +476,31 @@ function getCellMessage(rawRecord: unknown, productCode: string) {
   return '点击查看报价明细';
 }
 
+function getColumnPrice(rawRecord: unknown, columnKey: unknown) {
+  const entry = getRecordEntry(rawRecord, productCodeFromColumn(columnKey));
+  if (isUltraLowColumn(columnKey)) {
+    return entry?.ultraLowQuoteDisplay;
+  }
+  return (
+    entry?.unitQuoteDisplay ??
+    (canViewQuoteDetail.value ? entry?.unitQuoteExact : undefined)
+  );
+}
+
+function getColumnWeight(rawRecord: unknown, columnKey: unknown) {
+  const weight = getRecordEntry(
+    rawRecord,
+    productCodeFromColumn(columnKey),
+  )?.nominalWeightText;
+  return hasValue(weight) ? String(weight) : '无';
+}
+
 function buildRequest(): FdmcaiwuStandardQuotationApi.CalculateReq {
   return {
+    includeCarton: formState.includeCarton,
+    includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
-    profitMode: formState.profitMode,
-    profitRate: Number((formState.profitRatePercent / 100).toFixed(6)),
     quantity: formState.quantity,
   };
 }
@@ -383,6 +512,15 @@ function currentSignature() {
 const resultIsStale = computed(
   () =>
     Boolean(result.value) && calculatedSignature.value !== currentSignature(),
+);
+
+const tableScrollX = computed(() =>
+  Math.max(
+    1959,
+    295 +
+      productTypes.value.length *
+        (canViewUltraLowPrice.value ? 96 + 224 : 96 + 112),
+  ),
 );
 
 function uniqueDimensionOptions(field: keyof SpecificationRow) {
@@ -467,30 +605,16 @@ function validateForm() {
   if (!Number.isInteger(formState.quantity) || formState.quantity <= 0) {
     return '数量必须为大于 0 的整数';
   }
-  if (
-    !Number.isFinite(formState.profitRatePercent) ||
-    formState.profitRatePercent < 0
-  ) {
-    return '利润率必须大于或等于 0';
-  }
-  if (
-    formState.profitMode === 'GROSS_MARGIN' &&
-    formState.profitRatePercent >= 100
-  ) {
-    return '毛利率必须小于 100%';
-  }
   return '';
 }
 
 function applyDefaults(defaults?: FdmcaiwuStandardQuotationApi.Defaults) {
   if (!defaults) return;
   formState.quantity = defaults.quantity ?? 1;
-  formState.profitMode = defaults.profitMode ?? 'GROSS_MARGIN';
-  const profitRate = toNumber(defaults.profitRate);
-  formState.profitRatePercent =
-    profitRate === undefined ? 20 : Number((profitRate * 100).toFixed(4));
+  formState.includeCarton = defaults.includeCarton ?? false;
+  formState.includeOpp = defaults.includeOpp ?? false;
   formState.includeStrap = defaults.includeStrap ?? false;
-  formState.includeSupplement = defaults.includeSupplement ?? false;
+  formState.includeSupplement = defaults.includeSupplement ?? true;
 }
 
 async function loadOptions() {
@@ -512,17 +636,16 @@ async function loadOptions() {
 }
 
 async function handleCalculate(options: { silent?: boolean } = {}) {
-  if (calculating.value) return;
+  if (calculating.value) return false;
   if (!canCalculate) {
     message.warning('当前账号没有常规规格报价计算权限');
-    return;
+    return false;
   }
   const errorMessage = validateForm();
   if (errorMessage) {
     message.warning(errorMessage);
-    return;
+    return false;
   }
-
   calculating.value = true;
   requestError.value = '';
   try {
@@ -536,20 +659,100 @@ async function handleCalculate(options: { silent?: boolean } = {}) {
     if (!options.silent) {
       message.success(`已实时计算 ${rows.value.length} 条常规规格`);
     }
+    return true;
   } catch (error) {
     requestError.value =
       error instanceof Error ? error.message : '常规规格报价计算失败';
+    return false;
   } finally {
     calculating.value = false;
   }
 }
 
+function resetCreateSpecificationForm() {
+  Object.assign(createSpecificationForm, {
+    lengthMm: undefined,
+    thicknessMm: undefined,
+    widthMm: undefined,
+  });
+  createSpecificationFormRef.value?.clearValidate();
+}
+
+function openCreateSpecification() {
+  // Modal 的 v-if 只是展示控制，这里仍做二次校验，避免从控制台直接触发处理函数。
+  if (!canCreateSpecification.value) {
+    message.warning('只有超级管理员可以新增常规规格');
+    return;
+  }
+  resetCreateSpecificationForm();
+  createSpecificationOpen.value = true;
+}
+
+async function handleCreateSpecification() {
+  // 保存前再次读取最新角色和服务端能力，防止弹窗打开后权限发生变化。
+  if (!canCreateSpecification.value) {
+    createSpecificationOpen.value = false;
+    message.warning('当前账号没有新增常规规格权限');
+    return;
+  }
+  if (createSpecificationSaving.value) return;
+
+  try {
+    await createSpecificationFormRef.value?.validate();
+  } catch {
+    return;
+  }
+
+  const enteredLengthMm = Number(createSpecificationForm.lengthMm);
+  const enteredWidthMm = Number(createSpecificationForm.widthMm);
+  // 与服务端目录规则一致：较长边归一为长度，避免交换长宽后无法定位新规格。
+  const lengthMm = Math.max(enteredLengthMm, enteredWidthMm);
+  const widthMm = Math.min(enteredLengthMm, enteredWidthMm);
+  const thicknessMm = Number(createSpecificationForm.thicknessMm);
+  const currentParameters = { ...formState };
+  createSpecificationSaving.value = true;
+  try {
+    await createStandardQuotationSpecification({
+      lengthMm,
+      thicknessMm,
+      widthMm,
+    });
+    createSpecificationOpen.value = false;
+
+    await loadOptions();
+    Object.assign(formState, currentParameters);
+    const calculated = await handleCalculate({ silent: true });
+    if (calculated) {
+      Object.assign(filterState, {
+        lengthMm: String(lengthMm),
+        productCode: undefined,
+        quotationStatus: 'ALL',
+        thicknessMm: String(thicknessMm),
+        widthMm: String(widthMm),
+      });
+      await nextTick();
+      document
+        .querySelector('.result-card')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      message.success(
+        `已新增并定位规格 ${formatDimension(lengthMm)} × ${formatDimension(widthMm)} × ${formatDimension(thicknessMm)} mm`,
+      );
+    } else {
+      message.success('规格已新增，请重新计算报价后查看');
+    }
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '新增常规规格失败');
+  } finally {
+    createSpecificationSaving.value = false;
+  }
+}
+
 function resetParameters() {
   Object.assign(formState, {
+    includeCarton: false,
+    includeOpp: false,
     includeStrap: false,
-    includeSupplement: false,
-    profitMode: 'GROSS_MARGIN',
-    profitRatePercent: 20,
+    includeSupplement: true,
     quantity: 1,
   });
   applyDefaults(options.value?.defaults);
@@ -566,6 +769,8 @@ function resetFilters() {
 }
 
 function showDetail(rawRecord: unknown, productCode: string) {
+  if (!canViewQuoteDetail.value) return;
+
   const record = rawRecord as DisplayRow;
   const product = productTypes.value.find(
     (item) => item.productCode === productCode,
@@ -601,7 +806,7 @@ onMounted(async () => {
         show-icon
         type="info"
         message="实时计算口径"
-        description="价格均由现有报价引擎按当前配方、原料、工费、模具和下方利润参数实时计算；Excel 只提供规格与复合层附加参数，不读取其中的历史固定报价。"
+        description="价格均由现有报价引擎按当前配方、原料、工费、模具和规格对应的报价规则实时计算；价格口径由系统按规格自动匹配。"
       />
 
       <Alert
@@ -626,6 +831,16 @@ onMounted(async () => {
         </template>
         <template #extra>
           <div class="parameter-actions">
+            <Button
+              v-if="canCreateSpecification"
+              :disabled="optionsLoading || calculating"
+              @click="openCreateSpecification"
+            >
+              <template #icon>
+                <IconifyIcon icon="lucide:plus" />
+              </template>
+              新增常规规格
+            </Button>
             <Button :disabled="calculating" @click="resetParameters">
               恢复默认
             </Button>
@@ -655,30 +870,25 @@ onMounted(async () => {
                 :precision="0"
               />
             </div>
-            <div class="field">
-              <label>利润模式</label>
-              <Select
-                v-model:value="formState.profitMode"
-                class="w-full"
-                :options="PROFIT_MODE_OPTIONS"
-              />
-            </div>
-            <div class="field">
-              <label>利润率</label>
-              <InputNumber
-                v-model:value="formState.profitRatePercent"
-                addon-after="%"
-                class="w-full"
-                :max="formState.profitMode === 'GROSS_MARGIN' ? 99.99 : 1000"
-                :min="0"
-                :precision="2"
-              />
-            </div>
             <div class="switch-field">
               <Switch v-model:checked="formState.includeSupplement" />
               <div>
-                <div class="switch-title">允许补片</div>
-                <div class="switch-description">剩余厚度按引擎规则补片</div>
+                <div class="switch-title">计入半层余厚补片</div>
+                <div class="switch-description">默认按余厚规则计入补片</div>
+              </div>
+            </div>
+            <div class="switch-field">
+              <Switch v-model:checked="formState.includeOpp" />
+              <div>
+                <div class="switch-title">计入OPP膜</div>
+                <div class="switch-description">按当前规格读取OPP膜价格</div>
+              </div>
+            </div>
+            <div class="switch-field">
+              <Switch v-model:checked="formState.includeCarton" />
+              <div>
+                <div class="switch-title">计入外箱</div>
+                <div class="switch-description">按当前规格读取外箱价格</div>
               </div>
             </div>
             <div class="switch-field">
@@ -795,6 +1005,8 @@ onMounted(async () => {
               </div>
               <div class="table-context">
                 <strong>{{ productTypes.length }} 类产品同表展示</strong>
+                <span> · 克重 / 常规价</span>
+                <span v-if="canViewUltraLowPrice"> / 超低价对比</span>
                 <span> · 当前 {{ filteredRows.length }} 条规格</span>
               </div>
             </div>
@@ -811,11 +1023,17 @@ onMounted(async () => {
                 showTotal: (total: number) => `共 ${total} 条`,
               }"
               row-key="key"
-              :scroll="{ x: 1335, y: 620 }"
+              :scroll="{ x: tableScrollX, y: 620 }"
               size="small"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="isPriceColumn(column.key)">
+                <span
+                  v-if="isWeightColumn(column.key)"
+                  class="matrix-weight-text"
+                >
+                  {{ getColumnWeight(record, column.key) }}
+                </span>
+                <template v-else-if="isPriceColumn(column.key)">
                   <template
                     v-if="
                       getCellStatus(
@@ -824,7 +1042,10 @@ onMounted(async () => {
                       ) === 'CALCULATED'
                     "
                   >
-                    <Tooltip title="点击查看报价明细">
+                    <Tooltip
+                      v-if="canViewQuoteDetail && !isUltraLowColumn(column.key)"
+                      title="点击查看报价明细"
+                    >
                       <Button
                         class="matrix-price-button"
                         size="small"
@@ -834,19 +1055,13 @@ onMounted(async () => {
                         "
                       >
                         {{
-                          formatPriceCell(
-                            getRecordEntry(
-                              record,
-                              productCodeFromColumn(column.key),
-                            )?.unitQuoteDisplay ??
-                              getRecordEntry(
-                                record,
-                                productCodeFromColumn(column.key),
-                              )?.unitQuoteExact,
-                          )
+                          formatPriceCell(getColumnPrice(record, column.key))
                         }}
                       </Button>
                     </Tooltip>
+                    <span v-else class="matrix-price-text">
+                      {{ formatPriceCell(getColumnPrice(record, column.key)) }}
+                    </span>
                   </template>
                   <span
                     v-else-if="
@@ -898,7 +1113,63 @@ onMounted(async () => {
       </Card>
     </div>
 
+    <Modal
+      v-if="canCreateSpecification"
+      v-model:open="createSpecificationOpen"
+      :confirm-loading="createSpecificationSaving"
+      :mask-closable="!createSpecificationSaving"
+      ok-text="保存并计算"
+      title="新增常规规格"
+      width="560px"
+      @ok="handleCreateSpecification"
+    >
+      <Alert
+        class="mb-4"
+        show-icon
+        type="info"
+        message="规格保存后将由现有报价引擎计算"
+        description="请分别填写长度、宽度和厚度，系统会将较长边统一作为长度。新增后 TPE常规、轻羽、高弹由引擎计算；5种复合品缺少基材厚度、表面或胶水成本时显示未配置。仅在开启OPP膜、外箱或绑带且缺少对应价格时，才需到辅料价格表补齐。"
+      />
+      <Form
+        ref="createSpecificationFormRef"
+        layout="vertical"
+        :model="createSpecificationForm"
+        :rules="createSpecificationRules"
+      >
+        <div class="create-specification-grid">
+          <FormItem label="长度（mm）" name="lengthMm">
+            <InputNumber
+              v-model:value="createSpecificationForm.lengthMm"
+              class="w-full"
+              :min="0.001"
+              :precision="3"
+              placeholder="例如 1850"
+            />
+          </FormItem>
+          <FormItem label="宽度（mm）" name="widthMm">
+            <InputNumber
+              v-model:value="createSpecificationForm.widthMm"
+              class="w-full"
+              :min="0.001"
+              :precision="3"
+              placeholder="例如 610"
+            />
+          </FormItem>
+          <FormItem label="厚度（mm）" name="thicknessMm">
+            <InputNumber
+              v-model:value="createSpecificationForm.thicknessMm"
+              class="w-full"
+              :min="0.001"
+              :precision="3"
+              placeholder="例如 6"
+            />
+          </FormItem>
+        </div>
+      </Form>
+    </Modal>
+
     <Drawer
+      v-if="canViewQuoteDetail"
       v-model:open="detailOpen"
       destroy-on-close
       title="规格报价明细"
@@ -956,6 +1227,18 @@ onMounted(async () => {
           <Descriptions.Item label="胶水成本">
             {{ formatExactMoney(selectedDetail.entry?.adhesiveCostPerPiece) }}
           </Descriptions.Item>
+          <Descriptions.Item label="OPP膜">
+            {{ formatExactMoney(selectedDetail.entry?.oppCostPerPiece) }}
+          </Descriptions.Item>
+          <Descriptions.Item label="外箱">
+            {{ formatExactMoney(selectedDetail.entry?.cartonCostPerPiece) }}
+          </Descriptions.Item>
+          <Descriptions.Item label="绑带">
+            {{ formatExactMoney(selectedDetail.entry?.strapCostPerPiece) }}
+          </Descriptions.Item>
+          <Descriptions.Item label="辅料小计">
+            {{ formatExactMoney(selectedDetail.entry?.auxiliaryCost) }}
+          </Descriptions.Item>
           <Descriptions.Item label="复合附加成本">
             {{
               formatExactMoney(
@@ -1012,6 +1295,15 @@ onMounted(async () => {
 
         <Divider orientation="left">数据来源</Divider>
         <Descriptions bordered :column="1" size="small">
+          <Descriptions.Item label="辅料价格表">
+            {{ selectedDetail.entry?.accessoryPriceId || '—' }}
+          </Descriptions.Item>
+          <Descriptions.Item label="辅料价格版本">
+            {{ selectedDetail.entry?.accessoryPriceSourceVersion || '—' }}
+          </Descriptions.Item>
+          <Descriptions.Item label="辅料价格来源">
+            {{ selectedDetail.entry?.accessoryPriceSourceLocation || '—' }}
+          </Descriptions.Item>
           <Descriptions.Item label="Excel 资料版本">
             {{
               selectedDetail.entry?.catalogSourceVersion ||
@@ -1115,6 +1407,12 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
+.create-specification-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .summary-grid :deep(.ant-statistic) {
   padding: 14px 16px;
   background: var(--ant-color-fill-quaternary, #fafafa);
@@ -1193,9 +1491,17 @@ onMounted(async () => {
 }
 
 .matrix-table :deep(.matrix-spec-cell),
+.matrix-table :deep(.matrix-weight-cell),
 .matrix-table :deep(.matrix-price-cell) {
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+.matrix-weight-text {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ant-color-text-secondary, #595959);
 }
 
 .matrix-table :deep(.ant-table-tbody > tr > td.ant-table-cell-fix-left) {
@@ -1215,6 +1521,12 @@ onMounted(async () => {
 .matrix-price-button {
   height: 24px;
   padding: 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-price-text {
   font-size: 14px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1293,7 +1605,8 @@ onMounted(async () => {
 @media (max-width: 560px) {
   .parameter-grid,
   .summary-grid,
-  .filter-grid {
+  .filter-grid,
+  .create-specification-grid {
     grid-template-columns: 1fr;
   }
 

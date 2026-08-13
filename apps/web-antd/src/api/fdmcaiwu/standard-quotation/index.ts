@@ -17,11 +17,10 @@ export namespace FdmcaiwuStandardQuotationApi {
   }
 
   export interface Defaults {
+    includeCarton?: boolean;
+    includeOpp?: boolean;
     includeStrap?: boolean;
     includeSupplement?: boolean;
-    profitMode?: string;
-    /** 小数形式，例如 20% 返回 0.20。 */
-    profitRate?: DecimalValue;
     quantity?: number;
   }
 
@@ -31,7 +30,17 @@ export namespace FdmcaiwuStandardQuotationApi {
     sourceVersion?: string;
   }
 
+  export interface Capabilities {
+    /** 仅超级管理员可向常规规格报价表新增规格。 */
+    canCreateSpecification?: boolean;
+    /** 仅超级管理员可查看规格报价的成本、配方和模具等明细。 */
+    canViewQuoteDetail?: boolean;
+    /** 有权查看超低价的部门经理和超级管理员为 true。 */
+    canViewUltraLowPrice?: boolean;
+  }
+
   export interface Options {
+    capabilities?: Capabilities;
     defaults?: Defaults;
     productTypes?: ProductTypeOption[];
     source?: SourceInfo;
@@ -39,25 +48,36 @@ export namespace FdmcaiwuStandardQuotationApi {
   }
 
   export interface CalculateReq {
+    includeCarton: boolean;
+    includeOpp: boolean;
     includeStrap: boolean;
     includeSupplement: boolean;
-    profitMode: string;
-    /** 小数形式，例如 20% 传 0.20。 */
-    profitRate: number;
     quantity: number;
+  }
+
+  export interface CreateSpecificationReq {
+    lengthMm: number;
+    thicknessMm: number;
+    widthMm: number;
   }
 
   export interface QuotationEntry {
     additionalCostPerPiece?: NullableDecimalValue;
     adhesiveCostPerPiece?: NullableDecimalValue;
+    accessoryPriceId?: number | string;
+    accessoryPriceSourceLocation?: null | string;
+    accessoryPriceSourceVersion?: null | string;
+    auxiliaryCost?: NullableDecimalValue;
     baseUnitCostDisplay?: NullableDecimalValue;
     baseUnitCostExact?: NullableDecimalValue;
     blockReasons?: string[];
     calculationProfile?: null | string;
+    cartonCostPerPiece?: NullableDecimalValue;
     catalogSourceLocation?: null | string;
     catalogSourceVersion?: null | string;
     engineMaterialKgPerPiece?: NullableDecimalValue;
     nominalWeightText?: null | string;
+    oppCostPerPiece?: NullableDecimalValue;
     productCode: string;
     productLabel?: string;
     processCostRuleVersion?: null | string;
@@ -70,12 +90,17 @@ export namespace FdmcaiwuStandardQuotationApi {
     selectedMouldCode?: null | string;
     selectedMouldName?: null | string;
     status: CellStatus | string;
+    strapCostPerPiece?: NullableDecimalValue;
     substrateThicknessMm?: NullableDecimalValue;
     surfaceCostPerPiece?: NullableDecimalValue;
     unitCostDisplay?: NullableDecimalValue;
     unitCostExact?: NullableDecimalValue;
     unitQuoteDisplay?: NullableDecimalValue;
     unitQuoteExact?: NullableDecimalValue;
+    /** 仅有超低价查看能力的账号返回。 */
+    ultraLowQuoteDisplay?: NullableDecimalValue;
+    /** 仅超级管理员返回，普通部门经理不可见。 */
+    ultraLowQuoteExact?: NullableDecimalValue;
     warnings?: string[];
   }
 
@@ -95,6 +120,7 @@ export namespace FdmcaiwuStandardQuotationApi {
   }
 
   export interface CalculateResp {
+    capabilities?: Capabilities;
     calculatedAt?: string;
     productTypes?: ProductTypeOption[];
     rows?: SpecificationRow[];
@@ -120,5 +146,15 @@ export function calculateStandardQuotation(
     '/fdmcaiwu/standard-quotation/calculate',
     data,
     { timeout: 300_000 },
+  );
+}
+
+/** 新增常规规格；服务端仅允许超级管理员调用。 */
+export function createStandardQuotationSpecification(
+  data: FdmcaiwuStandardQuotationApi.CreateSpecificationReq,
+) {
+  return requestClient.post<number | string>(
+    '/fdmcaiwu/standard-quotation/specifications',
+    data,
   );
 }

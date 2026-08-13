@@ -119,12 +119,9 @@ const COST_GROUPS: CostGroupDefinition[] = [
         label: '批量发货',
         unit: '元/条',
       },
-      { field: 'oppCostPerPiece', label: 'OPP袋', unit: '元/条' },
-      { field: 'cartonCostPerPiece', label: '纸箱', unit: '元/条' },
-      { field: 'strapCostPerPiece', label: '绑带', unit: '元/条' },
     ],
     key: 'packing',
-    title: '包装与辅料',
+    title: '包装操作',
   },
 ];
 
@@ -402,7 +399,7 @@ onMounted(loadData);
 <template>
   <Page
     title="工费规则"
-    description="按工艺路线维护前加工、大小垫、厚垫及包装费率；单笔与批量报价会自动解析当前有效版本。"
+    description="按工艺路线维护前加工、大小垫、厚垫及包装操作费率；单笔与批量报价会自动解析当前有效版本。"
   >
     <Modal
       v-model:open="editOpen"
@@ -492,10 +489,10 @@ onMounted(loadData);
           </FormItem>
           <FormItem label="启用状态">
             <Space>
-<Switch v-model:checked="form.enabled" /><span>{{
+              <Switch v-model:checked="form.enabled" /><span>{{
                 form.enabled ? '启用' : '停用'
               }}</span>
-</Space>
+            </Space>
           </FormItem>
         </div>
 
@@ -505,6 +502,14 @@ onMounted(loadData);
           type="info"
           message="厚垫覆盖规则"
           description="厚度达到阈值后，立切、复合、压花、冲床使用厚垫档；包装人工仍只按大小垫判断。"
+        />
+
+        <Alert
+          class="mb-4"
+          show-icon
+          type="info"
+          message="辅料价格已改为按规格维护"
+          description="OPP膜、外箱和绑带价格请在“辅料价格表”中按长度、宽度、厚度维护；本页不再提供这三项价格输入。"
         />
 
         <section
@@ -657,10 +662,8 @@ onMounted(loadData);
           </template>
           <template v-else-if="column.key === 'enabled'">
             <Tag :color="record.enabled ? 'success' : 'default'">
-{{
-              record.enabled ? '启用' : '停用'
-            }}
-</Tag>
+              {{ record.enabled ? '启用' : '停用' }}
+            </Tag>
           </template>
           <template v-else-if="column.key === 'action'">
             <Space :size="0">
@@ -669,18 +672,18 @@ onMounted(loadData);
                 size="small"
                 type="link"
                 @click="handleEdit(record)"
-                >
-编辑
-</Button>
+              >
+                编辑
+              </Button>
               <Button
                 v-access:code="['fdmcaiwu:process-cost-rule:delete']"
                 danger
                 size="small"
                 type="link"
                 @click="handleDelete(record)"
-                >
-删除
-</Button>
+              >
+                删除
+              </Button>
             </Space>
           </template>
         </template>

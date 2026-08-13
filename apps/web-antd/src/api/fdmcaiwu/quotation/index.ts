@@ -63,6 +63,8 @@ export namespace FdmcaiwuQuotationApi {
   }
 
   export interface CostDefaults extends CostInputs {
+    includeCarton?: boolean;
+    includeOpp?: boolean;
     includeStrap?: boolean;
     includeSupplement?: boolean;
     recipeCode?: string;
@@ -85,6 +87,8 @@ export namespace FdmcaiwuQuotationApi {
   }
 
   export interface CalculateReq {
+    includeCarton: boolean;
+    includeOpp: boolean;
     includeStrap: boolean;
     includeSupplement: boolean;
     mouldProfileId?: number;
@@ -148,6 +152,9 @@ export namespace FdmcaiwuQuotationApi {
   }
 
   export interface CalculateResp extends CostInputs {
+    accessoryPriceId?: number | string;
+    accessoryPriceSourceLocation?: string;
+    accessoryPriceSourceVersion?: string;
     auxiliaryCost?: DecimalValue;
     blockReasons: string[];
     boardLengthMm?: DecimalValue;
@@ -161,6 +168,8 @@ export namespace FdmcaiwuQuotationApi {
     densityType?: string;
     effectiveWidthMm?: DecimalValue;
     fullLayers?: number;
+    includeCarton?: boolean;
+    includeOpp?: boolean;
     includeStrap?: boolean;
     includeSupplement?: boolean;
     ingredientCosts: IngredientCost[];
