@@ -105,24 +105,24 @@ const COMPOSE_NODE_TYPES = new Set([
  */
 export function getCreativeNodeVisual(type: string): CreativeNodeVisual {
   if (ASSET_NODE_TYPES.has(type)) {
-    return { height: 206, variant: 'asset', width: 166 };
+    return { height: 164, variant: 'asset', width: 160 };
   }
   if (type === 'content-planner') {
-    return { height: 224, variant: 'planner', width: 184 };
+    return { height: 164, variant: 'planner', width: 176 };
   }
   if (type === 'prompt-generator') {
-    return { height: 176, variant: 'llm', width: 202 };
+    return { height: 132, variant: 'llm', width: 184 };
   }
   if (PLAN_ITEM_NODE_TYPES.has(type)) {
-    return { height: 156, variant: 'plan-item', width: 178 };
+    return { height: 124, variant: 'plan-item', width: 168 };
   }
   if (RESULT_PREVIEW_NODE_TYPES.has(type)) {
-    return { height: 158, variant: 'generate', width: 202 };
+    return { height: 126, variant: 'generate', width: 184 };
   }
   if (COMPOSE_NODE_TYPES.has(type)) {
-    return { height: 286, variant: 'compose', width: 224 };
+    return { height: 176, variant: 'compose', width: 196 };
   }
-  return { height: 120, variant: 'compact', width: 180 };
+  return { height: 92, variant: 'compact', width: 168 };
 }
 
 const input = (

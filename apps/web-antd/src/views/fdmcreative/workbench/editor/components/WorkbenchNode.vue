@@ -284,7 +284,10 @@ const llmTags = computed(() => {
 <template>
   <article
     class="creative-node"
-    :class="`creative-node--${visual.variant}`"
+    :class="[
+      `creative-node--${visual.variant}`,
+      { 'creative-node--has-media': Boolean(mediaUrl) },
+    ]"
     :data-node-type="nodeType"
     :data-node-variant="visual.variant"
     :style="nodeStyle"
@@ -475,17 +478,17 @@ const llmTags = computed(() => {
   background: hsl(var(--card) / 98%);
   border: 1px solid
     color-mix(in srgb, var(--node-accent) 36%, hsl(var(--border)));
-  border-radius: 8px;
-  box-shadow: 0 2px 8px hsl(var(--foreground) / 8%);
+  border-radius: 7px;
+  box-shadow: 0 1px 5px hsl(var(--foreground) / 8%);
 }
 
 .node-header {
   display: flex;
-  flex: 0 0 38px;
-  gap: 7px;
+  flex: 0 0 32px;
+  gap: 6px;
   align-items: center;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 7px;
   border-bottom: 1px solid hsl(var(--border) / 72%);
 }
 
@@ -494,7 +497,7 @@ const llmTags = computed(() => {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 18px;
   white-space: nowrap;
@@ -504,16 +507,16 @@ const llmTags = computed(() => {
   display: grid;
   flex: none;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: var(--node-accent);
   background: color-mix(in srgb, var(--node-accent) 10%, white);
-  border-radius: 6px;
+  border-radius: 5px;
 }
 
 .node-icon :deep(svg) {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 .node-more {
@@ -566,8 +569,8 @@ const llmTags = computed(() => {
 }
 
 .node-body {
-  gap: 5px;
-  padding: 7px 8px 6px;
+  gap: 4px;
+  padding: 5px 7px;
 }
 
 .prompt {
@@ -575,17 +578,17 @@ const llmTags = computed(() => {
   flex: 0 0 auto;
   margin: 0;
   overflow: hidden;
-  -webkit-line-clamp: 2;
-  font-size: 11px;
-  line-height: 16px;
+  -webkit-line-clamp: 1;
+  font-size: 10px;
+  line-height: 14px;
   color: hsl(var(--muted-foreground));
   -webkit-box-orient: vertical;
 }
 
 .prompt--planner {
-  min-height: 68px;
-  padding: 7px;
-  -webkit-line-clamp: 4;
+  min-height: 42px;
+  padding: 5px 6px;
+  -webkit-line-clamp: 3;
   color: hsl(var(--foreground) / 82%);
   background: hsl(var(--muted) / 38%);
   border: 1px solid hsl(var(--border) / 66%);
@@ -593,8 +596,8 @@ const llmTags = computed(() => {
 }
 
 .creative-node--llm .prompt {
-  min-height: 42px;
-  padding: 6px 7px;
+  min-height: 30px;
+  padding: 4px 6px;
   -webkit-line-clamp: 2;
   color: color-mix(in srgb, var(--node-accent) 58%, hsl(var(--foreground)));
   background: color-mix(in srgb, var(--node-accent) 6%, hsl(var(--card)));
@@ -616,8 +619,8 @@ const llmTags = computed(() => {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
-  min-height: 23px;
-  padding: 0 6px;
+  min-height: 19px;
+  padding: 0 5px;
   border-bottom: 1px solid hsl(var(--border) / 66%);
 }
 
@@ -631,8 +634,8 @@ const llmTags = computed(() => {
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 10px;
-  line-height: 14px;
+  font-size: 9px;
+  line-height: 12px;
   white-space: nowrap;
 }
 
@@ -675,9 +678,9 @@ const llmTags = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
+  min-height: 22px;
   margin-top: auto;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: white;
   background: linear-gradient(90deg, #8b5cf6, #a855f7);
@@ -688,7 +691,7 @@ const llmTags = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 25px;
+  min-height: 21px;
   margin-top: auto;
   font-size: 10px;
   font-weight: 600;
@@ -716,9 +719,9 @@ const llmTags = computed(() => {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  min-height: 16px;
+  min-height: 14px;
   margin-top: auto;
-  font-size: 10px;
+  font-size: 9px;
   color: hsl(var(--muted-foreground));
 }
 
@@ -769,7 +772,7 @@ const llmTags = computed(() => {
   flex: 1;
   place-items: center;
   min-height: 0;
-  margin: 8px 8px 0;
+  margin: 6px 7px 0;
   overflow: hidden;
   background: hsl(var(--muted) / 52%);
   border-radius: 6px;
@@ -802,11 +805,11 @@ const llmTags = computed(() => {
 
 .asset-caption {
   display: flex;
-  flex: 0 0 38px;
+  flex: 0 0 31px;
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 7px;
 }
 
 .asset-caption strong,
@@ -817,7 +820,7 @@ const llmTags = computed(() => {
 }
 
 .asset-caption strong {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .asset-caption span {
@@ -933,8 +936,8 @@ const llmTags = computed(() => {
 .creative-node--generate .node-body--has-media {
   display: grid;
   grid-template-rows: minmax(0, 1fr) 17px;
-  grid-template-columns: 54px minmax(0, 1fr);
-  gap: 5px 6px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 4px 5px;
 }
 
 .creative-node--generate .node-body--has-media .generate-preview {
@@ -949,7 +952,7 @@ const llmTags = computed(() => {
 
 .creative-node--generate .node-body--has-media .detail-list > div {
   grid-template-columns: 30px minmax(0, 1fr);
-  min-height: 21px;
+  min-height: 18px;
   padding: 0 4px;
 }
 
@@ -962,14 +965,80 @@ const llmTags = computed(() => {
   .node-body:not(.node-body--has-media)
   .detail-list
   > div {
-  min-height: 24px;
+  min-height: 19px;
 }
 
 .creative-node--plan-item .prompt {
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .creative-node--compact .prompt {
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
+}
+
+/* At overview zoom the graph becomes a topology map: retain identity and
+ * execution state while removing content that cannot be read at that scale. */
+:global(.canvas-shell.is-overview) .creative-node .prompt,
+:global(.canvas-shell.is-overview) .creative-node .detail-list,
+:global(.canvas-shell.is-overview) .creative-node .planner-tags,
+:global(.canvas-shell.is-overview) .creative-node .llm-tags,
+:global(.canvas-shell.is-overview) .creative-node .planner-action,
+:global(.canvas-shell.is-overview) .creative-node .llm-action,
+:global(.canvas-shell.is-overview) .creative-node footer,
+:global(.canvas-shell.is-overview) .creative-node .asset-caption,
+:global(.canvas-shell.is-overview) .creative-node .preview-caption,
+:global(.canvas-shell.is-overview) .creative-node .media-play {
+  display: none;
+}
+
+:global(.canvas-shell.is-overview) .creative-node .node-header {
+  flex-basis: 34px;
+  border-bottom: 0;
+}
+
+:global(.canvas-shell.is-overview)
+  .creative-node:is(
+    .creative-node--compact,
+    .creative-node--llm,
+    .creative-node--plan-item,
+    .creative-node--planner
+  )
+  .node-header,
+:global(.canvas-shell.is-overview)
+  .creative-node--generate:not(.creative-node--has-media)
+  .node-header {
+  flex: 1;
+}
+
+:global(.canvas-shell.is-overview) .creative-node--compact .node-body,
+:global(.canvas-shell.is-overview) .creative-node--plan-item .node-body,
+:global(.canvas-shell.is-overview) .creative-node--llm .node-body,
+:global(.canvas-shell.is-overview) .creative-node--planner .node-body {
+  display: none;
+}
+
+:global(.canvas-shell.is-overview)
+  .creative-node--generate:not(.creative-node--has-media)
+  .node-body {
+  display: none;
+}
+
+:global(.canvas-shell.is-overview) .creative-node .asset-preview {
+  margin: 0 5px 5px;
+}
+
+:global(.canvas-shell.is-overview)
+  .creative-node--generate
+  .node-body--has-media {
+  display: block;
+  padding: 0 5px 5px;
+}
+
+:global(.canvas-shell.is-overview)
+  .creative-node--generate
+  .node-body--has-media
+  .generate-preview {
+  width: 100%;
+  height: 100%;
 }
 </style>

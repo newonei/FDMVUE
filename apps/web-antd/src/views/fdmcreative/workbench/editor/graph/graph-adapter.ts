@@ -200,6 +200,16 @@ export interface WorkbenchPoint {
   y: number;
 }
 
+export interface WorkbenchNavigationNode {
+  color: string;
+  icon: string;
+  id: string;
+  label: string;
+  name: string;
+  status: string;
+  type: string;
+}
+
 export interface WorkbenchBlankConnectionRequest {
   clientPoint: WorkbenchPoint;
   graphPoint: WorkbenchPoint;
@@ -212,6 +222,7 @@ export interface WorkbenchBlankConnectionRequest {
 export interface WorkbenchGraphCallbacks {
   onChange?: () => void;
   onConnectToBlank?: (request: WorkbenchBlankConnectionRequest) => void;
+  onNavigationChange?: () => void;
   onNodeGeometryChange?: (nodeId: string) => void;
   onSelectionChange?: (node?: FdmCreativeApi.WorkflowNode) => void;
   onViewportChange?: () => void;
@@ -531,7 +542,7 @@ export class WorkbenchGraphAdapter {
           node.getData()?.type === 'content-planner',
       );
     const firstBranchY = 80;
-    const branchGap = 190;
+    const branchGap = 148;
     const plannerVisual = getCreativeNodeVisual('content-planner');
     const planItemVisual = getCreativeNodeVisual('video-plan-item');
     const plannerY = Math.max(
@@ -653,7 +664,7 @@ export class WorkbenchGraphAdapter {
         const itemNode = templateNode(
           CREATIVE_NODE_MAP.get(itemType)!,
           {
-            x: 440,
+            x: 360,
             y: firstBranchY + index * branchGap,
           },
           {
@@ -665,7 +676,7 @@ export class WorkbenchGraphAdapter {
         const generateNode = templateNode(
           CREATIVE_NODE_MAP.get(generateType)!,
           {
-            x: 696,
+            x: 584,
             y: firstBranchY + index * branchGap,
           },
           {
@@ -725,7 +736,7 @@ export class WorkbenchGraphAdapter {
         const composeDefinition = templateNode(
           CREATIVE_NODE_MAP.get('video-compose')!,
           {
-            x: 950,
+            x: 824,
             y: Math.max(
               40,
               firstBranchY +
@@ -758,11 +769,11 @@ export class WorkbenchGraphAdapter {
         if (compose?.isNode()) this.graph.removeNode(compose);
       }
     });
-    // Generated plans can be much wider/taller than the viewport. Keep cards
-    // readable at their designed size and move the viewport instead of
-    // shrinking every card and its text with zoomToFit.
-    this.graph.zoomTo(1);
-    this.graph.centerContent();
+    if (plan.items.length > 4) this.fit();
+    else {
+      this.graph.zoomTo(1);
+      this.graph.centerContent();
+    }
     this.scheduleViewportChange();
   }
 
@@ -788,10 +799,37 @@ export class WorkbenchGraphAdapter {
     this.graph.zoomToFit({ maxScale: 1, padding: 36 });
   }
 
+  focusNode(id: string, minimumZoom = 0.65) {
+    const node = this.graph.getCellById(id);
+    if (!node?.isNode()) return false;
+    if (this.graph.zoom() < minimumZoom) this.graph.zoomTo(minimumZoom);
+    this.graph.select(node);
+    this.graph.centerCell(node, { padding: 72 });
+    this.scheduleViewportChange();
+    return true;
+  }
+
   getCanvasClientRect(): WorkbenchClientRect {
     return this.normalizeClientRect(
       this.scroller.container.getBoundingClientRect(),
     );
+  }
+
+  getNavigationNodes(): WorkbenchNavigationNode[] {
+    return this.graph.getNodes().map((node) => {
+      const data = node.getData() ?? {};
+      const type = String(data.type ?? 'creative-brief');
+      const template = CREATIVE_NODE_MAP.get(type);
+      return {
+        color: template?.color ?? '#64748b',
+        icon: template?.icon ?? 'lucide:box',
+        id: node.id,
+        label: template?.label ?? type,
+        name: String(data.name ?? template?.label ?? type),
+        status: String(data.status ?? 'IDLE'),
+        type,
+      };
+    });
   }
 
   /**
@@ -930,6 +968,7 @@ export class WorkbenchGraphAdapter {
         { ...node.getData(), status },
         { ignoreHistory: true, workbenchRuntime: true },
       );
+      this.callbacks.onNavigationChange?.();
     }
   }
 

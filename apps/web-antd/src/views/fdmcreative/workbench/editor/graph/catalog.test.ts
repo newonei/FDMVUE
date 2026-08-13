@@ -41,8 +41,8 @@ describe('creative node catalog', () => {
         'image-to-image',
         'image-to-video',
         'output',
-        'prompt-input',
         'prompt-generator',
+        'prompt-input',
         'prompt-template',
         'random-prompt',
         'video-compose',
@@ -510,21 +510,21 @@ describe('creative node catalog', () => {
     for (const node of CREATIVE_NODE_CATALOG) {
       const visual = getCreativeNodeVisual(node.type);
       expect(visual.width).toBeGreaterThanOrEqual(160);
-      expect(visual.width).toBeLessThanOrEqual(224);
-      expect(visual.height).toBeLessThanOrEqual(300);
+      expect(visual.width).toBeLessThanOrEqual(196);
+      expect(visual.height).toBeLessThanOrEqual(176);
     }
     expect(getCreativeNodeVisual('content-planner')).toMatchObject({
-      height: 224,
+      height: 164,
       variant: 'planner',
     });
     expect(getCreativeNodeVisual('image-input')).toMatchObject({
-      height: 206,
+      height: 164,
       variant: 'asset',
     });
     expect(getCreativeNodeVisual('prompt-generator')).toMatchObject({
-      height: 176,
+      height: 132,
       variant: 'llm',
-      width: 202,
+      width: 184,
     });
   });
 });

@@ -5,6 +5,7 @@ import type { CreativeQuickConnectOption } from './graph/catalog';
 import type {
   WorkbenchBlankConnectionRequest,
   WorkbenchGraphAdapter,
+  WorkbenchNavigationNode,
 } from './graph/graph-adapter';
 
 import type { FdmAiApi } from '#/api/fdmai';
@@ -61,6 +62,7 @@ import {
 } from '#/api/fdmcreative';
 import { uploadFile } from '#/api/infra/file';
 
+import CanvasNavigator from './components/CanvasNavigator.vue';
 import ExecutionTaskPanel from './components/ExecutionTaskPanel.vue';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
 import NodeLibraryPanel from './components/NodeLibraryPanel.vue';
@@ -104,9 +106,11 @@ const dirty = ref(false);
 const graphRevision = ref(0);
 const lastSavedAt = ref<Date>();
 const zoomPercent = ref(100);
+const canvasNavigatorOpen = ref(false);
 const project = ref<FdmCreativeApi.Project>();
 const draftVersion = ref(0);
 const selectedNode = ref<FdmCreativeApi.WorkflowNode>();
+const navigationNodes = ref<WorkbenchNavigationNode[]>([]);
 const plannerBusy = ref(false);
 const promptRefineBusy = ref(false);
 const planModalOpen = ref(false);
@@ -351,6 +355,11 @@ const connectedImageReferences = computed(() => {
     projectAssets.value,
     generatedImageAssetsByNodeId.value,
   );
+});
+const navigationNodeCount = computed(() => {
+  // X6 owns the node collection; graphRevision makes structural changes reactive.
+  void graphRevision.value;
+  return adapter.value?.graph.getNodes().length ?? navigationNodes.value.length;
 });
 const connectedTextSources = computed(() => {
   void graphRevision.value;
@@ -700,8 +709,12 @@ async function initialize() {
           if (!canEdit.value) return;
           dirty.value = true;
           graphRevision.value += 1;
+          if (canvasNavigatorOpen.value) refreshNavigationNodes();
         },
         onConnectToBlank: openQuickConnect,
+        onNavigationChange: () => {
+          if (canvasNavigatorOpen.value) refreshNavigationNodes();
+        },
         onSelectionChange: (node) => {
           if (node) closeQuickConnect();
           selectedNode.value = node;
@@ -725,6 +738,7 @@ async function initialize() {
       },
     );
     adapter.value.restoreDefinition(draft?.definition ?? EMPTY_WORKFLOW);
+    refreshNavigationNodes();
     if (canEdit.value) ensureDefaultModels();
     syncAssetNodePreviews();
     dirty.value = false;
@@ -756,6 +770,23 @@ function addNode(type: string) {
         : `画布最多支持 ${MAX_WORKBENCH_NODES} 个节点`,
     );
   }
+}
+
+function refreshNavigationNodes() {
+  navigationNodes.value = adapter.value?.getNavigationNodes() ?? [];
+}
+
+function toggleCanvasNavigator() {
+  refreshNavigationNodes();
+  canvasNavigatorOpen.value = !canvasNavigatorOpen.value;
+}
+
+async function locateCanvasNode(nodeId: string) {
+  const graphAdapter = adapter.value;
+  if (!graphAdapter?.focusNode(nodeId)) return;
+  canvasNavigatorOpen.value = false;
+  await nextTick();
+  graphAdapter.focusNode(nodeId);
 }
 
 function updateQuickConnectPosition() {
@@ -1099,7 +1130,28 @@ function handleWorkbenchKeydown(event: KeyboardEvent) {
   const hasOpenPopup = document.querySelector(
     '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-modal-wrap',
   );
+  const editableTarget =
+    event.target instanceof Element &&
+    event.target.closest(
+      'input, textarea, [contenteditable="true"], [role="textbox"]',
+    );
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 'f' &&
+    !hasOpenPopup &&
+    !editableTarget
+  ) {
+    event.preventDefault();
+    refreshNavigationNodes();
+    canvasNavigatorOpen.value = true;
+    return;
+  }
   if (event.key !== 'Escape' || event.defaultPrevented || hasOpenPopup) return;
+  if (canvasNavigatorOpen.value) {
+    event.preventDefault();
+    canvasNavigatorOpen.value = false;
+    return;
+  }
   if (quickConnectRequest.value) {
     event.preventDefault();
     closeQuickConnect();
@@ -1528,7 +1580,15 @@ onBeforeUnmount(() => {
         @node-drag-start="startDrag"
       />
 
-      <main ref="canvasShellRef" class="canvas-shell">
+      <main
+        ref="canvasShellRef"
+        class="canvas-shell"
+        :class="{
+          'is-detail': zoomPercent > 110,
+          'is-overview': zoomPercent < 60,
+          'is-standard': zoomPercent >= 60 && zoomPercent <= 110,
+        }"
+      >
         <Spin :spinning="loading" tip="正在加载画布…">
           <div ref="canvasRef" class="graph-canvas"></div>
         </Spin>
@@ -1602,6 +1662,23 @@ onBeforeUnmount(() => {
             description="没有匹配的兼容节点"
           />
         </section>
+
+        <Button
+          class="canvas-navigator-trigger"
+          :type="canvasNavigatorOpen ? 'primary' : 'default'"
+          @click="toggleCanvasNavigator"
+        >
+          <IconifyIcon icon="lucide:search" />
+          查找节点
+          <span>{{ navigationNodeCount }}</span>
+        </Button>
+
+        <CanvasNavigator
+          v-model="canvasNavigatorOpen"
+          :active-node-id="selectedNode?.id"
+          :nodes="navigationNodes"
+          @locate="locateCanvasNode"
+        />
 
         <div class="minimap-wrap">
           <div ref="minimapRef" class="minimap"></div>
@@ -1852,6 +1929,35 @@ onBeforeUnmount(() => {
   grid-template-columns:
     clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
     clamp(440px, 28vw, 540px);
+}
+
+.canvas-navigator-trigger {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 9;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 34px;
+  border-radius: 9px;
+  box-shadow: 0 6px 18px hsl(var(--foreground) / 10%);
+}
+
+.canvas-navigator-trigger > span {
+  min-width: 20px;
+  padding: 1px 5px;
+  font-size: 10px;
+  line-height: 16px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  background: hsl(var(--muted) / 68%);
+  border-radius: 999px;
+}
+
+.canvas-navigator-trigger.ant-btn-primary > span {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary-foreground) / 18%);
 }
 
 .minimap-wrap {
