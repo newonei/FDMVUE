@@ -52,6 +52,16 @@ function sidebarGuide(): DefaultTheme.SidebarItem[] {
   return [
     {
       collapsed: false,
+      text: 'FDM Creative',
+      items: [
+        {
+          link: 'fdmcreative/workbench-user-guide',
+          text: '节点式图像视频工作台教程',
+        },
+      ],
+    },
+    {
+      collapsed: false,
       text: '简介',
       items: [
         {
