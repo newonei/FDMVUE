@@ -1,3 +1,17 @@
+<script lang="ts">
+interface InstanceQueryState {
+  deptId?: number;
+  pageNo: number;
+  pageSize: number;
+  periodKey: string;
+  status?: number;
+  userId?: number;
+  userName?: string;
+}
+
+let persistedInstanceQuery: InstanceQueryState | undefined;
+</script>
+
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 
@@ -5,7 +19,7 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemDeptApi } from '#/api/system/dept';
 import type { SystemUserApi } from '#/api/system/user';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useUserStore } from '@vben/stores';
@@ -14,6 +28,7 @@ import { handleTree } from '@vben/utils';
 import {
   Button,
   DatePicker,
+  Input,
   message,
   Popconfirm,
   Select,
@@ -48,6 +63,7 @@ const isPerformanceHr = ref(false);
 const instanceLoading = ref(false);
 const deletingInstanceId = ref<number>();
 const reminding = ref(false);
+const remindingInstanceId = ref<number>();
 const instances = ref<JixiaoApi.Instance[]>([]);
 const instanceTotal = ref(0);
 const selectedInstanceIds = ref<number[]>([]);
@@ -59,14 +75,31 @@ function currentMonthKey() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-const instanceQuery = reactive({
-  pageNo: 1,
-  pageSize: 10,
-  periodKey: currentMonthKey(),
-  deptId: undefined as number | undefined,
-  status: undefined as number | undefined,
-  userId: undefined as number | undefined,
-});
+function createDefaultInstanceQuery(): InstanceQueryState {
+  return {
+    pageNo: 1,
+    pageSize: 10,
+    periodKey: currentMonthKey(),
+    deptId: undefined,
+    status: undefined,
+    userId: undefined,
+    userName: undefined,
+  };
+}
+
+const instanceQuery = reactive<InstanceQueryState>(
+  persistedInstanceQuery
+    ? { ...persistedInstanceQuery }
+    : createDefaultInstanceQuery(),
+);
+
+watch(
+  instanceQuery,
+  (query) => {
+    persistedInstanceQuery = { ...query };
+  },
+  { deep: true, immediate: true },
+);
 
 const userFilterOptions = computed(() =>
   users.value.flatMap((user) =>
@@ -130,7 +163,7 @@ const instanceColumns = computed<TableColumnsType>(() => [
   },
   { dataIndex: 'finalScore', title: '考核结果', width: 110 },
   { dataIndex: 'grade', title: '绩效等级', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 140 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 190 },
 ]);
 
 function canRemind(record: JixiaoApi.Instance) {
@@ -196,6 +229,7 @@ function clearSelection() {
 
 function searchInstances() {
   clearSelection();
+  instanceQuery.userName = instanceQuery.userName?.trim() || undefined;
   instanceQuery.pageNo = 1;
   void loadInstances();
 }
@@ -246,6 +280,17 @@ async function remindSelected() {
   }
 }
 
+async function remindInstance(record: JixiaoApi.Instance) {
+  if (!canRemind(record) || record.id === undefined) return;
+  remindingInstanceId.value = record.id;
+  try {
+    const recipientCount = await remindInstances({ instanceIds: [record.id] });
+    message.success(`已提交 ${recipientCount} 位当前处理人的钉钉催办消息`);
+  } finally {
+    remindingInstanceId.value = undefined;
+  }
+}
+
 function selectedFilterId(filters: Record<string, any>, key: string) {
   const value = filters[key]?.[0];
   return value === undefined ? undefined : Number(value);
@@ -291,6 +336,13 @@ onMounted(initialize);
     <Tabs v-model:active-key="activeTab" class="management-tabs">
       <Tabs.TabPane key="batches" tab="月度考核">
         <div class="filter-bar">
+          <Input
+            v-model:value="instanceQuery.userName"
+            allow-clear
+            :maxlength="50"
+            placeholder="输入被考核人姓名"
+            @press-enter="searchInstances"
+          />
           <DatePicker
             v-model:value="instanceQuery.periodKey"
             :allow-clear="false"
@@ -334,7 +386,10 @@ onMounted(initialize);
                 @confirm="remindSelected"
               >
                 <Button
-                  :disabled="selectedInstanceIds.length === 0"
+                  :disabled="
+                    selectedInstanceIds.length === 0 ||
+                    remindingInstanceId !== undefined
+                  "
                   :loading="reminding"
                   type="primary"
                 >
@@ -393,6 +448,24 @@ onMounted(initialize);
                     详情
                   </Button>
                   <Popconfirm
+                    v-if="canRemind(record)"
+                    title="确认向该考核的当前处理人发送钉钉催办消息？"
+                    @confirm="remindInstance(record)"
+                  >
+                    <Button
+                      :disabled="
+                        reminding ||
+                        (remindingInstanceId !== undefined &&
+                          remindingInstanceId !== record.id)
+                      "
+                      :loading="remindingInstanceId === record.id"
+                      size="small"
+                      type="link"
+                    >
+                      催办
+                    </Button>
+                  </Popconfirm>
+                  <Popconfirm
                     ok-type="danger"
                     title="确认删除该考核？删除后评分、结果和复盘数据将无法恢复。"
                     @confirm="removeInstance(record)"
@@ -438,7 +511,7 @@ onMounted(initialize);
 
 .filter-bar {
   display: grid;
-  grid-template-columns: 180px 140px auto;
+  grid-template-columns: minmax(180px, 260px) 180px 140px auto;
   gap: 8px;
 }
 

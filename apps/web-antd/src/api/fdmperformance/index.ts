@@ -239,6 +239,7 @@ export namespace JixiaoApi {
     status?: number;
     supervisorUserId?: number;
     userId?: number;
+    userName?: string;
   };
 
   export interface InstanceRemindReq {
@@ -322,6 +323,7 @@ export namespace JixiaoApi {
     periodKey?: string;
     publicStatus?: number;
     userId?: number;
+    userName?: string;
   };
 
   export interface GradeAdjustReq {

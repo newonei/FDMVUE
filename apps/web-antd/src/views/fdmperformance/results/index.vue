@@ -10,7 +10,7 @@ import {
   DatePicker,
   Drawer,
   Form,
-  InputNumber,
+  Input,
   message,
   Modal,
   Popconfirm,
@@ -62,7 +62,7 @@ const resultQuery = reactive({
   pageNo: 1,
   pageSize: 10,
   publicStatus: undefined as number | undefined,
-  userId: undefined as number | undefined,
+  userName: undefined as string | undefined,
 });
 const reviewQuery = reactive({
   pageNo: 1,
@@ -201,6 +201,7 @@ function openReview(record: JixiaoApi.Review) {
 }
 
 function searchResults() {
+  resultQuery.userName = resultQuery.userName?.trim() || undefined;
   resultQuery.pageNo = 1;
   selectedResultIds.value = [];
   void loadResults();
@@ -250,7 +251,13 @@ onMounted(() => {
         value-format="YYYY-MM"
         @change="changePeriodMonth"
       />
-      <InputNumber v-model:value="resultQuery.userId" placeholder="员工 ID" />
+      <Input
+        v-model:value="resultQuery.userName"
+        allow-clear
+        :maxlength="50"
+        placeholder="输入被考核人昵称"
+        @press-enter="searchResults"
+      />
       <Select
         v-model:value="resultQuery.grade"
         allow-clear
