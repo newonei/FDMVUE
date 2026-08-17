@@ -62,6 +62,7 @@ import {
 } from '#/api/fdmcreative';
 import { uploadFile } from '#/api/infra/file';
 
+import PromptLibraryPicker from '../../shared/PromptLibraryPicker.vue';
 import CanvasNavigator from './components/CanvasNavigator.vue';
 import ExecutionTaskPanel from './components/ExecutionTaskPanel.vue';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
@@ -88,6 +89,11 @@ defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
 
 interface NodeLibraryPanelExpose {
   getElement: () => HTMLElement | undefined;
+}
+
+interface PromptLibrarySelection {
+  content: string;
+  mode: 'append' | 'replace';
 }
 
 const route = useRoute();
@@ -148,6 +154,13 @@ const planner = reactive({
   prompt: '',
   videoCount: 4,
 });
+const plannerPromptTarget = computed<FdmCreativeApi.PromptTargetType>(() =>
+  planner.mode === 'IMAGE_SET'
+    ? 'IMAGE'
+    : planner.mode === 'VIDEO_SEQUENCE'
+      ? 'VIDEO'
+      : 'GENERAL',
+);
 
 const selectedConfig = computed(() => selectedNode.value?.config ?? {});
 const currentUserRole = computed(() => project.value?.currentUserRole);
@@ -1079,7 +1092,19 @@ function handleInlineConfigChange(key: string, value: unknown) {
   }
 }
 
-function handleInlineAssetChange(payload: { key: string; value: unknown }) {
+function handleInlineAssetChange(payload: {
+  assets?: FdmCreativeApi.CreativeAsset[];
+  key: string;
+  slot?: string;
+  value: unknown;
+}) {
+  if (payload.assets?.length) {
+    const merged = new Map(
+      projectAssets.value.map((asset) => [asset.id, asset]),
+    );
+    payload.assets.forEach((asset) => merged.set(asset.id, asset));
+    projectAssets.value = [...merged.values()];
+  }
   if (
     payload.key === 'assetId' &&
     ['image-input', 'video-input'].includes(selectedNode.value?.type ?? '')
@@ -1091,7 +1116,7 @@ function handleInlineAssetChange(payload: { key: string; value: unknown }) {
   if (
     selectedNode.value &&
     ['firstFrameAssetId', 'lastFrameAssetId', 'referenceAssetIds'].includes(
-      payload.key,
+      payload.slot || payload.key,
     )
   ) {
     let assetId: number | undefined;
@@ -1102,7 +1127,10 @@ function handleInlineAssetChange(payload: { key: string; value: unknown }) {
     } else if (typeof payload.value === 'number') {
       assetId = payload.value;
     }
-    const asset = projectAssets.value.find((item) => item.id === assetId);
+    const asset =
+      payload.assets?.find((item) => item.id === assetId) ||
+      payload.assets?.[0] ||
+      projectAssets.value.find((item) => item.id === assetId);
     if (asset) {
       adapter.value?.setNodeDisplayData(selectedNode.value.id, {
         assetName: asset.name,
@@ -1110,6 +1138,17 @@ function handleInlineAssetChange(payload: { key: string; value: unknown }) {
         previewUrl: asset.url,
       });
     }
+  }
+}
+
+function applyPlannerPromptFromLibrary(selection: PromptLibrarySelection) {
+  planner.prompt =
+    selection.mode === 'replace' || !planner.prompt.trim()
+      ? selection.content
+      : `${planner.prompt.trimEnd()}\n${selection.content}`;
+  planner.prompt = planner.prompt.slice(0, 10_000);
+  if (selectedNode.value?.type === 'content-planner') {
+    handleInlineConfigChange('prompt', planner.prompt);
   }
 }
 
@@ -1713,6 +1752,13 @@ onBeforeUnmount(() => {
                 <IconifyIcon icon="lucide:sparkles" />
               </Button>
             </Tooltip>
+            <PromptLibraryPicker
+              button-text="提示词库"
+              :current-text="planner.prompt"
+              :disabled="!canEdit"
+              :target-type="plannerPromptTarget"
+              @select="applyPlannerPromptFromLibrary"
+            />
             <Textarea
               v-model:value="planner.prompt"
               :auto-size="{ minRows: 1, maxRows: 3 }"
@@ -1782,6 +1828,7 @@ onBeforeUnmount(() => {
           :node="selectedNode"
           :node-run="selectedResultNodeRun"
           :progress="inlineEditorProgress"
+          :project-id="projectId"
           :project-assets="projectAssets"
           :readonly="!canEdit"
           :result-assets="resultAssets"
@@ -2260,6 +2307,10 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: center;
   min-width: 0;
+}
+
+.prompt-input-row > :deep(.ant-btn) {
+  flex: none;
 }
 
 .prompt-input-row :deep(.ant-input) {

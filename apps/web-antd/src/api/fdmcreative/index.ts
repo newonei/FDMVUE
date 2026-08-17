@@ -256,18 +256,21 @@ export namespace FdmCreativeApi {
 
   export interface CreativeAsset {
     createTime?: string;
+    creator?: string;
     expiresAt?: string;
     fileId?: number;
     id: number;
-    kind: 'IMAGE' | 'OTHER' | 'VIDEO';
+    kind: 'AUDIO' | 'DOCUMENT' | 'IMAGE' | 'OTHER' | 'VIDEO';
     metadataJson?: string;
     mimeType?: string;
     name: string;
     projectId: number;
+    projectName?: string;
     sha256?: string;
     size?: number;
     sourceNodeRunId?: number;
     sourceType?: string;
+    updateTime?: string;
     url?: string;
   }
 
@@ -277,6 +280,64 @@ export namespace FdmCreativeApi {
     projectId: number;
     url: string;
   }
+
+  export type PromptTargetType = 'GENERAL' | 'IMAGE' | 'VIDEO';
+  export type PromptVisibility = 'PERSONAL' | 'TENANT';
+  export type PromptCategory =
+    | 'BRAND_VISUAL'
+    | 'CAMERA_SHOT'
+    | 'COPYWRITING'
+    | 'GENERAL'
+    | 'ILLUSTRATION_ANIME'
+    | 'NEGATIVE_PROMPT'
+    | 'PORTRAIT'
+    | 'PRODUCT_ECOMMERCE'
+    | 'PROMPT_OPTIMIZATION'
+    | 'SCENE_SPACE'
+    | 'SOCIAL_POSTER'
+    | 'VIDEO_SCRIPT';
+
+  export interface CreativePrompt {
+    category: PromptCategory;
+    content: string;
+    createTime?: string;
+    creator?: string;
+    description?: string;
+    editable: boolean;
+    id: number;
+    name: string;
+    ownerUserId: number;
+    tags?: string;
+    targetType: PromptTargetType;
+    updateTime?: string;
+    visibility: PromptVisibility;
+  }
+
+  export interface CreativePromptCategory {
+    code: PromptCategory;
+    description: string;
+    label: string;
+  }
+
+  export type CreativePromptPageParams = PageParam & {
+    category?: PromptCategory;
+    compatibleTargetType?: PromptTargetType;
+    keyword?: string;
+    mineOnly?: boolean;
+    targetType?: PromptTargetType;
+    visibility?: PromptVisibility;
+  };
+
+  export interface CreativePromptSaveReq {
+    category: PromptCategory;
+    content: string;
+    description?: string;
+    id?: number;
+    name: string;
+    tags?: string;
+    targetType: PromptTargetType;
+    visibility: PromptVisibility;
+  }
 }
 
 const PROJECT = '/fdmcreative/project';
@@ -284,6 +345,7 @@ const WORKFLOW = '/fdmcreative/workflow';
 const PLAN = '/fdmcreative/plan';
 const EXECUTION = '/fdmcreative/execution';
 const ASSET = '/fdmcreative/asset';
+const PROMPT = '/fdmcreative/prompt';
 
 export function getCreativeProjectPage(
   params: FdmCreativeApi.ProjectPageParams,
@@ -445,11 +507,26 @@ export function getCreativeExecutionPage(
 }
 
 export function getCreativeAssetPage(
-  params: PageParam & { kind?: string; projectId?: number },
+  params: PageParam & {
+    keyword?: string;
+    kind?: string;
+    kinds?: string[];
+    projectId?: number;
+  },
 ) {
   return requestClient.get<PageResult<FdmCreativeApi.CreativeAsset>>(
     `${ASSET}/page`,
     { params },
+  );
+}
+
+export function importCreativeAsset(data: {
+  sourceAssetId: number;
+  targetProjectId: number;
+}) {
+  return requestClient.post<FdmCreativeApi.CreativeAsset>(
+    `${ASSET}/import`,
+    data,
   );
 }
 
@@ -467,4 +544,35 @@ export function createCreativeAsset(
 
 export function deleteCreativeAsset(id: number) {
   return requestClient.delete<boolean>(`${ASSET}/delete`, { params: { id } });
+}
+
+export function getCreativePromptPage(
+  params: FdmCreativeApi.CreativePromptPageParams,
+) {
+  return requestClient.get<PageResult<FdmCreativeApi.CreativePrompt>>(
+    `${PROMPT}/page`,
+    { params },
+  );
+}
+
+export function getCreativePromptCategories() {
+  return requestClient.get<FdmCreativeApi.CreativePromptCategory[]>(
+    `${PROMPT}/categories`,
+  );
+}
+
+export function createCreativePrompt(
+  data: FdmCreativeApi.CreativePromptSaveReq,
+) {
+  return requestClient.post<number>(`${PROMPT}/create`, data);
+}
+
+export function updateCreativePrompt(
+  data: FdmCreativeApi.CreativePromptSaveReq & { id: number },
+) {
+  return requestClient.put<boolean>(`${PROMPT}/update`, data);
+}
+
+export function deleteCreativePrompt(id: number) {
+  return requestClient.delete<boolean>(`${PROMPT}/delete`, { params: { id } });
 }

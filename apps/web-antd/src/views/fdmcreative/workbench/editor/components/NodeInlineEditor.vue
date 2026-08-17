@@ -25,6 +25,8 @@ import {
 
 import { FileUpload } from '#/components/upload';
 
+import AssetLibraryPicker from '../../../shared/AssetLibraryPicker.vue';
+import PromptLibraryPicker from '../../../shared/PromptLibraryPicker.vue';
 import {
   invalidPromptImageReferenceNumbers,
   normalizePromptReferenceBindings,
@@ -42,6 +44,12 @@ import { nodeRunStatusLabel } from '../node-run-status';
 type InlineEditorPlacement = 'above' | 'below';
 type InlineEditorVariant = 'floating' | 'panel';
 type SchemaScalar = number | string;
+
+interface PromptLibrarySelection {
+  content: string;
+  mode: 'append' | 'replace';
+  prompt: FdmCreativeApi.CreativePrompt;
+}
 
 interface SchemaField {
   description?: string;
@@ -83,6 +91,7 @@ interface Props {
   nodeRun?: FdmCreativeApi.NodeRun;
   placement?: InlineEditorPlacement;
   progress?: number;
+  projectId: number;
   projectAssets?: FdmCreativeApi.CreativeAsset[];
   resultAssets?: FdmCreativeApi.CreativeAsset[];
   resultText?: string;
@@ -277,6 +286,12 @@ const isImageNode = computed(
     props.node.type === 'image-plan-item',
 );
 const isVideoNode = computed(() => VIDEO_TYPES.has(props.node.type));
+const promptLibraryTarget = computed<FdmCreativeApi.PromptTargetType>(() => {
+  if (isImageNode.value) return 'IMAGE';
+  if (isVideoNode.value || props.node.type === 'video-plan-item')
+    return 'VIDEO';
+  return 'GENERAL';
+});
 const isComposeNode = computed(() => COMPOSE_TYPES.has(props.node.type));
 const isLoop = computed(() => LOOP_TYPES.has(props.node.type));
 const isMediaSelector = computed(() =>
@@ -650,6 +665,34 @@ function changePrompt(value: string) {
   emitConfig('prompt', normalized.slice(0, 1000));
 }
 
+function mergedLibraryText(
+  current: string,
+  selection: PromptLibrarySelection,
+  separator = '\n',
+) {
+  if (selection.mode === 'replace' || !current.trim()) return selection.content;
+  return `${current.trimEnd()}${separator}${selection.content}`;
+}
+
+function applyPromptFromLibrary(selection: PromptLibrarySelection) {
+  changePrompt(mergedLibraryText(asString(config.value.prompt), selection));
+}
+
+function applyLibraryText(
+  key:
+    | 'negativePrompt'
+    | 'prompts'
+    | 'promptTemplate'
+    | 'systemPrompt'
+    | 'variations',
+  selection: PromptLibrarySelection,
+) {
+  emitConfig(
+    key,
+    mergedLibraryText(asString(config.value[key]), selection).slice(0, 10_000),
+  );
+}
+
 function appendPromptVariable(variable: 'brief' | 'context' | 'input') {
   const prompt = asString(config.value.prompt).trimEnd();
   const separator = prompt ? ' ' : '';
@@ -679,6 +722,42 @@ function emitAssetChange(key: string, value: unknown, slot?: string) {
       (asset): asset is FdmCreativeApi.CreativeAsset => asset !== undefined,
     );
   emit('assetChange', { assets, key, slot, value });
+}
+
+function selectInputAssetFromLibrary(assets: FdmCreativeApi.CreativeAsset[]) {
+  const asset = assets[0];
+  if (asset)
+    emit('assetChange', { assets: [asset], key: 'assetId', value: asset.id });
+}
+
+function selectReferenceAssetsFromLibrary(
+  assets: FdmCreativeApi.CreativeAsset[],
+) {
+  const ids = [
+    ...new Set([
+      ...referenceAssetIds.value,
+      ...assets.map((asset) => asset.id),
+    ]),
+  ];
+  emit('assetChange', { assets, key: 'referenceAssetIds', value: ids });
+}
+
+function selectFrameAssetFromLibrary(
+  slot: 'firstFrameAssetId' | 'lastFrameAssetId',
+  assets: FdmCreativeApi.CreativeAsset[],
+) {
+  const asset = assets[0];
+  if (!asset) return;
+  if (isPlanItem.value) {
+    emit('assetChange', {
+      assets: [asset],
+      key: 'video',
+      slot,
+      value: { ...videoConfig.value, [slot]: asset.id },
+    });
+  } else {
+    emit('assetChange', { assets: [asset], key: slot, slot, value: asset.id });
+  }
 }
 
 function changeInputAsset(value: unknown) {
@@ -1003,6 +1082,13 @@ function handleEditorEscape() {
               :value="selectedInputAssetId"
               @change="changeInputAsset"
             />
+            <AssetLibraryPicker
+              button-text="浏览全部资产"
+              :disabled="readonly"
+              :kinds="[node.type === 'video-input' ? 'VIDEO' : 'IMAGE']"
+              :project-id="projectId"
+              @select="selectInputAssetFromLibrary"
+            />
             <p>
               {{
                 assetById.get(selectedInputAssetId || -1)?.name ||
@@ -1048,6 +1134,13 @@ function handleEditorEscape() {
               show-search
               :value="frameAssetId(slot.key)"
               @change="changeFrameAsset(slot.key, $event)"
+            />
+            <AssetLibraryPicker
+              button-text="资产库"
+              :disabled="readonly"
+              :kinds="['IMAGE']"
+              :project-id="projectId"
+              @select="selectFrameAssetFromLibrary(slot.key, $event)"
             />
           </article>
           <div v-if="node.type === 'image-to-video'" class="frame-tip">
@@ -1104,6 +1197,14 @@ function handleEditorEscape() {
               <span>管理素材</span>
             </template>
           </Select>
+          <AssetLibraryPicker
+            button-text="浏览资产库"
+            :disabled="readonly"
+            :kinds="['IMAGE']"
+            multiple
+            :project-id="projectId"
+            @select="selectReferenceAssetsFromLibrary"
+          />
           <slot name="asset-actions" :node="node"></slot>
         </div>
       </section>
@@ -1111,6 +1212,13 @@ function handleEditorEscape() {
       <section v-if="supportsPrompt" class="editor-section prompt-section">
         <div class="section-heading">
           <strong>{{ promptLabel() }}</strong>
+          <PromptLibraryPicker
+            button-text="从提示词库选择"
+            :current-text="asString(config.prompt)"
+            :disabled="readonly"
+            :target-type="promptLibraryTarget"
+            @select="applyPromptFromLibrary"
+          />
           <span
             v-if="
               isPromptGenerator
@@ -1238,15 +1346,23 @@ function handleEditorEscape() {
           负向提示词
           <span v-if="asString(config.negativePrompt)">已填写</span>
         </button>
-        <Textarea
-          v-if="negativePromptOpen"
-          class="negative-prompt"
-          :auto-size="{ minRows: 2, maxRows: 4 }"
-          :disabled="readonly"
-          placeholder="描述不希望出现在结果中的内容、风格或画面问题…"
-          :value="asString(config.negativePrompt)"
-          @change="emitConfig('negativePrompt', $event.target.value)"
-        />
+        <div v-if="negativePromptOpen" class="library-text-field">
+          <PromptLibraryPicker
+            button-text="选择负向提示词"
+            :current-text="asString(config.negativePrompt)"
+            :disabled="readonly"
+            :target-type="promptLibraryTarget"
+            @select="applyLibraryText('negativePrompt', $event)"
+          />
+          <Textarea
+            class="negative-prompt"
+            :auto-size="{ minRows: 2, maxRows: 4 }"
+            :disabled="readonly"
+            placeholder="描述不希望出现在结果中的内容、风格或画面问题…"
+            :value="asString(config.negativePrompt)"
+            @change="emitConfig('negativePrompt', $event.target.value)"
+          />
+        </div>
       </section>
 
       <section
@@ -1255,6 +1371,13 @@ function handleEditorEscape() {
       >
         <div class="section-heading">
           <strong>候选提示词</strong>
+          <PromptLibraryPicker
+            button-text="添加库中提示词"
+            :current-text="asString(config.prompts)"
+            :disabled="readonly"
+            :target-type="promptLibraryTarget"
+            @select="applyLibraryText('prompts', $event)"
+          />
           <span>每行一个，每次执行都会重新随机抽取</span>
         </div>
         <Textarea
@@ -1319,6 +1442,13 @@ function handleEditorEscape() {
         <div class="loop-variation-field">
           <div class="section-heading">
             <strong>变化项</strong>
+            <PromptLibraryPicker
+              button-text="从库中添加"
+              :current-text="asString(config.variations)"
+              :disabled="readonly"
+              :target-type="promptLibraryTarget"
+              @select="applyLibraryText('variations', $event)"
+            />
             <span>每行一项；不足时会从第一项循环使用</span>
           </div>
           <Textarea
@@ -1343,6 +1473,13 @@ function handleEditorEscape() {
         <div v-if="expanded" class="loop-variation-field">
           <div class="section-heading">
             <strong>循环提示词模板</strong>
+            <PromptLibraryPicker
+              button-text="从库中选择"
+              :current-text="asString(config.promptTemplate)"
+              :disabled="readonly"
+              :target-type="promptLibraryTarget"
+              @select="applyLibraryText('promptTemplate', $event)"
+            />
             <span>控制上游文本、变化项和轮次变量的组合方式</span>
           </div>
           <Textarea
@@ -1418,6 +1555,13 @@ function handleEditorEscape() {
             系统指令
             <small>定义角色、约束与输出质量；不会作为下游提示词直接输出</small>
           </span>
+          <PromptLibraryPicker
+            button-text="从提示词库选择"
+            :current-text="asString(config.systemPrompt)"
+            :disabled="readonly"
+            target-type="GENERAL"
+            @select="applyLibraryText('systemPrompt', $event)"
+          />
           <Textarea
             :auto-size="{ minRows: 3, maxRows: 6 }"
             :disabled="readonly"
@@ -2345,6 +2489,12 @@ function handleEditorEscape() {
   font-size: 10px;
 }
 
+.frame-card > :deep(.ant-btn) {
+  width: 96px;
+  overflow: hidden;
+  font-size: 10px;
+}
+
 .frame-preview {
   position: relative;
   display: grid;
@@ -2599,6 +2749,15 @@ function handleEditorEscape() {
   margin-top: 7px;
   font-size: 12px;
   line-height: 20px;
+}
+
+.library-text-field {
+  display: grid;
+  gap: 6px;
+}
+
+.library-text-field > :deep(.ant-btn) {
+  justify-self: start;
 }
 
 .system-prompt-field {
