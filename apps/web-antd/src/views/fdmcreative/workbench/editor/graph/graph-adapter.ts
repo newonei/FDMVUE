@@ -219,9 +219,30 @@ export interface WorkbenchBlankConnectionRequest {
   sourcePortType: FdmCreativeApi.PortType;
 }
 
+/**
+ * A result-history asset can only enter the graph through a normal FDM
+ * image/video input node.  The value is the stable asset id, never a provider
+ * URL or a browser-side file copy.
+ */
+export interface WorkbenchMediaBranchRequest {
+  assetId: FdmCreativeApi.MediaLongId;
+  assetKind: 'IMAGE' | 'VIDEO';
+  assetName?: string;
+  originNodeId?: string;
+  tool?: FdmCreativeApi.MediaToolDescriptor;
+}
+
+export interface WorkbenchMediaBranchResult {
+  derivedNode?: FdmCreativeApi.WorkflowNode;
+  inputNode: FdmCreativeApi.WorkflowNode;
+  nodeIds: string[];
+}
+
 export interface WorkbenchGraphCallbacks {
   onChange?: () => void;
   onConnectToBlank?: (request: WorkbenchBlankConnectionRequest) => void;
+  /** True while a node is being dragged; the second value is true only when its geometry changed. */
+  onNodeDragStateChange?: (dragging: boolean, changed?: boolean) => void;
   onNavigationChange?: () => void;
   onNodeGeometryChange?: (nodeId: string) => void;
   onSelectionChange?: (node?: FdmCreativeApi.WorkflowNode) => void;
@@ -241,6 +262,8 @@ export class WorkbenchGraphAdapter {
   private readonly callbacks: WorkbenchGraphCallbacks;
   private readonly connectingEdgeIds = new Set<string>();
   private readonly dnd: Dnd;
+  private nodeDragActive = false;
+  private nodeGeometryChangedDuringDrag = false;
   private readonly pendingNodeTargetPorts = new Map<
     string,
     Map<string, string>
@@ -511,6 +534,78 @@ export class WorkbenchGraphAdapter {
     return definition;
   }
 
+  /**
+   * Build a visible, editable workflow branch from a selected result asset.
+   * No external model request occurs here: the user confirms the operation by
+   * creating the branch, and the normal workflow save/run paths own execution.
+   */
+  addMediaToolBranch(
+    request: WorkbenchMediaBranchRequest,
+  ): undefined | WorkbenchMediaBranchResult {
+    const tool = request.tool;
+    if (
+      this.readOnly ||
+      !tool ||
+      !tool.available ||
+      !tool.applicableAssetKinds.includes(request.assetKind)
+    ) {
+      return undefined;
+    }
+    const additions = tool.template === 'MULTI_ANGLE_V1' ? 4 : 2;
+    if (this.graph.getNodes().length + additions > MAX_WORKBENCH_NODES) {
+      return undefined;
+    }
+    const inputNode = this.createPinnedMediaInput(request);
+    if (!inputNode) return undefined;
+
+    let derivedNode: FdmCreativeApi.WorkflowNode | undefined;
+    let nodeIds: string[] = [];
+    this.graph.batchUpdate('create-media-tool-branch', () => {
+      if (tool.template === 'MULTI_ANGLE_V1') {
+        const branch = this.addMultiAngleBranch(inputNode, tool);
+        if (!branch) return;
+        derivedNode = branch.derivedNode;
+        nodeIds = branch.nodeIds;
+        return;
+      }
+      const template = CREATIVE_NODE_MAP.get(tool.generatedNodeType);
+      if (!template) return;
+      derivedNode = templateNode(
+        template,
+        this.rightOf(inputNode, 56),
+        {
+          config: {
+            ...template.defaultConfig,
+            ...tool.defaultConfig,
+          },
+        },
+      );
+      const targetPortId = this.resolveMediaToolInputPort(
+        tool,
+        request.assetKind,
+      );
+      if (!targetPortId || !this.canAddBranchEdge(inputNode, derivedNode, targetPortId)) {
+        derivedNode = undefined;
+        return;
+      }
+      this.graph.addNode(toX6Node(inputNode));
+      this.graph.addNode(toX6Node(derivedNode));
+      this.graph.addEdge(
+        toX6Edge({
+          id: createLocalId('edge'),
+          sourceNodeId: inputNode.id,
+          sourcePortId: 'asset',
+          targetNodeId: derivedNode.id,
+          targetPortId,
+        }),
+      );
+      nodeIds = [inputNode.id, derivedNode.id];
+    });
+    if (!derivedNode || nodeIds.length === 0) return undefined;
+    this.graph.select(derivedNode.id);
+    return { derivedNode, inputNode, nodeIds };
+  }
+
   addNode(type: string, position?: { x: number; y: number }) {
     if (this.readOnly) return undefined;
     const template = CREATIVE_NODE_MAP.get(type);
@@ -527,6 +622,24 @@ export class WorkbenchGraphAdapter {
     const definition = templateNode(template, position);
     this.graph.addNode(toX6Node(definition));
     return definition;
+  }
+
+  /**
+   * Pin a historical, project-scoped result to a regular input node. This is
+   * deliberately one history batch so one Undo removes the whole insertion.
+   */
+  addPinnedMediaAsset(
+    request: Omit<WorkbenchMediaBranchRequest, 'tool'>,
+  ): undefined | WorkbenchMediaBranchResult {
+    if (this.readOnly || !request.assetId) return undefined;
+    if (this.graph.getNodes().length >= MAX_WORKBENCH_NODES) return undefined;
+    const inputNode = this.createPinnedMediaInput(request);
+    if (!inputNode) return undefined;
+    this.graph.batchUpdate('pin-result-asset', () => {
+      this.graph.addNode(toX6Node(inputNode));
+    });
+    this.graph.select(inputNode.id);
+    return { inputNode, nodeIds: [inputNode.id] };
   }
 
   applyPlanAsBatch(plan: FdmCreativeApi.ContentPlan) {
@@ -878,12 +991,23 @@ export class WorkbenchGraphAdapter {
     if (!this.readOnly && this.graph.canRedo()) this.graph.redo();
   }
 
+  /**
+   * Agent application always receives a fully validated server draft. Keep the restoration as one
+   * named X6 history batch so the UI does not replay the model's individual patch operations.
+   */
+  restoreAuthoritativeAgentDefinition(
+    definition: FdmCreativeApi.WorkflowDefinition,
+  ) {
+    this.restoreDefinition(definition, false, 'agent-apply-authoritative-draft');
+  }
+
   restoreDefinition(
     definition: FdmCreativeApi.WorkflowDefinition = EMPTY_WORKFLOW,
     cleanHistory = true,
+    batchName = 'restore-workflow',
   ) {
     this.suppressChange = true;
-    this.graph.batchUpdate('restore-workflow', () => {
+    this.graph.batchUpdate(batchName, () => {
       this.graph.clearCells();
       this.graph.addNodes(definition.nodes.map(toX6Node));
       this.graph.addEdges(
@@ -1008,6 +1132,84 @@ export class WorkbenchGraphAdapter {
     this.graph.zoomTo(next);
   }
 
+  private addMultiAngleBranch(
+    inputNode: FdmCreativeApi.WorkflowNode,
+    tool: FdmCreativeApi.MediaToolDescriptor,
+  ): undefined | WorkbenchMediaBranchResult {
+    const promptTemplate = CREATIVE_NODE_MAP.get('prompt-template');
+    const imageToImage = CREATIVE_NODE_MAP.get('image-to-image');
+    const imageCollection = CREATIVE_NODE_MAP.get('image-collection');
+    if (!promptTemplate || !imageToImage || !imageCollection) return undefined;
+    const promptNode = templateNode(promptTemplate, this.rightOf(inputNode, 56), {
+      config: {
+        ...promptTemplate.defaultConfig,
+        language: 'ZH_CN',
+        prompt:
+          '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
+        targetType: 'IMAGE',
+      },
+      name: '多角度提示词',
+    });
+    const generationNode = templateNode(
+      imageToImage,
+      this.rightOf(promptNode, 56),
+      {
+        config: {
+          ...imageToImage.defaultConfig,
+          ...tool.defaultConfig,
+          outputCount: 4,
+          prompt:
+            '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
+        },
+        name: '多角度生成',
+      },
+    );
+    const collectionNode = templateNode(
+      imageCollection,
+      this.rightOf(generationNode, 56),
+      { name: '多角度图片集合' },
+    );
+    const proposed = [
+      {
+        sourceNodeId: inputNode.id,
+        sourcePortId: 'asset',
+        targetNodeId: generationNode.id,
+        targetPortId: 'reference',
+      },
+      {
+        sourceNodeId: promptNode.id,
+        sourcePortId: 'prompt',
+        targetNodeId: generationNode.id,
+        targetPortId: 'prompt',
+      },
+      {
+        sourceNodeId: generationNode.id,
+        sourcePortId: 'asset',
+        targetNodeId: collectionNode.id,
+        targetPortId: 'images',
+      },
+    ];
+    const definition = this.serializeDefinition();
+    definition.nodes.push(inputNode, promptNode, generationNode, collectionNode);
+    for (const edge of proposed) {
+      if (!validateWorkflowConnection({ definition, ...edge })) return undefined;
+      definition.edges.push({ id: createLocalId('edge-probe'), ...edge });
+    }
+    this.graph.addNodes(
+      [inputNode, promptNode, generationNode, collectionNode].map((node) =>
+        toX6Node(node),
+      ),
+    );
+    for (const edge of proposed) {
+      this.graph.addEdge(toX6Edge({ id: createLocalId('edge'), ...edge }));
+    }
+    return {
+      derivedNode: generationNode,
+      inputNode,
+      nodeIds: [inputNode.id, promptNode.id, generationNode.id, collectionNode.id],
+    };
+  }
+
   private bindEvents() {
     const changed = () => {
       if (!this.suppressChange) this.callbacks.onChange?.();
@@ -1023,6 +1225,7 @@ export class WorkbenchGraphAdapter {
       }
     });
     this.graph.on('node:change:position', ({ node }) => {
+      if (this.nodeDragActive) this.nodeGeometryChangedDuringDrag = true;
       changed();
       this.callbacks.onNodeGeometryChange?.(node.id);
     });
@@ -1033,6 +1236,14 @@ export class WorkbenchGraphAdapter {
     this.graph.on('node:change:data', ({ options }) => {
       if (!options?.workbenchRuntime) changed();
     });
+    this.graph.on('node:mousedown', () => {
+      if (this.readOnly) return;
+      this.nodeDragActive = true;
+      this.nodeGeometryChangedDuringDrag = false;
+      this.callbacks.onNodeDragStateChange?.(true);
+    });
+    this.graph.on('node:mouseup', () => this.finishNodeDrag());
+    this.graph.on('blank:mouseup', () => this.finishNodeDrag());
     this.graph.on('edge:connected', ({ edge }) => {
       const sourceNodeId = edge.getSourceCellId();
       const sourcePortId = edge.getSourcePortId();
@@ -1096,6 +1307,22 @@ export class WorkbenchGraphAdapter {
     });
   }
 
+  private canAddBranchEdge(
+    inputNode: FdmCreativeApi.WorkflowNode,
+    derivedNode: FdmCreativeApi.WorkflowNode,
+    targetPortId: string,
+  ) {
+    const definition = this.serializeDefinition();
+    definition.nodes.push(inputNode, derivedNode);
+    return validateWorkflowConnection({
+      definition,
+      sourceNodeId: inputNode.id,
+      sourcePortId: 'asset',
+      targetNodeId: derivedNode.id,
+      targetPortId,
+    });
+  }
+
   private connectionDefinition(edgeId?: string) {
     const definition = this.serializeDefinition();
     if (!edgeId) return definition;
@@ -1121,6 +1348,35 @@ export class WorkbenchGraphAdapter {
       x,
       y,
     };
+  }
+
+  private createPinnedMediaInput(
+    request: Omit<WorkbenchMediaBranchRequest, 'tool'>,
+  ) {
+    const type = request.assetKind === 'VIDEO' ? 'video-input' : 'image-input';
+    const template = CREATIVE_NODE_MAP.get(type);
+    if (!template) return undefined;
+    const origin = request.originNodeId
+      ? this.workflowNodeFromCell(request.originNodeId)
+      : undefined;
+    const position = origin
+      ? this.rightOf(origin, 56)
+      : { x: 120, y: 120 + this.graph.getNodes().length * 12 };
+    return templateNode(template, position, {
+      config: {
+        ...template.defaultConfig,
+        assetId: request.assetId,
+      },
+      name: request.assetName?.trim() || template.label,
+    });
+  }
+
+  private finishNodeDrag() {
+    if (!this.nodeDragActive) return;
+    const changed = this.nodeGeometryChangedDuringDrag;
+    this.nodeDragActive = false;
+    this.nodeGeometryChangedDuringDrag = false;
+    this.callbacks.onNodeDragStateChange?.(false, changed);
   }
 
   private normalizeClientRect(rect: {
@@ -1159,6 +1415,21 @@ export class WorkbenchGraphAdapter {
       .map((item) => item.portId);
   }
 
+  private resolveMediaToolInputPort(
+    tool: FdmCreativeApi.MediaToolDescriptor,
+    assetKind: 'IMAGE' | 'VIDEO',
+  ) {
+    if (tool.generatedNodeType === 'asset-library-output') {
+      return assetKind === 'VIDEO' ? 'video' : 'image';
+    }
+    const template = CREATIVE_NODE_MAP.get(tool.generatedNodeType);
+    if (!template) return undefined;
+    const requested = template.ports.find(
+      (port) => port.direction === 'INPUT' && port.id === tool.inputPort,
+    );
+    return requested?.id;
+  }
+
   private resolvePendingTargetPort(edge: Edge) {
     const sourceNodeId = edge.getSourceCellId();
     const sourcePortId = edge.getSourcePortId();
@@ -1187,6 +1458,16 @@ export class WorkbenchGraphAdapter {
       sourcePortId,
       targetNodeId,
     });
+  }
+
+  private rightOf(
+    source: Pick<FdmCreativeApi.WorkflowNode, 'height' | 'width' | 'x' | 'y'>,
+    gap: number,
+  ) {
+    return {
+      x: source.x + source.width + gap,
+      y: source.y,
+    };
   }
 
   private readonly scheduleViewportChange = () => {

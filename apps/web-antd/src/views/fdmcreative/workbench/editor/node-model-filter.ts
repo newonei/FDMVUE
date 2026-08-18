@@ -38,23 +38,23 @@ function requiredCapability(
   references: number,
 ): FdmAiApi.Capability | undefined {
   switch (nodeType) {
+    case 'first-last-frame-to-video': {
+      return 'FIRST_LAST_FRAME_TO_VIDEO';
+    }
+    case 'image-edit': {
+      return 'IMAGE_EDIT';
+    }
     case 'image-generate': {
       return references > 0 ? 'IMAGE_TO_IMAGE' : 'TEXT_TO_IMAGE';
     }
     case 'image-to-image': {
       return 'IMAGE_TO_IMAGE';
     }
-    case 'image-edit': {
-      return 'IMAGE_EDIT';
-    }
-    case 'video-generate': {
-      return references > 0 ? 'FIRST_FRAME_TO_VIDEO' : 'TEXT_TO_VIDEO';
-    }
     case 'image-to-video': {
       return 'FIRST_FRAME_TO_VIDEO';
     }
-    case 'first-last-frame-to-video': {
-      return 'FIRST_LAST_FRAME_TO_VIDEO';
+    case 'video-generate': {
+      return references > 0 ? 'FIRST_FRAME_TO_VIDEO' : 'TEXT_TO_VIDEO';
     }
     default: {
       return undefined;

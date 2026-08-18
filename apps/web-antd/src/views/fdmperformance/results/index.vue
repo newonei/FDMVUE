@@ -4,6 +4,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import type { JixiaoApi } from '#/api/fdmperformance';
 
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
 
 import {
   Button,
@@ -25,6 +26,7 @@ import {
   adjustGrade,
   batchPublishResults,
   getResultPage,
+  getReview,
   getReviewPage,
   publishResult,
 } from '#/api/fdmperformance';
@@ -34,9 +36,12 @@ import {
   PERFORMANCE_PAGE_SIZE_OPTIONS,
   REVIEW_STATUS_MAP,
 } from '../shared/constants';
+import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceResults' });
+
+const route = useRoute();
 
 const resultLoading = ref(false);
 const batchPublishing = ref(false);
@@ -200,6 +205,20 @@ function openReview(record: JixiaoApi.Review) {
   reviewOpen.value = true;
 }
 
+async function openReviewFromRoute() {
+  const value = route.query.reviewId;
+  const reviewId = Array.isArray(value) ? value[0] : value;
+  if (!reviewId || !/^\d+$/.test(reviewId)) {
+    return;
+  }
+  try {
+    activeReview.value = await getReview(reviewId);
+    reviewOpen.value = true;
+  } catch {
+    message.warning('指定复盘不存在或当前账号无权限查看');
+  }
+}
+
 function searchResults() {
   resultQuery.userName = resultQuery.userName?.trim() || undefined;
   resultQuery.pageNo = 1;
@@ -233,8 +252,9 @@ function changeReviewPage(pagination: any) {
   void loadReviews();
 }
 
-onMounted(() => {
-  void Promise.all([loadResults(), loadReviews()]);
+onMounted(async () => {
+  await Promise.all([loadResults(), loadReviews()]);
+  await openReviewFromRoute();
 });
 </script>
 
@@ -321,7 +341,10 @@ onMounted(() => {
       @change="changeResultPage"
     >
       <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'grade'">
+        <template v-if="column.dataIndex === 'publicTime'">
+          {{ formatPerformanceDateTime(record.publicTime) }}
+        </template>
+        <template v-else-if="column.dataIndex === 'grade'">
           <Tag
             :color="
               record.grade === 'C'
@@ -398,7 +421,15 @@ onMounted(() => {
       @change="changeReviewPage"
     >
       <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'status'">
+        <template
+          v-if="
+            column.dataIndex === 'submittedTime' ||
+            column.dataIndex === 'employeeConfirmedTime'
+          "
+        >
+          {{ formatPerformanceDateTime(record[column.dataIndex]) }}
+        </template>
+        <template v-else-if="column.dataIndex === 'status'">
           <Tag :color="reviewStatus(record.status).color">
             {{ reviewStatus(record.status).text }}
           </Tag>

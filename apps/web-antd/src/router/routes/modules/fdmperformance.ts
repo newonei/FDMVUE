@@ -4,7 +4,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/fdmperformance',
     name: 'FdmPerformance',
-    redirect: '/fdmperformance/my',
+    redirect: '/fdmperformance/dashboard',
     meta: {
       title: '智能绩效',
       icon: 'lucide:chart-no-axes-combined',
@@ -12,6 +12,23 @@ const routes: RouteRecordRaw[] = [
       order: 20,
     },
     children: [
+      {
+        path: 'dashboard',
+        name: 'FdmPerformanceDashboard',
+        meta: { title: '绩效看板', icon: 'lucide:layout-dashboard' },
+        component: () => import('#/views/fdmperformance/dashboard/index.vue'),
+      },
+      {
+        path: 'dashboard/person/:userId',
+        name: 'FdmPerformancePersonHistory',
+        meta: {
+          title: '人员历史绩效',
+          hideInMenu: true,
+          icon: 'lucide:chart-no-axes-combined',
+        },
+        component: () =>
+          import('#/views/fdmperformance/dashboard/person/index.vue'),
+      },
       {
         path: 'my',
         name: 'FdmPerformanceMy',

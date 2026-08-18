@@ -124,7 +124,7 @@ export function resolveConnectedImageReferences(
         IMAGE_PORT_TYPES.has(targetPort.type),
       );
     })
-    .sort((left, right) => {
+    .toSorted((left, right) => {
       const portDifference =
         (targetPortOrder.get(left.targetPortId) ?? Number.MAX_SAFE_INTEGER) -
         (targetPortOrder.get(right.targetPortId) ?? Number.MAX_SAFE_INTEGER);

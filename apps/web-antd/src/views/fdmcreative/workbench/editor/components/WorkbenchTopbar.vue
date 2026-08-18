@@ -8,8 +8,12 @@ defineOptions({ name: 'FdmCreativeWorkbenchTopbar' });
 withDefaults(
   defineProps<{
     canEdit?: boolean;
+    canExport?: boolean;
+    canImport?: boolean;
     canRun?: boolean;
     dirty?: boolean;
+    exporting?: boolean;
+    importing?: boolean;
     projectName?: string;
     publishing?: boolean;
     roleLabel?: string;
@@ -19,8 +23,12 @@ withDefaults(
   }>(),
   {
     canEdit: true,
+    canExport: true,
+    canImport: true,
     canRun: true,
     dirty: false,
+    exporting: false,
+    importing: false,
     projectName: '',
     publishing: false,
     roleLabel: '',
@@ -30,7 +38,9 @@ withDefaults(
 
 const emit = defineEmits<{
   back: [];
+  export: [];
   fit: [];
+  import: [];
   publish: [];
   redo: [];
   run: [];
@@ -105,6 +115,28 @@ const emit = defineEmits<{
       </Tooltip>
     </Space>
     <Space>
+      <Tooltip title="导出安全的工作流结构，不包含运行记录、临时链接或凭据">
+        <Button
+          v-access:code="['fdmcreative:workflow:query']"
+          :disabled="!canExport"
+          :loading="exporting"
+          @click="emit('export')"
+        >
+          <IconifyIcon icon="lucide:download" />
+          导出
+        </Button>
+      </Tooltip>
+      <Tooltip title="导入会先预检素材引用，再明确确认替换当前草稿">
+        <Button
+          v-access:code="['fdmcreative:workflow:update']"
+          :disabled="!canImport"
+          :loading="importing"
+          @click="emit('import')"
+        >
+          <IconifyIcon icon="lucide:upload" />
+          导入
+        </Button>
+      </Tooltip>
       <Button
         v-access:code="['fdmcreative:execution:run']"
         :disabled="!canRun"

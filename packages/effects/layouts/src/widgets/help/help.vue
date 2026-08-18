@@ -3,7 +3,7 @@ import { $t } from '@vben/locales';
 import { openWindow } from '@vben/utils';
 
 import { useVbenModal } from '@vben-core/popup-ui';
-import { Badge, VbenButton, VbenButtonGroup } from '@vben-core/shadcn-ui';
+import { VbenButton, VbenButtonGroup } from '@vben-core/shadcn-ui';
 
 import { useMagicKeys, whenever } from '@vueuse/core';
 
@@ -86,7 +86,6 @@ const [Modal, modalApi] = useVbenModal({
           </VbenButton>
         </VbenButtonGroup>
       </div>
-
-    </div>
+</div>
   </Modal>
 </template>

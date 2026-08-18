@@ -71,6 +71,55 @@ export function inlineNodeConfigValidationError(
   ) {
     return '素材选择序号必须是正整数';
   }
+  if (nodeType === 'image-crop') {
+    const values = [
+      ['cropX', config.cropX ?? 0],
+      ['cropY', config.cropY ?? 0],
+      ['cropWidth', config.cropWidth ?? 1],
+      ['cropHeight', config.cropHeight ?? 1],
+    ] as const;
+    const invalid = values.some(
+      ([, value]) => typeof value !== 'number' || !Number.isFinite(value),
+    );
+    if (invalid) return '裁剪坐标必须是有限数字';
+    const cropX = values[0][1] as number;
+    const cropY = values[1][1] as number;
+    const cropWidth = values[2][1] as number;
+    const cropHeight = values[3][1] as number;
+    if (
+      cropX < 0 ||
+      cropY < 0 ||
+      cropWidth <= 0 ||
+      cropHeight <= 0 ||
+      cropX + cropWidth > 1 ||
+      cropY + cropHeight > 1
+    ) {
+      return '裁剪矩形必须在原图的归一化边界内';
+    }
+    if (
+      config.coordinateMode !== undefined &&
+      String(config.coordinateMode).toUpperCase() !== 'NORMALIZED'
+    ) {
+      return '图片裁剪仅支持归一化坐标';
+    }
+  }
+  if (nodeType === 'image-split') {
+    const columns = config.columns ?? 2;
+    const rows = config.rows ?? 2;
+    if (
+      typeof columns !== 'number' ||
+      typeof rows !== 'number' ||
+      !Number.isInteger(columns) ||
+      !Number.isInteger(rows) ||
+      columns < 1 ||
+      rows < 1 ||
+      columns > 8 ||
+      rows > 8 ||
+      columns * rows > 64
+    ) {
+      return '图片分割行列必须是 1 到 8 的整数，输出总数不能超过 64';
+    }
+  }
   if (nodeType !== 'video-normalize') return undefined;
 
   const width = configuredNumber(

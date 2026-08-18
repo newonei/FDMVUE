@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "nodes": [
+    {
+      "id": "prompt-source",
+      "type": "prompt-input",
+      "name": "创作提示词",
+      "x": 40,
+      "y": 80,
+      "width": 184,
+      "height": 132,
+      "config": { "prompt": "玻璃质感产品广告，柔和棚拍光", "language": "ZH_CN" },
+      "ports": [
+        { "id": "prompt", "direction": "OUTPUT", "type": "prompt-text" }
+      ]
+    },
+    {
+      "id": "random-prompt",
+      "type": "random-prompt",
+      "name": "随机提示词",
+      "x": 280,
+      "y": 80,
+      "width": 184,
+      "height": 132,
+      "config": { "prompts": "晨光\n暮色", "language": "ZH_CN" },
+      "ports": [
+        { "id": "prompts", "direction": "INPUT", "type": "prompt-text" },
+        { "id": "prompt", "direction": "OUTPUT", "type": "prompt-text" }
+      ]
+    },
+    {
+      "id": "image-generate",
+      "type": "image-generate",
+      "name": "图片生成",
+      "x": 520,
+      "y": 80,
+      "width": 184,
+      "height": 126,
+      "config": {},
+      "ports": [
+        { "id": "item", "direction": "INPUT", "type": "image-plan-item" },
+        { "id": "prompt", "direction": "INPUT", "type": "prompt-text" },
+        { "id": "reference", "direction": "INPUT", "type": "image-list" },
+        { "id": "asset", "direction": "OUTPUT", "type": "image-asset" }
+      ]
+    },
+    {
+      "id": "image-collection",
+      "type": "image-collection",
+      "name": "图片集合",
+      "x": 760,
+      "y": 80,
+      "width": 168,
+      "height": 92,
+      "config": {},
+      "ports": [
+        { "id": "images", "direction": "INPUT", "type": "image-list", "required": true },
+        { "id": "ordered-images", "direction": "OUTPUT", "type": "image-list" }
+      ]
+    },
+    {
+      "id": "image-loop",
+      "type": "image-loop",
+      "name": "图片循环",
+      "x": 1000,
+      "y": 80,
+      "width": 168,
+      "height": 92,
+      "config": { "count": 2, "promptTemplate": "{{input}} {{item}}" },
+      "ports": [
+        { "id": "prompt", "direction": "INPUT", "type": "prompt-text" },
+        { "id": "brief", "direction": "INPUT", "type": "creative-brief" },
+        { "id": "images", "direction": "INPUT", "type": "image-list" },
+        { "id": "result-prompt", "direction": "OUTPUT", "type": "prompt-text" },
+        { "id": "selected-images", "direction": "OUTPUT", "type": "image-list" }
+      ]
+    },
+    {
+      "id": "loop-image-generate",
+      "type": "image-generate",
+      "name": "循环图片生成",
+      "x": 1240,
+      "y": 80,
+      "width": 184,
+      "height": 126,
+      "config": {},
+      "ports": [
+        { "id": "item", "direction": "INPUT", "type": "image-plan-item" },
+        { "id": "prompt", "direction": "INPUT", "type": "prompt-text" },
+        { "id": "reference", "direction": "INPUT", "type": "image-list" },
+        { "id": "asset", "direction": "OUTPUT", "type": "image-asset" }
+      ]
+    },
+    {
+      "id": "video-input",
+      "type": "video-input",
+      "name": "视频素材",
+      "x": 520,
+      "y": 340,
+      "width": 160,
+      "height": 164,
+      "config": { "assetId": "123" },
+      "ports": [
+        { "id": "asset", "direction": "OUTPUT", "type": "video-asset" }
+      ]
+    },
+    {
+      "id": "video-loop",
+      "type": "video-loop",
+      "name": "视频循环",
+      "x": 760,
+      "y": 340,
+      "width": 168,
+      "height": 92,
+      "config": { "count": 2, "promptTemplate": "{{input}} {{item}}" },
+      "ports": [
+        { "id": "prompt", "direction": "INPUT", "type": "prompt-text" },
+        { "id": "brief", "direction": "INPUT", "type": "creative-brief" },
+        { "id": "videos", "direction": "INPUT", "type": "video-list" },
+        { "id": "result-prompt", "direction": "OUTPUT", "type": "prompt-text" },
+        { "id": "selected-videos", "direction": "OUTPUT", "type": "video-list" }
+      ]
+    },
+    {
+      "id": "video-timeline",
+      "type": "video-timeline",
+      "name": "视频时间线",
+      "x": 1000,
+      "y": 340,
+      "width": 168,
+      "height": 92,
+      "config": {},
+      "ports": [
+        { "id": "videos", "direction": "INPUT", "type": "video-list", "required": true },
+        { "id": "ordered-videos", "direction": "OUTPUT", "type": "video-list" },
+        { "id": "timeline", "direction": "OUTPUT", "type": "timeline" }
+      ]
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "name": "成果输出",
+      "x": 1480,
+      "y": 180,
+      "width": 196,
+      "height": 176,
+      "config": {},
+      "ports": [
+        { "id": "artifacts", "direction": "INPUT", "type": "artifact-set" },
+        { "id": "images", "direction": "INPUT", "type": "image-list" },
+        { "id": "image", "direction": "INPUT", "type": "image-asset" },
+        { "id": "videos", "direction": "INPUT", "type": "video-list" },
+        { "id": "video", "direction": "INPUT", "type": "video-asset" },
+        { "id": "timeline", "direction": "INPUT", "type": "timeline" }
+      ]
+    }
+  ],
+  "edges": [
+    { "id": "prompt-to-random", "sourceNodeId": "prompt-source", "sourcePortId": "prompt", "targetNodeId": "random-prompt", "targetPortId": "prompts" },
+    { "id": "random-to-image", "sourceNodeId": "random-prompt", "sourcePortId": "prompt", "targetNodeId": "image-generate", "targetPortId": "prompt" },
+    { "id": "image-to-collection", "sourceNodeId": "image-generate", "sourcePortId": "asset", "targetNodeId": "image-collection", "targetPortId": "images" },
+    { "id": "random-to-image-loop", "sourceNodeId": "random-prompt", "sourcePortId": "prompt", "targetNodeId": "image-loop", "targetPortId": "prompt" },
+    { "id": "collection-to-image-loop", "sourceNodeId": "image-collection", "sourcePortId": "ordered-images", "targetNodeId": "image-loop", "targetPortId": "images" },
+    { "id": "image-loop-to-generate", "sourceNodeId": "image-loop", "sourcePortId": "result-prompt", "targetNodeId": "loop-image-generate", "targetPortId": "prompt" },
+    { "id": "loop-image-to-output", "sourceNodeId": "loop-image-generate", "sourcePortId": "asset", "targetNodeId": "output", "targetPortId": "image" },
+    { "id": "random-to-video-loop", "sourceNodeId": "random-prompt", "sourcePortId": "prompt", "targetNodeId": "video-loop", "targetPortId": "prompt" },
+    { "id": "video-input-to-loop", "sourceNodeId": "video-input", "sourcePortId": "asset", "targetNodeId": "video-loop", "targetPortId": "videos" },
+    { "id": "video-loop-to-timeline", "sourceNodeId": "video-loop", "sourcePortId": "selected-videos", "targetNodeId": "video-timeline", "targetPortId": "videos" },
+    { "id": "timeline-to-output", "sourceNodeId": "video-timeline", "sourcePortId": "ordered-videos", "targetNodeId": "output", "targetPortId": "videos" }
+  ]
+}

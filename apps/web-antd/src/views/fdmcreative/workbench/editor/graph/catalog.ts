@@ -44,7 +44,9 @@ const AI_GENERATE_NODE_TYPES = new Set([
 ]);
 const RESULT_PREVIEW_NODE_TYPES = new Set([
   ...AI_GENERATE_NODE_TYPES,
+  'image-crop',
   'image-resize',
+  'image-split',
   'video-frame-extract',
   'video-normalize',
   'video-transition',
@@ -313,14 +315,45 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       resizeMode: 'FIT',
       width: 1024,
     },
-    description: '在本地受控流程中裁剪、缩放或调整图片比例',
+    description: '在本地受控流程中缩放、适配或调整图片比例，不会伪装成 AI 超分',
     icon: 'lucide:scan',
-    label: '图片裁剪缩放',
+    label: '图片缩放/适配',
     ports: [
       input('image', 'image-asset', true),
       output('asset', 'image-asset'),
     ],
     type: 'image-resize',
+  },
+  {
+    color: '#0f766e',
+    defaultConfig: {
+      coordinateMode: 'NORMALIZED',
+      cropHeight: 1,
+      cropWidth: 1,
+      cropX: 0,
+      cropY: 0,
+      format: 'png',
+    },
+    description: '用归一化坐标在服务端裁剪原图，预览缩放不会改变实际裁剪范围',
+    icon: 'lucide:crop',
+    label: '图片裁剪',
+    ports: [
+      input('image', 'image-asset', true),
+      output('asset', 'image-asset'),
+    ],
+    type: 'image-crop',
+  },
+  {
+    color: '#0d9488',
+    defaultConfig: { columns: 2, format: 'png', rows: 2 },
+    description: '在受控像素、输出数量和临时磁盘上限内，把图片拆分为独立素材',
+    icon: 'lucide:panels-top-left',
+    label: '图片分割',
+    ports: [
+      input('image', 'image-asset', true),
+      output('images', 'image-list'),
+    ],
+    type: 'image-split',
   },
   {
     color: '#0f766e',
@@ -633,7 +666,14 @@ export const NODE_GROUPS = [
   {
     key: 'generate',
     label: '图像生成与处理',
-    types: ['image-generate', 'image-to-image', 'image-edit', 'image-resize'],
+    types: [
+      'image-generate',
+      'image-to-image',
+      'image-edit',
+      'image-resize',
+      'image-crop',
+      'image-split',
+    ],
   },
   {
     key: 'video',

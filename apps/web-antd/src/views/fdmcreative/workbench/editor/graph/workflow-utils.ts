@@ -11,8 +11,10 @@ const SINGLE_PROMPT_INPUT_NODE_TYPES = new Set([
 const SINGLE_MEDIA_INPUT_PORTS = new Set([
   'first-last-frame-to-video:first-frame',
   'first-last-frame-to-video:last-frame',
+  'image-crop:image',
   'image-edit:image',
   'image-resize:image',
+  'image-split:image',
   'image-to-video:first-frame',
   'video-frame-extract:video',
   'video-normalize:video',

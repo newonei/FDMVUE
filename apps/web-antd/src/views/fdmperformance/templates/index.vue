@@ -46,6 +46,7 @@ import {
   SCORE_METHOD_OPTIONS,
   TEMPLATE_STATUS_MAP,
 } from '../shared/constants';
+import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceTemplates' });
@@ -99,9 +100,9 @@ function personUserOptions(person: JixiaoApi.TemplatePerson, role: PersonRole) {
   const blockedIds =
     role === 'employee'
       ? [person.supervisorUserId, person.superiorSupervisorUserId]
-      : role === 'supervisor'
+      : (role === 'supervisor'
         ? [person.userId, person.superiorSupervisorUserId]
-        : [person.userId, person.supervisorUserId];
+        : [person.userId, person.supervisorUserId]);
   return userOptions.value.map((option) => ({
     ...option,
     disabled: blockedIds.some((id) => id === option.value),
@@ -536,7 +537,10 @@ onMounted(async () => {
       @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'periodType'">
+        <template v-if="column.dataIndex === 'createTime'">
+          {{ formatPerformanceDateTime(record.createTime) }}
+        </template>
+        <template v-else-if="column.dataIndex === 'periodType'">
           {{
             PERIOD_OPTIONS.find((item) => item.value === record.periodType)
               ?.label

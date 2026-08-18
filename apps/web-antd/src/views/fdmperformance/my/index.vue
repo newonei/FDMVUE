@@ -36,6 +36,7 @@ import {
   PERFORMANCE_PAGE_SIZE_OPTIONS,
   TASK_LABELS,
 } from '../shared/constants';
+import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 
 defineOptions({ name: 'FdmPerformanceMy' });
@@ -367,7 +368,10 @@ onMounted(load);
       >
         <template #emptyText><Empty description="暂无已公示结果" /></template>
         <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'periodKey'">
+          <template v-if="column.dataIndex === 'publicTime'">
+            {{ formatPerformanceDateTime(record.publicTime) }}
+          </template>
+          <template v-else-if="column.dataIndex === 'periodKey'">
             {{ periodLabel(record.periodKey) }}
           </template>
           <template v-else-if="column.dataIndex === 'grade'">

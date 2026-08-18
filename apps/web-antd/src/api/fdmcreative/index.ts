@@ -124,9 +124,53 @@ export namespace FdmCreativeApi {
   export interface WorkflowDraft {
     currentRevisionId?: number;
     definition: WorkflowDefinition;
+    /** Server-calculated SHA-256 of the normalized draft. */
+    definitionHash?: string;
     draftVersion: number;
     projectId?: number;
+    /** New P2 fields tolerate legacy number serialization during rollout. */
+    savedByUserId?: number | string;
+    savedTime?: number | string;
     staleNodeIds?: string[];
+  }
+
+  export interface WorkflowCapability {
+    autosaveEnabled: boolean;
+    mediaToolsEnabled: boolean;
+  }
+
+  export interface WorkflowExportDocument {
+    definition: WorkflowDefinition;
+    exportedAt: number;
+    format: 'FdmCreativeWorkflowExport';
+    metadata: {
+      definitionSchemaVersion: number;
+      edgeCount: number;
+      nodeCount: number;
+    };
+    schemaVersion: 1;
+  }
+
+  export interface WorkflowImportAssetIssue {
+    assetId: string;
+    configPath: string;
+    nodeId: string;
+    reason: string;
+  }
+
+  export interface WorkflowImportPreview {
+    canImport: boolean;
+    clearedAssetReferences: WorkflowImportAssetIssue[];
+    definition: WorkflowDefinition;
+    definitionHash: string;
+    edgeCount: number;
+    nodeCount: number;
+    unavailableAssetReferences: WorkflowImportAssetIssue[];
+  }
+
+  export interface WorkflowImportResult {
+    draft: WorkflowDraft;
+    report: WorkflowImportPreview;
   }
 
   export interface WorkflowRevision {
@@ -338,6 +382,228 @@ export namespace FdmCreativeApi {
     targetType: PromptTargetType;
     visibility: PromptVisibility;
   }
+
+  /**
+   * Agent-specific Long values are always represented as decimal strings. The legacy workbench
+   * APIs predate this rule, but new Agent state must never pass a Snowflake-style identifier
+   * through a JavaScript number.
+   */
+  export type AgentLongId = string;
+
+  export type AgentConversationStatus = 'ACTIVE' | 'ARCHIVED';
+  export type AgentMessageRole = 'ASSISTANT' | 'SYSTEM' | 'USER';
+  export type AgentReferenceType = 'ASSET' | 'NODE' | 'PROMPT';
+  export type AgentRunStatus =
+    | 'APPLIED'
+    | 'APPLYING'
+    | 'CANCEL_REQUESTED'
+    | 'CANCELED'
+    | 'CONFLICT'
+    | 'CREATED'
+    | 'FAILED'
+    | 'PLANNING'
+    | 'READY';
+  export type CanvasPatchOperationType =
+    | 'ADD_NODE'
+    | 'CONNECT'
+    | 'DELETE_NODE'
+    | 'DISCONNECT'
+    | 'MOVE_NODE'
+    | 'RENAME_NODE'
+    | 'UPDATE_NODE_CONFIG';
+  export type CanvasPatchPlacement = 'ABOVE' | 'BELOW' | 'LEFT' | 'RIGHT';
+  export type CanvasPatchSuggestedRunScope =
+    | 'DOWNSTREAM'
+    | 'FULL'
+    | 'NODE'
+    | 'NONE';
+
+  export interface AgentReference {
+    id: string;
+    type: AgentReferenceType;
+  }
+
+  export interface AgentConversation {
+    createTime?: string;
+    createdByUserId: AgentLongId;
+    id: AgentLongId;
+    lastMessageSequence?: AgentLongId;
+    lastRunId?: AgentLongId;
+    projectId: AgentLongId;
+    status: AgentConversationStatus;
+    title: string;
+    updateTime?: string;
+  }
+
+  export interface AgentMessage {
+    content: string;
+    conversationId: AgentLongId;
+    createTime?: string;
+    id: AgentLongId;
+    references?: AgentReference[];
+    role: AgentMessageRole;
+    runId?: AgentLongId;
+    sequenceNo: AgentLongId;
+  }
+
+  export interface CanvasPatchOperation {
+    config?: Record<string, unknown>;
+    edgeId?: string;
+    name?: string;
+    nodeId?: string;
+    nodeType?: string;
+    operationId: string;
+    placement?: CanvasPatchPlacement;
+    relativeToNodeId?: string;
+    sourceNodeId?: string;
+    sourcePortId?: string;
+    targetNodeId?: string;
+    targetPortId?: string;
+    type: CanvasPatchOperationType;
+    x?: number;
+    y?: number;
+  }
+
+  export interface CanvasPatch {
+    baseDraftVersion: number;
+    operations: CanvasPatchOperation[];
+    schemaVersion: 1;
+    suggestedRun?: {
+      scope: CanvasPatchSuggestedRunScope;
+      startNodeId?: string;
+    };
+    summary?: string;
+    warnings?: string[];
+  }
+
+  export interface AgentRun {
+    appliedDraftVersion?: number;
+    attemptNo: number;
+    baseDraftVersion: number;
+    completedTime?: string;
+    conversationId: AgentLongId;
+    createTime?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    executionId?: AgentLongId;
+    id: AgentLongId;
+    invocationId?: string;
+    logicalModelId?: AgentLongId;
+    patch?: CanvasPatch;
+    planningStartedTime?: string;
+    projectId: AgentLongId;
+    repairAttempted?: boolean;
+    requestMessageId: AgentLongId;
+    status: AgentRunStatus;
+    suggestedRunScope?: CanvasPatchSuggestedRunScope;
+    suggestedStartNodeId?: string;
+    summary?: string;
+  }
+
+  export interface AgentEvent {
+    eventTime?: string;
+    eventType: string;
+    payloadJson?: string;
+    sequenceNo: AgentLongId;
+  }
+
+  export interface AgentCapability {
+    enabled: boolean;
+    routeKey: string;
+  }
+
+  export interface AgentApplyResp {
+    affectedNodeIds?: string[];
+    destructiveOperationIds?: string[];
+    draft?: WorkflowDraft;
+    run: AgentRun;
+    status: AgentRunStatus;
+  }
+
+  /** All P3 result-history identifiers stay decimal strings in browser state. */
+  export type MediaLongId = string;
+
+  export type NodeResultAssetAvailability = 'ACTIVE' | 'EXPIRED' | 'MISSING';
+
+  export interface NodeResultAsset {
+    adopted: boolean;
+    availability: NodeResultAssetAvailability;
+    deleteEligible: boolean;
+    durationMillis?: number;
+    height?: number;
+    id?: MediaLongId;
+    kind?: 'IMAGE' | 'VIDEO';
+    mimeType?: string;
+    name?: string;
+    size?: number;
+    unavailableReason?: string;
+    url?: string;
+    width?: number;
+  }
+
+  export interface NodeResultVersion {
+    adoptedAssetId?: MediaLongId;
+    adoptedNodeRunId?: MediaLongId;
+    assets: NodeResultAsset[];
+    attemptNo?: number;
+    completedTime?: string;
+    cost?: {
+      costAmount?: number;
+      currency?: string;
+      estimatedCost?: number;
+      priceVersion?: string;
+    };
+    model?: {
+      logicalModelId?: MediaLongId;
+      name?: string;
+      providerCode?: string;
+    };
+    nodeRunId: MediaLongId;
+    nodeType?: string;
+    selectionStatus?: 'CURRENT' | 'STALE';
+    selectionVersion: number;
+    semanticFingerprint?: string;
+    startedTime?: string;
+  }
+
+  export type NodeResultPageParams = PageParam & {
+    nodeId: string;
+    projectId: number;
+  };
+
+  export interface NodeResultAdoptReq {
+    assetId: MediaLongId;
+    confirmStale?: boolean;
+    expectedSelectionVersion: number;
+    nodeId: string;
+    nodeRunId: MediaLongId;
+    projectId: number;
+  }
+
+  export interface NodeResultAdoption {
+    adoptedAssetId?: MediaLongId;
+    adoptedNodeRunId?: MediaLongId;
+    selectionTime?: string;
+    selectionUserId?: MediaLongId;
+    selectionVersion: number;
+    status: 'CURRENT' | 'STALE';
+  }
+
+  export interface MediaToolDescriptor {
+    applicableAssetKinds: Array<'IMAGE' | 'VIDEO'>;
+    available: boolean;
+    defaultConfig: Record<string, unknown>;
+    generatedNodeType: string;
+    id: string;
+    inputPort: string;
+    label: string;
+    localExecution: boolean;
+    outputPlacement: 'RIGHT';
+    requiredCapability?: string;
+    schemaVersion: 1;
+    template?: 'MULTI_ANGLE_V1';
+    unavailableReason?: string;
+  }
 }
 
 const PROJECT = '/fdmcreative/project';
@@ -346,6 +612,9 @@ const PLAN = '/fdmcreative/plan';
 const EXECUTION = '/fdmcreative/execution';
 const ASSET = '/fdmcreative/asset';
 const PROMPT = '/fdmcreative/prompt';
+const AGENT = '/fdmcreative/agent';
+const NODE_RESULT = '/fdmcreative/node-result';
+const MEDIA_TOOL = '/fdmcreative/media-tool';
 
 export function getCreativeProjectPage(
   params: FdmCreativeApi.ProjectPageParams,
@@ -393,13 +662,55 @@ export function getWorkflowDraft(projectId: number) {
   });
 }
 
+export function getWorkflowCapability(projectId: number) {
+  return requestClient.get<FdmCreativeApi.WorkflowCapability>(
+    `${WORKFLOW}/capability`,
+    { params: { projectId } },
+  );
+}
+
 export function saveWorkflowDraft(data: {
   definition: FdmCreativeApi.WorkflowDefinition;
+  definitionHash: string;
   expectedDraftVersion: number;
+  mutationId: string;
   projectId: number;
 }) {
   return requestClient.put<FdmCreativeApi.WorkflowDraft>(
     `${WORKFLOW}/draft`,
+    data,
+  );
+}
+
+export function exportWorkflowDraft(projectId: number) {
+  return requestClient.get<FdmCreativeApi.WorkflowExportDocument>(
+    `${WORKFLOW}/export`,
+    { params: { projectId } },
+  );
+}
+
+export function previewWorkflowImport(data: {
+  clearUnavailableAssetReferences?: boolean;
+  document: string;
+  projectId: number;
+}) {
+  return requestClient.post<FdmCreativeApi.WorkflowImportPreview>(
+    `${WORKFLOW}/import/preview`,
+    data,
+  );
+}
+
+export function importWorkflowDraft(data: {
+  clearUnavailableAssetReferences?: boolean;
+  definitionHash: string;
+  document: string;
+  expectedDraftVersion: number;
+  mutationId: string;
+  projectId: number;
+  replaceConfirmed: true;
+}) {
+  return requestClient.post<FdmCreativeApi.WorkflowImportResult>(
+    `${WORKFLOW}/import`,
     data,
   );
 }
@@ -466,6 +777,7 @@ export function applyContentPlan(data: {
 }) {
   return requestClient.post<{
     definition: FdmCreativeApi.WorkflowDefinition;
+    definitionHash?: string;
     draftVersion: number;
   }>(`${PLAN}/apply`, data);
 }
@@ -489,6 +801,31 @@ export function retryCreativeNode(nodeRunId: number) {
   return requestClient.post<boolean>(`${EXECUTION}/retry-node`, undefined, {
     params: { nodeRunId },
   });
+}
+
+export function getCreativeNodeResultPage(
+  params: FdmCreativeApi.NodeResultPageParams,
+) {
+  return requestClient.get<PageResult<FdmCreativeApi.NodeResultVersion>>(
+    `${NODE_RESULT}/page`,
+    { params },
+  );
+}
+
+export function adoptCreativeNodeResult(
+  data: FdmCreativeApi.NodeResultAdoptReq,
+) {
+  return requestClient.post<FdmCreativeApi.NodeResultAdoption>(
+    `${NODE_RESULT}/adopt`,
+    data,
+  );
+}
+
+export function getCreativeMediaToolDescriptors(projectId: number) {
+  return requestClient.get<FdmCreativeApi.MediaToolDescriptor[]>(
+    `${MEDIA_TOOL}/descriptors`,
+    { params: { projectId } },
+  );
 }
 
 export function getCreativeExecution(id: number) {
@@ -575,4 +912,111 @@ export function updateCreativePrompt(
 
 export function deleteCreativePrompt(id: number) {
   return requestClient.delete<boolean>(`${PROMPT}/delete`, { params: { id } });
+}
+
+export function getCreativeAgentCapability() {
+  return requestClient.get<FdmCreativeApi.AgentCapability>(
+    `${AGENT}/capability`,
+  );
+}
+
+export function createCreativeAgentConversation(data: {
+  projectId: number;
+  title?: string;
+}) {
+  return requestClient.post<FdmCreativeApi.AgentLongId>(
+    `${AGENT}/conversation`,
+    data,
+  );
+}
+
+export function renameCreativeAgentConversation(data: {
+  conversationId: FdmCreativeApi.AgentLongId;
+  title: string;
+}) {
+  return requestClient.put<boolean>(`${AGENT}/conversation/rename`, data);
+}
+
+export function archiveCreativeAgentConversation(
+  conversationId: FdmCreativeApi.AgentLongId,
+) {
+  return requestClient.post<boolean>(`${AGENT}/conversation/archive`, {
+    conversationId,
+  });
+}
+
+export function getCreativeAgentConversationPage(params: PageParam & {
+  projectId: number;
+  status?: FdmCreativeApi.AgentConversationStatus;
+}) {
+  return requestClient.get<PageResult<FdmCreativeApi.AgentConversation>>(
+    `${AGENT}/conversation/page`,
+    { params },
+  );
+}
+
+export function getCreativeAgentMessagePage(params: PageParam & {
+  afterSequence?: FdmCreativeApi.AgentLongId;
+  conversationId: FdmCreativeApi.AgentLongId;
+}) {
+  return requestClient.get<PageResult<FdmCreativeApi.AgentMessage>>(
+    `${AGENT}/message/page`,
+    { params },
+  );
+}
+
+export function createCreativeAgentRun(data: {
+  content: string;
+  conversationId: FdmCreativeApi.AgentLongId;
+  idempotencyKey: string;
+  logicalModelId?: FdmCreativeApi.AgentLongId;
+  projectId: number;
+  references: FdmCreativeApi.AgentReference[];
+}) {
+  return requestClient.post<FdmCreativeApi.AgentRun>(`${AGENT}/run`, data);
+}
+
+export function getCreativeAgentRun(id: FdmCreativeApi.AgentLongId) {
+  return requestClient.get<FdmCreativeApi.AgentRun>(`${AGENT}/run/get`, {
+    params: { id },
+  });
+}
+
+export function applyCreativeAgentRun(data: {
+  approveDestructive?: boolean;
+  expectedDraftVersion: number;
+  projectId: number;
+  runId: FdmCreativeApi.AgentLongId;
+}) {
+  return requestClient.post<FdmCreativeApi.AgentApplyResp>(
+    `${AGENT}/run/apply`,
+    data,
+  );
+}
+
+export function cancelCreativeAgentRun(id: FdmCreativeApi.AgentLongId) {
+  return requestClient.post<boolean>(`${AGENT}/run/cancel`, undefined, {
+    params: { id },
+  });
+}
+
+export function retryCreativeAgentRun(id: FdmCreativeApi.AgentLongId) {
+  return requestClient.post<FdmCreativeApi.AgentRun>(
+    `${AGENT}/run/retry`,
+    undefined,
+    { params: { id } },
+  );
+}
+
+export function executeCreativeAgentRun(data: {
+  expectedDraftVersion: number;
+  projectId: number;
+  runId: FdmCreativeApi.AgentLongId;
+  scope: Exclude<FdmCreativeApi.CanvasPatchSuggestedRunScope, 'NONE'>;
+  startNodeId?: string;
+}) {
+  return requestClient.post<FdmCreativeApi.AgentLongId>(
+    `${AGENT}/run/execute`,
+    data,
+  );
 }

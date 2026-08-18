@@ -2,9 +2,14 @@ import type { PageParam, PageResult } from '@vben/request';
 
 import { requestClient } from '#/api/request';
 
+export * from './dashboard';
+
 export namespace JixiaoApi {
+  /** Java LocalDateTime may be serialized as an epoch-millisecond number or ISO text. */
+  export type DateTimeValue = number | string;
+
   export interface Indicator {
-    createTime?: string;
+    createTime?: DateTimeValue;
     defaultWeight?: number | string;
     deptId?: number;
     dimensionName?: string;
@@ -66,7 +71,7 @@ export namespace JixiaoApi {
   }
 
   export interface Template {
-    createTime?: string;
+    createTime?: DateTimeValue;
     dimensions?: TemplateDimension[];
     id?: number;
     name?: string;
@@ -92,7 +97,7 @@ export namespace JixiaoApi {
     name: string;
     periodType: string;
     personCount: number;
-    updateTime?: string;
+    updateTime?: DateTimeValue;
   }
 
   export type TemplateSelectPageParams = PageParam & {
@@ -133,7 +138,7 @@ export namespace JixiaoApi {
   }
 
   export interface Batch {
-    createTime?: string;
+    createTime?: DateTimeValue;
     creatorUserId?: number;
     creatorUserName?: string;
     endDate?: string;
@@ -157,7 +162,7 @@ export namespace JixiaoApi {
   };
 
   export interface InstanceIndicator {
-    actionPlanCompletedTime?: string;
+    actionPlanCompletedTime?: DateTimeValue;
     actionPlanCompletedUserId?: number;
     actionPlanCompletedUserName?: string;
     actionPlanEnabled?: boolean;
@@ -193,7 +198,7 @@ export namespace JixiaoApi {
     instanceId?: number;
     periodKey?: string;
     publicStatus?: number;
-    publicTime?: string;
+    publicTime?: DateTimeValue;
     supervisorUserId?: number;
     supervisorUserName?: string;
     userId?: number;
@@ -210,7 +215,7 @@ export namespace JixiaoApi {
     deptId?: number;
     deptName?: string;
     finalScore?: number;
-    finishTime?: string;
+    finishTime?: DateTimeValue;
     grade?: string;
     id?: number;
     indicators?: InstanceIndicator[];
@@ -218,7 +223,7 @@ export namespace JixiaoApi {
     periodKey?: string;
     processDefinitionKey?: string;
     processInstanceId?: string;
-    publicTime?: string;
+    publicTime?: DateTimeValue;
     result?: Result;
     scores?: Score[];
     status?: number;
@@ -341,7 +346,7 @@ export namespace JixiaoApi {
   }
 
   export interface GradeLog {
-    createTime?: string;
+    createTime?: DateTimeValue;
     id?: number;
     instanceId?: number;
     newGrade?: string;
@@ -362,12 +367,12 @@ export namespace JixiaoApi {
   export interface Review {
     bossUserId?: number;
     bossUserName?: string;
-    createTime?: string;
+    createTime?: DateTimeValue;
     generalManagerUserId?: number;
     generalManagerUserName?: string;
     id?: number;
-    closedTime?: string;
-    employeeConfirmedTime?: string;
+    closedTime?: DateTimeValue;
+    employeeConfirmedTime?: DateTimeValue;
     employeeConfirmedUserId?: number;
     employeeConfirmedUserName?: string;
     improvementPlan?: string;
@@ -376,7 +381,7 @@ export namespace JixiaoApi {
     reasonAnalysis?: string;
     resultId?: number;
     status?: number;
-    submittedTime?: string;
+    submittedTime?: DateTimeValue;
     supervisorSubmittedUserId?: number;
     supervisorSubmittedUserName?: string;
     superiorSupervisorUserId?: number;
@@ -761,7 +766,7 @@ export function getReviewPage(params: JixiaoApi.ReviewPageParams) {
   );
 }
 
-export function getReview(id: number) {
+export function getReview(id: number | string) {
   return requestClient.get<JixiaoApi.Review>('/fdmperformance/review/get', {
     params: { id },
   });

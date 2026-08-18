@@ -28,6 +28,7 @@ import { IconifyIcon } from '@vben/icons';
 import {
   Alert,
   Button,
+  Drawer,
   Empty,
   Input,
   InputNumber,
@@ -43,16 +44,24 @@ import {
 
 import { searchFdmAiModels } from '#/api/fdmai';
 import {
+  adoptCreativeNodeResult,
   applyContentPlan,
   cancelCreativeExecution,
   createCreativeAsset,
+  exportWorkflowDraft,
+  getCreativeAsset,
   getCreativeAssetPage,
   getCreativeExecution,
   getCreativeExecutionPage,
+  getCreativeMediaToolDescriptors,
+  getCreativeNodeResultPage,
   getCreativeProject,
   getLatestContentPlan,
+  getWorkflowCapability,
   getWorkflowDraft,
+  importWorkflowDraft,
   previewContentPlan,
+  previewWorkflowImport,
   publishWorkflow,
   refineCreativePrompt,
   runCreativeWorkflow,
@@ -63,11 +72,14 @@ import {
 import { uploadFile } from '#/api/infra/file';
 
 import PromptLibraryPicker from '../../shared/PromptLibraryPicker.vue';
+import { firstRestorableAgentNode } from './agent-draft-restore';
+import CanvasAgentPanel from './components/CanvasAgentPanel.vue';
 import CanvasNavigator from './components/CanvasNavigator.vue';
 import ExecutionTaskPanel from './components/ExecutionTaskPanel.vue';
 import NodeInlineEditor from './components/NodeInlineEditor.vue';
 import NodeLibraryPanel from './components/NodeLibraryPanel.vue';
 import WorkbenchTopbar from './components/WorkbenchTopbar.vue';
+import WorkflowConflictModal from './components/WorkflowConflictModal.vue';
 import { resolveConnectedImageReferences } from './connected-image-references';
 import { CREATIVE_NODE_CATALOG } from './graph/catalog';
 import {
@@ -84,6 +96,14 @@ import { normalizeModelIdentifier } from './model-identifier';
 import { supportsNodeModel } from './node-model-filter';
 import { extractPromptText } from './prompt-text-output';
 import { useExecutionEventStream } from './use-execution-event-stream';
+import { isWorkflowVersionConflict, useWorkflowAutosave } from './use-workflow-autosave';
+import type { WorkflowAutosaveSnapshot } from './use-workflow-autosave';
+import {
+  createWorkflowExport,
+  downloadWorkflowExport,
+  parseWorkflowExport,
+  WORKFLOW_EXPORT_MAX_BYTES,
+} from './workflow-export';
 
 defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
 
@@ -106,15 +126,32 @@ const nodeLibraryRef = ref<NodeLibraryPanelExpose>();
 const quickConnectRef = ref<HTMLElement>();
 const adapter = ref<WorkbenchGraphAdapter>();
 const loading = ref(true);
-const saving = ref(false);
 const publishing = ref(false);
-const dirty = ref(false);
 const graphRevision = ref(0);
-const lastSavedAt = ref<Date>();
 const zoomPercent = ref(100);
 const canvasNavigatorOpen = ref(false);
+const agentPanelOpen = ref(false);
+const agentPanelWidth = ref(480);
+const viewportWidth = ref(
+  typeof window === 'undefined' ? 1440 : window.innerWidth,
+);
 const project = ref<FdmCreativeApi.Project>();
 const draftVersion = ref(0);
+const workflowCapability = ref<FdmCreativeApi.WorkflowCapability>({
+  autosaveEnabled: false,
+  mediaToolsEnabled: false,
+});
+const workflowConflictOpen = ref(false);
+const workflowConflictLoading = ref(false);
+const workflowConflictServerDraft = ref<FdmCreativeApi.WorkflowDraft>();
+const workflowExporting = ref(false);
+const workflowImporting = ref(false);
+const workflowImportPreviewing = ref(false);
+const workflowImportModalOpen = ref(false);
+const workflowImportFileRef = ref<HTMLInputElement>();
+const workflowImportDocument = ref<string>();
+const workflowImportPreview = ref<FdmCreativeApi.WorkflowImportPreview>();
+const clearUnavailableImportAssets = ref(false);
 const selectedNode = ref<FdmCreativeApi.WorkflowNode>();
 const navigationNodes = ref<WorkbenchNavigationNode[]>([]);
 const plannerBusy = ref(false);
@@ -127,6 +164,9 @@ const latestNodeRunsByNodeId = ref<
 >({});
 const modelOptions = ref<FdmAiApi.ModelOption[]>([]);
 const projectAssets = ref<FdmCreativeApi.CreativeAsset[]>([]);
+const nodeResultVersions = ref<FdmCreativeApi.NodeResultVersion[]>([]);
+const nodeResultLoading = ref(false);
+const mediaTools = ref<FdmCreativeApi.MediaToolDescriptor[]>([]);
 const quickConnectRequest = ref<WorkbenchBlankConnectionRequest>();
 const quickConnectSearch = ref('');
 let executionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -134,6 +174,30 @@ let executionEventRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let planTimer: ReturnType<typeof setTimeout> | undefined;
 let promptRefineTimer: ReturnType<typeof setTimeout> | undefined;
 let initializationGeneration = 0;
+let graphDragActive = false;
+let graphChangedDuringDrag = false;
+let nodeResultRequestSequence = 0;
+
+const autosave = useWorkflowAutosave({
+  enabled: () => workflowCapability.value.autosaveEnabled,
+  getExpectedDraftVersion: () => draftVersion.value,
+  onConflict: async (snapshot, error) => {
+    await showWorkflowConflict(snapshot, error);
+  },
+  onSaved: (draft) => {
+    draftVersion.value = draft.draftVersion;
+    if (project.value) project.value.draftVersion = draft.draftVersion;
+  },
+  projectId: () => projectId.value,
+  save: (request) =>
+    saveWorkflowDraft({
+      ...request,
+      projectId: projectId.value,
+    }),
+});
+const saving = autosave.isSaving;
+const dirty = autosave.hasUnpersistedSnapshot;
+const localConflictSnapshot = autosave.localSnapshot;
 
 const MODEL_NODE_TYPES = new Set([
   'content-planner',
@@ -157,9 +221,9 @@ const planner = reactive({
 const plannerPromptTarget = computed<FdmCreativeApi.PromptTargetType>(() =>
   planner.mode === 'IMAGE_SET'
     ? 'IMAGE'
-    : planner.mode === 'VIDEO_SEQUENCE'
+    : (planner.mode === 'VIDEO_SEQUENCE'
       ? 'VIDEO'
-      : 'GENERAL',
+      : 'GENERAL'),
 );
 
 const selectedConfig = computed(() => selectedNode.value?.config ?? {});
@@ -175,6 +239,18 @@ const canRunSelectedNode = computed(
     canRun.value &&
     (canEdit.value || selectedNode.value?.type !== 'content-planner'),
 );
+const agentPanelUsesDrawer = computed(
+  // Preserve a usable graph viewport rather than forcing four narrow desktop columns.
+  () => viewportWidth.value < (selectedNode.value ? 1600 : 1120),
+);
+const agentPanelStyle = computed<CSSProperties>(() => ({
+  '--agent-panel-width': `${agentPanelWidth.value}px`,
+}));
+const agentWorkflowNodes = computed(() => {
+  // X6 owns the live graph; this revision makes add/remove/config changes visible to Agent refs.
+  void graphRevision.value;
+  return adapter.value?.serializeDefinition().nodes ?? [];
+});
 const currentUserRoleLabel = computed(() => {
   const role = currentUserRole.value;
   return role
@@ -208,17 +284,10 @@ const filteredQuickConnectOptions = computed(() => {
   );
 });
 const summary = computed(() => planSummary(pendingPlan.value?.plan));
-const saveStatus = computed(() => {
-  if (saving.value) return '保存中…';
-  if (dirty.value) return '有未保存修改';
-  if (lastSavedAt.value) {
-    return `已保存 ${lastSavedAt.value.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-    })}`;
-  }
-  return '已保存';
-});
+const saveStatus = autosave.statusLabel;
+const hasAutosaveConflict = computed(
+  () => autosave.status.value === 'CONFLICT',
+);
 const aggregatedRunningNodeRuns = computed(() =>
   aggregateLoopNodeRuns(runningExecution.value?.nodeRuns ?? []),
 );
@@ -440,6 +509,53 @@ const resultText = computed(() =>
     : undefined,
 );
 
+interface ResultHistoryAction {
+  asset: FdmCreativeApi.NodeResultAsset;
+  version: FdmCreativeApi.NodeResultVersion;
+}
+
+async function refreshNodeResultVersions() {
+  const targetProjectId = projectId.value;
+  const targetNodeId = selectedNode.value?.id;
+  const requestSequence = ++nodeResultRequestSequence;
+  if (!targetNodeId || !Number.isFinite(targetProjectId)) {
+    nodeResultVersions.value = [];
+    nodeResultLoading.value = false;
+    return;
+  }
+  nodeResultVersions.value = [];
+  nodeResultLoading.value = true;
+  try {
+    const page = await getCreativeNodeResultPage({
+      nodeId: targetNodeId,
+      pageNo: 1,
+      pageSize: 20,
+      projectId: targetProjectId,
+    });
+    if (
+      requestSequence === nodeResultRequestSequence &&
+      targetProjectId === projectId.value &&
+      targetNodeId === selectedNode.value?.id
+    ) {
+      nodeResultVersions.value = page.list;
+    }
+  } catch {
+    // Result history is supplemental to the editor. Do not block a working
+    // draft when a retained history row has been concurrently cleaned up.
+    if (
+      requestSequence === nodeResultRequestSequence &&
+      targetProjectId === projectId.value &&
+      targetNodeId === selectedNode.value?.id
+    ) {
+      nodeResultVersions.value = [];
+    }
+  } finally {
+    if (requestSequence === nodeResultRequestSequence) {
+      nodeResultLoading.value = false;
+    }
+  }
+}
+
 function collectOutputReferences(
   value: unknown,
   assetIds: Set<number>,
@@ -483,13 +599,22 @@ function syncAssetNodePreviews() {
     if (!['image-input', 'video-input'].includes(node.getData()?.type))
       continue;
     const assetId = node.getData()?.config?.assetId;
-    const asset = typeof assetId === 'number' ? assets.get(assetId) : undefined;
+    const asset = [...assets.values()].find(
+      (candidate) => String(candidate.id) === String(assetId),
+    );
     graphAdapter.setNodeDisplayData(node.id, {
       assetName: asset?.name,
       previewUrl: asset?.url,
     });
   }
 }
+
+watch(
+  () => [projectId.value, selectedNode.value?.id] as const,
+  () => {
+    void refreshNodeResultVersions();
+  },
+);
 
 function syncExecutionNodePreviews() {
   const graphAdapter = adapter.value;
@@ -664,8 +789,128 @@ async function uploadInputAsset(
   return url;
 }
 
+/**
+ * Agent attachments are first imported into the current project through the normal asset service.
+ * The Agent request subsequently carries only its stable asset ID—never an upload URL or file
+ * path—so the gateway remains inside FDM's existing asset and permission boundary.
+ */
+async function uploadAgentReferenceAsset(file: File) {
+  let kind: 'AUDIO' | 'IMAGE' | 'VIDEO' | undefined;
+  if (file.type.startsWith('image/')) {
+    kind = 'IMAGE';
+  } else if (file.type.startsWith('video/')) {
+    kind = 'VIDEO';
+  } else if (file.type.startsWith('audio/')) {
+    kind = 'AUDIO';
+  }
+  if (!kind) throw new Error('仅支持图片、视频或音频素材作为 Agent 引用');
+  const maxSizeMb = { AUDIO: 100, IMAGE: 25, VIDEO: 500 }[kind];
+  const kindLabel = { AUDIO: '音频', IMAGE: '图片', VIDEO: '视频' }[kind];
+  if (file.size > maxSizeMb * 1024 * 1024) {
+    throw new Error(`${kindLabel}不能超过 ${maxSizeMb} MB`);
+  }
+  const response = await uploadFile({
+    directory: `fdmcreative/${projectId.value}/agent-references`,
+    file,
+  });
+  const url = uploadedUrl(response);
+  if (!url) throw new Error('文件服务未返回可用 URL');
+  const assetId = await createCreativeAsset({
+    kind,
+    name: file.name,
+    projectId: projectId.value,
+    url,
+  });
+  const asset = await getCreativeAsset(assetId);
+  await refreshProjectAssets(projectId.value);
+  return asset;
+}
+
+function toggleAgentPanel() {
+  agentPanelOpen.value = !agentPanelOpen.value;
+}
+
+function recordGraphChange() {
+  if (!canEdit.value) return;
+  graphRevision.value += 1;
+  if (canvasNavigatorOpen.value) refreshNavigationNodes();
+  if (graphDragActive) {
+    graphChangedDuringDrag = true;
+    return;
+  }
+  const definition = adapter.value?.serializeDefinition();
+  if (definition) void autosave.markChanged(definition);
+}
+
+function handleNodeDragStateChange(dragging: boolean, changed = false) {
+  graphDragActive = dragging;
+  if (dragging) {
+    graphChangedDuringDrag = false;
+    return;
+  }
+  const shouldCapture = changed || graphChangedDuringDrag;
+  graphChangedDuringDrag = false;
+  if (!shouldCapture || !canEdit.value) return;
+  const definition = adapter.value?.serializeDefinition();
+  if (definition) void autosave.markChanged(definition);
+}
+
+async function flushBeforeWorkflowAction(action: string) {
+  if (!canEdit.value) return true;
+  const saved = await autosave.flush();
+  if (!saved) {
+    message.warning(`请先处理画布保存状态，才能${action}`);
+  }
+  return saved;
+}
+
+function prepareAgentCanvasMutation() {
+  if (!canEdit.value) {
+    message.warning('当前项目角色为只读，不能提交或应用 Agent 方案');
+    return Promise.resolve(false);
+  }
+  return flushBeforeWorkflowAction('提交或应用 Agent 方案');
+}
+
+async function applyAgentDraft(payload: {
+  affectedNodeIds: string[];
+  draft: FdmCreativeApi.WorkflowDraft;
+}) {
+  draftVersion.value = payload.draft.draftVersion;
+  selectedNode.value = undefined;
+  adapter.value?.restoreAuthoritativeAgentDefinition(payload.draft.definition);
+  autosave.resetBaseline(payload.draft);
+  syncAssetNodePreviews();
+  refreshNavigationNodes();
+  await nextTick();
+  const firstAffectedNodeId = firstRestorableAgentNode(
+    payload.draft,
+    payload.affectedNodeIds,
+  );
+  if (firstAffectedNodeId) adapter.value?.focusNode(firstAffectedNodeId);
+}
+
+function monitorAgentExecution() {
+  // Agent execution returns a Java Long as a string. Do not coerce it through Number: refresh
+  // the normal execution list instead, which also handles a very fast terminal execution.
+  const targetProjectId = projectId.value;
+  const targetGeneration = initializationGeneration;
+  window.setTimeout(() => {
+    if (
+      targetProjectId === projectId.value &&
+      targetGeneration === initializationGeneration
+    ) {
+      void restoreLatestExecution(targetProjectId, targetGeneration);
+    }
+  }, 450);
+}
+
+function updateViewportWidth() {
+  viewportWidth.value = window.innerWidth;
+}
+
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!dirty.value) return;
+  if (!autosave.needsUnloadGuard.value) return;
   event.preventDefault();
   event.returnValue = '';
 }
@@ -674,6 +919,7 @@ async function initialize() {
   const generation = ++initializationGeneration;
   const requestedProjectId = projectId.value;
   closeQuickConnect();
+  autosave.resetBaseline();
   adapter.value?.disposeWorkbenchGraph();
   adapter.value = undefined;
   selectedNode.value = undefined;
@@ -681,6 +927,9 @@ async function initialize() {
   latestNodeRunsByNodeId.value = {};
   pendingPlan.value = undefined;
   projectAssets.value = [];
+  nodeResultVersions.value = [];
+  nodeResultLoading.value = false;
+  mediaTools.value = [];
   planModalOpen.value = false;
   if (executionTimer) clearTimeout(executionTimer);
   if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
@@ -693,20 +942,28 @@ async function initialize() {
   }
   loading.value = true;
   try {
-    const [projectData, draft, availableModels, assetPage] = await Promise.all([
-      getCreativeProject(requestedProjectId),
-      getWorkflowDraft(requestedProjectId),
-      searchFdmAiModels({}).catch(() => []),
-      getCreativeAssetPage({
-        pageNo: 1,
-        pageSize: 100,
-        projectId: requestedProjectId,
-      }).catch(() => ({ list: [], total: 0 })),
-    ]);
+    const [projectData, draft, capability, availableModels, assetPage, tools] =
+      await Promise.all([
+        getCreativeProject(requestedProjectId),
+        getWorkflowDraft(requestedProjectId),
+        getWorkflowCapability(requestedProjectId).catch(() => ({
+          autosaveEnabled: false,
+          mediaToolsEnabled: false,
+        })),
+        searchFdmAiModels({}).catch(() => []),
+        getCreativeAssetPage({
+          pageNo: 1,
+          pageSize: 100,
+          projectId: requestedProjectId,
+        }).catch(() => ({ list: [], total: 0 })),
+        getCreativeMediaToolDescriptors(requestedProjectId).catch(() => []),
+      ]);
     if (generation !== initializationGeneration) return;
     project.value = projectData;
+    workflowCapability.value = capability;
     modelOptions.value = availableModels;
     projectAssets.value = assetPage.list;
+    mediaTools.value = tools;
     draftVersion.value = draft?.draftVersion ?? projectData.draftVersion ?? 0;
     await nextTick();
     if (!canvasRef.value || !minimapRef.value) return;
@@ -719,12 +976,10 @@ async function initialize() {
       },
       {
         onChange: () => {
-          if (!canEdit.value) return;
-          dirty.value = true;
-          graphRevision.value += 1;
-          if (canvasNavigatorOpen.value) refreshNavigationNodes();
+          recordGraphChange();
         },
         onConnectToBlank: openQuickConnect,
+        onNodeDragStateChange: handleNodeDragStateChange,
         onNavigationChange: () => {
           if (canvasNavigatorOpen.value) refreshNavigationNodes();
         },
@@ -752,9 +1007,15 @@ async function initialize() {
     );
     adapter.value.restoreDefinition(draft?.definition ?? EMPTY_WORKFLOW);
     refreshNavigationNodes();
+    autosave.resetBaseline(
+      draft ?? {
+        definition: EMPTY_WORKFLOW,
+        draftVersion: draftVersion.value,
+        projectId: requestedProjectId,
+      },
+    );
     if (canEdit.value) ensureDefaultModels();
     syncAssetNodePreviews();
-    dirty.value = false;
     void restoreLatestPlan(requestedProjectId, generation);
     void restoreLatestExecution(requestedProjectId, generation);
   } finally {
@@ -1141,6 +1402,132 @@ function handleInlineAssetChange(payload: {
   }
 }
 
+function canMutateFromResult(action: ResultHistoryAction) {
+  if (!canEdit.value) {
+    message.warning('当前项目角色为只读，不能采用结果或创建画布分支');
+    return false;
+  }
+  if (autosave.status.value === 'CONFLICT') {
+    message.warning('草稿存在保存冲突，请先处理冲突后再创建结果分支');
+    return false;
+  }
+  if (
+    action.asset.availability !== 'ACTIVE' ||
+    !action.asset.id ||
+    !action.asset.url ||
+    !action.asset.kind
+  ) {
+    message.warning(action.asset.unavailableReason || '该历史素材已不可用');
+    return false;
+  }
+  return true;
+}
+
+async function submitResultAdoption(
+  action: ResultHistoryAction,
+  nodeId: string,
+  confirmStale: boolean,
+) {
+  if (!canMutateFromResult(action) || !action.asset.id) return;
+  try {
+    await adoptCreativeNodeResult({
+      assetId: action.asset.id,
+      confirmStale,
+      expectedSelectionVersion: action.version.selectionVersion,
+      nodeId,
+      nodeRunId: action.version.nodeRunId,
+      projectId: projectId.value,
+    });
+    await refreshNodeResultVersions();
+    message.success('已采用该结果版本；后续重跑会保留你的选择直到节点语义再次变更');
+  } catch (error) {
+    await refreshNodeResultVersions();
+    message.error(
+      error instanceof Error
+        ? error.message
+        : '采用失败：结果可能已被其他编辑者更新，已刷新当前版本',
+    );
+  }
+}
+
+function handleResultAdopt(action: ResultHistoryAction) {
+  if (!canMutateFromResult(action)) return;
+  const nodeId = selectedNode.value?.id;
+  if (!nodeId) return;
+  if (action.version.selectionStatus !== 'STALE') {
+    void submitResultAdoption(action, nodeId, false);
+    return;
+  }
+  Modal.confirm({
+    cancelText: '取消',
+    content:
+      '该节点的配置或上游语义已经变化。继续采用此历史结果会把它作为当前可复用结果；请确认这是你的明确选择。',
+    okText: '确认采用历史结果',
+    onOk: () => submitResultAdoption(action, nodeId, true),
+    title: '确认采用语义已过期的结果？',
+  });
+}
+
+function applyResultAssetDisplay(
+  nodeId: string,
+  asset: FdmCreativeApi.NodeResultAsset,
+) {
+  adapter.value?.setNodeDisplayData(nodeId, {
+    assetName: asset.name,
+    assetType: asset.kind,
+    previewUrl: asset.url,
+  });
+}
+
+function handleResultPin(action: ResultHistoryAction) {
+  if (!canMutateFromResult(action) || !action.asset.id || !action.asset.kind)
+    return;
+  const branch = adapter.value?.addPinnedMediaAsset({
+    assetId: action.asset.id,
+    assetKind: action.asset.kind,
+    assetName: action.asset.name,
+    originNodeId: selectedNode.value?.id,
+  });
+  if (!branch) {
+    message.warning(`无法固定素材：请检查画布节点上限（${MAX_WORKBENCH_NODES}）`);
+    return;
+  }
+  applyResultAssetDisplay(branch.inputNode.id, action.asset);
+  refreshNavigationNodes();
+  message.success('已将结果固定为画布输入节点；素材仍由现有资产体系管理');
+}
+
+function handleResultTool(action: ResultHistoryAction & {
+  tool: FdmCreativeApi.MediaToolDescriptor;
+}) {
+  if (!canMutateFromResult(action) || !action.asset.id || !action.asset.kind)
+    return;
+  if (!action.tool.available) {
+    message.warning(action.tool.unavailableReason || '该媒体工具当前不可用');
+    return;
+  }
+  const branch = adapter.value?.addMediaToolBranch({
+    assetId: action.asset.id,
+    assetKind: action.asset.kind,
+    assetName: action.asset.name,
+    originNodeId: selectedNode.value?.id,
+    tool: action.tool,
+  });
+  if (!branch) {
+    message.warning(
+      `无法创建“${action.tool.label}”分支，请检查端口兼容性、节点上限或工具配置`,
+    );
+    return;
+  }
+  applyResultAssetDisplay(branch.inputNode.id, action.asset);
+  refreshNavigationNodes();
+  message.success(
+    action.tool.id === 'save-asset-library'
+      ? '已创建资产库输出分支，运行工作流后会按现有资产生命周期保存'
+      : `已创建“${action.tool.label}”分支；请检查参数后按正常工作流运行`,
+  );
+}
+
 function applyPlannerPromptFromLibrary(selection: PromptLibrarySelection) {
   planner.prompt =
     selection.mode === 'replace' || !planner.prompt.trim()
@@ -1202,48 +1589,226 @@ function handleWorkbenchKeydown(event: KeyboardEvent) {
   }
 }
 
+async function showWorkflowConflict(
+  _snapshot: WorkflowAutosaveSnapshot,
+  _error: unknown,
+) {
+  const targetProjectId = projectId.value;
+  workflowConflictOpen.value = true;
+  workflowConflictLoading.value = true;
+  workflowConflictServerDraft.value = undefined;
+  try {
+    const latest = await getWorkflowDraft(targetProjectId);
+    if (targetProjectId === projectId.value) {
+      workflowConflictServerDraft.value = latest;
+    }
+  } catch {
+    if (targetProjectId === projectId.value) {
+      message.warning('无法读取服务器最新草稿；本地副本仍可安全导出');
+    }
+  } finally {
+    if (targetProjectId === projectId.value) {
+      workflowConflictLoading.value = false;
+    }
+  }
+}
+
+function downloadLocalConflictSnapshot() {
+  const snapshot = autosave.localSnapshot.value;
+  if (!snapshot) return;
+  downloadWorkflowExport(createWorkflowExport(snapshot.definition));
+  message.success('本地未保存副本已导出');
+}
+
+function keepLocalConflictSnapshot() {
+  autosave.keepLocalForLater();
+  workflowConflictOpen.value = false;
+  message.info('已保留本地副本；自动保存保持暂停，稍后可继续处理冲突');
+}
+
+function handleWorkflowConflictModalOpen(nextOpen: boolean) {
+  workflowConflictOpen.value = nextOpen;
+  if (!nextOpen) autosave.keepLocalForLater();
+}
+
+function loadServerConflictDraft() {
+  const latest = workflowConflictServerDraft.value;
+  if (!latest) return;
+  Modal.confirm({
+    cancelText: '继续保留本地',
+    content:
+      '加载服务器版本会替换当前画布。若需要保留本地工作，请先点击“导出本地副本”。',
+    okText: '加载服务器版本',
+    okType: 'danger',
+    onCancel: () => autosave.keepLocalForLater(),
+    onOk: () => {
+      selectedNode.value = undefined;
+      adapter.value?.restoreDefinition(latest.definition);
+      draftVersion.value = latest.draftVersion;
+      if (project.value) project.value.draftVersion = latest.draftVersion;
+      autosave.discardLocalAndLoadServer(latest);
+      syncAssetNodePreviews();
+      refreshNavigationNodes();
+      workflowConflictOpen.value = false;
+      message.success('已加载服务器最新草稿');
+    },
+    title: '确认加载服务器版本？',
+  });
+}
+
+async function exportWorkflow() {
+  if (!project.value) return;
+  workflowExporting.value = true;
+  try {
+    const document = await exportWorkflowDraft(projectId.value);
+    // Verify the server response before turning it into a browser download.
+    const safeDocument = parseWorkflowExport(JSON.stringify(document));
+    downloadWorkflowExport(safeDocument);
+    message.success('工作流结构已导出');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '工作流导出失败');
+  } finally {
+    workflowExporting.value = false;
+  }
+}
+
+function openWorkflowImport() {
+  if (!canEdit.value) return;
+  workflowImportFileRef.value?.click();
+}
+
+async function handleWorkflowImportFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (file.size > WORKFLOW_EXPORT_MAX_BYTES) {
+    message.error('导入文件超过工作流大小限制');
+    return;
+  }
+  try {
+    const document = parseWorkflowExport(await file.text());
+    workflowImportModalOpen.value = false;
+    workflowImportDocument.value = JSON.stringify(document);
+    workflowImportPreview.value = undefined;
+    clearUnavailableImportAssets.value = false;
+    await previewSelectedWorkflowImport();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '导入文件不可用');
+  }
+}
+
+async function previewSelectedWorkflowImport() {
+  const document = workflowImportDocument.value;
+  if (!document || !canEdit.value) return;
+  workflowImportPreviewing.value = true;
+  try {
+    const preview = await previewWorkflowImport({
+      clearUnavailableAssetReferences: clearUnavailableImportAssets.value,
+      document,
+      projectId: projectId.value,
+    });
+    workflowImportPreview.value = preview;
+    workflowImportModalOpen.value = true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '导入预检失败');
+  } finally {
+    workflowImportPreviewing.value = false;
+  }
+}
+
+async function confirmWorkflowImport() {
+  const document = workflowImportDocument.value;
+  const preview = workflowImportPreview.value;
+  if (!document || !preview || !canEdit.value) return;
+  if (!preview.canImport) {
+    message.warning('请先清空失效素材引用，或在原项目中恢复相应素材后再导入');
+    return;
+  }
+  if (!(await flushBeforeWorkflowAction('导入并替换当前草稿'))) return;
+
+  const mutationId = createWorkflowMutationId('workflow-import');
+  const conflictSnapshot: WorkflowAutosaveSnapshot = {
+    definition: preview.definition,
+    definitionHash: preview.definitionHash,
+    expectedDraftVersion: draftVersion.value,
+    mutationId,
+    sequence: -1,
+  };
+  workflowImporting.value = true;
+  try {
+    const result = await importWorkflowDraft({
+      clearUnavailableAssetReferences: clearUnavailableImportAssets.value,
+      definitionHash: preview.definitionHash,
+      document,
+      expectedDraftVersion: draftVersion.value,
+      mutationId,
+      projectId: projectId.value,
+      replaceConfirmed: true,
+    });
+    draftVersion.value = result.draft.draftVersion;
+    if (project.value) project.value.draftVersion = result.draft.draftVersion;
+    selectedNode.value = undefined;
+    adapter.value?.restoreDefinition(result.draft.definition);
+    autosave.resetBaseline(result.draft);
+    syncAssetNodePreviews();
+    refreshNavigationNodes();
+    workflowImportModalOpen.value = false;
+    message.success(
+      result.report.clearedAssetReferences.length > 0
+        ? '工作流结构已导入，失效素材引用已清空'
+        : '工作流结构已导入',
+    );
+  } catch (error) {
+    if (isWorkflowVersionConflict(error)) {
+      await autosave.enterExternalConflict(conflictSnapshot, error);
+    } else {
+      message.error(error instanceof Error ? error.message : '工作流导入失败');
+    }
+  } finally {
+    workflowImporting.value = false;
+  }
+}
+
+function createWorkflowMutationId(prefix: string) {
+  const unique =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}:${unique}`;
+}
+
 async function saveDraft(showMessage = true) {
   if (!canEdit.value) {
     if (showMessage) message.warning('当前项目角色为只读，不能保存草稿');
     return false;
   }
-  if (!adapter.value || saving.value) return false;
-  const targetProjectId = projectId.value;
-  const targetGeneration = initializationGeneration;
-  saving.value = true;
+  if (!adapter.value) return false;
   try {
     const definition = adapter.value.serializeDefinition();
     if (!validateWorkflowDefinition(definition)) {
       message.error('画布包含无效连线、重复标识或超过节点上限，无法保存');
       return false;
     }
-    const savedDraft = await saveWorkflowDraft({
-      definition,
-      expectedDraftVersion: draftVersion.value,
-      projectId: targetProjectId,
-    });
-    if (
-      targetProjectId !== projectId.value ||
-      targetGeneration !== initializationGeneration
-    ) {
-      return false;
+    // A manual click is an explicit immediate flush. If no change has been
+    // captured yet, create one so manual save remains compatible with P1.
+    if (!dirty.value) await autosave.markChanged(definition);
+    const saved = await autosave.flush();
+    if (saved && showMessage) message.success('草稿已保存');
+    if (!saved && showMessage && autosave.status.value !== 'CONFLICT') {
+      message.error('草稿尚未保存，请检查网络或处理保存状态后重试');
     }
-    draftVersion.value = savedDraft.draftVersion;
-    dirty.value = false;
-    lastSavedAt.value = new Date();
-    if (showMessage) message.success('草稿已保存');
-    return true;
-  } catch {
-    message.error('保存失败，草稿可能已在其他页面更新，请刷新后重试');
+    return saved;
+  } catch (error) {
+    if (showMessage) {
+      message.error(error instanceof Error ? error.message : '草稿保存失败');
+    }
     return false;
-  } finally {
-    saving.value = false;
   }
 }
 
 async function publish() {
   if (!canEdit.value) return;
-  if (dirty.value && !(await saveDraft(false))) return;
+  if (!(await flushBeforeWorkflowAction('发布任务'))) return;
   publishing.value = true;
   try {
     await publishWorkflow({
@@ -1346,6 +1911,7 @@ async function applyPlan() {
     message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
     return;
   }
+  if (!(await flushBeforeWorkflowAction('应用内容规划'))) return;
   const validated = await previewContentPlan({
     imageCount:
       planner.mode === 'VIDEO_SEQUENCE' ? undefined : planner.imageCount,
@@ -1372,10 +1938,17 @@ async function applyPlan() {
   if (result.definition) {
     adapter.value?.restoreDefinition(result.definition, false);
     syncAssetNodePreviews();
+    autosave.resetBaseline({
+      definition: result.definition,
+      definitionHash: result.definitionHash,
+      draftVersion: result.draftVersion,
+      projectId: projectId.value,
+    });
   } else {
     adapter.value?.applyPlanAsBatch(validated.plan ?? preview.plan);
+    const definition = adapter.value?.serializeDefinition();
+    if (definition) void autosave.markChanged(definition);
   }
-  dirty.value = false;
   planModalOpen.value = false;
   message.success('规划已作为一个批次应用到画布，不会自动执行模型');
 }
@@ -1458,7 +2031,7 @@ async function run(scope: FdmCreativeApi.ExecutionScope, startNodeId?: string) {
     message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
     return;
   }
-  if (dirty.value && !(await saveDraft(false))) return;
+  if (canEdit.value && !(await flushBeforeWorkflowAction('运行工作流'))) return;
   if (
     targetProjectId !== projectId.value ||
     targetGeneration !== initializationGeneration
@@ -1498,6 +2071,7 @@ async function monitorExecution(id: number, targetProjectId = projectId.value) {
     );
   } else {
     await refreshProjectAssets(targetProjectId);
+    void refreshNodeResultVersions();
   }
 }
 
@@ -1548,11 +2122,14 @@ function goBack() {
 }
 
 onBeforeRouteLeave(() => {
-  if (!dirty.value) return true;
+  if (!autosave.needsUnloadGuard.value) return true;
   return new Promise<boolean>((resolve) => {
     Modal.confirm({
       cancelText: '继续编辑',
-      content: '当前画布有未保存修改，离开后修改将丢失。',
+      content:
+        autosave.status.value === 'CONFLICT'
+          ? '当前画布存在保存冲突，离开前请先导出本地副本或加载服务器版本。'
+          : '当前画布仍有未持久化修改，离开后修改将丢失。',
       okText: '确认离开',
       onCancel: () => resolve(false),
       onOk: () => resolve(true),
@@ -1565,10 +2142,16 @@ watch(
   () => route.params.projectId,
   () => void initialize(),
 );
+watch(clearUnavailableImportAssets, () => {
+  if (workflowImportModalOpen.value && workflowImportDocument.value) {
+    void previewSelectedWorkflowImport();
+  }
+});
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('keydown', handleWorkbenchKeydown);
   window.addEventListener('pointerdown', handleQuickConnectPointerDown, true);
+  window.addEventListener('resize', updateViewportWidth);
   void initialize();
 });
 
@@ -1581,10 +2164,12 @@ onBeforeUnmount(() => {
     handleQuickConnectPointerDown,
     true,
   );
+  window.removeEventListener('resize', updateViewportWidth);
   if (executionTimer) clearTimeout(executionTimer);
   if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
   if (planTimer) clearTimeout(planTimer);
   if (promptRefineTimer) clearTimeout(promptRefineTimer);
+  autosave.destroy();
   adapter.value?.disposeWorkbenchGraph();
 });
 </script>
@@ -1593,8 +2178,12 @@ onBeforeUnmount(() => {
   <div class="workbench-editor">
     <WorkbenchTopbar
       :can-edit="canEdit"
+      :can-export="Boolean(project)"
+      :can-import="canEdit && Boolean(project)"
       :can-run="canRun"
       :dirty="dirty"
+      :exporting="workflowExporting"
+      :importing="workflowImporting"
       :project-name="project?.name"
       :publishing="publishing"
       :role-label="currentUserRoleLabel"
@@ -1602,7 +2191,9 @@ onBeforeUnmount(() => {
       :saving="saving"
       :zoom-percent="zoomPercent"
       @back="goBack"
+      @export="exportWorkflow"
       @fit="adapter?.fit()"
+      @import="openWorkflowImport"
       @publish="publish"
       @redo="adapter?.redo()"
       @run="run('FULL')"
@@ -1610,8 +2201,22 @@ onBeforeUnmount(() => {
       @undo="adapter?.undo()"
       @zoom-by="adapter?.zoomBy($event)"
     />
+    <input
+      ref="workflowImportFileRef"
+      accept="application/json,.json"
+      class="workflow-import-file"
+      type="file"
+      @change="handleWorkflowImportFile"
+    />
 
-    <div class="editor-body" :class="{ 'has-inspector': selectedNode }">
+    <div
+      class="editor-body"
+      :class="{
+        'has-agent-panel': agentPanelOpen && !agentPanelUsesDrawer,
+        'has-inspector': selectedNode,
+      }"
+      :style="agentPanelStyle"
+    >
       <NodeLibraryPanel
         ref="nodeLibraryRef"
         :readonly="!canEdit"
@@ -1710,6 +2315,15 @@ onBeforeUnmount(() => {
           <IconifyIcon icon="lucide:search" />
           查找节点
           <span>{{ navigationNodeCount }}</span>
+        </Button>
+
+        <Button
+          class="canvas-agent-trigger"
+          :type="agentPanelOpen ? 'primary' : 'default'"
+          @click="toggleAgentPanel"
+        >
+          <IconifyIcon icon="lucide:bot" />
+          画布 Agent
         </Button>
 
         <CanvasNavigator
@@ -1832,6 +2446,11 @@ onBeforeUnmount(() => {
           :project-assets="projectAssets"
           :readonly="!canEdit"
           :result-assets="resultAssets"
+          :result-history-autosave-conflict="hasAutosaveConflict"
+          :result-history-can-edit="canEdit"
+          :result-history-loading="nodeResultLoading"
+          :result-media-tools="mediaTools"
+          :result-versions="nodeResultVersions"
           :result-text="resultText"
           :upload-accept="inputUploadAccept"
           :upload-api="uploadInputAsset"
@@ -1841,11 +2460,141 @@ onBeforeUnmount(() => {
           @close="closeInlineEditor"
           @config-change="handleInlineConfigChange"
           @name-change="setNodeName"
+          @result-adopt="handleResultAdopt"
+          @result-pin="handleResultPin"
+          @result-tool="handleResultTool"
           @run="handleInlineRun"
           @run-downstream="handleInlineRunDownstream"
         />
       </aside>
+
+      <aside
+        v-if="agentPanelOpen && !agentPanelUsesDrawer"
+        class="agent-panel"
+      >
+        <CanvasAgentPanel
+          :can-edit="canEdit"
+          :can-run="canRun"
+          :current-node="selectedNode"
+          :current-user-role="currentUserRole"
+          :draft-version="draftVersion"
+          :model-options="modelOptions"
+          :nodes="agentWorkflowNodes"
+          :prepare-canvas-mutation="prepareAgentCanvasMutation"
+          :project-id="projectId"
+          :upload-asset="uploadAgentReferenceAsset"
+          :width="agentPanelWidth"
+          @close="agentPanelOpen = false"
+          @draft-applied="applyAgentDraft"
+          @execution-created="monitorAgentExecution"
+          @resize="agentPanelWidth = $event"
+        />
+      </aside>
     </div>
+
+    <Drawer
+      v-if="agentPanelOpen && agentPanelUsesDrawer"
+      :body-style="{ padding: '0' }"
+      :closable="false"
+      destroy-on-close
+      placement="right"
+      :open="agentPanelOpen"
+      :width="Math.min(agentPanelWidth, Math.max(320, viewportWidth - 16))"
+      @close="agentPanelOpen = false"
+    >
+      <CanvasAgentPanel
+        :can-edit="canEdit"
+        :can-run="canRun"
+        :current-node="selectedNode"
+        :current-user-role="currentUserRole"
+        :draft-version="draftVersion"
+        :model-options="modelOptions"
+        :nodes="agentWorkflowNodes"
+        :prepare-canvas-mutation="prepareAgentCanvasMutation"
+        :project-id="projectId"
+        :upload-asset="uploadAgentReferenceAsset"
+        :width="agentPanelWidth"
+        @close="agentPanelOpen = false"
+        @draft-applied="applyAgentDraft"
+        @execution-created="monitorAgentExecution"
+        @resize="agentPanelWidth = $event"
+      />
+    </Drawer>
+
+    <WorkflowConflictModal
+      :loading-server-draft="workflowConflictLoading"
+      :local-snapshot="localConflictSnapshot"
+      :open="workflowConflictOpen"
+      :server-draft="workflowConflictServerDraft"
+      @download-local="downloadLocalConflictSnapshot"
+      @keep-local="keepLocalConflictSnapshot"
+      @load-server="loadServerConflictDraft"
+      @update:open="handleWorkflowConflictModalOpen"
+    />
+
+    <Modal
+      v-model:open="workflowImportModalOpen"
+      :confirm-loading="workflowImporting"
+      :ok-button-props="{
+        disabled: workflowImportPreviewing || !workflowImportPreview?.canImport,
+      }"
+      ok-text="确认替换并导入"
+      title="导入工作流结构"
+      :width="660"
+      @ok="confirmWorkflowImport"
+    >
+      <Alert
+        show-icon
+        type="warning"
+        message="导入会替换当前草稿"
+        description="导入前已执行本地格式检查与服务端预检。系统不会复制其他项目的私有素材；失效引用必须由你明确选择清空。"
+      />
+      <div v-if="workflowImportPreviewing" class="workflow-import-loading">
+        正在预检工作流和素材引用…
+      </div>
+      <template v-else-if="workflowImportPreview">
+        <dl class="workflow-import-summary">
+          <dt>导入结构</dt>
+          <dd>
+            {{ workflowImportPreview.nodeCount }} 个节点，
+            {{ workflowImportPreview.edgeCount }} 条连线
+          </dd>
+          <dt>可替换</dt>
+          <dd>
+            <Tag :color="workflowImportPreview.canImport ? 'green' : 'red'">
+              {{ workflowImportPreview.canImport ? '可以导入' : '需要处理失效引用' }}
+            </Tag>
+          </dd>
+        </dl>
+
+        <div
+          v-if="workflowImportPreview.unavailableAssetReferences.length"
+          class="workflow-import-issues"
+        >
+          <strong>失效或无权访问的素材引用</strong>
+          <ul>
+            <li
+              v-for="issue in workflowImportPreview.unavailableAssetReferences"
+              :key="`${issue.nodeId}:${issue.configPath}:${issue.assetId}`"
+            >
+              节点 {{ issue.nodeId }} · {{ issue.configPath }} · 素材 {{
+                issue.assetId
+              }}（{{ issue.reason }}）
+            </li>
+          </ul>
+          <div class="workflow-import-clear-option">
+            <Switch v-model:checked="clearUnavailableImportAssets" size="small" />
+            <span>仅导入结构，并清空这些失效素材引用</span>
+          </div>
+        </div>
+        <Alert
+          v-if="workflowImportPreview.clearedAssetReferences.length"
+          show-icon
+          type="info"
+          :message="`本次将清空 ${workflowImportPreview.clearedAssetReferences.length} 个失效素材引用`"
+        />
+      </template>
+    </Modal>
 
     <Modal
       v-model:open="planModalOpen"
@@ -1965,6 +2714,67 @@ onBeforeUnmount(() => {
   background: hsl(var(--background));
 }
 
+.workflow-import-file {
+  display: none;
+}
+
+.workflow-import-loading {
+  padding: 24px 0;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.workflow-import-summary {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 10px 14px;
+  padding: 16px 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.workflow-import-summary dt {
+  color: hsl(var(--muted-foreground));
+}
+
+.workflow-import-summary dd {
+  margin: 0;
+  color: hsl(var(--foreground));
+}
+
+.workflow-import-issues {
+  padding: 13px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  background: rgb(245 158 11 / 7%);
+  border: 1px solid rgb(245 158 11 / 28%);
+  border-radius: 9px;
+}
+
+.workflow-import-issues > strong {
+  color: #b45309;
+}
+
+.workflow-import-issues ul {
+  max-height: 144px;
+  padding-left: 20px;
+  margin: 9px 0;
+  overflow: auto;
+  color: hsl(var(--muted-foreground));
+}
+
+.workflow-import-issues li + li {
+  margin-top: 5px;
+}
+
+.workflow-import-clear-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: hsl(var(--foreground));
+}
+
 .editor-body {
   display: grid;
   grid-template-columns: clamp(196px, 11.6vw, 222px) minmax(0, 1fr);
@@ -1978,6 +2788,18 @@ onBeforeUnmount(() => {
     clamp(440px, 28vw, 540px);
 }
 
+.editor-body.has-agent-panel {
+  grid-template-columns:
+    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
+    var(--agent-panel-width);
+}
+
+.editor-body.has-inspector.has-agent-panel {
+  grid-template-columns:
+    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
+    clamp(400px, 24vw, 500px) var(--agent-panel-width);
+}
+
 .canvas-navigator-trigger {
   position: absolute;
   top: 16px;
@@ -1989,6 +2811,24 @@ onBeforeUnmount(() => {
   height: 34px;
   border-radius: 9px;
   box-shadow: 0 6px 18px hsl(var(--foreground) / 10%);
+}
+
+.canvas-agent-trigger {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 9;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 34px;
+  border-radius: 9px;
+  box-shadow: 0 6px 18px hsl(var(--foreground) / 10%);
+}
+
+.canvas-agent-trigger :deep(svg) {
+  width: 15px;
+  height: 15px;
 }
 
 .canvas-navigator-trigger > span {
@@ -2062,6 +2902,16 @@ onBeforeUnmount(() => {
   background: hsl(var(--card));
   border-left: 1px solid hsl(var(--border));
   box-shadow: -8px 0 24px hsl(var(--foreground) / 4%);
+}
+
+.agent-panel {
+  z-index: 5;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--card));
+  border-left: 1px solid hsl(var(--border));
+  box-shadow: -8px 0 24px hsl(var(--foreground) / 5%);
 }
 
 .canvas-shell :deep(.ant-spin-nested-loading),
@@ -2453,6 +3303,15 @@ onBeforeUnmount(() => {
 
   .editor-body.has-inspector {
     grid-template-columns: 190px minmax(0, 1fr) 400px;
+  }
+
+  .editor-body.has-agent-panel {
+    grid-template-columns: 190px minmax(0, 1fr) var(--agent-panel-width);
+  }
+
+  .editor-body.has-inspector.has-agent-panel {
+    grid-template-columns:
+      190px minmax(0, 1fr) 400px var(--agent-panel-width);
   }
 
   .prompt-dock {

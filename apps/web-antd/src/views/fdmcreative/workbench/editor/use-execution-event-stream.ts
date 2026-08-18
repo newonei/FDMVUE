@@ -1,5 +1,6 @@
 import type { MaybeRefOrGetter, Ref, ShallowRef } from 'vue';
 
+import type { CreativeLongId } from './creative-long-id';
 import type {
   CreativeExecutionEvent,
   ExecutionEventStreamHandle,
@@ -14,6 +15,7 @@ import { isTenantEnable, useAppConfig } from '@vben/hooks';
 import { useAccessStore } from '@vben/stores';
 
 import { createExecutionEventStream } from './execution-event-stream';
+import { mergeSseAuthenticationHeaders } from './sse-auth-headers';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 
@@ -29,7 +31,9 @@ export interface UseExecutionEventStreamOptions extends Omit<
   AuthenticatedExecutionEventStreamOptions,
   'executionId' | 'onError' | 'onEvent' | 'onStateChange'
 > {
-  executionId: MaybeRefOrGetter<null | number | undefined>;
+  executionId: MaybeRefOrGetter<
+    CreativeLongId | null | number | undefined
+  >;
   immediate?: boolean;
   onError?: ExecutionEventStreamOptions['onError'];
   onEvent?: ExecutionEventStreamOptions['onEvent'];
@@ -40,7 +44,7 @@ export interface UseExecutionEventStreamReturn {
   cursor: Ref<number>;
   error: ShallowRef<Error | undefined>;
   lastEvent: ShallowRef<CreativeExecutionEvent | undefined>;
-  start: (executionId?: number) => void;
+  start: (executionId?: CreativeLongId | number) => void;
   state: Ref<'idle' | ExecutionEventStreamState>;
   stop: () => void;
 }
@@ -62,19 +66,12 @@ export function createAuthenticatedExecutionEventStream(
         typeof configuredHeaders === 'function'
           ? await configuredHeaders()
           : configuredHeaders;
-      const headers = new Headers(additional);
-      if (accessStore.accessToken) {
-        headers.set('Authorization', `Bearer ${accessStore.accessToken}`);
-      }
-      if (isTenantEnable()) {
-        if (accessStore.tenantId !== null) {
-          headers.set('tenant-id', String(accessStore.tenantId));
-        }
-        if (accessStore.visitTenantId !== null) {
-          headers.set('visit-tenant-id', String(accessStore.visitTenantId));
-        }
-      }
-      return headers;
+      return mergeSseAuthenticationHeaders(additional, {
+        accessToken: accessStore.accessToken,
+        tenantEnabled: isTenantEnable(),
+        tenantId: accessStore.tenantId,
+        visitTenantId: accessStore.visitTenantId,
+      });
     },
   });
 }
@@ -100,7 +97,7 @@ export function useExecutionEventStream(
     state.value = 'closed';
   };
 
-  const start = (explicitExecutionId?: number) => {
+  const start = (explicitExecutionId?: CreativeLongId | number) => {
     const executionId = explicitExecutionId ?? toValue(options.executionId);
     stop();
     if (executionId === null || executionId === undefined) {

@@ -31,6 +31,7 @@ describe('creative node catalog', () => {
         'creative-brief',
         'first-last-frame-to-video',
         'image-collection',
+        'image-crop',
         'image-edit',
         'image-generate',
         'image-input',
@@ -38,6 +39,7 @@ describe('creative node catalog', () => {
         'image-plan-item',
         'image-resize',
         'image-select',
+        'image-split',
         'image-to-image',
         'image-to-video',
         'output',
@@ -360,6 +362,51 @@ describe('creative node catalog', () => {
         ],
       ),
     ).toEqual([expect.objectContaining({ sourcePortId: 'ordered-images' })]);
+  });
+
+  it('declares bounded local crop and split nodes without calling resize AI upscaling', () => {
+    expect(CREATIVE_NODE_MAP.get('image-resize')).toMatchObject({
+      label: '图片缩放/适配',
+    });
+    expect(CREATIVE_NODE_MAP.get('image-crop')).toMatchObject({
+      defaultConfig: {
+        coordinateMode: 'NORMALIZED',
+        cropHeight: 1,
+        cropWidth: 1,
+        cropX: 0,
+        cropY: 0,
+        format: 'png',
+      },
+      ports: [
+        expect.objectContaining({
+          direction: 'INPUT',
+          id: 'image',
+          required: true,
+          type: 'image-asset',
+        }),
+        expect.objectContaining({
+          direction: 'OUTPUT',
+          id: 'asset',
+          type: 'image-asset',
+        }),
+      ],
+    });
+    expect(CREATIVE_NODE_MAP.get('image-split')).toMatchObject({
+      defaultConfig: { columns: 2, format: 'png', rows: 2 },
+      ports: [
+        expect.objectContaining({
+          direction: 'INPUT',
+          id: 'image',
+          required: true,
+          type: 'image-asset',
+        }),
+        expect.objectContaining({
+          direction: 'OUTPUT',
+          id: 'images',
+          type: 'image-list',
+        }),
+      ],
+    });
   });
 
   it('declares executable video preprocessing and an ordered timeline output', () => {

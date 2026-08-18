@@ -40,6 +40,7 @@ import {
   supportsNodeModel,
 } from '../node-model-filter';
 import { nodeRunStatusLabel } from '../node-run-status';
+import NodeResultVersionsPanel from './NodeResultVersionsPanel.vue';
 
 type InlineEditorPlacement = 'above' | 'below';
 type InlineEditorVariant = 'floating' | 'panel';
@@ -70,6 +71,15 @@ interface AssetChangePayload {
   value: unknown;
 }
 
+interface ResultActionPayload {
+  asset: FdmCreativeApi.NodeResultAsset;
+  version: FdmCreativeApi.NodeResultVersion;
+}
+
+interface ResultToolActionPayload extends ResultActionPayload {
+  tool: FdmCreativeApi.MediaToolDescriptor;
+}
+
 interface ConnectedTextSource {
   id: string;
   name: string;
@@ -94,6 +104,11 @@ interface Props {
   projectId: number;
   projectAssets?: FdmCreativeApi.CreativeAsset[];
   resultAssets?: FdmCreativeApi.CreativeAsset[];
+  resultHistoryAutosaveConflict?: boolean;
+  resultHistoryCanEdit?: boolean;
+  resultHistoryLoading?: boolean;
+  resultMediaTools?: FdmCreativeApi.MediaToolDescriptor[];
+  resultVersions?: FdmCreativeApi.NodeResultVersion[];
   resultText?: string;
   readonly?: boolean;
   uploadAccept?: string[];
@@ -117,6 +132,11 @@ const props = withDefaults(defineProps<Props>(), {
   progress: undefined,
   projectAssets: () => [],
   resultAssets: () => [],
+  resultHistoryAutosaveConflict: false,
+  resultHistoryCanEdit: false,
+  resultHistoryLoading: false,
+  resultMediaTools: () => [],
+  resultVersions: () => [],
   resultText: undefined,
   readonly: false,
   uploadAccept: () => [],
@@ -131,6 +151,9 @@ const emit = defineEmits<{
   close: [];
   configChange: [key: string, value: unknown];
   nameChange: [value: string];
+  resultAdopt: [payload: ResultActionPayload];
+  resultPin: [payload: ResultActionPayload];
+  resultTool: [payload: ResultToolActionPayload];
   run: [nodeId: string];
   runDownstream: [nodeId: string];
 }>();
@@ -501,7 +524,15 @@ const inputAssetOptions = computed(() => {
 const imageAssetOptions = computed(() =>
   imageAssets.value.map((asset) => ({ label: asset.name, value: asset.id })),
 );
-const selectedInputAssetId = computed(() => asNumber(config.value.assetId));
+// P3 result history keeps identifiers as decimal strings to avoid JavaScript
+// precision loss. Resolve the rendered select/preview against the project
+// asset list without rewriting the graph configuration back to a number.
+const selectedInputAssetId = computed(() => {
+  const configuredAssetId = config.value.assetId;
+  return props.projectAssets.find(
+    (asset) => String(asset.id) === String(configuredAssetId),
+  )?.id;
+});
 const referenceAssetIds = computed(() =>
   asNumberList(config.value.referenceAssetIds),
 );
@@ -1209,6 +1240,22 @@ function handleEditorEscape() {
         </div>
       </section>
 
+      <section
+        v-if="node.type === 'image-edit'"
+        class="editor-section mask-capability-note"
+      >
+        <div class="section-heading">
+          <strong>遮罩局部重绘</strong>
+          <Tag color="default">当前不可用</Tag>
+        </div>
+        <p>
+          当前 FDM AI 目录尚未声明 IMAGE_INPAINT / IMAGE_OUTPAINT 的供应商契约。遮罩资产仅保留为私有图片引用，运行会被安全拒绝，不会被静默忽略或伪装成普通图片编辑。
+        </p>
+        <span v-if="config.maskAssetId">
+          已检测到历史遮罩配置；请移除或等待管理员配置完整能力后再运行。
+        </span>
+      </section>
+
       <section v-if="supportsPrompt" class="editor-section prompt-section">
         <div class="section-heading">
           <strong>{{ promptLabel() }}</strong>
@@ -1664,6 +1711,18 @@ function handleEditorEscape() {
           </a>
         </div>
       </section>
+
+      <NodeResultVersionsPanel
+        v-if="resultVersions.length || resultHistoryLoading"
+        :autosave-conflict="resultHistoryAutosaveConflict"
+        :can-edit="resultHistoryCanEdit"
+        :loading="resultHistoryLoading"
+        :media-tools="resultMediaTools"
+        :versions="resultVersions"
+        @adopt="emit('resultAdopt', $event)"
+        @pin="emit('resultPin', $event)"
+        @tool="emit('resultTool', $event)"
+      />
     </main>
 
     <footer class="editor-toolbar">
@@ -1859,6 +1918,100 @@ function handleEditorEscape() {
           :value="asString(config.resizeMode, 'FIT').toUpperCase()"
           @change="emitConfig('resizeMode', $event)"
         />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="[
+            { label: 'PNG', value: 'png' },
+            { label: 'JPEG', value: 'jpeg' },
+          ]"
+          :value="asString(config.format, 'png').toLowerCase()"
+          @change="emitConfig('format', $event)"
+        />
+      </template>
+
+      <template v-else-if="node.type === 'image-crop'">
+        <Tag color="cyan">归一化坐标</Tag>
+        <InputNumber
+          addon-before="X"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="1"
+          :min="0"
+          :precision="4"
+          :step="0.01"
+          :value="asNumber(config.cropX) ?? 0"
+          @change="emitConfig('cropX', $event)"
+        />
+        <InputNumber
+          addon-before="Y"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="1"
+          :min="0"
+          :precision="4"
+          :step="0.01"
+          :value="asNumber(config.cropY) ?? 0"
+          @change="emitConfig('cropY', $event)"
+        />
+        <InputNumber
+          addon-before="宽"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="1"
+          :min="0.0001"
+          :precision="4"
+          :step="0.01"
+          :value="asNumber(config.cropWidth) ?? 1"
+          @change="emitConfig('cropWidth', $event)"
+        />
+        <InputNumber
+          addon-before="高"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="1"
+          :min="0.0001"
+          :precision="4"
+          :step="0.01"
+          :value="asNumber(config.cropHeight) ?? 1"
+          @change="emitConfig('cropHeight', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="[
+            { label: 'PNG', value: 'png' },
+            { label: 'JPEG', value: 'jpeg' },
+          ]"
+          :value="asString(config.format, 'png').toLowerCase()"
+          @change="emitConfig('format', $event)"
+        />
+      </template>
+
+      <template v-else-if="node.type === 'image-split'">
+        <InputNumber
+          addon-before="列"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="8"
+          :min="1"
+          :precision="0"
+          :value="asNumber(config.columns) ?? 2"
+          @change="emitConfig('columns', $event)"
+        />
+        <InputNumber
+          addon-before="行"
+          class="toolbar-number toolbar-number--small"
+          :disabled="readonly"
+          :max="8"
+          :min="1"
+          :precision="0"
+          :value="asNumber(config.rows) ?? 2"
+          @change="emitConfig('rows', $event)"
+        />
+        <Tag color="cyan">
+          {{ (asNumber(config.columns) ?? 2) * (asNumber(config.rows) ?? 2) }} 个分片
+        </Tag>
         <Select
           class="toolbar-control"
           :disabled="readonly"
@@ -2841,6 +2994,29 @@ function handleEditorEscape() {
   margin: 3px 0 0;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
+}
+
+.mask-capability-note {
+  background: color-mix(in srgb, #f59e0b 6%, hsl(var(--card)));
+}
+
+.mask-capability-note .section-heading :deep(.ant-tag) {
+  margin-left: auto;
+  font-size: 10px;
+}
+
+.mask-capability-note p,
+.mask-capability-note > span {
+  display: block;
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: hsl(var(--muted-foreground));
+}
+
+.mask-capability-note > span {
+  margin-top: 6px;
+  color: color-mix(in srgb, #d97706 72%, hsl(var(--foreground)));
 }
 
 .execution-error {
