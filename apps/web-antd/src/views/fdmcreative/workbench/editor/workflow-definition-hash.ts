@@ -15,7 +15,10 @@ type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export function canonicalWorkflowDefinitionJson(
   definition: FdmCreativeApi.WorkflowDefinition,
 ) {
-  return canonicalizeJson(definition, '$');
+  return canonicalizeJson(
+    materializeWorkflowDefinitionTransportDefaults(definition),
+    '$',
+  );
 }
 
 export function normalizeWorkflowDefinitionForTransport(
@@ -24,6 +27,32 @@ export function normalizeWorkflowDefinitionForTransport(
   return JSON.parse(
     canonicalWorkflowDefinitionJson(definition),
   ) as FdmCreativeApi.WorkflowDefinition;
+}
+
+/**
+ * Mirrors defaults that Jackson applies while binding the save request. In
+ * particular, a missing `Port.required` becomes `false` on the Java model and
+ * consequently participates in the server-owned definition hash. Materialize
+ * it before both serializing and hashing so the two sides fingerprint the same
+ * document.
+ *
+ * Only a missing value is materialized. Explicit JSON `null` remains subject
+ * to the existing JSON contract rather than being silently changed to `false`.
+ */
+function materializeWorkflowDefinitionTransportDefaults(
+  definition: FdmCreativeApi.WorkflowDefinition,
+): FdmCreativeApi.WorkflowDefinition {
+  return {
+    ...definition,
+    nodes: definition.nodes.map((node) => ({
+      ...node,
+      ports: node.ports.map((port) =>
+        port.required === undefined
+          ? { ...port, required: false }
+          : { ...port },
+      ),
+    })),
+  };
 }
 
 export async function hashWorkflowDefinition(
@@ -57,13 +86,13 @@ function canonicalizeJson(
     case 'object': {
       if (Array.isArray(value)) {
         return `[${value
-          .map((item, index) => canonicalizeJson(item, `${path}[${index}]`, true))
+          .map((item, index) =>
+            canonicalizeJson(item, `${path}[${index}]`, true),
+          )
           .join(',')}]`;
       }
       return `{${Object.keys(value as Record<string, unknown>)
-        .filter(
-          (key) => (value as Record<string, unknown>)[key] !== undefined,
-        )
+        .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
         .toSorted()
         .map(
           (key) =>

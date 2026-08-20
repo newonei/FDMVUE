@@ -80,4 +80,36 @@ describe('workflow definition hash', () => {
       variants: ['keep', null],
     });
   });
+
+  it('materializes omitted port defaults before hashing and transport', async () => {
+    const source = definition();
+    source.nodes[0]!.ports = [
+      {
+        direction: 'OUTPUT',
+        id: 'asset',
+        type: 'image-asset',
+      },
+    ];
+
+    const transport = normalizeWorkflowDefinitionForTransport(source);
+    const expectedCanonical =
+      '{"edges":[],"nodes":[{"config":{},"height":100,"id":"image-input","name":"输入图片","ports":[{"direction":"OUTPUT","id":"asset","required":false,"type":"image-asset"}],"type":"image-input","width":160,"x":40,"y":20}],"schemaVersion":1,"viewport":{"x":0,"y":0,"zoom":1}}';
+
+    expect(transport.nodes[0]?.ports).toEqual([
+      {
+        direction: 'OUTPUT',
+        id: 'asset',
+        required: false,
+        type: 'image-asset',
+      },
+    ]);
+    expect(canonicalWorkflowDefinitionJson(source)).toBe(expectedCanonical);
+    expect(canonicalWorkflowDefinitionJson(transport)).toBe(expectedCanonical);
+    await expect(hashWorkflowDefinition(source)).resolves.toBe(
+      '46c7c59cca2557b233af88ddefeaf30a84a6939f52aa085ef0777bcec4a19c65',
+    );
+    await expect(hashWorkflowDefinition(transport)).resolves.toBe(
+      '46c7c59cca2557b233af88ddefeaf30a84a6939f52aa085ef0777bcec4a19c65',
+    );
+  });
 });

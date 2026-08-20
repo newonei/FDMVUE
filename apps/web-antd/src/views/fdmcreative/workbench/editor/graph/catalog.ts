@@ -148,7 +148,12 @@ const input = (
 const output = (
   id: string,
   type: FdmCreativeApi.PortType,
-): FdmCreativeApi.WorkflowPort => ({ direction: 'OUTPUT', id, type });
+): FdmCreativeApi.WorkflowPort => ({
+  direction: 'OUTPUT',
+  id,
+  required: false,
+  type,
+});
 
 export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   {

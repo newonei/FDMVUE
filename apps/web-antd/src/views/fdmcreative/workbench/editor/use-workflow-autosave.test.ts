@@ -3,6 +3,7 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useWorkflowAutosave } from './use-workflow-autosave';
+import { hashWorkflowDefinition } from './workflow-definition-hash';
 
 function definition(label = 'first'): FdmCreativeApi.WorkflowDefinition {
   return {
@@ -51,6 +52,44 @@ afterEach(() => {
 });
 
 describe('workflow autosave', () => {
+  it('submits the normalized definition with its matching hash', async () => {
+    const save = vi.fn((request) =>
+      Promise.resolve(draft(request.definition, 2)),
+    );
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => 1,
+      projectId: () => 7,
+      save,
+    });
+    const source = definition('output-port');
+    source.nodes[0]!.ports = [
+      {
+        direction: 'OUTPUT',
+        id: 'asset',
+        type: 'image-asset',
+      },
+    ];
+
+    await autosave.markChanged(source);
+    await expect(autosave.flush()).resolves.toBe(true);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    const request = save.mock.calls[0]![0];
+    expect(request.definition.nodes[0]?.ports).toEqual([
+      {
+        direction: 'OUTPUT',
+        id: 'asset',
+        required: false,
+        type: 'image-asset',
+      },
+    ]);
+    await expect(hashWorkflowDefinition(request.definition)).resolves.toBe(
+      request.definitionHash,
+    );
+    autosave.destroy();
+  });
+
   it('debounces edits and serializes a newer snapshot after the first request completes', async () => {
     vi.useFakeTimers();
     let version = 1;
@@ -122,7 +161,9 @@ describe('workflow autosave', () => {
 
   it('keeps the complete draft only in memory while offline and resumes after online', async () => {
     vi.useFakeTimers();
-    const save = vi.fn((request) => Promise.resolve(draft(request.definition, 2)));
+    const save = vi.fn((request) =>
+      Promise.resolve(draft(request.definition, 2)),
+    );
     const autosave = useWorkflowAutosave({
       enabled: () => true,
       getExpectedDraftVersion: () => 1,
