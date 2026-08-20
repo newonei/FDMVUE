@@ -807,6 +807,10 @@ export function remindReview(data: JixiaoApi.ReviewRemindReq) {
   return requestClient.post<number>('/fdmperformance/review/remind', data);
 }
 
+export function deleteReview(id: number) {
+  return requestClient.delete<boolean>(`/fdmperformance/review/delete?id=${id}`);
+}
+
 export function getSetting() {
   return requestClient.get<JixiaoApi.Setting>('/fdmperformance/setting/get');
 }

@@ -6,6 +6,8 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { useAccess } from '@vben/access';
+
 import {
   Button,
   DatePicker,
@@ -25,6 +27,7 @@ import {
 import {
   adjustGrade,
   batchPublishResults,
+  deleteReview,
   getResultPage,
   getReview,
   getReviewPage,
@@ -43,11 +46,13 @@ import PerformanceShell from '../shared/PerformanceShell.vue';
 defineOptions({ name: 'FdmPerformanceResults' });
 
 const route = useRoute();
+const { hasAccessByCodes } = useAccess();
 
 const resultLoading = ref(false);
 const batchPublishing = ref(false);
 const reviewLoading = ref(false);
 const remindingReviewId = ref<number>();
+const deletingReviewId = ref<number>();
 const adjustOpen = ref(false);
 const reviewOpen = ref(false);
 const results = ref<JixiaoApi.Result[]>([]);
@@ -115,7 +120,7 @@ const reviewColumns: TableColumnsType = [
   { dataIndex: 'status', title: '状态', width: 100 },
   { dataIndex: 'submittedTime', title: '主管提交时间', width: 180 },
   { dataIndex: 'employeeConfirmedTime', title: '员工确认时间', width: 180 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 150 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 220 },
 ];
 
 function reviewStatus(status?: number): { color: string; text: string } {
@@ -130,6 +135,18 @@ function canRemindReview(record: JixiaoApi.Review) {
   return (
     typeof record.id === 'number' &&
     (record.status === 0 || record.status === 1)
+  );
+}
+
+const canManagePerformance = computed(() =>
+  hasAccessByCodes(['fdmperformance:hr']),
+);
+
+function canDeleteReview(record: JixiaoApi.Review) {
+  return (
+    canManagePerformance.value &&
+    typeof record.id === 'number' &&
+    record.status === 2
   );
 }
 
@@ -224,6 +241,23 @@ async function submitReviewReminder(record: JixiaoApi.Review) {
     message.success(`已向 ${recipientCount} 位当前处理人发送钉钉催办消息`);
   } finally {
     remindingReviewId.value = undefined;
+  }
+}
+
+async function removeReview(record: JixiaoApi.Review) {
+  if (!canDeleteReview(record) || record.id === undefined) {
+    return;
+  }
+  deletingReviewId.value = record.id;
+  try {
+    await deleteReview(record.id);
+    message.success('误触发的绩效复盘已删除');
+    if (reviews.value.length === 1 && reviewQuery.pageNo > 1) {
+      reviewQuery.pageNo -= 1;
+    }
+    await loadReviews();
+  } finally {
+    deletingReviewId.value = undefined;
   }
 }
 
@@ -477,6 +511,20 @@ onMounted(async () => {
                 type="link"
               >
                 催办
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              v-if="canDeleteReview(record)"
+              title="确认删除该已关闭的误触发绩效复盘？关联钉钉待办会保持关闭。"
+              @confirm="removeReview(record)"
+            >
+              <Button
+                danger
+                :loading="deletingReviewId === record.id"
+                size="small"
+                type="link"
+              >
+                删除
               </Button>
             </Popconfirm>
           </Space>
