@@ -49,6 +49,7 @@ function deferred<T>() {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('workflow autosave', () => {
@@ -87,6 +88,89 @@ describe('workflow autosave', () => {
     await expect(hashWorkflowDefinition(request.definition)).resolves.toBe(
       request.definitionHash,
     );
+    autosave.destroy();
+  });
+
+  it('waits for an older capture when a newer hash finishes first', async () => {
+    const firstDigest = deferred<ArrayBuffer>();
+    vi.spyOn(globalThis.crypto.subtle, 'digest')
+      .mockReturnValueOnce(firstDigest.promise)
+      .mockResolvedValueOnce(new Uint8Array(32).buffer);
+    const save = vi.fn((request) =>
+      Promise.resolve(draft(request.definition, 2)),
+    );
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => 1,
+      projectId: () => 7,
+      save,
+    });
+
+    const firstCapture = autosave.markChanged(definition('first'));
+    const secondCapture = autosave.markChanged(definition('second'));
+    await secondCapture;
+    const flushing = autosave.flush();
+
+    await settlePromiseQueue();
+    expect(save).not.toHaveBeenCalled();
+
+    firstDigest.resolve(new Uint8Array(32).buffer);
+    await firstCapture;
+    await expect(flushing).resolves.toBe(true);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]![0].definition.nodes[0]?.config.label).toBe(
+      'second',
+    );
+    expect(autosave.status.value).toBe('SAVED');
+    autosave.destroy();
+  });
+
+  it('continues a flush when a new capture begins during an active save', async () => {
+    const secondDigest = deferred<ArrayBuffer>();
+    vi.spyOn(globalThis.crypto.subtle, 'digest')
+      .mockResolvedValueOnce(new Uint8Array(32).buffer)
+      .mockReturnValueOnce(secondDigest.promise);
+    let version = 1;
+    const firstSave = deferred<FdmCreativeApi.WorkflowDraft>();
+    const firstSaveStarted = deferred<void>();
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        firstSaveStarted.resolve(undefined);
+        return firstSave.promise;
+      })
+      .mockImplementationOnce((request) =>
+        Promise.resolve(draft(request.definition, (version = 3))),
+      );
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => version,
+      projectId: () => 7,
+      save,
+    });
+
+    await autosave.markChanged(definition('first'));
+    const flushing = autosave.flush();
+    await firstSaveStarted.promise;
+    const secondCapture = autosave.markChanged(definition('second'));
+    let flushSettled = false;
+    void flushing.then(() => {
+      flushSettled = true;
+    });
+
+    firstSave.resolve(draft(definition('first'), (version = 2)));
+    await vi.waitFor(() => expect(autosave.status.value).toBe('SAVED'));
+    expect(flushSettled).toBe(false);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    secondDigest.resolve(new Uint8Array(32).buffer);
+    await secondCapture;
+    await expect(flushing).resolves.toBe(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]![0].definition.nodes[0]?.config.label).toBe(
+      'second',
+    );
+    expect(autosave.status.value).toBe('SAVED');
     autosave.destroy();
   });
 
@@ -301,3 +385,9 @@ describe('workflow autosave', () => {
     failedAutosave.destroy();
   });
 });
+
+async function settlePromiseQueue() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}

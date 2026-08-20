@@ -5,6 +5,8 @@ export interface WorkflowSaveBlockedFeedback {
   message: string;
 }
 
+export type WorkflowSaveFeedbackSource = 'manual-save' | 'workflow-action';
+
 /**
  * Turns the autosave state that blocks an action into a concrete next step.
  * Publishing normally saves first, so a generic “handle save state” warning
@@ -15,6 +17,7 @@ export function workflowSaveBlockedFeedback(
   status: WorkflowAutosaveStatus,
   action: string,
   error?: unknown,
+  source: WorkflowSaveFeedbackSource = 'workflow-action',
 ): WorkflowSaveBlockedFeedback | undefined {
   switch (status) {
     case 'CONFLICT': {
@@ -29,48 +32,75 @@ export function workflowSaveBlockedFeedback(
           return {
             level: 'error',
             message:
-              `画布自动保存失败：当前页面的画布格式与服务端不兼容，暂时无法${action}。` +
-              '请刷新页面以加载最新版本后重试。',
+              source === 'manual-save'
+                ? '画布保存失败：当前页面的画布格式与服务端不兼容。请刷新页面以加载最新版本后重试。'
+                : `画布自动保存失败：当前页面的画布格式与服务端不兼容，暂时无法${action}。` +
+                  '请刷新页面以加载最新版本后重试。',
           };
         }
         return {
           level: 'error',
-          message: `画布自动保存失败：画布定义无效，暂时无法${action}。请检查节点和连线后重试。`,
+          message:
+            source === 'manual-save'
+              ? '画布定义无效，无法保存草稿。请检查节点和连线后重试。'
+              : `画布自动保存失败：画布定义无效，暂时无法${action}。请检查节点和连线后重试。`,
         };
       }
       return {
         level: 'error',
-        message: `画布自动保存失败，暂时无法${action}。请点击“保存草稿”重试。`,
+        message:
+          source === 'manual-save'
+            ? '保存草稿失败。请检查网络或保存失败原因后重试。'
+            : `画布自动保存失败，暂时无法${action}。请点击“保存草稿”重试。`,
       };
     }
     case 'OFFLINE': {
       return {
         level: 'warning',
-        message: `当前网络不可用，画布自动保存未完成，暂时无法${action}。请恢复网络后重试。`,
+        message:
+          source === 'manual-save'
+            ? '当前网络不可用，无法保存草稿。请恢复网络后重试。'
+            : `当前网络不可用，画布自动保存未完成，暂时无法${action}。请恢复网络后重试。`,
       };
     }
     case 'RETRYING': {
       return {
         level: 'warning',
-        message: `画布正在重试保存，请稍候再${action}。`,
+        message:
+          source === 'manual-save'
+            ? '画布正在重试保存，请稍候。'
+            : `画布正在重试保存，请稍候再${action}。`,
       };
     }
     case 'SAVING': {
       return {
         level: 'warning',
-        message: `画布正在保存，请稍候再${action}。`,
+        message:
+          source === 'manual-save'
+            ? '画布正在保存，请稍候。'
+            : `画布正在保存，请稍候再${action}。`,
       };
     }
     case 'DIRTY': {
       return {
         level: 'warning',
-        message: `画布正在自动保存，请稍候再${action}。`,
+        message:
+          source === 'manual-save'
+            ? '画布正在整理最新修改，请稍候。'
+            : `画布正在自动保存，请稍候再${action}。`,
       };
+    }
+    case 'IDLE':
+    case 'SAVED': {
+      // Neither state should block an action. Returning no feedback prevents a
+      // stale read after an async flush from telling a user to click the same
+      // manual-save button again.
+      return undefined;
     }
     default: {
       return {
         level: 'warning',
-        message: `画布尚未完成保存，暂时无法${action}。请点击“保存草稿”后重试。`,
+        message: '画布保存状态已变化，请稍候后重试。',
       };
     }
   }

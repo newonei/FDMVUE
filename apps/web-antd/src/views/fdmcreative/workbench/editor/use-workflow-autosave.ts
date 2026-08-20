@@ -72,6 +72,10 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
   let activeRequest: Promise<void> | undefined;
   let sequence = 0;
   let lifecycle = 0;
+  // A cumulative barrier for every capture in the current lifecycle. A newer
+  // Web Crypto calculation can finish before an older one, so waiting only for
+  // the newest Promise would let flush() report a false failure while an older
+  // (already stale) capture is still settling.
   let latestCapture: Promise<void> = Promise.resolve();
 
   // RETRYING deliberately stays clickable in the top bar: a user can choose
@@ -146,7 +150,10 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
         pendingCaptures.value = Math.max(0, pendingCaptures.value - 1);
       }
     });
-    latestCapture = capture;
+    const previousCaptureBarrier = latestCapture;
+    latestCapture = Promise.all([previousCaptureBarrier, capture]).then(
+      () => undefined,
+    );
     return capture;
   }
 
@@ -196,19 +203,31 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
   }
 
   async function flush() {
-    await latestCapture;
-    if (status.value === 'CONFLICT' || status.value === 'OFFLINE') return false;
-    if (status.value === 'ERROR' && !retryFailedSnapshot()) return false;
-    clearTimer('debounce');
-    clearTimer('retry');
-    while (active || pending) {
-      await submitNext(false);
-      if (flushCannotContinue(status.value)) {
+    // A graph change may begin while a previous HTTP save is in flight. Keep
+    // draining until the capture barrier is stable, so one manual save (and a
+    // publish-before-save) persists the newest complete definition rather than
+    // returning `false` with a transient SAVED status.
+    while (true) {
+      const captureBarrier = latestCapture;
+      await captureBarrier;
+      if (status.value === 'CONFLICT' || status.value === 'OFFLINE') {
         return false;
       }
+      if (status.value === 'ERROR' && !retryFailedSnapshot()) return false;
       clearTimer('debounce');
+      clearTimer('retry');
+      while (active || pending) {
+        await submitNext(false);
+        if (flushCannotContinue(status.value)) {
+          return false;
+        }
+        clearTimer('debounce');
+      }
+      if (captureBarrier !== latestCapture || pendingCaptures.value > 0) {
+        continue;
+      }
+      return !hasUnpersistedSnapshot.value;
     }
-    return !hasUnpersistedSnapshot.value;
   }
 
   function retryFailedSnapshot() {

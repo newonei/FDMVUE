@@ -20,16 +20,8 @@ describe('workflow save feedback', () => {
     ['RETRYING', 'warning', '画布正在重试保存，请稍候再发布任务。'],
     ['SAVING', 'warning', '画布正在保存，请稍候再发布任务。'],
     ['DIRTY', 'warning', '画布正在自动保存，请稍候再发布任务。'],
-    [
-      'IDLE',
-      'warning',
-      '画布尚未完成保存，暂时无法发布任务。请点击“保存草稿”后重试。',
-    ],
-    [
-      'SAVED',
-      'warning',
-      '画布尚未完成保存，暂时无法发布任务。请点击“保存草稿”后重试。',
-    ],
+    ['IDLE', undefined, undefined],
+    ['SAVED', undefined, undefined],
   ] satisfies Array<
     [
       WorkflowAutosaveStatus,
@@ -93,5 +85,27 @@ describe('workflow save feedback', () => {
       message:
         '画布自动保存失败：画布定义无效，暂时无法发布任务。请检查节点和连线后重试。',
     });
+  });
+
+  it('does not point a manual-save click back to the same button', () => {
+    expect(
+      workflowSaveBlockedFeedback(
+        'ERROR',
+        '保存草稿',
+        undefined,
+        'manual-save',
+      ),
+    ).toEqual({
+      level: 'error',
+      message: '保存草稿失败。请检查网络或保存失败原因后重试。',
+    });
+    expect(
+      workflowSaveBlockedFeedback(
+        'SAVED',
+        '保存草稿',
+        undefined,
+        'manual-save',
+      ),
+    ).toBeUndefined();
   });
 });

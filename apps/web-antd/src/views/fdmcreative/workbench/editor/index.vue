@@ -199,7 +199,10 @@ const autosave = useWorkflowAutosave({
       projectId: projectId.value,
     }),
 });
-const saving = autosave.isSaving;
+const manualSavePending = ref(false);
+const saving = computed(
+  () => autosave.isSaving.value || manualSavePending.value,
+);
 const dirty = autosave.hasUnpersistedSnapshot;
 const localConflictSnapshot = autosave.localSnapshot;
 
@@ -889,11 +892,15 @@ async function flushBeforeWorkflowAction(action: string) {
   return saved;
 }
 
-function showWorkflowSaveBlockedFeedback(action: string) {
+function showWorkflowSaveBlockedFeedback(
+  action: string,
+  source: 'manual-save' | 'workflow-action' = 'workflow-action',
+) {
   const feedback = workflowSaveBlockedFeedback(
     autosave.status.value,
     action,
     autosave.conflictError.value,
+    source,
   );
   if (!feedback) return;
   if (feedback.level === 'error') {
@@ -1830,6 +1837,10 @@ async function saveDraft(showMessage = true) {
     return false;
   }
   if (!adapter.value) return false;
+  // A click must immediately lock the action, before serializing or hashing,
+  // so rapid clicks cannot launch duplicate flushes and duplicate notices.
+  if (manualSavePending.value) return false;
+  manualSavePending.value = true;
   try {
     const definition = adapter.value.serializeDefinition();
     if (!validateWorkflowDefinition(definition)) {
@@ -1841,13 +1852,17 @@ async function saveDraft(showMessage = true) {
     if (!dirty.value) await autosave.markChanged(definition);
     const saved = await autosave.flush();
     if (saved && showMessage) message.success('草稿已保存');
-    if (!saved && showMessage) showWorkflowSaveBlockedFeedback('保存草稿');
+    if (!saved && showMessage) {
+      showWorkflowSaveBlockedFeedback('保存草稿', 'manual-save');
+    }
     return saved;
   } catch (error) {
     if (showMessage) {
       message.error(error instanceof Error ? error.message : '草稿保存失败');
     }
     return false;
+  } finally {
+    manualSavePending.value = false;
   }
 }
 
