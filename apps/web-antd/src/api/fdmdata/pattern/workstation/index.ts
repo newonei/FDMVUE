@@ -36,6 +36,9 @@ function resolvePatternRecognitionApiUrl(value: string) {
 }
 
 export namespace PatternRecognitionApi {
+  export type OrderSource = 'DOMESTIC' | 'ECOMMERCE';
+  export type SourceScope = 'ALL' | OrderSource;
+
   export interface UploadProgressEvent {
     loaded: number;
     percent: number;
@@ -49,11 +52,13 @@ export namespace PatternRecognitionApi {
   }
 
   export interface Candidate {
+    candidate_key?: string;
     design_image_url: string;
     preview_image_url?: null | string;
     detail_score?: null | number;
     embedding_score?: null | number;
     feature_score?: null | number;
+    internal_order_no?: null | string;
     item_id: string;
     item_no: string;
     local_image_url: string;
@@ -64,7 +69,10 @@ export namespace PatternRecognitionApi {
     quantity: number;
     recognized_count: number;
     score: number;
+    source_item_id?: null | string;
+    source_type?: OrderSource | string;
     status: string;
+    tenant_id?: null | number | string;
   }
 
   export interface UploadMatchResponse {
@@ -72,30 +80,51 @@ export namespace PatternRecognitionApi {
     capture_id: string;
     decision: 'auto_match' | 'manual_review' | 'no_match' | string;
     image_quality?: Record<string, any>;
+    source_scope?: SourceScope | string;
     top_candidates: Candidate[];
   }
 
   export interface ConfirmRequest {
+    candidate_key?: null | string;
     capture_id: string;
     item_id?: null | string;
     order_no: string;
+    source_type?: OrderSource | string;
   }
 
   export interface ConfirmResponse {
+    allocated_candidate_key?: null | string;
+    allocated_internal_order_no?: null | string;
     allocated_item_id: string;
     allocated_item_no: string;
     allocated_order_no: string;
+    allocated_source_item_id?: null | string;
+    allocated_source_type?: OrderSource | string;
+    allocated_tenant_id?: null | number | string;
     capture_id: string;
+    idempotent_replay?: boolean;
     index_removed_count: number;
+    internal_order_no?: null | string;
     order_status: string;
     pattern_group_id: string;
     quantity: number;
     ready_to_ship: boolean;
     recognized_count: number;
     removed_from_index: boolean;
+    requested_candidate_key?: null | string;
     requested_item_id?: null | string;
     requested_order_no: string;
+    source_item_id?: null | string;
+    source_type?: OrderSource | string;
     status: string;
+    tenant_id?: null | number | string;
+  }
+
+  export interface SyncSourceStats {
+    indexed_orders?: number;
+    orders_changed?: number;
+    orders_metadata_only?: number;
+    orders_seen?: number;
   }
 
   export interface SyncOrdersResponse {
@@ -106,6 +135,8 @@ export namespace PatternRecognitionApi {
     orders_metadata_only?: number;
     orders_seen?: number;
     orders_synced?: number;
+    source_scope?: SourceScope | string;
+    source_stats?: Partial<Record<OrderSource, SyncSourceStats>>;
   }
 
   export interface SyncJobResponse {
@@ -115,6 +146,7 @@ export namespace PatternRecognitionApi {
     job_id?: null | string;
     message?: string;
     result?: null | SyncOrdersResponse;
+    source_scope?: SourceScope | string;
     started_at?: null | string;
     status: 'failed' | 'idle' | 'queued' | 'running' | 'success' | string;
   }
@@ -224,7 +256,9 @@ function xhrPostJson<T>(
         }
         return;
       }
-      reject(new Error(readErrorMessageFromText(text, xhr.status, xhr.statusText)));
+      reject(
+        new Error(readErrorMessageFromText(text, xhr.status, xhr.statusText)),
+      );
     });
 
     xhr.addEventListener('timeout', () => {
@@ -244,15 +278,18 @@ export function getPatternRecognitionHealth() {
 }
 
 export function syncPatternRecognitionOrders(incremental = true) {
+  const sourceQuery = 'source_scope=ALL';
   return fetchJson<PatternRecognitionApi.SyncOrdersResponse>(
-    incremental ? '/api/admin/sync-orders/incremental' : '/api/admin/sync-orders',
+    incremental
+      ? `/api/admin/sync-orders/incremental?${sourceQuery}`
+      : `/api/admin/sync-orders?${sourceQuery}`,
     { method: 'POST' },
   );
 }
 
 export function startPatternRecognitionSyncJob(incremental = true) {
   return fetchJson<PatternRecognitionApi.SyncJobResponse>(
-    `/api/admin/sync-orders/job?incremental=${incremental ? 'true' : 'false'}`,
+    `/api/admin/sync-orders/job?incremental=${incremental ? 'true' : 'false'}&source_scope=ALL`,
     { method: 'POST' },
   );
 }
@@ -275,10 +312,15 @@ export function uploadPatternCapture(
   );
 }
 
-export function confirmPatternMatch(data: PatternRecognitionApi.ConfirmRequest) {
-  return fetchJson<PatternRecognitionApi.ConfirmResponse>('/api/match/confirm', {
-    body: JSON.stringify(data),
-    headers: { 'Content-Type': 'application/json' },
-    method: 'POST',
-  });
+export function confirmPatternMatch(
+  data: PatternRecognitionApi.ConfirmRequest,
+) {
+  return fetchJson<PatternRecognitionApi.ConfirmResponse>(
+    '/api/match/confirm',
+    {
+      body: JSON.stringify(data),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    },
+  );
 }

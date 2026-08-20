@@ -14,6 +14,7 @@ import {
   message,
   Modal,
   Progress,
+  Segmented,
   Space,
   Switch,
   Tag,
@@ -60,8 +61,6 @@ const cameraError = ref('');
 const cameraStatusText = ref('正在准备摄像头');
 
 const currentCaptureId = ref('');
-const selectedOrderNo = ref('');
-const selectedItemId = ref('');
 const confirmLoading = ref(false);
 const confirmResult = ref<null | PatternRecognitionApi.ConfirmResponse>(null);
 const confirmError = ref('');
@@ -70,12 +69,22 @@ const incrementalSyncLoading = ref(false);
 const fullSyncLoading = ref(false);
 const syncStatus = ref('等待同步');
 const autoSync = ref(true);
+const sourceScope = ref<PatternRecognitionApi.SourceScope>('ALL');
 const serviceStatus = ref<'error' | 'loading' | 'ready'>('loading');
 const serviceMessage = ref('正在连接识别服务');
 let autoSyncTimer: number | undefined;
 const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
 const PATTERN_IMAGE_PLACEHOLDER =
   'data:image/svg+xml;charset=utf-8,%3Csvg xmlns%3D%22http://www.w3.org/2000/svg%22 width%3D%22240%22 height%3D%22160%22 viewBox%3D%220 0 240 160%22%3E%3Crect width%3D%22240%22 height%3D%22160%22 fill%3D%22%23f8fafc%22/%3E%3Cpath d%3D%22M78 106l38-44 34 44H78z%22 fill%3D%22%23d9e2ec%22/%3E%3Ccircle cx%3D%22155%22 cy%3D%2254%22 r%3D%2216%22 fill%3D%22%23d9e2ec%22/%3E%3Ctext x%3D%22120%22 y%3D%22138%22 text-anchor%3D%22middle%22 fill%3D%22%2394a3b8%22 font-size%3D%2214%22%3E%E6%97%A0%E9%A2%84%E8%A7%88%E5%9B%BE%3C/text%3E%3C/svg%3E';
+const ORDER_SOURCES: PatternRecognitionApi.OrderSource[] = [
+  'ECOMMERCE',
+  'DOMESTIC',
+];
+const SOURCE_SCOPE_OPTIONS = [
+  { label: '全部来源', value: 'ALL' },
+  { label: '电商订单', value: 'ECOMMERCE' },
+  { label: '内销订单', value: 'DOMESTIC' },
+];
 
 const bestMatch = computed(() => matchResult.value?.best_match || null);
 const candidates = computed(() => matchResult.value?.top_candidates || []);
@@ -86,10 +95,11 @@ const selectedComparisonCandidate = computed(
 const selectedCandidateRank = computed(() => {
   const candidate = selectedComparisonCandidate.value;
   if (!candidate) return 0;
+  const candidateKey = candidateGlobalKey(candidate);
   const index = candidates.value.findIndex(
-    (item) => item.item_id === candidate.item_id,
+    (item) => candidateGlobalKey(item) === candidateKey,
   );
-  return index !== -1 ? index + 1 : 0;
+  return index === -1 ? 0 : index + 1;
 });
 const selectedMatchImageUrl = computed(() => {
   const candidate = selectedComparisonCandidate.value;
@@ -124,6 +134,89 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function normalizeOrderSource(
+  value: null | string | undefined,
+): PatternRecognitionApi.OrderSource {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase();
+  return normalized === 'DOMESTIC' || normalized === 'NEIXIAO'
+    ? 'DOMESTIC'
+    : 'ECOMMERCE';
+}
+
+function normalizeSourceScope(
+  value: null | string | undefined,
+  fallback: PatternRecognitionApi.SourceScope = 'ALL',
+): PatternRecognitionApi.SourceScope {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase();
+  if (normalized === 'DOMESTIC' || normalized === 'ECOMMERCE') {
+    return normalized;
+  }
+  return normalized === 'ALL' ? 'ALL' : fallback;
+}
+
+function sourceScopeLabel(value: PatternRecognitionApi.SourceScope) {
+  if (value === 'DOMESTIC') return '内销订单';
+  if (value === 'ECOMMERCE') return '电商订单';
+  return '全部来源';
+}
+
+function orderSourceMeta(value: null | string | undefined) {
+  const source = normalizeOrderSource(value);
+  return source === 'DOMESTIC'
+    ? { color: 'purple', source, text: '内销' }
+    : { color: 'blue', source, text: '电商' };
+}
+
+function candidateGlobalKey(candidate: PatternRecognitionApi.Candidate) {
+  const explicitKey = String(candidate.candidate_key ?? '').trim();
+  if (explicitKey) return explicitKey;
+  return [
+    normalizeOrderSource(candidate.source_type),
+    String(candidate.tenant_id ?? ''),
+    String(candidate.source_item_id ?? candidate.item_id ?? ''),
+    String(candidate.order_no ?? ''),
+    String(candidate.item_no ?? ''),
+  ].join(':');
+}
+
+function sumSourceMetric(
+  data: PatternRecognitionApi.SyncOrdersResponse,
+  key: keyof PatternRecognitionApi.SyncSourceStats,
+) {
+  let hasValue = false;
+  let total = 0;
+  for (const source of ORDER_SOURCES) {
+    const value = data.source_stats?.[source]?.[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    hasValue = true;
+    total += value;
+  }
+  return hasValue ? total : undefined;
+}
+
+function formatSourceStats(
+  incremental: boolean,
+  data: PatternRecognitionApi.SyncOrdersResponse,
+) {
+  return ORDER_SOURCES.flatMap((source) => {
+    const stats = data.source_stats?.[source];
+    if (!stats) return [];
+    const label = orderSourceMeta(source).text;
+    if (incremental) {
+      return [
+        `${label}变更 ${stats.orders_changed ?? 0}、索引 ${stats.indexed_orders ?? '-'}`,
+      ];
+    }
+    return [
+      `${label}同步 ${stats.orders_seen ?? '-'}、索引 ${stats.indexed_orders ?? '-'}`,
+    ];
+  }).join('；');
+}
+
 function isSyncJobPending(status?: string) {
   return status === 'queued' || status === 'running';
 }
@@ -131,17 +224,34 @@ function isSyncJobPending(status?: string) {
 function formatSyncResult(
   incremental: boolean,
   data: PatternRecognitionApi.SyncOrdersResponse,
+  requestedScope: PatternRecognitionApi.SourceScope,
 ) {
-  const changed = data.orders_changed ?? data.orders_synced ?? 0;
-  return incremental
-    ? `增量同步完成：新增/变更 ${changed} 条，索引 ${data.indexed_orders ?? '-'} 条`
-    : `全量重建完成：${data.orders_synced ?? data.orders_seen ?? '-'} 条订单，模型 ${data.active_model_id || '-'}`;
+  const actualScope = normalizeSourceScope(data.source_scope, requestedScope);
+  const scopeText = sourceScopeLabel(actualScope);
+  const sourceStatsText = formatSourceStats(incremental, data);
+  const indexed =
+    data.indexed_orders ?? sumSourceMetric(data, 'indexed_orders');
+  const summary = incremental
+    ? `增量同步完成（${scopeText}）：新增/变更 ${
+        data.orders_changed ??
+        data.orders_synced ??
+        sumSourceMetric(data, 'orders_changed') ??
+        0
+      } 条，索引 ${indexed ?? '-'} 条`
+    : `全量重建完成（${scopeText}）：${
+        data.orders_synced ??
+        data.orders_seen ??
+        sumSourceMetric(data, 'orders_seen') ??
+        '-'
+      } 条订单，模型 ${data.active_model_id || '-'}`;
+  return sourceStatsText ? `${summary}；${sourceStatsText}` : summary;
 }
 
 async function waitForSyncJob(
   jobId: string,
   incremental: boolean,
   silent: boolean,
+  requestedScope: PatternRecognitionApi.SourceScope,
 ) {
   let latest = await getPatternRecognitionSyncJob(jobId);
   for (let index = 0; index < 3600; index += 1) {
@@ -151,7 +261,9 @@ async function waitForSyncJob(
     if (!silent) {
       syncStatus.value =
         latest.message ||
-        (incremental ? '正在增量同步订单' : '正在全量重建索引');
+        (incremental
+          ? `正在增量同步${sourceScopeLabel(requestedScope)}`
+          : `正在重建${sourceScopeLabel(requestedScope)}索引`);
     }
     await sleep(2000);
     latest = await getPatternRecognitionSyncJob(jobId);
@@ -183,7 +295,7 @@ const uploadStageMeta = computed(() => {
 const uploadProgressText = computed(() => {
   const file = captureFile.value;
   if (!file) return '等待选择实拍图';
-  const total = uploadTotal.value || file.size;
+  const total = uploadTotal.value > 0 ? uploadTotal.value : file.size;
   if (uploadStage.value === 'uploading') {
     return `已上传 ${formatBytes(uploadLoaded.value)} / ${formatBytes(total)}`;
   }
@@ -201,8 +313,23 @@ const uploadProgressText = computed(() => {
 const canConfirm = computed(
   () =>
     !!currentCaptureId.value &&
-    !!selectedOrderNo.value &&
-    !!selectedItemId.value,
+    !!selectedComparisonCandidate.value &&
+    !confirmResult.value,
+);
+const confirmedSourceType = computed(() =>
+  normalizeOrderSource(
+    confirmResult.value?.allocated_source_type ??
+      confirmResult.value?.source_type ??
+      selectedComparisonCandidate.value?.source_type,
+  ),
+);
+const confirmedInternalOrderNo = computed(() =>
+  String(
+    confirmResult.value?.allocated_internal_order_no ??
+      confirmResult.value?.internal_order_no ??
+      selectedComparisonCandidate.value?.internal_order_no ??
+      '',
+  ).trim(),
 );
 const needsLowSimilarityConfirm = computed(
   () => matchResult.value?.decision === 'no_match',
@@ -224,8 +351,6 @@ function resetRecognitionState() {
   confirmResult.value = null;
   confirmError.value = '';
   selectedCandidate.value = null;
-  selectedOrderNo.value = '';
-  selectedItemId.value = '';
   currentCaptureId.value = '';
 }
 
@@ -234,6 +359,15 @@ function resetUploadProgress(stage: CaptureUploadStage = 'idle') {
   uploadPercent.value = 0;
   uploadLoaded.value = 0;
   uploadTotal.value = captureFile.value?.size ?? 0;
+}
+
+function handleSourceScopeChange(value: number | string) {
+  const nextScope = normalizeSourceScope(String(value), sourceScope.value);
+  if (nextScope === sourceScope.value) return;
+  sourceScope.value = nextScope;
+  resetRecognitionState();
+  resetUploadProgress(captureFile.value ? 'ready' : 'idle');
+  message.info(`本次匹配范围已切换为${sourceScopeLabel(nextScope)}`);
 }
 
 function setCaptureFile(file: File) {
@@ -286,9 +420,12 @@ async function runSync(incremental: boolean, silent = false) {
     fullSyncLoading.value = true;
   }
   if (!silent) {
-    syncStatus.value = incremental ? '正在增量同步订单' : '正在全量重建索引';
+    syncStatus.value = incremental
+      ? '正在增量同步全部来源'
+      : '正在重建全部来源索引';
   }
   try {
+    const requestedScope: PatternRecognitionApi.SourceScope = 'ALL';
     const started = await startPatternRecognitionSyncJob(incremental);
     if (!started.job_id) {
       throw new Error(started.error || started.message || '同步任务创建失败');
@@ -297,15 +434,26 @@ async function runSync(incremental: boolean, silent = false) {
       syncStatus.value = started.message;
     }
 
-    const completed = await waitForSyncJob(started.job_id, incremental, silent);
+    const completed = await waitForSyncJob(
+      started.job_id,
+      incremental,
+      silent,
+      requestedScope,
+    );
     if (completed.status !== 'success') {
       throw new Error(completed.error || completed.message || '同步失败');
     }
     const data = completed.result || {};
-    const changed = data.orders_changed ?? data.orders_synced ?? 0;
+    const changed =
+      data.orders_changed ??
+      data.orders_synced ??
+      sumSourceMetric(data, 'orders_changed') ??
+      0;
     if (!silent || changed > 0) {
       syncStatus.value =
-        completed.message || formatSyncResult(incremental, data);
+        Object.keys(data).length > 0
+          ? formatSyncResult(incremental, data, requestedScope)
+          : completed.message || '同步完成';
     }
     if (!silent) {
       message.success(incremental ? '增量同步完成' : '全量重建完成');
@@ -535,6 +683,7 @@ async function startMatch() {
   try {
     const form = new FormData();
     form.append('file', captureFile.value);
+    form.append('source_scope', sourceScope.value);
     const data = await uploadPatternCapture(form, {
       onUploadComplete: () => {
         uploadStage.value = 'processing';
@@ -580,29 +729,29 @@ async function startMatch() {
 
 function selectCandidate(candidate: PatternRecognitionApi.Candidate) {
   selectedCandidate.value = candidate;
-  selectedOrderNo.value = candidate.order_no;
-  selectedItemId.value = candidate.item_id;
 }
 
 function isSelectedCandidate(candidate: PatternRecognitionApi.Candidate) {
   const selected = selectedComparisonCandidate.value;
   return (
-    !!selected &&
-    selected.order_no === candidate.order_no &&
-    selected.item_id === candidate.item_id
+    !!selected && candidateGlobalKey(selected) === candidateGlobalKey(candidate)
   );
 }
 
 async function doSubmitConfirm() {
   if (!canConfirm.value) return;
+  const candidate = selectedComparisonCandidate.value;
+  if (!candidate) return;
   confirmLoading.value = true;
   confirmError.value = '';
   confirmResult.value = null;
   try {
     confirmResult.value = await confirmPatternMatch({
+      candidate_key: candidate.candidate_key || candidateGlobalKey(candidate),
       capture_id: currentCaptureId.value,
-      item_id: selectedItemId.value,
-      order_no: selectedOrderNo.value,
+      item_id: candidate.item_id,
+      order_no: candidate.order_no,
+      source_type: normalizeOrderSource(candidate.source_type),
     });
     message.success('确认完成');
   } catch (error) {
@@ -760,6 +909,15 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <Space wrap>
+          <div class="source-scope-control">
+            <span>本次匹配范围</span>
+            <Segmented
+              :disabled="matching || confirmLoading"
+              :options="SOURCE_SCOPE_OPTIONS"
+              :value="sourceScope"
+              @change="handleSourceScopeChange"
+            />
+          </div>
           <Switch
             v-model:checked="autoSync"
             checked-children="自动同步"
@@ -769,13 +927,13 @@ onBeforeUnmount(() => {
             <template #icon>
               <IconifyIcon icon="lucide:refresh-cw" />
             </template>
-            增量同步订单
+            增量同步全部订单
           </Button>
           <Button danger :loading="fullSyncLoading" @click="runSync(false)">
             <template #icon>
               <IconifyIcon icon="lucide:database-zap" />
             </template>
-            全量重建索引
+            全量重建全部索引
           </Button>
         </Space>
       </section>
@@ -910,7 +1068,9 @@ onBeforeUnmount(() => {
               {{ captureFile?.name || '选择或拖入实拍图' }}
             </p>
             <p class="upload-subtitle">
-              上传完成后会自动进入图案识别，请等待结果返回。
+              上传完成后会在{{
+                sourceScopeLabel(sourceScope)
+              }}中进行图案识别，请等待结果返回。
             </p>
           </UploadDragger>
 
@@ -976,6 +1136,16 @@ onBeforeUnmount(() => {
             <div class="card-title">
               <IconifyIcon icon="lucide:badge-check" />
               <span>最高相似图</span>
+              <Tag
+                v-if="selectedComparisonCandidate"
+                :color="
+                  orderSourceMeta(selectedComparisonCandidate.source_type).color
+                "
+              >
+                {{
+                  orderSourceMeta(selectedComparisonCandidate.source_type).text
+                }}
+              </Tag>
               <Tag v-if="selectedComparisonCandidate" color="processing">
                 {{ formatScore(selectedComparisonCandidate.score) }}
               </Tag>
@@ -995,6 +1165,12 @@ onBeforeUnmount(() => {
                   selectedComparisonCandidate.order_no || '-'
                 }}</strong>
               </div>
+              <div v-if="selectedComparisonCandidate.internal_order_no">
+                <span>内部单号</span>
+                <strong>{{
+                  selectedComparisonCandidate.internal_order_no
+                }}</strong>
+              </div>
               <div>
                 <span>图案明细</span>
                 <strong>{{
@@ -1003,9 +1179,11 @@ onBeforeUnmount(() => {
               </div>
               <div>
                 <span>排名</span>
-                <strong>{{ selectedCandidateRank || '-' }}/{{
+                <strong
+                  >{{ selectedCandidateRank || '-' }}/{{
                     candidates.length || '-'
-                  }}</strong>
+                  }}</strong
+                >
               </div>
               <div>
                 <span>图片质量</span>
@@ -1029,9 +1207,7 @@ onBeforeUnmount(() => {
                 formatOptionalScore(selectedComparisonCandidate.embedding_score)
               }}
               / 分区
-              {{
-                formatOptionalScore(selectedComparisonCandidate.patch_score)
-              }}
+              {{ formatOptionalScore(selectedComparisonCandidate.patch_score) }}
               / 局部
               {{
                 formatOptionalScore(selectedComparisonCandidate.feature_score)
@@ -1050,10 +1226,23 @@ onBeforeUnmount(() => {
             <div class="confirm-panel">
               <div class="selected-info">
                 <span>当前选择</span>
-                <strong>
-                  {{ selectedComparisonCandidate.order_no }} /
-                  {{ selectedComparisonCandidate.item_no }}
-                </strong>
+                <div class="selected-order-line">
+                  <Tag
+                    :color="
+                      orderSourceMeta(selectedComparisonCandidate.source_type)
+                        .color
+                    "
+                  >
+                    {{
+                      orderSourceMeta(selectedComparisonCandidate.source_type)
+                        .text
+                    }}
+                  </Tag>
+                  <strong>
+                    {{ selectedComparisonCandidate.order_no }} /
+                    {{ selectedComparisonCandidate.item_no }}
+                  </strong>
+                </div>
               </div>
               <Space wrap>
                 <Button
@@ -1065,7 +1254,7 @@ onBeforeUnmount(() => {
                   <template #icon>
                     <IconifyIcon icon="lucide:package-check" />
                   </template>
-                  确认打包 / 下一个
+                  {{ confirmResult ? '已确认' : '确认打包 / 下一个' }}
                 </Button>
               </Space>
             </div>
@@ -1080,9 +1269,32 @@ onBeforeUnmount(() => {
               v-if="confirmResult"
               show-icon
               :type="confirmResult.ready_to_ship ? 'success' : 'info'"
-              :message="`已分配到订单 ${confirmResult.allocated_order_no} / 图案 ${confirmResult.allocated_item_no}`"
-              :description="`图案进度 ${confirmResult.recognized_count}/${confirmResult.quantity}，订单状态 ${confirmResult.order_status}${confirmResult.removed_from_index ? '，该图案已完成并从识别索引移除' : '，该图案仍需继续识别'}`"
-            />
+            >
+              <template #message>
+                <Space :size="4" wrap>
+                  <Tag :color="orderSourceMeta(confirmedSourceType).color">
+                    {{ orderSourceMeta(confirmedSourceType).text }}
+                  </Tag>
+                  <span>
+                    已分配到订单 {{ confirmResult.allocated_order_no }} / 图案
+                    {{ confirmResult.allocated_item_no }}
+                  </span>
+                </Space>
+              </template>
+              <template #description>
+                <span>
+                  图案进度
+                  {{ confirmResult.recognized_count }}/{{
+                    confirmResult.quantity
+                  }}，订单状态 {{ confirmResult.order_status
+                  }}<template v-if="confirmedInternalOrderNo"
+                    >，内部单号 {{ confirmedInternalOrderNo }}</template
+                  ><template v-if="confirmResult.removed_from_index"
+                    >，该图案已完成并从识别索引移除</template
+                  ><template v-else>，该图案仍需继续识别</template>
+                </span>
+              </template>
+            </Alert>
           </template>
           <Empty v-else description="暂无匹配结果" />
         </Card>
@@ -1102,7 +1314,7 @@ onBeforeUnmount(() => {
         <div v-if="candidates.length > 0" class="candidate-list">
           <div
             v-for="(candidate, index) in candidates"
-            :key="`${candidate.order_no}-${candidate.item_id}`"
+            :key="candidateGlobalKey(candidate)"
             class="candidate-item"
             :class="{ selected: isSelectedCandidate(candidate) }"
             role="button"
@@ -1119,9 +1331,15 @@ onBeforeUnmount(() => {
             <div class="candidate-body">
               <div class="candidate-title">
                 <strong>{{ candidate.order_no }}</strong>
+                <Tag :color="orderSourceMeta(candidate.source_type).color">
+                  {{ orderSourceMeta(candidate.source_type).text }}
+                </Tag>
                 <Tag>{{ formatCandidateItemNoWithTotal(candidate) }}</Tag>
                 <Tag color="processing">{{ formatScore(candidate.score) }}</Tag>
                 <Tag>{{ candidate.status }}</Tag>
+              </div>
+              <div v-if="candidate.internal_order_no" class="candidate-status">
+                内部单号：{{ candidate.internal_order_no }}
               </div>
               <div class="score-line">
                 DINO {{ formatOptionalScore(candidate.embedding_score) }} / 分区
@@ -1185,6 +1403,18 @@ onBeforeUnmount(() => {
   margin-top: 8px;
   font-size: 12px;
   color: #64748b;
+}
+
+.source-scope-control {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.source-scope-control > span {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .card-title {
@@ -1252,9 +1482,6 @@ onBeforeUnmount(() => {
 .camera-video {
   width: 100%;
   height: 100%;
-}
-
-.camera-video {
   object-fit: contain;
 }
 
@@ -1427,7 +1654,7 @@ onBeforeUnmount(() => {
 
 .summary-panel {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
   padding: 12px;
   background: #f8fafc;
@@ -1464,10 +1691,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
+  cursor: pointer;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  cursor: pointer;
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease;
@@ -1537,6 +1764,13 @@ onBeforeUnmount(() => {
 
 .selected-info {
   min-width: 0;
+}
+
+.selected-order-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 @media (max-width: 1180px) {

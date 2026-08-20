@@ -77,6 +77,16 @@ function formatRecognitionStatus(value: unknown) {
   return '待识别';
 }
 
+function formatRecognitionProgress(
+  row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
+) {
+  const recognizedCount = Number(row.recognizedCount ?? 0);
+  const quantity = Number(row.quantity ?? 0);
+  const recognized = Number.isFinite(recognizedCount) ? recognizedCount : 0;
+  const total = Number.isFinite(quantity) ? quantity : 0;
+  return `${recognized}/${total}`;
+}
+
 function formatProductionSent(value: unknown) {
   return Number(value) === 1 ? '已发出' : '未发出';
 }
@@ -164,6 +174,16 @@ export function useFormSchema(
       rules: 'required',
     },
     {
+      fieldName: 'internalOrderNo',
+      label: '内部单号',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        maxlength: 64,
+        placeholder: '请输入内部单号',
+      },
+    },
+    {
       fieldName: 'shopName',
       label: '店铺',
       component: 'Select',
@@ -248,6 +268,17 @@ export function useBatchFormSchema(
       rules: 'required',
     },
     {
+      fieldName: 'internalOrderNo',
+      label: '内部单号',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        maxlength: 64,
+        placeholder: '请输入内部单号',
+      },
+      rules: 'required',
+    },
+    {
       fieldName: 'shopName',
       label: '店铺',
       component: 'Select',
@@ -308,6 +339,12 @@ export function useGridFormSchema(
       label: '订单号',
       component: 'Input',
       componentProps: { allowClear: true, placeholder: '请输入订单号' },
+    },
+    {
+      fieldName: 'internalOrderNo',
+      label: '内部单号',
+      component: 'Input',
+      componentProps: { allowClear: true, placeholder: '请输入内部单号' },
     },
     {
       fieldName: 'shopName',
@@ -393,6 +430,13 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       showOverflow: 'tooltip',
     },
     {
+      field: 'internalOrderNo',
+      title: '内部单号',
+      minWidth: 150,
+      fixed: 'left',
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'productionSent',
       title: '是否制作发出',
       fixed: 'left',
@@ -413,11 +457,19 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       width: 120,
       slots: {
         default: ({ row }) =>
-          h(
-            Tag,
-            { color: recognitionStatusColor(row.recognitionStatus) },
-            () => formatRecognitionStatus(row.recognitionStatus),
+          h(Tag, { color: recognitionStatusColor(row.recognitionStatus) }, () =>
+            formatRecognitionStatus(row.recognitionStatus),
           ),
+      },
+    },
+    {
+      field: 'recognizedCount',
+      title: '识别进度',
+      fixed: 'left',
+      width: 100,
+      align: 'center',
+      slots: {
+        default: ({ row }) => formatRecognitionProgress(row),
       },
     },
     {

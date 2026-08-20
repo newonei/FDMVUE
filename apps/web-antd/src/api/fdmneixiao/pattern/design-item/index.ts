@@ -10,6 +10,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
   export interface PatternDesignItem {
     id?: number;
     orderNo?: string;
+    internalOrderNo?: string;
     shopName?: string;
     itemNo?: string;
     designImageUrl?: string;
@@ -21,6 +22,9 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     followUser?: string;
     productionSent?: number;
     recognitionStatus?: number;
+    readonly recognizedCount?: number;
+    readonly lastRecognizedTime?: number | string;
+    readonly recognitionCompletedTime?: number | string;
     downloaded?: number;
     status?: number;
     remark?: string;
@@ -39,6 +43,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
 
   export interface BatchCreateReq {
     orderNo: string;
+    internalOrderNo: string;
     shopName?: string;
     orderDate?: number | string;
     importSequence?: number;
@@ -161,9 +166,12 @@ export function deleteFdmNeixiaoPatternDesignItem(id: number) {
 export function exportFdmNeixiaoPatternDesignItemExcel(
   params: Record<string, unknown>,
 ) {
-  return requestClient.download('/fdmneixiao/pattern/design-item/export-excel', {
-    params,
-  });
+  return requestClient.download(
+    '/fdmneixiao/pattern/design-item/export-excel',
+    {
+      params,
+    },
+  );
 }
 
 export function getFdmNeixiaoPatternDesignItemShopNameOptions(
