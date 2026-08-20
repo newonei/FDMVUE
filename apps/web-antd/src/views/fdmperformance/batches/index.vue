@@ -22,8 +22,9 @@ import type { SystemUserApi } from '#/api/system/user';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
+import { IconifyIcon } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
-import { handleTree } from '@vben/utils';
+import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
 
 import {
   Button,
@@ -40,6 +41,7 @@ import {
 
 import {
   deleteInstance,
+  exportInstanceExcel,
   getInstancePage,
   getSetting,
   remindInstances,
@@ -62,6 +64,7 @@ const activeTab = ref('batches');
 const isPerformanceHr = ref(false);
 const instanceLoading = ref(false);
 const deletingInstanceId = ref<number>();
+const exporting = ref(false);
 const reminding = ref(false);
 const remindingInstanceId = ref<number>();
 const instances = ref<JixiaoApi.Instance[]>([]);
@@ -223,6 +226,23 @@ async function loadInstances() {
   }
 }
 
+async function exportInstances() {
+  exporting.value = true;
+  try {
+    const data = await exportInstanceExcel({
+      ...instanceQuery,
+      userName: instanceQuery.userName?.trim() || undefined,
+    });
+    downloadFileFromBlobPart({
+      fileName: `${monthLabel(instanceQuery.periodKey)}绩效考核结果.xlsx`,
+      source: data,
+    });
+    message.success('绩效考核结果已导出');
+  } finally {
+    exporting.value = false;
+  }
+}
+
 function clearSelection() {
   selectedInstanceIds.value = [];
 }
@@ -381,6 +401,12 @@ onMounted(initialize);
               >
                 清空
               </Button>
+              <Button :loading="exporting" @click="exportInstances">
+                <template #icon>
+                  <IconifyIcon icon="lucide:download" />
+                </template>
+                导出 Excel
+              </Button>
               <Popconfirm
                 :title="`确认向所选 ${selectedInstanceIds.length} 条考核的当前处理人发送钉钉催办消息？`"
                 @confirm="remindSelected"
@@ -524,8 +550,8 @@ onMounted(initialize);
 }
 
 .selected-count {
-  color: #64748b;
   font-size: 13px;
+  color: #64748b;
 }
 
 @media (max-width: 900px) {

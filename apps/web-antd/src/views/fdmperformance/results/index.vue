@@ -29,6 +29,7 @@ import {
   getReview,
   getReviewPage,
   publishResult,
+  remindReview,
 } from '#/api/fdmperformance';
 
 import {
@@ -46,6 +47,7 @@ const route = useRoute();
 const resultLoading = ref(false);
 const batchPublishing = ref(false);
 const reviewLoading = ref(false);
+const remindingReviewId = ref<number>();
 const adjustOpen = ref(false);
 const reviewOpen = ref(false);
 const results = ref<JixiaoApi.Result[]>([]);
@@ -113,7 +115,7 @@ const reviewColumns: TableColumnsType = [
   { dataIndex: 'status', title: '状态', width: 100 },
   { dataIndex: 'submittedTime', title: '主管提交时间', width: 180 },
   { dataIndex: 'employeeConfirmedTime', title: '员工确认时间', width: 180 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 100 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 150 },
 ];
 
 function reviewStatus(status?: number): { color: string; text: string } {
@@ -122,6 +124,13 @@ function reviewStatus(status?: number): { color: string; text: string } {
 
 function canPublishResult(record: JixiaoApi.Result) {
   return typeof record.id === 'number' && record.publicStatus !== 1;
+}
+
+function canRemindReview(record: JixiaoApi.Review) {
+  return (
+    typeof record.id === 'number' &&
+    (record.status === 0 || record.status === 1)
+  );
 }
 
 async function loadResults() {
@@ -203,6 +212,19 @@ async function submitBatchPublish() {
 function openReview(record: JixiaoApi.Review) {
   activeReview.value = record;
   reviewOpen.value = true;
+}
+
+async function submitReviewReminder(record: JixiaoApi.Review) {
+  if (!canRemindReview(record) || record.id === undefined) {
+    return;
+  }
+  remindingReviewId.value = record.id;
+  try {
+    const recipientCount = await remindReview({ reviewId: record.id });
+    message.success(`已向 ${recipientCount} 位当前处理人发送钉钉催办消息`);
+  } finally {
+    remindingReviewId.value = undefined;
+  }
 }
 
 async function openReviewFromRoute() {
@@ -440,9 +462,24 @@ onMounted(async () => {
           </Tag>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
-          <Button size="small" type="link" @click="openReview(record)">
-            查看
-          </Button>
+          <Space>
+            <Button size="small" type="link" @click="openReview(record)">
+              查看
+            </Button>
+            <Popconfirm
+              v-if="canRemindReview(record)"
+              title="确认向该绩效复盘的当前处理人发送钉钉催办消息？"
+              @confirm="submitReviewReminder(record)"
+            >
+              <Button
+                :loading="remindingReviewId === record.id"
+                size="small"
+                type="link"
+              >
+                催办
+              </Button>
+            </Popconfirm>
+          </Space>
         </template>
       </template>
     </Table>

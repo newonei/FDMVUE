@@ -414,6 +414,10 @@ export namespace JixiaoApi {
     reviewId: number;
   }
 
+  export interface ReviewRemindReq {
+    reviewId: number;
+  }
+
   export interface Setting {
     bossUserId?: number;
     bossUserName?: string;
@@ -595,6 +599,13 @@ export function deleteBatch(id: number) {
 export function getInstancePage(params: JixiaoApi.InstancePageParams) {
   return requestClient.get<PageResult<JixiaoApi.Instance>>(
     '/fdmperformance/assessment/instance/page',
+    { params },
+  );
+}
+
+export function exportInstanceExcel(params: JixiaoApi.InstancePageParams) {
+  return requestClient.download(
+    '/fdmperformance/assessment/instance/export-excel',
     { params },
   );
 }
@@ -790,6 +801,10 @@ export function submitReview(data: JixiaoApi.ReviewSubmitReq) {
 
 export function confirmReview(data: JixiaoApi.ReviewConfirmReq) {
   return requestClient.post<boolean>('/fdmperformance/review/confirm', data);
+}
+
+export function remindReview(data: JixiaoApi.ReviewRemindReq) {
+  return requestClient.post<number>('/fdmperformance/review/remind', data);
 }
 
 export function getSetting() {
