@@ -21,7 +21,8 @@
     "dev": "pnpm vite --mode development",
     "preview": "vite preview",
     "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit --skipLibCheck",
-    "typecheck:fdmcreative": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit --skipLibCheck -p tsconfig.fdmcreative.json"
+    "typecheck:fdmcreative": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit --skipLibCheck -p tsconfig.fdmcreative.json",
+    "typecheck:fdmcrm": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vue-tsc --noEmit --skipLibCheck -p tsconfig.fdmcrm.json"
   },
   "imports": {
     "#/*": "./src/*"
