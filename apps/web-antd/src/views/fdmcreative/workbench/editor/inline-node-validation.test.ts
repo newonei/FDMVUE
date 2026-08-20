@@ -100,4 +100,60 @@ describe('inline node config validation', () => {
       inlineNodeConfigValidationError('image-split', { columns: 9, rows: 1 }),
     ).toContain('不能超过 64');
   });
+
+  it('validates audio generation, trim, mix, and merge boundaries before submission', () => {
+    expect(
+      inlineNodeConfigValidationError('audio-generate', {
+        durationSeconds: 15,
+        format: 'mp3',
+      }),
+    ).toBeUndefined();
+    expect(
+      inlineNodeConfigValidationError('music-generate', {
+        durationSeconds: 601,
+        format: 'm4a',
+      }),
+    ).toContain('时长');
+    expect(
+      inlineNodeConfigValidationError('audio-trim', {
+        durationSeconds: 5,
+        endSeconds: 7,
+        fadeInSeconds: 3,
+        fadeOutSeconds: 3,
+        startSeconds: 2,
+      }),
+    ).toContain('淡入');
+    expect(
+      inlineNodeConfigValidationError('audio-trim', {
+        channels: 2,
+        durationSeconds: 5,
+        endSeconds: 7,
+        fadeInSeconds: 1,
+        fadeOutSeconds: 1,
+        format: 'wav',
+        sampleRate: 44_100,
+        startSeconds: 2,
+        volumePercent: 100,
+      }),
+    ).toBeUndefined();
+    expect(
+      inlineNodeConfigValidationError('audio-mix', {
+        audioOrder: ['source-a', 'source-b'],
+        durationPolicy: 'SHORTEST',
+        format: 'mp3',
+      }),
+    ).toBeUndefined();
+    expect(
+      inlineNodeConfigValidationError('audio-mix', {
+        durationPolicy: 'POSITION',
+      }),
+    ).toContain('策略');
+    expect(
+      inlineNodeConfigValidationError('video-audio-merge', {
+        audioMode: 'DUCK',
+        duckingLevel: 0,
+        durationPolicy: 'SHORTEST',
+      }),
+    ).toContain('压低比例');
+  });
 });

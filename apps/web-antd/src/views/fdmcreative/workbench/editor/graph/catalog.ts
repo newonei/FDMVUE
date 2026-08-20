@@ -32,21 +32,28 @@ export interface CreativeNodeVisual {
   width: number;
 }
 
-const ASSET_NODE_TYPES = new Set(['image-input', 'video-input']);
+const ASSET_NODE_TYPES = new Set(['audio-input', 'image-input', 'video-input']);
 const PLAN_ITEM_NODE_TYPES = new Set(['image-plan-item', 'video-plan-item']);
 const AI_GENERATE_NODE_TYPES = new Set([
+  'audio-generate',
   'first-last-frame-to-video',
   'image-edit',
   'image-generate',
   'image-to-image',
   'image-to-video',
+  'music-generate',
   'video-generate',
 ]);
 const RESULT_PREVIEW_NODE_TYPES = new Set([
   ...AI_GENERATE_NODE_TYPES,
+  'audio-extract',
+  'audio-mix',
+  'audio-normalize',
+  'audio-trim',
   'image-crop',
   'image-resize',
   'image-split',
+  'video-audio-merge',
   'video-frame-extract',
   'video-normalize',
   'video-transition',
@@ -167,6 +174,14 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     label: '视频素材',
     ports: [output('asset', 'video-asset')],
     type: 'video-input',
+  },
+  {
+    color: '#9333ea',
+    description: '选择项目资产库中的音频，供裁剪、混音和视频配音使用',
+    icon: 'lucide:audio-lines',
+    label: '音频素材',
+    ports: [output('asset', 'audio-asset')],
+    type: 'audio-input',
   },
   {
     color: '#1d4ed8',
@@ -395,6 +410,119 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
     type: 'first-last-frame-to-video',
   },
   {
+    color: '#7e22ce',
+    defaultConfig: { durationSeconds: 15, format: 'mp3', language: 'ZH_CN' },
+    description:
+      '按提示词生成配音、旁白、语音或音效；音色等供应商参数仅在已声明 Schema 时显示',
+    icon: 'lucide:mic-vocal',
+    label: '语音生成',
+    ports: [input('prompt', 'prompt-text'), output('asset', 'audio-asset')],
+    type: 'audio-generate',
+  },
+  {
+    color: '#6d28d9',
+    defaultConfig: { durationSeconds: 30, format: 'mp3' },
+    description: '按提示词生成配乐，需要单独配置支持 TEXT_TO_MUSIC 的模型路由',
+    icon: 'lucide:music-2',
+    label: '音乐生成',
+    ports: [input('prompt', 'prompt-text'), output('asset', 'audio-asset')],
+    type: 'music-generate',
+  },
+  {
+    color: '#a855f7',
+    defaultConfig: {
+      channels: 2,
+      durationSeconds: 15,
+      fadeInSeconds: 0,
+      fadeOutSeconds: 0,
+      format: 'wav',
+      sampleRate: 44_100,
+      startSeconds: 0,
+      volumePercent: 100,
+    },
+    description: '使用受控 FFmpeg 在明确时长范围内裁剪音频，可加淡入淡出',
+    icon: 'lucide:scissors',
+    label: '音频裁剪',
+    ports: [
+      input('audio', 'audio-asset', true),
+      output('asset', 'audio-asset'),
+    ],
+    type: 'audio-trim',
+  },
+  {
+    color: '#9333ea',
+    defaultConfig: {
+      channels: 2,
+      format: 'wav',
+      sampleRate: 44_100,
+      targetLufs: -16,
+      volumePercent: 100,
+    },
+    description: '使用受控 FFmpeg 统一音频响度、采样率和声道数',
+    icon: 'lucide:audio-waveform',
+    label: '音频标准化',
+    ports: [
+      input('audio', 'audio-asset', true),
+      output('asset', 'audio-asset'),
+    ],
+    type: 'audio-normalize',
+  },
+  {
+    color: '#7e22ce',
+    defaultConfig: {
+      channels: 2,
+      durationPolicy: 'LONGEST',
+      format: 'wav',
+      sampleRate: 44_100,
+      volumePercent: 100,
+    },
+    description: '按画布连线或显式轨道列表顺序混合多条音频，不按节点坐标排序',
+    icon: 'lucide:git-merge',
+    label: '音频混音',
+    ports: [
+      input('audios', 'audio-list', true),
+      output('asset', 'audio-asset'),
+    ],
+    type: 'audio-mix',
+  },
+  {
+    color: '#8b5cf6',
+    defaultConfig: {
+      channels: 2,
+      format: 'wav',
+      sampleRate: 44_100,
+      volumePercent: 100,
+    },
+    description:
+      '从一个包含音轨的视频中提取可复用音频，适合提取原声、对白或环境音轨',
+    icon: 'lucide:audio-lines',
+    label: '提取视频音频',
+    ports: [
+      input('video', 'video-asset', true),
+      output('asset', 'audio-asset'),
+    ],
+    type: 'audio-extract',
+  },
+  {
+    color: '#7c3aed',
+    defaultConfig: {
+      audioMode: 'REPLACE',
+      duckingLevel: 0.35,
+      durationPolicy: 'SHORTEST',
+    },
+    description:
+      '替换、保留混合或压低原声后，将音频合入视频并导出 MP4；可附带受控字幕文档',
+    icon: 'lucide:clapperboard',
+    label: '视频配音合成',
+    ports: [
+      input('video', 'video-asset', true),
+      input('audio', 'audio-asset', true),
+      input('subtitles', 'document-asset'),
+      output('asset', 'video-asset'),
+    ],
+    type: 'video-audio-merge',
+  },
+  {
     color: '#c2410c',
     defaultConfig: { durationSeconds: 5, startSeconds: 0 },
     description: '使用受控 FFmpeg 执行器裁剪视频片段',
@@ -454,15 +582,25 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#ea580c',
-    description: '按输入顺序拼接视频片段并导出 MP4',
+    description: '按输入顺序拼接视频片段并导出 MP4；可附带受控字幕文档',
     icon: 'lucide:film',
     label: '视频合成',
     ports: [
       input('videos', 'video-list', true),
+      input('subtitles', 'document-asset'),
       output('timeline', 'timeline'),
       output('asset', 'video-asset'),
     ],
     type: 'video-compose',
+  },
+  {
+    color: '#475569',
+    description:
+      '短剧成片编译器专用：从冻结 frame 时间线导出私有 SRT/VTT 文档，不能使用任意路径或 URL。',
+    icon: 'lucide:captions',
+    label: '字幕导出（短剧受控）',
+    ports: [output('documents', 'document-asset')],
+    type: 'subtitle-export',
   },
   {
     color: '#64748b',
@@ -474,6 +612,17 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       output('ordered-images', 'image-list'),
     ],
     type: 'image-collection',
+  },
+  {
+    color: '#7c3aed',
+    description: '把多条音频按连线写入顺序整理为明确的音频列表',
+    icon: 'lucide:list-music',
+    label: '音频集合',
+    ports: [
+      input('audios', 'audio-list', true),
+      output('ordered-audios', 'audio-list'),
+    ],
+    type: 'audio-collection',
   },
   {
     color: '#475569',
@@ -557,7 +706,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#475569',
-    description: '聚合图片、视频和时间线成果',
+    description: '聚合图片、视频、音频和时间线成果',
     icon: 'lucide:package-open',
     label: '成果集合',
     ports: [
@@ -565,6 +714,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       input('image', 'image-asset'),
       input('videos', 'video-list'),
       input('video', 'video-asset'),
+      input('audios', 'audio-list'),
+      input('audio', 'audio-asset'),
       input('timeline', 'timeline'),
       output('artifacts', 'artifact-set'),
     ],
@@ -581,6 +732,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       input('image', 'image-asset'),
       input('videos', 'video-list'),
       input('video', 'video-asset'),
+      input('audios', 'audio-list'),
+      input('audio', 'audio-asset'),
       input('timeline', 'timeline'),
     ],
     type: 'output',
@@ -596,6 +749,8 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       input('image', 'image-asset'),
       input('videos', 'video-list'),
       input('video', 'video-asset'),
+      input('audios', 'audio-list'),
+      input('audio', 'audio-asset'),
       input('timeline', 'timeline'),
     ],
     type: 'asset-library-output',
@@ -641,7 +796,13 @@ export const NODE_GROUPS = [
   {
     key: 'input',
     label: '素材输入',
-    types: ['creative-brief', 'image-input', 'video-input', 'brand-input'],
+    types: [
+      'creative-brief',
+      'image-input',
+      'video-input',
+      'audio-input',
+      'brand-input',
+    ],
   },
   {
     key: 'llm',
@@ -690,10 +851,24 @@ export const NODE_GROUPS = [
     ],
   },
   {
+    key: 'audio',
+    label: '音频生成与处理',
+    types: [
+      'audio-generate',
+      'music-generate',
+      'audio-trim',
+      'audio-normalize',
+      'audio-mix',
+      'audio-extract',
+      'video-audio-merge',
+    ],
+  },
+  {
     key: 'aggregate',
     label: '聚合与输出',
     types: [
       'image-collection',
+      'audio-collection',
       'video-timeline',
       'artifact-collection',
       'output',

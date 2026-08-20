@@ -60,9 +60,7 @@ export interface SseEventStreamOptions<
   onReady?: () => MaybePromise<void>;
   onStateChange?: (state: SseEventStreamState) => void;
   /** JSON response parser for the durable-event endpoint. */
-  parsePersistedEvents?: (
-    body: unknown,
-  ) => readonly Record<string, unknown>[];
+  parsePersistedEvents?: (body: unknown) => readonly Record<string, unknown>[];
   /** Converts a raw SSE data message into the resource-specific event contract. */
   parseEvent: (message: RawSseMessage) => TEvent;
   random?: () => number;
@@ -72,6 +70,13 @@ export interface SseEventStreamOptions<
   resourceId: CreativeLongId | number;
   /** Query parameter that carries `resourceId`; defaults to `id`. */
   resourceIdParam?: string;
+  /** Query parameter that carries the durable cursor; defaults to `afterSequence`. */
+  cursorParam?: string;
+  /** Stable extra query parameters required by a nested business resource. */
+  queryParameters?: Record<
+    string,
+    boolean | null | number | string | undefined
+  >;
   signal?: AbortSignal;
   streamPath: string;
 }
@@ -218,9 +223,12 @@ export function createSseEventStream<
 >(options: SseEventStreamOptions<TEvent>): SseEventStreamHandle {
   const resourceId = requireCreativeLongId(options.resourceId, 'resourceId');
   const resourceIdParam = options.resourceIdParam ?? 'id';
-  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(resourceIdParam)) {
-    throw new TypeError('resourceIdParam 必须是合法查询参数名称');
-  }
+  const cursorParam = options.cursorParam ?? 'afterSequence';
+  assertQueryParameterName(resourceIdParam, 'resourceIdParam');
+  assertQueryParameterName(cursorParam, 'cursorParam');
+  Object.keys(options.queryParameters ?? {}).forEach((name) =>
+    assertQueryParameterName(name, 'queryParameters'),
+  );
   const initialCursor = options.afterSequence ?? 0;
   if (!Number.isSafeInteger(initialCursor) || initialCursor < 0) {
     throw new TypeError('afterSequence 必须是非负整数');
@@ -299,6 +307,8 @@ export function createSseEventStream<
       resourceIdParam,
       resourceId,
       cursor,
+      cursorParam,
+      options.queryParameters,
     );
     const headers = await resolveHeaders('application/json');
     headers.delete('Last-Event-ID');
@@ -313,7 +323,9 @@ export function createSseEventStream<
       throw await httpError(response, `补拉${label}失败`);
     }
     const body = await response.json();
-    const rows = (options.parsePersistedEvents ?? parsePersistedEvents)(body).toSorted(
+    const rows = (options.parsePersistedEvents ?? parsePersistedEvents)(
+      body,
+    ).toSorted(
       (left, right) =>
         numericSequence(left.sequenceNo) - numericSequence(right.sequenceNo),
     );
@@ -361,6 +373,8 @@ export function createSseEventStream<
       resourceIdParam,
       resourceId,
       cursor,
+      cursorParam,
+      options.queryParameters,
     );
     const response = await fetchImpl(url, {
       cache: 'no-store',
@@ -472,7 +486,10 @@ export function numericSequence(value: unknown): number {
 }
 
 /** Reject data that should be represented by a stable FDM id, not an SSE payload. */
-export function assertSafeSsePayload(value: unknown, location = 'payload'): void {
+export function assertSafeSsePayload(
+  value: unknown,
+  location = 'payload',
+): void {
   if (value === null || value === undefined || typeof value !== 'object') {
     return;
   }
@@ -627,7 +644,26 @@ function withCursorQuery(
   resourceIdParam: string,
   resourceId: CreativeLongId,
   afterSequence: number,
+  cursorParam: string,
+  queryParameters?: Record<
+    string,
+    boolean | null | number | string | undefined
+  >,
 ): string {
+  const parameters = new URLSearchParams();
+  for (const [name, value] of Object.entries(queryParameters ?? {})) {
+    if (value !== null && value !== undefined) {
+      parameters.set(name, String(value));
+    }
+  }
+  parameters.set(resourceIdParam, resourceId);
+  parameters.set(cursorParam, String(afterSequence));
   const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}${resourceIdParam}=${encodeURIComponent(resourceId)}&afterSequence=${encodeURIComponent(afterSequence)}`;
+  return `${url}${separator}${parameters.toString()}`;
+}
+
+function assertQueryParameterName(value: string, label: string) {
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(value)) {
+    throw new TypeError(`${label} 必须是合法查询参数名称`);
+  }
 }

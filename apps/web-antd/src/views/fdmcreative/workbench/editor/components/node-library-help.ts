@@ -16,6 +16,8 @@ interface HelpOverride {
 const PORT_LABELS: Record<string, string> = {
   artifacts: '成果集合',
   asset: '媒体素材',
+  audio: '单条音频',
+  audios: '有序音频集合',
   brief: '创作需求 / 品牌资料',
   context: '上下文提示词',
   first: '前一个视频',
@@ -38,6 +40,7 @@ const PORT_LABELS: Record<string, string> = {
 const OUTPUT_LABELS: Record<string, string> = {
   artifacts: '统一成果集合',
   asset: '处理后的媒体素材',
+  'ordered-audios': '有序音频集合',
   brief: '创作需求',
   image: '选中的单张图片',
   item: '单项图片 / 视频方案',
@@ -54,6 +57,8 @@ const OUTPUT_LABELS: Record<string, string> = {
 
 const PORT_TYPE_LABELS: Record<string, string> = {
   'artifact-set': '成果集合',
+  'audio-asset': '音频素材',
+  'audio-list': '音频集合',
   'content-plan': 'AI 内容规划',
   'creative-brief': '创作需求',
   'image-asset': '图片素材',
@@ -67,6 +72,34 @@ const PORT_TYPE_LABELS: Record<string, string> = {
 };
 
 const HELP: Record<string, HelpOverride> = {
+  'audio-collection': {
+    scenarios: ['背景音乐与配音整理', '明确混音轨道顺序'],
+    tip: '按连线保存顺序输出 AUDIO_LIST；需要固定顺序时在“音频混音”中填写显式源节点列表。',
+  },
+  'audio-extract': {
+    scenarios: ['从实拍视频分离原声', '复用视频对白或环境音'],
+    tip: '输入视频必须有可读音轨；无音轨、坏文件和超过限制的文件会在服务端失败，不会生成空音频。',
+  },
+  'audio-generate': {
+    scenarios: ['角色配音', '旁白', '产品音效'],
+    tip: '选择支持 TEXT_TO_AUDIO 的音频模型；音色、语速等只会显示已声明的模型 Schema 参数。',
+  },
+  'audio-input': {
+    scenarios: ['上传配乐', '导入录音', '复用项目音效'],
+    tip: '只选择 AUDIO 素材。播放器仅在你主动点击后播放，执行仍从私有资产库读取。',
+  },
+  'audio-mix': {
+    scenarios: ['旁白与背景音乐混音', '多条音效合成'],
+    tip: '先使用“音频集合”表达顺序；混音不会根据节点在画布上的位置推断轨道先后。',
+  },
+  'audio-normalize': {
+    scenarios: ['统一不同录音响度', '输出前规范化配音'],
+    tip: '目标响度、采样率、声道和输出格式均由受控 FFmpeg 校验；不要把供应商参数填到这里。',
+  },
+  'audio-trim': {
+    scenarios: ['裁剪配音', '制作循环音效', '去除录音空白'],
+    tip: '结束时间可留空并由开始时间与时长推算；淡入和淡出总和不能超过裁剪时长。',
+  },
   'artifact-collection': {
     scenarios: ['图片和视频混合交付', '多条生成分支统一汇总'],
     tip: '只连接真正需要交付的内容，中间预览素材通常不用接入。',
@@ -155,6 +188,14 @@ const HELP: Record<string, HelpOverride> = {
     scenarios: ['分镜合片', '多段短视频拼接', '批量片段交付'],
     tip: '上游规格不一致时先经过“视频规格统一”，可减少合成失败。',
   },
+  'video-audio-merge': {
+    scenarios: ['视频配音', '替换原声', '给视频添加背景音乐'],
+    tip: '明确选择替换、保留混合或 Duck，以及最短/最长时长策略；服务端会探测视频和外部音频。',
+  },
+  'music-generate': {
+    scenarios: ['背景音乐', '情绪配乐', '短片音乐草稿'],
+    tip: '需要单独配置支持 TEXT_TO_MUSIC 的音乐模型路由；不会混用普通语音 route。',
+  },
   'video-frame-extract': {
     scenarios: ['制作首尾帧', '提取封面', '将视频画面作为生图参考'],
     tip: '指定时间不能超过视频时长，压缩严重的视频可能抽到模糊帧。',
@@ -217,9 +258,7 @@ export function getNodeLibraryHelp(
   const custom = HELP[node.type];
   const inputs = node.ports
     .filter((port) => port.direction === 'INPUT')
-    .map((port) =>
-      getPortLabel(port.id, port.type, Boolean(port.required)),
-    );
+    .map((port) => getPortLabel(port.id, port.type, Boolean(port.required)));
   const outputs = node.ports
     .filter((port) => port.direction === 'OUTPUT')
     .map((port) =>
@@ -227,13 +266,13 @@ export function getNodeLibraryHelp(
     );
 
   return {
-    inputs: inputs.length > 0 ? inputs : ['无需上游输入，在右侧属性面板填写或选择内容'],
-    outputs:
-      outputs.length > 0 ? outputs : ['无下游输出（工作流终点）'],
+    inputs:
+      inputs.length > 0
+        ? inputs
+        : ['无需上游输入，在右侧属性面板填写或选择内容'],
+    outputs: outputs.length > 0 ? outputs : ['无下游输出（工作流终点）'],
     purpose: node.description,
     scenarios: custom?.scenarios ?? ['按节点说明连接到工作流中使用'],
-    tip:
-      custom?.tip ??
-      '添加节点后，请在右侧属性面板检查必填项和连接状态。',
+    tip: custom?.tip ?? '添加节点后，请在右侧属性面板检查必填项和连接状态。',
   };
 }

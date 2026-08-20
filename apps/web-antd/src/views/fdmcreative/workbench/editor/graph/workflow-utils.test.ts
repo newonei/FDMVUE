@@ -92,7 +92,11 @@ function mediaWorkflow(
   targetPortType: FdmCreativeApi.PortType,
 ): FdmCreativeApi.WorkflowDefinition {
   const sourcePortType =
-    targetPortType === 'video-list' ? 'video-asset' : targetPortType;
+    targetPortType === 'video-list'
+      ? 'video-asset'
+      : targetPortType === 'audio-list'
+        ? 'audio-asset'
+        : targetPortType;
   return {
     edges: [
       {
@@ -336,6 +340,13 @@ describe('workflow graph rules', () => {
     ).toBe(true);
   });
 
+  it('allows only the explicit audio asset to audio list conversion', () => {
+    expect(isPortTypeCompatible('audio-asset', 'audio-list')).toBe(true);
+    expect(isPortTypeCompatible('audio-list', 'audio-asset')).toBe(false);
+    expect(isPortTypeCompatible('audio-asset', 'video-list')).toBe(false);
+    expect(isPortTypeCompatible('video-asset', 'audio-list')).toBe(false);
+  });
+
   it('accepts only one edge on scalar media inputs', () => {
     for (const [targetType, targetPortId, targetPortType] of [
       ['first-last-frame-to-video', 'first-frame', 'image-asset'],
@@ -346,6 +357,11 @@ describe('workflow graph rules', () => {
       ['image-split', 'image', 'image-asset'],
       ['image-to-video', 'first-frame', 'image-asset'],
       ['video-frame-extract', 'video', 'video-asset'],
+      ['audio-trim', 'audio', 'audio-asset'],
+      ['audio-normalize', 'audio', 'audio-asset'],
+      ['audio-extract', 'video', 'video-asset'],
+      ['video-audio-merge', 'video', 'video-asset'],
+      ['video-audio-merge', 'audio', 'audio-asset'],
       ['video-normalize', 'video', 'video-asset'],
       ['video-transition', 'first', 'video-asset'],
       ['video-transition', 'second', 'video-asset'],
@@ -371,6 +387,15 @@ describe('workflow graph rules', () => {
         sourcePortId: 'asset',
         targetNodeId: 'target',
         targetPortId: 'videos',
+      }),
+    ).toBe(true);
+    expect(
+      validateWorkflowConnection({
+        definition: mediaWorkflow('audio-mix', 'audios', 'audio-list'),
+        sourceNodeId: 'media-b',
+        sourcePortId: 'asset',
+        targetNodeId: 'target',
+        targetPortId: 'audios',
       }),
     ).toBe(true);
   });

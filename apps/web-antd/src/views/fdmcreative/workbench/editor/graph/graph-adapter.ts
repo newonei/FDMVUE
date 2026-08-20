@@ -106,6 +106,7 @@ function portColor(type: FdmCreativeApi.PortType) {
   if (type === 'prompt-text') return PROMPT_PORT_COLOR;
   if (type.includes('image')) return '#16a34a';
   if (type.includes('video') || type === 'timeline') return '#0d9488';
+  if (type.includes('audio')) return '#a855f7';
   if (type === 'artifact-set') return '#64748b';
   return '#1677ff';
 }
@@ -118,6 +119,7 @@ function edgeColor(edge: FdmCreativeApi.WorkflowEdge) {
   if (/compose|video|timeline/.test(`${edge.id}:${edge.sourcePortId}`)) {
     return '#0d9488';
   }
+  if (/audio|music/.test(`${edge.id}:${edge.sourcePortId}`)) return '#a855f7';
   if (/image|asset/.test(`${edge.id}:${edge.sourcePortId}`)) return '#16a34a';
   return '#1677ff';
 }
@@ -226,7 +228,7 @@ export interface WorkbenchBlankConnectionRequest {
  */
 export interface WorkbenchMediaBranchRequest {
   assetId: FdmCreativeApi.MediaLongId;
-  assetKind: 'IMAGE' | 'VIDEO';
+  assetKind: 'AUDIO' | 'IMAGE' | 'VIDEO';
   assetName?: string;
   originNodeId?: string;
   tool?: FdmCreativeApi.MediaToolDescriptor;
@@ -570,21 +572,20 @@ export class WorkbenchGraphAdapter {
       }
       const template = CREATIVE_NODE_MAP.get(tool.generatedNodeType);
       if (!template) return;
-      derivedNode = templateNode(
-        template,
-        this.rightOf(inputNode, 56),
-        {
-          config: {
-            ...template.defaultConfig,
-            ...tool.defaultConfig,
-          },
+      derivedNode = templateNode(template, this.rightOf(inputNode, 56), {
+        config: {
+          ...template.defaultConfig,
+          ...tool.defaultConfig,
         },
-      );
+      });
       const targetPortId = this.resolveMediaToolInputPort(
         tool,
         request.assetKind,
       );
-      if (!targetPortId || !this.canAddBranchEdge(inputNode, derivedNode, targetPortId)) {
+      if (
+        !targetPortId ||
+        !this.canAddBranchEdge(inputNode, derivedNode, targetPortId)
+      ) {
         derivedNode = undefined;
         return;
       }
@@ -998,7 +999,11 @@ export class WorkbenchGraphAdapter {
   restoreAuthoritativeAgentDefinition(
     definition: FdmCreativeApi.WorkflowDefinition,
   ) {
-    this.restoreDefinition(definition, false, 'agent-apply-authoritative-draft');
+    this.restoreDefinition(
+      definition,
+      false,
+      'agent-apply-authoritative-draft',
+    );
   }
 
   restoreDefinition(
@@ -1140,16 +1145,19 @@ export class WorkbenchGraphAdapter {
     const imageToImage = CREATIVE_NODE_MAP.get('image-to-image');
     const imageCollection = CREATIVE_NODE_MAP.get('image-collection');
     if (!promptTemplate || !imageToImage || !imageCollection) return undefined;
-    const promptNode = templateNode(promptTemplate, this.rightOf(inputNode, 56), {
-      config: {
-        ...promptTemplate.defaultConfig,
-        language: 'ZH_CN',
-        prompt:
-          '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
-        targetType: 'IMAGE',
+    const promptNode = templateNode(
+      promptTemplate,
+      this.rightOf(inputNode, 56),
+      {
+        config: {
+          ...promptTemplate.defaultConfig,
+          language: 'ZH_CN',
+          prompt: '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
+          targetType: 'IMAGE',
+        },
+        name: '多角度提示词',
       },
-      name: '多角度提示词',
-    });
+    );
     const generationNode = templateNode(
       imageToImage,
       this.rightOf(promptNode, 56),
@@ -1158,8 +1166,7 @@ export class WorkbenchGraphAdapter {
           ...imageToImage.defaultConfig,
           ...tool.defaultConfig,
           outputCount: 4,
-          prompt:
-            '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
+          prompt: '请基于参考图生成多角度视图：正面、45 度、侧面和细节特写。',
         },
         name: '多角度生成',
       },
@@ -1190,9 +1197,15 @@ export class WorkbenchGraphAdapter {
       },
     ];
     const definition = this.serializeDefinition();
-    definition.nodes.push(inputNode, promptNode, generationNode, collectionNode);
+    definition.nodes.push(
+      inputNode,
+      promptNode,
+      generationNode,
+      collectionNode,
+    );
     for (const edge of proposed) {
-      if (!validateWorkflowConnection({ definition, ...edge })) return undefined;
+      if (!validateWorkflowConnection({ definition, ...edge }))
+        return undefined;
       definition.edges.push({ id: createLocalId('edge-probe'), ...edge });
     }
     this.graph.addNodes(
@@ -1206,7 +1219,12 @@ export class WorkbenchGraphAdapter {
     return {
       derivedNode: generationNode,
       inputNode,
-      nodeIds: [inputNode.id, promptNode.id, generationNode.id, collectionNode.id],
+      nodeIds: [
+        inputNode.id,
+        promptNode.id,
+        generationNode.id,
+        collectionNode.id,
+      ],
     };
   }
 
@@ -1353,7 +1371,12 @@ export class WorkbenchGraphAdapter {
   private createPinnedMediaInput(
     request: Omit<WorkbenchMediaBranchRequest, 'tool'>,
   ) {
-    const type = request.assetKind === 'VIDEO' ? 'video-input' : 'image-input';
+    const type =
+      request.assetKind === 'AUDIO'
+        ? 'audio-input'
+        : request.assetKind === 'VIDEO'
+          ? 'video-input'
+          : 'image-input';
     const template = CREATIVE_NODE_MAP.get(type);
     if (!template) return undefined;
     const origin = request.originNodeId
@@ -1417,10 +1440,14 @@ export class WorkbenchGraphAdapter {
 
   private resolveMediaToolInputPort(
     tool: FdmCreativeApi.MediaToolDescriptor,
-    assetKind: 'IMAGE' | 'VIDEO',
+    assetKind: 'AUDIO' | 'IMAGE' | 'VIDEO',
   ) {
     if (tool.generatedNodeType === 'asset-library-output') {
-      return assetKind === 'VIDEO' ? 'video' : 'image';
+      return assetKind === 'AUDIO'
+        ? 'audio'
+        : assetKind === 'VIDEO'
+          ? 'video'
+          : 'image';
     }
     const template = CREATIVE_NODE_MAP.get(tool.generatedNodeType);
     if (!template) return undefined;

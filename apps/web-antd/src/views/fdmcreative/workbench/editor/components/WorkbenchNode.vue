@@ -131,6 +131,22 @@ const isVideoMedia = computed(() => {
   }
   return /\.(?:m3u8|mov|mp4|webm)(?:[?#].*)?$/i.test(mediaUrl.value);
 });
+const isAudioMedia = computed(() => {
+  if (
+    [
+      'audio-extract',
+      'audio-generate',
+      'audio-input',
+      'audio-mix',
+      'audio-normalize',
+      'audio-trim',
+      'music-generate',
+    ].includes(nodeType.value)
+  ) {
+    return true;
+  }
+  return /\.(?:aac|flac|m4a|mp3|ogg|wav)(?:[?#].*)?$/i.test(mediaUrl.value);
+});
 const assetName = computed(() =>
   firstValue(
     display.value.assetName,
@@ -230,6 +246,63 @@ const detailRows = computed<DetailRow[]>(() => {
       config.value.durationSeconds,
       '5 秒',
     );
+  } else if (['audio-generate', 'music-generate'].includes(type)) {
+    add(
+      '模型',
+      config.value.modelName,
+      config.value.logicalModelName,
+      '自动路由',
+    );
+    add(
+      '时长',
+      `${config.value.durationSeconds ?? (type === 'music-generate' ? 30 : 15)} 秒`,
+    );
+    add('格式', String(config.value.format ?? 'mp3').toUpperCase());
+  } else if (type === 'audio-trim') {
+    add('开始', `${config.value.startSeconds ?? 0} 秒`);
+    add('时长', `${config.value.durationSeconds ?? 15} 秒`);
+    add(
+      '淡入/出',
+      `${config.value.fadeInSeconds ?? 0} / ${config.value.fadeOutSeconds ?? 0} 秒`,
+    );
+  } else if (type === 'audio-normalize') {
+    add('响度', `${config.value.targetLufs ?? -16} LUFS`);
+    add(
+      '输出',
+      `${config.value.sampleRate ?? 44_100} Hz · ${config.value.channels ?? 2} 声道`,
+    );
+  } else if (type === 'audio-mix') {
+    add(
+      '轨道顺序',
+      Array.isArray(config.value.audioOrder)
+        ? `${config.value.audioOrder.length} 条显式轨道`
+        : '已保存的连线顺序',
+    );
+    add(
+      '结束',
+      config.value.durationPolicy === 'LONGEST' ? '最长音轨' : '最短音轨',
+    );
+  } else if (type === 'audio-extract') {
+    add(
+      '输出',
+      `${config.value.sampleRate ?? 44_100} Hz · ${config.value.channels ?? 2} 声道`,
+    );
+    add('格式', String(config.value.format ?? 'wav').toUpperCase());
+  } else if (type === 'video-audio-merge') {
+    const audioModeLabels: Record<string, string> = {
+      DUCK: '压低原声',
+      KEEP: '保留混合',
+      REPLACE: '替换原声',
+    };
+    add(
+      '原声',
+      audioModeLabels[String(config.value.audioMode ?? 'REPLACE')] ??
+        '替换原声',
+    );
+    add(
+      '时长',
+      config.value.durationPolicy === 'LONGEST' ? '最长素材' : '最短素材',
+    );
   } else if (type === 'video-compose') {
     add('片段', config.value.segmentOrder, config.value.videoIds);
     add('格式', config.value.format, 'MP4');
@@ -321,10 +394,20 @@ const llmTags = computed(() => {
           preload="metadata"
           :src="mediaUrl"
         ></video>
+        <audio
+          v-else-if="mediaUrl && nodeType === 'audio-input'"
+          controls
+          preload="metadata"
+          :src="mediaUrl"
+        ></audio>
         <div v-else class="asset-placeholder">
           <IconifyIcon
             :icon="
-              nodeType === 'video-input' ? 'lucide:film' : 'lucide:image-plus'
+              nodeType === 'audio-input'
+                ? 'lucide:audio-lines'
+                : nodeType === 'video-input'
+                  ? 'lucide:film'
+                  : 'lucide:image-plus'
             "
           />
           <span>选择或上传素材</span>
@@ -352,6 +435,10 @@ const llmTags = computed(() => {
             preload="metadata"
             :src="mediaUrl"
           ></video>
+          <div v-else-if="isAudioMedia" class="audio-media-preview">
+            <IconifyIcon icon="lucide:audio-lines" />
+            <span>音频成果</span>
+          </div>
           <img v-else :src="mediaUrl" alt="" />
           <span v-if="isVideoMedia" class="media-play">
             <IconifyIcon icon="lucide:play" />
@@ -385,6 +472,10 @@ const llmTags = computed(() => {
           preload="metadata"
           :src="mediaUrl"
         ></video>
+        <div v-else-if="isAudioMedia" class="audio-media-preview">
+          <IconifyIcon icon="lucide:audio-lines" />
+          <span>音频成果</span>
+        </div>
         <img v-else :src="mediaUrl" alt="" />
         <span v-if="isVideoMedia" class="media-play media-play--small">
           <IconifyIcon icon="lucide:play" />
@@ -431,6 +522,9 @@ const llmTags = computed(() => {
         </span>
         <span v-if="videoConfig.durationSeconds">
           {{ videoConfig.durationSeconds }} 秒
+        </span>
+        <span v-else-if="isAudioMedia && config.durationSeconds">
+          {{ config.durationSeconds }} 秒
         </span>
         <span v-else-if="nodeType === 'prompt-generator'">
           {{
@@ -786,6 +880,12 @@ const llmTags = computed(() => {
   object-fit: cover;
 }
 
+.asset-preview audio {
+  width: 100%;
+  min-width: 0;
+  padding: 26px 6px;
+}
+
 .asset-placeholder {
   display: grid;
   gap: 7px;
@@ -853,6 +953,27 @@ const llmTags = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.audio-media-preview {
+  display: grid;
+  gap: 4px;
+  place-content: center;
+  width: 100%;
+  height: 100%;
+  color: color-mix(in srgb, var(--node-accent) 78%, hsl(var(--foreground)));
+  text-align: center;
+  background: color-mix(in srgb, var(--node-accent) 9%, hsl(var(--card)));
+}
+
+.audio-media-preview :deep(svg) {
+  width: 22px;
+  height: 22px;
+  margin: 0 auto;
+}
+
+.audio-media-preview span {
+  font-size: 9px;
 }
 
 .compose-placeholder {

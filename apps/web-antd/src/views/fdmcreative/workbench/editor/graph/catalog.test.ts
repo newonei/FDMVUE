@@ -26,6 +26,13 @@ describe('creative node catalog', () => {
       new Set([
         'artifact-collection',
         'asset-library-output',
+        'audio-collection',
+        'audio-extract',
+        'audio-generate',
+        'audio-input',
+        'audio-mix',
+        'audio-normalize',
+        'audio-trim',
         'brand-input',
         'content-planner',
         'creative-brief',
@@ -42,11 +49,14 @@ describe('creative node catalog', () => {
         'image-split',
         'image-to-image',
         'image-to-video',
+        'music-generate',
         'output',
         'prompt-generator',
         'prompt-input',
         'prompt-template',
         'random-prompt',
+        'subtitle-export',
+        'video-audio-merge',
         'video-compose',
         'video-frame-extract',
         'video-generate',
@@ -191,6 +201,8 @@ describe('creative node catalog', () => {
           expect.objectContaining({ id: 'artifacts', required: false }),
           expect.objectContaining({ id: 'image', type: 'image-asset' }),
           expect.objectContaining({ id: 'images', type: 'image-list' }),
+          expect.objectContaining({ id: 'audio', type: 'audio-asset' }),
+          expect.objectContaining({ id: 'audios', type: 'audio-list' }),
           expect.objectContaining({ id: 'video', type: 'video-asset' }),
           expect.objectContaining({ id: 'videos', type: 'video-list' }),
           expect.objectContaining({
@@ -244,6 +256,8 @@ describe('creative node catalog', () => {
       'image-to-image',
       'image-to-video',
       'video-generate',
+      'audio-generate',
+      'music-generate',
     ]) {
       expect(CREATIVE_NODE_MAP.get(type)?.ports).toContainEqual(
         expect.objectContaining({
@@ -443,12 +457,97 @@ describe('creative node catalog', () => {
     );
   });
 
+  it('declares audio inputs, distinct AI modalities, and explicit ordered audio processing', () => {
+    expect(CREATIVE_NODE_MAP.get('audio-input')?.ports).toEqual([
+      expect.objectContaining({
+        direction: 'OUTPUT',
+        id: 'asset',
+        type: 'audio-asset',
+      }),
+    ]);
+    for (const type of ['audio-generate', 'music-generate']) {
+      expect(CREATIVE_NODE_MAP.get(type)?.ports).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            direction: 'INPUT',
+            id: 'prompt',
+            type: 'prompt-text',
+          }),
+          expect.objectContaining({
+            direction: 'OUTPUT',
+            id: 'asset',
+            type: 'audio-asset',
+          }),
+        ]),
+      );
+    }
+    expect(CREATIVE_NODE_MAP.get('audio-collection')?.ports).toEqual([
+      expect.objectContaining({
+        direction: 'INPUT',
+        id: 'audios',
+        type: 'audio-list',
+      }),
+      expect.objectContaining({
+        direction: 'OUTPUT',
+        id: 'ordered-audios',
+        type: 'audio-list',
+      }),
+    ]);
+    expect(CREATIVE_NODE_MAP.get('audio-mix')?.defaultConfig).toMatchObject({
+      durationPolicy: 'LONGEST',
+      volumePercent: 100,
+    });
+    expect(CREATIVE_NODE_MAP.get('audio-mix')?.ports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: 'INPUT',
+          id: 'audios',
+          required: true,
+          type: 'audio-list',
+        }),
+      ]),
+    );
+    expect(CREATIVE_NODE_MAP.get('video-audio-merge')?.ports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'video', type: 'video-asset' }),
+        expect.objectContaining({ id: 'audio', type: 'audio-asset' }),
+      ]),
+    );
+    expect(NODE_GROUPS).toContainEqual(
+      expect.objectContaining({
+        key: 'audio',
+        types: expect.arrayContaining(['audio-generate', 'music-generate']),
+      }),
+    );
+  });
+
+  it('keeps short-drama subtitle export system-only while preserving its document contract', () => {
+    expect(CREATIVE_NODE_MAP.get('subtitle-export')?.ports).toEqual([
+      expect.objectContaining({
+        direction: 'OUTPUT',
+        id: 'documents',
+        type: 'document-asset',
+      }),
+    ]);
+    expect(
+      NODE_GROUPS.some((group) => group.types.includes('subtitle-export')),
+    ).toBe(false);
+    expect(CREATIVE_NODE_MAP.get('video-compose')?.ports).toContainEqual(
+      expect.objectContaining({ id: 'subtitles', type: 'document-asset' }),
+    );
+    expect(CREATIVE_NODE_MAP.get('video-audio-merge')?.ports).toContainEqual(
+      expect.objectContaining({ id: 'subtitles', type: 'document-asset' }),
+    );
+  });
+
   it('allows direct media results to connect to both output nodes', () => {
     for (const type of ['asset-library-output', 'output']) {
       expect(CREATIVE_NODE_MAP.get(type)?.ports).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: 'image', type: 'image-asset' }),
           expect.objectContaining({ id: 'images', type: 'image-list' }),
+          expect.objectContaining({ id: 'audio', type: 'audio-asset' }),
+          expect.objectContaining({ id: 'audios', type: 'audio-list' }),
           expect.objectContaining({ id: 'video', type: 'video-asset' }),
           expect.objectContaining({ id: 'videos', type: 'video-list' }),
         ]),
@@ -537,6 +636,21 @@ describe('creative node catalog', () => {
       ]),
     ).toEqual(expect.arrayContaining([['video-compose', 'videos']]));
 
+    expect(
+      getQuickConnectOptions('audio-asset').map((item) => [
+        item.template.type,
+        item.targetPortId,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['audio-collection', 'audios'],
+        ['audio-mix', 'audios'],
+        ['audio-normalize', 'audio'],
+        ['audio-trim', 'audio'],
+        ['video-audio-merge', 'audio'],
+      ]),
+    );
+
     const promptTargets = getQuickConnectOptions('prompt-text');
     expect(
       promptTargets.map((item) => [item.template.type, item.targetPortId]),
@@ -548,6 +662,8 @@ describe('creative node catalog', () => {
         ['image-to-image', 'prompt'],
         ['image-to-video', 'prompt'],
         ['prompt-generator', 'context'],
+        ['audio-generate', 'prompt'],
+        ['music-generate', 'prompt'],
         ['video-generate', 'prompt'],
       ]),
     );
@@ -565,6 +681,10 @@ describe('creative node catalog', () => {
       variant: 'planner',
     });
     expect(getCreativeNodeVisual('image-input')).toMatchObject({
+      height: 164,
+      variant: 'asset',
+    });
+    expect(getCreativeNodeVisual('audio-input')).toMatchObject({
       height: 164,
       variant: 'asset',
     });

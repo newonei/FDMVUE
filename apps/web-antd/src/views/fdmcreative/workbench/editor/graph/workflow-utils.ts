@@ -1,14 +1,19 @@
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 const SINGLE_PROMPT_INPUT_NODE_TYPES = new Set([
+  'audio-generate',
   'first-last-frame-to-video',
   'image-edit',
   'image-generate',
   'image-to-image',
   'image-to-video',
+  'music-generate',
   'video-generate',
 ]);
 const SINGLE_MEDIA_INPUT_PORTS = new Set([
+  'audio-extract:video',
+  'audio-normalize:audio',
+  'audio-trim:audio',
   'first-last-frame-to-video:first-frame',
   'first-last-frame-to-video:last-frame',
   'image-crop:image',
@@ -16,6 +21,8 @@ const SINGLE_MEDIA_INPUT_PORTS = new Set([
   'image-resize:image',
   'image-split:image',
   'image-to-video:first-frame',
+  'video-audio-merge:audio',
+  'video-audio-merge:video',
   'video-frame-extract:video',
   'video-normalize:video',
   'video-transition:first',
@@ -56,6 +63,7 @@ export function isPortTypeCompatible(
   > = {
     'image-asset': ['image-list'],
     'video-asset': ['video-list'],
+    'audio-asset': ['audio-list'],
   };
   return listCompatibility[sourceType]?.includes(targetType) ?? false;
 }

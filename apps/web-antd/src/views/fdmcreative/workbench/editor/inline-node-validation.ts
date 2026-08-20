@@ -4,6 +4,9 @@ const DEFAULT_VIDEO_NORMALIZE_FPS = 30;
 
 export const MAX_VIDEO_NORMALIZE_PIXELS = 8_847_360;
 export const MAX_VIDEO_NORMALIZE_PIXEL_RATE = 265_420_800;
+const MAX_AUDIO_DURATION_SECONDS = 600;
+const MAX_AUDIO_SAMPLE_RATE = 192_000;
+const MAX_AUDIO_CHANNELS = 8;
 
 function configuredNumber(
   config: Record<string, unknown>,
@@ -22,6 +25,138 @@ function isValidVideoDimension(value: unknown): value is number {
     value <= 8192 &&
     value % 2 === 0
   );
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function audioFormatValidationError(config: Record<string, unknown>) {
+  const format = String(config.format ?? 'wav').toLowerCase();
+  return ['m4a', 'mp3', 'wav'].includes(format)
+    ? undefined
+    : '音频格式只支持 WAV、MP3 或 M4A';
+}
+
+function audioOutputValidationError(config: Record<string, unknown>) {
+  const sampleRate = config.sampleRate ?? 44_100;
+  const channels = config.channels ?? 2;
+  const volumePercent = config.volumePercent ?? 100;
+  if (
+    !finiteNumber(sampleRate) ||
+    !Number.isInteger(sampleRate) ||
+    sampleRate < 8000 ||
+    sampleRate > MAX_AUDIO_SAMPLE_RATE
+  ) {
+    return `音频采样率必须是 8,000 到 ${MAX_AUDIO_SAMPLE_RATE.toLocaleString('en-US')} 之间的整数`;
+  }
+  if (
+    !finiteNumber(channels) ||
+    !Number.isInteger(channels) ||
+    channels < 1 ||
+    channels > MAX_AUDIO_CHANNELS
+  ) {
+    return `音频声道数必须是 1 到 ${MAX_AUDIO_CHANNELS} 之间的整数`;
+  }
+  if (
+    !finiteNumber(volumePercent) ||
+    volumePercent < 0 ||
+    volumePercent > 200
+  ) {
+    return '输出音量必须在 0 到 200% 之间';
+  }
+  return audioFormatValidationError(config);
+}
+
+function audioValidationError(
+  nodeType: string,
+  config: Record<string, unknown>,
+) {
+  if (['audio-generate', 'music-generate'].includes(nodeType)) {
+    const duration =
+      config.durationSeconds ?? (nodeType === 'music-generate' ? 30 : 15);
+    if (
+      !finiteNumber(duration) ||
+      duration <= 0 ||
+      duration > MAX_AUDIO_DURATION_SECONDS
+    ) {
+      return `音频生成时长必须在 0 到 ${MAX_AUDIO_DURATION_SECONDS} 秒之间`;
+    }
+    return audioFormatValidationError(config);
+  }
+  if (nodeType === 'audio-trim') {
+    const start = config.startSeconds ?? 0;
+    const duration = config.durationSeconds ?? 15;
+    const end = config.endSeconds;
+    const fadeIn = config.fadeInSeconds ?? 0;
+    const fadeOut = config.fadeOutSeconds ?? 0;
+    if (
+      !finiteNumber(start) ||
+      !finiteNumber(duration) ||
+      start < 0 ||
+      duration <= 0 ||
+      duration > MAX_AUDIO_DURATION_SECONDS
+    ) {
+      return `音频裁剪开始和时长必须在 0 到 ${MAX_AUDIO_DURATION_SECONDS} 秒范围内`;
+    }
+    if (
+      end !== undefined &&
+      (!finiteNumber(end) ||
+        end <= start ||
+        Math.abs(end - start - duration) >= 0.001)
+    ) {
+      return '音频结束时间必须大于开始时间，且与裁剪时长一致';
+    }
+    if (
+      !finiteNumber(fadeIn) ||
+      !finiteNumber(fadeOut) ||
+      fadeIn < 0 ||
+      fadeOut < 0 ||
+      fadeIn + fadeOut > duration
+    ) {
+      return '音频淡入和淡出不能为负，且总时长不能超过裁剪时长';
+    }
+    return audioOutputValidationError(config);
+  }
+  if (nodeType === 'audio-normalize') {
+    const targetLufs = config.targetLufs ?? -16;
+    if (!finiteNumber(targetLufs) || targetLufs < -70 || targetLufs > -5) {
+      return '目标响度必须在 -70 到 -5 LUFS 之间';
+    }
+    return audioOutputValidationError(config);
+  }
+  if (nodeType === 'audio-mix') {
+    const policy = String(config.durationPolicy ?? 'LONGEST').toUpperCase();
+    if (!['LONGEST', 'SHORTER', 'SHORTEST'].includes(policy)) {
+      return '混音时长策略只支持最短或最长音轨';
+    }
+    const order = config.audioOrder;
+    if (
+      order !== undefined &&
+      (!Array.isArray(order) ||
+        order.length > 16 ||
+        order.some((item) => typeof item !== 'string' || !item.trim()))
+    ) {
+      return '显式音轨顺序最多 16 项，且每项必须是源节点 ID';
+    }
+    return audioOutputValidationError(config);
+  }
+  if (nodeType === 'audio-extract') return audioOutputValidationError(config);
+  if (nodeType === 'video-audio-merge') {
+    const mode = String(config.audioMode ?? 'REPLACE').toUpperCase();
+    const policy = String(config.durationPolicy ?? 'SHORTEST').toUpperCase();
+    if (!['DUCK', 'KEEP', 'REPLACE'].includes(mode)) {
+      return '原音轨处理仅支持替换、保留混合或 Duck';
+    }
+    if (!['LONGEST', 'SHORTEST'].includes(policy)) {
+      return '视频配音时长策略只支持最短或最长素材';
+    }
+    const duckingLevel = config.duckingLevel ?? 0.35;
+    if (!finiteNumber(duckingLevel) || duckingLevel <= 0 || duckingLevel > 1) {
+      return 'Duck 压低比例必须在 0 到 1 之间';
+    }
+  }
+  return undefined;
 }
 
 export function inlineNodeConfigValidationError(
@@ -120,6 +255,8 @@ export function inlineNodeConfigValidationError(
       return '图片分割行列必须是 1 到 8 的整数，输出总数不能超过 64';
     }
   }
+  const audioError = audioValidationError(nodeType, config);
+  if (audioError) return audioError;
   if (nodeType !== 'video-normalize') return undefined;
 
   const width = configuredNumber(

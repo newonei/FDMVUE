@@ -45,6 +45,7 @@ const confirming = ref(false);
 const rows = ref<FdmCreativeApi.CreativeAsset[]>([]);
 const total = ref(0);
 const selected = ref(new Map<number, FdmCreativeApi.CreativeAsset>());
+const audioDurations = ref<Record<number, number>>({});
 const query = reactive({
   keyword: '',
   kind: '' as '' | FdmCreativeApi.CreativeAsset['kind'],
@@ -116,6 +117,34 @@ function formatBytes(size?: number) {
   if (!size) return '未知大小';
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(milliseconds?: number) {
+  if (!milliseconds || milliseconds < 0) return undefined;
+  const seconds = Math.round(milliseconds / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes > 0
+    ? `${minutes}:${String(remainder).padStart(2, '0')}`
+    : `${remainder} 秒`;
+}
+
+function audioSummary(asset: FdmCreativeApi.CreativeAsset) {
+  const duration = formatDuration(audioDurations.value[asset.id]);
+  const format = asset.mimeType?.replace(/^audio\//, '').toUpperCase();
+  return [duration, format].filter(Boolean).join(' · ') || '加载音频信息中';
+}
+
+function captureAudioDuration(
+  asset: FdmCreativeApi.CreativeAsset,
+  event: Event,
+) {
+  const media = event.target as HTMLAudioElement;
+  if (!Number.isFinite(media.duration) || media.duration < 0) return;
+  audioDurations.value = {
+    ...audioDurations.value,
+    [asset.id]: Math.round(media.duration * 1000),
+  };
 }
 
 async function confirm() {
@@ -194,45 +223,63 @@ async function confirm() {
 
     <Spin :spinning="loading">
       <div v-if="rows.length" class="asset-picker-grid">
-        <button
+        <article
           v-for="asset in rows"
           :key="asset.id"
           class="asset-tile"
           :class="{ selected: selected.has(asset.id) }"
-          type="button"
-          @click="toggle(asset)"
         >
-          <div class="asset-tile__preview">
-            <img
-              v-if="asset.kind === 'IMAGE' && asset.url"
-              :alt="asset.name"
-              loading="lazy"
-              :src="asset.url"
-            />
-            <video
-              v-else-if="asset.kind === 'VIDEO' && asset.url"
-              muted
-              playsinline
+          <button
+            class="asset-tile__select"
+            :aria-pressed="selected.has(asset.id)"
+            type="button"
+            @click="toggle(asset)"
+          >
+            <div class="asset-tile__preview">
+              <img
+                v-if="asset.kind === 'IMAGE' && asset.url"
+                :alt="asset.name"
+                loading="lazy"
+                :src="asset.url"
+              />
+              <video
+                v-else-if="asset.kind === 'VIDEO' && asset.url"
+                muted
+                playsinline
+                preload="metadata"
+                :src="asset.url"
+              ></video>
+              <div v-else class="asset-tile__fallback">
+                <IconifyIcon :icon="mediaIcon(asset.kind)" />
+                <span>{{ assetKindLabel(asset.kind) }}</span>
+              </div>
+              <span v-if="selected.has(asset.id)" class="asset-tile__check">
+                <IconifyIcon icon="lucide:check" />
+              </span>
+            </div>
+            <div class="asset-tile__body">
+              <strong :title="asset.name">{{ asset.name }}</strong>
+              <span>{{ asset.projectName || `项目 ${asset.projectId}` }}</span>
+              <div>
+                <Tag :bordered="false">{{ assetKindLabel(asset.kind) }}</Tag>
+                <small>{{ formatBytes(asset.size) }}</small>
+              </div>
+            </div>
+          </button>
+          <div
+            v-if="asset.kind === 'AUDIO' && asset.url"
+            class="asset-tile__audio"
+          >
+            <audio
+              controls
               preload="metadata"
               :src="asset.url"
-            ></video>
-            <div v-else class="asset-tile__fallback">
-              <IconifyIcon :icon="mediaIcon(asset.kind)" />
-              <span>{{ assetKindLabel(asset.kind) }}</span>
-            </div>
-            <span v-if="selected.has(asset.id)" class="asset-tile__check">
-              <IconifyIcon icon="lucide:check" />
-            </span>
+              @click.stop
+              @loadedmetadata="captureAudioDuration(asset, $event)"
+            ></audio>
+            <small>{{ audioSummary(asset) }}</small>
           </div>
-          <div class="asset-tile__body">
-            <strong :title="asset.name">{{ asset.name }}</strong>
-            <span>{{ asset.projectName || `项目 ${asset.projectId}` }}</span>
-            <div>
-              <Tag :bordered="false">{{ assetKindLabel(asset.kind) }}</Tag>
-              <small>{{ formatBytes(asset.size) }}</small>
-            </div>
-          </div>
-        </button>
+        </article>
       </div>
       <Empty v-else description="没有找到匹配素材" />
     </Spin>
@@ -305,14 +352,23 @@ async function confirm() {
 
 .asset-tile {
   min-width: 0;
-  padding: 0;
   overflow: hidden;
   text-align: left;
-  cursor: pointer;
   background: #fff;
   border: 1px solid #e5eaf1;
   border-radius: 10px;
   transition: 150ms ease;
+}
+
+.asset-tile__select {
+  display: block;
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
 }
 
 .asset-tile:hover,
@@ -391,6 +447,27 @@ async function confirm() {
   align-items: center;
   justify-content: space-between;
   margin-top: 3px;
+}
+
+.asset-tile__audio {
+  display: grid;
+  gap: 4px;
+  padding: 0 9px 9px;
+  border-top: 1px solid #edf0f5;
+}
+
+.asset-tile__audio audio {
+  width: 100%;
+  height: 30px;
+  margin-top: 7px;
+}
+
+.asset-tile__audio small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: #8491a5;
+  white-space: nowrap;
 }
 
 .asset-picker-footer {

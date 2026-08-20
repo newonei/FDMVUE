@@ -149,4 +149,35 @@ describe('supportsNodeModel', () => {
       ),
     ).toBe(true);
   });
+
+  it('keeps voice and music routes on their distinct modalities and capabilities', () => {
+    expect(
+      supportsNodeModel(
+        model(['TEXT_TO_AUDIO'], 'AUDIO'),
+        'audio-generate',
+        [],
+      ),
+    ).toBe(true);
+    expect(
+      supportsNodeModel(
+        model(['TEXT_TO_AUDIO'], 'MUSIC'),
+        'audio-generate',
+        [],
+      ),
+    ).toBe(false);
+    expect(
+      supportsNodeModel(
+        model(['TEXT_TO_MUSIC'], 'MUSIC'),
+        'music-generate',
+        [],
+      ),
+    ).toBe(true);
+    expect(
+      supportsNodeModel(
+        model(['TEXT_TO_AUDIO'], 'AUDIO'),
+        'music-generate',
+        [],
+      ),
+    ).toBe(false);
+  });
 });

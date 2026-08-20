@@ -38,6 +38,9 @@ function requiredCapability(
   references: number,
 ): FdmAiApi.Capability | undefined {
   switch (nodeType) {
+    case 'audio-generate': {
+      return 'TEXT_TO_AUDIO';
+    }
     case 'first-last-frame-to-video': {
       return 'FIRST_LAST_FRAME_TO_VIDEO';
     }
@@ -52,6 +55,9 @@ function requiredCapability(
     }
     case 'image-to-video': {
       return 'FIRST_FRAME_TO_VIDEO';
+    }
+    case 'music-generate': {
+      return 'TEXT_TO_MUSIC';
     }
     case 'video-generate': {
       return references > 0 ? 'FIRST_FRAME_TO_VIDEO' : 'TEXT_TO_VIDEO';
@@ -68,6 +74,12 @@ export function supportsNodeModel(
   referenceAssetIds: unknown,
 ) {
   const references = referenceAssetCount(referenceAssetIds);
+  if (
+    (nodeType === 'audio-generate' && model.modality !== 'AUDIO') ||
+    (nodeType === 'music-generate' && model.modality !== 'MUSIC')
+  ) {
+    return false;
+  }
   if (nodeType === 'prompt-generator') {
     if (model.modality !== 'TEXT' || !model.capabilities.includes('CHAT')) {
       return false;

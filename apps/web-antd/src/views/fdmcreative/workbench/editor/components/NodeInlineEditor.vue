@@ -183,6 +183,16 @@ const VIDEO_AI_TYPES = new Set([
   'image-to-video',
   'video-generate',
 ]);
+const VOICE_AI_TYPES = new Set(['audio-generate']);
+const MUSIC_AI_TYPES = new Set(['music-generate']);
+const AUDIO_AI_TYPES = new Set([...VOICE_AI_TYPES, ...MUSIC_AI_TYPES]);
+const AUDIO_LOCAL_TYPES = new Set([
+  'audio-extract',
+  'audio-mix',
+  'audio-normalize',
+  'audio-trim',
+  'video-audio-merge',
+]);
 const VIDEO_TYPES = new Set([
   ...VIDEO_AI_TYPES,
   'video-compose',
@@ -193,6 +203,12 @@ const VIDEO_TYPES = new Set([
   'video-timeline',
   'video-transition',
   'video-trim',
+]);
+const AUDIO_TYPES = new Set([
+  ...AUDIO_AI_TYPES,
+  ...AUDIO_LOCAL_TYPES,
+  'audio-collection',
+  'audio-input',
 ]);
 const COMPOSE_TYPES = new Set([
   'artifact-collection',
@@ -211,6 +227,21 @@ const DURATION_OPTIONS = [3, 5, 8, 10, 15].map((value) => ({
   label: `${value} 秒`,
   value,
 }));
+const AUDIO_DURATION_OPTIONS = [3, 5, 10, 15, 30, 60, 120, 300].map(
+  (value) => ({ label: `${value} 秒`, value }),
+);
+const AUDIO_FORMAT_OPTIONS = [
+  { label: 'MP3', value: 'mp3' },
+  { label: 'WAV', value: 'wav' },
+  { label: 'M4A / AAC', value: 'm4a' },
+];
+const AUDIO_SAMPLE_RATE_OPTIONS = [8000, 16_000, 22_050, 44_100, 48_000].map(
+  (value) => ({ label: `${value / 1000} kHz`, value }),
+);
+const AUDIO_CHANNEL_OPTIONS = [
+  { label: '单声道', value: 1 },
+  { label: '立体声', value: 2 },
+];
 const RESOLUTION_OPTIONS = ['720P', '1080P', '2K', '4K'].map((value) => ({
   label: value,
   value,
@@ -291,7 +322,7 @@ const template = computed(() => CREATIVE_NODE_MAP.get(props.node.type));
 const imageConfig = computed(() => asRecord(config.value.image));
 const videoConfig = computed(() => asRecord(config.value.video));
 const isAssetInput = computed(() =>
-  ['image-input', 'video-input'].includes(props.node.type),
+  ['audio-input', 'image-input', 'video-input'].includes(props.node.type),
 );
 const isPlanner = computed(() => props.node.type === 'content-planner');
 const isPromptGenerator = computed(
@@ -309,6 +340,12 @@ const isImageNode = computed(
     props.node.type === 'image-plan-item',
 );
 const isVideoNode = computed(() => VIDEO_TYPES.has(props.node.type));
+const isAudioNode = computed(() => AUDIO_TYPES.has(props.node.type));
+const isAudioLocalNode = computed(() => AUDIO_LOCAL_TYPES.has(props.node.type));
+const inputAssetKind = computed<FdmCreativeApi.CreativeAsset['kind']>(() => {
+  if (props.node.type === 'audio-input') return 'AUDIO';
+  return props.node.type === 'video-input' ? 'VIDEO' : 'IMAGE';
+});
 const promptLibraryTarget = computed<FdmCreativeApi.PromptTargetType>(() => {
   if (isImageNode.value) return 'IMAGE';
   if (isVideoNode.value || props.node.type === 'video-plan-item')
@@ -331,7 +368,8 @@ const isAiNode = computed(
     isPlanner.value ||
     isPromptGenerator.value ||
     IMAGE_AI_TYPES.has(props.node.type) ||
-    VIDEO_AI_TYPES.has(props.node.type),
+    VIDEO_AI_TYPES.has(props.node.type) ||
+    AUDIO_AI_TYPES.has(props.node.type),
 );
 const supportsNegativePrompt = computed(
   () =>
@@ -341,6 +379,7 @@ const supportsNegativePrompt = computed(
 );
 const supportsPrompt = computed(() =>
   [
+    'audio-generate',
     'brand-input',
     'content-planner',
     'creative-brief',
@@ -350,6 +389,7 @@ const supportsPrompt = computed(() =>
     'image-plan-item',
     'image-to-image',
     'image-to-video',
+    'music-generate',
     'prompt-generator',
     'prompt-input',
     'prompt-template',
@@ -418,6 +458,8 @@ const expectedModality = computed<FdmAiApi.Modality | undefined>(() => {
   if (isPlanner.value || isPromptGenerator.value) return 'TEXT';
   if (IMAGE_AI_TYPES.has(props.node.type)) return 'IMAGE';
   if (VIDEO_AI_TYPES.has(props.node.type)) return 'VIDEO';
+  if (VOICE_AI_TYPES.has(props.node.type)) return 'AUDIO';
+  if (MUSIC_AI_TYPES.has(props.node.type)) return 'MUSIC';
   return undefined;
 });
 const availableModels = computed(() =>
@@ -516,9 +558,8 @@ const imageAssets = computed(() =>
   props.projectAssets.filter((asset) => asset.kind === 'IMAGE'),
 );
 const inputAssetOptions = computed(() => {
-  const kind = props.node.type === 'video-input' ? 'VIDEO' : 'IMAGE';
   return props.projectAssets
-    .filter((asset) => asset.kind === kind)
+    .filter((asset) => asset.kind === inputAssetKind.value)
     .map((asset) => ({ label: asset.name, value: asset.id }));
 });
 const imageAssetOptions = computed(() =>
@@ -743,6 +784,52 @@ function emitMediaConfig(key: string, value: unknown) {
   emitNestedConfig(isVideoNode.value ? 'video' : 'image', key, value);
 }
 
+function changeAudioTrimStart(value: unknown) {
+  const start = asNumber(value);
+  emitConfig('startSeconds', start);
+  const end = asNumber(config.value.endSeconds);
+  if (start !== undefined && end !== undefined && end > start) {
+    emitConfig('durationSeconds', Number((end - start).toFixed(3)));
+  }
+}
+
+function changeAudioTrimDuration(value: unknown) {
+  emitConfig('durationSeconds', asNumber(value));
+  // A manually chosen duration becomes the source of truth until an explicit end is entered again.
+  if (config.value.endSeconds !== undefined)
+    emitConfig('endSeconds', undefined);
+}
+
+function changeAudioTrimEnd(value: unknown) {
+  const end = asNumber(value);
+  if (end === undefined) {
+    emitConfig('endSeconds', undefined);
+    return;
+  }
+  const start = asNumber(config.value.startSeconds) ?? 0;
+  emitConfig('endSeconds', end);
+  if (end > start)
+    emitConfig('durationSeconds', Number((end - start).toFixed(3)));
+}
+
+function changeAudioOrder(event: Event) {
+  const value = (event.target as HTMLTextAreaElement | null)?.value ?? '';
+  const order = value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 16);
+  emitConfig('audioOrder', order.length > 0 ? order : undefined);
+}
+
+function audioOrderText() {
+  return Array.isArray(config.value.audioOrder)
+    ? config.value.audioOrder
+        .filter((item): item is string => typeof item === 'string')
+        .join('\n')
+    : '';
+}
+
 function emitAssetChange(key: string, value: unknown, slot?: string) {
   if (props.readonly) return;
   const ids = Array.isArray(value) ? asNumberList(value) : [asNumber(value)];
@@ -856,6 +943,7 @@ function promptLabel() {
   if (props.node.type === 'image-plan-item') return '图片提示词';
   if (isVideoNode.value) return '视频提示词';
   if (isImageNode.value) return '图片提示词';
+  if (isAudioNode.value) return '音频提示词';
   return '节点提示词';
 }
 
@@ -867,6 +955,8 @@ function promptPlaceholder() {
     return '例如：{{brief}}\n{{input}}；未写变量时会自动追加上游文本…';
   if (isVideoNode.value) return '描述主体动作、场景变化、镜头运动与画面连续性…';
   if (isImageNode.value) return '描述主体、场景、构图、光线、材质和画面风格…';
+  if (isAudioNode.value)
+    return '描述音色、情绪、语速、节奏、乐器或需要保留的声音特征…';
   return '输入该节点需要处理的内容…';
 }
 
@@ -1085,19 +1175,29 @@ function handleEditorEscape() {
                 :src="assetPreview(assetById.get(selectedInputAssetId || -1))"
               />
               <video
-                v-else
+                v-else-if="
+                  assetById.get(selectedInputAssetId || -1)?.kind === 'VIDEO'
+                "
                 muted
                 playsinline
                 preload="metadata"
                 :src="assetPreview(assetById.get(selectedInputAssetId || -1))"
               ></video>
+              <audio
+                v-else
+                controls
+                preload="metadata"
+                :src="assetPreview(assetById.get(selectedInputAssetId || -1))"
+              ></audio>
             </template>
             <div v-else class="asset-empty">
               <IconifyIcon
                 :icon="
-                  node.type === 'video-input'
-                    ? 'lucide:film'
-                    : 'lucide:image-plus'
+                  node.type === 'audio-input'
+                    ? 'lucide:audio-lines'
+                    : node.type === 'video-input'
+                      ? 'lucide:film'
+                      : 'lucide:image-plus'
                 "
               />
               <span>尚未选择素材</span>
@@ -1116,7 +1216,7 @@ function handleEditorEscape() {
             <AssetLibraryPicker
               button-text="浏览全部资产"
               :disabled="readonly"
-              :kinds="[node.type === 'video-input' ? 'VIDEO' : 'IMAGE']"
+              :kinds="[inputAssetKind]"
               :project-id="projectId"
               @select="selectInputAssetFromLibrary"
             />
@@ -1249,7 +1349,8 @@ function handleEditorEscape() {
           <Tag color="default">当前不可用</Tag>
         </div>
         <p>
-          当前 FDM AI 目录尚未声明 IMAGE_INPAINT / IMAGE_OUTPAINT 的供应商契约。遮罩资产仅保留为私有图片引用，运行会被安全拒绝，不会被静默忽略或伪装成普通图片编辑。
+          当前 FDM AI 目录尚未声明 IMAGE_INPAINT / IMAGE_OUTPAINT
+          的供应商契约。遮罩资产仅保留为私有图片引用，运行会被安全拒绝，不会被静默忽略或伪装成普通图片编辑。
         </p>
         <span v-if="config.maskAssetId">
           已检测到历史遮罩配置；请移除或等待管理员配置完整能力后再运行。
@@ -1540,6 +1641,233 @@ function handleEditorEscape() {
         </div>
       </section>
 
+      <section
+        v-if="isAudioLocalNode"
+        class="editor-section audio-settings-section"
+      >
+        <div class="section-heading">
+          <strong>
+            {{
+              node.type === 'audio-trim'
+                ? '音频裁剪设置'
+                : node.type === 'audio-normalize'
+                  ? '音频标准化设置'
+                  : node.type === 'audio-mix'
+                    ? '音频混音设置'
+                    : node.type === 'audio-extract'
+                      ? '提取音轨设置'
+                      : '视频配音合成设置'
+            }}
+          </strong>
+          <span v-if="node.type === 'audio-mix'">
+            顺序只取已保存的 AUDIO_LIST，不按画布位置推断
+          </span>
+          <span v-else>参数将在服务端受控 FFmpeg 中校验和执行</span>
+        </div>
+
+        <div v-if="node.type === 'audio-trim'" class="audio-settings-grid">
+          <label>
+            <span>开始（秒）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="600"
+              :min="0"
+              :precision="3"
+              :step="0.1"
+              :value="asNumber(config.startSeconds) ?? 0"
+              @change="changeAudioTrimStart($event)"
+            />
+          </label>
+          <label>
+            <span>时长（秒）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="600"
+              :min="0.01"
+              :precision="3"
+              :step="0.1"
+              :value="asNumber(config.durationSeconds) ?? 15"
+              @change="changeAudioTrimDuration($event)"
+            />
+          </label>
+          <label>
+            <span>结束（秒，可选）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="86_400"
+              :min="0.01"
+              :precision="3"
+              placeholder="由开始 + 时长推算"
+              :step="0.1"
+              :value="asNumber(config.endSeconds)"
+              @change="changeAudioTrimEnd($event)"
+            />
+          </label>
+          <label>
+            <span>淡入（秒）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="600"
+              :min="0"
+              :precision="3"
+              :step="0.1"
+              :value="asNumber(config.fadeInSeconds) ?? 0"
+              @change="emitConfig('fadeInSeconds', $event)"
+            />
+          </label>
+          <label>
+            <span>淡出（秒）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="600"
+              :min="0"
+              :precision="3"
+              :step="0.1"
+              :value="asNumber(config.fadeOutSeconds) ?? 0"
+              @change="emitConfig('fadeOutSeconds', $event)"
+            />
+          </label>
+        </div>
+
+        <div v-if="node.type === 'audio-normalize'" class="audio-settings-grid">
+          <label>
+            <span>目标响度（LUFS）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="-5"
+              :min="-70"
+              :precision="1"
+              :step="1"
+              :value="asNumber(config.targetLufs) ?? -16"
+              @change="emitConfig('targetLufs', $event)"
+            />
+          </label>
+        </div>
+
+        <div v-if="node.type === 'audio-mix'" class="audio-settings-grid">
+          <label>
+            <span>输出结束策略</span>
+            <Select
+              :disabled="readonly"
+              :options="[
+                { label: '最长音轨结束', value: 'LONGEST' },
+                { label: '最短音轨结束', value: 'SHORTEST' },
+              ]"
+              :value="asString(config.durationPolicy, 'LONGEST').toUpperCase()"
+              @change="emitConfig('durationPolicy', $event)"
+            />
+          </label>
+          <label class="audio-settings-grid__wide">
+            <span>显式音轨顺序（可选）</span>
+            <Textarea
+              :auto-size="{ minRows: 2, maxRows: 4 }"
+              :disabled="readonly"
+              placeholder="每行一个源节点 ID；留空时使用保存的连线顺序。推荐先用“音频集合”固定顺序。"
+              :value="audioOrderText()"
+              @change="changeAudioOrder($event)"
+            />
+          </label>
+        </div>
+
+        <div
+          v-if="node.type === 'video-audio-merge'"
+          class="audio-settings-grid"
+        >
+          <label>
+            <span>原音轨处理</span>
+            <Select
+              :disabled="readonly"
+              :options="[
+                { label: '替换原音轨', value: 'REPLACE' },
+                { label: '保留并混合', value: 'KEEP' },
+                { label: '压低原音轨（Duck）', value: 'DUCK' },
+              ]"
+              :value="asString(config.audioMode, 'REPLACE').toUpperCase()"
+              @change="emitConfig('audioMode', $event)"
+            />
+          </label>
+          <label>
+            <span>视频时长策略</span>
+            <Select
+              :disabled="readonly"
+              :options="[
+                { label: '最短素材结束', value: 'SHORTEST' },
+                { label: '最长素材结束', value: 'LONGEST' },
+              ]"
+              :value="asString(config.durationPolicy, 'SHORTEST').toUpperCase()"
+              @change="emitConfig('durationPolicy', $event)"
+            />
+          </label>
+          <label
+            v-if="
+              asString(config.audioMode, 'REPLACE').toUpperCase() === 'DUCK'
+            "
+          >
+            <span>压低比例</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="1"
+              :min="0.01"
+              :precision="2"
+              :step="0.05"
+              :value="asNumber(config.duckingLevel) ?? 0.35"
+              @change="emitConfig('duckingLevel', $event)"
+            />
+          </label>
+        </div>
+
+        <div
+          v-if="
+            [
+              'audio-extract',
+              'audio-mix',
+              'audio-normalize',
+              'audio-trim',
+            ].includes(node.type)
+          "
+          class="audio-settings-grid audio-settings-grid--output"
+        >
+          <label>
+            <span>输出格式</span>
+            <Select
+              :disabled="readonly"
+              :options="AUDIO_FORMAT_OPTIONS"
+              :value="asString(config.format, 'wav').toLowerCase()"
+              @change="emitConfig('format', $event)"
+            />
+          </label>
+          <label>
+            <span>采样率</span>
+            <Select
+              :disabled="readonly"
+              :options="AUDIO_SAMPLE_RATE_OPTIONS"
+              :value="asNumber(config.sampleRate) ?? 44_100"
+              @change="emitConfig('sampleRate', $event)"
+            />
+          </label>
+          <label>
+            <span>声道</span>
+            <Select
+              :disabled="readonly"
+              :options="AUDIO_CHANNEL_OPTIONS"
+              :value="asNumber(config.channels) ?? 2"
+              @change="emitConfig('channels', $event)"
+            />
+          </label>
+          <label>
+            <span>输出音量（%）</span>
+            <InputNumber
+              :disabled="readonly"
+              :max="200"
+              :min="0"
+              :precision="0"
+              :value="asNumber(config.volumePercent) ?? 100"
+              @change="emitConfig('volumePercent', $event)"
+            />
+          </label>
+        </div>
+      </section>
+
       <section v-if="isComposeNode" class="editor-section compose-section">
         <div class="section-heading">
           <strong>{{
@@ -1687,28 +2015,36 @@ function handleEditorEscape() {
           <span>{{ resultAssets.length }} 个素材已归档</span>
         </div>
         <div class="result-strip">
-          <a
+          <article
             v-for="asset in resultAssets.slice(0, 6)"
             :key="asset.id"
-            :href="asset.url"
-            rel="noreferrer"
-            target="_blank"
             :title="asset.name"
           >
-            <img
-              v-if="asset.kind === 'IMAGE'"
-              :alt="asset.name"
-              :src="asset.url"
-            />
-            <video
-              v-else
-              muted
-              playsinline
-              preload="metadata"
-              :src="asset.url"
-            ></video>
+            <a
+              v-if="asset.kind !== 'AUDIO'"
+              :href="asset.url"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <img
+                v-if="asset.kind === 'IMAGE'"
+                :alt="asset.name"
+                :src="asset.url"
+              />
+              <video
+                v-else
+                muted
+                playsinline
+                preload="metadata"
+                :src="asset.url"
+              ></video>
+            </a>
+            <div v-else class="result-strip__audio">
+              <IconifyIcon icon="lucide:audio-lines" />
+              <audio controls preload="metadata" :src="asset.url"></audio>
+            </div>
             <span>{{ asset.name }}</span>
-          </a>
+          </article>
         </div>
       </section>
 
@@ -1888,6 +2224,31 @@ function handleEditorEscape() {
         />
       </template>
 
+      <template v-else-if="AUDIO_AI_TYPES.has(node.type)">
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="AUDIO_DURATION_OPTIONS"
+          :value="
+            asNumber(config.durationSeconds) ??
+            (node.type === 'music-generate' ? 30 : 15)
+          "
+          @change="emitConfig('durationSeconds', $event)"
+        />
+        <Select
+          class="toolbar-control"
+          :disabled="readonly"
+          :options="AUDIO_FORMAT_OPTIONS"
+          :value="asString(config.format, 'mp3').toLowerCase()"
+          @change="emitConfig('format', $event)"
+        />
+        <Tag color="purple">
+          {{
+            node.type === 'music-generate' ? '音乐 route' : '语音 / 音效 route'
+          }}
+        </Tag>
+      </template>
+
       <template v-else-if="node.type === 'video-compose'">
         <Tag>MP4 · 按输入顺序拼接</Tag>
       </template>
@@ -2010,7 +2371,8 @@ function handleEditorEscape() {
           @change="emitConfig('rows', $event)"
         />
         <Tag color="cyan">
-          {{ (asNumber(config.columns) ?? 2) * (asNumber(config.rows) ?? 2) }} 个分片
+          {{ (asNumber(config.columns) ?? 2) * (asNumber(config.rows) ?? 2) }}
+          个分片
         </Tag>
         <Select
           class="toolbar-control"
@@ -2444,6 +2806,12 @@ function handleEditorEscape() {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.asset-preview--large audio {
+  width: 100%;
+  min-width: 0;
+  padding: 27px 8px;
 }
 
 .asset-empty {
@@ -2957,6 +3325,43 @@ function handleEditorEscape() {
   width: 100%;
 }
 
+.audio-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.audio-settings-grid + .audio-settings-grid {
+  margin-top: 10px;
+}
+
+.audio-settings-grid label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.audio-settings-grid :deep(.ant-input-number),
+.audio-settings-grid :deep(.ant-select) {
+  width: 100%;
+}
+
+.audio-settings-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.audio-settings-grid__wide :deep(textarea) {
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.audio-settings-grid--output {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .loop-variation-field {
   margin-top: 12px;
 }
@@ -3050,7 +3455,7 @@ function handleEditorEscape() {
   overflow-x: auto;
 }
 
-.result-strip > a {
+.result-strip > article {
   position: relative;
   flex: 0 0 86px;
   height: 62px;
@@ -3061,12 +3466,30 @@ function handleEditorEscape() {
   border-radius: 7px;
 }
 
+.result-strip > article > a,
 .result-strip img,
 .result-strip video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.result-strip__audio {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px;
+  align-items: center;
+  height: 100%;
+  padding: 8px 5px 16px;
+  color: var(--editor-accent);
+  background: color-mix(in srgb, var(--editor-accent) 8%, hsl(var(--card)));
+}
+
+.result-strip__audio audio {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
 }
 
 .result-strip span {

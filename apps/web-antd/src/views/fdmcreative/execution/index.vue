@@ -4,6 +4,7 @@ import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 import { onMounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
 
 import {
   Button,
@@ -26,6 +27,7 @@ import CreativeShell from '../shared/CreativeShell.vue';
 
 defineOptions({ name: 'FdmCreativeExecutions' });
 
+const route = useRoute();
 const loading = ref(false);
 const detailLoading = ref(false);
 const drawerOpen = ref(false);
@@ -70,10 +72,14 @@ async function load() {
 
 async function openDetail(record: Record<string, unknown>) {
   const row = record as unknown as FdmCreativeApi.Execution;
+  await openExecutionDetail(row.id);
+}
+
+async function openExecutionDetail(executionId: number) {
   drawerOpen.value = true;
   detailLoading.value = true;
   try {
-    detail.value = await getCreativeExecution(row.id);
+    detail.value = await getCreativeExecution(executionId);
   } finally {
     detailLoading.value = false;
   }
@@ -106,7 +112,18 @@ function handleTableChange(pagination: TablePaginationConfig) {
   void load();
 }
 
-onMounted(load);
+onMounted(() => {
+  void (async () => {
+    await load();
+    const rawExecutionId = route.query.executionId;
+    const executionId = Number(
+      Array.isArray(rawExecutionId) ? rawExecutionId[0] : rawExecutionId,
+    );
+    if (Number.isSafeInteger(executionId) && executionId > 0) {
+      await openExecutionDetail(executionId);
+    }
+  })();
+});
 </script>
 
 <template>

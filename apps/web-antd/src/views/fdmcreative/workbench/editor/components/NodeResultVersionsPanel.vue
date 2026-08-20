@@ -27,6 +27,8 @@ interface Props {
   canEdit?: boolean;
   loading?: boolean;
   mediaTools?: FdmCreativeApi.MediaToolDescriptor[];
+  /** Workbench pins to canvas; other consumers can route the same archived asset to their library. */
+  pinLabel?: string;
   versions?: FdmCreativeApi.NodeResultVersion[];
 }
 
@@ -35,6 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
   canEdit: false,
   loading: false,
   mediaTools: () => [],
+  pinLabel: '固定到画布',
   versions: () => [],
 });
 
@@ -109,6 +112,13 @@ function formatDuration(value?: number) {
   return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)} 秒`;
 }
 
+function assetKindLabel(kind?: FdmCreativeApi.NodeResultAsset['kind']) {
+  if (kind === 'AUDIO') return '音频';
+  if (kind === 'VIDEO') return '视频';
+  if (kind === 'IMAGE') return '图片';
+  return '媒体';
+}
+
 function formatCost(cost?: FdmCreativeApi.NodeResultVersion['cost']) {
   if (!cost) return undefined;
   const amount = cost.costAmount ?? cost.estimatedCost;
@@ -155,7 +165,7 @@ function emitTool(
           :disabled="Boolean(actionBlockedReason)"
           @click="emit('pin', defaultSelection)"
         >
-          固定到画布
+          {{ pinLabel }}
         </Button>
       </Tooltip>
       <Tooltip
@@ -173,7 +183,10 @@ function emitTool(
       </Tooltip>
     </div>
 
-    <div v-if="loading && !versions.length" class="node-result-versions__loading">
+    <div
+      v-if="loading && !versions.length"
+      class="node-result-versions__loading"
+    >
       <IconifyIcon icon="lucide:loader-circle" class="is-spinning" />
       正在读取结果历史
     </div>
@@ -192,7 +205,10 @@ function emitTool(
               <Tag v-if="version.selectionStatus === 'CURRENT'" color="blue">
                 当前可复用
               </Tag>
-              <Tag v-else-if="version.selectionStatus === 'STALE'" color="orange">
+              <Tag
+                v-else-if="version.selectionStatus === 'STALE'"
+                color="orange"
+              >
                 已过期语义
               </Tag>
             </span>
@@ -204,7 +220,9 @@ function emitTool(
             <span v-if="version.model?.name">
               {{ version.model.name }}
             </span>
-            <span v-if="formatCost(version.cost)">{{ formatCost(version.cost) }}</span>
+            <span v-if="formatCost(version.cost)">{{
+              formatCost(version.cost)
+            }}</span>
             <span v-if="version.attemptNo">尝试 {{ version.attemptNo }}</span>
           </p>
 
@@ -213,10 +231,25 @@ function emitTool(
               v-for="asset in version.assets"
               :key="asset.id || `${version.nodeRunId}:${asset.name}`"
               class="result-asset"
-              :class="{ 'is-unavailable': !assetIsActive(asset) }"
+              :class="{
+                'is-audio': asset.kind === 'AUDIO',
+                'is-unavailable': !assetIsActive(asset),
+              }"
             >
+              <div
+                v-if="assetIsActive(asset) && asset.kind === 'AUDIO'"
+                class="result-asset__audio"
+              >
+                <span><IconifyIcon icon="lucide:audio-lines" /> 音频结果</span>
+                <audio
+                  controls
+                  preload="metadata"
+                  :src="asset.url"
+                  @click.stop
+                ></audio>
+              </div>
               <button
-                v-if="assetIsActive(asset)"
+                v-else-if="assetIsActive(asset)"
                 class="result-asset__preview"
                 type="button"
                 @click="openPreview({ asset, version })"
@@ -241,9 +274,11 @@ function emitTool(
               </div>
 
               <div class="result-asset__detail">
-                <strong :title="asset.name">{{ asset.name || '未命名素材' }}</strong>
+                <strong :title="asset.name">{{
+                  asset.name || '未命名素材'
+                }}</strong>
                 <small>
-                  {{ asset.kind === 'VIDEO' ? '视频' : '图片' }}
+                  {{ assetKindLabel(asset.kind) }}
                   <template v-if="asset.width && asset.height">
                     · {{ asset.width }}×{{ asset.height }}
                   </template>
@@ -251,29 +286,49 @@ function emitTool(
                     · {{ formatDuration(asset.durationMillis) }}
                   </template>
                 </small>
-                <small v-if="formatBytes(asset.size)">{{ formatBytes(asset.size) }}</small>
+                <small v-if="formatBytes(asset.size)">{{
+                  formatBytes(asset.size)
+                }}</small>
               </div>
 
               <div class="result-asset__actions">
                 <Tag v-if="asset.adopted" color="green">当前采用</Tag>
-                <Tooltip :title="actionBlockedReason || (!assetIsActive(asset) ? asset.unavailableReason : undefined)">
+                <Tooltip
+                  :title="
+                    actionBlockedReason ||
+                    (!assetIsActive(asset)
+                      ? asset.unavailableReason
+                      : undefined)
+                  "
+                >
                   <Button
                     size="small"
                     type="link"
-                    :disabled="!assetIsActive(asset) || Boolean(actionBlockedReason)"
+                    :disabled="
+                      !assetIsActive(asset) || Boolean(actionBlockedReason)
+                    "
                     @click="emit('adopt', { asset, version })"
                   >
                     采用此版
                   </Button>
                 </Tooltip>
-                <Tooltip :title="actionBlockedReason || (!assetIsActive(asset) ? asset.unavailableReason : undefined)">
+                <Tooltip
+                  :title="
+                    actionBlockedReason ||
+                    (!assetIsActive(asset)
+                      ? asset.unavailableReason
+                      : undefined)
+                  "
+                >
                   <Button
                     size="small"
                     type="link"
-                    :disabled="!assetIsActive(asset) || Boolean(actionBlockedReason)"
+                    :disabled="
+                      !assetIsActive(asset) || Boolean(actionBlockedReason)
+                    "
                     @click="emit('pin', { asset, version })"
                   >
-                    固定到画布
+                    {{ pinLabel }}
                   </Button>
                 </Tooltip>
               </div>
@@ -290,12 +345,19 @@ function emitTool(
                     @click="emitTool(tool, { asset, version })"
                   >
                     <IconifyIcon
-                      :icon="tool.localExecution ? 'lucide:wand-sparkles' : 'lucide:sparkles'"
+                      :icon="
+                        tool.localExecution
+                          ? 'lucide:wand-sparkles'
+                          : 'lucide:sparkles'
+                      "
                     />
                     {{ tool.label }}
                   </Button>
                 </Tooltip>
-                <small v-if="asset.deleteEligible" class="result-asset__library-hint">
+                <small
+                  v-if="asset.deleteEligible"
+                  class="result-asset__library-hint"
+                >
                   可在资产库删除
                 </small>
               </div>
@@ -343,6 +405,12 @@ function emitTool(
           :src="preview.asset.url"
           :style="{ transform: `scale(${previewZoom})` }"
         />
+        <audio
+          v-else-if="preview.asset.kind === 'AUDIO'"
+          controls
+          preload="metadata"
+          :src="preview.asset.url"
+        ></audio>
         <video
           v-else
           controls
@@ -352,12 +420,30 @@ function emitTool(
         ></video>
       </div>
       <dl class="result-preview__metadata">
-        <div><dt>运行版本</dt><dd>{{ preview.version.nodeRunId }}</dd></div>
-        <div><dt>类型</dt><dd>{{ preview.asset.kind === 'VIDEO' ? '视频' : '图片' }}</dd></div>
-        <div v-if="preview.asset.mimeType"><dt>格式</dt><dd>{{ preview.asset.mimeType }}</dd></div>
-        <div v-if="preview.asset.width && preview.asset.height"><dt>尺寸</dt><dd>{{ preview.asset.width }}×{{ preview.asset.height }}</dd></div>
-        <div v-if="formatDuration(preview.asset.durationMillis)"><dt>时长</dt><dd>{{ formatDuration(preview.asset.durationMillis) }}</dd></div>
-        <div v-if="formatBytes(preview.asset.size)"><dt>文件大小</dt><dd>{{ formatBytes(preview.asset.size) }}</dd></div>
+        <div>
+          <dt>运行版本</dt>
+          <dd>{{ preview.version.nodeRunId }}</dd>
+        </div>
+        <div>
+          <dt>类型</dt>
+          <dd>{{ assetKindLabel(preview.asset.kind) }}</dd>
+        </div>
+        <div v-if="preview.asset.mimeType">
+          <dt>格式</dt>
+          <dd>{{ preview.asset.mimeType }}</dd>
+        </div>
+        <div v-if="preview.asset.width && preview.asset.height">
+          <dt>尺寸</dt>
+          <dd>{{ preview.asset.width }}×{{ preview.asset.height }}</dd>
+        </div>
+        <div v-if="formatDuration(preview.asset.durationMillis)">
+          <dt>时长</dt>
+          <dd>{{ formatDuration(preview.asset.durationMillis) }}</dd>
+        </div>
+        <div v-if="formatBytes(preview.asset.size)">
+          <dt>文件大小</dt>
+          <dd>{{ formatBytes(preview.asset.size) }}</dd>
+        </div>
       </dl>
     </template>
   </Modal>
@@ -527,6 +613,10 @@ function emitTool(
   grid-template-columns: 1fr;
 }
 
+.result-asset.is-audio {
+  grid-template-columns: minmax(154px, 210px) minmax(0, 1fr);
+}
+
 .result-asset__preview,
 .result-asset__placeholder {
   position: relative;
@@ -567,6 +657,36 @@ function emitTool(
 
 .result-asset__preview:hover .result-asset__preview-hint {
   opacity: 1;
+}
+
+.result-asset__audio {
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  min-width: 0;
+  padding: 7px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--primary) / 7%);
+  border: 1px solid hsl(var(--primary) / 16%);
+  border-radius: 6px;
+}
+
+.result-asset__audio > span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.result-asset__audio > span svg {
+  width: 13px;
+  height: 13px;
+  color: hsl(var(--primary));
+}
+
+.result-asset__audio audio {
+  width: 100%;
+  height: 29px;
 }
 
 .result-asset__placeholder {
@@ -682,6 +802,10 @@ function emitTool(
 .result-preview__canvas video {
   max-width: 100%;
   max-height: 62vh;
+}
+
+.result-preview__canvas audio {
+  width: min(560px, calc(100% - 40px));
 }
 
 .result-preview__metadata {

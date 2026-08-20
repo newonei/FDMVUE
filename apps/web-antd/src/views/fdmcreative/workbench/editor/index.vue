@@ -7,6 +7,7 @@ import type {
   WorkbenchGraphAdapter,
   WorkbenchNavigationNode,
 } from './graph/graph-adapter';
+import type { WorkflowAutosaveSnapshot } from './use-workflow-autosave';
 
 import type { FdmAiApi } from '#/api/fdmai';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
@@ -96,8 +97,10 @@ import { normalizeModelIdentifier } from './model-identifier';
 import { supportsNodeModel } from './node-model-filter';
 import { extractPromptText } from './prompt-text-output';
 import { useExecutionEventStream } from './use-execution-event-stream';
-import { isWorkflowVersionConflict, useWorkflowAutosave } from './use-workflow-autosave';
-import type { WorkflowAutosaveSnapshot } from './use-workflow-autosave';
+import {
+  isWorkflowVersionConflict,
+  useWorkflowAutosave,
+} from './use-workflow-autosave';
 import {
   createWorkflowExport,
   downloadWorkflowExport,
@@ -221,9 +224,9 @@ const planner = reactive({
 const plannerPromptTarget = computed<FdmCreativeApi.PromptTargetType>(() =>
   planner.mode === 'IMAGE_SET'
     ? 'IMAGE'
-    : (planner.mode === 'VIDEO_SEQUENCE'
+    : planner.mode === 'VIDEO_SEQUENCE'
       ? 'VIDEO'
-      : 'GENERAL'),
+      : 'GENERAL',
 );
 
 const selectedConfig = computed(() => selectedNode.value?.config ?? {});
@@ -263,12 +266,18 @@ const currentUserRoleLabel = computed(() => {
     : '';
 });
 const inputUploadAccept = computed(() =>
-  selectedNode.value?.type === 'video-input'
-    ? ['mp4', 'mov', 'webm']
-    : ['jpg', 'jpeg', 'png', 'webp'],
+  selectedNode.value?.type === 'audio-input'
+    ? ['mp3', 'wav', 'm4a', 'flac', 'ogg']
+    : selectedNode.value?.type === 'video-input'
+      ? ['mp4', 'mov', 'webm']
+      : ['jpg', 'jpeg', 'png', 'webp'],
 );
 const inputUploadMaxSize = computed(() =>
-  selectedNode.value?.type === 'video-input' ? 500 : 25,
+  selectedNode.value?.type === 'audio-input'
+    ? 100
+    : selectedNode.value?.type === 'video-input'
+      ? 500
+      : 25,
 );
 const quickConnectStyle = computed<CSSProperties>(() => ({
   left: `${quickConnectPosition.left}px`,
@@ -357,7 +366,7 @@ const resultAssets = computed(() => {
   return projectAssets.value.filter(
     (asset) =>
       Boolean(asset.url) &&
-      ['IMAGE', 'VIDEO'].includes(asset.kind) &&
+      ['AUDIO', 'IMAGE', 'VIDEO'].includes(asset.kind) &&
       (assetIds.has(asset.id) ||
         (asset.url ? urls.has(asset.url) : false) ||
         (asset.sourceNodeRunId
@@ -596,7 +605,11 @@ function syncAssetNodePreviews() {
   if (!graphAdapter) return;
   const assets = new Map(projectAssets.value.map((asset) => [asset.id, asset]));
   for (const node of graphAdapter.graph.getNodes()) {
-    if (!['image-input', 'video-input'].includes(node.getData()?.type))
+    if (
+      !['audio-input', 'image-input', 'video-input'].includes(
+        node.getData()?.type,
+      )
+    )
       continue;
     const assetId = node.getData()?.config?.assetId;
     const asset = [...assets.values()].find(
@@ -741,14 +754,25 @@ async function uploadInputAsset(
   onUploadProgress?: AxiosProgressEvent,
 ) {
   const node = selectedNode.value;
-  if (!node || !['image-input', 'video-input'].includes(node.type)) {
-    throw new Error('请先选择图片或视频输入节点');
+  if (
+    !node ||
+    !['audio-input', 'image-input', 'video-input'].includes(node.type)
+  ) {
+    throw new Error('请先选择图片、视频或音频输入节点');
   }
-  const kind = node.type === 'video-input' ? 'VIDEO' : 'IMAGE';
-  const mimePrefix = kind === 'VIDEO' ? 'video/' : 'image/';
+  const kind =
+    node.type === 'audio-input'
+      ? 'AUDIO'
+      : node.type === 'video-input'
+        ? 'VIDEO'
+        : 'IMAGE';
+  const mimePrefix =
+    kind === 'AUDIO' ? 'audio/' : kind === 'VIDEO' ? 'video/' : 'image/';
   const maxBytes = inputUploadMaxSize.value * 1024 * 1024;
   if (!file.type.startsWith(mimePrefix)) {
-    throw new Error(`请选择有效的${kind === 'VIDEO' ? '视频' : '图片'}文件`);
+    throw new Error(
+      `请选择有效的${kind === 'AUDIO' ? '音频' : kind === 'VIDEO' ? '视频' : '图片'}文件`,
+    );
   }
   if (file.size > maxBytes) {
     throw new Error(`文件不能超过 ${inputUploadMaxSize.value} MB`);
@@ -1368,7 +1392,9 @@ function handleInlineAssetChange(payload: {
   }
   if (
     payload.key === 'assetId' &&
-    ['image-input', 'video-input'].includes(selectedNode.value?.type ?? '')
+    ['audio-input', 'image-input', 'video-input'].includes(
+      selectedNode.value?.type ?? '',
+    )
   ) {
     setInputAsset(payload.value);
     return;
@@ -1439,7 +1465,9 @@ async function submitResultAdoption(
       projectId: projectId.value,
     });
     await refreshNodeResultVersions();
-    message.success('已采用该结果版本；后续重跑会保留你的选择直到节点语义再次变更');
+    message.success(
+      '已采用该结果版本；后续重跑会保留你的选择直到节点语义再次变更',
+    );
   } catch (error) {
     await refreshNodeResultVersions();
     message.error(
@@ -1489,7 +1517,9 @@ function handleResultPin(action: ResultHistoryAction) {
     originNodeId: selectedNode.value?.id,
   });
   if (!branch) {
-    message.warning(`无法固定素材：请检查画布节点上限（${MAX_WORKBENCH_NODES}）`);
+    message.warning(
+      `无法固定素材：请检查画布节点上限（${MAX_WORKBENCH_NODES}）`,
+    );
     return;
   }
   applyResultAssetDisplay(branch.inputNode.id, action.asset);
@@ -1497,9 +1527,11 @@ function handleResultPin(action: ResultHistoryAction) {
   message.success('已将结果固定为画布输入节点；素材仍由现有资产体系管理');
 }
 
-function handleResultTool(action: ResultHistoryAction & {
-  tool: FdmCreativeApi.MediaToolDescriptor;
-}) {
+function handleResultTool(
+  action: ResultHistoryAction & {
+    tool: FdmCreativeApi.MediaToolDescriptor;
+  },
+) {
   if (!canMutateFromResult(action) || !action.asset.id || !action.asset.kind)
     return;
   if (!action.tool.available) {
@@ -2468,10 +2500,7 @@ onBeforeUnmount(() => {
         />
       </aside>
 
-      <aside
-        v-if="agentPanelOpen && !agentPanelUsesDrawer"
-        class="agent-panel"
-      >
+      <aside v-if="agentPanelOpen && !agentPanelUsesDrawer" class="agent-panel">
         <CanvasAgentPanel
           :can-edit="canEdit"
           :can-run="canRun"
@@ -2562,7 +2591,11 @@ onBeforeUnmount(() => {
           <dt>可替换</dt>
           <dd>
             <Tag :color="workflowImportPreview.canImport ? 'green' : 'red'">
-              {{ workflowImportPreview.canImport ? '可以导入' : '需要处理失效引用' }}
+              {{
+                workflowImportPreview.canImport
+                  ? '可以导入'
+                  : '需要处理失效引用'
+              }}
             </Tag>
           </dd>
         </dl>
@@ -2577,13 +2610,15 @@ onBeforeUnmount(() => {
               v-for="issue in workflowImportPreview.unavailableAssetReferences"
               :key="`${issue.nodeId}:${issue.configPath}:${issue.assetId}`"
             >
-              节点 {{ issue.nodeId }} · {{ issue.configPath }} · 素材 {{
-                issue.assetId
-              }}（{{ issue.reason }}）
+              节点 {{ issue.nodeId }} · {{ issue.configPath }} · 素材
+              {{ issue.assetId }}（{{ issue.reason }}）
             </li>
           </ul>
           <div class="workflow-import-clear-option">
-            <Switch v-model:checked="clearUnavailableImportAssets" size="small" />
+            <Switch
+              v-model:checked="clearUnavailableImportAssets"
+              size="small"
+            />
             <span>仅导入结构，并清空这些失效素材引用</span>
           </div>
         </div>
@@ -3310,8 +3345,7 @@ onBeforeUnmount(() => {
   }
 
   .editor-body.has-inspector.has-agent-panel {
-    grid-template-columns:
-      190px minmax(0, 1fr) 400px var(--agent-panel-width);
+    grid-template-columns: 190px minmax(0, 1fr) 400px var(--agent-panel-width);
   }
 
   .prompt-dock {
