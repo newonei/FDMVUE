@@ -126,6 +126,40 @@ const CRM_DICT = {
   CRM_RECEIVABLE_RETURN_TYPE: 'crm_receivable_return_type', // CRM 回款的还款方式
 } as const;
 
+/** ========== FDM 外贸 CRM（由官方 CRM 母版隔离复制） ========== */
+const FDM_WAIMAO_CRM_DICT = {
+  FDM_WAIMAO_CRM_AUDIT_STATUS: 'fdm_waimao_crm_audit_status',
+  FDM_WAIMAO_CRM_BIZ_TYPE: 'fdm_waimao_crm_biz_type',
+  FDM_WAIMAO_CRM_BUSINESS_END_STATUS_TYPE:
+    'fdm_waimao_crm_business_end_status_type',
+  FDM_WAIMAO_CRM_CUSTOMER_INDUSTRY: 'fdm_waimao_crm_customer_industry',
+  FDM_WAIMAO_CRM_CUSTOMER_LEVEL: 'fdm_waimao_crm_customer_level',
+  FDM_WAIMAO_CRM_CUSTOMER_SOURCE: 'fdm_waimao_crm_customer_source',
+  FDM_WAIMAO_CRM_FOLLOW_UP_TYPE: 'fdm_waimao_crm_follow_up_type',
+  FDM_WAIMAO_CRM_PERMISSION_LEVEL: 'fdm_waimao_crm_permission_level',
+  FDM_WAIMAO_CRM_PRODUCT_STATUS: 'fdm_waimao_crm_product_status',
+  FDM_WAIMAO_CRM_PRODUCT_UNIT: 'fdm_waimao_crm_product_unit',
+  FDM_WAIMAO_CRM_RECEIVABLE_RETURN_TYPE:
+    'fdm_waimao_crm_receivable_return_type',
+} as const;
+
+/** ========== FDM 内贸 CRM（由官方 CRM 母版隔离复制） ========== */
+const FDM_NEIMAO_CRM_DICT = {
+  FDM_NEIMAO_CRM_AUDIT_STATUS: 'fdm_neimao_crm_audit_status',
+  FDM_NEIMAO_CRM_BIZ_TYPE: 'fdm_neimao_crm_biz_type',
+  FDM_NEIMAO_CRM_BUSINESS_END_STATUS_TYPE:
+    'fdm_neimao_crm_business_end_status_type',
+  FDM_NEIMAO_CRM_CUSTOMER_INDUSTRY: 'fdm_neimao_crm_customer_industry',
+  FDM_NEIMAO_CRM_CUSTOMER_LEVEL: 'fdm_neimao_crm_customer_level',
+  FDM_NEIMAO_CRM_CUSTOMER_SOURCE: 'fdm_neimao_crm_customer_source',
+  FDM_NEIMAO_CRM_FOLLOW_UP_TYPE: 'fdm_neimao_crm_follow_up_type',
+  FDM_NEIMAO_CRM_PERMISSION_LEVEL: 'fdm_neimao_crm_permission_level',
+  FDM_NEIMAO_CRM_PRODUCT_STATUS: 'fdm_neimao_crm_product_status',
+  FDM_NEIMAO_CRM_PRODUCT_UNIT: 'fdm_neimao_crm_product_unit',
+  FDM_NEIMAO_CRM_RECEIVABLE_RETURN_TYPE:
+    'fdm_neimao_crm_receivable_return_type',
+} as const;
+
 /** ========== ERP - 企业资源计划模块 ========== */
 const ERP_DICT = {
   ERP_AUDIT_STATUS: 'erp_audit_status', // ERP 审批状态
@@ -291,6 +325,8 @@ const DICT_TYPE = {
   ...CRM_DICT,
   ...ERP_DICT,
   ...FDM_DATA_DICT,
+  ...FDM_NEIMAO_CRM_DICT,
+  ...FDM_WAIMAO_CRM_DICT,
   ...INFRA_DICT,
   ...IM_DICT,
   ...IOT_DICT,

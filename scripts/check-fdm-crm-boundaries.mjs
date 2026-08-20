@@ -28,6 +28,22 @@ const optionalTargets = [
   'apps/web-antd/src/router/routes/modules/fdmwaimaocrm.ts',
   'apps/web-antd/src/router/routes/modules/fdmneimaocrm.ts',
 ];
+const officialCloneSources = [
+  {
+    source: 'apps/web-antd/src/api/crm',
+    targets: [
+      'apps/web-antd/src/api/fdmwaimaocrm',
+      'apps/web-antd/src/api/fdmneimaocrm',
+    ],
+  },
+  {
+    source: 'apps/web-antd/src/views/crm',
+    targets: [
+      'apps/web-antd/src/views/fdmwaimaocrm',
+      'apps/web-antd/src/views/fdmneimaocrm',
+    ],
+  },
+];
 
 function collectFiles(target) {
   const absoluteTarget = resolve(repoRoot, target);
@@ -71,6 +87,26 @@ const allFiles = [
   ]),
 ];
 const violations = [];
+
+for (const cloneSource of officialCloneSources) {
+  const sourceRoot = resolve(repoRoot, cloneSource.source);
+  const sourceFiles = collectFiles(cloneSource.source);
+  for (const target of cloneSource.targets) {
+    const targetRoot = resolve(repoRoot, target);
+    for (const sourceFile of sourceFiles) {
+      const relativePath = relative(sourceRoot, sourceFile);
+      const targetFile = resolve(targetRoot, relativePath);
+      if (!existsSync(targetFile)) {
+        violations.push({
+          file: relative(repoRoot, targetFile).replaceAll('\\', '/'),
+          line: 0,
+          rule: `Official CRM mother-copy file is missing from ${target}`,
+          text: `Expected clone of ${relative(repoRoot, sourceFile).replaceAll('\\', '/')}`,
+        });
+      }
+    }
+  }
+}
 
 function scan(files, pattern, rule) {
   for (const file of files) {
@@ -156,5 +192,5 @@ if (violations.length > 0) {
 
 console.log('FDM CRM boundary verification passed.');
 console.log(
-  'Checked official CRM isolation, dual-CRM isolation, and shared selector API boundaries.',
+  'Checked complete official CRM mother copies, namespace isolation, dual-CRM isolation, and shared selector API boundaries.',
 );
