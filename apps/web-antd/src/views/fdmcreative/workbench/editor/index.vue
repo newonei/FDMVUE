@@ -101,6 +101,7 @@ import {
   isWorkflowVersionConflict,
   useWorkflowAutosave,
 } from './use-workflow-autosave';
+import { workflowSaveBlockedFeedback } from './workflow-save-feedback';
 import {
   createWorkflowExport,
   downloadWorkflowExport,
@@ -883,9 +884,23 @@ async function flushBeforeWorkflowAction(action: string) {
   if (!canEdit.value) return true;
   const saved = await autosave.flush();
   if (!saved) {
-    message.warning(`请先处理画布保存状态，才能${action}`);
+    showWorkflowSaveBlockedFeedback(action);
   }
   return saved;
+}
+
+function showWorkflowSaveBlockedFeedback(action: string) {
+  const feedback = workflowSaveBlockedFeedback(
+    autosave.status.value,
+    action,
+    autosave.conflictError.value,
+  );
+  if (!feedback) return;
+  if (feedback.level === 'error') {
+    message.error(feedback.message);
+  } else {
+    message.warning(feedback.message);
+  }
 }
 
 function prepareAgentCanvasMutation() {
@@ -1826,9 +1841,7 @@ async function saveDraft(showMessage = true) {
     if (!dirty.value) await autosave.markChanged(definition);
     const saved = await autosave.flush();
     if (saved && showMessage) message.success('草稿已保存');
-    if (!saved && showMessage && autosave.status.value !== 'CONFLICT') {
-      message.error('草稿尚未保存，请检查网络或处理保存状态后重试');
-    }
+    if (!saved && showMessage) showWorkflowSaveBlockedFeedback('保存草稿');
     return saved;
   } catch (error) {
     if (showMessage) {

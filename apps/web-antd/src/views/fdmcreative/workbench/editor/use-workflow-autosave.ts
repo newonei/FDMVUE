@@ -26,8 +26,7 @@ export interface WorkflowAutosaveSaveRequest {
   mutationId: string;
 }
 
-export interface WorkflowAutosaveSnapshot
-  extends WorkflowAutosaveSaveRequest {
+export interface WorkflowAutosaveSnapshot extends WorkflowAutosaveSaveRequest {
   sequence: number;
 }
 
@@ -162,7 +161,8 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
       normalized = normalizeWorkflowDefinitionForTransport(definition);
       definitionHash = await hashWorkflowDefinition(normalized);
     } catch (error) {
-      if (captureLifecycle !== lifecycle || captureSequence !== sequence) return;
+      if (captureLifecycle !== lifecycle || captureSequence !== sequence)
+        return;
       failed = undefined;
       localSnapshot.value = undefined;
       status.value = 'ERROR';
@@ -360,7 +360,10 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
         await options.onConflict?.(newestLocalSnapshot, error);
         return;
       }
-      if (isRetryableNetworkError(error) && retryCount(snapshot) < RETRY_DELAYS.length) {
+      if (
+        isRetryableNetworkError(error) &&
+        retryCount(snapshot) < RETRY_DELAYS.length
+      ) {
         if (!online.value) {
           status.value = 'OFFLINE';
           return;
@@ -474,21 +477,27 @@ function readOnlineState() {
 }
 
 function retryCount(snapshot: WorkflowAutosaveSnapshot) {
-  return (snapshot as WorkflowAutosaveSnapshot & { retryCount?: number }).retryCount ?? 0;
+  return (
+    (snapshot as WorkflowAutosaveSnapshot & { retryCount?: number })
+      .retryCount ?? 0
+  );
 }
 
 function setRetryCount(snapshot: WorkflowAutosaveSnapshot, value: number) {
-  (snapshot as WorkflowAutosaveSnapshot & { retryCount?: number }).retryCount = value;
+  (snapshot as WorkflowAutosaveSnapshot & { retryCount?: number }).retryCount =
+    value;
 }
 
 function hasBeenSubmitted(snapshot: WorkflowAutosaveSnapshot) {
   return (
-    snapshot as WorkflowAutosaveSnapshot & { submitted?: boolean }
-  ).submitted === true;
+    (snapshot as WorkflowAutosaveSnapshot & { submitted?: boolean })
+      .submitted === true
+  );
 }
 
 function markSubmitted(snapshot: WorkflowAutosaveSnapshot) {
-  (snapshot as WorkflowAutosaveSnapshot & { submitted?: boolean }).submitted = true;
+  (snapshot as WorkflowAutosaveSnapshot & { submitted?: boolean }).submitted =
+    true;
 }
 
 export function isWorkflowVersionConflict(error: unknown) {
@@ -496,6 +505,10 @@ export function isWorkflowVersionConflict(error: unknown) {
 }
 
 function isRetryableNetworkError(error: unknown) {
+  // RequestClient surfaces business failures as { code, msg } without an HTTP
+  // status. They must fail immediately rather than masquerading as a transient
+  // network loss and delaying the actionable save feedback.
+  if (readErrorCode(error) !== undefined) return false;
   const status = readHttpStatus(error);
   if (status === undefined || status === 0) return true;
   return status === 408 || status === 502 || status === 503 || status === 504;
@@ -508,9 +521,15 @@ function readErrorCode(error: unknown): number | undefined {
     data?: { code?: unknown };
     response?: { data?: { code?: unknown } };
   };
-  const raw = candidate.code ?? candidate.data?.code ?? candidate.response?.data?.code;
-  const numeric = Number(raw);
-  return Number.isFinite(numeric) ? numeric : undefined;
+  for (const raw of [
+    candidate.code,
+    candidate.data?.code,
+    candidate.response?.data?.code,
+  ]) {
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return undefined;
 }
 
 function readHttpStatus(error: unknown): number | undefined {

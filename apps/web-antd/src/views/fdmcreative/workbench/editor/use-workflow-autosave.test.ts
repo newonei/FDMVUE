@@ -159,6 +159,37 @@ describe('workflow autosave', () => {
     autosave.destroy();
   });
 
+  it('does not retry a rejected workflow definition and retains its reason', async () => {
+    vi.useFakeTimers();
+    const rejection = {
+      code: 'ERR_BAD_REQUEST',
+      message: 'Request failed',
+      response: {
+        data: {
+          code: 1_013_000_010,
+          msg: '画布定义无效：definitionHash 与规范化后的画布定义不一致',
+        },
+      },
+    };
+    const save = vi.fn().mockRejectedValue(rejection);
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => 1,
+      projectId: () => 7,
+      save,
+    });
+
+    await autosave.markChanged(definition());
+    await expect(autosave.flush()).resolves.toBe(false);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.status.value).toBe('ERROR');
+    expect(autosave.conflictError.value).toStrictEqual(rejection);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(save).toHaveBeenCalledTimes(1);
+    autosave.destroy();
+  });
+
   it('keeps the complete draft only in memory while offline and resumes after online', async () => {
     vi.useFakeTimers();
     const save = vi.fn((request) =>

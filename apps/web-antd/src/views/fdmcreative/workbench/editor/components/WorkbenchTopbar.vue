@@ -63,18 +63,16 @@ const emit = defineEmits<{
         <span>{{ projectName || '未命名项目' }}</span>
       </div>
       <span v-if="roleLabel" class="role-badge">{{ roleLabel }}</span>
-      <button
+      <span
         v-if="canEdit"
         v-access:code="['fdmcreative:workflow:update']"
         class="save-state"
         :class="{ dirty }"
-        :disabled="saving"
-        :title="dirty ? '点击保存当前草稿' : '草稿已保存，点击可再次保存'"
-        type="button"
-        @click="emit('save')"
+        :aria-label="`画布保存状态：${saveStatus}`"
+        :title="`画布保存状态：${saveStatus}`"
       >
         <i></i>{{ saveStatus }}
-      </button>
+      </span>
     </div>
     <Space class="canvas-controls" :size="2">
       <Tooltip title="撤销">
@@ -135,6 +133,22 @@ const emit = defineEmits<{
         >
           <IconifyIcon icon="lucide:upload" />
           导入
+        </Button>
+      </Tooltip>
+      <Tooltip
+        :title="`当前：${saveStatus}。立即保存当前画布；发布任务时也会先自动保存`"
+      >
+        <Button
+          v-if="canEdit"
+          v-access:code="['fdmcreative:workflow:update']"
+          aria-label="保存草稿"
+          class="save-draft-button"
+          :disabled="saving"
+          :loading="saving"
+          @click="emit('save')"
+        >
+          <IconifyIcon icon="lucide:save" />
+          保存草稿
         </Button>
       </Tooltip>
       <Button
@@ -238,14 +252,8 @@ const emit = defineEmits<{
   padding: 4px 6px;
   font-size: 10px;
   color: hsl(var(--muted-foreground));
-  cursor: pointer;
   background: transparent;
-  border: 0;
   border-radius: 6px;
-}
-
-.save-state:hover {
-  background: hsl(var(--muted) / 38%);
 }
 
 .save-state i {
