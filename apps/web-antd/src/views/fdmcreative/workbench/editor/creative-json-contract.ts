@@ -1,9 +1,6 @@
 export const CREATIVE_SCHEMA_VERSIONS = {
   agentReference: 1,
   canvasPatch: 1,
-  dramaScript: 1,
-  dramaStoryboard: 1,
-  dramaTimeline: 1,
   workflowDefinition: 1,
   workflowExport: 1,
 } as const;
@@ -26,9 +23,7 @@ export function parseCreativeSchemaEnvelope<
   }
   const expectedVersion = CREATIVE_SCHEMA_VERSIONS[contract];
   if (value.schemaVersion !== expectedVersion) {
-    throw new TypeError(
-      `${contract} schemaVersion 必须为 ${expectedVersion}`,
-    );
+    throw new TypeError(`${contract} schemaVersion 必须为 ${expectedVersion}`);
   }
   return value as TEnvelope;
 }

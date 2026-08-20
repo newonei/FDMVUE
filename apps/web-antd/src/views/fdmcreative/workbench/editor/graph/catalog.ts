@@ -515,14 +515,12 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       duckingLevel: 0.35,
       durationPolicy: 'SHORTEST',
     },
-    description:
-      '替换、保留混合或压低原声后，将音频合入视频并导出 MP4；可附带受控字幕文档',
+    description: '替换、保留混合或压低原声后，将音频合入视频并导出 MP4',
     icon: 'lucide:clapperboard',
     label: '视频配音合成',
     ports: [
       input('video', 'video-asset', true),
       input('audio', 'audio-asset', true),
-      input('subtitles', 'document-asset'),
       output('asset', 'video-asset'),
     ],
     type: 'video-audio-merge',
@@ -587,25 +585,15 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#ea580c',
-    description: '按输入顺序拼接视频片段并导出 MP4；可附带受控字幕文档',
+    description: '按输入顺序拼接视频片段并导出 MP4',
     icon: 'lucide:film',
     label: '视频合成',
     ports: [
       input('videos', 'video-list', true),
-      input('subtitles', 'document-asset'),
       output('timeline', 'timeline'),
       output('asset', 'video-asset'),
     ],
     type: 'video-compose',
-  },
-  {
-    color: '#475569',
-    description:
-      '短剧成片编译器专用：从冻结 frame 时间线导出私有 SRT/VTT 文档，不能使用任意路径或 URL。',
-    icon: 'lucide:captions',
-    label: '字幕导出（短剧受控）',
-    ports: [output('documents', 'document-asset')],
-    type: 'subtitle-export',
   },
   {
     color: '#64748b',

@@ -1,10 +1,11 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { FdmAiApi } from '#/api/fdmai';
+
 import { requestClient } from '#/api/request';
 
 export namespace FdmCreativeApi {
   export type ProjectStatus = 'ACTIVE' | 'ARCHIVED';
-  export type ProjectType = 'DRAMA' | 'WORKBENCH';
   export type ProjectMemberRole = 'EDITOR' | 'OWNER' | 'RUNNER' | 'VIEWER';
   export type PlanMode = 'IMAGE_SET' | 'MIXED' | 'VIDEO_SEQUENCE';
   export type PlanItemKind = 'IMAGE' | 'VIDEO';
@@ -36,7 +37,6 @@ export namespace FdmCreativeApi {
     | 'audio-list'
     | 'content-plan'
     | 'creative-brief'
-    | 'document-asset'
     | 'image-asset'
     | 'image-list'
     | 'image-plan-item'
@@ -57,388 +57,14 @@ export namespace FdmCreativeApi {
     id: number;
     name: string;
     ownerUserId?: number;
-    projectType?: ProjectType;
     status: ProjectStatus;
     updateTime?: string;
   }
 
   export type ProjectPageParams = PageParam & {
     keyword?: string;
-    /** Omitted keeps the workbench's legacy WORKBENCH-only view; ALL is an explicit cross-surface filter. */
-    projectType?: 'ALL' | ProjectType;
     status?: ProjectStatus;
   };
-
-  export type DramaScriptStatus =
-    | 'CONFIRMED'
-    | 'CREATED'
-    | 'FAILED'
-    | 'GENERATING'
-    | 'PREVIEW';
-  export type DramaEntityType = 'CHARACTER' | 'PROP' | 'SCENE';
-
-  export interface DramaProject {
-    aspectRatio: string;
-    coverAssetId?: number;
-    createTime?: string;
-    creator?: string;
-    currentScriptRevisionId?: number;
-    currentUserRole: ProjectMemberRole;
-    description?: string;
-    dramaType: string;
-    id: number;
-    language: string;
-    name: string;
-    ownerUserId?: number;
-    projectId: number;
-    status: ProjectStatus;
-    targetDurationSeconds: number;
-    updateTime?: string;
-    version: number;
-    visualStyle?: string;
-  }
-
-  export interface DramaScriptEntity {
-    description: string;
-    entityKey: string;
-    name: string;
-    prompt?: string;
-    referenceAssetIds: number[];
-  }
-
-  export interface DramaDialogue {
-    action?: string;
-    characterKey: string;
-    narration?: string;
-    text: string;
-  }
-
-  export interface DramaStoryScene {
-    action: string;
-    dialogues: DramaDialogue[];
-    estimatedDurationSeconds: number;
-    narration?: string;
-    sceneEntityKey: string;
-    sceneKey: string;
-    sceneNo: number;
-    title: string;
-  }
-
-  export interface DramaScript {
-    characters: DramaScriptEntity[];
-    props: DramaScriptEntity[];
-    scenes: DramaScriptEntity[];
-    schemaVersion: 1;
-    storyScenes: DramaStoryScene[];
-    synopsis: string;
-    theme?: string;
-    title: string;
-  }
-
-  export interface DramaScriptDiff {
-    addedEntityKeys: string[];
-    addedSceneKeys: string[];
-    changedEntityKeys: string[];
-    changedSceneKeys: string[];
-    removedEntityKeys: string[];
-    removedSceneKeys: string[];
-  }
-
-  export interface DramaScriptRevision {
-    confirmedByUserId?: number;
-    createTime?: string;
-    creator?: string;
-    diff?: DramaScriptDiff;
-    dramaProjectId: number;
-    errorCode?: string;
-    errorMessage?: string;
-    id: number;
-    invocationId?: string;
-    revisionNo: number;
-    schemaVersion: number;
-    script?: DramaScript;
-    sourceAgentRunId?: number;
-    status: DramaScriptStatus;
-  }
-
-  export interface DramaEntity {
-    adoptedAssetId?: number;
-    createTime?: string;
-    creator?: string;
-    description: string;
-    dramaProjectId: number;
-    entityKey: string;
-    entityType: DramaEntityType;
-    id: number;
-    locked: boolean;
-    name: string;
-    prompt?: string;
-    sourceScriptRevisionId?: number;
-    updateTime?: string;
-    version: number;
-  }
-
-  export interface DramaScriptEvent {
-    eventTime?: string;
-    eventType: string;
-    id: number;
-    payloadJson?: string;
-  }
-
-  export type DramaShotStatus =
-    | 'DRAFT'
-    | 'GENERATING_IMAGE'
-    | 'GENERATING_VIDEO'
-    | 'IMAGE_READY'
-    | 'REMOVED'
-    | 'STALE'
-    | 'VIDEO_READY';
-  export type DramaShotTaskType = 'GENERATE_IMAGE' | 'GENERATE_VIDEO';
-  export type DramaShotTaskStatus =
-    | 'CANCEL_REQUESTED'
-    | 'CANCELED'
-    | 'CREATED'
-    | 'FAILED'
-    | 'LAUNCHING'
-    | 'RUNNING'
-    | 'STALE'
-    | 'SUCCEEDED';
-
-  /** Versioned P5B projection of one confirmed DramaScript; generated deterministically on the server. */
-  export interface DramaStoryboardShot {
-    actionText?: string;
-    cameraMovement?: string;
-    continuityGroup?: string;
-    dialogueText?: string;
-    durationSeconds: number;
-    framing?: string;
-    narrationText?: string;
-    sceneKey: string;
-    sceneNo: number;
-    shotKey: string;
-    shotNo: number;
-    sortOrder: number;
-    title?: string;
-    visualPrompt: string;
-  }
-
-  export interface DramaStoryboard {
-    schemaVersion: 1;
-    scriptRevisionId: number;
-    shots: DramaStoryboardShot[];
-    totalDurationSeconds: number;
-  }
-
-  export interface DramaStoryboardChange {
-    reason: string;
-    shotKey: string;
-  }
-
-  export interface DramaStoryboardDiff {
-    added: DramaStoryboardChange[];
-    lockedRetained: DramaStoryboardChange[];
-    removed: DramaStoryboardChange[];
-    updated: DramaStoryboardChange[];
-  }
-
-  export interface DramaStoryboardGeneration {
-    diff: DramaStoryboardDiff;
-    dramaVersion: number;
-    scriptRevisionId: number;
-    storyboard: DramaStoryboard;
-  }
-
-  /** Current editable truth; media histories remain in the existing node-run result ledger. */
-  export interface DramaShot {
-    actionText?: string;
-    adoptedAudioAssetId?: number | string;
-    adoptedImageAssetId?: number | string;
-    adoptedImageNodeRunId?: number;
-    adoptedVideoAssetId?: number | string;
-    adoptedVideoNodeRunId?: number;
-    cameraMovement?: string;
-    continuityGroup?: string;
-    createTime?: string;
-    dialogueText?: string;
-    dramaProjectId: number;
-    durationSeconds: number;
-    framing?: string;
-    id: number;
-    locked: boolean;
-    narrationText?: string;
-    sceneKey: string;
-    sceneNo: number;
-    scriptRevisionId: number;
-    shotKey: string;
-    shotNo: number;
-    sortOrder: number;
-    status: DramaShotStatus;
-    title?: string;
-    updateTime?: string;
-    version: number;
-    videoStale?: boolean;
-    visualPrompt: string;
-  }
-
-  /** A durable idempotent bridge to exactly one controlled execution. */
-  export interface DramaShotTask {
-    adoptedAssetId?: number | string;
-    attemptNo: number;
-    completedTime?: string;
-    dramaProjectId: number;
-    errorCode?: string;
-    errorMessage?: string;
-    executionId?: number;
-    id: number;
-    nodeId?: string;
-    nodeRunId?: number;
-    resultAssetId?: number | string;
-    shotId: number;
-    sourceImageAssetId?: number | string;
-    startedTime?: string;
-    status: DramaShotTaskStatus;
-    taskType: DramaShotTaskType;
-    updateTime?: string;
-  }
-
-  export interface DramaShotTaskWorkflow {
-    executionId?: number;
-    readOnly: true;
-    taskId: number;
-    workflow: WorkflowDefinition;
-  }
-
-  /** P5C: only frame fields are persisted as timing truth; seconds are derived at the FFmpeg boundary. */
-  export type DramaTimelineTrackType =
-    | 'DIALOGUE'
-    | 'MUSIC'
-    | 'NARRATION'
-    | 'SOUND_EFFECT'
-    | 'SUBTITLE'
-    | 'VIDEO';
-  export type DramaAudioTaskType =
-    | 'DIALOGUE'
-    | 'MUSIC'
-    | 'NARRATION'
-    | 'SOUND_EFFECT';
-  export type DramaAudioTaskStatus =
-    | 'CANCEL_REQUESTED'
-    | 'CANCELED'
-    | 'CREATED'
-    | 'FAILED'
-    | 'LAUNCHING'
-    | 'RUNNING'
-    | 'STALE'
-    | 'SUCCEEDED';
-  export type DramaCompositionStatus =
-    | 'CANCEL_REQUESTED'
-    | 'CANCELED'
-    | 'CREATED'
-    | 'FAILED'
-    | 'LAUNCHING'
-    | 'RUNNING'
-    | 'SUCCEEDED';
-
-  export interface DramaTimelineClip {
-    assetId?: number;
-    characterKey?: string;
-    clipId: string;
-    cueKey?: string;
-    durationFrames: number;
-    startFrame: number;
-    text?: string;
-    transition?: 'FADE' | 'FADEBLACK' | 'NONE';
-    transitionFrames?: number;
-    trimInFrames?: number;
-    trimOutFrames?: number;
-    voiceId?: string;
-    voicePitch?: number;
-    voiceSpeed?: number;
-    volume?: number;
-  }
-
-  export interface DramaTimelineTrack {
-    clips: DramaTimelineClip[];
-    label?: string;
-    trackId: string;
-    type: DramaTimelineTrackType;
-  }
-
-  export interface DramaTimeline {
-    durationFrames: number;
-    fps: number;
-    height: number;
-    schemaVersion: 1;
-    tracks: DramaTimelineTrack[];
-    width: number;
-  }
-
-  export interface DramaTimelineResponse {
-    dramaProjectId: number;
-    id: number;
-    schemaVersion: number;
-    scriptRevisionId: number;
-    timeline: DramaTimeline;
-    timelineHash: string;
-    updateTime?: string;
-    version: number;
-  }
-
-  export interface DramaAudioTask {
-    adoptedAssetId?: number;
-    attemptNo: number;
-    completedTime?: string;
-    cueKey: string;
-    dramaProjectId: number;
-    errorCode?: string;
-    errorMessage?: string;
-    executionId?: number;
-    id: number;
-    nodeId?: string;
-    nodeRunId?: number;
-    resultAssetId?: number;
-    startedTime?: string;
-    status: DramaAudioTaskStatus;
-    taskType: DramaAudioTaskType;
-    timelineId: number;
-    timelineVersion: number;
-    updateTime?: string;
-  }
-
-  export interface DramaAudioTaskWorkflow {
-    executionId?: number;
-    readOnly: true;
-    taskId: number;
-    workflow: WorkflowDefinition;
-  }
-
-  export interface DramaComposition {
-    completedTime?: string;
-    dramaProjectId: number;
-    errorCode?: string;
-    errorMessage?: string;
-    executionId?: number;
-    finalAssetId?: number;
-    finalNodeRunId?: number;
-    id: number;
-    materialAssetIds: number[];
-    startedTime?: string;
-    status: DramaCompositionStatus;
-    subtitleNodeRunId?: number;
-    subtitleSrtAssetId?: number;
-    subtitleVttAssetId?: number;
-    timelineHash: string;
-    timelineId: number;
-    timelineVersion: number;
-    updateTime?: string;
-  }
-
-  export interface DramaCompositionWorkflow {
-    executionId?: number;
-    readOnly: true;
-    revisionId: number;
-    workflow: WorkflowDefinition;
-  }
 
   export interface ProjectSaveReq {
     coverAssetId?: number;
@@ -674,6 +300,45 @@ export namespace FdmCreativeApi {
     refinedPrompt?: string;
     refinementId: number;
     status: 'FAILED' | 'GENERATING' | 'SUCCEEDED';
+  }
+
+  export type AgentImageTaskStatus =
+    | 'CANCEL_REQUESTED'
+    | 'CANCELED'
+    | 'CREATED'
+    | 'FAILED'
+    | 'LAUNCHING'
+    | 'RUNNING'
+    | 'SUCCEEDED';
+
+  /** Safe release limits for the direct-image Creative Agent. */
+  export interface AgentImageCapability {
+    enabled: boolean;
+    maxOutputCount: number;
+    maxPromptBytes: number;
+    maxReferenceCount: number;
+  }
+
+  /** A durable direct Agent request; output URLs are existing private creative asset URLs. */
+  export interface AgentImageTask {
+    attemptNo: number;
+    completedTime?: string;
+    createTime?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    executionId?: number;
+    id: number;
+    logicalModelId?: string;
+    negativePrompt?: string;
+    nodeId?: string;
+    nodeRunId?: number;
+    outputAssets: CreativeAsset[];
+    projectId: number;
+    prompt: string;
+    resultAssetId?: number;
+    startedTime?: string;
+    status: AgentImageTaskStatus;
+    updateTime?: string;
   }
 
   export interface CreativeAsset {
@@ -991,9 +656,9 @@ const EXECUTION = '/fdmcreative/execution';
 const ASSET = '/fdmcreative/asset';
 const PROMPT = '/fdmcreative/prompt';
 const AGENT = '/fdmcreative/agent';
+const AGENT_IMAGE = '/fdmcreative/agent-image';
 const NODE_RESULT = '/fdmcreative/node-result';
 const MEDIA_TOOL = '/fdmcreative/media-tool';
-const DRAMA = '/fdmcreative/drama';
 
 export function getCreativeProjectPage(
   params: FdmCreativeApi.ProjectPageParams,
@@ -1033,483 +698,6 @@ export function saveCreativeProjectMembers(
   data: FdmCreativeApi.ProjectMemberSaveReq,
 ) {
   return requestClient.put<boolean>(`${PROJECT}/members`, data);
-}
-
-export function getDramaProjectPage(
-  params: PageParam & {
-    keyword?: string;
-    status?: FdmCreativeApi.ProjectStatus;
-  },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaProject>>(
-    `${DRAMA}/page`,
-    { params },
-  );
-}
-
-export function getDramaProject(projectId: number) {
-  return requestClient.get<FdmCreativeApi.DramaProject>(`${DRAMA}/get`, {
-    params: { projectId },
-  });
-}
-
-export function createDramaProject(data: {
-  aspectRatio?: string;
-  coverAssetId?: number;
-  description?: string;
-  dramaType?: string;
-  language?: string;
-  name: string;
-  targetDurationSeconds?: number;
-  visualStyle?: string;
-}) {
-  return requestClient.post<number>(`${DRAMA}/create`, data);
-}
-
-export function updateDramaProject(data: {
-  aspectRatio?: string;
-  coverAssetId?: number;
-  description?: string;
-  dramaType?: string;
-  expectedVersion: number;
-  language?: string;
-  name?: string;
-  projectId: number;
-  targetDurationSeconds?: number;
-  visualStyle?: string;
-}) {
-  return requestClient.put<boolean>(`${DRAMA}/update`, data);
-}
-
-export function archiveDramaProject(data: {
-  expectedVersion: number;
-  projectId: number;
-}) {
-  return requestClient.post<boolean>(`${DRAMA}/archive`, undefined, {
-    params: data,
-  });
-}
-
-export function generateDramaScript(data: {
-  logicalModelId?: number;
-  projectId: number;
-  prompt: string;
-  promptIds?: number[];
-  referenceAssetIds?: number[];
-  sourceAgentRunId?: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaScriptRevision>(
-    `${DRAMA}/script/generate`,
-    data,
-  );
-}
-
-export function previewDramaScript(data: {
-  projectId: number;
-  script: FdmCreativeApi.DramaScript;
-  sourceAgentRunId?: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaScriptRevision>(
-    `${DRAMA}/script/preview`,
-    data,
-  );
-}
-
-export function getDramaScript(projectId: number, scriptRevisionId: number) {
-  return requestClient.get<FdmCreativeApi.DramaScriptRevision>(
-    `${DRAMA}/script/get`,
-    { params: { projectId, scriptRevisionId } },
-  );
-}
-
-export function getDramaScriptPage(params: PageParam & { projectId: number }) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaScriptRevision>>(
-    `${DRAMA}/script/page`,
-    { params },
-  );
-}
-
-export function syncDramaScript(projectId: number, scriptRevisionId: number) {
-  return requestClient.post<FdmCreativeApi.DramaScriptRevision>(
-    `${DRAMA}/script/sync`,
-    undefined,
-    { params: { projectId, scriptRevisionId } },
-  );
-}
-
-export function confirmDramaScript(data: {
-  expectedDramaVersion: number;
-  projectId: number;
-  scriptRevisionId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaScriptRevision>(
-    `${DRAMA}/script/confirm`,
-    data,
-  );
-}
-
-export function getDramaScriptEvents(params: {
-  afterId?: number;
-  projectId: number;
-  scriptRevisionId: number;
-}) {
-  return requestClient.get<FdmCreativeApi.DramaScriptEvent[]>(
-    `${DRAMA}/script/events`,
-    { params },
-  );
-}
-
-export function getDramaEntityPage(
-  params: PageParam & {
-    entityType?: FdmCreativeApi.DramaEntityType;
-    keyword?: string;
-    projectId: number;
-  },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaEntity>>(
-    `${DRAMA}/entity/page`,
-    { params },
-  );
-}
-
-export function updateDramaEntity(data: {
-  adoptedAssetId?: number;
-  description?: string;
-  entityId: number;
-  expectedVersion: number;
-  name?: string;
-  projectId: number;
-  prompt?: string;
-}) {
-  return requestClient.put<FdmCreativeApi.DramaEntity>(
-    `${DRAMA}/entity/update`,
-    data,
-  );
-}
-
-export function adoptDramaEntityReference(data: {
-  adoptedAssetId: number;
-  entityId: number;
-  expectedVersion: number;
-  projectId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaEntity>(
-    `${DRAMA}/entity/adopt-reference`,
-    data,
-  );
-}
-
-export function lockDramaEntity(data: {
-  entityId: number;
-  expectedVersion: number;
-  locked: boolean;
-  projectId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaEntity>(
-    `${DRAMA}/entity/lock`,
-    data,
-  );
-}
-
-export function generateDramaEntityReference(data: {
-  entityId: number;
-  expectedEntityVersion: number;
-  logicalModelId?: number;
-  projectId: number;
-}) {
-  return requestClient.post<number>(`${DRAMA}/entity/generate-reference`, data);
-}
-
-export function generateDramaStoryboard(data: {
-  expectedDramaVersion: number;
-  projectId: number;
-  scriptRevisionId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaStoryboardGeneration>(
-    `${DRAMA}/storyboard/generate`,
-    data,
-  );
-}
-
-export function getDramaShotPage(
-  params: PageParam & {
-    includeRemoved?: boolean;
-    keyword?: string;
-    projectId: number;
-  },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaShot>>(
-    `${DRAMA}/shot/page`,
-    { params },
-  );
-}
-
-export function updateDramaShot(data: {
-  actionText?: string;
-  cameraMovement?: string;
-  continuityGroup?: string;
-  dialogueText?: string;
-  durationSeconds?: number;
-  expectedVersion: number;
-  framing?: string;
-  narrationText?: string;
-  projectId: number;
-  shotId: number;
-  visualPrompt?: string;
-}) {
-  return requestClient.put<FdmCreativeApi.DramaShot>(
-    `${DRAMA}/shot/update`,
-    data,
-  );
-}
-
-export function lockDramaShot(data: {
-  expectedVersion: number;
-  locked: boolean;
-  projectId: number;
-  shotId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShot>(
-    `${DRAMA}/shot/lock`,
-    data,
-  );
-}
-
-export function sortDramaShots(data: {
-  items: Array<{
-    expectedVersion: number;
-    shotId: number;
-    sortOrder: number;
-  }>;
-  projectId: number;
-}) {
-  return requestClient.put<FdmCreativeApi.DramaShot[]>(
-    `${DRAMA}/shot/sort`,
-    data,
-  );
-}
-
-export function generateDramaShotImage(data: {
-  expectedShotVersion: number;
-  logicalModelId?: number;
-  projectId: number;
-  shotId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShotTask>(
-    `${DRAMA}/shot/generate-image`,
-    data,
-  );
-}
-
-export function generateDramaShotImages(data: {
-  logicalModelId?: number;
-  projectId: number;
-  shots: Array<{
-    expectedShotVersion: number;
-    shotId: number;
-  }>;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShotTask[]>(
-    `${DRAMA}/shot/generate-images`,
-    data,
-  );
-}
-
-export function generateDramaShotVideo(data: {
-  expectedShotVersion: number;
-  logicalModelId?: number;
-  projectId: number;
-  shotId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShotTask>(
-    `${DRAMA}/shot/generate-video`,
-    data,
-  );
-}
-
-export function getDramaShotTaskPage(
-  params: PageParam & {
-    projectId: number;
-    shotId?: number;
-  },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaShotTask>>(
-    `${DRAMA}/shot/task/page`,
-    { params },
-  );
-}
-
-export function cancelDramaShotTask(data: {
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShotTask>(
-    `${DRAMA}/shot/task/cancel`,
-    data,
-  );
-}
-
-export function retryDramaShotTask(data: {
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShotTask>(
-    `${DRAMA}/shot/task/retry`,
-    data,
-  );
-}
-
-export function adoptDramaShotTaskResult(data: {
-  assetId: number | string;
-  expectedShotVersion: number;
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaShot>(
-    `${DRAMA}/shot/task/adopt`,
-    data,
-  );
-}
-
-export function getDramaShotTaskWorkflow(projectId: number, taskId: number) {
-  return requestClient.get<FdmCreativeApi.DramaShotTaskWorkflow>(
-    `${DRAMA}/shot/task/workflow`,
-    { params: { projectId, taskId } },
-  );
-}
-
-export function getDramaTimeline(projectId: number) {
-  return requestClient.get<FdmCreativeApi.DramaTimelineResponse>(
-    `${DRAMA}/timeline`,
-    { params: { projectId } },
-  );
-}
-
-export function initializeDramaTimeline(projectId: number) {
-  return requestClient.post<FdmCreativeApi.DramaTimelineResponse>(
-    `${DRAMA}/timeline/initialize`,
-    { projectId },
-  );
-}
-
-export function updateDramaTimeline(data: {
-  expectedVersion: number;
-  projectId: number;
-  timeline: FdmCreativeApi.DramaTimeline;
-}) {
-  return requestClient.put<FdmCreativeApi.DramaTimelineResponse>(
-    `${DRAMA}/timeline`,
-    data,
-  );
-}
-
-export function generateDramaAudio(data: {
-  cueKey: string;
-  expectedTimelineVersion: number;
-  logicalModelId?: number;
-  projectId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaAudioTask>(
-    `${DRAMA}/audio/generate`,
-    data,
-  );
-}
-
-export function getDramaAudioTaskPage(
-  params: PageParam & { cueKey?: string; projectId: number },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaAudioTask>>(
-    `${DRAMA}/audio/task/page`,
-    { params },
-  );
-}
-
-export function cancelDramaAudioTask(data: {
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaAudioTask>(
-    `${DRAMA}/audio/task/cancel`,
-    data,
-  );
-}
-
-export function retryDramaAudioTask(data: {
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaAudioTask>(
-    `${DRAMA}/audio/task/retry`,
-    data,
-  );
-}
-
-export function adoptDramaAudioTaskResult(data: {
-  assetId: number;
-  expectedTimelineVersion: number;
-  projectId: number;
-  taskId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaTimelineResponse>(
-    `${DRAMA}/audio/task/adopt`,
-    data,
-  );
-}
-
-export function getDramaAudioTaskWorkflow(projectId: number, taskId: number) {
-  return requestClient.get<FdmCreativeApi.DramaAudioTaskWorkflow>(
-    `${DRAMA}/audio/task/workflow`,
-    { params: { projectId, taskId } },
-  );
-}
-
-export function publishDramaComposition(data: {
-  expectedTimelineVersion: number;
-  projectId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaComposition>(
-    `${DRAMA}/composition/publish`,
-    data,
-  );
-}
-
-export function getDramaCompositionPage(
-  params: PageParam & { projectId: number },
-) {
-  return requestClient.get<PageResult<FdmCreativeApi.DramaComposition>>(
-    `${DRAMA}/composition/page`,
-    { params },
-  );
-}
-
-export function cancelDramaComposition(data: {
-  projectId: number;
-  revisionId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaComposition>(
-    `${DRAMA}/composition/cancel`,
-    data,
-  );
-}
-
-export function retryDramaComposition(data: {
-  projectId: number;
-  revisionId: number;
-}) {
-  return requestClient.post<FdmCreativeApi.DramaComposition>(
-    `${DRAMA}/composition/retry`,
-    data,
-  );
-}
-
-export function getDramaCompositionWorkflow(
-  projectId: number,
-  revisionId: number,
-) {
-  return requestClient.get<FdmCreativeApi.DramaCompositionWorkflow>(
-    `${DRAMA}/composition/workflow`,
-    { params: { projectId, revisionId } },
-  );
 }
 
 export function getWorkflowDraft(projectId: number) {
@@ -1623,6 +811,63 @@ export function syncCreativePrompt(refinementId: number) {
     `${PLAN}/refine-sync`,
     undefined,
     { params: { refinementId } },
+  );
+}
+
+export function getAgentImageCapability() {
+  return requestClient.get<FdmCreativeApi.AgentImageCapability>(
+    `${AGENT_IMAGE}/capability`,
+  );
+}
+
+export function getAgentImageModels() {
+  return requestClient.get<FdmAiApi.ModelOption[]>(`${AGENT_IMAGE}/models`);
+}
+
+export function generateAgentImage(data: {
+  aspectRatio?: string;
+  idempotencyKey: string;
+  /** Java Long IDs are serialized as decimal strings to avoid JavaScript precision loss. */
+  logicalModelId?: string;
+  modelParameters?: Record<string, unknown>;
+  negativePrompt?: string;
+  outputCount?: number;
+  projectId: number;
+  prompt: string;
+  referenceAssetIds?: number[];
+}) {
+  return requestClient.post<FdmCreativeApi.AgentImageTask>(
+    `${AGENT_IMAGE}/generate`,
+    data,
+  );
+}
+
+export function getAgentImageTaskPage(
+  params: PageParam & { projectId: number },
+) {
+  return requestClient.get<PageResult<FdmCreativeApi.AgentImageTask>>(
+    `${AGENT_IMAGE}/task/page`,
+    { params },
+  );
+}
+
+export function cancelAgentImageTask(data: {
+  projectId: number;
+  taskId: number;
+}) {
+  return requestClient.post<FdmCreativeApi.AgentImageTask>(
+    `${AGENT_IMAGE}/task/cancel`,
+    data,
+  );
+}
+
+export function retryAgentImageTask(data: {
+  projectId: number;
+  taskId: number;
+}) {
+  return requestClient.post<FdmCreativeApi.AgentImageTask>(
+    `${AGENT_IMAGE}/task/retry`,
+    data,
   );
 }
 

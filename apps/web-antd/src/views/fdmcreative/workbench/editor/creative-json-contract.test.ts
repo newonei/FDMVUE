@@ -22,10 +22,7 @@ describe('creative JSON contracts', () => {
       'schemaVersion',
     );
     expect(() =>
-      parseCreativeSchemaEnvelope(
-        { schemaVersion: 2 },
-        'dramaTimeline',
-      ),
+      parseCreativeSchemaEnvelope({ schemaVersion: 2 }, 'workflowExport'),
     ).toThrow('schemaVersion');
   });
 });

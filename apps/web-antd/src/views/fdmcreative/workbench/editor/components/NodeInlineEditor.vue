@@ -688,7 +688,14 @@ const nodeValidationError = computed(
 );
 
 function effectiveReferenceCount() {
-  return displayedReferences.value.length;
+  // This helper is evaluated while the model-selection computed refs are being created. Do not
+  // read displayedReferences here: that computed is declared later and Vue may evaluate the model
+  // list immediately, which previously triggered a temporal-dead-zone ReferenceError.
+  const configured = asNumberList(config.value.referenceAssetIds);
+  const connected = props.connectedReferences
+    .map((reference) => reference.assetId)
+    .filter((id): id is number => typeof id === 'number');
+  return new Set([...configured, ...connected]).size;
 }
 
 watch(
@@ -2170,15 +2177,19 @@ function handleEditorEscape() {
             <IconifyIcon icon="lucide:rectangle-horizontal" />
           </template>
         </Select>
-        <InputNumber
-          addon-before="数量"
-          class="toolbar-number toolbar-number--small"
-          :disabled="readonly"
-          :max="8"
-          :min="1"
-          :value="asNumber(currentMediaValue('outputCount', 1))"
-          @change="emitMediaConfig('outputCount', $event)"
-        />
+        <Tooltip
+          title="数量超过 1 时会逐张调用模型，并自动汇总为本节点的多张输出；本地图片服务无需支持一次返回多张。"
+        >
+          <InputNumber
+            addon-before="数量"
+            class="toolbar-number toolbar-number--small"
+            :disabled="readonly"
+            :max="8"
+            :min="1"
+            :value="asNumber(currentMediaValue('outputCount', 1))"
+            @change="emitMediaConfig('outputCount', $event)"
+          />
+        </Tooltip>
       </template>
 
       <template

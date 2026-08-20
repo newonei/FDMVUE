@@ -853,3 +853,67 @@ Terra 每完成一个阶段，在该阶段末尾追加以下记录，不要只�
 - 数据影响：未删除或重写既有业务行；新增了短剧表/列/索引，以及短剧菜单和角色菜单授权。未启动或部署应用、未改 feature flag、未调用真实模型供应商、未生成或写入业务资产。
 - 未完成事项：仍需由管理员显式启用 `FDM_CREATIVE_DRAMA_ENABLED`、配置并核验图片/视频/音频/音乐/结构化剧本 routes 与实际额度、准备 FFmpeg/FFprobe 受控目录，并完成第 11.3 节多角色浏览器和真实供应商 smoke test。以上未因数据库迁移成功而虚假勾选。
 - 是否具备继续部署条件：是（数据库结构、最小菜单权限和后端自动化门禁已就绪；真实能力启用仍受 route、额度、feature flag 和手工验收保护）。
+
+## 16. 后续增量：创作 Agent 直接图片生成（2026-08-20）
+
+> 本增量借鉴 VOZEB 的“从一句想法直接创作”的交互，不复制、内嵌或依赖 VOZEB-PRO 源码。它与 P1 的画布编辑 Agent 并列：前者生成或修改工作流，后者直接创建图片，但二者都不能绕过 FDM 权限、FDM AI 路由、Usage、执行和私有资产体系。
+
+### 16.1 增量 TODO
+
+- [x] `AGENT-IMAGE-01`：新增独立的“创作 Agent”页面与动态菜单入口，不要求用户先进入节点画布。
+- [x] `AGENT-IMAGE-02`：提供项目上下文选择、自然语言图片需求、参考图、提示词库、模型、画幅、生成数量、负向提示词和模型 schema 参数的紧凑操作面。
+- [x] `AGENT-IMAGE-03`：复用画布“图片生成”节点的模型能力筛选：无参考图要求 `TEXT_TO_IMAGE`，一张参考图要求 `IMAGE_TO_IMAGE`，两张及以上参考图额外要求 `MULTI_REFERENCE`；自动选中首个可用 FDM 逻辑模型。模型目录暂不可用时仅回退到既有受控 route 默认模型，浏览器绝不直连供应商。
+- [x] `AGENT-IMAGE-04`：服务端把请求编译为只含一个受控 `TEXT_TO_IMAGE` 节点的不可变工作流快照，并通过既有 `CreativeExecutionService` 提交，保留路由、并发槽、Usage、归档和失败语义。
+- [x] `AGENT-IMAGE-05`：新增持久化任务、幂等业务键、启动 lease、按 `AGENT_DIRECT_IMAGE` 来源回收执行、取消/重试、任务结果投影和重启后 reconcile。
+- [x] `AGENT-IMAGE-06`：每次延迟 launch 前重验原请求人的项目 `RUN` 权限、提示词/参数安全限制和参考图片资产归属；已创建执行只做结算/取消转发，不会因后续失权重复发起供应商调用。
+- [x] `AGENT-IMAGE-07`：补齐“取消发生在执行创建边界”竞态：取消意图在 lease 内保持可恢复；若共享执行已落库，立即转发既有取消链路，避免额外重提或产生孤立调用。
+- [x] `AGENT-IMAGE-08`：功能关闭时 reconcile job 不访问未迁移的新表，支持安全的“先部署代码、后执行 SQL、最后开开关”顺序。
+- [x] `AGENT-IMAGE-09`：修复图片节点内联编辑器在模型计算阶段提前读取 `displayedReferences` 导致的 temporal-dead-zone 错误。
+- [x] `AGENT-IMAGE-10`：新增任务持久化、幂等、丢失回包恢复、取消竞态、功能开关和 SQL 静态结构测试，并完成全量后端/前端回归。
+- [x] `AGENT-IMAGE-DEPLOY-01`：已审核并复核 `20260820_fdmcreative_agent_direct_image.sql` 在本地 `fdm` 数据库落库；任务表、执行来源生成列、唯一索引、页面菜单和三个动作权限均存在。
+- [x] `AGENT-IMAGE-DEPLOY-02`：已在 `local` Profile 设置等效的 `fdm.creative.direct-image-agent-enabled=true`，并通过 IDEA 重启 `YudaoServerApplication`；运行时已从 classpath `application-local.yaml` 加载该属性。
+- [ ] `AGENT-IMAGE-DEPLOY-03`：在具有实际图片额度的 FDM AI route 上完成真实图片生成、取消、失败重试、重启恢复和 OWNER / EDITOR / RUNNER / VIEWER / super_admin 浏览器 smoke test。
+
+### 创作 Agent 直接图片生成实施记录（2026-08-20）
+
+- 完成的 TODO：`AGENT-IMAGE-01` ～ `AGENT-IMAGE-10`。
+- 后端变更文件：新增 `AgentImageController`、`AgentImageService(Impl)`、`AgentImageTaskDispatcher`、`AgentImageTaskReconcileJob`、任务 DO/Mapper/VO/枚举、`AgentImageWorkflowAssembler` 和 `AGENT_DIRECT_IMAGE` 执行来源；更新 `CreativeProperties`、错误码和受控执行来源枚举。直接图片请求始终被编译为既有图片节点工作流并进入共享执行服务，不创建新的 provider client。
+- 前端变更文件：新增 `apps/web-antd/src/views/fdmcreative/agent/index.vue` 和 Agent 图片 API 契约；页面复用项目素材库、提示词库、模型目录、提示词优化、统一执行详情与资产预览。默认模型按能力自动选择，结果显示在“最近生成”并同时归档到当前项目素材库。
+- SQL 补丁：新增 `FDMServer/sql/mysql/patches/20260820_fdmcreative_agent_direct_image.sql`。它只前进且可重跑：创建 `fdmcreative_agent_image_task`，在 `fdmcreative_execution_run` 上增加来源专用 stored generated column 和唯一索引，并新增“创作 Agent”菜单及最小动作权限。已在本地 `fdm` 数据库复核落库；未改写或删除既有业务数据。
+- 权限、并发与失败恢复：HTTP 层使用 `fdmcreative:agent-image:*` 最小权限；服务层继续使用项目 `READ` / `RUN` 边界，super_admin 仍遵守既有跨项目授权规则。任务以用户/项目/幂等键唯一化，短事务领取 launch lease；提交回包丢失时按 `AGENT_DIRECT_IMAGE + sourceId` 找回同一 execution；取消、成员变更、服务重启和归档短暂不可见均不允许重新创建第二个供应商任务。
+- 新增/更新测试：`AgentImageServiceImplTest` 覆盖服务器编译快照、重复提交、共享执行边界、丢失 launch 回包和迟到取消转发；`AgentImageTaskReconcileJobTest` 覆盖默认关闭时不探测未迁移表；`AgentImageSqlPatchTest` 覆盖任务表、来源唯一性和菜单权限 SQL 契约。`NodeInlineEditor.vue` 的初始化回归由 fdmcreative TypeScript 检查与生产构建覆盖。
+- 执行的命令及结果：`mvn -pl yudao-module-fdmcreative -am test` 通过（fdmcreative 299 tests，0 failure/error）；`pnpm exec vitest run --dom apps/web-antd/src/views/fdmcreative` 通过（36 files，155 tests）；`pnpm --filter @vben/web-antd run typecheck:fdmcreative` 通过；`pnpm --filter @vben/web-antd run build` 通过。生产构建仅报告项目原有的 `:deep` CSS minify 提示，退出码为 0。
+- 手工/安全验收：已复核本增量 SQL、启用本地 feature flag 并重启本地后端；未调用真实模型供应商，也未写入业务资产。未触碰 `Infinite-Canvas` 或 `FdmTool`，且没有复制 VOZEB-PRO 源码。
+- 部署前置条件：先审核数据库兼容性和在线 DDL 窗口，执行本节 SQL 补丁，再启用 `FDM_CREATIVE_DIRECT_IMAGE_AGENT_ENABLED=true`，最后确认 `creative.image.generate.default` route 至少有一个启用的、具备 `TEXT_TO_IMAGE`（有参考图时 `IMAGE_TO_IMAGE`）能力且存在实际额度的模型。
+- 未完成事项：`AGENT-IMAGE-DEPLOY-03` 仍需在当前已启用环境完成；真实供应商和多角色浏览器 smoke test 未被本地自动化伪造为已完成。
+- 已知风险：数据库补丁会向 `fdmcreative_execution_run` 增加 stored generated column 和唯一索引，生产需评估表大小、MySQL 版本及在线 DDL 锁表策略。若 route、模型能力或额度缺失，任务会在既有共享执行边界明确失败，不会回退到任意 provider 或绕过 Usage/权限/资产链路。
+- 是否具备进入部署准备条件：是（本地 SQL、开关与启动门禁已完成；真实生成验收仍受 route、额度和烟测前置条件保护）。
+
+### 创作 Agent 直接图片生成启用交付记录（2026-08-20）
+
+- SQL 门禁：只读核验本地 `fdm` 数据库确认 `fdmcreative_agent_image_task` 已存在；`fdmcreative_execution_run.agent_direct_image_source_id` 为 stored generated column；`uk_fdmcreative_execution_agent_direct_image_source` 唯一索引和创作 Agent 页面/生成/取消/重试四项菜单权限均已存在。因此未重复执行 DDL。
+- 开关与启动：在 `FDMServer/yudao-server/src/main/resources/application-local.yaml` 设置 `fdm.creative.direct-image-agent-enabled: true`。IDEA 中的 `YudaoServerApplication` 已执行“停止并重新运行”；新 Java 进程于 2026-08-20 19:02:30 启动，48080 监听且 `/actuator/health` 返回 `UP`。运行时环境端点确认该属性来自 classpath `application-local.yaml` 第 315 行。
+- 路由前置：租户 1 的 FDM AI tenant policy 已启用（最大并发 10）；已核验可用图片模型/路由包括 `gpt-image-2`、`doubao-seedream-5-0`、`Doubao Seedream 4.0` 和 `Doubao Seedream 4.5`，均为启用状态并提供所需图片能力。Agent 会按受控逻辑模型路由运行，不会直连供应商。
+- 本次未做的事：没有发起真实图片生成、取消、失败重试或多角色浏览器 smoke test，也没有产生供应商费用或业务资产；故 `AGENT-IMAGE-DEPLOY-03` 保持未勾选。
+
+### 短剧生产本地下线交付记录（2026-08-20）
+
+- [x] `DRAMA-RETIRE-01`：按“下线但不删除”的可逆方式停用 `/fdmcreative/drama`。短剧源码、9 张短剧数据表、已有项目/任务/资产、角色授权和历史执行记录均保留；未执行 `DROP`、`DELETE` 或任何供应商调用。
+- 开关：`FDMServer/yudao-server/src/main/resources/application-local.yaml` 已将 `fdm.creative.drama-enabled` 设为 `false`。通过 IDEA 重启后，运行时环境端点确认该配置来自 classpath `application-local.yaml` 第 313 行，当前未被更高优先级环境变量覆盖。
+- 菜单：仅将短剧生产页面菜单 `900000100574` 及其 19 个动作子菜单更新为 `status=1`、`visible=0`；共 20 条菜单记录均已停用和隐藏，没有删除菜单或回收角色授权。前端动态菜单刷新或重新登录后不再显示短剧生产入口。
+- 运行保护：下线前后均确认 `DRAMA*` 来源的非终态 execution 数量为 `0`，因此没有取消或中断任何正在运行的短剧任务。重启后的本地服务监听 `48080`，`/actuator/health` 返回 `UP`；即使直接访问历史地址，后端现有 feature flag 校验也会拒绝创建新的短剧生产任务。
+- 保留的其他能力：`fdm.creative.direct-image-agent-enabled` 仍为 `true`，创作 Agent 图片能力未受本次短剧下线影响。
+- 回滚方式：如需恢复，先将上述 20 条菜单的 `status` 恢复为 `0`、`visible` 恢复为 `1`，再把 `drama-enabled` 设回 `true` 并重启服务；恢复前应重新核验图片、视频、音频 route、额度和 FFmpeg/FFprobe 环境。
+
+### 短剧生产代码移除与 Agent 模型对齐交付记录（2026-08-20）
+
+> 本记录取代上方“短剧生产本地下线”中的“保留源码、可通过 feature flag 回滚”策略：按后续明确需求，已删除短剧生产**代码**。为保护既有业务数据，本次没有删除任何数据库表、历史项目、资产、执行记录或已隐藏菜单。
+
+- [x] `DRAMA-REMOVE-01`：已删除 FDMServer 的短剧 Controller、Service、Job、领域模型、Mapper、DO、VO、枚举、结构化剧本 AI gateway、事件流、schema、短剧专用测试和三个短剧 SQL patch 源文件。
+- [x] `DRAMA-REMOVE-02`：已删除 FDMVUE 的短剧页面、工具函数、事件流、路由、API 类型/API 调用和专用测试；前端源码中不再保留短剧生产入口。
+- [x] `DRAMA-REMOVE-03`：已移除 `fdm.creative.drama-*` 配置、短剧执行/业务来源、错误码、项目类型筛选，以及 P5C 专用的 `subtitle-export` 节点、`document-asset` 端口和字幕元数据校验。通用图片、视频、音频、FFmpeg、时间线和工作台节点继续保留。
+- [x] `DRAMA-REMOVE-04`：历史 `project_type=DRAMA` 项目不再被后端筛除，会按当前用户项目权限作为普通工作台项目返回；数据库中的 `project_type` 列保持不变，后续新建项目仍写入兼容值 `WORKBENCH`。
+- [x] `AGENT-IMAGE-MODEL-ALIGN-01`：创作 Agent 读取与画布图片生成节点相同的 FDM AI 模型目录，复用 `supportsNodeModel(model, 'image-generate', referenceAssetIds)`；参考图数量变化时重新筛选并保留当前有效模型，否则自动选中第一个可用模型。提交继续通过受控 FDM AI 路由，不会浏览器直连供应商。
+- 数据库边界：本次未执行 SQL、DDL、DML、`DROP`、`TRUNCATE` 或 `DELETE`。此前已存在的 9 张短剧表、历史短剧数据和停用菜单未被改写；如未来需要物理清库，应另行评估备份、保留期、外键/血缘和不可逆迁移方案后再执行。
+- 验证：`mvn -pl yudao-module-fdmcreative -am test` 通过（`yudao-module-fdmcreative` 249 tests，0 failure/error）；`pnpm -F @vben/web-antd run typecheck:fdmcreative` 通过；`pnpm -F @vben/web-antd exec vitest run src/views/fdmcreative --environment happy-dom` 通过（34 files，161 tests）；`pnpm -F @vben/web-antd run build` 通过。两端 `git diff --check` 通过；后端和前端源码的短剧/字幕专用引用扫描均为空。
+- 未做：未调用真实模型供应商、未重新启动服务、未执行数据库变更、未修改 `Infinite-Canvas` 或 `FdmTool`、未推送代码。生产构建有项目现存的 `:deep` CSS minify 警告，但退出码为 0。

@@ -55,7 +55,6 @@ describe('creative node catalog', () => {
         'prompt-input',
         'prompt-template',
         'random-prompt',
-        'subtitle-export',
         'video-audio-merge',
         'video-compose',
         'video-frame-extract',
@@ -518,25 +517,6 @@ describe('creative node catalog', () => {
         key: 'audio',
         types: expect.arrayContaining(['audio-generate', 'music-generate']),
       }),
-    );
-  });
-
-  it('keeps short-drama subtitle export system-only while preserving its document contract', () => {
-    expect(CREATIVE_NODE_MAP.get('subtitle-export')?.ports).toEqual([
-      expect.objectContaining({
-        direction: 'OUTPUT',
-        id: 'documents',
-        type: 'document-asset',
-      }),
-    ]);
-    expect(
-      NODE_GROUPS.some((group) => group.types.includes('subtitle-export')),
-    ).toBe(false);
-    expect(CREATIVE_NODE_MAP.get('video-compose')?.ports).toContainEqual(
-      expect.objectContaining({ id: 'subtitles', type: 'document-asset' }),
-    );
-    expect(CREATIVE_NODE_MAP.get('video-audio-merge')?.ports).toContainEqual(
-      expect.objectContaining({ id: 'subtitles', type: 'document-asset' }),
     );
   });
 

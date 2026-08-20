@@ -7,7 +7,7 @@ export interface SseAuthenticationContext {
 
 /**
  * Merges caller headers with current application authentication. It is deliberately transport
- * agnostic so execution, Agent and Drama streams all use exactly the same tenant semantics.
+ * agnostic so execution and Agent streams use exactly the same tenant semantics.
  */
 export function mergeSseAuthenticationHeaders(
   configured: HeadersInit | undefined,
