@@ -2,11 +2,13 @@
 import type { BpmTaskApi } from '#/api/bpm/task';
 import type { SystemNoticeApi } from '#/api/system/notice';
 import type { SystemNotifyMessageApi } from '#/api/system/notify/message';
+import type { SystemVersionApi } from '#/api/system/version';
 
 import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
+import { useBuildInfo } from '@vben/hooks';
 import { IconifyIcon } from '@vben/icons';
 import { preferences } from '@vben/preferences';
 import { useUserStore } from '@vben/stores';
@@ -29,6 +31,7 @@ import {
   getUnreadNotifyMessageCount,
   getUnreadNotifyMessageList,
 } from '#/api/system/notify/message';
+import { getSystemBuildInfo } from '#/api/system/version';
 
 defineOptions({ name: 'DashboardHome' });
 
@@ -37,6 +40,7 @@ interface DashboardLoadingState {
   messages: boolean;
   notices: boolean;
   tasks: boolean;
+  version: boolean;
 }
 
 interface DashboardErrorState {
@@ -44,6 +48,7 @@ interface DashboardErrorState {
   messages: boolean;
   notices: boolean;
   tasks: boolean;
+  version: boolean;
 }
 
 interface QuickEntry {
@@ -69,6 +74,7 @@ interface MetricCard {
 const router = useRouter();
 const userStore = useUserStore();
 const { hasAccessByCodes } = useAccess();
+const frontendBuildInfo = useBuildInfo(import.meta.env, import.meta.env.PROD);
 
 const tasks = ref<BpmTaskApi.Task[]>([]);
 const taskTotal = ref(0);
@@ -81,12 +87,14 @@ const selectedNotice = ref<null | SystemNoticeApi.Notice>(null);
 const noticeModalOpen = ref(false);
 const lastUpdatedAt = ref<null | number>(null);
 const refreshing = ref(false);
+const backendBuildInfo = ref<null | SystemVersionApi.BuildInfo>(null);
 
 const loading = reactive<DashboardLoadingState>({
   dingTalk: false,
   messages: false,
   notices: false,
   tasks: false,
+  version: false,
 });
 
 const failed = reactive<DashboardErrorState>({
@@ -94,6 +102,7 @@ const failed = reactive<DashboardErrorState>({
   messages: false,
   notices: false,
   tasks: false,
+  version: false,
 });
 
 const canViewBpmTasks = computed(() => hasAccessByCodes(['bpm:task:query']));
@@ -103,6 +112,14 @@ const canViewDingTalkApprovals = computed(() =>
 const canManageNotices = computed(() =>
   hasAccessByCodes(['system:notice:query']),
 );
+const systemVersionStatus = computed(() => {
+  if (loading.version) return { color: 'blue', text: '正在读取' };
+  if (backendBuildInfo.value) return { color: 'green', text: '后端已连接' };
+  return {
+    color: failed.version ? 'orange' : 'default',
+    text: failed.version ? '后端未上报' : '等待读取',
+  };
+});
 
 const currentDateText = computed(() => {
   const weekday = [
@@ -287,6 +304,19 @@ function formatDateTime(value?: Date | number | string) {
   return parsed.isValid() ? parsed.format('MM-DD HH:mm') : '—';
 }
 
+function formatBuildVersion(value?: string) {
+  return !value || value === 'local' ? '本地开发' : value;
+}
+
+function formatBuildMetadata(commit?: string, buildTime?: string) {
+  if (!commit || commit === 'local') return '本地开发构建';
+  const parsed = dayjs(buildTime);
+  const time = parsed.isValid()
+    ? parsed.format('YYYY-MM-DD HH:mm')
+    : '时间未记录';
+  return `提交 ${commit.slice(0, 12)} · 构建 ${time}`;
+}
+
 function plainText(value?: string) {
   return (value || '')
     .replaceAll(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -435,6 +465,20 @@ async function loadNotices() {
   }
 }
 
+async function loadSystemVersion() {
+  failed.version = false;
+  loading.version = true;
+  try {
+    backendBuildInfo.value = await getSystemBuildInfo();
+  } catch {
+    // 新前端可先于后端发布；旧后端不存在接口时在版本卡片中明确提示即可。
+    failed.version = true;
+    backendBuildInfo.value = null;
+  } finally {
+    loading.version = false;
+  }
+}
+
 async function refreshDashboard() {
   if (refreshing.value) return;
   refreshing.value = true;
@@ -444,6 +488,7 @@ async function refreshDashboard() {
       loadDingTalkTodoCount(),
       loadMessages(),
       loadNotices(),
+      loadSystemVersion(),
     ]);
     lastUpdatedAt.value = Date.now();
   } finally {
@@ -776,6 +821,79 @@ onActivated(() => {
                 <small>{{ entry.description }}</small>
               </span>
             </button>
+          </div>
+        </article>
+
+        <article class="home-card version-card">
+          <header class="home-card__header compact-header">
+            <div>
+              <div class="home-card__eyebrow">SYSTEM VERSION</div>
+              <h2>系统版本</h2>
+            </div>
+            <Tag :color="systemVersionStatus.color">
+              {{ systemVersionStatus.text }}
+            </Tag>
+          </header>
+
+          <div class="version-card__body">
+            <div class="version-item">
+              <span class="version-item__icon frontend-version-icon">
+                <IconifyIcon icon="lucide:monitor-smartphone" />
+              </span>
+              <span class="version-item__content">
+                <span class="version-item__label">前端构建版本</span>
+                <code>{{ formatBuildVersion(frontendBuildInfo.version) }}</code>
+                <span class="version-item__meta">
+                  {{
+                    formatBuildMetadata(
+                      frontendBuildInfo.commit,
+                      frontendBuildInfo.buildTime,
+                    )
+                  }}
+                </span>
+              </span>
+            </div>
+
+            <div v-if="loading.version" class="version-item">
+              <span class="version-item__icon backend-version-icon">
+                <IconifyIcon icon="lucide:server-cog" />
+              </span>
+              <span class="version-item__content version-item__loading">
+                <Skeleton.Button active size="small" style="width: 152px" />
+                <Skeleton.Button active size="small" style="width: 116px" />
+              </span>
+            </div>
+            <div v-else-if="backendBuildInfo" class="version-item">
+              <span class="version-item__icon backend-version-icon">
+                <IconifyIcon icon="lucide:server-cog" />
+              </span>
+              <span class="version-item__content">
+                <span class="version-item__label">后端运行版本</span>
+                <code>{{ formatBuildVersion(backendBuildInfo.version) }}</code>
+                <span class="version-item__meta">
+                  {{
+                    formatBuildMetadata(
+                      backendBuildInfo.commit,
+                      backendBuildInfo.buildTime,
+                    )
+                  }}
+                </span>
+              </span>
+            </div>
+            <div v-else class="version-item version-item--unavailable">
+              <span class="version-item__icon unavailable-version-icon">
+                <IconifyIcon icon="lucide:triangle-alert" />
+              </span>
+              <span class="version-item__content">
+                <span class="version-item__label">后端运行版本</span>
+                <strong>未上报</strong>
+                <span class="version-item__meta">
+                  {{
+                    failed.version ? '后端尚未部署版本接口' : '等待版本信息返回'
+                  }}
+                </span>
+              </span>
+            </div>
           </div>
         </article>
       </aside>
@@ -1331,6 +1449,91 @@ onActivated(() => {
 
 .information-more {
   margin-top: 12px;
+}
+
+.version-card__body {
+  display: grid;
+  padding: 4px 20px 10px;
+}
+
+.version-item {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 14px 0;
+}
+
+.version-item + .version-item {
+  border-top: 1px solid hsl(var(--border) / 58%);
+}
+
+.version-item__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+  border-radius: 10px;
+}
+
+.frontend-version-icon {
+  color: #2563eb;
+  background: rgb(37 99 235 / 9%);
+}
+
+.backend-version-icon {
+  color: #0f766e;
+  background: rgb(15 118 110 / 10%);
+}
+
+.unavailable-version-icon {
+  color: #d97706;
+  background: rgb(217 119 6 / 10%);
+}
+
+.version-item__content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.version-item__label {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.version-item code,
+.version-item strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.version-item__meta {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground) / 78%);
+  white-space: nowrap;
+}
+
+.version-item__loading {
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.version-item__loading :deep(.ant-skeleton-button) {
+  height: 16px;
 }
 
 .quick-grid {

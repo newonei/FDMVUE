@@ -55,12 +55,24 @@ jobs:
       - name: Override production env for CI
         run: |
           set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          commit_time="$(git show -s --format=%cI "${GITHUB_SHA}")"
+          version_date="$(git show -s --date=format:%Y.%m.%d --format=%cd "${GITHUB_SHA}")"
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          build_version="${version_date}-${short_sha}"
+
           # .env.production.local overrides .env.production at build time
           # without committing server-specific values to the repo.
           cat > "apps/${FRONTEND_APP}/.env.production.local" <<EOF
           VITE_BASE=/
           VITE_BASE_URL=${FRONTEND_BASE_URL}
           VITE_GLOB_API_URL=${FRONTEND_API_URL}
+          VITE_GLOB_BUILD_VERSION=${build_version}
+          VITE_GLOB_BUILD_COMMIT=${GITHUB_SHA}
+          VITE_GLOB_BUILD_COMMIT_TIME=${commit_time}
+          VITE_GLOB_BUILD_TIME=${build_time}
+          VITE_GLOB_BUILD_RUN_ID=${GITHUB_RUN_ID}
+          VITE_GLOB_BUILD_RUN_NUMBER=${GITHUB_RUN_NUMBER}
           VITE_UPLOAD_TYPE=server
           VITE_COMPRESS=gzip
           VITE_PWA=false

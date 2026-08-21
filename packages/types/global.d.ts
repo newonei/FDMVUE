@@ -11,6 +11,12 @@ export interface VbenAdminProAppConfigRaw {
   VITE_GLOB_API_URL: string;
   VITE_GLOB_AUTH_DINGDING_CLIENT_ID: string;
   VITE_GLOB_AUTH_DINGDING_CORP_ID: string;
+  VITE_GLOB_BUILD_COMMIT: string;
+  VITE_GLOB_BUILD_COMMIT_TIME: string;
+  VITE_GLOB_BUILD_RUN_ID: string;
+  VITE_GLOB_BUILD_RUN_NUMBER: string;
+  VITE_GLOB_BUILD_TIME: string;
+  VITE_GLOB_BUILD_VERSION: string;
   // API 加解密相关配置
   VITE_APP_API_ENCRYPT_ENABLE: string;
   VITE_APP_API_ENCRYPT_HEADER: string;
@@ -24,6 +30,15 @@ interface AuthConfig {
     clientId: string;
     corpId: string;
   };
+}
+
+export interface ApplicationBuildInfo {
+  buildTime: string;
+  commit: string;
+  commitTime: string;
+  runId: string;
+  runNumber: string;
+  version: string;
 }
 
 export interface ApplicationConfig {
