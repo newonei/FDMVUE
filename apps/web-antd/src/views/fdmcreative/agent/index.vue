@@ -4,6 +4,7 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -49,6 +50,17 @@ import CreativeShell from '../shared/CreativeShell.vue';
 import PromptLibraryPicker from '../shared/PromptLibraryPicker.vue';
 import { normalizeModelIdentifier } from '../workbench/editor/model-identifier';
 import { supportsNodeModel } from '../workbench/editor/node-model-filter';
+import type {
+  ImageMentionCandidate,
+  ImageMentionContext,
+} from './image-mention';
+import {
+  buildImageMentionCandidates,
+  findImageMentionContext,
+  hasImageMention,
+  insertImageMention,
+  reindexImageMentionsAfterRemoval,
+} from './image-mention';
 
 defineOptions({ name: 'FdmCreativeImageAgent' });
 
@@ -95,6 +107,9 @@ const tasks = ref<FdmCreativeApi.AgentImageTask[]>([]);
 const taskTotal = ref(0);
 const modelParameters = ref<Record<string, unknown>>({});
 const activeIdempotencyKey = ref<string>();
+const promptEditorRef = ref<HTMLElement>();
+const imageMentionContext = ref<ImageMentionContext>();
+const activeImageMentionIndex = ref(0);
 const form = reactive({
   aspectRatio: '1:1',
   negativePrompt: '',
@@ -127,6 +142,19 @@ const schemaFields = computed(() =>
 );
 const promptBytes = computed(
   () => new TextEncoder().encode(form.prompt).length,
+);
+const imageMentionCandidates = computed(() =>
+  imageMentionContext.value
+    ? buildImageMentionCandidates(
+        referenceAssets.value,
+        imageMentionContext.value.query,
+      )
+    : [],
+);
+const imageMentionOpen = computed(
+  () =>
+    Boolean(imageMentionContext.value) &&
+    imageMentionCandidates.value.length > 0,
 );
 const hasRunningTask = computed(() =>
   tasks.value.some(
@@ -286,9 +314,116 @@ function selectReferenceAssets(assets: FdmCreativeApi.CreativeAsset[]) {
 }
 
 function removeReferenceAsset(id: number) {
+  const removedIndex = referenceAssets.value.findIndex(
+    (asset) => asset.id === id,
+  );
+  if (removedIndex === -1) return;
+
+  const mentionIndex = removedIndex + 1;
+  if (hasImageMention(form.prompt, mentionIndex)) {
+    message.warning(
+      `提示词正在引用 @图片${mentionIndex}，请先删除或替换该引用后再移除素材`,
+    );
+    return;
+  }
+  form.prompt = reindexImageMentionsAfterRemoval(form.prompt, mentionIndex);
   referenceAssets.value = referenceAssets.value.filter(
     (asset) => asset.id !== id,
   );
+}
+
+function promptTextarea() {
+  return promptEditorRef.value?.querySelector('textarea') || undefined;
+}
+
+function closeImageMention() {
+  imageMentionContext.value = undefined;
+  activeImageMentionIndex.value = 0;
+}
+
+function syncImageMention(target: EventTarget | null) {
+  if (!(target instanceof HTMLTextAreaElement)) return;
+  const next = findImageMentionContext(
+    target.value,
+    target.selectionStart ?? target.value.length,
+  );
+  if (next?.query !== imageMentionContext.value?.query) {
+    activeImageMentionIndex.value = 0;
+  }
+  imageMentionContext.value = next;
+}
+
+function handlePromptInput(event: Event) {
+  syncImageMention(event.target);
+}
+
+function handlePromptCursorChange(event: Event) {
+  syncImageMention(event.target);
+}
+
+function handlePromptBlur() {
+  window.setTimeout(closeImageMention, 120);
+}
+
+function selectImageMention(
+  candidate: ImageMentionCandidate<FdmCreativeApi.CreativeAsset>,
+) {
+  if (!imageMentionContext.value) return;
+  const insertion = insertImageMention(
+    form.prompt,
+    imageMentionContext.value,
+    candidate,
+  );
+  form.prompt = insertion.value;
+  closeImageMention();
+  void nextTick(() => {
+    const textarea = promptTextarea();
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(insertion.cursor, insertion.cursor);
+  });
+}
+
+function handlePromptKeydown(event: KeyboardEvent) {
+  if (event.ctrlKey && event.key === 'Enter') {
+    event.preventDefault();
+    void submit();
+    return;
+  }
+  if (!imageMentionOpen.value) return;
+
+  const candidates = imageMentionCandidates.value;
+  switch (event.key) {
+    case 'ArrowDown': {
+      event.preventDefault();
+      activeImageMentionIndex.value =
+        (activeImageMentionIndex.value + 1) % candidates.length;
+      break;
+    }
+    case 'ArrowUp': {
+      event.preventDefault();
+      activeImageMentionIndex.value =
+        (activeImageMentionIndex.value - 1 + candidates.length) %
+        candidates.length;
+      break;
+    }
+    case 'Enter':
+    case 'Tab': {
+      const candidate = candidates[activeImageMentionIndex.value];
+      if (!candidate) {
+        closeImageMention();
+        break;
+      }
+      event.preventDefault();
+      selectImageMention(candidate);
+      break;
+    }
+    case 'Escape': {
+      event.preventDefault();
+      closeImageMention();
+      break;
+    }
+  }
 }
 
 function modelLabel(model?: FdmAiApi.ModelOption) {
@@ -324,10 +459,12 @@ async function loadModels() {
       modelParameters.value = {};
     }
     if (imageModels.value.length === 0) {
-      const scenario =
-        referenceAssetIds.length > 1
-          ? '多参考图'
-          : (referenceAssetIds.length > 0 ? '参考图' : '文生图');
+      let scenario = '文生图';
+      if (referenceAssetIds.length > 1) {
+        scenario = '多参考图';
+      } else if (referenceAssetIds.length > 0) {
+        scenario = '参考图';
+      }
       modelLoadError.value = `没有支持${scenario}的可用图片模型，请配置 creative.image.generate.default 路由`;
     }
   } catch (error) {
@@ -608,7 +745,8 @@ onBeforeUnmount(() => {
       >
         <template #description>
           管理员需要先执行本次 SQL 补丁，并配置
-          <code>FDM_CREATIVE_DIRECT_IMAGE_AGENT_ENABLED=true</code>。在启用前，页面不会提交任何模型调用。
+          <code>FDM_CREATIVE_DIRECT_IMAGE_AGENT_ENABLED=true</code
+          >。在启用前，页面不会提交任何模型调用。
         </template>
       </Alert>
 
@@ -648,10 +786,12 @@ onBeforeUnmount(() => {
 
         <div v-if="!projects.length" class="no-project-context">
           <IconifyIcon icon="lucide:folder-plus" />
-          <span>还没有可访问的工作台项目。请先在“图像视频工作台”中新建项目，再回来直接生成。</span>
+          <span
+            >还没有可访问的工作台项目。请先在“图像视频工作台”中新建项目，再回来直接生成。</span
+          >
           <Button type="link" @click="router.push('/fdmcreative/workbench')">
-前往工作台
-</Button>
+            前往工作台
+          </Button>
         </div>
 
         <section
@@ -660,7 +800,7 @@ onBeforeUnmount(() => {
         >
           <div v-if="referenceAssets.length" class="reference-strip">
             <div
-              v-for="asset in referenceAssets"
+              v-for="(asset, index) in referenceAssets"
               :key="asset.id"
               class="reference-chip"
             >
@@ -668,7 +808,10 @@ onBeforeUnmount(() => {
               <span v-else class="reference-chip__fallback">
                 <IconifyIcon icon="lucide:image" />
               </span>
-              <span :title="asset.name">{{ asset.name }}</span>
+              <span class="reference-chip__copy" :title="asset.name">
+                <strong>@图片{{ index + 1 }}</strong>
+                <span>{{ asset.name }}</span>
+              </span>
               <button
                 aria-label="移除参考图"
                 type="button"
@@ -679,14 +822,65 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <Textarea
-            v-model:value="form.prompt"
-            :auto-size="{ minRows: 5, maxRows: 10 }"
-            :disabled="!selectedProjectId"
-            :maxlength="Math.min(capability.maxPromptBytes, 20_000)"
-            placeholder="输入你的创作想法、脚本片段或画面要求。比如：为夏日咖啡新品设计一张清新、有呼吸感的电商海报……"
-            @keydown.ctrl.enter.prevent="submit"
-          />
+          <div ref="promptEditorRef" class="composer__prompt-editor">
+            <Textarea
+              v-model:value="form.prompt"
+              aria-autocomplete="list"
+              aria-controls="agent-image-mention-menu"
+              :aria-expanded="imageMentionOpen"
+              :auto-size="{ minRows: 5, maxRows: 10 }"
+              :disabled="!selectedProjectId"
+              :maxlength="Math.min(capability.maxPromptBytes, 20_000)"
+              placeholder="输入你的创作想法、脚本片段或画面要求。输入 @ 可引用已选图片。"
+              @blur="handlePromptBlur"
+              @click="handlePromptCursorChange"
+              @input="handlePromptInput"
+              @keydown="handlePromptKeydown"
+              @select="handlePromptCursorChange"
+            />
+
+            <div
+              v-if="imageMentionOpen"
+              id="agent-image-mention-menu"
+              class="image-mention-menu"
+              role="listbox"
+            >
+              <div class="image-mention-menu__header">
+                <span>引用已选图片</span>
+                <small>↑↓ 选择，Enter 或 Tab 插入</small>
+              </div>
+              <button
+                v-for="(candidate, index) in imageMentionCandidates"
+                :key="candidate.asset.id"
+                :aria-selected="index === activeImageMentionIndex"
+                :class="{ 'is-active': index === activeImageMentionIndex }"
+                class="image-mention-option"
+                role="option"
+                type="button"
+                @mouseenter="activeImageMentionIndex = index"
+                @mousedown.prevent
+                @click="selectImageMention(candidate)"
+              >
+                <img
+                  v-if="candidate.asset.url"
+                  :alt="candidate.asset.name"
+                  :src="candidate.asset.url"
+                />
+                <span v-else class="image-mention-option__fallback">
+                  <IconifyIcon icon="lucide:image" />
+                </span>
+                <span class="image-mention-option__copy">
+                  <strong>{{ candidate.token }}</strong>
+                  <span :title="candidate.asset.name">{{
+                    candidate.asset.name
+                  }}</span>
+                </span>
+              </button>
+            </div>
+            <p class="composer__mention-tip">
+              引用素材后，输入 @ 即可插入 @图片1、@图片2 等图片引用。
+            </p>
+          </div>
 
           <div class="composer__footer">
             <div class="composer-tools">
@@ -765,8 +959,10 @@ onBeforeUnmount(() => {
                         }"
                         :title="field.description"
                       >
-                        <span>{{ field.title }}
-                          <small v-if="field.required">必填</small></span>
+                        <span
+                          >{{ field.title }}
+                          <small v-if="field.required">必填</small></span
+                        >
                         <Select
                           v-if="field.options"
                           :options="field.options"
@@ -823,7 +1019,9 @@ onBeforeUnmount(() => {
               <span v-if="modelLoadError" class="model-load-error">{{
                 modelLoadError
               }}</span>
-              <span class="byte-count">{{ promptBytes }} / {{ capability.maxPromptBytes }} B</span>
+              <span class="byte-count"
+                >{{ promptBytes }} / {{ capability.maxPromptBytes }} B</span
+              >
               <Button
                 v-access:code="['fdmcreative:agent-image:generate']"
                 :disabled="!canSubmit"
@@ -862,7 +1060,9 @@ onBeforeUnmount(() => {
             </p>
           </div>
           <div class="section-header__actions">
-            <span v-if="taskTotal" class="task-count">{{ taskTotal }} 条任务</span>
+            <span v-if="taskTotal" class="task-count"
+              >{{ taskTotal }} 条任务</span
+            >
             <Button :loading="taskLoading" size="small" @click="loadTasks">
               <IconifyIcon icon="lucide:refresh-cw" />
               刷新
@@ -875,10 +1075,8 @@ onBeforeUnmount(() => {
             <article v-for="task in tasks" :key="task.id" class="task-card">
               <header class="task-card__header">
                 <Tag :color="taskStatusColor(task.status)">
-{{
-                  taskStatus(task)
-                }}
-</Tag>
+                  {{ taskStatus(task) }}
+                </Tag>
                 <time>{{ taskTime(task) }}</time>
               </header>
               <p class="task-card__prompt" :title="task.prompt">
@@ -927,9 +1125,12 @@ onBeforeUnmount(() => {
                 }}</span>
               </div>
               <footer class="task-card__footer">
-                <span>#{{ task.id
+                <span
+                  >#{{ task.id
                   }}<template v-if="task.attemptNo > 1">
-                    · 重试 {{ task.attemptNo }}</template></span>
+                    · 重试 {{ task.attemptNo }}</template
+                  ></span
+                >
                 <div>
                   <Button
                     v-if="task.executionId"
@@ -965,7 +1166,9 @@ onBeforeUnmount(() => {
             </article>
           </div>
           <Empty v-else class="task-empty" description="还没有直接生成的图片">
-            <span>完成首次生成后，图片结果、状态和失败恢复入口会显示在这里。</span>
+            <span
+              >完成首次生成后，图片结果、状态和失败恢复入口会显示在这里。</span
+            >
           </Empty>
         </Spin>
       </section>
@@ -1511,5 +1714,103 @@ onBeforeUnmount(() => {
   .section-header__actions {
     justify-content: space-between;
   }
+}
+
+.composer__prompt-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.composer__mention-tip {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+}
+
+.reference-chip__copy,
+.image-mention-option__copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.reference-chip__copy strong,
+.image-mention-option__copy strong {
+  font-size: 11px;
+  line-height: 1.25;
+  color: hsl(var(--primary));
+}
+
+.reference-chip__copy > span,
+.image-mention-option__copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-mention-menu {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 6px;
+  padding: 8px;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--primary) / 25%);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
+}
+
+.image-mention-menu__header {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1px 2px 5px;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+
+.image-mention-menu__header small {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+
+.image-mention-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: hsl(var(--muted) / 25%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 9px;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.image-mention-option:hover,
+.image-mention-option.is-active {
+  background: hsl(var(--primary) / 8%);
+  border-color: hsl(var(--primary) / 55%);
+}
+
+.image-mention-option img,
+.image-mention-option__fallback {
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  object-fit: cover;
+  background: hsl(var(--muted));
+  border-radius: 7px;
 }
 </style>
