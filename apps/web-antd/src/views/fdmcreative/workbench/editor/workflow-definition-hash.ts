@@ -1,5 +1,7 @@
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
+import { sha256Hex } from '@vben/utils';
+
 type JsonPrimitive = boolean | null | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -58,12 +60,13 @@ function materializeWorkflowDefinitionTransportDefaults(
 export async function hashWorkflowDefinition(
   definition: FdmCreativeApi.WorkflowDefinition,
 ) {
-  const encoder = new TextEncoder();
-  const payload = encoder.encode(canonicalWorkflowDefinitionJson(definition));
+  const canonical = canonicalWorkflowDefinitionJson(definition);
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
-    throw new Error('当前浏览器不支持工作流完整性摘要');
+    return sha256Hex(canonical);
   }
+  const encoder = new TextEncoder();
+  const payload = encoder.encode(canonical);
   const digest = await subtle.digest('SHA-256', payload);
   return [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, '0'))

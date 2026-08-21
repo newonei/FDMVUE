@@ -1,6 +1,6 @@
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   canonicalWorkflowDefinitionJson,
@@ -32,6 +32,10 @@ function definition(
 }
 
 describe('workflow definition hash', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('matches the server-owned empty-workflow SHA-256 fixture', async () => {
     const empty: FdmCreativeApi.WorkflowDefinition = {
       edges: [],
@@ -43,6 +47,20 @@ describe('workflow definition hash', () => {
     expect(canonicalWorkflowDefinitionJson(empty)).toBe(
       '{"edges":[],"nodes":[],"schemaVersion":1,"viewport":{"x":0,"y":0,"zoom":1}}',
     );
+    await expect(hashWorkflowDefinition(empty)).resolves.toBe(
+      'a8d7d5ac1e2bc91f2f5b89c5fa3dffddb771c5598d8c9c9c030bb98784cfefd0',
+    );
+  });
+
+  it('falls back to JavaScript SHA-256 when Web Crypto is unavailable over HTTP', async () => {
+    vi.stubGlobal('crypto', {});
+    const empty: FdmCreativeApi.WorkflowDefinition = {
+      edges: [],
+      nodes: [],
+      schemaVersion: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+    };
+
     await expect(hashWorkflowDefinition(empty)).resolves.toBe(
       'a8d7d5ac1e2bc91f2f5b89c5fa3dffddb771c5598d8c9c9c030bb98784cfefd0',
     );

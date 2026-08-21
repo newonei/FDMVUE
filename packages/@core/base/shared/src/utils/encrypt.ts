@@ -2,6 +2,14 @@ import CryptoJS from 'crypto-js';
 import { JSEncrypt } from 'jsencrypt';
 
 /**
+ * Calculates a lowercase SHA-256 hexadecimal digest without requiring the
+ * browser's secure-context-only Web Crypto API.
+ */
+export function sha256Hex(data: string): string {
+  return CryptoJS.SHA256(data).toString(CryptoJS.enc.Hex);
+}
+
+/**
  * API 加解密工具类
  * 支持 AES 和 RSA 加密算法
  */
