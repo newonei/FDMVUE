@@ -289,8 +289,8 @@ catalogs:
       specifier: ^6.1.7
       version: 6.1.7
     dhtmlx-gantt:
-      specifier: ^9.1.4
-      version: 9.1.4
+      specifier: ^10.0.1
+      version: 10.0.1
     diagram-js:
       specifier: ^15.14.0
       version: 15.18.0
@@ -833,7 +833,7 @@ importers:
         version: 1.11.21
       dhtmlx-gantt:
         specifier: 'catalog:'
-        version: 9.1.4
+        version: 10.0.1
       diagram-js:
         specifier: 'catalog:'
         version: 15.18.0
@@ -975,7 +975,7 @@ importers:
         version: 1.11.21
       dhtmlx-gantt:
         specifier: 'catalog:'
-        version: 9.1.4
+        version: 10.0.1
       diagram-js:
         specifier: 'catalog:'
         version: 15.18.0
@@ -1107,7 +1107,7 @@ importers:
         version: 1.11.21
       dhtmlx-gantt:
         specifier: 'catalog:'
-        version: 9.1.4
+        version: 10.0.1
       diagram-js:
         specifier: 'catalog:'
         version: 15.18.0
@@ -7375,6 +7375,7 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   crypto-random-string@2.0.0:
     resolution: {integrity: sha512-v1plID3y9r/lPhviJ1wrXpLeyUIGAZ2SHNYTEapm7/8A9nLPoyvVp3RK/EPFqn5kEznyWgYZNsRtYYIWbuG8KA==}
@@ -7729,8 +7730,8 @@ packages:
   devlop@1.1.0:
     resolution: {integrity: sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA==}
 
-  dhtmlx-gantt@9.1.4:
-    resolution: {integrity: sha512-XCNA5QUiuV79Xq1ykNpH9LFNR2IVpDZMqnmBV6dsBeOkHyPMOpkyQ/gqAPCcK2GAvYHoN2nGAMYb2LldCWhMuQ==}
+  dhtmlx-gantt@10.0.1:
+    resolution: {integrity: sha512-dVmq5WONubm+kODQKpDdTwTMNe9N6LEVVgmgsn/umcv2kPKrSnld7P4gEuw61W5RcB5n8d46nl0GJar4CRM3LA==}
 
   diagram-js-direct-editing@3.4.0:
     resolution: {integrity: sha512-eXfd+nxJr5xt3YlCrs+E53mPi+gqBWRBkAXkR99ZPL7Pl0B3H5nkv/uiwx4Q4vJU/Sp8Jy3zVdhP/Y2c6loTjw==}
@@ -17833,7 +17834,7 @@ snapshots:
     dependencies:
       dequal: 2.0.3
 
-  dhtmlx-gantt@9.1.4: {}
+  dhtmlx-gantt@10.0.1: {}
 
   diagram-js-direct-editing@3.4.0(diagram-js@15.18.0):
     dependencies:
