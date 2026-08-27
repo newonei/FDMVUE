@@ -1,5 +1,7 @@
 import { requestClient } from '#/api/request';
 
+import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
+
 export namespace FdmcaiwuStandardQuotationApi {
   export type DecimalValue = number | string;
   export type NullableDecimalValue = DecimalValue | null;
@@ -67,6 +69,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     additionalCostPerPiece?: NullableDecimalValue;
     adhesiveCostPerPiece?: NullableDecimalValue;
     accessoryPriceId?: number | string;
+    accessoryMatches?: FdmcaiwuQuotationApi.AccessoryMatch[];
     accessoryPriceSourceLocation?: null | string;
     accessoryPriceSourceVersion?: null | string;
     auxiliaryCost?: NullableDecimalValue;
@@ -78,6 +81,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     catalogSourceLocation?: null | string;
     catalogSourceVersion?: null | string;
     engineMaterialKgPerPiece?: NullableDecimalValue;
+    lamination?: null | FdmcaiwuQuotationApi.LaminationQuote;
     nominalWeightText?: null | string;
     oppCostPerPiece?: NullableDecimalValue;
     productCode: string;
@@ -95,14 +99,19 @@ export namespace FdmcaiwuStandardQuotationApi {
     strapCostPerPiece?: NullableDecimalValue;
     substrateThicknessMm?: NullableDecimalValue;
     surfaceCostPerPiece?: NullableDecimalValue;
+    taxRate?: NullableDecimalValue;
     unitCostDisplay?: NullableDecimalValue;
     unitCostExact?: NullableDecimalValue;
     unitQuoteDisplay?: NullableDecimalValue;
     unitQuoteExact?: NullableDecimalValue;
+    unitQuoteTaxIncludedDisplay?: NullableDecimalValue;
+    unitQuoteTaxIncludedExact?: NullableDecimalValue;
     /** 仅有超低价查看能力的账号返回。 */
     ultraLowQuoteDisplay?: NullableDecimalValue;
     /** 仅超级管理员返回，普通部门经理不可见。 */
     ultraLowQuoteExact?: NullableDecimalValue;
+    ultraLowQuoteTaxIncludedDisplay?: NullableDecimalValue;
+    ultraLowQuoteTaxIncludedExact?: NullableDecimalValue;
     warnings?: string[];
   }
 
@@ -132,9 +141,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     summary?: Summary;
   }
 
-  /**
-   * 小垫判定与裁切基础参数。定价规则仅在服务端内部执行，前端不接收也不提交。
-   */
+  /** 小垫面积阈值、政策开关与裁切参数；具体定价比例仅在服务端内部。 */
   export interface SmallMatPolicyResp {
     allowRotate?: boolean;
     configured?: boolean;
@@ -145,11 +152,12 @@ export namespace FdmcaiwuStandardQuotationApi {
     kerfMm?: NullableDecimalValue;
     maxAreaSquareMeters?: NullableDecimalValue;
     orderSetupCost?: NullableDecimalValue;
+    pricingEnabled?: boolean;
     repackingCostPerPiece?: NullableDecimalValue;
     version?: string;
   }
 
-  /** 小垫判定设置保存请求，仅包含可维护的判定及裁切参数。 */
+  /** 只维护面积、功能开关和裁切参数，不提交任何定价比例。 */
   export interface SaveSmallMatPolicyReq {
     allowRotate: boolean;
     cuttingCostPerPiece: number;
@@ -158,6 +166,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     kerfMm: number;
     maxAreaSquareMeters: number;
     orderSetupCost: number;
+    pricingEnabled: boolean;
     repackingCostPerPiece: number;
   }
 
@@ -208,15 +217,20 @@ export namespace FdmcaiwuStandardQuotationApi {
     orderSetupCostExact?: NullableDecimalValue;
     policyVersion?: string;
     regularTotalQuoteExact?: NullableDecimalValue;
+    regularTotalQuoteTaxIncludedExact?: NullableDecimalValue;
     regularUnitQuoteExact?: NullableDecimalValue;
+    regularUnitQuoteTaxIncludedExact?: NullableDecimalValue;
     repackingCostExact?: NullableDecimalValue;
     sourceCostMode?: string;
     sourceEngineProfile?: string;
     ultraLowTotalQuoteExact?: NullableDecimalValue;
+    ultraLowTotalQuoteTaxIncludedExact?: NullableDecimalValue;
     ultraLowUnitQuoteExact?: NullableDecimalValue;
+    ultraLowUnitQuoteTaxIncludedExact?: NullableDecimalValue;
   }
 
   export interface SmallMatCalculateResp {
+    accessoryMatches?: FdmcaiwuQuotationApi.AccessoryMatch[];
     blockReasons?: string[];
     capabilities?: Capabilities;
     detail?: null | SmallMatQuoteDetail;
@@ -228,10 +242,14 @@ export namespace FdmcaiwuStandardQuotationApi {
     productLabel?: string;
     quantity?: number;
     status?: string;
+    taxRate?: NullableDecimalValue;
     thicknessMm?: DecimalValue;
     totalQuoteDisplay?: NullableDecimalValue;
+    totalQuoteTaxIncludedDisplay?: NullableDecimalValue;
     ultraLowQuoteDisplay?: NullableDecimalValue;
+    ultraLowQuoteTaxIncludedDisplay?: NullableDecimalValue;
     unitQuoteDisplay?: NullableDecimalValue;
+    unitQuoteTaxIncludedDisplay?: NullableDecimalValue;
     warnings?: string[];
     widthMm?: DecimalValue;
   }

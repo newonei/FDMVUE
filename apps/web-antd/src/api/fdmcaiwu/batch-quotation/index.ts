@@ -6,15 +6,13 @@ export namespace FdmcaiwuBatchQuotationApi {
   export type DecimalValue = FdmcaiwuQuotationApi.DecimalValue;
 
   export interface CalculateOptions {
+    defaultLaminationMaterialId?: number | string;
     defaultQuantity?: number;
     defaultRecipeId?: number;
     includeCarton?: boolean;
     includeOpp?: boolean;
     includeStrap?: boolean;
     includeSupplement?: boolean;
-    profitMode?: string;
-    /** 小数形式，例如 20% 传 0.20。批量成本比较默认传 0。 */
-    profitRate?: number;
   }
 
   /**
@@ -43,6 +41,8 @@ export namespace FdmcaiwuBatchQuotationApi {
     foamingLaborPerKg?: DecimalValue;
     fullLayers?: number;
     inputRecipe?: string;
+    inputLaminationMaterial?: string;
+    lamination?: null | FdmcaiwuQuotationApi.LaminationQuote;
     layoutColumns?: number;
     layoutOrientation?: string;
     layoutRows?: number;
@@ -79,11 +79,16 @@ export namespace FdmcaiwuBatchQuotationApi {
     status?: string;
     strapCostPerPiece?: DecimalValue;
     supplementPieces?: number;
+    taxRate?: DecimalValue;
     totalPiecesPerBoard?: number;
     thicknessClass?: string;
     unitCostPerPiece?: DecimalValue;
+    /** 现有字段为不含税常规单价。 */
     unitQuote?: DecimalValue;
+    unitQuoteTaxIncluded?: DecimalValue;
+    /** 现有字段为不含税常规总价。 */
     quoteTotal?: DecimalValue;
+    quoteTotalTaxIncluded?: DecimalValue;
     verticalCutCostPerPiece?: DecimalValue;
     warnings?: string[];
     /** 兼容服务端扩展列，页面只读取已约定的字段。 */

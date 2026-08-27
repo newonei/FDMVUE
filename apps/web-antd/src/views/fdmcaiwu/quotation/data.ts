@@ -1,5 +1,7 @@
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
 
+export const DEFAULT_QUOTATION_TAX_RATE = 0.08;
+
 export const RESULT_COST_FIELDS: Array<{
   field: keyof FdmcaiwuQuotationApi.CalculateResp;
   name: string;
@@ -16,6 +18,39 @@ export const RESULT_COST_FIELDS: Array<{
 
 export function hasValue(value: unknown): boolean {
   return value !== undefined && value !== null && value !== '';
+}
+
+function normalizeTaxRate(value: unknown): number {
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 0) return DEFAULT_QUOTATION_TAX_RATE;
+  return rate > 1 ? rate / 100 : rate;
+}
+
+/**
+ * 优先使用服务端 Decimal 含税字段。仅用于兼容尚未返回新字段的旧后端，
+ * 派生结果最终仍由金额格式化函数按两位小数展示。
+ */
+export function resolveTaxIncludedValue(
+  excludingTax: unknown,
+  includingTax?: unknown,
+  taxRate: unknown = DEFAULT_QUOTATION_TAX_RATE,
+): FdmcaiwuQuotationApi.DecimalValue | undefined {
+  if (hasValue(includingTax)) {
+    return typeof includingTax === 'number' || typeof includingTax === 'string'
+      ? includingTax
+      : String(includingTax);
+  }
+  if (!hasValue(excludingTax)) return undefined;
+  const base = Number(excludingTax);
+  if (!Number.isFinite(base)) return undefined;
+  return (base * (1 + normalizeTaxRate(taxRate)))
+    .toFixed(12)
+    .replace(/\.?0+$/, '');
+}
+
+export function formatQuotationTaxRate(value: unknown): string {
+  const rate = normalizeTaxRate(value);
+  return `${(rate * 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 }
 
 export function formatSpecification(
@@ -44,12 +79,6 @@ export function formatDensityType(value?: string): string {
   if (!value) return '—';
   if (value === 'CUSTOM') return '定制';
   return `密度 ${value}`;
-}
-
-export function formatProfitMode(value?: string): string {
-  if (value === 'GROSS_MARGIN') return '毛利率';
-  if (value === 'MARKUP') return '加价率';
-  return value || '—';
 }
 
 export function formatLayoutOrientation(value?: string): string {

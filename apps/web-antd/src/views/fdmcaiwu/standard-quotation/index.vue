@@ -42,6 +42,12 @@ import {
   saveSmallMatPolicy,
 } from '#/api/fdmcaiwu/standard-quotation';
 
+import AccessoryMatchList from '../quotation/components/accessory-match-list.vue';
+import {
+  formatQuotationTaxRate,
+  resolveTaxIncludedValue,
+} from '../quotation/data';
+
 defineOptions({ name: 'FdmcaiwuStandardQuotation' });
 
 type ProductTypeOption = FdmcaiwuStandardQuotationApi.ProductTypeOption;
@@ -85,6 +91,7 @@ interface SmallMatPolicyFormModel {
   kerfMm: number;
   maxAreaSquareMeters: number;
   orderSetupCost: number;
+  pricingEnabled: boolean;
   repackingCostPerPiece: number;
 }
 
@@ -113,6 +120,8 @@ interface NormalizedProductType extends ProductTypeOption {
   productLabel: string;
 }
 
+type ProductGroup = 'BASE_TPE' | 'EXTERNAL_LAMINATION' | 'RUBBER_COMPOSITE';
+
 const PRODUCT_TYPES: NormalizedProductType[] = [
   { productCode: 'TPE_REGULAR', productLabel: 'TPE常规' },
   { productCode: 'TPE_LIGHT', productLabel: 'TPE轻羽' },
@@ -130,6 +139,26 @@ const PRODUCT_TYPES: NormalizedProductType[] = [
   { composite: true, productCode: 'TPE_PU', productLabel: 'TPE+PU' },
   {
     composite: true,
+    productCode: 'TPE_PU_HIGH_SOLID',
+    productLabel: 'TPE+PU高固',
+  },
+  {
+    composite: true,
+    productCode: 'TPE_PU_CONTRAST',
+    productLabel: 'TPE+PU撞色',
+  },
+  {
+    composite: true,
+    productCode: 'TPE_PU_HIGH_SOLID_CONTRAST',
+    productLabel: 'TPE+PU高固撞色',
+  },
+  {
+    composite: true,
+    productCode: 'TPE_SILICONE_ANTISLIP',
+    productLabel: 'TPE+硅胶止滑皮',
+  },
+  {
+    composite: true,
     productCode: 'TPE_CORK',
     productLabel: 'TPE+软木',
   },
@@ -139,6 +168,20 @@ const PRODUCT_TYPES: NormalizedProductType[] = [
     productLabel: 'TPE+麂皮绒',
   },
 ];
+
+const PRODUCT_GROUP_OPTIONS: Array<{
+  label: string;
+  value: ProductGroup;
+}> = [
+  { label: '基础 TPE', value: 'BASE_TPE' },
+  { label: '橡胶复合', value: 'RUBBER_COMPOSITE' },
+  { label: '外采面材', value: 'EXTERNAL_LAMINATION' },
+];
+
+const RUBBER_PRODUCT_CODES = new Set([
+  'ELASTIC_TPE_RUBBER',
+  'REGULAR_TPE_RUBBER',
+]);
 
 const STATUS_FILTER_OPTIONS = [
   { label: '全部状态', value: 'ALL' },
@@ -158,6 +201,7 @@ const calculating = ref(false);
 const optionsError = ref('');
 const requestError = ref('');
 const productTypes = ref<NormalizedProductType[]>([...PRODUCT_TYPES]);
+const activeProductGroup = ref<ProductGroup>('BASE_TPE');
 const options = ref<FdmcaiwuStandardQuotationApi.Options>();
 const result = ref<FdmcaiwuStandardQuotationApi.CalculateResp>();
 const rows = ref<SpecificationRow[]>([]);
@@ -203,6 +247,7 @@ const smallMatPolicyForm = reactive<SmallMatPolicyFormModel>({
   kerfMm: 0,
   maxAreaSquareMeters: 0.5,
   orderSetupCost: 0,
+  pricingEnabled: true,
   repackingCostPerPiece: 0,
 });
 
@@ -294,7 +339,10 @@ const smallMatRules: Partial<Record<keyof SmallMatFormModel, Rule[]>> = {
 };
 
 const smallMatPolicyRules: Record<
-  keyof Omit<SmallMatPolicyFormModel, 'allowRotate' | 'enabled'>,
+  keyof Omit<
+    SmallMatPolicyFormModel,
+    'allowRotate' | 'enabled' | 'pricingEnabled'
+  >,
   Rule[]
 > = {
   cuttingCostPerPiece: [nonNegativeNumberRule],
@@ -332,13 +380,38 @@ const canViewSmallMatQuoteDetail = computed(
     Boolean(smallMatResult.value?.detail),
 );
 
-/** 母垫规格、排版和利用率不包含成本，可对已获报价权限的用户安全展示。 */
+/** 母垫推荐和排版不含成本，服务端返回后所有报价用户均可查看。 */
 const canViewSmallMatPlan = computed(() => Boolean(smallMatResult.value?.plan));
 
 const canViewSmallMatUltraLowPrice = computed(
   () =>
     smallMatResult.value?.capabilities?.canViewUltraLowPrice ??
     canViewUltraLowPrice.value,
+);
+
+function getProductGroup(product: NormalizedProductType): ProductGroup {
+  if (!product.composite) return 'BASE_TPE';
+  if (RUBBER_PRODUCT_CODES.has(product.productCode)) {
+    return 'RUBBER_COMPOSITE';
+  }
+  return 'EXTERNAL_LAMINATION';
+}
+
+const visibleProductTypes = computed(() =>
+  productTypes.value.filter(
+    (product) => getProductGroup(product) === activeProductGroup.value,
+  ),
+);
+
+const activeProductGroupLabel = computed(
+  () =>
+    PRODUCT_GROUP_OPTIONS.find(
+      (item) => item.value === activeProductGroup.value,
+    )?.label ?? '当前产品组',
+);
+
+const externalLaminationGroupActive = computed(
+  () => activeProductGroup.value === 'EXTERNAL_LAMINATION',
 );
 
 const smallMatPolicyNeedsParameterReview = computed(() =>
@@ -394,7 +467,7 @@ const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
     key: 'specification',
     title: '规格(mm)',
   },
-  ...productTypes.value.map((product, index) => {
+  ...visibleProductTypes.value.map((product, index) => {
     const toneClass = index % 2 === 0 ? 'matrix-header-a' : 'matrix-header-b';
     const productColumns = [
       {
@@ -418,8 +491,8 @@ const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
           }`,
         }),
         key: `regular:${product.productCode}`,
-        title: '常规价',
-        width: 112,
+        title: '常规报价',
+        width: 152,
       },
     ];
     if (canViewUltraLowPrice.value) {
@@ -431,8 +504,8 @@ const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
           class: `matrix-header ${toneClass} matrix-header-ultra-low matrix-product-end-cell`,
         }),
         key: `ultra:${product.productCode}`,
-        title: '超低价',
-        width: 112,
+        title: '超低报价',
+        width: 152,
       });
     }
     return {
@@ -561,23 +634,32 @@ function normalizeProducts(
 ): NormalizedProductType[] {
   if (!sourceProducts?.length) return [...PRODUCT_TYPES];
 
-  const productsByCode = new Map(
-    sourceProducts
-      .map((item) => [item.productCode ?? item.code, item] as const)
-      .filter((item): item is readonly [string, ProductTypeOption] =>
-        Boolean(item[0]),
-      ),
+  const fallbackByCode = new Map(
+    PRODUCT_TYPES.map((item) => [item.productCode, item]),
   );
-  return PRODUCT_TYPES.map((fallback) => {
-    const source = productsByCode.get(fallback.productCode);
-    return {
+  const normalized: NormalizedProductType[] = [];
+  const seenCodes = new Set<string>();
+  for (const source of sourceProducts) {
+    const productCode = source.productCode ?? source.code;
+    if (!productCode || seenCodes.has(productCode)) continue;
+    const fallback = fallbackByCode.get(productCode);
+    normalized.push({
       ...fallback,
       ...source,
-      productCode: fallback.productCode,
+      composite: source.composite ?? fallback?.composite ?? false,
+      productCode,
       productLabel:
-        source?.productLabel ?? source?.label ?? fallback.productLabel,
-    };
-  });
+        source.productLabel ??
+        source.label ??
+        fallback?.productLabel ??
+        productCode,
+    });
+    seenCodes.add(productCode);
+  }
+  for (const fallback of PRODUCT_TYPES) {
+    if (!seenCodes.has(fallback.productCode)) normalized.push({ ...fallback });
+  }
+  return normalized;
 }
 
 function getEntry(row: SpecificationRow, productCode: string) {
@@ -602,6 +684,24 @@ function getAdditionalCost(
     (toNumber(entry.surfaceCostPerPiece) ?? 0) +
     (toNumber(entry.adhesiveCostPerPiece) ?? 0)
   );
+}
+
+function formatLaminationLayoutDetail(
+  lamination?: null | NonNullable<QuotationEntry['lamination']>,
+) {
+  if (!lamination) return '—';
+  const parts: string[] = [];
+  if ((lamination.standardRows ?? 0) > 0) {
+    parts.push(
+      `标准 ${lamination.piecesPerStandardRow ?? '—'} 片/排 × ${lamination.standardRows} 排`,
+    );
+  }
+  if ((lamination.rotatedRows ?? 0) > 0) {
+    parts.push(
+      `旋转 ${lamination.piecesPerRotatedRow ?? '—'} 片/排 × ${lamination.rotatedRows} 排`,
+    );
+  }
+  return parts.join(' + ') || '—';
 }
 
 function isPriceColumn(columnKey: unknown) {
@@ -655,6 +755,80 @@ function getColumnPrice(rawRecord: unknown, columnKey: unknown) {
     entry?.unitQuoteDisplay ??
     (canViewQuoteDetail.value ? entry?.unitQuoteExact : undefined)
   );
+}
+
+function getColumnTaxIncludedPrice(rawRecord: unknown, columnKey: unknown) {
+  const entry = getRecordEntry(rawRecord, productCodeFromColumn(columnKey));
+  const excludingTax = getColumnPrice(rawRecord, columnKey);
+  const includingTax = isUltraLowColumn(columnKey)
+    ? (entry?.ultraLowQuoteTaxIncludedDisplay ??
+      (canViewQuoteDetail.value
+        ? entry?.ultraLowQuoteTaxIncludedExact
+        : undefined))
+    : (entry?.unitQuoteTaxIncludedDisplay ??
+      (canViewQuoteDetail.value
+        ? entry?.unitQuoteTaxIncludedExact
+        : undefined));
+  return resolveTaxIncludedValue(excludingTax, includingTax, entry?.taxRate);
+}
+
+function hasAccessoryFallback(rawRecord: unknown, columnKey: unknown) {
+  return Boolean(
+    getRecordEntry(
+      rawRecord,
+      productCodeFromColumn(columnKey),
+    )?.accessoryMatches?.some(
+      (item) => String(item.matchMode).toUpperCase() !== 'EXACT',
+    ),
+  );
+}
+
+function accessoryTypeLabel(value: unknown) {
+  const labels: Record<string, string> = {
+    CARTON: '外箱',
+    OPP: 'OPP膜',
+    STRAP: '绑带',
+  };
+  return labels[String(value ?? '').toUpperCase()] || String(value || '辅料');
+}
+
+function formatAccessoryMatchSpecification(
+  length: unknown,
+  width: unknown,
+  thickness: unknown,
+) {
+  return `${formatDimension(length)} × ${formatDimension(width)} × ${formatDimension(
+    thickness,
+  )} mm`;
+}
+
+function getAccessoryFallbackTooltip(rawRecord: unknown, columnKey: unknown) {
+  const matches =
+    getRecordEntry(rawRecord, productCodeFromColumn(columnKey))
+      ?.accessoryMatches ?? [];
+  return matches
+    .filter((item) => String(item.matchMode).toUpperCase() !== 'EXACT')
+    .map(
+      (item) =>
+        `${item.accessoryName || accessoryTypeLabel(item.accessoryType)}：${formatAccessoryMatchSpecification(
+          item.requestedLengthMm,
+          item.requestedWidthMm,
+          item.requestedThicknessMm,
+        )} → ${formatAccessoryMatchSpecification(
+          item.matchedLengthMm,
+          item.matchedWidthMm,
+          item.matchedThicknessMm,
+        )}`,
+    )
+    .join('；');
+}
+
+function resolveEntryTaxIncluded(
+  entry: QuotationEntry | undefined,
+  excludingTax: unknown,
+  includingTax?: unknown,
+) {
+  return resolveTaxIncludedValue(excludingTax, includingTax, entry?.taxRate);
 }
 
 function getColumnWeight(rawRecord: unknown, columnKey: unknown) {
@@ -862,6 +1036,7 @@ function applySmallMatPolicy(policy?: SmallMatPolicyResp) {
     kerfMm: toNumber(policy?.kerfMm) ?? 0,
     maxAreaSquareMeters: toNumber(policy?.maxAreaSquareMeters) ?? 0.5,
     orderSetupCost: toNumber(policy?.orderSetupCost) ?? 0,
+    pricingEnabled: policy?.pricingEnabled ?? true,
     repackingCostPerPiece: toNumber(policy?.repackingCostPerPiece) ?? 0,
   });
 }
@@ -910,6 +1085,7 @@ async function handleSaveSmallMatPolicy() {
       kerfMm: Number(smallMatPolicyForm.kerfMm),
       maxAreaSquareMeters: Number(smallMatPolicyForm.maxAreaSquareMeters),
       orderSetupCost: Number(smallMatPolicyForm.orderSetupCost),
+      pricingEnabled: smallMatPolicyForm.pricingEnabled,
       repackingCostPerPiece: Number(smallMatPolicyForm.repackingCostPerPiece),
     });
     smallMatPolicy.value = savedPolicy ?? smallMatPolicy.value;
@@ -940,10 +1116,10 @@ const resultIsStale = computed(
 
 const tableScrollX = computed(() =>
   Math.max(
-    1959,
+    980,
     295 +
-      productTypes.value.length *
-        (canViewUltraLowPrice.value ? 96 + 224 : 96 + 112),
+      visibleProductTypes.value.length *
+        (canViewUltraLowPrice.value ? 96 + 304 : 96 + 152),
   ),
 );
 
@@ -957,7 +1133,7 @@ const lengthOptions = computed(() => uniqueDimensionOptions('lengthMm'));
 const widthOptions = computed(() => uniqueDimensionOptions('widthMm'));
 const thicknessOptions = computed(() => uniqueDimensionOptions('thicknessMm'));
 const productFilterOptions = computed(() =>
-  productTypes.value.map((product) => ({
+  visibleProductTypes.value.map((product) => ({
     label: product.productLabel,
     value: product.productCode,
   })),
@@ -1007,7 +1183,9 @@ const filteredRows = computed(() =>
 
     const entries = filterState.productCode
       ? [getEntry(row, filterState.productCode)]
-      : productTypes.value.map((product) => getEntry(row, product.productCode));
+      : visibleProductTypes.value.map((product) =>
+          getEntry(row, product.productCode),
+        );
     return entries.some(
       (entry) =>
         normalizeStatus(entry?.status ?? 'NOT_CONFIGURED') ===
@@ -1212,6 +1390,10 @@ function resetFilters() {
   });
 }
 
+function handleProductGroupChange() {
+  filterState.productCode = undefined;
+}
+
 function showDetail(rawRecord: unknown, productCode: string) {
   if (!canViewQuoteDetail.value) return;
 
@@ -1241,7 +1423,7 @@ onMounted(async () => {
 
 <template>
   <Page
-    description="按常用长、宽、厚规格集中查看 8 类产品的实时计算价格。"
+    description="按产品组查看 12 类常用规格的实时计算价格，避免超宽表格影响对比。"
     title="常规规格报价表"
   >
     <div class="standard-quotation-page">
@@ -1250,7 +1432,7 @@ onMounted(async () => {
         show-icon
         type="info"
         message="实时计算口径"
-        description="价格均由现有报价引擎按当前配方、原料、工费、模具和规格对应的报价规则实时计算；价格口径由系统按规格自动匹配。"
+        description="价格均由现有报价引擎按当前配方、原料、工费、模具和规格对应的报价规则实时计算；原报价为不含税口径，含税价固定增加 8%。辅料优先精确匹配，无精确记录时仅向长、宽、厚均不小于成品的启用规格匹配。"
       />
 
       <Alert
@@ -1366,6 +1548,15 @@ onMounted(async () => {
       </Card>
 
       <Alert
+        v-if="externalLaminationGroupActive"
+        class="mt-4"
+        show-icon
+        type="info"
+        message="外采面材价格依赖当前报价数量"
+        :description="`当前按每个规格 ${formState.quantity} 片进行固定卷宽排版和余料分摊；数量变化可能使单价呈阶梯变化，请修改数量后重新计算。`"
+      />
+
+      <Alert
         v-if="resultIsStale"
         class="mt-4"
         show-icon
@@ -1435,6 +1626,14 @@ onMounted(async () => {
             </div>
 
             <div class="table-toolbar">
+              <div class="product-group-switcher">
+                <span class="product-group-label">产品组</span>
+                <Select
+                  v-model:value="activeProductGroup"
+                  :options="PRODUCT_GROUP_OPTIONS"
+                  @change="handleProductGroupChange"
+                />
+              </div>
               <div class="filter-grid">
                 <Select
                   v-model:value="filterState.lengthMm"
@@ -1458,7 +1657,7 @@ onMounted(async () => {
                   v-model:value="filterState.productCode"
                   allow-clear
                   :options="productFilterOptions"
-                  placeholder="状态对应产品（任一产品）"
+                  placeholder="筛选当前组产品"
                 />
                 <Select
                   v-model:value="filterState.quotationStatus"
@@ -1467,9 +1666,14 @@ onMounted(async () => {
                 <Button @click="resetFilters">清空筛选</Button>
               </div>
               <div class="table-context">
-                <strong>{{ productTypes.length }} 类产品同表展示</strong>
-                <span> · 克重 / 常规价</span>
-                <span v-if="canViewUltraLowPrice"> / 超低价对比</span>
+                <strong>
+                  {{ activeProductGroupLabel }} ·
+                  {{ visibleProductTypes.length }} 类产品
+                </strong>
+                <span> · 克重 / 常规报价（不含税 / 含税）</span>
+                <span v-if="canViewUltraLowPrice">
+                  / 超低报价（不含税 / 含税）
+                </span>
                 <span> · 当前 {{ filteredRows.length }} 条规格</span>
               </div>
             </div>
@@ -1505,26 +1709,61 @@ onMounted(async () => {
                       ) === 'CALCULATED'
                     "
                   >
-                    <Tooltip
-                      v-if="canViewQuoteDetail && !isUltraLowColumn(column.key)"
-                      title="点击查看报价明细"
-                    >
-                      <Button
-                        class="matrix-price-button"
-                        size="small"
-                        type="link"
-                        @click="
-                          showDetail(record, productCodeFromColumn(column.key))
+                    <div class="matrix-price-stack">
+                      <div class="matrix-price-line">
+                        <span class="matrix-price-label">不含税</span>
+                        <Tooltip
+                          v-if="
+                            canViewQuoteDetail && !isUltraLowColumn(column.key)
+                          "
+                          title="点击查看报价明细"
+                        >
+                          <Button
+                            class="matrix-price-button"
+                            size="small"
+                            type="link"
+                            @click="
+                              showDetail(
+                                record,
+                                productCodeFromColumn(column.key),
+                              )
+                            "
+                          >
+                            {{
+                              formatPriceCell(
+                                getColumnPrice(record, column.key),
+                              )
+                            }}
+                          </Button>
+                        </Tooltip>
+                        <span v-else class="matrix-price-text">
+                          {{
+                            formatPriceCell(getColumnPrice(record, column.key))
+                          }}
+                        </span>
+                      </div>
+                      <div class="matrix-price-line matrix-tax-price-line">
+                        <span class="matrix-price-label">含税</span>
+                        <span class="matrix-price-text">
+                          {{
+                            formatPriceCell(
+                              getColumnTaxIncludedPrice(record, column.key),
+                            )
+                          }}
+                        </span>
+                      </div>
+                      <Tooltip
+                        v-if="
+                          !isUltraLowColumn(column.key) &&
+                          hasAccessoryFallback(record, column.key)
                         "
+                        :title="getAccessoryFallbackTooltip(record, column.key)"
                       >
-                        {{
-                          formatPriceCell(getColumnPrice(record, column.key))
-                        }}
-                      </Button>
-                    </Tooltip>
-                    <span v-else class="matrix-price-text">
-                      {{ formatPriceCell(getColumnPrice(record, column.key)) }}
-                    </span>
+                        <Tag class="matrix-accessory-tag" color="warning">
+                          辅料向上匹配
+                        </Tag>
+                      </Tooltip>
+                    </div>
                   </template>
                   <span
                     v-else-if="
@@ -1591,7 +1830,7 @@ onMounted(async () => {
         show-icon
         type="info"
         message="规格保存后将由现有报价引擎计算"
-        description="请分别填写长度、宽度和厚度，系统会将较长边统一作为长度。新增后 TPE常规、轻羽、高弹由引擎计算；5种复合品缺少基材厚度、表面或胶水成本时显示未配置。仅在开启OPP膜、外箱或绑带且缺少对应价格时，才需到辅料价格表补齐。"
+        description="请分别填写长度、宽度和厚度，系统会将较长边统一作为长度。新增后 TPE常规、轻羽、高弹由引擎计算；复合品缺少基材厚度、表面或胶水成本时显示未配置。OPP膜、外箱和绑带优先精确匹配；没有精确价格时，只使用长、宽、厚均不小于成品的最近启用规格，仍无合格记录才会阻断。"
       />
       <Form
         ref="createSpecificationFormRef"
@@ -1638,7 +1877,7 @@ onMounted(async () => {
       :mask-closable="!smallMatPolicySaving && !smallMatPolicyLoading"
       ok-text="保存设置"
       title="小垫判定设置"
-      width="620px"
+      width="760px"
       @ok="handleSaveSmallMatPolicy"
     >
       <Spin :spinning="smallMatPolicyLoading">
@@ -1646,8 +1885,8 @@ onMounted(async () => {
           class="mb-4"
           show-icon
           type="info"
-          message="设置小垫范围与裁切基础参数"
-          description="成品规格均按 mm 输入；系统以成品面积判断是否适用小垫拆分，并按当前有效设置完成排版和报价。"
+          message="分别设置小垫报价政策与拆分测算"
+          description="面积阈值同时用于识别小垫；报价政策和母垫裁切测算可独立启停，具体价格规则始终由服务端执行。"
         />
 
         <Alert
@@ -1660,12 +1899,21 @@ onMounted(async () => {
         />
 
         <Alert
-          v-else-if="smallMatPolicy?.enabled === false"
+          v-if="smallMatPolicy?.pricingEnabled === false"
           class="mb-4"
           show-icon
           type="warning"
-          message="小垫拆分当前未启用"
-          description="请确认裁切参数和费用后，打开“启用小垫拆分”并保存。"
+          message="小垫报价政策当前未启用"
+          description="面积阈值仍会保留；开启“启用小垫报价政策”并保存后，新的报价才会使用小垫专用价格政策。"
+        />
+
+        <Alert
+          v-if="smallMatPolicy?.enabled === false"
+          class="mb-4"
+          show-icon
+          type="warning"
+          message="小垫拆分测算当前未启用"
+          description="请确认裁切参数和费用后，打开“启用小垫拆分测算”并保存；该开关不影响小垫报价政策。"
         />
 
         <Alert
@@ -1756,10 +2004,21 @@ onMounted(async () => {
 
           <div class="small-mat-policy-switches">
             <div class="switch-field">
+              <Switch v-model:checked="smallMatPolicyForm.pricingEnabled" />
+              <div>
+                <div class="switch-title">启用小垫报价政策</div>
+                <div class="switch-description">
+                  控制面积阈值内是否使用小垫专用报价政策
+                </div>
+              </div>
+            </div>
+            <div class="switch-field">
               <Switch v-model:checked="smallMatPolicyForm.enabled" />
               <div>
-                <div class="switch-title">启用小垫拆分</div>
-                <div class="switch-description">关闭后不生成小垫拆分报价</div>
+                <div class="switch-title">启用小垫拆分测算</div>
+                <div class="switch-description">
+                  控制是否生成母垫推荐和裁切排版方案
+                </div>
               </div>
             </div>
             <div class="switch-field">
@@ -1958,7 +2217,9 @@ onMounted(async () => {
             <template v-else-if="isSmallMatCalculated()">
               <div class="small-mat-price-grid">
                 <div class="small-mat-price-card small-mat-regular-price">
-                  <div class="small-mat-price-label">常规报价（单片）</div>
+                  <div class="small-mat-price-label">
+                    常规报价（不含税单片）
+                  </div>
                   <Tooltip
                     v-if="canViewSmallMatQuoteDetail"
                     title="点击查看规格报价明细"
@@ -1979,9 +2240,33 @@ onMounted(async () => {
                     v-if="hasValue(smallMatResult.totalQuoteDisplay)"
                     class="small-mat-price-subtext"
                   >
-                    本次数量报价：{{
+                    不含税总价：{{
                       formatMoney(smallMatResult.totalQuoteDisplay)
                     }}
+                  </div>
+                  <div class="small-mat-tax-price">
+                    含税单片（+{{
+                      formatQuotationTaxRate(smallMatResult.taxRate)
+                    }}）：{{
+                      formatMoney(
+                        resolveTaxIncludedValue(
+                          smallMatResult.unitQuoteDisplay,
+                          smallMatResult.unitQuoteTaxIncludedDisplay,
+                          smallMatResult.taxRate,
+                        ),
+                      )
+                    }}
+                    <span v-if="hasValue(smallMatResult.totalQuoteDisplay)">
+                      含税总价：{{
+                        formatMoney(
+                          resolveTaxIncludedValue(
+                            smallMatResult.totalQuoteDisplay,
+                            smallMatResult.totalQuoteTaxIncludedDisplay,
+                            smallMatResult.taxRate,
+                          ),
+                        )
+                      }}
+                    </span>
                   </div>
                 </div>
 
@@ -1992,13 +2277,32 @@ onMounted(async () => {
                   "
                   class="small-mat-price-card small-mat-ultra-price"
                 >
-                  <div class="small-mat-price-label">超低价（单片）</div>
+                  <div class="small-mat-price-label">超低价（不含税单片）</div>
                   <div class="small-mat-price-value">
                     {{ formatMoney(smallMatResult.ultraLowQuoteDisplay) }}
                   </div>
-                  <div class="small-mat-price-subtext">按当前权限展示</div>
+                  <div class="small-mat-tax-price">
+                    含税单片（+{{
+                      formatQuotationTaxRate(smallMatResult.taxRate)
+                    }}）：{{
+                      formatMoney(
+                        resolveTaxIncludedValue(
+                          smallMatResult.ultraLowQuoteDisplay,
+                          smallMatResult.ultraLowQuoteTaxIncludedDisplay,
+                          smallMatResult.taxRate,
+                        ),
+                      )
+                    }}
+                  </div>
                 </div>
               </div>
+
+              <AccessoryMatchList
+                v-if="smallMatResult.accessoryMatches?.length"
+                :matches="smallMatResult.accessoryMatches"
+                class="mt-4"
+                heading="本次小垫辅料匹配"
+              />
 
               <template v-if="canViewSmallMatPlan && smallMatResult.plan">
                 <Divider orientation="left">推荐母垫与排版</Divider>
@@ -2059,11 +2363,15 @@ onMounted(async () => {
                       </Tag>
                       <span>{{ formatMotherSpecification(candidate) }}</span>
                     </div>
-                    <span>每张
-                      {{ formatDimension(candidate.piecesPerMother) }} 片</span>
+                    <span
+                      >每张
+                      {{ formatDimension(candidate.piecesPerMother) }} 片</span
+                    >
                     <span>{{ formatDimension(candidate.motherCount) }} 张</span>
-                    <span>利用率
-                      {{ formatUtilization(candidate.orderUtilization) }}</span>
+                    <span
+                      >利用率
+                      {{ formatUtilization(candidate.orderUtilization) }}</span
+                    >
                   </div>
                 </div>
               </template>
@@ -2120,10 +2428,8 @@ onMounted(async () => {
             </div>
           </div>
           <Tag color="success">
-{{
-            smallMatStatusLabel(smallMatResult.status)
-          }}
-</Tag>
+            {{ smallMatStatusLabel(smallMatResult.status) }}
+          </Tag>
         </div>
 
         <Descriptions bordered :column="2" size="small">
@@ -2163,18 +2469,62 @@ onMounted(async () => {
           <Descriptions.Item label="最终单位成本">
             {{ formatExactMoney(smallMatResult.detail.finalUnitCostExact) }}
           </Descriptions.Item>
-          <Descriptions.Item label="常规单片报价">
+          <Descriptions.Item label="常规单片报价（不含税）">
             {{ formatExactMoney(smallMatResult.detail.regularUnitQuoteExact) }}
           </Descriptions.Item>
-          <Descriptions.Item label="常规总报价">
+          <Descriptions.Item label="常规单片报价（含税）">
+            {{
+              formatExactMoney(
+                resolveTaxIncludedValue(
+                  smallMatResult.detail.regularUnitQuoteExact,
+                  smallMatResult.detail.regularUnitQuoteTaxIncludedExact,
+                  smallMatResult.taxRate,
+                ),
+              )
+            }}
+          </Descriptions.Item>
+          <Descriptions.Item label="常规总报价（不含税）">
             {{ formatExactMoney(smallMatResult.detail.regularTotalQuoteExact) }}
           </Descriptions.Item>
-          <Descriptions.Item label="超低单片报价">
+          <Descriptions.Item label="常规总报价（含税）">
+            {{
+              formatExactMoney(
+                resolveTaxIncludedValue(
+                  smallMatResult.detail.regularTotalQuoteExact,
+                  smallMatResult.detail.regularTotalQuoteTaxIncludedExact,
+                  smallMatResult.taxRate,
+                ),
+              )
+            }}
+          </Descriptions.Item>
+          <Descriptions.Item label="超低单片报价（不含税）">
             {{ formatExactMoney(smallMatResult.detail.ultraLowUnitQuoteExact) }}
           </Descriptions.Item>
-          <Descriptions.Item label="超低总报价">
+          <Descriptions.Item label="超低单片报价（含税）">
+            {{
+              formatExactMoney(
+                resolveTaxIncludedValue(
+                  smallMatResult.detail.ultraLowUnitQuoteExact,
+                  smallMatResult.detail.ultraLowUnitQuoteTaxIncludedExact,
+                  smallMatResult.taxRate,
+                ),
+              )
+            }}
+          </Descriptions.Item>
+          <Descriptions.Item label="超低总报价（不含税）">
             {{
               formatExactMoney(smallMatResult.detail.ultraLowTotalQuoteExact)
+            }}
+          </Descriptions.Item>
+          <Descriptions.Item label="超低总报价（含税）">
+            {{
+              formatExactMoney(
+                resolveTaxIncludedValue(
+                  smallMatResult.detail.ultraLowTotalQuoteExact,
+                  smallMatResult.detail.ultraLowTotalQuoteTaxIncludedExact,
+                  smallMatResult.taxRate,
+                ),
+              )
             }}
           </Descriptions.Item>
         </Descriptions>
@@ -2221,6 +2571,73 @@ onMounted(async () => {
           </Descriptions.Item>
         </Descriptions>
 
+        <template v-if="selectedDetail.entry?.lamination">
+          <Divider orientation="left">外采面材排版</Divider>
+          <Descriptions bordered :column="2" size="small">
+            <Descriptions.Item label="贴合材料">
+              {{ selectedDetail.entry.lamination.materialCode || '—' }} ·
+              {{ selectedDetail.entry.lamination.materialName || '—' }}
+            </Descriptions.Item>
+            <Descriptions.Item label="材料版本">
+              {{ selectedDetail.entry.lamination.versionCode || '—' }}
+            </Descriptions.Item>
+            <Descriptions.Item label="TPE基材厚度">
+              {{
+                formatDimension(selectedDetail.entry.lamination.tpeThicknessMm)
+              }}
+              mm
+            </Descriptions.Item>
+            <Descriptions.Item label="订单排版">
+              {{
+                formatLaminationLayoutDetail(selectedDetail.entry.lamination)
+              }}
+            </Descriptions.Item>
+            <Descriptions.Item label="计费购买长度">
+              {{
+                formatDimension(
+                  selectedDetail.entry.lamination.billableLengthMm,
+                )
+              }}
+              mm
+            </Descriptions.Item>
+            <Descriptions.Item label="面材利用率">
+              {{
+                formatUtilization(
+                  selectedDetail.entry.lamination.layoutUtilizationRate,
+                )
+              }}
+            </Descriptions.Item>
+            <Descriptions.Item label="面材单片成本">
+              {{
+                formatExactMoney(
+                  selectedDetail.entry.lamination.materialCostPerPiece,
+                )
+              }}
+            </Descriptions.Item>
+            <Descriptions.Item label="热熔胶单片成本">
+              {{
+                formatExactMoney(
+                  selectedDetail.entry.lamination.adhesiveCostPerPiece,
+                )
+              }}
+            </Descriptions.Item>
+            <Descriptions.Item label="贴合加工费">
+              {{
+                formatExactMoney(
+                  selectedDetail.entry.lamination.laminationLaborCostPerPiece,
+                )
+              }}
+            </Descriptions.Item>
+            <Descriptions.Item label="面材订单成本">
+              {{
+                formatExactMoney(
+                  selectedDetail.entry.lamination.materialOrderCost,
+                )
+              }}
+            </Descriptions.Item>
+          </Descriptions>
+        </template>
+
         <Divider orientation="left">成本与报价</Divider>
         <Descriptions bordered :column="2" size="small">
           <Descriptions.Item label="引擎基础成本">
@@ -2262,7 +2679,7 @@ onMounted(async () => {
           <Descriptions.Item label="总成本">
             {{ formatExactMoney(selectedDetail.entry?.unitCostExact) }}
           </Descriptions.Item>
-          <Descriptions.Item label="最终实时报价" :span="2">
+          <Descriptions.Item label="最终实时报价（不含税）">
             <span class="detail-quote">
               {{
                 formatMoney(
@@ -2279,7 +2696,46 @@ onMounted(async () => {
               {{ formatExactMoney(selectedDetail.entry?.unitQuoteExact) }}
             </span>
           </Descriptions.Item>
+          <Descriptions.Item
+            :label="`最终实时报价（含税 +${formatQuotationTaxRate(selectedDetail.entry?.taxRate)}）`"
+          >
+            <span class="detail-quote tax-detail-quote">
+              {{
+                formatMoney(
+                  resolveEntryTaxIncluded(
+                    selectedDetail.entry,
+                    selectedDetail.entry?.unitQuoteDisplay ??
+                      selectedDetail.entry?.unitQuoteExact,
+                    selectedDetail.entry?.unitQuoteTaxIncludedDisplay ??
+                      selectedDetail.entry?.unitQuoteTaxIncludedExact,
+                  ),
+                )
+              }}
+            </span>
+            <span
+              v-if="hasValue(selectedDetail.entry?.unitQuoteExact)"
+              class="exact-value"
+            >
+              精确值
+              {{
+                formatExactMoney(
+                  resolveEntryTaxIncluded(
+                    selectedDetail.entry,
+                    selectedDetail.entry?.unitQuoteExact,
+                    selectedDetail.entry?.unitQuoteTaxIncludedExact,
+                  ),
+                )
+              }}
+            </span>
+          </Descriptions.Item>
         </Descriptions>
+
+        <AccessoryMatchList
+          v-if="selectedDetail.entry?.accessoryMatches?.length"
+          :matches="selectedDetail.entry.accessoryMatches"
+          class="mt-4"
+          heading="本规格辅料匹配"
+        />
 
         <Alert
           v-if="selectedDetail.entry?.blockReasons?.length"
@@ -2434,7 +2890,7 @@ onMounted(async () => {
 
 .small-mat-policy-switches {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -2571,6 +3027,18 @@ onMounted(async () => {
   color: var(--ant-color-text-secondary, #8c8c8c);
 }
 
+.small-mat-tax-price {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-primary, #1677ff);
+  border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
+}
+
 .small-mat-plan-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2655,6 +3123,23 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
+.product-group-switcher {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.product-group-switcher :deep(.ant-select) {
+  width: 150px;
+}
+
+.product-group-label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(130px, 170px)) auto;
@@ -2671,6 +3156,10 @@ onMounted(async () => {
   font-size: 20px;
   font-weight: 700;
   color: var(--ant-color-primary, #1677ff);
+}
+
+.tax-detail-quote {
+  color: var(--ant-color-success, #52c41a);
 }
 
 .matrix-table :deep(.ant-table-thead > tr > th.matrix-header) {
@@ -2742,6 +3231,39 @@ onMounted(async () => {
   font-variant-numeric: tabular-nums;
 }
 
+.matrix-price-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: stretch;
+  min-width: 112px;
+}
+
+.matrix-price-line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  white-space: nowrap;
+}
+
+.matrix-price-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.matrix-tax-price-line .matrix-price-text {
+  color: var(--ant-color-success, #389e0d);
+}
+
+.matrix-accessory-tag {
+  align-self: center;
+  margin-inline-end: 0;
+  font-size: 10px;
+  cursor: help;
+}
+
 .matrix-price-text {
   font-size: 14px;
   font-weight: 700;
@@ -2804,6 +3326,14 @@ onMounted(async () => {
   .table-toolbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .product-group-switcher {
+    width: 100%;
+  }
+
+  .product-group-switcher :deep(.ant-select) {
+    flex: 1;
   }
 }
 

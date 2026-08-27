@@ -4,12 +4,21 @@ import type { Rule } from 'ant-design-vue/es/form';
 
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
 
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -23,10 +32,12 @@ import {
   FormItem,
   InputNumber,
   message,
+  Progress,
   RadioGroup,
   Segmented,
   Select,
   Spin,
+  Space,
   Switch,
   Table,
   Tag,
@@ -35,9 +46,12 @@ import {
 
 import {
   calculateQuotation,
+  createQuotationAiAnalysis,
+  getQuotationAiAnalysis,
   getQuotationOptions,
 } from '#/api/fdmcaiwu/quotation';
 
+import AccessoryMatchList from './components/accessory-match-list.vue';
 import {
   formatCompactDecimal,
   formatDecimal,
@@ -47,10 +61,11 @@ import {
   formatMaterialUnitCost,
   formatMoney,
   formatProductType,
-  formatProfitMode,
+  formatQuotationTaxRate,
   formatRate,
   formatSpecification,
   hasValue,
+  resolveTaxIncludedValue,
   RESULT_COST_FIELDS,
 } from './data';
 import BatchQuotationPanel from '../batch-quotation/index.vue';
@@ -59,19 +74,20 @@ defineOptions({ name: 'FdmcaiwuQuotation' });
 
 type MouldSelectionMode = 'AUTO' | 'MANUAL';
 type QuotationMode = 'batch' | 'single';
+type ProductStructure = 'LAMINATED' | 'PURE_TPE';
 
 interface QuotationFormModel {
   includeCarton: boolean;
   includeOpp: boolean;
   includeStrap: boolean;
   includeSupplement: boolean;
+  laminationMaterialId?: number | string;
   mouldProfileId?: number;
   mouldSelectionMode: MouldSelectionMode;
   productLengthMm?: number;
   productThicknessMm?: number;
   productWidthMm?: number;
-  profitMode?: string;
-  profitRatePercent?: number;
+  productStructure: ProductStructure;
   quantity?: number;
   recipeId?: number;
 }
@@ -87,14 +103,13 @@ interface CandidateTableRow extends FdmcaiwuQuotationApi.MouldCandidate {
   utilizationText: string;
 }
 
-const FALLBACK_PROFIT_MODES = [
-  { label: '毛利率', value: 'GROSS_MARGIN' },
-  { label: '加价率', value: 'MARKUP' },
-];
-
 const route = useRoute();
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
+const userStore = useUserStore();
+const isSuperAdmin = computed(() =>
+  (userStore.userRoles ?? []).includes('super_admin'),
+);
 const canUseBatchQuotation = hasAccessByCodes([
   'fdmcaiwu:batch-quotation:query',
 ]);
@@ -162,17 +177,35 @@ const calculating = ref(false);
 const optionsError = ref('');
 const requestError = ref('');
 const result = ref<FdmcaiwuQuotationApi.CalculateResp>();
+const lastCalculateRequest = ref<FdmcaiwuQuotationApi.CalculateReq>();
 const activeResultTab = ref('overview');
+const aiAnalysisLoading = ref(false);
+const aiAnalysisStatus = ref('');
+const aiAnalysisProgress = ref(0);
+const aiAnalysisMessage = ref('');
+const aiAnalysisError = ref('');
+const aiAnalysisResult = ref<FdmcaiwuQuotationApi.AiAnalysisResult>();
 const quotationOptions = ref<FdmcaiwuQuotationApi.Options>({
+  capabilities: undefined,
   costDefaults: undefined,
+  laminationMaterials: [],
   mouldProfiles: [],
-  profitModes: [],
   recipes: [],
 });
+
+const canViewOptionQuoteDetail = computed(
+  () =>
+    isSuperAdmin.value &&
+    quotationOptions.value.capabilities?.canViewQuoteDetail === true,
+);
 
 let calculateRequestSeq = 0;
 let optionsRequestSeq = 0;
 let optionsInitialized = false;
+let aiAnalysisRequestSeq = 0;
+
+const AI_ANALYSIS_MAX_POLLS = 80;
+const AI_ANALYSIS_POLL_INTERVAL_MS = 1500;
 
 function createInitialForm(): QuotationFormModel {
   return {
@@ -180,13 +213,13 @@ function createInitialForm(): QuotationFormModel {
     includeOpp: false,
     includeStrap: false,
     includeSupplement: true,
+    laminationMaterialId: undefined,
     mouldProfileId: undefined,
     mouldSelectionMode: 'AUTO',
     productLengthMm: undefined,
     productThicknessMm: undefined,
     productWidthMm: undefined,
-    profitMode: 'GROSS_MARGIN',
-    profitRatePercent: 20,
+    productStructure: 'PURE_TPE',
     quantity: 1,
     recipeId: undefined,
   };
@@ -221,6 +254,8 @@ function isRecipeCostAvailable(recipe?: FdmcaiwuQuotationApi.RecipeOption) {
   ) {
     return false;
   }
+  // 非超级管理员收到的是已脱敏选项，成本为空并不代表配方不可使用。
+  if (!canViewOptionQuoteDetail.value) return true;
   return Number(recipe.unitCostPerKg) > 0;
 }
 
@@ -234,9 +269,11 @@ const recipeSelectOptions = computed(() =>
     const available = isRecipeCostAvailable(item);
     return {
       disabled: !available,
-      label: `${item.recipeCode} · ${item.recipeName} · ${
-        available ? formatMaterialUnitCost(item.unitCostPerKg) : '成本不可用'
-      }`,
+      label: `${item.recipeCode} · ${item.recipeName}${
+        canViewOptionQuoteDetail.value && available
+          ? ` · ${formatMaterialUnitCost(item.unitCostPerKg)}`
+          : ''
+      }${available ? '' : ' · 成本不可用'}`,
       title: available ? undefined : getRecipeBlockReason(item),
       value: item.id,
     };
@@ -247,6 +284,58 @@ const selectedRecipe = computed(() =>
   quotationOptions.value.recipes.find(
     (item) => String(item.id) === String(formState.recipeId),
   ),
+);
+
+const productStructureOptions = [
+  { label: '纯TPE', value: 'PURE_TPE' },
+  { label: 'TPE+外采面材', value: 'LAMINATED' },
+];
+
+const laminationMaterialOptions = computed(() =>
+  (quotationOptions.value.laminationMaterials ?? []).map((item) => ({
+    label: `${item.materialCode} · ${item.materialName} · 卷宽 ${formatCompactDecimal(
+      item.rollWidthMm,
+      'mm',
+      3,
+    )} · 厚 ${formatCompactDecimal(item.materialThicknessMm, 'mm', 3)}`,
+    value: item.id,
+  })),
+);
+
+const selectedLaminationMaterial = computed(() =>
+  (quotationOptions.value.laminationMaterials ?? []).find(
+    (item) => String(item.id) === String(formState.laminationMaterialId),
+  ),
+);
+
+const baseTpeThicknessPreview = computed(() => {
+  const finishedThickness = Number(formState.productThicknessMm);
+  const materialThickness = Number(
+    selectedLaminationMaterial.value?.materialThicknessMm,
+  );
+  if (
+    formState.productStructure !== 'LAMINATED' ||
+    !Number.isFinite(finishedThickness) ||
+    !Number.isFinite(materialThickness)
+  ) {
+    return undefined;
+  }
+  return finishedThickness - materialThickness;
+});
+
+const canViewQuoteDetail = computed(() => {
+  if (!isSuperAdmin.value) return false;
+  if (result.value) {
+    return result.value.capabilities?.canViewQuoteDetail === true;
+  }
+  return canViewOptionQuoteDetail.value;
+});
+
+const canViewUltraLowPrice = computed(
+  () =>
+    isSuperAdmin.value ||
+    result.value?.capabilities?.canViewUltraLowPrice === true ||
+    quotationOptions.value.capabilities?.canViewUltraLowPrice === true,
 );
 
 const availableRecipeCount = computed(
@@ -272,23 +361,6 @@ const selectedMouldProfile = computed(() =>
   ),
 );
 
-const profitModeOptions = computed(() => {
-  const options =
-    quotationOptions.value.profitModes.length > 0
-      ? quotationOptions.value.profitModes
-      : FALLBACK_PROFIT_MODES;
-  return options.map((item) => ({
-    label: item.label || formatProfitMode(item.value),
-    value: item.value,
-  }));
-});
-
-const profitRateExtra = computed(() =>
-  formState.profitMode === 'MARKUP'
-    ? '输入 20 表示在精确单位成本上加价 20%'
-    : '输入 20 表示目标销售毛利率为 20%',
-);
-
 const manualMouldExtra = computed(() => {
   if (formState.mouldSelectionMode === 'AUTO') {
     return '自动模式不传 mouldProfileId，由服务端选择单位成本最低的可行模具';
@@ -303,6 +375,16 @@ const manualMouldExtra = computed(() => {
 });
 
 const formRules: Record<string, Rule[]> = {
+  laminationMaterialId: [
+    {
+      async validator(_rule, value) {
+        if (formState.productStructure === 'LAMINATED' && !hasValue(value)) {
+          throw new Error('请选择贴合材料');
+        }
+      },
+      trigger: 'change',
+    },
+  ],
   mouldProfileId: [
     {
       async validator(_rule, value) {
@@ -328,6 +410,18 @@ const formRules: Record<string, Rule[]> = {
       trigger: 'change',
       type: 'number',
     },
+    {
+      async validator() {
+        if (
+          formState.productStructure === 'LAMINATED' &&
+          baseTpeThicknessPreview.value !== undefined &&
+          baseTpeThicknessPreview.value <= 0
+        ) {
+          throw new Error('成品总厚度必须大于贴合材料厚度');
+        }
+      },
+      trigger: 'change',
+    },
   ],
   productWidthMm: [
     {
@@ -335,29 +429,6 @@ const formRules: Record<string, Rule[]> = {
       required: true,
       trigger: 'change',
       type: 'number',
-    },
-  ],
-  profitMode: [
-    { message: '请选择利润模式', required: true, trigger: 'change' },
-  ],
-  profitRatePercent: [
-    {
-      message: '请输入利润率',
-      required: true,
-      trigger: 'change',
-      type: 'number',
-    },
-    {
-      async validator(_rule, value) {
-        const numberValue = Number(value);
-        if (!Number.isFinite(numberValue) || numberValue < 0) {
-          throw new Error('利润率不能小于 0%');
-        }
-        if (formState.profitMode === 'GROSS_MARGIN' && numberValue >= 100) {
-          throw new Error('毛利率必须小于 100%');
-        }
-      },
-      trigger: 'change',
     },
   ],
   quantity: [
@@ -392,13 +463,28 @@ function handleMouldModeChange() {
   }
 }
 
-function handleProfitModeChange() {
-  formRef.value?.validateFields(['profitRatePercent']).catch(() => undefined);
+function handleProductStructureChange() {
+  if (formState.productStructure === 'PURE_TPE') {
+    formState.laminationMaterialId = undefined;
+  }
+  formRef.value?.clearValidate(['laminationMaterialId', 'productThicknessMm']);
+}
+
+function clearAiAnalysis() {
+  aiAnalysisRequestSeq += 1;
+  aiAnalysisLoading.value = false;
+  aiAnalysisStatus.value = '';
+  aiAnalysisProgress.value = 0;
+  aiAnalysisMessage.value = '';
+  aiAnalysisError.value = '';
+  aiAnalysisResult.value = undefined;
 }
 
 function handleReset() {
   Object.assign(formState, createInitialFormFromOptions());
   result.value = undefined;
+  lastCalculateRequest.value = undefined;
+  clearAiAnalysis();
   activeResultTab.value = 'overview';
   requestError.value = '';
   nextTick(() => formRef.value?.clearValidate());
@@ -409,6 +495,8 @@ async function loadOptions() {
   calculateRequestSeq += 1;
   calculating.value = false;
   result.value = undefined;
+  lastCalculateRequest.value = undefined;
+  clearAiAnalysis();
   requestError.value = '';
   optionsLoading.value = true;
   optionsError.value = '';
@@ -416,9 +504,10 @@ async function loadOptions() {
     const data = await getQuotationOptions();
     if (requestSeq !== optionsRequestSeq) return;
     quotationOptions.value = {
+      capabilities: data?.capabilities,
       costDefaults: data?.costDefaults,
+      laminationMaterials: data?.laminationMaterials ?? [],
       mouldProfiles: data?.mouldProfiles ?? [],
-      profitModes: data?.profitModes ?? [],
       recipes: data?.recipes ?? [],
     };
 
@@ -471,8 +560,8 @@ function buildCalculateRequest():
     !formState.productThicknessMm ||
     formState.recipeId === undefined ||
     !formState.quantity ||
-    !formState.profitMode ||
-    formState.profitRatePercent === undefined
+    (formState.productStructure === 'LAMINATED' &&
+      !formState.laminationMaterialId)
   ) {
     return undefined;
   }
@@ -482,6 +571,10 @@ function buildCalculateRequest():
     includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
+    laminationMaterialId:
+      formState.productStructure === 'LAMINATED'
+        ? formState.laminationMaterialId
+        : undefined,
     mouldProfileId:
       formState.mouldSelectionMode === 'MANUAL'
         ? formState.mouldProfileId
@@ -489,8 +582,6 @@ function buildCalculateRequest():
     productLengthMm: formState.productLengthMm,
     productThicknessMm: formState.productThicknessMm,
     productWidthMm: formState.productWidthMm,
-    profitMode: formState.profitMode,
-    profitRate: Number((formState.profitRatePercent / 100).toFixed(6)),
     quantity: formState.quantity,
     recipeId: formState.recipeId,
   };
@@ -507,6 +598,8 @@ async function runCalculation() {
     const response = await calculateQuotation(payload);
     if (requestSeq !== calculateRequestSeq) return;
     result.value = response;
+    lastCalculateRequest.value = payload;
+    clearAiAnalysis();
     activeResultTab.value =
       response.status?.toLowerCase() === 'blocked' &&
       response.candidateMoulds?.length
@@ -518,6 +611,8 @@ async function runCalculation() {
   } catch (error) {
     if (requestSeq !== calculateRequestSeq) return;
     result.value = undefined;
+    lastCalculateRequest.value = undefined;
+    clearAiAnalysis();
     requestError.value = extractRequestError(error);
   } finally {
     if (requestSeq === calculateRequestSeq) {
@@ -546,10 +641,154 @@ watch(
     calculateRequestSeq += 1;
     calculating.value = false;
     result.value = undefined;
+    lastCalculateRequest.value = undefined;
+    clearAiAnalysis();
     requestError.value = '';
   },
   { deep: true },
 );
+
+function createAiAnalysisRequestId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `quotation-ai-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function waitForAiAnalysisPoll() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, AI_ANALYSIS_POLL_INTERVAL_MS);
+  });
+}
+
+function normalizeAiProgress(value: unknown) {
+  const progress = Number(value);
+  if (!Number.isFinite(progress)) return 0;
+  return Math.min(100, Math.max(0, progress <= 1 ? progress * 100 : progress));
+}
+
+function aiAnalysisStatusLabel(value: unknown) {
+  const status = String(value ?? '').toUpperCase();
+  const labels: Record<string, string> = {
+    CANCEL_REQUESTED: '正在取消',
+    CANCELING: '正在取消',
+    CANCELED: '分析已取消',
+    CREATED: '等待分析',
+    DOWNLOADING: '正在获取结果',
+    FAILED: '分析失败',
+    PENDING: '等待分析',
+    QUEUED: '等待分析',
+    RESULT_RECEIVED: '正在校验结果',
+    RUNNING: '分析中',
+    SUBMITTING: '正在提交',
+    SUBMISSION_UNKNOWN: '提交状态待确认',
+    SUCCEEDED: '分析完成',
+    SUCCESS: '分析完成',
+    UNAVAILABLE: '服务不可用',
+    WAITING_PROVIDER: '等待模型响应',
+  };
+  return labels[status] || (status ? String(value) : '准备分析');
+}
+
+function aiRiskLabel(value: unknown) {
+  const labels: Record<string, string> = {
+    HIGH: '高风险',
+    LOW: '低风险',
+    MEDIUM: '中风险',
+  };
+  return labels[String(value ?? '').toUpperCase()] || String(value || '未评级');
+}
+
+function aiRiskColor(value: unknown) {
+  const risk = String(value ?? '').toUpperCase();
+  if (risk === 'HIGH') return 'error';
+  if (risk === 'MEDIUM') return 'warning';
+  if (risk === 'LOW') return 'success';
+  return 'default';
+}
+
+function formatAiConfidence(value: unknown) {
+  if (!hasValue(value)) return '—';
+  const confidence = Number(value);
+  if (!Number.isFinite(confidence)) return String(value);
+  const percentage = confidence <= 1 ? confidence * 100 : confidence;
+  return `${Math.min(100, Math.max(0, percentage)).toFixed(0)}%`;
+}
+
+async function handleAiAnalysis() {
+  const quotation = lastCalculateRequest.value;
+  if (!quotation || !result.value) {
+    message.warning('请先完成当前参数的报价计算');
+    return;
+  }
+
+  const requestSeq = ++aiAnalysisRequestSeq;
+  aiAnalysisLoading.value = true;
+  aiAnalysisStatus.value = 'PENDING';
+  aiAnalysisProgress.value = 0;
+  aiAnalysisMessage.value = '';
+  aiAnalysisError.value = '';
+  aiAnalysisResult.value = undefined;
+
+  try {
+    const started = await createQuotationAiAnalysis({
+      quotation,
+      requestId: createAiAnalysisRequestId(),
+    });
+    if (requestSeq !== aiAnalysisRequestSeq) return;
+
+    if (!started.available) {
+      aiAnalysisMessage.value =
+        started.message || 'AI 分析服务当前不可用，报价结果不受影响。';
+      aiAnalysisStatus.value = started.status || 'UNAVAILABLE';
+      return;
+    }
+    if (!started.invocationId) {
+      aiAnalysisError.value =
+        started.message || 'AI 分析任务未返回有效的任务编号。';
+      return;
+    }
+
+    aiAnalysisStatus.value = started.status || 'QUEUED';
+    aiAnalysisMessage.value = started.message || '';
+    for (let pollIndex = 0; pollIndex < AI_ANALYSIS_MAX_POLLS; pollIndex += 1) {
+      if (requestSeq !== aiAnalysisRequestSeq) return;
+      if (pollIndex > 0) await waitForAiAnalysisPoll();
+      if (requestSeq !== aiAnalysisRequestSeq) return;
+
+      const status = await getQuotationAiAnalysis(started.invocationId);
+      if (requestSeq !== aiAnalysisRequestSeq) return;
+      aiAnalysisStatus.value = status.status || aiAnalysisStatus.value;
+      aiAnalysisProgress.value = normalizeAiProgress(status.progress);
+      aiAnalysisMessage.value = status.message || '';
+
+      if (!status.available) {
+        aiAnalysisMessage.value =
+          status.message || 'AI 分析服务当前不可用，报价结果不受影响。';
+        return;
+      }
+      if (status.result) aiAnalysisResult.value = status.result;
+      if (status.terminal || status.result) {
+        if (status.result) aiAnalysisProgress.value = 100;
+        if (!status.result) {
+          aiAnalysisError.value =
+            status.message || 'AI 分析未生成可展示的结果。';
+        }
+        return;
+      }
+    }
+    aiAnalysisError.value =
+      'AI 分析等待超时，可稍后重新发起；报价结果不受影响。';
+  } catch (error) {
+    if (requestSeq !== aiAnalysisRequestSeq) return;
+    aiAnalysisError.value =
+      extractRequestError(error) || 'AI 分析未完成，报价结果不受影响。';
+  } finally {
+    if (requestSeq === aiAnalysisRequestSeq) {
+      aiAnalysisLoading.value = false;
+    }
+  }
+}
 
 const blockReasons = computed(() => result.value?.blockReasons ?? []);
 const warnings = computed(() => result.value?.warnings ?? []);
@@ -570,20 +809,59 @@ const resultStatusColor = computed(() =>
   normalizedResultStatus.value === 'blocked' ? 'error' : 'success',
 );
 
-const summaryValues = computed(() => ({
-  totalQuote: {
-    display: result.value?.totalQuoteDisplay,
-    exact: result.value?.totalQuoteExact,
-  },
-  unitCost: {
-    display: result.value?.unitCostDisplay,
-    exact: result.value?.unitCostExact,
-  },
-  unitQuote: {
-    display: result.value?.unitQuoteDisplay,
-    exact: result.value?.unitQuoteExact,
-  },
-}));
+const quotationTaxRateLabel = computed(() =>
+  formatQuotationTaxRate(result.value?.taxRate),
+);
+
+function resolveResultTaxIncluded(
+  excludingTax: unknown,
+  includingTax?: unknown,
+) {
+  return resolveTaxIncludedValue(
+    excludingTax,
+    includingTax,
+    result.value?.taxRate,
+  );
+}
+
+const summaryValues = computed(() => {
+  const unitQuoteDisplay =
+    result.value?.regularUnitQuoteDisplay ?? result.value?.unitQuoteDisplay;
+  const totalQuoteDisplay =
+    result.value?.regularTotalQuoteDisplay ?? result.value?.totalQuoteDisplay;
+  return {
+    totalQuote: {
+      display: totalQuoteDisplay,
+      exact: result.value?.totalQuoteExact,
+      taxIncludedDisplay: resolveResultTaxIncluded(
+        totalQuoteDisplay,
+        result.value?.regularTotalQuoteTaxIncludedDisplay ??
+          result.value?.totalQuoteTaxIncludedDisplay,
+      ),
+      taxIncludedExact: resolveResultTaxIncluded(
+        result.value?.totalQuoteExact,
+        result.value?.totalQuoteTaxIncludedExact,
+      ),
+    },
+    unitCost: {
+      display: result.value?.unitCostDisplay,
+      exact: result.value?.unitCostExact,
+    },
+    unitQuote: {
+      display: unitQuoteDisplay,
+      exact: result.value?.unitQuoteExact,
+      taxIncludedDisplay: resolveResultTaxIncluded(
+        unitQuoteDisplay,
+        result.value?.regularUnitQuoteTaxIncludedDisplay ??
+          result.value?.unitQuoteTaxIncludedDisplay,
+      ),
+      taxIncludedExact: resolveResultTaxIncluded(
+        result.value?.unitQuoteExact,
+        result.value?.unitQuoteTaxIncludedExact,
+      ),
+    },
+  };
+});
 
 const processCards = computed(() => {
   const data = result.value;
@@ -804,14 +1082,6 @@ const candidateColumns = [
   },
 ];
 
-const resultProfitRate = computed(() => {
-  if (!hasValue(result.value?.profitRate)) return '—';
-  const numberValue = Number(result.value?.profitRate);
-  return Number.isFinite(numberValue)
-    ? `${(numberValue * 100).toFixed(2).replace(/\.?0+$/, '')}%`
-    : String(result.value?.profitRate);
-});
-
 function formatSizeClass(value?: string) {
   if (value === 'SMALL') return '小垫（有效宽度 ≤ 660mm）';
   if (value === 'LARGE') return '大垫（有效宽度 > 660mm）';
@@ -845,11 +1115,70 @@ const resultContextItems = computed(() => [
   {
     key: 'terms',
     label: '报价条件',
-    value: `${result.value?.quantity ?? '—'} 条 · ${formatProfitMode(
-      result.value?.profitMode,
-    )} ${resultProfitRate.value}`,
+    value: `${result.value?.quantity ?? '—'} 条 · 价格规则由系统自动匹配`,
   },
 ]);
+
+const laminationLayoutSummary = computed(() => {
+  const lamination = result.value?.lamination;
+  if (!lamination) return '—';
+  const parts: string[] = [];
+  if ((lamination.standardRows ?? 0) > 0) {
+    parts.push(
+      `标准 ${lamination.piecesPerStandardRow ?? '—'} 片/排 × ${lamination.standardRows} 排`,
+    );
+  }
+  if ((lamination.rotatedRows ?? 0) > 0) {
+    parts.push(
+      `旋转 ${lamination.piecesPerRotatedRow ?? '—'} 片/排 × ${lamination.rotatedRows} 排`,
+    );
+  }
+  return parts.join(' + ') || '已按订单数量自动排版';
+});
+
+const laminationFacts = computed(() => {
+  const lamination = result.value?.lamination;
+  if (!lamination) return [];
+  return [
+    {
+      key: 'material',
+      label: '贴合材料',
+      value:
+        [lamination.materialCode, lamination.materialName]
+          .filter(Boolean)
+          .join(' · ') || '—',
+    },
+    {
+      key: 'base-thickness',
+      label: '基础TPE厚度',
+      value: formatCompactDecimal(lamination.tpeThicknessMm, 'mm', 3),
+    },
+    {
+      key: 'layout',
+      label: '卷材排版',
+      value: laminationLayoutSummary.value,
+    },
+    {
+      key: 'purchase-length',
+      label: '计费购买长度',
+      value: formatCompactDecimal(lamination.billableLengthMm, 'mm', 2),
+    },
+    {
+      key: 'net-area',
+      label: '净贴合面积',
+      value: formatCompactDecimal(
+        lamination.productNetAreaSquareMeters,
+        '㎡',
+        4,
+      ),
+    },
+    {
+      key: 'utilization',
+      label: '面材利用率',
+      value: formatRate(lamination.layoutUtilizationRate),
+    },
+  ];
+});
 
 const productionFacts = computed(() => [
   {
@@ -877,6 +1206,9 @@ const productionFacts = computed(() => [
 ]);
 
 onMounted(loadOptions);
+onBeforeUnmount(() => {
+  aiAnalysisRequestSeq += 1;
+});
 </script>
 
 <template>
@@ -976,7 +1308,7 @@ onMounted(loadOptions);
                           : '成本不可用'
                       }}
                     </Tag>
-                    <span>
+                    <span v-if="canViewQuoteDetail">
                       批次
                       {{
                         formatCompactDecimal(
@@ -1010,6 +1342,41 @@ onMounted(loadOptions);
                   />
                 </FormItem>
 
+                <FormItem class="span-two" label="产品结构">
+                  <RadioGroup
+                    v-model:value="formState.productStructure"
+                    button-style="solid"
+                    option-type="button"
+                    :options="productStructureOptions"
+                    @change="handleProductStructureChange"
+                  />
+                </FormItem>
+
+                <FormItem
+                  v-if="formState.productStructure === 'LAMINATED'"
+                  class="span-two"
+                  label="外采贴合材料"
+                  name="laminationMaterialId"
+                  extra="下拉仅展示卷宽和厚度，采购延米价不在报价页显示"
+                >
+                  <Select
+                    v-model:value="formState.laminationMaterialId"
+                    allow-clear
+                    option-filter-prop="label"
+                    placeholder="请选择贴合材料"
+                    show-search
+                    :loading="optionsLoading"
+                    :options="laminationMaterialOptions"
+                  />
+                  <Alert
+                    v-if="!laminationMaterialOptions.length && !optionsLoading"
+                    class="mt-2"
+                    show-icon
+                    type="warning"
+                    message="尚未配置可用的贴合材料"
+                  />
+                </FormItem>
+
                 <div class="span-two dimension-grid">
                   <FormItem label="成品长度（mm）" name="productLengthMm">
                     <InputNumber
@@ -1039,6 +1406,31 @@ onMounted(loadOptions);
                     />
                   </FormItem>
                 </div>
+
+                <Alert
+                  v-if="
+                    formState.productStructure === 'LAMINATED' &&
+                    selectedLaminationMaterial
+                  "
+                  class="span-two"
+                  show-icon
+                  :type="
+                    baseTpeThicknessPreview !== undefined &&
+                    baseTpeThicknessPreview <= 0
+                      ? 'error'
+                      : 'info'
+                  "
+                  :message="`成品总厚度扣除 ${formatCompactDecimal(
+                    selectedLaminationMaterial.materialThicknessMm,
+                    'mm',
+                    3,
+                  )} 面材后，基础TPE厚度为 ${formatCompactDecimal(
+                    baseTpeThicknessPreview,
+                    'mm',
+                    3,
+                  )}`"
+                  description="数量会参与固定卷宽排版，未利用的卷宽和末排余料由本订单承担。"
+                />
               </div>
             </div>
 
@@ -1146,32 +1538,6 @@ onMounted(loadOptions);
                     :step="1"
                   />
                 </FormItem>
-
-                <FormItem label="利润模式" name="profitMode">
-                  <Select
-                    v-model:value="formState.profitMode"
-                    :options="profitModeOptions"
-                    @change="handleProfitModeChange"
-                  />
-                </FormItem>
-
-                <FormItem
-                  class="span-two"
-                  label="利润率（%）"
-                  name="profitRatePercent"
-                  :extra="profitRateExtra"
-                >
-                  <InputNumber
-                    v-model:value="formState.profitRatePercent"
-                    class="w-full"
-                    :max="
-                      formState.profitMode === 'GROSS_MARGIN' ? 99.99 : 1000
-                    "
-                    :min="0"
-                    :precision="2"
-                    addon-after="%"
-                  />
-                </FormItem>
               </div>
             </div>
 
@@ -1209,9 +1575,23 @@ onMounted(loadOptions);
             </div>
           </template>
           <template #extra>
-            <Tag v-if="result" :color="resultStatusColor">
-              {{ resultStatusLabel }}
-            </Tag>
+            <Space>
+              <Tag v-if="result" :color="resultStatusColor">
+                {{ resultStatusLabel }}
+              </Tag>
+              <Button
+                v-if="result && lastCalculateRequest"
+                v-access:code="['fdmcaiwu:quotation:calculate']"
+                size="small"
+                :loading="aiAnalysisLoading"
+                @click="handleAiAnalysis"
+              >
+                <template #icon>
+                  <IconifyIcon icon="lucide:sparkles" />
+                </template>
+                {{ aiAnalysisResult ? '重新分析' : 'AI分析' }}
+              </Button>
+            </Space>
           </template>
 
           <Spin :spinning="calculating" tip="正在计算排版与报价…">
@@ -1264,25 +1644,75 @@ onMounted(loadOptions);
                 class="summary-grid"
               >
                 <div class="summary-item quote-summary">
-                  <div class="summary-label">建议单位报价</div>
+                  <div class="summary-label">常规单价</div>
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.unitQuote.display) }}
                   </div>
-                  <div class="summary-caption">
-                    {{ formatProfitMode(result.profitMode) }}
-                    {{ resultProfitRate }}
+                  <div class="summary-caption">不含税 · 系统价格政策</div>
+                  <div class="summary-tax-value">
+                    含税（+{{ quotationTaxRateLabel }}）
+                    {{
+                      formatMoney(summaryValues.unitQuote.taxIncludedDisplay)
+                    }}
                   </div>
                 </div>
                 <div class="summary-item total-summary">
-                  <div class="summary-label">报价总额</div>
+                  <div class="summary-label">常规总价</div>
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.totalQuote.display) }}
                   </div>
                   <div class="summary-caption">
-                    {{ result.quantity ?? '—' }} 条
+                    不含税 · {{ result.quantity ?? '—' }} 条
+                  </div>
+                  <div class="summary-tax-value">
+                    含税（+{{ quotationTaxRateLabel }}）
+                    {{
+                      formatMoney(summaryValues.totalQuote.taxIncludedDisplay)
+                    }}
                   </div>
                 </div>
-                <div class="summary-item cost-summary">
+                <div
+                  v-if="
+                    canViewUltraLowPrice &&
+                    hasValue(result.ultraLowUnitQuoteDisplay)
+                  "
+                  class="summary-item ultra-summary"
+                >
+                  <div class="summary-label">超低单价</div>
+                  <div class="summary-value">
+                    {{ formatMoney(result.ultraLowUnitQuoteDisplay) }}
+                  </div>
+                  <div class="summary-caption">
+                    不含税总价
+                    {{ formatMoney(result.ultraLowTotalQuoteDisplay) }}
+                  </div>
+                  <div class="summary-tax-value">
+                    含税（+{{ quotationTaxRateLabel }}）
+                    {{
+                      formatMoney(
+                        resolveResultTaxIncluded(
+                          result.ultraLowUnitQuoteDisplay,
+                          result.ultraLowUnitQuoteTaxIncludedDisplay,
+                        ),
+                      )
+                    }}
+                    <span class="summary-tax-secondary">
+                      总价
+                      {{
+                        formatMoney(
+                          resolveResultTaxIncluded(
+                            result.ultraLowTotalQuoteDisplay,
+                            result.ultraLowTotalQuoteTaxIncludedDisplay,
+                          ),
+                        )
+                      }}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  v-if="canViewQuoteDetail"
+                  class="summary-item cost-summary"
+                >
                   <div class="summary-label">单位成本</div>
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.unitCost.display) }}
@@ -1290,6 +1720,119 @@ onMounted(loadOptions);
                   <div class="summary-caption">精确值收纳在计算依据</div>
                 </div>
               </div>
+
+              <section
+                v-if="
+                  aiAnalysisLoading ||
+                  aiAnalysisResult ||
+                  aiAnalysisMessage ||
+                  aiAnalysisError
+                "
+                class="ai-analysis-panel"
+              >
+                <div class="ai-analysis-heading">
+                  <div>
+                    <div class="ai-analysis-title">
+                      <IconifyIcon icon="lucide:sparkles" />
+                      <span>AI 报价分析</span>
+                    </div>
+                    <div class="ai-analysis-subtitle">
+                      AI 仅解释本次参数、阻断原因和风险，不生成或修改价格
+                    </div>
+                  </div>
+                  <Tag v-if="aiAnalysisStatus" color="processing">
+                    {{ aiAnalysisStatusLabel(aiAnalysisStatus) }}
+                  </Tag>
+                </div>
+
+                <Progress
+                  v-if="aiAnalysisLoading"
+                  :percent="Math.round(aiAnalysisProgress)"
+                  status="active"
+                />
+                <Alert
+                  v-if="aiAnalysisError"
+                  class="mt-3"
+                  show-icon
+                  type="warning"
+                  message="AI 分析未完成"
+                  :description="aiAnalysisError"
+                />
+                <Alert
+                  v-else-if="aiAnalysisMessage && !aiAnalysisResult"
+                  class="mt-3"
+                  show-icon
+                  type="info"
+                  message="AI 分析状态"
+                  :description="aiAnalysisMessage"
+                />
+
+                <template v-if="aiAnalysisResult">
+                  <div class="ai-analysis-summary">
+                    <div class="ai-analysis-summary-meta">
+                      <Tag :color="aiRiskColor(aiAnalysisResult.riskLevel)">
+                        {{ aiRiskLabel(aiAnalysisResult.riskLevel) }}
+                      </Tag>
+                      <span>
+                        置信度
+                        {{ formatAiConfidence(aiAnalysisResult.confidence) }}
+                      </span>
+                    </div>
+                    <div class="ai-analysis-summary-text">
+                      {{ aiAnalysisResult.summary || '本次分析未返回摘要。' }}
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="aiAnalysisResult.observations?.length"
+                    class="ai-analysis-block"
+                  >
+                    <div class="ai-analysis-block-title">观察项</div>
+                    <div class="ai-observation-list">
+                      <div
+                        v-for="(item, index) in aiAnalysisResult.observations"
+                        :key="item.code || `${item.title}-${index}`"
+                        class="ai-observation-item"
+                      >
+                        <div class="ai-observation-heading">
+                          <Tag
+                            :color="
+                              String(item.severity).toUpperCase() === 'WARNING'
+                                ? 'warning'
+                                : 'blue'
+                            "
+                          >
+                            {{
+                              String(item.severity).toUpperCase() === 'WARNING'
+                                ? '注意'
+                                : '信息'
+                            }}
+                          </Tag>
+                          <strong>{{ item.title || '分析观察' }}</strong>
+                        </div>
+                        <div class="ai-observation-detail">
+                          {{ item.detail || '—' }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="aiAnalysisResult.suggestions?.length"
+                    class="ai-analysis-block"
+                  >
+                    <div class="ai-analysis-block-title">建议</div>
+                    <ol class="ai-suggestion-list">
+                      <li
+                        v-for="(item, index) in aiAnalysisResult.suggestions"
+                        :key="`${item}-${index}`"
+                      >
+                        {{ item }}
+                      </li>
+                    </ol>
+                  </div>
+                </template>
+              </section>
 
               <Tabs
                 v-model:active-key="activeResultTab"
@@ -1308,6 +1851,114 @@ onMounted(loadOptions);
                         <div class="context-value">{{ item.value }}</div>
                       </div>
                     </div>
+                  </section>
+
+                  <AccessoryMatchList
+                    v-if="result.accessoryMatches?.length"
+                    :matches="result.accessoryMatches"
+                    class="mb-4"
+                  />
+
+                  <Alert
+                    v-if="
+                      formState.productStructure === 'LAMINATED' &&
+                      !canViewQuoteDetail
+                    "
+                    class="mb-4"
+                    show-icon
+                    type="info"
+                    message="外采面材已随本次报价计算"
+                    :description="`${selectedLaminationMaterial?.materialName || '所选面材'}已按当前 ${result.quantity ?? formState.quantity ?? '—'} 片数量自动排版；详细排版与成本仅超级管理员可查看。`"
+                  />
+
+                  <section
+                    v-if="canViewQuoteDetail && result.lamination"
+                    class="tab-section"
+                  >
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">外采面材排版</div>
+                        <div class="tab-section-subtitle">
+                          固定卷宽按当前数量自动组合标准与旋转排版，余料由本订单承担
+                        </div>
+                      </div>
+                    </div>
+                    <div class="fact-grid lamination-fact-grid">
+                      <div
+                        v-for="item in laminationFacts"
+                        :key="item.key"
+                        class="fact-item"
+                      >
+                        <span class="fact-label">{{ item.label }}</span>
+                        <strong class="fact-value">{{ item.value }}</strong>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    v-if="canViewQuoteDetail && result.lamination"
+                    class="tab-section"
+                  >
+                    <div class="tab-section-heading">
+                      <div>
+                        <div class="tab-section-title">贴合增量成本</div>
+                        <div class="tab-section-subtitle">
+                          卷材按计费长度计价；胶水按实际铺料卷材面积计费，不含供应商计费取整的超额部分；贴合人工取材料价格版本并替代旧复合工费
+                        </div>
+                      </div>
+                    </div>
+                    <Descriptions bordered :column="2" size="small">
+                      <DescriptionsItem label="材料版本">
+                        {{ result.lamination.versionCode || '—' }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="基础TPE厚度">
+                        {{
+                          formatCompactDecimal(
+                            result.lamination.tpeThicknessMm,
+                            'mm',
+                            3,
+                          )
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="面材单片成本">
+                        {{
+                          formatExactMoney(
+                            result.lamination.materialCostPerPiece,
+                          )
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="面材订单成本">
+                        {{
+                          formatExactMoney(result.lamination.materialOrderCost)
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="热熔胶单片成本">
+                        {{
+                          formatExactMoney(
+                            result.lamination.adhesiveCostPerPiece,
+                          )
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="热熔胶订单成本">
+                        {{
+                          formatExactMoney(result.lamination.adhesiveOrderCost)
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="复合加工单片">
+                        {{
+                          formatExactMoney(
+                            result.lamination.laminationLaborCostPerPiece,
+                          )
+                        }}
+                      </DescriptionsItem>
+                      <DescriptionsItem label="动态费用计入单位成本">
+                        {{
+                          result.lamination.dynamicCostIncludedInUnitCost
+                            ? '是'
+                            : '否'
+                        }}
+                      </DescriptionsItem>
+                    </Descriptions>
                   </section>
 
                   <section class="tab-section">
@@ -1352,7 +2003,11 @@ onMounted(loadOptions);
                   </section>
                 </Tabs.TabPane>
 
-                <Tabs.TabPane key="cost" tab="成本明细">
+                <Tabs.TabPane
+                  v-if="canViewQuoteDetail"
+                  key="cost"
+                  tab="成本明细"
+                >
                   <section class="tab-section">
                     <div class="tab-section-heading">
                       <div>
@@ -1401,7 +2056,11 @@ onMounted(loadOptions);
                   </section>
                 </Tabs.TabPane>
 
-                <Tabs.TabPane key="moulds" tab="模具比选">
+                <Tabs.TabPane
+                  v-if="canViewQuoteDetail"
+                  key="moulds"
+                  tab="模具比选"
+                >
                   <section class="tab-section">
                     <div class="tab-section-heading">
                       <div>
@@ -1475,7 +2134,11 @@ onMounted(loadOptions);
                   </section>
                 </Tabs.TabPane>
 
-                <Tabs.TabPane key="audit" tab="计算依据">
+                <Tabs.TabPane
+                  v-if="canViewQuoteDetail"
+                  key="audit"
+                  tab="计算依据"
+                >
                   <div class="audit-intro">
                     日常报价无需展开以下内容；需要核算、追溯或排查时再按项查看。
                   </div>
@@ -1485,11 +2148,28 @@ onMounted(loadOptions);
                         <DescriptionsItem label="单位成本精确值">
                           {{ formatExactMoney(summaryValues.unitCost.exact) }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="建议单位报价精确值">
+                        <DescriptionsItem label="不含税单位报价精确值">
                           {{ formatExactMoney(summaryValues.unitQuote.exact) }}
                         </DescriptionsItem>
-                        <DescriptionsItem label="报价总额精确值">
+                        <DescriptionsItem label="含税单位报价精确值">
+                          {{
+                            formatExactMoney(
+                              summaryValues.unitQuote.taxIncludedExact,
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="不含税报价总额精确值">
                           {{ formatExactMoney(summaryValues.totalQuote.exact) }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="含税报价总额精确值">
+                          {{
+                            formatExactMoney(
+                              summaryValues.totalQuote.taxIncludedExact,
+                            )
+                          }}
+                        </DescriptionsItem>
+                        <DescriptionsItem label="含税加点">
+                          {{ quotationTaxRateLabel }}
                         </DescriptionsItem>
                       </Descriptions>
                     </Collapse.Panel>
@@ -1694,10 +2374,6 @@ onMounted(loadOptions);
                         <DescriptionsItem label="配方">
                           {{ result.recipeCode || '—' }} ·
                           {{ result.recipeName || '—' }}
-                        </DescriptionsItem>
-                        <DescriptionsItem label="利润口径">
-                          {{ formatProfitMode(result.profitMode) }} /
-                          {{ resultProfitRate }}
                         </DescriptionsItem>
                         <DescriptionsItem label="计算口径">
                           {{ result.calculationProfile || '—' }}
@@ -1955,15 +2631,139 @@ onMounted(loadOptions);
   text-overflow: ellipsis;
   font-size: clamp(22px, 2vw, 31px);
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
   line-height: 1.25;
   color: var(--ant-color-text, #1f1f1f);
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 .summary-caption {
   margin-top: 8px;
   overflow-wrap: anywhere;
+}
+
+.summary-tax-value {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--ant-color-primary, #1677ff);
+  overflow-wrap: anywhere;
+}
+
+.summary-tax-secondary {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.ultra-summary {
+  background: rgb(114 46 209 / 6%);
+  border-top: 3px solid #722ed1;
+}
+
+.ai-analysis-panel {
+  padding: 16px;
+  margin-top: 16px;
+  background: linear-gradient(
+    135deg,
+    rgb(114 46 209 / 6%),
+    rgb(22 119 255 / 4%)
+  );
+  border: 1px solid rgb(114 46 209 / 18%);
+  border-radius: 10px;
+}
+
+.ai-analysis-heading,
+.ai-analysis-title,
+.ai-analysis-summary-meta,
+.ai-observation-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-analysis-heading {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ai-analysis-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-text, #1f1f1f);
+}
+
+.ai-analysis-subtitle,
+.ai-analysis-summary-meta,
+.ai-observation-detail {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.ai-analysis-subtitle {
+  margin-top: 3px;
+}
+
+.ai-analysis-summary {
+  padding: 12px 14px;
+  margin-top: 12px;
+  background: var(--ant-color-bg-container, #fff);
+  border-radius: 8px;
+}
+
+.ai-analysis-summary-text {
+  margin-top: 9px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ant-color-text, #1f1f1f);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ai-analysis-block {
+  margin-top: 14px;
+}
+
+.ai-analysis-block-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-observation-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-observation-item {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.ai-observation-detail {
+  margin-top: 7px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ai-suggestion-list {
+  padding: 10px 12px 10px 34px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--ant-color-bg-container, #fff);
+  border-radius: 8px;
+}
+
+.ai-suggestion-list li + li {
+  margin-top: 4px;
 }
 
 .result-tabs {
@@ -2021,11 +2821,11 @@ onMounted(loadOptions);
 .context-value {
   margin-top: 5px;
   overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
   color: var(--ant-color-text, #1f1f1f);
-  text-overflow: ellipsis;
   overflow-wrap: anywhere;
 }
 
@@ -2042,8 +2842,8 @@ onMounted(loadOptions);
   gap: 6px;
   min-width: 0;
   padding: 12px;
-  border-left: 3px solid var(--ant-color-primary, #1677ff);
   background: var(--ant-color-fill-quaternary, #fafafa);
+  border-left: 3px solid var(--ant-color-primary, #1677ff);
   border-radius: 6px;
 }
 
@@ -2141,6 +2941,10 @@ onMounted(loadOptions);
 }
 
 @media (max-width: 900px) {
+  .ai-observation-list {
+    grid-template-columns: 1fr;
+  }
+
   .fact-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

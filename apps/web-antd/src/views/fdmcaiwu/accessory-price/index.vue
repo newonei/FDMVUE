@@ -274,7 +274,7 @@ async function handleSave() {
 
 function handleDelete(record: AccessoryPrice | Record<string, any>) {
   Modal.confirm({
-    content: `删除 ${record.lengthMm} × ${record.widthMm} × ${record.thicknessMm} mm 后，选择对应辅料的新报价将被阻断。`,
+    content: `删除 ${record.lengthMm} × ${record.widthMm} × ${record.thicknessMm} mm 后，新报价会先尝试向上匹配其他启用规格；没有长、宽、厚均不小于成品的有效价格时才会被阻断。`,
     okText: '确认删除',
     okType: 'danger',
     title: '确认删除规格辅料价格？',
@@ -318,7 +318,7 @@ onMounted(loadData);
 <template>
   <Page
     title="辅料价格表"
-    description="按成品长度、宽度、厚度维护 OPP膜、外箱和绑带的单位价格；报价会按三项规格精确匹配启用记录。"
+    description="按成品长度、宽度、厚度维护 OPP膜、外箱和绑带的单位价格；报价优先精确匹配，无精确价格时向长、宽、厚均不小于成品的最近启用规格匹配。"
   >
     <Modal
       v-model:open="editOpen"
@@ -340,7 +340,7 @@ onMounted(loadData);
           show-icon
           type="info"
           message="规格分三列维护"
-          description="长度、宽度、厚度共同确定唯一规格。辅料价格可单项留空；报价勾选了未维护价格的辅料时会被阻断，填写 0 则明确表示免费。"
+          description="长度、宽度、厚度共同确定唯一规格。辅料价格可单项留空，填写 0 表示免费；报价勾选的辅料若无精确价格，会按单项向上匹配三个尺寸都不小于成品的最近启用记录，仍无合格记录才会阻断。"
         />
 
         <section class="form-section">

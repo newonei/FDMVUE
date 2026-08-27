@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
 import {
@@ -35,7 +36,11 @@ import {
 } from '#/api/fdmcaiwu/batch-quotation';
 import { getQuotationOptions } from '#/api/fdmcaiwu/quotation';
 
-import { formatMaterialUnitCost, hasValue } from '../quotation/data';
+import {
+  formatMaterialUnitCost,
+  hasValue,
+  resolveTaxIncludedValue,
+} from '../quotation/data';
 
 defineOptions({ name: 'FdmcaiwuBatchQuotation' });
 
@@ -52,14 +57,13 @@ const route = useRoute();
 const router = useRouter();
 
 interface BatchFormModel {
+  defaultLaminationMaterialId?: number | string;
   defaultQuantity: number;
   defaultRecipeId?: number;
   includeCarton: boolean;
   includeOpp: boolean;
   includeStrap: boolean;
   includeSupplement: boolean;
-  profitMode: string;
-  profitRatePercent: number;
 }
 
 interface PreviewRow {
@@ -75,6 +79,11 @@ interface PreviewRow {
   failureReason: string;
   foamingLaborPerKg: string;
   key: string;
+  laminationLayout: string;
+  laminationMaterial: string;
+  laminationPurchaseLength: string;
+  laminationUtilization: string;
+  tpeThicknessMm: string;
   materialCost: string;
   materialUnitCostPerKg: string;
   materialYieldRate: string;
@@ -111,6 +120,9 @@ interface PreviewRow {
   verticalCutCostPerPiece: string;
   warnings: string;
   unitQuote: string;
+  unitQuoteTaxIncluded: string;
+  quoteTotal: string;
+  quoteTotalTaxIncluded: string;
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -125,32 +137,48 @@ const result = ref<FdmcaiwuBatchQuotationApi.CalculateResult>();
 const calculatedSignature = ref('');
 const optionsError = ref('');
 const requestError = ref('');
+const batchTaxPriceUsesCompatibilityDerivation = computed(() =>
+  (result.value?.rows ?? []).some(
+    (row) =>
+      isSuccessRow(row) &&
+      (!hasValue(row.unitQuoteTaxIncluded) ||
+        !hasValue(row.quoteTotalTaxIncluded)),
+  ),
+);
 const quotationOptions = ref<FdmcaiwuQuotationApi.Options>({
   costDefaults: undefined,
+  laminationMaterials: [],
   mouldProfiles: [],
-  profitModes: [],
   recipes: [],
 });
+const userStore = useUserStore();
+const isSuperAdmin = computed(() =>
+  (userStore.userRoles ?? []).includes('super_admin'),
+);
+const canViewOptionQuoteDetail = computed(
+  () =>
+    isSuperAdmin.value &&
+    quotationOptions.value.capabilities?.canViewQuoteDetail === true,
+);
+const canViewQuoteDetail = computed(
+  () =>
+    isSuperAdmin.value &&
+    (result.value?.rows ?? []).some((row) =>
+      [row.unitCostPerPiece, row.materialCost, row.chargeWeightKg].some(
+        (value) => hasValue(value),
+      ),
+    ),
+);
 
 const formState = reactive<BatchFormModel>({
+  defaultLaminationMaterialId: undefined,
   defaultQuantity: 1,
   defaultRecipeId: undefined,
   includeCarton: false,
   includeOpp: false,
   includeStrap: false,
   includeSupplement: true,
-  profitMode: 'GROSS_MARGIN',
-  profitRatePercent: 20,
 });
-
-const profitModeOptions = computed(() =>
-  quotationOptions.value.profitModes.length > 0
-    ? quotationOptions.value.profitModes
-    : [
-        { label: '毛利率', value: 'GROSS_MARGIN' },
-        { label: '加价率', value: 'MARKUP' },
-      ],
-);
 
 function isRecipeCostAvailable(recipe?: FdmcaiwuQuotationApi.RecipeOption) {
   if (!recipe || recipe.costBlockReasons?.length) return false;
@@ -162,6 +190,7 @@ function isRecipeCostAvailable(recipe?: FdmcaiwuQuotationApi.RecipeOption) {
   ) {
     return false;
   }
+  if (!canViewOptionQuoteDetail.value) return true;
   return Number(recipe.unitCostPerKg) > 0;
 }
 
@@ -170,15 +199,27 @@ const recipeSelectOptions = computed(() =>
     const available = isRecipeCostAvailable(item);
     return {
       disabled: !available,
-      label: `${item.recipeCode} · ${item.recipeName} · ${
-        available ? formatMaterialUnitCost(item.unitCostPerKg) : '成本不可用'
-      }`,
+      label: `${item.recipeCode} · ${item.recipeName}${
+        canViewOptionQuoteDetail.value && available
+          ? ` · ${formatMaterialUnitCost(item.unitCostPerKg)}`
+          : ''
+      }${available ? '' : ' · 成本不可用'}`,
       title: available
         ? undefined
         : item.costBlockReasons?.join('；') || '配方原材料成本不可用',
       value: item.id,
     };
   }),
+);
+
+const laminationMaterialOptions = computed(() =>
+  (quotationOptions.value.laminationMaterials ?? []).map((item) => ({
+    label: `${item.materialCode} · ${item.materialName} · 卷宽 ${formatNumber(
+      item.rollWidthMm,
+      3,
+    )} mm · 厚 ${formatNumber(item.materialThicknessMm, 3)} mm`,
+    value: item.id,
+  })),
 );
 
 const selectedFileList = computed<UploadFile[]>(() =>
@@ -196,14 +237,13 @@ const selectedFileList = computed<UploadFile[]>(() =>
 
 function buildOptions(): FdmcaiwuBatchQuotationApi.CalculateOptions {
   const options: FdmcaiwuBatchQuotationApi.CalculateOptions = {
+    defaultLaminationMaterialId: formState.defaultLaminationMaterialId,
     defaultQuantity: formState.defaultQuantity,
     defaultRecipeId: formState.defaultRecipeId,
     includeCarton: formState.includeCarton,
     includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
     includeSupplement: formState.includeSupplement,
-    profitMode: formState.profitMode,
-    profitRate: Number((formState.profitRatePercent / 100).toFixed(6)),
   };
   return options;
 }
@@ -318,21 +358,71 @@ function getSpecificationDimensions(
     : ['—', '—', '—'];
 }
 
+function getLaminationRecord(row: FdmcaiwuBatchQuotationApi.ResultRow) {
+  return (row.lamination ?? {}) as unknown as Record<string, unknown>;
+}
+
+function firstLaminationValue(
+  row: FdmcaiwuBatchQuotationApi.ResultRow,
+  ...fields: string[]
+) {
+  const lamination = getLaminationRecord(row);
+  return fields
+    .map((field) => lamination[field])
+    .find((value) => hasValue(value));
+}
+
+function formatLaminationMaterial(row: FdmcaiwuBatchQuotationApi.ResultRow) {
+  const code = firstLaminationValue(row, 'materialCode');
+  const name = firstLaminationValue(row, 'materialName');
+  const label = [code, name].filter((value) => hasValue(value)).join(' · ');
+  if (label) return label;
+  return hasValue(row.inputLaminationMaterial)
+    ? String(row.inputLaminationMaterial)
+    : '纯TPE';
+}
+
+function formatLaminationLayout(row: FdmcaiwuBatchQuotationApi.ResultRow) {
+  const standardRows = Number(firstLaminationValue(row, 'standardRows') ?? 0);
+  const rotatedRows = Number(firstLaminationValue(row, 'rotatedRows') ?? 0);
+  const parts: string[] = [];
+  if (standardRows > 0) {
+    parts.push(
+      `标准 ${firstLaminationValue(row, 'piecesPerStandardRow') ?? '—'} 片/排 × ${standardRows} 排`,
+    );
+  }
+  if (rotatedRows > 0) {
+    parts.push(
+      `旋转 ${firstLaminationValue(row, 'piecesPerRotatedRow') ?? '—'} 片/排 × ${rotatedRows} 排`,
+    );
+  }
+  return parts.join(' + ') || (row.lamination ? '已自动排版' : '—');
+}
+
 const previewRows = computed<PreviewRow[]>(() =>
   (result.value?.rows ?? []).map((row, index) => {
     const rowNo = Number(row.rowNumber ?? index + 1);
     const success = isSuccessRow(row);
     const [lengthMm, widthMm, thicknessMm] = getSpecificationDimensions(row);
-    const recipe = [row.recipeCode, row.recipeName].filter(Boolean).join(' · ');
+    const recipe =
+      [row.recipeCode, row.recipeName].filter(Boolean).join(' · ') ||
+      String(row.inputRecipe ?? '');
     const mould = [row.mouldProfileCode, row.mouldProfileName]
       .filter(Boolean)
       .join(' · ');
+    const unitQuote = firstValue(row, 'unitQuote');
+    const quoteTotal = firstValue(row, 'quoteTotal');
+    const taxRate = firstValue(row, 'taxRate');
     return {
       allocationCostPerKg: formatMoney(firstValue(row, 'allocationCostPerKg')),
       auxiliarySubtotalPerPiece: formatMoney(
         firstValue(row, 'auxiliarySubtotalPerPiece'),
       ),
       batchTotalCost: formatMoney(firstValue(row, 'batchTotalCost')),
+      tpeThicknessMm: formatNumber(
+        firstLaminationValue(row, 'tpeThicknessMm'),
+        3,
+      ),
       businessNo: String(firstValue(row, 'businessNo') ?? '—'),
       batchShippingOperationCostPerPiece: formatMoney(
         firstValue(
@@ -361,6 +451,15 @@ const previewRows = computed<PreviewRow[]>(() =>
         ) || (success ? '' : '计算失败'),
       foamingLaborPerKg: formatMoney(firstValue(row, 'foamingLaborPerKg')),
       key: `${rowNo}-${index}`,
+      laminationLayout: formatLaminationLayout(row),
+      laminationMaterial: formatLaminationMaterial(row),
+      laminationPurchaseLength: formatNumber(
+        firstLaminationValue(row, 'billableLengthMm'),
+        2,
+      ),
+      laminationUtilization: formatRate(
+        firstLaminationValue(row, 'layoutUtilizationRate'),
+      ),
       lengthMm,
       materialCost: formatMoney(firstValue(row, 'materialCost')),
       materialUnitCostPerKg: formatMoney(
@@ -429,246 +528,369 @@ const previewRows = computed<PreviewRow[]>(() =>
       ),
       warnings: joinMessages(row.warnings),
       widthMm,
-      unitQuote: formatMoney(firstValue(row, 'unitQuote')),
+      unitQuote: formatMoney(unitQuote),
+      unitQuoteTaxIncluded: formatMoney(
+        resolveTaxIncludedValue(
+          unitQuote,
+          firstValue(row, 'unitQuoteTaxIncluded'),
+          taxRate,
+        ),
+      ),
+      quoteTotal: formatMoney(quoteTotal),
+      quoteTotalTaxIncluded: formatMoney(
+        resolveTaxIncludedValue(
+          quoteTotal,
+          firstValue(row, 'quoteTotalTaxIncluded'),
+          taxRate,
+        ),
+      ),
     };
   }),
 );
 
-const previewColumns: TableColumnsType<PreviewRow> = [
-  { dataIndex: 'rowNo', fixed: 'left', key: 'rowNo', title: '行号', width: 70 },
-  { dataIndex: 'businessNo', key: 'businessNo', title: '业务编号', width: 130 },
-  {
-    dataIndex: 'status',
-    fixed: 'left',
-    key: 'status',
-    title: '状态',
-    width: 80,
-  },
-  { dataIndex: 'lengthMm', key: 'lengthMm', title: '长度(mm)', width: 100 },
-  { dataIndex: 'widthMm', key: 'widthMm', title: '宽度(mm)', width: 100 },
-  {
-    dataIndex: 'thicknessMm',
-    key: 'thicknessMm',
-    title: '厚度(mm)',
-    width: 100,
-  },
-  { dataIndex: 'recipe', key: 'recipe', title: '配方', width: 210 },
-  { dataIndex: 'quantity', key: 'quantity', title: '数量', width: 80 },
-  {
-    dataIndex: 'effectiveWidthMm',
-    key: 'effectiveWidthMm',
-    title: '有效宽度(mm)',
-    width: 120,
-  },
-  { dataIndex: 'sizeClass', key: 'sizeClass', title: '大小垫', width: 85 },
-  {
-    dataIndex: 'thicknessClass',
-    key: 'thicknessClass',
-    title: '厚度分类',
-    width: 90,
-  },
-  {
-    dataIndex: 'processRouteCode',
-    key: 'processRouteCode',
-    title: '工艺路线',
-    width: 140,
-  },
-  {
-    dataIndex: 'processCostRuleVersion',
-    key: 'processCostRuleVersion',
-    title: '工费规则版本',
-    width: 130,
-  },
-  {
-    dataIndex: 'candidateCount',
-    key: 'candidateCount',
-    title: '候选模具数',
-    width: 105,
-  },
-  { dataIndex: 'mould', key: 'mould', title: '最低成本可行模具', width: 220 },
-  {
-    dataIndex: 'materialUnitCostPerKg',
-    key: 'materialUnitCostPerKg',
-    title: 'KG单价',
-    width: 105,
-  },
-  {
-    dataIndex: 'chargeWeightKg',
-    key: 'chargeWeightKg',
-    title: '装模量(kg)',
-    width: 110,
-  },
-  {
-    dataIndex: 'totalPiecesPerBoard',
-    key: 'totalPiecesPerBoard',
-    title: '开片条数',
-    width: 100,
-  },
-  {
-    dataIndex: 'materialYieldRate',
-    key: 'materialYieldRate',
-    title: '合格率',
-    width: 90,
-  },
-  {
-    dataIndex: 'materialCost',
-    key: 'materialCost',
-    title: '材料价格',
-    width: 100,
-  },
-  {
-    dataIndex: 'foamingLaborPerKg',
-    key: 'foamingLaborPerKg',
-    title: '发泡KG人工单价',
-    width: 140,
-  },
-  {
-    dataIndex: 'slicingLaborPerKg',
-    key: 'slicingLaborPerKg',
-    title: '开片人工KG单价',
-    width: 140,
-  },
-  {
-    dataIndex: 'allocationCostPerKg',
-    key: 'allocationCostPerKg',
-    title: '费用分摊(KG单价)',
-    width: 150,
-  },
-  {
-    dataIndex: 'preprocessCostPerKg',
-    key: 'preprocessCostPerKg',
-    title: '前加工费用小计',
-    width: 135,
-  },
-  {
-    dataIndex: 'preprocessCost',
-    key: 'preprocessCost',
-    title: '前加工费用折算',
-    width: 135,
-  },
-  {
-    dataIndex: 'verticalCutCostPerPiece',
-    key: 'verticalCutCostPerPiece',
-    title: '立切',
-    width: 85,
-  },
-  {
-    dataIndex: 'compositeCostPerPiece',
-    key: 'compositeCostPerPiece',
-    title: '复合加工',
-    width: 100,
-  },
-  {
-    dataIndex: 'embossCostPerPiece',
-    key: 'embossCostPerPiece',
-    title: '压花(送片+接片)',
-    width: 145,
-  },
-  {
-    dataIndex: 'punchCostPerPiece',
-    key: 'punchCostPerPiece',
-    title: '冲床',
-    width: 85,
-  },
-  {
-    dataIndex: 'postprocessCost',
-    key: 'postprocessCost',
-    title: '小计',
-    width: 90,
-  },
-  {
-    dataIndex: 'packingLaborPerPiece',
-    key: 'packingLaborPerPiece',
-    title: '包装人工/条',
-    width: 115,
-  },
-  {
-    dataIndex: 'batchShippingOperationCostPerPiece',
-    key: 'batchShippingOperationCostPerPiece',
-    title: '批量发货',
-    width: 100,
-  },
-  {
-    dataIndex: 'packingOperationCostPerPiece',
-    key: 'packingOperationCostPerPiece',
-    title: '包装费用小计',
-    width: 125,
-  },
-  {
-    dataIndex: 'oppCostPerPiece',
-    key: 'oppCostPerPiece',
-    title: 'OPP膜',
-    width: 90,
-  },
-  {
-    dataIndex: 'cartonCostPerPiece',
-    key: 'cartonCostPerPiece',
-    title: '外箱',
-    width: 90,
-  },
-  {
-    dataIndex: 'strapCostPerPiece',
-    key: 'strapCostPerPiece',
-    title: '绑带',
-    width: 90,
-  },
-  {
-    dataIndex: 'auxiliarySubtotalPerPiece',
-    key: 'auxiliarySubtotalPerPiece',
-    title: '辅料小计',
-    width: 105,
-  },
-  {
-    dataIndex: 'totalCost',
-    key: 'totalCost',
-    title: '总计成本',
-    width: 110,
-  },
-  {
-    dataIndex: 'currentCost',
-    key: 'currentCost',
-    title: '现有成本',
-    width: 105,
-  },
-  {
-    dataIndex: 'costDifference',
-    key: 'costDifference',
-    title: '成本差额',
-    width: 105,
-  },
-  {
-    dataIndex: 'costDifferenceRate',
-    key: 'costDifferenceRate',
-    title: '差异率',
-    width: 95,
-  },
-  {
-    dataIndex: 'currentQuote',
-    key: 'currentQuote',
-    title: '现有报价',
-    width: 105,
-  },
-  {
-    dataIndex: 'unitQuote',
-    key: 'unitQuote',
-    title: '建议报价',
-    width: 105,
-  },
-  {
-    dataIndex: 'batchTotalCost',
-    key: 'batchTotalCost',
-    title: '批量总成本',
-    width: 120,
-  },
-  { dataIndex: 'remarks', key: 'remarks', title: '备注', width: 180 },
-  {
-    dataIndex: 'failureReason',
-    fixed: 'right',
-    key: 'failureReason',
-    title: '失败原因/提醒',
-    width: 260,
-  },
-];
+const SENSITIVE_BATCH_COLUMN_KEYS = new Set([
+  'allocationCostPerKg',
+  'auxiliarySubtotalPerPiece',
+  'batchShippingOperationCostPerPiece',
+  'batchTotalCost',
+  'tpeThicknessMm',
+  'candidateCount',
+  'cartonCostPerPiece',
+  'chargeWeightKg',
+  'compositeCostPerPiece',
+  'costDifference',
+  'costDifferenceRate',
+  'currentCost',
+  'effectiveWidthMm',
+  'embossCostPerPiece',
+  'foamingLaborPerKg',
+  'materialCost',
+  'materialUnitCostPerKg',
+  'materialYieldRate',
+  'laminationLayout',
+  'laminationPurchaseLength',
+  'laminationUtilization',
+  'mould',
+  'oppCostPerPiece',
+  'packingLaborPerPiece',
+  'packingOperationCostPerPiece',
+  'postprocessCost',
+  'preprocessCost',
+  'preprocessCostPerKg',
+  'processCostRuleVersion',
+  'processRouteCode',
+  'punchCostPerPiece',
+  'sizeClass',
+  'slicingLaborPerKg',
+  'strapCostPerPiece',
+  'thicknessClass',
+  'totalCost',
+  'totalPiecesPerBoard',
+  'verticalCutCostPerPiece',
+]);
+
+const previewColumns = computed<TableColumnsType<PreviewRow>>(() => {
+  const columns: TableColumnsType<PreviewRow> = [
+    {
+      dataIndex: 'rowNo',
+      fixed: 'left',
+      key: 'rowNo',
+      title: '行号',
+      width: 70,
+    },
+    {
+      dataIndex: 'businessNo',
+      key: 'businessNo',
+      title: '业务编号',
+      width: 130,
+    },
+    {
+      dataIndex: 'status',
+      fixed: 'left',
+      key: 'status',
+      title: '状态',
+      width: 80,
+    },
+    { dataIndex: 'lengthMm', key: 'lengthMm', title: '长度(mm)', width: 100 },
+    { dataIndex: 'widthMm', key: 'widthMm', title: '宽度(mm)', width: 100 },
+    {
+      dataIndex: 'thicknessMm',
+      key: 'thicknessMm',
+      title: '厚度(mm)',
+      width: 100,
+    },
+    { dataIndex: 'recipe', key: 'recipe', title: '配方', width: 210 },
+    { dataIndex: 'quantity', key: 'quantity', title: '数量', width: 80 },
+    {
+      dataIndex: 'laminationMaterial',
+      key: 'laminationMaterial',
+      title: '产品结构/贴合材料',
+      width: 230,
+    },
+    {
+      dataIndex: 'tpeThicknessMm',
+      key: 'tpeThicknessMm',
+      title: '基础TPE厚度(mm)',
+      width: 135,
+    },
+    {
+      dataIndex: 'laminationLayout',
+      key: 'laminationLayout',
+      title: '卷材排版',
+      width: 230,
+    },
+    {
+      dataIndex: 'laminationPurchaseLength',
+      key: 'laminationPurchaseLength',
+      title: '计费长度(mm)',
+      width: 130,
+    },
+    {
+      dataIndex: 'laminationUtilization',
+      key: 'laminationUtilization',
+      title: '面材利用率',
+      width: 110,
+    },
+    {
+      dataIndex: 'effectiveWidthMm',
+      key: 'effectiveWidthMm',
+      title: '有效宽度(mm)',
+      width: 120,
+    },
+    { dataIndex: 'sizeClass', key: 'sizeClass', title: '大小垫', width: 85 },
+    {
+      dataIndex: 'thicknessClass',
+      key: 'thicknessClass',
+      title: '厚度分类',
+      width: 90,
+    },
+    {
+      dataIndex: 'processRouteCode',
+      key: 'processRouteCode',
+      title: '工艺路线',
+      width: 140,
+    },
+    {
+      dataIndex: 'processCostRuleVersion',
+      key: 'processCostRuleVersion',
+      title: '工费规则版本',
+      width: 130,
+    },
+    {
+      dataIndex: 'candidateCount',
+      key: 'candidateCount',
+      title: '候选模具数',
+      width: 105,
+    },
+    { dataIndex: 'mould', key: 'mould', title: '最低成本可行模具', width: 220 },
+    {
+      dataIndex: 'materialUnitCostPerKg',
+      key: 'materialUnitCostPerKg',
+      title: 'KG单价',
+      width: 105,
+    },
+    {
+      dataIndex: 'chargeWeightKg',
+      key: 'chargeWeightKg',
+      title: '装模量(kg)',
+      width: 110,
+    },
+    {
+      dataIndex: 'totalPiecesPerBoard',
+      key: 'totalPiecesPerBoard',
+      title: '开片条数',
+      width: 100,
+    },
+    {
+      dataIndex: 'materialYieldRate',
+      key: 'materialYieldRate',
+      title: '合格率',
+      width: 90,
+    },
+    {
+      dataIndex: 'materialCost',
+      key: 'materialCost',
+      title: '材料价格',
+      width: 100,
+    },
+    {
+      dataIndex: 'foamingLaborPerKg',
+      key: 'foamingLaborPerKg',
+      title: '发泡KG人工单价',
+      width: 140,
+    },
+    {
+      dataIndex: 'slicingLaborPerKg',
+      key: 'slicingLaborPerKg',
+      title: '开片人工KG单价',
+      width: 140,
+    },
+    {
+      dataIndex: 'allocationCostPerKg',
+      key: 'allocationCostPerKg',
+      title: '费用分摊(KG单价)',
+      width: 150,
+    },
+    {
+      dataIndex: 'preprocessCostPerKg',
+      key: 'preprocessCostPerKg',
+      title: '前加工费用小计',
+      width: 135,
+    },
+    {
+      dataIndex: 'preprocessCost',
+      key: 'preprocessCost',
+      title: '前加工费用折算',
+      width: 135,
+    },
+    {
+      dataIndex: 'verticalCutCostPerPiece',
+      key: 'verticalCutCostPerPiece',
+      title: '立切',
+      width: 85,
+    },
+    {
+      dataIndex: 'compositeCostPerPiece',
+      key: 'compositeCostPerPiece',
+      title: '复合加工',
+      width: 100,
+    },
+    {
+      dataIndex: 'embossCostPerPiece',
+      key: 'embossCostPerPiece',
+      title: '压花(送片+接片)',
+      width: 145,
+    },
+    {
+      dataIndex: 'punchCostPerPiece',
+      key: 'punchCostPerPiece',
+      title: '冲床',
+      width: 85,
+    },
+    {
+      dataIndex: 'postprocessCost',
+      key: 'postprocessCost',
+      title: '小计',
+      width: 90,
+    },
+    {
+      dataIndex: 'packingLaborPerPiece',
+      key: 'packingLaborPerPiece',
+      title: '包装人工/条',
+      width: 115,
+    },
+    {
+      dataIndex: 'batchShippingOperationCostPerPiece',
+      key: 'batchShippingOperationCostPerPiece',
+      title: '批量发货',
+      width: 100,
+    },
+    {
+      dataIndex: 'packingOperationCostPerPiece',
+      key: 'packingOperationCostPerPiece',
+      title: '包装费用小计',
+      width: 125,
+    },
+    {
+      dataIndex: 'oppCostPerPiece',
+      key: 'oppCostPerPiece',
+      title: 'OPP膜',
+      width: 90,
+    },
+    {
+      dataIndex: 'cartonCostPerPiece',
+      key: 'cartonCostPerPiece',
+      title: '外箱',
+      width: 90,
+    },
+    {
+      dataIndex: 'strapCostPerPiece',
+      key: 'strapCostPerPiece',
+      title: '绑带',
+      width: 90,
+    },
+    {
+      dataIndex: 'auxiliarySubtotalPerPiece',
+      key: 'auxiliarySubtotalPerPiece',
+      title: '辅料小计',
+      width: 105,
+    },
+    {
+      dataIndex: 'totalCost',
+      key: 'totalCost',
+      title: '总计成本',
+      width: 110,
+    },
+    {
+      dataIndex: 'currentCost',
+      key: 'currentCost',
+      title: '现有成本',
+      width: 105,
+    },
+    {
+      dataIndex: 'costDifference',
+      key: 'costDifference',
+      title: '成本差额',
+      width: 105,
+    },
+    {
+      dataIndex: 'costDifferenceRate',
+      key: 'costDifferenceRate',
+      title: '差异率',
+      width: 95,
+    },
+    {
+      dataIndex: 'currentQuote',
+      key: 'currentQuote',
+      title: '现有报价',
+      width: 105,
+    },
+    {
+      dataIndex: 'unitQuote',
+      key: 'unitQuote',
+      title: '常规单价-不含税',
+      width: 130,
+    },
+    {
+      dataIndex: 'unitQuoteTaxIncluded',
+      key: 'unitQuoteTaxIncluded',
+      title: '常规单价-含税',
+      width: 130,
+    },
+    {
+      dataIndex: 'quoteTotal',
+      key: 'quoteTotal',
+      title: '常规总价-不含税',
+      width: 130,
+    },
+    {
+      dataIndex: 'quoteTotalTaxIncluded',
+      key: 'quoteTotalTaxIncluded',
+      title: '常规总价-含税',
+      width: 130,
+    },
+    {
+      dataIndex: 'batchTotalCost',
+      key: 'batchTotalCost',
+      title: '批量总成本',
+      width: 120,
+    },
+    { dataIndex: 'remarks', key: 'remarks', title: '备注', width: 180 },
+    {
+      dataIndex: 'failureReason',
+      fixed: 'right',
+      key: 'failureReason',
+      title: '失败原因/提醒',
+      width: 260,
+    },
+  ];
+  const visibleColumns = canViewQuoteDetail.value
+    ? columns
+    : columns.filter(
+        (column) => !SENSITIVE_BATCH_COLUMN_KEYS.has(String(column.key ?? '')),
+      );
+  return visibleColumns;
+});
 
 function validateFile(file: File) {
   const lowerName = file.name.toLowerCase();
@@ -707,18 +929,6 @@ function validateForm() {
   ) {
     return '默认数量必须为大于 0 的整数';
   }
-  if (
-    !Number.isFinite(formState.profitRatePercent) ||
-    formState.profitRatePercent < 0
-  ) {
-    return '利润率必须大于或等于 0';
-  }
-  if (
-    formState.profitMode === 'GROSS_MARGIN' &&
-    formState.profitRatePercent >= 100
-  ) {
-    return '毛利率必须小于 100%';
-  }
   return '';
 }
 
@@ -728,9 +938,10 @@ async function loadOptions() {
   try {
     const data = await getQuotationOptions();
     quotationOptions.value = {
+      capabilities: data?.capabilities,
       costDefaults: data?.costDefaults,
+      laminationMaterials: data?.laminationMaterials ?? [],
       mouldProfiles: data?.mouldProfiles ?? [],
-      profitModes: data?.profitModes ?? [],
       recipes: data?.recipes ?? [],
     };
     const defaults = data?.costDefaults;
@@ -828,14 +1039,13 @@ async function handleExport() {
 
 function handleResetParameters() {
   Object.assign(formState, {
+    defaultLaminationMaterialId: undefined,
     defaultQuantity: 1,
     defaultRecipeId: undefined,
     includeCarton: false,
     includeOpp: false,
     includeStrap: false,
     includeSupplement: true,
-    profitMode: 'GROSS_MARGIN',
-    profitRatePercent: 20,
   });
   const defaults = quotationOptions.value.costDefaults;
   formState.includeCarton = defaults?.includeCarton ?? false;
@@ -896,7 +1106,7 @@ onActivated(() => {
     :description="
       props.embedded
         ? undefined
-        : '从 Excel 的长度、宽度、厚度三列导入尺寸，逐行自动选择总计成本最低的可行模具，并导出完整工艺与成本明细。'
+        : '从 Excel 的长度、宽度、成品总厚度三列导入尺寸，可按行选择外采贴合材料并冻结本次报价。'
     "
     :title="props.embedded ? undefined : '批量报价'"
   >
@@ -906,7 +1116,7 @@ onActivated(() => {
         show-icon
         type="info"
         message="计算口径"
-        description="Excel 中的长度(mm)、宽度(mm)、厚度(mm)需分别填写；配方或数量留空时使用下方全局默认值。每条尺寸都会遍历可用模具并选择单位总成本最低的可行方案。"
+        description="Excel 中的长度(mm)、宽度(mm)、成品总厚度(mm)需分别填写；贴合材料留空表示纯TPE。数量会参与卷材排版和余料分摊，价格规则由服务端按规格自动匹配。"
       />
 
       <Alert
@@ -950,7 +1160,7 @@ onActivated(() => {
             </p>
             <p class="ant-upload-text">点击或拖拽 Excel 到这里</p>
             <p class="ant-upload-hint">
-              模板按长度(mm)、宽度(mm)、厚度(mm)三列填写，不要合并为“长×宽×厚”
+              模板按长度(mm)、宽度(mm)、成品总厚度(mm)三列填写，不要合并为“长×宽×厚”
             </p>
           </Upload.Dragger>
 
@@ -986,6 +1196,25 @@ onActivated(() => {
                 />
               </div>
 
+              <div class="field span-two">
+                <label>默认贴合材料（可选）</label>
+                <Select
+                  v-model:value="formState.defaultLaminationMaterialId"
+                  allow-clear
+                  class="w-full"
+                  :disabled="optionsLoading"
+                  :options="laminationMaterialOptions"
+                  placeholder="Excel 贴合材料为空时使用；留空表示纯TPE"
+                  show-search
+                  :filter-option="
+                    (input, option) =>
+                      String(option?.label ?? '')
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                  "
+                />
+              </div>
+
               <div class="field">
                 <label>默认数量</label>
                 <InputNumber
@@ -993,27 +1222,6 @@ onActivated(() => {
                   class="w-full"
                   :min="1"
                   :precision="0"
-                />
-              </div>
-
-              <div class="field">
-                <label>利润模式</label>
-                <Select
-                  v-model:value="formState.profitMode"
-                  class="w-full"
-                  :options="profitModeOptions"
-                />
-              </div>
-
-              <div class="field">
-                <label>利润率（%）</label>
-                <InputNumber
-                  v-model:value="formState.profitRatePercent"
-                  addon-after="%"
-                  class="w-full"
-                  :max="formState.profitMode === 'GROSS_MARGIN' ? 99.99 : 1000"
-                  :min="0"
-                  :precision="2"
                 />
               </div>
 
@@ -1103,7 +1311,7 @@ onActivated(() => {
           description="当前预览是旧参数结果，请重新计算后再导出。"
         />
 
-        <Spin :spinning="calculating" tip="正在逐条比较可行模具并计算成本…">
+        <Spin :spinning="calculating" tip="正在逐条计算TPE、卷材排版与报价…">
           <Empty
             v-if="!result && !requestError"
             class="result-empty"
@@ -1140,6 +1348,18 @@ onActivated(() => {
               :description="`批次号：${result.calculationBatchId}。导出将直接读取本批次快照，不会因原材料价格或工费规则更新而漂移。`"
             />
 
+            <Alert
+              class="mb-4"
+              show-icon
+              type="info"
+              message="报价同时展示不含税与含税口径"
+              :description="
+                batchTaxPriceUsesCompatibilityDerivation
+                  ? '当前部分批量行尚未返回独立含税字段，页面暂按不含税金额固定增加 8% 派生展示；导出内容以服务端批次快照为准。'
+                  : '现有常规单价和总价是不含税口径；含税单价和总价由服务端按固定 8% 加点返回。'
+              "
+            />
+
             <Table
               bordered
               :columns="previewColumns"
@@ -1147,7 +1367,7 @@ onActivated(() => {
               :pagination="{ defaultPageSize: 50, showSizeChanger: true }"
               row-key="key"
               size="small"
-              :scroll="{ x: 4420, y: 600 }"
+              :scroll="{ x: isSuperAdmin ? 5460 : 2310, y: 600 }"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'status'">
