@@ -257,7 +257,6 @@ export namespace FdmCreativeApi {
 
   export interface Execution {
     completedTime?: string;
-    errorMessage?: string;
     failedNodeCount?: number;
     id: number;
     projectId: number;
@@ -267,6 +266,8 @@ export namespace FdmCreativeApi {
     status: ExecutionStatus;
     succeededNodeCount?: number;
     totalNodeCount?: number;
+    /** The node runs are included in both task detail and task-list responses. */
+    nodeRuns?: NodeRun[];
     workflowDraftVersion?: number;
     workflowRevisionId?: number;
   }
@@ -283,6 +284,8 @@ export namespace FdmCreativeApi {
     errorMessage?: string;
     fdmaiInvocationId?: string;
     id: number;
+    /** Immutable node configuration captured when this task was created. */
+    inputJson?: string;
     nodeId: string;
     nodeType?: string;
     outputJson?: string;
@@ -290,9 +293,7 @@ export namespace FdmCreativeApi {
     status: NodeRunStatus;
   }
 
-  export interface ExecutionDetail extends Execution {
-    nodeRuns?: NodeRun[];
-  }
+  export type ExecutionDetail = Execution;
 
   export interface PromptRefineResp {
     errorMessage?: string;
