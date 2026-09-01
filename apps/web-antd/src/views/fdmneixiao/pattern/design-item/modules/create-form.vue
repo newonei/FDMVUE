@@ -6,8 +6,17 @@ import { nextTick, ref, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
+import { formatDateTime } from '@vben/utils';
 
-import { Button, Empty, Image, Input, InputNumber, message } from 'ant-design-vue';
+import {
+  Button,
+  Empty,
+  Image,
+  Input,
+  InputNumber,
+  message,
+} from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import {
@@ -32,6 +41,8 @@ interface BatchRow {
   designImageUrl: string;
   previewImageUrl?: string;
   productSpec?: string;
+  packagingMethod?: string;
+  purchasePrice?: number;
   quantity: number;
   remark?: string;
   rowKey: number;
@@ -47,6 +58,7 @@ interface UploadSuccessPayload {
 
 const SOURCE_IMAGE_MAX_SIZE_MB = 1024;
 
+const userStore = useUserStore();
 let rowSeq = 0;
 let resettingBatchRows = false;
 const batchUploadUrls = ref<string[]>([]);
@@ -132,10 +144,7 @@ async function uploadDesignImageWithPreview(
   };
 }
 
-function setImageUrlsForDesign(
-  designUrl: string,
-  previewUrl?: string,
-) {
+function setImageUrlsForDesign(designUrl: string, previewUrl?: string) {
   const normalizedDesignUrl = designUrl.trim();
   if (!normalizedDesignUrl) return;
   const normalizedPreviewUrl = String(previewUrl ?? '').trim();
@@ -264,6 +273,12 @@ function normalizeBatchItems() {
         getStoredPreviewUrl(row.designImageUrl, row.previewImageUrl) ||
         undefined,
       productSpec: row.productSpec?.trim() || '',
+      packagingMethod: row.packagingMethod?.trim() || undefined,
+      purchasePrice:
+        typeof row.purchasePrice === 'number' &&
+        Number.isFinite(row.purchasePrice)
+          ? row.purchasePrice
+          : undefined,
       quantity: Number(row.quantity || 1),
       remark: row.remark?.trim() || undefined,
     }))
@@ -281,7 +296,9 @@ function validateBatchRows() {
   return true;
 }
 
-function findDuplicatedUrl(items: FdmNeixiaoPatternDesignItemApi.BatchCreateItem[]) {
+function findDuplicatedUrl(
+  items: FdmNeixiaoPatternDesignItemApi.BatchCreateItem[],
+) {
   const seen = new Set<string>();
   for (const item of items) {
     if (seen.has(item.designImageUrl)) {
@@ -330,6 +347,9 @@ async function applyCreateDefaults() {
   await batchFormApi.setValues(
     {
       ...PATTERN_DESIGN_ITEM_DEFAULTS,
+      followUser:
+        String(userStore.userInfo?.nickname ?? '').trim() || undefined,
+      orderDate: formatDateTime(new Date()),
       productionSent: 0,
     } as any,
     false,
@@ -397,6 +417,8 @@ resetBatchRows();
                   <span class="required">*</span>
                   产品规格
                 </th>
+                <th class="w-[160px]">包装方式</th>
+                <th class="w-[150px]">采购价</th>
                 <th class="w-[120px]">数量</th>
                 <th class="w-[180px]">备注</th>
                 <th class="w-[80px]">操作</th>
@@ -439,6 +461,24 @@ resetBatchRows();
                     v-model:value="row.productSpec"
                     allow-clear
                     placeholder="必填"
+                  />
+                </td>
+                <td>
+                  <Input
+                    v-model:value="row.packagingMethod"
+                    allow-clear
+                    :maxlength="128"
+                    placeholder="可选"
+                  />
+                </td>
+                <td>
+                  <InputNumber
+                    v-model:value="row.purchasePrice"
+                    class="w-full"
+                    :min="0"
+                    :precision="6"
+                    :step="0.01"
+                    placeholder="可选"
                   />
                 </td>
                 <td>
@@ -511,7 +551,7 @@ resetBatchRows();
 
 .batch-table {
   width: 100%;
-  min-width: 1220px;
+  min-width: 1540px;
   border-collapse: collapse;
 }
 

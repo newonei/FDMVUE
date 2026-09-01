@@ -8,7 +8,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
-import { downloadFileFromBlobPart } from '@vben/utils';
+import { useAccessStore, useUserStore } from '@vben/stores';
+import { downloadFileFromBlobPart, getFileNameFromUrl } from '@vben/utils';
 
 import { Button, message } from 'ant-design-vue';
 
@@ -23,10 +24,21 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
+import {
+  createPatternDesignItemGridId,
+  PATTERN_DESIGN_ITEM_GRID_CUSTOM_CONFIG,
+} from './grid-persistence';
 import CreateForm from './modules/create-form.vue';
 import EditForm from './modules/edit-form.vue';
 
 defineOptions({ name: 'FdmNeixiaoPatternDesignItem' });
+
+const accessStore = useAccessStore();
+const userStore = useUserStore();
+const patternDesignItemGridId = createPatternDesignItemGridId(
+  accessStore.tenantId,
+  userStore.userInfo?.id ?? userStore.userInfo?.userId,
+);
 
 const [CreateFormModal, createFormModalApi] = useVbenModal({
   connectedComponent: CreateForm,
@@ -36,9 +48,9 @@ const [EditFormModal, editFormModalApi] = useVbenModal({
   connectedComponent: EditForm,
   destroyOnClose: true,
 });
-const checkedRows = shallowRef<FdmNeixiaoPatternDesignItemApi.PatternDesignItem[]>(
-  [],
-);
+const checkedRows = shallowRef<
+  FdmNeixiaoPatternDesignItemApi.PatternDesignItem[]
+>([]);
 const checkedCount = computed(() => checkedRows.value.length);
 
 const FILENAME_INVALID_CHARS = /[<>:"/\\|?*]/g;
@@ -51,7 +63,9 @@ function handleEdit(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
   editFormModalApi.setData(row).open();
 }
 
-async function handleDelete(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
+async function handleDelete(
+  row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
+) {
   if (!row.id) return;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.id]),
@@ -86,9 +100,8 @@ function handleRowCheckboxChange({
 function sanitizeFileName(value: string) {
   return (
     value
-      .replaceAll(
-        /./g,
-        (char) => ((char.codePointAt(0) ?? 0) < 32 ? '_' : char),
+      .replaceAll(/./g, (char) =>
+        (char.codePointAt(0) ?? 0) < 32 ? '_' : char,
       )
       .replaceAll(FILENAME_INVALID_CHARS, '_')
       .replaceAll(/\s+/g, '_')
@@ -141,7 +154,7 @@ function buildDownloadUrl(url: string, fileName: string) {
   }
 }
 
-function triggerOriginalImageDownload(url: string, fileName: string) {
+function triggerFileDownload(url: string, fileName: string) {
   const link = document.createElement('a');
   link.href = buildDownloadUrl(url, fileName);
   link.download = fileName;
@@ -177,13 +190,30 @@ async function handleDownloadOriginal(
     return;
   }
 
-  triggerOriginalImageDownload(url, getOriginalImageFileName(row, index));
+  triggerFileDownload(url, getOriginalImageFileName(row, index));
   try {
     await markRowsDownloaded([row]);
   } catch (error) {
     console.error('Mark pattern design item downloaded failed', error);
     message.warning('原图已开始下载，但标记已下载失败');
   }
+}
+
+function handleDownloadAttachment(
+  row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
+) {
+  const url = String(row.attachmentUrl ?? '').trim();
+  if (!url) {
+    message.warning('当前记录没有附件');
+    return;
+  }
+
+  const extractedName = getFileNameFromUrl(url);
+  const fallbackName = `附件-${row.orderNo || row.id || '内销定制订单'}`;
+  const fileName = sanitizeFileName(
+    extractedName && extractedName !== 'unknown' ? extractedName : fallbackName,
+  );
+  triggerFileDownload(url, fileName);
 }
 
 async function handleBatchDownloadOriginal() {
@@ -201,7 +231,7 @@ async function handleBatchDownloadOriginal() {
   }
 
   downloadableRows.forEach((row, index) => {
-    triggerOriginalImageDownload(
+    triggerFileDownload(
       String(row.designImageUrl).trim(),
       getOriginalImageFileName(row, index),
     );
@@ -220,9 +250,7 @@ async function handleBatchDownloadOriginal() {
   message.success(
     `已开始下载 ${downloadableRows.length} 张原图${
       markSuccess ? '，并标记为已下载' : ''
-    }${
-      skippedCount > 0 ? `，${skippedCount} 条没有原图 URL` : ''
-    }`,
+    }${skippedCount > 0 ? `，${skippedCount} 条没有原图 URL` : ''}`,
   );
 }
 
@@ -279,7 +307,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
+    customConfig: PATTERN_DESIGN_ITEM_GRID_CUSTOM_CONFIG,
     height: '600px',
+    id: patternDesignItemGridId,
     keepSource: false,
     stripe: true,
     proxyConfig: {
@@ -366,10 +396,7 @@ onBeforeUnmount(() => {
 
       <Grid table-title="内销定制订单">
         <template #toolbar-tools>
-          <span
-            v-if="checkedCount > 0"
-            class="text-xs text-muted-foreground"
-          >
+          <span v-if="checkedCount > 0" class="text-xs text-muted-foreground">
             已选 {{ checkedCount }} 条
           </span>
         </template>
@@ -384,6 +411,14 @@ onBeforeUnmount(() => {
                 disabled: !row.designImageUrl,
                 auth: ['fdmneixiao:pattern-design-item:update'],
                 onClick: handleDownloadOriginal.bind(null, row),
+              },
+              {
+                label: '下载附件',
+                type: 'link',
+                icon: ACTION_ICON.DOWNLOAD,
+                disabled: !String(row.attachmentUrl ?? '').trim(),
+                auth: ['fdmneixiao:pattern-design-item:query'],
+                onClick: handleDownloadAttachment.bind(null, row),
               },
               {
                 label: $t('common.edit'),
