@@ -10,6 +10,7 @@ import { h } from 'vue';
 import { Image, Tag } from 'ant-design-vue';
 
 import { z } from '#/adapter/form';
+import { uploadFdmNeixiaoPatternDesignItemAttachment } from '#/api/fdmneixiao/pattern/design-item';
 import { getSimpleUserList } from '#/api/system/user';
 import { getRangePickerDefaultProps } from '#/utils';
 
@@ -101,6 +102,16 @@ function formatDownloaded(value: unknown) {
   return Number(value) === 1 ? '已下载' : '未下载';
 }
 
+function formatPurchasePrice(value: unknown) {
+  if (value === undefined || value === null || value === '') return '';
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return String(value);
+  return new Intl.NumberFormat('zh-CN', {
+    maximumFractionDigits: 6,
+    minimumFractionDigits: 2,
+  }).format(amount);
+}
+
 function formatItemNoWithTotal(
   row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
 ) {
@@ -156,6 +167,15 @@ function getFollowUserSelectProps() {
   };
 }
 
+function getAttachmentUploadProps() {
+  return {
+    api: uploadFdmNeixiaoPatternDesignItemAttachment,
+    maxNumber: 1,
+    maxSize: 1024,
+    showDescription: false,
+  };
+}
+
 export function useFormSchema(
   shopOptions: ShopNameSelectOptions = {},
 ): VbenFormSchema[] {
@@ -190,6 +210,13 @@ export function useFormSchema(
       componentProps: getShopNameSelectProps(shopOptions),
     },
     {
+      fieldName: 'attachmentUrl',
+      label: '附件',
+      component: 'FileUpload',
+      componentProps: getAttachmentUploadProps(),
+      formItemClass: 'col-span-2',
+    },
+    {
       fieldName: 'productSpec',
       label: '产品规格',
       component: 'Input',
@@ -199,6 +226,28 @@ export function useFormSchema(
         placeholder: '请输入产品规格',
       },
       rules: 'required',
+    },
+    {
+      fieldName: 'packagingMethod',
+      label: '包装方式',
+      component: 'Input',
+      componentProps: {
+        allowClear: true,
+        maxlength: 128,
+        placeholder: '请输入包装方式',
+      },
+    },
+    {
+      fieldName: 'purchasePrice',
+      label: '采购价',
+      component: 'InputNumber',
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        placeholder: '请输入采购价，单位：元',
+        precision: 6,
+        step: 0.01,
+      },
     },
     {
       fieldName: 'quantity',
@@ -283,6 +332,13 @@ export function useBatchFormSchema(
       label: '店铺',
       component: 'Select',
       componentProps: getShopNameSelectProps(shopOptions),
+      formItemClass: 'col-span-2',
+    },
+    {
+      fieldName: 'attachmentUrl',
+      label: '附件',
+      component: 'FileUpload',
+      componentProps: getAttachmentUploadProps(),
       formItemClass: 'col-span-2',
     },
     {
@@ -543,6 +599,21 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       minWidth: 160,
       showOverflow: 'tooltip',
     },
+    {
+      field: 'packagingMethod',
+      title: '包装方式',
+      minWidth: 140,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'purchasePrice',
+      title: '采购价',
+      minWidth: 120,
+      align: 'right',
+      slots: {
+        default: ({ row }) => formatPurchasePrice(row.purchasePrice),
+      },
+    },
     { field: 'quantity', title: '数量', minWidth: 90, align: 'right' },
     {
       field: 'orderDate',
@@ -588,8 +659,9 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       formatter: 'formatDateTime',
     },
     {
+      field: '__actions',
       title: '操作',
-      width: 220,
+      width: 320,
       fixed: 'right',
       slots: { default: 'actions' },
     },

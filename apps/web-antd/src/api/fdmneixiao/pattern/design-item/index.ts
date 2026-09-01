@@ -4,7 +4,7 @@ import type { AxiosProgressEvent } from '#/api/infra/file';
 
 import { requestClient } from '#/api/request';
 
-const DESIGN_IMAGE_UPLOAD_TIMEOUT = 30 * 60 * 1000;
+const PATTERN_DESIGN_ITEM_UPLOAD_TIMEOUT = 30 * 60 * 1000;
 
 export namespace FdmNeixiaoPatternDesignItemApi {
   export interface PatternDesignItem {
@@ -15,7 +15,10 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     itemNo?: string;
     designImageUrl?: string;
     previewImageUrl?: string;
+    attachmentUrl?: string;
     productSpec?: string;
+    packagingMethod?: string;
+    purchasePrice?: number;
     quantity?: number;
     orderDate?: number | string;
     importSequence?: number;
@@ -37,6 +40,8 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     designImageUrl: string;
     previewImageUrl?: string;
     productSpec?: string;
+    packagingMethod?: string;
+    purchasePrice?: number;
     quantity: number;
     remark?: string;
   }
@@ -45,6 +50,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     orderNo: string;
     internalOrderNo: string;
     shopName?: string;
+    attachmentUrl?: string;
     orderDate?: number | string;
     importSequence?: number;
     followUser?: string;
@@ -118,7 +124,21 @@ export function uploadFdmNeixiaoPatternDesignItemDesignImage(
     { file },
     {
       onUploadProgress,
-      timeout: DESIGN_IMAGE_UPLOAD_TIMEOUT,
+      timeout: PATTERN_DESIGN_ITEM_UPLOAD_TIMEOUT,
+    },
+  );
+}
+
+export function uploadFdmNeixiaoPatternDesignItemAttachment(
+  file: File,
+  onUploadProgress?: AxiosProgressEvent,
+) {
+  return requestClient.upload<string>(
+    '/fdmneixiao/pattern/design-item/upload-attachment',
+    { file },
+    {
+      onUploadProgress,
+      timeout: PATTERN_DESIGN_ITEM_UPLOAD_TIMEOUT,
     },
   );
 }
