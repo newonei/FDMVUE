@@ -133,7 +133,7 @@ async function initialize() {
       companyId.value = companies.value[0]!.value;
     if (companyId.value) await load();
   } catch {
-    error.value = '可访问公司读取失败。';
+    error.value = '公司列表读取失败。';
   }
 }
 
@@ -149,7 +149,7 @@ async function load() {
     pageNo.value = 1;
   } catch {
     rows.value = [];
-    error.value = '供应商读取失败，请核对公司数据权限。';
+    error.value = '供应商读取失败，请核对公司配置或稍后重试。';
   } finally {
     loading.value = false;
   }

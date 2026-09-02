@@ -118,8 +118,7 @@ async function loadCompanies() {
       companyId.value = companyOptions.value[0]!.value;
     }
   } catch {
-    loadError.value =
-      '无法读取当前用户可访问的公司；采购申请不会跨公司自动查询。';
+    loadError.value = '无法读取公司列表，请检查公司配置或稍后重试。';
   } finally {
     companiesLoading.value = false;
   }
@@ -140,7 +139,7 @@ async function load() {
     });
   } catch {
     records.value = [];
-    loadError.value = '采购申请加载失败，请检查公司权限或稍后重试。';
+    loadError.value = '采购申请加载失败，请检查公司配置或稍后重试。';
   } finally {
     loading.value = false;
   }
@@ -261,9 +260,7 @@ void initialize();
           <template #emptyText>
             <Empty
               :description="
-                companyId
-                  ? '当前公司暂无真实采购申请'
-                  : '请先选择一个可访问的数据公司'
+                companyId ? '当前公司暂无真实采购申请' : '请先选择一个数据公司'
               "
             />
           </template>

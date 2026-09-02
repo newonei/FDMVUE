@@ -232,7 +232,7 @@ watch(() => [productId.value, queryCompanyId.value], initialize, {
         <Alert
           v-if="formOptions.companies.length === 0"
           class="product-form__alert"
-          message="当前账号没有可管理的公司，请先配置公司数据权限。"
+          message="当前租户没有启用的公司，请先配置公司主数据。"
           show-icon
           type="warning"
         />

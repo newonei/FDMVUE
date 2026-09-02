@@ -183,7 +183,7 @@ async function initialize() {
       companyId.value = companies.value[0]!.value;
     if (companyId.value) await changeCompany();
   } catch {
-    error.value = '可访问公司读取失败。';
+    error.value = '公司列表读取失败。';
   }
 }
 
@@ -867,7 +867,7 @@ void initialize();
         </div>
         <Divider />
         <p class="muted-text">
-          发布时服务端会再次校验公司访问权、映射版本、当前合规版本、事实编码、作用域和有效期，并为每条事实及完整集合生成权威
+          发布时服务端会再次校验公司配置、映射版本、当前合规版本、事实编码、作用域和有效期，并为每条事实及完整集合生成权威
           Hash。
         </p>
       </div>

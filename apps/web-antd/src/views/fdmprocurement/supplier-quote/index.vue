@@ -130,7 +130,7 @@ async function initialize() {
       companyId.value = companies.value[0]!.value;
     if (companyId.value && canReadSensitive.value) await changeCompany();
   } catch {
-    error.value = '可访问公司读取失败。';
+    error.value = '公司列表读取失败。';
   }
 }
 
@@ -178,7 +178,7 @@ async function load() {
     pageNo.value = 1;
   } catch {
     rows.value = [];
-    error.value = '敏感报价读取失败，请核对 view-sensitive 权限和公司授权。';
+    error.value = '敏感报价读取失败，请核对 view-sensitive 权限和公司配置。';
   } finally {
     loading.value = false;
   }
@@ -254,7 +254,10 @@ void initialize();
 </script>
 
 <template>
-  <Page title="供应商报价" description="公司隔离的敏感供应商报价版本与阶梯价格">
+  <Page
+    title="供应商报价"
+    description="按公司配置管理的敏感供应商报价版本与阶梯价格"
+  >
     <template #extra>
       <Button
         v-if="canCreate"

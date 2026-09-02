@@ -510,7 +510,7 @@ async function loadCompanies() {
     selectedCompanyId.value = undefined;
     companyError.value = errorMessage(
       error,
-      '当前页面 AI 未开放，或授权公司校验失败。请联系管理员确认页面 AI 配置后重试。',
+      '当前页面 AI 未开放，或启用公司校验失败。请联系管理员确认页面 AI 配置后重试。',
     );
   } finally {
     if (version === companyRequestVersion) loadingCompanies.value = false;
@@ -794,7 +794,7 @@ watch(selectedCompanyId, (next, previous) => {
           :disabled="loadingCompanies || sending || !resolvedBusinessId"
           :loading="loadingCompanies"
           :options="companyOptions"
-          placeholder="请选择当前页面要分析的授权公司"
+          placeholder="请选择当前页面要分析的公司"
         />
       </section>
 
@@ -806,7 +806,7 @@ watch(selectedCompanyId, (next, previous) => {
           !companyError &&
           companies.length === 0
         "
-        description="当前业务对象或页面没有可供你使用 AI 的授权公司。"
+        description="当前业务对象或页面没有可用于 AI 分析的启用公司。"
         message="没有可用公司"
         show-icon
         type="warning"

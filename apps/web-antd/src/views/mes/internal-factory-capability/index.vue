@@ -239,7 +239,7 @@ async function load(resetPage = false) {
     if (version !== requestVersion) return;
     rows.value = [];
     total.value = 0;
-    loadError.value = '工厂产品能力读取失败，请核对公司数据范围和查询条件。';
+    loadError.value = '工厂产品能力读取失败，请核对公司配置和查询条件。';
   } finally {
     if (version === requestVersion) loading.value = false;
   }
