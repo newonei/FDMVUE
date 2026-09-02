@@ -36,12 +36,12 @@ import {
   RadioGroup,
   Segmented,
   Select,
-  Spin,
   Space,
+  Spin,
   Switch,
   Table,
-  Tag,
   Tabs,
+  Tag,
 } from 'ant-design-vue';
 
 import {
@@ -51,6 +51,7 @@ import {
   getQuotationOptions,
 } from '#/api/fdmcaiwu/quotation';
 
+import BatchQuotationPanel from '../batch-quotation/index.vue';
 import AccessoryMatchList from './components/accessory-match-list.vue';
 import {
   formatCompactDecimal,
@@ -68,15 +69,16 @@ import {
   resolveTaxIncludedValue,
   RESULT_COST_FIELDS,
 } from './data';
-import BatchQuotationPanel from '../batch-quotation/index.vue';
 
 defineOptions({ name: 'FdmcaiwuQuotation' });
 
 type MouldSelectionMode = 'AUTO' | 'MANUAL';
+type ProfitRateMode = 'CUSTOM' | 'DEFAULT';
 type QuotationMode = 'batch' | 'single';
 type ProductStructure = 'LAMINATED' | 'PURE_TPE';
 
 interface QuotationFormModel {
+  customProfitRatePercent?: string;
   includeCarton: boolean;
   includeOpp: boolean;
   includeStrap: boolean;
@@ -84,6 +86,7 @@ interface QuotationFormModel {
   laminationMaterialId?: number | string;
   mouldProfileId?: number;
   mouldSelectionMode: MouldSelectionMode;
+  profitRateMode: ProfitRateMode;
   productLengthMm?: number;
   productThicknessMm?: number;
   productWidthMm?: number;
@@ -141,7 +144,7 @@ function normalizeQuotationMode(value: unknown): QuotationMode {
   return value === 'batch' && canUseBatchQuotation ? 'batch' : 'single';
 }
 
-function setQuotationMode(value: string | number) {
+function setQuotationMode(value: number | string) {
   const nextMode = normalizeQuotationMode(value);
   activeQuotationMode.value = nextMode;
   if (nextMode === 'batch') {
@@ -169,6 +172,11 @@ watch(
 const mouldSelectionModeOptions = [
   { label: '自动选择最低成本可行模具', value: 'AUTO' },
   { label: '手动指定模具', value: 'MANUAL' },
+];
+
+const profitRateModeOptions = [
+  { label: '按规格自动', value: 'DEFAULT' },
+  { label: '自定义利润率', value: 'CUSTOM' },
 ];
 
 const formRef = ref<FormInstance>();
@@ -199,6 +207,10 @@ const canViewOptionQuoteDetail = computed(
     quotationOptions.value.capabilities?.canViewQuoteDetail === true,
 );
 
+const canCustomizeProfitRate = computed(
+  () => quotationOptions.value.capabilities?.canCustomizeProfitRate === true,
+);
+
 let calculateRequestSeq = 0;
 let optionsRequestSeq = 0;
 let optionsInitialized = false;
@@ -209,6 +221,7 @@ const AI_ANALYSIS_POLL_INTERVAL_MS = 1500;
 
 function createInitialForm(): QuotationFormModel {
   return {
+    customProfitRatePercent: undefined,
     includeCarton: false,
     includeOpp: false,
     includeStrap: false,
@@ -216,6 +229,7 @@ function createInitialForm(): QuotationFormModel {
     laminationMaterialId: undefined,
     mouldProfileId: undefined,
     mouldSelectionMode: 'AUTO',
+    profitRateMode: 'DEFAULT',
     productLengthMm: undefined,
     productThicknessMm: undefined,
     productWidthMm: undefined,
@@ -375,6 +389,23 @@ const manualMouldExtra = computed(() => {
 });
 
 const formRules: Record<string, Rule[]> = {
+  customProfitRatePercent: [
+    {
+      async validator(_rule, value) {
+        if (
+          !canCustomizeProfitRate.value ||
+          formState.profitRateMode !== 'CUSTOM'
+        ) {
+          return;
+        }
+        const normalized = normalizeProfitRatePercent(value);
+        if (normalized === undefined) {
+          throw new Error('请输入 0 至 99.99 之间的利润率');
+        }
+      },
+      trigger: ['blur', 'change'],
+    },
+  ],
   laminationMaterialId: [
     {
       async validator(_rule, value) {
@@ -470,6 +501,67 @@ function handleProductStructureChange() {
   formRef.value?.clearValidate(['laminationMaterialId', 'productThicknessMm']);
 }
 
+/**
+ * InputNumber 使用 string-mode 保留十进制精度；这里用字符串比较范围，
+ * 避免百分比先转为 IEEE-754 number 再发送产生尾差。
+ */
+function normalizeProfitRatePercent(value: unknown): string | undefined {
+  const text = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) return undefined;
+  const [integerPart = '', fractionPart = ''] = text.split('.');
+  const normalizedInteger = integerPart.replace(/^0+(?=\d)/, '');
+  if (normalizedInteger.length > 2) return undefined;
+  if (normalizedInteger === '99' && fractionPart.padEnd(2, '0') > '99') {
+    return undefined;
+  }
+  return text;
+}
+
+function formatProfitRatePercent(value: unknown): string {
+  const formatted = formatCompactDecimal(value, '', 2);
+  return formatted === '—' ? formatted : `${formatted}%`;
+}
+
+function normalizeProfitRatePercentForInput(
+  value: unknown,
+): string | undefined {
+  const text = String(value ?? '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return undefined;
+  const [integerPart = '', fractionPart = ''] = text.split('.');
+  const compactFraction = fractionPart.replace(/0+$/, '');
+  return normalizeProfitRatePercent(
+    compactFraction ? `${integerPart}.${compactFraction}` : integerPart,
+  );
+}
+
+function restoreDefaultProfitRate() {
+  if (!canCustomizeProfitRate.value) {
+    formState.profitRateMode = 'DEFAULT';
+    formState.customProfitRatePercent = undefined;
+    return;
+  }
+  formState.profitRateMode = 'DEFAULT';
+  formState.customProfitRatePercent = undefined;
+  formRef.value?.clearValidate(['customProfitRatePercent']);
+}
+
+function handleProfitRateModeChange() {
+  if (!canCustomizeProfitRate.value) {
+    restoreDefaultProfitRate();
+    return;
+  }
+  if (formState.profitRateMode === 'DEFAULT') {
+    formState.customProfitRatePercent = undefined;
+    formRef.value?.clearValidate(['customProfitRatePercent']);
+    return;
+  }
+  if (formState.customProfitRatePercent === undefined) {
+    formState.customProfitRatePercent = normalizeProfitRatePercentForInput(
+      result.value?.defaultProfitRatePercent,
+    );
+  }
+}
+
 function clearAiAnalysis() {
   aiAnalysisRequestSeq += 1;
   aiAnalysisLoading.value = false;
@@ -510,6 +602,13 @@ async function loadOptions() {
       mouldProfiles: data?.mouldProfiles ?? [],
       recipes: data?.recipes ?? [],
     };
+
+    // 权限可能在页面打开期间被收回；隐藏控件之外再清空本地值，
+    // buildCalculateRequest 还会做最后一道发送前校验。
+    if (!canCustomizeProfitRate.value) {
+      formState.profitRateMode = 'DEFAULT';
+      formState.customProfitRatePercent = undefined;
+    }
 
     if (!optionsInitialized) {
       Object.assign(formState, createInitialFormFromOptions());
@@ -566,7 +665,22 @@ function buildCalculateRequest():
     return undefined;
   }
 
+  const customProfitRatePercent =
+    canCustomizeProfitRate.value && formState.profitRateMode === 'CUSTOM'
+      ? normalizeProfitRatePercent(formState.customProfitRatePercent)
+      : undefined;
+  if (
+    canCustomizeProfitRate.value &&
+    formState.profitRateMode === 'CUSTOM' &&
+    customProfitRatePercent === undefined
+  ) {
+    return undefined;
+  }
+
   return {
+    ...(customProfitRatePercent === undefined
+      ? {}
+      : { customProfitRatePercent }),
     includeCarton: formState.includeCarton,
     includeOpp: formState.includeOpp,
     includeStrap: formState.includeStrap,
@@ -1094,6 +1208,16 @@ function formatThicknessClass(value?: string) {
   return value || '—';
 }
 
+const pricingPolicySummary = computed(() => {
+  const appliedRate = result.value?.appliedProfitRatePercent;
+  if (!canCustomizeProfitRate.value || !hasValue(appliedRate)) {
+    return '价格规则由系统自动匹配';
+  }
+  return result.value?.customProfitRateApplied
+    ? `自定义利润率 ${formatProfitRatePercent(appliedRate)}`
+    : `规格默认利润率 ${formatProfitRatePercent(appliedRate)}`;
+});
+
 const resultContextItems = computed(() => [
   {
     key: 'product',
@@ -1115,7 +1239,7 @@ const resultContextItems = computed(() => [
   {
     key: 'terms',
     label: '报价条件',
-    value: `${result.value?.quantity ?? '—'} 条 · 价格规则由系统自动匹配`,
+    value: `${result.value?.quantity ?? '—'} 条 · ${pricingPolicySummary.value}`,
   },
 ]);
 
@@ -1538,6 +1662,90 @@ onBeforeUnmount(() => {
                     :step="1"
                   />
                 </FormItem>
+
+                <FormItem
+                  v-if="canCustomizeProfitRate"
+                  class="span-two"
+                  label="报价利润率"
+                  name="customProfitRatePercent"
+                >
+                  <div class="profit-rate-control">
+                    <div class="profit-rate-row">
+                      <RadioGroup
+                        v-model:value="formState.profitRateMode"
+                        button-style="solid"
+                        option-type="button"
+                        :options="profitRateModeOptions"
+                        @change="handleProfitRateModeChange"
+                      />
+                      <InputNumber
+                        v-if="formState.profitRateMode === 'CUSTOM'"
+                        v-model:value="formState.customProfitRatePercent"
+                        class="profit-rate-input"
+                        string-mode
+                        :min="0"
+                        :max="99.99"
+                        :precision="2"
+                        :step="0.01"
+                        addon-after="%"
+                        placeholder="例如 12.50"
+                      />
+                      <Button
+                        v-if="formState.profitRateMode === 'CUSTOM'"
+                        size="small"
+                        type="link"
+                        @click="restoreDefaultProfitRate"
+                      >
+                        恢复默认
+                      </Button>
+                    </div>
+                    <div class="profit-rate-hint">
+                      <template v-if="formState.profitRateMode === 'DEFAULT'">
+                        由服务端按当前规格报价政策自动匹配；完成计算后会显示本次实际采用的利润率。
+                      </template>
+                      <template v-else>
+                        自定义值只影响本次单笔报价，不会修改系统默认规格政策；不得低于该规格的系统超低价利润率，最终以后端校验为准。
+                      </template>
+                    </div>
+                    <div
+                      v-if="result && hasValue(result.appliedProfitRatePercent)"
+                      class="profit-rate-result"
+                    >
+                      <Tag
+                        :color="
+                          result.customProfitRateApplied ? 'purple' : 'blue'
+                        "
+                      >
+                        {{
+                          result.customProfitRateApplied
+                            ? '本次采用自定义利润率'
+                            : '本次采用规格默认利润率'
+                        }}
+                      </Tag>
+                      <span>
+                        {{
+                          formatProfitRatePercent(
+                            result.appliedProfitRatePercent,
+                          )
+                        }}
+                      </span>
+                      <span
+                        v-if="
+                          result.customProfitRateApplied &&
+                          hasValue(result.defaultProfitRatePercent)
+                        "
+                        class="profit-rate-default"
+                      >
+                        规格默认
+                        {{
+                          formatProfitRatePercent(
+                            result.defaultProfitRatePercent,
+                          )
+                        }}
+                      </span>
+                    </div>
+                  </div>
+                </FormItem>
               </div>
             </div>
 
@@ -1546,7 +1754,11 @@ onBeforeUnmount(() => {
               show-icon
               type="info"
               message="成本规则由系统自动解析"
-              description="配方决定实时KG成本、固定合格率和工艺路线；规格决定大小垫、厚垫及对应工费。页面不允许临时报改基础费率。"
+              :description="
+                canCustomizeProfitRate
+                  ? '配方决定实时KG成本、固定合格率和工艺路线；规格决定默认利润率、大小垫、厚垫及对应工费。自定义利润率只作用于当前单笔报价。'
+                  : '配方决定实时KG成本、固定合格率和工艺路线；规格决定利润率、大小垫、厚垫及对应工费。'
+              "
             />
 
             <div class="form-actions">
@@ -1648,7 +1860,9 @@ onBeforeUnmount(() => {
                   <div class="summary-value">
                     {{ formatMoney(summaryValues.unitQuote.display) }}
                   </div>
-                  <div class="summary-caption">不含税 · 系统价格政策</div>
+                  <div class="summary-caption">
+                    不含税 · {{ pricingPolicySummary }}
+                  </div>
                   <div class="summary-tax-value">
                     含税（+{{ quotationTaxRateLabel }}）
                     {{
@@ -2572,6 +2786,44 @@ onBeforeUnmount(() => {
   gap: 10px;
   align-items: center;
   min-height: 32px;
+}
+
+.profit-rate-control {
+  padding: 12px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.profit-rate-row,
+.profit-rate-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.profit-rate-input {
+  width: 168px;
+}
+
+.profit-rate-hint,
+.profit-rate-default {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.profit-rate-hint {
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.profit-rate-result {
+  padding-top: 9px;
+  margin-top: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .form-actions {

@@ -466,7 +466,7 @@ function topShopOption(
       trigger: 'axis',
       formatter: (params: any) => {
         const item = Array.isArray(params) ? params[0] : params;
-        const row = shops[item.dataIndex];
+        const row = shops[item.dataIndex]!;
         return `${row.label}<br/>平台：${platformLabel(row.platformCode)}<br/>实际销售额：¥${fmtAmount2(row.sales)}`;
       },
     },
@@ -964,9 +964,7 @@ void fetchShopNameOptions();
       </div>
 
       <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <span class="text-sm font-semibold text-foreground"
-          >全平台核心指标</span
-        >
+        <span class="text-sm font-semibold text-foreground">全平台核心指标</span>
         <span class="text-xs text-muted-foreground">{{ dataSummary }}</span>
       </div>
 
@@ -1191,11 +1189,11 @@ void fetchShopNameOptions();
 }
 
 .kpi-value {
-  overflow-wrap: anywhere;
   font-size: clamp(24px, 2vw, 34px);
   font-weight: 760;
   line-height: 1.15;
   color: hsl(var(--foreground));
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 

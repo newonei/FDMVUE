@@ -63,7 +63,7 @@ function getPrintDictLabel(dictType: string, value?: number) {
 }
 
 /** 打印出库单：加载数据后只展示打印区域，再调用浏览器打印 */
-async function print(id: number) {
+async function print(id: WmsShipmentOrderApi.JavaLong) {
   if (printing.value) {
     return;
   }

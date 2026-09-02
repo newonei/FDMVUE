@@ -163,7 +163,10 @@ async function fetchShopOptions(keyword = '') {
   try {
     const loadedOptions = await loadShopOptions(keyword);
     if (mySeq !== shopFetchSeq) return;
-    const values = await formApi.getValues().catch(() => ({}));
+    const values = (await formApi.getValues().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
     shopOptions.value = mergeCurrentShopOption(
       loadedOptions,
       values.shopId,

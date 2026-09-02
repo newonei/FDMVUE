@@ -1,0 +1,176 @@
+{
+  "options": {
+    "generationType": "REQUISITION_TO_SOURCING_PLAN",
+    "routeKey": "fdmprocurement.requisition-to-sourcing-plan",
+    "sourceSnapshotHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "facts": {
+      "source": {
+        "requisitionId": "9223372036854775806",
+        "requisitionNo": "PR-20260830-001",
+        "version": 4,
+        "status": "READY",
+        "validationStatus": "PASSED",
+        "companyId": "1",
+        "requiredDate": "2026-09-20",
+        "requirementSetHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "lines": [
+          {
+            "lineToken": "LINE-001",
+            "requisitionItemId": "9223372036854775805",
+            "itemVersion": 2,
+            "lineNo": 1,
+            "productId": "9223372036854775804",
+            "skuId": "9223372036854775803",
+            "productVersionToken": "product-v7",
+            "productCode": "SKU-001",
+            "productName": "测试产品",
+            "specification": "蓝色 / 100 PCS",
+            "customization": null,
+            "purchaseUnit": "BOX",
+            "unitConversionFactor": "100.00000000",
+            "requestedQty": "10.00000000",
+            "requiredBaseQty": "1000.00000000",
+            "requiredDate": "2026-09-20",
+            "productMappingStatus": "MAPPED",
+            "lineHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ]
+      },
+      "policy": {
+        "id": "9223372036854775802",
+        "version": 3,
+        "hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "formulaVersion": "SOURCING-SCORE-2.0",
+        "needsConfirmationSelectionAllowed": true,
+        "overrideReasonMinLength": 12,
+        "maximumSupplierCount": 2,
+        "maximumSupplierConcentration": "0.70000000",
+        "trustedRateProviders": ["PBOC"]
+      },
+      "evidenceDate": "2026-08-30",
+      "inputHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "fullCandidateSetHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "candidateCounts": {
+        "eligible": 1,
+        "needsConfirmation": 0,
+        "unknown": 0,
+        "ineligible": 0
+      },
+      "comparableCostComplete": false,
+      "candidates": [
+        {
+          "candidateToken": "CANDIDATE-001-001",
+          "lineToken": "LINE-001",
+          "requisitionItemId": "9223372036854775805",
+          "supplierId": "9223372036854775801",
+          "supplierVersion": 5,
+          "supplierCompanyId": "9223372036854775800",
+          "supplierCompanyVersion": 2,
+          "supplierProductId": "9223372036854775799",
+          "supplierProductVersion": 6,
+          "quoteVersionId": "9223372036854775798",
+          "quoteBusinessVersion": 4,
+          "quoteRecordVersion": 3,
+          "quoteSourceChecksum": "quote-checksum",
+          "quoteTierId": "9223372036854775797",
+          "performanceSnapshotId": "9223372036854775796",
+          "performanceSnapshotVersion": 2,
+          "performanceFactsHash": "performance-facts-hash",
+          "purchaseUnit": "BOX",
+          "unitConversionFactor": "100.00000000",
+          "minOrderQty": "1.00000000",
+          "packageMultiple": "1.00000000",
+          "quoteTierMinQty": "1.00000000",
+          "quoteTierMaxQty": "100.00000000",
+          "eligibilityStatus": "ELIGIBLE",
+          "eliminationCodes": [],
+          "currency": "USD",
+          "quotedUnitPrice": "15.00000000",
+          "comparableUnitCost": "1.07142857",
+          "rateRequestedDate": "2026-08-30",
+          "rateEffectiveDate": "2026-08-29",
+          "exchangeRateToCny": "7.14285714",
+          "rateProvider": "PBOC",
+          "rateFallbackUsed": true,
+          "rateRetrievedAt": 1788057600000,
+          "costScore": "82.00000000",
+          "deliveryScore": "91.00000000",
+          "qualityScore": "88.00000000",
+          "capacityScore": "80.00000000",
+          "termsScore": "76.00000000",
+          "resilienceScore": "84.00000000",
+          "totalScore": "84.60000000",
+          "confidence": "HIGH",
+          "maxAllocatableQty": "10.00000000",
+          "promisedDate": "2026-09-18",
+          "evidenceCodes": [
+            "PERFORMANCE_EVIDENCE_COMPLETE",
+            "RATE_FALLBACK_USED"
+          ],
+          "evidenceHash": "candidate-evidence-hash"
+        }
+      ],
+      "feasiblePlans": [
+        {
+          "planToken": "PLAN-001",
+          "planHash": "plan-hash",
+          "objectiveRank": 1,
+          "comparableTotalCost": null,
+          "latestPromisedDate": "2026-09-18",
+          "riskCodes": ["COMPARABLE_COST_INCOMPLETE"],
+          "allocations": [
+            {
+              "lineToken": "LINE-001",
+              "candidateToken": "CANDIDATE-001-001",
+              "quantity": "10.00000000",
+              "allocatedBaseQty": "1000.00000000",
+              "allocationRole": "RECOMMENDED"
+            }
+          ]
+        }
+      ],
+      "missingData": [],
+      "warnings": ["完整可比成本尚未接入"],
+      "blockers": []
+    },
+    "models": [
+      {
+        "id": "9223372036854775795",
+        "code": "gpt-structured",
+        "name": "结构化寻源模型",
+        "enabled": true,
+        "capabilities": ["STRUCTURED_OUTPUT"]
+      }
+    ],
+    "existingAssessment": null
+  },
+  "job": {
+    "id": "9223372036854775794",
+    "generationType": "REQUISITION_TO_SOURCING_PLAN",
+    "sourceType": "PROCUREMENT_REQUISITION",
+    "sourceId": "9223372036854775806",
+    "sourceVersion": 4,
+    "sourceSnapshotHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "modelId": "9223372036854775795",
+    "modelName": "结构化寻源模型",
+    "invocationId": "provider-invocation-01HXYZ",
+    "status": "QUEUED",
+    "version": 8,
+    "currentAttemptNo": 1,
+    "proposalVersion": null,
+    "proposalHash": null,
+    "proposalSchemaVersion": null,
+    "proposal": null,
+    "facts": null,
+    "sourceStale": false,
+    "missingData": [],
+    "warnings": [],
+    "rules": [],
+    "requestedAt": 1788057600000,
+    "startedAt": 1788057601000,
+    "completedAt": null,
+    "traceId": "trace-01HXYZ",
+    "errorCode": null,
+    "errorMessage": null
+  }
+}

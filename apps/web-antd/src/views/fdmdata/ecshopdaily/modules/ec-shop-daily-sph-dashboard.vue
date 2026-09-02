@@ -2,9 +2,9 @@
 import type { ECOption } from '@vben/plugins/echarts';
 
 import type { EcShopDailyOption } from '../data';
+
 import type { FdmDateRange } from '#/components/fdm-date-range-picker';
 
-import dayjs from 'dayjs';
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 
 import {
@@ -19,6 +19,7 @@ import {
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import {
   getEcShopDailyPlatformDetailPage,
@@ -27,12 +28,7 @@ import {
 import { FdmAutoComplete as AutoComplete } from '#/components/fdm-auto-complete';
 import { FdmDateRangePicker } from '#/components/fdm-date-range-picker';
 
-import {
-  fmtAmount2,
-  fmtPercent2,
-  normalizeStatDateKey,
-  round2,
-} from '../dashboard-utils';
+import { fmtAmount2, normalizeStatDateKey, round2 } from '../dashboard-utils';
 import EchartsBox from './echarts-box.vue';
 
 defineOptions({ name: 'EcShopDailySphDashboard' });
@@ -66,13 +62,14 @@ function currentYearRange(): FdmDateRange {
 
 function asNumber(value: unknown): number {
   if (value === null || value === undefined || value === '') return 0;
-  const n = Number(String(value).replace('%', '').replace(/,/g, '').trim());
+  const n = Number(String(value).replace('%', '').replaceAll(',', '').trim());
   return Number.isFinite(n) ? n : 0;
 }
 
 function getValue(row: DetailRow, ...keys: string[]): unknown {
   for (const key of keys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+    if (row[key] !== undefined && row[key] !== null && row[key] !== '')
+      return row[key];
   }
   return undefined;
 }
@@ -131,9 +128,17 @@ function rowToBucket(row: DetailRow): SphBucket {
   const paidOrderCount = getNumber(row, 'paid_order_count', 'paidOrderCount');
   const avgOrderValue = getNumber(row, 'avg_order_value', 'avgOrderValue');
   return {
-    actualTransaction: getNumber(row, 'transaction_amount_2', 'transactionAmount2'),
-    avgOrderValueTotal: avgOrderValue > 0 && paidOrderCount > 0 ? avgOrderValue * paidOrderCount : 0,
-    avgOrderValueWeight: avgOrderValue > 0 && paidOrderCount > 0 ? paidOrderCount : 0,
+    actualTransaction: getNumber(
+      row,
+      'transaction_amount_2',
+      'transactionAmount2',
+    ),
+    avgOrderValueTotal:
+      avgOrderValue > 0 && paidOrderCount > 0
+        ? avgOrderValue * paidOrderCount
+        : 0,
+    avgOrderValueWeight:
+      avgOrderValue > 0 && paidOrderCount > 0 ? paidOrderCount : 0,
     buyerCount: getNumber(row, 'buyer_count', 'buyerCount'),
     orderAmount: getNumber(row, 'order_amount', 'orderAmount'),
     orderCount: getNumber(row, 'order_count', 'orderCount'),
@@ -142,13 +147,21 @@ function rowToBucket(row: DetailRow): SphBucket {
     refundAmount:
       getNumber(row, 'refund_amount_2', 'refundAmount2') ||
       getNumber(row, 'refund_amount', 'refundAmount'),
-    transactionAmount: getNumber(row, 'transaction_amount', 'transactionAmount'),
+    transactionAmount: getNumber(
+      row,
+      'transaction_amount',
+      'transactionAmount',
+    ),
   };
 }
 
 function addBucket(target: SphBucket, source: SphBucket) {
-  target.actualTransaction = round2(target.actualTransaction + source.actualTransaction);
-  target.avgOrderValueTotal = round2(target.avgOrderValueTotal + source.avgOrderValueTotal);
+  target.actualTransaction = round2(
+    target.actualTransaction + source.actualTransaction,
+  );
+  target.avgOrderValueTotal = round2(
+    target.avgOrderValueTotal + source.avgOrderValueTotal,
+  );
   target.avgOrderValueWeight += source.avgOrderValueWeight;
   target.buyerCount += source.buyerCount;
   target.orderAmount = round2(target.orderAmount + source.orderAmount);
@@ -156,14 +169,20 @@ function addBucket(target: SphBucket, source: SphBucket) {
   target.orderUserCount += source.orderUserCount;
   target.paidOrderCount += source.paidOrderCount;
   target.refundAmount = round2(target.refundAmount + source.refundAmount);
-  target.transactionAmount = round2(target.transactionAmount + source.transactionAmount);
+  target.transactionAmount = round2(
+    target.transactionAmount + source.transactionAmount,
+  );
 }
 
 function statDateOf(row: DetailRow): string {
   return normalizeStatDateKey(getValue(row, 'stat_date', 'statDate') as any);
 }
 
-function aggregateByKey(rows: DetailRow[], keyOf: (dateKey: string) => string, maxCount?: number) {
+function aggregateByKey(
+  rows: DetailRow[],
+  keyOf: (dateKey: string) => string,
+  maxCount?: number,
+) {
   const map = new Map<string, SphBucket>();
   for (const row of rows) {
     const dateKey = statDateOf(row);
@@ -175,7 +194,10 @@ function aggregateByKey(rows: DetailRow[], keyOf: (dateKey: string) => string, m
   }
   const labels = [...map.keys()].toSorted();
   const slicedLabels = maxCount ? labels.slice(-maxCount) : labels;
-  return { buckets: slicedLabels.map((label) => map.get(label)!), labels: slicedLabels };
+  return {
+    buckets: slicedLabels.map((label) => map.get(label)!),
+    labels: slicedLabels,
+  };
 }
 
 function sliceLastRows(rows: DetailRow[], days: number): DetailRow[] {
@@ -198,13 +220,21 @@ const dashForm = reactive<{ shopName: string; statDate: FdmDateRange }>({
 });
 
 const sortedRows = computed(() =>
-  [...rawRows.value].toSorted((a, b) => statDateOf(a).localeCompare(statDateOf(b))),
+  [...rawRows.value].toSorted((a, b) =>
+    statDateOf(a).localeCompare(statDateOf(b)),
+  ),
 );
 const last7Rows = computed(() => sliceLastRows(sortedRows.value, 7));
 const last30Rows = computed(() => sliceLastRows(sortedRows.value, 30));
-const monthAgg = computed(() => aggregateByKey(sortedRows.value, (dateKey) => dateKey.slice(0, 7)));
-const last7Agg = computed(() => aggregateByKey(last7Rows.value, (dateKey) => dateKey));
-const last30Agg = computed(() => aggregateByKey(last30Rows.value, (dateKey) => dateKey));
+const monthAgg = computed(() =>
+  aggregateByKey(sortedRows.value, (dateKey) => dateKey.slice(0, 7)),
+);
+const last7Agg = computed(() =>
+  aggregateByKey(last7Rows.value, (dateKey) => dateKey),
+);
+const last30Agg = computed(() =>
+  aggregateByKey(last30Rows.value, (dateKey) => dateKey),
+);
 const weekAgg = computed(() =>
   aggregateByKey(
     sortedRows.value,
@@ -216,16 +246,24 @@ const weekAgg = computed(() =>
 const rangeKpi = computed(() => {
   const bucket = newBucket();
   for (const row of sortedRows.value) addBucket(bucket, rowToBucket(row));
-  const refundRatio = ratioPercent(bucket.refundAmount, bucket.transactionAmount);
+  const refundRatio = ratioPercent(
+    bucket.refundAmount,
+    bucket.transactionAmount,
+  );
   const orderPayRate = ratioPercent(bucket.paidOrderCount, bucket.orderCount);
   const userPayRate = ratioPercent(bucket.buyerCount, bucket.orderUserCount);
-  const actualRate = ratioPercent(bucket.actualTransaction, bucket.transactionAmount);
-  const avgOrderValue =
-    bucket.avgOrderValueWeight > 0
-      ? round2(bucket.avgOrderValueTotal / bucket.avgOrderValueWeight)
-      : bucket.paidOrderCount > 0
-        ? round2(bucket.transactionAmount / bucket.paidOrderCount)
-        : 0;
+  const actualRate = ratioPercent(
+    bucket.actualTransaction,
+    bucket.transactionAmount,
+  );
+  let avgOrderValue = 0;
+  if (bucket.avgOrderValueWeight > 0) {
+    avgOrderValue = round2(
+      bucket.avgOrderValueTotal / bucket.avgOrderValueWeight,
+    );
+  } else if (bucket.paidOrderCount > 0) {
+    avgOrderValue = round2(bucket.transactionAmount / bucket.paidOrderCount);
+  }
   return {
     ...bucket,
     actualRate,
@@ -248,7 +286,8 @@ const filterSummary = computed(() => {
 });
 
 const dataSummary = computed(() => {
-  const days = aggregateByKey(sortedRows.value, (dateKey) => dateKey).labels.length;
+  const days = aggregateByKey(sortedRows.value, (dateKey) => dateKey).labels
+    .length;
   if (!days && !loading.value) return '暂无数据，请调整筛选条件';
   return `合并后 ${days} 个统计日 · 原始记录 ${rawRows.value.length} 条`;
 });
@@ -257,25 +296,29 @@ const diagnosticItems = computed(() => {
   const kpi = rangeKpi.value;
   return [
     {
-      description: '订单成交率 = 成交订单数 / 下单订单数，用于观察订单从下单到成交的转化效率。',
+      description:
+        '订单成交率 = 成交订单数 / 下单订单数，用于观察订单从下单到成交的转化效率。',
       label: '订单成交率',
       value: ratioLabel(kpi.orderPayRate),
       tone: 'blue',
     },
     {
-      description: '用户成交率 = 成交人数 / 下单人数，用于观察用户从下单到成交的转化效率。',
+      description:
+        '用户成交率 = 成交人数 / 下单人数，用于观察用户从下单到成交的转化效率。',
       label: '用户成交率',
       value: ratioLabel(kpi.userPayRate),
       tone: 'cyan',
     },
     {
-      description: '实际成交占比 = 实际成交金额 / 成交金额，用于观察扣除异常影响后的成交质量。',
+      description:
+        '实际成交占比 = 实际成交金额 / 成交金额，用于观察扣除异常影响后的成交质量。',
       label: '实际成交占比',
       value: ratioLabel(kpi.actualRate),
       tone: 'green',
     },
     {
-      description: '退款率 = 退款金额 / 成交金额，用于观察退款对视频号成交的影响。',
+      description:
+        '退款率 = 退款金额 / 成交金额，用于观察退款对视频号成交的影响。',
       label: '退款率',
       value: ratioLabel(kpi.refundRatio),
       tone: kpi.refundRatio !== null && kpi.refundRatio <= 15 ? 'green' : 'red',
@@ -297,12 +340,25 @@ const diagnosticItems = computed(() => {
 
 function baseChartOption(title: string): ECOption {
   return {
-    title: { left: 6, text: title, textStyle: { fontSize: 15, fontWeight: 600 }, top: 4 },
+    title: {
+      left: 6,
+      text: title,
+      textStyle: { fontSize: 15, fontWeight: 600 },
+      top: 4,
+    },
     tooltip: { axisPointer: { type: 'cross' }, trigger: 'axis' },
     grid: { bottom: 58, left: 58, right: 44, top: 54 },
     legend: { bottom: 4, itemHeight: 8, itemWidth: 12 },
-    xAxis: { axisLabel: { hideOverlap: true, interval: 'auto' }, boundaryGap: false, type: 'category' },
-    yAxis: { axisLabel: { formatter: (value: number) => amountShort(value) }, splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } }, type: 'value' },
+    xAxis: {
+      axisLabel: { hideOverlap: true, interval: 'auto' },
+      boundaryGap: false,
+      type: 'category',
+    },
+    yAxis: {
+      axisLabel: { formatter: (value: number) => amountShort(value) },
+      splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } },
+      type: 'value',
+    },
   };
 }
 
@@ -312,79 +368,213 @@ function moneyFormatter(value: unknown) {
 
 function last7TrendOption(): ECOption | null {
   const { buckets, labels } = last7Agg.value;
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption('过去7天交易趋势') as any;
   option.xAxis.data = labels;
   option.yAxis = [
-    { axisLabel: { formatter: (value: number) => amountShort(value) }, name: '金额', splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } }, type: 'value' },
-    { axisLabel: { formatter: (value: number) => `${value}` }, name: '订单', type: 'value' },
+    {
+      axisLabel: { formatter: (value: number) => amountShort(value) },
+      name: '金额',
+      splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } },
+      type: 'value',
+    },
+    {
+      axisLabel: { formatter: (value: number) => `${value}` },
+      name: '订单',
+      type: 'value',
+    },
   ];
   option.series = [
-    { name: '成交金额', type: 'line', smooth: true, data: buckets.map((item) => round2(item.transactionAmount)), itemStyle: { color: '#2563eb' }, label: { show: true, position: 'top', formatter: (p: any) => amountShort(p.value), fontSize: 10 } },
-    { name: '实际成交金额', type: 'line', smooth: true, data: buckets.map((item) => round2(item.actualTransaction)), itemStyle: { color: '#10b981' } },
-    { name: '成交订单数', type: 'line', yAxisIndex: 1, smooth: true, data: buckets.map((item) => item.paidOrderCount), itemStyle: { color: '#f97316' } },
+    {
+      name: '成交金额',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => round2(item.transactionAmount)),
+      itemStyle: { color: '#2563eb' },
+      label: {
+        show: true,
+        position: 'top',
+        formatter: (p: any) => amountShort(p.value),
+        fontSize: 10,
+      },
+    },
+    {
+      name: '实际成交金额',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => round2(item.actualTransaction)),
+      itemStyle: { color: '#10b981' },
+    },
+    {
+      name: '成交订单数',
+      type: 'line',
+      yAxisIndex: 1,
+      smooth: true,
+      data: buckets.map((item) => item.paidOrderCount),
+      itemStyle: { color: '#f97316' },
+    },
   ];
   return option;
 }
 
 function monthTrendOption(): ECOption | null {
   const { buckets, labels } = monthAgg.value;
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption('月度交易数据') as any;
   option.xAxis.data = labels;
   option.xAxis.boundaryGap = true;
   option.tooltip.valueFormatter = moneyFormatter;
   option.series = [
-    { name: '成交金额', type: 'bar', data: buckets.map((item) => round2(item.transactionAmount)), itemStyle: { color: '#2563eb', borderRadius: [5, 5, 0, 0] }, label: { show: labels.length <= 12, position: 'top', formatter: (p: any) => amountShort(p.value), fontSize: 10 } },
-    { name: '下单金额', type: 'bar', data: buckets.map((item) => round2(item.orderAmount)), itemStyle: { color: '#93c5fd', borderRadius: [5, 5, 0, 0] } },
-    { name: '退款金额', type: 'line', smooth: true, data: buckets.map((item) => round2(item.refundAmount)), itemStyle: { color: '#ef4444' } },
+    {
+      name: '成交金额',
+      type: 'bar',
+      data: buckets.map((item) => round2(item.transactionAmount)),
+      itemStyle: { color: '#2563eb', borderRadius: [5, 5, 0, 0] },
+      label: {
+        show: labels.length <= 12,
+        position: 'top',
+        formatter: (p: any) => amountShort(p.value),
+        fontSize: 10,
+      },
+    },
+    {
+      name: '下单金额',
+      type: 'bar',
+      data: buckets.map((item) => round2(item.orderAmount)),
+      itemStyle: { color: '#93c5fd', borderRadius: [5, 5, 0, 0] },
+    },
+    {
+      name: '退款金额',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => round2(item.refundAmount)),
+      itemStyle: { color: '#ef4444' },
+    },
   ];
   return option;
 }
 
 function last30FunnelOption(): ECOption | null {
   const { buckets, labels } = last30Agg.value;
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption('近30天下单与成交漏斗') as any;
   option.xAxis.data = labels;
   option.series = [
-    { name: '下单订单数', type: 'line', smooth: true, data: buckets.map((item) => item.orderCount), itemStyle: { color: '#64748b' }, label: { show: true, position: 'top', fontSize: 10 } },
-    { name: '成交订单数', type: 'line', smooth: true, data: buckets.map((item) => item.paidOrderCount), itemStyle: { color: '#2563eb' } },
-    { name: '下单人数', type: 'line', smooth: true, data: buckets.map((item) => item.orderUserCount), itemStyle: { color: '#f59e0b' } },
-    { name: '成交人数', type: 'line', smooth: true, data: buckets.map((item) => item.buyerCount), itemStyle: { color: '#10b981' } },
+    {
+      name: '下单订单数',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => item.orderCount),
+      itemStyle: { color: '#64748b' },
+      label: { show: true, position: 'top', fontSize: 10 },
+    },
+    {
+      name: '成交订单数',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => item.paidOrderCount),
+      itemStyle: { color: '#2563eb' },
+    },
+    {
+      name: '下单人数',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => item.orderUserCount),
+      itemStyle: { color: '#f59e0b' },
+    },
+    {
+      name: '成交人数',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => item.buyerCount),
+      itemStyle: { color: '#10b981' },
+    },
   ];
   return option;
 }
 
 function refundRatioOption(): ECOption | null {
   const { buckets, labels } = last30Agg.value;
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption('近30天退款风险') as any;
   option.xAxis.data = labels;
   option.yAxis = [
-    { axisLabel: { formatter: (value: number) => amountShort(value) }, name: '金额', splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } }, type: 'value' },
-    { axisLabel: { formatter: (value: number) => `${value}%` }, name: '退款率', type: 'value' },
+    {
+      axisLabel: { formatter: (value: number) => amountShort(value) },
+      name: '金额',
+      splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } },
+      type: 'value',
+    },
+    {
+      axisLabel: { formatter: (value: number) => `${value}%` },
+      name: '退款率',
+      type: 'value',
+    },
   ];
   option.series = [
-    { name: '退款金额', type: 'bar', data: buckets.map((item) => round2(item.refundAmount)), itemStyle: { color: '#ef4444', borderRadius: [5, 5, 0, 0] } },
-    { name: '退款率', type: 'line', yAxisIndex: 1, smooth: true, data: buckets.map((item) => ratioPercent(item.refundAmount, item.transactionAmount)), itemStyle: { color: '#1d4ed8' }, label: { show: true, position: 'top', formatter: (p: any) => ratioLabel(p.value), fontSize: 10 } },
+    {
+      name: '退款金额',
+      type: 'bar',
+      data: buckets.map((item) => round2(item.refundAmount)),
+      itemStyle: { color: '#ef4444', borderRadius: [5, 5, 0, 0] },
+    },
+    {
+      name: '退款率',
+      type: 'line',
+      yAxisIndex: 1,
+      smooth: true,
+      data: buckets.map((item) =>
+        ratioPercent(item.refundAmount, item.transactionAmount),
+      ),
+      itemStyle: { color: '#1d4ed8' },
+      label: {
+        show: true,
+        position: 'top',
+        formatter: (p: any) => ratioLabel(p.value),
+        fontSize: 10,
+      },
+    },
   ];
   return option;
 }
 
 function weekTrendOption(): ECOption | null {
   const { buckets, labels } = weekAgg.value;
-  if (!labels.length) return null;
+  if (labels.length === 0) return null;
   const option = baseChartOption('过去十周交易趋势') as any;
   option.xAxis.data = labels;
-  option.tooltip.valueFormatter = (value: unknown) => String(value);
+  option.tooltip.valueFormatter = String;
   option.yAxis = [
-    { axisLabel: { formatter: (value: number) => amountShort(value) }, name: '金额', splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } }, type: 'value' },
-    { axisLabel: { formatter: (value: number) => `${value}%` }, name: '成交率', type: 'value' },
+    {
+      axisLabel: { formatter: (value: number) => amountShort(value) },
+      name: '金额',
+      splitLine: { lineStyle: { color: '#e5e7eb', type: 'dashed' } },
+      type: 'value',
+    },
+    {
+      axisLabel: { formatter: (value: number) => `${value}%` },
+      name: '成交率',
+      type: 'value',
+    },
   ];
   option.series = [
-    { name: '成交金额', type: 'line', smooth: true, data: buckets.map((item) => round2(item.transactionAmount)), itemStyle: { color: '#2563eb' } },
-    { name: '订单成交率', type: 'line', yAxisIndex: 1, smooth: true, data: buckets.map((item) => ratioPercent(item.paidOrderCount, item.orderCount)), itemStyle: { color: '#8b5cf6' } },
+    {
+      name: '成交金额',
+      type: 'line',
+      smooth: true,
+      data: buckets.map((item) => round2(item.transactionAmount)),
+      itemStyle: { color: '#2563eb' },
+    },
+    {
+      name: '订单成交率',
+      type: 'line',
+      yAxisIndex: 1,
+      smooth: true,
+      data: buckets.map((item) =>
+        ratioPercent(item.paidOrderCount, item.orderCount),
+      ),
+      itemStyle: { color: '#8b5cf6' },
+    },
   ];
   return option;
 }
@@ -414,7 +604,10 @@ async function fetchShopNameOptions(keyword = '') {
 
 function handleShopNameSearch(keyword = '') {
   if (shopNameSearchTimer) clearTimeout(shopNameSearchTimer);
-  shopNameSearchTimer = setTimeout(() => void fetchShopNameOptions(keyword), 250);
+  shopNameSearchTimer = setTimeout(
+    () => void fetchShopNameOptions(keyword),
+    250,
+  );
 }
 
 function handleShopNameClear() {
@@ -541,7 +734,9 @@ void fetchShopNameOptions();
             )
           "
         >
-          <div class="sph-kpi-value">{{ kpiMoney(rangeKpi.transactionAmount) }}</div>
+          <div class="sph-kpi-value">
+            {{ kpiMoney(rangeKpi.transactionAmount) }}
+          </div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--actual" size="small">
@@ -554,7 +749,9 @@ void fetchShopNameOptions();
             )
           "
         >
-          <div class="sph-kpi-value">{{ kpiMoney(rangeKpi.actualTransaction) }}</div>
+          <div class="sph-kpi-value">
+            {{ kpiMoney(rangeKpi.actualTransaction) }}
+          </div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--orders" size="small">
@@ -567,7 +764,9 @@ void fetchShopNameOptions();
             )
           "
         >
-          <div class="sph-kpi-value">{{ amountShort(rangeKpi.paidOrderCount) }}</div>
+          <div class="sph-kpi-value">
+            {{ amountShort(rangeKpi.paidOrderCount) }}
+          </div>
         </Tooltip>
       </Card>
       <Card class="sph-kpi sph-kpi--refund" size="small">
@@ -587,10 +786,16 @@ void fetchShopNameOptions();
 
     <Card size="small" class="mb-4 sph-diagnosis">
       <div class="diagnosis-grid">
-        <div v-for="item in diagnosticItems" :key="item.label" class="diagnosis-item">
+        <div
+          v-for="item in diagnosticItems"
+          :key="item.label"
+          class="diagnosis-item"
+        >
           <span class="diagnosis-label">{{ item.label }}</span>
           <Tooltip :title="metricTitle(item.description, item.value)">
-            <Tag :color="item.tone" class="diagnosis-value">{{ item.value }}</Tag>
+            <Tag :color="item.tone" class="diagnosis-value">
+              {{ item.value }}
+            </Tag>
           </Tooltip>
         </div>
       </div>
@@ -629,12 +834,16 @@ void fetchShopNameOptions();
 <style scoped>
 .sph-filter :deep(.ant-card-body) {
   padding: 16px;
-  background: linear-gradient(135deg, rgb(255 255 255) 0%, rgb(239 246 255) 100%);
+  background: linear-gradient(
+    135deg,
+    rgb(255 255 255) 0%,
+    rgb(239 246 255) 100%
+  );
 }
 
 .sph-filter :deep(.ant-form-item-label > label) {
-  color: hsl(var(--muted-foreground));
   font-size: 13px;
+  color: hsl(var(--muted-foreground));
 }
 
 .sph-filter-actions :deep(.ant-form-item-label) {
@@ -648,8 +857,8 @@ void fetchShopNameOptions();
 }
 
 .sph-kpi {
-  overflow: hidden;
   min-height: 148px;
+  overflow: hidden;
   border: 0;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgb(15 23 42 / 7%);
@@ -661,18 +870,18 @@ void fetchShopNameOptions();
 }
 
 .sph-kpi-title {
-  color: #111827;
   font-size: 14px;
   font-weight: 700;
+  color: #111827;
 }
 
 .sph-kpi-value {
   margin-top: 22px;
-  overflow-wrap: anywhere;
   font-size: clamp(24px, 2vw, 34px);
   font-weight: 850;
-  letter-spacing: 0;
   line-height: 1.15;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 
@@ -707,21 +916,21 @@ void fetchShopNameOptions();
 
 .diagnosis-item {
   display: flex;
-  min-width: 0;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  min-width: 0;
   padding: 8px 10px;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
-  background: hsl(var(--background));
 }
 
 .diagnosis-label {
   overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  font-size: 13px;
   text-overflow: ellipsis;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 

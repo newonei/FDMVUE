@@ -44,23 +44,23 @@ interface MatrixRow {
   specText: string;
   productType: string;
   id?: number;
-  tmallPrice: number | null;
-  pddPrice: number | null;
-  douyinPrice: number | null;
-  sphPrice: number | null;
-  xhsPrice: number | null;
-  jdPrice: number | null;
+  tmallPrice: null | number;
+  pddPrice: null | number;
+  douyinPrice: null | number;
+  sphPrice: null | number;
+  xhsPrice: null | number;
+  jdPrice: null | number;
   remark: string;
-  baselineTmall: number | null;
-  baselinePdd: number | null;
-  baselineDouyin: number | null;
-  baselineSph: number | null;
-  baselineXhs: number | null;
-  baselineJd: number | null;
+  baselineTmall: null | number;
+  baselinePdd: null | number;
+  baselineDouyin: null | number;
+  baselineSph: null | number;
+  baselineXhs: null | number;
+  baselineJd: null | number;
   baselineRemark: string;
 }
 
-function numDirty(a: number | null | undefined, b: number | null | undefined) {
+function numDirty(a: null | number | undefined, b: null | number | undefined) {
   const na = a ?? null;
   const nb = b ?? null;
   if (na === null && nb === null) return false;
@@ -101,7 +101,7 @@ const yogaMatDictOptions = computed(() =>
 const yogaMatLabelMap = computed(() => {
   const m = new Map<string, string>();
   for (const opt of yogaMatDictOptions.value ?? []) {
-    if (opt?.value != null && opt?.label) {
+    if (opt?.value !== null && opt?.value !== undefined && opt?.label) {
       m.set(String(opt.value), String(opt.label));
     }
   }
@@ -214,7 +214,7 @@ async function loadMatrix() {
 
 async function saveAllDirty() {
   const dirty = (matrixRows.value ?? []).filter((r) => isRowDirty(r));
-  if (!dirty.length) {
+  if (dirty.length === 0) {
     message.info('没有需要保存的修改');
     return;
   }
@@ -331,7 +331,7 @@ const columns = [
   },
 ] as any[];
 
-const [Modal, modalApi] = useVbenModal({
+const [Modal] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
       matrixRows.value = [];
@@ -374,9 +374,9 @@ const [Modal, modalApi] = useVbenModal({
 
         <div class="ml-auto flex items-center gap-2">
           <Button :loading="loading" @click="loadMatrix">刷新</Button>
-          <Button :loading="saving" type="primary" @click="saveAllDirty"
-            >保存全部修改</Button
-          >
+          <Button :loading="saving" type="primary" @click="saveAllDirty">
+            保存全部修改
+          </Button>
         </div>
       </div>
 

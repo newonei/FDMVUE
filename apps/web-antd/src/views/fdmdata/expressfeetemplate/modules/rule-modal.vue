@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { ColumnsType } from 'ant-design-vue/es/table';
+
 import type { FdmdataExpressFeeRuleApi } from '#/api/fdmdata/expressfeerule';
 import type { FdmdataExpressFeeTemplateApi } from '#/api/fdmdata/expressfeetemplate';
 
@@ -44,7 +46,7 @@ const formState = reactive<FdmdataExpressFeeRuleApi.ExpressFeeRule>({
   weightMinKg: 0,
 });
 
-const columns = [
+const columns: ColumnsType = [
   { title: '省份', dataIndex: 'provinceName', width: 100 },
   { title: '重量下限', dataIndex: 'weightMinKg', width: 96 },
   { title: '重量上限', dataIndex: 'weightMaxKg', width: 96 },
@@ -55,7 +57,7 @@ const columns = [
   { title: '排序', dataIndex: 'sort', width: 72 },
   { title: '状态', dataIndex: 'enabled', width: 72 },
   { title: '操作', dataIndex: 'actions', width: 130, fixed: 'right' },
-] as const;
+];
 
 const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {

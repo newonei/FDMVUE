@@ -25,6 +25,26 @@ interface DingTalkAuthResult {
   code: string;
 }
 
+interface DingTalkAuthCallbacks {
+  onFail: (error: unknown) => void;
+  onSuccess: (result: DingTalkAuthResult) => void;
+}
+
+interface DingTalkSdk {
+  error?: (callback: (error: unknown) => void) => unknown;
+  ready: (callback: () => void) => unknown;
+  requestAuthCode?: (
+    options: DingTalkAuthCallbacks & DingTalkConfig,
+  ) => unknown;
+  runtime: {
+    permission: {
+      requestAuthCode: (
+        options: DingTalkAuthCallbacks & Pick<DingTalkConfig, 'corpId'>,
+      ) => unknown;
+    };
+  };
+}
+
 /**
  * 读取钉钉应用配置（corpId + clientId）。
  * 优先环境变量 VITE_APP_DINGTALK_CORP_ID / VITE_APP_DINGTALK_CLIENT_ID。
@@ -88,14 +108,14 @@ export async function requestDingTalkAuthCode(
   clientId: string,
 ): Promise<string> {
   // 动态 import，避免外部浏览器加载 dingtalk-jsapi 报错
-  // @ts-expect-error - 第三方库无类型定义
   const ddModule = await import('dingtalk-jsapi');
-  const dd = ddModule.default || ddModule;
+  const dd = (ddModule.default || ddModule) as unknown as DingTalkSdk;
 
   // 新版（钉钉 PC 客户端 / 钉钉浏览器内部应用）
-  if (typeof dd.requestAuthCode === 'function') {
+  const requestAuthCode = dd.requestAuthCode;
+  if (typeof requestAuthCode === 'function') {
     return new Promise<string>((resolve, reject) => {
-      dd.requestAuthCode({
+      requestAuthCode.call(dd, {
         corpId,
         clientId,
         onSuccess: (result: DingTalkAuthResult) => resolve(result.code),

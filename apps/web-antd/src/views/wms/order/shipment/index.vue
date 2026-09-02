@@ -48,7 +48,7 @@ defineOptions({ name: 'WmsShipmentOrder' });
 
 const printRef = ref<InstanceType<typeof ShipmentOrderPrint>>();
 const detailMap = reactive<
-  Record<number, WmsShipmentOrderDetailApi.ShipmentOrderDetail[]>
+  Record<string, WmsShipmentOrderDetailApi.ShipmentOrderDetail[]>
 >({});
 
 const [FormModal, formModalApi] = useVbenModal({
@@ -64,8 +64,7 @@ const [DetailModal, detailModalApi] = useVbenModal({
 /** 清空展开明细缓存 */
 function clearDetailMap() {
   for (const id of Object.keys(detailMap)) {
-    const key = Number(id);
-    Reflect.deleteProperty(detailMap, key);
+    Reflect.deleteProperty(detailMap, id);
   }
 }
 
@@ -99,7 +98,7 @@ function getDetailTotalPrice(
 
 /** 获取已展开行的明细 */
 function getExpandedDetails(row: WmsShipmentOrderApi.ShipmentOrder) {
-  return detailMap[row.id!] || [];
+  return row.id === undefined ? [] : detailMap[String(row.id)] || [];
 }
 
 /** 展开列表行时懒加载出库明细 */
@@ -110,12 +109,13 @@ async function handleExpandChange(
   if (!expanded) {
     return;
   }
-  const key = row.id;
-  if (isUndefined(key)) {
+  const orderId = row.id;
+  if (isUndefined(orderId)) {
     return;
   }
+  const key = String(orderId);
   Reflect.deleteProperty(detailMap, key);
-  detailMap[key] = await getShipmentOrderDetailListByOrderId(key);
+  detailMap[key] = await getShipmentOrderDetailListByOrderId(orderId);
 }
 
 /** 判断出库单是否可修改 */
@@ -328,9 +328,21 @@ const [Grid, gridApi] = useVbenVxeGrid({
               label: $t('common.edit'),
               type: 'link',
               icon: ACTION_ICON.EDIT,
+              ifShow: !row.reservationBacked,
               disabled: !canUpdateShipmentOrder(row.status),
               tooltip: getShipmentOrderUpdateTip(row.status),
               auth: ['wms:shipment-order:update'],
+              onClick: handleEdit.bind(null, row),
+            },
+            {
+              label:
+                row.reservationAttemptStatus === 'CONSUMED'
+                  ? '查看预留出库'
+                  : '查看/整批完成',
+              type: 'link',
+              icon: ACTION_ICON.VIEW,
+              ifShow: row.reservationBacked === true,
+              auth: ['wms:shipment-order:query'],
               onClick: handleEdit.bind(null, row),
             },
             {
@@ -338,6 +350,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
               type: 'link',
               danger: true,
               icon: ACTION_ICON.DELETE,
+              ifShow: !row.reservationBacked,
               disabled: !canDeleteShipmentOrder(row.status),
               tooltip: getShipmentOrderDeleteTip(row.status),
               auth: ['wms:shipment-order:delete'],

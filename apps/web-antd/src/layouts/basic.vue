@@ -33,6 +33,7 @@ import { $t } from '#/locales';
 import { router } from '#/router';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
+import TradeAiAssistantHost from '#/views/fdm-trade-shared/components/TradeAiAssistantHost.vue';
 import FmsAccountSetSwitch from '#/views/fms/components/account-set/account-set-switch.vue';
 
 const userStore = useUserStore();
@@ -287,6 +288,7 @@ watch(
       </Tooltip>
     </template>
     <template #extra>
+      <TradeAiAssistantHost />
       <AuthenticationLoginExpiredModal
         v-model:open="accessStore.loginExpired"
         :avatar

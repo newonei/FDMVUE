@@ -32,6 +32,7 @@ export namespace FdmcaiwuQuotationApi {
   }
 
   export interface Capabilities {
+    canCustomizeProfitRate?: boolean;
     canViewQuoteDetail?: boolean;
     canViewUltraLowPrice?: boolean;
   }
@@ -153,6 +154,11 @@ export namespace FdmcaiwuQuotationApi {
   }
 
   export interface CalculateReq {
+    /**
+     * 自定义利润率百分数，例如字符串 "12.50" 表示 12.50%。
+     * 仅具有单笔报价自定义利润率权限的账号可传；为空时由服务端按规格政策决定。
+     */
+    customProfitRatePercent?: DecimalValue;
     includeCarton: boolean;
     includeOpp: boolean;
     includeStrap: boolean;
@@ -232,6 +238,8 @@ export namespace FdmcaiwuQuotationApi {
     candidateMoulds: MouldCandidate[];
     chargeWeightKg?: DecimalValue;
     chargeWeightSource?: string;
+    customProfitRateApplied?: boolean;
+    defaultProfitRatePercent?: NullableDecimalValue;
     densityType?: string;
     effectiveWidthMm?: DecimalValue;
     fullLayers?: number;
@@ -240,7 +248,7 @@ export namespace FdmcaiwuQuotationApi {
     includeStrap?: boolean;
     includeSupplement?: boolean;
     ingredientCosts: IngredientCost[];
-    lamination?: null | LaminationQuote;
+    lamination?: LaminationQuote | null;
     layoutAlgorithmVersion?: string;
     layoutColumns?: number;
     layoutOrientation?: string;
@@ -261,6 +269,8 @@ export namespace FdmcaiwuQuotationApi {
     piecesPerLayer?: number;
     postprocessCost?: DecimalValue;
     preprocessCost?: DecimalValue;
+    pricingPolicyVersionNumber?: number;
+    appliedProfitRatePercent?: NullableDecimalValue;
     productLengthMm?: DecimalValue;
     productThicknessMm?: DecimalValue;
     productType?: string;

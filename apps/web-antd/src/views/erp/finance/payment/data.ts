@@ -340,6 +340,13 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       fixed: 'left',
     },
     {
+      field: 'sourceMode',
+      title: '结算模式',
+      width: 120,
+      formatter: ({ cellValue }) =>
+        cellValue === 'ALLOCATED_V2' ? '义务分摊 V2' : '旧付款流程',
+    },
+    {
       field: 'supplierName',
       title: '供应商',
       minWidth: 120,
@@ -384,6 +391,33 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
       minWidth: 120,
     },
     {
+      field: 'settlementDirection',
+      title: '结算方向',
+      width: 105,
+      formatter: ({ cellValue, row }) => {
+        if (row.sourceMode !== 'ALLOCATED_V2') return '—';
+        if (cellValue === 'REFUND') return '退款';
+        if (cellValue === 'PAYMENT') return '付款';
+        return '未返回';
+      },
+    },
+    {
+      field: 'currencyCode',
+      title: '原币',
+      width: 90,
+      formatter: ({ cellValue, row }) =>
+        row.sourceMode === 'ALLOCATED_V2' ? cellValue || '未返回' : '—',
+    },
+    {
+      field: 'postingVersion',
+      title: '过账版本',
+      width: 105,
+      formatter: ({ cellValue, row }) =>
+        row.sourceMode === 'ALLOCATED_V2' && Number.isInteger(cellValue)
+          ? `v${cellValue}`
+          : '—',
+    },
+    {
       field: 'status',
       title: '状态',
       minWidth: 90,
@@ -394,7 +428,7 @@ export function useGridColumns(): VxeTableGridOptions['columns'] {
     },
     {
       title: '操作',
-      width: 260,
+      width: 330,
       fixed: 'right',
       slots: { default: 'actions' },
     },

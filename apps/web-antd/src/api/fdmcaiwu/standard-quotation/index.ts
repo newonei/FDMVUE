@@ -1,6 +1,6 @@
-import { requestClient } from '#/api/request';
-
 import type { FdmcaiwuQuotationApi } from '#/api/fdmcaiwu/quotation';
+
+import { requestClient } from '#/api/request';
 
 export namespace FdmcaiwuStandardQuotationApi {
   export type DecimalValue = number | string;
@@ -35,7 +35,7 @@ export namespace FdmcaiwuStandardQuotationApi {
   export interface Capabilities {
     /** 仅超级管理员可向常规规格报价表新增规格。 */
     canCreateSpecification?: boolean;
-    /** 仅超级管理员可维护小垫判定及裁切参数。 */
+    /** 仅超级管理员可维护规格报价政策、小垫范围及裁切参数。 */
     canManageSmallMatPolicy?: boolean;
     /** 仅超级管理员可查看规格报价的成本、配方和模具等明细。 */
     canViewQuoteDetail?: boolean;
@@ -81,7 +81,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     catalogSourceLocation?: null | string;
     catalogSourceVersion?: null | string;
     engineMaterialKgPerPiece?: NullableDecimalValue;
-    lamination?: null | FdmcaiwuQuotationApi.LaminationQuote;
+    lamination?: FdmcaiwuQuotationApi.LaminationQuote | null;
     nominalWeightText?: null | string;
     oppCostPerPiece?: NullableDecimalValue;
     productCode: string;
@@ -134,6 +134,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     capabilities?: Capabilities;
     calculatedAt?: string;
     productTypes?: ProductTypeOption[];
+    pricingPolicyVersionNumber?: number;
     rows?: SpecificationRow[];
     /** 兼容早期接口草案的字段名。 */
     specs?: SpecificationRow[];
@@ -141,7 +142,10 @@ export namespace FdmcaiwuStandardQuotationApi {
     summary?: Summary;
   }
 
-  /** 小垫面积阈值、政策开关与裁切参数；具体定价比例仅在服务端内部。 */
+  /**
+   * 规格报价、小垫判定和裁切参数。该接口仅真实超级管理员可访问，
+   * 普通报价 options 和计算响应不会下发完整利润政策。
+   */
   export interface SmallMatPolicyResp {
     allowRotate?: boolean;
     configured?: boolean;
@@ -153,21 +157,50 @@ export namespace FdmcaiwuStandardQuotationApi {
     maxAreaSquareMeters?: NullableDecimalValue;
     orderSetupCost?: NullableDecimalValue;
     pricingEnabled?: boolean;
+    regularBand1ProfitRatePercent?: NullableDecimalValue;
+    regularBand2ProfitRatePercent?: NullableDecimalValue;
+    regularBand3ProfitRatePercent?: NullableDecimalValue;
+    regularBand4ProfitRatePercent?: NullableDecimalValue;
+    regularWidthThreshold1Mm?: NullableDecimalValue;
+    regularWidthThreshold2Mm?: NullableDecimalValue;
+    regularWidthThreshold3Mm?: NullableDecimalValue;
     repackingCostPerPiece?: NullableDecimalValue;
+    smallMatRegularProfitRatePercent?: NullableDecimalValue;
+    smallMatUltraLowProfitRatePercent?: NullableDecimalValue;
+    ultraLowBand1ProfitRatePercent?: NullableDecimalValue;
+    ultraLowBand2ProfitRatePercent?: NullableDecimalValue;
+    ultraLowBand3ProfitRatePercent?: NullableDecimalValue;
+    ultraLowBand4ProfitRatePercent?: NullableDecimalValue;
+    updateTime?: string;
     version?: string;
+    versionNumber?: number;
   }
 
-  /** 只维护面积、功能开关和裁切参数，不提交任何定价比例。 */
+  /** 保存完整规格报价政策；百分数按原值提交，例如 "13.00" 表示 13%。 */
   export interface SaveSmallMatPolicyReq {
     allowRotate: boolean;
     cuttingCostPerPiece: number;
     edgeTrimMm: number;
     enabled: boolean;
+    expectedVersionNumber: number;
     kerfMm: number;
     maxAreaSquareMeters: number;
     orderSetupCost: number;
     pricingEnabled: boolean;
+    regularBand1ProfitRatePercent: DecimalValue;
+    regularBand2ProfitRatePercent: DecimalValue;
+    regularBand3ProfitRatePercent: DecimalValue;
+    regularBand4ProfitRatePercent: DecimalValue;
+    regularWidthThreshold1Mm: DecimalValue;
+    regularWidthThreshold2Mm: DecimalValue;
+    regularWidthThreshold3Mm: DecimalValue;
     repackingCostPerPiece: number;
+    smallMatRegularProfitRatePercent: DecimalValue;
+    smallMatUltraLowProfitRatePercent: DecimalValue;
+    ultraLowBand1ProfitRatePercent: DecimalValue;
+    ultraLowBand2ProfitRatePercent: DecimalValue;
+    ultraLowBand3ProfitRatePercent: DecimalValue;
+    ultraLowBand4ProfitRatePercent: DecimalValue;
   }
 
   /** 小垫成品拆分测算请求，所有规格均按 mm 分列提交。 */
@@ -240,6 +273,7 @@ export namespace FdmcaiwuStandardQuotationApi {
     plan?: SmallMatCutPlan;
     productCode?: string;
     productLabel?: string;
+    pricingPolicyVersionNumber?: number;
     quantity?: number;
     status?: string;
     taxRate?: NullableDecimalValue;
@@ -283,14 +317,14 @@ export function createStandardQuotationSpecification(
   );
 }
 
-/** 获取当前小垫判定和裁切参数；服务端仅允许超级管理员访问。 */
+/** 获取当前规格报价政策、小垫判定和裁切参数；仅超级管理员可访问。 */
 export function getSmallMatPolicy() {
   return requestClient.get<FdmcaiwuStandardQuotationApi.SmallMatPolicyResp>(
     '/fdmcaiwu/standard-quotation/small-mat-policy/current',
   );
 }
 
-/** 保存小垫判定和裁切参数。 */
+/** 带版本检查保存规格报价政策、小垫判定和裁切参数。 */
 export function saveSmallMatPolicy(
   data: FdmcaiwuStandardQuotationApi.SaveSmallMatPolicyReq,
 ) {

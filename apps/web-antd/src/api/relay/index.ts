@@ -159,6 +159,18 @@ export namespace FdmRelayApi {
     operationId?: string;
   }
 
+  export interface ApiKeyCcsImportRequest {
+    id: number;
+  }
+
+  /** 仅由本人显式执行 CC Switch 导入时短暂返回，禁止持久化。 */
+  export interface ApiKeyCcsImportResult {
+    id: number;
+    name: string;
+    apiKey: string;
+    publicBaseUrl: string;
+  }
+
   export interface UsageStats {
     requestCount?: number;
     successCount?: number;
@@ -308,6 +320,15 @@ export function createMyRelayApiKey(data: FdmRelayApi.MyApiKeyCreateRequest) {
 export function rotateMyRelayApiKey(id: number) {
   return requestClient.post<FdmRelayApi.ApiKeySecretResult>(
     `/fdmrelay/api-key/rotate?id=${id}`,
+  );
+}
+
+export function prepareMyRelayApiKeyCcsImport(
+  data: FdmRelayApi.ApiKeyCcsImportRequest,
+) {
+  return requestClient.post<FdmRelayApi.ApiKeyCcsImportResult>(
+    '/fdmrelay/api-key/ccs-import',
+    data,
   );
 }
 

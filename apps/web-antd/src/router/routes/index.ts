@@ -7,7 +7,13 @@ import { coreRoutes, fallbackNotFoundRoute } from './core';
 // 路由模块与 Vitest 测试可以同为 TypeScript 文件；显式排除测试，避免把
 // `describe()` 等测试运行时代码打进正常的 Vite 应用。
 const dynamicRouteFiles = import.meta.glob(
-  ['./modules/**/*.ts', '!./modules/**/*.spec.ts', '!./modules/**/*.test.ts'],
+  [
+    './modules/**/*.ts',
+    '!./modules/**/*.spec.ts',
+    '!./modules/**/*.test.ts',
+    // 外贸部门已由数据库菜单提供真实路由；保留原型源码，但不再注入运行时。
+    '!./modules/fdmwaimao-prototype.ts',
+  ],
   {
     eager: true,
   },

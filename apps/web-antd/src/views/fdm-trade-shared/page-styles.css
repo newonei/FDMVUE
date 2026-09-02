@@ -1,0 +1,76 @@
+.fdm-trade-cell-subtext {
+  max-width: 240px;
+  margin: -3px 12px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+
+.fdm-trade-money {
+  display: inline-block;
+  width: 100%;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.fdm-trade-context-alert {
+  margin-top: 12px;
+}
+
+.fdm-trade-action-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.fdm-trade-demand-edit-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--radius);
+}
+
+.fdm-trade-demand-edit-row > strong {
+  padding-top: 30px;
+}
+
+.fdm-trade-demand-edit-row .ant-form-item {
+  margin-bottom: 0;
+}
+
+.fdm-trade-receipt-form {
+  display: grid;
+  gap: 12px;
+}
+
+.fdm-trade-receipt-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
+.fdm-trade-receipt-form__grid .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.fdm-trade-grid-page .ant-btn-link,
+.fdm-trade-list-shell .ant-btn-link {
+  min-height: 32px;
+}
+
+@media (max-width: 767px) {
+  .fdm-trade-demand-edit-row,
+  .fdm-trade-receipt-form__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fdm-trade-demand-edit-row > strong {
+    padding-top: 0;
+  }
+}

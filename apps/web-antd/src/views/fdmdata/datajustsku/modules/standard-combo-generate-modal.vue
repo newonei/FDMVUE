@@ -1,9 +1,18 @@
 <script lang="ts" setup>
 import type { ColumnsType } from 'ant-design-vue/es/table';
 
+import type { FdmdataDataJustAccessoryApi } from '#/api/fdmdata/datajustaccessory';
+import type {
+  CustomComboPreviewResp,
+  FdmdataDataJustSkuApi,
+  StandardComboGenReq,
+} from '#/api/fdmdata/datajustsku';
+import type { StandardComboSpecTemplateApi } from '#/api/fdmdata/standard-combo-spec-template';
+
 import { computed, h, reactive, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+
 import {
   Button,
   Form,
@@ -17,11 +26,12 @@ import {
 } from 'ant-design-vue';
 
 import { getDataJustAccessoryPage } from '#/api/fdmdata/datajustaccessory';
-import { getFinishedSkuPageForComboPicker, importStandardCombo, previewStandardCombo } from '#/api/fdmdata/datajustsku';
-import type { CustomComboPreviewResp, FdmdataDataJustSkuApi, StandardComboGenReq } from '#/api/fdmdata/datajustsku';
-import type { FdmdataDataJustAccessoryApi } from '#/api/fdmdata/datajustaccessory';
+import {
+  getFinishedSkuPageForComboPicker,
+  importStandardCombo,
+  previewStandardCombo,
+} from '#/api/fdmdata/datajustsku';
 import { listStandardComboSpecMatchRows } from '#/api/fdmdata/standard-combo-spec-template';
-import type { StandardComboSpecTemplateApi } from '#/api/fdmdata/standard-combo-spec-template';
 
 const emit = defineEmits(['success']);
 
@@ -66,7 +76,7 @@ const specMatchRows = ref<StandardComboSpecTemplateApi.MatchRow[]>([]);
 function listParenContents(s: string): string[] {
   const out: string[] = [];
   const reAscii = /\(([^)]*)\)/g;
-  let m: RegExpExecArray | null;
+  let m: null | RegExpExecArray;
   while ((m = reAscii.exec(s)) !== null) {
     out.push(m[1] ?? '');
   }
@@ -118,7 +128,7 @@ function trySpecKeysFromOneField(field: string | undefined) {
   }
   const t = field.trim();
   const inners = listParenContents(t);
-  if (inners.length) {
+  if (inners.length > 0) {
     for (const inner of inners) {
       const full = extractSpecFullFromPlain(inner);
       const lw = extractSpecLwFromPlain(inner);
@@ -232,7 +242,7 @@ function specSetMatches(
   try {
     const parsed = JSON.parse(ruleJson);
     if (Array.isArray(parsed)) {
-      specs = parsed.map((v) => String(v));
+      specs = parsed.map(String);
     }
   } catch {
     specs = ruleJson
@@ -265,14 +275,20 @@ function accessoryMatchesFinished(
   if (mt === 'WIDTH_EXACT') {
     const w = specWidthCm(fKeys);
     return (
-      w != null && aRow.matchWidthCm != null && w === Number(aRow.matchWidthCm)
+      w !== null &&
+      w !== undefined &&
+      aRow.matchWidthCm !== null &&
+      aRow.matchWidthCm !== undefined &&
+      w === Number(aRow.matchWidthCm)
     );
   }
   if (mt === 'WIDTH_MAX') {
     const w = specWidthCm(fKeys);
     return (
-      w != null &&
-      aRow.matchWidthMaxCm != null &&
+      w !== null &&
+      w !== undefined &&
+      aRow.matchWidthMaxCm !== null &&
+      aRow.matchWidthMaxCm !== undefined &&
       w <= Number(aRow.matchWidthMaxCm)
     );
   }
@@ -283,7 +299,7 @@ function accessoryMatchesFinished(
   return specPairMatch(fKeys, aKeys) || specMatchesTemplate(fKeys, aRow.id!);
 }
 
-function normalizeAccessoryQty(raw: number | undefined | null): number {
+function normalizeAccessoryQty(raw: null | number | undefined): number {
   const n = Math.floor(Number(raw));
   if (!Number.isFinite(n) || n < 1) {
     return 1;
@@ -295,7 +311,7 @@ function buildStandardComboPayload(): StandardComboGenReq {
   const body: StandardComboGenReq = {
     finishedSkuIds: finishedSelectedIds.value,
   };
-  if (accessorySelectedIds.value.length) {
+  if (accessorySelectedIds.value.length > 0) {
     body.accessoryPicks = accessorySelectedIds.value.map((id) => ({
       accessoryId: id,
       qty: normalizeAccessoryQty(accessoryQtyById[id]),
@@ -309,7 +325,14 @@ function accessoryNumericId(record: { id?: number | string }) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function onAccessoryQtyInput(id: number, v: number | string | null) {
+function accessorySlotRecordId(slotProps: unknown) {
+  const { record } = slotProps as {
+    record: { id?: number | string };
+  };
+  return accessoryNumericId(record);
+}
+
+function onAccessoryQtyInput(id: number, v: null | number | string) {
   if (!id || !accessorySelectedIds.value.includes(id)) {
     return;
   }
@@ -321,7 +344,7 @@ function onAccessoryQtyInput(id: number, v: number | string | null) {
 function finishedMatchesSelectedAccessories(
   row: FdmdataDataJustSkuApi.DataJustSku,
 ) {
-  if (!accessorySelectedIds.value.length) {
+  if (accessorySelectedIds.value.length === 0) {
     return true;
   }
   for (const id of accessorySelectedIds.value) {
@@ -371,7 +394,7 @@ const accessoryColumns = computed<ColumnsType>(() => [
       record: FdmdataDataJustAccessoryApi.Accessory;
     }) => {
       const n = extractBundleCountFromRow(record);
-      return n != null ? `${n}条` : '-';
+      return n === null || n === undefined ? '-' : `${n}条`;
     },
   },
   {
@@ -419,11 +442,11 @@ function clearFinishedSelection() {
 }
 
 function trimOrUndef(s: string | undefined) {
-  if (s == null || s === '') {
+  if (s === null || s === undefined || s === '') {
     return undefined;
   }
   const t = s.trim();
-  return t ? t : undefined;
+  return t || undefined;
 }
 
 function rebuildFinishedFilterOptionsFromSource() {
@@ -540,8 +563,8 @@ async function resetFinishedQueryAndReload() {
   await loadFinishedList();
 }
 
-function onFinishedRowSelectionChange(keys: (string | number)[]) {
-  finishedSelectedIds.value = keys.map((k) => Number(k));
+function onFinishedRowSelectionChange(keys: (number | string)[]) {
+  finishedSelectedIds.value = keys.map(Number);
 }
 
 /** 当前表格可见的配件 id（筛选后）；勾选变更时需与「列表外仍保留的已选」合并 */
@@ -551,11 +574,9 @@ function visibleAccessoryIdNums() {
     .filter((id) => id > 0);
 }
 
-function onAccessoryRowSelectionChange(keys: (string | number)[]) {
+function onAccessoryRowSelectionChange(keys: (number | string)[]) {
   const visibleSet = new Set(visibleAccessoryIdNums());
-  const visiblePicked = keys
-    .map((k) => Number(k))
-    .filter((id) => Number.isFinite(id));
+  const visiblePicked = keys.map(Number).filter((id) => Number.isFinite(id));
   const offScreenPicked = accessorySelectedIds.value.filter(
     (id) => !visibleSet.has(id),
   );
@@ -565,7 +586,7 @@ function onAccessoryRowSelectionChange(keys: (string | number)[]) {
   const next = new Set(merged);
   for (const id of prev) {
     if (!next.has(id)) {
-      delete accessoryQtyById[id];
+      Reflect.deleteProperty(accessoryQtyById, id);
     }
   }
   for (const id of merged) {
@@ -597,7 +618,7 @@ function selectAllAccessoriesInList() {
 function clearAccessorySelection() {
   accessorySelectedIds.value = [];
   for (const k of Object.keys(accessoryQtyById)) {
-    delete accessoryQtyById[Number(k)];
+    Reflect.deleteProperty(accessoryQtyById, Number(k));
   }
   applyAccessoryFinishedFilter();
 }
@@ -614,7 +635,7 @@ function renderAccessoryCodeNameBlocks(
   qtys?: number[] | undefined,
 ) {
   const list = codes ?? [];
-  if (!list.length) {
+  if (list.length === 0) {
     return '-';
   }
   return h(
@@ -694,7 +715,7 @@ const columns: ColumnsType = [
 ];
 
 async function handlePreview() {
-  if (!finishedSelectedIds.value.length) {
+  if (finishedSelectedIds.value.length === 0) {
     message.warning('请选择成品 SKU');
     return;
   }
@@ -739,7 +760,7 @@ function reset() {
   accessorySourceRows.value = [];
   accessorySelectedIds.value = [];
   for (const k of Object.keys(accessoryQtyById)) {
-    delete accessoryQtyById[Number(k)];
+    Reflect.deleteProperty(accessoryQtyById, Number(k));
   }
   accessoryQuery.productName = '';
   accessoryQuery.itemCode = '';
@@ -814,15 +835,15 @@ const [VbenModal, modalApi] = useVbenModal({
               >
                 查询
               </Button>
-              <Button size="small" @click="resetFinishedQueryAndReload"
-                >重置条件</Button
-              >
-              <Button size="small" @click="selectAllFinishedInList"
-                >全选当前结果</Button
-              >
-              <Button size="small" @click="clearFinishedSelection"
-                >清空勾选</Button
-              >
+              <Button size="small" @click="resetFinishedQueryAndReload">
+                重置条件
+              </Button>
+              <Button size="small" @click="selectAllFinishedInList">
+                全选当前结果
+              </Button>
+              <Button size="small" @click="clearFinishedSelection">
+                清空勾选
+              </Button>
               <span class="text-xs text-muted-foreground">
                 共 {{ finishedRows.length }} 条，已选
                 {{ finishedSelectedIds.length }} 条
@@ -911,12 +932,12 @@ const [VbenModal, modalApi] = useVbenModal({
               >
                 查询
               </Button>
-              <Button size="small" @click="selectAllAccessoriesInList"
-                >全选当前结果</Button
-              >
-              <Button size="small" @click="clearAccessorySelection"
-                >清空勾选</Button
-              >
+              <Button size="small" @click="selectAllAccessoriesInList">
+                全选当前结果
+              </Button>
+              <Button size="small" @click="clearAccessorySelection">
+                清空勾选
+              </Button>
               <span class="text-xs text-muted-foreground">
                 共 {{ accessoryRows.length }} 条，已选
                 {{ accessorySelectedIds.length }}
@@ -937,19 +958,25 @@ const [VbenModal, modalApi] = useVbenModal({
               }"
               :columns="accessoryColumns"
             >
-              <template #accessoryQty="{ record }">
+              <!-- @vue-ignore Ant Design Vue supports named customRender slots at runtime. -->
+              <template #accessoryQty="slotProps">
                 <InputNumber
                   :min="1"
                   :max="99_999"
                   :precision="0"
                   :disabled="
-                    !accessorySelectedIds.includes(accessoryNumericId(record))
+                    !accessorySelectedIds.includes(
+                      accessorySlotRecordId(slotProps),
+                    )
                   "
                   size="small"
                   class="w-full min-w-[96px]"
-                  :value="accessoryQtyById[accessoryNumericId(record)] ?? 1"
+                  :value="
+                    accessoryQtyById[accessorySlotRecordId(slotProps)] ?? 1
+                  "
                   @update:value="
-                    (v) => onAccessoryQtyInput(accessoryNumericId(record), v)
+                    (v) =>
+                      onAccessoryQtyInput(accessorySlotRecordId(slotProps), v)
                   "
                 />
               </template>
@@ -961,8 +988,9 @@ const [VbenModal, modalApi] = useVbenModal({
             type="primary"
             :loading="loadingPreview"
             @click="handlePreview"
-            >预览</Button
           >
+            预览
+          </Button>
           <Button
             type="default"
             :disabled="!preview || willCreate + willUpdate === 0"
