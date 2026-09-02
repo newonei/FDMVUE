@@ -192,24 +192,24 @@ const WEEKLY_COMPARE_SHOP_ORDER_PATTERNS =
 
 const VIEW_MODE_OPTIONS = [
   { label: '综合', value: 'SUMMARY' },
-  { label: '销售额', value: 'SALES' },
+  { label: '实际销售额', value: 'SALES' },
   { label: '营销费', value: 'MARKETING' },
   { label: '费比', value: 'COST_RATIO' },
   { label: '退款', value: 'REFUND' },
-  { label: '件数', value: 'ORDER' },
+  { label: '订单数', value: 'ORDER' },
 ];
 
 const PLATFORM_VISUAL_METRIC_OPTIONS = [
-  { label: '销售额', value: 'SALES' },
-  { label: '销售件数', value: 'SALES_COUNT' },
+  { label: '实际销售额', value: 'SALES' },
+  { label: '订单数', value: 'SALES_COUNT' },
   { label: '推广费', value: 'MARKETING' },
   { label: '推广费比', value: 'COST_RATIO' },
 ];
 
 const ABNORMAL_RANKING_OPTIONS = [
-  { label: '销售额下降', value: 'SALES_DROP' },
+  { label: '实际销售额下降', value: 'SALES_DROP' },
   { label: '费比上升', value: 'COST_RATIO_RISE' },
-  { label: '件数增长', value: 'COUNT_GROWTH' },
+  { label: '订单数增长', value: 'COUNT_GROWTH' },
 ];
 
 const METRIC_DESCRIPTIONS = {
@@ -220,13 +220,14 @@ const METRIC_DESCRIPTIONS = {
   refundRatio:
     '退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额，用于观察退款风险。',
   roi: '投产比 = 实际销售额 / 营销费用，越高说明投放效率越好。',
-  salesAmount: '实际销售额使用主表真实净销售额，已剔除刷单金额影响。',
+  salesAmount:
+    '实际销售额优先使用各平台明细的实际销售字段，缺失时回退主表真实净销售额。',
 } satisfies Record<string, string>;
 
 const MATRIX_VIEW_DESCRIPTIONS = {
   COST_RATIO: '费比 = 营销费用 / 实际销售额 × 100%。',
   MARKETING: '营销费 = 各平台推广投放费用汇总。',
-  ORDER: '销售件数当前按真实订单数统计 = 已支付订单数 - 刷单单量。',
+  ORDER: '订单数使用主表真实支付订单数，已剔除刷单单量。',
   REFUND:
     '退款 = 退款金额；退款率：淘宝/抖音/小红书按退款金额 / 成交额(GMV)，其他平台按退款金额 / 支付金额。',
   SALES: METRIC_DESCRIPTIONS.salesAmount,
@@ -393,7 +394,7 @@ function normalizeWeeklyCompareName(value: unknown): string {
     .replaceAll('京东', '京')
     .replaceAll('抖音', '抖')
     .replaceAll('拼多多', '拼')
-    .replace(/[\s\-_/\\—–]+/g, '');
+    .replaceAll(/[\s\-_/\\—–]+/g, '');
 }
 
 function weeklyComparePlatformCode(platformCode?: string): string {
@@ -430,9 +431,9 @@ function weeklyComparePlatformSummaryTitle(
   fallback?: string,
 ): string {
   const code = weeklyComparePlatformCode(platformCode);
-  if (code === 'TAOBAO') return '淘宝天猫销售额';
+  if (code === 'TAOBAO') return '淘宝天猫实际销售额';
   const label = weeklyComparePlatformLabel(code, fallback);
-  return `${label}渠道销售额`;
+  return `${label}渠道实际销售额`;
 }
 
 function weeklyCompareShopOrderIndex(shop: SummaryShop): number {
@@ -777,7 +778,7 @@ function buildShopPlatformColumns(
   const sourceIndex = new Map(
     shops0.map((shop, index) => [shop.shopKey, index]),
   );
-  const sortedShops = [...shops0].sort((a, b) => {
+  const sortedShops = shops0.toSorted((a, b) => {
     const platformOrder =
       weeklyComparePlatformOrder(a.platformCode) -
       weeklyComparePlatformOrder(b.platformCode);
@@ -810,7 +811,7 @@ function buildShopPlatformColumns(
   }
 
   const columns: WeeklyCompareColumn[] = [];
-  for (const group of [...groups.values()].sort(
+  for (const group of [...groups.values()].toSorted(
     (a, b) =>
       weeklyComparePlatformOrder(a.platformCode) -
       weeklyComparePlatformOrder(b.platformCode),
@@ -876,10 +877,10 @@ const weeklyCompareDisplayRows: WeeklyCompareRow[] = [
 ];
 
 const monthlyTableMetricRows: MonthlyTableRow[] = [
-  { key: 'salesAmount', label: '销售额' },
+  { key: 'salesAmount', label: '实际销售额' },
   { key: 'marketingCost', label: '营销费用' },
   { className: 'is-ratio-row', key: 'costRatio', label: '费比' },
-  { key: 'realOrderCount', label: '销售件数' },
+  { key: 'realOrderCount', label: '订单数' },
   { key: 'refundAmount', label: '退款金额' },
   { className: 'is-ratio-row', key: 'refundRatio', label: '退款率' },
 ];
@@ -1625,14 +1626,14 @@ function buildCompareColumns(
     {
       customRender: ({ record }) => moneyTextOrDash(record.current.salesAmount),
       key: 'salesAmount',
-      title: '销售额',
+      title: '实际销售额',
       width: 120,
     },
     {
       customRender: ({ record }) =>
         moneyTextOrDash(record.previous?.salesAmount),
       key: 'previousSalesAmount',
-      title: '上期销售额',
+      title: '上期实际销售额',
       width: 120,
     },
     {
@@ -1644,20 +1645,20 @@ function buildCompareColumns(
         return renderCompareText(signedPercentText(value), value);
       },
       key: 'salesGrowth',
-      title: '销售额环比',
+      title: '实际销售额环比',
       width: 120,
     },
     {
       customRender: ({ record }) => intText(record.current.realOrderCount),
       key: 'realOrderCount',
-      title: '销售件数',
+      title: '订单数',
       width: 110,
     },
     {
       customRender: ({ record }) =>
         record.previous ? intText(record.previous.realOrderCount) : '-',
       key: 'previousRealOrderCount',
-      title: '上期销售件数',
+      title: '上期订单数',
       width: 125,
     },
     {
@@ -1675,7 +1676,7 @@ function buildCompareColumns(
         );
       },
       key: 'realOrderCountGrowth',
-      title: '件数环比',
+      title: '订单数环比',
       width: 110,
     },
     {
@@ -1838,12 +1839,12 @@ function buildCoreCompareExcelHtml() {
     '日期范围',
     '平台',
     '店铺',
-    '销售额',
-    '上期销售额',
-    '销售额环比(%)',
-    '销售件数',
-    '上期销售件数',
-    '件数环比(%)',
+    '实际销售额',
+    '上期实际销售额',
+    '实际销售额环比(%)',
+    '订单数',
+    '上期订单数',
+    '订单数环比(%)',
     '推广费',
     '上期推广费',
     '推广费环比(%)',
@@ -1985,7 +1986,7 @@ const kpiCards = computed(() => [
   {
     className: 'kpi-order',
     desc: METRIC_DESCRIPTIONS.avgOrderValue,
-    label: '销售件数 / 客单价',
+    label: '订单数 / 客单价',
     sub: `客单价 ¥${amountText(totals.value.avgOrderValue)}`,
     value: intText(totals.value.realOrderCount),
   },
@@ -2011,7 +2012,7 @@ const insightItems = computed(() => {
     },
     {
       color: 'green',
-      desc: '销售额最高的店铺，用于快速定位主要贡献来源。',
+      desc: '实际销售额最高的店铺，用于快速定位主要贡献来源。',
       label: 'TOP 店铺',
       value: topShop
         ? `${topShop.shopName} ${amountText(topShop.salesAmount)}`
@@ -2031,7 +2032,7 @@ const insightItems = computed(() => {
     },
     {
       color: zeroSalesCostCount > 0 ? 'red' : 'green',
-      desc: '无销售额但产生营销费用的记录，通常需要检查投放或数据归集。',
+      desc: '无实际销售额但产生营销费用的记录，通常需要检查投放或数据归集。',
       label: '零销售有费用',
       value: `${zeroSalesCostCount} 个`,
     },
@@ -2091,11 +2092,11 @@ const salesCountChart = computed<ECOption | null>(() => {
       data: labels,
       type: 'category',
     },
-    yAxis: { name: '件', type: 'value' },
+    yAxis: { name: '单', type: 'value' },
     series: [
       {
         data: metrics.map((item) => Math.trunc(n(item.realOrderCount))),
-        name: '销售件数',
+        name: '订单数',
         smooth: true,
         type: 'line',
       },
@@ -2128,7 +2129,7 @@ const platformMetricTitle = computed(() => {
   return (
     PLATFORM_VISUAL_METRIC_OPTIONS.find(
       (item) => item.value === platformVisualMetricMode.value,
-    )?.label ?? '销售额'
+    )?.label ?? '实际销售额'
   );
 });
 
@@ -2140,7 +2141,7 @@ const platformCompareTitle = computed(() =>
 
 const platformMetricAxisName = computed(() => {
   if (platformVisualMetricMode.value === 'COST_RATIO') return '%';
-  if (platformVisualMetricMode.value === 'SALES_COUNT') return '件';
+  if (platformVisualMetricMode.value === 'SALES_COUNT') return '单';
   return '金额';
 });
 
@@ -2203,13 +2204,13 @@ const shopDiagnosticChart = computed<ECOption | null>(() => {
         const value = params.value as any[];
         return [
           `${value[4]} · ${value[3]}`,
-          `销售额环比：${signedPercentText(value[0] as number)}`,
+          `实际销售额环比：${signedPercentText(value[0] as number)}`,
           `费比变化：${signedPointText(value[1] as number)}`,
-          `销售额：¥${amountText(value[2])}`,
+          `实际销售额：¥${amountText(value[2])}`,
         ].join('<br/>');
       },
     },
-    xAxis: { name: '销售额环比(%)', type: 'value' },
+    xAxis: { name: '实际销售额环比(%)', type: 'value' },
     yAxis: { name: '费比变化(点)', type: 'value' },
     series: [
       {
@@ -2241,7 +2242,7 @@ const abnormalRankingTitle = computed(() => {
   return (
     ABNORMAL_RANKING_OPTIONS.find(
       (item) => item.value === abnormalRankingMode.value,
-    )?.label ?? '销售额下降'
+    )?.label ?? '实际销售额下降'
   );
 });
 
@@ -2398,7 +2399,7 @@ const dailyColumns = [
   },
   {
     dataIndex: 'realOrderCount',
-    title: tableHeader('真实订单', DAILY_COLUMN_DESCRIPTIONS.realOrderCount),
+    title: tableHeader('订单数', DAILY_COLUMN_DESCRIPTIONS.realOrderCount),
     customRender: ({ text }: { text: number }) => intText(text),
   },
 ];
@@ -2442,7 +2443,7 @@ onBeforeUnmount(() => {
         <div class="page-heading">
           <div>
             <h2>店铺经营汇总分析</h2>
-            <p>按周、月查看各店铺销售、投放、退款和销售件数表现</p>
+            <p>按周、月查看各店铺实际销售、投放、退款和订单数表现</p>
           </div>
           <div class="page-range">
             {{ summaryRangeText }}
@@ -2587,8 +2588,7 @@ onBeforeUnmount(() => {
                       <span>{{ column.title }}</span>
                       <em
                         v-if="column.type === 'shop' && column.platformLabel"
-                        >{{ column.platformLabel }}</em
-                      >
+                        >{{ column.platformLabel }}</em>
                     </th>
                   </tr>
                 </thead>
@@ -2660,8 +2660,7 @@ onBeforeUnmount(() => {
                       <span>{{ column.title }}</span>
                       <em
                         v-if="column.type === 'shop' && column.platformLabel"
-                        >{{ column.platformLabel }}</em
-                      >
+                        >{{ column.platformLabel }}</em>
                     </th>
                   </tr>
                 </thead>
@@ -2710,13 +2709,13 @@ onBeforeUnmount(() => {
         <Row :gutter="[16, 16]" class="mb-4">
           <Col :xl="14" :xs="24">
             <section class="chart-panel">
-              <div class="chart-title">销售额、营销费用与总费比趋势</div>
+              <div class="chart-title">实际销售额、营销费用与总费比趋势</div>
               <EchartsBox :height="330" :option="trendChart" />
             </section>
           </Col>
           <Col :xl="10" :xs="24">
             <section class="chart-panel">
-              <div class="chart-title">销售件数趋势</div>
+              <div class="chart-title">订单数趋势</div>
               <EchartsBox :height="330" :option="salesCountChart" />
             </section>
           </Col>
@@ -2745,7 +2744,7 @@ onBeforeUnmount(() => {
             <section class="chart-panel">
               <div class="chart-title">经营诊断散点图</div>
               <div class="section-sub">
-                横轴销售额环比，纵轴费比变化，气泡大小代表销售额
+                横轴实际销售额环比，纵轴费比变化，气泡大小代表实际销售额
               </div>
               <EchartsBox :height="330" :option="shopDiagnosticChart" />
             </section>
@@ -2754,7 +2753,7 @@ onBeforeUnmount(() => {
             <section class="chart-panel">
               <div class="chart-title">店铺费比变化热力图</div>
               <div class="section-sub">
-                红色为费比上升，绿色为费比下降，默认展示销售额 TOP20 店铺
+                红色为费比上升，绿色为费比下降，默认展示实际销售额 TOP20 店铺
               </div>
               <EchartsBox :height="420" :option="costRatioHeatmapChart" />
             </section>
@@ -2784,7 +2783,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="section-title">{{ periodTypeLabel }}核心对比</div>
               <div class="section-sub">
-                {{ compareBasisText }}；销售件数按真实订单数统计
+                {{ compareBasisText }}；订单数使用主表真实支付订单数
               </div>
             </div>
             <div class="matrix-tools">
@@ -2871,7 +2870,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="section-title">分析师矩阵</div>
               <div class="section-sub">
-                默认展示销售额 TOP12 店铺；点击店铺单元格可查看日明细
+                默认展示实际销售额 TOP12 店铺；点击店铺单元格可查看日明细
               </div>
             </div>
             <div class="matrix-tools">
