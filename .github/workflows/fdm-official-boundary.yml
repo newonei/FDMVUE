@@ -1,0 +1,31 @@
+name: FDM Official Frontend Boundary Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Fetch pinned official frontend tree
+        shell: bash
+        run: |
+          baseline="$(node -p "require('./scripts/fdm-official-boundaries.json').baseline")"
+          git fetch --no-tags --depth=1 \
+            https://github.com/yudaocode/yudao-ui-admin-vben.git \
+            "${baseline}"
+
+      - name: Verify FDM and official frontend boundaries
+        run: node ./scripts/check-fdm-boundaries.mjs

@@ -7,7 +7,9 @@ import {
 } from './calculation';
 import {
   buildConsumptionSavePayload,
+  buildConsumptionUpdatePayload,
   buildReceiptSavePayload,
+  buildReceiptUpdatePayload,
   createEmptyConsumptionForm,
   createEmptyReceiptForm,
   hydrateReceiptForm,
@@ -110,6 +112,42 @@ describe('receipt and consumption form model', () => {
     expect(validateConsumptionForm(consumption)).toEqual([]);
     expect(buildConsumptionSavePayload(consumption)).not.toHaveProperty(
       'willSettle',
+    );
+  });
+
+  it('submits attachment IDs only when creating receipt and consumption records', () => {
+    const receipt = createEmptyReceiptForm();
+    receipt.attachments = [
+      {
+        businessType: 'RECEIPT_RECORD',
+        fileName: 'receipt.pdf',
+        id: '9223372036854775804',
+        status: 'PENDING',
+      },
+    ];
+    expect(buildReceiptSavePayload(receipt).attachmentIds).toEqual([
+      '9223372036854775804',
+    ]);
+    Object.assign(receipt, { id: '9223372036854775806', version: 1 });
+    expect(buildReceiptUpdatePayload(receipt)).not.toHaveProperty(
+      'attachmentIds',
+    );
+
+    const consumption = createEmptyConsumptionForm();
+    consumption.attachments = [
+      {
+        businessType: 'CONSUMPTION_RECORD',
+        fileName: 'consumption.pdf',
+        id: '9223372036854775803',
+        status: 'PENDING',
+      },
+    ];
+    expect(buildConsumptionSavePayload(consumption).attachmentIds).toEqual([
+      '9223372036854775803',
+    ]);
+    Object.assign(consumption, { id: '9223372036854775805', version: 1 });
+    expect(buildConsumptionUpdatePayload(consumption)).not.toHaveProperty(
+      'attachmentIds',
     );
   });
 

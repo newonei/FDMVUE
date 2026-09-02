@@ -7,7 +7,7 @@ type RecoverySource = Pick<
   | 'reservationStatus'
   | 'status'
   | 'version'
-  | 'wmsHandoffRecoveryRequired'
+  | 'warehouseHandoffRecoveryRequired'
 >;
 
 export interface ShipmentHandoffRecoveryCommandIdentity {
@@ -30,8 +30,8 @@ export function canRecoverShipmentHandoff(
   return (
     candidate.status === 'CONFIRMED' &&
     candidate.reservationStatus === 'HANDOFF_PENDING' &&
-    candidate.nextRequiredAction === 'WMS_HANDOFF_RECOVERY_REQUIRED' &&
-    candidate.wmsHandoffRecoveryRequired === true &&
+    candidate.nextRequiredAction === 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED' &&
+    candidate.warehouseHandoffRecoveryRequired === true &&
     typeof candidate.id === 'string' &&
     POSITIVE_LONG.test(candidate.id) &&
     Number.isInteger(candidate.version) &&
@@ -87,6 +87,6 @@ export function isExpectedShipmentHandoffRecoveryResult(
     result.status === 'PENDING' &&
     typeof result.recovered === 'boolean' &&
     !!result.availableAt &&
-    result.nextRequiredAction === 'WMS_HANDOFF_PENDING'
+    result.nextRequiredAction === 'WAREHOUSE_HANDOFF_PENDING'
   );
 }

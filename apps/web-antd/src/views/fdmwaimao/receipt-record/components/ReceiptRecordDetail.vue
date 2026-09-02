@@ -28,6 +28,7 @@ import {
   fdmTradeDocumentRoute,
   fdmTradeReceiptListRoute,
 } from '#/views/fdm-trade-shared/document-links';
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
 
 import { formatAmount } from '../calculation';
 
@@ -390,6 +391,16 @@ function consumptionLabel(value: FdmWaimaoReceiptRecordApi.ConsumptionType) {
             {{ display(receipt.performanceRemark) }}
           </Descriptions.Item>
         </Descriptions>
+      </section>
+
+      <section class="receipt-detail__section">
+        <h3>单据附件</h3>
+        <FdmWaimaoAttachmentList
+          :business-id="record.id"
+          :business-type="
+            isConsumption ? 'CONSUMPTION_RECORD' : 'RECEIPT_RECORD'
+          "
+        />
       </section>
 
       <section class="receipt-detail__section">

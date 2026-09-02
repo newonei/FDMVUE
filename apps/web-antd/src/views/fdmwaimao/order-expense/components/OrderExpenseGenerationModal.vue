@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoOrderExpenseApi } from '#/api/fdmwaimao/order-expense';
 
 import { computed, nextTick, ref, watch } from 'vue';
@@ -41,6 +42,7 @@ import {
   startOrderExpenseGeneration,
 } from '#/api/fdmwaimao/order-expense';
 import { getShipment, getShipmentPage } from '#/api/fdmwaimao/shipment';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
 
 import {
   clearActiveExpenseGeneration,
@@ -92,6 +94,9 @@ const instruction = ref('');
 const job = ref<FdmWaimaoOrderExpenseApi.GenerationJob>();
 const generating = ref(false);
 const materializing = ref(false);
+const attachments = ref<FdmWaimaoAttachmentApi.Attachment[]>([]);
+const attachmentUploading = ref(false);
+const attachmentUploadError = ref(false);
 const generationError = ref('');
 const pollWarning = ref('');
 const restoringActive = ref(false);
@@ -189,6 +194,9 @@ function reset() {
   pollWarning.value = '';
   generating.value = false;
   materializing.value = false;
+  attachments.value = [];
+  attachmentUploading.value = false;
+  attachmentUploadError.value = false;
 }
 
 function applyJob(current: FdmWaimaoOrderExpenseApi.GenerationJob) {
@@ -415,23 +423,37 @@ async function materialize() {
   if (!current || !ready.value || typeof current.proposalVersion !== 'number') {
     return;
   }
+  if (attachmentUploading.value) {
+    message.warning('附件仍在上传，请等待上传完成后再生成费用草稿');
+    return;
+  }
+  if (attachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再生成');
+    return;
+  }
   materializing.value = true;
   generationError.value = '';
   const identity = `materialize:${current.id}:${current.proposalVersion}`;
   try {
     const result = await materializeOrderExpenseGeneration({
+      attachmentIds: attachments.value.map((attachment) => attachment.id),
       expectedRunVersion: current.version,
       expectedSourceSnapshotHash: current.sourceSnapshotHash,
       generationRunId: current.id,
       idempotencyKey: await getOrCreateExpenseCommand(
         identity,
-        `${current.version}:${current.proposalVersion}:${current.sourceSnapshotHash}`,
+        `${current.version}:${current.proposalVersion}:${current.sourceSnapshotHash}:${attachments.value
+          .map((attachment) => attachment.id)
+          .toSorted()
+          .join(',')}`,
         'expense-materialize',
       ),
       proposalVersion: current.proposalVersion,
     });
     clearExpenseCommand(identity);
     clearActiveExpenseGeneration();
+    attachments.value = [];
+    await nextTick();
     message.success(
       result.executedNow ? '已生成订单费用草稿' : '已打开此前生成的费用草稿',
     );
@@ -607,8 +629,11 @@ watch(sourceId, () => {
   <Modal
     :confirm-loading="materializing"
     :mask-closable="false"
+    destroy-on-close
     :open="open"
-    :ok-button-props="{ disabled: !ready }"
+    :ok-button-props="{
+      disabled: !ready || attachmentUploading || attachmentUploadError,
+    }"
     :cancel-text="running ? '暂时关闭（后台继续）' : '关闭'"
     ok-text="生成费用草稿"
     title="AI 从前置单据识别订单费用"
@@ -826,6 +851,20 @@ watch(sourceId, () => {
             <p>服务端正在重读前置单据、构造受控证据并校验模型输出…</p>
           </div>
 
+          <section v-if="ready" class="expense-ai-attachments">
+            <header>
+              <strong>费用单附件</strong>
+              <small>附件将在费用草稿生成成功时一并保存</small>
+            </header>
+            <FdmWaimaoAttachmentEditor
+              v-model="attachments"
+              business-type="ORDER_EXPENSE"
+              :disabled="materializing"
+              @error-change="attachmentUploadError = $event"
+              @uploading-change="attachmentUploading = $event"
+            />
+          </section>
+
           <template v-if="job">
             <Divider />
             <div
@@ -974,6 +1013,26 @@ watch(sourceId, () => {
 .proposal-list {
   max-height: 360px;
   overflow: auto;
+}
+
+.expense-ai-attachments {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.expense-ai-attachments > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.expense-ai-attachments > header small {
+  color: #8c8c8c;
 }
 
 .running-state {

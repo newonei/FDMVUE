@@ -137,7 +137,7 @@ const [Modal, modalApi] = useVbenModal({
       subjectRules.value = [];
       return;
     }
-    const data = modalApi.getData<TemplateFormData>();
+    const data = modalApi.getData() as TemplateFormData;
     if (!data) return;
     modalData.value = data;
     subjectRules.value = [];

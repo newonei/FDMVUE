@@ -33,6 +33,7 @@ import {
   fdmTradeReceiptListRoute,
   fdmTradeShipmentListRoute,
 } from '#/views/fdm-trade-shared/document-links';
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
 
 import { formatOkkiDateTime } from './okki-import/display';
 
@@ -310,6 +311,13 @@ function socialText(record: Record<string, any>) {
             <Empty description="OKKI 暂未返回联系人" />
           </template>
         </Table>
+      </TradeDetailSection>
+
+      <TradeDetailSection icon="lucide:paperclip" title="客户附件">
+        <FdmWaimaoAttachmentList
+          :business-id="customer.id"
+          business-type="CUSTOMER"
+        />
       </TradeDetailSection>
 
       <TradeDetailSection icon="lucide:refresh-cw" title="最近同步记录">

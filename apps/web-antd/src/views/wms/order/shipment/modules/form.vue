@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import type { FormType } from '../data';
-import type { ReservationCompletionCommand } from '../reservation-completion-actions';
 
 import type { VxeTableInstance } from '#/adapter/vxe-table';
 import type { WmsWarehouseApi } from '#/api/wms/md/warehouse';
@@ -14,13 +13,12 @@ import { confirm, useVbenModal } from '@vben/common-ui';
 import { OrderStatusEnum, OrderUpdateStatusList } from '@vben/constants';
 import { isEqual } from '@vben/utils';
 
-import { Alert, InputNumber, message } from 'ant-design-vue';
+import { InputNumber, message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import { TableAction, VxeColumn, VxeTable } from '#/adapter/vxe-table';
 import {
   cancelShipmentOrder,
-  completeReservationBackedShipmentOrders,
   completeShipmentOrder,
   createShipmentOrder,
   getShipmentOrder,
@@ -39,14 +37,6 @@ import {
 import { generateOrderNo } from '#/views/wms/utils/order';
 
 import { getDetailFooter, useFormSchema } from '../data';
-import {
-  canCompleteReservationAttempt,
-  clearReservationCompletionCommand,
-  ensureReservationCompletionCommand,
-  isExpectedReservationCompletionReceipt,
-  loadReservationCompletionCommand,
-  saveReservationCompletionCommand,
-} from '../reservation-completion-actions';
 
 interface DetailRow extends WmsShipmentOrderDetailApi.ShipmentOrderDetail {
   seq: number;
@@ -66,13 +56,9 @@ const detailTableRef = ref<VxeTableInstance>();
 const inventorySelectRef = ref<InstanceType<typeof WmsInventorySelect>>();
 const currentWarehouseId = ref<number>();
 const initializing = ref(false);
-const reservationCompletionCommand = ref<ReservationCompletionCommand>();
 let detailSeq = 0; // 明细行可能还没有后端 id，使用本地序号作为 VXE 行操作的稳定标识
 
 const getTitle = computed(() => {
-  if (formData.value.reservationBacked) {
-    return '预留出库单';
-  }
   return formType.value === 'update'
     ? $t('ui.actionTitle.edit', ['出库单'])
     : $t('ui.actionTitle.create', ['出库单']);
@@ -92,20 +78,6 @@ const isSavedPrepareOrder = computed(() => {
     OrderUpdateStatusList.includes(formData.value.status)
   );
 });
-const isReservationBacked = computed(
-  () => formData.value.reservationBacked === true,
-);
-const reservationCompletionAvailable = computed(() =>
-  canCompleteReservationAttempt(formData.value),
-);
-
-function browserSessionStorage() {
-  try {
-    return globalThis.sessionStorage;
-  } catch {
-    return undefined;
-  }
-}
 
 const [Form, formApi] = useVbenForm({
   commonConfig: {
@@ -318,10 +290,6 @@ async function buildSubmitData(): Promise<WmsShipmentOrderApi.ShipmentOrder> {
 
 /** 完成出库 */
 async function handleFormComplete() {
-  if (isReservationBacked.value) {
-    message.error('预留出库单只能通过整批完成操作处理');
-    return;
-  }
   const { valid } = await formApi.validate();
   if (!valid || !validateDetails(true) || !formData.value?.id) {
     return;
@@ -342,55 +310,8 @@ async function handleFormComplete() {
   }
 }
 
-function createReservationCompletionKey() {
-  const suffix =
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return `wms-reservation-completion:${suffix}`;
-}
-
-/**
- * 完成预留生成的出库单。浏览器不提交明细、仓库或数量；服务端会重新读取并
- * 原子完成同一 reservation attempt 的全部仓库单。
- */
-async function handleReservationBackedComplete() {
-  if (!reservationCompletionAvailable.value) {
-    message.error('当前预留出库批次不满足整批完成条件，请刷新后重试');
-    return;
-  }
-  reservationCompletionCommand.value = ensureReservationCompletionCommand(
-    reservationCompletionCommand.value,
-    formData.value,
-    createReservationCompletionKey,
-  );
-  const command = reservationCompletionCommand.value;
-  saveReservationCompletionCommand(browserSessionStorage(), command);
-  await confirm(
-    '确认整批完成该预留对应的全部仓库出库单？系统将一次性扣减已冻结的真实库存并完成整个批次，不能逐单完成或撤销。',
-  );
-  modalApi.lock();
-  try {
-    const receipt = await completeReservationBackedShipmentOrders(command);
-    if (!isExpectedReservationCompletionReceipt(receipt, command)) {
-      throw new Error('WMS reservation completion receipt mismatch');
-    }
-    clearReservationCompletionCommand(browserSessionStorage(), formData.value);
-    await modalApi.close();
-    emit('success');
-    message.success(
-      `${receipt.newlyCreated ? '整批出库成功' : '已确认原出库结果'}：${receipt.orderCount} 张出库单、${receipt.lineCount} 行、${receipt.inventoryCount} 条库存记录`,
-    );
-  } finally {
-    modalApi.unlock();
-  }
-}
-
 /** 作废出库单 */
 async function handleFormCancel() {
-  if (isReservationBacked.value) {
-    message.error('预留出库单不能通过普通作废操作处理');
-    return;
-  }
   if (!formData.value?.id) {
     return;
   }
@@ -408,10 +329,6 @@ async function handleFormCancel() {
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
-    if (isReservationBacked.value) {
-      message.error('预留出库单为只读，不能通过普通保存提交');
-      return;
-    }
     const { valid } = await formApi.validate();
     if (!valid || !validateDetails(false) || !isPrepareOrder.value) {
       return;
@@ -435,17 +352,12 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       formData.value = {};
       originalSubmitData.value = undefined;
-      reservationCompletionCommand.value = undefined;
       currentWarehouseId.value = undefined;
       setDetails([]);
-      formApi.setState({ commonConfig: { disabled: false } });
       return;
     }
     initializing.value = true;
-    const data = modalApi.getData<{
-      formType: FormType;
-      id?: WmsShipmentOrderApi.JavaLong;
-    }>();
+    const data = modalApi.getData() as { formType: FormType; id?: number };
     formType.value = data.formType;
     if (data?.id) {
       modalApi.lock();
@@ -455,23 +367,6 @@ const [Modal, modalApi] = useVbenModal({
         const orderDetails =
           order.details || (await getShipmentOrderDetailListByOrderId(data.id));
         formData.value = { ...order, details: orderDetails };
-        reservationCompletionCommand.value = canCompleteReservationAttempt(
-          formData.value,
-        )
-          ? loadReservationCompletionCommand(
-              browserSessionStorage(),
-              formData.value,
-            )
-          : undefined;
-        if (!canCompleteReservationAttempt(formData.value)) {
-          clearReservationCompletionCommand(
-            browserSessionStorage(),
-            formData.value,
-          );
-        }
-        formApi.setState({
-          commonConfig: { disabled: order.reservationBacked === true },
-        });
         currentWarehouseId.value = order.warehouseId;
         setDetails(orderDetails);
         // 设置到 values
@@ -490,7 +385,6 @@ const [Modal, modalApi] = useVbenModal({
       no: generateOrderNo('CK'),
       status: OrderStatusEnum.PREPARE,
     };
-    formApi.setState({ commonConfig: { disabled: false } });
     currentWarehouseId.value = undefined;
     setDetails([]);
     await formApi.setValues(formData.value);
@@ -502,34 +396,13 @@ const [Modal, modalApi] = useVbenModal({
 </script>
 
 <template>
-  <Modal
-    :title="getTitle"
-    class="w-3/4"
-    :show-confirm-button="isPrepareOrder && !isReservationBacked"
-  >
+  <Modal :title="getTitle" class="w-3/4" :show-confirm-button="isPrepareOrder">
     <div class="mx-4">
-      <Alert
-        v-if="isReservationBacked"
-        class="mb-4"
-        show-icon
-        :type="reservationCompletionAvailable ? 'warning' : 'info'"
-        :message="
-          reservationCompletionAvailable
-            ? '该出库单属于一个跨仓库存预留批次'
-            : '该预留出库批次已完成或当前不可执行'
-        "
-        :description="
-          reservationCompletionAvailable
-            ? '单据与明细均为只读。执行时会由服务端重新核验授权和冻结事实，并原子完成同一 reservation attempt 的全部仓库出库单；浏览器不会提交库存或数量。'
-            : `批次状态：${formData.reservationAttemptStatus || '未知'}${formData.consumedAt ? `；完成时间：${formData.consumedAt}` : ''}`
-        "
-      />
       <Form />
       <div class="mt-4">
         <div class="mb-3 flex items-center justify-between">
           <span class="text-sm font-semibold">出库明细</span>
           <TableAction
-            v-if="!isReservationBacked"
             :actions="[
               {
                 label: '添加商品',
@@ -580,7 +453,6 @@ const [Modal, modalApi] = useVbenModal({
               <InputNumber
                 v-model:value="row.quantity"
                 :controls="false"
-                :disabled="isReservationBacked"
                 :min="0"
                 :precision="QUANTITY_PRECISION"
                 class="!w-full"
@@ -594,7 +466,6 @@ const [Modal, modalApi] = useVbenModal({
               <InputNumber
                 v-model:value="row.price"
                 :controls="false"
-                :disabled="isReservationBacked"
                 :min="0"
                 :precision="PRICE_PRECISION"
                 class="!w-full"
@@ -608,7 +479,6 @@ const [Modal, modalApi] = useVbenModal({
               <InputNumber
                 v-model:value="row.totalPrice"
                 :controls="false"
-                :disabled="isReservationBacked"
                 :min="0"
                 :precision="PRICE_PRECISION"
                 class="!w-full"
@@ -620,7 +490,6 @@ const [Modal, modalApi] = useVbenModal({
           <VxeColumn title="操作" align="center" fixed="right" width="90">
             <template #default="{ row }">
               <TableAction
-                v-if="!isReservationBacked"
                 :actions="[
                   {
                     label: '删除',
@@ -642,22 +511,13 @@ const [Modal, modalApi] = useVbenModal({
             {
               label: '完成出库',
               type: 'primary',
-              ifShow: !isReservationBacked,
               auth: ['wms:shipment-order:complete'],
               onClick: handleFormComplete,
-            },
-            {
-              label: '整批完成预留出库',
-              type: 'primary',
-              ifShow: reservationCompletionAvailable,
-              auth: ['wms:shipment-order:complete-reservation'],
-              onClick: handleReservationBackedComplete,
             },
             {
               label: '作废',
               type: 'primary',
               danger: true,
-              ifShow: !isReservationBacked,
               auth: ['wms:shipment-order:cancel'],
               onClick: handleFormCancel,
             },

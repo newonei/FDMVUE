@@ -18,6 +18,9 @@ export function useVbenForm<
   const IS_REACTIVE = isReactive(options);
   const api = new FormApi(options as unknown as VbenFormProps);
   const extendedApi: ExtendedFormApi = api as never;
+  // The fixed official business-source baseline still calls reset(). Keep the
+  // compatibility at the form boundary instead of editing every official page.
+  extendedApi.reset = () => api.resetForm();
   extendedApi.useStore = (selector) => {
     return useSelector(api.store, selector);
   };

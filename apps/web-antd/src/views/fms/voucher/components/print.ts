@@ -88,7 +88,9 @@ export function buildVoucherListPrintHtml(
   period: string,
   vouchers: FmsVoucherApi.Voucher[],
 ) {
-  const rows = vouchers.map(buildVoucherListRowHtml).join('');
+  const rows = vouchers
+    .map((voucher) => buildVoucherListRowHtml(voucher))
+    .join('');
   const content = `
     <section class="voucher-list-page">
       <h1>凭证列表</h1>

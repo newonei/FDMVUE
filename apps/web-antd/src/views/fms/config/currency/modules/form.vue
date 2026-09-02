@@ -62,7 +62,7 @@ const [Modal, modalApi] = useVbenModal({
       formData.value = undefined;
       return;
     }
-    const data = modalApi.getData<FmsCurrencyApi.Currency>();
+    const data = modalApi.getData() as FmsCurrencyApi.Currency;
     if (!data?.id) {
       await formApi.setValues({
         accountSetId: data?.accountSetId,

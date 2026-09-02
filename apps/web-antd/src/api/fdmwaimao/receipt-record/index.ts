@@ -1,5 +1,7 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
+
 import { requestClient } from '#/api/request';
 
 export namespace FdmWaimaoReceiptRecordApi {
@@ -11,6 +13,7 @@ export namespace FdmWaimaoReceiptRecordApi {
 
   export interface BaseRecord {
     allocatedContractAmount: DecimalValue;
+    attachments?: FdmWaimaoAttachmentApi.Attachment[];
     companyId: string;
     companyName: string;
     contractCurrency: string;
@@ -88,6 +91,7 @@ export namespace FdmWaimaoReceiptRecordApi {
   }
 
   export interface ReceiptSaveReq {
+    attachmentIds: string[];
     category?: string;
     arrivalAmount: DecimalValue;
     confirmPotentialDuplicate: boolean;
@@ -106,13 +110,17 @@ export namespace FdmWaimaoReceiptRecordApi {
     remark?: string;
   }
 
-  export interface ReceiptUpdateReq extends ReceiptSaveReq {
+  export interface ReceiptUpdateReq extends Omit<
+    ReceiptSaveReq,
+    'attachmentIds'
+  > {
     expectedVersion: number;
     id: string;
   }
 
   export interface ConsumptionSaveReq {
     amount: DecimalValue;
+    attachmentIds: string[];
     consumptionDate: string;
     currency: string;
     consumptionType: ConsumptionType;
@@ -121,7 +129,10 @@ export namespace FdmWaimaoReceiptRecordApi {
     remark?: string;
   }
 
-  export interface ConsumptionUpdateReq extends ConsumptionSaveReq {
+  export interface ConsumptionUpdateReq extends Omit<
+    ConsumptionSaveReq,
+    'attachmentIds'
+  > {
     expectedVersion: number;
     id: string;
   }
@@ -228,6 +239,7 @@ export function createReceiptRecord(
 ) {
   const payload: FdmWaimaoReceiptRecordApi.ReceiptSaveReq = {
     arrivalAmount: data.arrivalAmount,
+    attachmentIds: data.attachmentIds,
     category: data.category,
     confirmPotentialDuplicate: data.confirmPotentialDuplicate,
     currency: data.currency,

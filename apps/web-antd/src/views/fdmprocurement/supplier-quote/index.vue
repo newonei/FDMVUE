@@ -148,7 +148,7 @@ async function changeCompany() {
     const [mappingRows, suppliers] = await Promise.all([
       getProcurementSupplierProductList({ companyId: companyId.value }),
       canReadSuppliers.value
-        ? getProcurementSupplierList({ companyId: companyId.value })
+        ? getProcurementSupplierList({})
         : Promise.resolve([]),
     ]);
     const supplierNames = Object.fromEntries(
@@ -359,7 +359,8 @@ void initialize();
     >
       <div class="quote-form">
         <label>报价编号<Input v-model:value="form.quoteNo" /></label>
-        <label>状态<Select
+        <label
+          >状态<Select
             v-model:value="form.status"
             :options="
               ['DRAFT', 'ACTIVE', 'EXPIRED', 'VOIDED'].map((value) => ({
@@ -368,17 +369,26 @@ void initialize();
               }))
             "
         /></label>
-        <label>币种<Input v-model:value="form.currency" :maxlength="3" /></label>
+        <label
+          >币种<Input v-model:value="form.currency" :maxlength="3"
+        /></label>
         <label>含税<Checkbox v-model:checked="form.taxIncluded" /></label>
         <label>税率（0～1）<Input v-model:value="form.taxRate" /></label>
         <label>单位运费<Input v-model:value="form.unitFreightAmount" /></label>
-        <label>交期天数<Input v-model:value="form.leadTimeDays" type="number" /></label>
+        <label
+          >交期天数<Input v-model:value="form.leadTimeDays" type="number"
+        /></label>
         <label>付款条款<Input v-model:value="form.paymentTerms" /></label>
-        <label>有效开始<Input v-model:value="form.validFrom" type="date" /></label>
-        <label>有效结束<Input v-model:value="form.validUntil" type="date" /></label>
+        <label
+          >有效开始<Input v-model:value="form.validFrom" type="date"
+        /></label>
+        <label
+          >有效结束<Input v-model:value="form.validUntil" type="date"
+        /></label>
         <section class="tiers">
           <header>
-            <strong>阶梯价格</strong><Button size="small" @click="addTier">新增阶梯</Button>
+            <strong>阶梯价格</strong
+            ><Button size="small" @click="addTier">新增阶梯</Button>
           </header>
           <div
             v-for="(tier, index) in form.tiers"

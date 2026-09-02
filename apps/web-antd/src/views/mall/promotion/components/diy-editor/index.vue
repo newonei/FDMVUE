@@ -123,7 +123,7 @@ watch(
       return;
     }
     // 如果是基础设置页，默认选中的索引改成 -1，为了防止删除组件后切换到此页导致报错
-    // 上游参考：组件选择索引处理逻辑
+    // https://gitee.com/yudaocode/yudao-ui-admin-vue3/pulls/792
     if (props.showTabBar) {
       selectedComponentIndex.value = -1;
     }

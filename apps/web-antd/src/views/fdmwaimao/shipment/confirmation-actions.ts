@@ -87,9 +87,9 @@ export function isExpectedShipmentConfirmationResult(
     LOWER_SHA256.test(result.confirmedSnapshotHash) &&
     UUID.test(result.outboxEventId) &&
     [
-      'WMS_HANDOFF_PENDING',
-      'WMS_HANDOFF_RECOVERY_REQUIRED',
-      'WMS_OUTBOUND_PENDING',
+      'WAREHOUSE_HANDOFF_PENDING',
+      'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED',
+      'WAREHOUSE_OUTBOUND_PENDING',
     ].includes(result.nextRequiredAction)
   );
 }

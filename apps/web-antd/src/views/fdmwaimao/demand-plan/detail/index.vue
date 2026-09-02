@@ -34,8 +34,9 @@ import {
   fdmTradeShipmentListRoute,
 } from '#/views/fdm-trade-shared/document-links';
 import { requisitionGenerationRouteQuery } from '#/views/fdmprocurement/requisition/generation-route';
-import FactoryTaskGenerationDrawer from '#/views/mes/factory-supply-task/components/FactoryTaskGenerationDrawer.vue';
-import { canGenerateFactorySupplyTask } from '#/views/mes/factory-supply-task/generation-policy';
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
+import SupplyTaskGenerationDrawer from '#/views/fdmfactory/supply-task/components/SupplyTaskGenerationDrawer.vue';
+import { canGenerateSupplyTask } from '#/views/fdmfactory/supply-task/generation-policy';
 
 import DemandPlanLineEditor from '../components/DemandPlanLineEditor.vue';
 import { detailToForm } from '../form-model';
@@ -51,7 +52,7 @@ const detail = ref<FdmWaimaoDemandPlanApi.Detail>();
 const form = ref<DemandPlanFormModel>();
 const loading = ref(false);
 const creatingSourceRequisition = ref(false);
-const factoryTaskGenerationOpen = ref(false);
+const supplyTaskGenerationOpen = ref(false);
 let requestVersion = 0;
 
 const planId = computed(() => String(route.params.id || ''));
@@ -94,8 +95,8 @@ const canCreateSourceRequisition = computed(
       'fdmprocurement:requisition:create',
     ].every((code) => hasAccessByCodes([code])),
 );
-const canGenerateFactoryTask = computed(() =>
-  canGenerateFactorySupplyTask(detail.value, (code) =>
+const canGenerateSupply = computed(() =>
+  canGenerateSupplyTask(detail.value, (code) =>
     hasAccessByCodes([code]),
   ),
 );
@@ -206,9 +207,9 @@ function createSourceRequisition() {
   });
 }
 
-function generateFactoryTask() {
-  if (!canGenerateFactoryTask.value) return;
-  factoryTaskGenerationOpen.value = true;
+function generateSupplyTask() {
+  if (!canGenerateSupply.value) return;
+  supplyTaskGenerationOpen.value = true;
 }
 
 function back() {
@@ -263,9 +264,9 @@ watch(planId, load, { immediate: true });
         按来源建立采购草稿
       </Button>
       <Button
-        v-if="canGenerateFactoryTask"
+        v-if="canGenerateSupply"
         type="primary"
-        @click="generateFactoryTask"
+        @click="generateSupplyTask"
       >
         <template #icon>
           <IconifyIcon icon="lucide:factory" aria-hidden="true" />
@@ -402,6 +403,13 @@ watch(planId, load, { immediate: true });
         />
       </section>
 
+      <Card title="单据附件" size="small">
+        <FdmWaimaoAttachmentList
+          :business-id="detail.id"
+          business-type="FULFILLMENT_PLAN"
+        />
+      </Card>
+
       <Card title="变更记录" size="small">
         <Timeline v-if="detail.events.length">
           <Timeline.Item v-for="event in detail.events" :key="event.id">
@@ -426,8 +434,8 @@ watch(planId, load, { immediate: true });
       </Card>
     </div>
 
-    <FactoryTaskGenerationDrawer
-      v-model:open="factoryTaskGenerationOpen"
+    <SupplyTaskGenerationDrawer
+      v-model:open="supplyTaskGenerationOpen"
       :plan="detail"
     />
   </Page>

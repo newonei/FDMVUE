@@ -38,12 +38,17 @@
       "types": "./src/markmap/index.ts",
       "default": "./src/markmap/index.ts"
     },
+    "./tinyflow": {
+      "types": "./src/tinyflow/index.ts",
+      "default": "./src/tinyflow/index.ts"
+    },
     "./code-editor": {
       "types": "./src/code-editor/index.ts",
       "default": "./src/code-editor/index.ts"
     }
   },
   "dependencies": {
+    "@tinyflow-ai/vue": "catalog:",
     "@tiptap/core": "catalog:",
     "@tiptap/extension-document": "catalog:",
     "@tiptap/extension-highlight": "catalog:",
@@ -61,6 +66,7 @@
     "@vben-core/popup-ui": "workspace:*",
     "@vben-core/shadcn-ui": "workspace:*",
     "@vben-core/shared": "workspace:*",
+    "@vben-core/typings": "workspace:*",
     "@vben/hooks": "workspace:*",
     "@vben/icons": "workspace:*",
     "@vben/locales": "workspace:*",

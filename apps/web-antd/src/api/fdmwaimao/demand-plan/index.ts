@@ -216,6 +216,7 @@ export namespace FdmWaimaoDemandPlanApi {
   }
 
   export interface MaterializeReq {
+    attachmentIds?: string[];
     expectedRunVersion: string;
     expectedSourceSnapshotHash: string;
     expectedSourceVersion: number;
@@ -242,6 +243,7 @@ export namespace FdmWaimaoDemandPlanApi {
   }
 
   export interface DirectCreateReq {
+    attachmentIds?: string[];
     creationMode: 'MANUAL' | 'RULE';
     expectedOrderVersion: number;
     idempotencyKey: string;

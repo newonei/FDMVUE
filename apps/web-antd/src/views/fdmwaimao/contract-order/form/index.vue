@@ -3,7 +3,7 @@ import type { Dayjs } from 'dayjs';
 
 import type { FdmWaimaoContractOrderApi } from '#/api/fdmwaimao/contract-order';
 
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -24,6 +24,7 @@ import {
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
 
+import { getFdmWaimaoAttachmentList } from '#/api/fdmwaimao/attachment';
 import {
   createContractOrder,
   getContractOrder,
@@ -34,6 +35,7 @@ import {
 } from '#/api/fdmwaimao/contract-order';
 import { getCustomerPage } from '#/api/fdmwaimao/customer';
 import { useFdmWaimaoAiContext } from '#/views/fdm-trade-shared/ai-assistant/context';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
 
 import {
   calculateContractAmount,
@@ -99,6 +101,9 @@ const customerOptions = ref<CustomerSelectOption[]>([]);
 const contacts = ref<FdmWaimaoContractOrderApi.ContactOption[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const attachmentUploading = ref(false);
+const attachmentUploadError = ref(false);
+const attachmentEditorVisible = ref(true);
 const customerSearching = ref(false);
 const contactLoading = ref(false);
 const previewing = ref(false);
@@ -372,14 +377,35 @@ function scheduleAmountPreview() {
 
 async function initialize() {
   const requestId = ++loadRequestId;
+  if (
+    form.attachments.some((attachment) => attachment.status === 'PENDING') ||
+    attachmentUploading.value ||
+    attachmentUploadError.value
+  ) {
+    attachmentEditorVisible.value = false;
+    await nextTick();
+    attachmentUploading.value = false;
+    attachmentUploadError.value = false;
+    attachmentEditorVisible.value = true;
+  }
   resetForm();
   loading.value = true;
   try {
-    const [options, detail] = await Promise.all([
+    const [options, detail, attachments] = await Promise.all([
       getContractOrderFormOptions(),
       orderId.value
         ? getContractOrder(orderId.value)
         : Promise.resolve(undefined),
+      orderId.value
+        ? getFdmWaimaoAttachmentList('CONTRACT_ORDER', orderId.value).catch(
+            () => {
+              message.warning(
+                '合同已读取，但附件暂时加载失败，可稍后在详情页重试',
+              );
+              return [];
+            },
+          )
+        : Promise.resolve([]),
     ]);
     if (requestId !== loadRequestId) return;
     formOptions.value = options;
@@ -390,6 +416,9 @@ async function initialize() {
         return;
       }
       Object.assign(form, hydrateContractForm(detail));
+      form.attachments = attachments.filter(
+        (attachment) => attachment.status === 'BOUND',
+      );
       customerOptions.value = [
         { label: detail.customerName, value: detail.customerId },
       ];
@@ -408,6 +437,14 @@ async function initialize() {
 }
 
 async function save() {
+  if (attachmentUploading.value) {
+    message.warning('附件仍在上传，请稍候再保存');
+    return;
+  }
+  if (attachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再保存');
+    return;
+  }
   if (!canSave.value || saving.value) return;
   const issues = validateContractForm(form);
   validationMessages.value = issues.map((item) => item.message);
@@ -424,6 +461,8 @@ async function save() {
       id = form.id!;
     } else {
       id = await createContractOrder(buildContractSavePayload(form));
+      form.attachments = [];
+      await nextTick();
     }
     message.success(isEdit.value ? '合同草稿已更新' : '合同草稿已创建');
     await router.replace(`/fdmwaimao/contract-order/detail/${id}`);
@@ -628,6 +667,25 @@ onBeforeUnmount(() => {
               />
             </label>
           </div>
+        </section>
+
+        <section class="contract-order-form__section">
+          <h2><span>附件</span></h2>
+          <Alert
+            v-if="isEdit"
+            class="mb-4"
+            message="编辑草稿时附件仅供查看，不会清空或替换已有附件。"
+            show-icon
+            type="info"
+          />
+          <FdmWaimaoAttachmentEditor
+            v-if="attachmentEditorVisible"
+            v-model="form.attachments"
+            business-type="CONTRACT_ORDER"
+            :disabled="isEdit || saving"
+            @error-change="attachmentUploadError = $event"
+            @uploading-change="attachmentUploading = $event"
+          />
         </section>
 
         <section class="contract-order-form__section">
@@ -878,7 +936,9 @@ onBeforeUnmount(() => {
           <div class="contract-order-form__footer-actions">
             <Button @click="backToList">取消</Button>
             <Button
-              :disabled="!canSave"
+              :disabled="
+                !canSave || attachmentUploading || attachmentUploadError
+              "
               :loading="saving"
               type="primary"
               @click="save"

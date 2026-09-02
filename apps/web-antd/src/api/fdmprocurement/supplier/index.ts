@@ -11,21 +11,24 @@ export namespace FdmProcurementSupplierApi {
     | 'ENABLED'
     | 'FROZEN';
 
-  export interface Supplier {
+  export interface CompanyBinding {
     admissionStatus: ApprovalStatus;
-    approvalStatus: ApprovalStatus;
     companyId: string;
-    companyStatus: CompanyStatus;
-    companyVersion: number;
     directShipAllowed: boolean;
-    erpSupplierId?: null | string;
+    status: CompanyStatus;
+    validFrom: string;
+    validUntil: string;
+    version: number;
+  }
+
+  export interface Supplier {
+    approvalStatus: ApprovalStatus;
+    companyBindings: CompanyBinding[];
     id: string;
     remark?: null | string;
     status: SupplierStatus;
     supplierCode: string;
     supplierName: string;
-    validFrom: string;
-    validUntil: string;
     version: number;
   }
 
@@ -35,7 +38,6 @@ export namespace FdmProcurementSupplierApi {
     companyId: string;
     companyStatus: CompanyStatus;
     directShipAllowed: boolean;
-    erpSupplierId?: string;
     remark?: string;
     status: SupplierStatus;
     supplierCode: string;
@@ -46,8 +48,6 @@ export namespace FdmProcurementSupplierApi {
 
   export interface UpdateReq {
     approvalStatus: ApprovalStatus;
-    companyId: string;
-    erpSupplierId?: string;
     expectedVersion: number;
     id: string;
     remark?: string;
@@ -55,7 +55,7 @@ export namespace FdmProcurementSupplierApi {
     supplierName: string;
   }
 
-  export interface AuthorizeCompanyReq {
+  export interface BindCompanyReq {
     admissionStatus: ApprovalStatus;
     companyId: string;
     directShipAllowed: boolean;
@@ -74,15 +74,18 @@ export function normalizeSupplier(
 ): FdmProcurementSupplierApi.Supplier {
   return {
     ...value,
-    companyId: normalizeId(value.companyId, 'supplier.companyId'),
+    companyBindings: (value.companyBindings || []).map((binding) => ({
+      ...binding,
+      companyId: normalizeId(
+        binding.companyId,
+        'supplier.companyBindings.companyId',
+      ),
+    })),
     id: normalizeId(value.id, 'supplier.id'),
   };
 }
 
-export async function getProcurementSupplierList(params: {
-  companyId: string;
-  keyword?: string;
-}) {
+export async function getProcurementSupplierList(params: { keyword?: string }) {
   const result = await requestClient.get<FdmProcurementSupplierApi.Supplier[]>(
     `${BASE_URL}/list`,
     { params },
@@ -90,10 +93,10 @@ export async function getProcurementSupplierList(params: {
   return (result || []).map((supplier) => normalizeSupplier(supplier));
 }
 
-export async function getProcurementSupplier(companyId: string, id: string) {
+export async function getProcurementSupplier(id: string) {
   const result = await requestClient.get<FdmProcurementSupplierApi.Supplier>(
     `${BASE_URL}/get`,
-    { params: { companyId, id } },
+    { params: { id } },
   );
   return normalizeSupplier(result);
 }
@@ -113,8 +116,8 @@ export function updateProcurementSupplier(
   return requestClient.put<boolean>(`${BASE_URL}/update`, data);
 }
 
-export function authorizeProcurementSupplierCompany(
-  data: FdmProcurementSupplierApi.AuthorizeCompanyReq,
+export function bindProcurementSupplierCompany(
+  data: FdmProcurementSupplierApi.BindCompanyReq,
 ) {
-  return requestClient.put<boolean>(`${BASE_URL}/authorize-company`, data);
+  return requestClient.put<boolean>(`${BASE_URL}/bind-company`, data);
 }

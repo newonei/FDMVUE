@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import type { DemandPlanFormModel } from '../form-model';
 
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoDemandPlanApi } from '#/api/fdmwaimao/demand-plan';
 import type {
   AiFieldStateMap,
@@ -8,7 +9,7 @@ import type {
   AiValidationIssue,
 } from '#/views/fdm-trade-shared/ai-document-generation';
 
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -47,6 +48,7 @@ import {
   useAiGenerationJob,
   useAiModelCatalog,
 } from '#/views/fdm-trade-shared/ai-document-generation';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
 
 import DemandPlanLineEditor from '../components/DemandPlanLineEditor.vue';
 import DemandPlanSourceOrder from '../components/DemandPlanSourceOrder.vue';
@@ -89,6 +91,10 @@ const saving = ref(false);
 const confirming = ref(false);
 const directCreating = ref(false);
 const instruction = ref('');
+const attachments = ref<FdmWaimaoAttachmentApi.Attachment[]>([]);
+const attachmentUploading = ref(false);
+const attachmentUploadError = ref(false);
+const attachmentEditorVisible = ref(true);
 const phase = ref<'GENERATING' | 'READY' | 'START'>('START');
 const catalogOrderId = ref('');
 let loadVersion = 0;
@@ -337,6 +343,18 @@ function idempotencyKey() {
 
 async function load() {
   const version = ++loadVersion;
+  if (
+    attachments.value.length > 0 ||
+    attachmentUploading.value ||
+    attachmentUploadError.value
+  ) {
+    attachmentEditorVisible.value = false;
+    await nextTick();
+    attachments.value = [];
+    attachmentUploading.value = false;
+    attachmentUploadError.value = false;
+    attachmentEditorVisible.value = true;
+  }
   generation.stop();
   loading.value = true;
   detail.value = undefined;
@@ -443,6 +461,7 @@ function directDraftSuccessMessage(created: boolean, mode: 'MANUAL' | 'RULE') {
 
 async function createDirectDraft(mode: 'MANUAL' | 'RULE') {
   if (!canCreateDirect.value || editing.value) return;
+  if (!ensureAttachmentsReady()) return;
   const orderId =
     generationOptions.value?.sourceOrder.id || createOrderId.value;
   if (!orderId) return;
@@ -463,12 +482,17 @@ async function createDirectDraft(mode: 'MANUAL' | 'RULE') {
       return;
     }
     const result = await createDemandPlanDirect({
+      attachmentIds: attachments.value.map((attachment) => attachment.id),
       creationMode: mode,
       expectedOrderVersion,
       idempotencyKey: idempotencyKey(),
       orderId,
       remark: instruction.value.trim() || undefined,
     });
+    if (result.created) {
+      attachments.value = [];
+      await nextTick();
+    }
     message.success(directDraftSuccessMessage(result.created, mode));
     await router.push(`/fdmwaimao/demand-analysis/edit/${result.id}`);
   } catch (error) {
@@ -480,6 +504,18 @@ async function createDirectDraft(mode: 'MANUAL' | 'RULE') {
   } finally {
     directCreating.value = false;
   }
+}
+
+function ensureAttachmentsReady() {
+  if (attachmentUploading.value) {
+    message.warning('附件仍在上传，请等待上传完成后再保存。');
+    return false;
+  }
+  if (attachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再保存。');
+    return false;
+  }
+  return true;
 }
 
 function applyReadyJob(job: FdmWaimaoDemandPlanApi.GenerationJob) {
@@ -595,7 +631,12 @@ async function validateWithServer(
 }
 
 async function saveDraft(navigate = true) {
-  if (!form.value || !canSave.value || !ensureClientValid('DRAFT'))
+  if (
+    !form.value ||
+    !canSave.value ||
+    !ensureAttachmentsReady() ||
+    !ensureClientValid('DRAFT')
+  )
     return false;
   saving.value = true;
   try {
@@ -610,8 +651,15 @@ async function saveDraft(navigate = true) {
       return true;
     }
     const request = buildDemandPlanMaterializeReq(form.value);
+    request.attachmentIds = attachments.value.map(
+      (attachment) => attachment.id,
+    );
     if (!(await validateWithServer(request))) return false;
     const result = await createDemandPlan(request);
+    if (result.created) {
+      attachments.value = [];
+      await nextTick();
+    }
     message.success(
       result.created ? '需求计划草稿已创建' : '已打开现有需求计划',
     );
@@ -740,7 +788,7 @@ watch([planId, createOrderId], load, { immediate: true });
       :confirming="confirming"
       :fields="fields"
       :issues="allIssues"
-      :saving="saving"
+      :saving="saving || attachmentUploading"
       :show-confirm="canConfirm && phase === 'READY'"
       :show-save="Boolean(form && canSave && phase === 'READY')"
       :source-subtitle="
@@ -771,6 +819,20 @@ watch([planId, createOrderId], load, { immediate: true });
           show-icon
           type="warning"
         />
+        <section v-if="!editing" class="demand-plan-form__attachments">
+          <header>
+            <strong>单据附件</strong>
+            <span>附件将在需求计划创建成功时一并保存</span>
+          </header>
+          <FdmWaimaoAttachmentEditor
+            v-if="attachmentEditorVisible"
+            v-model="attachments"
+            business-type="FULFILLMENT_PLAN"
+            :disabled="saving || directCreating"
+            @error-change="attachmentUploadError = $event"
+            @uploading-change="attachmentUploading = $event"
+          />
+        </section>
       </template>
 
       <template #editor>
@@ -781,7 +843,9 @@ watch([planId, createOrderId], load, { immediate: true });
             :blockers="startBlockers"
             :disabled="!canGenerate"
             :loading-models="modelCatalog.loading.value"
-            :manual-disabled="!canCreateDirect"
+            :manual-disabled="
+              !canCreateDirect || attachmentUploading || attachmentUploadError
+            "
             :manual-starting="directCreating"
             :model-error="modelCatalog.error.value"
             :models="modelCatalog.compatibleModels.value"
@@ -878,6 +942,25 @@ watch([planId, createOrderId], load, { immediate: true });
 
 .demand-plan-form__missing {
   margin-top: 14px;
+}
+
+.demand-plan-form__attachments {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.demand-plan-form__attachments > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.demand-plan-form__attachments > header span {
+  font-size: 12px;
+  color: #8c8c8c;
 }
 
 .demand-plan-form__editor {

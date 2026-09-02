@@ -51,7 +51,7 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       return;
     }
-    const data = modalApi.getData<{ reason: GuideReason }>();
+    const data = modalApi.getData() as { reason: GuideReason };
     reason.value = data?.reason ?? 'empty';
     // 无权自行处理时只展示“我知道了”
     modalApi.setState({

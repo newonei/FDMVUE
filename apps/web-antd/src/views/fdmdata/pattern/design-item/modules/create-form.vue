@@ -1,13 +1,20 @@
 <script lang="ts" setup>
 import type { FdmdataPatternDesignItemApi } from '#/api/fdmdata/pattern/design-item';
-import type { AxiosProgressEvent } from '#/api/infra/file';
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
 import { nextTick, ref, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Empty, Image, Input, InputNumber, message } from 'ant-design-vue';
+import {
+  Button,
+  Empty,
+  Image,
+  Input,
+  InputNumber,
+  message,
+} from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import {
@@ -132,10 +139,7 @@ async function uploadDesignImageWithPreview(
   };
 }
 
-function setImageUrlsForDesign(
-  designUrl: string,
-  previewUrl?: string,
-) {
+function setImageUrlsForDesign(designUrl: string, previewUrl?: string) {
   const normalizedDesignUrl = designUrl.trim();
   if (!normalizedDesignUrl) return;
   const normalizedPreviewUrl = String(previewUrl ?? '').trim();
@@ -281,7 +285,9 @@ function validateBatchRows() {
   return true;
 }
 
-function findDuplicatedUrl(items: FdmdataPatternDesignItemApi.BatchCreateItem[]) {
+function findDuplicatedUrl(
+  items: FdmdataPatternDesignItemApi.BatchCreateItem[],
+) {
   const seen = new Set<string>();
   for (const item of items) {
     if (seen.has(item.designImageUrl)) {

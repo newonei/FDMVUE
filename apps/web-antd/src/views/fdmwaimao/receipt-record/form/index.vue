@@ -1,11 +1,12 @@
 <script lang="ts" setup>
 import type { Dayjs } from 'dayjs';
 
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoContractOrderApi } from '#/api/fdmwaimao/contract-order';
 import type { FdmWaimaoExchangeRateApi } from '#/api/fdmwaimao/exchange-rate';
 import type { FdmWaimaoReceiptRecordApi } from '#/api/fdmwaimao/receipt-record';
 
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -26,6 +27,7 @@ import {
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
+import { getFdmWaimaoAttachmentList } from '#/api/fdmwaimao/attachment';
 import {
   getContractOrder,
   getContractOrderPage,
@@ -46,6 +48,7 @@ import {
   updateReceiptRecord,
 } from '#/api/fdmwaimao/receipt-record';
 import { useFdmWaimaoAiContext } from '#/views/fdm-trade-shared/ai-assistant/context';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
 
 import {
   createLatestRequestGuard,
@@ -91,6 +94,9 @@ const quote = ref<FdmWaimaoExchangeRateApi.Quote>();
 const validationMessages = ref<string[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const attachmentUploading = ref(false);
+const attachmentUploadError = ref(false);
+const attachmentEditorVisible = ref(true);
 const previewing = ref(false);
 const quoteLoading = ref(false);
 const orderSearching = ref(false);
@@ -135,9 +141,28 @@ const currentDate = computed(() =>
     ? consumptionForm.consumptionDate
     : receiptForm.receiptDate,
 );
+const currentDateLabel = computed(() =>
+  isConsumption.value ? '消费日期' : '回款日期',
+);
 const currentAmount = computed(() =>
   isConsumption.value ? consumptionForm.amount : receiptForm.arrivalAmount,
 );
+const currentAmountLabel = computed(() =>
+  isConsumption.value ? '消费金额' : '到款金额',
+);
+const SETTLEMENT_HINT =
+  '订单是否结清由服务端聚合计算，不可手工修改；本期不展示假审核流程。';
+const attachmentBusinessType = computed<FdmWaimaoAttachmentApi.BusinessType>(
+  () => (isConsumption.value ? 'CONSUMPTION_RECORD' : 'RECEIPT_RECORD'),
+);
+const currentAttachments = computed<FdmWaimaoAttachmentApi.Attachment[]>({
+  get: () =>
+    isConsumption.value ? consumptionForm.attachments : receiptForm.attachments,
+  set: (attachments) => {
+    if (isConsumption.value) consumptionForm.attachments = attachments;
+    else receiptForm.attachments = attachments;
+  },
+});
 
 useFdmWaimaoAiContext(() => ({
   businessId: recordId.value || undefined,
@@ -333,6 +358,21 @@ function schedulePreview() {
 
 async function initialize() {
   const requestId = initializeGuard.begin();
+  const hasPendingAttachment = [
+    ...receiptForm.attachments,
+    ...consumptionForm.attachments,
+  ].some((attachment) => attachment.status === 'PENDING');
+  if (
+    hasPendingAttachment ||
+    attachmentUploading.value ||
+    attachmentUploadError.value
+  ) {
+    attachmentEditorVisible.value = false;
+    await nextTick();
+    attachmentUploading.value = false;
+    attachmentUploadError.value = false;
+    attachmentEditorVisible.value = true;
+  }
   loading.value = true;
   resetForms();
   try {
@@ -345,15 +385,40 @@ async function initialize() {
 
     if (isEdit.value) {
       if (isConsumption.value) {
-        replaceReactive(
-          consumptionForm,
-          hydrateConsumptionForm(await getConsumptionRecord(recordId.value)),
+        const [record, attachments] = await Promise.all([
+          getConsumptionRecord(recordId.value),
+          getFdmWaimaoAttachmentList(
+            'CONSUMPTION_RECORD',
+            recordId.value,
+          ).catch(() => {
+            message.warning(
+              '消费记录已读取，但附件暂时加载失败，可稍后在详情页重试',
+            );
+            return [];
+          }),
+        ]);
+        if (!initializeGuard.isLatest(requestId)) return;
+        replaceReactive(consumptionForm, hydrateConsumptionForm(record));
+        consumptionForm.attachments = attachments.filter(
+          (attachment) => attachment.status === 'BOUND',
         );
         receiptForm.orderId = consumptionForm.orderId;
       } else {
-        replaceReactive(
-          receiptForm,
-          hydrateReceiptForm(await getReceiptRecord(recordId.value)),
+        const [record, attachments] = await Promise.all([
+          getReceiptRecord(recordId.value),
+          getFdmWaimaoAttachmentList('RECEIPT_RECORD', recordId.value).catch(
+            () => {
+              message.warning(
+                '回款记录已读取，但附件暂时加载失败，可稍后在详情页重试',
+              );
+              return [];
+            },
+          ),
+        ]);
+        if (!initializeGuard.isLatest(requestId)) return;
+        replaceReactive(receiptForm, hydrateReceiptForm(record));
+        receiptForm.attachments = attachments.filter(
+          (attachment) => attachment.status === 'BOUND',
         );
         consumptionForm.orderId = receiptForm.orderId;
       }
@@ -379,6 +444,14 @@ async function initialize() {
 }
 
 async function save(confirmPotentialDuplicate = false) {
+  if (attachmentUploading.value) {
+    message.warning('附件仍在上传，请稍候再保存');
+    return;
+  }
+  if (attachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再保存');
+    return;
+  }
   const issues = isConsumption.value
     ? validateConsumptionForm(consumptionForm)
     : validateReceiptForm(receiptForm);
@@ -408,6 +481,8 @@ async function save(confirmPotentialDuplicate = false) {
         id = await createConsumptionRecord(
           buildConsumptionSavePayload(consumptionForm),
         );
+        consumptionForm.attachments = [];
+        await nextTick();
       }
     } else if (isEdit.value) {
       await updateReceiptRecord(
@@ -417,6 +492,8 @@ async function save(confirmPotentialDuplicate = false) {
       id = await createReceiptRecord(
         buildReceiptSavePayload(receiptForm, confirmPotentialDuplicate),
       );
+      receiptForm.attachments = [];
+      await nextTick();
     }
     message.success(isEdit.value ? '记录已更新' : '记录已创建');
     await router.replace({
@@ -608,12 +685,31 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="receipt-form__section">
+          <h2><span>附件</span></h2>
+          <Alert
+            v-if="isEdit"
+            class="mb-4"
+            message="编辑记录时附件仅供查看，不会清空或替换已有附件。"
+            show-icon
+            type="info"
+          />
+          <FdmWaimaoAttachmentEditor
+            v-if="attachmentEditorVisible"
+            v-model="currentAttachments"
+            :business-type="attachmentBusinessType"
+            :disabled="isEdit || saving"
+            @error-change="attachmentUploadError = $event"
+            @uploading-change="attachmentUploading = $event"
+          />
+        </section>
+
+        <section class="receipt-form__section">
           <h2>
             <span>{{ isConsumption ? '消费与汇率' : '到款与汇率' }}</span>
           </h2>
           <div class="receipt-form__grid">
             <label class="receipt-form__field">
-              <span>{{ isConsumption ? '消费日期' : '回款日期' }} <b>*</b></span>
+              <span>{{ currentDateLabel }} <b>*</b></span>
               <DatePicker
                 class="w-full"
                 :disabled-date="disableFutureDate"
@@ -686,7 +782,7 @@ onBeforeUnmount(() => {
               />
             </label>
             <label class="receipt-form__field">
-              <span>{{ isConsumption ? '消费金额' : '到款金额' }} <b>*</b></span>
+              <span>{{ currentAmountLabel }} <b>*</b></span>
               <InputNumber
                 v-if="isConsumption"
                 v-model:value="consumptionForm.amount"
@@ -863,12 +959,17 @@ onBeforeUnmount(() => {
         <div class="receipt-form__sticky-footer">
           <div>
             <strong>{{ isConsumption ? '消费记录' : '回款记录' }}</strong>
-            <span>订单是否结清由服务端聚合计算，不可手工修改；本期不展示假审核流程。</span>
+            <span>{{ SETTLEMENT_HINT }}</span>
           </div>
           <div class="receipt-form__footer-actions">
             <Button @click="backToList">取消</Button>
             <Button
-              :disabled="!canSave || isVoided"
+              :disabled="
+                !canSave ||
+                isVoided ||
+                attachmentUploading ||
+                attachmentUploadError
+              "
               :loading="saving"
               type="primary"
               @click="() => save()"

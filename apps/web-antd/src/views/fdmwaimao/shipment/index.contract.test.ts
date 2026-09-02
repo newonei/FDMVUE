@@ -15,6 +15,23 @@ const pageSource = readFileSync(
 );
 
 describe('shipment readiness materialization page boundary', () => {
+  it('passes pending attachment IDs only in the shipment draft create request', () => {
+    const createBlock = pageSource.slice(
+      pageSource.indexOf('async function submitCreate()'),
+      pageSource.indexOf('function openUpdate()'),
+    );
+    expect(createBlock).toMatch(
+      /createShipmentDraft\(\{[\s\S]*attachmentIds:\s*createForm\.attachments\.map\([\s\S]*attachment\.id/,
+    );
+
+    const updateBlock = pageSource.slice(
+      pageSource.indexOf('async function submitUpdate()'),
+      pageSource.indexOf('async function submitCancel()'),
+    );
+    expect(updateBlock).toContain('updateShipmentDraft({');
+    expect(updateBlock).not.toContain('attachmentIds');
+  });
+
   it('gates materialization on all four backend permissions and legal READY state', () => {
     for (const permission of [
       'fdmwaimao:shipment:query',
@@ -50,7 +67,7 @@ describe('shipment readiness materialization page boundary', () => {
       'expectedSourceSnapshotHash: job.sourceSnapshotHash',
     );
     expect(materializeFunction).not.toMatch(
-      /(?:productId|shipQuantity|warehouseId|wmsEvidence|authorityHash|evidence)\s*:/,
+      /(?:productId|shipQuantity|warehouseId|warehouseEvidence|authorityHash|evidence)\s*:/,
     );
   });
 
@@ -60,10 +77,10 @@ describe('shipment readiness materialization page boundary', () => {
     );
     expect(pageSource).toContain('不会预留或扣减库存');
     expect(pageSource).toContain('不会确认发货');
-    expect(pageSource).toContain('不会创建 WMS 出库单');
-    expect(pageSource).toMatch(/下一步可另行显式预留真实 WMS\s*库存/);
+    expect(pageSource).toContain('不会创建 WAREHOUSE 出库单');
+    expect(pageSource).toMatch(/下一步可另行显式预留真实 WAREHOUSE\s*库存/);
     expect(pageSource).toContain(
-      "result.nextRequiredAction === 'RESERVE_WMS_STOCK'",
+      "result.nextRequiredAction === 'RESERVE_WAREHOUSE_STOCK'",
     );
     expect(pageSource).toContain(
       'readinessMaterializationResult.readinessSnapshotHash',
@@ -93,12 +110,12 @@ describe('shipment readiness materialization page boundary', () => {
     expect(pageSource).toContain('confirmShipment({');
     expect(pageSource).toContain('expectedVersion: command.expectedVersion');
     expect(pageSource).toContain('idempotencyKey: command.idempotencyKey');
-    expect(pageSource).toContain('发货已确认并提交 WMS 交接队列');
+    expect(pageSource).toContain('发货已确认并提交 WAREHOUSE 交接队列');
     expect(pageSource).not.toMatch(
-      /function\s+(?:completeShipment|createWmsShipmentOrder|deductInventory)\s*\(/,
+      /function\s+(?:completeShipment|createWarehouseShipmentOrder|deductInventory)\s*\(/,
     );
     expect(pageSource).not.toMatch(
-      /@click="(?:completeShipment|createWmsShipmentOrder|deductInventory)/,
+      /@click="(?:completeShipment|createWarehouseShipmentOrder|deductInventory)/,
     );
   });
 
@@ -117,9 +134,9 @@ describe('shipment readiness materialization page boundary', () => {
     expect(pageSource).toContain('v-if="detailCanRecoverHandoff"');
     expect(pageSource).toContain('pendingHandoffRecoveryCommand');
     expect(pageSource).toContain('ensureShipmentHandoffRecoveryCommand(');
-    expect(pageSource).toContain('recoverShipmentWmsHandoff({');
+    expect(pageSource).toContain('recoverShipmentWarehouseHandoff({');
     expect(pageSource).toContain('reason: command.reason');
-    expect(pageSource).toContain('原 WMS 交接事件已重新排队');
+    expect(pageSource).toContain('原 WAREHOUSE 交接事件已重新排队');
     expect(pageSource).toContain('不会重新冻结预留');
   });
 

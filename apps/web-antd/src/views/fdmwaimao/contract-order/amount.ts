@@ -37,6 +37,10 @@ function decimal(value: unknown, fallback = ZERO) {
   return result.isFinite() ? result : fallback;
 }
 
+function plainDecimal(value: BigNumber) {
+  return value.toFixed(value.decimalPlaces() ?? 0);
+}
+
 export function roundMoney(value: BigNumber.Value) {
   return new BigNumber(value)
     .decimalPlaces(2, BigNumber.ROUND_HALF_UP)
@@ -45,7 +49,7 @@ export function roundMoney(value: BigNumber.Value) {
 
 export function canonicalDecimal(value: unknown, fallback = '0') {
   const result = decimal(value, new BigNumber(fallback));
-  return result.toFixed(0);
+  return plainDecimal(result);
 }
 
 export function isDecimalInRange(

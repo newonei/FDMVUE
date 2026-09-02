@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { FdmNeixiaoPatternDesignItemApi } from '#/api/fdmneixiao/pattern/design-item';
-import type { AxiosProgressEvent } from '#/api/infra/file';
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
 import { nextTick, ref, watch } from 'vue';
 

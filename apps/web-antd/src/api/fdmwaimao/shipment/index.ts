@@ -31,16 +31,16 @@ export namespace FdmWaimaoShipmentApi {
     | 'RELEASED';
   export type ShipmentNextRequiredAction =
     | 'CANCELLED'
-    | 'RE_RESERVE_WMS_STOCK'
+    | 'RE_RESERVE_WAREHOUSE_STOCK'
     | 'READINESS_TO_SHIPMENT'
-    | 'RESERVE_WMS_STOCK'
+    | 'RESERVE_WAREHOUSE_STOCK'
     | 'RUN_READINESS_TO_SHIPMENT'
     | 'SHIPMENT_CONFIRMATION'
-    | 'WMS_HANDOFF'
-    | 'WMS_HANDOFF_PENDING'
-    | 'WMS_HANDOFF_RECOVERY_REQUIRED'
-    | 'WMS_OUTBOUND_COMPLETED'
-    | 'WMS_OUTBOUND_PENDING';
+    | 'WAREHOUSE_HANDOFF'
+    | 'WAREHOUSE_HANDOFF_PENDING'
+    | 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED'
+    | 'WAREHOUSE_OUTBOUND_COMPLETED'
+    | 'WAREHOUSE_OUTBOUND_PENDING';
   export type TransportMode =
     | 'AIR'
     | 'COURIER'
@@ -76,7 +76,7 @@ export namespace FdmWaimaoShipmentApi {
     sequenceNo: number;
     sourcePayloadHash: string;
     sourceRequestId: string;
-    /** Monotonic WMS publication identity; keep as string to avoid JS Long precision loss. */
+    /** Monotonic WAREHOUSE publication identity; keep as string to avoid JS Long precision loss. */
     sourceSequence: JavaLongString;
     sourceSystem: string;
     sourceVersion: string;
@@ -109,14 +109,13 @@ export namespace FdmWaimaoShipmentApi {
     unit: string;
   }
 
-  export interface WmsOrder {
+  export interface WarehouseOutboundOrder {
     handedOffTime: DateTimeValue;
-    id: JavaLongString;
     lineCount: number;
     warehouseId: JavaLongString;
-    wmsOrderStatus: 'FINISHED' | 'PREPARE';
-    wmsShipmentOrderId: JavaLongString;
-    wmsShipmentOrderNo: string;
+    status: 'FINISHED' | 'PREPARE';
+    outboundOrderId: JavaLongString;
+    outboundOrderNo: string;
   }
 
   export interface Detail {
@@ -186,46 +185,47 @@ export namespace FdmWaimaoShipmentApi {
     transportMode?: null | TransportMode;
     updateTime?: DateTimeValue | null;
     version: number;
-    /** Immutable local acknowledgement of the typed WMS CONSUMED relay. */
-    wmsCompletionInboxId?: JavaLongString | null;
-    wmsCompletionOutboxId?: JavaLongString | null;
-    wmsCompletionPayloadHash?: null | string;
-    wmsConsumedAt?: DateTimeValue | null;
-    wmsConsumedInventoryCount?: null | number;
-    wmsConsumedLineCount?: null | number;
-    wmsConsumedOrderCount?: null | number;
-    wmsConsumptionEventId?: null | string;
-    wmsConsumptionPlanHash?: null | string;
-    wmsConsumptionRequestHash?: null | string;
-    wmsHandedOffTime?: DateTimeValue | null;
-    wmsHandoffAvailableAt?: DateTimeValue | null;
-    wmsHandoffDeadLetterAt?: DateTimeValue | null;
-    wmsHandoffDeliveryStatus?:
+    /** Immutable local acknowledgement of the typed WAREHOUSE CONSUMED relay. */
+    warehouseCompletionInboxId?: JavaLongString | null;
+    warehouseCompletionOutboxId?: JavaLongString | null;
+    warehouseCompletionPayloadHash?: null | string;
+    warehouseConsumedAt?: DateTimeValue | null;
+    warehouseConsumedInventoryCount?: null | number;
+    warehouseConsumedLineCount?: null | number;
+    warehouseConsumedOrderCount?: null | number;
+    warehouseConsumptionEventId?: null | string;
+    warehouseConsumptionPlanHash?: null | string;
+    warehouseConsumptionRequestHash?: null | string;
+    warehouseHandedOffTime?: DateTimeValue | null;
+    warehouseHandoffAvailableAt?: DateTimeValue | null;
+    warehouseHandoffDeadLetterAt?: DateTimeValue | null;
+    warehouseHandoffDeliveryStatus?:
       | 'DEAD_LETTER'
       | 'FAILED'
       | 'PENDING'
       | 'PROCESSING'
       | 'PUBLISHED'
       | null;
-    wmsHandoffEventId?: null | string;
-    wmsHandoffLastErrorCode?: null | string;
-    wmsHandoffLastErrorMessage?: null | string;
-    wmsHandoffOutboxVersion?: null | number;
-    wmsHandoffPlanHash?: null | string;
-    wmsHandoffRecoveryRequired?: boolean | null;
-    wmsHandoffRequestHash?: null | string;
-    wmsHandoffRetryCount?: null | number;
-    wmsOrderCount?: null | number;
-    wmsOrders: WmsOrder[];
+    warehouseHandoffEventId?: null | string;
+    warehouseHandoffLastErrorCode?: null | string;
+    warehouseHandoffLastErrorMessage?: null | string;
+    warehouseHandoffOutboxVersion?: null | number;
+    warehouseHandoffPlanHash?: null | string;
+    warehouseHandoffRecoveryRequired?: boolean | null;
+    warehouseHandoffRequestHash?: null | string;
+    warehouseHandoffRetryCount?: null | number;
+    warehouseOutboundOrderCount?: null | number;
+    warehouseOutboundOrders: WarehouseOutboundOrder[];
   }
 
   export type PageItem = Omit<Detail, 'lines'>;
 
   /**
-   * Browser-safe header-shell command. Product, quantity, warehouse and WMS evidence are
+   * Browser-safe header-shell command. Product, quantity, warehouse and WAREHOUSE evidence are
    * deliberately absent; they may only be materialized from a server READY generation run.
    */
   export interface CreateDraftReq {
+    attachmentIds?: string[];
     bookingNo?: string;
     carrierName?: string;
     contractOrderId: string;
@@ -304,7 +304,7 @@ export namespace FdmWaimaoShipmentApi {
     severity: 'BLOCKER' | 'INFO' | 'WARNING' | string;
   }
 
-  export interface ReadinessWmsEvidence {
+  export interface ReadinessWarehouseEvidence {
     allocatable: true;
     authorityPoolKey: string;
     authorityScope: 'WAREHOUSE';
@@ -319,7 +319,7 @@ export namespace FdmWaimaoShipmentApi {
     resolvedWarehouseId: JavaLongString;
     sourcePayloadHash: string;
     sourceRequestId: string;
-    /** Monotonic WMS publication identity; keep as string to avoid JS Long precision loss. */
+    /** Monotonic WAREHOUSE publication identity; keep as string to avoid JS Long precision loss. */
     sourceSequence: JavaLongString;
     sourceSystem: string;
     sourceVersion: string;
@@ -363,8 +363,8 @@ export namespace FdmWaimaoShipmentApi {
     sourceFulfillmentPlanLineId: JavaLongString;
     unitCode: string;
     warehouseId: JavaLongString;
-    wmsSupportedQuantity: DecimalValue;
-    wmsEvidence: ReadinessWmsEvidence;
+    warehouseSupportedQuantity: DecimalValue;
+    warehouseEvidence: ReadinessWarehouseEvidence;
   }
 
   export interface ReadinessProposal {
@@ -456,7 +456,7 @@ export namespace FdmWaimaoShipmentApi {
   export interface ReadinessMaterializeResult {
     confirmAvailable: false;
     materializedNow: boolean;
-    nextRequiredAction: 'RESERVE_WMS_STOCK';
+    nextRequiredAction: 'RESERVE_WAREHOUSE_STOCK';
     readinessMaterialized: true;
     readinessSnapshotHash: string;
     shipmentId: JavaLongString;
@@ -484,7 +484,7 @@ export namespace FdmWaimaoShipmentApi {
     created: boolean;
     expiresAt: DateTimeValue;
     idempotencyKey: string;
-    nextRequiredAction: 'RE_RESERVE_WMS_STOCK' | 'SHIPMENT_CONFIRMATION';
+    nextRequiredAction: 'RE_RESERVE_WAREHOUSE_STOCK' | 'SHIPMENT_CONFIRMATION';
     requestHash: string;
     reservationAttemptNo: number;
     reservationId: JavaLongString;
@@ -508,9 +508,9 @@ export namespace FdmWaimaoShipmentApi {
     confirmedSnapshotHash: string;
     created: boolean;
     nextRequiredAction:
-      | 'WMS_HANDOFF_PENDING'
-      | 'WMS_HANDOFF_RECOVERY_REQUIRED'
-      | 'WMS_OUTBOUND_PENDING';
+      | 'WAREHOUSE_HANDOFF_PENDING'
+      | 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED'
+      | 'WAREHOUSE_OUTBOUND_PENDING';
     outboxEventId: string;
     shipmentId: JavaLongString;
     shipmentVersion: number;
@@ -527,7 +527,7 @@ export namespace FdmWaimaoShipmentApi {
   export interface HandoffRecoveryResult {
     availableAt: DateTimeValue;
     eventId: string;
-    nextRequiredAction: 'WMS_HANDOFF_PENDING';
+    nextRequiredAction: 'WAREHOUSE_HANDOFF_PENDING';
     outboxId: JavaLongString;
     outboxVersion: number;
     recovered: boolean;
@@ -592,11 +592,11 @@ export function confirmShipment(data: FdmWaimaoShipmentApi.ConfirmReq) {
   );
 }
 
-export function recoverShipmentWmsHandoff(
+export function recoverShipmentWarehouseHandoff(
   data: FdmWaimaoShipmentApi.HandoffRecoveryReq,
 ) {
   return requestClient.post<FdmWaimaoShipmentApi.HandoffRecoveryResult>(
-    `${BASE_URL}/recover-wms-handoff`,
+    `${BASE_URL}/recover-warehouse-handoff`,
     data,
   );
 }
@@ -663,18 +663,18 @@ type RawReadinessMaterializeResult = Omit<
   'nextRequiredAction'
 > & {
   nextRequiredAction:
-    | 'RESERVATION_AND_WMS_HANDOFF_NOT_IMPLEMENTED'
-    | 'RESERVE_WMS_STOCK';
+    | 'RESERVATION_AND_WAREHOUSE_HANDOFF_NOT_IMPLEMENTED'
+    | 'RESERVE_WAREHOUSE_STOCK';
 };
 
 /**
- * The detail endpoint already exposes RESERVE_WMS_STOCK. Normalize the temporarily older
+ * The detail endpoint already exposes RESERVE_WAREHOUSE_STOCK. Normalize the temporarily older
  * materialize response so the page has one stable next-action contract during rolling rollout.
  */
 export function normalizeReadinessMaterializeResult(
   result: RawReadinessMaterializeResult,
 ): FdmWaimaoShipmentApi.ReadinessMaterializeResult {
-  return { ...result, nextRequiredAction: 'RESERVE_WMS_STOCK' };
+  return { ...result, nextRequiredAction: 'RESERVE_WAREHOUSE_STOCK' };
 }
 
 export async function materializeShipmentReadinessGeneration(

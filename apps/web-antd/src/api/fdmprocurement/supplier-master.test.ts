@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
+
 import {
-  authorizeProcurementSupplierCompany,
+  bindProcurementSupplierCompany,
   createProcurementSupplier,
   getProcurementSupplierList,
   updateProcurementSupplier,
@@ -33,7 +35,17 @@ describe('fdmprocurement supplier master API contract', () => {
   it('normalizes every supplier Long ID without number coercion', async () => {
     requestMocks.get.mockResolvedValueOnce([
       {
-        companyId: '9223372036854775801',
+        companyBindings: [
+          {
+            admissionStatus: 'APPROVED',
+            companyId: '9223372036854775801',
+            directShipAllowed: false,
+            status: 'ENABLED',
+            validFrom: '2026-01-01',
+            validUntil: '2026-12-31',
+            version: 1,
+          },
+        ],
         id: '9223372036854775802',
         supplierCode: 'S-1',
         supplierName: '供应商',
@@ -42,7 +54,6 @@ describe('fdmprocurement supplier master API contract', () => {
     requestMocks.post.mockResolvedValueOnce('9223372036854775806');
 
     const rows = await getProcurementSupplierList({
-      companyId: '9223372036854775801',
       keyword: 'S-1',
     });
     const id = await createProcurementSupplier({
@@ -61,11 +72,11 @@ describe('fdmprocurement supplier master API contract', () => {
     expect(requestMocks.get).toHaveBeenCalledWith(
       '/fdmprocurement/supplier/list',
       {
-        params: { companyId: '9223372036854775801', keyword: 'S-1' },
+        params: { keyword: 'S-1' },
       },
     );
     expect(rows[0]?.id).toBe('9223372036854775802');
-    expect(rows[0]?.companyId).toBe('9223372036854775801');
+    expect(rows[0]?.companyBindings[0]?.companyId).toBe('9223372036854775801');
     expect(id).toBe('9223372036854775806');
   });
 
@@ -73,7 +84,6 @@ describe('fdmprocurement supplier master API contract', () => {
     requestMocks.put.mockResolvedValueOnce(true);
     await updateProcurementSupplier({
       approvalStatus: 'APPROVED',
-      companyId: '9223372036854775801',
       expectedVersion: 7,
       id: '9223372036854775802',
       status: 'DISABLED',
@@ -88,9 +98,32 @@ describe('fdmprocurement supplier master API contract', () => {
     );
   });
 
-  it('carries the independent company-link version on authorization', async () => {
+  it('loads the full company selector and supplier list without user or company scope', async () => {
+    requestMocks.get
+      .mockResolvedValueOnce([
+        { companyName: '公司 A', id: 1 },
+        { companyName: '公司 B', id: 2 },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const companies = await getDataCompanySimpleList();
+    await getProcurementSupplierList({ keyword: undefined });
+
+    expect(companies).toHaveLength(2);
+    expect(requestMocks.get).toHaveBeenNthCalledWith(
+      1,
+      '/fdmdata/data-company/simple-list',
+    );
+    expect(requestMocks.get).toHaveBeenNthCalledWith(
+      2,
+      '/fdmprocurement/supplier/list',
+      { params: { keyword: undefined } },
+    );
+  });
+
+  it('carries the independent company business-binding version', async () => {
     requestMocks.put.mockResolvedValueOnce(true);
-    await authorizeProcurementSupplierCompany({
+    await bindProcurementSupplierCompany({
       admissionStatus: 'APPROVED',
       companyId: '9223372036854775801',
       directShipAllowed: true,
@@ -101,7 +134,7 @@ describe('fdmprocurement supplier master API contract', () => {
       validUntil: '2026-12-31',
     });
     expect(requestMocks.put).toHaveBeenCalledWith(
-      '/fdmprocurement/supplier/authorize-company',
+      '/fdmprocurement/supplier/bind-company',
       expect.objectContaining({
         expectedVersion: 11,
         supplierId: '9223372036854775802',

@@ -10,8 +10,12 @@ function decimal(value: unknown, fallback = ZERO) {
   return result.isFinite() ? result : fallback;
 }
 
+function plainDecimal(value: BigNumber) {
+  return value.toFixed(value.decimalPlaces() ?? 0);
+}
+
 export function canonicalDecimal(value: unknown, fallback = '0') {
-  return decimal(value, new BigNumber(fallback)).toFixed(0);
+  return plainDecimal(decimal(value, new BigNumber(fallback)));
 }
 
 export function isPositiveDecimal(value: unknown) {

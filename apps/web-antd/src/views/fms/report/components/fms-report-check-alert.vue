@@ -42,7 +42,7 @@ const passed = computed(() => {
   }
   return (
     props.result.balanced === true &&
-    !props.result.unmappedSubjects.length &&
+    props.result.unmappedSubjects.length === 0 &&
     (props.reportType === FMS_REPORT_TYPE.INCOME_STATEMENT ||
       (props.result.initialBalanceBalanced === true &&
         props.result.profitLossTransferred === true))

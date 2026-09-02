@@ -8,6 +8,10 @@ import {
   saveActiveExpenseGeneration,
 } from './command-store';
 
+function materializeFingerprint(attachmentIds: string[]) {
+  return `7:2:${'a'.repeat(64)}:${attachmentIds.toSorted().join(',')}`;
+}
+
 describe('订单费用命令身份', () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -49,6 +53,32 @@ describe('订单费用命令身份', () => {
 
     clearExpenseCommand('update:9:0');
     expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it('附件顺序不改变物化命令身份，但排序后的附件集合变化会创建新键', async () => {
+    vi.mocked(globalThis.crypto.randomUUID)
+      .mockReturnValueOnce('44444444-4444-4444-8444-444444444444')
+      .mockReturnValueOnce('55555555-5555-4555-8555-555555555555');
+    const identity = 'materialize:9223372036854775807:2';
+
+    const first = await getOrCreateExpenseCommand(
+      identity,
+      materializeFingerprint(['9223372036854775805', '9223372036854775804']),
+      'expense-materialize',
+    );
+    const reordered = await getOrCreateExpenseCommand(
+      identity,
+      materializeFingerprint(['9223372036854775804', '9223372036854775805']),
+      'expense-materialize',
+    );
+    const changed = await getOrCreateExpenseCommand(
+      identity,
+      materializeFingerprint(['9223372036854775804', '9223372036854775806']),
+      'expense-materialize',
+    );
+
+    expect(reordered).toBe(first);
+    expect(changed).not.toBe(first);
   });
 
   it('只持久化 SHA-256 摘要，不落金额、描述或币种', async () => {

@@ -1,4 +1,4 @@
-import { uploadFile } from '#/api/infra/file';
+import { uploadFdmObject } from '#/api/fdmstorage/object';
 
 const DEFAULT_PRINT_PREP_API_BASE = '/print-prep-api';
 const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
@@ -29,7 +29,9 @@ function resolvePrintPrepApiUrl(value: string) {
     ) {
       return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     }
-    return joinPrintPrepApiUrl(`${parsed.pathname}${parsed.search}${parsed.hash}`);
+    return joinPrintPrepApiUrl(
+      `${parsed.pathname}${parsed.search}${parsed.hash}`,
+    );
   }
   return joinPrintPrepApiUrl(text);
 }
@@ -273,7 +275,7 @@ export async function uploadPrintPrepOutputBlob({
   const file = new File([blob], fileName, {
     type: blob.type || mimeType || 'application/octet-stream',
   });
-  return await uploadFile({ directory, file });
+  return await uploadFdmObject({ directory, file });
 }
 
 export async function uploadPrintPrepReferenceBlob({
@@ -344,13 +346,10 @@ export function previewPrintPrep(form: FormData) {
 }
 
 export function createPrintPrepBaseJob(form: FormData) {
-  return fetchJson<PrintPrepApi.JobCreateResp>(
-    '/api/v1/print-prep/base/jobs',
-    {
-      method: 'POST',
-      body: form,
-    },
-  );
+  return fetchJson<PrintPrepApi.JobCreateResp>('/api/v1/print-prep/base/jobs', {
+    method: 'POST',
+    body: form,
+  });
 }
 
 export function createPrintPrepLayoutJob(form: FormData) {

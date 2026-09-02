@@ -67,7 +67,7 @@ const HUMAN_EVIDENCE_SYSTEMS = new Set([
   'MANUAL_CHECK',
   'SUPPLIER_CONFIRMATION',
   'WAREHOUSE_CONFIRMATION',
-  'WMS_SCREENSHOT',
+  'WAREHOUSE_SCREENSHOT',
 ]);
 const EVIDENCE_SOURCE_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
@@ -99,7 +99,7 @@ export function asDecimalString(value: unknown): string | undefined {
   if (!normalized) return undefined;
   const decimal = new BigNumber(normalized);
   if (!decimal.isFinite()) return undefined;
-  return decimal.toFixed(0);
+  return decimal.toFixed(decimal.decimalPlaces() ?? 0);
 }
 
 export function displayKnownQuantity(value: null | string | undefined) {
@@ -426,7 +426,7 @@ export function demandPlanAllocatedQuantity(line: DemandPlanFormLine) {
   if (values.some((value) => value === undefined)) return undefined;
   let total = new BigNumber(0);
   for (const value of values) total = total.plus(value!);
-  return total.toFixed(0);
+  return total.toFixed(total.decimalPlaces() ?? 0);
 }
 
 export function isDemandPlanLineBalanced(line: DemandPlanFormLine) {

@@ -13,8 +13,8 @@ function generationJob(): FdmWaimaoDemandPlanApi.GenerationJob {
       {
         editable: true,
         fieldPath: '$.lines[0].allocations[INTERNAL_FACTORY].quantity',
-        origin: 'WMS_FACTORY_ATP',
-        reason: '可在 WMS ATP 上限 12 内人工核实',
+        origin: 'WAREHOUSE_FACTORY_ATP',
+        reason: '可在 WAREHOUSE ATP 上限 12 内人工核实',
         status: 'EVIDENCE_AVAILABLE',
       },
       {
@@ -81,7 +81,7 @@ describe('demand-plan generation adapter', () => {
       origin: 'MASTER_DATA',
       proposedValue: '12',
     });
-    expect(authoritative?.evidence?.[0]?.detail).toContain('WMS ATP');
+    expect(authoritative?.evidence?.[0]?.detail).toContain('WAREHOUSE ATP');
 
     const unknown = fields.find(
       (field) =>

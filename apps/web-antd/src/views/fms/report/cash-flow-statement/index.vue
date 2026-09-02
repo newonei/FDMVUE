@@ -143,7 +143,7 @@ async function saveStatementAdjustment() {
       currentAmount: Number(currentAmount || 0),
       yearAmount: Number(yearAmount || 0),
     }));
-  if (!accountSetId.value || !items.length) return;
+  if (!accountSetId.value || items.length === 0) return;
   submitting.value = true;
   try {
     await updateCashFlowStatement({ ...queryParams, items });
@@ -185,7 +185,7 @@ async function saveAdjustment(next = false) {
       currentAmount: Number(item.currentAmount || 0),
       yearAmount: Number(item.yearAmount || 0),
     }));
-  if (!accountSetId.value || !items.length) return;
+  if (!accountSetId.value || items.length === 0) return;
   submitting.value = true;
   try {
     await updateCashFlowAdjustment({

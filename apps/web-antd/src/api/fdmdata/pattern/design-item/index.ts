@@ -1,6 +1,6 @@
 import type { PageParam, PageResult } from '@vben/request';
 
-import type { AxiosProgressEvent } from '#/api/infra/file';
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
 import { requestClient } from '#/api/request';
 

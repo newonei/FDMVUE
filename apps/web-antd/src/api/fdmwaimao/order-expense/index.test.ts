@@ -60,6 +60,7 @@ describe('fDM 外贸订单费用 API', () => {
 
   it('物化只提交 READY 运行的身份和冻结快照', async () => {
     const command = {
+      attachmentIds: ['9223372036854775805'],
       expectedRunVersion: '7',
       expectedSourceSnapshotHash: 'a'.repeat(64),
       generationRunId: '9223372036854775807',

@@ -20,6 +20,8 @@ import {
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
+
 defineOptions({ name: 'FdmWaimaoOrderExpenseDetail' });
 
 const props = defineProps<{
@@ -222,6 +224,13 @@ function operationLabel(value: string) {
           </template>
         </template>
       </Table>
+    </Card>
+
+    <Card size="small" title="单据附件">
+      <FdmWaimaoAttachmentList
+        :business-id="expense.id"
+        business-type="ORDER_EXPENSE"
+      />
     </Card>
 
     <Card size="small" title="业务状态记录">

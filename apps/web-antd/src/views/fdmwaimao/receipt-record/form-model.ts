@@ -1,3 +1,4 @@
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoReceiptRecordApi } from '#/api/fdmwaimao/receipt-record';
 
 import dayjs from 'dayjs';
@@ -6,6 +7,7 @@ import { canonicalDecimal, isPositiveDecimal } from './calculation';
 
 export interface ReceiptFormModel {
   arrivalAmount: string;
+  attachments: FdmWaimaoAttachmentApi.Attachment[];
   category: string;
   currency: string;
   foreignCurrencyRemark: string;
@@ -27,6 +29,7 @@ export interface ReceiptFormModel {
 
 export interface ConsumptionFormModel {
   amount: string;
+  attachments: FdmWaimaoAttachmentApi.Attachment[];
   consumptionDate?: string;
   consumptionType: FdmWaimaoReceiptRecordApi.ConsumptionType;
   currency: string;
@@ -83,6 +86,7 @@ export function queryOrderId(value: unknown) {
 export function createEmptyReceiptForm(): ReceiptFormModel {
   return {
     arrivalAmount: '',
+    attachments: [],
     category: '',
     currency: '',
     foreignCurrencyRemark: '',
@@ -102,6 +106,7 @@ export function createEmptyReceiptForm(): ReceiptFormModel {
 export function createEmptyConsumptionForm(): ConsumptionFormModel {
   return {
     amount: '',
+    attachments: [],
     consumptionDate: dayjs().format('YYYY-MM-DD'),
     consumptionType: 'CUSTOMER_BALANCE',
     currency: '',
@@ -115,6 +120,7 @@ export function hydrateReceiptForm(
 ): ReceiptFormModel {
   return {
     arrivalAmount: record.arrivalAmount,
+    attachments: Array.isArray(record.attachments) ? record.attachments : [],
     category: record.category ?? '',
     currency: record.currency,
     foreignCurrencyRemark: record.foreignCurrencyRemark ?? '',
@@ -140,6 +146,7 @@ export function hydrateConsumptionForm(
 ): ConsumptionFormModel {
   return {
     amount: record.amount,
+    attachments: Array.isArray(record.attachments) ? record.attachments : [],
     consumptionDate: normalizeRecordDate(record.consumptionDate),
     consumptionType: record.consumptionType,
     currency: record.currency,
@@ -187,10 +194,10 @@ export function validateConsumptionForm(model: ConsumptionFormModel) {
   return issues;
 }
 
-export function buildReceiptSavePayload(
+function buildReceiptCorePayload(
   model: ReceiptFormModel,
   confirmPotentialDuplicate = false,
-): FdmWaimaoReceiptRecordApi.ReceiptSaveReq {
+): Omit<FdmWaimaoReceiptRecordApi.ReceiptSaveReq, 'attachmentIds'> {
   return {
     arrivalAmount: canonicalDecimal(model.arrivalAmount),
     category: optionalText(model.category),
@@ -213,6 +220,16 @@ export function buildReceiptSavePayload(
   };
 }
 
+export function buildReceiptSavePayload(
+  model: ReceiptFormModel,
+  confirmPotentialDuplicate = false,
+): FdmWaimaoReceiptRecordApi.ReceiptSaveReq {
+  return {
+    ...buildReceiptCorePayload(model, confirmPotentialDuplicate),
+    attachmentIds: model.attachments.map((attachment) => attachment.id),
+  };
+}
+
 export function buildReceiptUpdatePayload(
   model: ReceiptFormModel,
   confirmPotentialDuplicate = false,
@@ -221,7 +238,7 @@ export function buildReceiptUpdatePayload(
     throw new Error('编辑回款记录缺少 id 或 expectedVersion');
   }
   return {
-    ...buildReceiptSavePayload(model, confirmPotentialDuplicate),
+    ...buildReceiptCorePayload(model, confirmPotentialDuplicate),
     expectedVersion: model.version,
     id: text(model.id),
   };
@@ -239,9 +256,9 @@ export function buildReceiptPreviewPayload(
   };
 }
 
-export function buildConsumptionSavePayload(
+function buildConsumptionCorePayload(
   model: ConsumptionFormModel,
-): FdmWaimaoReceiptRecordApi.ConsumptionSaveReq {
+): Omit<FdmWaimaoReceiptRecordApi.ConsumptionSaveReq, 'attachmentIds'> {
   return {
     amount: canonicalDecimal(model.amount),
     consumptionDate: normalizeRecordDate(model.consumptionDate) ?? '',
@@ -253,6 +270,15 @@ export function buildConsumptionSavePayload(
   };
 }
 
+export function buildConsumptionSavePayload(
+  model: ConsumptionFormModel,
+): FdmWaimaoReceiptRecordApi.ConsumptionSaveReq {
+  return {
+    ...buildConsumptionCorePayload(model),
+    attachmentIds: model.attachments.map((attachment) => attachment.id),
+  };
+}
+
 export function buildConsumptionUpdatePayload(
   model: ConsumptionFormModel,
 ): FdmWaimaoReceiptRecordApi.ConsumptionUpdateReq {
@@ -260,7 +286,7 @@ export function buildConsumptionUpdatePayload(
     throw new Error('编辑消费记录缺少 id 或 expectedVersion');
   }
   return {
-    ...buildConsumptionSavePayload(model),
+    ...buildConsumptionCorePayload(model),
     expectedVersion: model.version,
     id: text(model.id),
   };

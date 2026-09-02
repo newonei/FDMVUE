@@ -7,9 +7,6 @@ import { DICT_TYPE } from '@vben/constants';
 import { z } from '#/adapter/form';
 import { formatExchangeRate } from '#/views/fms/utils/format';
 
-// Keep six fractional digits within JavaScript's safe integer range.
-const MAX_EXCHANGE_RATE = (Number.MAX_SAFE_INTEGER - 1) / 1_000_000;
-
 /** 列表字段 */
 export function useGridColumns(): VxeTableGridOptions<FmsCurrencyApi.Currency>['columns'] {
   return [
@@ -116,8 +113,8 @@ export function useFormSchema(
       rules: z
         .number({ message: '汇率不能为空' })
         .min(0.000001, { message: '汇率不能小于 0.000001' })
-        .max(MAX_EXCHANGE_RATE, {
-          message: `汇率不能大于 ${MAX_EXCHANGE_RATE}`,
+        .max(1_000_000_000_000, {
+          message: '汇率不能大于 999999999999.999999',
         })
         .default(1),
       description: () =>
@@ -130,7 +127,7 @@ export function useFormSchema(
       },
       componentProps: {
         min: 0.000001,
-        max: MAX_EXCHANGE_RATE,
+        max: 1_000_000_000_000,
         precision: 6,
         step: 0.01,
         class: 'w-full',

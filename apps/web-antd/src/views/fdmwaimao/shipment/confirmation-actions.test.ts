@@ -37,7 +37,7 @@ function detail(
     sourceCount: 1,
     status: 'DRAFT',
     version: 10,
-    wmsOrders: [],
+    warehouseOutboundOrders: [],
     ...overrides,
   };
 }
@@ -102,7 +102,7 @@ describe('shipment confirmation action policy', () => {
     const receipt: FdmWaimaoShipmentApi.ConfirmResult = {
       confirmedSnapshotHash: 'd'.repeat(64),
       created: true,
-      nextRequiredAction: 'WMS_HANDOFF_PENDING',
+      nextRequiredAction: 'WAREHOUSE_HANDOFF_PENDING',
       outboxEventId: '550e8400-e29b-41d4-a716-446655440000',
       shipmentId: command.shipmentId,
       shipmentVersion: 11,

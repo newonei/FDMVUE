@@ -33,6 +33,7 @@ import {
   fdmTradeReceiptListRoute,
   fdmTradeShipmentListRoute,
 } from '#/views/fdm-trade-shared/document-links';
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
 
 import { formatCurrencyAmount } from '../amount';
 import { validateContractFulfillmentConstraints } from '../form-model';
@@ -664,6 +665,14 @@ function itemText(record: Record<string, unknown>, key: string) {
           {{ formatCurrencyAmount(order.additionalFeeAmount) }} =
           {{ formatCurrencyAmount(order.totalAmount) }}
         </p>
+      </section>
+
+      <section class="contract-order-detail__section">
+        <h3>单据附件</h3>
+        <FdmWaimaoAttachmentList
+          :business-id="order.id"
+          business-type="CONTRACT_ORDER"
+        />
       </section>
 
       <section class="contract-order-detail__section">

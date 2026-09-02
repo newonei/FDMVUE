@@ -3,7 +3,7 @@ export type SupplierMasterAction =
   | 'COMPLIANCE_READ'
   | 'QUOTE_CREATE'
   | 'QUOTE_READ'
-  | 'SUPPLIER_AUTHORIZE_COMPANY'
+  | 'SUPPLIER_BIND_COMPANY'
   | 'SUPPLIER_CREATE'
   | 'SUPPLIER_PRODUCT_CREATE'
   | 'SUPPLIER_PRODUCT_READ'
@@ -15,7 +15,7 @@ const ACTION_PERMISSION: Record<SupplierMasterAction, string> = {
   COMPLIANCE_READ: 'fdmprocurement:supplier-product:query',
   QUOTE_CREATE: 'fdmprocurement:supplier-quote:create',
   QUOTE_READ: 'fdmprocurement:supplier-quote:view-sensitive',
-  SUPPLIER_AUTHORIZE_COMPANY: 'fdmprocurement:supplier:authorize-company',
+  SUPPLIER_BIND_COMPANY: 'fdmprocurement:supplier:bind-company',
   SUPPLIER_CREATE: 'fdmprocurement:supplier:create',
   SUPPLIER_PRODUCT_CREATE: 'fdmprocurement:supplier-product:create',
   SUPPLIER_PRODUCT_READ: 'fdmprocurement:supplier-product:query',

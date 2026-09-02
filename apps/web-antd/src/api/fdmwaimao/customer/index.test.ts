@@ -76,6 +76,7 @@ describe('fdmwaimao customer API contract', () => {
     });
     await previewOkkiCustomer('okki-company-1');
     await importOkkiCustomer({
+      attachmentIds: ['9223372036854775804'],
       confirmPotentialDuplicate: true,
       okkiCompanyId: 'okki-company-1',
       previewHash:
@@ -109,6 +110,7 @@ describe('fdmwaimao customer API contract', () => {
     expect(requestMocks.post).toHaveBeenCalledWith(
       '/fdmwaimao/customer/import-from-okki',
       {
+        attachmentIds: ['9223372036854775804'],
         confirmPotentialDuplicate: true,
         okkiCompanyId: 'okki-company-1',
         previewHash:

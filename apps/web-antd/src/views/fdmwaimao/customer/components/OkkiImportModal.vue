@@ -1,7 +1,8 @@
 <script lang="ts" setup>
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoCustomerApi } from '#/api/fdmwaimao/customer';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -30,6 +31,7 @@ import {
   searchOkkiCustomers,
   updateCustomerProfile,
 } from '#/api/fdmwaimao/customer';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
 
 import {
   CUSTOMER_PROFILE_VERSION_CONFLICT,
@@ -76,6 +78,7 @@ const SEARCH_FIELD_OPTIONS: Array<{
   { label: '联系人电话', value: 'customer_list.tel' },
   { label: '社交账号', value: 'customer_list.contact.value' },
 ];
+const ERROR_ICON = 'lucide:cloud-off';
 
 const form = reactive<{
   keyword: string;
@@ -94,6 +97,9 @@ const total = ref(0);
 const searching = ref(false);
 const previewing = ref(false);
 const importing = ref(false);
+const attachmentUploading = ref(false);
+const attachmentUploadError = ref(false);
+const attachments = ref<FdmWaimaoAttachmentApi.Attachment[]>([]);
 const selected = ref<FdmWaimaoCustomerApi.OkkiCandidate>();
 const preview = ref<FdmWaimaoCustomerApi.OkkiPreview>();
 const draft = ref<FdmWaimaoCustomerApi.CustomerProfileDraft>();
@@ -156,6 +162,8 @@ const canImport = computed(
     draftValid.value &&
     props.allowImport &&
     !importing.value &&
+    !attachmentUploading.value &&
+    !attachmentUploadError.value &&
     !alreadyMapped.value &&
     (!confirmationRequired.value || duplicateConfirmed.value),
 );
@@ -475,11 +483,17 @@ function validateDraft(
 }
 
 function confirmDiscardDraft() {
-  if (!draftDirty.value) return Promise.resolve(true);
+  const hasAttachmentChanges =
+    attachments.value.length > 0 ||
+    attachmentUploading.value ||
+    attachmentUploadError.value;
+  if (!draftDirty.value && !hasAttachmentChanges) return Promise.resolve(true);
   return new Promise<boolean>((resolve) => {
     Modal.confirm({
       cancelText: '继续编辑',
-      content: '离开后，本次对公司资料和联系人的修改不会保存。',
+      content: hasAttachmentChanges
+        ? '离开后，本次资料修改不会保存，已上传或正在上传的附件也会被清理。'
+        : '离开后，本次对公司资料和联系人的修改不会保存。',
       okText: '放弃修改',
       onCancel: () => resolve(false),
       onOk: () => resolve(true),
@@ -488,8 +502,17 @@ function confirmDiscardDraft() {
   });
 }
 
+function resetAttachmentsAfterEditorUnmount() {
+  void nextTick(() => {
+    attachments.value = [];
+    attachmentUploading.value = false;
+    attachmentUploadError.value = false;
+  });
+}
+
 function clearLoadedSnapshot() {
   preview.value = undefined;
+  resetAttachmentsAfterEditorUnmount();
   draft.value = undefined;
   draftBaseline.value = '';
   draftOrigin.value = 'OKKI';
@@ -514,6 +537,7 @@ watch(
     total.value = 0;
     selected.value = undefined;
     preview.value = undefined;
+    resetAttachmentsAfterEditorUnmount();
     draft.value = undefined;
     draftBaseline.value = '';
     draftOrigin.value = 'OKKI';
@@ -724,12 +748,21 @@ async function confirmImport() {
     message.warning('请先修正草稿中的必填项或格式错误');
     return;
   }
+  if (attachmentUploading.value) {
+    message.warning('附件仍在上传，请等待上传完成后再导入');
+    return;
+  }
+  if (attachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再导入');
+    return;
+  }
   if (!canImport.value) return;
   const companyId = preview.value.companyId;
   const previewHash = preview.value.previewHash;
   importing.value = true;
   try {
     const result = await importOkkiCustomer({
+      attachmentIds: attachments.value.map((attachment) => attachment.id),
       confirmPotentialDuplicate: duplicateConfirmed.value,
       okkiCompanyId: companyId,
       previewHash,
@@ -738,6 +771,10 @@ async function confirmImport() {
     message.success(
       result.created ? '交易客户导入成功' : '该客户已导入，已打开现有记录',
     );
+    if (result.created) {
+      attachments.value = [];
+      await nextTick();
+    }
     emit('imported', result.customerId);
     emit('update:open', false);
   } catch (error) {
@@ -1021,7 +1058,7 @@ function duplicateReason(reason: string) {
         </div>
 
         <div v-else-if="previewError" class="okki-preview-error">
-          <span aria-hidden="true"><IconifyIcon icon="lucide:cloud-off" /></span>
+          <span aria-hidden="true"><IconifyIcon :icon="ERROR_ICON" /></span>
           <h3>客户详情读取失败</h3>
           <p>{{ previewError }}</p>
           <Button
@@ -1146,6 +1183,25 @@ function duplicateReason(reason: string) {
               :errors="draftErrors"
               :origin="draftOrigin"
             />
+
+            <section v-if="draft && !alreadyMapped" class="okki-info-card">
+              <div class="okki-section-heading">
+                <div class="okki-section-heading__title">
+                  <IconifyIcon icon="lucide:paperclip" aria-hidden="true" />
+                  <h4>业务附件</h4>
+                </div>
+                <p>附件会在交易客户实际创建成功后绑定。</p>
+              </div>
+              <div class="okki-attachment-editor">
+                <FdmWaimaoAttachmentEditor
+                  v-model="attachments"
+                  business-type="CUSTOMER"
+                  :disabled="!canEditDraft || importing"
+                  @error-change="attachmentUploadError = $event"
+                  @uploading-change="attachmentUploading = $event"
+                />
+              </div>
+            </section>
 
             <section
               class="okki-duplicate-card"
@@ -1648,6 +1704,10 @@ function duplicateReason(reason: string) {
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 12px;
+}
+
+.okki-attachment-editor {
+  margin-top: 12px;
 }
 
 .okki-section-heading h4 {

@@ -1,5 +1,8 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
+
+import { FDM_OBJECT_UPLOAD_TIMEOUT } from '#/api/fdmstorage/object';
 import { requestClient } from '#/api/request';
 
 export * from './dashboard';
@@ -188,6 +191,19 @@ export namespace JixiaoApi {
     scoreType?: string;
     scorerUserId?: number;
     scorerUserName?: string;
+  }
+
+  /** 员工在自评节点上传的佐证材料。Long 标识按字符串传输，避免浏览器精度丢失。 */
+  export interface SelfScoreAttachment {
+    createTime?: DateTimeValue;
+    fileName: string;
+    fileSize?: number;
+    id: string;
+    instanceId: string;
+    mimeType?: string;
+    sha256?: string;
+    uploaderName?: string;
+    uploaderUserId?: string;
   }
 
   export interface Result {
@@ -637,6 +653,47 @@ export function getInstance(id: number) {
   );
 }
 
+export function getSelfScoreAttachmentList(instanceId: number | string) {
+  return requestClient.get<JixiaoApi.SelfScoreAttachment[]>(
+    '/fdmperformance/assessment/self-score-attachment/list',
+    { params: { instanceId } },
+  );
+}
+
+export function uploadSelfScoreAttachment(
+  file: File,
+  instanceId: number | string,
+  taskId: string,
+  onUploadProgress?: AxiosProgressEvent,
+) {
+  return requestClient.upload<JixiaoApi.SelfScoreAttachment>(
+    '/fdmperformance/assessment/self-score-attachment/upload',
+    { file, instanceId, taskId },
+    {
+      onUploadProgress,
+      timeout: FDM_OBJECT_UPLOAD_TIMEOUT,
+    },
+  );
+}
+
+export function deleteSelfScoreAttachment(
+  id: string,
+  instanceId: number | string,
+  taskId: string,
+) {
+  return requestClient.delete<boolean>(
+    '/fdmperformance/assessment/self-score-attachment/delete',
+    { params: { id, instanceId, taskId } },
+  );
+}
+
+export function getSelfScoreAttachmentDownloadUrl(id: string) {
+  return requestClient.get<string>(
+    '/fdmperformance/assessment/self-score-attachment/download-url',
+    { params: { id } },
+  );
+}
+
 export function confirmIndicatorTask(data: JixiaoApi.TaskReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/indicator-confirm',
@@ -808,7 +865,9 @@ export function remindReview(data: JixiaoApi.ReviewRemindReq) {
 }
 
 export function deleteReview(id: number) {
-  return requestClient.delete<boolean>(`/fdmperformance/review/delete?id=${id}`);
+  return requestClient.delete<boolean>(
+    `/fdmperformance/review/delete?id=${id}`,
+  );
 }
 
 export function getSetting() {

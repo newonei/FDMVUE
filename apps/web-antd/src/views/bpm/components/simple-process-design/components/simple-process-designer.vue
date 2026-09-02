@@ -61,36 +61,6 @@ const props = defineProps({
     required: false,
     default: undefined,
   },
-  useLocalOptions: {
-    type: Boolean,
-    required: false,
-    default: false,
-  },
-  localRoles: {
-    type: Array,
-    required: false,
-    default: () => [],
-  },
-  localPosts: {
-    type: Array,
-    required: false,
-    default: () => [],
-  },
-  localUsers: {
-    type: Array,
-    required: false,
-    default: () => [],
-  },
-  localDepts: {
-    type: Array,
-    required: false,
-    default: () => [],
-  },
-  localUserGroups: {
-    type: Array,
-    required: false,
-    default: () => [],
-  },
 });
 // 保存成功事件
 const emits = defineEmits(['success']);
@@ -217,27 +187,9 @@ function validateNode(
   }
 }
 
-function loadProcessNodeTree() {
-  if (processData.value) {
-    processNodeTree.value = processData?.value;
-  } else {
-    updateModel();
-  }
-}
-
 onMounted(async () => {
   try {
     loading.value = true;
-    if (props.useLocalOptions) {
-      roleOptions.value = props.localRoles as SystemRoleApi.Role[];
-      postOptions.value = props.localPosts as SystemPostApi.Post[];
-      userOptions.value = props.localUsers as SystemUserApi.User[];
-      deptOptions.value = props.localDepts as SystemDeptApi.Dept[];
-      deptTreeOptions.value = handleTree(deptOptions.value);
-      userGroupOptions.value = props.localUserGroups as BpmUserGroupApi.UserGroup[];
-      loadProcessNodeTree();
-      return;
-    }
     // 获得角色列表
     roleOptions.value = await getSimpleRoleList();
     // 获得岗位列表
@@ -252,7 +204,11 @@ onMounted(async () => {
     // 获取用户组列表
     userGroupOptions.value = await getUserGroupSimpleList();
     // 加载流程数据
-    loadProcessNodeTree();
+    if (processData.value) {
+      processNodeTree.value = processData?.value;
+    } else {
+      updateModel();
+    }
   } finally {
     loading.value = false;
   }
@@ -270,11 +226,7 @@ const validate = async () => {
     return false;
   }
 };
-function getCurrentFlowData() {
-  return processNodeTree.value;
-}
-
-defineExpose({ getCurrentFlowData, validate });
+defineExpose({ validate });
 </script>
 <template>
   <div v-loading="loading">

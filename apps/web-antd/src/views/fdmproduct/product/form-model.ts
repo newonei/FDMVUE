@@ -73,7 +73,9 @@ function normalizeDecimal(value: string) {
   const normalized = value.trim();
   if (!normalized) return undefined;
   const decimal = new BigNumber(normalized);
-  return decimal.isFinite() ? decimal.toFixed(0) : normalized;
+  return decimal.isFinite()
+    ? decimal.toFixed(decimal.decimalPlaces() ?? 0)
+    : normalized;
 }
 
 export function createEmptyProductSku(baseUnit = 'PCS'): ProductSkuForm {

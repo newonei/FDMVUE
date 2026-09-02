@@ -1,3 +1,4 @@
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoContractOrderApi } from '#/api/fdmwaimao/contract-order';
 import type { ProductSelectionValue } from '#/views/fdmproduct/shared';
 
@@ -49,6 +50,7 @@ export interface ContractFormModel {
   additionalFeeAmount: string;
   additionalFeeCategory: string;
   alibabaTradeAssuranceNo: string;
+  attachments: FdmWaimaoAttachmentApi.Attachment[];
   certificationRequirements: string[];
   companyId?: string;
   contactId?: string;
@@ -147,6 +149,7 @@ export function createEmptyContractForm(): ContractFormModel {
     additionalFeeAmount: '0',
     additionalFeeCategory: '',
     alibabaTradeAssuranceNo: '',
+    attachments: [],
     certificationRequirements: [],
     countryComplianceRequirements: [],
     currency: 'USD',
@@ -434,6 +437,7 @@ export function hydrateContractForm(
     additionalFeeAmount: detail.additionalFeeAmount ?? '0',
     additionalFeeCategory: detail.additionalFeeCategory ?? '',
     alibabaTradeAssuranceNo: detail.alibabaTradeAssuranceNo ?? '',
+    attachments: Array.isArray(detail.attachments) ? detail.attachments : [],
     certificationRequirements: normalizeContractRequirementCodes(
       detail.certificationRequirements,
     ),
@@ -650,9 +654,9 @@ function buildItemPayload(
   return payload;
 }
 
-export function buildContractSavePayload(
+function buildContractCorePayload(
   model: ContractFormModel,
-): FdmWaimaoContractOrderApi.SaveReq {
+): Omit<FdmWaimaoContractOrderApi.SaveReq, 'attachmentIds'> {
   return {
     additionalFeeAmount: canonicalDecimal(model.additionalFeeAmount),
     additionalFeeCategory: optionalText(model.additionalFeeCategory),
@@ -690,6 +694,15 @@ export function buildContractSavePayload(
   };
 }
 
+export function buildContractSavePayload(
+  model: ContractFormModel,
+): FdmWaimaoContractOrderApi.SaveReq {
+  return {
+    ...buildContractCorePayload(model),
+    attachmentIds: model.attachments.map((attachment) => attachment.id),
+  };
+}
+
 export function buildContractUpdatePayload(
   model: ContractFormModel,
 ): FdmWaimaoContractOrderApi.UpdateReq {
@@ -697,7 +710,7 @@ export function buildContractUpdatePayload(
     throw new Error('编辑合同缺少 id 或 expectedVersion');
   }
   return {
-    ...buildContractSavePayload(model),
+    ...buildContractCorePayload(model),
     expectedVersion: model.version,
     id: text(model.id),
   };

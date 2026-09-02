@@ -23,7 +23,7 @@ import {
 
 import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 import {
-  authorizeProcurementSupplierCompany,
+  bindProcurementSupplierCompany,
   createProcurementSupplier,
   getProcurementSupplierList,
   updateProcurementSupplier,
@@ -45,8 +45,8 @@ const canCreate = computed(() =>
 const canUpdate = computed(() =>
   canUseSupplierMasterAction('SUPPLIER_UPDATE', hasPermission),
 );
-const canAuthorizeCompany = computed(() =>
-  canUseSupplierMasterAction('SUPPLIER_AUTHORIZE_COMPANY', hasPermission),
+const canBindCompany = computed(() =>
+  canUseSupplierMasterAction('SUPPLIER_BIND_COMPANY', hasPermission),
 );
 
 const rows = ref<FdmProcurementSupplierApi.Supplier[]>([]);
@@ -56,12 +56,12 @@ const keyword = ref('');
 const status = ref<FdmProcurementSupplierApi.SupplierStatus>();
 const loading = ref(false);
 const saving = ref(false);
-const authorizing = ref(false);
+const bindingSaving = ref(false);
 const error = ref('');
 const modalOpen = ref(false);
-const authorizationModalOpen = ref(false);
+const bindingModalOpen = ref(false);
 const editing = ref<FdmProcurementSupplierApi.Supplier>();
-const authorizationEditing = ref<FdmProcurementSupplierApi.Supplier>();
+const bindingEditing = ref<FdmProcurementSupplierApi.Supplier>();
 const pageNo = ref(1);
 const pageSize = ref(10);
 
@@ -70,7 +70,6 @@ const form = reactive({
   approvalStatus: 'PENDING' as FdmProcurementSupplierApi.ApprovalStatus,
   companyStatus: 'ENABLED' as FdmProcurementSupplierApi.CompanyStatus,
   directShipAllowed: false,
-  erpSupplierId: '',
   remark: '',
   status: 'ENABLED' as FdmProcurementSupplierApi.SupplierStatus,
   supplierCode: '',
@@ -78,8 +77,9 @@ const form = reactive({
   validFrom: '',
   validUntil: '',
 });
-const authorizationForm = reactive({
+const bindingForm = reactive({
   admissionStatus: 'PENDING' as FdmProcurementSupplierApi.ApprovalStatus,
+  companyId: '',
   companyStatus: 'ENABLED' as FdmProcurementSupplierApi.CompanyStatus,
   directShipAllowed: false,
   validFrom: '',
@@ -97,9 +97,9 @@ const pagedRows = computed(() =>
 );
 
 useFdmWaimaoAiContext(() => ({
-  companyId: companyId.value || undefined,
   context: {
     filters: {
+      businessBindingCompanyId: companyId.value || undefined,
       keywordApplied: Boolean(keyword.value.trim()),
       status: status.value,
     },
@@ -121,6 +121,7 @@ useFdmWaimaoAiContext(() => ({
 
 async function initialize() {
   if (!canQuery.value) return;
+  await load();
   try {
     const result = await getDataCompanySimpleList();
     companies.value = (result || [])
@@ -129,27 +130,26 @@ async function initialize() {
         label: item.companyShortName || item.companyName || String(item.id),
         value: String(item.id),
       }));
-    if (companies.value.length === 1)
+    if (!companyId.value && companies.value.length > 0) {
       companyId.value = companies.value[0]!.value;
-    if (companyId.value) await load();
+    }
   } catch {
-    error.value = '公司列表读取失败。';
+    error.value = '公司业务绑定选项读取失败，供应商列表仍保持全租户可见。';
   }
 }
 
 async function load() {
-  if (!companyId.value || !canQuery.value) return;
+  if (!canQuery.value) return;
   loading.value = true;
   error.value = '';
   try {
     rows.value = await getProcurementSupplierList({
-      companyId: companyId.value,
       keyword: keyword.value.trim() || undefined,
     });
     pageNo.value = 1;
   } catch {
     rows.value = [];
-    error.value = '供应商读取失败，请核对公司配置或稍后重试。';
+    error.value = '供应商读取失败，请稍后重试。';
   } finally {
     loading.value = false;
   }
@@ -158,17 +158,16 @@ async function load() {
 function resetForm(row?: FdmProcurementSupplierApi.Supplier) {
   editing.value = row;
   Object.assign(form, {
-    admissionStatus: row?.admissionStatus || 'PENDING',
+    admissionStatus: 'PENDING',
     approvalStatus: row?.approvalStatus || 'PENDING',
-    companyStatus: row?.companyStatus || 'ENABLED',
-    directShipAllowed: row?.directShipAllowed || false,
-    erpSupplierId: row?.erpSupplierId || '',
+    companyStatus: 'ENABLED',
+    directShipAllowed: false,
     remark: row?.remark || '',
     status: row?.status || 'ENABLED',
     supplierCode: row?.supplierCode || '',
     supplierName: row?.supplierName || '',
-    validFrom: row?.validFrom || '',
-    validUntil: row?.validUntil || '',
+    validFrom: '',
+    validUntil: '',
   });
 }
 
@@ -184,17 +183,35 @@ function openEdit(row: FdmProcurementSupplierApi.Supplier) {
   modalOpen.value = true;
 }
 
-function openAuthorization(row: FdmProcurementSupplierApi.Supplier) {
-  if (!canAuthorizeCompany.value) return;
-  authorizationEditing.value = row;
-  Object.assign(authorizationForm, {
-    admissionStatus: row.admissionStatus,
-    companyStatus: row.companyStatus,
-    directShipAllowed: row.directShipAllowed,
-    validFrom: row.validFrom,
-    validUntil: row.validUntil,
+function openCompanyBinding(row: FdmProcurementSupplierApi.Supplier) {
+  if (!canBindCompany.value) return;
+  const selectedCompanyId = companyId.value || companies.value[0]?.value;
+  if (!selectedCompanyId) {
+    message.warning('请先在页面上方选择要维护的业务绑定公司。');
+    return;
+  }
+  bindingEditing.value = row;
+  applyBindingDraft(selectedCompanyId);
+  bindingModalOpen.value = true;
+}
+
+function applyBindingDraft(selectedCompanyId: string) {
+  const binding = bindingEditing.value?.companyBindings.find(
+    (item) => item.companyId === selectedCompanyId,
+  );
+  Object.assign(bindingForm, {
+    admissionStatus: binding?.admissionStatus || 'PENDING',
+    companyId: selectedCompanyId,
+    companyStatus: binding?.status || 'ENABLED',
+    directShipAllowed: binding?.directShipAllowed || false,
+    validFrom: binding?.validFrom || '',
+    validUntil: binding?.validUntil || '',
   });
-  authorizationModalOpen.value = true;
+}
+
+function selectedCompanyBinding(row: FdmProcurementSupplierApi.Supplier) {
+  if (!companyId.value) return undefined;
+  return row.companyBindings.find((item) => item.companyId === companyId.value);
 }
 
 function asSupplier(record: Record<string, unknown>) {
@@ -215,8 +232,6 @@ async function save() {
     await (editing.value
       ? updateProcurementSupplier({
           approvalStatus: form.approvalStatus,
-          companyId: companyId.value,
-          erpSupplierId: form.erpSupplierId.trim() || undefined,
           expectedVersion: editing.value.version,
           id: editing.value.id,
           remark: form.remark.trim() || undefined,
@@ -226,7 +241,6 @@ async function save() {
       : createProcurementSupplier({
           ...form,
           companyId: companyId.value,
-          erpSupplierId: form.erpSupplierId.trim() || undefined,
           remark: form.remark.trim() || undefined,
           supplierCode: form.supplierCode.trim(),
           supplierName: form.supplierName.trim(),
@@ -241,37 +255,40 @@ async function save() {
   }
 }
 
-async function authorizeCompany() {
-  const row = authorizationEditing.value;
-  if (!row) return;
-  if (!authorizationForm.validFrom || !authorizationForm.validUntil) {
-    message.warning('请填写公司准入有效期。');
+async function bindCompany() {
+  const row = bindingEditing.value;
+  if (!row || !bindingForm.companyId) return;
+  if (!bindingForm.validFrom || !bindingForm.validUntil) {
+    message.warning('请填写公司业务绑定有效期。');
     return;
   }
-  if (authorizationForm.validFrom > authorizationForm.validUntil) {
+  if (bindingForm.validFrom > bindingForm.validUntil) {
     message.warning('准入结束日期不能早于开始日期。');
     return;
   }
-  authorizing.value = true;
+  bindingSaving.value = true;
   try {
-    await authorizeProcurementSupplierCompany({
-      admissionStatus: authorizationForm.admissionStatus,
-      companyId: row.companyId,
-      directShipAllowed: authorizationForm.directShipAllowed,
-      expectedVersion: row.companyVersion,
-      status: authorizationForm.companyStatus,
+    const existing = row.companyBindings.find(
+      (item) => item.companyId === bindingForm.companyId,
+    );
+    await bindProcurementSupplierCompany({
+      admissionStatus: bindingForm.admissionStatus,
+      companyId: bindingForm.companyId,
+      directShipAllowed: bindingForm.directShipAllowed,
+      expectedVersion: existing?.version || 0,
+      status: bindingForm.companyStatus,
       supplierId: row.id,
-      validFrom: authorizationForm.validFrom,
-      validUntil: authorizationForm.validUntil,
+      validFrom: bindingForm.validFrom,
+      validUntil: bindingForm.validUntil,
     });
-    message.success('公司准入信息已更新');
-    authorizationModalOpen.value = false;
-    authorizationEditing.value = undefined;
+    message.success('公司业务绑定信息已更新');
+    bindingModalOpen.value = false;
+    bindingEditing.value = undefined;
     await load();
   } catch {
-    message.error('准入信息保存失败；若数据版本已变化，请刷新后重试。');
+    message.error('公司业务绑定信息保存失败；若数据版本已变化，请刷新后重试。');
   } finally {
-    authorizing.value = false;
+    bindingSaving.value = false;
   }
 }
 
@@ -279,8 +296,8 @@ const columns = [
   { dataIndex: 'supplierCode', key: 'supplierCode', title: '供应商编码' },
   { dataIndex: 'supplierName', key: 'supplierName', title: '供应商名称' },
   { key: 'status', title: '状态', width: 120 },
-  { key: 'approval', title: '审批 / 准入', width: 160 },
-  { key: 'validity', title: '公司准入有效期', width: 210 },
+  { key: 'approval', title: '审批 / 业务绑定', width: 180 },
+  { key: 'validity', title: '公司业务绑定有效期', width: 210 },
   { key: 'actions', title: '操作', width: 190 },
 ];
 
@@ -288,7 +305,7 @@ void initialize();
 </script>
 
 <template>
-  <Page title="供应商资料" description="真实采购供应商主数据与公司准入状态">
+  <Page title="供应商资料" description="真实采购供应商主数据与公司业务绑定状态">
     <template #extra>
       <Button
         v-if="canCreate"
@@ -308,13 +325,20 @@ void initialize();
     <div v-else class="supplier-page">
       <Alert v-if="error" :message="error" type="error" show-icon />
       <Card size="small">
+        <Alert
+          class="visibility-notice"
+          message="供应商列表始终展示全租户数据；公司选择仅用于查看和维护业务绑定，不限制用户可见性。"
+          show-icon
+          type="info"
+        />
         <Space wrap>
           <Select
             v-model:value="companyId"
+            allow-clear
             :options="companies"
-            placeholder="选择数据公司"
+            placeholder="业务绑定公司（不影响列表可见性）"
             style="width: 240px"
-            @change="load"
+            @change="pageNo = 1"
           />
           <Input
             v-model:value="keyword"
@@ -336,9 +360,7 @@ void initialize();
             "
             @change="pageNo = 1"
           />
-          <Button :loading="loading" :disabled="!companyId" @click="load">
-            查询
-          </Button>
+          <Button :loading="loading" @click="load"> 查询 </Button>
         </Space>
       </Card>
       <Card size="small">
@@ -355,10 +377,17 @@ void initialize();
             </template>
             <template v-else-if="column.key === 'approval'">
               {{ record.approvalStatus }} /
-              {{ record.admissionStatus }}
+              {{
+                selectedCompanyBinding(asSupplier(record))?.admissionStatus ||
+                '未绑定'
+              }}
             </template>
             <template v-else-if="column.key === 'validity'">
-              {{ record.validFrom }} ～ {{ record.validUntil }}
+              <template v-if="selectedCompanyBinding(asSupplier(record))">
+                {{ selectedCompanyBinding(asSupplier(record))?.validFrom }} ～
+                {{ selectedCompanyBinding(asSupplier(record))?.validUntil }}
+              </template>
+              <span v-else>未选择公司或当前公司未绑定</span>
             </template>
             <template v-else-if="column.key === 'actions'">
               <Space size="small">
@@ -370,11 +399,11 @@ void initialize();
                   编辑
                 </Button>
                 <Button
-                  v-if="canAuthorizeCompany"
+                  v-if="canBindCompany"
                   type="link"
-                  @click="openAuthorization(asSupplier(record))"
+                  @click="openCompanyBinding(asSupplier(record))"
                 >
-                  公司准入
+                  公司业务绑定
                 </Button>
               </Space>
             </template>
@@ -396,13 +425,14 @@ void initialize();
       @ok="save"
     >
       <div class="supplier-form">
-        <label>供应商编码<Input
+        <label
+          >供应商编码<Input
             v-model:value="form.supplierCode"
             :disabled="Boolean(editing)"
         /></label>
         <label>供应商名称<Input v-model:value="form.supplierName" /></label>
-        <label>ERP 供应商 ID<Input v-model:value="form.erpSupplierId" /></label>
-        <label>主状态<Select
+        <label
+          >主状态<Select
             v-model:value="form.status"
             :options="
               ['ENABLED', 'DISABLED', 'FROZEN', 'BLACKLISTED'].map((value) => ({
@@ -411,7 +441,8 @@ void initialize();
               }))
             "
         /></label>
-        <label>审批状态<Select
+        <label
+          >审批状态<Select
             v-model:value="form.approvalStatus"
             :options="
               ['PENDING', 'APPROVED', 'REJECTED'].map((value) => ({
@@ -421,7 +452,14 @@ void initialize();
             "
         /></label>
         <template v-if="!editing">
-          <label>公司状态<Select
+          <label
+            >首次业务绑定公司<Select
+              v-model:value="companyId"
+              :options="companies"
+              placeholder="选择公司"
+          /></label>
+          <label
+            >公司状态<Select
               v-model:value="form.companyStatus"
               :options="
                 ['ENABLED', 'DISABLED'].map((value) => ({
@@ -430,7 +468,8 @@ void initialize();
                 }))
               "
           /></label>
-          <label>准入状态<Select
+          <label
+            >准入状态<Select
               v-model:value="form.admissionStatus"
               :options="
                 ['PENDING', 'APPROVED', 'REJECTED'].map((value) => ({
@@ -439,36 +478,53 @@ void initialize();
                 }))
               "
           /></label>
-          <label>准入开始<Input v-model:value="form.validFrom" type="date" /></label>
-          <label>准入结束<Input v-model:value="form.validUntil" type="date" /></label>
-          <label class="switch-field">允许直发<Switch v-model:checked="form.directShipAllowed" /></label>
+          <label
+            >准入开始<Input v-model:value="form.validFrom" type="date"
+          /></label>
+          <label
+            >准入结束<Input v-model:value="form.validUntil" type="date"
+          /></label>
+          <label class="switch-field"
+            >允许直发<Switch v-model:checked="form.directShipAllowed"
+          /></label>
         </template>
-        <label>备注<Input.TextArea v-model:value="form.remark" :maxlength="2000" /></label>
+        <label
+          >备注<Input.TextArea v-model:value="form.remark" :maxlength="2000"
+        /></label>
       </div>
     </Modal>
 
     <Modal
-      v-model:open="authorizationModalOpen"
-      :confirm-loading="authorizing"
-      title="维护公司准入"
-      @ok="authorizeCompany"
+      v-model:open="bindingModalOpen"
+      :confirm-loading="bindingSaving"
+      title="维护公司业务绑定"
+      @ok="bindCompany"
     >
       <Alert
-        v-if="authorizationEditing"
-        :message="`${authorizationEditing.supplierCode} · ${authorizationEditing.supplierName}`"
+        v-if="bindingEditing"
+        :message="`${bindingEditing.supplierCode} · ${bindingEditing.supplierName}`"
         description="准入状态、有效期和直发资格使用独立版本控制，不会覆盖供应商主档。"
         type="info"
         show-icon
       />
-      <div class="supplier-form authorization-form">
-        <label>公司状态<Select
-            v-model:value="authorizationForm.companyStatus"
+      <div class="supplier-form binding-form">
+        <label
+          >业务绑定公司<Select
+            v-model:value="bindingForm.companyId"
+            :options="companies"
+            placeholder="选择公司"
+            @change="applyBindingDraft(String($event))"
+        /></label>
+        <label
+          >公司状态<Select
+            v-model:value="bindingForm.companyStatus"
             :options="
               ['ENABLED', 'DISABLED'].map((value) => ({ label: value, value }))
             "
         /></label>
-        <label>准入状态<Select
-            v-model:value="authorizationForm.admissionStatus"
+        <label
+          >准入状态<Select
+            v-model:value="bindingForm.admissionStatus"
             :options="
               ['PENDING', 'APPROVED', 'REJECTED'].map((value) => ({
                 label: value,
@@ -476,16 +532,14 @@ void initialize();
               }))
             "
         /></label>
-        <label>准入开始<Input
-            v-model:value="authorizationForm.validFrom"
-            type="date"
+        <label
+          >准入开始<Input v-model:value="bindingForm.validFrom" type="date"
         /></label>
-        <label>准入结束<Input
-            v-model:value="authorizationForm.validUntil"
-            type="date"
+        <label
+          >准入结束<Input v-model:value="bindingForm.validUntil" type="date"
         /></label>
-        <label class="switch-field">允许直发<Switch
-            v-model:checked="authorizationForm.directShipAllowed"
+        <label class="switch-field"
+          >允许直发<Switch v-model:checked="bindingForm.directShipAllowed"
         /></label>
       </div>
     </Modal>
@@ -503,8 +557,12 @@ void initialize();
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.authorization-form {
+.binding-form {
   margin-top: 16px;
+}
+
+.visibility-notice {
+  margin-bottom: 12px;
 }
 
 .supplier-form label {

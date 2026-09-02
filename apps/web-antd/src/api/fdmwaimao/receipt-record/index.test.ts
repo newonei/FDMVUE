@@ -51,7 +51,10 @@ describe('fdmwaimao receipt and consumption API contract', () => {
     });
     await getReceiptRecord('9223372036854775806');
     await previewReceiptAmount({ ...save, id: '9223372036854775806' });
-    await createReceiptRecord(save);
+    await createReceiptRecord({
+      ...save,
+      attachmentIds: ['9223372036854775804'],
+    });
     await updateReceiptRecord({
       ...save,
       expectedVersion: 3,
@@ -78,6 +81,14 @@ describe('fdmwaimao receipt and consumption API contract', () => {
       2,
       '/fdmwaimao/receipt-record/get',
       { params: { id: '9223372036854775806' } },
+    );
+    expect(requestMocks.post).toHaveBeenNthCalledWith(
+      2,
+      '/fdmwaimao/receipt-record/create',
+      expect.objectContaining({
+        ...save,
+        attachmentIds: ['9223372036854775804'],
+      }),
     );
     expect(requestMocks.put).toHaveBeenLastCalledWith(
       '/fdmwaimao/receipt-record/void',
@@ -110,7 +121,10 @@ describe('fdmwaimao receipt and consumption API contract', () => {
     });
     await getConsumptionRecord('9007199254740994');
     await previewConsumptionAmount(save);
-    await createConsumptionRecord(save);
+    await createConsumptionRecord({
+      ...save,
+      attachmentIds: ['9007199254740992'],
+    });
     await updateConsumptionRecord({
       ...save,
       expectedVersion: 1,
@@ -137,6 +151,14 @@ describe('fdmwaimao receipt and consumption API contract', () => {
       '/fdmwaimao/consumption-record/amount-preview',
       save,
       { silent: true },
+    );
+    expect(requestMocks.post).toHaveBeenNthCalledWith(
+      2,
+      '/fdmwaimao/consumption-record/create',
+      {
+        ...save,
+        attachmentIds: ['9007199254740992'],
+      },
     );
     expect(requestMocks.put).toHaveBeenLastCalledWith(
       '/fdmwaimao/consumption-record/void',

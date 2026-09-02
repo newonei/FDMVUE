@@ -14,11 +14,13 @@ import type {
   ShipmentReservationCommandKind,
 } from './reservation-actions';
 
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
 import type { FdmWaimaoDemandPlanApi } from '#/api/fdmwaimao/demand-plan';
 import type { FdmWaimaoShipmentApi } from '#/api/fdmwaimao/shipment';
 
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -67,7 +69,7 @@ import {
   getShipmentReadinessGenerationJob,
   getShipmentReadinessGenerationOptions,
   materializeShipmentReadinessGeneration,
-  recoverShipmentWmsHandoff,
+  recoverShipmentWarehouseHandoff,
   regenerateShipmentReadinessGeneration,
   releaseShipmentStockReservation,
   reserveShipmentStock,
@@ -78,6 +80,8 @@ import {
 import { useFdmWaimaoAiContext } from '#/views/fdm-trade-shared/ai-assistant/context';
 import { TradeBusinessLink } from '#/views/fdm-trade-shared/components';
 import { fdmTradeDocumentRoute } from '#/views/fdm-trade-shared/document-links';
+import FdmWaimaoAttachmentEditor from '#/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue';
+import FdmWaimaoAttachmentList from '#/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue';
 
 import {
   canConfirmShipment,
@@ -113,6 +117,7 @@ import {
 defineOptions({ name: 'FdmWaimaoShipment' });
 
 interface DraftFormState {
+  attachments: FdmWaimaoAttachmentApi.Attachment[];
   bookingNo: string;
   carrierName: string;
   eta?: Dayjs;
@@ -163,6 +168,8 @@ let detailRequestVersion = 0;
 
 const createOpen = ref(false);
 const creating = ref(false);
+const createAttachmentUploading = ref(false);
+const createAttachmentUploadError = ref(false);
 const planLoading = ref(false);
 const planOptions = ref<FdmWaimaoDemandPlanApi.PageItem[]>([]);
 const selectedPlan = ref<FdmWaimaoDemandPlanApi.Detail>();
@@ -347,8 +354,8 @@ const proposalColumns = [
   { dataIndex: 'reason', key: 'reason', title: '建议理由', width: 220 },
 ];
 
-const wmsOrderColumns = [
-  { dataIndex: 'wmsShipmentOrderNo', key: 'no', title: 'WMS 出库单号' },
+const warehouseOutboundOrderColumns = [
+  { dataIndex: 'outboundOrderNo', key: 'no', title: 'FDM 仓储出库单号' },
   { dataIndex: 'warehouseId', key: 'warehouse', title: '仓库', width: 130 },
   { dataIndex: 'lineCount', key: 'lineCount', title: '行数', width: 90 },
   { key: 'status', title: '状态', width: 120 },
@@ -384,6 +391,7 @@ useFdmWaimaoAiContext(() => ({
 
 function freshDraftForm(): DraftFormState {
   return {
+    attachments: [],
     bookingNo: '',
     carrierName: '',
     eta: undefined,
@@ -481,7 +489,7 @@ function reservationStatusLabel(
     CONSUMED: '已消费',
     EXPIRED: '已过期',
     HANDED_OFF: '已交接',
-    HANDOFF_PENDING: '等待 WMS 交接',
+    HANDOFF_PENDING: '等待 WAREHOUSE 交接',
     RELEASED: '已释放',
   };
   return value ? labels[value] : '未预留';
@@ -517,32 +525,32 @@ function nextActionLabel(value: null | string | undefined) {
   ) {
     return '等待 AI 发货准备建议';
   }
-  if (value === 'RESERVE_WMS_STOCK') return '等待显式预留真实 WMS 库存';
-  if (value === 'RE_RESERVE_WMS_STOCK') return '预留已终止，可重新预留';
+  if (value === 'RESERVE_WAREHOUSE_STOCK') return '等待显式预留真实 WAREHOUSE 库存';
+  if (value === 'RE_RESERVE_WAREHOUSE_STOCK') return '预留已终止，可重新预留';
   if (value === 'SHIPMENT_CONFIRMATION') {
     return '库存已预留；等待人工确认发货';
   }
-  if (value === 'WMS_HANDOFF') return '等待后端 WMS 交接';
-  if (value === 'WMS_HANDOFF_PENDING') return '发货已确认；正在交接 WMS';
-  if (value === 'WMS_HANDOFF_RECOVERY_REQUIRED') {
-    return 'WMS 交接已停止自动重试，需要人工恢复';
+  if (value === 'WAREHOUSE_HANDOFF') return '等待后端 WAREHOUSE 交接';
+  if (value === 'WAREHOUSE_HANDOFF_PENDING') return '发货已确认；正在交接 WAREHOUSE';
+  if (value === 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED') {
+    return 'WAREHOUSE 交接已停止自动重试，需要人工恢复';
   }
-  if (value === 'WMS_OUTBOUND_PENDING') return 'WMS 出库单已建立，等待整单出库';
-  if (value === 'WMS_OUTBOUND_COMPLETED') return 'WMS 已完成整单物理出库';
+  if (value === 'WAREHOUSE_OUTBOUND_PENDING') return 'WAREHOUSE 出库单已建立，等待整单出库';
+  if (value === 'WAREHOUSE_OUTBOUND_COMPLETED') return 'WAREHOUSE 已完成整单物理出库';
   if (value === 'CANCELLED') return '草稿已取消';
   return value || '等待服务端判断';
 }
 
 function lifecycleMessage(source: FdmWaimaoShipmentApi.Detail) {
-  if (source.nextRequiredAction === 'WMS_HANDOFF_RECOVERY_REQUIRED') {
-    return 'WMS 交接需要人工恢复';
+  if (source.nextRequiredAction === 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED') {
+    return 'WAREHOUSE 交接需要人工恢复';
   }
-  if (source.reservationStatus === 'CONSUMED') return 'WMS 整单出库已完成';
-  if (source.reservationStatus === 'HANDED_OFF') return 'WMS 出库单已建立';
+  if (source.reservationStatus === 'CONSUMED') return 'WAREHOUSE 整单出库已完成';
+  if (source.reservationStatus === 'HANDED_OFF') return 'WAREHOUSE 出库单已建立';
   if (source.reservationStatus === 'HANDOFF_PENDING') {
-    return '发货已确认，等待 WMS 交接';
+    return '发货已确认，等待 WAREHOUSE 交接';
   }
-  if (source.reservationStatus === 'ACTIVE') return '真实 WMS 库存已预留';
+  if (source.reservationStatus === 'ACTIVE') return '真实 WAREHOUSE 库存已预留';
   return source.readinessMaterialized
     ? '发货准备证据已冻结'
     : '当前仍是发货空壳草稿';
@@ -551,7 +559,7 @@ function lifecycleMessage(source: FdmWaimaoShipmentApi.Detail) {
 function lifecycleAlertType(
   source: FdmWaimaoShipmentApi.Detail,
 ): 'error' | 'info' | 'success' | 'warning' {
-  if (source.nextRequiredAction === 'WMS_HANDOFF_RECOVERY_REQUIRED') {
+  if (source.nextRequiredAction === 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED') {
     return 'error';
   }
   if (
@@ -569,7 +577,7 @@ function reservationBoundaryMessage(source: FdmWaimaoShipmentApi.Detail) {
   if (source.reservationStatus === 'HANDOFF_PENDING')
     return '已冻结交接，正在异步建单';
   if (source.reservationStatus === 'HANDED_OFF')
-    return 'WMS 已接管，尚未物理出库';
+    return 'WAREHOUSE 已接管，尚未物理出库';
   if (source.reservationStatus === 'CONSUMED')
     return '真实库存与预留已整单扣减';
   return '终态预留凭证仅作审计保留';
@@ -577,18 +585,18 @@ function reservationBoundaryMessage(source: FdmWaimaoShipmentApi.Detail) {
 
 function reservationBoundaryDescription(source: FdmWaimaoShipmentApi.Detail) {
   if (source.reservationStatus === 'ACTIVE') {
-    return '当前只冻结 WMS reserved_quantity。发货仍未确认，未扣减在手库存，也未创建或完成 WMS 出库单。';
+    return '当前只冻结 WAREHOUSE reserved_quantity。发货仍未确认，未扣减在手库存，也未创建或完成 WAREHOUSE 出库单。';
   }
   if (source.reservationStatus === 'HANDOFF_PENDING') {
-    return '发货确认与交接事件已提交，预留不再允许释放或过期；系统正在用冻结凭证幂等创建 WMS 出库单。';
+    return '发货确认与交接事件已提交，预留不再允许释放或过期；系统正在用冻结凭证幂等创建 WAREHOUSE 出库单。';
   }
   if (source.reservationStatus === 'HANDED_OFF') {
-    return 'WMS 已按仓建立 PREPARE 出库单，reserved_quantity 仍保持冻结；只有整单完成后才扣减真实在手库存。';
+    return 'WAREHOUSE 已按仓建立 PREPARE 出库单，reserved_quantity 仍保持冻结；只有整单完成后才扣减真实在手库存。';
   }
   if (source.reservationStatus === 'CONSUMED') {
     return '同一预留尝试下的全部仓库出库单已原子完成，quantity 与 reserved_quantity 已按冻结明细同步扣减。';
   }
-  return '该凭证已终止，不再占用真实 WMS 库存；重新预留会生成新尝试并重新校验全部权威事实。';
+  return '该凭证已终止，不再占用真实 WAREHOUSE 库存；重新预留会生成新尝试并重新校验全部权威事实。';
 }
 
 function generationStatusLabel(
@@ -1003,7 +1011,7 @@ function isExpectedMaterializationResult(
     result.shipmentVersion > 0 &&
     result.readinessMaterialized === true &&
     result.confirmAvailable === false &&
-    result.nextRequiredAction === 'RESERVE_WMS_STOCK' &&
+    result.nextRequiredAction === 'RESERVE_WAREHOUSE_STOCK' &&
     /^[0-9a-f]{64}$/.test(result.readinessSnapshotHash)
   );
 }
@@ -1083,7 +1091,7 @@ function confirmReadinessMaterialization() {
   Modal.confirm({
     centered: true,
     content:
-      '只会把服务端重新校验通过的 READY 提案物化为当前发货单的 DRAFT 明细；不会预留或扣减库存，不会确认发货，也不会创建 WMS 出库单。',
+      '只会把服务端重新校验通过的 READY 提案物化为当前发货单的 DRAFT 明细；不会预留或扣减库存，不会确认发货，也不会创建 WAREHOUSE 出库单。',
     okText: '确认生成',
     onOk: materializeReadiness,
     title: '确认生成发货明细？',
@@ -1419,19 +1427,19 @@ async function executeReservationAction(
       await refreshShipmentAfterReservationAction(command.shipmentId);
     } catch {
       message.warning(
-        'WMS 预留操作已返回成功，但列表或详情刷新失败，请手动刷新',
+        'WAREHOUSE 预留操作已返回成功，但列表或详情刷新失败，请手动刷新',
       );
     }
     if (command.kind === 'RELEASE') {
       message.success(
         result.status === 'EXPIRED'
-          ? '预留已到期并释放；未扣减在手库存，也未创建 WMS 出库单'
-          : '预留已释放；未扣减在手库存，也未创建 WMS 出库单',
+          ? '预留已到期并释放；未扣减在手库存，也未创建 WAREHOUSE 出库单'
+          : '预留已释放；未扣减在手库存，也未创建 WAREHOUSE 出库单',
       );
     } else {
       message.success(
         result.created
-          ? '真实 WMS 库存已预留；发货仍未确认，也未扣减在手库存或创建出库单'
+          ? '真实 WAREHOUSE 库存已预留；发货仍未确认，也未扣减在手库存或创建出库单'
           : '相同预留命令已安全重放；已刷新服务端预留凭证',
       );
     }
@@ -1472,8 +1480,8 @@ function openReservationAction(action = detailReservationAction.value) {
     centered: true,
     content:
       action === 'RERESERVE'
-        ? '服务端会重新校验 readiness、仓库授权、产品执行映射和真实在手库存，再建立新一轮预留。不会确认发货、扣减在手库存或创建 WMS 出库单。'
-        : '服务端会从已物化明细重建产品、SKU、仓库、数量及权威证据，并只增加 WMS reserved_quantity。不会确认发货、扣减在手库存或创建 WMS 出库单。',
+        ? '服务端会重新校验 readiness、仓库授权、产品执行映射和真实在手库存，再建立新一轮预留。不会确认发货、扣减在手库存或创建 WAREHOUSE 出库单。'
+        : '服务端会从已物化明细重建产品、SKU、仓库、数量及权威证据，并只增加 WAREHOUSE reserved_quantity。不会确认发货、扣减在手库存或创建 WAREHOUSE 出库单。',
     okText: reservationActionLabel(action),
     onCancel: () => abandonReservationCommand(command),
     onOk: () => executeReservationAction(action),
@@ -1599,8 +1607,8 @@ async function executeConfirmation() {
     }
     message.success(
       result.created
-        ? '发货已确认并提交 WMS 交接队列；当前尚未发生物理出库'
-        : '相同确认命令已安全重放；已刷新 WMS 交接状态',
+        ? '发货已确认并提交 WAREHOUSE 交接队列；当前尚未发生物理出库'
+        : '相同确认命令已安全重放；已刷新 WAREHOUSE 交接状态',
     );
     return true;
   } finally {
@@ -1631,11 +1639,11 @@ function openConfirmation() {
   Modal.confirm({
     centered: true,
     content:
-      '确认后，服务端会再次校验并冻结当前 ACTIVE 库存预留，在同一事务提交发货确认和 durable WMS 交接事件。该动作不可再按草稿释放预留；但此刻仍不会扣减在手库存，物理出库须等待 WMS 整单完成。',
+      '确认后，服务端会再次校验并冻结当前 ACTIVE 库存预留，在同一事务提交发货确认和 durable WAREHOUSE 交接事件。该动作不可再按草稿释放预留；但此刻仍不会扣减在手库存，物理出库须等待 WAREHOUSE 整单完成。',
     okText: '确认发货',
     onCancel: () => abandonConfirmationCommand(command),
     onOk: executeConfirmation,
-    title: '确认发货并交接 WMS？',
+    title: '确认发货并交接 WAREHOUSE？',
   });
 }
 
@@ -1716,21 +1724,21 @@ async function submitHandoffRecovery() {
   try {
     let result: FdmWaimaoShipmentApi.HandoffRecoveryResult;
     try {
-      result = await recoverShipmentWmsHandoff({
+      result = await recoverShipmentWarehouseHandoff({
         expectedShipmentVersion: command.expectedShipmentVersion,
         id: command.shipmentId,
         idempotencyKey: command.idempotencyKey,
         reason: command.reason,
       });
       if (!isExpectedShipmentHandoffRecoveryResult(result, command)) {
-        throw new Error('WMS 交接恢复回执与当前命令身份不一致');
+        throw new Error('WAREHOUSE 交接恢复回执与当前命令身份不一致');
       }
     } catch {
       try {
         const latest = await refreshShipmentAfterHandoffRecovery(
           command.shipmentId,
         );
-        if (latest.nextRequiredAction !== 'WMS_HANDOFF_RECOVERY_REQUIRED') {
+        if (latest.nextRequiredAction !== 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED') {
           handoffRecoveryOpen.value = false;
           handoffRecoveryReason.value = '';
           message.warning('恢复响应未确认，已按服务端最新交接状态刷新');
@@ -1749,11 +1757,11 @@ async function submitHandoffRecovery() {
     try {
       await refreshShipmentAfterHandoffRecovery(command.shipmentId);
     } catch {
-      message.warning('WMS 交接已重新排队，但详情刷新失败，请手动刷新');
+      message.warning('WAREHOUSE 交接已重新排队，但详情刷新失败，请手动刷新');
     }
     message.success(
       result.recovered
-        ? '原 WMS 交接事件已重新排队，冻结库存与事件身份保持不变'
+        ? '原 WAREHOUSE 交接事件已重新排队，冻结库存与事件身份保持不变'
         : '相同恢复命令已安全重放；已刷新交接状态',
     );
   } finally {
@@ -1796,6 +1804,14 @@ function openCreate() {
 }
 
 async function submitCreate() {
+  if (createAttachmentUploading.value) {
+    message.warning('附件仍在上传，请等待上传完成后再创建发货草稿');
+    return;
+  }
+  if (createAttachmentUploadError.value) {
+    message.warning('存在上传失败的附件，请重试或移除后再创建');
+    return;
+  }
   const plan = selectedPlan.value;
   if (!plan || !createForm.fulfillmentPlanId) {
     message.warning('请选择并读取一张已确认履约计划');
@@ -1808,7 +1824,7 @@ async function submitCreate() {
     return;
   }
   if (!createForm.etd) {
-    message.warning('请填写预计离港日期，WMS 发货准备度需要按该日期核验');
+    message.warning('请填写预计离港日期，WAREHOUSE 发货准备度需要按该日期核验');
     return;
   }
   if (createForm.eta?.isBefore(createForm.etd, 'day')) {
@@ -1817,9 +1833,10 @@ async function submitCreate() {
   }
   creating.value = true;
   try {
-    // Do not send product, quantity, warehouse or WMS evidence from the browser. The server
+    // Do not send product, quantity, warehouse or WAREHOUSE evidence from the browser. The server
     // reloads the confirmed contract/plan and creates only the DRAFT header shell.
     const result = await createShipmentDraft({
+      attachmentIds: createForm.attachments.map((attachment) => attachment.id),
       bookingNo: clean(createForm.bookingNo),
       carrierName: clean(createForm.carrierName),
       contractOrderId: plan.contractOrderId,
@@ -1837,6 +1854,10 @@ async function submitCreate() {
         ? '发货草稿已创建，下一步可生成发货准备建议'
         : '相同请求已存在，已打开原发货草稿',
     );
+    if (result.created) {
+      createForm.attachments = [];
+      await nextTick();
+    }
     createOpen.value = false;
     await load();
     await openDetail(result.id);
@@ -1985,7 +2006,7 @@ watch(
 <template>
   <Page
     :auto-content-height="false"
-    description="从已确认履约计划建立真实发货单；AI 物化、库存预留、人工确认、WMS 交接与整单物理出库均为可审计的独立状态"
+    description="从已确认履约计划建立真实发货单；AI 物化、库存预留、人工确认、WAREHOUSE 交接与整单物理出库均为可审计的独立状态"
     title="发货计划"
   >
     <template #extra>
@@ -2000,7 +2021,7 @@ watch(
     <Alert
       class="shipment-page__boundary"
       message="安全边界"
-      description="DRAFT、已预留、已确认、已交接和已出库含义不同。浏览器只提交单据身份与 CAS 版本；产品、仓库、数量和权威证据均由服务端重建。只有 WMS 返回 CONSUMED 凭证后才表示真实库存已扣减。"
+      description="DRAFT、已预留、已确认、已交接和已出库含义不同。浏览器只提交单据身份与 CAS 版本；产品、仓库、数量和权威证据均由服务端重建。只有 WAREHOUSE 返回 CONSUMED 凭证后才表示真实库存已扣减。"
       show-icon
       type="info"
     />
@@ -2225,7 +2246,7 @@ watch(
                         pendingHandoffRecoveryCommand?.shipmentId === record.id
                       "
                     >
-                      恢复 WMS 交接
+                      恢复 WAREHOUSE 交接
                     </Menu.Item>
                     <Menu.Divider
                       v-if="canCancel && isShipmentDraftEditable(record)"
@@ -2327,7 +2348,7 @@ watch(
           <template #icon>
             <IconifyIcon icon="lucide:refresh-cw" aria-hidden="true" />
           </template>
-          恢复 WMS 交接
+          恢复 WAREHOUSE 交接
         </Button>
         <Button
           v-if="canUpdate && isShipmentDraftEditable(detail)"
@@ -2377,7 +2398,7 @@ watch(
                 }}</code>
               </span>
               <span>
-                下一步可另行显式预留真实 WMS
+                下一步可另行显式预留真实 WAREHOUSE
                 库存。本次物化未预留、未确认发货、未扣库存，也未创建出库单。
               </span>
             </div>
@@ -2390,7 +2411,7 @@ watch(
           class="shipment-page__section"
           :column="2"
           size="small"
-          title="WMS 库存预留凭证"
+          title="WAREHOUSE 库存预留凭证"
         >
           <Descriptions.Item label="预留状态">
             <Tag :color="reservationStatusColor(detail.reservationStatus)">
@@ -2404,7 +2425,7 @@ watch(
             Shipment V{{ detail.reservationSourceVersion ?? '—' }} · Attempt
             {{ detail.reservationAttemptNo ?? '—' }}
           </Descriptions.Item>
-          <Descriptions.Item label="WMS 预留版本">
+          <Descriptions.Item label="WAREHOUSE 预留版本">
             V{{ detail.reservationVersion ?? '—' }}
           </Descriptions.Item>
           <Descriptions.Item label="预留时间">
@@ -2442,7 +2463,7 @@ watch(
           class="shipment-page__section"
           :column="2"
           size="small"
-          title="发货确认与 WMS 交接凭证"
+          title="发货确认与 WAREHOUSE 交接凭证"
         >
           <Descriptions.Item label="确认时间">
             {{ dateTimeText(detail.confirmedTime) }}
@@ -2459,33 +2480,33 @@ watch(
           <Descriptions.Item label="交接投递状态">
             <Tag
               :color="
-                detail.wmsHandoffDeliveryStatus === 'DEAD_LETTER'
+                detail.warehouseHandoffDeliveryStatus === 'DEAD_LETTER'
                   ? 'red'
-                  : detail.wmsHandoffDeliveryStatus === 'PUBLISHED'
+                  : detail.warehouseHandoffDeliveryStatus === 'PUBLISHED'
                     ? 'green'
                     : 'blue'
               "
             >
-              {{ detail.wmsHandoffDeliveryStatus || '等待创建' }}
+              {{ detail.warehouseHandoffDeliveryStatus || '等待创建' }}
             </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="投递版本 / 次数">
-            V{{ detail.wmsHandoffOutboxVersion ?? '—' }} ·
-            {{ detail.wmsHandoffRetryCount ?? 0 }} 次
+            V{{ detail.warehouseHandoffOutboxVersion ?? '—' }} ·
+            {{ detail.warehouseHandoffRetryCount ?? 0 }} 次
           </Descriptions.Item>
           <Descriptions.Item
-            v-if="detail.wmsHandoffRecoveryRequired"
+            v-if="detail.warehouseHandoffRecoveryRequired"
             label="死信时间"
           >
-            {{ dateTimeText(detail.wmsHandoffDeadLetterAt) }}
+            {{ dateTimeText(detail.warehouseHandoffDeadLetterAt) }}
           </Descriptions.Item>
           <Descriptions.Item
-            v-if="detail.wmsHandoffRecoveryRequired"
+            v-if="detail.warehouseHandoffRecoveryRequired"
             label="脱敏错误"
           >
-            {{ detail.wmsHandoffLastErrorCode || 'WMS_HANDOFF_FAILED' }} ·
+            {{ detail.warehouseHandoffLastErrorCode || 'WAREHOUSE_HANDOFF_FAILED' }} ·
             {{
-              detail.wmsHandoffLastErrorMessage || '请联系管理员检查追踪日志'
+              detail.warehouseHandoffLastErrorMessage || '请联系管理员检查追踪日志'
             }}
           </Descriptions.Item>
           <Descriptions.Item label="交接冻结版本">
@@ -2497,59 +2518,59 @@ watch(
           <Descriptions.Item label="冻结事件" :span="2">
             <code>{{ detail.reservationHandoffPinEventId || '—' }}</code>
           </Descriptions.Item>
-          <Descriptions.Item label="WMS 交接事件" :span="2">
-            <code>{{ detail.wmsHandoffEventId || '等待 WMS 接收' }}</code>
+          <Descriptions.Item label="WAREHOUSE 交接事件" :span="2">
+            <code>{{ detail.warehouseHandoffEventId || '等待 WAREHOUSE 接收' }}</code>
           </Descriptions.Item>
-          <Descriptions.Item label="WMS 交接时间">
-            {{ dateTimeText(detail.wmsHandedOffTime) }}
+          <Descriptions.Item label="WAREHOUSE 交接时间">
+            {{ dateTimeText(detail.warehouseHandedOffTime) }}
           </Descriptions.Item>
-          <Descriptions.Item label="WMS 出库单数">
-            {{ detail.wmsOrderCount ?? detail.wmsOrders.length }}
+          <Descriptions.Item label="WAREHOUSE 出库单数">
+            {{ detail.warehouseOutboundOrderCount ?? detail.warehouseOutboundOrders.length }}
           </Descriptions.Item>
           <Descriptions.Item
-            v-if="detail.wmsHandoffPlanHash"
-            label="WMS 交接计划 Hash"
+            v-if="detail.warehouseHandoffPlanHash"
+            label="WAREHOUSE 交接计划 Hash"
             :span="2"
           >
-            <code>{{ detail.wmsHandoffPlanHash }}</code>
+            <code>{{ detail.warehouseHandoffPlanHash }}</code>
           </Descriptions.Item>
         </Descriptions>
 
         <Descriptions
-          v-if="detail.wmsConsumptionEventId"
+          v-if="detail.warehouseConsumptionEventId"
           bordered
           class="shipment-page__section"
           :column="2"
           size="small"
-          title="WMS 真实出库完成回执"
+          title="WAREHOUSE 真实出库完成回执"
         >
           <Descriptions.Item label="物理出库时间">
-            {{ dateTimeText(detail.wmsConsumedAt) }}
+            {{ dateTimeText(detail.warehouseConsumedAt) }}
           </Descriptions.Item>
           <Descriptions.Item label="完成范围">
-            {{ detail.wmsConsumedOrderCount ?? '—' }} 张出库单 ·
-            {{ detail.wmsConsumedLineCount ?? '—' }} 行 ·
-            {{ detail.wmsConsumedInventoryCount ?? '—' }} 个库存维度
+            {{ detail.warehouseConsumedOrderCount ?? '—' }} 张出库单 ·
+            {{ detail.warehouseConsumedLineCount ?? '—' }} 行 ·
+            {{ detail.warehouseConsumedInventoryCount ?? '—' }} 个库存维度
           </Descriptions.Item>
           <Descriptions.Item label="消费事件" :span="2">
-            <code>{{ detail.wmsConsumptionEventId }}</code>
+            <code>{{ detail.warehouseConsumptionEventId }}</code>
           </Descriptions.Item>
-          <Descriptions.Item label="FDM Inbox / WMS Outbox" :span="2">
-            {{ detail.wmsCompletionInboxId || '—' }} /
-            {{ detail.wmsCompletionOutboxId || '—' }}
+          <Descriptions.Item label="FDM Inbox / WAREHOUSE Outbox" :span="2">
+            {{ detail.warehouseCompletionInboxId || '—' }} /
+            {{ detail.warehouseCompletionOutboxId || '—' }}
           </Descriptions.Item>
           <Descriptions.Item label="消费计划 Hash" :span="2">
-            <code>{{ detail.wmsConsumptionPlanHash || '—' }}</code>
+            <code>{{ detail.warehouseConsumptionPlanHash || '—' }}</code>
           </Descriptions.Item>
           <Descriptions.Item label="消费命令 Hash" :span="2">
-            <code>{{ detail.wmsConsumptionRequestHash || '—' }}</code>
+            <code>{{ detail.warehouseConsumptionRequestHash || '—' }}</code>
           </Descriptions.Item>
           <Descriptions.Item label="事件载荷 Hash" :span="2">
-            <code>{{ detail.wmsCompletionPayloadHash || '—' }}</code>
+            <code>{{ detail.warehouseCompletionPayloadHash || '—' }}</code>
           </Descriptions.Item>
           <Descriptions.Item :span="2">
             <Alert
-              description="该回执来自 WMS 的已验证整单消费事件；页面不根据计划数量推算实际出库量。每行实际出库数量均由同一事务中的 WMS 行事实回填。"
+              description="该回执来自 WAREHOUSE 的已验证整单消费事件；页面不根据计划数量推算实际出库量。每行实际出库数量均由同一事务中的 WAREHOUSE 行事实回填。"
               message="真实库存扣减与 FDM 实际出库量已经原子确认"
               show-icon
               type="success"
@@ -2558,28 +2579,28 @@ watch(
         </Descriptions>
 
         <Card
-          v-if="detail.wmsOrders.length"
+          v-if="detail.warehouseOutboundOrders.length"
           :bordered="false"
           class="shipment-page__section"
           size="small"
-          title="按仓 WMS 出库单"
+          title="按仓 FDM 仓储出库单"
         >
           <Table
-            :columns="wmsOrderColumns"
-            :data-source="detail.wmsOrders"
+            :columns="warehouseOutboundOrderColumns"
+            :data-source="detail.warehouseOutboundOrders"
             :pagination="false"
-            row-key="id"
+            row-key="outboundOrderId"
             size="small"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
                 <Tag
                   :color="
-                    record.wmsOrderStatus === 'FINISHED' ? 'green' : 'blue'
+                    record.status === 'FINISHED' ? 'green' : 'blue'
                   "
                 >
                   {{
-                    record.wmsOrderStatus === 'FINISHED' ? '已完成' : '待出库'
+                    record.status === 'FINISHED' ? '已完成' : '待出库'
                   }}
                 </Tag>
               </template>
@@ -2689,7 +2710,19 @@ watch(
           :bordered="false"
           class="shipment-page__section"
           size="small"
-          title="产品明细与 WMS 权威证据"
+          title="单据附件"
+        >
+          <FdmWaimaoAttachmentList
+            :business-id="detail.id"
+            business-type="SHIPMENT"
+          />
+        </Card>
+
+        <Card
+          :bordered="false"
+          class="shipment-page__section"
+          size="small"
+          title="产品明细与 WAREHOUSE 权威证据"
         >
           <Table
             :columns="lineColumns"
@@ -2745,17 +2778,17 @@ watch(
                   <dl>
                     <dt>权威池</dt>
                     <dd>{{ source.authorityPoolKey }}</dd>
-                    <dt>WMS 来源</dt>
+                    <dt>WAREHOUSE 来源</dt>
                     <dd>
                       {{ source.sourceSystem }} · {{ source.sourceVersion }} ·
                       Seq
                       {{ source.sourceSequence }}
                     </dd>
-                    <dt>WMS 请求</dt>
+                    <dt>WAREHOUSE 请求</dt>
                     <dd class="shipment-page__hash">
                       {{ source.sourceRequestId }}
                     </dd>
-                    <dt>WMS Payload Hash</dt>
+                    <dt>WAREHOUSE Payload Hash</dt>
                     <dd class="shipment-page__hash">
                       {{ source.sourcePayloadHash }}
                     </dd>
@@ -2849,7 +2882,7 @@ watch(
     <Spin :spinning="readinessLoading || readinessSubmitting">
       <Alert
         class="shipment-page__modal-alert"
-        description="产品、可发上限、WMS 发布版本和公司仓库授权都由服务端实时重建。当前结果只是一份只读提案，不会预留、扣减库存或创建出库单。"
+        description="产品、可发上限、WAREHOUSE 发布版本和公司仓库授权都由服务端实时重建。当前结果只是一份只读提案，不会预留、扣减库存或创建出库单。"
         message="AI 只能在权威边界内选择"
         show-icon
         type="info"
@@ -3027,50 +3060,50 @@ watch(
                 <template v-else-if="column.key === 'evidence'">
                   <div class="shipment-page__stack">
                     <Tag color="green">
-                      {{ record.wmsEvidence.status }} · ATP
-                      {{ record.wmsEvidence.availableToPromise }}
+                      {{ record.warehouseEvidence.status }} · ATP
+                      {{ record.warehouseEvidence.availableToPromise }}
                     </Tag>
                     <span>
-                      {{ record.wmsEvidence.sourceSystem }} ·
-                      {{ record.wmsEvidence.sourceVersion }} · Seq
-                      {{ record.wmsEvidence.sourceSequence }}
+                      {{ record.warehouseEvidence.sourceSystem }} ·
+                      {{ record.warehouseEvidence.sourceVersion }} · Seq
+                      {{ record.warehouseEvidence.sourceSequence }}
                     </span>
                     <span class="shipment-page__hash">
-                      请求 {{ record.wmsEvidence.sourceRequestId }}
+                      请求 {{ record.warehouseEvidence.sourceRequestId }}
                     </span>
                     <span>
                       仓库授权 V{{
-                        record.wmsEvidence.warehouseAuthorityEvidence
+                        record.warehouseEvidence.warehouseAuthorityEvidence
                           .authorityVersion
                       }}
                       · 映射
                       {{
-                        record.wmsEvidence.warehouseAuthorityEvidence.mappingId
+                        record.warehouseEvidence.warehouseAuthorityEvidence.mappingId
                       }}
                     </span>
                     <details class="shipment-page__evidence-details">
                       <summary>展开完整权威证据</summary>
                       <dl>
-                        <dt>WMS Hash</dt>
+                        <dt>WAREHOUSE Hash</dt>
                         <dd class="shipment-page__hash">
-                          {{ record.wmsEvidence.sourcePayloadHash }}
+                          {{ record.warehouseEvidence.sourcePayloadHash }}
                         </dd>
-                        <dt>WMS 观测 / 失效</dt>
+                        <dt>WAREHOUSE 观测 / 失效</dt>
                         <dd>
-                          {{ dateTimeText(record.wmsEvidence.observedAt) }} /
-                          {{ dateTimeText(record.wmsEvidence.validUntil) }}
+                          {{ dateTimeText(record.warehouseEvidence.observedAt) }} /
+                          {{ dateTimeText(record.warehouseEvidence.validUntil) }}
                         </dd>
                         <dt>授权 Hash</dt>
                         <dd class="shipment-page__hash">
                           {{
-                            record.wmsEvidence.warehouseAuthorityEvidence
+                            record.warehouseEvidence.warehouseAuthorityEvidence
                               .authorityHash
                           }}
                         </dd>
                         <dt>授权引用</dt>
                         <dd class="shipment-page__hash">
                           {{
-                            record.wmsEvidence.warehouseAuthorityEvidence
+                            record.warehouseEvidence.warehouseAuthorityEvidence
                               .evidenceRef
                           }}
                         </dd>
@@ -3078,14 +3111,14 @@ watch(
                         <dd>
                           {{
                             dateTimeText(
-                              record.wmsEvidence.warehouseAuthorityEvidence
+                              record.warehouseEvidence.warehouseAuthorityEvidence
                                 .effectiveFrom,
                             )
                           }}
                           /
                           {{
                             dateTimeText(
-                              record.wmsEvidence.warehouseAuthorityEvidence
+                              record.warehouseEvidence.warehouseAuthorityEvidence
                                 .effectiveTo,
                             )
                           }}
@@ -3099,7 +3132,7 @@ watch(
 
             <Alert
               class="shipment-page__generation-boundary"
-              description="当前展示仍是只读建议；只有点击“确认生成发货明细”后，服务端才会重新校验并写入 DRAFT 明细。该操作不会预留库存、确认发货、扣减库存或创建 WMS 出库单。"
+              description="当前展示仍是只读建议；只有点击“确认生成发货明细”后，服务端才会重新校验并写入 DRAFT 明细。该操作不会预留库存、确认发货、扣减库存或创建 WAREHOUSE 出库单。"
               message="物化前仍需人工确认并由服务端再次校验"
               show-icon
               type="warning"
@@ -3183,6 +3216,9 @@ watch(
   <Modal
     v-model:open="createOpen"
     :confirm-loading="creating"
+    :ok-button-props="{
+      disabled: createAttachmentUploading || createAttachmentUploadError,
+    }"
     destroy-on-close
     ok-text="创建空壳草稿"
     title="从已确认履约计划创建发货草稿"
@@ -3272,6 +3308,15 @@ watch(
           show-count
         />
       </Form.Item>
+      <Form.Item label="单据附件">
+        <FdmWaimaoAttachmentEditor
+          v-model="createForm.attachments"
+          business-type="SHIPMENT"
+          :disabled="creating"
+          @error-change="createAttachmentUploadError = $event"
+          @uploading-change="createAttachmentUploading = $event"
+        />
+      </Form.Item>
     </Form>
   </Modal>
 
@@ -3333,13 +3378,13 @@ watch(
     :confirm-loading="reservationSubmitting"
     :mask-closable="false"
     ok-text="确认释放预留"
-    title="释放真实 WMS 库存预留"
+    title="释放真实 WAREHOUSE 库存预留"
     @cancel="cancelReleaseReservation"
     @ok="submitReleaseReservation"
   >
     <Alert
       class="shipment-page__modal-alert"
-      description="释放只减少 WMS reserved_quantity，不扣减在手库存、不确认发货，也不创建、完成或删除 WMS 出库单。释放后如需再次预留，必须发起一个新的预留动作并重新校验全部权威事实。"
+      description="释放只减少 WAREHOUSE reserved_quantity，不扣减在手库存、不确认发货，也不创建、完成或删除 WAREHOUSE 出库单。释放后如需再次预留，必须发起一个新的预留动作并重新校验全部权威事实。"
       message="释放当前 ACTIVE 预留"
       show-icon
       type="warning"
@@ -3358,13 +3403,13 @@ watch(
     :confirm-loading="handoffRecoverySubmitting"
     :mask-closable="false"
     ok-text="重新投递原交接事件"
-    title="恢复 WMS 交接"
+    title="恢复 WAREHOUSE 交接"
     @cancel="cancelHandoffRecovery"
     @ok="submitHandoffRecovery"
   >
     <Alert
       class="shipment-page__modal-alert"
-      description="恢复只把原 DEAD_LETTER 事件重新排队，并保留原 event ID、payload hash、确认快照和 WMS 命令幂等键；不会重新冻结预留、创建第二条事件或直接调用 WMS。原因会写入不可变审计。"
+      description="恢复只把原 DEAD_LETTER 事件重新排队，并保留原 event ID、payload hash、确认快照和 WAREHOUSE 命令幂等键；不会重新冻结预留、创建第二条事件或直接调用 WAREHOUSE。原因会写入不可变审计。"
       message="受控重试，不是重新确认"
       show-icon
       type="warning"
@@ -3387,7 +3432,7 @@ watch(
   >
     <Alert
       class="shipment-page__modal-alert"
-      description="取消只改变本地发货草稿状态，不会创建、撤销或完成任何 WMS 出库动作。"
+      description="取消只改变本地发货草稿状态，不会创建、撤销或完成任何 WAREHOUSE 出库动作。"
       message="这是显式状态变更"
       show-icon
       type="warning"

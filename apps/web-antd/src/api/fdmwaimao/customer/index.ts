@@ -192,6 +192,7 @@ export namespace FdmWaimaoCustomerApi {
   }
 
   export interface ImportReq {
+    attachmentIds: string[];
     confirmPotentialDuplicate: boolean;
     okkiCompanyId: string;
     previewHash: string;

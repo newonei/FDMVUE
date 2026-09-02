@@ -122,7 +122,7 @@ export function formatSubjectDisplay(
 ) {
   if (!code && !name) return '';
   const names = auxiliaryNames.filter(Boolean);
-  return `${code || ''} ${name || ''}${names.length ? ` / ${names.join('、')}` : ''}`;
+  return `${code || ''} ${name || ''}${names.length > 0 ? ` / ${names.join('、')}` : ''}`;
 }
 
 /** 构建会计期间导出文件名 */

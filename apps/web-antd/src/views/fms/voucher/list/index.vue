@@ -229,7 +229,7 @@ async function handleMoreCommand(
       return;
     }
   }
-  if (!voucherWords.value.length) {
+  if (voucherWords.value.length === 0) {
     message.warning('请先设置凭证字');
     return;
   }
@@ -251,10 +251,10 @@ async function handleMoreCommand(
 async function handlePrintVoucher(row?: FmsVoucherApi.Voucher) {
   if (!accountSetId.value) return;
   let vouchers = row ? [row] : selectedRows.value;
-  if (!vouchers.length) {
+  if (vouchers.length === 0) {
     vouchers = await getAllVoucherList();
   }
-  if (!vouchers.length) {
+  if (vouchers.length === 0) {
     message.warning('暂无可打印的凭证');
     return;
   }
@@ -268,7 +268,7 @@ async function handlePrintVoucher(row?: FmsVoucherApi.Voucher) {
 /** 打印凭证列表 */
 async function handlePrintList() {
   const vouchers = await getAllVoucherList();
-  if (!vouchers.length) {
+  if (vouchers.length === 0) {
     message.warning('暂无可打印的凭证');
     return;
   }
@@ -295,12 +295,14 @@ async function handleExport() {
   try {
     await confirm('是否确认导出凭证列表的数据项？');
     exportLoading.value = true;
-    const ids = selectedRows.value.length
-      ? selectedRows.value.map((row) => row.id)
-      : undefined;
+    const ids =
+      selectedRows.value.length > 0
+        ? selectedRows.value.map((row) => row.id)
+        : undefined;
     const data = await exportVoucher({ ...lastQuery.value, ids });
     downloadFileFromBlobPart({ fileName: '凭证列表.xls', source: data });
   } catch {
+    //
   } finally {
     exportLoading.value = false;
   }
@@ -356,13 +358,13 @@ async function handleReview(row: FmsVoucherApi.Voucher, status: number) {
 
 /** 批量审核或反审核凭证 */
 async function handleBatchReview(status: number) {
-  if (!accountSetId.value || !selectedRows.value.length) return;
+  if (!accountSetId.value || selectedRows.value.length === 0) return;
   const rows = selectedRows.value.filter((row) =>
     status === FMS_VOUCHER_STATUS.APPROVED
       ? row.status === FMS_VOUCHER_STATUS.PENDING_REVIEW
       : row.status === FMS_VOUCHER_STATUS.APPROVED,
   );
-  if (!rows.length) {
+  if (rows.length === 0) {
     message.warning('所选凭证不符合当前审核操作');
     return;
   }

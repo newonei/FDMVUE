@@ -59,10 +59,10 @@ const [Modal, modalApi] = useVbenModal({
     if (!isOpen) {
       return;
     }
-    const data = modalApi.getData<{
+    const data = modalApi.getData() as {
       accountSetId: number;
       auxiliaryType: FmsAuxiliaryTypeApi.AuxiliaryType;
-    }>();
+    };
     accountSetId.value = data.accountSetId;
     auxiliaryType.value = data.auxiliaryType;
     resetImport();

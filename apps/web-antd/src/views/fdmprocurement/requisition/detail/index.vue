@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { FdmProcurementPurchaseOrderHandoffApi } from '#/api/fdmprocurement/purchase-order-handoff';
+import type { FdmProcurementPurchaseOrderApi } from '#/api/fdmprocurement/purchase-order';
 import type { FdmProcurementRequisitionApi } from '#/api/fdmprocurement/requisition';
 import type { ProductSelectionValue } from '#/views/fdmproduct/shared/product-selection';
 
@@ -28,13 +28,13 @@ import {
 } from 'ant-design-vue';
 
 import {
-  getPurchaseOrderHandoffExecutionFacts,
-  getPurchaseOrderHandoffLifecycleEvents,
-  getPurchaseOrderHandoffProjectionState,
-  getPurchaseOrderHandoffs,
-  retryPurchaseOrderHandoff,
-  retryPurchaseOrderHandoffProjection,
-} from '#/api/fdmprocurement/purchase-order-handoff';
+  getPurchaseOrderExecutionFacts,
+  getPurchaseOrderLifecycleEvents,
+  getPurchaseOrderProjectionState,
+  getPurchaseOrderProjections,
+  retryPurchaseOrderProjection,
+  retryPurchaseOrderPublication,
+} from '#/api/fdmprocurement/purchase-order';
 import {
   bindProcurementRequisitionProductSku,
   getProcurementRequisition,
@@ -64,21 +64,21 @@ import {
 import {
   canLoadExecutionFacts,
   canLoadLifecycleHistory,
-  canRetryHandoff,
+  canRetryPurchaseOrderProjection,
   canRetryProjection,
-  erpLifecycleActionMeta,
-  erpLifecycleEventResultMeta,
-  erpLifecycleNotice,
-  erpLifecycleStatusMeta,
+  purchaseOrderLifecycleActionMeta,
+  purchaseOrderLifecycleEventResultMeta,
+  purchaseOrderLifecycleNotice,
+  purchaseOrderLifecycleStatusMeta,
   executionActionMeta,
   executionDocumentTypeMeta,
   executionEventResultMeta,
   executionPostingStateMeta,
-  handoffStatusMeta,
+  purchaseOrderProjectionStatusMeta,
   projectionStateNotice,
   projectionStatusMeta,
   validateProjectionRetryReason,
-} from '../handoff-policy';
+} from '../purchase-order-policy';
 import {
   authoritativeSelectedAssessmentRef,
   canBindUnmappedProductSku,
@@ -95,7 +95,7 @@ defineOptions({ name: 'FdmProcurementRequisitionDetail' });
 const props = defineProps<{ id?: number | string }>();
 
 interface LifecycleHistoryState {
-  events: FdmProcurementPurchaseOrderHandoffApi.LifecycleEvent[];
+  events: FdmProcurementPurchaseOrderApi.LifecycleEvent[];
   failed: boolean;
   loaded: boolean;
   loading: boolean;
@@ -103,7 +103,7 @@ interface LifecycleHistoryState {
 }
 
 interface ExecutionFactsState {
-  documents: FdmProcurementPurchaseOrderHandoffApi.ExecutionDocument[];
+  documents: FdmProcurementPurchaseOrderApi.ExecutionDocument[];
   failed: boolean;
   loaded: boolean;
   loading: boolean;
@@ -121,19 +121,22 @@ const validation = ref<FdmProcurementRequisitionApi.ValidationResult>();
 const loading = ref(false);
 const actionLoading = ref('');
 const approvalLoadFailed = ref(false);
-const handoffLoading = ref(false);
-const handoffLoadFailed = ref(false);
-const handoffs = ref<FdmProcurementPurchaseOrderHandoffApi.Handoff[]>([]);
+const purchaseOrderProjectionLoading = ref(false);
+const purchaseOrderProjectionLoadFailed = ref(false);
+const purchaseOrderProjections = ref<
+  FdmProcurementPurchaseOrderApi.PurchaseOrderProjection[]
+>([]);
 const projectionLoading = ref(false);
 const projectionLoadFailed = ref(false);
-const projectionState =
-  ref<FdmProcurementPurchaseOrderHandoffApi.ProjectionState>();
-const lifecycleHistoryByHandoff = ref<Record<string, LifecycleHistoryState>>(
-  {},
-);
-const expandedLifecycleHandoffIds = ref<string[]>([]);
-const executionFactsByHandoff = ref<Record<string, ExecutionFactsState>>({});
-const expandedExecutionHandoffIds = ref<string[]>([]);
+const projectionState = ref<FdmProcurementPurchaseOrderApi.ProjectionState>();
+const lifecycleHistoryByPurchaseOrderProjection = ref<
+  Record<string, LifecycleHistoryState>
+>({});
+const expandedLifecyclePurchaseOrderProjectionIds = ref<string[]>([]);
+const executionFactsByPurchaseOrderProjection = ref<
+  Record<string, ExecutionFactsState>
+>({});
+const expandedExecutionPurchaseOrderProjectionIds = ref<string[]>([]);
 const projectionRetryOpen = ref(false);
 const projectionRetryReason = ref('');
 const projectionRetryError = ref('');
@@ -146,7 +149,7 @@ const productBindingItem = ref<FdmProcurementRequisitionApi.RequisitionItem>();
 const selectedProduct = ref<ProductSelectionValue>();
 const productBindingSaving = ref(false);
 let requestSequence = 0;
-let handoffRequestSequence = 0;
+let purchaseOrderProjectionRequestSequence = 0;
 let lifecycleHistoryEpoch = 0;
 let lifecycleHistoryRequestSequence = 0;
 let executionFactsEpoch = 0;
@@ -187,8 +190,8 @@ const hasWithdrawPermission = computed(() =>
 const hasApprovalWorkspacePermission = computed(() =>
   hasAllActionPermissions('APPROVAL_WORKSPACE', hasPermission),
 );
-const hasHandoffQueryPermission = computed(() =>
-  hasPermission('fdmprocurement:purchase-order-handoff:query'),
+const hasPurchaseOrderProjectionQueryPermission = computed(() =>
+  hasPermission('fdmprocurement:purchase-order:query'),
 );
 const hasReviewPermission = computed(() =>
   hasAllActionPermissions('EDIT', hasPermission),
@@ -359,8 +362,10 @@ const projectionMeta = computed(() =>
 const projectionNotice = computed(() =>
   projectionState.value
     ? projectionStateNotice(projectionState.value, {
-        handoffListLoaded: !handoffLoading.value && !handoffLoadFailed.value,
-        visibleHandoffCount: handoffs.value.length,
+        purchaseOrderListLoaded:
+          !purchaseOrderProjectionLoading.value &&
+          !purchaseOrderProjectionLoadFailed.value,
+        visiblePurchaseOrderCount: purchaseOrderProjections.value.length,
       })
     : undefined,
 );
@@ -471,13 +476,13 @@ async function bindProductSku() {
   }
 }
 
-const handoffLineColumns = [
-  { key: 'product', title: '产品与 ERP 映射', width: 230 },
-  { key: 'quantity', title: '采购数量 → ERP 基础数量', width: 220 },
+const purchaseOrderProjectionLineColumns = [
+  { key: 'product', title: '产品与采购写模型映射', width: 230 },
+  { key: 'quantity', title: '采购数量 → 库存单位数量', width: 220 },
   { key: 'price', title: '报价、税率与人民币净价', width: 270 },
   { key: 'schedule', title: '交付日期', width: 160 },
   { key: 'lineage', title: '供应决策血缘', width: 250 },
-  { key: 'erpItem', title: 'ERP 明细回执', width: 150 },
+  { key: 'purchaseOrderItem', title: 'FDM 采购单明细', width: 150 },
 ];
 
 const executionLineColumns = [
@@ -488,10 +493,10 @@ const executionLineColumns = [
 ];
 
 function executionLineRowKey(
-  line: FdmProcurementPurchaseOrderHandoffApi.ExecutionLine,
+  line: FdmProcurementPurchaseOrderApi.ExecutionLine,
 ) {
   return (
-    line.purchaseInItemId ||
+    line.purchaseReceiptItemId ||
     line.purchaseReturnItemId ||
     `${line.purchaseOrderItemId}:${line.lineRef}`
   );
@@ -500,10 +505,10 @@ function executionLineRowKey(
 function executionLineIdentity(documentType: string, rawLine: unknown) {
   // Ant Design Vue types scoped-slot records as a generic Record even though
   // dataSource is strongly typed. Narrow it once at this display-only edge.
-  const line = rawLine as FdmProcurementPurchaseOrderHandoffApi.ExecutionLine;
+  const line = rawLine as FdmProcurementPurchaseOrderApi.ExecutionLine;
   return documentType === 'PURCHASE_RETURN'
     ? `退货行 ${line.purchaseReturnItemId || '—'}`
-    : `入库行 ${line.purchaseInItemId || '—'}`;
+    : `入库行 ${line.purchaseReceiptItemId || '—'}`;
 }
 
 function displayValue(value?: null | number | string) {
@@ -513,34 +518,36 @@ function displayValue(value?: null | number | string) {
 }
 
 function displayDateTime(
-  value?: FdmProcurementPurchaseOrderHandoffApi.DateTimeValue | null,
+  value?: FdmProcurementPurchaseOrderApi.DateTimeValue | null,
 ) {
   return displayValue(value).replace('T', ' ');
 }
 
 function resetLifecycleHistories() {
   ++lifecycleHistoryEpoch;
-  lifecycleHistoryByHandoff.value = {};
-  expandedLifecycleHandoffIds.value = [];
+  lifecycleHistoryByPurchaseOrderProjection.value = {};
+  expandedLifecyclePurchaseOrderProjectionIds.value = [];
 }
 
 function resetExecutionFacts() {
   ++executionFactsEpoch;
-  executionFactsByHandoff.value = {};
-  expandedExecutionHandoffIds.value = [];
+  executionFactsByPurchaseOrderProjection.value = {};
+  expandedExecutionPurchaseOrderProjectionIds.value = [];
 }
 
-function resetHandoffEvidence() {
+function resetPurchaseOrderProjectionEvidence() {
   resetLifecycleHistories();
   resetExecutionFacts();
 }
 
-function lifecycleHistoryState(handoffId: string) {
-  return lifecycleHistoryByHandoff.value[handoffId];
+function lifecycleHistoryState(projectionId: string) {
+  return lifecycleHistoryByPurchaseOrderProjection.value[projectionId];
 }
 
-function lifecyclePanelActiveKey(handoffId: string) {
-  return expandedLifecycleHandoffIds.value.includes(handoffId)
+function lifecyclePanelActiveKey(projectionId: string) {
+  return expandedLifecyclePurchaseOrderProjectionIds.value.includes(
+    projectionId,
+  )
     ? ['lifecycle-history']
     : [];
 }
@@ -551,7 +558,7 @@ function isLifecyclePanelExpanded(activeKey: unknown) {
 }
 
 function isCurrentLifecycleHistoryRequest(
-  handoffId: string,
+  projectionId: string,
   pageSequence: number,
   epoch: number,
   historySequence: number,
@@ -559,35 +566,35 @@ function isCurrentLifecycleHistoryRequest(
   return (
     !disposed &&
     canLoadLifecycleHistory(
-      handoffId,
-      handoffs.value,
-      hasHandoffQueryPermission.value,
+      projectionId,
+      purchaseOrderProjections.value,
+      hasPurchaseOrderProjectionQueryPermission.value,
     ) &&
     pageSequence === requestSequence &&
     epoch === lifecycleHistoryEpoch &&
     requisitionId.value !== '' &&
-    lifecycleHistoryByHandoff.value[handoffId]?.requestSequence ===
-      historySequence
+    lifecycleHistoryByPurchaseOrderProjection.value[projectionId]
+      ?.requestSequence === historySequence
   );
 }
 
-async function loadLifecycleHistory(handoffId: string) {
+async function loadLifecycleHistory(projectionId: string) {
   if (
     !canLoadLifecycleHistory(
-      handoffId,
-      handoffs.value,
-      hasHandoffQueryPermission.value,
+      projectionId,
+      purchaseOrderProjections.value,
+      hasPurchaseOrderProjectionQueryPermission.value,
     )
   ) {
     return;
   }
-  const current = lifecycleHistoryByHandoff.value[handoffId];
+  const current = lifecycleHistoryByPurchaseOrderProjection.value[projectionId];
   if (current?.loading || current?.loaded) return;
 
   const pageSequence = requestSequence;
   const epoch = lifecycleHistoryEpoch;
   const historySequence = ++lifecycleHistoryRequestSequence;
-  lifecycleHistoryByHandoff.value[handoffId] = {
+  lifecycleHistoryByPurchaseOrderProjection.value[projectionId] = {
     events: current?.events ?? [],
     failed: false,
     loaded: false,
@@ -595,10 +602,10 @@ async function loadLifecycleHistory(handoffId: string) {
     requestSequence: historySequence,
   };
   try {
-    const events = await getPurchaseOrderHandoffLifecycleEvents(handoffId);
+    const events = await getPurchaseOrderLifecycleEvents(projectionId);
     if (
       !isCurrentLifecycleHistoryRequest(
-        handoffId,
+        projectionId,
         pageSequence,
         epoch,
         historySequence,
@@ -606,7 +613,7 @@ async function loadLifecycleHistory(handoffId: string) {
     ) {
       return;
     }
-    lifecycleHistoryByHandoff.value[handoffId] = {
+    lifecycleHistoryByPurchaseOrderProjection.value[projectionId] = {
       events,
       failed: false,
       loaded: true,
@@ -616,7 +623,7 @@ async function loadLifecycleHistory(handoffId: string) {
   } catch {
     if (
       !isCurrentLifecycleHistoryRequest(
-        handoffId,
+        projectionId,
         pageSequence,
         epoch,
         historySequence,
@@ -624,7 +631,7 @@ async function loadLifecycleHistory(handoffId: string) {
     ) {
       return;
     }
-    lifecycleHistoryByHandoff.value[handoffId] = {
+    lifecycleHistoryByPurchaseOrderProjection.value[projectionId] = {
       events: [],
       failed: true,
       loaded: false,
@@ -634,24 +641,26 @@ async function loadLifecycleHistory(handoffId: string) {
   }
 }
 
-function handleLifecyclePanelChange(handoffId: string, activeKey: unknown) {
+function handleLifecyclePanelChange(projectionId: string, activeKey: unknown) {
   const expanded = isLifecyclePanelExpanded(activeKey);
-  const next = new Set(expandedLifecycleHandoffIds.value);
+  const next = new Set(expandedLifecyclePurchaseOrderProjectionIds.value);
   if (expanded) {
-    next.add(handoffId);
-    void loadLifecycleHistory(handoffId);
+    next.add(projectionId);
+    void loadLifecycleHistory(projectionId);
   } else {
-    next.delete(handoffId);
+    next.delete(projectionId);
   }
-  expandedLifecycleHandoffIds.value = [...next];
+  expandedLifecyclePurchaseOrderProjectionIds.value = [...next];
 }
 
-function executionFactsState(handoffId: string) {
-  return executionFactsByHandoff.value[handoffId];
+function executionFactsState(projectionId: string) {
+  return executionFactsByPurchaseOrderProjection.value[projectionId];
 }
 
-function executionPanelActiveKey(handoffId: string) {
-  return expandedExecutionHandoffIds.value.includes(handoffId)
+function executionPanelActiveKey(projectionId: string) {
+  return expandedExecutionPurchaseOrderProjectionIds.value.includes(
+    projectionId,
+  )
     ? ['execution-facts']
     : [];
 }
@@ -662,7 +671,7 @@ function isExecutionPanelExpanded(activeKey: unknown) {
 }
 
 function isCurrentExecutionFactsRequest(
-  handoffId: string,
+  projectionId: string,
   pageSequence: number,
   epoch: number,
   factsSequence: number,
@@ -670,34 +679,35 @@ function isCurrentExecutionFactsRequest(
   return (
     !disposed &&
     canLoadExecutionFacts(
-      handoffId,
-      handoffs.value,
-      hasHandoffQueryPermission.value,
+      projectionId,
+      purchaseOrderProjections.value,
+      hasPurchaseOrderProjectionQueryPermission.value,
     ) &&
     pageSequence === requestSequence &&
     epoch === executionFactsEpoch &&
     requisitionId.value !== '' &&
-    executionFactsByHandoff.value[handoffId]?.requestSequence === factsSequence
+    executionFactsByPurchaseOrderProjection.value[projectionId]
+      ?.requestSequence === factsSequence
   );
 }
 
-async function loadExecutionFacts(handoffId: string) {
+async function loadExecutionFacts(projectionId: string) {
   if (
     !canLoadExecutionFacts(
-      handoffId,
-      handoffs.value,
-      hasHandoffQueryPermission.value,
+      projectionId,
+      purchaseOrderProjections.value,
+      hasPurchaseOrderProjectionQueryPermission.value,
     )
   ) {
     return;
   }
-  const current = executionFactsByHandoff.value[handoffId];
+  const current = executionFactsByPurchaseOrderProjection.value[projectionId];
   if (current?.loading || current?.loaded) return;
 
   const pageSequence = requestSequence;
   const epoch = executionFactsEpoch;
   const factsSequence = ++executionFactsRequestSequence;
-  executionFactsByHandoff.value[handoffId] = {
+  executionFactsByPurchaseOrderProjection.value[projectionId] = {
     documents: current?.documents ?? [],
     failed: false,
     loaded: false,
@@ -705,10 +715,10 @@ async function loadExecutionFacts(handoffId: string) {
     requestSequence: factsSequence,
   };
   try {
-    const documents = await getPurchaseOrderHandoffExecutionFacts(handoffId);
+    const documents = await getPurchaseOrderExecutionFacts(projectionId);
     if (
       !isCurrentExecutionFactsRequest(
-        handoffId,
+        projectionId,
         pageSequence,
         epoch,
         factsSequence,
@@ -716,7 +726,7 @@ async function loadExecutionFacts(handoffId: string) {
     ) {
       return;
     }
-    executionFactsByHandoff.value[handoffId] = {
+    executionFactsByPurchaseOrderProjection.value[projectionId] = {
       documents,
       failed: false,
       loaded: true,
@@ -726,7 +736,7 @@ async function loadExecutionFacts(handoffId: string) {
   } catch {
     if (
       !isCurrentExecutionFactsRequest(
-        handoffId,
+        projectionId,
         pageSequence,
         epoch,
         factsSequence,
@@ -734,7 +744,7 @@ async function loadExecutionFacts(handoffId: string) {
     ) {
       return;
     }
-    executionFactsByHandoff.value[handoffId] = {
+    executionFactsByPurchaseOrderProjection.value[projectionId] = {
       documents: [],
       failed: true,
       loaded: false,
@@ -744,16 +754,16 @@ async function loadExecutionFacts(handoffId: string) {
   }
 }
 
-function handleExecutionPanelChange(handoffId: string, activeKey: unknown) {
+function handleExecutionPanelChange(projectionId: string, activeKey: unknown) {
   const expanded = isExecutionPanelExpanded(activeKey);
-  const next = new Set(expandedExecutionHandoffIds.value);
+  const next = new Set(expandedExecutionPurchaseOrderProjectionIds.value);
   if (expanded) {
-    next.add(handoffId);
-    void loadExecutionFacts(handoffId);
+    next.add(projectionId);
+    void loadExecutionFacts(projectionId);
   } else {
-    next.delete(handoffId);
+    next.delete(projectionId);
   }
-  expandedExecutionHandoffIds.value = [...next];
+  expandedExecutionPurchaseOrderProjectionIds.value = [...next];
 }
 
 async function loadApprovalState(id: string, sequence: number) {
@@ -770,54 +780,71 @@ async function loadApprovalState(id: string, sequence: number) {
   }
 }
 
-function isCurrentHandoffRequest(
+function isCurrentPurchaseOrderProjectionRequest(
   id: string,
   pageSequence: number,
-  handoffSequence: number,
+  purchaseOrderProjectionSequence: number,
 ) {
   return (
     !disposed &&
     pageSequence === requestSequence &&
-    handoffSequence === handoffRequestSequence &&
+    purchaseOrderProjectionSequence ===
+      purchaseOrderProjectionRequestSequence &&
     id === requisitionId.value
   );
 }
 
-async function loadHandoffState(
+async function loadPurchaseOrderProjectionState(
   id: string,
   status: string,
   pageSequence = requestSequence,
 ) {
-  const handoffSequence = ++handoffRequestSequence;
-  resetHandoffEvidence();
-  handoffLoadFailed.value = false;
-  handoffs.value = [];
+  const purchaseOrderProjectionSequence =
+    ++purchaseOrderProjectionRequestSequence;
+  resetPurchaseOrderProjectionEvidence();
+  purchaseOrderProjectionLoadFailed.value = false;
+  purchaseOrderProjections.value = [];
   projectionLoadFailed.value = false;
   projectionState.value = undefined;
-  handoffLoading.value = false;
+  purchaseOrderProjectionLoading.value = false;
   projectionLoading.value = false;
-  if (!hasHandoffQueryPermission.value || status !== 'APPROVED') return;
-  handoffLoading.value = true;
+  if (!hasPurchaseOrderProjectionQueryPermission.value || status !== 'APPROVED')
+    return;
+  purchaseOrderProjectionLoading.value = true;
   projectionLoading.value = true;
   try {
-    const [projectionResult, handoffResult] = await Promise.allSettled([
-      getPurchaseOrderHandoffProjectionState(id),
-      getPurchaseOrderHandoffs(id),
-    ]);
-    if (!isCurrentHandoffRequest(id, pageSequence, handoffSequence)) return;
+    const [projectionResult, purchaseOrderProjectionResult] =
+      await Promise.allSettled([
+        getPurchaseOrderProjectionState(id),
+        getPurchaseOrderProjections(id),
+      ]);
+    if (
+      !isCurrentPurchaseOrderProjectionRequest(
+        id,
+        pageSequence,
+        purchaseOrderProjectionSequence,
+      )
+    )
+      return;
     if (projectionResult.status === 'fulfilled') {
       projectionState.value = projectionResult.value;
     } else {
       projectionLoadFailed.value = true;
     }
-    if (handoffResult.status === 'fulfilled') {
-      handoffs.value = handoffResult.value;
+    if (purchaseOrderProjectionResult.status === 'fulfilled') {
+      purchaseOrderProjections.value = purchaseOrderProjectionResult.value;
     } else {
-      handoffLoadFailed.value = true;
+      purchaseOrderProjectionLoadFailed.value = true;
     }
   } finally {
-    if (isCurrentHandoffRequest(id, pageSequence, handoffSequence)) {
-      handoffLoading.value = false;
+    if (
+      isCurrentPurchaseOrderProjectionRequest(
+        id,
+        pageSequence,
+        purchaseOrderProjectionSequence,
+      )
+    ) {
+      purchaseOrderProjectionLoading.value = false;
       projectionLoading.value = false;
     }
   }
@@ -826,21 +853,21 @@ async function loadHandoffState(
 async function load() {
   const id = requisitionId.value;
   const sequence = ++requestSequence;
-  ++handoffRequestSequence;
-  resetHandoffEvidence();
+  ++purchaseOrderProjectionRequestSequence;
+  resetPurchaseOrderProjectionEvidence();
   loading.value = Boolean(id);
   detail.value = undefined;
   validation.value = undefined;
   approvalState.value = undefined;
   approvalLoadFailed.value = false;
-  handoffs.value = [];
-  handoffLoadFailed.value = false;
+  purchaseOrderProjections.value = [];
+  purchaseOrderProjectionLoadFailed.value = false;
   projectionState.value = undefined;
   projectionLoadFailed.value = false;
   projectionRetryOpen.value = false;
   projectionRetryReason.value = '';
   projectionRetryError.value = '';
-  handoffLoading.value = false;
+  purchaseOrderProjectionLoading.value = false;
   projectionLoading.value = false;
   if (!id) return;
   try {
@@ -850,7 +877,7 @@ async function load() {
     detail.value = result;
     await Promise.all([
       loadApprovalState(id, sequence),
-      loadHandoffState(id, result.status, sequence),
+      loadPurchaseOrderProjectionState(id, result.status, sequence),
     ]);
   } finally {
     if (
@@ -863,23 +890,24 @@ async function load() {
   }
 }
 
-async function refreshHandoffs() {
+async function refreshPurchaseOrderProjections() {
   if (!detail.value) return;
-  await loadHandoffState(detail.value.id, detail.value.status);
+  await loadPurchaseOrderProjectionState(detail.value.id, detail.value.status);
 }
 
-async function retryHandoff(
-  handoff: FdmProcurementPurchaseOrderHandoffApi.Handoff,
+async function handlePurchaseOrderProjectionRetry(
+  purchaseOrderProjection: FdmProcurementPurchaseOrderApi.PurchaseOrderProjection,
 ) {
-  if (!canRetryHandoff(handoff, hasPermission)) return;
-  actionLoading.value = `handoff:${handoff.id}`;
+  if (!canRetryPurchaseOrderProjection(purchaseOrderProjection, hasPermission))
+    return;
+  actionLoading.value = `purchaseOrderProjection:${purchaseOrderProjection.id}`;
   try {
-    await retryPurchaseOrderHandoff({
-      expectedVersion: handoff.version,
-      id: handoff.id,
+    await retryPurchaseOrderProjection({
+      expectedVersion: purchaseOrderProjection.version,
+      id: purchaseOrderProjection.id,
     });
-    message.success('已重新进入 ERP 草稿采购单发送队列');
-    await refreshHandoffs();
+    message.success('已重新进入 FDM 采购单生成队列');
+    await refreshPurchaseOrderProjections();
   } finally {
     actionLoading.value = '';
   }
@@ -923,7 +951,7 @@ async function retryProjection() {
   actionLoading.value = 'projection-retry';
   projectionRetryError.value = '';
   try {
-    await retryPurchaseOrderHandoffProjection({
+    await retryPurchaseOrderPublication({
       expectedVersion: state.outboxVersion,
       outboxId: state.outboxId,
       reason: validated.reason,
@@ -933,7 +961,7 @@ async function retryProjection() {
     projectionRetryOpen.value = false;
     projectionRetryReason.value = '';
     message.success('审批投影已恢复到等待投递，将由后端任务继续处理');
-    await refreshHandoffs();
+    await refreshPurchaseOrderProjections();
   } finally {
     actionLoading.value = '';
   }
@@ -1074,8 +1102,8 @@ function back() {
 onBeforeUnmount(() => {
   disposed = true;
   ++requestSequence;
-  ++handoffRequestSequence;
-  resetHandoffEvidence();
+  ++purchaseOrderProjectionRequestSequence;
+  resetPurchaseOrderProjectionEvidence();
   projectionRetryOpen.value = false;
 });
 
@@ -1244,9 +1272,13 @@ watch(requisitionId, load, { immediate: true });
               <template v-if="column.key === 'product'">
                 <div class="requisition-detail__stack">
                   <strong>{{ record.productName }}</strong>
-                  <span>{{ record.productCode || '无产品编码' }} ·
-                    {{ record.specification || '无规格' }}</span>
-                  <span v-if="record.customization">定制：{{ record.customization }}</span>
+                  <span
+                    >{{ record.productCode || '无产品编码' }} ·
+                    {{ record.specification || '无规格' }}</span
+                  >
+                  <span v-if="record.customization"
+                    >定制：{{ record.customization }}</span
+                  >
                 </div>
               </template>
               <template v-else-if="column.key === 'mapping'">
@@ -1274,7 +1306,9 @@ watch(requisitionId, load, { immediate: true });
                 <div class="requisition-detail__stack">
                   <span>合同产品行 {{ record.sourceContractLineId }}</span>
                   <span>需求计划行 {{ record.sourcePlanLineId }}</span>
-                  <span>采购申请行 {{ record.id }} · v{{ record.version }}</span>
+                  <span
+                    >采购申请行 {{ record.id }} · v{{ record.version }}</span
+                  >
                 </div>
               </template>
             </template>
@@ -1300,7 +1334,9 @@ watch(requisitionId, load, { immediate: true });
                 {{ issue.severity }}
               </Tag>
               <strong>{{ issue.code }}</strong>
-              <span>{{ issue.fieldPath || '单据级' }} · {{ issue.message }}</span>
+              <span
+                >{{ issue.fieldPath || '单据级' }} · {{ issue.message }}</span
+              >
             </div>
           </div>
           <Empty
@@ -1410,36 +1446,41 @@ watch(requisitionId, load, { immediate: true });
             >
               <strong>{{ audit.operation }}</strong>
               <p>{{ audit.fromStatus || '—' }} → {{ audit.toStatus || '—' }}</p>
-              <small>{{ audit.actorType || 'SYSTEM' }}
+              <small
+                >{{ audit.actorType || 'SYSTEM' }}
                 {{ audit.actorUserId || '' }} ·
-                {{ audit.createTime || '—' }}</small>
+                {{ audit.createTime || '—' }}</small
+              >
               <p v-if="audit.reason">{{ audit.reason }}</p>
             </Timeline.Item>
           </Timeline>
         </Card>
 
         <Card
-          v-if="hasHandoffQueryPermission && detail.status === 'APPROVED'"
-          title="ERP 采购单交接与生命周期"
+          v-if="
+            hasPurchaseOrderProjectionQueryPermission &&
+            detail.status === 'APPROVED'
+          "
+          title="FDM 采购单投影与生命周期"
           size="small"
         >
           <template #extra>
             <Button
-              :loading="handoffLoading || projectionLoading"
+              :loading="purchaseOrderProjectionLoading || projectionLoading"
               size="small"
-              @click="refreshHandoffs"
+              @click="refreshPurchaseOrderProjections"
             >
-              刷新交接状态
+              刷新采购单投影状态
             </Button>
           </template>
           <Alert
-            message="采购申请审批通过后，系统仅使用审批冻结快照创建 ERP 草稿采购单。创建交付状态与 ERP 单据生命周期分开记录，ERP 确认、反确认或取消后只读回传。"
+            message="采购申请审批通过后，系统仅使用审批冻结快照创建 FDM 采购单草稿。采购单生成状态与单据生命周期分开记录，确认、反确认或取消后只读回传。"
             show-icon
             type="info"
           />
           <Alert
             v-if="projectionLoadFailed"
-            class="handoff-alert"
+            class="purchase-order-projection-alert"
             message="审批事件投递状态暂时无法读取。页面不会把读取失败误报为尚未创建或投递成功。"
             show-icon
             type="warning"
@@ -1459,7 +1500,7 @@ watch(requisitionId, load, { immediate: true });
             />
             <div v-if="canRetryProjectionState" class="projection-retry-action">
               <span>
-                恢复操作只把当前死信事件重新放回投递队列，不会在浏览器中直接执行投影或创建交接台账。
+                恢复操作只把当前死信事件重新放回投递队列，不会在浏览器中直接执行投影或创建采购单投影。
               </span>
               <Button danger size="small" @click="openProjectionRetry">
                 人工恢复投影
@@ -1489,8 +1530,9 @@ watch(requisitionId, load, { immediate: true });
               <Descriptions.Item label="死信时间">
                 {{ displayDateTime(projectionState.deadLetterAt) }}
               </Descriptions.Item>
-              <Descriptions.Item label="投影 / 当前交接数">
-                {{ projectionState.handoffCount }} / {{ handoffs.length }}
+              <Descriptions.Item label="投影 / 当前采购单投影数">
+                {{ projectionState.purchaseOrderCount }} /
+                {{ purchaseOrderProjections.length }}
               </Descriptions.Item>
               <Descriptions.Item
                 v-if="
@@ -1508,221 +1550,326 @@ watch(requisitionId, load, { immediate: true });
             </Descriptions>
           </div>
           <Alert
-            v-if="handoffLoadFailed"
-            class="handoff-alert"
-            message="交接台账暂时无法读取。页面不会把读取失败误报成尚未生成，请稍后重试。"
+            v-if="purchaseOrderProjectionLoadFailed"
+            class="purchase-order-projection-alert"
+            message="采购单投影暂时无法读取。页面不会把读取失败误报成尚未生成，请稍后重试。"
             show-icon
             type="warning"
           />
           <Skeleton
-            v-if="handoffLoading && !handoffs.length"
+            v-if="
+              purchaseOrderProjectionLoading && !purchaseOrderProjections.length
+            "
             active
             :paragraph="{ rows: 4 }"
           />
           <Empty
-            v-else-if="!handoffLoadFailed && !handoffs.length"
+            v-else-if="
+              !purchaseOrderProjectionLoadFailed &&
+              !purchaseOrderProjections.length
+            "
             :image="Empty.PRESENTED_IMAGE_SIMPLE"
-            description="当前没有 ERP 采购单交接台账，请以上方审批事件投递状态为准。"
+            description="当前没有 FDM 采购单投影，请以上方审批事件投递状态为准。"
           />
-          <div v-else class="handoff-list">
+          <div v-else class="purchase-order-projection-list">
             <Card
-              v-for="handoff in handoffs"
-              :key="handoff.id"
-              class="handoff-card"
+              v-for="purchaseOrderProjection in purchaseOrderProjections"
+              :key="purchaseOrderProjection.id"
+              class="purchase-order-projection-card"
               size="small"
             >
               <template #title>
-                <div class="handoff-card__title">
-                  <strong>供应商 {{ handoff.supplierId }} ·
-                    {{ handoff.quoteCurrency }}</strong>
+                <div class="purchase-order-projection-card__title">
+                  <strong
+                    >供应商 {{ purchaseOrderProjection.supplierId }} ·
+                    {{ purchaseOrderProjection.quoteCurrency }}</strong
+                  >
                   <span>{{
-                    handoff.erpPurchaseOrderNo || '尚未取得 ERP 单号'
+                    purchaseOrderProjection.purchaseOrderNo ||
+                    '尚未取得 FDM 采购单号'
                   }}</span>
                 </div>
               </template>
               <template #extra>
                 <Button
-                  v-if="canRetryHandoff(handoff, hasPermission)"
-                  :loading="actionLoading === `handoff:${handoff.id}`"
+                  v-if="
+                    canRetryPurchaseOrderProjection(
+                      purchaseOrderProjection,
+                      hasPermission,
+                    )
+                  "
+                  :loading="
+                    actionLoading ===
+                    `purchaseOrderProjection:${purchaseOrderProjection.id}`
+                  "
                   danger
                   size="small"
-                  @click="retryHandoff(handoff)"
+                  @click="
+                    handlePurchaseOrderProjectionRetry(purchaseOrderProjection)
+                  "
                 >
                   人工重试
                 </Button>
               </template>
 
-              <div class="handoff-state-strip">
-                <div class="handoff-state-strip__item">
-                  <span class="handoff-state-strip__label">FDM → ERP 创建交付</span>
-                  <Tag :color="handoffStatusMeta(handoff.status).color">
-                    {{ handoffStatusMeta(handoff.status).label }}
-                  </Tag>
-                  <small>完成时间 {{ displayDateTime(handoff.completedAt) }}</small>
-                </div>
-                <div
-                  class="handoff-state-strip__item"
-                  :class="{
-                    'handoff-state-strip__item--cancelled':
-                      handoff.erpPurchaseOrderStatus === 'CANCELLED',
-                  }"
-                >
-                  <span class="handoff-state-strip__label">ERP 单据生命周期</span>
+              <div class="purchase-order-projection-state-strip">
+                <div class="purchase-order-projection-state-strip__item">
+                  <span class="purchase-order-projection-state-strip__label"
+                    >FDM 采购单生成</span
+                  >
                   <Tag
                     :color="
-                      erpLifecycleStatusMeta(handoff.erpPurchaseOrderStatus)
-                        .color
+                      purchaseOrderProjectionStatusMeta(
+                        purchaseOrderProjection.status,
+                      ).color
                     "
                   >
                     {{
-                      erpLifecycleStatusMeta(handoff.erpPurchaseOrderStatus)
-                        .label
+                      purchaseOrderProjectionStatusMeta(
+                        purchaseOrderProjection.status,
+                      ).label
                     }}
                   </Tag>
-                  <small>状态更新
-                    {{ displayDateTime(handoff.erpStatusUpdatedAt) }}</small>
+                  <small
+                    >完成时间
+                    {{
+                      displayDateTime(purchaseOrderProjection.completedAt)
+                    }}</small
+                  >
+                </div>
+                <div
+                  class="purchase-order-projection-state-strip__item"
+                  :class="{
+                    'purchase-order-projection-state-strip__item--cancelled':
+                      purchaseOrderProjection.purchaseOrderStatus ===
+                      'CANCELLED',
+                  }"
+                >
+                  <span class="purchase-order-projection-state-strip__label"
+                    >采购单据生命周期</span
+                  >
+                  <Tag
+                    :color="
+                      purchaseOrderLifecycleStatusMeta(
+                        purchaseOrderProjection.purchaseOrderStatus,
+                      ).color
+                    "
+                  >
+                    {{
+                      purchaseOrderLifecycleStatusMeta(
+                        purchaseOrderProjection.purchaseOrderStatus,
+                      ).label
+                    }}
+                  </Tag>
+                  <small
+                    >状态更新
+                    {{
+                      displayDateTime(purchaseOrderProjection.statusUpdatedAt)
+                    }}</small
+                  >
                 </div>
               </div>
 
               <Alert
-                v-if="erpLifecycleNotice(handoff)"
-                class="handoff-lifecycle-alert"
-                :description="erpLifecycleNotice(handoff)?.description"
-                :message="erpLifecycleNotice(handoff)?.message"
+                v-if="purchaseOrderLifecycleNotice(purchaseOrderProjection)"
+                class="purchase-order-projection-lifecycle-alert"
+                :description="
+                  purchaseOrderLifecycleNotice(purchaseOrderProjection)
+                    ?.description
+                "
+                :message="
+                  purchaseOrderLifecycleNotice(purchaseOrderProjection)?.message
+                "
                 show-icon
-                :type="erpLifecycleNotice(handoff)?.type"
+                :type="
+                  purchaseOrderLifecycleNotice(purchaseOrderProjection)?.type
+                "
               />
 
               <Descriptions :column="3" size="small">
-                <Descriptions.Item label="公司 / ERP 供应商">
-                  {{ handoff.companyId }} / {{ handoff.erpSupplierId }}
+                <Descriptions.Item label="公司 / FDM 供应商">
+                  {{ purchaseOrderProjection.companyId }} /
+                  {{ purchaseOrderProjection.supplierId }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 采购单号">
-                  {{ handoff.erpPurchaseOrderNo || '尚未取得回执' }}
+                <Descriptions.Item label="FDM 采购单号">
+                  {{
+                    purchaseOrderProjection.purchaseOrderNo || '尚未取得回执'
+                  }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 单据 ID">
-                  {{ handoff.erpPurchaseOrderId || '—' }}
+                <Descriptions.Item label="采购单据 ID">
+                  {{ purchaseOrderProjection.purchaseOrderId || '—' }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 生命周期版本">
-                  {{ displayValue(handoff.erpLifecycleVersion) }}
+                <Descriptions.Item label="FDM 采购单生命周期版本">
+                  {{ displayValue(purchaseOrderProjection.lifecycleVersion) }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 状态更新时间">
-                  {{ displayDateTime(handoff.erpStatusUpdatedAt) }}
+                <Descriptions.Item label="FDM 采购单状态更新时间">
+                  {{ displayDateTime(purchaseOrderProjection.statusUpdatedAt) }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 最近动作 / 操作人">
-                  {{ handoff.erpLastAction || '—' }} /
-                  {{ handoff.erpLastActorUserId || '—' }}
+                <Descriptions.Item label="FDM 采购单最近动作 / 操作人">
+                  {{ purchaseOrderProjection.lastAction || '—' }} /
+                  {{ purchaseOrderProjection.lastActorUserId || '—' }}
                 </Descriptions.Item>
                 <Descriptions.Item label="冻结汇率">
-                  1 {{ handoff.quoteCurrency }} =
-                  {{ handoff.exchangeRateToCny }} CNY
+                  1 {{ purchaseOrderProjection.quoteCurrency }} =
+                  {{ purchaseOrderProjection.exchangeRateToCny }} CNY
                 </Descriptions.Item>
                 <Descriptions.Item label="请求日 / 生效日">
-                  {{ handoff.rateRequestedDate }} /
-                  {{ handoff.rateEffectiveDate }}
+                  {{ purchaseOrderProjection.rateRequestedDate }} /
+                  {{ purchaseOrderProjection.rateEffectiveDate }}
                 </Descriptions.Item>
                 <Descriptions.Item label="汇率来源">
-                  {{ handoff.rateProvider }}
-                  <Tag v-if="handoff.rateFallbackUsed" color="orange">
+                  {{ purchaseOrderProjection.rateProvider }}
+                  <Tag
+                    v-if="purchaseOrderProjection.rateFallbackUsed"
+                    color="orange"
+                  >
                     使用回退汇率
                   </Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="汇率获取时间">
-                  {{ displayDateTime(handoff.rateRetrievedAt) }}
+                  {{ displayDateTime(purchaseOrderProjection.rateRetrievedAt) }}
                 </Descriptions.Item>
                 <Descriptions.Item label="尝试次数 / 下次重试">
-                  {{ handoff.attemptCount }} /
-                  {{ displayDateTime(handoff.nextRetryAt) }}
+                  {{ purchaseOrderProjection.attemptCount }} /
+                  {{ displayDateTime(purchaseOrderProjection.nextRetryAt) }}
                 </Descriptions.Item>
                 <Descriptions.Item label="最近尝试 / 完成时间">
-                  {{ displayDateTime(handoff.lastAttemptAt) }} /
-                  {{ displayDateTime(handoff.completedAt) }}
+                  {{ displayDateTime(purchaseOrderProjection.lastAttemptAt) }} /
+                  {{ displayDateTime(purchaseOrderProjection.completedAt) }}
                 </Descriptions.Item>
                 <Descriptions.Item
-                  v-if="handoff.lastErrorCode || handoff.lastErrorMessage"
+                  v-if="
+                    purchaseOrderProjection.lastErrorCode ||
+                    purchaseOrderProjection.lastErrorMessage
+                  "
                   label="最近错误"
                   :span="3"
                 >
                   <Tag color="red">
-                    {{ handoff.lastErrorCode || 'ERP_HANDOFF_FAILED' }}
+                    {{
+                      purchaseOrderProjection.lastErrorCode ||
+                      'PURCHASE_ORDER_FAILED'
+                    }}
                   </Tag>
-                  {{ handoff.lastErrorMessage || '未提供脱敏错误摘要' }}
+                  {{
+                    purchaseOrderProjection.lastErrorMessage ||
+                    '未提供脱敏错误摘要'
+                  }}
                 </Descriptions.Item>
                 <Descriptions.Item label="审批快照" :span="3">
-                  ID {{ handoff.approvalSnapshotId }} ·
-                  {{ handoff.approvalSnapshotHash }}
+                  ID {{ purchaseOrderProjection.approvalSnapshotId }} ·
+                  {{ purchaseOrderProjection.approvalSnapshotHash }}
                 </Descriptions.Item>
                 <Descriptions.Item label="寻源决策" :span="3">
-                  评估 {{ handoff.sourcingAssessmentId }} ·
-                  {{ handoff.sourcingInputHash }}
+                  评估 {{ purchaseOrderProjection.sourcingAssessmentId }} ·
+                  {{ purchaseOrderProjection.sourcingInputHash }}
                 </Descriptions.Item>
-                <Descriptions.Item label="ERP 幂等命令" :span="3">
-                  {{ handoff.erpCommandId }} ·
-                  {{ handoff.erpPayloadHash || '尚未生成载荷哈希' }}
+                <Descriptions.Item label="采购单幂等命令" :span="3">
+                  {{ purchaseOrderProjection.commandId }} ·
+                  {{
+                    purchaseOrderProjection.payloadHash || '尚未生成载荷哈希'
+                  }}
                 </Descriptions.Item>
               </Descriptions>
 
               <Collapse
-                class="handoff-lifecycle-history"
+                class="purchase-order-projection-lifecycle-history"
                 ghost
-                :active-key="lifecyclePanelActiveKey(handoff.id)"
-                @change="handleLifecyclePanelChange(handoff.id, $event)"
+                :active-key="
+                  lifecyclePanelActiveKey(purchaseOrderProjection.id)
+                "
+                @change="
+                  handleLifecyclePanelChange(purchaseOrderProjection.id, $event)
+                "
               >
                 <Collapse.Panel key="lifecycle-history" header="生命周期记录">
                   <Skeleton
-                    v-if="lifecycleHistoryState(handoff.id)?.loading"
+                    v-if="
+                      lifecycleHistoryState(purchaseOrderProjection.id)?.loading
+                    "
                     active
                     :paragraph="{ rows: 2 }"
                   />
                   <Alert
-                    v-else-if="lifecycleHistoryState(handoff.id)?.failed"
-                    message="生命周期记录暂时无法读取，交接状态和 ERP 当前状态仍以上方数据为准。"
+                    v-else-if="
+                      lifecycleHistoryState(purchaseOrderProjection.id)?.failed
+                    "
+                    message="生命周期记录暂时无法读取，采购单投影状态和当前单据状态仍以上方数据为准。"
                     show-icon
                     type="warning"
                   />
                   <Empty
                     v-else-if="
-                      lifecycleHistoryState(handoff.id)?.loaded &&
-                      !lifecycleHistoryState(handoff.id)?.events.length
+                      lifecycleHistoryState(purchaseOrderProjection.id)
+                        ?.loaded &&
+                      !lifecycleHistoryState(purchaseOrderProjection.id)?.events
+                        .length
                     "
                     :image="Empty.PRESENTED_IMAGE_SIMPLE"
-                    description="暂无 ERP 确认、反确认或取消记录"
+                    description="暂无 FDM 采购单确认、反确认或取消记录"
                   />
                   <Timeline
-                    v-else-if="lifecycleHistoryState(handoff.id)?.events.length"
-                    class="handoff-lifecycle-timeline"
+                    v-else-if="
+                      lifecycleHistoryState(purchaseOrderProjection.id)?.events
+                        .length
+                    "
+                    class="purchase-order-projection-lifecycle-timeline"
                   >
                     <Timeline.Item
-                      v-for="event in lifecycleHistoryState(handoff.id)?.events"
+                      v-for="event in lifecycleHistoryState(
+                        purchaseOrderProjection.id,
+                      )?.events"
                       :key="event.eventId"
-                      :color="erpLifecycleActionMeta(event.action).color"
+                      :color="
+                        purchaseOrderLifecycleActionMeta(event.action).color
+                      "
                     >
-                      <div class="handoff-lifecycle-event__header">
+                      <div
+                        class="purchase-order-projection-lifecycle-event__header"
+                      >
                         <strong>
                           v{{ event.lifecycleVersion }} ·
-                          {{ erpLifecycleActionMeta(event.action).label }}
+                          {{
+                            purchaseOrderLifecycleActionMeta(event.action).label
+                          }}
                         </strong>
                         <Tag
                           :color="
-                            erpLifecycleEventResultMeta(event.result).color
+                            purchaseOrderLifecycleEventResultMeta(event.result)
+                              .color
                           "
                         >
-                          {{ erpLifecycleEventResultMeta(event.result).label }}
+                          {{
+                            purchaseOrderLifecycleEventResultMeta(event.result)
+                              .label
+                          }}
                         </Tag>
                       </div>
-                      <div class="handoff-lifecycle-event__transition">
+                      <div
+                        class="purchase-order-projection-lifecycle-event__transition"
+                      >
                         <Tag
                           :color="
-                            erpLifecycleStatusMeta(event.fromStatus).color
+                            purchaseOrderLifecycleStatusMeta(event.fromStatus)
+                              .color
                           "
                         >
-                          {{ erpLifecycleStatusMeta(event.fromStatus).label }}
+                          {{
+                            purchaseOrderLifecycleStatusMeta(event.fromStatus)
+                              .label
+                          }}
                         </Tag>
                         <IconifyIcon icon="lucide:arrow-right" />
                         <Tag
-                          :color="erpLifecycleStatusMeta(event.toStatus).color"
+                          :color="
+                            purchaseOrderLifecycleStatusMeta(event.toStatus)
+                              .color
+                          "
                         >
-                          {{ erpLifecycleStatusMeta(event.toStatus).label }}
+                          {{
+                            purchaseOrderLifecycleStatusMeta(event.toStatus)
+                              .label
+                          }}
                         </Tag>
                       </div>
                       <p>
@@ -1730,8 +1877,8 @@ watch(requisitionId, load, { immediate: true });
                         操作人
                         {{
                           event.actorUserId
-                            ? `ERP 用户 ${event.actorUserId}`
-                            : 'ERP 系统（未提供用户 ID）'
+                            ? `操作用户 ${event.actorUserId}`
+                            : 'FDM 系统（未提供用户 ID）'
                         }}
                       </p>
                       <p>原因：{{ event.reason?.trim() || '未填写原因' }}</p>
@@ -1741,10 +1888,14 @@ watch(requisitionId, load, { immediate: true });
               </Collapse>
 
               <Collapse
-                class="handoff-execution-facts"
+                class="purchase-order-projection-execution-facts"
                 ghost
-                :active-key="executionPanelActiveKey(handoff.id)"
-                @change="handleExecutionPanelChange(handoff.id, $event)"
+                :active-key="
+                  executionPanelActiveKey(purchaseOrderProjection.id)
+                "
+                @change="
+                  handleExecutionPanelChange(purchaseOrderProjection.id, $event)
+                "
               >
                 <Collapse.Panel
                   key="execution-facts"
@@ -1752,38 +1903,45 @@ watch(requisitionId, load, { immediate: true });
                 >
                   <Alert
                     class="execution-facts-alert"
-                    message="这里只读取 ERP 已回传并由后端投影的采购入库、采购退货和净入库事实；页面不会推断付款、虚构单据或补造数量。"
+                    message="这里只读取 FDM 采购执行领域回传并由后端投影的入库、退货和净入库事实；页面不会推断付款、虚构单据或补造数量。"
                     show-icon
                     type="info"
                   />
                   <Skeleton
-                    v-if="executionFactsState(handoff.id)?.loading"
+                    v-if="
+                      executionFactsState(purchaseOrderProjection.id)?.loading
+                    "
                     active
                     :paragraph="{ rows: 3 }"
                   />
                   <Alert
-                    v-else-if="executionFactsState(handoff.id)?.failed"
+                    v-else-if="
+                      executionFactsState(purchaseOrderProjection.id)?.failed
+                    "
                     message="采购执行事实暂时无法读取。读取失败不代表没有入库、退货或过账记录，请稍后重试。"
                     show-icon
                     type="warning"
                   />
                   <Empty
                     v-else-if="
-                      executionFactsState(handoff.id)?.loaded &&
-                      !executionFactsState(handoff.id)?.documents.length
+                      executionFactsState(purchaseOrderProjection.id)?.loaded &&
+                      !executionFactsState(purchaseOrderProjection.id)
+                        ?.documents.length
                     "
                     :image="Empty.PRESENTED_IMAGE_SIMPLE"
-                    description="暂无 ERP 采购入库或退货执行事实"
+                    description="暂无 FDM 采购入库或退货执行事实"
                   />
                   <div
                     v-else-if="
-                      executionFactsState(handoff.id)?.documents.length
+                      executionFactsState(purchaseOrderProjection.id)?.documents
+                        .length
                     "
                     class="execution-document-list"
                   >
                     <section
-                      v-for="document in executionFactsState(handoff.id)
-                        ?.documents"
+                      v-for="document in executionFactsState(
+                        purchaseOrderProjection.id,
+                      )?.documents"
                       :key="`${document.documentType}:${document.documentId}`"
                       class="execution-document"
                     >
@@ -1821,8 +1979,8 @@ watch(requisitionId, load, { immediate: true });
                           {{ executionActionMeta(document.lastAction).label }} /
                           {{
                             document.lastActorUserId
-                              ? `ERP 用户 ${document.lastActorUserId}`
-                              : 'ERP 系统（未提供用户 ID）'
+                              ? `操作用户 ${document.lastActorUserId}`
+                              : 'FDM 系统（未提供用户 ID）'
                           }}
                         </Descriptions.Item>
                         <Descriptions.Item label="最近发生时间">
@@ -1881,10 +2039,12 @@ watch(requisitionId, load, { immediate: true });
                                   累计退货
                                   {{ record.returnedQuantity ?? '—' }}
                                 </span>
-                                <strong>净入库
+                                <strong
+                                  >净入库
                                   {{
                                     record.netReceivedQuantity ?? '—'
-                                  }}</strong>
+                                  }}</strong
+                                >
                               </template>
                             </div>
                           </template>
@@ -1921,9 +2081,11 @@ watch(requisitionId, load, { immediate: true });
                                     .label
                                 }}
                               </Tag>
-                              <span>单据版本 v{{
+                              <span
+                                >单据版本 v{{
                                   record.lastDocumentVersion
-                                }}</span>
+                                }}</span
+                              >
                               <span>事件 {{ record.lastEventId }}</span>
                               <span>{{
                                 displayDateTime(record.lastOccurredAt)
@@ -1989,8 +2151,8 @@ watch(requisitionId, load, { immediate: true });
                             操作人
                             {{
                               event.actorUserId
-                                ? `ERP 用户 ${event.actorUserId}`
-                                : 'ERP 系统（未提供用户 ID）'
+                                ? `操作用户 ${event.actorUserId}`
+                                : 'FDM 系统（未提供用户 ID）'
                             }}
                           </p>
                           <p>
@@ -2007,8 +2169,8 @@ watch(requisitionId, load, { immediate: true });
               </Collapse>
 
               <Table
-                :columns="handoffLineColumns"
-                :data-source="handoff.lines"
+                :columns="purchaseOrderProjectionLineColumns"
+                :data-source="purchaseOrderProjection.lines"
                 :pagination="false"
                 row-key="id"
                 size="small"
@@ -2017,34 +2179,44 @@ watch(requisitionId, load, { immediate: true });
                 <template #bodyCell="{ column, record }">
                   <template v-if="column.key === 'product'">
                     <div class="requisition-detail__stack">
-                      <strong>产品 {{ record.productId }} / SKU
-                        {{ record.skuId }}</strong>
-                      <span>ERP 商品 {{ record.erpProductId }}</span>
+                      <strong
+                        >产品 {{ record.productId }} / SKU
+                        {{ record.skuId }}</strong
+                      >
+                      <span>采购商品 {{ record.writeModelProductId }}</span>
                       <span>产品版本 {{ record.productVersionToken }}</span>
                     </div>
                   </template>
                   <template v-else-if="column.key === 'quantity'">
                     <div class="requisition-detail__stack">
-                      <strong>{{ record.purchaseQuantity }}
-                        {{ record.purchaseUnit }}</strong>
+                      <strong
+                        >{{ record.purchaseQuantity }}
+                        {{ record.purchaseUnit }}</strong
+                      >
                       <span>
-                        × {{ record.erpUnitsPerPurchaseUnit }} =
-                        {{ record.erpQuantity }} ERP 基础单位
+                        × {{ record.unitsPerPurchaseUnit }} =
+                        {{ record.stockQuantity }} 库存单位
                       </span>
                     </div>
                   </template>
                   <template v-else-if="column.key === 'price'">
                     <div class="requisition-detail__stack">
-                      <strong>{{ record.quotedUnitPrice }}
-                        {{ handoff.quoteCurrency }} /
-                        {{ record.purchaseUnit }}</strong>
+                      <strong
+                        >{{ record.quotedUnitPrice }}
+                        {{ purchaseOrderProjection.quoteCurrency }} /
+                        {{ record.purchaseUnit }}</strong
+                      >
                       <span>
                         {{ record.quoteTaxIncluded ? '含税' : '未税' }} · 税率
                         {{ record.taxPercent }}%
                       </span>
-                      <span>外币基础单位净价
-                        {{ record.originalBaseUnitPrice }}</span>
-                      <span>人民币基础单位净价 ¥{{ record.cnyBaseUnitPrice }}</span>
+                      <span
+                        >外币基础单位净价
+                        {{ record.originalBaseUnitPrice }}</span
+                      >
+                      <span
+                        >人民币基础单位净价 ¥{{ record.cnyBaseUnitPrice }}</span
+                      >
                       <span v-if="String(record.unitFreightAmount) !== '0'">
                         单位运费 {{ record.unitFreightAmount }}（需人工处理）
                       </span>
@@ -2059,15 +2231,19 @@ watch(requisitionId, load, { immediate: true });
                   <template v-else-if="column.key === 'lineage'">
                     <div class="requisition-detail__stack">
                       <span>申请行 {{ record.requisitionItemId }}</span>
-                      <span>分配 {{ record.sourcingAllocationId }} · 候选
-                        {{ record.sourcingCandidateId }}</span>
-                      <span>报价 {{ record.quoteVersionRef }} · 阶梯
-                        {{ record.quoteTierId }}</span>
+                      <span
+                        >分配 {{ record.sourcingAllocationId }} · 候选
+                        {{ record.sourcingCandidateId }}</span
+                      >
+                      <span
+                        >报价 {{ record.quoteVersionRef }} · 阶梯
+                        {{ record.quoteTierId }}</span
+                      >
                       <span>供应商产品 {{ record.supplierProductId }}</span>
                     </div>
                   </template>
-                  <template v-else-if="column.key === 'erpItem'">
-                    {{ record.erpPurchaseOrderItemId || '尚未取得明细回执' }}
+                  <template v-else-if="column.key === 'purchaseOrderItem'">
+                    {{ record.purchaseOrderItemId || '尚未取得明细回执' }}
                   </template>
                 </template>
               </Table>
@@ -2298,11 +2474,11 @@ watch(requisitionId, load, { immediate: true });
   margin: 2px 0;
 }
 
-.handoff-alert {
+.purchase-order-projection-alert {
   margin-top: 12px;
 }
 
-.handoff-list {
+.purchase-order-projection-list {
   display: grid;
   gap: 12px;
   margin-top: 14px;
@@ -2348,27 +2524,27 @@ watch(requisitionId, load, { immediate: true });
   color: rgb(220 38 38);
 }
 
-.handoff-card__title {
+.purchase-order-projection-card__title {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
-.handoff-card__title span {
+.purchase-order-projection-card__title span {
   font-size: 12px;
   font-weight: 400;
   color: hsl(var(--muted-foreground));
 }
 
-.handoff-state-strip {
+.purchase-order-projection-state-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
 
-.handoff-state-strip__item {
+.purchase-order-projection-state-strip__item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 10px;
@@ -2379,61 +2555,61 @@ watch(requisitionId, load, { immediate: true });
   border-radius: 8px;
 }
 
-.handoff-state-strip__item--cancelled {
+.purchase-order-projection-state-strip__item--cancelled {
   background: rgb(254 242 242);
   border-color: rgb(254 202 202);
 }
 
-.handoff-state-strip__label {
+.purchase-order-projection-state-strip__label {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
 }
 
-.handoff-state-strip__item small {
+.purchase-order-projection-state-strip__item small {
   grid-column: 1 / -1;
   color: hsl(var(--muted-foreground));
 }
 
-.handoff-lifecycle-alert {
+.purchase-order-projection-lifecycle-alert {
   margin-bottom: 12px;
 }
 
-.handoff-execution-facts,
-.handoff-lifecycle-history {
+.purchase-order-projection-execution-facts,
+.purchase-order-projection-lifecycle-history {
   margin: 4px 0 12px;
   border-top: 1px solid hsl(var(--border));
   border-bottom: 1px solid hsl(var(--border));
 }
 
-.handoff-execution-facts :deep(.ant-collapse-header),
-.handoff-lifecycle-history :deep(.ant-collapse-header) {
+.purchase-order-projection-execution-facts :deep(.ant-collapse-header),
+.purchase-order-projection-lifecycle-history :deep(.ant-collapse-header) {
   padding-inline: 2px;
   font-weight: 600;
 }
 
-.handoff-execution-facts :deep(.ant-collapse-content-box),
-.handoff-lifecycle-history :deep(.ant-collapse-content-box) {
+.purchase-order-projection-execution-facts :deep(.ant-collapse-content-box),
+.purchase-order-projection-lifecycle-history :deep(.ant-collapse-content-box) {
   padding-inline: 8px;
 }
 
-.handoff-lifecycle-timeline {
+.purchase-order-projection-lifecycle-timeline {
   padding-top: 8px;
 }
 
-.handoff-lifecycle-event__header,
-.handoff-lifecycle-event__transition {
+.purchase-order-projection-lifecycle-event__header,
+.purchase-order-projection-lifecycle-event__transition {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
-.handoff-lifecycle-event__transition {
+.purchase-order-projection-lifecycle-event__transition {
   margin: 6px 0;
 }
 
-.handoff-lifecycle-event__header p,
-.handoff-lifecycle-timeline p {
+.purchase-order-projection-lifecycle-event__header p,
+.purchase-order-projection-lifecycle-timeline p {
   margin: 3px 0;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
@@ -2489,7 +2665,7 @@ watch(requisitionId, load, { immediate: true });
   padding-top: 8px;
 }
 
-.handoff-card :deep(.ant-descriptions-item-content) {
+.purchase-order-projection-card :deep(.ant-descriptions-item-content) {
   overflow-wrap: anywhere;
 }
 
@@ -2506,7 +2682,7 @@ watch(requisitionId, load, { immediate: true });
     grid-template-columns: 1fr;
   }
 
-  .handoff-state-strip {
+  .purchase-order-projection-state-strip {
     grid-template-columns: 1fr;
   }
 }

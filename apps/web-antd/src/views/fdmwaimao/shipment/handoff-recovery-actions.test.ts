@@ -27,7 +27,7 @@ function detail(
     id: '9223372036854775806',
     lineCount: 1,
     lines: [],
-    nextRequiredAction: 'WMS_HANDOFF_RECOVERY_REQUIRED',
+    nextRequiredAction: 'WAREHOUSE_HANDOFF_RECOVERY_REQUIRED',
     ownerUserId: '5',
     readinessMaterialized: true,
     reservationId: '9223372036854775807',
@@ -37,8 +37,8 @@ function detail(
     sourceCount: 1,
     status: 'CONFIRMED',
     version: 11,
-    wmsHandoffRecoveryRequired: true,
-    wmsOrders: [],
+    warehouseHandoffRecoveryRequired: true,
+    warehouseOutboundOrders: [],
     ...overrides,
   };
 }
@@ -49,7 +49,7 @@ describe('shipment handoff recovery action policy', () => {
     expect(canRecoverShipmentHandoff(detail(), false)).toBe(false);
     expect(
       canRecoverShipmentHandoff(
-        detail({ nextRequiredAction: 'WMS_HANDOFF_PENDING' }),
+        detail({ nextRequiredAction: 'WAREHOUSE_HANDOFF_PENDING' }),
         true,
       ),
     ).toBe(false);
@@ -61,7 +61,7 @@ describe('shipment handoff recovery action policy', () => {
     ).toBe(false);
     expect(
       canRecoverShipmentHandoff(
-        detail({ wmsHandoffRecoveryRequired: false }),
+        detail({ warehouseHandoffRecoveryRequired: false }),
         true,
       ),
     ).toBe(false);
@@ -74,19 +74,19 @@ describe('shipment handoff recovery action policy', () => {
     const first = ensureShipmentHandoffRecoveryCommand(
       undefined,
       source,
-      'WMS 已恢复',
+      'WAREHOUSE 已恢复',
       createKey,
     );
     const replay = ensureShipmentHandoffRecoveryCommand(
       first,
       source,
-      'WMS 已恢复',
+      'WAREHOUSE 已恢复',
       createKey,
     );
     const changedReason = ensureShipmentHandoffRecoveryCommand(
       first,
       source,
-      '已修复 WMS 数据',
+      '已修复 WAREHOUSE 数据',
       createKey,
     );
 
@@ -103,13 +103,13 @@ describe('shipment handoff recovery action policy', () => {
     const command = {
       expectedShipmentVersion: 11,
       idempotencyKey: 'shipment-handoff-recovery:stable-key-1',
-      reason: 'WMS 已恢复',
+      reason: 'WAREHOUSE 已恢复',
       shipmentId: '9223372036854775806',
     };
     const result: FdmWaimaoShipmentApi.HandoffRecoveryResult = {
       availableAt: '2026-08-31T07:30:00',
       eventId: '550e8400-e29b-41d4-a716-446655440000',
-      nextRequiredAction: 'WMS_HANDOFF_PENDING',
+      nextRequiredAction: 'WAREHOUSE_HANDOFF_PENDING',
       outboxId: '9223372036854775808',
       outboxVersion: 8,
       recovered: true,

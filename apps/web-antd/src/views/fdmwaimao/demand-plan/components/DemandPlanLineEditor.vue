@@ -48,7 +48,7 @@ const unknownCount = computed(
 const balanced = computed(() => isDemandPlanLineBalanced(props.line));
 const humanEvidenceSourceOptions = [
   { label: '人工核查', value: 'MANUAL_CHECK' },
-  { label: 'WMS 截图', value: 'WMS_SCREENSHOT' },
+  { label: 'WAREHOUSE 截图', value: 'WAREHOUSE_SCREENSHOT' },
   { label: 'ERP 截图', value: 'ERP_SCREENSHOT' },
   { label: '供应商确认', value: 'SUPPLIER_CONFIRMATION' },
   { label: '工厂确认', value: 'FACTORY_CONFIRMATION' },

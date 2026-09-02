@@ -27,24 +27,24 @@ describe('supplier master permission policy', () => {
     expect(canUseSupplierMasterAction('SUPPLIER_UPDATE', queryOnly)).toBe(
       false,
     );
-    expect(
-      canUseSupplierMasterAction('SUPPLIER_AUTHORIZE_COMPANY', queryOnly),
-    ).toBe(false);
+    expect(canUseSupplierMasterAction('SUPPLIER_BIND_COMPANY', queryOnly)).toBe(
+      false,
+    );
     expect(
       canUseSupplierMasterAction('SUPPLIER_PRODUCT_CREATE', queryOnly),
     ).toBe(false);
   });
 
-  it('uses the dedicated company authorization permission', () => {
+  it('uses the dedicated company business-binding permission', () => {
     expect(
       canUseSupplierMasterAction(
-        'SUPPLIER_AUTHORIZE_COMPANY',
-        (code) => code === 'fdmprocurement:supplier:authorize-company',
+        'SUPPLIER_BIND_COMPANY',
+        (code) => code === 'fdmprocurement:supplier:bind-company',
       ),
     ).toBe(true);
     expect(
       canUseSupplierMasterAction(
-        'SUPPLIER_AUTHORIZE_COMPANY',
+        'SUPPLIER_BIND_COMPANY',
         (code) => code === 'fdmprocurement:supplier:update',
       ),
     ).toBe(false);

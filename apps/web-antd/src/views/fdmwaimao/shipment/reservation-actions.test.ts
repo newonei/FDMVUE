@@ -28,14 +28,14 @@ function detail(
     id: '9223372036854775806',
     lineCount: 1,
     lines: [],
-    nextRequiredAction: 'RESERVE_WMS_STOCK',
+    nextRequiredAction: 'RESERVE_WAREHOUSE_STOCK',
     ownerUserId: '9223372036854775705',
     readinessMaterialized: true,
     shipmentNo: 'SHIP-20260831-1',
     sourceCount: 1,
     status: 'DRAFT',
     version: 9,
-    wmsOrders: [],
+    warehouseOutboundOrders: [],
     ...overrides,
   };
 }
@@ -49,7 +49,7 @@ describe('shipment reservation action policy', () => {
       reservationStatus: 'ACTIVE',
     });
     const released = detail({
-      nextRequiredAction: 'RE_RESERVE_WMS_STOCK',
+      nextRequiredAction: 'RE_RESERVE_WAREHOUSE_STOCK',
       reservationId: '9223372036854775807',
       reservationStatus: 'RELEASED',
     });

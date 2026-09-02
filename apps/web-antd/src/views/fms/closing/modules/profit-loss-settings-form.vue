@@ -93,7 +93,7 @@ const [Modal, modalApi] = useVbenModal({
       modalData.value = undefined;
       return;
     }
-    const data = modalApi.getData<ProfitLossSettingsFormData>();
+    const data = modalApi.getData() as ProfitLossSettingsFormData;
     if (!data) return;
     modalData.value = data;
     await formApi.setState({

@@ -81,7 +81,7 @@ const totalQuantity = computed(() => {
     const value = new BigNumber(item.quantity || 0);
     if (value.isFinite()) total = total.plus(value);
   }
-  return total.toFixed(0);
+  return total.toFixed(total.decimalPlaces() ?? 0);
 });
 
 function notify() {

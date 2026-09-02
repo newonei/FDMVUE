@@ -225,6 +225,7 @@ export namespace FdmWaimaoOrderExpenseApi {
   }
 
   export interface MaterializeReq {
+    attachmentIds?: string[];
     expectedRunVersion: string;
     expectedSourceSnapshotHash: string;
     generationRunId: string;

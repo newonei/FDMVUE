@@ -11,6 +11,10 @@ const dynamicRouteFiles = import.meta.glob(
     './modules/**/*.ts',
     '!./modules/**/*.spec.ts',
     '!./modules/**/*.test.ts',
+    // Keep official sources available for upstream merges, but never register
+    // the disabled AI/MES business modules in this FDM runtime.
+    '!./modules/ai.ts',
+    '!./modules/mes.ts',
     // 外贸部门已由数据库菜单提供真实路由；保留原型源码，但不再注入运行时。
     '!./modules/fdmwaimao-prototype.ts',
   ],
@@ -48,7 +52,13 @@ const accessRoutes = [...dynamicRoutes, ...staticRoutes];
 
 // add by 芋艿：from https://github.com/vbenjs/vue-vben-admin/blob/main/playground/src/router/routes/index.ts#L38-L45
 const componentKeys: string[] = Object.keys(
-  import.meta.glob('../../views/**/*.vue'),
+  import.meta.glob([
+    '../../views/**/*.vue',
+    '!../../views/ai/**/*.vue',
+    '!../../views/erp/**/*.vue',
+    '!../../views/mes/**/*.vue',
+    '!../../views/wms/**/*.vue',
+  ]),
 )
   .filter((item) => !item.includes('/modules/'))
   .map((v) => {

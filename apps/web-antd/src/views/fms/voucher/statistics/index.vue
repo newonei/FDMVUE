@@ -181,6 +181,7 @@ async function handleExport() {
       source: data,
     });
   } catch {
+    //
   } finally {
     exportLoading.value = false;
   }

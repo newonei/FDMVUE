@@ -189,9 +189,7 @@ async function initialize() {
 
 async function loadSuppliers() {
   if (!companyId.value || !canQuerySuppliers.value) return;
-  const result = await getProcurementSupplierList({
-    companyId: companyId.value,
-  });
+  const result = await getProcurementSupplierList({});
   suppliers.value = result.map((item) => ({
     label: `${item.supplierCode} · ${item.supplierName}`,
     value: item.id,
@@ -516,7 +514,8 @@ void initialize();
               {{ record.minOrderQty }} / {{ record.packageMultiple }}
             </template>
             <template v-else-if="column.key === 'status'">
-              <Tag>{{ record.mappingType }}</Tag><Tag>{{ record.approvalStatus }}</Tag>
+              <Tag>{{ record.mappingType }}</Tag
+              ><Tag>{{ record.approvalStatus }}</Tag>
             </template>
             <template v-else-if="column.key === 'compliance'">
               <Tag
@@ -560,26 +559,36 @@ void initialize();
       @ok="save"
     >
       <div class="mapping-form">
-        <label>供应商<Select
+        <label
+          >供应商<Select
             v-model:value="form.supplierId"
             show-search
             :options="suppliers"
         /></label>
-        <label>产品中心 SKU
+        <label
+          >产品中心 SKU
           <div class="product-choice">
             <Input
               :value="selectedProductLabel"
               readonly
               placeholder="尚未选择"
             /><Button @click="productPickerOpen = true">选择 SKU</Button>
-          </div></label>
-        <label>供应商产品编码<Input v-model:value="form.supplierProductCode" /></label>
-        <label>供应商产品名称<Input v-model:value="form.supplierProductName" /></label>
+          </div></label
+        >
+        <label
+          >供应商产品编码<Input v-model:value="form.supplierProductCode"
+        /></label>
+        <label
+          >供应商产品名称<Input v-model:value="form.supplierProductName"
+        /></label>
         <label>采购单位<Input v-model:value="form.purchaseUnit" /></label>
-        <label>单位换算系数<Input v-model:value="form.unitConversionFactor" /></label>
+        <label
+          >单位换算系数<Input v-model:value="form.unitConversionFactor"
+        /></label>
         <label>最小起订量<Input v-model:value="form.minOrderQty" /></label>
         <label>包装倍数<Input v-model:value="form.packageMultiple" /></label>
-        <label>映射类型<Select
+        <label
+          >映射类型<Select
             v-model:value="form.mappingType"
             :options="
               ['EXACT', 'APPROVED_SUBSTITUTE'].map((value) => ({
@@ -588,7 +597,8 @@ void initialize();
               }))
             "
         /></label>
-        <label>审批状态<Select
+        <label
+          >审批状态<Select
             v-model:value="form.approvalStatus"
             :options="
               ['PENDING', 'APPROVED', 'REJECTED'].map((value) => ({
@@ -597,10 +607,17 @@ void initialize();
               }))
             "
         /></label>
-        <label>有效开始<Input v-model:value="form.validFrom" type="date" /></label>
-        <label>有效结束<Input v-model:value="form.validUntil" type="date" /></label>
-        <label>核定产能（可选）<Input v-model:value="form.verifiedCapacityQty" /></label>
-        <label>产能有效期（可选）<Input
+        <label
+          >有效开始<Input v-model:value="form.validFrom" type="date"
+        /></label>
+        <label
+          >有效结束<Input v-model:value="form.validUntil" type="date"
+        /></label>
+        <label
+          >核定产能（可选）<Input v-model:value="form.verifiedCapacityQty"
+        /></label>
+        <label
+          >产能有效期（可选）<Input
             v-model:value="form.capacityValidUntil"
             type="date"
         /></label>

@@ -51,6 +51,10 @@ function decimal(value: null | number | string | undefined) {
   return result.isFinite() ? result : undefined;
 }
 
+function plainDecimal(value: BigNumber) {
+  return value.toFixed(value.decimalPlaces() ?? 0);
+}
+
 export function initialSelectionQuantities(
   assessment: FdmProcurementSourcingApi.Assessment,
 ) {
@@ -67,7 +71,7 @@ export function initialSelectionQuantities(
   visibleAllocations.forEach((allocation) => {
     const value = decimal(allocation.allocatedQty);
     if (value?.isGreaterThan(0)) {
-      result[String(allocation.candidateId)] = value.toFixed(0);
+      result[String(allocation.candidateId)] = plainDecimal(value);
     }
   });
   return result;
@@ -111,10 +115,10 @@ export function sourcingLineQuantitySummaryFromCandidates(
   }
 
   return {
-    allocatedBase: complete ? allocated.toFixed(0) : undefined,
+    allocatedBase: complete ? plainDecimal(allocated) : undefined,
     balanced: Boolean(complete && required?.isEqualTo(allocated)),
     complete,
-    requiredBase: required?.toFixed(0),
+    requiredBase: required ? plainDecimal(required) : undefined,
   };
 }
 
@@ -205,7 +209,7 @@ export function buildSourcingSelectionIntent(
     const upperBound = decimal(candidate.maxAllocatableQty);
     if (upperBound && quantity.isGreaterThan(upperBound)) {
       issues.push(
-        `候选 ${candidateId} 超过最大可分配数量 ${upperBound.toFixed(0)}`,
+        `候选 ${candidateId} 超过最大可分配数量 ${plainDecimal(upperBound)}`,
       );
       return;
     }
@@ -216,13 +220,13 @@ export function buildSourcingSelectionIntent(
     }
     const minimum = decimal(candidate.minOrderQty);
     if (minimum && quantity.isLessThan(minimum)) {
-      issues.push(`候选 ${candidateId} 低于最小起订量 ${minimum.toFixed(0)}`);
+      issues.push(`候选 ${candidateId} 低于最小起订量 ${plainDecimal(minimum)}`);
       return;
     }
     const multiple = decimal(candidate.packageMultiple);
     if (multiple?.isGreaterThan(0) && !quantity.modulo(multiple).isZero()) {
       issues.push(
-        `候选 ${candidateId} 必须按 ${multiple.toFixed(0)} 的包装倍数分配`,
+        `候选 ${candidateId} 必须按 ${plainDecimal(multiple)} 的包装倍数分配`,
       );
       return;
     }
@@ -237,7 +241,7 @@ export function buildSourcingSelectionIntent(
     }
     allocations.push({
       candidateKey: candidateId,
-      quantity: quantity.toFixed(0),
+      quantity: plainDecimal(quantity),
     });
   });
 
@@ -292,7 +296,7 @@ export function buildSourcingSelectionIntent(
     }
     if (!expected || !actual.isEqualTo(expected)) {
       issues.push(
-        `第 ${item.lineNo} 行分配后的基础数量 ${actual.toFixed(0)}，必须等于申请基础数量 ${expected?.toFixed(0) ?? 'UNKNOWN'}`,
+        `第 ${item.lineNo} 行分配后的基础数量 ${plainDecimal(actual)}，必须等于申请基础数量 ${expected ? plainDecimal(expected) : 'UNKNOWN'}`,
       );
     }
     if (

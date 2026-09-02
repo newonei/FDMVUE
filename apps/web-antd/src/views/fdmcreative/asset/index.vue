@@ -25,7 +25,7 @@ import {
   getCreativeAssetPage,
   getCreativeProjectPage,
 } from '#/api/fdmcreative';
-import { uploadFile } from '#/api/infra/file';
+import { uploadFdmObject } from '#/api/fdmstorage/object';
 
 import CreativeShell from '../shared/CreativeShell.vue';
 import { ASSET_KIND_OPTIONS, assetKindLabel } from '../shared/library-options';
@@ -151,7 +151,7 @@ async function submitUpload() {
   }
   uploading.value = true;
   try {
-    const response = await uploadFile({
+    const response = await uploadFdmObject({
       directory: `fdmcreative/${projectId}/uploads`,
       file,
     });
@@ -280,10 +280,8 @@ onMounted(async () => {
                 ></audio>
               </div>
               <Tag class="asset-kind" color="blue">
-{{
-                assetKindLabel(asset.kind)
-              }}
-</Tag>
+                {{ assetKindLabel(asset.kind) }}
+              </Tag>
             </div>
             <div class="asset-info">
               <strong :title="asset.name">{{ asset.name }}</strong>

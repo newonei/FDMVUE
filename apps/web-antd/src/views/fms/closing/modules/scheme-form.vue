@@ -101,7 +101,7 @@ const [Modal, modalApi] = useVbenModal({
       subjectRules.value = [];
       return;
     }
-    const data = modalApi.getData<SchemeFormData>();
+    const data = modalApi.getData() as SchemeFormData;
     if (!data) return;
     modalData.value = data;
     schemeId.value = undefined;

@@ -542,6 +542,8 @@ export interface VbenFormProps<
 }
 
 export type ExtendedFormApi = FormApi & {
+  /** Compatibility alias retained for the fixed official business baseline. */
+  reset: () => ReturnType<FormApi['resetForm']>;
   useStore: <T = NoInfer<VbenFormProps>>(
     selector?: (state: NoInfer<VbenFormProps>) => T,
   ) => Readonly<Ref<T>>;

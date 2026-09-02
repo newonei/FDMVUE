@@ -42,7 +42,7 @@ export function availableShipmentReservationAction(
     return undefined;
   }
   if (
-    candidate.nextRequiredAction === 'RESERVE_WMS_STOCK' &&
+    candidate.nextRequiredAction === 'RESERVE_WAREHOUSE_STOCK' &&
     !candidate.reservationId &&
     !candidate.reservationStatus
   ) {
@@ -56,7 +56,7 @@ export function availableShipmentReservationAction(
     return 'RELEASE';
   }
   if (
-    candidate.nextRequiredAction === 'RE_RESERVE_WMS_STOCK' &&
+    candidate.nextRequiredAction === 'RE_RESERVE_WAREHOUSE_STOCK' &&
     !!candidate.reservationId &&
     (candidate.reservationStatus === 'EXPIRED' ||
       candidate.reservationStatus === 'RELEASED')
@@ -148,6 +148,6 @@ export function isExpectedShipmentReservationResult(
       ? result.status === 'ACTIVE' &&
         result.nextRequiredAction === 'SHIPMENT_CONFIRMATION'
       : (result.status === 'EXPIRED' || result.status === 'RELEASED') &&
-        result.nextRequiredAction === 'RE_RESERVE_WMS_STOCK')
+        result.nextRequiredAction === 'RE_RESERVE_WAREHOUSE_STOCK')
   );
 }

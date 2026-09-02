@@ -83,6 +83,7 @@ describe('fdmwaimao demand-plan API contract', () => {
 
   it('materializes allocations without sending client contract quantities', async () => {
     const request = {
+      attachmentIds: ['9223372036854775800'],
       expectedRunVersion: '8',
       expectedSourceSnapshotHash: 'a'.repeat(64),
       expectedSourceVersion: 7,
@@ -148,10 +149,12 @@ describe('fdmwaimao demand-plan API contract', () => {
       '/fdmwaimao/demand-plan/confirm',
       { expectedVersion: 12, id: update.id },
     );
+    expect(update).not.toHaveProperty('attachmentIds');
   });
 
   it('creates a server-authoritative rule or manual draft without a fake model run', async () => {
     const request = {
+      attachmentIds: ['9223372036854775801'],
       creationMode: 'RULE' as const,
       expectedOrderVersion: 7,
       idempotencyKey: '550e8400-e29b-41d4-a716-446655440000',

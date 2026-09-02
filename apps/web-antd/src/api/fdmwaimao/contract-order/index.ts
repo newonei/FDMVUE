@@ -1,5 +1,7 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { FdmWaimaoAttachmentApi } from '#/api/fdmwaimao/attachment';
+
 import { requestClient } from '#/api/request';
 
 export namespace FdmWaimaoContractOrderApi {
@@ -137,6 +139,7 @@ export namespace FdmWaimaoContractOrderApi {
   export interface ContractDetail extends PageItem {
     additionalFeeAmount: DecimalValue;
     additionalFeeCategory?: null | string;
+    attachments?: FdmWaimaoAttachmentApi.Attachment[];
     discountedProductAmount: DecimalValue;
     items: ContractItem[];
     orderDiscountAmount: DecimalValue;
@@ -172,6 +175,7 @@ export namespace FdmWaimaoContractOrderApi {
     additionalFeeAmount: DecimalValue;
     additionalFeeCategory?: string;
     alibabaTradeAssuranceNo: string;
+    attachmentIds: string[];
     companyId: string;
     contactId?: string;
     currency: string;
@@ -197,7 +201,7 @@ export namespace FdmWaimaoContractOrderApi {
     subject: string;
   }
 
-  export interface UpdateReq extends SaveReq {
+  export interface UpdateReq extends Omit<SaveReq, 'attachmentIds'> {
     expectedVersion: number;
     id: string;
   }

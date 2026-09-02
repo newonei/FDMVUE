@@ -28,7 +28,7 @@ const CONFIDENCES = new Set<AiFieldConfidence>(['HIGH', 'LOW', 'MEDIUM']);
 
 function origin(value: unknown, proposedValue: unknown): AiFieldOrigin {
   const raw = String(value || '').toUpperCase();
-  if (raw === 'WMS_FACTORY_ATP') return 'MASTER_DATA';
+  if (raw === 'WAREHOUSE_FACTORY_ATP') return 'MASTER_DATA';
   const normalized = raw as AiFieldOrigin;
   if (ORIGINS.has(normalized)) return normalized;
   return proposedValue === undefined ||

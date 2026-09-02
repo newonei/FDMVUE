@@ -43,6 +43,7 @@ import { getSimpleUserList } from '#/api/system/user';
 
 import { INSTANCE_STATUS_MAP } from '../../shared/constants';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
+import SelfScoreAttachmentPanel from './SelfScoreAttachmentPanel.vue';
 
 defineOptions({ name: 'FdmPerformanceInstanceDetail' });
 
@@ -54,6 +55,8 @@ const { hasAccessByCodes } = useAccess();
 const userStore = useUserStore();
 const loading = ref(false);
 const submitting = ref(false);
+const selfScoreAttachmentHasError = ref(false);
+const selfScoreAttachmentUploading = ref(false);
 const transferring = ref(false);
 const transferVisible = ref(false);
 const returning = ref(false);
@@ -89,10 +92,17 @@ const managerScoreEnabled = computed(
   () => instance.value?.managerScoreEnabled === true,
 );
 const scoreSummary = computed(() => {
-  const sum = (field: keyof Pick<ScoreRow, 'managerScore' | 'selfScore' | 'supervisorScore'>) => {
+  const sum = (
+    field: keyof Pick<
+      ScoreRow,
+      'managerScore' | 'selfScore' | 'supervisorScore'
+    >,
+  ) => {
     const values = scoreRows.value
       .map((row) => row[field])
-      .filter((score): score is number => score !== undefined && score !== null);
+      .filter(
+        (score): score is number => score !== undefined && score !== null,
+      );
     if (values.length === 0) return undefined;
     return Number(values.reduce((total, score) => total + score, 0).toFixed(2));
   };
@@ -464,6 +474,14 @@ async function submitScore() {
   if (!req || !instance.value) return;
   const taskKey = instance.value.currentTaskKey || '';
   if (!validateScoreRows(taskKey)) return;
+  if (taskKey === 'JIXIAO_SELF_SCORE' && selfScoreAttachmentUploading.value) {
+    message.warning('自评附件仍在上传，请完成后再提交评分');
+    return;
+  }
+  if (taskKey === 'JIXIAO_SELF_SCORE' && selfScoreAttachmentHasError.value) {
+    message.warning('存在上传失败的自评附件，请重试或移除后再提交评分');
+    return;
+  }
   const items = scoreRows.value.map((row) => {
     return {
       comment: scoreComment(row, taskKey),
@@ -667,7 +685,10 @@ onMounted(load);
         <Descriptions.Item label="主管评分汇总（50%）">
           {{ scoreSummary.supervisor ?? '-' }}
         </Descriptions.Item>
-        <Descriptions.Item v-if="managerScoreEnabled" label="上级评分汇总（10%）">
+        <Descriptions.Item
+          v-if="managerScoreEnabled"
+          label="上级评分汇总（10%）"
+        >
           {{ scoreSummary.manager ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item label="最终分">
@@ -798,6 +819,16 @@ onMounted(load);
           </template>
         </template>
       </Table>
+    </div>
+
+    <div v-if="instance?.id" class="detail-panel">
+      <SelfScoreAttachmentPanel
+        :editable="canEditSelfScore && !!instance.currentTaskId"
+        :instance-id="instance.id"
+        :task-id="instance.currentTaskId"
+        @error-change="selfScoreAttachmentHasError = $event"
+        @uploading-change="selfScoreAttachmentUploading = $event"
+      />
     </div>
 
     <div

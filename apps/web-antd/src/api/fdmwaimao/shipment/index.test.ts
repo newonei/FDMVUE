@@ -12,7 +12,7 @@ import {
   getShipmentReadinessGenerationOptions,
   materializeShipmentReadinessGeneration,
   normalizeReadinessMaterializeResult,
-  recoverShipmentWmsHandoff,
+  recoverShipmentWarehouseHandoff,
   regenerateShipmentReadinessGeneration,
   releaseShipmentStockReservation,
   reserveShipmentStock,
@@ -35,7 +35,7 @@ describe('fdmwaimao shipment API contract', () => {
   });
 
   it('keeps Java Long identifiers as strings at the browser boundary', async () => {
-    const publicationSequence: FdmWaimaoShipmentApi.ReadinessWmsEvidence['sourceSequence'] =
+    const publicationSequence: FdmWaimaoShipmentApi.ReadinessWarehouseEvidence['sourceSequence'] =
       '9223372036854775800';
     await getShipmentPage({
       companyId: '9223372036854775801',
@@ -63,8 +63,9 @@ describe('fdmwaimao shipment API contract', () => {
     expect(publicationSequence).toBe('9223372036854775800');
   });
 
-  it('creates only a shipment header shell without browser quantities or WMS evidence', async () => {
+  it('creates only a shipment header shell without browser quantities or WAREHOUSE evidence', async () => {
     const request = {
+      attachmentIds: ['9223372036854775801'],
       contractOrderId: '9223372036854775803',
       etd: '2026-09-02',
       expectedContractOrderVersion: 7,
@@ -176,7 +177,7 @@ describe('fdmwaimao shipment API contract', () => {
     );
     expect(request).not.toHaveProperty('lineSelections');
     expect(request).not.toHaveProperty('shipQuantity');
-    expect(request).not.toHaveProperty('wmsEvidence');
+    expect(request).not.toHaveProperty('warehouseEvidence');
     expect(request).not.toHaveProperty('authorityHash');
   });
 
@@ -189,17 +190,17 @@ describe('fdmwaimao shipment API contract', () => {
     const proposal = result.proposal;
     expect(proposal).toBeDefined();
     const line = proposal!.lineSelections[0]!;
-    const wms = line.wmsEvidence;
-    const authority = wms.warehouseAuthorityEvidence;
+    const warehouse = line.warehouseEvidence;
+    const authority = warehouse.warehouseAuthorityEvidence;
 
     expect(line).not.toHaveProperty('warehouseAuthorityEvidence');
-    expect(wms.sourceVersion).toBe('wms-stock-v12');
-    expect(wms.sourceSequence).toBe('9223372036854775798');
-    expect(wms.sourcePayloadHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(warehouse.sourceVersion).toBe('warehouse-stock-v12');
+    expect(warehouse.sourceSequence).toBe('9223372036854775798');
+    expect(warehouse.sourcePayloadHash).toMatch(/^[0-9a-f]{64}$/);
     expect(authority.authorityVersion).toBe(6);
     expect(authority.authorityHash).toMatch(/^[0-9a-f]{64}$/);
     expect(authority.evidenceRef).toBe(
-      'WMS_COMPANY_WAREHOUSE_AUTHORITY:9223372036854775799:V6',
+      'WAREHOUSE_COMPANY_WAREHOUSE_AUTHORITY:9223372036854775799:V6',
     );
     expect(authority.effectiveFrom).toBe('2026-08-01T00:00:00+08:00');
     expect(authority.effectiveTo).toBe('2026-09-03T00:00:01+08:00');
@@ -217,8 +218,8 @@ describe('fdmwaimao shipment API contract', () => {
       line.productId,
       line.skuId,
       line.warehouseId,
-      wms.resolvedWarehouseId,
-      wms.sourceSequence,
+      warehouse.resolvedWarehouseId,
+      warehouse.sourceSequence,
       authority.mappingId,
       authority.tenantId,
       authority.companyId,
@@ -243,7 +244,7 @@ describe('fdmwaimao shipment API contract', () => {
     requestMocks.post.mockResolvedValueOnce({
       confirmAvailable: false,
       materializedNow: true,
-      nextRequiredAction: 'RESERVATION_AND_WMS_HANDOFF_NOT_IMPLEMENTED',
+      nextRequiredAction: 'RESERVATION_AND_WAREHOUSE_HANDOFF_NOT_IMPLEMENTED',
       readinessMaterialized: true,
       readinessSnapshotHash: '8'.repeat(64),
       shipmentId: request.shipmentId,
@@ -270,7 +271,7 @@ describe('fdmwaimao shipment API contract', () => {
       'quantity',
       'shipQuantity',
       'warehouseId',
-      'wmsEvidence',
+      'warehouseEvidence',
       'authorityHash',
       'evidence',
     ]) {
@@ -279,7 +280,7 @@ describe('fdmwaimao shipment API contract', () => {
     expect(typeof request.shipmentId).toBe('string');
     expect(typeof request.generationRunId).toBe('string');
     expect(typeof request.expectedRunVersion).toBe('string');
-    expect(result.nextRequiredAction).toBe('RESERVE_WMS_STOCK');
+    expect(result.nextRequiredAction).toBe('RESERVE_WAREHOUSE_STOCK');
   });
 
   it('normalizes both rolling materialize response variants to the reservation action', () => {
@@ -295,15 +296,15 @@ describe('fdmwaimao shipment API contract', () => {
     expect(
       normalizeReadinessMaterializeResult({
         ...base,
-        nextRequiredAction: 'RESERVATION_AND_WMS_HANDOFF_NOT_IMPLEMENTED',
+        nextRequiredAction: 'RESERVATION_AND_WAREHOUSE_HANDOFF_NOT_IMPLEMENTED',
       }).nextRequiredAction,
-    ).toBe('RESERVE_WMS_STOCK');
+    ).toBe('RESERVE_WAREHOUSE_STOCK');
     expect(
       normalizeReadinessMaterializeResult({
         ...base,
-        nextRequiredAction: 'RESERVE_WMS_STOCK',
+        nextRequiredAction: 'RESERVE_WAREHOUSE_STOCK',
       }).nextRequiredAction,
-    ).toBe('RESERVE_WMS_STOCK');
+    ).toBe('RESERVE_WAREHOUSE_STOCK');
   });
 
   it('reserves and releases with identity-only commands and stable string shipment IDs', async () => {
@@ -396,13 +397,13 @@ describe('fdmwaimao shipment API contract', () => {
       expectedShipmentVersion: 11,
       id: '9223372036854775806',
       idempotencyKey: 'shipment-handoff-recovery:stable-key-1',
-      reason: 'WMS 临时故障已恢复，重新投递原交接事件',
+      reason: 'WAREHOUSE 临时故障已恢复，重新投递原交接事件',
     };
 
-    await recoverShipmentWmsHandoff(request);
+    await recoverShipmentWarehouseHandoff(request);
 
     expect(requestMocks.post).toHaveBeenCalledWith(
-      '/fdmwaimao/shipment/recover-wms-handoff',
+      '/fdmwaimao/shipment/recover-warehouse-handoff',
       request,
     );
     expect(Object.keys(request).toSorted()).toEqual([
@@ -417,7 +418,7 @@ describe('fdmwaimao shipment API contract', () => {
       'payloadHash',
       'payloadJson',
       'reservationId',
-      'wmsCommandIdempotencyKey',
+      'warehouseCommandIdempotencyKey',
     ]) {
       expect(request).not.toHaveProperty(forbidden);
     }
@@ -453,51 +454,51 @@ describe('fdmwaimao shipment API contract', () => {
     expect(detailReservation.reservationId).toBe('9223372036854775807');
   });
 
-  it('models the WMS consumed acknowledgement without deriving actual quantities', () => {
+  it('models the WAREHOUSE consumed acknowledgement without deriving actual quantities', () => {
     const completion = {
       actualOutboundQuantity: '80.000000',
-      wmsCompletionInboxId: '9223372036854775701',
-      wmsCompletionOutboxId: '9223372036854775702',
-      wmsCompletionPayloadHash: 'a'.repeat(64),
-      wmsConsumedAt: '2026-08-31T15:30:00',
-      wmsConsumedInventoryCount: 1,
-      wmsConsumedLineCount: 1,
-      wmsConsumedOrderCount: 1,
-      wmsConsumptionEventId: 'WMS-SHIPMENT-RESERVATION:81:A1:CONSUMED:V4',
-      wmsConsumptionPlanHash: 'b'.repeat(64),
-      wmsConsumptionRequestHash: 'c'.repeat(64),
+      warehouseCompletionInboxId: '9223372036854775701',
+      warehouseCompletionOutboxId: '9223372036854775702',
+      warehouseCompletionPayloadHash: 'a'.repeat(64),
+      warehouseConsumedAt: '2026-08-31T15:30:00',
+      warehouseConsumedInventoryCount: 1,
+      warehouseConsumedLineCount: 1,
+      warehouseConsumedOrderCount: 1,
+      warehouseConsumptionEventId: 'WAREHOUSE-SHIPMENT-RESERVATION:81:A1:CONSUMED:V4',
+      warehouseConsumptionPlanHash: 'b'.repeat(64),
+      warehouseConsumptionRequestHash: 'c'.repeat(64),
     } satisfies Pick<
       FdmWaimaoShipmentApi.Detail,
-      | 'wmsCompletionInboxId'
-      | 'wmsCompletionOutboxId'
-      | 'wmsCompletionPayloadHash'
-      | 'wmsConsumedAt'
-      | 'wmsConsumedInventoryCount'
-      | 'wmsConsumedLineCount'
-      | 'wmsConsumedOrderCount'
-      | 'wmsConsumptionEventId'
-      | 'wmsConsumptionPlanHash'
-      | 'wmsConsumptionRequestHash'
+      | 'warehouseCompletionInboxId'
+      | 'warehouseCompletionOutboxId'
+      | 'warehouseCompletionPayloadHash'
+      | 'warehouseConsumedAt'
+      | 'warehouseConsumedInventoryCount'
+      | 'warehouseConsumedLineCount'
+      | 'warehouseConsumedOrderCount'
+      | 'warehouseConsumptionEventId'
+      | 'warehouseConsumptionPlanHash'
+      | 'warehouseConsumptionRequestHash'
     > & {
       actualOutboundQuantity: FdmWaimaoShipmentApi.DecimalValue;
     };
 
-    expect(typeof completion.wmsCompletionInboxId).toBe('string');
-    expect(typeof completion.wmsCompletionOutboxId).toBe('string');
+    expect(typeof completion.warehouseCompletionInboxId).toBe('string');
+    expect(typeof completion.warehouseCompletionOutboxId).toBe('string');
     expect(completion.actualOutboundQuantity).toBe('80.000000');
-    expect(completion.wmsConsumedLineCount).toBe(1);
+    expect(completion.warehouseConsumedLineCount).toBe(1);
     expect(completion).not.toHaveProperty('inventoryDeltas');
   });
 
-  it('models materialized source WMS and warehouse authority provenance as string Longs', () => {
+  it('models materialized source WAREHOUSE and warehouse authority provenance as string Longs', () => {
     const source = {
-      authorityPoolKey: 'WMS_STOCK:T1:C2:W3',
+      authorityPoolKey: 'WAREHOUSE_STOCK:T1:C2:W3',
       evidenceExpiresAt: '2026-09-03T00:00:01+08:00',
       evidenceHash: 'a'.repeat(64),
       evidenceObservedAt: '2026-08-31T10:00:00+08:00',
-      evidenceRef: 'WMS_STOCK_AVAILABILITY_PROJECTION:stock-request-1',
-      evidenceType: 'WMS_STOCK_AVAILABILITY_PROJECTION',
-      evidenceVersion: 'wms-stock-v12',
+      evidenceRef: 'WAREHOUSE_STOCK_AVAILABILITY_PROJECTION:stock-request-1',
+      evidenceType: 'WAREHOUSE_STOCK_AVAILABILITY_PROJECTION',
+      evidenceVersion: 'warehouse-stock-v12',
       id: '9223372036854775700',
       plannedQuantity: '80',
       readinessStatus: 'READY',
@@ -505,14 +506,14 @@ describe('fdmwaimao shipment API contract', () => {
       sourcePayloadHash: 'b'.repeat(64),
       sourceRequestId: 'stock-request-1',
       sourceSequence: '9223372036854775798',
-      sourceSystem: 'FDM_WMS',
+      sourceSystem: 'FDM_WAREHOUSE',
       sourceType: 'WAREHOUSE',
-      sourceVersion: 'wms-stock-v12',
+      sourceVersion: 'warehouse-stock-v12',
       warehouseAuthorityEffectiveFrom: '2026-08-01T00:00:00+08:00',
       warehouseAuthorityEffectiveTo: '2026-09-03T00:00:01+08:00',
       warehouseAuthorityEvidenceRef:
-        'WMS_COMPANY_WAREHOUSE_AUTHORITY:9223372036854775799:V6',
-      warehouseAuthorityEvidenceType: 'WMS_COMPANY_WAREHOUSE_AUTHORITY',
+        'WAREHOUSE_COMPANY_WAREHOUSE_AUTHORITY:9223372036854775799:V6',
+      warehouseAuthorityEvidenceType: 'WAREHOUSE_COMPANY_WAREHOUSE_AUTHORITY',
       warehouseAuthorityHash: 'c'.repeat(64),
       warehouseAuthorityMappingId: '9223372036854775799',
       warehouseAuthorityVersion: 6,

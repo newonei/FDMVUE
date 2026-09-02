@@ -11,7 +11,7 @@ import type { WorkflowAutosaveSnapshot } from './use-workflow-autosave';
 
 import type { FdmAiApi } from '#/api/fdmai';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
-import type { AxiosProgressEvent } from '#/api/infra/file';
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
 import {
   computed,
@@ -70,7 +70,7 @@ import {
   syncContentPlan,
   syncCreativePrompt,
 } from '#/api/fdmcreative';
-import { uploadFile } from '#/api/infra/file';
+import { uploadFdmObject } from '#/api/fdmstorage/object';
 
 import PromptLibraryPicker from '../../shared/PromptLibraryPicker.vue';
 import { firstRestorableAgentNode } from './agent-draft-restore';
@@ -781,7 +781,7 @@ async function uploadInputAsset(
   if (file.size > maxBytes) {
     throw new Error(`文件不能超过 ${inputUploadMaxSize.value} MB`);
   }
-  const response = await uploadFile(
+  const response = await uploadFdmObject(
     { directory: `fdmcreative/${projectId.value}/uploads`, file },
     onUploadProgress,
   );
@@ -837,7 +837,7 @@ async function uploadAgentReferenceAsset(file: File) {
   if (file.size > maxSizeMb * 1024 * 1024) {
     throw new Error(`${kindLabel}不能超过 ${maxSizeMb} MB`);
   }
-  const response = await uploadFile({
+  const response = await uploadFdmObject({
     directory: `fdmcreative/${projectId.value}/agent-references`,
     file,
   });

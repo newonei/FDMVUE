@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import type { FdmNeixiaoPatternDesignItemApi } from '#/api/fdmneixiao/pattern/design-item';
-import type { AxiosProgressEvent } from '#/api/infra/file';
+import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
 import { nextTick, ref } from 'vue';
 
@@ -126,10 +126,7 @@ async function uploadDesignImageWithPreview(
   };
 }
 
-function setImageUrlsForDesign(
-  designUrl: string,
-  previewUrl?: string,
-) {
+function setImageUrlsForDesign(designUrl: string, previewUrl?: string) {
   const normalizedDesignUrl = designUrl.trim();
   if (!normalizedDesignUrl) return;
   const normalizedPreviewUrl = String(previewUrl ?? '').trim();
@@ -178,15 +175,18 @@ function normalizeOrderDateForForm(value: number | string | undefined) {
   if (!Number.isFinite(value)) return undefined;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
-  return [
-    date.getFullYear(),
-    padDatePart(date.getMonth() + 1),
-    padDatePart(date.getDate()),
-  ].join('-') + ` ${[
-    padDatePart(date.getHours()),
-    padDatePart(date.getMinutes()),
-    padDatePart(date.getSeconds()),
-  ].join(':')}`;
+  return (
+    [
+      date.getFullYear(),
+      padDatePart(date.getMonth() + 1),
+      padDatePart(date.getDate()),
+    ].join('-') +
+    ` ${[
+      padDatePart(date.getHours()),
+      padDatePart(date.getMinutes()),
+      padDatePart(date.getSeconds()),
+    ].join(':')}`
+  );
 }
 
 function buildEditFormValues(
@@ -268,7 +268,8 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmNeixiaoPatternDesignItemApi.PatternDesignItem>();
+    const row =
+      modalApi.getData<FdmNeixiaoPatternDesignItemApi.PatternDesignItem>();
     const rowId = row?.id;
     resetShopNameOptions();
     await resetModalState();

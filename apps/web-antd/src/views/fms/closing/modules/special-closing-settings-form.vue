@@ -128,7 +128,7 @@ const [Modal, modalApi] = useVbenModal({
       subjectRules.value = [];
       return;
     }
-    const data = modalApi.getData<SpecialClosingSettingsFormData>();
+    const data = modalApi.getData() as SpecialClosingSettingsFormData;
     if (!data) return;
     modalData.value = data;
     subjectRules.value = data.scheme.subjects.map((item) => ({

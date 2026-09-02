@@ -371,6 +371,27 @@ describe('contract order payload and validation', () => {
     });
   });
 
+  it('submits attachment IDs only when creating a contract', () => {
+    const model = validModel();
+    model.attachments = [
+      {
+        businessType: 'CONTRACT_ORDER',
+        fileName: 'contract.pdf',
+        id: '9223372036854775804',
+        status: 'PENDING',
+      },
+    ];
+
+    expect(buildContractSavePayload(model).attachmentIds).toEqual([
+      '9223372036854775804',
+    ]);
+
+    Object.assign(model, { id: '9223372036854775806', version: 7 });
+    expect(buildContractUpdatePayload(model)).not.toHaveProperty(
+      'attachmentIds',
+    );
+  });
+
   it('adds orderId to contact lookup only for an existing contract', () => {
     expect(buildContactOptionsParams({}, 'customer-new')).toEqual({
       customerId: 'customer-new',

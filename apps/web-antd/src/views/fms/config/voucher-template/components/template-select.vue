@@ -142,9 +142,9 @@ defineExpose({ open });
             @click="
               selectTemplate(record as FmsVoucherTemplateApi.VoucherTemplate)
             "
-            >
-套用
-</Button>
+          >
+            套用
+          </Button>
           <Button
             v-if="
               fmsStore.isAccountSetWritable &&
