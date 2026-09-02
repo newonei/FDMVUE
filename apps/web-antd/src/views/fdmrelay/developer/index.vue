@@ -3,7 +3,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { FdmRelayApi } from '#/api/relay';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 
 import { confirm, Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -40,10 +40,12 @@ import {
   getMyRelayUsagePage,
   getMyRelayUsageSummary,
   getRelayPublicInfo,
+  prepareMyRelayApiKeyCcsImport,
   revokeMyRelayApiKey,
   rotateMyRelayApiKey,
 } from '#/api/relay';
 
+import { buildCcSwitchImportDeeplink } from './cc-switch-import';
 import { buildWorkBuddyModelPrompt } from './workbuddy-prompt';
 
 defineOptions({ name: 'FdmRelayDeveloper' });
@@ -113,6 +115,15 @@ const createForm = reactive({
 const secretModalOpen = ref(false);
 const secretAcknowledged = ref(false);
 const secretResult = ref<FdmRelayApi.ApiKeySecretResult>();
+const ccsImportBusyKeyId = ref<number>();
+const ccsImportReadyModalOpen = ref(false);
+const ccsImportReadyKeyName = ref('');
+let ccsImportReadyKeyId: number | undefined;
+let pendingCcSwitchDeeplink = '';
+let pendingCcSwitchTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingCcSwitchExpiresAt = 0;
+let ccsImportDisposed = false;
+let ccsImportPageHidden = false;
 const { copy } = useClipboard({ legacy: true });
 
 const keyColumns: TableColumnsType<FdmRelayApi.ApiKey> = [
@@ -124,7 +135,7 @@ const keyColumns: TableColumnsType<FdmRelayApi.ApiKey> = [
   { title: '过期时间', key: 'expiresAt', width: 180 },
   { title: '最后调用', key: 'lastUsedAt', width: 180 },
   { title: '创建时间', key: 'createTime', width: 180 },
-  { title: '操作', key: 'action', width: 150, fixed: 'right' },
+  { title: '操作', key: 'action', width: 230, fixed: 'right' },
 ];
 
 const usageColumns: TableColumnsType<FdmRelayApi.UsageLog> = [
@@ -234,6 +245,16 @@ function formatTime(value?: FdmRelayApi.DateTimeValue) {
 
 function normalizeStatus(value: unknown) {
   return String(value ?? '').toUpperCase();
+}
+
+function canImportToCcs(row: Record<string, any>) {
+  const status = normalizeStatus(row.status);
+  const provisionStatus = normalizeStatus(row.provisionStatus);
+  return (
+    relayAvailable.value &&
+    ['1', 'ACTIVE', 'AVAILABLE', 'ENABLED'].includes(status) &&
+    (!provisionStatus || provisionStatus === 'ACTIVE')
+  );
 }
 
 function statusColor(value: unknown) {
@@ -349,6 +370,156 @@ async function copyWorkBuddyPrompt() {
     );
   } catch {
     message.error('WorkBuddy 配置提示词复制失败，请重试');
+  }
+}
+
+function launchCcSwitchDeeplink(deeplink: string) {
+  window.location.assign(deeplink);
+}
+
+function clearPendingCcSwitchImport() {
+  if (pendingCcSwitchTimer !== undefined) {
+    clearTimeout(pendingCcSwitchTimer);
+    pendingCcSwitchTimer = undefined;
+  }
+  pendingCcSwitchDeeplink = '';
+  pendingCcSwitchExpiresAt = 0;
+  ccsImportReadyModalOpen.value = false;
+  ccsImportReadyKeyName.value = '';
+  if (ccsImportBusyKeyId.value === ccsImportReadyKeyId) {
+    ccsImportBusyKeyId.value = undefined;
+  }
+  ccsImportReadyKeyId = undefined;
+}
+
+function queuePendingCcSwitchImport(
+  deeplink: string,
+  keyId: number,
+  keyName: string,
+) {
+  if (ccsImportDisposed || ccsImportPageHidden) return;
+  clearPendingCcSwitchImport();
+  pendingCcSwitchDeeplink = deeplink;
+  pendingCcSwitchExpiresAt = Date.now() + 60_000;
+  ccsImportReadyKeyId = keyId;
+  ccsImportBusyKeyId.value = keyId;
+  ccsImportReadyKeyName.value = keyName;
+  ccsImportReadyModalOpen.value = true;
+  pendingCcSwitchTimer = setTimeout(() => {
+    const wasOpen = ccsImportReadyModalOpen.value;
+    clearPendingCcSwitchImport();
+    if (wasOpen) {
+      message.warning('CC Switch 导入配置已过期，请重新点击导入');
+    }
+  }, 60_000);
+}
+
+function openPendingCcSwitchImport() {
+  const deeplink = pendingCcSwitchDeeplink;
+  if (!deeplink || Date.now() >= pendingCcSwitchExpiresAt) {
+    clearPendingCcSwitchImport();
+    message.warning('CC Switch 导入配置已过期，请重新点击导入');
+    return;
+  }
+  clearPendingCcSwitchImport();
+  try {
+    launchCcSwitchDeeplink(deeplink);
+  } catch {
+    message.error('未能打开 CC Switch，请确认已安装并注册 ccswitch:// 协议');
+  }
+}
+
+function importToCcSwitch() {
+  const apiKey = secretResult.value?.apiKey;
+  const baseUrl = String(
+    secretResult.value?.publicBaseUrl || publicInfo.value.publicBaseUrl || '',
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  if (!apiKey || !baseUrl) {
+    message.warning('缺少 API Key 或服务地址，暂时无法导入 CC Switch');
+    return;
+  }
+
+  try {
+    launchCcSwitchDeeplink(
+      buildCcSwitchImportDeeplink({ apiKey, baseUrl }),
+    );
+  } catch {
+    message.error(
+      '未能打开 CC Switch，请确认已安装并注册 ccswitch:// 协议',
+    );
+  }
+}
+
+async function handleImportKeyToCcs(row: Record<string, any>) {
+  if (ccsImportBusyKeyId.value !== undefined || !canImportToCcs(row)) {
+    return;
+  }
+  ccsImportBusyKeyId.value = row.id;
+
+  let result: FdmRelayApi.ApiKeyCcsImportResult | undefined;
+  let queuedForUserClick = false;
+  try {
+    try {
+      await confirm(
+        `将临时读取密钥“${row.name}”的完整内容，并交给本机 CC Switch 打开导入确认。此操作不会轮换或吊销密钥，请仅在可信设备上继续。`,
+      );
+    } catch {
+      return;
+    }
+    if (ccsImportDisposed || ccsImportPageHidden) return;
+
+    result = await prepareMyRelayApiKeyCcsImport({ id: row.id });
+    if (ccsImportDisposed || ccsImportPageHidden) {
+      result.apiKey = '';
+      return;
+    }
+    if (
+      result.id !== row.id ||
+      !result.apiKey ||
+      !result.publicBaseUrl
+    ) {
+      throw new Error('Invalid CC Switch import response');
+    }
+
+    const apiKey = result.apiKey;
+    const providerName = [
+      'Sub2API',
+      result.name?.trim() || row.name,
+      row.keyLast4,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const deeplink = buildCcSwitchImportDeeplink({
+      apiKey,
+      baseUrl: result.publicBaseUrl,
+      providerName,
+    });
+
+    // Remove the plaintext field as soon as the transport payload is built. If the
+    // browser's transient activation expired during the POST, retain the deep link
+    // (which still contains the secret) in a hard-expiring closure and require one
+    // real click to launch the protocol.
+    result.apiKey = '';
+    if (ccsImportDisposed || ccsImportPageHidden) return;
+    if (navigator.userActivation?.isActive === true) {
+      launchCcSwitchDeeplink(deeplink);
+    } else {
+      queuePendingCcSwitchImport(deeplink, row.id, result.name || row.name);
+      queuedForUserClick = true;
+    }
+  } catch {
+    if (!ccsImportDisposed && !ccsImportPageHidden) {
+      message.error(
+        '无法准备或打开 CC Switch 导入配置，请确认密钥仍处于启用状态后重试',
+      );
+    }
+  } finally {
+    if (result) result.apiKey = '';
+    if (!queuedForUserClick && ccsImportBusyKeyId.value === row.id) {
+      ccsImportBusyKeyId.value = undefined;
+    }
   }
 }
 
@@ -505,7 +676,26 @@ async function refreshAll() {
   }
 }
 
-onMounted(refreshAll);
+function handlePageHide() {
+  ccsImportPageHidden = true;
+  clearPendingCcSwitchImport();
+}
+
+function handlePageShow() {
+  if (!ccsImportDisposed) ccsImportPageHidden = false;
+}
+
+onMounted(() => {
+  window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('pageshow', handlePageShow);
+  void refreshAll();
+});
+onBeforeUnmount(() => {
+  ccsImportDisposed = true;
+  window.removeEventListener('pagehide', handlePageHide);
+  window.removeEventListener('pageshow', handlePageShow);
+  clearPendingCcSwitchImport();
+});
 </script>
 
 <template>
@@ -579,7 +769,7 @@ onMounted(refreshAll);
           <Tabs.TabPane key="keys" tab="我的 API Key">
             <Alert
               class="mb-3"
-              message="完整 Key 仅在创建或轮换成功后展示一次；列表始终只显示掩码。"
+              message="完整 Key 创建或轮换后仅展示一次；列表始终显示掩码，导入 CCS 时只会临时读取并交给本机应用。"
               show-icon
               type="info"
             />
@@ -619,7 +809,7 @@ onMounted(refreshAll);
               :loading="keyLoading"
               :pagination="keyPagination"
               row-key="id"
-              :scroll="{ x: 1450 }"
+              :scroll="{ x: 1600 }"
               size="middle"
               @change="handleKeyPageChange"
             >
@@ -673,10 +863,24 @@ onMounted(refreshAll);
                   <TableAction
                     :actions="[
                       {
+                        label: '导入 CCS',
+                        type: 'link',
+                        auth: ['fdmrelay:self:ccs-import'],
+                        loading: ccsImportBusyKeyId === record.id,
+                        disabled:
+                          !canImportToCcs(record) ||
+                          ccsImportBusyKeyId !== undefined,
+                        tooltip: canImportToCcs(record)
+                          ? '读取当前完整密钥并交给本机 CC Switch'
+                          : '仅启用中的密钥可导入',
+                        onClick: handleImportKeyToCcs.bind(null, record),
+                      },
+                      {
                         label: '轮换',
                         type: 'link',
                         auth: ['fdmrelay:self:rotate'],
                         disabled:
+                          ccsImportBusyKeyId === record.id ||
                           !relayAvailable ||
                           ['REVOKED', 'EXPIRED'].includes(
                             normalizeStatus(record.status),
@@ -688,7 +892,9 @@ onMounted(refreshAll);
                         type: 'link',
                         danger: true,
                         auth: ['fdmrelay:self:revoke'],
-                        disabled: normalizeStatus(record.status) === 'REVOKED',
+                        disabled:
+                          ccsImportBusyKeyId === record.id ||
+                          normalizeStatus(record.status) === 'REVOKED',
                         onClick: handleRevokeKey.bind(null, record),
                       },
                     ]"
@@ -939,6 +1145,28 @@ onMounted(refreshAll);
     </Modal>
 
     <Modal
+      v-model:open="ccsImportReadyModalOpen"
+      :mask-closable="false"
+      cancel-text="取消"
+      destroy-on-close
+      ok-text="打开 CC Switch"
+      title="CC Switch 导入配置已准备"
+      width="520px"
+      @cancel="clearPendingCcSwitchImport"
+      @ok="openPendingCcSwitchImport"
+    >
+      <Alert
+        message="浏览器的外部应用唤起授权已经过期，请再次确认打开。"
+        show-icon
+        type="info"
+      />
+      <p class="mb-0 mt-4 text-sm text-muted-foreground">
+        密钥“{{ ccsImportReadyKeyName }}”的配置只会在当前页面短暂保留 60
+        秒；点击后将打开 CC Switch 的最终导入确认窗口。
+      </p>
+    </Modal>
+
+    <Modal
       :closable="false"
       :footer="null"
       :keyboard="false"
@@ -949,7 +1177,7 @@ onMounted(refreshAll);
     >
       <Alert
         class="mb-4"
-        message="请立即复制并安全保存。关闭后系统不会再次返回完整 Key。"
+        message="请立即复制并安全保存。关闭后页面不会再次展示完整 Key；列表导入 CCS 时也不会在页面回显密钥。"
         show-icon
         type="warning"
       />
@@ -974,6 +1202,25 @@ onMounted(refreshAll);
         <div class="break-all font-mono text-xs text-muted-foreground">
           {{ secretApiBaseUrl || '-' }}
         </div>
+      </div>
+      <div class="mt-4 rounded border border-border p-3 text-sm">
+        <div class="font-medium">导入到 CC Switch</div>
+        <div class="mt-1 text-xs text-muted-foreground">
+          自动生成 Codex 供应商配置并打开 CC Switch；导入前会在 CC Switch
+          中再次显示完整配置供你确认。
+        </div>
+        <Button
+          block
+          class="mt-3"
+          :disabled="!secretResult?.apiKey || !secretApiBaseUrl"
+          type="primary"
+          @click="importToCcSwitch"
+        >
+          <template #icon>
+            <IconifyIcon icon="lucide:external-link" />
+          </template>
+          导入到 CCS
+        </Button>
       </div>
       <div class="mt-4 rounded border border-border p-3 text-sm">
         <div class="font-medium">使用 AI 配置 WorkBuddy</div>

@@ -394,11 +394,16 @@ function moneyTrendOption(
   title: string,
   labels: string[],
   buckets: PeriodBucket[],
-  extra?: { paid?: boolean; type?: 'bar' | 'line' },
+  extra?: {
+    forceValueLabels?: boolean;
+    paid?: boolean;
+    type?: 'bar' | 'line';
+  },
 ): ECOption | null {
   if (labels.length === 0) return null;
   const chartType = extra?.type ?? 'line';
   const marketingName = extra?.paid ? '营销费用总额' : '营销费用';
+  const showValueLabels = extra?.forceValueLabels || labels.length <= 12;
   const option = baseChartOption(title) as any;
   option.xAxis.data = labels;
   option.xAxis.boundaryGap = chartType === 'bar';
@@ -412,7 +417,7 @@ function moneyTrendOption(
       data: buckets.map((item) => round2(item.netSales)),
       itemStyle: { color: '#2563eb' },
       label: {
-        show: labels.length <= 12,
+        show: showValueLabels,
         position: 'top',
         formatter: (params: any) => amountShort(params.value),
         fontSize: 10,
@@ -426,7 +431,7 @@ function moneyTrendOption(
       data: buckets.map((item) => round2(item.marketing)),
       itemStyle: { color: '#22c55e' },
       label: {
-        show: labels.length <= 12,
+        show: showValueLabels,
         position: 'top',
         formatter: (params: any) => amountShort(params.value),
         fontSize: 10,
@@ -458,6 +463,7 @@ function ratioTrendOption(
   buckets: PeriodBucket[],
   ratioOf: (bucket: PeriodBucket) => null | number,
   seriesName = '费比',
+  forceValueLabels = false,
 ): ECOption | null {
   if (labels.length === 0) return null;
   const option = baseChartOption(title) as any;
@@ -474,7 +480,7 @@ function ratioTrendOption(
       data: buckets.map((item) => ratioOf(item)),
       itemStyle: { color: '#2563eb' },
       label: {
-        show: labels.length <= 12,
+        show: forceValueLabels || labels.length <= 12,
         position: 'top',
         formatter: (params: any) => ratioLabel(params.value),
         fontSize: 10,
@@ -574,6 +580,7 @@ const last30TrendChart = computed(() =>
     '近30天数据走势图',
     last30Agg.value.labels,
     last30Agg.value.buckets,
+    { forceValueLabels: isPddDashboard() },
   ),
 );
 const last30PromoRatioChart = computed(() =>
@@ -583,6 +590,7 @@ const last30PromoRatioChart = computed(() =>
     last30Agg.value.buckets,
     (bucket) => ratioPercent(bucket.marketing, bucket.netSales),
     '推广占比',
+    isPddDashboard(),
   ),
 );
 const last7TrendChart = computed(() =>
