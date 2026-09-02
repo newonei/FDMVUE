@@ -74,13 +74,19 @@ export function updatePurchaseIn(data: ErpPurchaseInApi.PurchaseIn) {
   return requestClient.put('/erp/purchase-in/update', data);
 }
 
-/** 更新采购入库的状态 */
-export function updatePurchaseInStatus(id: number, status: number) {
+/** 更新采购入库的状态；反过账(10)可携带审计原因，过账(20)永不发送原因。 */
+export function updatePurchaseInStatus(
+  id: number,
+  status: number,
+  reason?: string,
+) {
+  const params: { id: number; reason?: string; status: number } = {
+    id,
+    status,
+  };
+  if (status === 10 && reason !== undefined) params.reason = reason;
   return requestClient.put('/erp/purchase-in/update-status', null, {
-    params: {
-      id,
-      status,
-    },
+    params,
   });
 }
 

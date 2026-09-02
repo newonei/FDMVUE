@@ -74,10 +74,19 @@ export function updatePurchaseReturn(
   return requestClient.put('/erp/purchase-return/update', data);
 }
 
-/** 更新采购退货的状态 */
-export function updatePurchaseReturnStatus(id: number, status: number) {
+/** 更新采购退货状态；反过账(10)可携带审计原因，过账(20)永不发送原因。 */
+export function updatePurchaseReturnStatus(
+  id: number,
+  status: number,
+  reason?: string,
+) {
+  const params: { id: number; reason?: string; status: number } = {
+    id,
+    status,
+  };
+  if (status === 10 && reason !== undefined) params.reason = reason;
   return requestClient.put('/erp/purchase-return/update-status', null, {
-    params: { id, status },
+    params,
   });
 }
 

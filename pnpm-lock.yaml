@@ -813,6 +813,9 @@ importers:
       benz-amr-recorder:
         specifier: 'catalog:'
         version: 1.1.5
+      bignumber.js:
+        specifier: ^9.3.1
+        version: 9.3.1
       bpmn-js:
         specifier: 'catalog:'
         version: 18.19.0

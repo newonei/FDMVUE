@@ -8,7 +8,7 @@ const requestMocks = vi.hoisted(() => ({
 
 vi.mock('#/api/request', () => ({ requestClient: requestMocks }));
 
-describe('FDM Relay CC Switch import API', () => {
+describe('fdm Relay CC Switch import API', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('uses an explicit POST body instead of putting the key id in a URL', async () => {

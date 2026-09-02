@@ -49,7 +49,7 @@ const [Modal, modalApi] = useVbenModal({
       detailData.value = {};
       return;
     }
-    const data = modalApi.getData<{ id?: number }>();
+    const data = modalApi.getData<{ id?: WmsShipmentOrderApi.JavaLong }>();
     if (!data?.id) {
       return;
     }

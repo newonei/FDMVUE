@@ -528,7 +528,7 @@ function amountStructureOption(): ECOption | null {
           color: (params: any) =>
             ['#f97316', '#2563eb', '#ea580c', '#22c55e', '#64748b'][
               params.dataIndex
-            ],
+            ]!,
           borderRadius: [5, 5, 0, 0],
         },
         label: {

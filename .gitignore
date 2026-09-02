@@ -67,3 +67,7 @@ datalog
 **/test-results/
 **/playwright-report/
 /output/playwright/
+
+# Local visual QA reports and screenshots may contain business data
+/design-qa.md
+/design-qa-assets/

@@ -14,7 +14,7 @@ import {
   normalizeDateRange,
 } from './date-range';
 
-defineOptions({ inheritAttrs: false, name: 'FdmDateRangePicker' });
+defineOptions({ name: 'FdmDateRangePicker', inheritAttrs: false });
 
 const props = withDefaults(
   defineProps<{
@@ -27,7 +27,9 @@ const props = withDefaults(
   {
     allowClear: false,
     disabled: false,
+    modelValue: undefined,
     placeholder: '选择日期范围',
+    value: undefined,
   },
 );
 
@@ -40,7 +42,8 @@ const emits = defineEmits<{
 
 const open = ref(false);
 const selectedRange = ref<FdmDateRange>(
-  normalizeDateRange(props.value ?? props.modelValue) ?? getYesterdayDateRange(),
+  normalizeDateRange(props.value ?? props.modelValue) ??
+    getYesterdayDateRange(),
 );
 const pendingRange = ref<FdmDateRange>([...selectedRange.value]);
 
@@ -75,7 +78,7 @@ function handleOpenChange(nextOpen: boolean) {
   }
 }
 
-function updateRange(value: FdmDateRange | undefined) {
+function updateRange(value?: null | unknown[]) {
   const normalized = normalizeDateRange(value) ?? getYesterdayDateRange();
   selectedRange.value = normalized;
   pendingRange.value = [...normalized];
@@ -88,7 +91,7 @@ function selectPreset(range: FdmDateRange) {
   updateRange(range);
 }
 
-function handlePickerChange(value?: FdmDateRange) {
+function handlePickerChange(value: null | unknown[]) {
   updateRange(value);
 }
 
@@ -114,10 +117,7 @@ function confirmRange() {
           <div class="ec-date-range-title">查询范围</div>
 
           <div class="ec-date-range-presets">
-            <template
-              v-for="group in FDM_DATE_RANGE_GROUPS"
-              :key="group.label"
-            >
+            <template v-for="group in FDM_DATE_RANGE_GROUPS" :key="group.label">
               <div class="ec-date-range-group-label">{{ group.label }}</div>
               <button
                 v-for="preset in group.presets"
@@ -174,19 +174,19 @@ function confirmRange() {
 
 .ec-date-range-trigger {
   display: inline-flex;
-  min-height: 32px;
-  width: 100%;
-  min-width: 180px;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  width: 100%;
+  min-width: 180px;
+  min-height: 32px;
+  padding: 4px 12px;
+  line-height: 22px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  background: hsl(var(--background));
   border: 1px solid hsl(var(--border));
   border-radius: 6px;
-  background: hsl(var(--background));
-  padding: 4px 12px;
-  color: hsl(var(--foreground));
-  line-height: 22px;
-  text-align: left;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
@@ -194,21 +194,21 @@ function confirmRange() {
 
 .ec-date-range-trigger:hover,
 .ec-date-range-trigger:focus {
+  outline: none;
   border-color: #1677ff;
   box-shadow: 0 0 0 2px rgb(22 119 255 / 10%);
-  outline: none;
 }
 
 .ec-date-range-trigger.is-disabled {
+  color: hsl(var(--muted-foreground));
   cursor: not-allowed;
   background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
 }
 
 .ec-date-range-arrow {
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
-  flex-shrink: 0;
   border-right: 1px solid currentcolor;
   border-bottom: 1px solid currentcolor;
   transform: translateY(-2px) rotate(45deg);
@@ -221,9 +221,9 @@ function confirmRange() {
 
 .ec-date-range-title,
 .ec-date-range-subtitle {
-  color: hsl(var(--muted-foreground));
   font-size: 14px;
   font-weight: 600;
+  color: hsl(var(--muted-foreground));
 }
 
 .ec-date-range-presets {
@@ -235,19 +235,19 @@ function confirmRange() {
 }
 
 .ec-date-range-group-label {
-  color: hsl(var(--muted-foreground));
   font-size: 16px;
+  color: hsl(var(--muted-foreground));
 }
 
 .ec-date-range-preset {
   min-height: 28px;
+  font-size: 16px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
   border: 0;
   border-radius: 4px;
-  background: transparent;
-  color: hsl(var(--foreground));
-  cursor: pointer;
-  font-size: 16px;
-  text-align: left;
 }
 
 .ec-date-range-preset:hover,
@@ -261,8 +261,8 @@ function confirmRange() {
 
 .ec-date-range-picker-row {
   display: flex;
-  align-items: center;
   gap: 16px;
+  align-items: center;
   margin-top: 12px;
 }
 
@@ -278,8 +278,8 @@ function confirmRange() {
 .ec-date-range-footer {
   display: flex;
   justify-content: flex-end;
-  margin-top: 20px;
   padding-top: 20px;
+  margin-top: 20px;
   border-top: 1px solid hsl(var(--border));
 }
 

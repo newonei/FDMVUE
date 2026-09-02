@@ -56,10 +56,7 @@ export function buildCcSwitchImportDeeplink(
     ['configFormat', 'json'],
     ['usageEnabled', 'true'],
     ['usageScript', btoa(CC_SWITCH_USAGE_SCRIPT)],
-    [
-      'usageAutoInterval',
-      String(CC_SWITCH_USAGE_QUERY_INTERVAL_MINUTES),
-    ],
+    ['usageAutoInterval', String(CC_SWITCH_USAGE_QUERY_INTERVAL_MINUTES)],
   ]);
 
   return `ccswitch://v1/import?${params.toString()}`;

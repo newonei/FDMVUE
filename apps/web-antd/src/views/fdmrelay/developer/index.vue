@@ -442,13 +442,9 @@ function importToCcSwitch() {
   }
 
   try {
-    launchCcSwitchDeeplink(
-      buildCcSwitchImportDeeplink({ apiKey, baseUrl }),
-    );
+    launchCcSwitchDeeplink(buildCcSwitchImportDeeplink({ apiKey, baseUrl }));
   } catch {
-    message.error(
-      '未能打开 CC Switch，请确认已安装并注册 ccswitch:// 协议',
-    );
+    message.error('未能打开 CC Switch，请确认已安装并注册 ccswitch:// 协议');
   }
 }
 
@@ -475,11 +471,7 @@ async function handleImportKeyToCcs(row: Record<string, any>) {
       result.apiKey = '';
       return;
     }
-    if (
-      result.id !== row.id ||
-      !result.apiKey ||
-      !result.publicBaseUrl
-    ) {
+    if (result.id !== row.id || !result.apiKey || !result.publicBaseUrl) {
       throw new Error('Invalid CC Switch import response');
     }
 

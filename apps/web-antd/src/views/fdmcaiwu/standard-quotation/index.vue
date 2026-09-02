@@ -32,6 +32,7 @@ import {
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import BigNumber from 'bignumber.js';
 
 import {
   calculateSmallMat,
@@ -92,7 +93,20 @@ interface SmallMatPolicyFormModel {
   maxAreaSquareMeters: number;
   orderSetupCost: number;
   pricingEnabled: boolean;
+  regularBand1ProfitRatePercent: string;
+  regularBand2ProfitRatePercent: string;
+  regularBand3ProfitRatePercent: string;
+  regularBand4ProfitRatePercent: string;
+  regularWidthThreshold1Mm: string;
+  regularWidthThreshold2Mm: string;
+  regularWidthThreshold3Mm: string;
   repackingCostPerPiece: number;
+  smallMatRegularProfitRatePercent: string;
+  smallMatUltraLowProfitRatePercent: string;
+  ultraLowBand1ProfitRatePercent: string;
+  ultraLowBand2ProfitRatePercent: string;
+  ultraLowBand3ProfitRatePercent: string;
+  ultraLowBand4ProfitRatePercent: string;
 }
 
 interface DisplayRow extends SpecificationRow {
@@ -237,6 +251,7 @@ const smallMatPolicyOpen = ref(false);
 const smallMatPolicyLoading = ref(false);
 const smallMatPolicySaving = ref(false);
 const smallMatPolicyError = ref('');
+const smallMatPolicyNotice = ref('');
 const smallMatPolicy = ref<SmallMatPolicyResp>();
 const smallMatPolicyFormRef = ref<FormInstance>();
 const smallMatPolicyForm = reactive<SmallMatPolicyFormModel>({
@@ -248,7 +263,20 @@ const smallMatPolicyForm = reactive<SmallMatPolicyFormModel>({
   maxAreaSquareMeters: 0.5,
   orderSetupCost: 0,
   pricingEnabled: true,
+  regularBand1ProfitRatePercent: '',
+  regularBand2ProfitRatePercent: '',
+  regularBand3ProfitRatePercent: '',
+  regularBand4ProfitRatePercent: '',
+  regularWidthThreshold1Mm: '',
+  regularWidthThreshold2Mm: '',
+  regularWidthThreshold3Mm: '',
   repackingCostPerPiece: 0,
+  smallMatRegularProfitRatePercent: '',
+  smallMatUltraLowProfitRatePercent: '',
+  ultraLowBand1ProfitRatePercent: '',
+  ultraLowBand2ProfitRatePercent: '',
+  ultraLowBand3ProfitRatePercent: '',
+  ultraLowBand4ProfitRatePercent: '',
 });
 
 const isSuperAdmin = computed(() =>
@@ -324,6 +352,35 @@ const nonNegativeNumberRule: Rule = {
   },
 };
 
+function parseDecimal(value: unknown): BigNumber | undefined {
+  const text = String(value ?? '').trim();
+  if (!text || !/^\d+(?:\.\d+)?$/.test(text)) return undefined;
+  const decimal = new BigNumber(text);
+  return decimal.isFinite() ? decimal : undefined;
+}
+
+const positiveDecimalStringRule: Rule = {
+  required: true,
+  trigger: ['blur', 'change'],
+  validator: async (_rule, value) => {
+    const decimal = parseDecimal(value);
+    if (!decimal || !decimal.isGreaterThan(0)) {
+      throw new Error('阈值必须大于 0');
+    }
+  },
+};
+
+const profitRatePercentRule: Rule = {
+  required: true,
+  trigger: ['blur', 'change'],
+  validator: async (_rule, value) => {
+    const decimal = parseDecimal(value);
+    if (!decimal || decimal.isNegative() || !decimal.isLessThan(100)) {
+      throw new Error('利润率必须在 0%（含）至 100%（不含）之间');
+    }
+  },
+};
+
 const smallMatRules: Partial<Record<keyof SmallMatFormModel, Rule[]>> = {
   lengthMm: [positiveDimensionRule],
   productCode: [
@@ -350,7 +407,20 @@ const smallMatPolicyRules: Record<
   kerfMm: [nonNegativeNumberRule],
   maxAreaSquareMeters: [positiveDimensionRule],
   orderSetupCost: [nonNegativeNumberRule],
+  regularBand1ProfitRatePercent: [profitRatePercentRule],
+  regularBand2ProfitRatePercent: [profitRatePercentRule],
+  regularBand3ProfitRatePercent: [profitRatePercentRule],
+  regularBand4ProfitRatePercent: [profitRatePercentRule],
+  regularWidthThreshold1Mm: [positiveDecimalStringRule],
+  regularWidthThreshold2Mm: [positiveDecimalStringRule],
+  regularWidthThreshold3Mm: [positiveDecimalStringRule],
   repackingCostPerPiece: [nonNegativeNumberRule],
+  smallMatRegularProfitRatePercent: [profitRatePercentRule],
+  smallMatUltraLowProfitRatePercent: [profitRatePercentRule],
+  ultraLowBand1ProfitRatePercent: [profitRatePercentRule],
+  ultraLowBand2ProfitRatePercent: [profitRatePercentRule],
+  ultraLowBand3ProfitRatePercent: [profitRatePercentRule],
+  ultraLowBand4ProfitRatePercent: [profitRatePercentRule],
 };
 
 /**
@@ -423,6 +493,51 @@ const smallMatPolicyNeedsParameterReview = computed(() =>
     smallMatPolicyForm.orderSetupCost,
   ].every((value) => Number(value) === 0),
 );
+
+const pricingPolicyValidationError = computed(() => {
+  const threshold1 = parseDecimal(smallMatPolicyForm.regularWidthThreshold1Mm);
+  const threshold2 = parseDecimal(smallMatPolicyForm.regularWidthThreshold2Mm);
+  const threshold3 = parseDecimal(smallMatPolicyForm.regularWidthThreshold3Mm);
+  if (
+    threshold1 &&
+    threshold2 &&
+    threshold3 &&
+    (!threshold1.isLessThan(threshold2) || !threshold2.isLessThan(threshold3))
+  ) {
+    return '三个有效宽度阈值必须严格递增，不能相等或倒序';
+  }
+
+  const regularRates = [
+    smallMatPolicyForm.regularBand1ProfitRatePercent,
+    smallMatPolicyForm.regularBand2ProfitRatePercent,
+    smallMatPolicyForm.regularBand3ProfitRatePercent,
+    smallMatPolicyForm.regularBand4ProfitRatePercent,
+  ].map((value) => parseDecimal(value));
+  const ultraLowRates = [
+    smallMatPolicyForm.ultraLowBand1ProfitRatePercent,
+    smallMatPolicyForm.ultraLowBand2ProfitRatePercent,
+    smallMatPolicyForm.ultraLowBand3ProfitRatePercent,
+    smallMatPolicyForm.ultraLowBand4ProfitRatePercent,
+  ].map((value) => parseDecimal(value));
+  for (let index = 0; index < regularRates.length; index += 1) {
+    const regularRate = regularRates[index];
+    const ultraLowRate = ultraLowRates[index];
+    if (regularRate && ultraLowRate?.isGreaterThan(regularRate)) {
+      return `第 ${index + 1} 档超低利润率不能高于该档默认利润率`;
+    }
+  }
+
+  const smallMatRegular = parseDecimal(
+    smallMatPolicyForm.smallMatRegularProfitRatePercent,
+  );
+  const smallMatUltraLow = parseDecimal(
+    smallMatPolicyForm.smallMatUltraLowProfitRatePercent,
+  );
+  if (smallMatRegular && smallMatUltraLow?.isGreaterThan(smallMatRegular)) {
+    return '小垫超低利润率不能高于小垫默认利润率';
+  }
+  return '';
+});
 
 const tableColumns = computed<TableColumnsType<DisplayRow>>(() => [
   {
@@ -543,6 +658,69 @@ function toNumber(value: unknown) {
   if (!hasValue(value)) return undefined;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function toDecimalInputString(value: unknown, fallback: string) {
+  return hasValue(value) ? String(value) : fallback;
+}
+
+function extractRequestError(error: unknown, fallback: string) {
+  const requestError = error as {
+    code?: number | string;
+    data?: { code?: number | string; message?: string; msg?: string };
+    message?: string;
+    response?: {
+      data?: {
+        code?: number | string;
+        message?: string;
+        msg?: string;
+      };
+      status?: number;
+    };
+  };
+  return (
+    requestError.response?.data?.message ||
+    requestError.response?.data?.msg ||
+    requestError.data?.message ||
+    requestError.data?.msg ||
+    requestError.message ||
+    fallback
+  );
+}
+
+function isPolicyVersionConflict(error: unknown) {
+  const requestError = error as {
+    code?: number | string;
+    data?: { code?: number | string; message?: string; msg?: string };
+    message?: string;
+    response?: {
+      data?: {
+        code?: number | string;
+        message?: string;
+        msg?: string;
+      };
+      status?: number;
+    };
+  };
+  const errorCode = String(
+    requestError.response?.data?.code ??
+      requestError.data?.code ??
+      requestError.code ??
+      '',
+  );
+  const errorMessage = String(
+    requestError.response?.data?.message ||
+      requestError.response?.data?.msg ||
+      requestError.data?.message ||
+      requestError.data?.msg ||
+      requestError.message ||
+      '',
+  );
+  return (
+    requestError.response?.status === 409 ||
+    errorCode === '1203009000' ||
+    /版本|冲突|已被.*(?:更新|修改)|重新加载|刷新后重试/.test(errorMessage)
+  );
 }
 
 function formatDimension(value: unknown) {
@@ -687,7 +865,7 @@ function getAdditionalCost(
 }
 
 function formatLaminationLayoutDetail(
-  lamination?: null | NonNullable<QuotationEntry['lamination']>,
+  lamination?: NonNullable<QuotationEntry['lamination']> | null,
 ) {
   if (!lamination) return '—';
   const parts: string[] = [];
@@ -1037,67 +1215,217 @@ function applySmallMatPolicy(policy?: SmallMatPolicyResp) {
     maxAreaSquareMeters: toNumber(policy?.maxAreaSquareMeters) ?? 0.5,
     orderSetupCost: toNumber(policy?.orderSetupCost) ?? 0,
     pricingEnabled: policy?.pricingEnabled ?? true,
+    regularBand1ProfitRatePercent: toDecimalInputString(
+      policy?.regularBand1ProfitRatePercent,
+      '',
+    ),
+    regularBand2ProfitRatePercent: toDecimalInputString(
+      policy?.regularBand2ProfitRatePercent,
+      '',
+    ),
+    regularBand3ProfitRatePercent: toDecimalInputString(
+      policy?.regularBand3ProfitRatePercent,
+      '',
+    ),
+    regularBand4ProfitRatePercent: toDecimalInputString(
+      policy?.regularBand4ProfitRatePercent,
+      '',
+    ),
+    regularWidthThreshold1Mm: toDecimalInputString(
+      policy?.regularWidthThreshold1Mm,
+      '',
+    ),
+    regularWidthThreshold2Mm: toDecimalInputString(
+      policy?.regularWidthThreshold2Mm,
+      '',
+    ),
+    regularWidthThreshold3Mm: toDecimalInputString(
+      policy?.regularWidthThreshold3Mm,
+      '',
+    ),
     repackingCostPerPiece: toNumber(policy?.repackingCostPerPiece) ?? 0,
+    smallMatRegularProfitRatePercent: toDecimalInputString(
+      policy?.smallMatRegularProfitRatePercent,
+      '',
+    ),
+    smallMatUltraLowProfitRatePercent: toDecimalInputString(
+      policy?.smallMatUltraLowProfitRatePercent,
+      '',
+    ),
+    ultraLowBand1ProfitRatePercent: toDecimalInputString(
+      policy?.ultraLowBand1ProfitRatePercent,
+      '',
+    ),
+    ultraLowBand2ProfitRatePercent: toDecimalInputString(
+      policy?.ultraLowBand2ProfitRatePercent,
+      '',
+    ),
+    ultraLowBand3ProfitRatePercent: toDecimalInputString(
+      policy?.ultraLowBand3ProfitRatePercent,
+      '',
+    ),
+    ultraLowBand4ProfitRatePercent: toDecimalInputString(
+      policy?.ultraLowBand4ProfitRatePercent,
+      '',
+    ),
   });
 }
 
-async function openSmallMatPolicy() {
+async function loadSmallMatPolicy(showSuccess = false) {
   if (!canManageSmallMatPolicy.value) {
-    message.warning('只有超级管理员可以维护小垫判定设置');
-    return;
+    message.warning('只有超级管理员可以维护报价政策');
+    return false;
   }
-  smallMatPolicyOpen.value = true;
   smallMatPolicyLoading.value = true;
   smallMatPolicyError.value = '';
   try {
     const data = await getSmallMatPolicy();
     smallMatPolicy.value = data;
     applySmallMatPolicy(data);
+    smallMatPolicyFormRef.value?.clearValidate();
+    if (showSuccess) message.success('已加载最新报价政策');
+    return true;
   } catch (error) {
-    smallMatPolicyError.value =
-      error instanceof Error ? error.message : '小垫判定设置加载失败';
+    smallMatPolicyError.value = extractRequestError(
+      error,
+      '报价政策设置加载失败',
+    );
+    return false;
   } finally {
     smallMatPolicyLoading.value = false;
   }
 }
 
-async function handleSaveSmallMatPolicy() {
+async function openSmallMatPolicy() {
+  if (!canManageSmallMatPolicy.value) {
+    message.warning('只有超级管理员可以维护报价政策');
+    return;
+  }
+  smallMatPolicyOpen.value = true;
+  smallMatPolicyNotice.value = '';
+  await loadSmallMatPolicy();
+}
+
+function handleReloadSmallMatPolicy() {
+  if (!canManageSmallMatPolicy.value || smallMatPolicyLoading.value) return;
+  Modal.confirm({
+    cancelText: '继续编辑',
+    content: '重新加载会放弃当前尚未保存的修改，并读取服务器最新版本。',
+    okText: '重新加载',
+    onOk: async () => {
+      smallMatPolicyNotice.value = '';
+      await loadSmallMatPolicy(true);
+    },
+    title: '确认重新加载报价政策？',
+  });
+}
+
+async function performSaveSmallMatPolicy() {
   if (!canManageSmallMatPolicy.value) {
     smallMatPolicyOpen.value = false;
-    message.warning('当前账号没有小垫判定设置权限');
+    message.warning('当前账号没有报价政策设置权限');
     return;
   }
   if (smallMatPolicySaving.value) return;
-  try {
-    await smallMatPolicyFormRef.value?.validate();
-  } catch {
-    return;
-  }
 
   smallMatPolicySaving.value = true;
   smallMatPolicyError.value = '';
+  smallMatPolicyNotice.value = '';
   try {
     const savedPolicy = await saveSmallMatPolicy({
       allowRotate: smallMatPolicyForm.allowRotate,
       cuttingCostPerPiece: Number(smallMatPolicyForm.cuttingCostPerPiece),
       edgeTrimMm: Number(smallMatPolicyForm.edgeTrimMm),
       enabled: smallMatPolicyForm.enabled,
+      expectedVersionNumber: smallMatPolicy.value?.versionNumber ?? 0,
       kerfMm: Number(smallMatPolicyForm.kerfMm),
       maxAreaSquareMeters: Number(smallMatPolicyForm.maxAreaSquareMeters),
       orderSetupCost: Number(smallMatPolicyForm.orderSetupCost),
       pricingEnabled: smallMatPolicyForm.pricingEnabled,
+      regularBand1ProfitRatePercent:
+        smallMatPolicyForm.regularBand1ProfitRatePercent,
+      regularBand2ProfitRatePercent:
+        smallMatPolicyForm.regularBand2ProfitRatePercent,
+      regularBand3ProfitRatePercent:
+        smallMatPolicyForm.regularBand3ProfitRatePercent,
+      regularBand4ProfitRatePercent:
+        smallMatPolicyForm.regularBand4ProfitRatePercent,
+      regularWidthThreshold1Mm: smallMatPolicyForm.regularWidthThreshold1Mm,
+      regularWidthThreshold2Mm: smallMatPolicyForm.regularWidthThreshold2Mm,
+      regularWidthThreshold3Mm: smallMatPolicyForm.regularWidthThreshold3Mm,
       repackingCostPerPiece: Number(smallMatPolicyForm.repackingCostPerPiece),
+      smallMatRegularProfitRatePercent:
+        smallMatPolicyForm.smallMatRegularProfitRatePercent,
+      smallMatUltraLowProfitRatePercent:
+        smallMatPolicyForm.smallMatUltraLowProfitRatePercent,
+      ultraLowBand1ProfitRatePercent:
+        smallMatPolicyForm.ultraLowBand1ProfitRatePercent,
+      ultraLowBand2ProfitRatePercent:
+        smallMatPolicyForm.ultraLowBand2ProfitRatePercent,
+      ultraLowBand3ProfitRatePercent:
+        smallMatPolicyForm.ultraLowBand3ProfitRatePercent,
+      ultraLowBand4ProfitRatePercent:
+        smallMatPolicyForm.ultraLowBand4ProfitRatePercent,
     });
     smallMatPolicy.value = savedPolicy ?? smallMatPolicy.value;
     applySmallMatPolicy(smallMatPolicy.value);
+    smallMatResult.value = undefined;
     smallMatPolicyOpen.value = false;
-    message.success('小垫判定设置已保存');
+    const recalculated = canCalculate
+      ? await handleCalculate({ silent: true })
+      : false;
+    message.success(
+      recalculated
+        ? '报价政策已保存，常规规格价格已按新政策刷新'
+        : '报价政策已保存，请重新计算以刷新规格价格',
+    );
   } catch (error) {
-    smallMatPolicyError.value =
-      error instanceof Error ? error.message : '小垫判定设置保存失败';
+    if (isPolicyVersionConflict(error)) {
+      const conflictMessage = extractRequestError(
+        error,
+        '报价政策已被其他管理员更新',
+      );
+      const loaded = await loadSmallMatPolicy();
+      smallMatPolicyNotice.value = loaded
+        ? `${conflictMessage}；已加载服务器最新版本，请重新确认后保存。`
+        : `${conflictMessage}；最新版本加载失败，请点击“重新加载”。`;
+      message.warning('检测到版本冲突，未覆盖他人的修改');
+    } else {
+      smallMatPolicyError.value = extractRequestError(
+        error,
+        '报价政策设置保存失败',
+      );
+    }
   } finally {
     smallMatPolicySaving.value = false;
   }
+}
+
+async function handleSaveSmallMatPolicy() {
+  if (!canManageSmallMatPolicy.value) {
+    smallMatPolicyOpen.value = false;
+    message.warning('当前账号没有报价政策设置权限');
+    return;
+  }
+  if (smallMatPolicySaving.value || smallMatPolicyLoading.value) return;
+  try {
+    await smallMatPolicyFormRef.value?.validate();
+  } catch {
+    return;
+  }
+  if (pricingPolicyValidationError.value) {
+    message.warning(pricingPolicyValidationError.value);
+    return;
+  }
+
+  Modal.confirm({
+    cancelText: '继续检查',
+    content:
+      '保存后将影响后续单笔报价、常规规格报价、小垫报价和批量报价；历史报价结果不会被改写。',
+    okText: '确认发布',
+    onOk: performSaveSmallMatPolicy,
+    title: '确认发布新的规格报价政策？',
+  });
 }
 
 function openSmallMatQuoteDetail() {
@@ -1472,9 +1800,9 @@ onMounted(async () => {
               @click="openSmallMatPolicy"
             >
               <template #icon>
-                <IconifyIcon icon="lucide:ruler" />
+                <IconifyIcon icon="lucide:badge-percent" />
               </template>
-              小垫判定设置
+              报价政策设置
             </Button>
             <Button
               v-if="canCreateSpecification"
@@ -1876,8 +2204,8 @@ onMounted(async () => {
       :confirm-loading="smallMatPolicySaving || smallMatPolicyLoading"
       :mask-closable="!smallMatPolicySaving && !smallMatPolicyLoading"
       ok-text="保存设置"
-      title="小垫判定设置"
-      width="760px"
+      title="规格报价政策与小垫设置"
+      width="920px"
       @ok="handleSaveSmallMatPolicy"
     >
       <Spin :spinning="smallMatPolicyLoading">
@@ -1885,8 +2213,8 @@ onMounted(async () => {
           class="mb-4"
           show-icon
           type="info"
-          message="分别设置小垫报价政策与拆分测算"
-          description="面积阈值同时用于识别小垫；报价政策和母垫裁切测算可独立启停，具体价格规则始终由服务端执行。"
+          message="统一维护所有规格报价入口使用的利润政策"
+          description="有效宽度取成品长宽中的较短边；小垫命中时优先使用小垫利润政策。保存后单笔、常规规格、小垫和批量报价都会读取同一服务端政策。"
         />
 
         <Alert
@@ -1894,8 +2222,8 @@ onMounted(async () => {
           class="mb-4"
           show-icon
           type="warning"
-          message="尚未发布小垫判定设置"
-          description="请确认以下参数后保存；保存后新发起的小垫测算将使用该设置。"
+          message="尚未发布租户报价政策"
+          description="当前没有可回填的政策版本；请完整填写宽度阈值和利润率后发布第一个版本。"
         />
 
         <Alert
@@ -1904,7 +2232,7 @@ onMounted(async () => {
           show-icon
           type="warning"
           message="小垫报价政策当前未启用"
-          description="面积阈值仍会保留；开启“启用小垫报价政策”并保存后，新的报价才会使用小垫专用价格政策。"
+          description="面积阈值和小垫利润仍会保留；开启后，新报价才会优先使用小垫利润政策。"
         />
 
         <Alert
@@ -1921,8 +2249,26 @@ onMounted(async () => {
           class="mb-4"
           show-icon
           type="error"
-          message="小垫判定设置未能加载或保存"
+          message="报价政策未能加载或保存"
           :description="smallMatPolicyError"
+        />
+
+        <Alert
+          v-if="smallMatPolicyNotice"
+          class="mb-4"
+          show-icon
+          type="warning"
+          message="报价政策版本已变化"
+          :description="smallMatPolicyNotice"
+        />
+
+        <Alert
+          v-if="pricingPolicyValidationError"
+          class="mb-4"
+          show-icon
+          type="error"
+          message="利润政策校验未通过"
+          :description="pricingPolicyValidationError"
         />
 
         <Alert
@@ -1942,7 +2288,177 @@ onMounted(async () => {
           :model="smallMatPolicyForm"
           :rules="smallMatPolicyRules"
         >
-          <div class="small-mat-policy-grid">
+          <div class="policy-section-heading">
+            <div>
+              <div class="policy-section-title">常规规格利润分档</div>
+              <div class="policy-section-description">
+                成品长宽中的较短边为有效宽度；超低利润率不得高于同档默认利润率。
+              </div>
+            </div>
+          </div>
+
+          <div class="pricing-policy-table-scroll">
+            <div class="pricing-policy-table">
+              <div class="pricing-policy-header">档位</div>
+              <div class="pricing-policy-header">有效宽度上限（mm）</div>
+              <div class="pricing-policy-header">默认利润率</div>
+              <div class="pricing-policy-header">超低利润率</div>
+
+              <div class="pricing-policy-band">第 1 档</div>
+              <FormItem name="regularWidthThreshold1Mm">
+                <InputNumber
+                  v-model:value="smallMatPolicyForm.regularWidthThreshold1Mm"
+                  aria-label="第1档有效宽度上限"
+                  class="w-full"
+                  string-mode
+                  :min="0.001"
+                  :precision="3"
+                />
+              </FormItem>
+              <FormItem name="regularBand1ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.regularBand1ProfitRatePercent
+                  "
+                  aria-label="第1档默认利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+              <FormItem name="ultraLowBand1ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.ultraLowBand1ProfitRatePercent
+                  "
+                  aria-label="第1档超低利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+
+              <div class="pricing-policy-band">第 2 档</div>
+              <FormItem name="regularWidthThreshold2Mm">
+                <InputNumber
+                  v-model:value="smallMatPolicyForm.regularWidthThreshold2Mm"
+                  aria-label="第2档有效宽度上限"
+                  class="w-full"
+                  string-mode
+                  :min="0.001"
+                  :precision="3"
+                />
+              </FormItem>
+              <FormItem name="regularBand2ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.regularBand2ProfitRatePercent
+                  "
+                  aria-label="第2档默认利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+              <FormItem name="ultraLowBand2ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.ultraLowBand2ProfitRatePercent
+                  "
+                  aria-label="第2档超低利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+
+              <div class="pricing-policy-band">第 3 档</div>
+              <FormItem name="regularWidthThreshold3Mm">
+                <InputNumber
+                  v-model:value="smallMatPolicyForm.regularWidthThreshold3Mm"
+                  aria-label="第3档有效宽度上限"
+                  class="w-full"
+                  string-mode
+                  :min="0.001"
+                  :precision="3"
+                />
+              </FormItem>
+              <FormItem name="regularBand3ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.regularBand3ProfitRatePercent
+                  "
+                  aria-label="第3档默认利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+              <FormItem name="ultraLowBand3ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.ultraLowBand3ProfitRatePercent
+                  "
+                  aria-label="第3档超低利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+
+              <div class="pricing-policy-band">第 4 档</div>
+              <div class="pricing-policy-open-band">大于第 3 档上限</div>
+              <FormItem name="regularBand4ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.regularBand4ProfitRatePercent
+                  "
+                  aria-label="第4档默认利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+              <FormItem name="ultraLowBand4ProfitRatePercent">
+                <InputNumber
+                  v-model:value="
+                    smallMatPolicyForm.ultraLowBand4ProfitRatePercent
+                  "
+                  aria-label="第4档超低利润率"
+                  class="w-full"
+                  string-mode
+                  :min="0"
+                  :max="99.99"
+                  :precision="2"
+                  addon-after="%"
+                />
+              </FormItem>
+            </div>
+          </div>
+
+          <Divider orientation="left">小垫利润政策</Divider>
+          <div class="small-mat-profit-grid">
             <FormItem label="最大成品面积（㎡）" name="maxAreaSquareMeters">
               <InputNumber
                 v-model:value="smallMatPolicyForm.maxAreaSquareMeters"
@@ -1952,6 +2468,42 @@ onMounted(async () => {
                 placeholder="例如 0.50"
               />
             </FormItem>
+            <FormItem
+              label="小垫默认利润率"
+              name="smallMatRegularProfitRatePercent"
+            >
+              <InputNumber
+                v-model:value="
+                  smallMatPolicyForm.smallMatRegularProfitRatePercent
+                "
+                class="w-full"
+                string-mode
+                :min="0"
+                :max="99.99"
+                :precision="2"
+                addon-after="%"
+              />
+            </FormItem>
+            <FormItem
+              label="小垫超低利润率"
+              name="smallMatUltraLowProfitRatePercent"
+            >
+              <InputNumber
+                v-model:value="
+                  smallMatPolicyForm.smallMatUltraLowProfitRatePercent
+                "
+                class="w-full"
+                string-mode
+                :min="0"
+                :max="99.99"
+                :precision="2"
+                addon-after="%"
+              />
+            </FormItem>
+          </div>
+
+          <Divider orientation="left">小垫裁切测算</Divider>
+          <div class="small-mat-policy-grid">
             <FormItem label="刀缝（mm）" name="kerfMm">
               <InputNumber
                 v-model:value="smallMatPolicyForm.kerfMm"
@@ -2032,8 +2584,27 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div v-if="smallMatPolicy?.version" class="policy-version">
-            当前设置版本：{{ smallMatPolicy.version }}
+          <div class="policy-version">
+            <div>
+              <span>来源：当前租户规格报价政策</span>
+              <span>
+                · 当前版本：{{ smallMatPolicy?.version || '尚未发布' }}
+              </span>
+              <span v-if="smallMatPolicy?.updateTime">
+                · 最后更新：{{ formatDateTime(smallMatPolicy.updateTime) }}
+              </span>
+            </div>
+            <Button
+              :disabled="smallMatPolicyLoading || smallMatPolicySaving"
+              size="small"
+              type="link"
+              @click="handleReloadSmallMatPolicy"
+            >
+              <template #icon>
+                <IconifyIcon icon="lucide:refresh-cw" />
+              </template>
+              重新加载
+            </Button>
           </div>
         </Form>
       </Spin>
@@ -2051,7 +2622,7 @@ onMounted(async () => {
           show-icon
           type="info"
           message="按成品规格测算小垫拆分报价"
-          description="请分别填写长度、宽度和厚度（mm）。系统会按当前有效的小垫判定设置，匹配可用母垫；测算按常规母垫完整内部成本及裁切口径执行。"
+          description="请分别填写长度、宽度和厚度（mm）。系统会按报价政策设置中的小垫范围，匹配可用母垫；测算按常规母垫完整内部成本及裁切口径执行。"
         />
 
         <Form
@@ -2209,7 +2780,7 @@ onMounted(async () => {
               :description="
                 getSmallMatFeedback(
                   smallMatResult,
-                  '请确认成品规格，或由超级管理员检查小垫判定设置。',
+                  '请确认成品规格，或由超级管理员检查报价政策设置中的小垫范围。',
                 )
               "
             />
@@ -2363,15 +2934,11 @@ onMounted(async () => {
                       </Tag>
                       <span>{{ formatMotherSpecification(candidate) }}</span>
                     </div>
-                    <span
-                      >每张
-                      {{ formatDimension(candidate.piecesPerMother) }} 片</span
-                    >
+                    <span>每张
+                      {{ formatDimension(candidate.piecesPerMother) }} 片</span>
                     <span>{{ formatDimension(candidate.motherCount) }} 张</span>
-                    <span
-                      >利用率
-                      {{ formatUtilization(candidate.orderUtilization) }}</span
-                    >
+                    <span>利用率
+                      {{ formatUtilization(candidate.orderUtilization) }}</span>
                   </div>
                 </div>
               </template>
@@ -2385,7 +2952,7 @@ onMounted(async () => {
               :description="
                 getSmallMatFeedback(
                   smallMatResult,
-                  '请根据下方提示补齐相关资料或由超级管理员检查小垫判定设置。',
+                  '请根据下方提示补齐相关资料或由超级管理员检查报价政策设置。',
                 )
               "
             />
@@ -2888,6 +3455,85 @@ onMounted(async () => {
   gap: 0 12px;
 }
 
+.policy-section-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.policy-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text, #1f1f1f);
+}
+
+.policy-section-description {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #8c8c8c);
+}
+
+.pricing-policy-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+}
+
+.pricing-policy-table {
+  display: grid;
+  grid-template-columns: 90px minmax(180px, 1.25fr) repeat(
+      2,
+      minmax(160px, 1fr)
+    );
+  min-width: 650px;
+}
+
+.pricing-policy-header,
+.pricing-policy-band,
+.pricing-policy-open-band,
+.pricing-policy-table :deep(.ant-form-item) {
+  min-width: 0;
+  padding: 9px 10px;
+  margin: 0;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.pricing-policy-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary, #595959);
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.pricing-policy-band,
+.pricing-policy-open-band {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.pricing-policy-band {
+  font-weight: 600;
+  color: var(--ant-color-text, #1f1f1f);
+}
+
+.pricing-policy-open-band {
+  color: var(--ant-color-text-secondary, #595959);
+}
+
+.pricing-policy-table > :nth-last-child(-n + 4) {
+  border-bottom: 0;
+}
+
+.small-mat-profit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
 .small-mat-policy-switches {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2895,9 +3541,15 @@ onMounted(async () => {
 }
 
 .policy-version {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
   margin-top: 14px;
   font-size: 12px;
   color: var(--ant-color-text-secondary, #8c8c8c);
+  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .small-mat-calculator {
@@ -3340,6 +3992,7 @@ onMounted(async () => {
 @media (max-width: 820px) {
   .parameter-grid,
   .summary-grid,
+  .small-mat-profit-grid,
   .small-mat-policy-grid,
   .small-mat-form-grid,
   .small-mat-plan-grid {
@@ -3368,6 +4021,7 @@ onMounted(async () => {
   .summary-grid,
   .filter-grid,
   .create-specification-grid,
+  .small-mat-profit-grid,
   .small-mat-policy-grid,
   .small-mat-form-grid,
   .small-mat-accessory-grid,

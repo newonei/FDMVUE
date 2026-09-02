@@ -35,12 +35,10 @@ describe('buildCcSwitchImportDeeplink', () => {
       String(CC_SWITCH_USAGE_QUERY_INTERVAL_MINUTES),
     );
     expect(params.has('enabled')).toBe(false);
-    expect(atob(params.get('usageScript') || '')).toBe(
-      CC_SWITCH_USAGE_SCRIPT,
-    );
+    expect(atob(params.get('usageScript') || '')).toBe(CC_SWITCH_USAGE_SCRIPT);
   });
 
-  it('URL-encodes a custom provider name without changing the API Key', () => {
+  it('url-encodes a custom provider name without changing the API key', () => {
     const params = paramsFromDeeplink(
       buildCcSwitchImportDeeplink({
         apiKey: 'sk-test+with/slash=',

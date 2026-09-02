@@ -1,6 +1,8 @@
 <script lang="ts" setup>
 import type { ColumnsType } from 'ant-design-vue/es/table';
 
+import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
+
 import { onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
@@ -17,9 +19,6 @@ import {
   Table,
 } from 'ant-design-vue';
 
-import ImageUpload from '#/components/upload/image-upload.vue';
-
-import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
 import {
   createDataJustPatternCost,
   deleteDataJustPatternCost,
@@ -27,6 +26,7 @@ import {
   suggestDataJustPatternCostItemCode,
   updateDataJustPatternCost,
 } from '#/api/fdmdata/datajustpattern';
+import ImageUpload from '#/components/upload/image-upload.vue';
 
 const emit = defineEmits(['success']);
 
@@ -44,7 +44,7 @@ const createForm = reactive({
 const listLoading = ref(false);
 const list = ref<FdmdataDataJustPatternApi.PatternCost[]>([]);
 
-const editingId = ref<number | null>(null);
+const editingId = ref<null | number>(null);
 const editingForm = reactive({
   id: 0,
   itemCode: '',
@@ -60,8 +60,8 @@ const editingUserLockedItemCode = ref(false);
 /** 进入编辑时的图案名称；名称未相对此行变化时不自动建议，避免覆盖库里的自定义编码 */
 const editBaselinePatternName = ref('');
 
-let createSuggestTimer: ReturnType<typeof setTimeout> | null = null;
-let editSuggestTimer: ReturnType<typeof setTimeout> | null = null;
+let createSuggestTimer: null | ReturnType<typeof setTimeout> = null;
+let editSuggestTimer: null | ReturnType<typeof setTimeout> = null;
 
 function clearCreateSuggestTimer() {
   if (createSuggestTimer) {
@@ -136,7 +136,7 @@ watch(
 watch(
   () => editingForm.patternName,
   () => {
-    if (editingId.value == null) {
+    if (editingId.value === null || editingId.value === undefined) {
       return;
     }
     clearEditSuggestTimer();
@@ -172,7 +172,7 @@ async function reloadList() {
   }
 }
 
-function beginEdit(row: FdmdataDataJustPatternApi.PatternCost) {
+function beginEdit(row: Partial<FdmdataDataJustPatternApi.PatternCost>) {
   if (!row?.id) return;
   clearEditSuggestTimer();
   editingId.value = row.id;
@@ -229,7 +229,9 @@ async function saveEdit() {
   }
 }
 
-async function handleDelete(row: FdmdataDataJustPatternApi.PatternCost) {
+async function handleDelete(
+  row: Partial<FdmdataDataJustPatternApi.PatternCost>,
+) {
   if (!row?.id) return;
   if (editingId.value === row.id) {
     cancelEdit();
@@ -440,9 +442,9 @@ const [VbenModal, modalApi] = useVbenModal({
                 </template>
                 <template v-else>
                   <div class="flex flex-wrap items-center gap-2">
-                    <Button size="small" @click="beginEdit(record)"
-                      >编辑</Button
-                    >
+                    <Button size="small" @click="beginEdit(record)">
+                      编辑
+                    </Button>
                     <Popconfirm
                       title="确定删除该图案商品？"
                       ok-text="删除"
