@@ -259,8 +259,8 @@ catalogs:
       specifier: ^0.7.1
       version: 0.7.1
     codemirror:
-      specifier: ^5.65.21
-      version: 5.65.21
+      specifier: ^6.0.2
+      version: 6.65.7
     commitlint-plugin-function-rules:
       specifier: ^5.0.1
       version: 5.0.1
@@ -2223,7 +2223,7 @@ importers:
         version: 3.0.3(magicast@0.5.3)(vue@3.5.39(typescript@6.0.3))
       codemirror:
         specifier: 'catalog:'
-        version: 5.65.21
+        version: 6.65.7
       echarts:
         specifier: 'catalog:'
         version: 6.1.0
@@ -7229,9 +7229,6 @@ packages:
     resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
     engines: {node: '>=0.10.0'}
 
-  codemirror@5.65.21:
-    resolution: {integrity: sha512-6teYk0bA0nR3QP0ihGMoxuKzpl5W80FpnHpBJpgy66NK3cZv5b/d/HY8PnRvfSsCG1MTfr92u2WUl+wT0E40mQ==}
-
   codemirror@6.65.7:
     resolution: {integrity: sha512-HcfnUFJwI2FvH73YWVbbMh7ObWxZiHIycEhv9ZEXy6e8ZKDjtZKbbYFUtsLN46HFXPvU5V2Uvc2d55Z//oFW5A==}
     deprecated: This is an accidentally mis-tagged instance of 5.65.7
@@ -7442,6 +7439,7 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   crypto-random-string@2.0.0:
     resolution: {integrity: sha512-v1plID3y9r/lPhviJ1wrXpLeyUIGAZ2SHNYTEapm7/8A9nLPoyvVp3RK/EPFqn5kEznyWgYZNsRtYYIWbuG8KA==}
@@ -17462,8 +17460,6 @@ snapshots:
   clsx@2.1.1: {}
 
   cluster-key-slot@1.1.1: {}
-
-  codemirror@5.65.21: {}
 
   codemirror@6.65.7: {}
 
