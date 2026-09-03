@@ -115,15 +115,15 @@ function verifyFdmIsolation() {
     {
       label: 'official API/view import',
       pattern:
-        /(?:#|@)\/(?:api|views)\/(?:erp|mes|wms)(?:\/|['"`])|['"`](?:\.\.?\/)+(?:[^'"`/]+\/)*(?:erp|mes|wms)(?:\/|['"`])/i,
+        /(?:#|@)\/(?:api|views)\/(?:crm|erp|mes|wms)(?:\/|['"`])|['"`](?:\.\.?\/)+(?:[^'"`/]+\/)*(?:crm|erp|mes|wms)(?:\/|['"`])/i,
     },
     {
       label: 'official HTTP URL',
-      pattern: /['"`](?:\/admin-api)?\/(?:erp|mes|wms)(?:\/|['"`])/i,
+      pattern: /['"`](?:\/admin-api)?\/(?:crm|erp|mes|wms)(?:\/|['"`])/i,
     },
     {
       label: 'official permission code',
-      pattern: /['"`](?:erp|mes|wms):[a-z0-9:-]+['"`]/i,
+      pattern: /['"`](?:crm|erp|mes|wms):[a-z0-9:-]+['"`]/i,
     },
     {
       label: 'official Infra file import',
@@ -316,22 +316,36 @@ function verifyRuntimeDisablement() {
       'utf8',
     ),
   );
+  const routerHelper = withoutComments(
+    readFileSync(
+      resolve(repositoryRoot, 'apps/web-antd/src/utils/routerHelper.ts'),
+      'utf8',
+    ),
+  );
+  const expectedRoots = manifest.disabledOfficialRoots;
+  const disabledSegments = expectedRoots.map((rootPath) =>
+    rootPath.replace(/^\//, ''),
+  );
   const problems = [];
-  for (const segment of ['ai', 'erp', 'mes', 'wms']) {
+  for (const segment of disabledSegments) {
     if (!access.includes(`!../views/${segment}/**/*.vue`)) {
       problems.push(`dynamic page map does not exclude ${segment}`);
     }
     if (!routes.includes(`!../../views/${segment}/**/*.vue`)) {
       problems.push(`component key map does not exclude ${segment}`);
     }
+    if (!routerHelper.includes(`!../views/${segment}/**/*.{vue,tsx}`)) {
+      problems.push(`BPM dynamic form map does not exclude ${segment}`);
+    }
   }
-  for (const moduleName of ['ai', 'mes']) {
+  for (const moduleName of ['ai', 'crm', 'mes']) {
     if (!routes.includes(`!./modules/${moduleName}.ts`)) {
       problems.push(`static module glob does not exclude ${moduleName}`);
     }
   }
-  const expectedRoots = ['/ai', '/erp', '/mes', '/wms'];
-  const expectedComponents = ['ai/', 'erp/', 'mes/', 'wms/'];
+  const expectedComponents = expectedRoots.map(
+    (rootPath) => `${rootPath.replace(/^\//, '')}/`,
+  );
   if (
     !sameValues(quotedValues(menuFilter, 'DISABLED_ROOT_PATHS'), expectedRoots)
   ) {
@@ -361,5 +375,5 @@ verifyOfficialSources();
 verifyFdmIsolation();
 verifyRuntimeDisablement();
 console.log(
-  `FDM boundaries OK: official sources match ${manifest.baseline}; disabled modules remain outside runtime; FDM code has no official ERP/WMS/MES/Infra coupling or legacy FDM domain aliases.`,
+  `FDM boundaries OK: official sources match ${manifest.baseline}; disabled modules remain outside runtime; FDM code has no official CRM/ERP/WMS/MES/Infra coupling or legacy FDM domain aliases.`,
 );

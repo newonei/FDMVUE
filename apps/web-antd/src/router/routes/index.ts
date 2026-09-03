@@ -12,8 +12,9 @@ const dynamicRouteFiles = import.meta.glob(
     '!./modules/**/*.spec.ts',
     '!./modules/**/*.test.ts',
     // Keep official sources available for upstream merges, but never register
-    // the disabled AI/MES business modules in this FDM runtime.
+    // the disabled AI/CRM/MES business modules in this FDM runtime.
     '!./modules/ai.ts',
+    '!./modules/crm.ts',
     '!./modules/mes.ts',
     // 外贸部门已由数据库菜单提供真实路由；保留原型源码，但不再注入运行时。
     '!./modules/fdmwaimao-prototype.ts',
@@ -55,6 +56,7 @@ const componentKeys: string[] = Object.keys(
   import.meta.glob([
     '../../views/**/*.vue',
     '!../../views/ai/**/*.vue',
+    '!../../views/crm/**/*.vue',
     '!../../views/erp/**/*.vue',
     '!../../views/mes/**/*.vue',
     '!../../views/wms/**/*.vue',

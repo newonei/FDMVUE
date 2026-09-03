@@ -5,7 +5,14 @@ import type {
 
 import { defineAsyncComponent } from 'vue';
 
-const modules = import.meta.glob('../views/**/*.{vue,tsx}');
+const modules = import.meta.glob([
+  '../views/**/*.{vue,tsx}',
+  '!../views/ai/**/*.{vue,tsx}',
+  '!../views/crm/**/*.{vue,tsx}',
+  '!../views/erp/**/*.{vue,tsx}',
+  '!../views/mes/**/*.{vue,tsx}',
+  '!../views/wms/**/*.{vue,tsx}',
+]);
 
 /**
  * 注册一个异步组件

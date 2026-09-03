@@ -202,14 +202,6 @@ const allQuickEntries: QuickEntry[] = [
     title: '我的绩效',
   },
   {
-    color: '#ea580c',
-    description: '跟进客户、合同与回款提醒',
-    icon: 'lucide:users-round',
-    path: '/crm/backlog',
-    permissions: ['crm:customer:query', 'crm:clue:query', 'crm:contract:query'],
-    title: '客户待办',
-  },
-  {
     color: '#db2777',
     description: '进入图像与视频创作项目',
     icon: 'lucide:sparkles',

@@ -1,7 +1,7 @@
 import type { AppRouteRecordRaw } from '@vben/types';
 
-const DISABLED_ROOT_PATHS = new Set(['/ai', '/erp', '/mes', '/wms']);
-const DISABLED_COMPONENT_PREFIXES = ['ai/', 'erp/', 'mes/', 'wms/'];
+const DISABLED_ROOT_PATHS = new Set(['/ai', '/crm', '/erp', '/mes', '/wms']);
+const DISABLED_COMPONENT_PREFIXES = ['ai/', 'crm/', 'erp/', 'mes/', 'wms/'];
 
 function isDisabledOfficialBusinessMenu(menu: AppRouteRecordRaw): boolean {
   const component = menu.component;

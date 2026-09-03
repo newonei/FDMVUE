@@ -18,7 +18,7 @@ function createMenu(
 }
 
 describe('filterDisabledOfficialBusinessMenus', () => {
-  it.each(['/ai', '/erp', '/mes', '/wms'])(
+  it.each(['/ai', '/crm', '/erp', '/mes', '/wms'])(
     'removes disabled root %s and its complete subtree',
     (rootPath) => {
       const menus = [
@@ -76,6 +76,12 @@ describe('filterDisabledOfficialBusinessMenus', () => {
       }),
       createMenu('FdmProcurement', '/fdmprocurement', {
         component: 'fdmprocurement/purchase-execution/receipt/index',
+      }),
+      createMenu('FdmWaimao', '/fdmwaimao', {
+        component: 'fdmwaimao/customer/index',
+      }),
+      createMenu('FdmWaimaoCrmPrototype', '/fdmwaimaocrm-prototype', {
+        component: 'fdmwaimaocrm-prototype/index',
       }),
     ];
 
