@@ -36,7 +36,7 @@ overrides:
   pinia: 'catalog:'
   vue: 'catalog:'
 catalog:
-  '@antv/x6': 3.1.7
+  '@antv/x6': 3.1.8
   '@antv/x6-vue-shape': 3.0.2
   '@ast-grep/napi': ^0.43.0
   '@changesets/changelog-github': ^0.7.0
