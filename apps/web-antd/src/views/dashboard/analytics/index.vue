@@ -1,8 +1,7 @@
 <script lang="ts" setup>
 import type { BpmTaskApi } from '#/api/bpm/task';
-import type { SystemNoticeApi } from '#/api/system/notice';
+import type { FdmDashboardApi } from '#/api/fdmdata/dashboard';
 import type { SystemNotifyMessageApi } from '#/api/system/notify/message';
-import type { SystemVersionApi } from '#/api/system/version';
 
 import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -26,12 +25,15 @@ import dayjs from 'dayjs';
 
 import { getTaskTodoPage } from '#/api/bpm/task';
 import { getDingTalkApprovalTodoCount } from '#/api/fdmdingtalk/approval';
-import { getNoticePage, getPublishedNoticePage } from '#/api/system/notice';
+import {
+  getFdmDashboardBuildInfo,
+  getFdmDashboardPublishedNoticePage,
+} from '#/api/fdmdata/dashboard';
+import { getNoticePage } from '#/api/system/notice';
 import {
   getUnreadNotifyMessageCount,
   getUnreadNotifyMessageList,
 } from '#/api/system/notify/message';
-import { getSystemBuildInfo } from '#/api/system/version';
 
 defineOptions({ name: 'DashboardHome' });
 
@@ -81,13 +83,13 @@ const taskTotal = ref(0);
 const dingTalkTodoCount = ref<null | number>(null);
 const unreadMessageCount = ref<null | number>(null);
 const unreadMessages = ref<SystemNotifyMessageApi.NotifyMessage[]>([]);
-const notices = ref<SystemNoticeApi.Notice[]>([]);
+const notices = ref<FdmDashboardApi.Notice[]>([]);
 const activeInformationTab = ref<'messages' | 'notices'>('notices');
-const selectedNotice = ref<null | SystemNoticeApi.Notice>(null);
+const selectedNotice = ref<FdmDashboardApi.Notice | null>(null);
 const noticeModalOpen = ref(false);
 const lastUpdatedAt = ref<null | number>(null);
 const refreshing = ref(false);
-const backendBuildInfo = ref<null | SystemVersionApi.BuildInfo>(null);
+const backendBuildInfo = ref<FdmDashboardApi.BuildInfo | null>(null);
 
 const loading = reactive<DashboardLoadingState>({
   dingTalk: false,
@@ -366,7 +368,7 @@ function openTask(task: BpmTaskApi.Task) {
   });
 }
 
-function openNotice(notice: SystemNoticeApi.Notice) {
+function openNotice(notice: FdmDashboardApi.Notice) {
   selectedNotice.value = notice;
   noticeModalOpen.value = true;
 }
@@ -433,7 +435,10 @@ async function loadNotices() {
   failed.notices = false;
   loading.notices = true;
   try {
-    const result = await getPublishedNoticePage({ pageNo: 1, pageSize: 5 });
+    const result = await getFdmDashboardPublishedNoticePage({
+      pageNo: 1,
+      pageSize: 5,
+    });
     notices.value = result.list || [];
   } catch {
     // 兼容前后端分批更新：旧服务仅管理员拥有公告查询权限。
@@ -461,7 +466,7 @@ async function loadSystemVersion() {
   failed.version = false;
   loading.version = true;
   try {
-    backendBuildInfo.value = await getSystemBuildInfo();
+    backendBuildInfo.value = await getFdmDashboardBuildInfo();
   } catch {
     // 新前端可先于后端发布；旧后端不存在接口时在版本卡片中明确提示即可。
     failed.version = true;
