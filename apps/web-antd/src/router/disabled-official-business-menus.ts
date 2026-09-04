@@ -16,7 +16,7 @@ function isDisabledOfficialBusinessMenu(menu: AppRouteRecordRaw): boolean {
 
 /**
  * Runtime guard for environments whose menu table still contains disabled
- * official business modules. FDM-owned roots such as /fdmai and /fdmfactory
+ * official business modules. FDM-owned roots such as /fdmai and /fdmcaiwu
  * do not match an exact root or component prefix and remain untouched.
  */
 function filterDisabledOfficialBusinessMenus(

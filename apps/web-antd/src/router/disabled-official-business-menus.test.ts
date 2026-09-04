@@ -68,20 +68,8 @@ describe('filterDisabledOfficialBusinessMenus', () => {
       createMenu('AiTools', '/ai-tools', {
         component: 'tools/ai/index',
       }),
-      createMenu('FdmWarehouse', '/fdmwarehouse', {
-        component: 'fdmwarehouse/outbound-order/index',
-      }),
-      createMenu('FdmFactory', '/fdmfactory', {
-        component: 'fdmfactory/supply-task/index',
-      }),
-      createMenu('FdmProcurement', '/fdmprocurement', {
-        component: 'fdmprocurement/purchase-execution/receipt/index',
-      }),
-      createMenu('FdmWaimao', '/fdmwaimao', {
-        component: 'fdmwaimao/customer/index',
-      }),
-      createMenu('FdmWaimaoCrmPrototype', '/fdmwaimaocrm-prototype', {
-        component: 'fdmwaimaocrm-prototype/index',
+      createMenu('FdmCaiwu', '/fdmcaiwu', {
+        component: 'fdmcaiwu/quotation/index',
       }),
     ];
 

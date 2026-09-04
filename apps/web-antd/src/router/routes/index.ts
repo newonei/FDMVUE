@@ -16,8 +16,6 @@ const dynamicRouteFiles = import.meta.glob(
     '!./modules/ai.ts',
     '!./modules/crm.ts',
     '!./modules/mes.ts',
-    // 外贸部门已由数据库菜单提供真实路由；保留原型源码，但不再注入运行时。
-    '!./modules/fdmwaimao-prototype.ts',
   ],
   {
     eager: true,

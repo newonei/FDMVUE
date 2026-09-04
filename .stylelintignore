@@ -57,7 +57,3 @@ apps/web-antd/src/views/fdmdingtalk
 apps/web-antd/src/views/fdmneixiao
 apps/web-antd/src/views/fdmperformance
 apps/web-antd/src/views/fdmxui
-apps/web-antd/src/views/fdmwaimao/components/FdmWaimaoAttachmentEditor.vue
-apps/web-antd/src/views/fdmwaimao/components/FdmWaimaoAttachmentList.vue
-apps/web-antd/src/views/fdmwaimao/demand-plan/form/index.vue
-apps/web-antd/src/views/fdmwaimao/order-expense/components/OrderExpenseGenerationModal.vue
