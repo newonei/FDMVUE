@@ -12,6 +12,7 @@ const emit = defineEmits(['success']);
 
 const selectedIds = ref<number[]>([]);
 const picUrl = ref<string>('');
+const submitting = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
@@ -21,11 +22,12 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const ids = modalApi.getData<number[]>() ?? [];
-    selectedIds.value = Array.isArray(ids) ? ids : [];
+    selectedIds.value = Array.isArray(ids) ? [...ids] : [];
   },
 });
 
 async function handleConfirm() {
+  if (submitting.value) return;
   if (!selectedIds.value.length) {
     message.warning('请先勾选成品编码列表数据');
     return;
@@ -35,23 +37,31 @@ async function handleConfirm() {
     message.warning('请先上传图片');
     return;
   }
+  const ids = [...selectedIds.value];
+  submitting.value = true;
   modalApi.lock();
   try {
-    await batchSetFinishedSkuPic({ ids: selectedIds.value, picUrl: url });
-    message.success(`已批量设置 ${selectedIds.value.length} 条图片`);
+    await batchSetFinishedSkuPic({ ids, picUrl: url });
+    message.success(`已批量设置 ${ids.length} 条图片`);
     emit('success');
     modalApi.close();
   } finally {
+    submitting.value = false;
     modalApi.unlock();
   }
 }
 </script>
 
 <template>
-  <Modal title="批量设置图片（成品编码列表）" :show-confirm-button="false">
+  <Modal
+    title="批量设置图片（成品编码列表）"
+    :show-confirm-button="false"
+    :show-cancel-button="false"
+  >
     <div class="space-y-3 px-4">
       <div class="text-sm text-muted-foreground">
-        已选择 <strong>{{ selectedIds.length }}</strong> 条，将统一设置为同一张图片。
+        已选择
+        <strong>{{ selectedIds.length }}</strong> 条，将统一设置为同一张图片。
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -72,15 +82,25 @@ async function handleConfirm() {
         </div>
 
         <div class="flex-1">
-          <ImageUpload v-model="picUrl" :max-number="1" />
+          <ImageUpload
+            v-model="picUrl"
+            :max-number="1"
+            :disabled="submitting"
+          />
         </div>
       </div>
 
       <div class="flex justify-end gap-2 border-t border-border pt-3">
-        <Button @click="modalApi.close()">取消</Button>
-        <Button type="primary" @click="handleConfirm">确定上传并批量设置</Button>
+        <Button :disabled="submitting" @click="modalApi.close()">取消</Button>
+        <Button
+          type="primary"
+          :loading="submitting"
+          :disabled="!selectedIds.length || !picUrl.trim() || submitting"
+          @click="handleConfirm"
+        >
+          批量设置图片
+        </Button>
       </div>
     </div>
   </Modal>
 </template>
-

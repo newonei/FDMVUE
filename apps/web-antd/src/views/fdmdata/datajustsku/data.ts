@@ -2,6 +2,8 @@ import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
 
+import { useUserStore } from '@vben/stores';
+
 import { getSimpleUserList } from '#/api/system/user';
 import { getRangePickerDefaultProps } from '#/utils';
 
@@ -48,7 +50,7 @@ function accessoryEnumGridLabel(
 
 /** 新增/修改的表单（blank / pattern / finished 三个 Tab 共用，2 列布局） */
 export function useFormSchema(): VbenFormSchema[] {
-  const fullWidth = 'col-span-2';
+  const fullWidth = 'col-span-full';
   return [
     // ── 隐藏字段 ──────────────────────────────────────────────
     {
@@ -310,7 +312,7 @@ export function useFormSchema(): VbenFormSchema[] {
 
 /** 配件列表专用表单：字段顺序与 fdm_data_just_accessory 表结构保持一致 */
 export function useAccessoryFormSchema(): VbenFormSchema[] {
-  const fullWidth = 'col-span-2';
+  const fullWidth = 'col-span-full';
   return [
     {
       fieldName: 'id',
@@ -637,7 +639,24 @@ export function useAccessoryFormSchema(): VbenFormSchema[] {
 
 /** 列表的搜索表单（高频字段靠前；分类、创建时间靠后可配合表单「收起」） */
 export function useGridFormSchema(): VbenFormSchema[] {
+  const userStore = useUserStore();
   return [
+    {
+      fieldName: 'creator',
+      label: '创建人',
+      component: 'ApiSelect',
+      defaultValue: userStore.userInfo?.id,
+      help: '默认查询自己创建的编码；可选择其他创建人，清空则查询全部。',
+      componentProps: {
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        api: getSimpleUserList,
+        labelField: 'nickname',
+        valueField: 'id',
+        placeholder: '全部创建人',
+      },
+    },
     {
       fieldName: 'itemCode',
       label: '商品编码',
@@ -687,19 +706,6 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         placeholder: '模糊查询分类',
-      },
-    },
-    {
-      fieldName: 'creator',
-      label: '创建人',
-      component: 'ApiSelect',
-      componentProps: {
-        allowClear: true,
-        showSearch: true,
-        api: getSimpleUserList,
-        labelField: 'nickname',
-        valueField: 'id',
-        placeholder: '请选择创建人',
       },
     },
     {
@@ -767,7 +773,7 @@ export function buildDataJustSkuGridColumns(
     options?.listTab === 'combo' || options?.listTab === 'custom_combo';
 
   return [
-    { type: 'checkbox', width: 40 },
+    { type: 'checkbox', width: 44, fixed: 'left' },
     ...(options?.blankPicPreview || options?.listTab === 'accessory'
       ? [blankPicColumn]
       : []),
@@ -781,7 +787,9 @@ export function buildDataJustSkuGridColumns(
         options?.listTab === 'custom_combo' || options?.listTab === 'combo'
           ? '组合商品编码'
           : '商品编码',
-      minWidth: 140,
+      minWidth: 190,
+      fixed: 'left',
+      slots: { default: 'colItemCode' },
     },
     ...(options?.listTab === 'custom_combo' || options?.listTab === 'combo'
       ? [

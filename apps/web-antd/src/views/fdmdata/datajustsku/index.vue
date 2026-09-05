@@ -1,21 +1,28 @@
 <script lang="ts" setup>
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataDataJustAccessoryApi } from '#/api/fdmdata/datajustaccessory';
-import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
+import type {
+  FdmdataDataJustSkuApi,
+  JstSyncBatchResp,
+} from '#/api/fdmdata/datajustsku';
 import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
 
 import { computed, nextTick, ref, shallowRef } from 'vue';
 
 import { confirm, Page, useVbenModal } from '@vben/common-ui';
-import { downloadFileFromBlobPart, isEmpty } from '@vben/utils';
+import { downloadFileFromBlobPart } from '@vben/utils';
+
+import { useClipboard } from '@vueuse/core';
 
 import {
+  Alert,
   Button,
   Dropdown,
   Menu,
   message,
   Segmented,
   Tag,
+  Tooltip,
 } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -71,6 +78,7 @@ import CustomComboChildrenModalComp from './modules/custom-combo-children-modal.
 import CustomComboGenerateModalComp from './modules/custom-combo-generate-modal.vue';
 import StandardComboGenerateModalComp from './modules/standard-combo-generate-modal.vue';
 import ComboPlatformPriceModalComp from './modules/combo-platform-price-modal.vue';
+import SyncResultModalComp from './modules/sync-result-modal.vue';
 
 /** 与后端列表 Tab 一致；配件列表独立表 fdm_data_just_accessory */
 type SkuListTab =
@@ -143,6 +151,62 @@ const activeTabMeta = computed(() =>
 );
 
 const checkedCount = computed(() => checkedIds.value.length);
+const loadingList = ref(false);
+const listLoadFailed = ref(false);
+const switchingTab = ref(false);
+const exporting = ref(false);
+const pendingAction = ref<'delete' | 'sync' | null>(null);
+const pendingRowId = ref<number>();
+const interactionBusy = computed(
+  () => loadingList.value || switchingTab.value || !!pendingAction.value,
+);
+const appliedFilters = ref<Record<string, unknown>>({});
+const tabFilters = new Map<SkuListTab, Record<string, unknown>>();
+const { copy } = useClipboard({ legacy: true });
+const syncFilterOptions = [
+  { label: '全部状态', value: 0 },
+  { label: '未同步', value: 1 },
+  { label: '已同步', value: 2 },
+  { label: '同步失败', value: 3 },
+];
+const activeSyncFilter = computed(
+  () => Number(appliedFilters.value.status) || 0,
+);
+const hasActiveFilters = computed(() =>
+  Object.values(appliedFilters.value).some((value) =>
+    Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined && value !== null && value !== '',
+  ),
+);
+
+async function copyItemCode(code?: string) {
+  if (!code) return;
+  try {
+    await copy(code);
+    message.success('商品编码已复制');
+  } catch {
+    message.error('复制失败，请选中商品编码后手动复制');
+  }
+}
+
+async function handleSyncFilter(value: number) {
+  if (interactionBusy.value) return;
+  await gridApi.formApi.setFieldValue('status', value || undefined);
+  await gridApi.formApi.submitForm();
+}
+
+async function handleResetFilters() {
+  if (interactionBusy.value) return;
+  await gridApi.formApi.resetForm();
+  await gridApi.formApi.setFieldValue('creator', undefined);
+  await gridApi.formApi.submitForm();
+}
+
+function clearSelection() {
+  checkedIds.value = [];
+  void gridApi.grid?.clearCheckboxRow();
+}
 
 /** 当前 Tab 主按钮（每 Tab 仅一个 primary，减少工具栏视觉噪音） */
 const primaryToolbarAction = computed(() => {
@@ -193,7 +257,7 @@ const secondaryToolbarActions = computed(() => {
 type ToolbarMenuItem = { key: string; label: string; disabled?: boolean };
 
 const batchToolbarMenuItems = computed((): ToolbarMenuItem[] => {
-  const disabled = isEmpty(checkedIds.value);
+  const disabled = checkedCount.value === 0 || interactionBusy.value;
   const tab = activeListTab.value;
   if (tab === 'blank') {
     return [
@@ -225,14 +289,6 @@ const importToolbarMenuItems = computed((): ToolbarMenuItem[] => {
     return [{ key: 'import-accessory', label: '导入（配件列表）' }];
   }
   return [];
-});
-
-const moreToolbarMenuItems = computed((): ToolbarMenuItem[] => {
-  const disabled = isEmpty(checkedIds.value);
-  return [
-    { key: 'export', label: '导出' },
-    { key: 'delete-batch', label: '批量删除', disabled },
-  ];
 });
 
 function handleToolbarMenuClick({ key }: { key: string | number }) {
@@ -295,11 +351,6 @@ function sameCheckedIdList(a: number[], b: number[]) {
   return true;
 }
 
-/** 供 v-memo：仅当选中集合变化时才重跑工具栏 TableAction */
-const checkedIdsMemoKey = computed(() =>
-  [...checkedIds.value].toSorted((a, b) => a - b).join(','),
-);
-
 function handleRowCheckboxChange({
   records,
 }: {
@@ -323,17 +374,36 @@ const gridTableTitle = computed(() => {
 
 async function onListTabChange(key: string | number) {
   const nextTab = key as SkuListTab;
-  checkedIds.value = [];
-  gridApi.setGridOptions({
-    columns: buildDataJustSkuGridColumns({
-      listTab: nextTab,
-      patternPicPreview: nextTab === 'pattern',
-      blankPicPreview: nextTab === 'blank',
-      finishedPicPreview: nextTab === 'finished',
-    }),
-  });
-  await nextTick();
-  gridApi.query();
+  if (nextTab === activeListTab.value || interactionBusy.value) return;
+  switchingTab.value = true;
+  try {
+    tabFilters.set(activeListTab.value, {
+      ...(await gridApi.formApi.getValues()),
+    });
+    clearSelection();
+    // 不让上一列表的行在新列表请求失败后套用新的编辑/删除接口。
+    await gridApi.grid.loadData([]);
+    activeListTab.value = nextTab;
+    gridApi.setGridOptions({
+      columns: buildDataJustSkuGridColumns({
+        listTab: nextTab,
+        patternPicPreview: nextTab === 'pattern',
+        blankPicPreview: nextTab === 'blank',
+        finishedPicPreview: nextTab === 'finished',
+      }),
+    });
+    await gridApi.formApi.resetForm();
+    const savedFilters = tabFilters.get(nextTab);
+    if (savedFilters) {
+      await gridApi.formApi.setValues(savedFilters);
+      // setValues 会忽略 undefined，单独恢复用户清空的创建人条件。
+      await gridApi.formApi.setFieldValue('creator', savedFilters.creator);
+    }
+    await nextTick();
+    await gridApi.formApi.submitForm();
+  } finally {
+    switchingTab.value = false;
+  }
 }
 
 const [FormModal, formModalApi] = useVbenModal({
@@ -422,13 +492,18 @@ const [CustomComboChildrenModal, customComboChildrenModalApi] = useVbenModal({
   destroyOnClose: true,
 });
 
+const [SyncResultModal, syncResultModalApi] = useVbenModal({
+  connectedComponent: SyncResultModalComp,
+  destroyOnClose: true,
+});
+
 function handleOpenComboChildren(data: { comboId: number; itemCode?: string }) {
   customComboChildrenModalApi.setData(data).open();
 }
 
 /** 刷新表格 */
 function handleRefresh() {
-  gridApi.query();
+  return gridApi.query();
 }
 
 function handleYogaBlankGen() {
@@ -440,7 +515,8 @@ function handleCostMaintain() {
 }
 
 function handleBlankBatchSetPic() {
-  blankBatchPicModalApi.setData(checkedIds.value).open();
+  if (checkedCount.value === 0 || interactionBusy.value) return;
+  blankBatchPicModalApi.setData([...checkedIds.value]).open();
 }
 
 function handleBlankImportExcel() {
@@ -460,7 +536,8 @@ function handleCreate() {
 }
 
 function handleFinishedBatchSetPic() {
-  finishedBatchPicModalApi.setData(checkedIds.value).open();
+  if (checkedCount.value === 0 || interactionBusy.value) return;
+  finishedBatchPicModalApi.setData([...checkedIds.value]).open();
 }
 
 function handlePatternCostMaintain() {
@@ -509,6 +586,9 @@ function handleEdit(
 async function handleSyncJushuitan(
   row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern,
 ) {
+  if (interactionBusy.value) return;
+  pendingAction.value = 'sync';
+  pendingRowId.value = row.id;
   const hideLoading = message.loading({
     content: '正在同步到聚水潭…',
     duration: 0,
@@ -545,85 +625,46 @@ async function handleSyncJushuitan(
         res?.jstSkuId ? `同步成功，聚水潭 SKU ID：${res.jstSkuId}` : '同步成功',
       );
     }
-    handleRefresh();
+    await handleRefresh();
   } finally {
     hideLoading();
+    pendingAction.value = null;
+    pendingRowId.value = undefined;
   }
 }
 
-/** 空白版列表：勾选后批量同步（后端一次聚水潭接口，items 多条） */
-async function handleSyncJushuitanBatch() {
-  if (isEmpty(checkedIds.value)) {
-    return;
-  }
+/** 捕获本次同步接口，结果窗口重试时仍使用原列表。 */
+async function runBatchSync(
+  sync: (ids: number[]) => Promise<JstSyncBatchResp>,
+) {
+  if (checkedCount.value === 0 || interactionBusy.value) return;
+  const ids = [...checkedIds.value];
+  const listLabel = activeTabMeta.value?.label ?? 'SKU';
+  pendingAction.value = 'sync';
   const hideLoading = message.loading({
-    content: '正在批量同步到聚水潭…',
+    content: `正在同步选中的 ${ids.length} 条记录…`,
     duration: 0,
   });
   try {
-    const res = await syncDataJustSkuToJushuitanBatch(checkedIds.value);
-    checkedIds.value = [];
-    if (res.failCount === 0) {
-      message.success(`批量同步完成，共 ${res.successCount} 条`);
-    } else {
-      message.warning(
-        `批量同步完成：成功 ${res.successCount} 条，失败 ${res.failCount} 条（失败原因见各条 message）`,
-      );
-    }
-    handleRefresh();
+    const result = await sync(ids);
+    syncResultModalApi.setData({ result, listLabel, retry: sync }).open();
+    await handleRefresh();
   } finally {
     hideLoading();
+    pendingAction.value = null;
   }
 }
 
-/** 成品编码列表：勾选后批量同步（后端一次聚水潭接口，items 多条） */
-async function handleSyncFinishedJushuitanBatch() {
-  if (isEmpty(checkedIds.value)) {
-    return;
-  }
-  const hideLoading = message.loading({
-    content: '正在批量同步到聚水潭…',
-    duration: 0,
-  });
-  try {
-    const res = await syncFinishedSkuToJushuitanBatchV2(checkedIds.value);
-    checkedIds.value = [];
-    if (res.failCount === 0) {
-      message.success(`批量同步完成，共 ${res.successCount} 条`);
-    } else {
-      message.warning(
-        `批量同步完成：成功 ${res.successCount} 条，失败 ${res.failCount} 条（失败原因见各条 message）`,
-      );
-    }
-    handleRefresh();
-  } finally {
-    hideLoading();
-  }
+function handleSyncJushuitanBatch() {
+  return runBatchSync(syncDataJustSkuToJushuitanBatch);
 }
 
-/** 标准组合 / 定制组合：勾选后批量同步组合装到聚水潭（一次接口多条 items） */
-async function handleSyncCustomComboBatch() {
-  if (isEmpty(checkedIds.value)) {
-    return;
-  }
-  const hideLoading = message.loading({
-    content: '正在批量同步组合装到聚水潭…',
-    duration: 0,
-  });
-  try {
-    const res = await syncCustomComboToJushuitanBatch(checkedIds.value);
-    checkedIds.value = [];
-    if (res.failCount === 0) {
-      message.success(`批量同步完成，共 ${res.successCount} 条`);
-    } else {
-      message.warning(
-        `批量同步完成：成功 ${res.successCount} 条，失败 ${res.failCount} 条（失败原因见各条 message）`,
-      );
-    }
-    handleRefresh();
-  } finally {
-    hideLoading();
-  }
+function handleSyncFinishedJushuitanBatch() {
+  return runBatchSync(syncFinishedSkuToJushuitanBatchV2);
+}
+
+function handleSyncCustomComboBatch() {
+  return runBatchSync(syncCustomComboToJushuitanBatch);
 }
 
 /** 删除（SKU 主表或图案表） */
@@ -633,6 +674,9 @@ async function handleDelete(
     | FdmdataDataJustPatternApi.Pattern
     | FdmdataDataJustAccessoryApi.Accessory,
 ) {
+  if (interactionBusy.value) return;
+  pendingAction.value = 'delete';
+  pendingRowId.value = row.id;
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deleting', [row.id]),
     duration: 0,
@@ -653,75 +697,95 @@ async function handleDelete(
       await deleteDataJustSku(row.id!);
     }
     message.success($t('ui.actionMessage.deleteSuccess', [row.id]));
-    handleRefresh();
+    await handleRefresh();
   } finally {
     hideLoading();
+    pendingAction.value = null;
+    pendingRowId.value = undefined;
   }
 }
 
 /** 批量删除 */
 async function handleDeleteBatch() {
-  await confirm($t('ui.actionMessage.deleteBatchConfirm'));
+  if (checkedCount.value === 0 || interactionBusy.value) return;
+  const ids = [...checkedIds.value];
+  const tab = activeListTab.value;
+  pendingAction.value = 'delete';
+  try {
+    await confirm(
+      `确定删除「${activeTabMeta.value?.shortLabel}」中选中的 ${ids.length} 条记录吗？删除后无法恢复。`,
+    );
+  } catch {
+    pendingAction.value = null;
+    return;
+  }
   const hideLoading = message.loading({
     content: $t('ui.actionMessage.deletingBatch'),
     duration: 0,
   });
   try {
-    if (activeListTab.value === 'pattern') {
-      await deleteDataJustPatternList(checkedIds.value);
-    } else if (activeListTab.value === 'accessory') {
-      await deleteDataJustAccessoryList(checkedIds.value);
-    } else if (activeListTab.value === 'finished') {
-      await deleteFinishedSkuList(checkedIds.value);
-    } else if (
-      activeListTab.value === 'custom_combo' ||
-      activeListTab.value === 'combo'
-    ) {
-      await deleteCustomComboList(checkedIds.value);
+    if (tab === 'pattern') {
+      await deleteDataJustPatternList(ids);
+    } else if (tab === 'accessory') {
+      await deleteDataJustAccessoryList(ids);
+    } else if (tab === 'finished') {
+      await deleteFinishedSkuList(ids);
+    } else if (tab === 'custom_combo' || tab === 'combo') {
+      await deleteCustomComboList(ids);
     } else {
-      await deleteDataJustSkuList(checkedIds.value);
+      await deleteDataJustSkuList(ids);
     }
-    checkedIds.value = [];
+    clearSelection();
     message.success($t('ui.actionMessage.deleteSuccess'));
-    handleRefresh();
+    await handleRefresh();
   } finally {
     hideLoading();
+    pendingAction.value = null;
   }
 }
 
 /** 导出表格 */
 async function handleExport() {
-  const meta = LIST_TAB_META.find((m) => m.key === activeListTab.value);
-  const formValues = await gridApi.formApi.getValues();
-  const data =
-    activeListTab.value === 'pattern'
-      ? await exportDataJustPatternExcel(formValues)
-      : activeListTab.value === 'accessory'
-        ? await exportDataJustAccessoryExcel(
-            formValues as Record<string, unknown>,
-          )
-        : activeListTab.value === 'finished'
-          ? await exportFinishedSkuExcel(formValues)
-          : activeListTab.value === 'custom_combo' ||
-              activeListTab.value === 'combo'
-            ? await exportCustomComboExcel({
-                ...formValues,
-                categoryName:
-                  activeListTab.value === 'combo' ? '组合' : '定制组合',
-              })
-            : await exportDataJustSku({
-                ...formValues,
-                listTab: activeListTab.value,
-              });
-  downloadFileFromBlobPart({
-    fileName: meta?.exportName ?? '聚水潭SKU.xls',
-    source: data,
-  });
+  if (exporting.value || interactionBusy.value || listLoadFailed.value) return;
+  exporting.value = true;
+  try {
+    const meta = LIST_TAB_META.find((m) => m.key === activeListTab.value);
+    const formValues = { ...appliedFilters.value };
+    const data =
+      activeListTab.value === 'pattern'
+        ? await exportDataJustPatternExcel(formValues)
+        : activeListTab.value === 'accessory'
+          ? await exportDataJustAccessoryExcel(
+              formValues as Record<string, unknown>,
+            )
+          : activeListTab.value === 'finished'
+            ? await exportFinishedSkuExcel(formValues)
+            : activeListTab.value === 'custom_combo' ||
+                activeListTab.value === 'combo'
+              ? await exportCustomComboExcel({
+                  ...formValues,
+                  categoryName:
+                    activeListTab.value === 'combo' ? '组合' : '定制组合',
+                })
+              : await exportDataJustSku({
+                  ...formValues,
+                  listTab: activeListTab.value,
+                });
+    downloadFileFromBlobPart({
+      fileName: meta?.exportName ?? '聚水潭SKU.xls',
+      source: data,
+    });
+    message.success('导出成功');
+  } finally {
+    exporting.value = false;
+  }
 }
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
     schema: useGridFormSchema(),
+    collapsed: true,
+    submitOnEnter: true,
     wrapperClass: 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4',
   },
   gridOptions: {
@@ -738,47 +802,63 @@ const [Grid, gridApi] = useVbenVxeGrid({
     proxyConfig: {
       ajax: {
         query: async ({ page }, formValues) => {
-          if (
-            activeListTab.value === 'custom_combo' ||
-            activeListTab.value === 'combo'
-          ) {
-            return await getCustomComboPage({
+          loadingList.value = true;
+          listLoadFailed.value = false;
+          clearSelection();
+          appliedFilters.value = { ...formValues };
+          try {
+            if (
+              activeListTab.value === 'custom_combo' ||
+              activeListTab.value === 'combo'
+            ) {
+              return await getCustomComboPage({
+                pageNo: page.currentPage,
+                pageSize: page.pageSize,
+                ...formValues,
+                categoryName:
+                  activeListTab.value === 'combo' ? '组合' : '定制组合',
+              } as any);
+            }
+            if (activeListTab.value === 'pattern') {
+              return await getDataJustPatternPage({
+                pageNo: page.currentPage,
+                pageSize: page.pageSize,
+                ...formValues,
+              } as any);
+            }
+            if (activeListTab.value === 'accessory') {
+              return await getDataJustAccessoryPage({
+                pageNo: page.currentPage,
+                pageSize: page.pageSize,
+                ...formValues,
+              } as any);
+            }
+            if (activeListTab.value === 'finished') {
+              return await getFinishedSkuPage({
+                pageNo: page.currentPage,
+                pageSize: page.pageSize,
+                ...formValues,
+              } as any);
+            }
+            return await getDataJustSkuPage({
               pageNo: page.currentPage,
               pageSize: page.pageSize,
+              listTab: activeListTab.value,
               ...formValues,
-              categoryName:
-                activeListTab.value === 'combo' ? '组合' : '定制组合',
-            } as any);
+            });
+          } catch (error) {
+            listLoadFailed.value = true;
+            await gridApi.grid.loadData([]);
+            throw error;
+          } finally {
+            loadingList.value = false;
           }
-          if (activeListTab.value === 'pattern') {
-            return await getDataJustPatternPage({
-              pageNo: page.currentPage,
-              pageSize: page.pageSize,
-              ...formValues,
-            } as any);
-          }
-          if (activeListTab.value === 'accessory') {
-            return await getDataJustAccessoryPage({
-              pageNo: page.currentPage,
-              pageSize: page.pageSize,
-              ...formValues,
-            } as any);
-          }
-          if (activeListTab.value === 'finished') {
-            return await getFinishedSkuPage({
-              pageNo: page.currentPage,
-              pageSize: page.pageSize,
-              ...formValues,
-            } as any);
-          }
-          return await getDataJustSkuPage({
-            pageNo: page.currentPage,
-            pageSize: page.pageSize,
-            listTab: activeListTab.value,
-            ...formValues,
-          });
         },
       },
+    },
+    checkboxConfig: {
+      highlight: true,
+      checkMethod: () => !interactionBusy.value,
     },
     rowConfig: {
       keyField: 'id',
@@ -813,18 +893,21 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <PatternCostMaintainModal />
     <FinishedCostMaintainModal />
     <PatternProductMaintainModal @success="handleRefresh" />
-    <PatternGenerateModal />
+    <PatternGenerateModal @success="handleRefresh" />
+    <SyncResultModal @success="handleRefresh" />
     <FinishedGenerateModal @success="handleRefresh" />
     <CustomComboGenerateModal @success="handleRefresh" />
     <StandardComboGenerateModal @success="handleRefresh" />
     <ComboPlatformPriceModal />
     <CustomComboChildrenModal />
 
-    <div class="data-just-sku-page flex min-h-0 flex-1 flex-col px-4 pb-4">
+    <div
+      class="data-just-sku-page flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4"
+    >
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3"
       >
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 basis-full lg:flex-1">
           <h2 class="mb-1 text-lg font-semibold text-foreground">
             聚水潭 SKU 编码管理
           </h2>
@@ -833,17 +916,146 @@ const [Grid, gridApi] = useVbenVxeGrid({
           </p>
         </div>
         <Segmented
-          v-model:value="activeListTab"
+          :value="activeListTab"
           :options="segmentedOptions"
+          :disabled="interactionBusy"
           class="data-just-sku-segmented shrink-0"
           @change="onListTabChange"
         />
       </header>
 
+      <div
+        class="sku-filter-bar flex flex-wrap items-center gap-2 rounded-md bg-card px-3 py-2"
+      >
+        <span class="text-xs text-muted-foreground">聚水潭同步</span>
+        <Button
+          v-for="option in syncFilterOptions"
+          :key="option.value"
+          size="small"
+          :type="activeSyncFilter === option.value ? 'primary' : 'text'"
+          :aria-pressed="activeSyncFilter === option.value"
+          :disabled="interactionBusy"
+          @click="handleSyncFilter(option.value)"
+          >{{ option.label }}</Button
+        >
+        <Button
+          v-if="hasActiveFilters"
+          type="link"
+          size="small"
+          :disabled="interactionBusy"
+          @click="handleResetFilters"
+        >
+          清空全部筛选
+        </Button>
+        <span class="ml-auto text-xs text-muted-foreground"
+          >输入后按 Enter 查询 · 各列表独立保留筛选</span
+        >
+      </div>
+
+      <div
+        class="sku-selection-bar flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
+        :class="
+          checkedCount > 0
+            ? 'border-primary/30 bg-primary/5'
+            : 'border-transparent bg-card'
+        "
+        aria-live="polite"
+      >
+        <template v-if="checkedCount > 0">
+          <span class="mr-1 text-sm"
+            >已选
+            <strong class="text-primary">{{ checkedCount }}</strong> 条<span
+              class="ml-1 text-xs text-muted-foreground"
+              >（当前页）</span
+            ></span
+          >
+          <Button
+            size="small"
+            :disabled="interactionBusy"
+            @click="clearSelection"
+            >取消选择</Button
+          >
+          <Button
+            v-for="item in batchToolbarMenuItems"
+            :key="item.key"
+            v-access:code="['fdmdata:data-just-sku:update']"
+            size="small"
+            :disabled="item.disabled"
+            :loading="pendingAction === 'sync' && item.key.endsWith('sync')"
+            @click="handleToolbarMenuClick({ key: item.key })"
+            >{{ item.label }}</Button
+          >
+          <Button
+            v-access:code="['fdmdata:data-just-sku:delete']"
+            size="small"
+            danger
+            :disabled="interactionBusy"
+            :loading="pendingAction === 'delete' && pendingRowId === undefined"
+            @click="handleDeleteBatch"
+            >删除所选</Button
+          >
+        </template>
+        <span v-else class="text-xs text-muted-foreground"
+          >勾选左侧复选框进行批量操作，翻页或重新查询会清空选择。</span
+        >
+      </div>
+
+      <Alert
+        v-if="listLoadFailed"
+        type="error"
+        message="列表加载失败，请重试。"
+        show-icon
+        class="shrink-0"
+      >
+        <template #action>
+          <Button
+            size="small"
+            :disabled="interactionBusy"
+            @click="handleRefresh"
+            >重新加载</Button
+          >
+        </template>
+      </Alert>
+
       <Grid
         class="data-just-sku-grid min-h-0 flex-1"
         :table-title="gridTableTitle"
       >
+        <template #colItemCode="{ row }">
+          <div class="flex items-center gap-1 text-left">
+            <Tooltip :title="row.itemCode">
+              <span class="min-w-0 flex-1 truncate font-mono text-xs">{{
+                row.itemCode || '—'
+              }}</span>
+            </Tooltip>
+            <Tooltip title="复制商品编码">
+              <Button
+                v-if="row.itemCode"
+                type="text"
+                size="small"
+                aria-label="复制商品编码"
+                class="shrink-0 !px-1 text-muted-foreground"
+                @click.stop="copyItemCode(row.itemCode)"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  aria-hidden="true"
+                >
+                  <rect x="8" y="8" width="12" height="12" rx="2" />
+                  <path
+                    d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
+                  />
+                </svg>
+              </Button>
+            </Tooltip>
+          </div>
+        </template>
         <template #colSyncStatus="{ row }">
           <Tag v-if="row.status === 1" color="warning">未同步</Tag>
           <Tag v-else-if="row.status === 2" color="success">已同步</Tag>
@@ -869,19 +1081,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
           </div>
         </template>
         <template #toolbar-tools>
-          <div
-            v-memo="[activeListTab, checkedIdsMemoKey]"
-            class="inline-flex max-w-full flex-wrap items-center gap-2"
-          >
-            <span
-              v-if="checkedCount > 0"
-              class="mr-1 text-xs text-muted-foreground"
-            >
-              已选 {{ checkedCount }} 条
-            </span>
+          <div class="inline-flex max-w-full flex-wrap items-center gap-2">
             <Button
               v-if="primaryToolbarAction"
               type="primary"
+              :disabled="interactionBusy"
               @click="primaryToolbarAction.onClick"
             >
               {{ primaryToolbarAction.label }}
@@ -889,26 +1093,17 @@ const [Grid, gridApi] = useVbenVxeGrid({
             <Button
               v-for="(act, idx) in secondaryToolbarActions"
               :key="`${activeListTab}-sec-${idx}`"
+              :disabled="interactionBusy"
               @click="act.onClick"
             >
               {{ act.label }}
             </Button>
-            <Dropdown v-if="batchToolbarMenuItems.length > 0">
-              <Button>批量操作</Button>
-              <template #overlay>
-                <Menu @click="handleToolbarMenuClick">
-                  <Menu.Item
-                    v-for="item in batchToolbarMenuItems"
-                    :key="item.key"
-                    :disabled="item.disabled"
-                  >
-                    {{ item.label }}
-                  </Menu.Item>
-                </Menu>
-              </template>
-            </Dropdown>
-            <Dropdown v-if="importToolbarMenuItems.length > 0">
-              <Button>导入</Button>
+            <Dropdown
+              v-if="importToolbarMenuItems.length > 0"
+              :trigger="['click']"
+              :disabled="interactionBusy"
+            >
+              <Button :disabled="interactionBusy">导入 ▾</Button>
               <template #overlay>
                 <Menu @click="handleToolbarMenuClick">
                   <Menu.Item
@@ -920,36 +1115,35 @@ const [Grid, gridApi] = useVbenVxeGrid({
                 </Menu>
               </template>
             </Dropdown>
-            <Dropdown>
-              <Button>更多</Button>
-              <template #overlay>
-                <Menu @click="handleToolbarMenuClick">
-                  <Menu.Item
-                    v-for="item in moreToolbarMenuItems"
-                    :key="item.key"
-                    :disabled="item.disabled"
-                  >
-                    <span
-                      :class="
-                        item.key === 'delete-batch' ? 'text-red-500' : undefined
-                      "
-                    >
-                      {{ item.label }}
-                    </span>
-                  </Menu.Item>
-                </Menu>
-              </template>
-            </Dropdown>
+            <Tooltip title="导出当前列表中符合已查询条件的全部记录">
+              <Button
+                :loading="exporting"
+                :disabled="interactionBusy || listLoadFailed"
+                @click="handleExport"
+                >导出筛选结果</Button
+              >
+            </Tooltip>
           </div>
         </template>
         <template #actions="{ row }">
-          <div v-memo="[row.id, row.status, activeListTab]">
+          <div
+            v-memo="[
+              row.id,
+              row.status,
+              row.itemCode,
+              activeListTab,
+              interactionBusy,
+              pendingAction,
+              pendingRowId,
+            ]"
+          >
             <TableAction
               :actions="[
                 {
                   label: $t('common.edit'),
                   type: 'link',
                   icon: ACTION_ICON.EDIT,
+                  disabled: interactionBusy,
                   auth: ['fdmdata:data-just-sku:update'],
                   ifShow:
                     activeListTab !== 'combo' &&
@@ -957,8 +1151,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   onClick: handleEdit.bind(null, row),
                 },
                 {
-                  label: '同步到聚水潭',
+                  label: row.status === 3 ? '重试同步' : '同步',
                   type: 'link',
+                  disabled: interactionBusy,
+                  loading: pendingAction === 'sync' && pendingRowId === row.id,
                   auth: ['fdmdata:data-just-sku:update'],
                   ifShow:
                     (row.status === 1 || row.status === 3) &&
@@ -969,10 +1165,13 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   label: $t('common.delete'),
                   type: 'link',
                   danger: true,
+                  disabled: interactionBusy,
+                  loading:
+                    pendingAction === 'delete' && pendingRowId === row.id,
                   icon: ACTION_ICON.DELETE,
                   auth: ['fdmdata:data-just-sku:delete'],
                   popConfirm: {
-                    title: $t('ui.actionMessage.deleteConfirm', [row.id]),
+                    title: `确定删除商品「${row.itemCode || row.productName || row.id}」吗？`,
                     confirm: handleDelete.bind(null, row),
                   },
                 },
@@ -992,6 +1191,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 .data-just-sku-segmented {
   max-width: 100%;
+  overflow-x: auto;
+}
+
+.sku-filter-bar,
+.sku-selection-bar {
+  flex-shrink: 0;
 }
 
 .data-just-sku-segmented :deep(.ant-segmented) {
@@ -1007,5 +1212,12 @@ const [Grid, gridApi] = useVbenVxeGrid({
 .data-just-sku-grid :deep(.vben-vxe-grid) {
   flex: 1 1 0;
   min-height: 0;
+}
+
+.data-just-sku-grid :deep(.vxe-toolbar) {
+  height: auto;
+  min-height: 52px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

@@ -20,8 +20,16 @@ import {
   Table,
 } from 'ant-design-vue';
 
-import { getYogaBlankOptions, importFinished, previewFinished } from '#/api/fdmdata/datajustsku';
-import type { PatternPreviewResp, YogaBlankOptions } from '#/api/fdmdata/datajustsku';
+import {
+  getYogaBlankOptions,
+  importFinished,
+  previewFinished,
+} from '#/api/fdmdata/datajustsku';
+import type {
+  FinishedGenReq,
+  PatternPreviewResp,
+  YogaBlankOptions,
+} from '#/api/fdmdata/datajustsku';
 import { usePatternCostRemoteSelect } from '../composables/use-pattern-cost-remote-select';
 
 const emit = defineEmits(['success']);
@@ -30,6 +38,9 @@ const formRef = ref();
 const loadingPreview = ref(false);
 const generating = ref(false);
 const preview = ref<PatternPreviewResp | null>(null);
+const previewPayload = ref<FinishedGenReq | null>(null);
+const previewNeedsRefresh = ref(false);
+let previewRevision = 0;
 
 /** 与空白版弹窗同源：长/宽/厚字典选项 */
 const blankOptions = ref<YogaBlankOptions | null>(null);
@@ -223,6 +234,31 @@ function buildSizeTextBlock(): string {
   return lines.join('\n');
 }
 
+function buildFinishedPayload(): FinishedGenReq {
+  return {
+    materialKey: formState.materialKey,
+    productType: formState.productType,
+    category: formState.category,
+    sizeTextBlock: buildSizeTextBlock(),
+    patternCostId: formState.patternCostId!,
+    colors: [...formState.colors],
+  };
+}
+
+// 确保确认时使用的条件与用户已核对的预览完全一致。
+watch(
+  () => JSON.stringify(buildFinishedPayload()),
+  () => {
+    previewRevision++;
+    if (preview.value || loadingPreview.value) {
+      previewNeedsRefresh.value = true;
+    }
+    preview.value = null;
+    previewPayload.value = null;
+  },
+  { flush: 'sync' },
+);
+
 const sizeComboCount = computed(() => {
   const a = sizeLengths.value.length;
   const b = sizeWidths.value.length;
@@ -278,7 +314,9 @@ const columns: ColumnsType = [
 const [VbenModal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      previewRevision++;
       preview.value = null;
+      previewPayload.value = null;
       formState.materialKey = '';
       formState.productType = '';
       formState.category = '';
@@ -291,6 +329,7 @@ const [VbenModal, modalApi] = useVbenModal({
       sizeThicknesses.value = [];
       selectedSizeTemplateName.value = undefined;
       newTemplateName.value = '';
+      previewNeedsRefresh.value = false;
       return;
     }
     modalApi.lock();
@@ -305,6 +344,7 @@ const [VbenModal, modalApi] = useVbenModal({
 });
 
 async function loadPreview() {
+  if (loadingPreview.value || generating.value) return;
   if (
     !sizeLengths.value.length ||
     !sizeWidths.value.length ||
@@ -318,17 +358,18 @@ async function loadPreview() {
   } catch {
     return;
   }
-  const sizeTextBlock = buildSizeTextBlock();
+  if (loadingPreview.value || generating.value) return;
+  const payload = buildFinishedPayload();
+  const revision = ++previewRevision;
+  preview.value = null;
+  previewPayload.value = null;
   loadingPreview.value = true;
   try {
-    preview.value = await previewFinished({
-      materialKey: formState.materialKey,
-      productType: formState.productType,
-      category: formState.category,
-      sizeTextBlock,
-      patternCostId: formState.patternCostId!,
-      colors: formState.colors,
-    });
+    const result = await previewFinished(payload);
+    if (revision !== previewRevision) return;
+    preview.value = result;
+    previewPayload.value = payload;
+    previewNeedsRefresh.value = false;
     message.success(
       `预览完成：将新增 ${willCreate.value} 条，将覆盖更新 ${willUpdate.value} 条`,
     );
@@ -338,7 +379,8 @@ async function loadPreview() {
 }
 
 async function handleGenerate() {
-  if (willCreate.value + willUpdate.value === 0) {
+  if (generating.value || loadingPreview.value) return;
+  if (!previewPayload.value || willCreate.value + willUpdate.value === 0) {
     message.warning('没有可入库的新增/更新行，请先预览');
     return;
   }
@@ -355,28 +397,37 @@ async function handleGenerate() {
   } catch {
     return;
   }
-  if (willUpdate.value > 0) {
-    await confirm(
-      `将覆盖更新 ${willUpdate.value} 条已存在的成品编码记录（按商品编码 itemCode 匹配），确认继续？`,
-    );
+  if (generating.value || loadingPreview.value) return;
+  const payload = previewPayload.value;
+  const revision = previewRevision;
+  if (!payload) {
+    message.warning('生成条件已变化，请重新预览');
+    return;
   }
-  const sizeTextBlock = buildSizeTextBlock();
   generating.value = true;
+  modalApi.lock();
   try {
-    const res = await importFinished({
-      materialKey: formState.materialKey,
-      productType: formState.productType,
-      category: formState.category,
-      sizeTextBlock,
-      patternCostId: formState.patternCostId!,
-      colors: formState.colors,
-    });
+    if (willUpdate.value > 0) {
+      try {
+        await confirm(
+          `将覆盖更新 ${willUpdate.value} 条已存在的成品编码记录（按商品编码匹配），确认继续？`,
+        );
+      } catch {
+        return;
+      }
+    }
+    if (revision !== previewRevision) {
+      message.warning('生成条件已变化，请重新预览');
+      return;
+    }
+    const res = await importFinished(payload);
     message.success(
       `完成：新增 ${res.created} 条，更新 ${res.updated ?? 0} 条，跳过 ${res.skipped} 条`,
     );
     emit('success');
     modalApi.close();
   } finally {
+    modalApi.unlock();
     generating.value = false;
   }
 }
@@ -390,20 +441,16 @@ async function handleGenerate() {
     :show-confirm-button="false"
   >
     <p class="mb-3 text-sm text-muted-foreground">
-      图案与<strong>图案编码生成</strong>弹窗一致，来自接口
-      <code class="rounded bg-muted px-1"
-        >GET /fdmdata/data-just-pattern-cost/page</code
-      >
-      （已维护的图案对照）。成品类型
-      <code class="rounded bg-muted px-1">YogaMat</code>；分类
-      <code class="rounded bg-muted px-1">fdm_yoga_category</code
-      >（飞德慕成品分类，与成品类型独立）；尺寸与<strong>空白版生成</strong>相同：长/宽/厚三列多选（字典
-      <code class="rounded bg-muted px-1">fdm_yoga_blank_size_length</code
-      >等），笛卡尔积生成规格；颜色
-      <code class="rounded bg-muted px-1">fdm_color</code>。
+      选择材质、分类和已维护的图案，再选择颜色及长、宽、厚。
+      系统会按所选尺寸组合生成规格；请先预览，核对商品编码和新增、覆盖数量后再确认生成。
     </p>
 
-    <Form ref="formRef" :model="formState" layout="vertical">
+    <Form
+      ref="formRef"
+      :model="formState"
+      :disabled="generating"
+      layout="vertical"
+    >
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <FormItem
           label="材质"
@@ -413,7 +460,7 @@ async function handleGenerate() {
           <Select
             v-model:value="formState.materialKey"
             allow-clear
-            placeholder="请选择（字典 material_type）"
+            placeholder="请选择材质"
             :options="materialOptions"
             show-search
             option-filter-prop="label"
@@ -637,6 +684,14 @@ async function handleGenerate() {
       </FormItem>
     </Form>
 
+    <p
+      v-if="previewNeedsRefresh"
+      role="status"
+      class="mb-3 rounded bg-warning/10 px-3 py-2 text-sm text-foreground"
+    >
+      生成条件已变化，请重新预览后确认生成。
+    </p>
+
     <Spin :spinning="loadingPreview">
       <div
         v-if="preview"
@@ -644,7 +699,9 @@ async function handleGenerate() {
       >
         <span>将新增 {{ willCreate }} 条</span>
         <span class="text-muted-foreground">|</span>
-        <span>将跳过 {{ willSkip }} 条（已存在商品编码）</span>
+        <span>将覆盖更新 {{ willUpdate }} 条</span>
+        <span class="text-muted-foreground">|</span>
+        <span>将跳过 {{ willSkip }} 条</span>
       </div>
 
       <Table
@@ -674,16 +731,24 @@ async function handleGenerate() {
     </Spin>
 
     <div class="mt-4 flex justify-end gap-2 border-t border-border pt-3">
-      <Button :loading="loadingPreview" @click="loadPreview">预览</Button>
+      <Button
+        :loading="loadingPreview"
+        :disabled="generating"
+        @click="loadPreview"
+      >
+        {{ preview || previewNeedsRefresh ? '重新预览' : '预览' }}
+      </Button>
       <Button
         type="primary"
         :loading="generating"
-        :disabled="willCreate === 0"
+        :disabled="
+          !previewPayload || loadingPreview || willCreate + willUpdate === 0
+        "
         @click="handleGenerate"
       >
-        确认生成
+        确认生成（{{ willCreate + willUpdate }} 条）
       </Button>
-      <Button @click="modalApi.close()">关闭</Button>
+      <Button :disabled="generating" @click="modalApi.close()">关闭</Button>
     </div>
   </VbenModal>
 </template>
