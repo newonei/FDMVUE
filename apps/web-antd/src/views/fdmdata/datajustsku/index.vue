@@ -1,23 +1,19 @@
 <script lang="ts" setup>
-import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type { FdmdataDataJustAccessoryApi } from '#/api/fdmdata/datajustaccessory';
-import type {
-  FdmdataDataJustSkuApi,
-  JstSyncBatchResp,
-} from '#/api/fdmdata/datajustsku';
-import type { FdmdataDataJustPatternApi } from '#/api/fdmdata/datajustpattern';
+import type { JstSyncBatchResp } from '#/api/fdmdata/datajustsku';
+import type { SkuDisplayRow, SkuListTab } from './display';
 
-import { computed, nextTick, ref, shallowRef } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 
-import { confirm, Page, useVbenModal } from '@vben/common-ui';
-import { downloadFileFromBlobPart } from '@vben/utils';
+import { confirm, Page, useVbenDrawer, useVbenModal } from '@vben/common-ui';
+import { downloadFileFromBlobPart, formatDate } from '@vben/utils';
 
-import { useClipboard } from '@vueuse/core';
+import { useClipboard, useElementSize } from '@vueuse/core';
 
 import {
   Alert,
   Button,
   Dropdown,
+  Image,
   Menu,
   message,
   Segmented,
@@ -25,7 +21,7 @@ import {
   Tooltip,
 } from 'ant-design-vue';
 
-import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
+import { TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   deleteDataJustPattern,
   deleteDataJustPatternList,
@@ -79,15 +75,38 @@ import CustomComboGenerateModalComp from './modules/custom-combo-generate-modal.
 import StandardComboGenerateModalComp from './modules/standard-combo-generate-modal.vue';
 import ComboPlatformPriceModalComp from './modules/combo-platform-price-modal.vue';
 import SyncResultModalComp from './modules/sync-result-modal.vue';
+import DetailDrawerComp from './modules/detail-drawer.vue';
+import {
+  displaySkuValue,
+  formatSkuMoney,
+  getAccessoryKindLabel,
+  getAccessoryMatchLabel,
+  SKU_PLATFORM_PRICES,
+} from './display';
 
-/** 与后端列表 Tab 一致；配件列表独立表 fdm_data_just_accessory */
-type SkuListTab =
-  | 'blank'
-  | 'pattern'
-  | 'finished'
-  | 'combo'
-  | 'accessory'
-  | 'custom_combo';
+const tableHost = ref<HTMLElement>();
+const { width: tableWidth } = useElementSize(tableHost);
+const compactTable = computed(
+  () => tableWidth.value > 0 && tableWidth.value < 1060,
+);
+const failedImages = ref<Set<string>>(new Set());
+
+function onImageError(url: string) {
+  failedImages.value = new Set([...failedImages.value, url]);
+}
+
+function currentColumns() {
+  return buildDataJustSkuGridColumns({
+    listTab: activeListTab.value,
+    compact: compactTable.value,
+  });
+}
+
+watch(compactTable, async () => {
+  gridApi.setGridOptions({ columns: currentColumns() });
+  await nextTick();
+  await gridApi.grid.recalculate(true);
+});
 
 const LIST_TAB_META: {
   key: SkuListTab;
@@ -351,15 +370,7 @@ function sameCheckedIdList(a: number[], b: number[]) {
   return true;
 }
 
-function handleRowCheckboxChange({
-  records,
-}: {
-  records: (
-    | FdmdataDataJustSkuApi.DataJustSku
-    | FdmdataDataJustPatternApi.Pattern
-    | FdmdataDataJustAccessoryApi.Accessory
-  )[];
-}) {
+function handleRowCheckboxChange({ records }: { records: SkuDisplayRow[] }) {
   const next = records.map((item) => item.id!);
   if (sameCheckedIdList(checkedIds.value, next)) {
     return;
@@ -385,12 +396,7 @@ async function onListTabChange(key: string | number) {
     await gridApi.grid.loadData([]);
     activeListTab.value = nextTab;
     gridApi.setGridOptions({
-      columns: buildDataJustSkuGridColumns({
-        listTab: nextTab,
-        patternPicPreview: nextTab === 'pattern',
-        blankPicPreview: nextTab === 'blank',
-        finishedPicPreview: nextTab === 'finished',
-      }),
+      columns: currentColumns(),
     });
     await gridApi.formApi.resetForm();
     const savedFilters = tabFilters.get(nextTab);
@@ -497,6 +503,32 @@ const [SyncResultModal, syncResultModalApi] = useVbenModal({
   destroyOnClose: true,
 });
 
+const [DetailDrawer, detailDrawerApi] = useVbenDrawer({
+  connectedComponent: DetailDrawerComp,
+  destroyOnClose: true,
+});
+
+function handleView(row: SkuDisplayRow) {
+  detailDrawerApi
+    .setData({
+      row: { ...row },
+      listTab: activeListTab.value,
+      listLabel: activeTabMeta.value?.label,
+    })
+    .open();
+}
+
+function handleDetailEdit(payload: {
+  row: SkuDisplayRow;
+  listTab: SkuListTab;
+}) {
+  if (interactionBusy.value) {
+    message.info('请等待当前操作完成后再编辑');
+    return;
+  }
+  formModalApi.setData(payload).open();
+}
+
 function handleOpenComboChildren(data: { comboId: number; itemCode?: string }) {
   customComboChildrenModalApi.setData(data).open();
 }
@@ -573,19 +605,12 @@ function handleFinishedCostMaintain() {
 }
 
 /** 编辑（SKU 主表或图案表，由表单根据 listTab 分支） */
-function handleEdit(
-  row:
-    | FdmdataDataJustSkuApi.DataJustSku
-    | FdmdataDataJustPatternApi.Pattern
-    | FdmdataDataJustAccessoryApi.Accessory,
-) {
+function handleEdit(row: SkuDisplayRow) {
   formModalApi.setData({ row, listTab: activeListTab.value }).open();
 }
 
 /** 同步到聚水潭 */
-async function handleSyncJushuitan(
-  row: FdmdataDataJustSkuApi.DataJustSku | FdmdataDataJustPatternApi.Pattern,
-) {
+async function handleSyncJushuitan(row: SkuDisplayRow) {
   if (interactionBusy.value) return;
   pendingAction.value = 'sync';
   pendingRowId.value = row.id;
@@ -668,12 +693,7 @@ function handleSyncCustomComboBatch() {
 }
 
 /** 删除（SKU 主表或图案表） */
-async function handleDelete(
-  row:
-    | FdmdataDataJustSkuApi.DataJustSku
-    | FdmdataDataJustPatternApi.Pattern
-    | FdmdataDataJustAccessoryApi.Accessory,
-) {
+async function handleDelete(row: SkuDisplayRow) {
   if (interactionBusy.value) return;
   pendingAction.value = 'delete';
   pendingRowId.value = row.id;
@@ -781,7 +801,7 @@ async function handleExport() {
   }
 }
 
-const [Grid, gridApi] = useVbenVxeGrid({
+const [Grid, gridApi] = useVbenVxeGrid<SkuDisplayRow>({
   formOptions: {
     schema: useGridFormSchema(),
     collapsed: true,
@@ -789,19 +809,19 @@ const [Grid, gridApi] = useVbenVxeGrid({
     wrapperClass: 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4',
   },
   gridOptions: {
-    columns: buildDataJustSkuGridColumns({
-      listTab: activeListTab.value,
-      patternPicPreview: activeListTab.value === 'pattern',
-      blankPicPreview: activeListTab.value === 'blank',
-      finishedPicPreview: activeListTab.value === 'finished',
-    }),
+    columns: currentColumns(),
     height: 'auto',
+    align: 'left',
+    showOverflow: false,
     stripe: true,
     /** 关闭行源快照：勾选时 Vxe 不必维护全量 original 数据，减轻大列表交互卡顿 */
     keepSource: false,
     proxyConfig: {
       ajax: {
-        query: async ({ page }, formValues) => {
+        query: async (
+          { page }: { page: { currentPage: number; pageSize: number } },
+          formValues: Record<string, unknown>,
+        ) => {
           loadingList.value = true;
           listLoadFailed.value = false;
           clearSelection();
@@ -846,10 +866,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
               listTab: activeListTab.value,
               ...formValues,
             });
-          } catch (error) {
+          } catch {
             listLoadFailed.value = true;
-            await gridApi.grid.loadData([]);
-            throw error;
+            return { list: [], total: 0 };
           } finally {
             loadingList.value = false;
           }
@@ -867,12 +886,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
     toolbarConfig: {
       refresh: true,
       search: true,
+      custom: false,
     },
-  } as VxeTableGridOptions<
-    | FdmdataDataJustSkuApi.DataJustSku
-    | FdmdataDataJustPatternApi.Pattern
-    | FdmdataDataJustAccessoryApi.Accessory
-  >,
+  },
   gridEvents: {
     checkboxAll: handleRowCheckboxChange,
     checkboxChange: handleRowCheckboxChange,
@@ -881,7 +897,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
 </script>
 
 <template>
-  <Page auto-content-height content-class="flex min-h-0 flex-1 flex-col !p-0">
+  <Page
+    class="sku-page-layout"
+    auto-content-height
+    content-class="flex min-h-0 flex-1 flex-col !p-0"
+  >
     <FormModal @success="handleRefresh" />
     <YogaBlankGenModal @success="handleRefresh" />
     <BlankBatchPicModalComp @success="handleRefresh" />
@@ -895,6 +915,10 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <PatternProductMaintainModal @success="handleRefresh" />
     <PatternGenerateModal @success="handleRefresh" />
     <SyncResultModal @success="handleRefresh" />
+    <DetailDrawer
+      @edit="handleDetailEdit"
+      @children="handleOpenComboChildren"
+    />
     <FinishedGenerateModal @success="handleRefresh" />
     <CustomComboGenerateModal @success="handleRefresh" />
     <StandardComboGenerateModal @success="handleRefresh" />
@@ -1017,175 +1041,314 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </template>
       </Alert>
 
-      <Grid
-        class="data-just-sku-grid min-h-0 flex-1"
-        :table-title="gridTableTitle"
-      >
-        <template #colItemCode="{ row }">
-          <div class="flex items-center gap-1 text-left">
-            <Tooltip :title="row.itemCode">
-              <span class="min-w-0 flex-1 truncate font-mono text-xs">{{
-                row.itemCode || '—'
-              }}</span>
-            </Tooltip>
-            <Tooltip title="复制商品编码">
-              <Button
-                v-if="row.itemCode"
-                type="text"
-                size="small"
-                aria-label="复制商品编码"
-                class="shrink-0 !px-1 text-muted-foreground"
-                @click.stop="copyItemCode(row.itemCode)"
+      <div ref="tableHost" class="sku-table-host">
+        <Grid
+          class="data-just-sku-grid min-h-0 flex-1"
+          :class="{ 'sku-grid-compact': compactTable }"
+          :table-title="gridTableTitle"
+        >
+          <template #table-title>
+            <div class="min-w-0">
+              <span class="font-medium">{{ activeTabMeta?.label }}</span>
+              <span
+                v-if="compactTable"
+                class="ml-2 text-xs font-normal text-muted-foreground"
+                >点击详情查看完整资料</span
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  aria-hidden="true"
+            </div>
+          </template>
+          <template #colProduct="{ row }">
+            <div class="sku-product">
+              <div class="sku-product-image">
+                <Image
+                  v-if="row.picUrl && !failedImages.has(row.picUrl)"
+                  :src="row.picUrl"
+                  :width="52"
+                  :height="52"
+                  :alt="row.productName || row.itemCode || '商品图片'"
+                  @error="onImageError(row.picUrl)"
+                />
+                <span v-else>{{ row.picUrl ? '加载失败' : '暂无图片' }}</span>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1">
+                  <Tooltip :title="row.itemCode">
+                    <button
+                      type="button"
+                      class="sku-product-code min-w-0 flex-1 text-left font-mono text-xs"
+                      @click="handleView(row)"
+                    >
+                      {{ row.itemCode || '—' }}
+                    </button>
+                  </Tooltip>
+                  <Tooltip title="复制商品编码">
+                    <Button
+                      v-if="row.itemCode"
+                      type="text"
+                      size="small"
+                      aria-label="复制商品编码"
+                      class="shrink-0 !px-1 text-muted-foreground"
+                      @click.stop="copyItemCode(row.itemCode)"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.7"
+                        aria-hidden="true"
+                      >
+                        <rect x="8" y="8" width="12" height="12" rx="2" />
+                        <path
+                          d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
+                        />
+                      </svg>
+                    </Button>
+                  </Tooltip>
+                </div>
+                <Tooltip :title="row.productName">
+                  <div class="sku-product-name text-xs text-muted-foreground">
+                    {{ displaySkuValue(row.productName) }}
+                  </div>
+                </Tooltip>
+              </div>
+            </div>
+          </template>
+          <template #colSpecifications="{ row }">
+            <div class="sku-cell-stack">
+              <template v-if="activeListTab === 'accessory'">
+                <span class="sku-cell-line">{{
+                  getAccessoryKindLabel(row.accessoryKind)
+                }}</span>
+                <span class="sku-cell-line text-muted-foreground">{{
+                  getAccessoryMatchLabel(row.matchType)
+                }}</span>
+                <span
+                  class="sku-cell-line text-muted-foreground"
+                  :title="row.colorSpec"
+                  >{{ displaySkuValue(row.colorSpec) }}</span
                 >
-                  <rect x="8" y="8" width="12" height="12" rx="2" />
-                  <path
-                    d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"
-                  />
-                </svg>
-              </Button>
-            </Tooltip>
-          </div>
-        </template>
-        <template #colSyncStatus="{ row }">
-          <Tag v-if="row.status === 1" color="warning">未同步</Tag>
-          <Tag v-else-if="row.status === 2" color="success">已同步</Tag>
-          <Tag v-else-if="row.status === 3" color="error">同步失败</Tag>
-          <span v-else>-</span>
-        </template>
-        <template #colCustomComboChildren="{ row }">
-          <div v-memo="[row.id, row.itemCode]">
-            <TableAction
-              :actions="[
-                {
-                  label: '查看',
-                  type: 'link',
-                  auth: ['fdmdata:data-just-sku:query'],
-                  onClick: () =>
-                    handleOpenComboChildren({
-                      comboId: row.id!,
-                      itemCode: row.itemCode,
-                    }),
-                },
-              ]"
-            />
-          </div>
-        </template>
-        <template #toolbar-tools>
-          <div class="inline-flex max-w-full flex-wrap items-center gap-2">
-            <Button
-              v-if="primaryToolbarAction"
-              type="primary"
-              :disabled="interactionBusy"
-              @click="primaryToolbarAction.onClick"
-            >
-              {{ primaryToolbarAction.label }}
-            </Button>
-            <Button
-              v-for="(act, idx) in secondaryToolbarActions"
-              :key="`${activeListTab}-sec-${idx}`"
-              :disabled="interactionBusy"
-              @click="act.onClick"
-            >
-              {{ act.label }}
-            </Button>
-            <Dropdown
-              v-if="importToolbarMenuItems.length > 0"
-              :trigger="['click']"
-              :disabled="interactionBusy"
-            >
-              <Button :disabled="interactionBusy">导入 ▾</Button>
-              <template #overlay>
-                <Menu @click="handleToolbarMenuClick">
-                  <Menu.Item
-                    v-for="item in importToolbarMenuItems"
-                    :key="item.key"
-                  >
-                    {{ item.label }}
-                  </Menu.Item>
-                </Menu>
               </template>
-            </Dropdown>
-            <Tooltip title="导出当前列表中符合已查询条件的全部记录">
-              <Button
-                :loading="exporting"
-                :disabled="interactionBusy || listLoadFailed"
-                @click="handleExport"
-                >导出筛选结果</Button
+              <template v-else>
+                <span
+                  class="sku-cell-line"
+                  :title="row.colorSpec || row.styleCode"
+                  >{{ displaySkuValue(row.colorSpec || row.styleCode) }}</span
+                >
+                <span
+                  class="sku-cell-line text-muted-foreground"
+                  :title="row.categoryName"
+                  >{{ displaySkuValue(row.categoryName)
+                  }}<template v-if="row.materialKey">
+                    · {{ row.materialKey }}</template
+                  ></span
+                >
+                <Button
+                  v-if="
+                    activeListTab === 'combo' ||
+                    activeListTab === 'custom_combo'
+                  "
+                  type="link"
+                  size="small"
+                  v-access:code="['fdmdata:data-just-sku:query']"
+                  class="!h-5 !p-0 self-start"
+                  @click="
+                    handleOpenComboChildren({
+                      comboId: row.id,
+                      itemCode: row.itemCode,
+                    })
+                  "
+                  >查看子商品</Button
+                >
+              </template>
+            </div>
+          </template>
+          <template #colPrice="{ row }">
+            <div v-if="activeListTab === 'combo'" class="sku-platform-prices">
+              <div
+                v-for="platform in SKU_PLATFORM_PRICES"
+                :key="platform.key"
+                class="flex min-w-0 items-center justify-between gap-1"
               >
-            </Tooltip>
-          </div>
-        </template>
-        <template #actions="{ row }">
-          <div
-            v-memo="[
-              row.id,
-              row.status,
-              row.itemCode,
-              activeListTab,
-              interactionBusy,
-              pendingAction,
-              pendingRowId,
-            ]"
-          >
-            <TableAction
-              :actions="[
-                {
-                  label: $t('common.edit'),
-                  type: 'link',
-                  icon: ACTION_ICON.EDIT,
-                  disabled: interactionBusy,
-                  auth: ['fdmdata:data-just-sku:update'],
-                  ifShow:
-                    activeListTab !== 'combo' &&
-                    activeListTab !== 'custom_combo',
-                  onClick: handleEdit.bind(null, row),
-                },
-                {
-                  label: row.status === 3 ? '重试同步' : '同步',
-                  type: 'link',
-                  disabled: interactionBusy,
-                  loading: pendingAction === 'sync' && pendingRowId === row.id,
-                  auth: ['fdmdata:data-just-sku:update'],
-                  ifShow:
-                    (row.status === 1 || row.status === 3) &&
-                    activeListTab !== 'accessory',
-                  onClick: handleSyncJushuitan.bind(null, row),
-                },
-                {
-                  label: $t('common.delete'),
-                  type: 'link',
-                  danger: true,
-                  disabled: interactionBusy,
-                  loading:
-                    pendingAction === 'delete' && pendingRowId === row.id,
-                  icon: ACTION_ICON.DELETE,
-                  auth: ['fdmdata:data-just-sku:delete'],
-                  popConfirm: {
-                    title: `确定删除商品「${row.itemCode || row.productName || row.id}」吗？`,
-                    confirm: handleDelete.bind(null, row),
+                <span class="shrink-0 text-muted-foreground">{{
+                  platform.label
+                }}</span>
+                <span
+                  class="truncate tabular-nums"
+                  :title="formatSkuMoney(row[platform.key])"
+                  >{{ formatSkuMoney(row[platform.key]) }}</span
+                >
+              </div>
+            </div>
+            <span v-else class="tabular-nums">{{
+              formatSkuMoney(row.costPrice)
+            }}</span>
+          </template>
+          <template #colSyncStatus="{ row }">
+            <div class="sku-cell-stack">
+              <Tag v-if="row.status === 1" color="warning">未同步</Tag>
+              <Tag v-else-if="row.status === 2" color="success">已同步</Tag>
+              <Tag v-else-if="row.status === 3" color="error">同步失败</Tag>
+              <span v-else>—</span>
+              <span
+                v-if="row.jstSkuId"
+                class="sku-cell-line font-mono text-muted-foreground"
+                :title="`聚水潭 SKU ID：${row.jstSkuId}`"
+                >ID {{ row.jstSkuId }}</span
+              >
+            </div>
+          </template>
+          <template #colCreated="{ row }">
+            <div class="sku-cell-stack">
+              <span
+                class="sku-cell-line"
+                :title="row.creatorName || row.creator"
+                >{{ displaySkuValue(row.creatorName || row.creator) }}</span
+              >
+              <span class="text-muted-foreground">{{
+                row.createTime ? formatDate(row.createTime, 'YYYY-MM-DD') : '—'
+              }}</span>
+              <span v-if="row.createTime" class="text-muted-foreground">{{
+                formatDate(row.createTime, 'HH:mm:ss')
+              }}</span>
+            </div>
+          </template>
+          <template #toolbar-tools>
+            <div class="inline-flex max-w-full flex-wrap items-center gap-2">
+              <Button
+                v-if="primaryToolbarAction"
+                type="primary"
+                :disabled="interactionBusy"
+                @click="primaryToolbarAction.onClick"
+              >
+                {{ primaryToolbarAction.label }}
+              </Button>
+              <template v-if="!compactTable">
+                <Button
+                  v-for="(act, idx) in secondaryToolbarActions"
+                  :key="`${activeListTab}-sec-${idx}`"
+                  :disabled="interactionBusy"
+                  @click="act.onClick"
+                >
+                  {{ act.label }}
+                </Button>
+              </template>
+              <Dropdown
+                v-else-if="secondaryToolbarActions.length"
+                :trigger="['click']"
+                :disabled="interactionBusy"
+              >
+                <Button :disabled="interactionBusy">维护 ▾</Button>
+                <template #overlay>
+                  <Menu>
+                    <Menu.Item
+                      v-for="(act, idx) in secondaryToolbarActions"
+                      :key="idx"
+                      :disabled="interactionBusy"
+                      @click="act.onClick"
+                      >{{ act.label }}</Menu.Item
+                    >
+                  </Menu>
+                </template>
+              </Dropdown>
+              <Dropdown
+                v-if="importToolbarMenuItems.length > 0"
+                :trigger="['click']"
+                :disabled="interactionBusy"
+              >
+                <Button :disabled="interactionBusy">导入 ▾</Button>
+                <template #overlay>
+                  <Menu @click="handleToolbarMenuClick">
+                    <Menu.Item
+                      v-for="item in importToolbarMenuItems"
+                      :key="item.key"
+                    >
+                      {{ item.label }}
+                    </Menu.Item>
+                  </Menu>
+                </template>
+              </Dropdown>
+              <Tooltip title="导出当前列表中符合已查询条件的全部记录">
+                <Button
+                  :loading="exporting"
+                  :disabled="interactionBusy || listLoadFailed"
+                  @click="handleExport"
+                  >{{ compactTable ? '导出' : '导出筛选结果' }}</Button
+                >
+              </Tooltip>
+            </div>
+          </template>
+          <template #actions="{ row }">
+            <div class="sku-row-actions">
+              <TableAction
+                :actions="[
+                  {
+                    label: '详情',
+                    type: 'link',
+                    onClick: () => handleView(row),
                   },
-                },
-              ]"
-            />
-          </div>
-        </template>
-      </Grid>
+                  {
+                    label: $t('common.edit'),
+                    type: 'link',
+                    disabled: interactionBusy,
+                    auth: ['fdmdata:data-just-sku:update'],
+                    ifShow:
+                      activeListTab !== 'combo' &&
+                      activeListTab !== 'custom_combo',
+                    onClick: handleEdit.bind(null, row),
+                  },
+                ]"
+              />
+              <TableAction
+                :actions="[
+                  {
+                    label: row.status === 3 ? '重试' : '同步',
+                    tooltip:
+                      row.status === 3 ? '重试同步到聚水潭' : '同步到聚水潭',
+                    type: 'link',
+                    disabled: interactionBusy,
+                    loading:
+                      pendingAction === 'sync' && pendingRowId === row.id,
+                    auth: ['fdmdata:data-just-sku:update'],
+                    ifShow:
+                      (row.status === 1 || row.status === 3) &&
+                      activeListTab !== 'accessory',
+                    onClick: handleSyncJushuitan.bind(null, row),
+                  },
+                  {
+                    label: $t('common.delete'),
+                    type: 'link',
+                    danger: true,
+                    disabled: interactionBusy,
+                    loading:
+                      pendingAction === 'delete' && pendingRowId === row.id,
+                    auth: ['fdmdata:data-just-sku:delete'],
+                    popConfirm: {
+                      title: `确定删除商品「${row.itemCode || row.productName || row.id}」吗？`,
+                      confirm: handleDelete.bind(null, row),
+                    },
+                  },
+                ]"
+              />
+            </div>
+          </template>
+        </Grid>
+      </div>
     </div>
   </Page>
 </template>
 
 <style scoped>
+.sku-page-layout {
+  /* 表格内容不参与外层最小高度计算，避免缩小窗口后仍被旧高度撑住。 */
+  contain: size;
+  min-height: 0;
+}
+
 .data-just-sku-page {
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -1203,14 +1366,23 @@ const [Grid, gridApi] = useVbenVxeGrid({
   background: hsl(var(--muted) / 45%);
 }
 
+.sku-table-host,
 .data-just-sku-grid {
   display: flex;
+  flex: 1 1 0%;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
-.data-just-sku-grid :deep(.vben-vxe-grid) {
-  flex: 1 1 0;
+.data-just-sku-grid :deep(.vxe-grid:not(.is--maximize)) {
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 100% !important;
+}
+
+.data-just-sku-grid :deep(.vxe-grid--layout-body-wrapper),
+.data-just-sku-grid :deep(.vxe-grid--layout-body-content-wrapper) {
   min-height: 0;
 }
 
@@ -1219,5 +1391,100 @@ const [Grid, gridApi] = useVbenVxeGrid({
   min-height: 52px;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.sku-grid-compact :deep(.vxe-buttons--wrapper) {
+  flex-basis: 100%;
+  padding: 0;
+}
+
+.sku-grid-compact :deep(.vxe-tools--wrapper) {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.sku-grid-compact :deep(.vxe-tool--item-wrapper) {
+  display: flex;
+  align-items: center;
+}
+
+.sku-grid-compact :deep(.vxe-tools--operate) {
+  margin-left: 0;
+}
+
+.sku-product {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 64px;
+}
+
+.sku-product-image {
+  display: flex;
+  flex: 0 0 52px;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.sku-product-image :deep(.ant-image-img) {
+  object-fit: contain;
+}
+
+.sku-product-code,
+.sku-product-name {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.sku-product-code:hover {
+  color: hsl(var(--primary));
+}
+
+.sku-cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.sku-cell-line {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sku-cell-stack :deep(.ant-tag) {
+  margin-inline-end: 0;
+}
+
+.sku-platform-prices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 10px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.sku-row-actions :deep(.ant-btn) {
+  height: 28px;
+  padding: 0 4px;
 }
 </style>

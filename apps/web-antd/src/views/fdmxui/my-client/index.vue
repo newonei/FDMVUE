@@ -7,6 +7,8 @@ import { ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
+import { message } from 'ant-design-vue';
+
 import { TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   getMyFdmxuiClientLinks,
@@ -131,7 +133,7 @@ function useGridColumns(): VxeTableGridOptions<FdmxuiClientApi.Client>['columns'
     },
     {
       title: '操作',
-      width: 120,
+      width: 280,
       fixed: 'right',
       slots: { default: 'actions' },
     },
@@ -142,6 +144,36 @@ async function handleShowLinks(row: FdmxuiClientApi.Client) {
   if (!row.id) return;
   linkDetailClient.value = await getMyFdmxuiClientLinks(row.id);
   linkDetailOpen.value = true;
+}
+
+function handleImportClashVerge(row: FdmxuiClientApi.Client) {
+  if (row.status === 2) return;
+
+  const subscriptionUrl = row.clashSubscriptionUrl?.trim();
+  if (!subscriptionUrl) {
+    message.warning('暂无 Clash 订阅地址，请联系管理员刷新订阅链接');
+    return;
+  }
+
+  try {
+    const { protocol } = new URL(subscriptionUrl);
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      message.warning('Clash 订阅地址必须是 HTTP 或 HTTPS 链接');
+      return;
+    }
+  } catch {
+    message.warning('Clash 订阅地址格式不正确，请联系管理员刷新订阅链接');
+    return;
+  }
+
+  // 直接在点击事件中唤起客户端，避免异步请求导致浏览器丢失用户激活状态。
+  window.location.assign(
+    `clash-verge://install-config?url=${encodeURIComponent(subscriptionUrl)}`,
+  );
+  message.info(
+    '已发起导入，请允许浏览器打开 Clash Verge；若未打开，可在订阅信息中复制 CLASH 链接手动导入',
+    8,
+  );
 }
 
 const [Grid] = useVbenVxeGrid({
@@ -180,6 +212,9 @@ const [Grid] = useVbenVxeGrid({
           <h2 class="mb-1 text-lg font-semibold text-foreground">
             我的3XUI订阅
           </h2>
+          <p class="m-0 text-sm text-muted-foreground">
+            安装 Clash Verge 后，点击“导入 Clash Verge”即可导入对应订阅配置。
+          </p>
         </div>
       </header>
 
@@ -187,6 +222,14 @@ const [Grid] = useVbenVxeGrid({
         <template #actions="{ row }">
           <TableAction
             :actions="[
+              {
+                label: '导入 Clash Verge',
+                type: 'link',
+                icon: 'lucide:download',
+                disabled: row.status === 2,
+                tooltip: row.status === 2 ? '已回收的订阅无法导入' : undefined,
+                onClick: handleImportClashVerge.bind(null, row),
+              },
               {
                 label: '订阅信息',
                 type: 'link',

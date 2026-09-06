@@ -1,6 +1,6 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type { FdmdataDataJustSkuApi } from '#/api/fdmdata/datajustsku';
+import type { SkuDisplayRow } from './display';
 
 import { useUserStore } from '@vben/stores';
 
@@ -30,23 +30,6 @@ const ACCESSORY_MATCH_TYPE_OPTIONS = [
   { label: '宽度上限匹配', value: 'WIDTH_MAX' },
   { label: '多个规格集合', value: 'SPEC_SET' },
 ];
-
-/** 列表展示：枚举 value → 中文 label（与表单下拉一致；不识别时回退原值） */
-function accessoryEnumGridLabel(
-  cellValue: unknown,
-  options: readonly { label: string; value: string }[],
-): string {
-  if (cellValue === null || cellValue === undefined) {
-    return '-';
-  }
-  const raw = String(cellValue).trim();
-  if (!raw) {
-    return '-';
-  }
-  const key = raw.toUpperCase();
-  const hit = options.find((o) => o.value.toUpperCase() === key);
-  return hit?.label ?? raw;
-}
 
 /** 新增/修改的表单（blank / pattern / finished 三个 Tab 共用，2 列布局） */
 export function useFormSchema(): VbenFormSchema[] {
@@ -721,11 +704,6 @@ export function useGridFormSchema(): VbenFormSchema[] {
 }
 
 export type DataJustSkuGridColumnOptions = {
-  /** 空白版列表 Tab：展示 picUrl 缩略图 */
-  blankPicPreview?: boolean;
-  /** 成品编码列表 Tab：展示 picUrl 缩略图 */
-  finishedPicPreview?: boolean;
-  /** 当前列表 Tab */
   listTab?:
     | 'accessory'
     | 'blank'
@@ -733,234 +711,79 @@ export type DataJustSkuGridColumnOptions = {
     | 'custom_combo'
     | 'finished'
     | 'pattern';
-  /** 图案列表 Tab：在商品编码前展示 picUrl 缩略图 */
-  patternPicPreview?: boolean;
+  compact?: boolean;
 };
 
-/** 列表字段（与搜索一致：主信息 + 成本 + 状态 + 时间；其余在编辑中查看） */
+/** 将相关字段放在同一单元格，所有列共用一个滚动区域，避免固定层挤占内容。 */
 export function buildDataJustSkuGridColumns(
-  options?: DataJustSkuGridColumnOptions,
-): VxeTableGridOptions<FdmdataDataJustSkuApi.DataJustSku>['columns'] {
-  const blankPicColumn = {
-    field: 'picUrl',
-    title: '图片',
-    width: 64,
-    cellRender: {
-      name: 'CellImage',
-      props: {
-        width: 40,
-        height: 40,
-        class: 'rounded object-cover',
-      },
-    },
-  } as const;
-
-  const patternPicColumn = {
-    field: 'picUrl',
-    title: '图案',
-    width: 64,
-    cellRender: {
-      name: 'CellImage',
-      props: {
-        width: 40,
-        height: 40,
-        class: 'rounded object-cover',
-      },
-    },
-  } as const;
-
-  const isComboLikeTab =
-    options?.listTab === 'combo' || options?.listTab === 'custom_combo';
-
+  options: DataJustSkuGridColumnOptions = {},
+): VxeTableGridOptions<SkuDisplayRow>['columns'] {
+  const { compact = false, listTab = 'pattern' } = options;
   return [
-    { type: 'checkbox', width: 44, fixed: 'left' },
-    ...(options?.blankPicPreview || options?.listTab === 'accessory'
-      ? [blankPicColumn]
-      : []),
-    ...(options?.finishedPicPreview || options?.listTab === 'combo'
-      ? [blankPicColumn]
-      : []),
-    ...(options?.patternPicPreview ? [patternPicColumn] : []),
+    { type: 'checkbox', width: 44, align: 'center' },
     {
       field: 'itemCode',
-      title:
-        options?.listTab === 'custom_combo' || options?.listTab === 'combo'
-          ? '组合商品编码'
-          : '商品编码',
-      minWidth: 190,
-      fixed: 'left',
-      slots: { default: 'colItemCode' },
+      title: '商品信息',
+      minWidth: compact ? 220 : 300,
+      align: 'left',
+      showOverflow: false,
+      slots: { default: 'colProduct' },
     },
-    ...(options?.listTab === 'custom_combo' || options?.listTab === 'combo'
-      ? [
-          ...(options?.listTab === 'custom_combo'
-            ? [
-                {
-                  field: 'entyItemCode',
-                  title: '对应实体编码',
-                  minWidth: 160,
-                },
-              ]
-            : []),
-          {
-            field: '_customComboChildren',
-            title: '子商品',
-            width: 100,
-            slots: { default: 'colCustomComboChildren' },
-          },
-        ]
-      : []),
-    {
-      field: 'productShortName',
-      title: '商品简称',
-      minWidth: 120,
-    },
-    {
-      field: 'productName',
-      title: '商品名称',
-      minWidth: 180,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'styleCode',
-      title: '款式编码',
-      minWidth: 120,
-    },
-    ...(isComboLikeTab
+    ...(compact
       ? []
       : [
           {
             field: 'colorSpec',
-            title: '颜色及规格',
-            minWidth: 120,
+            title: listTab === 'accessory' ? '配件与匹配规则' : '规格与分类',
+            minWidth: 165,
+            align: 'left' as const,
+            showOverflow: false,
+            slots: { default: 'colSpecifications' },
           },
-        ]),
-    {
-      field: 'categoryName',
-      title: '分类',
-      minWidth: 100,
-    },
-    ...(options?.listTab === 'combo'
-      ? [
-          {
-            field: 'materialKey',
-            title: '材质',
-            minWidth: 90,
-          },
-          {
-            field: 'tmallPrice',
-            title: '天猫价',
-            minWidth: 90,
-          },
-          {
-            field: 'pddPrice',
-            title: '拼多多价',
-            minWidth: 100,
-          },
-          {
-            field: 'douyinPrice',
-            title: '抖音价',
-            minWidth: 100,
-          },
-          {
-            field: 'sphPrice',
-            title: '视频号价',
-            minWidth: 100,
-          },
-          {
-            field: 'xhsPrice',
-            title: '小红书价',
-            minWidth: 100,
-          },
-          {
-            field: 'jdPrice',
-            title: '京东价',
-            minWidth: 100,
-          },
-        ]
-      : []),
-    ...(options?.listTab === 'accessory'
-      ? [
-          {
-            field: 'accessoryKind',
-            title: '配件品类',
-            minWidth: 110,
-            formatter: ({ cellValue }: { cellValue?: unknown }) =>
-              accessoryEnumGridLabel(cellValue, ACCESSORY_KIND_OPTIONS),
-          },
-          {
-            field: 'matchType',
-            title: '匹配类型',
-            minWidth: 130,
-            formatter: ({ cellValue }: { cellValue?: unknown }) =>
-              accessoryEnumGridLabel(cellValue, ACCESSORY_MATCH_TYPE_OPTIONS),
-          },
-          {
-            field: 'matchSpecFullKey',
-            title: '完整规格',
-            minWidth: 120,
-          },
-          {
-            field: 'matchSpecLwKey',
-            title: '长宽规格',
-            minWidth: 110,
-          },
-          {
-            field: 'matchWidthCm',
-            title: '精确宽度',
-            minWidth: 100,
-          },
-          {
-            field: 'matchWidthMaxCm',
-            title: '宽度上限',
-            minWidth: 100,
-          },
-        ]
-      : []),
-    ...(isComboLikeTab
-      ? []
-      : [
-          {
-            field: 'costPrice',
-            title: '成本价',
-            minWidth: 100,
-          },
+          ...(listTab === 'custom_combo'
+            ? []
+            : [
+                {
+                  field: 'costPrice',
+                  title: listTab === 'combo' ? '平台价格' : '成本价',
+                  width: listTab === 'combo' ? 200 : 100,
+                  align: 'left' as const,
+                  showOverflow: false,
+                  slots: { default: 'colPrice' },
+                },
+              ]),
         ]),
     {
       field: 'status',
       title: '聚水潭同步',
-      minWidth: 110,
+      width: compact ? 108 : 135,
+      align: 'left',
+      showOverflow: false,
       slots: { default: 'colSyncStatus' },
     },
-    ...(isComboLikeTab
+    ...(compact
       ? []
       : [
           {
-            field: 'jstSkuId',
-            title: '聚水潭SKU ID',
-            minWidth: 130,
+            field: 'creatorName',
+            title: '创建信息',
+            width: 140,
+            align: 'left' as const,
+            showOverflow: false,
+            slots: { default: 'colCreated' },
           },
         ]),
     {
-      field: 'creatorName',
-      title: '创建人',
-      minWidth: 100,
-    },
-    {
-      field: 'createTime',
-      title: '创建时间',
-      minWidth: 160,
-      formatter: 'formatDateTime',
-    },
-    {
+      field: '_actions',
       title: '操作',
-      width: 200,
-      fixed: 'right',
+      width: 128,
+      align: 'left',
+      showOverflow: false,
       slots: { default: 'actions' },
     },
   ];
 }
 
-export function useGridColumns(): VxeTableGridOptions<FdmdataDataJustSkuApi.DataJustSku>['columns'] {
+export function useGridColumns(): VxeTableGridOptions<SkuDisplayRow>['columns'] {
   return buildDataJustSkuGridColumns();
 }

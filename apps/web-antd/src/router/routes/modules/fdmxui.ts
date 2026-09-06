@@ -3,7 +3,7 @@ import type { RouteRecordRaw } from 'vue-router';
 const routes: RouteRecordRaw[] = [
   {
     path: '/fdmtool/my-client',
-    alias: ['/fdmxui/my-client'],
+    alias: ['/fdmaccount/my-client', '/fdmxui/my-client'],
     component: () => import('#/views/fdmxui/my-client/index.vue'),
     name: 'FdmToolMyClient',
     meta: {

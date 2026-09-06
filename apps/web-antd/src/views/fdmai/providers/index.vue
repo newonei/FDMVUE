@@ -4,6 +4,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import type { FdmAiApi } from '#/api/fdmai';
 
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 
@@ -34,6 +35,7 @@ import {
   getFdmAiAdapters,
   getFdmAiProviders,
   probeFdmAiProvider,
+  retireFdmAiProvider,
   testFdmAiProvider,
   updateFdmAiProvider,
 } from '#/api/fdmai';
@@ -98,6 +100,11 @@ const PRESETS: ProviderPreset[] = [
 
 const { hasAccessByCodes } = useAccess();
 const canManagePlatform = hasAccessByCodes(['fdmai:platform:manage']);
+const canImportModels =
+  canManagePlatform &&
+  hasAccessByCodes(['fdmai:model:create']) &&
+  hasAccessByCodes(['fdmai:route:create']);
+const router = useRouter();
 const loading = ref(false);
 const saving = ref(false);
 const probing = ref(false);
@@ -105,6 +112,8 @@ const modalOpen = ref(false);
 const discoveryOpen = ref(false);
 const testingId = ref<number>();
 const syncingId = ref<number>();
+const mutatingId = ref<number>();
+const mutationAction = ref<'delete' | 'retire'>();
 const rows = ref<FdmAiApi.ProviderAccount[]>([]);
 const adapters = ref<FdmAiApi.AdapterDescriptor[]>([]);
 const editingId = ref<number>();
@@ -135,7 +144,7 @@ const columns: TableColumnsType<FdmAiApi.ProviderAccount> = [
   { dataIndex: 'credentialMask', title: 'API Key', width: 150 },
   { dataIndex: 'platform', title: '范围', width: 90 },
   { dataIndex: 'enabled', title: '状态', width: 90 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 280 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 420 },
 ];
 const discoveryColumns: TableColumnsType<FdmAiApi.ProviderModelInfo> = [
   { dataIndex: 'id', title: '模型标识' },
@@ -344,6 +353,17 @@ function showDiscoveredModels(
   discoveryOpen.value = true;
 }
 
+async function selectProviderModels(record: unknown) {
+  if (!canImportModels) return;
+  const provider = record as FdmAiApi.ProviderAccount | undefined;
+  if (!provider?.id) return;
+  await router.push({
+    path: '/fdmai/models',
+    query: { import: '1', providerAccountId: String(provider.id) },
+  });
+  discoveryOpen.value = false;
+}
+
 async function testSavedProvider(
   record: unknown,
   discoverAfterSuccess = false,
@@ -405,11 +425,39 @@ async function syncModels(record: unknown, showSuccess = true) {
   }
 }
 
+async function retire(record: unknown) {
+  const provider = record as FdmAiApi.ProviderAccount;
+  if (mutatingId.value != null) return;
+  mutatingId.value = provider.id;
+  mutationAction.value = 'retire';
+  try {
+    await retireFdmAiProvider(provider.id, provider.platform);
+    message.success('服务商账号已下线，可编辑后重新启用，也可删除');
+    await load();
+  } finally {
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
+  }
+}
+
 async function remove(record: unknown) {
   const provider = record as FdmAiApi.ProviderAccount;
-  await deleteFdmAiProvider(provider.id, provider.platform);
-  message.success('服务商账号已下线');
-  await load();
+  if (mutatingId.value != null) return;
+  if (provider.enabled) {
+    message.warning('请先下线服务商，再执行删除');
+    return;
+  }
+  mutatingId.value = provider.id;
+  mutationAction.value = 'delete';
+  try {
+    await deleteFdmAiProvider(provider.id, provider.platform);
+    rows.value = rows.value.filter((item) => String(item.id) !== String(provider.id));
+    message.success('服务商账号已删除，历史调用与用量记录已保留');
+    await load();
+  } finally {
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
+  }
 }
 
 onMounted(load);
@@ -441,7 +489,7 @@ onMounted(load);
       :data-source="rows"
       :loading="loading"
       row-key="id"
-      :scroll="{ x: 1180 }"
+      :scroll="{ x: 1320 }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'adapterCode'">
@@ -471,7 +519,7 @@ onMounted(load);
           </Tag>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
-          <Space :size="4">
+          <Space :size="4" wrap>
             <Button
               v-access:code="['fdmai:provider:test']"
               :loading="testingId === record.id"
@@ -491,6 +539,15 @@ onMounted(load);
               拉取模型
             </Button>
             <Button
+              v-if="canImportModels"
+              :disabled="!record.enabled"
+              size="small"
+              type="link"
+              @click="selectProviderModels(record)"
+            >
+              接入模型
+            </Button>
+            <Button
               v-access:code="['fdmai:provider:update']"
               size="small"
               type="link"
@@ -499,11 +556,14 @@ onMounted(load);
               编辑
             </Button>
             <Popconfirm
+              v-if="record.enabled"
               title="确认下线该服务商账号？历史调用仍会保留。"
-              @confirm="remove(record)"
+              @confirm="retire(record)"
             >
               <Button
                 v-access:code="['fdmai:provider:delete']"
+                :disabled="mutatingId != null"
+                :loading="mutatingId === record.id && mutationAction === 'retire'"
                 danger
                 size="small"
                 type="link"
@@ -511,6 +571,30 @@ onMounted(load);
                 下线
               </Button>
             </Popconfirm>
+            <Tooltip :title="record.enabled ? '请先下线，再删除服务商' : undefined">
+              <span v-access:code="['fdmai:provider:delete']">
+                <Popconfirm
+                  :disabled="record.enabled || mutatingId != null"
+                  :title="`删除服务商「${record.name}」？`"
+                  description="删除后将从列表移除，无法恢复。历史调用、用量和模型保留，此渠道不能再用于新调用。"
+                  :overlay-style="{ width: '360px', maxWidth: 'calc(100vw - 32px)' }"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  :ok-button-props="{ danger: true }"
+                  @confirm="remove(record)"
+                >
+                  <Button
+                    :disabled="record.enabled || mutatingId != null"
+                    :loading="mutatingId === record.id && mutationAction === 'delete'"
+                    danger
+                    size="small"
+                    type="link"
+                  >
+                    删除
+                  </Button>
+                </Popconfirm>
+              </span>
+            </Tooltip>
           </Space>
         </template>
       </template>
@@ -657,7 +741,6 @@ onMounted(load);
 
     <Modal
       v-model:open="discoveryOpen"
-      :footer="null"
       :title="`${discoveredProvider?.name || '服务商'} · 模型目录`"
       :width="760"
     >
@@ -665,8 +748,8 @@ onMounted(load);
         class="discovery-alert"
         :message="
           discoveredModels.length
-            ? `已发现 ${discoveredModels.length} 个模型，可前往“模型管理”选择并导入。`
-            : '连接正常，但该服务商没有返回可发现的模型；可以在模型管理中手动填写模型 ID。'
+            ? `已发现 ${discoveredModels.length} 个模型，在模型中心选择要接入的模型后即可使用。`
+            : '该服务商没有返回可发现的模型，可以前往模型中心查看接入方式。'
         "
         show-icon
         :type="discoveredModels.length ? 'success' : 'warning'"
@@ -678,6 +761,17 @@ onMounted(load);
         row-key="id"
         size="small"
       />
+      <template #footer>
+        <Button @click="discoveryOpen = false">关闭</Button>
+        <Button
+          v-if="canImportModels"
+          :disabled="!discoveredProvider?.enabled"
+          type="primary"
+          @click="selectProviderModels(discoveredProvider)"
+        >
+          选择要接入的模型
+        </Button>
+      </template>
     </Modal>
   </AiCenterShell>
 </template>
