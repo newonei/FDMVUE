@@ -714,6 +714,12 @@ export function getWorkflowCapability(projectId: number) {
   );
 }
 
+export function getCreativeWorkflowModels(projectId: number) {
+  return requestClient.get<FdmAiApi.ModelOption[]>(`${WORKFLOW}/models`, {
+    params: { projectId },
+  });
+}
+
 export function saveWorkflowDraft(data: {
   definition: FdmCreativeApi.WorkflowDefinition;
   definitionHash: string;

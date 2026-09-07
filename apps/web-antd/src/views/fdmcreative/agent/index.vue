@@ -47,6 +47,7 @@ import {
 
 import AssetLibraryPicker from '../shared/AssetLibraryPicker.vue';
 import CreativeShell from '../shared/CreativeShell.vue';
+import { creativeModelLoadError } from '../shared/model-feedback';
 import PromptLibraryPicker from '../shared/PromptLibraryPicker.vue';
 import { normalizeModelIdentifier } from '../workbench/editor/model-identifier';
 import { supportsNodeModel } from '../workbench/editor/node-model-filter';
@@ -465,15 +466,12 @@ async function loadModels() {
       } else if (referenceAssetIds.length > 0) {
         scenario = '参考图';
       }
-      modelLoadError.value = `没有支持${scenario}的可用图片模型，请配置 creative.image.generate.default 路由`;
+      modelLoadError.value = `没有支持${scenario}的可用图片模型，请检查模型、服务商和图片生成路由是否启用`;
     }
   } catch (error) {
     imageModels.value = [];
     selectedModelId.value = undefined;
-    const detail = error instanceof Error ? error.message.trim() : '';
-    modelLoadError.value = detail
-      ? `图片模型目录加载失败：${detail}`
-      : '图片模型目录加载失败，请检查创作 Agent 查询权限和模型路由配置';
+    modelLoadError.value = creativeModelLoadError(error);
   } finally {
     modelsLoading.value = false;
   }

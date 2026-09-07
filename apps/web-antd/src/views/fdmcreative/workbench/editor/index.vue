@@ -43,7 +43,6 @@ import {
   Tooltip,
 } from 'ant-design-vue';
 
-import { searchFdmAiModels } from '#/api/fdmai';
 import {
   adoptCreativeNodeResult,
   applyContentPlan,
@@ -57,6 +56,7 @@ import {
   getCreativeMediaToolDescriptors,
   getCreativeNodeResultPage,
   getCreativeProject,
+  getCreativeWorkflowModels,
   getLatestContentPlan,
   getWorkflowCapability,
   getWorkflowDraft,
@@ -73,6 +73,7 @@ import {
 import { uploadFdmObject } from '#/api/fdmstorage/object';
 
 import PromptLibraryPicker from '../../shared/PromptLibraryPicker.vue';
+import { creativeModelLoadError } from '../../shared/model-feedback';
 import { firstRestorableAgentNode } from './agent-draft-restore';
 import CanvasAgentPanel from './components/CanvasAgentPanel.vue';
 import CanvasNavigator from './components/CanvasNavigator.vue';
@@ -167,6 +168,7 @@ const latestNodeRunsByNodeId = ref<
   Record<string, FdmCreativeApi.NodeRun | undefined>
 >({});
 const modelOptions = ref<FdmAiApi.ModelOption[]>([]);
+const modelLoadError = ref('');
 const projectAssets = ref<FdmCreativeApi.CreativeAsset[]>([]);
 const nodeResultVersions = ref<FdmCreativeApi.NodeResultVersion[]>([]);
 const nodeResultLoading = ref(false);
@@ -973,6 +975,8 @@ async function initialize() {
   latestNodeRunsByNodeId.value = {};
   pendingPlan.value = undefined;
   projectAssets.value = [];
+  modelOptions.value = [];
+  modelLoadError.value = '';
   nodeResultVersions.value = [];
   nodeResultLoading.value = false;
   mediaTools.value = [];
@@ -996,7 +1000,12 @@ async function initialize() {
           autosaveEnabled: false,
           mediaToolsEnabled: false,
         })),
-        searchFdmAiModels({}).catch(() => []),
+        getCreativeWorkflowModels(requestedProjectId)
+          .then((models) => ({ models, error: '' }))
+          .catch((error: unknown) => ({
+            models: [] as FdmAiApi.ModelOption[],
+            error: creativeModelLoadError(error),
+          })),
         getCreativeAssetPage({
           pageNo: 1,
           pageSize: 100,
@@ -1007,7 +1016,11 @@ async function initialize() {
     if (generation !== initializationGeneration) return;
     project.value = projectData;
     workflowCapability.value = capability;
-    modelOptions.value = availableModels;
+    modelOptions.value = availableModels.models;
+    modelLoadError.value = availableModels.error ||
+      (availableModels.models.length === 0
+        ? '暂无可用创作模型，请检查模型、服务商和路由是否启用'
+        : '');
     projectAssets.value = assetPage.list;
     mediaTools.value = tools;
     draftVersion.value = draft?.draftVersion ?? projectData.draftVersion ?? 0;
@@ -2267,6 +2280,13 @@ onBeforeUnmount(() => {
       class="workflow-import-file"
       type="file"
       @change="handleWorkflowImportFile"
+    />
+
+    <Alert
+      v-if="modelLoadError"
+      :message="modelLoadError"
+      show-icon
+      type="warning"
     />
 
     <div
