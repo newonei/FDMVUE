@@ -58,6 +58,13 @@ export function getMyFdmxuiClientLinks(id: number) {
   );
 }
 
+export function prepareMyClashImport(id: number) {
+  return requestClient.get<FdmxuiClientApi.Client>(
+    '/fdmxui/client/my-clash-import',
+    { params: { id }, timeout: 60_000 },
+  );
+}
+
 export function createFdmxuiClient(data: FdmxuiClientApi.Client) {
   return requestClient.post<number>('/fdmxui/client/create', data);
 }
