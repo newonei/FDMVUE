@@ -33,7 +33,6 @@ import {
 import CreativeShell from '../shared/CreativeShell.vue';
 import {
   PROMPT_TARGET_OPTIONS,
-  PROMPT_VISIBILITY_OPTIONS,
   promptTargetLabel,
 } from '../shared/library-options';
 
@@ -58,7 +57,7 @@ const form = reactive<FdmCreativeApi.CreativePromptSaveReq>({
   name: '',
   tags: '',
   targetType: 'GENERAL',
-  visibility: 'PERSONAL',
+  visibility: 'TENANT',
 });
 
 const categoryOptions = computed(() =>
@@ -100,7 +99,7 @@ function resetForm() {
     name: '',
     tags: '',
     targetType: query.targetType || 'GENERAL',
-    visibility: 'PERSONAL',
+    visibility: 'TENANT',
   });
 }
 
@@ -118,7 +117,7 @@ function openEdit(item: FdmCreativeApi.CreativePrompt) {
     name: item.name,
     tags: item.tags || '',
     targetType: item.targetType,
-    visibility: item.visibility,
+    visibility: 'TENANT',
   });
   modalOpen.value = true;
 }
@@ -192,7 +191,7 @@ onMounted(async () => {
 
 <template>
   <CreativeShell
-    description="沉淀团队常用提示词，在图像、视频和规划节点中一键复用"
+    description="同一租户内所有员工共享提示词，可在任意画布和创作 Agent 中使用；创建人或超级管理员可维护"
     title="提示词库"
   >
     <template #actions>
@@ -254,7 +253,7 @@ onMounted(async () => {
           <Select
             v-model:value="sourceFilter"
             :options="[
-              { label: '个人与团队', value: 'all' },
+              { label: '全部共享提示词', value: 'all' },
               { label: '我创建的', value: 'mine' },
             ]"
             @change="changeSourceFilter"
@@ -276,7 +275,7 @@ onMounted(async () => {
                   <Tag :bordered="false">
                     {{ promptTargetLabel(item.targetType) }}
                   </Tag>
-                  <Tag v-if="item.visibility === 'TENANT'" color="blue">
+                  <Tag color="blue">
                     团队共享
                   </Tag>
                 </header>
@@ -376,18 +375,9 @@ onMounted(async () => {
               </Radio.Button>
             </Radio.Group>
           </Form.Item>
-          <Form.Item label="可见范围" required>
-            <Select
-              v-model:value="form.visibility"
-              :options="PROMPT_VISIBILITY_OPTIONS"
-            >
-              <template #option="{ label, description }">
-                <div class="visibility-option">
-                  <strong>{{ label }}</strong>
-                  <span>{{ description }}</span>
-                </div>
-              </template>
-            </Select>
+          <Form.Item label="可见范围">
+            <Tag color="blue">团队共享</Tag>
+            <span>同一租户内所有员工均可查看和使用</span>
           </Form.Item>
         </div>
         <Form.Item label="提示词内容" required>
@@ -570,15 +560,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 14px;
-}
-
-.visibility-option {
-  display: grid;
-}
-
-.visibility-option span {
-  font-size: 11px;
-  color: #94a3b8;
 }
 
 @media (max-width: 900px) {

@@ -6,6 +6,7 @@ import { computed, reactive, ref } from 'vue';
 import { IconifyIcon } from '@vben/icons';
 
 import {
+  Alert,
   Button,
   Empty,
   Input,
@@ -21,7 +22,7 @@ import {
   getCreativePromptPage,
 } from '#/api/fdmcreative';
 
-import { promptTargetLabel } from './library-options';
+import { PROMPT_TARGET_OPTIONS, promptTargetLabel } from './library-options';
 
 interface PromptLibrarySelection {
   content: string;
@@ -36,7 +37,7 @@ interface Props {
   targetType?: FdmCreativeApi.PromptTargetType;
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   buttonText: '提示词库',
   currentText: '',
   disabled: false,
@@ -53,11 +54,14 @@ const rows = ref<FdmCreativeApi.CreativePrompt[]>([]);
 const categories = ref<FdmCreativeApi.CreativePromptCategory[]>([]);
 const selected = ref<FdmCreativeApi.CreativePrompt>();
 const total = ref(0);
+const loadError = ref('');
+let loadVersion = 0;
 const query = reactive<{
   category?: FdmCreativeApi.PromptCategory;
   keyword: string;
   pageNo: number;
   pageSize: number;
+  targetType?: FdmCreativeApi.PromptTargetType;
 }>({ keyword: '', pageNo: 1, pageSize: 8 });
 
 const categoryOptions = computed(() =>
@@ -66,36 +70,44 @@ const categoryOptions = computed(() =>
 
 async function loadCategories() {
   if (categories.value.length === 0) {
-    categories.value = await getCreativePromptCategories();
+    try {
+      categories.value = await getCreativePromptCategories();
+    } catch {
+      // A category failure must not prevent selecting or searching existing prompts.
+    }
   }
 }
 
 async function load() {
+  const version = ++loadVersion;
   loading.value = true;
+  loadError.value = '';
+  selected.value = undefined;
+  rows.value = [];
+  total.value = 0;
   try {
     const data = await getCreativePromptPage({
       category: query.category,
-      compatibleTargetType: props.targetType,
       keyword: query.keyword.trim() || undefined,
       pageNo: query.pageNo,
       pageSize: query.pageSize,
+      targetType: query.targetType,
     });
+    if (version !== loadVersion) return;
     rows.value = data.list;
     total.value = data.total;
-    if (
-      selected.value &&
-      !rows.value.some((item) => item.id === selected.value?.id)
-    ) {
-      selected.value = undefined;
-    }
+  } catch {
+    if (version !== loadVersion) return;
+    loadError.value = '提示词加载失败，请检查网络或登录状态后重试';
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 }
 
 function show() {
   query.keyword = '';
   query.category = undefined;
+  query.targetType = undefined;
   query.pageNo = 1;
   selected.value = undefined;
   open.value = true;
@@ -156,8 +168,28 @@ function excerpt(content: string) {
       />
     </div>
 
+    <div class="prompt-picker-scope">
+      <span>团队共享 · 默认显示全部用途的提示词</span>
+      <Select
+        v-model:value="query.targetType"
+        aria-label="提示词用途"
+        allow-clear
+        :options="PROMPT_TARGET_OPTIONS"
+        placeholder="全部用途"
+        @change="
+          query.pageNo = 1;
+          load();
+        "
+      />
+    </div>
+
     <Spin :spinning="loading">
-      <div v-if="rows.length" class="prompt-picker-list">
+      <Alert v-if="loadError" :message="loadError" show-icon type="error">
+        <template #action>
+          <Button size="small" @click="load">重试</Button>
+        </template>
+      </Alert>
+      <div v-else-if="rows.length" class="prompt-picker-list">
         <button
           v-for="item in rows"
           :key="item.id"
@@ -188,7 +220,7 @@ function excerpt(content: string) {
               <Tag :bordered="false">{{
                 promptTargetLabel(item.targetType)
               }}</Tag>
-              <Tag v-if="item.visibility === 'TENANT'" color="blue">团队</Tag>
+              <Tag color="blue">团队共享</Tag>
             </span>
             <span>{{ excerpt(item.content) }}</span>
             <small v-if="item.tags">{{ item.tags }}</small>
@@ -200,7 +232,10 @@ function excerpt(content: string) {
           />
         </button>
       </div>
-      <Empty v-else description="没有找到匹配提示词" />
+      <Empty
+        v-else-if="!loading"
+        description="没有找到匹配提示词，可清空搜索或切换为全部用途"
+      />
     </Spin>
 
     <div class="prompt-picker-pagination">
@@ -246,6 +281,19 @@ function excerpt(content: string) {
   gap: 8px;
   min-height: 420px;
   padding: 14px 0;
+}
+
+.prompt-picker-scope {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  color: #64748b;
+}
+
+.prompt-picker-scope :deep(.ant-select) {
+  min-width: 140px;
 }
 
 .prompt-option {

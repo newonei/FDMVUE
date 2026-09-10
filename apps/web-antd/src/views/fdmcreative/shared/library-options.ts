@@ -20,15 +20,6 @@ export const PROMPT_TARGET_OPTIONS: Array<{
   { label: '视频', value: 'VIDEO' },
 ];
 
-export const PROMPT_VISIBILITY_OPTIONS: Array<{
-  description: string;
-  label: string;
-  value: FdmCreativeApi.PromptVisibility;
-}> = [
-  { description: '仅自己可查看和使用', label: '个人', value: 'PERSONAL' },
-  { description: '当前租户成员均可使用', label: '团队共享', value: 'TENANT' },
-];
-
 export function assetKindLabel(kind: FdmCreativeApi.CreativeAsset['kind']) {
   return (
     {
