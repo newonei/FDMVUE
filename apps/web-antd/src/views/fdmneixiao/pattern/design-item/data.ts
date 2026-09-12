@@ -661,7 +661,7 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
     {
       field: '__actions',
       title: '操作',
-      width: 320,
+      width: 480,
       fixed: 'right',
       slots: { default: 'actions' },
     },

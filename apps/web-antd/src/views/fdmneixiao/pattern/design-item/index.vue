@@ -11,7 +11,7 @@ import { IconifyIcon } from '@vben/icons';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { downloadFileFromBlobPart, getFileNameFromUrl } from '@vben/utils';
 
-import { Button, message } from 'ant-design-vue';
+import { Button, message, Modal } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -20,6 +20,8 @@ import {
   getFdmNeixiaoPatternDesignItemPage,
   getFdmNeixiaoPatternDesignItemShopNameOptions,
   markFdmNeixiaoPatternDesignItemDownloaded,
+  notifyFdmNeixiaoPatternDesignItemOrder,
+  productionSendFdmNeixiaoPatternDesignItem,
 } from '#/api/fdmneixiao/pattern/design-item';
 import { $t } from '#/locales';
 
@@ -254,6 +256,48 @@ async function handleBatchDownloadOriginal() {
   );
 }
 
+async function handleNotifyOrder(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
+  const orderNo = String(row.orderNo ?? '').trim();
+  if (!orderNo) return;
+  Modal.confirm({
+    title: `确认发送订单 ${orderNo} 的群通知吗？`,
+    content: '重复发送会在群里产生新消息。',
+    onOk: async () => {
+      await notifyFdmNeixiaoPatternDesignItemOrder(orderNo);
+      message.success(`订单 ${orderNo} 通知已发送`);
+      await gridApi.query();
+    },
+  });
+}
+
+async function handleNotifySelectedOrder() {
+  const orderNos = [...new Set(checkedRows.value
+    .map((row) => String(row.orderNo ?? '').trim())
+    .filter(Boolean))];
+  if (orderNos.length === 0) {
+    message.warning('请先勾选要通知的订单');
+    return;
+  }
+  Modal.confirm({
+    title: `确认发送 ${orderNos.length} 个整单订单通知吗？`,
+    content: '重复发送会在群里产生新消息。',
+    onOk: async () => {
+      for (const orderNo of orderNos) {
+        await notifyFdmNeixiaoPatternDesignItemOrder(orderNo);
+      }
+      message.success(`已发送 ${orderNos.length} 个整单订单通知`);
+      await gridApi.query();
+    },
+  });
+}
+
+async function handleProductionSend(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
+  if (!row.id) return;
+  await productionSendFdmNeixiaoPatternDesignItem(row.id);
+  message.success('制作发出通知已发送');
+  await gridApi.query();
+}
+
 const shopNameOptions = ref<PatternDesignItemShopOption[]>([]);
 const shopNameOptionsLoading = ref(false);
 let shopNameFetchSeq = 0;
@@ -363,6 +407,16 @@ onBeforeUnmount(() => {
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
           <Button
+            v-access:code="['fdmneixiao:pattern-design-item:notify']"
+            :disabled="checkedCount === 0"
+            @click="handleNotifySelectedOrder"
+          >
+            <template #icon>
+              <IconifyIcon icon="lucide:send" />
+            </template>
+            整单订单通知
+          </Button>
+          <Button
             v-access:code="['fdmneixiao:pattern-design-item:update']"
             :disabled="checkedCount === 0"
             @click="handleBatchDownloadOriginal"
@@ -404,6 +458,26 @@ onBeforeUnmount(() => {
         <template #actions="{ row }">
           <TableAction
             :actions="[
+              {
+                label: '订单通知',
+                type: 'link',
+                icon: 'lucide:send',
+                disabled: !String(row.orderNo ?? '').trim(),
+                auth: ['fdmneixiao:pattern-design-item:notify'],
+                onClick: handleNotifyOrder.bind(null, row),
+              },
+              {
+                label: '发货',
+                type: 'link',
+                icon: 'lucide:truck',
+                // 已发出的明细也允许再次点击，用于补发群通知；后端会保持状态幂等。
+                disabled: !row.id,
+                auth: ['fdmneixiao:pattern-design-item:production-send'],
+                popConfirm: {
+                  title: '确认发送制作发出通知吗？未发出的明细会标记为已发出。',
+                  confirm: handleProductionSend.bind(null, row),
+                },
+              },
               {
                 label: '下载原图',
                 type: 'link',

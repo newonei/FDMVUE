@@ -177,6 +177,22 @@ export function markFdmNeixiaoPatternDesignItemDownloaded(ids: number[]) {
   );
 }
 
+/** 发送整单内销定制订单通知 */
+export function notifyFdmNeixiaoPatternDesignItemOrder(orderNo: string) {
+  return requestClient.post<boolean>(
+    '/fdmneixiao/pattern/design-item/notify-order',
+    { orderNo },
+  );
+}
+
+/** 标记内销定制订单制作发出并发送通知 */
+export function productionSendFdmNeixiaoPatternDesignItem(id: number) {
+  return requestClient.post<boolean>(
+    '/fdmneixiao/pattern/design-item/production-send',
+    { id },
+  );
+}
+
 export function deleteFdmNeixiaoPatternDesignItem(id: number) {
   return requestClient.delete<boolean>(
     `/fdmneixiao/pattern/design-item/delete?id=${id}`,
