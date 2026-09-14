@@ -368,8 +368,14 @@ export function updateFdmAiProvider(
   );
 }
 
-export function deleteFdmAiProvider(id: number, platform = false) {
+export function retireFdmAiProvider(id: number, platform = false) {
   return requestClient.delete<boolean>(`${PROVIDERS}/${id}`, {
+    params: { platform },
+  });
+}
+
+export function deleteFdmAiProvider(id: number, platform = false) {
+  return requestClient.delete<boolean>(`${PROVIDERS}/${id}/remove`, {
     params: { platform },
   });
 }

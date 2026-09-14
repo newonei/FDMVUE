@@ -34,6 +34,7 @@ import {
   getFdmAiAdapters,
   getFdmAiProviders,
   probeFdmAiProvider,
+  retireFdmAiProvider,
   testFdmAiProvider,
   updateFdmAiProvider,
 } from '#/api/fdmai';
@@ -105,7 +106,8 @@ const modalOpen = ref(false);
 const discoveryOpen = ref(false);
 const testingId = ref<number>();
 const syncingId = ref<number>();
-const enablingId = ref<number>();
+const mutatingId = ref<number>();
+const mutationAction = ref<'delete' | 'enable' | 'retire'>();
 const rows = ref<FdmAiApi.ProviderAccount[]>([]);
 const adapters = ref<FdmAiApi.AdapterDescriptor[]>([]);
 const editingId = ref<number>();
@@ -408,8 +410,9 @@ async function syncModels(record: unknown, showSuccess = true) {
 
 async function enable(record: unknown) {
   const provider = record as FdmAiApi.ProviderAccount;
-  if (enablingId.value != null || provider.enabled) return;
-  enablingId.value = provider.id;
+  if (mutatingId.value != null || provider.enabled) return;
+  mutatingId.value = provider.id;
+  mutationAction.value = 'enable';
   try {
     // An omitted credential tells the backend to retain the stored API Key.
     await updateFdmAiProvider(provider.id, {
@@ -423,15 +426,44 @@ async function enable(record: unknown) {
     message.success('服务商账号已重新启用');
     await load();
   } finally {
-    enablingId.value = undefined;
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
+  }
+}
+
+async function retire(record: unknown) {
+  const provider = record as FdmAiApi.ProviderAccount;
+  if (mutatingId.value != null) return;
+  mutatingId.value = provider.id;
+  mutationAction.value = 'retire';
+  try {
+    await retireFdmAiProvider(provider.id, provider.platform);
+    message.success('服务商账号已下线，可编辑后重新启用，也可删除');
+    await load();
+  } finally {
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
   }
 }
 
 async function remove(record: unknown) {
   const provider = record as FdmAiApi.ProviderAccount;
-  await deleteFdmAiProvider(provider.id, provider.platform);
-  message.success('服务商账号已下线');
-  await load();
+  if (mutatingId.value != null) return;
+  if (provider.enabled) {
+    message.warning('请先下线服务商，再执行删除');
+    return;
+  }
+  mutatingId.value = provider.id;
+  mutationAction.value = 'delete';
+  try {
+    await deleteFdmAiProvider(provider.id, provider.platform);
+    rows.value = rows.value.filter((item) => String(item.id) !== String(provider.id));
+    message.success('服务商账号已删除，历史调用与用量记录已保留');
+    await load();
+  } finally {
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
+  }
 }
 
 onMounted(load);
@@ -528,8 +560,8 @@ onMounted(load);
             >
               <Button
                 v-access:code="['fdmai:provider:update']"
-                :disabled="enablingId != null"
-                :loading="enablingId === record.id"
+                :disabled="mutatingId != null"
+                :loading="mutatingId === record.id && mutationAction === 'enable'"
                 size="small"
                 type="link"
               >
@@ -537,11 +569,14 @@ onMounted(load);
               </Button>
             </Popconfirm>
             <Popconfirm
+              v-if="record.enabled"
               title="确认下线该服务商账号？历史调用仍会保留。"
-              @confirm="remove(record)"
+              @confirm="retire(record)"
             >
               <Button
                 v-access:code="['fdmai:provider:delete']"
+                :disabled="mutatingId != null"
+                :loading="mutatingId === record.id && mutationAction === 'retire'"
                 danger
                 size="small"
                 type="link"
@@ -549,6 +584,30 @@ onMounted(load);
                 下线
               </Button>
             </Popconfirm>
+            <Tooltip :title="record.enabled ? '请先下线，再删除服务商' : undefined">
+              <span v-access:code="['fdmai:provider:delete']">
+                <Popconfirm
+                  :disabled="record.enabled || mutatingId != null"
+                  :title="`删除服务商「${record.name}」？`"
+                  description="删除后将从列表移除，无法恢复。历史调用、用量和模型保留，此渠道不能再用于新调用。"
+                  :overlay-style="{ width: '360px', maxWidth: 'calc(100vw - 32px)' }"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  :ok-button-props="{ danger: true }"
+                  @confirm="remove(record)"
+                >
+                  <Button
+                    :disabled="record.enabled || mutatingId != null"
+                    :loading="mutatingId === record.id && mutationAction === 'delete'"
+                    danger
+                    size="small"
+                    type="link"
+                  >
+                    删除
+                  </Button>
+                </Popconfirm>
+              </span>
+            </Tooltip>
           </Space>
         </template>
       </template>
