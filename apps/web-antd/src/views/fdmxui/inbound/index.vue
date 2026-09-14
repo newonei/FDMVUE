@@ -7,8 +7,8 @@ import { IconifyIcon } from '@vben/icons';
 
 import { Button, message } from 'ant-design-vue';
 
-import { useVbenVxeGrid } from '#/adapter/vxe-table';
-import { getFdmxuiInboundPage, syncFdmxuiInbound } from '#/api/fdmxui/inbound';
+import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
+import { cleanupFdmxuiInbound, deleteFdmxuiInbound, getFdmxuiInboundPage, syncFdmxuiInbound } from '#/api/fdmxui/inbound';
 
 import { useGridColumns, useGridFormSchema } from './data';
 
@@ -33,6 +33,20 @@ async function handleSync() {
     hideLoading();
   }
 }
+async function handleCleanup() {
+  const formValues = await gridApi.formApi.getValues();
+  const panelId = Number(formValues.panelId);
+  if (!panelId) { message.warning('请先在搜索条件中选择面板'); return; }
+  const count = await cleanupFdmxuiInbound(panelId);
+  message.success(`已清理 ${count} 个失效节点`);
+  gridApi.query();
+}
+async function handleDelete(row: FdmxuiInboundApi.Inbound) {
+  if (!row.id) return;
+  await deleteFdmxuiInbound(row.id);
+  message.success('节点已删除');
+  await gridApi.query();
+}
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: { schema: useGridFormSchema() },
@@ -49,6 +63,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
+            available: formValues.available ?? true,
           }),
       },
     },
@@ -74,10 +89,29 @@ const [Grid, gridApi] = useVbenVxeGrid({
             </template>
             同步节点
           </Button>
+          <Button @click="handleCleanup">清理失效节点</Button>
         </div>
       </header>
 
-      <Grid table-title="3XUI节点" />
+      <Grid table-title="3XUI节点">
+        <template #actions="{ row }">
+          <TableAction
+            :actions="[
+              {
+                label: '删除',
+                type: 'link',
+                danger: true,
+                icon: ACTION_ICON.DELETE,
+                auth: ['fdmxui:inbound:delete'],
+                popConfirm: {
+                  title: `确认删除节点 ${row.remark || row.tag || row.xuiInboundId || row.id}？`,
+                  confirm: handleDelete.bind(null, row),
+                },
+              },
+            ]"
+          />
+        </template>
+      </Grid>
     </div>
   </Page>
 </template>

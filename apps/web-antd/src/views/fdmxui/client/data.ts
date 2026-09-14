@@ -15,6 +15,7 @@ export const CLIENT_STATUS_OPTIONS = [
   { label: '正常', value: 1 },
   { label: '已回收', value: 2 },
   { label: '异常', value: 3 },
+  { label: '已替换', value: 4 },
 ];
 
 export const FDMXUI_CLIENT_DEFAULTS: Partial<FdmxuiClientApi.Client> = {

@@ -2,7 +2,6 @@
 import type { TableColumnsType } from 'ant-design-vue';
 
 import type { FdmAiApi } from '#/api/fdmai';
-import type { FdmdataDataCompanyApi } from '#/api/fdmdata/datacompany';
 
 import {
   computed,
@@ -43,11 +42,10 @@ import {
   getFdmAiProviders,
   getFdmAiRoutes,
   importFdmAiProviderModels,
-  submitFdmAiInvocation,
+  submitFdmAiModelTest,
   updateFdmAiModel,
   updateFdmAiRoute,
 } from '#/api/fdmai';
-import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 
 import {
   filterLibraryModels,
@@ -74,7 +72,7 @@ const emit = defineEmits<{
   ];
 }>();
 
-type SubmittedTestContext = FdmAiApi.PolicyContext & {
+type SubmittedTestContext = {
   capability: FdmAiApi.Capability;
 };
 
@@ -182,28 +180,12 @@ const testElapsedMillis = ref(0);
 const testModel = ref<FdmAiApi.ModelDefinition>();
 const testSnapshot = ref<FdmAiApi.InvocationSnapshot>();
 const testInvocationId = ref('');
-const testCompanies = ref<FdmdataDataCompanyApi.DataCompany[]>([]);
-const companiesLoading = ref(false);
 const testRouteKey = ref<string>();
 const activeTestSubmission = ref<{
   context: SubmittedTestContext;
   modelId: number;
   routeKey?: string;
 }>();
-const testContext = reactive<Partial<FdmAiApi.PolicyContext>>({
-  companyId: undefined,
-  generationType: '',
-  sensitivityLevel: 'INTERNAL',
-});
-const companyOptions = computed(() =>
-  testCompanies.value
-    .filter((company) => company.id !== undefined)
-    .map((company) => ({
-      label:
-        company.companyName || company.companyShortName || `公司 ${company.id}`,
-      value: company.id!,
-    })),
-);
 const editingId = ref<number>();
 const rows = ref<FdmAiApi.ModelDefinition[]>([]);
 const providers = ref<FdmAiApi.ProviderAccount[]>([]);
@@ -1065,7 +1047,7 @@ function startTestPolling() {
 
 function openTest(
   record: unknown,
-  context?: Partial<FdmAiApi.PolicyContext> & {
+  context?: {
     capability?: FdmAiApi.Capability;
     routeKey?: string;
   },
@@ -1087,23 +1069,8 @@ function openTest(
     referenceUrl: '',
   });
   testRouteKey.value = context?.routeKey;
-  Object.assign(testContext, {
-    companyId: context?.companyId,
-    generationType: context?.generationType || testForm.capability || '',
-    sensitivityLevel: context?.sensitivityLevel || 'INTERNAL',
-  });
   testOpen.value = true;
-  companiesLoading.value = true;
-  void getDataCompanySimpleList()
-    .then((companies) => {
-      testCompanies.value = companies;
-    })
-    .catch(() => {
-      testCompanies.value = [];
-    })
-    .finally(() => {
-      companiesLoading.value = false;
-    });
+
 }
 
 function parseCommonParameters() {
@@ -1126,19 +1093,6 @@ async function submitModelTest() {
     message.warning('当前模型没有可用于测试的主能力');
     return;
   }
-  if (
-    !testContext.companyId ||
-    !companyOptions.value.some((company) =>
-      sameModelLibraryId(company.value, testContext.companyId),
-    )
-  ) {
-    message.warning('请选择本次测试所属的公司');
-    return;
-  }
-  if (!testContext.generationType?.trim() || !testContext.sensitivityLevel) {
-    message.warning('请填写生成业务类型并选择内容敏感级别');
-    return;
-  }
   if (!testForm.prompt.trim()) {
     message.warning('请输入测试提示词');
     return;
@@ -1157,9 +1111,6 @@ async function submitModelTest() {
   const submitted = {
     context: {
       capability: testForm.capability,
-      companyId: testContext.companyId,
-      generationType: testContext.generationType.trim(),
-      sensitivityLevel: testContext.sensitivityLevel,
     } satisfies SubmittedTestContext,
     modelId: model.id,
     routeKey: testRouteKey.value,
@@ -1174,17 +1125,12 @@ async function submitModelTest() {
   testElapsedMillis.value = 0;
   testStartedAt = Date.now();
   try {
-    const ticket = await submitFdmAiInvocation({
+    const ticket = await submitFdmAiModelTest({
       additionalRequiredCapabilities:
         model.modality === 'TEXT' && referenceUrl ? ['IMAGE_INPUT'] : [],
       businessId: `${model.id}:${model.code}`,
-      businessType: 'MODEL_TEST',
-      caller: 'fdmai-model-console',
       capability: submitted.context.capability,
       commonParameters,
-      companyId: submitted.context.companyId,
-      generationType: submitted.context.generationType,
-      sensitivityLevel: submitted.context.sensitivityLevel,
       idempotencyKey: createTestIdempotencyKey(model.id),
       input: {
         negativePrompt: testForm.negativePrompt.trim() || undefined,
@@ -1595,35 +1541,6 @@ onBeforeUnmount(() => {
           type="info"
           show-icon
         />
-        <div class="two-columns">
-          <Form.Item label="所属公司" required>
-            <Select
-              v-model:value="testContext.companyId"
-              :loading="companiesLoading"
-              :options="companyOptions"
-              show-search
-              option-filter-prop="label"
-              placeholder="选择本次测试所属的公司"
-            />
-          </Form.Item>
-          <Form.Item label="生成业务类型" required>
-            <Input
-              v-model:value="testContext.generationType"
-              placeholder="填写公司策略使用的业务分类"
-            />
-          </Form.Item>
-        </div>
-        <Form.Item label="内容敏感级别" required>
-          <Select
-            v-model:value="testContext.sensitivityLevel"
-            :options="[
-              { label: '公开', value: 'PUBLIC' },
-              { label: '内部（默认，可调整）', value: 'INTERNAL' },
-              { label: '机密', value: 'CONFIDENTIAL' },
-              { label: '严格限制', value: 'RESTRICTED' },
-            ]"
-          />
-        </Form.Item>
         <Form.Item label="请求动作" required>
           <Select
             v-model:value="testForm.capability"
@@ -1631,7 +1548,7 @@ onBeforeUnmount(() => {
             placeholder="选择模型能力"
           />
           <small class="test-hint">
-            测试使用所选公司的调用策略。包含参考图时，文本模型需要支持图片理解。
+            包含参考图时，文本模型需要支持图片理解。
           </small>
         </Form.Item>
         <Form.Item label="提示词" required>
@@ -1755,13 +1672,7 @@ onBeforeUnmount(() => {
           继续查询
         </Button>
         <Button
-          :disabled="
-            testCapabilityOptions.length === 0 ||
-            companiesLoading ||
-            !testContext.companyId ||
-            !testContext.generationType?.trim() ||
-            !testContext.sensitivityLevel
-          "
+          :disabled="testCapabilityOptions.length === 0"
           :loading="testSubmitting"
           type="primary"
           @click="submitModelTest"

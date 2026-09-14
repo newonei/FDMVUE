@@ -8,13 +8,15 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 import { Page } from '@vben/common-ui';
 
 import { useClipboard } from '@vueuse/core';
-import { Alert, Button, message, Modal, Spin } from 'ant-design-vue';
+import { Alert, Button, message, Modal, Select, Spin } from 'ant-design-vue';
 
 import { TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
   getMyFdmxuiClientLinks,
   getMyFdmxuiClientPage,
   prepareMyClashImport,
+  getFdmxuiSelfOptions,
+  selfAssignFdmxuiClient,
 } from '#/api/fdmxui/client';
 import { getSimpleFdmxuiPanelList } from '#/api/fdmxui/panel';
 import { getRangePickerDefaultProps } from '#/utils';
@@ -33,6 +35,28 @@ const clashImportRow = ref<FdmxuiClientApi.Client>();
 const clashImportAttempted = ref(false);
 const { copy } = useClipboard({ legacy: true });
 let clashImportSequence = 0;
+const selfAssignOpen = ref(false);
+const selfAssignLoading = ref(false);
+const selfOptions = ref<FdmxuiClientApi.SelfOption[]>([]);
+const selfPanelId = ref<number>();
+const selfInboundIds = ref<number[]>([]);
+const selfInbounds = computed(() => selfOptions.value.find((x) => x.panelId === selfPanelId.value)?.inbounds || []);
+let refreshMyGrid: () => Promise<void> = async () => {};
+
+async function openSelfAssign() {
+  selfPanelId.value = undefined;
+  selfInboundIds.value = [];
+  selfOptions.value = [];
+  selfAssignOpen.value = true; selfAssignLoading.value = true;
+  try { selfOptions.value = await getFdmxuiSelfOptions(); }
+  finally { selfAssignLoading.value = false; }
+}
+async function submitSelfAssign() {
+  if (!selfPanelId.value || selfInboundIds.value.length === 0) { message.warning('请选择面板和节点'); return; }
+  selfAssignLoading.value = true;
+  try { const client = await selfAssignFdmxuiClient({ panelId: selfPanelId.value, inboundIds: selfInboundIds.value }); message.success('订阅已生效'); selfAssignOpen.value = false; await refreshMyGrid(); if (client?.lastSyncError) message.warning(client.lastSyncError); }
+  finally { selfAssignLoading.value = false; }
+}
 
 const clashImportUrl = computed(() => {
   const url = clashImportClient.value?.clashSubscriptionUrl;
@@ -45,6 +69,7 @@ const CLIENT_STATUS_OPTIONS = [
   { label: '正常', value: 1 },
   { label: '已回收', value: 2 },
   { label: '异常', value: 3 },
+  { label: '已替换', value: 4 },
 ];
 
 function formatStatus({ cellValue }: { cellValue: unknown }) {
@@ -231,7 +256,7 @@ async function copyClashSubscription() {
   }
 }
 
-const [Grid] = useVbenVxeGrid({
+const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: { schema: useGridFormSchema() },
   gridOptions: {
     autoResize: true,
@@ -253,11 +278,21 @@ const [Grid] = useVbenVxeGrid({
     toolbarConfig: { refresh: true, search: true },
   } as VxeTableGridOptions<FdmxuiClientApi.Client>,
 });
+refreshMyGrid = async () => { await gridApi.query(); };
 </script>
 
 <template>
   <Page auto-content-height>
     <LinkDetailModal v-model:open="linkDetailOpen" :client="linkDetailClient" />
+    <Modal v-model:open="selfAssignOpen" title="领取 / 切换 3XUI 订阅" :confirm-loading="selfAssignLoading" @ok="submitSelfAssign">
+      <Spin :spinning="selfAssignLoading">
+        <div class="space-y-4 py-2">
+          <div><div class="mb-1 text-sm">面板</div><Select v-model:value="selfPanelId" class="w-full" placeholder="请选择面板" @change="() => (selfInboundIds = [])"><Select.Option v-for="item in selfOptions" :key="item.panelId" :value="item.panelId">{{ item.panelName }}</Select.Option></Select></div>
+          <div><div class="mb-1 text-sm">节点</div><Select v-model:value="selfInboundIds" mode="multiple" class="w-full" :disabled="!selfPanelId" placeholder="请选择节点"><Select.Option v-for="item in selfInbounds" :key="item.id" :value="item.id">{{ item.remark || item.tag || item.id }} / {{ item.protocol || '-' }}:{{ item.port || '-' }}</Select.Option></Select></div>
+          <Alert type="info" message="流量、IP 限制和过期时间使用系统默认策略" show-icon />
+        </div>
+      </Spin>
+    </Modal>
     <Modal
       :open="clashImportOpen"
       title="导入 Clash Verge"
@@ -323,6 +358,7 @@ const [Grid] = useVbenVxeGrid({
             点击“导入 Clash Verge”检查订阅配置，并打开本机客户端导入。
           </p>
         </div>
+        <Button type="primary" @click="openSelfAssign">领取 / 切换订阅</Button>
       </header>
 
       <Grid table-title="我的3XUI订阅">

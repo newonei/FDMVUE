@@ -303,6 +303,15 @@ export namespace FdmAiApi {
     routeKey?: string;
   }
 
+  export type ModelTestSubmitReq = Omit<
+    InvocationSubmitReq,
+    | 'businessType'
+    | 'caller'
+    | 'companyId'
+    | 'generationType'
+    | 'sensitivityLevel'
+  >;
+
   export interface InvocationTicket {
     invocationId: string;
     status: string;
@@ -481,6 +490,13 @@ export function getFdmAiInvocationPage(params: FdmAiApi.InvocationPageReq) {
 export function submitFdmAiInvocation(data: FdmAiApi.InvocationSubmitReq) {
   return requestClient.post<FdmAiApi.InvocationTicket>(
     '/fdmai/invocations',
+    data,
+  );
+}
+
+export function submitFdmAiModelTest(data: FdmAiApi.ModelTestSubmitReq) {
+  return requestClient.post<FdmAiApi.InvocationTicket>(
+    '/fdmai/invocations/model-test',
     data,
   );
 }
