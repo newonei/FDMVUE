@@ -3,6 +3,8 @@ import type { PageParam, PageResult } from '@vben/request';
 import { requestClient } from '#/api/request';
 
 export namespace FdmxuiClientApi {
+  export interface SelfOptionInbound { id?: number; remark?: string; tag?: string; protocol?: string; port?: number }
+  export interface SelfOption { panelId?: number; panelName?: string; inbounds?: SelfOptionInbound[] }
   export interface Client {
     id?: number;
     userId?: number;
@@ -30,6 +32,14 @@ export namespace FdmxuiClientApi {
     createTime?: string;
     updateTime?: string;
   }
+}
+
+export function getFdmxuiSelfOptions() {
+  return requestClient.get<FdmxuiClientApi.SelfOption[]>('/fdmxui/client/self-options');
+}
+
+export function selfAssignFdmxuiClient(data: { panelId: number; inboundIds: number[] }) {
+  return requestClient.post<FdmxuiClientApi.Client>('/fdmxui/client/self-assign', data);
 }
 
 export function getFdmxuiClientPage(params: PageParam) {

@@ -2,7 +2,6 @@
 import type { ModelScene } from './scenarios';
 
 import type { FdmAiApi } from '#/api/fdmai';
-import type { FdmdataDataCompanyApi } from '#/api/fdmdata/datacompany';
 
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -20,7 +19,6 @@ import {
   Input,
   message,
   Modal,
-  Popconfirm,
   Select,
   Spin,
   Tag,
@@ -28,15 +26,12 @@ import {
 
 import {
   createFdmAiRoute,
-  getFdmAiCompanyModelPolicies,
   getFdmAiModels,
   getFdmAiProviders,
   getFdmAiRoutes,
   testFdmAiProvider,
-  updateFdmAiCompanyModelPolicy,
   updateFdmAiRoute,
 } from '#/api/fdmai';
-import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 
 import ModelLibrary from './ModelLibrary.vue';
 import {
@@ -54,7 +49,6 @@ const icon = {
   video: createIconifyIcon('ant-design:video-camera-outlined'),
 };
 const LinkIcon = createIconifyIcon('ant-design:link-outlined');
-const ShieldIcon = createIconifyIcon('ant-design:safety-outlined');
 const CheckIcon = createIconifyIcon('ant-design:check-circle-outlined');
 const SettingsIcon = createIconifyIcon('ant-design:control-outlined');
 const { hasAccessByCodes } = useAccess();
@@ -62,8 +56,6 @@ const has = (code: string) => hasAccessByCodes([code]);
 const canManagePlatform = has('fdmai:platform:manage');
 const canImport =
   canManagePlatform && has('fdmai:model:create') && has('fdmai:route:create');
-const canQueryPolicy = has('fdmai:policy:query');
-const canUpdatePolicy = has('fdmai:policy:update');
 const canTest = has('fdmai:invocation:create') && has('fdmai:invocation:query');
 const route = useRoute();
 const router = useRouter();
@@ -72,8 +64,6 @@ const loadError = ref('');
 const models = ref<FdmAiApi.ModelDefinition[]>([]);
 const providers = ref<FdmAiApi.ProviderAccount[]>([]);
 const routes = ref<FdmAiApi.RouteDefinition[]>([]);
-const companies = ref<FdmdataDataCompanyApi.DataCompany[]>([]);
-const companyLoadError = ref(false);
 const selectedSceneId = ref('image');
 const libraryVisible = ref(false);
 const library = ref<InstanceType<typeof ModelLibrary>>();
@@ -95,22 +85,18 @@ const testedResults = reactive<Record<string, boolean>>({});
 function resultKey(
   modelId: number,
   routeKey: string,
-  value: FdmAiApi.PolicyContext & { capability: FdmAiApi.Capability },
+  value: { capability: FdmAiApi.Capability },
 ) {
   return JSON.stringify([
     String(modelId),
     routeKey,
-    String(value.companyId),
-    value.generationType,
-    value.sensitivityLevel,
     value.capability,
   ]);
 }
 const testResult = computed(() =>
-  active.value.model && policyContext.value
+  active.value.model
     ? testedResults[
         resultKey(active.value.model.id, activeScene.value.routeKey, {
-          ...policyContext.value,
           capability: activeScene.value.capability,
         })
       ]
@@ -120,7 +106,7 @@ function onTested(
   modelId: number,
   success: boolean,
   routeKey?: string,
-  value?: FdmAiApi.PolicyContext & { capability: FdmAiApi.Capability },
+  value?: { capability: FdmAiApi.Capability },
 ) {
   if (routeKey && value)
     testedResults[resultKey(modelId, routeKey, value)] = success;
@@ -137,57 +123,6 @@ const capabilityNames: Partial<Record<FdmAiApi.Capability, string>> = {
   FIRST_FRAME_TO_VIDEO: '首帧生视频',
   FIRST_LAST_FRAME_TO_VIDEO: '首尾帧生视频',
 };
-const companyOptions = computed(() =>
-  companies.value
-    .filter((item) => item.id != null)
-    .map((item) => ({
-      value: item.id!,
-      label: item.companyShortName || item.companyName || String(item.id),
-    })),
-);
-const sensitivityOptions = [
-  { value: 'PUBLIC', label: '公开数据' },
-  { value: 'INTERNAL', label: '内部数据' },
-  { value: 'CONFIDENTIAL', label: '机密数据' },
-  { value: 'RESTRICTED', label: '严格限制数据' },
-];
-const context = reactive<{
-  companyId?: number;
-  sensitivityLevel: FdmAiApi.SensitivityLevel;
-}>({ sensitivityLevel: 'INTERNAL' });
-const generationTypes = reactive<Record<string, string>>(
-  Object.fromEntries(MODEL_SCENES.map((scene) => [scene.id, scene.capability])),
-);
-const policyContext = computed<FdmAiApi.PolicyContext | undefined>(() =>
-  context.companyId
-    ? {
-        companyId: context.companyId,
-        generationType:
-          generationTypes[activeScene.value.id] || activeScene.value.capability,
-        sensitivityLevel: context.sensitivityLevel,
-      }
-    : undefined,
-);
-const policies = ref<FdmAiApi.CompanyModelPolicy[]>([]);
-const policyLoading = ref(false);
-const policyError = ref(false);
-const policyOpen = ref(false);
-const policySaving = ref(false);
-const policyAllowed = computed(() =>
-  policies.value.some(
-    (item) =>
-      item.enabled &&
-      sameId(item.modelId, active.value.model?.id) &&
-      sameId(item.providerAccountId, active.value.provider?.id),
-  ),
-);
-const policyLabel = computed(() => {
-  if (!context.companyId) return '请选择公司';
-  if (!canQueryPolicy) return '无查询权限';
-  if (policyLoading.value) return '查询中';
-  if (policyError.value) return '查询失败';
-  return policyAllowed.value ? '已允许' : '待配置';
-});
 const providerChecks = reactive<
   Record<string, { message?: string; valid: boolean }>
 >({});
@@ -231,7 +166,6 @@ const bindingOptions = computed(() =>
 watch(bindingScope, () => {
   bindingRouteId.value = undefined;
 });
-let policyRequest = 0;
 let loadRequest = 0;
 let configurationSnapshot = '';
 
@@ -264,44 +198,7 @@ async function load() {
     loadError.value =
       '部分配置未能读取，请重试或检查模型、服务商和路由查询权限。';
   loading.value = false;
-  await loadPolicies();
 }
-
-async function loadCompanies() {
-  try {
-    companies.value = await getDataCompanySimpleList();
-    companyLoadError.value = false;
-  } catch {
-    companyLoadError.value = true;
-  }
-}
-
-async function loadPolicies() {
-  const request = ++policyRequest;
-  policies.value = [];
-  policyError.value = false;
-  policyLoading.value = false;
-  const value = policyContext.value;
-  if (
-    !value ||
-    !canQueryPolicy ||
-    !/^[A-Z][A-Z0-9_.:-]{0,127}$/.test(value.generationType)
-  )
-    return;
-  policyLoading.value = true;
-  try {
-    const result = await getFdmAiCompanyModelPolicies(value);
-    if (request === policyRequest) policies.value = result;
-  } catch {
-    if (request === policyRequest) policyError.value = true;
-  } finally {
-    if (request === policyRequest) policyLoading.value = false;
-  }
-}
-
-watch(policyContext, () => {
-  void loadPolicies();
-});
 
 function openBinding(scene = activeScene.value) {
   bindingScene.value = scene;
@@ -406,48 +303,13 @@ async function checkProvider() {
   }
 }
 
-async function allowPolicy() {
-  const value = policyContext.value;
-  if (
-    !value ||
-    !active.value.model ||
-    !active.value.provider ||
-    !canUpdatePolicy
-  )
-    return;
-  if (!/^[A-Z][A-Z0-9_.:-]{0,127}$/.test(value.generationType)) {
-    message.warning(
-      '业务用途标识应以大写字母开头，仅包含大写字母、数字及 _ . : -',
-    );
-    return;
-  }
-  policySaving.value = true;
-  try {
-    await updateFdmAiCompanyModelPolicy({
-      ...value,
-      modelId: active.value.model.id,
-      providerAccountId: active.value.provider.id,
-      enabled: true,
-    });
-    message.success('已保存所选公司、用途和数据级别的使用权限');
-    await loadPolicies();
-  } finally {
-    policySaving.value = false;
-  }
-}
-
 async function openTest() {
   if (!active.value.configured || !active.value.model) {
     openBinding();
     return;
   }
-  if (!policyContext.value) {
-    policyOpen.value = true;
-    return;
-  }
   const model = active.value.model;
   const testContext = {
-    ...policyContext.value,
     routeKey: activeScene.value.routeKey,
     capability: activeScene.value.capability,
   };
@@ -495,7 +357,6 @@ watch(
   },
 );
 onMounted(async () => {
-  void loadCompanies();
   await load();
   await consumeImportQuery();
 });
@@ -662,14 +523,6 @@ onMounted(async () => {
                 </button>
               </div>
               <div>
-                <ShieldIcon /><span>公司使用权限</span><button
-                  :class="{ good: policyAllowed && !policyLoading }"
-                  @click="policyOpen = true"
-                >
-                  {{ policyLabel }}
-                </button>
-              </div>
-              <div>
                 <CheckIcon /><span>模型验证</span><span
                   class="status-tag"
                   :class="{
@@ -708,12 +561,12 @@ onMounted(async () => {
                 @click="openTest"
               >
                 {{
-                  active.configured && policyContext
+                  active.configured
                     ? '测试当前模型'
                     : '完成配置并测试'
                 }}
               </Button>
-              <p>配置默认模型后，在创作中按实际任务验证权限</p>
+              <p>配置默认模型后，可直接测试连通性与输出效果</p>
             </div>
           </aside>
         </div>
@@ -820,93 +673,10 @@ onMounted(async () => {
         </Form.Item>
       </Form>
       <p class="modal-help">
-        模型绑定和公司使用权限分别管理；保存场景不会自动授予公司权限。已有模型未显示时，请检查模型、服务商和来源路由是否已启用，以及生效范围是否一致。
+        已有模型未显示时，请检查模型、服务商和来源路由是否已启用，以及生效范围是否一致。
       </p>
     </Modal>
 
-    <Modal
-      v-model:open="policyOpen"
-      title="公司使用权限"
-      :width="580"
-      :footer="null"
-    >
-      <p class="modal-help">
-        选择本次测试所属公司与数据级别。使用权限只适用于指定用途、模型和服务商组合。
-      </p>
-      <Form layout="vertical">
-        <Form.Item label="所属公司" required>
-          <Select
-            v-model:value="context.companyId"
-            allow-clear
-            show-search
-            option-filter-prop="label"
-            :options="companyOptions"
-            placeholder="选择实际使用模型的公司"
-          />
-</Form.Item><Alert
-          v-if="companyLoadError"
-          type="warning"
-          message="公司列表读取失败，请重试"
-        >
-          <template #action>
-            <Button size="small" @click="loadCompanies">重试</Button>
-          </template>
-</Alert><Form.Item label="数据级别" required>
-          <Select
-            v-model:value="context.sensitivityLevel"
-            :options="sensitivityOptions"
-          />
-</Form.Item><Form.Item label="业务用途">
-          <span>{{ activeScene.title }}</span><Collapse ghost>
-            <Collapse.Panel key="purpose" header="高级：匹配已有业务用途标识">
-              <Input
-                v-model:value="generationTypes[activeScene.id]"
-                placeholder="与业务调用使用的用途标识一致"
-              />
-            </Collapse.Panel>
-          </Collapse>
-        </Form.Item>
-      </Form>
-      <div class="policy-summary">
-        <span>{{ active.model?.name || '尚未选择模型' }} ·
-          {{ active.provider?.name || '未配置来源' }}</span><Tag :color="policyAllowed ? 'green' : 'default'">
-          {{ policyLabel }}
-        </Tag>
-      </div>
-      <Alert
-        v-if="!canQueryPolicy"
-        message="没有公司策略查询权限，请联系管理员确认使用权限。"
-        type="info"
-        show-icon
-      />
-      <Alert
-        v-else-if="policyError"
-        message="权限查询失败，当前不能确认是否已允许使用。"
-        type="warning"
-        show-icon
-      />
-      <div class="policy-actions">
-        <Button @click="policyOpen = false">完成</Button><Popconfirm
-          v-if="canUpdatePolicy && !policyAllowed"
-          title="允许所选公司在此用途和数据级别下使用该模型与服务商？"
-          ok-text="确认允许"
-          @confirm="allowPolicy"
-        >
-          <Button
-            type="primary"
-            :loading="policySaving"
-            :disabled="
-              !policyContext ||
-              !active.configured ||
-              policyLoading ||
-              policyError
-            "
-          >
-            允许此公司使用
-          </Button>
-        </Popconfirm>
-      </div>
-    </Modal>
   </Page>
 </template>
 
@@ -1272,19 +1042,6 @@ h2 {
 }
 .binding-scope {
   margin-top: 18px;
-}
-.policy-summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 15px 0;
-  border-top: 1px solid hsl(var(--border));
-}
-.policy-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
 }
 :global(.dark) .scene-row.selected,
 :global(.dark) .candidate.chosen {

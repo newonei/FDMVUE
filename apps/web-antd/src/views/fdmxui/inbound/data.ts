@@ -129,5 +129,11 @@ export function useGridColumns(): VxeTableGridOptions<FdmxuiInboundApi.Inbound>[
       minWidth: 160,
       formatter: 'formatDateTime',
     },
+    {
+      title: '操作',
+      width: 120,
+      fixed: 'right',
+      slots: { default: 'actions' },
+    },
   ];
 }

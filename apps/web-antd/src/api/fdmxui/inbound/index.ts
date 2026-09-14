@@ -39,3 +39,11 @@ export function getSimpleFdmxuiInboundList(panelId: number) {
 export function syncFdmxuiInbound(panelId: number) {
   return requestClient.post<number>(`/fdmxui/inbound/sync?panelId=${panelId}`);
 }
+
+export function cleanupFdmxuiInbound(panelId: number) {
+  return requestClient.post<number>(`/fdmxui/inbound/cleanup?panelId=${panelId}`);
+}
+
+export function deleteFdmxuiInbound(id: number) {
+  return requestClient.delete<boolean>(`/fdmxui/inbound/delete?id=${id}`);
+}

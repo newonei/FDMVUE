@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../../tsconfig.json",
+  "include": ["../../api/fdmplatform/**/*.ts", "./**/*.ts", "./**/*.vue"],
+  "exclude": ["./**/*.test.ts"]
+}
