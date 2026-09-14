@@ -3,6 +3,26 @@ import type { PageParam, PageResult } from '@vben/request';
 import { requestClient } from '#/api/request';
 
 export namespace FdmAiApi {
+  export type SensitivityLevel =
+    | 'CONFIDENTIAL'
+    | 'INTERNAL'
+    | 'PUBLIC'
+    | 'RESTRICTED';
+
+  export interface PolicyContext {
+    companyId: number;
+    generationType: string;
+    sensitivityLevel: SensitivityLevel;
+  }
+
+  export interface CompanyModelPolicy extends PolicyContext {
+    id?: number;
+    modelId: number;
+    providerAccountId: number;
+    enabled: boolean;
+    policyVersion?: number;
+  }
+
   export type Modality =
     | 'AUDIO'
     | 'EMBEDDING'
@@ -173,6 +193,9 @@ export namespace FdmAiApi {
   }
 
   export interface ModelQuery {
+    companyId?: number;
+    generationType?: string;
+    sensitivityLevel?: SensitivityLevel;
     modality?: Modality;
     requiredCapabilities?: Capability[];
     routeKey?: string;
@@ -261,6 +284,9 @@ export namespace FdmAiApi {
   }
 
   export interface InvocationSubmitReq {
+    companyId?: number;
+    generationType?: string;
+    sensitivityLevel?: SensitivityLevel;
     additionalRequiredCapabilities?: Capability[];
     businessId: string;
     businessType: string;
@@ -269,7 +295,7 @@ export namespace FdmAiApi {
     commonParameters: Record<string, unknown>;
     idempotencyKey: string;
     input: InvocationInput;
-    logicalModelId: number;
+    logicalModelId?: number;
     maxCost?: NumericValue;
     modality: Modality;
     providerOptions: Record<string, unknown>;
@@ -487,5 +513,21 @@ export function searchFdmAiModels(data: FdmAiApi.ModelQuery) {
 export function getFdmAiModelCapabilities(id: number) {
   return requestClient.get<FdmAiApi.ModelCapabilities>(
     `/fdmai/catalog/models/${id}/capabilities`,
+  );
+}
+
+export function getFdmAiCompanyModelPolicies(params: FdmAiApi.PolicyContext) {
+  return requestClient.get<FdmAiApi.CompanyModelPolicy[]>(
+    '/fdmai/company-model-policies',
+    { params },
+  );
+}
+
+export function updateFdmAiCompanyModelPolicy(
+  data: FdmAiApi.CompanyModelPolicy,
+) {
+  return requestClient.put<FdmAiApi.CompanyModelPolicy>(
+    '/fdmai/company-model-policies',
+    data,
   );
 }

@@ -4,6 +4,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import type { FdmAiApi } from '#/api/fdmai';
 
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 
@@ -99,6 +100,11 @@ const PRESETS: ProviderPreset[] = [
 
 const { hasAccessByCodes } = useAccess();
 const canManagePlatform = hasAccessByCodes(['fdmai:platform:manage']);
+const canImportModels =
+  canManagePlatform &&
+  hasAccessByCodes(['fdmai:model:create']) &&
+  hasAccessByCodes(['fdmai:route:create']);
+const router = useRouter();
 const loading = ref(false);
 const saving = ref(false);
 const probing = ref(false);
@@ -138,7 +144,7 @@ const columns: TableColumnsType<FdmAiApi.ProviderAccount> = [
   { dataIndex: 'credentialMask', title: 'API Key', width: 150 },
   { dataIndex: 'platform', title: '范围', width: 90 },
   { dataIndex: 'enabled', title: '状态', width: 90 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 280 },
+  { dataIndex: 'action', fixed: 'right', title: '操作', width: 420 },
 ];
 const discoveryColumns: TableColumnsType<FdmAiApi.ProviderModelInfo> = [
   { dataIndex: 'id', title: '模型标识' },
@@ -347,6 +353,17 @@ function showDiscoveredModels(
   discoveryOpen.value = true;
 }
 
+async function selectProviderModels(record: unknown) {
+  if (!canImportModels) return;
+  const provider = record as FdmAiApi.ProviderAccount | undefined;
+  if (!provider?.id) return;
+  await router.push({
+    path: '/fdmai/models',
+    query: { import: '1', providerAccountId: String(provider.id) },
+  });
+  discoveryOpen.value = false;
+}
+
 async function testSavedProvider(
   record: unknown,
   discoverAfterSuccess = false,
@@ -408,13 +425,29 @@ async function syncModels(record: unknown, showSuccess = true) {
   }
 }
 
+async function retire(record: unknown) {
+  const provider = record as FdmAiApi.ProviderAccount;
+  if (mutatingId.value != null) return;
+  mutatingId.value = provider.id;
+  mutationAction.value = 'retire';
+  try {
+    await retireFdmAiProvider(provider.id, provider.platform);
+    message.success('服务商账号已下线，可编辑后重新启用，也可删除');
+    await load();
+  } finally {
+    mutatingId.value = undefined;
+    mutationAction.value = undefined;
+  }
+}
+
 async function enable(record: unknown) {
   const provider = record as FdmAiApi.ProviderAccount;
   if (mutatingId.value != null || provider.enabled) return;
   mutatingId.value = provider.id;
   mutationAction.value = 'enable';
   try {
-    // An omitted credential tells the backend to retain the stored API Key.
+    // Updating without a credential keeps the encrypted API Key on the server;
+    // only the lifecycle flag changes when a retired account is restored.
     await updateFdmAiProvider(provider.id, {
       adapterCode: provider.adapterCode,
       baseUrl: provider.baseUrl,
@@ -424,21 +457,6 @@ async function enable(record: unknown) {
       platform: provider.platform,
     });
     message.success('服务商账号已重新启用');
-    await load();
-  } finally {
-    mutatingId.value = undefined;
-    mutationAction.value = undefined;
-  }
-}
-
-async function retire(record: unknown) {
-  const provider = record as FdmAiApi.ProviderAccount;
-  if (mutatingId.value != null) return;
-  mutatingId.value = provider.id;
-  mutationAction.value = 'retire';
-  try {
-    await retireFdmAiProvider(provider.id, provider.platform);
-    message.success('服务商账号已下线，可编辑后重新启用，也可删除');
     await load();
   } finally {
     mutatingId.value = undefined;
@@ -495,7 +513,7 @@ onMounted(load);
       :data-source="rows"
       :loading="loading"
       row-key="id"
-      :scroll="{ x: 1180 }"
+      :scroll="{ x: 1320 }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'adapterCode'">
@@ -525,7 +543,7 @@ onMounted(load);
           </Tag>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
-          <Space :size="4">
+          <Space :size="4" wrap>
             <Button
               v-access:code="['fdmai:provider:test']"
               :loading="testingId === record.id"
@@ -543,6 +561,15 @@ onMounted(load);
               @click="syncModels(record)"
             >
               拉取模型
+            </Button>
+            <Button
+              v-if="canImportModels"
+              :disabled="!record.enabled"
+              size="small"
+              type="link"
+              @click="selectProviderModels(record)"
+            >
+              接入模型
             </Button>
             <Button
               v-access:code="['fdmai:provider:update']"
@@ -754,7 +781,6 @@ onMounted(load);
 
     <Modal
       v-model:open="discoveryOpen"
-      :footer="null"
       :title="`${discoveredProvider?.name || '服务商'} · 模型目录`"
       :width="760"
     >
@@ -762,8 +788,8 @@ onMounted(load);
         class="discovery-alert"
         :message="
           discoveredModels.length
-            ? `已发现 ${discoveredModels.length} 个模型，可前往“模型管理”选择并导入。`
-            : '连接正常，但该服务商没有返回可发现的模型；可以在模型管理中手动填写模型 ID。'
+            ? `已发现 ${discoveredModels.length} 个模型，在模型中心选择要接入的模型后即可使用。`
+            : '该服务商没有返回可发现的模型，可以前往模型中心查看接入方式。'
         "
         show-icon
         :type="discoveredModels.length ? 'success' : 'warning'"
@@ -775,6 +801,17 @@ onMounted(load);
         row-key="id"
         size="small"
       />
+      <template #footer>
+        <Button @click="discoveryOpen = false">关闭</Button>
+        <Button
+          v-if="canImportModels"
+          :disabled="!discoveredProvider?.enabled"
+          type="primary"
+          @click="selectProviderModels(discoveredProvider)"
+        >
+          选择要接入的模型
+        </Button>
+      </template>
     </Modal>
   </AiCenterShell>
 </template>
