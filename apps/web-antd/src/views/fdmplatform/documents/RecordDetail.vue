@@ -404,8 +404,8 @@ const related = computed<DocumentKind[]>(
   >
     <template #extra>
       <Button :loading="loading" :disabled="childOpen" @click="load">
-刷新当前单据
-</Button>
+        刷新当前单据
+      </Button>
 </template><Spin v-if="loading" /><Alert
       v-if="pageError"
       :message="pageError"

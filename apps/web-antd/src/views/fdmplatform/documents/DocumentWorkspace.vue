@@ -460,8 +460,8 @@ onMounted(async () => {
               </Button>
               <div class="fdm-cell-line">
                 <Tag v-if="record.migration?.sourceSystem === 'JINZHI'">
-金智
-</Tag>
+                  金智
+                </Tag>
                 <RelatedLink
                   :style="{
                     maxWidth:

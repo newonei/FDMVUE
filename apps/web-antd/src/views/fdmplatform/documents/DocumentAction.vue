@@ -354,10 +354,10 @@ async function execute(input: Record<string, unknown>, key: string) {
       show-icon
     /><Space v-if="!loading">
       <Button @click="close">关闭</Button><Button v-if="lockedContractId" @click="prepare(lockedContractId)">
-重试当前合同
+        重试当前合同
 </Button><Button v-if="!lockContract" @click="pickerOpen = true">
-重新选择合同
-</Button>
+        重新选择合同
+      </Button>
     </Space>
 </Modal><ActionDialog
     :open="open && actionOpen"
