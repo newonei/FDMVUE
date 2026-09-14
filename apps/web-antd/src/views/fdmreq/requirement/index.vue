@@ -33,7 +33,6 @@ const statusFilter = ref<string | undefined>();
 const createOpen = ref(false);
 const creating = ref(false);
 const form = reactive({
-  reqNo: '',
   title: '',
   rawDescription: '',
   submitterId: '',
@@ -65,29 +64,30 @@ function openDetail(reqNo: string) {
 }
 
 function resetForm() {
-  form.reqNo = '';
   form.title = '';
   form.rawDescription = '';
   form.submitterId = '';
 }
 
 async function submitCreate() {
-  if (!form.reqNo.trim() || !form.title.trim() || !form.rawDescription.trim()) {
-    message.warning('编号、标题、原始描述必填');
+  if (!form.title.trim() || !form.rawDescription.trim()) {
+    message.warning('标题、原始描述必填（编号由系统自动生成）');
     return;
   }
   creating.value = true;
   try {
-    await createRequirement({
-      reqNo: form.reqNo.trim(),
+    const created = await createRequirement({
       title: form.title.trim(),
       rawDescription: form.rawDescription,
       submitterId: form.submitterId.trim() || undefined,
     });
-    message.success('已创建需求');
+    message.success(`已创建需求 ${created?.reqNo ?? ''}`.trim());
     createOpen.value = false;
     resetForm();
     await load();
+    if (created?.reqNo) {
+      openDetail(created.reqNo);
+    }
   } finally {
     creating.value = false;
   }
@@ -142,9 +142,8 @@ onMounted(load);
       @cancel="resetForm"
     >
       <Form layout="vertical">
-        <FormItem label="需求编号" required>
-          <Input v-model:value="form.reqNo" placeholder="REQ-YYYYMMDD-NN" />
-        </FormItem>
+
+        <FormItem label="需求编号"><span class="text-muted-foreground text-sm">系统自动生成（REQ-yyyyMMdd-NN，上海时区）</span></FormItem>
         <FormItem label="标题" required>
           <Input v-model:value="form.title" />
         </FormItem>

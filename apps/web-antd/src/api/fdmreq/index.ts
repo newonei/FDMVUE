@@ -85,7 +85,8 @@ export namespace FdmReqApi {
   }
 
   export interface CreateRequirementParams {
-    reqNo: string;
+    /** @deprecated ignored; server auto-generates REQ-yyyyMMdd-NN */
+    reqNo?: string;
     title: string;
     rawDescription: string;
     submitterId?: string;
