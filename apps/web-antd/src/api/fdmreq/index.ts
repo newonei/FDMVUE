@@ -9,6 +9,7 @@ export type FdmReqStatus =
   | 'TESTING'
   | 'PUSHED_CHECKING'
   | 'PENDING_ACCEPTANCE'
+  | 'COMPLETED'
   | 'ACCEPTED'
   | 'BLOCKED'
   | 'CANCELLED';
@@ -102,6 +103,12 @@ export namespace FdmReqApi {
     createdBy?: string;
   }
 
+  export interface WriteProposalParams {
+    contentJson?: string;
+    proposalText?: string;
+    createdBy?: string;
+  }
+
   export interface ApproveParams {
     versionId: number;
     approverId?: string;
@@ -132,6 +139,16 @@ export namespace FdmReqApi {
     skippedReason?: string;
     evidenceJson?: string;
     residualRisk?: string;
+  }
+
+  export interface CompleteResult {
+    requirement: Requirement;
+    merge?: {
+      success?: boolean;
+      alreadyMerged?: boolean;
+      skipped?: boolean;
+      message?: string;
+    };
   }
 }
 
@@ -177,10 +194,29 @@ export function createRequirementVersion(
   );
 }
 
+export function writeProposal(reqNo: string, data: FdmReqApi.WriteProposalParams) {
+  return requestClient.post<FdmReqApi.RequirementVersion>(
+    `/fdmreq/bot/requirements/${encodeURIComponent(reqNo)}/proposal`,
+    data,
+  );
+}
+
 export function approveRequirement(reqNo: string, data: FdmReqApi.ApproveParams) {
   return requestClient.post<FdmReqApi.Approval>(
     `/fdmreq/requirements/${encodeURIComponent(reqNo)}/approve`,
     data,
+  );
+}
+
+export function startDev(reqNo: string) {
+  return requestClient.post<FdmReqApi.Approval>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/start-dev`,
+  );
+}
+
+export function completeRequirement(reqNo: string) {
+  return requestClient.post<FdmReqApi.CompleteResult>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/complete`,
   );
 }
 
