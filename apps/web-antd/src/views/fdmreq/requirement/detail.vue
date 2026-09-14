@@ -5,6 +5,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+import { useAccess } from '@vben/access';
 import { useUserStore } from '@vben/stores';
 
 import {
@@ -35,6 +36,10 @@ defineOptions({ name: 'FdmReqRequirementDetail' });
 const route = useRoute();
 const router = useRouter();
 const userStore = useUserStore();
+const { hasAccessByCodes } = useAccess();
+const canApprove = computed(() =>
+  hasAccessByCodes(['fdmreq:requirement:approve']),
+);
 
 const reqNo = computed(() => String(route.query.reqNo || ''));
 const loading = ref(false);
@@ -101,6 +106,10 @@ async function submitVersion() {
 }
 
 async function submitApprove() {
+  if (!canApprove.value) {
+    message.error('无确认授权权限（需要 fdmreq:requirement:approve 或超管）');
+    return;
+  }
   if (!approveForm.versionId) {
     message.warning('请先有版本');
     return;
@@ -152,7 +161,7 @@ onMounted(load);
       </Space>
       <Space>
         <Button @click="versionOpen = true">新建整理版本</Button>
-        <Button type="primary" @click="approveOpen = true">确认需求并授权开发</Button>
+        <Button v-if="canApprove" type="primary" @click="approveOpen = true">确认需求并授权开发</Button>
         <Button @click="taskOpen = true">创建开发任务</Button>
       </Space>
     </div>
