@@ -105,6 +105,7 @@ const modalOpen = ref(false);
 const discoveryOpen = ref(false);
 const testingId = ref<number>();
 const syncingId = ref<number>();
+const enablingId = ref<number>();
 const rows = ref<FdmAiApi.ProviderAccount[]>([]);
 const adapters = ref<FdmAiApi.AdapterDescriptor[]>([]);
 const editingId = ref<number>();
@@ -405,6 +406,27 @@ async function syncModels(record: unknown, showSuccess = true) {
   }
 }
 
+async function enable(record: unknown) {
+  const provider = record as FdmAiApi.ProviderAccount;
+  if (enablingId.value != null || provider.enabled) return;
+  enablingId.value = provider.id;
+  try {
+    // An omitted credential tells the backend to retain the stored API Key.
+    await updateFdmAiProvider(provider.id, {
+      adapterCode: provider.adapterCode,
+      baseUrl: provider.baseUrl,
+      configuration: provider.configuration ?? {},
+      enabled: true,
+      name: provider.name,
+      platform: provider.platform,
+    });
+    message.success('服务商账号已重新启用');
+    await load();
+  } finally {
+    enablingId.value = undefined;
+  }
+}
+
 async function remove(record: unknown) {
   const provider = record as FdmAiApi.ProviderAccount;
   await deleteFdmAiProvider(provider.id, provider.platform);
@@ -498,6 +520,22 @@ onMounted(load);
             >
               编辑
             </Button>
+            <Popconfirm
+              v-if="!record.enabled"
+              :title="`确认重新启用服务商「${record.name}」？`"
+              description="启用后将恢复该服务商用于新的模型调用，历史调用和用量记录保持不变。"
+              @confirm="enable(record)"
+            >
+              <Button
+                v-access:code="['fdmai:provider:update']"
+                :disabled="enablingId != null"
+                :loading="enablingId === record.id"
+                size="small"
+                type="link"
+              >
+                重新启用
+              </Button>
+            </Popconfirm>
             <Popconfirm
               title="确认下线该服务商账号？历史调用仍会保留。"
               @confirm="remove(record)"
