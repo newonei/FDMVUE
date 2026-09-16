@@ -540,7 +540,8 @@ describe('embedded customs child', () => {
     click(host, '新建报关批次');
     await settle();
     expect(
-      host.querySelector('[data-customs-editor="contract-a"]')?.dataset.locked,
+      host.querySelector<HTMLElement>('[data-customs-editor="contract-a"]')
+        ?.dataset.locked,
     ).toBe('true');
     expect(busy).toHaveBeenLastCalledWith(true);
     click(host, '关闭报关编辑');

@@ -437,7 +437,7 @@ function click(host: HTMLElement, text: string) {
   button!.click();
 }
 function action(host: HTMLElement) {
-  return host.querySelector('[data-action]');
+  return host.querySelector<HTMLElement>('[data-action]');
 }
 
 describe('contract document dialog entry points', () => {
@@ -470,11 +470,15 @@ describe('contract document dialog entry points', () => {
         keyword: undefined,
         assignmentStatus: undefined,
       });
-      if (expectedAction) {
-        expect(action(view.host)?.dataset.action).toBe(expectedAction);
-        expect(action(view.host)?.dataset.contract).toBe('contract-a');
-        expect(action(view.host)?.dataset.locked).toBe('true');
-      } else expect(action(view.host)).toBeNull();
+      const actionElement = action(view.host);
+      expect(actionElement === null).toBe(!expectedAction);
+      expect(actionElement?.dataset.action).toBe(expectedAction);
+      expect(actionElement?.dataset.contract).toBe(
+        expectedAction ? 'contract-a' : undefined,
+      );
+      expect(actionElement?.dataset.locked).toBe(
+        expectedAction ? 'true' : undefined,
+      );
       expect(view.router.currentRoute.value.fullPath).toBe(view.route);
       expect(view.host.textContent).toContain('HT-contract-a');
     },
@@ -483,8 +487,9 @@ describe('contract document dialog entry points', () => {
   it('opens customs in place, locks closing during editing and refreshes the parent after a change', async () => {
     const view = await mount('customs');
     expect(
-      view.host.querySelector('[data-customs-contract="contract-a"]')?.dataset
-        .embedded,
+      view.host.querySelector<HTMLElement>(
+        '[data-customs-contract="contract-a"]',
+      )?.dataset.embedded,
     ).toBe('true');
     expect(mocks.page).not.toHaveBeenCalled();
     expect(action(view.host)).toBeNull();
@@ -521,7 +526,8 @@ describe('contract document dialog interactions and request lifecycle', () => {
       view.host.querySelector('[data-record-id="unassigned-request"]'),
     ).not.toBeNull();
     expect(
-      view.host.querySelector('[data-active-tab]')?.dataset.activeTab,
+      view.host.querySelector<HTMLElement>('[data-active-tab]')?.dataset
+        .activeTab,
     ).toBe('intake');
     click(view.host, '接单 / 分派');
     await settle();
@@ -591,8 +597,9 @@ describe('contract document dialog interactions and request lifecycle', () => {
     click(view.host, '接单 / 分派');
     await settle();
     expect(
-      view.host.querySelector('[data-standalone-id="native-request-id"]')
-        ?.dataset.embedded,
+      view.host.querySelector<HTMLElement>(
+        '[data-standalone-id="native-request-id"]',
+      )?.dataset.embedded,
     ).toBe('true');
     expect(action(view.host)).toBeNull();
     expect(view.host.querySelector('[data-detail-id]')).toBeNull();
@@ -615,7 +622,9 @@ describe('contract document dialog interactions and request lifecycle', () => {
     expect(
       view.host.querySelector('[data-record-id="stale-intake-request"]'),
     ).toBeNull();
-    expect(view.host.querySelector('[data-total]')?.dataset.total).toBe('1');
+    expect(
+      view.host.querySelector<HTMLElement>('[data-total]')?.dataset.total,
+    ).toBe('1');
   });
 
   it('keeps filtering and pagination scoped to this contract and resets the page when searching', async () => {
@@ -709,7 +718,9 @@ describe('contract document dialog interactions and request lifecycle', () => {
     pending.resolve({ list: [row('stale-row')], total: 99 });
     await settle();
     expect(view.host.querySelector('[data-record-id="stale-row"]')).toBeNull();
-    expect(view.host.querySelector('[data-total]')?.dataset.total).toBe('1');
+    expect(
+      view.host.querySelector<HTMLElement>('[data-total]')?.dataset.total,
+    ).toBe('1');
     expect(view.host.textContent).toContain('HT-contract-b');
     expect(view.updated).not.toHaveBeenCalled();
   });
@@ -768,8 +779,8 @@ describe('contract document dialog interactions and request lifecycle', () => {
     click(view.host, '单据-native-row');
     await settle();
     expect(
-      view.host.querySelector('[data-standalone-id="native-id"]')?.dataset
-        .embedded,
+      view.host.querySelector<HTMLElement>('[data-standalone-id="native-id"]')
+        ?.dataset.embedded,
     ).toBe('true');
     expect(view.host.querySelector('[data-detail-id]')).toBeNull();
     click(view.host, '关闭原生单据');
@@ -792,8 +803,8 @@ describe('contract document dialog interactions and request lifecycle', () => {
     click(view.host, '单据-existing-order');
     await settle();
     expect(
-      view.host.querySelector('[data-detail-id="existing-order"]')?.dataset
-        .embedded,
+      view.host.querySelector<HTMLElement>('[data-detail-id="existing-order"]')
+        ?.dataset.embedded,
     ).toBe('true');
     click(view.host, '办理关联到货');
     await settle();
