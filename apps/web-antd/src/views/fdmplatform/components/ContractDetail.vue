@@ -146,7 +146,7 @@ const stages = computed(() => [
   ...contractRelatedStages(related.value, props.contract),
   {
     name: '产品交付',
-    value: `${progress.value.filter((item) => item.deliveryComplete).length} / ${progress.value.length} 项完成`,
+    value: `${progress.value.filter((item) => item.deliveryComplete).length} / ${progress.value.length} 项完成（${progress.value.filter((item) => !item.quantityProgressKnown).length} 项数量待核对）`,
     description: '原已发货量与后续已匹配发货明细合计',
   },
   {
@@ -182,6 +182,7 @@ async function loadSummary() {
   customsError.value = '';
   relatedError.value = '';
   related.value = undefined;
+  customs.value = undefined;
   const [customsResult, relatedResult] = await Promise.allSettled([
     getCustomsSummary(id),
     getContractRelatedSummary(id),
@@ -391,12 +392,13 @@ async function download(file: { id: string; name: string }) {
                 'unitPrice|销售单价',
                 'requiredDate|交期',
                 'requestedQuantity|已匹配申请数量',
+                'remainingRequestQuantity|未匹配申请数量（参考）',
                 'shippedQuantity|净发货数量',
               )
             "
           />
           <p class="navigation-note">
-            产品数量按已匹配的单据明细统计；尚未匹配产品行的单据仍计入流程页的关联总数。
+            数量仅统计当前合同快照中已匹配的明细；未匹配或独立单据仍计入关联总数。未匹配申请数量仅供参考，不是全量可采购额度，不作为自动下单或结案依据。数量缺失时保持待核对，不按零判定完成。
           </p>
           <Card
             v-if="standardFiles.length"

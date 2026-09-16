@@ -6,38 +6,70 @@ import BigNumber from 'bignumber.js';
 import { rows } from '../data';
 import { nativeMoney } from '../documents/migration-display';
 import { shipmentKind } from '../documents/model';
+import {
+  invoiceFinanceDescription,
+  receiptFinanceDescription,
+  receiptStatusDescription,
+} from './finance-progress';
 
-function decimal(value: unknown) {
-  const number = new BigNumber(String(value ?? 0));
-  return number.isFinite() ? number : new BigNumber(0);
+function decimal(value: unknown): BigNumber | undefined {
+  if (
+    (typeof value !== 'string' && typeof value !== 'number') ||
+    String(value).trim() === ''
+  )
+    return undefined;
+  const number = new BigNumber(String(value));
+  return number.isFinite() && !number.isNegative() ? number : undefined;
 }
-function text(value: BigNumber) {
-  return value.toFixed(value.decimalPlaces() ?? 0);
+function text(value: BigNumber | undefined) {
+  return value?.toFixed(value.decimalPlaces() ?? 0);
 }
 export function contractItemProgress(contract: Contract | undefined) {
   return (contract?.items ?? []).map((item) => {
+    const quantity = decimal(item.quantity);
     let requested = new BigNumber(0);
+    let requestsKnown = Array.isArray(contract?.requests);
     for (const request of contract?.requests ?? []) {
       if (request.status === 'CANCELLED') continue;
+      if (request.status !== 'ACTIVE') requestsKnown = false;
+      if (!Array.isArray(request.items)) requestsKnown = false;
       for (const line of rows(request.items)) {
-        if (line.contractItemId === item.id)
-          requested = requested.plus(decimal(line.quantity));
+        if (line.contractItemId !== item.id) continue;
+        const value = decimal(line.quantity);
+        if (!value || value.isZero()) requestsKnown = false;
+        else requested = requested.plus(value);
       }
     }
-    let shipped = decimal(item.openingShippedQuantity);
+    // Missing opening balance is the existing zero default; an explicit invalid value is unknown.
+    let shipped = decimal(
+      item.openingShippedQuantity === undefined
+        ? 0
+        : item.openingShippedQuantity,
+    );
+    let shipmentsKnown = Array.isArray(contract?.shipments);
     for (const shipment of contract?.shipments ?? []) {
       if (shipment.contractItemId !== item.id) continue;
-      shipped = shipped.plus(
-        decimal(shipment.quantity).multipliedBy(
-          shipmentKind(shipment) === 'RETURN' ? -1 : 1,
-        ),
-      );
+      const value = decimal(shipment.quantity);
+      if (!value || value.isZero()) shipmentsKnown = false;
+      else if (shipped)
+        shipped = shipped.plus(
+          value.multipliedBy(shipmentKind(shipment) === 'RETURN' ? -1 : 1),
+        );
     }
+    if (!shipmentsKnown || shipped?.isNegative()) shipped = undefined;
+    const ordered = quantity?.isGreaterThan(0) ? quantity : undefined;
+    const remaining =
+      ordered && requestsKnown
+        ? BigNumber.maximum(ordered.minus(requested), 0)
+        : undefined;
     return {
       ...item,
-      requestedQuantity: text(requested),
+      requestedQuantity: requestsKnown ? text(requested) : undefined,
+      remainingRequestQuantity: text(remaining),
       shippedQuantity: text(shipped),
-      deliveryComplete: shipped.isGreaterThanOrEqualTo(decimal(item.quantity)),
+      quantityProgressKnown: !!ordered && !!shipped,
+      deliveryComplete:
+        !!ordered && !!shipped && shipped.isGreaterThanOrEqualTo(ordered),
     };
   });
 }
@@ -64,13 +96,21 @@ export function contractRelatedStages(
     },
     {
       name: '关联回款',
-      value: summary ? `${summary.receipts.total} 笔` : '暂未读取',
-      description: `已入账确认金额：${nativeMoney(contract?.financeSummary?.confirmedReceipts, contract?.currency)}`,
+      value: summary
+        ? summary.receipts.statusBreakdownAvailable === false
+          ? '未读取或当前不可见'
+          : `${summary.receipts.total} 笔`
+        : '暂未读取',
+      description: `${receiptStatusDescription(summary?.receipts)}；${receiptFinanceDescription(contract?.financeSummary, contract?.currency, nativeMoney)}`,
     },
     {
       name: '关联发票',
       value: summary ? `${summary.invoices.total} 份` : '暂未读取',
-      description: `已入账有效金额：${nativeMoney(contract?.financeSummary?.effectiveInvoices, contract?.currency)}`,
+      description: invoiceFinanceDescription(
+        contract?.financeSummary,
+        contract?.currency,
+        nativeMoney,
+      ),
     },
   ];
 }

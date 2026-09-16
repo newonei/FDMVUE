@@ -32,7 +32,7 @@ describe('unified contract progress', () => {
     );
     expect(stages.find((stage) => stage.name === '关联回款')).toMatchObject({
       value: '5 笔',
-      description: '已入账确认金额：未提供（币种待核对）',
+      description: expect.stringContaining('已确认净回款：未读取或当前不可见'),
     });
   });
   it('never displays a failed or pending summary load as zero records', () => {
@@ -61,6 +61,7 @@ describe('unified contract progress', () => {
   it('counts only current mapped noncancelled request quantities without borrowing independent quantities', () => {
     const contract = {
       items: [{ id: 'i', quantity: 5 }],
+      shipments: [],
       requests: [
         {
           id: 'r',
