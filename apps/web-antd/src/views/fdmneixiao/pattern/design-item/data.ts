@@ -187,9 +187,8 @@ export function useFormSchema(
       component: 'Input',
       componentProps: {
         allowClear: false,
-        disabled: true,
         maxlength: 64,
-        placeholder: '订单号不允许修改',
+        placeholder: '请输入订单号',
       },
       rules: 'required',
     },
