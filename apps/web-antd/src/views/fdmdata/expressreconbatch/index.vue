@@ -9,7 +9,7 @@ import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, message } from 'ant-design-vue';
+import { Alert, Button, message, Tag } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -21,7 +21,7 @@ import {
 } from '#/api/fdmdata/expressreconbatch';
 import { $t } from '#/locales';
 
-import { useGridColumns, useGridFormSchema } from './data';
+import { BATCH_STATUS_OPTIONS, useGridColumns, useGridFormSchema } from './data';
 import ReconcileModal from './modules/reconcile-modal.vue';
 import ShopSummaryModal from './modules/shop-summary-modal.vue';
 
@@ -76,6 +76,9 @@ async function handleRecalculate(
 
 function handleViewDetail(row: FdmdataExpressReconBatchApi.ExpressReconBatch) {
   if (!row.id) return;
+  if (row.status === 'NEEDS_RECALC') {
+    message.warning('该批次展示的是订单池变更前的历史结果，请重新计算后用于对账或汇总。');
+  }
   router.push({
     path: '/fdmdata/express-recon/detail',
     query: { batchId: row.id },
@@ -114,6 +117,12 @@ function startPollImportBatch(batchId: number) {
       if (batch.status === 'RECONCILED') {
         stopPollImportBatch(batchId);
         message.success(`对账完成：${batch.batchNo}`);
+        return;
+      }
+
+      if (batch.status === 'NEEDS_RECALC') {
+        stopPollImportBatch(batchId);
+        message.warning(batch.remark || `订单池已变化，请重算：${batch.batchNo}`);
         return;
       }
 
@@ -212,7 +221,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
         </div>
       </header>
 
+      <Alert
+        class="mb-3"
+        type="info"
+        show-icon
+        message="订单池更新后，相关历史批次会标为待重算；原金额保留，重算时使用当前计费规则。待重算批次不能参与店铺汇总。"
+      />
       <Grid table-title="对账批次">
+        <template #status="{ row }">
+          <Tag :color="row.status === 'NEEDS_RECALC' ? 'warning' : row.status === 'RECONCILED' ? 'success' : row.status === 'FAILED' ? 'error' : 'processing'">
+            {{ BATCH_STATUS_OPTIONS.find((option) => option.value === row.status)?.label ?? row.status }}
+          </Tag>
+        </template>
         <template #actions="{ row }">
           <TableAction
             :actions="[
@@ -225,6 +245,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
               },
               {
                 label: '重算',
+                disabled: row.status === 'IMPORTING',
                 type: 'link',
                 icon: 'lucide:refresh-cw',
                 auth: ['fdmdata:express-recon-batch:create'],
@@ -235,6 +256,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
               },
               {
                 label: $t('common.delete'),
+                disabled: row.status === 'IMPORTING',
                 type: 'link',
                 danger: true,
                 icon: ACTION_ICON.DELETE,

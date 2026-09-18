@@ -77,13 +77,14 @@ const PERFORMANCE_HR_CODES = ['fdmperformance:hr'];
 type ScoreRow = {
   indicator: JixiaoApi.InstanceIndicator;
   managerComment?: string;
-  managerScore?: number;
+  managerScore?: null | number;
   selfComment?: string;
-  selfScore?: number;
+  selfScore?: null | number;
   supervisorComment?: string;
-  supervisorScore?: number;
+  supervisorScore?: null | number;
 };
 const scoreRows = ref<ScoreRow[]>([]);
+const scorePanel = ref<HTMLDivElement>();
 
 type ProcessStepStatus = 'error' | 'finish' | 'process' | 'wait';
 
@@ -344,13 +345,29 @@ function scoreComment(row: ScoreRow, taskKey: string) {
   return row.supervisorComment;
 }
 
+function focusScoreInput(indicatorId?: number) {
+  if (indicatorId === undefined) return;
+  scorePanel.value
+    ?.querySelector<HTMLInputElement>(`#performance-score-${indicatorId}`)
+    ?.focus();
+}
+
 function validateScoreRows(taskKey: string) {
   for (const row of scoreRows.value) {
-    const score = Number(scoreValue(row, taskKey) ?? 0);
-    if (Number.isNaN(score) || score < 0 || score > SCORE_MAX) {
+    const value = scoreValue(row, taskKey);
+    if (value === null || value === undefined) {
+      message.warning(
+        `请填写「${row.indicator.name || '指标'}」评分，0 分需明确输入`,
+      );
+      focusScoreInput(row.indicator.id);
+      return false;
+    }
+    const score = Number(value);
+    if (!Number.isFinite(score) || score < 0 || score > SCORE_MAX) {
       message.warning(
         `${row.indicator.name || '指标'}评分必须在 0-${SCORE_MAX} 分之间`,
       );
+      focusScoreInput(row.indicator.id);
       return false;
     }
   }
@@ -486,7 +503,7 @@ async function submitScore() {
     return {
       comment: scoreComment(row, taskKey),
       instanceIndicatorId: row.indicator.id!,
-      score: Number(scoreValue(row, taskKey) || 0),
+      score: Number(scoreValue(row, taskKey)),
     };
   });
   submitting.value = true;
@@ -697,7 +714,7 @@ onMounted(load);
       </Descriptions>
     </div>
 
-    <div class="detail-panel">
+    <div ref="scorePanel" class="detail-panel">
       <Alert
         v-if="pendingActionPlanIndicators.length"
         class="action-alert"
@@ -755,10 +772,12 @@ onMounted(load);
             <InputNumber
               v-if="canEditSelfScore"
               v-model:value="record.selfScore"
+              :id="`performance-score-${record.indicator.id}`"
               :max="SCORE_MAX"
               :min="0"
               class="score-input"
               addon-after="分"
+              placeholder="必填，可填 0"
             />
             <span v-else>{{ record.selfScore ?? '-' }}</span>
           </template>
@@ -777,10 +796,12 @@ onMounted(load);
             <InputNumber
               v-if="canEditSupervisorScore"
               v-model:value="record.supervisorScore"
+              :id="`performance-score-${record.indicator.id}`"
               :max="SCORE_MAX"
               :min="0"
               class="score-input"
               addon-after="分"
+              placeholder="必填，可填 0"
             />
             <span v-else>{{ record.supervisorScore ?? '-' }}</span>
           </template>
@@ -799,10 +820,12 @@ onMounted(load);
             <InputNumber
               v-if="canEditManagerScore"
               v-model:value="record.managerScore"
+              :id="`performance-score-${record.indicator.id}`"
               :max="SCORE_MAX"
               :min="0"
               class="score-input"
               addon-after="分"
+              placeholder="必填，可填 0"
             />
             <span v-else>{{ record.managerScore ?? '-' }}</span>
           </template>

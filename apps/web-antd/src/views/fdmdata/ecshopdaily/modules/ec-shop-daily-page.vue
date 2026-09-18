@@ -4,10 +4,7 @@ import type { PageParam } from '@vben/request';
 import type { EcShopDailyOption } from '../data';
 
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type {
-  EcShopDailyPlatformDetailPageParams,
-  FdmdataEcShopDailyApi,
-} from '#/api/fdmdata/ecshopdaily';
+import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 
 import {
   computed,
@@ -40,7 +37,6 @@ import {
   DETAIL_FIELD_PREFIX,
   formatEcPlatformLabel,
   getEcShopDailyImportPlaceholder,
-  getDisplayMarketingCost,
   normalizeEcPlatformCode,
   useGridColumns,
   useGridFormSchema,
@@ -55,6 +51,11 @@ import EcShopDailyTaobaoDashboard from './ec-shop-daily-taobao-dashboard.vue';
 import EcShopDailyXhsDashboard from './ec-shop-daily-xhs-dashboard.vue';
 import Form from './form.vue';
 import JdImportModal from './jd-import-modal.vue';
+import {
+  createDailyRefreshQueue,
+  createDailySummaryCache,
+  loadDailyPage,
+} from './table-query';
 
 defineOptions({ name: 'EcShopDailyPage' });
 
@@ -122,7 +123,9 @@ const activeTab = ref<'dashboard' | 'table'>('dashboard');
 const exporting = ref(false);
 const summaryLoading = ref(false);
 const summaryRow = ref<FdmdataEcShopDailyApi.EcShopDaily | null>(null);
-const jdSummaryMarketingCost = ref<number | undefined>();
+const summaryCache = createDailySummaryCache(getEcShopDailyPageSummary);
+const refreshQueue = createDailyRefreshQueue(() => void gridApi.query());
+let tableQuerySeq = 0;
 
 const checkedIds = shallowRef<number[]>([]);
 const checkedCount = computed(() => checkedIds.value.length);
@@ -220,58 +223,6 @@ function buildTableQueryParams(
   };
 }
 
-function normalizeKeyPart(value: unknown): string {
-  return String(value ?? '').trim();
-}
-
-function normalizeDateKey(value: unknown): string {
-  if (Array.isArray(value) && value.length >= 3) {
-    const [year, month, day] = value;
-    return [
-      String(year).padStart(4, '0'),
-      String(month).padStart(2, '0'),
-      String(day).padStart(2, '0'),
-    ].join('-');
-  }
-  return normalizeKeyPart(value).slice(0, 10);
-}
-
-function detailMergeKey(row: Record<string, any>) {
-  return [
-    normalizeDateKey(row.statDate ?? row.stat_date),
-    normalizeKeyPart(row.platformCode ?? row.platform_code).toUpperCase(),
-    normalizeKeyPart(row.shopId ?? row.shop_id),
-    normalizeKeyPart(row.shopName ?? row.shop_name),
-  ].join('|');
-}
-
-function mergePlatformDetailRows(
-  rows: FdmdataEcShopDailyApi.EcShopDaily[],
-  details: Record<string, any>[],
-) {
-  if (rows.length === 0 || details.length === 0) return rows;
-  const byDailyId = new Map<string, Record<string, any>>();
-  const byBizKey = new Map<string, Record<string, any>>();
-
-  for (const detail of details) {
-    if (detail.daily_id !== null && detail.daily_id !== undefined) {
-      byDailyId.set(String(detail.daily_id), detail);
-    }
-    byBizKey.set(detailMergeKey(detail), detail);
-  }
-
-  return rows.map((row) => {
-    const detail =
-      byDailyId.get(String(row.id)) ?? byBizKey.get(detailMergeKey(row as any));
-    if (!detail) return row;
-    const merged: Record<string, any> = { ...row };
-    for (const [key, value] of Object.entries(detail)) {
-      merged[`${DETAIL_FIELD_PREFIX}${key}`] = value;
-    }
-    return merged as FdmdataEcShopDailyApi.EcShopDaily;
-  });
-}
-
 async function handleExport() {
   exporting.value = true;
   try {
@@ -313,7 +264,11 @@ function formatRoiValue(numerator: unknown, denominator: unknown): string {
 }
 
 function getSummaryMarketingCost() {
-  if (fixedPlatformCode.value === 'JD') return jdSummaryMarketingCost.value;
+  if (fixedPlatformCode.value === 'JD') {
+    return (
+      summaryRow.value?.actualMarketingCost ?? summaryRow.value?.marketingCost
+    );
+  }
   return summaryRow.value?.marketingCost;
 }
 
@@ -444,45 +399,45 @@ const [Grid, gridApi] = useVbenVxeGrid({
     footerMethod,
     proxyConfig: {
       ajax: {
-        query: async ({ page }, formValues) => {
+        query: async (proxyParams, formValues) => {
+          const { page } = proxyParams;
+          refreshQueue.start();
+          const seq = ++tableQuerySeq;
+          // VXE 原生刷新按钮使用 reload；分页使用 query。
+          if ('code' in proxyParams && proxyParams.code === 'reload') {
+            summaryCache.clear();
+          }
           const params = buildTableQueryParams(formValues, {
             pageNo: page.currentPage,
             pageSize: page.pageSize,
           }) as PageParam & Record<string, any>;
           summaryLoading.value = true;
+          summaryRow.value = null;
           try {
-            const detailPromise = fixedPlatformCode.value
-              ? getEcShopDailyPlatformDetailPage({
-                  ...params,
-                  pageNo: 1,
-                  pageSize: -1,
-                  platformCode: fixedPlatformCode.value,
-                } as EcShopDailyPlatformDetailPageParams)
-              : Promise.resolve(null);
-            const [pageResult, summary, detailResult] = await Promise.all([
-              getEcShopDailyPage(params),
-              getEcShopDailyPageSummary(params),
-              detailPromise,
+            const [pageResult, summary] = await Promise.all([
+              loadDailyPage(
+                params,
+                fixedPlatformCode.value,
+                {
+                  getDetails: getEcShopDailyPlatformDetailPage,
+                  getPage: getEcShopDailyPage,
+                },
+                DETAIL_FIELD_PREFIX,
+              ),
+              summaryCache.get(params),
             ]);
-            summaryRow.value = summary;
-            jdSummaryMarketingCost.value =
-              fixedPlatformCode.value === 'JD' && detailResult?.list
-                ? detailResult.list.reduce(
-                    (sum, detail) => sum + getDisplayMarketingCost(detail),
-                    0,
-                  )
-                : undefined;
-            if (detailResult?.list) {
-              pageResult.list = mergePlatformDetailRows(
-                pageResult.list,
-                detailResult.list,
-              );
+            if (seq === tableQuerySeq && !refreshQueue.isPending()) {
+              summaryRow.value = summary;
             }
             return pageResult;
           } finally {
-            summaryLoading.value = false;
+            if (seq === tableQuerySeq && !refreshQueue.isPending()) {
+              summaryLoading.value = false;
+            }
           }
         },
+        queryError: () => refreshQueue.finish(),
+        querySuccess: () => refreshQueue.finish(),
       },
     },
     rowConfig: { keyField: 'id', isHover: true },
@@ -494,8 +449,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
   },
 });
 
+function requestTableRefresh() {
+  summaryCache.clear();
+  summaryRow.value = null;
+  refreshQueue.request();
+}
+
 function handleRefresh() {
-  gridApi.query();
+  requestTableRefresh();
   if (activeTab.value === 'dashboard' && dashboardRef.value) {
     void dashboardRef.value.reload?.();
   }
@@ -505,16 +466,19 @@ onMounted(() => {
   void fetchShopNameOptions();
 });
 
-watch(fixedPlatformCode, (platformCode) => {
+watch(fixedPlatformCode, async (platformCode) => {
   checkedIds.value = [];
-  void Promise.resolve(
+  await Promise.resolve(
     gridApi.formApi.setValues({ platformCode }, false),
   ).catch(() => {});
   void fetchShopNameOptions();
-  gridApi.query();
+  requestTableRefresh();
 });
 
 onBeforeUnmount(() => {
+  tableQuerySeq++;
+  refreshQueue.dispose();
+  summaryCache.clear();
   if (shopNameSearchTimer) {
     clearTimeout(shopNameSearchTimer);
   }

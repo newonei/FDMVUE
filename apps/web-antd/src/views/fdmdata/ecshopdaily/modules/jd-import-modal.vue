@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import type { FileType } from 'ant-design-vue/es/upload/interface';
+import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -15,47 +15,56 @@ defineOptions({ name: 'EcShopDailyJdImportModal' });
 const emit = defineEmits(['success']);
 
 const shopId = ref('');
-let selectedFile: File | null = null;
+const fileList = ref<UploadFile[]>([]);
+const selectedFile = computed(() => fileList.value[0]?.originFileObj ?? null);
+const submitting = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (submitting.value) return;
+    const file = selectedFile.value;
     const id = shopId.value.trim();
     if (!id) {
       message.warning('请输入店铺ID');
       return;
     }
-    if (!selectedFile) {
+    if (!file) {
       message.warning('请选择 Excel 文件');
       return;
     }
+    submitting.value = true;
     modalApi.lock();
     try {
-      const res = await importJdEcShopDailyExcel(selectedFile, id);
+      const res = await importJdEcShopDailyExcel(file, id);
       await modalApi.close();
       emit('success');
       message.success(
         `导入完成：读取 ${res.total} 行；新增 ${res.created}；更新 ${res.updated}；跳过 ${res.skipped}`,
       );
     } finally {
+      submitting.value = false;
       modalApi.unlock();
     }
   },
   onOpenChange(isOpen: boolean) {
     if (!isOpen) {
       shopId.value = '';
-      selectedFile = null;
+      fileList.value = [];
     }
   },
 });
 
-function beforeUpload(file: FileType) {
-  selectedFile = file as File;
+function beforeUpload() {
   return false;
 }
 </script>
 
 <template>
-  <Modal title="京东 Excel 导入" class="w-[560px] max-w-[calc(100vw-2rem)]">
+  <Modal
+    title="京东 Excel 导入"
+    class="w-[560px] max-w-[calc(100vw-2rem)]"
+    :confirm-disabled="!selectedFile || submitting"
+  >
     <div class="space-y-3 px-1">
       <div>
         <div class="mb-1 text-sm font-medium">店铺ID</div>
@@ -64,7 +73,9 @@ function beforeUpload(file: FileType) {
       <div>
         <div class="mb-1 text-sm font-medium">京东商智 Excel 文件</div>
         <Upload
+          v-model:file-list="fileList"
           :before-upload="beforeUpload"
+          :disabled="submitting"
           :max-count="1"
           accept=".xls,.xlsx"
         >

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import type { FileType } from 'ant-design-vue/es/upload/interface';
+import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -24,11 +24,15 @@ const templateId = ref<number | undefined>();
 const templateOptions = ref<{ label: string; value: number }[]>([]);
 const batchName = ref('');
 const billMonth = ref('');
-const billFileName = ref('');
-let billFile: File | null = null;
+const fileList = ref<UploadFile[]>([]);
+const selectedFile = computed(() => fileList.value[0]?.originFileObj ?? null);
+const billFileName = computed(() => selectedFile.value?.name ?? '');
+const submitting = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (submitting.value) return;
+    const billFile = selectedFile.value;
     if (!billMonth.value.trim()) {
       message.warning('请输入账单所属期');
       return;
@@ -37,6 +41,7 @@ const [Modal, modalApi] = useVbenModal({
       message.warning('请选择快递账单 Excel');
       return;
     }
+    submitting.value = true;
     modalApi.lock();
     try {
       const res = await reconcileCarrierExpress({
@@ -50,6 +55,7 @@ const [Modal, modalApi] = useVbenModal({
       emit('success', res.batchId);
       await modalApi.close();
     } finally {
+      submitting.value = false;
       modalApi.unlock();
     }
   },
@@ -72,13 +78,10 @@ function reset() {
   templateId.value = undefined;
   batchName.value = '';
   billMonth.value = '';
-  billFile = null;
-  billFileName.value = '';
+  fileList.value = [];
 }
 
-function beforeBillUpload(file: FileType) {
-  billFile = file as File;
-  billFileName.value = file.name;
+function beforeBillUpload() {
   return false;
 }
 
@@ -89,7 +92,11 @@ async function handleDownloadTemplate() {
 </script>
 
 <template>
-  <Modal title="上传账单对账" class="w-[560px] max-w-[calc(100vw-2rem)]">
+  <Modal
+    title="上传账单对账"
+    class="w-[560px] max-w-[calc(100vw-2rem)]"
+    :confirm-disabled="!selectedFile || submitting"
+  >
     <div class="space-y-4 px-1">
       <p class="mb-0 text-xs text-muted-foreground">
         选择该快递公司的计费模板并上传月度账单，系统将在全局订单池内按运单号匹配并识别重复计费。
@@ -131,7 +138,9 @@ async function handleDownloadTemplate() {
           </Button>
         </div>
         <Upload
+          v-model:file-list="fileList"
           :before-upload="beforeBillUpload"
+          :disabled="submitting"
           :max-count="1"
           accept=".xls,.xlsx"
         >

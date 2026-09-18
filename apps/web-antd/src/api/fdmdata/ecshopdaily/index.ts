@@ -30,6 +30,7 @@ export namespace FdmdataEcShopDailyApi {
     buyerCount?: number; // 成交买家数
     realBuyerCount?: number; // 真实成交买家数
     marketingCost?: number; // 营销花费
+    actualMarketingCost?: number; // 列表汇总实际营销费，京东扣除红包及返利；原营销费不变
     remark?: string; // 备注
     detailPayload?: Record<string, any>; // 平台明细字段
     rawPayload?: any; // 平台原始数据
@@ -192,6 +193,7 @@ export function getEcShopDailyPlatformDetail(id: number) {
 }
 
 export interface EcShopDailyPlatformDetailPageParams extends PageParam {
+  dailyIds?: number[];
   platformCode: string;
   shopName?: string;
   statDate?: string[];
@@ -203,7 +205,7 @@ export function getEcShopDailyPlatformDetailPage(
 ) {
   return requestClient.get<PageResult<Record<string, any>>>(
     '/fdmdata/ec-shop-daily/platform-detail-page',
-    { params },
+    { params: { ...params, dailyIds: params.dailyIds?.join(',') } },
   );
 }
 
