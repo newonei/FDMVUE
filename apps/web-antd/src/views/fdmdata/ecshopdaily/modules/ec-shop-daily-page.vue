@@ -399,11 +399,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
     footerMethod,
     proxyConfig: {
       ajax: {
-        query: async ({ code, page }, formValues) => {
+        query: async (proxyParams, formValues) => {
+          const { page } = proxyParams;
           refreshQueue.start();
           const seq = ++tableQuerySeq;
           // VXE 原生刷新按钮使用 reload；分页使用 query。
-          if (code === 'reload') summaryCache.clear();
+          if ('code' in proxyParams && proxyParams.code === 'reload') {
+            summaryCache.clear();
+          }
           const params = buildTableQueryParams(formValues, {
             pageNo: page.currentPage,
             pageSize: page.pageSize,
