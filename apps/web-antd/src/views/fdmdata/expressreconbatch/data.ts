@@ -16,6 +16,7 @@ export const EXPRESS_RECON_STATUS_OPTIONS = [
 export const BATCH_STATUS_OPTIONS = [
   { label: '导入中', value: 'IMPORTING' },
   { label: '已对账', value: 'RECONCILED' },
+  { label: '待重算', value: 'NEEDS_RECALC' },
   { label: '导入失败', value: 'FAILED' },
 ];
 
@@ -96,7 +97,8 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataExpressReconBatchAp
     },
     { field: 'carrierName', title: '快递公司', minWidth: 110 },
     { field: 'billMonth', title: '账单所属期', minWidth: 110 },
-    { field: 'status', title: '状态', minWidth: 96, formatter: formatBatchStatus },
+    { field: 'status', title: '状态', minWidth: 100, formatter: formatBatchStatus, slots: { default: 'status' } },
+    { field: 'remark', title: '状态说明', minWidth: 220, showOverflow: 'tooltip' },
     {
       field: 'totalWaybillCount',
       title: '总运单',

@@ -7,7 +7,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, Table } from 'ant-design-vue';
+import { Alert, Button, Table } from 'ant-design-vue';
 
 import type { FdmdataExpressReconBatchApi } from '#/api/fdmdata/expressreconbatch';
 
@@ -20,6 +20,8 @@ defineOptions({ name: 'ExpressReconShopSummaryModal' });
 
 const rows = ref<FdmdataExpressReconBatchApi.ShopSummary[]>([]);
 const loading = ref(false);
+const loadError = ref('');
+let loadSequence = 0;
 const filters = ref<Record<string, unknown>>({});
 
 const columns: TableColumnsType = [
@@ -56,7 +58,10 @@ const columns: TableColumnsType = [
 const [Modal, modalApi] = useVbenModal({
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
+      loadSequence++;
+      loading.value = false;
       rows.value = [];
+      loadError.value = '';
       filters.value = {};
       return;
     }
@@ -66,11 +71,20 @@ const [Modal, modalApi] = useVbenModal({
 });
 
 async function loadSummary() {
+  const sequence = ++loadSequence;
+  const requestFilters = { ...filters.value };
   loading.value = true;
+  rows.value = [];
+  loadError.value = '';
   try {
-    rows.value = await getExpressReconShopSummary(filters.value);
+    const result = await getExpressReconShopSummary(requestFilters);
+    if (sequence === loadSequence) rows.value = result;
+  } catch {
+    if (sequence === loadSequence) {
+      loadError.value = '汇总未能加载。请先处理筛选范围内的待重算批次，再重新打开汇总；其他错误请按提示重试。';
+    }
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) loading.value = false;
   }
 }
 
@@ -89,8 +103,9 @@ async function handleExport() {
 <template>
   <Modal title="店铺运费汇总" class="w-[1040px] max-w-[calc(100vw-2rem)]">
     <div class="space-y-3">
+      <Alert v-if="loadError" type="warning" show-icon :message="loadError" />
       <div class="flex justify-end">
-        <Button @click="handleExport">
+        <Button :disabled="loading || !!loadError || rows.length === 0" @click="handleExport">
           <template #icon>
             <IconifyIcon icon="lucide:download" />
           </template>

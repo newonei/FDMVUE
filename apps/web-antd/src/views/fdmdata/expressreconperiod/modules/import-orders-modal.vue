@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import type { FileType } from 'ant-design-vue/es/upload/interface';
+import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -16,11 +16,15 @@ const emit = defineEmits<{ success: [periodId?: number] }>();
 
 const periodName = ref('');
 const orderMonth = ref('');
-const orderFileName = ref('');
-let orderFile: File | null = null;
+const fileList = ref<UploadFile[]>([]);
+const selectedFile = computed(() => fileList.value[0]?.originFileObj ?? null);
+const orderFileName = computed(() => selectedFile.value?.name ?? '');
+const submitting = ref(false);
 
 const [Modal, modalApi] = useVbenModal({
   async onConfirm() {
+    if (submitting.value) return;
+    const orderFile = selectedFile.value;
     if (!orderFile) {
       message.warning('请选择订单明细 Excel');
       return;
@@ -29,6 +33,7 @@ const [Modal, modalApi] = useVbenModal({
       message.warning('请输入发货月份');
       return;
     }
+    submitting.value = true;
     modalApi.lock();
     try {
       const res = await importExpressReconOrders({
@@ -40,6 +45,7 @@ const [Modal, modalApi] = useVbenModal({
       emit('success', res.periodId);
       await modalApi.close();
     } finally {
+      submitting.value = false;
       modalApi.unlock();
     }
   },
@@ -53,19 +59,20 @@ const [Modal, modalApi] = useVbenModal({
 function reset() {
   periodName.value = '';
   orderMonth.value = '';
-  orderFile = null;
-  orderFileName.value = '';
+  fileList.value = [];
 }
 
-function beforeOrderUpload(file: FileType) {
-  orderFile = file as File;
-  orderFileName.value = file.name;
+function beforeOrderUpload() {
   return false;
 }
 </script>
 
 <template>
-  <Modal title="导入发货订单" class="w-[560px] max-w-[calc(100vw-2rem)]">
+  <Modal
+    title="导入发货订单"
+    class="w-[560px] max-w-[calc(100vw-2rem)]"
+    :confirm-disabled="!selectedFile || submitting"
+  >
     <div class="space-y-4 px-1">
       <p class="mb-0 text-xs text-muted-foreground">
         按发货月份导入订单池；同一发货月份重复导入时会替换原订单明细。
@@ -87,7 +94,9 @@ function beforeOrderUpload(file: FileType) {
       <div>
         <div class="mb-1 text-sm font-medium">订单明细 Excel</div>
         <Upload
+          v-model:file-list="fileList"
           :before-upload="beforeOrderUpload"
+          :disabled="submitting"
           :max-count="1"
           accept=".xls,.xlsx"
         >
