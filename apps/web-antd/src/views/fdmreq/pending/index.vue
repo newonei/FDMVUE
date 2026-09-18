@@ -56,32 +56,50 @@ onMounted(load);
       <Button @click="load">刷新</Button>
     </div>
 
-    <Card class="mb-4" title="我的待确认（PENDING_CONFIRM）">
-      <Table :columns="columns" :data-source="confirmRows" :pagination="false" row-key="reqNo">
+    <Card class="mb-4" title="待审核的方案">
+      <Table
+        :columns="columns"
+        :data-source="confirmRows"
+        :pagination="false"
+        row-key="reqNo"
+      >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'status' || column.key === 'status'">
+          <template
+            v-if="column.dataIndex === 'status' || column.key === 'status'"
+          >
             <Tag :color="getFdmReqStatusMeta(record.status).color">
               {{ getFdmReqStatusMeta(record.status).label }}
             </Tag>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <Button type="link" @click="openDetail(record.reqNo)">去确认</Button>
+            <Button type="link" @click="openDetail(record.reqNo)"
+              >去审核</Button
+            >
           </template>
         </template>
       </Table>
     </Card>
 
-    <Card title="我的待验收（PENDING_ACCEPTANCE）">
-      <Table :columns="columns" :data-source="acceptanceRows" :pagination="false" row-key="reqNo">
+    <Card title="待验收的交付">
+      <Table
+        :columns="columns"
+        :data-source="acceptanceRows"
+        :pagination="false"
+        row-key="reqNo"
+      >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.dataIndex === 'status' || column.key === 'status'">
+          <template
+            v-if="column.dataIndex === 'status' || column.key === 'status'"
+          >
             <Tag :color="getFdmReqStatusMeta(record.status).color">
               {{ getFdmReqStatusMeta(record.status).label }}
             </Tag>
           </template>
           <template v-else-if="column.key === 'actions'">
             <Space>
-              <Button type="link" @click="openDetail(record.reqNo)">去验收</Button>
+              <Button type="link" @click="openDetail(record.reqNo)"
+                >去验收</Button
+              >
             </Space>
           </template>
         </template>

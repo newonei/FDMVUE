@@ -2,6 +2,7 @@ import { requestClient } from '#/api/request';
 
 export type FdmReqStatus =
   | 'PENDING_ANALYSIS'
+  | 'ANALYZING'
   | 'PENDING_SUPPLEMENT'
   | 'PENDING_CONFIRM'
   | 'APPROVED_PENDING_DEV'
@@ -15,6 +16,7 @@ export type FdmReqStatus =
   | 'CANCELLED';
 
 export namespace FdmReqApi {
+  export type DateTime = string | number | number[];
   export interface Requirement {
     id?: number;
     reqNo: string;
@@ -23,8 +25,8 @@ export namespace FdmReqApi {
     submitterId?: string;
     status: FdmReqStatus | string;
     currentVersionId?: number;
-    createTime?: string;
-    updateTime?: string;
+    createTime?: DateTime;
+    updateTime?: DateTime;
   }
 
   export interface RequirementVersion {
@@ -34,7 +36,7 @@ export namespace FdmReqApi {
     contentJson?: string;
     snapshotHash?: string;
     createdBy?: string;
-    createTime?: string;
+    createTime?: DateTime;
   }
 
   export interface Approval {
@@ -43,7 +45,7 @@ export namespace FdmReqApi {
     versionId?: number;
     snapshotHash?: string;
     approverId?: string;
-    approvedAt?: string;
+    approvedAt?: DateTime;
     allowedScopeJson?: string;
   }
 
@@ -57,10 +59,13 @@ export namespace FdmReqApi {
     branchName?: string;
     commitSha?: string;
     prUrl?: string;
-    heartbeatAt?: string;
+    heartbeatAt?: DateTime;
     logExcerpt?: string;
     failReason?: string;
     retryCount?: number;
+    resultJson?: string;
+    createTime?: DateTime;
+    updateTime?: DateTime;
   }
 
   export interface TestReport {
@@ -74,7 +79,22 @@ export namespace FdmReqApi {
     skippedReason?: string;
     evidenceJson?: string;
     residualRisk?: string;
-    createTime?: string;
+    createTime?: DateTime;
+  }
+
+  export interface RequirementEvent {
+    id?: number;
+    eventType?: string;
+    actorId?: string;
+    fromStatus?: string;
+    toStatus?: string;
+    payloadJson?: string;
+    createTime?: DateTime;
+  }
+
+  export interface FeedbackParams {
+    message: string;
+    versionId?: number;
   }
 
   export interface RequirementDetail {
@@ -83,6 +103,12 @@ export namespace FdmReqApi {
     approvals: Approval[];
     tasks: DevTask[];
     reports: TestReport[];
+    events?: RequirementEvent[];
+    lease?: {
+      workerId?: string;
+      type?: 'ANALYSIS' | 'DEV';
+      expiresAt?: DateTime;
+    } | null;
   }
 
   export interface CreateRequirementParams {
@@ -90,7 +116,6 @@ export namespace FdmReqApi {
     reqNo?: string;
     title: string;
     rawDescription: string;
-    submitterId?: string;
   }
 
   export interface UpdateRequirementParams {
@@ -111,7 +136,6 @@ export namespace FdmReqApi {
 
   export interface ApproveParams {
     versionId: number;
-    approverId?: string;
     allowedScopeJson?: string;
   }
 
@@ -165,7 +189,10 @@ export function getRequirementDetail(reqNo: string) {
 }
 
 export function createRequirement(data: FdmReqApi.CreateRequirementParams) {
-  return requestClient.post<FdmReqApi.Requirement>('/fdmreq/requirements', data);
+  return requestClient.post<FdmReqApi.Requirement>(
+    '/fdmreq/requirements',
+    data,
+  );
 }
 
 export function updateRequirement(
@@ -194,14 +221,20 @@ export function createRequirementVersion(
   );
 }
 
-export function writeProposal(reqNo: string, data: FdmReqApi.WriteProposalParams) {
+export function writeProposal(
+  reqNo: string,
+  data: FdmReqApi.WriteProposalParams,
+) {
   return requestClient.post<FdmReqApi.RequirementVersion>(
     `/fdmreq/bot/requirements/${encodeURIComponent(reqNo)}/proposal`,
     data,
   );
 }
 
-export function approveRequirement(reqNo: string, data: FdmReqApi.ApproveParams) {
+export function approveRequirement(
+  reqNo: string,
+  data: FdmReqApi.ApproveParams,
+) {
   return requestClient.post<FdmReqApi.Approval>(
     `/fdmreq/requirements/${encodeURIComponent(reqNo)}/approve`,
     data,
@@ -230,7 +263,10 @@ export function createRequirementTask(
   );
 }
 
-export function callbackTask(taskId: number | string, data: FdmReqApi.CallbackParams) {
+export function callbackTask(
+  taskId: number | string,
+  data: FdmReqApi.CallbackParams,
+) {
   return requestClient.post<FdmReqApi.DevTask>(
     `/fdmreq/tasks/${encodeURIComponent(String(taskId))}/callback`,
     data,
@@ -249,6 +285,46 @@ export function createRequirementReport(
 ) {
   return requestClient.post<FdmReqApi.TestReport>(
     `/fdmreq/requirements/${encodeURIComponent(reqNo)}/reports`,
+    data,
+  );
+}
+
+export function rejectRequirement(
+  reqNo: string,
+  data: FdmReqApi.FeedbackParams,
+) {
+  return requestClient.post<FdmReqApi.Requirement>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/reject`,
+    data,
+  );
+}
+
+export function supplementRequirement(
+  reqNo: string,
+  data: FdmReqApi.FeedbackParams,
+) {
+  return requestClient.post<FdmReqApi.Requirement>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/supplement`,
+    data,
+  );
+}
+
+export function reanalyzeRequirement(
+  reqNo: string,
+  data: FdmReqApi.FeedbackParams,
+) {
+  return requestClient.post<FdmReqApi.Requirement>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/reanalyze`,
+    data,
+  );
+}
+
+export function retryRequirement(
+  reqNo: string,
+  data: FdmReqApi.FeedbackParams,
+) {
+  return requestClient.post<FdmReqApi.Requirement>(
+    `/fdmreq/requirements/${encodeURIComponent(reqNo)}/retry`,
     data,
   );
 }
