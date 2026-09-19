@@ -50,6 +50,7 @@ import './compact-tables.css';
 const props = defineProps<{
   contract?: Contract;
   kind?: ContractDocumentKind;
+  mode?: 'create' | 'list';
   open: boolean;
 }>();
 const emit = defineEmits<{ close: []; updated: [value: Contract] }>();
@@ -269,9 +270,9 @@ function contribution(key: string) {
     value && typeof value === 'object'
       ? (value as Record<string, unknown>).contribution
       : undefined;
-  return amount != null
-    ? nativeMoney(amount, profit.value?.currency)
-    : '资料未完整';
+  return amount === null || amount === undefined
+    ? '资料未完整'
+    : nativeMoney(amount, profit.value?.currency);
 }
 function switchQueue() {
   page.value = 1;
@@ -279,7 +280,7 @@ function switchQueue() {
   void load();
 }
 watch(
-  () => [props.open, props.contract?.id, props.kind],
+  () => [props.open, props.contract?.id, props.kind, props.mode],
   async () => {
     const context = ++contextSequence;
     ++sequence;
@@ -307,7 +308,7 @@ watch(
     )
       return;
     const launch = contractDocumentLaunch(kind);
-    if (launch.action) create(launch.action);
+    if (launch.action && props.mode !== 'list') create(launch.action);
   },
   { immediate: true },
 );

@@ -6,7 +6,7 @@ import type {
   SupplierContact,
 } from '#/api/fdmplatform/procurement';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -32,11 +32,14 @@ import SupplierContacts from './SupplierContacts.vue';
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
 const emit = defineEmits<{
   action: [name: string];
+  busy: [value: boolean];
   save: [payload: Record<string, unknown>];
 }>();
 const contacts = ref<SupplierContact[]>([]);
 const pageError = ref('');
 const contactsOpen = ref(false);
+watch(contactsOpen, (value) => emit('busy', value));
+onBeforeUnmount(() => emit('busy', false));
 const form = reactive({
   contactId: undefined as string | undefined,
   deliveryDate: '',
@@ -204,7 +207,7 @@ function supplierName(snapshot: ProcurementSetting | undefined) {
       </template>
 </Table><Alert
       type="info"
-      message="产品、形状、数量及单价沿用批准方案快照。需要修改时请发起采购方案变更，不直接覆盖历史执行资料。"
+      message="产品、形状、数量及单价沿用生效方案快照。需要修改时请发起采购方案变更，不直接覆盖历史执行资料。"
     /><Descriptions size="small" :column="2">
       <Descriptions.Item label="采购签约主体">
         {{

@@ -66,7 +66,7 @@ watch(
 <template>
   <Modal
     :open="open"
-    title="选择已批准来源单据"
+    title="选择已生效来源单据"
     width="900px"
     :footer="null"
     @cancel="emit('close')"

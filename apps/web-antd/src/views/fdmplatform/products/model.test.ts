@@ -61,8 +61,8 @@ describe('contract product selection and pricing', () => {
     expect(contractLineAmount(line({ unitPrice: null }))).toBeUndefined();
     expect(contractLineAmount(line({ unitPrice: undefined }))).toBeUndefined();
     expect(contractLineAmount(line({ unitPrice: '' }))).toBeUndefined();
-    expect(contractLineAmount(line({ unitPrice: '0' }))).toBe(0);
-    expect(contractLineAmount(line())).toBe(37.5);
+    expect(contractLineAmount(line({ unitPrice: '0' }))).toBe('0.00');
+    expect(contractLineAmount(line())).toBe('37.50');
   });
   it('copies a customized SKU into an independent contract line without sharing attachment arrays', () => {
     const original = line();

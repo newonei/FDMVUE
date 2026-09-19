@@ -24,15 +24,20 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   getAccess: vi.fn(),
+  getContract: vi.fn(),
+  activate: vi.fn(),
   resolve: vi.fn(),
   getCustomers: vi.fn(),
   getCustomer: vi.fn(),
   getCustomerOptions: vi.fn(),
   saveCustomer: vi.fn(),
+  saveCustomerSources: vi.fn(),
   counter: 0,
 }));
 vi.mock('#/api/fdmplatform', () => ({
+  contractAction: mocks.activate,
   getAccess: mocks.getAccess,
+  getContract: mocks.getContract,
   getAttachments: vi.fn().mockResolvedValue({ items: [] }),
   newIdempotencyKey: () => `test-operation-${++mocks.counter}`,
 }));
@@ -48,6 +53,7 @@ vi.mock('#/api/fdmplatform/customers', () => ({
   getCustomer: mocks.getCustomer,
   getCustomerOptions: mocks.getCustomerOptions,
   saveCustomer: mocks.saveCustomer,
+  saveCustomerSources: mocks.saveCustomerSources,
 }));
 vi.mock('../products/components/ProductPicker.vue', () => ({
   default: defineComponent({
@@ -242,7 +248,7 @@ vi.mock('ant-design-vue', () => {
     Table: table,
     Tag: block,
     Textarea: input,
-    message: { success: vi.fn(), info: vi.fn() },
+    message: { success: vi.fn(), info: vi.fn(), warning: vi.fn() },
   };
 });
 const disposals: (() => void)[] = [];
@@ -316,7 +322,7 @@ async function newContract(category: string | undefined = 'YOGA') {
     ).toBeTruthy(),
   );
   await fill(view.host, '订单所属公司', '1');
-  await fill(view.host, '合同名称', '含附件的测试合同');
+  await fill(view.host, '内部名称（可选）', '含附件的测试合同');
   await fill(view.host, '客户', 'customer');
   if (category) await fill(view.host, '产品分类', category);
   clickText(view.host, '产品中心');
@@ -330,6 +336,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.create.mockReset();
   mocks.update.mockReset();
+  mocks.activate.mockReset();
+  mocks.getContract.mockReset();
   mocks.counter = 0;
   mocks.getCustomerOptions.mockReset().mockResolvedValue({
     countries: [
@@ -337,6 +345,8 @@ beforeEach(() => {
       { code: 'US', nameZh: '美国', nameEn: 'United States', iso3: 'USA' },
     ],
     productCategories: [],
+    customerSources: ['展会', '客户转介绍', '其他'],
+    sourceVersion: -1,
   });
   mocks.saveCustomer.mockReset();
   mocks.getCustomers.mockReset().mockResolvedValue({
@@ -505,8 +515,9 @@ describe('business creation attachment queues', () => {
     );
     expect(view.host.textContent).toContain(file.name);
     expect(
-      view.host.querySelector<HTMLInputElement>('[data-label="合同名称"] input')
-        ?.value,
+      view.host.querySelector<HTMLInputElement>(
+        '[data-label="内部名称（可选）"] input',
+      )?.value,
     ).toBe('含附件的测试合同');
     const [firstBody, firstFiles] = mocks.create.mock.calls[0]!;
     expect(firstBody.name).toBe('含附件的测试合同');
@@ -748,5 +759,113 @@ describe('customer identity and fixed country selection', () => {
     expect(view.closed).not.toHaveBeenCalled();
     finish({ id: 'okki' });
     await vi.waitFor(() => expect(view.closed).toHaveBeenCalledOnce());
+  });
+});
+
+describe('new contract form hides optional commercial fields', () => {
+  it('saves an unnamed draft and submits its persisted identity and version to take effect', async () => {
+    const view = await newContract();
+    await fill(view.host, '内部名称（可选）', '');
+    mocks.create.mockResolvedValueOnce({
+      id: 'created',
+      code: 'HT-1',
+      version: 3,
+    });
+    mocks.activate.mockResolvedValueOnce({
+      id: 'created',
+      code: 'HT-1',
+      version: 4,
+      status: 'CONFIRMED',
+    });
+    clickText(view.host, '保存并生效');
+    await vi.waitFor(() => expect(view.saved).toHaveBeenCalledOnce());
+    expect(mocks.create.mock.calls[0]![0].name).toBe('');
+    expect(mocks.activate).toHaveBeenCalledWith(
+      'created',
+      'CONFIRM_CONTRACT',
+      3,
+      expect.any(String),
+      {},
+    );
+    expect(view.saved).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'CONFIRMED', version: 4 }),
+    );
+    expect(view.host.textContent).not.toContain('审核异常接手人');
+    expect(mocks.getContract).not.toHaveBeenCalled();
+    expect(view.closed).toHaveBeenCalledOnce();
+  });
+
+  it('retains the saved contract when activation fails so retry does not create another order', async () => {
+    const view = await newContract();
+    const saved = { id: 'created', code: 'HT-1', version: 3 };
+    mocks.create.mockResolvedValueOnce(saved);
+    mocks.activate.mockRejectedValueOnce(new Error('当前产品规格已变更'));
+    clickText(view.host, '保存并生效');
+    await vi.waitFor(() => expect(view.closed).toHaveBeenCalledOnce());
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(view.saved).toHaveBeenCalledWith(saved);
+    expect(mocks.getContract).not.toHaveBeenCalled();
+  });
+
+  it('hides tax basis, payment terms and delivery requirement on create', async () => {
+    const view = await newContract();
+    expect(view.host.querySelector('[data-label="默认税费口径"]')).toBeNull();
+    expect(view.host.querySelector('[data-label="付款条件"]')).toBeNull();
+    expect(view.host.querySelector('[data-label="交付要求"]')).toBeNull();
+    mocks.create.mockResolvedValueOnce({ id: 'created', code: 'HT-1' });
+    clickText(view.host, '保存草稿');
+    await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+    const payload = mocks.create.mock.calls[0]![0];
+    expect(payload).not.toHaveProperty('taxBasis');
+    expect(payload.items[0].taxBasis).toBe('TAX_INCLUDED');
+    expect(payload.paymentTerms).toBe('');
+    expect(payload.deliveryRequirement).toBe('');
+  });
+
+  it('keeps historical tax basis, payment terms and delivery requirement when editing', async () => {
+    const view = mount(ContractEditor, {
+      open: false,
+      master: [],
+      contract: {
+        id: 'old',
+        status: 'CONFIRMED',
+        version: 0,
+        productCategory: 'YOGA',
+        paymentTerms: '货到付款',
+        deliveryRequirement: '分批发货',
+        items: [
+          {
+            id: 'line-1',
+            skuId: 'sku-a',
+            skuName: '旧产品',
+            quantity: '1',
+            unitPrice: '12',
+            taxBasis: 'TAX_EXCLUDED',
+            attachmentIds: [],
+          },
+        ],
+      },
+    });
+    view.props.open = true;
+    await nextTick();
+    expect(view.host.querySelector('[data-label="默认税费口径"]')).toBeTruthy();
+    expect(view.host.querySelector('[data-label="付款条件"]')).toBeTruthy();
+    expect(view.host.querySelector('[data-label="交付要求"]')).toBeTruthy();
+    expect(
+      [...view.host.querySelectorAll('button')].some(
+        (button) => button.textContent?.trim() === '保存并生效',
+      ),
+    ).toBe(false);
+    expect(view.host.textContent).toContain('保存合同修订');
+    expect(
+      view.host.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '[data-label="付款条件"] input,[data-label="付款条件"] textarea',
+      )?.value,
+    ).toBe('货到付款');
+    expect(
+      view.host.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        '[data-label="交付要求"] input,[data-label="交付要求"] textarea',
+      )?.value,
+    ).toBe('分批发货');
   });
 });

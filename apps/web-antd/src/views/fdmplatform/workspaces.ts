@@ -103,20 +103,20 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     ],
   },
   'purchase-quotes': {
-    title: '报价与方案审批',
+    title: '报价与采购方案',
     department: '采购部门',
     section: 'records',
     description:
-      '保存真实询价证据与报价版本，比较采购方案，按版本和数量范围审批。',
+      '保存真实询价证据与报价版本，比较采购方案，按版本和数量范围生效。',
     defaultTab: 'purchase',
     groups: [
       {
         resource: 'purchase-plans',
-        title: '采购方案 / 审批',
+        title: '采购方案',
         tab: 'purchase',
         fields: [
           'name|方案名称',
-          'status|审批状态',
+          'status|方案状态',
           'version|方案版本',
           'ownerUserId|编制人',
           'facts|采购事实',
@@ -152,7 +152,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '采购部门',
     section: 'records',
     description:
-      '按有效批准版本下单，登记分批到货、异常和退货，跟进自产任务进度。',
+      '按有效生效版本下单，登记分批到货、异常和退货，跟进自产任务进度。',
     defaultTab: 'delivery',
     groups: [
       {
@@ -162,7 +162,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
         fields: [
           'supplierName|供应商',
           'status|执行状态',
-          'approvedPlanVersion|批准版本',
+          'approvedPlanVersion|生效版本',
           'amount|采购金额',
           'currency|币种',
           'lines|执行明细',
@@ -261,7 +261,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '工厂部门',
     section: 'stock',
     description:
-      '按货权、仓库、SKU 和规格管理库存池，在批准的合同范围内预留、收货和发货。',
+      '按货权、仓库、SKU 和规格管理库存池，在生效的合同范围内预留、收货和发货。',
     defaultTab: 'delivery',
   },
   'admin-master': {
@@ -301,11 +301,10 @@ export function detailTabFor(
   workspace: WorkspaceKey,
   requested: unknown,
 ): DetailTab {
-  return contractDetailTabs.includes(requested as DetailTab)
-    ? (requested as DetailTab)
-    : workspace === 'trade-contracts'
-      ? 'overview'
-      : 'progress';
+  if (contractDetailTabs.includes(requested as DetailTab)) {
+    return requested as DetailTab;
+  }
+  return workspace === 'trade-contracts' ? 'overview' : 'progress';
 }
 
 export function contextualValues(

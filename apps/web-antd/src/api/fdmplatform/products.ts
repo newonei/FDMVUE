@@ -76,6 +76,66 @@ export interface ProductAttachmentView {
   items: ProductAttachment[];
 }
 const base = '/fdmplatform/v1/products';
+
+export interface ProductImportRow {
+  rowNumber: number;
+  code: string;
+  name: string;
+  status: 'ERROR' | 'IMPORTED' | 'READY' | 'SKIPPED';
+  message: string;
+  productId?: string;
+  values: Partial<
+    Pick<
+      Product,
+      | 'active'
+      | 'category'
+      | 'color'
+      | 'displayName'
+      | 'imageUrl'
+      | 'material'
+      | 'packaging'
+      | 'printing'
+      | 'remark'
+      | 'shape'
+      | 'size'
+      | 'specification'
+      | 'unit'
+    >
+  >;
+}
+export interface ProductImportResult {
+  fileName: string;
+  previewHash: string;
+  totalCount: number;
+  readyCount: number;
+  createdCount: number;
+  skippedCount: number;
+  errorCount: number;
+  warnings: string[];
+  rows: ProductImportRow[];
+}
+export function downloadProductImportTemplate(companyId = 0) {
+  return requestClient.download<Blob>(`${base}/import-template`, {
+    params: { companyId },
+  });
+}
+export function previewProductImport(file: File, companyId = 0) {
+  return requestClient.upload<ProductImportResult>(
+    `${base}/import-preview`,
+    { file, companyId },
+    { timeout: 300_000 },
+  );
+}
+export function importProducts(data: {
+  companyId: number;
+  file: File;
+  idempotencyKey: string;
+  previewHash: string;
+}) {
+  return requestClient.upload<ProductImportResult>(`${base}/import`, data, {
+    timeout: 300_000,
+  });
+}
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
 }

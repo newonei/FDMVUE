@@ -27,7 +27,7 @@ import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from './components/FinanceDocument.vue';
-import { financeRecordRoute, financeStatus, financeTitles } from './model';
+import { financeStatus, financeTitles } from './model';
 
 import '../../documents/procurement-tabs';
 
@@ -136,7 +136,10 @@ function show(record: ProcurementFinanceRecord) {
     });
     return;
   }
-  void router.push(financeRecordRoute(record));
+  newType.value = record.type;
+  selectedId.value = record.id;
+  context.value = {};
+  open.value = true;
 }
 function clear() {
   const query = withoutDetailQuery(route.query);
@@ -207,9 +210,9 @@ watch(
                 value,
                 label: {
                   DRAFT: '草稿',
-                  SUBMITTED: '待审批',
-                  APPROVED: '已批准',
-                  REJECTED: '已退回',
+                  SUBMITTED: '待生效',
+                  APPROVED: '已生效',
+                  REJECTED: '待补充',
                   CONFIRMED: '已确认',
                   CANCELLED: '已取消',
                   REVERSED: '已冲销',
@@ -310,7 +313,6 @@ watch(
       :context="context"
       @close="close"
       @updated="load"
-      @create="create"
     />
   </Page>
   <BusinessDocumentDetail

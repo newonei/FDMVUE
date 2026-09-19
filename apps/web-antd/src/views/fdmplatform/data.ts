@@ -2,6 +2,7 @@ import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import type { MasterType } from '#/api/fdmplatform/masters';
 
 import { hasReceiptFx } from './finance/exchange-rates/model';
+import { requestLineDefaults } from './products/feedback-model';
 
 export interface Option {
   label: string;
@@ -54,12 +55,19 @@ export const masterTypes: Option[] = [
   ['STOCK_OWNER', '货权主体'],
 ].map(([value, label]) => ({ value: value!, label: label! }));
 export const statusLabels: Record<string, string> = {
+  BANK_TRANSFER: '银行转账',
+  ALIBABA: '阿里信保',
+  PAYPAL: 'PayPal',
+  ALIPAY: '支付宝',
+  WECHAT: '微信',
+  CASH: '现金',
+  OTHER: '其他',
   NEEDS_COMPLETION: '待补齐资料',
   READY: '可办理',
   LINKED: '已关联办理',
   ACTIVE: '有效',
   ALLOCATED: '已分配',
-  APPROVED: '已批准',
+  APPROVED: '已生效',
   ARCHIVED: '已归档',
   ASSIGNED: '已分派',
   AVAILABLE: '可用',
@@ -82,9 +90,9 @@ export const statusLabels: Record<string, string> = {
   MAKE: '自产',
   PAID: '已收足',
   PARTIAL: '部分完成',
-  PARTIALLY_APPROVED: '部分批准',
+  PARTIALLY_APPROVED: '部分生效',
   PENDING: '待确认',
-  PENDING_APPROVAL: '待审批',
+  PENDING_APPROVAL: '待生效',
   RECEIVED: '已到货',
   REJECTED: '已退回',
   RELEASED: '已释放',
@@ -94,7 +102,7 @@ export const statusLabels: Record<string, string> = {
   SHIPPED: '已发货',
   STALE: '已失效',
   STOCK: '库存',
-  SUBMITTED: '待经理决策',
+  SUBMITTED: '待生效',
   UNASSIGNED: '待分派',
   VALID: '有效',
   VERIFIED: '已核定',
@@ -149,15 +157,14 @@ export const statusLabels: Record<string, string> = {
   WAREHOUSE: '仓库',
   STOCK_OWNER: '货权主体',
   CONTRACT_CREATE: '创建合同',
-  CONFIRM_CONTRACT: '确认合同',
+  CONFIRM_CONTRACT: '合同生效',
   UPDATE_CONTRACT: '修订合同',
   CREATE_REQUEST: '创建采购申请',
   ASSIGN_FULFILLMENT: '分派履约任务',
   TRANSFER_ASSIGNMENT: '转派任务',
   CREATE_QUOTE: '登记报价',
   SAVE_PLAN: '保存采购方案',
-  SUBMIT_PLAN: '提交经理审批',
-  DECIDE_PLAN: '经理决策',
+  SUBMIT_PLAN: '方案生效',
   GENERATE_ORDERS: '生成采购执行单',
   RECORD_ARRIVAL: '确认到货入库',
   RETURN_ARRIVAL: '采购到货退货',
@@ -264,18 +271,18 @@ export function contractDraftAction(
     action: contract ? 'UPDATE_CONTRACT' : 'CREATE_CONTRACT',
     title: contract ? '修订合同与规格' : '新建合同 / 样品',
     description: contract
-      ? '修订保留已有明细 ID；已执行内容按后端规则限制。关键条件变更后原批准和预审需重新检查。'
+      ? '修订保留已有明细 ID；已执行内容按后端规则限制。关键条件变更后原方案需重新生效。'
       : '以合同为唯一履约起点。产品采用统一 SKU，定制内容保存为本合同的规格快照。',
     fields: [
-      field('code', '合同编号', undefined, {
+      field('code', '订单号', undefined, {
         disabled: true,
         required: false,
         hint: '首次保存后自动生成，已有编号不可修改。',
       }),
-      field('name', '合同名称'),
+      field('name', '内部名称（可选）', undefined, { required: false }),
       field('alibabaTradeAssuranceNo', '阿里信保单号', undefined, {
         required: false,
-        hint: '最多 100 个字符；不做正式报关可填写“不报关”。',
+        hint: '仅适用阿里信保的订单填写实际单号，最多 100 个字符。',
       }),
       selectField('customerId', '客户', masterOptions(master, 'CUSTOMER')),
       selectField(
@@ -345,7 +352,11 @@ export function contractActions(
   contract: Contract,
   master: MasterRecord[],
 ): Record<string, ActionDefinition> {
-  const itemOptions = options(contract.items, ['skuName', 'id']);
+  const itemOptions = contract.items.map((item) => ({
+    value: item.id,
+    label: `${item.skuName} · ${item.specification}`,
+    fill: requestLineDefaults(contract, item),
+  }));
   const requestOptions = options(contract.requests ?? []);
   const requestItems = (contract.requests ?? []).flatMap((request) =>
     rows(request.items).map((item) => ({
@@ -384,7 +395,7 @@ export function contractActions(
     ),
     CONFIRM_CONTRACT: {
       action: 'CONFIRM_CONTRACT',
-      title: '确认合同',
+      title: '合同生效',
       description: '确认当前合同与产品规格快照后，按合同明细开展履约。',
       fields: [],
     },
@@ -392,7 +403,7 @@ export function contractActions(
       action: 'CANCEL_REQUEST',
       title: '取消采购申请',
       description:
-        '取消未形成执行承诺的申请；已有批准或下单等约束由服务端检查，历史记录保留。',
+        '取消未形成执行承诺的申请；已有生效或下单等约束由服务端检查，历史记录保留。',
       fields: [
         selectField(
           'requestId',
@@ -407,15 +418,24 @@ export function contractActions(
       description:
         '可分批提交，同一明细允许超量申请。申请不会自动扩大合同数量。',
       fields: [
-        field('name', '申请名称'),
-        field('remark', '申请说明 / 超量原因', 'textarea', { required: false }),
+        field('name', '申请名称', undefined, {
+          default: contract.code,
+          hidden: true,
+          hint: '自动带入当前合同编号，可按需修改；同一合同允许分批申请。',
+        }),
+        field('remark', '备注 / 超量原因', 'textarea', { required: false }),
       ],
       lineKey: 'items',
       lineFields: [
         selectField('contractItemId', '合同产品明细', itemOptions),
-        quantity(),
-        field('requiredDate', '要求到货日期', 'date'),
-        field('remark', '明细说明', undefined, { required: false }),
+        field('quantity', '本次申请数量', 'decimal', {
+          min: 0.000001,
+          hint: '默认尚未申请的数量，可按本次需求调整；超量请在备注说明。',
+        }),
+        field('requiredDate', '期望到货日', 'date', {
+          required: false,
+          hint: '默认合同产品交期；尚未确定可留空。',
+        }),
       ],
     },
     ASSIGN_FULFILLMENT: {
@@ -506,36 +526,16 @@ export function contractActions(
     },
     SUBMIT_PLAN: {
       action: 'SUBMIT_PLAN',
-      title: '提交方案审批',
+      title: '方案生效',
       description:
-        '提交指定版本进行规则校验并进入经理决策；修改后需要重新提交。',
-      fields: planFields,
-    },
-    DECIDE_PLAN: {
-      action: 'DECIDE_PLAN',
-      title: '经理审批',
-      description: '决定绑定方案版本与数量上限，有共享约束时须整包决策。',
-      fields: [
-        ...planFields,
-        field('approved', '批准方案', 'boolean', { default: true }),
-        field('reason', '决策意见 / 风险处理依据', 'textarea'),
-      ],
-      lineKey: 'scopes',
-      optionalLines: true,
-      lineFields: [
-        selectField(
-          'planLineId',
-          '批准明细（留空批准全部）',
-          options(planLines),
-        ),
-        quantity(),
-      ],
+        '校验当前方案版本、报价和可用数量后生效；下单、预留和自产继续单独办理。',
+      fields: [...planFields],
     },
     GENERATE_ORDERS: {
       action: 'GENERATE_ORDERS',
       title: '生成采购执行单',
       description:
-        '仅生成当前批准版本的未执行数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单，各行保留原报价版本。',
+        '仅生成当前生效版本的未执行数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单，各行保留原报价版本。',
       fields: [
         ...planFields,
         field(
@@ -591,16 +591,30 @@ export function financeActions(
   return {
     CREATE_RECEIPT: {
       action: 'CREATE_RECEIPT',
-      title: '登记统一回款',
+      title: '新建回款记录',
       description:
-        '登记真实到账，按到账日期自动折算人民币；财务确认后计入合同回款，可暂时没有发票。',
+        '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
       fields: [
         source,
-        amount,
-        field('currency', '币种', undefined, { default: contract.currency }),
+        { ...amount, label: '回款金额' },
+        field('currency', '回款币种', undefined, {
+          default: contract.currency,
+        }),
         field('receivedAt', '到账日期', 'date'),
-        field('accountRef', '收款账户引用'),
-        field('evidenceRef', '到账凭证引用'),
+        selectField(
+          'paymentMethod',
+          '到款方式',
+          [
+            ['BANK_TRANSFER', '银行转账'],
+            ['ALIBABA', '阿里信保'],
+            ['PAYPAL', 'PayPal'],
+            ['ALIPAY', '支付宝'],
+            ['WECHAT', '微信'],
+            ['CASH', '现金'],
+            ['OTHER', '其他'],
+          ].map(([value, label]) => ({ value: value!, label: label! })),
+          { required: false },
+        ),
       ],
     },
     REFRESH_RECEIPT_FX: {
@@ -623,7 +637,7 @@ export function financeActions(
       action: 'CONFIRM_RECEIPT',
       title: '财务确认到账',
       description:
-        '核对主体、币种与到账凭证，确认后不可直接删除，只能记录退款或冲销。',
+        '核对真实到账金额、币种与到账日期，确认后不可直接删除，只能记录退款或冲销。',
       fields: [selectField('receiptId', '待确认回款', receiptOptions)],
     },
     REVERSE_RECEIPT: {
@@ -831,7 +845,7 @@ export function executionActions(
     TRANSFER_ASSIGNMENT: {
       action: 'TRANSFER_ASSIGNMENT',
       title: '转派履约任务',
-      description: '记录新责任人及转派依据，历史责任和审批记录保持可追溯。',
+      description: '记录新责任人及转派依据，历史责任和操作记录保持可追溯。',
       fields: [
         selectField(
           'assignmentId',
@@ -953,14 +967,14 @@ export function executionActions(
       action: 'STOCK_RESERVE',
       title: '预留合同库存',
       description:
-        '按已批准方案明细原子预留，后台校验批准版本、剩余额度与可用库存。',
+        '按已生效方案明细原子预留，后台校验生效版本、剩余额度与可用库存。',
       fields: [
         pool,
         source,
         contractItem,
         selectField(
           'planId',
-          '已批准方案',
+          '已生效方案',
           (contract.plans ?? [])
             .filter((plan) =>
               ['APPROVED', 'PARTIALLY_APPROVED'].includes(String(plan.status)),
@@ -971,10 +985,10 @@ export function executionActions(
               fill: { planVersion: plan.version ?? 1 },
             })),
         ),
-        field('planVersion', '批准方案版本', 'number', { min: 1 }),
+        field('planVersion', '生效方案版本', 'number', { min: 1 }),
         selectField(
           'planLineId',
-          '批准方案明细',
+          '生效方案明细',
           options(
             (contract.plans ?? []).flatMap((plan) => rows(plan.lines)),
             ['method', 'contractItemId', 'id'],
@@ -999,6 +1013,11 @@ export function executionActions(
         source,
         reservation,
         quantity,
+        field('shippedDate', '实际发货日期', 'date', {
+          default: new Date().toLocaleDateString('sv-SE', {
+            timeZone: 'Asia/Shanghai',
+          }),
+        }),
         field('evidenceRef', '发货 / 物流凭证引用'),
       ],
     },

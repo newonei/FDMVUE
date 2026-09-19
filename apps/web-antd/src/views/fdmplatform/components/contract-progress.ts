@@ -77,6 +77,13 @@ export function contractRelatedStages(
   summary: ContractRelatedSummary | undefined,
   contract: Contract | undefined,
 ) {
+  let receiptsValue = '暂未读取';
+  if (summary) {
+    receiptsValue =
+      summary.receipts.statusBreakdownAvailable === false
+        ? '未读取或当前不可见'
+        : `${summary.receipts.total} 笔`;
+  }
   return [
     {
       name: '采购申请',
@@ -96,11 +103,7 @@ export function contractRelatedStages(
     },
     {
       name: '关联回款',
-      value: summary
-        ? summary.receipts.statusBreakdownAvailable === false
-          ? '未读取或当前不可见'
-          : `${summary.receipts.total} 笔`
-        : '暂未读取',
+      value: receiptsValue,
       description: `${receiptStatusDescription(summary?.receipts)}；${receiptFinanceDescription(contract?.financeSummary, contract?.currency, nativeMoney)}`,
     },
     {
@@ -113,4 +116,18 @@ export function contractRelatedStages(
       ),
     },
   ];
+}
+
+export function contractDeliveryStatus(contract: Contract | undefined) {
+  const items = contractItemProgress(contract);
+  if (items.length === 0 || items.some((item) => !item.quantityProgressKnown))
+    return '待核对';
+  if (items.every((item) => item.deliveryComplete)) return '已发齐';
+  if (
+    items.some((item) =>
+      new BigNumber(item.shippedQuantity ?? 0).isGreaterThan(0),
+    )
+  )
+    return '部分发货';
+  return '未发货';
 }

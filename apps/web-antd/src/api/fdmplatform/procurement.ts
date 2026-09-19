@@ -182,6 +182,7 @@ export function uploadProcurementSigned(
 }
 
 export interface ProcurementOrderRow extends DocumentRow {
+  ownerUserIds?: number[];
   details?: ProcurementOrderView['details'];
   orderAmount?: string;
   paidAmount?: string;
@@ -190,6 +191,7 @@ export interface ProcurementOrderRow extends DocumentRow {
 export function getProcurementOrders(params: {
   contractId?: string;
   keyword?: string;
+  mine?: boolean;
   pageNo: number;
   pageSize: number;
   status?: string;

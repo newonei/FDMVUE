@@ -29,6 +29,7 @@ import {
 import { errorText } from '../../data';
 import { useEntityDetail } from '../../documents/useEntityDetail';
 import CustomerEditor from './CustomerEditor.vue';
+import { customerMissingFields } from './model';
 import OkkiCustomerPicker from './OkkiCustomerPicker.vue';
 
 import '../../components/compact-tables.css';
@@ -227,12 +228,20 @@ onBeforeUnmount(() => {
                 v-else-if="column.key === 'region'"
                 class="fdm-cell-line"
                 :title="
-                  [record.country, record.province, record.city]
+                  [
+                    record.countryName || record.country,
+                    record.province,
+                    record.city,
+                  ]
                     .filter(Boolean)
                     .join(' / ')
                 "
                 >{{
-                  [record.country, record.province, record.city]
+                  [
+                    record.countryName || record.country,
+                    record.province,
+                    record.city,
+                  ]
                     .filter(Boolean)
                     .join(' / ') || '—'
                 }}</span>
@@ -281,6 +290,11 @@ onBeforeUnmount(() => {
                 :color="record.active ? 'green' : 'default'"
               >
                 {{ record.active ? '启用' : '停用' }}
+                <span
+                  v-if="customerMissingFields(record).length"
+                  :title="`待补：${customerMissingFields(record).join('、')}`"
+                >
+                  · 待补资料</span>
               </Tag>
               <Space v-else-if="column.key === 'action'" :size="0">
                 <Button type="link" @click="edit(record as Customer)">

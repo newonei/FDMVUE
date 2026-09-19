@@ -2,12 +2,14 @@
 import type { DocumentKind } from '../documents/model';
 import type { DetailTab, WorkspaceKey } from '../workspaces';
 import type { ContractDocumentKind } from './contract-document-launcher';
+import type { WorkboardLaunch } from './contract-workboard';
 
 import type {
   AttachmentView,
   BusinessRecord,
   Contract,
   Directory,
+  DocumentRow,
   MasterRecord,
   PageResource,
 } from '#/api/fdmplatform';
@@ -31,30 +33,36 @@ import {
   contractAction,
   getAttachments,
   getContractAudit,
+  newIdempotencyKey,
 } from '#/api/fdmplatform';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
 
 import { productCategoryLabel } from '../contract-categories';
-import { contractActions, errorText, label } from '../data';
+import { errorText, label } from '../data';
 import { personLabel } from '../directory';
+import DocumentAction from '../documents/DocumentAction.vue';
 import ImportedContractCompletion from '../documents/ImportedContractCompletion.vue';
 import LinkedRecordTable from '../documents/LinkedRecordTable.vue';
 import { nativeMoney } from '../documents/migration-display';
 import MigrationSource from '../documents/MigrationSource.vue';
 import { documentDefinitions } from '../documents/model';
 import { entityTarget } from '../documents/navigation';
+import RecordDetail from '../documents/RecordDetail.vue';
 import RelatedLink from '../documents/RelatedLink.vue';
+import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import { detailTabFor } from '../workspaces';
-import ActionDialog from './ActionDialog.vue';
 import AttachmentPanel from './AttachmentPanel.vue';
 import {
   contractItemProgress,
   contractRelatedStages,
 } from './contract-progress';
+import { workboardDocumentRow } from './contract-workboard';
+import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
+import ContractWorkboard from './ContractWorkboard.vue';
 import RecordTable from './RecordTable.vue';
 const props = defineProps<{
   contract?: Contract;
@@ -73,16 +81,20 @@ const emit = defineEmits<{
   updated: [value: Contract];
 }>();
 const documentKind = ref<ContractDocumentKind>();
+const documentMode = ref<'create' | 'list'>();
 const documentsOpen = ref(false);
+const workLaunch = ref<WorkboardLaunch>();
+const workRow = ref<DocumentRow>();
 const attachmentBusy = ref(false);
 const childOpen = computed(
   () =>
     documentsOpen.value ||
     editorOpen.value ||
     completionOpen.value ||
-    confirmOpen.value ||
-    attachmentBusy.value ||
-    saving.value,
+    reimbursementOpen.value ||
+    !!workLaunch.value ||
+    activating.value ||
+    attachmentBusy.value,
 );
 const navigationGroups: { items: DocumentKind[]; title: string }[] = [
   { title: '外贸部门', items: ['requests', 'shipments', 'salesReturns'] },
@@ -103,12 +115,33 @@ const navigationGroups: { items: DocumentKind[]; title: string }[] = [
     items: ['receipts', 'refunds', 'invoices', 'allocations', 'costs'],
   },
 ];
+const quickDocuments: { action: string; kind: DocumentKind; title: string }[] =
+  [
+    { kind: 'requests', action: 'CREATE_REQUEST', title: '新建采购申请' },
+    { kind: 'receipts', action: 'CREATE_RECEIPT', title: '登记回款' },
+    { kind: 'shipments', action: 'STOCK_RESERVE', title: '预留库存' },
+    { kind: 'shipments', action: 'STOCK_SHIP', title: '登记发货' },
+    { kind: 'invoices', action: 'CREATE_INVOICE', title: '开票办理' },
+  ];
+function quickActionReason(action: string) {
+  if (props.loading) return '正在刷新合同，请稍后再试';
+  if (childOpen.value) return '请先完成或关闭当前办理窗口';
+  return contractQuickActionReason(props.contract, action);
+}
+function openQuickDocument(entry: { action: string; kind: DocumentKind }) {
+  const reason = quickActionReason(entry.action);
+  if (reason) {
+    message.warning(reason);
+    return;
+  }
+  startWork({ kind: entry.kind, action: entry.action });
+}
 const activeTab = ref('overview');
 const editorOpen = ref(false);
 const completionOpen = ref(false);
-const confirmOpen = ref(false);
-const saving = ref(false);
-const pageError = ref('');
+const reimbursementOpen = ref(false);
+const activating = ref(false);
+let activationKey = newIdempotencyKey();
 const attachments = ref<AttachmentView>();
 const attachmentError = ref('');
 const attachmentLoading = ref(false);
@@ -126,11 +159,6 @@ const company = computed(
     )?.companyName ??
     props.contract?.companyName ??
     '',
-);
-const confirmation = computed(() =>
-  props.contract
-    ? contractActions(props.contract, props.master).CONFIRM_CONTRACT
-    : undefined,
 );
 const standardFiles = computed(() => [
   ...new Map(
@@ -214,14 +242,16 @@ watch(
   () => [props.open, props.contract?.id],
   () => {
     ++summarySequence;
+    activationKey = newIdempotencyKey();
     documentsOpen.value = false;
     editorOpen.value = false;
     completionOpen.value = false;
-    confirmOpen.value = false;
+    reimbursementOpen.value = false;
+    workLaunch.value = undefined;
+    workRow.value = undefined;
     related.value = undefined;
     if (props.open && props.contract) {
       activeTab.value = detailTabFor(props.workspace, props.initialTab);
-      confirmOpen.value = false;
       attachments.value = undefined;
       audit.value = [];
       customs.value = undefined;
@@ -241,10 +271,24 @@ watch(
 watch(activeTab, (tab) => {
   if (tab === 'audit') void loadAudit();
 });
-function openDocuments(kind: ContractDocumentKind) {
+function openDocuments(kind: ContractDocumentKind, mode?: 'create' | 'list') {
   if (!props.contract || childOpen.value) return;
   documentKind.value = kind;
+  documentMode.value = mode;
   documentsOpen.value = true;
+}
+function startWork(launch: WorkboardLaunch) {
+  if (!props.contract || props.loading || childOpen.value) return;
+  try {
+    if (launch.action && !props.contract.allowedActions.includes(launch.action))
+      throw new Error('此操作当前不可用，请刷新订单后重试');
+    workRow.value = launch.recordId
+      ? workboardDocumentRow(props.contract, launch.kind, launch.recordId)
+      : undefined;
+    workLaunch.value = launch;
+  } catch (error) {
+    message.warning(errorText(error));
+  }
 }
 function documentUpdated(value: Contract) {
   if (value.id !== props.contract?.id) return;
@@ -253,31 +297,37 @@ function documentUpdated(value: Contract) {
   void loadFiles();
   if (activeTab.value === 'audit') void loadAudit();
 }
+async function activateContract() {
+  const current = props.contract;
+  if (
+    !current ||
+    childOpen.value ||
+    props.loading ||
+    current.status !== 'DRAFT' ||
+    !current.allowedActions.includes('CONFIRM_CONTRACT')
+  )
+    return;
+  activating.value = true;
+  try {
+    const result = await contractAction(
+      current.id,
+      'CONFIRM_CONTRACT',
+      current.version,
+      activationKey,
+      {},
+    );
+    if (props.contract?.id !== current.id) return;
+    activationKey = newIdempotencyKey();
+    documentUpdated(result);
+    message.success('合同已生效，可以继续办理采购、交付和收付款');
+  } catch (error) {
+    message.error(errorText(error));
+  } finally {
+    activating.value = false;
+  }
+}
 function close() {
   if (!childOpen.value) emit('close');
-}
-async function confirm(payload: Record<string, unknown>, key: string) {
-  if (!props.contract) return;
-  saving.value = true;
-  pageError.value = '';
-  try {
-    emit(
-      'updated',
-      await contractAction(
-        props.contract.id,
-        'CONFIRM_CONTRACT',
-        props.contract.version,
-        key,
-        payload,
-      ),
-    );
-    confirmOpen.value = false;
-    message.success('合同已确认');
-  } catch (error) {
-    pageError.value = errorText(error);
-  } finally {
-    saving.value = false;
-  }
 }
 async function download(file: { id: string; name: string }) {
   if (!props.contract) return;
@@ -300,7 +350,11 @@ async function download(file: { id: string; name: string }) {
 <template>
   <Drawer
     :open="open"
-    :title="contract ? `${contract.code} · ${contract.name}` : '合同详情'"
+    :title="
+      contract
+        ? [contract.code, contract.name].filter(Boolean).join(' · ')
+        : '合同详情'
+    "
     width="min(1150px,96vw)"
     :closable="!childOpen"
     :mask-closable="!childOpen"
@@ -320,6 +374,7 @@ async function download(file: { id: string; name: string }) {
             nativeMoney(contract.additionalAmount, contract.currency)
           }}</span><Button
           v-if="contract.allowedActions.includes('UPDATE_CONTRACT')"
+          :disabled="childOpen || loading"
           @click="editorOpen = true"
         >
           编辑合同与产品
@@ -329,13 +384,16 @@ async function download(file: { id: string; name: string }) {
             contract.allowedActions.includes('CONFIRM_CONTRACT')
           "
           type="primary"
-          @click="confirmOpen = true"
+          :loading="activating"
+          :disabled="childOpen || loading"
+          @click="activateContract"
         >
-          确认合同
+          合同生效
         </Button>
 </Space><Button
         v-if="contract.allowedActions.includes('COMPLETE_IMPORTED_CONTRACT')"
         type="primary"
+        :disabled="childOpen || loading"
         @click="completionOpen = true"
       >
         补齐办理资料
@@ -345,39 +403,67 @@ async function download(file: { id: string; name: string }) {
         :native-source="{ kind: 'CONTRACT', nativeId: contract.id }"
       /><Tabs v-model:active-key="activeTab">
         <TabPane key="overview" tab="合同概要">
-          <Descriptions bordered size="small" :column="2">
-            <Descriptions.Item label="订单所属公司">
-              {{ company || '待补齐' }}
+          <ContractWorkboard
+            :contract="contract"
+            :disabled="childOpen"
+            :loading="loading"
+            @launch="startWork"
+          />
+          <details class="overview-basic">
+            <summary>订单基本资料与销售附加费用</summary>
+            <Descriptions bordered size="small" :column="2">
+              <Descriptions.Item label="订单所属公司">
+                {{ company || '待补齐' }}
 </Descriptions.Item><Descriptions.Item label="业务类型">
-              {{ label(contract.businessType) }}
+                {{ label(contract.businessType) }}
 </Descriptions.Item><Descriptions.Item label="产品分类">
-              {{
-                productCategoryLabel(contract.productCategory)
-              }}
+                {{
+                  productCategoryLabel(contract.productCategory)
+                }}
 </Descriptions.Item><Descriptions.Item label="负责人">
-              {{
-                personLabel(directory, contract.ownerUserId)
-              }}
+                {{
+                  personLabel(directory, contract.ownerUserId)
+                }}
 </Descriptions.Item><Descriptions.Item label="业务部门">
-              {{
-                directory?.departments.find(
-                  (item) => item.id === contract?.departmentId,
-                )?.name ?? '未指定'
-              }}
+                {{
+                  directory?.departments.find(
+                    (item) => item.id === contract?.departmentId,
+                  )?.name ?? '未指定'
+                }}
 </Descriptions.Item><Descriptions.Item label="签订日期">
-              {{ label(contract.signedDate) }}
-</Descriptions.Item><Descriptions.Item label="数据版本">
-              {{ contract.version }}
+                {{ label(contract.signedDate) }}
 </Descriptions.Item><Descriptions.Item label="阿里信保单号" :span="2">
-              {{
-                contract.alibabaTradeAssuranceNo || '未填写'
-              }}
-</Descriptions.Item><Descriptions.Item label="付款条件" :span="2">
-              {{ label(contract.paymentTerms) }}
-</Descriptions.Item><Descriptions.Item label="交付要求" :span="2">
-              {{ label(contract.deliveryRequirement) }}
-            </Descriptions.Item>
-          </Descriptions>
+                {{
+                  contract.alibabaTradeAssuranceNo || '未填写'
+                }}
+</Descriptions.Item><Descriptions.Item
+                v-if="contract.paymentTerms"
+                label="付款条件"
+                :span="2"
+              >
+                {{ label(contract.paymentTerms) }}
+</Descriptions.Item><Descriptions.Item
+                v-if="contract.deliveryRequirement"
+                label="交付要求"
+                :span="2"
+              >
+                {{ label(contract.deliveryRequirement) }}
+              </Descriptions.Item>
+            </Descriptions>
+            <RecordTable
+              v-if="contract.salesCharges?.length"
+              :data="
+                contract.salesCharges.map((charge, index) => ({
+                  ...charge,
+                  id: String(index),
+                  currency: contract?.currency,
+                }))
+              "
+              :columns="
+                columns('name|销售附加收费', 'amount|金额', 'currency|币种')
+              "
+            />
+          </details>
 </TabPane><TabPane key="products" tab="产品明细">
           <LinkedRecordTable
             :contract="contract"
@@ -387,6 +473,7 @@ async function download(file: { id: string; name: string }) {
                 'skuName|产品',
                 'specification|冻结规格',
                 'shape|形状',
+                'suggestedSupplierName|建议采购工厂',
                 'quantity|合同数量',
                 'unit|单位',
                 'unitPrice|销售单价',
@@ -449,14 +536,25 @@ async function download(file: { id: string; name: string }) {
           >
             <div class="document-links">
               <Button
+                v-if="group.title === '外贸部门'"
+                :disabled="
+                  childOpen || ['CLOSED', 'CANCELLED'].includes(contract.status)
+                "
+                @click="reimbursementOpen = true"
+              >
+                费用报销
+              </Button>
+              <Button
                 v-for="kind in group.items"
                 :key="kind"
-                @click="openDocuments(kind)"
+                :disabled="childOpen"
+                @click="openDocuments(kind, 'list')"
               >
                 {{ documentDefinitions[kind].title }}
 </Button><Button
                 v-if="group.title === '采购部门'"
-                @click="openDocuments('customs')"
+                :disabled="childOpen"
+                @click="openDocuments('customs', 'list')"
               >
                 报关跟进
               </Button>
@@ -489,19 +587,88 @@ async function download(file: { id: string; name: string }) {
             "
           />
         </TabPane>
-</Tabs><Card v-if="activeTab === 'overview'" title="后续业务" size="small">
-        <Space wrap>
-          <Button type="primary" @click="openDocuments('requests')">
-            采购申请
-</Button><Button @click="activeTab = 'progress'">
-            查看流程进度与全部关联单据
-</Button><Button @click="activeTab = 'products'">查看产品明细</Button>
-        </Space>
-      </Card>
+      </Tabs>
+      <template v-if="activeTab === 'overview'">
+        <Card title="后续业务" size="small">
+          <div class="overview-business">
+            <Alert
+              v-if="['CLOSED', 'CANCELLED'].includes(contract.status)"
+              type="info"
+              show-icon
+              message="合同已结案或取消，可通过更多业务查看历史单据，不能继续新建业务。"
+            />
+            <Alert
+              v-else-if="contract.status === 'DRAFT'"
+              type="info"
+              show-icon
+              message="采购和发货需先确认合同；回款登记需补齐成交单价。建单保存不等于合同结案。"
+            />
+            <Space wrap>
+              <span
+                v-for="entry in quickDocuments"
+                :key="entry.action"
+                :title="quickActionReason(entry.action)"
+              >
+                <Button
+                  :type="entry.kind === 'requests' ? 'primary' : 'default'"
+                  :disabled="Boolean(quickActionReason(entry.action))"
+                  @click="openQuickDocument(entry)"
+                >
+                  {{ entry.title }}
+                </Button>
+              </span>
+              <Button
+                :disabled="
+                  childOpen || ['CLOSED', 'CANCELLED'].includes(contract.status)
+                "
+                @click="reimbursementOpen = true"
+              >
+                费用报销
+              </Button>
+              <Button :disabled="childOpen" @click="activeTab = 'progress'">
+                更多业务 / 全部关联单据
+              </Button>
+              <Button :disabled="childOpen" @click="activeTab = 'products'">
+                查看产品明细
+              </Button>
+            </Space>
+            <p class="overview-note">
+              弹窗自动关联合同，保存后更新合同及流程进度；回款登记后仍需确认到账。
+            </p>
+          </div>
+        </Card>
+        <Card title="流程进度" size="small">
+          <div class="overview-business">
+            <div class="progress-grid">
+              <Card
+                v-for="stage in stages"
+                :key="stage.name"
+                size="small"
+                :title="stage.name"
+              >
+                {{ stage.value }}
+                <p
+                  v-if="'description' in stage && stage.description"
+                  class="overview-note"
+                >
+                  {{ stage.description }}
+                </p>
+              </Card>
+            </div>
+            <Alert v-if="customsError" :message="customsError" type="warning" />
+            <Alert v-if="relatedError" :message="relatedError" type="warning">
+              <template #action>
+                <Button size="small" @click="loadSummary">重新读取</Button>
+              </template>
+            </Alert>
+          </div>
+        </Card>
+      </template>
     </div>
 </Drawer><ContractDocumentDialog
     :open="open && documentsOpen"
     :kind="documentKind"
+    :mode="documentMode"
     :contract="contract"
     @close="documentsOpen = false"
     @updated="documentUpdated"
@@ -523,13 +690,33 @@ async function download(file: { id: string; name: string }) {
     :directory="directory"
     @close="completionOpen = false"
     @saved="(value) => emit('updated', value)"
-  /><ActionDialog
-    :open="confirmOpen"
-    :definition="confirmation"
-    :saving="saving"
-    :error="pageError"
-    @close="confirmOpen = false"
-    @submit="confirm"
+  /><FinanceDocument
+    :open="open && reimbursementOpen"
+    type="REIMBURSEMENT"
+    :context="{ contractId: contract?.id, currency: contract?.currency }"
+    @close="reimbursementOpen = false"
+    @updated="emit('refresh')"
+  />
+  <DocumentAction
+    v-if="workLaunch?.action"
+    :open="open"
+    :kind="workLaunch.kind"
+    :action="workLaunch.action"
+    :contract-id="contract?.id"
+    :row="workRow"
+    :source="workLaunch.source"
+    lock-contract
+    @close="workLaunch = undefined"
+    @updated="documentUpdated"
+  />
+  <RecordDetail
+    v-if="workLaunch && !workLaunch.action"
+    :open="open"
+    :kind="workLaunch.kind"
+    :row="workRow"
+    embedded
+    @close="workLaunch = undefined"
+    @updated="emit('refresh')"
   />
 </template>
 <style scoped>
@@ -553,5 +740,33 @@ async function download(file: { id: string; name: string }) {
 
 .navigation-note {
   margin-top: 20px;
+}
+
+.overview-business {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.overview-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #64748b);
+}
+
+.overview-basic {
+  margin-bottom: 16px;
+}
+
+.overview-basic > summary {
+  padding: 10px 0;
+  color: var(--ant-color-text-secondary, #64748b);
+  cursor: pointer;
+}
+
+@media (max-width: 600px) {
+  .progress-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

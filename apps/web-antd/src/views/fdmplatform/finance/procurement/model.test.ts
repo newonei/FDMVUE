@@ -3,6 +3,7 @@ import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-fin
 import { describe, expect, it } from 'vitest';
 
 import {
+  actionNames,
   allocationDifference,
   allocationGroupsAfterSourceChange,
   allocationPreview,
@@ -16,6 +17,12 @@ import {
   procurementOrderAmount,
 } from './model';
 describe('采购财务编辑与金额口径', () => {
+  it('生效历史显示中文操作名，同时保留既有审核记录的历史含义', () => {
+    expect(actionNames.ACTIVATE).toBe('提交生效');
+    expect(actionNames.SUBMIT).toBe('提交生效');
+    expect(actionNames.APPROVE).toBe('历史批准');
+    expect(actionNames.REJECT).toBe('历史退回');
+  });
   it('草稿独立复制，保留费用来源身份但不修改原记录', () => {
     const source = {
       expenses: [
@@ -52,7 +59,7 @@ describe('采购财务编辑与金额口径', () => {
     });
     expect(body).not.toHaveProperty('paidAt');
   });
-  it('付款只关联来源审批单，不在客户端编造汇率和凭证', () => {
+  it('付款只关联来源生效单据，不在客户端编造汇率和凭证', () => {
     const body = financePayload(
       'PAYMENT',
       financeDraft({

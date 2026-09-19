@@ -112,7 +112,7 @@ async function download(item: ContractAttachment) {
       v-if="view && !view.enabled"
       type="warning"
       show-icon
-      message="当前合同私有附件存储尚未配置。请由系统管理员完成私有存储配置后上传；不会改用公开文件地址。"
+      message="系统文件存储暂不可用，请检查基础设施中的文件配置。附件上传复用系统当前存储。"
     />
     <p>
       {{

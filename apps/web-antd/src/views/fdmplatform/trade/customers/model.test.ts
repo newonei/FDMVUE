@@ -4,10 +4,39 @@ import {
   countryMatches,
   countrySelectOptions,
   customerForm,
+  customerMissingFields,
+  customerSourceOptions,
   mergeOkkiCustomers,
 } from './model';
 
 describe('oKKI customer preview and local maintenance', () => {
+  it('preserves removed or historical source values without changing the configured dictionary', () => {
+    const configured = ['展会', '其他'];
+    expect(customerSourceOptions(configured, '历史进口商介绍')).toEqual([
+      { label: '展会', value: '展会' },
+      { label: '其他', value: '其他' },
+      { label: '历史进口商介绍（原值）', value: '历史进口商介绍' },
+    ]);
+    expect(customerSourceOptions(configured, '展会')).toHaveLength(2);
+    expect(configured).toEqual(['展会', '其他']);
+  });
+  it('flags contact and delivery gaps without demanding both email and phone', () => {
+    expect(
+      customerMissingFields({ email: 'buyer@example.com', address: '   ' }),
+    ).toEqual(['客户来源', '公司名称', '联系人', '详细地址']);
+    expect(
+      customerMissingFields({
+        phone: '+48 123',
+        customerSource: '展会',
+        companyName: 'Buyer Ltd',
+        contactName: 'Buyer',
+        address: 'Address',
+      }),
+    ).toEqual([]);
+    expect(customerMissingFields({ email: ' ', phone: '' })).toContain(
+      '邮箱或电话',
+    );
+  });
   it('searches the supplied fixed country list by Chinese, English, ISO2 and ISO3 without creating values', () => {
     const options = countrySelectOptions([
       { code: 'US', nameZh: '美国', nameEn: 'United States', iso3: 'USA' },

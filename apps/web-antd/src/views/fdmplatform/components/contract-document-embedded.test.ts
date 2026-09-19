@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   customsPage: vi.fn(),
   customs: vi.fn(),
   customsFiles: vi.fn(),
+  customsAction: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
   getAccess: vi.fn().mockResolvedValue({ userId: 1 }),
@@ -45,7 +46,7 @@ vi.mock('#/api/fdmplatform/customs', () => ({
 vi.mock('#/api/fdmplatform/submissions', () => ({
   contractActionWithAttachments: mocks.action,
   createCustomsWithAttachments: vi.fn(),
-  customsActionWithAttachments: vi.fn(),
+  customsActionWithAttachments: mocks.customsAction,
 }));
 vi.mock('../documents/ContractPicker.vue', () => ({
   default: defineComponent({
@@ -169,9 +170,13 @@ vi.mock('ant-design-vue', () => {
   });
   const modal = defineComponent({
     props: { open: Boolean },
+    emits: ['ok'],
     setup: (props, ctx) => () =>
       props.open
-        ? h('section', { 'data-modal': true }, ctx.slots.default?.())
+        ? h('section', { 'data-modal': true }, [
+            ctx.slots.default?.(),
+            h('button', { onClick: () => ctx.emit('ok') }, '保存当前设置'),
+          ])
         : null,
   });
   const table = defineComponent({
@@ -503,6 +508,110 @@ describe('locked contract document actions', () => {
 });
 
 describe('embedded customs child', () => {
+  it.each([
+    ['READY', '资料齐全'],
+    ['PENDING_REVIEW', '待完善资料'],
+    ['REVIEW_PENDING', '待完善资料'],
+  ])(
+    'displays document availability for %s without an approval stage',
+    async (documentStatus, title) => {
+      mocks.customs.mockResolvedValueOnce({
+        ...batchFixture(),
+        documentStatus,
+      });
+      const { host } = await mount(CustomsPanel, {
+        companyId: 1,
+        contractId: 'contract-a',
+        embedded: true,
+      });
+      click(host, '查看跟进');
+      await settle();
+      expect(host.textContent).toContain(title);
+      expect(host.textContent).not.toContain('复核');
+    },
+  );
+  it('updates required documents without submitting or displaying a manual review flag', async () => {
+    const batch = {
+      ...batchFixture(),
+      allowedActions: ['CHECKLIST'],
+      checklist: [
+        {
+          id: 'check-a',
+          category: 'CONTRACT',
+          applicable: true,
+          required: true,
+          reviewed: true,
+          reason: '用于本批出口',
+        },
+      ],
+    };
+    mocks.customs.mockResolvedValue(batch);
+    mocks.customsAction.mockResolvedValue({ ...batch, version: 2 });
+    const { host } = await mount(CustomsPanel, {
+      companyId: 1,
+      contractId: 'contract-a',
+      embedded: true,
+    });
+    click(host, '查看跟进');
+    await settle();
+    host
+      .querySelector<HTMLButtonElement>('[data-row="check-a"] button')!
+      .click();
+    await settle();
+    expect(host.textContent).toContain('必须提供');
+    expect(host.textContent).not.toContain('已复核当前文件');
+    click(host, '保存当前设置');
+    await vi.waitFor(() => expect(mocks.customsAction).toHaveBeenCalledOnce());
+    expect(mocks.customsAction).toHaveBeenCalledWith(
+      'customs-a',
+      1,
+      'embedded-test-key',
+      'CHECKLIST',
+      {
+        category: 'CONTRACT',
+        applicable: true,
+        required: true,
+        reason: '用于本批出口',
+      },
+      [],
+      undefined,
+    );
+    expect(mocks.customsAction.mock.calls[0]![4]).not.toHaveProperty(
+      'reviewed',
+    );
+  });
+
+  it('offers cost registration without approval or rejection even for legacy allowed actions', async () => {
+    mocks.customs.mockResolvedValueOnce({
+      ...batchFixture(),
+      allowedActions: ['SUBMIT_COST', 'REGISTER_COST', 'REJECT_COST'],
+      expenses: [
+        {
+          id: 'expense',
+          status: 'PENDING',
+          attachmentId: 'voucher',
+          cost: { amount: '100', currency: 'CNY', category: 'TRANSPORT' },
+        },
+      ],
+    });
+    const { host } = await mount(CustomsPanel, {
+      companyId: 1,
+      contractId: 'contract-a',
+      embedded: true,
+    });
+    click(host, '查看跟进');
+    await settle();
+    expect(host.textContent).toContain('待归集');
+    expect(
+      [...host.querySelectorAll('button')].some(
+        (button) => button.textContent?.trim() === '退回',
+      ),
+    ).toBe(false);
+    click(host, '确认归集');
+    await settle();
+    expect(host.querySelector('[data-modal]')).not.toBeNull();
+  });
+
   it('ignores the parent documentId and opens and closes its own detail without modifying the route', async () => {
     const busy = vi.fn();
     const { host, router } = await mount(CustomsPanel, {

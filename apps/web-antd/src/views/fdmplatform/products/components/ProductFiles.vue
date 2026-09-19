@@ -114,7 +114,7 @@ async function download(file: ProductAttachment) {
       v-if="view && !view.enabled"
       type="warning"
       show-icon
-      message="产品私有资料存储尚未配置，请配置后上传。"
+      message="系统文件存储暂不可用，请检查基础设施中的文件配置。"
     />
     <p>
       此处上传跨业务共用的产品规格、检测、包装及说明书资料，本业务所有启用登录用户均可读取。客户专属图稿请在具体合同的“产品规格”附件中上传。

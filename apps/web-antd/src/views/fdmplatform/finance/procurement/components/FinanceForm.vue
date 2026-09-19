@@ -49,7 +49,10 @@ const props = defineProps<{
   saving: boolean;
   type: ProcurementFinanceType;
 }>();
-const emit = defineEmits<{ save: [payload: Record<string, unknown>] }>();
+const emit = defineEmits<{
+  save: [payload: Record<string, unknown>];
+  submit: [payload: Record<string, unknown>];
+}>();
 const form = reactive(financeDraft());
 const entities = ref<ProcurementSetting[]>([]);
 const orderPickerOpen = ref(false);
@@ -263,10 +266,13 @@ function validate() {
 function payload() {
   return financePayload(props.type, form);
 }
-function save() {
+function save(submit = false) {
   if (props.saving) return;
   pageError.value = validate();
-  if (!pageError.value) emit('save', payload());
+  if (!pageError.value) {
+    if (submit) emit('submit', payload());
+    else emit('save', payload());
+  }
 }
 defineExpose({ payload });
 </script>
@@ -303,7 +309,7 @@ defineExpose({ payload });
             :disabled="saving || !!record"
             @click="sourcePickerOpen = true"
           >
-            选择已批准来源
+            选择已生效来源
           </Button>
         </Space>
 </Form.Item><Form.Item v-if="type === 'COST_ALLOCATION'" label="成本来源">
@@ -711,9 +717,25 @@ defineExpose({ payload });
       >
         添加产品分配组
       </Button>
-</Card><slot name="attachments"></slot><Button :disabled="saving" type="primary" :loading="saving" @click="save">
-      保存草稿
-</Button><OrderPicker
+</Card><slot name="attachments"></slot><Space>
+      <Button
+        :disabled="saving"
+        :type="type === 'REQUEST' ? 'default' : 'primary'"
+        :loading="saving"
+        @click="save()"
+      >
+        保存草稿
+      </Button>
+      <Button
+        v-if="type === 'REQUEST'"
+        :disabled="saving"
+        type="primary"
+        :loading="saving"
+        @click="save(true)"
+      >
+        提交生效
+      </Button>
+</Space><OrderPicker
       :open="orderPickerOpen"
       @close="orderPickerOpen = false"
       @selected="chooseOrder"

@@ -26,6 +26,26 @@ export function customerForm(customer?: Partial<Customer>) {
   );
 }
 
+export function customerSourceOptions(values: string[], current = '') {
+  const options = values.map((value) => ({ label: value, value }));
+  if (current && !values.includes(current))
+    options.push({ label: `${current}（原值）`, value: current });
+  return options;
+}
+
+export function customerMissingFields(
+  customer: Partial<Record<string, unknown>>,
+) {
+  const missing: string[] = [];
+  const empty = (key: string) => !String(customer[key] ?? '').trim();
+  if (empty('customerSource')) missing.push('客户来源');
+  if (empty('companyName')) missing.push('公司名称');
+  if (empty('contactName')) missing.push('联系人');
+  if (empty('email') && empty('phone')) missing.push('邮箱或电话');
+  if (empty('address')) missing.push('详细地址');
+  return missing;
+}
+
 export function countrySelectOptions(countries: CountryOption[]) {
   return countries.map((country) => ({
     value: country.code,
@@ -45,7 +65,7 @@ export function countryMatches(input: string, option?: unknown) {
   );
 }
 
-/** OKKI searches scan a bounded number of remote pages. Continue without losing prior matches. */
+/** Merge local directory result pages without losing matches or duplicating a customer. */
 export function mergeOkkiCustomers(
   current: OkkiCustomerSource[],
   next: OkkiCustomerSource[],

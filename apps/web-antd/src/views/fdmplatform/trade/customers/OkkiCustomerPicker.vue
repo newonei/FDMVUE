@@ -5,6 +5,7 @@ import type {
   OkkiCustomerPreview,
   OkkiCustomerSearch,
   OkkiCustomerSource,
+  OkkiDirectoryStatus,
 } from '#/api/fdmplatform/customers';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
@@ -29,8 +30,11 @@ import {
   getCustomer,
   getCustomerOptions,
   getOkkiCustomerStatus,
+  getOkkiDirectoryStatus,
+  pauseOkkiDirectory,
   previewOkkiCustomer,
   refreshOkkiCustomer,
+  refreshOkkiDirectory,
   searchOkkiCustomers,
   syncOkkiCustomer,
 } from '#/api/fdmplatform/customers';
@@ -53,6 +57,7 @@ const result = ref<OkkiCustomerSearch>();
 const preview = ref<OkkiCustomerPreview>();
 const existing = ref<Customer>();
 const loading = ref(false);
+const initializing = ref(false);
 const previewLoading = ref(false);
 const saving = ref(false);
 const panelError = ref('');
@@ -62,6 +67,73 @@ const countries = ref<CountryOption[]>([]);
 const selectedCountry = ref<string>();
 const countryOptions = computed(() => countrySelectOptions(countries.value));
 const previewSection = ref<HTMLElement>();
+const directory = ref<OkkiDirectoryStatus>();
+const directoryBusy = ref(false);
+let directorySequence = 0;
+let sessionSequence = 0;
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+function stopPolling() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = undefined;
+}
+function schedulePoll() {
+  stopPolling();
+  if (props.open && directory.value?.status === 'RUNNING')
+    pollTimer = setTimeout(() => {
+      void loadDirectory();
+    }, 3000);
+}
+async function loadDirectory() {
+  const run = directorySequence;
+  try {
+    const value = await getOkkiDirectoryStatus();
+    if (!props.open || run !== directorySequence) return;
+    const completed =
+      directory.value?.status === 'RUNNING' && value.status === 'COMPLETE';
+    directory.value = value;
+    if (completed && result.value) await search(false);
+  } catch (error) {
+    if (props.open && run === directorySequence)
+      panelError.value = errorText(error);
+  } finally {
+    if (run === directorySequence) schedulePoll();
+  }
+}
+async function updateDirectory(restart = false) {
+  if (directoryBusy.value) return;
+  const run = ++directorySequence;
+  stopPolling();
+  directoryBusy.value = true;
+  panelError.value = '';
+  try {
+    const value = await refreshOkkiDirectory(restart);
+    if (props.open && run === directorySequence) directory.value = value;
+  } catch (error) {
+    if (run === directorySequence) panelError.value = errorText(error);
+  } finally {
+    if (run === directorySequence) {
+      directoryBusy.value = false;
+      schedulePoll();
+    }
+  }
+}
+async function pauseDirectory() {
+  if (directoryBusy.value) return;
+  const run = ++directorySequence;
+  stopPolling();
+  directoryBusy.value = true;
+  try {
+    const value = await pauseOkkiDirectory();
+    if (props.open && run === directorySequence) directory.value = value;
+  } catch (error) {
+    if (run === directorySequence) panelError.value = errorText(error);
+  } finally {
+    if (run === directorySequence) {
+      directoryBusy.value = false;
+      schedulePoll();
+    }
+  }
+}
 watch(
   keyword,
   () => {
@@ -91,10 +163,18 @@ const columns = [
 watch(
   () => props.open,
   async (open) => {
+    const session = ++sessionSequence;
+    directorySequence++;
+    stopPolling();
+    directoryBusy.value = false;
     searchSequence++;
     previewSequence++;
-    if (!open) return;
+    if (!open) {
+      initializing.value = false;
+      return;
+    }
     status.value = undefined;
+    directory.value = undefined;
     result.value = undefined;
     items.value = [];
     preview.value = undefined;
@@ -105,27 +185,29 @@ watch(
     panelError.value = '';
     previewError.value = '';
     previewLoading.value = false;
-    const sequence = searchSequence;
-    loading.value = true;
+    initializing.value = true;
+    loading.value = false;
     try {
       const [connection, options] = await Promise.all([
         getOkkiCustomerStatus(),
         getCustomerOptions(),
       ]);
-      if (!props.open || sequence !== searchSequence) return;
+      if (!props.open || session !== sessionSequence) return;
       status.value = connection;
       countries.value = options.countries;
+      if (canSearch.value && !props.refreshCustomer) await loadDirectory();
       if (props.refreshCustomer?.externalId && canSearch.value)
         await select(props.refreshCustomer.externalId);
     } catch (error) {
-      if (sequence === searchSequence) panelError.value = errorText(error);
+      if (session === sessionSequence) panelError.value = errorText(error);
     } finally {
-      if (sequence === searchSequence) loading.value = false;
+      if (session === sessionSequence) initializing.value = false;
     }
   },
+  { immediate: true },
 );
 async function search(continuing = false) {
-  if (!canSearch.value || loading.value) return;
+  if (!canSearch.value || loading.value || initializing.value) return;
   const cursor = continuing ? result.value?.nextCursor : 1;
   if (cursor === null || cursor === undefined) return;
   const query = continuing ? activeKeyword.value : keyword.value.trim();
@@ -142,6 +224,8 @@ async function search(continuing = false) {
     if (!props.open || sequence !== searchSequence) return;
     items.value = mergeOkkiCustomers(items.value, response.items);
     result.value = response;
+    directory.value = response.directory;
+    schedulePoll();
   } catch (error) {
     if (sequence === searchSequence) panelError.value = errorText(error);
   } finally {
@@ -213,6 +297,9 @@ async function confirm() {
   }
 }
 onBeforeUnmount(() => {
+  sessionSequence++;
+  directorySequence++;
+  stopPolling();
   searchSequence++;
   previewSequence++;
 });
@@ -243,20 +330,63 @@ onBeforeUnmount(() => {
         "
       />
       <template v-if="!refreshCustomer">
+        <Alert
+          v-if="canSearch"
+          :type="directory?.lastError ? 'warning' : 'info'"
+          show-icon
+          :message="
+            directory?.status === 'RUNNING'
+              ? '客户目录正在后台更新，关闭窗口后仍会继续'
+              : directory?.complete
+                ? '正在使用最近一次完整客户目录'
+                : '请先建立 OKKI 客户目录，完成后可搜索全部客户'
+          "
+          :description="
+            directory
+              ? `可搜索 ${directory.indexedCount} 条；本轮已读取 ${directory.scannedCount} 条${directory.remoteTotal === null ? '' : `，来源总数参考 ${directory.remoteTotal}`}。${directory.completedAt ? `上次完整更新时间：${directory.completedAt}。` : '尚无完整目录。'}${directory.lastError || ''}`
+              : '读取目录状态中…'
+          "
+        />
+        <Space v-if="canSearch" wrap>
+          <Button
+            v-if="directory?.status !== 'RUNNING'"
+            :loading="directoryBusy"
+            @click="updateDirectory(false)"
+          >
+            {{
+              directory?.status === 'FAILED' || directory?.status === 'PAUSED'
+                ? '继续更新目录'
+                : '更新客户目录'
+            }}
+          </Button>
+          <Button v-else :loading="directoryBusy" @click="pauseDirectory">
+            暂停更新
+          </Button>
+          <Button
+            v-if="
+              directory?.status === 'FAILED' || directory?.status === 'PAUSED'
+            "
+            :disabled="directoryBusy"
+            @click="updateDirectory(true)"
+          >
+            从头重新建立
+          </Button>
+        </Space>
         <Space wrap>
           <Input
             v-model:value="keyword"
             placeholder="客户名称、简称或编号"
             allow-clear
             class="search-input"
+            :disabled="initializing || saving"
             @press-enter="search(false)"
           /><Button
             type="primary"
-            :disabled="!canSearch"
-            :loading="loading"
+            :disabled="!canSearch || initializing"
+            :loading="loading || initializing"
             @click="search(false)"
           >
-            搜索 OKKI
+            搜索客户目录
           </Button>
         </Space>
         <Alert
@@ -265,11 +395,9 @@ onBeforeUnmount(() => {
           show-icon
           :message="
             result.notice ||
-            (result.hasMore
-              ? '本次只扫描了部分远程客户，可继续查找剩余数据。'
-              : '本次搜索已扫描结束。')
+            (result.hasMore ? '还有更多匹配客户。' : '已显示全部匹配客户。')
           "
-          :description="`当前累计匹配 ${items.length} 个客户，本次扫描 ${result.scannedCount} 条${result.remoteTotal === null ? '' : `，来源总数参考 ${result.remoteTotal}`}。`"
+          :description="`目录内匹配 ${result.matchedTotal} 个客户，已显示 ${items.length} 个。`"
         />
         <Table
           :columns="columns"
@@ -282,8 +410,8 @@ onBeforeUnmount(() => {
           <template #emptyText>
             <Empty
               :description="
-                result?.hasMore
-                  ? '已扫描部分暂无匹配，可继续查找'
+                !directory?.complete
+                  ? '目录尚未完整，请更新目录后重新搜索'
                   : result
                     ? '没有匹配客户'
                     : '输入关键词后搜索，或留空查询客户'
@@ -314,7 +442,7 @@ onBeforeUnmount(() => {
           </template>
         </Table>
         <Button v-if="result?.hasMore" :loading="loading" @click="search(true)">
-          继续查找剩余 OKKI 客户
+          加载更多匹配客户
         </Button>
       </template>
       <Alert
@@ -376,9 +504,10 @@ onBeforeUnmount(() => {
                     field === 'code'
                       ? existing?.code || '首次保存后自动生成'
                       : field === 'customerSource'
-                        ? existing?.customerSource ||
-                          preview.customer.customerSource ||
-                          '—'
+                        ? (existing
+                            ? existing.customerSource
+                            : preview.customer.customerSource ||
+                              preview.customer.sourceCustomerSource) || '—'
                         : preview.customer[field] || '—'
                   }}
                 </Descriptions.Item>

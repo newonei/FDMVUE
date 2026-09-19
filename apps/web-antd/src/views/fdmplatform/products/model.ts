@@ -1,6 +1,8 @@
 import type { Access, Contract, ContractItem } from '#/api/fdmplatform';
 import type { Product, TaxBasis } from '#/api/fdmplatform/products';
 
+import BigNumber from 'bignumber.js';
+
 export const taxOptions = [
   { label: '含税价', value: 'TAX_INCLUDED' },
   { label: '未税价', value: 'TAX_EXCLUDED' },
@@ -67,11 +69,26 @@ export function contractLineAmount(
     line.unitPrice === ''
   )
     return undefined;
-  const amount = Number(line.quantity) * Number(line.unitPrice);
-  return Number.isFinite(amount) ? amount : undefined;
+  const amount = new BigNumber(line.quantity).times(line.unitPrice);
+  return amount.isFinite()
+    ? amount.toFixed(2, BigNumber.ROUND_HALF_UP)
+    : undefined;
+}
+/** Match the server: round each line to cents before summing. */
+export function contractItemsTotal(lines: ContractItem[]) {
+  let total = new BigNumber(0);
+  for (const line of lines) {
+    total = total.plus(contractLineAmount(line) ?? 0);
+  }
+  return total.toFixed(2);
 }
 export function copyContractLine(line: ContractItem, id: string): ContractItem {
-  return { ...line, id, attachmentIds: [...(line.attachmentIds ?? [])] };
+  return {
+    ...line,
+    id,
+    attachmentIds: [...(line.attachmentIds ?? [])],
+    attachmentPurposes: { ...line.attachmentPurposes },
+  };
 }
 /** Currency/tax changes require deliberate repricing. Never retain an old amount as a converted price. */
 export function invalidateLinePrices(

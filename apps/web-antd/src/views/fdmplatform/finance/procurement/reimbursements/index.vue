@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import FinanceWorkspace from '../index.vue';
+import ReimbursementWorkspace from './ReimbursementWorkspace.vue';
 defineOptions({ name: 'FdmPlatformProcurementReimbursements' });
 </script>
-<template><FinanceWorkspace type="REIMBURSEMENT" /></template>
+<template><ReimbursementWorkspace /></template>

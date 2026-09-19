@@ -520,7 +520,7 @@ it('disables cancelling requests already cancelled, ordered, produced, or active
   };
   expect(
     documentActionUnavailableReason(approved, 'CANCEL_REQUEST', request),
-  ).toBe('已批准申请需先变更方案并释放预留');
+  ).toBe('已生效申请需先变更方案并释放预留');
   expect(() =>
     documentActionDefinition(
       approved,
@@ -530,7 +530,7 @@ it('disables cancelling requests already cancelled, ordered, produced, or active
       [],
       request,
     ),
-  ).toThrow('已批准申请需先变更方案并释放预留');
+  ).toThrow('已生效申请需先变更方案并释放预留');
 });
 it('allows cancelling a request with only invalidated approvals and ignores other request execution', () => {
   const request = { id: 'request-a', status: 'ACTIVE' };

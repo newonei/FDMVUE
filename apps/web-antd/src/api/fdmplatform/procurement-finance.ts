@@ -27,6 +27,15 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   amount: Decimal;
   payerEntityId?: string;
   payerSnapshot?: { name?: string };
+  expenseEntityId?: string;
+  expenseEntitySnapshot?: { name?: string };
+  approval?: {
+    handlerUserId: number;
+    openedAt: string;
+    requesterUserId: number;
+    round: number;
+    status: string;
+  };
   exchange?: {
     fallback: boolean;
     fetchedAt: string;
@@ -46,6 +55,7 @@ export function getProcurementFinancePage(params: {
   orderId?: string;
   pageNo: number;
   pageSize: number;
+  paymentStatus?: 'PAID' | 'UNPAID';
   status?: string;
   type: ProcurementFinanceType;
 }) {

@@ -12,19 +12,17 @@ import BigNumber from 'bignumber.js';
 import {
   contractActions,
   executionActions,
-  field,
   financeActions,
   label,
   rows,
-  selectField,
   statusLabels,
 } from '../data';
+import { requestLineDefaults } from '../products/feedback-model';
 export function actionTitle(action: string): string {
   return (
     (
       {
         CANCEL_REQUEST: '取消采购申请',
-        REQUEST_AI_REVIEW: '发起 AI 预审',
       } as Record<string, string>
     )[action] ??
     statusLabels[action] ??
@@ -105,8 +103,8 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     actions: ['CREATE_QUOTE'],
   },
   plans: {
-    title: '采购方案审批',
-    description: '编制方案、发起 AI 预审、提交审批和按数量范围决策。',
+    title: '采购方案',
+    description: '编制采购方案，校验并生效后继续下单、预留或自产。',
     resource: 'purchase-plans',
     route: `${procurement}plans`,
     fields: [
@@ -116,11 +114,11 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'rationale|推荐理由',
     ],
     create: ['SAVE_PLAN'],
-    actions: ['SAVE_PLAN', 'REQUEST_AI_REVIEW', 'SUBMIT_PLAN', 'DECIDE_PLAN'],
+    actions: ['SAVE_PLAN', 'SUBMIT_PLAN'],
   },
   orders: {
     title: '采购单',
-    description: '按已批准方案生成采购单，查看当前订单明细与未执行余额。',
+    description: '按已生效方案生成采购单，查看当前订单明细与未执行余额。',
     resource: 'purchase-orders',
     route: `${procurement}orders`,
     fields: [
@@ -128,7 +126,7 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'status|状态',
       'amount|采购金额',
       'currency|币种',
-      'approvedPlanVersion|批准版本',
+      'approvedPlanVersion|生效版本',
     ],
     create: ['GENERATE_ORDERS'],
     actions: ['CANCEL_ORDER'],
@@ -178,12 +176,13 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
   },
   shipments: {
     title: '发货单',
-    description: '按批准方案预留库存，引用预留分批发货，并释放未使用预留。',
+    description: '按生效方案预留库存，引用预留分批发货，并释放未使用预留。',
     resource: 'outbound-shipments',
     route: `${trade}shipments`,
     fields: [
       'quantity|发货数量',
-      'occurredAt|发货时间',
+      'shippedDate|实际发货日期',
+      'occurredAt|登记时间',
       'evidenceRef|物流凭证',
     ],
     create: ['STOCK_SHIP', 'STOCK_RESERVE', 'STOCK_RELEASE'],
@@ -205,13 +204,17 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     route: `${finance}receipts`,
     fields: [
       'receivedAt|到账日期',
-      'amount|原币金额',
+      'amount|回款金额',
       'sourceBookAmount|原账面金额',
-      'currency|币种',
+      'currency|回款币种',
       'rmbAmount|人民币金额',
       'exchangeRateToCny|汇率',
       'exchangeRateDate|汇率日期',
       'status|确认状态',
+      'paymentMethod|到款方式',
+      'actorId|登记人',
+      'confirmedBy|确认人',
+      'confirmedAt|确认时间',
     ],
     create: ['CREATE_RECEIPT'],
     actions: ['CONFIRM_RECEIPT', 'REFRESH_RECEIPT_FX'],
@@ -344,14 +347,10 @@ export function pendingRequestItems(
     );
 }
 export function receiptKind(record: BusinessRecord): string {
-  return String(
-    record.kind ||
-      (record.originalReceiptId || Number(record.amount) < 0
-        ? 'REFUND'
-        : Number(record.amount) > 0
-          ? 'PAYMENT'
-          : ''),
-  );
+  if (record.kind) return String(record.kind);
+  if (record.originalReceiptId || Number(record.amount) < 0) return 'REFUND';
+  if (Number(record.amount) > 0) return 'PAYMENT';
+  return '';
 }
 export function shipmentKind(record: BusinessRecord): string {
   return String(
@@ -514,7 +513,7 @@ export function documentActionUnavailableReason(
           ),
       )
     )
-      return '已批准申请需先变更方案并释放预留';
+      return '已生效申请需先变更方案并释放预留';
   }
   if (
     action === 'CANCEL_ORDER' &&
@@ -571,16 +570,6 @@ export function documentActionDefinition(
     ...financeActions(contract),
     ...executionActions(contract, pools, master),
   };
-  if (action === 'REQUEST_AI_REVIEW')
-    definitions[action] = {
-      action,
-      title: '发起采购 AI 预审',
-      description: '预审绑定当前方案版本，仅提供建议，不能自动批准或下单。',
-      fields: [
-        selectField('planId', '采购方案', []),
-        field('planVersion', '方案版本', 'number'),
-      ],
-    };
   const definition = definitions[action];
   if (
     !definition ||
@@ -610,6 +599,9 @@ export function documentActionDefinition(
     contractItemId: contract.items.map((item) => ({
       value: item.id,
       label: `${item.skuName} · ${item.specification} · ${item.quantity} ${item.unit}`,
+      ...(action === 'CREATE_REQUEST'
+        ? { fill: requestLineDefaults(contract, item) }
+        : {}),
     })),
     requestId: (contract.requests ?? [])
       .filter((request) => request.status !== 'CANCELLED')
@@ -623,13 +615,12 @@ export function documentActionDefinition(
     ),
     assignmentId: assignments
       .filter((assignment) => assignment.status !== 'CANCELLED')
-      .filter((assignment) =>
-        action === 'CREATE_QUOTE'
-          ? assignment.method === 'BUY'
-          : ['STOCK_RECEIVE', 'UPDATE_PRODUCTION'].includes(action)
-            ? assignment.method === 'MAKE'
-            : true,
-      )
+      .filter((assignment) => {
+        if (action === 'CREATE_QUOTE') return assignment.method === 'BUY';
+        if (['STOCK_RECEIVE', 'UPDATE_PRODUCTION'].includes(action))
+          return assignment.method === 'MAKE';
+        return true;
+      })
       .map((assignment) => ({
         value: assignment.id,
         label: assignmentName(assignment),
@@ -686,10 +677,20 @@ export function documentActionDefinition(
       value: arrival.id,
       label: `${arrival.batchNo} · ${itemName(arrival.contractItemId)} · 到货 ${arrival.quantity}`,
     })),
-    poolId: pools.map((pool) => ({
-      value: pool.id,
-      label: `${pool.warehouseName ?? master.find((item) => item.id === pool.warehouseId)?.name ?? '仓库未注明'} · ${pool.skuName ?? master.find((item) => item.id === pool.skuId)?.name ?? itemName(contract.items.find((item) => item.skuId === pool.skuId)?.id)} · 可用 ${pool.available ?? '待核实'}`,
-    })),
+    poolId: pools
+      .filter(
+        (pool) =>
+          action !== 'STOCK_SHIP' ||
+          rows(pool.reservations).some(
+            (reservation) =>
+              reservation.contractId === contract.id &&
+              decimal(reservation.remainingQuantity).isGreaterThan(0),
+          ),
+      )
+      .map((pool) => ({
+        value: pool.id,
+        label: `${pool.warehouseName ?? master.find((item) => item.id === pool.warehouseId)?.name ?? '仓库未注明'} · ${pool.skuName ?? master.find((item) => item.id === pool.skuId)?.name ?? itemName(contract.items.find((item) => item.skuId === pool.skuId)?.id)} · 可用 ${pool.available ?? '待核实'}`,
+      })),
     reservationId: pools.flatMap((pool) =>
       rows(pool.reservations)
         .filter(
@@ -750,12 +751,17 @@ export function documentActionDefinition(
       label: `${contract.finance?.invoices?.find((invoice) => invoice.id === allocation.invoiceId)?.invoiceNumber ?? '发票'} · 核销 ${allocation.amount}`,
     }));
   const receiptCandidates = (contract.finance?.receipts ?? []).filter(
-    (receipt) =>
-      action === 'CONFIRM_RECEIPT'
-        ? receiptKind(receipt) === 'PAYMENT' && receipt.status === 'PENDING'
-        : ['BIND_ALLOCATION', 'REVERSE_RECEIPT'].includes(action)
-          ? receiptKind(receipt) === 'PAYMENT' && receipt.status === 'CONFIRMED'
-          : true,
+    (receipt) => {
+      if (action === 'CONFIRM_RECEIPT')
+        return (
+          receiptKind(receipt) === 'PAYMENT' && receipt.status === 'PENDING'
+        );
+      if (['BIND_ALLOCATION', 'REVERSE_RECEIPT'].includes(action))
+        return (
+          receiptKind(receipt) === 'PAYMENT' && receipt.status === 'CONFIRMED'
+        );
+      return true;
+    },
   );
   if (action !== 'REFRESH_RECEIPT_FX')
     optionsByKey.receiptId = receiptCandidates.map((receipt) => ({
@@ -945,6 +951,11 @@ export function documentActionDefinition(
       ? { hidden: true }
       : {}),
     ...(locked.has(entry.key) ? { disabled: true } : {}),
+    ...(action === 'STOCK_SHIP' &&
+    entry.key === 'reservationId' &&
+    optionsByKey.reservationId?.length === 1
+      ? { hidden: true }
+      : {}),
     ...(entry.key === 'evidenceRef' || entry.key === 'evidenceIds'
       ? { hint: '可在上方直接上传凭证，再选择文件。' }
       : {}),
@@ -954,7 +965,7 @@ export function documentActionDefinition(
     ...(action === 'SAVE_PLAN' && record
       ? {
           description:
-            '修订当前方案会使原批准和预审失效，需重新提交审批。若存在未发货预留，请先在发货页面释放后再修订。',
+            '修订当前方案后需要重新生效。若存在未发货预留，请先在发货页面释放后再修订。',
         }
       : {}),
     title:

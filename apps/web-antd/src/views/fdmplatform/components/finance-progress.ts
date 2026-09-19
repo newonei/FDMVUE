@@ -11,7 +11,7 @@ function validAmount(value: unknown): value is number | string {
   );
 }
 
-function amountText(
+export function amountText(
   summary: Summary,
   key: string,
   currency: unknown,

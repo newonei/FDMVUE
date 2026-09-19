@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ActionDefinition } from '../data';
 import type { DocumentKind } from './model';
+import type { RelatedDocumentSource } from './related-creation';
 
 import type {
   AttachmentView,
@@ -29,7 +30,6 @@ import {
   getContract,
   getDirectory,
   getMasterData,
-  requestAiReview,
 } from '#/api/fdmplatform';
 import { getContractStockPools } from '#/api/fdmplatform/stock';
 import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
@@ -42,6 +42,7 @@ import { withDirectory, withEvidence } from '../directory';
 import ContractPicker from './ContractPicker.vue';
 import { documentActionDataNeeds } from './data-needs';
 import { currentDocument, documentActionDefinition } from './model';
+import { relatedActionDefinition } from './related-creation';
 const props = defineProps<{
   action?: string;
   contractId?: string;
@@ -49,6 +50,7 @@ const props = defineProps<{
   lockContract?: boolean;
   open: boolean;
   row?: DocumentRow;
+  source?: RelatedDocumentSource;
 }>();
 const emit = defineEmits<{ close: []; updated: [contract: Contract] }>();
 const pickerOpen = ref(false);
@@ -87,6 +89,7 @@ const supportsAttachments = computed(() =>
     'STOCK_RESERVE',
     'STOCK_RETURN',
     'STOCK_SHIP',
+    'SUBMIT_PLAN',
     'UPDATE_CONTRACT',
     'UPDATE_PRODUCTION',
   ].includes(props.action ?? ''),
@@ -124,13 +127,18 @@ function finishClose() {
   actionOpen.value = false;
   emit('close');
 }
-function close() {
+function close(hasChanges = false) {
   if (saving.value || attachmentBusy.value) return;
-  if (draftFiles.value.length > 0)
+  if (hasChanges || draftFiles.value.length > 0)
     Modal.confirm({
-      title: '关闭当前办理？',
-      content: `${draftFiles.value.length} 个待上传附件尚未保存，关闭后将清除。`,
-      okText: '关闭',
+      title: '当前填写内容尚未保存',
+      content:
+        draftFiles.value.length > 0
+          ? `当前填写内容和 ${draftFiles.value.length} 个待上传附件尚未保存。继续填写可保留内容，放弃后需重新填写。`
+          : '继续填写可保留当前内容，放弃后需重新填写。',
+      okText: '放弃并关闭',
+      cancelText: '继续填写',
+      autoFocusButton: 'cancel',
       onOk: finishClose,
     });
   else finishClose();
@@ -142,11 +150,14 @@ async function prepare(id: string) {
   const action = props.action;
   const kind = props.kind;
   const row = props.row;
+  const source = props.source;
   pickerOpen.value = false;
   actionOpen.value = false;
   loading.value = true;
   pageError.value = '';
   try {
+    if (source && (!props.lockContract || !lockedContractId.value || row))
+      throw new Error('关联建单需锁定来源合同，请关闭后重新办理');
     if (props.lockContract && row && row.contractId !== id)
       throw new Error('当前单据不属于此合同，请关闭后重新选择单据');
     const needs = documentActionDataNeeds(action);
@@ -171,14 +182,23 @@ async function prepare(id: string) {
     pools.value = stock.pools;
     attachments.value = files;
     const record = row ? currentDocument(loaded, kind, row.id) : undefined;
-    definition.value = documentActionDefinition(
-      loaded,
-      kind,
-      action,
-      master.value,
-      pools.value,
-      record,
-    );
+    definition.value = source
+      ? relatedActionDefinition(
+          loaded,
+          kind,
+          action,
+          source,
+          master.value,
+          pools.value,
+        )
+      : documentActionDefinition(
+          loaded,
+          kind,
+          action,
+          master.value,
+          pools.value,
+          record,
+        );
     actionOpen.value = true;
   } catch (error) {
     if (current === sequence) pageError.value = errorText(error);
@@ -195,6 +215,8 @@ watch(
     props.kind,
     props.action,
     props.lockContract,
+    props.source?.kind,
+    props.source?.id,
   ],
   () => {
     ++sequence;
@@ -306,27 +328,16 @@ async function execute(input: Record<string, unknown>, key: string) {
           : {}),
       };
     }
-    if (action === 'REQUEST_AI_REVIEW') {
-      await requestAiReview(current.id, {
-        ...payload,
-        expectedVersion: current.version,
-        idempotencyKey: key,
-      });
-      const latest = await getContract(current.id);
-      if (run !== sequence || !props.open) return;
-      emit('updated', latest);
-    } else {
-      const latest = await contractActionWithAttachments(
-        current.id,
-        action,
-        current.version,
-        key,
-        payload,
-        draftFiles.value,
-      );
-      if (run !== sequence || !props.open) return;
-      emit('updated', latest);
-    }
+    const latest = await contractActionWithAttachments(
+      current.id,
+      action,
+      current.version,
+      key,
+      payload,
+      draftFiles.value,
+    );
+    if (run !== sequence || !props.open) return;
+    emit('updated', latest);
     message.success(`${definition.value.title}成功`);
     finishClose();
   } catch (error) {
@@ -339,13 +350,14 @@ async function execute(input: Record<string, unknown>, key: string) {
 <template>
   <ContractPicker
     :open="pickerOpen && open && !lockContract"
+    :action="action"
     @close="close"
     @select="(selected) => prepare(selected.id)"
   /><Modal
     :open="open && !pickerOpen && !actionOpen"
     title="准备办理"
     :footer="null"
-    @cancel="close"
+    @cancel="close()"
   >
     <Spin v-if="loading" /><Alert
       v-if="pageError"
@@ -353,7 +365,7 @@ async function execute(input: Record<string, unknown>, key: string) {
       type="error"
       show-icon
     /><Space v-if="!loading">
-      <Button @click="close">关闭</Button><Button v-if="lockedContractId" @click="prepare(lockedContractId)">
+      <Button @click="close()">关闭</Button><Button v-if="lockedContractId" @click="prepare(lockedContractId)">
         重试当前合同
 </Button><Button v-if="!lockContract" @click="pickerOpen = true">
         重新选择合同
@@ -384,7 +396,13 @@ async function execute(input: Record<string, unknown>, key: string) {
 </Descriptions.Item><Descriptions.Item label="订单所属公司">
           {{ company }}
 </Descriptions.Item><Descriptions.Item label="当前办理">
-          {{ props.row ? '已锁定当前单据' : '新建单据' }}
+          {{
+            props.source
+              ? '已带入来源单据'
+              : props.row
+                ? '已锁定当前单据'
+                : '新建单据'
+          }}
         </Descriptions.Item>
 </Descriptions><Collapse v-if="contract && needsEvidence">
         <Collapse.Panel key="files" header="已上传凭据：可继续选择已有文件">

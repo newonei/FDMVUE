@@ -26,6 +26,15 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   procurementOrderAction: vi.fn(),
   uploadProcurementSigned: vi.fn(),
 }));
+vi.mock('#/api/fdmplatform/procurement-finance', () => ({
+  getProcurementFinanceSummary: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('../../finance/procurement/components/FinanceDocument.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('../../documents/RecordDetail.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
@@ -44,7 +53,76 @@ vi.mock('../../components/RecordTable.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('../../documents/DocumentAction.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    props: {
+      action: { type: String, default: undefined },
+      contractId: { type: String, default: undefined },
+      kind: { type: String, default: undefined },
+      lockContract: Boolean,
+      open: Boolean,
+      source: { type: Object, default: undefined },
+    },
+    emits: ['close', 'updated'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            {
+              'data-related-action': props.action,
+              'data-kind': props.kind,
+              'data-contract-id': props.contractId,
+              'data-contract-locked': String(props.lockContract),
+              'data-source': JSON.stringify(props.source),
+            },
+            [
+              h('button', { onClick: () => ctx.emit('close') }, '取消关联建单'),
+              h(
+                'button',
+                {
+                  onClick: () =>
+                    ctx.emit('updated', {
+                      id: props.contractId ?? 'contract-1',
+                      version: 2,
+                    }),
+                },
+                '保存关联单据',
+              ),
+            ],
+          )
+        : null,
+  }),
+}));
+vi.mock('../../components/ContractDocumentDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      contract: { type: Object, default: undefined },
+      kind: { type: String, default: undefined },
+      open: Boolean,
+    },
+    emits: ['close', 'updated'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            {
+              'data-related-list': props.kind,
+              'data-contract-id': props.contract?.id,
+            },
+            [
+              h(
+                'button',
+                { onClick: () => ctx.emit('close') },
+                '关闭关联单据列表',
+              ),
+              h(
+                'button',
+                { onClick: () => ctx.emit('updated', props.contract) },
+                '更新关联方案',
+              ),
+            ],
+          )
+        : null,
+  }),
 }));
 vi.mock('../../documents/MigrationSource.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -116,6 +194,13 @@ vi.mock('ant-design-vue', () => {
     }),
     Button: button,
     Card: block,
+    Drawer: defineComponent({
+      props: { open: Boolean },
+      setup: (props, ctx) => () =>
+        props.open ? h('section', ctx.slots.default?.()) : null,
+    }),
+    Empty: block,
+    Progress: block,
     Input: { Search: block },
     Select: block,
     Space: block,
@@ -145,10 +230,54 @@ function nativeRows() {
     allowedActions: ['SAVE_DETAILS'],
   }));
 }
+function contractFixture() {
+  return {
+    id: 'contract-1',
+    code: 'HT-1',
+    name: '采购合同',
+    version: 1,
+    status: 'ACTIVE',
+    currency: 'CNY',
+    companyId: 1,
+    items: [],
+    allowedActions: ['GENERATE_ORDERS', 'RECORD_ARRIVAL', 'RETURN_ARRIVAL'],
+    purchaseOrders: ['order-1', 'order-2'].map((id) => ({
+      id,
+      code: id,
+      status: 'ORDERED',
+      currency: 'CNY',
+      supplierName: '测试供应商',
+      lines: [
+        {
+          id: 'line-1',
+          unit: '件',
+          quantity: 10,
+          arrivedQuantity: 4,
+          cancelledQuantity: 0,
+          returnedQuantity: 0,
+        },
+      ],
+    })),
+  };
+}
+function orderFixture(id = 'order-1') {
+  return {
+    id,
+    contractId: 'contract-1',
+    version: 1,
+    order: contractFixture().purchaseOrders.find((order) => order.id === id),
+    details: { version: 1 },
+    allowedActions: [],
+    history: [],
+    exports: [],
+  };
+}
 const dispose: (() => void)[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.page.mockResolvedValue({ list: nativeRows(), total: 6 });
+  mocks.contract.mockImplementation(async () => contractFixture());
+  mocks.detail.mockImplementation(async (_contractId, id) => orderFixture(id));
 });
 afterEach(() => {
   for (const close of dispose.splice(0)) close();
@@ -159,14 +288,20 @@ async function settle() {
     await nextTick();
   }
 }
-async function mount() {
+async function mount(
+  location = '/fdmprocurement/platform-orders?contractId=jz-contract-9676',
+) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/fdmprocurement/platform-orders', component: Workspace }],
+    routes: [
+      { path: '/fdmprocurement/platform-orders', component: Workspace },
+      {
+        path: '/elsewhere',
+        component: defineComponent({ render: () => null }),
+      },
+    ],
   });
-  await router.push(
-    '/fdmprocurement/platform-orders?contractId=jz-contract-9676',
-  );
+  await router.push(location);
   await router.isReady();
   const host = document.createElement('div');
   document.body.append(host);
@@ -212,10 +347,11 @@ describe('unified native purchase workspace', () => {
     await settle();
     expect(router.currentRoute.value.query).toMatchObject({
       contractId: 'jz-contract-9676',
-      standaloneId: 'po-3',
     });
     expect(router.currentRoute.value.query.documentId).toBeUndefined();
-    expect(host.querySelector('[data-business-id="po-3"]')).not.toBeNull();
+    expect(
+      host.querySelector<HTMLElement>('[data-business-id="po-3"]'),
+    ).not.toBeNull();
     expect(mocks.detail).not.toHaveBeenCalled();
     expect(mocks.contract).not.toHaveBeenCalled();
     click(host, '关闭单据');
@@ -240,5 +376,119 @@ describe('unified native purchase workspace', () => {
     await settle();
     expect(host.textContent).toContain('新合同读取失败');
     expect(host.querySelectorAll('[data-order-id]')).toHaveLength(0);
+  });
+});
+
+describe('related creation inside the purchase workspace', () => {
+  const detailLocation =
+    '/fdmprocurement/platform-orders?contractId=contract-1&documentId=order-1';
+  it('generates orders directly from the filtered list without leaving the page', async () => {
+    const { host, router } = await mount();
+    const location = router.currentRoute.value.fullPath;
+    click(host, '生成采购单');
+    await settle();
+    const dialog = host.querySelector<HTMLElement>(
+      '[data-related-action="GENERATE_ORDERS"]',
+    );
+    expect(dialog?.dataset.kind).toBe('orders');
+    expect(dialog?.dataset.contractId).toBe('jz-contract-9676');
+    expect(dialog?.dataset.contractLocked).toBe('true');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.dataset.source).toBeUndefined();
+    expect(router.currentRoute.value.fullPath).toBe(location);
+    click(host, '取消关联建单');
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
+    expect(router.currentRoute.value.fullPath).toBe(location);
+  });
+  it('lets the existing action select a contract on the unfiltered list and refreshes after creation', async () => {
+    const { host, router } = await mount('/fdmprocurement/platform-orders');
+    click(host, '生成采购单');
+    await settle();
+    const dialog = host.querySelector<HTMLElement>(
+      '[data-related-action="GENERATE_ORDERS"]',
+    );
+    expect(dialog?.dataset.contractLocked).toBe('false');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.dataset.contractId).toBeUndefined();
+    click(host, '保存关联单据');
+    await settle();
+    expect(mocks.page).toHaveBeenCalledTimes(2);
+    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
+    expect(router.currentRoute.value.fullPath).toBe(
+      '/fdmprocurement/platform-orders',
+    );
+  });
+  it('passes the current order into arrival and return creation and refreshes the parent after saving', async () => {
+    const { host, router } = await mount(detailLocation);
+    click(host, '登记到货');
+    await settle();
+    const dialog = host.querySelector<HTMLElement>(
+      '[data-related-action="RECORD_ARRIVAL"]',
+    );
+    expect(dialog?.dataset.kind).toBe('arrivals');
+    expect(dialog?.dataset.contractId).toBe('contract-1');
+    expect(dialog?.dataset.contractLocked).toBe('true');
+    expect(JSON.parse(dialog!.dataset.source!)).toEqual({
+      kind: 'orders',
+      id: 'order-1',
+    });
+    expect(router.currentRoute.value.fullPath).toBe(detailLocation);
+    click(host, '取消关联建单');
+    await settle();
+    expect(mocks.detail).toHaveBeenCalledTimes(1);
+    click(host, '采购退货');
+    await settle();
+    const returns = host.querySelector<HTMLElement>(
+      '[data-related-action="RETURN_ARRIVAL"]',
+    );
+    expect(returns?.dataset.kind).toBe('purchaseReturns');
+    expect(JSON.parse(returns!.dataset.source!)).toEqual({
+      kind: 'orders',
+      id: 'order-1',
+    });
+    click(host, '保存关联单据');
+    await settle();
+    expect(mocks.detail).toHaveBeenCalledTimes(2);
+    expect(mocks.contract).toHaveBeenCalledTimes(2);
+    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
+    expect(router.currentRoute.value.fullPath).toBe(detailLocation);
+  });
+  it('opens related plans in the current workspace and clears nested dialogs when changing the parent', async () => {
+    const { host, router } = await mount(detailLocation);
+    click(host, '采购方案变更');
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-related-list="plans"]')?.dataset
+        .contractId,
+    ).toBe('contract-1');
+    expect(router.currentRoute.value.fullPath).toBe(detailLocation);
+    click(host, '更新关联方案');
+    await settle();
+    expect(mocks.detail).toHaveBeenCalledTimes(2);
+    expect(
+      host.querySelector<HTMLElement>('[data-related-list="plans"]'),
+    ).not.toBeNull();
+    await router.push({
+      query: { contractId: 'contract-1', documentId: 'order-2' },
+    });
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-related-list]')).toBeNull();
+    click(host, '登记到货');
+    await settle();
+    expect(
+      JSON.parse(
+        host.querySelector<HTMLElement>('[data-related-action]')!.dataset
+          .source!,
+      ),
+    ).toEqual({ kind: 'orders', id: 'order-2' });
+    await router.push({ query: { contractId: 'contract-1' } });
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
+    click(host, '生成采购单');
+    await settle();
+    const generation = host.querySelector<HTMLElement>('[data-related-action]');
+    expect(generation).not.toBeNull();
+    expect(generation?.dataset.source).toBeUndefined();
   });
 });

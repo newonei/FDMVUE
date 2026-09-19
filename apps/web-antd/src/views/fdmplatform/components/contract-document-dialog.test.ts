@@ -390,8 +390,11 @@ async function settle() {
     await nextTick();
   }
 }
-async function mount(kind: ContractDocumentKind = 'requests') {
-  const props = reactive({ open: true, kind, contract: contract() });
+async function mount(
+  kind: ContractDocumentKind = 'requests',
+  mode?: 'create' | 'list',
+) {
+  const props = reactive({ open: true, kind, mode, contract: contract() });
   const updated = vi.fn();
   const closed = vi.fn(() => {
     props.open = false;
@@ -441,6 +444,15 @@ function action(host: HTMLElement) {
 }
 
 describe('contract document dialog entry points', () => {
+  it('opens related records for browsing without creating a new record and can explicitly switch to creation', async () => {
+    const view = await mount('receipts', 'list');
+    expect(action(view.host)).toBeNull();
+    expect(view.host.querySelector('[data-dialog]')).not.toBeNull();
+    view.props.mode = 'create';
+    await settle();
+    expect(action(view.host)?.dataset.action).toBe('CREATE_RECEIPT');
+    expect(view.router.currentRoute.value.fullPath).toBe(view.route);
+  });
   const entries: [ContractDocumentKind, string, string?][] = [
     ['requests', 'purchase-requests', 'CREATE_REQUEST'],
     ['tasks', 'purchase-intake'],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
+import ProcurementWorkbench from './ProcurementWorkbench.vue';
 defineOptions({ name: 'FdmPlatformPurchaseTasks' });
 </script>
-<template><DocumentWorkspace kind="tasks" /></template>
+<template><ProcurementWorkbench /></template>

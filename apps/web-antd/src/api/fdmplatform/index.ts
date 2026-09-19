@@ -64,6 +64,10 @@ export interface ContractItem extends BusinessRecord {
   shape?: string;
   printing?: string;
   packaging?: string;
+  suggestedSupplierId?: string;
+  suggestedSupplierName?: string;
+  suggestedSupplierRemark?: string;
+  attachmentPurposes?: Record<string, string>;
   attachmentIds?: string[];
   priceSourceId?: string;
   priceSourceVersion?: number;
@@ -80,6 +84,8 @@ export interface Contract extends BusinessRecord {
   migration?: MigrationInfo;
   blockReasons?: string[];
   additionalAmount?: Decimal;
+  salesCharges?: { amount: Decimal; name: string }[];
+  useTradeAssurance?: boolean;
   companyName?: string;
   code: string;
   name: string;

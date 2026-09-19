@@ -464,7 +464,7 @@ describe('record-specific business actions', () => {
     },
   );
 
-  it.each(['SUBMIT_PLAN', 'DECIDE_PLAN', 'REQUEST_AI_REVIEW'])(
+  it.each(['SUBMIT_PLAN'])(
     'binds %s to the current plan version without replacing contract version',
     (name) => {
       const contract = contractFixture();
@@ -595,14 +595,14 @@ describe('parent document choices and automatic technical fields', () => {
     ).toEqual([]);
   });
 
-  it('limits approval lines and cancellation lines to the current plan and order', () => {
+  it('limits execution lines and cancellation lines to the current plan and order', () => {
     const contract = contractFixture();
-    const approve = action(contract, 'plans', 'DECIDE_PLAN', 'plan-a');
+    const approve = action(contract, 'orders', 'GENERATE_ORDERS');
     expect(
       optionIds(
         actionField(approve, 'planLineId', true),
         {},
-        approve.initialValues,
+        { ...approve.initialValues, planId: 'plan-a' },
       ),
     ).toEqual(['plan-line-a']);
     const cancel = action(contract, 'orders', 'CANCEL_ORDER', 'order-a');
@@ -670,10 +670,34 @@ describe('parent document choices and automatic technical fields', () => {
     });
     expect(actionField(generate, 'planVersion').hidden).toBe(true);
     contract.plans![0]!.version = 0;
-    const review = action(contract, 'plans', 'REQUEST_AI_REVIEW', 'plan-a');
+    const review = action(contract, 'plans', 'SUBMIT_PLAN', 'plan-a');
     expect(review.initialValues?.planVersion).toBe(0);
     expect(actionField(review, 'planId').options?.[0]?.fill).toEqual({
       planVersion: 0,
     });
+  });
+});
+
+describe('document flow without approval stages', () => {
+  it.each(['DECIDE_PLAN', 'REQUEST_AI_REVIEW'])(
+    'rejects the disabled %s action even for legacy permissions',
+    (name) => {
+      expect(() => action(contractFixture(), 'plans', name, 'plan-a')).toThrow(
+        '此操作不属于当前单据类型',
+      );
+    },
+  );
+  it('requires only the current plan identity and version for activation', () => {
+    const definition = action(
+      contractFixture(),
+      'plans',
+      'SUBMIT_PLAN',
+      'plan-a',
+    );
+    expect(definition.fields.map((field) => field.key)).toEqual([
+      'planId',
+      'planVersion',
+    ]);
+    expect(definition.title).toBe('方案生效');
   });
 });

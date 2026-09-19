@@ -54,6 +54,25 @@ export function fieldVisible(field: Field, values: FormValues) {
     values[field.visibleWhen.key] === field.visibleWhen.value
   );
 }
+
+/** Compare submitted values, treating an empty input like its untouched state. */
+export function formDraftSignature(values: FormValues, lines: FormValues[]) {
+  const normalizeValue = (value: FormValue) => {
+    if (empty(value)) return null;
+    if (Array.isArray(value)) return value.map(String);
+    return String(value);
+  };
+  const normalize = (data: FormValues) =>
+    Object.fromEntries(
+      Object.entries(data)
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => [key, normalizeValue(value)]),
+    );
+  return JSON.stringify({
+    values: normalize(values),
+    lines: lines.map((line) => normalize(line)),
+  });
+}
 export function settleSources(
   fields: Field[],
   values: FormValues,

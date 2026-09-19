@@ -7,6 +7,7 @@ export interface Customer extends MasterRecord {
   contactSelection?: string;
   shortName?: string;
   country?: string;
+  countryName?: string;
   customerSource?: string;
   companyName?: string;
   sourceCountry?: string;
@@ -44,6 +45,24 @@ export interface OkkiCustomerSearch {
   scannedCount: number;
   remoteTotal: null | number;
   notice: string;
+  matchedTotal: number;
+  directory: OkkiDirectoryStatus;
+}
+export interface OkkiDirectoryStatus {
+  status: 'COMPLETE' | 'FAILED' | 'NEVER' | 'PAUSED' | 'RUNNING';
+  indexedCount: number;
+  scannedCount: number;
+  remoteTotal: null | number;
+  complete: boolean;
+  updatedAt: null | string;
+  completedAt: null | string;
+  lastError: null | string;
+}
+export interface CustomerOptions {
+  countries: CountryOption[];
+  productCategories: { label: string; value: string }[];
+  customerSources: string[];
+  sourceVersion: number;
 }
 const base = '/fdmplatform/v1/customers';
 export interface CountryOption {
@@ -54,10 +73,31 @@ export interface CountryOption {
   aliases?: string[];
 }
 export function getCustomerOptions() {
-  return requestClient.get<{
-    countries: CountryOption[];
-    productCategories: { label: string; value: string }[];
-  }>(`${base}/options`);
+  return requestClient.get<CustomerOptions>(`${base}/options`);
+}
+export function saveCustomerSources(data: {
+  expectedVersion: number;
+  idempotencyKey: string;
+  values: string[];
+}) {
+  return requestClient.post<CustomerOptions>(`${base}/source-options`, data);
+}
+export function getOkkiDirectoryStatus() {
+  return requestClient.get<OkkiDirectoryStatus>(
+    `${base}/okki/directory-status`,
+  );
+}
+export function refreshOkkiDirectory(restart = false) {
+  return requestClient.post<OkkiDirectoryStatus>(
+    `${base}/okki/directory-refresh`,
+    undefined,
+    { params: { restart } },
+  );
+}
+export function pauseOkkiDirectory() {
+  return requestClient.post<OkkiDirectoryStatus>(
+    `${base}/okki/directory-pause`,
+  );
 }
 export function getCustomers(params: {
   active?: boolean;

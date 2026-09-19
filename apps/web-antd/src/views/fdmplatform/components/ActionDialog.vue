@@ -21,6 +21,7 @@ import { newIdempotencyKey } from '#/api/fdmplatform';
 
 import {
   fieldVisible,
+  formDraftSignature,
   initialFormValues,
   settleSources,
 } from '../documents/formDefaults';
@@ -39,7 +40,7 @@ const props = defineProps<{
   saving: boolean;
 }>();
 const emit = defineEmits<{
-  close: [];
+  close: [hasChanges: boolean];
   submit: [payload: Record<string, unknown>, idempotencyKey: string];
 }>();
 const automatic = new WeakMap<FormValues, FormValues>();
@@ -48,6 +49,13 @@ const lines = ref<FormValues[]>([]);
 const rowKeys = new WeakMap<FormValues, string>();
 let rowSequence = 0;
 const lineErrors = ref<Record<string, Record<string, string>>>({});
+const fieldErrors = ref<Record<string, string>>({});
+const validated = ref(false);
+const initialDraft = ref('');
+const actionBody = ref<HTMLElement>();
+const hasChanges = computed(
+  () => formDraftSignature(values.value, lines.value) !== initialDraft.value,
+);
 const lineTable = ref<HTMLElement>();
 const visibleLineFields = computed(() =>
   (props.definition?.lineFields ?? []).filter(
@@ -132,7 +140,7 @@ function removeLine(index: number) {
   const line = lines.value[index];
   if (line) Reflect.deleteProperty(lineErrors.value, rowKey(line));
   lines.value.splice(index, 1);
-  validation.value = '';
+  if (validated.value) collectErrors();
 }
 function settle(target: FormValues, fields: Field[]) {
   let auto = automatic.get(toRaw(target));
@@ -147,6 +155,7 @@ function addLine() {
   const value = makeValues(props.definition?.lineFields ?? []);
   lines.value.push(value);
   settle(lines.value.at(-1)!, props.definition?.lineFields ?? []);
+  if (validated.value) collectErrors();
 }
 watch(
   () => props.open,
@@ -158,6 +167,8 @@ watch(
     );
     lines.value = [];
     lineErrors.value = {};
+    fieldErrors.value = {};
+    validated.value = false;
     validation.value = '';
     idempotencyKey.value = newIdempotencyKey();
     if (props.definition?.fields.some((field) => field.key === 'sourceKey'))
@@ -184,7 +195,9 @@ watch(
       lines.value.length === 0
     )
       addLine();
+    initialDraft.value = formDraftSignature(values.value, lines.value);
   },
+  { immediate: true },
 );
 function uploadedEvidence(item: Field) {
   return (
@@ -214,12 +227,66 @@ function fieldError(item: Field, data: FormValues): string {
   }
   return '';
 }
-function validate(fields: Field[], data: FormValues): string {
-  for (const item of fields) {
-    const error = fieldError(item, data);
-    if (error) return error;
+function collectErrors() {
+  const definition = props.definition;
+  fieldErrors.value = {};
+  lineErrors.value = {};
+  const messages: string[] = [];
+  for (const item of definition?.fields ?? []) {
+    const error = fieldError(item, values.value);
+    if (error) {
+      fieldErrors.value[item.key] = error;
+      messages.push(error);
+    }
   }
-  return '';
+  if (definition?.lineFields) {
+    if (lines.value.length === 0 && !definition.optionalLines)
+      messages.push('请至少添加一条明细');
+    for (const [index, line] of lines.value.entries()) {
+      const errors: Record<string, string> = {};
+      for (const item of definition.lineFields) {
+        const error = fieldError(item, line);
+        if (error) {
+          errors[item.key] = error;
+          messages.push(`第 ${index + 1} 行：${error}`);
+        }
+      }
+      if (Object.keys(errors).length > 0)
+        lineErrors.value[rowKey(line)] = errors;
+    }
+  }
+  validation.value =
+    messages.length > 1
+      ? `还有 ${messages.length} 项需要检查：${messages[0]}；其余请查看标红位置。`
+      : (messages[0] ?? '');
+  return messages.length === 0;
+}
+function focusFirstError() {
+  void nextTick(() => {
+    const first =
+      actionBody.value?.querySelector<HTMLElement>(
+        '.action-field-error, .line-cell-error',
+      ) ?? lineTable.value;
+    first?.scrollIntoView?.({
+      block: 'center',
+      inline: 'nearest',
+      behavior: 'smooth',
+    });
+    first
+      ?.querySelector<HTMLElement>(
+        'input:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
+      )
+      ?.focus({ preventScroll: true });
+  });
+}
+watch(
+  () => props.evidenceReady,
+  () => {
+    if (validated.value) collectErrors();
+  },
+);
+function requestClose() {
+  if (!props.saving) emit('close', hasChanges.value);
 }
 function clean(data: FormValues) {
   return Object.fromEntries(
@@ -232,39 +299,14 @@ function submit() {
   const definition = props.definition;
   if (!definition) return;
   if (props.saving) return;
-  lineErrors.value = {};
+  validated.value = true;
+  if (!collectErrors()) {
+    focusFirstError();
+    return;
+  }
   if (definition.action === 'CREATE_RECEIPT' && !fxPreviewReady.value) {
     validation.value = conversionRequiredMessage;
     return;
-  }
-  validation.value = validate(definition.fields, values.value);
-  if (validation.value) return;
-  if (definition.lineFields) {
-    if (lines.value.length === 0 && !definition.optionalLines) {
-      validation.value = '请至少添加一条明细';
-      return;
-    }
-    for (const [index, line] of lines.value.entries()) {
-      const errors: Record<string, string> = {};
-      for (const item of definition.lineFields) {
-        const error = fieldError(item, line);
-        if (error) {
-          errors[item.key] = error;
-          if (!validation.value)
-            validation.value = `第 ${index + 1} 行：${error}`;
-        }
-      }
-      if (Object.keys(errors).length > 0)
-        lineErrors.value[rowKey(line)] = errors;
-    }
-    if (validation.value) {
-      void nextTick(() => {
-        lineTable.value
-          ?.querySelector('.line-cell-error')
-          ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      });
-      return;
-    }
   }
   const payload: Record<string, unknown> = clean(values.value);
   if (definition.lineKey && lines.value.length > 0)
@@ -291,19 +333,10 @@ function setValue(target: FormValues, key: string, value: unknown) {
   const auto = automatic.get(toRaw(target));
   if (auto) auto[key] = undefined;
   settle(target, fields ?? []);
-  if (lineErrors.value[rowKey(target)]) {
-    const errors = lineErrors.value[rowKey(target)]!;
-    for (const item of fields ?? []) {
-      if (!errors[item.key]) continue;
-      const error = fieldError(item, target);
-      if (error) errors[item.key] = error;
-      else Reflect.deleteProperty(errors, item.key);
-    }
-  }
-  validation.value = '';
   if (target === values.value)
     for (const line of lines.value)
       settle(line, props.definition?.lineFields ?? []);
+  if (validated.value) collectErrors();
 }
 </script>
 
@@ -319,10 +352,12 @@ function setValue(target: FormValues, key: string, value: unknown) {
     :closable="!saving"
     :keyboard="!saving"
     :cancel-button-props="{ disabled: saving }"
-    @cancel="emit('close')"
+    :body-style="{ maxHeight: 'calc(100dvh - 200px)', overflowY: 'auto' }"
+    :style="{ top: 'min(8vh, 64px)' }"
+    @cancel="requestClose"
     @ok="submit"
   >
-    <div v-if="definition" class="action-dialog">
+    <div v-if="definition" ref="actionBody" class="action-dialog">
       <Alert :message="definition.description" type="info" show-icon />
       <slot name="context"></slot>
       <Alert
@@ -339,7 +374,12 @@ function setValue(target: FormValues, key: string, value: unknown) {
           :key="item.key"
           :label="item.label"
           :required="item.required && !uploadedEvidence(item)"
-          :class="{ wide: item.type === 'textarea' }"
+          :class="{
+            wide: item.type === 'textarea',
+            'action-field-error': fieldErrors[item.key],
+          }"
+          :help="fieldErrors[item.key]"
+          :validate-status="fieldErrors[item.key] ? 'error' : undefined"
           :extra="
             uploadedEvidence(item)
               ? '已选择待上传附件，保存时自动关联；也可保留现有凭据选择。'
@@ -608,7 +648,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
       </template>
       <slot name="attachments"></slot>
       <p class="muted">
-        提交后列表会更新。若提示数据已变化，请关闭窗口，刷新单据后重试。
+        提交成功后自动刷新当前单据；提交失败时保留已填写内容，方便检查后重试。
       </p>
     </div>
   </Modal>

@@ -21,9 +21,10 @@ export const financeRoutes: Record<ProcurementFinanceType, string> = {
 export const actionNames: Record<string, string> = {
   COMPLETE_MIGRATED_PAYMENT: '补齐原付款资料',
   UPDATE: '保存草稿',
-  SUBMIT: '提交审批',
-  APPROVE: '批准',
-  REJECT: '退回修改',
+  SUBMIT: '提交生效',
+  ACTIVATE: '提交生效',
+  APPROVE: '历史批准',
+  REJECT: '历史退回',
   WITHDRAW: '撤回并编辑',
   CANCEL: '取消单据',
   CONFIRM: '确认',
@@ -290,9 +291,9 @@ export function financeStatus(value: unknown) {
     (
       {
         DRAFT: '草稿',
-        SUBMITTED: '待审批',
-        APPROVED: '已批准',
-        REJECTED: '已退回',
+        SUBMITTED: '待生效',
+        APPROVED: '已生效',
+        REJECTED: '待补充',
         CONFIRMED: '已确认',
         CANCELLED: '已取消',
         REVERSED: '已冲销',
@@ -336,12 +337,11 @@ export function allocationPreview(
         ? base.minus(sum)
         : raw;
     sum = sum.plus(amount);
-    const percentage =
-      group.mode === 'PERCENT'
-        ? new BigNumber(entry.percentage || 0)
-        : base.isZero()
-          ? new BigNumber(0)
-          : amount.multipliedBy(100).dividedBy(base).decimalPlaces(8);
+    let percentage: BigNumber;
+    if (group.mode === 'PERCENT')
+      percentage = new BigNumber(entry.percentage || 0);
+    else if (base.isZero()) percentage = new BigNumber(0);
+    else percentage = amount.multipliedBy(100).dividedBy(base).decimalPlaces(8);
     return {
       amount: amount.isFinite() ? amount.toFixed(scale) : '—',
       percentage: percentage.isFinite()

@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import type { DocumentKind } from './model';
+import type {
+  RelatedCreation,
+  RelatedDocumentSource,
+} from './related-creation';
 
 import type {
   AttachmentView,
@@ -11,7 +15,6 @@ import type {
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 
 import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 
 import {
   Alert,
@@ -25,19 +28,13 @@ import {
   Tag,
 } from 'ant-design-vue';
 
-import {
-  getAiReviews,
-  getAttachments,
-  getContract,
-  getDirectory,
-  refreshAiReview,
-} from '#/api/fdmplatform';
+import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
-import RecordTable from '../components/RecordTable.vue';
 import { errorText, label, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
+import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
 import LinkedRecordTable from './LinkedRecordTable.vue';
@@ -56,7 +53,10 @@ import {
   entityTarget,
   relatedDocumentLinks,
 } from './navigation';
+import { relatedCreations } from './related-creation';
 import RelatedLink from './RelatedLink.vue';
+
+import '../purchase/components/procurement.css';
 const props = defineProps<{
   embedded?: boolean;
   kind: DocumentKind;
@@ -68,7 +68,6 @@ const emit = defineEmits<{
   navigate: [kind: DocumentKind];
   updated: [];
 }>();
-const router = useRouter();
 const contract = ref<Contract>();
 const record = ref<BusinessRecord>();
 const migration = computed(
@@ -91,11 +90,22 @@ const actionOpen = ref(false);
 const attachmentBusy = ref(false);
 const childOpen = computed(() => actionOpen.value || attachmentBusy.value);
 const selectedAction = ref<string>();
-const reviews = ref<BusinessRecord[]>([]);
-const reviewLoading = ref(false);
-const reviewError = ref('');
+const selectedKind = ref<DocumentKind>(props.kind);
+const relatedSource = ref<RelatedDocumentSource>();
 let sequence = 0;
 const config = computed(() => documentDefinitions[props.kind]);
+const procurement = computed(() =>
+  [
+    'arrivals',
+    'orders',
+    'plans',
+    'production',
+    'purchaseReturns',
+    'quotes',
+    'requests',
+    'tasks',
+  ].includes(props.kind),
+);
 const title = computed(
   () =>
     record.value?.name ??
@@ -111,6 +121,11 @@ const company = computed(
     contract.value?.companyName ??
     '',
 );
+const drawerTitle = computed(() =>
+  title.value === config.value.title
+    ? config.value.title
+    : `${config.value.title} · ${title.value}`,
+);
 const actions = computed(() =>
   config.value.actions
     .filter((action) => contract.value?.allowedActions.includes(action))
@@ -125,10 +140,13 @@ const actions = computed(() =>
         return record.value?.status === 'PENDING';
       if (action === 'VOID_INVOICE') return record.value?.status === 'VALID';
       if (action === 'SUBMIT_PLAN')
-        return ['DRAFT', 'REJECTED', 'RETURNED'].includes(
-          String(record.value?.status),
-        );
-      if (action === 'DECIDE_PLAN') return record.value?.status === 'SUBMITTED';
+        return [
+          'DRAFT',
+          'PARTIALLY_APPROVED',
+          'REJECTED',
+          'RETURNED',
+          'SUBMITTED',
+        ].includes(String(record.value?.status));
       if (action === 'UNBIND_ALLOCATION')
         return !record.value?.originalAllocationId;
       if (action === 'REVERSE_COST')
@@ -156,7 +174,7 @@ const extraFields = [
   'rationale|推荐理由',
   'risks|风险',
   'sharedConditions|共同约束',
-  'evidenceRef|凭证引用',
+  'evidenceRef|历史凭证',
   'accountRef|收款账户',
   'exchangeRateToCny|人民币参考汇率',
   'exchangeRateDate|实际汇率日期',
@@ -184,15 +202,18 @@ const fields = computed(() =>
 function display(key: string) {
   if (key === 'allocationType') return allocationKind(record.value!);
   const value = record.value?.[key];
-  return (
+  const formatted =
     migrationCell(record.value ?? {}, key) ??
-    receiptFxDisplay(record.value ?? {}, key) ??
-    (/UserId$/i.test(key)
-      ? personLabel(directory.value, value)
-      : Array.isArray(value)
-        ? value.map((entry) => label(entry)).join('；')
-        : label(value))
-  );
+    receiptFxDisplay(record.value ?? {}, key);
+  if (formatted !== undefined && formatted !== null) return formatted;
+  if (
+    /UserId$/i.test(key) ||
+    ['actorId', 'confirmedBy', 'createdBy'].includes(key)
+  )
+    return personLabel(directory.value, value);
+  if (Array.isArray(value))
+    return value.map((entry) => label(entry)).join('；');
+  return label(value);
 }
 const lines = computed(() =>
   rows(record.value?.items ?? record.value?.lines).map((line) => ({
@@ -205,6 +226,14 @@ const lines = computed(() =>
       contract.value?.items.find((item) => item.id === line.contractItemId)
         ?.shape ??
       '未维护',
+    suggestedSupplier:
+      (
+        line.specificationSnapshot as
+          | undefined
+          | { suggestedSupplierName?: string }
+      )?.suggestedSupplierName ??
+      contract.value?.items.find((item) => item.id === line.contractItemId)
+        ?.suggestedSupplierName,
     assignmentName: contract.value?.assignments?.find(
       (item) => item.id === line.assignmentId,
     )?.method,
@@ -233,6 +262,7 @@ const lineColumns = computed(() =>
   [
     'productName|产品',
     'shape|形状',
+    'suggestedSupplier|建议采购工厂',
     'quantity|数量',
     'requiredDate|需求日期',
     'assignmentName|履约方式',
@@ -269,7 +299,6 @@ async function load() {
     directory.value = people;
     record.value = currentDocument(value, props.kind, props.row.id);
     void loadFiles();
-    if (props.kind === 'plans') void loadReviews();
   } catch (error) {
     if (current === sequence) pageError.value = errorText(error);
   } finally {
@@ -281,11 +310,14 @@ watch(
   () => {
     ++sequence;
     actionOpen.value = false;
+    selectedAction.value = undefined;
+    selectedKind.value = props.kind;
+    relatedSource.value = undefined;
     attachmentBusy.value = false;
     contract.value = undefined;
     record.value = undefined;
     if (props.open) {
-      filesOpen.value = true;
+      filesOpen.value = !procurement.value;
       allContractFiles.value = false;
       attachments.value = undefined;
       attachmentError.value = '';
@@ -328,30 +360,10 @@ async function loadFiles() {
       attachmentError.value = errorText(error);
   }
 }
-async function loadReviews(refresh = false) {
-  if (!contract.value || !record.value) return;
-  const contractId = contract.value.id;
-  const recordId = record.value.id;
-  const run = sequence;
-  reviewLoading.value = true;
-  reviewError.value = '';
-  try {
-    if (refresh)
-      for (const review of reviews.value.filter(
-        (item) => item.status === 'PENDING',
-      ))
-        await refreshAiReview(contractId, review.id);
-    const results = await getAiReviews(contractId);
-    if (run !== sequence || !props.open) return;
-    reviews.value = results.filter((review) => review.planId === recordId);
-  } catch (error) {
-    if (run === sequence) reviewError.value = errorText(error);
-  } finally {
-    if (run === sequence) reviewLoading.value = false;
-  }
-}
 function openAction(action: string) {
   if (childOpen.value) return;
+  selectedKind.value = props.kind;
+  relatedSource.value = undefined;
   selectedAction.value = action;
   actionOpen.value = true;
 }
@@ -360,43 +372,53 @@ function updated() {
   void load();
   emit('updated');
 }
-function navigate(kind: DocumentKind) {
-  if (!contract.value || childOpen.value) return;
-  if (props.embedded) {
-    emit('navigate', kind);
-    return;
-  }
-  void router.push({
-    path: documentDefinitions[kind].route,
-    query: { contractId: contract.value.id },
-  });
+function openRelated(launch: RelatedCreation) {
+  if (!contract.value || !record.value || childOpen.value) return;
+  relatedSource.value = { kind: props.kind, id: record.value.id };
+  selectedKind.value = launch.kind;
+  selectedAction.value = launch.action;
+  actionOpen.value = true;
 }
 function close() {
   if (!childOpen.value) emit('close');
 }
-const related = computed<DocumentKind[]>(
-  () =>
-    ((
-      ({
-        requests: ['tasks'],
-        tasks: ['quotes', 'production'],
-        quotes: ['plans'],
-        plans: ['orders'],
-        orders: ['arrivals'],
-        arrivals: ['purchaseReturns'],
-        production: ['shipments'],
-        shipments: ['salesReturns'],
-        receipts: ['allocations', 'refunds'],
-        invoices: ['allocations'],
-      }) as Partial<Record<DocumentKind, DocumentKind[]>>
-    )[props.kind] as DocumentKind[] | undefined) ?? [],
+const related = computed(() =>
+  record.value
+    ? relatedCreations(props.kind, record.value).filter(
+        (entry) =>
+          contract.value?.allowedActions.includes(entry.action) &&
+          !actions.value.includes(entry.action),
+      )
+    : [],
 );
+const mainAction = computed(() => {
+  const candidates = new Set([
+    ...actions.value.filter(
+      (action) =>
+        contract.value &&
+        record.value &&
+        !documentActionUnavailableReason(contract.value, action, record.value),
+    ),
+    ...related.value.map((entry) => entry.action),
+  ]);
+  return [
+    'ASSIGN_FULFILLMENT',
+    'SUBMIT_PLAN',
+    'GENERATE_ORDERS',
+    'RECORD_ARRIVAL',
+    'UPDATE_PRODUCTION',
+    'SAVE_PLAN',
+    'CREATE_QUOTE',
+    'TRANSFER_ASSIGNMENT',
+  ].find((action) => candidates.has(action));
+});
 </script>
 <template>
   <Drawer
     :open="open"
-    :title="`${config.title} · ${title}`"
-    width="min(1050px,96vw)"
+    :title="drawerTitle"
+    :root-class-name="procurement ? 'procurement-record-drawer' : undefined"
+    :width="procurement ? 'min(920px,96vw)' : 'min(1050px,96vw)'"
     :closable="!childOpen"
     :mask-closable="!childOpen"
     :keyboard="!childOpen"
@@ -417,7 +439,11 @@ const related = computed<DocumentKind[]>(
       size="large"
       style="width: 100%"
     >
-      <Descriptions bordered size="small" :column="2">
+      <Descriptions
+        :bordered="!procurement"
+        size="small"
+        :column="{ xs: 1, sm: 2 }"
+      >
         <Descriptions.Item label="关联合同">
           <RelatedLink :target="contractTarget(contract.id)">
             {{ contract.code }} · {{ contract.name }}
@@ -429,11 +455,12 @@ const related = computed<DocumentKind[]>(
 </Descriptions.Item><Descriptions.Item label="订单所属公司">
           {{ company }}
 </Descriptions.Item><Descriptions.Item label="当前状态">
-          <Tag>{{ label(record.status) }}</Tag>
+          <ProcurementStatusBadge v-if="procurement" :status="record.status" />
+          <Tag v-else>{{ label(record.status) }}</Tag>
         </Descriptions.Item>
 </Descriptions><Descriptions
         v-if="sourceContext.length"
-        bordered
+        :bordered="!procurement"
         size="small"
         :column="2"
       >
@@ -446,11 +473,23 @@ const related = computed<DocumentKind[]>(
             {{ item.value }}
           </RelatedLink>
         </Descriptions.Item>
-</Descriptions><Space wrap>
+</Descriptions><Space wrap :class="{ 'procurement-record-actions': procurement }">
+        <Button
+          v-for="launch in related"
+          :key="launch.action"
+          :type="
+            procurement && launch.action === mainAction ? 'primary' : 'default'
+          "
+          :disabled="childOpen"
+          @click="openRelated(launch)"
+        >
+          {{ launch.title }}
+        </Button>
         <Button
           v-for="action in actions"
           :key="action"
-          type="primary"
+          :type="!procurement || action === mainAction ? 'primary' : 'default'"
+          :danger="procurement && /^(CANCEL|VOID|REVERSE|UNBIND)/.test(action)"
           :disabled="
             !!documentActionUnavailableReason(contract, action, record!)
           "
@@ -467,15 +506,12 @@ const related = computed<DocumentKind[]>(
           "
         >
           {{ filesOpen ? '收起附件' : '凭证附件' }}
-</Button><Button
-          v-for="targetKind in related"
-          :key="targetKind"
-          @click="navigate(targetKind)"
-        >
-          {{ embedded ? '办理' : '前往'
-          }}{{ documentDefinitions[targetKind].title }}
         </Button>
-</Space><Descriptions bordered size="small" :column="2">
+</Space><Descriptions
+        :bordered="!procurement"
+        size="small"
+        :column="{ xs: 1, sm: 2 }"
+      >
         <Descriptions.Item
           v-for="item in fields"
           :key="item.key"
@@ -496,39 +532,6 @@ const related = computed<DocumentKind[]>(
           :contract="contract"
           :data="lines"
           :columns="lineColumns"
-        />
-</Card><Card
-        v-if="kind === 'plans'"
-        title="当前方案审批与 AI 预审"
-        size="small"
-      >
-        <RecordTable
-          v-if="rows(record.approvals).length"
-          :data="rows(record.approvals)"
-          :columns="[
-            { key: 'planVersion', title: '审批版本' },
-            { key: 'invalidated', title: '已失效' },
-            { key: 'approved', title: '审批结果' },
-            { key: 'scopes', title: '批准范围' },
-            { key: 'reason', title: '意见' },
-            { key: 'actorId', title: '审批人' },
-            { key: 'occurredAt', title: '时间' },
-          ]"
-        /><Button :loading="reviewLoading" @click="loadReviews(true)">
-          刷新预审结果
-</Button><Alert
-          v-if="reviewError"
-          :message="reviewError"
-          type="warning"
-        /><RecordTable
-          :data="reviews"
-          :columns="[
-            { key: 'status', title: '预审状态' },
-            { key: 'planVersion', title: '方案版本' },
-            { key: 'summary', title: '预审结论 / 未完成原因' },
-            { key: 'risks', title: '风险' },
-            { key: 'evidenceIds', title: '引用证据' },
-          ]"
         />
 </Card><Card
         v-if="kind === 'costs' && contribution"
@@ -585,11 +588,12 @@ const related = computed<DocumentKind[]>(
     />
 </Drawer><DocumentAction
     :open="open && actionOpen"
-    :kind="kind"
+    :kind="selectedKind"
     :action="selectedAction"
-    :row="row"
+    :row="relatedSource ? undefined : row"
+    :source="relatedSource"
     :contract-id="row?.contractId"
-    :lock-contract="embedded"
+    :lock-contract="true"
     @close="actionOpen = false"
     @updated="updated"
   />

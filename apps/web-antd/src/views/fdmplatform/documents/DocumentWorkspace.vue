@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { DocumentKind } from './model';
+import type { RelatedDocumentSource } from './related-creation';
 
 import type { Directory, DocumentRow } from '#/api/fdmplatform';
 
@@ -28,6 +29,7 @@ import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import DocumentAction from './DocumentAction.vue';
+import { documentListNextStep } from './list-actions';
 import { contractReferenceText, migrationCell } from './migration-display';
 import {
   actionTitle,
@@ -117,34 +119,26 @@ const selectedRow = ref<DocumentRow>();
 const selectedStandaloneId = ref<string>();
 const actionOpen = ref(false);
 const selectedAction = ref<string>();
+const actionKind = ref<DocumentKind>(props.kind);
 const actionRow = ref<DocumentRow>();
+const actionSource = ref<RelatedDocumentSource>();
+const actionContractId = ref<string>();
 let sequence = 0;
 let locateSequence = 0;
 const locateError = ref('');
 function openRow(row: DocumentRow) {
+  ++locateSequence;
+  locateError.value = '';
+  actionOpen.value = false;
   if (row.standaloneId) {
-    void router.push({
-      query: {
-        ...withoutDetailQuery(route.query),
-        standaloneId: row.standaloneId,
-      },
-    });
+    detailOpen.value = false;
+    selectedRow.value = undefined;
+    selectedStandaloneId.value = row.standaloneId;
     return;
   }
-  if (
-    route.query.documentId === row.id &&
-    route.query.contractId === row.contractId
-  ) {
-    void locateDocument();
-    return;
-  }
-  void router.push({
-    query: {
-      ...withoutDetailQuery(route.query),
-      contractId: row.contractId,
-      documentId: row.id,
-    },
-  });
+  selectedStandaloneId.value = undefined;
+  selectedRow.value = row;
+  detailOpen.value = true;
 }
 function closeDetail() {
   detailOpen.value = false;
@@ -207,7 +201,7 @@ const columns = computed(() => [
   {
     title: '办理',
     key: 'action',
-    width: isIntake.value ? 200 : 115,
+    width: 235,
     fixed: 'right' as const,
   },
 ]);
@@ -280,17 +274,48 @@ function clearContext() {
 }
 function create(action: string) {
   actionRow.value = undefined;
+  actionSource.value = undefined;
+  actionKind.value = effectiveKind.value;
+  actionContractId.value = contractId.value;
   selectedAction.value = action;
   actionOpen.value = true;
 }
-function dispatch(row: DocumentRow) {
-  if (row.standaloneId) {
-    openRow(row);
-    return;
-  }
-  actionRow.value = row;
-  selectedAction.value = 'ASSIGN_FULFILLMENT';
+function quickAction(row: DocumentRow) {
+  const launch = documentListNextStep(effectiveKind.value, row).action;
+  if (!launch || actionOpen.value) return;
+  actionKind.value = launch.kind;
+  actionRow.value = launch.related ? undefined : row;
+  actionSource.value = launch.related
+    ? { kind: effectiveKind.value, id: row.id }
+    : undefined;
+  actionContractId.value = row.contractId;
+  selectedAction.value = launch.action;
   actionOpen.value = true;
+}
+const hasSearch = computed(() =>
+  Boolean(keyword.value.trim() || status.value || assignmentStatus.value),
+);
+const emptyMessage = computed(() =>
+  hasSearch.value ? '没有符合当前查询条件的单据' : kindEmptyMessage(),
+);
+function kindEmptyMessage() {
+  if (props.kind === 'tasks')
+    return isIntake.value
+      ? '当前没有未分派或部分分派的采购申请'
+      : '尚无履约任务，请先在待接单申请中接单分派';
+  return contractId.value
+    ? `该合同尚无${config.value.title}`
+    : `尚无${config.value.title}`;
+}
+function clearSearch() {
+  keyword.value = '';
+  status.value = undefined;
+  assignmentStatus.value = undefined;
+  search();
+}
+function actionSaved() {
+  actionOpen.value = false;
+  void load();
 }
 watch(
   () => [
@@ -307,6 +332,8 @@ watch(
     selectedRow.value = undefined;
     selectedAction.value = undefined;
     actionRow.value = undefined;
+    actionSource.value = undefined;
+    actionContractId.value = undefined;
     status.value = undefined;
     assignmentStatus.value = undefined;
     if (!routeActive.value) return;
@@ -392,6 +419,9 @@ onMounted(async () => {
             style="width: 180px"
             @change="search"
           />
+          <Button v-if="hasSearch" @click="clearSearch">
+            清除查询
+          </Button>
 </Space><Alert
           v-if="locateError"
           :message="locateError"
@@ -413,14 +443,6 @@ onMounted(async () => {
           :columns="columns"
           :data-source="records"
           :loading="loading"
-          :locale="{
-            emptyText:
-              kind === 'tasks'
-                ? isIntake
-                  ? '当前没有未分派或部分分派的采购申请'
-                  : '尚无履约任务，请先在待接单申请中接单分派'
-                : '暂无数据',
-          }"
           row-key="id"
           :scroll="{ x: Math.max(1300, columns.length * 150 + 170) }"
           :pagination="{
@@ -438,6 +460,30 @@ onMounted(async () => {
             }
           "
         >
+          <template #emptyText>
+            <Space direction="vertical" class="py-6">
+              <span>{{ emptyMessage }}</span>
+              <Button v-if="hasSearch" @click="clearSearch">
+                清除查询，查看当前范围
+              </Button>
+              <Button
+                v-else-if="kind === 'tasks' && !isIntake"
+                @click="procurementQueue = 'intake'"
+              >
+                查看待接单申请
+              </Button>
+              <Button
+                v-else-if="config.create[0]"
+                type="primary"
+                @click="create(config.create[0])"
+              >
+                {{ actionTitle(config.create[0]) }}
+              </Button>
+              <Button v-else-if="contractId" @click="clearContext">
+                查看全部合同的单据
+              </Button>
+            </Space>
+          </template>
           <template #bodyCell="{ column, record }">
             <div v-if="column.key === 'contract'">
               <Button
@@ -511,24 +557,40 @@ onMounted(async () => {
               )?.companyName ??
               record.companyName ??
               (record.companyId ? `公司 #${record.companyId}` : '待补齐')
-            }}</span><Space v-else-if="column.key === 'action' && isIntake">
-              <Button
-                v-if="record.allowedActions?.includes('ASSIGN_FULFILLMENT')"
-                type="link"
-                @click="dispatch(record as DocumentRow)"
+            }}</span>
+            <div v-else-if="column.key === 'action'">
+              <Space wrap size="small">
+                <Button
+                  v-if="
+                    documentListNextStep(effectiveKind, record as DocumentRow)
+                      .action
+                  "
+                  type="link"
+                  @click="quickAction(record as DocumentRow)"
+                >
+                  {{
+                    documentListNextStep(effectiveKind, record as DocumentRow)
+                      .action?.title
+                  }}
+                </Button>
+                <Button type="link" @click="openRow(record as DocumentRow)">
+                  {{ isIntake ? '查看申请' : '查看详情' }}
+                </Button>
+              </Space>
+              <div
+                v-if="
+                  documentListNextStep(effectiveKind, record as DocumentRow)
+                    .hint
+                "
+                class="text-muted-foreground px-3 text-xs"
               >
-                接单 / 分派
-              </Button>
-              <Button type="link" @click="openRow(record as DocumentRow)">
-                查看申请
-              </Button>
-</Space><Button
-              v-else-if="column.key === 'action'"
-              type="link"
-              @click="openRow(record as DocumentRow)"
-            >
-              查看 / 办理
-</Button><Tag v-else-if="column.key === 'status'">
+                {{
+                  documentListNextStep(effectiveKind, record as DocumentRow)
+                    .hint
+                }}
+              </div>
+            </div>
+            <Tag v-else-if="column.key === 'status'">
               {{ cell(record as DocumentRow, String(column.key)) }}
 </Tag><span
               v-else
@@ -552,12 +614,14 @@ onMounted(async () => {
       @updated="load"
     /><DocumentAction
       :open="actionOpen && routeActive"
-      :kind="effectiveKind"
+      :kind="actionKind"
       :action="selectedAction"
       :row="actionRow"
-      :contract-id="contractId"
+      :source="actionSource"
+      :contract-id="actionContractId"
+      :lock-contract="Boolean(actionContractId)"
       @close="actionOpen = false"
-      @updated="load"
+      @updated="actionSaved"
     />
   </Page>
 </template>

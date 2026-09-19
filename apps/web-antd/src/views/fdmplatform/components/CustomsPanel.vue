@@ -123,7 +123,6 @@ const feedbackId = ref('');
 const category = ref('CONTRACT');
 const applicable = ref(true);
 const mandatory = ref(false);
-const reviewed = ref(false);
 const uploadCategory = ref('CONTRACT');
 const replacesId = ref<string>();
 const uploadRemark = ref('');
@@ -223,7 +222,6 @@ const checklistColumns = [
   { key: 'category', title: '资料类别', width: 170 },
   { key: 'applicable', title: '是否适用', width: 90 },
   { key: 'required', title: '必须提供', width: 90 },
-  { key: 'reviewed', title: '复核', width: 90 },
   { key: 'reason', title: '说明', dataIndex: 'reason', width: 200 },
   { key: 'action', title: '操作', width: 90 },
 ];
@@ -421,7 +419,6 @@ function beginAction(action: string, record?: Record<string, unknown>) {
   category.value = String(record?.category ?? 'CONTRACT');
   applicable.value = record?.applicable !== false;
   mandatory.value = record?.required === true;
-  reviewed.value = record?.reviewed === true;
   actionOpen.value = true;
 }
 function closeAction() {
@@ -480,7 +477,6 @@ async function perform() {
       applicable: applicable.value,
       required: mandatory.value,
       reason: reason.value,
-      reviewed: reviewed.value,
     };
   if (actionName.value === 'FEEDBACK')
     payload = { message: reason.value, dueDate: dueDate.value || undefined };
@@ -502,8 +498,6 @@ async function perform() {
     };
   if (actionName.value === 'REGISTER_COST')
     payload = { expenseId: expenseId.value };
-  if (actionName.value === 'REJECT_COST')
-    payload = { expenseId: expenseId.value, reason: reason.value };
   saving.value = true;
   actionError.value = '';
   try {
@@ -626,8 +620,8 @@ async function preview(file: CustomsFile) {
     downloading.value = '';
   }
 }
-function reviewExpense(action: string, expense: CustomsExpense) {
-  beginAction(action, { id: expense.id });
+function registerExpense(expense: CustomsExpense) {
+  beginAction('REGISTER_COST', { id: expense.id });
 }
 watch(
   () => [props.companyId, props.contractId],
@@ -939,7 +933,7 @@ onBeforeUnmount(() => {
                 v-if="!storageEnabled"
                 type="warning"
                 show-icon
-                message="报关资料私有存储尚未配置，请联系管理员。"
+                message="系统文件存储暂不可用，请检查基础设施中的文件配置。"
               />
               <Space wrap>
                 <Select
@@ -1048,7 +1042,10 @@ onBeforeUnmount(() => {
               </template>
             </Table>
           </TabPane>
-          <TabPane key="checklist" tab="资料清单与复核">
+          <TabPane key="checklist" tab="资料要求">
+            <p class="customs-muted">
+              根据适用的必需资料与已上传文件自动判断是否齐全。
+            </p>
             <Space class="customs-section">
               <Button
                 v-if="hasAction('CHECKLIST')"
@@ -1075,18 +1072,12 @@ onBeforeUnmount(() => {
                 <span v-else-if="column.key === 'required'">{{
                   record.required ? '是' : '否'
                 }}</span>
-                <Tag
-                  v-else-if="column.key === 'reviewed'"
-                  :color="record.reviewed ? 'green' : undefined"
-                >
-                  {{ record.reviewed ? '已复核' : '待复核' }}
-                </Tag>
                 <Button
                   v-else-if="column.key === 'action' && hasAction('CHECKLIST')"
                   type="link"
                   @click="beginAction('CHECKLIST', record)"
                 >
-                  设置 / 复核
+                  设置资料要求
                 </Button>
               </template>
             </Table>
@@ -1159,7 +1150,7 @@ onBeforeUnmount(() => {
             <Alert
               type="info"
               show-icon
-              message="采购提交费用及凭据后，由财务确认归集到合同成本。"
+              message="登记费用及凭据后，可直接确认归集到合同成本。"
               class="customs-section"
             />
             <Table
@@ -1183,7 +1174,13 @@ onBeforeUnmount(() => {
                   '费用凭据'
                 }}</span>
                 <div v-else-if="column.key === 'status'">
-                  <Tag>{{ customsLabel(record.status) }}</Tag>
+                  <Tag>
+                    {{
+                      record.status === 'PENDING'
+                        ? '待归集'
+                        : customsLabel(record.status)
+                    }}
+                  </Tag>
                   <div class="customs-muted">{{ record.reason }}</div>
                 </div>
                 <Space
@@ -1195,20 +1192,9 @@ onBeforeUnmount(() => {
                   <Button
                     v-if="hasAction('REGISTER_COST')"
                     type="link"
-                    @click="
-                      reviewExpense('REGISTER_COST', record as CustomsExpense)
-                    "
+                    @click="registerExpense(record as CustomsExpense)"
                   >
                     确认归集
-</Button><Button
-                    v-if="hasAction('REJECT_COST')"
-                    type="link"
-                    danger
-                    @click="
-                      reviewExpense('REJECT_COST', record as CustomsExpense)
-                    "
-                  >
-                    退回
                   </Button>
                 </Space>
               </template>
@@ -1353,8 +1339,6 @@ onBeforeUnmount(() => {
           <Space wrap>
             <Checkbox v-model:checked="applicable">适用</Checkbox><Checkbox v-model:checked="mandatory" :disabled="!applicable">
               必须提供
-</Checkbox><Checkbox v-model:checked="reviewed" :disabled="!applicable">
-              已复核当前文件
             </Checkbox>
           </Space>
         </template>

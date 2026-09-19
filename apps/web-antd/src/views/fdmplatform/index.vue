@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { ActionDefinition } from './data';
+import type { DocumentKind } from './documents/model';
 import type { DetailTab, WorkspaceKey } from './workspaces';
 
 import type {
@@ -49,7 +50,9 @@ import {
 import { getStockPage, getStockPool } from '#/api/fdmplatform/stock';
 
 import ActionDialog from './components/ActionDialog.vue';
+import { contractDeliveryStatus } from './components/contract-progress';
 import ContractDetail from './components/ContractDetail.vue';
+import { amountText } from './components/finance-progress';
 import ImportPanel from './components/ImportPanel.vue';
 import MasterSourcePicker from './components/MasterSourcePicker.vue';
 import RecordTable from './components/RecordTable.vue';
@@ -65,6 +68,7 @@ import {
 } from './data';
 import { personLabel, withDirectory } from './directory';
 import BusinessDocumentList from './documents/BusinessDocumentList.vue';
+import DocumentAction from './documents/DocumentAction.vue';
 import { nativeMoney } from './documents/migration-display';
 import { referenceId, withoutDetailQuery } from './documents/navigation';
 import {
@@ -103,6 +107,19 @@ const total = ref(0);
 const statusFilter = ref<string>();
 const requestStateFilter = ref<string>();
 const ownerFilter = ref<number>();
+// View preference only; the server still applies tenant and access boundaries.
+const onlyMyContracts = ref(false);
+const contractOwnerFilter = computed(() =>
+  onlyMyContracts.value ? access.value?.userId : undefined,
+);
+async function showContracts(mine: boolean) {
+  if (mine && !access.value?.userId) {
+    message.warning('当前登录身份尚未读取，请刷新后重试');
+    return;
+  }
+  onlyMyContracts.value = mine;
+  await reloadList();
+}
 const documents = ref<DocumentRow[]>([]);
 const directory = ref<Directory>();
 provide('fdmPlatformDirectory', directory);
@@ -128,6 +145,28 @@ const stockDocumentTitles = {
   'stock-outs': '出库单',
   stocktakes: '库存盘点',
 } as const;
+const inventoryActions = [
+  { title: '预留库存', action: 'STOCK_RESERVE', kind: 'shipments' },
+  { title: '登记发货', action: 'STOCK_SHIP', kind: 'shipments' },
+  { title: '采购到货', action: 'RECORD_ARRIVAL', kind: 'arrivals' },
+  { title: '自产入库', action: 'STOCK_RECEIVE', kind: 'production' },
+] satisfies { action: string; kind: DocumentKind; title: string }[];
+const inventoryAction = ref<(typeof inventoryActions)[number]>();
+const stockDocumentRefresh = ref(0);
+function openInventoryAction(action: (typeof inventoryActions)[number]) {
+  if (
+    !hasAccess.value ||
+    !routeActive.value ||
+    props.workspace !== 'inventory-stock'
+  )
+    return;
+  inventoryAction.value = action;
+}
+async function inventoryUpdated() {
+  if (!routeActive.value || props.workspace !== 'inventory-stock') return;
+  stockDocumentRefresh.value++;
+  await loadCompany();
+}
 const inventoryType = computed<'pools' | keyof typeof stockDocumentTitles>({
   get: () =>
     typeof route.query.inventoryType === 'string' &&
@@ -231,8 +270,7 @@ async function clearStockLocation() {
   await router.replace({ query: withoutStockQuery(route.query) });
 }
 const contractColumns = computed(() => [
-  { title: '订单所属公司', key: 'company', width: 220, ellipsis: true },
-  { title: '合同 / 样品', dataIndex: 'name', key: 'name', width: 260 },
+  { title: '订单号 / 样品', dataIndex: 'code', key: 'name', width: 260 },
   {
     title: '客户',
     dataIndex: 'customerName',
@@ -240,30 +278,14 @@ const contractColumns = computed(() => [
     width: 190,
     ellipsis: true,
   },
-  {
-    title: '产品分类',
-    dataIndex: 'productCategory',
-    key: 'productCategory',
-    width: 170,
-  },
-  {
-    title: '业务类型',
-    dataIndex: 'businessType',
-    key: 'businessType',
-    width: 130,
-  },
   ...(contracts.value.some((contract) => contract.amount !== undefined)
     ? [{ title: '合同金额', dataIndex: 'amount', key: 'amount', width: 160 }]
     : []),
+  { title: '已回款', key: 'confirmedReceipts', width: 180 },
+  { title: '未回款', key: 'unpaidAmount', width: 180 },
+  { title: '发货状态', key: 'deliveryStatus', width: 120 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
-  { title: '产品明细', key: 'items', width: 95 },
   { title: '负责人', dataIndex: 'ownerUserId', key: 'ownerUserId', width: 100 },
-  {
-    title: '业务版本',
-    dataIndex: 'businessVersion',
-    key: 'businessVersion',
-    width: 75,
-  },
   { title: '操作', key: 'action', fixed: 'right' as const, width: 105 },
 ]);
 const columns = (...pairs: string[]) =>
@@ -287,6 +309,7 @@ async function initialize() {
   }
 }
 function clearData() {
+  inventoryAction.value = undefined;
   loading.value = false;
   contracts.value = [];
   documents.value = [];
@@ -321,7 +344,9 @@ async function loadCompany() {
           pageNo: pageNo.value,
           pageSize: pageSize.value,
           keyword: keyword.value.trim() || undefined,
-          ownerUserId: ownerFilter.value,
+          ownerUserId: isContractList
+            ? contractOwnerFilter.value
+            : ownerFilter.value,
           ...(resource === 'purchase-requests'
             ? {
                 status: requestStateFilter.value,
@@ -516,6 +541,8 @@ function openCreateContract() {
 async function onNewContractSaved(contract: Contract) {
   contractEditorOpen.value = false;
   selectedContract.value = contract;
+  detailContext.value = undefined;
+  detailTab.value = 'overview';
   detailOpen.value = true;
   await loadCompany();
 }
@@ -830,6 +857,13 @@ function closeContractDetail() {
     });
 }
 watch(
+  () => [routeActive.value, props.workspace],
+  () => {
+    if (!routeActive.value || props.workspace !== 'inventory-stock')
+      inventoryAction.value = undefined;
+  },
+);
+watch(
   () => [route.query.contractId, route.query.tab, routeActive.value],
   () => {
     void locateContract();
@@ -869,22 +903,16 @@ onMounted(async () => {
           <p>{{ workspaceDefinition.description }}</p>
         </div>
         <Space wrap>
-          <Button
-            v-if="workspace === 'inventory-stock'"
-            @click="router.push('/fdmwaimao/platform-shipments')"
-          >
-            预留与发货
-</Button><Button
-            v-if="workspace === 'inventory-stock'"
-            @click="router.push('/fdmprocurement/platform-arrivals')"
-          >
-            采购到货
-</Button><Button
-            v-if="workspace === 'inventory-stock'"
-            @click="router.push('/fdmprocurement/platform-production')"
-          >
-            自产入库
-</Button><Button :loading="initialLoading || loading" @click="initialize">
+          <template v-if="workspace === 'inventory-stock'">
+            <Button
+              v-for="entry in inventoryActions"
+              :key="entry.action"
+              :disabled="!hasAccess || Boolean(inventoryAction)"
+              @click="openInventoryAction(entry)"
+            >
+              {{ entry.title }}
+            </Button>
+</template><Button :loading="initialLoading || loading" @click="initialize">
             刷新数据
 </Button><Button
             v-if="hasAccess && canCreate"
@@ -931,6 +959,23 @@ onMounted(async () => {
               <div class="tab-stack">
                 <div class="toolbar">
                   <Space wrap>
+                    <Space :size="0">
+                      <Button
+                        :type="onlyMyContracts ? 'default' : 'primary'"
+                        :aria-pressed="!onlyMyContracts"
+                        @click="showContracts(false)"
+                      >
+                        全部合同
+                      </Button>
+                      <Button
+                        :type="onlyMyContracts ? 'primary' : 'default'"
+                        :aria-pressed="onlyMyContracts"
+                        :disabled="!access?.userId"
+                        @click="showContracts(true)"
+                      >
+                        我负责的
+                      </Button>
+                    </Space>
                     <Input
                       v-model:value="keyword"
                       placeholder="合同编号、名称或客户"
@@ -975,7 +1020,13 @@ onMounted(async () => {
                   @change="changePage"
                 >
                   <template #emptyText>
-                    <Empty description="暂无合同">
+                    <Empty
+                      :description="
+                        onlyMyContracts
+                          ? '当前筛选条件下没有我负责的合同'
+                          : '当前筛选条件下暂无合同'
+                      "
+                    >
                       <Button
                         v-if="canCreate"
                         type="primary"
@@ -990,18 +1041,63 @@ onMounted(async () => {
                       <Button
                         type="link"
                         class="contract-title"
-                        :title="record.name"
+                        :title="record.code"
                         @click="openContractFromList(record as Contract)"
                       >
-                        {{ record.name }}
+                        {{ record.code || '订单号待补齐' }}
                       </Button>
                       <div
                         class="contract-code fdm-cell-line"
-                        :title="record.code"
+                        :title="
+                          [record.name, companyName(record.companyId)]
+                            .filter(Boolean)
+                            .join(' · ')
+                        "
                       >
-                        {{ record.code }}
+                        {{
+                          [record.name, companyName(record.companyId)]
+                            .filter(Boolean)
+                            .join(' · ')
+                        }}
                       </div>
                     </template>
+                    <template
+                      v-else-if="
+                        ['confirmedReceipts', 'unpaidAmount'].includes(
+                          String(column.key),
+                        )
+                      "
+                    >
+                      {{
+                        amountText(
+                          record.financeSummary,
+                          String(column.key),
+                          record.currency,
+                          nativeMoney,
+                        )
+                      }}
+                      <div
+                        v-if="
+                          column.key === 'confirmedReceipts' &&
+                          Number(record.financeSummary?.overpaidAmount) > 0
+                        "
+                      >
+                        <Tag color="orange">
+                          超收
+                          {{
+                            amountText(
+                              record.financeSummary,
+                              'overpaidAmount',
+                              record.currency,
+                              nativeMoney,
+                            )
+                          }}
+                        </Tag>
+                      </div>
+                    </template>
+                    <span v-else-if="column.key === 'deliveryStatus'">
+                      {{ contractDeliveryStatus(record as Contract) }}
+                    </span>
                     <Tag
                       v-else-if="column.key === 'status'"
                       :color="record.status === 'DRAFT' ? 'default' : 'blue'"
@@ -1299,6 +1395,7 @@ onMounted(async () => {
                 </Tabs>
                 <BusinessDocumentList
                   v-if="inventoryType !== 'pools'"
+                  :key="stockDocumentRefresh"
                   :resource="inventoryType"
                   :title="stockDocumentTitles[inventoryType]"
                 />
@@ -1325,7 +1422,7 @@ onMounted(async () => {
                   <Alert
                     type="info"
                     show-icon
-                    message="可用库存 = 现存量 − 不可售量 − 已预留量 − 安全缓冲。收发与预留从合同详情办理，不直接修改余额。"
+                    message="可用库存 = 现存量 − 不可售量 − 已预留量 − 安全缓冲。可点击上方按钮，选择关联合同后办理收发与预留。"
                   />
                   <Alert
                     v-if="displayedStock.filtered"
@@ -1520,6 +1617,14 @@ onMounted(async () => {
       @close="closeContractDetail"
       @refresh="refreshDetail"
       @updated="onContractUpdated"
+    />
+    <DocumentAction
+      v-if="inventoryAction"
+      :open="routeActive && workspace === 'inventory-stock'"
+      :kind="inventoryAction.kind"
+      :action="inventoryAction.action"
+      @close="inventoryAction = undefined"
+      @updated="inventoryUpdated"
     />
     <ActionDialog
       :definition="actionDefinition"

@@ -1,0 +1,183 @@
+.procurement-workspace,
+.procurement-record-drawer {
+  --procurement-surface: hsl(var(--background));
+  --procurement-muted: hsl(var(--muted) / 65%);
+  --procurement-text: hsl(var(--foreground));
+  --procurement-secondary: hsl(var(--muted-foreground));
+  --procurement-line: hsl(var(--border));
+  --procurement-accent: hsl(var(--primary));
+  --procurement-selected: hsl(var(--primary) / 7%);
+
+  font-size: 14px;
+  color: var(--procurement-text);
+}
+
+.procurement-workspace {
+  min-width: 0;
+  padding: 24px;
+  background: var(--procurement-surface);
+  border: 1px solid var(--procurement-line);
+  border-radius: 10px;
+}
+
+.procurement-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.procurement-page-heading {
+  min-width: 0;
+}
+
+.procurement-eyebrow {
+  font-size: 12px;
+  color: var(--procurement-secondary);
+  letter-spacing: 0.06em;
+}
+
+.procurement-page-heading h1 {
+  margin: 4px 0 6px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--procurement-text);
+}
+
+.procurement-page-heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--procurement-secondary);
+}
+
+.procurement-header-actions,
+.procurement-toolbar,
+.procurement-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.procurement-header-context {
+  flex-basis: 100%;
+}
+
+.procurement-toolbar {
+  justify-content: space-between;
+  margin: 18px 0;
+}
+
+.procurement-status {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--procurement-secondary, hsl(var(--muted-foreground)));
+  white-space: normal;
+  background: var(--procurement-muted, hsl(var(--muted)));
+  border-radius: 5px;
+}
+
+.procurement-status-dot {
+  flex: 0 0 5px;
+  width: 5px;
+  height: 5px;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.procurement-status[data-tone='active'] {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 9%);
+}
+
+.procurement-status[data-tone='success'] {
+  color: var(--ant-color-success-text, #23834c);
+  background: var(--ant-color-success-bg, rgb(35 131 76 / 9%));
+}
+
+.procurement-status[data-tone='attention'] {
+  color: var(--ant-color-warning-text, #a76710);
+  background: var(--ant-color-warning-bg, rgb(167 103 16 / 9%));
+}
+
+.procurement-status[data-tone='danger'] {
+  color: var(--ant-color-error-text, #c14444);
+  background: var(--ant-color-error-bg, rgb(193 68 68 / 9%));
+}
+
+.dark .procurement-status[data-tone='success'] { color: #82d6a3; }
+
+.dark .procurement-status[data-tone='attention'] { color: #e8b66d; }
+
+.dark .procurement-status[data-tone='danger'] { color: #f09a9a; }
+
+.procurement-workspace .ant-table,
+.procurement-workspace .ant-table-thead > tr > th {
+  background: transparent;
+}
+
+.procurement-workspace .ant-table-thead > tr > th {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--procurement-secondary);
+  background: var(--procurement-muted);
+}
+
+.procurement-workspace .ant-table-thead > tr > th::before { display: none; }
+
+.procurement-workspace .ant-table-tbody > tr > td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.procurement-workspace .ant-table-tbody > tr.procurement-row-selected > td { background: var(--procurement-selected); }
+
+.procurement-muted {
+  font-size: 12px;
+  color: var(--procurement-secondary, hsl(var(--muted-foreground)));
+  overflow-wrap: anywhere;
+}
+
+.procurement-number { font-variant-numeric: tabular-nums; }
+
+.procurement-record-drawer .ant-drawer-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--procurement-text);
+}
+
+.procurement-record-drawer .ant-descriptions-item-label {
+  font-size: 12px;
+  color: var(--procurement-secondary);
+}
+
+.procurement-record-drawer .ant-card {
+  box-shadow: none;
+}
+
+.procurement-record-drawer .procurement-record-actions {
+  padding: 16px 0;
+  border-top: 1px solid var(--procurement-line);
+  border-bottom: 1px solid var(--procurement-line);
+}
+
+@media (max-width: 767px) {
+  .procurement-workspace { padding: 16px; }
+
+  .procurement-page-header {
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .procurement-page-heading h1 { font-size: 21px; }
+
+  .procurement-header-actions { width: 100%; }
+}

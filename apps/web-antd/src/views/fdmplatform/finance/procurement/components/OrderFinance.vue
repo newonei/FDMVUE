@@ -4,8 +4,7 @@ import type {
   ProcurementFinanceType,
 } from '#/api/fdmplatform/procurement-finance';
 
-import { computed, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -20,28 +19,31 @@ import {
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 
 import { errorText } from '../../../data';
+import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
-import {
-  financeRecordRoute,
-  financeStatus,
-  financeTitles,
-  hasPayableBalance,
-} from '../model';
+import { financeStatus, financeTitles, hasPayableBalance } from '../model';
 import FinanceDocument from './FinanceDocument.vue';
 const props = defineProps<{
   contractId: string;
   mode: 'costs' | 'payments';
   orderId: string;
 }>();
-const emit = defineEmits<{ changed: [] }>();
-const router = useRouter();
+const emit = defineEmits<{ busy: [value: boolean]; changed: [] }>();
 const active = useRouteOwner();
 const summary = ref<Record<string, unknown>>({});
 const pageError = ref('');
 const loading = ref(false);
 const open = ref(false);
+const selectedId = ref<string>();
+const standaloneId = ref<string>();
+watch(
+  () => open.value || !!standaloneId.value,
+  (value) => emit('busy', value),
+);
+onBeforeUnmount(() => emit('busy', false));
 const type = ref<ProcurementFinanceType>('REQUEST');
 const context = ref<Record<string, unknown>>({});
+let sequence = 0;
 const sections = computed(() =>
   props.mode === 'costs'
     ? [{ key: 'costAllocations', type: 'COST_ALLOCATION' as const }]
@@ -59,22 +61,27 @@ function records(key: string) {
   ) as ProcurementFinanceRecord[];
 }
 async function load() {
+  const run = ++sequence;
   loading.value = true;
+  pageError.value = '';
   try {
-    summary.value = await getProcurementFinanceSummary(
+    const value = await getProcurementFinanceSummary(
       props.contractId,
       props.orderId,
     );
+    if (run === sequence) summary.value = value;
   } catch (error) {
-    pageError.value = errorText(error);
+    if (run === sequence) pageError.value = errorText(error);
   } finally {
-    loading.value = false;
+    if (run === sequence) loading.value = false;
   }
 }
 function create(
   kind: ProcurementFinanceType,
   initial: Record<string, unknown> = {},
 ) {
+  selectedId.value = undefined;
+  standaloneId.value = undefined;
   type.value = kind;
   context.value = {
     contractId: props.contractId,
@@ -82,6 +89,16 @@ function create(
     currency: summary.value.currency,
     ...initial,
   };
+  open.value = true;
+}
+function show(record: ProcurementFinanceRecord) {
+  if (record.standaloneId) {
+    standaloneId.value = record.standaloneId;
+    return;
+  }
+  type.value = record.type;
+  selectedId.value = record.id;
+  context.value = {};
   open.value = true;
 }
 function updated() {
@@ -92,6 +109,7 @@ watch(
   () => [props.contractId, props.orderId],
   () => {
     open.value = false;
+    standaloneId.value = undefined;
     void load();
   },
   { immediate: true },
@@ -163,11 +181,7 @@ watch(
           <Button
             v-if="column.key === 'name'"
             type="link"
-            @click="
-              router.push(
-                financeRecordRoute(record as ProcurementFinanceRecord),
-              )
-            "
+            @click="show(record as ProcurementFinanceRecord)"
           >
             {{ record.code }} · {{ record.name }}
 </Button><Tag v-else-if="column.key === 'state'">
@@ -178,10 +192,16 @@ watch(
 </Card><FinanceDocument
       :open="open && active"
       :type="type"
+      :record-id="selectedId"
       :context="context"
       @close="open = false"
       @updated="updated"
-      @create="create"
+    /><BusinessDocumentDetail
+      :id="standaloneId"
+      :open="Boolean(standaloneId) && active"
+      embedded
+      @close="standaloneId = undefined"
+      @updated="updated"
     />
   </Space>
 </template>

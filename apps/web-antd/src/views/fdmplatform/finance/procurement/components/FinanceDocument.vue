@@ -8,7 +8,7 @@ import type {
   ProcurementFinanceType,
 } from '#/api/fdmplatform/procurement-finance';
 
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 import { formatDate } from '@vben/utils';
 
@@ -25,7 +25,7 @@ import {
   Tag,
 } from 'ant-design-vue';
 
-import { newIdempotencyKey } from '#/api/fdmplatform';
+import { getDirectory, newIdempotencyKey } from '#/api/fdmplatform';
 import { downloadBusinessDocumentFile } from '#/api/fdmplatform/business-documents';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
@@ -58,6 +58,8 @@ import {
   payableBalance,
 } from '../model';
 import FinanceForm from './FinanceForm.vue';
+import ReimbursementDetail from './ReimbursementDetail.vue';
+import ReimbursementForm from './ReimbursementForm.vue';
 const props = defineProps<{
   context?: Record<string, unknown>;
   open: boolean;
@@ -66,12 +68,12 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  create: [type: ProcurementFinanceType, context: Record<string, unknown>];
   updated: [record: ProcurementFinanceRecord];
 }>();
 const record = ref<ProcurementFinanceRecord>();
 const loading = ref(false);
 const saving = ref(false);
+const submitting = ref(false);
 const pageError = ref('');
 const files = ref<ProcurementFinanceFile[]>([]);
 const draftFiles = ref<File[]>([]);
@@ -79,12 +81,21 @@ const actionFiles = ref<File[]>([]);
 const canUpload = ref(false);
 const enabled = ref(false);
 const formRef = ref<InstanceType<typeof FinanceForm>>();
+const reimbursementRef = ref<InstanceType<typeof ReimbursementForm>>();
+const userNames = ref<Record<string, string>>({});
 const fileInput = ref<HTMLInputElement>();
 const actionDefinition = ref<ActionDefinition>();
 const actionOpen = ref(false);
+const related = ref<{
+  context: Record<string, unknown>;
+  type: ProcurementFinanceType;
+}>();
+const childOpen = computed(() => actionOpen.value || !!related.value);
+const busy = computed(() => saving.value || submitting.value);
 const operationKeys = new Map<string, string>();
 const uploadKeys = new WeakMap<File, string>();
 let sequence = 0;
+let relatedRefreshSequence = 0;
 const type = computed(() => record.value?.type ?? props.type);
 const planAvailable = computed(() => {
   const periods = rows(record.value?.periods);
@@ -110,13 +121,25 @@ const editable = computed(
 );
 const actions = computed(
   () =>
-    record.value?.allowedActions.filter((action) => action !== 'UPDATE') ?? [],
+    record.value?.allowedActions.filter(
+      (action) => !['APPROVE', 'REJECT', 'UPDATE'].includes(action),
+    ) ?? [],
+);
+const reimbursementDraftActions = computed(() =>
+  actions.value.filter((action) => action !== 'SUBMIT'),
+);
+const returnReason = computed(
+  () =>
+    [...rows(record.value?.history)]
+      .toReversed()
+      .find((entry) => entry.action === 'REJECT')?.reason,
 );
 const allowsPayment = computed(
   () =>
     record.value &&
     ['REIMBURSEMENT', 'REQUEST'].includes(record.value.type) &&
     record.value.status === 'APPROVED' &&
+    record.value.summary?.complete !== false &&
     hasPayableBalance(record.value.summary?.availablePaymentAmount),
 );
 function key(action: string) {
@@ -138,16 +161,19 @@ async function loadFiles() {
   enabled.value = listing.enabled;
 }
 function close() {
-  if (saving.value) return;
+  if (busy.value || childOpen.value) return;
   const finish = () => {
     draftFiles.value = [];
     actionFiles.value = [];
     emit('close');
   };
-  if (draftFiles.value.length + actionFiles.value.length > 0)
+  if (
+    draftFiles.value.length + actionFiles.value.length > 0 ||
+    reimbursementRef.value?.isDirty()
+  )
     Modal.confirm({
       title: '关闭当前单据？',
-      content: '待上传附件尚未保存，关闭后将清除。',
+      content: '当前填写内容或待上传附件尚未保存，关闭后将清除。',
       okText: '关闭',
       onOk: finish,
     });
@@ -161,8 +187,8 @@ function closeAction() {
   };
   if (actionFiles.value.length > 0)
     Modal.confirm({
-      title: '关闭退款办理？',
-      content: '待上传退款凭据尚未保存，关闭后将清除。',
+      title: '关闭当前办理？',
+      content: '待上传凭据尚未保存，关闭后将清除。',
       okText: '关闭',
       onOk: finish,
     });
@@ -170,12 +196,25 @@ function closeAction() {
 }
 async function load() {
   const run = ++sequence;
+  loading.value = false;
   record.value = undefined;
   files.value = [];
   draftFiles.value = [];
   actionFiles.value = [];
   pageError.value = '';
   operationKeys.clear();
+  if (props.type === 'REIMBURSEMENT') {
+    void getDirectory(0)
+      .then((directory) => {
+        if (run === sequence)
+          userNames.value = Object.fromEntries(
+            directory.users.map((user) => [String(user.id), user.nickname]),
+          );
+      })
+      .catch(() => {
+        /* IDs remain visible when the directory is temporarily unavailable. */
+      });
+  }
   if (!props.recordId) return;
   loading.value = true;
   try {
@@ -193,16 +232,22 @@ watch(
   () => [props.open, props.recordId, props.type],
   () => {
     actionOpen.value = false;
+    related.value = undefined;
     if (props.open) void load();
     else sequence++;
   },
   { immediate: true },
 );
-async function save(payload: Record<string, unknown>) {
+async function save(payload: Record<string, unknown>, quiet = false) {
   if (saving.value) return undefined;
+  const run = sequence;
   saving.value = true;
   pageError.value = '';
   try {
+    const pendingFiles =
+      type.value === 'REIMBURSEMENT'
+        ? (reimbursementRef.value?.pendingAttachments() ?? [])
+        : draftFiles.value;
     const value = record.value
       ? await procurementFinanceActionWithAttachments(
           record.value.id,
@@ -212,7 +257,7 @@ async function save(payload: Record<string, unknown>) {
             idempotencyKey: key('UPDATE'),
             payload,
           },
-          draftFiles.value,
+          pendingFiles,
         )
       : await createProcurementFinanceWithAttachments(
           {
@@ -220,27 +265,48 @@ async function save(payload: Record<string, unknown>) {
             idempotencyKey: key('CREATE'),
             payload,
           },
-          draftFiles.value,
+          pendingFiles,
         );
+    if (run !== sequence || !props.open) return undefined;
     draftFiles.value = [];
     record.value = value;
+    await nextTick();
+    reimbursementRef.value?.markSaved();
     operationKeys.delete('UPDATE');
     operationKeys.delete('CREATE');
     emit('updated', value);
     await loadFiles();
-    message.success('草稿已保存');
+    if (!quiet) message.success('草稿已保存');
     return value;
   } catch (error) {
-    pageError.value = errorText(error);
+    if (run === sequence && props.open) pageError.value = errorText(error);
     return undefined;
   } finally {
     saving.value = false;
   }
 }
+async function submitDocument(payload: Record<string, unknown>) {
+  if (busy.value || childOpen.value) return;
+  const run = sequence;
+  submitting.value = true;
+  try {
+    const saved = await save(payload, true);
+    if (
+      !saved ||
+      run !== sequence ||
+      record.value?.id !== saved.id ||
+      !props.open
+    )
+      return;
+    await execute('SUBMIT', {}, key('SUBMIT'), true);
+  } finally {
+    submitting.value = false;
+  }
+}
 async function openAction(action: string) {
-  if (saving.value) return;
+  if (busy.value) return;
   actionFiles.value = [];
-  if (['APPROVE', 'CONFIRM', 'SUBMIT'].includes(action)) {
+  if (['CONFIRM', 'SUBMIT'].includes(action)) {
     void execute(action, {}, key(action));
     return;
   }
@@ -313,16 +379,25 @@ async function execute(
   action: string,
   payload: Record<string, unknown>,
   idempotencyKey: string,
+  alreadySaved = false,
 ) {
   if (saving.value || !record.value) return;
+  const run = sequence;
   pageError.value = '';
   if (
     ['CONFIRM', 'SUBMIT'].includes(action) &&
     editable.value &&
-    formRef.value
+    formRef.value &&
+    !alreadySaved
   ) {
     const saved = await save(formRef.value.payload());
-    if (!saved) return;
+    if (
+      !saved ||
+      run !== sequence ||
+      record.value?.id !== saved.id ||
+      !props.open
+    )
+      return;
   }
   saving.value = true;
   try {
@@ -336,17 +411,20 @@ async function execute(
       },
       actionFiles.value,
     );
+    if (run !== sequence || !props.open) return;
     actionFiles.value = [];
     record.value = value;
     operationKeys.delete(action);
     actionOpen.value = false;
     emit('updated', value);
     await loadFiles();
-    message.success(
-      action === 'WITHDRAW' ? '已撤回，可在当前页面直接编辑' : '操作已完成',
-    );
+    let successMessage = '操作已完成';
+    if (action === 'WITHDRAW') successMessage = '已撤回，可在当前页面直接编辑';
+    else if (action === 'SUBMIT')
+      successMessage = '单据已生效，可继续办理付款与成本归集';
+    message.success(successMessage);
   } catch (error) {
-    pageError.value = errorText(error);
+    if (run === sequence && props.open) pageError.value = errorText(error);
   } finally {
     saving.value = false;
   }
@@ -401,8 +479,8 @@ async function downloadSource(file: BusinessDocumentFile) {
   }
 }
 function pay() {
-  if (!record.value) return;
-  emit('create', 'PAYMENT', {
+  if (!record.value || childOpen.value || saving.value) return;
+  createRelated('PAYMENT', {
     sourceDocumentId: record.value.id,
     contractId: record.value.contractId,
     orderId: record.value.orderId,
@@ -414,8 +492,8 @@ function pay() {
   });
 }
 function requestPeriod(period: Record<string, unknown>) {
-  if (!record.value) return;
-  emit('create', 'REQUEST', {
+  if (!record.value || childOpen.value || saving.value) return;
+  createRelated('REQUEST', {
     contractId: record.value.contractId,
     orderId: record.value.orderId,
     currency: record.value.currency,
@@ -426,6 +504,44 @@ function requestPeriod(period: Record<string, unknown>) {
     name: period.name,
   });
 }
+function createRelated(
+  type: ProcurementFinanceType,
+  context: Record<string, unknown>,
+) {
+  related.value = { type, context };
+}
+function allocateCosts() {
+  if (!record.value || childOpen.value || saving.value) return;
+  createRelated('COST_ALLOCATION', {
+    sourceType: 'REIMBURSEMENT',
+    sourceDocumentId: record.value.id,
+    contractId: record.value.contractId,
+    orderId: record.value.orderId,
+    currency: record.value.currency,
+    costScope: 'ORDER',
+  });
+}
+async function relatedUpdated() {
+  const id = record.value?.id;
+  const run = sequence;
+  const refresh = ++relatedRefreshSequence;
+  if (!id) return;
+  try {
+    const value = await getProcurementFinance(id);
+    if (
+      !props.open ||
+      run !== sequence ||
+      refresh !== relatedRefreshSequence ||
+      record.value?.id !== id
+    )
+      return;
+    record.value = value;
+    emit('updated', value);
+  } catch (error) {
+    if (props.open && run === sequence && refresh === relatedRefreshSequence)
+      pageError.value = errorText(error);
+  }
+}
 </script>
 <template>
   <Drawer
@@ -435,10 +551,10 @@ function requestPeriod(period: Record<string, unknown>) {
         ? `${financeTitles[type]} · ${record.code}`
         : `新建${financeTitles[type]}`
     "
-    width="min(1180px,97vw)"
-    :mask-closable="!saving"
-    :closable="!saving"
-    :keyboard="!saving"
+    :width="type === 'REIMBURSEMENT' ? 'min(1440px,98vw)' : 'min(1180px,97vw)'"
+    :mask-closable="!busy && !childOpen"
+    :closable="!busy && !childOpen"
+    :keyboard="!busy && !childOpen"
     @close="close"
   >
     <Space direction="vertical" size="middle" style="width: 100%">
@@ -447,7 +563,12 @@ function requestPeriod(period: Record<string, unknown>) {
         type="info"
         message="正在读取当前单据…"
       /><template v-else>
-        <Descriptions v-if="record" bordered size="small" :column="3">
+        <Descriptions
+          v-if="record && type !== 'REIMBURSEMENT'"
+          bordered
+          size="small"
+          :column="3"
+        >
           <Descriptions.Item label="名称">{{ record.name }}</Descriptions.Item><Descriptions.Item label="状态">
             <Tag>{{ financeStatus(record.status) }}</Tag>
 </Descriptions.Item><Descriptions.Item label="单据金额">
@@ -504,11 +625,12 @@ function requestPeriod(period: Record<string, unknown>) {
           :migration="record.migration"
           :block-reasons="record.blockReasons"
           :native-source="{ kind: 'PROC_FINANCE', nativeId: record.id }"
-        /><Space wrap>
+        /><Space v-if="type !== 'REIMBURSEMENT'" wrap>
           <Button
             v-for="action in actions"
             :key="action"
             :loading="saving"
+            :disabled="childOpen"
             :danger="['REVERSE', 'CANCEL'].includes(action)"
             @click="openAction(action)"
           >
@@ -519,19 +641,53 @@ function requestPeriod(period: Record<string, unknown>) {
                   : '确认已保存资料'
                 : (actionNames[action] ?? action)
             }}
-</Button><Button v-if="allowsPayment" type="primary" @click="pay">
+</Button><Button
+            v-if="allowsPayment"
+            :disabled="childOpen || saving"
+            type="primary"
+            @click="pay"
+          >
             登记本次付款
           </Button>
-</Space><FinanceForm
-          v-if="editable"
+        </Space>
+        <Alert
+          v-if="type === 'REIMBURSEMENT' && record?.status === 'REJECTED'"
+          type="warning"
+          show-icon
+          :message="`待补充资料：${returnReason || '请补齐资料后提交生效。'}`"
+        />
+        <ReimbursementForm
+          v-if="editable && type === 'REIMBURSEMENT'"
+          ref="reimbursementRef"
+          :record="record"
+          :context="context"
+          :files="files"
+          :saving="busy"
+          @save="(payload) => save(payload)"
+          @submit="submitDocument"
+        />
+        <ReimbursementDetail
+          v-else-if="record && type === 'REIMBURSEMENT'"
+          :record="record"
+          :files="files"
+          :user-names="userNames"
+          :busy="busy || childOpen"
+          @action="openAction"
+          @pay="pay"
+          @allocate="allocateCosts"
+          @download="download"
+        />
+        <FinanceForm
+          v-else-if="editable"
           ref="formRef"
           :type="type"
           :record="record"
           :context="context"
           :files="files"
-          :saving="saving"
+          :saving="busy"
           :pending-files-count="draftFiles.length"
-          @save="save"
+          @save="(payload) => save(payload)"
+          @submit="submitDocument"
         >
           <template #attachments>
             <CreationAttachments
@@ -562,21 +718,13 @@ function requestPeriod(period: Record<string, unknown>) {
                   )
                 "
                 type="link"
+                :disabled="childOpen || saving"
                 @click="requestPeriod(period)"
               >
                 发起本期请款
               </Button>
             </template>
-</RecordTable><RecordTable
-            v-if="type === 'REIMBURSEMENT'"
-            :data="rows(record.expenses)"
-            :columns="[
-              { key: 'category', title: '费用类型' },
-              { key: 'amount', title: '金额' },
-              { key: 'expenseDate', title: '发生日期' },
-              { key: 'remark', title: '说明' },
-            ]"
-          />
+          </RecordTable>
           <div v-if="type === 'COST_ALLOCATION'">
             <Card
               v-for="(group, index) in rows(record.groups)"
@@ -616,7 +764,26 @@ function requestPeriod(period: Record<string, unknown>) {
               {{ record.remark ?? '—' }}
             </Descriptions.Item>
           </Descriptions>
-</template><Card v-if="record" title="凭证附件" size="small">
+        </template>
+        <Space
+          v-if="
+            type === 'REIMBURSEMENT' &&
+            editable &&
+            reimbursementDraftActions.length
+          "
+          wrap
+        >
+          <Button
+            v-for="action in reimbursementDraftActions"
+            :key="action"
+            :disabled="busy || childOpen"
+            :danger="action === 'CANCEL'"
+            @click="openAction(action)"
+          >
+            {{ actionNames[action] ?? action }}
+          </Button>
+        </Space>
+        <Card v-if="record" title="凭证附件" size="small">
           <Space>
             <Button
               v-if="!editable"
@@ -687,6 +854,7 @@ function requestPeriod(period: Record<string, unknown>) {
             :data="
               rows(record.history).map((entry) => ({
                 ...entry,
+                actorId: userNames[String(entry.actorId)] || entry.actorId,
                 at:
                   formatDate(
                     entry.at == null ? undefined : String(entry.at),
@@ -726,4 +894,12 @@ function requestPeriod(period: Record<string, unknown>) {
       </template>
     </ActionDialog>
   </Drawer>
+  <FinanceDocument
+    v-if="related"
+    :open="open"
+    :type="related.type"
+    :context="related.context"
+    @close="related = undefined"
+    @updated="relatedUpdated"
+  />
 </template>
