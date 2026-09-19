@@ -41,62 +41,18 @@ import {
 } from '#/api/fdmai';
 
 import AiCenterShell from '../shared/AiCenterShell.vue';
+import type { ProviderImageTransport } from './provider-presets';
+import {
+  applyProviderPreset,
+  getProviderImageTransport,
+  getProviderPreset,
+  inferProviderPreset,
+  parseProviderConfiguration,
+  PROVIDER_PRESETS,
+  setProviderImageTransport,
+} from './provider-presets';
 
 defineOptions({ name: 'FdmAiProviders' });
-
-interface ProviderPreset {
-  adapterCode: string;
-  baseUrl: string;
-  configuration?: Record<string, unknown>;
-  description: string;
-  key: string;
-  name: string;
-  placeholder: string;
-}
-
-const PRESETS: ProviderPreset[] = [
-  {
-    adapterCode: 'openai-compatible-text',
-    baseUrl: 'https://api.openai.com/v1',
-    description: 'OpenAI 官方 Chat Completions 与模型目录',
-    key: 'openai',
-    name: 'OpenAI',
-    placeholder: 'https://api.openai.com/v1',
-  },
-  {
-    adapterCode: 'openai-compatible-text',
-    baseUrl: '',
-    description: 'New API 自部署或托管中转站',
-    key: 'new-api',
-    name: 'New API',
-    placeholder: 'https://new-api.example.com/v1',
-  },
-  {
-    adapterCode: 'openai-compatible-text',
-    baseUrl: '',
-    description: 'Sub2API OpenAI 兼容网关',
-    key: 'sub2api',
-    name: 'Sub2API',
-    placeholder: 'https://sub2api.example.com/v1',
-  },
-  {
-    adapterCode: 'volcengine-visual',
-    baseUrl: 'https://ark.cn-beijing.volces.com',
-    configuration: { apiFamily: 'ARK' },
-    description: '火山引擎 Ark 图片与视频生成接口',
-    key: 'volcengine-ark',
-    name: 'Volcengine Ark',
-    placeholder: 'https://ark.cn-beijing.volces.com',
-  },
-  {
-    adapterCode: 'openai-compatible-text',
-    baseUrl: '',
-    description: '任意实现 OpenAI 协议的服务地址',
-    key: 'custom-openai',
-    name: '自定义 OpenAI 兼容',
-    placeholder: 'https://gateway.example.com/v1',
-  },
-];
 
 const { hasAccessByCodes } = useAccess();
 const canManagePlatform = hasAccessByCodes(['fdmai:platform:manage']);
@@ -119,6 +75,23 @@ const adapters = ref<FdmAiApi.AdapterDescriptor[]>([]);
 const editingId = ref<number>();
 const presetKey = ref('openai');
 const configurationJson = ref('{}');
+const imageTransport = computed<ProviderImageTransport>({
+  get: () => {
+    try {
+      return getProviderImageTransport(configurationJson.value);
+    } catch {
+      return 'xai-native';
+    }
+  },
+  set: (value) => {
+    try {
+      configurationJson.value = setProviderImageTransport(configurationJson.value, value);
+      probeResult.value = undefined;
+    } catch {
+      message.error('高级配置不是有效 JSON 对象，请先修正后再选择图片处理方式');
+    }
+  },
+});
 const probeResult = ref<FdmAiApi.ProviderProbeResult>();
 const discoveredModels = ref<FdmAiApi.ProviderModelInfo[]>([]);
 const discoveredProvider = ref<FdmAiApi.ProviderAccount>();
@@ -153,7 +126,7 @@ const discoveryColumns: TableColumnsType<FdmAiApi.ProviderModelInfo> = [
 ];
 
 const presetOptions = computed(() =>
-  PRESETS.map((preset) => ({
+  PROVIDER_PRESETS.map((preset) => ({
     disabled:
       adapters.value.length > 0 &&
       !adapters.value.some((item) => item.code === preset.adapterCode),
@@ -161,9 +134,7 @@ const presetOptions = computed(() =>
     value: preset.key,
   })),
 );
-const activePreset = computed(
-  () => PRESETS.find((item) => item.key === presetKey.value) ?? PRESETS[0]!,
-);
+const activePreset = computed(() => getProviderPreset(presetKey.value));
 const activeAdapter = computed(() =>
   adapters.value.find((item) => item.code === form.adapterCode),
 );
@@ -190,23 +161,12 @@ function compactConfiguration(configuration: Record<string, unknown>) {
   );
 }
 
-function providerPreset(row: FdmAiApi.ProviderAccount) {
-  if (row.adapterCode === 'volcengine-visual') return 'volcengine-ark';
-  const value = `${row.name} ${row.baseUrl}`.toLowerCase();
-  if (value.includes('api.openai.com')) return 'openai';
-  if (value.includes('sub2api')) return 'sub2api';
-  if (value.includes('new api') || value.includes('new-api')) return 'new-api';
-  return 'custom-openai';
-}
-
 function selectPreset(key: string, resetValues = true) {
-  const preset = PRESETS.find((item) => item.key === key) ?? PRESETS[0]!;
+  const preserveAccount = Boolean(editingId.value) || !resetValues;
+  const preset = applyProviderPreset(form, key, preserveAccount);
   presetKey.value = preset.key;
-  form.adapterCode = preset.adapterCode;
   probeResult.value = undefined;
-  if (!resetValues) return;
-  form.name = preset.name;
-  form.baseUrl = preset.baseUrl;
+  if (preserveAccount) return;
   configurationJson.value = '{}';
   Object.assign(advanced, {
     allowInsecureHttp: false,
@@ -256,7 +216,7 @@ function openEdit(record: unknown) {
   const configuration = { ...provider.configuration };
   editingId.value = provider.id;
   probeResult.value = undefined;
-  presetKey.value = providerPreset(provider);
+  presetKey.value = inferProviderPreset(provider);
   Object.assign(advanced, {
     allowInsecureHttp: Boolean(configuration.allowInsecureHttp),
     internalNetwork: Boolean(configuration.internalNetwork),
@@ -295,9 +255,9 @@ function buildPayload(showWarning = true) {
   }
   let extra: Record<string, unknown>;
   try {
-    extra = JSON.parse(configurationJson.value || '{}');
+    extra = parseProviderConfiguration(configurationJson.value);
   } catch {
-    if (showWarning) message.error('高级配置不是有效 JSON');
+    if (showWarning) message.error('高级配置不是有效 JSON 对象');
     return undefined;
   }
   const configuration = compactConfiguration({
@@ -476,7 +436,9 @@ async function remove(record: unknown) {
   try {
     await deleteFdmAiProvider(provider.id, provider.platform);
     rows.value = rows.value.filter((item) => String(item.id) !== String(provider.id));
-    message.success('服务商账号已删除，历史调用与用量记录已保留');
+    message.success(
+      '服务商账号、下属路由及仅关联此账号的模型已删除，历史调用与用量记录已保留',
+    );
     await load();
   } finally {
     mutatingId.value = undefined;
@@ -616,7 +578,7 @@ onMounted(load);
                 <Popconfirm
                   :disabled="record.enabled || mutatingId != null"
                   :title="`删除服务商「${record.name}」？`"
-                  description="删除后将从列表移除，无法恢复。历史调用、用量和模型保留，此渠道不能再用于新调用。"
+                  description="将删除此账号、下属路由及仅关联此账号的模型，无法恢复。其他服务商共用的模型、历史调用和用量记录会保留。"
                   :overlay-style="{ width: '360px', maxWidth: 'calc(100vw - 32px)' }"
                   ok-text="删除"
                   cancel-text="取消"
@@ -652,16 +614,40 @@ onMounted(load);
           <Form.Item label="接入平台" required>
             <Select
               v-model:value="presetKey"
-              :disabled="Boolean(editingId)"
+              :disabled="saving"
               :options="presetOptions"
               @change="handlePresetChange"
             />
             <small class="field-hint">{{ activePreset.description }}</small>
+            <small v-if="editingId" class="field-hint">
+              切换接入协议会保留当前服务地址和 API Key，保存后对新调用生效。
+            </small>
           </Form.Item>
           <Form.Item label="账号名称" required>
             <Input v-model:value="form.name" placeholder="用于后台识别该账号" />
           </Form.Item>
         </div>
+        <Alert
+          v-if="form.adapterCode === 'xai-grok'"
+          class="http-alert"
+          message="Grok 图片与视频接入"
+          description="可连接 xAI 官方服务，也可保留 Sub2API 等中转站地址。中转站需要支持 Grok 图片接口以及视频提交、任务查询接口；成功拉取模型目录后，仍需在模型管理中测试实际生成。"
+          show-icon
+          type="info"
+        />
+        <Form.Item v-if="form.adapterCode === 'xai-grok'" label="图片处理方式">
+          <Select
+            v-model:value="imageTransport"
+            :disabled="saving"
+            :options="[
+              { label: 'Grok 标准接口', value: 'xai-native' },
+              { label: 'Sub2API 生成并转存', value: 'sub2api-async' },
+            ]"
+          />
+          <small class="field-hint">
+            选择“Sub2API 生成并转存”前，请先在 Sub2API 配置七牛等图片对象存储；生成完成后返回转存后的图片链接。
+          </small>
+        </Form.Item>
         <Form.Item label="Base URL" required>
           <Input
             v-model:value="form.baseUrl"

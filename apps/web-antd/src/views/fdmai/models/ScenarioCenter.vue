@@ -3,7 +3,15 @@ import type { ModelScene } from './scenarios';
 
 import type { FdmAiApi } from '#/api/fdmai';
 
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
@@ -357,6 +365,11 @@ watch(
   },
 );
 onMounted(async () => {
+  await load();
+  await consumeImportQuery();
+});
+onActivated(async () => {
+  if (loading.value) return;
   await load();
   await consumeImportQuery();
 });

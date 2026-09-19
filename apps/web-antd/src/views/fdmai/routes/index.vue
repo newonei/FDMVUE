@@ -3,7 +3,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { FdmAiApi } from '#/api/fdmai';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 
 import {
   Alert,
@@ -176,6 +176,9 @@ async function remove(record: Record<string, unknown>) {
 }
 
 onMounted(load);
+onActivated(() => {
+  if (!loading.value) void load();
+});
 </script>
 
 <template>

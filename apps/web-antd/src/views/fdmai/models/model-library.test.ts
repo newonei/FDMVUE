@@ -7,11 +7,19 @@ import {
   findProviderModelConnection,
   getChannelCatalogDiff,
   getModelChannels,
+  getProviderModelImportStatus,
+  getProviderModelSupport,
+  inferProviderModelType,
   limitModelSelection,
   modelSaveRequest,
   sameModelLibraryId,
   selectLibraryModelIds,
 } from './model-library';
+
+const textAdapter = {
+  capabilities: ['CHAT'],
+  modalities: ['TEXT'],
+} satisfies Pick<FdmAiApi.AdapterDescriptor, 'capabilities' | 'modalities'>;
 
 function model(id: number, enabled = true): FdmAiApi.ModelDefinition {
   return {
@@ -60,6 +68,263 @@ function provider(id: number, enabled = true): FdmAiApi.ProviderAccount {
 }
 
 describe('model library', () => {
+  it('separates pending models from unsupported models when filtering a provider directory', () => {
+    const models: FdmAiApi.ProviderModelInfo[] = [
+      { id: 'known-chat', metadata: {}, modality: 'TEXT', capabilities: ['CHAT'] },
+      {
+        id: 'unconfirmed-chat',
+        metadata: {},
+        modality: 'TEXT',
+        capabilities: ['CHAT'],
+        requiresConfirmation: true,
+      },
+      { id: 'unknown-model', metadata: {} },
+      {
+        id: 'image-only',
+        metadata: {},
+        modality: 'IMAGE',
+        capabilities: ['TEXT_TO_IMAGE'],
+        importable: false,
+      },
+    ];
+    const idsWithStatus = (status: 'pending' | 'ready' | 'unsupported') =>
+      models
+        .filter(
+          (model) => getProviderModelImportStatus(model, textAdapter) === status,
+        )
+        .map((model) => model.id);
+    expect(idsWithStatus('ready')).toEqual(['known-chat']);
+    expect(idsWithStatus('pending')).toEqual([
+      'unconfirmed-chat',
+      'unknown-model',
+    ]);
+    expect(idsWithStatus('unsupported')).toEqual(['image-only']);
+  });
+
+  it('allows a reviewed model without weakening an explicit unsupported result', () => {
+    const model = {
+      id: 'reviewed-chat',
+      metadata: {},
+      modality: 'TEXT',
+      capabilities: ['CHAT'],
+      requiresConfirmation: true,
+      userConfirmed: true,
+    } satisfies FdmAiApi.ProviderModelInfo & { userConfirmed: boolean };
+    expect(getProviderModelImportStatus(model, textAdapter)).toBe('ready');
+    expect(
+      getProviderModelImportStatus({ ...model, importable: false }, textAdapter),
+    ).toBe('unsupported');
+    expect(getProviderModelImportStatus(model)).toBe('pending');
+    expect(
+      getProviderModelImportStatus({ ...model, capabilities: [] }, textAdapter),
+    ).toBe('pending');
+  });
+
+  it('keeps a confirmed video classification while blocking import through a text and image adapter', () => {
+    const video = {
+      id: 'grok-imagine-video',
+      metadata: {},
+      modality: 'VIDEO',
+      capabilities: ['TEXT_TO_VIDEO'],
+      requiresConfirmation: true,
+      userConfirmed: true,
+    } satisfies FdmAiApi.ProviderModelInfo & { userConfirmed: boolean };
+    const adapter = {
+      capabilities: ['CHAT', 'TEXT_TO_IMAGE'],
+      modalities: ['TEXT', 'IMAGE'],
+    } satisfies Pick<FdmAiApi.AdapterDescriptor, 'capabilities' | 'modalities'>;
+
+    expect(getProviderModelImportStatus(video, adapter)).toBe('unsupported');
+    expect(getProviderModelSupport(video, adapter)).toEqual({
+      reason: 'modality-unsupported',
+      status: 'unsupported',
+      unsupportedCapabilities: ['TEXT_TO_VIDEO'],
+    });
+    expect(video.modality).toBe('VIDEO');
+    expect(video.capabilities).toEqual(['TEXT_TO_VIDEO']);
+    expect(
+      getProviderModelImportStatus(video, {
+        capabilities: ['TEXT_TO_VIDEO'],
+        modalities: ['VIDEO'],
+      }),
+    ).toBe('ready');
+  });
+
+  it('requires both adapter modality and selected capabilities to support importing video', () => {
+    const video = {
+      id: 'reference-video',
+      metadata: {},
+      modality: 'VIDEO',
+      capabilities: ['TEXT_TO_VIDEO', 'FIRST_FRAME_TO_VIDEO'],
+    } satisfies FdmAiApi.ProviderModelInfo;
+    const textToVideoAdapter = {
+      capabilities: ['TEXT_TO_VIDEO'],
+      modalities: ['VIDEO'],
+    } satisfies Pick<FdmAiApi.AdapterDescriptor, 'capabilities' | 'modalities'>;
+    expect(getProviderModelSupport(video, textToVideoAdapter)).toEqual({
+      reason: 'capability-unsupported',
+      status: 'unsupported',
+      unsupportedCapabilities: ['FIRST_FRAME_TO_VIDEO'],
+    });
+    expect(getProviderModelImportStatus(video, textToVideoAdapter)).toBe(
+      'unsupported',
+    );
+    expect(
+      getProviderModelImportStatus(video, {
+        capabilities: ['TEXT_TO_VIDEO', 'FIRST_FRAME_TO_VIDEO'],
+        modalities: ['TEXT'],
+      }),
+    ).toBe('unsupported');
+  });
+
+  it('does not let a manual confirmation override a backend import restriction', () => {
+    const blocked = {
+      id: 'blocked-video',
+      metadata: {},
+      modality: 'VIDEO',
+      capabilities: ['TEXT_TO_VIDEO'],
+      importable: false,
+      userConfirmed: true,
+    } satisfies FdmAiApi.ProviderModelInfo & { userConfirmed: boolean };
+    const videoAdapter = {
+      capabilities: ['TEXT_TO_VIDEO'],
+      modalities: ['VIDEO'],
+    } satisfies Pick<FdmAiApi.AdapterDescriptor, 'capabilities' | 'modalities'>;
+    expect(getProviderModelImportStatus(blocked, videoAdapter)).toBe(
+      'unsupported',
+    );
+    expect(getProviderModelSupport(blocked, videoAdapter).reason).toBe(
+      'backend-blocked',
+    );
+    expect(getProviderModelImportStatus(blocked)).toBe('unsupported');
+  });
+
+  it('keeps confirmed classifications pending until adapter information is available', () => {
+    const confirmed = {
+      id: 'confirmed-chat',
+      metadata: {},
+      modality: 'TEXT',
+      capabilities: ['CHAT'],
+      userConfirmed: true,
+    } satisfies FdmAiApi.ProviderModelInfo & { userConfirmed: boolean };
+    expect(getProviderModelSupport(confirmed)).toEqual({
+      reason: 'adapter-unavailable',
+      status: 'unknown',
+      unsupportedCapabilities: [],
+    });
+    expect(getProviderModelImportStatus(confirmed)).toBe('pending');
+    expect(
+      getProviderModelImportStatus(confirmed, {
+        capabilities: ['CHAT'],
+        modalities: [],
+      }),
+    ).toBe('pending');
+    expect(
+      getProviderModelImportStatus(confirmed, {
+        capabilities: [],
+        modalities: ['TEXT'],
+      }),
+    ).toBe('pending');
+  });
+
+  it('requires explicit confirmation for a fallback classification even if the backend omitted its flag', () => {
+    const fallback = {
+      id: 'unknown-future-model',
+      metadata: {},
+      modality: 'TEXT',
+      capabilities: ['CHAT'],
+      classificationSource: 'FALLBACK',
+    } satisfies FdmAiApi.ProviderModelInfo;
+    expect(getProviderModelImportStatus(fallback, textAdapter)).toBe('pending');
+    expect(
+      getProviderModelImportStatus(
+        { ...fallback, userConfirmed: true },
+        textAdapter,
+      ),
+    ).toBe('ready');
+  });
+
+  it('does not treat an input capability or a capability of another modality as a complete classification', () => {
+    const multimodalAdapter = {
+      capabilities: ['CHAT', 'IMAGE_INPUT', 'TEXT_TO_VIDEO'],
+      modalities: ['TEXT', 'VIDEO'],
+    } satisfies Pick<FdmAiApi.AdapterDescriptor, 'capabilities' | 'modalities'>;
+    const incomplete = {
+      id: 'incomplete-text',
+      metadata: {},
+      modality: 'TEXT',
+      capabilities: ['IMAGE_INPUT'],
+      userConfirmed: true,
+    } satisfies FdmAiApi.ProviderModelInfo & { userConfirmed: boolean };
+    expect(getProviderModelSupport(incomplete, multimodalAdapter).reason).toBe(
+      'classification-incomplete',
+    );
+    expect(getProviderModelImportStatus(incomplete, multimodalAdapter)).toBe(
+      'pending',
+    );
+    expect(
+      getProviderModelImportStatus(
+        { ...incomplete, capabilities: ['TEXT_TO_VIDEO'] },
+        multimodalAdapter,
+      ),
+    ).toBe('pending');
+    expect(
+      getProviderModelImportStatus(
+        { ...incomplete, capabilities: ['CHAT', 'IMAGE_INPUT'] },
+        multimodalAdapter,
+      ),
+    ).toBe('ready');
+  });
+
+  it.each([
+    ['grok-imagine-video', 'VIDEO', 'TEXT_TO_VIDEO'],
+    ['xai/grok-imagine-video-1.5', 'VIDEO', 'TEXT_TO_VIDEO'],
+    ['image-to-video-v2', 'VIDEO', 'TEXT_TO_VIDEO'],
+    ['grok-imagine-image-2.0', 'IMAGE', 'TEXT_TO_IMAGE'],
+    ['grok-imagine-image-quality', 'IMAGE', 'TEXT_TO_IMAGE'],
+    ['grok-2-image', 'IMAGE', 'TEXT_TO_IMAGE'],
+    ['grok-4.1-fast', 'TEXT', 'CHAT'],
+    ['grok-build', 'TEXT', 'CHAT'],
+    ['deepseek-v4-pro', 'TEXT', 'CHAT'],
+    ['gpt-image-1', 'IMAGE', 'TEXT_TO_IMAGE'],
+    ['qwen3-embedding', 'EMBEDDING', 'EMBEDDING'],
+    ['bge-reranker-v2', 'RERANK', 'RERANK'],
+    ['tts-1', 'AUDIO', 'TEXT_TO_AUDIO'],
+    ['suno-v4', 'MUSIC', 'TEXT_TO_MUSIC'],
+  ])('suggests a controlled classification for %s without using adapter support', (id, modality, capability) => {
+    expect(inferProviderModelType(id)).toEqual({
+      capabilities: [capability],
+      modality,
+    });
+  });
+
+  it('keeps a video name hint pending confirmation and prevents import through a text and image channel', () => {
+    const hint = inferProviderModelType('grok-imagine-video');
+    const hinted = {
+      id: 'grok-imagine-video',
+      metadata: {},
+      ...hint,
+      requiresConfirmation: true,
+    } satisfies FdmAiApi.ProviderModelInfo;
+    expect(hinted.modality).toBe('VIDEO');
+    expect(
+      getProviderModelImportStatus(hinted, {
+        capabilities: ['CHAT', 'TEXT_TO_IMAGE'],
+        modalities: ['TEXT', 'IMAGE'],
+      }),
+    ).toBe('unsupported');
+    expect(
+      getProviderModelImportStatus(hinted, {
+        capabilities: ['TEXT_TO_VIDEO'],
+        modalities: ['VIDEO'],
+      }),
+    ).toBe('pending');
+  });
+
+  it.each(['unknown-model', 'my-image-helper', 'image', 'acme-video', 'grok-imagine', 'mygrok-4'])('does not assume a model type for ambiguous ID %s', (id) => {
+    expect(inferProviderModelType(id)).toBeUndefined();
+  });
+
   it('filters models by channel routes while preserving explicitly requested disabled models', () => {
     const models = [model(1), model(2, false), model(3)];
     const routes = [route(1, 10), route(2, 10, false), route(3, 20)];

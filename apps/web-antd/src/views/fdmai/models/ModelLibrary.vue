@@ -5,6 +5,7 @@ import type { FdmAiApi } from '#/api/fdmai';
 
 import {
   computed,
+  onActivated,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -34,6 +35,7 @@ import {
 } from 'ant-design-vue';
 
 import {
+  cancelFdmAiInvocation,
   createFdmAiModel,
   discoverFdmAiProviderModels,
   getFdmAiAdapters,
@@ -52,12 +54,27 @@ import {
   findProviderModelConnection,
   getChannelCatalogDiff,
   getModelChannels,
+  getProviderModelImportStatus,
+  inferProviderModelType,
   limitModelSelection,
   MODEL_IMPORT_LIMIT,
   modelSaveRequest,
   sameModelLibraryId,
   selectLibraryModelIds,
 } from './model-library';
+import {
+  CAPABILITIES,
+  CAPABILITIES_BY_MODALITY,
+  CAPABILITY_LABELS,
+  MODALITIES,
+  MODALITY_LABELS,
+} from './model-types';
+import {
+  modelTestReferenceUrls,
+  modelTestVideoParameters,
+  modelTestVideoResolutions,
+} from './model-test-input';
+import ModelTypeDialog from './ModelTypeDialog.vue';
 
 defineOptions({ name: 'FdmAiModelLibrary' });
 
@@ -76,31 +93,6 @@ type SubmittedTestContext = {
   capability: FdmAiApi.Capability;
 };
 
-const MODALITIES: FdmAiApi.Modality[] = [
-  'TEXT',
-  'IMAGE',
-  'VIDEO',
-  'AUDIO',
-  'EMBEDDING',
-  'RERANK',
-  'MUSIC',
-];
-const CAPABILITIES: FdmAiApi.Capability[] = [
-  'CHAT',
-  'STRUCTURED_OUTPUT',
-  'IMAGE_INPUT',
-  'TEXT_TO_IMAGE',
-  'IMAGE_TO_IMAGE',
-  'MULTI_REFERENCE',
-  'IMAGE_EDIT',
-  'TEXT_TO_VIDEO',
-  'FIRST_FRAME_TO_VIDEO',
-  'FIRST_LAST_FRAME_TO_VIDEO',
-  'TEXT_TO_AUDIO',
-  'EMBEDDING',
-  'RERANK',
-  'TEXT_TO_MUSIC',
-];
 const TERMINAL_STATUSES = new Set([
   'CANCELED',
   'FAILED',
@@ -118,43 +110,6 @@ const PREFERRED_CAPABILITIES: Partial<
   TEXT: ['CHAT', 'STRUCTURED_OUTPUT'],
   VIDEO: ['TEXT_TO_VIDEO', 'FIRST_FRAME_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO'],
 };
-const CAPABILITIES_BY_MODALITY: Record<
-  FdmAiApi.Modality,
-  FdmAiApi.Capability[]
-> = {
-  AUDIO: ['TEXT_TO_AUDIO'],
-  EMBEDDING: ['EMBEDDING'],
-  IMAGE: ['TEXT_TO_IMAGE', 'IMAGE_TO_IMAGE', 'MULTI_REFERENCE', 'IMAGE_EDIT'],
-  MUSIC: ['TEXT_TO_MUSIC'],
-  RERANK: ['RERANK'],
-  TEXT: ['CHAT', 'STRUCTURED_OUTPUT', 'IMAGE_INPUT'],
-  VIDEO: ['TEXT_TO_VIDEO', 'FIRST_FRAME_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO'],
-};
-const MODALITY_LABELS: Record<FdmAiApi.Modality, string> = {
-  AUDIO: '语音生成',
-  EMBEDDING: '向量',
-  IMAGE: '图片生成',
-  MUSIC: '音乐生成',
-  RERANK: '重排序',
-  TEXT: '文本对话',
-  VIDEO: '视频生成',
-};
-const CAPABILITY_LABELS: Record<FdmAiApi.Capability, string> = {
-  CHAT: '对话/文本生成',
-  EMBEDDING: '生成向量',
-  FIRST_FRAME_TO_VIDEO: '首帧生视频',
-  FIRST_LAST_FRAME_TO_VIDEO: '首尾帧生视频',
-  IMAGE_EDIT: '图片编辑',
-  IMAGE_INPUT: '图片理解',
-  IMAGE_TO_IMAGE: '参考图生图',
-  MULTI_REFERENCE: '多参考图',
-  RERANK: '文本重排序',
-  STRUCTURED_OUTPUT: '结构化 JSON',
-  TEXT_TO_AUDIO: '文本生成语音',
-  TEXT_TO_IMAGE: '文生图',
-  TEXT_TO_MUSIC: '文本生成音乐',
-  TEXT_TO_VIDEO: '文生视频',
-};
 
 interface SyncProviderModel extends FdmAiApi.ProviderModelInfo {
   userConfirmed: boolean;
@@ -164,6 +119,7 @@ const { hasAccessByCodes } = useAccess();
 const canManagePlatform = hasAccessByCodes(['fdmai:platform:manage']);
 const canUpdateModel = hasAccessByCodes(['fdmai:model:update']);
 const canUpdateRoute = hasAccessByCodes(['fdmai:route:update']);
+const canCancelInvocation = hasAccessByCodes(['fdmai:invocation:cancel']);
 const canTestModel =
   hasAccessByCodes(['fdmai:invocation:create']) &&
   hasAccessByCodes(['fdmai:invocation:query']);
@@ -175,11 +131,21 @@ const discovering = ref(false);
 const importing = ref(false);
 const testOpen = ref(false);
 const testSubmitting = ref(false);
+const testCancelling = ref(false);
 const testPolling = ref(false);
 const testElapsedMillis = ref(0);
 const testModel = ref<FdmAiApi.ModelDefinition>();
 const testSnapshot = ref<FdmAiApi.InvocationSnapshot>();
 const testInvocationId = ref('');
+const testHasActiveInvocation = computed(() =>
+  Boolean(testInvocationId.value) && !isTerminalStatus(testSnapshot.value?.status),
+);
+const testCancellationPending = computed(() =>
+  ['CANCEL_REQUESTED', 'CANCELING'].includes(testSnapshot.value?.status || ''),
+);
+const testIsArchiving = computed(() =>
+  ['RESULT_RECEIVED', 'DOWNLOADING'].includes(testSnapshot.value?.status || ''),
+);
 const testRouteKey = ref<string>();
 const activeTestSubmission = ref<{
   context: SubmittedTestContext;
@@ -201,30 +167,31 @@ const restoringModelId = ref<string>();
 const syncProviderId = ref<number>();
 const syncKeyword = ref('');
 const syncModality = ref<FdmAiApi.Modality>();
-const syncStatus = ref<'all' | 'connected' | 'inactive' | 'pending' | 'ready'>(
-  'ready',
-);
+const syncStatus = ref<
+  'all' | 'connected' | 'inactive' | 'pending' | 'ready' | 'unsupported'
+>('all');
 const discoveredModels = ref<SyncProviderModel[]>([]);
 const catalogSnapshot = ref<{ providerId: string; upstreamIds: string[] }>();
 const selectedModelIds = ref<string[]>([]);
 const manualProviderModel = ref('');
 const adjustOpen = ref(false);
 const adjustingModelId = ref('');
-const adjustment = reactive<{
-  capabilities: FdmAiApi.Capability[];
-  modality?: FdmAiApi.Modality;
-}>({
-  capabilities: [],
-  modality: undefined,
-});
+const adjustingModel = computed(() => discoveredModels.value.find((model) =>
+  sameModelLibraryId(model.id, adjustingModelId.value),
+));
 const commonParametersJson = ref('{}');
 const testForm = reactive<{
+  aspectRatio?: string;
   capability?: FdmAiApi.Capability;
+  duration?: number;
+  lastFrameUrl: string;
   negativePrompt: string;
   prompt: string;
   referenceUrl: string;
+  resolution?: string;
 }>({
   capability: undefined,
+  lastFrameUrl: '',
   negativePrompt: '',
   prompt: '',
   referenceUrl: '',
@@ -338,8 +305,11 @@ const filteredDiscoveredModels = computed(() => {
       return false;
     if (syncStatus.value === 'ready')
       return isSyncModelReady(model) && !providerModelConnection(model.id);
-    if (syncStatus.value === 'pending')
-      return !isSyncModelReady(model) && !providerModelConnection(model.id);
+    if (syncStatus.value === 'pending' || syncStatus.value === 'unsupported')
+      return (
+        syncModelImportStatus(model) === syncStatus.value &&
+        !providerModelConnection(model.id)
+      );
     const connection = providerModelConnection(model.id);
     if (syncStatus.value === 'connected')
       return Boolean(connection?.model.enabled && connection.route.enabled);
@@ -387,7 +357,17 @@ const rowSelection = computed(() => ({
 const pendingConfirmationCount = computed(
   () =>
     discoveredModels.value.filter(
-      (item) => !isSyncModelReady(item) && !providerModelConnection(item.id),
+      (item) =>
+        syncModelImportStatus(item) === 'pending' &&
+        !providerModelConnection(item.id),
+    ).length,
+);
+const unsupportedModelCount = computed(
+  () =>
+    discoveredModels.value.filter(
+      (item) =>
+        syncModelImportStatus(item) === 'unsupported' &&
+        !providerModelConnection(item.id),
     ).length,
 );
 const readyModelCount = computed(
@@ -395,25 +375,6 @@ const readyModelCount = computed(
     discoveredModels.value.filter(
       (item) => isSyncModelReady(item) && !providerModelConnection(item.id),
     ).length,
-);
-const syncModalityOptions = computed(() => {
-  const modalities = activeSyncAdapter.value?.modalities?.length
-    ? activeSyncAdapter.value.modalities
-    : MODALITIES;
-  return modalities
-    .filter((value) => supportedCapabilities(value).length > 0)
-    .map((value) => ({
-      label: `${MODALITY_LABELS[value]}（${value}）`,
-      value,
-    }));
-});
-const adjustmentCapabilityOptions = computed(() =>
-  adjustment.modality
-    ? supportedCapabilities(adjustment.modality).map((value) => ({
-        label: `${CAPABILITY_LABELS[value]}（${value}）`,
-        value,
-      }))
-    : [],
 );
 const testCapabilityOptions = computed(() =>
   (testModel.value?.capabilities ?? [])
@@ -425,6 +386,29 @@ const testCapabilityOptions = computed(() =>
       label: `${CAPABILITY_LABELS[value]}（${value}）`,
       value,
     })),
+);
+const testRoutes = computed(() => routes.value.filter((route) =>
+  route.enabled &&
+  sameModelLibraryId(route.modelId, testModel.value?.id) &&
+  (!testRouteKey.value || route.routeKey === testRouteKey.value),
+));
+const testUsesGrok = computed(() => testRoutes.value.length > 0 && testRoutes.value.every((route) =>
+  providers.value.some((provider) =>
+    sameModelLibraryId(provider.id, route.providerAccountId) && provider.adapterCode === 'xai-grok',
+  ),
+));
+const testResolutionOptions = computed(() => modelTestVideoResolutions(
+  testUsesGrok.value,
+  testRoutes.value.map((route) => route.providerModel),
+  testForm.capability,
+).map((value) => ({ label: value, value })));
+watch(testResolutionOptions, (options) => {
+  if (testForm.resolution && !options.some((option) => option.value === testForm.resolution)) {
+    testForm.resolution = undefined;
+  }
+});
+const testPromptRequired = computed(() =>
+  !testUsesGrok.value || !['FIRST_FRAME_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO'].includes(testForm.capability || ''),
 );
 
 const columns: TableColumnsType<FdmAiApi.ModelDefinition> = [
@@ -575,7 +559,7 @@ async function openSync(
     requestedProvider?.value ?? providerOptions.value[0]?.value;
   syncKeyword.value = '';
   syncModality.value = modality;
-  syncStatus.value = 'ready';
+  syncStatus.value = 'all';
   discoveredModels.value = [];
   catalogSnapshot.value = undefined;
   selectedModelIds.value = [];
@@ -594,22 +578,17 @@ async function changeSyncProvider() {
 }
 
 function isSyncModelReady(record: unknown) {
+  return syncModelImportStatus(record) === 'ready';
+}
+
+function syncModelImportStatus(record: unknown) {
   const model = record as SyncProviderModel;
-  if (model.importable === false) return false;
-  if (!model.modality || !model.capabilities?.length) return false;
-  const modalityCapabilities = supportedCapabilities(model.modality);
-  if (
-    !model.capabilities.every((capability) =>
-      modalityCapabilities.includes(capability),
-    )
-  ) {
-    return false;
-  }
-  return !model.requiresConfirmation || model.userConfirmed;
+  return getProviderModelImportStatus(model, activeSyncAdapter.value);
 }
 
 function supportedCapabilities(modality: FdmAiApi.Modality) {
   const modalityCapabilities = CAPABILITIES_BY_MODALITY[modality];
+  if (!activeSyncAdapter.value?.modalities.includes(modality)) return [];
   const adapterCapabilities = activeSyncAdapter.value?.capabilities;
   if (!adapterCapabilities?.length) return [];
   return modalityCapabilities.filter((capability) =>
@@ -620,25 +599,19 @@ function supportedCapabilities(modality: FdmAiApi.Modality) {
 function normalizeDiscoveredModel(
   model: FdmAiApi.ProviderModelInfo,
 ): SyncProviderModel {
-  const allowed = model.modality
-    ? supportedCapabilities(model.modality)
-    : ([] as FdmAiApi.Capability[]);
-  const originalCapabilities = model.capabilities ?? [];
-  const capabilities = originalCapabilities.filter((capability) =>
-    allowed.includes(capability),
-  );
-  const capabilitiesReduced =
-    capabilities.length !== originalCapabilities.length;
+  const needsTypeHint = model.classificationSource === 'FALLBACK' || !model.modality;
+  const hint = needsTypeHint ? inferProviderModelType(model.id) : undefined;
   return {
     ...model,
-    capabilities,
-    classificationNote: capabilitiesReduced
-      ? model.classificationNote ||
-        '服务商声明的部分能力未被当前适配器实现，已仅保留可执行能力'
+    // Keep the model's own classification, including capabilities unavailable on this channel.
+    // Older discovery responses can contain a TEXT fallback for a clearly named video model.
+    modality: needsTypeHint ? hint?.modality : model.modality,
+    capabilities: needsTypeHint ? [...(hint?.capabilities ?? [])] : [...(model.capabilities ?? [])],
+    classificationNote: hint
+      ? '根据模型名称提示类型，请核对实际调用方式；渠道支持情况单独显示。'
       : model.classificationNote,
     metadata: model.metadata || {},
-    requiresConfirmation:
-      Boolean(model.requiresConfirmation) || capabilitiesReduced,
+    requiresConfirmation: Boolean(model.requiresConfirmation) || needsTypeHint,
     userConfirmed: false,
   };
 }
@@ -680,68 +653,16 @@ async function discoverModels() {
   }
 }
 
-function firstCapability(modality: FdmAiApi.Modality) {
-  return supportedCapabilities(modality)[0];
-}
-
 function inferManualModel(id: string): SyncProviderModel {
-  const normalized = id.toLowerCase();
-  const candidates: Array<{
-    capability: FdmAiApi.Capability;
-    modality: FdmAiApi.Modality;
-    pattern: RegExp;
-  }> = [
-    {
-      capability: 'EMBEDDING',
-      modality: 'EMBEDDING',
-      pattern: /embed|embedding/,
-    },
-    { capability: 'RERANK', modality: 'RERANK', pattern: /rerank/ },
-    {
-      capability: 'TEXT_TO_IMAGE',
-      modality: 'IMAGE',
-      pattern: /dall[-_]?e|flux|gpt[-_]?image|image|sdxl|seedream/,
-    },
-    {
-      capability: 'TEXT_TO_VIDEO',
-      modality: 'VIDEO',
-      pattern: /kling|sora|veo|video/,
-    },
-    {
-      capability: 'TEXT_TO_MUSIC',
-      modality: 'MUSIC',
-      pattern: /music|suno/,
-    },
-    {
-      capability: 'TEXT_TO_AUDIO',
-      modality: 'AUDIO',
-      pattern: /audio|speech|tts|voice/,
-    },
-    {
-      capability: 'CHAT',
-      modality: 'TEXT',
-      pattern: /claude|codex|deepseek|gemini|gpt|llama|qwen/,
-    },
-  ];
-  const adapterModalities = activeSyncAdapter.value?.modalities ?? MODALITIES;
-  const candidate = candidates.find(
-    (item) =>
-      item.pattern.test(normalized) &&
-      adapterModalities.includes(item.modality),
-  );
-  const onlyAdapterModality =
-    adapterModalities.length === 1 ? adapterModalities[0] : undefined;
-  const modality = candidate?.modality ?? onlyAdapterModality;
-  const capability =
-    candidate?.capability ?? (modality ? firstCapability(modality) : undefined);
+  const hint = inferProviderModelType(id);
   return {
-    capabilities: capability ? [capability] : [],
-    classificationConfidence: candidate ? 'MEDIUM' : 'LOW',
-    classificationSource: candidate ? 'MODEL_PATTERN' : 'FALLBACK',
+    capabilities: [...(hint?.capabilities ?? [])],
+    classificationConfidence: hint ? 'MEDIUM' : 'LOW',
+    classificationSource: hint ? 'MODEL_PATTERN' : 'FALLBACK',
     id,
     importable: true,
     metadata: { manual: true },
-    modality,
+    modality: hint?.modality,
     name: id,
     requiresConfirmation: true,
     userConfirmed: false,
@@ -766,61 +687,34 @@ function addManualModel() {
 function openModelAdjustment(record: unknown) {
   const model = record as SyncProviderModel;
   adjustingModelId.value = model.id;
-  adjustment.modality = model.modality;
-  adjustment.capabilities = model.capabilities ? [...model.capabilities] : [];
   adjustOpen.value = true;
 }
 
-function handleAdjustmentModalityChange(value: unknown) {
-  if (
-    typeof value !== 'string' ||
-    !MODALITIES.includes(value as FdmAiApi.Modality)
-  ) {
-    return;
-  }
-  const modality = value as FdmAiApi.Modality;
-  const allowed = supportedCapabilities(modality);
-  adjustment.capabilities = adjustment.capabilities.filter((capability) =>
-    allowed.includes(capability),
-  );
-  if (adjustment.capabilities.length === 0) {
-    const defaultCapability = allowed[0];
-    if (defaultCapability) adjustment.capabilities = [defaultCapability];
-  }
-}
-
-function confirmModelAdjustment() {
-  if (!adjustment.modality || adjustment.capabilities.length === 0) {
-    message.warning('请选择模型模态和至少一项能力');
-    return;
-  }
-  const allowed = supportedCapabilities(adjustment.modality);
-  const unsupported = adjustment.capabilities.filter(
-    (capability) => !allowed.includes(capability),
-  );
-  if (unsupported.length > 0) {
-    message.error(
-      `当前服务商接入方式不支持：${unsupported.map((capability) => capabilityLabel(capability)).join('、')}`,
-    );
-    return;
-  }
-  const modelIndex = discoveredModels.value.findIndex((item) =>
-    sameModelLibraryId(item.id, adjustingModelId.value),
-  );
-  if (modelIndex === -1) return;
-  const model = discoveredModels.value[modelIndex];
+function confirmModelAdjustment(selection: {
+  capabilities: FdmAiApi.Capability[];
+  modality: FdmAiApi.Modality;
+}) {
+  if (!selection.capabilities.length || !selection.capabilities.every((capability) =>
+    CAPABILITIES_BY_MODALITY[selection.modality].includes(capability),
+  )) return;
+  const model = adjustingModel.value;
   if (!model) return;
   const updated: SyncProviderModel = {
     ...model,
-    capabilities: [...adjustment.capabilities],
-    modality: adjustment.modality,
+    capabilities: [...selection.capabilities],
+    modality: selection.modality,
     userConfirmed: true,
   };
-  discoveredModels.value = discoveredModels.value.map((item, index) =>
-    index === modelIndex ? updated : item,
+  discoveredModels.value = discoveredModels.value.map((item) =>
+    sameModelLibraryId(item.id, model.id) ? updated : item,
   );
+  if (!isSyncModelReady(updated)) {
+    selectedModelIds.value = selectedModelIds.value.filter((id) => !sameModelLibraryId(id, model.id));
+  }
   adjustOpen.value = false;
-  message.success('模型类型已确认，请勾选需要接入的模型');
+  message.success(isSyncModelReady(updated)
+    ? '模型类型已确认，请勾选需要接入的模型'
+    : '已确认模型类型；当前渠道暂不可接入，模型仍保留在目录中');
 }
 
 function confidenceLabel(confidence?: string) {
@@ -884,7 +778,7 @@ async function importSelectedModels() {
     return;
   }
   if (selectedModels.some((item) => !isSyncModelReady(item))) {
-    message.warning('存在尚未确认类型的模型，请先完成确认');
+    message.warning('所选模型中存在待确认或当前渠道不支持的模型，请检查接入状态');
     return;
   }
   const unsupportedModel = selectedModels.find((item) => {
@@ -1045,6 +939,21 @@ function startTestPolling() {
   void pollTestInvocation(testInvocationId.value, version);
 }
 
+async function cancelModelTest() {
+  if (!canCancelInvocation || !testHasActiveInvocation.value || testCancellationPending.value || testCancelling.value) return;
+  const invocationId = testInvocationId.value;
+  const requestVersion = testRequestVersion;
+  testCancelling.value = true;
+  try {
+    await cancelFdmAiInvocation(invocationId);
+    if (!testOpen.value || requestVersion !== testRequestVersion || invocationId !== testInvocationId.value) return;
+    message.info('已提交取消请求，正在查询实际状态');
+    startTestPolling();
+  } finally {
+    if (requestVersion === testRequestVersion) testCancelling.value = false;
+  }
+}
+
 function openTest(
   record: unknown,
   context?: {
@@ -1055,6 +964,7 @@ function openTest(
   const model = record as FdmAiApi.ModelDefinition;
   testRequestVersion += 1;
   testSubmitting.value = false;
+  testCancelling.value = false;
   stopTestPolling();
   testModel.value = model;
   testSnapshot.value = undefined;
@@ -1063,10 +973,14 @@ function openTest(
   testElapsedMillis.value = 0;
   commonParametersJson.value = '{}';
   Object.assign(testForm, {
+    aspectRatio: undefined,
     capability: context?.capability ?? preferredCapability(model),
+    duration: undefined,
+    lastFrameUrl: '',
     negativePrompt: '',
     prompt: '',
     referenceUrl: '',
+    resolution: undefined,
   });
   testRouteKey.value = context?.routeKey;
   testOpen.value = true;
@@ -1088,26 +1002,36 @@ function parseCommonParameters() {
 }
 
 async function submitModelTest() {
+  if (testSubmitting.value || testCancelling.value || testHasActiveInvocation.value) return;
   const model = testModel.value;
   if (!model || !testForm.capability) {
     message.warning('当前模型没有可用于测试的主能力');
     return;
   }
-  if (!testForm.prompt.trim()) {
+  if (testPromptRequired.value && !testForm.prompt.trim()) {
     message.warning('请输入测试提示词');
     return;
   }
-  const referenceUrl = testForm.referenceUrl.trim();
+  let referenceUrls: string[];
+  try {
+    referenceUrls = modelTestReferenceUrls(testForm.capability, testForm.referenceUrl, testForm.lastFrameUrl);
+  } catch (error) {
+    message.warning(error instanceof Error ? error.message : '请检查参考图片');
+    return;
+  }
   if (
     model.modality === 'TEXT' &&
-    referenceUrl &&
+    referenceUrls.length &&
     !model.capabilities.includes('IMAGE_INPUT')
   ) {
     message.warning('该文本模型未声明图片输入能力，不能填写参考 URL');
     return;
   }
-  const commonParameters = parseCommonParameters();
-  if (!commonParameters) return;
+  const parsedParameters = parseCommonParameters();
+  if (!parsedParameters) return;
+  const commonParameters = model.modality === 'VIDEO'
+    ? modelTestVideoParameters(parsedParameters, testForm, testUsesGrok.value)
+    : parsedParameters;
   const submitted = {
     context: {
       capability: testForm.capability,
@@ -1127,15 +1051,15 @@ async function submitModelTest() {
   try {
     const ticket = await submitFdmAiModelTest({
       additionalRequiredCapabilities:
-        model.modality === 'TEXT' && referenceUrl ? ['IMAGE_INPUT'] : [],
+        model.modality === 'TEXT' && referenceUrls.length ? ['IMAGE_INPUT'] : [],
       businessId: `${model.id}:${model.code}`,
       capability: submitted.context.capability,
       commonParameters,
       idempotencyKey: createTestIdempotencyKey(model.id),
       input: {
-        negativePrompt: testForm.negativePrompt.trim() || undefined,
+        negativePrompt: testUsesGrok.value ? undefined : testForm.negativePrompt.trim() || undefined,
         prompt: testForm.prompt.trim(),
-        referenceUrls: referenceUrl ? [referenceUrl] : [],
+        referenceUrls,
         variables: {},
       },
       ...(submitted.routeKey
@@ -1298,6 +1222,7 @@ watch(syncOpen, (open) => {
 defineExpose({ load, openSync, openTest });
 
 onMounted(load);
+onActivated(load);
 onBeforeUnmount(() => {
   discoveryVersion += 1;
   testRequestVersion += 1;
@@ -1551,7 +1476,7 @@ onBeforeUnmount(() => {
             包含参考图时，文本模型需要支持图片理解。
           </small>
         </Form.Item>
-        <Form.Item label="提示词" required>
+        <Form.Item label="提示词" :required="testPromptRequired">
           <Textarea
             v-model:value="testForm.prompt"
             placeholder="输入一条用于验证模型连通性和输出效果的提示词"
@@ -1559,24 +1484,81 @@ onBeforeUnmount(() => {
           />
         </Form.Item>
         <div class="two-columns">
-          <Form.Item label="负面提示词（可选）">
+          <Form.Item v-if="!testUsesGrok" label="负面提示词（可选）">
             <Textarea
               v-model:value="testForm.negativePrompt"
               placeholder="图片或视频模型可填写不希望出现的内容"
               :rows="2"
             />
           </Form.Item>
-          <Form.Item label="参考 URL（可选）">
+          <Form.Item
+            v-if="!['TEXT_TO_VIDEO', 'TEXT_TO_IMAGE'].includes(testForm.capability || '')"
+            :label="testModel?.modality === 'VIDEO' ? '首帧图片 URL' : '参考图片 URL（每行一张）'"
+            :required="['FIRST_FRAME_TO_VIDEO', 'FIRST_LAST_FRAME_TO_VIDEO', 'IMAGE_EDIT', 'IMAGE_TO_IMAGE', 'MULTI_REFERENCE'].includes(testForm.capability || '')"
+          >
+            <Textarea
+              v-if="testModel?.modality === 'IMAGE'"
+              v-model:value="testForm.referenceUrl"
+              placeholder="https://example.com/reference.png"
+              :rows="3"
+            />
             <Input
+              v-else
               v-model:value="testForm.referenceUrl"
               placeholder="https://example.com/reference.png"
             />
           </Form.Item>
+          <Form.Item v-if="testForm.capability === 'FIRST_LAST_FRAME_TO_VIDEO'" label="尾帧图片 URL" required>
+            <Input v-model:value="testForm.lastFrameUrl" placeholder="https://example.com/last-frame.png" />
+          </Form.Item>
         </div>
+        <template v-if="testModel?.modality === 'VIDEO'">
+          <Alert
+            v-if="testUsesGrok"
+            class="test-alert"
+            message="Grok 视频生成参数"
+            :description="testForm.capability === 'FIRST_LAST_FRAME_TO_VIDEO'
+              ? '首尾帧生成需要 grok-imagine-video-1.5，最高 720p，时长 1–15 秒。图片地址需可由服务商访问。'
+              : '时长 1–15 秒；经典视频模型支持 480p / 720p，1.5 支持 1080p。首帧图片地址需可由服务商访问。'"
+            show-icon
+            type="info"
+          />
+          <div class="two-columns">
+            <Form.Item label="视频时长（秒）">
+              <InputNumber
+                v-model:value="testForm.duration"
+                class="full"
+                :min="1"
+                :max="testUsesGrok ? 15 : undefined"
+                :precision="0"
+                placeholder="使用模型默认值"
+              />
+            </Form.Item>
+            <Form.Item label="画面比例">
+              <Select
+                v-model:value="testForm.aspectRatio"
+                allow-clear
+                :options="['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].map((value) => ({ label: value, value }))"
+                placeholder="使用模型默认值"
+              />
+            </Form.Item>
+            <Form.Item label="视频分辨率">
+              <Select
+                v-model:value="testForm.resolution"
+                allow-clear
+                :options="testResolutionOptions"
+                placeholder="使用模型默认值"
+              />
+            </Form.Item>
+          </div>
+        </template>
         <Collapse class="advanced-collapse" ghost>
           <Collapse.Panel key="test-advanced" header="高级参数">
             <Form.Item label="通用参数（JSON）">
               <Textarea v-model:value="commonParametersJson" :rows="6" />
+              <small v-if="testModel?.modality === 'VIDEO'" class="test-hint">
+                已填写的视频时长、比例和分辨率优先于此处同名参数。
+              </small>
             </Form.Item>
           </Collapse.Panel>
         </Collapse>
@@ -1613,6 +1595,14 @@ onBeforeUnmount(() => {
                 ? 'success'
                 : 'active'
           "
+        />
+        <Alert
+          v-if="testHasActiveInvocation"
+          class="test-alert"
+          message="调用仍在进行"
+          description="停止轮询或关闭弹窗不会终止调用。提交取消请求后，实际结果以后台状态为准。"
+          show-icon
+          type="info"
         />
         <Alert
           v-if="testSnapshot.errorMessage || testSnapshot.errorCode"
@@ -1672,7 +1662,16 @@ onBeforeUnmount(() => {
           继续查询
         </Button>
         <Button
-          :disabled="testCapabilityOptions.length === 0"
+          v-if="canCancelInvocation && testHasActiveInvocation"
+          :disabled="testCancellationPending"
+          :loading="testCancelling"
+          danger
+          @click="cancelModelTest"
+        >
+          {{ testIsArchiving ? '停止归档' : '请求取消' }}
+        </Button>
+        <Button
+          :disabled="testCapabilityOptions.length === 0 || testHasActiveInvocation || testCancelling"
           :loading="testSubmitting"
           type="primary"
           @click="submitModelTest"
@@ -1743,10 +1742,20 @@ onBeforeUnmount(() => {
           <span>新增 <strong>{{ catalogDiff.newIds.length }}</strong></span>
           <span>已接入 <strong>{{ catalogDiff.connectedIds.length }}</strong></span>
           <span>已停用 <strong>{{ catalogDiff.inactiveIds.length }}</strong></span>
-          <span>需确认 / 暂不支持
+          <span>待确认类型
             <strong>{{ pendingConfirmationCount }}</strong></span>
+          <span>当前接入不支持
+            <strong>{{ unsupportedModelCount }}</strong></span>
           <span>可直接接入 <strong>{{ readyModelCount }}</strong></span>
         </div>
+        <Alert
+          v-if="pendingConfirmationCount > 0"
+          class="sync-alert"
+          :message="`${pendingConfirmationCount} 个模型待确认类型，确认后可勾选接入`"
+          description="点击对应模型的“确认类型”，选择实际支持的用途与能力。标记为“当前接入不支持”的模型需要使用支持该用途的接入方式。"
+          show-icon
+          type="info"
+        />
         <Alert
           v-if="catalogDiff?.missingIds.length"
           class="sync-alert"
@@ -1783,11 +1792,12 @@ onBeforeUnmount(() => {
             :disabled="importing"
             aria-label="目录状态"
             :options="[
-              { label: '可新接入', value: 'ready' },
+              { label: '全部目录', value: 'all' },
+              { label: '可直接接入', value: 'ready' },
+              { label: '待确认类型', value: 'pending' },
+              { label: '当前接入不支持', value: 'unsupported' },
               { label: '已接入', value: 'connected' },
               { label: '已停用', value: 'inactive' },
-              { label: '待确认类型', value: 'pending' },
-              { label: '全部目录', value: 'all' },
             ]"
           />
         </div>
@@ -1914,11 +1924,14 @@ onBeforeUnmount(() => {
             </template>
             <template v-else-if="column.dataIndex === 'classification'">
               <div class="classification-cell">
-                <Tag v-if="record.importable === false" color="red">
+                <Tag v-if="syncModelImportStatus(record) === 'unsupported'" color="orange">
                   当前接入不支持
                 </Tag>
                 <Tag v-else-if="record.userConfirmed" color="green">
                   已人工确认
+                </Tag>
+                <Tag v-else-if="!isSyncModelReady(record)" color="orange">
+                  待确认类型
                 </Tag>
                 <Tag
                   v-else
@@ -1937,7 +1950,6 @@ onBeforeUnmount(() => {
             <template v-else-if="column.dataIndex === 'syncAction'">
               <Button
                 :disabled="
-                  record.importable === false ||
                   Boolean(providerModelConnection(record.id)) ||
                   importing
                 "
@@ -1945,7 +1957,7 @@ onBeforeUnmount(() => {
                 type="link"
                 @click="openModelAdjustment(record)"
               >
-                {{ isSyncModelReady(record) ? '调整类型' : '确认类型' }}
+                {{ syncModelImportStatus(record) === 'unsupported' ? '查看类型' : isSyncModelReady(record) ? '调整类型' : '确认类型' }}
               </Button>
             </template>
           </template>
@@ -1969,39 +1981,13 @@ onBeforeUnmount(() => {
       </template>
     </Modal>
 
-    <Modal
+    <ModelTypeDialog
       v-model:open="adjustOpen"
-      :title="`确认模型类型 · ${adjustingModelId}`"
-      :width="600"
-      @ok="confirmModelAdjustment"
-    >
-      <Alert
-        class="test-alert"
-        description="模型目录通常只返回 ID，系统会先自动识别；不确定的模型需要您确认一次，避免把图片模型当成文本模型调用。"
-        message="请选择这个模型实际支持的输入输出类型"
-        show-icon
-        type="info"
-      />
-      <Form layout="vertical">
-        <Form.Item label="输出类型" required>
-          <Select
-            v-model:value="adjustment.modality"
-            :options="syncModalityOptions"
-            placeholder="选择 TEXT、IMAGE、VIDEO 等类型"
-            @change="handleAdjustmentModalityChange"
-          />
-        </Form.Item>
-        <Form.Item label="调用方式" required>
-          <Select
-            v-model:value="adjustment.capabilities"
-            :disabled="!adjustment.modality"
-            mode="multiple"
-            :options="adjustmentCapabilityOptions"
-            placeholder="选择该模型实际支持的调用方式"
-          />
-        </Form.Item>
-      </Form>
-    </Modal>
+      :model="adjustingModel"
+      :adapter="activeSyncAdapter"
+      :provider-name="activeSyncProvider?.name"
+      @confirm="confirmModelAdjustment"
+    />
 
     <Modal
       v-model:open="modalOpen"
