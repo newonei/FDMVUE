@@ -7,7 +7,83 @@ import { requestClient } from '#/api/request';
 
 export * from './dashboard';
 
+export function getPerformanceAccess() {
+  return requestClient.get<JixiaoApi.Access>(
+    '/fdmperformance/assessment/access',
+  );
+}
+
+export function acknowledgeResultAdjustment(resultId: number) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/result/acknowledge-adjustment',
+    { resultId },
+  );
+}
+
+export function getManagementRelations() {
+  return requestClient.get<JixiaoApi.ManagementRelation[]>(
+    '/fdmperformance/assessment/management-relations',
+  );
+}
+
+export function saveManagementRelations(data: JixiaoApi.ManagementRelation[]) {
+  return requestClient.put<boolean>(
+    '/fdmperformance/assessment/management-relations',
+    data,
+  );
+}
+
+export function getScoreDraft(instanceId: number, taskId: string) {
+  return requestClient.get<JixiaoApi.ScoreDraft | null>(
+    '/fdmperformance/assessment/score/draft',
+    { params: { instanceId, taskId } },
+  );
+}
+
+export function saveScoreDraft(data: JixiaoApi.ScoreDraft) {
+  return requestClient.put<JixiaoApi.ScoreDraft>(
+    '/fdmperformance/assessment/score/draft',
+    data,
+  );
+}
+
 export namespace JixiaoApi {
+  export type Role = 'ADMIN' | 'EMPLOYEE' | 'MANAGER' | 'SUPERVISOR';
+  export type Scope = 'ALL' | 'INITIATED' | 'MANAGED' | 'SELF' | 'VISIBLE';
+  export type AllowedAction =
+    | 'CANCEL'
+    | 'COMPLETE_ACTION_PLAN'
+    | 'DELETE'
+    | 'EMPLOYEE_CONFIRM'
+    | 'HR_REVIEW'
+    | 'INDICATOR_CONFIRM'
+    | 'MANAGER_SCORE'
+    | 'REMIND'
+    | 'RETURN'
+    | 'SAVE_SCORE_DRAFT'
+    | 'SELF_SCORE'
+    | 'SUPERVISOR_SCORE'
+    | 'TRANSFER';
+  export interface Access {
+    role: Role;
+    canLaunch: boolean;
+    canManage: boolean;
+    canConfigure: boolean;
+    canExport: boolean;
+    availableScopes: Scope[];
+  }
+  export interface ManagementRelation {
+    supervisorUserId: number;
+    managerUserId?: number;
+    userIds: number[];
+  }
+  export interface ScoreDraft {
+    instanceId: number;
+    taskId: string;
+    items: { comment?: string; instanceIndicatorId: number; score?: number; }[];
+    reason?: string;
+    updateTime?: DateTimeValue;
+  }
   /** Java LocalDateTime may be serialized as an epoch-millisecond number or ISO text. */
   export type DateTimeValue = number | string;
 
@@ -110,6 +186,8 @@ export namespace JixiaoApi {
   };
 
   export interface LaunchReq {
+    userIds?: number[];
+    idempotencyKey?: string;
     endDate?: string;
     name: string;
     periodKey: string;
@@ -119,12 +197,15 @@ export namespace JixiaoApi {
   }
 
   export interface LaunchBatchItem {
+    userIds?: number[];
+    idempotencyKey?: string;
     name: string;
     periodKey: string;
     templateId: number;
   }
 
   export interface LaunchBatchReq {
+    idempotencyKey?: string;
     endDate?: string;
     items: LaunchBatchItem[];
     remark?: string;
@@ -222,6 +303,13 @@ export namespace JixiaoApi {
   }
 
   export interface Instance {
+    creatorUserId?: number;
+    creatorUserName?: string;
+    managerUserId?: number;
+    endDate?: string;
+    allowedActions?: AllowedAction[];
+    visibilityReason?: string;
+    draft?: ScoreDraft;
     batchId?: number;
     currentTaskId?: string;
     currentTaskAssigneeUserId?: number;
@@ -255,8 +343,11 @@ export namespace JixiaoApi {
 
   export type InstancePageParams = PageParam & {
     batchId?: number;
+    creatorUserId?: number;
     deptId?: number;
+    onlyPending?: boolean;
     periodKey?: string;
+    scope?: Scope;
     status?: number;
     supervisorUserId?: number;
     userId?: number;
@@ -340,9 +431,11 @@ export namespace JixiaoApi {
 
   export type ResultPageParams = PageParam & {
     batchId?: number;
+    creatorUserId?: number;
     grade?: string;
     periodKey?: string;
     publicStatus?: number;
+    scope?: Scope;
     userId?: number;
     userName?: string;
   };
@@ -381,6 +474,7 @@ export namespace JixiaoApi {
   };
 
   export interface Review {
+    allowedActions?: ('CONFIRM' | 'DELETE' | 'REMIND' | 'SUBMIT')[];
     bossUserId?: number;
     bossUserName?: string;
     createTime?: DateTimeValue;
@@ -412,7 +506,9 @@ export namespace JixiaoApi {
   }
 
   export type ReviewPageParams = PageParam & {
+    creatorUserId?: number;
     periodKey?: string;
+    scope?: Scope;
     status?: number;
     userId?: number;
   };
@@ -636,6 +732,13 @@ export function getMyInstancePage(params: JixiaoApi.InstancePageParams) {
 export function deleteInstance(id: number) {
   return requestClient.delete<boolean>(
     `/fdmperformance/assessment/instance/delete?id=${id}`,
+  );
+}
+
+export function cancelInstance(data: { instanceId: number; reason: string }) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/instance/cancel',
+    data,
   );
 }
 

@@ -18,6 +18,7 @@ import {
 import { getSimpleDeptList } from '#/api/system/dept';
 
 import PerformanceShell from '../../shared/PerformanceShell.vue';
+import { usePerformanceAccess } from '../../shared/access';
 import PerformanceDashboardFilters from '../components/PerformanceDashboardFilters.vue';
 import PerformanceKpiBand from '../components/PerformanceKpiBand.vue';
 import PersonHistoryDetailsTable from '../components/PersonHistoryDetailsTable.vue';
@@ -96,9 +97,9 @@ function applyDefaultPeriodRange() {
   const desired =
     query.periodType === 'MONTH'
       ? periods.slice(0, 12)
-      : (currentYearPeriods.length > 0
+      : currentYearPeriods.length > 0
         ? currentYearPeriods
-        : periods);
+        : periods;
   query.endPeriodKey = desired[0]?.periodKey || '';
   query.startPeriodKey = desired.at(-1)?.periodKey || '';
 }
@@ -107,7 +108,11 @@ async function loadFilterOptions(periodType = query.periodType) {
   const requestId = ++filterRequestId;
   filterLoading.value = true;
   try {
-    const result = await getDashboardFilterOptions({ periodType });
+    const result = await getDashboardFilterOptions({
+      periodType,
+      scope: query.scope,
+      creatorUserId: query.creatorUserId,
+    });
     if (requestId !== filterRequestId) return;
     filterOptions.value = result;
     if (result.performanceHr && query.publicStatus === undefined) {
@@ -224,7 +229,10 @@ async function loadGradeLogs(record: JixiaoDashboardApi.EmployeeHistory) {
       ...toDashboardRequest(query),
       resultId: record.resultId,
     });
-    gradeLogsByResult.value = { ...gradeLogsByResult.value, [key]: result.list };
+    gradeLogsByResult.value = {
+      ...gradeLogsByResult.value,
+      [key]: result.list,
+    };
   } catch {
     message.error('调级审计记录加载失败，请稍后重试');
   } finally {
@@ -255,14 +263,14 @@ function backToDashboard() {
   });
 }
 
+const { loadAccess } = usePerformanceAccess();
+
 async function initialize() {
   query.userName = '';
   try {
-    const [, departmentList] = await Promise.all([
-      loadFilterOptions(),
-      getSimpleDeptList(),
-    ]);
-    departments.value = departmentList;
+    const capability = await loadAccess();
+    await loadFilterOptions();
+    if (capability.canConfigure) departments.value = await getSimpleDeptList();
     await refreshPage();
   } catch {
     // Each failed request has already surfaced a focused message.
@@ -273,10 +281,15 @@ onMounted(() => void initialize());
 </script>
 
 <template>
-  <PerformanceShell title="人员历史绩效">
+  <PerformanceShell
+    title="人员历史绩效"
+    description="历史成绩仅包含当前有权查看的考核记录。"
+  >
     <div class="page-heading">
       <div>
-        <Button size="small" type="link" @click="backToDashboard">返回绩效看板</Button>
+        <Button size="small" type="link" @click="backToDashboard"
+          >返回绩效看板</Button
+        >
         <h2>{{ summary?.userName || '人员历史绩效' }}</h2>
         <p>
           当前部门：{{ summary?.currentDeptName || '-' }}
@@ -284,7 +297,10 @@ onMounted(() => void initialize());
           当前主管：{{ summary?.currentSupervisorUserName || '-' }}
         </p>
       </div>
-      <Tag v-if="summary && summary.consecutiveCGroupPeriods > 0" color="orange">
+      <Tag
+        v-if="summary && summary.consecutiveCGroupPeriods > 0"
+        color="orange"
+      >
         连续 {{ summary.consecutiveCGroupPeriods }} 个周期出现 C档结果
       </Tag>
     </div>

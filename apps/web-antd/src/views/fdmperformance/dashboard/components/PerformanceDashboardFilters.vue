@@ -90,7 +90,12 @@ function update(patch: Partial<DashboardQueryState>) {
 
 function changePeriodType(value: number | string) {
   const periodType = value as JixiaoDashboardApi.PeriodType;
-  update({ endPeriodKey: '', periodType, startPeriodKey: '', templateId: undefined });
+  update({
+    endPeriodKey: '',
+    periodType,
+    startPeriodKey: '',
+    templateId: undefined,
+  });
   emit('periodTypeChange', periodType);
 }
 
@@ -157,7 +162,12 @@ function filterTemplateOption(input: string, option?: { label?: unknown }) {
       <Select
         v-else
         :loading="loading"
-        :options="periodOptions.map((item) => ({ label: item.label, value: item.periodKey }))"
+        :options="
+          periodOptions.map((item) => ({
+            label: item.label,
+            value: item.periodKey,
+          }))
+        "
         :value="modelValue.startPeriodKey || undefined"
         placeholder="选择开始周期"
         show-search
@@ -180,7 +190,12 @@ function filterTemplateOption(input: string, option?: { label?: unknown }) {
       <Select
         v-else
         :loading="loading"
-        :options="periodOptions.map((item) => ({ label: item.label, value: item.periodKey }))"
+        :options="
+          periodOptions.map((item) => ({
+            label: item.label,
+            value: item.periodKey,
+          }))
+        "
         :value="modelValue.endPeriodKey || undefined"
         placeholder="选择结束周期"
         show-search
@@ -188,7 +203,7 @@ function filterTemplateOption(input: string, option?: { label?: unknown }) {
       />
     </div>
 
-    <div class="filter-field">
+    <div v-if="departments.length" class="filter-field">
       <label>部门</label>
       <TreeSelect
         allow-clear
@@ -239,15 +254,23 @@ function filterTemplateOption(input: string, option?: { label?: unknown }) {
       <Select
         allow-clear
         mode="multiple"
-        :options="['A+', 'A', 'B', 'C+', 'C'].map((value) => ({ label: value, value }))"
+        :options="
+          ['A+', 'A', 'B', 'C+', 'C'].map((value) => ({ label: value, value }))
+        "
         :value="modelValue.grades"
         placeholder="全部等级"
         @update:value="update({ grades: selectGrades($event) })"
       />
       <div class="grade-shortcuts">
-        <Button size="small" type="link" @click="toggleGradeGroup(['A+', 'A'])">A档</Button>
-        <Button size="small" type="link" @click="toggleGradeGroup(['B'])">B档</Button>
-        <Button size="small" type="link" @click="toggleGradeGroup(['C+', 'C'])">C档</Button>
+        <Button size="small" type="link" @click="toggleGradeGroup(['A+', 'A'])"
+          >A档</Button
+        >
+        <Button size="small" type="link" @click="toggleGradeGroup(['B'])"
+          >B档</Button
+        >
+        <Button size="small" type="link" @click="toggleGradeGroup(['C+', 'C'])"
+          >C档</Button
+        >
       </div>
     </div>
 
@@ -268,7 +291,9 @@ function filterTemplateOption(input: string, option?: { label?: unknown }) {
 
     <div class="filter-actions">
       <Button @click="emit('reset')">重置</Button>
-      <Button :loading="loading" type="primary" @click="emit('query')">查询</Button>
+      <Button :loading="loading" type="primary" @click="emit('query')"
+        >查询</Button
+      >
     </div>
   </section>
 </template>

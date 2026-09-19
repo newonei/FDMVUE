@@ -16,12 +16,15 @@ import {
   Modal,
   Space,
   Table,
+  Tabs,
   Tag,
   Textarea,
 } from 'ant-design-vue';
 
 import {
+  acknowledgeResultAdjustment,
   confirmReview,
+  getInstance,
   getMyInstancePage,
   getMyPendingReviews,
   getMyPendingSupervisorReviews,
@@ -38,6 +41,12 @@ import {
 } from '../shared/constants';
 import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import {
+  actionLabel,
+  canAcknowledgeAdjustment,
+  canHandleReview,
+  deadlineMeta,
+} from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceMy' });
 
@@ -45,8 +54,14 @@ type ReviewMode = 'confirm' | 'submit';
 
 const route = useRoute();
 const router = useRouter();
+const activeTab = ref(
+  ['current', 'history', 'reviews'].includes(String(route.query.tab))
+    ? String(route.query.tab)
+    : 'current',
+);
 const instanceLoading = ref(false);
 const resultLoading = ref(false);
+const acknowledgingResultId = ref<number>();
 const reviewOpen = ref(false);
 const reviewMode = ref<ReviewMode>('submit');
 const activeReview = ref<JixiaoApi.Review>();
@@ -59,10 +74,14 @@ const resultTotal = ref(0);
 const instanceQuery = reactive({
   pageNo: 1,
   pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
+  status: 1,
+  scope: 'SELF' as const,
 });
 const resultQuery = reactive({
   pageNo: 1,
   pageSize: PERFORMANCE_DEFAULT_PAGE_SIZE,
+  publicStatus: 1,
+  scope: 'SELF' as const,
 });
 const handledReviewRouteKey = ref('');
 const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
@@ -75,11 +94,12 @@ const reviewForm = reactive<JixiaoApi.ReviewSubmitReq>({
 });
 
 const instanceColumns: TableColumnsType = [
-  { dataIndex: 'userName', title: '被考核人', width: 140 },
+  { dataIndex: 'templateName', title: '考核名称', width: 180 },
   { dataIndex: 'currentTaskName', title: '当前节点', width: 160 },
   { dataIndex: 'periodKey', title: '考核周期', width: 130 },
   { dataIndex: 'supervisorUserName', title: '主管', width: 150 },
-  { dataIndex: 'finalScore', title: '主管汇总分', width: 120 },
+  { dataIndex: 'endDate', title: '截止时间', width: 180 },
+  { dataIndex: 'finalScore', title: '待确认综合分', width: 120 },
   { dataIndex: 'status', title: '状态', width: 100 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 90 },
 ];
@@ -88,9 +108,10 @@ const resultColumns: TableColumnsType = [
   { dataIndex: 'publicTime', title: '公示时间' },
   { dataIndex: 'periodKey', title: '考核周期' },
   { dataIndex: 'supervisorUserName', title: '主管' },
-  { dataIndex: 'finalScore', title: '最终分' },
+  { dataIndex: 'finalScore', title: '已公布综合分' },
   { dataIndex: 'grade', title: '等级' },
   { dataIndex: 'employeeConfirmed', title: '确认状态' },
+  { dataIndex: 'action', title: '操作', width: 100 },
 ];
 
 function instanceStatus(status?: number): { color: string; text: string } {
@@ -139,13 +160,36 @@ async function loadResults() {
   }
 }
 
+async function acknowledgeAdjustment(record: JixiaoApi.Result) {
+  if (!canAcknowledgeAdjustment(record)) return;
+  Modal.confirm({
+    title: '知悉等级调整',
+    content: `当前已公布综合分为 ${record.finalScore ?? '—'}，等级为 ${record.grade || '—'}。确认后将记录你已知悉此结果。`,
+    okText: '确认知悉',
+    onOk: async () => {
+      acknowledgingResultId.value = record.id;
+      try {
+        await acknowledgeResultAdjustment(record.id!);
+        message.success('已记录知悉');
+        await loadResults();
+      } finally {
+        acknowledgingResultId.value = undefined;
+      }
+    },
+  });
+}
+
 async function loadReviews() {
   const [supervisorPending, employeePending] = await Promise.all([
     getMyPendingSupervisorReviews(),
     getMyPendingReviews(),
   ]);
-  supervisorReviews.value = supervisorPending || [];
-  employeeReviews.value = employeePending || [];
+  supervisorReviews.value = (supervisorPending || []).filter((review) =>
+    canHandleReview(review, 'SUBMIT'),
+  );
+  employeeReviews.value = (employeePending || []).filter((review) =>
+    canHandleReview(review, 'CONFIRM'),
+  );
   syncRouteReviewAction();
 }
 
@@ -173,8 +217,18 @@ function openInstance(record: JixiaoApi.Instance) {
   );
 }
 
+async function openResult(record: JixiaoApi.Result) {
+  if (!record.instanceId) return;
+  const instance = await getInstance(record.instanceId);
+  openInstance(instance);
+}
+
 function openReview(review: JixiaoApi.Review, mode: ReviewMode) {
-  if (!review.id) return;
+  if (
+    !review.id ||
+    !canHandleReview(review, mode === 'submit' ? 'SUBMIT' : 'CONFIRM')
+  )
+    return;
   activeReview.value = review;
   reviewMode.value = mode;
   Object.assign(reviewForm, {
@@ -213,6 +267,7 @@ function syncRouteReviewAction() {
     action === 'submit' ? supervisorReviews.value : employeeReviews.value;
   const review = source.find((item) => item.id === reviewId);
   if (review) {
+    activeTab.value = 'reviews';
     handledReviewRouteKey.value = routeKey;
     openReview(review, action);
   }
@@ -262,14 +317,41 @@ watch(
   () => [route.query.reviewId, route.query.reviewAction],
   syncRouteReviewAction,
 );
+watch(
+  () => route.query.tab,
+  (value) => {
+    if (['current', 'history', 'reviews'].includes(String(value)))
+      activeTab.value = String(value);
+  },
+);
 
 onMounted(load);
 </script>
 
 <template>
-  <PerformanceShell title="我的绩效">
+  <PerformanceShell
+    title="我的绩效"
+    description="这里仅展示你作为被考核人的考核与成绩；评分他人的任务请前往工作台。"
+  >
+    <Tabs v-model:active-key="activeTab">
+      <Tabs.TabPane key="current" tab="进行中" />
+      <Tabs.TabPane key="history" tab="历史成绩" />
+      <Tabs.TabPane
+        key="reviews"
+        :tab="`改进与复盘${employeeReviews.length + supervisorReviews.length ? `（${employeeReviews.length + supervisorReviews.length}）` : ''}`"
+      />
+    </Tabs>
+    <Empty
+      v-if="
+        activeTab === 'reviews' &&
+        !employeeReviews.length &&
+        !supervisorReviews.length
+      "
+      description="暂无待处理复盘"
+    />
     <div
       v-for="review in supervisorReviews"
+      v-show="activeTab === 'reviews'"
       :key="`supervisor-${review.id}`"
       class="review-banner supervisor-banner"
     >
@@ -287,6 +369,7 @@ onMounted(load);
 
     <div
       v-for="review in employeeReviews"
+      v-show="activeTab === 'reviews'"
       :key="`employee-${review.id}`"
       class="review-banner employee-banner"
     >
@@ -302,7 +385,7 @@ onMounted(load);
       </Button>
     </div>
 
-    <div class="panel">
+    <div v-if="activeTab === 'current'" class="panel">
       <div class="panel-head"><strong>当前考核</strong></div>
       <Table
         class="performance-compact-table"
@@ -333,6 +416,11 @@ onMounted(load);
           <template v-else-if="column.dataIndex === 'periodKey'">
             {{ periodLabel(record.periodKey) }}
           </template>
+          <template v-else-if="column.dataIndex === 'endDate'"
+            ><Tag :color="deadlineMeta(record.endDate).color">{{
+              deadlineMeta(record.endDate).text
+            }}</Tag></template
+          >
           <template v-else-if="column.dataIndex === 'status'">
             <Tag :color="instanceStatus(record.status).color">
               {{ instanceStatus(record.status).text }}
@@ -340,14 +428,14 @@ onMounted(load);
           </template>
           <template v-else-if="column.dataIndex === 'action'">
             <Button size="small" type="link" @click="openInstance(record)">
-              处理
+              {{ actionLabel(record) }}
             </Button>
           </template>
         </template>
       </Table>
     </div>
 
-    <div class="panel">
+    <div v-if="activeTab === 'history'" class="panel">
       <div class="panel-head"><strong>已公示结果</strong></div>
       <Table
         class="performance-compact-table"
@@ -386,7 +474,20 @@ onMounted(load);
             <Tag :color="record.employeeConfirmed ? 'green' : 'orange'">
               {{ record.employeeConfirmed ? '已确认' : '待确认' }}
             </Tag>
+            <Button
+              v-if="canAcknowledgeAdjustment(record)"
+              type="link"
+              size="small"
+              :loading="acknowledgingResultId === record.id"
+              @click="acknowledgeAdjustment(record)"
+              >知悉等级调整</Button
+            >
           </template>
+          <template v-else-if="column.dataIndex === 'action'"
+            ><Button type="link" size="small" @click="openResult(record)"
+              >查看详情</Button
+            ></template
+          >
         </template>
       </Table>
     </div>

@@ -11,6 +11,22 @@ import {
 } from './composables/use-dashboard-query-state';
 
 describe('performance dashboard query state', () => {
+  it('preserves authorized record scope through history navigation and rejects unknown scope names', () => {
+    const state = createDashboardQueryState({
+      scope: 'MANAGED',
+      creatorUserId: '42',
+    });
+    expect(toDashboardRequest(state)).toMatchObject({
+      scope: 'MANAGED',
+      creatorUserId: '42',
+    });
+    expect(
+      createDashboardQueryState(toDashboardRouteQuery(state) as any).scope,
+    ).toBe('MANAGED');
+    expect(createDashboardQueryState({ scope: 'OTHER_TENANT' }).scope).toBe(
+      'VISIBLE',
+    );
+  });
   it('restores filters and preserves a Long template ID as an opaque value', () => {
     const state = createDashboardQueryState({
       endPeriodKey: '2026-07',

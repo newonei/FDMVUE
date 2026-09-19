@@ -5,6 +5,7 @@ import type { SystemUserApi } from '#/api/system/user';
 import { computed, onMounted, reactive, ref } from 'vue';
 
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -18,10 +19,12 @@ import { getSetting, saveSetting } from '#/api/fdmperformance';
 import { getSimpleUserList } from '#/api/system/user';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import { usePerformanceAccess } from '../shared/access';
 
 defineOptions({ name: 'FdmPerformanceSettings' });
 
 const loading = ref(false);
+const { access, accessLoading, loadAccess } = usePerformanceAccess();
 const users = ref<SystemUserApi.User[]>([]);
 const form = reactive<JixiaoApi.Setting>({
   bossUserId: undefined,
@@ -61,24 +64,37 @@ async function load() {
 }
 
 async function submit() {
+  if (!access.value?.canConfigure) return;
   await saveSetting(form);
   message.success('设置已保存');
   await load();
 }
 
-onMounted(load);
+onMounted(async () => {
+  const capability = await loadAccess();
+  if (capability.canConfigure) await load();
+});
 </script>
 
 <template>
-  <PerformanceShell title="系统设置">
-    <div class="settings-panel">
+  <PerformanceShell
+    title="绩效 HR、老板与总经理设置"
+    description="配置人事审核人员、复盘通知对象与钉钉提醒。"
+  >
+    <Alert
+      v-if="!accessLoading && access && !access.canConfigure"
+      type="warning"
+      message="仅绩效管理员可以维护系统设置。"
+      show-icon
+    />
+    <div v-if="access?.canConfigure" class="settings-panel">
       <Form layout="vertical">
         <Form.Item label="绩效 HR">
           <Select
             v-model:value="form.hrUserIds"
             mode="multiple"
             show-search
-            :filter-option="false"
+            option-filter-prop="label"
             :options="userOptions"
             placeholder="选择可处理人事审核的 HR"
           />
@@ -89,7 +105,7 @@ onMounted(load);
               v-model:value="form.bossUserId"
               allow-clear
               show-search
-              :filter-option="false"
+              option-filter-prop="label"
               :options="userOptions"
             />
           </Form.Item>
@@ -98,7 +114,7 @@ onMounted(load);
               v-model:value="form.generalManagerUserId"
               allow-clear
               show-search
-              :filter-option="false"
+              option-filter-prop="label"
               :options="userOptions"
             />
           </Form.Item>

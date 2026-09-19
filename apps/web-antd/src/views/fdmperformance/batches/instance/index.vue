@@ -4,18 +4,23 @@ import type { TableColumnsType } from 'ant-design-vue';
 import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemUserApi } from '#/api/system/user';
 
-import { computed, onMounted, reactive, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 
-import { useAccess } from '@vben/access';
 import { Undo2 } from '@vben/icons';
-import { useUserStore } from '@vben/stores';
+import { useMediaQuery } from '@vueuse/core';
 
 import {
   Alert,
   Button,
   Descriptions,
-  InputNumber,
   message,
   Modal,
   Select,
@@ -32,7 +37,9 @@ import {
   confirmIndicatorTask,
   getInstance,
   getReturnableTaskNodes,
+  getScoreDraft,
   returnTask,
+  saveScoreDraft,
   submitHrReview,
   submitManagerScore,
   submitSelfScore,
@@ -43,6 +50,15 @@ import { getSimpleUserList } from '#/api/system/user';
 
 import { INSTANCE_STATUS_MAP } from '../../shared/constants';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
+import { hasAction } from '../../shared/workspace';
+import {
+  activeScoreStage,
+  applyScoreDraft,
+  scoreDraftPayload,
+  scoreRowsFromInstance,
+  type ScoreRow,
+} from './score-model';
+import ScoreFields from './ScoreFields.vue';
 import SelfScoreAttachmentPanel from './SelfScoreAttachmentPanel.vue';
 
 defineOptions({ name: 'FdmPerformanceInstanceDetail' });
@@ -51,8 +67,7 @@ const props = defineProps<{
   id?: number | string;
 }>();
 const route = useRoute();
-const { hasAccessByCodes } = useAccess();
-const userStore = useUserStore();
+const isNarrow = useMediaQuery('(max-width: 900px)');
 const loading = ref(false);
 const submitting = ref(false);
 const selfScoreAttachmentHasError = ref(false);
@@ -73,18 +88,55 @@ const returnForm = reactive({
   reason: '',
   targetTaskDefinitionKey: undefined as string | undefined,
 });
-const PERFORMANCE_HR_CODES = ['fdmperformance:hr'];
-type ScoreRow = {
-  indicator: JixiaoApi.InstanceIndicator;
-  managerComment?: string;
-  managerScore?: null | number;
-  selfComment?: string;
-  selfScore?: null | number;
-  supervisorComment?: string;
-  supervisorScore?: null | number;
-};
 const scoreRows = ref<ScoreRow[]>([]);
 const scorePanel = ref<HTMLDivElement>();
+const draftReason = ref('');
+const savingDraft = ref(false);
+const draftSaveFailed = ref(false);
+const draftLoadFailed = ref(false);
+const draftSavedAt = ref<JixiaoApi.DateTimeValue>();
+const savedSnapshot = ref('');
+const loadError = ref('');
+let latestLoadId = 0;
+const scoreStage = computed(() => activeScoreStage(instance.value));
+const currentDraft = computed(() =>
+  instance.value
+    ? scoreDraftPayload(instance.value, scoreRows.value, draftReason.value)
+    : undefined,
+);
+const draftSnapshot = computed(() =>
+  JSON.stringify(currentDraft.value || null),
+);
+const hasUnsavedChanges = computed(
+  () =>
+    !!scoreStage.value &&
+    savedSnapshot.value !== '' &&
+    savedSnapshot.value !== draftSnapshot.value,
+);
+const canSaveDraft = computed(
+  () =>
+    !!instance.value &&
+    hasAction(instance.value, 'SAVE_SCORE_DRAFT') &&
+    !!scoreStage.value &&
+    !draftLoadFailed.value,
+);
+const completedScoreCount = computed(
+  () =>
+    currentDraft.value?.items.filter(
+      (item) =>
+        item.score !== undefined &&
+        Number.isFinite(item.score) &&
+        item.score >= 0 &&
+        item.score <= SCORE_MAX,
+    ).length || 0,
+);
+const scoreResultLabel = computed(() =>
+  instance.value?.result?.publicStatus === 1 || instance.value?.publicTime
+    ? '已公布综合分'
+    : instance.value?.currentTaskKey === 'JIXIAO_EMPLOYEE_CONFIRM'
+      ? '待确认综合分'
+      : '综合分（待审核 / 待公布）',
+);
 
 type ProcessStepStatus = 'error' | 'finish' | 'process' | 'wait';
 
@@ -135,26 +187,15 @@ const managerRelationWarning = computed(() => {
 });
 const indicatorColumns = computed<TableColumnsType>(() => {
   const columns: TableColumnsType = [
-    { dataIndex: 'dimensionName', fixed: 'left', title: '维度', width: 120 },
-    { dataIndex: 'name', fixed: 'left', title: '指标', width: 180 },
-    { dataIndex: 'standard', title: '考核标准', width: 260 },
-    { dataIndex: 'weight', title: '权重/基准分', width: 120 },
-    { dataIndex: 'actionPlan', title: '行动计划', width: 180 },
-    { dataIndex: 'selfScore', title: '员工自评(50%)', width: 130 },
-    { dataIndex: 'selfComment', title: '自评说明', width: 220 },
+    { dataIndex: 'name', title: '指标与标准', width: 260 },
+    { dataIndex: 'weight', title: '权重 / 基准分', width: 110 },
     {
-      dataIndex: 'supervisorScore',
-      title: managerScoreEnabled.value ? '主管评分(40%)' : '主管评分(50%)',
-      width: 130,
+      dataIndex: 'scores',
+      title: '各阶段评分与说明',
+      width: managerScoreEnabled.value ? 520 : 360,
     },
-    { dataIndex: 'supervisorComment', title: '主管说明', width: 220 },
+    { dataIndex: 'actionPlan', title: '行动计划', width: 130 },
   ];
-  if (managerScoreEnabled.value) {
-    columns.push(
-      { dataIndex: 'managerScore', title: '上级评分(10%)', width: 130 },
-      { dataIndex: 'managerComment', title: '上级说明', width: 220 },
-    );
-  }
   return columns;
 });
 
@@ -164,35 +205,28 @@ const actionPlanIndicators = computed(() =>
 const pendingActionPlanIndicators = computed(() =>
   actionPlanIndicators.value.filter((item) => item.actionPlanStatus !== 1),
 );
-const canScore = computed(() =>
-  [
-    'JIXIAO_MANAGER_SCORE',
-    'JIXIAO_SELF_SCORE',
-    'JIXIAO_SUPERVISOR_SCORE',
-  ].includes(instance.value?.currentTaskKey || ''),
-);
-const canApproveCurrent = computed(() =>
-  [
-    'JIXIAO_EMPLOYEE_CONFIRM',
-    'JIXIAO_HR_REVIEW',
-    'JIXIAO_INDICATOR_CONFIRM',
-  ].includes(instance.value?.currentTaskKey || ''),
-);
+const canScore = computed(() => !!scoreStage.value);
+const canApproveCurrent = computed(() => {
+  const detail = instance.value;
+  if (!detail?.currentTaskId || detail.status !== 1) return false;
+  return (['INDICATOR_CONFIRM', 'EMPLOYEE_CONFIRM', 'HR_REVIEW'] as const).some(
+    (action) =>
+      detail.currentTaskKey === `JIXIAO_${action}` && hasAction(detail, action),
+  );
+});
 const canEditSelfScore = computed(
-  () => instance.value?.currentTaskKey === 'JIXIAO_SELF_SCORE',
+  () => scoreStage.value?.action === 'SELF_SCORE',
 );
 const canEditSupervisorScore = computed(
-  () => instance.value?.currentTaskKey === 'JIXIAO_SUPERVISOR_SCORE',
+  () => scoreStage.value?.action === 'SUPERVISOR_SCORE',
 );
 const canEditManagerScore = computed(
-  () => instance.value?.currentTaskKey === 'JIXIAO_MANAGER_SCORE',
-);
-const isPerformanceAdmin = computed(() =>
-  hasAccessByCodes(PERFORMANCE_HR_CODES),
+  () => scoreStage.value?.action === 'MANAGER_SCORE',
 );
 const canTransfer = computed(
   () =>
-    isPerformanceAdmin.value &&
+    !!instance.value &&
+    hasAction(instance.value, 'TRANSFER') &&
     instance.value?.status === 1 &&
     !!instance.value?.currentTaskId,
 );
@@ -247,13 +281,6 @@ const processSteps = computed(() => {
       title: '人事审核',
     },
     {
-      description: detail?.result?.grade
-        ? `当前等级：${detail.result.grade}`
-        : '默认 B / 可调整',
-      key: 'JIXIAO_GRADE_ADJUST',
-      title: '人事调级',
-    },
-    {
       description: detail?.publicTime ? '已公示' : '待人事公示',
       key: 'JIXIAO_RESULT_PUBLISH',
       title: '结果公示',
@@ -276,7 +303,7 @@ const currentProcessStep = computed(() => {
   }
   if (detail?.status === 2) {
     return processSteps.value.findIndex(
-      (step) => step.key === 'JIXIAO_GRADE_ADJUST',
+      (step) => step.key === 'JIXIAO_RESULT_PUBLISH',
     );
   }
   return 0;
@@ -288,7 +315,8 @@ const currentProcessTitle = computed(
 const isCompletedInstance = computed(() => instance.value?.status === 2);
 const canReturn = computed(
   () =>
-    isPerformanceAdmin.value &&
+    !!instance.value &&
+    hasAction(instance.value, 'RETURN') &&
     (isCompletedInstance.value ||
       (instance.value?.status === 1 && !!instance.value?.currentTaskId)),
 );
@@ -319,13 +347,6 @@ function processStepStatus(index: number): ProcessStepStatus {
   if (index < current) return 'finish';
   if (index === current) return 'process';
   return 'wait';
-}
-
-function scoreOf(indicatorId?: number, scoreType?: string) {
-  return instance.value?.scores?.find(
-    (item) =>
-      item.instanceIndicatorId === indicatorId && item.scoreType === scoreType,
-  );
 }
 
 function baselineScore(record: Record<string, any> | ScoreRow) {
@@ -374,8 +395,10 @@ function validateScoreRows(taskKey: string) {
   return true;
 }
 
-async function load() {
+async function load(discardLocal = false) {
+  const requestId = ++latestLoadId;
   loading.value = true;
+  loadError.value = '';
   try {
     const routeInstanceId = route.params.instanceId;
     const rawInstanceId =
@@ -386,25 +409,55 @@ async function load() {
       message.error('考核实例 ID 无效');
       return;
     }
-    instance.value = await getInstance(id);
-    scoreRows.value = [];
-    for (const indicator of instance.value.indicators || []) {
-      const selfScore = scoreOf(indicator.id, 'SELF');
-      const supervisorScore = scoreOf(indicator.id, 'SUPERVISOR');
-      const managerScore = scoreOf(indicator.id, 'MANAGER');
-      scoreRows.value.push({
-        indicator,
-        managerComment: managerScore?.comment,
-        managerScore: managerScore?.score,
-        selfComment: selfScore?.comment,
-        selfScore: selfScore?.score,
-        supervisorComment: supervisorScore?.comment,
-        supervisorScore: supervisorScore?.score,
-      });
+    const detail = await getInstance(id);
+    if (requestId !== latestLoadId) return;
+    const preserveLocal =
+      !discardLocal &&
+      hasUnsavedChanges.value &&
+      detail.id === instance.value?.id &&
+      detail.currentTaskId === instance.value?.currentTaskId &&
+      !!activeScoreStage(detail);
+    let rows = scoreRowsFromInstance(detail);
+    let draft: JixiaoApi.ScoreDraft | null | undefined;
+    draftLoadFailed.value = false;
+    if (
+      !preserveLocal &&
+      activeScoreStage(detail) &&
+      hasAction(detail, 'SAVE_SCORE_DRAFT')
+    ) {
+      try {
+        draft = await getScoreDraft(detail.id!, detail.currentTaskId!);
+      } catch {
+        if (requestId === latestLoadId) draftLoadFailed.value = true;
+      }
     }
+    if (requestId !== latestLoadId) return;
+    if (preserveLocal) {
+      rows = rows.map((row) => ({
+        ...row,
+        ...scoreRows.value.find((old) => old.indicator.id === row.indicator.id),
+        indicator: row.indicator,
+      }));
+    } else {
+      const applied = applyScoreDraft(detail, rows, draft);
+      draftReason.value = applied ? draft?.reason || '' : '';
+      draftSavedAt.value = applied ? draft?.updateTime : undefined;
+    }
+    instance.value = detail;
+    scoreRows.value = rows;
+    if (!preserveLocal) savedSnapshot.value = draftSnapshot.value;
     await loadReturnableNodes(true);
+  } catch {
+    if (requestId === latestLoadId) {
+      loadError.value =
+        '考核详情加载失败，可能已无查看权限。请重试或返回可用入口。';
+      if (!hasUnsavedChanges.value) {
+        instance.value = undefined;
+        scoreRows.value = [];
+      }
+    }
   } finally {
-    loading.value = false;
+    if (requestId === latestLoadId) loading.value = false;
   }
 }
 
@@ -437,12 +490,13 @@ function canCompleteAction(indicator: JixiaoApi.InstanceIndicator) {
     indicator.actionPlanEnabled === true &&
     indicator.actionPlanStatus !== 1 &&
     [1, 2].includes(instance.value?.status ?? 0) &&
-    Number(userStore.userInfo?.id) === Number(instance.value?.userId)
+    !!instance.value &&
+    hasAction(instance.value, 'COMPLETE_ACTION_PLAN')
   );
 }
 
 function completeAction(indicator: JixiaoApi.InstanceIndicator) {
-  if (!indicator.id) return;
+  if (!indicator.id || !canCompleteAction(indicator)) return;
   Modal.confirm({
     cancelText: '取消',
     content: `确认已经完成指标“${indicator.name || '-'}”对应的行动项？`,
@@ -468,6 +522,7 @@ function taskReq() {
 }
 
 async function approveCurrent() {
+  if (!canApproveCurrent.value || submitting.value) return;
   const req = taskReq();
   if (!req) return;
   submitting.value = true;
@@ -487,6 +542,14 @@ async function approveCurrent() {
 }
 
 async function submitScore() {
+  if (
+    !canScore.value ||
+    draftLoadFailed.value ||
+    loading.value ||
+    submitting.value ||
+    savingDraft.value
+  )
+    return;
   const req = taskReq();
   if (!req || !instance.value) return;
   const taskKey = instance.value.currentTaskKey || '';
@@ -509,21 +572,41 @@ async function submitScore() {
   submitting.value = true;
   try {
     if (instance.value.currentTaskKey === 'JIXIAO_SELF_SCORE') {
-      await submitSelfScore({ ...req, items });
+      await submitSelfScore({
+        ...req,
+        items,
+        ...(draftReason.value.trim()
+          ? { reason: draftReason.value.trim() }
+          : {}),
+      });
     } else if (instance.value.currentTaskKey === 'JIXIAO_SUPERVISOR_SCORE') {
-      await submitSupervisorScore({ ...req, items });
+      await submitSupervisorScore({
+        ...req,
+        items,
+        ...(draftReason.value.trim()
+          ? { reason: draftReason.value.trim() }
+          : {}),
+      });
     } else if (instance.value.currentTaskKey === 'JIXIAO_MANAGER_SCORE') {
-      await submitManagerScore({ ...req, items });
+      await submitManagerScore({
+        ...req,
+        items,
+        ...(draftReason.value.trim()
+          ? { reason: draftReason.value.trim() }
+          : {}),
+      });
     }
     message.success('评分已提交');
-    await load();
+    savedSnapshot.value = draftSnapshot.value;
+    await load(true);
   } finally {
     submitting.value = false;
   }
 }
 
 async function openTransfer() {
-  if (!instance.value?.currentTaskId) return;
+  if (!canTransfer.value || !instance.value?.currentTaskId) return;
+  if (!(await confirmLeave())) return;
   transferForm.assigneeUserId = undefined;
   transferForm.reason = '';
   transferVisible.value = true;
@@ -533,6 +616,7 @@ async function openTransfer() {
 }
 
 async function submitTransfer() {
+  if (!canTransfer.value) return;
   if (!instance.value?.id || !instance.value.currentTaskId) return;
   if (!transferForm.assigneeUserId) {
     message.warning('请选择转交人');
@@ -561,6 +645,7 @@ async function submitTransfer() {
 
 async function openReturn(targetTaskDefinitionKey?: string) {
   if (!canReturn.value) return;
+  if (!(await confirmLeave())) return;
   await loadReturnableNodes();
   if (returnableNodes.value.length === 0) {
     message.warning('当前节点没有可回退的历史步骤');
@@ -579,6 +664,7 @@ async function openReturn(targetTaskDefinitionKey?: string) {
 }
 
 async function submitReturn() {
+  if (!canReturn.value) return;
   if (!instance.value?.id) return;
   if (instance.value.status === 1 && !instance.value.currentTaskId) return;
   if (!returnForm.targetTaskDefinitionKey) {
@@ -609,15 +695,109 @@ async function submitReturn() {
   }
 }
 
-onMounted(load);
+async function saveDraft() {
+  const payload = currentDraft.value;
+  if (
+    !canSaveDraft.value ||
+    !payload ||
+    loading.value ||
+    savingDraft.value ||
+    submitting.value
+  )
+    return;
+  const invalid = payload.items.find(
+    (item) =>
+      item.score !== undefined &&
+      (!Number.isFinite(item.score) ||
+        item.score < 0 ||
+        item.score > SCORE_MAX),
+  );
+  if (invalid) {
+    message.warning(`评分必须在 0-${SCORE_MAX} 分之间，未完成项可以留空暂存`);
+    focusScoreInput(invalid.instanceIndicatorId);
+    return;
+  }
+  const snapshot = draftSnapshot.value;
+  savingDraft.value = true;
+  draftSaveFailed.value = false;
+  try {
+    const saved = await saveScoreDraft(payload);
+    if (
+      instance.value?.id === payload.instanceId &&
+      instance.value.currentTaskId === payload.taskId
+    ) {
+      savedSnapshot.value = snapshot;
+      draftSavedAt.value = saved.updateTime;
+    }
+    message.success('评分草稿已保存，尚未提交');
+  } catch {
+    draftSaveFailed.value = true;
+  } finally {
+    savingDraft.value = false;
+  }
+}
+
+function draftTimeLabel(value?: JixiaoApi.DateTimeValue) {
+  if (value === undefined) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function confirmLeave() {
+  if (!hasUnsavedChanges.value) return true;
+  return new Promise<boolean>((resolve) => {
+    Modal.confirm({
+      title: '评分尚未保存',
+      content: '离开会丢失本次未保存的评分和说明。你可以取消后先暂存草稿。',
+      okText: '放弃修改并离开',
+      cancelText: '继续编辑',
+      onOk: () => {
+        resolve(true);
+      },
+      onCancel: () => resolve(false),
+    });
+  });
+}
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!hasUnsavedChanges.value) return;
+  event.preventDefault();
+  event.returnValue = '';
+}
+onBeforeRouteLeave(confirmLeave);
+onBeforeRouteUpdate(confirmLeave);
+watch(
+  () => props.id ?? route.params.instanceId,
+  () => {
+    void load(true);
+  },
+);
+onMounted(() => {
+  window.addEventListener('beforeunload', warnBeforeUnload);
+  void load();
+});
+onBeforeUnmount(() => {
+  latestLoadId += 1;
+  window.removeEventListener('beforeunload', warnBeforeUnload);
+});
 </script>
 
 <template>
   <PerformanceShell title="单人考核详情">
+    <Alert v-if="loadError" :message="loadError" show-icon type="error"
+      ><template #action
+        ><Button size="small" :loading="loading" @click="load()"
+          >重试</Button
+        ></template
+      ></Alert
+    >
     <div v-if="instance" class="process-panel">
       <div class="process-head">
         <div>
-          <strong>考核流程</strong>
+          <strong
+            >{{ instance.userName }} · {{ instance.periodKey }} 绩效考核</strong
+          >
           <span> 当前：{{ currentProcessTitle }} </span>
           <span>
             当前处理人：{{ instance.currentTaskAssigneeUserName || '-' }}
@@ -654,9 +834,9 @@ onMounted(load);
       <div class="process-scroll">
         <Steps
           :current="currentProcessStep"
+          :direction="isNarrow ? 'vertical' : 'horizontal'"
           class="process-steps"
           size="small"
-          type="navigation"
         >
           <Steps.Step
             v-for="(step, index) in processSteps"
@@ -674,7 +854,12 @@ onMounted(load);
     </div>
 
     <div class="detail-panel">
-      <Descriptions v-if="instance" bordered size="small" :column="3">
+      <Descriptions
+        v-if="instance"
+        bordered
+        size="small"
+        :column="{ xs: 1, sm: 2, lg: 3 }"
+      >
         <Descriptions.Item label="被考核人">
           {{ instance.userName }}
         </Descriptions.Item>
@@ -685,8 +870,11 @@ onMounted(load);
           {{ instance.superiorSupervisorUserName || '-' }}
           <Tag v-if="managerRelationInvalid" color="warning">关系无效</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="流程实例">
-          {{ instance.processInstanceId || '-' }}
+        <Descriptions.Item label="发起人">
+          {{ instance.creatorUserName || '-' }}
+        </Descriptions.Item>
+        <Descriptions.Item label="截止日期">
+          {{ instance.endDate || '未设置' }}
         </Descriptions.Item>
         <Descriptions.Item label="当前处理人">
           {{ instance.currentTaskAssigneeUserName || '-' }}
@@ -699,7 +887,11 @@ onMounted(load);
         <Descriptions.Item label="员工自评汇总（50%）">
           {{ scoreSummary.self ?? '-' }}
         </Descriptions.Item>
-        <Descriptions.Item label="主管评分汇总（50%）">
+        <Descriptions.Item
+          :label="
+            managerScoreEnabled ? '主管评分汇总（40%）' : '主管评分汇总（50%）'
+          "
+        >
           {{ scoreSummary.supervisor ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item
@@ -708,13 +900,42 @@ onMounted(load);
         >
           {{ scoreSummary.manager ?? '-' }}
         </Descriptions.Item>
-        <Descriptions.Item label="最终分">
+        <Descriptions.Item :label="scoreResultLabel">
           {{ instance.finalScore ?? '-' }}
         </Descriptions.Item>
+        <Descriptions.Item v-if="instance.result?.grade" label="绩效等级">{{
+          instance.result.grade
+        }}</Descriptions.Item>
       </Descriptions>
     </div>
 
     <div ref="scorePanel" class="detail-panel">
+      <div class="score-heading">
+        <h2>指标与评分</h2>
+        <span v-if="canScore"
+          >已填 {{ completedScoreCount }} / {{ scoreRows.length }} 项 · 每项
+          0—100 分</span
+        >
+      </div>
+      <Alert
+        v-if="instance?.currentTaskId && !canScore && !canApproveCurrent"
+        class="action-alert"
+        message="当前为查看模式。只有本节点指定处理人可以评分或确认。"
+        show-icon
+        type="info"
+      />
+      <Alert
+        v-if="draftLoadFailed"
+        class="action-alert"
+        message="草稿加载失败。请先重试，避免覆盖之前保存的内容。"
+        show-icon
+        type="warning"
+        ><template #action
+          ><Button size="small" :loading="loading" @click="load()"
+            >重新加载草稿</Button
+          ></template
+        ></Alert
+      >
       <Alert
         v-if="pendingActionPlanIndicators.length"
         class="action-alert"
@@ -723,11 +944,12 @@ onMounted(load);
         type="info"
       />
       <Table
+        v-if="!isNarrow"
         :columns="indicatorColumns"
         :data-source="scoreRows"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: managerScoreEnabled ? 1770 : 1420 }"
+        :scroll="{ x: managerScoreEnabled ? 1020 : 860 }"
         row-key="indicator.id"
         size="small"
       >
@@ -737,6 +959,12 @@ onMounted(load);
           </template>
           <template v-else-if="column.dataIndex === 'name'">
             <strong>{{ record.indicator.name || '-' }}</strong>
+            <div class="indicator-meta">
+              {{ record.indicator.dimensionName || '-' }}
+            </div>
+            <div class="standard-cell">
+              {{ record.indicator.standard || '-' }}
+            </div>
           </template>
           <template v-else-if="column.dataIndex === 'standard'">
             <div class="standard-cell">
@@ -768,85 +996,74 @@ onMounted(load);
               </Button>
             </Space>
           </template>
-          <template v-else-if="column.dataIndex === 'selfScore'">
-            <InputNumber
-              v-if="canEditSelfScore"
-              v-model:value="record.selfScore"
-              :id="`performance-score-${record.indicator.id}`"
-              :max="SCORE_MAX"
-              :min="0"
-              class="score-input"
-              addon-after="分"
-              placeholder="必填，可填 0"
+          <template v-else-if="column.dataIndex === 'scores'">
+            <ScoreFields
+              :row="record as ScoreRow"
+              :self-editable="canEditSelfScore"
+              :supervisor-editable="canEditSupervisorScore"
+              :manager-editable="canEditManagerScore"
+              :manager-enabled="managerScoreEnabled"
+              :disabled="
+                loading || submitting || savingDraft || draftLoadFailed
+              "
+              @update:row="Object.assign(record, $event)"
             />
-            <span v-else>{{ record.selfScore ?? '-' }}</span>
-          </template>
-          <template v-else-if="column.dataIndex === 'selfComment'">
-            <Textarea
-              v-if="canEditSelfScore"
-              v-model:value="record.selfComment"
-              :rows="2"
-              placeholder="填写自评说明"
-            />
-            <span v-else class="readonly-comment">
-              {{ record.selfComment || '-' }}
-            </span>
-          </template>
-          <template v-else-if="column.dataIndex === 'supervisorScore'">
-            <InputNumber
-              v-if="canEditSupervisorScore"
-              v-model:value="record.supervisorScore"
-              :id="`performance-score-${record.indicator.id}`"
-              :max="SCORE_MAX"
-              :min="0"
-              class="score-input"
-              addon-after="分"
-              placeholder="必填，可填 0"
-            />
-            <span v-else>{{ record.supervisorScore ?? '-' }}</span>
-          </template>
-          <template v-else-if="column.dataIndex === 'supervisorComment'">
-            <Textarea
-              v-if="canEditSupervisorScore"
-              v-model:value="record.supervisorComment"
-              :rows="2"
-              placeholder="填写主管说明"
-            />
-            <span v-else class="readonly-comment">
-              {{ record.supervisorComment || '-' }}
-            </span>
-          </template>
-          <template v-else-if="column.dataIndex === 'managerScore'">
-            <InputNumber
-              v-if="canEditManagerScore"
-              v-model:value="record.managerScore"
-              :id="`performance-score-${record.indicator.id}`"
-              :max="SCORE_MAX"
-              :min="0"
-              class="score-input"
-              addon-after="分"
-              placeholder="必填，可填 0"
-            />
-            <span v-else>{{ record.managerScore ?? '-' }}</span>
-          </template>
-          <template v-else-if="column.dataIndex === 'managerComment'">
-            <Textarea
-              v-if="canEditManagerScore"
-              v-model:value="record.managerComment"
-              :rows="2"
-              placeholder="填写上级说明"
-            />
-            <span v-else class="readonly-comment">
-              {{ record.managerComment || '-' }}
-            </span>
           </template>
         </template>
       </Table>
+      <div v-else class="indicator-cards">
+        <article
+          v-for="row in scoreRows"
+          :key="row.indicator.id"
+          class="indicator-card"
+        >
+          <div class="score-heading">
+            <h3>{{ row.indicator.name }}</h3>
+            <Tag
+              >{{ baselineScore(row) }}% / 基准 {{ baselineScore(row) }} 分</Tag
+            >
+          </div>
+          <p class="indicator-meta">
+            {{ row.indicator.dimensionName || '未分维度' }}
+          </p>
+          <p class="standard-cell">
+            {{ row.indicator.standard || '暂无考核标准' }}
+          </p>
+          <ScoreFields
+            :row="row"
+            :self-editable="canEditSelfScore"
+            :supervisor-editable="canEditSupervisorScore"
+            :manager-editable="canEditManagerScore"
+            :manager-enabled="managerScoreEnabled"
+            :disabled="loading || submitting || savingDraft || draftLoadFailed"
+            @update:row="Object.assign(row, $event)"
+          />
+          <div v-if="row.indicator.actionPlanEnabled" class="indicator-action">
+            <Tag
+              :color="row.indicator.actionPlanStatus === 1 ? 'green' : 'orange'"
+              >行动计划：{{
+                row.indicator.actionPlanStatus === 1 ? '已完成' : '待完成'
+              }}</Tag
+            ><Button
+              v-if="canCompleteAction(row.indicator)"
+              size="small"
+              type="link"
+              @click="completeAction(row.indicator)"
+              >完成</Button
+            >
+          </div>
+        </article>
+      </div>
     </div>
 
     <div v-if="instance?.id" class="detail-panel">
       <SelfScoreAttachmentPanel
-        :editable="canEditSelfScore && !!instance.currentTaskId"
+        :editable="
+          canEditSelfScore &&
+          !!instance.currentTaskId &&
+          !loading &&
+          !submitting
+        "
         :instance-id="instance.id"
         :task-id="instance.currentTaskId"
         @error-change="selfScoreAttachmentHasError = $event"
@@ -856,26 +1073,63 @@ onMounted(load);
 
     <div
       v-if="instance?.currentTaskId && (canScore || canApproveCurrent)"
-      class="detail-panel action-panel"
+      class="detail-panel"
     >
-      <Space>
-        <Button
-          v-if="canScore"
-          :loading="submitting"
-          type="primary"
-          @click="submitScore"
-        >
-          提交评分
-        </Button>
-        <Button
-          v-else-if="canApproveCurrent"
-          :loading="submitting"
-          type="primary"
-          @click="approveCurrent"
-        >
-          提交当前节点
-        </Button>
-      </Space>
+      <label v-if="canScore" class="draft-reason"
+        >本次评分说明（可选）<Textarea
+          v-model:value="draftReason"
+          :disabled="submitting || savingDraft || loading || draftLoadFailed"
+          :maxlength="500"
+          :rows="2"
+          placeholder="补充本次评分或提交说明"
+      /></label>
+      <Alert
+        v-if="draftSaveFailed"
+        class="action-alert"
+        message="草稿保存失败，本页修改仍保留，请重试暂存。"
+        show-icon
+        type="error"
+      />
+      <div class="action-panel">
+        <div class="draft-status" aria-live="polite">
+          <span v-if="canScore && hasUnsavedChanges">有未保存修改</span
+          ><span v-else-if="canScore && draftSavedAt"
+            >草稿已保存 · {{ draftTimeLabel(draftSavedAt) }}</span
+          >
+        </div>
+        <Space>
+          <Button
+            v-if="canSaveDraft"
+            :loading="savingDraft"
+            :disabled="submitting || loading"
+            @click="saveDraft"
+            >暂存草稿</Button
+          >
+          <Button
+            v-if="canScore"
+            :loading="submitting"
+            :disabled="savingDraft || loading || draftLoadFailed"
+            type="primary"
+            @click="submitScore"
+          >
+            提交评分
+          </Button>
+          <Button
+            v-else-if="canApproveCurrent"
+            :loading="submitting"
+            type="primary"
+            @click="approveCurrent"
+          >
+            {{
+              instance.currentTaskKey === 'JIXIAO_INDICATOR_CONFIRM'
+                ? '确认指标'
+                : instance.currentTaskKey === 'JIXIAO_EMPLOYEE_CONFIRM'
+                  ? '确认考核结果'
+                  : '审核通过'
+            }}
+          </Button>
+        </Space>
+      </div>
     </div>
 
     <Modal
@@ -885,6 +1139,11 @@ onMounted(load);
       @ok="submitTransfer"
     >
       <Space direction="vertical" class="transfer-form">
+        <Alert
+          message="仅能转交给有本条考核查看权且符合当前节点资格的人员。下方通讯录仅供查找，是否可接收由提交时再次核验。"
+          show-icon
+          type="info"
+        />
         <Select
           v-model:value="transferForm.assigneeUserId"
           :options="userOptions"
@@ -932,8 +1191,8 @@ onMounted(load);
   min-width: 0;
   padding: 14px;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid #edf0f4;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
@@ -956,17 +1215,17 @@ onMounted(load);
 .process-head strong {
   font-size: 15px;
   font-weight: 650;
-  color: #111827;
+  color: hsl(var(--foreground));
 }
 
 .process-head span {
   font-size: 13px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
 }
 
 .process-scroll {
   padding-bottom: 4px;
-  overflow: auto hidden;
+  overflow: visible;
 }
 
 .manager-relation-alert {
@@ -990,7 +1249,7 @@ onMounted(load);
 }
 
 .process-steps {
-  min-width: 980px;
+  min-width: 0;
 }
 
 :deep(.process-steps.ant-steps-navigation) {
@@ -1023,8 +1282,8 @@ onMounted(load);
   min-width: 0;
   padding: 14px;
   overflow: hidden;
-  background: #fff;
-  border: 1px solid #edf0f4;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
@@ -1034,12 +1293,15 @@ onMounted(load);
 
 .action-panel {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .standard-cell,
 .readonly-comment {
-  color: #475569;
+  color: hsl(var(--muted-foreground));
   white-space: pre-wrap;
 }
 
@@ -1049,5 +1311,60 @@ onMounted(load);
 
 :deep(.ant-table-cell .ant-input-number-group-wrapper) {
   width: 100%;
+}
+
+.score-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.score-heading h2,
+.score-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.score-heading span,
+.indicator-meta,
+.draft-status {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.indicator-meta {
+  margin: 6px 0;
+}
+.indicator-cards {
+  display: grid;
+  gap: 16px;
+}
+.indicator-card {
+  padding-bottom: 18px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.indicator-card:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.indicator-card .standard-cell {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+.indicator-action {
+  margin-top: 12px;
+}
+.draft-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+@media (max-width: 640px) {
+  .process-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

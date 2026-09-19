@@ -8,6 +8,8 @@ import { useRoute } from 'vue-router';
 import { PERFORMANCE_DEFAULT_PAGE_SIZE } from '../../shared/constants';
 
 export interface DashboardQueryState {
+  scope?: JixiaoDashboardApi.QueryParams['scope'];
+  creatorUserId?: JixiaoDashboardApi.Id;
   deptId?: JixiaoDashboardApi.Id;
   endPeriodKey: string;
   grades: string[];
@@ -46,7 +48,7 @@ function asPeriodType(value: null | string | undefined) {
 }
 
 function asPublicStatus(value: null | string | undefined) {
-  return value === '0' ? 0 : (value === '1' ? 1 : undefined);
+  return value === '0' ? 0 : value === '1' ? 1 : undefined;
 }
 
 export function createDashboardQueryState(
@@ -56,6 +58,12 @@ export function createDashboardQueryState(
     ?.split(',')
     .filter((grade) => ['A', 'A+', 'B', 'C', 'C+'].includes(grade));
   return {
+    scope: ['VISIBLE', 'SELF', 'INITIATED', 'MANAGED', 'ALL'].includes(
+      first(routeQuery, 'scope') || '',
+    )
+      ? (first(routeQuery, 'scope') as JixiaoDashboardApi.QueryParams['scope'])
+      : 'VISIBLE',
+    creatorUserId: first(routeQuery, 'creatorUserId') || undefined,
     deptId: first(routeQuery, 'deptId') || undefined,
     endPeriodKey: first(routeQuery, 'endPeriodKey') || '',
     grades: grades || [],
@@ -77,6 +85,8 @@ export function toDashboardRequest(
   state: DashboardQueryState,
 ): JixiaoDashboardApi.QueryParams {
   return {
+    scope: state.scope || 'VISIBLE',
+    ...(state.creatorUserId ? { creatorUserId: state.creatorUserId } : {}),
     ...(state.deptId ? { deptId: state.deptId } : {}),
     endPeriodKey: state.endPeriodKey,
     ...(state.grades.length > 0 ? { grades: state.grades } : {}),
@@ -97,6 +107,10 @@ export function toDashboardRouteQuery(
   state: DashboardQueryState,
 ): LocationQueryRaw {
   return {
+    scope: state.scope || 'VISIBLE',
+    ...(state.creatorUserId
+      ? { creatorUserId: String(state.creatorUserId) }
+      : {}),
     ...(state.deptId ? { deptId: String(state.deptId) } : {}),
     endPeriodKey: state.endPeriodKey || undefined,
     ...(state.grades.length > 0 ? { grades: state.grades.join(',') } : {}),

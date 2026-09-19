@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "references": [],
+  "include": [
+    "src/api/fdmperformance/**/*.ts",
+    "src/views/fdmperformance/**/*.ts",
+    "src/views/fdmperformance/**/*.vue",
+    "src/router/routes/modules/fdmperformance.ts"
+  ]
+}

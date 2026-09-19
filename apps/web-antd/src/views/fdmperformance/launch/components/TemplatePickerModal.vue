@@ -33,6 +33,7 @@ defineOptions({ name: 'JixiaoTemplatePickerModal' });
 const props = defineProps<{
   open: boolean;
   selected?: JixiaoApi.TemplateSelectItem[];
+  selectionLimit?: number;
 }>();
 
 const emit = defineEmits<{
@@ -107,7 +108,10 @@ async function loadDepartments() {
 }
 
 async function initialize() {
-  draftSelected.value = [...(props.selected || [])];
+  draftSelected.value = [...(props.selected || [])].slice(
+    0,
+    props.selectionLimit,
+  );
   rows.value = [];
   total.value = 0;
   Object.assign(query, {
@@ -127,7 +131,10 @@ function toggleTemplate(item: JixiaoApi.TemplateSelectItem) {
     );
     return;
   }
-  draftSelected.value = [...draftSelected.value, item];
+  draftSelected.value =
+    props.selectionLimit === 1
+      ? [item]
+      : [...draftSelected.value, item].slice(0, props.selectionLimit);
 }
 
 function removeTemplate(id: number) {

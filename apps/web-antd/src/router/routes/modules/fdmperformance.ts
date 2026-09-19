@@ -4,7 +4,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/fdmperformance',
     name: 'FdmPerformance',
-    redirect: '/fdmperformance/dashboard',
+    redirect: '/fdmperformance/workbench',
     meta: {
       title: '智能绩效',
       icon: 'lucide:chart-no-axes-combined',
@@ -13,9 +13,22 @@ const routes: RouteRecordRaw[] = [
     },
     children: [
       {
+        path: 'workbench',
+        name: 'FdmPerformanceWorkbench',
+        meta: { title: '绩效工作台', icon: 'lucide:layout-dashboard' },
+        component: () => import('#/views/fdmperformance/workbench/index.vue'),
+      },
+      {
+        path: 'configuration',
+        name: 'FdmPerformanceConfiguration',
+        meta: { title: '配置中心', icon: 'lucide:settings' },
+        component: () =>
+          import('#/views/fdmperformance/configuration/index.vue'),
+      },
+      {
         path: 'dashboard',
         name: 'FdmPerformanceDashboard',
-        meta: { title: '绩效看板', icon: 'lucide:layout-dashboard' },
+        meta: { title: '绩效分析', icon: 'lucide:chart-no-axes-combined' },
         component: () => import('#/views/fdmperformance/dashboard/index.vue'),
       },
       {
@@ -50,7 +63,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'launch',
         name: 'FdmPerformanceLaunch',
-        meta: { title: '发起考核', icon: 'lucide:send' },
+        meta: { title: '发起考核', hideInMenu: true, icon: 'lucide:send' },
         component: () => import('#/views/fdmperformance/launch/index.vue'),
       },
       {

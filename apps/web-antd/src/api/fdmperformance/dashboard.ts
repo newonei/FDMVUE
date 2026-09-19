@@ -21,6 +21,8 @@ export namespace JixiaoDashboardApi {
     | 'YEAR';
 
   export interface QueryParams extends PageParam {
+    scope?: 'ALL' | 'INITIATED' | 'MANAGED' | 'SELF' | 'VISIBLE';
+    creatorUserId?: Id;
     deptId?: Id;
     endPeriodKey: string;
     grades?: string[];
@@ -33,6 +35,8 @@ export namespace JixiaoDashboardApi {
   }
 
   export interface FilterOptionsParams {
+    scope?: QueryParams['scope'];
+    creatorUserId?: Id;
     periodType?: PeriodType;
   }
 

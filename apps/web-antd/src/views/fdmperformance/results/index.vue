@@ -6,8 +6,6 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
-import { useAccess } from '@vben/access';
-
 import {
   Button,
   DatePicker,
@@ -42,11 +40,12 @@ import {
 } from '../shared/constants';
 import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import { usePerformanceAccess } from '../shared/access';
 
 defineOptions({ name: 'FdmPerformanceResults' });
 
 const route = useRoute();
-const { hasAccessByCodes } = useAccess();
+const { access, loadAccess } = usePerformanceAccess();
 
 const resultLoading = ref(false);
 const batchPublishing = ref(false);
@@ -128,22 +127,28 @@ function reviewStatus(status?: number): { color: string; text: string } {
 }
 
 function canPublishResult(record: JixiaoApi.Result) {
-  return typeof record.id === 'number' && record.publicStatus !== 1;
+  return (
+    access.value?.canConfigure === true &&
+    typeof record.id === 'number' &&
+    record.publicStatus !== 1
+  );
 }
 
 function canRemindReview(record: JixiaoApi.Review) {
   return (
+    record.allowedActions?.includes('REMIND') === true &&
     typeof record.id === 'number' &&
     (record.status === 0 || record.status === 1)
   );
 }
 
-const canManagePerformance = computed(() =>
-  hasAccessByCodes(['fdmperformance:hr']),
+const canManagePerformance = computed(
+  () => access.value?.canConfigure === true,
 );
 
 function canDeleteReview(record: JixiaoApi.Review) {
   return (
+    record.allowedActions?.includes('DELETE') === true &&
     canManagePerformance.value &&
     typeof record.id === 'number' &&
     record.status === 2
@@ -309,13 +314,17 @@ function changeReviewPage(pagination: any) {
 }
 
 onMounted(async () => {
+  await loadAccess();
   await Promise.all([loadResults(), loadReviews()]);
   await openReviewFromRoute();
 });
 </script>
 
 <template>
-  <PerformanceShell title="结果与复盘">
+  <PerformanceShell
+    title="结果与复盘"
+    description="仅统计当前授权范围内的考核。公布结果和调整等级由绩效管理员处理。"
+  >
     <div class="filter-bar">
       <DatePicker
         v-model:value="periodKey"
@@ -351,7 +360,7 @@ onMounted(async () => {
         style="width: 130px"
       />
       <Button type="primary" @click="searchResults">查询结果</Button>
-      <div class="batch-actions">
+      <div v-if="canManagePerformance" class="batch-actions">
         <span class="selected-count">
           已选择 {{ selectedResultIds.length }} 项
         </span>
@@ -383,7 +392,7 @@ onMounted(async () => {
       :columns="resultColumns"
       :data-source="results"
       :loading="resultLoading"
-      :row-selection="resultRowSelection"
+      :row-selection="canManagePerformance ? resultRowSelection : undefined"
       :pagination="{
         current: resultQuery.pageNo,
         pageSize: resultQuery.pageSize,
@@ -425,7 +434,12 @@ onMounted(async () => {
         </template>
         <template v-else-if="column.dataIndex === 'action'">
           <Space>
-            <Button size="small" type="link" @click="openAdjust(record)">
+            <Button
+              v-if="canManagePerformance"
+              size="small"
+              type="link"
+              @click="openAdjust(record)"
+            >
               调整等级
             </Button>
             <Popconfirm

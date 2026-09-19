@@ -1,568 +1,490 @@
-<script lang="ts">
-interface InstanceQueryState {
-  deptId?: number;
-  pageNo: number;
-  pageSize: number;
-  periodKey: string;
-  status?: number;
-  userId?: number;
-  userName?: string;
-}
-
-let persistedInstanceQuery: InstanceQueryState | undefined;
-</script>
-
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
-
 import type { JixiaoApi } from '#/api/fdmperformance';
-import type { SystemDeptApi } from '#/api/system/dept';
-import type { SystemUserApi } from '#/api/system/user';
-
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-
-import { IconifyIcon } from '@vben/icons';
-import { useUserStore } from '@vben/stores';
-import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
-
+import { downloadFileFromBlobPart } from '@vben/utils';
 import {
+  Alert,
   Button,
   DatePicker,
+  Empty,
   Input,
   message,
+  Modal,
   Popconfirm,
   Select,
   Space,
   Table,
   Tabs,
   Tag,
+  Textarea,
 } from 'ant-design-vue';
-
 import {
+  cancelInstance,
   deleteInstance,
   exportInstanceExcel,
   getInstancePage,
-  getSetting,
   remindInstances,
 } from '#/api/fdmperformance';
-import { getSimpleDeptList } from '#/api/system/dept';
-import { getSimpleUserList } from '#/api/system/user';
-
+import { usePerformanceAccess } from '../shared/access';
 import {
+  INSTANCE_STATUS_MAP,
   PERFORMANCE_PAGE_SIZE_OPTIONS,
   TASK_LABELS,
 } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import {
+  actionLabel,
+  deadlineMeta,
+  defaultManagementScope,
+  hasAction,
+  managementScopes,
+  SCOPE_LABELS,
+  visibilityLabel,
+} from '../shared/workspace';
 import HrReviewQueue from './components/HrReviewQueue.vue';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
-
 const router = useRouter();
-const userStore = useUserStore();
-const activeTab = ref('batches');
-const isPerformanceHr = ref(false);
-const instanceLoading = ref(false);
-const deletingInstanceId = ref<number>();
+const { access, accessLoading, loadAccess } = usePerformanceAccess();
+const loading = ref(false);
+const loadError = ref(false);
 const exporting = ref(false);
 const reminding = ref(false);
-const remindingInstanceId = ref<number>();
-const instances = ref<JixiaoApi.Instance[]>([]);
-const instanceTotal = ref(0);
-const selectedInstanceIds = ref<number[]>([]);
-const users = ref<SystemUserApi.User[]>([]);
-const departments = ref<SystemDeptApi.Dept[]>([]);
-
-function currentMonthKey() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
-
-function createDefaultInstanceQuery(): InstanceQueryState {
-  return {
-    pageNo: 1,
-    pageSize: 10,
-    periodKey: currentMonthKey(),
-    deptId: undefined,
-    status: undefined,
-    userId: undefined,
-    userName: undefined,
-  };
-}
-
-const instanceQuery = reactive<InstanceQueryState>(
-  persistedInstanceQuery
-    ? { ...persistedInstanceQuery }
-    : createDefaultInstanceQuery(),
-);
-
-watch(
-  instanceQuery,
-  (query) => {
-    persistedInstanceQuery = { ...query };
-  },
-  { deep: true, immediate: true },
-);
-
-const userFilterOptions = computed(() =>
-  users.value.flatMap((user) =>
-    user.id === undefined
-      ? []
-      : [
-          {
-            text: `${user.nickname || user.username} (${user.id})`,
-            value: user.id,
-          },
-        ],
-  ),
-);
-
-interface DeptFilterOption {
-  children?: DeptFilterOption[];
-  text: string;
-  value: number;
-}
-
-const deptFilterOptions = computed(() => {
-  const toFilterOptions = (items: SystemDeptApi.Dept[]): DeptFilterOption[] =>
-    items.flatMap((item) => {
-      if (item.id === undefined) return [];
-      const children = item.children?.length
-        ? toFilterOptions(item.children)
-        : undefined;
-      return [{ children, text: item.name, value: item.id }];
-    });
-  return toFilterOptions(handleTree(departments.value) as SystemDeptApi.Dept[]);
+const rows = ref<JixiaoApi.Instance[]>([]);
+const total = ref(0);
+const selectedIds = ref<number[]>([]);
+const activeTab = ref('instances');
+const cancelOpen = ref(false);
+const cancelTarget = ref<JixiaoApi.Instance>();
+const cancelReason = ref('');
+const cancelLoading = ref(false);
+let requestId = 0;
+const query = reactive<JixiaoApi.InstancePageParams>({
+  pageNo: 1,
+  pageSize: 10,
+  scope: 'INITIATED',
+  periodKey: undefined,
+  status: undefined,
+  userName: undefined,
+  creatorUserId: undefined,
 });
-
-const instanceColumns = computed<TableColumnsType>(() => [
-  {
-    dataIndex: 'userName',
-    filteredValue:
-      instanceQuery.userId === undefined ? null : [instanceQuery.userId],
-    filterMultiple: false,
-    filterSearch: true,
-    filters: userFilterOptions.value,
-    title: '被考核人',
-    width: 140,
-  },
-  {
-    dataIndex: 'deptName',
-    ellipsis: true,
-    filteredValue:
-      instanceQuery.deptId === undefined ? null : [instanceQuery.deptId],
-    filterMode: 'tree',
-    filterMultiple: false,
-    filterSearch: true,
-    filters: deptFilterOptions.value,
-    title: '部门',
-    width: 160,
-  },
-  { dataIndex: 'currentTaskName', title: '当前流程', width: 150 },
-  {
-    dataIndex: 'currentTaskAssigneeUserName',
-    title: '当前执行人',
-    width: 150,
-  },
-  { dataIndex: 'finalScore', title: '考核结果', width: 110 },
-  { dataIndex: 'grade', title: '绩效等级', width: 100 },
-  { dataIndex: 'action', fixed: 'right', title: '操作', width: 190 },
+const scopes = computed(() => managementScopes(access.value));
+const creatorOptions = computed(() => [
+  ...new Map(
+    rows.value
+      .filter((row) => row.creatorUserId)
+      .map((row) => [
+        row.creatorUserId,
+        {
+          label: row.creatorUserName || `用户 ${row.creatorUserId}`,
+          value: row.creatorUserId,
+        },
+      ]),
+  ).values(),
 ]);
-
-function canRemind(record: JixiaoApi.Instance) {
-  return record.status === 1 && typeof record.id === 'number';
-}
-
+const selectedRows = computed(() =>
+  rows.value.filter((row) => selectedIds.value.includes(row.id!)),
+);
+const canRemindSelected = computed(
+  () =>
+    selectedRows.value.length > 0 &&
+    selectedRows.value.every((row) => hasAction(row, 'REMIND')),
+);
 const rowSelection = computed(() => ({
-  preserveSelectedRowKeys: true,
-  selectedRowKeys: selectedInstanceIds.value,
-  getCheckboxProps: (record: JixiaoApi.Instance) => ({
-    disabled: !canRemind(record),
+  selectedRowKeys: selectedIds.value,
+  getCheckboxProps: (row: JixiaoApi.Instance) => ({
+    disabled: !hasAction(row, 'REMIND'),
   }),
-  onChange: (keys: Array<number | string>) => {
-    selectedInstanceIds.value = keys
-      .map(Number)
-      .filter((key) => Number.isSafeInteger(key) && key > 0);
+  onChange: (keys: (number | string)[]) => {
+    selectedIds.value = keys.map(Number);
   },
 }));
-
-function currentFlow(record: JixiaoApi.Instance) {
-  if (record.status === 2) return '考核结束';
-  if (record.status === 3) return '已取消';
-  return (
-    TASK_LABELS[record.currentTaskKey || ''] ||
-    record.currentTaskName ||
-    '等待流程处理'
-  );
-}
-
-function currentExecutor(record: JixiaoApi.Instance) {
-  if (record.status !== 1) return '-';
-  if (record.currentTaskAssigneeUserName) {
-    return record.currentTaskAssigneeUserName;
-  }
-  if (record.currentTaskKey === 'JIXIAO_HR_REVIEW') {
-    return '绩效 HR';
-  }
-  return '待分配';
-}
-
-function gradeColor(grade?: string) {
-  if (grade === 'A+') return 'green';
-  if (grade === 'A') return 'cyan';
-  if (grade === 'C+') return 'orange';
-  if (grade === 'C') return 'red';
-  return 'blue';
-}
-
-async function loadInstances() {
-  instanceLoading.value = true;
+const columns: TableColumnsType = [
+  { dataIndex: 'userName', title: '被考核人', width: 160 },
+  { dataIndex: 'templateName', title: '考核与周期', width: 200 },
+  { dataIndex: 'creatorUserName', title: '发起人', width: 120 },
+  { dataIndex: 'currentTaskName', title: '阶段与处理人', width: 180 },
+  { dataIndex: 'endDate', title: '截止时间', width: 190 },
+  { dataIndex: 'finalScore', title: '成绩', width: 130 },
+  { dataIndex: 'action', title: '操作', fixed: 'right', width: 220 },
+];
+async function load() {
+  if (!access.value?.canManage) return;
+  const current = ++requestId;
+  loading.value = true;
+  loadError.value = false;
+  selectedIds.value = [];
+  rows.value = [];
   try {
-    const data = await getInstancePage(instanceQuery);
-    instances.value = data.list;
-    instanceTotal.value = data.total;
-  } finally {
-    instanceLoading.value = false;
-  }
-}
-
-async function exportInstances() {
-  exporting.value = true;
-  try {
-    const data = await exportInstanceExcel({
-      ...instanceQuery,
-      userName: instanceQuery.userName?.trim() || undefined,
-    });
-    downloadFileFromBlobPart({
-      fileName: `${monthLabel(instanceQuery.periodKey)}绩效考核结果.xlsx`,
-      source: data,
-    });
-    message.success('绩效考核结果已导出');
-  } finally {
-    exporting.value = false;
-  }
-}
-
-function clearSelection() {
-  selectedInstanceIds.value = [];
-}
-
-function searchInstances() {
-  clearSelection();
-  instanceQuery.userName = instanceQuery.userName?.trim() || undefined;
-  instanceQuery.pageNo = 1;
-  void loadInstances();
-}
-
-function changePeriodMonth() {
-  searchInstances();
-}
-
-function monthLabel(periodKey: string) {
-  const [year, month] = periodKey.split('-');
-  return year && month ? `${year}年${month}月` : periodKey;
-}
-
-function openInstance(record: JixiaoApi.Instance) {
-  router.push(
-    `/fdmperformance/batches/${record.batchId}/instances/${record.id}`,
-  );
-}
-
-async function removeInstance(record: JixiaoApi.Instance) {
-  if (!record.id) return;
-  deletingInstanceId.value = record.id;
-  try {
-    await deleteInstance(record.id);
-    selectedInstanceIds.value = selectedInstanceIds.value.filter(
-      (id) => id !== record.id,
-    );
-    message.success('考核已删除');
-    if (instances.value.length === 1 && instanceQuery.pageNo > 1) {
-      instanceQuery.pageNo -= 1;
+    const result = await getInstancePage({ ...query });
+    if (current !== requestId) return;
+    rows.value = result.list;
+    total.value = result.total;
+  } catch {
+    if (current === requestId) {
+      loadError.value = true;
+      total.value = 0;
     }
-    await loadInstances();
   } finally {
-    deletingInstanceId.value = undefined;
+    if (current === requestId) loading.value = false;
   }
 }
-
-async function remindSelected() {
-  if (selectedInstanceIds.value.length === 0) return;
-  const instanceIds = [...selectedInstanceIds.value];
+function search() {
+  query.pageNo = 1;
+  void load();
+}
+function changeScope(scope: string | number) {
+  if (!scopes.value.includes(scope as JixiaoApi.Scope)) return;
+  query.scope = scope as JixiaoApi.Scope;
+  query.creatorUserId = undefined;
+  query.userName = undefined;
+  total.value = 0;
+  search();
+}
+function openInstance(row: JixiaoApi.Instance) {
+  void router.push(
+    `/fdmperformance/batches/${row.batchId}/instances/${row.id}`,
+  );
+}
+async function remind(instanceIds: number[]) {
   reminding.value = true;
   try {
-    const recipientCount = await remindInstances({ instanceIds });
-    selectedInstanceIds.value = [];
-    message.success(`已提交 ${recipientCount} 位当前处理人的钉钉催办消息`);
+    const count = await remindInstances({ instanceIds });
+    message.success(`已提交 ${count} 位处理人的催办消息`);
+    selectedIds.value = [];
+    await load();
   } finally {
     reminding.value = false;
   }
 }
-
-async function remindInstance(record: JixiaoApi.Instance) {
-  if (!canRemind(record) || record.id === undefined) return;
-  remindingInstanceId.value = record.id;
+async function exportRows() {
+  if (!access.value?.canExport) return;
+  exporting.value = true;
   try {
-    const recipientCount = await remindInstances({ instanceIds: [record.id] });
-    message.success(`已提交 ${recipientCount} 位当前处理人的钉钉催办消息`);
+    const data = await exportInstanceExcel({ ...query });
+    downloadFileFromBlobPart({ fileName: '绩效考核结果.xlsx', source: data });
   } finally {
-    remindingInstanceId.value = undefined;
+    exporting.value = false;
   }
 }
-
-function selectedFilterId(filters: Record<string, any>, key: string) {
-  const value = filters[key]?.[0];
-  return value === undefined ? undefined : Number(value);
+function openCancel(row: JixiaoApi.Instance) {
+  cancelTarget.value = row;
+  cancelReason.value = '';
+  cancelOpen.value = true;
 }
-
-function changeInstancePage(pagination: any, filters: Record<string, any>) {
-  const userId = selectedFilterId(filters, 'userName');
-  const deptId = selectedFilterId(filters, 'deptName');
-  const filterChanged =
-    userId !== instanceQuery.userId || deptId !== instanceQuery.deptId;
-  const pageSizeChanged = instanceQuery.pageSize !== pagination.pageSize;
-  instanceQuery.userId = userId;
-  instanceQuery.deptId = deptId;
-  if (filterChanged) {
-    selectedInstanceIds.value = [];
+async function confirmCancel() {
+  if (!cancelTarget.value?.id || !cancelReason.value.trim()) {
+    message.warning('请填写撤销原因');
+    return;
   }
-  instanceQuery.pageNo =
-    filterChanged || pageSizeChanged ? 1 : pagination.current;
-  instanceQuery.pageSize = pagination.pageSize;
-  void loadInstances();
+  cancelLoading.value = true;
+  try {
+    await cancelInstance({
+      instanceId: cancelTarget.value.id,
+      reason: cancelReason.value.trim(),
+    });
+    message.success('考核已撤销');
+    cancelOpen.value = false;
+    await load();
+  } finally {
+    cancelLoading.value = false;
+  }
 }
-
+async function remove(row: JixiaoApi.Instance) {
+  if (!row.id || !hasAction(row, 'DELETE')) return;
+  await deleteInstance(row.id);
+  message.success('已删除');
+  await load();
+}
 async function initialize() {
-  const [setting, userList, departmentList] = await Promise.all([
-    getSetting(),
-    getSimpleUserList(),
-    getSimpleDeptList(),
-    loadInstances(),
-  ]);
-  users.value = userList;
-  departments.value = departmentList;
-  const currentUserId = Number(
-    userStore.userInfo?.id ?? userStore.userInfo?.userId ?? 0,
-  );
-  isPerformanceHr.value = (setting.hrUserIds || []).includes(currentUserId);
+  const capability = await loadAccess();
+  query.scope = defaultManagementScope(capability);
+  await load();
 }
-
 onMounted(initialize);
 </script>
 
 <template>
-  <PerformanceShell title="考核管理">
-    <Tabs v-model:active-key="activeTab" class="management-tabs">
-      <Tabs.TabPane key="batches" tab="月度考核">
-        <div class="filter-bar">
-          <Input
-            v-model:value="instanceQuery.userName"
-            allow-clear
-            :maxlength="50"
-            placeholder="输入被考核人姓名"
-            @press-enter="searchInstances"
+  <PerformanceShell
+    title="考核管理"
+    description="管理自己发起的考核；分管主管发起的记录可监督查看。只有当前获准的任务和管理操作才会显示。"
+  >
+    <template #actions
+      ><Space
+        ><Button
+          v-if="access?.canConfigure"
+          @click="router.push('/fdmperformance/results')"
+          >结果公布与复盘</Button
+        ><Button
+          v-if="access?.canLaunch"
+          type="primary"
+          @click="router.push('/fdmperformance/launch')"
+          >发起考核</Button
+        ></Space
+      ></template
+    >
+    <Alert
+      v-if="!accessLoading && access && !access.canManage"
+      type="info"
+      message="当前岗位仅能查看本人的绩效，请前往我的绩效。"
+      show-icon
+    />
+    <Tabs v-if="access?.canManage" v-model:active-key="activeTab">
+      <Tabs.TabPane key="instances" tab="考核记录">
+        <div class="management-panel">
+          <Alert
+            v-if="loadError"
+            type="error"
+            message="考核记录加载失败，请重新查询。"
+            show-icon
           />
-          <DatePicker
-            v-model:value="instanceQuery.periodKey"
-            :allow-clear="false"
-            format="YYYY年MM月"
-            :input-read-only="true"
-            picker="month"
-            placeholder="选择月份"
-            value-format="YYYY-MM"
-            @change="changePeriodMonth"
-          />
-          <Select
-            v-model:value="instanceQuery.status"
-            allow-clear
-            :options="[
-              { label: '进行中', value: 1 },
-              { label: '已完成', value: 2 },
-              { label: '已取消', value: 3 },
-            ]"
-            placeholder="全部状态"
-          />
-          <Button type="primary" @click="searchInstances">查询</Button>
-        </div>
-
-        <div class="instance-panel">
-          <div class="panel-head">
-            <strong>{{ monthLabel(instanceQuery.periodKey) }}考核人员</strong>
-            <Space wrap>
-              <span class="selected-count">
-                已选择 {{ selectedInstanceIds.length }} 项
-              </span>
-              <Button
-                v-if="selectedInstanceIds.length > 0"
-                size="small"
-                type="link"
-                @click="clearSelection"
-              >
-                清空
-              </Button>
-              <Button :loading="exporting" @click="exportInstances">
-                <template #icon>
-                  <IconifyIcon icon="lucide:download" />
-                </template>
-                导出 Excel
-              </Button>
-              <Popconfirm
-                :title="`确认向所选 ${selectedInstanceIds.length} 条考核的当前处理人发送钉钉催办消息？`"
-                @confirm="remindSelected"
-              >
-                <Button
-                  :disabled="
-                    selectedInstanceIds.length === 0 ||
-                    remindingInstanceId !== undefined
-                  "
-                  :loading="reminding"
-                  type="primary"
-                >
-                  钉钉催办
-                </Button>
-              </Popconfirm>
-            </Space>
+          <Tabs :active-key="query.scope" @change="changeScope"
+            ><Tabs.TabPane
+              v-for="scope in scopes"
+              :key="scope"
+              :tab="SCOPE_LABELS[scope]"
+          /></Tabs>
+          <div class="filter-bar">
+            <DatePicker
+              v-model:value="query.periodKey"
+              picker="month"
+              value-format="YYYY-MM"
+              placeholder="考核月份"
+              allow-clear
+            />
+            <Input
+              v-model:value="query.userName"
+              placeholder="搜索被考核人"
+              allow-clear
+              @press-enter="search"
+            />
+            <Select
+              v-model:value="query.status"
+              :options="[
+                { label: '进行中', value: 1 },
+                { label: '已完成', value: 2 },
+                { label: '已撤销', value: 3 },
+              ]"
+              placeholder="全部状态"
+              allow-clear
+            />
+            <Select
+              v-if="query.scope !== 'INITIATED'"
+              v-model:value="query.creatorUserId"
+              :options="creatorOptions"
+              placeholder="本页发起人"
+              allow-clear
+              show-search
+              option-filter-prop="label"
+            />
+            <Button type="primary" @click="search">查询</Button>
+          </div>
+          <div class="table-toolbar">
+            <span
+              >共 {{ total }} 条 ·
+              {{ SCOPE_LABELS[query.scope || 'VISIBLE'] }}</span
+            ><Space
+              ><Popconfirm
+                v-if="canRemindSelected"
+                :title="`催办选中的 ${selectedIds.length} 条考核？`"
+                @confirm="remind(selectedIds)"
+                ><Button :loading="reminding"
+                  >批量催办（{{ selectedIds.length }}）</Button
+                ></Popconfirm
+              ><Button
+                v-if="access.canExport"
+                :loading="exporting"
+                @click="exportRows"
+                >导出当前范围</Button
+              ></Space
+            >
           </div>
           <Table
             class="performance-compact-table"
-            :columns="instanceColumns"
-            :data-source="instances"
-            :loading="instanceLoading"
-            :pagination="{
-              current: instanceQuery.pageNo,
-              pageSize: instanceQuery.pageSize,
-              pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
-              showSizeChanger: true,
-              size: 'small',
-              total: instanceTotal,
-            }"
+            :columns="columns"
+            :data-source="rows"
+            :loading="loading"
             :row-selection="rowSelection"
-            :scroll="{ x: 1100 }"
+            :pagination="{
+              current: query.pageNo,
+              pageSize: query.pageSize,
+              total,
+              showSizeChanger: true,
+              pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
+            }"
+            :scroll="{ x: 1240 }"
             row-key="id"
             size="small"
-            @change="changeInstancePage"
+            @change="
+              (pagination) => {
+                query.pageNo = pagination.current || 1;
+                query.pageSize = pagination.pageSize || 10;
+                load();
+              }
+            "
           >
+            <template #emptyText
+              ><Empty
+                :description="
+                  loadError
+                    ? '加载失败，请重新查询'
+                    : '当前范围没有符合条件的考核'
+                "
+            /></template>
             <template #bodyCell="{ column, record }">
-              <template v-if="column.dataIndex === 'deptName'">
-                {{ record[column.dataIndex] || '-' }}
-              </template>
-              <template v-else-if="column.dataIndex === 'currentTaskName'">
-                {{ currentFlow(record) }}
-              </template>
-              <template
-                v-else-if="column.dataIndex === 'currentTaskAssigneeUserName'"
+              <template v-if="column.dataIndex === 'userName'"
+                ><strong>{{ record.userName }}</strong>
+                <div class="secondary">
+                  {{ record.deptName || '—' }}
+                </div></template
               >
-                {{ currentExecutor(record) }}
-              </template>
-              <template v-else-if="column.dataIndex === 'finalScore'">
-                {{ record.finalScore ?? '-' }}
-              </template>
-              <template v-else-if="column.dataIndex === 'grade'">
-                <Tag v-if="record.grade" :color="gradeColor(record.grade)">
-                  {{ record.grade }}
-                </Tag>
-                <span v-else>-</span>
-              </template>
-              <template v-else-if="column.dataIndex === 'action'">
-                <Space :size="0">
-                  <Button
+              <template v-else-if="column.dataIndex === 'templateName'"
+                ><span>{{ record.templateName || '绩效考核' }}</span>
+                <div class="secondary">{{ record.periodKey }}</div></template
+              >
+              <template v-else-if="column.dataIndex === 'creatorUserName'"
+                ><span>{{ record.creatorUserName || '—' }}</span>
+                <div class="secondary">
+                  {{ visibilityLabel(record.visibilityReason) }}
+                </div></template
+              >
+              <template v-else-if="column.dataIndex === 'currentTaskName'"
+                ><Tag :color="INSTANCE_STATUS_MAP[record.status]?.color">{{
+                  record.currentTaskKey
+                    ? TASK_LABELS[record.currentTaskKey] ||
+                      record.currentTaskName
+                    : INSTANCE_STATUS_MAP[record.status]?.text
+                }}</Tag>
+                <div class="secondary">
+                  {{ record.currentTaskAssigneeUserName || '—' }}
+                </div></template
+              >
+              <template v-else-if="column.dataIndex === 'endDate'"
+                ><Tag
+                  :color="
+                    record.status === 1
+                      ? deadlineMeta(record.endDate).color
+                      : 'default'
+                  "
+                  >{{
+                    record.status === 1
+                      ? deadlineMeta(record.endDate).text
+                      : record.endDate || '—'
+                  }}</Tag
+                ></template
+              >
+              <template v-else-if="column.dataIndex === 'finalScore'"
+                >{{ record.finalScore ?? '—' }}
+                <Tag v-if="record.grade">{{ record.grade }}</Tag>
+                <div class="secondary">
+                  {{
+                    record.publicTime
+                      ? '已公布'
+                      : record.finalScore != null
+                        ? '待公布'
+                        : '尚未完成评分'
+                  }}
+                </div></template
+              >
+              <template v-else-if="column.dataIndex === 'action'"
+                ><Space :size="0" wrap
+                  ><Button
                     size="small"
                     type="link"
                     @click="openInstance(record)"
-                  >
-                    详情
-                  </Button>
-                  <Popconfirm
-                    v-if="canRemind(record)"
-                    title="确认向该考核的当前处理人发送钉钉催办消息？"
-                    @confirm="remindInstance(record)"
-                  >
-                    <Button
-                      :disabled="
-                        reminding ||
-                        (remindingInstanceId !== undefined &&
-                          remindingInstanceId !== record.id)
-                      "
-                      :loading="remindingInstanceId === record.id"
-                      size="small"
-                      type="link"
-                    >
-                      催办
-                    </Button>
-                  </Popconfirm>
-                  <Popconfirm
-                    ok-type="danger"
-                    title="确认删除该考核？删除后评分、结果和复盘数据将无法恢复。"
-                    @confirm="removeInstance(record)"
-                  >
-                    <Button
-                      danger
-                      :disabled="
-                        deletingInstanceId !== undefined &&
-                        deletingInstanceId !== record.id
-                      "
-                      :loading="deletingInstanceId === record.id"
-                      size="small"
-                      type="link"
-                    >
-                      删除
-                    </Button>
-                  </Popconfirm>
-                </Space>
-              </template>
+                    >{{ actionLabel(record) }}</Button
+                  ><Popconfirm
+                    v-if="hasAction(record, 'REMIND')"
+                    title="向当前处理人发送催办提醒？"
+                    @confirm="remind([record.id])"
+                    ><Button size="small" type="link" :loading="reminding"
+                      >催办</Button
+                    ></Popconfirm
+                  ><Button
+                    v-if="hasAction(record, 'CANCEL')"
+                    size="small"
+                    type="link"
+                    @click="openCancel(record)"
+                    >撤销</Button
+                  ><Popconfirm
+                    v-if="access.canConfigure && hasAction(record, 'DELETE')"
+                    title="仅已撤销且没有正式评分的考核可删除。确认永久删除该考核及关联数据？"
+                    @confirm="remove(record)"
+                    ><Button danger size="small" type="link"
+                      >删除</Button
+                    ></Popconfirm
+                  ></Space
+                ></template
+              >
             </template>
           </Table>
         </div>
       </Tabs.TabPane>
-      <Tabs.TabPane v-if="isPerformanceHr" key="hr-review" tab="待人事审核">
-        <HrReviewQueue />
-      </Tabs.TabPane>
+      <Tabs.TabPane v-if="access.canConfigure" key="hr-review" tab="待人事审核"
+        ><HrReviewQueue
+      /></Tabs.TabPane>
     </Tabs>
+    <Modal
+      v-model:open="cancelOpen"
+      title="撤销考核"
+      :confirm-loading="cancelLoading"
+      ok-text="确认撤销"
+      @ok="confirmCancel"
+      ><p>
+        撤销 {{ cancelTarget?.userName }} 的
+        {{ cancelTarget?.periodKey }} 考核，评分与处理轨迹将保留。
+      </p>
+      <Textarea
+        v-model:value="cancelReason"
+        :rows="4"
+        :maxlength="500"
+        placeholder="填写撤销原因"
+    /></Modal>
   </PerformanceShell>
 </template>
 
 <style scoped>
-.filter-bar,
-.instance-panel {
-  padding: 12px;
-  background: #fff;
-  border: 1px solid #edf0f4;
-  border-radius: 8px;
+.management-panel {
+  padding: 18px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
 }
-
-.management-tabs {
-  min-width: 0;
-}
-
 .filter-bar {
-  display: grid;
-  grid-template-columns: minmax(180px, 260px) 180px 140px auto;
-  gap: 8px;
-}
-
-.panel-head {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.filter-bar :deep(.ant-input-affix-wrapper),
+.filter-bar :deep(.ant-select),
+.filter-bar :deep(.ant-picker) {
+  width: 180px;
+}
+.table-toolbar {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 14px;
 }
-
-.selected-count {
-  font-size: 13px;
-  color: #64748b;
+.table-toolbar > span,
+.secondary {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
-
-@media (max-width: 900px) {
-  .filter-bar,
-  .panel-head {
-    grid-template-columns: 1fr;
-  }
-
-  .panel-head {
-    flex-direction: column;
+.secondary {
+  margin-top: 5px;
+}
+@media (max-width: 700px) {
+  .table-toolbar {
     align-items: flex-start;
+    flex-direction: column;
+  }
+  .management-panel {
+    padding: 12px;
   }
 }
 </style>

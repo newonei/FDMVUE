@@ -7,7 +7,7 @@ import { useRouter } from 'vue-router';
 
 import { handleTree } from '@vben/utils';
 
-import { Empty, message } from 'ant-design-vue';
+import { Empty, message, Tabs } from 'ant-design-vue';
 
 import {
   getDashboardEmployeeHistoryPage,
@@ -17,6 +17,8 @@ import {
 import { getSimpleDeptList } from '#/api/system/dept';
 
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import { usePerformanceAccess } from '../shared/access';
+import { SCOPE_LABELS } from '../shared/workspace';
 import DepartmentComparisonTable from './components/DepartmentComparisonTable.vue';
 import EmployeeHistoryTable from './components/EmployeeHistoryTable.vue';
 import GradeDistributionChart from './components/GradeDistributionChart.vue';
@@ -33,6 +35,7 @@ import {
 defineOptions({ name: 'FdmPerformanceDashboard' });
 
 const router = useRouter();
+const { access, loadAccess } = usePerformanceAccess();
 const { resetPage, state: query, syncRoute } = useDashboardQueryState(router);
 
 const filterOptions = ref<JixiaoDashboardApi.FilterOptions | null>(null);
@@ -52,11 +55,10 @@ const departmentTree = computed(
   () => handleTree(departments.value) as SystemDeptApi.Dept[],
 );
 
-const showDepartmentComparison = computed(
-  () =>
-    Boolean(
-      filterOptions.value?.performanceHr || filterOptions.value?.hasRelatedUsers,
-    ),
+const showDepartmentComparison = computed(() =>
+  Boolean(
+    filterOptions.value?.performanceHr || filterOptions.value?.hasRelatedUsers,
+  ),
 );
 
 function sortAvailablePeriods(periods: JixiaoDashboardApi.PeriodOption[]) {
@@ -127,9 +129,9 @@ function applyDefaultPeriodRange() {
   const desired =
     query.periodType === 'MONTH'
       ? periods.slice(0, 12)
-      : (currentYearPeriods.length > 0
+      : currentYearPeriods.length > 0
         ? currentYearPeriods
-        : periods);
+        : periods;
   query.endPeriodKey = desired[0]?.periodKey || '';
   query.startPeriodKey = desired.at(-1)?.periodKey || '';
 }
@@ -138,7 +140,11 @@ async function loadFilterOptions(periodType = query.periodType) {
   const requestId = ++filterRequestId;
   filterLoading.value = true;
   try {
-    const result = await getDashboardFilterOptions({ periodType });
+    const result = await getDashboardFilterOptions({
+      periodType,
+      scope: query.scope,
+      creatorUserId: query.creatorUserId,
+    });
     if (requestId !== filterRequestId) return;
     filterOptions.value = result;
     if (result.performanceHr && query.publicStatus === undefined) {
@@ -295,23 +301,61 @@ function openReview(record: JixiaoDashboardApi.EmployeeHistory) {
 
 async function initialize() {
   try {
-    const [, departmentList] = await Promise.all([
-      loadFilterOptions(),
-      getSimpleDeptList(),
-    ]);
-    departments.value = departmentList;
+    const capability = await loadAccess();
+    if (
+      query.scope !== 'VISIBLE' &&
+      !capability.availableScopes.includes(query.scope || 'SELF')
+    )
+      query.scope = 'VISIBLE';
+    await loadFilterOptions();
+    if (capability.canConfigure) departments.value = await getSimpleDeptList();
     await refreshDashboard();
   } catch {
     // Each request has already provided a specific error message.
   }
 }
 
+async function changeScope(value: string | number) {
+  const scope = value as NonNullable<typeof query.scope>;
+  if (scope !== 'VISIBLE' && !access.value?.availableScopes.includes(scope))
+    return;
+  Object.assign(
+    query,
+    createDashboardQueryState({ scope, periodType: query.periodType }),
+  );
+  overviewRequestId++;
+  historyRequestId++;
+  overview.value = null;
+  historyRows.value = [];
+  historyTotal.value = 0;
+  await loadFilterOptions();
+  await refreshDashboard();
+}
+
 onMounted(() => void initialize());
 </script>
 
 <template>
-  <PerformanceShell title="绩效看板">
+  <PerformanceShell
+    title="绩效分析"
+    description="仅包含当前有权查看的考核记录；个人历史不会扩展到未授权的其他考核。"
+  >
+    <Tabs
+      v-if="access?.canManage"
+      :active-key="query.scope || 'VISIBLE'"
+      @change="changeScope"
+    >
+      <Tabs.TabPane key="VISIBLE" tab="当前可见范围" />
+      <Tabs.TabPane
+        v-for="scope in access.availableScopes.filter(
+          (item) => item !== 'VISIBLE',
+        )"
+        :key="scope"
+        :tab="SCOPE_LABELS[scope]"
+      />
+    </Tabs>
     <PerformanceDashboardFilters
+      :hide-user-name="access?.role === 'EMPLOYEE'"
       :model-value="query"
       :departments="departmentTree"
       :loading="filterLoading || overviewLoading || historyLoading"
