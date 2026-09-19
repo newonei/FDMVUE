@@ -10,10 +10,14 @@ const mocks = vi.hoisted(() => ({
   allowCancel: true,
   cancel: vi.fn(),
   info: vi.fn(),
+  models: vi.fn(),
   poll: vi.fn(),
+  providers: vi.fn(),
+  routes: vi.fn(),
   status: 'DOWNLOADING',
   submit: vi.fn(),
   success: vi.fn(),
+  warning: vi.fn(),
 }));
 
 vi.mock('@vben/access', () => ({
@@ -27,9 +31,9 @@ vi.mock('#/api/fdmai', () => ({
   discoverFdmAiProviderModels: vi.fn(),
   getFdmAiAdapters: vi.fn().mockResolvedValue([]),
   getFdmAiInvocation: mocks.poll,
-  getFdmAiModels: vi.fn().mockResolvedValue([]),
-  getFdmAiProviders: vi.fn().mockResolvedValue([]),
-  getFdmAiRoutes: vi.fn().mockResolvedValue([]),
+  getFdmAiModels: mocks.models,
+  getFdmAiProviders: mocks.providers,
+  getFdmAiRoutes: mocks.routes,
   importFdmAiProviderModels: vi.fn(),
   submitFdmAiModelTest: mocks.submit,
   updateFdmAiModel: vi.fn(),
@@ -63,7 +67,7 @@ vi.mock('ant-design-vue', async () => {
     Descriptions: Object.assign(block, { Item: block }), Form: Object.assign(block, { Item: block }),
     Input: input, InputNumber: input, Modal: modal, Progress: block, Select: block,
     Space: block, Switch: block, Table: block, Tag: block, Textarea: input,
-    message: { info: mocks.info, success: mocks.success, warning: vi.fn(), error: vi.fn() },
+    message: { info: mocks.info, success: mocks.success, warning: mocks.warning, error: vi.fn() },
   };
 });
 
@@ -71,12 +75,23 @@ const model: FdmAiApi.ModelDefinition = {
   capabilities: ['TEXT_TO_IMAGE'], code: 'archive-test', currency: 'USD', enabled: true,
   id: 12, modality: 'IMAGE', name: '归档测试模型', parameterSchema: '{}', unitPrice: 1,
 };
+const provider: FdmAiApi.ProviderAccount = {
+  id: 2, name: '测试服务商', adapterCode: 'openai-compatible-text', baseUrl: 'https://example.test/v1',
+  configuration: {}, credentialConfigured: true, enabled: true, platform: false, tenantId: 1,
+};
+const route: FdmAiApi.RouteDefinition = {
+  id: 3, modelId: model.id, providerAccountId: provider.id, providerModel: 'test-image',
+  routeKey: 'test.image', providerOptions: {}, enabled: true, platform: false, tenantId: 1,
+};
 const cleanups: Array<() => void> = [];
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   mocks.allowCancel = true;
   mocks.status = 'DOWNLOADING';
+  mocks.models.mockResolvedValue([model]);
+  mocks.providers.mockResolvedValue([provider]);
+  mocks.routes.mockResolvedValue([route]);
   mocks.cancel.mockResolvedValue(true);
   mocks.submit.mockResolvedValue({ invocationId: 'invocation-1', status: 'QUEUED' });
   mocks.poll.mockImplementation(async () => ({
@@ -93,15 +108,19 @@ async function settle() {
 function button(host: HTMLElement, text: string) {
   return [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === text);
 }
-async function runningTest() {
+async function mountLibrary() {
   const host = document.createElement('div');
   document.body.append(host);
   const app = createApp(ModelLibrary);
   app.directive('access', {});
-  const instance = app.mount(host) as unknown as { openTest: (record: FdmAiApi.ModelDefinition) => void };
+  const instance = app.mount(host) as unknown as { openTest: (record: FdmAiApi.ModelDefinition) => Promise<void> };
   cleanups.push(() => { app.unmount(); host.remove(); });
   await settle();
-  instance.openTest(model);
+  return { host, instance };
+}
+async function runningTest() {
+  const { host, instance } = await mountLibrary();
+  await instance.openTest(model);
   await settle();
   const prompt = host.querySelector<HTMLTextAreaElement>('textarea[placeholder="输入一条用于验证模型连通性和输出效果的提示词"]')!;
   prompt.value = '生成测试图片';
@@ -162,5 +181,32 @@ describe('model test cancellation', () => {
     expect(button(host, '请求取消')).toBeUndefined();
     expect(button(host, '停止轮询')).toBeDefined();
     expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+});
+
+describe('model test configuration refresh', () => {
+  it('refreshes before opening and blocks a provider disabled since the model list loaded', async () => {
+    const { host, instance } = await mountLibrary();
+    mocks.providers.mockResolvedValue([{ ...provider, enabled: false }]);
+    await instance.openTest(model);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(mocks.warning).toHaveBeenCalledWith('服务商「测试服务商」已停用，请先在服务商接入中启用');
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it('refreshes before submission and blocks stale modal configuration without creating an invocation', async () => {
+    const { host, instance } = await mountLibrary();
+    await instance.openTest(model);
+    await settle();
+    mocks.providers.mockResolvedValue([{ ...provider, enabled: false }]);
+    const prompt = host.querySelector<HTMLTextAreaElement>('textarea[placeholder="输入一条用于验证模型连通性和输出效果的提示词"]')!;
+    prompt.value = '测试提示词';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    button(host, '开始测试')!.click();
+    await settle();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('服务商「测试服务商」已停用');
+    expect(button(host, '开始测试')?.disabled).toBe(true);
   });
 });

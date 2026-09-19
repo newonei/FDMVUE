@@ -75,6 +75,7 @@ import {
   modelTestVideoResolutions,
 } from './model-test-input';
 import ModelTypeDialog from './ModelTypeDialog.vue';
+import { getModelTestAvailability } from './model-test-availability';
 
 defineOptions({ name: 'FdmAiModelLibrary' });
 
@@ -131,6 +132,7 @@ const discovering = ref(false);
 const importing = ref(false);
 const testOpen = ref(false);
 const testSubmitting = ref(false);
+const testChecking = ref(false);
 const testCancelling = ref(false);
 const testPolling = ref(false);
 const testElapsedMillis = ref(0);
@@ -147,6 +149,7 @@ const testIsArchiving = computed(() =>
   ['RESULT_RECEIVED', 'DOWNLOADING'].includes(testSnapshot.value?.status || ''),
 );
 const testRouteKey = ref<string>();
+const testAvailability = computed(() => modelTestAvailability(testModel.value, testRouteKey.value));
 const activeTestSubmission = ref<{
   context: SubmittedTestContext;
   modelId: number;
@@ -459,6 +462,22 @@ async function refreshAfterChange() {
   } finally {
     emit('changed');
   }
+}
+
+function modelTestAvailability(record: unknown, routeKey?: string) {
+  return getModelTestAvailability({
+    canViewPlatform: canManagePlatform,
+    model: record as FdmAiApi.ModelDefinition | undefined,
+    models: rows.value,
+    providers: providers.value,
+    routeKey,
+    routes: routes.value,
+  });
+}
+
+async function refreshTestConfiguration() {
+  if (loadingPromise) await loadingPromise.catch(() => {});
+  await load();
 }
 
 function providerModelConnection(providerModel: string) {
@@ -954,14 +973,31 @@ async function cancelModelTest() {
   }
 }
 
-function openTest(
+async function openTest(
   record: unknown,
   context?: {
     capability?: FdmAiApi.Capability;
     routeKey?: string;
   },
 ) {
-  const model = record as FdmAiApi.ModelDefinition;
+  if (!canTestModel || testChecking.value) return;
+  const requestedModel = record as FdmAiApi.ModelDefinition;
+  const openingVersion = testRequestVersion;
+  testChecking.value = true;
+  let model: FdmAiApi.ModelDefinition | undefined;
+  try {
+    await refreshTestConfiguration();
+    if (openingVersion !== testRequestVersion) return;
+    model = rows.value.find((item) => sameModelLibraryId(item.id, requestedModel.id));
+    const availability = modelTestAvailability(model, context?.routeKey);
+    if (availability.status === 'unavailable') {
+      message.warning(availability.reason);
+      return;
+    }
+  } finally {
+    testChecking.value = false;
+  }
+  if (!model) return;
   testRequestVersion += 1;
   testSubmitting.value = false;
   testCancelling.value = false;
@@ -1002,10 +1038,28 @@ function parseCommonParameters() {
 }
 
 async function submitModelTest() {
-  if (testSubmitting.value || testCancelling.value || testHasActiveInvocation.value) return;
+  if (testChecking.value || testSubmitting.value || testCancelling.value || testHasActiveInvocation.value) return;
+  const selectedModelId = testModel.value?.id;
+  const checkingVersion = testRequestVersion;
+  testChecking.value = true;
+  try {
+    await refreshTestConfiguration();
+    if (!testOpen.value || checkingVersion !== testRequestVersion) return;
+    testModel.value = rows.value.find((item) => sameModelLibraryId(item.id, selectedModelId));
+    if (testAvailability.value.status === 'unavailable') {
+      message.warning(testAvailability.value.reason);
+      return;
+    }
+  } finally {
+    testChecking.value = false;
+  }
   const model = testModel.value;
   if (!model || !testForm.capability) {
     message.warning('当前模型没有可用于测试的主能力');
+    return;
+  }
+  if (!model.capabilities.includes(testForm.capability)) {
+    message.warning('模型支持的能力已变更，请重新选择测试动作');
     return;
   }
   if (testPromptRequired.value && !testForm.prompt.trim()) {
@@ -1406,15 +1460,16 @@ onBeforeUnmount(() => {
         </template>
         <template v-else-if="column.dataIndex === 'action'">
           <Space>
-            <Button
-              v-if="canTestModel"
-              :disabled="!record.enabled"
-              size="small"
-              type="link"
-              @click="openTest(record)"
-            >
-              测试
-            </Button>
+            <span v-if="canTestModel" :title="modelTestAvailability(record).reason">
+              <Button
+                :disabled="testChecking || modelTestAvailability(record).status === 'unavailable'"
+                size="small"
+                type="link"
+                @click="openTest(record)"
+              >
+                测试
+              </Button>
+            </span>
             <Button
               v-access:code="['fdmai:model:update']"
               size="small"
@@ -1458,6 +1513,13 @@ onBeforeUnmount(() => {
       />
 
       <Form layout="vertical">
+        <Alert
+          v-if="testAvailability.status !== 'available'"
+          class="test-alert"
+          :message="testAvailability.reason"
+          :type="testAvailability.status === 'unavailable' ? 'warning' : 'info'"
+          show-icon
+        />
         <Alert
           v-if="testRouteKey"
           class="test-alert"
@@ -1671,8 +1733,8 @@ onBeforeUnmount(() => {
           {{ testIsArchiving ? '停止归档' : '请求取消' }}
         </Button>
         <Button
-          :disabled="testCapabilityOptions.length === 0 || testHasActiveInvocation || testCancelling"
-          :loading="testSubmitting"
+          :disabled="testCapabilityOptions.length === 0 || testHasActiveInvocation || testCancelling || testAvailability.status === 'unavailable'"
+          :loading="testSubmitting || testChecking"
           type="primary"
           @click="submitModelTest"
         >
