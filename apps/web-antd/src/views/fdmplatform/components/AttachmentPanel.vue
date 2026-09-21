@@ -7,6 +7,8 @@ import type {
 
 import { onBeforeUnmount, ref, watch } from 'vue';
 
+import { Upload } from '@vben/icons';
+
 import {
   Alert,
   Button,
@@ -121,6 +123,15 @@ async function download(item: ContractAttachment) {
           : '可在这里上传和下载合同资料。'
       }}
     </p>
+    <input
+      v-if="view?.enabled && categories.length"
+      ref="fileInput"
+      type="file"
+      hidden
+      aria-label="选择合同附件"
+      :disabled="uploading"
+      @change="chooseFile"
+    />
     <Space wrap>
       <template v-if="view?.enabled && categories.length">
         <Select
@@ -136,13 +147,25 @@ async function download(item: ContractAttachment) {
           :disabled="uploading"
           @change="uploadKey = newIdempotencyKey()"
         />
-        <input
-          ref="fileInput"
-          type="file"
-          aria-label="选择合同附件"
+        <Button
+          type="primary"
+          ghost
           :disabled="uploading"
-          @change="chooseFile"
-        />
+          @click="fileInput?.click()"
+        >
+          <template #icon>
+            <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
+          </template>
+          {{ selectedFile ? '重新选择文件' : '选择文件' }}
+        </Button>
+        <span
+          class="inline-block max-w-60 truncate align-middle"
+          :class="{ 'text-muted-foreground': !selectedFile }"
+          :title="selectedFile?.name"
+          role="status"
+        >
+          {{ selectedFile?.name ?? '尚未选择文件' }}
+        </span>
         <Button
           type="primary"
           :loading="uploading"
@@ -154,6 +177,12 @@ async function download(item: ContractAttachment) {
       </template>
       <Button :loading="loading" @click="emit('refresh')">刷新附件</Button>
     </Space>
+    <p
+      v-if="view?.enabled && categories.length"
+      class="text-muted-foreground text-sm"
+    >
+      先选择资料分类和文件，再点击“上传附件”完成上传。
+    </p>
     <Table
       :data-source="view?.items ?? []"
       row-key="id"
