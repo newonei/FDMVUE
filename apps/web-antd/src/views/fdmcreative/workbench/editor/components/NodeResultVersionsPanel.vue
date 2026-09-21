@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -12,6 +12,7 @@ import {
   isActiveResultAsset,
   resultBranchBlockedReason,
 } from '../result-history';
+import NodeResultCompareModal from './NodeResultCompareModal.vue';
 
 interface ResultActionPayload {
   asset: FdmCreativeApi.NodeResultAsset;
@@ -49,6 +50,106 @@ const emit = defineEmits<{
 
 const preview = ref<ResultActionPayload>();
 const previewZoom = ref(1);
+const compareOpen = ref(false);
+const comparedKeys = ref<string[]>([]);
+const expandedVersions = ref<Record<string, boolean>>({});
+
+function resultKey(payload: ResultActionPayload) {
+  return `${payload.version.nodeRunId}:${payload.asset.id}`;
+}
+
+const imageSelections = computed(() =>
+  props.versions.flatMap((version, index) =>
+    version.assets
+      .filter((asset) => asset.kind === 'IMAGE' && assetIsActive(asset))
+      .map((asset) => ({
+        asset,
+        version,
+        label: `版本 ${props.versions.length - index}`,
+      })),
+  ),
+);
+const comparedSelections = computed(() =>
+  comparedKeys.value.flatMap((key) => {
+    const selection = imageSelections.value.find(
+      (item) => resultKey(item) === key,
+    );
+    return selection ? [selection] : [];
+  }),
+);
+
+watch(imageSelections, (selections) => {
+  const validKeys = new Set(selections.map(resultKey));
+  comparedKeys.value = comparedKeys.value.filter((key) => validKeys.has(key));
+  if (comparedKeys.value.length < 2) compareOpen.value = false;
+});
+watch(
+  () => props.versions,
+  (versions) => {
+    if (!preview.value) return;
+    const version = versions.find(
+      (item) => item.nodeRunId === preview.value?.version.nodeRunId,
+    );
+    const asset = version?.assets.find(
+      (item) => item.id === preview.value?.asset.id && assetIsActive(item),
+    );
+    if (version && asset) preview.value = { asset, version };
+    else closePreview();
+  },
+  { deep: true },
+);
+
+function isCompared(payload: ResultActionPayload) {
+  return comparedKeys.value.includes(resultKey(payload));
+}
+
+function toggleCompared(payload: ResultActionPayload) {
+  if (payload.asset.kind !== 'IMAGE' || !assetIsActive(payload.asset)) return;
+  const key = resultKey(payload);
+  if (isCompared(payload)) {
+    comparedKeys.value = comparedKeys.value.filter((item) => item !== key);
+    compareOpen.value = false;
+  } else if (comparedKeys.value.length < 2) {
+    comparedKeys.value = [...comparedKeys.value, key];
+  }
+}
+
+function isAdoptedVersion(version: FdmCreativeApi.NodeResultVersion) {
+  return (
+    version.selectionStatus !== 'STALE' &&
+    (String(version.adoptedNodeRunId) === String(version.nodeRunId) ||
+      version.assets.some((asset) => asset.adopted))
+  );
+}
+
+function versionExpanded(
+  version: FdmCreativeApi.NodeResultVersion,
+  index: number,
+) {
+  return (
+    expandedVersions.value[String(version.nodeRunId)] ??
+    (index === 0 || isAdoptedVersion(version))
+  );
+}
+
+function toggleVersion(
+  version: FdmCreativeApi.NodeResultVersion,
+  index: number,
+) {
+  expandedVersions.value[String(version.nodeRunId)] = !versionExpanded(
+    version,
+    index,
+  );
+}
+
+function emitAssetAction(
+  action: 'adopt' | 'pin',
+  payload: ResultActionPayload,
+) {
+  if (!assetIsActive(payload.asset) || actionBlockedReason.value) return;
+  if (action === 'adopt') emit('adopt', payload);
+  else emit('pin', payload);
+}
 
 const actionBlockedReason = computed(() => {
   return resultBranchBlockedReason({
@@ -138,7 +239,12 @@ function emitTool(
   tool: FdmCreativeApi.MediaToolDescriptor,
   payload: ResultActionPayload,
 ) {
-  if (!tool.available || actionBlockedReason.value) return;
+  if (
+    !tool.available ||
+    !assetIsActive(payload.asset) ||
+    actionBlockedReason.value
+  )
+    return;
   emit('tool', { ...payload, tool });
 }
 </script>
@@ -157,13 +263,15 @@ function emitTool(
     <div v-if="defaultSelection" class="node-result-versions__quick-tools">
       <span>
         <IconifyIcon icon="lucide:wand-sparkles" />
-        当前素材：{{ defaultSelection.asset.name || defaultSelection.asset.id }}
+        快捷操作素材：{{
+          defaultSelection.asset.name || defaultSelection.asset.id
+        }}
       </span>
       <Tooltip :title="actionBlockedReason">
         <Button
           size="small"
           :disabled="Boolean(actionBlockedReason)"
-          @click="emit('pin', defaultSelection)"
+          @click="emitAssetAction('pin', defaultSelection)"
         >
           {{ pinLabel }}
         </Button>
@@ -184,6 +292,41 @@ function emitTool(
     </div>
 
     <div
+      v-if="imageSelections.length > 1 || comparedSelections.length"
+      class="result-compare-tray"
+    >
+      <div class="result-compare-tray__heading">
+        <span
+          >图片比较 <strong>{{ comparedSelections.length }}/2</strong></span
+        >
+        <Button
+          data-testid="open-result-compare"
+          size="small"
+          :disabled="comparedSelections.length !== 2"
+          @click="compareOpen = true"
+        >
+          <IconifyIcon icon="lucide:columns-2" /> 并排比较
+        </Button>
+      </div>
+      <p v-if="!comparedSelections.length">
+        可跨版本选择两张图片，比较不会改变已采用结果。
+      </p>
+      <div v-else class="result-compare-tray__selections">
+        <button
+          v-for="item in comparedSelections"
+          :key="resultKey(item)"
+          type="button"
+          :aria-label="`移出比较：${item.label} ${item.asset.name || '图片'}`"
+          @click="toggleCompared(item)"
+        >
+          <img :src="item.asset.url" :alt="item.asset.name || item.label" />
+          <span>{{ item.label }} · {{ item.asset.name || '图片' }}</span>
+          <IconifyIcon icon="lucide:x" />
+        </button>
+      </div>
+    </div>
+
+    <div
       v-if="loading && !versions.length"
       class="node-result-versions__loading"
     >
@@ -201,15 +344,38 @@ function emitTool(
         <article class="result-version">
           <header class="result-version__meta">
             <span class="result-version__title">
-              <strong>版本 {{ versions.length - index }}</strong>
-              <Tag v-if="version.selectionStatus === 'CURRENT'" color="blue">
-                当前可复用
+              <button
+                class="result-version__toggle"
+                type="button"
+                :aria-expanded="versionExpanded(version, index)"
+                :aria-label="`${versionExpanded(version, index) ? '收起' : '展开'}版本 ${versions.length - index}`"
+                @click="toggleVersion(version, index)"
+              >
+                <IconifyIcon
+                  :icon="
+                    versionExpanded(version, index)
+                      ? 'lucide:chevron-down'
+                      : 'lucide:chevron-right'
+                  "
+                />
+                <strong>版本 {{ versions.length - index }}</strong>
+                <small>{{ version.assets.length }} 个结果</small>
+              </button>
+              <Tag
+                v-if="isAdoptedVersion(version)"
+                color="green"
+                data-testid="contains-adopted-result"
+              >
+                含已采用结果
               </Tag>
               <Tag
-                v-else-if="version.selectionStatus === 'STALE'"
+                v-else-if="
+                  version.selectionStatus === 'STALE' &&
+                  String(version.adoptedNodeRunId) === String(version.nodeRunId)
+                "
                 color="orange"
               >
-                已过期语义
+                已采用结果待更新
               </Tag>
             </span>
             <time :title="version.completedTime">
@@ -226,7 +392,10 @@ function emitTool(
             <span v-if="version.attemptNo">尝试 {{ version.attemptNo }}</span>
           </p>
 
-          <div class="result-version__assets">
+          <div
+            v-if="versionExpanded(version, index)"
+            class="result-version__assets"
+          >
             <article
               v-for="asset in version.assets"
               :key="asset.id || `${version.nodeRunId}:${asset.name}`"
@@ -234,6 +403,7 @@ function emitTool(
               :class="{
                 'is-audio': asset.kind === 'AUDIO',
                 'is-unavailable': !assetIsActive(asset),
+                'is-compared': isCompared({ asset, version }),
               }"
             >
               <div
@@ -266,7 +436,12 @@ function emitTool(
                   preload="metadata"
                   :src="asset.url"
                 ></video>
-                <span class="result-asset__preview-hint">查看</span>
+                <span class="result-asset__preview-hint">{{
+                  preview &&
+                  resultKey(preview) === resultKey({ asset, version })
+                    ? '正在查看'
+                    : '查看大图'
+                }}</span>
               </button>
               <div v-else class="result-asset__placeholder">
                 <IconifyIcon icon="lucide:image-off" />
@@ -292,7 +467,28 @@ function emitTool(
               </div>
 
               <div class="result-asset__actions">
-                <Tag v-if="asset.adopted" color="green">当前采用</Tag>
+                <Tag
+                  v-if="asset.adopted && version.selectionStatus !== 'STALE'"
+                  color="green"
+                  data-testid="adopted-asset"
+                >
+                  当前采用
+                </Tag>
+                <Button
+                  v-if="asset.kind === 'IMAGE'"
+                  class="result-asset__compare"
+                  size="small"
+                  :aria-label="`${isCompared({ asset, version }) ? '移出' : '加入'}比较：版本 ${versions.length - index} ${asset.name || '图片'}`"
+                  :aria-pressed="isCompared({ asset, version })"
+                  :disabled="
+                    !assetIsActive(asset) ||
+                    (!isCompared({ asset, version }) &&
+                      comparedSelections.length >= 2)
+                  "
+                  @click="toggleCompared({ asset, version })"
+                >
+                  {{ isCompared({ asset, version }) ? '已选比较' : '加入比较' }}
+                </Button>
                 <Tooltip
                   :title="
                     actionBlockedReason ||
@@ -307,9 +503,9 @@ function emitTool(
                     :disabled="
                       !assetIsActive(asset) || Boolean(actionBlockedReason)
                     "
-                    @click="emit('adopt', { asset, version })"
+                    @click="emitAssetAction('adopt', { asset, version })"
                   >
-                    采用此版
+                    {{ asset.kind === 'IMAGE' ? '采用此图' : '采用此素材' }}
                   </Button>
                 </Tooltip>
                 <Tooltip
@@ -326,7 +522,7 @@ function emitTool(
                     :disabled="
                       !assetIsActive(asset) || Boolean(actionBlockedReason)
                     "
-                    @click="emit('pin', { asset, version })"
+                    @click="emitAssetAction('pin', { asset, version })"
                   >
                     {{ pinLabel }}
                   </Button>
@@ -368,6 +564,12 @@ function emitTool(
     </ol>
   </section>
 
+  <NodeResultCompareModal
+    :open="compareOpen && comparedSelections.length === 2"
+    :selections="comparedSelections"
+    @close="compareOpen = false"
+  />
+
   <Modal
     :footer="null"
     :open="Boolean(preview)"
@@ -377,7 +579,7 @@ function emitTool(
   >
     <template v-if="preview">
       <div class="result-preview__toolbar">
-        <span>{{ preview.asset.name || '未命名素材' }}</span>
+        <span>正在查看：{{ preview.asset.name || '未命名素材' }}</span>
         <span class="result-preview__toolbar-actions">
           <Button
             v-if="preview.asset.kind === 'IMAGE'"
@@ -394,7 +596,9 @@ function emitTool(
             <IconifyIcon icon="lucide:zoom-in" />
           </Button>
           <a :download="preview.asset.name" :href="preview.asset.url">
-            <Button size="small"><IconifyIcon icon="lucide:download" /> 下载</Button>
+            <Button size="small"
+              ><IconifyIcon icon="lucide:download" /> 下载</Button
+            >
           </a>
         </span>
       </div>
@@ -569,8 +773,77 @@ function emitTool(
 }
 
 .result-version__title {
+  flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
+}
+
+.result-version__toggle {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 3px 0;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.result-version__toggle small {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.result-compare-tray {
+  padding: 10px;
+  margin-bottom: 12px;
+  background: hsl(var(--primary) / 5%);
+  border: 1px solid hsl(var(--primary) / 18%);
+  border-radius: 8px;
+}
+
+.result-compare-tray__heading,
+.result-compare-tray__selections button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.result-compare-tray p {
+  margin: 7px 0 0;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.result-compare-tray__selections {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.result-compare-tray__selections button {
+  min-width: 0;
+  padding: 4px 6px;
+  text-align: left;
+  cursor: pointer;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.result-compare-tray__selections img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.result-compare-tray__selections span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .result-version__title strong {
@@ -596,12 +869,13 @@ function emitTool(
 
 .result-version__assets {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: 8px;
 }
 
 .result-asset {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px 9px;
   padding: 7px;
   background: hsl(var(--background));
@@ -609,12 +883,17 @@ function emitTool(
   border-radius: 8px;
 }
 
+.result-asset.is-compared {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 20%);
+}
+
 .result-asset.is-unavailable {
   grid-template-columns: 1fr;
 }
 
 .result-asset.is-audio {
-  grid-template-columns: minmax(154px, 210px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .result-asset__preview,
@@ -622,8 +901,8 @@ function emitTool(
   position: relative;
   display: grid;
   place-items: center;
-  width: 78px;
-  height: 58px;
+  width: 100%;
+  height: 132px;
   padding: 0;
   overflow: hidden;
   color: hsl(var(--muted-foreground));
@@ -640,7 +919,7 @@ function emitTool(
 .result-asset__preview video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .result-asset__preview-hint {
@@ -655,7 +934,8 @@ function emitTool(
   transition: opacity 120ms ease;
 }
 
-.result-asset__preview:hover .result-asset__preview-hint {
+.result-asset__preview:hover .result-asset__preview-hint,
+.result-asset__preview:focus-visible .result-asset__preview-hint {
   opacity: 1;
 }
 

@@ -19,6 +19,7 @@ vi.mock('@antv/x6', () => ({
   Snapline: function MockX6Constructor() {},
 }));
 vi.mock('@antv/x6-vue-shape', () => ({ register: vi.fn() }));
+vi.mock('../components/WorkbenchNode.vue', () => ({ default: {} }));
 
 interface FakeNodeDefinition {
   data: {
@@ -115,7 +116,7 @@ class FakeGraph {
     return this.nodes;
   }
 
-  select(id: string) {
+  resetSelection(id: string) {
     this.selectedId = id;
   }
 
@@ -135,6 +136,7 @@ function adapterFor(graph: FakeGraph) {
   Object.assign(adapter as object, {
     graph,
     readOnly: false,
+    scroller: { container: document.createElement('div') },
   });
   return adapter;
 }

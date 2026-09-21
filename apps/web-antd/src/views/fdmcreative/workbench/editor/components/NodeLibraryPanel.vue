@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 
@@ -10,16 +10,19 @@ import { getNodeLibraryHelp } from './node-library-help';
 
 defineOptions({ name: 'FdmCreativeNodeLibraryPanel' });
 
-const props = withDefaults(defineProps<{ readonly?: boolean }>(), {
-  readonly: false,
-});
+const props = withDefaults(
+  defineProps<{ compact?: boolean; readonly?: boolean }>(),
+  { compact: false, readonly: false },
+);
 
 const emit = defineEmits<{
   nodeAdd: [type: string];
   nodeDragStart: [type: string, event: MouseEvent];
+  toggleCompact: [];
 }>();
 
 const rootElement = ref<HTMLElement>();
+const searchInput = ref<{ focus: () => void }>();
 const search = ref('');
 
 const filteredGroups = computed(() => {
@@ -49,120 +52,177 @@ function handleDoubleClick(type: string) {
 }
 
 function handleMouseDown(type: string, event: MouseEvent) {
-  if (!props.readonly) emit('nodeDragStart', type, event);
+  if (!props.readonly && event.button === 0 && event.detail < 2) {
+    emit('nodeDragStart', type, event);
+  }
+}
+
+function handleKeyDown(type: string, event: KeyboardEvent) {
+  if (![' ', 'Enter'].includes(event.key)) return;
+  event.preventDefault();
+  if (!props.readonly && !event.repeat) emit('nodeAdd', type);
+}
+
+async function focusSearch() {
+  if (props.compact) {
+    emit('toggleCompact');
+    await nextTick();
+  }
+  searchInput.value?.focus();
 }
 
 function getElement() {
   return rootElement.value;
 }
 
-defineExpose({ getElement });
+defineExpose({ focusSearch, getElement });
 </script>
 
 <template>
-  <aside ref="rootElement" class="node-library">
-    <div class="panel-title">
-      <strong>节点库</strong>
-      <IconifyIcon :icon="readonly ? 'lucide:lock-keyhole' : 'lucide:blocks'" />
-    </div>
-    <Input
-      v-model:value="search"
-      allow-clear
-      placeholder="搜索节点"
-      size="small"
-    >
-      <template #prefix><IconifyIcon icon="lucide:search" /></template>
-    </Input>
-    <p class="panel-hint">
-      <IconifyIcon icon="lucide:circle-help" />
-      悬浮查看说明 · 双击添加
-    </p>
-    <Collapse :default-active-key="NODE_GROUPS.map((group) => group.key)" ghost>
-      <Collapse.Panel
-        v-for="group in filteredGroups"
-        :key="group.key"
-        :header="group.label"
+  <aside
+    ref="rootElement"
+    class="node-library"
+    :class="{ 'is-compact': compact }"
+    aria-label="节点库"
+  >
+    <nav v-if="compact" class="compact-tools" aria-label="节点库入口">
+      <button
+        type="button"
+        aria-label="展开节点库"
+        @click="emit('toggleCompact')"
       >
-        <Popover
-          v-for="node in group.nodes"
-          :key="node.type"
-          :mouse-enter-delay="0.25"
-          overlay-class-name="node-library-help-overlay"
-          placement="rightTop"
-          :trigger="['hover', 'focus']"
+        <IconifyIcon icon="lucide:blocks" /><span>节点</span>
+      </button>
+      <button type="button" aria-label="搜索节点" @click="focusSearch">
+        <IconifyIcon icon="lucide:search" /><span>搜索</span>
+      </button>
+    </nav>
+    <template v-else>
+      <div class="panel-title">
+        <strong>节点库</strong>
+        <button
+          type="button"
+          class="collapse-button"
+          aria-label="收起节点库"
+          @click="emit('toggleCompact')"
         >
-          <template #content>
-            <article
-              :id="`node-help-${node.type}`"
-              class="node-help"
-              :style="{ '--help-accent': node.color }"
-            >
-              <header class="node-help__header">
-                <span><IconifyIcon :icon="node.icon" /></span>
-                <div>
-                  <strong>{{ node.label }}</strong>
-                  <small>{{ node.type }}</small>
-                </div>
-              </header>
-
-              <section>
-                <b>用途</b>
-                <p>{{ node.help.purpose }}</p>
-              </section>
-
-              <div class="node-help__io">
-                <section>
-                  <b><IconifyIcon icon="lucide:log-in" /> 输入</b>
-                  <ul>
-                    <li v-for="item in node.help.inputs" :key="item">
-                      {{ item }}
-                    </li>
-                  </ul>
-                </section>
-                <section>
-                  <b><IconifyIcon icon="lucide:log-out" /> 输出</b>
-                  <ul>
-                    <li v-for="item in node.help.outputs" :key="item">
-                      {{ item }}
-                    </li>
-                  </ul>
-                </section>
-              </div>
-
-              <section>
-                <b>适用场景</b>
-                <div class="node-help__tags">
-                  <span v-for="item in node.help.scenarios" :key="item">
-                    {{ item }}
-                  </span>
-                </div>
-              </section>
-
-              <aside class="node-help__tip">
-                <IconifyIcon icon="lucide:lightbulb" />
-                <span><b>小提示</b>{{ node.help.tip }}</span>
-              </aside>
-              <footer>双击添加 · 按住拖到画布</footer>
-            </article>
-          </template>
-
-          <button
-            :aria-describedby="`node-help-${node.type}`"
-            :aria-disabled="readonly"
-            class="library-node"
-            :class="{ 'is-readonly': readonly }"
-            :style="{ '--accent': node.color }"
-            type="button"
-            @dblclick="handleDoubleClick(node.type)"
-            @mousedown="handleMouseDown(node.type, $event)"
+          <IconifyIcon icon="lucide:panel-left-close" />
+        </button>
+      </div>
+      <Input
+        ref="searchInput"
+        v-model:value="search"
+        allow-clear
+        aria-label="搜索节点"
+        placeholder="搜索节点"
+        size="small"
+      >
+        <template #prefix><IconifyIcon icon="lucide:search" /></template>
+      </Input>
+      <p class="panel-hint">
+        <IconifyIcon icon="lucide:circle-help" />
+        {{
+          readonly
+            ? '只读 · 悬浮或聚焦查看说明'
+            : '双击或 Enter 添加 · 拖到画布'
+        }}
+      </p>
+      <Collapse
+        :default-active-key="NODE_GROUPS.map((group) => group.key)"
+        ghost
+      >
+        <Collapse.Panel
+          v-for="group in filteredGroups"
+          :key="group.key"
+          :header="group.label"
+        >
+          <Popover
+            v-for="node in group.nodes"
+            :key="node.type"
+            :mouse-enter-delay="0.25"
+            overlay-class-name="node-library-help-overlay"
+            placement="rightTop"
+            :trigger="['hover', 'focus']"
           >
-            <span><IconifyIcon :icon="node.icon" /></span>
-            <strong>{{ node.label }}</strong>
-            <IconifyIcon class="library-chevron" icon="lucide:info" />
-          </button>
-        </Popover>
-      </Collapse.Panel>
-    </Collapse>
+            <template #content>
+              <article
+                :id="`node-help-${node.type}`"
+                class="node-help"
+                :style="{ '--help-accent': node.color }"
+              >
+                <header class="node-help__header">
+                  <span><IconifyIcon :icon="node.icon" /></span>
+                  <div>
+                    <strong>{{ node.label }}</strong>
+                    <small>{{ node.type }}</small>
+                  </div>
+                </header>
+
+                <section>
+                  <b>用途</b>
+                  <p>{{ node.help.purpose }}</p>
+                </section>
+
+                <div class="node-help__io">
+                  <section>
+                    <b><IconifyIcon icon="lucide:log-in" /> 输入</b>
+                    <ul>
+                      <li v-for="item in node.help.inputs" :key="item">
+                        {{ item }}
+                      </li>
+                    </ul>
+                  </section>
+                  <section>
+                    <b><IconifyIcon icon="lucide:log-out" /> 输出</b>
+                    <ul>
+                      <li v-for="item in node.help.outputs" :key="item">
+                        {{ item }}
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+
+                <section>
+                  <b>适用场景</b>
+                  <div class="node-help__tags">
+                    <span v-for="item in node.help.scenarios" :key="item">
+                      {{ item }}
+                    </span>
+                  </div>
+                </section>
+
+                <aside class="node-help__tip">
+                  <IconifyIcon icon="lucide:lightbulb" />
+                  <span><b>小提示</b>{{ node.help.tip }}</span>
+                </aside>
+                <footer>
+                  {{
+                    readonly ? '只读模式' : '双击 / Enter / 空格添加 · 拖到画布'
+                  }}
+                </footer>
+              </article>
+            </template>
+
+            <button
+              :aria-describedby="`node-help-${node.type}`"
+              :aria-disabled="readonly"
+              class="library-node"
+              :class="{ 'is-readonly': readonly }"
+              :style="{ '--accent': node.color }"
+              type="button"
+              @dblclick="handleDoubleClick(node.type)"
+              @keydown="handleKeyDown(node.type, $event)"
+              @mousedown="handleMouseDown(node.type, $event)"
+            >
+              <span><IconifyIcon :icon="node.icon" /></span>
+              <strong>{{ node.label }}</strong>
+              <IconifyIcon class="library-chevron" icon="lucide:info" />
+            </button>
+          </Popover>
+        </Collapse.Panel>
+      </Collapse>
+      <p v-if="!filteredGroups.length" class="empty-hint">没有匹配的节点</p>
+    </template>
   </aside>
 </template>
 
@@ -177,6 +237,59 @@ defineExpose({ getElement });
   border-right: 1px solid hsl(var(--border));
 }
 
+.node-library.is-compact {
+  padding: 12px 4px;
+}
+
+.compact-tools {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-tools button,
+.collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.compact-tools button {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 44px;
+  font-size: 11px;
+}
+
+.compact-tools button:hover,
+.collapse-button:hover {
+  color: hsl(var(--primary));
+  background: hsl(var(--muted));
+}
+
+.compact-tools :deep(svg),
+.collapse-button :deep(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.collapse-button {
+  width: 28px;
+  height: 28px;
+}
+
+.empty-hint {
+  padding: 20px 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
 .panel-title {
   display: flex;
   align-items: center;
@@ -187,12 +300,6 @@ defineExpose({ getElement });
 
 .panel-title strong {
   font-size: 14px;
-}
-
-.panel-title > :last-child:not(strong) {
-  width: 14px;
-  height: 14px;
-  color: hsl(var(--muted-foreground));
 }
 
 .panel-hint {

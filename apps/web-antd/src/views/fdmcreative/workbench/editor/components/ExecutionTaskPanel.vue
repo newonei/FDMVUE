@@ -1,136 +1,249 @@
 <script lang="ts" setup>
 import type { FdmCreativeApi } from '#/api/fdmcreative';
-
 import { computed, ref } from 'vue';
-
 import { IconifyIcon } from '@vben/icons';
-
-import { Button, Empty, Progress, Tag, Tooltip } from 'ant-design-vue';
-
-import { loopRunLabel } from '../loop-run';
+import { Alert, Button, Empty, Progress, Select, Tag } from 'ant-design-vue';
+import {
+  canRetryNode,
+  EXECUTION_STATUS_LABEL,
+  taskProgress,
+} from '../execution-feedback';
+import { canvasNodeIdForRun, parseLoopRunNodeId } from '../loop-run';
 import { nodeRunStatusLabel } from '../node-run-status';
 
-interface Props {
-  allowCancel?: boolean;
-  execution?: FdmCreativeApi.ExecutionDetail;
-  streamState?: 'closed' | 'connecting' | 'idle' | 'open' | 'reconnecting';
-}
-
-const props = withDefaults(defineProps<Props>(), {
-  allowCancel: true,
-  execution: undefined,
-  streamState: 'idle',
-});
+const props = withDefaults(
+  defineProps<{
+    allowCancel?: boolean;
+    allowRetry?: boolean;
+    busy?: boolean;
+    currentExecutionId?: number;
+    execution?: FdmCreativeApi.ExecutionDetail;
+    history?: FdmCreativeApi.Execution[];
+    historyError?: string;
+    historyHasMore?: boolean;
+    historyLoading?: boolean;
+    nodeNames?: Record<string, string>;
+    streamState?: 'closed' | 'connecting' | 'idle' | 'open' | 'reconnecting';
+    syncError?: string;
+    variant?: 'floating' | 'panel';
+  }>(),
+  {
+    allowCancel: false,
+    allowRetry: false,
+    busy: false,
+    history: () => [],
+    historyError: '',
+    historyHasMore: false,
+    historyLoading: false,
+    nodeNames: () => ({}),
+    streamState: 'idle',
+    syncError: '',
+    variant: 'floating',
+  },
+);
 
 const emit = defineEmits<{
   cancel: [];
+  loadMore: [];
+  locate: [nodeId: string];
+  refresh: [];
+  retry: [run: FdmCreativeApi.NodeRun];
+  selectExecution: [id: number];
 }>();
-
-const EXECUTION_STATUS_LABEL: Record<FdmCreativeApi.ExecutionStatus, string> = {
-  CANCEL_REQUESTED: '取消中',
-  CANCELED: '已取消',
-  CREATED: '准备中',
-  FAILED: '失败',
-  PARTIAL_SUCCESS: '部分成功',
-  RUNNING: '运行中',
-  SUCCEEDED: '成功',
-};
-
 const expanded = ref(false);
-
-const progress = computed(() => {
-  const execution = props.execution;
-  if (!execution?.totalNodeCount) return 0;
-  const completed =
-    (execution.succeededNodeCount ?? 0) + (execution.failedNodeCount ?? 0);
-  return Math.round((completed / execution.totalNodeCount) * 100);
-});
-
+const onlyFailed = ref(false);
+const isExpanded = computed(() => props.variant === 'panel' || expanded.value);
+const progress = computed(() =>
+  props.execution
+    ? taskProgress(props.execution)
+    : { completed: 0, percent: 0, total: 0 },
+);
 const canCancel = computed(
   () =>
     props.allowCancel &&
     ['CREATED', 'RUNNING'].includes(props.execution?.status ?? ''),
 );
-
-const visibleRuns = computed(() => {
-  const runs = props.execution?.nodeRuns ?? [];
-  return expanded.value ? runs : runs.slice(0, 3);
+const visibleRuns = computed(() =>
+  (props.execution?.nodeRuns ?? []).filter(
+    (run) => !onlyFailed.value || run.status === 'FAILED',
+  ),
+);
+const historyOptions = computed(() => {
+  const values = new Map(props.history.map((item) => [item.id, item]));
+  if (props.execution) values.set(props.execution.id, props.execution);
+  return [...values.values()].map((item) => ({
+    value: item.id,
+    label: `#${item.id} · ${EXECUTION_STATUS_LABEL[item.status]}${item.startedTime ? ` · ${item.startedTime}` : ''}`,
+  }));
 });
 const streamLabel = computed(
   () =>
     ({
-      closed: '轮询兜底',
+      closed: '自动更新',
       connecting: '连接中',
       idle: '已结束',
-      open: '实时',
-      reconnecting: '重连中',
+      open: '实时更新',
+      reconnecting: '重新连接中',
     })[props.streamState],
 );
+function runName(run: FdmCreativeApi.NodeRun) {
+  const parsed = parseLoopRunNodeId(run.nodeId);
+  const name = props.nodeNames[parsed.baseNodeId] || parsed.baseNodeId;
+  return parsed.iteration ? `${name} · 第 ${parsed.iteration} 轮` : name;
+}
 </script>
 
 <template>
   <section
-    v-if="execution"
+    v-if="execution || variant === 'panel'"
     class="execution-task-panel"
-    :class="{ 'is-expanded': expanded }"
+    :class="{ 'is-expanded': isExpanded, 'is-panel': variant === 'panel' }"
     data-testid="execution-task-panel"
   >
     <header class="task-panel__header">
       <button
-        :aria-expanded="expanded"
+        v-if="variant === 'floating'"
         class="task-panel__toggle"
         type="button"
+        :aria-expanded="isExpanded"
         @click="expanded = !expanded"
       >
-        <span class="task-panel__title">
-          <IconifyIcon icon="lucide:list-checks" />
-          <strong>运行队列</strong>
-          <span class="task-panel__stream" :class="`is-${streamState}`">
-            <i></i>{{ streamLabel }}
-          </span>
-          <Tag>{{ EXECUTION_STATUS_LABEL[execution.status] }}</Tag>
-        </span>
-        <span class="task-panel__summary">
-          {{ execution.succeededNodeCount ?? 0 }}/{{
-            execution.totalNodeCount ?? 0
-          }}
-          · {{ progress }}%
-          <IconifyIcon
-            :icon="expanded ? 'lucide:chevron-down' : 'lucide:chevron-up'"
-          />
-        </span>
+        <IconifyIcon icon="lucide:list-checks" /> 运行任务
+        <IconifyIcon
+          :icon="isExpanded ? 'lucide:chevron-down' : 'lucide:chevron-up'"
+        />
       </button>
-      <Tooltip v-if="canCancel" title="取消当前运行">
+      <strong v-else>运行任务</strong>
+      <Button
+        v-if="variant === 'panel'"
+        :loading="historyLoading"
+        size="small"
+        @click="emit('refresh')"
+        >刷新</Button
+      >
+    </header>
+    <template v-if="isExpanded && variant === 'panel'">
+      <label class="task-label" for="execution-history">当前查看的任务</label>
+      <Select
+        id="execution-history"
+        aria-label="当前查看的任务"
+        :value="execution?.id"
+        :options="historyOptions"
+        :loading="historyLoading"
+        :disabled="busy"
+        placeholder="选择历史任务"
+        @change="emit('selectExecution', Number($event))"
+      />
+      <Button
+        v-if="historyHasMore"
+        class="history-more"
+        size="small"
+        :loading="historyLoading"
+        @click="emit('loadMore')"
+        >加载更早的任务</Button
+      >
+      <Alert
+        v-if="historyError"
+        :message="historyError"
+        type="warning"
+        show-icon
+      />
+      <Alert v-if="syncError" :message="syncError" type="warning" show-icon />
+      <p
+        v-if="execution && currentExecutionId !== execution.id"
+        class="task-hint"
+      >
+        正在查看历史任务。定位节点不会覆盖当前参数；重试使用任务原始参数。
+      </p>
+    </template>
+    <template v-if="execution">
+      <div class="task-panel__summary">
+        <Tag>{{ EXECUTION_STATUS_LABEL[execution.status] }}</Tag>
+        <span>已结束 {{ progress.completed }}/{{ progress.total }} 个节点</span>
+        <span v-if="currentExecutionId === execution.id" class="task-stream">{{
+          streamLabel
+        }}</span>
+      </div>
+      <Progress
+        :percent="progress.percent"
+        :show-info="false"
+        size="small"
+        :status="
+          ['FAILED', 'PARTIAL_SUCCESS'].includes(execution.status)
+            ? 'exception'
+            : undefined
+        "
+        aria-label="任务处理进度"
+      />
+      <div v-if="isExpanded" class="task-panel__actions">
         <Button
-          v-access:code="['fdmcreative:execution:cancel']"
+          size="small"
+          :type="onlyFailed ? 'primary' : 'default'"
+          :aria-pressed="onlyFailed"
+          @click="onlyFailed = !onlyFailed"
+          >{{ onlyFailed ? '只看失败' : '全部节点' }}</Button
+        >
+        <Button
+          v-if="canCancel"
+          :disabled="busy"
           danger
           size="small"
-          type="text"
           @click="emit('cancel')"
+          >取消此任务</Button
         >
-          <IconifyIcon icon="lucide:square" />
-        </Button>
-      </Tooltip>
-    </header>
-
-    <Progress
-      class="task-panel__progress"
-      :percent="progress"
-      :show-info="false"
-      size="small"
-      :status="execution.status === 'FAILED' ? 'exception' : undefined"
-    />
-
-    <div v-if="visibleRuns.length" class="task-panel__runs">
-      <article v-for="nodeRun in visibleRuns" :key="nodeRun.id">
-        <span :title="loopRunLabel(nodeRun)">{{ loopRunLabel(nodeRun) }}</span>
-        <Tag>{{ nodeRunStatusLabel(nodeRun.status) }}</Tag>
-      </article>
-    </div>
+      </div>
+      <div v-if="isExpanded && visibleRuns.length" class="task-panel__runs">
+        <article
+          v-for="run in visibleRuns"
+          :key="run.id"
+          :class="{ 'is-failed': run.status === 'FAILED' }"
+        >
+          <div class="task-run__heading">
+            <button
+              type="button"
+              class="task-run__locate"
+              :aria-label="`定位节点：${runName(run)}`"
+              @click="emit('locate', canvasNodeIdForRun(run.nodeId))"
+            >
+              <IconifyIcon icon="lucide:locate-fixed" /><span>{{
+                runName(run)
+              }}</span>
+            </button>
+            <Tag>{{ nodeRunStatusLabel(run.status) }}</Tag>
+          </div>
+          <p v-if="run.errorMessage" class="task-run__error">
+            {{ run.errorMessage }}
+          </p>
+          <div
+            v-if="allowRetry && canRetryNode(execution, run)"
+            class="task-run__recovery"
+          >
+            <Button size="small" :disabled="busy" @click="emit('retry', run)"
+              >按原参数重试</Button
+            >
+            <Button
+              size="small"
+              type="text"
+              @click="emit('locate', canvasNodeIdForRun(run.nodeId))"
+              >查看当前节点</Button
+            >
+          </div>
+        </article>
+      </div>
+      <Empty
+        v-else-if="isExpanded"
+        :description="onlyFailed ? '没有失败节点' : '任务正在准备中'"
+        :image-style="{ height: '44px' }"
+      />
+    </template>
     <Empty
-      v-else-if="expanded"
-      description="任务正在准备中"
-      :image-style="{ height: '36px' }"
+      v-else
+      :description="
+        currentExecutionId
+          ? `正在读取任务 #${currentExecutionId}`
+          : '还没有运行任务'
+      "
+      :image-style="{ height: '64px' }"
     />
   </section>
 </template>
@@ -141,150 +254,112 @@ const streamLabel = computed(
   right: 16px;
   bottom: 16px;
   z-index: 12;
-  width: min(360px, calc(100% - 32px));
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(400px, calc(100% - 32px));
+  padding: 14px;
   color: hsl(var(--foreground));
-  background: hsl(var(--card) / 96%);
-  border: 1px solid hsl(var(--border) / 82%);
-  border-radius: 12px;
-  box-shadow: 0 12px 30px hsl(var(--foreground) / 10%);
-  backdrop-filter: blur(14px);
-  transition:
-    width 160ms ease,
-    box-shadow 160ms ease;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 8%);
 }
-
-.execution-task-panel.is-expanded {
-  width: min(440px, calc(100% - 32px));
-  box-shadow: 0 18px 42px hsl(var(--foreground) / 15%);
+.execution-task-panel.is-panel {
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
-
 .task-panel__header,
 .task-panel__toggle,
-.task-panel__title,
-.task-panel__summary {
+.task-panel__summary,
+.task-panel__actions,
+.task-run__heading,
+.task-run__recovery {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
 }
-
-.task-panel__header {
-  gap: 6px;
-}
-
-.task-panel__toggle {
-  flex: 1;
+.task-panel__header,
+.task-panel__actions {
   justify-content: space-between;
-  min-width: 0;
-  padding: 0;
+}
+.task-panel__toggle,
+.task-run__locate {
   color: inherit;
+  text-align: left;
   cursor: pointer;
   background: transparent;
   border: 0;
 }
-
-.task-panel__title {
-  gap: 7px;
-  min-width: 0;
+.task-panel__toggle {
+  flex: 1;
+  justify-content: space-between;
+  padding: 0;
 }
-
-.task-panel__title > svg {
-  flex: none;
-  width: 15px;
-  height: 15px;
-  color: hsl(var(--primary));
-}
-
-.task-panel__title strong {
+.task-label,
+.task-panel__summary,
+.task-hint {
   font-size: 12px;
 }
-
-.task-panel__stream {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  font-size: 9px;
+.task-hint {
+  margin: 0;
   color: hsl(var(--muted-foreground));
 }
-
-.task-panel__stream i {
-  width: 5px;
-  height: 5px;
-  background: hsl(var(--muted-foreground) / 52%);
-  border-radius: 999px;
-}
-
-.task-panel__stream.is-open i {
-  background: #16a34a;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #16a34a 14%, transparent);
-}
-
-.task-panel__stream.is-connecting i,
-.task-panel__stream.is-reconnecting i {
-  background: #f59e0b;
-}
-
-.task-panel__summary {
-  flex: none;
-  gap: 5px;
-  font-size: 10px;
+.task-stream {
   color: hsl(var(--muted-foreground));
 }
-
-.task-panel__summary > svg {
-  width: 13px;
-  height: 13px;
-}
-
-.task-panel__progress {
-  display: block;
-  margin: 6px 0 0;
-  line-height: 0;
-}
-
 .task-panel__runs {
   display: grid;
-  gap: 4px;
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition:
-    max-height 180ms ease,
-    margin 180ms ease,
-    opacity 140ms ease;
-}
-
-.is-expanded .task-panel__runs {
-  max-height: min(36vh, 360px);
-  margin-top: 8px;
-  overflow: auto;
-  opacity: 1;
-}
-
-.task-panel__runs article {
-  display: flex;
   gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 30px;
-  padding: 4px 6px 4px 9px;
-  background: hsl(var(--muted) / 42%);
-  border: 1px solid hsl(var(--border) / 64%);
+}
+.execution-task-panel:not(.is-panel) .task-panel__runs {
+  max-height: 36vh;
+  overflow: auto;
+}
+.task-panel__runs article {
+  padding: 10px;
+  background: hsl(var(--muted) / 40%);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
-
-.task-panel__runs article > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  white-space: nowrap;
+.task-panel__runs article.is-failed {
+  border-color: hsl(var(--destructive) / 40%);
 }
-
-@media (max-width: 900px) {
-  .execution-task-panel {
-    right: 10px;
-    bottom: 10px;
-    width: calc(100% - 20px);
-  }
+.task-run__locate {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.task-run__locate span {
+  overflow-wrap: anywhere;
+}
+.task-run__locate svg,
+.task-panel__toggle svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.task-run__error {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: hsl(var(--destructive));
+}
+.task-run__recovery {
+  margin-top: 8px;
+}
+.history-more {
+  align-self: flex-start;
 }
 </style>

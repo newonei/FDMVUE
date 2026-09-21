@@ -53,6 +53,78 @@ afterEach(() => {
 });
 
 describe('workflow autosave', () => {
+  it('clears a previously observed dirty flag after an asynchronous save and allows repeated flushes', async () => {
+    const response = deferred<FdmCreativeApi.WorkflowDraft>();
+    const save = vi.fn(() => response.promise);
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => 1,
+      projectId: () => 7,
+      save,
+    });
+
+    await autosave.markChanged(definition('edited'));
+    // The editor renders these flags before the asynchronous request finishes.
+    expect(autosave.hasUnpersistedSnapshot.value).toBe(true);
+    expect(autosave.needsUnloadGuard.value).toBe(true);
+    const flushing = autosave.flush();
+    await settlePromiseQueue();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.status.value).toBe('SAVING');
+    expect(autosave.hasUnpersistedSnapshot.value).toBe(true);
+
+    response.resolve(draft(definition('edited'), 2));
+    await expect(flushing).resolves.toBe(true);
+    expect(autosave.status.value).toBe('SAVED');
+    expect(autosave.hasUnpersistedSnapshot.value).toBe(false);
+    expect(autosave.needsUnloadGuard.value).toBe(false);
+    await expect(autosave.flush()).resolves.toBe(true);
+    expect(save).toHaveBeenCalledTimes(1);
+    autosave.destroy();
+  });
+
+  it('clears observed dirty state after each of two edit and asynchronous save cycles', async () => {
+    let version = 1;
+    const responses = [
+      deferred<FdmCreativeApi.WorkflowDraft>(),
+      deferred<FdmCreativeApi.WorkflowDraft>(),
+    ];
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => responses[0]!.promise)
+      .mockImplementationOnce(() => responses[1]!.promise);
+    const autosave = useWorkflowAutosave({
+      enabled: () => false,
+      getExpectedDraftVersion: () => version,
+      onSaved: (savedDraft) => {
+        version = savedDraft.draftVersion;
+      },
+      projectId: () => 7,
+      save,
+    });
+
+    for (const [index, label] of ['first', 'second'].entries()) {
+      await autosave.markChanged(definition(label));
+      expect(autosave.hasUnpersistedSnapshot.value).toBe(true);
+      const flushing = autosave.flush();
+      await settlePromiseQueue();
+      expect(save).toHaveBeenCalledTimes(index + 1);
+      expect(save.mock.calls[index]![0].expectedDraftVersion).toBe(index + 1);
+      expect(autosave.hasUnpersistedSnapshot.value).toBe(true);
+      responses[index]!.resolve(draft(definition(label), index + 2));
+      await expect(flushing).resolves.toBe(true);
+      expect(autosave.status.value).toBe('SAVED');
+      expect(autosave.hasUnpersistedSnapshot.value).toBe(false);
+      expect(autosave.needsUnloadGuard.value).toBe(false);
+    }
+    await expect(autosave.flush()).resolves.toBe(true);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[0]![0].mutationId).not.toBe(
+      save.mock.calls[1]![0].mutationId,
+    );
+    autosave.destroy();
+  });
+
   it('submits the normalized definition with its matching hash', async () => {
     const save = vi.fn((request) =>
       Promise.resolve(draft(request.definition, 2)),

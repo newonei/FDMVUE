@@ -211,7 +211,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       prompt: '',
       targetType: 'GENERAL',
     },
-    description: '输入可复用的静态提示词，可连接到多个图像或视频生成节点',
+    description: '填写可重复使用的提示词，连接到多个图片或视频生成节点',
     icon: 'lucide:text-cursor-input',
     label: '提示词文本',
     ports: [output('prompt', 'prompt-text')],
@@ -237,7 +237,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       prompt: '{{input}}',
       targetType: 'GENERAL',
     },
-    description: '在本地合并上游提示词和创作需求，不调用模型',
+    description: '按模板组合已连接的提示词和创作需求，无需调用 AI 模型',
     icon: 'lucide:braces',
     label: '提示词模板',
     ports: [
@@ -335,7 +335,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       resizeMode: 'FIT',
       width: 1024,
     },
-    description: '在本地受控流程中缩放、适配或调整图片比例，不会伪装成 AI 超分',
+    description: '调整图片尺寸和比例，使用普通缩放，不提供 AI 超分辨率增强',
     icon: 'lucide:scan',
     label: '图片缩放/适配',
     ports: [
@@ -354,7 +354,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       cropY: 0,
       format: 'png',
     },
-    description: '用归一化坐标在服务端裁剪原图，预览缩放不会改变实际裁剪范围',
+    description: '选择要保留的画面区域，放大或缩小预览不会改变实际裁剪范围',
     icon: 'lucide:crop',
     label: '图片裁剪',
     ports: [
@@ -366,7 +366,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   {
     color: '#0d9488',
     defaultConfig: { columns: 2, format: 'png', rows: 2 },
-    description: '在受控像素、输出数量和临时磁盘上限内，把图片拆分为独立素材',
+    description: '按行列把图片分割成多张独立素材，适合拆分拼图或分镜',
     icon: 'lucide:panels-top-left',
     label: '图片分割',
     ports: [
@@ -417,8 +417,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   {
     color: '#7e22ce',
     defaultConfig: { durationSeconds: 15, format: 'mp3', language: 'ZH_CN' },
-    description:
-      '按提示词生成配音、旁白、语音或音效；音色等供应商参数仅在已声明 Schema 时显示',
+    description: '根据提示词生成配音、旁白或音效，可选音色等设置以所选模型为准',
     icon: 'lucide:mic-vocal',
     label: '语音生成',
     ports: [input('prompt', 'prompt-text'), output('asset', 'audio-asset')],
@@ -427,7 +426,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   {
     color: '#6d28d9',
     defaultConfig: { durationSeconds: 30, format: 'mp3' },
-    description: '按提示词生成配乐，需要单独配置支持 TEXT_TO_MUSIC 的模型路由',
+    description: '根据提示词生成配乐，需先配置支持音乐生成的模型',
     icon: 'lucide:music-2',
     label: '音乐生成',
     ports: [input('prompt', 'prompt-text'), output('asset', 'audio-asset')],
@@ -445,7 +444,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       startSeconds: 0,
       volumePercent: 100,
     },
-    description: '使用受控 FFmpeg 在明确时长范围内裁剪音频，可加淡入淡出',
+    description: '按开始时间和时长截取音频，可添加淡入淡出',
     icon: 'lucide:scissors',
     label: '音频裁剪',
     ports: [
@@ -463,7 +462,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       targetLufs: -16,
       volumePercent: 100,
     },
-    description: '使用受控 FFmpeg 统一音频响度、采样率和声道数',
+    description: '统一音频响度、采样率和声道数，便于多段音频搭配使用',
     icon: 'lucide:audio-waveform',
     label: '音频标准化',
     ports: [
@@ -481,7 +480,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       sampleRate: 44_100,
       volumePercent: 100,
     },
-    description: '按画布连线或显式轨道列表顺序混合多条音频，不按节点坐标排序',
+    description: '将多条音频混合为一条，音轨顺序以连线先后或音轨列表为准',
     icon: 'lucide:git-merge',
     label: '音频混音',
     ports: [
@@ -528,7 +527,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   {
     color: '#c2410c',
     defaultConfig: { durationSeconds: 5, startSeconds: 0 },
-    description: '使用受控 FFmpeg 执行器裁剪视频片段',
+    description: '按开始时间和时长截取需要的视频片段',
     icon: 'lucide:scissors',
     label: '视频裁剪',
     ports: [
@@ -608,7 +607,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
   },
   {
     color: '#7c3aed',
-    description: '把多条音频按连线写入顺序整理为明确的音频列表',
+    description: '按连线先后整理多条音频，移动节点不会改变列表顺序',
     icon: 'lucide:list-music',
     label: '音频集合',
     ports: [
@@ -651,7 +650,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       startIndex: 1,
       variations: '',
     },
-    description: '按轮次切换变化提示词和图片，串行重复运行整个下游分支',
+    description: '逐轮切换提示词和图片，当前轮的后续节点全部完成后再开始下一轮',
     icon: 'lucide:repeat-2',
     label: '图片循环',
     ports: [
@@ -673,7 +672,7 @@ export const CREATIVE_NODE_CATALOG: CreativeNodeTemplate[] = [
       startIndex: 1,
       variations: '',
     },
-    description: '按轮次切换变化提示词和视频，串行重复运行整个下游分支',
+    description: '逐轮切换提示词和视频，当前轮的后续节点全部完成后再开始下一轮',
     icon: 'lucide:refresh-cw',
     label: '视频循环',
     ports: [

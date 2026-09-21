@@ -1,4 +1,4 @@
-import type { Edge, Node } from '@antv/x6';
+import type { Cell, Edge, Node } from '@antv/x6';
 
 import type {
   CreativeNodeTemplate,
@@ -8,7 +8,6 @@ import type {
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 import {
-  Clipboard,
   Dnd,
   Graph,
   History,
@@ -32,6 +31,7 @@ import {
 } from './catalog';
 import {
   EMPTY_WORKFLOW,
+  findAvailableNodePosition,
   findAutoConnectTargetPort,
   isEditableTarget,
   validateWorkflowConnection,
@@ -243,11 +243,17 @@ export interface WorkbenchMediaBranchResult {
 export interface WorkbenchGraphCallbacks {
   onChange?: () => void;
   onConnectToBlank?: (request: WorkbenchBlankConnectionRequest) => void;
+  onHistoryChange?: (state: { canRedo: boolean; canUndo: boolean }) => void;
+  onRequestNodePicker?: (request: {
+    clientPoint: WorkbenchPoint;
+    graphPoint: WorkbenchPoint;
+  }) => void;
   /** True while a node is being dragged; the second value is true only when its geometry changed. */
   onNodeDragStateChange?: (dragging: boolean, changed?: boolean) => void;
   onNavigationChange?: () => void;
   onNodeGeometryChange?: (nodeId: string) => void;
   onSelectionChange?: (node?: FdmCreativeApi.WorkflowNode) => void;
+  onSelectionCountChange?: (count: number) => void;
   onViewportChange?: () => void;
   onZoom?: (zoom: number) => void;
 }
@@ -261,6 +267,8 @@ export interface WorkbenchGraphElements {
 
 export class WorkbenchGraphAdapter {
   readonly graph: Graph;
+  private clipboardCells: Cell[] = [];
+  private clipboardOffset = 0;
   private readonly callbacks: WorkbenchGraphCallbacks;
   private readonly connectingEdgeIds = new Set<string>();
   private readonly dnd: Dnd;
@@ -272,6 +280,14 @@ export class WorkbenchGraphAdapter {
   >();
   private readonly readOnly: boolean;
   private readonly scroller: Scroller;
+  private spacePressed = false;
+  private handDrag?: {
+    clientX: number;
+    clientY: number;
+    left: number;
+    top: number;
+  };
+  private lastPointer?: WorkbenchPoint;
   private suppressChange = false;
   private viewportFrame?: number;
 
@@ -443,15 +459,33 @@ export class WorkbenchGraphAdapter {
     });
     this.graph
       .use(this.scroller)
-      .use(new Selection({ enabled: true, multiple: false, rubberband: false }))
+      .use(
+        new Selection({
+          enabled: true,
+          modifiers: ['shift'],
+          movable: !this.readOnly,
+          multiple: true,
+          multipleSelectionModifiers: ['shift', 'ctrl', 'meta'],
+          rubberband: true,
+          showNodeSelectionBox: true,
+          pointerEvents: 'none',
+        }),
+      )
       .use(new Snapline({ enabled: true }))
-      .use(new History({ enabled: true, stackSize: 80 }))
-      .use(new Clipboard({ enabled: true }))
+      .use(
+        new History({
+          enabled: true,
+          stackSize: 80,
+          beforeAddCommand: (_event, args) =>
+            !(args as { options?: { ignoreHistory?: boolean } }).options
+              ?.ignoreHistory,
+        }),
+      )
       .use(
         new Keyboard({
           enabled: true,
           global: false,
-          guard: (event) => !isEditableTarget(event.target),
+          guard: (event) => this.allowCanvasShortcut(event),
         }),
       )
       .use(
@@ -473,10 +507,21 @@ export class WorkbenchGraphAdapter {
     this.scroller.container.addEventListener(
       'scroll',
       this.scheduleViewportChange,
-      { passive: true },
+      {
+        passive: true,
+      },
     );
     this.bindEvents();
     this.bindShortcuts();
+    this.scroller.container.addEventListener(
+      'mousedown',
+      this.handleCanvasMouseDown,
+      true,
+    );
+    this.scroller.container.addEventListener('mousemove', this.rememberPointer);
+    window.addEventListener('keyup', this.releaseSpace);
+    window.addEventListener('blur', this.releaseHand);
+    window.addEventListener('mouseup', this.finishCanvasDrag);
   }
 
   addConnectedNode(
@@ -532,7 +577,10 @@ export class WorkbenchGraphAdapter {
         }),
       );
     });
-    if (definition) this.graph.select(definition.id);
+    if (definition) {
+      this.graph.resetSelection(definition.id);
+      this.focusCanvas();
+    }
     return definition;
   }
 
@@ -603,7 +651,8 @@ export class WorkbenchGraphAdapter {
       nodeIds = [inputNode.id, derivedNode.id];
     });
     if (!derivedNode || nodeIds.length === 0) return undefined;
-    this.graph.select(derivedNode.id);
+    this.graph.resetSelection(derivedNode.id);
+    this.focusCanvas();
     return { derivedNode, inputNode, nodeIds };
   }
 
@@ -620,8 +669,19 @@ export class WorkbenchGraphAdapter {
     ) {
       return undefined;
     }
-    const definition = templateNode(template, position);
+    const definition = templateNode(
+      template,
+      position ??
+        findAvailableNodePosition(
+          this.graph.clientToLocal(this.canvasCenter()),
+          getCreativeNodeVisual(type),
+          this.graph
+            .getNodes()
+            .map((node) => ({ ...node.getPosition(), ...node.getSize() })),
+        ),
+    );
     this.graph.addNode(toX6Node(definition));
+    if (!position) this.focusNode(definition.id);
     return definition;
   }
 
@@ -639,7 +699,8 @@ export class WorkbenchGraphAdapter {
     this.graph.batchUpdate('pin-result-asset', () => {
       this.graph.addNode(toX6Node(inputNode));
     });
-    this.graph.select(inputNode.id);
+    this.graph.resetSelection(inputNode.id);
+    this.focusCanvas();
     return { inputNode, nodeIds: [inputNode.id] };
   }
 
@@ -893,10 +954,64 @@ export class WorkbenchGraphAdapter {
 
   clearSelection() {
     this.graph.cleanSelection();
-    this.callbacks.onSelectionChange?.();
+  }
+
+  getHistoryState() {
+    return {
+      canRedo: !this.readOnly && this.graph.canRedo(),
+      canUndo: !this.readOnly && this.graph.canUndo(),
+    };
+  }
+
+  getSelectedNodeCount() {
+    return this.graph.getSelectedCells().filter((cell) => cell.isNode()).length;
+  }
+
+  deleteSelection() {
+    if (this.readOnly) return;
+    const cells = this.graph.getSelectedCells();
+    if (!cells.length) return;
+    this.graph.batchUpdate('delete-selection', () =>
+      this.graph.removeCells(cells),
+    );
+    this.focusCanvas();
+  }
+
+  duplicateSelection() {
+    if (this.readOnly) return;
+    const cells = this.copyableSelection();
+    const nodes = cells.filter((cell) => cell.isNode());
+    if (
+      !nodes.length ||
+      this.graph.getNodes().length + nodes.length > MAX_WORKBENCH_NODES
+    )
+      return;
+    const clones = this.cloneEditableCells(cells);
+    this.graph.batchUpdate('duplicate-selection', () => {
+      clones.forEach((cell) => {
+        cell.translate(32, 32);
+      });
+      this.graph.model.addCells(clones);
+    });
+    this.graph.resetSelection(clones.filter((cell) => cell.isNode()));
+    this.focusCanvas();
   }
 
   disposeWorkbenchGraph() {
+    this.releaseHand();
+    this.scroller.container.removeEventListener(
+      'mousedown',
+      this.handleCanvasMouseDown,
+      true,
+    );
+    this.scroller.container.removeEventListener(
+      'mousemove',
+      this.rememberPointer,
+    );
+    window.removeEventListener('keyup', this.releaseSpace);
+    window.removeEventListener('blur', this.releaseHand);
+    window.removeEventListener('mouseup', this.finishCanvasDrag);
+    this.finishNodeDrag();
     this.scroller.container.removeEventListener(
       'scroll',
       this.scheduleViewportChange,
@@ -913,12 +1028,17 @@ export class WorkbenchGraphAdapter {
     this.graph.zoomToFit({ maxScale: 1, padding: 36 });
   }
 
+  focusCanvas() {
+    this.scroller.container.focus({ preventScroll: true });
+  }
+
   focusNode(id: string, minimumZoom = 0.65) {
     const node = this.graph.getCellById(id);
     if (!node?.isNode()) return false;
     if (this.graph.zoom() < minimumZoom) this.graph.zoomTo(minimumZoom);
-    this.graph.select(node);
+    this.graph.resetSelection(node);
     this.graph.centerCell(node, { padding: 72 });
+    this.focusCanvas();
     this.scheduleViewportChange();
     return true;
   }
@@ -989,7 +1109,7 @@ export class WorkbenchGraphAdapter {
   }
 
   redo() {
-    if (!this.readOnly && this.graph.canRedo()) this.graph.redo();
+    this.replayHistory('redo');
   }
 
   /**
@@ -1119,7 +1239,7 @@ export class WorkbenchGraphAdapter {
   }
 
   undo() {
-    if (!this.readOnly && this.graph.canUndo()) this.graph.undo();
+    this.replayHistory('undo');
   }
 
   updateNode(
@@ -1174,7 +1294,9 @@ export class WorkbenchGraphAdapter {
     const collectionNode = templateNode(
       imageCollection,
       this.rightOf(generationNode, 56),
-      { name: '多角度图片集合' },
+      {
+        name: '多角度图片集合',
+      },
     );
     const proposed = [
       {
@@ -1255,7 +1377,8 @@ export class WorkbenchGraphAdapter {
       if (!options?.workbenchRuntime) changed();
     });
     this.graph.on('node:mousedown', () => {
-      if (this.readOnly) return;
+      if (this.readOnly || this.nodeDragActive) return;
+      this.graph.startBatch('workbench-node-drag');
       this.nodeDragActive = true;
       this.nodeGeometryChangedDuringDrag = false;
       this.callbacks.onNodeDragStateChange?.(true);
@@ -1281,49 +1404,290 @@ export class WorkbenchGraphAdapter {
     });
     this.graph.on('translate', this.scheduleViewportChange);
     this.graph.on('resize', this.scheduleViewportChange);
-    this.graph.on('cell:selected', ({ cell }) => {
-      this.callbacks.onSelectionChange?.(
-        cell.isNode() ? this.workflowNodeFromCell(cell.id) : undefined,
-      );
+    this.graph.on('selection:changed', () => this.notifySelection());
+    this.graph.on('history:change', () =>
+      this.callbacks.onHistoryChange?.(this.getHistoryState()),
+    );
+    this.graph.on('blank:dblclick', ({ e }) => {
+      if (this.readOnly || this.spacePressed) return;
+      e.preventDefault();
+      this.requestNodePicker({ x: e.clientX, y: e.clientY });
     });
-    this.graph.on('blank:click', () => this.callbacks.onSelectionChange?.());
   }
 
   private bindShortcuts() {
     this.graph.bindKey(['backspace', 'delete'], (event) => {
-      if (this.readOnly || isEditableTarget(event.target)) return;
-      const cells = this.graph.getSelectedCells();
-      if (cells.length > 0) this.graph.removeCells(cells);
+      if (this.readOnly || !this.allowCanvasShortcut(event)) return;
+      this.deleteSelection();
+      return false;
     });
     this.graph.bindKey(['ctrl+z', 'meta+z'], (event) => {
       if (
         !this.readOnly &&
-        !isEditableTarget(event.target) &&
+        this.allowCanvasShortcut(event) &&
         this.graph.canUndo()
       ) {
-        this.graph.undo();
+        this.undo();
+        return false;
       }
     });
     this.graph.bindKey(['ctrl+shift+z', 'meta+shift+z'], (event) => {
       if (
         !this.readOnly &&
-        !isEditableTarget(event.target) &&
+        this.allowCanvasShortcut(event) &&
         this.graph.canRedo()
       ) {
-        this.graph.redo();
+        this.redo();
+        return false;
       }
     });
     this.graph.bindKey(['ctrl+c', 'meta+c'], (event) => {
-      if (!isEditableTarget(event.target)) {
-        this.graph.copy(this.graph.getSelectedCells());
+      if (this.allowCanvasShortcut(event)) {
+        this.copySelection();
+        return false;
       }
     });
     this.graph.bindKey(['ctrl+v', 'meta+v'], (event) => {
-      if (!this.readOnly && !isEditableTarget(event.target)) {
-        this.graph.paste({ offset: 28 });
+      if (!this.readOnly && this.allowCanvasShortcut(event)) {
+        this.pasteSelection();
+        return false;
       }
     });
+    this.graph.bindKey(['ctrl+d', 'meta+d'], (event) => {
+      if (this.readOnly || !this.allowCanvasShortcut(event)) return;
+      this.duplicateSelection();
+      return false;
+    });
+    this.graph.bindKey('tab', (event) => {
+      if (this.readOnly || !this.allowCanvasShortcut(event)) return;
+      this.requestNodePicker(this.lastPointer ?? this.canvasCenter());
+      return false;
+    });
+    this.graph.bindKey(
+      'space',
+      (event) => {
+        if (!this.allowCanvasShortcut(event)) return;
+        this.spacePressed = true;
+        this.scroller.container.style.cursor = 'grab';
+        return false;
+      },
+      'keydown',
+    );
   }
+
+  private allowCanvasShortcut(event: KeyboardEvent) {
+    return (
+      !event.defaultPrevented &&
+      !event.isComposing &&
+      !isEditableTarget(event.target) &&
+      event.target instanceof Element &&
+      this.scroller.container.contains(event.target)
+    );
+  }
+
+  private notifySelection() {
+    const cells = this.graph.getSelectedCells();
+    const single =
+      cells.length === 1 && cells[0]?.isNode() ? cells[0] : undefined;
+    this.callbacks.onSelectionCountChange?.(this.getSelectedNodeCount());
+    this.callbacks.onSelectionChange?.(
+      single ? this.workflowNodeFromCell(single.id) : undefined,
+    );
+  }
+
+  private replayHistory(direction: 'redo' | 'undo') {
+    if (
+      this.readOnly ||
+      !(direction === 'undo' ? this.graph.canUndo() : this.graph.canRedo())
+    )
+      return;
+
+    // X6 records a complete data object for a parameter edit. The execution
+    // stream can update status/preview afterwards, so preserve those live
+    // fields while replaying the user's config/name change.
+    const runtime = new Map(
+      this.graph.getNodes().map((node) => {
+        const data = node.getData() ?? {};
+        return [
+          node.id,
+          {
+            display: data.display,
+            hasDisplay: Object.hasOwn(data, 'display'),
+            hasStatus: Object.hasOwn(data, 'status'),
+            status: data.status,
+          },
+        ] as const;
+      }),
+    );
+    this.graph[direction]();
+    for (const node of this.graph.getNodes()) {
+      const current = runtime.get(node.id);
+      if (!current) continue;
+      const data = { ...node.getData() };
+      if (current.hasStatus) data.status = current.status;
+      else delete data.status;
+      if (current.hasDisplay) data.display = current.display;
+      else delete data.display;
+      node.setData(data, {
+        ignoreHistory: true,
+        overwrite: true,
+        workbenchRuntime: true,
+      });
+    }
+    this.callbacks.onNavigationChange?.();
+    this.notifySelection();
+    this.focusCanvas();
+  }
+
+  private canvasCenter(): WorkbenchPoint {
+    const rect = this.getCanvasClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  }
+
+  private copyableSelection(): Cell[] {
+    const nodes = this.graph
+      .getSelectedCells()
+      .filter(
+        (cell) => cell.isNode() && cell.getData()?.type !== 'content-planner',
+      );
+    const ids = new Set(nodes.map((node) => node.id));
+    return [
+      ...nodes,
+      ...this.graph
+        .getEdges()
+        .filter(
+          (edge) =>
+            ids.has(edge.getSourceCellId()) && ids.has(edge.getTargetCellId()),
+        ),
+    ];
+  }
+
+  private pasteSelection() {
+    if (this.readOnly) return;
+    const nodes = this.clipboardCells.filter((cell) => cell.isNode());
+    if (
+      !nodes.length ||
+      nodes.some((node) => node.getData()?.type === 'content-planner') ||
+      this.graph.getNodes().length + nodes.length > MAX_WORKBENCH_NODES
+    )
+      return;
+    const pasted = this.cloneEditableCells(this.clipboardCells);
+    this.clipboardOffset += 32;
+    pasted.forEach((cell) =>
+      cell.translate(this.clipboardOffset, this.clipboardOffset),
+    );
+    this.graph.batchUpdate('paste-selection', () => {
+      this.graph.model.addCells(pasted);
+      this.graph.resetSelection(pasted.filter((cell) => cell.isNode()));
+    });
+  }
+
+  private copySelection() {
+    // Keep a detached snapshot: X6's clipboard discards the clone ID map and
+    // clones again after each paste, leaving stable EDGE references behind.
+    this.clipboardCells = this.cloneEditableCells(this.copyableSelection());
+    this.clipboardOffset = 0;
+  }
+
+  private cloneEditableCells(cells: Cell[]) {
+    const cloneMap = this.graph.cloneCells(cells);
+    const edgeIds = new Map(
+      cells
+        .filter((cell) => cell.isEdge())
+        .map((cell) => [cell.id, cloneMap[cell.id]!.id]),
+    );
+    const clones = Object.values(cloneMap);
+    for (const node of clones.filter((cell) => cell.isNode())) {
+      this.resetCopiedNodeRuntime(node, edgeIds);
+    }
+    return clones;
+  }
+
+  private resetCopiedNodeRuntime(
+    node: Cell,
+    edgeIds: ReadonlyMap<string, string>,
+  ) {
+    const data = node.getData() ?? {};
+    const config = { ...data.config };
+    if (Array.isArray(config.promptReferenceBindings)) {
+      config.promptReferenceBindings = config.promptReferenceBindings.map(
+        (binding: unknown) => {
+          if (!binding || typeof binding !== 'object') return binding;
+          const record = binding as Record<string, unknown>;
+          if (typeof record.bindingKey !== 'string') return binding;
+          const match = /^EDGE:(.*):(\d+)$/.exec(record.bindingKey);
+          const edgeId = match ? edgeIds.get(match[1]!) : undefined;
+          return edgeId
+            ? { ...record, bindingKey: `EDGE:${edgeId}:${match![2]}` }
+            : binding;
+        },
+      );
+    }
+    node.setData(
+      {
+        config,
+        name: data.name,
+        ports: data.ports,
+        status: 'IDLE',
+        type: data.type,
+      },
+      { overwrite: true },
+    );
+  }
+
+  private requestNodePicker(clientPoint: WorkbenchPoint) {
+    this.callbacks.onRequestNodePicker?.({
+      clientPoint,
+      graphPoint: this.graph.clientToLocal(clientPoint),
+    });
+  }
+
+  private readonly rememberPointer = (event: MouseEvent) => {
+    this.lastPointer = { x: event.clientX, y: event.clientY };
+  };
+
+  private readonly handleCanvasMouseDown = (event: MouseEvent) => {
+    if (
+      !this.spacePressed ||
+      event.button !== 0 ||
+      isEditableTarget(event.target)
+    )
+      return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.handDrag = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      left: this.scroller.container.scrollLeft,
+      top: this.scroller.container.scrollTop,
+    };
+    this.scroller.container.style.cursor = 'grabbing';
+    window.addEventListener('mousemove', this.moveHand);
+  };
+
+  private readonly moveHand = (event: MouseEvent) => {
+    if (!this.handDrag) return;
+    this.scroller.container.scrollLeft =
+      this.handDrag.left - (event.clientX - this.handDrag.clientX);
+    this.scroller.container.scrollTop =
+      this.handDrag.top - (event.clientY - this.handDrag.clientY);
+  };
+
+  private readonly finishCanvasDrag = () => {
+    this.handDrag = undefined;
+    window.removeEventListener('mousemove', this.moveHand);
+    this.scroller.container.style.cursor = this.spacePressed ? 'grab' : '';
+    this.finishNodeDrag();
+  };
+
+  private readonly releaseHand = () => {
+    this.spacePressed = false;
+    this.finishCanvasDrag();
+  };
+
+  private readonly releaseSpace = (event: KeyboardEvent) => {
+    if (event.code === 'Space' || event.key === ' ') this.releaseHand();
+  };
 
   private canAddBranchEdge(
     inputNode: FdmCreativeApi.WorkflowNode,
@@ -1399,6 +1763,7 @@ export class WorkbenchGraphAdapter {
     const changed = this.nodeGeometryChangedDuringDrag;
     this.nodeDragActive = false;
     this.nodeGeometryChangedDuringDrag = false;
+    this.graph.stopBatch('workbench-node-drag');
     this.callbacks.onNodeDragStateChange?.(false, changed);
   }
 

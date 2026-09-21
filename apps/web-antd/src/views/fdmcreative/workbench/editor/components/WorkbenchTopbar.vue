@@ -1,38 +1,57 @@
 <script lang="ts" setup>
+import { computed, ref } from 'vue';
+
+import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
 
-import { Button, Space, Tooltip } from 'ant-design-vue';
+import { Button, Dropdown, Menu, Space, Tooltip } from 'ant-design-vue';
 
 defineOptions({ name: 'FdmCreativeWorkbenchTopbar' });
 
-withDefaults(
+type RunScope = 'DOWNSTREAM' | 'FULL' | 'NODE';
+
+const props = withDefaults(
   defineProps<{
+    busy?: boolean;
     canEdit?: boolean;
     canExport?: boolean;
     canImport?: boolean;
+    canRedo?: boolean;
     canRun?: boolean;
+    canRunSelected?: boolean;
+    canUndo?: boolean;
     dirty?: boolean;
     exporting?: boolean;
     importing?: boolean;
     projectName?: string;
     publishing?: boolean;
     roleLabel?: string;
+    running?: boolean;
     saveStatus: string;
     saving?: boolean;
+    selectedNodeName?: string;
+    selectedNodeType?: string;
     zoomPercent: number;
   }>(),
   {
+    busy: false,
     canEdit: true,
     canExport: true,
     canImport: true,
+    canRedo: false,
     canRun: true,
+    canRunSelected: false,
+    canUndo: false,
     dirty: false,
     exporting: false,
     importing: false,
     projectName: '',
     publishing: false,
     roleLabel: '',
+    running: false,
     saving: false,
+    selectedNodeName: '',
+    selectedNodeType: '',
   },
 );
 
@@ -40,103 +59,155 @@ const emit = defineEmits<{
   back: [];
   export: [];
   fit: [];
+  help: [];
   import: [];
   publish: [];
   redo: [];
-  run: [];
+  run: [scope: RunScope];
   save: [];
   undo: [];
   zoomBy: [delta: number];
 }>();
+
+const runScope = ref<RunScope>('FULL');
+const selectedScopeAvailable = computed(
+  () => props.canRunSelected && Boolean(props.selectedNodeName.trim()),
+);
+const runDisabled = computed(
+  () =>
+    props.busy ||
+    props.running ||
+    (runScope.value === 'FULL' ? !props.canRun : !selectedScopeAvailable.value),
+);
+const isPlanPreview = computed(
+  () =>
+    runScope.value === 'NODE' && props.selectedNodeType === 'content-planner',
+);
+const runLabel = computed(() => {
+  if (props.busy) return '提交中';
+  if (props.running) return '运行中';
+  if (isPlanPreview.value) return '预览方案';
+  if (runScope.value === 'NODE') return '仅运行此节点';
+  if (runScope.value === 'DOWNSTREAM') return '运行所选及下游';
+  return '从头运行画布';
+});
+const runTooltip = computed(() => {
+  if (props.busy) return '正在提交运行请求，请稍候';
+  if (props.running) return '当前任务正在运行，结束后可以再次运行';
+  if (runScope.value === 'FULL')
+    return '从头执行整张画布，会重新执行全部节点的生成任务';
+  if (!selectedScopeAvailable.value) return '请先选中一个可运行节点';
+  if (isPlanPreview.value)
+    return `为「${props.selectedNodeName}」生成方案预览，确认后再应用到画布`;
+  if (runScope.value === 'NODE')
+    return `仅运行「${props.selectedNodeName}」，使用已连接上游的现有结果，不重新执行其他节点`;
+  return `运行「${props.selectedNodeName}」及其下游节点，会实际执行生成任务`;
+});
+const saveFailed = computed(() => /失败|冲突/.test(props.saveStatus));
+const { hasAccessByCodes } = useAccess();
+const canExportWorkflow = computed(() =>
+  hasAccessByCodes(['fdmcreative:workflow:query']),
+);
+const canImportWorkflow = computed(() =>
+  hasAccessByCodes(['fdmcreative:workflow:update']),
+);
+const canPublishWorkflow = computed(() =>
+  hasAccessByCodes(['fdmcreative:workflow:publish']),
+);
+const hasMoreActions = computed(
+  () =>
+    canExportWorkflow.value ||
+    canImportWorkflow.value ||
+    canPublishWorkflow.value,
+);
+
+function run() {
+  if (!runDisabled.value) emit('run', runScope.value);
+}
 </script>
 
 <template>
   <header class="topbar">
     <div class="topbar__start">
       <Tooltip title="返回项目列表">
-        <Button class="icon-button" type="text" @click="emit('back')">
+        <Button
+          aria-label="返回项目列表"
+          class="icon-button"
+          type="text"
+          @click="emit('back')"
+        >
           <IconifyIcon icon="lucide:arrow-left" />
         </Button>
       </Tooltip>
-      <strong class="workbench-title">节点式图像视频工作台</strong>
-      <div class="project-name">
-        <span>{{ projectName || '未命名项目' }}</span>
+      <div class="project-heading">
+        <strong class="project-name" :title="projectName || '未命名项目'">{{
+          projectName || '未命名项目'
+        }}</strong>
+        <span
+          v-if="canEdit"
+          v-access:code="['fdmcreative:workflow:update']"
+          class="save-state"
+          :class="{ dirty, 'is-error': saveFailed }"
+          :aria-label="`画布保存状态：${saveStatus}`"
+          aria-live="polite"
+          ><i></i>{{ saveStatus }}</span
+        >
       </div>
       <span v-if="roleLabel" class="role-badge">{{ roleLabel }}</span>
-      <span
-        v-if="canEdit"
-        v-access:code="['fdmcreative:workflow:update']"
-        class="save-state"
-        :class="{ dirty }"
-        :aria-label="`画布保存状态：${saveStatus}`"
-        :title="`画布保存状态：${saveStatus}`"
-      >
-        <i></i>{{ saveStatus }}
-      </span>
     </div>
     <Space class="canvas-controls" :size="2">
       <Tooltip title="撤销">
         <Button
+          aria-label="撤销"
           class="icon-button"
-          :disabled="!canEdit"
+          :disabled="!canEdit || !canUndo"
           type="text"
           @click="emit('undo')"
-        >
-          <IconifyIcon icon="lucide:undo-2" />
-        </Button>
+          ><IconifyIcon icon="lucide:undo-2"
+        /></Button>
       </Tooltip>
       <Tooltip title="重做">
         <Button
+          aria-label="重做"
           class="icon-button"
-          :disabled="!canEdit"
+          :disabled="!canEdit || !canRedo"
           type="text"
           @click="emit('redo')"
-        >
-          <IconifyIcon icon="lucide:redo-2" />
-        </Button>
+          ><IconifyIcon icon="lucide:redo-2"
+        /></Button>
       </Tooltip>
       <Tooltip title="缩小">
-        <Button class="icon-button" type="text" @click="emit('zoomBy', -0.1)">
-          <IconifyIcon icon="lucide:minus" />
-        </Button>
+        <Button
+          aria-label="缩小画布"
+          class="icon-button"
+          type="text"
+          @click="emit('zoomBy', -0.1)"
+          ><IconifyIcon icon="lucide:minus"
+        /></Button>
       </Tooltip>
       <span class="zoom-value">{{ zoomPercent }}%</span>
       <Tooltip title="放大">
-        <Button class="icon-button" type="text" @click="emit('zoomBy', 0.1)">
-          <IconifyIcon icon="lucide:plus" />
-        </Button>
+        <Button
+          aria-label="放大画布"
+          class="icon-button"
+          type="text"
+          @click="emit('zoomBy', 0.1)"
+          ><IconifyIcon icon="lucide:plus"
+        /></Button>
       </Tooltip>
       <Tooltip title="适配画布">
-        <Button class="icon-button" type="text" @click="emit('fit')">
-          <IconifyIcon icon="lucide:scan" />
-        </Button>
+        <Button
+          aria-label="适配画布"
+          class="icon-button"
+          type="text"
+          @click="emit('fit')"
+          ><IconifyIcon icon="lucide:scan"
+        /></Button>
       </Tooltip>
     </Space>
-    <Space>
-      <Tooltip title="导出安全的工作流结构，不包含运行记录、临时链接或凭据">
-        <Button
-          v-access:code="['fdmcreative:workflow:query']"
-          :disabled="!canExport"
-          :loading="exporting"
-          @click="emit('export')"
-        >
-          <IconifyIcon icon="lucide:download" />
-          导出
-        </Button>
-      </Tooltip>
-      <Tooltip title="导入会先预检素材引用，再明确确认替换当前草稿">
-        <Button
-          v-access:code="['fdmcreative:workflow:update']"
-          :disabled="!canImport"
-          :loading="importing"
-          @click="emit('import')"
-        >
-          <IconifyIcon icon="lucide:upload" />
-          导入
-        </Button>
-      </Tooltip>
+    <div class="topbar__actions">
       <Tooltip
-        :title="`当前：${saveStatus}。立即保存当前画布；发布任务时也会先自动保存`"
+        :title="`当前：${saveStatus}。立即保存当前画布；发布版本时也会先自动保存`"
       >
         <Button
           v-if="canEdit"
@@ -147,120 +218,150 @@ const emit = defineEmits<{
           :loading="saving"
           @click="emit('save')"
         >
-          <IconifyIcon icon="lucide:save" />
-          保存草稿
+          <IconifyIcon icon="lucide:save" /><span>保存草稿</span>
         </Button>
       </Tooltip>
-      <Button
-        v-access:code="['fdmcreative:execution:run']"
-        :disabled="!canRun"
-        @click="emit('run')"
-      >
-        <IconifyIcon icon="lucide:play" />
-        试运行
-      </Button>
-      <Button
-        v-access:code="['fdmcreative:workflow:publish']"
-        :disabled="!canEdit"
-        :loading="publishing"
-        type="primary"
-        @click="emit('publish')"
-      >
-        <IconifyIcon icon="lucide:workflow" />
-        发布任务
-      </Button>
-    </Space>
+      <div v-access:code="['fdmcreative:execution:run']" class="run-controls">
+        <select
+          v-model="runScope"
+          aria-label="运行范围"
+          class="run-scope"
+          :disabled="busy || running"
+        >
+          <option value="FULL" :disabled="!canRun">从头运行画布</option>
+          <option value="NODE" :disabled="!selectedScopeAvailable">
+            仅运行此节点
+          </option>
+          <option value="DOWNSTREAM" :disabled="!selectedScopeAvailable">
+            所选及下游
+          </option>
+        </select>
+        <Tooltip :title="runTooltip">
+          <Button
+            class="run-button"
+            :disabled="runDisabled"
+            :loading="busy || running"
+            type="primary"
+            @click="run"
+            ><IconifyIcon v-if="!running" icon="lucide:play" />{{
+              runLabel
+            }}</Button
+          >
+        </Tooltip>
+      </div>
+      <Dropdown v-if="hasMoreActions" :trigger="['click']">
+        <Button aria-label="更多画布操作" class="icon-button more-button"
+          ><IconifyIcon icon="lucide:ellipsis"
+        /></Button>
+        <template #overlay>
+          <Menu>
+            <Menu.Item
+              key="export"
+              v-if="canExportWorkflow"
+              :disabled="!canExport || exporting"
+              @click="emit('export')"
+            >
+              <IconifyIcon icon="lucide:download" />{{
+                exporting ? '正在导出…' : '导出工作流'
+              }}
+            </Menu.Item>
+            <Menu.Item
+              key="import"
+              v-if="canImportWorkflow"
+              :disabled="!canEdit || !canImport || importing"
+              @click="emit('import')"
+            >
+              <IconifyIcon icon="lucide:upload" />{{
+                importing ? '正在导入…' : '导入工作流'
+              }}
+            </Menu.Item>
+            <Menu.Item
+              key="publish"
+              v-if="canPublishWorkflow"
+              :disabled="!canEdit || publishing"
+              @click="emit('publish')"
+            >
+              <IconifyIcon icon="lucide:workflow" />{{
+                publishing ? '正在发布…' : '发布版本'
+              }}
+            </Menu.Item>
+          </Menu>
+        </template>
+      </Dropdown>
+      <Tooltip title="操作帮助与快捷键">
+        <Button
+          aria-label="操作帮助与快捷键"
+          class="icon-button help-button"
+          type="text"
+          @click="emit('help')"
+          ><IconifyIcon icon="lucide:circle-help"
+        /></Button>
+      </Tooltip>
+    </div>
   </header>
 </template>
 
 <style scoped>
 .topbar {
   z-index: 5;
-  display: grid;
-  grid-template-columns: minmax(500px, 1fr) auto minmax(420px, 1fr);
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   align-items: center;
-  padding: 0 20px;
+  min-width: 0;
+  padding: 9px 16px;
   color: hsl(var(--foreground));
   background: hsl(var(--card));
   border-bottom: 1px solid hsl(var(--border));
-  box-shadow: 0 2px 10px hsl(var(--foreground) / 4%);
-}
-
-.topbar > :last-child {
-  justify-self: end;
-}
-
-.topbar__start,
-.project-name {
-  display: flex;
-  align-items: center;
 }
 
 .topbar__start {
-  gap: 10px;
+  display: flex;
+  flex: 1 1 200px;
+  gap: 8px;
+  align-items: center;
   min-width: 0;
 }
 
-.workbench-title {
-  flex: none;
-  font-size: 15px;
-  font-weight: 650;
-  white-space: nowrap;
+.project-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .project-name {
-  gap: 8px;
   min-width: 0;
-  height: 34px;
-  padding: 0 12px;
-  color: hsl(var(--foreground) / 86%);
-  background: hsl(var(--muted) / 38%);
-  border: 1px solid hsl(var(--border));
-  border-radius: 9px;
-}
-
-.project-name span {
-  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
-}
-
-.project-name :deep(svg) {
-  width: 13px;
-  height: 13px;
-  color: hsl(var(--muted-foreground));
 }
 
 .role-badge {
   flex: none;
-  padding: 3px 7px;
-  font-size: 10px;
+  padding: 2px 6px;
+  font-size: 11px;
   color: hsl(var(--primary));
   background: hsl(var(--primary) / 10%);
-  border: 1px solid hsl(var(--primary) / 18%);
-  border-radius: 999px;
+  border-radius: 5px;
 }
 
 .save-state {
   display: inline-flex;
-  flex: none;
   gap: 5px;
   align-items: center;
-  padding: 4px 6px;
-  font-size: 10px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
-  background: transparent;
-  border-radius: 6px;
+  overflow-wrap: anywhere;
 }
 
 .save-state i {
-  width: 8px;
-  height: 8px;
+  flex: none;
+  width: 6px;
+  height: 6px;
   background: #16a34a;
-  border-radius: 999px;
+  border-radius: 50%;
 }
 
 .save-state.dirty {
@@ -271,42 +372,103 @@ const emit = defineEmits<{
   background: #f59e0b;
 }
 
+.save-state.is-error {
+  color: hsl(var(--destructive));
+}
+
+.save-state.is-error i {
+  background: currentColor;
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 7px;
+}
+
 .icon-button :deep(svg) {
   width: 17px;
   height: 17px;
 }
 
 .canvas-controls {
-  height: 36px;
-  padding: 0 4px;
-  background: hsl(var(--card));
+  flex: none;
+  padding: 0 3px;
   border: 1px solid hsl(var(--border));
-  border-radius: 9px;
-  box-shadow: 0 2px 8px hsl(var(--foreground) / 4%);
+  border-radius: 7px;
 }
 
 .zoom-value {
-  min-width: 44px;
+  display: inline-block;
+  min-width: 40px;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
-@media (max-width: 1500px) {
-  .topbar {
-    grid-template-columns: minmax(390px, 1fr) auto minmax(380px, 1fr);
-  }
+.topbar__actions,
+.run-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.topbar__actions {
+  margin-left: auto;
+}
+
+.run-scope {
+  min-width: 0;
+  height: 32px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.run-scope:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.run-button,
+.save-draft-button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 1200px) {
   .topbar {
-    grid-template-columns: minmax(260px, 1fr) auto minmax(330px, 1fr);
-    padding: 0 10px;
+    gap: 8px 10px;
+    padding: 8px 10px;
   }
 
-  .save-state,
-  .topbar__start .project-name {
+  .save-draft-button span {
     display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar__start,
+  .topbar__actions {
+    flex-basis: 100%;
+  }
+
+  .topbar__actions {
+    margin-left: 0;
+  }
+
+  .canvas-controls {
+    margin-right: auto;
   }
 }
 </style>

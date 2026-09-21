@@ -81,14 +81,19 @@ export function useWorkflowAutosave(options: WorkflowAutosaveOptions) {
   // RETRYING deliberately stays clickable in the top bar: a user can choose
   // “save now” to cancel the backoff and force the same stable snapshot once.
   const isSaving = computed(() => status.value === 'SAVING');
-  const hasUnpersistedSnapshot = computed(
-    () =>
+  const hasUnpersistedSnapshot = computed(() => {
+    // Queue entries are plain variables. Always subscribe to their reactive
+    // lifecycle status, even when a pending entry short-circuits the result.
+    // Otherwise a rendered dirty flag stays cached after a successful save.
+    const currentStatus = status.value;
+    return (
       pendingCaptures.value > 0 ||
       Boolean(active || pending || failed) ||
-      status.value === 'CONFLICT' ||
-      status.value === 'ERROR' ||
-      status.value === 'OFFLINE',
-  );
+      currentStatus === 'CONFLICT' ||
+      currentStatus === 'ERROR' ||
+      currentStatus === 'OFFLINE'
+    );
+  });
   const needsUnloadGuard: ComputedRef<boolean> = computed(
     () => hasUnpersistedSnapshot.value,
   );

@@ -28,6 +28,7 @@ import { FileUpload } from '#/components/upload';
 import AssetLibraryPicker from '../../../shared/AssetLibraryPicker.vue';
 import PromptLibraryPicker from '../../../shared/PromptLibraryPicker.vue';
 import {
+  countImageReferences,
   invalidPromptImageReferenceNumbers,
   normalizePromptReferenceBindings,
   reconcilePromptReferenceBindings,
@@ -319,6 +320,14 @@ function normalizedSelectNumber(value: unknown) {
 
 const config = computed(() => props.node.config ?? {});
 const template = computed(() => CREATIVE_NODE_MAP.get(props.node.type));
+const referenceInputRequired = computed(() =>
+  (template.value?.ports ?? props.node.ports).some(
+    (port) =>
+      port.direction === 'INPUT' &&
+      ['image-asset', 'image-list'].includes(port.type) &&
+      port.required,
+  ),
+);
 const imageConfig = computed(() => asRecord(config.value.image));
 const videoConfig = computed(() => asRecord(config.value.video));
 const isAssetInput = computed(() =>
@@ -411,26 +420,42 @@ const editorStyle = computed(() => ({
   width: props.variant === 'panel' ? '100%' : `${props.width}px`,
 }));
 
-const effectiveStatus = computed(
-  () =>
-    (props.busy ? 'RUNNING' : undefined) ??
-    props.nodeRun?.status ??
-    props.executionStatus ??
-    'IDLE',
+const ACTIVE_NODE_STATUSES = new Set([
+  'ARCHIVING_AI',
+  'BLOCKED',
+  'CANCEL_REQUESTED',
+  'CREATED',
+  'PENDING',
+  'RUNNING',
+  'WAITING_AI',
+]);
+const executionFinished = computed(() =>
+  ['CANCELED', 'FAILED', 'PARTIAL_SUCCESS', 'SUCCEEDED'].includes(
+    props.executionStatus ?? '',
+  ),
 );
-const isRunning = computed(
-  () =>
-    props.busy ||
-    [
-      'ARCHIVING_AI',
-      'BLOCKED',
-      'CANCEL_REQUESTED',
-      'CREATED',
-      'PENDING',
-      'RUNNING',
-      'WAITING_AI',
-    ].includes(effectiveStatus.value),
+const executionRunning = computed(() =>
+  ['CREATED', 'RUNNING', 'CANCEL_REQUESTED'].includes(
+    props.executionStatus ?? '',
+  ),
 );
+const effectiveStatus = computed(() => {
+  const status = props.nodeRun?.status ?? 'IDLE';
+  return executionFinished.value && ACTIVE_NODE_STATUSES.has(status)
+    ? 'TASK_FINISHED'
+    : status;
+});
+const isNodeRunning = computed(() =>
+  ACTIVE_NODE_STATUSES.has(effectiveStatus.value),
+);
+const isRunning = computed(() => executionRunning.value || isNodeRunning.value);
+const runLabel = computed(() => {
+  if (props.busy) return '提交中';
+  if (isNodeRunning.value) return '运行中';
+  if (executionRunning.value) return '任务运行中';
+  return isPlanner.value ? '预览方案' : '仅运行此节点';
+});
+const runPending = computed(() => props.busy || isRunning.value);
 const statusMeta = computed(() => {
   const map: Record<string, { color?: string; label: string }> = {
     ARCHIVING_AI: { color: 'processing', label: '结果归档中' },
@@ -446,6 +471,7 @@ const statusMeta = computed(() => {
     SKIPPED: { label: '已跳过' },
     STALE: { color: 'orange', label: '需要更新' },
     SUCCEEDED: { color: 'green', label: '已完成' },
+    TASK_FINISHED: { label: '任务已结束' },
     WAITING_AI: { color: 'processing', label: '模型生成中' },
   };
   return map[effectiveStatus.value] ?? { label: String(effectiveStatus.value) };
@@ -652,7 +678,9 @@ const promptReferenceError = computed(() => {
     ),
   );
   return invalid.length > 0
-    ? `提示词中的 ${invalid.map((index) => `@图片${index}`).join('、')} 没有对应的参考图片，请重新选择或连接图片`
+    ? `提示词中的 ${invalid
+        .map((index) => `@图片${index}`)
+        .join('、')} 没有对应的参考图片，请重新选择或连接图片`
     : undefined;
 });
 const promptTemplateError = computed(() => {
@@ -666,7 +694,9 @@ const promptTemplateError = computed(() => {
     (variable) => variable && !['brief', 'context', 'input'].includes(variable),
   );
   if (invalid.length > 0) {
-    return `不支持的模板变量：${[...new Set(invalid)].map((item) => `{{${item}}}`).join('、')}`;
+    return `不支持的模板变量：${[...new Set(invalid)]
+      .map((item) => `{{${item}}}`)
+      .join('、')}`;
   }
   const unmatched = prompt.replace(variablePattern, '');
   if (unmatched.includes('{{') || unmatched.includes('}}')) {
@@ -691,38 +721,22 @@ function effectiveReferenceCount() {
   // This helper is evaluated while the model-selection computed refs are being created. Do not
   // read displayedReferences here: that computed is declared later and Vue may evaluate the model
   // list immediately, which previously triggered a temporal-dead-zone ReferenceError.
-  const configured = asNumberList(config.value.referenceAssetIds);
-  const connected = props.connectedReferences
-    .map((reference) => reference.assetId)
-    .filter((id): id is number => typeof id === 'number');
-  return new Set([...configured, ...connected]).size;
+  const configuredPort =
+    props.node.type === 'image-edit'
+      ? 'image'
+      : [
+            'video-generate',
+            'image-to-video',
+            'first-last-frame-to-video',
+          ].includes(props.node.type)
+        ? 'first-frame'
+        : 'reference';
+  return countImageReferences(
+    config.value,
+    props.connectedReferences,
+    configuredPort,
+  );
 }
-
-watch(
-  [availableModels, selectedModelId],
-  () => {
-    if (props.readonly || !isAiNode.value || selectedModelId.value) return;
-    const defaultModel = availableModels.value[0];
-    const logicalModelId = normalizeModelIdentifier(defaultModel?.id);
-    if (logicalModelId) emit('configChange', 'logicalModelId', logicalModelId);
-  },
-  { immediate: true },
-);
-
-watch(
-  synchronizedPromptReferenceBindings,
-  (bindings) => {
-    if (
-      props.readonly ||
-      JSON.stringify(bindings) ===
-        JSON.stringify(storedPromptReferenceBindings.value)
-    ) {
-      return;
-    }
-    emit('configChange', 'promptReferenceBindings', bindings);
-  },
-  { flush: 'post', immediate: true },
-);
 
 function frameAssetId(slot: 'firstFrameAssetId' | 'lastFrameAssetId') {
   return asNumber(config.value[slot] ?? videoConfig.value[slot]);
@@ -736,12 +750,34 @@ function emitConfig(key: string, value: unknown) {
   if (!props.readonly) emit('configChange', key, value);
 }
 
-function changePrompt(value: string) {
-  const normalized = value.replaceAll(
-    /\{\{\s*(input|context|brief)\s*\}\}/gi,
-    (_, variable: string) => `{{${variable.toLowerCase()}}}`,
+function persistPromptReferenceBindings(nextReferenceIds: number[] = []) {
+  if (props.readonly) return;
+  // Keep the current aliases, including references being removed, before applying
+  // a user edit. Merely displaying derived aliases must not modify the draft.
+  const bindings = reconcilePromptReferenceBindings(
+    nextReferenceIds
+      .filter((id) => !connectedAssetIds.value.has(id))
+      .map((id) => `ASSET:${id}`),
+    synchronizedPromptReferenceBindings.value,
   );
-  emitConfig('prompt', normalized.slice(0, 1000));
+  if (
+    JSON.stringify(bindings) !==
+    JSON.stringify(storedPromptReferenceBindings.value)
+  ) {
+    emitConfig('promptReferenceBindings', bindings);
+  }
+}
+
+function changePrompt(value: string) {
+  const normalized = value
+    .replaceAll(
+      /\{\{\s*(input|context|brief)\s*\}\}/gi,
+      (_, variable: string) => `{{${variable.toLowerCase()}}}`,
+    )
+    .slice(0, 1000);
+  if (normalized === asString(config.value.prompt)) return;
+  persistPromptReferenceBindings();
+  emitConfig('prompt', normalized);
 }
 
 function mergedLibraryText(
@@ -858,12 +894,15 @@ function selectInputAssetFromLibrary(assets: FdmCreativeApi.CreativeAsset[]) {
 function selectReferenceAssetsFromLibrary(
   assets: FdmCreativeApi.CreativeAsset[],
 ) {
+  if (props.readonly) return;
   const ids = [
     ...new Set([
       ...referenceAssetIds.value,
       ...assets.map((asset) => asset.id),
     ]),
   ];
+  if (JSON.stringify(ids) === JSON.stringify(referenceAssetIds.value)) return;
+  persistPromptReferenceBindings(ids);
   emit('assetChange', { assets, key: 'referenceAssetIds', value: ids });
 }
 
@@ -890,7 +929,10 @@ function changeInputAsset(value: unknown) {
 }
 
 function changeReferenceAssets(value: unknown) {
-  emitAssetChange('referenceAssetIds', asNumberList(value));
+  const ids = asNumberList(value);
+  if (JSON.stringify(ids) === JSON.stringify(referenceAssetIds.value)) return;
+  persistPromptReferenceBindings(ids);
+  emitAssetChange('referenceAssetIds', ids);
 }
 
 function removeReferenceAsset(id: number) {
@@ -931,13 +973,13 @@ function commitNameEvent(event: Event) {
 }
 
 function runNode() {
-  if (props.canRun && !isRunning.value && !nodeValidationError.value) {
+  if (props.canRun && !runPending.value && !nodeValidationError.value) {
     emit('run', props.node.id);
   }
 }
 
 function runDownstream() {
-  if (props.canRun && !isRunning.value && !nodeValidationError.value) {
+  if (props.canRun && !runPending.value && !nodeValidationError.value) {
     emit('runDownstream', props.node.id);
   }
 }
@@ -1040,14 +1082,18 @@ function schemaSelectValue(key: string) {
 }
 
 function formatReferenceMeta(reference: {
+  assetId?: number;
   connected: boolean;
   mimeType?: string;
   sourceNodeName?: string;
 }) {
   if (reference.connected) {
-    return reference.sourceNodeName
-      ? `来自连线 · ${reference.sourceNodeName}`
-      : '来自连线';
+    const source = reference.sourceNodeName
+      ? ` · ${reference.sourceNodeName}`
+      : '';
+    return reference.assetId
+      ? `已自动引用${source}`
+      : `已连接，生成后自动传入${source}`;
   }
   return reference.mimeType
     ? reference.mimeType.replace('image/', '').toUpperCase()
@@ -1117,7 +1163,7 @@ function handleEditorEscape() {
         {{ statusMeta.label }}
       </Tag>
       <span
-        v-if="isRunning && typeof progress === 'number'"
+        v-if="isNodeRunning && typeof progress === 'number'"
         class="header-progress"
       >
         {{ Math.round(progress) }}%
@@ -1148,7 +1194,7 @@ function handleEditorEscape() {
     </header>
 
     <Progress
-      v-if="isRunning && typeof progress === 'number'"
+      v-if="isNodeRunning && typeof progress === 'number'"
       class="running-progress"
       :percent="progress"
       :show-info="false"
@@ -1167,7 +1213,9 @@ function handleEditorEscape() {
           </strong>
           <span v-if="isPlanner">用于保持角色、商品和视觉风格一致</span>
           <span v-else-if="!isAssetInput">
-            可选，模型能力不支持时会在执行前提示
+            {{
+              referenceInputRequired ? '必需' : '可选'
+            }}：连接上游后自动传入，也可补充素材
           </span>
         </div>
 
@@ -1240,7 +1288,9 @@ function handleEditorEscape() {
               :api="uploadApi"
               directory="fdmcreative"
               :disabled="readonly"
-              :help-text="`支持 ${uploadAccept.join(' / ') || '常用素材格式'}，最大 ${uploadMaxSize || 25} MB`"
+              :help-text="`支持 ${
+                uploadAccept.join(' / ') || '常用素材格式'
+              }，最大 ${uploadMaxSize || 25} MB`"
               :max-number="1"
               :max-size="uploadMaxSize"
               :show-description="false"
@@ -2525,29 +2575,38 @@ function handleEditorEscape() {
       </Button>
 
       <div class="toolbar-spacer"></div>
-      <Button
-        v-if="canRun && expanded"
-        class="downstream-button"
-        :disabled="isRunning || Boolean(nodeValidationError)"
-        @click="runDownstream"
-      >
-        从此向下运行
-      </Button>
+      <Tooltip title="运行当前节点及其下游节点，会实际执行生成任务">
+        <Button
+          v-if="canRun"
+          class="downstream-button"
+          :disabled="runPending || Boolean(nodeValidationError)"
+          @click="runDownstream"
+        >
+          从此向下运行
+        </Button>
+      </Tooltip>
       <Tooltip
         :title="
-          nodeValidationError || (isRunning ? '节点正在执行' : '运行当前节点')
+          nodeValidationError ||
+          (busy
+            ? '正在提交运行请求，请稍候'
+            : isRunning
+              ? '当前任务正在运行，结束后可以再次运行'
+              : isPlanner
+                ? '预览创作方案'
+                : '仅运行此节点，使用已连接上游的现有结果，不重新执行其他节点')
         "
       >
         <Button
           v-if="canRun"
           class="run-button"
-          :disabled="isRunning || Boolean(nodeValidationError)"
-          :loading="isRunning"
-          shape="circle"
+          :disabled="runPending || Boolean(nodeValidationError)"
+          :loading="runPending"
           type="primary"
           @click="runNode"
         >
-          <IconifyIcon v-if="!isRunning" icon="lucide:arrow-up" />
+          <IconifyIcon v-if="!runPending" icon="lucide:play" />
+          {{ runLabel }}
         </Button>
       </Tooltip>
     </footer>
@@ -3630,12 +3689,11 @@ function handleEditorEscape() {
 .editor-toolbar {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   gap: 7px;
   align-items: center;
   min-height: 56px;
   padding: 9px 12px;
-  overflow-x: auto;
-  scrollbar-width: thin;
   background: hsl(var(--muted) / 24%);
   border-radius: 0 0 12px 12px;
 }
@@ -3690,14 +3748,13 @@ function handleEditorEscape() {
 }
 
 .run-button {
-  display: inline-grid;
-  flex: 0 0 40px;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  background: #1677ff;
-  box-shadow: 0 6px 14px rgb(22 119 255 / 24%);
+  display: inline-flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding-inline: 10px;
 }
 
 .run-button :deep(svg) {

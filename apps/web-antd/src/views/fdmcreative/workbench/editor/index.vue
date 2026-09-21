@@ -24,12 +24,12 @@ import {
 } from 'vue';
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
 
 import {
   Alert,
   Button,
-  Drawer,
   Empty,
   Input,
   InputNumber,
@@ -65,6 +65,7 @@ import {
   previewWorkflowImport,
   publishWorkflow,
   refineCreativePrompt,
+  retryCreativeNode,
   runCreativeWorkflow,
   saveWorkflowDraft,
   syncContentPlan,
@@ -82,7 +83,12 @@ import NodeInlineEditor from './components/NodeInlineEditor.vue';
 import NodeLibraryPanel from './components/NodeLibraryPanel.vue';
 import WorkbenchTopbar from './components/WorkbenchTopbar.vue';
 import WorkflowConflictModal from './components/WorkflowConflictModal.vue';
-import { resolveConnectedImageReferences } from './connected-image-references';
+import {
+  countImageReferences,
+  resolveConnectedImageReferences,
+} from './connected-image-references';
+import { canRetryNode, workflowRunNodeIds } from './execution-feedback';
+import { resolveGeneratedImageAssets } from './generated-image-assets';
 import { CREATIVE_NODE_CATALOG } from './graph/catalog';
 import {
   createWorkbenchGraph,
@@ -113,6 +119,7 @@ import {
 defineOptions({ name: 'FdmCreativeWorkbenchEditor' });
 
 interface NodeLibraryPanelExpose {
+  focusSearch: () => Promise<void>;
   getElement: () => HTMLElement | undefined;
 }
 
@@ -123,6 +130,7 @@ interface PromptLibrarySelection {
 
 const route = useRoute();
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
 const projectId = computed(() => Number(route.params.projectId));
 const canvasRef = ref<HTMLElement>();
 const canvasShellRef = ref<HTMLElement>();
@@ -136,10 +144,35 @@ const graphRevision = ref(0);
 const zoomPercent = ref(100);
 const canvasNavigatorOpen = ref(false);
 const agentPanelOpen = ref(false);
-const agentPanelWidth = ref(480);
-const viewportWidth = ref(
-  typeof window === 'undefined' ? 1440 : window.innerWidth,
+const agentPanelWidth = ref(400);
+const libraryCompact = ref(
+  typeof window !== 'undefined' && window.innerWidth < 1440,
 );
+const sidePanel = ref<'assistant' | 'parameters' | 'tasks'>('parameters');
+const sidePanelOpen = ref(false);
+const shortcutHelpOpen = ref(false);
+const selectionCount = ref(0);
+const historyState = ref({ canRedo: false, canUndo: false });
+const runSubmitting = ref(false);
+const taskActionBusy = ref(false);
+const executionHistory = ref<FdmCreativeApi.Execution[]>([]);
+const historyPage = ref(1);
+const historyTotal = ref(0);
+const historyLoading = ref(false);
+const historyError = ref('');
+const inspectedExecution = ref<FdmCreativeApi.ExecutionDetail>();
+const executionSyncError = ref('');
+const imageImportInput = ref<HTMLInputElement>();
+const imageImportBusy = ref(false);
+const imageImportProgress = ref('');
+const imageDragDepth = ref(0);
+const nodePickerRequest = ref<{
+  clientPoint: { x: number; y: number };
+  graphPoint: { x: number; y: number };
+}>();
+let historyRequestSequence = 0;
+let taskDetailSequence = 0;
+let assetRequestSequence = 0;
 const project = ref<FdmCreativeApi.Project>();
 const draftVersion = ref(0);
 const workflowCapability = ref<FdmCreativeApi.WorkflowCapability>({
@@ -174,9 +207,15 @@ const nodeResultVersions = ref<FdmCreativeApi.NodeResultVersion[]>([]);
 const nodeResultLoading = ref(false);
 const mediaTools = ref<FdmCreativeApi.MediaToolDescriptor[]>([]);
 const quickConnectRequest = ref<WorkbenchBlankConnectionRequest>();
+const activePickerRequest = computed(
+  () => quickConnectRequest.value ?? nodePickerRequest.value,
+);
 const quickConnectSearch = ref('');
+const quickConnectActiveIndex = ref(0);
 let executionTimer: ReturnType<typeof setTimeout> | undefined;
 let executionEventRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let executionMonitorSequence = 0;
+const monitoredExecutionId = ref<number>();
 let planTimer: ReturnType<typeof setTimeout> | undefined;
 let promptRefineTimer: ReturnType<typeof setTimeout> | undefined;
 let initializationGeneration = 0;
@@ -231,30 +270,59 @@ const plannerPromptTarget = computed<FdmCreativeApi.PromptTargetType>(() =>
   planner.mode === 'IMAGE_SET'
     ? 'IMAGE'
     : planner.mode === 'VIDEO_SEQUENCE'
-      ? 'VIDEO'
-      : 'GENERAL',
+    ? 'VIDEO'
+    : 'GENERAL',
 );
 
 const selectedConfig = computed(() => selectedNode.value?.config ?? {});
 const currentUserRole = computed(() => project.value?.currentUserRole);
-const canEdit = computed(() =>
-  ['EDITOR', 'OWNER'].includes(currentUserRole.value ?? ''),
+const canEdit = computed(
+  () =>
+    ['EDITOR', 'OWNER'].includes(currentUserRole.value ?? '') &&
+    hasAccessByCodes(['fdmcreative:workflow:update']),
+);
+const canImportImages = computed(
+  () => canEdit.value && hasAccessByCodes(['fdmcreative:asset:create']),
+);
+const hasRunRole = computed(
+  () => Boolean(currentUserRole.value) && currentUserRole.value !== 'VIEWER',
 );
 const canRun = computed(
-  () => Boolean(currentUserRole.value) && currentUserRole.value !== 'VIEWER',
+  () => hasRunRole.value && hasAccessByCodes(['fdmcreative:execution:run']),
 );
 const canRunSelectedNode = computed(
   () =>
-    canRun.value &&
-    (canEdit.value || selectedNode.value?.type !== 'content-planner'),
-);
-const agentPanelUsesDrawer = computed(
-  // Preserve a usable graph viewport rather than forcing four narrow desktop columns.
-  () => viewportWidth.value < (selectedNode.value ? 1600 : 1120),
+    Boolean(selectedNode.value) &&
+    (selectedNode.value?.type === 'content-planner'
+      ? canEdit.value && hasAccessByCodes(['fdmcreative:plan:generate'])
+      : canRun.value),
 );
 const agentPanelStyle = computed<CSSProperties>(() => ({
-  '--agent-panel-width': `${agentPanelWidth.value}px`,
+  '--sidebar-width': `${
+    sidePanel.value === 'assistant' ? agentPanelWidth.value : 400
+  }px`,
+  '--library-width': libraryCompact.value ? '56px' : '210px',
 }));
+const taskExecution = computed(() => {
+  const current =
+    runningExecution.value?.id === monitoredExecutionId.value
+      ? runningExecution.value
+      : undefined;
+  return inspectedExecution.value?.id === current?.id
+    ? current
+    : inspectedExecution.value ?? current;
+});
+const taskNodeNames = computed(() =>
+  Object.fromEntries(
+    agentWorkflowNodes.value.map((node) => [node.id, node.name || node.id]),
+  ),
+);
+const canCancelTask = computed(
+  () => hasRunRole.value && hasAccessByCodes(['fdmcreative:execution:cancel']),
+);
+const canRetryTask = computed(
+  () => hasRunRole.value && hasAccessByCodes(['fdmcreative:execution:retry']),
+);
 const agentWorkflowNodes = computed(() => {
   // X6 owns the live graph; this revision makes add/remove/config changes visible to Agent refs.
   void graphRevision.value;
@@ -275,15 +343,15 @@ const inputUploadAccept = computed(() =>
   selectedNode.value?.type === 'audio-input'
     ? ['mp3', 'wav', 'm4a', 'flac', 'ogg']
     : selectedNode.value?.type === 'video-input'
-      ? ['mp4', 'mov', 'webm']
-      : ['jpg', 'jpeg', 'png', 'webp'],
+    ? ['mp4', 'mov', 'webm']
+    : ['jpg', 'jpeg', 'png', 'webp'],
 );
 const inputUploadMaxSize = computed(() =>
   selectedNode.value?.type === 'audio-input'
     ? 100
     : selectedNode.value?.type === 'video-input'
-      ? 500
-      : 25,
+    ? 500
+    : 25,
 );
 const quickConnectStyle = computed<CSSProperties>(() => ({
   left: `${quickConnectPosition.left}px`,
@@ -291,7 +359,15 @@ const quickConnectStyle = computed<CSSProperties>(() => ({
 }));
 const filteredQuickConnectOptions = computed(() => {
   const keyword = quickConnectSearch.value.trim().toLowerCase();
-  return (quickConnectRequest.value?.options ?? []).filter(
+  const options =
+    quickConnectRequest.value?.options ??
+    (nodePickerRequest.value
+      ? CREATIVE_NODE_CATALOG.map((template) => ({
+          template,
+          targetPortId: '',
+        }))
+      : []);
+  return options.filter(
     ({ template }) =>
       !keyword ||
       template.label.toLowerCase().includes(keyword) ||
@@ -308,7 +384,13 @@ const aggregatedRunningNodeRuns = computed(() =>
 );
 const activeExecutionId = computed(() => {
   const execution = runningExecution.value;
+  if (
+    monitoredExecutionId.value &&
+    execution?.id !== monitoredExecutionId.value
+  )
+    return monitoredExecutionId.value;
   return execution &&
+    execution.id === monitoredExecutionId.value &&
     ['CANCEL_REQUESTED', 'CREATED', 'RUNNING'].includes(execution.status)
     ? execution.id
     : undefined;
@@ -323,22 +405,18 @@ const { state: executionStreamState } = useExecutionEventStream({
 });
 const selectedResultNodeRun = computed(() =>
   selectedNode.value
-    ? (aggregatedRunningNodeRuns.value.find(
+    ? aggregatedRunningNodeRuns.value.find(
         (nodeRun) => nodeRun.nodeId === selectedNode.value?.id,
-      ) ?? latestNodeRunsByNodeId.value[selectedNode.value.id])
+      ) ?? latestNodeRunsByNodeId.value[selectedNode.value.id]
     : undefined,
 );
-const inlineEditorBusy = computed(
-  () =>
-    plannerBusy.value ||
-    [
-      'ARCHIVING_AI',
-      'BLOCKED',
-      'CANCEL_REQUESTED',
-      'PENDING',
-      'RUNNING',
-      'WAITING_AI',
-    ].includes(selectedResultNodeRun.value?.status ?? ''),
+const currentExecutionStatus = computed<
+  FdmCreativeApi.ExecutionStatus | undefined
+>(() =>
+  monitoredExecutionId.value &&
+  runningExecution.value?.id !== monitoredExecutionId.value
+    ? 'CREATED'
+    : runningExecution.value?.status,
 );
 const inlineEditorProgress = computed(() => {
   const status = selectedResultNodeRun.value?.status;
@@ -381,64 +459,21 @@ const resultAssets = computed(() => {
   );
 });
 const generatedImageAssetsByNodeId = computed(() => {
-  const result = new Map<string, FdmCreativeApi.CreativeAsset[]>();
-  const metadataForwardingTypes = new Set([
-    'image-collection',
-    'image-loop',
-    'image-select',
-  ]);
-  const orderedNodeIds = new Set<string>();
-  const nodeRuns = runningExecution.value?.nodeRuns ?? [];
-  const nodeRunById = new Map(nodeRuns.map((nodeRun) => [nodeRun.id, nodeRun]));
-  const append = (nodeId: string, asset: FdmCreativeApi.CreativeAsset) => {
-    const canvasNodeId = canvasNodeIdForRun(nodeId);
-    const values = result.get(canvasNodeId) ?? [];
-    if (!values.some((item) => item.id === asset.id)) values.push(asset);
-    result.set(canvasNodeId, values);
-  };
-  const imageAssetById = new Map(
-    projectAssets.value
-      .filter((asset) => asset.kind === 'IMAGE')
-      .map((asset) => [asset.id, asset]),
+  // A partial run must not hide results produced by another node's earlier run.
+  // Archived output JSON is available before the whole execution finishes and
+  // also covers results outside the first page of the project asset picker.
+  const runs = new Map<number, FdmCreativeApi.NodeRun>();
+  for (const run of Object.values(latestNodeRunsByNodeId.value)) {
+    if (run) runs.set(run.id, run);
+  }
+  for (const run of runningExecution.value?.nodeRuns ?? []) {
+    runs.set(run.id, run);
+  }
+  return resolveGeneratedImageAssets(
+    projectId.value,
+    [...runs.values()],
+    projectAssets.value,
   );
-  for (const nodeRun of nodeRuns) {
-    if (
-      !nodeRun.outputJson ||
-      !nodeRun.nodeType ||
-      !metadataForwardingTypes.has(nodeRun.nodeType)
-    ) {
-      continue;
-    }
-    const assetIds = new Set<number>();
-    try {
-      collectOutputReferences(
-        JSON.parse(nodeRun.outputJson),
-        assetIds,
-        new Set(),
-      );
-    } catch {
-      continue;
-    }
-    if (assetIds.size > 0) {
-      orderedNodeIds.add(canvasNodeIdForRun(nodeRun.nodeId));
-    }
-    for (const assetId of assetIds) {
-      const asset = imageAssetById.get(assetId);
-      if (asset) append(nodeRun.nodeId, asset);
-    }
-  }
-  for (const asset of projectAssets.value) {
-    if (asset.kind !== 'IMAGE' || !asset.sourceNodeRunId) continue;
-    const nodeRun = nodeRunById.get(asset.sourceNodeRunId);
-    if (!nodeRun) continue;
-    append(nodeRun.nodeId, asset);
-  }
-  for (const [nodeId, values] of result) {
-    if (!orderedNodeIds.has(nodeId)) {
-      values.sort((left, right) => left.id - right.id);
-    }
-  }
-  return result;
 });
 const connectedImageReferences = computed(() => {
   // X6 owns the graph state, so this revision makes edge/config changes reactive.
@@ -594,12 +629,20 @@ function collectOutputReferences(
 }
 
 async function refreshProjectAssets(targetProjectId = projectId.value) {
+  if (targetProjectId !== projectId.value) return;
+  const generation = initializationGeneration;
+  const sequence = ++assetRequestSequence;
   const page = await getCreativeAssetPage({
     pageNo: 1,
     pageSize: 100,
     projectId: targetProjectId,
   }).catch(() => undefined);
-  if (page && targetProjectId === projectId.value) {
+  if (
+    page &&
+    sequence === assetRequestSequence &&
+    generation === initializationGeneration &&
+    targetProjectId === projectId.value
+  ) {
     projectAssets.value = page.list;
     syncAssetNodePreviews();
     syncExecutionNodePreviews();
@@ -680,6 +723,15 @@ function syncExecutionNodePreviews() {
       previewUrl: asset.url,
     });
   }
+  for (const [nodeId, assets] of generatedImageAssetsByNodeId.value) {
+    const asset = assets.at(-1);
+    if (!asset?.url) continue;
+    graphAdapter.setNodeDisplayData(nodeId, {
+      assetName: asset.name,
+      assetType: asset.kind,
+      previewUrl: asset.url,
+    });
+  }
 }
 
 function mergeLatestNodeRuns(execution: FdmCreativeApi.ExecutionDetail) {
@@ -705,7 +757,8 @@ async function restoreLatestExecution(
     if (
       !latest ||
       generation !== initializationGeneration ||
-      runningExecution.value
+      runningExecution.value ||
+      monitoredExecutionId.value !== undefined
     ) {
       return;
     }
@@ -713,10 +766,12 @@ async function restoreLatestExecution(
     if (
       generation !== initializationGeneration ||
       targetProjectId !== projectId.value ||
-      runningExecution.value
+      runningExecution.value ||
+      monitoredExecutionId.value !== undefined
     ) {
       return;
     }
+    monitoredExecutionId.value = execution.id;
     runningExecution.value = execution;
     mergeLatestNodeRuns(execution);
     for (const nodeRun of aggregateLoopNodeRuns(execution.nodeRuns ?? [])) {
@@ -760,6 +815,8 @@ async function uploadInputAsset(
   onUploadProgress?: AxiosProgressEvent,
 ) {
   const node = selectedNode.value;
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
   if (
     !node ||
     !['audio-input', 'image-input', 'video-input'].includes(node.type)
@@ -770,39 +827,52 @@ async function uploadInputAsset(
     node.type === 'audio-input'
       ? 'AUDIO'
       : node.type === 'video-input'
-        ? 'VIDEO'
-        : 'IMAGE';
+      ? 'VIDEO'
+      : 'IMAGE';
   const mimePrefix =
     kind === 'AUDIO' ? 'audio/' : kind === 'VIDEO' ? 'video/' : 'image/';
   const maxBytes = inputUploadMaxSize.value * 1024 * 1024;
   if (!file.type.startsWith(mimePrefix)) {
     throw new Error(
-      `请选择有效的${kind === 'AUDIO' ? '音频' : kind === 'VIDEO' ? '视频' : '图片'}文件`,
+      `请选择有效的${
+        kind === 'AUDIO' ? '音频' : kind === 'VIDEO' ? '视频' : '图片'
+      }文件`,
     );
   }
   if (file.size > maxBytes) {
     throw new Error(`文件不能超过 ${inputUploadMaxSize.value} MB`);
   }
   const response = await uploadFdmObject(
-    { directory: `fdmcreative/${projectId.value}/uploads`, file },
+    { directory: `fdmcreative/${targetProjectId}/uploads`, file },
     onUploadProgress,
   );
   const url = uploadedUrl(response);
   if (!url) throw new Error('文件服务未返回可用 URL');
+  if (generation !== initializationGeneration)
+    throw new Error('项目已切换，已停止绑定素材');
   const assetId = await createCreativeAsset({
     kind,
     name: file.name,
-    projectId: projectId.value,
+    projectId: targetProjectId,
     url,
   });
+  if (
+    generation !== initializationGeneration ||
+    !adapter.value?.graph.getCellById(node.id)
+  )
+    throw new Error('原节点已移除，素材已保存在原项目中');
+  const currentNode = adapter.value
+    .serializeDefinition()
+    .nodes.find((item) => item.id === node.id);
+  if (!currentNode) throw new Error('原节点已移除，素材已保存在原项目中');
   const overrides = new Set(
-    Array.isArray(node.config.userOverrides)
-      ? node.config.userOverrides.map(String)
+    Array.isArray(currentNode.config.userOverrides)
+      ? currentNode.config.userOverrides.map(String)
       : [],
   );
   overrides.add('assetId');
   const config = {
-    ...node.config,
+    ...currentNode.config,
     assetId,
     userOverrides: [...overrides],
   };
@@ -812,9 +882,11 @@ async function uploadInputAsset(
     previewUrl: url,
   });
   if (selectedNode.value?.id === node.id) {
-    selectedNode.value = { ...node, config };
+    selectedNode.value = { ...currentNode, config };
   }
-  await refreshProjectAssets(projectId.value);
+  await refreshProjectAssets(targetProjectId);
+  if (generation !== initializationGeneration)
+    throw new Error('项目已切换，素材已保存在原项目中');
   message.success('素材已上传并绑定到当前节点');
   return url;
 }
@@ -825,6 +897,8 @@ async function uploadInputAsset(
  * path—so the gateway remains inside FDM's existing asset and permission boundary.
  */
 async function uploadAgentReferenceAsset(file: File) {
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
   let kind: 'AUDIO' | 'IMAGE' | 'VIDEO' | undefined;
   if (file.type.startsWith('image/')) {
     kind = 'IMAGE';
@@ -840,24 +914,348 @@ async function uploadAgentReferenceAsset(file: File) {
     throw new Error(`${kindLabel}不能超过 ${maxSizeMb} MB`);
   }
   const response = await uploadFdmObject({
-    directory: `fdmcreative/${projectId.value}/agent-references`,
+    directory: `fdmcreative/${targetProjectId}/agent-references`,
     file,
   });
   const url = uploadedUrl(response);
   if (!url) throw new Error('文件服务未返回可用 URL');
+  if (generation !== initializationGeneration)
+    throw new Error('项目已切换，已停止添加素材');
   const assetId = await createCreativeAsset({
     kind,
     name: file.name,
-    projectId: projectId.value,
+    projectId: targetProjectId,
     url,
   });
   const asset = await getCreativeAsset(assetId);
-  await refreshProjectAssets(projectId.value);
+  if (generation !== initializationGeneration)
+    throw new Error('项目已切换，素材已保存在原项目中');
+  await refreshProjectAssets(targetProjectId);
+  if (generation !== initializationGeneration)
+    throw new Error('项目已切换，已停止当前上传批次');
   return asset;
 }
 
+async function importCanvasImages(
+  files: File[],
+  point?: { x: number; y: number },
+) {
+  if (!canImportImages.value || imageImportBusy.value || !adapter.value) return;
+  if (!files.length) return;
+  if (files.length > 20) return void message.warning('每次最多导入 20 张图片');
+  const invalid = files.find(
+    (file) => !file.type.startsWith('image/') || file.size > 25 * 1024 * 1024,
+  );
+  if (invalid)
+    return void message.warning(
+      `「${invalid.name}」不是有效图片或超过 25 MB，请重新选择`,
+    );
+  if (
+    adapter.value.graph.getNodes().length + files.length >
+    MAX_WORKBENCH_NODES
+  )
+    return void message.warning(
+      `画布最多容纳 ${MAX_WORKBENCH_NODES} 个节点，请先整理画布`,
+    );
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
+  imageImportBusy.value = true;
+  let imported = 0;
+  try {
+    for (const file of files) {
+      if (generation !== initializationGeneration || !canImportImages.value)
+        return;
+      const graph = adapter.value;
+      if (!graph || graph.graph.getNodes().length >= MAX_WORKBENCH_NODES)
+        throw new Error('已达到画布节点数量上限');
+      imageImportProgress.value = `导入图片 ${imported + 1}/${files.length}`;
+      const response = await uploadFdmObject({
+        directory: `fdmcreative/${targetProjectId}/uploads`,
+        file,
+      });
+      if (generation !== initializationGeneration) return;
+      const url = uploadedUrl(response);
+      if (!url) throw new Error('文件服务未返回可用图片地址');
+      const assetId = await createCreativeAsset({
+        kind: 'IMAGE',
+        name: file.name,
+        projectId: targetProjectId,
+        url,
+      });
+      if (generation !== initializationGeneration || !canImportImages.value)
+        return;
+      const position = point
+        ? { x: point.x + imported * 48, y: point.y + imported * 48 }
+        : undefined;
+      let nodeId: string | undefined;
+      graph.graph.batchUpdate('import-canvas-image', () => {
+        const node = graph.addNode('image-input', position);
+        if (!node) return;
+        nodeId = node.id;
+        graph.updateNode(node.id, {
+          name: file.name,
+          config: { ...node.config, assetId, userOverrides: ['assetId'] },
+        });
+        graph.setNodeDisplayData(node.id, {
+          assetName: file.name,
+          previewUrl: url,
+        });
+      });
+      if (!nodeId)
+        throw new Error('素材已上传，请从素材库绑定；当前画布无法再添加节点');
+      graph.focusNode(nodeId);
+      selectedNode.value = graph
+        .serializeDefinition()
+        .nodes.find((node) => node.id === nodeId);
+      imported += 1;
+    }
+    message.success(`已导入 ${imported} 张图片，可连接到生图或编辑节点`);
+  } catch (error) {
+    if (generation === initializationGeneration)
+      message.error(
+        `${imported ? `已导入 ${imported} 张；` : ''}${
+          error instanceof Error ? error.message : '图片导入失败，请重试'
+        }`,
+      );
+  } finally {
+    if (generation === initializationGeneration) {
+      imageImportBusy.value = false;
+      imageImportProgress.value = '';
+      void refreshProjectAssets(targetProjectId);
+    }
+  }
+}
+
+function handleImageFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const files = [...(input.files ?? [])];
+  input.value = '';
+  void importCanvasImages(files);
+}
+
+function handleCanvasDrag(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect =
+    canImportImages.value && !imageImportBusy.value ? 'copy' : 'none';
+  if (event.type === 'dragenter') imageDragDepth.value += 1;
+  if (event.type === 'dragleave')
+    imageDragDepth.value = Math.max(0, imageDragDepth.value - 1);
+}
+
+function handleCanvasDrop(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  imageDragDepth.value = 0;
+  if (!canImportImages.value || imageImportBusy.value) return;
+  const point = adapter.value?.graph.clientToLocal(
+    event.clientX,
+    event.clientY,
+  );
+  void importCanvasImages([...event.dataTransfer.files], point);
+}
+
 function toggleAgentPanel() {
-  agentPanelOpen.value = !agentPanelOpen.value;
+  if (sidePanelOpen.value && sidePanel.value === 'assistant') {
+    sidePanelOpen.value = false;
+    return;
+  }
+  openSidePanel('assistant');
+}
+
+function openSidePanel(panel: 'assistant' | 'parameters' | 'tasks') {
+  sidePanel.value = panel;
+  sidePanelOpen.value = true;
+  if (panel === 'assistant') agentPanelOpen.value = true;
+  if (panel === 'tasks') void refreshTaskHistory();
+}
+
+function handleSidebarTabKey(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'End', 'Home'].includes(event.key)) return;
+  event.preventDefault();
+  const panels = ['parameters', 'tasks', 'assistant'] as const;
+  const current = panels.indexOf(sidePanel.value);
+  const index =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+      ? 2
+      : (current + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+  const panel = panels[index]!;
+  openSidePanel(panel);
+  void nextTick(() =>
+    document.getElementById(`workbench-tab-${panel}`)?.focus(),
+  );
+}
+
+async function refreshTaskHistory(loadMore = false) {
+  if (loadMore && historyLoading.value) return;
+  const sequence = ++historyRequestSequence;
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
+  const detailSequence = taskDetailSequence;
+  const pageNo = loadMore ? historyPage.value + 1 : 1;
+  historyLoading.value = true;
+  historyError.value = '';
+  try {
+    const page = await getCreativeExecutionPage({
+      pageNo,
+      pageSize: 20,
+      projectId: targetProjectId,
+    });
+    if (
+      sequence !== historyRequestSequence ||
+      targetProjectId !== projectId.value ||
+      generation !== initializationGeneration
+    )
+      return;
+    const entries = loadMore
+      ? [...executionHistory.value, ...page.list]
+      : page.list;
+    executionHistory.value = [
+      ...new Map(entries.map((item) => [item.id, item])).values(),
+    ];
+    historyTotal.value = page.total;
+    historyPage.value = pageNo;
+    if (
+      !loadMore &&
+      inspectedExecution.value &&
+      detailSequence === taskDetailSequence
+    )
+      void inspectTask(inspectedExecution.value.id);
+  } catch {
+    if (
+      sequence === historyRequestSequence &&
+      generation === initializationGeneration
+    )
+      historyError.value = '任务记录加载失败，请点击刷新重试';
+  } finally {
+    if (
+      sequence === historyRequestSequence &&
+      generation === initializationGeneration
+    )
+      historyLoading.value = false;
+  }
+}
+
+function refreshTaskPanel() {
+  void refreshTaskHistory();
+  if (monitoredExecutionId.value)
+    void monitorExecution(monitoredExecutionId.value, projectId.value, true);
+}
+
+async function inspectTask(id: number) {
+  const sequence = ++taskDetailSequence;
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
+  if (id === monitoredExecutionId.value && id === runningExecution.value?.id) {
+    inspectedExecution.value = undefined;
+    return;
+  }
+  try {
+    const detail = await getCreativeExecution(id);
+    if (
+      sequence !== taskDetailSequence ||
+      generation !== initializationGeneration ||
+      targetProjectId !== projectId.value
+    )
+      return;
+    inspectedExecution.value = detail;
+  } catch {
+    if (
+      sequence === taskDetailSequence &&
+      generation === initializationGeneration
+    )
+      message.error('任务详情加载失败，请重试');
+  }
+}
+
+function locateTaskNode(nodeId: string) {
+  if (!adapter.value?.graph.getCellById(nodeId)) {
+    message.info('这个节点已不在当前草稿中，原始运行记录仍然保留');
+    return;
+  }
+  openSidePanel('parameters');
+  void locateCanvasNode(nodeId);
+}
+
+function retryTaskNode(nodeRun: FdmCreativeApi.NodeRun) {
+  const execution = taskExecution.value;
+  if (
+    !canRetryTask.value ||
+    taskActionBusy.value ||
+    !execution ||
+    !canRetryNode(execution, nodeRun)
+  )
+    return;
+  const wouldInterruptTask = () =>
+    runSubmitting.value ||
+    Boolean(
+      activeExecutionId.value && activeExecutionId.value !== execution.id,
+    );
+  if (wouldInterruptTask()) {
+    message.info('请等待当前任务结束后再重试历史任务');
+    return;
+  }
+  const targetProjectId = projectId.value;
+  const generation = initializationGeneration;
+  Modal.confirm({
+    title: '按原参数重试此节点？',
+    content:
+      '将使用这次任务的原始参数重试，并恢复因失败被跳过或过期的下游节点。当前画布的新修改不会带入，可能产生新的模型调用费用。',
+    okText: '重试此节点',
+    cancelText: '返回修改',
+    onOk: async () => {
+      if (
+        !canRetryTask.value ||
+        taskActionBusy.value ||
+        generation !== initializationGeneration ||
+        targetProjectId !== projectId.value
+      )
+        return;
+      if (wouldInterruptTask()) {
+        message.info('请等待当前任务结束后再重试历史任务');
+        return;
+      }
+      taskActionBusy.value = true;
+      const monitorIdAtRetry = monitoredExecutionId.value;
+      try {
+        await retryCreativeNode(nodeRun.id);
+        if (
+          generation !== initializationGeneration ||
+          targetProjectId !== projectId.value
+        )
+          return;
+        if (
+          wouldInterruptTask() ||
+          (monitoredExecutionId.value !== monitorIdAtRetry &&
+            monitoredExecutionId.value !== execution.id)
+        ) {
+          // A newer task owns the monitor; this retry only refreshes history.
+          void refreshTaskHistory();
+          return;
+        }
+        inspectedExecution.value = undefined;
+        ++taskDetailSequence;
+        // Retrying reuses the execution id. Its old terminal snapshot must not
+        // unlock new launches if the first refreshed detail request fails.
+        runningExecution.value = { ...execution, status: 'CREATED' };
+        await monitorExecution(execution.id, targetProjectId);
+        void refreshTaskHistory();
+      } finally {
+        if (generation === initializationGeneration)
+          taskActionBusy.value = false;
+      }
+    },
+  });
+}
+
+function runFromTopbar(scope: FdmCreativeApi.ExecutionScope) {
+  if (scope === 'FULL') return void run('FULL');
+  const node = selectedNode.value;
+  if (!node || !canRunSelectedNode.value) return;
+  if (scope === 'NODE') handleInlineRun(node.id);
+  else handleInlineRunDownstream(node.id);
 }
 
 function recordGraphChange() {
@@ -953,10 +1351,6 @@ function monitorAgentExecution() {
   }, 450);
 }
 
-function updateViewportWidth() {
-  viewportWidth.value = window.innerWidth;
-}
-
 function handleBeforeUnload(event: BeforeUnloadEvent) {
   if (!autosave.needsUnloadGuard.value) return;
   event.preventDefault();
@@ -972,6 +1366,26 @@ async function initialize() {
   adapter.value = undefined;
   selectedNode.value = undefined;
   runningExecution.value = undefined;
+  inspectedExecution.value = undefined;
+  executionHistory.value = [];
+  historyTotal.value = 0;
+  historyLoading.value = false;
+  historyError.value = '';
+  runSubmitting.value = false;
+  taskActionBusy.value = false;
+  selectionCount.value = 0;
+  historyState.value = { canRedo: false, canUndo: false };
+  executionSyncError.value = '';
+  imageImportBusy.value = false;
+  imageImportProgress.value = '';
+  imageDragDepth.value = 0;
+  sidePanelOpen.value = false;
+  agentPanelOpen.value = false;
+  ++historyRequestSequence;
+  ++taskDetailSequence;
+  ++assetRequestSequence;
+  ++executionMonitorSequence;
+  monitoredExecutionId.value = undefined;
   latestNodeRunsByNodeId.value = {};
   pendingPlan.value = undefined;
   projectAssets.value = [];
@@ -1017,7 +1431,8 @@ async function initialize() {
     project.value = projectData;
     workflowCapability.value = capability;
     modelOptions.value = availableModels.models;
-    modelLoadError.value = availableModels.error ||
+    modelLoadError.value =
+      availableModels.error ||
       (availableModels.models.length === 0
         ? '暂无可用创作模型，请检查模型、服务商和路由是否启用'
         : '');
@@ -1038,6 +1453,23 @@ async function initialize() {
           recordGraphChange();
         },
         onConnectToBlank: openQuickConnect,
+        onRequestNodePicker: (request) => {
+          if (!canEdit.value) return;
+          adapter.value?.clearSelection();
+          quickConnectRequest.value = undefined;
+          nodePickerRequest.value = request;
+          quickConnectSearch.value = '';
+          void nextTick(() => {
+            updateQuickConnectPosition();
+            quickConnectRef.value?.querySelector('input')?.focus();
+          });
+        },
+        onSelectionCountChange: (count) => {
+          selectionCount.value = count;
+        },
+        onHistoryChange: (state) => {
+          historyState.value = state;
+        },
         onNodeDragStateChange: handleNodeDragStateChange,
         onNavigationChange: () => {
           if (canvasNavigatorOpen.value) refreshNavigationNodes();
@@ -1045,10 +1477,11 @@ async function initialize() {
         onSelectionChange: (node) => {
           if (node) closeQuickConnect();
           selectedNode.value = node;
+          if (node) openSidePanel('parameters');
           syncPlannerControls(node);
         },
         onViewportChange: () => {
-          const request = quickConnectRequest.value;
+          const request = activePickerRequest.value;
           if (!request || !adapter.value) return;
           const clientPoint = adapter.value.graph.localToClient(
             request.graphPoint,
@@ -1065,6 +1498,7 @@ async function initialize() {
       },
     );
     adapter.value.restoreDefinition(draft?.definition ?? EMPTY_WORKFLOW);
+    historyState.value = adapter.value.getHistoryState();
     refreshNavigationNodes();
     autosave.resetBaseline(
       draft ?? {
@@ -1096,7 +1530,7 @@ function startDrag(type: string, event: MouseEvent) {
 
 function addNode(type: string) {
   if (!canEdit.value) return;
-  if (!adapter.value?.addNode(type, { x: 180, y: 160 })) {
+  if (!adapter.value?.addNode(type)) {
     message.warning(
       type === 'content-planner'
         ? '画布中只能有一个 AI 内容规划节点'
@@ -1123,7 +1557,7 @@ async function locateCanvasNode(nodeId: string) {
 }
 
 function updateQuickConnectPosition() {
-  const request = quickConnectRequest.value;
+  const request = activePickerRequest.value;
   const shell = canvasShellRef.value;
   if (!request || !shell) return;
   const shellRect = shell.getBoundingClientRect();
@@ -1150,6 +1584,7 @@ function updateQuickConnectPosition() {
 
 function openQuickConnect(request: WorkbenchBlankConnectionRequest) {
   if (!canEdit.value) return;
+  nodePickerRequest.value = undefined;
   adapter.value?.clearSelection();
   quickConnectSearch.value = '';
   quickConnectRequest.value = request;
@@ -1159,16 +1594,33 @@ function openQuickConnect(request: WorkbenchBlankConnectionRequest) {
   });
 }
 
-function closeQuickConnect() {
+function closeQuickConnect(restoreFocus = false) {
   quickConnectRequest.value = undefined;
+  nodePickerRequest.value = undefined;
   quickConnectSearch.value = '';
+  quickConnectActiveIndex.value = 0;
+  if (restoreFocus) adapter.value?.focusCanvas();
 }
 
 function createQuickConnectedNode(option: CreativeQuickConnectOption) {
   if (!canEdit.value) return;
   const request = quickConnectRequest.value;
   const graphAdapter = adapter.value;
-  if (!request || !graphAdapter) return;
+  if (!graphAdapter) return;
+  if (!request && nodePickerRequest.value) {
+    const node = graphAdapter.addNode(
+      option.template.type,
+      nodePickerRequest.value.graphPoint,
+    );
+    closeQuickConnect();
+    if (node) graphAdapter.focusNode(node.id);
+    else
+      message.warning(
+        '该节点无法添加，请检查节点数量上限或是否已存在内容规划节点',
+      );
+    return;
+  }
+  if (!request) return;
   const created = graphAdapter.addConnectedNode(request, option);
   closeQuickConnect();
   if (!created) {
@@ -1176,14 +1628,31 @@ function createQuickConnectedNode(option: CreativeQuickConnectOption) {
   }
 }
 
-function chooseFirstQuickConnectOption() {
-  const option = filteredQuickConnectOptions.value[0];
+function chooseQuickConnectOption() {
+  const option =
+    filteredQuickConnectOptions.value[quickConnectActiveIndex.value];
   if (option) createQuickConnectedNode(option);
 }
 
+function stepQuickConnectOption(direction: number) {
+  const count = filteredQuickConnectOptions.value.length;
+  if (!count) return;
+  quickConnectActiveIndex.value =
+    (quickConnectActiveIndex.value + direction + count) % count;
+  void nextTick(() =>
+    quickConnectRef.value
+      ?.querySelector('.quick-connect-option.is-active')
+      ?.scrollIntoView({ block: 'nearest' }),
+  );
+}
+
+watch(filteredQuickConnectOptions, () => {
+  quickConnectActiveIndex.value = 0;
+});
+
 function handleQuickConnectPointerDown(event: PointerEvent) {
   if (
-    quickConnectRequest.value &&
+    activePickerRequest.value &&
     event.target instanceof Node &&
     !quickConnectRef.value?.contains(event.target)
   ) {
@@ -1263,21 +1732,39 @@ function ensurePlannerNode() {
 }
 
 function defaultModelForNode(node: FdmCreativeApi.WorkflowNode) {
-  const referenceAssetIds = Array.isArray(node.config.referenceAssetIds)
-    ? node.config.referenceAssetIds.filter(
-        (item): item is number => typeof item === 'number',
+  const definition = adapter.value?.serializeDefinition();
+  const references = definition
+    ? resolveConnectedImageReferences(
+        definition,
+        node.id,
+        projectAssets.value,
+        generatedImageAssetsByNodeId.value,
       )
     : [];
+  const configuredTargetPort =
+    node.type === 'image-edit'
+      ? 'image'
+      : [
+          'video-generate',
+          'image-to-video',
+          'first-last-frame-to-video',
+        ].includes(node.type)
+      ? 'first-frame'
+      : 'reference';
+  const referenceCount = countImageReferences(
+    node.config,
+    references,
+    configuredTargetPort,
+  );
   return modelOptions.value.find((model) => {
     if (node.type === 'content-planner') {
       return (
         model.modality === 'TEXT' &&
         model.capabilities.includes('STRUCTURED_OUTPUT') &&
-        (referenceAssetIds.length === 0 ||
-          model.capabilities.includes('IMAGE_INPUT'))
+        (referenceCount === 0 || model.capabilities.includes('IMAGE_INPUT'))
       );
     }
-    return supportsNodeModel(model, node.type, referenceAssetIds);
+    return supportsNodeModel(model, node.type, Array(referenceCount).fill(0));
   });
 }
 
@@ -1299,11 +1786,16 @@ function plannerLogicalModelIdForNode(node: FdmCreativeApi.WorkflowNode) {
   );
 }
 
-function ensureDefaultModels() {
+function ensureDefaultModels(
+  scope: FdmCreativeApi.ExecutionScope = 'FULL',
+  startNodeId?: string,
+) {
   const graphAdapter = adapter.value;
   if (!graphAdapter) return false;
+  const definition = graphAdapter.serializeDefinition();
+  const selected = workflowRunNodeIds(definition, scope, startNodeId);
   let allConfigured = true;
-  for (const node of graphAdapter.serializeDefinition().nodes) {
+  for (const node of definition.nodes.filter((node) => selected.has(node.id))) {
     if (!ensureDefaultModel(node)) allConfigured = false;
   }
   return allConfigured;
@@ -1391,6 +1883,7 @@ function syncPlannerControls(node?: FdmCreativeApi.WorkflowNode) {
 function closeInlineEditor() {
   selectedNode.value = undefined;
   adapter.value?.clearSelection();
+  if (sidePanel.value === 'parameters') sidePanelOpen.value = false;
 }
 
 function handleInlineConfigChange(key: string, value: unknown) {
@@ -1619,15 +2112,50 @@ function handleInlineRunDownstream(nodeId: string) {
   void run('DOWNSTREAM', nodeId);
 }
 
+function hasVisibleWorkbenchPopup() {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-modal-wrap',
+    ),
+  ].some((element) => {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+}
+
+// The parameter editor stops bubbling keydown events so text shortcuts remain local.
+// Capture only the explicit save shortcut; never capture typing or undo/redo.
+async function handleWorkbenchSaveKey(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's')
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!canEdit.value || saving.value || hasVisibleWorkbenchPopup()) return;
+  const generation = initializationGeneration;
+  const editingElement =
+    event.target instanceof HTMLElement &&
+    event.target.matches('input, textarea')
+      ? event.target
+      : undefined;
+  editingElement?.blur();
+  await nextTick();
+  if (generation !== initializationGeneration) return;
+  editingElement?.focus();
+  void saveDraft();
+}
+
 function handleWorkbenchKeydown(event: KeyboardEvent) {
-  const hasOpenPopup = document.querySelector(
-    '.ant-select-dropdown:not(.ant-select-dropdown-hidden), .ant-picker-dropdown:not(.ant-picker-dropdown-hidden), .ant-modal-wrap',
-  );
+  const hasOpenPopup = hasVisibleWorkbenchPopup();
   const editableTarget =
     event.target instanceof Element &&
     event.target.closest(
       'input, textarea, [contenteditable="true"], [role="textbox"]',
     );
+  if (event.key === '?' && !editableTarget && !hasOpenPopup) {
+    event.preventDefault();
+    shortcutHelpOpen.value = true;
+    return;
+  }
   if (
     (event.ctrlKey || event.metaKey) &&
     event.key.toLowerCase() === 'f' &&
@@ -1645,12 +2173,12 @@ function handleWorkbenchKeydown(event: KeyboardEvent) {
     canvasNavigatorOpen.value = false;
     return;
   }
-  if (quickConnectRequest.value) {
+  if (activePickerRequest.value) {
     event.preventDefault();
-    closeQuickConnect();
+    closeQuickConnect(true);
     return;
   }
-  if (selectedNode.value) {
+  if (selectedNode.value || selectionCount.value > 0) {
     event.preventDefault();
     closeInlineEditor();
   }
@@ -1881,7 +2409,7 @@ async function saveDraft(showMessage = true) {
 
 async function publish() {
   if (!canEdit.value) return;
-  if (!(await flushBeforeWorkflowAction('发布任务'))) return;
+  if (!(await flushBeforeWorkflowAction('发布版本'))) return;
   publishing.value = true;
   try {
     await publishWorkflow({
@@ -2094,42 +2622,110 @@ function executionProgress(execution?: FdmCreativeApi.Execution) {
 }
 
 async function run(scope: FdmCreativeApi.ExecutionScope, startNodeId?: string) {
+  if (runSubmitting.value || taskActionBusy.value || activeExecutionId.value)
+    return;
   const targetProjectId = projectId.value;
   const targetGeneration = initializationGeneration;
   if (!canRun.value) {
-    message.warning('当前项目角色没有运行权限');
+    message.warning('当前账号没有运行此项目的权限');
     return;
   }
-  if (canEdit.value && !ensureDefaultModels()) {
-    message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
-    return;
-  }
-  if (canEdit.value && !(await flushBeforeWorkflowAction('运行工作流'))) return;
   if (
-    targetProjectId !== projectId.value ||
-    targetGeneration !== initializationGeneration
+    scope !== 'FULL' &&
+    (!startNodeId || !adapter.value?.graph.getCellById(startNodeId))
   ) {
+    message.warning('请先选择要运行的节点');
     return;
   }
-  const id = await runCreativeWorkflow({
-    expectedDraftVersion: draftVersion.value,
-    projectId: targetProjectId,
-    scope,
-    startNodeId,
-  });
-  if (
-    targetProjectId !== projectId.value ||
-    targetGeneration !== initializationGeneration
-  ) {
-    return;
+  runSubmitting.value = true;
+  try {
+    if (canEdit.value && !ensureDefaultModels(scope, startNodeId)) {
+      message.warning('当前没有可用的默认模型，请先在模型中心启用可用模型');
+      return;
+    }
+    if (canEdit.value && !(await flushBeforeWorkflowAction('运行工作流')))
+      return;
+    if (
+      targetProjectId !== projectId.value ||
+      targetGeneration !== initializationGeneration
+    ) {
+      return;
+    }
+    const id = await runCreativeWorkflow({
+      expectedDraftVersion: draftVersion.value,
+      projectId: targetProjectId,
+      scope,
+      startNodeId,
+    });
+    if (
+      targetProjectId !== projectId.value ||
+      targetGeneration !== initializationGeneration
+    ) {
+      return;
+    }
+    // Submission is complete once the server has created an execution. Its
+    // lifecycle (including the initial detail load) now owns the running lock;
+    // slow result/asset refreshes must not keep the submit button stuck.
+    monitoredExecutionId.value = id;
+    runSubmitting.value = false;
+    await monitorExecution(id, targetProjectId);
+    if (
+      targetGeneration !== initializationGeneration ||
+      targetProjectId !== projectId.value
+    )
+      return;
+    inspectedExecution.value = undefined;
+    ++taskDetailSequence;
+    openSidePanel('tasks');
+  } finally {
+    if (targetGeneration === initializationGeneration)
+      runSubmitting.value = false;
   }
-  await monitorExecution(id, targetProjectId);
 }
 
-async function monitorExecution(id: number, targetProjectId = projectId.value) {
+async function monitorExecution(
+  id: number,
+  targetProjectId = projectId.value,
+  background = false,
+) {
+  if (
+    targetProjectId !== projectId.value ||
+    (background && monitoredExecutionId.value !== id)
+  )
+    return;
+  if (!background) {
+    monitoredExecutionId.value = id;
+    if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
+  }
+  const sequence = ++executionMonitorSequence;
+  const generation = initializationGeneration;
   if (executionTimer) clearTimeout(executionTimer);
-  const execution = await getCreativeExecution(id);
-  if (targetProjectId !== projectId.value) return;
+  let execution: FdmCreativeApi.ExecutionDetail;
+  try {
+    execution = await getCreativeExecution(id);
+  } catch {
+    if (
+      monitoredExecutionId.value !== id ||
+      sequence !== executionMonitorSequence ||
+      generation !== initializationGeneration ||
+      targetProjectId !== projectId.value
+    )
+      return;
+    executionSyncError.value = `任务 #${id} 的状态暂时无法读取，正在自动重连。任务不会因此重新提交。`;
+    executionTimer = setTimeout(
+      () => refreshExecutionInBackground(id, targetProjectId),
+      5_000,
+    );
+    return;
+  }
+  if (
+    monitoredExecutionId.value !== id ||
+    sequence !== executionMonitorSequence ||
+    generation !== initializationGeneration ||
+    targetProjectId !== projectId.value
+  )
+    return;
+  executionSyncError.value = '';
   runningExecution.value = execution;
   mergeLatestNodeRuns(execution);
   for (const node of aggregateLoopNodeRuns(execution.nodeRuns ?? [])) {
@@ -2143,7 +2739,7 @@ async function monitorExecution(id: number, targetProjectId = projectId.value) {
       15_000,
     );
   } else {
-    await refreshProjectAssets(targetProjectId);
+    void refreshProjectAssets(targetProjectId);
     void refreshNodeResultVersions();
   }
 }
@@ -2152,8 +2748,14 @@ function refreshExecutionInBackground(
   id: number,
   targetProjectId = projectId.value,
 ) {
-  void monitorExecution(id, targetProjectId).catch(() => {
-    if (targetProjectId !== projectId.value || activeExecutionId.value !== id) {
+  if (targetProjectId !== projectId.value || monitoredExecutionId.value !== id)
+    return;
+  void monitorExecution(id, targetProjectId, true).catch(() => {
+    if (
+      targetProjectId !== projectId.value ||
+      monitoredExecutionId.value !== id ||
+      activeExecutionId.value !== id
+    ) {
       return;
     }
     if (executionTimer) clearTimeout(executionTimer);
@@ -2165,29 +2767,43 @@ function refreshExecutionInBackground(
 }
 
 function scheduleExecutionRefresh(delay = 160) {
-  const execution = runningExecution.value;
-  if (!execution || execution.id !== activeExecutionId.value) return;
+  const id = activeExecutionId.value;
+  if (!id) return;
   if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
   const targetProjectId = projectId.value;
   executionEventRefreshTimer = setTimeout(() => {
     executionEventRefreshTimer = undefined;
-    refreshExecutionInBackground(execution.id, targetProjectId);
+    refreshExecutionInBackground(id, targetProjectId);
   }, delay);
 }
 
 async function cancelRun() {
-  const executionId = runningExecution.value?.id;
-  if (!executionId || !canRun.value) return;
+  const executionId = taskExecution.value?.id;
+  if (!executionId || !canCancelTask.value || taskActionBusy.value) return;
   const targetProjectId = projectId.value;
   const targetGeneration = initializationGeneration;
-  await cancelCreativeExecution(executionId);
-  if (
-    targetProjectId !== projectId.value ||
-    targetGeneration !== initializationGeneration
-  ) {
-    return;
+  const detailSequence = taskDetailSequence;
+  taskActionBusy.value = true;
+  try {
+    await cancelCreativeExecution(executionId);
+    if (
+      targetProjectId !== projectId.value ||
+      targetGeneration !== initializationGeneration
+    ) {
+      return;
+    }
+    if (monitoredExecutionId.value === executionId)
+      await monitorExecution(executionId, targetProjectId, true);
+    else if (
+      inspectedExecution.value?.id === executionId &&
+      detailSequence === taskDetailSequence
+    )
+      await inspectTask(executionId);
+    void refreshTaskHistory();
+  } finally {
+    if (targetGeneration === initializationGeneration)
+      taskActionBusy.value = false;
   }
-  await monitorExecution(executionId, targetProjectId);
 }
 
 function goBack() {
@@ -2223,8 +2839,8 @@ watch(clearUnavailableImportAssets, () => {
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('keydown', handleWorkbenchKeydown);
+  window.addEventListener('keydown', handleWorkbenchSaveKey, true);
   window.addEventListener('pointerdown', handleQuickConnectPointerDown, true);
-  window.addEventListener('resize', updateViewportWidth);
   void initialize();
 });
 
@@ -2232,12 +2848,12 @@ onBeforeUnmount(() => {
   initializationGeneration += 1;
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('keydown', handleWorkbenchKeydown);
+  window.removeEventListener('keydown', handleWorkbenchSaveKey, true);
   window.removeEventListener(
     'pointerdown',
     handleQuickConnectPointerDown,
     true,
   );
-  window.removeEventListener('resize', updateViewportWidth);
   if (executionTimer) clearTimeout(executionTimer);
   if (executionEventRefreshTimer) clearTimeout(executionEventRefreshTimer);
   if (planTimer) clearTimeout(planTimer);
@@ -2254,6 +2870,13 @@ onBeforeUnmount(() => {
       :can-export="Boolean(project)"
       :can-import="canEdit && Boolean(project)"
       :can-run="canRun"
+      :can-run-selected="canRun && canRunSelectedNode"
+      :can-undo="historyState.canUndo"
+      :can-redo="historyState.canRedo"
+      :selected-node-name="selectedNode?.name || selectedNode?.id"
+      :selected-node-type="selectedNode?.type"
+      :busy="runSubmitting || taskActionBusy"
+      :running="Boolean(activeExecutionId)"
       :dirty="dirty"
       :exporting="workflowExporting"
       :importing="workflowImporting"
@@ -2269,10 +2892,20 @@ onBeforeUnmount(() => {
       @import="openWorkflowImport"
       @publish="publish"
       @redo="adapter?.redo()"
-      @run="run('FULL')"
+      @run="runFromTopbar"
+      @help="shortcutHelpOpen = true"
       @save="saveDraft()"
       @undo="adapter?.undo()"
       @zoom-by="adapter?.zoomBy($event)"
+    />
+    <input
+      ref="imageImportInput"
+      accept="image/*"
+      class="workflow-import-file"
+      multiple
+      type="file"
+      aria-label="导入图片到画布"
+      @change="handleImageFileChange"
     />
     <input
       ref="workflowImportFileRef"
@@ -2292,14 +2925,15 @@ onBeforeUnmount(() => {
     <div
       class="editor-body"
       :class="{
-        'has-agent-panel': agentPanelOpen && !agentPanelUsesDrawer,
-        'has-inspector': selectedNode,
+        'has-sidebar': sidePanelOpen,
       }"
       :style="agentPanelStyle"
     >
       <NodeLibraryPanel
         ref="nodeLibraryRef"
+        :compact="libraryCompact"
         :readonly="!canEdit"
+        @toggle-compact="libraryCompact = !libraryCompact"
         @node-add="addNode"
         @node-drag-start="startDrag"
       />
@@ -2312,13 +2946,24 @@ onBeforeUnmount(() => {
           'is-overview': zoomPercent < 60,
           'is-standard': zoomPercent >= 60 && zoomPercent <= 110,
         }"
+        @dragenter="handleCanvasDrag"
+        @dragover="handleCanvasDrag"
+        @dragleave="handleCanvasDrag"
+        @drop="handleCanvasDrop"
       >
+        <div
+          v-if="imageDragDepth > 0 && canImportImages && !imageImportBusy"
+          class="canvas-file-drop"
+          role="status"
+        >
+          松开即可导入图片到画布<small>每次最多 20 张，每张不超过 25 MB</small>
+        </div>
         <Spin :spinning="loading" tip="正在加载画布…">
           <div ref="canvasRef" class="graph-canvas"></div>
         </Spin>
 
         <section
-          v-if="quickConnectRequest"
+          v-if="activePickerRequest"
           ref="quickConnectRef"
           class="quick-connect-menu"
           :style="quickConnectStyle"
@@ -2329,15 +2974,21 @@ onBeforeUnmount(() => {
         >
           <header class="quick-connect-menu__header">
             <div>
-              <strong>选择下一个节点</strong>
-              <span>选择后将在此处创建，并自动完成连线</span>
+              <strong>{{
+                quickConnectRequest ? '选择下一个节点' : '添加节点'
+              }}</strong>
+              <span>{{
+                quickConnectRequest
+                  ? '选择后在此创建，并自动连线'
+                  : '↑ ↓ 选择 · Enter 添加 · Esc 关闭'
+              }}</span>
             </div>
             <Button
               aria-label="关闭节点选择器"
               class="quick-connect-menu__close"
               size="small"
               type="text"
-              @click="closeQuickConnect"
+              @click="closeQuickConnect(true)"
             >
               <IconifyIcon icon="lucide:x" />
             </Button>
@@ -2347,8 +2998,21 @@ onBeforeUnmount(() => {
             v-model:value="quickConnectSearch"
             allow-clear
             class="quick-connect-menu__search"
-            placeholder="搜索兼容节点"
-            @keydown.enter.prevent="chooseFirstQuickConnectOption"
+            :placeholder="
+              quickConnectRequest ? '搜索兼容节点' : '搜索节点名称或用途'
+            "
+            role="combobox"
+            aria-label="搜索并添加节点"
+            aria-controls="quick-connect-options"
+            aria-expanded="true"
+            :aria-activedescendant="
+              filteredQuickConnectOptions.length
+                ? `quick-connect-option-${quickConnectActiveIndex}`
+                : undefined
+            "
+            @keydown.enter.prevent="chooseQuickConnectOption"
+            @keydown.down.prevent="stepQuickConnectOption(1)"
+            @keydown.up.prevent="stepQuickConnectOption(-1)"
           >
             <template #prefix>
               <IconifyIcon icon="lucide:search" />
@@ -2357,12 +3021,18 @@ onBeforeUnmount(() => {
 
           <div
             v-if="filteredQuickConnectOptions.length"
+            id="quick-connect-options"
+            role="listbox"
             class="quick-connect-menu__list"
           >
             <button
-              v-for="option in filteredQuickConnectOptions"
+              v-for="(option, index) in filteredQuickConnectOptions"
               :key="`${option.template.type}:${option.targetPortId}`"
               class="quick-connect-option"
+              :id="`quick-connect-option-${index}`"
+              :class="{ 'is-active': quickConnectActiveIndex === index }"
+              :aria-selected="quickConnectActiveIndex === index"
+              role="option"
               :style="{ '--node-accent': option.template.color }"
               type="button"
               @click="createQuickConnectedNode(option)"
@@ -2375,7 +3045,7 @@ onBeforeUnmount(() => {
                 <small>{{ option.template.description }}</small>
               </span>
               <span class="quick-connect-option__action">
-                自动连线
+                {{ quickConnectRequest ? '自动连线' : '添加' }}
                 <IconifyIcon icon="lucide:arrow-right" />
               </span>
             </button>
@@ -2383,28 +3053,90 @@ onBeforeUnmount(() => {
           <Empty
             v-else
             class="quick-connect-menu__empty"
-            description="没有匹配的兼容节点"
+            description="没有匹配的节点，试试其他关键词"
           />
         </section>
 
-        <Button
-          class="canvas-navigator-trigger"
-          :type="canvasNavigatorOpen ? 'primary' : 'default'"
-          @click="toggleCanvasNavigator"
-        >
-          <IconifyIcon icon="lucide:search" />
-          查找节点
-          <span>{{ navigationNodeCount }}</span>
-        </Button>
+        <div class="canvas-tools">
+          <Button
+            v-if="canImportImages"
+            :loading="imageImportBusy"
+            :disabled="imageImportBusy"
+            title="选择图片，或直接拖入画布"
+            @click="imageImportInput?.click()"
+          >
+            <IconifyIcon icon="lucide:image-plus" />{{
+              imageImportBusy ? imageImportProgress : '导入图片'
+            }}
+          </Button>
+          <Button
+            class="canvas-navigator-trigger"
+            :type="canvasNavigatorOpen ? 'primary' : 'default'"
+            @click="toggleCanvasNavigator"
+          >
+            <IconifyIcon icon="lucide:search" />
+            查找节点
+            <span>{{ navigationNodeCount }}</span>
+          </Button>
 
-        <Button
-          class="canvas-agent-trigger"
-          :type="agentPanelOpen ? 'primary' : 'default'"
-          @click="toggleAgentPanel"
+          <Button
+            class="canvas-agent-trigger"
+            :type="
+              sidePanelOpen && sidePanel === 'assistant' ? 'primary' : 'default'
+            "
+            @click="toggleAgentPanel"
+          >
+            <IconifyIcon icon="lucide:bot" />
+            AI 助手
+          </Button>
+          <Button
+            :type="
+              sidePanelOpen && sidePanel === 'tasks' ? 'primary' : 'default'
+            "
+            @click="openSidePanel('tasks')"
+          >
+            <IconifyIcon icon="lucide:list-checks" />任务
+            <span v-if="activeExecutionId" class="running-indicator"
+              >运行中</span
+            >
+          </Button>
+          <Button
+            v-if="selectedNode && !sidePanelOpen"
+            @click="openSidePanel('parameters')"
+            >节点参数</Button
+          >
+        </div>
+
+        <div
+          v-if="selectionCount > 1"
+          class="selection-actions"
+          role="toolbar"
+          aria-label="选中节点操作"
         >
-          <IconifyIcon icon="lucide:bot" />
-          画布 Agent
-        </Button>
+          <strong>已选 {{ selectionCount }} 个节点</strong>
+          <Button
+            :disabled="!canEdit"
+            size="small"
+            @click="adapter?.duplicateSelection()"
+            >复制选中</Button
+          >
+          <Button
+            :disabled="!canEdit"
+            size="small"
+            danger
+            @click="adapter?.deleteSelection()"
+            >删除选中</Button
+          >
+          <Button
+            size="small"
+            type="text"
+            @click="
+              adapter?.clearSelection();
+              adapter?.focusCanvas();
+            "
+            >取消选择</Button
+          >
+        </div>
 
         <CanvasNavigator
           v-model="canvasNavigatorOpen"
@@ -2430,7 +3162,12 @@ onBeforeUnmount(() => {
         </div>
 
         <section
-          v-if="!selectedNode && !quickConnectRequest && canEdit"
+          v-if="
+            selectionCount === 0 &&
+            !activePickerRequest &&
+            canEdit &&
+            !sidePanelOpen
+          "
           class="prompt-dock"
         >
           <div class="prompt-input-row">
@@ -2495,108 +3232,179 @@ onBeforeUnmount(() => {
               addon-before="片段"
               size="small"
             />
-            <span class="auto-run">
-              <Switch :checked="false" disabled size="small" /> 自动执行
-            </span>
+            <span class="auto-run">先预览方案，再应用到画布</span>
           </div>
         </section>
-
-        <ExecutionTaskPanel
-          :allow-cancel="canRun"
-          :execution="runningExecution"
-          :stream-state="executionStreamState"
-          @cancel="cancelRun"
-        />
       </main>
 
-      <aside v-if="selectedNode" class="inspector-panel">
-        <NodeInlineEditor
-          :busy="inlineEditorBusy"
-          :can-run="canRunSelectedNode"
-          :connected-references="connectedImageReferences"
-          :connected-prompt-input-count="connectedPromptInputCount"
-          :connected-text-sources="connectedTextSources"
-          :error-message="selectedResultNodeRun?.errorMessage"
-          :execution-status="runningExecution?.status"
-          :model-options="modelOptions"
-          :node="selectedNode"
-          :node-run="selectedResultNodeRun"
-          :progress="inlineEditorProgress"
-          :project-id="projectId"
-          :project-assets="projectAssets"
-          :readonly="!canEdit"
-          :result-assets="resultAssets"
-          :result-history-autosave-conflict="hasAutosaveConflict"
-          :result-history-can-edit="canEdit"
-          :result-history-loading="nodeResultLoading"
-          :result-media-tools="mediaTools"
-          :result-versions="nodeResultVersions"
-          :result-text="resultText"
-          :upload-accept="inputUploadAccept"
-          :upload-api="uploadInputAsset"
-          :upload-max-size="inputUploadMaxSize"
-          variant="panel"
-          @asset-change="handleInlineAssetChange"
-          @close="closeInlineEditor"
-          @config-change="handleInlineConfigChange"
-          @name-change="setNodeName"
-          @result-adopt="handleResultAdopt"
-          @result-pin="handleResultPin"
-          @result-tool="handleResultTool"
-          @run="handleInlineRun"
-          @run-downstream="handleInlineRunDownstream"
-        />
-      </aside>
-
-      <aside v-if="agentPanelOpen && !agentPanelUsesDrawer" class="agent-panel">
-        <CanvasAgentPanel
-          :can-edit="canEdit"
-          :can-run="canRun"
-          :current-node="selectedNode"
-          :current-user-role="currentUserRole"
-          :draft-version="draftVersion"
-          :model-options="modelOptions"
-          :nodes="agentWorkflowNodes"
-          :prepare-canvas-mutation="prepareAgentCanvasMutation"
-          :project-id="projectId"
-          :upload-asset="uploadAgentReferenceAsset"
-          :width="agentPanelWidth"
-          @close="agentPanelOpen = false"
-          @draft-applied="applyAgentDraft"
-          @execution-created="monitorAgentExecution"
-          @resize="agentPanelWidth = $event"
-        />
+      <aside v-show="sidePanelOpen" class="workbench-sidebar">
+        <div class="sidebar-tabs" role="tablist" aria-label="工作面板">
+          <button
+            v-for="tab in [
+              { value: 'parameters', label: '参数' },
+              { value: 'tasks', label: '任务' },
+              { value: 'assistant', label: '助手' },
+            ]"
+            :key="tab.value"
+            :id="`workbench-tab-${tab.value}`"
+            :aria-controls="`workbench-panel-${tab.value}`"
+            :aria-selected="sidePanel === tab.value"
+            :tabindex="sidePanel === tab.value ? 0 : -1"
+            role="tab"
+            type="button"
+            @keydown="handleSidebarTabKey"
+            @click="
+              openSidePanel(tab.value as 'assistant' | 'parameters' | 'tasks')
+            "
+          >
+            {{ tab.label }}
+          </button>
+          <Button
+            aria-label="收起工作面板"
+            type="text"
+            @click="sidePanelOpen = false"
+            ><IconifyIcon icon="lucide:panel-right-close"
+          /></Button>
+        </div>
+        <div
+          v-show="sidePanel === 'parameters'"
+          id="workbench-panel-parameters"
+          class="sidebar-content"
+          role="tabpanel"
+          aria-labelledby="workbench-tab-parameters"
+        >
+          <NodeInlineEditor
+            v-if="selectedNode"
+            :busy="plannerBusy || runSubmitting || taskActionBusy"
+            :can-run="canRunSelectedNode"
+            :connected-references="connectedImageReferences"
+            :connected-prompt-input-count="connectedPromptInputCount"
+            :connected-text-sources="connectedTextSources"
+            :error-message="selectedResultNodeRun?.errorMessage"
+            :execution-status="currentExecutionStatus"
+            :model-options="modelOptions"
+            :node="selectedNode"
+            :node-run="selectedResultNodeRun"
+            :progress="inlineEditorProgress"
+            :project-id="projectId"
+            :project-assets="projectAssets"
+            :readonly="!canEdit"
+            :result-assets="resultAssets"
+            :result-history-autosave-conflict="hasAutosaveConflict"
+            :result-history-can-edit="canEdit"
+            :result-history-loading="nodeResultLoading"
+            :result-media-tools="mediaTools"
+            :result-versions="nodeResultVersions"
+            :result-text="resultText"
+            :upload-accept="inputUploadAccept"
+            :upload-api="canImportImages ? uploadInputAsset : undefined"
+            :upload-max-size="inputUploadMaxSize"
+            variant="panel"
+            @asset-change="handleInlineAssetChange"
+            @close="closeInlineEditor"
+            @config-change="handleInlineConfigChange"
+            @name-change="setNodeName"
+            @result-adopt="handleResultAdopt"
+            @result-pin="handleResultPin"
+            @result-tool="handleResultTool"
+            @run="handleInlineRun"
+            @run-downstream="handleInlineRunDownstream"
+          />
+          <Empty
+            v-else
+            :description="
+              selectionCount > 1
+                ? '已选中多个节点，可在画布上批量移动、复制或删除'
+                : '选择画布中的节点查看参数'
+            "
+            class="sidebar-empty"
+          />
+        </div>
+        <div
+          v-show="sidePanel === 'tasks'"
+          id="workbench-panel-tasks"
+          class="sidebar-content"
+          role="tabpanel"
+          aria-labelledby="workbench-tab-tasks"
+        >
+          <ExecutionTaskPanel
+            variant="panel"
+            :allow-cancel="canCancelTask"
+            :allow-retry="canRetryTask"
+            :busy="taskActionBusy"
+            :execution="taskExecution"
+            :current-execution-id="monitoredExecutionId"
+            :sync-error="executionSyncError"
+            :history="executionHistory"
+            :history-loading="historyLoading"
+            :history-error="historyError"
+            :history-has-more="executionHistory.length < historyTotal"
+            :node-names="taskNodeNames"
+            :stream-state="executionStreamState"
+            @cancel="cancelRun"
+            @retry="retryTaskNode"
+            @locate="locateTaskNode"
+            @refresh="refreshTaskPanel"
+            @load-more="refreshTaskHistory(true)"
+            @select-execution="inspectTask"
+          />
+        </div>
+        <div
+          v-show="sidePanel === 'assistant'"
+          id="workbench-panel-assistant"
+          class="sidebar-content"
+          role="tabpanel"
+          aria-labelledby="workbench-tab-assistant"
+        >
+          <CanvasAgentPanel
+            v-if="agentPanelOpen"
+            :can-edit="canEdit"
+            :can-run="canRun"
+            :current-node="selectedNode"
+            :current-user-role="currentUserRole"
+            :draft-version="draftVersion"
+            :model-options="modelOptions"
+            :nodes="agentWorkflowNodes"
+            :prepare-canvas-mutation="prepareAgentCanvasMutation"
+            :project-id="projectId"
+            :upload-asset="uploadAgentReferenceAsset"
+            :width="agentPanelWidth"
+            @close="sidePanelOpen = false"
+            @draft-applied="applyAgentDraft"
+            @execution-created="monitorAgentExecution"
+            @resize="agentPanelWidth = $event"
+          />
+        </div>
       </aside>
     </div>
 
-    <Drawer
-      v-if="agentPanelOpen && agentPanelUsesDrawer"
-      :body-style="{ padding: '0' }"
-      :closable="false"
-      destroy-on-close
-      placement="right"
-      :open="agentPanelOpen"
-      :width="Math.min(agentPanelWidth, Math.max(320, viewportWidth - 16))"
-      @close="agentPanelOpen = false"
+    <Modal
+      v-model:open="shortcutHelpOpen"
+      title="画布操作与快捷键"
+      :footer="null"
+      :width="520"
     >
-      <CanvasAgentPanel
-        :can-edit="canEdit"
-        :can-run="canRun"
-        :current-node="selectedNode"
-        :current-user-role="currentUserRole"
-        :draft-version="draftVersion"
-        :model-options="modelOptions"
-        :nodes="agentWorkflowNodes"
-        :prepare-canvas-mutation="prepareAgentCanvasMutation"
-        :project-id="projectId"
-        :upload-asset="uploadAgentReferenceAsset"
-        :width="agentPanelWidth"
-        @close="agentPanelOpen = false"
-        @draft-applied="applyAgentDraft"
-        @execution-created="monitorAgentExecution"
-        @resize="agentPanelWidth = $event"
-      />
-    </Drawer>
+      <dl class="shortcut-list">
+        <dt>添加节点</dt>
+        <dd>空白处双击 / Tab；节点库双击或 Enter</dd>
+        <dt>移动视图</dt>
+        <dd>拖动画布空白处；按住 Space 临时抓手</dd>
+        <dt>多选 / 框选</dt>
+        <dd>Shift + 点击节点 / Shift + 拖动空白处</dd>
+        <dt>复制 / 粘贴</dt>
+        <dd>Ctrl / ⌘ + C / V</dd>
+        <dt>快速复制选中</dt>
+        <dd>Ctrl / ⌘ + D</dd>
+        <dt>撤销 / 重做</dt>
+        <dd>Ctrl / ⌘ + Z / Shift + Z</dd>
+        <dt>保存 / 查找节点</dt>
+        <dd>Ctrl / ⌘ + S / F</dd>
+        <dt>缩放</dt>
+        <dd>Ctrl / ⌘ + 滚轮</dd>
+        <dt>取消选择 / 关闭菜单</dt>
+        <dd>Esc</dd>
+      </dl>
+    </Modal>
 
     <WorkflowConflictModal
       :loading-server-draft="workflowConflictLoading"
@@ -2714,7 +3522,9 @@ onBeforeUnmount(() => {
             {{
               pendingPlan.quote?.estimatedCost === undefined
                 ? '待报价'
-                : `${pendingPlan.quote.estimatedCost} ${pendingPlan.quote.currency || 'CNY'}`
+                : `${pendingPlan.quote.estimatedCost} ${
+                    pendingPlan.quote.currency || 'CNY'
+                  }`
             }}
           </span>
         </div>
@@ -2790,8 +3600,8 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  display: grid;
-  grid-template-rows: 60px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   color: hsl(var(--foreground));
   background: hsl(var(--background));
@@ -2859,28 +3669,137 @@ onBeforeUnmount(() => {
 }
 
 .editor-body {
+  position: relative;
   display: grid;
-  grid-template-columns: clamp(196px, 11.6vw, 222px) minmax(0, 1fr);
+  flex: 1;
+  grid-template-columns: var(--library-width) minmax(0, 1fr);
   min-height: 0;
   transition: grid-template-columns 160ms ease;
 }
 
-.editor-body.has-inspector {
-  grid-template-columns:
-    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
-    clamp(440px, 28vw, 540px);
+.editor-body.has-sidebar {
+  grid-template-columns: var(--library-width) minmax(0, 1fr) minmax(
+      340px,
+      var(--sidebar-width)
+    );
 }
 
-.editor-body.has-agent-panel {
-  grid-template-columns:
-    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
-    var(--agent-panel-width);
+.workbench-editor > :deep(.topbar) {
+  flex: none;
+  min-height: 60px;
 }
-
-.editor-body.has-inspector.has-agent-panel {
-  grid-template-columns:
-    clamp(196px, 11.6vw, 222px) minmax(0, 1fr)
-    clamp(400px, 24vw, 500px) var(--agent-panel-width);
+.workbench-sidebar {
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--card));
+  border-left: 1px solid hsl(var(--border));
+}
+.sidebar-tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.sidebar-tabs > button:not(.ant-btn) {
+  flex: 1;
+  height: 42px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+.sidebar-tabs > button[aria-selected='true'] {
+  color: hsl(var(--primary));
+  border-bottom-color: hsl(var(--primary));
+}
+.sidebar-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar-empty {
+  margin: 48px 16px;
+}
+.canvas-tools {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+.canvas-file-drop {
+  position: absolute;
+  inset: 16px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: hsl(var(--primary));
+  pointer-events: none;
+  background: hsl(var(--background) / 94%);
+  border: 2px dashed hsl(var(--primary));
+  border-radius: 14px;
+}
+.canvas-file-drop small {
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.quick-connect-option.is-active {
+  background: hsl(var(--primary) / 8%);
+  outline: 1px solid hsl(var(--primary) / 45%);
+  outline-offset: -1px;
+}
+.canvas-tools > :deep(button) {
+  position: static;
+  pointer-events: auto;
+}
+.running-indicator {
+  font-size: 11px;
+  color: hsl(var(--primary));
+}
+.selection-actions {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  font-size: 12px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+.shortcut-list {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 2fr;
+  gap: 14px;
+  padding: 16px 0;
+  margin: 0;
+}
+.shortcut-list dt {
+  color: hsl(var(--muted-foreground));
+}
+.shortcut-list dd {
+  margin: 0;
 }
 
 .canvas-navigator-trigger {
@@ -3015,9 +3934,7 @@ onBeforeUnmount(() => {
 
 .graph-canvas :deep(.x6-node.x6-available-node .creative-node) {
   border-color: #4f7cff;
-  box-shadow:
-    0 0 0 3px rgb(79 124 255 / 16%),
-    0 8px 22px rgb(37 99 235 / 14%);
+  box-shadow: 0 0 0 3px rgb(79 124 255 / 16%), 0 8px 22px rgb(37 99 235 / 14%);
 }
 
 .graph-canvas :deep(.x6-available-magnet) {
@@ -3045,8 +3962,7 @@ onBeforeUnmount(() => {
   background: hsl(var(--card) / 98%);
   border: 1px solid hsl(var(--border));
   border-radius: 14px;
-  box-shadow:
-    0 20px 48px hsl(var(--foreground) / 18%),
+  box-shadow: 0 20px 48px hsl(var(--foreground) / 18%),
     0 3px 10px hsl(var(--foreground) / 8%);
   backdrop-filter: blur(18px);
   transform-origin: top left;
@@ -3131,9 +4047,7 @@ onBeforeUnmount(() => {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 10px;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
+  transition: background 120ms ease, border-color 120ms ease,
     transform 120ms ease;
 }
 
@@ -3380,29 +4294,45 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1200px) {
-  .editor-body {
-    grid-template-columns: 190px minmax(0, 1fr);
-  }
-
-  .editor-body.has-inspector {
-    grid-template-columns: 190px minmax(0, 1fr) 400px;
-  }
-
-  .editor-body.has-agent-panel {
-    grid-template-columns: 190px minmax(0, 1fr) var(--agent-panel-width);
-  }
-
-  .editor-body.has-inspector.has-agent-panel {
-    grid-template-columns: 190px minmax(0, 1fr) 400px var(--agent-panel-width);
-  }
-
   .prompt-dock {
-    width: min(620px, calc(100% - 220px));
-    min-width: 500px;
+    width: min(620px, calc(100% - 32px));
+    min-width: 0;
+    bottom: 174px;
   }
 
   .prompt-options {
     padding: 0 36px;
+  }
+}
+
+@media (max-width: 900px) {
+  .editor-body.has-sidebar {
+    grid-template-columns: var(--library-width) minmax(0, 1fr);
+  }
+  .workbench-sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, calc(100% - 56px));
+    box-shadow: -8px 0 24px hsl(var(--foreground) / 12%);
+  }
+  .canvas-tools {
+    gap: 4px;
+  }
+  .canvas-tools :deep(.ant-btn) {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+  .selection-actions {
+    top: 96px;
+  }
+  .prompt-dock {
+    bottom: 174px;
+  }
+  .prompt-options {
+    flex-wrap: wrap;
+    padding-inline: 0;
   }
 }
 </style>

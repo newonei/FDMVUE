@@ -24,6 +24,33 @@ export interface PromptReferenceBinding {
   bindingKey: string;
 }
 
+/** Match execution bindings, including connected images that have not been generated yet. */
+export function countImageReferences(
+  config: Record<string, unknown>,
+  connectedReferences: ConnectedImageReference[],
+  configuredTargetPort = 'reference',
+) {
+  const references = new Set(
+    connectedReferences.map((reference) => reference.bindingKey),
+  );
+  // Separate edges remain separate inputs even when they carry the same asset.
+  // The executor only skips manually configured assets already on this port.
+  const connectedAssets = new Set(
+    connectedReferences
+      .filter((reference) => reference.targetPortId === configuredTargetPort)
+      .map((reference) => reference.assetId),
+  );
+  const configured = Array.isArray(config.referenceAssetIds)
+    ? config.referenceAssetIds
+    : [];
+  for (const id of configured) {
+    if (typeof id === 'number' && !connectedAssets.has(id)) {
+      references.add(`ASSET:${id}`);
+    }
+  }
+  return references.size;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

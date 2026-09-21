@@ -38,10 +38,55 @@ export const EMPTY_WORKFLOW: FdmCreativeApi.WorkflowDefinition = {
 };
 
 export function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
+  if (!(target instanceof Element)) return false;
   return Boolean(
-    target.closest('input, textarea, button, select, [contenteditable="true"]'),
+    target.closest(
+      'input, textarea, button, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]',
+    ),
   );
+}
+
+/** Search around the visible center without stacking a new node on existing work. */
+export function findAvailableNodePosition(
+  center: { x: number; y: number },
+  size: { height: number; width: number },
+  obstacles: Array<{ height: number; width: number; x: number; y: number }>,
+) {
+  const gap = 32;
+  const origin = {
+    x: center.x - size.width / 2,
+    y: center.y - size.height / 2,
+  };
+  const available = (x: number, y: number) =>
+    obstacles.every(
+      (rect) =>
+        x + size.width + gap <= rect.x ||
+        x >= rect.x + rect.width + gap ||
+        y + size.height + gap <= rect.y ||
+        y >= rect.y + rect.height + gap,
+    );
+  const nearbyRings = Math.ceil(Math.sqrt(obstacles.length)) + 1;
+  for (let ring = 0; ring <= nearbyRings; ring += 1) {
+    for (let y = -ring; y <= ring; y += 1) {
+      for (let x = -ring; x <= ring; x += 1) {
+        if (Math.max(Math.abs(x), Math.abs(y)) !== ring) continue;
+        const point = {
+          x: origin.x + x * (size.width + gap),
+          y: origin.y + y * (size.height + gap),
+        };
+        if (available(point.x, point.y)) return point;
+      }
+    }
+  }
+  // A single oversized node can cover every nearby candidate. Keep the final
+  // fallback outside all obstacles instead of silently stacking at the center.
+  return {
+    x: Math.max(
+      origin.x,
+      ...obstacles.map((rect) => rect.x + rect.width + gap),
+    ),
+    y: origin.y,
+  };
 }
 export function findWorkflowPort(
   definition: FdmCreativeApi.WorkflowDefinition,
