@@ -146,6 +146,16 @@ function getFollowUserSelectProps() {
   };
 }
 
+function handleOrderNoInput(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  if (!input) return;
+  const digitsOnly = input.value.replace(/\D/g, '');
+  if (input.value !== digitsOnly) {
+    input.value = digitsOnly;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
 export function useFormSchema(
   shopOptions: ShopNameSelectOptions = {},
 ): VbenFormSchema[] {
@@ -242,10 +252,16 @@ export function useBatchFormSchema(
       component: 'Input',
       componentProps: {
         allowClear: true,
+        inputmode: 'numeric',
         maxlength: 64,
+        onInput: handleOrderNoInput,
         placeholder: '请输入订单号',
       },
-      rules: 'required',
+      rules: z
+        .string()
+        .min(1, '订单号不能为空')
+        .max(64)
+        .regex(/^\d+$/, '订单号只能输入数字'),
     },
     {
       fieldName: 'shopName',
