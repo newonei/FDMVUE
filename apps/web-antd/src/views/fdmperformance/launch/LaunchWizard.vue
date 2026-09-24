@@ -84,7 +84,7 @@ const personColumns: TableColumnsType = [
   { dataIndex: 'userName', title: '被考核人', width: 150 },
   {
     dataIndex: 'supervisorUserName',
-    title: '主管评分人（发起人）',
+    title: '主管评分人（考评表配置）',
     width: 180,
   },
   {
@@ -299,7 +299,7 @@ onMounted(initialize);
           </div>
           <Alert
             class="section-alert"
-            message="候选仅包含当前账号可发起的人员。主管评分人由发起人承担，上级评分人按配置带入；关系异常的人员不能选择。"
+            message="候选仅包含当前账号可发起的人员。主管评分人和上级评分人均按考评表逐人配置，当前账号仅作为考核发起人；关系异常的人员不能选择。"
             show-icon
             type="info"
           />

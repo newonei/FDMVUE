@@ -49,6 +49,7 @@ import {
 import { getSimpleUserList } from '#/api/system/user';
 
 import { INSTANCE_STATUS_MAP } from '../../shared/constants';
+import { formatPerformanceDateTime } from '../../shared/format';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
 import { hasAction } from '../../shared/workspace';
 import {
@@ -738,11 +739,7 @@ async function saveDraft() {
 }
 
 function draftTimeLabel(value?: JixiaoApi.DateTimeValue) {
-  if (value === undefined) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? String(value)
-    : date.toLocaleString('zh-CN', { hour12: false });
+  return formatPerformanceDateTime(value);
 }
 
 function confirmLeave() {
