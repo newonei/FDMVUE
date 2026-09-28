@@ -169,7 +169,10 @@ jobs:
           tag="build-${short_sha}"
           base="oss://${OSS_BUCKET}/${OSS_PREFIX%/}"
 
-          ossutil cp -f "dist/${PACKAGE_NAME}"        "${base}/${tag}/${PACKAGE_NAME}"
+          # ossutil 默认只对 >100MB 的文件分片并发上传；十几 MB 的前端包会走单连接，
+          # GitHub → 杭州链路差时只有 20–40 KB/s。强制 1MB 分片、8 路并发（后端大包正是因此快得多）。
+          ossutil cp -f --bigfile-threshold=1048576 --part-size=1048576 --parallel=8 \
+            "dist/${PACKAGE_NAME}" "${base}/${tag}/${PACKAGE_NAME}"
           ossutil cp -f "dist/${PACKAGE_NAME}.sha256" "${base}/${tag}/${PACKAGE_NAME}.sha256"
 
           echo "${tag}" > latest.txt
