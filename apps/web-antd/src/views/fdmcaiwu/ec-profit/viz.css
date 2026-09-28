@@ -1,0 +1,31 @@
+/*
+ * 电商毛利表图形配色：分类色按固定顺序使用（相邻色已做色盲可分辨校验），暗色模式单独取色。
+ * 抽屉等浮层会挂到 body 下，所以变量定义在 :root 而不是页面容器上。
+ */
+:root {
+  --ecp-series-1: #2a78d6;
+  --ecp-series-2: #eb6834;
+  --ecp-series-3: #1baf7a;
+  --ecp-series-4: #eda100;
+  --ecp-series-5: #e87ba4;
+  --ecp-series-6: #008300;
+  --ecp-series-7: #4a3aa7;
+  --ecp-other: #c3c2b7;
+  --ecp-negative: #d03b3b;
+  --ecp-positive-text: #006300;
+  --ecp-track: #f0efec;
+}
+
+.dark {
+  --ecp-series-1: #3987e5;
+  --ecp-series-2: #d95926;
+  --ecp-series-3: #199e70;
+  --ecp-series-4: #c98500;
+  --ecp-series-5: #d55181;
+  --ecp-series-6: #008300;
+  --ecp-series-7: #9085e9;
+  --ecp-other: #5a5a56;
+  --ecp-negative: #e66767;
+  --ecp-positive-text: #0ca30c;
+  --ecp-track: #2c2c2a;
+}

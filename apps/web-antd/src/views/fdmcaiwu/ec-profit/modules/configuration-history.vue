@@ -23,9 +23,9 @@ let sequence = 0;
 const labels: Record<string, string> = {
   ASSIGNMENTS: '店铺归属变更',
   SCOPE_SYNC: '月报范围同步',
-  GROUP_CREATE: '新增财务小组',
-  GROUP_UPDATE: '修改财务小组',
-  GROUP_DELETE: '删除财务小组',
+  GROUP_CREATE: '新增分组',
+  GROUP_UPDATE: '修改分组',
+  GROUP_DELETE: '删除分组',
 };
 const columns = [
   { title: '操作时间', dataIndex: 'createTime', width: 180 },
@@ -71,7 +71,7 @@ const changes = computed(() => {
     return [
       {
         rowKey: 'group',
-        shopName: '财务小组',
+        shopName: '分组',
         before: result.before,
         after: result.after,
       },

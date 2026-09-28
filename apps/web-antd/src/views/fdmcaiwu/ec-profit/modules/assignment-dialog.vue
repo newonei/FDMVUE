@@ -46,7 +46,7 @@ const options = computed(() =>
   props.groups
     .filter((group) => group.enabled)
     .map((group) => ({
-      label: `${group.departmentName} / ${group.name}`,
+      label: group.name,
       value: group.id,
     })),
 );
@@ -130,7 +130,7 @@ const columns = [
 <template>
   <Modal
     :open="open"
-    title="批量配置店铺归属"
+    title="批量调整分组"
     :width="880"
     :footer="null"
     :closable="!saving"
@@ -152,7 +152,7 @@ const columns = [
             ><Radio :value="true">纳入毛利</Radio
             ><Radio :value="false">不纳入毛利</Radio></Radio.Group
           ></FormItem
-        ><FormItem v-if="values.included" label="目标财务小组"
+        ><FormItem v-if="values.included" label="目标分组"
           ><Select
             v-model:value="values.groupId"
             :options="options"
@@ -160,24 +160,8 @@ const columns = [
             show-search
             option-filter-prop="label"
             :disabled="locked"
-            placeholder="选择小组；留空则作为未分组店铺"
+            placeholder="选择分组；留空则作为未分组店铺"
         /></FormItem>
-        <div
-          v-if="values.included && !values.groupId"
-          class="grid grid-cols-2 gap-4"
-        >
-          <FormItem label="财务部门代码（可选）"
-            ><Input
-              v-model:value="values.departmentCode"
-              :maxlength="64"
-              :disabled="locked" /></FormItem
-          ><FormItem label="财务部门名称（可选）"
-            ><Input
-              v-model:value="values.departmentName"
-              :maxlength="100"
-              :disabled="locked"
-          /></FormItem>
-        </div>
         <FormItem :label="values.included ? '变更说明' : '排除原因（必填）'"
           ><Input.TextArea
             v-model:value="values.reason"
@@ -213,7 +197,7 @@ const columns = [
           v-if="preview.affectedReports.length"
           class="rounded-lg bg-muted/40 p-3 text-xs leading-6"
         >
-          <strong>已建月报保持原快照</strong>
+          <strong>已建月报的应报店铺范围不变（查看时的分组会按新配置更新）</strong>
           <div v-for="report in preview.affectedReports" :key="report.id">
             {{ report.month }}：{{
               report.syncAllowed
@@ -224,7 +208,7 @@ const columns = [
         </div></template
       >
       <p v-else class="mb-0 text-xs text-muted-foreground">
-        先预览所有店铺的原归属、新归属与受影响月份，再整批保存。历史月报不会自动改变。
+        先预览所有店铺的原分组、新分组与受影响月份，再整批保存。
       </p>
       <div class="flex justify-end gap-2">
         <Button :disabled="saving" @click="emit('update:open', false)"
@@ -238,7 +222,7 @@ const columns = [
           @click="prepare"
           >预览变更</Button
         ><Button v-else type="primary" :loading="saving" @click="apply"
-          >确认保存归属</Button
+          >确认保存</Button
         >
       </div>
     </div>

@@ -10,10 +10,13 @@ import {
   expansionKeys,
   filterTree,
   findGroup,
+  groupRanking,
+  leafRows,
   nodeMetric,
   nodeState,
   selectedTotal,
   tableTree,
+  UNCONFIGURED_KEY,
   yearCell,
 } from './tree-model';
 
@@ -40,7 +43,6 @@ const node = (
   key,
   name: key,
   nodeType: 'GROUP',
-  legacyGroup: false,
   children: [],
   expectedShopCount: 2,
   importedShopCount: 1,
@@ -56,43 +58,34 @@ const node = (
 });
 
 describe('分组毛利展示与完整性', () => {
-  it('表底合计直接选择服务端全月、部门或小组投影，不重复累加父子节点', () => {
+  it('表底合计直接选择服务端全月或分组投影，不重复累加父子节点', () => {
     const group = node('g', {
       summary: { salesAmount: '50' },
       receivedSummary: { salesAmount: '40' },
-    });
-    const department = node('dept', {
-      children: [group],
-      summary: { salesAmount: '100' },
     });
     const total = node('total', { summary: { salesAmount: '300' } });
     const view: Api.MonthlyView = {
       month: '2026-09',
       report: null,
-      departments: [department],
+      groups: [group],
       total,
     };
     expect(selectedTotal(view)).toBe(total);
-    expect(selectedTotal(view, 'dept')).toBe(department);
-    expect(selectedTotal(view, 'dept', 'g')).toBe(group);
-    expect(
-      nodeMetric(selectedTotal(view, undefined, 'g')!, 'salesAmount', true),
-    ).toBe('40.00');
-    expect(selectedTotal(view, undefined, 'missing')).toBeUndefined();
+    expect(selectedTotal(view, 'g')).toBe(group);
+    expect(nodeMetric(selectedTotal(view, 'g')!, 'salesAmount', true)).toBe(
+      '40.00',
+    );
+    expect(selectedTotal(view, 'missing')).toBeUndefined();
   });
-  it('店铺叶子与空小组不可展开，原接口数据保持不变', () => {
+  it('店铺叶子与空分组不可展开，原接口数据保持不变', () => {
     const leaf = node('shop', { nodeType: 'SHOP' });
     const emptyGroup = node('empty', {
       expectedShopCount: 0,
       dataState: 'EMPTY',
     });
-    const department = node('dept', {
-      nodeType: 'DEPARTMENT',
-      children: [node('g', { children: [leaf] }), emptyGroup],
-    });
-    const rows = tableTree([department]);
-    expect(rows[0]?.children?.[0]?.children?.[0]?.children).toBeUndefined();
-    expect(rows[0]?.children?.[1]?.children).toBeUndefined();
+    const rows = tableTree([node('g', { children: [leaf] }), emptyGroup]);
+    expect(rows[0]?.children?.[0]?.children).toBeUndefined();
+    expect(rows[1]?.children).toBeUndefined();
     expect(leaf.children).toEqual([]);
     expect(emptyGroup.children).toEqual([]);
   });
@@ -105,27 +98,23 @@ describe('分组毛利展示与完整性', () => {
       nodeMetric(node('zero', { summary: { salesAmount: 0 } }), 'salesAmount'),
     ).toBe('0.00');
   });
-  it('未分组及费用节点在树和展开中保留，不因缺少groupId丢失', () => {
-    const missing = node('unassigned', {
+  it('未配置分组与费用行保留在树中，可展开、筛选和定位', () => {
+    const unconfigured = node(UNCONFIGURED_KEY, {
+      name: '未配置',
       children: [node('fee', { nodeType: 'ADJUSTMENT' })],
     });
-    const department = node('department', {
-      nodeType: 'DEPARTMENT',
-      children: [missing],
-    });
-    expect(filterTree([department])[0]?.children[0]?.key).toBe('unassigned');
-    expect(expansionKeys([department], 'shop')).toEqual([
-      'department',
-      'unassigned',
+    const group = node('GROUP:3', { children: [node('shop', { nodeType: 'SHOP' })] });
+    const empty = node('GROUP:4');
+    expect(expansionKeys([group, empty, unconfigured], 'shop')).toEqual([
+      'GROUP:3',
+      UNCONFIGURED_KEY,
     ]);
-    expect(findGroup([department], 'unassigned')?.department.key).toBe(
-      'department',
-    );
-    expect(
-      filterTree([department], undefined, 'unassigned')[0]?.children,
-    ).toHaveLength(1);
+    expect(expansionKeys([group, unconfigured], 'group')).toEqual([]);
+    expect(findGroup([group, unconfigured], UNCONFIGURED_KEY)).toBe(unconfigured);
+    expect(filterTree([group, unconfigured], UNCONFIGURED_KEY)).toEqual([unconfigured]);
+    expect(filterTree([group, unconfigured])).toHaveLength(2);
   });
-  it('没有应报店铺的空组与真实零经营区分，费用和归属问题仍有状态', () => {
+  it('没有应报店铺的空组与真实零经营区分，费用仍有状态', () => {
     expect(
       nodeState(
         node('empty', {
@@ -144,24 +133,47 @@ describe('分组毛利展示与完整性', () => {
       ),
     ).toBe('费用待导入');
     expect(
-      nodeState(
-        node('unassigned', { unassignedCount: 1, dataState: 'PARTIAL' }),
-      ),
-    ).toBe('归属待确认');
+      nodeState(node(UNCONFIGURED_KEY, { unassignedCount: 1, dataState: 'COMPLETE' })),
+    ).toBe('数据完整');
   });
-  it('年度点击使用当月快照，不按当前小组重归属', () => {
-    const past = node('legacy', { name: '原小组', legacyGroup: true });
+  it('店铺拍平后带上所在分组，排行按指标降序且未知值排最后', () => {
+    const a = node('GROUP:1', {
+      name: '甲组',
+      expectedShopCount: 1,
+      importedShopCount: 1,
+      summary: { grossProfit: '10' },
+      children: [node('SHOP:1', { nodeType: 'SHOP' })],
+    });
+    const b = node('GROUP:2', {
+      name: '乙组',
+      expectedShopCount: 1,
+      importedShopCount: 1,
+      summary: { grossProfit: '30' },
+    });
+    const c = node(UNCONFIGURED_KEY, {
+      name: '未配置',
+      expectedShopCount: 1,
+      importedShopCount: 1,
+      summary: { grossProfit: '99' },
+    });
+    expect(leafRows([a])[0]).toMatchObject({ key: 'SHOP:1', groupKey: 'GROUP:1', groupLabel: '甲组' });
+    expect(groupRanking([a, c, b], 'grossProfit').map((row) => row.key)).toEqual([
+      'GROUP:2',
+      'GROUP:1',
+      UNCONFIGURED_KEY,
+    ]);
+  });
+  it('年度单元格按月份取节点', () => {
     const row: Api.YearGroup = {
-      key: 'group:3',
-      name: '新名称',
-      legacyGroup: false,
+      key: 'GROUP:3',
+      name: '一组',
       includedMonths: [],
       summary: {},
       months: [
-        { month: '2026-01', reportId: 9, reportStatus: 'READY', node: past },
+        { month: '2026-01', reportId: 9, reportStatus: 'READY', node: node('GROUP:3') },
       ],
     };
-    expect(yearCell(row, '2026-01')?.node?.name).toBe('原小组');
+    expect(yearCell(row, '2026-01')?.node?.key).toBe('GROUP:3');
     expect(yearCell(row, '2026-02')).toBeUndefined();
   });
 });

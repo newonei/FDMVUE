@@ -95,21 +95,21 @@ export namespace FdmcaiwuEcProfitApi {
     result: Record<string, unknown>;
   }
 
+  /** 分组 → 店铺/费用；分组来自电商分组配置，未配置的店铺与费用行归入 UNCONFIGURED */
   export interface GroupNode {
     key: string;
-    nodeType: 'ADJUSTMENT' | 'DEPARTMENT' | 'GROUP' | 'SHOP' | 'TOTAL';
+    nodeType: 'ADJUSTMENT' | 'GROUP' | 'SHOP' | 'TOTAL';
     name: string;
-    departmentCode?: string;
-    departmentName?: string;
     groupId?: number;
     groupName?: string;
-    legacyGroup: boolean;
+    sortOrder?: number;
     item?: Item;
     children: GroupNode[];
     expectedShopCount: number;
     importedShopCount: number;
     adjustmentCount: number;
     pendingAdjustmentCount: number;
+    /** 归入「未配置」分组的明细条数 */
     unassignedCount: number;
     missingShopIds: string[];
     missingMetricCounts: Record<string, number>;
@@ -120,17 +120,13 @@ export namespace FdmcaiwuEcProfitApi {
   export interface MonthlyView {
     month: string;
     report: Report | null;
-    departments: GroupNode[];
+    groups: GroupNode[];
     total: GroupNode;
   }
   export interface YearGroup {
     key: string;
     name: string;
-    departmentCode?: string;
-    departmentName?: string;
     groupId?: number;
-    groupName?: string;
-    legacyGroup: boolean;
     months: {
       month: string;
       reportId?: number;
@@ -355,4 +351,18 @@ export function getEcProfitConfigurationHistory(limit = 50) {
     `${baseUrl}/configuration-history`,
     { params: { limit } },
   );
+}
+
+/** 月度毛利 Excel：分层汇总（可折叠）+ 店铺明细 */
+export function exportEcProfitMonthlyExcel(month: string) {
+  return requestClient.download(`${baseUrl}/export-monthly-excel`, {
+    params: { month },
+  });
+}
+
+/** 年度 Excel：全年汇总 + 各指标小组逐月对比 */
+export function exportEcProfitYearExcel(year: number) {
+  return requestClient.download(`${baseUrl}/export-year-excel`, {
+    params: { year },
+  });
 }

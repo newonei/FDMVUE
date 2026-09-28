@@ -1,41 +1,68 @@
 <script setup lang="ts">
 import type { TableColumnsType } from 'ant-design-vue';
 import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
+import type { MetricKey } from '../model';
+import type { LeafRow } from '../tree-model';
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+
+import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
+
 import {
   Alert,
   Button,
   Checkbox,
   DatePicker,
-  Drawer,
+  Dropdown,
   Empty,
+  Input,
+  Menu,
   message,
   Modal,
-  Radio,
+  Segmented,
   Select,
+  Spin,
   Table,
   Tag,
   Tooltip,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
+
 import {
   deleteEcProfit,
+  exportEcProfitMonthlyExcel,
   getEcProfitMonthlyView,
+  getEcProfitYear,
 } from '#/api/fdmcaiwu/ec-profit';
+
 import {
-  ALL_METRICS,
-  coverageText,
+  changeOf,
+  formatMetric,
+  sumMetrics,
+  toNumber,
+} from '../model';
+import {
+  displaySummary,
   expansionKeys,
   filterTree,
   financialColumns,
   findGroup,
-  metricLabel,
+  fullyImported,
+  isRateMetric,
+  leafRows,
   nodeMetric,
   nodeState,
   selectedTotal,
   tableTree,
+  UNCONFIGURED_KEY,
 } from '../tree-model';
-import { formatMetric } from '../model';
+import CostStructure from './cost-structure.vue';
+import GroupRanking from './group-ranking.vue';
+import ImportDialog from './import-dialog.vue';
+import ItemDrawer from './item-drawer.vue';
+import MonthStrip from './month-strip.vue';
 import ReportForm from './report-form.vue';
 import ScopeDialog from './scope-dialog.vue';
 
@@ -49,81 +76,82 @@ const emit = defineEmits<{
   configured: [];
   'clear-focus': [];
 }>();
+const { hasAccessByCodes } = useAccess();
+
 const view = ref<Api.MonthlyView>();
 const loading = ref(false);
 const error = ref('');
-const departmentKey = ref<string>();
+const yearReports = ref<Api.Report[]>([]);
+const previousYearReports = ref<Api.Report[]>([]);
+const yearLoading = ref(false);
 const groupKey = ref<string>();
-const fullColumns = ref(false);
+const keyword = ref('');
+const mode = ref<'flat' | 'tree'>('tree');
+const columnMode = ref<'core' | 'full'>('core');
+const fullColumns = computed(() => columnMode.value === 'full');
 const received = ref(false);
 const expandedKeys = ref<(number | string)[]>([]);
 const formOpen = ref(false);
 const editing = ref<Api.Report>();
 const scopeOpen = ref(false);
+const importOpen = ref(false);
+const exporting = ref(false);
 const itemDetail = ref<Api.GroupNode>();
 const detailOpen = ref(false);
 let sequence = 0;
+let yearSequence = 0;
 
-const departments = computed(() => view.value?.departments ?? []);
-const departmentOptions = computed(() =>
-  departments.value.map((node) => ({ label: node.name, value: node.key })),
+const thisMonth = dayjs().format('YYYY-MM');
+const report = computed(() => view.value?.report ?? undefined);
+const groups = computed(() => view.value?.groups ?? []);
+const hasData = computed(() => (view.value?.total.importedShopCount ?? 0) > 0
+  || (view.value?.total.adjustmentCount ?? 0) > (view.value?.total.pendingAdjustmentCount ?? 0));
+const totalComplete = computed(() => !!view.value && fullyImported(view.value.total));
+/** 未配置分组的明细条数；一个分组都没配时全部在这里 */
+const unconfiguredCount = computed(() => view.value?.total.unassignedCount ?? 0);
+const noGroupConfigured = computed(
+  () => groups.value.length > 0 && groups.value.every((group) => group.key === UNCONFIGURED_KEY),
 );
-const groupOptions = computed(() =>
-  departments.value
-    .filter((node) => !departmentKey.value || node.key === departmentKey.value)
-    .flatMap((node) =>
-      node.children.map((group) => ({
-        label: `${node.name} / ${group.name}`,
-        value: group.key,
-      })),
-    ),
-);
-const tree = computed(() =>
-  filterTree(departments.value, departmentKey.value, groupKey.value),
-);
-const tableRows = computed(() => tableTree(tree.value));
-const summaryNode = computed(() =>
-  view.value
-    ? selectedTotal(view.value, departmentKey.value, groupKey.value)
-    : undefined,
-);
-const columns = computed<TableColumnsType<Api.GroupNode>>(() => [
-  { title: '部门 / 小组 / 店铺', key: 'name', fixed: 'left', width: 285 },
-  { title: '数据状态', key: 'state', width: 175 },
-  ...(fullColumns.value
-    ? [
-        { title: '平台', key: 'platform', width: 110 },
-        { title: '公司主体', key: 'company', width: 180 },
-      ]
-    : []),
-  ...financialColumns(fullColumns.value),
-]);
-const editable = computed(
+
+// ==================== 月份与年度 ====================
+
+function shiftMonth(step: number) {
+  return dayjs(`${props.month}-01`).add(step, 'month').format('YYYY-MM');
+}
+function changeMonth(value: unknown) {
+  if (typeof value === 'string' && value) emit('update:month', value);
+}
+const previousReport = computed(() => {
+  const month = shiftMonth(-1);
+  return [...yearReports.value, ...previousYearReports.value].find(
+    (item) => item.month === month && item.status === 'READY',
+  );
+});
+const latestReportMonth = computed(
   () =>
-    !!view.value?.report &&
-    view.value.report.status === 'WAITING_IMPORT' &&
-    view.value.total.importedShopCount === 0 &&
-    view.value.total.adjustmentCount ===
-      view.value.total.pendingAdjustmentCount,
+    [...yearReports.value]
+      .filter((item) => item.month !== props.month)
+      .sort((a, b) => b.month.localeCompare(a.month))[0]?.month,
 );
-const cardsUseReceived = computed(
-  () => view.value?.total.dataState !== 'COMPLETE',
-);
-const cards = computed(() =>
-  ['salesAmount', 'grossProfit', 'grossMargin'].map((key) => ({
-    key,
-    label: metricLabel(key),
-    value: view.value
-      ? nodeMetric(view.value.total, key, cardsUseReceived.value)
-      : '—',
-  })),
-);
-const missingMetrics = computed(() =>
-  Object.entries(view.value?.total.missingMetricCounts ?? {})
-    .filter(([, count]) => count > 0)
-    .map(([key, count]) => `${metricLabel(key)}：${count} 项`)
-    .join('；'),
-);
+
+async function loadYear() {
+  const current = ++yearSequence;
+  const year = Number(props.month.slice(0, 4));
+  yearLoading.value = true;
+  try {
+    const [reports, previous] = await Promise.all([
+      getEcProfitYear(year),
+      props.month.endsWith('-01') ? getEcProfitYear(year - 1) : Promise.resolve([]),
+    ]);
+    if (current !== yearSequence) return;
+    yearReports.value = reports;
+    previousYearReports.value = previous;
+  } catch {
+    // 年度导航失败不影响当月明细
+  } finally {
+    if (current === yearSequence) yearLoading.value = false;
+  }
+}
 
 async function load() {
   const current = ++sequence;
@@ -134,15 +162,14 @@ async function load() {
     const result = await getEcProfitMonthlyView(props.month);
     if (current !== sequence) return;
     view.value = result;
-    expandedKeys.value = expansionKeys(result.departments, 'shop');
-    departmentKey.value = undefined;
+    expandedKeys.value = expansionKeys(result.groups, 'group');
     groupKey.value = undefined;
     if (props.focusGroupKey) {
-      const found = findGroup(result.departments, props.focusGroupKey);
+      const found = findGroup(result.groups, props.focusGroupKey);
       if (found) {
-        departmentKey.value = found.department.key;
-        groupKey.value = found.group.key;
-      } else message.info('该月未找到此小组，已展示完整月报');
+        groupKey.value = found.key;
+        expandedKeys.value = expansionKeys(result.groups, 'shop');
+      } else message.info('该月未找到此分组，已展示完整月报');
       emit('clear-focus');
     }
   } catch {
@@ -156,362 +183,664 @@ watch(
   () => void load(),
   { immediate: true },
 );
-onBeforeUnmount(() => sequence++);
-function changeMonth(value: string) {
-  if (value) emit('update:month', value);
+watch(
+  () => [props.month.slice(0, 4), props.month.endsWith('-01'), props.configRevision],
+  () => void loadYear(),
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  sequence++;
+  yearSequence++;
+});
+function refresh() {
+  void load();
+  void loadYear();
+}
+
+// ==================== 概览 ====================
+
+const overview = computed(() => (view.value ? displaySummary(view.value.total) : undefined));
+const cards = computed(() =>
+  (['salesAmount', 'grossProfit', 'grossMargin'] as MetricKey[]).map((key) => {
+    const rate = isRateMetric(key);
+    const change =
+      totalComplete.value && report.value?.status === 'READY'
+        ? changeOf(overview.value?.[key], previousReport.value?.summary?.[key], rate)
+        : undefined;
+    return {
+      key,
+      label: { salesAmount: '销售额', grossProfit: '毛利润', grossMargin: '毛利率' }[key as string],
+      value: formatMetric(overview.value?.[key], rate),
+      negative: (toNumber(overview.value?.[key]) ?? 0) < 0,
+      change,
+    };
+  }),
+);
+const coverage = computed(() => {
+  const total = view.value?.total;
+  if (!total || total.expectedShopCount === 0) return 0;
+  return Math.round((total.importedShopCount / total.expectedShopCount) * 100);
+});
+const issues = computed(() => {
+  const total = view.value?.total;
+  if (!report.value || !total) return [];
+  const result: string[] = [];
+  const pending = total.expectedShopCount - total.importedShopCount;
+  if (pending > 0) result.push(`${pending} 家店铺待导入，合计暂按已导入小计展示`);
+  if (total.pendingAdjustmentCount > 0) result.push(`${total.pendingAdjustmentCount} 项费用待导入`);
+  const missing = Object.entries(total.missingMetricCounts ?? {})
+    .filter(([key, count]) => count > 0 && ['estimatedFreight', 'freightAdjustment', 'newProductGiftAmount', 'customerRefundAmount'].every((optional) => optional !== key))
+    .map(([key, count]) => `${financialColumns(true).find((column) => column.key === key)?.title ?? key} ${count} 项`);
+  if (missing.length > 0) result.push(`缺少指标：${missing.join('、')}`);
+  return result;
+});
+
+// ==================== 筛选与表格 ====================
+
+const groupOptions = computed(() =>
+  groups.value.map((group) => ({ label: group.name, value: group.key })),
+);
+function selectGroup(key: string | undefined) {
+  groupKey.value = key;
+  if (key) expandedKeys.value = expansionKeys(groups.value, 'shop');
+}
+function clearFilters() {
+  groupKey.value = undefined;
+  keyword.value = '';
+}
+const filtered = computed(() => !!(groupKey.value || keyword.value.trim()));
+watch(keyword, (value) => {
+  if (value.trim()) mode.value = 'flat';
+});
+
+const tree = computed(() => filterTree(groups.value, groupKey.value));
+const treeRows = computed(() => tableTree(tree.value));
+const allExpanded = computed(() => {
+  const keys = expansionKeys(tree.value, 'shop');
+  return keys.length > 0 && keys.every((key) => expandedKeys.value.includes(key));
+});
+function toggleExpand() {
+  expandedKeys.value = allExpanded.value
+    ? expansionKeys(tree.value, 'group')
+    : expansionKeys(tree.value, 'shop');
+}
+
+const flatRows = computed(() => {
+  const text = keyword.value.trim().toLowerCase();
+  return leafRows(groups.value).filter(
+    (row) =>
+      (!groupKey.value || row.groupKey === groupKey.value) &&
+      (!text ||
+        row.name.toLowerCase().includes(text) ||
+        (row.item?.platformCode ?? '').toLowerCase().includes(text)),
+  );
+});
+const flatSummary = computed(() =>
+  sumMetrics(
+    flatRows.value
+      .filter((row) => !received.value || row.item?.dataStatus === 'IMPORTED')
+      .map((row) => (row.item?.dataStatus === 'IMPORTED' ? row.item : {})),
+  ),
+);
+const summaryNode = computed(() =>
+  view.value ? selectedTotal(view.value, groupKey.value) : undefined,
+);
+/** 结构图跟随筛选：选中分组/部门后展示该范围。 */
+const structureSummary = computed(() =>
+  summaryNode.value ? displaySummary(summaryNode.value) : undefined,
+);
+const structureScope = computed(() =>
+  groupKey.value ? (findGroup(groups.value, groupKey.value)?.name ?? '所选分组') : '全月',
+);
+
+function compare(key: string) {
+  return (a: LeafRow, b: LeafRow) =>
+    (toNumber(a.item?.[key as MetricKey]) ?? Number.NEGATIVE_INFINITY) -
+    (toNumber(b.item?.[key as MetricKey]) ?? Number.NEGATIVE_INFINITY);
+}
+/** 受控排序：店铺排行默认按毛利润从高到低。 */
+const sortState = ref<{ key: string; order: 'ascend' | 'descend' | null }>({
+  key: 'grossProfit',
+  order: 'descend',
+});
+function tableChange(_pagination: unknown, _filters: unknown, sorter: any) {
+  const current = Array.isArray(sorter) ? sorter[0] : sorter;
+  sortState.value = { key: String(current?.columnKey ?? ''), order: current?.order ?? null };
+}
+const metricColumns = computed(() => financialColumns(fullColumns.value));
+const columns = computed<TableColumnsType>(() => [
+  {
+    title: mode.value === 'tree' ? '分组 / 店铺' : '店铺 / 费用',
+    key: 'name',
+    fixed: 'left',
+    width: mode.value === 'tree' ? 280 : 260,
+  },
+  ...(fullColumns.value
+    ? [
+        { title: '平台', key: 'platform', width: 90 },
+        { title: '公司主体', key: 'company', width: 170 },
+      ]
+    : []),
+  ...metricColumns.value.map((column) => ({
+    ...column,
+    ...(mode.value === 'flat'
+      ? {
+          sorter: compare(column.key),
+          sortDirections: ['descend', 'ascend'] as ('ascend' | 'descend')[],
+          sortOrder: sortState.value.key === column.key ? sortState.value.order : null,
+        }
+      : {}),
+  })),
+]);
+const scrollX = computed(() =>
+  columns.value.reduce((sum, column) => sum + Number(column.width ?? 0), 0),
+);
+function rowClass(record: Api.GroupNode) {
+  if (mode.value === 'flat') return '';
+  if (record.nodeType === 'GROUP') return 'ecp-row-group';
+  return '';
+}
+function metricValue(node: Api.GroupNode, key: string) {
+  return nodeMetric(node, key, received.value);
+}
+function negative(node: Api.GroupNode, key: string) {
+  const values = received.value ? node.receivedSummary : node.summary;
+  return (toNumber(values?.[key as MetricKey]) ?? 0) < 0;
+}
+/** 只在异常时显示状态，正常数据不占位。 */
+function leafFlags(node: Api.GroupNode) {
+  const flags: { color: string; text: string }[] = [];
+  if (node.nodeType === 'ADJUSTMENT') flags.push({ color: 'purple', text: '费用' });
+  const state = nodeState(node);
+  if (!['已导入', '费用已导入'].includes(state))
+    flags.push({ color: state.includes('待导入') ? 'orange' : 'gold', text: state });
+  return flags;
+}
+function openItem(node: Api.GroupNode) {
+  itemDetail.value = node;
+  detailOpen.value = true;
+}
+
+// ==================== 操作 ====================
+
+const editable = computed(
+  () =>
+    !!report.value &&
+    report.value.status === 'WAITING_IMPORT' &&
+    view.value!.total.importedShopCount === 0 &&
+    view.value!.total.adjustmentCount === view.value!.total.pendingAdjustmentCount,
+);
+const canCreate = computed(() => hasAccessByCodes(['fdmcaiwu:ec-profit:create']));
+const moreActions = computed(() =>
+  [
+    { key: 'create', label: '新建月报', icon: 'lucide:plus', show: canCreate.value },
+    {
+      key: 'scope',
+      label: '同步本月范围',
+      icon: 'lucide:list-restart',
+      show: editable.value && hasAccessByCodes(['fdmcaiwu:ec-profit:update']),
+    },
+    {
+      key: 'remark',
+      label: '编辑备注',
+      icon: 'lucide:pencil',
+      show: editable.value && hasAccessByCodes(['fdmcaiwu:ec-profit:update']),
+    },
+    {
+      key: 'delete',
+      label: '删除月报',
+      icon: 'lucide:trash-2',
+      show: editable.value && hasAccessByCodes(['fdmcaiwu:ec-profit:delete']),
+      danger: true,
+    },
+  ].filter((action) => action.show),
+);
+function runAction({ key }: { key: number | string }) {
+  if (key === 'create') create();
+  else if (key === 'scope') scopeOpen.value = true;
+  else if (key === 'remark') edit();
+  else if (key === 'delete') remove();
 }
 function create() {
   editing.value = undefined;
   formOpen.value = true;
 }
 function edit() {
-  if (view.value?.report && editable.value) {
-    editing.value = view.value.report;
+  if (report.value && editable.value) {
+    editing.value = report.value;
     formOpen.value = true;
   }
 }
 async function saved(month: string) {
+  void loadYear();
   if (month !== props.month) emit('update:month', month);
   else await load();
 }
 function remove() {
-  const report = view.value?.report;
-  if (!report || !editable.value) return;
+  const current = report.value;
+  if (!current || !editable.value) return;
   Modal.confirm({
-    title: `删除 ${report.month} 月报？`,
-    content: '仅删除尚无导入数据的月报及店铺占位明细，财务归属配置不受影响。',
+    title: `删除 ${current.month} 月报？`,
+    content: '仅删除尚无导入数据的月报及店铺占位明细，分组配置不受影响。',
     okText: '删除',
     okType: 'danger',
     cancelText: '取消',
     async onOk() {
-      await deleteEcProfit(report.id, report.version);
+      await deleteEcProfit(current.id, current.version);
       message.success('月报已删除');
-      await load();
+      refresh();
     },
   });
 }
-function openItem(node: Api.GroupNode) {
-  itemDetail.value = node;
-  detailOpen.value = true;
-}
-function metricValue(node: Api.GroupNode, key: string) {
-  if (groupKey.value && node.nodeType === 'DEPARTMENT') return '—';
-  return nodeMetric(node, key, received.value);
+async function exportExcel() {
+  if (!report.value) return;
+  exporting.value = true;
+  try {
+    const data = await exportEcProfitMonthlyExcel(props.month);
+    downloadFileFromBlobPart({ fileName: `电商毛利表-${props.month}.xlsx`, source: data });
+  } finally {
+    exporting.value = false;
+  }
 }
 </script>
 
 <template>
   <div class="space-y-4">
+    <!-- 工具栏 -->
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <DatePicker
-          :value="month"
-          picker="month"
-          value-format="YYYY-MM"
-          format="YYYY 年 MM 月"
-          :allow-clear="false"
-          aria-label="毛利月份"
-          @change="(_value, dateString) => changeMonth(dateString)"
-        />
-        <Tag
-          v-if="view?.report"
-          :color="view.report.status === 'READY' ? 'success' : 'orange'"
-          >{{
-            view.report.status === 'READY' ? '月报已就绪' : '月报待导入'
-          }}</Tag
-        >
-        <span v-if="view?.report" class="text-xs text-muted-foreground">{{
-          view.report.reportNo
-        }}</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center">
+          <Tooltip title="上个月">
+            <Button aria-label="上个月" @click="changeMonth(shiftMonth(-1))">
+              <template #icon><IconifyIcon icon="lucide:chevron-left" /></template>
+            </Button>
+          </Tooltip>
+          <DatePicker
+            :value="month"
+            picker="month"
+            value-format="YYYY-MM"
+            format="YYYY 年 MM 月"
+            :allow-clear="false"
+            class="mx-1 w-36"
+            aria-label="毛利月份"
+            @change="changeMonth"
+          />
+          <Tooltip title="下个月">
+            <Button
+              aria-label="下个月"
+              :disabled="shiftMonth(1) > thisMonth"
+              @click="changeMonth(shiftMonth(1))"
+            >
+              <template #icon><IconifyIcon icon="lucide:chevron-right" /></template>
+            </Button>
+          </Tooltip>
+        </div>
+        <template v-if="report">
+          <Tag :color="report.status === 'READY' ? 'success' : 'orange'" class="!mr-0">{{
+            report.status === 'READY' ? '已就绪' : '待导入'
+          }}</Tag>
+          <span class="text-xs text-muted-foreground">{{ report.reportNo }}</span>
+          <Tooltip v-if="report.remark" :title="`备注：${report.remark}`">
+            <IconifyIcon icon="lucide:message-square-text" class="text-muted-foreground" />
+          </Tooltip>
+        </template>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <Button :loading="loading" @click="load"
-          ><template #icon><IconifyIcon icon="lucide:refresh-cw" /></template
-          >刷新</Button
-        >
-        <template v-if="editable">
-          <Button
-            v-access:code="['fdmcaiwu:ec-profit:update']"
-            @click="scopeOpen = true"
-            >同步本月范围</Button
-          >
-          <Button v-access:code="['fdmcaiwu:ec-profit:update']" @click="edit"
-            >编辑备注</Button
-          >
-          <Button
-            v-access:code="['fdmcaiwu:ec-profit:delete']"
-            danger
-            @click="remove"
-            >删除月报</Button
-          >
-        </template>
         <Button
-          v-access:code="['fdmcaiwu:ec-profit:create']"
-          type="primary"
-          @click="create"
-          ><template #icon><IconifyIcon icon="lucide:plus" /></template
-          >新建月报</Button
+          v-access:code="['fdmcaiwu:ec-profit:update']"
+          @click="importOpen = true"
         >
+          <template #icon><IconifyIcon icon="lucide:upload" /></template>导入 Excel
+        </Button>
+        <Tooltip :title="report ? '分层汇总（可折叠）+ 店铺明细两张表' : '本月尚未建单'">
+          <Button :disabled="!report" :loading="exporting" @click="exportExcel">
+            <template #icon><IconifyIcon icon="lucide:download" /></template>导出 Excel
+          </Button>
+        </Tooltip>
+        <Tooltip title="刷新">
+          <Button aria-label="刷新" :loading="loading" @click="refresh">
+            <template #icon><IconifyIcon icon="lucide:refresh-cw" /></template>
+          </Button>
+        </Tooltip>
+        <Dropdown v-if="moreActions.length > 0" :trigger="['click']">
+          <Button>
+            更多<IconifyIcon icon="lucide:chevron-down" class="ml-1 inline-block" />
+          </Button>
+          <template #overlay>
+            <Menu @click="runAction">
+              <Menu.Item v-for="action in moreActions" :key="action.key" :danger="action.danger">
+                <span class="inline-flex items-center gap-2">
+                  <IconifyIcon :icon="action.icon" />{{ action.label }}
+                </span>
+              </Menu.Item>
+            </Menu>
+          </template>
+        </Dropdown>
       </div>
     </div>
-    <Alert v-if="error" :message="error" type="error" show-icon />
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div
-        v-for="card in cards"
-        :key="card.key"
-        class="rounded-xl border border-border bg-card p-5"
-      >
-        <div class="text-sm text-muted-foreground">{{ card.label }}</div>
-        <div class="my-3 text-3xl font-semibold tabular-nums">
-          {{ card.value }}
-        </div>
-        <div
-          class="text-xs"
-          :class="
-            cardsUseReceived && view?.report
-              ? 'text-amber-600'
-              : 'text-muted-foreground'
-          "
-        >
-          {{
-            !view?.report
-              ? '本月尚未建单'
-              : cardsUseReceived
-                ? '已导入小计 · 全月尚未完整'
-                : '全月完整合计'
-          }}
-        </div>
-      </div>
-      <div class="rounded-xl border border-border bg-card p-5">
-        <div class="text-sm text-muted-foreground">应报店铺完成进度</div>
-        <div class="my-3 text-3xl font-semibold tabular-nums">
-          {{ view?.total.importedShopCount ?? '—'
-          }}<span class="ml-2 text-sm text-muted-foreground"
-            >/ {{ view?.total.expectedShopCount ?? '—' }} 家</span
-          >
-        </div>
-        <div class="text-xs text-muted-foreground">
-          {{ view?.total.unassignedCount ?? 0 }} 项未分组 ·
-          {{ view?.total.adjustmentCount ?? 0 }} 项费用调整
-        </div>
-      </div>
-    </div>
-    <Alert
-      v-if="
-        view?.report &&
-        (view.total.dataState !== 'COMPLETE' || view.total.unassignedCount > 0)
-      "
-      type="warning"
-      show-icon
-      message="本月数据尚待核对，未导入店铺与未归属费用均保留在下表。"
-    >
-      <template #description
-        ><span
-          >{{ coverageText(view.total) }}；{{
-            view.total.pendingAdjustmentCount
-          }}
-          项费用待导入。{{
-            missingMetrics ? `缺失指标：${missingMetrics}` : ''
-          }}</span
-        ></template
-      >
+
+    <MonthStrip
+      :loading="yearLoading"
+      :month="month"
+      :reports="yearReports"
+      @select="changeMonth"
+    />
+
+    <Alert v-if="error" :message="error" type="error" show-icon>
+      <template #action><Button size="small" @click="load">重试</Button></template>
     </Alert>
-    <div class="rounded-xl border border-border bg-card p-5">
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap gap-2">
-          <Select
-            v-model:value="departmentKey"
-            :options="departmentOptions"
-            placeholder="全部部门"
-            allow-clear
-            class="w-40"
-            aria-label="筛选财务部门"
-            @change="groupKey = undefined"
-          />
-          <Select
-            v-model:value="groupKey"
-            :options="groupOptions"
-            placeholder="全部小组"
-            allow-clear
-            class="w-56"
-            aria-label="筛选财务小组"
-          />
-          <Button
-            size="small"
-            @click="expandedKeys = expansionKeys(tree, 'shop')"
-            >展开到店铺</Button
-          >
-          <Button
-            size="small"
-            @click="expandedKeys = expansionKeys(tree, 'department')"
-            >收起到小组</Button
-          >
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
-          <Checkbox v-model:checked="received">显示已导入小计</Checkbox>
-          <Radio.Group
-            v-model:value="fullColumns"
-            size="small"
-            button-style="solid"
-            ><Radio.Button :value="false">核心列</Radio.Button
-            ><Radio.Button :value="true">完整列</Radio.Button></Radio.Group
-          >
-        </div>
-      </div>
-      <div class="mb-3 text-xs text-muted-foreground">
-        人民币 / 元 ·
-        {{
-          received
-            ? '当前为已导入小计，不代表全部应报数据'
-            : '当前为完整合计，缺失值保留为「—」'
-        }}{{ groupKey ? ' · 已筛选小组，部门金额不展示' : '' }}
-      </div>
-      <Table
-        :columns="columns"
-        :data-source="tableRows"
-        :loading="loading"
-        :pagination="false"
-        :scroll="{ x: fullColumns ? 3470 : 1825, y: 620 }"
-        :expanded-row-keys="expandedKeys"
-        :indent-size="18"
-        row-key="key"
-        size="small"
-        bordered
-        @update:expanded-row-keys="expandedKeys = [...$event]"
+
+    <div v-if="loading && !view" class="flex h-60 items-center justify-center">
+      <Spin />
+    </div>
+    <!-- 未建单 -->
+      <div
+        v-if="!loading && !error && view && !report"
+        class="flex flex-col items-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center"
       >
-        <template #bodyCell="{ column, record }">
-          <div
-            v-if="column.key === 'name'"
-            class="inline-flex max-w-full items-center gap-2"
+        <IconifyIcon icon="lucide:calendar-plus" class="mb-3 size-10 text-muted-foreground" />
+        <div class="text-base font-medium">{{ month.replace('-', ' 年 ') }} 月尚未建立月报</div>
+        <p class="mb-5 mt-2 max-w-md text-sm text-muted-foreground">
+          月报按当月分组配置生成全量应报店铺，建单后再导入各店铺数据。
+        </p>
+        <div class="flex flex-wrap justify-center gap-2">
+          <Button v-if="canCreate" type="primary" @click="create">新建本月月报</Button>
+          <Button @click="emit('configured')">查看店铺配置</Button>
+          <Button
+            v-if="latestReportMonth"
+            type="link"
+            @click="changeMonth(latestReportMonth)"
+            >查看 {{ Number(latestReportMonth.slice(5)) }} 月数据 →</Button
           >
-            <Button
-              v-if="record.item"
-              size="small"
-              type="link"
-              class="!h-auto !whitespace-normal !px-0 !text-left"
-              @click="openItem(record as Api.GroupNode)"
-              >{{ record.name }}</Button
-            >
-            <strong v-else>{{ record.name }}</strong>
-            <Tag v-if="record.nodeType === 'ADJUSTMENT'">费用</Tag>
-            <Tooltip
-              v-if="record.legacyGroup"
-              title="依据当月历史名称展示，不使用当前归属重分"
-              ><Tag>历史</Tag></Tooltip
-            >
-          </div>
-          <div v-else-if="column.key === 'state'">
-            <span
-              v-if="groupKey && record.nodeType === 'DEPARTMENT'"
-              class="text-xs text-muted-foreground"
-              >已筛选下属小组</span
-            >
-            <Tag
-              v-else
-              :color="
-                record.dataState === 'COMPLETE'
-                  ? 'success'
-                  : record.dataState === 'PARTIAL'
-                    ? 'orange'
-                    : 'default'
-              "
-              >{{ nodeState(record as Api.GroupNode) }}</Tag
-            >
+        </div>
+      </div>
+
+      <template v-else-if="view && report">
+        <!-- 核心指标 -->
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            v-for="card in cards"
+            :key="card.key"
+            class="rounded-xl border border-border bg-card px-5 py-4"
+          >
+            <div class="flex items-center justify-between text-sm text-muted-foreground">
+              <span>{{ card.label }}</span>
+              <Tag v-if="!totalComplete" color="orange" class="!mr-0">已导入小计</Tag>
+            </div>
             <div
-              v-if="
-                !record.item && !(groupKey && record.nodeType === 'DEPARTMENT')
-              "
-              class="mt-1 text-xs text-muted-foreground"
+              class="my-2 text-[26px] font-semibold leading-tight"
+              :class="card.negative ? 'text-[var(--ecp-negative)]' : ''"
             >
-              {{ coverageText(record as Api.GroupNode)
-              }}<span v-if="record.adjustmentCount">
-                · {{ record.adjustmentCount }} 项费用</span
-              >
+              {{ card.value }}
+            </div>
+            <div class="flex items-center gap-1 text-xs text-muted-foreground">
+              <template v-if="card.change">
+                <span
+                  class="inline-flex items-center gap-0.5 font-medium"
+                  :class="
+                    card.change.direction > 0
+                      ? 'text-[var(--ecp-positive-text)]'
+                      : card.change.direction < 0
+                        ? 'text-[var(--ecp-negative)]'
+                        : ''
+                  "
+                >
+                  <IconifyIcon
+                    v-if="card.change.direction !== 0"
+                    :icon="card.change.direction > 0 ? 'lucide:arrow-up-right' : 'lucide:arrow-down-right'"
+                  />{{ card.change.text }}
+                </span>
+                <span>较上月</span>
+              </template>
+              <span v-else>{{ totalComplete ? '上月无可比数据' : '全月尚未完整，不做环比' }}</span>
             </div>
           </div>
-          <template v-else-if="column.key === 'platform'">{{
-            record.item?.platformCode || '—'
-          }}</template>
-          <template v-else-if="column.key === 'company'">{{
-            record.item?.companyName || '—'
-          }}</template>
-          <span
-            v-else
-            class="tabular-nums"
-            :class="
-              record.nodeType === 'SHOP' || record.nodeType === 'ADJUSTMENT'
-                ? ''
-                : 'font-semibold'
-            "
-            >{{
-              metricValue(record as Api.GroupNode, String(column.key))
-            }}</span
-          >
-        </template>
-        <template #summary>
-          <Table.Summary v-if="summaryNode && view?.report" fixed>
-            <Table.Summary.Row class="bg-muted/60">
-              <Table.Summary.Cell
-                v-for="(column, index) in columns"
-                :key="String(column.key)"
-                :index="index"
-                :align="column.align"
+          <div class="rounded-xl border border-border bg-card px-5 py-4">
+            <div class="text-sm text-muted-foreground">应报店铺完成</div>
+            <div class="my-2 text-[26px] font-semibold leading-tight">
+              {{ view.total.importedShopCount
+              }}<span class="ml-1 text-sm font-normal text-muted-foreground"
+                >/ {{ view.total.expectedShopCount }} 家</span
               >
-                <div v-if="column.key === 'name'" class="font-semibold">
-                  {{ departmentKey || groupKey ? '筛选范围合计' : '全月合计' }}
-                  <div class="mt-1 text-xs font-normal text-muted-foreground">
-                    {{ received ? '已导入小计' : '完整合计 · 缺失值不补零' }}
-                  </div>
+            </div>
+            <div class="h-1.5 overflow-hidden rounded-full bg-[var(--ecp-track)]">
+              <div
+                class="h-full rounded-full"
+                :class="coverage === 100 ? 'bg-[var(--ecp-series-1)]' : 'bg-amber-500'"
+                :style="{ width: `${coverage}%` }"
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        <Alert v-if="issues.length > 0" type="warning" show-icon class="!mt-3">
+          <template #message>
+            <ul class="m-0 list-none space-y-0.5 p-0 text-sm">
+              <li v-for="issue in issues" :key="issue">{{ issue }}</li>
+            </ul>
+          </template>
+        </Alert>
+        <Alert v-if="unconfiguredCount > 0" type="info" show-icon class="!mt-3">
+          <template #message>
+            {{
+              noGroupConfigured
+                ? '还没有配置电商分组，本月全部店铺暂时放在「未配置」分组。'
+                : `${unconfiguredCount} 项明细还没有配置分组，已放在「未配置」分组。`
+            }}
+          </template>
+          <template #action>
+            <Button size="small" type="primary" ghost @click="emit('configured')">去配置分组</Button>
+          </template>
+        </Alert>
+
+        <!-- 结构与排行 -->
+        <div v-if="hasData" class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-5">
+          <div class="rounded-xl border border-border bg-card p-5 xl:col-span-3">
+            <div class="mb-4 flex items-start justify-between gap-2">
+              <div>
+                <div class="font-medium">销售额去向 · {{ structureScope }}</div>
+                <div class="text-xs text-muted-foreground">
+                  每 100 元销售额里，毛利与各项成本各占多少
                 </div>
-                <div v-else-if="column.key === 'state'" class="text-xs">
-                  <div>{{ nodeState(summaryNode) }}</div>
-                  <div class="mt-1 text-muted-foreground">
-                    {{ coverageText(summaryNode) }}
-                  </div>
-                </div>
-                <span
-                  v-else-if="
-                    column.key === 'platform' || column.key === 'company'
-                  "
-                  >—</span
-                >
-                <strong v-else class="tabular-nums">{{
-                  nodeMetric(summaryNode, String(column.key), received)
-                }}</strong>
-              </Table.Summary.Cell>
-            </Table.Summary.Row>
-          </Table.Summary>
-        </template>
-        <template #emptyText>
-          <Empty
-            :image="Empty.PRESENTED_IMAGE_SIMPLE"
-            :description="
-              error
-                ? '数据暂不可用'
-                : view?.report
-                  ? '当前范围暂无明细'
-                  : `${month} 尚未建立月报`
-            "
+              </div>
+              <Button v-if="filtered" size="small" type="link" class="!px-0" @click="clearFilters"
+                >看全月</Button
+              >
+            </div>
+            <CostStructure :summary="structureSummary" />
+          </div>
+          <div class="rounded-xl border border-border bg-card p-5 xl:col-span-2">
+            <GroupRanking
+              :groups="groups"
+              :selected-key="groupKey"
+              @select="selectGroup"
+            />
+          </div>
+        </div>
+
+        <!-- 明细表 -->
+        <div class="mt-4 rounded-xl border border-border bg-card p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <Segmented
+                v-model:value="mode"
+                :options="[
+                  { label: '按分组', value: 'tree' },
+                  { label: '店铺排行', value: 'flat' },
+                ]"
+              />
+              <Input
+                v-model:value="keyword"
+                allow-clear
+                placeholder="搜索店铺 / 平台"
+                class="!w-44"
+                aria-label="搜索店铺"
+              >
+                <template #prefix><IconifyIcon icon="lucide:search" class="text-muted-foreground" /></template>
+              </Input>
+              <Select
+                :value="groupKey"
+                :options="groupOptions"
+                placeholder="全部分组"
+                allow-clear
+                class="w-44"
+                aria-label="筛选分组"
+                @change="(value) => selectGroup(value as string | undefined)"
+              />
+              <Button v-if="filtered" type="link" size="small" @click="clearFilters">清除筛选</Button>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <Checkbox v-if="!totalComplete" v-model:checked="received">显示已导入小计</Checkbox>
+              <Button v-if="mode === 'tree'" size="small" @click="toggleExpand">
+                <template #icon>
+                  <IconifyIcon :icon="allExpanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'" />
+                </template>
+                {{ allExpanded ? '收起到分组' : '展开全部店铺' }}
+              </Button>
+              <Segmented
+                v-model:value="columnMode"
+                size="small"
+                :options="[
+                  { label: '核心列', value: 'core' },
+                  { label: '完整列', value: 'full' },
+                ]"
+              />
+            </div>
+          </div>
+          <div class="mb-2 text-xs text-muted-foreground">
+            单位：元 · 红色为负数 · 「—」表示未导入或缺少口径
+          </div>
+          <Table
+            :columns="columns"
+            :data-source="mode === 'tree' ? treeRows : flatRows"
+            :loading="loading"
+            :pagination="false"
+            :scroll="{ x: scrollX, y: 560 }"
+            :expanded-row-keys="mode === 'tree' ? expandedKeys : undefined"
+            :row-class-name="(record: any) => rowClass(record)"
+            :indent-size="16"
+            row-key="key"
+            size="small"
+            @update:expanded-row-keys="expandedKeys = [...$event]"
+            @change="tableChange"
           >
-            <p
-              v-if="!view?.report && !error"
-              class="text-xs text-muted-foreground"
-            >
-              先配置本月应报店铺，再创建完整的待导入月报。
-            </p>
-            <Button v-if="!view?.report && !error" @click="emit('configured')"
-              >查看店铺配置</Button
-            >
-          </Empty>
-        </template>
-      </Table>
-      <p
-        v-if="view?.report?.remark"
-        class="mb-0 mt-3 text-xs text-muted-foreground"
-      >
-        月报备注：{{ view.report.remark }}
-      </p>
-    </div>
+            <template #bodyCell="{ column, record }">
+              <div v-if="column.key === 'name'" class="flex min-w-0 items-center gap-1.5">
+                <template v-if="record.item">
+                  <button
+                    type="button"
+                    class="truncate text-left text-primary hover:underline"
+                    :title="record.name"
+                    @click="openItem(record as Api.GroupNode)"
+                  >
+                    {{ record.name }}
+                  </button>
+                  <Tag
+                    v-for="flag in leafFlags(record as Api.GroupNode)"
+                    :key="flag.text"
+                    :color="flag.color"
+                    class="!mr-0 shrink-0"
+                    >{{ flag.text }}</Tag
+                  >
+                </template>
+                <template v-else>
+                  <span class="truncate" :title="record.name">{{ record.name }}</span>
+                  <span class="shrink-0 text-xs font-normal text-muted-foreground"
+                    >{{ record.expectedShopCount }} 家</span
+                  >
+                  <Tooltip
+                    v-if="!fullyImported(record as Api.GroupNode)"
+                    :title="`已导入 ${record.importedShopCount} / ${record.expectedShopCount} 家`"
+                  >
+                    <Tag color="orange" class="!mr-0 shrink-0"
+                      >{{ record.importedShopCount }}/{{ record.expectedShopCount }}</Tag
+                    >
+                  </Tooltip>
+                  <Tag
+                    v-else-if="record.expectedShopCount === 0 && record.adjustmentCount === 0"
+                    class="!mr-0 shrink-0"
+                    >本月无应报</Tag
+                  >
+                </template>
+              </div>
+              <div
+                v-if="column.key === 'name' && mode === 'flat'"
+                class="truncate text-[11px] text-muted-foreground"
+              >
+                {{ record.groupLabel }}
+              </div>
+              <template v-else-if="column.key === 'platform'">{{
+                record.item?.platformCode || '—'
+              }}</template>
+              <template v-else-if="column.key === 'company'">
+                <span class="block truncate" :title="record.item?.companyName">{{
+                  record.item?.companyName || '—'
+                }}</span>
+              </template>
+              <span
+                v-else-if="column.key !== 'name'"
+                class="tabular-nums"
+                :class="[
+                  negative(record as Api.GroupNode, String(column.key)) ? 'text-[var(--ecp-negative)]' : '',
+                  record.item ? '' : 'font-medium',
+                ]"
+                >{{ metricValue(record as Api.GroupNode, String(column.key)) }}</span
+              >
+            </template>
+            <template #summary>
+              <Table.Summary v-if="summaryNode" fixed>
+                <Table.Summary.Row class="ecp-summary-row">
+                  <Table.Summary.Cell
+                    v-for="(column, index) in columns"
+                    :key="String(column.key)"
+                    :index="index"
+                    :align="(column as any).align"
+                  >
+                    <div v-if="column.key === 'name'" class="font-semibold">
+                      {{ filtered ? '筛选范围合计' : '全月合计' }}
+                      <span
+                        v-if="received || !fullyImported(summaryNode)"
+                        class="ml-1 text-xs font-normal text-muted-foreground"
+                        >{{ received ? '已导入小计' : '完整合计，缺失不补零' }}</span
+                      >
+                    </div>
+                    <span v-else-if="column.key === 'platform' || column.key === 'company'"></span>
+                    <strong
+                      v-else
+                      class="tabular-nums"
+                      :class="
+                        (toNumber(
+                          (mode === 'flat'
+                            ? flatSummary
+                            : received
+                              ? summaryNode.receivedSummary
+                              : summaryNode.summary)?.[column.key as MetricKey],
+                        ) ?? 0) < 0
+                          ? 'text-[var(--ecp-negative)]'
+                          : ''
+                      "
+                      >{{
+                        mode === 'flat'
+                          ? formatMetric(
+                              flatSummary[column.key as MetricKey],
+                              isRateMetric(String(column.key)),
+                            )
+                          : nodeMetric(summaryNode, String(column.key), received)
+                      }}</strong
+                    >
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            </template>
+            <template #emptyText>
+              <Empty
+                :image="Empty.PRESENTED_IMAGE_SIMPLE"
+                :description="keyword ? `没有找到「${keyword}」` : '当前范围暂无明细'"
+              />
+            </template>
+          </Table>
+        </div>
+      </template>
   </div>
   <ReportForm
     v-model:open="formOpen"
@@ -524,53 +853,26 @@ function metricValue(node: Api.GroupNode, key: string) {
     "
   />
   <ScopeDialog
-    v-if="view?.report"
+    v-if="report"
     v-model:open="scopeOpen"
-    :report="view.report"
-    @saved="load"
+    :report="report"
+    @saved="refresh"
     @configure="
       scopeOpen = false;
       emit('configured');
     "
   />
-  <Drawer
-    v-model:open="detailOpen"
-    :title="itemDetail?.name || '明细详情'"
-    :width="680"
-  >
-    <template v-if="itemDetail?.item">
-      <div class="mb-4 flex flex-wrap gap-2">
-        <Tag>{{
-          itemDetail.item.lineType === 'ADJUSTMENT' ? '费用调整' : '店铺'
-        }}</Tag
-        ><Tag>{{ nodeState(itemDetail) }}</Tag
-        ><span>{{ itemDetail.item.platformCode || '—' }}</span>
-      </div>
-      <div class="mb-4 text-sm text-muted-foreground">
-        {{ itemDetail.departmentName || '未分配部门' }} /
-        {{ itemDetail.groupName || '未分组' }} ·
-        {{ itemDetail.item.companyName || '未记录公司主体' }}
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div
-          v-for="metric in ALL_METRICS"
-          :key="metric.key"
-          class="rounded border border-border p-3"
-        >
-          <div class="text-xs text-muted-foreground">{{ metric.label }}</div>
-          <div class="mt-2 text-lg tabular-nums">
-            {{ formatMetric(itemDetail.item[metric.key], metric.rate) }}
-          </div>
-        </div>
-      </div>
-      <div class="mt-4 space-y-2 text-xs text-muted-foreground">
-        <p>来源批次：{{ itemDetail.item.sourceBatchId ?? '—' }}</p>
-        <p>
-          工作表 / 行：{{ itemDetail.item.sourceSheetName || '—' }} /
-          {{ itemDetail.item.sourceRowNumber ?? '—' }}
-        </p>
-        <p>备注：{{ itemDetail.item.remark || '—' }}</p>
-      </div>
-    </template>
-  </Drawer>
+  <ImportDialog v-model:open="importOpen" :default-month="month" />
+  <ItemDrawer v-model:open="detailOpen" :node="itemDetail" />
 </template>
+
+<style scoped>
+:deep(.ecp-row-group > td) {
+  font-weight: 600;
+  background: hsl(var(--accent));
+}
+
+:deep(.ecp-summary-row > td) {
+  background: hsl(var(--accent)) !important;
+}
+</style>

@@ -37,7 +37,7 @@ export function assignmentLabel(shop?: Api.AssignmentShop) {
   if (!shop || !shop.configured) return '未配置';
   if (!shop.included)
     return `不纳入毛利${shop.reason ? ` · ${shop.reason}` : ''}`;
-  return `${shop.departmentName || '未分配部门'} / ${shop.groupName || '未分组'}`;
+  return shop.groupName || '未分组';
 }
 
 export function assignmentRequest(

@@ -51,10 +51,18 @@ const selectedShops = computed(() =>
 const unconfiguredCount = computed(
   () => shops.value.filter((shop) => !shop.configured).length,
 );
+/** 各分组在所选月份的店铺数 */
+const memberCount = computed(() => {
+  const counts = new Map<number, number>();
+  for (const shop of shops.value)
+    if (shop.included && shop.groupId)
+      counts.set(shop.groupId, (counts.get(shop.groupId) ?? 0) + 1);
+  return counts;
+});
 const columns: TableColumnsType<Api.AssignmentShop> = [
   { title: '店铺 / 编号', key: 'name', width: 230 },
   { title: '平台', dataIndex: 'platformCode', width: 100 },
-  { title: '当前财务归属', key: 'assignment', width: 260 },
+  { title: '所属分组', key: 'assignment', width: 220 },
   { title: '范围', key: 'scope', width: 110 },
   { title: '生效月份', dataIndex: 'effectiveMonth', width: 110 },
   { title: '备注 / 原因', dataIndex: 'reason', width: 200 },
@@ -62,7 +70,7 @@ const columns: TableColumnsType<Api.AssignmentShop> = [
 const filterOptions = [
   { label: '全部店铺', value: 'all' },
   { label: '未配置待核实', value: 'unconfigured' },
-  { label: '已纳入 / 未分组', value: 'unassigned' },
+  { label: '纳入但未分组', value: 'unassigned' },
   { label: '已纳入毛利', value: 'included' },
   { label: '已排除', value: 'excluded' },
 ];
@@ -76,7 +84,7 @@ async function load() {
     const result = await getShopAssignments(month.value);
     if (current === sequence) data.value = result;
   } catch {
-    if (current === sequence) error.value = '店铺归属配置加载失败，请重试。';
+    if (current === sequence) error.value = '分组配置加载失败，请重试。';
   } finally {
     if (current === sequence) loading.value = false;
   }
@@ -116,15 +124,15 @@ async function changed() {
 }
 function removeGroup(group: Api.Group) {
   Modal.confirm({
-    title: `删除财务小组「${group.name}」？`,
+    title: `删除分组「${group.name}」？`,
     content:
-      '仅未被归属配置或月报引用的小组可删除；已有历史记录的小组请使用停用。',
+      '仅从未放过店铺、也未被月报引用的分组可删除；已有历史记录的分组请编辑后停用。',
     okText: '删除',
     okType: 'danger',
     cancelText: '取消',
     async onOk() {
       await deleteFinanceGroup(group.id, group.version);
-      message.success('财务小组已删除');
+      message.success('分组已删除');
       await changed();
     },
   });
@@ -135,7 +143,7 @@ function removeGroup(group: Api.Group) {
   <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-3">
-        <span class="text-sm">配置生效月份</span
+        <span class="text-sm">生效月份</span
         ><DatePicker
           v-model:value="month"
           picker="month"
@@ -144,7 +152,7 @@ function removeGroup(group: Api.Group) {
           :allow-clear="false"
           aria-label="归属生效月份"
         /><span class="text-xs text-muted-foreground"
-          >当月及后续月份生效，已有月报保留快照</span
+          >调整从该月起生效；店铺第一次配置的分组也用于之前的月份</span
         >
       </div>
       <Button :loading="loading" @click="load">刷新配置</Button>
@@ -164,13 +172,13 @@ function removeGroup(group: Api.Group) {
     <div class="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
       <section class="rounded-xl border border-border bg-card p-4">
         <div class="mb-3 flex items-center justify-between">
-          <strong>财务部门与小组</strong
+          <strong>电商分组</strong
           ><Button
             v-access:code="['fdmcaiwu:ec-profit:group-config']"
             size="small"
             type="primary"
             @click="newGroup"
-            >新增小组</Button
+            >新增分组</Button
           >
         </div>
         <Button
@@ -178,7 +186,7 @@ function removeGroup(group: Api.Group) {
           :type="groupId === undefined ? 'primary' : 'default'"
           ghost
           @click="groupId = undefined"
-          >全部小组 / 未分配店铺</Button
+          >全部店铺</Button
         >
         <div class="mt-3 max-h-[600px] space-y-2 overflow-auto">
           <div
@@ -192,15 +200,12 @@ function removeGroup(group: Api.Group) {
             "
           >
             <button class="w-full text-left" @click="groupId = group.id">
-              <div class="text-xs text-muted-foreground">
-                {{ group.departmentName }} · {{ group.departmentCode }}
-              </div>
-              <div class="mt-1 flex items-center justify-between">
+              <div class="flex items-center justify-between">
                 <strong>{{ group.name }}</strong
                 ><Tag v-if="!group.enabled">已停用</Tag>
               </div>
               <div class="mt-1 text-xs text-muted-foreground">
-                {{ group.code }}
+                {{ memberCount.get(group.id) ?? 0 }} 家店铺
               </div>
             </button>
             <div
@@ -221,11 +226,11 @@ function removeGroup(group: Api.Group) {
           <Empty
             v-if="!loading && !groups.length"
             :image="Empty.PRESENTED_IMAGE_SIMPLE"
-            description="尚未创建财务小组"
+            description="还没有分组，点「新增分组」选择店铺"
           />
         </div>
         <p class="mb-0 mt-4 text-xs leading-6 text-muted-foreground">
-          独立财务核算分类，不读取聚水潭分组作为归属。
+          分组只决定哪些店铺算一个组，月报按分组汇总，与财务核算无关。
         </p>
       </section>
       <section class="min-w-0 rounded-xl border border-border bg-card p-4">
@@ -247,7 +252,7 @@ function removeGroup(group: Api.Group) {
             type="primary"
             :disabled="!selectedKeys.length || loading"
             @click="assign"
-            >批量配置（{{ selectedKeys.length }}）</Button
+            >批量调整分组（{{ selectedKeys.length }}）</Button
           >
         </div>
         <div class="mb-3 text-xs text-muted-foreground">
@@ -310,6 +315,9 @@ function removeGroup(group: Api.Group) {
   <GroupEditor
     v-model:open="groupOpen"
     :group="editingGroup"
+    :groups="groups"
+    :month="month"
+    :shops="shops"
     @saved="changed"
   />
   <AssignmentDialog
