@@ -118,12 +118,15 @@ export function getFdmNeixiaoPatternDesignItem(id: number) {
 export function uploadFdmNeixiaoPatternDesignItemDesignImage(
   file: File,
   onUploadProgress?: AxiosProgressEvent,
+  options: { signal?: AbortSignal; silent?: boolean } = {},
 ) {
   return requestClient.upload<FdmNeixiaoPatternDesignItemApi.UploadResp>(
     '/fdmneixiao/pattern/design-item/upload-design-image',
     { file },
     {
       onUploadProgress,
+      signal: options.signal,
+      silent: options.silent,
       timeout: PATTERN_DESIGN_ITEM_UPLOAD_TIMEOUT,
     },
   );

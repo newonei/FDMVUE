@@ -29,6 +29,7 @@ import {
   updateNotifyMessageRead,
 } from '#/api/system/notify/message';
 import { getSimpleTenantList } from '#/api/system/tenant';
+import { UploadTaskPanel } from '#/components/upload-task';
 import { $t } from '#/locales';
 import { router } from '#/router';
 import { useAuthStore } from '#/store';
@@ -293,6 +294,7 @@ watch(
       >
         <LoginForm />
       </AuthenticationLoginExpiredModal>
+      <UploadTaskPanel />
     </template>
     <template #lock-screen>
       <LockScreen :avatar @to-login="handleLogout" />

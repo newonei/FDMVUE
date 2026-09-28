@@ -4,14 +4,23 @@ import type { PatternDesignItemShopOption } from './data';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmNeixiaoPatternDesignItemApi } from '#/api/fdmneixiao/pattern/design-item';
 
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import {
+  computed,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { downloadFileFromBlobPart, getFileNameFromUrl } from '@vben/utils';
 
-import { Button, message, Modal } from 'ant-design-vue';
+import { Badge, Button, message, Modal } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -30,6 +39,7 @@ import {
   createPatternDesignItemGridId,
   PATTERN_DESIGN_ITEM_GRID_CUSTOM_CONFIG,
 } from './grid-persistence';
+import { usePatternDesignItemCreateDraft } from './modules/create-draft';
 import CreateForm from './modules/create-form.vue';
 import EditForm from './modules/edit-form.vue';
 
@@ -57,9 +67,37 @@ const checkedCount = computed(() => checkedRows.value.length);
 
 const FILENAME_INVALID_CHARS = /[<>:"/\\|?*]/g;
 
+const {
+  hasContent: hasCreateDraft,
+  openRequested: createDraftOpenRequested,
+  stats: createDraftStats,
+} = usePatternDesignItemCreateDraft();
+
 function handleCreate() {
   createFormModalApi.open();
 }
+
+// 上传面板里点「查看」后回到本页并打开草稿。
+// 等页面挂载后再打开（弹窗子组件挂载前 modalApi 还不可用）；页面被标签页缓存时只由当前激活的实例响应
+const pageActive = ref(false);
+onMounted(() => {
+  pageActive.value = true;
+});
+onActivated(() => {
+  pageActive.value = true;
+});
+onDeactivated(() => {
+  pageActive.value = false;
+});
+watch(
+  [createDraftOpenRequested, pageActive],
+  ([requested, active]) => {
+    if (!requested || !active) return;
+    createDraftOpenRequested.value = false;
+    if (hasCreateDraft.value) handleCreate();
+  },
+  { immediate: true },
+);
 
 function handleEdit(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
   editFormModalApi.setData(row).open();
@@ -342,6 +380,9 @@ function handleShopNameSearch(keyword = '') {
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
+    // 默认只展示第一行常用筛选，给表格留出更多高度
+    collapsed: true,
+    showCollapseButton: true,
     schema: useGridFormSchema({
       onShopNameSearch: handleShopNameSearch,
       shopNameOptions,
@@ -352,7 +393,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     autoResize: true,
     columns: useGridColumns(),
     customConfig: PATTERN_DESIGN_ITEM_GRID_CUSTOM_CONFIG,
-    height: '600px',
+    height: 'auto',
     id: patternDesignItemGridId,
     keepSource: false,
     stripe: true,
@@ -393,7 +434,7 @@ onBeforeUnmount(() => {
     <CreateFormModal @success="gridApi.query()" />
     <EditFormModal @success="gridApi.query()" />
 
-    <div>
+    <div class="flex h-full flex-col">
       <header
         class="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 pt-3 pb-2"
       >
@@ -435,20 +476,24 @@ onBeforeUnmount(() => {
             </template>
             导出
           </Button>
-          <Button
+          <Badge
             v-access:code="['fdmneixiao:pattern-design-item:create']"
-            type="primary"
-            @click="handleCreate"
+            :count="hasCreateDraft ? createDraftStats.total : 0"
+            :title="hasCreateDraft ? '有未提交的新增草稿' : undefined"
           >
-            <template #icon>
-              <IconifyIcon icon="lucide:plus" />
-            </template>
-            新增
-          </Button>
+            <Button type="primary" @click="handleCreate">
+              <template #icon>
+                <IconifyIcon
+                  :icon="hasCreateDraft ? 'lucide:file-pen-line' : 'lucide:plus'"
+                />
+              </template>
+              {{ hasCreateDraft ? '继续新增' : '新增' }}
+            </Button>
+          </Badge>
         </div>
       </header>
 
-      <Grid table-title="内销定制订单">
+      <Grid class="min-h-0 flex-1" table-title="内销定制订单">
         <template #toolbar-tools>
           <span v-if="checkedCount > 0" class="text-xs text-muted-foreground">
             已选 {{ checkedCount }} 条
@@ -459,12 +504,12 @@ onBeforeUnmount(() => {
           <TableAction
             :actions="[
               {
-                label: '订单通知',
+                label: '下载原图',
                 type: 'link',
-                icon: 'lucide:send',
-                disabled: !String(row.orderNo ?? '').trim(),
-                auth: ['fdmneixiao:pattern-design-item:notify'],
-                onClick: handleNotifyOrder.bind(null, row),
+                icon: ACTION_ICON.DOWNLOAD,
+                disabled: !row.designImageUrl,
+                auth: ['fdmneixiao:pattern-design-item:update'],
+                onClick: handleDownloadOriginal.bind(null, row),
               },
               {
                 label: '发货',
@@ -479,31 +524,30 @@ onBeforeUnmount(() => {
                 },
               },
               {
-                label: '下载原图',
-                type: 'link',
-                icon: ACTION_ICON.DOWNLOAD,
-                disabled: !row.designImageUrl,
-                auth: ['fdmneixiao:pattern-design-item:update'],
-                onClick: handleDownloadOriginal.bind(null, row),
-              },
-              {
-                label: '下载附件',
-                type: 'link',
-                icon: ACTION_ICON.DOWNLOAD,
-                disabled: !String(row.attachmentUrl ?? '').trim(),
-                auth: ['fdmneixiao:pattern-design-item:query'],
-                onClick: handleDownloadAttachment.bind(null, row),
-              },
-              {
                 label: $t('common.edit'),
                 type: 'link',
                 icon: ACTION_ICON.EDIT,
                 auth: ['fdmneixiao:pattern-design-item:update'],
                 onClick: handleEdit.bind(null, row),
               },
+            ]"
+            :drop-down-actions="[
+              {
+                label: '订单通知',
+                icon: 'lucide:send',
+                disabled: !String(row.orderNo ?? '').trim(),
+                auth: ['fdmneixiao:pattern-design-item:notify'],
+                onClick: handleNotifyOrder.bind(null, row),
+              },
+              {
+                label: '下载附件',
+                icon: ACTION_ICON.DOWNLOAD,
+                disabled: !String(row.attachmentUrl ?? '').trim(),
+                auth: ['fdmneixiao:pattern-design-item:query'],
+                onClick: handleDownloadAttachment.bind(null, row),
+              },
               {
                 label: $t('common.delete'),
-                type: 'link',
                 danger: true,
                 icon: ACTION_ICON.DELETE,
                 auth: ['fdmneixiao:pattern-design-item:delete'],
