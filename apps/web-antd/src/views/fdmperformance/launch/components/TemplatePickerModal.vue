@@ -74,6 +74,17 @@ const departmentOptions = computed(() => {
 const selectedIds = computed(
   () => new Set(draftSelected.value.map((item) => item.id)),
 );
+const multiple = computed(() => props.selectionLimit !== 1);
+const pageAllSelected = computed(
+  () =>
+    rows.value.length > 0 &&
+    rows.value.every((item) => selectedIds.value.has(item.id)),
+);
+const pagePartiallySelected = computed(
+  () =>
+    !pageAllSelected.value &&
+    rows.value.some((item) => selectedIds.value.has(item.id)),
+);
 
 function periodLabel(periodType?: string) {
   return (
@@ -135,6 +146,23 @@ function toggleTemplate(item: JixiaoApi.TemplateSelectItem) {
     props.selectionLimit === 1
       ? [item]
       : [...draftSelected.value, item].slice(0, props.selectionLimit);
+}
+
+function togglePage(checked: boolean) {
+  if (checked) {
+    const additions = rows.value.filter(
+      (item) => !selectedIds.value.has(item.id),
+    );
+    draftSelected.value = [...draftSelected.value, ...additions].slice(
+      0,
+      props.selectionLimit,
+    );
+    return;
+  }
+  const pageIds = new Set(rows.value.map((item) => item.id));
+  draftSelected.value = draftSelected.value.filter(
+    (item) => !pageIds.has(item.id),
+  );
 }
 
 function removeTemplate(id: number) {
@@ -221,6 +249,17 @@ watch(
             show-search
             @change="handleFilterChange"
           />
+        </div>
+
+        <div v-if="multiple && rows.length" class="page-toolbar">
+          <Checkbox
+            :checked="pageAllSelected"
+            :indeterminate="pagePartiallySelected"
+            @change="togglePage($event.target.checked)"
+          >
+            全选本页
+          </Checkbox>
+          <span>共 {{ total }} 张</span>
         </div>
 
         <div class="list-region">
@@ -389,8 +428,17 @@ watch(
   border-bottom: 1px solid #edf0f4;
 }
 
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 0;
+  font-size: 12px;
+  color: #8f959e;
+}
+
 .list-region {
-  height: 372px;
+  height: 340px;
   overflow-y: auto;
 }
 
@@ -463,7 +511,7 @@ watch(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 372px;
+  min-height: 340px;
 }
 
 .pagination {

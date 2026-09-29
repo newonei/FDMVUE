@@ -44,15 +44,18 @@ function validDate(value?: string) {
     Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
   );
 }
-export function validateLaunchFields(form: Partial<JixiaoApi.LaunchReq>) {
+export function validateLaunchFields(form: {
+  items: Array<Partial<JixiaoApi.LaunchBatchItem> & { templateName?: string }>;
+  startDate?: string;
+}) {
   const errors: string[] = [];
-  if (!form.templateId) errors.push('请先选择考评表');
-  if (!form.periodKey?.trim()) errors.push('请选择考核周期');
-  if (!form.name?.trim()) errors.push('请填写考核名称');
-  if (!validDate(form.startDate) || !validDate(form.endDate))
-    errors.push('请选择有效的开始日期和截止日期');
-  else if (form.startDate! > form.endDate!)
-    errors.push('截止日期不能早于开始日期');
+  if (!form.items.length) errors.push('请先选择考评表');
+  for (const item of form.items) {
+    const prefix = form.items.length > 1 ? `「${item.templateName}」` : '';
+    if (!item.periodKey?.trim()) errors.push(`${prefix}请选择考核周期`);
+    if (!item.name?.trim()) errors.push(`${prefix}请填写考核名称`);
+  }
+  if (!validDate(form.startDate)) errors.push('请选择有效的开始日期');
   return errors;
 }
 export function personIssue(person: JixiaoApi.TemplatePerson) {
@@ -85,26 +88,35 @@ export function validateSelection(
   }
   return errors;
 }
-/** Retry an uncertain request with its original key; edits create a new attempt. */
+/**
+ * Retry an uncertain request with each template's original key; editing a
+ * template's launch (or the shared fields) gives that template a new attempt.
+ */
 export function createLaunchAttempt(
   createKey: () => string = () =>
     globalThis.crypto?.randomUUID?.() ||
     `jixiao-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
 ) {
-  let fingerprint = '';
-  let key = '';
+  const attempts = new Map<number, { fingerprint: string; key: string }>();
   return {
-    request(payload: JixiaoApi.LaunchReq): JixiaoApi.LaunchReq {
-      const normalized = {
-        ...payload,
-        userIds: [...(payload.userIds || [])].sort((a, b) => a - b),
+    request(payload: JixiaoApi.LaunchBatchReq): JixiaoApi.LaunchBatchReq {
+      const { items, ...shared } = payload;
+      return {
+        ...shared,
+        items: items.map((item) => {
+          const normalized = {
+            ...item,
+            userIds: [...(item.userIds || [])].sort((a, b) => a - b),
+          };
+          const fingerprint = JSON.stringify({ ...shared, ...normalized });
+          let attempt = attempts.get(item.templateId);
+          if (attempt?.fingerprint !== fingerprint) {
+            attempt = { fingerprint, key: createKey() };
+            attempts.set(item.templateId, attempt);
+          }
+          return { ...normalized, idempotencyKey: attempt.key };
+        }),
       };
-      const next = JSON.stringify(normalized);
-      if (next !== fingerprint) {
-        fingerprint = next;
-        key = createKey();
-      }
-      return { ...normalized, idempotencyKey: key };
     },
   };
 }

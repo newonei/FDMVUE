@@ -17,8 +17,9 @@ import {
   Table,
   Tag,
 } from 'ant-design-vue';
-import { getLaunchPreview, launchAssessment } from '#/api/fdmperformance';
+import { batchLaunchAssessments, getLaunchPreview } from '#/api/fdmperformance';
 import { usePerformanceAccess } from '../shared/access';
+import { PERIOD_OPTIONS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 import TemplatePickerModal from './components/TemplatePickerModal.vue';
 import {
@@ -31,6 +32,13 @@ import {
 } from './model';
 
 defineOptions({ name: 'FdmPerformanceLaunchWizard' });
+interface LaunchItem {
+  name: string;
+  periodKey: string;
+  preview?: JixiaoApi.LaunchPreview;
+  selectedUserIds: number[];
+  template: JixiaoApi.TemplateSelectItem;
+}
 const router = useRouter();
 const { access, accessLoading, loadAccess } = usePerformanceAccess();
 const accessFailed = ref(false);
@@ -38,48 +46,51 @@ const step = ref(0);
 const submitting = ref(false);
 const previewLoading = ref(false);
 const templatePickerOpen = ref(false);
-const selectedTemplate = ref<JixiaoApi.TemplateSelectItem>();
-const preview = ref<JixiaoApi.LaunchPreview>();
-const selectedUserIds = ref<number[]>([]);
+const items = ref<LaunchItem[]>([]);
 const launchAttempt = createLaunchAttempt();
 const form = reactive({
-  name: '',
-  periodKey: '',
   startDate: '',
-  endDate: '',
   remark: '',
 });
 let previewRequestId = 0;
 const selectedTemplates = computed(() =>
-  selectedTemplate.value ? [selectedTemplate.value] : [],
+  items.value.map((item) => item.template),
 );
-const persons = computed(() => preview.value?.persons || []);
-const selectedPersons = computed(() =>
-  persons.value.filter(
+const totalSelected = computed(() =>
+  items.value.reduce((sum, item) => sum + item.selectedUserIds.length, 0),
+);
+function personsOf(item: LaunchItem) {
+  return item.preview?.persons || [];
+}
+function selectedPersonsOf(item: LaunchItem) {
+  return personsOf(item).filter(
     (person) =>
       person.userId !== undefined &&
-      selectedUserIds.value.includes(person.userId),
-  ),
-);
+      item.selectedUserIds.includes(person.userId),
+  );
+}
 const reviewerSignature = computed(() =>
   JSON.stringify(
-    selectedPersons.value
-      .map((person) => [
-        person.userId,
-        person.supervisorUserId,
-        person.superiorSupervisorUserId,
-      ])
-      .sort((a, b) => Number(a[0]) - Number(b[0])),
+    items.value.map((item) => [
+      item.template.id,
+      selectedPersonsOf(item)
+        .map((person) => [
+          person.userId,
+          person.supervisorUserId,
+          person.superiorSupervisorUserId,
+        ])
+        .sort((a, b) => Number(a[0]) - Number(b[0])),
+    ]),
   ),
 );
-const flatIndicators = computed(() =>
-  (preview.value?.dimensions || []).flatMap((dimension) =>
+function indicatorsOf(item: LaunchItem) {
+  return (item.preview?.dimensions || []).flatMap((dimension) =>
     (dimension.indicators || []).map((indicator) => ({
       ...indicator,
       dimensionName: dimension.name,
     })),
-  ),
-);
+  );
+}
 const personColumns: TableColumnsType = [
   { dataIndex: 'userName', title: '被考核人', width: 150 },
   {
@@ -100,51 +111,96 @@ const indicatorColumns: TableColumnsType = [
   { dataIndex: 'standard', title: '考核标准', width: 260 },
   { dataIndex: 'weight', title: '权重', width: 80 },
 ];
-const rowSelection = computed(() => ({
-  selectedRowKeys: selectedUserIds.value,
-  onChange: (keys: (number | string)[]) => {
-    selectedUserIds.value = keys.map(Number);
-  },
-  getCheckboxProps: (person: JixiaoApi.TemplatePerson) => ({
-    disabled: !!personIssue(person),
-  }),
-}));
-function confirmTemplates(templates: JixiaoApi.TemplateSelectItem[]) {
-  const template = templates[0];
-  if (!template || template.id === selectedTemplate.value?.id) return;
-  selectedTemplate.value = template;
-  form.periodKey = defaultPeriodKey(template.periodType);
-  form.name = `${template.name}-${form.periodKey}`;
-  preview.value = undefined;
-  selectedUserIds.value = [];
-  previewRequestId += 1;
-  step.value = 0;
+function rowSelectionOf(item: LaunchItem) {
+  return {
+    selectedRowKeys: item.selectedUserIds,
+    onChange: (keys: (number | string)[]) => {
+      item.selectedUserIds = keys.map(Number);
+    },
+    getCheckboxProps: (person: JixiaoApi.TemplatePerson) => ({
+      disabled: !!personIssue(person),
+    }),
+  };
 }
-function changePeriod() {
-  if (selectedTemplate.value)
-    form.name = `${selectedTemplate.value.name}-${form.periodKey}`;
+const launchableUserIds = (item: LaunchItem) =>
+  personsOf(item)
+    .filter((person) => !personIssue(person))
+    .map((person) => person.userId!);
+const allLaunchableSelected = computed(() =>
+  items.value.every((item) =>
+    launchableUserIds(item).every((id) => item.selectedUserIds.includes(id)),
+  ),
+);
+function selectAllLaunchable() {
+  for (const item of items.value) item.selectedUserIds = launchableUserIds(item);
+}
+function periodLabel(periodType?: string) {
+  return (
+    PERIOD_OPTIONS.find((option) => option.value === periodType)?.label ||
+    periodType ||
+    '-'
+  );
+}
+function confirmTemplates(templates: JixiaoApi.TemplateSelectItem[]) {
+  const existing = new Map(items.value.map((item) => [item.template.id, item]));
+  items.value = templates.map((template) => {
+    const kept = existing.get(template.id);
+    if (kept) return kept;
+    const periodKey = defaultPeriodKey(template.periodType);
+    return {
+      name: `${template.name}-${periodKey}`,
+      periodKey,
+      selectedUserIds: [],
+      template,
+    };
+  });
+  previewRequestId += 1;
+}
+function removeItem(templateId: number) {
+  items.value = items.value.filter((item) => item.template.id !== templateId);
+}
+function changePeriod(item: LaunchItem) {
+  item.name = `${item.template.name}-${item.periodKey}`;
+}
+function itemError(item: LaunchItem, error: string) {
+  return items.value.length > 1 ? `「${item.template.name}」${error}` : error;
 }
 function validateBasics() {
   const errors = validateLaunchFields({
-    ...form,
-    templateId: selectedTemplate.value?.id,
+    startDate: form.startDate,
+    items: items.value.map((item) => ({
+      name: item.name,
+      periodKey: item.periodKey,
+      templateId: item.template.id,
+      templateName: item.template.name,
+    })),
   });
   if (errors.length) message.warning(errors[0]);
   return errors.length === 0;
 }
 function validatePeople() {
-  const errors = validateSelection(persons.value, selectedUserIds.value);
-  if (errors.length) message.warning(errors[0]);
-  return errors.length === 0;
+  for (const item of items.value) {
+    const errors = validateSelection(personsOf(item), item.selectedUserIds);
+    if (errors.length) {
+      message.warning(itemError(item, errors[0]!));
+      return false;
+    }
+  }
+  return true;
 }
-async function loadPreview() {
-  if (!selectedTemplate.value || !access.value?.canLaunch) return false;
+async function loadPreviews() {
+  if (!items.value.length || !access.value?.canLaunch) return false;
   const requestId = ++previewRequestId;
+  const targets = [...items.value];
   previewLoading.value = true;
   try {
-    const data = await getLaunchPreview(selectedTemplate.value.id);
+    const previews = await Promise.all(
+      targets.map((item) => getLaunchPreview(item.template.id)),
+    );
     if (requestId !== previewRequestId) return false;
-    preview.value = data;
+    targets.forEach((item, index) => {
+      item.preview = previews[index];
+    });
     return true;
   } finally {
     if (requestId === previewRequestId) previewLoading.value = false;
@@ -154,7 +210,7 @@ async function nextStep() {
   if (!access.value?.canLaunch || submitting.value || previewLoading.value)
     return;
   if (step.value === 0) {
-    if (validateBasics() && (await loadPreview())) step.value = 1;
+    if (validateBasics() && (await loadPreviews())) step.value = 1;
   } else if (validatePeople()) step.value = 2;
 }
 async function submit() {
@@ -162,15 +218,14 @@ async function submit() {
     !access.value?.canLaunch ||
     submitting.value ||
     !validateBasics() ||
-    !validatePeople() ||
-    !selectedTemplate.value
+    !validatePeople()
   )
     return;
   submitting.value = true;
   try {
     const reviewedRelations = reviewerSignature.value;
     // Refresh the authorized population and reviewer mapping before launch.
-    if (!(await loadPreview()) || !validatePeople()) {
+    if (!(await loadPreviews()) || !validatePeople()) {
       step.value = 1;
       return;
     }
@@ -179,20 +234,31 @@ async function submit() {
       message.warning('评分人关系已变化，请重新核对后再发起');
       return;
     }
-    const batchId = await launchAssessment(
+    const launchedCount = totalSelected.value;
+    // The backend launches every template in one transaction: all or none.
+    const batchIds = await batchLaunchAssessments(
       launchAttempt.request({
-        ...form,
-        name: form.name.trim(),
-        periodKey: form.periodKey.trim(),
         remark: form.remark.trim(),
-        templateId: selectedTemplate.value.id,
-        userIds: [...selectedUserIds.value],
+        startDate: form.startDate,
+        items: items.value.map((item) => ({
+          name: item.name.trim(),
+          periodKey: item.periodKey.trim(),
+          templateId: item.template.id,
+          userIds: [...item.selectedUserIds],
+        })),
       }),
     );
-    message.success(`已为 ${selectedUserIds.value.length} 人发起考核`);
+    message.success(
+      batchIds.length > 1
+        ? `已发起 ${batchIds.length} 张考评表，共 ${launchedCount} 人考核`
+        : `已为 ${launchedCount} 人发起考核`,
+    );
     await router.push({
       name: 'FdmPerformanceBatches',
-      query: { batchId: String(batchId), scope: 'INITIATED' },
+      query:
+        batchIds.length === 1
+          ? { batchId: String(batchIds[0]), scope: 'INITIATED' }
+          : { scope: 'INITIATED' },
     });
   } finally {
     submitting.value = false;
@@ -246,40 +312,67 @@ onMounted(initialize);
                 :disabled="previewLoading"
                 class="template-trigger"
                 @click="templatePickerOpen = true"
-                >{{ selectedTemplate?.name || '选择一张可用考评表' }}</Button
+                >{{
+                  items.length
+                    ? `已选择 ${items.length} 张考评表，点击调整`
+                    : '选择考评表（可多选）'
+                }}</Button
               >
-              <p v-if="selectedTemplate" class="secondary-text">
-                {{ selectedTemplate.indicatorCount }} 项指标 ·
-                下一步选择本次考核人员
+              <p v-if="items.length" class="secondary-text">
+                为每张考评表设置考核周期和名称，下一步选择本次考核人员
               </p>
             </Form.Item>
-            <div class="form-grid">
-              <Form.Item label="考核周期" required>
+            <div v-if="items.length" class="launch-items">
+              <div class="launch-items-head">
+                <span>考评表</span><span>考核周期</span><span>考核名称</span
+                ><span></span>
+              </div>
+              <div
+                v-for="item in items"
+                :key="item.template.id"
+                class="launch-item-row"
+              >
+                <div class="launch-item-template">
+                  <strong :title="item.template.name">{{
+                    item.template.name
+                  }}</strong>
+                  <span
+                    >{{ periodLabel(item.template.periodType) }} ·
+                    {{ item.template.indicatorCount }} 项指标</span
+                  >
+                </div>
                 <Select
-                  v-if="buildPeriodOptions(selectedTemplate?.periodType).length"
-                  v-model:value="form.periodKey"
-                  :options="buildPeriodOptions(selectedTemplate?.periodType)"
-                  @change="changePeriod"
+                  v-if="buildPeriodOptions(item.template.periodType).length"
+                  v-model:value="item.periodKey"
+                  :aria-label="`${item.template.name}考核周期`"
+                  :options="buildPeriodOptions(item.template.periodType)"
+                  @change="changePeriod(item)"
                 />
                 <Input
                   v-else
-                  v-model:value="form.periodKey"
+                  v-model:value="item.periodKey"
+                  :aria-label="`${item.template.name}考核周期`"
                   placeholder="如：2026-09"
-                  @change="changePeriod"
+                  @change="changePeriod(item)"
                 />
-              </Form.Item>
-              <Form.Item label="考核名称" required
-                ><Input v-model:value="form.name" :maxlength="100"
-              /></Form.Item>
+                <Input
+                  v-model:value="item.name"
+                  :aria-label="`${item.template.name}考核名称`"
+                  :maxlength="100"
+                />
+                <Button
+                  danger
+                  size="small"
+                  type="text"
+                  @click="removeItem(item.template.id)"
+                  >移除</Button
+                >
+              </div>
+            </div>
+            <div class="form-grid">
               <Form.Item label="开始日期" required
                 ><DatePicker
                   v-model:value="form.startDate"
-                  value-format="YYYY-MM-DD"
-                  class="full-width"
-              /></Form.Item>
-              <Form.Item label="截止日期" required
-                ><DatePicker
-                  v-model:value="form.endDate"
                   value-format="YYYY-MM-DD"
                   class="full-width"
               /></Form.Item>
@@ -295,7 +388,15 @@ onMounted(initialize);
         <section v-if="step === 1" class="launch-panel">
           <div class="section-heading">
             <h2>选择本次考核人员</h2>
-            <Tag color="blue">已选 {{ selectedUserIds.length }} 人</Tag>
+            <div class="launch-item-actions">
+              <Button
+                :disabled="allLaunchableSelected"
+                size="small"
+                @click="selectAllLaunchable"
+                >全选可发起人员</Button
+              >
+              <Tag color="blue">已选 {{ totalSelected }} 人</Tag>
+            </div>
           </div>
           <Alert
             class="section-alert"
@@ -303,88 +404,121 @@ onMounted(initialize);
             show-icon
             type="info"
           />
-          <Table
-            :columns="personColumns"
-            :data-source="persons"
-            :row-selection="rowSelection"
-            :pagination="false"
-            :scroll="{ x: 740 }"
-            row-key="userId"
-            size="small"
+          <div
+            v-for="item in items"
+            :key="item.template.id"
+            class="launch-item"
           >
-            <template #bodyCell="{ column, record }">
-              <template
-                v-if="column.dataIndex === 'superiorSupervisorUserName'"
-                >{{
-                  record.superiorSupervisorUserName || '不启用上级评分'
-                }}</template
-              >
-              <template v-else-if="column.dataIndex === 'validation'"
-                ><Tag :color="personIssue(record) ? 'error' : 'success'">{{
-                  personIssue(record) || '可发起'
-                }}</Tag></template
-              >
-            </template>
-            <template #emptyText
-              >此考评表暂无你有权发起的人员，请联系管理员维护人员范围。</template
+            <div class="launch-item-heading">
+              <div>
+                <h3>{{ item.name }}</h3>
+                <span class="secondary-text"
+                  >{{ item.template.name }} · 考核周期 {{ item.periodKey }}</span
+                >
+              </div>
+              <div class="launch-item-actions">
+                <Tag
+                  >已选 {{ item.selectedUserIds.length }} /
+                  {{ personsOf(item).length }} 人</Tag
+                >
+                <Button
+                  v-if="items.length > 1"
+                  danger
+                  size="small"
+                  type="text"
+                  @click="removeItem(item.template.id)"
+                  >移除此表</Button
+                >
+              </div>
+            </div>
+            <Table
+              :columns="personColumns"
+              :data-source="personsOf(item)"
+              :row-selection="rowSelectionOf(item)"
+              :pagination="false"
+              :scroll="{ x: 740 }"
+              row-key="userId"
+              size="small"
             >
-          </Table>
+              <template #bodyCell="{ column, record }">
+                <template
+                  v-if="column.dataIndex === 'superiorSupervisorUserName'"
+                  >{{
+                    record.superiorSupervisorUserName || '不启用上级评分'
+                  }}</template
+                >
+                <template v-else-if="column.dataIndex === 'validation'"
+                  ><Tag :color="personIssue(record) ? 'error' : 'success'">{{
+                    personIssue(record) || '可发起'
+                  }}</Tag></template
+                >
+              </template>
+              <template #emptyText
+                >此考评表暂无你有权发起的人员，请联系管理员维护人员范围。</template
+              >
+            </Table>
+          </div>
         </section>
         <section v-if="step === 2" class="launch-panel">
           <h2>核对后发起</h2>
           <Descriptions bordered size="small" :column="{ xs: 1, sm: 2, lg: 3 }">
-            <Descriptions.Item label="考核名称">{{
-              form.name
-            }}</Descriptions.Item
-            ><Descriptions.Item label="考评表">{{
-              selectedTemplate?.name
-            }}</Descriptions.Item
-            ><Descriptions.Item label="考核周期">{{
-              form.periodKey
-            }}</Descriptions.Item
+            <Descriptions.Item label="考评表"
+              >{{ items.length }} 张</Descriptions.Item
             ><Descriptions.Item label="开始日期">{{
               form.startDate
             }}</Descriptions.Item
-            ><Descriptions.Item label="截止日期">{{
-              form.endDate
-            }}</Descriptions.Item
             ><Descriptions.Item label="本次人数"
-              >{{ selectedUserIds.length }} 人</Descriptions.Item
+              >{{ totalSelected }} 人</Descriptions.Item
             >
           </Descriptions>
-          <h3>被考核人与评分人</h3>
-          <Table
-            :columns="personColumns.slice(0, 3)"
-            :data-source="selectedPersons"
-            :pagination="false"
-            :scroll="{ x: 520 }"
-            row-key="userId"
-            size="small"
-            ><template #bodyCell="{ column, record }"
-              ><template
-                v-if="column.dataIndex === 'superiorSupervisorUserName'"
-                >{{
-                  record.superiorSupervisorUserName || '不启用上级评分'
-                }}</template
-              ></template
-            ></Table
+          <div
+            v-for="item in items"
+            :key="item.template.id"
+            class="launch-item"
           >
-          <h3>指标快照</h3>
-          <Table
-            :columns="indicatorColumns"
-            :data-source="flatIndicators"
-            :pagination="false"
-            :scroll="{ x: 650 }"
-            row-key="id"
-            size="small"
-            ><template #bodyCell="{ column, record }"
-              ><template v-if="column.dataIndex === 'weight'"
-                >{{ record.weight || 0 }}%</template
-              ></template
-            ></Table
-          >
+            <div class="launch-item-heading">
+              <div>
+                <h3>{{ item.name }}</h3>
+                <span class="secondary-text"
+                  >{{ item.template.name }} · 考核周期 {{ item.periodKey }} ·
+                  {{ item.selectedUserIds.length }} 人</span
+                >
+              </div>
+            </div>
+            <h4>被考核人与评分人</h4>
+            <Table
+              :columns="personColumns.slice(0, 3)"
+              :data-source="selectedPersonsOf(item)"
+              :pagination="false"
+              :scroll="{ x: 520 }"
+              row-key="userId"
+              size="small"
+              ><template #bodyCell="{ column, record }"
+                ><template
+                  v-if="column.dataIndex === 'superiorSupervisorUserName'"
+                  >{{
+                    record.superiorSupervisorUserName || '不启用上级评分'
+                  }}</template
+                ></template
+              ></Table
+            >
+            <h4>指标快照</h4>
+            <Table
+              :columns="indicatorColumns"
+              :data-source="indicatorsOf(item)"
+              :pagination="false"
+              :scroll="{ x: 650 }"
+              row-key="id"
+              size="small"
+              ><template #bodyCell="{ column, record }"
+                ><template v-if="column.dataIndex === 'weight'"
+                  >{{ record.weight || 0 }}%</template
+                ></template
+              ></Table
+            >
+          </div>
           <p class="secondary-text">
-            发起后每人生成独立考核，从指标确认开始。提交时将重新核验人员权限、评分关系和重复考核。
+            发起后每人生成独立考核，从指标确认开始。提交时将重新核验人员权限、评分关系和重复考核；多张考评表一并提交，任一张未通过校验则全部不发起。
           </p>
         </section>
         <div class="wizard-actions">
@@ -400,13 +534,12 @@ onMounted(initialize);
             @click="nextStep"
             >下一步</Button
           ><Button v-else :loading="submitting" type="primary" @click="submit"
-            >确认发起 {{ selectedUserIds.length }} 人考核</Button
+            >确认发起 {{ totalSelected }} 人考核</Button
           >
         </div>
         <TemplatePickerModal
           v-model:open="templatePickerOpen"
           :selected="selectedTemplates"
-          :selection-limit="1"
           @confirm="confirmTemplates"
         />
       </div>
@@ -432,9 +565,77 @@ onMounted(initialize);
   font-weight: 600;
 }
 .launch-panel h3 {
-  margin: 22px 0 12px;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+.launch-panel h4 {
+  margin: 16px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+.launch-items {
+  margin-bottom: 20px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+.launch-items-head,
+.launch-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.4fr) 56px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+}
+.launch-items-head {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+}
+.launch-item-row {
+  border-top: 1px solid hsl(var(--border));
+}
+.launch-item-template {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.launch-item-template strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.launch-item-template span {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.launch-item {
+  padding-top: 16px;
+  margin-top: 20px;
+  border-top: 1px solid hsl(var(--border));
+}
+.section-alert + .launch-item {
+  margin-top: 0;
+}
+.launch-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.launch-item-heading .secondary-text {
+  display: block;
+  margin-top: 4px;
+}
+.launch-item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .section-heading {
   display: flex;
@@ -472,8 +673,18 @@ onMounted(initialize);
   justify-content: flex-end;
 }
 @media (max-width: 640px) {
-  .form-grid {
+  .form-grid,
+  .launch-item-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .launch-items-head {
+    display: none;
+  }
+  .launch-items-head + .launch-item-row {
+    border-top: 0;
+  }
+  .launch-item-row :deep(.ant-btn) {
+    justify-self: start;
   }
   .launch-panel {
     padding: 14px;
