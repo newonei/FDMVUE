@@ -18,24 +18,20 @@ import {
 } from 'ant-design-vue';
 
 import {
-  applyShopAssignments,
   createFinanceGroup,
-  previewShopAssignments,
+  saveEcProfitDefaultGroups,
   updateFinanceGroup,
 } from '#/api/fdmcaiwu/ec-profit';
 
-import { assignmentApply } from '../config-model';
-
 /**
- * 电商分组 = 分组名称 + 哪些店铺在这个组。与财务核算无关，不需要部门和代码；
- * 店铺加入/移出按所选月份起生效；店铺第一次配置的分组也用于之前月份的查看。
+ * 电商分组 = 分组名称 + 哪些店铺默认在这个组。与财务核算无关，不需要部门和代码；
+ * 这里改的是「默认分组」，对所有月份生效；某个月临时调整在「按月调整」里改。
  */
 const props = defineProps<{
   group?: Api.Group;
   groups: Api.Group[];
-  month: string;
   open: boolean;
-  shops: Api.AssignmentShop[];
+  shops: Api.GroupMemberShop[];
 }>();
 const emit = defineEmits<{ 'update:open': [open: boolean]; saved: [] }>();
 
@@ -48,11 +44,11 @@ const form = reactive({
   enabled: true,
 });
 
-/** 当前（所选月份）在该组的店铺 */
+/** 默认在该组的店铺 */
 const members = computed(() =>
   props.group
     ? props.shops
-        .filter((shop) => shop.included && shop.groupId === props.group!.id)
+        .filter((shop) => shop.defaultGroupId === props.group!.id)
         .map((shop) => shop.shopId)
     : [],
 );
@@ -74,8 +70,8 @@ const shopById = computed(() => new Map(props.shops.map((shop) => [shop.shopId, 
 const shopOptions = computed(() =>
   props.shops.map((shop) => {
     const other =
-      shop.included && shop.groupId && shop.groupId !== props.group?.id
-        ? `（现属 ${shop.groupName}）`
+      shop.defaultGroupId && shop.defaultGroupId !== props.group?.id
+        ? `（现属 ${shop.defaultGroupName}）`
         : '';
     return {
       label: `${shop.shopName}${shop.platformCode ? ` · ${shop.platformCode}` : ''}${other}`,
@@ -88,7 +84,7 @@ const removed = computed(() => members.value.filter((id) => !form.shopIds.includ
 const movedFromOther = computed(() =>
   added.value
     .map((id) => shopById.value.get(id))
-    .filter((shop) => shop?.included && shop.groupId && shop.groupId !== props.group?.id),
+    .filter((shop) => shop?.defaultGroupId && shop.defaultGroupId !== props.group?.id),
 );
 const disabling = computed(() => !!props.group && props.group.enabled && !form.enabled);
 
@@ -101,17 +97,10 @@ function nameRule(_rule: unknown, value: string) {
   return duplicated ? Promise.reject(new Error('已有同名分组')) : Promise.resolve();
 }
 
-/** 预览后按原样提交，保证提交的就是服务端核对过的版本；每批最多 200 家。 */
+/** 设置默认分组；groupId 为空表示移出默认分组。每批最多 500 家。 */
 async function moveShops(shopIds: string[], groupId?: number) {
-  for (let index = 0; index < shopIds.length; index += 200) {
-    const request: Api.AssignmentRequest = {
-      effectiveMonth: props.month,
-      shopIds: shopIds.slice(index, index + 200),
-      included: true,
-      ...(groupId ? { groupId } : {}),
-    };
-    const preview = await previewShopAssignments(request);
-    await applyShopAssignments(assignmentApply(request, preview, crypto.randomUUID()));
+  for (let index = 0; index < shopIds.length; index += 500) {
+    await saveEcProfitDefaultGroups({ groupId, shopIds: shopIds.slice(index, index + 500) });
   }
 }
 
@@ -127,7 +116,7 @@ async function save() {
   try {
     const base = { name: form.name.trim(), sort: form.sort ?? 0 };
     if (props.group) {
-      // 停用前先把组内店铺全部移出，否则服务端会因「仍有生效店铺」拒绝停用
+      // 停用前先把默认成员全部移出，否则服务端会因「仍有店铺」拒绝停用
       if (disabling.value && members.value.length > 0) await moveShops(members.value);
       await updateFinanceGroup({
         ...props.group,
@@ -191,7 +180,7 @@ async function save() {
         <template #label>
           <span>组内店铺</span>
           <span class="ml-2 text-xs font-normal text-muted-foreground"
-            >已选 {{ form.shopIds.length }} 家 · {{ month }} 起生效</span
+            >已选 {{ form.shopIds.length }} 家 · 默认分组，所有月份生效</span
           >
         </template>
         <Select
@@ -228,7 +217,7 @@ async function save() {
         <template #message>
           <div class="space-y-1 text-sm">
             <div v-if="disabling">
-              停用后该组不再接收店铺；组内 {{ members.length }} 家店铺将改为「未分组」。
+              停用后该组不再接收店铺；组内 {{ members.length }} 家店铺将变为「未配置」。
             </div>
             <template v-else>
               <div v-if="added.length">
@@ -238,7 +227,7 @@ async function save() {
                 >
               </div>
               <div v-if="removed.length">
-                移出 {{ removed.length }} 家（改为「未分组」）：
+                移出 {{ removed.length }} 家（变为「未配置」）：
                 <Tag v-for="id in removed" :key="id" class="!mb-1">{{
                   shopById.get(id)?.shopName
                 }}</Tag>
@@ -248,7 +237,7 @@ async function save() {
         </template>
       </Alert>
       <p class="mb-0 text-xs leading-6 text-muted-foreground">
-        分组只决定哪些店铺算一个组，月度毛利和年度对比都按这里的分组汇总。变更从 {{ month }} 起生效；店铺第一次配置的分组也用于之前的月份。
+        这里设置的是店铺的<strong>默认分组</strong>，所有月份都按它汇总。某个月临时有变化（如有人请假，店铺交给别人），到「按月调整」里只改那个月。
       </p>
     </Form>
   </Modal>

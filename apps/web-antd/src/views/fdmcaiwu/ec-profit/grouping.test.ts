@@ -5,6 +5,9 @@ import {
   assignmentLabel,
   assignmentRequest,
   filterAssignments,
+  filterMembers,
+  memberCounts,
+  UNCONFIGURED_GROUP,
 } from './config-model';
 import {
   expansionKeys,
@@ -263,5 +266,49 @@ describe('归属预览与版本化提交', () => {
         'another',
       ),
     ).toThrow('月份');
+  });
+});
+
+describe('默认分组 + 按月调整', () => {
+  const member = (
+    shopId: string,
+    values: Partial<Api.GroupMemberShop> = {},
+  ): Api.GroupMemberShop => ({
+    shopId,
+    shopName: `店铺${shopId}`,
+    enabled: true,
+    ...values,
+  });
+  // a 默认 1 组；b 默认 1 组、本月请假调到 2 组；c 没有默认分组
+  const shops = [
+    member('a', { defaultGroupId: 1, effectiveGroupId: 1 }),
+    member('b', {
+      defaultGroupId: 1,
+      overrideGroupId: 2,
+      overrideGroupName: '二组',
+      effectiveGroupId: 2,
+    }),
+    member('c'),
+  ];
+  it('默认视图按默认分组计数，按月视图按实际生效分组计数并给出调入调出', () => {
+    const defaults = memberCounts(shops, 'default');
+    expect(defaults.get(1)?.total).toBe(2);
+    expect(defaults.get(2)).toBeUndefined();
+    expect(defaults.get(UNCONFIGURED_GROUP)?.total).toBe(1);
+    const month = memberCounts(shops, 'month');
+    expect(month.get(1)).toEqual({ in: 0, out: 1, total: 1 });
+    expect(month.get(2)).toEqual({ in: 1, out: 0, total: 1 });
+  });
+  it('按分组、未配置和本月调整筛选', () => {
+    const ids = (rows: Api.GroupMemberShop[]) => rows.map((row) => row.shopId);
+    expect(ids(filterMembers(shops, 'default', 'all', '', 1))).toEqual(['a', 'b']);
+    expect(ids(filterMembers(shops, 'month', 'all', '', 1))).toEqual(['a']);
+    expect(
+      ids(filterMembers(shops, 'month', 'all', '', UNCONFIGURED_GROUP)),
+    ).toEqual(['c']);
+    expect(ids(filterMembers(shops, 'month', 'adjusted', ''))).toEqual(['b']);
+    expect(ids(filterMembers(shops, 'default', 'adjusted', ''))).toEqual([]);
+    expect(ids(filterMembers(shops, 'default', 'unconfigured', ''))).toEqual(['c']);
+    expect(ids(filterMembers(shops, 'default', 'all', '店铺b'))).toEqual(['b']);
   });
 });

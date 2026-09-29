@@ -245,6 +245,22 @@ export namespace FdmcaiwuEcProfitApi {
     departmentName?: string;
     reason?: string;
   }
+  /** 店铺分组：默认分组对所有月份生效；某月有临时调整时该月按调整 */
+  export interface GroupMemberShop extends ShopOption {
+    enabled: boolean;
+    defaultGroupId?: number;
+    defaultGroupName?: string;
+    overrideGroupId?: number;
+    overrideGroupName?: string;
+    overrideReason?: string;
+    effectiveGroupId?: number;
+    effectiveGroupName?: string;
+  }
+  export interface GroupMembers {
+    month?: string;
+    groups: Group[];
+    shops: GroupMemberShop[];
+  }
   export interface AssignmentList {
     effectiveMonth: string;
     configVersion: number;
@@ -386,6 +402,29 @@ export function deleteFinanceGroup(id: number, expectedVersion: number) {
   return requestClient.delete<boolean>(`${baseUrl}/finance-group/delete`, {
     params: { id, expectedVersion },
   });
+}
+/** 店铺分组一览；不传月份只看默认分组 */
+export function getEcProfitGroupMembers(month?: string) {
+  return requestClient.get<FdmcaiwuEcProfitApi.GroupMembers>(
+    `${baseUrl}/group-members`,
+    { params: { month } },
+  );
+}
+/** 设置默认分组；groupId 为空表示移出默认分组 */
+export function saveEcProfitDefaultGroups(data: {
+  groupId?: number;
+  shopIds: string[];
+}) {
+  return requestClient.post<number>(`${baseUrl}/default-groups/save`, data);
+}
+/** 某月临时调整；groupId 为空表示恢复默认分组 */
+export function saveEcProfitMonthGroups(data: {
+  groupId?: number;
+  month: string;
+  reason?: string;
+  shopIds: string[];
+}) {
+  return requestClient.post<number>(`${baseUrl}/month-groups/save`, data);
 }
 export function getShopAssignments(effectiveMonth: string) {
   return requestClient.get<FdmcaiwuEcProfitApi.AssignmentList>(

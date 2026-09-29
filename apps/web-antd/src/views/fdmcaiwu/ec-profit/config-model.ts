@@ -107,3 +107,69 @@ export function assignmentApply(
     idempotencyKey,
   };
 }
+
+// ==================== 默认分组 + 按月调整 ====================
+
+/** default：看默认分组（所有月份）；month：看某月实际生效的分组 */
+export type GroupView = 'default' | 'month';
+export type MemberFilter = 'adjusted' | 'all' | 'unconfigured';
+/** 分组卡片里「未配置」的 key */
+export const UNCONFIGURED_GROUP = 0;
+
+/** 该视图下店铺所在分组；没有分组为 undefined */
+export function memberGroupId(shop: Api.GroupMemberShop, view: GroupView) {
+  return (view === 'default' ? shop.defaultGroupId : shop.effectiveGroupId) ?? undefined;
+}
+
+/** 所选月份是否对该店做了临时调整 */
+export function isAdjusted(shop: Api.GroupMemberShop) {
+  return !!shop.overrideGroupName;
+}
+
+/** groupId：undefined 为全部，UNCONFIGURED_GROUP 为未配置 */
+export function filterMembers(
+  shops: Api.GroupMemberShop[],
+  view: GroupView,
+  filter: MemberFilter,
+  keyword: string,
+  groupId?: number,
+) {
+  const text = keyword.trim().toLocaleLowerCase();
+  return shops.filter((shop) => {
+    const current = memberGroupId(shop, view);
+    if (groupId !== undefined && (current ?? UNCONFIGURED_GROUP) !== groupId)
+      return false;
+    if (
+      text &&
+      !`${shop.shopName} ${shop.shopId} ${shop.platformCode ?? ''}`
+        .toLocaleLowerCase()
+        .includes(text)
+    )
+      return false;
+    if (filter === 'unconfigured') return current === undefined;
+    if (filter === 'adjusted') return view === 'month' && isAdjusted(shop);
+    return true;
+  });
+}
+
+/** 每个分组的店铺数；未配置记在 UNCONFIGURED_GROUP。按月视图另给出调入/调出数。 */
+export function memberCounts(shops: Api.GroupMemberShop[], view: GroupView) {
+  const counts = new Map<number, { in: number; out: number; total: number }>();
+  const entry = (id: number) => {
+    let value = counts.get(id);
+    if (!value) counts.set(id, (value = { in: 0, out: 0, total: 0 }));
+    return value;
+  };
+  for (const shop of shops) {
+    const current = memberGroupId(shop, view) ?? UNCONFIGURED_GROUP;
+    entry(current).total++;
+    if (view === 'month' && isAdjusted(shop)) {
+      const fallback = shop.defaultGroupId ?? UNCONFIGURED_GROUP;
+      if (fallback !== current) {
+        entry(current).in++;
+        entry(fallback).out++;
+      }
+    }
+  }
+  return counts;
+}

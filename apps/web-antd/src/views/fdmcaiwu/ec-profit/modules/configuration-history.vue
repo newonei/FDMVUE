@@ -22,6 +22,9 @@ const open = ref(false);
 let sequence = 0;
 const labels: Record<string, string> = {
   ASSIGNMENTS: '店铺归属变更',
+  DEFAULT_GROUP_SET: '设置默认分组',
+  MONTH_GROUP_SET: '按月调整分组',
+  MONTH_GROUP_RESET: '恢复默认分组',
   SCOPE_SYNC: '月报范围同步',
   GROUP_CREATE: '新增分组',
   GROUP_UPDATE: '修改分组',
@@ -135,6 +138,12 @@ function summary(row: Api.ConfigurationHistory) {
         return `${text(result.month)} · ${text(result.shopName)}`;
     }
   }
+  if (row.action === 'DEFAULT_GROUP_SET')
+    return `${text(result.count)} 家店铺默认分组 → ${text(result.groupName)}`;
+  if (row.action === 'MONTH_GROUP_SET')
+    return `${text(result.month)} · ${text(result.count)} 家店铺本月调到 ${text(result.groupName)}${result.reason ? `（${result.reason}）` : ''}`;
+  if (row.action === 'MONTH_GROUP_RESET')
+    return `${text(result.month)} · ${text(result.count)} 家店铺恢复默认分组`;
   if (Array.isArray(result.changes))
     return `${result.changes.length} 项变更${result.effectiveMonth ? ` · ${result.effectiveMonth} 起` : ''}`;
   if (result.before || result.after)
