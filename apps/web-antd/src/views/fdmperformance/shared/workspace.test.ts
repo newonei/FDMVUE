@@ -72,6 +72,14 @@ describe('performance workspace access', () => {
     expect(managementScopes(access)).toEqual(['INITIATED', 'MANAGED']);
     expect(defaultManagementScope(access)).toBe('INITIATED');
     expect(
+      defaultManagementScope({
+        ...access,
+        role: 'ADMIN',
+        canConfigure: true,
+        availableScopes: ['VISIBLE', 'SELF', 'INITIATED', 'MANAGED', 'ALL'],
+      }),
+    ).toBe('ALL');
+    expect(
       managementScopes({
         ...access,
         role: 'EMPLOYEE',

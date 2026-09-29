@@ -42,6 +42,8 @@ export function defaultManagementScope(
   access: JixiaoApi.Access,
 ): JixiaoApi.Scope {
   const scopes = managementScopes(access);
+  // Admins manage everyone's assessments, so they start from the full list.
+  if (scopes.includes('ALL')) return 'ALL';
   return scopes.includes('INITIATED') ? 'INITIATED' : scopes[0] || 'SELF';
 }
 

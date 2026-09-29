@@ -80,7 +80,7 @@ export namespace JixiaoApi {
   export interface ScoreDraft {
     instanceId: number;
     taskId: string;
-    items: { comment?: string; instanceIndicatorId: number; score?: number; }[];
+    items: { comment?: string; instanceIndicatorId: number; score?: number }[];
     reason?: string;
     updateTime?: DateTimeValue;
   }
@@ -729,9 +729,10 @@ export function getMyInstancePage(params: JixiaoApi.InstancePageParams) {
   );
 }
 
-export function deleteInstance(id: number) {
+export function deleteInstance(id: number, reason: string) {
   return requestClient.delete<boolean>(
-    `/fdmperformance/assessment/instance/delete?id=${id}`,
+    '/fdmperformance/assessment/instance/delete',
+    { params: { id, reason } },
   );
 }
 
