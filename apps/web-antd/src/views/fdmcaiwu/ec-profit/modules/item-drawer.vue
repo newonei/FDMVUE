@@ -3,14 +3,18 @@ import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
 
 import { computed } from 'vue';
 
-import { Descriptions, Drawer, Tag } from 'ant-design-vue';
+import { IconifyIcon } from '@vben/icons';
+
+import { Button, Descriptions, Drawer, Tag } from 'ant-design-vue';
 
 import { formatMetric, METRIC_GROUPS } from '../model';
 import { nodeState } from '../tree-model';
 import CostStructure from './cost-structure.vue';
 
-const props = defineProps<{ node?: Api.GroupNode }>();
+const props = defineProps<{ editable?: boolean; node?: Api.GroupNode }>();
 const open = defineModel<boolean>('open', { default: false });
+const emit = defineEmits<{ edit: [item: Api.Item] }>();
+const manual = computed(() => new Set((props.node?.item?.manualFields ?? '').split(',').filter(Boolean)));
 
 const item = computed(() => props.node?.item);
 const imported = computed(() => item.value?.dataStatus === 'IMPORTED');
@@ -26,6 +30,11 @@ const headline = computed(() =>
 
 <template>
   <Drawer v-model:open="open" :width="640" :title="node?.name || '明细详情'">
+    <template v-if="editable && node?.item" #extra>
+      <Button type="primary" size="small" @click="emit('edit', node.item)">
+        <template #icon><IconifyIcon icon="lucide:pencil" /></template>修改
+      </Button>
+    </template>
     <template v-if="node && item">
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <Tag :color="item.lineType === 'ADJUSTMENT' ? 'purple' : 'blue'">{{
@@ -70,6 +79,16 @@ const headline = computed(() =>
               :class="Number(item[metric.key] ?? 0) < 0 ? 'text-[var(--ecp-negative)]' : ''"
               >{{ formatMetric(item[metric.key], metric.rate) }}</span
             >
+            <Tag v-if="manual.has(metric.key)" color="gold" class="!ml-1 !px-1 !text-[10px] !leading-4">手工</Tag>
+            <div
+              v-if="metric.key === 'platformFee' && item.platformFeeBill != null"
+              class="mt-0.5 text-[11px] text-muted-foreground"
+            >
+              账单 {{ formatMetric(item.platformFeeBill) }}
+              <template v-if="Number(item.platformFeeAdjustment ?? 0) !== 0">
+                · 调整 {{ formatMetric(item.platformFeeAdjustment) }}（{{ item.platformFeeAdjustmentReason }}）
+              </template>
+            </div>
           </Descriptions.Item>
         </Descriptions>
       </section>

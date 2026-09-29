@@ -104,11 +104,10 @@ export function sumMetrics(values: Metric[]): Metric {
         ? null
         : amount.div(sales).toFixed(8);
   }
-  const purchaseParts = [
-    total.ownPurchaseCost,
-    total.accessoryPurchaseCost,
-    total.dropshipPurchaseCost,
-  ].map(decimal);
+  // 采购合计 = 自营 + 周边，(采购合计 + 代发) 与 (自营 + 周边 + 代发) 等价，且不依赖可选的拆分项
+  const purchaseParts = [total.purchaseCost, total.dropshipPurchaseCost].map(
+    decimal,
+  );
   total.purchaseCostRate =
     sales === null || sales.isZero() || purchaseParts.includes(null)
       ? null

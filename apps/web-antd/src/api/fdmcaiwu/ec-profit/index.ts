@@ -48,6 +48,82 @@ export namespace FdmcaiwuEcProfitApi {
     companyName?: string;
     dataStatus: 'IMPORTED' | 'PENDING';
     sourceBatchId?: number;
+    /** 聚水潭「6001 账单费用」；平台扣费 = 账单费用 + 调整 */
+    platformFeeBill?: Decimal;
+    platformFeeAdjustment?: Decimal;
+    platformFeeAdjustmentReason?: string;
+    /** 网页手工改过的字段，逗号分隔 */
+    manualFields?: string;
+  }
+
+  /** Excel 中取到的五项金额 */
+  export interface ImportValues {
+    salesAmount?: Decimal;
+    purchaseCost?: Decimal;
+    freightCost?: Decimal;
+    promotionCost?: Decimal;
+    platformFeeBill?: Decimal;
+  }
+  export interface ImportRow {
+    rowNumber: number;
+    shopId: string;
+    shopName: string;
+    directoryShopName?: string;
+    action: 'NEW' | 'UNCHANGED' | 'UPDATE';
+    imported: ImportValues;
+    current?: ImportValues;
+    keptManualFields: string[];
+    grossProfitAfter?: Decimal;
+  }
+  export interface ImportPreview {
+    month: string;
+    fileName: string;
+    fileSha256: string;
+    sheetName?: string;
+    conditions: Record<string, string>;
+    shipDateFrom?: string;
+    shipDateTo?: string;
+    reportId?: number;
+    reportVersion?: number;
+    rows: ImportRow[];
+    keptItems: { itemId: number; lineType: string; shopName: string }[];
+    newCount: number;
+    updateCount: number;
+    unchangedCount: number;
+    warnings: string[];
+    errors: string[];
+    previewToken: string;
+  }
+  export interface ImportResult {
+    reportId: number;
+    batchId: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+  }
+  /** 新增（无 id，按 month）或修改（有 id）一行明细 */
+  export interface ItemSave {
+    id?: number;
+    month?: string;
+    reportVersion?: number;
+    lineType?: 'ADJUSTMENT' | 'SHOP';
+    shopId?: string;
+    shopName?: string;
+    salesAmount?: Decimal;
+    newProductGiftAmount?: Decimal;
+    customerRefundAmount?: Decimal;
+    purchaseCost?: Decimal;
+    accessoryPurchaseCost?: Decimal;
+    dropshipPurchaseCost?: Decimal;
+    estimatedFreight?: Decimal;
+    freightAdjustment?: Decimal;
+    freightCost?: Decimal;
+    promotionCost?: Decimal;
+    platformFeeBill?: Decimal;
+    platformFeeAdjustment?: Decimal;
+    platformFeeAdjustmentReason?: string;
+    taxFee?: Decimal;
+    remark?: string;
   }
 
   export interface Report {
@@ -364,5 +440,58 @@ export function exportEcProfitMonthlyExcel(month: string) {
 export function exportEcProfitYearExcel(year: number) {
   return requestClient.download(`${baseUrl}/export-year-excel`, {
     params: { year },
+  });
+}
+
+/** 预览聚水潭「经营利润明细表」导入，不写库 */
+export function previewEcProfitImport(month: string, file: File) {
+  return requestClient.upload<FdmcaiwuEcProfitApi.ImportPreview>(
+    `${baseUrl}/import/preview`,
+    { month, file },
+  );
+}
+
+/** 确认导入，previewToken 须与预览一致 */
+export function applyEcProfitImport(data: {
+  file: File;
+  idempotencyKey: string;
+  month: string;
+  overwriteManual: boolean;
+  previewToken: string;
+}) {
+  return requestClient.upload<FdmcaiwuEcProfitApi.ImportResult>(
+    `${baseUrl}/import/apply`,
+    data,
+  );
+}
+
+export function saveEcProfitItem(data: FdmcaiwuEcProfitApi.ItemSave) {
+  return requestClient.post<number>(`${baseUrl}/item/save`, data);
+}
+
+export function deleteEcProfitItem(id: number, reportVersion: number) {
+  return requestClient.delete<boolean>(`${baseUrl}/item/delete`, {
+    params: { id, reportVersion },
+  });
+}
+
+/** 把某一项在本月所有空白明细里统一填成同一个值，返回填写条数 */
+export function fillBlankEcProfitItems(data: {
+  field: string;
+  reportId: number;
+  reportVersion: number;
+  value: number;
+}) {
+  return requestClient.post<number>(`${baseUrl}/item/fill-blank`, data);
+}
+
+/** 清空整月数据，confirmMonth 须与月报月份一致 */
+export function purgeEcProfitReport(
+  id: number,
+  expectedVersion: number,
+  confirmMonth: string,
+) {
+  return requestClient.delete<boolean>(`${baseUrl}/purge`, {
+    params: { id, expectedVersion, confirmMonth },
   });
 }

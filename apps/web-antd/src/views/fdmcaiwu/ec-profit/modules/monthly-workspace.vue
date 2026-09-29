@@ -18,6 +18,7 @@ import {
   Dropdown,
   Empty,
   Input,
+  InputNumber,
   Menu,
   message,
   Modal,
@@ -32,9 +33,12 @@ import dayjs from 'dayjs';
 
 import {
   deleteEcProfit,
+  deleteEcProfitItem,
   exportEcProfitMonthlyExcel,
+  fillBlankEcProfitItems,
   getEcProfitMonthlyView,
   getEcProfitYear,
+  purgeEcProfitReport,
 } from '#/api/fdmcaiwu/ec-profit';
 
 import {
@@ -62,6 +66,7 @@ import CostStructure from './cost-structure.vue';
 import GroupRanking from './group-ranking.vue';
 import ImportDialog from './import-dialog.vue';
 import ItemDrawer from './item-drawer.vue';
+import ItemEditor from './item-editor.vue';
 import MonthStrip from './month-strip.vue';
 import ReportForm from './report-form.vue';
 import ScopeDialog from './scope-dialog.vue';
@@ -331,6 +336,9 @@ const columns = computed<TableColumnsType>(() => [
         }
       : {}),
   })),
+  ...(canUpdate.value
+    ? [{ title: '操作', key: 'actions', width: 92, fixed: 'right' as const, align: 'center' as const }]
+    : []),
 ]);
 const scrollX = computed(() =>
   columns.value.reduce((sum, column) => sum + Number(column.width ?? 0), 0),
@@ -370,10 +378,16 @@ const editable = computed(
     view.value!.total.importedShopCount === 0 &&
     view.value!.total.adjustmentCount === view.value!.total.pendingAdjustmentCount,
 );
-const canCreate = computed(() => hasAccessByCodes(['fdmcaiwu:ec-profit:create']));
+const canUpdate = computed(() => hasAccessByCodes(['fdmcaiwu:ec-profit:update']));
 const moreActions = computed(() =>
   [
-    { key: 'create', label: '新建月报', icon: 'lucide:plus', show: canCreate.value },
+    { key: 'add', label: '添加店铺 / 费用行', icon: 'lucide:list-plus', show: canUpdate.value },
+    {
+      key: 'fill',
+      label: '批量填写空白项',
+      icon: 'lucide:paint-bucket',
+      show: canUpdate.value && !!report.value,
+    },
     {
       key: 'scope',
       label: '同步本月范围',
@@ -393,17 +407,22 @@ const moreActions = computed(() =>
       show: editable.value && hasAccessByCodes(['fdmcaiwu:ec-profit:delete']),
       danger: true,
     },
+    {
+      key: 'purge',
+      label: '清空本月数据…',
+      icon: 'lucide:eraser',
+      show: !!report.value && !editable.value && hasAccessByCodes(['fdmcaiwu:ec-profit:delete']),
+      danger: true,
+    },
   ].filter((action) => action.show),
 );
 function runAction({ key }: { key: number | string }) {
-  if (key === 'create') create();
+  if (key === 'add') openEditor();
+  else if (key === 'fill') openFill();
+  else if (key === 'purge') openPurge();
   else if (key === 'scope') scopeOpen.value = true;
   else if (key === 'remark') edit();
   else if (key === 'delete') remove();
-}
-function create() {
-  editing.value = undefined;
-  formOpen.value = true;
 }
 function edit() {
   if (report.value && editable.value) {
@@ -411,6 +430,97 @@ function edit() {
     formOpen.value = true;
   }
 }
+// ---------- 明细维护 ----------
+const editorOpen = ref(false);
+const editorItem = ref<Api.Item>();
+function openEditor(item?: Api.Item) {
+  editorItem.value = item;
+  editorOpen.value = true;
+  detailOpen.value = false;
+}
+function afterImport(month: string) {
+  if (month !== props.month) emit('update:month', month);
+  else refresh();
+}
+function removeItem(item: Api.Item) {
+  const current = report.value;
+  if (!current) return;
+  Modal.confirm({
+    title: `删除「${item.shopName}」这一行？`,
+    content: '只删除本月这一行数据，可以之后重新导入或手工添加。',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      await deleteEcProfitItem(item.id, current.version);
+      message.success('已删除');
+      refresh();
+    },
+  });
+}
+
+const FILL_FIELDS = [
+  { label: '代发采购', value: 'dropshipPurchaseCost' },
+  { label: '其中周边', value: 'accessoryPurchaseCost' },
+  { label: '税费', value: 'taxFee' },
+  { label: '新品礼金', value: 'newProductGiftAmount' },
+  { label: '客户返款', value: 'customerRefundAmount' },
+] as const;
+const fillOpen = ref(false);
+const fillField = ref<string>('dropshipPurchaseCost');
+const fillValue = ref<number | undefined>(0);
+const filling = ref(false);
+const fillBlankCount = computed(
+  () =>
+    leafRows(groups.value).filter(
+      (row) => row.item && row.item[fillField.value as keyof Api.Item] == null,
+    ).length,
+);
+function openFill() {
+  fillField.value = 'dropshipPurchaseCost';
+  fillValue.value = 0;
+  fillOpen.value = true;
+}
+async function submitFill() {
+  const current = report.value;
+  if (!current || fillValue.value == null) return;
+  filling.value = true;
+  try {
+    const count = await fillBlankEcProfitItems({
+      reportId: current.id,
+      reportVersion: current.version,
+      field: fillField.value,
+      value: fillValue.value,
+    });
+    message.success(`已填写 ${count} 行`);
+    fillOpen.value = false;
+    refresh();
+  } finally {
+    filling.value = false;
+  }
+}
+
+const purgeOpen = ref(false);
+const purgeInput = ref('');
+const purging = ref(false);
+function openPurge() {
+  purgeInput.value = '';
+  purgeOpen.value = true;
+}
+async function submitPurge() {
+  const current = report.value;
+  if (!current || purgeInput.value.trim() !== current.month) return;
+  purging.value = true;
+  try {
+    await purgeEcProfitReport(current.id, current.version, current.month);
+    message.success(`${current.month} 的数据已清空，可以重新导入`);
+    purgeOpen.value = false;
+    refresh();
+  } finally {
+    purging.value = false;
+  }
+}
+
 async function saved(month: string) {
   void loadYear();
   if (month !== props.month) emit('update:month', month);
@@ -541,11 +651,14 @@ async function exportExcel() {
         <IconifyIcon icon="lucide:calendar-plus" class="mb-3 size-10 text-muted-foreground" />
         <div class="text-base font-medium">{{ month.replace('-', ' 年 ') }} 月尚未建立月报</div>
         <p class="mb-5 mt-2 max-w-md text-sm text-muted-foreground">
-          月报按当月分组配置生成全量应报店铺，建单后再导入各店铺数据。
+          导入聚水潭「经营利润明细表」后自动建立本月月报；聚水潭里没有的店铺可以手工添加。
         </p>
         <div class="flex flex-wrap justify-center gap-2">
-          <Button v-if="canCreate" type="primary" @click="create">新建本月月报</Button>
-          <Button @click="emit('configured')">查看店铺配置</Button>
+          <Button v-if="canUpdate" type="primary" @click="importOpen = true">
+            <template #icon><IconifyIcon icon="lucide:upload" /></template>导入 Excel
+          </Button>
+          <Button v-if="canUpdate" @click="openEditor()">手工添加</Button>
+          <Button @click="emit('configured')">查看分组配置</Button>
           <Button
             v-if="latestReportMonth"
             type="link"
@@ -777,6 +890,31 @@ async function exportExcel() {
                   record.item?.companyName || '—'
                 }}</span>
               </template>
+              <div v-else-if="column.key === 'actions'" class="flex justify-center gap-1">
+                <template v-if="record.item">
+                  <Tooltip title="修改">
+                    <Button
+                      size="small"
+                      type="text"
+                      aria-label="修改"
+                      @click="openEditor(record.item as Api.Item)"
+                    >
+                      <template #icon><IconifyIcon icon="lucide:pencil" /></template>
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title="删除这一行">
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      aria-label="删除"
+                      @click="removeItem(record.item as Api.Item)"
+                    >
+                      <template #icon><IconifyIcon icon="lucide:trash-2" /></template>
+                    </Button>
+                  </Tooltip>
+                </template>
+              </div>
               <span
                 v-else-if="column.key !== 'name'"
                 class="tabular-nums"
@@ -804,7 +942,9 @@ async function exportExcel() {
                         >{{ received ? '已导入小计' : '完整合计，缺失不补零' }}</span
                       >
                     </div>
-                    <span v-else-if="column.key === 'platform' || column.key === 'company'"></span>
+                    <span
+                      v-else-if="['platform', 'company', 'actions'].includes(String(column.key))"
+                    ></span>
                     <strong
                       v-else
                       class="tabular-nums"
@@ -862,8 +1002,55 @@ async function exportExcel() {
       emit('configured');
     "
   />
-  <ImportDialog v-model:open="importOpen" :default-month="month" />
-  <ItemDrawer v-model:open="detailOpen" :node="itemDetail" />
+  <ImportDialog v-model:open="importOpen" :default-month="month" @imported="afterImport" />
+  <ItemDrawer
+    v-model:open="detailOpen"
+    :node="itemDetail"
+    :editable="canUpdate"
+    @edit="openEditor"
+  />
+  <ItemEditor
+    v-model:open="editorOpen"
+    :item="editorItem"
+    :month="month"
+    :report-version="report?.version"
+    @saved="refresh"
+  />
+  <Modal
+    v-model:open="fillOpen"
+    title="批量填写空白项"
+    :confirm-loading="filling"
+    ok-text="填写"
+    :ok-button-props="{ disabled: fillValue == null || fillBlankCount === 0 }"
+    @ok="submitFill"
+  >
+    <p class="text-sm text-muted-foreground">
+      把本月所有「空白」的某一项统一填成同一个值，已有数值的行不受影响。常用于代发采购、周边统一填 0。
+    </p>
+    <div class="flex items-center gap-3">
+      <Select v-model:value="fillField" :options="[...FILL_FIELDS]" class="w-40" />
+      <span class="text-sm">填为</span>
+      <InputNumber v-model:value="fillValue" :precision="2" class="w-36" />
+    </div>
+    <p class="mb-0 mt-3 text-sm">本月有 <strong>{{ fillBlankCount }}</strong> 行这一项是空白的。</p>
+  </Modal>
+  <Modal
+    v-model:open="purgeOpen"
+    title="清空本月数据"
+    :confirm-loading="purging"
+    ok-text="清空"
+    :ok-button-props="{ danger: true, disabled: purgeInput.trim() !== report?.month }"
+    @ok="submitPurge"
+  >
+    <Alert
+      type="error"
+      show-icon
+      class="mb-3"
+      :message="`将删除 ${report?.month} 的月报和全部 ${leafRows(groups).length} 行明细（含手工录入的），之后可重新导入。`"
+    />
+    <p class="mb-2 text-sm">请输入月份 <strong>{{ report?.month }}</strong> 确认：</p>
+    <Input v-model:value="purgeInput" :placeholder="report?.month" />
+  </Modal>
 </template>
 
 <style scoped>
