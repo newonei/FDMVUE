@@ -4,7 +4,6 @@ import {
   actionLabel,
   canAcknowledgeAdjustment,
   canHandleReview,
-  deadlineMeta,
   defaultManagementScope,
   hasAction,
   managementScopes,
@@ -87,15 +86,5 @@ describe('performance workspace access', () => {
       }),
     ).toEqual([]);
     expect(managementScopes()).toEqual([]);
-  });
-  it('uses the end of the local cutoff date before marking a task overdue', () => {
-    expect(
-      deadlineMeta('2026-09-18', new Date('2026-09-18T10:00:00')).overdue,
-    ).toBe(false);
-    expect(
-      deadlineMeta('2026-09-18', new Date('2026-09-19T00:00:00')).overdue,
-    ).toBe(true);
-    expect(deadlineMeta(undefined).text).toBe('未设截止日期');
-    expect(deadlineMeta('invalid').overdue).toBe(false);
   });
 });

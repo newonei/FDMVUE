@@ -870,9 +870,6 @@ onBeforeUnmount(() => {
         <Descriptions.Item label="发起人">
           {{ instance.creatorUserName || '-' }}
         </Descriptions.Item>
-        <Descriptions.Item label="截止日期">
-          {{ instance.endDate || '未设置' }}
-        </Descriptions.Item>
         <Descriptions.Item label="当前处理人">
           {{ instance.currentTaskAssigneeUserName || '-' }}
         </Descriptions.Item>

@@ -47,25 +47,6 @@ export function defaultManagementScope(
   return scopes.includes('INITIATED') ? 'INITIATED' : scopes[0] || 'SELF';
 }
 
-export function deadlineMeta(endDate?: string, now = new Date()) {
-  if (!endDate)
-    return { color: 'default', text: '未设截止日期', overdue: false };
-  const date = new Date(`${endDate.slice(0, 10)}T23:59:59`);
-  if (Number.isNaN(date.getTime()))
-    return { color: 'default', text: endDate, overdue: false };
-  const days = Math.ceil((date.getTime() - now.getTime()) / 86_400_000);
-  return {
-    color: days <= 0 ? 'red' : days <= 3 ? 'orange' : 'default',
-    text:
-      days <= 0
-        ? `已逾期 · ${endDate.slice(0, 10)}`
-        : days <= 3
-          ? `${days} 天内截止 · ${endDate.slice(0, 10)}`
-          : endDate.slice(0, 10),
-    overdue: days <= 0,
-  };
-}
-
 export function hasAction(
   instance: JixiaoApi.Instance,
   action: JixiaoApi.AllowedAction,
