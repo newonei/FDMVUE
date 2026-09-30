@@ -207,7 +207,7 @@ function supplierName(snapshot: ProcurementSetting | undefined) {
       </template>
 </Table><Alert
       type="info"
-      message="产品、形状、数量及单价沿用生效方案快照。需要修改时请发起采购方案变更，不直接覆盖历史执行资料。"
+      message="产品、形状、数量及单价沿用已确认方案。需要修改时请发起采购方案变更，不直接覆盖历史执行资料。"
     /><Descriptions size="small" :column="2">
       <Descriptions.Item label="采购签约主体">
         {{

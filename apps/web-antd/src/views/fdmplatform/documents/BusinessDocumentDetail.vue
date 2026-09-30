@@ -370,7 +370,7 @@ async function submit(
       new BigNumber(String(payload.acceptedQuantity ?? 0)).isPositive() &&
       !payload.stockPoolId
     )
-      throw new Error('有合格入库数量时请选择对应库存池');
+      throw new Error('有合格入库数量时请选择对应库存');
     const clean = { ...payload };
     delete clean.selectedSkuId;
     delete clean.selectedSpecVersion;

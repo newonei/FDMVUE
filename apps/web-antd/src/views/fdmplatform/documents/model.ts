@@ -79,7 +79,7 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     resource: 'assignments',
     route: `${procurement}tasks`,
     fields: [
-      'method|履约方式',
+      'method|采购方式',
       'quantity|数量',
       'ownerUserId|经办人',
       'status|状态',
@@ -107,18 +107,13 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     description: '编制采购方案，校验并生效后继续下单、预留或自产。',
     resource: 'purchase-plans',
     route: `${procurement}plans`,
-    fields: [
-      'name|方案名称',
-      'status|状态',
-      'version|方案版本',
-      'rationale|推荐理由',
-    ],
+    fields: ['name|方案名称', 'status|状态', 'rationale|推荐理由'],
     create: ['SAVE_PLAN'],
     actions: ['SAVE_PLAN', 'SUBMIT_PLAN'],
   },
   orders: {
     title: '采购单',
-    description: '按已生效方案生成采购单，查看当前订单明细与未执行余额。',
+    description: '按已确认的采购方案生成采购单，查看当前订单明细与未执行余额。',
     resource: 'purchase-orders',
     route: `${procurement}orders`,
     fields: [
@@ -126,7 +121,6 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'status|状态',
       'amount|采购金额',
       'currency|币种',
-      'approvedPlanVersion|生效版本',
     ],
     create: ['GENERATE_ORDERS'],
     actions: ['CANCEL_ORDER'],
@@ -176,7 +170,8 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
   },
   shipments: {
     title: '发货单',
-    description: '按生效方案预留库存，引用预留分批发货，并释放未使用预留。',
+    description:
+      '按已确认的采购方案预留库存，引用预留分批发货，并释放未使用的预留。',
     resource: 'outbound-shipments',
     route: `${trade}shipments`,
     fields: [

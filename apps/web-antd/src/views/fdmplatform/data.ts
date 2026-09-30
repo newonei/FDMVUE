@@ -52,7 +52,7 @@ export const masterTypes: Option[] = [
   ['SKU', '产品 / SKU'],
   ['SUPPLIER', '供应商'],
   ['WAREHOUSE', '仓库'],
-  ['STOCK_OWNER', '货权主体'],
+  ['STOCK_OWNER', '货主'],
 ].map(([value, label]) => ({ value: value!, label: label! }));
 export const statusLabels: Record<string, string> = {
   BANK_TRANSFER: '银行转账',
@@ -67,7 +67,7 @@ export const statusLabels: Record<string, string> = {
   LINKED: '已关联办理',
   ACTIVE: '有效',
   ALLOCATED: '已分配',
-  APPROVED: '已生效',
+  APPROVED: '已确认',
   ARCHIVED: '已归档',
   ASSIGNED: '已分派',
   AVAILABLE: '可用',
@@ -90,7 +90,7 @@ export const statusLabels: Record<string, string> = {
   MAKE: '自产',
   PAID: '已收足',
   PARTIAL: '部分完成',
-  PARTIALLY_APPROVED: '部分生效',
+  PARTIALLY_APPROVED: '部分确认',
   PENDING: '待确认',
   PENDING_APPROVAL: '待生效',
   RECEIVED: '已到货',
@@ -102,7 +102,7 @@ export const statusLabels: Record<string, string> = {
   SHIPPED: '已发货',
   STALE: '已失效',
   STOCK: '库存',
-  SUBMITTED: '待生效',
+  SUBMITTED: '待确认',
   UNASSIGNED: '待分派',
   VALID: '有效',
   VERIFIED: '已核定',
@@ -155,17 +155,17 @@ export const statusLabels: Record<string, string> = {
   SKU: '产品 / SKU',
   SUPPLIER: '供应商',
   WAREHOUSE: '仓库',
-  STOCK_OWNER: '货权主体',
+  STOCK_OWNER: '货主',
   CONTRACT_CREATE: '创建合同',
   CONFIRM_CONTRACT: '合同生效',
   UPDATE_CONTRACT: '修订合同',
   CREATE_REQUEST: '创建采购申请',
-  ASSIGN_FULFILLMENT: '分派履约任务',
+  ASSIGN_FULFILLMENT: '分派采购任务',
   TRANSFER_ASSIGNMENT: '转派任务',
   CREATE_QUOTE: '登记报价',
   SAVE_PLAN: '保存采购方案',
-  SUBMIT_PLAN: '方案生效',
-  GENERATE_ORDERS: '生成采购执行单',
+  SUBMIT_PLAN: '确认方案',
+  GENERATE_ORDERS: '生成采购单',
   RECORD_ARRIVAL: '确认到货入库',
   RETURN_ARRIVAL: '采购到货退货',
   CANCEL_ORDER: '取消采购余额',
@@ -317,7 +317,7 @@ export function contractDraftAction(
     lineFields: [
       selectField('skuId', '产品 / SKU', masterOptions(master, 'SKU')),
       field('specVersion', '定制规格版本', undefined, { default: '1' }),
-      field('specification', '本合同冻结规格'),
+      field('specification', '本合同规格'),
       field('quantity', '合同数量', 'decimal', { min: 0.000001, default: '1' }),
       field('unitPrice', '销售单价', 'decimal', { min: 0, default: '0' }),
       field('unit', '单位', undefined, { default: '件' }),
@@ -384,7 +384,11 @@ export function contractActions(
     field('quantity', '数量', 'decimal', { default: '1', min: 0.000001 });
   const planFields = [
     selectField('planId', '采购方案', planOptions),
-    field('planVersion', '方案版本', 'number', { default: 1, min: 1 }),
+    field('planVersion', '方案版本', 'number', {
+      default: 1,
+      min: 1,
+      hidden: true,
+    }),
   ];
   return {
     UPDATE_CONTRACT: contractDraftAction(
@@ -440,7 +444,7 @@ export function contractActions(
     },
     ASSIGN_FULFILLMENT: {
       action: 'ASSIGN_FULFILLMENT',
-      title: '分派履约任务',
+      title: '分派采购任务',
       description:
         '同一申请明细可以分配库存、自制与外采；累计分配不能超过申请数量。',
       fields: [
@@ -448,7 +452,7 @@ export function contractActions(
         selectField('requestItemId', '申请明细', options(requestItems)),
         selectField(
           'method',
-          '履约方式',
+          '采购方式',
           [
             { value: 'BUY', label: '外采' },
             { value: 'MAKE', label: '自产' },
@@ -457,7 +461,7 @@ export function contractActions(
           { default: 'BUY' },
         ),
         quantity(),
-        field('ownerUserId', '经办人用户 ID', 'number', { min: 1 }),
+        field('ownerUserId', '经办人', 'number', { min: 1 }),
         field('factoryId', '承接工厂名称或业务编码（自产时填写）', undefined, {
           required: false,
         }),
@@ -466,7 +470,7 @@ export function contractActions(
     },
     CREATE_QUOTE: {
       action: 'CREATE_QUOTE',
-      title: '登记已核实报价',
+      title: '登记供应商报价',
       description: '报价证据与价格口径经人工核对后登记。修订报价保留原版本。',
       fields: [
         selectField('assignmentId', '外采任务', assignmentOptions),
@@ -489,7 +493,7 @@ export function contractActions(
           default: false,
         }),
         field('freightIncluded', '价格包含运费', 'boolean', { default: false }),
-        field('evidenceIds', '报价证据文件 ID（逗号分隔）', 'textarea'),
+        field('evidenceIds', '报价凭证', 'textarea'),
         selectField('previousQuoteId', '被修订报价', quoteOptions, {
           required: false,
         }),
@@ -517,7 +521,7 @@ export function contractActions(
       ],
       lineKey: 'lines',
       lineFields: [
-        selectField('assignmentId', '履约任务', assignmentOptions),
+        selectField('assignmentId', '采购任务', assignmentOptions),
         selectField('quoteId', '已确认报价（外采必选）', quoteOptions, {
           required: false,
         }),
@@ -526,16 +530,16 @@ export function contractActions(
     },
     SUBMIT_PLAN: {
       action: 'SUBMIT_PLAN',
-      title: '方案生效',
+      title: '确认方案',
       description:
-        '校验当前方案版本、报价和可用数量后生效；下单、预留和自产继续单独办理。',
+        '系统核对报价和可用数量后确认方案；确认后即可下单、预留库存或安排自产。',
       fields: [...planFields],
     },
     GENERATE_ORDERS: {
       action: 'GENERATE_ORDERS',
-      title: '生成采购执行单',
+      title: '生成采购单',
       description:
-        '仅生成当前生效版本的未执行数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单，各行保留原报价版本。',
+        '只生成已确认方案中尚未下单的数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单。',
       fields: [
         ...planFields,
         field(
@@ -821,8 +825,11 @@ export function executionActions(
   ]);
   const quantity = field('quantity', '本次数量', 'decimal', { min: 0.000001 });
   const reason = field('reason', '原因与依据', 'textarea');
-  const pool = selectField('poolId', '库存池', poolOptions);
-  const source = field('sourceKey', '本次业务事件唯一编号');
+  const pool = selectField('poolId', '库存', poolOptions);
+  // Filled with the stable idempotency key by ActionDialog; users never type it.
+  const source = field('sourceKey', '本次业务事件唯一编号', undefined, {
+    hidden: true,
+  });
   const contractItem = selectField(
     'contractItemId',
     '合同产品明细',
@@ -838,21 +845,21 @@ export function executionActions(
   );
   const reservation = selectField(
     'reservationId',
-    '合同预留记录',
+    '预留记录',
     options(reservations, ['name', 'remainingQuantity', 'id']),
   );
   return {
     TRANSFER_ASSIGNMENT: {
       action: 'TRANSFER_ASSIGNMENT',
-      title: '转派履约任务',
+      title: '转派采购任务',
       description: '记录新责任人及转派依据，历史责任和操作记录保持可追溯。',
       fields: [
         selectField(
           'assignmentId',
-          '履约任务',
+          '采购任务',
           options(contract.assignments ?? [], ['method', 'id']),
         ),
-        field('ownerUserId', '新经办人用户 ID', 'number', { min: 1 }),
+        field('ownerUserId', '新经办人', 'number', { min: 1 }),
         reason,
       ],
     },
@@ -870,7 +877,7 @@ export function executionActions(
           '收货仓库',
           masterOptions(master, 'WAREHOUSE'),
         ),
-        selectField('stockPoolId', '收货库存池', poolOptions),
+        selectField('stockPoolId', '收货库存', poolOptions),
         quantity,
         field('acceptedQuantity', '合格数量', 'decimal', { min: 0 }),
         field('exceptionReason', '异常说明（有差异时必填）', 'textarea', {
@@ -965,16 +972,16 @@ export function executionActions(
     },
     STOCK_RESERVE: {
       action: 'STOCK_RESERVE',
-      title: '预留合同库存',
+      title: '预留库存',
       description:
-        '按已生效方案明细原子预留，后台校验生效版本、剩余额度与可用库存。',
+        '按已确认的采购方案预留库存，系统自动核对剩余额度与可用库存。',
       fields: [
         pool,
         source,
         contractItem,
         selectField(
           'planId',
-          '已生效方案',
+          '采购方案',
           (contract.plans ?? [])
             .filter((plan) =>
               ['APPROVED', 'PARTIALLY_APPROVED'].includes(String(plan.status)),
@@ -985,10 +992,10 @@ export function executionActions(
               fill: { planVersion: plan.version ?? 1 },
             })),
         ),
-        field('planVersion', '生效方案版本', 'number', { min: 1 }),
+        field('planVersion', '方案版本', 'number', { min: 1, hidden: true }),
         selectField(
           'planLineId',
-          '生效方案明细',
+          '方案明细',
           options(
             (contract.plans ?? []).flatMap((plan) => rows(plan.lines)),
             ['method', 'contractItemId', 'id'],
@@ -999,13 +1006,13 @@ export function executionActions(
     },
     STOCK_RELEASE: {
       action: 'STOCK_RELEASE',
-      title: '释放未出库预留',
+      title: '释放预留',
       description: '释放已有预留的剩余数量，保留事件与原预留的关系。',
       fields: [pool, source, reservation, quantity, reason],
     },
     STOCK_SHIP: {
       action: 'STOCK_SHIP',
-      title: '确认分批发货',
+      title: '登记发货',
       description:
         '实际发货扣减现存并释放对应预留，登记发货证据后更新合同交付事实。',
       fields: [

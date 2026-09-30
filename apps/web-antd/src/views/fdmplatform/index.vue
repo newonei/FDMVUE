@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { ActionDefinition } from './data';
+import type { CompletionScope } from './documents/completion-scope';
 import type { DocumentKind } from './documents/model';
 import type { DetailTab, WorkspaceKey } from './workspaces';
 
@@ -50,6 +51,7 @@ import {
 import { getStockPage, getStockPool } from '#/api/fdmplatform/stock';
 
 import ActionDialog from './components/ActionDialog.vue';
+import CompletionScopeFilter from './components/CompletionScope.vue';
 import { contractDeliveryStatus } from './components/contract-progress';
 import ContractDetail from './components/ContractDetail.vue';
 import { amountText } from './components/finance-progress';
@@ -68,6 +70,7 @@ import {
 } from './data';
 import { personLabel, withDirectory } from './directory';
 import BusinessDocumentList from './documents/BusinessDocumentList.vue';
+import { completionFilter, scopeFromQuery } from './documents/completion-scope';
 import DocumentAction from './documents/DocumentAction.vue';
 import { nativeMoney } from './documents/migration-display';
 import { referenceId, withoutDetailQuery } from './documents/navigation';
@@ -112,6 +115,25 @@ const onlyMyContracts = ref(false);
 const contractOwnerFilter = computed(() =>
   onlyMyContracts.value ? access.value?.userId : undefined,
 );
+const contractScope = ref<CompletionScope>('current');
+const contractPendingTotal = ref(0);
+let contractPendingSequence = 0;
+/** Only the queue size; it decides whether the scope switch is shown at all. */
+async function loadContractPendingTotal(company: number) {
+  const run = ++contractPendingSequence;
+  try {
+    const result = await getBusinessPage<Contract>('contracts', {
+      companyId: company,
+      pageNo: 1,
+      pageSize: 1,
+      pendingCompletion: true,
+    });
+    if (run === contractPendingSequence)
+      contractPendingTotal.value = result.total;
+  } catch {
+    if (run === contractPendingSequence) contractPendingTotal.value = 0;
+  }
+}
 async function showContracts(mine: boolean) {
   if (mine && !access.value?.userId) {
     message.warning('当前登录身份尚未读取，请刷新后重试');
@@ -222,12 +244,12 @@ const taskStats = computed(() =>
   props.workspace === 'inventory-stock'
     ? [
         {
-          title: '库存池总数',
+          title: '库存总数',
           value: stock.value.total ?? 0,
           note: '来源数量与平台可用量分别显示',
         },
         {
-          title: '本页库存池',
+          title: '本页库存',
           value: stock.value.pools.length,
           note: '原出入库、盘点按单据类型查询',
         },
@@ -337,6 +359,8 @@ async function loadCompany() {
     !readableMasterTypes.value.some((entry) => entry.value === masterType.value)
   )
     masterType.value = String(readableMasterTypes.value[0]?.value ?? 'SKU');
+  if (isContractList && pageNo.value === 1)
+    void loadContractPendingTotal(company);
   const results = await Promise.allSettled([
     (isContractList || isRecordList) && resource
       ? getBusinessPage<Contract | DocumentRow>(resource, {
@@ -347,6 +371,9 @@ async function loadCompany() {
           ownerUserId: isContractList
             ? contractOwnerFilter.value
             : ownerFilter.value,
+          pendingCompletion: isContractList
+            ? completionFilter(contractScope.value)
+            : undefined,
           ...(resource === 'purchase-requests'
             ? {
                 status: requestStateFilter.value,
@@ -538,6 +565,49 @@ function showAction(definition: ActionDefinition) {
 function openCreateContract() {
   contractEditorOpen.value = true;
 }
+const entryStatuses = new Set(['CONFIRMED', 'DRAFT', 'EXECUTING']);
+/** Portal links preselect the contract list: ?mine=true&status=DRAFT&scope=pending. */
+function applyContractEntry() {
+  if (props.workspace !== 'trade-contracts') return;
+  onlyMyContracts.value = route.query.mine === 'true';
+  const status = route.query.status;
+  statusFilter.value =
+    typeof status === 'string' && entryStatuses.has(status)
+      ? status
+      : undefined;
+  contractScope.value = scopeFromQuery(route.query.scope) ?? 'current';
+}
+/** ?create=contract opens the new-contract drawer once and is removed so a refresh does not reopen it. */
+function consumeCreateEntry() {
+  if (
+    props.workspace !== 'trade-contracts' ||
+    route.query.create !== 'contract'
+  )
+    return;
+  openCreateContract();
+  const query = { ...route.query };
+  Reflect.deleteProperty(query, 'create');
+  void router.replace({ query });
+}
+watch(
+  () => [
+    route.query.mine,
+    route.query.status,
+    route.query.scope,
+    route.query.create,
+  ],
+  (current, previous) => {
+    if (
+      !initialized.value ||
+      !routeActive.value ||
+      current.every((value, index) => value === previous[index])
+    )
+      return;
+    applyContractEntry();
+    consumeCreateEntry();
+    void reloadList();
+  },
+);
 async function onNewContractSaved(contract: Contract) {
   contractEditorOpen.value = false;
   selectedContract.value = contract;
@@ -622,11 +692,11 @@ function openEditMaster(record: MasterRecord) {
 function openPool() {
   showAction({
     action: 'CREATE_POOL',
-    title: '建立库存池',
+    title: '建立库存',
     description:
-      '按货权、仓库、SKU 与规格版本建立唯一库存池。平台接管必须有盘点和主账切换依据，未移交库存保持外部主账。',
+      '按货主、仓库、SKU 与规格版本建立唯一库存。平台接管必须有盘点和主账切换依据，未移交库存保持外部主账。',
     fields: [
-      field('stockOwnerId', '货权主体', undefined, {
+      field('stockOwnerId', '货主', undefined, {
         masterType: 'STOCK_OWNER',
       }),
       field('warehouseId', '仓库', undefined, { masterType: 'WAREHOUSE' }),
@@ -636,7 +706,7 @@ function openPool() {
         'authority',
         '库存权威主账',
         [
-          { value: 'EXTERNAL', label: '外部系统（只读影子池）' },
+          { value: 'EXTERNAL', label: '外部系统（只读）' },
           { value: 'PLATFORM', label: '本平台（已确认接管）' },
         ],
         { default: 'EXTERNAL' },
@@ -648,7 +718,7 @@ function openPool() {
 function openStockAction(action: 'CONFIGURE_AVAILABILITY' | 'OPENING') {
   const poolField = selectField(
     'poolId',
-    '库存池',
+    '库存',
     stock.value.pools.map((pool) => ({
       value: pool.id,
       label: `${pool.warehouseName ?? '仓库未注明'} / ${pool.skuName ?? '产品未关联'} / ${pool.specVersion ?? '规格待核实'}`,
@@ -663,7 +733,7 @@ function openStockAction(action: 'CONFIGURE_AVAILABILITY' | 'OPENING') {
           action,
           title: '导入已盘点期初库存',
           description:
-            '仅允许从未产生任何库存流水的新池导入一次期初。凭证与数量应来自已确认盘点，不会写入外部库存主账。',
+            '仅允许从未产生任何库存流水的新库存导入一次期初。凭证与数量应来自已确认盘点，不会写入外部库存主账。',
           fields: [
             poolField,
             sourceField,
@@ -742,11 +812,11 @@ function openTakeover(pool: BusinessRecord) {
     action: 'TAKEOVER',
     title: '核实盘点并接管库存',
     description:
-      '按实际盘点数量建立平台库存主账。请核实仓库、货权及产品身份，来源历史余额仅供核对，不自动当作今天可用库存。',
+      '按实际盘点数量建立平台库存主账。请核实仓库、货主及产品身份，来源历史余额仅供核对，不自动当作今天可用库存。',
     fields: [
-      field('poolId', '库存池', undefined, { hidden: true }),
+      field('poolId', '库存', undefined, { hidden: true }),
       field('sourceKey', '业务事件', undefined, { hidden: true }),
-      field('stockOwnerId', '实际货权主体', undefined, {
+      field('stockOwnerId', '实际货主', undefined, {
         masterType: 'STOCK_OWNER',
       }),
       field('warehouseId', '实际仓库', undefined, { masterType: 'WAREHOUSE' }),
@@ -808,7 +878,7 @@ async function saveAction(
         (entry) => entry.id === payload.poolId,
       );
       if (!pool || pool.version === undefined)
-        throw new Error('库存池版本未加载，请刷新后重新操作');
+        throw new Error('库存版本未加载，请刷新后重新操作');
       const { poolId, ...command } = payload;
       if (action === 'OPENING') {
         command.sourceType = 'OPENING';
@@ -887,9 +957,11 @@ watch(
   },
 );
 onMounted(async () => {
+  applyContractEntry();
   await initialize();
   initialized.value = true;
   await locateContract();
+  consumeCreateEntry();
 });
 </script>
 
@@ -976,6 +1048,11 @@ onMounted(async () => {
                         我负责的
                       </Button>
                     </Space>
+                    <CompletionScopeFilter
+                      v-model="contractScope"
+                      :pending-total="contractPendingTotal"
+                      @change="reloadList"
+                    />
                     <Input
                       v-model:value="keyword"
                       placeholder="合同编号、名称或客户"
@@ -1401,15 +1478,15 @@ onMounted(async () => {
                 />
                 <template v-else>
                   <div class="toolbar">
-                    <span class="muted">货权 · 仓库 · SKU · 规格版本</span><Space wrap>
+                    <span class="muted">货主 · 仓库 · SKU · 规格版本</span><Space wrap>
                       <Input.Search
                         v-model:value="keyword"
-                        placeholder="搜索产品、仓库或货权"
+                        placeholder="搜索产品、仓库或货主"
                         allow-clear
                         @search="reloadList"
                       />
                       <Button type="primary" @click="openPool">
-                        建立库存池
+                        建立库存
 </Button><Button @click="openStockAction('OPENING')">
                         导入期初
 </Button><Button
@@ -1449,7 +1526,7 @@ onMounted(async () => {
                     :columns="
                       columns(
                         'skuName|产品',
-                        'stockOwnerName|货权主体',
+                        'stockOwnerName|货主',
                         'warehouseName|仓库',
                         'skuCode|SKU',
                         'specVersion|规格版本',
@@ -1493,7 +1570,7 @@ onMounted(async () => {
                   <Alert
                     v-if="!displayedStock.filtered"
                     type="info"
-                    message="列表按服务端分页；点击库存池的“流水与预留”查看该池明细。外部主账库存需先核实盘点并接管，不能直接用于新业务扣减。"
+                    message="列表按服务端分页；点击库存的“流水与预留”查看明细。外部主账库存需先核实盘点并接管，不能直接用于新业务扣减。"
                   />
                   <Card
                     v-if="displayedStock.filtered"
@@ -1506,7 +1583,7 @@ onMounted(async () => {
                       :columns="
                         columns(
                           'id|预留 ID',
-                          'poolId|库存池',
+                          'poolId|库存',
                           'contractId|合同',
                           'contractItemId|合同明细',
                           'quantity|原预留数量',
@@ -1527,7 +1604,7 @@ onMounted(async () => {
                       :columns="
                         columns(
                           'id|事件 ID',
-                          'poolId|库存池',
+                          'poolId|库存',
                           'type|业务动作',
                           'contractId|合同',
                           'sourceKey|来源唯一编号',

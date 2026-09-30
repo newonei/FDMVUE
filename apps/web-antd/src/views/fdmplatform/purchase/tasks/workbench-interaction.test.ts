@@ -377,7 +377,7 @@ describe('采购工作台交互与全量查询', () => {
     expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
     button(host, '关闭比价').click();
     await settle();
-    button(host, '办理方案生效').click();
+    button(host, '确认方案').click();
     await settle();
     expect(
       host.querySelector<HTMLElement>('[data-detail]')?.dataset.detail,

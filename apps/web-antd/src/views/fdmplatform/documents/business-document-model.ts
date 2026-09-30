@@ -415,7 +415,7 @@ export function businessDocumentActionDefinition(
         },
         {
           key: 'stockPoolId',
-          label: '对应库存池',
+          label: '对应库存',
           stockSource: {
             skuKey: 'selectedSkuId',
             specKey: 'selectedSpecVersion',

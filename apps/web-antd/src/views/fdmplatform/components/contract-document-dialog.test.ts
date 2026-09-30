@@ -567,7 +567,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
         assignmentStatus: 'UNASSIGNED',
       }),
     );
-    click(view.host, '履约任务');
+    click(view.host, '采购任务');
     await settle();
     expect(mocks.page).toHaveBeenLastCalledWith(
       'assignments',
@@ -624,7 +624,7 @@ describe('contract document dialog interactions and request lifecycle', () => {
       .mockReturnValueOnce(pending.promise)
       .mockResolvedValueOnce({ list: [row('current-task')], total: 1 });
     const view = await mount('tasks');
-    click(view.host, '履约任务');
+    click(view.host, '采购任务');
     await settle();
     pending.resolve({ list: [row('stale-intake-request')], total: 30 });
     await settle();

@@ -54,8 +54,26 @@ const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const archive = ref(false);
-const stage = ref<'all' | ProcurementStage>('all');
-const mine = ref(false);
+const stages = new Set<string>([
+  'all',
+  'arrival',
+  'intake',
+  'order',
+  'plan',
+  'production',
+  'quote',
+  'review',
+]);
+/** Portal links open the workbench on one stage and/or the user's own tasks. */
+function queryStage(value: unknown): 'all' | ProcurementStage | undefined {
+  return typeof value === 'string' && stages.has(value)
+    ? (value as 'all' | ProcurementStage)
+    : undefined;
+}
+const stage = ref<'all' | ProcurementStage>(
+  queryStage(route.query.stage) ?? 'all',
+);
+const mine = ref(route.query.mine === 'true');
 const keyword = ref('');
 const page = ref(1);
 const pageSize = 10;
@@ -282,6 +300,20 @@ watch(
         .catch(() => undefined);
   },
   { immediate: true },
+);
+watch(
+  () => [route.query.stage, route.query.mine],
+  (current, previous) => {
+    if (
+      !active.value ||
+      current.every((value, index) => value === previous[index])
+    )
+      return;
+    stage.value = queryStage(route.query.stage) ?? 'all';
+    mine.value = route.query.mine === 'true';
+    page.value = 1;
+    void load();
+  },
 );
 watch(
   () => [

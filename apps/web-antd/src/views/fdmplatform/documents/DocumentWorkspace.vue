@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CompletionScope } from './completion-scope';
 import type { DocumentKind } from './model';
 import type { RelatedDocumentSource } from './related-creation';
 
@@ -24,10 +25,16 @@ import {
 
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
+import CompletionScopeFilter from '../components/CompletionScope.vue';
 import { errorText, label, statusLabels } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
+import {
+  completionFilter,
+  defaultCompletionScope,
+  scopeFromQuery,
+} from './completion-scope';
 import DocumentAction from './DocumentAction.vue';
 import { documentListNextStep } from './list-actions';
 import { contractReferenceText, migrationCell } from './migration-display';
@@ -111,6 +118,10 @@ const pageError = ref('');
 const keyword = ref('');
 const status = ref<string>();
 const assignmentStatus = ref<string>();
+const scope = ref<CompletionScope>(
+  scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
+);
+const pendingTotal = ref(0);
 const pageNo = ref(1);
 const pageSize = ref(10);
 const total = ref(0);
@@ -239,6 +250,7 @@ async function load() {
       assignmentStatus:
         effectiveKind.value === 'requests' ? assignmentStatus.value : undefined,
       contractId: contractId.value,
+      pendingCompletion: completionFilter(scope.value),
     });
     if (current === sequence) {
       records.value = result.list;
@@ -248,6 +260,23 @@ async function load() {
     if (current === sequence) pageError.value = errorText(error);
   } finally {
     if (current === sequence) loading.value = false;
+  }
+}
+/** Only the queue size; it decides whether the scope switch is shown at all. */
+let pendingSequence = 0;
+async function loadPendingTotal() {
+  const current = ++pendingSequence;
+  try {
+    const result = await getBusinessPage<DocumentRow>(config.value.resource, {
+      companyId: 0,
+      pageNo: 1,
+      pageSize: 1,
+      contractId: contractId.value,
+      pendingCompletion: true,
+    });
+    if (current === pendingSequence) pendingTotal.value = result.total;
+  } catch {
+    if (current === pendingSequence) pendingTotal.value = 0;
   }
 }
 function search() {
@@ -302,7 +331,7 @@ function kindEmptyMessage() {
   if (props.kind === 'tasks')
     return isIntake.value
       ? '当前没有未分派或部分分派的采购申请'
-      : '尚无履约任务，请先在待接单申请中接单分派';
+      : '尚无采购任务，请先在待接单申请中接单分派';
   return contractId.value
     ? `该合同尚无${config.value.title}`
     : `尚无${config.value.title}`;
@@ -336,9 +365,14 @@ watch(
     actionContractId.value = undefined;
     status.value = undefined;
     assignmentStatus.value = undefined;
+    scope.value =
+      scopeFromQuery(route.query.scope) ??
+      defaultCompletionScope(contractId.value);
+    pendingTotal.value = 0;
     if (!routeActive.value) return;
     void loadContext();
     void load();
+    void loadPendingTotal();
   },
 );
 onBeforeUnmount(() => {
@@ -348,6 +382,7 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   void loadContext();
   void load();
+  void loadPendingTotal();
   try {
     directory.value = await getDirectory(0);
   } catch (error) {
@@ -370,7 +405,7 @@ onMounted(async () => {
         </Tabs>
         <Tabs v-if="kind === 'tasks'" v-model:active-key="procurementQueue">
           <TabPane key="intake" tab="待接单申请" />
-          <TabPane key="tasks" tab="履约任务" />
+          <TabPane key="tasks" tab="采购任务" />
         </Tabs>
         <Space wrap>
           <Button
@@ -395,6 +430,11 @@ onMounted(async () => {
             </Space>
           </template>
 </Alert><Space wrap>
+          <CompletionScopeFilter
+            v-model="scope"
+            :pending-total="pendingTotal"
+            @change="search"
+          />
           <Input.Search
             v-model:value="keyword"
             placeholder="搜索合同、客户或单据内容"

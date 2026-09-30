@@ -698,6 +698,6 @@ describe('document flow without approval stages', () => {
       'planId',
       'planVersion',
     ]);
-    expect(definition.title).toBe('方案生效');
+    expect(definition.title).toBe('确认方案');
   });
 });

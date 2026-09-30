@@ -245,7 +245,7 @@ describe('source-bound stock and finance creation', () => {
         production,
         'STOCK_RESERVE',
       ),
-    ).toThrow('没有已生效的方案明细');
+    ).toThrow('没有已确认的方案明细');
     expect(() =>
       related(
         contract,
@@ -255,7 +255,7 @@ describe('source-bound stock and finance creation', () => {
         production,
         'STOCK_RESERVE',
       ),
-    ).toThrow('尚无匹配的库存池');
+    ).toThrow('尚无匹配的库存');
   });
   it('ships only current-product reservations and uses their remaining quantity rather than production quantity', () => {
     const { contract, pools, production } = fixture();

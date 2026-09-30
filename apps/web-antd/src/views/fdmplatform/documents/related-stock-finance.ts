@@ -90,7 +90,7 @@ export function stockFinanceRelatedDefinition(
               .map((line) => ({ planId: plan.id, id: line.id })),
           ) ?? [];
       if (lines.length === 0)
-        throw new Error('当前产品没有已生效的方案明细，请先办理采购方案生效');
+        throw new Error('当前产品没有已确认的方案明细，请先确认采购方案');
       restrict('planId', (option) =>
         lines.some((line) => matches(line.planId, option.value)),
       );
@@ -106,7 +106,7 @@ export function stockFinanceRelatedDefinition(
           matches(option.when?.contractItemId, itemId),
         ).length === 0
       )
-        throw new Error('当前产品尚无匹配的库存池，请先按实际情况办理入库');
+        throw new Error('当前产品尚无匹配的库存，请先按实际情况办理入库');
     } else {
       const reservations = pools.flatMap((pool) =>
         rows(pool.reservations)
@@ -143,7 +143,7 @@ export function stockFinanceRelatedDefinition(
       !record.poolId
     )
       throw new Error('当前记录缺少有效的原发货流水，无法办理销售退货');
-    lock('poolId', record.poolId, '原发货库存池不可用，请刷新后重试');
+    lock('poolId', record.poolId, '原发货库存不可用，请刷新后重试');
     lock('shipmentEventId', record.eventId, '原发货流水不可用，请刷新后重试');
     return result;
   }

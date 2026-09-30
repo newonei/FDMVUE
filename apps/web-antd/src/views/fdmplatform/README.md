@@ -34,6 +34,30 @@
 | 工厂部门 | 库存与合同收发   | fdmplatform/inventory/stock/index        |
 | 基础资料 | 业务主数据与迁移 | fdmplatform/admin/master-data/index      |
 
+### 菜单合并（2026-09-29）
+
+同一部门内按单据类型拆开的菜单合并为带页签的部门页面，页签由 `?view=` 选择，切换页签只保留 `contractId` 筛选：
+
+| 保留菜单 | 页签 |
+| --- | --- |
+| 发货与退货 `platform-shipments` | 发货单 · 销售退货单 |
+| 报价与方案 `platform-quotes` | 供应商报价 · 采购方案 |
+| 采购单 `platform-orders` | 采购单 · 到货单 · 采购退货单 · 自产进度 |
+| 采购设置 `platform-templates` | 合同模板与主体 · 采购分派规则 |
+| 收款与开票 `platform-receipts` | 回款记录 · 退款与冲销 · 开票记录 · 回款核销 |
+| 付款与报销 `platform-procurement-requests` | 采购请款 · 采购付款 · 费用报销 |
+| 成本与利润 `platform-costs` | 合同成本与贡献 · 采购成本归属 |
+
+被合并菜单的组件和路由保留，旧链接由 `documents/merged-routes.ts` 跳转到对应页签并保留原查询参数；侧边栏隐藏与改名由后端补丁 `20260929_fdmplatform_menu_consolidation.sql` 完成。本模块全部页面按菜单路径复用标签（`documents/tab-policy.ts`），打开详情、切换筛选不再另开标签。
+
+### 部门门户
+
+外贸、采购、财务、仓库各有一个门户页（`portal/*/index`，菜单路径 `platform-portal`，排在部门第一位），内容为我的待办、进度列表、本月数据与近 6 个月趋势、本部门全部功能。门户不在全员共享菜单内：只有被分配对应菜单的角色可见，`/fdmplatform/v1/portal/{trade|purchase|finance|stock}` 同时校验 `fdmplatform:portal:*` 权限。外贸、采购按“我负责的”统计，财务、仓库按部门共享；金额按币种分开，历史待补齐只计数不读取。待办卡片跳转到已筛选的列表：采购工作台支持 `?stage=&mine=true`，合同订单支持 `?mine=true&status=&scope=&create=contract`，单据列表支持 `?scope=`。
+
+### 待补齐历史单据
+
+列表默认只显示“当前业务”。金智导入后仍需补齐的合同、单据及其子记录进入“待补齐历史单据”队列，有待补齐记录时列表顶部显示切换；从合同进入的列表默认显示全部。数据来自索引行的 `pendingCompletion`，存量数据由 `20260929_fdmplatform_index_pending_completion.sql` 回填，未回填前一律视为当前业务。
+
 组件由现有 `router/access.ts` 的页面扫描载入。菜单父目录由后端增量 SQL 管理，本模块通过独立扩展提供全员菜单可见性，不恢复旧的退役采购或仓储页面。
 
 ## 正式接口与共用业务范围

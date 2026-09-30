@@ -441,25 +441,14 @@ describe('合同工作台原处选择及金额展示', () => {
     expect(view.launch).not.toHaveBeenCalled();
   });
 
-  it('takes received money from the confirmed ledger rather than pending records and never displays unread amounts as zero', async () => {
+  it('keeps the pending-receipt guidance and never reports unread finance as finished', async () => {
     const contract = fixture();
     contract.finance = {
       receipts: [
         { id: 'pending', status: 'PENDING', kind: 'PAYMENT', amount: '100' },
       ],
     };
-    contract.financeSummary = {
-      confirmedReceipts: '0',
-      unpaidAmount: '100',
-      pendingReceipts: '100',
-    };
     const view = mount(contract);
-    const received = () =>
-      [...view.host.querySelectorAll('.workboard-metric')].find((metric) =>
-        metric.textContent?.includes('已回款'),
-      )!;
-    expect(received().textContent).toContain('0.00');
-    expect(received().textContent).not.toContain('100');
     expect(view.host.textContent).toContain('确认前不计入已回款');
     view.props.contract = {
       ...contract,
@@ -468,9 +457,7 @@ describe('合同工作台原处选择及金额展示', () => {
       allowedActions: [],
     };
     await nextTick();
-    expect(received().textContent).toContain('未读取或当前不可见');
     expect(view.host.textContent).toContain('当前已读取的资料中没有');
     expect(view.host.textContent).not.toContain('全部完成');
-    expect(view.host.textContent).toContain('待核对');
   });
 });

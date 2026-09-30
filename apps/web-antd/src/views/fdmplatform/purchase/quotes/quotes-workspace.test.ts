@@ -8,8 +8,8 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import QuotesWorkspace from './index.vue';
 import QuoteComparisonDialog from './QuoteComparisonDialog.vue';
+import QuotesWorkspace from './QuoteWorkspace.vue';
 
 const mocks = vi.hoisted(() => ({
   page: vi.fn(),

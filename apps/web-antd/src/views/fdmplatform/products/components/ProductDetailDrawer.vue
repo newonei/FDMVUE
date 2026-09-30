@@ -673,7 +673,7 @@ function refresh() {
 
           <Empty
             v-if="!view?.inventoryPools.length"
-            description="尚未找到该产品的库存池；原出入库与盘点记录可从上方对应业务类型查询。"
+            description="尚未找到该产品的库存；原出入库与盘点记录可从上方对应业务类型查询。"
             :image="Empty.PRESENTED_IMAGE_SIMPLE"
           />
           <div
@@ -684,14 +684,14 @@ function refresh() {
             <RelatedLink :target="{ type: 'stock', poolId: pool.id }">
               {{
                 pool.warehouseName ||
-                (pool.warehouseId ? `仓库 ${pool.warehouseId}` : '查看库存池')
+                (pool.warehouseId ? `仓库 ${pool.warehouseId}` : '查看库存')
               }}
             </RelatedLink>
             <div class="activity-muted">
               规格版本 {{ pool.specVersion ?? '—' }} ·
               {{
                 pool.stockOwnerName ||
-                (pool.stockOwnerId ? `货权 ${pool.stockOwnerId}` : '货权未记录')
+                (pool.stockOwnerId ? `货主 ${pool.stockOwnerId}` : '货主未记录')
               }}
             </div>
             <Descriptions size="small" :column="1">

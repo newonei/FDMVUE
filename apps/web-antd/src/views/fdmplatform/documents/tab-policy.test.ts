@@ -1,4 +1,4 @@
-/* eslint-disable vue/one-component-per-file -- Route fixtures verify KeepAlive across procurement and other modules. */
+/* eslint-disable vue/one-component-per-file -- Route fixtures verify KeepAlive across platform and other modules. */
 import { createApp, defineComponent, h, KeepAlive, nextTick } from 'vue';
 import {
   createMemoryHistory,
@@ -11,9 +11,9 @@ import { getTabKey } from '@vben/stores';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { installProcurementTabPolicy } from './procurement-tab-policy';
+import { installPlatformTabPolicy } from './tab-policy';
 
-function setup() {
+function setup(install = true) {
   let mounts = 0;
   const component = defineComponent({
     name: 'ProcurementFixture',
@@ -28,59 +28,48 @@ function setup() {
         );
     },
   });
+  const lazy = async () => component;
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      {
-        path: '/fdmprocurement/platform-orders',
-        component: async () => {
-          installProcurementTabPolicy(router);
-          return component;
-        },
-      },
-      {
-        path: '/caiwu/platform-procurement-requests',
-        component: async () => {
-          installProcurementTabPolicy(router);
-          return component;
-        },
-      },
-      {
-        path: '/caiwu/platform-procurement-payments',
-        component: async () => {
-          installProcurementTabPolicy(router);
-          return component;
-        },
-      },
-      {
-        path: '/caiwu/platform-procurement-reimbursements',
-        component: async () => {
-          installProcurementTabPolicy(router);
-          return component;
-        },
-      },
-      {
-        path: '/caiwu/platform-procurement-costs',
-        component: async () => {
-          installProcurementTabPolicy(router);
-          return component;
-        },
-      },
+      ...(
+        [
+          ['/fdmprocurement/platform-orders', 'FdmPlatformPurchaseOrders'],
+          [
+            '/caiwu/platform-procurement-requests',
+            'FdmPlatformProcurementRequests',
+          ],
+          [
+            '/caiwu/platform-procurement-payments',
+            'FdmPlatformProcurementPayments',
+          ],
+          [
+            '/caiwu/platform-procurement-reimbursements',
+            'FdmPlatformProcurementReimbursements',
+          ],
+          ['/caiwu/platform-procurement-costs', 'FdmPlatformProcurementCosts'],
+          ['/fdmwaimao/platform-contracts', 'FdmPlatformTradeContracts'],
+          ['/fdmwaimao/platform-customers', 'FdmPlatformTradeCustomers'],
+          ['/caiwu/platform-receipts', 'FdmPlatformFinanceReceipts'],
+        ] as [string, string][]
+      ).map(([path, name]) => ({ path, name, component: lazy })),
       {
         path: '/system/users',
+        name: 'SystemUser',
         component: defineComponent({
           render: () => h('div', 'Official fixture'),
         }),
       },
     ],
   });
+  if (install) installPlatformTabPolicy(router);
   const keys: string[] = [];
   router.afterEach((to) =>
     keys.push(getTabKey({ ...to, meta: to.matched.at(-1)?.meta ?? to.meta })),
   );
   return { router, keys, getMounts: () => mounts };
 }
-describe('procurement page tab identity', () => {
+describe('platform page tab identity', () => {
   it('sets both tabbar and KeepAlive keys before the first lazy deep-link navigation commits', async () => {
     const { router, keys } = setup();
     await router.push(
@@ -156,6 +145,20 @@ describe('procurement page tab identity', () => {
     }
     expect(new Set(keys).size).toBe(4);
   });
+  it('keeps contract, customer and document detail links in their menu tab', async () => {
+    const { router, keys } = setup();
+    for (const [path, key] of [
+      ['/fdmwaimao/platform-contracts', 'contractId'],
+      ['/fdmwaimao/platform-customers', 'customerId'],
+      ['/caiwu/platform-receipts', 'documentId'],
+    ] as const) {
+      await router.push(path);
+      await router.push(`${path}?${key}=a`);
+      await router.push(`${path}?${key}=b&tab=progress`);
+      expect(keys.slice(-3)).toEqual([path, path, path]);
+      expect(router.currentRoute.value.query[key]).toBe('b');
+    }
+  });
   it('does not change other modules tab keys or drop explicit pageKey behavior', async () => {
     const { router, keys } = setup();
     await router.push(
@@ -175,14 +178,14 @@ describe('procurement page tab identity', () => {
   });
 });
 
-describe('procurement policy registration', () => {
+describe('platform tab policy registration', () => {
   it('registers once for a router even when the module is evaluated again during HMR', async () => {
-    const { router } = setup();
+    const { router } = setup(false);
     const guard = vi.spyOn(router, 'beforeResolve');
-    installProcurementTabPolicy(router);
+    installPlatformTabPolicy(router);
     vi.resetModules();
-    const reloaded = await import('./procurement-tab-policy');
-    reloaded.installProcurementTabPolicy(router);
+    const reloaded = await import('./tab-policy');
+    reloaded.installPlatformTabPolicy(router);
     expect(guard).toHaveBeenCalledOnce();
     await router.push(
       '/fdmprocurement/platform-orders?contractId=c&documentId=after-hot-reload',

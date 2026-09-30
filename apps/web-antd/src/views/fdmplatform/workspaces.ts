@@ -77,15 +77,15 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '采购部门',
     section: 'records',
     description:
-      '按负责人和状态处理履约任务；未分派申请保留原因，可人工分派或转派。',
+      '按负责人和状态处理采购任务；未分派申请保留原因，可人工分派或转派。',
     defaultTab: 'purchase',
     groups: [
       {
         resource: 'assignments',
-        title: '履约任务',
+        title: '采购任务',
         tab: 'purchase',
         fields: [
-          'method|履约方式',
+          'method|采购方式',
           'quantity|分派数量',
           'ownerUserId|经办人',
           'status|状态',
@@ -117,7 +117,6 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
         fields: [
           'name|方案名称',
           'status|方案状态',
-          'version|方案版本',
           'ownerUserId|编制人',
           'facts|采购事实',
           'risks|风险',
@@ -152,7 +151,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '采购部门',
     section: 'records',
     description:
-      '按有效生效版本下单，登记分批到货、异常和退货，跟进自产任务进度。',
+      '按已确认的采购方案下单，登记分批到货、异常和退货，跟进自产任务进度。',
     defaultTab: 'delivery',
     groups: [
       {
@@ -162,7 +161,6 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
         fields: [
           'supplierName|供应商',
           'status|执行状态',
-          'approvedPlanVersion|生效版本',
           'amount|采购金额',
           'currency|币种',
           'lines|执行明细',
@@ -261,7 +259,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '工厂部门',
     section: 'stock',
     description:
-      '按货权、仓库、SKU 和规格管理库存池，在生效的合同范围内预留、收货和发货。',
+      '按货主、仓库、SKU 和规格管理库存，在已生效的合同范围内预留、收货和发货。',
     defaultTab: 'delivery',
   },
   'admin-master': {
@@ -269,7 +267,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '基础资料',
     section: 'master',
     description:
-      '维护供应商、仓库与货权映射，预检 CSV 后确认导入；客户及产品从专用中心维护。',
+      '维护供应商、仓库与货主映射，预检 CSV 后确认导入；客户及产品从专用中心维护。',
     defaultTab: 'overview',
   },
   'admin-access': {

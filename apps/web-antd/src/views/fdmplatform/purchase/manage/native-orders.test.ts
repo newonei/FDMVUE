@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   detail: vi.fn(),
   contract: vi.fn(),
 }));
-vi.mock('../../documents/procurement-tabs', () => ({}));
 vi.mock('#/api/fdmplatform', () => ({
   getAttachments: vi.fn(),
   getContract: mocks.contract,
@@ -413,7 +412,12 @@ describe('related creation inside the purchase workspace', () => {
     expect(dialog?.dataset.contractId).toBeUndefined();
     click(host, '保存关联单据');
     await settle();
-    expect(mocks.page).toHaveBeenCalledTimes(2);
+    // The completion-queue size request is separate from the list refresh.
+    expect(
+      mocks.page.mock.calls.filter(
+        ([params]) => params?.pendingCompletion !== true,
+      ),
+    ).toHaveLength(2);
     expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
     expect(router.currentRoute.value.fullPath).toBe(
       '/fdmprocurement/platform-orders',

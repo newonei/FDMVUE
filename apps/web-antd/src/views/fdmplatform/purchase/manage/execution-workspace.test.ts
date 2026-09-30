@@ -30,7 +30,6 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinanceSummary: mocks.finance,
 }));
-vi.mock('../../documents/procurement-tabs', () => ({}));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
@@ -381,7 +380,12 @@ describe('采购订单原页执行', () => {
     expect(host.querySelector<HTMLElement>('[data-drawer]')).toBeNull();
     expect(mocks.list).toHaveBeenCalledTimes(count);
     expect(host.querySelector('input')?.value).toBe('工厂');
-    expect(mocks.list).toHaveBeenLastCalledWith(
+    // The completion-queue size request is separate from the list request.
+    expect(
+      mocks.list.mock.calls
+        .map(([params]) => params)
+        .findLast((params) => params?.pendingCompletion !== true),
+    ).toEqual(
       expect.objectContaining({
         pageNo: 2,
         contractId: undefined,

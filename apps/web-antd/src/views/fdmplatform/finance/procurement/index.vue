@@ -29,8 +29,6 @@ import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from './components/FinanceDocument.vue';
 import { financeStatus, financeTitles } from './model';
 
-import '../../documents/procurement-tabs';
-
 import '../../components/compact-tables.css';
 
 const props = defineProps<{ type: ProcurementFinanceType }>();

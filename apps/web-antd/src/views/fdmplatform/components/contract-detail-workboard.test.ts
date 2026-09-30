@@ -233,6 +233,7 @@ vi.mock('ant-design-vue', () => {
     Descriptions: Object.assign(block, { Item: block }),
     Space: block,
     Tabs: block,
+    Tooltip: block,
     Tag: defineComponent({
       setup: (_, ctx) => () =>
         h('span', { 'data-status-tag': true }, ctx.slots.default?.()),

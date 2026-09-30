@@ -78,7 +78,7 @@ export function relatedCreations(
     }
     case 'requests': {
       return [
-        { kind: 'tasks', action: 'ASSIGN_FULFILLMENT', title: '分派履约任务' },
+        { kind: 'tasks', action: 'ASSIGN_FULFILLMENT', title: '分派采购任务' },
       ];
     }
     case 'shipments': {
@@ -392,7 +392,7 @@ export function relatedActionDefinition(
   }
   if (action === 'GENERATE_ORDERS') {
     if (!['APPROVED', 'PARTIALLY_APPROVED'].includes(String(record.status)))
-      throw new Error('采购方案尚未生效，请先办理方案生效');
+      throw new Error('采购方案尚未确认，请先确认方案');
     const approvals = rows(record.approvals)
       .filter(
         (approval) =>

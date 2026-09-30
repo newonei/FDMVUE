@@ -163,6 +163,8 @@ export interface PageQuery {
   assignmentStatus?: string;
   contractId?: string;
   ownerUserId?: number;
+  /** true: imported records awaiting completion; false: current business; absent: both. */
+  pendingCompletion?: boolean;
 }
 export interface PageResult<T> {
   list: T[];

@@ -265,7 +265,7 @@ const lineColumns = computed(() =>
     'suggestedSupplier|建议采购工厂',
     'quantity|数量',
     'requiredDate|需求日期',
-    'assignmentName|履约方式',
+    'assignmentName|采购方式',
     'supplierName|供应商',
     'unitPrice|单价',
     'arrivedQuantity|已到数量',

@@ -29,8 +29,6 @@ import {
   reimbursementViews,
 } from './workspace';
 
-import '../../../documents/procurement-tabs';
-
 const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();

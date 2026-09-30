@@ -275,7 +275,7 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
       });
       add(
         'order',
-        '生效方案待下单',
+        '已确认方案待下单',
         '只生成尚未执行的生效外采数量。',
         '生成采购单',
         'plans',

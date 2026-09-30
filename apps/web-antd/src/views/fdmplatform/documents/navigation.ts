@@ -263,11 +263,11 @@ export function relatedDocumentLinks(
   function assignment(id: unknown) {
     const current = find(contract.assignments, id);
     doc(
-      '来源履约任务',
+      '来源采购任务',
       'tasks',
       id,
       current
-        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '履约任务'} · ${current.method === 'BUY' ? '外采' : current.method === 'MAKE' ? '自产' : '库存'} ${current.quantity}`
+        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '采购任务'} · ${current.method === 'BUY' ? '外采' : current.method === 'MAKE' ? '自产' : '库存'} ${current.quantity}`
         : undefined,
     );
     if (current) {

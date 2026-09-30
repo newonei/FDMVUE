@@ -7,10 +7,7 @@ import { computed, ref, watch } from 'vue';
 
 import { Button, Card, Tag } from 'ant-design-vue';
 
-import { nativeMoney } from '../documents/migration-display';
-import { contractDeliveryStatus } from './contract-progress';
 import { contractWorkboard } from './contract-workboard';
-import { amountText } from './finance-progress';
 
 const props = defineProps<{
   contract: Contract;
@@ -24,31 +21,6 @@ const groups = computed(() => contractWorkboard(props.contract));
 const visible = computed(() =>
   showAll.value ? groups.value : groups.value.slice(0, 4),
 );
-const metrics = computed(() => [
-  {
-    title: '订单金额',
-    value: nativeMoney(props.contract.amount, props.contract.currency),
-  },
-  {
-    title: '已回款',
-    value: amountText(
-      props.contract.financeSummary,
-      'confirmedReceipts',
-      props.contract.currency,
-      nativeMoney,
-    ),
-  },
-  {
-    title: '未回款',
-    value: amountText(
-      props.contract.financeSummary,
-      'unpaidAmount',
-      props.contract.currency,
-      nativeMoney,
-    ),
-  },
-  { title: '交付状态', value: contractDeliveryStatus(props.contract) },
-]);
 function choose(group: WorkboardGroup) {
   if (props.disabled || props.loading) return;
   if (group.records.length === 1) emit('launch', group.records[0]!.launch);
@@ -63,11 +35,6 @@ watch(
 );
 </script>
 <template>
-  <div class="workboard-metrics" aria-label="订单办理概况">
-    <div v-for="metric in metrics" :key="metric.title" class="workboard-metric">
-      <span>{{ metric.title }}</span><strong>{{ loading ? '正在读取…' : metric.value }}</strong>
-    </div>
-  </div>
   <Card title="接下来可办理" size="small" class="workboard">
     <p class="workboard-note">
       按当前订单资料整理；采购、交付和收款可分别推进。点击后在当前页面办理。
@@ -126,31 +93,10 @@ watch(
   </Card>
 </template>
 <style scoped>
-.workboard-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.workboard-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid var(--ant-color-border-secondary, #e5e7eb);
-  border-radius: 8px;
-}
-
-.workboard-metric > span,
 .workboard-note {
+  margin: 4px 0 0;
   font-size: 12px;
   color: var(--ant-color-text-secondary, #64748b);
-}
-
-.workboard-metric strong {
-  font-size: 16px;
-  overflow-wrap: anywhere;
 }
 
 .workboard {
@@ -178,10 +124,6 @@ watch(
   flex-shrink: 0;
 }
 
-.workboard-note {
-  margin: 4px 0 0;
-}
-
 .workboard-records {
   max-height: 260px;
   padding: 0 12px;
@@ -197,10 +139,6 @@ watch(
 }
 
 @media (max-width: 640px) {
-  .workboard-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .workboard-row {
     flex-direction: column;
     gap: 8px;

@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
           @change="switchQueue"
         >
           <TabPane key="intake" tab="待接单申请" :disabled="nestedOpen" />
-          <TabPane key="tasks" tab="履约任务" :disabled="nestedOpen" />
+          <TabPane key="tasks" tab="采购任务" :disabled="nestedOpen" />
         </Tabs>
         <Card
           v-if="currentKind === 'costs'"

@@ -23,7 +23,7 @@ export const activityTypes: { label: string; value: ProductActivityType }[] = [
   { value: 'SALES_RETURN', label: '销售退货' },
   { value: 'PRODUCTION_PROGRESS', label: '生产进度' },
   { value: 'STOCK_EVENT', label: '库存流水' },
-  { value: 'ASSIGNMENT', label: '履约任务' },
+  { value: 'ASSIGNMENT', label: '采购任务' },
   { value: 'PURCHASE_PLAN', label: '采购方案' },
   { value: 'CUSTOMS', label: '报关跟进' },
   { value: 'STOCK_IN', label: '入库单' },

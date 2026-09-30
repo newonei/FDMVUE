@@ -290,7 +290,7 @@ watch(
           方案默认带入剩余可编制数量 {{ selected.planQuantity }}
           {{
             comparison.sourceUnit
-          }}，可在表单调整；保存后办理方案生效，再继续下单。
+          }}，可在表单调整；保存后确认方案，再继续下单。
         </p>
         <p v-else class="procurement-muted">
           比较数量用于测算；编制方案时按任务剩余额度带入，可继续调整。

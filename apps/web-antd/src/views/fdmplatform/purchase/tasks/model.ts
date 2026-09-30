@@ -20,7 +20,7 @@ export interface WorkbenchAction {
 /** Stage selects a shortcut; the existing modal reloads and validates the source. */
 export function workbenchAction(entry: ProcurementWorkItem): WorkbenchAction {
   const view = {
-    title: entry.stage === 'review' ? '办理方案生效' : '查看详情',
+    title: entry.stage === 'review' ? '确认方案' : '查看详情',
     kind: entry.kind,
   };
   if (

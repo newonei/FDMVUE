@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ActionDefinition } from '../../data';
+import type { CompletionScope } from '../../documents/completion-scope';
 import type { DocumentKind } from '../../documents/model';
 
 import type { AttachmentView, Contract, DocumentRow } from '#/api/fdmplatform';
@@ -46,10 +47,16 @@ import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-fina
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
+import CompletionScopeFilter from '../../components/CompletionScope.vue';
 import ContractDocumentDialog from '../../components/ContractDocumentDialog.vue';
 import RecordTable from '../../components/RecordTable.vue';
 import { errorText, field, rows } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
+import {
+  completionFilter,
+  defaultCompletionScope,
+  scopeFromQuery,
+} from '../../documents/completion-scope';
 import DocumentAction from '../../documents/DocumentAction.vue';
 import MigrationSource from '../../documents/MigrationSource.vue';
 import { documentActionUnavailableReason } from '../../documents/model';
@@ -82,8 +89,6 @@ import {
   orderPaymentProgress,
   purchaseRowLabels,
 } from './model';
-
-import '../../documents/procurement-tabs';
 
 import '../../components/compact-tables.css';
 import '../components/procurement.css';
@@ -187,6 +192,31 @@ const contractId = computed(() =>
     ? route.query.contractId
     : undefined,
 );
+const scope = ref<CompletionScope>(
+  scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
+);
+const pendingTotal = ref(0);
+let pendingSequence = 0;
+/** Only the queue size; it decides whether the scope switch is shown at all. */
+async function loadPendingTotal() {
+  if (!active.value) return;
+  const run = ++pendingSequence;
+  try {
+    const result = await getProcurementOrders({
+      contractId: contractId.value,
+      pageNo: 1,
+      pageSize: 1,
+      pendingCompletion: true,
+    });
+    if (run === pendingSequence) pendingTotal.value = result.total;
+  } catch {
+    if (run === pendingSequence) pendingTotal.value = 0;
+  }
+}
+function changeScope() {
+  page.value = 1;
+  void loadList();
+}
 const tab = computed({
   get: () => {
     if (selection.value) return localTab.value;
@@ -343,6 +373,7 @@ async function loadList() {
     keyword: keyword.value || undefined,
     status: status.value,
     mine: mine.value || undefined,
+    pendingCompletion: completionFilter(scope.value),
   };
   const queryKey = JSON.stringify(params);
   if (queryKey !== listQueryKey) {
@@ -592,8 +623,13 @@ watch(
 );
 watch(
   () => [active.value, route.query.contractId],
-  () => {
+  (next, previous) => {
+    if (previous && next[1] !== previous[1]) {
+      scope.value = defaultCompletionScope(contractId.value);
+      pendingTotal.value = 0;
+    }
     void loadList();
+    void loadPendingTotal();
   },
   { immediate: true },
 );
@@ -672,6 +708,11 @@ watch(financeType, (value, previous) => {
             "
           />
           <div class="procurement-toolbar-actions">
+            <CompletionScopeFilter
+              v-model="scope"
+              :pending-total="pendingTotal"
+              @change="changeScope"
+            />
             <Button
               :type="mine ? 'default' : 'primary'"
               size="small"
@@ -757,7 +798,7 @@ watch(financeType, (value, previous) => {
                 type="primary"
                 @click="createRelated('orders', 'GENERATE_ORDERS')"
               >
-                从生效方案生成
+                从已确认方案生成
               </Button>
             </Empty>
           </template>

@@ -2,6 +2,7 @@
 import type { DocumentKind } from '../documents/model';
 import type { DetailTab, WorkspaceKey } from '../workspaces';
 import type { ContractDocumentKind } from './contract-document-launcher';
+import type { MainlineAction } from './contract-mainline';
 import type { WorkboardLaunch } from './contract-workboard';
 
 import type {
@@ -27,6 +28,7 @@ import {
   TabPane,
   Tabs,
   Tag,
+  Tooltip,
 } from 'ant-design-vue';
 
 import {
@@ -62,6 +64,7 @@ import {
 import { workboardDocumentRow } from './contract-workboard';
 import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
+import ContractMainline from './ContractMainline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
 import RecordTable from './RecordTable.vue';
 const props = defineProps<{
@@ -326,6 +329,35 @@ async function activateContract() {
     activating.value = false;
   }
 }
+function runNext(action: MainlineAction) {
+  if (!props.contract || props.loading || childOpen.value) return;
+  switch (action.type) {
+    case 'activate': {
+      void activateContract();
+      break;
+    }
+    case 'complete': {
+      completionOpen.value = true;
+      break;
+    }
+    case 'documents': {
+      openDocuments(action.kind, 'list');
+      break;
+    }
+    case 'edit': {
+      editorOpen.value = true;
+      break;
+    }
+    case 'launch': {
+      startWork(action.launch);
+      break;
+    }
+    case 'quick': {
+      openQuickDocument({ kind: action.kind, action: action.action });
+      break;
+    }
+  }
+}
 function close() {
   if (!childOpen.value) emit('close');
 }
@@ -378,21 +410,12 @@ async function download(file: { id: string; name: string }) {
           @click="editorOpen = true"
         >
           编辑合同与产品
-</Button><Button
-          v-if="
-            contract.status === 'DRAFT' &&
-            contract.allowedActions.includes('CONFIRM_CONTRACT')
-          "
-          type="primary"
-          :loading="activating"
-          :disabled="childOpen || loading"
-          @click="activateContract"
-        >
-          合同生效
         </Button>
 </Space><Button
-        v-if="contract.allowedActions.includes('COMPLETE_IMPORTED_CONTRACT')"
-        type="primary"
+        v-if="
+          contract.allowedActions.includes('COMPLETE_IMPORTED_CONTRACT') &&
+          !contract.blockReasons?.length
+        "
         :disabled="childOpen || loading"
         @click="completionOpen = true"
       >
@@ -401,6 +424,12 @@ async function download(file: { id: string; name: string }) {
         :migration="contract.migration"
         :block-reasons="contract.blockReasons"
         :native-source="{ kind: 'CONTRACT', nativeId: contract.id }"
+      /><ContractMainline
+        :contract="contract"
+        :busy="activating"
+        :disabled="childOpen"
+        :loading="loading"
+        @next="runNext"
       /><Tabs v-model:active-key="activeTab">
         <TabPane key="overview" tab="合同概要">
           <ContractWorkboard
@@ -471,7 +500,7 @@ async function download(file: { id: string; name: string }) {
             :columns="
               columns(
                 'skuName|产品',
-                'specification|冻结规格',
+                'specification|规格',
                 'shape|形状',
                 'suggestedSupplierName|建议采购工厂',
                 'quantity|合同数量',
@@ -510,13 +539,13 @@ async function download(file: { id: string; name: string }) {
               size="small"
               :title="stage.name"
             >
-              {{ stage.value }}
-              <p
+              <strong class="stage-value">{{ stage.value }}</strong>
+              <Tooltip
                 v-if="'description' in stage && stage.description"
-                class="navigation-note"
+                :title="stage.description"
               >
-                {{ stage.description }}
-              </p>
+                <span class="stage-hint" tabindex="0">查看说明</span>
+              </Tooltip>
             </Card>
           </div>
           <Alert v-if="customsError" :message="customsError" type="warning" />
@@ -610,7 +639,6 @@ async function download(file: { id: string; name: string }) {
                 :title="quickActionReason(entry.action)"
               >
                 <Button
-                  :type="entry.kind === 'requests' ? 'primary' : 'default'"
                   :disabled="Boolean(quickActionReason(entry.action))"
                   @click="openQuickDocument(entry)"
                 >
@@ -635,32 +663,6 @@ async function download(file: { id: string; name: string }) {
             <p class="overview-note">
               弹窗自动关联合同，保存后更新合同及流程进度；回款登记后仍需确认到账。
             </p>
-          </div>
-        </Card>
-        <Card title="流程进度" size="small">
-          <div class="overview-business">
-            <div class="progress-grid">
-              <Card
-                v-for="stage in stages"
-                :key="stage.name"
-                size="small"
-                :title="stage.name"
-              >
-                {{ stage.value }}
-                <p
-                  v-if="'description' in stage && stage.description"
-                  class="overview-note"
-                >
-                  {{ stage.description }}
-                </p>
-              </Card>
-            </div>
-            <Alert v-if="customsError" :message="customsError" type="warning" />
-            <Alert v-if="relatedError" :message="relatedError" type="warning">
-              <template #action>
-                <Button size="small" @click="loadSummary">重新读取</Button>
-              </template>
-            </Alert>
           </div>
         </Card>
       </template>
@@ -730,6 +732,20 @@ async function download(file: { id: string; name: string }) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.stage-value {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.stage-hint {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: hsl(var(--primary));
+  cursor: help;
 }
 
 .document-links {

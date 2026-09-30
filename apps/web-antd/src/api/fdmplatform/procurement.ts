@@ -194,6 +194,7 @@ export function getProcurementOrders(params: {
   mine?: boolean;
   pageNo: number;
   pageSize: number;
+  pendingCompletion?: boolean;
   status?: string;
 }) {
   return requestClient.get<PageResult<ProcurementOrderRow>>(

@@ -309,7 +309,7 @@ async function execute(input: Record<string, unknown>, key: string) {
     if (action.startsWith('STOCK_')) {
       const pool = pools.value.find((item) => item.id === payload.poolId);
       if (!pool || pool.version === undefined)
-        throw new Error('库存池版本未加载，请关闭后重新办理');
+        throw new Error('库存版本未加载，请关闭后重新办理');
       const { poolId, planId, planVersion, planLineId, ...command } = payload;
       if (action === 'STOCK_RECEIVE' || action === 'STOCK_RESERVE')
         command.contractId = current.id;

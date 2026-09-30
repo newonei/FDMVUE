@@ -29,7 +29,6 @@ vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
 }));
-vi.mock('../../../documents/procurement-tabs', () => ({}));
 vi.mock('#/api/fdmplatform', () => ({ getDirectory: mocks.directory }));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinancePage: mocks.page,
