@@ -1,4 +1,8 @@
-import type { MasterRecord, PageResult } from './index';
+import type { Decimal, MasterRecord, PageResult } from './index';
+import type {
+  ProductActivityRecord,
+  ProductActivityType,
+} from './product-activity';
 
 import { requestClient } from '#/api/request';
 
@@ -175,5 +179,72 @@ export function refreshOkkiCustomer(
     `${base}/${encodeURIComponent(id)}/okki-refresh`,
     data,
     { timeout: 120_000 },
+  );
+}
+
+/** 客户档案里能出现的单据类型（与产品档案共用类型名、跳转和展示规则） */
+export type CustomerActivityType = Extract<
+  ProductActivityType,
+  | 'ALL'
+  | 'ARRIVAL'
+  | 'ASSIGNMENT'
+  | 'CONTRACT'
+  | 'CUSTOMS'
+  | 'PRODUCTION_PROGRESS'
+  | 'PURCHASE_INVOICE'
+  | 'PURCHASE_ORDER'
+  | 'PURCHASE_PAYMENT'
+  | 'PURCHASE_PLAN'
+  | 'PURCHASE_REQUEST'
+  | 'PURCHASE_RETURN'
+  | 'QUOTE'
+  | 'RECEIPT'
+  | 'REFUND'
+  | 'SALES_INVOICE'
+  | 'SALES_RETURN'
+  | 'SHIPMENT'
+  | 'STOCK_IN'
+  | 'STOCK_OUT'
+>;
+export interface CustomerAmountSummary {
+  /** 未注明币种的历史单据为空 */
+  currency?: null | string;
+  contractAmount: Decimal;
+  receivedAmount: Decimal;
+  refundedAmount: Decimal;
+  invoicedAmount: Decimal;
+}
+/** 与产品档案的记录同形，另带备注/原因（如回款扣款原因） */
+export interface CustomerActivityRecord extends ProductActivityRecord {
+  note?: null | string;
+}
+export interface CustomerActivityView {
+  customerId: string;
+  list: CustomerActivityRecord[];
+  total: number;
+  counts: Partial<Record<Exclude<CustomerActivityType, 'ALL'>, number>>;
+  summary: {
+    amounts: CustomerAmountSummary[];
+    firstDate?: null | string;
+    lastDate?: null | string;
+  };
+  pageNo: number;
+  pageSize: number;
+  notes: string[];
+}
+export function getCustomerActivity(
+  id: string,
+  params: {
+    fromDate?: string;
+    keyword?: string;
+    pageNo: number;
+    pageSize: number;
+    toDate?: string;
+    type: CustomerActivityType;
+  },
+) {
+  return requestClient.get<CustomerActivityView>(
+    `${base}/${encodeURIComponent(id)}/activity`,
+    { params, timeout: 60_000 },
   );
 }

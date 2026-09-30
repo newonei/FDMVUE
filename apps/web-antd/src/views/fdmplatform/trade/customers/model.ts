@@ -1,8 +1,11 @@
 import type {
   CountryOption,
   Customer,
+  CustomerActivityType,
   OkkiCustomerSource,
 } from '#/api/fdmplatform/customers';
+
+import { activityLabel } from '../../products/activity-model';
 
 export const customerFields = [
   ['name', '客户全称'],
@@ -75,4 +78,49 @@ export function mergeOkkiCustomers(
       [...current, ...next].map((customer) => [customer.externalId, customer]),
     ).values(),
   ];
+}
+
+/** 客户档案的单据类型，按外贸业务顺序：销售与收款在前，采购与仓储在后 */
+export const customerActivityTypes: {
+  label: string;
+  value: Exclude<CustomerActivityType, 'ALL'>;
+}[] = (
+  [
+    'CONTRACT',
+    'SHIPMENT',
+    'SALES_RETURN',
+    'RECEIPT',
+    'REFUND',
+    'SALES_INVOICE',
+    'CUSTOMS',
+    'PURCHASE_REQUEST',
+    'ASSIGNMENT',
+    'QUOTE',
+    'PURCHASE_PLAN',
+    'PURCHASE_ORDER',
+    'ARRIVAL',
+    'PURCHASE_RETURN',
+    'PRODUCTION_PROGRESS',
+    'STOCK_IN',
+    'STOCK_OUT',
+    'PURCHASE_INVOICE',
+    'PURCHASE_PAYMENT',
+  ] as const
+).map((value) => ({ value, label: activityLabel(value) }));
+
+export function customerRegion(customer: Partial<Customer>) {
+  return [
+    customer.countryName || customer.country,
+    customer.province,
+    customer.city,
+  ]
+    .filter(Boolean)
+    .join(' / ');
+}
+
+export function customerSourceLabel(source?: string) {
+  if (source === 'OKKI') return 'OKKI 同步';
+  if (source === 'LOCAL') return '本地新增';
+  if (source === 'JINZHI') return '金智导入';
+  return source || '—';
 }

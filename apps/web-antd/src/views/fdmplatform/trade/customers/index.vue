@@ -28,6 +28,7 @@ import {
 
 import { errorText } from '../../data';
 import { useEntityDetail } from '../../documents/useEntityDetail';
+import CustomerDetailDrawer from './CustomerDetailDrawer.vue';
 import CustomerEditor from './CustomerEditor.vue';
 import { customerMissingFields } from './model';
 import OkkiCustomerPicker from './OkkiCustomerPicker.vue';
@@ -45,6 +46,8 @@ const source = ref<string>();
 const loading = ref(false);
 const panelError = ref('');
 const editorOpen = ref(false);
+/** 点击客户打开客户档案（资料 + 全部关联单据）；「维护」才打开编辑 */
+const detailOpen = ref(false);
 const selected = ref<Customer>();
 const okkiOpen = ref(false);
 const refreshCustomer = ref<Customer>();
@@ -57,7 +60,7 @@ const columns = [
   { title: '联系人', key: 'contact', width: 235 },
   { title: '资料来源', key: 'source', width: 155 },
   { title: '状态', key: 'state', width: 90 },
-  { title: '操作', key: 'action', width: 245, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 290, fixed: 'right' as const },
 ];
 async function load(reset = false) {
   if (reset) page.value = 1;
@@ -86,17 +89,51 @@ const entityDetail = useEntityDetail(
   getCustomer,
   (value) => {
     selected.value = value;
-    editorOpen.value = true;
+    detailOpen.value = Boolean(value);
+    editorOpen.value = !value;
   },
   () => {
     editorOpen.value = false;
+    detailOpen.value = false;
   },
   (value) => {
     panelError.value = value;
   },
 );
-function edit(customer?: Customer) {
-  entityDetail.open(customer?.id);
+function view(customer: Customer) {
+  entityDetail.open(customer.id);
+}
+function create() {
+  entityDetail.open();
+}
+function edit(customer: Customer) {
+  entityDetail.invalidatePending();
+  selected.value = customer;
+  editorOpen.value = true;
+}
+function closeEditor() {
+  editorOpen.value = false;
+  if (!detailOpen.value) entityDetail.close();
+}
+async function saved(customer: Customer) {
+  if (detailOpen.value && selected.value?.id === customer.id)
+    selected.value = customer;
+  await load();
+}
+async function okkiSaved() {
+  await Promise.all([load(), refreshSelected()]);
+}
+/** 档案打开时，状态或 OKKI 刷新后同步最新客户资料 */
+async function refreshSelected() {
+  const id = selected.value?.id;
+  if (!id || !detailOpen.value) return;
+  try {
+    const customer = await getCustomer(id);
+    if (detailOpen.value && selected.value?.id === id)
+      selected.value = customer;
+  } catch (error) {
+    panelError.value = errorText(error);
+  }
 }
 function chooseOkki(customer?: Customer) {
   refreshCustomer.value = customer;
@@ -120,7 +157,7 @@ function toggle(customer: Customer) {
           idempotencyKey: key,
         });
         message.success('客户状态已更新');
-        await load();
+        await Promise.all([load(), refreshSelected()]);
       } catch (error) {
         panelError.value = errorText(error);
         message.error(panelError.value);
@@ -179,7 +216,7 @@ onBeforeUnmount(() => {
               style="width: 120px"
               @change="load(true)"
             />
-            <Button :loading="loading" @click="load(true)">查询</Button><Button type="primary" @click="edit()">新建客户</Button><Button @click="chooseOkki()">从 OKKI 选择客户</Button>
+            <Button :loading="loading" @click="load(true)">查询</Button><Button type="primary" @click="create()">新建客户</Button><Button @click="chooseOkki()">从 OKKI 选择客户</Button>
           </Space>
           <Table
             class="fdm-business-table"
@@ -189,7 +226,7 @@ onBeforeUnmount(() => {
             :data-source="customers"
             row-key="id"
             :loading="loading"
-            :scroll="{ x: 1420 }"
+            :scroll="{ x: 1465 }"
             :pagination="{
               current: page,
               pageSize,
@@ -209,8 +246,8 @@ onBeforeUnmount(() => {
               <div v-if="column.key === 'name'">
                 <Button
                   type="link"
-                  :title="record.name"
-                  @click="edit(record as Customer)"
+                  :title="`查看客户档案：${record.name}`"
+                  @click="view(record as Customer)"
                 >
                   {{ record.name }}
                 </Button>
@@ -297,7 +334,9 @@ onBeforeUnmount(() => {
                   · 待补资料</span>
               </Tag>
               <Space v-else-if="column.key === 'action'" :size="0">
-                <Button type="link" @click="edit(record as Customer)">
+                <Button type="link" @click="view(record as Customer)">
+                  档案
+</Button><Button type="link" @click="edit(record as Customer)">
                   维护
 </Button><Button
                   v-if="record.sourceSystem === 'OKKI'"
@@ -319,17 +358,25 @@ onBeforeUnmount(() => {
         </div>
       </Card>
     </div>
+    <CustomerDetailDrawer
+      :open="detailOpen"
+      :customer="selected"
+      @close="entityDetail.close"
+      @edit="edit"
+      @okki="chooseOkki"
+      @toggle="toggle"
+    />
     <CustomerEditor
       :open="editorOpen"
       :customer="selected"
-      @close="entityDetail.close"
-      @saved="load()"
+      @close="closeEditor"
+      @saved="saved"
     />
     <OkkiCustomerPicker
       :open="okkiOpen"
       :refresh-customer="refreshCustomer"
       @close="okkiOpen = false"
-      @saved="load()"
+      @saved="okkiSaved"
     />
   </Page>
 </template>

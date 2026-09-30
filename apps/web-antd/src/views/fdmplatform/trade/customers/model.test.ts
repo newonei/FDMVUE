@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   countryMatches,
   countrySelectOptions,
+  customerActivityTypes,
   customerForm,
   customerMissingFields,
+  customerRegion,
+  customerSourceLabel,
   customerSourceOptions,
   mergeOkkiCustomers,
 } from './model';
@@ -82,5 +85,32 @@ describe('oKKI customer preview and local maintenance', () => {
     expect(form).not.toHaveProperty('externalId');
     expect(form).not.toHaveProperty('sourceSystem');
     expect(customerForm().name).toBe('');
+  });
+});
+
+describe('客户档案', () => {
+  it('单据类型按销售、收款、采购、仓储排列并使用统一中文名', () => {
+    const labels = customerActivityTypes.map((item) => item.label);
+    expect(labels.slice(0, 6)).toEqual([
+      '合同订单',
+      '发货单',
+      '销售退货',
+      '回款记录',
+      '退款记录',
+      '开票记录',
+    ]);
+    expect(new Set(customerActivityTypes.map((item) => item.value)).size).toBe(
+      customerActivityTypes.length,
+    );
+  });
+  it('地区与资料来源显示为可读文字', () => {
+    expect(
+      customerRegion({ countryName: '美国', country: 'US', city: 'LA' }),
+    ).toBe('美国 / LA');
+    expect(customerRegion({ country: 'US' })).toBe('US');
+    expect(customerRegion({})).toBe('');
+    expect(customerSourceLabel('JINZHI')).toBe('金智导入');
+    expect(customerSourceLabel('OTHER')).toBe('OTHER');
+    expect(customerSourceLabel()).toBe('—');
   });
 });
