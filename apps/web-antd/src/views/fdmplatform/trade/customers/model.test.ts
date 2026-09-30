@@ -4,12 +4,17 @@ import {
   countryMatches,
   countrySelectOptions,
   customerActivityTypes,
+  customerCsv,
   customerForm,
   customerMissingFields,
   customerRegion,
   customerSourceLabel,
   customerSourceOptions,
   mergeOkkiCustomers,
+  moneyShort,
+  recentTrend,
+  signedAgo,
+  sparkBars,
 } from './model';
 
 describe('oKKI customer preview and local maintenance', () => {
@@ -26,9 +31,10 @@ describe('oKKI customer preview and local maintenance', () => {
   it('flags contact and delivery gaps without demanding both email and phone', () => {
     expect(
       customerMissingFields({ email: 'buyer@example.com', address: '   ' }),
-    ).toEqual(['客户来源', '公司名称', '联系人', '详细地址']);
+    ).toEqual(['国家 / 地区', '客户来源', '公司名称', '联系人', '详细地址']);
     expect(
       customerMissingFields({
+        country: 'PL',
         phone: '+48 123',
         customerSource: '展会',
         companyName: 'Buyer Ltd',
@@ -112,5 +118,100 @@ describe('客户档案', () => {
     expect(customerSourceLabel('JINZHI')).toBe('金智导入');
     expect(customerSourceLabel('OTHER')).toBe('OTHER');
     expect(customerSourceLabel()).toBe('—');
+  });
+});
+
+describe('客户经营统计展示', () => {
+  it('金额满一万显示为万，有币种时带币种，空值显示破折号', () => {
+    expect(moneyShort(54_191_936)).toBe('5,419.2 万');
+    expect(moneyShort('80130', 'CNY')).toBe('CNY 8.0 万');
+    expect(moneyShort(3540.456)).toBe('3,540.46');
+    expect(moneyShort(0)).toBe('0');
+    expect(moneyShort(null)).toBe('—');
+    expect(moneyShort('abc')).toBe('—');
+  });
+  it('距上次签约的时间用天、月、年描述', () => {
+    expect(signedAgo(0)).toBe('今天签约');
+    expect(signedAgo(24)).toBe('24 天前签约');
+    expect(signedAgo(112)).toBe('3 个月前签约');
+    expect(signedAgo(698)).toBe('1 年 11 个月前签约');
+    expect(signedAgo(365)).toBe('1 年前签约');
+    expect(signedAgo(null)).toBe('暂无合同');
+  });
+  it('近 12 个月与之前 12 个月比较，区分新客户与回流客户', () => {
+    const base = {
+      contractCount: 3,
+      tier: 'ACTIVE' as const,
+      newThisYear: false,
+      newRecent90: false,
+    };
+    expect(
+      recentTrend({ ...base, recent12Amount: 150, previous12Amount: 100 }),
+    ).toEqual({ text: '较上年 ▲50%', tone: 'up' });
+    expect(
+      recentTrend({ ...base, recent12Amount: 52, previous12Amount: 100 }),
+    ).toEqual({ text: '较上年 ▼48%', tone: 'down' });
+    expect(
+      recentTrend({ ...base, recent12Amount: 0, previous12Amount: 100 }).text,
+    ).toBe('近 12 个月无签约');
+    expect(
+      recentTrend(
+        {
+          ...base,
+          firstSignedDate: '2026-08-21',
+          recent12Amount: 10,
+          previous12Amount: 0,
+        },
+        '2025-10',
+      ).text,
+    ).toBe('首单在近 12 个月');
+    expect(
+      recentTrend(
+        {
+          ...base,
+          firstSignedDate: '2020-04-24',
+          recent12Amount: 10,
+          previous12Amount: 0,
+        },
+        '2025-10',
+      ).text,
+    ).toBe('上年同期无签约');
+    expect(recentTrend({ ...base, contractCount: 0 }).text).toBe('暂无合同');
+  });
+  it('迷你柱按本客户最大月份等比，空月份画成细线', () => {
+    const bars = sparkBars([0, 50, 100], ['2026-07', '2026-08', '2026-09']);
+    expect(bars.map((bar) => bar.height)).toEqual([2, 12, 24]);
+    expect(bars[0]).toMatchObject({ empty: true, month: '2026-07' });
+    expect(sparkBars([1, 1000])[0]?.height).toBe(3);
+  });
+  it('导出 CSV 带 BOM，转义逗号与引号并防止公式注入', () => {
+    const csv = customerCsv([
+      {
+        id: '1',
+        type: 'CUSTOMER',
+        companyId: 0,
+        code: 'JZ-C-1',
+        name: 'Acme, "Ltd"',
+        sourceSystem: 'JINZHI',
+        active: true,
+        version: 1,
+        contactName: '=cmd',
+        stats: {
+          contractCount: 2,
+          tier: 'SLEEP',
+          newThisYear: false,
+          newRecent90: false,
+          contractAmount: 100,
+          receivable: 5,
+          receivableSource: 'JINZHI',
+        },
+      },
+    ]);
+    expect(csv.startsWith('\uFEFF客户编号,客户名称')).toBe(true);
+    const row = csv.split('\r\n')[1];
+    expect(row).toContain('"Acme, ""Ltd"""');
+    expect(row).toContain(",'=cmd,");
+    expect(row).toContain(',沉睡,2,');
+    expect(row).toContain(',未注明币种,100,');
   });
 });

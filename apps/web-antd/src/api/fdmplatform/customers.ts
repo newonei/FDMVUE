@@ -26,6 +26,76 @@ export interface Customer extends MasterRecord {
   phone?: string;
   lastSyncedAt?: string;
   sourceUpdatedAt?: string;
+  /** 列表带 withStats 时附带；无共用范围的账号没有 */
+  stats?: CustomerStats;
+}
+/** 按最近一次签约分层：≤90 天活跃、91–365 天需跟进、超过 1 年沉睡、没有合同未成交 */
+export type CustomerTier = 'ACTIVE' | 'FOLLOW' | 'NONE' | 'SLEEP';
+export type CustomerListTier = 'NEW' | 'RECEIVABLE' | CustomerTier;
+export type CustomerSort =
+  | 'CONTRACT_AMOUNT'
+  | 'LAST_SIGNED'
+  | 'RECEIVABLE'
+  | 'RECENT_12';
+export interface CustomerCurrencyAmounts {
+  /** 金智迁入合同没有币种，为空 */
+  currency?: null | string;
+  contractAmount: Decimal;
+  recent12Amount: Decimal;
+  receivable: Decimal;
+}
+/** 金额取合同最多的币种；其余币种在 otherCurrencies，不跨币种相加 */
+export interface CustomerStats extends Partial<CustomerCurrencyAmounts> {
+  contractCount: number;
+  firstSignedDate?: null | string;
+  lastSignedDate?: null | string;
+  lastContractId?: null | string;
+  lastContractCode?: null | string;
+  daysSinceLastSigned?: null | number;
+  tier: CustomerTier;
+  newThisYear: boolean;
+  newRecent90: boolean;
+  /** JINZHI 金智汇总的客户未回款额；NATIVE 新系统合同额减回款；MIXED 两者都有 */
+  receivableSource?: 'JINZHI' | 'MIXED' | 'NATIVE' | null;
+  previous12Amount?: Decimal;
+  /** 近 12 个自然月（含本月）每月签约额，与 overview.months 对齐 */
+  monthly?: Decimal[];
+  otherCurrencies?: CustomerCurrencyAmounts[];
+}
+export interface CustomerOverview {
+  total: number;
+  activeCount: number;
+  inactiveCount: number;
+  tiers: Record<CustomerTier, number>;
+  newThisYear: number;
+  newRecent90: number;
+  receivableCustomers: number;
+  receivables: { amount: Decimal; currency?: null | string }[];
+  missingProfile: number;
+  months: string[];
+  activeDays: number;
+  followDays: number;
+  asOf: string;
+}
+export interface CustomerSnapshot {
+  customerId: string;
+  contractCount: number;
+  currency?: null | string;
+  years: { amount: Decimal; year: number }[];
+  recentContracts: {
+    amount?: Decimal | null;
+    code?: null | string;
+    currency?: null | string;
+    id: string;
+    signedDate?: null | string;
+    status?: null | string;
+  }[];
+  products: {
+    name: string;
+    orders: number;
+    quantity: Decimal;
+    unit?: null | string;
+  }[];
 }
 export interface OkkiCustomerSource {
   externalId: string;
@@ -105,12 +175,34 @@ export function pauseOkkiDirectory() {
 }
 export function getCustomers(params: {
   active?: boolean;
+  country?: string;
+  customerSource?: string;
   keyword?: string;
+  missing?: boolean;
+  order?: 'ASC' | 'DESC';
   pageNo: number;
   pageSize: number;
+  sort?: CustomerSort;
   sourceSystem?: string;
+  tier?: CustomerListTier;
+  withStats?: boolean;
 }) {
-  return requestClient.get<PageResult<Customer>>(`${base}/page`, { params });
+  return requestClient.get<PageResult<Customer>>(`${base}/page`, {
+    params,
+    timeout: 60_000,
+  });
+}
+export function getCustomerOverview() {
+  /** 无共用范围的账号返回 null */
+  return requestClient.get<CustomerOverview | null>(`${base}/overview`, {
+    timeout: 60_000,
+  });
+}
+export function getCustomerSnapshot(id: string) {
+  return requestClient.get<CustomerSnapshot>(
+    `${base}/${encodeURIComponent(id)}/snapshot`,
+    { timeout: 60_000 },
+  );
 }
 export function getCustomer(id: string) {
   return requestClient.get<Customer>(`${base}/${encodeURIComponent(id)}`);

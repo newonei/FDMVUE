@@ -26,6 +26,7 @@ import {
 } from '#/api/fdmplatform';
 
 import { errorText } from '../data';
+import { contractAttachmentCategories } from './contract-files';
 
 const props = defineProps<{
   categories: string[];
@@ -45,14 +46,7 @@ const operationError = ref('');
 const uploadKey = ref('');
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
 onBeforeUnmount(() => emit('busy', false));
-const categoryLabels: Record<string, string> = {
-  SPECIFICATION: '产品规格',
-  SALES: '商业合同',
-  PROCUREMENT: '询价采购',
-  RECEIPT: '回款凭证',
-  FINANCE: '发票与成本',
-  STOCK: '库存与物流',
-};
+const categoryLabels = contractAttachmentCategories;
 function chooseFile(event: Event) {
   selectedFile.value = (event.target as HTMLInputElement).files?.[0];
   uploadKey.value = newIdempotencyKey();

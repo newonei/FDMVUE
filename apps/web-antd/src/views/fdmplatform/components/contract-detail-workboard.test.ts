@@ -41,8 +41,10 @@ const reviewState = reactive({
 vi.mock('#/api/fdmplatform', () => ({
   contractAction: mocks.activate,
   newIdempotencyKey: () => 'activation-key',
-  getAttachments: mocks.attachments,
   getContractAudit: vi.fn().mockResolvedValue([]),
+}));
+vi.mock('#/api/fdmplatform/contract-files', () => ({
+  getContractFiles: mocks.attachments,
 }));
 vi.mock('#/api/fdmplatform/contract-progress', () => ({
   getContractRelatedSummary: mocks.summary,
@@ -195,7 +197,7 @@ vi.mock('../documents/RelatedLink.vue', () => ({
 vi.mock('../finance/procurement/components/FinanceDocument.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
-vi.mock('./AttachmentPanel.vue', () => ({
+vi.mock('./ContractFilesPanel.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./ContractReviewPanel.vue', () => ({

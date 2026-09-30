@@ -49,7 +49,12 @@ import {
   customerSourceLabel,
 } from './model';
 
-const props = defineProps<{ customer?: Customer; open: boolean }>();
+const props = defineProps<{
+  customer?: Customer;
+  /** 打开时先显示的单据类型，如从列表「查看全部合同」进入 */
+  initialTab?: CustomerActivityType;
+  open: boolean;
+}>();
 const emit = defineEmits<{
   close: [];
   edit: [customer: Customer];
@@ -114,7 +119,7 @@ watch(
     sequence++;
     if (!props.open || !props.customer) return;
     view.value = undefined;
-    tab.value = 'ALL';
+    tab.value = props.initialTab ?? 'ALL';
     keyword.value = '';
     fromDate.value = '';
     toDate.value = '';

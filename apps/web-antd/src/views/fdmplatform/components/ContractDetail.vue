@@ -6,7 +6,6 @@ import type { MainlineAction } from './contract-mainline';
 import type { WorkboardLaunch } from './contract-workboard';
 
 import type {
-  AttachmentView,
   BusinessRecord,
   Contract,
   Directory,
@@ -14,6 +13,7 @@ import type {
   MasterRecord,
   PageResource,
 } from '#/api/fdmplatform';
+import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 
 import { computed, ref, watch } from 'vue';
 
@@ -33,10 +33,10 @@ import {
 
 import {
   contractAction,
-  getAttachments,
   getContractAudit,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
+import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
@@ -56,7 +56,6 @@ import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import { detailTabFor } from '../workspaces';
-import AttachmentPanel from './AttachmentPanel.vue';
 import {
   contractItemProgress,
   contractRelatedStages,
@@ -64,6 +63,7 @@ import {
 import { workboardDocumentRow } from './contract-workboard';
 import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
+import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
 import RecordTable from './RecordTable.vue';
@@ -145,7 +145,7 @@ const completionOpen = ref(false);
 const reimbursementOpen = ref(false);
 const activating = ref(false);
 let activationKey = newIdempotencyKey();
-const attachments = ref<AttachmentView>();
+const attachments = ref<ContractFileListing>();
 const attachmentError = ref('');
 const attachmentLoading = ref(false);
 const audit = ref<BusinessRecord[]>([]);
@@ -198,7 +198,7 @@ async function loadFiles() {
   attachmentLoading.value = true;
   attachmentError.value = '';
   try {
-    const result = await getAttachments(id);
+    const result = await getContractFiles(id);
     if (id === props.contract?.id) attachments.value = result;
   } catch (error) {
     attachmentError.value = errorText(error);
@@ -590,12 +590,13 @@ async function download(file: { id: string; name: string }) {
             </div>
           </Card>
 </TabPane><TabPane key="attachments" tab="合同附件">
-          <AttachmentPanel
+          <ContractFilesPanel
             :contract-id="contract.id"
-            :view="attachments"
-            :categories="attachments?.uploadCategories ?? []"
+            :listing="attachments"
+            :directory="directory"
             :error="attachmentError"
             :loading="attachmentLoading"
+            uploadable
             @refresh="loadFiles"
             @busy="(value) => (attachmentBusy = value)"
           />

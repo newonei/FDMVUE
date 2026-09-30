@@ -13,6 +13,7 @@ import type {
   DocumentRow,
 } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
+import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 
 import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
 
@@ -29,8 +30,10 @@ import {
 } from 'ant-design-vue';
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
+import { getContractFiles } from '#/api/fdmplatform/contract-files';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
+import ContractFilesPanel from '../components/ContractFilesPanel.vue';
 import { errorText, label, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
@@ -81,6 +84,8 @@ const attachments = ref<AttachmentView>();
 const attachmentError = ref('');
 const filesOpen = ref(false);
 const allContractFiles = ref(false);
+const contractFiles = ref<ContractFileListing>();
+const contractFilesLoading = ref(false);
 const attachmentTarget = computed(() =>
   record.value
     ? documentAttachmentTarget(props.kind, record.value.id)
@@ -320,6 +325,7 @@ watch(
       filesOpen.value = !procurement.value;
       allContractFiles.value = false;
       attachments.value = undefined;
+      contractFiles.value = undefined;
       attachmentError.value = '';
       void load();
     } else {
@@ -338,18 +344,20 @@ async function loadFiles() {
   const recordId = record.value.id;
   const allFiles = allContractFiles.value;
   attachmentError.value = '';
+  const current = () =>
+    props.open &&
+    contract.value?.id === contractId &&
+    record.value?.id === recordId &&
+    allContractFiles.value === allFiles;
   try {
-    const response = await getAttachments(
-      contractId,
-      allFiles ? undefined : attachmentTarget.value,
-    );
-    if (
-      props.open &&
-      contract.value?.id === contractId &&
-      record.value?.id === recordId &&
-      allContractFiles.value === allFiles
-    )
-      attachments.value = response;
+    if (allFiles) {
+      contractFilesLoading.value = true;
+      const response = await getContractFiles(contractId);
+      if (current()) contractFiles.value = response;
+      return;
+    }
+    const response = await getAttachments(contractId, attachmentTarget.value);
+    if (current()) attachments.value = response;
   } catch (error) {
     if (
       props.open &&
@@ -358,6 +366,8 @@ async function loadFiles() {
       allContractFiles.value === allFiles
     )
       attachmentError.value = errorText(error);
+  } finally {
+    if (allFiles) contractFilesLoading.value = false;
   }
 }
 function openAction(action: string) {
@@ -567,7 +577,17 @@ const mainAction = computed(() => {
             {{ allContractFiles ? '返回当前单据附件' : '查看合同全部附件' }}
           </Button>
         </template>
+        <ContractFilesPanel
+          v-if="allContractFiles"
+          :contract-id="contract.id"
+          :listing="contractFiles"
+          :directory="directory"
+          :error="attachmentError"
+          :loading="contractFilesLoading"
+          @refresh="loadFiles"
+        />
         <AttachmentPanel
+          v-else
           :contract-id="contract.id"
           :target="attachmentTarget"
           :view="attachments"
