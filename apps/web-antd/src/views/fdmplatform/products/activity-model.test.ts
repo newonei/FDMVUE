@@ -31,10 +31,22 @@ function record(
 }
 
 describe('product activity navigation and quantity display', () => {
+  it.each(['STOCK_IN', 'STOCK_OUT', 'STOCKTAKE'] as const)(
+    'shows legacy %s without a link after the fulfillment stock page was retired',
+    (type) => {
+      expect(
+        activityTarget(
+          record({
+            type,
+            contractId: null,
+            standaloneId: 'native/a',
+            recordType: type,
+          }),
+        ),
+      ).toBeUndefined();
+    },
+  );
   it.each([
-    'STOCK_IN',
-    'STOCK_OUT',
-    'STOCKTAKE',
     'PURCHASE_INVOICE',
     'PURCHASE_PAYMENT',
     'RECEIPT',
@@ -89,24 +101,11 @@ describe('product activity navigation and quantity display', () => {
     });
   });
 
-  it('keeps stock events tied to their actual pool, not the entire contract', () => {
-    const target = activityTarget(
-      record({ type: 'STOCK_EVENT', poolId: 'pool/a', eventId: 'event:b' }),
-    );
-    expect(target).toEqual({
-      type: 'stock',
-      poolId: 'pool/a',
-      eventId: 'event:b',
-    });
-    expect(navigationRoute(target!)).toEqual({
-      path: '/gongchang/platform-stock',
-      query: { poolId: 'pool/a', eventId: 'event:b' },
-    });
+  it('no longer links legacy stock events after the fulfillment stock page was retired', () => {
     expect(
-      activityTarget(record({ type: 'STOCK_EVENT', eventId: 'event:b' })),
-    ).toBeUndefined();
-    expect(
-      activityTarget(record({ type: 'PURCHASE_ORDER', contractId: null })),
+      activityTarget(
+        record({ type: 'STOCK_EVENT', poolId: 'pool/a', eventId: 'event:b' }),
+      ),
     ).toBeUndefined();
   });
 

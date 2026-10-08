@@ -16,6 +16,7 @@ import type {
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 
 import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import {
   Alert,
@@ -122,8 +123,6 @@ const quickDocuments: { action: string; kind: DocumentKind; title: string }[] =
   [
     { kind: 'requests', action: 'CREATE_REQUEST', title: '新建采购申请' },
     { kind: 'receipts', action: 'CREATE_RECEIPT', title: '登记回款' },
-    { kind: 'shipments', action: 'STOCK_RESERVE', title: '预留库存' },
-    { kind: 'shipments', action: 'STOCK_SHIP', title: '登记发货' },
     { kind: 'invoices', action: 'CREATE_INVOICE', title: '开票办理' },
   ];
 function quickActionReason(action: string) {
@@ -329,6 +328,7 @@ async function activateContract() {
     activating.value = false;
   }
 }
+const router = useRouter();
 function runNext(action: MainlineAction) {
   if (!props.contract || props.loading || childOpen.value) return;
   switch (action.type) {
@@ -354,6 +354,10 @@ function runNext(action: MainlineAction) {
     }
     case 'quick': {
       openQuickDocument({ kind: action.kind, action: action.action });
+      break;
+    }
+    case 'route': {
+      void router.push({ path: action.path, query: action.query });
       break;
     }
   }

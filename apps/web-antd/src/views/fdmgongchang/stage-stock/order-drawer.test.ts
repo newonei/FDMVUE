@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn(),
   create: vi.fn(),
   getOrder: vi.fn(),
+  makeTasks: vi.fn(),
   page: vi.fn(),
   preview: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   completeOrder: mocks.complete,
   createOrder: mocks.create,
+  getMakeTasks: mocks.makeTasks,
   getOrder: mocks.getOrder,
   getStockPage: mocks.page,
   previewItemCodes: mocks.preview,
@@ -151,7 +153,10 @@ function clickButton(text: string) {
 describe('order drawer', () => {
   let host: HTMLDivElement;
   let unmount: () => void;
-  const state = reactive({ open: false });
+  const state = reactive<{
+    open: boolean;
+    task?: { assignmentId: string; contractId: string };
+  }>({ open: false });
   const saved = vi.fn();
 
   beforeEach(() => {
@@ -167,6 +172,7 @@ describe('order drawer', () => {
       rows.map((_, i) => `CODE-${i}`),
     );
     mocks.create.mockResolvedValue(9);
+    mocks.makeTasks.mockResolvedValue([]);
     host = document.createElement('div');
     document.body.append(host);
     const app = createApp(
@@ -174,6 +180,7 @@ describe('order drawer', () => {
         setup: () => () =>
           h(OrderDrawer, {
             initialStage: 'BOARD',
+            initialTask: state.task,
             mode: 'create',
             onSaved: saved,
             'onUpdate:open': (v: boolean) => (state.open = v),
@@ -191,6 +198,7 @@ describe('order drawer', () => {
     host.remove();
     document.body.innerHTML = '';
     state.open = false;
+    state.task = undefined;
     vi.clearAllMocks();
     vi.useRealTimers();
   });
@@ -311,5 +319,45 @@ describe('order drawer', () => {
       expect.stringContaining('进入车间在制'),
       'BOARD',
     );
+  });
+
+  it('links a ready make task from the trade list and submits its contract and assignment', async () => {
+    mocks.makeTasks.mockResolvedValue([
+      {
+        approvedQuantity: 100,
+        assignmentId: 'a1',
+        assignmentQuantity: 100,
+        completedQuantity: 0,
+        contractCode: 'HT-20261008-001',
+        contractId: 'c1',
+        contractItemId: 'i1',
+        customerName: '美国客户',
+        inProgressOrderCount: 0,
+        itemQuantity: 100,
+        linkedOrderCount: 0,
+        productName: '紫灰双色瑜伽垫',
+        ready: true,
+        shippedQuantity: 0,
+        unit: '张',
+      },
+    ]);
+    state.task = { assignmentId: 'a1', contractId: 'c1' };
+    await nextTick();
+    state.open = true;
+    await flush();
+    expect(document.body.textContent).toContain('HT-20261008-001');
+    typeInto('order-take-1', '10');
+    await flush();
+    [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+      .find((r) => r.value === 'false')!
+      .click();
+    await flush();
+    clickButton('提交领料');
+    await flush();
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({
+      assignmentId: 'a1',
+      contractId: 'c1',
+      finish: false,
+    });
   });
 });

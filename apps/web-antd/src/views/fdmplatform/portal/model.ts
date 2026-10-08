@@ -52,7 +52,6 @@ const TASKS = '/fdmprocurement/platform-tasks';
 const ORDERS = '/fdmprocurement/platform-orders';
 const RECEIPTS = '/caiwu/platform-receipts';
 const PAYMENTS = '/caiwu/platform-procurement-requests';
-const STOCK = '/gongchang/platform-stock';
 
 export function contractLink(contractId: string): PortalLink {
   return { path: CONTRACTS, query: { contractId } };
@@ -510,91 +509,6 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
             title: '采购单',
             description: '采购单付款进度',
             link: { path: ORDERS },
-          },
-        ],
-      },
-    ],
-  },
-  stock: {
-    department: 'stock',
-    name: '仓库门户',
-    dataTitle: '部门数据',
-    primary: { label: '打开履约库存', link: { path: STOCK } },
-    todos: [
-      {
-        key: 'ship',
-        label: '待安排发货',
-        empty: '没有已备货待发的合同',
-        hot: true,
-        target: contractOr({ path: SHIPMENTS }),
-      },
-      {
-        key: 'arrival',
-        label: '待到货',
-        empty: '没有在途的采购单',
-        target: () => ({
-          path: ORDERS,
-          query: { view: 'orders', status: 'ORDERED' },
-        }),
-      },
-      {
-        key: 'stocktake',
-        label: '盘点待补齐',
-        empty: '没有待补齐的盘点',
-        target: () => ({ path: STOCK, query: { inventoryType: 'stocktakes' } }),
-      },
-      {
-        key: 'history',
-        label: '历史出入库待补齐',
-        empty: '没有待补齐的出入库',
-        target: () => ({ path: STOCK, query: { inventoryType: 'stock-ins' } }),
-      },
-    ],
-    listTitle: '最近发货与退货',
-    listMore: { path: SHIPMENTS },
-    listEmpty: '还没有发货或退货记录，登记发货后会显示在这里。',
-    metrics: [
-      {
-        label: '库存条目',
-        value: count('stockEntries', '条', () => '含外部系统库存'),
-      },
-      {
-        label: '本月到货',
-        value: count('arrivalsThisMonth', '批', () => '按到货登记日期'),
-      },
-      {
-        label: '本月发货',
-        value: count('shipmentsThisMonth', '批', () => '按实际发货日期'),
-      },
-      {
-        label: '待发货合同',
-        value: count('shippable', '份', () => '已备货未发齐'),
-      },
-    ],
-    trendLabel: '近 6 个月发货批次',
-    functions: [
-      {
-        group: '日常办理',
-        items: [
-          {
-            title: '履约库存',
-            description: '库存 · 入库 · 出库 · 盘点',
-            link: { path: STOCK },
-          },
-          {
-            title: '发货与退货',
-            description: '发货单 · 销售退货单',
-            link: { path: SHIPMENTS },
-          },
-          {
-            title: '到货单',
-            description: '采购到货与异常',
-            link: { path: ORDERS, query: { view: 'arrivals' } },
-          },
-          {
-            title: '合同履约主数据',
-            description: '仓库与货主',
-            link: { path: '/fdmbase/platform-master-data' },
           },
         ],
       },

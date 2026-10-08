@@ -19,7 +19,6 @@ export type RelatedTarget =
     }
   | { contractId: string; documentId: string; type: 'customs' }
   | { contractId: string; type: 'contract' }
-  | { eventId?: string; poolId: string; type: 'stock' }
   | { id: string; type: 'customer' | 'product' | 'supplier' }
   | { id: string; type: 'procurementFinance' }
   | { kind: DocumentKind; standaloneId: string; type: 'businessDocument' }
@@ -70,18 +69,10 @@ const nativeRoutes: Record<
     query: { invoiceType: 'PURCHASE' },
   },
   PURCHASE_PAYMENT: { path: '/caiwu/platform-procurement-payments' },
-  STOCK_IN: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stock-ins' },
-  },
-  STOCK_OUT: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stock-outs' },
-  },
-  STOCKTAKE: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stocktakes' },
-  },
+};
+const fulfillmentMethodLabels: Record<string, string> = {
+  BUY: '外采',
+  MAKE: '自产',
 };
 export function businessRecordTarget(
   recordType: unknown,
@@ -112,15 +103,6 @@ export function standaloneLocation(
   if (id && query.documentId !== undefined)
     throw new Error('单据链接包含冲突的定位，请从单据列表重新打开');
   return id;
-}
-export function stockTarget(
-  poolId: unknown,
-  eventId?: unknown,
-): RelatedTarget | undefined {
-  const pool = referenceId(poolId);
-  const event = referenceId(eventId);
-  if (!pool || (eventId !== undefined && !event)) return undefined;
-  return { type: 'stock', poolId: pool, ...(event ? { eventId: event } : {}) };
 }
 export function navigationRoute(target: RelatedTarget): {
   path: string;
@@ -156,14 +138,6 @@ export function navigationRoute(target: RelatedTarget): {
         contractId: target.contractId,
         documentId: target.documentId,
         ...(target.kind === 'tasks' ? { queue: 'tasks' } : {}),
-      },
-    };
-  if (target.type === 'stock')
-    return {
-      path: '/gongchang/platform-stock',
-      query: {
-        poolId: target.poolId,
-        ...(target.eventId ? { eventId: target.eventId } : {}),
       },
     };
   if (target.type === 'customs')
@@ -267,7 +241,7 @@ export function relatedDocumentLinks(
       'tasks',
       id,
       current
-        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '采购任务'} · ${current.method === 'BUY' ? '外采' : current.method === 'MAKE' ? '自产' : '库存'} ${current.quantity}`
+        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '采购任务'} · ${fulfillmentMethodLabels[String(current.method)] ?? '库存'} ${current.quantity}`
         : undefined,
     );
     if (current) {

@@ -41,6 +41,7 @@ const typeColor: Record<string, string> = {
   COMPLETE: 'green',
   ISSUE: 'red',
   OPENING: 'blue',
+  SHIP: 'purple',
   RAW_RECEIPT: 'green',
   STOCKTAKE: 'default',
 };

@@ -471,10 +471,7 @@ describe('contractDetail workboard integration', () => {
     expect(mocks.reviewSubmit).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['登记回款', 'receipts', 'CREATE_RECEIPT'],
-    ['预留库存', 'shipments', 'STOCK_RESERVE'],
-  ])(
+  it.each([['登记回款', 'receipts', 'CREATE_RECEIPT']])(
     'opens %s directly as a contract-locked action and keeps the order when cancelled',
     async (title, kind, action) => {
       const { host, close } = await mountDetail();
@@ -608,7 +605,7 @@ describe('contractDetail workboard integration', () => {
     props.contract = contract('contract-3');
     await nextTick();
     expect(host.querySelector<HTMLElement>('[data-list]')).toBeNull();
-    button(host, '预留库存').click();
+    button(host, '登记回款').click();
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-action]')?.dataset.contract,

@@ -124,6 +124,13 @@ const wipOrders = computed(() =>
           </button>
         </li>
       </template>
+      <li
+        class="flex min-h-6 items-center gap-2 pl-[13px] text-[11px] text-muted-foreground"
+        aria-hidden="true"
+      >
+        <span class="h-6 w-0.5 shrink-0 rounded bg-border"></span>
+        <span>外贸出货</span>
+      </li>
     </ol>
 
     <!-- 窄屏：方块网格 -->

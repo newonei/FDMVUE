@@ -3,7 +3,7 @@ import type { ProcurementWorkItem } from './procurement-workbench';
 
 import { requestClient } from '#/api/request';
 
-export type PortalDepartment = 'finance' | 'purchase' | 'stock' | 'trade';
+export type PortalDepartment = 'finance' | 'purchase' | 'trade';
 /** Amounts per currency; currencies are never added together. */
 export type CurrencyAmounts = Record<string, number | string>;
 export interface PortalTodo {

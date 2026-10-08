@@ -263,8 +263,12 @@ describe('contract main line', () => {
       ],
     });
     expect(next(stocked)).toMatchObject({
-      button: '办理发货',
-      action: { type: 'documents', kind: 'shipments' },
+      button: '去工序库存',
+      action: {
+        type: 'route',
+        path: '/gongchang/stage-stock',
+        query: { tab: 'trade' },
+      },
     });
     const shipped = {
       ...stocked,

@@ -335,6 +335,12 @@ const statCards = computed(() =>
                 残次 {{ formatQty(record.defectQuantity) }} ·
                 {{ formatRate(defectRate(record.goodQuantity, record.defectQuantity)) }}
               </span>
+              <span
+                v-if="Number(record.productionWriteback ?? 0) > 0"
+                class="whitespace-nowrap text-xs text-primary"
+              >
+                回写合同 {{ formatQty(record.productionWriteback) }}
+              </span>
             </div>
             <span v-else class="text-xs text-muted-foreground">未报完工</span>
           </template>

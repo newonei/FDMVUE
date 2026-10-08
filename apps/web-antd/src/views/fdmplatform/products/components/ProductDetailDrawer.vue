@@ -666,72 +666,6 @@ function refresh() {
             </Button>
           </div>
         </Card>
-        <Card title="产品库存" size="small">
-          <p class="activity-muted">
-            原记录库存量与平台可用量分别显示；外部主账库存核实盘点并接管后，才可用于新业务扣减。
-          </p>
-
-          <Empty
-            v-if="!view?.inventoryPools.length"
-            description="尚未找到该产品的库存；原出入库与盘点记录可从上方对应业务类型查询。"
-            :image="Empty.PRESENTED_IMAGE_SIMPLE"
-          />
-          <div
-            v-for="pool in view?.inventoryPools ?? []"
-            :key="pool.id"
-            class="stock-summary"
-          >
-            <RelatedLink :target="{ type: 'stock', poolId: pool.id }">
-              {{
-                pool.warehouseName ||
-                (pool.warehouseId ? `仓库 ${pool.warehouseId}` : '查看库存')
-              }}
-            </RelatedLink>
-            <div class="activity-muted">
-              规格版本 {{ pool.specVersion ?? '—' }} ·
-              {{
-                pool.stockOwnerName ||
-                (pool.stockOwnerId ? `货主 ${pool.stockOwnerId}` : '货主未记录')
-              }}
-            </div>
-            <Descriptions size="small" :column="1">
-              <Descriptions.Item
-                v-if="pool.sourceOnHandQuantity != null"
-                label="原记录现存量"
-              >
-                {{ quantityText(pool.sourceOnHandQuantity, pool.sourceUnit) }}
-              </Descriptions.Item>
-              <Descriptions.Item
-                v-if="pool.sourceAvailableQuantity != null"
-                label="原记录可用量"
-              >
-                {{
-                  quantityText(pool.sourceAvailableQuantity, pool.sourceUnit)
-                }}
-              </Descriptions.Item>
-              <Descriptions.Item label="现存量">
-                {{ quantityText(pool.onHand, pool.unit) }}
-              </Descriptions.Item>
-              <Descriptions.Item label="已预留">
-                {{ quantityText(pool.reserved, pool.unit) }}
-              </Descriptions.Item>
-              <Descriptions.Item label="可用量">
-                {{
-                  pool.authority === 'EXTERNAL'
-                    ? '待盘点接管'
-                    : quantityText(pool.available, pool.unit)
-                }}
-              </Descriptions.Item>
-            </Descriptions>
-          </div>
-          <Button
-            v-if="view?.inventoryPools.length"
-            type="link"
-            @click="showType('STOCK_EVENT')"
-          >
-            查看本产品库存流水
-          </Button>
-        </Card>
         <Card v-if="view?.notes.length" title="统计口径" size="small">
           <ul class="statistics-notes">
             <li v-for="note in view.notes" :key="note">{{ note }}</li>
@@ -893,12 +827,6 @@ function refresh() {
 .summary-unit {
   width: 100%;
   margin-bottom: 6px;
-}
-
-.stock-summary + .stock-summary {
-  padding-top: 12px;
-  margin-top: 12px;
-  border-top: 1px solid #f0f0f0;
 }
 
 .statistics-notes {

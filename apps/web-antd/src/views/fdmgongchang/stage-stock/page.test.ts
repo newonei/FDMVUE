@@ -8,6 +8,10 @@ import StageStockPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
   defect: vi.fn(),
+  makeTasks: vi.fn(),
+  route: { query: {} as Record<string, string> },
+  shipmentPage: vi.fn(),
+  shippable: vi.fn(),
   options: vi.fn(),
   orderPage: vi.fn(),
   setting: vi.fn(),
@@ -18,6 +22,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   completeOrder: vi.fn(),
   createOrder: vi.fn(),
+  createShipment: vi.fn(),
+  getMakeTasks: mocks.makeTasks,
+  getShipmentPage: mocks.shipmentPage,
+  getShippableItems: mocks.shippable,
   getDefectStats: mocks.defect,
   getOrder: vi.fn(),
   getOrderPage: mocks.orderPage,
@@ -31,6 +39,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   saveStageStockSetting: vi.fn(),
   stocktake: vi.fn(),
 }));
+vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({ setup: (_, ctx) => () => h('main', ctx.slots.default?.()) }),
@@ -131,6 +140,29 @@ describe('stage stock page', () => {
     });
     mocks.defect.mockResolvedValue([{ defectQuantity: 3, goodQuantity: 147, orderCount: 1, process: 'EMBOSS' }]);
     mocks.txnPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.makeTasks.mockResolvedValue([
+      {
+        approvedQuantity: 100,
+        assignmentId: 'a1',
+        assignmentQuantity: 100,
+        color: '丁香紫/灰',
+        completedQuantity: 30,
+        contractCode: 'HT-20261008-001',
+        contractId: 'c1',
+        contractItemId: 'i1',
+        customerName: '美国客户',
+        inProgressOrderCount: 1,
+        itemQuantity: 100,
+        linkedOrderCount: 2,
+        productName: '紫灰双色瑜伽垫',
+        ready: true,
+        requiredDate: [2026, 11, 1],
+        shippedQuantity: 0,
+        unit: '张',
+      },
+    ]);
+    mocks.shippable.mockResolvedValue([]);
+    mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
     mocks.setting.mockResolvedValue({
       processes: options.processes.map((p) => ({ process: p.code, sources: p.sources })),
       stages: options.stages.map((s) => ({ defaultLocation: s.defaultLocation, stage: s.code })),
@@ -157,13 +189,16 @@ describe('stage stock page', () => {
     expect(text).toContain('生产链');
     expect(text).toContain('1 在制');
 
-    for (const tab of ['工序单', '库存流水', '基础设置']) {
+    for (const tab of ['工序单', '外贸订单', '库存流水', '基础设置']) {
       const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));
       (el?.querySelector('.ant-tabs-tab-btn') as HTMLElement | null)?.click();
       await flush();
     }
     const after = document.body.textContent ?? '';
     expect(after).toContain('GX20261007-004');
+    expect(after).toContain('HT-20261008-001');
+    expect(after).toContain('2026-11-01');
+    expect(after).toContain('生产中');
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
     expect(errors).toEqual([]);

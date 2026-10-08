@@ -22,6 +22,7 @@ import {
 import {
   completeOrder,
   createOrder,
+  getMakeTasks,
   getOrder,
   getStockPage,
   previewItemCodes,
@@ -29,6 +30,7 @@ import {
 
 import {
   attrSummary,
+  contractProductText,
   defectRate,
   deriveOutputs,
   EDITABLE_FIELDS,
@@ -36,6 +38,7 @@ import {
   formatRate,
   lineBatch,
   makeLabels,
+  makeTaskRemaining,
   nextKey,
   normalizeForStage,
   sumQty,
@@ -51,6 +54,8 @@ import AttrFields from './attr-fields.vue';
  */
 const props = defineProps<{
   initialStage?: string;
+  /** 从「外贸订单 → 安排生产」进入时预选的自制任务。 */
+  initialTask?: { assignmentId: string; contractId: string };
   mode: 'complete' | 'create';
   options: Api.Options;
   orderId?: number;
@@ -71,8 +76,33 @@ const picked = ref<Record<number, Api.Stock>>({});
 const outputs = ref<OutputDraft[]>([]);
 const touched = ref(false);
 const codes = ref<Array<null | string>>([]);
+/** 外贸合同的自制任务，工序单从中选择关联订单。 */
+const makeTasks = ref<Api.MakeTask[]>([]);
+const makeTasksLoading = ref(false);
+const linkedAssignmentId = ref<string>();
+const linkedTask = computed(() =>
+  makeTasks.value.find((t) => t.assignmentId === linkedAssignmentId.value),
+);
+const makeTaskOptions = computed(() =>
+  makeTasks.value
+    .filter((t) => makeTaskRemaining(t) > 0 || t.assignmentId === linkedAssignmentId.value)
+    .map((t) => ({
+      disabled: !t.ready,
+      label: `${t.contractCode} · ${t.customerName ?? ''} · ${contractProductText(t)} · 待产 ${formatQty(makeTaskRemaining(t))}${t.unit ?? ''}${t.ready ? '' : '（采购方案未生效）'}`,
+      value: t.assignmentId,
+    })),
+);
+async function loadMakeTasks() {
+  makeTasksLoading.value = true;
+  try {
+    makeTasks.value = await getMakeTasks();
+  } catch {
+    makeTasks.value = [];
+  } finally {
+    makeTasksLoading.value = false;
+  }
+}
 const meta = reactive({
-  contractCode: '',
   operatorName: '',
   remark: '',
   team: '',
@@ -172,7 +202,6 @@ watch(open, async (value) => {
   resetPicking();
   finish.value = true;
   Object.assign(meta, {
-    contractCode: '',
     operatorName: '',
     remark: '',
     team: '',
@@ -194,6 +223,8 @@ watch(open, async (value) => {
     return;
   }
   order.value = undefined;
+  linkedAssignmentId.value = props.initialTask?.assignmentId;
+  void loadMakeTasks();
   const code = defaultProcessFor(props.initialStage);
   processCode.value = code;
   const option = props.options.processes.find((p) => p.code === code);
@@ -414,7 +445,8 @@ async function submit() {
     const out = outputStageOption.value;
     if (props.mode === 'create') {
       await createOrder({
-        contractCode: meta.contractCode.trim() || undefined,
+        assignmentId: linkedTask.value?.assignmentId,
+        contractId: linkedTask.value?.contractId,
         finish: finish.value,
         inputs: inputs.value.map((l) => ({
           laminationSide: processCode.value === 'LAMINATE' ? l.side : undefined,
@@ -809,15 +841,26 @@ watch(processCode, warnNoPatterns);
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label
               for="order-contract"
-              class="flex flex-col gap-1 text-xs text-muted-foreground"
+              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
             >
-              关联订单号（选填）
-              <Input
+              关联外贸订单（选填）
+              <Select
                 id="order-contract"
-                v-model:value="meta.contractCode"
-                :maxlength="64"
-                placeholder="例如 HT-20261002-003"
+                v-model:value="linkedAssignmentId"
+                :loading="makeTasksLoading"
+                :not-found-content="makeTasksLoading ? '加载中…' : '外贸合同里暂无分派给工厂的自制任务'"
+                :options="makeTaskOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="选择外贸合同的自制任务"
+                show-search
               />
+              <span v-if="linkedTask && outputStage === 'PACKED'" class="text-primary">
+                包装完工后，良品数量会自动回写到合同 {{ linkedTask.contractCode }} 的生产进度。
+              </span>
+              <span v-else-if="linkedTask">
+                包装完工时才回写合同进度，这道工序只做关联记录。
+              </span>
             </label>
             <label
               for="order-team"

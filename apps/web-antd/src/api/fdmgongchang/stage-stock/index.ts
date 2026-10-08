@@ -157,7 +157,10 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface OrderCreateReq {
+    /** 关联外贸自制任务：contractId 与 assignmentId 一起填。 */
+    assignmentId?: string;
     contractCode?: string;
+    contractId?: string;
     finish: boolean;
     inputs: OrderInput[];
     operatorName?: string;
@@ -188,8 +191,11 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface Order {
+    assignmentId?: null | string;
     completedAt?: null | number | string;
     contractCode?: null | string;
+    contractId?: null | string;
+    contractItemId?: null | string;
     defectQuantity: Decimal;
     goodQuantity: Decimal;
     id: number;
@@ -201,6 +207,8 @@ export namespace FdmgongchangStageStockApi {
     outputs?: OrderLine[];
     outputStage: string;
     process: string;
+    /** 包装完工回写到合同的数量。 */
+    productionWriteback?: Decimal | null;
     remark?: null | string;
     sourceStage: string;
     status: 'COMPLETED' | 'IN_PROGRESS';
@@ -223,6 +231,92 @@ export namespace FdmgongchangStageStockApi {
   export interface Setting {
     processes: Array<{ process: string; sources: string[] }>;
     stages: Array<{ defaultLocation: string; stage: string }>;
+  }
+
+  /** 后端 LocalDate 可能是 "2026-10-08" 或 [2026, 10, 8]。 */
+  export type DateValue = null | number[] | string;
+
+  /** 外贸合同的自制任务（待生产订单）。ready=false 表示采购方案未生效。 */
+  export interface MakeTask {
+    approvedQuantity: Decimal;
+    assignmentId: string;
+    assignmentQuantity: Decimal;
+    color?: null | string;
+    completedQuantity: Decimal;
+    contractCode: string;
+    contractId: string;
+    contractItemId: string;
+    customerName?: null | string;
+    inProgressOrderCount: number;
+    itemQuantity: Decimal;
+    linkedOrderCount: number;
+    material?: null | string;
+    packaging?: null | string;
+    printing?: null | string;
+    productCode?: null | string;
+    productName?: null | string;
+    ready: boolean;
+    requiredDate?: DateValue;
+    shippedQuantity: Decimal;
+    size?: null | string;
+    specification?: null | string;
+    status?: null | string;
+    unit?: null | string;
+  }
+
+  /** 可从工序库存出货的合同明细（自制或库存履约）。 */
+  export interface ShippableItem {
+    color?: null | string;
+    contractCode: string;
+    contractId: string;
+    contractItemId: string;
+    customerName?: null | string;
+    itemQuantity: Decimal;
+    material?: null | string;
+    method: 'MAKE' | 'STOCK';
+    productCode?: null | string;
+    productName?: null | string;
+    remainingQuantity: Decimal;
+    requiredDate?: DateValue;
+    shippedQuantity: Decimal;
+    size?: null | string;
+    specification?: null | string;
+    unit?: null | string;
+  }
+
+  export interface ShipmentCreateReq {
+    contractId: string;
+    contractItemId: string;
+    lines: Array<{ quantity: Decimal; stockId: number }>;
+    operatorName?: string;
+    remark?: string;
+    shippedDate?: string;
+  }
+
+  export interface Shipment {
+    contractCode?: null | string;
+    contractId: string;
+    contractItemId: string;
+    customerName?: null | string;
+    id: number;
+    lines?: Array<{
+      batchNo: string;
+      itemCode: string;
+      location: string;
+      quantity: Decimal;
+      stockId: number;
+    }>;
+    operatorName?: null | string;
+    productName?: null | string;
+    quantity: Decimal;
+    remark?: null | string;
+    shipmentNo: string;
+    shippedAt?: number | string;
+    shippedDate?: DateValue;
+  }
+
+  export interface ShipmentPageReq extends PageParam {
+    keyword?: string;
   }
 
   export interface CodePreviewRow {
@@ -313,4 +407,31 @@ export function getStageStockSetting() {
 
 export function saveStageStockSetting(data: FdmgongchangStageStockApi.Setting) {
   return requestClient.put<boolean>(`${BASE}/setting`, data);
+}
+
+export function getMakeTasks() {
+  return requestClient.get<FdmgongchangStageStockApi.MakeTask[]>(
+    `${BASE}/trade/make-tasks`,
+  );
+}
+
+export function getShippableItems() {
+  return requestClient.get<FdmgongchangStageStockApi.ShippableItem[]>(
+    `${BASE}/trade/shippable-items`,
+  );
+}
+
+export function createShipment(
+  data: FdmgongchangStageStockApi.ShipmentCreateReq,
+) {
+  return requestClient.post<number>(`${BASE}/shipment/create`, data);
+}
+
+export function getShipmentPage(
+  params: FdmgongchangStageStockApi.ShipmentPageReq,
+) {
+  return requestClient.get<PageResult<FdmgongchangStageStockApi.Shipment>>(
+    `${BASE}/shipment/page`,
+    { params },
+  );
 }

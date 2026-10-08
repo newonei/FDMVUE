@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
@@ -16,8 +17,10 @@ import {
 import OrderDrawer from './modules/order-drawer.vue';
 import OrderPanel from './modules/order-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
+import ShipmentDrawer from './modules/shipment-drawer.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
+import TradePanel from './modules/trade-panel.vue';
 import TxnPanel from './modules/txn-panel.vue';
 
 /**
@@ -34,7 +37,11 @@ const canOperate = computed(() =>
 const options = ref<Api.Options>();
 const summary = ref<Api.Summary>();
 const loadError = ref(false);
-const activeTab = ref<'orders' | 'settings' | 'stock' | 'txns'>('stock');
+type TabKey = 'orders' | 'settings' | 'stock' | 'trade' | 'txns';
+const TAB_KEYS = new Set<TabKey>(['orders', 'settings', 'stock', 'trade', 'txns']);
+const route = useRoute();
+const activeTab = ref<TabKey>('stock');
+const tradePending = ref(0);
 const activeStage = ref('BOARD');
 const refreshKey = ref(0);
 const txnItemCode = ref('');
@@ -43,6 +50,10 @@ const drawerOpen = ref(false);
 const drawerMode = ref<'complete' | 'create'>('create');
 const drawerStage = ref<string>();
 const drawerOrderId = ref<number>();
+const drawerTask = ref<{ assignmentId: string; contractId: string }>();
+
+const shipmentOpen = ref(false);
+const shipmentTarget = ref<{ contractId: string; contractItemId: string }>();
 
 const wipCount = computed(() =>
   (summary.value?.processes ?? []).reduce(
@@ -67,6 +78,16 @@ async function loadAll() {
 
 onMounted(loadAll);
 
+/** 外贸合同主线的「去工序库存」带 ?tab=trade 进来，直接打开外贸订单。 */
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === 'string' && TAB_KEYS.has(tab as TabKey))
+      activeTab.value = tab as TabKey;
+  },
+  { immediate: true },
+);
+
 function selectStage(stage: string) {
   activeStage.value = stage;
   activeTab.value = 'stock';
@@ -76,7 +97,25 @@ function openCreate(stage?: string) {
   drawerMode.value = 'create';
   drawerStage.value = stage ?? activeStage.value;
   drawerOrderId.value = undefined;
+  drawerTask.value = undefined;
   drawerOpen.value = true;
+}
+
+/** 外贸订单「安排生产」：预选自制任务，默认从当前选中的库存段开始。 */
+function openProduce(task: Api.MakeTask) {
+  drawerMode.value = 'create';
+  drawerStage.value = activeStage.value;
+  drawerOrderId.value = undefined;
+  drawerTask.value = {
+    assignmentId: task.assignmentId,
+    contractId: task.contractId,
+  };
+  drawerOpen.value = true;
+}
+
+function openShipment(target?: { contractId: string; contractItemId: string }) {
+  shipmentTarget.value = target;
+  shipmentOpen.value = true;
 }
 
 function openComplete(orderId: number) {
@@ -161,6 +200,7 @@ async function onSettingSaved() {
                 :stage="activeStage"
                 @changed="onChanged"
                 @create="openCreate"
+                @ship="openShipment()"
                 @txn="showTxns"
               />
             </Tabs.TabPane>
@@ -176,6 +216,20 @@ async function onSettingSaved() {
                 :refresh-key="refreshKey"
                 @complete="openComplete"
                 @create="openCreate()"
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane key="trade">
+              <template #tab>
+                外贸订单
+                <span v-if="tradePending > 0" class="ml-1 text-xs text-primary">
+                  {{ tradePending }} 待生产
+                </span>
+              </template>
+              <TradePanel
+                :refresh-key="refreshKey"
+                @pending="(count) => (tradePending = count)"
+                @produce="openProduce"
+                @ship="openShipment"
               />
             </Tabs.TabPane>
             <Tabs.TabPane key="txns" tab="库存流水">
@@ -194,9 +248,17 @@ async function onSettingSaved() {
         <OrderDrawer
           v-model:open="drawerOpen"
           :initial-stage="drawerStage"
+          :initial-task="drawerTask"
           :mode="drawerMode"
           :options="options"
           :order-id="drawerOrderId"
+          @saved="onSaved"
+        />
+        <ShipmentDrawer
+          v-model:open="shipmentOpen"
+          :initial-contract-id="shipmentTarget?.contractId"
+          :initial-item-id="shipmentTarget?.contractItemId"
+          :options="options"
           @saved="onSaved"
         />
       </div>

@@ -29,6 +29,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   changed: [];
   create: [stage: string];
+  ship: [];
   txn: [itemCode: string];
 }>();
 
@@ -41,6 +42,9 @@ const canReceive = computed(() =>
 );
 const canStocktake = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:stocktake']),
+);
+const canShip = computed(() =>
+  hasAccessByCodes(['fdmgongchang:stage-stock:ship']),
 );
 
 const keyword = ref('');
@@ -151,7 +155,7 @@ function onSaved() {
           <span class="mx-1">·</span>
           去向
           <b class="font-medium text-foreground">{{
-            outgoing.map((p) => p.label).join('、') || '出货'
+            outgoing.map((p) => p.label).join('、') || '外贸出货'
           }}</b>
         </span>
       </div>
@@ -176,6 +180,14 @@ function onSaved() {
           @click="emit('create', stage)"
         >
           从这里领料
+        </Button>
+        <Button
+          v-if="canShip && stage === 'PACKED'"
+          size="small"
+          type="primary"
+          @click="emit('ship')"
+        >
+          外贸出货
         </Button>
       </div>
     </div>

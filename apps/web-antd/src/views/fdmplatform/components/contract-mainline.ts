@@ -36,6 +36,7 @@ export type MainlineAction =
   | { action: string; kind: DocumentKind; type: 'quick' }
   | { kind: DocumentKind; type: 'documents' }
   | { launch: WorkboardLaunch; type: 'launch' }
+  | { path: string; query?: Record<string, string>; type: 'route' }
   | { type: 'activate' }
   | { type: 'complete' }
   | { type: 'edit' };
@@ -485,16 +486,22 @@ export function contractNextStep(
   if (open('arrival'))
     return {
       title: '等待到货',
-      description: '采购单已下达，到货或完工后由采购部门登记。',
+      description:
+        '外采到货由采购部门登记；自制产品在工厂包装完工后自动回写进度。',
       department: '采购部门',
     };
   if (open('shipment'))
     return {
-      title: '安排发货',
-      description: '先预留库存，再按实际出货分批登记发货。',
+      title: '安排出货',
+      description:
+        '工厂在「工序库存」从已包装成品出货，出货数量自动记到本合同。',
       department: '工厂部门',
-      button: '办理发货',
-      action: { type: 'documents', kind: 'shipments' },
+      button: '去工序库存',
+      action: {
+        type: 'route',
+        path: '/gongchang/stage-stock',
+        query: { tab: 'trade' },
+      },
     };
   if (open('receipt'))
     return quick(contract, 'receipts', 'CREATE_RECEIPT', {
