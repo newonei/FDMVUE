@@ -1,0 +1,205 @@
+<script lang="ts" setup>
+import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
+
+import { computed, onMounted, ref } from 'vue';
+
+import { useAccess } from '@vben/access';
+import { Page } from '@vben/common-ui';
+
+import { Button, message, Result, Spin, Tabs } from 'ant-design-vue';
+
+import {
+  getStageStockOptions,
+  getStageStockSummary,
+} from '#/api/fdmgongchang/stage-stock';
+
+import OrderDrawer from './modules/order-drawer.vue';
+import OrderPanel from './modules/order-panel.vue';
+import SettingPanel from './modules/setting-panel.vue';
+import StageRail from './modules/stage-rail.vue';
+import StockPanel from './modules/stock-panel.vue';
+import TxnPanel from './modules/txn-panel.vue';
+
+/**
+ * 工厂部门 · 工序库存：每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
+ * 宽屏左侧是生产链（竖排），右侧是库存 / 工序单 / 流水 / 设置。
+ */
+defineOptions({ name: 'FdmGongchangStageStock' });
+
+const { hasAccessByCodes } = useAccess();
+const canOperate = computed(() =>
+  hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
+);
+
+const options = ref<Api.Options>();
+const summary = ref<Api.Summary>();
+const loadError = ref(false);
+const activeTab = ref<'orders' | 'settings' | 'stock' | 'txns'>('stock');
+const activeStage = ref('BOARD');
+const refreshKey = ref(0);
+const txnItemCode = ref('');
+
+const drawerOpen = ref(false);
+const drawerMode = ref<'complete' | 'create'>('create');
+const drawerStage = ref<string>();
+const drawerOrderId = ref<number>();
+
+const wipCount = computed(() =>
+  (summary.value?.processes ?? []).reduce(
+    (t, p) => t + (p.inProgressCount ?? 0),
+    0,
+  ),
+);
+
+async function loadSummary() {
+  summary.value = await getStageStockSummary();
+}
+
+async function loadAll() {
+  loadError.value = false;
+  try {
+    const [opts] = await Promise.all([getStageStockOptions(), loadSummary()]);
+    options.value = opts;
+  } catch {
+    loadError.value = true;
+  }
+}
+
+onMounted(loadAll);
+
+function selectStage(stage: string) {
+  activeStage.value = stage;
+  activeTab.value = 'stock';
+}
+
+function openCreate(stage?: string) {
+  drawerMode.value = 'create';
+  drawerStage.value = stage ?? activeStage.value;
+  drawerOrderId.value = undefined;
+  drawerOpen.value = true;
+}
+
+function openComplete(orderId: number) {
+  drawerMode.value = 'complete';
+  drawerOrderId.value = orderId;
+  drawerOpen.value = true;
+}
+
+function showTxns(itemCode: string) {
+  txnItemCode.value = itemCode;
+  activeTab.value = 'txns';
+}
+
+async function onChanged() {
+  refreshKey.value += 1;
+  await loadSummary();
+}
+
+async function onSaved(text: string, stage?: string) {
+  message.success(text);
+  if (stage && activeTab.value === 'stock') activeStage.value = stage;
+  await onChanged();
+}
+
+async function onSettingSaved() {
+  options.value = await getStageStockOptions();
+}
+</script>
+
+<template>
+  <Page>
+    <div class="flex flex-col gap-4">
+      <header class="flex flex-wrap items-end justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="m-0 text-xl font-semibold tracking-tight">工序库存</h1>
+          <p class="m-0 mt-1 text-sm text-muted-foreground">
+            每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
+          </p>
+        </div>
+        <Button
+          v-if="canOperate && options"
+          type="primary"
+          @click="openCreate()"
+        >
+          ＋ 新建工序单
+        </Button>
+      </header>
+
+      <Result v-if="loadError" status="warning" title="工序库存没有加载出来">
+        <template #subTitle>
+          可能是网络问题，或者还没有分配「工序库存」的查看权限。
+        </template>
+        <template #extra>
+          <Button type="primary" @click="loadAll">重新加载</Button>
+        </template>
+      </Result>
+      <div v-else-if="!options" class="flex h-60 items-center justify-center">
+        <Spin />
+      </div>
+
+      <div v-else class="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <aside class="flex flex-col gap-2 xl:sticky xl:top-2 xl:w-60 xl:shrink-0">
+          <StageRail
+            :active="activeTab === 'stock' ? activeStage : undefined"
+            :options="options"
+            :summary="summary"
+            @select="selectStage"
+          />
+          <p class="m-0 px-1 text-xs leading-relaxed text-muted-foreground">
+            每道工序只能向上游库存领料；跳过工序时可以领更早阶段的库存，例如冲裁直接领片材。
+          </p>
+        </aside>
+
+        <section
+          class="min-w-0 flex-1 rounded-lg border border-border bg-card px-4 pb-4"
+        >
+          <Tabs v-model:active-key="activeTab">
+            <Tabs.TabPane key="stock" tab="库存">
+              <StockPanel
+                :options="options"
+                :refresh-key="refreshKey"
+                :stage="activeStage"
+                @changed="onChanged"
+                @create="openCreate"
+                @txn="showTxns"
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane key="orders">
+              <template #tab>
+                工序单
+                <span v-if="wipCount > 0" class="ml-1 text-xs text-warning">
+                  {{ wipCount }} 在制
+                </span>
+              </template>
+              <OrderPanel
+                :options="options"
+                :refresh-key="refreshKey"
+                @complete="openComplete"
+                @create="openCreate()"
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane key="txns" tab="库存流水">
+              <TxnPanel
+                v-model:item-code="txnItemCode"
+                :options="options"
+                :refresh-key="refreshKey"
+              />
+            </Tabs.TabPane>
+            <Tabs.TabPane key="settings" tab="基础设置">
+              <SettingPanel :options="options" @saved="onSettingSaved" />
+            </Tabs.TabPane>
+          </Tabs>
+        </section>
+
+        <OrderDrawer
+          v-model:open="drawerOpen"
+          :initial-stage="drawerStage"
+          :mode="drawerMode"
+          :options="options"
+          :order-id="drawerOrderId"
+          @saved="onSaved"
+        />
+      </div>
+    </div>
+  </Page>
+</template>
