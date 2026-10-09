@@ -7,6 +7,7 @@ import type { AttachmentView, Contract, DocumentRow } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type {
   ProcurementOrderRow,
+  ProcurementOrdersOverview,
   ProcurementOrderView,
 } from '#/api/fdmplatform/procurement';
 
@@ -40,6 +41,7 @@ import {
   exportProcurementOrder,
   getProcurementOrder,
   getProcurementOrders,
+  getProcurementOrdersOverview,
   procurementOrderAction,
   uploadProcurementSigned,
 } from '#/api/fdmplatform/procurement';
@@ -87,6 +89,7 @@ import {
   orderDetailsPayload,
   orderMoney,
   orderPaymentProgress,
+  orderSteps,
   purchaseRowLabels,
 } from './model';
 
@@ -249,6 +252,41 @@ const canReceive = computed(
 const paymentProgress = computed(() =>
   orderPaymentProgress(financeSummary.value),
 );
+/** Migrated 金智 orders have no native lifecycle to walk through. */
+const execution = computed(() =>
+  view.value && !migration.value
+    ? orderSteps(view.value, financeSummary.value)
+    : undefined,
+);
+const nextHints: Record<string, { button: string; text: string }> = {
+  details: {
+    text: '先把工厂联系人、交期和交货地址填好并确认，后面导出合同会带上这些资料。',
+    button: '填写下单资料',
+  },
+  contract: {
+    text: '导出采购合同给工厂盖章，签回后上传到这里，之后才能申请付款。',
+    button: '去导出 / 上传合同',
+  },
+  arrival: {
+    text: '货到后由仓库在工厂部门「工序库存 → 到货入库」登记，这里的到货进度会自动更新。',
+    button: '打开到货入库',
+  },
+  payment: {
+    text: '按合同约定申请付款，财务付款后进度会更新。',
+    button: '申请付款',
+  },
+};
+function goStep(key: string) {
+  if (childOpen.value) return;
+  if (key === 'details') tab.value = 'details';
+  else if (key === 'contract') tab.value = 'contract';
+  else if (key === 'arrival')
+    void router.push({
+      path: '/gongchang/stage-stock',
+      query: { tab: 'receiving' },
+    });
+  else if (key === 'payment') openFinance('REQUEST');
+}
 const selectedIndex = computed(() =>
   records.value.findIndex((row) => row.id === view.value?.id),
 );
@@ -363,8 +401,44 @@ function key(action: string) {
   }
   return id;
 }
+const overview = ref<ProcurementOrdersOverview>();
+let overviewSequence = 0;
+/** Native orders only; refreshed with the list so the cards follow 只看我负责的. */
+async function loadOverview() {
+  const run = ++overviewSequence;
+  try {
+    const result = await getProcurementOrdersOverview(mine.value);
+    if (run === overviewSequence) overview.value = result;
+  } catch {
+    if (run === overviewSequence) overview.value = undefined;
+  }
+}
+function amountLines(amounts?: Record<string, number | string>) {
+  return Object.entries(amounts ?? {})
+    .filter(([, value]) => Number(value) !== 0)
+    .map(([currency, value]) => orderMoney(value, currency));
+}
+const attentionClass: Record<string, string> = {
+  OVERDUE: 'is-overdue',
+  UNSIGNED: 'is-unsigned',
+  ARRIVED_UNPAID: 'is-unpaid',
+};
+const attentionNames: Record<string, string> = {
+  OVERDUE: '超期未到',
+  UNSIGNED: '合同未签回',
+  ARRIVED_UNPAID: '已到货未付',
+};
+function openAttention(row: ProcurementOrdersOverview['attention'][number]) {
+  openRow({ contractId: row.contractId, id: row.orderId } as DocumentRow);
+}
+function showOpen() {
+  status.value = status.value === 'ORDERED' ? undefined : 'ORDERED';
+  page.value = 1;
+  void loadList();
+}
 async function loadList() {
   if (!active.value) return;
+  void loadOverview();
   const run = ++listSequence;
   const params = {
     contractId: contractId.value,
@@ -673,6 +747,76 @@ watch(financeType, (value, previous) => {
         description="列表未刷新成功，已保留上次结果。"
         show-icon
       />
+      <section class="order-kpis" aria-label="采购单概况">
+        <button
+          type="button"
+          class="order-kpi"
+          :class="{ selected: status === 'ORDERED' }"
+          :aria-pressed="status === 'ORDERED'"
+          @click="showOpen"
+        >
+          <span>在途采购单</span>
+          <b>{{ overview ? `${overview.open} 张` : '—' }}</b>
+          <small>{{
+            amountLines(overview?.openAmount)[0] ?? '等待到货入库'
+          }}</small>
+        </button>
+        <div class="order-kpi" :class="{ alert: (overview?.overdue ?? 0) > 0 }">
+          <span>超期未到货</span>
+          <b>{{ overview ? `${overview.overdue} 张` : '—' }}</b>
+          <small>{{
+            overview?.overdue
+              ? `最长超期 ${overview.maxOverdueDays} 天`
+              : '按下单资料交期或报价承诺交期'
+          }}</small>
+        </div>
+        <div class="order-kpi">
+          <span>待签回合同</span>
+          <b>{{ overview ? `${overview.unsigned} 张` : '—' }}</b>
+          <small>签回后才能申请付款</small>
+        </div>
+        <div class="order-kpi">
+          <span>未付款</span>
+          <b>{{
+            amountLines(overview?.unpaidAmount)[0] ?? (overview ? '0' : '—')
+          }}</b>
+          <small>{{
+            amountLines(overview?.arrivedUnpaidAmount)[0]
+              ? `已到货 ${amountLines(overview?.arrivedUnpaidAmount)[0]}`
+              : overview
+                ? `${overview.unpaid} 张有未付金额`
+                : ''
+          }}</small>
+        </div>
+      </section>
+      <section
+        v-if="overview?.attention.length"
+        class="order-attention"
+        aria-label="需要处理的采购单"
+      >
+        <span class="procurement-muted">需要处理</span>
+        <button
+          v-for="row in overview.attention"
+          :key="`${row.reason}:${row.orderId}`"
+          type="button"
+          :class="attentionClass[row.reason]"
+          @click="openAttention(row)"
+        >
+          <b>{{ row.code }}</b>
+          <span>{{ row.supplierName }}</span>
+          <em>{{
+            row.reason === 'OVERDUE'
+              ? `超期 ${row.days} 天`
+              : attentionNames[row.reason]
+          }}</em>
+        </button>
+      </section>
+      <p
+        v-else-if="overview && overview.orders === 0"
+        class="procurement-muted order-empty-hint"
+      >
+        新系统还没有采购单：在采购工作台或报价页「选价下单」后，采购单会出现在这里，统计卡会跟着更新。
+      </p>
       <div class="order-surface">
         <div class="order-views" aria-label="采购状态视图">
           <button
@@ -713,28 +857,19 @@ watch(financeType, (value, previous) => {
               :pending-total="pendingTotal"
               @change="changeScope"
             />
-            <Button
-              :type="mine ? 'default' : 'primary'"
-              size="small"
+            <button
+              type="button"
+              class="mine-toggle"
+              :class="{ on: mine }"
+              :aria-pressed="mine"
               @click="
-                mine = false;
+                mine = !mine;
                 page = 1;
                 loadList();
               "
             >
-              全部
-            </Button>
-            <Button
-              :type="mine ? 'primary' : 'default'"
-              size="small"
-              @click="
-                mine = true;
-                page = 1;
-                loadList();
-              "
-            >
-              我负责的
-            </Button>
+              {{ mine ? '✓ ' : '' }}只看我负责的
+            </button>
             <span class="procurement-muted">当前筛选共 {{ total }} 单</span>
             <Button
               v-if="keyword || status || contractId || mine"
@@ -796,9 +931,9 @@ watch(financeType, (value, previous) => {
               <Button
                 v-else
                 type="primary"
-                @click="createRelated('orders', 'GENERATE_ORDERS')"
+                @click="router.push('/fdmprocurement/platform-tasks')"
               >
-                从已确认方案生成
+                去采购工作台选价下单
               </Button>
             </Empty>
           </template>
@@ -967,6 +1102,41 @@ watch(financeType, (value, previous) => {
             </Button>
           </header>
 
+          <section
+            v-if="execution"
+            class="order-steps"
+            aria-label="采购单执行步骤"
+          >
+            <ol>
+              <li
+                v-for="step in execution.steps"
+                :key="step.key"
+                :class="{
+                  done: step.done,
+                  current: execution.current?.key === step.key,
+                }"
+              >
+                <i></i><b>{{ step.title }}</b><span>{{ step.summary }}</span>
+              </li>
+            </ol>
+            <div
+              v-if="execution.current && nextHints[execution.current.key]"
+              class="order-next"
+            >
+              <span><b>下一步：</b>{{ nextHints[execution.current.key]?.text }}</span>
+              <Button
+                type="primary"
+                :disabled="
+                  childOpen ||
+                  (execution.current.key === 'payment' &&
+                    !hasPayableBalance(financeSummary.availableRequestAmount))
+                "
+                @click="goStep(execution.current.key)"
+              >
+                {{ nextHints[execution.current.key]?.button }}
+              </Button>
+            </div>
+          </section>
           <div class="order-summary">
             <div class="order-summary-item">
               <span class="procurement-muted">采购金额</span>
@@ -1419,6 +1589,203 @@ watch(financeType, (value, previous) => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+}
+
+.order-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.order-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--procurement-surface);
+  border: 1px solid var(--procurement-line);
+  border-radius: 10px;
+}
+
+button.order-kpi {
+  cursor: pointer;
+}
+
+button.order-kpi:hover,
+button.order-kpi:focus-visible {
+  outline: none;
+  border-color: var(--procurement-accent);
+}
+
+.order-kpi.selected {
+  border-color: var(--procurement-accent);
+  box-shadow: inset 0 0 0 1px var(--procurement-accent);
+}
+
+.order-kpi span,
+.order-kpi small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--procurement-secondary);
+  white-space: nowrap;
+}
+
+.order-kpi b {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.order-kpi.alert b {
+  color: hsl(var(--destructive));
+}
+
+.order-attention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.order-attention button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+  background: var(--procurement-surface);
+  border: 1px solid var(--procurement-line);
+  border-radius: 999px;
+}
+
+.order-attention button:hover,
+.order-attention button:focus-visible {
+  outline: none;
+  border-color: var(--procurement-accent);
+}
+
+.order-attention em {
+  font-style: normal;
+  color: var(--procurement-secondary);
+}
+
+.order-attention .is-overdue em {
+  color: hsl(var(--destructive));
+}
+
+.order-attention .is-unpaid em {
+  color: hsl(var(--warning));
+}
+
+.order-empty-hint {
+  margin: 0 0 12px;
+}
+
+@media (max-width: 960px) {
+  .order-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.order-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.order-steps ol {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.order-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.order-steps li i {
+  height: 4px;
+  margin-bottom: 4px;
+  background: var(--procurement-line);
+  border-radius: 2px;
+}
+
+.order-steps li.done i {
+  background: hsl(var(--success));
+}
+
+.order-steps li.current i {
+  background: var(--procurement-accent);
+}
+
+.order-steps li.current b {
+  color: var(--procurement-accent);
+}
+
+.order-steps li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--procurement-secondary);
+  white-space: nowrap;
+}
+
+.order-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 13px;
+  background: var(--procurement-selected);
+  border-radius: 8px;
+}
+
+.mine-toggle {
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--procurement-secondary);
+  cursor: pointer;
+  background: var(--procurement-surface);
+  border: 1px solid var(--procurement-line);
+  border-radius: 999px;
+}
+
+.mine-toggle.on {
+  color: var(--procurement-accent);
+  background: var(--procurement-selected);
+  border-color: var(--procurement-accent);
+}
+
+.mine-toggle:focus-visible {
+  outline: 2px solid var(--procurement-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .order-steps ol {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .order-summary {

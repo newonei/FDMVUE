@@ -338,7 +338,7 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
         items: [
           {
             title: '采购工作台',
-            description: '接单、报价、方案、下单',
+            description: '接单、报价、选价下单',
             link: { path: TASKS },
           },
           {
@@ -355,6 +355,11 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
             title: '报关跟进',
             description: '批次、资料与费用',
             link: { path: '/fdmprocurement/platform-customs' },
+          },
+          {
+            title: '原材料采购',
+            description: '工厂原料下单与到货',
+            link: { path: '/fdmprocurement/raw-purchase' },
           },
         ],
       },
@@ -541,4 +546,97 @@ export function daysUntil(date: string | undefined, today: Date) {
   );
   const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((due - now) / 86_400_000);
+}
+
+export interface PipelineStep {
+  key: string;
+  label: string;
+  /** Workbench stages or order todos summed into this step. */
+  todos: string[];
+  hint: string;
+  /** Waiting on the buyer (counted in the headline), not on suppliers or other departments. */
+  mine: boolean;
+  target: (todos: PortalTodo[]) => PortalLink;
+}
+const ORDER_TODO_TARGET = (todos: PortalTodo[]): PortalLink => {
+  const only =
+    todos.length === 1 && todos[0]!.count === 1 ? todos[0] : undefined;
+  return only?.contractId && only.orderId
+    ? {
+        path: ORDERS,
+        query: { contractId: only.contractId, documentId: only.orderId },
+      }
+    : { path: ORDERS, query: { mine: 'true' } };
+};
+/** The buyer's work in order: each step leads into the next. */
+export const purchasePipeline: PipelineStep[] = [
+  {
+    key: 'intake',
+    label: '待接单',
+    todos: ['intake'],
+    hint: '外贸提交的申请',
+    mine: true,
+    target: task('intake'),
+  },
+  {
+    key: 'quote',
+    label: '待报价',
+    todos: ['quote'],
+    hint: '找供应商询价',
+    mine: true,
+    target: task('quote'),
+  },
+  {
+    key: 'order',
+    label: '待下单',
+    todos: ['plan', 'order'],
+    hint: '有报价，选价下单',
+    mine: true,
+    target: task('plan'),
+  },
+  {
+    key: 'sign',
+    label: '待签回',
+    todos: ['sign'],
+    hint: '合同未签回',
+    mine: true,
+    target: ORDER_TODO_TARGET,
+  },
+  {
+    key: 'transit',
+    label: '在途',
+    todos: ['transit'],
+    hint: '等待到货入库',
+    mine: false,
+    target: ORDER_TODO_TARGET,
+  },
+  {
+    key: 'pay',
+    label: '待付款',
+    todos: ['pay'],
+    hint: '还有未付金额',
+    mine: true,
+    target: ORDER_TODO_TARGET,
+  },
+  {
+    key: 'customs',
+    label: '报关中',
+    todos: ['customs'],
+    hint: '进行中的批次',
+    mine: true,
+    target: () => ({ path: '/fdmprocurement/platform-customs' }),
+  },
+];
+export function pipelineCounts(summary: PortalSummary | undefined) {
+  return purchasePipeline.map((step) => {
+    const todos = (summary?.todos ?? []).filter((todo) =>
+      step.todos.includes(todo.key),
+    );
+    const count = todos.reduce(
+      (sum, todo) => sum + (Number(todo.count) || 0),
+      0,
+    );
+    const preview = todos.find((todo) => Number(todo.count) > 0)?.preview ?? '';
+    return { ...step, count, preview, link: step.target(todos) };
+  });
 }

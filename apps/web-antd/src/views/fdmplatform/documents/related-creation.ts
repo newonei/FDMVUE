@@ -144,7 +144,8 @@ function lockContext(
   };
 }
 
-function planAvailable(contract: Contract, assignment: BusinessRecord) {
+/** Task quantity not yet ordered or held by another live plan; same rule as the server. */
+export function planAvailable(contract: Contract, assignment: BusinessRecord) {
   const orders = (contract.purchaseOrders ?? []).flatMap((order) =>
     rows(order.lines),
   );

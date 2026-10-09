@@ -30,13 +30,17 @@ export interface ProcurementWorkItem {
   hint?: string;
 }
 export interface ProcurementWorkbenchResult extends PageResult<ProcurementWorkItem> {
-  counts: Record<'all' | ProcurementStage, number>;
+  /** Stage counts; `overdue` / `soon` cover every stage under the same filters. */
+  counts: Partial<Record<'overdue' | 'soon', number>> &
+    Record<'all' | ProcurementStage, number>;
 }
 export interface ProcurementWorkbenchQuery {
   stage: 'all' | ProcurementStage;
   keyword?: string;
   mine: boolean;
   contractId?: string;
+  /** Only overdue tasks, or tasks due within 3 days. */
+  due?: 'overdue' | 'soon';
   pageNo: number;
   pageSize: number;
 }

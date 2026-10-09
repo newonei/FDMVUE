@@ -14,10 +14,16 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   contract: vi.fn(),
   directory: vi.fn(),
+  action: vi.fn(),
+  confirm: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
+  contractAction: mocks.action,
   getContract: mocks.contract,
   getDirectory: mocks.directory,
+  newIdempotencyKey: () => 'key-1',
 }));
 vi.mock('#/api/fdmplatform/procurement-workbench', () => ({
   getProcurementWorkbench: mocks.page,
@@ -109,6 +115,55 @@ vi.mock('../../documents/DocumentAction.vue', () => ({
         : null,
   }),
 }));
+vi.mock('../quotes/QuoteEntryDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      assignmentId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            {
+              'data-quote-entry': props.assignmentId,
+              'data-contract': props.contractId,
+            },
+            [
+              h('button', { onClick: () => ctx.emit('close') }, '取消报价'),
+              h(
+                'button',
+                {
+                  onClick: () =>
+                    ctx.emit(
+                      'saved',
+                      { id: props.contractId },
+                      'new-quote',
+                      false,
+                    ),
+                },
+                '保存报价',
+              ),
+              h(
+                'button',
+                {
+                  onClick: () =>
+                    ctx.emit(
+                      'saved',
+                      { id: props.contractId },
+                      'new-quote',
+                      true,
+                    ),
+                },
+                '保存并下单',
+              ),
+            ],
+          )
+        : null,
+  }),
+}));
 vi.mock('../quotes/QuoteComparisonDialog.vue', () => ({
   default: defineComponent({
     props: {
@@ -150,6 +205,8 @@ vi.mock('ant-design-vue', () => {
     }),
     Empty: block,
     Select: block,
+    Modal: { confirm: mocks.confirm },
+    message: { success: mocks.success, error: mocks.error },
     Input: {
       Search: defineComponent({
         props: { value: { type: String, default: undefined } },
@@ -231,7 +288,13 @@ function entry(
       contractVersion: 1,
       companyId: 1,
       contractStatus: 'CONFIRMED',
-      allowedActions: ['CREATE_QUOTE', 'SAVE_PLAN', 'ASSIGN_FULFILLMENT'],
+      allowedActions: [
+        'CREATE_QUOTE',
+        'SAVE_PLAN',
+        'ASSIGN_FULFILLMENT',
+        'CLAIM_REQUEST',
+        'ORDER_FROM_QUOTE',
+      ],
       record: { id: `source-${key}`, status: 'ASSIGNED', method: 'BUY' },
     },
   };
@@ -347,16 +410,14 @@ describe('采购工作台交互与全量查询', () => {
     await settle();
     button(host, '录入报价').click();
     await settle();
-    const action = host.querySelector<HTMLElement>('[data-action]')!;
-    expect(action.dataset.action).toBe('CREATE_QUOTE');
-    expect(action.dataset.contract).toBe('contract-a');
-    expect(action.dataset.source).toBe(
-      JSON.stringify({ kind: 'tasks', id: 'source-a' }),
-    );
-    expect(action.dataset.locked).toBe('true');
-    button(host, '保存操作').click();
-    await settle();
+    const entry = host.querySelector<HTMLElement>('[data-quote-entry]')!;
+    expect(entry.dataset.quoteEntry).toBe('source-a');
+    expect(entry.dataset.contract).toBe('contract-a');
     expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+    button(host, '保存报价').click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-quote-entry]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-compare]')).toBeNull();
     expect(mocks.page).toHaveBeenLastCalledWith(
       expect.objectContaining({ mine: true, pageNo: 2 }),
     );
@@ -369,7 +430,7 @@ describe('采购工作台交互与全量查询', () => {
       ]),
     );
     const { host } = await mount();
-    button(host, '比较报价').click();
+    button(host, '选价下单').click();
     await settle();
     expect(
       host.querySelector<HTMLElement>('[data-compare]')?.dataset.compare,
@@ -478,7 +539,7 @@ describe('采购工作台交互与全量查询', () => {
     mocks.page
       .mockResolvedValueOnce({ ...response([]), total: 9 })
       .mockResolvedValue({ ...response(), total: 9 });
-    button(host, '保存操作').click();
+    button(host, '保存报价').click();
     await settle();
     expect(mocks.page).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageNo: 1 }),
@@ -491,5 +552,88 @@ describe('采购工作台交互与全量查询', () => {
     expect(mocks.page).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageNo: 1, contractId: 'another-contract' }),
     );
+  });
+  it('我来接单确认后按外采接下整条申请，分派…仍走原分派表单', async () => {
+    mocks.page.mockResolvedValue(
+      response([entry('req', 'intake', 'requests')]),
+    );
+    mocks.action.mockResolvedValue({ id: 'contract-a' });
+    const { host } = await mount();
+    button(host, '我来接单').click();
+    await settle();
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    const options = mocks.confirm.mock.calls[0]![0];
+    expect(options.content).toContain('10 件');
+    await options.onOk();
+    await settle();
+    expect(mocks.action).toHaveBeenCalledWith(
+      'contract-a',
+      'CLAIM_REQUEST',
+      1,
+      'key-1',
+      { requestId: 'source-req' },
+    );
+    expect(mocks.success).toHaveBeenCalledWith('已接单，下一步录入报价');
+    button(host, '分派…').click();
+    await settle();
+    const action = host.querySelector<HTMLElement>('[data-action]')!;
+    expect(action.dataset.action).toBe('ASSIGN_FULFILLMENT');
+    expect(action.dataset.kind).toBe('tasks');
+    button(host, '取消操作').click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+  });
+  it('接单失败时提示原因并保留列表', async () => {
+    mocks.page.mockResolvedValue(
+      response([entry('req', 'intake', 'requests')]),
+    );
+    mocks.action.mockRejectedValue({
+      code: 1,
+      msg: '申请已全部分派，无需接单',
+    });
+    const { host } = await mount();
+    button(host, '我来接单').click();
+    await settle();
+    await mocks.confirm.mock.calls[0]![0].onOk();
+    await settle();
+    expect(mocks.error).toHaveBeenCalledWith('申请已全部分派，无需接单');
+    expect(host.querySelector<HTMLElement>('[data-entry]')).not.toBeNull();
+  });
+  it('保存并下单后直接打开新报价的比价下单', async () => {
+    const { host } = await mount();
+    button(host, '录入报价').click();
+    await settle();
+    button(host, '保存并下单').click();
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-compare]')?.dataset.compare,
+    ).toBe('new-quote');
+  });
+  it('交期显示倒计时，超期筛选发送到服务端且可以取消', async () => {
+    const late = entry();
+    late.dueDate = '2000-01-01';
+    mocks.page.mockResolvedValue({
+      ...response([late]),
+      counts: { ...response().counts, overdue: 3, soon: 0 },
+    });
+    const { host } = await mount();
+    expect(host.textContent).toMatch(/超期 \d+ 天/);
+    expect(host.querySelector('nav')?.textContent).toContain('3 条已超期');
+    button(host, '已超期 3').click();
+    await settle();
+    expect(mocks.page).toHaveBeenLastCalledWith(
+      expect.objectContaining({ due: 'overdue', pageNo: 1 }),
+    );
+    button(host, '已超期 3').click();
+    await settle();
+    expect(mocks.page.mock.calls.at(-1)![0]).not.toHaveProperty('due');
+  });
+  it('已下线的待到货、自产阶段不再显示，旧方案阶段只在有数时出现', async () => {
+    const { host } = await mount();
+    const nav = host.querySelector('nav')!.textContent!;
+    expect(nav).not.toContain('待到货');
+    expect(nav).not.toContain('自产跟进');
+    expect(nav).toContain('待生成采购单1');
+    expect(nav).toContain('采购单 →');
   });
 });

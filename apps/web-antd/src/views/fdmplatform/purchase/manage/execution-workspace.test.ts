@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Workspace from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  overview: vi.fn(),
   list: vi.fn(),
   detail: vi.fn(),
   contract: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('#/api/fdmplatform', () => ({
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrders: mocks.list,
+  getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
   downloadProcurementFile: vi.fn(),
   exportProcurementOrder: vi.fn(),
@@ -348,8 +350,33 @@ function button(host: HTMLElement, text: string) {
   expect(result).toBeDefined();
   return result!;
 }
+const overview = {
+  orders: 2,
+  open: 1,
+  overdue: 1,
+  maxOverdueDays: 9,
+  unsigned: 1,
+  unpaid: 1,
+  asOf: '2026-10-08',
+  openAmount: { CNY: 246 },
+  unpaidAmount: { CNY: 146 },
+  arrivedUnpaidAmount: {},
+  attention: [
+    {
+      reason: 'OVERDUE',
+      days: 9,
+      code: 'CG-OVERDUE',
+      orderId: 'po-a',
+      contractId: 'contract-a',
+      contractCode: 'HT-1',
+      supplierName: '工厂甲',
+      currency: 'CNY',
+    },
+  ],
+};
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.overview.mockResolvedValue(overview);
   mocks.list.mockResolvedValue({ list: [row()], total: 21 });
   mocks.contract.mockResolvedValue(contract());
   mocks.detail.mockResolvedValue(detail());
@@ -450,7 +477,7 @@ describe('采购订单原页执行', () => {
   });
   it('负责人筛选发送服务端条件并回第一页，刷新失败保留已有结果', async () => {
     const { host } = await mount('?page=2');
-    button(host, '我负责的').click();
+    button(host, '只看我负责的').click();
     await settle();
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ mine: true, pageNo: 1 }),
@@ -515,5 +542,29 @@ describe('采购订单原页执行', () => {
     button(host, '付款页关闭子表单').click();
     await settle();
     expect(button(host, '关闭执行详情').disabled).toBe(false);
+  });
+  it('统计卡跟随我负责的筛选，在途卡筛选待到货，需要处理的采购单可直接打开', async () => {
+    const { host } = await mount();
+    expect(mocks.overview).toHaveBeenLastCalledWith(false);
+    expect(host.textContent).toContain('最长超期 9 天');
+    expect(host.textContent).toContain('CNY 146.00');
+    button(host, '只看我负责的').click();
+    await settle();
+    expect(mocks.overview).toHaveBeenLastCalledWith(true);
+    const open = [...host.querySelectorAll('button')].find((entry) =>
+      entry.textContent?.includes('在途采购单'),
+    )!;
+    open.click();
+    await settle();
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'ORDERED', pageNo: 1 }),
+    );
+    const attention = [...host.querySelectorAll('button')].find((entry) =>
+      entry.textContent?.includes('CG-OVERDUE'),
+    )!;
+    expect(attention.textContent).toContain('超期 9 天');
+    attention.click();
+    await settle();
+    expect(mocks.detail).toHaveBeenLastCalledWith('contract-a', 'po-a');
   });
 });

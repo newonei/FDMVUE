@@ -2,7 +2,7 @@
 import type { DocumentKind } from '../../documents/model';
 import type { RelatedDocumentSource } from '../../documents/related-creation';
 
-import type { Contract, DocumentRow } from '#/api/fdmplatform';
+import type { BusinessRecord, Contract, DocumentRow } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -14,7 +14,9 @@ import { errorText } from '../../data';
 import DocumentAction from '../../documents/DocumentAction.vue';
 import { resolveDocumentRow } from '../../documents/navigation';
 import RecordDetail from '../../documents/RecordDetail.vue';
+import OrderFromQuoteDialog from './OrderFromQuoteDialog.vue';
 import QuoteComparison from './QuoteComparison.vue';
+import QuoteEntryDialog from './QuoteEntryDialog.vue';
 
 import '../components/procurement.css';
 
@@ -23,7 +25,11 @@ const props = defineProps<{
   open: boolean;
   sourceQuoteId?: string;
 }>();
-const emit = defineEmits<{ close: []; updated: [] }>();
+const emit = defineEmits<{
+  close: [];
+  ordered: [contract: Contract, orders: BusinessRecord[]];
+  updated: [];
+}>();
 const contract = ref<Contract>();
 const loading = ref(false);
 const pageError = ref('');
@@ -33,7 +39,15 @@ const action = ref<string>();
 const actionSource = ref<RelatedDocumentSource>();
 const detailOpen = ref(false);
 const detailRow = ref<DocumentRow>();
-const childOpen = computed(() => actionOpen.value || detailOpen.value);
+const entryTask = ref<string>();
+const orderQuote = ref<string>();
+const childOpen = computed(
+  () =>
+    actionOpen.value ||
+    detailOpen.value ||
+    !!entryTask.value ||
+    !!orderQuote.value,
+);
 let sequence = 0;
 
 async function load() {
@@ -84,6 +98,31 @@ function saved(updated: Contract) {
   emit('updated');
   void load();
 }
+function openEntry(assignmentId: string) {
+  if (loading.value || pageError.value || !contract.value || childOpen.value)
+    return;
+  entryTask.value = assignmentId;
+}
+function entrySaved(
+  updated: Contract,
+  quoteId: string | undefined,
+  orderNow: boolean,
+) {
+  entryTask.value = undefined;
+  saved(updated);
+  if (orderNow && quoteId) orderQuote.value = quoteId;
+}
+function openOrder(quoteId: string) {
+  if (loading.value || pageError.value || !contract.value || childOpen.value)
+    return;
+  orderQuote.value = quoteId;
+}
+function ordered(updated: Contract, orders: BusinessRecord[]) {
+  orderQuote.value = undefined;
+  contract.value = updated;
+  emit('updated');
+  emit('ordered', updated, orders);
+}
 function detailsUpdated() {
   emit('updated');
   void load();
@@ -94,6 +133,8 @@ watch(
     ++sequence;
     actionOpen.value = false;
     detailOpen.value = false;
+    entryTask.value = undefined;
+    orderQuote.value = undefined;
     contract.value = undefined;
     pageError.value = '';
     if (props.open) void load();
@@ -130,9 +171,8 @@ onBeforeUnmount(() => {
           :quote-id="sourceQuoteId"
           :disabled="loading || Boolean(pageError)"
           @detail="detail"
-          @new-quote="
-            (id) => launch('quotes', 'CREATE_QUOTE', { kind: 'tasks', id })
-          "
+          @new-quote="openEntry"
+          @order="openOrder"
           @plan="(id) => launch('plans', 'SAVE_PLAN', { kind: 'quotes', id })"
         />
         <p v-else class="procurement-muted comparison-dialog-loading">
@@ -152,6 +192,20 @@ onBeforeUnmount(() => {
     :source="actionSource"
     @close="actionOpen = false"
     @updated="saved"
+  />
+  <QuoteEntryDialog
+    :open="open && !!entryTask"
+    :contract-id="contractId"
+    :assignment-id="entryTask"
+    @close="entryTask = undefined"
+    @saved="entrySaved"
+  />
+  <OrderFromQuoteDialog
+    :open="open && !!orderQuote"
+    :contract-id="contractId"
+    :quote-id="orderQuote"
+    @close="orderQuote = undefined"
+    @ordered="ordered"
   />
   <RecordDetail
     :open="open && detailOpen"

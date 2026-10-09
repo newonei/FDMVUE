@@ -6,10 +6,14 @@ import TemplateWorkspace from './TemplateWorkspace.vue';
 defineOptions({ name: 'FdmPlatformPurchaseTemplates' });
 /** Menu consolidation: former standalone menus redirect here with `?view=`. */
 const views = [
-  { key: 'templates', title: '合同模板与主体', component: TemplateWorkspace },
+  {
+    key: 'templates',
+    title: '签约主体与合同模板',
+    component: TemplateWorkspace,
+  },
   {
     key: 'routing',
-    title: '采购分派规则',
+    title: '自动分派规则',
     component: Workspace,
     props: { workspace: 'purchase-routing' },
   },

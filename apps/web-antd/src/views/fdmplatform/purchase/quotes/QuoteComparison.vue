@@ -25,6 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   detail: [id: string];
   newQuote: [assignmentId: string];
+  order: [id: string];
   plan: [id: string];
 }>();
 const selectedQuoteId = ref('');
@@ -60,6 +61,25 @@ const canCreate = computed(
         request.status !== 'CANCELLED',
     ),
 );
+
+/** 选价下单 needs the composite action; the rest of each card's checks match 编制方案. */
+const canOrder = computed(
+  () =>
+    !contractQuickActionReason(props.contract, 'ORDER_FROM_QUOTE') &&
+    (props.contract.allowedActions ?? []).includes('ORDER_FROM_QUOTE'),
+);
+/** Only a like-for-like comparison may call a quote the cheapest. */
+const lowestId = computed(() => {
+  if (!comparison.value.comparable) return undefined;
+  let best: undefined | { id: string; subtotal: BigNumber };
+  for (const entry of comparison.value.entries) {
+    const subtotal = new BigNumber(entry.subtotal ?? Number.NaN);
+    if (!subtotal.isFinite()) return undefined;
+    if (!best || subtotal.isLessThan(best.subtotal))
+      best = { id: String(entry.quote.id), subtotal };
+  }
+  return best?.id;
+});
 
 function money(value: unknown) {
   const amount = new BigNumber(
@@ -202,6 +222,7 @@ watch(
               :status="quoteStatus(entry.quote).status"
               :label="quoteStatus(entry.quote).label"
             />
+            <span v-if="lowestId === entry.quote.id" class="lowest-badge">最低价</span>
             <span class="procurement-muted">版本 {{ entry.quote.version ?? '待补齐' }}</span>
           </div>
         </header>
@@ -257,6 +278,16 @@ watch(
         </p>
         <div class="quote-column-actions">
           <Button
+            v-if="canOrder"
+            type="primary"
+            block
+            :disabled="disabled || !entry.canPlan"
+            :title="entry.planReason"
+            @click="emit('order', String(entry.quote.id))"
+          >
+            选此报价下单
+          </Button>
+          <Button
             block
             :disabled="disabled || !entry.canPlan"
             :title="entry.planReason"
@@ -293,7 +324,7 @@ watch(
           }}，可在表单调整；保存后确认方案，再继续下单。
         </p>
         <p v-else class="procurement-muted">
-          比较数量用于测算；编制方案时按任务剩余额度带入，可继续调整。
+          常规情况直接点卡片上的「选此报价下单」；要拆给多家供应商或调整分配数量时，再选为方案来源编制采购方案。
         </p>
       </div>
       <Button
@@ -492,6 +523,13 @@ watch(
 .quote-action-hint {
   margin: 0 16px 16px;
   line-height: 1.7;
+}
+
+.lowest-badge {
+  padding: 0 8px;
+  color: hsl(var(--success));
+  background: hsl(var(--success) / 12%);
+  border-radius: 999px;
 }
 
 .quote-column-actions {

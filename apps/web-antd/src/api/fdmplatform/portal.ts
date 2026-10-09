@@ -1,5 +1,6 @@
 import type { Contract } from './index';
 import type { ProcurementWorkItem } from './procurement-workbench';
+import type { SupplierDepartment } from './supplier-stats';
 
 import { requestClient } from '#/api/request';
 
@@ -12,6 +13,8 @@ export interface PortalTodo {
   preview: string;
   contractId?: string;
   recordId?: string;
+  /** Purchase order todos (待签回 / 在途 / 待付款) point at the first order. */
+  orderId?: string;
 }
 export interface PortalTrend {
   months: string[];
@@ -51,6 +54,8 @@ export interface PortalSummary {
   taskTotal?: number;
   payments?: PortalPayment[];
   movements?: PortalMovement[];
+  /** 采购门户：全部门近 12 个月采购额（含金智历史，按人民币）与前 5 家供应商。 */
+  purchasing?: null | SupplierDepartment;
 }
 
 export function getPortalSummary(department: PortalDepartment) {

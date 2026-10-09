@@ -6,7 +6,6 @@ import type {
   PortalSummary,
   PortalTodo,
 } from '#/api/fdmplatform/portal';
-import type { ProcurementWorkItem } from '#/api/fdmplatform/procurement-workbench';
 
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
@@ -23,18 +22,18 @@ import {
   contractNextStep,
 } from '../components/contract-mainline';
 import { contractWorkboard } from '../components/contract-workboard';
-import { errorText, label } from '../data';
+import { errorText } from '../data';
 import { nativeMoney } from '../documents/migration-display';
 import {
   actionableCount,
   contractLink,
-  daysUntil,
   formatNumber,
   greeting,
   pickTrend,
   portalDefinitions,
 } from './model';
 
+/** 外贸 and 财务 portals; 采购门户 has its own page (PurchasePortal). */
 const props = defineProps<{ department: PortalDepartment }>();
 const router = useRouter();
 const userStore = useUserStore();
@@ -134,23 +133,6 @@ const contractRows = computed(() =>
     return { contract, stages, next };
   }),
 );
-const stageLabels: Record<string, string> = {
-  arrival: '待到货',
-  intake: '待接单',
-  order: '待下单',
-  plan: '待编方案',
-  production: '自产跟进',
-  quote: '待报价',
-  review: '待确认方案',
-};
-function dueTag(task: ProcurementWorkItem) {
-  const days = daysUntil(task.dueDate, new Date());
-  if (days === undefined) return { text: '未约定交期', tone: '' };
-  if (days < 0) return { text: `已超期 ${-days} 天`, tone: 'danger' };
-  if (days === 0) return { text: '今天到期', tone: 'warn' };
-  if (days <= 3) return { text: `${days} 天后到期`, tone: 'warn' };
-  return { text: task.dueDate ?? '', tone: '' };
-}
 </script>
 <template>
   <Page>
@@ -253,33 +235,6 @@ function dueTag(task: ProcurementWorkItem) {
                   </span>
                 </span>
                 <span class="pill">{{ row.next.title }}</span>
-              </button>
-            </template>
-            <template v-else-if="department === 'purchase'">
-              <button
-                v-for="task in summary?.tasks ?? []"
-                :key="task.key"
-                type="button"
-                class="list-row"
-                @click="
-                  go({
-                    path: '/fdmprocurement/platform-tasks',
-                    query: { stage: task.stage, mine: 'true' },
-                  })
-                "
-              >
-                <span class="list-main">
-                  <b>{{ task.title }}</b>
-                  <span>{{ task.row.contractCode }} ·
-                    {{ stageLabels[task.stage] ?? label(task.stage) }}
-                    <template v-if="task.quantity !== undefined">
-                      · {{ formatNumber(task.quantity) }}
-                      {{ task.unit }}</template></span>
-                </span>
-                <span></span>
-                <span class="pill" :class="[dueTag(task).tone]">{{
-                  dueTag(task).text
-                }}</span>
               </button>
             </template>
             <template v-else-if="department === 'finance'">

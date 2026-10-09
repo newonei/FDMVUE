@@ -1,4 +1,4 @@
-import type { BusinessRecord, DocumentRow, PageResult } from './index';
+import type { BusinessRecord, Decimal, DocumentRow, PageResult } from './index';
 
 import { requestClient } from '#/api/request';
 export type SettingType = 'clauses' | 'entities' | 'templates';
@@ -200,5 +200,39 @@ export function getProcurementOrders(params: {
   return requestClient.get<PageResult<ProcurementOrderRow>>(
     `${procurementBase}/orders/page`,
     { params },
+  );
+}
+
+export type OrderAttentionReason = 'ARRIVED_UNPAID' | 'OVERDUE' | 'UNSIGNED';
+export interface ProcurementOrdersOverview {
+  orders: number;
+  open: number;
+  overdue: number;
+  maxOverdueDays: number;
+  unsigned: number;
+  unpaid: number;
+  asOf: string;
+  openAmount: Record<string, Decimal>;
+  unpaidAmount: Record<string, Decimal>;
+  arrivedUnpaidAmount: Record<string, Decimal>;
+  attention: {
+    amount?: Decimal | null;
+    code: string;
+    contractCode: string;
+    contractId: string;
+    currency: string;
+    days?: number;
+    dueDate?: string;
+    orderId: string;
+    reason: OrderAttentionReason;
+    supplierName: string;
+    unpaid?: Decimal;
+  }[];
+}
+/** Native orders only: in transit, overdue, contract not signed back, unpaid. */
+export function getProcurementOrdersOverview(mine: boolean) {
+  return requestClient.get<ProcurementOrdersOverview>(
+    `${procurementBase}/orders/overview`,
+    { params: { mine } },
   );
 }

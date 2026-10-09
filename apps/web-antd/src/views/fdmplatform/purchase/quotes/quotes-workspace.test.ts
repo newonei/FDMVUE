@@ -59,6 +59,65 @@ vi.mock('../../documents/DocumentAction.vue', () => ({
         : null,
   }),
 }));
+vi.mock('./QuoteEntryDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      assignmentId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            {
+              'data-quote-entry': props.assignmentId ?? '',
+              'data-contract': props.contractId ?? '',
+            },
+            [
+              h('button', { onClick: () => ctx.emit('close') }, '取消报价'),
+              h(
+                'button',
+                {
+                  onClick: () =>
+                    ctx.emit('saved', mocks.saved, 'quote-b', true),
+                },
+                '保存并下单',
+              ),
+            ],
+          )
+        : null,
+  }),
+}));
+vi.mock('./OrderFromQuoteDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      quoteId: { type: String, default: undefined },
+    },
+    emits: ['close', 'ordered'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            { 'data-order': props.quoteId, 'data-contract': props.contractId },
+            [
+              h('button', { onClick: () => ctx.emit('close') }, '取消下单'),
+              h(
+                'button',
+                {
+                  onClick: () =>
+                    ctx.emit('ordered', mocks.saved, [{ id: 'order-1' }]),
+                },
+                '确认下单',
+              ),
+            ],
+          )
+        : null,
+  }),
+}));
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({
     props: {
@@ -276,6 +335,10 @@ async function mount(
     routes: [
       { path: '/quotes', component: { render: () => null } },
       { path: '/other', component: { render: () => null } },
+      {
+        path: '/fdmprocurement/platform-orders',
+        component: { render: () => null },
+      },
     ],
   });
   await router.push(`/quotes${query}`);
@@ -374,16 +437,13 @@ describe('procurement quote workspace', () => {
     const { host } = await mount();
     button(host, '补充供应商报价').click();
     await settle();
-    const action = host.querySelector<HTMLElement>('[data-action]')!;
-    expect(action.dataset.action).toBe('CREATE_QUOTE');
-    expect(action.dataset.source).toBe(
-      JSON.stringify({ kind: 'tasks', id: 'task' }),
-    );
-    expect(action.dataset.contract).toBe('contract-a');
-    button(host, '取消办理').click();
+    const entry = host.querySelector<HTMLElement>('[data-quote-entry]')!;
+    expect(entry.dataset.quoteEntry).toBe('task');
+    expect(entry.dataset.contract).toBe('contract-a');
+    button(host, '取消报价').click();
     await settle();
     expect(host.querySelectorAll('[data-quote-id]')).toHaveLength(2);
-    expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-quote-entry]')).toBeNull();
   });
   it('preserves external detail links and clears only the detail when closed', async () => {
     const { host, router } = await mount(
@@ -471,6 +531,62 @@ describe('procurement quote workspace', () => {
     await nextTick();
     expect(button(host, '编制采购方案').disabled).toBe(true);
     expect(host.textContent).toContain('比较数量超过适用上限');
+  });
+});
+
+describe('选价下单', () => {
+  function orderable() {
+    const contract = fixture();
+    contract.allowedActions = ['SAVE_PLAN', 'CREATE_QUOTE', 'ORDER_FROM_QUOTE'];
+    return contract;
+  }
+  it('hides 选此报价下单 when the contract cannot order', async () => {
+    const { host } = await mount();
+    expect(
+      [...host.querySelectorAll('button')].some(
+        (entry) => entry.textContent?.trim() === '选此报价下单',
+      ),
+    ).toBe(false);
+  });
+  it('orders straight from a quote card and opens the new purchase order', async () => {
+    mocks.contract.mockResolvedValue(orderable());
+    mocks.saved = orderable();
+    const { host, router } = await mount();
+    button(
+      host.querySelector('[data-quote-id="quote-b"]')!,
+      '选此报价下单',
+    ).click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-order]')?.dataset.order).toBe(
+      'quote-b',
+    );
+    button(host, '确认下单').click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-order]')).toBeNull();
+    expect(router.currentRoute.value.path).toBe(
+      '/fdmprocurement/platform-orders',
+    );
+    expect(router.currentRoute.value.query).toEqual({
+      contractId: 'contract-a',
+      documentId: 'order-1',
+    });
+  });
+  it('saves a quote and continues to order it from the comparison dialog', async () => {
+    mocks.contract.mockResolvedValue(orderable());
+    mocks.saved = orderable();
+    const { host } = await mount(QuoteComparisonDialog, '', {
+      open: true,
+      contractId: 'contract-a',
+      sourceQuoteId: 'quote-a',
+    });
+    button(host, '补充供应商报价').click();
+    await settle();
+    button(host, '保存并下单').click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-quote-entry]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-order]')?.dataset.order).toBe(
+      'quote-b',
+    );
   });
 });
 

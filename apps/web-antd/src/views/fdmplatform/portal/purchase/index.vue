@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import DepartmentPortal from '../DepartmentPortal.vue';
+import PurchasePortal from '../PurchasePortal.vue';
 
 defineOptions({ name: 'FdmPlatformPurchasePortal' });
 </script>
-<template><DepartmentPortal department="purchase" /></template>
+<template><PurchasePortal /></template>

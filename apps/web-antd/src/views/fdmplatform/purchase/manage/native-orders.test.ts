@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Workspace from './index.vue';
 const mocks = vi.hoisted(() => ({
+  overview: vi.fn(),
   page: vi.fn(),
   detail: vi.fn(),
   contract: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('#/api/fdmplatform', () => ({
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrders: mocks.page,
+  getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
   downloadProcurementFile: vi.fn(),
   exportProcurementOrder: vi.fn(),
@@ -274,6 +276,19 @@ function orderFixture(id = 'order-1') {
 const dispose: (() => void)[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.overview.mockResolvedValue({
+    orders: 0,
+    open: 0,
+    overdue: 0,
+    maxOverdueDays: 0,
+    unsigned: 0,
+    unpaid: 0,
+    asOf: '2026-10-08',
+    openAmount: {},
+    unpaidAmount: {},
+    arrivedUnpaidAmount: {},
+    attention: [],
+  });
   mocks.page.mockResolvedValue({ list: nativeRows(), total: 6 });
   mocks.contract.mockImplementation(async () => contractFixture());
   mocks.detail.mockImplementation(async (_contractId, id) => orderFixture(id));

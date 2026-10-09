@@ -54,6 +54,16 @@
 
 外贸、采购、财务、仓库各有一个门户页（`portal/*/index`，菜单路径 `platform-portal`，排在部门第一位），内容为我的待办、进度列表、本月数据与近 6 个月趋势、本部门全部功能。门户不在全员共享菜单内：只有被分配对应菜单的角色可见，`/fdmplatform/v1/portal/{trade|purchase|finance|stock}` 同时校验 `fdmplatform:portal:*` 权限。外贸、采购按“我负责的”统计，财务、仓库按部门共享；金额按币种分开，历史待补齐只计数不读取。待办卡片跳转到已筛选的列表：采购工作台支持 `?stage=&mine=true`，合同订单支持 `?mine=true&status=&scope=&create=contract`，单据列表支持 `?scope=`。
 
+### 采购部门改版（2026-10-08）
+
+- **选价下单**：比价卡片「选此报价下单」和录入报价后的「保存并下单」调用合同动作 `ORDER_FROM_QUOTE`（`lines[{quoteId, quantity?}]`、`rationale?`），后端在一个事务里依次保存方案、确认方案、生成采购单，复用原有校验；选的不是同口径最低价时须填理由。同一申请里同供应商的其他有效报价可勾选一起下单，商务条件一致的合并成一张采购单。原「编制方案 → 确认方案 → 生成采购单」入口保留，用于拆分或调整数量。
+- **我来接单**：工作台待接单行调用 `CLAIM_REQUEST`（`requestId`），把申请剩余数量全部按外采分给自己；拆分、自产仍走「分派…」。
+- **录入报价**：`purchase/quotes/QuoteEntryDialog.vue` 分价格 / 条件 / 凭证三组，币种下拉默认 CNY，计价单位固定为需求单位，有效期 7 / 15 / 30 天快捷选；上传的文件就是报价凭证（随 `CREATE_QUOTE` 提交，后端追加到 `evidenceIds`）。
+- **工作台**：阶段改为流程条，交期倒计时，`/procurement-workbench/page?due=overdue|soon` 筛选，`counts.overdue / counts.soon` 覆盖全部阶段；已下线的待到货、自产阶段不再显示。
+- **采购单**：`/procurement/orders/overview?mine=` 返回新系统采购单的在途、超期未到（交期取下单资料，没填取报价承诺到货日）、待签回、未付款和需要处理的单子；抽屉顶部的执行步骤条只用于新系统采购单。「我负责的」改为单个开关。
+- **供应商管理**：`/suppliers/stats/page|overview`、`/suppliers/{id}/stats-snapshot`（`PlatformSupplierStatsService`）汇总合同内采购单与金智独立采购单，按租户缓存、合同按 `updated_at` 增量读取。金智采购单没有币种，按人民币统计；「在途」只算新系统采购单。分层：常用 ≤90 天、偶尔 91–365 天、沉睡超过 1 年、未合作从没下单。
+- **采购门户**：`portal/PurchasePortal.vue` 独立于外贸 / 财务门户；`/portal/purchase` 新增 `sign / transit / pay` 待办、`metrics.overdueTasks / soonTasks` 和全部门的 `purchasing`（近 12 个月人民币采购额、前 5 家供应商）。
+
 ### 待补齐历史单据
 
 列表默认只显示“当前业务”。金智导入后仍需补齐的合同、单据及其子记录进入“待补齐历史单据”队列，有待补齐记录时列表顶部显示切换；从合同进入的列表默认显示全部。数据来自索引行的 `pendingCompletion`，存量数据由 `20260929_fdmplatform_index_pending_completion.sql` 回填，未回填前一律视为当前业务。

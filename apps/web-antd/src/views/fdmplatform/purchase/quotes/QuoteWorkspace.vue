@@ -2,7 +2,7 @@
 import type { DocumentKind } from '../../documents/model';
 import type { RelatedDocumentSource } from '../../documents/related-creation';
 
-import type { Contract, DocumentRow } from '#/api/fdmplatform';
+import type { BusinessRecord, Contract, DocumentRow } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -28,7 +28,9 @@ import { useRouteOwner } from '../../documents/useRouteOwner';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { quoteStatus } from './comparison';
+import OrderFromQuoteDialog from './OrderFromQuoteDialog.vue';
 import QuoteComparison from './QuoteComparison.vue';
+import QuoteEntryDialog from './QuoteEntryDialog.vue';
 
 import '../components/procurement.css';
 
@@ -57,6 +59,9 @@ const action = ref<string>();
 const actionKind = ref<DocumentKind>('quotes');
 const actionContractId = ref<string>();
 const actionSource = ref<RelatedDocumentSource>();
+/** 录入报价 and 选价下单 use their own dialogs instead of the generic action form. */
+const entry = ref<{ assignmentId?: string; contractId?: string }>();
+const ordering = ref<{ contractId: string; quoteId: string }>();
 let listSequence = 0;
 let comparisonSequence = 0;
 let locateSequence = 0;
@@ -201,6 +206,36 @@ function actionSaved(updated: Contract) {
   }
   refresh();
 }
+function openEntry(assignmentId?: string) {
+  if (actionOpen.value || ordering.value) return;
+  entry.value = {
+    assignmentId,
+    contractId: assignmentId ? selectedContract.value?.id : contractId.value,
+  };
+}
+function entrySaved(
+  updated: Contract,
+  quoteId: string | undefined,
+  orderNow: boolean,
+) {
+  entry.value = undefined;
+  actionSaved(updated);
+  if (orderNow && quoteId) ordering.value = { contractId: updated.id, quoteId };
+}
+function openOrder(quoteId: string) {
+  if (!selectedContract.value || actionDisabled.value) return;
+  ordering.value = { contractId: selectedContract.value.id, quoteId };
+}
+function ordered(updated: Contract, orders: BusinessRecord[]) {
+  ordering.value = undefined;
+  actionSaved(updated);
+  const first = orders[0];
+  if (first)
+    void router.push({
+      path: '/fdmprocurement/platform-orders',
+      query: { contractId: updated.id, documentId: String(first.id) },
+    });
+}
 async function locate() {
   const run = ++locateSequence;
   locateError.value = '';
@@ -271,13 +306,11 @@ onBeforeUnmount(() => {
     <div class="procurement-workspace quotes-workspace">
       <ProcurementPageHeader
         title="询价与报价"
-        description="围绕同一采购需求比较价格、交期与报价口径，直接编制采购方案。"
+        description="同一采购需求的报价并排比较，看准价格、交期和口径后直接选价下单。"
       >
         <template #actions>
           <Button :loading="loading" @click="refresh">刷新</Button>
-          <Button type="primary" @click="launch('quotes', 'CREATE_QUOTE')">
-            新增报价
-          </Button>
+          <Button type="primary" @click="openEntry()">录入报价</Button>
         </template>
       </ProcurementPageHeader>
 
@@ -452,9 +485,8 @@ onBeforeUnmount(() => {
               :quote-id="selectedRow.id"
               :disabled="actionDisabled"
               @detail="showComparisonDetail"
-              @new-quote="
-                (id) => launch('quotes', 'CREATE_QUOTE', { kind: 'tasks', id })
-              "
+              @new-quote="openEntry"
+              @order="openOrder"
               @plan="
                 (id) => launch('plans', 'SAVE_PLAN', { kind: 'quotes', id })
               "
@@ -484,6 +516,20 @@ onBeforeUnmount(() => {
         :source="actionSource"
         @close="closeAction"
         @updated="actionSaved"
+      />
+      <QuoteEntryDialog
+        :open="!!entry && routeActive"
+        :contract-id="entry?.contractId"
+        :assignment-id="entry?.assignmentId"
+        @close="entry = undefined"
+        @saved="entrySaved"
+      />
+      <OrderFromQuoteDialog
+        :open="!!ordering && routeActive"
+        :contract-id="ordering?.contractId"
+        :quote-id="ordering?.quoteId"
+        @close="ordering = undefined"
+        @ordered="ordered"
       />
       <RecordDetail
         :open="detailOpen && routeActive"
