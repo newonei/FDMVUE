@@ -66,6 +66,12 @@ const shipmentPageNo = ref(1);
 const shipmentPageSize = ref(20);
 const shipmentLoading = ref(false);
 
+const METHOD_LABELS: Record<string, string> = {
+  BUY: '外采',
+  MAKE: '自制',
+  STOCK: '库存',
+};
+
 const stateColor: Record<MakeTaskState, string> = {
   done: 'green',
   'not-ready': 'default',
@@ -199,7 +205,7 @@ const shipmentColumns = [
         外贸合同分派给工厂「自制」的产品。新建工序单时关联对应任务，包装完工后良品数量会自动回写到合同的生产进度。
       </template>
       <template v-else-if="view === 'shippable'">
-        自制或库存履约、还没出完货的合同明细。出货从「已包装成品」扣减，并登记到合同的出货记录上。
+        自制、外采或库存履约、还没出完货的合同明细。外采成品先在「到货入库」收进已包装成品；出货从「已包装成品」扣减，并登记到合同的出货记录上。
       </template>
       <template v-else>工厂已出货的记录，同时显示在外贸合同的发货记录里。</template>
     </p>
@@ -305,7 +311,7 @@ const shipmentColumns = [
           <span class="text-sm">{{ contractProductText(record as Api.ShippableItem) }}</span>
         </template>
         <template v-else-if="column.key === 'method'">
-          <Tag class="m-0">{{ record.method === 'MAKE' ? '自制' : '库存' }}</Tag>
+          <Tag class="m-0">{{ METHOD_LABELS[record.method] ?? record.method }}</Tag>
         </template>
         <template v-else-if="column.key === 'quantity'">
           <span class="tabular-nums">{{ formatQty(record.itemQuantity) }}</span>

@@ -14,7 +14,12 @@ const mocks = vi.hoisted(() => ({
   shippable: vi.fn(),
   options: vi.fn(),
   orderPage: vi.fn(),
+  rawLines: vi.fn(),
+  receiptPage: vi.fn(),
+  receiveRaw: vi.fn(),
+  receiveTrade: vi.fn(),
   setting: vi.fn(),
+  tradeLines: vi.fn(),
   stockPage: vi.fn(),
   summary: vi.fn(),
   txnPage: vi.fn(),
@@ -29,13 +34,18 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   getDefectStats: mocks.defect,
   getOrder: vi.fn(),
   getOrderPage: mocks.orderPage,
+  getRawOpenLines: mocks.rawLines,
+  getReceiptPage: mocks.receiptPage,
+  getTradeOpenLines: mocks.tradeLines,
   getStageStockOptions: mocks.options,
   getStageStockSetting: mocks.setting,
   getStageStockSummary: mocks.summary,
   getStockPage: mocks.stockPage,
   getTxnPage: mocks.txnPage,
   previewItemCodes: vi.fn().mockResolvedValue([]),
+  receiveRawPurchase: mocks.receiveRaw,
   receiveStock: vi.fn(),
+  receiveTradePurchase: mocks.receiveTrade,
   saveStageStockSetting: vi.fn(),
   stocktake: vi.fn(),
 }));
@@ -83,6 +93,60 @@ const options: Api.Options = {
   stages: stages.map(([code, label, unit]) => ({ code, defaultLocation: `${label}区`, label, unit })),
   textures: [{ label: '贝壳纹', value: 'SH' }],
 };
+
+const rawLine: Api.RawOpenLine = {
+  expectedDate: [2026, 10, 20],
+  lineId: 11,
+  orderDate: [2026, 10, 8],
+  purchaseId: 7,
+  purchaseNo: 'CG20261008-001',
+  quantity: 1000,
+  rawCategory: 'MAIN',
+  rawMaterialCode: 'MAT-TPE',
+  rawMaterialName: 'TPE粒子',
+  receivedQuantity: 600,
+  remainingQuantity: 400,
+  supplierName: '东莞原料厂',
+};
+const tradeLine: Api.TradePurchaseLine = {
+  arrivedQuantity: 0,
+  color: '紫色',
+  contractCode: 'HT-20261008-002',
+  contractId: 'c2',
+  contractItemId: 'i2',
+  customerName: '美国客户',
+  material: 'TPE',
+  orderCode: 'PO-001',
+  orderId: 'o1',
+  orderLineId: 'ol1',
+  productName: '外采瑜伽垫',
+  quantity: 200,
+  remainingQuantity: 200,
+  size: '183x61x0.6',
+  supplierName: '义乌垫子厂',
+  unit: '张',
+};
+
+function mockEmptyPage() {
+  mocks.options.mockResolvedValue(options);
+  mocks.summary.mockResolvedValue({ processes: [], stages: [] });
+  mocks.stockPage.mockResolvedValue({ list: [], total: 0 });
+  mocks.orderPage.mockResolvedValue({ list: [], total: 0 });
+  mocks.defect.mockResolvedValue([]);
+  mocks.txnPage.mockResolvedValue({ list: [], total: 0 });
+  mocks.makeTasks.mockResolvedValue([]);
+  mocks.shippable.mockResolvedValue([]);
+  mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
+  mocks.rawLines.mockResolvedValue([rawLine]);
+  mocks.tradeLines.mockResolvedValue([tradeLine]);
+  mocks.receiptPage.mockResolvedValue({ list: [], total: 0 });
+}
+
+function clickButton(text: string, root: ParentNode = document) {
+  const el = [...root.querySelectorAll('button')].find((b) => b.textContent?.replaceAll(/\s/g, '') === text);
+  if (!el) throw new Error(`找不到按钮：${text}`);
+  el.click();
+}
 
 const flush = async () => {
   for (let i = 0; i < 8; i++) {
@@ -163,6 +227,9 @@ describe('stage stock page', () => {
     ]);
     mocks.shippable.mockResolvedValue([]);
     mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.rawLines.mockResolvedValue([rawLine]);
+    mocks.tradeLines.mockResolvedValue([tradeLine]);
+    mocks.receiptPage.mockResolvedValue({ list: [], total: 0 });
     mocks.setting.mockResolvedValue({
       processes: options.processes.map((p) => ({ process: p.code, sources: p.sources })),
       stages: options.stages.map((s) => ({ defaultLocation: s.defaultLocation, stage: s.code })),
@@ -189,7 +256,7 @@ describe('stage stock page', () => {
     expect(text).toContain('生产链');
     expect(text).toContain('1 在制');
 
-    for (const tab of ['工序单', '外贸订单', '库存流水', '基础设置']) {
+    for (const tab of ['工序单', '外贸订单', '到货入库', '库存流水', '基础设置']) {
       const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));
       (el?.querySelector('.ant-tabs-tab-btn') as HTMLElement | null)?.click();
       await flush();
@@ -201,6 +268,57 @@ describe('stage stock page', () => {
     expect(after).toContain('生产中');
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
+    expect(after).toContain('2 待到');
+    expect(after).toContain('CG20261008-001');
+    expect(after).toContain('TPE粒子');
     expect(errors).toEqual([]);
+  });
+
+  it('receives a raw purchase line into raw stock and a bought product into packed stock from 到货入库', async () => {
+    const errors: unknown[] = [];
+    mockEmptyPage();
+    mocks.receiveRaw.mockResolvedValue(1);
+    mocks.receiveTrade.mockResolvedValue(2);
+    mocks.route.query = { tab: 'receiving' };
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(StageStockPage);
+    app.config.errorHandler = (err) => errors.push(err);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    expect(document.body.textContent).toContain('东莞原料厂');
+    clickButton('收货', host);
+    await flush();
+    expect(document.body.textContent).toContain('原材料到货入库');
+    clickButton('确认收货');
+    await flush();
+    expect(mocks.receiveRaw).toHaveBeenCalledWith(
+      expect.objectContaining({ purchaseLineId: 11, quantity: 400 }),
+    );
+    expect(mocks.receiveRaw.mock.calls[0]![0].batchNo).toMatch(/^RM\d{4}$/);
+
+    const trade = [...host.querySelectorAll('.ant-segmented-item')].find((el) => el.textContent?.includes('外采成品待到货'));
+    (trade as HTMLElement).click();
+    await flush();
+    expect(host.textContent).toContain('义乌垫子厂');
+    clickButton('收货', host);
+    await flush();
+    expect(document.body.textContent).toContain('外采成品到货入库');
+    clickButton('确认收货');
+    await flush();
+    expect(mocks.receiveTrade).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedQuantity: 200,
+        attrs: expect.objectContaining({ backColor: 'PU', frontColor: 'PU', length: 183, material: 'TPE', thickness: 0.6, width: 61 }),
+        contractId: 'c2',
+        orderId: 'o1',
+        orderLineId: 'ol1',
+        quantity: 200,
+      }),
+    );
+    expect(errors).toEqual([]);
+    mocks.route.query = {};
   });
 });

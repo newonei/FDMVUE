@@ -16,6 +16,8 @@ import {
 
 import OrderDrawer from './modules/order-drawer.vue';
 import OrderPanel from './modules/order-panel.vue';
+import ReceiptDrawer from './modules/receipt-drawer.vue';
+import ReceivingPanel from './modules/receiving-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
 import ShipmentDrawer from './modules/shipment-drawer.vue';
 import StageRail from './modules/stage-rail.vue';
@@ -37,11 +39,19 @@ const canOperate = computed(() =>
 const options = ref<Api.Options>();
 const summary = ref<Api.Summary>();
 const loadError = ref(false);
-type TabKey = 'orders' | 'settings' | 'stock' | 'trade' | 'txns';
-const TAB_KEYS = new Set<TabKey>(['orders', 'settings', 'stock', 'trade', 'txns']);
+type TabKey = 'orders' | 'receiving' | 'settings' | 'stock' | 'trade' | 'txns';
+const TAB_KEYS = new Set<TabKey>([
+  'orders',
+  'receiving',
+  'settings',
+  'stock',
+  'trade',
+  'txns',
+]);
 const route = useRoute();
 const activeTab = ref<TabKey>('stock');
 const tradePending = ref(0);
+const receivingPending = ref(0);
 const activeStage = ref('BOARD');
 const refreshKey = ref(0);
 const txnItemCode = ref('');
@@ -54,6 +64,10 @@ const drawerTask = ref<{ assignmentId: string; contractId: string }>();
 
 const shipmentOpen = ref(false);
 const shipmentTarget = ref<{ contractId: string; contractItemId: string }>();
+
+const receiptOpen = ref(false);
+const receiptRawLine = ref<Api.RawOpenLine>();
+const receiptTradeLine = ref<Api.TradePurchaseLine>();
 
 const wipCount = computed(() =>
   (summary.value?.processes ?? []).reduce(
@@ -78,7 +92,7 @@ async function loadAll() {
 
 onMounted(loadAll);
 
-/** 外贸合同主线的「去工序库存」带 ?tab=trade 进来，直接打开外贸订单。 */
+/** 外贸合同主线的「去工序库存」带 ?tab=trade / ?tab=receiving 进来，直接打开对应标签。 */
 watch(
   () => route.query.tab,
   (tab) => {
@@ -116,6 +130,18 @@ function openProduce(task: Api.MakeTask) {
 function openShipment(target?: { contractId: string; contractItemId: string }) {
   shipmentTarget.value = target;
   shipmentOpen.value = true;
+}
+
+function openRawReceipt(line: Api.RawOpenLine) {
+  receiptTradeLine.value = undefined;
+  receiptRawLine.value = line;
+  receiptOpen.value = true;
+}
+
+function openTradeReceipt(line: Api.TradePurchaseLine) {
+  receiptRawLine.value = undefined;
+  receiptTradeLine.value = line;
+  receiptOpen.value = true;
 }
 
 function openComplete(orderId: number) {
@@ -232,6 +258,23 @@ async function onSettingSaved() {
                 @ship="openShipment"
               />
             </Tabs.TabPane>
+            <Tabs.TabPane key="receiving">
+              <template #tab>
+                到货入库
+                <span
+                  v-if="receivingPending > 0"
+                  class="ml-1 text-xs text-primary"
+                >
+                  {{ receivingPending }} 待到
+                </span>
+              </template>
+              <ReceivingPanel
+                :refresh-key="refreshKey"
+                @pending="(count) => (receivingPending = count)"
+                @receive-raw="openRawReceipt"
+                @receive-trade="openTradeReceipt"
+              />
+            </Tabs.TabPane>
             <Tabs.TabPane key="txns" tab="库存流水">
               <TxnPanel
                 v-model:item-code="txnItemCode"
@@ -259,6 +302,13 @@ async function onSettingSaved() {
           :initial-contract-id="shipmentTarget?.contractId"
           :initial-item-id="shipmentTarget?.contractItemId"
           :options="options"
+          @saved="onSaved"
+        />
+        <ReceiptDrawer
+          v-model:open="receiptOpen"
+          :options="options"
+          :raw-line="receiptRawLine"
+          :trade-line="receiptTradeLine"
           @saved="onSaved"
         />
       </div>

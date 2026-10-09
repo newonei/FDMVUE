@@ -70,6 +70,12 @@ export const TXN_TYPE_LABELS: Record<string, string> = {
   RAW_RECEIPT: '原料入库',
   SHIP: '出货出库',
   STOCKTAKE: '盘点调整',
+  TRADE_RECEIPT: '外采入库',
+};
+
+export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
+  RAW_PURCHASE: '原材料采购',
+  TRADE_PURCHASE: '外采成品',
 };
 
 /** 报完工时各工序可以修改的产出属性，其余属性沿用领料。 */
@@ -541,3 +547,66 @@ export const MAKE_TASK_STATE_LABELS: Record<MakeTaskState, string> = {
   producing: '生产中',
   waiting: '待生产',
 };
+
+/** 把合同上的尺寸文字（如「183x61x0.6」「183×61×0.6cm」）拆成长宽厚，拆不出来返回空对象。 */
+export function parseSizeText(text?: null | string): Pick<
+  Api.ItemAttrs,
+  'length' | 'thickness' | 'width'
+> {
+  const match = (text ?? '')
+    .replaceAll(/\s+/g, '')
+    .match(/^(\d+(?:\.\d+)?)[x×*](\d+(?:\.\d+)?)[x×*](\d+(?:\.\d+)?)(?:cm)?$/i);
+  if (!match) return {};
+  return {
+    length: Number(match[1]),
+    thickness: Number(match[3]),
+    width: Number(match[2]),
+  };
+}
+
+/** 外采到货的数量规则：实收不超过待到货，可入库不超过实收，少于实收要写原因。 */
+export function validateTradeReceipt(input: {
+  accepted?: null | number;
+  quantity?: null | number;
+  reason?: string;
+  remaining: unknown;
+}) {
+  const problems: string[] = [];
+  const quantity = input.quantity ?? 0;
+  const accepted = input.accepted ?? 0;
+  const remaining = toNumber(input.remaining) ?? 0;
+  if (quantity <= 0) problems.push('请填写大于 0 的实收数量。');
+  else if (quantity > remaining)
+    problems.push(`实收数量超过这行采购待到货的 ${formatQty(remaining)}。`);
+  if (input.accepted === null || input.accepted === undefined || accepted < 0)
+    problems.push('请填写可入库数量（良品），全部不良时填 0。');
+  else if (accepted > quantity) problems.push('可入库数量不能超过实收数量。');
+  else if (accepted < quantity && !input.reason?.trim())
+    problems.push('可入库数量少于实收数量，请填写异常原因。');
+  return problems;
+}
+
+/** 外采成品收货时按合同产品预填已包装成品的规格：材质、正反面色（「紫/灰」）、长宽厚，匹配不到的留空让人填。 */
+export function guessPackedAttrs(
+  line: Pick<Api.TradePurchaseLine, 'color' | 'material' | 'size' | 'specification'>,
+  options: Pick<Api.Options, 'colors' | 'materials'>,
+): Api.ItemAttrs {
+  const find = (list: Api.DictOption[], text?: string) => {
+    const t = (text ?? '').trim().toUpperCase();
+    if (!t) return undefined;
+    return list.find(
+      (o) => o.value.toUpperCase() === t || o.label.toUpperCase() === t,
+    )?.value;
+  };
+  const [front, back] = (line.color ?? '').split(/[/／、]/);
+  const frontColor = find(options.colors, front);
+  const dims = parseSizeText(line.size);
+  return {
+    backColor: find(options.colors, back) ?? frontColor,
+    frontColor,
+    material:
+      find(options.materials, line.material ?? undefined) ??
+      find(options.materials, 'TPE'),
+    ...(dims.length === undefined ? parseSizeText(line.specification) : dims),
+  };
+}

@@ -251,6 +251,25 @@ describe('contract main line', () => {
       action: { type: 'quick', kind: 'requests', action: 'CREATE_REQUEST' },
     });
     expect(next(contract()).title).toBe('等待采购部门安排');
+    const bought = contract({
+      purchaseOrders: [
+        {
+          id: 'po-1',
+          status: 'ISSUED',
+          lines: [{ id: 'po-line', contractItemId: 'item-1', quantity: '100' }],
+        },
+      ],
+    });
+    expect(next(bought)).toMatchObject({
+      title: '等待到货',
+      department: '工厂部门',
+      button: '去到货入库',
+      action: {
+        type: 'route',
+        path: '/gongchang/stage-stock',
+        query: { tab: 'receiving' },
+      },
+    });
     const stocked = contract({
       assignments: [
         {

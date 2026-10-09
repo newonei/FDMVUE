@@ -273,7 +273,7 @@ export namespace FdmgongchangStageStockApi {
     customerName?: null | string;
     itemQuantity: Decimal;
     material?: null | string;
-    method: 'MAKE' | 'STOCK';
+    method: 'BUY' | 'MAKE' | 'STOCK';
     productCode?: null | string;
     productName?: null | string;
     remainingQuantity: Decimal;
@@ -317,6 +317,92 @@ export namespace FdmgongchangStageStockApi {
 
   export interface ShipmentPageReq extends PageParam {
     keyword?: string;
+  }
+
+  /** 原材料采购单里还没到齐的明细。 */
+  export interface RawOpenLine {
+    expectedDate?: DateValue;
+    lineId: number;
+    orderDate?: DateValue;
+    purchaseId: number;
+    purchaseNo: string;
+    quantity: Decimal;
+    rawCategory?: null | string;
+    rawMaterialCode: string;
+    rawMaterialName: string;
+    receivedQuantity: Decimal;
+    remainingQuantity: Decimal;
+    supplierName?: null | string;
+  }
+
+  /** 外贸合同外采采购单里还没到齐的明细。 */
+  export interface TradePurchaseLine {
+    arrivedQuantity: Decimal;
+    color?: null | string;
+    contractCode: string;
+    contractId: string;
+    contractItemId: string;
+    customerName?: null | string;
+    material?: null | string;
+    orderCode?: null | string;
+    orderId: string;
+    orderLineId: string;
+    productCode?: null | string;
+    productName?: null | string;
+    quantity: Decimal;
+    remainingQuantity: Decimal;
+    size?: null | string;
+    specification?: null | string;
+    supplierName?: null | string;
+    unit?: null | string;
+  }
+
+  export interface RawReceiptReq {
+    batchNo: string;
+    location?: string;
+    purchaseLineId: number;
+    quantity: Decimal;
+    remark?: string;
+  }
+
+  export interface TradeReceiptReq {
+    acceptedQuantity: Decimal;
+    attrs: ItemAttrs;
+    batchNo: string;
+    contractId: string;
+    exceptionReason?: string;
+    location?: string;
+    orderId: string;
+    orderLineId: string;
+    quantity: Decimal;
+    remark?: string;
+  }
+
+  export type ReceiptSource = 'RAW_PURCHASE' | 'TRADE_PURCHASE';
+
+  export interface Receipt {
+    acceptedQuantity: Decimal;
+    batchNo: string;
+    contractCode?: null | string;
+    exceptionReason?: null | string;
+    id: number;
+    itemCode: string;
+    location: string;
+    operatorName?: null | string;
+    productName?: null | string;
+    purchaseNo?: null | string;
+    quantity: Decimal;
+    receiptNo: string;
+    receivedAt?: number | string;
+    remark?: null | string;
+    sourceType: ReceiptSource;
+    stage: string;
+    supplierName?: null | string;
+  }
+
+  export interface ReceiptPageReq extends PageParam {
+    keyword?: string;
+    sourceType?: ReceiptSource;
   }
 
   export interface CodePreviewRow {
@@ -432,6 +518,39 @@ export function getShipmentPage(
 ) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Shipment>>(
     `${BASE}/shipment/page`,
+    { params },
+  );
+}
+
+export function getRawOpenLines() {
+  return requestClient.get<FdmgongchangStageStockApi.RawOpenLine[]>(
+    `${BASE}/receiving/raw-lines`,
+  );
+}
+
+export function getTradeOpenLines() {
+  return requestClient.get<FdmgongchangStageStockApi.TradePurchaseLine[]>(
+    `${BASE}/receiving/trade-lines`,
+  );
+}
+
+export function receiveRawPurchase(
+  data: FdmgongchangStageStockApi.RawReceiptReq,
+) {
+  return requestClient.post<number>(`${BASE}/receiving/raw`, data);
+}
+
+export function receiveTradePurchase(
+  data: FdmgongchangStageStockApi.TradeReceiptReq,
+) {
+  return requestClient.post<number>(`${BASE}/receiving/trade`, data);
+}
+
+export function getReceiptPage(
+  params: FdmgongchangStageStockApi.ReceiptPageReq,
+) {
+  return requestClient.get<PageResult<FdmgongchangStageStockApi.Receipt>>(
+    `${BASE}/receiving/page`,
     { params },
   );
 }

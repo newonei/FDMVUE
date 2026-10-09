@@ -19,7 +19,7 @@ import { receiveStock } from '#/api/fdmgongchang/stage-stock';
 import { normalizeForStage, RAW_CATEGORY_LABELS, stageFields } from '../model';
 import AttrFields from './attr-fields.vue';
 
-/** 原料入库（只入原材料）与期初入库（上线时录入各阶段现有库存）。 */
+/** 无采购单的原料入库（只入原材料）与期初入库（上线时录入各阶段现有库存）。 */
 const props = defineProps<{ options: Api.Options; stage: string }>();
 const emit = defineEmits<{ saved: [] }>();
 const open = defineModel<boolean>('open', { required: true });
@@ -114,6 +114,12 @@ async function submit() {
         <Radio.Button value="RAW_RECEIPT">原料入库</Radio.Button>
         <Radio.Button value="OPENING">期初入库</Radio.Button>
       </Radio.Group>
+      <Alert
+        v-if="isRaw && type === 'RAW_RECEIPT'"
+        type="info"
+        show-icon
+        message="有采购单的原材料请到「到货入库」收货，会同时更新采购单的到货数量。这里只用于没有采购单的入库，例如样品、退料。"
+      />
       <Alert
         v-if="!isRaw"
         type="info"

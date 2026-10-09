@@ -150,7 +150,9 @@ function onSaved() {
         <span class="text-xs text-muted-foreground">
           来源
           <b class="font-medium text-foreground">{{
-            incoming?.label ?? '原料入库'
+            incoming
+              ? `${incoming.label}${stage === 'PACKED' ? '、外采到货' : ''}`
+              : '采购到货'
           }}</b>
           <span class="mx-1">·</span>
           去向
@@ -264,7 +266,9 @@ function onSaved() {
           {{ stageOption?.label }}暂无库存。<template v-if="incoming">
             在「{{ incoming.label }}」工序单报完工后会入库到这里。
           </template>
-          <template v-else>点「原料入库」录入原材料。</template>
+          <template v-else>
+            原材料采购单在「到货入库」收货后会入库到这里。
+          </template>
         </div>
       </template>
     </Table>

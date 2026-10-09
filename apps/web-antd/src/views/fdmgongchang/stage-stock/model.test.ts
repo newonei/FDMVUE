@@ -7,13 +7,16 @@ import { describe, expect, it } from 'vitest';
 import {
   attrSummary,
   deriveOutputs,
+  guessPackedAttrs,
   joinBatches,
   lineBatch,
   makeLabels,
   normalizeForStage,
+  parseSizeText,
   stageColumns,
   sumQty,
   validateOutputs,
+  validateTradeReceipt,
 } from './model';
 
 function line(
@@ -239,6 +242,54 @@ describe('validateOutputs', () => {
       '第 1 行请填完整的长、宽、厚。',
       '第 1 行请选择配方版本。',
       '第 1 行请选择颜色。',
+    ]);
+  });
+});
+
+describe('receiving helpers', () => {
+  it('splits contract size text into length, width and thickness', () => {
+    expect(parseSizeText('183x61x0.6')).toEqual({ length: 183, thickness: 0.6, width: 61 });
+    expect(parseSizeText(' 183 × 61 × 0.6 cm ')).toEqual({ length: 183, thickness: 0.6, width: 61 });
+    expect(parseSizeText('183*61*0.6CM')).toEqual({ length: 183, thickness: 0.6, width: 61 });
+    expect(parseSizeText('6mm')).toEqual({});
+    expect(parseSizeText(null)).toEqual({});
+  });
+
+  it('prefills packed attributes from the contract product and leaves unknown values empty', () => {
+    const options = {
+      colors: [
+        { label: '丁香紫', value: 'DX' },
+        { label: '灰色', value: 'HS' },
+      ],
+      materials: [{ label: 'TPE', value: 'TPE' }],
+    };
+    expect(
+      guessPackedAttrs({ color: '丁香紫/hs', material: 'tpe', size: '183x61x0.6' }, options),
+    ).toEqual({ backColor: 'HS', frontColor: 'DX', length: 183, material: 'TPE', thickness: 0.6, width: 61 });
+    expect(
+      guessPackedAttrs({ color: '丁香紫', material: 'PVC', size: '大号', specification: '183×61×0.8cm' }, options),
+    ).toEqual({ backColor: 'DX', frontColor: 'DX', length: 183, material: 'TPE', thickness: 0.8, width: 61 });
+    expect(guessPackedAttrs({ color: '彩虹' }, options)).toEqual({
+      backColor: undefined,
+      frontColor: undefined,
+      material: 'TPE',
+    });
+  });
+
+  it('checks bought-goods quantities the same way procurement arrivals did', () => {
+    const base = { remaining: '200' };
+    expect(validateTradeReceipt({ ...base, accepted: 200, quantity: 200 })).toEqual([]);
+    expect(validateTradeReceipt({ ...base, accepted: 0, quantity: 3, reason: '整批不良' })).toEqual([]);
+    expect(validateTradeReceipt({ ...base, accepted: 190, quantity: 200, reason: ' ' })).toEqual([
+      '可入库数量少于实收数量，请填写异常原因。',
+    ]);
+    expect(validateTradeReceipt({ ...base, accepted: 210, quantity: 201 })).toEqual([
+      '实收数量超过这行采购待到货的 200。',
+      '可入库数量不能超过实收数量。',
+    ]);
+    expect(validateTradeReceipt({ ...base, accepted: undefined, quantity: 0 })).toEqual([
+      '请填写大于 0 的实收数量。',
+      '请填写可入库数量（良品），全部不良时填 0。',
     ]);
   });
 });

@@ -487,8 +487,14 @@ export function contractNextStep(
     return {
       title: '等待到货',
       description:
-        '外采到货由采购部门登记；自制产品在工厂包装完工后自动回写进度。',
-      department: '采购部门',
+        '外采成品由工厂在「工序库存 · 到货入库」收货，进已包装成品并自动记到本合同；自制产品包装完工后自动回写进度。',
+      department: '工厂部门',
+      button: '去到货入库',
+      action: {
+        type: 'route',
+        path: '/gongchang/stage-stock',
+        query: { tab: 'receiving' },
+      },
     };
   if (open('shipment'))
     return {
