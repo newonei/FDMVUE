@@ -2,6 +2,7 @@
 import type { AttrField, InputLine, OutputDraft } from '../model';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
+import type { FdmgongchangProductionOrderApi } from '#/api/fdmgongchang/production-order';
 import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
@@ -24,6 +25,7 @@ import {
   Table,
 } from 'ant-design-vue';
 
+import { getOpenProductionOrders } from '#/api/fdmgongchang/production-order';
 import { getScheduleTasks } from '#/api/fdmgongchang/schedule';
 import {
   createOrder,
@@ -110,6 +112,36 @@ async function loadMakeTasks() {
     makeTasksLoading.value = false;
   }
 }
+/** 工厂订单（内部向工厂下单）已接单的明细；包装报产出时良品自动累加到完成数量。 */
+const productionOrders = ref<FdmgongchangProductionOrderApi.Order[]>([]);
+const linkedProductionItemId = ref<number>();
+const productionItemOptions = computed(() =>
+  productionOrders.value.flatMap((o) =>
+    o.items
+      .filter((i) => Number(i.quantity) > Number(i.completedQuantity) || i.id === linkedProductionItemId.value)
+      .map((i) => ({
+        label: `${o.orderNo} · ${o.requesterDeptName || o.requesterName || ''} · ${i.productName} · 待做 ${formatQty(Number(i.quantity) - Number(i.completedQuantity))}${i.unit ?? ''}`,
+        value: i.id,
+      })),
+  ),
+);
+const linkedProductionOrderNo = computed(
+  () => productionOrders.value.find((o) => o.items.some((i) => i.id === linkedProductionItemId.value))?.orderNo,
+);
+async function loadProductionOrders() {
+  try {
+    productionOrders.value = await getOpenProductionOrders();
+  } catch {
+    productionOrders.value = [];
+  }
+}
+// 外贸自制任务和工厂订单只能关联一个
+watch(linkedAssignmentId, (v) => {
+  if (v) linkedProductionItemId.value = undefined;
+});
+watch(linkedProductionItemId, (v) => {
+  if (v) linkedAssignmentId.value = undefined;
+});
 const meta = reactive({
   remark: '',
 });
@@ -402,7 +434,9 @@ watch(open, async (value) => {
   }
   order.value = undefined;
   linkedAssignmentId.value = props.initialTask?.assignmentId;
+  linkedProductionItemId.value = undefined;
   void loadMakeTasks();
+  void loadProductionOrders();
   const code = defaultProcessFor(props.initialStage);
   processCode.value = code;
   void loadOperators();
@@ -649,6 +683,7 @@ async function submit() {
     if (props.mode === 'create') {
       await createOrder({
         assignmentId: linkedTask.value?.assignmentId,
+        productionOrderItemId: linkedProductionItemId.value,
         contractId: linkedTask.value?.contractId,
         finish: finish.value,
         inputs: inputs.value.map((l) => ({
@@ -1162,6 +1197,28 @@ watch(processCode, warnNoPatterns);
               </span>
               <span v-else-if="linkedTask">
                 包装完工时才回写合同进度，这道工序只做关联记录。
+              </span>
+            </label>
+            <label
+              v-if="productionItemOptions.length > 0 || linkedProductionItemId"
+              for="order-production-item"
+              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
+            >
+              关联工厂订单（选填）
+              <Select
+                id="order-production-item"
+                v-model:value="linkedProductionItemId"
+                :options="productionItemOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="选内部部门下给本厂、已接单的生产订单"
+                show-search
+              />
+              <span v-if="linkedProductionItemId && outputStage === 'PACKED'" class="text-primary">
+                每次报产出的良品会自动累加到工厂订单 {{ linkedProductionOrderNo }} 的完成数量。
+              </span>
+              <span v-else-if="linkedProductionItemId">
+                包装报产出时才累加完成数量，这道工序只做关联记录。
               </span>
             </label>
             <label

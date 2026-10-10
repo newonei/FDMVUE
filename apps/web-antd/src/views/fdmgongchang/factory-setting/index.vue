@@ -7,13 +7,16 @@ import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
 import {
+  Alert,
   Button,
   Checkbox,
   InputNumber,
   message,
+  Radio,
   Result,
   Spin,
   Tabs,
+  Tag,
 } from 'ant-design-vue';
 
 import {
@@ -28,6 +31,7 @@ import WageItemPanel from './modules/wage-item-panel.vue';
 /**
  * 工厂部门 · 工厂设置：各厂自己的配置集中在这里。
  * - 本厂工序：各厂工序不一样，没勾的工序不会出现在开单、生产链和人员岗位里；
+ * - AI 排单：本厂排单用哪个模型，只能选 AI 网关已给本厂放行的模型；
  * - 计价项目：本厂的计件、计时、杂活、补助价格（单独权限，普通人员看不到）。
  */
 defineOptions({ name: 'FdmGongchangFactorySetting' });
@@ -39,7 +43,7 @@ const canEdit = computed(() =>
 const canSeeWage = computed(() =>
   hasAccessByCodes(['fdmgongchang:wage-item:query']),
 );
-const activeTab = ref<'processes' | 'wage'>('processes');
+const activeTab = ref<'ai' | 'processes' | 'wage'>('processes');
 
 const factory = useFactory();
 const setting = ref<Api.Setting>();
@@ -50,6 +54,15 @@ const savedCapacity = (code: string) => {
   const v = setting.value?.processes.find((p) => p.code === code)?.dailyCapacity;
   return v === null || v === undefined || v === '' ? null : Number(v);
 };
+/** 选的排单模型，'' 表示自动。模型编号是长整数，按字符串比较避免精度问题。 */
+const modelId = ref('');
+const savedModelId = computed(() =>
+  setting.value?.scheduleModelId === null || setting.value?.scheduleModelId === undefined
+    ? ''
+    : String(setting.value.scheduleModelId),
+);
+const models = computed(() => setting.value?.scheduleModels ?? []);
+const autoModel = computed(() => models.value.find((m) => m.allowed));
 const loading = ref(false);
 const saving = ref(false);
 const loadError = ref(false);
@@ -64,7 +77,8 @@ const dirty = computed(() => {
     saved.some((code) => !enabled.value.includes(code)) ||
     (setting.value?.processes ?? []).some(
       (p) => (capacities.value[p.code] ?? null) !== savedCapacity(p.code),
-    )
+    ) ||
+    modelId.value !== savedModelId.value
   );
 });
 
@@ -85,6 +99,7 @@ async function load() {
     capacities.value = Object.fromEntries(
       setting.value.processes.map((p) => [p.code, savedCapacity(p.code)]),
     );
+    modelId.value = savedModelId.value;
   } catch {
     loadError.value = true;
   } finally {
@@ -114,6 +129,7 @@ async function save() {
         order.map((code) => [code, capacities.value[code] ?? null]),
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
+      scheduleModelId: modelId.value || null,
     });
     message.success(`${factory.current.value?.name ?? '本厂'}的工厂设置已保存`);
     await load();
@@ -142,7 +158,7 @@ async function save() {
           </p>
         </div>
         <Button
-          v-if="canEdit && setting && activeTab === 'processes'"
+          v-if="canEdit && setting && activeTab !== 'wage'"
           :disabled="!dirty"
           :loading="saving"
           type="primary"
@@ -228,6 +244,49 @@ async function save() {
           </p>
         </section>
       </Spin>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="ai" tab="AI 排单">
+            <section class="flex flex-col gap-3">
+              <h2 class="m-0 text-sm font-semibold">
+                排单模型<span class="ml-2 text-xs font-normal text-muted-foreground">生成排单方案时用哪个 AI 模型；只有 AI 网关已给本厂放行「工厂排单」用途的模型才能选</span>
+              </h2>
+              <Alert
+                v-if="models.length === 0"
+                message="AI 网关里还没有可用的文本模型，请先让 AI 网关管理员接入模型。"
+                show-icon
+                type="warning"
+              />
+              <Radio.Group
+                v-else
+                id="factory-schedule-model"
+                v-model:value="modelId"
+                :disabled="!canEdit"
+                class="flex flex-col gap-2"
+              >
+                <Radio value="" class="rounded-md border border-border px-3 py-2">
+                  自动
+                  <span class="text-xs text-muted-foreground">
+                    {{ autoModel ? `现在用 ${autoModel.name}` : '本厂还没有放行的模型' }}
+                  </span>
+                </Radio>
+                <Radio
+                  v-for="m in models"
+                  :key="m.id"
+                  :disabled="!m.allowed && String(m.id) !== savedModelId"
+                  :value="String(m.id)"
+                  class="rounded-md border border-border px-3 py-2"
+                >
+                  {{ m.name }}
+                  <span class="text-xs text-muted-foreground">{{ m.code }}</span>
+                  <Tag v-if="!m.allowed" class="ml-2" color="orange">未给本厂放行</Tag>
+                  <Tag v-else-if="m.structured" class="ml-2" color="green">结构化输出</Tag>
+                </Radio>
+              </Radio.Group>
+              <p class="m-0 text-xs text-muted-foreground">
+                想用新的模型：先在「模型中心」接入服务商和文本模型，再由 AI 管理员给本厂放行「工厂排单」用途（FDM_GONGCHANG_SCHEDULE，INTERNAL），这里就能选了。
+                选的模型以后不再放行时，自动改用第一个放行的模型。
+              </p>
+            </section>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
             <WageItemPanel

@@ -8,16 +8,18 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
-import { Button, Input, message, Result, Select, Table, Tag } from 'ant-design-vue';
+import { Button, Input, message, Popconfirm, Result, Select, Table, Tag } from 'ant-design-vue';
 
-import { getWorkerList, getWorkerOptions } from '#/api/fdmgongchang/factory';
+import { getWorkerList, getWorkerOptions, removeWorkers } from '#/api/fdmgongchang/factory';
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
+import AddModal from './modules/add-modal.vue';
 import AssignModal from './modules/assign-modal.vue';
 
 /**
  * 工厂部门 · 人员岗位：钉钉登录过的本厂人员都会出现在这里，工厂管理员给他们分配岗位。
+ * 不在本厂部门下的人可以手动添加，手动添加的可以再移出本厂。
  * 工序单的操作人只能选本厂、在岗、具备该工序岗位的人。
  */
 defineOptions({ name: 'FdmGongchangWorker' });
@@ -41,6 +43,15 @@ const filters = reactive({
 const pageNo = ref(1);
 const pageSize = ref(20);
 
+const addOpen = ref(false);
+/** 工厂绑定的钉钉根部门，例如黄石工厂 → 湖北飞德慕。 */
+const factoryDeptName = computed(() => {
+  const deptId = factory.factories.value.find((f) => f.id === factory.factoryId.value)?.deptId;
+  return options.value?.depts.find((d) => d.id === deptId)?.name ?? '本厂部门';
+});
+const currentFactoryName = computed(
+  () => factory.factories.value.find((f) => f.id === factory.factoryId.value)?.name,
+);
 const modalOpen = ref(false);
 const modalWorkers = ref<Api.Worker[]>([]);
 
@@ -128,6 +139,18 @@ async function onSaved(text: string) {
   await loadRows();
 }
 
+async function onAdded(text: string) {
+  message.success(text);
+  filters.state = undefined;
+  await loadRows();
+}
+
+async function removeOne(worker: Api.Worker) {
+  await removeWorkers([worker.userId]);
+  message.success(`已把 ${worker.nickname} 移出本厂`);
+  await loadRows();
+}
+
 const columns = [
   { key: 'nickname', title: '姓名' },
   { dataIndex: 'deptName', key: 'deptName', title: '车间 / 部门' },
@@ -135,7 +158,7 @@ const columns = [
   { dataIndex: 'team', key: 'team', title: '班组' },
   { key: 'wageMode', title: '计薪' },
   { key: 'status', title: '状态' },
-  { align: 'right' as const, key: 'actions', title: '', width: 90 },
+  { align: 'right' as const, key: 'actions', title: '', width: 140 },
 ];
 
 const deptOptions = computed(() =>
@@ -166,16 +189,15 @@ const stateOptions = [
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            本厂人员用钉钉登录一次就会出现在这里。分配工序岗位后，开工序单时才能选他做操作人。
+            钉钉部门「{{ factoryDeptName }}」及下级部门的人登录一次就会出现在这里；不在这个部门下的人，点「添加人员」从系统里搜出来加进来。分配工序岗位后，开工序单时才能选他做操作人。
           </p>
         </div>
-        <Button
-          v-if="canUpdate && selectedKeys.length > 0"
-          type="primary"
-          @click="openAssign(rows.filter((r) => selectedKeys.includes(r.userId)))"
-        >
-          批量分配（{{ selectedKeys.length }} 人）
-        </Button>
+        <div v-if="canUpdate && !noFactory && !loadError" class="flex flex-wrap gap-2">
+          <Button v-if="selectedKeys.length > 0" @click="openAssign(rows.filter((r) => selectedKeys.includes(r.userId)))">
+            批量分配（{{ selectedKeys.length }} 人）
+          </Button>
+          <Button type="primary" @click="addOpen = true">＋ 添加人员</Button>
+        </div>
       </header>
 
       <Result v-if="noFactory" status="info" title="你的账号还不属于任何工厂">
@@ -252,7 +274,10 @@ const stateOptions = [
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'nickname'">
               <div class="flex flex-col">
-                <span>{{ record.nickname }}</span>
+                <span class="flex items-center gap-1">
+                  {{ record.nickname }}
+                  <Tag v-if="record.added" class="m-0" color="blue">手动添加</Tag>
+                </span>
                 <span v-if="record.mobile" class="text-xs text-muted-foreground">{{ record.mobile }}</span>
               </div>
             </template>
@@ -271,19 +296,34 @@ const stateOptions = [
               <span v-else class="text-xs text-muted-foreground">—</span>
             </template>
             <template v-else-if="column.key === 'actions'">
-              <button
-                v-if="canUpdate"
-                class="whitespace-nowrap text-xs text-primary hover:underline"
-                type="button"
-                @click="openAssign([record as Api.Worker])"
-              >
-                {{ record.assigned ? '修改' : '分配岗位' }}
-              </button>
+              <span v-if="canUpdate" class="inline-flex gap-3 whitespace-nowrap text-xs">
+                <button
+                  class="text-primary hover:underline"
+                  type="button"
+                  @click="openAssign([record as Api.Worker])"
+                >
+                  {{ record.assigned ? '修改' : '分配岗位' }}
+                </button>
+                <Popconfirm
+                  v-if="record.added"
+                  :title="`把 ${record.nickname} 移出本厂？岗位会一起清掉`"
+                  ok-text="移出"
+                  @confirm="removeOne(record as Api.Worker)"
+                >
+                  <button class="text-destructive hover:underline" type="button">移出本厂</button>
+                </Popconfirm>
+              </span>
             </template>
           </template>
         </Table>
       </section>
 
+      <AddModal
+        v-model:open="addOpen"
+        :factory-id="factory.factoryId.value"
+        :factory-name="currentFactoryName"
+        @added="onAdded"
+      />
       <AssignModal
         v-if="options"
         v-model:open="modalOpen"

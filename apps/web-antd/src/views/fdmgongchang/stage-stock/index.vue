@@ -2,12 +2,12 @@
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
-import { Button, message, Result, Spin, Tabs } from 'ant-design-vue';
+import { Alert, Button, message, Result, Spin, Tabs } from 'ant-design-vue';
 
 import {
   getStageStockOptions,
@@ -24,6 +24,7 @@ import SettingPanel from './modules/setting-panel.vue';
 import ShipmentDrawer from './modules/shipment-drawer.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
+import TodayPanel from './modules/today-panel.vue';
 import TradePanel from './modules/trade-panel.vue';
 import TxnPanel from './modules/txn-panel.vue';
 
@@ -44,17 +45,28 @@ const summary = ref<Api.Summary>();
 const loadError = ref(false);
 /** 账号不属于任何工厂，且没有「查看全部工厂」权限。 */
 const noFactory = ref(false);
-type TabKey = 'orders' | 'receiving' | 'settings' | 'stock' | 'trade' | 'txns';
+type TabKey =
+  | 'orders'
+  | 'receiving'
+  | 'settings'
+  | 'stock'
+  | 'today'
+  | 'trade'
+  | 'txns';
 const TAB_KEYS = new Set<TabKey>([
   'orders',
   'receiving',
   'settings',
   'stock',
+  'today',
   'trade',
   'txns',
 ]);
 const route = useRoute();
-const activeTab = ref<TabKey>('stock');
+const router = useRouter();
+const activeTab = ref<TabKey>('today');
+/** 手机上打开时提示去工人端。 */
+const onPhone = typeof window !== 'undefined' && window.innerWidth < 768;
 const tradePending = ref(0);
 const receivingPending = ref(0);
 const activeStage = ref('BOARD');
@@ -221,6 +233,18 @@ async function onSettingSaved() {
         </Button>
       </header>
 
+      <Alert
+        v-if="onPhone"
+        message="在手机上？工人请用「我的工作台」，一步一步领料、报数量更方便"
+        show-icon
+        type="info"
+      >
+        <template #action>
+          <Button size="small" type="primary" @click="router.push('/gongchang/workbench')">
+            去工作台
+          </Button>
+        </template>
+      </Alert>
       <Result
         v-if="noFactory"
         status="info"
@@ -267,6 +291,9 @@ async function onSettingSaved() {
           class="min-w-0 flex-1 rounded-lg border border-border bg-card px-4 pb-4"
         >
           <Tabs v-model:active-key="activeTab">
+            <Tabs.TabPane key="today" tab="今日生产">
+              <TodayPanel :refresh-key="refreshKey" @orders="activeTab = 'orders'" />
+            </Tabs.TabPane>
             <Tabs.TabPane key="stock" tab="库存">
               <StockPanel
                 :options="options"

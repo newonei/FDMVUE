@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import StageStockPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  openProductionOrders: vi.fn().mockResolvedValue([]),
   defect: vi.fn(),
   makeTasks: vi.fn(),
   myFactories: vi.fn().mockResolvedValue({
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
     ],
   }),
   setFactory: vi.fn(),
-  route: { query: {} as Record<string, string> },
+  route: { query: { tab: 'stock' } as Record<string, string> },
   shipmentPage: vi.fn(),
   shippable: vi.fn(),
   options: vi.fn(),
@@ -49,6 +50,19 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   getStageStockOptions: mocks.options,
   getStageStockSetting: mocks.setting,
   getStageStockSummary: mocks.summary,
+  getStageStockToday: vi.fn().mockResolvedValue({
+    defectTotal: 0,
+    goodTotal: 0,
+    lanes: [],
+    pendingRecords: 0,
+    shortages: [],
+    staleOrders: [],
+    startedTaskCount: 0,
+    taskCount: 0,
+    today: '2026-10-11',
+    unassignedWorkers: 0,
+    wipCount: 0,
+  }),
   getStockPage: mocks.stockPage,
   getTxnPage: mocks.txnPage,
   previewItemCodes: vi.fn().mockResolvedValue([]),
@@ -62,13 +76,17 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   voidOrder: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({ getScheduleTasks: vi.fn().mockResolvedValue([]) }));
+vi.mock('#/api/fdmgongchang/production-order', () => ({ getOpenProductionOrders: mocks.openProductionOrders }));
 vi.mock('#/api/fdmgongchang/wage', () => ({ matchWageItems: vi.fn().mockResolvedValue([]) }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,
 }));
 vi.mock('@vben/stores', () => ({ useUserStore: () => ({ userInfo: { id: 1 } }) }));
-vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
+vi.mock('vue-router', () => ({
+  useRoute: () => mocks.route,
+  useRouter: () => ({ push: vi.fn(), resolve: () => ({ href: '/gongchang/workbench' }) }),
+}));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({ setup: (_, ctx) => () => h('main', ctx.slots.default?.()) }),

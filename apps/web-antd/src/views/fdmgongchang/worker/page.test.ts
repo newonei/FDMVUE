@@ -13,15 +13,21 @@ const mocks = vi.hoisted(() => ({
     defaultFactoryId: 3,
     factories: [{ code: 'LYFDM', deptId: 124, id: 3, name: '洛阳飞德慕' }],
   }),
+  add: vi.fn(),
   options: vi.fn(),
+  remove: vi.fn(),
   save: vi.fn(),
+  search: vi.fn(),
   setFactory: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   getWorkerList: mocks.list,
   getWorkerOptions: mocks.options,
+  addWorkers: mocks.add,
+  removeWorkers: mocks.remove,
   saveWorkers: mocks.save,
+  searchWorkerCandidates: mocks.search,
   setCurrentFactoryId: mocks.setFactory,
 }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
@@ -123,5 +129,40 @@ describe('worker page', () => {
       userIds: [12],
       wageMode: undefined,
     });
+  });
+
+  it('adds people from outside the factory dept, skipping ones already in another factory', async () => {
+    mocks.options.mockResolvedValue(options);
+    mocks.list.mockResolvedValue([{ ...workers[0], added: true }]);
+    mocks.search.mockResolvedValue([
+      { deptName: '总部', nickname: '赵七', userId: 21 },
+      { deptName: '湖北飞德慕', factoryId: 1, factoryName: '湖北飞德慕', nickname: '赵八', userId: 22 },
+    ]);
+    mocks.add.mockResolvedValue(true);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(WorkerPage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+    expect(document.body.textContent).toContain('手动添加');
+    expect(document.body.textContent).toContain('移出本厂');
+
+    clickButton('＋添加人员');
+    await flush();
+    const input = document.querySelector<HTMLInputElement>('#worker-add-keyword')!;
+    input.value = '赵';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 350));
+    await flush();
+    expect(mocks.search).toHaveBeenCalledWith('赵');
+    expect(document.body.textContent).toContain('在湖北飞德慕');
+    const other = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('赵八'));
+    expect(other?.disabled).toBe(true);
+    [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('赵七'))!.click();
+    await flush();
+    clickButton('添加1人');
+    await flush();
+    expect(mocks.add).toHaveBeenCalledWith([21]);
   });
 });

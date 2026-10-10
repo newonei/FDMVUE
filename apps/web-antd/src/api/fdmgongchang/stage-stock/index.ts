@@ -85,6 +85,47 @@ export namespace FdmgongchangStageStockApi {
     stages: Array<{ quantity: Decimal; rowCount: number; stage: string }>;
   }
 
+  /** 今日生产概览。 */
+  export interface Today {
+    defectTotal: Decimal;
+    goodTotal: Decimal;
+    lanes: Array<{
+      defect: Decimal;
+      done: Decimal;
+      label: string;
+      outputLabel: string;
+      people: string[];
+      plan: Decimal;
+      process: string;
+      stock: Decimal;
+      unit: string;
+      wip: number;
+    }>;
+    pendingRecords: number;
+    shortages: Array<{
+      available: Decimal;
+      label: string;
+      planned: Decimal;
+      process: string;
+      sourceLabel: string;
+      unit: string;
+    }>;
+    staleOrders: Array<{
+      id: number;
+      inputQuantity: Decimal;
+      issuedAt?: null | number | string;
+      operatorName?: null | string;
+      orderNo: string;
+      process: string;
+      unit: string;
+    }>;
+    startedTaskCount: number;
+    taskCount: number;
+    today: DateValue;
+    unassignedWorkers: number;
+    wipCount: number;
+  }
+
   export interface Stock {
     batchNo: string;
     id: number;
@@ -179,6 +220,8 @@ export namespace FdmgongchangStageStockApi {
     pieceworks?: Piecework[];
     process: string;
     remark?: string;
+    /** 关联的生产订单明细（选填）；包装报产出时良品累加到它的完成数量。 */
+    productionOrderItemId?: number;
     /** 关联的排单任务（选填）。 */
     scheduleTaskId?: number;
     sourceStage: string;
@@ -479,6 +522,12 @@ export function getStageStockSummary() {
     `${BASE}/summary`,
     { headers: factoryHeaders() },
   );
+}
+
+export function getStageStockToday() {
+  return requestClient.get<FdmgongchangStageStockApi.Today>(`${BASE}/today`, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getStockPage(params: FdmgongchangStageStockApi.StockPageReq) {

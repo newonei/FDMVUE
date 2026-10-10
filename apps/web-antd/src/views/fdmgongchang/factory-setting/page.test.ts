@@ -82,6 +82,7 @@ describe('factory setting page', () => {
     expect(mocks.save).toHaveBeenCalledWith({
       dailyCapacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
       enabledProcesses: ['MIX', 'SLICE', 'PACK'],
+      scheduleModelId: null,
     });
   });
 });

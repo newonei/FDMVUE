@@ -29,6 +29,8 @@ export namespace FdmgongchangFactoryApi {
   }
 
   export interface Worker {
+    /** 手动添加的（不在本厂部门下），可以移出本厂。 */
+    added?: boolean;
     assigned: boolean;
     deptId?: null | number;
     deptName?: null | string;
@@ -59,6 +61,16 @@ export namespace FdmgongchangFactoryApi {
     team?: string;
     userIds: number[];
     wageMode?: string;
+  }
+
+  export interface Candidate {
+    deptName?: null | string;
+    /** 已经属于的工厂；不属于任何工厂时为空。 */
+    factoryId?: null | number;
+    factoryName?: null | string;
+    mobile?: null | string;
+    nickname: string;
+    userId: number;
   }
 
   export interface Operator {
@@ -119,6 +131,30 @@ export function saveWorkers(data: FdmgongchangFactoryApi.WorkerSaveReq) {
   });
 }
 
+/** 按姓名搜全部系统用户，用来把不在本厂部门下的人加进来。 */
+export function searchWorkerCandidates(keyword: string) {
+  return requestClient.get<FdmgongchangFactoryApi.Candidate[]>(
+    '/fdmgongchang/worker/candidates',
+    { headers: factoryHeaders(), params: { keyword } },
+  );
+}
+
+export function addWorkers(userIds: number[]) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/worker/add',
+    { userIds },
+    { headers: factoryHeaders() },
+  );
+}
+
+export function removeWorkers(userIds: number[]) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/worker/remove',
+    { userIds },
+    { headers: factoryHeaders() },
+  );
+}
+
 export namespace FdmgongchangFactorySettingApi {
   export interface ProcessToggle {
     code: string;
@@ -131,8 +167,21 @@ export namespace FdmgongchangFactorySettingApi {
     dailyCapacity?: null | number | string;
   }
 
+  export interface ModelOption {
+    /** 是否已给本厂放行 AI 排单用途；没放行的不能选。 */
+    allowed: boolean;
+    code: string;
+    id: number;
+    name: string;
+    /** 支持结构化输出；不支持时用普通对话，系统再校验格式。 */
+    structured: boolean;
+  }
+
   export interface Setting {
     processes: ProcessToggle[];
+    /** AI 排单选的模型；为空表示自动（本厂放行的第一个）。 */
+    scheduleModelId?: null | number | string;
+    scheduleModels?: ModelOption[];
   }
 
   export interface SaveReq {
@@ -140,6 +189,8 @@ export namespace FdmgongchangFactorySettingApi {
     dailyCapacities?: Record<string, null | number>;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];
+    /** AI 排单用的模型；为空表示自动。 */
+    scheduleModelId?: null | number | string;
   }
 }
 
