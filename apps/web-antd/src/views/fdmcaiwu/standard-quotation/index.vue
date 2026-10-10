@@ -776,9 +776,11 @@ function formatPriceCell(value: unknown) {
 
 function formatDateTime(value: unknown) {
   if (!hasValue(value)) return '—';
-  const date = new Date(String(value));
+  // 后端时间可能是毫秒时间戳（数字或数字字符串），也可能是 ISO 文本
+  const text = String(value);
+  const date = new Date(/^\d{11,}$/.test(text) ? Number(text) : text);
   return Number.isNaN(date.getTime())
-    ? String(value)
+    ? text
     : date.toLocaleString('zh-CN', { hour12: false });
 }
 

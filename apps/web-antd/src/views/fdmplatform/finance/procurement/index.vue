@@ -22,6 +22,7 @@ import {
 
 import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
 
+import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
@@ -32,6 +33,7 @@ import { financeStatus, financeTitles } from './model';
 import '../../components/compact-tables.css';
 
 const props = defineProps<{ type: ProcurementFinanceType }>();
+const inMergedView = useInMergedView();
 const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
@@ -172,7 +174,7 @@ watch(
 </script>
 <template>
   <Page
-    :title="financeTitles[effectiveType]"
+    :title="inMergedView ? undefined : financeTitles[effectiveType]"
     description="独立办理采购资金与费用，确认付款后才计入已付，成本按自身来源与归属单独管理。"
   >
     <Card>

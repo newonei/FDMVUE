@@ -109,6 +109,13 @@ const signedRange = ref<[Dayjs, Dayjs]>();
 const sort = ref<ContractBoardSort>('SIGNED');
 const year = ref<'ALL' | 'EARLIER' | number>(new Date().getFullYear());
 const shipState = ref<'ALL' | 'OPEN'>('OPEN');
+/** 门户“金智合同未发齐”和提示条的入口：近半年签订、迁移时未发齐 */
+const jinzhiRecent = ref(false);
+const jinzhiSince = computed(
+  () =>
+    overview.value?.jinzhi.since ??
+    dayjs().subtract(6, 'month').startOf('month').format('YYYY-MM-DD'),
+);
 
 const detailOpen = ref(false);
 const detailLoading = ref(false);
@@ -181,7 +188,9 @@ const columns = computed(() =>
 function signedFilter() {
   if (tab.value === 'JINZHI')
     return {
-      ...yearRange(year.value),
+      ...(jinzhiRecent.value
+        ? { signedFrom: jinzhiSince.value }
+        : yearRange(year.value)),
       shipState: shipState.value === 'OPEN' ? ('OPEN' as const) : undefined,
     };
   const range = signedRange.value;
@@ -303,6 +312,7 @@ function showJinzhiOpen() {
   tab.value = 'JINZHI';
   shipState.value = 'OPEN';
   year.value = 'ALL';
+  jinzhiRecent.value = true;
   keyword.value = '';
   void load(true);
 }
@@ -394,6 +404,11 @@ async function onNewContractSaved(contract: Contract) {
 function applyEntry() {
   const entry = entryFromQuery(route.query);
   tab.value = entry.tab;
+  if (route.query.scope === 'pending') {
+    jinzhiRecent.value = true;
+    shipState.value = 'OPEN';
+    year.value = 'ALL';
+  }
   stage.value = entry.stage;
   due.value = entry.due;
   if (entry.mine !== undefined) mine.value = entry.mine;
@@ -613,8 +628,22 @@ onMounted(async () => {
               v-model:value="year"
               :options="yearOptions"
               style="width: 110px"
-              @change="load(true)"
+              @change="
+                jinzhiRecent = false;
+                load(true);
+              "
             />
+            <Tag
+              v-if="jinzhiRecent"
+              closable
+              color="orange"
+              @close="
+                jinzhiRecent = false;
+                load(true);
+              "
+            >
+              {{ jinzhiSince }} 以后签订
+            </Tag>
             <div class="seg small" role="group" aria-label="发货情况">
               <button
                 type="button"
@@ -690,9 +719,9 @@ onMounted(async () => {
             v-if="filtered && tab !== 'JINZHI'"
             type="link"
             @click="resetFilters"
-            >
-清除筛选
-</Button>
+          >
+            清除筛选
+          </Button>
           <span class="grow"></span>
           <span v-if="tab === 'ACTIVE' && overview" class="chips">
             <button
@@ -948,9 +977,9 @@ onMounted(async () => {
                 type="link"
                 size="small"
                 @click="openContract(record.id)"
-                >
-查看
-</Button>
+              >
+                查看
+              </Button>
             </template>
           </template>
         </Table>

@@ -15,6 +15,7 @@ import { Alert, Button, Empty, Input, Table, Tag } from 'ant-design-vue';
 import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
 
+import { useInMergedView } from '../../../components/merged-view';
 import { errorText } from '../../../data';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../../documents/navigation';
@@ -29,6 +30,7 @@ import {
   reimbursementViews,
 } from './workspace';
 
+const inMergedView = useInMergedView();
 const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
@@ -214,8 +216,10 @@ onBeforeUnmount(() => {
     <section class="expense-workspace">
       <header class="expense-heading">
         <div>
-          <span class="expense-eyebrow">财务管理 / 费用报销</span>
-          <h1>费用报销</h1>
+          <template v-if="!inMergedView">
+            <span class="expense-eyebrow">财务管理 / 费用报销</span>
+            <h1>费用报销</h1>
+          </template>
           <p>填写费用与凭证，提交生效后继续办理实际付款。</p>
         </div>
         <Button type="primary" size="large" @click="create">新建报销</Button>

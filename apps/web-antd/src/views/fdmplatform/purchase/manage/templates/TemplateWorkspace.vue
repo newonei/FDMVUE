@@ -31,8 +31,11 @@ import {
 } from '#/api/fdmplatform/procurement';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
+import { useInMergedView } from '../../../components/merged-view';
 import { errorText, field, selectField } from '../../../data';
+
 defineOptions({ name: 'FdmPlatformPurchaseTemplateWorkspace' });
+const inMergedView = useInMergedView();
 const tab = ref<SettingType>('entities');
 const data = ref<Record<SettingType, ProcurementSetting[]>>({
   entities: [],
@@ -173,7 +176,7 @@ onMounted(load);
 </script>
 <template>
   <Page
-    title="采购合同模板"
+    :title="inMergedView ? undefined : '采购合同模板'"
     description="统一维护签约与付款主体、合同模板及分组条款，历史采购合同保留原始版本。"
   >
     <Card>

@@ -175,8 +175,8 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
       },
       {
         key: 'history',
-        label: '历史合同待补齐',
-        empty: '没有待补齐的历史合同',
+        label: '金智合同未发齐',
+        empty: '最近签的金智合同都已发齐',
         target: () => ({ path: CONTRACTS, query: { scope: 'pending' } }),
       },
     ],

@@ -33,6 +33,11 @@
   min-width: 0;
 }
 
+/* 合并页签里不再重复大标题，说明和操作保持一行 */
+.procurement-page-header.is-merged {
+  margin-bottom: 16px;
+}
+
 .procurement-eyebrow {
   font-size: 12px;
   color: var(--procurement-secondary);

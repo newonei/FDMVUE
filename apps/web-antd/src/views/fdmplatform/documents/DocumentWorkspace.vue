@@ -27,6 +27,7 @@ import dayjs from 'dayjs';
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
 import CompletionScopeFilter from '../components/CompletionScope.vue';
+import { useInMergedView } from '../components/merged-view';
 import { errorText, label, money, statusLabels } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
@@ -67,6 +68,7 @@ import '../components/compact-tables.css';
 const props = defineProps<{ kind: DocumentKind }>();
 const route = useRoute();
 const router = useRouter();
+const inMergedView = useInMergedView();
 const routeActive = useRouteOwner();
 const procurementQueue = computed<'intake' | 'tasks'>({
   get: () => (route.query.queue === 'tasks' ? 'tasks' : 'intake'),
@@ -119,7 +121,9 @@ const records = ref<DocumentRow[]>([]);
 const loading = ref(false);
 const pageError = ref('');
 const keyword = ref('');
-const status = ref<string>();
+/** 采购申请默认只看有效的；合同取消后申请也随之取消，不再占列表 */
+const defaultStatus = () => (props.kind === 'requests' ? 'ACTIVE' : undefined);
+const status = ref<string | undefined>(defaultStatus());
 const assignmentStatus = ref<string>();
 const scope = ref<CompletionScope>(
   scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
@@ -280,8 +284,50 @@ function requestCell(record: Record<string, unknown>, key: string) {
     ? `${name} 等 ${items.length} 项 · 共 ${quantity}`
     : `${name} · ${quantity}`;
 }
+/** 金智迁入的出入库单把产品和数量放在明细行里，单头没有 */
+function lineCell(row: DocumentRow, key: string) {
+  const lines = Array.isArray(row.record.lines)
+    ? (row.record.lines as Record<string, unknown>[])
+    : [];
+  const value = row.record[key];
+  if (key === 'product') {
+    if (lines.length === 0) return undefined;
+    const first = lines[0]!;
+    const snapshot = (first.specificationSnapshot ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const name = String(first.skuName ?? snapshot.skuName ?? '产品');
+    return lines.length > 1 ? `${name} 等 ${lines.length} 项` : name;
+  }
+  if (
+    key === 'quantity' &&
+    (value === null || value === undefined) &&
+    lines.length > 0
+  ) {
+    const units = new Set(lines.map((line) => String(line.unit ?? '')));
+    const total = lines.reduce(
+      (sum, line) => sum + Number(line.quantity ?? 0),
+      0,
+    );
+    return `${total.toLocaleString('en-US')}${units.size === 1 ? ` ${[...units][0]}` : ''}`;
+  }
+  if (key === 'shippedDate' && !value) {
+    const source = (row as { migration?: { sourceDate?: string } }).migration
+      ?.sourceDate;
+    if (source) return source.slice(0, 10);
+    const occurred = row.record.occurredAt;
+    return typeof occurred === 'string'
+      ? dayjs(occurred).format('YYYY-MM-DD')
+      : undefined;
+  }
+  return undefined;
+}
 function cell(row: DocumentRow, key: string) {
   if (key === 'allocationType') return allocationKind(row.record);
+  const fromLines = lineCell(row, key);
+  if (fromLines !== undefined) return fromLines;
+  if (key === 'product') return '—';
   if (
     key === 'requestItems' ||
     (key === 'requiredDate' && Array.isArray(row.record.items))
@@ -391,7 +437,11 @@ function quickAction(row: DocumentRow) {
   actionOpen.value = true;
 }
 const hasSearch = computed(() =>
-  Boolean(keyword.value.trim() || status.value || assignmentStatus.value),
+  Boolean(
+    keyword.value.trim() ||
+    (status.value && status.value !== defaultStatus()) ||
+    assignmentStatus.value,
+  ),
 );
 const emptyMessage = computed(() =>
   hasSearch.value ? '没有符合当前查询条件的单据' : kindEmptyMessage(),
@@ -407,7 +457,7 @@ function kindEmptyMessage() {
 }
 function clearSearch() {
   keyword.value = '';
-  status.value = undefined;
+  status.value = defaultStatus();
   assignmentStatus.value = undefined;
   search();
 }
@@ -432,7 +482,7 @@ watch(
     actionRow.value = undefined;
     actionSource.value = undefined;
     actionContractId.value = undefined;
-    status.value = undefined;
+    status.value = defaultStatus();
     assignmentStatus.value = undefined;
     scope.value =
       scopeFromQuery(route.query.scope) ??
@@ -461,7 +511,13 @@ onMounted(async () => {
 </script>
 <template>
   <Page
-    :title="kind === 'tasks' ? documentDefinitions.tasks.title : config.title"
+    :title="
+      inMergedView
+        ? undefined
+        : kind === 'tasks'
+          ? documentDefinitions.tasks.title
+          : config.title
+    "
     :description="handoff?.note ?? config.description"
   >
     <Card>
