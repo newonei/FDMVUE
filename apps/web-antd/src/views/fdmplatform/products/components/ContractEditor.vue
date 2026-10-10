@@ -9,6 +9,7 @@ import type {
   Directory,
   MasterRecord,
 } from '#/api/fdmplatform';
+import type { ContractBoardRow } from '#/api/fdmplatform/contract-board';
 import type { Customer } from '#/api/fdmplatform/customers';
 import type { Product, TaxBasis } from '#/api/fdmplatform/products';
 
@@ -36,8 +37,10 @@ import {
   contractAction,
   getAccess,
   getAttachments,
+  getContract,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
+import { getContractBoard } from '#/api/fdmplatform/contract-board';
 import { getCustomer, getCustomers } from '#/api/fdmplatform/customers';
 import { resolveProducts } from '#/api/fdmplatform/products';
 import { submissionFilesError } from '#/api/fdmplatform/submission-files';
@@ -53,7 +56,7 @@ import {
   validProductCategory,
 } from '../../contract-categories';
 import { errorText, money } from '../../data';
-import { personLabel } from '../../directory';
+import { departmentLabel, personLabel } from '../../directory';
 import CustomerEditor from '../../trade/customers/CustomerEditor.vue';
 import {
   attachmentPurposeOptions,
@@ -76,6 +79,8 @@ import ProductPicker from './ProductPicker.vue';
 
 const props = defineProps<{
   contract?: Contract;
+  /** 新建时带入另一份合同的产品、成交价和条件（复制上一单） */
+  copyFrom?: Contract;
   defaultBusinessType?: 'DOMESTIC' | 'FOREIGN';
   directory?: Directory;
   master: MasterRecord[];
@@ -138,6 +143,118 @@ const customerError = ref('');
 const customerKeyword = ref('');
 const customerPage = ref(1);
 const customerTotal = ref(0);
+/** 新建合同时，所选客户最近的合同；用于带出订单公司、币种和复制上一单 */
+const recentContracts = ref<ContractBoardRow[]>([]);
+const copyChoice = ref<string>();
+const copying = ref(false);
+let recentSequence = 0;
+const departmentOptions = computed(() => {
+  const options = (props.directory?.departments ?? []).map((department) => ({
+    value: department.id,
+    label: department.name,
+  }));
+  if (
+    form.departmentId !== undefined &&
+    form.departmentId !== null &&
+    !options.some((option) => option.value === form.departmentId)
+  )
+    options.unshift({
+      value: form.departmentId,
+      label: departmentLabel(props.directory, form.departmentId),
+    });
+  return options;
+});
+const recentOptions = computed(() =>
+  recentContracts.value.map((row) => ({
+    value: row.id,
+    label: `${row.code ?? '未编号'} · ${row.signedDate ?? '日期未填'} · ${row.firstItem ?? '无产品'}${row.itemCount > 1 ? ` 等 ${row.itemCount} 项` : ''}${row.migrated ? '（金智）' : ''}`,
+  })),
+);
+async function loadRecentContracts(customerId: string) {
+  const run = ++recentSequence;
+  recentContracts.value = [];
+  copyChoice.value = undefined;
+  if (!customerId || props.contract) return;
+  try {
+    const result = await getContractBoard({
+      tab: 'ALL',
+      customerId,
+      pageNo: 1,
+      pageSize: 5,
+      sort: 'SIGNED',
+      order: 'DESC',
+    });
+    if (run !== recentSequence || !props.open || form.customerId !== customerId)
+      return;
+    recentContracts.value = result.list.filter(
+      (row) => row.status !== 'CANCELLED',
+    );
+    copyChoice.value = recentContracts.value[0]?.id;
+    // 订单公司和币种按这个客户上一份新系统合同带出，可以改
+    const last = recentContracts.value.find(
+      (row) => row.companyId && row.currency,
+    );
+    if (last && !form.companyId) {
+      const known = orderCompanies.value.some(
+        (option) => option.value === last.companyId,
+      );
+      if (known) form.companyId = last.companyId ?? undefined;
+    }
+    if (last?.currency && lines.value.length === 0)
+      form.currency = last.currency;
+  } catch {
+    // 最近合同只是便利信息，读取失败不影响新建
+  }
+}
+/** 复制上一单：带入产品、规格、成交价和条件；交期和附件不带，没有产品档案的历史明细跳过。 */
+function applyCopy(source: Contract) {
+  if (
+    source.companyId &&
+    orderCompanies.value.some((o) => o.value === source.companyId)
+  )
+    form.companyId = form.companyId ?? source.companyId;
+  if (/^[A-Z]{3}$/.test(String(source.currency ?? '')))
+    form.currency = source.currency;
+  form.taxBasis =
+    source.items[0]?.taxBasis === 'TAX_EXCLUDED'
+      ? 'TAX_EXCLUDED'
+      : 'TAX_INCLUDED';
+  if (validProductCategory(source.productCategory))
+    form.productCategory = source.productCategory ?? undefined;
+  if (!form.customerId) form.customerId = source.customerId;
+  form.paymentTerms = form.paymentTerms || (source.paymentTerms ?? '');
+  form.deliveryRequirement =
+    form.deliveryRequirement || String(source.deliveryRequirement ?? '');
+  const usable = source.items.filter((item) => item.skuId);
+  lines.value = usable.map((item) =>
+    copyContractLine(
+      {
+        ...item,
+        requiredDate: undefined,
+        attachmentIds: [],
+        attachmentPurposes: {},
+        taxBasis: form.taxBasis,
+      },
+      newIdempotencyKey(),
+    ),
+  );
+  const skipped = source.items.length - usable.length;
+  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价并填写交期。`;
+}
+async function copyRecent() {
+  const id = copyChoice.value;
+  if (!id || copying.value) return;
+  copying.value = true;
+  try {
+    const source = await getContract(id);
+    if (!props.open) return;
+    applyCopy(source);
+  } catch (error) {
+    panelError.value = errorText(error);
+  } finally {
+    copying.value = false;
+  }
+}
 const customerOptions = computed(() =>
   customerChoices.value.map((customer) => ({
     value: customer.id,
@@ -344,6 +461,12 @@ watch(
       attachmentIds: [...(line.attachmentIds ?? [])],
       attachmentPurposes: { ...line.attachmentPurposes },
     }));
+    recentContracts.value = [];
+    copyChoice.value = undefined;
+    if (!contract && props.copyFrom) {
+      form.customerId = props.copyFrom.customerId ?? '';
+      applyCopy(props.copyFrom);
+    }
     customerChoices.value = props.master.filter(
       (row) => row.type === 'CUSTOMER' && row.id === form.customerId,
     );
@@ -356,6 +479,13 @@ watch(
       if (!contract) {
         form.ownerUserId = access.value.userId;
         form.departmentId = access.value.departmentId;
+        if (
+          form.companyId &&
+          !orderCompanies.value.some(
+            (option) => option.value === form.companyId,
+          )
+        )
+          form.companyId = undefined;
       }
     } catch (error) {
       if (run !== editorSequence || !props.open) return;
@@ -371,6 +501,12 @@ watch(
         attachmentsError.value = errorText(error);
       }
     }
+  },
+);
+watch(
+  () => form.customerId,
+  (customerId) => {
+    if (props.open && !props.contract) void loadRecentContracts(customerId);
   },
 );
 function showPicker(lineId?: string) {
@@ -726,6 +862,41 @@ async function save(activate = false) {
       />
       <Card title="合同基本信息" size="small">
         <Form layout="vertical" class="header-fields">
+          <Form.Item label="客户" required>
+            <Select
+              v-model:value="form.customerId"
+              :options="customerOptions"
+              :loading="customerLoading"
+              :filter-option="false"
+              show-search
+              placeholder="搜索客户名称或编号"
+              @search="searchCustomers"
+              @popup-scroll="moreCustomers"
+            >
+              <template #option="option">
+                <span>{{ option.label }}</span><small class="muted"> {{ option.description }}</small>
+              </template>
+            </Select>
+            <Button type="link" size="small" @click="createCustomer">
+              新增客户并选用
+            </Button>
+            <Alert v-if="customerError" type="error" :message="customerError" />
+          </Form.Item>
+          <Form.Item
+            v-if="!contract && recentContracts.length"
+            label="这个客户最近的合同"
+            class="recent-contracts"
+            extra="订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，交期和附件不带。"
+          >
+            <div class="recent-row">
+              <Select
+                v-model:value="copyChoice"
+                :options="recentOptions"
+                style="flex: 1; min-width: 0"
+              />
+              <Button :loading="copying" @click="copyRecent">复制这一单</Button>
+            </div>
+          </Form.Item>
           <Form.Item label="订单所属公司" required>
             <Select
               v-model:value="form.companyId"
@@ -766,26 +937,6 @@ async function save(activate = false) {
               allow-clear
               placeholder="请输入实际阿里信保单号"
             />
-          </Form.Item>
-          <Form.Item label="客户" required>
-            <Select
-              v-model:value="form.customerId"
-              :options="customerOptions"
-              :loading="customerLoading"
-              :filter-option="false"
-              show-search
-              placeholder="搜索客户名称或编号"
-              @search="searchCustomers"
-              @popup-scroll="moreCustomers"
-            >
-              <template #option="option">
-                <span>{{ option.label }}</span><small class="muted"> {{ option.description }}</small>
-              </template>
-            </Select>
-            <Button type="link" size="small" @click="createCustomer">
-              新增客户并选用
-            </Button>
-            <Alert v-if="customerError" type="error" :message="customerError" />
           </Form.Item>
           <Form.Item label="业务类型">
             <Select
@@ -831,12 +982,7 @@ async function save(activate = false) {
               v-model:value="form.departmentId"
               allow-clear
               placeholder="可留空"
-              :options="
-                directory?.departments.map((department) => ({
-                  value: department.id,
-                  label: department.name,
-                }))
-              "
+              :options="departmentOptions"
               show-search
               option-filter-prop="label"
             />
@@ -1218,6 +1364,16 @@ async function save(activate = false) {
 </template>
 
 <style scoped>
+.recent-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-fields :deep(.recent-contracts) {
+  grid-column: span 2;
+}
+
 .editor-stack {
   display: flex;
   flex-direction: column;

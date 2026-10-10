@@ -1,7 +1,7 @@
 import type { DocumentKind } from '../documents/model';
 import type { WorkboardGroup, WorkboardLaunch } from './contract-workboard';
 
-import type { BusinessRecord, Contract } from '#/api/fdmplatform';
+import type { Contract } from '#/api/fdmplatform';
 
 import BigNumber from 'bignumber.js';
 
@@ -90,8 +90,6 @@ function stateOf(percent: number | undefined): MainlineState {
   if (percent >= 100) return 'done';
   return percent > 0 ? 'active' : 'waiting';
 }
-const activeRecord = (record: BusinessRecord) =>
-  !['CANCELLED', 'CLOSED'].includes(String(record.status));
 
 interface ItemFacts {
   name: string;
@@ -104,8 +102,9 @@ interface ItemFacts {
 
 /** Only records matched to a contract product count; unmatched or standalone documents stay in 关联单据. */
 function itemFacts(contract: Contract): ItemFacts[] {
+  // 已关闭（CLOSED）的采购单仍是真实安排过的数量，只有取消的不算
   const lines = (contract.purchaseOrders ?? [])
-    .filter((order) => activeRecord(order))
+    .filter((order) => order.status !== 'CANCELLED')
     .flatMap((order) => rows(order.lines));
   const assignments = (contract.assignments ?? []).filter(
     (assignment) => assignment.status !== 'CANCELLED',
@@ -403,7 +402,7 @@ export function contractNextStep(
   if (['CANCELLED', 'CLOSED'].includes(contract.status))
     return {
       title: '合同已结束',
-      description: '可在“流程进度与关联单据”查看历史单据。',
+      description: '可在下方各部门页签查看历史单据。',
     };
   if (contract.blockReasons?.length)
     return allowed('COMPLETE_IMPORTED_CONTRACT')
@@ -456,7 +455,7 @@ export function contractNextStep(
       groups.slice(1).reduce((total, group) => total + group.records.length, 0);
     return {
       title: first.title,
-      description: `${first.records[0]!.title}${others > 0 ? `；另有 ${others} 项见下方“接下来可办理”` : ''}`,
+      description: `${first.records[0]!.title}${others > 0 ? `；另有 ${others} 项见下方“全部待办”` : ''}`,
       department: groupDepartments[first.key] ?? '采购部门',
       button: first.button,
       action: { type: 'launch', launch: first.records[0]!.launch },

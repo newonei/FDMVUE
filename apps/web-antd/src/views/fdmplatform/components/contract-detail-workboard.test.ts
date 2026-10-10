@@ -58,6 +58,7 @@ vi.mock('#/api/fdmplatform/products', () => ({
 vi.mock('./contract-progress', () => ({
   contractItemProgress: () => [],
   contractRelatedStages: () => [],
+  contractItemPipeline: () => [],
 }));
 vi.mock('./ContractWorkboard.vue', () => ({
   default: defineComponent({
@@ -232,6 +233,14 @@ vi.mock('ant-design-vue', () => {
   return {
     Alert: block,
     Card: block,
+    Input: { TextArea: block },
+    Modal: defineComponent({
+      props: { open: Boolean },
+      setup: (props, ctx) => () =>
+        props.open
+          ? h('div', { 'data-modal': true }, ctx.slots.default?.())
+          : null,
+    }),
     Descriptions: Object.assign(block, { Item: block }),
     Space: block,
     Tabs: block,
@@ -350,7 +359,7 @@ async function mountDetail() {
   const refresh = vi.fn();
   const props = reactive({
     contract: contract(),
-    initialTab: 'overview' as const,
+    initialTab: 'products' as const,
     loading: false,
     master: [],
     open: true,
@@ -437,7 +446,7 @@ describe('contractDetail workboard integration', () => {
     button(host, '合同生效').click();
     await nextTick();
     expect(button(host, '合同生效').disabled).toBe(true);
-    expect(button(host, '编辑合同与产品').disabled).toBe(true);
+    expect(button(host, '编辑合同').disabled).toBe(true);
     expect(button(host, '刷新合同').disabled).toBe(true);
     const drawer = host.querySelector<HTMLElement>('[data-order]')!;
     expect(drawer.dataset.keyboard).toBe('false');
@@ -544,44 +553,65 @@ describe('contractDetail workboard integration', () => {
     },
   );
 
-  it('opens every progress navigation entry in list mode, including entries that usually launch a create form', async () => {
+  it('opens every department list in list mode from its own tab, without retired stock documents', async () => {
     const { host } = await mountDetail();
-    const progress = host.querySelector<HTMLElement>(
-      '[data-tab="流程进度与关联单据"]',
-    )!;
-    const kinds: DocumentKind[] = [
-      'requests',
-      'shipments',
-      'salesReturns',
-      'tasks',
-      'quotes',
-      'plans',
-      'orders',
+    const tabs: [string, DocumentKind[]][] = [
+      ['采购', ['requests', 'tasks', 'quotes', 'plans', 'orders']],
+      ['发货与报关', ['shipments', 'salesReturns']],
+      [
+        '收款与开票',
+        ['receipts', 'refunds', 'invoices', 'allocations', 'costs'],
+      ],
+    ];
+    for (const [title, kinds] of tabs) {
+      const pane = [...host.querySelectorAll<HTMLElement>('[data-tab]')].find(
+        (entry) => entry.dataset.tab?.startsWith(title),
+      )!;
+      expect(pane).toBeTruthy();
+      for (const kind of kinds) {
+        button(pane, documentDefinitions[kind].title).click();
+        await nextTick();
+        const list = host.querySelector<HTMLElement>('[data-list]')!;
+        expect(list.dataset.list).toBe(kind);
+        expect(list.dataset.mode).toBe('list');
+        expect(list.dataset.listContract).toBe('contract-1');
+        expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+        button(host, '关闭关联列表').click();
+        await nextTick();
+      }
+    }
+    for (const retired of [
       'arrivals',
       'purchaseReturns',
       'production',
-      'receipts',
-      'refunds',
-      'invoices',
-      'allocations',
-      'costs',
-    ];
-    for (const kind of kinds) {
-      button(progress, documentDefinitions[kind].title).click();
-      await nextTick();
-      const list = host.querySelector<HTMLElement>('[data-list]')!;
-      expect(list.dataset.list).toBe(kind);
-      expect(list.dataset.mode).toBe('list');
-      expect(list.dataset.listContract).toBe('contract-1');
-      expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
-      button(host, '关闭关联列表').click();
-      await nextTick();
-    }
-    button(progress, '报关跟进').click();
+    ] as DocumentKind[])
+      expect(
+        [...host.querySelectorAll('button')].some(
+          (entry) =>
+            entry.textContent?.trim() === documentDefinitions[retired].title,
+        ),
+      ).toBe(false);
+    const delivery = [...host.querySelectorAll<HTMLElement>('[data-tab]')].find(
+      (entry) => entry.dataset.tab === '发货与报关',
+    )!;
+    button(delivery, '报关跟进').click();
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-list="customs"]')?.dataset.mode,
     ).toBe('list');
+  });
+
+  it('asks for a reason before cancelling a contract', async () => {
+    const { host, props } = await mountDetail();
+    props.contract = {
+      ...contract(),
+      allowedActions: [...contract().allowedActions, 'CANCEL_CONTRACT'],
+    };
+    await nextTick();
+    button(host, '取消合同').click();
+    await nextTick();
+    expect(host.querySelector('[data-modal]')).not.toBeNull();
+    expect(mocks.activate).not.toHaveBeenCalled();
   });
 
   it('clears both active forms and related lists when switching contracts', async () => {
@@ -594,10 +624,10 @@ describe('contractDetail workboard integration', () => {
     expect(
       host.querySelector<HTMLElement>('[data-workboard]')?.dataset.workboard,
     ).toBe('contract-2');
-    const progress = host.querySelector<HTMLElement>(
-      '[data-tab="流程进度与关联单据"]',
+    const purchase = [...host.querySelectorAll<HTMLElement>('[data-tab]')].find(
+      (entry) => entry.dataset.tab?.startsWith('采购'),
     )!;
-    button(progress, documentDefinitions.orders.title).click();
+    button(purchase, documentDefinitions.orders.title).click();
     await nextTick();
     expect(
       host.querySelector<HTMLElement>('[data-list]')?.dataset.listContract,

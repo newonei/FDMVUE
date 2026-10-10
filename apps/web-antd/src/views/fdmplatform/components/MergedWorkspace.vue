@@ -13,6 +13,8 @@ export interface MergedView {
   title: string;
   component: Component;
   props?: Record<string, unknown>;
+  /** 旧链接里的 view 值，打开同一个页签（例如几张历史单据合进一个页签） */
+  aliases?: string[];
 }
 
 const props = defineProps<{ views: MergedView[] }>();
@@ -20,8 +22,11 @@ const route = useRoute();
 const router = useRouter();
 const current = computed(
   () =>
-    props.views.find((view) => view.key === route.query.view) ??
-    props.views[0]!,
+    props.views.find(
+      (view) =>
+        view.key === route.query.view ||
+        view.aliases?.includes(String(route.query.view)),
+    ) ?? props.views[0]!,
 );
 /** A tab switch keeps only the contract filter; record, filter and sub-tab queries belong to the previous page. */
 function select(key: unknown) {

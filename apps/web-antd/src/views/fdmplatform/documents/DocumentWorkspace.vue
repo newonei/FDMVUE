@@ -22,11 +22,12 @@ import {
   Tabs,
   Tag,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
 import CompletionScopeFilter from '../components/CompletionScope.vue';
-import { errorText, label, statusLabels } from '../data';
+import { errorText, label, money, statusLabels } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
@@ -43,9 +44,11 @@ import {
   allocationKind,
   documentDefinitions,
   documentStatuses,
+  factoryHandoff,
   procurementDocumentDefinition,
   procurementDocumentKind,
   queryContractId,
+  RETIRED_STOCK_ACTIONS,
 } from './model';
 import {
   contractTarget,
@@ -216,6 +219,13 @@ const columns = computed(() => [
     fixed: 'right' as const,
   },
 ]);
+/** 已改到工序库存的动作不再在列表上新建 */
+const createActions = computed(() =>
+  config.value.create.filter((action) => !RETIRED_STOCK_ACTIONS.has(action)),
+);
+const handoff = computed(() =>
+  purchaseInvoice.value ? undefined : factoryHandoff[effectiveKind.value],
+);
 const statusOptions = computed(() =>
   (isIntake.value ? [] : documentStatuses(effectiveKind.value)).map(
     (value) => ({ value, label: statusLabels[value] }),
@@ -227,14 +237,73 @@ const assignmentOptions = computed(() =>
     : ['UNASSIGNED', 'PARTIALLY_ASSIGNED', 'ASSIGNED']
   ).map((value) => ({ value, label: label(value) })),
 );
+const PEOPLE = /UserId$|^actorId$|^confirmedBy$|^createdBy$|^cancelledBy$/i;
+const INSTANTS = new Set([
+  'confirmedAt',
+  'createdAt',
+  'occurredAt',
+  'updatedAt',
+]);
+const AMOUNTS = new Set(['amount', 'rmbAmount', 'unitPrice']);
+/** 采购申请：首个产品名 + 项数 + 总数量；需求日期取最早一项 */
+function requestCell(record: Record<string, unknown>, key: string) {
+  const items = Array.isArray(record.items)
+    ? (record.items as Record<string, unknown>[])
+    : [];
+  if (key === 'requiredDate') {
+    const dates = items
+      .map((item) => String(item.requiredDate ?? ''))
+      .filter(Boolean)
+      .toSorted();
+    return dates[0] ?? '未填写';
+  }
+  if (items.length === 0) return '没有明细';
+  const snapshot = (items[0]!.specificationSnapshot ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const name = String(snapshot.skuName ?? snapshot.skuCode ?? '产品');
+  const units = new Set(
+    items.map((item) =>
+      String(
+        (item.specificationSnapshot as Record<string, unknown> | undefined)
+          ?.unit ?? '',
+      ),
+    ),
+  );
+  const total = items.reduce(
+    (sum, item) => sum + Number(item.quantity ?? 0),
+    0,
+  );
+  const quantity = `${total.toLocaleString('en-US')}${units.size === 1 ? ` ${[...units][0]}` : ''}`;
+  return items.length > 1
+    ? `${name} 等 ${items.length} 项 · 共 ${quantity}`
+    : `${name} · ${quantity}`;
+}
 function cell(row: DocumentRow, key: string) {
   if (key === 'allocationType') return allocationKind(row.record);
+  if (
+    key === 'requestItems' ||
+    (key === 'requiredDate' && Array.isArray(row.record.items))
+  )
+    return requestCell(row.record, key);
   const value = row.record[key];
-  return (
-    migrationCell(row.record, key) ??
-    receiptFxDisplay(row.record, key) ??
-    (/UserId$/i.test(key) ? personLabel(directory.value, value) : label(value))
-  );
+  const special =
+    migrationCell(row.record, key) ?? receiptFxDisplay(row.record, key);
+  if (special !== undefined) return special;
+  if (PEOPLE.test(key))
+    return value === null || value === undefined || value === ''
+      ? '—'
+      : personLabel(directory.value, value);
+  // 时间按本地时区到分钟；日期字段原样显示
+  if (INSTANTS.has(key) && typeof value === 'string' && value.includes('T'))
+    return dayjs(value).format('YYYY-MM-DD HH:mm');
+  if (AMOUNTS.has(key) && value !== null && value !== undefined && value !== '')
+    return money(
+      value,
+      typeof row.record.currency === 'string' ? row.record.currency : '',
+    );
+  return label(value);
 }
 async function load() {
   const current = ++sequence;
@@ -393,7 +462,7 @@ onMounted(async () => {
 <template>
   <Page
     :title="kind === 'tasks' ? documentDefinitions.tasks.title : config.title"
-    :description="config.description"
+    :description="handoff?.note ?? config.description"
   >
     <Card>
       <Space direction="vertical" size="middle" style="width: 100%">
@@ -409,7 +478,19 @@ onMounted(async () => {
         </Tabs>
         <Space wrap>
           <Button
-            v-for="(action, index) in config.create"
+            v-if="handoff"
+            type="primary"
+            @click="
+              router.push({
+                path: '/gongchang/stage-stock',
+                query: { tab: handoff.tab },
+              })
+            "
+          >
+            去工序库存办理
+          </Button>
+          <Button
+            v-for="(action, index) in createActions"
             :key="action"
             :type="index === 0 ? 'primary' : 'default'"
             @click="create(action)"
@@ -513,11 +594,11 @@ onMounted(async () => {
                 查看待接单申请
               </Button>
               <Button
-                v-else-if="config.create[0]"
+                v-else-if="createActions[0]"
                 type="primary"
-                @click="create(config.create[0])"
+                @click="create(createActions[0])"
               >
-                {{ actionTitle(config.create[0]) }}
+                {{ actionTitle(createActions[0]) }}
               </Button>
               <Button v-else-if="contractId" @click="clearContext">
                 查看全部合同的单据

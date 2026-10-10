@@ -35,7 +35,7 @@ watch(
 );
 </script>
 <template>
-  <Card title="接下来可办理" size="small" class="workboard">
+  <Card title="可分别推进的事项" size="small" class="workboard">
     <p class="workboard-note">
       按当前订单资料整理；采购、交付和收款可分别推进。点击后在当前页面办理。
     </p>

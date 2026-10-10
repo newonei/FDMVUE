@@ -2,13 +2,39 @@ import type { ActionDefinition, Field } from './data';
 
 import type { ContractAttachment, Directory } from '#/api/fdmplatform';
 
+/** 姓名 · 部门；只有重名时才带上系统编号区分。 */
 export function personLabel(directory: Directory | undefined, value: unknown) {
   const user = directory?.users.find(
     (entry) => String(entry.id) === String(value),
   );
-  if (user)
-    return `${user.nickname}${user.departmentName ? ` · ${user.departmentName}` : ''} (#${user.id})`;
+  if (user) {
+    const namesake = directory!.users.some(
+      (entry) => entry.id !== user.id && entry.nickname === user.nickname,
+    );
+    return `${user.nickname}${user.departmentName ? ` · ${user.departmentName}` : ''}${namesake ? ` (#${user.id})` : ''}`;
+  }
   return value ? `用户 #${value}` : '未指定';
+}
+
+/** 只要姓名，用于表格里的经办人、采购员 */
+export function personName(directory: Directory | undefined, value: unknown) {
+  const user = directory?.users.find(
+    (entry) => String(entry.id) === String(value),
+  );
+  if (user) return user.nickname;
+  return value ? `用户 #${value}` : '未指定';
+}
+
+/** 部门名；目录里没有时写明编号，不直接显示数字 */
+export function departmentLabel(
+  directory: Directory | undefined,
+  value: unknown,
+) {
+  if (value === null || value === undefined || value === '') return '未指定';
+  const department = directory?.departments.find(
+    (entry) => String(entry.id) === String(value),
+  );
+  return department?.name ?? `未知部门（${value}）`;
 }
 
 export function withDirectory(

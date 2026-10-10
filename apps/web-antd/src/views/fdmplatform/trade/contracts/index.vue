@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import Workspace from '../../index.vue';
+import ContractBoard from './ContractBoard.vue';
+
 defineOptions({ name: 'FdmPlatformTradeContracts' });
 </script>
 
 <template>
-  <Workspace workspace="trade-contracts" />
+  <ContractBoard />
 </template>

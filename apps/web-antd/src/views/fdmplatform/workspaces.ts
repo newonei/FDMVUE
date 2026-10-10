@@ -61,7 +61,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
     department: '外贸部门',
     section: 'contracts',
     description: '登记合同与样品，确认产品规格，跟进采购申请、履约交付与回款。',
-    defaultTab: 'overview',
+    defaultTab: 'products',
   },
   'trade-requests': {
     title: '采购申请',
@@ -279,13 +279,21 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
   },
 };
 
+/** 合同详情按部门分页签；旧链接的 overview / progress 落到产品与进度 */
 export const contractDetailTabs: DetailTab[] = [
-  'overview',
   'products',
-  'progress',
-  'audit',
+  'purchase',
+  'delivery',
+  'finance',
   'attachments',
+  'audit',
 ];
+const legacyDetailTabs: Partial<Record<DetailTab, DetailTab>> = {
+  overview: 'products',
+  progress: 'products',
+  cost: 'finance',
+  customs: 'delivery',
+};
 
 export function workspaceAllowsAction(
   _workspace: WorkspaceKey,
@@ -302,7 +310,11 @@ export function detailTabFor(
   if (contractDetailTabs.includes(requested as DetailTab)) {
     return requested as DetailTab;
   }
-  return workspace === 'trade-contracts' ? 'overview' : 'progress';
+  const legacy = legacyDetailTabs[requested as DetailTab];
+  if (legacy) return legacy;
+  const fallback = legacyDetailTabs[workspaces[workspace].defaultTab];
+  const own = workspaces[workspace].defaultTab;
+  return contractDetailTabs.includes(own) ? own : (fallback ?? 'products');
 }
 
 export function contextualValues(

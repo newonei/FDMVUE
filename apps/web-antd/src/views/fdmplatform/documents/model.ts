@@ -55,6 +55,42 @@ export interface DocumentDefinition {
   create: string[];
   actions: string[];
 }
+/** 履约库存下线（10/8）后，这些动作改由工厂「工序库存」办理；列表只查记录，不再新建。 */
+export const RETIRED_STOCK_ACTIONS = new Set([
+  'RECORD_ARRIVAL',
+  'RETURN_ARRIVAL',
+  'STOCK_RECEIVE',
+  'STOCK_RELEASE',
+  'STOCK_RESERVE',
+  'STOCK_RETURN',
+  'STOCK_SHIP',
+  'UPDATE_PRODUCTION',
+]);
+/** 改到工序库存办理的单据：列表顶部说明和入口 */
+export const factoryHandoff: Partial<
+  Record<DocumentKind, { note: string; tab: string }>
+> = {
+  shipments: {
+    note: '出货在工厂「工序库存」从已包装成品办理，数量自动记到合同；这里汇总查看全部发货记录。',
+    tab: 'trade',
+  },
+  salesReturns: {
+    note: '客户退货不再在这里新建，这里只查已有的销售退货记录。',
+    tab: 'trade',
+  },
+  arrivals: {
+    note: '外采到货改在工厂「工序库存 · 到货入库」办理并自动记到采购单；这里只查历史到货单。',
+    tab: 'receiving',
+  },
+  purchaseReturns: {
+    note: '采购退货随到货一起改到工序库存处理；这里只查历史退货记录。',
+    tab: 'receiving',
+  },
+  production: {
+    note: '自制任务由工厂工序单包装完工后自动回写；这里只查历史自产进度。',
+    tab: 'trade',
+  },
+};
 const procurement = '/fdmprocurement/platform-';
 const trade = '/fdmwaimao/platform-';
 const finance = '/caiwu/platform-';
@@ -65,8 +101,9 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     resource: 'purchase-requests',
     route: `${trade}requests`,
     fields: [
-      'name|申请名称',
-      'status|状态',
+      'requestItems|产品 · 数量',
+      'requiredDate|需求日期',
+      'ownerUserId|采购经办',
       'assignmentStatus|分派进度',
       'remark|说明',
     ],

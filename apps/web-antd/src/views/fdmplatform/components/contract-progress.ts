@@ -131,3 +131,57 @@ export function contractDeliveryStatus(contract: Contract | undefined) {
     return '部分发货';
   return '未发货';
 }
+
+/** 每行产品的 申请 → 下单 → 到货 → 发货 数量；外采按采购单（扣取消、退货），自制按完工，库存按分派。 */
+export function contractItemPipeline(contract: Contract | undefined) {
+  const orders = (contract?.purchaseOrders ?? []).filter(
+    (order) => order.status !== 'CANCELLED',
+  );
+  const lines = orders.flatMap((order) => rows(order.lines));
+  const own = (contract?.assignments ?? []).filter(
+    (assignment) =>
+      assignment.status !== 'CANCELLED' &&
+      ['MAKE', 'STOCK'].includes(String(assignment.method)),
+  );
+  const produced = (assignmentId: unknown) => {
+    let completed = new BigNumber(0);
+    for (const progress of rows(contract?.productionProgress))
+      if (progress.assignmentId === assignmentId) {
+        const value = decimal(progress.completedQuantity);
+        if (value) completed = BigNumber.maximum(completed, value);
+      }
+    return completed;
+  };
+  return contractItemProgress(contract).map((item) => {
+    let ordered = new BigNumber(0);
+    let arrived = new BigNumber(0);
+    for (const line of lines) {
+      if (line.contractItemId !== item.id) continue;
+      ordered = ordered
+        .plus(decimal(line.quantity) ?? 0)
+        .minus(decimal(line.cancelledQuantity) ?? 0);
+      arrived = arrived
+        .plus(decimal(line.arrivedQuantity) ?? 0)
+        .minus(decimal(line.returnedQuantity) ?? 0);
+    }
+    for (const assignment of own) {
+      if (assignment.contractItemId !== item.id) continue;
+      const quantity = decimal(assignment.quantity) ?? new BigNumber(0);
+      ordered = ordered.plus(quantity);
+      arrived = arrived.plus(
+        assignment.method === 'STOCK' ? quantity : produced(assignment.id),
+      );
+    }
+    const unitPrice = decimal(item.unitPrice);
+    const quantity = decimal(item.quantity);
+    return {
+      ...item,
+      orderedQuantity: text(ordered),
+      arrivedQuantity: text(arrived),
+      lineAmount:
+        unitPrice && quantity
+          ? quantity.multipliedBy(unitPrice).toFixed(2)
+          : undefined,
+    };
+  });
+}
