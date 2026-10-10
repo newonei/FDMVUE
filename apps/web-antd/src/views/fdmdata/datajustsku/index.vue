@@ -56,7 +56,11 @@ import {
 } from '#/api/fdmdata/datajustsku';
 import { $t } from '#/locales';
 
-import { buildDataJustSkuGridColumns, useGridFormSchema } from './data';
+import {
+  buildDataJustSkuGridColumns,
+  supportsSizeColorFilter,
+  useGridFormSchema,
+} from './data';
 import CostModal from './modules/cost-modal.vue';
 import BlankBatchPicModal from './modules/blank-batch-pic-modal.vue';
 import BlankImportModal from './modules/blank-import-modal.vue';
@@ -398,6 +402,11 @@ async function onListTabChange(key: string | number) {
     gridApi.setGridOptions({
       columns: currentColumns(),
     });
+    const hideSizeColor = !supportsSizeColorFilter(nextTab);
+    gridApi.formApi.updateSchema([
+      { fieldName: 'attr1', hide: hideSizeColor },
+      { fieldName: 'attr2', hide: hideSizeColor },
+    ]);
     await gridApi.formApi.resetForm();
     const savedFilters = tabFilters.get(nextTab);
     if (savedFilters) {
@@ -803,7 +812,7 @@ async function handleExport() {
 
 const [Grid, gridApi] = useVbenVxeGrid<SkuDisplayRow>({
   formOptions: {
-    schema: useGridFormSchema(),
+    schema: useGridFormSchema(activeListTab.value),
     collapsed: true,
     submitOnEnter: true,
     wrapperClass: 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4',
