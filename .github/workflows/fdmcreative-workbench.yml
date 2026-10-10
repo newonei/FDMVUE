@@ -10,13 +10,16 @@ on:
       - 'packages/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
+      - 'vitest*.config.ts'
   push:
     branches: [main]
     paths:
+      - '.github/workflows/fdmcreative-workbench.yml'
       - 'apps/web-antd/**'
       - 'packages/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
+      - 'vitest*.config.ts'
 
 permissions:
   contents: read
