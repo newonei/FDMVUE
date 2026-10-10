@@ -18,6 +18,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     attachmentUrl?: string;
     productSpec?: string;
     packagingMethod?: string;
+    salePrice?: number;
     purchasePrice?: number;
     quantity?: number;
     orderDate?: number | string;
@@ -41,6 +42,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     previewImageUrl?: string;
     productSpec?: string;
     packagingMethod?: string;
+    salePrice?: number;
     purchasePrice?: number;
     quantity: number;
     remark?: string;

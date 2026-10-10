@@ -102,7 +102,7 @@ function formatDownloaded(value: unknown) {
   return Number(value) === 1 ? '已下载' : '未下载';
 }
 
-function formatPurchasePrice(value: unknown) {
+function formatPrice(value: unknown) {
   if (value === undefined || value === null || value === '') return '';
   const amount = Number(value);
   if (!Number.isFinite(amount)) return String(value);
@@ -234,6 +234,18 @@ export function useFormSchema(
         allowClear: true,
         maxlength: 128,
         placeholder: '请输入包装方式',
+      },
+    },
+    {
+      fieldName: 'salePrice',
+      label: '售价',
+      component: 'InputNumber',
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        placeholder: '请输入售价，单位：元',
+        precision: 6,
+        step: 0.01,
       },
     },
     {
@@ -576,12 +588,21 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
     },
     { field: 'quantity', title: '数量', width: 80, align: 'right' },
     {
+      field: 'salePrice',
+      title: '售价',
+      minWidth: 110,
+      align: 'right',
+      slots: {
+        default: ({ row }) => formatPrice(row.salePrice),
+      },
+    },
+    {
       field: 'purchasePrice',
       title: '采购价',
       minWidth: 110,
       align: 'right',
       slots: {
-        default: ({ row }) => formatPurchasePrice(row.purchasePrice),
+        default: ({ row }) => formatPrice(row.purchasePrice),
       },
     },
     {

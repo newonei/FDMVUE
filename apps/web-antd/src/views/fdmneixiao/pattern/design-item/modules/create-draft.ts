@@ -21,6 +21,7 @@ export interface DesignRow {
   previewImageUrl?: string;
   productSpec?: string;
   purchasePrice?: number;
+  salePrice?: number;
   quantity: number;
   remark?: string;
   rowKey: number;

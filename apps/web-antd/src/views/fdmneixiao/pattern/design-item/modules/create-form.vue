@@ -164,6 +164,7 @@ const batchValues = reactive<{
   productSpec?: string;
   purchasePrice?: number;
   quantity?: number;
+  salePrice?: number;
 }>({});
 
 function applyBatchValues(onlyEmpty: boolean) {
@@ -173,6 +174,9 @@ function applyBatchValues(onlyEmpty: boolean) {
   }
   if (batchValues.packagingMethod?.trim()) {
     patch.packagingMethod = batchValues.packagingMethod.trim();
+  }
+  if (typeof batchValues.salePrice === 'number') {
+    patch.salePrice = batchValues.salePrice;
   }
   if (typeof batchValues.purchasePrice === 'number') {
     patch.purchasePrice = batchValues.purchasePrice;
@@ -248,6 +252,10 @@ function normalizeBatchItems(): FdmNeixiaoPatternDesignItemApi.BatchCreateItem[]
     previewImageUrl: row.previewImageUrl?.trim() || undefined,
     productSpec: row.productSpec?.trim() || '',
     packagingMethod: row.packagingMethod?.trim() || undefined,
+    salePrice:
+      typeof row.salePrice === 'number' && Number.isFinite(row.salePrice)
+        ? row.salePrice
+        : undefined,
     purchasePrice:
       typeof row.purchasePrice === 'number' &&
       Number.isFinite(row.purchasePrice)
@@ -453,6 +461,15 @@ watch(
                     :maxlength="128"
                     placeholder="不填则不修改"
                   />
+                  <label>售价</label>
+                  <InputNumber
+                    v-model:value="batchValues.salePrice"
+                    style="width: 100%"
+                    :min="0"
+                    :precision="6"
+                    :step="0.01"
+                    placeholder="不填则不修改"
+                  />
                   <label>采购价</label>
                   <InputNumber
                     v-model:value="batchValues.purchasePrice"
@@ -523,6 +540,7 @@ watch(
                   <span class="required">*</span>产品规格
                 </th>
                 <th class="w-[140px]">包装方式</th>
+                <th class="w-[124px]">售价</th>
                 <th class="w-[124px]">采购价</th>
                 <th class="w-[92px]">数量</th>
                 <th class="w-[160px]">备注</th>
@@ -600,6 +618,16 @@ watch(
                     v-model:value="row.packagingMethod"
                     allow-clear
                     :maxlength="128"
+                    placeholder="可选"
+                  />
+                </td>
+                <td>
+                  <InputNumber
+                    v-model:value="row.salePrice"
+                    class="w-full"
+                    :min="0"
+                    :precision="6"
+                    :step="0.01"
                     placeholder="可选"
                   />
                 </td>
