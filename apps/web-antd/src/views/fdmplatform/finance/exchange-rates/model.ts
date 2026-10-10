@@ -60,3 +60,30 @@ export function receiptFxDisplay(
     return `CNY ${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return String(value);
 }
+
+/** 外贸常用币种，汇率中心置顶显示 */
+export const COMMON_CURRENCIES = [
+  'USD',
+  'EUR',
+  'GBP',
+  'AUD',
+  'CAD',
+  'JPY',
+  'HKD',
+];
+
+/** 汇率显示 4 位小数，完整值放在悬停提示里 */
+export function rateText(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(4) : String(value ?? '—');
+}
+
+export function splitCommonRates<T extends { currency: string }>(rows: T[]) {
+  const common = COMMON_CURRENCIES.flatMap((code) =>
+    rows.filter((row) => row.currency === code),
+  );
+  const others = rows.filter(
+    (row) => !COMMON_CURRENCIES.includes(row.currency),
+  );
+  return { common, others };
+}

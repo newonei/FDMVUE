@@ -169,3 +169,71 @@ export function getContractBoardOverview(mine?: boolean) {
     params: { mine: mine || undefined },
   });
 }
+
+export type AgingBucket = 'D30' | 'D60' | 'D90' | 'OVER90' | 'UNSHIPPED';
+export interface ReceivableRow extends ContractBoardRow {
+  aging: AgingBucket;
+  agingDays: null | number;
+  lastShipDate: null | string;
+  lastReceiptDate: null | string;
+}
+export interface ContractReceivables {
+  contracts: number;
+  unpaid: CurrencyAmount[];
+  pending: CurrencyAmount[];
+  buckets: { amounts: CurrencyAmount[]; count: number; key: AgingBucket }[];
+  asOf: string;
+  list: ReceivableRow[];
+  total: number;
+}
+export interface MarginRow extends ContractBoardRow {
+  revenueCny: Decimal | null;
+  purchaseCny: Decimal | null;
+  otherCny: Decimal | null;
+  marginCny: Decimal | null;
+  marginRate: Decimal | null;
+  notes: string[];
+}
+export interface ContractMargins {
+  summary: {
+    contracts: number;
+    incomplete: number;
+    marginCny: Decimal;
+    marginRate: Decimal | null;
+    otherCny: Decimal;
+    purchaseCny: Decimal;
+    revenueCny: Decimal;
+  };
+  asOf: string;
+  list: MarginRow[];
+  total: number;
+}
+
+export function getContractReceivables(
+  params: Pick<
+    ContractBoardQuery,
+    'keyword' | 'mine' | 'pageNo' | 'pageSize'
+  > & {
+    aging?: AgingBucket;
+  },
+) {
+  return requestClient.get<ContractReceivables>(`${base}/receivables`, {
+    params,
+  });
+}
+
+export function getContractMargins(
+  params: Pick<
+    ContractBoardQuery,
+    | 'keyword'
+    | 'mine'
+    | 'order'
+    | 'pageNo'
+    | 'pageSize'
+    | 'signedFrom'
+    | 'signedTo'
+    | 'sort'
+  >,
+) {
+  return requestClient.get<ContractMargins>(`${base}/margins`, { params });
+}

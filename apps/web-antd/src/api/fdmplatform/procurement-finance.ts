@@ -56,6 +56,8 @@ export function getProcurementFinancePage(params: {
   pageNo: number;
   pageSize: number;
   paymentStatus?: 'PAID' | 'UNPAID';
+  /** NATIVE 新系统单据 · JINZHI 金智迁入；不传看全部 */
+  source?: 'JINZHI' | 'NATIVE';
   status?: string;
   type: ProcurementFinanceType;
 }) {

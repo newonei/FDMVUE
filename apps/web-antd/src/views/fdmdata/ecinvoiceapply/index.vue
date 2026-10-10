@@ -8,7 +8,7 @@ import { confirm, Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, message } from 'ant-design-vue';
+import { Button, message, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
@@ -21,11 +21,80 @@ import {
 } from '#/api/fdmdata/ecinvoiceapply';
 import { $t } from '#/locales';
 
-import { useGridColumns, useGridFormSchema } from './data';
+import { formatInvoiceStatus, useGridColumns, useGridFormSchema } from './data';
 import { isInvoiceApplyLocked } from './invoice-lock';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'EcInvoiceApply' });
+
+type StatusTab = 'ALL' | 'DONE' | 'SOON' | 'TODO';
+const SOON_DAYS = 3;
+const statusTabs: { key: StatusTab; label: string; hint: string }[] = [
+  { key: 'TODO', label: '待开票', hint: '还没开票，按截止时间从早到晚排' },
+  { key: 'SOON', label: `${SOON_DAYS} 天内截止`, hint: `未开票且 ${SOON_DAYS} 天内到开票截止时间` },
+  { key: 'DONE', label: '已开票', hint: '已开票或已上传发票附件' },
+  { key: 'ALL', label: '全部', hint: '' },
+];
+const statusTab = ref<StatusTab>('TODO');
+const tabCounts = ref<Partial<Record<StatusTab, number>>>({});
+/** 页签条件覆盖查询表单里的开票状态 */
+function tabFilter(tab: StatusTab) {
+  const now = dayjs();
+  switch (tab) {
+    case 'DONE': {
+      return { invoiceStatus: 1 };
+    }
+    case 'SOON': {
+      return {
+        invoiceStatus: 0,
+        invoiceDueTime: [
+          now.format('YYYY-MM-DD HH:mm:ss'),
+          now.add(SOON_DAYS, 'day').format('YYYY-MM-DD HH:mm:ss'),
+        ],
+        sort: 'DUE',
+      };
+    }
+    case 'TODO': {
+      return { invoiceStatus: 0, sort: 'DUE' };
+    }
+    default: {
+      return {};
+    }
+  }
+}
+async function loadTabCounts() {
+  const results = await Promise.allSettled(
+    statusTabs.map((tab) =>
+      getEcInvoiceApplyPage({ pageNo: 1, pageSize: 1, ...tabFilter(tab.key) }),
+    ),
+  );
+  const counts: Partial<Record<StatusTab, number>> = {};
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled')
+      counts[statusTabs[index]!.key] = result.value.total;
+  });
+  tabCounts.value = counts;
+}
+function selectTab(tab: StatusTab) {
+  if (statusTab.value === tab) return;
+  statusTab.value = tab;
+  gridApi.query();
+}
+/** 截止时间倒计时：已过红色，3 天内橙色 */
+function dueInfo(row: FdmdataEcInvoiceApplyApi.EcInvoiceApply) {
+  const value = row.invoiceDueTime;
+  if (value === null || value === undefined || value === '' || value === 0)
+    return { text: '—', note: '', tone: '' };
+  const due = dayjs(typeof value === 'number' ? value : String(value));
+  if (!due.isValid()) return { text: String(value), note: '', tone: '' };
+  const text = due.format('MM-DD HH:mm');
+  if (isInvoiceApplyLocked(row)) return { text, note: '', tone: 'muted' };
+  const hours = due.diff(dayjs(), 'hour');
+  if (hours < 0) return { text, note: `已过 ${Math.ceil(-hours / 24)} 天`, tone: 'late' };
+  if (hours < 24) return { text, note: `剩 ${Math.max(hours, 0)} 小时`, tone: 'late' };
+  const days = Math.floor(hours / 24);
+  return { text, note: `剩 ${days} 天`, tone: days < SOON_DAYS ? 'soon' : '' };
+}
 
 const [FormModal, formModalApi] = useVbenModal({ connectedComponent: Form });
 const selectedRows = ref<FdmdataEcInvoiceApplyApi.EcInvoiceApply[]>([]);
@@ -310,16 +379,18 @@ const [Grid, gridApi] = useVbenVxeGrid({
       ajax: {
         query: async ({ page }, formValues) => {
           clearSelectedRows();
+          void loadTabCounts();
           return getEcInvoiceApplyPage({
             pageNo: page.currentPage,
             pageSize: page.pageSize,
             ...formValues,
+            ...tabFilter(statusTab.value),
           });
         },
       },
     },
     rowConfig: { keyField: 'id', isHover: true },
-    toolbarConfig: { refresh: true, search: true },
+    toolbarConfig: { custom: true, refresh: true, search: true },
   } as VxeTableGridOptions<FdmdataEcInvoiceApplyApi.EcInvoiceApply>,
   gridEvents: {
     checkboxAll: handleRowCheckboxChange,
@@ -335,8 +406,36 @@ const [Grid, gridApi] = useVbenVxeGrid({
     <div>
       <Grid
         table-title="电商发票申请"
-        table-title-help="管理电商平台发票申请、开票状态和付款方开票信息。"
+        table-title-help="管理电商平台发票申请、开票状态和付款方开票信息。其余字段可在右上角列设置里勾选显示。"
       >
+        <template #toolbar-actions>
+          <div class="status-tabs" role="tablist" aria-label="开票状态">
+            <button
+              v-for="tab in statusTabs"
+              :key="tab.key"
+              type="button"
+              role="tab"
+              :title="tab.hint"
+              :aria-selected="statusTab === tab.key"
+              :class="{ on: statusTab === tab.key, hot: tab.key === 'SOON' && (tabCounts.SOON ?? 0) > 0 }"
+              @click="selectTab(tab.key)"
+            >
+              {{ tab.label }}<em>{{ tabCounts[tab.key]?.toLocaleString('en-US') ?? '' }}</em>
+            </button>
+          </div>
+        </template>
+
+        <template #status="{ row }">
+          <Tag :color="isInvoiceApplyLocked(row) ? 'green' : 'orange'" class="status-tag">
+            {{ formatInvoiceStatus({ cellValue: row.invoiceStatus, row }) }}
+          </Tag>
+        </template>
+        <template #due="{ row }">
+          <span class="due" :class="dueInfo(row).tone">
+            {{ dueInfo(row).text
+            }}<small v-if="dueInfo(row).note">{{ dueInfo(row).note }}</small>
+          </span>
+        </template>
         <template #toolbar-tools>
           <div class="flex flex-wrap items-center gap-2">
             <Button
@@ -423,3 +522,73 @@ const [Grid, gridApi] = useVbenVxeGrid({
     </div>
   </Page>
 </template>
+
+<style scoped>
+.status-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: hsl(var(--muted));
+  border-radius: 8px;
+}
+
+.status-tabs button {
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.status-tabs button.on {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--card));
+}
+
+.status-tabs button.hot em {
+  color: hsl(var(--destructive));
+}
+
+.status-tabs button:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+.status-tabs em {
+  margin-left: 4px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-tag {
+  margin: 0;
+}
+
+.due {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.due small {
+  font-size: 12px;
+}
+
+.due.late {
+  color: hsl(var(--destructive));
+}
+
+.due.soon small {
+  font-weight: 600;
+  color: color-mix(in srgb, hsl(var(--warning)) 55%, hsl(var(--foreground)));
+}
+
+.due.muted {
+  color: hsl(var(--muted-foreground));
+}
+</style>

@@ -116,6 +116,33 @@ function normalizeApprovalTemplates(templates: DingTalkApprovalApi.Template[]) {
   return [...uniqueTemplates.values()];
 }
 
+const TEMPLATE_KEY = 'fdm.dingtalk.approval.template';
+/** 记住上次选的模板；只是本机便利，读写失败不影响使用 */
+function rememberTemplate(processCode?: string) {
+  try {
+    if (processCode) localStorage.setItem(TEMPLATE_KEY, processCode);
+  } catch {
+    // 浏览器禁用存储时忽略
+  }
+}
+function rememberedTemplate() {
+  try {
+    return localStorage.getItem(TEMPLATE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** 打开页面时直接选上次用的模板，没有就选第一个，列表不再空着等人选 */
+function preselectTemplate() {
+  if (selectedProcessCode.value || approvalTemplates.value.length === 0)
+    return false;
+  const saved = rememberedTemplate();
+  selectedProcessCode.value =
+    approvalTemplates.value.find((item) => item.processCode === saved)
+      ?.processCode ?? approvalTemplates.value[0]!.processCode;
+  return true;
+}
+
 function templateOptionLabel(template: DingTalkApprovalApi.Template) {
   const datatype =
     template.datatype == null ? '' : ` · datatype ${template.datatype}`;
@@ -132,6 +159,7 @@ function closeCurrentDetail() {
 
 async function loadApprovalTemplates(reloadList = false) {
   if (templateLoading.value) return;
+  let shouldReload = reloadList;
   const previousProcessCode = selectedProcessCode.value;
   templateLoading.value = true;
   templateLoaded.value = false;
@@ -141,6 +169,7 @@ async function loadApprovalTemplates(reloadList = false) {
     if (!Array.isArray(result)) throw new Error('审批模板返回格式无效');
     approvalTemplates.value = normalizeApprovalTemplates(result);
     templateLoaded.value = true;
+    if (preselectTemplate()) shouldReload = true;
     if (
       previousProcessCode &&
       !approvalTemplates.value.some(
@@ -159,7 +188,7 @@ async function loadApprovalTemplates(reloadList = false) {
   } finally {
     templateLoading.value = false;
   }
-  if (reloadList) await gridApi.query();
+  if (shouldReload) await gridApi.query();
 }
 
 async function queryTodoCount() {
@@ -273,6 +302,8 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 onMounted(() => {
   void loadApprovalTemplates();
+  // 全部模板的待审批数量进页面就查，不用再点按钮
+  void queryTodoCount();
 });
 
 function isProcessing(processInstanceId?: string) {
@@ -308,6 +339,7 @@ function scopeChanged(scope: number | string) {
 
 function templateChanged(value: unknown) {
   selectedProcessCode.value = typeof value === 'string' ? value : undefined;
+  rememberTemplate(selectedProcessCode.value);
   pageNotice.value = '';
   pageTruncated.value = false;
   closeCurrentDetail();

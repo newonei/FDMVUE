@@ -15,6 +15,7 @@ import { useUserStore } from '@vben/stores';
 
 import { Alert, Button } from 'ant-design-vue';
 
+import { getEcInvoiceApplyPage } from '#/api/fdmdata/ecinvoiceapply';
 import { getPortalSummary } from '#/api/fdmplatform/portal';
 
 import {
@@ -27,6 +28,7 @@ import { nativeMoney } from '../documents/migration-display';
 import {
   actionableCount,
   contractLink,
+  EC_INVOICES,
   formatNumber,
   greeting,
   pickTrend,
@@ -39,11 +41,44 @@ const router = useRouter();
 const userStore = useUserStore();
 const definition = computed(() => portalDefinitions[props.department]);
 const summary = ref<PortalSummary>();
+/** 业务协同之外的待办（电商开票），按菜单权限在前端单独查；查不到就不显示数字 */
+const extraTodos = ref<PortalTodo[]>([]);
 const loading = ref(false);
 const loadError = ref('');
 let sequence = 0;
 
+async function loadEcInvoices() {
+  if (props.department !== 'finance' || !reachable({ path: EC_INVOICES }))
+    return;
+  try {
+    const now = new Date();
+    const soon = new Date(now.getTime() + 3 * 24 * 3600 * 1000);
+    const text = (date: Date) =>
+      date.toLocaleString('sv-SE').replace('T', ' ').slice(0, 19);
+    const [pending, urgent] = await Promise.all([
+      getEcInvoiceApplyPage({
+        pageNo: 1,
+        pageSize: 1,
+        invoiceStatus: 0,
+        sort: 'DUE',
+      }),
+      getEcInvoiceApplyPage({
+        pageNo: 1,
+        pageSize: 1,
+        invoiceStatus: 0,
+        invoiceDueTime: [text(now), text(soon)],
+      }),
+    ]);
+    const first = pending.list[0];
+    let preview = first ? `${first.shopName ?? ''} · ${first.title ?? ''}` : '';
+    if (urgent.total > 0) preview = `${urgent.total} 张 3 天内到开票截止`;
+    extraTodos.value = [{ key: 'ecInvoice', count: pending.total, preview }];
+  } catch {
+    extraTodos.value = [];
+  }
+}
 async function load() {
+  void loadEcInvoices();
   const run = ++sequence;
   loading.value = true;
   loadError.value = '';
@@ -81,9 +116,14 @@ const subline = computed(() => {
 });
 const todos = computed(() =>
   definition.value.todos.map((entry) => {
-    const todo: PortalTodo = summary.value?.todos.find(
-      (item) => item.key === entry.key,
-    ) ?? { key: entry.key, count: 0, preview: '' };
+    const todo: PortalTodo = [
+      ...(summary.value?.todos ?? []),
+      ...extraTodos.value,
+    ].find((item) => item.key === entry.key) ?? {
+      key: entry.key,
+      count: 0,
+      preview: '',
+    };
     return {
       ...entry,
       todo,

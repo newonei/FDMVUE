@@ -17,6 +17,7 @@ import {
   Table,
   Tag,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
@@ -25,7 +26,7 @@ import {
 } from '#/api/fdmplatform/exchange-rates';
 
 import { errorText } from '../../data';
-import { conversionDateNote } from './model';
+import { conversionDateNote, rateText, splitCommonRates } from './model';
 
 defineOptions({ name: 'FdmPlatformExchangeRates' });
 const date = ref(new Date().toLocaleDateString('sv-SE'));
@@ -36,10 +37,21 @@ const fetching = ref(false);
 const panelError = ref('');
 let sequence = 0;
 let fetchKey = { date: '', key: '' };
-const rows = computed(() =>
-  (bundle.value?.rows ?? []).filter((row) =>
-    row.currency.includes(keyword.value.trim().toUpperCase()),
-  ),
+const showOthers = ref(false);
+const split = computed(() => splitCommonRates(bundle.value?.rows ?? []));
+/** 输入筛选时在全部币种里找；不筛选时表格只列常用之外的币种 */
+const rows = computed(() => {
+  const term = keyword.value.trim().toUpperCase();
+  if (term)
+    return (bundle.value?.rows ?? []).filter((row) =>
+      row.currency.includes(term),
+    );
+  return split.value.others;
+});
+const fetchedText = computed(() =>
+  bundle.value?.fetchedAt
+    ? dayjs(bundle.value.fetchedAt).format('YYYY-MM-DD HH:mm')
+    : '—',
 );
 const sourceUrl = computed(() =>
   bundle.value?.sourceUrl.startsWith('https://')
@@ -140,7 +152,7 @@ onBeforeUnmount(() => {
 </Descriptions.Item><Descriptions.Item label="实际来源日期">
               {{ bundle.rateDate }}
 </Descriptions.Item><Descriptions.Item label="获取时间">
-              {{ bundle.fetchedAt }}
+              {{ fetchedText }}
             </Descriptions.Item>
             <Descriptions.Item label="来源">
               <a
@@ -156,13 +168,36 @@ onBeforeUnmount(() => {
             :message="conversionDateNote(bundle)"
             show-icon
           />
-          <Input
-            v-model:value="keyword"
-            placeholder="筛选币种，例如 USD、EUR"
-            allow-clear
-            style="max-width: 280px"
-          />
+          <div v-if="split.common.length" class="pinned" aria-label="常用币种">
+            <div v-for="rate in split.common" :key="rate.currency" class="pin">
+              <span>{{ rate.currency }}</span>
+              <b :title="`1 ${rate.currency} = ${rate.rateToCny} CNY`">{{
+                rateText(rate.rateToCny)
+              }}</b>
+              <small>1 {{ rate.currency }} 折人民币</small>
+            </div>
+          </div>
+          <Space wrap>
+            <Input
+              v-model:value="keyword"
+              placeholder="筛选币种，例如 THB、SGD"
+              allow-clear
+              style="width: 240px"
+            />
+            <Button
+              v-if="!keyword"
+              type="link"
+              @click="showOthers = !showOthers"
+            >
+              {{
+                showOthers
+                  ? '收起其他币种'
+                  : `其他 ${split.others.length} 种币种`
+              }}
+            </Button>
+          </Space>
           <Table
+            v-if="showOthers || keyword"
             :columns="columns"
             :data-source="rows"
             row-key="currency"
@@ -170,7 +205,11 @@ onBeforeUnmount(() => {
             :scroll="{ x: 920 }"
           >
             <template #bodyCell="{ column, record }">
-              <strong v-if="column.key === 'rate'">1 {{ record.currency }} = {{ record.rateToCny }} CNY</strong><Tag
+              <strong
+                v-if="column.key === 'rate'"
+                :title="`1 ${record.currency} = ${record.rateToCny} CNY`"
+                >1 {{ record.currency }} =
+                {{ rateText(record.rateToCny) }} CNY</strong><Tag
                 v-else-if="column.key === 'fallback'"
                 :color="record.fallback ? 'orange' : 'green'"
               >
@@ -190,5 +229,37 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.pinned {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.pin {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.pin span,
+.pin small {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.pin span {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.pin b {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 </style>

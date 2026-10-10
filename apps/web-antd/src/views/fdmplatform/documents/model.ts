@@ -240,14 +240,11 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     description: '登记真实到账、确认回款，按到账日期保存人民币折算快照。',
     resource: 'receipt-records',
     route: `${finance}receipts`,
+    // 原币金额带币种；汇率、汇率日期、原账面金额在单据详情里看
     fields: [
       'receivedAt|到账日期',
       'amount|回款金额',
-      'sourceBookAmount|原账面金额',
-      'currency|回款币种',
-      'rmbAmount|人民币金额',
-      'exchangeRateToCny|汇率',
-      'exchangeRateDate|汇率日期',
+      'rmbAmount|折人民币',
       'status|确认状态',
       'paymentMethod|到款方式',
       'actorId|登记人',

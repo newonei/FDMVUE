@@ -52,6 +52,8 @@ const TASKS = '/fdmprocurement/platform-tasks';
 const ORDERS = '/fdmprocurement/platform-orders';
 const RECEIPTS = '/caiwu/platform-receipts';
 const PAYMENTS = '/caiwu/platform-procurement-requests';
+/** 电商开票申请（fdmdata），不在业务协同模块里，门户在前端单独查数量 */
+export const EC_INVOICES = '/caiwu/fpadmiin/ecinvoiceapply';
 
 export function contractLink(contractId: string): PortalLink {
   return { path: CONTRACTS, query: { contractId } };
@@ -442,6 +444,13 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
         target: () => ({ path: PAYMENTS, query: { view: 'reimbursements' } }),
       },
       {
+        key: 'ecInvoice',
+        label: '电商开票待处理',
+        empty: '电商发票都已开具',
+        hot: true,
+        target: () => ({ path: EC_INVOICES }),
+      },
+      {
         key: 'history',
         label: '历史财务单据待补齐',
         empty: '没有待补齐的历史单据',
@@ -499,6 +508,31 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
             title: '汇率中心',
             description: '参考汇率与折算',
             link: { path: '/caiwu/platform-exchange-rates' },
+          },
+        ],
+      },
+      {
+        group: '电商与报价',
+        items: [
+          {
+            title: '电商开票申请',
+            description: '待开票 · 截止提醒 · 上传发票',
+            link: { path: EC_INVOICES },
+          },
+          {
+            title: '电商毛利表',
+            description: '按月、按分组看店铺毛利',
+            link: { path: '/caiwu/ec-profit' },
+          },
+          {
+            title: '产品报价',
+            description: '单项与 Excel 批量报价',
+            link: { path: '/caiwu/baojia/quotation' },
+          },
+          {
+            title: '钉钉审批单',
+            description: '待我审批的钉钉审批',
+            link: { path: '/caiwu/dingtalk-approval' },
           },
         ],
       },

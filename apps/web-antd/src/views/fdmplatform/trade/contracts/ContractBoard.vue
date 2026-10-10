@@ -388,6 +388,8 @@ function locateFromRoute() {
     return;
   }
   if (selected.value?.id === id && detailOpen.value) return;
+  // 财务页面跳过来时带 ?tab=finance，直接打开对应页签
+  if (typeof route.query.tab === 'string') detailTab.value = route.query.tab;
   void showContract(id);
 }
 function openEditor(source?: Contract) {

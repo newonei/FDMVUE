@@ -47,6 +47,9 @@ const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
 const status = ref<string>();
+/** 采购付款里金智迁入的 9 千多条历史付款默认不混进来 */
+const source = ref<'ALL' | 'JINZHI' | 'NATIVE'>('NATIVE');
+const isPayment = computed(() => effectiveType.value === 'PAYMENT');
 const loading = ref(false);
 const pageError = ref('');
 const open = ref(false);
@@ -94,6 +97,8 @@ async function load() {
       orderId: orderId.value,
       status: status.value,
       keyword: keyword.value || undefined,
+      source:
+        isPayment.value && source.value !== 'ALL' ? source.value : undefined,
       pageNo: page.value,
       pageSize: 10,
     });
@@ -119,6 +124,48 @@ function create(
   };
   selectedId.value = undefined;
   open.value = true;
+}
+function selectSource(value: 'ALL' | 'JINZHI' | 'NATIVE') {
+  if (source.value === value) return;
+  source.value = value;
+  page.value = 1;
+  void load();
+}
+const columns = computed(() =>
+  isPayment.value
+    ? [
+        { title: '单据号 / 名称', key: 'name', width: 300 },
+        { title: '供应商 / 收款方', key: 'payee', width: 200, ellipsis: true },
+        { title: '付款日期', key: 'paidAt', width: 110 },
+        { title: '金额', key: 'money', width: 150, align: 'right' as const },
+        { title: '付款账户', key: 'payer', width: 180, ellipsis: true },
+        { title: '状态', key: 'state', width: 100 },
+        { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
+      ]
+    : [
+        { title: '单据号 / 名称', key: 'name', width: 330 },
+        { title: '金额', key: 'money', width: 170, align: 'right' as const },
+        { title: '付款主体', key: 'payer', width: 250, ellipsis: true },
+        { title: '状态', key: 'state', width: 120 },
+        { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
+      ],
+);
+function moneyText(record: ProcurementFinanceRecord) {
+  if (record.amount === null || record.amount === undefined) return '未注明';
+  const amount = Number(record.amount).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return record.currency ? `${record.currency} ${amount}` : amount;
+}
+function payerText(record: ProcurementFinanceRecord) {
+  if (isPayment.value)
+    return String(
+      record.payerSnapshot?.name ??
+        (record as Record<string, unknown>).payerAccount ??
+        '—',
+    );
+  return payerSummary(record);
 }
 function close() {
   open.value = false;
@@ -252,6 +299,27 @@ watch(
               effectiveType === 'PAYMENT_PLAN' ? '查看采购请款' : '查看付款计划'
             }}
 </Button><Button :loading="loading" @click="load">刷新</Button>
+          <div
+            v-if="isPayment"
+            class="source-switch"
+            role="group"
+            aria-label="付款来源"
+          >
+            <button
+              v-for="option in [
+                { key: 'NATIVE', label: '新系统' },
+                { key: 'JINZHI', label: '金智历史' },
+                { key: 'ALL', label: '全部' },
+              ] as const"
+              :key="option.key"
+              type="button"
+              :class="{ on: source === option.key }"
+              :aria-pressed="source === option.key"
+              @click="selectSource(option.key)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
 </Space><Table
           class="fdm-business-table"
           size="small"
@@ -261,14 +329,7 @@ watch(
           :loading="loading"
           row-key="id"
           :pagination="{ current: page, pageSize: 10, total }"
-          :columns="[
-            { title: '单据号 / 名称', key: 'name', width: 330 },
-            { title: '金额', dataIndex: 'amount', width: 150 },
-            { title: '币种', dataIndex: 'currency', width: 90 },
-            { title: '付款主体', key: 'payer', width: 250, ellipsis: true },
-            { title: '状态', key: 'state', width: 120 },
-            { title: '操作', key: 'action', width: 140, fixed: 'right' },
-          ]"
+          :columns="columns"
           @change="
             (value) => {
               page = value.current ?? 1;
@@ -287,8 +348,8 @@ watch(
 </Button><span
               v-else-if="column.key === 'payer'"
               class="fdm-cell-line"
-              :title="payerSummary(record as ProcurementFinanceRecord)"
-              >{{ payerSummary(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
+              :title="payerText(record as ProcurementFinanceRecord)"
+              >{{ payerText(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
               {{ financeStatus(record.status) }}
 </Tag><Button
               v-else-if="column.key === 'action'"
@@ -297,11 +358,16 @@ watch(
             >
               查看 / 办理
             </Button>
-            <span v-else-if="column.dataIndex === 'amount'">{{
-              record.amount ?? '未注明'
-            }}</span>
-            <span v-else-if="column.dataIndex === 'currency'">{{
-              record.currency || '未注明'
+            <span v-else-if="column.key === 'money'" class="num">{{ moneyText(record as ProcurementFinanceRecord)
+              }}<small v-if="!record.currency" class="muted">
+                币种未注明</small></span>
+            <span
+              v-else-if="column.key === 'payee'"
+              class="fdm-cell-line"
+              :title="String(record.payeeName ?? '')"
+              >{{ record.payeeName || '—' }}</span>
+            <span v-else-if="column.key === 'paidAt'" class="num">{{
+              record.paidAt ?? '—'
             }}</span>
           </template>
         </Table>
@@ -322,3 +388,42 @@ watch(
     @updated="load"
   />
 </template>
+
+<style scoped>
+.source-switch {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.source-switch button {
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.source-switch button.on {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+}
+
+.source-switch button:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+</style>
