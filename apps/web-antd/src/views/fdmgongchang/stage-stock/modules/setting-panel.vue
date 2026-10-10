@@ -35,6 +35,18 @@ const saving = ref(false);
 const sources = reactive<Record<string, string[]>>({});
 const defaults = reactive<Record<string, string>>({});
 const locations = reactive<Record<string, string>>({});
+/** 本厂有哪些工序：各厂工序不一样，没勾的工序不出现在开单、生产链和岗位里。 */
+const enabledProcesses = ref<string[]>([]);
+const allProcesses = computed<Api.ProcessToggle[]>(
+  () =>
+    props.options.allProcesses ??
+    props.options.processes.map((p) => ({
+      code: p.code,
+      enabled: true,
+      label: p.label,
+      outputStage: p.outputStage,
+    })),
+);
 
 const stageLabel = (code: string) =>
   props.options.stages.find((s) => s.code === code)?.label ?? code;
@@ -42,6 +54,10 @@ const stageLabel = (code: string) =>
 onMounted(async () => {
   try {
     const setting = await getStageStockSetting();
+    enabledProcesses.value = [
+      ...(setting.enabledProcesses ??
+        props.options.processes.map((p) => p.code)),
+    ];
     for (const p of setting.processes) {
       sources[p.process] = [...p.sources];
       defaults[p.process] = p.sources[0] ?? '';
@@ -59,6 +75,10 @@ function onSourcesChange(process: string, value: string[]) {
 }
 
 async function save() {
+  if (enabledProcesses.value.length === 0) {
+    message.warning('本厂至少要启用一道工序');
+    return;
+  }
   const processes = props.options.processes.map((p) => {
     const chosen = sources[p.code] ?? [];
     const first = defaults[p.code];
@@ -88,6 +108,9 @@ async function save() {
   saving.value = true;
   try {
     await saveStageStockSetting({
+      enabledProcesses: allProcesses.value
+        .map((p) => p.code)
+        .filter((code) => enabledProcesses.value.includes(code)),
       processes,
       stages: props.options.stages.map((s) => ({
         defaultLocation: locations[s.code]!.trim(),
@@ -105,6 +128,23 @@ async function save() {
 <template>
   <Spin :spinning="loading">
     <div class="flex flex-col gap-6">
+      <section class="flex flex-col gap-2">
+        <h3 class="m-0 text-sm font-semibold">
+          本厂工序<span class="ml-2 text-xs font-normal text-muted-foreground">各厂工序不一样；没勾的工序不会出现在开单、生产链和人员岗位里。改完点「保存设置」</span>
+        </h3>
+        <Checkbox.Group
+          id="setting-enabled-processes"
+          v-model:value="enabledProcesses"
+          :disabled="!canEdit"
+          :options="
+            allProcesses.map((p) => ({
+              label: `${p.label}（产出${p.outputStageLabel ?? stageLabel(p.outputStage)}）`,
+              value: p.code,
+            }))
+          "
+        />
+      </section>
+
       <section class="flex flex-col gap-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h3 class="m-0 text-sm font-semibold">

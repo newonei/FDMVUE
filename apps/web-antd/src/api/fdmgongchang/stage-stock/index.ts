@@ -65,7 +65,17 @@ export namespace FdmgongchangStageStockApi {
     name: string;
   }
 
+  /** 全部工序及本厂是否启用（基础设置勾选用）。 */
+  export interface ProcessToggle {
+    code: string;
+    enabled: boolean;
+    label: string;
+    outputStage: string;
+    outputStageLabel?: string;
+  }
+
   export interface Options {
+    allProcesses?: ProcessToggle[];
     colors: DictOption[];
     materials: DictOption[];
     patterns: DictOption[];
@@ -265,6 +275,8 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface Setting {
+    /** 本厂有哪些工序；不传表示不修改。 */
+    enabledProcesses?: string[];
     processes: Array<{ process: string; sources: string[] }>;
     stages: Array<{ defaultLocation: string; stage: string }>;
   }
