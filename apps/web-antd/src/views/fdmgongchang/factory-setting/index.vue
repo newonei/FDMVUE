@@ -6,7 +6,15 @@ import { computed, onMounted, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
-import { Button, Checkbox, message, Result, Spin, Tabs } from 'ant-design-vue';
+import {
+  Button,
+  Checkbox,
+  InputNumber,
+  message,
+  Result,
+  Spin,
+  Tabs,
+} from 'ant-design-vue';
 
 import {
   getFactorySetting,
@@ -36,6 +44,12 @@ const activeTab = ref<'processes' | 'wage'>('processes');
 const factory = useFactory();
 const setting = ref<Api.Setting>();
 const enabled = ref<string[]>([]);
+/** 工序日产能（产出单位 / 天），AI 排单在没有历史产出时参考。 */
+const capacities = ref<Record<string, null | number>>({});
+const savedCapacity = (code: string) => {
+  const v = setting.value?.processes.find((p) => p.code === code)?.dailyCapacity;
+  return v === null || v === undefined || v === '' ? null : Number(v);
+};
 const loading = ref(false);
 const saving = ref(false);
 const loadError = ref(false);
@@ -47,7 +61,10 @@ const dirty = computed(() => {
     .map((p) => p.code);
   return (
     saved.length !== enabled.value.length ||
-    saved.some((code) => !enabled.value.includes(code))
+    saved.some((code) => !enabled.value.includes(code)) ||
+    (setting.value?.processes ?? []).some(
+      (p) => (capacities.value[p.code] ?? null) !== savedCapacity(p.code),
+    )
   );
 });
 
@@ -65,6 +82,9 @@ async function load() {
     enabled.value = setting.value.processes
       .filter((p) => p.enabled)
       .map((p) => p.code);
+    capacities.value = Object.fromEntries(
+      setting.value.processes.map((p) => [p.code, savedCapacity(p.code)]),
+    );
   } catch {
     loadError.value = true;
   } finally {
@@ -90,6 +110,9 @@ async function save() {
   try {
     const order = (setting.value?.processes ?? []).map((p) => p.code);
     await saveFactorySetting({
+      dailyCapacities: Object.fromEntries(
+        order.map((code) => [code, capacities.value[code] ?? null]),
+      ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
     });
     message.success(`${factory.current.value?.name ?? '本厂'}的工厂设置已保存`);
@@ -165,17 +188,44 @@ async function save() {
             id="factory-processes"
             v-model:value="enabled"
             :disabled="!canEdit"
-            class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4"
+            class="grid grid-cols-1 gap-2 md:grid-cols-2"
           >
-            <Checkbox
+            <div
               v-for="p in setting?.processes ?? []"
               :key="p.code"
-              :value="p.code"
+              class="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
             >
-              {{ p.label }}
-              <span class="text-xs text-muted-foreground">产出{{ p.outputStageLabel }}</span>
-            </Checkbox>
+              <Checkbox :value="p.code">
+                {{ p.label }}
+                <span class="text-xs text-muted-foreground">产出{{ p.outputStageLabel }}</span>
+              </Checkbox>
+              <label
+                :for="`capacity-${p.code}`"
+                class="flex items-center gap-1 text-xs text-muted-foreground"
+              >
+                日产能
+                <InputNumber
+                  :id="`capacity-${p.code}`"
+                  :disabled="!canEdit || !enabled.includes(p.code)"
+                  :min="0"
+                  :precision="0"
+                  :value="capacities[p.code] ?? undefined"
+                  class="w-28"
+                  placeholder="选填"
+                  size="small"
+                  @change="
+                    (v) =>
+                      (capacities[p.code] =
+                        (v as null | number | undefined) ?? null)
+                  "
+                />
+                {{ p.outputUnit }}/天
+              </label>
+            </div>
           </Checkbox.Group>
+          <p class="m-0 text-xs text-muted-foreground">
+            日产能是这道工序整个车间一天大概能做多少，AI 排单时用来控制每天的量；不填时按最近 14 天的实际产出估算。
+          </p>
         </section>
       </Spin>
           </Tabs.TabPane>

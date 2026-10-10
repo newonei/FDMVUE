@@ -2,6 +2,7 @@
 import type { AttrField, InputLine, OutputDraft } from '../model';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
+import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
 
@@ -23,6 +24,7 @@ import {
   Table,
 } from 'ant-design-vue';
 
+import { getScheduleTasks } from '#/api/fdmgongchang/schedule';
 import {
   createOrder,
   getMakeTasks,
@@ -241,6 +243,30 @@ function pieceErrors() {
   return problems;
 }
 
+/** 关联排单任务（选填）：这道工序前 3 天到明天下发的任务，用来对比计划与实际。 */
+const scheduleTasks = ref<FdmgongchangScheduleApi.Task[]>([]);
+const scheduleTaskId = ref<number>();
+async function loadScheduleTasks() {
+  const code = processCode.value;
+  try {
+    const list = await getScheduleTasks(code);
+    if (code === processCode.value) scheduleTasks.value = list;
+  } catch {
+    scheduleTasks.value = [];
+  }
+}
+const scheduleTaskOptions = computed(() =>
+  scheduleTasks.value.map((t) => {
+    const date = Array.isArray(t.workDate)
+      ? `${t.workDate[1]}-${t.workDate[2]}`
+      : String(t.workDate ?? '').slice(5);
+    return {
+      label: `${date} · ${t.sequence ?? ''}. ${t.contractCode || '备货'} · ${[t.product, t.spec].filter(Boolean).join(' ')} · 计划 ${Number(t.quantity)} / 已做 ${Number(t.actualQuantity)} ${t.unit ?? ''}${t.workerNames ? ` · ${t.workerNames}` : ''}`,
+      value: t.id,
+    };
+  }),
+);
+
 /** 报产出：true 报完关单；false 只登记这一批，单子继续在制。 */
 const reportFinish = ref(true);
 const reportedBefore = computed(() => order.value?.reportCount ?? 0);
@@ -353,6 +379,8 @@ watch(open, async (value) => {
   Object.assign(meta, { remark: '' });
   operatorUserId.value = undefined;
   pieces.value = [];
+  scheduleTaskId.value = undefined;
+  scheduleTasks.value = [];
   pieceMatches.value = [];
   pieceMatchesLoaded.value = false;
   if (props.mode === 'report' && props.orderId) {
@@ -378,6 +406,7 @@ watch(open, async (value) => {
   const code = defaultProcessFor(props.initialStage);
   processCode.value = code;
   void loadOperators();
+  void loadScheduleTasks();
   processCode.value = code;
   const option = props.options.processes.find((p) => p.code === code);
   sourceStage.value =
@@ -395,6 +424,8 @@ function selectProcess(code: string) {
   resetPicking();
   loadStock();
   loadOperators();
+  scheduleTaskId.value = undefined;
+  loadScheduleTasks();
 }
 
 function selectSource(stage: string) {
@@ -630,6 +661,7 @@ async function submit() {
         pieceworks: finish.value ? piecePayload() : [],
         process: processCode.value,
         remark: meta.remark.trim() || undefined,
+        scheduleTaskId: scheduleTaskId.value,
         sourceStage: sourceStage.value,
       });
       emit(
@@ -1131,6 +1163,22 @@ watch(processCode, warnNoPatterns);
               <span v-else-if="linkedTask">
                 包装完工时才回写合同进度，这道工序只做关联记录。
               </span>
+            </label>
+            <label
+              v-if="scheduleTasks.length > 0"
+              for="order-schedule-task"
+              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
+            >
+              关联排单任务（选填）
+              <Select
+                id="order-schedule-task"
+                v-model:value="scheduleTaskId"
+                :options="scheduleTaskOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="选这张单在做哪个排单任务，用来对比计划与实际"
+                show-search
+              />
             </label>
             <label
               for="order-operator"

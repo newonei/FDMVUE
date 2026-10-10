@@ -126,6 +126,9 @@ export namespace FdmgongchangFactorySettingApi {
     label: string;
     outputStage: string;
     outputStageLabel: string;
+    outputUnit?: string;
+    /** 日产能（产出单位 / 天），AI 排单参考。 */
+    dailyCapacity?: null | number | string;
   }
 
   export interface Setting {
@@ -133,6 +136,8 @@ export namespace FdmgongchangFactorySettingApi {
   }
 
   export interface SaveReq {
+    /** 各工序日产能（工序编码 → 产出单位 / 天）。 */
+    dailyCapacities?: Record<string, null | number>;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];
   }

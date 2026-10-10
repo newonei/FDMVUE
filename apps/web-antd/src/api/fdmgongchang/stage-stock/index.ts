@@ -179,6 +179,8 @@ export namespace FdmgongchangStageStockApi {
     pieceworks?: Piecework[];
     process: string;
     remark?: string;
+    /** 关联的排单任务（选填）。 */
+    scheduleTaskId?: number;
     sourceStage: string;
   }
 

@@ -25,6 +25,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   previewItemCodes: mocks.preview,
   reportOrder: mocks.report,
 }));
+vi.mock('#/api/fdmgongchang/schedule', () => ({ getScheduleTasks: vi.fn().mockResolvedValue([]) }));
 vi.mock('#/api/fdmgongchang/wage', () => ({ matchWageItems: mocks.match }));
 vi.mock('@vben/stores', () => ({
   useUserStore: () => ({ userInfo: { id: 7 } }),

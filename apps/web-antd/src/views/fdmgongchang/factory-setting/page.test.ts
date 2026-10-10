@@ -80,6 +80,7 @@ describe('factory setting page', () => {
       .click();
     await flush();
     expect(mocks.save).toHaveBeenCalledWith({
+      dailyCapacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
       enabledProcesses: ['MIX', 'SLICE', 'PACK'],
     });
   });
