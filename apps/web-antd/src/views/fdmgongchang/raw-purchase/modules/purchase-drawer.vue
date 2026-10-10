@@ -3,6 +3,7 @@ import type { Dayjs } from 'dayjs';
 
 import type { DraftLine } from '../model';
 
+import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangRawPurchaseApi as Api } from '#/api/fdmgongchang/raw-purchase';
 import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 import type { MasterRecord } from '#/api/fdmplatform';
@@ -37,12 +38,15 @@ import {
 
 /** 新建 / 修改原材料采购单：供应商来自外贸平台供应商主数据，原材料来自财务部门的原材料价格表。 */
 const props = defineProps<{
+  /** 收货工厂：三家工厂各自到货入库。 */
+  factories: FdmgongchangFactoryApi.Factory[];
   materials: StockApi.RawMaterialOption[];
   purchase?: Api.Purchase;
 }>();
 const emit = defineEmits<{ saved: [message: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 
+const factoryId = ref<number>();
 const supplierId = ref<string>();
 const supplierName = ref<string>();
 const orderDate = ref<Dayjs>(dayjs());
@@ -70,6 +74,8 @@ watch(open, (value) => {
   if (!value) return;
   errors.value = [];
   const p = props.purchase;
+  factoryId.value =
+    p?.factoryId ?? (props.factories.length === 1 ? props.factories[0]?.id : undefined);
   supplierId.value = p?.supplierId;
   supplierName.value = p?.supplierName;
   orderDate.value = p?.orderDate ? dayjs(String(p.orderDate)) : dayjs();
@@ -101,12 +107,14 @@ function num(value: null | number | string | undefined) {
 
 async function submit() {
   const problems = validateDraft({ lines: lines.value, nameOf, supplierId: supplierId.value });
+  if (!factoryId.value) problems.unshift('请选择收货工厂。');
   errors.value = problems;
-  if (problems.length > 0 || !supplierId.value) return;
+  if (problems.length > 0 || !supplierId.value || !factoryId.value) return;
   saving.value = true;
   try {
     const data: Api.SaveReq = {
       expectedDate: expectedDate.value?.format('YYYY-MM-DD'),
+      factoryId: factoryId.value,
       id: props.purchase?.id,
       lines: lines.value.map((l) => ({
         quantity: l.quantity!,
@@ -145,6 +153,16 @@ async function submit() {
   >
     <div class="flex flex-col gap-5">
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label for="rp-factory" class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+          收货工厂（到货后由这家工厂在「工序库存 · 到货入库」收货）
+          <Select
+            id="rp-factory"
+            v-model:value="factoryId"
+            :options="factories.map((f) => ({ label: f.name, value: f.id }))"
+            class="w-full"
+            placeholder="选择收货工厂"
+          />
+        </label>
         <div class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
           <span>供应商（采购部门「供应商管理」里的供应商）</span>
           <RemoteMasterSelect

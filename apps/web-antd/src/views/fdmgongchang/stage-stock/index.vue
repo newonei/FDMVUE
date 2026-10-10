@@ -14,6 +14,8 @@ import {
   getStageStockSummary,
 } from '#/api/fdmgongchang/stage-stock';
 
+import FactorySwitch from '../shared/factory-switch.vue';
+import { useFactory } from '../shared/use-factory';
 import OrderDrawer from './modules/order-drawer.vue';
 import OrderPanel from './modules/order-panel.vue';
 import ReceiptDrawer from './modules/receipt-drawer.vue';
@@ -36,9 +38,12 @@ const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
 );
 
+const factory = useFactory();
 const options = ref<Api.Options>();
 const summary = ref<Api.Summary>();
 const loadError = ref(false);
+/** 账号不属于任何工厂，且没有「查看全部工厂」权限。 */
+const noFactory = ref(false);
 type TabKey = 'orders' | 'receiving' | 'settings' | 'stock' | 'trade' | 'txns';
 const TAB_KEYS = new Set<TabKey>([
   'orders',
@@ -57,7 +62,7 @@ const refreshKey = ref(0);
 const txnItemCode = ref('');
 
 const drawerOpen = ref(false);
-const drawerMode = ref<'complete' | 'create'>('create');
+const drawerMode = ref<'create' | 'report'>('create');
 const drawerStage = ref<string>();
 const drawerOrderId = ref<number>();
 const drawerTask = ref<{ assignmentId: string; contractId: string }>();
@@ -82,7 +87,13 @@ async function loadSummary() {
 
 async function loadAll() {
   loadError.value = false;
+  noFactory.value = false;
   try {
+    if (!factory.loaded.value) await factory.load();
+    if (factory.factoryId.value === null) {
+      noFactory.value = true;
+      return;
+    }
     const [opts] = await Promise.all([getStageStockOptions(), loadSummary()]);
     options.value = opts;
   } catch {
@@ -91,6 +102,18 @@ async function loadAll() {
 }
 
 onMounted(loadAll);
+
+/** 切换工厂：库存、单据、设置都按工厂分开，整页重新加载。 */
+async function switchFactory(id: number) {
+  if (id === factory.factoryId.value) return;
+  factory.select(id);
+  options.value = undefined;
+  summary.value = undefined;
+  tradePending.value = 0;
+  receivingPending.value = 0;
+  txnItemCode.value = '';
+  await loadAll();
+}
 
 /** 外贸合同主线的「去工序库存」带 ?tab=trade / ?tab=receiving 进来，直接打开对应标签。 */
 watch(
@@ -144,8 +167,8 @@ function openTradeReceipt(line: Api.TradePurchaseLine) {
   receiptOpen.value = true;
 }
 
-function openComplete(orderId: number) {
-  drawerMode.value = 'complete';
+function openReport(orderId: number) {
+  drawerMode.value = 'report';
   drawerOrderId.value = orderId;
   drawerOpen.value = true;
 }
@@ -176,7 +199,15 @@ async function onSettingSaved() {
     <div class="flex flex-col gap-4">
       <header class="flex flex-wrap items-end justify-between gap-3">
         <div class="min-w-0">
-          <h1 class="m-0 text-xl font-semibold tracking-tight">工序库存</h1>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <h1 class="m-0 text-xl font-semibold tracking-tight">工序库存</h1>
+            <FactorySwitch
+              v-if="factory.factories.value.length > 0"
+              :factories="factory.factories.value"
+              :value="factory.factoryId.value"
+              @change="switchFactory"
+            />
+          </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
             每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
           </p>
@@ -190,7 +221,20 @@ async function onSettingSaved() {
         </Button>
       </header>
 
-      <Result v-if="loadError" status="warning" title="工序库存没有加载出来">
+      <Result
+        v-if="noFactory"
+        status="info"
+        title="你的账号还不属于任何工厂"
+      >
+        <template #subTitle>
+          工序库存按工厂分开记账。请在钉钉里把你调到所在工厂的部门，或联系管理员分配「查看全部工厂」权限。
+        </template>
+      </Result>
+      <Result
+        v-else-if="loadError"
+        status="warning"
+        title="工序库存没有加载出来"
+      >
         <template #subTitle>
           可能是网络问题，或者还没有分配「工序库存」的查看权限。
         </template>
@@ -202,7 +246,11 @@ async function onSettingSaved() {
         <Spin />
       </div>
 
-      <div v-else class="flex flex-col gap-4 xl:flex-row xl:items-start">
+      <div
+        v-else
+        :key="factory.factoryId.value ?? 0"
+        class="flex flex-col gap-4 xl:flex-row xl:items-start"
+      >
         <aside class="flex flex-col gap-2 xl:sticky xl:top-2 xl:w-60 xl:shrink-0">
           <StageRail
             :active="activeTab === 'stock' ? activeStage : undefined"
@@ -240,8 +288,9 @@ async function onSettingSaved() {
               <OrderPanel
                 :options="options"
                 :refresh-key="refreshKey"
-                @complete="openComplete"
+                @changed="onChanged"
                 @create="openCreate()"
+                @report="openReport"
               />
             </Tabs.TabPane>
             <Tabs.TabPane key="trade">

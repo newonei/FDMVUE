@@ -8,7 +8,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { formatDateTime } from '@vben/utils';
 
-import { Button, Input, Select, Spin, Table, Tag } from 'ant-design-vue';
+import { Button, Input, message, Select, Spin, Table, Tag } from 'ant-design-vue';
 
 import {
   getDefectStats,
@@ -23,14 +23,55 @@ import {
   formatRate,
   makeLabels,
 } from '../model';
+import ReturnModal from './return-modal.vue';
+import VoidModal from './void-modal.vue';
 
 const props = defineProps<{ options: Api.Options; refreshKey: number }>();
-const emit = defineEmits<{ complete: [orderId: number]; create: [] }>();
+const emit = defineEmits<{
+  changed: [];
+  create: [];
+  report: [orderId: number];
+}>();
 
 const { hasAccessByCodes } = useAccess();
 const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
 );
+const canVoid = computed(() =>
+  hasAccessByCodes(['fdmgongchang:stage-stock:void']),
+);
+
+const STATUS = {
+  COMPLETED: { color: 'green', label: '已完工' },
+  IN_PROGRESS: { color: 'orange', label: '在制' },
+  VOIDED: { color: 'default', label: '已作废' },
+} as const;
+const statusOf = (status: Api.OrderStatus) =>
+  STATUS[status] ?? { color: 'default', label: status };
+
+const returnOpen = ref(false);
+const returnOrderId = ref<number>();
+const voidOpen = ref(false);
+const voidTarget = ref<Api.Order>();
+
+function openReturn(order: Api.Order) {
+  returnOrderId.value = order.id;
+  returnOpen.value = true;
+}
+
+function openVoid(order: Api.Order) {
+  voidTarget.value = order;
+  voidOpen.value = true;
+}
+
+function onAdjusted(text: string) {
+  message.success(text);
+  emit('changed');
+}
+
+/** 已回写合同生产进度的单不能作废。 */
+const voidable = (order: Api.Order) =>
+  order.status !== 'VOIDED' && Number(order.productionWriteback ?? 0) <= 0;
 
 const labels = computed(() => makeLabels(props.options));
 const processLabel = (code?: string) =>
@@ -123,12 +164,13 @@ const columns = [
   { align: 'right' as const, key: 'output', title: '产出' },
   { key: 'contract', title: '关联订单' },
   { key: 'people', title: '班组 · 操作人' },
-  { align: 'right' as const, key: 'actions', title: '', width: 80 },
+  { align: 'right' as const, key: 'actions', title: '', width: 120 },
 ];
 
 const statusOptions = [
   { label: '在制', value: 'IN_PROGRESS' },
   { label: '已完工', value: 'COMPLETED' },
+  { label: '已作废', value: 'VOIDED' },
 ];
 const processOptions = computed(() =>
   props.options.processes.map((p) => ({ label: p.label, value: p.code })),
@@ -177,20 +219,30 @@ const statCards = computed(() =>
             已领 <b class="tabular-nums">{{ formatQty(o.inputQuantity) }}</b>
             {{ stageOf(o.sourceStage)?.unit }}
             {{ stageOf(o.sourceStage)?.label }}
+            <span
+              v-if="Number(o.returnedQuantity ?? 0) > 0"
+              class="text-xs text-muted-foreground"
+            >（已退 {{ formatQty(o.returnedQuantity) }}）</span>
+          </div>
+          <div
+            v-if="(o.reportCount ?? 0) > 0"
+            class="text-xs text-muted-foreground"
+          >
+            已报 {{ o.reportCount }} 次，良品
+            {{ formatQty(o.goodQuantity) }}
+            {{ stageOf(o.outputStage)?.unit }}
           </div>
           <div
             class="flex items-center justify-between gap-2 text-xs text-muted-foreground"
           >
             <span>{{ [o.team, o.operatorName].filter(Boolean).join(' · ') }} ·
               {{ formatDateTime(o.issuedAt) }}</span>
-            <Button
-              v-if="canOperate"
-              size="small"
-              type="primary"
-              @click="emit('complete', o.id)"
-            >
-              报完工
-            </Button>
+            <span v-if="canOperate" class="flex gap-1">
+              <Button size="small" @click="openReturn(o)">退料</Button>
+              <Button size="small" type="primary" @click="emit('report', o.id)">
+                报产出
+              </Button>
+            </span>
           </div>
         </div>
       </div>
@@ -291,11 +343,8 @@ const statCards = computed(() =>
           <template v-else-if="column.key === 'process'">
             <div class="flex flex-wrap items-center gap-1">
               <span class="whitespace-nowrap">{{ processLabel(record.process) }}</span>
-              <Tag
-                :color="record.status === 'IN_PROGRESS' ? 'orange' : 'green'"
-                class="m-0"
-              >
-                {{ record.status === 'IN_PROGRESS' ? '在制' : '已完工' }}
+              <Tag :color="statusOf(record.status).color" class="m-0">
+                {{ statusOf(record.status).label }}
               </Tag>
               <Tag v-if="isSkipped(record as Api.Order)" class="m-0">跳过工序</Tag>
             </div>
@@ -315,8 +364,9 @@ const statCards = computed(() =>
           </template>
           <template v-else-if="column.key === 'output'">
             <div
-              v-if="record.status === 'COMPLETED'"
+              v-if="record.status === 'COMPLETED' || (record.reportCount ?? 0) > 0"
               class="flex flex-col items-end"
+              :class="record.status === 'VOIDED' ? 'line-through opacity-60' : ''"
             >
               <span class="whitespace-nowrap tabular-nums">
                 良品 {{ formatQty(record.goodQuantity) }}
@@ -342,7 +392,9 @@ const statCards = computed(() =>
                 回写合同 {{ formatQty(record.productionWriteback) }}
               </span>
             </div>
-            <span v-else class="text-xs text-muted-foreground">未报完工</span>
+            <span v-else class="text-xs text-muted-foreground">{{
+              record.status === 'VOIDED' ? '—' : '未报产出'
+            }}</span>
           </template>
           <template v-else-if="column.key === 'contract'">
             <span v-if="record.contractCode" class="font-mono text-xs">
@@ -356,14 +408,32 @@ const statCards = computed(() =>
             </span>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <button
-              v-if="canOperate && record.status === 'IN_PROGRESS'"
-              type="button"
-              class="whitespace-nowrap text-xs text-primary hover:underline"
-              @click="emit('complete', record.id)"
-            >
-              报完工
-            </button>
+            <span class="flex justify-end gap-2 whitespace-nowrap text-xs">
+              <button
+                v-if="canOperate && record.status === 'IN_PROGRESS'"
+                type="button"
+                class="text-primary hover:underline"
+                @click="emit('report', record.id)"
+              >
+                报产出
+              </button>
+              <button
+                v-if="canOperate && record.status === 'IN_PROGRESS'"
+                type="button"
+                class="text-primary hover:underline"
+                @click="openReturn(record as Api.Order)"
+              >
+                退料
+              </button>
+              <button
+                v-if="canVoid && voidable(record as Api.Order)"
+                type="button"
+                class="text-destructive hover:underline"
+                @click="openVoid(record as Api.Order)"
+              >
+                作废
+              </button>
+            </span>
           </template>
         </template>
         <template #expandedRowRender="{ record }">
@@ -386,6 +456,10 @@ const statCards = computed(() =>
                       <span class="font-mono">{{ line.batchNo }}</span></span>
                     <b class="ml-2 tabular-nums">{{ formatQty(line.quantity) }}
                       {{ stageOf(line.stage)?.unit }}</b>
+                    <span
+                      v-if="Number(line.returnedQuantity ?? 0) > 0"
+                      class="ml-1 text-muted-foreground"
+                    >已退 {{ formatQty(line.returnedQuantity) }}</span>
                     <Tag v-if="line.laminationSide" class="ml-1">
                       {{ line.laminationSide === 'FRONT' ? '正面' : '反面' }}
                     </Tag>
@@ -404,6 +478,12 @@ const statCards = computed(() =>
                     v-for="line in details[record.id]!.outputs"
                     :key="line.id"
                   >
+                    <Tag
+                      v-if="(details[record.id]!.reportCount ?? 0) > 1"
+                      class="mr-1"
+                    >
+                      第 {{ line.reportSeq ?? 1 }} 次
+                    </Tag>
                     <span class="font-mono">{{ line.itemCode }}</span>
                     <span class="ml-2">{{
                       attrSummary(line.stage, line.item, labels)
@@ -421,15 +501,29 @@ const statCards = computed(() =>
                       {{ stageOf(line.stage)?.unit }}</span>
                   </li>
                 </ul>
-                <p v-else class="m-0 text-muted-foreground">还没报完工。</p>
+                <p v-else class="m-0 text-muted-foreground">还没报产出。</p>
               </div>
               <div v-if="record.remark" class="md:col-span-2">
                 <b class="mr-2">备注</b>{{ record.remark }}
+              </div>
+              <div
+                v-if="record.status === 'VOIDED'"
+                class="text-muted-foreground md:col-span-2"
+              >
+                <b class="mr-2 text-foreground">已作废</b>{{ record.voidReason }} ·
+                {{ record.voidedBy }} · {{ formatDateTime(record.voidedAt) }}
               </div>
             </div>
           </Spin>
         </template>
       </Table>
     </section>
+      <ReturnModal
+      v-model:open="returnOpen"
+      :options="options"
+      :order-id="returnOrderId"
+      @saved="onAdjusted"
+    />
+    <VoidModal v-model:open="voidOpen" :order="voidTarget" @saved="onAdjusted" />
   </div>
 </template>

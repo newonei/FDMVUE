@@ -7,20 +7,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OrderDrawer from './modules/order-drawer.vue';
 
 const mocks = vi.hoisted(() => ({
-  complete: vi.fn(),
   create: vi.fn(),
   getOrder: vi.fn(),
   makeTasks: vi.fn(),
+  operators: vi.fn(),
   page: vi.fn(),
   preview: vi.fn(),
+  report: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
-  completeOrder: mocks.complete,
   createOrder: mocks.create,
   getMakeTasks: mocks.makeTasks,
   getOrder: mocks.getOrder,
+  getOrderOperators: mocks.operators,
   getStockPage: mocks.page,
   previewItemCodes: mocks.preview,
+  reportOrder: mocks.report,
+}));
+vi.mock('@vben/stores', () => ({
+  useUserStore: () => ({ userInfo: { id: 7 } }),
 }));
 
 const options: Api.Options = {
@@ -154,9 +159,11 @@ describe('order drawer', () => {
   let host: HTMLDivElement;
   let unmount: () => void;
   const state = reactive<{
+    mode: 'create' | 'report';
     open: boolean;
+    orderId?: number;
     task?: { assignmentId: string; contractId: string };
-  }>({ open: false });
+  }>({ mode: 'create', open: false });
   const saved = vi.fn();
 
   beforeEach(() => {
@@ -173,6 +180,10 @@ describe('order drawer', () => {
     );
     mocks.create.mockResolvedValue(9);
     mocks.makeTasks.mockResolvedValue([]);
+    mocks.operators.mockResolvedValue([
+      { deptName: '开片车间', nickname: '张三', team: '开片一组', userId: 3 },
+      { deptName: '开片车间', nickname: '测试', team: '开片一组', userId: 7 },
+    ]);
     host = document.createElement('div');
     document.body.append(host);
     const app = createApp(
@@ -181,7 +192,8 @@ describe('order drawer', () => {
           h(OrderDrawer, {
             initialStage: 'BOARD',
             initialTask: state.task,
-            mode: 'create',
+            mode: state.mode,
+            orderId: state.orderId,
             onSaved: saved,
             'onUpdate:open': (v: boolean) => (state.open = v),
             open: state.open,
@@ -198,6 +210,8 @@ describe('order drawer', () => {
     host.remove();
     document.body.innerHTML = '';
     state.open = false;
+    state.mode = 'create';
+    state.orderId = undefined;
     state.task = undefined;
     vi.clearAllMocks();
     vi.useRealTimers();
@@ -241,8 +255,10 @@ describe('order drawer', () => {
     await flush();
     expect(mocks.create).toHaveBeenCalledTimes(1);
     const payload = mocks.create.mock.calls[0]![0] as Api.OrderCreateReq;
+    expect(mocks.operators).toHaveBeenCalledWith('SLICE');
     expect(payload).toMatchObject({
       finish: true,
+      operatorUserId: 7,
       process: 'SLICE',
       sourceStage: 'BOARD',
     });
@@ -358,6 +374,110 @@ describe('order drawer', () => {
       assignmentId: 'a1',
       contractId: 'c1',
       finish: false,
+    });
+  });
+
+  it('asks to assign the post first when nobody can do this process', async () => {
+    mocks.operators.mockResolvedValue([]);
+    state.open = true;
+    await flush();
+    typeInto('order-take-2', '50');
+    await flush();
+    [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+      .find((r) => r.value === 'false')!
+      .click();
+    await flush();
+    clickButton('提交领料');
+    await flush();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      '还没有人分配「开片」岗位，请先到 工厂部门 → 人员岗位 里分配。',
+    );
+  });
+
+  it('reports one batch and keeps the order in progress, then closes it without new output', async () => {
+    const inProgress: Api.Order = {
+      defectQuantity: 0,
+      goodQuantity: 0,
+      id: 5,
+      inputQuantity: 50,
+      inputs: [
+        {
+          batchNo: 'MB2',
+          id: 51,
+          item: stock(2, 'BOARD', 'GY', 'MB2', 100).item,
+          itemCode: 'BC-TPE-REC001-GY-190X130X0.3',
+          location: '板材区',
+          quantity: 50,
+          returnedQuantity: 10,
+          stage: 'BOARD',
+          stockId: 2,
+        },
+      ],
+      issuedAt: '2026-10-10 08:00:00',
+      orderNo: 'GX20261010-001',
+      outputStage: 'SHEET',
+      outputs: [],
+      process: 'SLICE',
+      reportCount: 0,
+      sourceStage: 'BOARD',
+      status: 'IN_PROGRESS',
+    };
+    mocks.getOrder.mockResolvedValue(inProgress);
+    mocks.report.mockResolvedValue(true);
+    state.mode = 'report';
+    state.orderId = 5;
+    await nextTick();
+    state.open = true;
+    await flush();
+    expect(document.body.textContent).toContain('报产出 · GX20261010-001');
+    expect(document.body.textContent).toContain('40');
+
+    const key = document
+      .querySelector('[id^="out-batch-"]')!
+      .id.replace('out-batch-', '');
+    for (const [field, value] of [
+      ['length', '185'],
+      ['width', '63'],
+    ] as const) {
+      typeInto(`out-${key}-${field}`, value);
+      await flush();
+    }
+    typeInto(`out-good-${key}`, '30');
+    await flush();
+    [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+      .find((r) => r.value === 'false')!
+      .click();
+    await flush();
+    clickButton('登记这一批');
+    await flush();
+    expect(mocks.report.mock.calls[0]![0]).toMatchObject({
+      finish: false,
+      id: 5,
+      outputs: [expect.objectContaining({ goodQuantity: 30 })],
+    });
+    expect(saved).toHaveBeenCalledWith(
+      expect.stringContaining('单子继续在制'),
+      'SHEET',
+    );
+
+    // 已经报过一次：关单时可以不再填产出
+    state.open = false;
+    await flush();
+    mocks.getOrder.mockResolvedValue({
+      ...inProgress,
+      goodQuantity: 30,
+      reportCount: 1,
+    });
+    state.open = true;
+    await flush();
+    expect(document.body.textContent).toContain('已报 1 次');
+    clickButton('确认报完并关单');
+    await flush();
+    expect(mocks.report.mock.calls[1]![0]).toEqual({
+      finish: true,
+      id: 5,
+      outputs: [],
     });
   });
 });

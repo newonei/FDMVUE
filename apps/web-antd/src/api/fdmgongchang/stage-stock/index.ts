@@ -1,5 +1,8 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
+
+import { factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
 
 const BASE = '/fdmgongchang/stage-stock';
@@ -163,18 +166,38 @@ export namespace FdmgongchangStageStockApi {
     contractId?: string;
     finish: boolean;
     inputs: OrderInput[];
-    operatorName?: string;
+    /** 操作人（系统用户），需具备该工序岗位；不填为当前登录人。班组从人员岗位带出。 */
+    operatorUserId?: number;
     outputs: OrderOutput[];
     process: string;
     remark?: string;
     sourceStage: string;
-    team?: string;
   }
 
   export interface OrderCompleteReq {
     id: number;
     outputs: OrderOutput[];
   }
+
+  /** 在制工序单报产出：finish=false 只登记这一批，单子继续在制。 */
+  export interface OrderReportReq {
+    finish: boolean;
+    id: number;
+    outputs: OrderOutput[];
+  }
+
+  export interface OrderReturnReq {
+    id: number;
+    lines: Array<{ inputId: number; quantity: Decimal }>;
+    remark?: string;
+  }
+
+  export interface OrderVoidReq {
+    id: number;
+    reason: string;
+  }
+
+  export type OrderStatus = 'COMPLETED' | 'IN_PROGRESS' | 'VOIDED';
 
   export interface OrderLine {
     batchNo: string;
@@ -186,6 +209,11 @@ export namespace FdmgongchangStageStockApi {
     laminationSide?: LaminationSide | null;
     location: string;
     quantity?: Decimal | null;
+    /** 产出行：第几次报产出、报产出时间。 */
+    reportedAt?: null | number | string;
+    reportSeq?: null | number;
+    /** 领料行：已退回的余料。 */
+    returnedQuantity?: Decimal | null;
     stage: string;
     stockId?: null | number;
   }
@@ -203,6 +231,7 @@ export namespace FdmgongchangStageStockApi {
     inputs?: OrderLine[];
     issuedAt: number | string;
     operatorName?: null | string;
+    operatorUserId?: null | number;
     orderNo: string;
     outputs?: OrderLine[];
     outputStage: string;
@@ -210,9 +239,16 @@ export namespace FdmgongchangStageStockApi {
     /** 包装完工回写到合同的数量。 */
     productionWriteback?: Decimal | null;
     remark?: null | string;
+    /** 已报产出次数。 */
+    reportCount?: null | number;
+    /** 已退回原库存的余料合计（来源单位）。 */
+    returnedQuantity?: Decimal | null;
     sourceStage: string;
-    status: 'COMPLETED' | 'IN_PROGRESS';
+    status: OrderStatus;
     team?: null | string;
+    voidedAt?: null | number | string;
+    voidedBy?: null | string;
+    voidReason?: null | string;
   }
 
   export interface OrderPageReq extends PageParam {
@@ -414,65 +450,103 @@ export namespace FdmgongchangStageStockApi {
 export function getStageStockOptions() {
   return requestClient.get<FdmgongchangStageStockApi.Options>(
     `${BASE}/options`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function getStageStockSummary() {
   return requestClient.get<FdmgongchangStageStockApi.Summary>(
     `${BASE}/summary`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function getStockPage(params: FdmgongchangStageStockApi.StockPageReq) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Stock>>(
     `${BASE}/stock/page`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }
 
 export function receiveStock(data: FdmgongchangStageStockApi.ReceiveReq) {
-  return requestClient.post<number>(`${BASE}/stock/receive`, data);
+  return requestClient.post<number>(`${BASE}/stock/receive`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function stocktake(data: FdmgongchangStageStockApi.StocktakeReq) {
-  return requestClient.post<boolean>(`${BASE}/stock/stocktake`, data);
+  return requestClient.post<boolean>(`${BASE}/stock/stocktake`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getTxnPage(params: FdmgongchangStageStockApi.TxnPageReq) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Txn>>(
     `${BASE}/txn/page`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }
 
 export function getOrderPage(params: FdmgongchangStageStockApi.OrderPageReq) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Order>>(
     `${BASE}/order/page`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }
 
 export function getOrder(id: number) {
   return requestClient.get<FdmgongchangStageStockApi.Order>(
     `${BASE}/order/get`,
-    { params: { id } },
+    { headers: factoryHeaders(), params: { id } },
   );
 }
 
 export function createOrder(data: FdmgongchangStageStockApi.OrderCreateReq) {
-  return requestClient.post<number>(`${BASE}/order/create`, data);
+  return requestClient.post<number>(`${BASE}/order/create`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function completeOrder(
   data: FdmgongchangStageStockApi.OrderCompleteReq,
 ) {
-  return requestClient.post<boolean>(`${BASE}/order/complete`, data);
+  return requestClient.post<boolean>(`${BASE}/order/complete`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+export function reportOrder(data: FdmgongchangStageStockApi.OrderReportReq) {
+  return requestClient.post<boolean>(`${BASE}/order/report`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+export function returnOrderMaterial(
+  data: FdmgongchangStageStockApi.OrderReturnReq,
+) {
+  return requestClient.post<boolean>(`${BASE}/order/return`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+export function voidOrder(data: FdmgongchangStageStockApi.OrderVoidReq) {
+  return requestClient.post<boolean>(`${BASE}/order/void`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 本厂可做这道工序的在岗人员（人员岗位里分配的）。 */
+export function getOrderOperators(process: string) {
+  return requestClient.get<FdmgongchangFactoryApi.Operator[]>(
+    `${BASE}/order/operators`,
+    { headers: factoryHeaders(), params: { process } },
+  );
 }
 
 export function getDefectStats(params?: { from?: string; to?: string }) {
   return requestClient.get<FdmgongchangStageStockApi.DefectStat[]>(
     `${BASE}/order/defect-stats`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }
 
@@ -488,29 +562,36 @@ export function previewItemCodes(
 export function getStageStockSetting() {
   return requestClient.get<FdmgongchangStageStockApi.Setting>(
     `${BASE}/setting`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function saveStageStockSetting(data: FdmgongchangStageStockApi.Setting) {
-  return requestClient.put<boolean>(`${BASE}/setting`, data);
+  return requestClient.put<boolean>(`${BASE}/setting`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getMakeTasks() {
   return requestClient.get<FdmgongchangStageStockApi.MakeTask[]>(
     `${BASE}/trade/make-tasks`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function getShippableItems() {
   return requestClient.get<FdmgongchangStageStockApi.ShippableItem[]>(
     `${BASE}/trade/shippable-items`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function createShipment(
   data: FdmgongchangStageStockApi.ShipmentCreateReq,
 ) {
-  return requestClient.post<number>(`${BASE}/shipment/create`, data);
+  return requestClient.post<number>(`${BASE}/shipment/create`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getShipmentPage(
@@ -518,32 +599,38 @@ export function getShipmentPage(
 ) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Shipment>>(
     `${BASE}/shipment/page`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }
 
 export function getRawOpenLines() {
   return requestClient.get<FdmgongchangStageStockApi.RawOpenLine[]>(
     `${BASE}/receiving/raw-lines`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function getTradeOpenLines() {
   return requestClient.get<FdmgongchangStageStockApi.TradePurchaseLine[]>(
     `${BASE}/receiving/trade-lines`,
+    { headers: factoryHeaders() },
   );
 }
 
 export function receiveRawPurchase(
   data: FdmgongchangStageStockApi.RawReceiptReq,
 ) {
-  return requestClient.post<number>(`${BASE}/receiving/raw`, data);
+  return requestClient.post<number>(`${BASE}/receiving/raw`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function receiveTradePurchase(
   data: FdmgongchangStageStockApi.TradeReceiptReq,
 ) {
-  return requestClient.post<number>(`${BASE}/receiving/trade`, data);
+  return requestClient.post<number>(`${BASE}/receiving/trade`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getReceiptPage(
@@ -551,6 +638,6 @@ export function getReceiptPage(
 ) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Receipt>>(
     `${BASE}/receiving/page`,
-    { params },
+    { headers: factoryHeaders(), params },
   );
 }

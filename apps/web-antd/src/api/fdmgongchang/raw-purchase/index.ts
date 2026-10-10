@@ -34,6 +34,9 @@ export namespace FdmgongchangRawPurchaseApi {
     createTime?: number | string;
     currency: string;
     expectedDate?: DateValue | null;
+    /** 收货工厂。 */
+    factoryId: number;
+    factoryName?: null | string;
     id: number;
     lastReceivedAt?: null | number | string;
     lines: Line[];
@@ -49,6 +52,7 @@ export namespace FdmgongchangRawPurchaseApi {
 
   export interface SaveReq {
     expectedDate?: string;
+    factoryId: number;
     id?: number;
     lines: Array<{
       quantity: Decimal;
@@ -63,6 +67,7 @@ export namespace FdmgongchangRawPurchaseApi {
   }
 
   export interface PageReq extends PageParam {
+    factoryId?: number;
     keyword?: string;
     status?: Status;
   }

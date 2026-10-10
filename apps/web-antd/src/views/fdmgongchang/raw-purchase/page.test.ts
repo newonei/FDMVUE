@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   update: vi.fn(),
 }));
+vi.mock('#/api/fdmgongchang/factory', () => ({
+  getFactoryList: vi.fn().mockResolvedValue([
+    { code: 'HBFDM', deptId: 118, id: 1, name: '湖北飞德慕' },
+  ]),
+}));
 vi.mock('#/api/fdmgongchang/raw-purchase', () => ({
   cancelRawPurchase: mocks.cancel,
   closeRawPurchase: mocks.close,
@@ -44,6 +49,8 @@ const line = (id: number, code: string, name: string, qty: number, received: num
 const ordered: Api.Purchase = {
   currency: 'CNY',
   expectedDate: [2026, 10, 20],
+  factoryId: 1,
+  factoryName: '湖北飞德慕',
   id: 1,
   lines: [line(11, 'MAT-TPE', 'TPE粒子', 1000, 0), line(12, 'MAT-AC', '发泡剂AC', 20, 0)],
   operatorName: 'Owen',

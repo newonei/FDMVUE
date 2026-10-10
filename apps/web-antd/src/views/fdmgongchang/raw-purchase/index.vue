@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import type { TablePaginationConfig } from 'ant-design-vue';
 
+import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangRawPurchaseApi as Api } from '#/api/fdmgongchang/raw-purchase';
 import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 
@@ -19,6 +20,7 @@ import {
   Tag,
 } from 'ant-design-vue';
 
+import { getFactoryList } from '#/api/fdmgongchang/factory';
 import {
   cancelRawPurchase,
   closeRawPurchase,
@@ -41,6 +43,7 @@ const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:raw-purchase:cr
 const canCancel = computed(() => hasAccessByCodes(['fdmgongchang:raw-purchase:cancel']));
 
 const materials = ref<StockApi.RawMaterialOption[]>([]);
+const factories = ref<FdmgongchangFactoryApi.Factory[]>([]);
 const rows = ref<Api.Purchase[]>([]);
 const total = ref(0);
 const pageNo = ref(1);
@@ -82,7 +85,10 @@ async function load() {
 
 onMounted(async () => {
   await load();
-  materials.value = await getRawPurchaseMaterials();
+  [materials.value, factories.value] = await Promise.all([
+    getRawPurchaseMaterials(),
+    getFactoryList(),
+  ]);
 });
 
 watch(status, () => {
@@ -154,7 +160,7 @@ function received(purchase: Api.Purchase) {
 
 const columns = [
   { key: 'no', title: '采购单 / 下单日期' },
-  { key: 'supplier', title: '供应商' },
+  { key: 'supplier', title: '供应商 / 收货工厂' },
   { key: 'lines', title: '原材料（已到 / 采购 kg）' },
   { align: 'right' as const, key: 'amount', title: '金额（元）' },
   { key: 'expected', title: '预计到货' },
@@ -208,7 +214,12 @@ const columns = [
               </div>
             </template>
             <template v-else-if="column.key === 'supplier'">
-              <span class="text-sm">{{ record.supplierName }}</span>
+              <div class="flex flex-col">
+                <span class="text-sm">{{ record.supplierName }}</span>
+                <span v-if="record.factoryName" class="whitespace-nowrap text-xs text-muted-foreground">
+                  收货：{{ record.factoryName }}
+                </span>
+              </div>
             </template>
             <template v-else-if="column.key === 'lines'">
               <div class="flex min-w-[240px] flex-col gap-0.5 text-xs">
@@ -278,6 +289,7 @@ const columns = [
 
     <PurchaseDrawer
       v-model:open="drawerOpen"
+      :factories="factories"
       :materials="materials"
       :purchase="editing"
       @saved="onSaved"

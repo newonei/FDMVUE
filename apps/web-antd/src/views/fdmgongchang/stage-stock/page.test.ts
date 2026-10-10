@@ -9,6 +9,15 @@ import StageStockPage from './index.vue';
 const mocks = vi.hoisted(() => ({
   defect: vi.fn(),
   makeTasks: vi.fn(),
+  myFactories: vi.fn().mockResolvedValue({
+    canSeeAll: true,
+    defaultFactoryId: 2,
+    factories: [
+      { code: 'HBFDM', deptId: 118, id: 1, name: '湖北飞德慕' },
+      { code: 'LYJZ', deptId: 120, id: 2, name: '洛阳京造' },
+    ],
+  }),
+  setFactory: vi.fn(),
   route: { query: {} as Record<string, string> },
   shipmentPage: vi.fn(),
   shippable: vi.fn(),
@@ -25,7 +34,6 @@ const mocks = vi.hoisted(() => ({
   txnPage: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
-  completeOrder: vi.fn(),
   createOrder: vi.fn(),
   createShipment: vi.fn(),
   getMakeTasks: mocks.makeTasks,
@@ -33,6 +41,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   getShippableItems: mocks.shippable,
   getDefectStats: mocks.defect,
   getOrder: vi.fn(),
+  getOrderOperators: vi.fn().mockResolvedValue([]),
   getOrderPage: mocks.orderPage,
   getRawOpenLines: mocks.rawLines,
   getReceiptPage: mocks.receiptPage,
@@ -46,9 +55,17 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   receiveRawPurchase: mocks.receiveRaw,
   receiveStock: vi.fn(),
   receiveTradePurchase: mocks.receiveTrade,
+  reportOrder: vi.fn(),
+  returnOrderMaterial: vi.fn(),
   saveStageStockSetting: vi.fn(),
   stocktake: vi.fn(),
+  voidOrder: vi.fn(),
 }));
+vi.mock('#/api/fdmgongchang/factory', () => ({
+  getMyFactories: mocks.myFactories,
+  setCurrentFactoryId: mocks.setFactory,
+}));
+vi.mock('@vben/stores', () => ({ useUserStore: () => ({ userInfo: { id: 1 } }) }));
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
 vi.mock('@vben/common-ui', () => ({
@@ -248,6 +265,8 @@ describe('stage stock page', () => {
 
     const text = document.body.textContent ?? '';
     expect(text).toContain('工序库存');
+    expect(mocks.setFactory).toHaveBeenCalledWith(2);
+    expect(document.querySelector('#factory-switch')).not.toBeNull();
     expect(text).toContain('已包装成品');
     expect(text).toContain('在制 40 片');
     expect(text).toContain('板材库存');

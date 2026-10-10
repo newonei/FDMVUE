@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { AttrField, InputLine, OutputDraft } from '../model';
 
+import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+
+import { useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -20,12 +23,13 @@ import {
 } from 'ant-design-vue';
 
 import {
-  completeOrder,
   createOrder,
   getMakeTasks,
   getOrder,
+  getOrderOperators,
   getStockPage,
   previewItemCodes,
+  reportOrder,
 } from '#/api/fdmgongchang/stage-stock';
 
 import {
@@ -49,14 +53,14 @@ import AttrFields from './attr-fields.vue';
 
 /**
  * 工序单抽屉：
- * - create：选工序 → 从上游库存领料 → 领料并报完工，或只领料（车间在制）；
- * - complete：对在制工序单报完工。
+ * - create：选工序 → 从上游库存领料 → 选操作人 → 领料并报完工，或只领料（车间在制）；
+ * - report：对在制工序单报产出，可以只登记这一批（继续在制），也可以报完关单。
  */
 const props = defineProps<{
   initialStage?: string;
   /** 从「外贸订单 → 安排生产」进入时预选的自制任务。 */
   initialTask?: { assignmentId: string; contractId: string };
-  mode: 'complete' | 'create';
+  mode: 'create' | 'report';
   options: Api.Options;
   orderId?: number;
 }>();
@@ -103,10 +107,37 @@ async function loadMakeTasks() {
   }
 }
 const meta = reactive({
-  operatorName: '',
   remark: '',
-  team: '',
 });
+/** 操作人：本厂在岗、具备这道工序岗位的人（人员岗位里分配）。 */
+const userStore = useUserStore();
+const operators = ref<FdmgongchangFactoryApi.Operator[]>([]);
+const operatorsLoading = ref(false);
+const operatorUserId = ref<number>();
+const selectedOperator = computed(() =>
+  operators.value.find((o) => o.userId === operatorUserId.value),
+);
+async function loadOperators() {
+  operatorsLoading.value = true;
+  const code = processCode.value;
+  try {
+    const list = await getOrderOperators(code);
+    if (code !== processCode.value) return;
+    operators.value = list;
+    const me = Number(userStore.userInfo?.id ?? userStore.userInfo?.userId);
+    operatorUserId.value = list.some((o) => o.userId === operatorUserId.value)
+      ? operatorUserId.value
+      : list.find((o) => o.userId === me)?.userId;
+  } catch {
+    operators.value = [];
+    operatorUserId.value = undefined;
+  } finally {
+    operatorsLoading.value = false;
+  }
+}
+/** 报产出：true 报完关单；false 只登记这一批，单子继续在制。 */
+const reportFinish = ref(true);
+const reportedBefore = computed(() => order.value?.reportCount ?? 0);
 const errors = ref<string[]>([]);
 const submitting = ref(false);
 const order = ref<Api.Order>();
@@ -131,9 +162,11 @@ const defaultMaterial = computed(
 );
 
 const inputs = computed<InputLine[]>(() => {
-  if (props.mode === 'complete') {
+  if (props.mode === 'report') {
     return (order.value?.inputs ?? []).map((line) => ({
-      quantity: toNumber(line.quantity) ?? 0,
+      quantity:
+        (toNumber(line.quantity) ?? 0) -
+        (toNumber(line.returnedQuantity) ?? 0),
       side: line.laminationSide ?? undefined,
       stock: {
         batchNo: line.batchNo,
@@ -201,12 +234,10 @@ watch(open, async (value) => {
   if (!value) return;
   resetPicking();
   finish.value = true;
-  Object.assign(meta, {
-    operatorName: '',
-    remark: '',
-    team: '',
-  });
-  if (props.mode === 'complete' && props.orderId) {
+  reportFinish.value = true;
+  Object.assign(meta, { remark: '' });
+  operatorUserId.value = undefined;
+  if (props.mode === 'report' && props.orderId) {
     orderLoading.value = true;
     try {
       order.value = await getOrder(props.orderId);
@@ -227,6 +258,8 @@ watch(open, async (value) => {
   void loadMakeTasks();
   const code = defaultProcessFor(props.initialStage);
   processCode.value = code;
+  void loadOperators();
+  processCode.value = code;
   const option = props.options.processes.find((p) => p.code === code);
   sourceStage.value =
     props.initialStage && option?.sources.includes(props.initialStage)
@@ -242,6 +275,7 @@ function selectProcess(code: string) {
   sourceStage.value = processOption.value?.sources[0] ?? sourceStage.value;
   resetPicking();
   loadStock();
+  loadOperators();
 }
 
 function selectSource(stage: string) {
@@ -416,10 +450,27 @@ function localErrors() {
         );
     }
   }
-  if (finish.value)
+  if (props.mode === 'create' && operators.value.length === 0) {
     problems.push(
-      ...validateOutputs(processCode.value, outputStage.value, outputs.value),
+      `还没有人分配「${processOption.value?.label ?? ''}」岗位，请先到 工厂部门 → 人员岗位 里分配。`,
     );
+  } else if (props.mode === 'create' && !operatorUserId.value) {
+    problems.push('请选择操作人。');
+  }
+  if (showOutputs.value) {
+    const outputErrors = validateOutputs(
+      processCode.value,
+      outputStage.value,
+      outputs.value,
+    );
+    // 已经报过产出的单，报完关单时可以不再填产出
+    const closingOnly =
+      props.mode === 'report' &&
+      reportFinish.value &&
+      reportedBefore.value > 0 &&
+      outputPayload().length === 0;
+    if (!closingOnly) problems.push(...outputErrors);
+  }
   return problems;
 }
 
@@ -453,12 +504,11 @@ async function submit() {
           quantity: l.quantity,
           stockId: l.stock.id,
         })),
-        operatorName: meta.operatorName.trim() || undefined,
+        operatorUserId: operatorUserId.value,
         outputs: finish.value ? outputPayload() : [],
         process: processCode.value,
         remark: meta.remark.trim() || undefined,
         sourceStage: sourceStage.value,
-        team: meta.team.trim() || undefined,
       });
       emit(
         'saved',
@@ -468,10 +518,21 @@ async function submit() {
         finish.value ? outputStage.value : sourceStage.value,
       );
     } else if (order.value) {
-      await completeOrder({ id: order.value.id, outputs: outputPayload() });
+      const payload = outputPayload();
+      await reportOrder({
+        finish: reportFinish.value,
+        id: order.value.id,
+        outputs: payload,
+      });
+      const entered =
+        payload.length > 0
+          ? `，${out?.label}入 ${formatQty(goodTotal.value)} ${out?.unit}`
+          : '';
       emit(
         'saved',
-        `${order.value.orderNo} 已完工，${out?.label}入 ${formatQty(goodTotal.value)} ${out?.unit}`,
+        reportFinish.value
+          ? `${order.value.orderNo} 已完工${entered}`
+          : `${order.value.orderNo} 已登记一批产出${entered}，单子继续在制`,
         outputStage.value,
       );
     }
@@ -483,8 +544,11 @@ async function submit() {
   }
 }
 
+/** 新建时选「只领料」不填产出；报产出时总要显示产出。 */
+const showOutputs = computed(() => props.mode === 'report' || finish.value);
+
 const summaryText = computed(() => {
-  if (!finish.value)
+  if (props.mode === 'create' && !finish.value)
     return `领料 ${formatQty(inputTotal.value)} ${inputUnit.value}，完工后再报产出`;
   const unit = outputStageOption.value?.unit ?? '';
   const rate = defectRate(goodTotal.value, defectTotal.value);
@@ -505,7 +569,7 @@ watch(processCode, warnNoPatterns);
   <Drawer
     v-model:open="open"
     :title="
-      mode === 'create' ? '新建工序单' : `报完工 · ${order?.orderNo ?? ''}`
+      mode === 'create' ? '新建工序单' : `报产出 · ${order?.orderNo ?? ''}`
     "
     :width="860"
     class="max-w-full"
@@ -692,6 +756,15 @@ watch(processCode, warnNoPatterns);
                 <span class="font-mono">{{ line.stock.batchNo }}</span></span>
               <b class="tabular-nums">{{ formatQty(line.quantity) }}
                 {{ stageOf(line.stock.stage)?.unit }}</b>
+              <span
+                v-if="
+                  Number(
+                    order?.inputs?.find((i) => i.stockId === line.stock.id)
+                      ?.returnedQuantity ?? 0,
+                  ) > 0
+                "
+                class="text-muted-foreground"
+              >（已扣除退回的余料）</span>
               <span v-if="line.side" class="text-muted-foreground">{{
                 line.side === 'FRONT' ? '正面' : '反面'
               }}</span>
@@ -699,11 +772,25 @@ watch(processCode, warnNoPatterns);
             <div class="text-muted-foreground">
               {{ order?.team }} {{ order?.operatorName }}
             </div>
+            <div v-if="reportedBefore > 0" class="text-foreground">
+              已报 {{ reportedBefore }} 次：良品
+              <b class="tabular-nums">{{ formatQty(order?.goodQuantity) }}</b>，残次
+              <b class="tabular-nums">{{ formatQty(order?.defectQuantity) }}</b>
+              {{ outputStageOption?.unit }}
+            </div>
           </div>
+          <Radio.Group
+            v-if="mode === 'report'"
+            v-model:value="reportFinish"
+            class="text-sm"
+          >
+            <Radio :value="true">报完并关单</Radio>
+            <Radio :value="false">只登记这一批，单子继续在制</Radio>
+          </Radio.Group>
         </section>
 
         <!-- 3 产出 -->
-        <section v-if="finish" class="flex flex-col gap-2">
+        <section v-if="showOutputs" class="flex flex-col gap-2">
           <h3
             class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold"
           >
@@ -711,8 +798,12 @@ watch(processCode, warnNoPatterns);
               v-if="mode === 'create'"
               class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
               >3</span>
-            产出入库
-            <span class="text-xs font-normal text-muted-foreground">良品入{{ outputStageOption?.label }}库存；残次品只登记数量</span>
+            {{ mode === 'report' && reportedBefore > 0 ? '这一批产出' : '产出入库' }}
+            <span class="text-xs font-normal text-muted-foreground">良品入{{ outputStageOption?.label }}库存；残次品只登记数量{{
+                mode === 'report' && reportFinish && reportedBefore > 0
+                  ? '；没有新产出可以不填，直接关单'
+                  : ''
+              }}</span>
           </h3>
           <div
             v-if="processCode === 'SLICE'"
@@ -863,29 +954,36 @@ watch(processCode, warnNoPatterns);
               </span>
             </label>
             <label
-              for="order-team"
-              class="flex flex-col gap-1 text-xs text-muted-foreground"
-            >
-              班组
-              <Input
-                id="order-team"
-                v-model:value="meta.team"
-                :maxlength="64"
-                placeholder="例如 开片组"
-              />
-            </label>
-            <label
               for="order-operator"
               class="flex flex-col gap-1 text-xs text-muted-foreground"
             >
               操作人
-              <Input
+              <Select
                 id="order-operator"
-                v-model:value="meta.operatorName"
-                :maxlength="64"
-                placeholder="不填则记为当前登录人"
+                v-model:value="operatorUserId"
+                :loading="operatorsLoading"
+                :not-found-content="
+                  operatorsLoading ? '加载中…' : '还没有人分配这道工序的岗位'
+                "
+                :options="
+                  operators.map((o) => ({
+                    label: [o.nickname, o.team, o.deptName]
+                      .filter(Boolean)
+                      .join(' · '),
+                    value: o.userId,
+                  }))
+                "
+                option-filter-prop="label"
+                placeholder="选择做这道工序的人"
+                show-search
               />
             </label>
+            <div class="flex flex-col gap-1 text-xs text-muted-foreground">
+              班组
+              <span class="flex h-8 items-center text-sm text-foreground">{{
+                selectedOperator?.team || '—'
+              }}</span>
+            </div>
             <label
               for="order-remark"
               class="flex flex-col gap-1 text-xs text-muted-foreground"
@@ -917,8 +1015,10 @@ watch(processCode, warnNoPatterns);
             <Button @click="open = false">取消</Button>
             <Button :loading="submitting" type="primary" @click="submit">
               {{
-                mode === 'complete'
-                  ? '确认完工入库'
+                mode === 'report'
+                  ? reportFinish
+                    ? '确认报完并关单'
+                    : '登记这一批'
                   : finish
                     ? '提交领料并入库'
                     : '提交领料'
