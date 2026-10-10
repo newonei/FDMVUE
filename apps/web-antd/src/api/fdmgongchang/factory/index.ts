@@ -118,3 +118,42 @@ export function saveWorkers(data: FdmgongchangFactoryApi.WorkerSaveReq) {
     headers: factoryHeaders(),
   });
 }
+
+export namespace FdmgongchangFactorySettingApi {
+  export interface ProcessToggle {
+    code: string;
+    enabled: boolean;
+    label: string;
+    outputStage: string;
+    outputStageLabel: string;
+  }
+
+  export interface Setting {
+    processes: ProcessToggle[];
+  }
+
+  export interface SaveReq {
+    /** 本厂有哪些工序，至少一道。 */
+    enabledProcesses: string[];
+  }
+}
+
+/** 工厂设置：本厂工序等各厂自己的配置。 */
+export function getFactorySetting() {
+  return requestClient.get<FdmgongchangFactorySettingApi.Setting>(
+    '/fdmgongchang/factory-setting/get',
+    { headers: factoryHeaders() },
+  );
+}
+
+export function saveFactorySetting(
+  data: FdmgongchangFactorySettingApi.SaveReq,
+) {
+  return requestClient.put<boolean>(
+    '/fdmgongchang/factory-setting/save',
+    data,
+    {
+      headers: factoryHeaders(),
+    },
+  );
+}
