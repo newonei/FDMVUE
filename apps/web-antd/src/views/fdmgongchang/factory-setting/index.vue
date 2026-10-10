@@ -6,7 +6,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
-import { Button, Checkbox, message, Result, Spin } from 'ant-design-vue';
+import { Button, Checkbox, message, Result, Spin, Tabs } from 'ant-design-vue';
 
 import {
   getFactorySetting,
@@ -15,10 +15,12 @@ import {
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
+import WageItemPanel from './modules/wage-item-panel.vue';
 
 /**
  * 工厂部门 · 工厂设置：各厂自己的配置集中在这里。
- * 本厂工序：各厂工序不一样，没勾的工序不会出现在开单、生产链和人员岗位里。
+ * - 本厂工序：各厂工序不一样，没勾的工序不会出现在开单、生产链和人员岗位里；
+ * - 计价项目：本厂的计件、计时、杂活、补助价格（单独权限，普通人员看不到）。
  */
 defineOptions({ name: 'FdmGongchangFactorySetting' });
 
@@ -26,6 +28,10 @@ const { hasAccessByCodes } = useAccess();
 const canEdit = computed(() =>
   hasAccessByCodes(['fdmgongchang:factory-setting:update']),
 );
+const canSeeWage = computed(() =>
+  hasAccessByCodes(['fdmgongchang:wage-item:query']),
+);
+const activeTab = ref<'processes' | 'wage'>('processes');
 
 const factory = useFactory();
 const setting = ref<Api.Setting>();
@@ -113,7 +119,7 @@ async function save() {
           </p>
         </div>
         <Button
-          v-if="canEdit && setting"
+          v-if="canEdit && setting && activeTab === 'processes'"
           :disabled="!dirty"
           :loading="saving"
           type="primary"
@@ -141,11 +147,16 @@ async function save() {
         </template>
       </Result>
 
-      <Spin v-else :spinning="loading">
-        <section
-          class="flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
-        >
-          <h2 class="m-0 text-base font-semibold">
+      <section
+        v-else
+        :key="factory.factoryId.value ?? 0"
+        class="rounded-lg border border-border bg-card px-4 pb-4"
+      >
+        <Tabs v-model:active-key="activeTab">
+          <Tabs.TabPane key="processes" tab="本厂工序">
+      <Spin :spinning="loading">
+        <section class="flex flex-col gap-3">
+          <h2 class="m-0 text-sm font-semibold">
             本厂工序<span
               class="ml-2 text-xs font-normal text-muted-foreground"
               >没勾的工序不会出现在开单、生产链和人员岗位里；少了某道工序时，下道工序自动改从更上游领料</span>
@@ -167,6 +178,16 @@ async function save() {
           </Checkbox.Group>
         </section>
       </Spin>
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
+            <WageItemPanel
+              :processes="
+                setting.processes.map((p) => ({ code: p.code, label: p.label }))
+              "
+            />
+          </Tabs.TabPane>
+        </Tabs>
+      </section>
     </div>
   </Page>
 </template>

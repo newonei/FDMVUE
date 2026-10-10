@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   operators: vi.fn(),
   page: vi.fn(),
   preview: vi.fn(),
+  match: vi.fn(),
   report: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
@@ -24,6 +25,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   previewItemCodes: mocks.preview,
   reportOrder: mocks.report,
 }));
+vi.mock('#/api/fdmgongchang/wage', () => ({ matchWageItems: mocks.match }));
 vi.mock('@vben/stores', () => ({
   useUserStore: () => ({ userInfo: { id: 7 } }),
 }));
@@ -180,6 +182,7 @@ describe('order drawer', () => {
     );
     mocks.create.mockResolvedValue(9);
     mocks.makeTasks.mockResolvedValue([]);
+    mocks.match.mockResolvedValue([]);
     mocks.operators.mockResolvedValue([
       { deptName: '开片车间', nickname: '张三', team: '开片一组', userId: 3 },
       { deptName: '开片车间', nickname: '测试', team: '开片一组', userId: 7 },
@@ -478,6 +481,42 @@ describe('order drawer', () => {
       finish: true,
       id: 5,
       outputs: [],
+      pieceworks: [],
+    });
+  });
+
+  it('records piecework for the operator with the best matching wage item and the good quantity', async () => {
+    mocks.match.mockResolvedValue([
+      { itemId: 41, matched: true, name: '开片', price: 27, score: 0, unit: '张' },
+      { itemId: 23, matched: false, name: '单片', price: 0.27, score: 0, unit: '片', productType: null },
+    ]);
+    state.open = true;
+    await flush();
+    typeInto('order-take-2', '50');
+    await flush();
+    const key = document
+      .querySelector('[id^="out-batch-"]')!
+      .id.replace('out-batch-', '');
+    for (const [field, value] of [
+      ['length', '185'],
+      ['width', '63'],
+    ] as const) {
+      typeInto(`out-${key}-${field}`, value);
+      await flush();
+    }
+    typeInto(`out-good-${key}`, '98');
+    await flush();
+    await vi.advanceTimersByTimeAsync(400);
+    await flush();
+    expect(mocks.match).toHaveBeenCalledWith(
+      expect.objectContaining({ process: 'SLICE', width: 63 }),
+    );
+    expect(document.body.textContent).toContain('计件');
+
+    clickButton('提交领料并入库');
+    await flush();
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({
+      pieceworks: [{ itemId: 41, quantity: 98, userId: 7 }],
     });
   });
 });

@@ -3,6 +3,7 @@ import type { AttrField, InputLine, OutputDraft } from '../model';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
+import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
 
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
@@ -31,6 +32,7 @@ import {
   previewItemCodes,
   reportOrder,
 } from '#/api/fdmgongchang/stage-stock';
+import { matchWageItems } from '#/api/fdmgongchang/wage';
 
 import {
   attrSummary,
@@ -135,6 +137,110 @@ async function loadOperators() {
     operatorsLoading.value = false;
   }
 }
+/**
+ * 计件：报产出时一起登记谁按哪个计价项目算多少。项目按产出的宽、长、厚推荐，
+ * 默认一行（操作人 + 最匹配的项目，数量 = 这次良品）；压花送片 / 接片这种两人各算全量的，再加一行。
+ */
+interface PieceLine {
+  itemId?: number;
+  itemTouched: boolean;
+  key: number;
+  quantity: null | number;
+  quantityTouched: boolean;
+  userId?: number;
+}
+const pieceMatches = ref<FdmgongchangWageApi.Match[]>([]);
+const pieceMatchesLoaded = ref(false);
+const pieces = ref<PieceLine[]>([]);
+let pieceKey = 0;
+const pieceItemOptions = computed(() =>
+  pieceMatches.value.map((m) => ({
+    label: `${m.name}${m.role ? `（${m.role}）` : ''} · ${m.price === null || m.price === undefined ? '未定价' : `${toNumber(m.price)} 元/${m.unit}`}${m.matched ? ' · 推荐' : ''}`,
+    value: m.itemId,
+  })),
+);
+const bestMatch = (excludeRole?: null | string) =>
+  pieceMatches.value.find((m) => m.matched && (!excludeRole || (m.role && m.role !== excludeRole))) ??
+  pieceMatches.value.find((m) => m.matched);
+/** 推荐项目里第一行用最匹配的；后加的行优先用不同角色（送片之后是接片）。 */
+function defaultItemFor(index: number) {
+  if (index === 0) return bestMatch()?.itemId;
+  const first = pieceMatches.value.find((m) => m.itemId === pieces.value[0]?.itemId);
+  return bestMatch(first?.role)?.itemId;
+}
+function addPiece(userId?: number) {
+  pieces.value.push({
+    itemId: undefined,
+    itemTouched: false,
+    key: ++pieceKey,
+    quantity: goodTotal.value > 0 ? goodTotal.value : null,
+    quantityTouched: false,
+    userId,
+  });
+  const index = pieces.value.length - 1;
+  pieces.value[index]!.itemId = defaultItemFor(index);
+}
+function removePiece(index: number) {
+  pieces.value.splice(index, 1);
+}
+let matchTimer: ReturnType<typeof setTimeout> | undefined;
+const pieceSpec = computed(() => {
+  const line =
+    outputs.value.find((o) => (toNumber(o.goodQuantity) ?? 0) > 0) ??
+    outputs.value[0];
+  return {
+    length: toNumber(line?.attrs.length) ?? null,
+    thickness: toNumber(line?.attrs.thickness) ?? null,
+    width: toNumber(line?.attrs.width) ?? null,
+  };
+});
+async function loadPieceMatches() {
+  const code = processCode.value;
+  try {
+    const list = await matchWageItems({ process: code, ...pieceSpec.value });
+    if (code !== processCode.value) return;
+    pieceMatches.value = list;
+  } catch {
+    pieceMatches.value = [];
+  } finally {
+    pieceMatchesLoaded.value = true;
+  }
+  if (pieces.value.length === 0 && pieceMatches.value.length > 0) {
+    addPiece(props.mode === 'report' ? (order.value?.operatorUserId ?? undefined) : operatorUserId.value);
+  } else {
+    pieces.value.forEach((line, index) => {
+      if (!line.itemTouched) line.itemId = defaultItemFor(index);
+    });
+  }
+}
+watch(
+  () => [open.value, processCode.value, JSON.stringify(pieceSpec.value)],
+  () => {
+    if (!open.value) return;
+    clearTimeout(matchTimer);
+    matchTimer = setTimeout(loadPieceMatches, 300);
+  },
+);
+/** 新建时换了操作人，第一行计件的人跟着换（没手动改过的话）。 */
+watch(operatorUserId, (id, old) => {
+  const first = pieces.value[0];
+  if (props.mode === 'create' && first && (first.userId === old || !first.userId)) first.userId = id;
+});
+function piecePayload(): FdmgongchangWageApi.Piecework[] {
+  return pieces.value
+    .filter((p) => p.userId && p.itemId && (p.quantity ?? 0) > 0)
+    .map((p) => ({ itemId: p.itemId!, quantity: p.quantity!, userId: p.userId! }));
+}
+function pieceErrors() {
+  const problems: string[] = [];
+  pieces.value.forEach((p, i) => {
+    const filled = [p.userId, p.itemId, (p.quantity ?? 0) > 0].filter(Boolean).length;
+    if (filled > 0 && filled < 3)
+      problems.push(`计件第 ${i + 1} 行请选人员、计价项目并填写数量，不计件可以删掉这一行。`);
+  });
+  return problems;
+}
+
 /** 报产出：true 报完关单；false 只登记这一批，单子继续在制。 */
 const reportFinish = ref(true);
 const reportedBefore = computed(() => order.value?.reportCount ?? 0);
@@ -209,6 +315,15 @@ const defectTotal = computed(() =>
   sumQty(outputs.value.map((o) => o.defectQuantity)),
 );
 
+/** 没手动改过数量的行，跟着良品合计走。 */
+watch(
+  () => goodTotal.value,
+  (value) => {
+    for (const line of pieces.value)
+      if (!line.quantityTouched) line.quantity = value > 0 ? value : null;
+  },
+);
+
 // ===== 打开与重置 =====
 
 function resetPicking() {
@@ -237,6 +352,9 @@ watch(open, async (value) => {
   reportFinish.value = true;
   Object.assign(meta, { remark: '' });
   operatorUserId.value = undefined;
+  pieces.value = [];
+  pieceMatches.value = [];
+  pieceMatchesLoaded.value = false;
   if (props.mode === 'report' && props.orderId) {
     orderLoading.value = true;
     try {
@@ -248,6 +366,7 @@ watch(open, async (value) => {
         inputs.value,
         defaultMaterial.value,
       );
+      void loadOperators();
     } finally {
       orderLoading.value = false;
     }
@@ -425,6 +544,7 @@ watch(
   },
 );
 onBeforeUnmount(() => {
+  clearTimeout(matchTimer);
   clearTimeout(searchTimer);
   clearTimeout(previewTimer);
 });
@@ -470,6 +590,7 @@ function localErrors() {
       reportedBefore.value > 0 &&
       outputPayload().length === 0;
     if (!closingOnly) problems.push(...outputErrors);
+    problems.push(...pieceErrors());
   }
   return problems;
 }
@@ -506,6 +627,7 @@ async function submit() {
         })),
         operatorUserId: operatorUserId.value,
         outputs: finish.value ? outputPayload() : [],
+        pieceworks: finish.value ? piecePayload() : [],
         process: processCode.value,
         remark: meta.remark.trim() || undefined,
         sourceStage: sourceStage.value,
@@ -523,6 +645,7 @@ async function submit() {
         finish: reportFinish.value,
         id: order.value.id,
         outputs: payload,
+        pieceworks: payload.length > 0 ? piecePayload() : [],
       });
       const entered =
         payload.length > 0
@@ -919,6 +1042,62 @@ watch(processCode, warnNoPatterns);
               按领料重新生成
             </Button>
           </div>
+        </section>
+
+        <!-- 计件 -->
+        <section v-if="showOutputs && pieceMatchesLoaded" class="flex flex-col gap-2">
+          <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
+            计件
+            <span class="text-xs font-normal text-muted-foreground">按产出规格推荐计价项目；两人各算全量的（如压花送片、接片）各填一行</span>
+          </h3>
+          <p v-if="pieceMatches.length === 0" class="m-0 text-xs text-muted-foreground">
+            这道工序还没有计价项目，可以到 工厂设置 → 计价项目 添加；不填计件也能报产出。
+          </p>
+          <template v-else>
+            <div
+              v-for="(line, index) in pieces"
+              :key="line.key"
+              class="flex flex-wrap items-center gap-2 rounded-md border border-border p-2"
+            >
+              <Select
+                :id="`piece-user-${line.key}`"
+                v-model:value="line.userId"
+                :aria-label="`计件第 ${index + 1} 行人员`"
+                :options="operators.map((o) => ({ label: [o.nickname, o.team].filter(Boolean).join(' · '), value: o.userId }))"
+                class="w-40"
+                option-filter-prop="label"
+                placeholder="人员"
+                show-search
+                size="small"
+              />
+              <Select
+                :id="`piece-item-${line.key}`"
+                :aria-label="`计件第 ${index + 1} 行计价项目`"
+                :options="pieceItemOptions"
+                :value="line.itemId"
+                class="min-w-[260px] flex-1"
+                option-filter-prop="label"
+                placeholder="计价项目"
+                show-search
+                size="small"
+                @change="(v) => ((line.itemId = v as number), (line.itemTouched = true))"
+              />
+              <InputNumber
+                :id="`piece-qty-${line.key}`"
+                :aria-label="`计件第 ${index + 1} 行数量`"
+                :min="0"
+                :precision="3"
+                :value="line.quantity ?? undefined"
+                class="w-28"
+                size="small"
+                @change="(v) => ((line.quantity = (v as null | number | undefined) ?? null), (line.quantityTouched = true))"
+              />
+              <Button danger size="small" type="link" @click="removePiece(index)">删除</Button>
+            </div>
+            <div>
+              <Button size="small" @click="addPiece()">＋ 加一个人</Button>
+            </div>
+          </template>
         </section>
 
         <!-- 4 其他信息 -->

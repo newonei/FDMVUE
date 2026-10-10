@@ -61,6 +61,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   stocktake: vi.fn(),
   voidOrder: vi.fn(),
 }));
+vi.mock('#/api/fdmgongchang/wage', () => ({ matchWageItems: vi.fn().mockResolvedValue([]) }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,

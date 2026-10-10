@@ -5,6 +5,7 @@ export const STAGE_ORDER = [
   'RAW',
   'BOARD',
   'SHEET',
+  'CUT',
   'LAMINATED',
   'EMBOSSED',
   'PUNCHED',
@@ -68,9 +69,11 @@ export const TXN_TYPE_LABELS: Record<string, string> = {
   ISSUE: '领料出库',
   OPENING: '期初入库',
   RAW_RECEIPT: '原料入库',
+  RETURN: '余料退回',
   SHIP: '出货出库',
   STOCKTAKE: '盘点调整',
   TRADE_RECEIPT: '外采入库',
+  VOID: '作废冲销',
 };
 
 export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
@@ -80,6 +83,7 @@ export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
 
 /** 报完工时各工序可以修改的产出属性，其余属性沿用领料。 */
 export const EDITABLE_FIELDS: Record<string, AttrField[]> = {
+  CUT: ['length', 'width'],
   EMBOSS: ['textureFront', 'textureBack'],
   ENGRAVE: ['pattern'],
   FOLD: [],
@@ -111,7 +115,8 @@ export function hasPattern(stage: string) {
 export function stageColumns(stage: string): ColumnField[] {
   if (stage === 'RAW') return ['rawMaterial', 'rawCategory'];
   if (stage === 'BOARD') return ['material', 'recipe', 'color', 'size'];
-  if (stage === 'SHEET') return ['material', 'color', 'size'];
+  if (stage === 'SHEET' || stage === 'CUT')
+    return ['material', 'color', 'size'];
   const columns: ColumnField[] = [
     'material',
     'frontColor',
@@ -264,6 +269,7 @@ function inputColor(line: InputLine) {
  * - 密炼：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
  * - 开片：领料按 颜色+厚度 分组，每组一行（可以颜色规格混开），长宽由人填写；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
+ * - 立切：按领料编码分组，沿用单色属性，长宽待改；
  * - 其余工序：按领料编码分组，沿用属性；压花待选纹路，雕刻待选图案，冲裁沿用尺寸待改。
  */
 export function deriveOutputs(
@@ -330,8 +336,10 @@ export function deriveOutputs(
   }
   const groups = new Map<string, { attrs: Api.ItemAttrs; batches: string[] }>();
   for (const line of inputs) {
+    const item = line.stock.item ?? {};
     const group = groups.get(line.stock.itemCode) ?? {
-      attrs: toLayered(line.stock.item ?? {}),
+      // 立切产出还是单色片材；之后的工序都按正反面色
+      attrs: process === 'CUT' ? { ...item } : toLayered(item),
       batches: [],
     };
     group.batches.push(line.stock.batchNo);

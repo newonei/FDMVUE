@@ -159,6 +159,13 @@ export namespace FdmgongchangStageStockApi {
     location?: string;
   }
 
+  /** 报产出时的计件：谁、按哪个计价项目、算多少。 */
+  export interface Piecework {
+    itemId: number;
+    quantity: Decimal;
+    userId: number;
+  }
+
   export interface OrderCreateReq {
     /** 关联外贸自制任务：contractId 与 assignmentId 一起填。 */
     assignmentId?: string;
@@ -169,6 +176,7 @@ export namespace FdmgongchangStageStockApi {
     /** 操作人（系统用户），需具备该工序岗位；不填为当前登录人。班组从人员岗位带出。 */
     operatorUserId?: number;
     outputs: OrderOutput[];
+    pieceworks?: Piecework[];
     process: string;
     remark?: string;
     sourceStage: string;
@@ -184,6 +192,7 @@ export namespace FdmgongchangStageStockApi {
     finish: boolean;
     id: number;
     outputs: OrderOutput[];
+    pieceworks?: Piecework[];
   }
 
   export interface OrderReturnReq {
@@ -239,6 +248,15 @@ export namespace FdmgongchangStageStockApi {
     /** 包装完工回写到合同的数量。 */
     productionWriteback?: Decimal | null;
     remark?: null | string;
+    /** 这张单带出的计件（详情接口返回）。 */
+    pieceworks?: Array<{
+      amount: Decimal;
+      itemName: string;
+      quantity?: Decimal | null;
+      reportSeq?: null | number;
+      status: string;
+      userName?: null | string;
+    }>;
     /** 已报产出次数。 */
     reportCount?: null | number;
     /** 已退回原库存的余料合计（来源单位）。 */

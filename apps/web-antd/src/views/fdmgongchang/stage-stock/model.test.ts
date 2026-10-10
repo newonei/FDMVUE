@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attrSummary,
   deriveOutputs,
+  EDITABLE_FIELDS,
   guessPackedAttrs,
   joinBatches,
   lineBatch,
@@ -291,5 +292,29 @@ describe('receiving helpers', () => {
       '请填写大于 0 的实收数量。',
       '请填写可入库数量（良品），全部不良时填 0。',
     ]);
+  });
+});
+
+describe('cross cutting', () => {
+  it('keeps the single colour sheet and its batch so length and width can be cut', () => {
+    const [line] = deriveOutputs('CUT', [
+      {
+        quantity: 10,
+        stock: {
+          batchNo: 'MB1',
+          id: 1,
+          item: { color: 'PU', length: 185, material: 'TPE', thickness: 0.6, width: 63 },
+          itemCode: 'PC-TPE-PU-185X63X0.6',
+          location: '片材区',
+          quantity: 20,
+          stage: 'SHEET',
+        },
+      },
+    ]);
+    expect(line!.attrs).toMatchObject({ color: 'PU', length: 185, thickness: 0.6, width: 63 });
+    expect(line!.attrs.frontColor).toBeUndefined();
+    expect(line!.batchNo).toBe('MB1');
+    expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width']);
+    expect(stageColumns('CUT')).toEqual(['material', 'color', 'size']);
   });
 });
