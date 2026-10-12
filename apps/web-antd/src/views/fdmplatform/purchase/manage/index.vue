@@ -90,6 +90,7 @@ import { batchOrders, batchProblem, batchSelectable } from './batch-model';
 import BatchRequestDialog from './components/BatchRequestDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
+import OrderExportMenu from './components/OrderExportMenu.vue';
 import OrderInvoices from './components/OrderInvoices.vue';
 import OrderStockDocs from './components/OrderStockDocs.vue';
 import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
@@ -332,8 +333,11 @@ function changeScope() {
 }
 const tab = computed({
   get: () => {
-    if (selection.value) return localTab.value;
-    return typeof route.query.tab === 'string' ? route.query.tab : 'details';
+    let value = 'details';
+    if (selection.value) value = localTab.value;
+    else if (typeof route.query.tab === 'string') value = route.query.tab;
+    // 「采购单模板」页签已撤，旧链接落到附件里的导出记录
+    return value === 'contract' ? 'attachments' : value;
   },
   set: (tab: string) => {
     if (selection.value) localTab.value = tab;
@@ -422,8 +426,9 @@ const templateState = computed(() => {
     (file) => file.kind === 'SIGNED',
   ).length;
   if (view.value.details.status !== 'CONFIRMED')
-    return { label: '下单资料未确认', sub: '确认后可生成采购单 Word' };
-  if (words === 0) return { label: '可生成', sub: '还没有生成采购单 Word' };
+    return { label: '下单资料未确认', sub: '确认后可在右上角导出' };
+  if (words === 0)
+    return { label: '可导出', sub: '右上角「导出」PDF / Word / Excel' };
   return {
     label: `已生成 ${words} 版`,
     sub: signed > 0 ? `已上传盖章件 ${signed} 份` : '盖章件选填',
@@ -775,11 +780,10 @@ async function command(
     const previousExports = new Set(view.value.exports.map((file) => file.id));
     const value =
       action === 'EXPORT_CONTRACT'
-        ? await exportProcurementOrder(
-            view.value.contractId,
-            view.value.id,
-            args,
-          )
+        ? await exportProcurementOrder(view.value.contractId, view.value.id, {
+            ...args,
+            format: String(payload.format ?? 'DOCX') as 'DOCX' | 'PDF' | 'XLSX',
+          })
         : await procurementOrderAction(view.value.contractId, view.value.id, {
             ...args,
             action,
@@ -802,10 +806,10 @@ async function command(
     if (action === 'WITHDRAW_DETAILS' || action === 'REVISE_DETAILS')
       successMessage = '已进入资料草稿，可直接编辑';
     else if (action === 'CONFIRM_DETAILS')
-      successMessage = '下单资料已确认，可在「采购单模板」生成采购单';
+      successMessage = '下单资料已确认，可在右上角「导出」生成采购单';
     else if (action === 'SAVE_DETAILS') successMessage = '草稿已保存';
     else if (action === 'EXPORT_CONTRACT')
-      successMessage = 'Word已生成，可在历史版本中下载';
+      successMessage = '采购单已导出，导出记录在「附件」页签';
     message.success(successMessage);
     void loadList();
   } catch (error) {
@@ -1343,14 +1347,33 @@ watch(financeType, (value, previous) => {
                   · 交期 {{ view.details.deliveryDate }}</span>
               </div>
             </div>
-            <Button
-              v-if="canReceive"
-              type="primary"
-              :disabled="childOpen"
-              @click="stockInOpen = true"
-            >
-              登记入库
-            </Button>
+            <Space>
+              <OrderExportMenu
+                :ready="view.allowedActions.includes('EXPORT_CONTRACT')"
+                :saving="saving"
+                :disabled="childOpen"
+                @export="(format) => command('EXPORT_CONTRACT', { format })"
+                @files="tab = 'attachments'"
+                @not-ready="
+                  () => {
+                    message.warning(
+                      view?.details.status === 'CONFIRMED'
+                        ? '文件存储未配置，暂时不能导出'
+                        : '请先在「商品与到货」确认下单资料，再导出采购单',
+                    );
+                    if (view?.details.status !== 'CONFIRMED') tab = 'details';
+                  }
+                "
+              />
+              <Button
+                v-if="canReceive"
+                type="primary"
+                :disabled="childOpen"
+                @click="stockInOpen = true"
+              >
+                登记入库
+              </Button>
+            </Space>
           </header>
 
           <div class="order-summary">
@@ -1435,9 +1458,9 @@ watch(financeType, (value, previous) => {
               type="button"
               class="order-summary-item order-summary-link"
               :disabled="childOpen"
-              @click="tab = 'contract'"
+              @click="tab = 'attachments'"
             >
-              <span class="procurement-muted">采购单模板</span>
+              <span class="procurement-muted">采购单导出</span>
               <strong>{{ templateState.label }}</strong>
               <span class="procurement-muted">{{ templateState.sub }}</span>
             </button>
@@ -1625,16 +1648,13 @@ watch(financeType, (value, previous) => {
                 @changed="financeChanged"
               />
             </TabPane>
-            <TabPane key="contract" tab="采购单模板">
+            <TabPane key="attachments" tab="附件">
               <OrderContract
                 :view="view"
                 :saving="saving"
-                @details="tab = 'details'"
-                @action="action"
+                style="margin-bottom: 12px"
                 @signed="upload"
               />
-            </TabPane>
-            <TabPane key="attachments" tab="附件">
               <AttachmentPanel
                 :contract-id="view.contractId"
                 :target="{ targetKind: 'purchaseOrders', targetId: view.id }"

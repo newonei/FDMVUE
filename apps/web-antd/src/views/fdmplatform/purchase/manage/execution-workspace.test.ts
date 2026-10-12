@@ -102,6 +102,9 @@ vi.mock('../warehouse/StockInDialog.vue', () => ({
     },
   }),
 }));
+vi.mock('./components/OrderExportMenu.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderContract.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
