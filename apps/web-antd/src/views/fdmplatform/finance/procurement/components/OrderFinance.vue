@@ -23,6 +23,7 @@ import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vu
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import { financeStatus, financeTitles, hasPayableBalance } from '../model';
 import FinanceDocument from './FinanceDocument.vue';
+import RefundTable from './RefundTable.vue';
 const props = defineProps<{
   contractId: string;
   mode: 'costs' | 'payments';
@@ -189,6 +190,13 @@ watch(
           </Tag>
         </template>
       </Table>
+</Card><Card v-if="mode === 'payments'" title="退款记录" size="small">
+      <RefundTable
+        :order-id="orderId"
+        @open-payment="
+          (id) => show({ id, type: 'PAYMENT' } as ProcurementFinanceRecord)
+        "
+      />
 </Card><FinanceDocument
       :open="open && active"
       :type="type"

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canReturn,
   canVoidStockIn,
+  overpaidAfterReturn,
   returnErrors,
   returnPayload,
   returnRows,
@@ -107,5 +108,19 @@ describe('purchase return model', () => {
     );
     expect(txnLabel({ type: 'IN', action: 'VOID_STOCK_OUT' })).toBe('作废出库');
     expect(txnLabel({ type: 'IN' })).toBe('采购入库');
+  });
+});
+
+describe('refund reminder', () => {
+  it('reports the overpaid part only when paid exceeds the reduced order amount', () => {
+    expect(
+      overpaidAfterReturn({ orderAmount: '900', paidAmount: '1000' }),
+    ).toBe('100');
+    expect(
+      overpaidAfterReturn({ orderAmount: '1000', paidAmount: '1000' }),
+    ).toBeUndefined();
+    expect(
+      overpaidAfterReturn({ orderAmount: '1000', paidAmount: null }),
+    ).toBeUndefined();
   });
 });

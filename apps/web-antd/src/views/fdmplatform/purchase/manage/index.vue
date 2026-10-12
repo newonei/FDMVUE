@@ -87,6 +87,7 @@ import StockInDialog from '../warehouse/StockInDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import OrderInvoices from './components/OrderInvoices.vue';
+import OrderStockDocs from './components/OrderStockDocs.vue';
 import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
 import {
   canRecordOrderArrival,
@@ -1471,6 +1472,14 @@ watch(financeType, (value, previous) => {
                   </RelatedLink>
                 </Space>
               </div>
+            </TabPane>
+            <TabPane key="stock" tab="入库与退货">
+              <OrderStockDocs
+                :contract-id="view.contractId"
+                :order-id="view.id"
+                :can-receive="canReceive"
+                @changed="invoicesChanged"
+              />
             </TabPane>
             <TabPane key="payments" tab="付款与费用">
               <OrderFinance

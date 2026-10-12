@@ -14,12 +14,18 @@ import {
   Switch,
 } from 'ant-design-vue';
 
+import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 import { createPurchaseReturn } from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
 import { localDate } from '../quotes/comparison';
-import { qty } from './model';
-import { returnErrors, returnPayload, returnRows } from './return-model';
+import { money, qty } from './model';
+import {
+  overpaidAfterReturn,
+  returnErrors,
+  returnPayload,
+  returnRows,
+} from './return-model';
 
 import './stock-dialog.css';
 
@@ -65,6 +71,25 @@ watch(
   { immediate: true },
 );
 
+/** 不再补货使采购金额减少；货款已付过头时提醒去原付款单登记退款，并带上退货单号作为依据。 */
+async function remindRefund(stockIn: StockIn, created: PurchaseReturn) {
+  try {
+    const summary = await getProcurementFinanceSummary(
+      stockIn.standalone ? '' : (stockIn.contractId ?? ''),
+      stockIn.orderId,
+    );
+    const over = overpaidAfterReturn(summary);
+    if (!over) return;
+    const currency = String(summary.currency ?? stockIn.currency ?? 'CNY');
+    Modal.warning({
+      title: '货款已多付，请登记供应商退款',
+      content: `退货后采购金额 ${money(summary.orderAmount, currency)}，已付 ${money(summary.paidAmount, currency)}，多付 ${money(over, currency)}。供应商退回货款后，请在采购单「付款与费用」打开原付款单登记「退款 / 冲销」，原因写「采购退货 ${created.code}」。`,
+    });
+  } catch {
+    // 只是提醒，读取付款汇总失败不影响退货结果
+  }
+}
+
 async function save() {
   submitted.value = true;
   const stockIn = props.stockIn;
@@ -77,15 +102,14 @@ async function save() {
   saving.value = true;
   error.value = '';
   try {
-    emit(
-      'saved',
-      await createPurchaseReturn(
-        returnPayload(form.value, rows.value, {
-          idempotencyKey,
-          stockInId: stockIn.id,
-        }),
-      ),
+    const created = await createPurchaseReturn(
+      returnPayload(form.value, rows.value, {
+        idempotencyKey,
+        stockInId: stockIn.id,
+      }),
     );
+    emit('saved', created);
+    if (created.noReplacement) void remindRefund(stockIn, created);
   } catch (error_) {
     error.value = errorText(error_);
   } finally {

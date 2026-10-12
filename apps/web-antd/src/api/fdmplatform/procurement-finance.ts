@@ -135,3 +135,39 @@ export function downloadProcurementFinanceFile(id: string, fileId: string) {
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
   );
 }
+
+/** 采购退款记录：付款单上登记的一笔退款 / 冲销。 */
+export interface ProcurementRefund {
+  id: string;
+  paymentId: string;
+  paymentCode?: string;
+  contractId?: string;
+  orderId?: string;
+  orderCode?: string;
+  supplierName?: string;
+  payeeName?: string;
+  currency?: string;
+  amount: Decimal;
+  rmbAmount?: Decimal;
+  paymentAmount?: Decimal;
+  paidAt?: string;
+  occurredDate?: string;
+  reason?: string;
+  evidenceRef?: string;
+  actorId?: number;
+  createdAt?: string;
+}
+export function getProcurementRefunds(params: {
+  contractId?: string;
+  from?: string;
+  keyword?: string;
+  orderId?: string;
+  pageNo: number;
+  pageSize: number;
+  to?: string;
+}) {
+  return requestClient.get<PageResult<ProcurementRefund>>(
+    `${base}/refunds/page`,
+    { params },
+  );
+}

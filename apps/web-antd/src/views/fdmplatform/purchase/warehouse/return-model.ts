@@ -128,6 +128,21 @@ export function returnPayload(
   };
 }
 
+/**
+ * 退货不再补货后，已付货款超过新的采购金额的部分；没有多付或金额未核实时为 undefined。
+ * summary 是采购财务的采购单汇总（orderAmount / paidAmount）。
+ */
+export function overpaidAfterReturn(summary: {
+  orderAmount?: unknown;
+  paidAmount?: unknown;
+}) {
+  const paid = decimal(summary.paidAmount);
+  const amount = decimal(summary.orderAmount);
+  if (!paid.isFinite() || !amount.isFinite()) return undefined;
+  const over = paid.minus(amount);
+  return over.gt(0) ? plain(over) : undefined;
+}
+
 const ACTION_LABELS: Record<string, string> = {
   STOCK_IN: '采购入库',
   STOCK_OUT: '销售出库',

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import MergedWorkspace from '../../../components/MergedWorkspace.vue';
 import CashPartyList from '../../cash/CashPartyList.vue';
+import RefundWorkspace from '../components/RefundWorkspace.vue';
 import FinanceWorkspace from '../index.vue';
 import ReimbursementWorkspace from '../reimbursements/ReimbursementWorkspace.vue';
 
@@ -19,6 +20,7 @@ const views = [
     component: FinanceWorkspace,
     props: { type: 'PAYMENT' },
   },
+  { key: 'refunds', title: '采购退款', component: RefundWorkspace },
   {
     key: 'suppliers',
     title: '供应商付款',

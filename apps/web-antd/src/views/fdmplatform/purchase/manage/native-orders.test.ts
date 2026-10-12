@@ -135,6 +135,9 @@ vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/OrderStockDocs.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderInvoices.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
