@@ -55,7 +55,7 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '客户名称',
       component: 'ApiSelect',
       rules: 'required',
-      componentProps: (_values: Record<string, any>, form: any) => ({
+      componentProps: (_values, form) => ({
         api: getCustomerSimpleList,
         labelField: 'name',
         valueField: 'id',

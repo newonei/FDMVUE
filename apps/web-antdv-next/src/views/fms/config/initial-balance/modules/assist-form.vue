@@ -10,7 +10,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { message } from 'antdv-next';
 
 import { useVbenForm } from '#/adapter/form';
-import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-select-modal.vue';
+import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-item-select.vue'; // FDM：官方误引用了不存在的 auxiliary-select-modal
 
 defineOptions({ name: 'FmsInitialAssistForm' });
 
@@ -158,7 +158,7 @@ function buildCombinations(
           :auxiliary-type-id="config.auxiliaryTypeId"
           multiple
           :placeholder="`请选择${config.name}`"
-          @change="(items: any[]) => handleItemsChange(config.auxiliaryTypeId, items)"
+          @change="(items) => handleItemsChange(config.auxiliaryTypeId, items)"
         />
       </template>
     </Form>

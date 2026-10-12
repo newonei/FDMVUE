@@ -32,7 +32,7 @@ import {
   getSubjectUsage,
   updateSubject,
 } from '#/api/fms/config/subject';
-import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-select-modal.vue';
+import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-item-select.vue'; // FDM：官方误引用了不存在的 auxiliary-select-modal
 import FmsAuxiliaryTypeSelect from '#/views/fms/config/auxiliary/components/auxiliary-type-select.vue';
 import FmsCurrencySelect from '#/views/fms/config/currency/components/fms-currency-select.vue';
 import { useFmsStore } from '#/views/fms/store/fms';

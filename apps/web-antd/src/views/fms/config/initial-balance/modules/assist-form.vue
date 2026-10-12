@@ -159,7 +159,7 @@ function buildCombinations(
           :auxiliary-type-id="config.auxiliaryTypeId"
           multiple
           :placeholder="`请选择${config.name}`"
-          @change="(items: any[]) => handleItemsChange(config.auxiliaryTypeId, items)"
+          @change="(items) => handleItemsChange(config.auxiliaryTypeId, items)"
         />
       </template>
     </Form>

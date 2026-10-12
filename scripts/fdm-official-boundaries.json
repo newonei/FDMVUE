@@ -1,5 +1,5 @@
 {
-  "baseline": "c6efe8fe74d9e52add6314f0bdadc6340df39ea8",
+  "baseline": "1b14e889f529e245fd620daa720dcea6de0cc5e7",
   "disabledOfficialRoots": ["/ai", "/crm", "/erp", "/mes", "/wms"],
   "officialPaths": [
     "apps/web-antd/src/api/ai",

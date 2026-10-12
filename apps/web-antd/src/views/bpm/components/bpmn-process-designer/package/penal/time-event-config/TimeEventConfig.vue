@@ -153,10 +153,7 @@ const [HelpModal, helpModalApi] = useVbenModal({
   title: '格式说明',
   showCancelButton: false,
   confirmText: '关闭',
-  // FDM：显式标注返回类型，避免官方代码的循环类型推断报错
-  onConfirm: (): void => {
-    helpModalApi.close();
-  },
+  onConfirm: () => helpModalApi.close(),
 });
 
 // 点击输入框时弹窗
