@@ -49,6 +49,10 @@ export interface InRow {
   /** 同一采购行可拆到多个仓库，key 区分拆出来的行 */
   key: string;
   orderLineId: string;
+  /** 批量转入库时一张对话框里有多张采购单 */
+  orderId?: string;
+  contractId?: string;
+  orderCode?: string;
   /** 空表示用表头的入库仓库 */
   warehouseId?: string;
   split?: boolean;
@@ -67,6 +71,9 @@ export function inboundRows(lines: InboundLine[]): InRow[] {
   return lines.map((line) => ({
     key: line.orderLineId,
     orderLineId: line.orderLineId,
+    orderId: line.orderId,
+    contractId: line.contractId ?? '',
+    orderCode: line.orderCode ?? undefined,
     productName: line.productName || '产品未注明',
     specification: line.specification ?? '',
     unit: line.unit ?? '',
@@ -132,6 +139,16 @@ export function stockInErrors(
   if (!form.warehouseId) sheet = '请选择入库仓库';
   else if (filledInRows(rows).length === 0) sheet = '至少填写一行实收数量';
   return { lines, sheet };
+}
+
+/** 按采购单分组（批量转入库），每张采购单再按仓库分。 */
+export function orderGroups(rows: InRow[]) {
+  const groups = new Map<string, InRow[]>();
+  for (const row of filledInRows(rows)) {
+    const order = row.orderId ?? '';
+    groups.set(order, [...(groups.get(order) ?? []), row]);
+  }
+  return groups;
 }
 
 /** 按仓库分组：每个仓库一张入库单。 */

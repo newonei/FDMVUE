@@ -57,6 +57,9 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/BatchRequestDialog.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderStockDocs.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -257,6 +260,7 @@ vi.mock('ant-design-vue', () => {
     TabPane: block,
     Tabs: block,
     Tag: block,
+    Modal: { confirm: vi.fn(), warning: vi.fn() },
     message: { success: vi.fn() },
     Table: defineComponent({
       props: {

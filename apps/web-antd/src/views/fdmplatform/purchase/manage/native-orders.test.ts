@@ -135,6 +135,9 @@ vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/BatchRequestDialog.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderStockDocs.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -252,6 +255,7 @@ vi.mock('ant-design-vue', () => {
     TabPane: block,
     Tabs: block,
     Tag: block,
+    Modal: { confirm: vi.fn(), warning: vi.fn() },
     message: { success: vi.fn() },
   };
 });

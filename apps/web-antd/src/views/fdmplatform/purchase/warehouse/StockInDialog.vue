@@ -29,6 +29,7 @@ import {
   defaultWarehouse,
   filledInRows,
   inboundRows,
+  orderGroups,
   qty,
   splitInRow,
   stockInErrors,
@@ -42,13 +43,15 @@ const props = defineProps<{
   contractId?: string;
   open: boolean;
   orderId?: string;
+  /** 列表「转入库」：多张同供应商采购单一起登记，每张单、每个仓库各一张入库单 */
+  targets?: { code: string; contractId: string; orderId: string }[];
 }>();
 /** 分仓时会一次生成多张入库单，saved 带回全部 */
 const emit = defineEmits<{
   close: [];
   saved: [value: StockIn, all: StockIn[]];
 }>();
-
+const multi = computed(() => (props.targets?.length ?? 0) > 0);
 const today = localDate();
 const warehouses = ref<ProcurementSetting[]>([]);
 const orders = ref<{ contractId: string; label: string; value: string }[]>([]);
@@ -67,6 +70,10 @@ const form = ref({
   directShip: false,
 });
 const target = computed(() => {
+  if (multi.value) {
+    const first = props.targets![0]!;
+    return { contractId: first.contractId, orderId: first.orderId };
+  }
   // 从采购单打开时 orderId 一定有；不关联合同的采购单 contractId 为空
   if (props.orderId)
     return { contractId: props.contractId ?? '', orderId: props.orderId };
@@ -79,8 +86,10 @@ const errors = computed(() => stockInErrors(form.value, rows.value));
 const count = computed(() => filledInRows(rows.value).length);
 const saveLabel = computed(() => {
   if (form.value.directShip) return '入库并直发';
-  const warehouses = warehouseGroups(rows.value, form.value.warehouseId).size;
-  return warehouses > 1 ? `确认入库（${warehouses} 个仓库）` : '确认入库';
+  let notes = 0;
+  for (const group of orderGroups(rows.value).values())
+    notes += warehouseGroups(group, form.value.warehouseId).size;
+  return notes > 1 ? `确认入库（生成 ${notes} 张入库单）` : '确认入库';
 });
 
 async function loadOrders(keyword = '') {
@@ -109,8 +118,22 @@ async function loadLines() {
   if (!value) return;
   loading.value = true;
   try {
-    rows.value = inboundRows(
-      await getInboundLines(value.contractId, value.orderId),
+    const sources = multi.value ? props.targets! : [value];
+    const loaded = await Promise.all(
+      sources.map((source) =>
+        getInboundLines(source.contractId, source.orderId),
+      ),
+    );
+    rows.value = loaded.flatMap((lines, index) =>
+      inboundRows(lines).map((row) => ({
+        ...row,
+        orderId: sources[index]!.orderId,
+        contractId: sources[index]!.contractId,
+        orderCode:
+          'code' in sources[index]!
+            ? String(sources[index]!.code)
+            : row.orderCode,
+      })),
     );
   } catch (error_) {
     error.value = errorText(error_);
@@ -138,7 +161,7 @@ watch(
         active: true,
       });
       form.value.warehouseId = defaultWarehouse(warehouses.value);
-      await (props.orderId ? loadLines() : loadOrders());
+      await (props.orderId || multi.value ? loadLines() : loadOrders());
     } catch (error_) {
       error.value = errorText(error_);
     }
@@ -160,19 +183,25 @@ async function save() {
   error.value = '';
   const created: StockIn[] = [];
   try {
-    // 每个仓库一张入库单；幂等键按仓库区分，失败后重试不会重复入库
-    for (const [warehouseId, group] of warehouseGroups(
-      rows.value,
-      form.value.warehouseId,
-    )) {
-      created.push(
-        await createStockIn(
-          stockInPayload({ ...form.value, warehouseId }, group, {
-            ...value,
-            idempotencyKey: `${idempotencyKey}:${warehouseId}`,
-          }),
-        ),
-      );
+    // 每张采购单、每个仓库一张入库单；幂等键按单和仓库区分，失败后重试不会重复入库
+    for (const [orderId, orderRows] of orderGroups(rows.value)) {
+      const ids = {
+        contractId: orderRows[0]?.contractId ?? value.contractId,
+        orderId: orderId || value.orderId,
+      };
+      for (const [warehouseId, group] of warehouseGroups(
+        orderRows,
+        form.value.warehouseId,
+      )) {
+        created.push(
+          await createStockIn(
+            stockInPayload({ ...form.value, warehouseId }, group, {
+              ...ids,
+              idempotencyKey: `${idempotencyKey}:${ids.orderId}:${warehouseId}`,
+            }),
+          ),
+        );
+      }
     }
     emit('saved', created[0]!, created);
   } catch (error_) {
@@ -197,7 +226,7 @@ async function save() {
     <div class="stock-dialog">
       <Alert v-if="error" type="error" :message="error" show-icon />
       <div class="sheet">
-        <label v-if="!orderId" class="field wide">
+        <label v-if="!orderId && !multi" class="field wide">
           <span>采购单</span>
           <Select
             v-model:value="picked"
@@ -280,6 +309,7 @@ async function save() {
             >
               <td>
                 <template v-if="!row.split">
+                  <span v-if="multi" class="hint">{{ row.orderCode }}</span>
                   <b>{{ row.productName }}</b>
                   <span v-if="row.specification" class="hint">{{
                     row.specification

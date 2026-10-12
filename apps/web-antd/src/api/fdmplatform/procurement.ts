@@ -168,6 +168,8 @@ export interface PurchaseOrderEntry {
   additionalCategory?: string;
   additionalAmount?: Decimal;
   roundOff?: Decimal;
+  /** 整单折扣 %，不传为 100 */
+  discountRate?: Decimal;
   remark?: string;
   lines: PurchaseOrderEntryLine[];
 }
@@ -363,5 +365,17 @@ export function setOrderNoInvoice(
   return requestClient.post<ProcurementOrderView>(
     `${orderPath(contractId, orderId)}/no-invoice`,
     { value },
+  );
+}
+
+/** 结束采购单：未到货的余额全部取消，返回结束掉的行数。 */
+export function endProcurementOrder(
+  contractId: string,
+  orderId: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<number>(
+    `${orderPath(contractId, orderId)}/end`,
+    data,
   );
 }

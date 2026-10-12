@@ -38,6 +38,8 @@ export interface EntryHeader {
   category?: string;
   companyId?: number;
   contractId?: string;
+  /** 整单折扣 %，空或 100 表示不打折 */
+  discountRate?: string;
   purchaseDate?: string;
   remark?: string;
   roundOff?: string;
@@ -81,7 +83,7 @@ export function setRowGift(row: EntryRow, gift: boolean) {
   }
 }
 
-/** 总金额 = 明细合计 + 附加费用 − 优惠抹零（和金智的计算过程一致，不含整单折扣）。 */
+/** 总金额 = 明细合计 × 整单折扣 − 优惠抹零 + 附加费用（和金智的计算过程一致）。 */
 export function entryTotals(rows: EntryRow[], header: EntryHeader) {
   let lines = new BigNumber(0);
   for (const row of rows) {
@@ -89,13 +91,19 @@ export function entryTotals(rows: EntryRow[], header: EntryHeader) {
     const amount = decimal(row.unitPrice).multipliedBy(decimal(row.quantity));
     if (amount.isFinite()) lines = lines.plus(amount);
   }
+  const rate = decimal(header.discountRate || 100);
+  const discounted = lines
+    .multipliedBy(rate.isFinite() ? rate : 100)
+    .dividedBy(100)
+    .decimalPlaces(2, BigNumber.ROUND_HALF_UP);
   const fee = decimal(header.additionalAmount || 0);
   const roundOff = decimal(header.roundOff || 0);
-  const total = lines
+  const total = discounted
     .plus(fee.isFinite() ? fee : 0)
     .minus(roundOff.isFinite() ? roundOff : 0);
   return {
     lines: lines.toFixed(2),
+    discounted: discounted.toFixed(2),
     total: total.toFixed(2),
     count: rows.filter((row) => !blank(row.quantity)).length,
   };
@@ -116,6 +124,14 @@ export function entryErrors(
   if (!header.supplierId) sheet = '请选择供应商';
   else if (!header.contractId && !header.companyId) sheet = '请选择所属公司';
   else if (rows.length === 0) sheet = '请至少添加一行产品';
+  else if (
+    !blank(header.discountRate) &&
+    !(
+      decimal(header.discountRate).gt(0) &&
+      decimal(header.discountRate).lte(100)
+    )
+  )
+    sheet = '整单折扣须在 0 到 100 之间';
   else if (new BigNumber(entryTotals(rows, header).total).lt(0))
     sheet = '优惠抹零不能超过采购金额';
   return { lines, sheet };
@@ -139,6 +155,7 @@ export function entryPayload(
       ? undefined
       : header.additionalAmount,
     roundOff: blank(header.roundOff) ? undefined : header.roundOff,
+    discountRate: blank(header.discountRate) ? undefined : header.discountRate,
     remark: header.remark?.trim() || undefined,
     lines: rows.map((row) => ({
       productId: row.contractItemId ? undefined : row.productId,

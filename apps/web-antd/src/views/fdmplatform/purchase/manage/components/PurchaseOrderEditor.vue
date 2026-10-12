@@ -587,6 +587,18 @@ async function save() {
           />
         </label>
         <label class="field">
+          <span>整单折扣 %</span>
+          <InputNumber
+            v-model:value="header.discountRate"
+            string-mode
+            :min="0"
+            :max="100"
+            :controls="false"
+            placeholder="100 为不打折"
+            style="width: 100%"
+          />
+        </label>
+        <label class="field">
           <span>优惠抹零</span>
           <InputNumber
             v-model:value="header.roundOff"
@@ -601,10 +613,11 @@ async function save() {
           <Input v-model:value="header.remark" />
         </label>
         <p class="formula">
-          总金额 <b>¥{{ totals.total }}</b> = 产品明细 ¥{{ totals.lines }} +
-          附加费用 ¥{{ header.additionalAmount || 0 }} − 优惠抹零 ¥{{
+          总金额 <b>¥{{ totals.total }}</b> = 产品明细 ¥{{ totals.lines }} ×
+          整单折扣 {{ header.discountRate || 100 }}% − 优惠抹零 ¥{{
             header.roundOff || 0
           }}
+          + 附加费用 ¥{{ header.additionalAmount || 0 }}
         </p>
       </section>
     </div>

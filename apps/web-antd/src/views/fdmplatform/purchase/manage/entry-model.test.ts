@@ -37,7 +37,19 @@ describe('新建采购单表单', () => {
     ];
     expect(
       entryTotals(rows, { additionalAmount: '30', roundOff: '5' }),
-    ).toEqual({ lines: '1250.00', total: '1275.00', count: 2 });
+    ).toEqual({
+      lines: '1250.00',
+      discounted: '1250.00',
+      total: '1275.00',
+      count: 2,
+    });
+    expect(
+      entryTotals(rows, {
+        discountRate: '95',
+        additionalAmount: '30',
+        roundOff: '5',
+      }).total,
+    ).toBe('1212.50');
   });
 
   it('needs supplier, company without a contract, product and quantity', () => {

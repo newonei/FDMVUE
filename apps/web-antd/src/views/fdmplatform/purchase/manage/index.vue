@@ -12,7 +12,7 @@ import type {
 } from '#/api/fdmplatform/procurement';
 import type { StockIn } from '#/api/fdmplatform/warehouse';
 
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, h, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -25,6 +25,7 @@ import {
   Empty,
   Input,
   message,
+  Modal,
   Progress,
   Space,
   Table,
@@ -40,6 +41,7 @@ import {
 } from '#/api/fdmplatform';
 import {
   downloadProcurementFile,
+  endProcurementOrder,
   exportProcurementOrder,
   getOrderInvoices,
   getProcurementOrder,
@@ -84,6 +86,8 @@ import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
 import StockInDialog from '../warehouse/StockInDialog.vue';
+import { batchOrders, batchProblem, batchSelectable } from './batch-model';
+import BatchRequestDialog from './components/BatchRequestDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import OrderInvoices from './components/OrderInvoices.vue';
@@ -108,6 +112,96 @@ const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const records = ref<ProcurementOrderRow[]>([]);
+/**
+ * 列表批量操作（金智「选中付款 / 转入库单 / 选中结束」）：只对新系统采购单，金智历史单不可选。
+ * 选择只在当前页有效，翻页或筛选后清空。
+ */
+const selectedKeys = ref<string[]>([]);
+const selectedOrders = computed(() =>
+  batchOrders(
+    records.value.filter((row) =>
+      selectedKeys.value.includes(String(row.standaloneId ?? row.id)),
+    ),
+  ),
+);
+const batchRequestOpen = ref(false);
+const batchStockInTargets =
+  ref<{ code: string; contractId: string; orderId: string }[]>();
+function runBatch(mode: 'end' | 'request' | 'stockIn') {
+  const problem = batchProblem(selectedOrders.value, mode);
+  if (problem) {
+    message.warning(problem);
+    return;
+  }
+  const active = selectedOrders.value.filter((order) => !order.ended);
+  if (mode === 'request') batchRequestOpen.value = true;
+  else if (mode === 'stockIn')
+    batchStockInTargets.value = active.map((order) => ({
+      code: order.code,
+      contractId: order.contractId,
+      orderId: order.orderId,
+    }));
+  else endSelected(active);
+}
+function endSelected(orders: ReturnType<typeof batchOrders>) {
+  let reason = '';
+  const key = crypto.randomUUID();
+  Modal.confirm({
+    title: `结束 ${orders.length} 张采购单？`,
+    content: () =>
+      h('div', [
+        h(
+          'p',
+          '未到货的余额全部取消，不再入库；已到货、已付款的记录保留。有未付请款的单会被拦下。',
+        ),
+        h(Input, {
+          placeholder: '结束原因（必填），如：供应商停产、改由其他供应商',
+          'onUpdate:value': (value: string) => {
+            reason = value;
+          },
+        }),
+      ]),
+    okText: '结束',
+    okButtonProps: { danger: true },
+    onOk: async () => {
+      if (!reason.trim()) {
+        message.error('请填写结束原因');
+        throw new Error('missing reason');
+      }
+      const failed: string[] = [];
+      let ended = 0;
+      for (const order of orders) {
+        try {
+          const lines = await endProcurementOrder(
+            order.contractId,
+            order.orderId,
+            {
+              reason: reason.trim(),
+              idempotencyKey: `${key}:${order.key}`,
+            },
+          );
+          if (lines > 0) ended += 1;
+        } catch (error) {
+          failed.push(`${order.code}：${errorText(error)}`);
+        }
+      }
+      if (ended > 0) message.success(`已结束 ${ended} 张采购单`);
+      if (failed.length > 0)
+        Modal.warning({
+          title: '部分采购单没有结束',
+          content: failed.join('\n'),
+        });
+      selectedKeys.value = [];
+      void loadList();
+    },
+  });
+}
+function batchDone() {
+  batchRequestOpen.value = false;
+  batchStockInTargets.value = undefined;
+  selectedKeys.value = [];
+  void loadList();
+}
 const total = ref(0);
 const page = ref(Number(route.query.page) || 1);
 const keyword = ref(
@@ -498,6 +592,9 @@ const receivedNames: Record<string, string> = {
 };
 async function loadList() {
   if (!active.value) return;
+  selectedKeys.value = selectedKeys.value.filter((key) =>
+    records.value.some((row) => String(row.standaloneId ?? row.id) === key),
+  );
   void loadOverview();
   const run = ++listSequence;
   const params = {
@@ -983,7 +1080,27 @@ watch(financeType, (value, previous) => {
           message="正在查看关联合同的采购单"
           banner
         />
+        <div v-if="selectedKeys.length > 0" class="order-batch-bar">
+          <span>已选 {{ selectedKeys.length }} 张</span>
+          <Button size="small" type="primary" @click="runBatch('request')">
+            集中请款
+          </Button>
+          <Button size="small" @click="runBatch('stockIn')">转入库</Button>
+          <Button size="small" danger @click="runBatch('end')">结束</Button>
+          <Button size="small" type="link" @click="selectedKeys = []">
+            清除选择
+          </Button>
+          <span class="procurement-muted">集中请款和转入库要求同一家供应商</span>
+        </div>
         <Table
+          :row-selection="{
+            selectedRowKeys: selectedKeys,
+            onChange: (keys: (number | string)[]) =>
+              (selectedKeys = keys.map(String)),
+            getCheckboxProps: (row: ProcurementOrderRow) => ({
+              disabled: !batchSelectable(row),
+            }),
+          }"
           class="fdm-business-table order-table"
           size="middle"
           table-layout="fixed"
@@ -1557,6 +1674,23 @@ watch(financeType, (value, previous) => {
       @close="editorOpen = false"
       @saved="editorSaved"
     />
+    <BatchRequestDialog
+      :open="batchRequestOpen && active"
+      :orders="selectedOrders"
+      @close="batchDone"
+      @done="(count) => message.success(`已生成 ${count} 张请款单`)"
+    />
+    <StockInDialog
+      :open="!!batchStockInTargets && active"
+      :targets="batchStockInTargets"
+      @close="batchStockInTargets = undefined"
+      @saved="
+        (_value, all) => {
+          message.success(`已生成 ${all.length} 张入库单`);
+          batchDone();
+        }
+      "
+    />
     <StockInDialog
       :open="stockInOpen && active"
       :contract-id="view?.contractId"
@@ -1751,6 +1885,16 @@ watch(financeType, (value, previous) => {
 
 .order-payment-link:hover {
   color: hsl(var(--primary));
+}
+
+.order-batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 20px;
+  background: hsl(var(--primary) / 6%);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .order-summary-link {
