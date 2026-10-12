@@ -30,6 +30,7 @@ import {
   Table,
   TabPane,
   Tabs,
+  Tag,
 } from 'ant-design-vue';
 
 import {
@@ -93,9 +94,6 @@ import {
   orderMoney,
   orderPaymentProgress,
   orderRowDue,
-  orderRowProducts,
-  orderRowSteps,
-  orderSteps,
   purchaseRowLabels,
 } from './model';
 
@@ -113,6 +111,12 @@ const keyword = ref(
 );
 const status = ref<string | undefined>(
   typeof route.query.status === 'string' ? route.query.status : undefined,
+);
+type Operation = 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
+const operation = ref<Operation | undefined>(
+  ['COMPLETED', 'ENDED', 'IN_PROGRESS'].includes(String(route.query.operation))
+    ? (route.query.operation as Operation)
+    : undefined,
 );
 const mine = ref(route.query.mine === 'true');
 const loading = ref(false);
@@ -271,39 +275,26 @@ function stockInSaved(value: StockIn) {
 const paymentProgress = computed(() =>
   orderPaymentProgress(financeSummary.value),
 );
-/** Migrated 金智 orders have no native lifecycle to walk through. */
-const execution = computed(() =>
-  view.value && !migration.value
-    ? orderSteps(view.value, financeSummary.value)
-    : undefined,
-);
+/**
+ * 采购单下属单据各自独立（模板、入库、付款没有先后），这里只汇总各自进度。
+ * 采购单模板：下单资料确认后可生成 Word，盖章件为选填附件。
+ */
+const templateState = computed(() => {
+  if (!view.value) return undefined;
+  const words = view.value.exports?.length ?? 0;
+  const signed = (view.value.files ?? []).filter(
+    (file) => file.kind === 'SIGNED',
+  ).length;
+  if (view.value.details.status !== 'CONFIRMED')
+    return { label: '下单资料未确认', sub: '确认后可生成采购单 Word' };
+  if (words === 0) return { label: '可生成', sub: '还没有生成采购单 Word' };
+  return {
+    label: `已生成 ${words} 版`,
+    sub: signed > 0 ? `已上传盖章件 ${signed} 份` : '盖章件选填',
+  };
+});
 /** 与后端统计同一天（中国时区），列表倒计时和顶部超期数才对得上。 */
 const today = computed(() => overview.value?.asOf ?? localDate());
-const nextHints: Record<string, { button: string; text: string }> = {
-  details: {
-    text: '选好工厂联系人、签约公司、合同模板和必选条款，点「确认下单资料」。交期和地址可选。',
-    button: '填写下单资料',
-  },
-  contract: {
-    text: '生成合同 Word 发给工厂盖章，拿到盖章件（PDF 或照片）后上传。',
-    button: '去导出 / 上传合同',
-  },
-  arrival: {
-    text: '货到后点「登记入库」开采购入库单；供应商直接发给客户的，入库时勾选「直发客户」，会自动出库。',
-    button: '登记入库',
-  },
-  payment: {
-    text: '按合同约定申请付款，财务付款后进度会更新。',
-    button: '申请付款',
-  },
-};
-function goStep(key: string) {
-  if (childOpen.value) return;
-  if (key === 'details') tab.value = 'details';
-  else if (key === 'contract') tab.value = 'contract';
-  else if (key === 'arrival') stockInOpen.value = true;
-  else if (key === 'payment') openFinance('REQUEST');
-}
 const selectedIndex = computed(() =>
   records.value.findIndex((row) => row.id === view.value?.id),
 );
@@ -448,11 +439,21 @@ const attentionNames: Record<string, string> = {
 function openAttention(row: ProcurementOrdersOverview['attention'][number]) {
   openRow({ contractId: row.contractId, id: row.orderId } as DocumentRow);
 }
-function showOpen() {
-  status.value = status.value === 'ORDERED' ? undefined : 'ORDERED';
+function showOperation(value?: Operation) {
+  operation.value = operation.value === value ? undefined : value;
   page.value = 1;
   void loadList();
 }
+const operationNames: Record<Operation, { color: string; label: string }> = {
+  IN_PROGRESS: { label: '进行中', color: 'processing' },
+  COMPLETED: { label: '已完成', color: 'success' },
+  ENDED: { label: '已结束', color: 'default' },
+};
+const receivedNames: Record<string, string> = {
+  NONE: '未入库',
+  PARTIAL: '部分入库',
+  ALL: '已入齐',
+};
 async function loadList() {
   if (!active.value) return;
   void loadOverview();
@@ -463,6 +464,7 @@ async function loadList() {
     pageSize: 10,
     keyword: keyword.value || undefined,
     status: status.value,
+    operation: operation.value,
     mine: mine.value || undefined,
     pendingCompletion: completionFilter(scope.value),
   };
@@ -593,6 +595,7 @@ async function clear() {
   page.value = 1;
   keyword.value = '';
   status.value = undefined;
+  operation.value = undefined;
   mine.value = false;
   if (Object.keys(route.query).length > 0) await router.replace({ query: {} });
   void loadList();
@@ -641,7 +644,7 @@ async function command(
     if (action === 'WITHDRAW_DETAILS' || action === 'REVISE_DETAILS')
       successMessage = '已进入资料草稿，可直接编辑';
     else if (action === 'CONFIRM_DETAILS')
-      successMessage = '下单资料已确认，下一步生成合同发给工厂盖章';
+      successMessage = '下单资料已确认，可在「采购单模板」生成采购单';
     else if (action === 'SAVE_DETAILS') successMessage = '草稿已保存';
     else if (action === 'EXPORT_CONTRACT')
       successMessage = 'Word已生成，可在历史版本中下载';
@@ -773,29 +776,24 @@ watch(financeType, (value, previous) => {
         <button
           type="button"
           class="order-kpi"
-          :class="{ selected: status === 'ORDERED' }"
-          :aria-pressed="status === 'ORDERED'"
-          @click="showOpen"
+          :class="{ selected: operation === 'IN_PROGRESS' }"
+          :aria-pressed="operation === 'IN_PROGRESS'"
+          @click="showOperation('IN_PROGRESS')"
         >
-          <span>在途采购单</span>
-          <b>{{ overview ? `${overview.open} 张` : '—' }}</b>
-          <small>{{
-            amountLines(overview?.openAmount)[0] ?? '等待到货入库'
-          }}</small>
+          <span>进行中</span>
+          <b>{{
+            overview ? `${overview.inProgress ?? overview.open} 张` : '—'
+          }}</b>
+          <small>入库或付款还没办完</small>
         </button>
         <div class="order-kpi" :class="{ alert: (overview?.overdue ?? 0) > 0 }">
-          <span>超期未到货</span>
+          <span>超期未入库</span>
           <b>{{ overview ? `${overview.overdue} 张` : '—' }}</b>
           <small>{{
             overview?.overdue
               ? `最长超期 ${overview.maxOverdueDays} 天`
-              : '按下单资料交期或报价承诺交期'
+              : '按交货日期或报价承诺交期'
           }}</small>
-        </div>
-        <div class="order-kpi">
-          <span>待签回合同</span>
-          <b>{{ overview ? `${overview.unsigned} 张` : '—' }}</b>
-          <small>已下单、还没上传工厂盖章件</small>
         </div>
         <div class="order-kpi">
           <span>未付款</span>
@@ -804,12 +802,23 @@ watch(financeType, (value, previous) => {
           }}</b>
           <small>{{
             amountLines(overview?.arrivedUnpaidAmount)[0]
-              ? `已到货 ${amountLines(overview?.arrivedUnpaidAmount)[0]}`
+              ? `已入库 ${amountLines(overview?.arrivedUnpaidAmount)[0]}`
               : overview
                 ? `${overview.unpaid} 张有未付金额`
                 : ''
           }}</small>
         </div>
+        <button
+          type="button"
+          class="order-kpi"
+          :class="{ selected: operation === 'COMPLETED' }"
+          :aria-pressed="operation === 'COMPLETED'"
+          @click="showOperation('COMPLETED')"
+        >
+          <span>已完成</span>
+          <b>{{ overview ? `${overview.completed ?? 0} 张` : '—' }}</b>
+          <small>入库已齐且已付清</small>
+        </button>
       </section>
       <section
         v-if="overview?.attention.length"
@@ -843,18 +852,17 @@ watch(financeType, (value, previous) => {
         <div class="order-views" aria-label="采购状态视图">
           <button
             v-for="item in [
-              { value: undefined, label: '全部订单' },
-              { value: 'ORDERED', label: '待到货' },
-              { value: 'PARTIALLY_RECEIVED', label: '部分到货' },
-              { value: 'RECEIVED', label: '已到货' },
-              { value: 'CANCELLED', label: '已取消' },
-            ]"
+              { value: undefined, label: '全部' },
+              { value: 'IN_PROGRESS', label: '进行中' },
+              { value: 'COMPLETED', label: '已完成' },
+              { value: 'ENDED', label: '已结束' },
+            ] as { label: string; value?: Operation }[]"
             :key="item.label"
             type="button"
-            :class="{ selected: status === item.value }"
-            :aria-pressed="status === item.value"
+            :class="{ selected: operation === item.value }"
+            :aria-pressed="operation === item.value"
             @click="
-              status = item.value;
+              operation = item.value;
               page = 1;
               loadList();
             "
@@ -894,7 +902,7 @@ watch(financeType, (value, previous) => {
             </button>
             <span class="procurement-muted">当前筛选共 {{ total }} 单</span>
             <Button
-              v-if="keyword || status || contractId || mine"
+              v-if="keyword || status || operation || contractId || mine"
               type="text"
               @click="clear"
             >
@@ -912,7 +920,7 @@ watch(financeType, (value, previous) => {
           class="fdm-business-table order-table"
           size="middle"
           table-layout="fixed"
-          :scroll="{ x: 1320 }"
+          :scroll="{ x: 1190 }"
           :data-source="records"
           :loading="loading"
           :row-key="(row: ProcurementOrderRow) => row.standaloneId ?? row.id"
@@ -928,14 +936,14 @@ watch(financeType, (value, previous) => {
             showTotal: (value: number) => `共 ${value} 单`,
           }"
           :columns="[
-            { title: '采购单 / 供应商', key: 'supplier', width: 230 },
-            { title: '采购产品', key: 'product', width: 220 },
-            { title: '关联合同 / 客户', key: 'contract', width: 190 },
-            { title: '采购金额', key: 'amount', width: 130, align: 'right' },
-            { title: '执行进度', key: 'progress', width: 220 },
-            { title: '交期', key: 'due', width: 100 },
-            { title: '付款', key: 'payment', width: 150 },
-            { title: '', key: 'action', width: 96, fixed: 'right' },
+            { title: '采购单 / 供应商', key: 'supplier', width: 250 },
+            { title: '关联合同 / 客户', key: 'contract', width: 200 },
+            { title: '采购日期', key: 'date', width: 110 },
+            { title: '采购金额', key: 'amount', width: 140, align: 'right' },
+            { title: '入库', key: 'received', width: 140 },
+            { title: '付款', key: 'payment', width: 170 },
+            { title: '操作状态', key: 'operation', width: 100 },
+            { title: '', key: 'action', width: 80, fixed: 'right' },
           ]"
           @change="
             (value) => {
@@ -947,7 +955,7 @@ watch(financeType, (value, previous) => {
           <template #emptyText>
             <Empty description="没有符合条件的采购订单">
               <Button
-                v-if="keyword || status || contractId || mine"
+                v-if="keyword || status || operation || contractId || mine"
                 @click="clear"
               >
                 清除筛选
@@ -987,26 +995,25 @@ watch(financeType, (value, previous) => {
                 {{ purchaseRowLabels(record as ProcurementOrderRow).supplier }}
               </RelatedLink>
             </div>
-            <div
-              v-else-if="column.key === 'product'"
-              class="order-cell"
-              :title="orderRowProducts(record.record).names.join('\n')"
-            >
-              <span class="order-ellipsis">{{
-                orderRowProducts(record.record).title
-              }}</span>
-              <span class="procurement-muted procurement-number">{{
-                orderRowProducts(record.record).quantity || '数量待核实'
-              }}</span>
-            </div>
             <div v-else-if="column.key === 'contract'" class="order-cell">
-              <RelatedLink :target="contractTarget(record.contractId)">
-                {{ purchaseRowLabels(record as ProcurementOrderRow).contract }}
-              </RelatedLink>
-              <span class="procurement-muted order-ellipsis">{{
-                record.customerName || '客户未注明'
-              }}</span>
+              <template v-if="record.contractId">
+                <RelatedLink :target="contractTarget(record.contractId)">
+                  {{
+                    purchaseRowLabels(record as ProcurementOrderRow).contract
+                  }}
+                </RelatedLink>
+                <span class="procurement-muted order-ellipsis">{{
+                  record.customerName || '客户未注明'
+                }}</span>
+              </template>
+              <span v-else class="procurement-muted">未关联合同</span>
             </div>
+            <span
+              v-else-if="column.key === 'date'"
+              class="procurement-number"
+              >{{
+                String(record.record.createdAt ?? '').slice(0, 10) || '—'
+              }}</span>
             <span
               v-else-if="column.key === 'amount'"
               class="procurement-number order-amount"
@@ -1016,40 +1023,21 @@ watch(financeType, (value, previous) => {
                   record.record.currency,
                 )
               }}</span>
-            <div v-else-if="column.key === 'progress'" class="order-cell">
-              <ol
-                class="row-steps"
-                :aria-label="orderRowSteps(record as ProcurementOrderRow).next"
-              >
-                <li
-                  v-for="step in orderRowSteps(record as ProcurementOrderRow)
-                    .steps"
-                  :key="step.key"
-                  :class="{ done: step.done, current: step.current }"
-                  :title="step.title"
-                >
-                  <i></i>{{ step.label }}
-                </li>
-              </ol>
-              <span
-                class="row-next"
-                :class="{
-                  late:
-                    orderRowDue(record as ProcurementOrderRow, today).tone ===
-                    'late',
-                }"
-                >{{ orderRowSteps(record as ProcurementOrderRow).next }}</span>
-            </div>
             <div
-              v-else-if="column.key === 'due'"
+              v-else-if="column.key === 'received'"
               class="order-cell"
               :class="`due-${orderRowDue(record as ProcurementOrderRow, today).tone}`"
             >
-              <span class="procurement-number">{{
-                orderRowDue(record as ProcurementOrderRow, today).main
-              }}</span>
+              <span>{{ receivedNames[record.receivedState ?? 'NONE'] }}</span>
               <small>{{
-                orderRowDue(record as ProcurementOrderRow, today).sub
+                record.receivedState === 'ALL'
+                  ? ''
+                  : [
+                      orderRowDue(record as ProcurementOrderRow, today).main,
+                      orderRowDue(record as ProcurementOrderRow, today).sub,
+                    ]
+                      .filter((part) => part && part !== '—')
+                      .join(' · ')
               }}</small>
             </div>
             <button
@@ -1081,22 +1069,27 @@ watch(financeType, (value, previous) => {
                 }}</span>
               <span v-else class="procurement-muted">已付清</span>
             </button>
-            <Button
-              v-else-if="column.key === 'action'"
-              :type="
-                orderRowSteps(record as ProcurementOrderRow).current
-                  ? 'primary'
-                  : 'default'
+            <Tag
+              v-else-if="column.key === 'operation'"
+              :color="
+                operationNames[
+                  (record.operationStatus ?? 'IN_PROGRESS') as Operation
+                ].color
               "
-              size="small"
-              ghost
-              @click="openRow(record as DocumentRow, 'details', $event)"
             >
               {{
-                orderRowSteps(record as ProcurementOrderRow).current
-                  ? '办理'
-                  : '查看'
+                operationNames[
+                  (record.operationStatus ?? 'IN_PROGRESS') as Operation
+                ].label
               }}
+            </Tag>
+            <Button
+              v-else-if="column.key === 'action'"
+              type="link"
+              size="small"
+              @click="openRow(record as DocumentRow, 'details', $event)"
+            >
+              查看
             </Button>
           </template>
         </Table>
@@ -1176,41 +1169,6 @@ watch(financeType, (value, previous) => {
             </Button>
           </header>
 
-          <section
-            v-if="execution"
-            class="order-steps"
-            aria-label="采购单执行步骤"
-          >
-            <ol>
-              <li
-                v-for="step in execution.steps"
-                :key="step.key"
-                :class="{
-                  done: step.done,
-                  current: execution.current?.key === step.key,
-                }"
-              >
-                <i></i><b>{{ step.title }}</b><span>{{ step.summary }}</span>
-              </li>
-            </ol>
-            <div
-              v-if="execution.current && nextHints[execution.current.key]"
-              class="order-next"
-            >
-              <span><b>下一步：</b>{{ nextHints[execution.current.key]?.text }}</span>
-              <Button
-                type="primary"
-                :disabled="
-                  childOpen ||
-                  (execution.current.key === 'payment' &&
-                    !hasPayableBalance(financeSummary.availableRequestAmount))
-                "
-                @click="goStep(execution.current.key)"
-              >
-                {{ nextHints[execution.current.key]?.button }}
-              </Button>
-            </div>
-          </section>
           <div class="order-summary">
             <div class="order-summary-item">
               <span class="procurement-muted">采购金额</span>
@@ -1223,7 +1181,7 @@ watch(financeType, (value, previous) => {
               <span class="procurement-muted">所属公司：{{ view.companyName || '待补齐' }}</span>
             </div>
             <div class="order-summary-item">
-              <span class="procurement-muted">货物进度</span>
+              <span class="procurement-muted">入库进度</span>
               <div v-for="group in arrivalProgress" :key="group.key">
                 <span v-if="group.known" class="procurement-number">已到 {{ group.arrived }} · 未到 {{ group.remaining }}
                   {{ group.unit }}</span>
@@ -1266,6 +1224,17 @@ watch(financeType, (value, previous) => {
                   )
                 }}</span>
             </div>
+            <button
+              v-if="templateState"
+              type="button"
+              class="order-summary-item order-summary-link"
+              :disabled="childOpen"
+              @click="tab = 'contract'"
+            >
+              <span class="procurement-muted">采购单模板</span>
+              <strong>{{ templateState.label }}</strong>
+              <span class="procurement-muted">{{ templateState.sub }}</span>
+            </button>
           </div>
           <Alert
             v-if="financeError"
@@ -1435,7 +1404,7 @@ watch(financeType, (value, previous) => {
                 @changed="financeChanged"
               />
             </TabPane>
-            <TabPane key="contract" tab="采购合同">
+            <TabPane key="contract" tab="采购单模板">
               <OrderContract
                 :view="view"
                 :saving="saving"
@@ -1640,57 +1609,6 @@ watch(financeType, (value, previous) => {
   font-weight: 600;
 }
 
-.row-steps {
-  display: flex;
-  gap: 4px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.row-steps li {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 1px 8px 1px 6px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground) / 75%);
-  background: hsl(var(--accent));
-  border-radius: 999px;
-}
-
-.row-steps li i {
-  width: 6px;
-  height: 6px;
-  background: hsl(var(--border));
-  border-radius: 50%;
-}
-
-.row-steps li.done {
-  color: color-mix(in srgb, hsl(var(--success)) 55%, hsl(var(--foreground)));
-  background: hsl(var(--success) / 14%);
-}
-
-.row-steps li.done i {
-  background: hsl(var(--success));
-}
-
-.row-steps li.current {
-  font-weight: 600;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
-}
-
-.row-steps li.current i {
-  background: hsl(var(--primary));
-}
-
-.row-next {
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.row-next.late,
 .due-late,
 .due-late small {
   color: hsl(var(--destructive));
@@ -1723,6 +1641,24 @@ watch(financeType, (value, previous) => {
 }
 
 .order-payment-link:hover {
+  color: hsl(var(--primary));
+}
+
+.order-summary-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.order-summary-link:hover strong {
   color: hsl(var(--primary));
 }
 
@@ -1867,69 +1803,6 @@ button.order-kpi:focus-visible {
   }
 }
 
-.order-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.order-steps ol {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.order-steps li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  font-size: 13px;
-}
-
-.order-steps li i {
-  height: 4px;
-  margin-bottom: 4px;
-  background: var(--procurement-line);
-  border-radius: 2px;
-}
-
-.order-steps li.done i {
-  background: hsl(var(--success));
-}
-
-.order-steps li.current i {
-  background: var(--procurement-accent);
-}
-
-.order-steps li.current b {
-  color: var(--procurement-accent);
-}
-
-.order-steps li span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  color: var(--procurement-secondary);
-  white-space: nowrap;
-}
-
-.order-next {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  font-size: 13px;
-  background: var(--procurement-selected);
-  border-radius: 8px;
-}
-
 .mine-toggle {
   padding: 3px 10px;
   font: inherit;
@@ -1952,15 +1825,9 @@ button.order-kpi:focus-visible {
   outline-offset: 2px;
 }
 
-@media (max-width: 760px) {
-  .order-steps ol {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 .order-summary {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 24px;
   padding: 20px;
   background: hsl(var(--accent));

@@ -246,6 +246,7 @@ vi.mock('ant-design-vue', () => {
     Space: block,
     TabPane: block,
     Tabs: block,
+    Tag: block,
     message: { success: vi.fn() },
     Table: defineComponent({
       props: {
@@ -572,7 +573,7 @@ describe('采购订单原页执行', () => {
     await settle();
     expect(button(host, '关闭执行详情').disabled).toBe(false);
   });
-  it('统计卡跟随我负责的筛选，在途卡筛选待到货，需要处理的采购单可直接打开', async () => {
+  it('统计卡跟随我负责的筛选，进行中卡按操作状态筛选，需要处理的采购单可直接打开', async () => {
     const { host } = await mount();
     expect(mocks.overview).toHaveBeenLastCalledWith(false);
     expect(host.textContent).toContain('最长超期 9 天');
@@ -580,13 +581,15 @@ describe('采购订单原页执行', () => {
     button(host, '只看我负责的').click();
     await settle();
     expect(mocks.overview).toHaveBeenLastCalledWith(true);
-    const open = [...host.querySelectorAll('button')].find((entry) =>
-      entry.textContent?.includes('在途采购单'),
+    const open = [...host.querySelectorAll('button')].find(
+      (entry) =>
+        entry.textContent?.includes('进行中') &&
+        entry.classList.contains('order-kpi'),
     )!;
     open.click();
     await settle();
     expect(mocks.list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ status: 'ORDERED', pageNo: 1 }),
+      expect.objectContaining({ operation: 'IN_PROGRESS', pageNo: 1 }),
     );
     const attention = [...host.querySelectorAll('button')].find((entry) =>
       entry.textContent?.includes('CG-OVERDUE'),

@@ -52,7 +52,7 @@ const editorOpen = ref(false);
 const editing = ref<ProcurementSetting>();
 const titles = {
   entities: '主体与签约资料',
-  templates: '采购合同模板',
+  templates: '采购单模板',
   clauses: '可选条款',
 };
 function typeFields() {
@@ -102,7 +102,7 @@ const definition = computed<ActionDefinition>(() => ({
   title: `${editing.value ? '维护' : '新建'}${titles[tab.value]}`,
   description:
     tab.value === 'entities'
-      ? '付款主体、签约公司和成本归属分别选择。签约资料按导出版本保存，不回写历史采购合同。'
+      ? '付款主体、签约公司和成本归属分别选择。签约资料按导出版本保存，不回写已生成的采购单。'
       : '保存已由业务确认的模板与条款正文。生成Word会冻结当时版本，修改后旧文件继续保留。',
   fields: [
     field('name', '名称'),
@@ -176,8 +176,8 @@ onMounted(load);
 </script>
 <template>
   <Page
-    :title="inMergedView ? undefined : '采购合同模板'"
-    description="统一维护签约与付款主体、合同模板及分组条款，历史采购合同保留原始版本。"
+    :title="inMergedView ? undefined : '采购单模板'"
+    description="统一维护签约与付款主体、采购单模板及分组条款，已生成的采购单保留原始版本。"
   >
     <Card>
       <Alert v-if="pageError" type="error" :message="pageError" /><Tabs

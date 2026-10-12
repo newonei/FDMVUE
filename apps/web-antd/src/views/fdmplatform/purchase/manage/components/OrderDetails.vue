@@ -121,7 +121,7 @@ const settingsMissing = computed(() => {
   if (!settingsLoaded.value || !canEdit.value) return [];
   return [
     entities.value.some((item) => item.active) ? '' : '签约公司',
-    templates.value.some((item) => item.active) ? '' : '合同模板',
+    templates.value.some((item) => item.active) ? '' : '采购单模板',
     clauses.value.some((item) => item.active) ? '' : '合同条款',
   ].filter(Boolean);
 });
@@ -229,7 +229,7 @@ function confirm() {
       type="warning"
       show-icon
       :message="`采购设置里还没有可用的${settingsMissing.join('、')}，下单资料确认不了`"
-      description="签约公司、合同模板和条款是所有采购单共用的，维护一次即可。"
+      description="签约公司、采购单模板和条款是所有采购单共用的，维护一次即可。"
     >
       <template #action>
         <Button size="small" type="primary" @click="openSettings">
@@ -302,7 +302,7 @@ function confirm() {
           />
         </Form.Item>
       </Form>
-      <h4 class="section-title">签约与合同条款</h4>
+      <h4 class="section-title">签约与条款</h4>
       <Form layout="vertical" class="order-fields">
         <Form.Item label="采购签约公司" required>
           <Select
@@ -323,7 +323,7 @@ function confirm() {
             placeholder="选择签约公司"
           />
         </Form.Item>
-        <Form.Item label="合同模板" required>
+        <Form.Item label="采购单模板" required>
           <Select
             :value="canEdit ? form.templateId : view.details.templateId"
             :disabled="!canEdit || saving"
@@ -403,7 +403,7 @@ function confirm() {
           不能直接撤回：{{ view.blockReasons.join('；') }}
         </span>
         <span v-else-if="canEdit" class="muted">
-          确认后就能在「采购合同」页签生成合同 Word 发给工厂盖章
+          确认后可在「采购单模板」页签生成采购单 Word 发给供应商
         </span>
       </Space>
     </Card>

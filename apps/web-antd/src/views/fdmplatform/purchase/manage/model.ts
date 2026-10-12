@@ -117,7 +117,7 @@ export function detailsChecklist(input: {
           ? `签约公司缺${entityGaps.join('、')}，请在采购设置里补齐`
           : undefined,
     },
-    { key: 'template', label: '合同模板', ok: !!input.template },
+    { key: 'template', label: '采购单模板', ok: !!input.template },
     {
       key: 'clauses',
       label: '必选条款',
@@ -294,133 +294,6 @@ export function downloadBlob(blob: Blob, name: string) {
   URL.revokeObjectURL(url);
 }
 
-export type OrderStepKey =
-  | 'arrival'
-  | 'contract'
-  | 'created'
-  | 'details'
-  | 'done'
-  | 'payment';
-export interface OrderStep {
-  key: OrderStepKey;
-  title: string;
-  summary: string;
-  done: boolean;
-}
-/**
- * The buyer's path for one native purchase order. Steps may finish out of order
- * (goods can arrive before the contract comes back), so each step is judged on its own
- * and the first unfinished one is the next thing to do.
- */
-export function orderSteps(
-  view: {
-    details: { deliveryDate?: string; status?: string };
-    exports?: unknown[];
-    files?: { kind?: string }[];
-    order: BusinessRecord;
-  },
-  finance: Record<string, unknown>,
-): { current?: OrderStep; steps: OrderStep[] } {
-  const status = String(view.order.status ?? '');
-  const cancelled = status === 'CANCELLED';
-  const arrival = orderArrivalProgress(view.order);
-  const arrived =
-    ['CLOSED', 'RECEIVED'].includes(status) ||
-    (arrival.length > 0 &&
-      arrival.every(
-        (group) => group.known && knownNumber(group.remaining)?.isZero(),
-      ));
-  const signed = (view.files ?? []).some((file) => file.kind === 'SIGNED');
-  const exported = (view.exports ?? []).length > 0;
-  const total = knownNumber(finance.orderAmount);
-  const unpaid = knownNumber(finance.unpaidAmount);
-  const paid = !!total?.gt(0) && !!unpaid && unpaid.lte(0);
-  const percent = orderPaymentProgress(finance);
-  const arrivedText = arrival
-    .filter((group) => group.known)
-    .map((group) => `${group.arrived} / ${group.ordered} ${group.unit}`)
-    .join('；');
-  const createdAt =
-    typeof view.order.createdAt === 'string'
-      ? view.order.createdAt.slice(0, 10)
-      : '';
-  let contractSummary = '导出采购合同盖章';
-  if (signed) contractSummary = '已上传签回合同';
-  else if (exported) contractSummary = '已导出，等待签回';
-  let paymentSummary = '申请付款';
-  if (paid) paymentSummary = '已付清';
-  else if (percent !== undefined)
-    paymentSummary = `已付 ${Math.round(percent)}%`;
-  const steps: OrderStep[] = [
-    {
-      key: 'created',
-      title: '已生成',
-      summary: createdAt ? `${createdAt} 下单` : '采购单已生成',
-      done: true,
-    },
-    {
-      key: 'details',
-      title: '下单资料',
-      summary:
-        view.details.status === 'CONFIRMED'
-          ? `已确认${view.details.deliveryDate ? ` · 交期 ${view.details.deliveryDate}` : ''}`
-          : '填联系人、签约公司和条款后确认',
-      done: view.details.status === 'CONFIRMED',
-    },
-    {
-      key: 'contract',
-      title: '合同签回',
-      summary: contractSummary,
-      done: signed,
-    },
-    {
-      key: 'arrival',
-      title: '入库',
-      summary: arrived
-        ? '已全部到货'
-        : arrivedText || '货到后在采购单上登记入库',
-      done: arrived,
-    },
-    {
-      key: 'payment',
-      title: '付款',
-      summary: paymentSummary,
-      done: paid,
-    },
-    {
-      key: 'done',
-      title: '完成',
-      summary: cancelled ? '采购单已取消' : '全部到货并付清',
-      done: cancelled || (arrived && paid),
-    },
-  ];
-  const current = cancelled ? undefined : steps.find((step) => !step.done);
-  return { current, steps };
-}
-
-/** 「EVA瑜伽柱 · 黑色 等 3 项」 and the summed quantity per unit for the list. */
-export function orderRowProducts(order: BusinessRecord) {
-  const lines = Array.isArray(order.lines)
-    ? (order.lines as BusinessRecord[])
-    : [];
-  const name = (line: BusinessRecord) => {
-    const snapshot = line.specificationSnapshot as
-      | Record<string, unknown>
-      | undefined;
-    return String(snapshot?.skuName ?? line.skuName ?? '').trim();
-  };
-  const first = lines.map((line) => name(line)).find(Boolean) ?? '产品未注明';
-  const quantity = orderArrivalProgress(order)
-    .filter((group) => group.known)
-    .map((group) => `${group.ordered} ${group.unit}`)
-    .join(' + ');
-  return {
-    title: lines.length > 1 ? `${first} 等 ${lines.length} 项` : first,
-    names: lines.map((line) => name(line)).filter(Boolean),
-    quantity,
-  };
-}
-
 export type DueTone = 'done' | 'late' | 'none' | 'soon';
 /** Countdown to the delivery date; finished or cancelled orders stop counting. */
 export function orderRowDue(
@@ -449,56 +322,5 @@ export function orderRowDue(
     main: row.dueDate.slice(5),
     sub: `还剩 ${days} 天`,
     tone: days <= 3 ? 'soon' : 'none',
-  };
-}
-
-/** List-row version of the drawer's steps: 资料 · 合同 · 到货 · 付款. */
-export function orderRowSteps(row: {
-  details?: { deliveryDate?: string; status?: string };
-  orderAmount?: string;
-  paidAmount?: string;
-  record: BusinessRecord;
-  signed?: boolean;
-  unpaidAmount?: string;
-}) {
-  const { current, steps } = orderSteps(
-    {
-      details: row.details ?? {},
-      files: row.signed ? [{ kind: 'SIGNED' }] : [],
-      order: row.record,
-    },
-    {
-      orderAmount: row.orderAmount,
-      paidAmount: row.paidAmount,
-      unpaidAmount: row.unpaidAmount,
-    },
-  );
-  const short: Partial<Record<OrderStepKey, string>> = {
-    details: '资料',
-    contract: '合同',
-    arrival: '入库',
-    payment: '付款',
-  };
-  const next: Partial<Record<OrderStepKey, string>> = {
-    details: '待确认下单资料',
-    contract: '待签回合同',
-    arrival: '待入库',
-    payment: '待付款',
-  };
-  const cancelled = String(row.record.status ?? '') === 'CANCELLED';
-  let nextText = current ? (next[current.key] ?? current.title) : '已完成';
-  if (cancelled) nextText = '已取消';
-  return {
-    current: current?.key,
-    next: nextText,
-    steps: steps
-      .filter((step) => short[step.key])
-      .map((step) => ({
-        key: step.key,
-        label: short[step.key] ?? step.title,
-        done: step.done,
-        current: step.key === current?.key,
-        title: `${step.title}：${step.summary}`,
-      })),
   };
 }

@@ -192,6 +192,10 @@ export interface ProcurementOrderRow extends DocumentRow {
   signed?: boolean;
   /** 下单资料交货日期，没填时取报价承诺到货日。 */
   dueDate?: string;
+  /** NONE 未入库 / PARTIAL 部分入库 / ALL 已入齐 */
+  receivedState?: 'ALL' | 'NONE' | 'PARTIAL';
+  /** IN_PROGRESS 进行中 / COMPLETED 已完成（入库齐且付清）/ ENDED 已结束 */
+  operationStatus?: 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
   ownerUserIds?: number[];
   details?: ProcurementOrderView['details'];
   orderAmount?: string;
@@ -202,6 +206,7 @@ export function getProcurementOrders(params: {
   contractId?: string;
   keyword?: string;
   mine?: boolean;
+  operation?: 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
   pageNo: number;
   pageSize: number;
   pendingCompletion?: boolean;
@@ -221,6 +226,9 @@ export interface ProcurementOrdersOverview {
   maxOverdueDays: number;
   unsigned: number;
   unpaid: number;
+  /** 操作状态：下属单据未全部办完 / 已全部办完 */
+  inProgress?: number;
+  completed?: number;
   asOf: string;
   openAmount: Record<string, Decimal>;
   unpaidAmount: Record<string, Decimal>;

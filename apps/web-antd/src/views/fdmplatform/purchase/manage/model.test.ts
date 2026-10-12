@@ -13,9 +13,6 @@ import {
   onlyChoice,
   orderDetailsPayload,
   orderRowDue,
-  orderRowProducts,
-  orderRowSteps,
-  orderSteps,
   preferredContact,
   purchaseRowLabels,
   snapshotShape,
@@ -143,83 +140,6 @@ describe('采购下单资料', () => {
   });
 });
 
-describe('orderSteps', () => {
-  const order = (overrides: Record<string, unknown> = {}) => ({
-    id: 'po',
-    status: 'ORDERED',
-    createdAt: '2026-10-08T03:00:00Z',
-    lines: [
-      {
-        quantity: 10,
-        arrivedQuantity: 0,
-        cancelledQuantity: 0,
-        returnedQuantity: 0,
-        specificationSnapshot: { unit: '件' },
-      },
-    ],
-    ...overrides,
-  });
-  it('starts with the order details and walks to payment', () => {
-    const fresh = orderSteps(
-      { details: { status: 'DRAFT' }, files: [], exports: [], order: order() },
-      { orderAmount: '100', paidAmount: '0', unpaidAmount: '100' },
-    );
-    expect(fresh.current?.key).toBe('details');
-    expect(fresh.steps.map((step) => step.done)).toEqual([
-      true,
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
-    const signed = orderSteps(
-      {
-        details: { status: 'CONFIRMED', deliveryDate: '2026-10-20' },
-        files: [{ kind: 'SIGNED' }],
-        exports: [{}],
-        order: order(),
-      },
-      { orderAmount: '100', paidAmount: '30', unpaidAmount: '70' },
-    );
-    expect(signed.current?.key).toBe('arrival');
-    expect(signed.steps[1]?.summary).toBe('已确认 · 交期 2026-10-20');
-    expect(signed.steps[3]?.summary).toBe('0 / 10 件');
-    expect(signed.steps[4]?.summary).toBe('已付 30%');
-  });
-  it('finishes when everything arrived and is paid, and stops for cancelled orders', () => {
-    const finished = orderSteps(
-      {
-        details: { status: 'CONFIRMED' },
-        files: [{ kind: 'SIGNED' }],
-        order: order({ status: 'RECEIVED' }),
-      },
-      { orderAmount: '100', paidAmount: '100', unpaidAmount: '0' },
-    );
-    expect(finished.current).toBeUndefined();
-    expect(finished.steps.every((step) => step.done)).toBe(true);
-    const cancelled = orderSteps(
-      { details: { status: 'DRAFT' }, order: order({ status: 'CANCELLED' }) },
-      {},
-    );
-    expect(cancelled.current).toBeUndefined();
-    expect(cancelled.steps.at(-1)?.summary).toBe('采购单已取消');
-  });
-  it('reports an exported but unsigned contract', () => {
-    const steps = orderSteps(
-      {
-        details: { status: 'CONFIRMED' },
-        files: [{ kind: 'EXPORT' }],
-        exports: [{}],
-        order: order(),
-      },
-      {},
-    );
-    expect(steps.current?.key).toBe('contract');
-    expect(steps.current?.summary).toBe('已导出，等待签回');
-  });
-});
-
 describe('下单资料确认前检查', () => {
   const template = {
     ...clause('t', ''),
@@ -286,13 +206,6 @@ describe('采购单列表行', () => {
       },
     ],
   });
-  it('names the first product and sums quantities per unit', () => {
-    expect(orderRowProducts(record())).toEqual({
-      title: 'TPE瑜伽垫 等 2 项',
-      names: ['TPE瑜伽垫', 'PU瑜伽垫'],
-      quantity: '1200 条',
-    });
-  });
   it('counts down to the delivery date and stops once everything arrived', () => {
     expect(
       orderRowDue({ dueDate: '2026-10-11', record: record() }, '2026-10-12'),
@@ -308,29 +221,5 @@ describe('采购单列表行', () => {
         '2026-10-12',
       ).sub,
     ).toBe('已到齐');
-  });
-  it('shows the four buyer steps and what comes next', () => {
-    const draft = orderRowSteps({
-      details: { status: 'DRAFT' },
-      record: record(),
-      orderAmount: '100',
-      unpaidAmount: '100',
-    });
-    expect(draft.steps.map((step) => step.label)).toEqual([
-      '资料',
-      '合同',
-      '入库',
-      '付款',
-    ]);
-    expect(draft.next).toBe('待确认下单资料');
-    const signed = orderRowSteps({
-      details: { status: 'CONFIRMED' },
-      signed: true,
-      record: record(),
-      orderAmount: '100',
-      unpaidAmount: '100',
-    });
-    expect(signed.next).toBe('待入库');
-    expect(signed.steps.filter((step) => step.done)).toHaveLength(2);
   });
 });

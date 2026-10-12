@@ -56,7 +56,7 @@ const columns = [
   { title: '说明', dataIndex: 'message', key: 'message', width: 235 },
 ];
 const statusText: Record<ProductImportRow['status'], string> = {
-  ERROR: '需修改',
+  ERROR: '导入失败',
   IMPORTED: '已导入',
   READY: '可导入',
   SKIPPED: '已跳过',
@@ -67,6 +67,31 @@ const statusColor: Record<ProductImportRow['status'], string> = {
   READY: 'blue',
   SKIPPED: 'default',
 };
+
+const failedRows = computed(() =>
+  (result.value?.rows ?? []).filter((row) => row.status === 'ERROR'),
+);
+/** 失败清单：行号、编号、名称、失败原因，便于在原 Excel 里逐行修改。 */
+function downloadFailures() {
+  const quote = (value: unknown) =>
+    `"${String(value ?? '').replaceAll('"', '""')}"`;
+  const lines = [
+    ['Excel 行', '产品编号', '产品名称', '失败原因']
+      .map((cell) => quote(cell))
+      .join(','),
+    ...failedRows.value.map((row) =>
+      [row.rowNumber, row.code, row.name, row.message]
+        .map((cell) => quote(cell))
+        .join(','),
+    ),
+  ];
+  downloadFileFromBlobPart({
+    source: new Blob([`\uFEFF${lines.join('\n')}`], {
+      type: 'text/csv;charset=utf-8',
+    }),
+    fileName: '产品导入失败清单.csv',
+  });
+}
 
 function clearFile() {
   if (busy.value) return;
@@ -229,7 +254,7 @@ async function downloadTemplate() {
         v-if="!result"
         type="info"
         show-icon
-        message="已有产品编号会跳过；有效行将新增为产品档案。"
+        message="产品编号必须唯一，名称 + 型号 + 规格三项不能同时和已有产品或文件里其他行相同；不符合的行导入失败并写明原因，其余行新增为产品档案。"
         description="产品状态为空或正常时启用，停售或下架时停用。型号、克重、纹路、条码等补充信息保存在备注中；库存设置仅保留说明。请先删除模板中的示例行。"
       />
       <template v-if="result">
@@ -237,7 +262,7 @@ async function downloadTemplate() {
           v-if="completed"
           type="success"
           show-icon
-          :message="`导入完成：新增 ${result.createdCount} 个产品，跳过 ${result.skippedCount} 行，需修改 ${result.errorCount} 行。`"
+          :message="`导入完成：新增 ${result.createdCount} 个产品，导入失败 ${result.errorCount} 行。`"
         />
         <Alert
           v-for="(warning, index) in result.warnings"
@@ -255,16 +280,22 @@ async function downloadTemplate() {
               completed ? result.createdCount : result.readyCount
             }}</strong>
           </div>
-          <div>
-            <span>重复 / 已跳过</span><strong>{{ result.skippedCount }}</strong>
-          </div>
           <div class="result-error">
-            <span>需修改</span><strong>{{ result.errorCount }}</strong>
+            <span>导入失败</span><strong>{{ result.errorCount }}</strong>
           </div>
         </div>
         <div class="import-preview-heading">
           <strong>{{ completed ? '导入结果' : '数据预览' }}</strong>
-          <Checkbox v-model:checked="onlyIssues">仅看跳过与问题行</Checkbox>
+          <span>
+            <Checkbox v-model:checked="onlyIssues">仅看失败行</Checkbox>
+            <Button
+              v-if="failedRows.length > 0"
+              size="small"
+              @click="downloadFailures"
+            >
+              下载失败清单（{{ failedRows.length }} 行）
+            </Button>
+          </span>
         </div>
         <Table
           :data-source="rows"
@@ -307,7 +338,8 @@ async function downloadTemplate() {
           </template>
         </Table>
         <p class="import-muted">
-          行号对应原 Excel，修改问题后可再次上传；已导入的产品会自动跳过。
+          行号对应原
+          Excel，按失败原因修改后可再次上传；已导入的产品再次上传会因编号已存在而失败，不会重复新增。
         </p>
       </template>
     </div>
@@ -426,7 +458,7 @@ async function downloadTemplate() {
 
 .import-results {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 

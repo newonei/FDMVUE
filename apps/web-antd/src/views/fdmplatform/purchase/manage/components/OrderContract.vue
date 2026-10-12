@@ -73,8 +73,8 @@ function upload(event: Event) {
       v-if="!confirmed"
       type="warning"
       show-icon
-      message="下单资料还没确认，暂时不能生成合同"
-      description="签约公司、合同模板和条款在「商品与到货」页签的下单资料里填写，确认后回到这里生成 Word。"
+      message="下单资料还没确认，暂时不能生成采购单"
+      description="签约公司、采购单模板和条款在「商品与到货」页签的下单资料里填写，确认后回到这里生成 Word。"
     >
       <template #action>
         <Button size="small" type="primary" @click="emit('details')">
@@ -82,10 +82,10 @@ function upload(event: Event) {
         </Button>
       </template>
     </Alert>
-    <Card title="合同签回" size="small">
+    <Card title="采购单模板" size="small">
       <ol class="contract-steps">
         <li :class="{ done: view.exports.length > 0 }">
-          <b>1. 生成合同 Word</b>
+          <b>1. 生成采购单 Word</b>
           <span class="muted">按已确认的下单资料生成，可在 Word 里微调后发给工厂盖章。</span>
           <Button
             v-if="view.allowedActions.includes('EXPORT_CONTRACT')"
@@ -93,11 +93,11 @@ function upload(event: Event) {
             :loading="saving"
             @click="emit('action', 'EXPORT_CONTRACT')"
           >
-            {{ view.exports.length > 0 ? '重新生成 Word' : '生成合同 Word' }}
+            {{ view.exports.length > 0 ? '重新生成 Word' : '生成采购单 Word' }}
           </Button>
         </li>
         <li :class="{ done: signed }">
-          <b>2. 上传工厂盖章件</b>
+          <b>2. 上传供应商盖章件（选填）</b>
           <span class="muted">支持 PDF、Word 或照片（jpg / png）。</span>
           <Space v-if="view.allowedActions.includes('UPLOAD_SIGNED')" wrap>
             <Select
@@ -180,7 +180,7 @@ function upload(event: Event) {
         <template #emptyText>还没有生成过合同</template>
         <template #bodyCell="{ column, record }">
           <span v-if="column.key === 'kind'">{{
-            record.kind === 'SIGNED' ? '工厂盖章件' : '合同 Word'
+            record.kind === 'SIGNED' ? '供应商盖章件' : '采购单 Word'
           }}</span><span v-else-if="column.key === 'createdAt'">{{
             formatDate(
               record.createdAt == null ? undefined : String(record.createdAt),
