@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
     defaultFactoryId: 1,
     factories: [{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }],
   }),
-  push: vi.fn(),
+  push: vi.fn().mockResolvedValue(undefined),
   render: vi.fn(),
   setFactory: vi.fn(),
 }));
@@ -22,7 +22,9 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,
 }));
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }));
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: mocks.push, resolve: () => ({ href: '/gongchang/workbench' }) }),
+}));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({ setup: (_, ctx) => () => h('main', ctx.slots.default?.()) }),
 }));
@@ -71,7 +73,10 @@ const dashboard: Api.Dashboard = {
   today: {
     defectTotal: 0,
     goodTotal: 0,
-    lanes: [],
+    lanes: [
+      { defect: 0, done: 120, label: '开片', outputLabel: '片材', people: ['张三'], plan: 400, process: 'SLICE', stock: 236, unit: '片', wip: 1 },
+      { defect: 0, done: 0, label: '压花', outputLabel: '已压花片材', people: [], plan: 0, process: 'EMBOSS', stock: 0, unit: '片', wip: 0 },
+    ],
     pendingRecords: 3,
     shortages: [{ available: 0, label: '贴合', planned: 500, process: 'LAMINATE', sourceLabel: '已立切片材', unit: '片' }],
     staleOrders: [],
@@ -120,9 +125,13 @@ describe('factory dashboard', () => {
     expect(text).toContain('贴合明天可能缺料');
     expect(text).toContain('张三');
     expect(text).toContain('¥141');
+    expect(text).toContain('今天各工序');
+    expect(text).toContain('实际 120 / 计划 400 片');
+    expect(text).toContain('还有 1 道工序今天没排也没开工');
+    expect(text).toContain('手机扫码进工人端');
     expect(mocks.render).toHaveBeenCalled();
 
     [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('去人员岗位'))!.click();
-    expect(mocks.push).toHaveBeenCalledWith('/gongchang/worker');
+    expect(mocks.push).toHaveBeenCalledWith({ name: 'FdmGongchangWorker' });
   });
 });

@@ -15,8 +15,9 @@ import { specText } from '../shared';
 /**
  * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量。
  * 产品规格以下单这一刻的产品档案为准，之后产品改了不影响这张单。
+ * copyFrom：从「我下的单」复制（例如被退回后改一改重新提交），带出工厂、用途、备注和产品数量，交期重新选。
  */
-const props = defineProps<{ factories: Api.Factory[] }>();
+const props = defineProps<{ copyFrom?: Api.Order; factories: Api.Factory[] }>();
 const emit = defineEmits<{ created: [id: number] }>();
 const open = defineModel<boolean>('open', { required: true });
 
@@ -43,13 +44,34 @@ const error = ref('');
 const factoryOptions = computed(() => props.factories.map((f) => ({ label: f.name, value: f.id })));
 const pickedIds = computed(() => new Set(lines.value.map((l) => l.product.id)));
 
+function fromSnapshot(i: Api.Item): Api.Product {
+  return {
+    code: i.productCode,
+    color: i.color,
+    displayName: i.productName,
+    id: i.productId,
+    material: i.material,
+    name: i.productName,
+    packaging: i.packaging,
+    printing: i.printing,
+    size: i.size,
+    specification: i.specification,
+    unit: i.unit,
+  };
+}
+
 watch(open, (value) => {
   if (!value) return;
-  factoryId.value = props.factories.length === 1 ? props.factories[0]?.id : undefined;
+  const src = props.copyFrom;
+  factoryId.value = src?.factoryId ?? (props.factories.length === 1 ? props.factories[0]?.id : undefined);
   requiredDate.value = undefined;
-  purpose.value = '';
-  remark.value = '';
-  lines.value = [];
+  purpose.value = src?.purpose ?? '';
+  remark.value = src?.remark ?? '';
+  lines.value = (src?.items ?? []).map((i) => ({
+    product: fromSnapshot(i),
+    quantity: Number(i.quantity) || null,
+    remark: i.remark ?? '',
+  }));
   keyword.value = '';
   results.value = [];
   searched.value = false;
@@ -141,7 +163,7 @@ async function submit() {
     :confirm-loading="submitting"
     :width="860"
     ok-text="提交给工厂"
-    title="向工厂下单"
+    :title="copyFrom ? `复制下单（来自 ${copyFrom.orderNo}）` : '向工厂下单'"
     @ok="submit"
   >
     <div class="flex flex-col gap-4 text-sm">
@@ -217,6 +239,9 @@ async function submit() {
         备注
         <Input.TextArea id="po-remark" v-model:value="remark" :auto-size="{ minRows: 2, maxRows: 4 }" :maxlength="500" placeholder="选填，例如 包装要求、优先级" />
       </label>
+      <p v-if="copyFrom" class="m-0 text-xs text-muted-foreground">
+        产品按产品中心当前的档案重新核对；已经停用的产品提交时会提示，请删掉换一个。
+      </p>
       <p v-if="error" class="m-0 text-sm text-destructive">{{ error }}</p>
     </div>
   </Modal>

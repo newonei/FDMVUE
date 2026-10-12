@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import type { FdmgongchangProductionOrderApi as OrderApi } from '#/api/fdmgongchang/production-order';
+
+import { computed, onMounted, ref } from 'vue';
+
+import { getWorkbenchProductionOrders } from '#/api/fdmgongchang/workbench';
 
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { stageOf, useJob } from '../use-job';
@@ -11,6 +15,35 @@ const job = useJob();
 const submitting = ref(false);
 const labels = computed(() => makeLabels(job.options));
 const source = computed(() => stageOf(job, job.sourceStage));
+
+/** 不按排单开包装单时，选这批是做哪张工厂订单；按排单开工的由排单任务自动关联。 */
+const askOrder = computed(() => !job.task && job.process?.outputStage === 'PACKED');
+const openOrders = ref<OrderApi.Order[]>([]);
+const orderChoices = computed(() =>
+  openOrders.value.flatMap((o) =>
+    o.items
+      .filter((i) => Number(i.quantity) > Number(i.completedQuantity))
+      .map((i) => ({
+        id: i.id,
+        label: i.productName,
+        left: `还差 ${formatQty(Number(i.quantity) - Number(i.completedQuantity))} ${i.unit ?? ''}`,
+        orderNo: o.orderNo,
+        party: o.requesterDeptName || o.requesterName || '',
+      })),
+  ),
+);
+onMounted(async () => {
+  if (!askOrder.value) return;
+  try {
+    openOrders.value = await getWorkbenchProductionOrders();
+  } catch {
+    openOrders.value = [];
+  }
+});
+function choose(c?: { id: number; label: string; orderNo: string }) {
+  job.productionItem = c ? { id: c.id, label: c.label, orderNo: c.orderNo } : undefined;
+}
+const orderText = computed(() => job.task?.contractCode || job.productionItem?.orderNo || '备货');
 
 async function issue() {
   submitting.value = true;
@@ -37,9 +70,32 @@ async function issue() {
         <div class="grid grid-cols-2 gap-2.5 text-sm">
           <div class="flex flex-col"><span class="text-muted-foreground">批次</span><b>{{ p.stock.batchNo }}</b></div>
           <div class="flex flex-col"><span class="text-muted-foreground">领完还剩</span><b>{{ formatQty((toNumber(p.stock.quantity) ?? 0) - p.qty) }} {{ source?.unit }}</b></div>
-          <div class="flex flex-col"><span class="text-muted-foreground">做的订单</span><b>{{ job.task?.contractCode || '备货' }}</b></div>
+          <div class="flex flex-col"><span class="text-muted-foreground">做的订单</span><b>{{ orderText }}</b></div>
           <div class="flex flex-col"><span class="text-muted-foreground">做的人</span><b>{{ job.my?.userName }}{{ job.my?.team ? `（${job.my.team}）` : '' }}</b></div>
         </div>
+      </section>
+      <section v-if="askOrder && orderChoices.length > 0" class="flex flex-col gap-2 rounded-2xl bg-card p-[18px] shadow-sm">
+        <span class="text-base font-bold">这批是做哪张工厂订单？</span>
+        <span class="text-sm text-muted-foreground">选了以后，报的好的数量会自动算进这张单的完成数量</span>
+        <button
+          :class="!job.productionItem ? 'border-primary bg-primary/10' : 'border-border'"
+          class="flex min-h-12 items-center rounded-xl border-2 px-3 text-left text-base"
+          type="button"
+          @click="choose()"
+        >
+          备货，不算哪张单
+        </button>
+        <button
+          v-for="c in orderChoices"
+          :key="c.id"
+          :class="job.productionItem?.id === c.id ? 'border-primary bg-primary/10' : 'border-border'"
+          class="flex min-h-14 flex-col items-start justify-center rounded-xl border-2 px-3 py-2 text-left"
+          type="button"
+          @click="choose(c)"
+        >
+          <span class="text-base font-bold">{{ c.label }}</span>
+          <span class="text-sm text-muted-foreground">{{ c.orderNo }} · {{ c.party }} · {{ c.left }}</span>
+        </button>
       </section>
       <p class="m-0 text-sm leading-relaxed text-muted-foreground">
         领料后这些料就从{{ source?.label }}库存扣掉，算到你「手上在做的」里。做完回来点「做完了，报数量」。

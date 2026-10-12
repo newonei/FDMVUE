@@ -15,6 +15,7 @@ import {
 } from '#/api/fdmgongchang/stage-stock';
 
 import FactorySwitch from '../shared/factory-switch.vue';
+import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
 import OrderDrawer from './modules/order-drawer.vue';
 import OrderPanel from './modules/order-panel.vue';
@@ -24,7 +25,6 @@ import SettingPanel from './modules/setting-panel.vue';
 import ShipmentDrawer from './modules/shipment-drawer.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
-import TodayPanel from './modules/today-panel.vue';
 import TradePanel from './modules/trade-panel.vue';
 import TxnPanel from './modules/txn-panel.vue';
 
@@ -50,7 +50,6 @@ type TabKey =
   | 'receiving'
   | 'settings'
   | 'stock'
-  | 'today'
   | 'trade'
   | 'txns';
 const TAB_KEYS = new Set<TabKey>([
@@ -58,13 +57,12 @@ const TAB_KEYS = new Set<TabKey>([
   'receiving',
   'settings',
   'stock',
-  'today',
   'trade',
   'txns',
 ]);
 const route = useRoute();
 const router = useRouter();
-const activeTab = ref<TabKey>('today');
+const activeTab = ref<TabKey>('stock');
 /** 手机上打开时提示去工人端。 */
 const onPhone = typeof window !== 'undefined' && window.innerWidth < 768;
 const tradePending = ref(0);
@@ -240,7 +238,7 @@ async function onSettingSaved() {
         type="info"
       >
         <template #action>
-          <Button size="small" type="primary" @click="router.push('/gongchang/workbench')">
+          <Button size="small" type="primary" @click="router.push(FACTORY_ROUTES.workbench)">
             去工作台
           </Button>
         </template>
@@ -291,9 +289,6 @@ async function onSettingSaved() {
           class="min-w-0 flex-1 rounded-lg border border-border bg-card px-4 pb-4"
         >
           <Tabs v-model:active-key="activeTab">
-            <Tabs.TabPane key="today" tab="今日生产">
-              <TodayPanel :refresh-key="refreshKey" @orders="activeTab = 'orders'" />
-            </Tabs.TabPane>
             <Tabs.TabPane key="stock" tab="库存">
               <StockPanel
                 :options="options"

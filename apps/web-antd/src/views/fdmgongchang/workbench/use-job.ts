@@ -41,6 +41,8 @@ export function createJob() {
     picks: [] as Pick[],
     pieces: [] as PieceLine[],
     process: undefined as Api.Process | undefined,
+    /** 不按排单开包装单时，这批是做哪张工厂订单（明细编号）；包装报数量时累加到它的完成数量。 */
+    productionItem: undefined as undefined | { id: number; label: string; orderNo: string },
     result: { amount: 0, good: 0, unit: '' },
     returns: {} as Record<number, null | number>,
     sourceStage: '',

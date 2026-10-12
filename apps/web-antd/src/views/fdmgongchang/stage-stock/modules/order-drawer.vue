@@ -22,6 +22,7 @@ import {
   Radio,
   Select,
   Spin,
+  Steps,
   Table,
 } from 'ant-design-vue';
 
@@ -407,6 +408,7 @@ watch(open, async (value) => {
   if (!value) return;
   resetPicking();
   finish.value = true;
+  step.value = 'input';
   reportFinish.value = true;
   Object.assign(meta, { remark: '' });
   operatorUserId.value = undefined;
@@ -616,7 +618,7 @@ onBeforeUnmount(() => {
 
 // ===== 提交 =====
 
-function localErrors() {
+function inputErrors() {
   const problems: string[] = [];
   if (props.mode === 'create') {
     if (inputs.value.length === 0) problems.push('请至少填写一行领用数量。');
@@ -635,13 +637,23 @@ function localErrors() {
         );
     }
   }
+  return problems;
+}
+
+function operatorErrors() {
+  const problems: string[] = [];
   if (props.mode === 'create' && operators.value.length === 0) {
     problems.push(
-      `还没有人分配「${processOption.value?.label ?? ''}」岗位，请先到 工厂部门 → 人员岗位 里分配。`,
+      `还没有人分配「${processOption.value?.label ?? ''}」岗位，请先到 工厂部门 → 人员与工资 → 人员岗位 里分配。`,
     );
   } else if (props.mode === 'create' && !operatorUserId.value) {
     problems.push('请选择操作人。');
   }
+  return problems;
+}
+
+function outputStepErrors() {
+  const problems: string[] = [];
   if (showOutputs.value) {
     const outputErrors = validateOutputs(
       processCode.value,
@@ -659,6 +671,56 @@ function localErrors() {
   }
   return problems;
 }
+
+function localErrors() {
+  return [...inputErrors(), ...operatorErrors(), ...outputStepErrors()];
+}
+
+// ===== 分步填写（只用于新建）：工序与领料 → 产出与计件（领料同时报产出时）→ 其他信息 =====
+type StepKey = 'input' | 'other' | 'output';
+const step = ref<StepKey>('input');
+const steps = computed<Array<{ key: StepKey; title: string }>>(() => [
+  { key: 'input', title: '工序与领料' },
+  ...(finish.value ? [{ key: 'output' as const, title: '产出与计件' }] : []),
+  { key: 'other', title: '关联与操作人' },
+]);
+const stepIndex = computed(() => Math.max(0, steps.value.findIndex((s) => s.key === step.value)));
+const isLastStep = computed(() => stepIndex.value === steps.value.length - 1);
+/** 新建时只显示当前这一步；报产出仍然一屏填完。 */
+const shown = (key: StepKey) => props.mode !== 'create' || step.value === key;
+
+function stepErrors(key: StepKey) {
+  if (key === 'input') return inputErrors();
+  if (key === 'output') return outputStepErrors();
+  return operatorErrors();
+}
+
+function nextStep() {
+  errors.value = stepErrors(step.value);
+  if (errors.value.length > 0) return;
+  const next = steps.value[stepIndex.value + 1];
+  if (next) step.value = next.key;
+}
+
+function prevStep() {
+  errors.value = [];
+  const prev = steps.value[stepIndex.value - 1];
+  if (prev) step.value = prev.key;
+}
+
+/** 点步骤条只能回到前面的步骤，往后走要先通过当前这一步的检查。 */
+function gotoStep(index: number) {
+  if (index < stepIndex.value) {
+    errors.value = [];
+    step.value = steps.value[index]!.key;
+  } else if (index === stepIndex.value + 1) {
+    nextStep();
+  }
+}
+
+watch(finish, () => {
+  if (!steps.value.some((s) => s.key === step.value)) step.value = 'input';
+});
 
 function outputPayload(): Api.OrderOutput[] {
   return outputs.value
@@ -767,8 +829,15 @@ watch(processCode, warnNoPatterns);
   >
     <Spin :spinning="orderLoading">
       <div class="flex flex-col gap-6">
+        <Steps
+          v-if="mode === 'create'"
+          :current="stepIndex"
+          :items="steps.map((s) => ({ title: s.title }))"
+          size="small"
+          @change="gotoStep"
+        />
         <!-- 1 选择工序 -->
-        <section v-if="mode === 'create'" class="flex flex-col gap-2">
+        <section v-if="mode === 'create'" v-show="shown('input')" class="flex flex-col gap-2">
           <h3 class="m-0 flex items-center gap-2 text-sm font-semibold">
             <span
               class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
@@ -796,7 +865,7 @@ watch(processCode, warnNoPatterns);
         </section>
 
         <!-- 2 领料 -->
-        <section class="flex flex-col gap-2">
+        <section v-show="shown('input')" class="flex flex-col gap-2">
           <h3
             class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold"
           >
@@ -980,7 +1049,7 @@ watch(processCode, warnNoPatterns);
         </section>
 
         <!-- 3 产出 -->
-        <section v-if="showOutputs" class="flex flex-col gap-2">
+        <section v-if="showOutputs" v-show="shown('output')" class="flex flex-col gap-2">
           <h3
             class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold"
           >
@@ -1112,7 +1181,7 @@ watch(processCode, warnNoPatterns);
         </section>
 
         <!-- 计件 -->
-        <section v-if="showOutputs && pieceMatchesLoaded" class="flex flex-col gap-2">
+        <section v-if="showOutputs && pieceMatchesLoaded" v-show="shown('output')" class="flex flex-col gap-2">
           <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
             计件
             <span class="text-xs font-normal text-muted-foreground">按产出规格推荐计价项目；两人各算全量的（如压花送片、接片）各填一行</span>
@@ -1168,7 +1237,7 @@ watch(processCode, warnNoPatterns);
         </section>
 
         <!-- 4 其他信息 -->
-        <section v-if="mode === 'create'" class="flex flex-col gap-2">
+        <section v-if="mode === 'create'" v-show="shown('other')" class="flex flex-col gap-2">
           <h3 class="m-0 flex items-center gap-2 text-sm font-semibold">
             <span
               class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary"
@@ -1297,7 +1366,11 @@ watch(processCode, warnNoPatterns);
           <span class="text-sm tabular-nums">{{ summaryText }}</span>
           <div class="flex gap-2">
             <Button @click="open = false">取消</Button>
-            <Button :loading="submitting" type="primary" @click="submit">
+            <Button v-if="mode === 'create' && stepIndex > 0" @click="prevStep">上一步</Button>
+            <Button v-if="mode === 'create' && !isLastStep" type="primary" @click="nextStep">
+              下一步：{{ steps[stepIndex + 1]?.title }}
+            </Button>
+            <Button v-else :loading="submitting" type="primary" @click="submit">
               {{
                 mode === 'report'
                   ? reportFinish

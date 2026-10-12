@@ -48,6 +48,17 @@ const pageNo = ref(1);
 const pageSize = ref(20);
 
 const createOpen = ref(false);
+const copyFrom = ref<Api.Order>();
+
+function openCreate(from?: Api.Order) {
+  copyFrom.value = from;
+  createOpen.value = true;
+}
+
+function copyOrder(order: Api.Order) {
+  drawerOpen.value = false;
+  openCreate(order);
+}
 const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
@@ -153,7 +164,7 @@ const columns = computed(() => [
   { key: 'progress', title: '完成', width: 160 },
   { key: 'date', title: '交期' },
   { key: 'status', title: '状态' },
-  { align: 'right' as const, key: 'actions', title: '', width: 80 },
+  { align: 'right' as const, key: 'actions', title: '', width: 120 },
 ]);
 
 function progressPercent(o: Api.Order) {
@@ -180,7 +191,7 @@ function progressPercent(o: Api.Order) {
             从产品中心选产品向工厂下生产订单。工厂确认接单、回复交期后，这张单会进入 AI 排单的待生产订单；包装工序单报产出时自动累加完成数量。
           </p>
         </div>
-        <Button v-if="canCreate" type="primary" @click="createOpen = true">＋ 向工厂下单</Button>
+        <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 向工厂下单</Button>
       </header>
 
       <Result v-if="!canCreate && !canHandle" status="info" title="还没有工厂下单的权限">
@@ -274,17 +285,22 @@ function progressPercent(o: Api.Order) {
                 <Tag :color="ORDER_STATUS[record.status as Api.Status]?.color" class="m-0">{{ record.statusLabel }}</Tag>
               </template>
               <template v-else-if="column.key === 'actions'">
-                <button class="whitespace-nowrap text-xs text-primary hover:underline" type="button" @click="openOrder(record.id)">
-                  {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
-                </button>
+                <span class="inline-flex gap-3 whitespace-nowrap text-xs">
+                  <button class="text-primary hover:underline" type="button" @click="openOrder(record.id)">
+                    {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
+                  </button>
+                  <button v-if="tab === 'mine'" class="text-primary hover:underline" type="button" @click="openCreate(record as Api.Order)">
+                    {{ record.status === 'REJECTED' ? '改了重下' : '复制' }}
+                  </button>
+                </span>
               </template>
             </template>
           </Table>
         </div>
       </section>
 
-      <CreateModal v-model:open="createOpen" :factories="orderable" @created="onCreated" />
-      <OrderDrawer v-model:open="drawerOpen" :mode="tab" :order-id="drawerId" @changed="onChanged" />
+      <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
+      <OrderDrawer v-model:open="drawerOpen" :mode="tab" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>
   </Page>
 </template>

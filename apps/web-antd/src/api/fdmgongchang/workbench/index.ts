@@ -1,6 +1,7 @@
 import type { PageResult } from '@vben/request';
 
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
+import type { FdmgongchangProductionOrderApi } from '#/api/fdmgongchang/production-order';
 import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
@@ -72,6 +73,14 @@ export function getWorkbenchStock(stage: string) {
   return requestClient.get<PageResult<FdmgongchangStageStockApi.Stock>>(
     `${BASE}/stock`,
     { ...headers(), params: { stage } },
+  );
+}
+
+/** 本厂正在生产的工厂订单：包装开工时选这批是做哪张单。 */
+export function getWorkbenchProductionOrders() {
+  return requestClient.get<FdmgongchangProductionOrderApi.Order[]>(
+    `${BASE}/production-orders`,
+    headers(),
   );
 }
 

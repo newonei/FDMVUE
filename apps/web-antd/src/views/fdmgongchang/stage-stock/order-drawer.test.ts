@@ -150,12 +150,31 @@ function typeInto(id: string, value: string) {
   input.dispatchEvent(new Event('blur', { bubbles: true }));
 }
 
-function clickButton(text: string) {
-  const button = [...document.querySelectorAll('button')].find((b) =>
+function findButton(text: string) {
+  return [...document.querySelectorAll('button')].find((b) =>
     b.textContent?.replaceAll(/\s/g, '').includes(text),
   );
+}
+
+function clickButton(text: string) {
+  const button = findButton(text);
   if (!button) throw new Error(`missing button ${text}`);
   button.click();
+}
+
+/** 新建是分步填写：一路点「下一步」到最后一步再提交；某一步没通过检查时停在那一步。 */
+async function submitCreate(text: string) {
+  for (let i = 0; i < 4; i++) {
+    const next = findButton('下一步');
+    if (!next) {
+      clickButton(text);
+      return;
+    }
+    next.click();
+    await flush();
+    if (document.querySelector('.ant-alert-error')) return;
+  }
+  throw new Error(`never reached ${text}`);
 }
 
 describe('order drawer', () => {
@@ -255,7 +274,7 @@ describe('order drawer', () => {
       '良品 434 片，残次 6 片（残次率 1.4%）',
     );
 
-    clickButton('提交领料并入库');
+    await submitCreate('提交领料并入库');
     await flush();
     expect(mocks.create).toHaveBeenCalledTimes(1);
     const payload = mocks.create.mock.calls[0]![0] as Api.OrderCreateReq;
@@ -312,7 +331,7 @@ describe('order drawer', () => {
       .id.replace('out-batch-', '');
     typeInto(`out-good-${key}`, '20');
     await flush();
-    clickButton('提交领料并入库');
+    await submitCreate('提交领料并入库');
     await flush();
     expect(mocks.create).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain(
@@ -331,7 +350,7 @@ describe('order drawer', () => {
     radios.find((r) => r.value === 'false')!.click();
     await flush();
     expect(document.querySelectorAll('[id^="out-batch-"]')).toHaveLength(0);
-    clickButton('提交领料');
+    await submitCreate('提交领料');
     await flush();
     const payload = mocks.create.mock.calls[0]![0] as Api.OrderCreateReq;
     expect(payload).toMatchObject({ finish: false, outputs: [] });
@@ -372,7 +391,7 @@ describe('order drawer', () => {
       .find((r) => r.value === 'false')!
       .click();
     await flush();
-    clickButton('提交领料');
+    await submitCreate('提交领料');
     await flush();
     expect(mocks.create.mock.calls[0]![0]).toMatchObject({
       assignmentId: 'a1',
@@ -391,11 +410,11 @@ describe('order drawer', () => {
       .find((r) => r.value === 'false')!
       .click();
     await flush();
-    clickButton('提交领料');
+    await submitCreate('提交领料');
     await flush();
     expect(mocks.create).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain(
-      '还没有人分配「开片」岗位，请先到 工厂部门 → 人员岗位 里分配。',
+      '还没有人分配「开片」岗位，请先到 工厂部门 → 人员与工资 → 人员岗位 里分配。',
     );
   });
 
@@ -514,7 +533,7 @@ describe('order drawer', () => {
     );
     expect(document.body.textContent).toContain('计件');
 
-    clickButton('提交领料并入库');
+    await submitCreate('提交领料并入库');
     await flush();
     expect(mocks.create.mock.calls[0]![0]).toMatchObject({
       pieceworks: [{ itemId: 41, quantity: 98, userId: 7 }],

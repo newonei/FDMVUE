@@ -152,4 +152,22 @@ describe('production order page', () => {
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
   });
+
+  it('copies a rejected order into a new one so the requester only fixes what was wrong', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:create');
+    mocks.factories.mockResolvedValue([{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }]);
+    mocks.myPage.mockResolvedValue({
+      list: [{ ...order, reply: '这个颜色缺料', status: 'REJECTED', statusLabel: '已退回' }],
+      total: 1,
+    });
+    unmount = mount();
+    await flush();
+    button('改了重下').click();
+    await flush();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('复制下单（来自 GD20261010-001）');
+    expect(text).toContain('明细（1）');
+    expect(document.querySelector<HTMLInputElement>('#po-qty-p1')?.value).toBe('500');
+    expect(document.querySelector<HTMLInputElement>('#po-purpose')?.value).toBe('电商备货');
+  });
 });

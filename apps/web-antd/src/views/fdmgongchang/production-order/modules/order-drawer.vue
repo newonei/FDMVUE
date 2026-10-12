@@ -23,7 +23,7 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from '../shared';
  * 工厂（mode=factory）待接单时接单（回复交期）或退回，生产中登记完成数量、结束这张单。
  */
 const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number }>();
-const emit = defineEmits<{ changed: [] }>();
+const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
 const open = defineModel<boolean>('open', { required: true });
 
 const order = ref<Api.Order>();
@@ -192,8 +192,9 @@ const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
           <Button :loading="busy" type="primary" @click="saveProgress">{{ complete ? '保存并完成' : '保存完成数量' }}</Button>
         </section>
 
-        <div v-if="canCancel" class="flex justify-end">
-          <Popconfirm title="撤回这张单？工厂还没接单" ok-text="撤回" @confirm="cancel">
+        <div v-if="mode === 'mine'" class="flex flex-wrap justify-end gap-2">
+          <Button @click="emit('copy', order)">{{ order.status === 'REJECTED' ? '修改后重新下单' : '复制下单' }}</Button>
+          <Popconfirm v-if="canCancel" title="撤回这张单？工厂还没接单" ok-text="撤回" @confirm="cancel">
             <Button :loading="busy" danger>撤回</Button>
           </Popconfirm>
         </div>

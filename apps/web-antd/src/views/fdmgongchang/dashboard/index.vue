@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { FactoryRoute } from '../shared/routes';
+
 import type { FdmgongchangDashboardApi as Api } from '#/api/fdmgongchang/dashboard';
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
@@ -7,20 +9,23 @@ import { useRouter } from 'vue-router';
 import { Page } from '@vben/common-ui';
 
 import { useFullscreen } from '@vueuse/core';
-import { Button, Empty, Progress, Result, Segmented, Spin, Tag } from 'ant-design-vue';
+import { Button, Empty, message, Progress, Result, Segmented, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { getFactoryDashboard } from '#/api/fdmgongchang/dashboard';
 
 import FactorySwitch from '../shared/factory-switch.vue';
+import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
 import KpiCard from './modules/kpi-card.vue';
+import TodayLanes from './modules/today-lanes.vue';
 import TrendChart from './modules/trend-chart.vue';
 import { big, change, dateText, daysLeft, money, n, pct, PROCESS_COLORS, yieldRate } from './shared';
 
 /**
  * 工厂部门 · 工厂看板：工厂管理员一屏看清这段时间的产出、良品率、排单达成、订单交付、库存与人员。
  * 每个指标都和前一段同样长的时间对比；「大屏」全屏显示并每 5 分钟自动刷新，适合挂在车间办公室。
+ * 「今天各工序」放在这里（原来在工序库存的「今日生产」页签），工序库存只管库存和单据。
  */
 defineOptions({ name: 'FdmGongchangDashboard' });
 
@@ -80,7 +85,9 @@ function changeRange(value: number | string) {
   load();
 }
 
-const go = (path: string) => router.push(path);
+/** 看板的人不一定能进每个页面（例如审计只读），没有权限时提示一下。 */
+const go = (target: FactoryRoute) =>
+  router.push(target).catch(() => message.info('你的账号没有这个页面的权限'));
 
 const kpi = computed(() => data.value?.kpi);
 const yieldNow = computed(() => (kpi.value ? yieldRate(kpi.value.good, kpi.value.defect) : null));
@@ -140,24 +147,24 @@ const topMax = computed(() => Math.max(1, ...(data.value?.people.top ?? []).map(
 const alerts = computed(() => {
   const d = data.value;
   if (!d) return [];
-  const list: Array<{ action: string; detail: string; path: string; title: string; tone: 'danger' | 'warning' }> = [];
+  const list: Array<{ action: string; detail: string; path: FactoryRoute; title: string; tone: 'danger' | 'warning' }> = [];
   if (d.kpi.overdueOrders > 0) {
-    list.push({ action: '去工厂下单', detail: '交期已过、还没做完', path: '/gongchang/production-order', title: `${d.kpi.overdueOrders} 张订单已逾期`, tone: 'danger' });
+    list.push({ action: '去工厂下单', detail: '交期已过、还没做完', path: FACTORY_ROUTES.productionOrder, title: `${d.kpi.overdueOrders} 张订单已逾期`, tone: 'danger' });
   }
   if (d.kpi.pendingOrders > 0) {
-    list.push({ action: '去接单', detail: '内部部门下给本厂、还没接单', path: '/gongchang/production-order', title: `${d.kpi.pendingOrders} 张工厂订单待接单`, tone: 'warning' });
+    list.push({ action: '去接单', detail: '内部部门下给本厂、还没接单', path: FACTORY_ROUTES.productionOrder, title: `${d.kpi.pendingOrders} 张工厂订单待接单`, tone: 'warning' });
   }
   for (const s of d.today.shortages) {
-    list.push({ action: '去 AI 排单', detail: `明天排了 ${big(s.planned)}${s.unit}，${s.sourceLabel}只有 ${big(s.available)}${s.unit}`, path: '/gongchang/schedule', title: `${s.label}明天可能缺料`, tone: 'danger' });
+    list.push({ action: '去 AI 排单', detail: `明天排了 ${big(s.planned)}${s.unit}，${s.sourceLabel}只有 ${big(s.available)}${s.unit}`, path: FACTORY_ROUTES.schedule, title: `${s.label}明天可能缺料`, tone: 'danger' });
   }
   for (const o of d.today.staleOrders.slice(0, 3)) {
-    list.push({ action: '去工序库存', detail: `${o.orderNo} · 已领 ${big(o.inputQuantity)}${o.unit}`, path: '/gongchang/stage-stock', title: `${o.operatorName ?? ''} 领料超过 8 小时没报数量`, tone: 'warning' });
+    list.push({ action: '去工序库存', detail: `${o.orderNo} · 已领 ${big(o.inputQuantity)}${o.unit}`, path: FACTORY_ROUTES.stageStock, title: `${o.operatorName ?? ''} 领料超过 8 小时没报数量`, tone: 'warning' });
   }
   if (d.kpi.pendingRecords > 0) {
-    list.push({ action: '去确认', detail: '确认后才能月底结算', path: '/gongchang/wage', title: `${d.kpi.pendingRecords} 条报工待确认`, tone: 'warning' });
+    list.push({ action: '去确认', detail: '确认后才能月底结算', path: FACTORY_ROUTES.wage, title: `${d.kpi.pendingRecords} 条报工待确认`, tone: 'warning' });
   }
   if (d.people.unassigned > 0) {
-    list.push({ action: '去人员岗位', detail: '没分岗位的人在手机上看不到要做的活', path: '/gongchang/worker', title: `${d.people.unassigned} 人还没分配岗位`, tone: 'warning' });
+    list.push({ action: '去人员岗位', detail: '没分岗位的人在手机上看不到要做的活', path: FACTORY_ROUTES.worker, title: `${d.people.unassigned} 人还没分配岗位`, tone: 'warning' });
   }
   return list;
 });
@@ -200,13 +207,16 @@ const alerts = computed(() => {
         <div v-if="data && kpi" class="flex flex-col gap-4">
           <!-- 关键指标 -->
           <section class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <KpiCard :change="change(n(kpi.packedGood), n(kpi.packedGoodPrev))" :unit="kpi.packedUnit" :value="big(kpi.packedGood)" label="成品产出" hint="包装良品" @open="go('/gongchang/stage-stock')" />
-            <KpiCard :change="change(yieldNow, yieldPrev)" :value="pct(yieldNow)" label="良品率" :hint="`残次 ${big(kpi.defect)}`" @open="go('/gongchang/stage-stock')" />
-            <KpiCard :change="change(planRate, planRatePrev)" :hint="kpi.planTaskCount > 0 ? `${kpi.planTaskCount} 个排单任务` : '这段时间没有下发排单'" :value="pct(planRate)" label="排单达成率" @open="go('/gongchang/schedule')" />
-            <KpiCard :hint="kpi.staleCount > 0 ? `${kpi.staleCount} 张超 8 小时没报` : '都在正常推进'" :tone="kpi.staleCount > 0 ? 'warning' : 'default'" :value="String(kpi.wipCount)" label="在制工序单" unit="张" @open="go('/gongchang/stage-stock')" />
-            <KpiCard :hint="kpi.overdueOrders > 0 ? `${kpi.overdueOrders} 张已逾期` : kpi.pendingOrders > 0 ? `${kpi.pendingOrders} 张待接单` : '没有逾期'" :tone="kpi.overdueOrders > 0 ? 'danger' : 'default'" :value="String(kpi.openOrders)" label="待交付订单" unit="张" @open="go('/gongchang/production-order')" />
-            <KpiCard :change="change(n(kpi.wageAmount), n(kpi.wageAmountPrev))" :hint="kpi.pendingRecords > 0 ? `${kpi.pendingRecords} 条待确认` : '已全部确认'" :tone="kpi.pendingRecords > 0 ? 'warning' : 'default'" :value="money(kpi.wageAmount)" label="报工工资" @open="go('/gongchang/wage')" />
+            <KpiCard :change="change(n(kpi.packedGood), n(kpi.packedGoodPrev))" :unit="kpi.packedUnit" :value="big(kpi.packedGood)" label="成品产出" hint="包装良品" @open="go(FACTORY_ROUTES.stageStock)" />
+            <KpiCard :change="change(yieldNow, yieldPrev)" :value="pct(yieldNow)" label="良品率" :hint="`残次 ${big(kpi.defect)}`" @open="go(FACTORY_ROUTES.stageStock)" />
+            <KpiCard :change="change(planRate, planRatePrev)" :hint="kpi.planTaskCount > 0 ? `${kpi.planTaskCount} 个排单任务` : '这段时间没有下发排单'" :value="pct(planRate)" label="排单达成率" @open="go(FACTORY_ROUTES.schedule)" />
+            <KpiCard :hint="kpi.staleCount > 0 ? `${kpi.staleCount} 张超 8 小时没报` : '都在正常推进'" :tone="kpi.staleCount > 0 ? 'warning' : 'default'" :value="String(kpi.wipCount)" label="在制工序单" unit="张" @open="go(FACTORY_ROUTES.stageStock)" />
+            <KpiCard :hint="kpi.overdueOrders > 0 ? `${kpi.overdueOrders} 张已逾期` : kpi.pendingOrders > 0 ? `${kpi.pendingOrders} 张待接单` : '没有逾期'" :tone="kpi.overdueOrders > 0 ? 'danger' : 'default'" :value="String(kpi.openOrders)" label="待交付订单" unit="张" @open="go(FACTORY_ROUTES.productionOrder)" />
+            <KpiCard :change="change(n(kpi.wageAmount), n(kpi.wageAmountPrev))" :hint="kpi.pendingRecords > 0 ? `${kpi.pendingRecords} 条待确认` : '已全部确认'" :tone="kpi.pendingRecords > 0 ? 'warning' : 'default'" :value="money(kpi.wageAmount)" label="报工工资" @open="go(FACTORY_ROUTES.wage)" />
           </section>
+
+          <!-- 今天各工序（原工序库存「今日生产」） -->
+          <TodayLanes :today="data.today" />
 
           <!-- 趋势 + 工序表现 -->
           <section class="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
@@ -256,7 +266,7 @@ const alerts = computed(() => {
             <div class="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
               <div class="flex items-baseline justify-between">
                 <h2 class="m-0 text-base font-semibold">订单交付</h2>
-                <button class="text-xs text-primary hover:underline" type="button" @click="go('/gongchang/production-order')">全部订单</button>
+                <button class="text-xs text-primary hover:underline" type="button" @click="go(FACTORY_ROUTES.productionOrder)">全部订单</button>
               </div>
               <Empty v-if="orders.length === 0" description="没有待交付的订单" />
               <ul v-else class="m-0 grid list-none grid-cols-1 gap-2 p-0 md:grid-cols-2">
@@ -293,7 +303,7 @@ const alerts = computed(() => {
                 <div class="grid grid-cols-3 gap-2 text-center">
                   <div class="rounded-lg bg-muted/50 py-2"><div class="text-xl font-bold tabular-nums">{{ data.people.active }}</div><div class="text-xs text-muted-foreground">在岗</div></div>
                   <div class="rounded-lg bg-muted/50 py-2"><div class="text-xl font-bold tabular-nums">{{ data.people.reported }}</div><div class="text-xs text-muted-foreground">有报工</div></div>
-                  <button :class="data.people.unassigned > 0 ? 'text-warning' : ''" class="rounded-lg bg-muted/50 py-2" type="button" @click="go('/gongchang/worker')">
+                  <button :class="data.people.unassigned > 0 ? 'text-warning' : ''" class="rounded-lg bg-muted/50 py-2" type="button" @click="go(FACTORY_ROUTES.worker)">
                     <div class="text-xl font-bold tabular-nums">{{ data.people.unassigned }}</div><div class="text-xs text-muted-foreground">待分配</div>
                   </button>
                 </div>

@@ -70,6 +70,7 @@ const defaultMaterial = () =>
 function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.process = process;
   job.task = task;
+  job.productionItem = undefined;
   job.sourceStage = process.sources[0] ?? '';
   job.picks = [];
   job.inputs = [];
@@ -134,6 +135,7 @@ function createPayload(finish: boolean) {
     outputs: finish ? outputPayload(job) : [],
     pieceworks: finish ? piecePayload() : [],
     process: job.process!.code,
+    productionOrderItemId: job.task ? undefined : job.productionItem?.id,
     scheduleTaskId: job.task?.id,
     sourceStage: job.sourceStage,
   };
