@@ -15,6 +15,7 @@ import {
   getWorkbenchOrder,
   reportWorkbenchOrder,
   returnWorkbenchMaterial,
+  supplementWorkbenchOrder,
 } from '#/api/fdmgongchang/workbench';
 
 import { useFactory } from '../shared/use-factory';
@@ -71,6 +72,8 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.process = process;
   job.task = task;
   job.productionItem = undefined;
+  job.recipe = undefined;
+  job.supplement = false;
   job.sourceStage = process.sources[0] ?? '';
   job.picks = [];
   job.inputs = [];
@@ -117,8 +120,27 @@ async function continueOrder(order: Api.Order) {
         stage: line.stage,
       },
     }));
-    job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial());
+    job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.order.recipeCode);
     job.step = 'report';
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** 手上在做的单料不够：选料补领，补完回首页，单子继续在制。 */
+async function supplementOrder(order: Api.Order) {
+  const process = job.my?.processes.find((p) => p.code === order.process);
+  if (!process) {
+    message.warning('你现在没有这道工序的岗位，请找班组长处理');
+    return;
+  }
+  reset(process, job.my?.tasks.find((t) => t.id === order.scheduleTaskId));
+  job.sourceStage = order.sourceStage;
+  loading.value = true;
+  try {
+    job.order = await getWorkbenchOrder(order.id);
+    job.supplement = true;
+    job.step = 'pick';
   } finally {
     loading.value = false;
   }
@@ -135,6 +157,8 @@ function createPayload(finish: boolean) {
     outputs: finish ? outputPayload(job) : [],
     pieceworks: finish ? piecePayload() : [],
     process: job.process!.code,
+    recipeBatches: job.recipe?.batches,
+    recipeCode: job.recipe?.code,
     productionOrderItemId: job.task ? undefined : job.productionItem?.id,
     scheduleTaskId: job.task?.id,
     sourceStage: job.sourceStage,
@@ -147,11 +171,16 @@ function piecePayload() {
     .map((p) => ({ itemId: p.itemId!, quantity: p.quantity!, userId: p.userId! }));
 }
 
-/** 只领料：单子进「我手上在做的」。 */
+/** 只领料：单子进「我手上在做的」；补领时把料加到原来那张单上。 */
 async function issueOnly() {
   submitting.value = true;
   try {
-    await createWorkbenchOrder(createPayload(false));
+    await (job.supplement && job.order
+      ? supplementWorkbenchOrder({
+          id: job.order.id,
+          inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+        })
+      : createWorkbenchOrder(createPayload(false)));
     await reload();
     job.result = { amount: 0, good: 0, unit: '' };
     job.step = 'done';
@@ -164,7 +193,7 @@ async function issueOnly() {
 function reportNow() {
   job.createFinish = true;
   job.inputs = pickInputs();
-  job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial());
+  job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
   job.step = 'report';
 }
 
@@ -230,7 +259,7 @@ function back() {
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
-        <Home v-if="job.step === 'home'" @continue-order="continueOrder" @start-free="startFree" @start-task="startTask" />
+        <Home v-if="job.step === 'home'" @continue-order="continueOrder" @start-free="startFree" @start-task="startTask" @supplement-order="supplementOrder" />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="job.step = 'confirm'" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep v-else-if="job.step === 'report'" @back="back" @next="afterReport" />

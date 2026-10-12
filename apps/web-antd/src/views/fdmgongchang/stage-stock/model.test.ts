@@ -9,11 +9,14 @@ import {
   deriveOutputs,
   EDITABLE_FIELDS,
   guessPackedAttrs,
+  issueSeqLabel,
   joinBatches,
   lineBatch,
   makeLabels,
   normalizeForStage,
   parseSizeText,
+  recipeCheck,
+  recipePicks,
   stageColumns,
   sumQty,
   validateOutputs,
@@ -316,5 +319,91 @@ describe('cross cutting', () => {
     expect(line!.batchNo).toBe('MB1');
     expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width']);
     expect(stageColumns('CUT')).toEqual(['material', 'color', 'size']);
+  });
+});
+
+describe('recipe issuing', () => {
+  const plan: Api.RecipePlan = {
+    batches: 2,
+    batchWeight: 15.5,
+    lines: [
+      {
+        available: 45,
+        issued: 0,
+        perBatch: 10,
+        picks: [
+          { available: 15, batchNo: 'T1', itemCode: 'YL-TPE', location: '原料仓', quantity: 15, stockId: 1 },
+          { available: 30, batchNo: 'T2', itemCode: 'YL-TPE', location: '原料仓', quantity: '5.000', stockId: 2 },
+        ],
+        rawMaterialCode: 'MAT-TPE',
+        rawMaterialName: 'TPE',
+        remaining: 20,
+        required: 20,
+        shortage: 0,
+      },
+      {
+        available: 0,
+        issued: 0.4,
+        perBatch: 0.5,
+        picks: [],
+        rawMaterialCode: 'MAT-CM',
+        rawMaterialName: '紫色母',
+        remaining: 0.6,
+        required: 1,
+        shortage: 0.6,
+      },
+      {
+        available: 8,
+        issued: 2,
+        perBatch: null,
+        picks: [],
+        rawMaterialCode: 'MAT-PE',
+        rawMaterialName: 'PE',
+        remaining: 0,
+        required: null,
+        shortage: 0,
+      },
+    ],
+    recipeCode: 'REC-001',
+    recipeEnabled: true,
+    recipeName: '常规款',
+    requiredTotal: 21,
+    shortage: true,
+  };
+
+  it('turns the plan into issue lines, first in first out', () => {
+    const picks = recipePicks(plan);
+    expect(picks.map((p) => [p.stock.id, p.quantity])).toEqual([
+      [1, 15],
+      [2, 5],
+    ]);
+    expect(picks[0]!.stock.item?.rawMaterialCode).toBe('MAT-TPE');
+    expect(picks[0]!.stock.stage).toBe('RAW');
+  });
+
+  it('compares what is filled with what the recipe asks for', () => {
+    const raw = (id: number, code: string, qty: number) =>
+      line(id, 'RAW', { rawMaterialCode: code, rawMaterialName: code }, `B${id}`, qty);
+    const inputs = [raw(1, 'MAT-TPE', 15), raw(2, 'MAT-TPE', 4), raw(9, 'MAT-LLPE', 3)];
+    expect(recipeCheck(plan, inputs)).toEqual([
+      { code: 'MAT-TPE', filled: 19, name: 'TPE', target: 20 },
+      { code: 'MAT-CM', filled: 0, name: '紫色母', target: 1 },
+      { code: 'MAT-LLPE', filled: 3, name: 'MAT-LLPE', target: null },
+    ]);
+    // 补领对照「还要领」
+    expect(recipeCheck(plan, [], true).map((c) => c.target)).toEqual([20, 0.6]);
+    expect(recipeCheck(undefined, inputs)).toEqual([]);
+  });
+
+  it('defaults the board recipe to the order recipe for mixing', () => {
+    const raw = [line(1, 'RAW', { rawMaterialCode: 'MAT-TPE' }, 'T1', 10)];
+    expect(deriveOutputs('MIX', raw, 'TPE', 'REC-001')[0]!.attrs).toEqual({ material: 'TPE', recipeCode: 'REC-001' });
+    expect(deriveOutputs('MIX', raw, 'TPE')[0]!.attrs).toEqual({ material: 'TPE' });
+  });
+
+  it('labels supplementary issue lines', () => {
+    expect(issueSeqLabel(0)).toBe('');
+    expect(issueSeqLabel(null)).toBe('');
+    expect(issueSeqLabel(2)).toBe('第 2 次补领');
   });
 });

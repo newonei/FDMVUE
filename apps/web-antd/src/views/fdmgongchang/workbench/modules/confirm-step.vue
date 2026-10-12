@@ -16,8 +16,8 @@ const submitting = ref(false);
 const labels = computed(() => makeLabels(job.options));
 const source = computed(() => stageOf(job, job.sourceStage));
 
-/** 不按排单开包装单时，选这批是做哪张工厂订单；按排单开工的由排单任务自动关联。 */
-const askOrder = computed(() => !job.task && job.process?.outputStage === 'PACKED');
+/** 不按排单开包装单时，选这批是做哪张工厂订单；按排单开工的由排单任务自动关联。补领沿用原来的单。 */
+const askOrder = computed(() => !job.supplement && !job.task && job.process?.outputStage === 'PACKED');
 const openOrders = ref<OrderApi.Order[]>([]);
 const orderChoices = computed(() =>
   openOrders.value.flatMap((o) =>
@@ -43,7 +43,9 @@ onMounted(async () => {
 function choose(c?: { id: number; label: string; orderNo: string }) {
   job.productionItem = c ? { id: c.id, label: c.label, orderNo: c.orderNo } : undefined;
 }
-const orderText = computed(() => job.task?.contractCode || job.productionItem?.orderNo || '备货');
+const orderText = computed(() =>
+  job.supplement ? `补到 ${job.order?.orderNo ?? ''}` : job.task?.contractCode || job.productionItem?.orderNo || '备货',
+);
 
 async function issue() {
   submitting.value = true;
@@ -57,7 +59,13 @@ async function issue() {
 
 <template>
   <div class="flex min-h-full flex-col">
-    <StepHeader :current="2" :title="`${job.process?.label} · 第 2 步 确认领料`" :total="3" subtitle="看一眼，对了就点确认" @back="emit('back')" />
+    <StepHeader
+      :current="2"
+      :subtitle="job.supplement ? `补到 ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
+      :title="`${job.process?.label} · 第 2 步 ${job.supplement ? '确认补领' : '确认领料'}`"
+      :total="job.supplement ? 2 : 3"
+      @back="emit('back')"
+    />
     <main class="flex flex-1 flex-col gap-3.5 p-4">
       <section v-for="p in job.picks" :key="p.stock.id" class="flex flex-col gap-3.5 rounded-2xl bg-card p-[18px] shadow-sm">
         <div class="flex flex-col gap-1">
@@ -97,15 +105,18 @@ async function issue() {
           <span class="text-sm text-muted-foreground">{{ c.orderNo }} · {{ c.party }} · {{ c.left }}</span>
         </button>
       </section>
-      <p class="m-0 text-sm leading-relaxed text-muted-foreground">
+      <p v-if="job.supplement" class="m-0 text-sm leading-relaxed text-muted-foreground">
+        补领的料从{{ source?.label }}库存扣掉，加到你手上这张单里。做完回来照常点「做完了，报数量」。
+      </p>
+      <p v-else class="m-0 text-sm leading-relaxed text-muted-foreground">
         领料后这些料就从{{ source?.label }}库存扣掉，算到你「手上在做的」里。做完回来点「做完了，报数量」。
       </p>
     </main>
     <footer class="sticky bottom-0 flex flex-col gap-2.5 border-t border-border bg-card px-4 pb-5 pt-3">
       <button :disabled="submitting" class="h-14 rounded-xl bg-primary text-lg font-bold text-primary-foreground" type="button" @click="issue">
-        确认领料，去干活
+        {{ job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
-      <button class="h-12 rounded-xl bg-primary/10 text-base font-bold text-primary" type="button" @click="emit('reportNow')">
+      <button v-if="!job.supplement" class="h-12 rounded-xl bg-primary/10 text-base font-bold text-primary" type="button" @click="emit('reportNow')">
         已经做完了，领料同时报数量
       </button>
     </footer>

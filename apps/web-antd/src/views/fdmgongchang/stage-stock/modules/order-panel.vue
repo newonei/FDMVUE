@@ -21,9 +21,11 @@ import {
   defectRate,
   formatQty,
   formatRate,
+  issueSeqLabel,
   makeLabels,
 } from '../model';
 import ReturnModal from './return-modal.vue';
+import SupplementModal from './supplement-modal.vue';
 import VoidModal from './void-modal.vue';
 
 const props = defineProps<{ options: Api.Options; refreshKey: number }>();
@@ -51,12 +53,19 @@ const statusOf = (status: Api.OrderStatus) =>
 
 const returnOpen = ref(false);
 const returnOrderId = ref<number>();
+const supplementOpen = ref(false);
+const supplementOrderId = ref<number>();
 const voidOpen = ref(false);
 const voidTarget = ref<Api.Order>();
 
 function openReturn(order: Api.Order) {
   returnOrderId.value = order.id;
   returnOpen.value = true;
+}
+
+function openSupplement(order: Api.Order) {
+  supplementOrderId.value = order.id;
+  supplementOpen.value = true;
 }
 
 function openVoid(order: Api.Order) {
@@ -223,6 +232,10 @@ const statCards = computed(() =>
               v-if="Number(o.returnedQuantity ?? 0) > 0"
               class="text-xs text-muted-foreground"
             >（已退 {{ formatQty(o.returnedQuantity) }}）</span>
+            <span
+              v-if="(o.supplementCount ?? 0) > 0"
+              class="text-xs text-muted-foreground"
+            >（含补领 {{ o.supplementCount }} 次）</span>
           </div>
           <div
             v-if="(o.reportCount ?? 0) > 0"
@@ -238,6 +251,7 @@ const statCards = computed(() =>
             <span>{{ [o.team, o.operatorName].filter(Boolean).join(' · ') }} ·
               {{ formatDateTime(o.issuedAt) }}</span>
             <span v-if="canOperate" class="flex gap-1">
+              <Button size="small" @click="openSupplement(o)">补领</Button>
               <Button size="small" @click="openReturn(o)">退料</Button>
               <Button size="small" type="primary" @click="emit('report', o.id)">
                 报产出
@@ -421,6 +435,14 @@ const statCards = computed(() =>
                 v-if="canOperate && record.status === 'IN_PROGRESS'"
                 type="button"
                 class="text-primary hover:underline"
+                @click="openSupplement(record as Api.Order)"
+              >
+                补领
+              </button>
+              <button
+                v-if="canOperate && record.status === 'IN_PROGRESS'"
+                type="button"
+                class="text-primary hover:underline"
                 @click="openReturn(record as Api.Order)"
               >
                 退料
@@ -445,9 +467,17 @@ const statCards = computed(() =>
               <div>
                 <h4 class="m-0 mb-1 text-sm font-semibold">
                   领料（扣{{ stageOf(record.sourceStage)?.label }}库存）
+                  <span
+                    v-if="details[record.id]!.recipeCode"
+                    class="ml-1 text-xs font-normal text-muted-foreground"
+                  >按配方 {{ details[record.id]!.recipeName || details[record.id]!.recipeCode }} ×
+                    {{ formatQty(details[record.id]!.recipeBatches) }} 锅</span>
                 </h4>
                 <ul class="m-0 flex list-disc flex-col gap-1 pl-4">
                   <li v-for="line in details[record.id]!.inputs" :key="line.id">
+                    <Tag v-if="issueSeqLabel(line.issueSeq)" class="mr-1" color="blue">
+                      {{ issueSeqLabel(line.issueSeq) }}
+                    </Tag>
                     <span class="font-mono">{{ line.itemCode }}</span>
                     <span class="ml-2">{{
                       attrSummary(line.stage, line.item, labels)
@@ -465,6 +495,19 @@ const statCards = computed(() =>
                     </Tag>
                   </li>
                 </ul>
+                <div
+                  v-if="(details[record.id]!.recipeLines ?? []).length > 0"
+                  class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground"
+                >
+                  <span
+                    v-for="r in details[record.id]!.recipeLines"
+                    :key="r.rawMaterialCode"
+                    :class="Number(r.remaining) > 0 ? 'text-warning' : ''"
+                  >
+                    {{ r.rawMaterialName || r.rawMaterialCode }}
+                    {{ formatQty(r.issued) }}{{ r.required == null ? '（配方外）' : ` / ${formatQty(r.required)}` }} kg
+                  </span>
+                </div>
               </div>
               <div>
                 <h4 class="m-0 mb-1 text-sm font-semibold">
@@ -522,6 +565,12 @@ const statCards = computed(() =>
       v-model:open="returnOpen"
       :options="options"
       :order-id="returnOrderId"
+      @saved="onAdjusted"
+    />
+    <SupplementModal
+      v-model:open="supplementOpen"
+      :options="options"
+      :order-id="supplementOrderId"
       @saved="onAdjusted"
     />
     <VoidModal v-model:open="voidOpen" :order="voidTarget" @saved="onAdjusted" />

@@ -219,6 +219,9 @@ export namespace FdmgongchangStageStockApi {
     outputs: OrderOutput[];
     pieceworks?: Piecework[];
     process: string;
+    /** 密炼按配方领料：配方编码与锅数（一锅 = 配方明细的一批用量）。 */
+    recipeBatches?: Decimal;
+    recipeCode?: string;
     remark?: string;
     /** 关联的生产订单明细（选填）；包装报产出时良品累加到它的完成数量。 */
     productionOrderItemId?: number;
@@ -240,6 +243,53 @@ export namespace FdmgongchangStageStockApi {
     pieceworks?: Piecework[];
   }
 
+  /** 在制工序单补领：领少了，从同一段库存再领，一次可以补多种。 */
+  export interface OrderSupplementReq {
+    id: number;
+    inputs: OrderInput[];
+    remark?: string;
+  }
+
+  /** 按配方算密炼领料：每种原料应领、已领、还要领，建议从哪几行库存领（先进先出）。 */
+  export interface RecipePlanLine {
+    available: Decimal;
+    issued: Decimal;
+    /** 一锅用量 kg；不在配方里另外领的料为空。 */
+    perBatch?: Decimal | null;
+    picks: Array<{
+      available: Decimal;
+      batchNo: string;
+      itemCode: string;
+      location: string;
+      quantity: Decimal;
+      stockId: number;
+    }>;
+    rawCategory?: null | string;
+    rawMaterialCode: string;
+    rawMaterialName?: null | string;
+    remaining: Decimal;
+    required?: Decimal | null;
+    shortage: Decimal;
+  }
+
+  export interface RecipePlan {
+    batches: Decimal;
+    batchWeight: Decimal;
+    lines: RecipePlanLine[];
+    recipeCode: string;
+    recipeEnabled: boolean;
+    recipeName: string;
+    requiredTotal: Decimal;
+    shortage: boolean;
+  }
+
+  export interface RecipePlanReq {
+    batches?: Decimal;
+    /** 在制单补领时传，按单上的配方扣掉已领的。 */
+    orderId?: number;
+    recipeCode?: string;
+  }
+
   export interface OrderReturnReq {
     id: number;
     lines: Array<{ inputId: number; quantity: Decimal }>;
@@ -258,6 +308,9 @@ export namespace FdmgongchangStageStockApi {
     defectQuantity?: Decimal | null;
     goodQuantity?: Decimal | null;
     id: number;
+    /** 领料行：这一行的领料时间；第几次领料（0 开单领料，1 起为第几次补领）。 */
+    issuedAt?: null | number | string;
+    issueSeq?: null | number;
     item?: ItemAttrs | null;
     itemCode: string;
     laminationSide?: LaminationSide | null;
@@ -302,12 +355,19 @@ export namespace FdmgongchangStageStockApi {
       status: string;
       userName?: null | string;
     }>;
+    /** 按配方领料的配方、锅数；详情另返回配方对照。 */
+    recipeBatches?: Decimal | null;
+    recipeCode?: null | string;
+    recipeLines?: null | RecipePlanLine[];
+    recipeName?: null | string;
     /** 已报产出次数。 */
     reportCount?: null | number;
     /** 已退回原库存的余料合计（来源单位）。 */
     returnedQuantity?: Decimal | null;
     sourceStage: string;
     status: OrderStatus;
+    /** 补领次数。 */
+    supplementCount?: null | number;
     team?: null | string;
     voidedAt?: null | number | string;
     voidedBy?: null | string;
@@ -596,6 +656,21 @@ export function returnOrderMaterial(
   return requestClient.post<boolean>(`${BASE}/order/return`, data, {
     headers: factoryHeaders(),
   });
+}
+
+export function supplementOrder(
+  data: FdmgongchangStageStockApi.OrderSupplementReq,
+) {
+  return requestClient.post<boolean>(`${BASE}/order/supplement`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+export function getRecipePlan(params: FdmgongchangStageStockApi.RecipePlanReq) {
+  return requestClient.get<FdmgongchangStageStockApi.RecipePlan>(
+    `${BASE}/order/recipe-plan`,
+    { headers: factoryHeaders(), params },
+  );
 }
 
 export function voidOrder(data: FdmgongchangStageStockApi.OrderVoidReq) {

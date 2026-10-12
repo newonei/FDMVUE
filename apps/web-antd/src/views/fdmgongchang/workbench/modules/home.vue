@@ -16,6 +16,7 @@ const emit = defineEmits<{
   continueOrder: [order: Api.Order];
   startFree: [process: Api.Process];
   startTask: [task: FdmgongchangScheduleApi.Task, process: Api.Process];
+  supplementOrder: [order: Api.Order];
 }>();
 const job = useJob();
 
@@ -136,6 +137,9 @@ const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)
           </span>
           <button class="h-14 rounded-xl bg-warning text-lg font-bold text-white" type="button" @click="emit('continueOrder', order)">
             做完了，报数量
+          </button>
+          <button class="h-12 rounded-xl border-2 border-warning bg-card text-base font-bold text-warning" type="button" @click="emit('supplementOrder', order)">
+            料不够，补领
           </button>
         </div>
       </section>

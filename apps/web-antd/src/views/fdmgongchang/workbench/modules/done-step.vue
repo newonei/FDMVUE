@@ -21,9 +21,10 @@ const percent = computed(() => {
       <div class="flex size-24 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <svg aria-label="提交成功" fill="none" height="52" role="img" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6" viewBox="0 0 24 24" width="52"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
       </div>
-      <h1 class="m-0 text-[28px] font-black">{{ job.result.good > 0 ? '报好了' : '领好了' }}</h1>
+      <h1 class="m-0 text-[28px] font-black">{{ job.result.good > 0 ? '报好了' : job.supplement ? '补好了' : '领好了' }}</h1>
       <p class="m-0 text-base leading-relaxed text-muted-foreground">
         <template v-if="job.result.good > 0">{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已经进库存<br />{{ job.finish || job.createFinish ? '这张单已结束' : '单子还留着，下次接着报' }}</template>
+        <template v-else-if="job.supplement">补的料已经加到 {{ job.order?.orderNo }}，做完回来点「做完了，报数量」</template>
         <template v-else>料已经从库存扣掉，做完回来点「做完了，报数量」</template>
       </p>
       <section class="grid w-full grid-cols-2 gap-3.5 rounded-2xl bg-card p-[18px] text-left shadow-sm">

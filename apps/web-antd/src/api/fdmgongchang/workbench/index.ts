@@ -110,6 +110,26 @@ export function returnWorkbenchMaterial(
   return requestClient.post<boolean>(`${BASE}/order/return`, data, headers());
 }
 
+/** 我的单补领：领少了再领，一次可以补多种。 */
+export function supplementWorkbenchOrder(
+  data: FdmgongchangStageStockApi.OrderSupplementReq,
+) {
+  return requestClient.post<boolean>(
+    `${BASE}/order/supplement`,
+    data,
+    headers(),
+  );
+}
+
+export function getWorkbenchRecipePlan(
+  params: FdmgongchangStageStockApi.RecipePlanReq,
+) {
+  return requestClient.get<FdmgongchangStageStockApi.RecipePlan>(
+    `${BASE}/recipe-plan`,
+    { ...headers(), params },
+  );
+}
+
 export function getWorkbenchMates(process: string) {
   return requestClient.get<FdmgongchangFactoryApi.Operator[]>(`${BASE}/mates`, {
     ...headers(),

@@ -33,6 +33,7 @@ import {
   getMakeTasks,
   getOrder,
   getOrderOperators,
+  getRecipePlan,
   getStockPage,
   previewItemCodes,
   reportOrder,
@@ -52,6 +53,8 @@ import {
   makeTaskRemaining,
   nextKey,
   normalizeForStage,
+  recipeCheck,
+  recipePicks,
   sumQty,
   toNumber,
   validateOutputs,
@@ -86,6 +89,16 @@ const sides = ref<Record<number, Api.LaminationSide>>({});
 const picked = ref<Record<number, Api.Stock>>({});
 const outputs = ref<OutputDraft[]>([]);
 const touched = ref(false);
+/** 密炼按配方领料：选配方和锅数，按配方带出每种原料的领用数量（先进先出）。 */
+const recipeCode = ref<string>();
+const recipeBatches = ref<null | number>(1);
+const recipePlan = ref<Api.RecipePlan>();
+const recipeLoading = ref(false);
+const recipeOptions = computed(() =>
+  props.options.recipes
+    .filter((r) => r.enabled)
+    .map((r) => ({ label: `${r.name}（${r.code}）`, value: r.code })),
+);
 const codes = ref<Array<null | string>>([]);
 /** 外贸合同的自制任务，工序单从中选择关联订单。 */
 const makeTasks = ref<Api.MakeTask[]>([]);
@@ -386,6 +399,9 @@ watch(
 // ===== 打开与重置 =====
 
 function resetPicking() {
+  recipeCode.value = undefined;
+  recipeBatches.value = 1;
+  recipePlan.value = undefined;
   quantities.value = {};
   sides.value = {};
   picked.value = {};
@@ -427,6 +443,7 @@ watch(open, async (value) => {
         order.value.process,
         inputs.value,
         defaultMaterial.value,
+        order.value.recipeCode,
       );
       void loadOperators();
     } finally {
@@ -519,6 +536,49 @@ function setSide(stock: Api.Stock, side: Api.LaminationSide) {
   sides.value[stock.id] = side;
 }
 
+/** 按配方 × 锅数带出每种原料的领用数量；原来填的数量会被替换。 */
+async function applyRecipe() {
+  if (!recipeCode.value || !(recipeBatches.value && recipeBatches.value > 0)) {
+    errors.value = ['请选择配方并填写锅数（大于 0）。'];
+    return;
+  }
+  recipeLoading.value = true;
+  try {
+    const plan = await getRecipePlan({
+      batches: recipeBatches.value,
+      recipeCode: recipeCode.value,
+    });
+    recipePlan.value = plan;
+    quantities.value = {};
+    picked.value = {};
+    for (const line of recipePicks(plan)) {
+      const stock =
+        stockRows.value.find((s) => s.id === line.stock.id) ??
+        (line.stock as Api.Stock);
+      picked.value[stock.id] = stock;
+      quantities.value[stock.id] = line.quantity;
+    }
+    touched.value = false;
+    errors.value = [];
+  } catch {
+    recipePlan.value = undefined;
+  } finally {
+    recipeLoading.value = false;
+  }
+}
+
+function clearRecipe() {
+  recipeCode.value = undefined;
+  recipePlan.value = undefined;
+}
+
+// 换了配方或锅数，之前算的建议作废
+watch([recipeCode, recipeBatches], () => {
+  if (recipePlan.value) recipePlan.value = undefined;
+});
+
+const recipeChecks = computed(() => recipeCheck(recipePlan.value, inputs.value));
+
 const stockColumns = computed(() => [
   { key: 'itemCode', title: '编码' },
   { key: 'attrs', title: '属性' },
@@ -543,6 +603,7 @@ watch(inputSignature, () => {
       processCode.value,
       inputs.value,
       defaultMaterial.value,
+      recipeCode.value,
     );
   }
 });
@@ -558,7 +619,12 @@ function onAttrChanged(index: number, field: AttrField) {
 function addLine() {
   const base =
     outputs.value.at(-1) ??
-    deriveOutputs(processCode.value, inputs.value, defaultMaterial.value)[0];
+    deriveOutputs(
+      processCode.value,
+      inputs.value,
+      defaultMaterial.value,
+      recipeCode.value,
+    )[0];
   if (!base) {
     errors.value = ['先填写领用数量，再添加产出行。'];
     return;
@@ -584,6 +650,7 @@ function regenerate() {
     processCode.value,
     inputs.value,
     defaultMaterial.value,
+    recipeCode.value,
   );
 }
 
@@ -629,6 +696,8 @@ function inputErrors() {
         );
       }
     }
+    if (recipeCode.value && !(recipeBatches.value && recipeBatches.value > 0))
+      problems.push('按配方领料请填写锅数（大于 0）。');
     if (processCode.value === 'LAMINATE' && inputs.value.length > 0) {
       const used = new Set(inputs.value.map((l) => l.side));
       if (!used.has('FRONT') || !used.has('BACK'))
@@ -757,6 +826,12 @@ async function submit() {
         outputs: finish.value ? outputPayload() : [],
         pieceworks: finish.value ? piecePayload() : [],
         process: processCode.value,
+        recipeBatches:
+          processCode.value === 'MIX' && recipeCode.value
+            ? (recipeBatches.value ?? undefined)
+            : undefined,
+        recipeCode:
+          processCode.value === 'MIX' ? recipeCode.value : undefined,
         remark: meta.remark.trim() || undefined,
         scheduleTaskId: scheduleTaskId.value,
         sourceStage: sourceStage.value,
@@ -920,6 +995,75 @@ watch(processCode, warnNoPatterns);
                 class="text-xs text-muted-foreground"
                 >共 {{ stockTotal }} 行，只显示前 200 行，请用搜索缩小范围</span>
             </div>
+            <div
+              v-if="processCode === 'MIX' && sourceStage === 'RAW'"
+              class="flex flex-col gap-2 rounded-md border border-dashed border-border p-3 text-xs"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold text-foreground">按配方领料</span>
+                <Select
+                  id="order-recipe"
+                  v-model:value="recipeCode"
+                  allow-clear
+                  class="w-56"
+                  :options="recipeOptions"
+                  placeholder="选配方，一次领齐所有原料"
+                  show-search
+                  option-filter-prop="label"
+                  size="small"
+                  @clear="clearRecipe"
+                />
+                <InputNumber
+                  id="order-recipe-batches"
+                  :value="recipeBatches ?? undefined"
+                  addon-after="锅"
+                  aria-label="配方锅数"
+                  :min="0"
+                  :precision="3"
+                  :style="{ width: '8rem' }"
+                  size="small"
+                  @change="(v) => (recipeBatches = (v as null | number | undefined) ?? null)"
+                />
+                <Button
+                  :disabled="!recipeCode"
+                  :loading="recipeLoading"
+                  size="small"
+                  type="primary"
+                  @click="applyRecipe"
+                >
+                  按配方带出
+                </Button>
+                <span class="text-muted-foreground">按配方明细的一锅用量 × 锅数算每种原料，先进先出分到库存行；带出后可以改。</span>
+              </div>
+              <template v-if="recipePlan">
+                <Alert
+                  v-if="recipePlan.shortage"
+                  show-icon
+                  type="warning"
+                  message="有原料库存不够，可以先领现有的，到料后在「车间在制」里补领。"
+                />
+                <div class="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+                  <span
+                    v-for="c in recipeChecks"
+                    :key="c.code"
+                    :class="
+                      c.target !== null && Math.abs(c.filled - c.target) > 0.0005
+                        ? 'text-warning'
+                        : ''
+                    "
+                  >
+                    {{ c.name }}
+                    <b>{{ formatQty(c.filled) }}</b>{{ c.target === null ? '（配方外）' : ` / ${formatQty(c.target)}` }} kg
+                    <template v-for="l in recipePlan.lines" :key="l.rawMaterialCode">
+                      <span
+                        v-if="l.rawMaterialCode === c.code && Number(l.shortage) > 0"
+                        class="text-destructive"
+                      >（缺 {{ formatQty(l.shortage) }}）</span>
+                    </template>
+                  </span>
+                </div>
+              </template>
+            </div>
             <Table
               :columns="stockColumns"
               :data-source="visibleStock"
@@ -1003,8 +1147,8 @@ watch(processCode, warnNoPatterns);
             class="flex flex-col gap-1 rounded-md border border-border p-3 text-xs"
           >
             <div
-              v-for="line in inputs"
-              :key="line.stock.id"
+              v-for="(line, index) in inputs"
+              :key="index"
               class="flex flex-wrap gap-x-3"
             >
               <span class="font-mono">{{ line.stock.itemCode }}</span>

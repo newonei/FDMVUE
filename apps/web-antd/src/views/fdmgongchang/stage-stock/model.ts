@@ -276,10 +276,19 @@ export function deriveOutputs(
   process: string,
   inputs: InputLine[],
   defaultMaterial = 'TPE',
+  /** 密炼按配方领料时，产出板材的配方版本默认用这个配方。 */
+  recipeCode?: null | string,
 ): OutputDraft[] {
   if (inputs.length === 0) return [];
   if (process === 'MIX') {
-    return [draft({ material: defaultMaterial }, '')];
+    return [
+      draft(
+        recipeCode
+          ? { material: defaultMaterial, recipeCode }
+          : { material: defaultMaterial },
+        '',
+      ),
+    ];
   }
   if (process === 'SLICE') {
     const groups = new Map<
@@ -617,4 +626,77 @@ export function guessPackedAttrs(
       find(options.materials, 'TPE'),
     ...(dims.length === undefined ? parseSizeText(line.specification) : dims),
   };
+}
+
+/** 按配方算出的建议领料：每行库存领多少（先进先出），带上库存行信息方便直接填进领料表。 */
+export function recipePicks(plan: Api.RecipePlan): InputLine[] {
+  return plan.lines.flatMap((line) =>
+    line.picks
+      .filter((p) => (toNumber(p.quantity) ?? 0) > 0)
+      .map((p) => ({
+        quantity: toNumber(p.quantity) ?? 0,
+        stock: {
+          batchNo: p.batchNo,
+          id: p.stockId,
+          item: {
+            rawCategory: line.rawCategory ?? null,
+            rawMaterialCode: line.rawMaterialCode,
+            rawMaterialName: line.rawMaterialName ?? null,
+          },
+          itemCode: p.itemCode,
+          location: p.location,
+          quantity: p.available,
+          stage: 'RAW',
+        },
+      })),
+  );
+}
+
+export interface RecipeCheck {
+  code: string;
+  /** 这次填的领用数量。 */
+  filled: number;
+  name: string;
+  /** 这次应领（新开单是应领，补领是还要领）；不在配方里的料为 null。 */
+  target: null | number;
+}
+
+/**
+ * 对照这次填的领料和配方：每种原料填了多少、应领多少。
+ * 配方里的料按配方顺序在前，另外填的料（不在配方里）排在后面。
+ */
+export function recipeCheck(
+  plan: Api.RecipePlan | undefined,
+  inputs: InputLine[],
+  /** true：对照「还要领」（补领）；false：对照「应领」（开单）。 */
+  remainingOnly = false,
+): RecipeCheck[] {
+  if (!plan) return [];
+  const filled = new Map<string, { name: string; qty: number }>();
+  for (const line of inputs) {
+    const code = line.stock.item?.rawMaterialCode;
+    if (!code) continue;
+    const prev = filled.get(code);
+    filled.set(code, {
+      name: prev?.name ?? line.stock.item?.rawMaterialName ?? code,
+      qty: roundQty((prev?.qty ?? 0) + line.quantity),
+    });
+  }
+  const planned = plan.lines.filter((l) => l.required !== null && l.required !== undefined);
+  const rows: RecipeCheck[] = planned.map((l) => ({
+    code: l.rawMaterialCode,
+    filled: filled.get(l.rawMaterialCode)?.qty ?? 0,
+    name: l.rawMaterialName ?? l.rawMaterialCode,
+    target: toNumber(remainingOnly ? l.remaining : l.required) ?? 0,
+  }));
+  const known = new Set(planned.map((l) => l.rawMaterialCode));
+  for (const [code, f] of filled) {
+    if (!known.has(code)) rows.push({ code, filled: f.qty, name: f.name, target: null });
+  }
+  return rows;
+}
+
+/** 领料行标签：开单领料不标，补领标「第 n 次补领」。 */
+export function issueSeqLabel(seq?: null | number) {
+  return seq && seq > 0 ? `第 ${seq} 次补领` : '';
 }
