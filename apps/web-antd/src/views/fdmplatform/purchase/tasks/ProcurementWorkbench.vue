@@ -52,7 +52,6 @@ import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
 import QuoteComparisonDialog from '../quotes/QuoteComparisonDialog.vue';
-import QuoteEntryDialog from '../quotes/QuoteEntryDialog.vue';
 import {
   dueBadge,
   MAINLINE_STEPS,
@@ -62,6 +61,8 @@ import {
   visibleStages,
   workbenchAction,
 } from './model';
+import RequestAssignDialog from './RequestAssignDialog.vue';
+import RequestQuoteDialog from './RequestQuoteDialog.vue';
 
 import '../components/procurement.css';
 
@@ -111,6 +112,7 @@ const actionEntry = ref<ProcurementWorkItem>();
 const actionOverride = ref<{ action: string; kind: DocumentKind }>();
 const compareEntry = ref<ProcurementWorkItem>();
 const quoteEntry = ref<ProcurementWorkItem>();
+const assignEntry = ref<ProcurementWorkItem>();
 const claiming = ref<string>();
 const detail = ref<{ kind: ProcurementWorkItem['kind']; row: DocumentRow }>();
 const standalone = ref<{ id: string; kind: 'requests' | 'tasks' }>();
@@ -119,6 +121,7 @@ const childOpen = computed(
     !!actionEntry.value ||
     !!compareEntry.value ||
     !!quoteEntry.value ||
+    !!assignEntry.value ||
     !!detail.value ||
     !!standalone.value ||
     !!claiming.value,
@@ -218,6 +221,7 @@ function perform(entry: ProcurementWorkItem) {
   actionOverride.value = undefined;
   if (action.mode === 'claim') claim(entry);
   else if (action.mode === 'quote') quoteEntry.value = entry;
+  else if (action.mode === 'assign') assignEntry.value = entry;
   else if (action.mode === 'compare') compareEntry.value = entry;
   else if (action.action) actionEntry.value = entry;
   else showDetails(entry);
@@ -225,6 +229,10 @@ function perform(entry: ProcurementWorkItem) {
 function performSecondary(entry: ProcurementWorkItem) {
   const secondary = workbenchAction(entry).secondary;
   if (childOpen.value || !secondary) return;
+  if (secondary.mode === 'assign') {
+    assignEntry.value = entry;
+    return;
+  }
   actionOverride.value = { action: secondary.action, kind: secondary.kind };
   actionEntry.value = entry;
 }
@@ -260,14 +268,21 @@ function changeDue(value: DueFilter) {
   page.value = 1;
   void load();
 }
-function quoteSaved(
-  _: unknown,
-  quoteId: string | undefined,
-  orderNow: boolean,
-) {
+function assignSaved() {
+  assignEntry.value = undefined;
+  void load();
+}
+/** The request a quote-stage task belongs to; the dialog lists all its BUY tasks. */
+function requestOf(entry: ProcurementWorkItem | undefined) {
+  const id = entry?.row.record?.requestId;
+  return typeof id === 'string' ? id : undefined;
+}
+function quoteSaved(_: unknown, quoteIds: string[], orderNow: boolean) {
   const entry = quoteEntry.value;
   quoteEntry.value = undefined;
   void load();
+  // Open 选价下单 on the clicked product's new quote; same-request quotes join as companions.
+  const quoteId = quoteIds[0];
   if (orderNow && quoteId && entry)
     compareEntry.value = {
       ...entry,
@@ -385,6 +400,7 @@ watch(
     actionEntry.value = undefined;
     compareEntry.value = undefined;
     quoteEntry.value = undefined;
+    assignEntry.value = undefined;
     if (!active.value || archive.value) {
       sequence++;
       loading.value = false;
@@ -919,12 +935,20 @@ onBeforeUnmount(() => {
       "
       @updated="updated"
     />
-    <QuoteEntryDialog
+    <RequestQuoteDialog
       :open="!!quoteEntry && active"
       :contract-id="quoteEntry?.row.contractId"
+      :request-id="requestOf(quoteEntry)"
       :assignment-id="quoteEntry?.row.id"
       @close="quoteEntry = undefined"
       @saved="quoteSaved"
+    />
+    <RequestAssignDialog
+      :open="!!assignEntry && active"
+      :contract-id="assignEntry?.row.contractId"
+      :request-id="assignEntry?.row.id"
+      @close="assignEntry = undefined"
+      @saved="assignSaved"
     />
     <RecordDetail
       :open="!!detail && active"

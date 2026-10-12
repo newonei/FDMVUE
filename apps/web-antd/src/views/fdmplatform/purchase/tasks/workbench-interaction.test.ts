@@ -115,11 +115,40 @@ vi.mock('../../documents/DocumentAction.vue', () => ({
         : null,
   }),
 }));
-vi.mock('../quotes/QuoteEntryDialog.vue', () => ({
+vi.mock('./RequestAssignDialog.vue', () => ({
   default: defineComponent({
     props: {
       open: Boolean,
       contractId: { type: String, default: undefined },
+      requestId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup: (props, ctx) => () =>
+      props.open
+        ? h(
+            'section',
+            {
+              'data-assign-request': props.requestId,
+              'data-contract': props.contractId,
+            },
+            [
+              h('button', { onClick: () => ctx.emit('close') }, '取消分派'),
+              h(
+                'button',
+                { onClick: () => ctx.emit('saved', { id: props.contractId }) },
+                '确认分派',
+              ),
+            ],
+          )
+        : null,
+  }),
+}));
+vi.mock('./RequestQuoteDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      requestId: { type: String, default: undefined },
       assignmentId: { type: String, default: undefined },
     },
     emits: ['close', 'saved'],
@@ -129,6 +158,7 @@ vi.mock('../quotes/QuoteEntryDialog.vue', () => ({
             'section',
             {
               'data-quote-entry': props.assignmentId,
+              'data-quote-request': props.requestId,
               'data-contract': props.contractId,
             },
             [
@@ -140,7 +170,7 @@ vi.mock('../quotes/QuoteEntryDialog.vue', () => ({
                     ctx.emit(
                       'saved',
                       { id: props.contractId },
-                      'new-quote',
+                      ['new-quote'],
                       false,
                     ),
                 },
@@ -153,7 +183,7 @@ vi.mock('../quotes/QuoteEntryDialog.vue', () => ({
                     ctx.emit(
                       'saved',
                       { id: props.contractId },
-                      'new-quote',
+                      ['new-quote'],
                       true,
                     ),
                 },
@@ -290,12 +320,19 @@ function entry(
       contractStatus: 'CONFIRMED',
       allowedActions: [
         'CREATE_QUOTE',
+        'CREATE_QUOTES',
         'SAVE_PLAN',
         'ASSIGN_FULFILLMENT',
+        'ASSIGN_REQUEST',
         'CLAIM_REQUEST',
         'ORDER_FROM_QUOTE',
       ],
-      record: { id: `source-${key}`, status: 'ASSIGNED', method: 'BUY' },
+      record: {
+        id: `source-${key}`,
+        status: 'ASSIGNED',
+        method: 'BUY',
+        requestId: 'request-1',
+      },
     },
   };
 }
@@ -412,6 +449,7 @@ describe('采购工作台交互与全量查询', () => {
     await settle();
     const entry = host.querySelector<HTMLElement>('[data-quote-entry]')!;
     expect(entry.dataset.quoteEntry).toBe('source-a');
+    expect(entry.dataset.quoteRequest).toBe('request-1');
     expect(entry.dataset.contract).toBe('contract-a');
     expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
     button(host, '保存报价').click();
@@ -553,7 +591,7 @@ describe('采购工作台交互与全量查询', () => {
       expect.objectContaining({ pageNo: 1, contractId: 'another-contract' }),
     );
   });
-  it('我来接单确认后按外采接下整条申请，分派…仍走原分派表单', async () => {
+  it('我来接单确认后按外采接下整条申请，分派…打开按单分派表格', async () => {
     mocks.page.mockResolvedValue(
       response([entry('req', 'intake', 'requests')]),
     );
@@ -576,12 +614,15 @@ describe('采购工作台交互与全量查询', () => {
     expect(mocks.success).toHaveBeenCalledWith('已接单，下一步录入报价');
     button(host, '分派…').click();
     await settle();
-    const action = host.querySelector<HTMLElement>('[data-action]')!;
-    expect(action.dataset.action).toBe('ASSIGN_FULFILLMENT');
-    expect(action.dataset.kind).toBe('tasks');
-    button(host, '取消操作').click();
-    await settle();
+    const assign = host.querySelector<HTMLElement>('[data-assign-request]')!;
+    expect(assign.dataset.assignRequest).toBe('source-req');
+    expect(assign.dataset.contract).toBe('contract-a');
     expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+    const loads = mocks.page.mock.calls.length;
+    button(host, '确认分派').click();
+    await settle();
+    expect(host.querySelector<HTMLElement>('[data-assign-request]')).toBeNull();
+    expect(mocks.page.mock.calls.length).toBeGreaterThan(loads);
   });
   it('接单失败时提示原因并保留列表', async () => {
     mocks.page.mockResolvedValue(

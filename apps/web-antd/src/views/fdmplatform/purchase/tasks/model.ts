@@ -26,14 +26,21 @@ export function visibleStages(counts?: Partial<Record<string, number>>) {
   );
 }
 
+export type WorkbenchMode = 'assign' | 'claim' | 'compare' | 'quote';
+
 export interface WorkbenchAction {
   title: string;
   kind: DocumentKind;
   action?: string;
   /** Flows with their own dialog instead of the generic action form. */
-  mode?: 'claim' | 'compare' | 'quote';
+  mode?: WorkbenchMode;
   /** A second, less common way to handle the same step. */
-  secondary?: { action: string; kind: DocumentKind; title: string };
+  secondary?: {
+    action: string;
+    kind: DocumentKind;
+    mode?: WorkbenchMode;
+    title: string;
+  };
 }
 
 /** Stage selects a shortcut; the existing modal reloads and validates the source. */
@@ -59,10 +66,12 @@ export function workbenchAction(entry: ProcurementWorkItem): WorkbenchAction {
       break;
     }
     case 'intake': {
+      // 按单分派：整张申请以产品表格一次分派，可混合外采 / 自产 / 库存并拆给多人。
       const assign = {
         title: '分派…',
         kind: 'tasks' as const,
-        action: 'ASSIGN_FULFILLMENT',
+        action: 'ASSIGN_REQUEST',
+        mode: 'assign' as const,
       };
       launch = allowed.includes('CLAIM_REQUEST')
         ? {
@@ -105,7 +114,7 @@ export function workbenchAction(entry: ProcurementWorkItem): WorkbenchAction {
           ? {
               title: '录入报价',
               kind: 'quotes',
-              action: 'CREATE_QUOTE',
+              action: 'CREATE_QUOTES',
               mode: 'quote',
             }
           : { title: '核对报价', kind: entry.kind };
