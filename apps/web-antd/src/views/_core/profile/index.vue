@@ -10,6 +10,7 @@ import { Card, Tabs } from 'ant-design-vue';
 
 import { getAuthPermissionInfoApi } from '#/api';
 import { getUserProfile } from '#/api/system/user/profile';
+import McpConnections from '#/views/fdmmcp/modules/my-connections.vue';
 
 import BaseInfo from './modules/base-info.vue';
 import ProfileUser from './modules/profile-user.vue';
@@ -58,6 +59,9 @@ onMounted(loadProfile);
           </Tabs.TabPane>
           <Tabs.TabPane key="userSocial" tab="社交绑定" force-render>
             <UserSocial @update:active-name="activeName = $event" />
+          </Tabs.TabPane>
+          <Tabs.TabPane key="mcpConnection" tab="AI 连接">
+            <McpConnections />
           </Tabs.TabPane>
           <!-- TODO @芋艿：在线设备 -->
         </Tabs>
