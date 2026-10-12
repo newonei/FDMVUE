@@ -260,11 +260,11 @@ const execution = computed(() =>
 );
 const nextHints: Record<string, { button: string; text: string }> = {
   details: {
-    text: '先把工厂联系人、交期和交货地址填好并确认，后面导出合同会带上这些资料。',
+    text: '选好工厂联系人、签约公司、合同模板和必选条款，点「确认下单资料」。交期和地址可选。',
     button: '填写下单资料',
   },
   contract: {
-    text: '导出采购合同给工厂盖章，签回后上传到这里，之后才能申请付款。',
+    text: '生成合同 Word 发给工厂盖章，拿到盖章件（PDF 或照片）后上传。',
     button: '去导出 / 上传合同',
   },
   arrival: {
@@ -622,6 +622,9 @@ async function command(
     let successMessage = '采购资料已更新';
     if (action === 'WITHDRAW_DETAILS' || action === 'REVISE_DETAILS')
       successMessage = '已进入资料草稿，可直接编辑';
+    else if (action === 'CONFIRM_DETAILS')
+      successMessage = '下单资料已确认，下一步生成合同发给工厂盖章';
+    else if (action === 'SAVE_DETAILS') successMessage = '草稿已保存';
     else if (action === 'EXPORT_CONTRACT')
       successMessage = 'Word已生成，可在历史版本中下载';
     message.success(successMessage);
@@ -1290,6 +1293,7 @@ watch(financeType, (value, previous) => {
                 :saving="saving"
                 @busy="contactEditorBusy = $event"
                 @save="(payload) => command('SAVE_DETAILS', payload)"
+                @confirm="(payload) => command('CONFIRM_DETAILS', payload)"
                 @action="action"
               />
               <section class="order-arrivals">
@@ -1364,7 +1368,7 @@ watch(financeType, (value, previous) => {
               <OrderContract
                 :view="view"
                 :saving="saving"
-                @save="(payload) => command('SAVE_DETAILS', payload)"
+                @details="tab = 'details'"
                 @action="action"
                 @signed="upload"
               />

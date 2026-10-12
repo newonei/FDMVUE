@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 import {
   activeContacts,
   compatibleClauses,
+  detailsChecklist,
+  onlyChoice,
   orderDetailsPayload,
   orderSteps,
   preferredContact,
@@ -212,5 +214,52 @@ describe('orderSteps', () => {
     );
     expect(steps.current?.key).toBe('contract');
     expect(steps.current?.summary).toBe('已导出，等待签回');
+  });
+});
+
+describe('下单资料确认前检查', () => {
+  const template = {
+    ...clause('t', ''),
+    requiredClauseGroups: ['PAYMENT', 'DELIVERY'],
+  };
+  const entity = {
+    ...clause('e', ''),
+    legalName: '武汉某公司',
+    address: '',
+  };
+  it('lists everything the backend needs before confirming', () => {
+    const checks = detailsChecklist({
+      clauseIds: ['pay'],
+      clauses: [clause('pay', 'PAYMENT'), clause('del', 'DELIVERY')],
+      contact: { phone: '' },
+      entity,
+      template,
+    });
+    expect(
+      checks.filter((check) => !check.ok).map((check) => check.key),
+    ).toEqual(['phone', 'entity', 'clauses']);
+    expect(checks.find((check) => check.key === 'entity')?.hint).toBe(
+      '签约公司缺地址，请在采购设置里补齐',
+    );
+    expect(checks.find((check) => check.key === 'clauses')?.hint).toBe(
+      '还差交货条款',
+    );
+  });
+  it('passes once contact, company, template and required clauses are set', () => {
+    const checks = detailsChecklist({
+      clauseIds: ['pay', 'del'],
+      clauses: [clause('pay', 'PAYMENT'), clause('del', 'DELIVERY')],
+      contact: { phone: '138' },
+      entity: { ...entity, address: '武汉' },
+      template,
+    });
+    expect(checks.every((check) => check.ok)).toBe(true);
+  });
+  it('preselects only when exactly one active option exists', () => {
+    expect(onlyChoice([clause('a', 'X')])).toBe('a');
+    expect(onlyChoice([clause('a', 'X'), clause('b', 'X')])).toBeUndefined();
+    expect(
+      onlyChoice([clause('a', 'X'), { ...clause('b', 'X'), active: false }]),
+    ).toBe('a');
   });
 });

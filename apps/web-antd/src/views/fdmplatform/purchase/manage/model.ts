@@ -46,7 +46,86 @@ export function compatibleClauses(
   const groups = selected.map((entry) => entry.groupCode);
   if (new Set(groups).size !== groups.length) return '同一条款组只能选择一项';
   const missing = requiredGroups.filter((group) => !groups.includes(group));
-  return missing.length > 0 ? `请选择必要条款：${missing.join('、')}` : '';
+  return missing.length > 0
+    ? `请选择必要条款：${missing.map((group) => clauseGroupTitle(group)).join('、')}`
+    : '';
+}
+const CLAUSE_GROUP_LABELS: Record<string, string> = {
+  PAYMENT: '付款条款',
+  DELIVERY: '交货条款',
+  QUALITY: '质量要求',
+  AFTER_SALES: '售后服务',
+  PACKAGING: '包装要求',
+  TRANSPORT: '运输约定',
+  ACCEPTANCE: '验收标准',
+  LIABILITY: '违约责任',
+  DISPUTE: '争议解决',
+  CONFIDENTIALITY: '保密条款',
+  OTHER: '其他约定',
+};
+export function clauseGroupTitle(group: string | undefined) {
+  return group ? (CLAUSE_GROUP_LABELS[group] ?? group) : '条款组';
+}
+/** The only active option, so a buyer with one signing company or template never has to pick it. */
+export function onlyChoice<T extends { active?: boolean; id: string }>(
+  options: T[],
+) {
+  const active = options.filter((entry) => entry.active);
+  return active.length === 1 ? active[0]?.id : undefined;
+}
+export interface DetailsCheck {
+  key: 'clauses' | 'contact' | 'entity' | 'phone' | 'template';
+  label: string;
+  ok: boolean;
+  hint?: string;
+}
+/** What the backend requires before 下单资料 can be confirmed, in the order the form shows it. */
+export function detailsChecklist(input: {
+  clauseIds: string[];
+  clauses: ProcurementSetting[];
+  contact?: { phone?: null | string };
+  entity?: ProcurementSetting;
+  template?: ProcurementSetting;
+}): DetailsCheck[] {
+  const required = input.template?.requiredClauseGroups ?? [];
+  const picked = new Set(
+    input.clauses
+      .filter((entry) => input.clauseIds.includes(entry.id))
+      .map((entry) => entry.groupCode),
+  );
+  const missingGroups = required.filter((group) => !picked.has(group));
+  const entityGaps = [
+    input.entity?.legalName ? '' : '法定名称',
+    input.entity?.address ? '' : '地址',
+  ].filter(Boolean);
+  return [
+    { key: 'contact', label: '工厂联系人', ok: !!input.contact },
+    {
+      key: 'phone',
+      label: '联系人电话',
+      ok: !!input.contact?.phone,
+      hint: input.contact ? '在「新增 / 维护」里给联系人补电话' : undefined,
+    },
+    {
+      key: 'entity',
+      label: '签约公司',
+      ok: !!input.entity && entityGaps.length === 0,
+      hint:
+        input.entity && entityGaps.length > 0
+          ? `签约公司缺${entityGaps.join('、')}，请在采购设置里补齐`
+          : undefined,
+    },
+    { key: 'template', label: '合同模板', ok: !!input.template },
+    {
+      key: 'clauses',
+      label: '必选条款',
+      ok: !!input.template && missingGroups.length === 0,
+      hint:
+        missingGroups.length > 0
+          ? `还差${missingGroups.map((group) => clauseGroupTitle(group)).join('、')}`
+          : undefined,
+    },
+  ];
 }
 export function snapshotShape(line: BusinessRecord): string {
   const snapshot = line.specificationSnapshot as
@@ -283,7 +362,7 @@ export function orderSteps(
       summary:
         view.details.status === 'CONFIRMED'
           ? `已确认${view.details.deliveryDate ? ` · 交期 ${view.details.deliveryDate}` : ''}`
-          : '填联系人、交期、交货地址',
+          : '填联系人、签约公司和条款后确认',
       done: view.details.status === 'CONFIRMED',
     },
     {

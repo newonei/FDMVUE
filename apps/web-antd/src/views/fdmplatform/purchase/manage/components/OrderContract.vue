@@ -2,10 +2,9 @@
 import type {
   ProcurementFile,
   ProcurementOrderView,
-  ProcurementSetting,
 } from '#/api/fdmplatform/procurement';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { formatDate } from '@vben/utils';
 
@@ -14,116 +13,39 @@ import {
   Button,
   Card,
   Descriptions,
-  Form,
   Select,
   Space,
   Table,
 } from 'ant-design-vue';
 
-import {
-  downloadProcurementFile,
-  getProcurementSettings,
-} from '#/api/fdmplatform/procurement';
+import { downloadProcurementFile } from '#/api/fdmplatform/procurement';
 
 import { errorText } from '../../../data';
-import { compatibleClauses, downloadBlob } from '../model';
+import { downloadBlob } from '../model';
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
 const emit = defineEmits<{
   action: [name: string];
-  save: [payload: Record<string, unknown>];
+  details: [];
   signed: [file: File, exportId: string];
 }>();
-const entities = ref<ProcurementSetting[]>([]);
-const templates = ref<ProcurementSetting[]>([]);
-const clauses = ref<ProcurementSetting[]>([]);
 const pageError = ref('');
 const exportId = ref<string>();
 const fileInput = ref<HTMLInputElement>();
-const form = reactive({
-  signingEntityId: undefined as string | undefined,
-  templateId: undefined as string | undefined,
-  clauseIds: [] as string[],
-});
-const canEdit = computed(() =>
-  props.view.allowedActions.includes('SAVE_DETAILS'),
+const confirmed = computed(() => props.view.details.status === 'CONFIRMED');
+const entity = computed(() => props.view.details.signingEntitySnapshot);
+const template = computed(() => props.view.details.templateSnapshot);
+const picked = computed(() => props.view.details.clauseSnapshots ?? []);
+const signed = computed(() =>
+  props.view.files.some((file) => file.kind === 'SIGNED'),
 );
-const entity = computed(
-  () =>
-    (canEdit.value
-      ? entities.value.find((item) => item.id === form.signingEntityId)
-      : props.view.details.signingEntitySnapshot) ??
-    props.view.details.signingEntitySnapshot,
-);
-const template = computed(
-  () =>
-    (canEdit.value
-      ? templates.value.find((item) => item.id === form.templateId)
-      : props.view.details.templateSnapshot) ??
-    props.view.details.templateSnapshot,
-);
-const groups = computed(() => [
-  ...new Set(
-    (canEdit.value ? clauses.value : (props.view.details.clauseSnapshots ?? []))
-      .map((item) => item.groupCode)
-      .filter(Boolean),
-  ),
-]);
-const picked = computed(() =>
-  canEdit.value
-    ? clauses.value.filter((item) => form.clauseIds.includes(item.id))
-    : (props.view.details.clauseSnapshots ?? []),
-);
+// The newest Word is almost always the one the factory stamped.
 watch(
-  () => [props.view.id, props.view.details.version],
-  async () => {
-    Object.assign(form, {
-      signingEntityId: props.view.details.signingEntityId,
-      templateId: props.view.details.templateId,
-      clauseIds: [...props.view.details.clauseIds],
-    });
-    try {
-      [entities.value, templates.value, clauses.value] = await Promise.all([
-        getProcurementSettings('entities', { usage: 'SIGN' }),
-        getProcurementSettings('templates'),
-        getProcurementSettings('clauses'),
-      ]);
-    } catch (error) {
-      pageError.value = errorText(error);
-    }
+  () => props.view.exports.map((file) => file.id).join(','),
+  () => {
+    exportId.value = props.view.exports.at(-1)?.id;
   },
   { immediate: true },
 );
-function clauseGroupTitle(group: string | undefined) {
-  const labels: Record<string, string> = {
-    PAYMENT: '付款条款',
-    DELIVERY: '交货条款',
-    QUALITY: '质量要求',
-    AFTER_SALES: '售后服务',
-    PACKAGING: '包装要求',
-    TRANSPORT: '运输约定',
-    ACCEPTANCE: '验收标准',
-    LIABILITY: '违约责任',
-    DISPUTE: '争议解决',
-    CONFIDENTIALITY: '保密条款',
-    OTHER: '其他约定',
-  };
-  return group ? (labels[group] ?? group) : '条款组';
-}
-function chooseClause(group: string, value: unknown) {
-  const other = form.clauseIds.filter(
-    (id) => clauses.value.find((item) => item.id === id)?.groupCode !== group,
-  );
-  form.clauseIds = typeof value === 'string' ? [...other, value] : other;
-}
-function save() {
-  pageError.value = compatibleClauses(
-    clauses.value,
-    form.clauseIds,
-    template.value?.requiredClauseGroups ?? [],
-  );
-  if (pageError.value) return;
-  emit('save', { ...props.view.details, ...form });
-}
 async function download(file: ProcurementFile) {
   try {
     downloadBlob(
@@ -146,150 +68,119 @@ function upload(event: Event) {
 </script>
 <template>
   <Space direction="vertical" style="width: 100%" size="middle">
-    <Alert v-if="pageError" type="error" :message="pageError" /><Alert
-      type="info"
-      message="采购签约公司独立于付款主体和成本归属。Word只包含选定签约资料、采购明细及条款，不包含内部付款分摊或利润。"
-    /><Card title="签约资料与条款选择" size="small">
-      <Form layout="vertical" class="contract-fields">
-        <Form.Item label="采购签约公司" required>
-          <Select
-            v-model:value="form.signingEntityId"
-            :disabled="!canEdit || saving"
-            :options="
-              entities
-                .filter(
-                  (item) => item.active || item.id === form.signingEntityId,
-                )
-                .map((item) => ({
-                  value: item.id,
-                  label: item.legalName ?? item.name,
-                }))
-            "
-            show-search
-            option-filter-prop="label"
-            placeholder="选择签约公司"
-          />
-</Form.Item><Form.Item label="合同模板" required>
-          <Select
-            v-model:value="form.templateId"
-            :disabled="!canEdit || saving"
-            :options="
-              templates
-                .filter((item) => item.active || item.id === form.templateId)
-                .map((item) => ({
-                  value: item.id,
-                  label: `${item.name} · 版本${item.version}`,
-                }))
-            "
-            placeholder="选择模板"
-          />
-</Form.Item><Form.Item
-          v-for="group in groups"
-          :key="group"
-          :label="clauseGroupTitle(group)"
-          :required="template?.requiredClauseGroups?.includes(group!)"
-        >
-          <Select
-            :value="picked.find((item) => item.groupCode === group)?.id"
-            :disabled="!canEdit || saving"
-            :options="
-              clauses
-                .filter(
-                  (item) =>
-                    item.groupCode === group &&
-                    (item.active || form.clauseIds.includes(item.id)),
-                )
-                .map((item) => ({ value: item.id, label: item.name }))
-            "
-            allow-clear
-            @update:value="(value) => chooseClause(group!, value)"
-          />
-        </Form.Item>
-</Form><Space wrap>
-        <Button v-if="canEdit" type="primary" :loading="saving" @click="save">
-          保存合同选择
-</Button><Button
-          v-if="view.allowedActions.includes('CONFIRM_DETAILS')"
-          :loading="saving"
-          @click="emit('action', 'CONFIRM_DETAILS')"
-        >
-          确认已保存下单资料
-</Button><Button
-          v-if="view.allowedActions.includes('WITHDRAW_DETAILS')"
-          :loading="saving"
-          @click="emit('action', 'WITHDRAW_DETAILS')"
-        >
-          撤回并编辑
-</Button><Button
-          v-if="view.allowedActions.includes('EXPORT_CONTRACT')"
-          type="primary"
-          :loading="saving"
-          @click="emit('action', 'EXPORT_CONTRACT')"
-        >
-          生成可编辑 Word
+    <Alert v-if="pageError" type="error" :message="pageError" />
+    <Alert
+      v-if="!confirmed"
+      type="warning"
+      show-icon
+      message="下单资料还没确认，暂时不能生成合同"
+      description="签约公司、合同模板和条款在「商品与到货」页签的下单资料里填写，确认后回到这里生成 Word。"
+    >
+      <template #action>
+        <Button size="small" type="primary" @click="emit('details')">
+          去填写下单资料
         </Button>
-      </Space>
-</Card><Card title="正文与抬头预览" size="small">
-      <h3>{{ template?.title ?? '请选择模板' }}</h3>
+      </template>
+    </Alert>
+    <Card title="合同签回" size="small">
+      <ol class="contract-steps">
+        <li :class="{ done: view.exports.length > 0 }">
+          <b>1. 生成合同 Word</b>
+          <span class="muted">按已确认的下单资料生成，可在 Word 里微调后发给工厂盖章。</span>
+          <Button
+            v-if="view.allowedActions.includes('EXPORT_CONTRACT')"
+            :type="view.exports.length > 0 ? 'default' : 'primary'"
+            :loading="saving"
+            @click="emit('action', 'EXPORT_CONTRACT')"
+          >
+            {{ view.exports.length > 0 ? '重新生成 Word' : '生成合同 Word' }}
+          </Button>
+        </li>
+        <li :class="{ done: signed }">
+          <b>2. 上传工厂盖章件</b>
+          <span class="muted">支持 PDF、Word 或照片（jpg / png）。</span>
+          <Space v-if="view.allowedActions.includes('UPLOAD_SIGNED')" wrap>
+            <Select
+              v-if="view.exports.length > 1"
+              v-model:value="exportId"
+              :options="
+                view.exports.map((file) => ({
+                  value: file.id,
+                  label: `对应第${file.revision ?? ''}版 Word`,
+                }))
+              "
+              style="width: 180px"
+            /><Button
+              :type="signed ? 'default' : 'primary'"
+              :disabled="!exportId || saving || !view.storageEnabled"
+              :title="view.storageEnabled ? undefined : '文件存储未配置'"
+              @click="fileInput?.click()"
+            >
+              {{ signed ? '再传一份盖章件' : '上传盖章件' }}
+            </Button>
+            <input
+              ref="fileInput"
+              type="file"
+              hidden
+              accept=".pdf,.docx,.jpg,.jpeg,.png"
+              @change="upload"
+            />
+          </Space>
+          <span v-else-if="confirmed" class="muted">先生成 Word</span>
+        </li>
+      </ol>
+    </Card>
+    <Card title="签约资料" size="small">
       <Descriptions size="small" :column="2">
         <Descriptions.Item label="采购方">
-          {{
-            entity?.legalName ?? entity?.name ?? '未选择'
-          }}
-</Descriptions.Item><Descriptions.Item label="供应商">
+          {{ entity?.legalName ?? entity?.name ?? '未选择' }}
+        </Descriptions.Item>
+        <Descriptions.Item label="供应商">
           {{ view.order.supplierName }}
-</Descriptions.Item><Descriptions.Item label="采购方地址">
+        </Descriptions.Item>
+        <Descriptions.Item label="采购方地址">
           {{ entity?.address ?? '未维护' }}
-</Descriptions.Item><Descriptions.Item label="工厂联系人">
+        </Descriptions.Item>
+        <Descriptions.Item label="工厂联系人">
           {{ view.details.contactSnapshot?.name ?? '未选择' }}
           {{ view.details.contactSnapshot?.phone }}
         </Descriptions.Item>
+        <Descriptions.Item label="合同模板">
+          {{ template?.name ?? '未选择' }}
+        </Descriptions.Item>
+        <Descriptions.Item label="条款">
+          {{ picked.map((item) => item.name).join('；') || '未选择' }}
+        </Descriptions.Item>
       </Descriptions>
-      <p class="clause-text">{{ template?.headerText }}</p>
+    </Card>
+    <Card v-if="template" title="正文预览" size="small">
+      <h3>{{ template.title }}</h3>
+      <p class="clause-text">{{ template.headerText }}</p>
       <section v-for="item in picked" :key="item.id">
         <strong>{{ item.name }}</strong>
         <p class="clause-text">{{ item.text }}</p>
       </section>
-      <p class="clause-text">{{ template?.footerText }}</p>
-</Card><Card title="Word 与签章版本" size="small">
-      <Space v-if="view.allowedActions.includes('UPLOAD_SIGNED')" wrap>
-        <Select
-          v-model:value="exportId"
-          :options="
-            view.exports.map((file) => ({
-              value: file.id,
-              label: `第${file.revision ?? ''}版 · ${file.name}`,
-            }))
-          "
-          placeholder="选择签章版对应的Word"
-          style="width: 320px"
-        /><Button
-          :disabled="!exportId || saving || !view.storageEnabled"
-          @click="fileInput?.click()"
-        >
-          上传签章版
-</Button><input
-          ref="fileInput"
-          type="file"
-          hidden
-          accept=".pdf,.docx,.jpg,.jpeg,.png"
-          @change="upload"
-        />
-</Space><Table
+      <p class="clause-text">{{ template.footerText }}</p>
+    </Card>
+    <Card title="文件记录" size="small">
+      <Table
         :data-source="view.files"
         row-key="id"
+        size="small"
+        :pagination="false"
         :columns="[
           { title: '文件', dataIndex: 'name' },
-          { title: '文件类型', key: 'kind' },
+          { title: '类型', key: 'kind' },
           { title: '文件版本', dataIndex: 'revision' },
           { title: '资料修订版', dataIndex: 'detailsRevision' },
-          { title: '生成时间', key: 'createdAt', dataIndex: 'createdAt' },
+          { title: '时间', key: 'createdAt', dataIndex: 'createdAt' },
           { title: '操作', key: 'action' },
         ]"
       >
+        <template #emptyText>还没有生成过合同</template>
         <template #bodyCell="{ column, record }">
           <span v-if="column.key === 'kind'">{{
-            record.kind === 'SIGNED' ? '签章文件' : 'Word导出'
+            record.kind === 'SIGNED' ? '工厂盖章件' : '合同 Word'
           }}</span><span v-else-if="column.key === 'createdAt'">{{
             formatDate(
               record.createdAt == null ? undefined : String(record.createdAt),
@@ -308,20 +199,46 @@ function upload(event: Event) {
   </Space>
 </template>
 <style scoped>
-.contract-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 20px;
+.contract-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.contract-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.contract-steps li.done {
+  border-color: var(--ant-color-success-border);
+}
+
+.contract-steps li.done b::after {
+  margin-left: 6px;
+  color: var(--ant-color-success);
+  content: '✓';
+}
+
+.contract-steps .muted {
+  flex: 1 1 240px;
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
 }
 
 .clause-text {
   line-height: 1.8;
   white-space: pre-wrap;
-}
-
-@media (max-width: 700px) {
-  .contract-fields {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
