@@ -58,7 +58,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
 
-    const row = modalApi.getData<FdmjustShopApi.Shop>();
+    const row = (modalApi.getData() as FdmjustShopApi.Shop);
     if (!row?.id) {
       message.error('未找到要编辑的店铺');
       await modalApi.close();

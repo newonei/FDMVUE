@@ -38,7 +38,7 @@ export function useFormSchema(): VbenFormSchema[] {
       fieldName: 'type',
       label: '模型类型',
       component: 'Select',
-      componentProps: (values) => {
+      componentProps: (values: Record<string, any>) => {
         return {
           placeholder: '请输入模型类型',
           disabled: !!values.id,

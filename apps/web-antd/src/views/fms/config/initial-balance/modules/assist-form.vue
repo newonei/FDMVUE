@@ -11,7 +11,7 @@ import { useVbenModal } from '@vben/common-ui';
 import { message } from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
-import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-item-select.vue';
+import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-select-modal.vue';
 
 defineOptions({ name: 'FmsInitialAssistForm' });
 
@@ -159,7 +159,7 @@ function buildCombinations(
           :auxiliary-type-id="config.auxiliaryTypeId"
           multiple
           :placeholder="`请选择${config.name}`"
-          @change="(items) => handleItemsChange(config.auxiliaryTypeId, items)"
+          @change="(items: any[]) => handleItemsChange(config.auxiliaryTypeId, items)"
         />
       </template>
     </Form>

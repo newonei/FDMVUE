@@ -65,7 +65,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmdataEcShopDailyBrushApi.EcShopDailyBrush>();
+    const row = (modalApi.getData() as FdmdataEcShopDailyBrushApi.EcShopDailyBrush);
     formData.value = undefined;
     await formApi.setValues(EC_SHOP_DAILY_BRUSH_DEFAULTS as any, false);
     if (!row?.id) return;

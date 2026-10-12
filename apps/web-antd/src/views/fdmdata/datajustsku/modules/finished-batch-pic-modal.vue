@@ -21,7 +21,7 @@ const [Modal, modalApi] = useVbenModal({
       picUrl.value = '';
       return;
     }
-    const ids = modalApi.getData<number[]>() ?? [];
+    const ids = (modalApi.getData() as number[]) ?? [];
     selectedIds.value = Array.isArray(ids) ? [...ids] : [];
   },
 });

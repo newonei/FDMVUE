@@ -1,6 +1,8 @@
 <script lang="ts" setup>
 import type { FormInstance, FormRules } from 'element-plus';
 
+import type { VoucherPrintSetting } from './print';
+
 import type { FmsVoucherApi } from '#/api/fms/voucher';
 
 import { nextTick, reactive, ref } from 'vue';
@@ -16,11 +18,7 @@ import {
   ElRadioGroup,
 } from 'element-plus';
 
-import {
-  buildVoucherPrintHtml,
-  DEFAULT_VOUCHER_PRINT_SETTING,
-  type VoucherPrintSetting,
-} from './print';
+import { buildVoucherPrintHtml, DEFAULT_VOUCHER_PRINT_SETTING } from './print';
 
 defineOptions({ name: 'FmsVoucherPrintForm' });
 

@@ -112,7 +112,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const seq = ++openSeq;
-    const row = modalApi.getData<FdmdataExtensionReleaseApi.ExtensionRelease>();
+    const row = (modalApi.getData() as FdmdataExtensionReleaseApi.ExtensionRelease);
     await formApi.resetForm();
     await formApi.setValues(EXTENSION_RELEASE_DEFAULTS as any, false);
     currentPackageUrl.value = '';

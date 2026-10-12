@@ -46,11 +46,11 @@ const [Modal, modalApi] = useVbenModal({
       retry = undefined;
       return;
     }
-    const data = modalApi.getData<{
-      result: JstSyncBatchResp;
+    const data = modalApi.getData() as {
       listLabel: string;
+      result: JstSyncBatchResp;
       retry: (ids: number[]) => Promise<JstSyncBatchResp>;
-    }>();
+    };
     listLabel.value = data.listLabel ?? '';
     result.value = {
       successCount: data.result?.successCount ?? 0,

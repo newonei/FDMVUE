@@ -241,7 +241,7 @@ const [Modal, modalApi] = useVbenModal({
     formReady.value = false;
     loadError.value = false;
     modalApi.setState({ confirmDisabled: true });
-    const raw = modalApi.getData<FormOpenPayload>();
+    const raw = (modalApi.getData() as FormOpenPayload);
     const tab =
       raw && typeof raw === 'object' && 'listTab' in raw
         ? raw.listTab

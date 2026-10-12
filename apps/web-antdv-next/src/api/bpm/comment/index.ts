@@ -15,10 +15,10 @@ export namespace BpmCommentApi {
     message: string;
     createTime: string;
     user?: {
-      id: number;
-      nickname: string;
       avatar?: string;
       deptName?: string;
+      id: number;
+      nickname: string;
     };
   }
 }
