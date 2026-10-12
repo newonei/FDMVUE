@@ -249,7 +249,7 @@ function confirm() {
       <h4 class="section-title">工厂与交货</h4>
       <Form layout="vertical" class="order-fields">
         <Form.Item label="工厂联系人" required>
-          <Space style="width: 100%">
+          <div class="contact-row">
             <Select
               v-model:value="form.contactId"
               :disabled="!canEdit || saving"
@@ -271,7 +271,7 @@ function confirm() {
             /><Button v-if="canEdit" @click="contactsOpen = true">
               新增 / 维护
             </Button>
-          </Space>
+          </div>
         </Form.Item>
         <Form.Item label="联系电话">
           <Input
@@ -475,11 +475,21 @@ function confirm() {
   grid-column: 1/-1;
 }
 
+.contact-row {
+  display: flex;
+  gap: 8px;
+}
+
+.contact-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
 .section-title {
   margin: 4px 0 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--ant-color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 .checklist {
@@ -489,21 +499,21 @@ function confirm() {
   padding: 8px 12px;
   margin-bottom: 12px;
   font-size: 13px;
-  background: var(--ant-color-fill-quaternary);
+  background: hsl(var(--accent));
   border-radius: 6px;
 }
 
 .checklist .ok {
-  color: var(--ant-color-success);
+  color: hsl(var(--success));
 }
 
 .checklist .todo {
-  color: var(--ant-color-warning-text);
+  color: color-mix(in srgb, hsl(var(--warning)) 55%, hsl(var(--foreground)));
 }
 
 .muted {
   font-size: 12px;
-  color: var(--ant-color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 @media (max-width: 700px) {

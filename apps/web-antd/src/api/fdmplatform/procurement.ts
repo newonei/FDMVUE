@@ -182,6 +182,12 @@ export function uploadProcurementSigned(
 }
 
 export interface ProcurementOrderRow extends DocumentRow {
+  /** Display number: 金智 keeps its own, native orders get CG-下单日期-ID前6位. */
+  orderCode?: string;
+  /** A signed contract has been uploaded for this order. */
+  signed?: boolean;
+  /** 下单资料交货日期，没填时取报价承诺到货日。 */
+  dueDate?: string;
   ownerUserIds?: number[];
   details?: ProcurementOrderView['details'];
   orderAmount?: string;

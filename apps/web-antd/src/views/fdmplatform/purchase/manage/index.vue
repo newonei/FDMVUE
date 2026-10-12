@@ -79,6 +79,7 @@ import OrderFinance from '../../finance/procurement/components/OrderFinance.vue'
 import { hasPayableBalance } from '../../finance/procurement/model';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
+import { localDate } from '../quotes/comparison';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import {
@@ -89,6 +90,9 @@ import {
   orderDetailsPayload,
   orderMoney,
   orderPaymentProgress,
+  orderRowDue,
+  orderRowProducts,
+  orderRowSteps,
   orderSteps,
   purchaseRowLabels,
 } from './model';
@@ -258,6 +262,8 @@ const execution = computed(() =>
     ? orderSteps(view.value, financeSummary.value)
     : undefined,
 );
+/** 与后端统计同一天（中国时区），列表倒计时和顶部超期数才对得上。 */
+const today = computed(() => overview.value?.asOf ?? localDate());
 const nextHints: Record<string, { button: string; text: string }> = {
   details: {
     text: '选好工厂联系人、签约公司、合同模板和必选条款，点「确认下单资料」。交期和地址可选。',
@@ -776,7 +782,7 @@ watch(financeType, (value, previous) => {
         <div class="order-kpi">
           <span>待签回合同</span>
           <b>{{ overview ? `${overview.unsigned} 张` : '—' }}</b>
-          <small>签回后才能申请付款</small>
+          <small>已下单、还没上传工厂盖章件</small>
         </div>
         <div class="order-kpi">
           <span>未付款</span>
@@ -893,7 +899,7 @@ watch(financeType, (value, previous) => {
           class="fdm-business-table order-table"
           size="middle"
           table-layout="fixed"
-          :scroll="{ x: 1080 }"
+          :scroll="{ x: 1320 }"
           :data-source="records"
           :loading="loading"
           :row-key="(row: ProcurementOrderRow) => row.standaloneId ?? row.id"
@@ -909,12 +915,14 @@ watch(financeType, (value, previous) => {
             showTotal: (value: number) => `共 ${value} 单`,
           }"
           :columns="[
-            { title: '采购单 / 供应商', key: 'supplier', width: 240 },
-            { title: '关联订单', key: 'contract', width: 210 },
-            { title: '采购金额', key: 'amount', width: 155, align: 'right' },
-            { title: '到货进度', key: 'arrival', width: 190 },
-            { title: '付款进度', key: 'payment', width: 185 },
-            { title: '状态 / 办理', key: 'action', width: 140, fixed: 'right' },
+            { title: '采购单 / 供应商', key: 'supplier', width: 230 },
+            { title: '采购产品', key: 'product', width: 220 },
+            { title: '关联合同 / 客户', key: 'contract', width: 190 },
+            { title: '采购金额', key: 'amount', width: 130, align: 'right' },
+            { title: '执行进度', key: 'progress', width: 220 },
+            { title: '交期', key: 'due', width: 100 },
+            { title: '付款', key: 'payment', width: 150 },
+            { title: '', key: 'action', width: 96, fixed: 'right' },
           ]"
           @change="
             (value) => {
@@ -942,13 +950,18 @@ watch(financeType, (value, previous) => {
           </template>
           <template #bodyCell="{ column, record }">
             <div v-if="column.key === 'supplier'" class="order-cell">
-              <button
-                type="button"
-                class="order-record-link"
-                @click="openRow(record as DocumentRow, 'details', $event)"
-              >
-                {{ purchaseRowLabels(record as ProcurementOrderRow).order }}
-              </button>
+              <span class="order-code-line">
+                <button
+                  type="button"
+                  class="order-record-link"
+                  @click="openRow(record as DocumentRow, 'details', $event)"
+                >
+                  {{ purchaseRowLabels(record as ProcurementOrderRow).order }}
+                </button>
+                <ProcurementStatusBadge
+                  :status="String(record.record.status ?? '')"
+                />
+              </span>
               <RelatedLink
                 class="procurement-muted"
                 :target="
@@ -961,44 +974,70 @@ watch(financeType, (value, previous) => {
                 {{ purchaseRowLabels(record as ProcurementOrderRow).supplier }}
               </RelatedLink>
             </div>
+            <div
+              v-else-if="column.key === 'product'"
+              class="order-cell"
+              :title="orderRowProducts(record.record).names.join('\n')"
+            >
+              <span class="order-ellipsis">{{
+                orderRowProducts(record.record).title
+              }}</span>
+              <span class="procurement-muted procurement-number">{{
+                orderRowProducts(record.record).quantity || '数量待核实'
+              }}</span>
+            </div>
             <div v-else-if="column.key === 'contract'" class="order-cell">
               <RelatedLink :target="contractTarget(record.contractId)">
                 {{ purchaseRowLabels(record as ProcurementOrderRow).contract }}
               </RelatedLink>
-              <span class="procurement-muted">{{
+              <span class="procurement-muted order-ellipsis">{{
                 record.customerName || '客户未注明'
               }}</span>
             </div>
             <span
               v-else-if="column.key === 'amount'"
-              class="procurement-number"
+              class="procurement-number order-amount"
               >{{
                 orderMoney(
                   record.orderAmount ?? record.record.amount,
                   record.record.currency,
                 )
               }}</span>
-            <div v-else-if="column.key === 'arrival'" class="order-cell">
-              <template v-if="orderArrivalProgress(record.record).length">
-                <div
-                  v-for="group in orderArrivalProgress(record.record)"
-                  :key="group.key"
-                  class="order-quantity"
+            <div v-else-if="column.key === 'progress'" class="order-cell">
+              <ol
+                class="row-steps"
+                :aria-label="orderRowSteps(record as ProcurementOrderRow).next"
+              >
+                <li
+                  v-for="step in orderRowSteps(record as ProcurementOrderRow)
+                    .steps"
+                  :key="step.key"
+                  :class="{ done: step.done, current: step.current }"
+                  :title="step.title"
                 >
-                  <span v-if="group.known" class="procurement-number">{{ group.arrived }} / {{ group.ordered }}
-                    <span class="procurement-muted">{{
-                      group.unit
-                    }}</span></span>
-                  <span v-else class="procurement-muted">到货数量待核实</span>
-                  <Progress
-                    v-if="group.percent !== undefined"
-                    :percent="group.percent"
-                    :show-info="false"
-                    size="small"
-                  />
-                </div>
-              </template>
-              <span v-else class="procurement-muted">到货数据待核实</span>
+                  <i></i>{{ step.label }}
+                </li>
+              </ol>
+              <span
+                class="row-next"
+                :class="{
+                  late:
+                    orderRowDue(record as ProcurementOrderRow, today).tone ===
+                    'late',
+                }"
+                >{{ orderRowSteps(record as ProcurementOrderRow).next }}</span>
+            </div>
+            <div
+              v-else-if="column.key === 'due'"
+              class="order-cell"
+              :class="`due-${orderRowDue(record as ProcurementOrderRow, today).tone}`"
+            >
+              <span class="procurement-number">{{
+                orderRowDue(record as ProcurementOrderRow, today).main
+              }}</span>
+              <small>{{
+                orderRowDue(record as ProcurementOrderRow, today).sub
+              }}</small>
             </div>
             <button
               v-else-if="column.key === 'payment'"
@@ -1006,27 +1045,46 @@ watch(financeType, (value, previous) => {
               class="order-payment-link"
               @click="openRow(record as DocumentRow, 'payments', $event)"
             >
-              <span>已付
-                {{
-                  orderMoney(record.paidAmount, record.record.currency)
-                }}</span>
-              <span class="procurement-muted">未付
+              <Progress
+                :percent="
+                  orderPaymentProgress({
+                    orderAmount: record.orderAmount,
+                    unpaidAmount: record.unpaidAmount,
+                    paidAmount: record.paidAmount,
+                  }) ?? 0
+                "
+                :show-info="false"
+                size="small"
+                :stroke-color="
+                  Number(record.unpaidAmount) > 0 ? undefined : '#52c41a'
+                "
+              />
+              <span
+                v-if="Number(record.unpaidAmount) > 0"
+                class="procurement-muted"
+                >未付
                 {{
                   orderMoney(record.unpaidAmount, record.record.currency)
                 }}</span>
+              <span v-else class="procurement-muted">已付清</span>
             </button>
-            <div v-else-if="column.key === 'action'" class="order-cell">
-              <ProcurementStatusBadge
-                :status="String(record.record.status ?? '')"
-              />
-              <Button
-                type="link"
-                class="order-open"
-                @click="openRow(record as DocumentRow, 'details', $event)"
-              >
-                查看与办理
-              </Button>
-            </div>
+            <Button
+              v-else-if="column.key === 'action'"
+              :type="
+                orderRowSteps(record as ProcurementOrderRow).current
+                  ? 'primary'
+                  : 'default'
+              "
+              size="small"
+              ghost
+              @click="openRow(record as DocumentRow, 'details', $event)"
+            >
+              {{
+                orderRowSteps(record as ProcurementOrderRow).current
+                  ? '办理'
+                  : '查看'
+              }}
+            </Button>
           </template>
         </Table>
       </div>
@@ -1479,8 +1537,8 @@ watch(financeType, (value, previous) => {
 
 .order-surface {
   overflow: hidden;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
@@ -1489,12 +1547,12 @@ watch(financeType, (value, previous) => {
   flex-wrap: wrap;
   gap: 24px;
   padding: 0 20px;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .order-views button {
   padding: 16px 0 13px;
-  color: var(--ant-color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   background: transparent;
   border: 0;
@@ -1503,14 +1561,14 @@ watch(financeType, (value, previous) => {
 
 .order-views .selected {
   font-weight: 600;
-  color: var(--ant-color-primary);
-  border-bottom-color: var(--ant-color-primary);
+  color: hsl(var(--primary));
+  border-bottom-color: hsl(var(--primary));
 }
 
 .order-views button:focus-visible,
 .order-record-link:focus-visible,
 .order-payment-link:focus-visible {
-  outline: 2px solid var(--ant-color-primary);
+  outline: 2px solid hsl(var(--primary));
   outline-offset: 3px;
 }
 
@@ -1532,8 +1590,10 @@ watch(financeType, (value, previous) => {
 
 .order-record-link {
   max-width: 100%;
+  padding: 0;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-weight: 600;
-  color: var(--ant-color-text);
+  color: hsl(var(--primary));
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -1541,14 +1601,100 @@ watch(financeType, (value, previous) => {
   border: 0;
 }
 
+.order-code-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.order-ellipsis {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-amount {
+  font-weight: 600;
+}
+
+.row-steps {
+  display: flex;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.row-steps li {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 8px 1px 6px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground) / 75%);
+  background: hsl(var(--accent));
+  border-radius: 999px;
+}
+
+.row-steps li i {
+  width: 6px;
+  height: 6px;
+  background: hsl(var(--border));
+  border-radius: 50%;
+}
+
+.row-steps li.done {
+  color: color-mix(in srgb, hsl(var(--success)) 55%, hsl(var(--foreground)));
+  background: hsl(var(--success) / 14%);
+}
+
+.row-steps li.done i {
+  background: hsl(var(--success));
+}
+
+.row-steps li.current {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+}
+
+.row-steps li.current i {
+  background: hsl(var(--primary));
+}
+
+.row-next {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.row-next.late,
+.due-late,
+.due-late small {
+  color: hsl(var(--destructive));
+}
+
+.due-soon small {
+  color: color-mix(in srgb, hsl(var(--warning)) 55%, hsl(var(--foreground)));
+}
+
+.due-done small,
+.due-none small {
+  color: hsl(var(--muted-foreground));
+}
+
 .order-record-link:hover {
-  color: var(--ant-color-primary);
+  color: hsl(var(--primary));
 }
 
 .order-payment-link {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
   font-variant-numeric: tabular-nums;
   text-align: left;
   cursor: pointer;
@@ -1557,7 +1703,7 @@ watch(financeType, (value, previous) => {
 }
 
 .order-payment-link:hover {
-  color: var(--ant-color-primary);
+  color: hsl(var(--primary));
 }
 
 .order-quantity {
@@ -1797,8 +1943,8 @@ button.order-kpi:focus-visible {
   grid-template-columns: 1fr 1fr 1fr;
   gap: 24px;
   padding: 20px;
-  background: var(--ant-color-fill-quaternary);
-  border: 1px solid var(--ant-color-border-secondary);
+  background: hsl(var(--accent));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
@@ -1836,7 +1982,7 @@ button.order-kpi:focus-visible {
 
 .order-more summary {
   padding: 5px 12px;
-  color: var(--ant-color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
 }
 
@@ -1849,10 +1995,10 @@ button.order-kpi:focus-visible {
   gap: 10px;
   width: 240px;
   padding: 12px;
-  background: var(--ant-color-bg-elevated);
-  border: 1px solid var(--ant-color-border-secondary);
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  box-shadow: var(--ant-box-shadow-secondary);
+  box-shadow: 0 6px 16px hsl(var(--foreground) / 8%);
 }
 
 .order-arrivals {

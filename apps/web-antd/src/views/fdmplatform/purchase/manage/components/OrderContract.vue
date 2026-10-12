@@ -214,17 +214,17 @@ function upload(event: Event) {
   gap: 4px 12px;
   align-items: center;
   padding: 10px 12px;
-  border: 1px solid var(--ant-color-border-secondary);
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
 .contract-steps li.done {
-  border-color: var(--ant-color-success-border);
+  border-color: hsl(var(--success) / 60%);
 }
 
 .contract-steps li.done b::after {
   margin-left: 6px;
-  color: var(--ant-color-success);
+  color: hsl(var(--success));
   content: '✓';
 }
 
@@ -234,7 +234,7 @@ function upload(event: Event) {
 
 .muted {
   font-size: 12px;
-  color: var(--ant-color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 .clause-text {

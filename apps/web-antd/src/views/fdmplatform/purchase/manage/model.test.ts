@@ -12,6 +12,9 @@ import {
   detailsChecklist,
   onlyChoice,
   orderDetailsPayload,
+  orderRowDue,
+  orderRowProducts,
+  orderRowSteps,
   orderSteps,
   preferredContact,
   purchaseRowLabels,
@@ -261,5 +264,73 @@ describe('下单资料确认前检查', () => {
     expect(
       onlyChoice([clause('a', 'X'), { ...clause('b', 'X'), active: false }]),
     ).toBe('a');
+  });
+});
+
+describe('采购单列表行', () => {
+  const record = (status = 'ORDERED') => ({
+    id: 'po',
+    status,
+    lines: [
+      {
+        quantity: 1000,
+        arrivedQuantity: 0,
+        cancelledQuantity: 0,
+        specificationSnapshot: { skuName: 'TPE瑜伽垫', unit: '条' },
+      },
+      {
+        quantity: 200,
+        arrivedQuantity: 0,
+        cancelledQuantity: 0,
+        specificationSnapshot: { skuName: 'PU瑜伽垫', unit: '条' },
+      },
+    ],
+  });
+  it('names the first product and sums quantities per unit', () => {
+    expect(orderRowProducts(record())).toEqual({
+      title: 'TPE瑜伽垫 等 2 项',
+      names: ['TPE瑜伽垫', 'PU瑜伽垫'],
+      quantity: '1200 条',
+    });
+  });
+  it('counts down to the delivery date and stops once everything arrived', () => {
+    expect(
+      orderRowDue({ dueDate: '2026-10-11', record: record() }, '2026-10-12'),
+    ).toEqual({ main: '10-11', sub: '超期 1 天', tone: 'late' });
+    expect(
+      orderRowDue({ dueDate: '2026-10-14', record: record() }, '2026-10-12')
+        .tone,
+    ).toBe('soon');
+    expect(orderRowDue({ record: record() }, '2026-10-12').main).toBe('未约定');
+    expect(
+      orderRowDue(
+        { dueDate: '2026-10-01', record: record('RECEIVED') },
+        '2026-10-12',
+      ).sub,
+    ).toBe('已到齐');
+  });
+  it('shows the four buyer steps and what comes next', () => {
+    const draft = orderRowSteps({
+      details: { status: 'DRAFT' },
+      record: record(),
+      orderAmount: '100',
+      unpaidAmount: '100',
+    });
+    expect(draft.steps.map((step) => step.label)).toEqual([
+      '资料',
+      '合同',
+      '到货',
+      '付款',
+    ]);
+    expect(draft.next).toBe('待确认下单资料');
+    const signed = orderRowSteps({
+      details: { status: 'CONFIRMED' },
+      signed: true,
+      record: record(),
+      orderAmount: '100',
+      unpaidAmount: '100',
+    });
+    expect(signed.next).toBe('等到货');
+    expect(signed.steps.filter((step) => step.done)).toHaveLength(2);
   });
 });

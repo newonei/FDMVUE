@@ -15,7 +15,9 @@ export function purchaseRowLabels(row: BusinessRecord) {
       | string
       | undefined;
   return {
-    order: first(record.code, row.code, record.name, row.name) || '查看采购单',
+    order:
+      first(row.orderCode, record.code, row.code, record.name, row.name) ||
+      '查看采购单',
     supplier: first(record.supplierName, row.supplierName) || '供应商未注明',
     supplierId: first(record.supplierId, row.supplierId),
     contract: contractReferenceText(
@@ -394,4 +396,109 @@ export function orderSteps(
   ];
   const current = cancelled ? undefined : steps.find((step) => !step.done);
   return { current, steps };
+}
+
+/** 「EVA瑜伽柱 · 黑色 等 3 项」 and the summed quantity per unit for the list. */
+export function orderRowProducts(order: BusinessRecord) {
+  const lines = Array.isArray(order.lines)
+    ? (order.lines as BusinessRecord[])
+    : [];
+  const name = (line: BusinessRecord) => {
+    const snapshot = line.specificationSnapshot as
+      | Record<string, unknown>
+      | undefined;
+    return String(snapshot?.skuName ?? line.skuName ?? '').trim();
+  };
+  const first = lines.map((line) => name(line)).find(Boolean) ?? '产品未注明';
+  const quantity = orderArrivalProgress(order)
+    .filter((group) => group.known)
+    .map((group) => `${group.ordered} ${group.unit}`)
+    .join(' + ');
+  return {
+    title: lines.length > 1 ? `${first} 等 ${lines.length} 项` : first,
+    names: lines.map((line) => name(line)).filter(Boolean),
+    quantity,
+  };
+}
+
+export type DueTone = 'done' | 'late' | 'none' | 'soon';
+/** Countdown to the delivery date; finished or cancelled orders stop counting. */
+export function orderRowDue(
+  row: { dueDate?: string; record: BusinessRecord },
+  today: string,
+): { main: string; sub: string; tone: DueTone } {
+  const status = String(row.record.status ?? '');
+  if (['CLOSED', 'RECEIVED'].includes(status))
+    return { main: row.dueDate?.slice(5) ?? '—', sub: '已到齐', tone: 'done' };
+  if (status === 'CANCELLED') return { main: '—', sub: '已取消', tone: 'none' };
+  if (!row.dueDate) return { main: '未约定', sub: '', tone: 'none' };
+  const days = Math.round(
+    (Date.parse(`${row.dueDate}T00:00:00Z`) -
+      Date.parse(`${today}T00:00:00Z`)) /
+      86_400_000,
+  );
+  if (days < 0)
+    return {
+      main: row.dueDate.slice(5),
+      sub: `超期 ${-days} 天`,
+      tone: 'late',
+    };
+  if (days === 0)
+    return { main: row.dueDate.slice(5), sub: '今天到期', tone: 'soon' };
+  return {
+    main: row.dueDate.slice(5),
+    sub: `还剩 ${days} 天`,
+    tone: days <= 3 ? 'soon' : 'none',
+  };
+}
+
+/** List-row version of the drawer's steps: 资料 · 合同 · 到货 · 付款. */
+export function orderRowSteps(row: {
+  details?: { deliveryDate?: string; status?: string };
+  orderAmount?: string;
+  paidAmount?: string;
+  record: BusinessRecord;
+  signed?: boolean;
+  unpaidAmount?: string;
+}) {
+  const { current, steps } = orderSteps(
+    {
+      details: row.details ?? {},
+      files: row.signed ? [{ kind: 'SIGNED' }] : [],
+      order: row.record,
+    },
+    {
+      orderAmount: row.orderAmount,
+      paidAmount: row.paidAmount,
+      unpaidAmount: row.unpaidAmount,
+    },
+  );
+  const short: Partial<Record<OrderStepKey, string>> = {
+    details: '资料',
+    contract: '合同',
+    arrival: '到货',
+    payment: '付款',
+  };
+  const next: Partial<Record<OrderStepKey, string>> = {
+    details: '待确认下单资料',
+    contract: '待签回合同',
+    arrival: '等到货',
+    payment: '待付款',
+  };
+  const cancelled = String(row.record.status ?? '') === 'CANCELLED';
+  let nextText = current ? (next[current.key] ?? current.title) : '已完成';
+  if (cancelled) nextText = '已取消';
+  return {
+    current: current?.key,
+    next: nextText,
+    steps: steps
+      .filter((step) => short[step.key])
+      .map((step) => ({
+        key: step.key,
+        label: short[step.key] ?? step.title,
+        done: step.done,
+        current: step.key === current?.key,
+        title: `${step.title}：${step.summary}`,
+      })),
+  };
 }
