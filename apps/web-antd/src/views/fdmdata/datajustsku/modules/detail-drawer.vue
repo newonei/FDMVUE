@@ -110,7 +110,7 @@ const extraFields = computed(() => [
 const [Drawer, drawerApi] = useVbenDrawer({
   onOpenChange(isOpen) {
     if (isOpen) {
-      detail.value = drawerApi.getData<DetailData>();
+      detail.value = (drawerApi.getData() as DetailData);
       imageFailed.value = false;
     }
   },

@@ -61,7 +61,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmdataShopCompanyApi.ShopCompany>();
+    const row = (modalApi.getData() as FdmdataShopCompanyApi.ShopCompany);
     formData.value = undefined;
     await formApi.setValues(SHOP_COMPANY_DEFAULTS as any, false);
     if (!row?.id) return;

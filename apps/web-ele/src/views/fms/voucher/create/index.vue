@@ -20,7 +20,7 @@ import {
 import { useRoute, useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
-import { confirm, Page, useVbenModal } from '@vben/common-ui';
+import { confirm, DocAlert, Page, useVbenModal } from '@vben/common-ui';
 import { DICT_TYPE } from '@vben/constants';
 import { getDictOptions } from '@vben/hooks';
 import { useUserStore } from '@vben/stores';
@@ -243,8 +243,8 @@ async function init() {
     voucherWords.value = wordList;
     subjects.value = handleTree(subjectList);
     auxiliaryTypes.value = auxiliaryTypeList;
-    Object.keys(auxiliaryOptions).forEach(
-      (key) => delete auxiliaryOptions[Number(key)],
+    Object.keys(auxiliaryOptions).forEach((key) =>
+      Reflect.deleteProperty(auxiliaryOptions, Number(key)),
     );
     currentMonth.value = accountingMonth || dayjs().format('YYYY-MM');
 
@@ -277,7 +277,7 @@ async function loadDetail(id: number) {
   });
   entries.value = data.entries.map((entry) => ({
     ...entry,
-    rowKey: Symbol(),
+    rowKey: Symbol('voucher-entry'),
     auxiliaries: entry.auxiliaries.map((item) => ({ ...item })),
   }));
   padEntries();
@@ -293,7 +293,7 @@ async function initializeCopiedVoucher(id: number) {
   const copiedEntries = entries.value.map((entry) => ({
     ...entry,
     id: undefined,
-    rowKey: Symbol(),
+    rowKey: Symbol('voucher-entry'),
     auxiliaries: entry.auxiliaries.map((item) => ({ ...item })),
   }));
   await resetForm(false);
@@ -386,7 +386,7 @@ function disableVoucherDate(date: Date) {
 
 /** 创建空白凭证分录 */
 function createEmptyEntry(): VoucherEntryForm {
-  return { rowKey: Symbol(), digest: '', auxiliaries: [] };
+  return { rowKey: Symbol('voucher-entry'), digest: '', auxiliaries: [] };
 }
 
 /** 空摘要沿用上一条分录 */
@@ -800,7 +800,7 @@ function buildPayload(): FmsVoucherApi.SaveReq | undefined {
     voucherWordId,
     voucherNumber,
     voucherTime: Number(formData.voucherTime),
-    entries: filledEntries.map(buildVoucherEntry),
+    entries: filledEntries.map((entry) => buildVoucherEntry(entry)),
   };
 }
 
@@ -819,7 +819,7 @@ function buildTemplateEntries(): FmsVoucherApi.VoucherEntry[] | undefined {
     ElMessage.warning('凭证模板借贷金额不平衡');
     return;
   }
-  return filledEntries.map(buildVoucherEntry);
+  return filledEntries.map((entry) => buildVoucherEntry(entry));
 }
 
 /** 构建凭证业务分录 */
@@ -932,7 +932,7 @@ async function applyTemplate(template: FmsVoucherTemplateApi.VoucherTemplate) {
   }
   entries.value = template.entries.map((entry) => ({
     ...entry,
-    rowKey: Symbol(),
+    rowKey: Symbol('voucher-entry'),
     auxiliaries: entry.auxiliaries.map((item) => ({ ...item })),
   }));
   padEntries();
@@ -1094,6 +1094,7 @@ onBeforeUnmount(removePageShortcutListener);
 
 <template>
   <Page>
+    <DocAlert title="【凭证】凭证管理" url="https://doc.iocoder.cn/fms/voucher/" />
     <!-- 凭证操作 -->
     <div class="mb-4 flex items-center justify-between rounded-md bg-card p-4">
       <div class="flex items-center gap-2">
@@ -1308,7 +1309,9 @@ onBeforeUnmount(removePageShortcutListener);
                   数量
                 </th>
                 <th class="entry-money entry-money-header relative !p-0">
-                  <strong class="block h-[25px] leading-[25px]">借方金额</strong>
+                  <strong class="block h-[25px] leading-[25px]">
+                    借方金额
+                  </strong>
                   <div
                     class="flex h-[22px] border-t border-[var(--el-border-color)] border-t-solid !bg-[var(--el-bg-color)] leading-[22px] [&>span:last-child]:border-r-0 [&>span:nth-child(4)]:border-r-[var(--el-color-primary-light-5)] [&>span:nth-child(8)]:border-r-[var(--el-color-primary-light-5)] [&>span:nth-child(9)]:border-r-[var(--el-color-danger-light-5)] [&>span]:box-border [&>span]:inline-flex [&>span]:h-full [&>span]:w-[calc(100%/11)] [&>span]:items-center [&>span]:justify-center [&>span]:border-r [&>span]:border-[var(--el-border-color-lighter)] [&>span]:border-r-solid [&>span]:text-12px [&>span]:font-400 [&>span]:text-[var(--el-text-color-secondary)]"
                   >
@@ -1321,7 +1324,9 @@ onBeforeUnmount(removePageShortcutListener);
                   </div>
                 </th>
                 <th class="entry-money entry-money-header relative !p-0">
-                  <strong class="block h-[25px] leading-[25px]">贷方金额</strong>
+                  <strong class="block h-[25px] leading-[25px]">
+                    贷方金额
+                  </strong>
                   <div
                     class="flex h-[22px] border-t border-[var(--el-border-color)] border-t-solid !bg-[var(--el-bg-color)] leading-[22px] [&>span:last-child]:border-r-0 [&>span:nth-child(4)]:border-r-[var(--el-color-primary-light-5)] [&>span:nth-child(8)]:border-r-[var(--el-color-primary-light-5)] [&>span:nth-child(9)]:border-r-[var(--el-color-danger-light-5)] [&>span]:box-border [&>span]:inline-flex [&>span]:h-full [&>span]:w-[calc(100%/11)] [&>span]:items-center [&>span]:justify-center [&>span]:border-r [&>span]:border-[var(--el-border-color-lighter)] [&>span]:border-r-solid [&>span]:text-12px [&>span]:font-400 [&>span]:text-[var(--el-text-color-secondary)]"
                   >

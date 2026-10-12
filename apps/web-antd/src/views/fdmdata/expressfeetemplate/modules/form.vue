@@ -67,7 +67,7 @@ const [Modal, modalApi] = useVbenModal({
     }
     const mySeq = ++openSeq;
     const row =
-      modalApi.getData<FdmdataExpressFeeTemplateApi.ExpressFeeTemplate>();
+      (modalApi.getData() as FdmdataExpressFeeTemplateApi.ExpressFeeTemplate);
     formData.value = undefined;
     await formApi.setValues(EXPRESS_FEE_TEMPLATE_DEFAULTS as any, false);
     if (!row?.id) return;

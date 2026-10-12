@@ -229,7 +229,7 @@ const [Modal, modalApi] = useVbenModal({
     }
 
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmdataEcShopDailyApi.EcShopDaily>();
+    const row = (modalApi.getData() as FdmdataEcShopDailyApi.EcShopDaily);
     if (!row?.id) {
       message.error('缺少行数据，无法填写刷单信息');
       await modalApi.close();

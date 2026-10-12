@@ -71,3 +71,4 @@ datalog
 # Local visual QA reports and screenshots may contain business data
 /design-qa.md
 /design-qa-assets/
+.playwright-mcp

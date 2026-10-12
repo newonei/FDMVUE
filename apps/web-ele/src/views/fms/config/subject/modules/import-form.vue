@@ -103,9 +103,9 @@ const [Modal, modalApi] = useVbenModal({
   showConfirmButton: false,
   onOpenChange(isOpen: boolean) {
     if (!isOpen) return;
-    accountSetId.value = modalApi.getData<{
+    accountSetId.value = (modalApi.getData() as {
       accountSetId: number;
-    }>().accountSetId;
+    }).accountSetId;
     resetForm();
   },
 });

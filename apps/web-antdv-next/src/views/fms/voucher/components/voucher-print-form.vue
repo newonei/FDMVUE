@@ -1,6 +1,8 @@
 <script lang="ts" setup>
 import type { FormInstance, FormProps } from 'antdv-next';
 
+import type { VoucherPrintSetting } from './print';
+
 import type { FmsVoucherApi } from '#/api/fms/voucher';
 
 import { nextTick, ref } from 'vue';
@@ -16,11 +18,7 @@ import {
   RadioGroup,
 } from 'antdv-next';
 
-import {
-  buildVoucherPrintHtml,
-  DEFAULT_VOUCHER_PRINT_SETTING,
-  type VoucherPrintSetting,
-} from './print';
+import { buildVoucherPrintHtml, DEFAULT_VOUCHER_PRINT_SETTING } from './print';
 
 defineOptions({ name: 'FmsVoucherPrintForm' });
 
