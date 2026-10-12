@@ -1,7 +1,12 @@
 import type { BusinessRecord, Decimal, DocumentRow, PageResult } from './index';
 
 import { requestClient } from '#/api/request';
-export type SettingType = 'clauses' | 'entities' | 'templates' | 'warehouses';
+export type SettingType =
+  | 'categories'
+  | 'clauses'
+  | 'entities'
+  | 'templates'
+  | 'warehouses';
 export interface ProcurementSetting {
   id: string;
   version: number;
@@ -114,6 +119,8 @@ export interface ProcurementOrderView {
     contactSnapshot?: SupplierContact;
     deliveryAddress?: string;
     deliveryDate?: string;
+    /** 这张单不需要收票（淘宝、个体等） */
+    noInvoice?: boolean;
     remark?: string;
     revision?: number;
     signingEntityId?: string;
@@ -230,7 +237,9 @@ export interface ProcurementOrderRow extends DocumentRow {
   dueDate?: string;
   /** NONE 未入库 / PARTIAL 部分入库 / ALL 已入齐 */
   receivedState?: 'ALL' | 'NONE' | 'PARTIAL';
-  /** IN_PROGRESS 进行中 / COMPLETED 已完成（入库齐且付清）/ ENDED 已结束 */
+  invoicedAmount?: Decimal;
+  noInvoice?: boolean;
+  /** IN_PROGRESS 进行中 / COMPLETED 已完成（入库齐、付清、收票齐）/ ENDED 已结束 */
   operationStatus?: 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
   ownerUserIds?: number[];
   /** 新建的独立采购单（不关联合同），打开完整采购单抽屉 */
@@ -290,5 +299,66 @@ export function getProcurementOrdersOverview(mine: boolean) {
   return requestClient.get<ProcurementOrdersOverview>(
     `${procurementBase}/orders/overview`,
     { params: { mine } },
+  );
+}
+
+export interface PurchaseInvoice {
+  id: string;
+  status: 'VALID' | 'VOID';
+  orderId: string;
+  orderCode?: string;
+  supplierName?: string;
+  currency?: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  invoiceType: 'ORDINARY' | 'OTHER' | 'SPECIAL';
+  taxRate?: Decimal;
+  amount: Decimal;
+  remark?: string;
+  voidReason?: string;
+  createdBy: number;
+  createdAt: string;
+}
+/** 采购收票：采购单上的发票与有效合计。 */
+export function getOrderInvoices(contractId: string, orderId: string) {
+  return requestClient.get<{
+    invoicedAmount: Decimal;
+    invoices: PurchaseInvoice[];
+  }>(`${orderPath(contractId, orderId)}/invoices`);
+}
+export function createPurchaseInvoice(data: {
+  amount: Decimal;
+  contractId: string;
+  idempotencyKey: string;
+  invoiceDate?: string;
+  invoiceNo: string;
+  invoiceType: PurchaseInvoice['invoiceType'];
+  orderId: string;
+  remark?: string;
+  taxRate?: Decimal;
+}) {
+  return requestClient.post<PurchaseInvoice>(
+    `${procurementBase}/invoices`,
+    data,
+  );
+}
+export function voidPurchaseInvoice(
+  id: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<PurchaseInvoice>(
+    `${procurementBase}/invoices/${encodeURIComponent(id)}/void`,
+    data,
+  );
+}
+/** 标记 / 取消「无需收票」。 */
+export function setOrderNoInvoice(
+  contractId: string,
+  orderId: string,
+  value: boolean,
+) {
+  return requestClient.post<ProcurementOrderView>(
+    `${orderPath(contractId, orderId)}/no-invoice`,
+    { value },
   );
 }

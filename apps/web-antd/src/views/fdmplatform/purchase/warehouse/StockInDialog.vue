@@ -30,8 +30,10 @@ import {
   filledInRows,
   inboundRows,
   qty,
+  splitInRow,
   stockInErrors,
   stockInPayload,
+  warehouseGroups,
 } from './model';
 
 import './stock-dialog.css';
@@ -41,7 +43,11 @@ const props = defineProps<{
   open: boolean;
   orderId?: string;
 }>();
-const emit = defineEmits<{ close: []; saved: [value: StockIn] }>();
+/** 分仓时会一次生成多张入库单，saved 带回全部 */
+const emit = defineEmits<{
+  close: [];
+  saved: [value: StockIn, all: StockIn[]];
+}>();
 
 const today = localDate();
 const warehouses = ref<ProcurementSetting[]>([]);
@@ -71,6 +77,11 @@ const target = computed(() => {
 });
 const errors = computed(() => stockInErrors(form.value, rows.value));
 const count = computed(() => filledInRows(rows.value).length);
+const saveLabel = computed(() => {
+  if (form.value.directShip) return '入库并直发';
+  const warehouses = warehouseGroups(rows.value, form.value.warehouseId).size;
+  return warehouses > 1 ? `确认入库（${warehouses} 个仓库）` : '确认入库';
+});
 
 async function loadOrders(keyword = '') {
   const page = await getProcurementOrders({
@@ -147,13 +158,28 @@ async function save() {
     return;
   saving.value = true;
   error.value = '';
+  const created: StockIn[] = [];
   try {
-    const result = await createStockIn(
-      stockInPayload(form.value, rows.value, { ...value, idempotencyKey }),
-    );
-    emit('saved', result);
+    // 每个仓库一张入库单；幂等键按仓库区分，失败后重试不会重复入库
+    for (const [warehouseId, group] of warehouseGroups(
+      rows.value,
+      form.value.warehouseId,
+    )) {
+      created.push(
+        await createStockIn(
+          stockInPayload({ ...form.value, warehouseId }, group, {
+            ...value,
+            idempotencyKey: `${idempotencyKey}:${warehouseId}`,
+          }),
+        ),
+      );
+    }
+    emit('saved', created[0]!, created);
   } catch (error_) {
-    error.value = errorText(error_);
+    error.value =
+      created.length > 0
+        ? `已生成 ${created.map((entry) => entry.code).join('、')}，其余仓库失败：${errorText(error_)}`
+        : errorText(error_);
   } finally {
     saving.value = false;
   }
@@ -232,11 +258,12 @@ async function save() {
               <th class="qty">合格</th>
               <th>不合格原因</th>
               <th class="batch">批次号</th>
+              <th class="warehouse">仓库</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!rows.length">
-              <td colspan="6" class="empty">
+              <td colspan="7" class="empty">
                 {{
                   loading
                     ? '正在读取采购单'
@@ -248,18 +275,21 @@ async function save() {
             </tr>
             <tr
               v-for="row in rows"
-              :key="row.orderLineId"
-              :class="{ invalid: submitted && errors.lines[row.orderLineId] }"
+              :key="row.key"
+              :class="{ invalid: submitted && errors.lines[row.key] }"
             >
               <td>
-                <b>{{ row.productName }}</b>
-                <span v-if="row.specification" class="hint">{{
-                  row.specification
-                }}</span>
+                <template v-if="!row.split">
+                  <b>{{ row.productName }}</b>
+                  <span v-if="row.specification" class="hint">{{
+                    row.specification
+                  }}</span>
+                </template>
+                <span v-else class="hint">↳ 分到其他仓</span>
                 <span
-                  v-if="submitted && errors.lines[row.orderLineId]"
+                  v-if="submitted && errors.lines[row.key]"
                   class="field-error"
-                  >{{ errors.lines[row.orderLineId] }}</span>
+                  >{{ errors.lines[row.key] }}</span>
               </td>
               <td class="num">{{ qty(row.remaining) }} {{ row.unit }}</td>
               <td>
@@ -299,6 +329,37 @@ async function save() {
               <td>
                 <Input v-model:value="row.batchNo" placeholder="选填" />
               </td>
+              <td>
+                <Select
+                  v-model:value="row.warehouseId"
+                  allow-clear
+                  :options="
+                    warehouses.map((entry) => ({
+                      value: entry.id,
+                      label: entry.name,
+                    }))
+                  "
+                  :placeholder="row.split ? '选择仓库' : '同表头'"
+                  style="width: 100%"
+                />
+                <Button
+                  v-if="!row.split"
+                  type="link"
+                  size="small"
+                  @click="rows = splitInRow(rows, row)"
+                >
+                  分到其他仓
+                </Button>
+                <Button
+                  v-else
+                  type="link"
+                  size="small"
+                  danger
+                  @click="rows = rows.filter((entry) => entry.key !== row.key)"
+                >
+                  删除
+                </Button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -313,7 +374,7 @@ async function save() {
         :disabled="!target"
         @click="save"
       >
-        {{ form.directShip ? '入库并直发' : '确认入库' }}
+        {{ saveLabel }}
       </Button>
     </template>
   </Modal>

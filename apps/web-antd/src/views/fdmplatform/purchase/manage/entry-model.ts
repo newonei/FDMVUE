@@ -151,3 +151,42 @@ export function entryPayload(
     })),
   };
 }
+
+export interface PastedLine {
+  lineNo: number;
+  code: string;
+  quantity?: string;
+  unitPrice?: string;
+  arrivalDate?: string;
+  remark?: string;
+  error?: string;
+}
+/**
+ * 从 Excel 复制的明细：每行「产品编号、数量、单价、到货日期、备注」，制表符或逗号分隔；
+ * 第一行是标题（含「编号」）时跳过。数量必填且大于 0，单价可空（之后在表格里填）。
+ */
+export function parsePastedLines(text: string): PastedLine[] {
+  const result: PastedLine[] = [];
+  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+    const cells = raw.split(/\t|,|，/).map((cell) => cell.trim());
+    if (cells.every((cell) => cell === '')) continue;
+    if (index === 0 && cells[0]?.includes('编号')) continue;
+    const [code = '', quantity, unitPrice, arrivalDate, remark] = cells;
+    const line: PastedLine = {
+      lineNo: index + 1,
+      code,
+      quantity: quantity || undefined,
+      unitPrice: unitPrice || undefined,
+      arrivalDate: arrivalDate || undefined,
+      remark: remark || undefined,
+    };
+    if (!code) line.error = '缺少产品编号';
+    else if (!decimal(quantity).gt(0)) line.error = '数量须大于 0';
+    else if (unitPrice && !decimal(unitPrice).gte(0))
+      line.error = '单价不是数字';
+    else if (arrivalDate && !/^\d{4}-\d{2}-\d{2}$/.test(arrivalDate))
+      line.error = '到货日期请写成 2026-10-20';
+    result.push(line);
+  }
+  return result;
+}

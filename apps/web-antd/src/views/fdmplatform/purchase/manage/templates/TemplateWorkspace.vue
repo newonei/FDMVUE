@@ -36,13 +36,14 @@ import { errorText, field, selectField } from '../../../data';
 
 defineOptions({ name: 'FdmPlatformPurchaseTemplateWorkspace' });
 const inMergedView = useInMergedView();
-/** 仓库在「仓库管理」维护，这里只管签约主体、模板和条款。 */
+/** 仓库在「仓库管理」维护，这里管签约主体、模板、条款和采购分类。 */
 type TemplateType = Exclude<SettingType, 'warehouses'>;
 const tab = ref<TemplateType>('entities');
 const data = ref<Record<TemplateType, ProcurementSetting[]>>({
   entities: [],
   templates: [],
   clauses: [],
+  categories: [],
 });
 const companies = ref<{ label: string; value: number }[]>([]);
 const pageError = ref('');
@@ -54,8 +55,10 @@ const titles = {
   entities: '主体与签约资料',
   templates: '采购单模板',
   clauses: '可选条款',
+  categories: '采购分类',
 };
 function typeFields() {
+  if (tab.value === 'categories') return [];
   if (tab.value === 'entities')
     return [
       field('code', '主体编码'),
@@ -115,13 +118,15 @@ async function load() {
   loading.value = true;
   pageError.value = '';
   try {
-    const [entities, templates, clauses, directory] = await Promise.all([
-      getProcurementSettings('entities'),
-      getProcurementSettings('templates'),
-      getProcurementSettings('clauses'),
-      getDirectory(0),
-    ]);
-    data.value = { entities, templates, clauses };
+    const [entities, templates, clauses, categories, directory] =
+      await Promise.all([
+        getProcurementSettings('entities'),
+        getProcurementSettings('templates'),
+        getProcurementSettings('clauses'),
+        getProcurementSettings('categories'),
+        getDirectory(0),
+      ]);
+    data.value = { entities, templates, clauses, categories };
     companies.value = directory.companies.map((entry) => ({
       label: entry.companyName,
       value: entry.companyId,
@@ -222,7 +227,7 @@ onMounted(load);
                   .join(' / ')
               : tab === 'clauses'
                 ? record.groupCode
-                : record.title
+                : (record.title ?? '—')
           }}</span><Tag v-else-if="column.key === 'state'">
             {{ record.active ? '启用' : '停用' }}
 </Tag><Space v-else-if="column.key === 'action'">

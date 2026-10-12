@@ -85,6 +85,10 @@
   width: 120px;
 }
 
+.stock-dialog .stock-grid .warehouse {
+  width: 150px;
+}
+
 .stock-dialog .stock-grid td.empty {
   padding: 24px;
   color: hsl(var(--muted-foreground));

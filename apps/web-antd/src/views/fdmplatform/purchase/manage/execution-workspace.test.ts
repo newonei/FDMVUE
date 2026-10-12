@@ -21,6 +21,7 @@ vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: vi.fn(() => 'key'),
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
+  getOrderInvoices: vi.fn(async () => ({ invoicedAmount: 0, invoices: [] })),
   getProcurementOrders: mocks.list,
   getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
@@ -54,6 +55,9 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('../../documents/RecordDetail.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderInvoices.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/PurchaseOrderEditor.vue', () => ({

@@ -9,10 +9,12 @@ import {
   inboundRows,
   linesTitle,
   outboundRows,
+  splitInRow,
   stockInErrors,
   stockInPayload,
   stockOutErrors,
   stockOutPayload,
+  warehouseGroups,
 } from './model';
 
 const warehouse = (
@@ -60,7 +62,7 @@ describe('仓库与采购入库', () => {
     const errors = stockInErrors({ warehouseId: 'w' }, rows);
     expect(errors.lines).toEqual({
       l1: '有不合格，请填原因',
-      l2: '超过未入库数量 10',
+      l2: '各仓合计超过未入库数量 10',
     });
     expect(stockInErrors({}, rows).sheet).toBe('请选择入库仓库');
   });
@@ -83,6 +85,29 @@ describe('仓库与采购入库', () => {
       },
     ]);
     expect(payload).toMatchObject({ directShip: true, deliveryNo: 'SH1' });
+  });
+});
+
+describe('入库分仓', () => {
+  it('splits one order line across warehouses and caps their sum', () => {
+    let rows = inboundRows([line('l1', 60)]);
+    rows = splitInRow(rows, rows[0]!);
+    rows[0]!.quantity = '40';
+    rows[0]!.acceptedQuantity = '40';
+    rows[1]!.quantity = '30';
+    rows[1]!.acceptedQuantity = '30';
+    expect(stockInErrors({ warehouseId: 'w1' }, rows).lines).toMatchObject({
+      l1: '各仓合计超过未入库数量 60',
+    });
+    rows[1]!.quantity = '20';
+    rows[1]!.acceptedQuantity = '20';
+    expect(stockInErrors({ warehouseId: 'w1' }, rows).lines).toEqual({
+      [rows[1]!.key]: '请选择这一行的仓库',
+    });
+    rows[1]!.warehouseId = 'w2';
+    const groups = warehouseGroups(rows, 'w1');
+    expect([...groups.keys()]).toEqual(['w1', 'w2']);
+    expect(groups.get('w2')?.[0]?.quantity).toBe('20');
   });
 });
 

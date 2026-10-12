@@ -50,6 +50,7 @@ import RelatedLink from '../../documents/RelatedLink.vue';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
+import PurchaseOrderEditor from '../manage/components/PurchaseOrderEditor.vue';
 import { localDate } from '../quotes/comparison';
 import QuoteComparisonDialog from '../quotes/QuoteComparisonDialog.vue';
 import {
@@ -124,9 +125,43 @@ const childOpen = computed(
     !!assignEntry.value ||
     !!detail.value ||
     !!standalone.value ||
+    !!orderEntry.value ||
     !!claiming.value,
 );
 const stageTabs = computed(() => visibleStages(result.value?.counts));
+/**
+ * 采购员直接开采购单（金智做法）：从申请或任务带出合同产品，报价与方案不再是必经环节。
+ * 只在还要采购的阶段显示。
+ */
+const orderEntry = ref<{ contractId: string; requestId?: string }>();
+function canEnterOrder(entry: ProcurementWorkItem) {
+  return (
+    ['intake', 'order', 'plan', 'quote'].includes(entry.stage) &&
+    !!entry.row.contractId
+  );
+}
+function openOrderEntry(entry: ProcurementWorkItem) {
+  if (childOpen.value) return;
+  // 申请行直接用申请 id；任务 / 报价行给出申请或任务 id，开单表单会顺着任务找到申请
+  const record = entry.row.record ?? {};
+  const requestId =
+    entry.kind === 'requests'
+      ? String(entry.row.id)
+      : String(record.requestId ?? record.assignmentId ?? entry.row.id);
+  orderEntry.value = { contractId: String(entry.row.contractId), requestId };
+}
+function orderEntered(value: {
+  code: string;
+  contractId: string;
+  orderId: string;
+}) {
+  orderEntry.value = undefined;
+  message.success(`已新建采购单 ${value.code}`);
+  void router.push({
+    path: '/fdmprocurement/platform-orders',
+    query: { contractId: value.contractId, documentId: value.orderId },
+  });
+}
 const launchKind = computed(() =>
   actionEntry.value
     ? (actionOverride.value?.kind ?? workbenchAction(actionEntry.value).kind)
@@ -240,7 +275,7 @@ function performSecondary(entry: ProcurementWorkItem) {
 function claim(entry: ProcurementWorkItem) {
   Modal.confirm({
     title: '接下这条采购申请？',
-    content: `「${shortTitle(entry.title)}」剩余的 ${quantityText(entry)} 会全部按外采交给你，接单后直接录入供应商报价。要拆给别人或部分自产，请点「分派…」。`,
+    content: `「${shortTitle(entry.title)}」剩余的 ${quantityText(entry)} 会交给你办理，接单后可以直接「开采购单」。要交给别的采购员，请点「分派…」。`,
     okText: '接单',
     cancelText: '取消',
     onOk: async () => {
@@ -737,6 +772,15 @@ onBeforeUnmount(() => {
                       ?.title
                   }}
                 </Button>
+                <Button
+                  v-if="canEnterOrder(record as ProcurementWorkItem)"
+                  type="link"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openOrderEntry(record as ProcurementWorkItem)"
+                >
+                  开采购单
+                </Button>
               </div>
             </template>
           </Table>
@@ -897,6 +941,13 @@ onBeforeUnmount(() => {
             >
               {{ workbenchAction(selected).secondary?.title }}
 </Button><Button
+              v-if="canEnterOrder(selected)"
+              block
+              :disabled="childOpen"
+              @click="openOrderEntry(selected)"
+            >
+              开采购单
+</Button><Button
               v-if="
                 workbenchAction(selected).action ||
                 workbenchAction(selected).mode
@@ -971,6 +1022,13 @@ onBeforeUnmount(() => {
       @close="compareEntry = undefined"
       @updated="load"
       @ordered="compareEntry = undefined"
+    />
+    <PurchaseOrderEditor
+      :open="!!orderEntry"
+      :contract-id="orderEntry?.contractId"
+      :request-id="orderEntry?.requestId"
+      @close="orderEntry = undefined"
+      @saved="orderEntered"
     />
   </Page>
 </template>

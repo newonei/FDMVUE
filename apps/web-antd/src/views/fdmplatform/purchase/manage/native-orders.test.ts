@@ -19,6 +19,7 @@ vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => 'test-key',
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
+  getOrderInvoices: vi.fn(async () => ({ invoicedAmount: 0, invoices: [] })),
   getProcurementOrders: mocks.page,
   getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
@@ -132,6 +133,9 @@ vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderDetails.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderInvoices.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/PurchaseOrderEditor.vue', () => ({

@@ -41,6 +41,7 @@ import {
 import {
   downloadProcurementFile,
   exportProcurementOrder,
+  getOrderInvoices,
   getProcurementOrder,
   getProcurementOrders,
   getProcurementOrdersOverview,
@@ -85,6 +86,7 @@ import { localDate } from '../quotes/comparison';
 import StockInDialog from '../warehouse/StockInDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
+import OrderInvoices from './components/OrderInvoices.vue';
 import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
 import {
   canRecordOrderArrival,
@@ -270,6 +272,23 @@ function standaloneOrder(id: string | undefined) {
   return !id || id === 'standalone';
 }
 const editorOpen = ref(false);
+/** 收票合计（抽屉摘要卡）；收票页签改动后重新读 */
+const invoicedTotal = ref<string>();
+async function loadInvoiced() {
+  const current = view.value;
+  if (!current) return;
+  try {
+    const result = await getOrderInvoices(current.contractId, current.id);
+    if (view.value?.id === current.id)
+      invoicedTotal.value = String(result.invoicedAmount);
+  } catch {
+    invoicedTotal.value = undefined;
+  }
+}
+async function invoicesChanged() {
+  await refreshFacts();
+  void loadList();
+}
 function editorSaved(value: {
   code: string;
   contractId: string;
@@ -541,6 +560,8 @@ async function loadDetail() {
     contract.value = parent;
     commandKeys.clear();
     void loadFinanceSummary();
+    invoicedTotal.value = undefined;
+    void loadInvoiced();
   } catch (error) {
     if (run === sequence)
       pageError.value = `无法打开采购单：${errorText(error)}`;
@@ -562,6 +583,7 @@ async function refreshFacts() {
       view.value = value;
       contract.value = parent;
       void loadFinanceSummary();
+      void loadInvoiced();
     }
   } catch (error) {
     pageError.value = errorText(error);
@@ -1269,6 +1291,28 @@ watch(financeType, (value, previous) => {
                 }}</span>
             </div>
             <button
+              type="button"
+              class="order-summary-item order-summary-link"
+              :disabled="childOpen"
+              @click="tab = 'invoices'"
+            >
+              <span class="procurement-muted">收票</span>
+              <strong class="procurement-number">{{
+                view.details.noInvoice
+                  ? '无需收票'
+                  : `已收 ${orderMoney(invoicedTotal ?? 0, view.order.currency)}`
+              }}</strong>
+              <span class="procurement-muted">{{
+                view.details.noInvoice
+                  ? '不影响完成'
+                  : `差额 ${orderMoney(
+                      Number(financeSummary.orderAmount ?? 0) -
+                        Number(invoicedTotal ?? 0),
+                      view.order.currency,
+                    )}`
+              }}</span>
+            </button>
+            <button
               v-if="templateState"
               type="button"
               class="order-summary-item order-summary-link"
@@ -1436,6 +1480,13 @@ watch(financeType, (value, previous) => {
                 mode="payments"
                 @busy="nestedFinanceBusy = $event"
                 @changed="financeChanged"
+              />
+            </TabPane>
+            <TabPane key="invoices" tab="收票">
+              <OrderInvoices
+                :view="view"
+                :order-amount="financeSummary.orderAmount"
+                @changed="invoicesChanged"
               />
             </TabPane>
             <TabPane key="costs" tab="成本归属">
@@ -1748,7 +1799,7 @@ watch(financeType, (value, previous) => {
 
 .order-kpis {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }

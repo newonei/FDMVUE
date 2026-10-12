@@ -5,6 +5,7 @@ import {
   entryErrors,
   entryPayload,
   entryTotals,
+  parsePastedLines,
   setRowGift,
   setRowPrice,
   setRowQuantity,
@@ -83,5 +84,27 @@ describe('新建采购单表单', () => {
       }),
     ]);
     expect(payload.additionalAmount).toBeUndefined();
+  });
+});
+
+describe('粘贴导入产品明细', () => {
+  it('reads code, quantity, price, date and remark from Excel rows', () => {
+    const lines = parsePastedLines(
+      '产品编号\t数量\t单价\nFL-1\t100\t0.245\t2026-10-20\t黄石付款\nFL-2,5\n\nFL-3\t0\nFL-4\t2\tabc\n\t3',
+    );
+    expect(lines.map((line) => [line.code, line.quantity, line.error])).toEqual(
+      [
+        ['FL-1', '100', undefined],
+        ['FL-2', '5', undefined],
+        ['FL-3', '0', '数量须大于 0'],
+        ['FL-4', '2', '单价不是数字'],
+        ['', '3', '缺少产品编号'],
+      ],
+    );
+    expect(lines[0]).toMatchObject({
+      unitPrice: '0.245',
+      arrivalDate: '2026-10-20',
+      remark: '黄石付款',
+    });
   });
 });

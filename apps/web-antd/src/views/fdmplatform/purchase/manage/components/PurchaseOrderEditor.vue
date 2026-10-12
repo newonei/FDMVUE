@@ -13,11 +13,15 @@ import {
   InputNumber,
   Modal,
   Select,
+  Textarea,
 } from 'ant-design-vue';
 
 import { getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
-import { createProcurementOrder } from '#/api/fdmplatform/procurement';
+import {
+  createProcurementOrder,
+  getProcurementSettings,
+} from '#/api/fdmplatform/procurement';
 import { getProducts } from '#/api/fdmplatform/products';
 
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
@@ -28,6 +32,7 @@ import {
   entryErrors,
   entryPayload,
   entryTotals,
+  parsePastedLines,
   PURCHASE_CATEGORIES,
   setRowGift,
   setRowPrice,
@@ -35,7 +40,12 @@ import {
   setRowTotal,
 } from '../entry-model';
 
-const props = defineProps<{ contractId?: string; open: boolean }>();
+const props = defineProps<{
+  contractId?: string;
+  open: boolean;
+  /** 从采购申请开单：带出申请里的合同产品与数量 */
+  requestId?: string;
+}>();
 const emit = defineEmits<{
   close: [];
   saved: [value: { code: string; contractId: string; orderId: string }];
@@ -57,6 +67,7 @@ const productOptions = ref<
     value: string;
   }[]
 >([]);
+const categories = ref<string[]>([...PURCHASE_CATEGORIES]);
 const saving = ref(false);
 const error = ref('');
 const submitted = ref(false);
@@ -78,6 +89,81 @@ const contractItems = computed(() =>
   })),
 );
 
+/** 批量添加：多选产品，或粘贴 Excel 的「产品编号、数量、单价、到货日期、备注」行。 */
+const bulkOpen = ref(false);
+const bulkProducts = ref<string[]>([]);
+const bulkText = ref('');
+const bulkIssues = ref<string[]>([]);
+const bulkBusy = ref(false);
+function openBulk() {
+  bulkProducts.value = [];
+  bulkText.value = '';
+  bulkIssues.value = [];
+  bulkOpen.value = true;
+}
+function productRow(product: (typeof productOptions.value)[number]): EntryRow {
+  return {
+    ...emptyRow(key()),
+    productId: product.value,
+    name: product.name,
+    code: product.code,
+    specification: product.specification,
+    unit: product.unit,
+  };
+}
+async function applyBulk() {
+  bulkBusy.value = true;
+  bulkIssues.value = [];
+  const added: EntryRow[] = bulkProducts.value
+    .map((id) => productOptions.value.find((entry) => entry.value === id))
+    .filter((entry) => !!entry)
+    .map((entry) => productRow(entry!));
+  try {
+    for (const line of parsePastedLines(bulkText.value)) {
+      if (line.error) {
+        bulkIssues.value.push(`第 ${line.lineNo} 行：${line.error}`);
+        continue;
+      }
+      const page = await getProducts({
+        companyId: 0,
+        pageNo: 1,
+        pageSize: 20,
+        keyword: line.code,
+        active: true,
+      });
+      const product = page.list.find((entry) => entry.code === line.code);
+      if (!product) {
+        bulkIssues.value.push(
+          `第 ${line.lineNo} 行：找不到产品编号 ${line.code}`,
+        );
+        continue;
+      }
+      const row = productRow({
+        value: product.id,
+        name: product.name,
+        code: product.code,
+        specification: product.specification,
+        unit: product.unit,
+        label: product.name,
+      });
+      row.arrivalDate = line.arrivalDate;
+      row.remark = line.remark;
+      setRowQuantity(row, line.quantity);
+      if (line.unitPrice) setRowPrice(row, line.unitPrice);
+      added.push(row);
+    }
+  } catch (error_) {
+    bulkIssues.value.push(errorText(error_));
+  } finally {
+    bulkBusy.value = false;
+  }
+  if (added.length > 0)
+    rows.value = [
+      ...rows.value.filter((row) => row.productId || row.contractItemId),
+      ...added,
+    ];
+  if (bulkIssues.value.length === 0) bulkOpen.value = false;
+}
 function key() {
   sequence += 1;
   return `row-${sequence}`;
@@ -125,6 +211,15 @@ async function chooseContract(value: unknown) {
   try {
     contract.value = await getContract(header.value.contractId);
     header.value.companyId ??= contract.value.companyId;
+    const current = contract.value;
+    if (!contracts.value.some((entry) => entry.value === current.id))
+      contracts.value = [
+        {
+          value: current.id,
+          label: `${current.code} · ${current.customerName ?? ''}`,
+        },
+        ...contracts.value,
+      ];
   } catch (error_) {
     error.value = errorText(error_);
   }
@@ -179,6 +274,39 @@ function addContractItems() {
       })),
   ];
 }
+/** 申请里的每个合同产品一行，数量按申请数量预填（可改可删，可再加外箱等非合同产品）。 */
+function fillFromRequest(requestId: string) {
+  // 传进来的可能是申请 id，也可能是采购任务（分派）id，后者顺着任务找到申请
+  const requests = contract.value?.requests ?? [];
+  const assignment = (contract.value?.assignments ?? []).find(
+    (entry) => entry.id === requestId,
+  );
+  const request =
+    requests.find((entry) => entry.id === requestId) ??
+    requests.find((entry) => entry.id === assignment?.requestId);
+  const items = new Map(
+    (contract.value?.items ?? []).map((item) => [item.id, item]),
+  );
+  const lines = (
+    (request?.items ?? []) as { contractItemId?: string; quantity?: unknown }[]
+  )
+    .map((line) => ({ line, item: items.get(String(line.contractItemId)) }))
+    .filter((entry) => entry.item);
+  if (lines.length === 0) return;
+  header.value.subject = `${contract.value?.code ?? ''} 采购单`;
+  rows.value = lines.map(({ line, item }) => ({
+    ...emptyRow(key()),
+    contractItemId: item!.id,
+    name: item!.skuName || '合同产品',
+    code: item!.skuCode,
+    specification: item!.specification,
+    unit: item!.unit,
+    quantity:
+      line.quantity === null || line.quantity === undefined
+        ? undefined
+        : String(line.quantity),
+  }));
+}
 watch(
   () => props.open,
   async (open) => {
@@ -191,10 +319,24 @@ watch(
     rows.value = [emptyRow(key())];
     void searchProducts();
     try {
-      directory.value = await getDirectory(0);
+      const [loaded, maintained] = await Promise.all([
+        getDirectory(0),
+        getProcurementSettings('categories', { active: true }).catch(() => []),
+      ]);
+      directory.value = loaded;
+      // 采购设置里维护了分类就用维护的，否则用内置的常用分类
+      if (maintained.length > 0) {
+        categories.value = maintained.map((entry) => entry.name);
+        header.value.category = categories.value.includes(
+          PURCHASE_CATEGORIES[0]!,
+        )
+          ? PURCHASE_CATEGORIES[0]
+          : categories.value[0];
+      }
       await (props.contractId
         ? chooseContract(props.contractId)
         : searchContracts());
+      if (props.requestId) fillFromRequest(props.requestId);
     } catch (error_) {
       error.value = errorText(error_);
     }
@@ -210,9 +352,10 @@ async function save() {
   try {
     emit(
       'saved',
-      await createProcurementOrder(
-        entryPayload(rows.value, header.value, idempotencyKey),
-      ),
+      await createProcurementOrder({
+        ...entryPayload(rows.value, header.value, idempotencyKey),
+        requestId: props.requestId,
+      }),
     );
   } catch (error_) {
     error.value = errorText(error_);
@@ -266,9 +409,7 @@ async function save() {
           <span>采购分类</span>
           <Select
             v-model:value="header.category"
-            :options="
-              PURCHASE_CATEGORIES.map((value) => ({ value, label: value }))
-            "
+            :options="categories.map((value) => ({ value, label: value }))"
           />
         </label>
         <label class="field">
@@ -295,6 +436,7 @@ async function save() {
         <span class="muted">共 {{ totals.count }} 行</span>
         <span class="grow"></span>
         <Button size="small" @click="addRow">添加一行</Button>
+        <Button size="small" @click="openBulk">批量添加 / 粘贴导入</Button>
         <Button v-if="contract" size="small" @click="addContractItems">
           带出合同产品
         </Button>
@@ -471,6 +613,45 @@ async function save() {
       <Button type="primary" :loading="saving" @click="save">保存</Button>
     </template>
   </Modal>
+  <Modal
+    :open="bulkOpen"
+    title="批量添加产品"
+    width="720px"
+    :confirm-loading="bulkBusy"
+    ok-text="添加到明细"
+    @ok="applyBulk"
+    @cancel="bulkOpen = false"
+  >
+    <div class="bulk">
+      <label class="field">
+        <span>多选产品</span>
+        <Select
+          v-model:value="bulkProducts"
+          mode="multiple"
+          show-search
+          :filter-option="false"
+          :options="productOptions"
+          placeholder="搜索产品编号、名称，可多选"
+          @search="searchProducts"
+        />
+      </label>
+      <label class="field">
+        <span>或从 Excel 粘贴（每行：产品编号、数量、单价、到货日期、备注）</span>
+        <Textarea
+          v-model:value="bulkText"
+          :auto-size="{ minRows: 5, maxRows: 12 }"
+          placeholder="FL2401267&#9;100&#9;0.245&#9;2026-10-20&#9;黄石付款"
+        />
+      </label>
+      <Alert
+        v-if="bulkIssues.length > 0"
+        type="warning"
+        show-icon
+        message="以下行没有加入，请修改后再粘贴这几行"
+        :description="bulkIssues.join('；')"
+      />
+    </div>
+  </Modal>
 </template>
 
 <style scoped>
@@ -601,6 +782,12 @@ em {
   margin: 0;
   font-size: 12px;
   color: hsl(var(--destructive));
+}
+
+.bulk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .formula {

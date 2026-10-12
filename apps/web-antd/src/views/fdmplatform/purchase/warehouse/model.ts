@@ -46,7 +46,12 @@ export function defaultWarehouse(warehouses: ProcurementSetting[]) {
 }
 
 export interface InRow {
+  /** 同一采购行可拆到多个仓库，key 区分拆出来的行 */
+  key: string;
   orderLineId: string;
+  /** 空表示用表头的入库仓库 */
+  warehouseId?: string;
+  split?: boolean;
   productName: string;
   specification: string;
   unit: string;
@@ -60,6 +65,7 @@ export interface InRow {
 /** Every open order line prefilled with its remaining quantity, all accepted. */
 export function inboundRows(lines: InboundLine[]): InRow[] {
   return lines.map((line) => ({
+    key: line.orderLineId,
     orderLineId: line.orderLineId,
     productName: line.productName || '产品未注明',
     specification: line.specification ?? '',
@@ -68,6 +74,26 @@ export function inboundRows(lines: InboundLine[]): InRow[] {
     quantity: String(line.remainingQuantity),
     acceptedQuantity: String(line.remainingQuantity),
   }));
+}
+
+let splitSequence = 0;
+/** 分到其他仓：同一采购行再加一行，数量留空待填，仓库另选。 */
+export function splitInRow(rows: InRow[], source: InRow): InRow[] {
+  splitSequence += 1;
+  const copy: InRow = {
+    ...source,
+    key: `${source.orderLineId}:split-${splitSequence}`,
+    split: true,
+    warehouseId: undefined,
+    quantity: undefined,
+    acceptedQuantity: undefined,
+    exceptionReason: undefined,
+    batchNo: undefined,
+  };
+  const index = rows.findLastIndex(
+    (row) => row.orderLineId === source.orderLineId,
+  );
+  return [...rows.slice(0, index + 1), copy, ...rows.slice(index + 1)];
 }
 
 /** Rows with a received quantity are submitted; the rest stay open. */
@@ -80,22 +106,43 @@ export function stockInErrors(
   rows: InRow[],
 ): { lines: Record<string, string>; sheet: string } {
   const lines: Record<string, string> = {};
+  const used = new Map<string, BigNumber>();
+  for (const row of filledInRows(rows))
+    used.set(
+      row.orderLineId,
+      (used.get(row.orderLineId) ?? new BigNumber(0)).plus(
+        decimal(row.quantity),
+      ),
+    );
   for (const row of rows) {
     const quantity = decimal(row.quantity);
     const accepted = decimal(row.acceptedQuantity);
     if ((row.quantity ?? '') === '') continue;
-    if (!quantity.gt(0)) lines[row.orderLineId] = '实收须大于 0';
-    else if (quantity.gt(decimal(row.remaining)))
-      lines[row.orderLineId] = `超过未入库数量 ${qty(row.remaining)}`;
+    if (!quantity.gt(0)) lines[row.key] = '实收须大于 0';
+    else if ((used.get(row.orderLineId) ?? quantity).gt(decimal(row.remaining)))
+      lines[row.key] = `各仓合计超过未入库数量 ${qty(row.remaining)}`;
     else if (!accepted.isFinite() || accepted.lt(0) || accepted.gt(quantity))
-      lines[row.orderLineId] = '合格数须在 0 到实收之间';
+      lines[row.key] = '合格数须在 0 到实收之间';
     else if (accepted.lt(quantity) && !row.exceptionReason?.trim())
-      lines[row.orderLineId] = '有不合格，请填原因';
+      lines[row.key] = '有不合格，请填原因';
+    else if (row.split && !row.warehouseId)
+      lines[row.key] = '请选择这一行的仓库';
   }
   let sheet = '';
   if (!form.warehouseId) sheet = '请选择入库仓库';
   else if (filledInRows(rows).length === 0) sheet = '至少填写一行实收数量';
   return { lines, sheet };
+}
+
+/** 按仓库分组：每个仓库一张入库单。 */
+export function warehouseGroups(rows: InRow[], fallback?: string) {
+  const groups = new Map<string, InRow[]>();
+  for (const row of filledInRows(rows)) {
+    const warehouse = row.warehouseId || fallback;
+    if (!warehouse) continue;
+    groups.set(warehouse, [...(groups.get(warehouse) ?? []), row]);
+  }
+  return groups;
 }
 
 export function stockInPayload(
