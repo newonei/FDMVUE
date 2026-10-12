@@ -1,3 +1,4 @@
+import type { FinanceDepartment } from './finance-stats';
 import type { Contract } from './index';
 import type { ProcurementWorkItem } from './procurement-workbench';
 import type { SupplierDepartment } from './supplier-stats';
@@ -56,6 +57,8 @@ export interface PortalSummary {
   movements?: PortalMovement[];
   /** 采购门户：全部门近 12 个月采购额（含金智历史，按人民币）与前 5 家供应商。 */
   purchasing?: null | SupplierDepartment;
+  /** 财务门户：全部门近 24 个月人民币收付（含金智历史）、账户与前 5 名。 */
+  cashflow?: FinanceDepartment | null;
 }
 
 export function getPortalSummary(department: PortalDepartment) {

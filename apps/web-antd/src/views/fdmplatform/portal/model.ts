@@ -54,6 +54,8 @@ const RECEIPTS = '/caiwu/platform-receipts';
 const PAYMENTS = '/caiwu/platform-procurement-requests';
 /** 电商开票申请（fdmdata），不在业务协同模块里，门户在前端单独查数量 */
 export const EC_INVOICES = '/caiwu/fpadmiin/ecinvoiceapply';
+export const FINANCE_RECEIPTS = RECEIPTS;
+export const FINANCE_PAYMENTS = PAYMENTS;
 
 export function contractLink(contractId: string): PortalLink {
   return { path: CONTRACTS, query: { contractId } };
@@ -501,13 +503,38 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
           },
           {
             title: '成本与利润',
-            description: '合同成本 · 采购成本归属',
+            description: '合同毛利 · 合同成本 · 采购成本归属',
             link: { path: '/caiwu/platform-costs' },
           },
           {
             title: '汇率中心',
             description: '参考汇率与折算',
             link: { path: '/caiwu/platform-exchange-rates' },
+          },
+        ],
+      },
+      {
+        group: '分析',
+        items: [
+          {
+            title: '客户回款',
+            description: '按客户看回款走势与未回款',
+            link: { path: RECEIPTS, query: { view: 'customers' } },
+          },
+          {
+            title: '按合同看应收',
+            description: '未收款合同与账龄',
+            link: { path: RECEIPTS, query: { view: 'receivables' } },
+          },
+          {
+            title: '供应商付款',
+            description: '按供应商看付款与采购额',
+            link: { path: PAYMENTS, query: { view: 'suppliers' } },
+          },
+          {
+            title: '合同毛利',
+            description: '按合同看收入、采购与毛利',
+            link: { path: '/caiwu/platform-costs', query: { view: 'margins' } },
           },
         ],
       },

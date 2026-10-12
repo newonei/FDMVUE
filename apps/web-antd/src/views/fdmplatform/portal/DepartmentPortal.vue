@@ -15,7 +15,6 @@ import { useUserStore } from '@vben/stores';
 
 import { Alert, Button } from 'ant-design-vue';
 
-import { getEcInvoiceApplyPage } from '#/api/fdmdata/ecinvoiceapply';
 import { getPortalSummary } from '#/api/fdmplatform/portal';
 
 import {
@@ -28,57 +27,23 @@ import { nativeMoney } from '../documents/migration-display';
 import {
   actionableCount,
   contractLink,
-  EC_INVOICES,
   formatNumber,
   greeting,
   pickTrend,
   portalDefinitions,
 } from './model';
 
-/** 外贸 and 财务 portals; 采购门户 has its own page (PurchasePortal). */
+/** 外贸门户; 采购与财务门户有各自的页面（PurchasePortal、FinancePortal）。 */
 const props = defineProps<{ department: PortalDepartment }>();
 const router = useRouter();
 const userStore = useUserStore();
 const definition = computed(() => portalDefinitions[props.department]);
 const summary = ref<PortalSummary>();
-/** 业务协同之外的待办（电商开票），按菜单权限在前端单独查；查不到就不显示数字 */
-const extraTodos = ref<PortalTodo[]>([]);
 const loading = ref(false);
 const loadError = ref('');
 let sequence = 0;
 
-async function loadEcInvoices() {
-  if (props.department !== 'finance' || !reachable({ path: EC_INVOICES }))
-    return;
-  try {
-    const now = new Date();
-    const soon = new Date(now.getTime() + 3 * 24 * 3600 * 1000);
-    const text = (date: Date) =>
-      date.toLocaleString('sv-SE').replace('T', ' ').slice(0, 19);
-    const [pending, urgent] = await Promise.all([
-      getEcInvoiceApplyPage({
-        pageNo: 1,
-        pageSize: 1,
-        invoiceStatus: 0,
-        sort: 'DUE',
-      }),
-      getEcInvoiceApplyPage({
-        pageNo: 1,
-        pageSize: 1,
-        invoiceStatus: 0,
-        invoiceDueTime: [text(now), text(soon)],
-      }),
-    ]);
-    const first = pending.list[0];
-    let preview = first ? `${first.shopName ?? ''} · ${first.title ?? ''}` : '';
-    if (urgent.total > 0) preview = `${urgent.total} 张 3 天内到开票截止`;
-    extraTodos.value = [{ key: 'ecInvoice', count: pending.total, preview }];
-  } catch {
-    extraTodos.value = [];
-  }
-}
 async function load() {
-  void loadEcInvoices();
   const run = ++sequence;
   loading.value = true;
   loadError.value = '';
@@ -116,10 +81,9 @@ const subline = computed(() => {
 });
 const todos = computed(() =>
   definition.value.todos.map((entry) => {
-    const todo: PortalTodo = [
-      ...(summary.value?.todos ?? []),
-      ...extraTodos.value,
-    ].find((item) => item.key === entry.key) ?? {
+    const todo: PortalTodo = (summary.value?.todos ?? []).find(
+      (item) => item.key === entry.key,
+    ) ?? {
       key: entry.key,
       count: 0,
       preview: '',
@@ -275,46 +239,6 @@ const contractRows = computed(() =>
                   </span>
                 </span>
                 <span class="pill">{{ row.next.title }}</span>
-              </button>
-            </template>
-            <template v-else-if="department === 'finance'">
-              <button
-                v-for="payment in summary?.payments ?? []"
-                :key="`${payment.type}:${payment.id}`"
-                type="button"
-                class="list-row"
-                @click="
-                  go(
-                    payment.type === 'RECEIPT'
-                      ? {
-                          path: '/caiwu/platform-receipts',
-                          query: {
-                            view: 'receipts',
-                            contractId: payment.contractId ?? '',
-                            documentId: payment.id,
-                          },
-                        }
-                      : {
-                          path: '/caiwu/platform-procurement-requests',
-                          query: { view: 'requests', financeId: payment.id },
-                        },
-                  )
-                "
-              >
-                <span class="list-main">
-                  <b>{{ payment.type === 'RECEIPT' ? '回款' : '采购请款' }} ·
-                    {{ nativeMoney(payment.amount, payment.currency) }}</b>
-                  <span>{{
-                      [payment.contractCode, payment.party, payment.name]
-                        .filter(Boolean)
-                        .join(' · ')
-                    }}<template v-if="payment.rmbAmount !== undefined">
-                      · 折 CNY {{ formatNumber(payment.rmbAmount) }}</template></span>
-                </span>
-                <span></span>
-                <span class="pill warn">{{
-                  payment.type === 'RECEIPT' ? '待确认' : '待付款'
-                }}</span>
               </button>
             </template>
             <template v-else>

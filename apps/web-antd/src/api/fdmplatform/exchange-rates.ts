@@ -47,3 +47,13 @@ export function convertReceiptToRmb(params: {
     timeout: 120_000,
   });
 }
+export interface ExchangeRatePoint {
+  rateDate: string;
+  rateToCny: Decimal;
+}
+/** 只读已保存的每日参考值；同一来源日期只出现一次。 */
+export function getExchangeRateHistory(currency: string, days: number) {
+  return requestClient.get<ExchangeRatePoint[]>(`${base}/history`, {
+    params: { currency, days },
+  });
+}

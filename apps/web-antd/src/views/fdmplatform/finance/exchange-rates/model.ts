@@ -87,3 +87,42 @@ export function splitCommonRates<T extends { currency: string }>(rows: T[]) {
   );
   return { common, others };
 }
+
+/** 走势概要：最新、区间最高 / 最低 / 均值与较区间首日的涨跌（%）。 */
+export function trendSummary(
+  points: { rateDate: string; rateToCny: unknown }[],
+) {
+  const values = points
+    .map((point) => ({ date: point.rateDate, value: Number(point.rateToCny) }))
+    .filter((point) => Number.isFinite(point.value) && point.value > 0);
+  const first = values[0];
+  const last = values.at(-1);
+  if (!first || !last) return undefined;
+  const numbers = values.map((point) => point.value);
+  return {
+    first: first.value,
+    firstDate: first.date,
+    last: last.value,
+    lastDate: last.date,
+    max: Math.max(...numbers),
+    min: Math.min(...numbers),
+    average: numbers.reduce((sum, value) => sum + value, 0) / numbers.length,
+    change: ((last.value - first.value) / first.value) * 100,
+  };
+}
+
+/**
+ * 参考折算：外币 → 人民币或人民币 → 外币，按 rateToCny（1 外币 = x 人民币）。
+ * 只用于估算，回款仍以登记时服务端冻结的汇率为准。
+ */
+export function referenceConvert(
+  amount: unknown,
+  rateToCny: unknown,
+  toCny: boolean,
+) {
+  const value = Number(amount);
+  const rate = Number(rateToCny);
+  if (!Number.isFinite(value) || !Number.isFinite(rate) || rate <= 0)
+    return undefined;
+  return toCny ? value * rate : value / rate;
+}

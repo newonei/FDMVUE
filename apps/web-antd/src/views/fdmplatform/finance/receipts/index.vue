@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import MergedWorkspace from '../../components/MergedWorkspace.vue';
 import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
+import CashPartyList from '../cash/CashPartyList.vue';
 import ContractReceivables from '../receivables/ContractReceivables.vue';
 
 defineOptions({ name: 'FdmPlatformFinanceReceipts' });
@@ -17,6 +18,12 @@ const documents = [
 const views = [
   documents[0]!,
   { key: 'receivables', title: '按合同看应收', component: ContractReceivables },
+  {
+    key: 'customers',
+    title: '客户回款',
+    component: CashPartyList,
+    props: { direction: 'IN' },
+  },
   ...documents.slice(1),
 ];
 </script>

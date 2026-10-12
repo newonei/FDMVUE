@@ -25,7 +25,7 @@
 | 外贸部门 | 发货单           | fdmplatform/trade/shipments/index        |
 | 外贸部门 | 销售退货单       | fdmplatform/trade/returns/index          |
 | 采购部门 | 供应商管理       | fdmplatform/purchase/suppliers/index     |
-| 采购部门 | 采购方案     | fdmplatform/purchase/plans/index         |
+| 采购部门 | 采购方案         | fdmplatform/purchase/plans/index         |
 | 采购部门 | 到货单           | fdmplatform/purchase/arrivals/index      |
 | 采购部门 | 采购退货单       | fdmplatform/purchase/returns/index       |
 | 采购部门 | 自产进度单       | fdmplatform/purchase/production/index    |
@@ -64,6 +64,13 @@
 - **供应商管理**：`/suppliers/stats/page|overview`、`/suppliers/{id}/stats-snapshot`（`PlatformSupplierStatsService`）汇总合同内采购单与金智独立采购单，按租户缓存、合同按 `updated_at` 增量读取。金智采购单没有币种，按人民币统计；「在途」只算新系统采购单。分层：常用 ≤90 天、偶尔 91–365 天、沉睡超过 1 年、未合作从没下单。
 - **采购门户**：`portal/PurchasePortal.vue` 独立于外贸 / 财务门户；`/portal/purchase` 新增 `sign / transit / pay` 待办、`metrics.overdueTasks / soonTasks` 和全部门的 `purchasing`（近 12 个月人民币采购额、前 5 家供应商）。
 
+### 财务部门改版（2026-10-12）
+
+- **收支统计**：`/finance-stats/overview|customers|suppliers|party`（`PlatformFinanceStatsService`）汇总合同回款、采购付款与金智集中回款 / 集中付款（只认金智「审核通过」），按租户缓存、合同按 `updated_at` 增量读取。金额一律折人民币：回款取冻结汇率快照，没有取金智本位币金额；金智付款没有币种按人民币计；折不了的外币单独计数，不按 1 计。退款与冲销为负数，部分冲销的付款按净额。`migratedUntil` 为最晚一笔金智收付日期，之后只有新系统登记的收付，跨过这一天的对比页面会提示。
+- **财务门户**：`portal/FinancePortal.vue` 独立于外贸门户；`/portal/finance` 新增 `cashflow`：近 24 个月收付、本月与今年累计对比、收付款账户、回款前 5 客户与付款前 5 供应商。付款只含采购付款，不含报销。
+- **客户回款**（收款与开票 `?view=customers`）与 **供应商付款**（付款与报销 `?view=suppliers`）：共用 `finance/cash/CashPartyList.vue`，按最近一次收付分层（≤90 天活跃、91–365 天需跟进、超过 1 年沉睡），可按近 12 个月、累计、最近收付排序并导出；客户另列未回款（与客户管理同口径），供应商另列同期采购额与付款占比。供应商按收款方名称归并（金智逐单付款只有名称）。
+- **汇率中心**：常用币种卡片切换走势，`/fx-rates/history` 只读已保存的每日参考值；参考换算在前端按当日参考值估算，回款折算仍以登记时冻结的汇率为准。
+
 ### 待补齐历史单据
 
 列表默认只显示“当前业务”。金智导入后仍需补齐的合同、单据及其子记录进入“待补齐历史单据”队列，有待补齐记录时列表顶部显示切换；从合同进入的列表默认显示全部。数据来自索引行的 `pendingCompletion`，存量数据由 `20260929_fdmplatform_index_pending_completion.sql` 回填，未回填前一律视为当前业务。
@@ -87,7 +94,6 @@
 客户列表带经营统计（`/customers/page?withStats=true`、`/customers/overview`、`/customers/{id}/snapshot`）：按最近一次签约日期分层（≤90 天活跃、91–365 天需跟进、超过 1 年沉睡、无合同未成交），列出累计合同额、近 12 个自然月每月签约额与上年同期比较、未回款、最近签约合同，可按这四项排序，行首展开看年度合同额、常购产品、最近合同与待补资料。草稿与作废合同不计。金额按币种分开，金智迁入合同没有币种归入「未注明币种」，不与 USD / CNY 相加。未回款：金智客户取金智「按客户汇总」的客户未回款额（截至迁移），新系统合同按合同额减同币种净回款。统计需要读取全部合同，只对共用范围账号提供；合同事实在服务端按租户缓存，启动后预热，之后只增量读取有变化的合同。「资料待补」与档案的资料完整度同一规则：国家、客户来源、公司名称、联系人、邮箱或电话、详细地址任一为空。
 
 业务列表通过本模块 `compact-tables.css` 限定样式：单元格上下各 8px，名称与摘要至多双行，长文本省略且可悬停查看，操作区保持单行与横向滚动，不修改宿主或官方模块表格。
-
 
 每个部门有独立的服务端分页列表。合同、采购申请、履约任务、报价、方案、采购订单、回款、发票和成本调用各自 `/page` 接口，支持页码、关键词、状态及可选经办人筛选，默认显示全部。采购申请使用 `assignmentStatus` 筛选分派状态，成本使用 `status` 筛选归集阶段；金额不跨币种合并。
 

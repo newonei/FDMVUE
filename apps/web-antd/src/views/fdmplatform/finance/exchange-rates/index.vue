@@ -12,7 +12,9 @@ import {
   Descriptions,
   Empty,
   Input,
+  InputNumber,
   message,
+  Select,
   Space,
   Table,
   Tag,
@@ -26,7 +28,13 @@ import {
 } from '#/api/fdmplatform/exchange-rates';
 
 import { errorText } from '../../data';
-import { conversionDateNote, rateText, splitCommonRates } from './model';
+import {
+  conversionDateNote,
+  rateText,
+  referenceConvert,
+  splitCommonRates,
+} from './model';
+import RateTrend from './RateTrend.vue';
 
 defineOptions({ name: 'FdmPlatformExchangeRates' });
 const date = ref(new Date().toLocaleDateString('sv-SE'));
@@ -38,6 +46,30 @@ const panelError = ref('');
 let sequence = 0;
 let fetchKey = { date: '', key: '' };
 const showOthers = ref(false);
+/** 走势与换算共用的币种，点常用币种卡片切换 */
+const selected = ref('USD');
+const amount = ref<number>(10_000);
+const toCny = ref(true);
+const currencyOptions = computed(() =>
+  [...split.value.common, ...split.value.others].map((row) => ({
+    label: row.currency,
+    value: row.currency,
+  })),
+);
+const selectedRate = computed(() =>
+  bundle.value?.rows.find((row) => row.currency === selected.value),
+);
+const converted = computed(() =>
+  referenceConvert(amount.value, selectedRate.value?.rateToCny, toCny.value),
+);
+function money(value?: number) {
+  return value === undefined
+    ? '—'
+    : value.toLocaleString('zh-CN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+}
 const split = computed(() => splitCommonRates(bundle.value?.rows ?? []));
 /** 输入筛选时在全部币种里找；不筛选时表格只列常用之外的币种 */
 const rows = computed(() => {
@@ -169,13 +201,69 @@ onBeforeUnmount(() => {
             show-icon
           />
           <div v-if="split.common.length" class="pinned" aria-label="常用币种">
-            <div v-for="rate in split.common" :key="rate.currency" class="pin">
+            <button
+              v-for="rate in split.common"
+              :key="rate.currency"
+              type="button"
+              class="pin"
+              :class="{ on: selected === rate.currency }"
+              :aria-pressed="selected === rate.currency"
+              @click="selected = rate.currency"
+            >
               <span>{{ rate.currency }}</span>
               <b :title="`1 ${rate.currency} = ${rate.rateToCny} CNY`">{{
                 rateText(rate.rateToCny)
               }}</b>
               <small>1 {{ rate.currency }} 折人民币</small>
-            </div>
+            </button>
+          </div>
+          <div class="tools">
+            <section class="tool">
+              <RateTrend :currency="selected" />
+            </section>
+            <section class="tool converter" aria-label="参考换算">
+              <b>参考换算</b>
+              <Space wrap>
+                <InputNumber
+                  v-model:value="amount"
+                  :min="0"
+                  :precision="2"
+                  style="width: 160px"
+                />
+                <Select
+                  v-if="toCny"
+                  v-model:value="selected"
+                  :options="currencyOptions"
+                  show-search
+                  style="width: 100px"
+                />
+                <span v-else>CNY</span>
+                <Button
+                  size="small"
+                  aria-label="交换换算方向"
+                  @click="toCny = !toCny"
+                >
+                  ⇄
+                </Button>
+                <span v-if="toCny">CNY</span>
+                <Select
+                  v-else
+                  v-model:value="selected"
+                  :options="currencyOptions"
+                  show-search
+                  style="width: 100px"
+                />
+              </Space>
+              <div class="result">
+                <span>{{ money(amount) }} {{ toCny ? selected : 'CNY' }} ≈</span>
+                <strong>{{ money(converted) }} {{ toCny ? 'CNY' : selected }}</strong>
+              </div>
+              <small>
+                按 {{ bundle.rateDate }} 参考汇率 1 {{ selected }} =
+                {{ rateText(selectedRate?.rateToCny) }} CNY
+                估算；回款折算以登记时冻结的汇率为准，不代表银行结汇价。
+              </small>
+            </section>
           </div>
           <Space wrap>
             <Input
@@ -241,9 +329,73 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  align-items: flex-start;
   padding: 10px 14px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
   border: 1px solid hsl(var(--border));
   border-radius: 10px;
+}
+
+.pin:hover,
+.pin:focus-visible {
+  outline: none;
+  border-color: hsl(var(--primary));
+}
+
+.pin.on {
+  background: hsl(var(--primary) / 6%);
+  border-color: hsl(var(--primary));
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.tool {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.converter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.converter small {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result span {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.result strong {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .pin span,
