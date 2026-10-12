@@ -236,7 +236,7 @@ watch(
           </div>
         </div>
         <div class="table-wrap">
-          <table class="grid">
+          <table class="batch-grid">
             <thead>
               <tr>
                 <th>产品</th>
@@ -402,13 +402,13 @@ watch(
   border-radius: 8px;
 }
 
-.grid {
+.batch-grid {
   width: 100%;
   font-size: 13px;
   border-collapse: collapse;
 }
 
-.grid th {
+.batch-grid th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -420,42 +420,42 @@ watch(
   background: hsl(var(--accent));
 }
 
-.grid td {
+.batch-grid td {
   padding: 6px 8px;
   vertical-align: top;
   border-top: 1px solid hsl(var(--border));
 }
 
-.grid tr.split td {
+.batch-grid tr.split td {
   border-top-style: dashed;
 }
 
-.grid tr.invalid td {
+.batch-grid tr.invalid td {
   background: hsl(var(--destructive) / 5%);
 }
 
-.grid .num {
+.batch-grid .num {
   text-align: right;
   white-space: nowrap;
 }
 
-.grid .method {
+.batch-grid .method {
   width: 96px;
 }
 
-.grid .qty {
+.batch-grid .qty {
   width: 112px;
 }
 
-.grid .owner {
+.batch-grid .owner {
   width: 180px;
 }
 
-.grid .factory {
+.batch-grid .factory {
   width: 168px;
 }
 
-.grid .ops {
+.batch-grid .ops {
   width: 64px;
   text-align: center;
 }

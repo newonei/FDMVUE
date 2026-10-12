@@ -9,8 +9,11 @@ import {
   assignRows,
   batchQuoteErrors,
   batchQuotePayload,
+  priceFromTotal,
+  quoteTotalDrift,
   requestQuoteRows,
   splitRow,
+  totalFromPrice,
 } from './request-batch';
 
 const today = '2026-10-11';
@@ -197,5 +200,48 @@ describe('按单报价', () => {
         { assignmentId: 't2', unitPrice: '9', unit: '个' },
       ],
     });
+  });
+});
+
+describe('按单报价单价与总价互算', () => {
+  it('derives the total from a unit price, rounded to cents', () => {
+    expect(totalFromPrice('3.5', '1000')).toBe('3500.00');
+    expect(totalFromPrice('0.333', '3')).toBe('1.00');
+    expect(totalFromPrice('', '10')).toBeUndefined();
+  });
+  it('derives the unit price from a total, kept to 6 decimals', () => {
+    expect(priceFromTotal('3500', '1000')).toBe('3.5');
+    expect(priceFromTotal('100', '3')).toBe('33.333333');
+    expect(priceFromTotal('100', '0')).toBeUndefined();
+    expect(priceFromTotal(undefined, '5')).toBeUndefined();
+  });
+  it('shows the recorded total only when rounding changed it', () => {
+    const row = {
+      assignmentId: 'a',
+      title: '瑜伽垫',
+      specification: '',
+      unit: '条',
+      quantity: '3',
+    };
+    expect(
+      quoteTotalDrift({ ...row, total: '100', unitPrice: '33.333333' }),
+    ).toBeUndefined();
+    expect(
+      quoteTotalDrift({
+        ...row,
+        quantity: '7',
+        total: '100',
+        unitPrice: priceFromTotal('100', '7'),
+      }),
+    ).toBeUndefined();
+    expect(
+      quoteTotalDrift({
+        ...row,
+        quantity: '30000000',
+        total: '100',
+        unitPrice: priceFromTotal('100', '30000000'),
+      }),
+    ).toBe('90.00');
+    expect(quoteTotalDrift({ ...row, unitPrice: '2' })).toBeUndefined();
   });
 });

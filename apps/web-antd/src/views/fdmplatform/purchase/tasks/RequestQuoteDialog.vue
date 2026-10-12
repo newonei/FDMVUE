@@ -38,8 +38,10 @@ import {
   batchQuoteErrors,
   batchQuotePayload,
   pricedQuoteRows,
-  quoteRowSubtotal,
+  priceFromTotal,
+  quoteTotalDrift,
   requestQuoteRows,
+  totalFromPrice,
 } from './request-batch';
 
 const props = defineProps<{
@@ -89,6 +91,15 @@ const evidenceOptions = computed(() =>
   })),
 );
 
+/** 单价与总价互算：改哪个就以哪个为准，另一个跟着算。 */
+function setPrice(row: QuoteRow, value: null | number | string) {
+  row.unitPrice = value === null ? undefined : String(value);
+  row.total = totalFromPrice(row.unitPrice, row.quantity);
+}
+function setTotal(row: QuoteRow, value: null | number | string) {
+  row.total = value === null ? undefined : String(value);
+  row.unitPrice = priceFromTotal(row.total, row.quantity);
+}
 function setValidity(value: 'custom' | number) {
   validity.value = value;
   if (value !== 'custom') form.value.validUntil = addDays(today, value);
@@ -351,7 +362,7 @@ watch(
         </section>
 
         <div ref="tableRef" class="table-wrap">
-          <table class="grid">
+          <table class="batch-grid">
             <thead>
               <tr>
                 <th>产品</th>
@@ -359,8 +370,8 @@ watch(
                 <th>需求交期</th>
                 <th>现有最低报价</th>
                 <th class="price">单价（{{ form.currency }}）</th>
+                <th class="price">总价（{{ form.currency }}）</th>
                 <th class="date">交期（可选）</th>
-                <th class="num">小计</th>
               </tr>
             </thead>
             <tbody>
@@ -393,7 +404,7 @@ watch(
                 </td>
                 <td>
                   <InputNumber
-                    v-model:value="row.unitPrice"
+                    :value="row.unitPrice"
                     string-mode
                     :min="0"
                     :controls="false"
@@ -402,7 +413,24 @@ watch(
                     :aria-label="`${row.title} 单价`"
                     placeholder="不报留空"
                     style="width: 100%"
+                    @update:value="(value) => setPrice(row, value)"
                   />
+                </td>
+                <td>
+                  <InputNumber
+                    :value="row.total"
+                    string-mode
+                    :min="0"
+                    :controls="false"
+                    :disabled="saving"
+                    :aria-label="`${row.title} 总价`"
+                    placeholder="或填总价"
+                    style="width: 100%"
+                    @update:value="(value) => setTotal(row, value)"
+                  />
+                  <span v-if="quoteTotalDrift(row)" class="hint">
+                    单价取 6 位小数，实际总价 {{ quoteTotalDrift(row) }}
+                  </span>
                 </td>
                 <td>
                   <Input
@@ -413,7 +441,6 @@ watch(
                     :aria-label="`${row.title} 交期`"
                   />
                 </td>
-                <td class="num">{{ quoteRowSubtotal(row) ?? '—' }}</td>
               </tr>
             </tbody>
           </table>
@@ -600,13 +627,13 @@ watch(
   border-radius: 8px;
 }
 
-.grid {
+.batch-grid {
   width: 100%;
   font-size: 13px;
   border-collapse: collapse;
 }
 
-.grid th {
+.batch-grid th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -618,30 +645,30 @@ watch(
   background: hsl(var(--accent));
 }
 
-.grid td {
+.batch-grid td {
   padding: 6px 8px;
   vertical-align: top;
   border-top: 1px solid hsl(var(--border));
 }
 
-.grid tr.current td {
+.batch-grid tr.current td {
   background: hsl(var(--primary) / 5%);
 }
 
-.grid tr.invalid td {
+.batch-grid tr.invalid td {
   background: hsl(var(--destructive) / 5%);
 }
 
-.grid .num {
+.batch-grid .num {
   text-align: right;
   white-space: nowrap;
 }
 
-.grid .price {
+.batch-grid .price {
   width: 132px;
 }
 
-.grid .date {
+.batch-grid .date {
   width: 150px;
 }
 

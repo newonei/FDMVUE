@@ -182,6 +182,8 @@ export interface QuoteRow {
   /** Cheapest current confirmed quote from any supplier, for reference. */
   best?: { currency: string; supplierName: string; unitPrice: string };
   unitPrice?: string;
+  /** Line total the buyer typed or the one derived from the unit price; only the unit price is submitted. */
+  total?: string;
   /** Empty uses the sheet's promised date. */
   promisedDate?: string;
 }
@@ -237,9 +239,40 @@ export function pricedQuoteRows(all: QuoteRow[]) {
   return all.filter((row) => (row.unitPrice ?? '').trim() !== '');
 }
 
-export function quoteRowSubtotal(row: QuoteRow) {
-  const value = decimal(row.unitPrice).multipliedBy(decimal(row.quantity));
-  return value.isFinite() ? value.toFormat(2) : undefined;
+/** Quotes accept at most 6 decimals on the unit price. */
+const PRICE_SCALE = 6;
+const blank = (value: string | undefined) => (value ?? '').trim() === '';
+
+/** Unit price typed: total follows as price × quantity, rounded to cents. */
+export function totalFromPrice(price: string | undefined, quantity: string) {
+  if (blank(price)) return undefined;
+  const value = decimal(price).multipliedBy(decimal(quantity));
+  return value.isFinite() ? value.toFixed(2) : undefined;
+}
+
+/** Total typed: unit price follows as total ÷ quantity, kept to 6 decimals. */
+export function priceFromTotal(total: string | undefined, quantity: string) {
+  const amount = decimal(quantity);
+  if (blank(total) || !amount.isGreaterThan(0)) return undefined;
+  const value = decimal(total).dividedBy(amount);
+  return value.isFinite()
+    ? plain(value.decimalPlaces(PRICE_SCALE, BigNumber.ROUND_HALF_UP))
+    : undefined;
+}
+
+/**
+ * When a typed total does not divide evenly, the rounded unit price gives a slightly
+ * different total; show what will actually be recorded.
+ */
+export function quoteTotalDrift(row: QuoteRow) {
+  if (blank(row.total) || blank(row.unitPrice)) return undefined;
+  const recorded = decimal(row.unitPrice).multipliedBy(decimal(row.quantity));
+  if (
+    !recorded.isFinite() ||
+    recorded.decimalPlaces(2).isEqualTo(decimal(row.total).decimalPlaces(2))
+  )
+    return undefined;
+  return recorded.toFormat(2);
 }
 
 /** Sheet-level errors (supplier, terms, evidence) plus row errors keyed by assignment. */
