@@ -199,10 +199,11 @@ export function procurementOrderAction(
     data,
   );
 }
+/** format：PDF、DOCX（Word）或 XLSX（Excel），都按金智采购单模板生成并存档一版。 */
 export function exportProcurementOrder(
   contractId: string,
   orderId: string,
-  data: OrderCommand,
+  data: OrderCommand & { format?: 'DOCX' | 'PDF' | 'XLSX' },
 ) {
   return requestClient.post<ProcurementOrderView>(
     `${orderPath(contractId, orderId)}/exports`,
