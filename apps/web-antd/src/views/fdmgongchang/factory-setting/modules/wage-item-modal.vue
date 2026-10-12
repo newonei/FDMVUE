@@ -206,10 +206,10 @@ async function submit() {
         <div class="flex flex-col gap-1 sm:col-span-2">
           <span>适用条件（留空为不限；报产出时按产出的宽、长、厚自动推荐）</span>
           <div class="flex flex-wrap items-center gap-2">
-            <InputNumber id="wage-item-width" v-model:value="form.widthMm" :min="1" :precision="0" addon-before="宽" addon-after="mm" class="w-40" />
-            <InputNumber id="wage-item-length" v-model:value="form.lengthMinMm" :min="1" :precision="0" addon-before="长 ≥" addon-after="mm" class="w-44" />
-            <InputNumber id="wage-item-tmin" v-model:value="form.thicknessMinMm" :min="0.01" :precision="2" addon-before="厚 ≥" addon-after="mm" class="w-40" />
-            <InputNumber id="wage-item-tmax" v-model:value="form.thicknessMaxMm" :min="0.01" :precision="2" addon-before="厚 ≤" addon-after="mm" class="w-40" />
+            <InputNumber id="wage-item-width" v-model:value="form.widthMm" :min="1" :precision="0" addon-before="宽" addon-after="mm" :style="{ width: '10rem' }" />
+            <InputNumber id="wage-item-length" v-model:value="form.lengthMinMm" :min="1" :precision="0" addon-before="长 ≥" addon-after="mm" :style="{ width: '11rem' }" />
+            <InputNumber id="wage-item-tmin" v-model:value="form.thicknessMinMm" :min="0.01" :precision="2" addon-before="厚 ≥" addon-after="mm" :style="{ width: '10rem' }" />
+            <InputNumber id="wage-item-tmax" v-model:value="form.thicknessMaxMm" :min="0.01" :precision="2" addon-before="厚 ≤" addon-after="mm" :style="{ width: '10rem' }" />
           </div>
         </div>
         <label for="wage-item-product" class="flex flex-col gap-1">

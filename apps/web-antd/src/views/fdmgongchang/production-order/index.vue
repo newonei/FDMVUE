@@ -219,7 +219,7 @@ function progressPercent(o: Api.Order) {
               id="po-filter-keyword"
               v-model:value="filters.keyword"
               allow-clear
-              class="w-56"
+              :style="{ width: '14rem' }"
               placeholder="订单号、用途、下单人、备注"
               size="small"
             />

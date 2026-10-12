@@ -229,7 +229,7 @@ async function submit() {
           <span class="text-xs font-normal text-muted-foreground">请核对成品规格和合同产品一致</span>
         </h3>
         <div class="flex flex-wrap items-center gap-3">
-          <Input id="shipment-stock-search" v-model:value="stockKeyword" allow-clear class="w-52" placeholder="搜编码或批次" size="small" />
+          <Input id="shipment-stock-search" v-model:value="stockKeyword" allow-clear :style="{ width: '13rem' }" placeholder="搜编码或批次" size="small" />
           <span v-if="stockTotal > 200" class="text-xs text-muted-foreground">共 {{ stockTotal }} 行，只显示前 200 行</span>
         </div>
         <Table
@@ -262,7 +262,7 @@ async function submit() {
                 :min="0"
                 :max="Number(record.quantity)"
                 :precision="3"
-                class="w-28"
+                :style="{ width: '7rem' }"
                 size="small"
                 :aria-label="`${record.itemCode} 出货数量`"
                 @change="(v) => setQuantity(record as Api.Stock, (v as null | number | undefined) ?? null)"

@@ -299,7 +299,7 @@ const statCards = computed(() =>
             id="order-filter-keyword"
             v-model:value="filters.keyword"
             allow-clear
-            class="w-52"
+            :style="{ width: '13rem' }"
             placeholder="单号、订单号或操作人"
             size="small"
           />

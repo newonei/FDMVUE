@@ -177,7 +177,7 @@ async function submit() {
               id="record-fill-all"
               :min="0"
               :precision="byHours ? 2 : 3"
-              class="w-24"
+              :style="{ width: '6rem' }"
               size="small"
               @change="(v) => fillAll((v as null | number) ?? null)"
             />
@@ -192,7 +192,7 @@ async function submit() {
             :min="0"
             :precision="byHours ? 2 : 3"
             :value="values[id] ?? undefined"
-            class="w-32"
+            :style="{ width: '8rem' }"
             size="small"
             @change="(v) => (values[id] = (v as null | number | undefined) ?? null)"
           />

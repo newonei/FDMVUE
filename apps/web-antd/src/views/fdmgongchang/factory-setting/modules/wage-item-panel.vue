@@ -121,7 +121,7 @@ const columns = [
           placeholder="全部工序"
           size="small"
         />
-        <Input id="wage-item-filter-keyword" v-model:value="keyword" allow-clear class="w-40" placeholder="搜项目名称" size="small" />
+        <Input id="wage-item-filter-keyword" v-model:value="keyword" allow-clear :style="{ width: '10rem' }" placeholder="搜项目名称" size="small" />
         <label for="wage-item-show-disabled" class="flex items-center gap-1 text-xs text-muted-foreground">
           <Switch id="wage-item-show-disabled" v-model:checked="showDisabled" size="small" />
           显示停用

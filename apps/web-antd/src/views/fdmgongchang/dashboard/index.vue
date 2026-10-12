@@ -123,8 +123,19 @@ const orders = computed(() =>
   }),
 );
 
+/** 没有产出、在制和库存的工序、库存段先收起来，避免一屏都是 0。 */
+const showIdle = ref(false);
+const activeProcesses = computed(() =>
+  processRows.value.filter((p) => n(p.good) + n(p.defect) + n(p.goodPrev) > 0 || p.wip > 0 || n(p.stock) > 0),
+);
+const visibleProcesses = computed(() => (showIdle.value ? processRows.value : activeProcesses.value));
+const idleProcessCount = computed(() => processRows.value.length - activeProcesses.value.length);
+const showEmptyStock = ref(false);
+const stockedStages = computed(() => (data.value?.stocks ?? []).filter((s) => n(s.quantity) > 0));
+const visibleStocks = computed(() => (showEmptyStock.value ? (data.value?.stocks ?? []) : stockedStages.value));
+const emptyStockCount = computed(() => (data.value?.stocks.length ?? 0) - stockedStages.value.length);
+
 const topMax = computed(() => Math.max(1, ...(data.value?.people.top ?? []).map((t) => n(t.amount))));
-const stockMax = computed(() => Math.max(1, ...(data.value?.stocks ?? []).map((s) => n(s.quantity))));
 
 const alerts = computed(() => {
   const d = data.value;
@@ -198,7 +209,7 @@ const alerts = computed(() => {
           </section>
 
           <!-- 趋势 + 工序表现 -->
-          <section class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <section class="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
             <div class="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
               <div class="flex items-baseline justify-between">
                 <h2 class="m-0 text-base font-semibold">产出趋势</h2>
@@ -208,7 +219,7 @@ const alerts = computed(() => {
             </div>
             <div class="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
               <h2 class="m-0 text-base font-semibold">工序表现</h2>
-              <div v-for="p in processRows" :key="p.process" class="flex flex-col gap-1">
+              <div v-for="p in visibleProcesses" :key="p.process" class="flex flex-col gap-1">
                 <div class="flex items-baseline justify-between gap-2 text-sm">
                   <span class="flex items-center gap-2">
                     <span :style="{ background: PROCESS_COLORS[p.process] ?? '#8A9893' }" class="size-2.5 rounded-sm"></span>
@@ -227,12 +238,21 @@ const alerts = computed(() => {
                 </div>
                 <span class="text-xs text-muted-foreground">在制 {{ p.wip }} 张单 · 库存 {{ big(p.stock) }} {{ p.unit }}</span>
               </div>
+              <p v-if="processRows.length > 0 && visibleProcesses.length === 0" class="m-0 text-sm text-muted-foreground">这段时间各工序都还没有产出。</p>
+              <button
+                v-if="idleProcessCount > 0"
+                class="self-start text-xs text-primary hover:underline"
+                type="button"
+                @click="showIdle = !showIdle"
+              >
+                {{ showIdle ? '收起没有数据的工序' : `还有 ${idleProcessCount} 道工序暂无数据，展开` }}
+              </button>
               <Empty v-if="processRows.length === 0" description="本厂还没有启用工序" />
             </div>
           </section>
 
           <!-- 订单交付 + 库存 + 人员 -->
-          <section class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <section class="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
             <div class="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm xl:col-span-2">
               <div class="flex items-baseline justify-between">
                 <h2 class="m-0 text-base font-semibold">订单交付</h2>
@@ -290,12 +310,21 @@ const alerts = computed(() => {
 
               <div class="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-sm">
                 <h2 class="m-0 text-base font-semibold">各段库存</h2>
-                <div v-for="s in data.stocks" :key="s.stage" class="flex items-center gap-2 text-sm">
-                  <span class="w-24 shrink-0 truncate text-muted-foreground">{{ s.label }}</span>
-                  <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div :style="{ width: `${(n(s.quantity) / stockMax) * 100}%` }" class="h-full rounded-full bg-primary/60"></div></div>
-                  <span class="w-20 shrink-0 text-right tabular-nums">{{ big(s.quantity) }} <span class="text-xs text-muted-foreground">{{ s.unit }}</span></span>
+                <p v-if="visibleStocks.length === 0" class="m-0 text-sm text-muted-foreground">各段都没有库存。</p>
+                <div class="grid grid-cols-2 gap-2">
+                  <div v-for="s in visibleStocks" :key="s.stage" class="flex flex-col rounded-lg bg-muted/50 px-3 py-2">
+                    <span class="truncate text-xs text-muted-foreground">{{ s.label }}</span>
+                    <span class="text-lg font-bold tabular-nums">{{ big(s.quantity) }} <span class="text-xs font-normal text-muted-foreground">{{ s.unit }}</span></span>
+                  </div>
                 </div>
-                <span class="text-xs text-muted-foreground">各段单位不同，条形只在同一段内看多少</span>
+                <button
+                  v-if="emptyStockCount > 0"
+                  class="self-start text-xs text-primary hover:underline"
+                  type="button"
+                  @click="showEmptyStock = !showEmptyStock"
+                >
+                  {{ showEmptyStock ? '收起没有库存的段' : `还有 ${emptyStockCount} 段没有库存，展开` }}
+                </button>
               </div>
             </div>
           </section>

@@ -247,7 +247,7 @@ const stateOptions = [
             id="worker-filter-keyword"
             v-model:value="filters.keyword"
             allow-clear
-            class="w-48"
+            :style="{ width: '12rem' }"
             placeholder="姓名或手机号"
             size="small"
           />

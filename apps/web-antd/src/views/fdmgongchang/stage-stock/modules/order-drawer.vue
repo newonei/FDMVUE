@@ -842,7 +842,7 @@ watch(processCode, warnNoPatterns);
                 id="order-stock-search"
                 v-model:value="stockKeyword"
                 allow-clear
-                class="w-52"
+                :style="{ width: '13rem' }"
                 placeholder="搜编码或批次"
                 size="small"
               />
@@ -887,7 +887,7 @@ watch(processCode, warnNoPatterns);
                     :min="0"
                     :max="Number(record.quantity)"
                     :precision="3"
-                    class="w-28"
+                    :style="{ width: '7rem' }"
                     size="small"
                     :aria-label="`${record.itemCode} 领用数量`"
                     @change="
@@ -1032,7 +1032,7 @@ watch(processCode, warnNoPatterns);
                   :placeholder="
                     processCode === 'MIX' ? '保存时自动生成' : '继承领料批次'
                   "
-                  class="w-56 font-mono"
+                  class="font-mono" :style="{ width: '14rem' }"
                   size="small"
                 />
               </label>
@@ -1067,7 +1067,7 @@ watch(processCode, warnNoPatterns);
                   v-model:value="line.goodQuantity"
                   :min="0"
                   :precision="3"
-                  class="w-28"
+                  :style="{ width: '7rem' }"
                   size="small"
                 />
                 {{ outputStageOption?.unit }}
@@ -1082,7 +1082,7 @@ watch(processCode, warnNoPatterns);
                   v-model:value="line.defectQuantity"
                   :min="0"
                   :precision="3"
-                  class="w-28"
+                  :style="{ width: '7rem' }"
                   size="small"
                 />
                 {{ outputStageOption?.unit }}
@@ -1155,7 +1155,7 @@ watch(processCode, warnNoPatterns);
                 :min="0"
                 :precision="3"
                 :value="line.quantity ?? undefined"
-                class="w-28"
+                :style="{ width: '7rem' }"
                 size="small"
                 @change="(v) => ((line.quantity = (v as null | number | undefined) ?? null), (line.quantityTouched = true))"
               />

@@ -202,7 +202,7 @@ async function submit() {
               :min="0"
               :precision="0"
               :value="l.quantity ?? undefined"
-              class="w-28"
+              :style="{ width: '7rem' }"
               placeholder="数量"
               @change="(v) => (l.quantity = (v as null | number | undefined) ?? null)"
             />

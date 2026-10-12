@@ -161,7 +161,7 @@ const receiptColumns = [
         id="receiving-search"
         v-model:value="keyword"
         allow-clear
-        class="w-60"
+        :style="{ width: '15rem' }"
         placeholder="搜采购单、供应商或物料"
         size="small"
       />

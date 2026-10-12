@@ -135,7 +135,7 @@ const columns = [
           id="txn-filter-keyword"
           v-model:value="filters.keyword"
           allow-clear
-          class="w-48"
+          :style="{ width: '12rem' }"
           placeholder="单号或批次"
           size="small"
         />

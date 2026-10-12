@@ -99,7 +99,7 @@ function emptyHint(field: AttrField) {
         :max="9999.99"
         :precision="field === 'thickness' ? 2 : 1"
         :step="field === 'thickness' ? 0.1 : 1"
-        class="w-24"
+        :style="{ width: '6rem' }"
         size="small"
         addon-after="cm"
         @change="(v) => update(field, v)"

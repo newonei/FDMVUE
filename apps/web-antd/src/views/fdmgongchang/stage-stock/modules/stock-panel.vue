@@ -166,7 +166,7 @@ function onSaved() {
           id="stock-search"
           v-model:value="keyword"
           allow-clear
-          class="w-56"
+          :style="{ width: '14rem' }"
           placeholder="搜编码或批次"
         />
         <Checkbox id="stock-show-zero" v-model:checked="showZero">

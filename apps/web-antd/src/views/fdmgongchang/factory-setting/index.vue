@@ -226,7 +226,7 @@ async function save() {
                   :min="0"
                   :precision="0"
                   :value="capacities[p.code] ?? undefined"
-                  class="w-28"
+                  :style="{ width: '7rem' }"
                   placeholder="选填"
                   size="small"
                   @change="

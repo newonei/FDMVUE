@@ -66,7 +66,7 @@ function remove(task: Api.PlanTask) {
                   :min="0"
                   :precision="3"
                   :value="Number(task.quantity)"
-                  class="w-24"
+                  :style="{ width: '6rem' }"
                   size="small"
                   @change="(v) => (task.quantity = (v as number | null) ?? 0)"
                 />

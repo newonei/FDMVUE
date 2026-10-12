@@ -189,7 +189,7 @@ const columns = [
             id="rp-search"
             v-model:value="keyword"
             allow-clear
-            class="w-60"
+            :style="{ width: '15rem' }"
             placeholder="搜采购单号或供应商"
             size="small"
           />

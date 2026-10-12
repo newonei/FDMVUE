@@ -153,7 +153,7 @@ const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
                 :min="0"
                 :precision="0"
                 :value="done[i.id] ?? undefined"
-                class="w-24"
+                :style="{ width: '6rem' }"
                 size="small"
                 @change="(v) => (done[i.id] = (v as null | number | undefined) ?? null)"
               />

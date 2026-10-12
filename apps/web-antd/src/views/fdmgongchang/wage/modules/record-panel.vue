@@ -161,7 +161,7 @@ const statusOptions = (Object.keys(RECORD_STATUS) as Api.RecordStatus[]).map((s)
       <div class="flex flex-wrap items-center gap-2">
         <Select id="record-filter-category" v-model:value="filters.category" :options="categoryOptions" allow-clear class="w-28" placeholder="全部类别" size="small" />
         <Select id="record-filter-status" v-model:value="filters.status" :options="statusOptions" allow-clear class="w-28" placeholder="全部状态" size="small" />
-        <Input id="record-filter-keyword" v-model:value="filters.keyword" allow-clear class="w-48" placeholder="姓名、项目或工序单号" size="small" />
+        <Input id="record-filter-keyword" v-model:value="filters.keyword" allow-clear :style="{ width: '12rem' }" placeholder="姓名、项目或工序单号" size="small" />
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <template v-if="selectedKeys.length > 0">

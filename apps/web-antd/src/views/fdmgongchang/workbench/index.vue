@@ -218,7 +218,8 @@ function back() {
 </script>
 
 <template>
-  <div class="mx-auto min-h-full w-full max-w-[480px] bg-background-deep">
+  <!-- 手机上全屏显示，盖住电脑端的顶部栏和标签页，工人只看到要做的活 -->
+  <div class="mx-auto min-h-full w-full max-w-[480px] bg-background-deep max-md:fixed max-md:inset-0 max-md:z-[900] max-md:max-w-none max-md:overflow-y-auto">
     <Result v-if="noFactory" status="info" title="你的账号还不属于任何工厂">
       <template #subTitle>请找工厂管理员在钉钉里把你调到所在工厂的部门。</template>
     </Result>

@@ -195,7 +195,7 @@ const shipmentColumns = [
         id="trade-search"
         v-model:value="keyword"
         allow-clear
-        class="w-60"
+        :style="{ width: '15rem' }"
         placeholder="搜合同号、客户或产品"
         size="small"
       />

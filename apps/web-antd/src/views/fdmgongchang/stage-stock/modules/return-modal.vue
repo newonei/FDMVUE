@@ -112,7 +112,7 @@ async function submit() {
             :max="remaining(line)"
             :min="0"
             :precision="3"
-            class="w-32"
+            :style="{ width: '8rem' }"
             size="small"
             @change="
               (v) =>
