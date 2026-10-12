@@ -36,8 +36,10 @@ import { errorText, field, selectField } from '../../../data';
 
 defineOptions({ name: 'FdmPlatformPurchaseTemplateWorkspace' });
 const inMergedView = useInMergedView();
-const tab = ref<SettingType>('entities');
-const data = ref<Record<SettingType, ProcurementSetting[]>>({
+/** 仓库在「仓库管理」维护，这里只管签约主体、模板和条款。 */
+type TemplateType = Exclude<SettingType, 'warehouses'>;
+const tab = ref<TemplateType>('entities');
+const data = ref<Record<TemplateType, ProcurementSetting[]>>({
   entities: [],
   templates: [],
   clauses: [],
@@ -53,6 +55,48 @@ const titles = {
   templates: '采购合同模板',
   clauses: '可选条款',
 };
+function typeFields() {
+  if (tab.value === 'entities')
+    return [
+      field('code', '主体编码'),
+      selectField('companyId', '关联公司（可选）', companies.value, {
+        required: false,
+      }),
+      field('legalName', '完整法定抬头', undefined, { required: false }),
+      field('address', '地址', undefined, { required: false }),
+      field('contactName', '联系人', undefined, { required: false }),
+      field('phone', '电话', undefined, { required: false }),
+      field('taxNo', '税号', undefined, { required: false }),
+      field('bankName', '开户行', undefined, { required: false }),
+      field('bankAccount', '银行账户', undefined, { required: false }),
+      field('usages', '可用用途', 'multiselect', {
+        options: [
+          { value: 'SIGN', label: '采购签约' },
+          { value: 'PAY', label: '实际付款' },
+          { value: 'COST', label: '成本归属' },
+        ],
+      }),
+      field('remark', '备注', 'textarea', { required: false }),
+    ];
+  if (tab.value === 'templates')
+    return [
+      field('title', 'Word合同标题'),
+      field('headerText', '前言正文', 'textarea', { required: false }),
+      field('footerText', '结尾正文', 'textarea', { required: false }),
+      field('requiredClauseGroups', '必要条款组', 'references', {
+        required: false,
+        options: [
+          ...new Set(
+            data.value.clauses.map((entry) => entry.groupCode).filter(Boolean),
+          ),
+        ].map((value) => ({
+          label: String(value),
+          value: String(value),
+        })),
+      }),
+    ];
+  return [field('groupCode', '条款组'), field('text', '条款正文', 'textarea')];
+}
 const definition = computed<ActionDefinition>(() => ({
   action: 'SAVE_SETTING',
   title: `${editing.value ? '维护' : '新建'}${titles[tab.value]}`,
@@ -62,51 +106,7 @@ const definition = computed<ActionDefinition>(() => ({
       : '保存已由业务确认的模板与条款正文。生成Word会冻结当时版本，修改后旧文件继续保留。',
   fields: [
     field('name', '名称'),
-    ...(tab.value === 'entities'
-      ? [
-          field('code', '主体编码'),
-          selectField('companyId', '关联公司（可选）', companies.value, {
-            required: false,
-          }),
-          field('legalName', '完整法定抬头', undefined, { required: false }),
-          field('address', '地址', undefined, { required: false }),
-          field('contactName', '联系人', undefined, { required: false }),
-          field('phone', '电话', undefined, { required: false }),
-          field('taxNo', '税号', undefined, { required: false }),
-          field('bankName', '开户行', undefined, { required: false }),
-          field('bankAccount', '银行账户', undefined, { required: false }),
-          field('usages', '可用用途', 'multiselect', {
-            options: [
-              { value: 'SIGN', label: '采购签约' },
-              { value: 'PAY', label: '实际付款' },
-              { value: 'COST', label: '成本归属' },
-            ],
-          }),
-          field('remark', '备注', 'textarea', { required: false }),
-        ]
-      : tab.value === 'templates'
-        ? [
-            field('title', 'Word合同标题'),
-            field('headerText', '前言正文', 'textarea', { required: false }),
-            field('footerText', '结尾正文', 'textarea', { required: false }),
-            field('requiredClauseGroups', '必要条款组', 'references', {
-              required: false,
-              options: [
-                ...new Set(
-                  data.value.clauses
-                    .map((entry) => entry.groupCode)
-                    .filter(Boolean),
-                ),
-              ].map((value) => ({
-                label: String(value),
-                value: String(value),
-              })),
-            }),
-          ]
-        : [
-            field('groupCode', '条款组'),
-            field('text', '条款正文', 'textarea'),
-          ]),
+    ...typeFields(),
     field('active', '启用', 'boolean', { default: true }),
   ],
   initialValues: editing.value ? { ...editing.value } : undefined,

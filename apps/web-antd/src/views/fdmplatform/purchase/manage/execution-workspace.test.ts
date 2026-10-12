@@ -56,6 +56,39 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('../warehouse/StockInDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup(props, { emit }) {
+      return () =>
+        props.open
+          ? h(
+              'div',
+              {
+                'data-stock-in': props.orderId,
+                'data-contract': props.contractId,
+              },
+              [
+                h(
+                  'button',
+                  {
+                    onClick: () =>
+                      emit('saved', { code: 'RK001', directShip: false }),
+                  },
+                  '确认入库',
+                ),
+                h('button', { onClick: () => emit('close') }, '取消入库'),
+              ],
+            )
+          : null;
+    },
+  }),
+}));
 vi.mock('./components/OrderContract.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -420,23 +453,19 @@ describe('采购订单原页执行', () => {
       }),
     );
   });
-  it('登记到货继承源订单并锁定合同，保存后更新原页并保留选择', async () => {
+  it('登记入库打开采购入库并带出当前采购单，保存后刷新原页并保留选择', async () => {
     const { host, router } = await mount('?page=2');
     button(host, 'CG-001').click();
     await settle();
-    button(host, '登记到货').click();
+    button(host, '登记入库').click();
     await settle();
-    const action = host.querySelector<HTMLElement>('[data-action]')!;
-    expect(action.dataset.action).toBe('RECORD_ARRIVAL');
-    expect(action.dataset.contract).toBe('contract-a');
-    expect(action.dataset.source).toBe(
-      JSON.stringify({ kind: 'orders', id: 'po-a' }),
-    );
-    expect(action.dataset.locked).toBe('true');
+    const dialog = host.querySelector<HTMLElement>('[data-stock-in]')!;
+    expect(dialog.dataset.stockIn).toBe('po-a');
+    expect(dialog.dataset.contract).toBe('contract-a');
     expect(button(host, '关闭执行详情').disabled).toBe(true);
-    button(host, '完成办理').click();
+    button(host, '确认入库').click();
     await settle();
-    expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-stock-in]')).toBeNull();
     expect(host.querySelector<HTMLElement>('[data-drawer]')).not.toBeNull();
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageNo: 2 }),
@@ -515,7 +544,7 @@ describe('采购订单原页执行', () => {
     await settle();
     expect(host.querySelector<HTMLElement>('[data-standalone]')).toBeNull();
   });
-  it('不存在未到余额时隐藏登记到货，付款资料未读取时不启用请款', async () => {
+  it('不存在未到余额时隐藏登记入库，付款资料未读取时不启用请款', async () => {
     const complete = detail();
     complete.order.lines[0]!.arrivedQuantity = 10;
     complete.order.status = 'RECEIVED';
@@ -526,7 +555,7 @@ describe('采购订单原页执行', () => {
     await settle();
     expect(
       [...host.querySelectorAll('button')].some(
-        (entry) => entry.textContent?.trim() === '登记到货',
+        (entry) => entry.textContent?.trim() === '登记入库',
       ),
     ).toBe(false);
     expect(button(host, '申请付款').disabled).toBe(true);

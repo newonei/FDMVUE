@@ -375,10 +375,10 @@ export function orderSteps(
     },
     {
       key: 'arrival',
-      title: '到货入库',
+      title: '入库',
       summary: arrived
         ? '已全部到货'
-        : arrivedText || '在工序库存「到货入库」登记',
+        : arrivedText || '货到后在采购单上登记入库',
       done: arrived,
     },
     {
@@ -476,13 +476,13 @@ export function orderRowSteps(row: {
   const short: Partial<Record<OrderStepKey, string>> = {
     details: '资料',
     contract: '合同',
-    arrival: '到货',
+    arrival: '入库',
     payment: '付款',
   };
   const next: Partial<Record<OrderStepKey, string>> = {
     details: '待确认下单资料',
     contract: '待签回合同',
-    arrival: '等到货',
+    arrival: '待入库',
     payment: '待付款',
   };
   const cancelled = String(row.record.status ?? '') === 'CANCELLED';

@@ -10,6 +10,7 @@ import type {
   ProcurementOrdersOverview,
   ProcurementOrderView,
 } from '#/api/fdmplatform/procurement';
+import type { StockIn } from '#/api/fdmplatform/warehouse';
 
 import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -80,6 +81,7 @@ import { hasPayableBalance } from '../../finance/procurement/model';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
+import StockInDialog from '../warehouse/StockInDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import {
@@ -144,6 +146,7 @@ const childOpen = computed(
     reasonOpen.value ||
     !!financeType.value ||
     !!arrivalId.value ||
+    stockInOpen.value ||
     nestedFinanceBusy.value ||
     contactEditorBusy.value ||
     saving.value,
@@ -247,12 +250,24 @@ const arrivalRow = computed(() =>
     ? resolveDocumentRow(contract.value, 'arrivals', arrivalId.value)
     : undefined,
 );
+/** 外采到货由采购在这里开采购入库单，不再进工厂的工序库存。 */
 const canReceive = computed(
   () =>
     !!view.value &&
-    !!contract.value?.allowedActions.includes('RECORD_ARRIVAL') &&
+    ['CONFIRMED', 'EXECUTING'].includes(String(contract.value?.status)) &&
     canRecordOrderArrival(view.value.order),
 );
+const stockInOpen = ref(false);
+function stockInSaved(value: StockIn) {
+  stockInOpen.value = false;
+  message.success(
+    value.directShip
+      ? `已入库 ${value.code}，并直发出库 ${value.stockOutCode}`
+      : `已入库 ${value.code}`,
+  );
+  void refreshFacts();
+  void loadList();
+}
 const paymentProgress = computed(() =>
   orderPaymentProgress(financeSummary.value),
 );
@@ -274,8 +289,8 @@ const nextHints: Record<string, { button: string; text: string }> = {
     button: '去导出 / 上传合同',
   },
   arrival: {
-    text: '货到后由仓库在工厂部门「工序库存 → 到货入库」登记，这里的到货进度会自动更新。',
-    button: '打开到货入库',
+    text: '货到后点「登记入库」开采购入库单；供应商直接发给客户的，入库时勾选「直发客户」，会自动出库。',
+    button: '登记入库',
   },
   payment: {
     text: '按合同约定申请付款，财务付款后进度会更新。',
@@ -286,11 +301,7 @@ function goStep(key: string) {
   if (childOpen.value) return;
   if (key === 'details') tab.value = 'details';
   else if (key === 'contract') tab.value = 'contract';
-  else if (key === 'arrival')
-    void router.push({
-      path: '/gongchang/stage-stock',
-      query: { tab: 'receiving' },
-    });
+  else if (key === 'arrival') stockInOpen.value = true;
   else if (key === 'payment') openFinance('REQUEST');
 }
 const selectedIndex = computed(() =>
@@ -485,6 +496,7 @@ async function loadDetail() {
   createAction.value = undefined;
   plansOpen.value = false;
   arrivalId.value = undefined;
+  stockInOpen.value = false;
   financeType.value = undefined;
   financeSummary.value = {};
   financeSequence++;
@@ -693,6 +705,7 @@ watch(
     reasonOpen.value = false;
     financeType.value = undefined;
     arrivalId.value = undefined;
+    stockInOpen.value = false;
     if (detailId.value) void loadDetail();
     else {
       view.value = undefined;
@@ -1157,9 +1170,9 @@ watch(financeType, (value, previous) => {
               v-if="canReceive"
               type="primary"
               :disabled="childOpen"
-              @click="createRelated('arrivals', 'RECORD_ARRIVAL')"
+              @click="stockInOpen = true"
             >
-              登记到货
+              登记入库
             </Button>
           </header>
 
@@ -1466,6 +1479,13 @@ watch(financeType, (value, previous) => {
         </template>
       </div>
     </Drawer>
+    <StockInDialog
+      :open="stockInOpen && active"
+      :contract-id="view?.contractId"
+      :order-id="view?.id"
+      @close="stockInOpen = false"
+      @saved="stockInSaved"
+    />
     <ActionDialog
       :open="reasonOpen && active"
       :definition="reasonDefinition"

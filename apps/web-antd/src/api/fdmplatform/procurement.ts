@@ -1,7 +1,7 @@
 import type { BusinessRecord, Decimal, DocumentRow, PageResult } from './index';
 
 import { requestClient } from '#/api/request';
-export type SettingType = 'clauses' | 'entities' | 'templates';
+export type SettingType = 'clauses' | 'entities' | 'templates' | 'warehouses';
 export interface ProcurementSetting {
   id: string;
   version: number;
@@ -24,6 +24,10 @@ export interface ProcurementSetting {
   requiredClauseGroups?: string[];
   groupCode?: string;
   text?: string;
+  /** 仓库：库管人员、默认仓库、是否计入总库存 */
+  managerUserIds?: number[];
+  isDefault?: boolean;
+  countInTotal?: boolean;
 }
 export interface SupplierContact {
   id: string;

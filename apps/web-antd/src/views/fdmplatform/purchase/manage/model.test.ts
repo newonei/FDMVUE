@@ -319,7 +319,7 @@ describe('采购单列表行', () => {
     expect(draft.steps.map((step) => step.label)).toEqual([
       '资料',
       '合同',
-      '到货',
+      '入库',
       '付款',
     ]);
     expect(draft.next).toBe('待确认下单资料');
@@ -330,7 +330,7 @@ describe('采购单列表行', () => {
       orderAmount: '100',
       unpaidAmount: '100',
     });
-    expect(signed.next).toBe('等到货');
+    expect(signed.next).toBe('待入库');
     expect(signed.steps.filter((step) => step.done)).toHaveLength(2);
   });
 });

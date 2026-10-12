@@ -134,6 +134,39 @@ vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('../warehouse/StockInDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup(props, { emit }) {
+      return () =>
+        props.open
+          ? h(
+              'div',
+              {
+                'data-stock-in': props.orderId,
+                'data-contract': props.contractId,
+              },
+              [
+                h(
+                  'button',
+                  {
+                    onClick: () =>
+                      emit('saved', { code: 'RK001', directShip: false }),
+                  },
+                  '确认入库',
+                ),
+                h('button', { onClick: () => emit('close') }, '取消入库'),
+              ],
+            )
+          : null;
+    },
+  }),
+}));
 vi.mock('./components/OrderContract.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -237,7 +270,7 @@ function contractFixture() {
     code: 'HT-1',
     name: '采购合同',
     version: 1,
-    status: 'ACTIVE',
+    status: 'EXECUTING',
     currency: 'CNY',
     companyId: 1,
     items: [],
@@ -438,22 +471,15 @@ describe('related creation inside the purchase workspace', () => {
       '/fdmprocurement/platform-orders',
     );
   });
-  it('passes the current order into arrival and return creation and refreshes the parent after saving', async () => {
+  it('passes the current order into stock-in and return creation and refreshes the parent after saving', async () => {
     const { host, router } = await mount(detailLocation);
-    click(host, '登记到货');
+    click(host, '登记入库');
     await settle();
-    const dialog = host.querySelector<HTMLElement>(
-      '[data-related-action="RECORD_ARRIVAL"]',
-    );
-    expect(dialog?.dataset.kind).toBe('arrivals');
-    expect(dialog?.dataset.contractId).toBe('contract-1');
-    expect(dialog?.dataset.contractLocked).toBe('true');
-    expect(JSON.parse(dialog!.dataset.source!)).toEqual({
-      kind: 'orders',
-      id: 'order-1',
-    });
+    const dialog = host.querySelector<HTMLElement>('[data-stock-in]');
+    expect(dialog?.dataset.stockIn).toBe('order-1');
+    expect(dialog?.dataset.contract).toBe('contract-1');
     expect(router.currentRoute.value.fullPath).toBe(detailLocation);
-    click(host, '取消关联建单');
+    click(host, '取消入库');
     await settle();
     expect(mocks.detail).toHaveBeenCalledTimes(1);
     click(host, '采购退货');
@@ -493,17 +519,14 @@ describe('related creation inside the purchase workspace', () => {
     });
     await settle();
     expect(host.querySelector<HTMLElement>('[data-related-list]')).toBeNull();
-    click(host, '登记到货');
+    click(host, '登记入库');
     await settle();
     expect(
-      JSON.parse(
-        host.querySelector<HTMLElement>('[data-related-action]')!.dataset
-          .source!,
-      ),
-    ).toEqual({ kind: 'orders', id: 'order-2' });
+      host.querySelector<HTMLElement>('[data-stock-in]')?.dataset.stockIn,
+    ).toBe('order-2');
     await router.push({ query: { contractId: 'contract-1' } });
     await settle();
-    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-stock-in]')).toBeNull();
     click(host, '生成采购单');
     await settle();
     const generation = host.querySelector<HTMLElement>('[data-related-action]');
