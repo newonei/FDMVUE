@@ -130,8 +130,44 @@ export interface ProcurementOrderView {
   files: ProcurementFile[];
   storageEnabled: boolean;
 }
+/** 不关联合同的采购单 contractId 为空，接口路径用 standalone 占位。 */
 function orderPath(contractId: string, orderId: string) {
-  return `${procurementBase}/orders/${encodeURIComponent(contractId)}/${encodeURIComponent(orderId)}`;
+  return `${procurementBase}/orders/${encodeURIComponent(contractId || 'standalone')}/${encodeURIComponent(orderId)}`;
+}
+
+export interface PurchaseOrderEntryLine {
+  productId?: string;
+  contractItemId?: string;
+  quantity: Decimal;
+  unitPrice?: Decimal;
+  arrivalDate?: string;
+  gift: boolean;
+  remark?: string;
+}
+export interface PurchaseOrderEntry {
+  idempotencyKey: string;
+  contractId?: string;
+  requestId?: string;
+  supplierId: string;
+  subject?: string;
+  category?: string;
+  purchaseDate?: string;
+  companyId?: number;
+  ownerUserId?: number;
+  currency?: string;
+  additionalCategory?: string;
+  additionalAmount?: Decimal;
+  roundOff?: Decimal;
+  remark?: string;
+  lines: PurchaseOrderEntryLine[];
+}
+/** 新建采购单：关联合同时写进合同，不关联时为独立采购单。 */
+export function createProcurementOrder(data: PurchaseOrderEntry) {
+  return requestClient.post<{
+    code: string;
+    contractId: string;
+    orderId: string;
+  }>(`${procurementBase}/orders`, data);
 }
 export function getProcurementOrder(contractId: string, orderId: string) {
   return requestClient.get<ProcurementOrderView>(
@@ -197,6 +233,8 @@ export interface ProcurementOrderRow extends DocumentRow {
   /** IN_PROGRESS 进行中 / COMPLETED 已完成（入库齐且付清）/ ENDED 已结束 */
   operationStatus?: 'COMPLETED' | 'ENDED' | 'IN_PROGRESS';
   ownerUserIds?: number[];
+  /** 新建的独立采购单（不关联合同），打开完整采购单抽屉 */
+  nativeStandalone?: boolean;
   details?: ProcurementOrderView['details'];
   orderAmount?: string;
   paidAmount?: string;

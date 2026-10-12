@@ -85,6 +85,7 @@ import { localDate } from '../quotes/comparison';
 import StockInDialog from '../warehouse/StockInDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
+import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
 import {
   canRecordOrderArrival,
   canReturnOrderArrival,
@@ -151,6 +152,7 @@ const childOpen = computed(
     !!financeType.value ||
     !!arrivalId.value ||
     stockInOpen.value ||
+    editorOpen.value ||
     nestedFinanceBusy.value ||
     contactEditorBusy.value ||
     saving.value,
@@ -258,10 +260,30 @@ const arrivalRow = computed(() =>
 const canReceive = computed(
   () =>
     !!view.value &&
-    ['CONFIRMED', 'EXECUTING'].includes(String(contract.value?.status)) &&
+    (standaloneOrder(view.value.contractId) ||
+      ['CONFIRMED', 'EXECUTING'].includes(String(contract.value?.status))) &&
     canRecordOrderArrival(view.value.order),
 );
 const stockInOpen = ref(false);
+/** 不关联合同的采购单：contractId 为空或占位 standalone。 */
+function standaloneOrder(id: string | undefined) {
+  return !id || id === 'standalone';
+}
+const editorOpen = ref(false);
+function editorSaved(value: {
+  code: string;
+  contractId: string;
+  orderId: string;
+}) {
+  editorOpen.value = false;
+  message.success(`已新建采购单 ${value.code}`);
+  void loadList();
+  localTab.value = 'details';
+  selection.value = {
+    contractId: value.contractId || 'standalone',
+    documentId: value.orderId,
+  };
+}
 function stockInSaved(value: StockIn) {
   stockInOpen.value = false;
   message.success(
@@ -510,7 +532,9 @@ async function loadDetail() {
     detailLoading.value = true;
     const [value, parent] = await Promise.all([
       getProcurementOrder(target.contractId, target.documentId),
-      getContract(target.contractId),
+      standaloneOrder(target.contractId)
+        ? Promise.resolve(undefined)
+        : getContract(target.contractId),
     ]);
     if (run !== sequence || !active.value) return;
     view.value = value;
@@ -530,7 +554,9 @@ async function refreshFacts() {
   try {
     const [value, parent] = await Promise.all([
       getProcurementOrder(view.value.contractId, currentId),
-      getContract(view.value.contractId),
+      standaloneOrder(view.value.contractId)
+        ? Promise.resolve(undefined)
+        : getContract(view.value.contractId),
     ]);
     if (view.value?.id === currentId) {
       view.value = value;
@@ -567,8 +593,20 @@ function openRow(row: DocumentRow, selectedTab = 'details', event?: Event) {
     event?.currentTarget instanceof HTMLElement
       ? event.currentTarget
       : undefined;
-  if (row.standaloneId) {
+  // 新建的独立采购单（不关联合同）走完整采购单抽屉；金智迁入的历史单仍是补齐页
+  const native =
+    !!row.standaloneId &&
+    (row as ProcurementOrderRow).nativeStandalone === true;
+  if (row.standaloneId && !native) {
     localStandaloneId.value = row.standaloneId;
+    return;
+  }
+  if (native) {
+    localTab.value = selectedTab;
+    selection.value = {
+      contractId: 'standalone',
+      documentId: row.standaloneId!,
+    };
     return;
   }
   localTab.value = selectedTab;
@@ -757,11 +795,17 @@ watch(financeType, (value, previous) => {
         <template #actions>
           <Button :loading="loading" @click="loadList">刷新</Button>
           <Button
-            type="primary"
             :disabled="childOpen"
             @click="createRelated('orders', 'GENERATE_ORDERS')"
           >
-            生成采购单
+            从方案生成
+          </Button>
+          <Button
+            type="primary"
+            :disabled="childOpen"
+            @click="editorOpen = true"
+          >
+            新建采购单
           </Button>
         </template>
       </ProcurementPageHeader>
@@ -1448,6 +1492,11 @@ watch(financeType, (value, previous) => {
         </template>
       </div>
     </Drawer>
+    <PurchaseOrderEditor
+      :open="editorOpen && active"
+      @close="editorOpen = false"
+      @saved="editorSaved"
+    />
     <StockInDialog
       :open="stockInOpen && active"
       :contract-id="view?.contractId"

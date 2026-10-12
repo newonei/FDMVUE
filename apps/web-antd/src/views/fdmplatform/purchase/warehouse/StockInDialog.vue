@@ -61,8 +61,9 @@ const form = ref({
   directShip: false,
 });
 const target = computed(() => {
-  if (props.contractId && props.orderId)
-    return { contractId: props.contractId, orderId: props.orderId };
+  // 从采购单打开时 orderId 一定有；不关联合同的采购单 contractId 为空
+  if (props.orderId)
+    return { contractId: props.contractId ?? '', orderId: props.orderId };
   const order = orders.value.find((entry) => entry.value === picked.value);
   return order
     ? { contractId: order.contractId, orderId: order.value }
@@ -85,9 +86,9 @@ async function loadOrders(keyword = '') {
     .map((row) => {
       const labels = purchaseRowLabels(row);
       return {
-        value: String(row.id),
-        contractId: String(row.contractId),
-        label: `${labels.order} · ${labels.supplier} · ${row.contractCode ?? ''}`,
+        value: String(row.standaloneId ?? row.id),
+        contractId: row.contractId ? String(row.contractId) : '',
+        label: `${labels.order} · ${labels.supplier} · ${row.contractCode ?? '未关联合同'}`,
       };
     });
 }

@@ -134,6 +134,9 @@ vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/PurchaseOrderEditor.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('../warehouse/StockInDialog.vue', () => ({
   default: defineComponent({
     props: {
@@ -432,7 +435,7 @@ describe('related creation inside the purchase workspace', () => {
   it('generates orders directly from the filtered list without leaving the page', async () => {
     const { host, router } = await mount();
     const location = router.currentRoute.value.fullPath;
-    click(host, '生成采购单');
+    click(host, '从方案生成');
     await settle();
     const dialog = host.querySelector<HTMLElement>(
       '[data-related-action="GENERATE_ORDERS"]',
@@ -450,7 +453,7 @@ describe('related creation inside the purchase workspace', () => {
   });
   it('lets the existing action select a contract on the unfiltered list and refreshes after creation', async () => {
     const { host, router } = await mount('/fdmprocurement/platform-orders');
-    click(host, '生成采购单');
+    click(host, '从方案生成');
     await settle();
     const dialog = host.querySelector<HTMLElement>(
       '[data-related-action="GENERATE_ORDERS"]',
@@ -527,7 +530,7 @@ describe('related creation inside the purchase workspace', () => {
     await router.push({ query: { contractId: 'contract-1' } });
     await settle();
     expect(host.querySelector<HTMLElement>('[data-stock-in]')).toBeNull();
-    click(host, '生成采购单');
+    click(host, '从方案生成');
     await settle();
     const generation = host.querySelector<HTMLElement>('[data-related-action]');
     expect(generation).not.toBeNull();

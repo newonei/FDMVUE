@@ -56,6 +56,9 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/PurchaseOrderEditor.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('../warehouse/StockInDialog.vue', () => ({
   default: defineComponent({
     props: {

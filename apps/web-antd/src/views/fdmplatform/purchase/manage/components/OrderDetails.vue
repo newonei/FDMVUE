@@ -450,7 +450,7 @@ function confirm() {
       </template>
 </Table><Alert
       type="info"
-      message="产品、形状、数量及单价沿用已确认方案。需要修改时请发起采购方案变更，不直接覆盖历史执行资料。"
+      message="产品、数量和单价以下单时为准，不直接覆盖已下单的资料；剩余不再采购的数量可在「更多操作」里结束余额。"
     /><Drawer
       :open="contactsOpen"
       title="工厂联系人"
