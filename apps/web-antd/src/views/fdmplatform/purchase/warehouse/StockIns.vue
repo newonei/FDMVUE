@@ -22,7 +22,10 @@ import { getStockIns } from '#/api/fdmplatform/warehouse';
 import { errorText } from '../../data';
 import { personName } from '../../directory';
 import { linesTitle, money, qty } from './model';
+import PurchaseReturnDialog from './PurchaseReturnDialog.vue';
+import { canReturn, canVoidStockIn } from './return-model';
 import StockInDialog from './StockInDialog.vue';
+import VoidDialog from './VoidDialog.vue';
 
 import './warehouse-pages.css';
 
@@ -38,6 +41,8 @@ const directory = ref<Directory>();
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
+const returning = ref<StockIn>();
+const voiding = ref<StockIn>();
 
 const columns = [
   { title: '入库单号', key: 'code', width: 170 },
@@ -53,6 +58,7 @@ const columns = [
   },
   { title: '金额', key: 'amount', width: 130, align: 'right' as const },
   { title: '入库日期 / 经办', key: 'date', width: 130 },
+  { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
 ];
 
 async function load(reset = false) {
@@ -85,6 +91,16 @@ function saved(value: StockIn) {
       : `已入库 ${value.code}`,
   );
   void load(true);
+}
+function returned(value: { code: string }) {
+  returning.value = undefined;
+  message.success(`已办理采购退货 ${value.code}`);
+  void load();
+}
+function voided(code: string) {
+  voiding.value = undefined;
+  message.success(`已作废 ${code}`);
+  void load();
 }
 onMounted(async () => {
   void load();
@@ -132,7 +148,10 @@ onMounted(async () => {
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: 1300 }"
+      :scroll="{ x: 1420 }"
+      :row-class-name="
+        (record: StockIn) => (record.status === 'VOIDED' ? 'voided' : '')
+      "
       :pagination="{
         current: pageNo,
         pageSize: 20,
@@ -167,7 +186,19 @@ onMounted(async () => {
               <span class="muted">{{ line.specification }}</span>
             </td>
             <td>{{ qty(line.quantity) }} {{ line.unit }}</td>
-            <td>{{ qty(line.acceptedQuantity) }}</td>
+            <td>
+              {{ qty(line.acceptedQuantity) }}
+              <span
+                v-if="
+                  Number(line.returnedAcceptedQuantity ?? 0) > 0 ||
+                  Number(line.returnedExceptionQuantity ?? 0) > 0
+                "
+                class="muted"
+              >
+                已退 {{ qty(line.returnedAcceptedQuantity ?? 0) }} 合格 /
+                {{ qty(line.returnedExceptionQuantity ?? 0) }} 不合格
+              </span>
+            </td>
             <td>{{ line.exceptionReason ?? '—' }}</td>
             <td>{{ line.batchNo ?? '—' }}</td>
             <td>{{ qty(line.unitPrice) }}</td>
@@ -178,6 +209,9 @@ onMounted(async () => {
       <template #bodyCell="{ column, record }">
         <div v-if="column.key === 'code'" class="cell">
           <b class="mono">{{ record.code }}</b>
+          <Tag v-if="record.status === 'VOIDED'" :title="record.voidReason">
+            已作废
+          </Tag>
           <Tag v-if="record.directShip" color="blue">
             直发 · {{ record.stockOutCode }}
           </Tag>
@@ -209,8 +243,44 @@ onMounted(async () => {
             personName(directory, record.createdBy)
           }}</span>
         </div>
+        <div v-else-if="column.key === 'action'" class="row-actions">
+          <template v-if="record.status === 'VOIDED'">
+            <span class="muted ellipsis" :title="record.voidReason">
+              {{ record.voidReason }}
+            </span>
+          </template>
+          <template v-else>
+            <Button
+              v-if="canReturn(record as StockIn)"
+              size="small"
+              type="link"
+              @click="returning = record as StockIn"
+            >
+              退货
+            </Button>
+            <Button
+              v-if="canVoidStockIn(record as StockIn)"
+              danger
+              size="small"
+              type="link"
+              @click="voiding = record as StockIn"
+            >
+              作废
+            </Button>
+          </template>
+        </div>
       </template>
     </Table>
     <StockInDialog :open="creating" @close="creating = false" @saved="saved" />
+    <PurchaseReturnDialog
+      :stock-in="returning"
+      @close="returning = undefined"
+      @saved="returned"
+    />
+    <VoidDialog
+      :stock-in="voiding"
+      @close="voiding = undefined"
+      @saved="voided"
+    />
   </div>
 </template>

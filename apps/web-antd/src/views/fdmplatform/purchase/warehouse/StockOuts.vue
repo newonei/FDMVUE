@@ -23,6 +23,7 @@ import { errorText } from '../../data';
 import { personName } from '../../directory';
 import { linesTitle, money, qty } from './model';
 import StockOutDialog from './StockOutDialog.vue';
+import VoidDialog from './VoidDialog.vue';
 
 import './warehouse-pages.css';
 
@@ -38,6 +39,7 @@ const directory = ref<Directory>();
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
+const voiding = ref<StockOut>();
 
 const columns = [
   { title: '出库单号', key: 'code', width: 180 },
@@ -47,6 +49,7 @@ const columns = [
   { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
   { title: '出库成本', key: 'cost', width: 130, align: 'right' as const },
   { title: '出库日期 / 经办', key: 'date', width: 130 },
+  { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
 ];
 
 async function load(reset = false) {
@@ -75,6 +78,11 @@ function saved(value: StockOut) {
   creating.value = false;
   message.success(`已出库 ${value.code}`);
   void load(true);
+}
+function voided(code: string) {
+  voiding.value = undefined;
+  message.success(`已作废 ${code}`);
+  void load();
 }
 onMounted(async () => {
   void load();
@@ -122,7 +130,10 @@ onMounted(async () => {
       :columns="columns"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: 1150 }"
+      :scroll="{ x: 1260 }"
+      :row-class-name="
+        (record: StockOut) => (record.status === 'VOIDED' ? 'voided' : '')
+      "
       :pagination="{
         current: pageNo,
         pageSize: 20,
@@ -164,6 +175,9 @@ onMounted(async () => {
       <template #bodyCell="{ column, record }">
         <div v-if="column.key === 'code'" class="cell">
           <b class="mono">{{ record.code }}</b>
+          <Tag v-if="record.status === 'VOIDED'" :title="record.voidReason">
+            已作废
+          </Tag>
           <Tag v-if="record.kind === 'DIRECT'" color="blue">
             直发 · {{ record.stockInCode }}
           </Tag>
@@ -190,8 +204,34 @@ onMounted(async () => {
             personName(directory, record.createdBy)
           }}</span>
         </div>
+        <div v-else-if="column.key === 'action'" class="row-actions">
+          <span
+            v-if="record.status === 'VOIDED'"
+            class="muted ellipsis"
+            :title="record.voidReason"
+            >{{ record.voidReason }}</span>
+          <span
+            v-else-if="record.kind === 'DIRECT'"
+            class="muted"
+            title="直发出库随对应入库单一起作废"
+            >随入库单作废</span>
+          <Button
+            v-else
+            danger
+            size="small"
+            type="link"
+            @click="voiding = record as StockOut"
+          >
+            作废
+          </Button>
+        </div>
       </template>
     </Table>
     <StockOutDialog :open="creating" @close="creating = false" @saved="saved" />
+    <VoidDialog
+      :stock-out="voiding"
+      @close="voiding = undefined"
+      @saved="voided"
+    />
   </div>
 </template>

@@ -74,3 +74,23 @@
 .warehouse-page .out {
   color: hsl(var(--destructive));
 }
+
+.warehouse-page .row-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.warehouse-page .row-actions .ant-btn-link {
+  padding: 0 4px;
+}
+
+/* 作废的单据保留可查，整行淡化 */
+.warehouse-page .voided td {
+  color: hsl(var(--muted-foreground));
+}
+
+.warehouse-page .voided .mono {
+  text-decoration: line-through;
+}

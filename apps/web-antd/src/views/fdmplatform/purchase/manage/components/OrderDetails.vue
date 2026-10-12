@@ -61,6 +61,7 @@ const form = reactive({
   deliveryDate: '',
   deliveryAddress: '',
   remark: '',
+  accessoryNote: '',
   signingEntityId: undefined as string | undefined,
   templateId: undefined as string | undefined,
   clauseIds: [] as string[],
@@ -192,6 +193,7 @@ watch(
       deliveryDate: props.view.details.deliveryDate ?? '',
       deliveryAddress: props.view.details.deliveryAddress ?? '',
       remark: props.view.details.remark ?? '',
+      accessoryNote: props.view.details.accessoryNote ?? '',
       signingEntityId: props.view.details.signingEntityId,
       templateId: props.view.details.templateId,
       clauseIds: [...(props.view.details.clauseIds ?? [])],
@@ -294,7 +296,19 @@ function confirm() {
             placeholder="不填则按合同约定"
           />
         </Form.Item>
-        <Form.Item label="下单备注" class="wide">
+        <Form.Item
+          label="辅料情况说明（印在采购单上）"
+          class="wide"
+          extra="写明彩盒、标签、包装袋等辅料由谁提供、怎么配，导出 Word 时印在「辅料情况说明」一栏"
+        >
+          <Textarea
+            v-model:value="form.accessoryNote"
+            :disabled="!canEdit || saving"
+            :auto-size="{ minRows: 1, maxRows: 4 }"
+            :maxlength="2000"
+          />
+        </Form.Item>
+        <Form.Item label="下单备注（内部，不导出）" class="wide">
           <Textarea
             v-model:value="form.remark"
             :disabled="!canEdit || saving"

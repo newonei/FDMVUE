@@ -113,6 +113,8 @@ export interface ProcurementOrderView {
   contractName: string;
   order: BusinessRecord;
   details: {
+    /** 辅料情况说明，导出到采购单 Word（金智「采购概要」） */
+    accessoryNote?: string;
     clauseIds: string[];
     clauseSnapshots?: ProcurementSetting[];
     contactId?: string;
@@ -121,6 +123,7 @@ export interface ProcurementOrderView {
     deliveryDate?: string;
     /** 这张单不需要收票（淘宝、个体等） */
     noInvoice?: boolean;
+    /** 内部下单备注，不导出给供应商 */
     remark?: string;
     revision?: number;
     signingEntityId?: string;

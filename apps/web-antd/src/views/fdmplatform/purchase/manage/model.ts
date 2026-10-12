@@ -276,6 +276,7 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'deliveryAddress',
       'deliveryDate',
       'remark',
+      'accessoryNote',
       'reason',
     ]
       .filter((key) => value[key] !== undefined)

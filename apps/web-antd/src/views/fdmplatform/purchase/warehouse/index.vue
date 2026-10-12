@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MergedWorkspace from '../../components/MergedWorkspace.vue';
+import PurchaseReturns from './PurchaseReturns.vue';
 import StockIns from './StockIns.vue';
 import StockOuts from './StockOuts.vue';
 import Stocks from './Stocks.vue';
@@ -13,6 +14,7 @@ defineOptions({ name: 'FdmPlatformWarehouse' });
 const views = [
   { key: 'stock-ins', title: '采购入库', component: StockIns },
   { key: 'stock-outs', title: '销售出库', component: StockOuts },
+  { key: 'purchase-returns', title: '采购退货', component: PurchaseReturns },
   { key: 'stocks', title: '库存', component: Stocks },
   {
     key: 'ledger',

@@ -23,12 +23,23 @@ export interface StockInLine extends StockProduct {
   batchNo?: string;
   unitPrice?: Decimal;
   amount?: Decimal;
+  /** 已退给供应商的合格品 / 不合格品数量 */
+  returnedAcceptedQuantity?: Decimal;
+  returnedExceptionQuantity?: Decimal;
 }
 
-export interface StockIn {
+/** 作废后保留可查，不再计入库存与合同进度。 */
+export interface VoidInfo {
+  voidReason?: string;
+  voidedAt?: string;
+  voidedBy?: number;
+}
+
+export interface StockIn extends VoidInfo {
   id: string;
   code: string;
-  status: string;
+  status: 'RECEIVED' | 'VOIDED';
+  standalone?: boolean;
   warehouseId: string;
   warehouseName: string;
   contractId: string;
@@ -58,9 +69,10 @@ export interface StockOutLine extends StockProduct {
   costAmount?: Decimal;
 }
 
-export interface StockOut {
+export interface StockOut extends VoidInfo {
   id: string;
   code: string;
+  status: 'SHIPPED' | 'VOIDED';
   kind: 'DIRECT' | 'SALES';
   warehouseId: string;
   warehouseName: string;
@@ -88,9 +100,19 @@ export interface StockBalance extends StockProduct {
   lastOutDate?: string;
 }
 
+/** 流水来源：采购入库、销售出库、作废入库（扣回）、作废出库（加回）、采购退货 */
+export type StockTxnAction =
+  | 'PURCHASE_RETURN'
+  | 'STOCK_IN'
+  | 'STOCK_OUT'
+  | 'VOID_STOCK_IN'
+  | 'VOID_STOCK_OUT';
+
 export interface StockTxn extends StockProduct {
   id: string;
   type: 'IN' | 'OUT';
+  /** 早期流水没有 action，按 type 推断 */
+  action?: StockTxnAction;
   docKind: string;
   docId: string;
   docCode: string;
@@ -166,6 +188,55 @@ export interface StockOutCreate {
   lines: { contractItemId: string; quantity: Decimal }[];
 }
 
+/** ACCEPTED 退合格品（扣库存）/ EXCEPTION 退回不合格品（未进库存，只登记） */
+export type ReturnKind = 'ACCEPTED' | 'EXCEPTION';
+
+export interface PurchaseReturnLine extends StockProduct {
+  orderLineId: string;
+  contractItemId?: string;
+  kind: ReturnKind;
+  quantity: Decimal;
+  unitPrice?: Decimal;
+  amount?: Decimal;
+}
+
+export interface PurchaseReturn {
+  id: string;
+  code: string;
+  status: 'RETURNED';
+  stockInId: string;
+  stockInCode: string;
+  warehouseId: string;
+  warehouseName: string;
+  contractId?: string;
+  contractCode?: string;
+  customerName?: string;
+  standalone: boolean;
+  orderId: string;
+  orderCode: string;
+  supplierName?: string;
+  currency?: string;
+  returnedDate: string;
+  reason: string;
+  /** 不再补货：退货数量同时取消采购余额，应付减少 */
+  noReplacement: boolean;
+  remark?: string;
+  amount?: Decimal;
+  lines: PurchaseReturnLine[];
+  createdBy: number;
+  createdAt: string;
+}
+
+export interface PurchaseReturnCreate {
+  idempotencyKey: string;
+  stockInId: string;
+  returnedDate?: string;
+  reason: string;
+  noReplacement: boolean;
+  remark?: string;
+  lines: { kind: ReturnKind; orderLineId: string; quantity: Decimal }[];
+}
+
 interface PageParams {
   keyword?: string;
   pageNo: number;
@@ -212,4 +283,27 @@ export function getOutboundItems(contractId: string, warehouseId?: string) {
   return requestClient.get<OutboundItem[]>(`${base}/outbound-items`, {
     params: { contractId, warehouseId },
   });
+}
+export function voidStockIn(
+  id: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<StockIn>(`${base}/stock-ins/${id}/void`, data);
+}
+export function voidStockOut(
+  id: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<StockOut>(`${base}/stock-outs/${id}/void`, data);
+}
+export function getPurchaseReturns(
+  params: PageParams & { orderId?: string; stockInId?: string },
+) {
+  return requestClient.get<PageResult<PurchaseReturn>>(
+    `${base}/purchase-returns/page`,
+    { params },
+  );
+}
+export function createPurchaseReturn(data: PurchaseReturnCreate) {
+  return requestClient.post<PurchaseReturn>(`${base}/purchase-returns`, data);
 }

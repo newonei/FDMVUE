@@ -4,6 +4,7 @@ import type { StockTxn } from '#/api/fdmplatform/warehouse';
 import { Table } from 'ant-design-vue';
 
 import { money, qty } from './model';
+import { txnLabel } from './return-model';
 
 import './warehouse-pages.css';
 
@@ -54,9 +55,7 @@ const columns = [
         }}</span>
         <div v-else-if="column.key === 'doc'" class="cell">
           <span class="mono">{{ record.docCode }}</span>
-          <span class="muted">{{
-            record.type === 'IN' ? '采购入库' : '销售出库'
-          }}</span>
+          <span class="muted">{{ txnLabel(record as StockTxn) }}</span>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName
