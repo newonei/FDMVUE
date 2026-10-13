@@ -215,6 +215,13 @@ onMounted(async () => {
           <Tag v-if="record.directShip" color="blue">
             直发 · {{ record.stockOutCode }}
           </Tag>
+          <Tag
+            v-if="record.kind === 'PRODUCTION'"
+            color="green"
+            title="工厂交货入库：要冲回请在工厂下单的交货单上作废"
+          >
+            工厂交货 · {{ record.deliveryNo }}
+          </Tag>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName

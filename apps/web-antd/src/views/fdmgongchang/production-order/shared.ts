@@ -72,7 +72,7 @@ export function routeLabel(draft: RouteDraft, options?: RouteApi.Options) {
   return same ? route.name : `${route.name}（已调整）`;
 }
 
-/** 订单明细工艺的最后一道工序：完成数量只在这道报产出时累加；旧单没有工艺，按包装。 */
+/** 订单明细工艺的最后一道工序（交货从它的产出阶段出）；旧单没有工艺，按包装。 */
 export function finalProcess(item: Pick<Api.Item, 'processes'>) {
   return item.processes?.at(-1) ?? 'PACK';
 }

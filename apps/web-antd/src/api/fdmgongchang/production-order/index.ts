@@ -59,6 +59,11 @@ export namespace FdmgongchangProductionOrderApi {
     specification?: null | string;
     /** 每道工序的进度（不含作废的工序单）。 */
     steps?: Step[];
+    /** 交货从哪个库存阶段出：工艺最后一道的产出阶段，旧单为已包装成品。 */
+    deliveryStage?: string;
+    deliveryStageLabel?: string;
+    /** 交货阶段的库存单位，交货时按 1:1 计入订单单位。 */
+    deliveryUnit?: string;
     unit?: null | string;
   }
 
@@ -107,6 +112,8 @@ export namespace FdmgongchangProductionOrderApi {
     status: Status;
     statusLabel: string;
     totalQuantity: number | string;
+    /** 交货单（含作废的），新的在前。 */
+    deliveries?: Delivery[];
   }
 
   export interface PageReq extends PageParam {
@@ -135,10 +142,45 @@ export namespace FdmgongchangProductionOrderApi {
     reply?: string;
   }
 
-  export interface ProgressReq {
-    complete?: boolean;
+  /** 交货单：工厂把内部订单的成品交到采购仓库，订单完成数量 = 净交货数量。 */
+  export interface Delivery {
+    createTime?: number | string;
+    deliveredDate: number[] | string;
+    deliveryNo: string;
     id: number;
-    items: Array<{ completedQuantity: number; itemId: number }>;
+    lines: Array<{
+      batchNo: string;
+      itemCode: string;
+      location?: string;
+      quantity: number | string;
+      stage: string;
+      stockId: number;
+    }>;
+    operatorName?: null | string;
+    productName?: null | string;
+    productionOrderItemId: number;
+    quantity: number | string;
+    remark?: null | string;
+    status: 'DELIVERED' | 'VOIDED';
+    /** 采购仓库的生产入库单号。 */
+    stockInCode?: null | string;
+    unit?: null | string;
+    voidReason?: null | string;
+    warehouseName?: null | string;
+  }
+
+  export interface DeliveryReq {
+    deliveredDate?: string;
+    lines: Array<{ quantity: number; stockId: number }>;
+    productionOrderItemId: number;
+    remark?: string;
+    warehouseId: string;
+  }
+
+  export interface Warehouse {
+    id: string;
+    isDefault: boolean;
+    name: string;
   }
 }
 
@@ -246,10 +288,34 @@ export function rejectProductionOrder(
   });
 }
 
-export function progressProductionOrder(
-  data: FdmgongchangProductionOrderApi.ProgressReq,
+/** 结束这张单（完成数量按交货单自动累加，没交够也可以结束）。 */
+export function completeProductionOrder(id: number) {
+  return requestClient.post<boolean>(`${BASE}/complete`, undefined, {
+    headers: factoryHeaders(),
+    params: { id },
+  });
+}
+
+/** 交货可选的采购仓库，默认仓库在前。 */
+export function getDeliveryWarehouses() {
+  return requestClient.get<FdmgongchangProductionOrderApi.Warehouse[]>(
+    `${BASE}/delivery/warehouses`,
+    { headers: factoryHeaders() },
+  );
+}
+
+/** 交货：从工厂库存扣，交到采购仓库（生产入库）。 */
+export function createDelivery(
+  data: FdmgongchangProductionOrderApi.DeliveryReq,
 ) {
-  return requestClient.post<boolean>(`${BASE}/progress`, data, {
+  return requestClient.post<number>(`${BASE}/delivery/create`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 作废交货单：采购仓库扣回、工厂库存退回、扣回完成数量。 */
+export function voidDelivery(data: { id: number; reason: string }) {
+  return requestClient.post<boolean>(`${BASE}/delivery/void`, data, {
     headers: factoryHeaders(),
   });
 }

@@ -62,6 +62,9 @@ describe('purchase return model', () => {
   it('only voids untouched stock-ins and only returns when something is left', () => {
     const fresh = stockIn([{ acceptedQuantity: '5' }]);
     expect(canVoidStockIn(fresh)).toBe(true);
+    // 工厂交货入库只能由工厂作废交货单冲回
+    expect(canVoidStockIn({ ...fresh, kind: 'PRODUCTION' })).toBe(false);
+    expect(canReturn({ ...fresh, kind: 'PRODUCTION' })).toBe(false);
     expect(canReturn(fresh)).toBe(true);
     const returned = stockIn([
       { acceptedQuantity: '5', returnedAcceptedQuantity: '5' },

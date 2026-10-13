@@ -3,6 +3,7 @@ import type { TablePaginationConfig } from 'ant-design-vue';
 
 import type { MakeTaskState } from '../model';
 
+import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -10,12 +11,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { formatDateTime } from '@vben/utils';
 
-import { Input, Segmented, Table, Tag } from 'ant-design-vue';
+import { Input, message, Segmented, Table, Tag } from 'ant-design-vue';
 
 import {
   getMakeTasks,
   getShipmentPage,
   getShippableItems,
+  getStageRouteOptions,
 } from '#/api/fdmgongchang/stage-stock';
 
 import {
@@ -27,10 +29,12 @@ import {
   makeTaskState,
   toNumber,
 } from '../model';
+import TaskRouteModal from './task-route-modal.vue';
 
 /**
  * 外贸订单：外贸合同分派给工厂的自制任务（待生产订单）、可出货的合同明细、工厂出货记录。
- * 包装完工后良品数量自动回写合同生产进度；出货从已包装成品扣减并登记到合同。
+ * 工厂可为每个自制任务设定工艺：最后一道（没设时为包装）报产出后良品自动回写合同生产进度；
+ * 出货从成品库存（已冲裁及之后）扣减并登记到合同。
  */
 const props = defineProps<{ refreshKey: number }>();
 const emit = defineEmits<{
@@ -56,6 +60,30 @@ const viewOptions = [
 ];
 
 const tasks = ref<Api.MakeTask[]>([]);
+const routeOptions = ref<RouteApi.Options>();
+const routeOpen = ref(false);
+const routeTask = ref<Api.MakeTask>();
+
+function processLabel(code: string) {
+  return routeOptions.value?.processes.find((p) => p.code === code)?.label ?? code;
+}
+
+async function openRoute(task: Api.MakeTask) {
+  routeTask.value = task;
+  if (!routeOptions.value) {
+    try {
+      routeOptions.value = await getStageRouteOptions();
+    } catch {
+      return;
+    }
+  }
+  routeOpen.value = true;
+}
+
+async function onRouteSaved(text: string) {
+  message.success(text);
+  await loadTrade();
+}
 const shippable = ref<Api.ShippableItem[]>([]);
 const loading = ref(false);
 const keyword = ref('');
@@ -202,10 +230,10 @@ const shipmentColumns = [
     </div>
     <p class="m-0 text-xs text-muted-foreground">
       <template v-if="view === 'tasks'">
-        外贸合同分派给工厂「自制」的产品。新建工序单时关联对应任务，包装完工后良品数量会自动回写到合同的生产进度。
+        外贸合同分派给工厂「自制」的产品。新建工序单时关联对应任务，工艺最后一道（没设工艺时为包装）报产出后良品数量自动回写到合同的生产进度。
       </template>
       <template v-else-if="view === 'shippable'">
-        自制、外采或库存履约、还没出完货的合同明细。外采成品先在「到货入库」收进已包装成品；出货从「已包装成品」扣减，并登记到合同的出货记录上。
+        自制、库存履约、还没出完货的合同明细。工厂出货从成品库存（已冲裁及之后的阶段）扣减，并登记到合同的出货记录上；外采成品由采购部门在仓库管理出库。
       </template>
       <template v-else>工厂已出货的记录，同时显示在外贸合同的发货记录里。</template>
     </p>
@@ -232,6 +260,13 @@ const shipmentColumns = [
             <span class="text-sm">{{ record.productName || record.productCode }}</span>
             <span class="text-xs text-muted-foreground">
               {{ [record.specification || record.size, record.color, record.packaging].filter(Boolean).join(' · ') }}
+            </span>
+            <span class="text-xs text-muted-foreground">
+              工艺：<template v-if="(record.processes ?? []).length > 0">{{ (record.processes ?? []).map(processLabel).join(' › ') }}</template>
+              <template v-else>未设（包装时回写合同进度）</template>
+              <button v-if="canOperate" class="ml-2 text-primary hover:underline" type="button" @click="openRoute(record as Api.MakeTask)">
+                {{ (record.processes ?? []).length > 0 ? '调整' : '设置工艺' }}
+              </button>
             </span>
           </div>
         </template>
@@ -390,5 +425,6 @@ const shipmentColumns = [
         <div class="py-6 text-sm text-muted-foreground">还没有出货记录。</div>
       </template>
     </Table>
+    <TaskRouteModal v-model:open="routeOpen" :options="routeOptions" :task="routeTask" @saved="onRouteSaved" />
   </div>
 </template>

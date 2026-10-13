@@ -40,7 +40,7 @@ import {
 } from '#/api/fdmgongchang/stage-stock';
 import { matchWageItems } from '#/api/fdmgongchang/wage';
 
-import { finalProcess, routeIncludes } from '../../production-order/shared';
+import { routeIncludes } from '../../production-order/shared';
 import {
   attrSummary,
   contractProductText,
@@ -109,9 +109,18 @@ const linkedAssignmentId = ref<string>();
 const linkedTask = computed(() =>
   makeTasks.value.find((t) => t.assignmentId === linkedAssignmentId.value),
 );
+/** 回写合同进度的那道工序：任务工艺的最后一道，没设工艺时为包装。 */
+const taskFinal = computed(() => linkedTask.value?.processes?.at(-1) ?? 'PACK');
 const makeTaskOptions = computed(() =>
   makeTasks.value
     .filter((t) => makeTaskRemaining(t) > 0 || t.assignmentId === linkedAssignmentId.value)
+    // 任务设了工艺时只列工艺里有这道工序的任务
+    .filter(
+      (t) =>
+        (t.processes ?? []).length === 0 ||
+        t.processes!.includes(processCode.value) ||
+        t.assignmentId === linkedAssignmentId.value,
+    )
     .map((t) => ({
       disabled: !t.ready,
       label: `${t.contractCode} · ${t.customerName ?? ''} · ${contractProductText(t)} · 待产 ${formatQty(makeTaskRemaining(t))}${t.unit ?? ''}${t.ready ? '' : '（采购方案未生效）'}`,
@@ -128,7 +137,7 @@ async function loadMakeTasks() {
     makeTasksLoading.value = false;
   }
 }
-/** 工厂订单（内部向工厂下单）已接单、工艺里有这道工序的明细；工艺最后一道报产出时良品自动累加到完成数量。 */
+/** 工厂订单（内部向工厂下单）已接单、工艺里有这道工序的明细；关联只记进度，完成数量按交货算。 */
 const productionOrders = ref<FdmgongchangProductionOrderApi.Order[]>([]);
 const linkedProductionItemId = ref<number>();
 const productionItemOptions = computed(() =>
@@ -151,11 +160,6 @@ const linkedProductionOrderNo = computed(
 const linkedProductionItem = computed(() =>
   productionOrders.value.flatMap((o) => o.items).find((i) => i.id === linkedProductionItemId.value),
 );
-/** 关联明细工艺的最后一道工序名，这道工序报产出时才累加完成数量。 */
-const linkedFinalLabel = computed(() => {
-  const code = linkedProductionItem.value ? finalProcess(linkedProductionItem.value) : '';
-  return processLabel(props.options, code);
-});
 // 换了工序后，原来关联的明细工艺里没有这道工序时取消关联
 watch(processCode, (code) => {
   if (linkedProductionItem.value && !routeIncludes(linkedProductionItem.value, code)) {
@@ -1425,11 +1429,11 @@ watch(processCode, warnNoPatterns);
                 placeholder="选择外贸合同的自制任务"
                 show-search
               />
-              <span v-if="linkedTask && outputStage === 'PACKED'" class="text-primary">
-                包装完工后，良品数量会自动回写到合同 {{ linkedTask.contractCode }} 的生产进度。
+              <span v-if="linkedTask && taskFinal === processCode" class="text-primary">
+                这是任务工艺的最后一道，良品数量会自动回写到合同 {{ linkedTask.contractCode }} 的生产进度。
               </span>
               <span v-else-if="linkedTask">
-                包装完工时才回写合同进度，这道工序只做关联记录。
+                任务工艺最后一道（{{ processLabel(options, taskFinal) }}）报产出时才回写合同进度，这道工序只做关联记录。
               </span>
             </label>
             <label
@@ -1447,14 +1451,8 @@ watch(processCode, warnNoPatterns);
                 placeholder="选内部部门下给本厂、已接单的生产订单"
                 show-search
               />
-              <span
-                v-if="linkedProductionItem && finalProcess(linkedProductionItem) === processCode"
-                class="text-primary"
-              >
-                这是订单工艺的最后一道，每次报产出的良品会自动累加到工厂订单 {{ linkedProductionOrderNo }} 的完成数量。
-              </span>
-              <span v-else-if="linkedProductionItemId">
-                订单工艺最后一道（{{ linkedFinalLabel }}）报产出时才累加完成数量，这道工序只做关联记录。
+              <span v-if="linkedProductionItemId">
+                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂下单」里交货。
               </span>
             </label>
             <label
