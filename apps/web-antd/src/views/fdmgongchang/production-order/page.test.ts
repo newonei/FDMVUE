@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   factories: vi.fn(),
   factoryPage: vi.fn(),
   get: vi.fn(),
+  lastRoute: vi.fn().mockResolvedValue(null),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
     defaultFactoryId: 1,
@@ -31,6 +32,23 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
   progressProductionOrder: vi.fn(),
+  getLastRoute: mocks.lastRoute,
+  getRouteOptions: vi.fn().mockResolvedValue({
+    processes: [
+      ['SLICE', '开片', 'SHEET', '片材', ['BOARD']],
+      ['PUNCH', '冲裁', 'PUNCHED', '已冲裁成品', ['SHEET']],
+      ['ENGRAVE', '雕刻', 'ENGRAVED', '已雕刻成品', ['PUNCHED']],
+      ['PACK', '包装', 'PACKED', '已包装成品', ['ENGRAVED', 'PUNCHED']],
+    ].map(([code, label, outputStage, outputStageLabel, sources]) => ({
+      code,
+      label,
+      outputStage,
+      outputStageLabel,
+      sources,
+      unit: '件',
+    })),
+    routes: [{ id: 3, name: '单层散装', status: 0, steps: ['SLICE', 'PUNCH'] }],
+  }),
   rejectProductionOrder: vi.fn(),
   searchOrderProducts: mocks.search,
 }));
@@ -61,7 +79,22 @@ const order: Api.Order = {
   factoryName: '黄石工厂',
   id: 9,
   items: [
-    { completedQuantity: 0, id: 91, productId: 'p1', productName: product.displayName!, quantity: 500, size: product.size, unit: '条' },
+    {
+      completedQuantity: 0,
+      id: 91,
+      processes: ['SLICE', 'PUNCH'],
+      productId: 'p1',
+      productName: product.displayName!,
+      quantity: 500,
+      routeId: 3,
+      routeName: '单层散装',
+      size: product.size,
+      steps: [
+        { defectQuantity: 0, goodQuantity: 0, inProgressCount: 0, label: '开片', orderCount: 0, outputStage: 'SHEET', planned: true, process: 'SLICE', unit: '片' },
+        { defectQuantity: 0, goodQuantity: 0, inProgressCount: 0, label: '冲裁', orderCount: 0, outputStage: 'PUNCHED', planned: true, process: 'PUNCH', unit: '件' },
+      ],
+      unit: '条',
+    },
   ],
   orderNo: 'GD20261010-001',
   purpose: '电商备货',
@@ -127,6 +160,16 @@ describe('production order page', () => {
     await flush();
     expect(document.body.textContent).toContain('明细（1）');
 
+    // 产品没下过单、工厂只有一条路线时默认用它；工序按生产链排，跳过后接不上时提示
+    expect(mocks.lastRoute).toHaveBeenCalledWith(1, 'p1');
+    const chips = () => [...document.querySelectorAll<HTMLButtonElement>('.route-chip')];
+    expect(chips().filter((c) => c.getAttribute('aria-pressed') === 'true').map((c) => c.textContent?.trim())).toEqual(['开片', '冲裁']);
+    chips().find((c) => c.textContent?.trim() === '冲裁')!.click();
+    await flush();
+    chips().find((c) => c.textContent?.trim() === '雕刻')!.click();
+    await flush();
+    expect(document.body.textContent).toContain('「雕刻」不能直接领「片材」');
+
     // 没填交期和数量时不提交
     button('提交给工厂').click();
     await flush();
@@ -148,6 +191,7 @@ describe('production order page', () => {
     button('去接单').click();
     await flush();
     expect(document.body.textContent).toContain('接单处理');
+    expect(document.body.textContent).toContain('工艺 · 单层散装');
     button('接单').click();
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
@@ -169,5 +213,9 @@ describe('production order page', () => {
     expect(text).toContain('明细（1）');
     expect(document.querySelector<HTMLInputElement>('#po-qty-p1')?.value).toBe('500');
     expect(document.querySelector<HTMLInputElement>('#po-purpose')?.value).toBe('电商备货');
+    // 原单的工艺一起带过来
+    expect(
+      [...document.querySelectorAll('.route-chip[aria-pressed="true"]')].map((c) => c.textContent?.trim()),
+    ).toEqual(['开片', '冲裁']);
   });
 });

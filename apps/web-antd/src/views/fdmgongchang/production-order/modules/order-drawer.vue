@@ -115,6 +115,36 @@ function saveProgress() {
 }
 
 const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
+
+/** 订单工艺里的工序（旧单列出关联过的工序）。 */
+function plannedSteps(item: Api.Item) {
+  const steps = item.steps ?? [];
+  return (item.processes ?? []).length > 0 ? steps.filter((s) => s.planned) : steps;
+}
+
+function stepClass(step: Api.Step, last: boolean) {
+  if (step.inProgressCount > 0) return 'bg-warning/15 text-warning';
+  if (num(step.goodQuantity) > 0) return last ? 'bg-success/15 text-success' : 'bg-primary/10 text-primary';
+  return 'bg-muted text-muted-foreground';
+}
+
+function stepTitle(step: Api.Step) {
+  const parts = [`${step.label}：良品 ${num(step.goodQuantity)}${step.unit}`];
+  if (num(step.defectQuantity) > 0) parts.push(`残次 ${num(step.defectQuantity)}${step.unit}`);
+  parts.push(`${step.orderCount} 张工序单`);
+  if (step.inProgressCount > 0) parts.push(`${step.inProgressCount} 张在制`);
+  return parts.join(' · ');
+}
+
+const lastStepText = computed(() => {
+  const labels = new Set(
+    (order.value?.items ?? []).map((i) => {
+      const steps = plannedSteps(i);
+      return (i.processes ?? []).length > 0 ? (steps[steps.length - 1]?.label ?? '') : '包装';
+    }),
+  );
+  return [...labels].filter(Boolean).join('、') || '包装';
+});
 </script>
 
 <template>
@@ -145,6 +175,25 @@ const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
               <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
               <span v-if="i.printing" class="text-xs text-muted-foreground">{{ i.printing }}</span>
               <span v-if="i.remark" class="text-xs text-warning">备注：{{ i.remark }}</span>
+              <span v-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
+                工艺：旧单没有定工艺，包装报产出时累加完成数量
+              </span>
+              <span v-else class="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                <span class="text-muted-foreground">工艺 · {{ i.routeName || '自选工序' }}：</span>
+                <template v-for="(step, index) in plannedSteps(i)" :key="step.process">
+                  <span v-if="index > 0" class="text-muted-foreground" aria-hidden="true">›</span>
+                  <span
+                    class="rounded px-1.5 leading-5"
+                    :class="stepClass(step, index === plannedSteps(i).length - 1)"
+                    :title="stepTitle(step)"
+                  >
+                    {{ step.label }}
+                    <template v-if="order.status !== 'SUBMITTED'">
+                      <b class="tabular-nums">{{ num(step.goodQuantity) }}</b>{{ step.unit }}
+                    </template>
+                  </span>
+                </template>
+              </span>
             </span>
             <span v-if="canProgress" class="flex items-center gap-1 text-xs text-muted-foreground">
               已完成
@@ -183,7 +232,7 @@ const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
         </section>
 
         <p v-if="order.status === 'ACCEPTED'" class="m-0 text-xs text-muted-foreground">
-          包装工序单关联这张单（或按 AI 排单里这张单的任务开工）后，每次报产出的良品会自动累加到完成数量<template v-if="canProgress">；这里也可以手动修正</template>。
+          工序单关联这张单（或按 AI 排单里这张单的任务开工）后，工艺最后一道（{{ lastStepText }}）每次报产出的良品会自动累加到完成数量<template v-if="canProgress">；这里也可以手动修正</template>。
         </p>
         <section v-if="canProgress" class="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 p-3">
           <Checkbox v-model:checked="complete">

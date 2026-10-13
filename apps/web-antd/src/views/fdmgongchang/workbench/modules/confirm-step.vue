@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 
 import { getWorkbenchProductionOrders } from '#/api/fdmgongchang/workbench';
 
+import { finalProcess } from '../../production-order/shared';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { stageOf, useJob } from '../use-job';
 import StepHeader from './step-header.vue';
@@ -16,13 +17,16 @@ const submitting = ref(false);
 const labels = computed(() => makeLabels(job.options));
 const source = computed(() => stageOf(job, job.sourceStage));
 
-/** 不按排单开包装单时，选这批是做哪张工厂订单；按排单开工的由排单任务自动关联。补领沿用原来的单。 */
-const askOrder = computed(() => !job.supplement && !job.task && job.process?.outputStage === 'PACKED');
+/**
+ * 不按排单开工时，如果这道工序是某张工厂订单工艺的最后一道，选这批是做哪张单（报产出时累加完成数量）；
+ * 按排单开工的由排单任务自动关联。补领沿用原来的单。
+ */
+const mayAskOrder = computed(() => !job.supplement && !job.task && !!job.process);
 const openOrders = ref<OrderApi.Order[]>([]);
 const orderChoices = computed(() =>
   openOrders.value.flatMap((o) =>
     o.items
-      .filter((i) => Number(i.quantity) > Number(i.completedQuantity))
+      .filter((i) => Number(i.quantity) > Number(i.completedQuantity) && finalProcess(i) === job.process?.code)
       .map((i) => ({
         id: i.id,
         label: i.productName,
@@ -32,8 +36,9 @@ const orderChoices = computed(() =>
       })),
   ),
 );
+const askOrder = computed(() => mayAskOrder.value && orderChoices.value.length > 0);
 onMounted(async () => {
-  if (!askOrder.value) return;
+  if (!mayAskOrder.value) return;
   try {
     openOrders.value = await getWorkbenchProductionOrders();
   } catch {
