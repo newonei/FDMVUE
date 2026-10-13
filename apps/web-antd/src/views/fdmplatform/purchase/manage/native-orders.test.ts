@@ -132,10 +132,52 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/StandaloneOrderFiles.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/BatchRequestDialog.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('#/api/fdmplatform/warehouse', () => ({
+  getStockIns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+  getPurchaseReturns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+}));
+vi.mock('./components/OrderSubDocMenu.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: { type: Array, default: () => [] },
+      disabled: Boolean,
+    },
+    emits: ['pick'],
+    setup: (props, ctx) => () =>
+      h(
+        'div',
+        (
+          props.items as Array<{
+            disabled?: boolean;
+            key: string;
+            label: string;
+          }>
+        ).map((item) =>
+          h(
+            'button',
+            {
+              disabled: props.disabled || item.disabled,
+              onClick: () => ctx.emit('pick', item.key),
+            },
+            item.label,
+          ),
+        ),
+      ),
+  }),
+}));
+vi.mock('./components/OrderTimeline.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderSummaryCards.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderStockDocs.vue', () => ({
@@ -247,7 +289,9 @@ vi.mock('ant-design-vue', () => {
     Drawer: defineComponent({
       props: { open: Boolean },
       setup: (props, ctx) => () =>
-        props.open ? h('section', ctx.slots.default?.()) : null,
+        props.open
+          ? h('section', [ctx.slots.extra?.(), ctx.slots.default?.()])
+          : null,
     }),
     Empty: block,
     Progress: block,
@@ -255,6 +299,41 @@ vi.mock('ant-design-vue', () => {
     Select: block,
     Space: block,
     Table: table,
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: defineComponent({
+      props: { items: { type: Array, default: () => [] } },
+      emits: ['click'],
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          (
+            props.items as Array<{
+              children?: Array<{
+                disabled?: boolean;
+                key: string;
+                label: string;
+              }>;
+              disabled?: boolean;
+              key: string;
+              label: string;
+            }>
+          )
+            .flatMap((item) => item.children ?? [item])
+            .map((item) =>
+              h(
+                'button',
+                {
+                  disabled: item.disabled,
+                  onClick: () => ctx.emit('click', { key: item.key }),
+                },
+                item.label,
+              ),
+            ),
+        ),
+    }),
     TabPane: block,
     Tabs: block,
     Tag: block,
@@ -490,7 +569,7 @@ describe('related creation inside the purchase workspace', () => {
   });
   it('passes the current order into stock-in and return creation and refreshes the parent after saving', async () => {
     const { host, router } = await mount(detailLocation);
-    click(host, '登记入库');
+    click(host, '入库单');
     await settle();
     const dialog = host.querySelector<HTMLElement>('[data-stock-in]');
     expect(dialog?.dataset.stockIn).toBe('order-1');
@@ -499,7 +578,7 @@ describe('related creation inside the purchase workspace', () => {
     click(host, '取消入库');
     await settle();
     expect(mocks.detail).toHaveBeenCalledTimes(1);
-    click(host, '采购退货');
+    click(host, '采购退货单');
     await settle();
     const returns = host.querySelector<HTMLElement>(
       '[data-related-action="RETURN_ARRIVAL"]',
@@ -536,7 +615,7 @@ describe('related creation inside the purchase workspace', () => {
     });
     await settle();
     expect(host.querySelector<HTMLElement>('[data-related-list]')).toBeNull();
-    click(host, '登记入库');
+    click(host, '入库单');
     await settle();
     expect(
       host.querySelector<HTMLElement>('[data-stock-in]')?.dataset.stockIn,

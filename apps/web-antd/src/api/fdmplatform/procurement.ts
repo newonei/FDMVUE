@@ -315,13 +315,18 @@ export interface PurchaseInvoice {
   orderCode?: string;
   supplierName?: string;
   currency?: string;
-  invoiceNo: string;
+  invoiceNo?: string;
   invoiceDate: string;
   invoiceType: 'ORDINARY' | 'OTHER' | 'SPECIAL';
   taxRate?: Decimal;
   amount: Decimal;
   remark?: string;
   voidReason?: string;
+  /** 挂在哪张付款记录下（金智付款发票的「付款计划/记录」），可空 */
+  paymentId?: string;
+  paymentCode?: string;
+  /** 发票原件 */
+  file?: { id: string; name: string; size: number; type?: string };
   createdBy: number;
   createdAt: string;
 }
@@ -332,19 +337,79 @@ export function getOrderInvoices(contractId: string, orderId: string) {
     invoices: PurchaseInvoice[];
   }>(`${orderPath(contractId, orderId)}/invoices`);
 }
-export function createPurchaseInvoice(data: {
-  amount: Decimal;
-  contractId: string;
-  idempotencyKey: string;
-  invoiceDate?: string;
-  invoiceNo: string;
-  invoiceType: PurchaseInvoice['invoiceType'];
-  orderId: string;
-  remark?: string;
-  taxRate?: Decimal;
-}) {
-  return requestClient.post<PurchaseInvoice>(
+/** 登记付款发票：必须上传发票原件，其余字段随表单提交。 */
+export function createPurchaseInvoice(
+  file: File,
+  data: {
+    amount: Decimal;
+    contractId: string;
+    idempotencyKey: string;
+    invoiceDate?: string;
+    invoiceNo?: string;
+    invoiceType: PurchaseInvoice['invoiceType'];
+    orderId: string;
+    paymentId?: string;
+    remark?: string;
+    taxRate?: Decimal;
+  },
+) {
+  const fields = Object.fromEntries(
+    Object.entries({
+      ...data,
+      contractId: data.contractId === 'standalone' ? '' : data.contractId,
+    }).filter(([, value]) => value !== undefined && value !== ''),
+  );
+  return requestClient.upload<PurchaseInvoice>(
     `${procurementBase}/invoices`,
+    { file, ...fields },
+    { timeout: 300_000 },
+  );
+}
+/** 发票识别结果：识别不到的字段为空，由采购员手填。 */
+export interface InvoiceRecognition {
+  recognized: boolean;
+  invoiceNo?: string;
+  invoiceDate?: string;
+  amount?: Decimal;
+  taxAmount?: Decimal;
+  taxRate?: Decimal;
+  invoiceType?: PurchaseInvoice['invoiceType'];
+  sellerName?: string;
+}
+/** 从发票 PDF / 数电 XML 读出号码、日期和价税合计，不保存文件。 */
+export function recognizePurchaseInvoice(file: File) {
+  return requestClient.upload<InvoiceRecognition>(
+    `${procurementBase}/invoices/recognize`,
+    { file },
+    { timeout: 60_000 },
+  );
+}
+export function downloadPurchaseInvoiceFile(id: string) {
+  return requestClient.download<Blob>(
+    `${procurementBase}/invoices/${encodeURIComponent(id)}/file`,
+  );
+}
+/** 付款发票列表（金智同款）：按收票时间倒序，附全部有效发票合计。 */
+export function getPurchaseInvoicePage(params: {
+  keyword?: string;
+  linked?: boolean;
+  pageNo: number;
+  pageSize: number;
+  status?: PurchaseInvoice['status'];
+}) {
+  return requestClient.get<{
+    list: PurchaseInvoice[];
+    total: number;
+    validTotals: Array<{ amount: Decimal; currency: string }>;
+  }>(`${procurementBase}/invoices/page`, { params });
+}
+/** 把发票挂到本采购单的某张付款记录下；paymentId 为空即取消关联。 */
+export function assignInvoicePayment(
+  id: string,
+  data: { idempotencyKey: string; paymentId?: string },
+) {
+  return requestClient.post<PurchaseInvoice>(
+    `${procurementBase}/invoices/${encodeURIComponent(id)}/payment`,
     data,
   );
 }

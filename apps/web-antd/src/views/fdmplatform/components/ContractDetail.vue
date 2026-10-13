@@ -15,7 +15,7 @@ import type {
 } from '#/api/fdmplatform';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 
-import { computed, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import {
@@ -23,7 +23,9 @@ import {
   Button,
   Card,
   Drawer,
+  Dropdown,
   Input,
+  Menu,
   message,
   Modal,
   Space,
@@ -56,6 +58,7 @@ import RecordDetail from '../documents/RecordDetail.vue';
 import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
+import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
@@ -64,8 +67,10 @@ import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
 import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
+import ContractTimeline from './ContractTimeline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
 import RecordTable from './RecordTable.vue';
+import SummaryCards from './SummaryCards.vue';
 
 const props = defineProps<{
   /** 打开后自动办理主线的“下一步”（列表行上的办理按钮） */
@@ -80,6 +85,7 @@ const props = defineProps<{
   recordContext?: { record: BusinessRecord; resource: PageResource };
   workspace: WorkspaceKey;
 }>();
+
 const emit = defineEmits<{
   autoNextDone: [];
   close: [];
@@ -87,6 +93,12 @@ const emit = defineEmits<{
   refresh: [];
   updated: [value: Contract];
 }>();
+
+/** 采购单执行抽屉：和采购订单页同一个组件，在合同订单里直接弹出 */
+const PurchaseOrderExecution = defineAsyncComponent(
+  () => import('../purchase/manage/index.vue'),
+);
+
 const documentKind = ref<ContractDocumentKind>();
 const documentMode = ref<'create' | 'list'>();
 const documentsOpen = ref(false);
@@ -104,6 +116,7 @@ const childOpen = computed(
     completionOpen.value ||
     reimbursementOpen.value ||
     !!workLaunch.value ||
+    !!purchaseOrder.value ||
     activating.value ||
     attachmentBusy.value ||
     !!terminateAction.value,
@@ -179,32 +192,6 @@ const ended = computed(() =>
 const allowed = (action: string) =>
   Boolean(props.contract?.allowedActions.includes(action));
 const summary = computed(() => props.contract?.financeSummary);
-const moneyCells = computed(() => {
-  const contract = props.contract;
-  const value = (key: string) => {
-    const amount = summary.value?.[key];
-    return amount === null || amount === undefined
-      ? '待核对'
-      : nativeMoney(amount, contract?.currency).replace(
-          `${contract?.currency} `,
-          '',
-        );
-  };
-  return [
-    {
-      label: '合同额',
-      value: nativeMoney(contract?.amount, contract?.currency),
-    },
-    { label: '已确认回款', value: value('confirmedReceipts') },
-    {
-      label: '待财务确认',
-      value: value('pendingReceipts'),
-      tone: Number(summary.value?.pendingReceipts) > 0 ? 'pending' : '',
-    },
-    { label: '未收', value: value('unpaidAmount') },
-    { label: '已开票', value: value('effectiveInvoices') },
-  ];
-});
 const totalQuantity = computed(() => {
   const units = new Set(pipeline.value.map((item) => item.unit));
   const sum = pipeline.value.reduce(
@@ -382,6 +369,11 @@ function openDocuments(kind: ContractDocumentKind, mode?: 'create' | 'list') {
   documentMode.value = mode;
   documentsOpen.value = true;
 }
+const purchaseOrder = ref<{ contractId: string; orderId: string }>();
+function openPurchaseOrder(orderId: string) {
+  if (!props.contract || childOpen.value) return;
+  purchaseOrder.value = { contractId: props.contract.id, orderId };
+}
 function startWork(launch: WorkboardLaunch) {
   if (!props.contract || props.loading || childOpen.value) return;
   try {
@@ -467,6 +459,146 @@ async function terminate() {
   }
 }
 const router = useRouter();
+/**
+ * 「下属单据新建」（金智同款）：按部门分组，从合同订单直接新建，自动关联本合同。
+ * 不能办理的项灰显并提示原因。
+ */
+const subDocItems = computed(() => {
+  const entry = (
+    key: string,
+    label: string,
+    group: string,
+    action?: string,
+  ) => {
+    const reason = action ? quickActionReason(action) : undefined;
+    return {
+      key,
+      label,
+      group,
+      disabled: Boolean(reason),
+      title: reason || undefined,
+    };
+  };
+  return [
+    {
+      key: 'reimbursement',
+      label: '费用报销',
+      group: '办公',
+      disabled: ended.value,
+      title: ended.value ? '合同已结束' : undefined,
+    },
+    entry('receipt', '回款记录', '合同', 'CREATE_RECEIPT'),
+    entry('invoice', '开票记录', '合同', 'CREATE_INVOICE'),
+    entry('request', '采购申请单', '采购', 'CREATE_REQUEST'),
+    ...(allowed('GENERATE_ORDERS')
+      ? [entry('orders', '采购单（按采购方案生成）', '采购', 'GENERATE_ORDERS')]
+      : []),
+    {
+      key: 'shipment',
+      label: '出库发货',
+      group: '库存',
+      disabled: ended.value,
+      title: '出货在工厂「工序库存」从已包装成品办理',
+    },
+  ];
+});
+function pickSubDoc(key: string) {
+  if (key === 'reimbursement') reimbursementOpen.value = true;
+  else if (key === 'receipt')
+    openQuickDocument({ action: 'CREATE_RECEIPT', kind: 'receipts' });
+  else if (key === 'invoice')
+    openQuickDocument({ action: 'CREATE_INVOICE', kind: 'invoices' });
+  else if (key === 'request')
+    openQuickDocument({ action: 'CREATE_REQUEST', kind: 'requests' });
+  else if (key === 'orders')
+    openQuickDocument({ action: 'GENERATE_ORDERS', kind: 'orders' });
+  else if (key === 'shipment')
+    void router.push({
+      path: '/gongchang/stage-stock',
+      query: { tab: 'trade' },
+    });
+}
+/** 右侧「摘要」（金智同款）：总金额、未回款、实际回款、待确认、已开票、未开票 */
+const summaryCards = computed(() => {
+  const contract = props.contract;
+  const raw = (key: string) => {
+    const value = summary.value?.[key];
+    return value === null || value === undefined ? undefined : Number(value);
+  };
+  const show = (value?: number) =>
+    value === undefined || Number.isNaN(value)
+      ? '待核对'
+      : nativeMoney(value, contract?.currency);
+  const total = Number(contract?.amount ?? 0);
+  const percent = (part?: number) =>
+    part === undefined || !(total > 0)
+      ? undefined
+      : Math.min(100, Math.round((part / total) * 100));
+  const received = raw('confirmedReceipts');
+  const unpaid = raw('unpaidAmount');
+  const invoiced = raw('effectiveInvoices');
+  const uninvoiced =
+    invoiced === undefined ? undefined : Math.max(0, total - invoiced);
+  return [
+    {
+      key: 'total',
+      label: '总金额',
+      value: nativeMoney(contract?.amount, contract?.currency),
+    },
+    {
+      key: 'unpaid',
+      label: '未回款额',
+      value: show(unpaid),
+      percent: percent(unpaid),
+      alert: (unpaid ?? 0) > 0,
+      tab: 'finance',
+    },
+    {
+      key: 'received',
+      label: '实际回款',
+      value: show(received),
+      percent: percent(received),
+      tab: 'finance',
+    },
+    {
+      key: 'pending',
+      label: '待财务确认',
+      value: show(raw('pendingReceipts')),
+      alert: (raw('pendingReceipts') ?? 0) > 0,
+      tab: 'finance',
+    },
+    {
+      key: 'invoiced',
+      label: '已开票额',
+      value: show(invoiced),
+      percent: percent(invoiced),
+      tab: 'finance',
+    },
+    {
+      key: 'uninvoiced',
+      label: '未开票额',
+      value: show(uninvoiced),
+      percent: percent(uninvoiced),
+      tab: 'finance',
+    },
+  ];
+});
+/** 下属单据数量，显示在页签上（金智：付款记录 (1)…） */
+const timelineCount = computed(
+  () =>
+    purchaseRows.value.requests.length +
+    purchaseRows.value.orders.length +
+    shipmentRows.value.length +
+    receiptRows.value.length +
+    invoiceRows.value.length,
+);
+function moreAction(key: string) {
+  if (!props.contract) return;
+  if (key === 'copy') emit('copy', props.contract);
+  else if (key === 'close') startTerminate('CLOSE_CONTRACT');
+  else if (key === 'cancel') startTerminate('CANCEL_CONTRACT');
+  else emit('refresh');
+}
 function runNext(action: MainlineAction) {
   if (!props.contract || props.loading || childOpen.value) return;
   switch (action.type) {
@@ -529,524 +661,562 @@ async function download(file: { id: string; name: string }) {
         ? [contract.code, contract.name].filter(Boolean).join(' · ')
         : '合同详情'
     "
-    width="min(1150px,96vw)"
+    width="min(1320px,96vw)"
     :closable="!childOpen"
     :mask-closable="!childOpen"
     :keyboard="!childOpen"
     @close="close"
   >
+    <template #title>
+      <div v-if="contract" class="contract-title">
+        <span class="doc-type">合同单</span>
+        <span>{{
+          [contract.code, contract.name].filter(Boolean).join(' · ')
+        }}</span>
+      </div>
+      <span v-else>合同详情</span>
+    </template>
     <template #extra>
-      <Space>
+      <Space v-if="contract">
+        <OrderSubDocMenu
+          :items="subDocItems"
+          :disabled="childOpen || loading"
+          @pick="pickSubDoc"
+        />
         <Button
-          :loading="loading"
-          :disabled="childOpen"
-          @click="emit('refresh')"
-        >
-          刷新合同
-        </Button>
-        <Button
-          v-if="contract?.allowedActions.includes('UPDATE_CONTRACT')"
+          v-if="contract.allowedActions.includes('UPDATE_CONTRACT')"
           :disabled="childOpen || loading"
           @click="editorOpen = true"
         >
-          编辑合同
+          编辑
         </Button>
+        <Dropdown :trigger="['click']" :disabled="childOpen">
+          <Button>更多</Button>
+          <template #overlay>
+            <Menu
+              :items="[
+                {
+                  key: 'refresh',
+                  label: '刷新合同',
+                  disabled: loading || childOpen,
+                },
+                { key: 'copy', label: '复制为新合同', disabled: childOpen },
+                ...(allowed('CLOSE_CONTRACT')
+                  ? [
+                      {
+                        key: 'close',
+                        label: '结案',
+                        disabled: childOpen || loading,
+                      },
+                    ]
+                  : []),
+                ...(allowed('CANCEL_CONTRACT')
+                  ? [
+                      {
+                        key: 'cancel',
+                        label: '取消合同',
+                        danger: true,
+                        disabled: childOpen || loading,
+                      },
+                    ]
+                  : []),
+              ]"
+              @click="
+                (info: { key: string | number }) => moreAction(String(info.key))
+              "
+            />
+          </template>
+        </Dropdown>
       </Space>
     </template>
-    <div v-if="contract" class="contract-detail">
-      <div class="identity">
-        <div class="identity-tags">
-          <Tag
-            :color="
-              ended
-                ? 'default'
-                : contract.status === 'DRAFT'
+    <div v-if="contract" class="contract-detail contract-layout">
+      <div class="contract-main">
+        <section class="identity">
+          <div class="identity-tags">
+            <Tag
+              :color="
+                ended
                   ? 'default'
-                  : 'blue'
-            "
+                  : contract.status === 'DRAFT'
+                    ? 'default'
+                    : 'blue'
+              "
             >
-{{ label(contract.status) }}
-</Tag>
-          <Tag>{{ productCategoryLabel(contract.productCategory) }}</Tag>
-          <Tag v-if="contract.businessType">
-{{
-            label(contract.businessType)
-          }}
-</Tag>
-        </div>
-        <p class="identity-line">
-          <RelatedLink :target="entityTarget('customer', contract.customerId)">
-            {{ contract.customerName }}
-          </RelatedLink>
-          <span>{{ company || '订单公司待补齐' }}</span>
-          <span>{{ personLabel(directory, contract.ownerUserId) }}</span>
-          <span>签订 {{ contract.signedDate ?? '未填写' }}</span>
-        </p>
-        <div class="identity-actions">
-          <Button
-            size="small"
-            :disabled="childOpen"
-            @click="emit('copy', contract)"
-          >
-            复制为新合同
-          </Button>
-          <Button
-            v-if="allowed('CLOSE_CONTRACT')"
-            size="small"
-            :disabled="childOpen || loading"
-            @click="startTerminate('CLOSE_CONTRACT')"
-          >
-            结案
-          </Button>
-          <Button
-            v-if="allowed('CANCEL_CONTRACT')"
-            size="small"
-            danger
-            :disabled="childOpen || loading"
-            @click="startTerminate('CANCEL_CONTRACT')"
-          >
-            取消合同
-          </Button>
-        </div>
-      </div>
-
-      <div class="moneybar" aria-label="金额">
-        <div v-for="cell in moneyCells" :key="cell.label">
-          <span>{{ cell.label }}</span><b :class="cell.tone">{{ cell.value }}</b>
-        </div>
-      </div>
-
-      <Button
-        v-if="
-          contract.allowedActions.includes('COMPLETE_IMPORTED_CONTRACT') &&
-          !contract.blockReasons?.length
-        "
-        :disabled="childOpen || loading"
-        @click="completionOpen = true"
-      >
-        补齐办理资料
-      </Button>
-      <MigrationSource
-        :migration="contract.migration"
-        :block-reasons="contract.blockReasons"
-        :native-source="{ kind: 'CONTRACT', nativeId: contract.id }"
-      />
-      <ContractMainline
-        :contract="contract"
-        :busy="activating"
-        :disabled="childOpen"
-        :loading="loading"
-        @next="runNext"
-      />
-      <details v-if="allTasks > 0" class="other-tasks">
-        <summary>全部待办（{{ allTasks }} 项）</summary>
-        <ContractWorkboard
-          :contract="contract"
-          :disabled="childOpen"
-          :loading="loading"
-          @launch="startWork"
-        />
-      </details>
-
-      <Tabs v-model:active-key="activeTab">
-        <TabPane key="products" tab="产品与进度">
-          <div class="products-layout">
-            <div class="ptable" role="table" aria-label="产品明细">
-              <div class="pr th" role="row">
-                <span>产品 / 规格</span><span class="r">数量</span><span class="r">单价</span><span class="r">金额</span><span>交期</span><span>申请 · 下单 · 到货</span><span class="r">已发</span>
-              </div>
-              <div
-                v-for="item in pipeline"
-                :key="item.id"
-                class="pr"
-                role="row"
-              >
-                <div class="prod">
-                  <img
-                    v-if="item.productImageUrl"
-                    :src="item.productImageUrl"
-                    alt=""
-                    class="thumb"
-                  />
-                  <div class="prod-text">
-                    <span class="strong" :title="item.skuName">{{
-                      item.skuName
-                    }}</span>
-                    <span class="sub" :title="item.specification">{{
-                      item.specification || item.size || '—'
-                    }}</span>
-                  </div>
-                </div>
-                <span class="r">{{ Number(item.quantity).toLocaleString('en-US') }}
-                  {{ item.unit }}</span>
-                <span class="r">{{ item.unitPrice ?? '待定价' }}</span>
-                <span class="r">{{
-                  item.lineAmount
-                    ? Number(item.lineAmount).toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                      })
-                    : '—'
-                }}</span>
-                <span>{{ item.requiredDate ?? '未约定' }}</span>
-                <span class="sub">{{ item.requestedQuantity ?? '待核对' }} ·
-                  {{ item.orderedQuantity ?? '—' }} ·
-                  {{ item.arrivedQuantity ?? '—' }}</span>
-                <span class="r" :class="{ done: item.deliveryComplete }">{{
-                  item.shippedQuantity ?? '待核对'
-                }}</span>
-              </div>
-              <div class="pr foot" role="row">
-                <span>合计 {{ pipeline.length }} 项</span><span class="r">{{ totalQuantity }}</span><span></span><span class="r">{{
-                  nativeMoney(contract.amount, contract.currency)
-                }}</span><span class="sub" style="grid-column: span 3">{{
-                  Number(contract.additionalAmount) > 0
-                    ? `含附加费用 ${nativeMoney(contract.additionalAmount, contract.currency)}`
-                    : '没有附加费用'
-                }}</span>
-              </div>
-              <p class="note">
-                <Tooltip
-                  title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
-                >
-                  <span tabindex="0">数量口径说明</span>
-                </Tooltip>
-              </p>
-            </div>
-            <aside class="side">
-              <Card size="small" title="合同资料">
-                <dl class="kv">
-                  <dt>所属公司</dt>
-                  <dd>{{ company || '待补齐' }}</dd>
-                  <dt>业务部门</dt>
-                  <dd>
-                    {{ departmentLabel(directory, contract.departmentId) }}
-                  </dd>
-                  <dt>付款条件</dt>
-                  <dd :class="{ muted: !contract.paymentTerms }">
-                    {{ contract.paymentTerms || '未填写' }}
-                  </dd>
-                  <dt>交付要求</dt>
-                  <dd :class="{ muted: !contract.deliveryRequirement }">
-                    {{ contract.deliveryRequirement || '未填写' }}
-                  </dd>
-                  <dt>阿里信保</dt>
-                  <dd>
-                    {{
-                      contract.alibabaTradeAssuranceNo ||
-                      (contract.useTradeAssurance ? '是' : '否')
-                    }}
-                  </dd>
-                </dl>
-                <div v-if="contract.salesCharges?.length" class="charges">
-                  <div
-                    v-for="charge in contract.salesCharges"
-                    :key="charge.name"
-                    class="charge"
-                  >
-                    <span>{{ charge.name }}</span><span>{{
-                      nativeMoney(charge.amount, contract.currency)
-                    }}</span>
-                  </div>
-                </div>
-              </Card>
-              <Card
-                v-if="standardFiles.length"
-                size="small"
-                title="产品标准资料"
-              >
-                <Button
-                  v-for="file in standardFiles"
-                  :key="file.id"
-                  type="link"
-                  size="small"
-                  class="file-link"
-                  @click="download(file)"
-                >
-                  {{ file.skuName }} · {{ file.name }}
-                </Button>
-              </Card>
-            </aside>
+              {{ label(contract.status) }}
+            </Tag>
+            <Tag>{{ productCategoryLabel(contract.productCategory) }}</Tag>
+            <Tag v-if="contract.businessType">
+              {{ label(contract.businessType) }}
+            </Tag>
           </div>
-        </TabPane>
-
-        <TabPane
-          key="purchase"
-          :tab="`采购${related?.requests?.total ? ` ${related.requests.total}` : ''}`"
-        >
-          <div class="dept">
-            <div class="dept-actions">
-              <span
-                v-for="entry in [
-                  {
-                    action: 'CREATE_REQUEST',
-                    kind: 'requests' as DocumentKind,
-                    title: '新建采购申请',
-                  },
-                ]"
-                :key="entry.action"
-                :title="quickActionReason(entry.action)"
+          <dl class="info-grid">
+            <dt>对应客户</dt>
+            <dd>
+              <RelatedLink
+                :target="entityTarget('customer', contract.customerId)"
               >
+                {{ contract.customerName }}
+              </RelatedLink>
+            </dd>
+            <dt>合同单号</dt>
+            <dd>{{ contract.code || '—' }}</dd>
+            <dt>签单日期</dt>
+            <dd>{{ contract.signedDate ?? '未填写' }}</dd>
+            <dt>总金额</dt>
+            <dd>{{ nativeMoney(contract.amount, contract.currency) }}</dd>
+            <dt>所有者</dt>
+            <dd>{{ personLabel(directory, contract.ownerUserId) }}</dd>
+            <dt>订单所属公司</dt>
+            <dd>{{ company || '待补齐' }}</dd>
+            <dt>业务部门</dt>
+            <dd>{{ departmentLabel(directory, contract.departmentId) }}</dd>
+            <dt>阿里信保</dt>
+            <dd>
+              {{
+                contract.alibabaTradeAssuranceNo ||
+                (contract.useTradeAssurance ? '是' : '否')
+              }}
+            </dd>
+            <dt>付款条件</dt>
+            <dd :class="{ muted: !contract.paymentTerms }">
+              {{ contract.paymentTerms || '未填写' }}
+            </dd>
+            <dt>交付要求</dt>
+            <dd :class="{ muted: !contract.deliveryRequirement }">
+              {{ contract.deliveryRequirement || '未填写' }}
+            </dd>
+          </dl>
+          <div v-if="contract.salesCharges?.length" class="charges">
+            <div
+              v-for="charge in contract.salesCharges"
+              :key="charge.name"
+              class="charge"
+            >
+              <span>{{ charge.name }}</span><span>{{ nativeMoney(charge.amount, contract.currency) }}</span>
+            </div>
+          </div>
+        </section>
+
+        <Button
+          v-if="
+            contract.allowedActions.includes('COMPLETE_IMPORTED_CONTRACT') &&
+            !contract.blockReasons?.length
+          "
+          :disabled="childOpen || loading"
+          @click="completionOpen = true"
+        >
+          补齐办理资料
+        </Button>
+        <MigrationSource
+          :migration="contract.migration"
+          :block-reasons="contract.blockReasons"
+          :native-source="{ kind: 'CONTRACT', nativeId: contract.id }"
+        />
+        <section class="products-card" aria-label="产品明细">
+          <h3 class="section-title">产品明细</h3>
+          <div class="ptable" role="table" aria-label="产品明细">
+            <div class="pr th" role="row">
+              <span>产品 / 规格</span><span class="r">数量</span><span class="r">单价</span><span class="r">金额</span><span>交期</span><span>申请 · 下单 · 到货</span><span class="r">已发</span>
+            </div>
+            <div v-for="item in pipeline" :key="item.id" class="pr" role="row">
+              <div class="prod">
+                <img
+                  v-if="item.productImageUrl"
+                  :src="item.productImageUrl"
+                  alt=""
+                  class="thumb"
+                />
+                <div class="prod-text">
+                  <span class="strong" :title="item.skuName">{{
+                    item.skuName
+                  }}</span>
+                  <span class="sub" :title="item.specification">{{
+                    item.specification || item.size || '—'
+                  }}</span>
+                </div>
+              </div>
+              <span class="r">{{ Number(item.quantity).toLocaleString('en-US') }}
+                {{ item.unit }}</span>
+              <span class="r">{{ item.unitPrice ?? '待定价' }}</span>
+              <span class="r">{{
+                item.lineAmount
+                  ? Number(item.lineAmount).toLocaleString('en-US', {
+                      minimumFractionDigits: 2,
+                    })
+                  : '—'
+              }}</span>
+              <span>{{ item.requiredDate ?? '未约定' }}</span>
+              <span class="sub">{{ item.requestedQuantity ?? '待核对' }} ·
+                {{ item.orderedQuantity ?? '—' }} ·
+                {{ item.arrivedQuantity ?? '—' }}</span>
+              <span class="r" :class="{ done: item.deliveryComplete }">{{
+                item.shippedQuantity ?? '待核对'
+              }}</span>
+            </div>
+            <div class="pr foot" role="row">
+              <span>合计 {{ pipeline.length }} 项</span><span class="r">{{ totalQuantity }}</span><span></span><span class="r">{{
+                nativeMoney(contract.amount, contract.currency)
+              }}</span><span class="sub" style="grid-column: span 3">{{
+                Number(contract.additionalAmount) > 0
+                  ? `含附加费用 ${nativeMoney(contract.additionalAmount, contract.currency)}`
+                  : '没有附加费用'
+              }}</span>
+            </div>
+            <p class="note">
+              <Tooltip
+                title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
+              >
+                <span tabindex="0">数量口径说明</span>
+              </Tooltip>
+            </p>
+          </div>
+        </section>
+        <Tabs v-model:active-key="activeTab">
+          <TabPane
+            key="products"
+            :tab="timelineCount ? `时间线 (${timelineCount})` : '时间线'"
+          >
+            <ContractTimeline
+              :requests="purchaseRows.requests"
+              :orders="purchaseRows.orders"
+              :shipments="shipmentRows"
+              :receipts="receiptRows"
+              :invoices="invoiceRows"
+              @open="(value) => (activeTab = value as DetailTab)"
+              @open-order="openPurchaseOrder"
+            />
+          </TabPane>
+
+          <TabPane
+            key="purchase"
+            :tab="`采购${related?.requests?.total ? ` ${related.requests.total}` : ''}`"
+          >
+            <div class="dept">
+              <div class="dept-actions">
+                <span
+                  v-for="entry in [
+                    {
+                      action: 'CREATE_REQUEST',
+                      kind: 'requests' as DocumentKind,
+                      title: '新建采购申请',
+                    },
+                  ]"
+                  :key="entry.action"
+                  :title="quickActionReason(entry.action)"
+                >
+                  <Button
+                    type="primary"
+                    :disabled="Boolean(quickActionReason(entry.action))"
+                    @click="openQuickDocument(entry)"
+                    >{{ entry.title }}</Button>
+                </span>
+              </div>
+              <h4>采购申请</h4>
+              <div v-if="purchaseRows.requests.length" class="mini-table">
+                <div
+                  v-for="request in purchaseRows.requests"
+                  :key="request.id"
+                  class="mini-row"
+                >
+                  <span class="strong">{{
+                    request.code || request.name || '采购申请'
+                  }}</span>
+                  <span>{{ rows(request.items).length }} 项 · 需求
+                    {{ requestDue(request) }}</span>
+                  <span>{{ label(request.assignmentStatus) }}</span>
+                </div>
+              </div>
+              <p v-else class="muted">还没有采购申请</p>
+              <h4>采购任务与报价</h4>
+              <div v-if="purchaseRows.tasks.length" class="mini-table">
+                <div
+                  v-for="task in purchaseRows.tasks"
+                  :key="task.id"
+                  class="mini-row"
+                >
+                  <span class="strong">{{
+                    itemName(task.contractItemId)
+                  }}</span>
+                  <span>{{ label(task.method) }} {{ task.quantity }} ·
+                    {{ personName(directory, task.ownerUserId) }}</span>
+                  <span>{{
+                    purchaseRows.quotes.filter(
+                      (quote) => quote.assignmentId === task.id,
+                    ).length
+                      ? `${purchaseRows.quotes.filter((quote) => quote.assignmentId === task.id).length} 份报价`
+                      : '还没报价'
+                  }}</span>
+                </div>
+              </div>
+              <p v-else class="muted">采购还没接单</p>
+              <h4>采购单</h4>
+              <div v-if="purchaseRows.orders.length" class="mini-table">
+                <button
+                  v-for="order in purchaseRows.orders"
+                  :key="order.id"
+                  type="button"
+                  class="mini-row mini-link"
+                  :disabled="childOpen"
+                  title="打开采购单"
+                  @click="openPurchaseOrder(String(order.id))"
+                >
+                  <span class="strong">{{ order.code || '采购单' }} ·
+                    {{ order.supplierName || '供应商未注明' }}</span>
+                  <span>{{ nativeMoney(order.amount, order.currency) }}</span>
+                  <span>到货 {{ orderProgress(order) }} ·
+                    {{ label(order.status) }}</span>
+                </button>
+              </div>
+              <p v-else class="muted">还没有采购单</p>
+              <div class="all-links">
+                <span class="muted">全部单据：</span>
+                <Button
+                  v-for="kind in departmentLists.purchase"
+                  :key="kind"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openDocuments(kind, 'list')"
+                >
+                  {{ documentDefinitions[kind].title }}
+                </Button>
+              </div>
+            </div>
+          </TabPane>
+
+          <TabPane key="delivery" tab="发货与报关">
+            <div class="dept">
+              <div class="dept-actions">
                 <Button
                   type="primary"
-                  :disabled="Boolean(quickActionReason(entry.action))"
-                  @click="openQuickDocument(entry)"
-                  >{{ entry.title }}</Button>
-              </span>
-            </div>
-            <h4>采购申请</h4>
-            <div v-if="purchaseRows.requests.length" class="mini-table">
-              <div
-                v-for="request in purchaseRows.requests"
-                :key="request.id"
-                class="mini-row"
-              >
-                <span class="strong">{{
-                  request.code || request.name || '采购申请'
-                }}</span>
-                <span>{{ rows(request.items).length }} 项 · 需求
-                  {{ requestDue(request) }}</span>
-                <span>{{ label(request.assignmentStatus) }}</span>
-              </div>
-            </div>
-            <p v-else class="muted">还没有采购申请</p>
-            <h4>采购任务与报价</h4>
-            <div v-if="purchaseRows.tasks.length" class="mini-table">
-              <div
-                v-for="task in purchaseRows.tasks"
-                :key="task.id"
-                class="mini-row"
-              >
-                <span class="strong">{{ itemName(task.contractItemId) }}</span>
-                <span>{{ label(task.method) }} {{ task.quantity }} ·
-                  {{ personName(directory, task.ownerUserId) }}</span>
-                <span>{{
-                  purchaseRows.quotes.filter(
-                    (quote) => quote.assignmentId === task.id,
-                  ).length
-                    ? `${purchaseRows.quotes.filter((quote) => quote.assignmentId === task.id).length} 份报价`
-                    : '还没报价'
-                }}</span>
-              </div>
-            </div>
-            <p v-else class="muted">采购还没接单</p>
-            <h4>采购单</h4>
-            <div v-if="purchaseRows.orders.length" class="mini-table">
-              <div
-                v-for="order in purchaseRows.orders"
-                :key="order.id"
-                class="mini-row"
-              >
-                <span class="strong">{{ order.code || '采购单' }} ·
-                  {{ order.supplierName || '供应商未注明' }}</span>
-                <span>{{ nativeMoney(order.amount, order.currency) }}</span>
-                <span>到货 {{ orderProgress(order) }} ·
-                  {{ label(order.status) }}</span>
-              </div>
-            </div>
-            <p v-else class="muted">还没有采购单</p>
-            <div class="all-links">
-              <span class="muted">全部单据：</span>
-              <Button
-                v-for="kind in departmentLists.purchase"
-                :key="kind"
-                size="small"
-                :disabled="childOpen"
-                @click="openDocuments(kind, 'list')"
-              >
-                {{ documentDefinitions[kind].title }}
-              </Button>
-            </div>
-          </div>
-        </TabPane>
-
-        <TabPane key="delivery" tab="发货与报关">
-          <div class="dept">
-            <div class="dept-actions">
-              <Button
-                type="primary"
-                :disabled="ended || childOpen"
-                @click="
-                  router.push({
-                    path: '/gongchang/stage-stock',
-                    query: { tab: 'trade' },
-                  })
-                "
-              >
-                去工序库存安排出货
-              </Button>
-              <span class="muted">出货在工厂「工序库存」从已包装成品办理，数量自动记到本合同。</span>
-            </div>
-            <h4>发货记录</h4>
-            <div v-if="shipmentRows.length" class="mini-table">
-              <div
-                v-for="shipment in shipmentRows"
-                :key="shipment.id"
-                class="mini-row"
-              >
-                <span class="strong">{{
-                  itemName(shipment.contractItemId)
-                }}</span>
-                <span>{{ shipment.kind === 'RETURN' ? '退回 ' : ''
-                  }}{{ shipment.quantity }}</span>
-                <span>{{
-                  String(
-                    shipment.shippedDate ?? shipment.occurredAt ?? '',
-                  ).slice(0, 10) || '日期未填'
-                }}</span>
-              </div>
-            </div>
-            <p v-else class="muted">还没有发货记录</p>
-            <h4>报关</h4>
-            <p v-if="customs" class="muted">
-              {{
-                customs.total
-                  ? `${customs.completed} / ${customs.total} 批已完成，${customs.pending} 批办理中`
-                  : '还没有报关批次'
-              }}
-            </p>
-            <Alert v-if="customsError" :message="customsError" type="warning" />
-            <div class="all-links">
-              <span class="muted">全部单据：</span>
-              <Button
-                v-for="kind in departmentLists.delivery"
-                :key="kind"
-                size="small"
-                :disabled="childOpen"
-                @click="openDocuments(kind, 'list')"
-              >
-                {{ documentDefinitions[kind].title }}
-              </Button>
-              <Button
-                size="small"
-                :disabled="childOpen"
-                @click="openDocuments('customs', 'list')"
-                >
-报关跟进
-</Button>
-            </div>
-          </div>
-        </TabPane>
-
-        <TabPane
-          key="finance"
-          :tab="`收款与开票${receiptRows.length ? ` ${receiptRows.length}` : ''}`"
-        >
-          <div class="dept">
-            <div class="dept-actions">
-              <span
-                v-for="entry in [
-                  {
-                    action: 'CREATE_RECEIPT',
-                    kind: 'receipts' as DocumentKind,
-                    title: '登记回款',
-                  },
-                  {
-                    action: 'CREATE_INVOICE',
-                    kind: 'invoices' as DocumentKind,
-                    title: '开票办理',
-                  },
-                ]"
-                :key="entry.action"
-                :title="quickActionReason(entry.action)"
-              >
-                <Button
-                  :type="
-                    entry.action === 'CREATE_RECEIPT' ? 'primary' : 'default'
+                  :disabled="ended || childOpen"
+                  @click="
+                    router.push({
+                      path: '/gongchang/stage-stock',
+                      query: { tab: 'trade' },
+                    })
                   "
-                  :disabled="Boolean(quickActionReason(entry.action))"
-                  @click="openQuickDocument(entry)"
-                  >{{ entry.title }}</Button>
-              </span>
-              <Button
-                :disabled="childOpen || ended"
-                @click="reimbursementOpen = true"
                 >
-费用报销
-</Button>
-            </div>
-            <h4>回款</h4>
-            <div v-if="receiptRows.length" class="mini-table">
-              <div
-                v-for="receipt in receiptRows"
-                :key="receipt.id"
-                class="mini-row"
-              >
-                <span class="strong">{{ receipt.receivedAt ?? '日期未填' }} ·
-                  {{ label(receipt.kind) }}</span>
-                <span>{{ nativeMoney(receipt.amount, receipt.currency)
-                  }}{{
-                    receipt.rmbAmount
-                      ? ` · 折 CNY ${Number(receipt.rmbAmount).toLocaleString('en-US')}`
-                      : ''
+                  去工序库存安排出货
+                </Button>
+                <span class="muted">出货在工厂「工序库存」从已包装成品办理，数量自动记到本合同。</span>
+              </div>
+              <h4>发货记录</h4>
+              <div v-if="shipmentRows.length" class="mini-table">
+                <div
+                  v-for="shipment in shipmentRows"
+                  :key="shipment.id"
+                  class="mini-row"
+                >
+                  <span class="strong">{{
+                    itemName(shipment.contractItemId)
                   }}</span>
-                <span><Tag
-                    :color="receipt.status === 'CONFIRMED' ? 'green' : 'orange'"
-                    >{{ label(receipt.status) }}</Tag></span>
+                  <span>{{ shipment.kind === 'RETURN' ? '退回 ' : ''
+                    }}{{ shipment.quantity }}</span>
+                  <span>{{
+                    String(
+                      shipment.shippedDate ?? shipment.occurredAt ?? '',
+                    ).slice(0, 10) || '日期未填'
+                  }}</span>
+                </div>
+              </div>
+              <p v-else class="muted">还没有发货记录</p>
+              <h4>报关</h4>
+              <p v-if="customs" class="muted">
+                {{
+                  customs.total
+                    ? `${customs.completed} / ${customs.total} 批已完成，${customs.pending} 批办理中`
+                    : '还没有报关批次'
+                }}
+              </p>
+              <Alert
+                v-if="customsError"
+                :message="customsError"
+                type="warning"
+              />
+              <div class="all-links">
+                <span class="muted">全部单据：</span>
+                <Button
+                  v-for="kind in departmentLists.delivery"
+                  :key="kind"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openDocuments(kind, 'list')"
+                >
+                  {{ documentDefinitions[kind].title }}
+                </Button>
+                <Button
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openDocuments('customs', 'list')"
+                >
+                  报关跟进
+                </Button>
               </div>
             </div>
-            <p v-else class="muted">还没有登记回款</p>
-            <h4>发票</h4>
-            <div v-if="invoiceRows.length" class="mini-table">
-              <div
-                v-for="invoice in invoiceRows"
-                :key="invoice.id"
-                class="mini-row"
-              >
-                <span class="strong">{{ invoice.invoiceNumber || '发票号未填' }} ·
-                  {{ label(invoice.type) }}</span>
-                <span>{{ nativeMoney(invoice.amount, invoice.currency) }}</span>
-                <span>{{ invoice.issuedAt ?? '' }}
-                  {{ label(invoice.status) }}</span>
-              </div>
-            </div>
-            <p v-else class="muted">还没有开票</p>
-            <div class="all-links">
-              <span class="muted">全部单据：</span>
-              <Button
-                v-for="kind in departmentLists.finance"
-                :key="kind"
-                size="small"
-                :disabled="childOpen"
-                @click="openDocuments(kind, 'list')"
-              >
-                {{ documentDefinitions[kind].title }}
-              </Button>
-            </div>
-          </div>
-        </TabPane>
+          </TabPane>
 
-        <TabPane key="attachments" tab="合同附件">
-          <ContractFilesPanel
-            :contract-id="contract.id"
-            :listing="attachments"
-            :directory="directory"
-            :error="attachmentError"
-            :loading="attachmentLoading"
-            uploadable
-            @refresh="loadFiles"
-            @busy="(value) => (attachmentBusy = value)"
+          <TabPane
+            key="finance"
+            :tab="`收款与开票${receiptRows.length ? ` ${receiptRows.length}` : ''}`"
+          >
+            <div class="dept">
+              <div class="dept-actions">
+                <span
+                  v-for="entry in [
+                    {
+                      action: 'CREATE_RECEIPT',
+                      kind: 'receipts' as DocumentKind,
+                      title: '登记回款',
+                    },
+                    {
+                      action: 'CREATE_INVOICE',
+                      kind: 'invoices' as DocumentKind,
+                      title: '开票办理',
+                    },
+                  ]"
+                  :key="entry.action"
+                  :title="quickActionReason(entry.action)"
+                >
+                  <Button
+                    :type="
+                      entry.action === 'CREATE_RECEIPT' ? 'primary' : 'default'
+                    "
+                    :disabled="Boolean(quickActionReason(entry.action))"
+                    @click="openQuickDocument(entry)"
+                    >{{ entry.title }}</Button>
+                </span>
+                <Button
+                  :disabled="childOpen || ended"
+                  @click="reimbursementOpen = true"
+                >
+                  费用报销
+                </Button>
+              </div>
+              <h4>回款</h4>
+              <div v-if="receiptRows.length" class="mini-table">
+                <div
+                  v-for="receipt in receiptRows"
+                  :key="receipt.id"
+                  class="mini-row"
+                >
+                  <span class="strong">{{ receipt.receivedAt ?? '日期未填' }} ·
+                    {{ label(receipt.kind) }}</span>
+                  <span>{{ nativeMoney(receipt.amount, receipt.currency)
+                    }}{{
+                      receipt.rmbAmount
+                        ? ` · 折 CNY ${Number(receipt.rmbAmount).toLocaleString('en-US')}`
+                        : ''
+                    }}</span>
+                  <span><Tag
+                      :color="
+                        receipt.status === 'CONFIRMED' ? 'green' : 'orange'
+                      "
+                      >{{ label(receipt.status) }}</Tag></span>
+                </div>
+              </div>
+              <p v-else class="muted">还没有登记回款</p>
+              <h4>发票</h4>
+              <div v-if="invoiceRows.length" class="mini-table">
+                <div
+                  v-for="invoice in invoiceRows"
+                  :key="invoice.id"
+                  class="mini-row"
+                >
+                  <span class="strong">{{ invoice.invoiceNumber || '发票号未填' }} ·
+                    {{ label(invoice.type) }}</span>
+                  <span>{{
+                    nativeMoney(invoice.amount, invoice.currency)
+                  }}</span>
+                  <span>{{ invoice.issuedAt ?? '' }}
+                    {{ label(invoice.status) }}</span>
+                </div>
+              </div>
+              <p v-else class="muted">还没有开票</p>
+              <div class="all-links">
+                <span class="muted">全部单据：</span>
+                <Button
+                  v-for="kind in departmentLists.finance"
+                  :key="kind"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openDocuments(kind, 'list')"
+                >
+                  {{ documentDefinitions[kind].title }}
+                </Button>
+              </div>
+            </div>
+          </TabPane>
+
+          <TabPane key="attachments" tab="合同附件">
+            <ContractFilesPanel
+              :contract-id="contract.id"
+              :listing="attachments"
+              :directory="directory"
+              :error="attachmentError"
+              :loading="attachmentLoading"
+              uploadable
+              @refresh="loadFiles"
+              @busy="(value) => (attachmentBusy = value)"
+            />
+          </TabPane>
+          <TabPane key="audit" tab="操作记录">
+            <Alert v-if="auditError" :message="auditError" type="error" />
+            <RecordTable
+              :data="auditRows"
+              :columns="
+                columns(
+                  'action|业务动作',
+                  'actor_id|操作人',
+                  'created_at|时间',
+                  'document_version|保存版本',
+                )
+              "
+            />
+          </TabPane>
+        </Tabs>
+        <Alert v-if="relatedError" :message="relatedError" type="warning">
+          <template #action>
+            <Button size="small" @click="loadSummary">重新读取</Button>
+          </template>
+        </Alert>
+      </div>
+      <aside class="contract-side">
+        <SummaryCards
+          :cards="summaryCards"
+          @open="(value) => (activeTab = value as DetailTab)"
+        />
+        <section class="side-card" aria-label="待办任务">
+          <h3 class="section-title">待办任务</h3>
+          <ContractMainline
+            :contract="contract"
+            :busy="activating"
+            :disabled="childOpen"
+            :loading="loading"
+            @next="runNext"
           />
-        </TabPane>
-        <TabPane key="audit" tab="操作记录">
-          <Alert v-if="auditError" :message="auditError" type="error" />
-          <RecordTable
-            :data="auditRows"
-            :columns="
-              columns(
-                'action|业务动作',
-                'actor_id|操作人',
-                'created_at|时间',
-                'document_version|保存版本',
-              )
-            "
-          />
-        </TabPane>
-      </Tabs>
-      <Alert v-if="relatedError" :message="relatedError" type="warning">
-        <template #action>
-          <Button size="small" @click="loadSummary">重新读取</Button>
-        </template>
-      </Alert>
+          <details v-if="allTasks > 0" class="other-tasks">
+            <summary>全部待办（{{ allTasks }} 项）</summary>
+            <ContractWorkboard
+              :contract="contract"
+              :disabled="childOpen"
+              :loading="loading"
+              @launch="startWork"
+            />
+          </details>
+        </section>
+        <Card v-if="standardFiles.length" size="small" title="产品标准资料">
+          <Button
+            v-for="file in standardFiles"
+            :key="file.id"
+            type="link"
+            size="small"
+            class="file-link"
+            @click="download(file)"
+          >
+            {{ file.skuName }} · {{ file.name }}
+          </Button>
+        </Card>
+      </aside>
     </div>
   </Drawer>
   <Modal
@@ -1125,6 +1295,12 @@ async function download(file: { id: string; name: string }) {
     @close="workLaunch = undefined"
     @updated="documentUpdated"
   />
+  <PurchaseOrderExecution
+    v-if="purchaseOrder && open"
+    :embedded-order="purchaseOrder"
+    @close="purchaseOrder = undefined"
+    @updated="emit('refresh')"
+  />
   <RecordDetail
     v-if="workLaunch && !workLaunch.action"
     :open="open"
@@ -1136,6 +1312,94 @@ async function download(file: { id: string; name: string }) {
   />
 </template>
 <style scoped>
+/* 合同订单详情（金智式）：左侧基本信息、产品明细、下属单据页签，右侧摘要与待办 */
+.contract-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.doc-type {
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 20px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 4px;
+}
+
+.contract-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.contract-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.contract-side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-card,
+.products-card,
+section.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.section-title {
+  padding-left: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  border-left: 3px solid hsl(var(--primary));
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 90px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.info-grid dt {
+  color: hsl(var(--muted-foreground));
+}
+
+.info-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .contract-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contract-side {
+    position: static;
+  }
+
+  .info-grid {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+}
+
 .contract-detail {
   display: flex;
   flex-direction: column;
@@ -1382,6 +1646,19 @@ async function download(file: { id: string; name: string }) {
   align-items: center;
   padding: 7px 12px;
   font-size: 12.5px;
+}
+
+.mini-link {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.mini-link:hover:not(:disabled) {
+  background: hsl(var(--accent));
 }
 
 .mini-row + .mini-row {

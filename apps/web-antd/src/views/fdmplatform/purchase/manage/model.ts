@@ -1,5 +1,6 @@
 import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
+  ProcurementOrderRow,
   ProcurementSetting,
   SupplierContact,
 } from '#/api/fdmplatform/procurement';
@@ -324,4 +325,61 @@ export function orderRowDue(
     sub: `还剩 ${days} 天`,
     tone: days <= 3 ? 'soon' : 'none',
   };
+}
+
+/**
+ * 采购单列表「操作/状态」小图标（金智同款）：入库、付款、收票、盖章各一个，
+ * done=已办完、part=部分、none=未办、skip=无需。
+ */
+function tone(done: boolean, partial: boolean) {
+  if (done) return 'done';
+  return partial ? 'part' : 'none';
+}
+function invoiceFlag(
+  row: ProcurementOrderRow,
+  amount: number,
+  invoiced: number,
+) {
+  if (row.noInvoice) return { tone: 'skip', title: '无需收票' };
+  const done = amount > 0 && invoiced >= amount - 0.005;
+  return {
+    tone: tone(done, invoiced > 0),
+    title: invoiced > 0 ? `已收票 ${invoiced.toFixed(2)}` : '未收票',
+  };
+}
+function paymentTitle(paidOff: boolean, paid: number) {
+  if (paidOff) return '已付清';
+  return paid > 0 ? '部分付款' : '未付款';
+}
+export function orderRowFlags(
+  row: ProcurementOrderRow,
+  receivedNames: Record<string, string>,
+) {
+  const unpaid = Number(row.unpaidAmount ?? Number.NaN);
+  const paid = Number(row.paidAmount ?? 0);
+  const amount = Number(row.orderAmount ?? Number.NaN);
+  const invoiced = Number(row.invoicedAmount ?? 0);
+  const received = row.receivedState ?? 'NONE';
+  const paidOff = unpaid === 0 && paid > 0;
+  return [
+    {
+      key: 'in',
+      text: '入',
+      tone: tone(received === 'ALL', received === 'PARTIAL'),
+      title: receivedNames[received] ?? received,
+    },
+    {
+      key: 'pay',
+      text: '付',
+      tone: tone(paidOff, paid > 0),
+      title: paymentTitle(paidOff, paid),
+    },
+    { key: 'invoice', text: '票', ...invoiceFlag(row, amount, invoiced) },
+    {
+      key: 'signed',
+      text: '章',
+      tone: row.signed ? 'done' : 'none',
+      title: row.signed ? '已上传盖章件' : '未上传盖章件',
+    },
+  ];
 }

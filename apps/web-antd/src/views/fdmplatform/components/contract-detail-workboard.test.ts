@@ -226,6 +226,35 @@ vi.mock('./ContractReviewPanel.vue', () => ({
 vi.mock('./RecordTable.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('../purchase/manage/components/OrderSubDocMenu.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: { type: Array, default: () => [] },
+      disabled: Boolean,
+    },
+    emits: ['pick'],
+    setup: (props, ctx) => () =>
+      h(
+        'div',
+        (
+          props.items as Array<{
+            disabled?: boolean;
+            key: string;
+            label: string;
+          }>
+        ).map((item) =>
+          h(
+            'button',
+            {
+              disabled: props.disabled || item.disabled,
+              onClick: () => ctx.emit('pick', item.key),
+            },
+            item.label,
+          ),
+        ),
+      ),
+  }),
+}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     setup: (_, ctx) => () => h('div', ctx.attrs, ctx.slots.default?.()),
@@ -248,6 +277,34 @@ vi.mock('ant-design-vue', () => {
     Tag: defineComponent({
       setup: (_, ctx) => () =>
         h('span', { 'data-status-tag': true }, ctx.slots.default?.()),
+    }),
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: defineComponent({
+      props: { items: { type: Array, default: () => [] } },
+      emits: ['click'],
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          (
+            props.items as Array<{
+              disabled?: boolean;
+              key: string;
+              label: string;
+            }>
+          ).map((item) =>
+            h(
+              'button',
+              {
+                disabled: item.disabled,
+                onClick: () => ctx.emit('click', { key: item.key }),
+              },
+              item.label,
+            ),
+          ),
+        ),
     }),
     TabPane: defineComponent({
       props: { tab: { type: String, default: '' } },
@@ -446,7 +503,7 @@ describe('contractDetail workboard integration', () => {
     button(host, '合同生效').click();
     await nextTick();
     expect(button(host, '合同生效').disabled).toBe(true);
-    expect(button(host, '编辑合同').disabled).toBe(true);
+    expect(button(host, '编辑').disabled).toBe(true);
     expect(button(host, '刷新合同').disabled).toBe(true);
     const drawer = host.querySelector<HTMLElement>('[data-order]')!;
     expect(drawer.dataset.keyboard).toBe('false');
@@ -480,7 +537,13 @@ describe('contractDetail workboard integration', () => {
     expect(mocks.reviewSubmit).not.toHaveBeenCalled();
   });
 
-  it.each([['登记回款', 'receipts', 'CREATE_RECEIPT']])(
+  it.each([
+    ['登记回款', 'receipts', 'CREATE_RECEIPT'],
+    // 「下属单据新建」（金智式）里的同一批办理
+    ['回款记录', 'receipts', 'CREATE_RECEIPT'],
+    ['开票记录', 'invoices', 'CREATE_INVOICE'],
+    ['采购申请单', 'requests', 'CREATE_REQUEST'],
+  ])(
     'opens %s directly as a contract-locked action and keeps the order when cancelled',
     async (title, kind, action) => {
       const { host, close } = await mountDetail();

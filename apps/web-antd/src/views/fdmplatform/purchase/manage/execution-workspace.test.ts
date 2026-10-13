@@ -60,6 +60,45 @@ vi.mock('../../documents/RecordDetail.vue', () => ({
 vi.mock('./components/BatchRequestDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('#/api/fdmplatform/warehouse', () => ({
+  getStockIns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+  getPurchaseReturns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+}));
+vi.mock('./components/OrderSubDocMenu.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: { type: Array, default: () => [] },
+      disabled: Boolean,
+    },
+    emits: ['pick'],
+    setup: (props, ctx) => () =>
+      h(
+        'div',
+        (
+          props.items as Array<{
+            disabled?: boolean;
+            key: string;
+            label: string;
+          }>
+        ).map((item) =>
+          h(
+            'button',
+            {
+              disabled: props.disabled || item.disabled,
+              onClick: () => ctx.emit('pick', item.key),
+            },
+            item.label,
+          ),
+        ),
+      ),
+  }),
+}));
+vi.mock('./components/OrderTimeline.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderSummaryCards.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderStockDocs.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -108,8 +147,36 @@ vi.mock('./components/OrderExportMenu.vue', () => ({
 vi.mock('./components/OrderContract.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/StandaloneOrderFiles.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
+}));
+vi.mock('../../finance/procurement/components/PaymentRecordDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      available: { type: null, default: undefined },
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup:
+      (props, { emit }) =>
+      () =>
+        props.open
+          ? h(
+              'section',
+              {
+                'data-payment': props.orderId,
+                'data-contract': props.contractId,
+                'data-available': String(props.available),
+              },
+              [h('button', { onClick: () => emit('close') }, '关闭登记付款')],
+            )
+          : null,
+  }),
 }));
 vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
   default: defineComponent({
@@ -260,6 +327,41 @@ vi.mock('ant-design-vue', () => {
     },
     Progress: block,
     Space: block,
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: defineComponent({
+      props: { items: { type: Array, default: () => [] } },
+      emits: ['click'],
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          (
+            props.items as Array<{
+              children?: Array<{
+                disabled?: boolean;
+                key: string;
+                label: string;
+              }>;
+              disabled?: boolean;
+              key: string;
+              label: string;
+            }>
+          )
+            .flatMap((item) => item.children ?? [item])
+            .map((item) =>
+              h(
+                'button',
+                {
+                  disabled: item.disabled,
+                  onClick: () => ctx.emit('click', { key: item.key }),
+                },
+                item.label,
+              ),
+            ),
+        ),
+    }),
     TabPane: block,
     Tabs: block,
     Tag: block,
@@ -437,6 +539,7 @@ beforeEach(() => {
     paidAmount: '40',
     unpaidAmount: '60',
     availableRequestAmount: '25',
+    availablePaymentAmount: '25',
   });
 });
 afterEach(() => {
@@ -475,7 +578,7 @@ describe('采购订单原页执行', () => {
     const { host, router } = await mount('?page=2');
     button(host, 'CG-001').click();
     await settle();
-    button(host, '登记入库').click();
+    button(host, '入库单').click();
     await settle();
     const dialog = host.querySelector<HTMLElement>('[data-stock-in]')!;
     expect(dialog.dataset.stockIn).toBe('po-a');
@@ -490,24 +593,54 @@ describe('采购订单原页执行', () => {
     );
     expect(router.currentRoute.value.query.contractId).toBeUndefined();
   });
-  it('请款使用服务端可请款余额，报销也直接关联当前订单', async () => {
+  it('嵌入合同订单时只弹出同一个采购单执行抽屉，不读列表，关闭通知调用方', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/contracts', component: { render: () => null } }],
+    });
+    await router.push('/contracts?contractId=contract-a');
+    await router.isReady();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const closed = vi.fn();
+    const app = createApp({
+      render: () =>
+        h(Workspace, {
+          embeddedOrder: { contractId: 'contract-a', orderId: 'po-a' },
+          onClose: closed,
+        }),
+    });
+    app.use(router);
+    app.mount(host);
+    disposals.push(() => {
+      app.unmount();
+      host.remove();
+    });
+    await settle();
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.overview).not.toHaveBeenCalled();
+    expect(mocks.detail).toHaveBeenCalledWith('contract-a', 'po-a');
+    expect(host.querySelector('[data-drawer]')).not.toBeNull();
+    expect(button(host, '付款记录')).toBeDefined();
+    button(host, '关闭执行详情').click();
+    await settle();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.fullPath).toBe(
+      '/contracts?contractId=contract-a',
+    );
+  });
+  it('登记付款带出服务端可付余额，报销也直接关联当前订单', async () => {
     const { host } = await mount();
     button(host, 'CG-001').click();
     await settle();
-    button(host, '申请付款').click();
+    button(host, '付款记录').click();
     await settle();
-    expect(
-      JSON.parse(
-        host.querySelector<HTMLElement>('[data-finance-type]')!.dataset
-          .context!,
-      ),
-    ).toEqual({
-      contractId: 'contract-a',
-      orderId: 'po-a',
-      currency: 'CNY',
-      amount: '25',
-    });
-    button(host, '关闭财务单据').click();
+    const payment = host.querySelector<HTMLElement>('[data-payment]')!;
+    expect(payment.dataset.payment).toBe('po-a');
+    expect(payment.dataset.contract).toBe('contract-a');
+    expect(payment.dataset.available).toBe('25');
+    expect(button(host, '关闭执行详情').disabled).toBe(true);
+    button(host, '关闭登记付款').click();
     await settle();
     button(host, '费用报销').click();
     await settle();
@@ -562,7 +695,7 @@ describe('采购订单原页执行', () => {
     await settle();
     expect(host.querySelector<HTMLElement>('[data-standalone]')).toBeNull();
   });
-  it('不存在未到余额时隐藏登记入库，付款资料未读取时不启用请款', async () => {
+  it('不存在未到余额时隐藏登记入库，付款资料未读取时不启用登记付款', async () => {
     const complete = detail();
     complete.order.lines[0]!.arrivedQuantity = 10;
     complete.order.status = 'RECEIVED';
@@ -571,12 +704,8 @@ describe('采购订单原页执行', () => {
     const { host } = await mount();
     button(host, 'CG-001').click();
     await settle();
-    expect(
-      [...host.querySelectorAll('button')].some(
-        (entry) => entry.textContent?.trim() === '登记入库',
-      ),
-    ).toBe(false);
-    expect(button(host, '申请付款').disabled).toBe(true);
+    expect(button(host, '入库单').disabled).toBe(true);
+    expect(button(host, '付款记录').disabled).toBe(true);
     expect(host.textContent).toContain('待核实');
   });
   it('付款页内的关联子表单打开时阻止关闭执行抽屉，关闭子表单后恢复', async () => {

@@ -13,6 +13,7 @@ import {
   onlyChoice,
   orderDetailsPayload,
   orderRowDue,
+  orderRowFlags,
   preferredContact,
   purchaseRowLabels,
   snapshotShape,
@@ -221,5 +222,50 @@ describe('采购单列表行', () => {
         '2026-10-12',
       ).sub,
     ).toBe('已到齐');
+  });
+});
+
+describe('采购单列表状态图标（金智式）', () => {
+  const names = { NONE: '未入库', PARTIAL: '部分入库', ALL: '已入齐' };
+  const row = (extra: Record<string, unknown>) =>
+    ({ id: 'o', record: {}, ...extra }) as unknown as Parameters<
+      typeof orderRowFlags
+    >[0];
+  it('入库、付款、收票、盖章分别按办完 / 部分 / 未办着色', () => {
+    const flags = orderRowFlags(
+      row({
+        receivedState: 'PARTIAL',
+        orderAmount: '100',
+        paidAmount: '100',
+        unpaidAmount: '0',
+        invoicedAmount: '40',
+        signed: true,
+      }),
+      names,
+    );
+    expect(flags.map((flag) => [flag.text, flag.tone])).toEqual([
+      ['入', 'part'],
+      ['付', 'done'],
+      ['票', 'part'],
+      ['章', 'done'],
+    ]);
+  });
+  it('无需收票显示为跳过，未付款与未收票为灰', () => {
+    const flags = orderRowFlags(
+      row({
+        orderAmount: '100',
+        paidAmount: '0',
+        unpaidAmount: '100',
+        noInvoice: true,
+      }),
+      names,
+    );
+    expect(flags.map((flag) => flag.tone)).toEqual([
+      'none',
+      'none',
+      'skip',
+      'none',
+    ]);
+    expect(flags[2]!.title).toBe('无需收票');
   });
 });

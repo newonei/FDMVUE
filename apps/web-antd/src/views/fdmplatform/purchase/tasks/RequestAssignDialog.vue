@@ -43,11 +43,30 @@ const idempotencyKey = ref('');
  * 提交时每个产品按剩余数量记为外采任务，经办人都是选中的采购员。
  */
 const owner = ref<number>();
+/** 没指定申请时（如从合同订单「分派采购任务」进来），在弹窗里选要分派的申请 */
+const chosenRequestId = ref<string>();
+const requestId = computed(() => props.requestId ?? chosenRequestId.value);
 let sequence = 0;
 let pristine: number | undefined;
 const request = computed(() =>
-  contract.value?.requests?.find((entry) => entry.id === props.requestId),
+  contract.value?.requests?.find((entry) => entry.id === requestId.value),
 );
+const pendingRequests = computed(() =>
+  (contract.value?.requests ?? [])
+    .filter((entry) => assignRows(contract.value!, entry.id).length > 0)
+    .map((entry) => ({
+      value: entry.id,
+      label: entry.code || entry.name || '采购申请',
+    })),
+);
+function chooseRequest(id: string) {
+  chosenRequestId.value = id;
+  if (!contract.value) return;
+  const me = Number(userStore.userInfo?.id);
+  lines.value = assignRows(contract.value, id, me > 0 ? me : undefined);
+  owner.value ??= lines.value[0]?.ownerUserId;
+  pageError.value = lines.value.length === 0 ? '这张申请已全部分派' : '';
+}
 const userOptions = computed(() =>
   (directory.value?.users ?? []).map((user) => ({
     value: user.id,
@@ -57,7 +76,7 @@ const userOptions = computed(() =>
   })),
 );
 const activeCount = computed(() => activeAssignRows(lines.value).length);
-async function prepare(contractId: string, requestId: string) {
+async function prepare(contractId: string, requestId?: string) {
   const run = ++sequence;
   loading.value = true;
   pageError.value = '';
@@ -73,6 +92,14 @@ async function prepare(contractId: string, requestId: string) {
       throw new Error('当前合同状态或你的角色不能分派采购任务');
     contract.value = loaded;
     directory.value = users;
+    if (!requestId) {
+      const pending = pendingRequests.value;
+      if (pending.length === 0)
+        pageError.value = '这个合同没有待分派的采购申请';
+      else if (pending.length === 1) chooseRequest(String(pending[0]!.value));
+      pristine = owner.value;
+      return;
+    }
     const me = Number(userStore.userInfo?.id);
     lines.value = assignRows(loaded, requestId, me > 0 ? me : undefined);
     if (lines.value.length === 0) pageError.value = '这张申请已全部分派';
@@ -87,7 +114,7 @@ async function prepare(contractId: string, requestId: string) {
 
 async function save() {
   const current = contract.value;
-  if (!current || !props.requestId || saving.value) return;
+  if (!current || !requestId.value || saving.value) return;
   submitted.value = true;
   if (!owner.value) {
     pageError.value = '请选择分派给哪个采购员';
@@ -106,7 +133,7 @@ async function save() {
       'ASSIGN_REQUEST',
       current.version,
       idempotencyKey.value,
-      assignPayload(props.requestId, lines.value),
+      assignPayload(requestId.value, lines.value),
     );
     message.success(
       `已分派给 ${userOptions.value.find((user) => user.value === owner.value)?.label ?? '采购员'}`,
@@ -145,9 +172,11 @@ watch(
     ++sequence;
     contract.value = undefined;
     lines.value = [];
+    owner.value = undefined;
+    chosenRequestId.value = undefined;
     submitted.value = false;
     pageError.value = '';
-    if (!props.open || !props.contractId || !props.requestId) return;
+    if (!props.open || !props.contractId) return;
     idempotencyKey.value = newIdempotencyKey();
     void prepare(props.contractId, props.requestId);
   },
@@ -176,6 +205,21 @@ watch(
         :message="pageError"
         class="assign-alert"
       />
+      <label
+        v-if="contract && !props.requestId && pendingRequests.length > 1"
+        class="owner-field request-field"
+      >
+        <span>采购申请</span>
+        <Select
+          :value="chosenRequestId"
+          :options="pendingRequests"
+          :disabled="saving"
+          placeholder="选择要分派的申请"
+          aria-label="采购申请"
+          style="width: 280px"
+          @update:value="(value) => chooseRequest(String(value))"
+        />
+      </label>
       <div v-if="contract && lines.length" class="assign">
         <label class="owner-field">
           <span>分派给</span>
@@ -234,6 +278,10 @@ watch(
   font-size: 13px;
   font-weight: 400;
   color: hsl(var(--muted-foreground));
+}
+
+.request-field {
+  margin-bottom: 12px;
 }
 
 .assign-alert {

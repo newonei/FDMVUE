@@ -15,7 +15,14 @@ import type {
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 
-import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  provide,
+  ref,
+  watch,
+} from 'vue';
 
 import {
   Alert,
@@ -24,6 +31,7 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  message,
   Space,
   Spin,
   Tag,
@@ -60,6 +68,7 @@ import { relatedCreations } from './related-creation';
 import RelatedLink from './RelatedLink.vue';
 
 import '../purchase/components/procurement.css';
+
 const props = defineProps<{
   embedded?: boolean;
   kind: DocumentKind;
@@ -71,6 +80,17 @@ const emit = defineEmits<{
   navigate: [kind: DocumentKind];
   updated: [];
 }>();
+/** 采购单执行抽屉（采购订单页同一个组件），异步加载避免与采购订单页循环引用 */
+const PurchaseOrderExecution = defineAsyncComponent(
+  () => import('../purchase/manage/index.vue'),
+);
+/** 采购申请「转成采购单 / 转成供应商报价」（金智同款）：复用采购工作台的开单、录报价表单 */
+const PurchaseOrderEditor = defineAsyncComponent(
+  () => import('../purchase/manage/components/PurchaseOrderEditor.vue'),
+);
+const RequestQuoteDialog = defineAsyncComponent(
+  () => import('../purchase/tasks/RequestQuoteDialog.vue'),
+);
 const contract = ref<Contract>();
 const record = ref<BusinessRecord>();
 const migration = computed(
@@ -93,11 +113,61 @@ const attachmentTarget = computed(() =>
 );
 const actionOpen = ref(false);
 const attachmentBusy = ref(false);
-const childOpen = computed(() => actionOpen.value || attachmentBusy.value);
+const convertTo = ref<'order' | 'quote'>();
+const convertedOrder = ref<{ contractId: string; orderId: string }>();
+const childOpen = computed(
+  () =>
+    actionOpen.value ||
+    attachmentBusy.value ||
+    !!convertTo.value ||
+    !!convertedOrder.value,
+);
+/** 申请没取消、合同允许时才能转单 */
+const canConvert = computed(
+  () =>
+    props.kind === 'requests' &&
+    !!record.value &&
+    record.value.status !== 'CANCELLED' &&
+    !!contract.value &&
+    !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
+);
+function converted(value: {
+  code: string;
+  contractId: string;
+  orderId: string;
+}) {
+  convertTo.value = undefined;
+  message.success(`已转成采购单 ${value.code}`);
+  emit('updated');
+  convertedOrder.value = {
+    contractId: value.contractId,
+    orderId: value.orderId,
+  };
+}
+function quoted() {
+  convertTo.value = undefined;
+  message.success('供应商报价已登记');
+  emit('updated');
+  void load();
+}
 const selectedAction = ref<string>();
 const selectedKind = ref<DocumentKind>(props.kind);
 const relatedSource = ref<RelatedDocumentSource>();
 let sequence = 0;
+/**
+ * 新系统采购单统一弹出采购订单执行抽屉（金智式：哪里打开都是同一个采购单详情）；
+ * 金智迁入的历史采购单仍按原单据显示。
+ */
+const purchaseOrder = computed(() => {
+  const row = props.row;
+  if (props.kind !== 'orders' || !row) return undefined;
+  const native = (row as { nativeStandalone?: boolean }).nativeStandalone;
+  if (row.standaloneId && native !== true) return undefined;
+  return {
+    contractId: row.standaloneId ? '' : String(row.contractId ?? ''),
+    orderId: String(row.standaloneId ?? row.id),
+  };
+});
 const config = computed(() => documentDefinitions[props.kind]);
 const procurement = computed(() =>
   [
@@ -314,6 +384,7 @@ watch(
   () => [props.open, props.row?.id, props.row?.contractId, props.kind],
   () => {
     ++sequence;
+    if (purchaseOrder.value) return;
     actionOpen.value = false;
     selectedAction.value = undefined;
     selectedKind.value = props.kind;
@@ -424,7 +495,14 @@ const mainAction = computed(() => {
 });
 </script>
 <template>
+  <PurchaseOrderExecution
+    v-if="purchaseOrder && open"
+    :embedded-order="purchaseOrder"
+    @close="emit('close')"
+    @updated="emit('updated')"
+  />
   <Drawer
+    v-else-if="!purchaseOrder"
     :open="open"
     :title="drawerTitle"
     :root-class-name="procurement ? 'procurement-record-drawer' : undefined"
@@ -435,9 +513,27 @@ const mainAction = computed(() => {
     @close="close"
   >
     <template #extra>
-      <Button :loading="loading" :disabled="childOpen" @click="load">
-        刷新当前单据
-      </Button>
+      <Space>
+        <template v-if="canConvert">
+          <Button
+            v-if="contract?.allowedActions.includes('CREATE_QUOTES')"
+            :disabled="childOpen"
+            @click="convertTo = 'quote'"
+          >
+            转成供应商报价
+          </Button>
+          <Button
+            type="primary"
+            :disabled="childOpen"
+            @click="convertTo = 'order'"
+          >
+            转成采购单
+          </Button>
+        </template>
+        <Button :loading="loading" :disabled="childOpen" @click="load">
+          刷新当前单据
+        </Button>
+      </Space>
 </template><Spin v-if="loading" /><Alert
       v-if="pageError"
       :message="pageError"
@@ -616,5 +712,27 @@ const mainAction = computed(() => {
     :lock-contract="true"
     @close="actionOpen = false"
     @updated="updated"
+  />
+  <PurchaseOrderEditor
+    v-if="convertTo === 'order'"
+    :open="open"
+    :contract-id="contract?.id"
+    :request-id="record?.id ? String(record.id) : undefined"
+    @close="convertTo = undefined"
+    @saved="converted"
+  />
+  <RequestQuoteDialog
+    v-if="convertTo === 'quote'"
+    :open="open"
+    :contract-id="contract?.id"
+    :request-id="record?.id ? String(record.id) : undefined"
+    @close="convertTo = undefined"
+    @saved="quoted"
+  />
+  <PurchaseOrderExecution
+    v-if="convertedOrder && open"
+    :embedded-order="convertedOrder"
+    @close="convertedOrder = undefined"
+    @updated="emit('updated')"
   />
 </template>
