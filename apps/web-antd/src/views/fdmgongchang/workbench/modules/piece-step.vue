@@ -77,7 +77,7 @@ function addMate() {
 </script>
 
 <template>
-  <div class="flex min-h-full flex-col">
+  <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
       :subtitle="`好的 ${formatQty(goodTotal(job))} ${unit} · 残次 ${formatQty(defectTotal(job))} ${unit}`"
       title="这批活算给谁？"
@@ -85,12 +85,12 @@ function addMate() {
     />
     <Spin :spinning="loading">
       <main class="flex flex-1 flex-col gap-3 p-4">
-        <p v-if="!loading && matches.length === 0" class="m-0 rounded-xl bg-card p-4 text-sm text-muted-foreground">
+        <p v-if="!loading && matches.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
           这道工序还没有计价项目，提交后由班组长补登计件。
         </p>
-        <section v-for="(line, i) in job.pieces" :key="line.key" class="flex flex-col gap-2.5 rounded-2xl bg-card p-4 shadow-sm">
+        <section v-for="(line, i) in job.pieces" :key="line.key" class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <div class="flex items-center justify-between gap-2">
-            <span v-if="i === 0" class="text-lg font-bold">{{ nameOf(line.userId) }}</span>
+            <span v-if="i === 0" class="text-sm font-bold">{{ nameOf(line.userId) }}</span>
             <Select
               v-else
               :id="`piece-mate-${line.key}`"
@@ -99,37 +99,35 @@ function addMate() {
               aria-label="一起做的人"
               class="min-w-0 flex-1"
               placeholder="选一起做的人"
-              size="large"
             />
-            <button v-if="i > 0" class="h-11 shrink-0 px-2 text-sm font-bold text-destructive" type="button" @click="job.pieces.splice(i, 1)">去掉</button>
+            <button v-if="i > 0" class="h-8 shrink-0 px-2 text-xs font-semibold text-destructive" type="button" @click="job.pieces.splice(i, 1)">去掉</button>
           </div>
           <Select
             :id="`piece-item-${line.key}`"
             v-model:value="line.itemId"
             :options="itemOptions"
             aria-label="计价项目"
-            size="large"
           />
           <div class="flex items-baseline justify-between border-t border-dashed border-border pt-2">
-            <span class="text-[15px] text-muted-foreground">{{ formatQty(line.quantity) }} {{ unit }} × ¥{{ priceOf(line.itemId) }}</span>
-            <span class="text-[26px] font-black text-primary">¥{{ formatQty(amountOf(line)) }}</span>
+            <span class="text-sm text-muted-foreground">{{ formatQty(line.quantity) }} {{ unit }} × ¥{{ priceOf(line.itemId) }}</span>
+            <span class="text-lg font-bold text-primary">¥{{ formatQty(amountOf(line)) }}</span>
           </div>
         </section>
         <button
           v-if="matches.length > 0 && mateOptions.length > 0"
-          class="h-[52px] rounded-xl border-2 border-dashed border-muted-foreground text-base font-bold text-muted-foreground"
+          class="h-9 rounded-md border border-dashed border-muted-foreground text-sm text-muted-foreground"
           type="button"
           @click="addMate"
         >
           ＋ 还有人跟我一起做
         </button>
-        <p class="m-0 text-[13px] leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
+        <p class="m-0 text-xs leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
       </main>
     </Spin>
-    <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-5 pt-3">
+    <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-4 pt-3">
       <button
         :disabled="props.submitting"
-        class="h-14 w-full rounded-xl bg-primary text-lg font-bold text-primary-foreground disabled:opacity-60"
+        class="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
         type="button"
         @click="emit('submit')"
       >

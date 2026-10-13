@@ -108,6 +108,15 @@ const flush = async () => {
   }
 };
 
+/** 在 InputNumber 里输入数字。 */
+function fill(id: string, value: number) {
+  const input = document.querySelector<HTMLInputElement>(`#${id}`);
+  if (!input) throw new Error(`找不到输入框：${id}`);
+  input.value = String(value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function clickButton(text: string) {
   const el = [...document.querySelectorAll('button')].find((b) =>
     b.textContent?.replaceAll(/\s/g, '').includes(text),
@@ -159,12 +168,19 @@ describe('workbench page', () => {
     expect(text).toContain('订单 HT-001');
     expect(text).toContain('已领 120 张板材');
 
-    clickButton('接着做这个活');
+    clickButton('接着做');
     await flush();
     expect(mocks.stock).toHaveBeenCalledWith('BOARD');
     expect(document.body.textContent).toContain('开片 · 第 1 步 领材料');
     clickButton('紫色');
     await flush();
+    // 选上后数量在同一行填，右边清单显示这种料领多少
+    clickButton('下一步');
+    await flush();
+    expect(mocks.create).not.toHaveBeenCalled();
+    fill('pick-11', 100);
+    await flush();
+    expect(document.body.textContent).toContain('本次领料');
     clickButton('下一步');
     await flush();
     expect(document.body.textContent).toContain('100 张');
@@ -204,6 +220,8 @@ describe('workbench page', () => {
     expect(mocks.order).toHaveBeenCalledWith(5);
     expect(document.body.textContent).toContain('开片 · 第 1 步 补领');
     clickButton('紫色');
+    await flush();
+    fill('pick-11', 100);
     await flush();
     clickButton('下一步');
     await flush();
@@ -263,15 +281,16 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('自己开单');
+    clickButton('开一张');
     await flush();
     expect(mocks.stock).toHaveBeenCalledWith('RAW');
-    clickButton('常规款');
-    await flush();
+    // 只有一个配方时直接选上
     clickButton('按配方带出要领的料');
     await flush();
     expect(mocks.plan).toHaveBeenCalledWith({ batches: 1, recipeCode: 'REC-001' });
-    expect(document.body.textContent).toContain('EVA 还缺 7 kg');
+    // 配方对照表：每种原料配方要多少、本次领多少、库存缺多少
+    const recipeRow = [...document.querySelectorAll('tr')].find((r) => r.textContent?.includes('EVA') && r.textContent.includes('10 kg'));
+    expect(recipeRow?.textContent?.replaceAll(/\s/g, '')).toContain('EVA10kg3kg7kg');
     clickButton('下一步');
     await flush();
     clickButton('确认领料，去干活');
@@ -306,12 +325,15 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('接着做这个活');
+    clickButton('接着做');
     await flush();
     const cards = [...document.querySelectorAll('button')].filter((b) => b.textContent?.includes('批次 B'));
     cards[0]!.click();
     await flush();
     cards[1]!.click();
+    await flush();
+    fill('pick-11', 100);
+    fill('pick-12', 40);
     await flush();
     clickButton('下一步');
     await flush();
