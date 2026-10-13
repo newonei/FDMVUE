@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { InputNumber } from 'ant-design-vue';
 
-/** 大号计数器：左右 − / + 按钮，中间可以直接输入，适合车间里单手点。 */
+/** 计数器：左右 − / + 按钮，中间可以直接输入，手机上单手也好点。 */
 const props = withDefaults(
   defineProps<{
     id: string;
@@ -26,8 +26,8 @@ function change(delta: number) {
   <div class="flex items-center justify-between gap-3">
     <button
       :aria-label="`${label}减 ${step}`"
-      :class="size === 'large' ? 'size-16 text-3xl' : 'size-14 text-2xl'"
-      class="shrink-0 rounded-xl border-2 border-foreground bg-card font-bold text-foreground"
+      :class="size === 'large' ? 'size-11 text-2xl' : 'size-10 text-xl'"
+      class="shrink-0 rounded-md border border-border bg-card font-bold text-foreground"
       type="button"
       @click="change(-step)"
     >
@@ -47,13 +47,14 @@ function change(delta: number) {
       :min="0"
       :precision="precision"
       class="min-w-0 flex-1"
+      placeholder="0"
       inputmode="decimal"
       @change="(v) => (value = (v as null | number | undefined) ?? null)"
     />
     <button
       :aria-label="`${label}加 ${step}`"
-      :class="size === 'large' ? 'size-16 text-3xl' : 'size-14 text-2xl'"
-      class="shrink-0 rounded-xl border-2 border-foreground bg-card font-bold text-foreground"
+      :class="size === 'large' ? 'size-11 text-2xl' : 'size-10 text-xl'"
+      class="shrink-0 rounded-md border border-border bg-card font-bold text-foreground"
       type="button"
       @click="change(step)"
     >
@@ -64,15 +65,15 @@ function change(delta: number) {
 
 <style scoped>
 .workbench-counter-lg :deep(input) {
-  height: 64px;
-  font-size: 44px;
+  height: 44px;
+  font-size: 26px;
   font-weight: 900;
   text-align: center;
 }
 
 .workbench-counter-md :deep(input) {
-  height: 56px;
-  font-size: 34px;
+  height: 40px;
+  font-size: 22px;
   font-weight: 900;
   text-align: center;
 }
