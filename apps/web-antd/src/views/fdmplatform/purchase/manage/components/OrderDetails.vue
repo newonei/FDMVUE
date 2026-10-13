@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
   ProcurementOrderView,
   ProcurementSetting,
@@ -18,7 +17,6 @@ import {
   Input,
   Select,
   Space,
-  Table,
   Tag,
   Textarea,
 } from 'ant-design-vue';
@@ -28,15 +26,13 @@ import {
   getSupplierContacts,
 } from '#/api/fdmplatform/procurement';
 
-import { errorText, rows } from '../../../data';
-import { procurementLineAmount } from '../../../finance/procurement/model';
+import { errorText } from '../../../data';
 import {
   clauseGroupTitle,
   compatibleClauses,
   detailsChecklist,
   onlyChoice,
   preferredContact,
-  snapshotShape,
 } from '../model';
 import SupplierContacts from './SupplierContacts.vue';
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
@@ -68,15 +64,6 @@ const form = reactive({
 });
 const canEdit = computed(() =>
   props.view.allowedActions.includes('SAVE_DETAILS'),
-);
-const productLines = computed(() =>
-  rows(props.view.order.lines).map((line) => ({
-    ...line,
-    unit:
-      (line.specificationSnapshot as Record<string, unknown>)?.unit ??
-      line.unit,
-    amount: procurementLineAmount(line, String(props.view.order.currency)),
-  })),
 );
 const contact = computed(
   () =>
@@ -421,51 +408,7 @@ function confirm() {
         </span>
       </Space>
     </Card>
-    <Table
-      :data-source="productLines"
-      row-key="id"
-      :pagination="false"
-      :scroll="{ x: 1000 }"
-      :columns="[
-        { key: 'product', title: '产品 / 规格', width: 270 },
-        { key: 'shape', title: '形状' },
-        { key: 'quantity', dataIndex: 'quantity', title: '订购数量' },
-        { key: 'unit', dataIndex: 'unit', title: '单位' },
-        { key: 'unitPrice', dataIndex: 'unitPrice', title: '单价' },
-        { key: 'amount', dataIndex: 'amount', title: '有效金额' },
-        {
-          key: 'arrivedQuantity',
-          dataIndex: 'arrivedQuantity',
-          title: '已到货',
-        },
-        {
-          key: 'returnedQuantity',
-          dataIndex: 'returnedQuantity',
-          title: '已退货',
-        },
-      ]"
-    >
-      <template #bodyCell="{ column, record }">
-        <div v-if="column.key === 'product'">
-          {{
-            record.skuName ?? record.specificationSnapshot?.skuName ?? '产品'
-          }}
-          <div class="muted">
-            {{
-              record.specificationSnapshot?.specification ??
-              record.specification ??
-              '—'
-            }}
-          </div>
-        </div>
-        <span v-else-if="column.key === 'shape'">{{
-          snapshotShape(record as BusinessRecord)
-        }}</span>
-      </template>
-</Table><Alert
-      type="info"
-      message="产品、数量和单价以下单时为准，不直接覆盖已下单的资料；剩余不再采购的数量可在「更多操作」里结束余额。"
-    /><Drawer
+    <Drawer
       :open="contactsOpen"
       title="工厂联系人"
       width="900px"
