@@ -30,6 +30,7 @@ export const actionNames: Record<string, string> = {
   CONFIRM: '确认',
   REVERSE: '退款 / 冲销',
   REDUCE_REMAINING: '调整未付款余额',
+  SET_NO_INVOICE: '设置无需发票',
 };
 export interface PeriodDraft {
   id?: string;
@@ -394,4 +395,85 @@ export function allocationGroupsAfterSourceChange(
   nextId: string,
 ) {
   return previousId === nextId ? groups : [newGroup()];
+}
+
+/** 付款分类（金智「付款分类」）；可手填其他。 */
+export const paymentMethods = [
+  '公对公转账',
+  '现金',
+  '个人账户转账',
+  '承兑汇票',
+];
+
+/** 付款记录下属付款发票的收票状态。 */
+export const invoiceStates: Record<string, { color: string; label: string }> = {
+  INVOICED: { color: 'success', label: '已收票' },
+  PARTIAL: { color: 'processing', label: '部分收票' },
+  PENDING: { color: 'warning', label: '未收票' },
+  NOT_REQUIRED: { color: 'default', label: '无需发票' },
+};
+
+export interface PaymentForm {
+  amount?: string;
+  paidAt?: string;
+  payerEntityId?: string;
+  payerAccount?: string;
+  paymentMethod?: string;
+  payeeName?: string;
+  payeeAccount?: string;
+  remark?: string;
+  noInvoice?: boolean;
+}
+
+/** 登记付款记录前的必填检查；available 为本单最多还能登记的金额（未读到时不限制）。 */
+export function paymentFormProblem(
+  form: PaymentForm,
+  today: string,
+  available?: unknown,
+) {
+  const amount = new BigNumber(form.amount ?? '');
+  if (!amount.isFinite() || !amount.gt(0)) return '请填写付款金额';
+  const limit = new BigNumber(String(available ?? ''));
+  if (limit.isFinite() && amount.gt(limit))
+    return `付款金额超过未付金额，最多还可登记 ${limit.toFormat(2)}`;
+  if (!form.paidAt) return '请选择付款日期';
+  if (form.paidAt > today) return '付款日期不能晚于今天';
+  if (!form.payerEntityId) return '请选择所属公司（付款公司）';
+  if (!form.payerAccount?.trim()) return '请填写付款方式（付款账户）';
+  if (!form.payeeName?.trim()) return '请填写收款方';
+  return '';
+}
+
+/** 付款主体的默认付款账户：开户行 + 账号末四位，和金智「付款方式」一样好认。 */
+export function payerAccountLabel(entity?: {
+  bankAccount?: string;
+  bankName?: string;
+}) {
+  if (!entity?.bankName && !entity?.bankAccount) return '';
+  const account = (entity.bankAccount ?? '').replaceAll(/\s/g, '');
+  const tail = account.length > 4 ? account.slice(-4) : account;
+  return tail
+    ? `${entity.bankName ?? ''}（${tail}）`.trim()
+    : (entity.bankName ?? '');
+}
+
+/** 新付款带入上一笔的付款公司、账户和收款方，分期付款不用每次重填。 */
+export function paymentDefaults(
+  previous: Array<Record<string, unknown>>,
+  supplierName?: string,
+): PaymentForm {
+  const last = previous
+    .filter((row) => row.sourceType === 'PURCHASE_ORDER')
+    .toSorted((a, b) =>
+      String(b.paidAt ?? '').localeCompare(String(a.paidAt ?? '')),
+    )[0];
+  const text = (value: unknown) =>
+    typeof value === 'string' && value ? value : undefined;
+  return {
+    payerEntityId: text(last?.payerEntityId),
+    payerAccount: text(last?.payerAccount),
+    paymentMethod: text(last?.paymentMethod) ?? '公对公转账',
+    payeeName: text(last?.payeeName) ?? supplierName,
+    payeeAccount: text(last?.payeeAccount),
+  };
 }

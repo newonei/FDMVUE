@@ -4,10 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   batchOrders,
+  batchPaymentInputs,
+  batchPaymentNo,
+  batchPaymentProblem,
   batchProblem,
   batchSelectable,
-  requestFormProblem,
-  requestPayloads,
 } from './batch-model';
 
 function row(extra: Partial<ProcurementOrderRow> = {}): ProcurementOrderRow {
@@ -60,35 +61,53 @@ describe('采购单批量操作', () => {
         },
       }),
     ]);
-    expect(batchProblem([...a, ...b], 'request')).toBe(
+    expect(batchProblem([...a, ...b], 'payment')).toBe(
       '一次只能办理同一家供应商的采购单',
     );
     expect(batchProblem([...a, ...b], 'end')).toBe('');
     expect(
-      batchProblem(batchOrders([row({ unpaidAmount: '0' })]), 'request'),
+      batchProblem(batchOrders([row({ unpaidAmount: '0' })]), 'payment'),
     ).toBe('选中的采购单都已付清');
     expect(batchProblem([], 'stockIn')).toBe('请先勾选采购单');
   });
 
-  it('builds one approved request per order with the shared payee and evidence', () => {
+  it('builds one payment record per order sharing the batch number', () => {
     const orders = batchOrders([row(), row({ id: 'o2', orderCode: 'CG002' })]);
     const form = {
+      paidAt: '2026-10-10',
       payerEntityId: 'pay',
+      payerAccount: '网商银行（8831）',
       payeeName: '工厂甲',
       payeeAccount: '6222',
-      remark: '货款',
-      evidence: 'DZ-1',
     };
     expect(
-      requestFormProblem({ ...form, evidence: '' }, { o1: '50' }),
-    ).toContain('凭据');
-    const payloads = requestPayloads(orders, { o1: '50', o2: '' }, form);
-    expect(payloads).toHaveLength(1);
-    expect(payloads[0]!.payload).toMatchObject({
+      batchPaymentProblem(
+        { ...form, payerAccount: '' },
+        { o1: '50' },
+        {},
+        '2026-10-12',
+      ),
+    ).toContain('付款账户');
+    expect(
+      batchPaymentProblem(form, { o1: '80' }, { o1: '50' }, '2026-10-12'),
+    ).toContain('超过未付金额');
+    expect(
+      batchPaymentProblem(form, { o1: '50' }, { o1: '50' }, '2026-10-12'),
+    ).toBe('');
+    const inputs = batchPaymentInputs(
+      orders,
+      { o1: '50', o2: '' },
+      form,
+      'JZFK-1',
+    );
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]!.input).toMatchObject({
       orderId: 'o1',
       amount: '50',
-      name: 'CG001 货款',
-      evidenceRefs: ['external:DZ-1'],
+      name: 'CG001 付款',
+      batchNo: 'JZFK-1',
+      payerAccount: '网商银行（8831）',
     });
+    expect(batchPaymentNo('2026-10-12')).toMatch(/^JZFK-20261012-\w{4}$/);
   });
 });

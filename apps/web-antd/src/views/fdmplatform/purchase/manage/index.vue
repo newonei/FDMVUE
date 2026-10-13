@@ -9,8 +9,9 @@ import type {
   ProcurementOrderRow,
   ProcurementOrdersOverview,
   ProcurementOrderView,
+  PurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
-import type { StockIn } from '#/api/fdmplatform/warehouse';
+import type { PurchaseReturn, StockIn } from '#/api/fdmplatform/warehouse';
 
 import { computed, h, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -22,13 +23,18 @@ import {
   Alert,
   Button,
   Drawer,
+  Dropdown,
   Empty,
   Input,
+  Menu,
   message,
   Modal,
   Progress,
   Space,
   Table,
+  TableSummary,
+  TableSummaryCell,
+  TableSummaryRow,
   TabPane,
   Tabs,
   Tag,
@@ -51,6 +57,7 @@ import {
   uploadProcurementSigned,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
+import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
@@ -81,19 +88,24 @@ import RelatedLink from '../../documents/RelatedLink.vue';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
 import OrderFinance from '../../finance/procurement/components/OrderFinance.vue';
+import PaymentRecordDialog from '../../finance/procurement/components/PaymentRecordDialog.vue';
 import { hasPayableBalance } from '../../finance/procurement/model';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
 import StockInDialog from '../warehouse/StockInDialog.vue';
 import { batchOrders, batchProblem, batchSelectable } from './batch-model';
-import BatchRequestDialog from './components/BatchRequestDialog.vue';
+import BatchPaymentDialog from './components/BatchPaymentDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import OrderExportMenu from './components/OrderExportMenu.vue';
 import OrderInvoices from './components/OrderInvoices.vue';
 import OrderStockDocs from './components/OrderStockDocs.vue';
+import OrderSubDocMenu from './components/OrderSubDocMenu.vue';
+import OrderSummaryCards from './components/OrderSummaryCards.vue';
+import OrderTimeline from './components/OrderTimeline.vue';
 import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
+import StandaloneOrderFiles from './components/StandaloneOrderFiles.vue';
 import {
   canRecordOrderArrival,
   canReturnOrderArrival,
@@ -103,14 +115,24 @@ import {
   orderMoney,
   orderPaymentProgress,
   orderRowDue,
+  orderRowFlags,
   purchaseRowLabels,
 } from './model';
 
 import '../../components/compact-tables.css';
 import '../components/procurement.css';
 
+/**
+ * 嵌入模式（金智式「下属单据」弹窗）：合同订单等页面直接弹出同一个采购单执行抽屉，
+ * 只渲染抽屉和它的子弹窗，不渲染列表；关闭和变化通知调用方。
+ */
+const props = defineProps<{
+  embeddedOrder?: { contractId: string; orderId: string };
+}>();
+const emit = defineEmits<{ close: []; updated: [] }>();
 const route = useRoute();
 const router = useRouter();
+const embedded = computed(() => !!props.embeddedOrder);
 const active = useRouteOwner();
 const records = ref<ProcurementOrderRow[]>([]);
 /**
@@ -125,17 +147,17 @@ const selectedOrders = computed(() =>
     ),
   ),
 );
-const batchRequestOpen = ref(false);
+const batchPaymentOpen = ref(false);
 const batchStockInTargets =
   ref<{ code: string; contractId: string; orderId: string }[]>();
-function runBatch(mode: 'end' | 'request' | 'stockIn') {
+function runBatch(mode: 'end' | 'payment' | 'stockIn') {
   const problem = batchProblem(selectedOrders.value, mode);
   if (problem) {
     message.warning(problem);
     return;
   }
   const active = selectedOrders.value.filter((order) => !order.ended);
-  if (mode === 'request') batchRequestOpen.value = true;
+  if (mode === 'payment') batchPaymentOpen.value = true;
   else if (mode === 'stockIn')
     batchStockInTargets.value = active.map((order) => ({
       code: order.code,
@@ -198,7 +220,7 @@ function endSelected(orders: ReturnType<typeof batchOrders>) {
   });
 }
 function batchDone() {
-  batchRequestOpen.value = false;
+  batchPaymentOpen.value = false;
   batchStockInTargets.value = undefined;
   selectedKeys.value = [];
   void loadList();
@@ -235,7 +257,9 @@ const plansOpen = ref(false);
 const nestedFinanceBusy = ref(false);
 const contactEditorBusy = ref(false);
 const arrivalId = ref<string>();
-const financeType = ref<'REIMBURSEMENT' | 'REQUEST'>();
+const financeType = ref<'REIMBURSEMENT'>();
+/** 登记付款记录（每付一笔一张，分期就是多张） */
+const paymentOpen = ref(false);
 const financeRevision = ref(0);
 const financeSummary = ref<Record<string, unknown>>({});
 const financeLoading = ref(false);
@@ -248,6 +272,7 @@ const childOpen = computed(
     plansOpen.value ||
     reasonOpen.value ||
     !!financeType.value ||
+    paymentOpen.value ||
     !!arrivalId.value ||
     stockInOpen.value ||
     editorOpen.value ||
@@ -313,7 +338,7 @@ const pendingTotal = ref(0);
 let pendingSequence = 0;
 /** Only the queue size; it decides whether the scope switch is shown at all. */
 async function loadPendingTotal() {
-  if (!active.value) return;
+  if (embedded.value || !active.value) return;
   const run = ++pendingSequence;
   try {
     const result = await getProcurementOrders({
@@ -373,16 +398,169 @@ function standaloneOrder(id: string | undefined) {
 const editorOpen = ref(false);
 /** 收票合计（抽屉摘要卡）；收票页签改动后重新读 */
 const invoicedTotal = ref<string>();
+/** 下属单据（时间线、页签数量用）：付款发票、入库单、退货单 */
+const orderInvoiceList = ref<PurchaseInvoice[]>([]);
+const orderStockIns = ref<StockIn[]>([]);
+const orderReturns = ref<PurchaseReturn[]>([]);
 async function loadInvoiced() {
   const current = view.value;
   if (!current) return;
-  try {
-    const result = await getOrderInvoices(current.contractId, current.id);
-    if (view.value?.id === current.id)
-      invoicedTotal.value = String(result.invoicedAmount);
-  } catch {
+  const [invoices, stockIns, returns] = await Promise.allSettled([
+    getOrderInvoices(current.contractId, current.id),
+    getStockIns({ pageNo: 1, pageSize: 100, orderId: current.id }),
+    getPurchaseReturns({ pageNo: 1, pageSize: 100, orderId: current.id }),
+  ]);
+  if (view.value?.id !== current.id) return;
+  if (invoices.status === 'fulfilled') {
+    invoicedTotal.value = String(invoices.value.invoicedAmount);
+    orderInvoiceList.value = invoices.value.invoices;
+  } else {
     invoicedTotal.value = undefined;
+    orderInvoiceList.value = [];
   }
+  orderStockIns.value =
+    stockIns.status === 'fulfilled' ? stockIns.value.list : [];
+  orderReturns.value = returns.status === 'fulfilled' ? returns.value.list : [];
+}
+function rowFlags(row: ProcurementOrderRow) {
+  return orderRowFlags(row, receivedNames);
+}
+/** 本页合计（金智列表底部）：采购金额、未付，按币种分开 */
+const pageTotals = computed(() => {
+  const sum = (field: 'orderAmount' | 'unpaidAmount') => {
+    const totals = new Map<string, number>();
+    for (const row of records.value as ProcurementOrderRow[]) {
+      const value = Number(
+        field === 'orderAmount'
+          ? (row.orderAmount ?? row.record.amount)
+          : row.unpaidAmount,
+      );
+      if (!Number.isFinite(value)) continue;
+      const currency = String(row.record.currency ?? 'CNY');
+      totals.set(currency, (totals.get(currency) ?? 0) + value);
+    }
+    return (
+      [...totals.entries()]
+        .map(([currency, value]) => orderMoney(value, currency))
+        .join(' / ') || '—'
+    );
+  };
+  return { amount: sum('orderAmount'), unpaid: sum('unpaidAmount') };
+});
+/** 「下属单据新建」：按部门分组，从采购单直接新建并自动关联 */
+const subDocItems = computed(() => {
+  const order = view.value?.order;
+  const payable = hasPayableBalance(
+    financeSummary.value.availablePaymentAmount,
+  );
+  const returnable =
+    !!order &&
+    !!contract.value?.allowedActions.includes('RETURN_ARRIVAL') &&
+    canReturnOrderArrival(order);
+  return [
+    {
+      key: 'payment',
+      label: '付款记录',
+      group: '采购',
+      disabled: !payable,
+      title: payable ? undefined : '已付清，或付款摘要未读取',
+    },
+    { key: 'invoice', label: '付款发票', group: '采购' },
+    ...(contract.value?.allowedActions.includes('RETURN_ARRIVAL')
+      ? [
+          {
+            key: 'return',
+            label: '采购退货单',
+            group: '采购',
+            disabled: !returnable,
+            title: returnable ? undefined : '当前订单没有可退到货数量',
+          },
+        ]
+      : []),
+    {
+      key: 'stockIn',
+      label: '入库单',
+      group: '库存',
+      disabled: !canReceive.value,
+      title: canReceive.value ? undefined : '没有未入库的数量',
+    },
+    { key: 'reimbursement', label: '费用报销', group: '办公' },
+  ];
+});
+function pickSubDoc(key: string) {
+  if (childOpen.value) return;
+  if (key === 'payment') openPayment();
+  else if (key === 'invoice') tab.value = 'invoices';
+  else if (key === 'return') createRelated('purchaseReturns', 'RETURN_ARRIVAL');
+  else if (key === 'stockIn') stockInOpen.value = true;
+  else if (key === 'reimbursement') openFinance('REIMBURSEMENT');
+}
+/** 页签上的下属单据数量（金智：付款记录 (1)、入库单 (1)…） */
+const subDocCounts = computed(() => {
+  const payments = Array.isArray(financeSummary.value.payments)
+    ? financeSummary.value.payments.length
+    : 0;
+  const invoices = orderInvoiceList.value.length;
+  const stock = orderStockIns.value.length + orderReturns.value.length;
+  return { payments, invoices, stock, all: payments + invoices + stock };
+});
+function counted(label: string, count: number) {
+  return count > 0 ? `${label} (${count})` : label;
+}
+const arrivalPercent = computed(() => {
+  const groups = arrivalProgress.value.filter(
+    (group) => group.percent !== undefined,
+  );
+  if (groups.length === 0) return undefined;
+  return Math.round(
+    groups.reduce((sum, group) => sum + Number(group.percent), 0) /
+      groups.length,
+  );
+});
+/** 采购终止（金智同款）：未到货余额全部取消，已到货、已付款的保留 */
+function endCurrentOrder() {
+  const current = view.value;
+  if (!current || childOpen.value) return;
+  let reason = '';
+  Modal.confirm({
+    title: `结束采购单 ${purchaseRowLabels({ ...current, record: current.order }).order}？`,
+    content: () =>
+      h('div', [
+        h(
+          'p',
+          '未到货的余额全部取消，不再入库；已到货、已付款的记录保留。有未付请款的单会被拦下。',
+        ),
+        h(Input, {
+          placeholder: '结束原因（必填）',
+          'onUpdate:value': (value: string) => {
+            reason = value;
+          },
+        }),
+      ]),
+    okText: '结束',
+    okButtonProps: { danger: true },
+    onOk: async () => {
+      if (!reason.trim()) {
+        message.error('请填写结束原因');
+        throw new Error('missing reason');
+      }
+      try {
+        const lines = await endProcurementOrder(
+          current.contractId,
+          current.id,
+          {
+            reason: reason.trim(),
+            idempotencyKey: key('END_ORDER'),
+          },
+        );
+        message.success(lines > 0 ? '采购单已结束' : '没有需要结束的余额');
+        await Promise.all([refreshFacts(), loadList()]);
+      } catch (error) {
+        message.error(errorText(error));
+        throw error;
+      }
+    },
+  });
 }
 async function invoicesChanged() {
   await refreshFacts();
@@ -412,9 +590,6 @@ function stockInSaved(value: StockIn) {
   void refreshFacts();
   void loadList();
 }
-const paymentProgress = computed(() =>
-  orderPaymentProgress(financeSummary.value),
-);
 /**
  * 采购单下属单据各自独立（模板、入库、付款没有先后），这里只汇总各自进度。
  * 采购单模板：下单资料确认后可生成 Word，盖章件为选填附件。
@@ -443,10 +618,12 @@ const financeContext = computed(() => ({
   contractId: view.value?.contractId,
   orderId: view.value?.id,
   currency: financeSummary.value.currency ?? view.value?.order.currency,
-  ...(financeType.value === 'REQUEST'
-    ? { amount: financeSummary.value.availableRequestAmount }
-    : {}),
 }));
+const previousPayments = computed(() =>
+  Array.isArray(financeSummary.value.payments)
+    ? (financeSummary.value.payments as Array<Record<string, unknown>>)
+    : [],
+);
 
 async function loadFinanceSummary() {
   const current = view.value;
@@ -472,21 +649,32 @@ async function loadFinanceSummary() {
     if (run === financeSequence) financeLoading.value = false;
   }
 }
-function openFinance(type: 'REIMBURSEMENT' | 'REQUEST') {
+function openFinance(type: 'REIMBURSEMENT') {
   if (childOpen.value || !view.value) return;
+  financeType.value = type;
+}
+function openPayment() {
   if (
-    type === 'REQUEST' &&
-    !hasPayableBalance(financeSummary.value.availableRequestAmount)
+    childOpen.value ||
+    !view.value ||
+    !hasPayableBalance(financeSummary.value.availablePaymentAmount)
   )
     return;
-  financeType.value = type;
+  paymentOpen.value = true;
+}
+async function paymentSaved(record: { code: string }) {
+  paymentOpen.value = false;
+  message.success(`已登记付款 ${record.code}`);
+  financeRevision.value += 1;
+  await financeChanged();
 }
 async function financeChanged() {
   await Promise.all([refreshFacts(), loadList()]);
 }
 async function loadOrderAttachments() {
   const current = view.value;
-  if (!current || !active.value) return;
+  // 独立采购单的附件由 StandaloneOrderFiles 读自己的单据附件
+  if (!current || !active.value || standaloneOrder(current.contractId)) return;
   attachmentsLoading.value = true;
   attachmentsError.value = '';
   try {
@@ -554,6 +742,7 @@ const overview = ref<ProcurementOrdersOverview>();
 let overviewSequence = 0;
 /** Native orders only; refreshed with the list so the cards follow 只看我负责的. */
 async function loadOverview() {
+  if (embedded.value) return;
   const run = ++overviewSequence;
   try {
     const result = await getProcurementOrdersOverview(mine.value);
@@ -596,6 +785,10 @@ const receivedNames: Record<string, string> = {
   ALL: '已入齐',
 };
 async function loadList() {
+  if (embedded.value) {
+    emit('updated');
+    return;
+  }
   if (!active.value) return;
   selectedKeys.value = selectedKeys.value.filter((key) =>
     records.value.some((row) => String(row.standaloneId ?? row.id) === key),
@@ -644,6 +837,7 @@ async function loadDetail() {
   arrivalId.value = undefined;
   stockInOpen.value = false;
   financeType.value = undefined;
+  paymentOpen.value = false;
   financeSummary.value = {};
   financeSequence++;
   if (!active.value) return;
@@ -743,6 +937,10 @@ function selectAdjacent(offset: number) {
 }
 async function back() {
   if (childOpen.value) return;
+  if (embedded.value) {
+    emit('close');
+    return;
+  }
   const wasLocal = !!selection.value || !!localStandaloneId.value;
   selection.value = undefined;
   localStandaloneId.value = undefined;
@@ -869,6 +1067,7 @@ watch(
     actionOpen.value = false;
     reasonOpen.value = false;
     financeType.value = undefined;
+    paymentOpen.value = false;
     arrivalId.value = undefined;
     stockInOpen.value = false;
     if (detailId.value) void loadDetail();
@@ -901,17 +1100,33 @@ watch(
     route.query.contractId,
   ],
   () => {
+    if (embedded.value) return;
     selection.value = undefined;
     localStandaloneId.value = undefined;
   },
+);
+watch(
+  () => props.embeddedOrder,
+  (order) => {
+    if (!order) return;
+    localTab.value = 'details';
+    selection.value = {
+      contractId: order.contractId || 'standalone',
+      documentId: order.orderId,
+    };
+  },
+  { immediate: true },
 );
 watch(financeType, (value, previous) => {
   if (!value && previous) financeRevision.value++;
 });
 </script>
 <template>
-  <Page auto-content-height>
-    <div class="procurement-workspace order-workspace">
+  <component
+    :is="embedded ? 'div' : Page"
+    v-bind="embedded ? {} : { autoContentHeight: true }"
+  >
+    <div v-if="!embedded" class="procurement-workspace order-workspace">
       <ProcurementPageHeader
         title="采购订单"
         description="跟进交付与付款，在当前订单直接办理关联业务。"
@@ -1084,18 +1299,6 @@ watch(financeType, (value, previous) => {
           message="正在查看关联合同的采购单"
           banner
         />
-        <div v-if="selectedKeys.length > 0" class="order-batch-bar">
-          <span>已选 {{ selectedKeys.length }} 张</span>
-          <Button size="small" type="primary" @click="runBatch('request')">
-            集中请款
-          </Button>
-          <Button size="small" @click="runBatch('stockIn')">转入库</Button>
-          <Button size="small" danger @click="runBatch('end')">结束</Button>
-          <Button size="small" type="link" @click="selectedKeys = []">
-            清除选择
-          </Button>
-          <span class="procurement-muted">集中请款和转入库要求同一家供应商</span>
-        </div>
         <Table
           :row-selection="{
             selectedRowKeys: selectedKeys,
@@ -1108,7 +1311,7 @@ watch(financeType, (value, previous) => {
           class="fdm-business-table order-table"
           size="middle"
           table-layout="fixed"
-          :scroll="{ x: 1190 }"
+          :scroll="{ x: 1300 }"
           :data-source="records"
           :loading="loading"
           :row-key="(row: ProcurementOrderRow) => row.standaloneId ?? row.id"
@@ -1124,6 +1327,7 @@ watch(financeType, (value, previous) => {
             showTotal: (value: number) => `共 ${value} 单`,
           }"
           :columns="[
+            { title: '操作/状态', key: 'flags', width: 110 },
             { title: '采购单 / 供应商', key: 'supplier', width: 250 },
             { title: '关联合同 / 客户', key: 'contract', width: 200 },
             { title: '采购日期', key: 'date', width: 110 },
@@ -1157,8 +1361,38 @@ watch(financeType, (value, previous) => {
               </Button>
             </Empty>
           </template>
+          <template #summary>
+            <TableSummary v-if="records.length > 0">
+              <TableSummaryRow class="order-summary-row">
+                <TableSummaryCell :index="0" />
+                <TableSummaryCell :index="1" />
+                <TableSummaryCell :index="2">本页合计</TableSummaryCell>
+                <TableSummaryCell :index="3" />
+                <TableSummaryCell :index="4" />
+                <TableSummaryCell :index="5" align="right">
+                  <span class="procurement-number">{{
+                    pageTotals.amount
+                  }}</span>
+                </TableSummaryCell>
+                <TableSummaryCell :index="6" />
+                <TableSummaryCell :index="7">
+                  <span class="procurement-muted">未付 {{ pageTotals.unpaid }}</span>
+                </TableSummaryCell>
+                <TableSummaryCell :index="8" />
+                <TableSummaryCell :index="9" />
+              </TableSummaryRow>
+            </TableSummary>
+          </template>
           <template #bodyCell="{ column, record }">
-            <div v-if="column.key === 'supplier'" class="order-cell">
+            <span v-if="column.key === 'flags'" class="order-flags">
+              <i
+                v-for="flag in rowFlags(record as ProcurementOrderRow)"
+                :key="flag.key"
+                :class="`flag-${flag.tone}`"
+                :title="flag.title"
+                >{{ flag.text }}</i>
+            </span>
+            <div v-else-if="column.key === 'supplier'" class="order-cell">
               <span class="order-code-line">
                 <button
                   type="button"
@@ -1281,12 +1515,39 @@ watch(financeType, (value, previous) => {
             </Button>
           </template>
         </Table>
+        <div class="order-batch-bar">
+          <Button
+            size="small"
+            :disabled="selectedKeys.length === 0"
+            @click="runBatch('payment')"
+          >
+            集中付款
+          </Button>
+          <Button
+            size="small"
+            :disabled="selectedKeys.length === 0"
+            @click="runBatch('stockIn')"
+          >
+            转入库
+          </Button>
+          <Button
+            size="small"
+            :disabled="selectedKeys.length === 0"
+            @click="runBatch('end')"
+          >
+            选中结束
+          </Button>
+          <span v-if="selectedKeys.length > 0">已选 {{ selectedKeys.length }} 张
+            <Button size="small" type="link" @click="selectedKeys = []">清除选择</Button>
+          </span>
+          <span v-else class="procurement-muted">勾选采购单后可集中付款、转入库或结束；集中付款和转入库要求同一家供应商</span>
+        </div>
       </div>
     </div>
 
     <Drawer
       :open="Boolean(detailId) && active"
-      width="min(1080px, 96vw)"
+      width="min(1320px, 96vw)"
       root-class-name="procurement-record-drawer"
       :closable="!childOpen"
       :mask-closable="!childOpen"
@@ -1294,13 +1555,19 @@ watch(financeType, (value, previous) => {
       :destroy-on-close="true"
       @close="back"
     >
-      <template #title><span>采购单执行</span></template>
-      <template #extra>
-        <Space>
+      <template #title>
+        <div v-if="view" class="order-title">
+          <Tag color="blue">采购单</Tag>
+          <span class="order-title-code">{{
+            purchaseRowLabels({ ...view, record: view.order }).order
+          }}</span>
+          <ProcurementStatusBadge :status="String(view.order.status ?? '')" />
           <Button
             v-if="selectedIndex >= 0"
             size="small"
+            type="text"
             :disabled="childOpen || selectedIndex <= 0"
+            title="上一单"
             @click="selectAdjacent(-1)"
           >
             上一单
@@ -1308,20 +1575,96 @@ watch(financeType, (value, previous) => {
           <Button
             v-if="selectedIndex >= 0"
             size="small"
+            type="text"
             :disabled="childOpen || selectedIndex >= records.length - 1"
+            title="下一单"
             @click="selectAdjacent(1)"
           >
             下一单
           </Button>
-          <Button
-            size="small"
+        </div>
+        <span v-else>采购单</span>
+      </template>
+      <template #extra>
+        <Space v-if="view && active">
+          <OrderSubDocMenu
+            :items="subDocItems"
             :disabled="childOpen"
-            :loading="detailLoading"
-            @click="loadDetail"
+            @pick="pickSubDoc"
+          />
+          <OrderExportMenu
+            :ready="view.allowedActions.includes('EXPORT_CONTRACT')"
+            :saving="saving"
+            :disabled="childOpen"
+            @export="(format) => command('EXPORT_CONTRACT', { format })"
+            @files="tab = 'attachments'"
+            @not-ready="
+              () => {
+                message.warning(
+                  view?.details.status === 'CONFIRMED'
+                    ? '文件存储未配置，暂时不能导出'
+                    : '请先在「详情」确认下单资料，再导出采购单',
+                );
+                if (view?.details.status !== 'CONFIRMED') tab = 'details';
+              }
+            "
+          />
+          <Button
+            v-if="
+              !['CANCELLED', 'RECEIVED', 'ENDED'].includes(
+                String(view.order.status ?? ''),
+              )
+            "
+            :disabled="childOpen"
+            @click="endCurrentOrder"
           >
-            刷新
+            采购终止
           </Button>
+          <Dropdown :trigger="['click']" :disabled="childOpen">
+            <Button>更多</Button>
+            <template #overlay>
+              <Menu
+                :items="[
+                  ...(view.allowedActions.includes('REVISE_DETAILS')
+                    ? [{ key: 'revise', label: '新建资料变更版本' }]
+                    : []),
+                  ...(contract
+                    ? [{ key: 'plans', label: '采购方案变更' }]
+                    : []),
+                  ...(contract?.allowedActions.includes('CANCEL_ORDER')
+                    ? [
+                        {
+                          key: 'cancel',
+                          label: '取消采购余额',
+                          danger: true,
+                          disabled: !!cancelReason,
+                          title: cancelReason,
+                        },
+                      ]
+                    : []),
+                  { key: 'refresh', label: '刷新' },
+                ]"
+                @click="
+                  (info: { key: string | number }) => {
+                    if (info.key === 'revise') action('REVISE_DETAILS');
+                    else if (info.key === 'plans') plansOpen = true;
+                    else if (info.key === 'cancel') actionOpen = true;
+                    else loadDetail();
+                  }
+                "
+              />
+            </template>
+          </Dropdown>
         </Space>
+        <Button
+          v-else
+          size="small"
+          :disabled="childOpen"
+          :loading="detailLoading"
+          @click="loadDetail"
+        >
+          刷新
+        </Button>
       </template>
       <div class="procurement-workspace order-execution">
         <Alert v-if="pageError" type="error" :message="pageError" show-icon />
@@ -1330,280 +1673,37 @@ watch(financeType, (value, previous) => {
           type="info"
           message="正在读取采购单…"
         />
-        <template v-if="view && active">
-          <header class="order-execution-header">
-            <div>
-              <div class="order-heading-line">
-                <h2>
-                  {{ purchaseRowLabels({ ...view, record: view.order }).order }}
-                </h2>
-                <ProcurementStatusBadge
-                  :status="String(view.order.status ?? '')"
-                />
-              </div>
-              <div class="procurement-muted">
-                {{ purchaseRowLabels({ ...view, record: view.order }).supplier
-                }}<span v-if="view.details.deliveryDate">
-                  · 交期 {{ view.details.deliveryDate }}</span>
-              </div>
-            </div>
-            <Space>
-              <OrderExportMenu
-                :ready="view.allowedActions.includes('EXPORT_CONTRACT')"
-                :saving="saving"
-                :disabled="childOpen"
-                @export="(format) => command('EXPORT_CONTRACT', { format })"
-                @files="tab = 'attachments'"
-                @not-ready="
-                  () => {
-                    message.warning(
-                      view?.details.status === 'CONFIRMED'
-                        ? '文件存储未配置，暂时不能导出'
-                        : '请先在「商品与到货」确认下单资料，再导出采购单',
-                    );
-                    if (view?.details.status !== 'CONFIRMED') tab = 'details';
-                  }
-                "
-              />
-              <Button
-                v-if="canReceive"
-                type="primary"
-                :disabled="childOpen"
-                @click="stockInOpen = true"
-              >
-                登记入库
-              </Button>
-            </Space>
-          </header>
-
-          <div class="order-summary">
-            <div class="order-summary-item">
-              <span class="procurement-muted">采购金额</span>
-              <strong class="procurement-number">{{
-                orderMoney(
-                  financeSummary.orderAmount,
-                  financeSummary.currency ?? view.order.currency,
-                )
-              }}</strong>
-              <span class="procurement-muted">所属公司：{{ view.companyName || '待补齐' }}</span>
-            </div>
-            <div class="order-summary-item">
-              <span class="procurement-muted">入库进度</span>
-              <div v-for="group in arrivalProgress" :key="group.key">
-                <span v-if="group.known" class="procurement-number">已到 {{ group.arrived }} · 未到 {{ group.remaining }}
-                  {{ group.unit }}</span>
-                <span v-else>数量待核实</span>
-                <Progress
-                  v-if="group.percent !== undefined"
-                  :percent="group.percent"
-                  :show-info="false"
-                  size="small"
-                />
-                <div
-                  v-if="group.returned && group.returned !== '0'"
-                  class="procurement-muted"
-                >
-                  已退 {{ group.returned }} {{ group.unit }}
-                </div>
-              </div>
-              <span v-if="!arrivalProgress.length">到货数据待核实</span>
-            </div>
-            <div class="order-summary-item">
-              <span class="procurement-muted">付款进度</span>
-              <strong class="procurement-number">已付
-                {{
-                  orderMoney(
-                    financeSummary.paidAmount,
-                    financeSummary.currency ?? view.order.currency,
-                  )
-                }}</strong>
-              <Progress
-                v-if="paymentProgress !== undefined"
-                :percent="paymentProgress"
-                :show-info="false"
-                size="small"
-              />
-              <span class="procurement-muted">未付
-                {{
-                  orderMoney(
-                    financeSummary.unpaidAmount,
-                    financeSummary.currency ?? view.order.currency,
-                  )
-                }}</span>
-            </div>
-            <button
-              type="button"
-              class="order-summary-item order-summary-link"
-              :disabled="childOpen"
-              @click="tab = 'invoices'"
-            >
-              <span class="procurement-muted">收票</span>
-              <strong class="procurement-number">{{
-                view.details.noInvoice
-                  ? '无需收票'
-                  : `已收 ${orderMoney(invoicedTotal ?? 0, view.order.currency)}`
-              }}</strong>
-              <span class="procurement-muted">{{
-                view.details.noInvoice
-                  ? '不影响完成'
-                  : `差额 ${orderMoney(
-                      Number(financeSummary.orderAmount ?? 0) -
-                        Number(invoicedTotal ?? 0),
-                      view.order.currency,
-                    )}`
-              }}</span>
-            </button>
-            <button
-              v-if="templateState"
-              type="button"
-              class="order-summary-item order-summary-link"
-              :disabled="childOpen"
-              @click="tab = 'attachments'"
-            >
-              <span class="procurement-muted">采购单导出</span>
-              <strong>{{ templateState.label }}</strong>
-              <span class="procurement-muted">{{ templateState.sub }}</span>
-            </button>
-          </div>
-          <Alert
-            v-if="financeError"
-            type="warning"
-            :message="`付款摘要暂未读取：${financeError}`"
-            show-icon
-          >
-            <template #action>
-              <Button
-                size="small"
-                :loading="financeLoading"
-                @click="loadFinanceSummary"
-              >
-                重试
-              </Button>
-            </template>
-          </Alert>
-          <div class="order-secondary-actions">
-            <Button
-              :disabled="
-                childOpen ||
-                financeLoading ||
-                !hasPayableBalance(financeSummary.availableRequestAmount)
-              "
-              :title="
-                financeLoading
-                  ? '正在读取请款余额'
-                  : !hasPayableBalance(financeSummary.availableRequestAmount)
-                    ? '暂无可请款余额，或付款摘要未读取'
-                    : undefined
-              "
-              @click="openFinance('REQUEST')"
-            >
-              申请付款
-            </Button>
-            <Button :disabled="childOpen" @click="openFinance('REIMBURSEMENT')">
-              费用报销
-            </Button>
-            <Button
-              v-if="contract?.allowedActions.includes('RETURN_ARRIVAL')"
-              :disabled="childOpen || !canReturnOrderArrival(view.order)"
-              :title="
-                !canReturnOrderArrival(view.order)
-                  ? '当前订单没有可退到货数量'
-                  : undefined
-              "
-              @click="createRelated('purchaseReturns', 'RETURN_ARRIVAL')"
-            >
-              采购退货
-            </Button>
-            <details class="order-more">
-              <summary>更多操作</summary>
-              <div class="order-more-content">
-                <Button
-                  v-if="view.allowedActions.includes('REVISE_DETAILS')"
-                  :disabled="childOpen"
-                  @click="action('REVISE_DETAILS')"
-                >
-                  新建资料变更版本
-                </Button>
-                <Button
-                  :disabled="childOpen || !contract"
-                  @click="plansOpen = true"
-                >
-                  采购方案变更
-                </Button>
-                <Button
-                  v-if="contract?.allowedActions.includes('CANCEL_ORDER')"
-                  danger
-                  :disabled="childOpen || !!cancelReason"
-                  :title="cancelReason"
-                  @click="actionOpen = true"
-                >
-                  取消采购余额
-                </Button>
-                <span v-if="cancelReason" class="procurement-muted">{{
-                  cancelReason
-                }}</span>
-              </div>
-            </details>
-          </div>
-          <div class="order-context">
-            <Space
-              v-for="link in mainLinks"
-              :key="JSON.stringify(link.target)"
-              size="small"
-            >
-              <span class="procurement-muted">{{ link.label }}</span><RelatedLink :target="link.target">{{ link.value }}</RelatedLink>
-            </Space>
-          </div>
-
-          <Tabs v-model:active-key="tab" class="order-tabs">
-            <TabPane key="details" tab="商品与到货">
-              <OrderDetails
-                :view="view"
-                :saving="saving"
-                @busy="contactEditorBusy = $event"
-                @save="(payload) => command('SAVE_DETAILS', payload)"
-                @confirm="(payload) => command('CONFIRM_DETAILS', payload)"
-                @action="action"
-              />
-              <section class="order-arrivals">
-                <h3>
-                  到货记录
-                  <span class="procurement-muted">{{ arrivalRows.length }} 笔</span>
-                </h3>
-                <Table
-                  :data-source="arrivalRows"
-                  size="small"
-                  row-key="id"
-                  :pagination="false"
-                  :scroll="{ x: 620 }"
-                  :columns="[
-                    { title: '到货批次', key: 'batch' },
-                    { title: '产品', key: 'product' },
-                    { title: '到货数量', dataIndex: 'quantity' },
-                    { title: '合格数量', dataIndex: 'acceptedQuantity' },
-                  ]"
-                >
-                  <template #emptyText>暂未登记到货</template>
-                  <template #bodyCell="{ column, record }">
-                    <Button
-                      v-if="column.key === 'batch'"
-                      type="link"
-                      :disabled="childOpen"
-                      @click="arrivalId = String(record.id)"
-                    >
-                      {{ record.batchNo || '查看到货单' }}
-                    </Button>
-                    <span v-else-if="column.key === 'product'">{{
-                      contract?.items.find(
-                        (item) => item.id === record.contractItemId,
-                      )?.productName || '产品未注明'
-                    }}</span>
-                  </template>
-                </Table>
-              </section>
-              <div v-if="productLinks.length" class="order-context">
+        <div v-if="view && active" class="order-layout">
+          <div class="order-main">
+            <section class="order-info">
+              <dl>
+                <dt>供应商</dt>
+                <dd>
+                  {{
+                    purchaseRowLabels({ ...view, record: view.order }).supplier
+                  }}
+                </dd>
+                <dt>采购单号</dt>
+                <dd>{{ String(view.order.code ?? '—') }}</dd>
+                <dt>采购金额</dt>
+                <dd class="procurement-number">
+                  {{
+                    orderMoney(
+                      financeSummary.orderAmount,
+                      financeSummary.currency ?? view.order.currency,
+                    )
+                  }}
+                </dd>
+                <dt>所属公司</dt>
+                <dd>{{ view.companyName || '待补齐' }}</dd>
+                <dt>交期</dt>
+                <dd>{{ view.details.deliveryDate || '未定' }}</dd>
+                <dt>收票</dt>
+                <dd>{{ view.details.noInvoice ? '无需收票' : '需要收票' }}</dd>
+              </dl>
+              <div class="order-context">
                 <Space
-                  v-for="link in productLinks"
+                  v-for="link in mainLinks"
                   :key="JSON.stringify(link.target)"
                   size="small"
                 >
@@ -1612,81 +1712,205 @@ watch(financeType, (value, previous) => {
                   </RelatedLink>
                 </Space>
               </div>
-            </TabPane>
-            <TabPane key="stock" tab="入库与退货">
-              <OrderStockDocs
-                :contract-id="view.contractId"
-                :order-id="view.id"
-                :can-receive="canReceive"
-                @changed="invoicesChanged"
-              />
-            </TabPane>
-            <TabPane key="payments" tab="付款与费用">
-              <OrderFinance
-                :key="financeRevision"
-                :contract-id="view.contractId"
-                :order-id="view.id"
-                mode="payments"
-                @busy="nestedFinanceBusy = $event"
-                @changed="financeChanged"
-              />
-            </TabPane>
-            <TabPane key="invoices" tab="收票">
-              <OrderInvoices
-                :view="view"
-                :order-amount="financeSummary.orderAmount"
-                @changed="invoicesChanged"
-              />
-            </TabPane>
-            <TabPane key="costs" tab="成本归属">
-              <OrderFinance
-                :key="financeRevision"
-                :contract-id="view.contractId"
-                :order-id="view.id"
-                mode="costs"
-                @busy="nestedFinanceBusy = $event"
-                @changed="financeChanged"
-              />
-            </TabPane>
-            <TabPane key="attachments" tab="附件">
-              <OrderContract
-                :view="view"
-                :saving="saving"
-                style="margin-bottom: 12px"
-                @signed="upload"
-              />
-              <AttachmentPanel
-                :contract-id="view.contractId"
-                :target="{ targetKind: 'purchaseOrders', targetId: view.id }"
-                :view="orderAttachments"
-                :categories="orderAttachments?.uploadCategories ?? []"
-                :loading="attachmentsLoading"
-                :error="attachmentsError"
-                @refresh="loadOrderAttachments"
-              />
-            </TabPane>
-            <TabPane key="history" tab="操作记录">
-              <MigrationSource
-                :migration="migration"
-                :native-source="{
-                  kind: 'CONTRACT',
-                  nativeId: view.contractId,
-                  recordId: view.id,
-                }"
-              />
-              <RecordTable
-                :data="historyRows"
-                :columns="[
-                  { key: 'action', title: '操作' },
-                  { key: 'actorId', title: '经办人' },
-                  { key: 'occurredAt', title: '时间' },
-                  { key: 'version', title: '资料版本' },
-                  { key: 'reason', title: '原因' },
-                ]"
-              />
-            </TabPane>
-          </Tabs>
-        </template>
+            </section>
+            <Alert
+              v-if="financeError"
+              type="warning"
+              :message="`付款摘要暂未读取：${financeError}`"
+              show-icon
+            >
+              <template #action>
+                <Button
+                  size="small"
+                  :loading="financeLoading"
+                  @click="loadFinanceSummary"
+                >
+                  重试
+                </Button>
+              </template>
+            </Alert>
+            <Tabs v-model:active-key="tab" class="order-tabs">
+              <TabPane
+                key="timeline"
+                :tab="counted('时间线', subDocCounts.all)"
+              >
+                <OrderTimeline
+                  :currency="
+                    String(financeSummary.currency ?? view.order.currency ?? '')
+                  "
+                  :payments="previousPayments"
+                  :invoices="orderInvoiceList"
+                  :stock-ins="orderStockIns"
+                  :returns="orderReturns"
+                  @open="(value) => (tab = value)"
+                />
+              </TabPane>
+              <TabPane key="details" tab="详情">
+                <OrderDetails
+                  :view="view"
+                  :saving="saving"
+                  @busy="contactEditorBusy = $event"
+                  @save="(payload) => command('SAVE_DETAILS', payload)"
+                  @confirm="(payload) => command('CONFIRM_DETAILS', payload)"
+                  @action="action"
+                />
+                <section class="order-arrivals">
+                  <h3>
+                    到货记录
+                    <span class="procurement-muted">{{ arrivalRows.length }} 笔</span>
+                  </h3>
+                  <Table
+                    :data-source="arrivalRows"
+                    size="small"
+                    row-key="id"
+                    :pagination="false"
+                    :scroll="{ x: 620 }"
+                    :columns="[
+                      { title: '到货批次', key: 'batch' },
+                      { title: '产品', key: 'product' },
+                      { title: '到货数量', dataIndex: 'quantity' },
+                      { title: '合格数量', dataIndex: 'acceptedQuantity' },
+                    ]"
+                  >
+                    <template #emptyText>暂未登记到货</template>
+                    <template #bodyCell="{ column, record }">
+                      <Button
+                        v-if="column.key === 'batch'"
+                        type="link"
+                        :disabled="childOpen"
+                        @click="arrivalId = String(record.id)"
+                      >
+                        {{ record.batchNo || '查看到货单' }}
+                      </Button>
+                      <span v-else-if="column.key === 'product'">{{
+                        contract?.items.find(
+                          (item) => item.id === record.contractItemId,
+                        )?.productName || '产品未注明'
+                      }}</span>
+                    </template>
+                  </Table>
+                </section>
+                <div v-if="productLinks.length" class="order-context">
+                  <Space
+                    v-for="link in productLinks"
+                    :key="JSON.stringify(link.target)"
+                    size="small"
+                  >
+                    <span class="procurement-muted">{{ link.label }}</span><RelatedLink :target="link.target">
+                      {{ link.value }}
+                    </RelatedLink>
+                  </Space>
+                </div>
+              </TabPane>
+              <TabPane key="stock" :tab="counted('入库单', subDocCounts.stock)">
+                <OrderStockDocs
+                  :contract-id="view.contractId"
+                  :order-id="view.id"
+                  :can-receive="canReceive"
+                  @changed="invoicesChanged"
+                />
+              </TabPane>
+              <TabPane
+                key="payments"
+                :tab="counted('付款记录', subDocCounts.payments)"
+              >
+                <OrderFinance
+                  :key="financeRevision"
+                  :contract-id="view.contractId"
+                  :order-id="view.id"
+                  :order-code="String(view.order.code ?? '')"
+                  :supplier-name="String(view.order.supplierName ?? '')"
+                  :invoiced="invoicedTotal"
+                  mode="payments"
+                  @busy="nestedFinanceBusy = $event"
+                  @changed="financeChanged"
+                />
+              </TabPane>
+              <TabPane
+                key="invoices"
+                :tab="counted('付款发票', subDocCounts.invoices)"
+              >
+                <OrderInvoices
+                  :view="view"
+                  :payments="previousPayments"
+                  :order-amount="financeSummary.orderAmount"
+                  @changed="invoicesChanged"
+                />
+              </TabPane>
+              <TabPane key="costs" tab="成本归属">
+                <OrderFinance
+                  :key="financeRevision"
+                  :contract-id="view.contractId"
+                  :order-id="view.id"
+                  mode="costs"
+                  @busy="nestedFinanceBusy = $event"
+                  @changed="financeChanged"
+                />
+              </TabPane>
+              <TabPane key="attachments" tab="附件">
+                <OrderContract
+                  :view="view"
+                  :saving="saving"
+                  style="margin-bottom: 12px"
+                  @signed="upload"
+                />
+                <StandaloneOrderFiles
+                  v-if="standaloneOrder(view.contractId)"
+                  :order-id="view.id"
+                />
+                <AttachmentPanel
+                  v-else
+                  :contract-id="view.contractId"
+                  :target="{ targetKind: 'purchaseOrders', targetId: view.id }"
+                  :view="orderAttachments"
+                  :categories="orderAttachments?.uploadCategories ?? []"
+                  :loading="attachmentsLoading"
+                  :error="attachmentsError"
+                  @refresh="loadOrderAttachments"
+                />
+              </TabPane>
+              <TabPane key="history" tab="操作记录">
+                <MigrationSource
+                  :migration="migration"
+                  :native-source="{
+                    kind: 'CONTRACT',
+                    nativeId: view.contractId,
+                    recordId: view.id,
+                  }"
+                />
+                <RecordTable
+                  :data="historyRows"
+                  :columns="[
+                    { key: 'action', title: '操作' },
+                    { key: 'actorId', title: '经办人' },
+                    { key: 'occurredAt', title: '时间' },
+                    { key: 'version', title: '资料版本' },
+                    { key: 'reason', title: '原因' },
+                  ]"
+                />
+              </TabPane>
+            </Tabs>
+          </div>
+          <aside class="order-side">
+            <OrderSummaryCards
+              :currency="
+                String(financeSummary.currency ?? view.order.currency ?? '')
+              "
+              :order-amount="financeSummary.orderAmount"
+              :paid="financeSummary.paidAmount"
+              :unpaid="financeSummary.unpaidAmount"
+              :invoiced="invoicedTotal"
+              :no-invoice="!!view.details.noInvoice"
+              :arrival-percent="arrivalPercent"
+              @open="(value) => (tab = value)"
+            />
+            <section v-if="templateState" class="order-side-card">
+              <span class="procurement-muted">采购单导出</span>
+              <strong>{{ templateState.label }}</strong>
+              <span class="procurement-muted">{{ templateState.sub }}</span>
+            </section>
+          </aside>
+        </div>
       </div>
     </Drawer>
     <PurchaseOrderEditor
@@ -1694,11 +1918,11 @@ watch(financeType, (value, previous) => {
       @close="editorOpen = false"
       @saved="editorSaved"
     />
-    <BatchRequestDialog
-      :open="batchRequestOpen && active"
+    <BatchPaymentDialog
+      :open="batchPaymentOpen && active"
       :orders="selectedOrders"
       @close="batchDone"
-      @done="(count) => message.success(`已生成 ${count} 张请款单`)"
+      @done="(count) => message.success(`已登记 ${count} 张付款记录`)"
     />
     <StockInDialog
       :open="!!batchStockInTargets && active"
@@ -1759,10 +1983,29 @@ watch(financeType, (value, previous) => {
     />
     <FinanceDocument
       :open="!!financeType && active"
-      :type="financeType ?? 'REQUEST'"
+      :type="financeType ?? 'REIMBURSEMENT'"
       :context="financeContext"
       @close="financeType = undefined"
       @updated="financeChanged"
+    />
+    <PaymentRecordDialog
+      v-if="view"
+      :open="paymentOpen && active"
+      :contract-id="view.contractId"
+      :order-id="view.id"
+      :order-code="String(view.order.code ?? '')"
+      :supplier-name="String(view.order.supplierName ?? '')"
+      :currency="String(financeSummary.currency ?? view.order.currency ?? '')"
+      :available="financeSummary.availablePaymentAmount"
+      :previous="previousPayments"
+      :reference="{
+        orderAmount: financeSummary.orderAmount,
+        paid: financeSummary.paidAmount,
+        unpaid: financeSummary.unpaidAmount,
+        invoiced: invoicedTotal,
+      }"
+      @close="paymentOpen = false"
+      @saved="paymentSaved"
     />
     <RecordDetail
       :open="!!arrivalId && active"
@@ -1771,7 +2014,7 @@ watch(financeType, (value, previous) => {
       @close="arrivalId = undefined"
       @updated="financeChanged"
     />
-  </Page>
+  </component>
   <BusinessDocumentDetail
     :id="standaloneId"
     :open="Boolean(standaloneId) && active"
@@ -1782,6 +2025,129 @@ watch(financeType, (value, previous) => {
 </template>
 
 <style scoped>
+.order-flags {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.order-flags i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  font-style: normal;
+  border-radius: 4px;
+}
+
+.order-flags .flag-done {
+  color: #fff;
+  background: #52c41a;
+}
+
+.order-flags .flag-part {
+  color: #fff;
+  background: #fa8c16;
+}
+
+.order-flags .flag-none {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent));
+}
+
+.order-flags .flag-skip {
+  color: hsl(var(--muted-foreground));
+  text-decoration: line-through;
+  background: hsl(var(--accent));
+}
+
+.order-summary-row :deep(td) {
+  font-weight: 600;
+  background: hsl(var(--accent));
+}
+
+/* 采购单详情（金智式）：左侧基本信息 + 下属单据页签，右侧摘要 */
+.order-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.order-title-code {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.order-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.order-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.order-side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-side-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.order-info {
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.order-info dl {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) 80px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.order-info dt {
+  color: hsl(var(--muted-foreground));
+}
+
+.order-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .order-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-side {
+    position: static;
+  }
+
+  .order-info dl {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+}
+
 .order-workspace {
   display: grid;
   gap: 16px;
@@ -1914,7 +2280,7 @@ watch(financeType, (value, previous) => {
   align-items: center;
   padding: 8px 20px;
   background: hsl(var(--primary) / 6%);
-  border-bottom: 1px solid hsl(var(--border));
+  border-top: 1px solid hsl(var(--border));
 }
 
 .order-summary-link {

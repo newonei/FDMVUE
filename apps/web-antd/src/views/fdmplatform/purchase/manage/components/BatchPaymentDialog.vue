@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { BatchOrder, RequestForm } from '../batch-model';
+import type { BatchOrder, BatchPaymentForm } from '../batch-model';
 
 import type { ProcurementSetting } from '#/api/fdmplatform/procurement';
 
@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue';
 
 import {
   Alert,
+  AutoComplete,
   Button,
   Input,
   InputNumber,
@@ -17,30 +18,44 @@ import BigNumber from 'bignumber.js';
 
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
-  createProcurementFinance,
   getProcurementFinanceSummary,
-  procurementFinanceAction,
+  registerOrderPayment,
 } from '#/api/fdmplatform/procurement-finance';
 
 import { errorText } from '../../../data';
-import { requestFormProblem, requestPayloads } from '../batch-model';
+import {
+  payerAccountLabel,
+  paymentMethods,
+} from '../../../finance/procurement/model';
+import { localDate } from '../../quotes/comparison';
+import {
+  batchPaymentInputs,
+  batchPaymentNo,
+  batchPaymentProblem,
+} from '../batch-model';
 
 /**
- * 集中请款（金智「全部集中付款」）：同一供应商的多张采购单一次填好付款主体、收款账户和凭据，
- * 每张采购单各生成一张请款单并直接生效；请款单仍是一单一张，财务付款照常。
+ * 集中付款（金智「集中付款」）：同一供应商的多张采购单一次转账付清，
+ * 每张采购单各登记一张付款记录，共用付款日期、付款公司、收款方和集中付款批号。
  */
 const props = defineProps<{ open: boolean; orders: BatchOrder[] }>();
 const emit = defineEmits<{ close: []; done: [created: number] }>();
 
+const today = localDate();
 const payers = ref<ProcurementSetting[]>([]);
-const available = ref<Record<string, string>>({});
+const available = ref<Record<string, string | undefined>>({});
 const amounts = ref<Record<string, string | undefined>>({});
-const form = ref<RequestForm>({});
+const form = ref<BatchPaymentForm>({});
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
 const results = ref<string[]>([]);
+/** 已登记成功的采购单：再点提交只补失败的那几张 */
+const finished = ref(new Set<string>());
+/** 失败过的采购单换新幂等键重试（失败的草稿已自动取消） */
+const attempts = new Map<string, number>();
 let base = '';
+let batchNo = '';
 
 const active = computed(() => props.orders.filter((order) => !order.ended));
 const total = computed(() => {
@@ -56,11 +71,15 @@ watch(
   async (open) => {
     if (!open) return;
     base = crypto.randomUUID();
+    batchNo = batchPaymentNo(today);
     error.value = '';
     results.value = [];
+    finished.value = new Set();
+    attempts.clear();
     form.value = {
+      paidAt: today,
+      paymentMethod: '公对公转账',
       payeeName: active.value[0]?.supplierName,
-      remark: '货款',
     };
     amounts.value = {};
     loading.value = true;
@@ -74,12 +93,12 @@ watch(
         ),
       ]);
       payers.value = loaded;
-      if (loaded.length === 1) form.value.payerEntityId = loaded[0]!.id;
+      if (loaded.length === 1) pickPayer(loaded[0]!.id);
       available.value = {};
       for (const [index, order] of active.value.entries()) {
         const value = String(
           (summaries[index] as Record<string, unknown>)
-            ?.availableRequestAmount ?? order.unpaid,
+            ?.availablePaymentAmount ?? order.unpaid,
         );
         available.value[order.key] = value;
         amounts.value[order.key] = new BigNumber(value).gt(0)
@@ -95,33 +114,41 @@ watch(
   { immediate: true },
 );
 
+function pickPayer(id: string) {
+  form.value.payerEntityId = id;
+  const label = payerAccountLabel(payers.value.find((row) => row.id === id));
+  if (label) form.value.payerAccount = label;
+}
+
 async function submit() {
-  error.value = requestFormProblem(form.value, amounts.value);
+  error.value = batchPaymentProblem(
+    form.value,
+    amounts.value,
+    available.value,
+    today,
+  );
   if (error.value) return;
   saving.value = true;
   results.value = [];
   let created = 0;
-  for (const { order, payload } of requestPayloads(
+  const pending = batchPaymentInputs(
     active.value,
     amounts.value,
     form.value,
-  )) {
+    batchNo,
+  ).filter(({ order }) => !finished.value.has(order.key));
+  for (const { order, input } of pending) {
     try {
-      // 幂等键按采购单区分：中途失败后再点提交，已建好的不会重复
-      const draft = await createProcurementFinance({
-        type: 'REQUEST',
-        idempotencyKey: `${base}:${order.key}`,
-        payload,
-      });
-      await procurementFinanceAction(draft.id, {
-        action: 'SUBMIT',
-        expectedVersion: draft.version,
-        idempotencyKey: `${base}:${order.key}:submit`,
-        payload: {},
-      });
+      // 幂等键按采购单区分：中途失败后再点提交，已登记的不会重复
+      const record = await registerOrderPayment(
+        input,
+        `${base}:${order.key}:${attempts.get(order.key) ?? 0}`,
+      );
       created += 1;
-      results.value.push(`${order.code}：已生成请款 ${draft.code}`);
+      finished.value.add(order.key);
+      results.value.push(`${order.code}：已登记付款 ${record.code}`);
     } catch (error_) {
+      attempts.set(order.key, (attempts.get(order.key) ?? 0) + 1);
       results.value.push(`${order.code}：失败，${errorText(error_)}`);
     }
   }
@@ -133,7 +160,7 @@ async function submit() {
 <template>
   <Modal
     :open="open"
-    title="集中请款"
+    title="集中付款"
     width="880px"
     :mask-closable="false"
     @cancel="emit('close')"
@@ -142,21 +169,40 @@ async function submit() {
       <Alert
         type="info"
         show-icon
-        :message="`${active[0]?.supplierName ?? ''} · ${active.length} 张采购单，每张各生成一张请款单并直接生效，财务付款照常。`"
+        :message="`${active[0]?.supplierName ?? ''} · ${active.length} 张采购单一次付款，每张各登记一张付款记录，共用批号便于对银行流水。`"
       />
       <Alert v-if="error" type="error" :message="error" show-icon />
       <div class="sheet">
         <label>
-          <span><em>*</em>付款主体</span>
+          <span><em>*</em>付款日期</span>
+          <Input v-model:value="form.paidAt" type="date" :max="today" />
+        </label>
+        <label>
+          <span><em>*</em>所属公司（付款公司）</span>
           <Select
-            v-model:value="form.payerEntityId"
+            :value="form.payerEntityId"
             :options="
               payers.map((entry) => ({
                 value: entry.id,
                 label: entry.legalName ?? entry.name,
               }))
             "
-            placeholder="选择付款公司"
+            placeholder="选择所属公司"
+            @update:value="(value) => pickPayer(String(value))"
+          />
+        </label>
+        <label>
+          <span><em>*</em>付款方式（付款账户）</span>
+          <Input
+            v-model:value="form.payerAccount"
+            placeholder="如：湖北飞德慕网商银行（8831）"
+          />
+        </label>
+        <label>
+          <span>付款分类</span>
+          <AutoComplete
+            v-model:value="form.paymentMethod"
+            :options="paymentMethods.map((value) => ({ value }))"
           />
         </label>
         <label>
@@ -164,37 +210,23 @@ async function submit() {
           <Input v-model:value="form.payeeName" />
         </label>
         <label>
-          <span><em>*</em>收款账户</span>
+          <span>收款账户信息</span>
           <Input
             v-model:value="form.payeeAccount"
             placeholder="开户行 + 账号"
           />
         </label>
-        <label>
-          <span><em>*</em>请款说明</span>
+        <label class="full">
+          <span>备注</span>
           <Input v-model:value="form.remark" />
-        </label>
-        <label>
-          <span><em>*</em>凭据编号</span>
-          <Input
-            v-model:value="form.evidence"
-            placeholder="对账单号、合同号或发票号"
-          />
-        </label>
-        <label>
-          <span>代付说明</span>
-          <Input
-            v-model:value="form.agencyReason"
-            placeholder="付款公司和签约公司不同时填写"
-          />
         </label>
       </div>
       <table class="orders">
         <thead>
           <tr>
             <th>采购单</th>
-            <th class="num">可请款</th>
-            <th class="amount">本次请款</th>
+            <th class="num">未付</th>
+            <th class="amount">本次付款</th>
           </tr>
         </thead>
         <tbody>
@@ -210,8 +242,8 @@ async function submit() {
                 string-mode
                 :min="0"
                 :controls="false"
-                :disabled="loading || saving"
-                placeholder="不请留空"
+                :disabled="loading || saving || finished.has(order.key)"
+                placeholder="不付留空"
                 style="width: 100%"
               />
             </td>
@@ -241,7 +273,7 @@ async function submit() {
         :disabled="loading"
         @click="submit"
       >
-        生成请款单
+        登记付款
       </Button>
     </template>
   </Modal>
@@ -303,6 +335,10 @@ em {
 
 .orders .amount {
   width: 180px;
+}
+
+.sheet .full {
+  grid-column: 1 / -1;
 }
 
 .results {

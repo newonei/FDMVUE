@@ -42,12 +42,12 @@ export function batchOrders(rows: ProcurementOrderRow[]): BatchOrder[] {
 }
 
 /**
- * 集中请款、转入库要求同一供应商、同一币种（一张付款对应一个收款方）；结束不限制。
+ * 集中付款、转入库要求同一供应商、同一币种（一张付款对应一个收款方）；结束不限制。
  * 返回不能一起办的原因，空串表示可以。
  */
 export function batchProblem(
   orders: BatchOrder[],
-  mode: 'end' | 'request' | 'stockIn',
+  mode: 'end' | 'payment' | 'stockIn',
 ) {
   if (orders.length === 0) return '请先勾选采购单';
   const active = orders.filter((order) => !order.ended);
@@ -58,43 +58,60 @@ export function batchProblem(
   if (new Set(active.map((order) => order.currency)).size > 1)
     return '选中的采购单币种不同，请分开办理';
   if (
-    mode === 'request' &&
+    mode === 'payment' &&
     !active.some((order) => new BigNumber(order.unpaid).gt(0))
   )
     return '选中的采购单都已付清';
   return '';
 }
 
-export interface RequestForm {
+export interface BatchPaymentForm {
+  paidAt?: string;
   payerEntityId?: string;
+  payerAccount?: string;
+  paymentMethod?: string;
   payeeName?: string;
   payeeAccount?: string;
   remark?: string;
-  evidence?: string;
-  agencyReason?: string;
 }
 
-export function requestFormProblem(
-  form: RequestForm,
+export function batchPaymentProblem(
+  form: BatchPaymentForm,
   amounts: Record<string, string | undefined>,
+  available: Record<string, string | undefined>,
+  today: string,
 ) {
-  if (!form.payerEntityId) return '请选择付款主体';
+  if (!form.paidAt) return '请选择付款日期';
+  if (form.paidAt > today) return '付款日期不能晚于今天';
+  if (!form.payerEntityId) return '请选择所属公司（付款公司）';
+  if (!form.payerAccount?.trim()) return '请填写付款方式（付款账户）';
   if (!form.payeeName?.trim()) return '请填写收款方';
-  if (!form.payeeAccount?.trim()) return '请填写收款账户';
-  if (!form.remark?.trim()) return '请填写请款说明';
-  if (!form.evidence?.trim()) return '请填写凭据编号（合同号、对账单号等）';
-  const positive = Object.values(amounts).filter((value) =>
+  const positive = Object.entries(amounts).filter(([, value]) =>
     new BigNumber(value ?? '').gt(0),
   );
-  if (positive.length === 0) return '至少一张采购单的本次请款金额大于 0';
+  if (positive.length === 0) return '至少一张采购单的本次付款金额大于 0';
+  for (const [key, value] of positive) {
+    const limit = new BigNumber(available[key] ?? '');
+    if (limit.isFinite() && new BigNumber(value!).gt(limit))
+      return `有采购单的本次付款超过未付金额（最多 ${limit.toFormat(2)}）`;
+  }
   return '';
 }
 
-/** 每张采购单一张请款单（和单张请款同一规则），金额为 0 或空的跳过。 */
-export function requestPayloads(
+/** 集中付款批号：同一次转账生成的各张付款记录共用，方便对银行流水。 */
+export function batchPaymentNo(today: string) {
+  return `JZFK-${today.replaceAll('-', '')}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+}
+
+/**
+ * 集中付款（金智「集中付款」）：一次转账付多张采购单，每张采购单各登记一张付款记录，
+ * 共用付款日期、付款公司、收款方和批号；金额为 0 或空的跳过。
+ */
+export function batchPaymentInputs(
   orders: BatchOrder[],
   amounts: Record<string, string | undefined>,
-  form: RequestForm,
+  form: BatchPaymentForm,
+  batchNo: string,
 ) {
   return orders
     .filter(
@@ -102,19 +119,19 @@ export function requestPayloads(
     )
     .map((order) => ({
       order,
-      payload: {
+      input: {
         contractId: order.contractId,
         orderId: order.orderId,
-        name: `${order.code} 货款`,
+        name: `${order.code} 付款`,
         amount: amounts[order.key]!,
-        payerEntityId: form.payerEntityId,
-        payeeName: form.payeeName?.trim(),
-        payeeAccount: form.payeeAccount?.trim(),
-        remark: form.remark?.trim(),
-        evidenceRefs: [`external:${form.evidence!.trim()}`],
-        ...(form.agencyReason?.trim()
-          ? { agencyReason: form.agencyReason.trim() }
-          : {}),
+        paidAt: form.paidAt!,
+        payerEntityId: form.payerEntityId!,
+        payerAccount: form.payerAccount!.trim(),
+        paymentMethod: form.paymentMethod?.trim() || undefined,
+        payeeName: form.payeeName!.trim(),
+        payeeAccount: form.payeeAccount?.trim() || undefined,
+        remark: form.remark?.trim() || undefined,
+        batchNo,
       },
     }));
 }

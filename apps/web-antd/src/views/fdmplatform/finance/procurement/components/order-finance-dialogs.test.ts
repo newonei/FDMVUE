@@ -46,6 +46,33 @@ vi.mock('./FinanceDocument.vue', () => ({
     },
   }),
 }));
+vi.mock('./PaymentRecordDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      available: { type: null, default: undefined },
+      previous: { type: Array, default: () => [] },
+      orderCode: { type: String, default: undefined },
+    },
+    setup(props) {
+      return () =>
+        props.open
+          ? h('section', {
+              'data-payment-dialog': true,
+              'data-available': String(props.available),
+              'data-previous': props.previous.length,
+              'data-order-code': props.orderCode,
+            })
+          : null;
+    },
+  }),
+}));
+vi.mock('./PaymentInvoiceDialog.vue', () => ({
+  default: defineComponent({ setup: () => () => null }),
+}));
+vi.mock('./RefundTable.vue', () => ({
+  default: defineComponent({ setup: () => () => null }),
+}));
 vi.mock('../../../documents/BusinessDocumentDetail.vue', () => ({
   default: defineComponent({
     props: {
@@ -81,6 +108,7 @@ vi.mock('ant-design-vue', () => {
     Descriptions: Object.assign(block, { Item: block }),
     Space: block,
     Tag: block,
+    message: { success: vi.fn(), error: vi.fn() },
     Table: defineComponent({
       props: { dataSource: { type: Array, default: () => [] } },
       setup(props, { slots }) {
@@ -101,6 +129,15 @@ beforeEach(() => {
   mocks.summary.mockResolvedValue({
     currency: 'CNY',
     availableRequestAmount: '60',
+    availablePaymentAmount: '45',
+    payments: [
+      {
+        id: 'pay-1',
+        code: 'CGFK-1',
+        type: 'PAYMENT',
+        sourceType: 'PURCHASE_ORDER',
+      },
+    ],
     requests: [
       { id: 'request-1', code: 'QK-1', name: '首期请款', type: 'REQUEST' },
     ],
@@ -121,6 +158,7 @@ async function mount() {
     mode: 'payments',
     contractId: 'contract-1',
     orderId: 'order-1',
+    orderCode: 'CG-1',
     onChanged: changed,
   });
   app.mount(host);
@@ -164,17 +202,31 @@ describe('采购单财务卡片弹窗办理', () => {
     ).toBe('payment-1');
     click(host, '关闭财务单据');
     await nextTick();
-    click(host, '发起采购请款');
+    click(host, '新建关联报销');
     await nextTick();
     const dialog = host.querySelector<HTMLElement>('[data-finance-dialog]')!;
     expect(Object.hasOwn(dialog.dataset, 'recordId')).toBe(false);
+    expect(dialog.dataset.type).toBe('REIMBURSEMENT');
     expect(JSON.parse(dialog.dataset.context!)).toEqual({
       contractId: 'contract-1',
       orderId: 'order-1',
       currency: 'CNY',
-      amount: '60',
     });
     expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it('付款直接登记付款记录，不再提供请款和分期入口；历史请款只读显示', async () => {
+    const { host } = await mount();
+    expect(host.textContent).not.toContain('发起采购请款');
+    expect(host.textContent).not.toContain('安排分期付款');
+    expect(host.querySelector('[title="采购请款单（历史）"]')).toBeTruthy();
+    expect(host.querySelector('[title="付款计划（历史）"]')).toBeNull();
+    click(host, '登记付款');
+    await nextTick();
+    const dialog = host.querySelector<HTMLElement>('[data-payment-dialog]')!;
+    expect(dialog.dataset.available).toBe('45');
+    expect(dialog.dataset.previous).toBe('1');
+    expect(dialog.dataset.orderCode).toBe('CG-1');
   });
 
   it('导入的付款记录同样在采购单内打开原单据', async () => {

@@ -1,5 +1,6 @@
 import type { BusinessDocumentFile, MigrationInfo } from './business-documents';
 import type { BusinessRecord, Decimal, PageResult } from './index';
+import type { PurchaseInvoice } from './procurement';
 
 import { requestClient } from '#/api/request';
 export type ProcurementFinanceType =
@@ -47,6 +48,36 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   };
   history?: BusinessRecord[];
   summary?: Record<string, unknown>;
+  /** 付款记录：直接挂采购单时为 PURCHASE_ORDER */
+  sourceType?: string;
+  paidAt?: string;
+  payerAccount?: string;
+  payeeName?: string;
+  payeeAccount?: string;
+  paymentMethod?: string;
+  noInvoice?: boolean;
+  batchNo?: string;
+  remark?: string;
+  /** 付款记录下属的付款发票 */
+  invoices?: PurchaseInvoice[];
+  invoicedAmount?: Decimal;
+  invoiceState?: 'INVOICED' | 'NOT_REQUIRED' | 'PARTIAL' | 'PENDING';
+}
+/** 付款记录的内容（金智「付款记录」）：每付一笔钱登记一张，分期就是多张。 */
+export interface OrderPaymentInput {
+  contractId: string;
+  orderId: string;
+  amount: Decimal;
+  paidAt: string;
+  payerEntityId: string;
+  payerAccount: string;
+  paymentMethod?: string;
+  payeeName: string;
+  payeeAccount?: string;
+  remark?: string;
+  noInvoice?: boolean;
+  batchNo?: string;
+  name?: string;
 }
 const base = '/fdmplatform/v1/procurement-finance';
 export function getProcurementFinancePage(params: {
@@ -91,6 +122,44 @@ export function procurementFinanceAction(
     `${base}/${encodeURIComponent(id)}/actions`,
     data,
   );
+}
+/**
+ * 登记付款记录：建单后直接确认，确认即计入已付。幂等键按调用方给的前缀区分，
+ * 中途失败重试时已建好的单不会重复。
+ */
+export async function registerOrderPayment(
+  input: OrderPaymentInput,
+  key: string,
+) {
+  const draft = await createProcurementFinance({
+    type: 'PAYMENT',
+    idempotencyKey: `${key}:create`,
+    payload: {
+      ...input,
+      contractId: input.contractId || undefined,
+      sourceType: 'PURCHASE_ORDER',
+    },
+  });
+  if (draft.status === 'CANCELLED')
+    throw new Error('上次登记未完成已取消，请重新提交');
+  if (draft.status !== 'DRAFT') return draft;
+  try {
+    return await procurementFinanceAction(draft.id, {
+      action: 'CONFIRM',
+      expectedVersion: draft.version,
+      idempotencyKey: `${key}:confirm`,
+      payload: {},
+    });
+  } catch (error) {
+    // 确认没过就把草稿取消，不在采购单下留半截付款；调用方换新键重试
+    await procurementFinanceAction(draft.id, {
+      action: 'CANCEL',
+      expectedVersion: draft.version,
+      idempotencyKey: `${key}:cancel`,
+      payload: { reason: '登记付款未完成，自动取消草稿' },
+    }).catch(() => undefined);
+    throw error;
+  }
 }
 export function getProcurementFinanceSummary(
   contractId: string,

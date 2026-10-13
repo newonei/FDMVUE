@@ -39,6 +39,7 @@ import AttachmentPanel from '../components/AttachmentPanel.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
 import { errorText } from '../data';
 import { withDirectory, withEvidence } from '../directory';
+import RequestAssignDialog from '../purchase/tasks/RequestAssignDialog.vue';
 import ContractPicker from './ContractPicker.vue';
 import { documentActionDataNeeds } from './data-needs';
 import { currentDocument, documentActionDefinition } from './model';
@@ -70,6 +71,17 @@ const attachmentBusy = ref(false);
 const lockedContractId = computed(
   () => props.contractId ?? props.row?.contractId,
 );
+/**
+ * 分派采购任务只分单（采购部门约定）：任何入口都弹出「分派采购申请」，
+ * 只选采购员，不再填申请明细、采购方式和数量。
+ */
+const assigning = computed(() => props.action === 'ASSIGN_FULFILLMENT');
+const assignContractId = ref<string>();
+const assignRequestId = computed(() => {
+  if (props.source?.kind === 'requests') return props.source.id;
+  if (props.kind === 'requests' && props.row) return String(props.row.id);
+  return undefined;
+});
 const supportsAttachments = computed(() =>
   [
     'ASSIGN_FULFILLMENT',
@@ -238,6 +250,14 @@ watch(
     const id = props.lockContract
       ? lockedContractId.value
       : (props.row?.contractId ?? props.contractId);
+    assignContractId.value = undefined;
+    if (assigning.value) {
+      if (id) assignContractId.value = id;
+      else if (props.lockContract)
+        pageError.value = '当前合同未加载，请关闭后重试';
+      else pickerOpen.value = true;
+      return;
+    }
     if (id) void prepare(id);
     else if (props.lockContract)
       pageError.value = '当前合同未加载，请关闭后重试';
@@ -352,9 +372,28 @@ async function execute(input: Record<string, unknown>, key: string) {
     :open="pickerOpen && open && !lockContract"
     :action="action"
     @close="close"
-    @select="(selected) => prepare(selected.id)"
+    @select="
+      (selected) =>
+        assigning
+          ? ((pickerOpen = false), (assignContractId = selected.id))
+          : prepare(selected.id)
+    "
+  /><RequestAssignDialog
+    v-if="assigning"
+    :open="open && !!assignContractId"
+    :contract-id="assignContractId"
+    :request-id="assignRequestId"
+    @close="finishClose"
+    @saved="
+      (value) => {
+        emit('updated', value);
+        finishClose();
+      }
+    "
   /><Modal
-    :open="open && !pickerOpen && !actionOpen"
+    :open="
+      open && !pickerOpen && !actionOpen && !(assigning && assignContractId)
+    "
     title="准备办理"
     :footer="null"
     @cancel="close()"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DocumentRow } from '#/api/fdmplatform';
 import type {
   ProcurementFinanceRecord,
   ProcurementFinanceType,
@@ -14,21 +15,30 @@ import {
   Button,
   Card,
   Input,
+  message,
   Select,
   Space,
   Table,
+  TableSummary,
+  TableSummaryCell,
+  TableSummaryRow,
   Tag,
 } from 'ant-design-vue';
 
-import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
+import {
+  getProcurementFinancePage,
+  getProcurementFinanceSummary,
+} from '#/api/fdmplatform/procurement-finance';
 
 import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
 import { useRouteOwner } from '../../documents/useRouteOwner';
+import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
-import { financeStatus, financeTitles } from './model';
+import PaymentRecordDialog from './components/PaymentRecordDialog.vue';
+import { financeStatus, financeTitles, invoiceStates } from './model';
 
 import '../../components/compact-tables.css';
 
@@ -134,13 +144,26 @@ function selectSource(value: 'ALL' | 'JINZHI' | 'NATIVE') {
 const columns = computed(() =>
   isPayment.value
     ? [
-        { title: '单据号 / 名称', key: 'name', width: 300 },
+        // 列顺序参考金智「付款记录」：付款金额、供应商、采购单、付款日期、付款分类、是否收票
+        {
+          title: '付款金额',
+          key: 'money',
+          width: 140,
+          align: 'right' as const,
+        },
         { title: '供应商 / 收款方', key: 'payee', width: 200, ellipsis: true },
+        { title: '采购单 / 付款单号', key: 'name', width: 260 },
         { title: '付款日期', key: 'paidAt', width: 110 },
-        { title: '金额', key: 'money', width: 150, align: 'right' as const },
-        { title: '付款账户', key: 'payer', width: 180, ellipsis: true },
+        { title: '付款分类', key: 'method', width: 110 },
+        { title: '是否收票', key: 'invoice', width: 100 },
+        {
+          title: '所属公司 / 付款方式',
+          key: 'payer',
+          width: 200,
+          ellipsis: true,
+        },
         { title: '状态', key: 'state', width: 100 },
-        { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
+        { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
       ]
     : [
         { title: '单据号 / 名称', key: 'name', width: 330 },
@@ -160,12 +183,74 @@ function moneyText(record: ProcurementFinanceRecord) {
 }
 function payerText(record: ProcurementFinanceRecord) {
   if (isPayment.value)
-    return String(
-      record.payerSnapshot?.name ??
-        (record as Record<string, unknown>).payerAccount ??
-        '—',
+    return (
+      [record.payerSnapshot?.name, record.payerAccount]
+        .filter(Boolean)
+        .join(' · ') || '—'
     );
   return payerSummary(record);
+}
+/** 本页合计（金智列表底部），按币种分开 */
+const pageTotal = computed(() => {
+  const totals = new Map<string, number>();
+  for (const row of rows.value) {
+    const value = Number(row.amount);
+    if (!Number.isFinite(value)) continue;
+    const currency = row.currency || '';
+    totals.set(currency, (totals.get(currency) ?? 0) + value);
+  }
+  return (
+    [...totals.entries()]
+      .map(([currency, value]) =>
+        `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      )
+      .join(' / ') || '—'
+  );
+});
+/** 列表「新建」：先选采购单，再登记付款记录（不经请款） */
+const pickingOrder = ref(false);
+const paymentOrder = ref<{
+  available?: unknown;
+  code?: string;
+  contractId: string;
+  currency?: string;
+  orderId: string;
+  previous: Array<Record<string, unknown>>;
+  reference: Record<string, unknown>;
+  supplierName?: string;
+}>();
+async function orderPicked(row: DocumentRow) {
+  pickingOrder.value = false;
+  const orderId = String(row.standaloneId ?? row.id);
+  const contractId = row.standaloneId
+    ? 'standalone'
+    : String(row.contractId ?? '');
+  try {
+    const summary = await getProcurementFinanceSummary(contractId, orderId);
+    paymentOrder.value = {
+      contractId,
+      orderId,
+      code: String(row.record?.code ?? row.record?.orderCode ?? ''),
+      supplierName: String(row.record?.supplierName ?? ''),
+      currency: String(summary.currency ?? row.record?.currency ?? ''),
+      available: summary.availablePaymentAmount,
+      previous: Array.isArray(summary.payments)
+        ? (summary.payments as Array<Record<string, unknown>>)
+        : [],
+      reference: {
+        orderAmount: summary.orderAmount,
+        paid: summary.paidAmount,
+        unpaid: summary.unpaidAmount,
+      },
+    };
+  } catch (error) {
+    message.error(errorText(error));
+  }
+}
+function paymentSaved(record: ProcurementFinanceRecord) {
+  paymentOrder.value = undefined;
+  message.success(`已登记付款 ${record.code}`);
+  void load();
 }
 function close() {
   open.value = false;
@@ -273,7 +358,13 @@ watch(
               page = 1;
               load();
             "
-          /><Button type="primary" @click="create(effectiveType)">
+          /><Button
+            v-if="isPayment"
+            type="primary"
+            @click="pickingOrder = true"
+          >
+            登记付款记录
+</Button><Button v-else type="primary" @click="create(effectiveType)">
             新建{{ financeTitles[effectiveType] }}
 </Button><Button
             v-if="effectiveType === 'REQUEST'"
@@ -337,6 +428,18 @@ watch(
             }
           "
         >
+          <template v-if="isPayment" #summary>
+            <TableSummary v-if="rows.length > 0">
+              <TableSummaryRow class="sum-row">
+                <TableSummaryCell :index="0" align="right">
+                  <span class="num">{{ pageTotal }}</span>
+                </TableSummaryCell>
+                <TableSummaryCell :index="1" :col-span="8">
+                  本页合计
+                </TableSummaryCell>
+              </TableSummaryRow>
+            </TableSummary>
+          </template>
           <template #bodyCell="{ column, record }">
             <Button
               v-if="column.key === 'name'"
@@ -369,6 +472,15 @@ watch(
             <span v-else-if="column.key === 'paidAt'" class="num">{{
               record.paidAt ?? '—'
             }}</span>
+            <span v-else-if="column.key === 'method'">{{
+              record.paymentMethod || '—'
+            }}</span>
+            <Tag
+              v-else-if="column.key === 'invoice' && record.invoiceState"
+              :color="invoiceStates[String(record.invoiceState)]?.color"
+            >
+              {{ invoiceStates[String(record.invoiceState)]?.label }}
+            </Tag>
           </template>
         </Table>
       </Space>
@@ -379,6 +491,25 @@ watch(
       :context="context"
       @close="close"
       @updated="load"
+    />
+    <OrderPicker
+      :open="pickingOrder && active"
+      @close="pickingOrder = false"
+      @selected="orderPicked"
+    />
+    <PaymentRecordDialog
+      v-if="paymentOrder"
+      :open="!!paymentOrder && active"
+      :contract-id="paymentOrder.contractId"
+      :order-id="paymentOrder.orderId"
+      :order-code="paymentOrder.code"
+      :supplier-name="paymentOrder.supplierName"
+      :currency="paymentOrder.currency"
+      :available="paymentOrder.available"
+      :previous="paymentOrder.previous"
+      :reference="paymentOrder.reference"
+      @close="paymentOrder = undefined"
+      @saved="paymentSaved"
     />
   </Page>
   <BusinessDocumentDetail
@@ -416,6 +547,11 @@ watch(
 .source-switch button:focus-visible {
   outline: 2px solid hsl(var(--primary));
   outline-offset: -2px;
+}
+
+.sum-row :deep(td) {
+  font-weight: 600;
+  background: hsl(var(--accent));
 }
 
 .num {

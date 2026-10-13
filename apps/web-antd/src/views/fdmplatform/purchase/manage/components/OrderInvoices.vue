@@ -6,35 +6,37 @@ import type {
 
 import { computed, h, ref, watch } from 'vue';
 
+import { downloadFileFromBlobPart } from '@vben/utils';
+
 import {
   Alert,
   Button,
   Checkbox,
   Input,
-  InputNumber,
   message,
   Modal,
-  Select,
   Table,
   Tag,
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
 import {
-  createPurchaseInvoice,
+  downloadPurchaseInvoiceFile,
   getOrderInvoices,
   setOrderNoInvoice,
   voidPurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
 
 import { errorText } from '../../../data';
-import { localDate } from '../../quotes/comparison';
+import InvoiceUpload from '../../../finance/procurement/components/InvoiceUpload.vue';
 
 /**
  * 采购收票（金智「付款发票」）：和入库、付款各自独立；发票合计到采购金额，或勾「无需收票」，收票才算办完。
  */
 const props = defineProps<{
   orderAmount?: unknown;
+  /** 本单付款记录：发票可挂到某一笔付款下（金智付款发票的「付款计划/记录」） */
+  payments?: Array<Record<string, unknown>>;
   view: ProcurementOrderView;
 }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -44,21 +46,10 @@ const TYPE_NAMES: Record<PurchaseInvoice['invoiceType'], string> = {
   ORDINARY: '增值税普票',
   OTHER: '其他',
 };
-const today = localDate();
 const invoices = ref<PurchaseInvoice[]>([]);
 const invoiced = ref('0');
 const loading = ref(false);
-const saving = ref(false);
 const error = ref('');
-const form = ref({
-  invoiceNo: '',
-  invoiceDate: today,
-  invoiceType: 'SPECIAL' as PurchaseInvoice['invoiceType'],
-  taxRate: '13',
-  amount: undefined as string | undefined,
-  remark: '',
-});
-let idempotencyKey = crypto.randomUUID();
 
 const currency = computed(() => String(props.view.order.currency ?? 'CNY'));
 const gap = computed(() => {
@@ -67,6 +58,18 @@ const gap = computed(() => {
   return amount.minus(invoiced.value);
 });
 const noInvoice = computed(() => !!props.view.details.noInvoice);
+const paymentOptions = computed(() =>
+  (props.payments ?? [])
+    .filter((row) =>
+      ['CONFIRMED', 'PARTIALLY_REVERSED', 'REVERSED'].includes(
+        String(row.status),
+      ),
+    )
+    .map((row) => ({
+      value: String(row.id),
+      label: `${String(row.code)} · ${String(row.paidAt ?? '')} · ${new BigNumber(String(row.amount ?? 0)).toFormat(2)}`,
+    })),
+);
 
 async function load() {
   loading.value = true;
@@ -77,51 +80,26 @@ async function load() {
       b.createdAt.localeCompare(a.createdAt),
     );
     invoiced.value = String(result.invoicedAmount);
-    if (!form.value.amount && gap.value?.gt(0))
-      form.value.amount = gap.value.toFixed(2);
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
     loading.value = false;
   }
 }
-async function save() {
-  if (!form.value.invoiceNo.trim()) {
-    error.value = '请填写发票号码';
-    return;
-  }
-  if (!new BigNumber(form.value.amount ?? '').gt(0)) {
-    error.value = '发票金额须大于 0';
-    return;
-  }
-  saving.value = true;
-  error.value = '';
+async function saved() {
+  message.success('发票已登记');
+  await load();
+  emit('changed');
+}
+async function download(invoice: PurchaseInvoice) {
   try {
-    await createPurchaseInvoice({
-      idempotencyKey,
-      contractId: props.view.contractId,
-      orderId: props.view.id,
-      invoiceNo: form.value.invoiceNo.trim(),
-      invoiceDate: form.value.invoiceDate || undefined,
-      invoiceType: form.value.invoiceType,
-      taxRate: form.value.taxRate || undefined,
-      amount: form.value.amount!,
-      remark: form.value.remark.trim() || undefined,
+    const blob = await downloadPurchaseInvoiceFile(invoice.id);
+    downloadFileFromBlobPart({
+      source: blob,
+      fileName: invoice.file?.name ?? `${invoice.invoiceNo ?? '发票'}.pdf`,
     });
-    idempotencyKey = crypto.randomUUID();
-    message.success('发票已登记');
-    form.value = {
-      ...form.value,
-      invoiceNo: '',
-      amount: undefined,
-      remark: '',
-    };
-    await load();
-    emit('changed');
   } catch (error_) {
     error.value = errorText(error_);
-  } finally {
-    saving.value = false;
   }
 }
 function remove(invoice: PurchaseInvoice) {
@@ -189,54 +167,14 @@ watch(() => props.view.id, load, { immediate: true });
       </Checkbox>
     </div>
 
-    <section class="entry" aria-label="登记收票">
-      <label>
-        <span>发票号码</span>
-        <Input v-model:value="form.invoiceNo" placeholder="必填" />
-      </label>
-      <label>
-        <span>开票日期</span>
-        <Input v-model:value="form.invoiceDate" type="date" :max="today" />
-      </label>
-      <label>
-        <span>发票类型</span>
-        <Select
-          v-model:value="form.invoiceType"
-          :options="
-            Object.entries(TYPE_NAMES).map(([value, label]) => ({
-              value,
-              label,
-            }))
-          "
-        />
-      </label>
-      <label>
-        <span>税率 %</span>
-        <InputNumber
-          v-model:value="form.taxRate"
-          string-mode
-          :min="0"
-          :max="100"
-          :controls="false"
-          style="width: 100%"
-        />
-      </label>
-      <label>
-        <span>发票金额（{{ currency }}）</span>
-        <InputNumber
-          v-model:value="form.amount"
-          string-mode
-          :min="0"
-          :controls="false"
-          style="width: 100%"
-        />
-      </label>
-      <label class="wide">
-        <span>备注</span>
-        <Input v-model:value="form.remark" />
-      </label>
-      <Button type="primary" :loading="saving" @click="save">登记收票</Button>
-    </section>
+    <InvoiceUpload
+      :contract-id="view.contractId"
+      :order-id="view.id"
+      :currency="currency"
+      :default-amount="gap?.gt(0) ? gap.toFixed(2) : undefined"
+      :payment-options="paymentOptions"
+      @saved="saved"
+    />
 
     <Table
       size="small"
@@ -245,18 +183,31 @@ watch(() => props.view.id, load, { immediate: true });
       :loading="loading"
       :pagination="false"
       :columns="[
-        { title: '发票号码', dataIndex: 'invoiceNo' },
+        { title: '发票号码', key: 'invoiceNo' },
+        { title: '原件', key: 'file' },
         { title: '类型', key: 'type' },
         { title: '税率', key: 'tax' },
         { title: '金额', key: 'amount', align: 'right' },
         { title: '开票日期', dataIndex: 'invoiceDate' },
+        { title: '对应付款', key: 'payment' },
         { title: '状态', key: 'status' },
         { title: '', key: 'action', width: 70 },
       ]"
     >
       <template #emptyText>还没有登记发票</template>
       <template #bodyCell="{ column, record }">
-        <span v-if="column.key === 'type'">{{
+        <span v-if="column.key === 'invoiceNo'">{{
+          record.invoiceNo ?? '—'
+        }}</span>
+        <Button
+          v-else-if="column.key === 'file' && record.file"
+          type="link"
+          size="small"
+          @click="download(record as PurchaseInvoice)"
+        >
+          {{ record.file.name }}
+        </Button>
+        <span v-else-if="column.key === 'type'">{{
           TYPE_NAMES[record.invoiceType as PurchaseInvoice['invoiceType']]
         }}</span>
         <span v-else-if="column.key === 'tax'">{{
@@ -266,6 +217,9 @@ watch(() => props.view.id, load, { immediate: true });
         }}</span>
         <span v-else-if="column.key === 'amount'" class="num">{{
           new BigNumber(String(record.amount)).toFormat(2)
+        }}</span>
+        <span v-else-if="column.key === 'payment'">{{
+          record.paymentCode ?? '—'
         }}</span>
         <Tag
           v-else-if="column.key === 'status'"
@@ -311,8 +265,7 @@ watch(() => props.view.id, load, { immediate: true });
   gap: 2px;
 }
 
-.summary span,
-.entry span {
+.summary span {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
 }
@@ -326,35 +279,7 @@ watch(() => props.view.id, load, { immediate: true });
   color: hsl(var(--destructive));
 }
 
-.entry {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px 12px;
-  align-items: end;
-}
-
-.entry label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.entry .wide {
-  grid-column: 1 / 5;
-}
-
 .num {
   font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 900px) {
-  .entry {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .entry .wide {
-    grid-column: auto;
-  }
 }
 </style>
