@@ -14,11 +14,20 @@ export namespace FdmgongchangStageStockApi {
   export type Decimal = number | string;
   export type LaminationSide = 'BACK' | 'FRONT';
   export type ReceiveType = 'OPENING' | 'RAW_RECEIPT';
+  export type MaterialKind = 'AUX' | 'RAW';
 
   /** 物料属性：每个库存阶段只用到其中一部分。 */
   export interface ItemAttrs {
     backColor?: null | string;
     color?: null | string;
+    /** 辅料：客户定制辅料所属合同；为空是通用辅料。 */
+    contractCode?: null | string;
+    contractId?: null | string;
+    /** 辅料：产品中心的产品，单位跟产品走。 */
+    productCode?: null | string;
+    productId?: null | string;
+    productName?: null | string;
+    unit?: null | string;
     frontColor?: null | string;
     length?: Decimal | null;
     material?: null | string;
@@ -239,6 +248,8 @@ export namespace FdmgongchangStageStockApi {
     contractId?: string;
     finish: boolean;
     inputs: OrderInput[];
+    /** 同时领的辅料（辅料库存行），不计入工序领料数量。 */
+    auxInputs?: OrderInput[];
     /** 操作人（系统用户），需具备该工序岗位；不填为当前登录人。班组从人员岗位带出。 */
     operatorUserId?: number;
     outputs: OrderOutput[];
@@ -270,6 +281,8 @@ export namespace FdmgongchangStageStockApi {
 
   /** 在制工序单补领：领少了，从同一段库存再领，一次可以补多种。 */
   export interface OrderSupplementReq {
+    /** 补领的辅料；可以只补辅料。 */
+    auxInputs?: OrderInput[];
     id: number;
     inputs: OrderInput[];
     remark?: string;
@@ -435,6 +448,8 @@ export namespace FdmgongchangStageStockApi {
     /** 工厂为这个任务设定的工艺（工序编码）；没设时为空，按包装回写合同进度。 */
     processes?: string[];
     routeName?: null | string;
+    /** 工厂为这个任务定的辅料用量。 */
+    auxUsages?: AuxUsage[];
     itemQuantity: Decimal;
     linkedOrderCount: number;
     material?: null | string;
@@ -506,20 +521,46 @@ export namespace FdmgongchangStageStockApi {
     keyword?: string;
   }
 
-  /** 原材料采购单里还没到齐的明细。 */
-  export interface RawOpenLine {
-    expectedDate?: DateValue;
-    lineId: number;
+  /** 辅料用量：每做一件成品要用多少这种辅料，在哪道工序领。 */
+  export interface AuxUsage {
+    perUnit: Decimal;
+    process?: null | string;
+    productCode?: null | string;
+    productId: string;
+    productName?: null | string;
+    unit?: null | string;
+  }
+
+  /** 开工序单时带出的辅料：用量、已领、可领的库存行。 */
+  export interface AuxPlan extends AuxUsage {
+    issuedQuantity: Decimal;
+    orderQuantity?: Decimal | null;
+    stocks: Stock[];
+  }
+
+  /** 采购单送到本厂、还没收齐的原料 / 辅料采购行。 */
+  export interface PurchaseLine {
+    category?: null | string;
+    contractCode?: null | string;
+    contractId?: null | string;
+    customerName?: null | string;
+    kind: MaterialKind;
+    orderCode: string;
     orderDate?: DateValue;
-    purchaseId: number;
-    purchaseNo: string;
+    orderId: string;
+    orderLineId: string;
+    productCode?: null | string;
+    productId: string;
+    productName: string;
     quantity: Decimal;
-    rawCategory?: null | string;
-    rawMaterialCode: string;
-    rawMaterialName: string;
+    /** 原料：上次选定的对应原材料。 */
+    rawMaterialCode?: null | string;
+    rawMaterialName?: null | string;
     receivedQuantity: Decimal;
     remainingQuantity: Decimal;
+    specification?: null | string;
     supplierName?: null | string;
+    unit?: null | string;
   }
 
   /** 外贸合同外采采购单里还没到齐的明细。 */
@@ -544,11 +585,17 @@ export namespace FdmgongchangStageStockApi {
     unit?: null | string;
   }
 
-  export interface RawReceiptReq {
-    batchNo: string;
+  export interface PurchaseReceiptReq {
+    acceptedQuantity?: Decimal;
+    batchNo?: string;
+    contractId?: null | string;
+    exceptionReason?: string;
     location?: string;
-    purchaseLineId: number;
+    orderId: string;
+    orderLineId: string;
     quantity: Decimal;
+    /** 原料第一次收货时必选对应的原材料，以后自动带出。 */
+    rawMaterialCode?: string;
     remark?: string;
   }
 
@@ -565,7 +612,7 @@ export namespace FdmgongchangStageStockApi {
     remark?: string;
   }
 
-  export type ReceiptSource = 'RAW_PURCHASE' | 'TRADE_PURCHASE';
+  export type ReceiptSource = 'PURCHASE' | 'RAW_PURCHASE' | 'TRADE_PURCHASE';
 
   export interface Receipt {
     acceptedQuantity: Decimal;
@@ -575,6 +622,7 @@ export namespace FdmgongchangStageStockApi {
     id: number;
     itemCode: string;
     location: string;
+    materialKind?: MaterialKind | null;
     operatorName?: null | string;
     productName?: null | string;
     purchaseNo?: null | string;
@@ -584,7 +632,14 @@ export namespace FdmgongchangStageStockApi {
     remark?: null | string;
     sourceType: ReceiptSource;
     stage: string;
+    /** RECEIVED 已收货 / VOIDED 已作废；为空视为已收货。 */
+    status?: null | string;
+    stockInCode?: null | string;
     supplierName?: null | string;
+    unit?: null | string;
+    voidReason?: null | string;
+    voidedAt?: number | string;
+    voidedBy?: null | string;
   }
 
   export interface ReceiptPageReq extends PageParam {
@@ -775,9 +830,10 @@ export function getShipmentPage(
   );
 }
 
-export function getRawOpenLines() {
-  return requestClient.get<FdmgongchangStageStockApi.RawOpenLine[]>(
-    `${BASE}/receiving/raw-lines`,
+/** 采购单送到本厂、待收货的原料与辅料。 */
+export function getPurchaseLines() {
+  return requestClient.get<FdmgongchangStageStockApi.PurchaseLine[]>(
+    `${BASE}/receiving/purchase-lines`,
     { headers: factoryHeaders() },
   );
 }
@@ -789,12 +845,47 @@ export function getTradeOpenLines() {
   );
 }
 
-export function receiveRawPurchase(
-  data: FdmgongchangStageStockApi.RawReceiptReq,
+/** 采购收货：原料进原材料、辅料进辅料库存，回写采购单到货。 */
+export function receivePurchase(
+  data: FdmgongchangStageStockApi.PurchaseReceiptReq,
 ) {
-  return requestClient.post<number>(`${BASE}/receiving/raw`, data, {
+  return requestClient.post<number>(`${BASE}/receiving/purchase`, data, {
     headers: factoryHeaders(),
   });
+}
+
+/** 作废采购收货：扣回库存，冲回采购单到货。 */
+export function voidReceipt(data: { id: number; reason: string }) {
+  return requestClient.post<boolean>(`${BASE}/receiving/void`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 开工序单时带出的辅料：订单 / 任务定的用量、已领数量和可领库存。 */
+export function getAuxPlan(params: {
+  assignmentId?: string;
+  contractId?: string;
+  process?: string;
+  productionOrderItemId?: number;
+}) {
+  return requestClient.get<FdmgongchangStageStockApi.AuxPlan[]>(
+    `${BASE}/order/aux-plan`,
+    { headers: factoryHeaders(), params },
+  );
+}
+
+/** 搜辅料产品（设任务辅料、辅料入库用）。 */
+export function searchStageAuxProducts(keyword: string) {
+  return requestClient.get<
+    Array<{
+      category?: null | string;
+      code?: null | string;
+      displayName?: null | string;
+      id: string;
+      name: string;
+      unit?: null | string;
+    }>
+  >(`${BASE}/aux-products`, { params: { keyword } });
 }
 
 export function receiveTradePurchase(
@@ -836,6 +927,7 @@ export function getStageRouteOptions() {
 /** 设定外贸自制任务的工艺：合同进度按最后一道回写；steps 为空时清除，回到按包装回写。 */
 export function saveTaskRoute(data: {
   assignmentId: string;
+  auxUsages?: FdmgongchangStageStockApi.AuxUsage[];
   contractId: string;
   routeId?: number;
   steps: string[];

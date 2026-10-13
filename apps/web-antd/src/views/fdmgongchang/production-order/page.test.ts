@@ -43,6 +43,7 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
   getLastRoute: mocks.lastRoute,
+  searchAuxProducts: vi.fn().mockResolvedValue([]),
   getRouteOptions: vi.fn().mockResolvedValue({
     processes: [
       ['SLICE', '开片', 'SHEET', '片材', ['BOARD']],

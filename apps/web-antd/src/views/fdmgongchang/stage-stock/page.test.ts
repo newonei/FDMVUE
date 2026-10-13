@@ -46,7 +46,10 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   getOrder: vi.fn(),
   getOrderOperators: vi.fn().mockResolvedValue([]),
   getOrderPage: mocks.orderPage,
-  getRawOpenLines: mocks.rawLines,
+  getAuxPlan: vi.fn().mockResolvedValue([]),
+  getPurchaseLines: mocks.rawLines,
+  searchStageAuxProducts: vi.fn().mockResolvedValue([]),
+  voidReceipt: vi.fn(),
   getReceiptPage: mocks.receiptPage,
   getTradeOpenLines: mocks.tradeLines,
   getStageStockOptions: mocks.options,
@@ -68,7 +71,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   getStockPage: mocks.stockPage,
   getTxnPage: mocks.txnPage,
   previewItemCodes: vi.fn().mockResolvedValue([]),
-  receiveRawPurchase: mocks.receiveRaw,
+  receivePurchase: mocks.receiveRaw,
   receiveStock: vi.fn(),
   receiveTradePurchase: mocks.receiveTrade,
   reportOrder: vi.fn(),
@@ -133,19 +136,23 @@ const options: Api.Options = {
   textures: [{ label: '贝壳纹', value: 'SH' }],
 };
 
-const rawLine: Api.RawOpenLine = {
-  expectedDate: [2026, 10, 20],
-  lineId: 11,
+const rawLine: Api.PurchaseLine = {
+  category: '原材料(YC2400000)',
+  kind: 'RAW',
+  orderCode: 'CG20261008001',
   orderDate: [2026, 10, 8],
-  purchaseId: 7,
-  purchaseNo: 'CG20261008-001',
+  orderId: 'o7',
+  orderLineId: 'l11',
+  productCode: 'YC2400001',
+  productId: 'p-tpe',
+  productName: '黄石-TPE粒子',
   quantity: 1000,
-  rawCategory: 'MAIN',
   rawMaterialCode: 'MAT-TPE',
   rawMaterialName: 'TPE粒子',
   receivedQuantity: 600,
   remainingQuantity: 400,
   supplierName: '东莞原料厂',
+  unit: 'kg',
 };
 const tradeLine: Api.TradePurchaseLine = {
   arrivedQuantity: 0,
@@ -326,12 +333,12 @@ describe('stage stock page', () => {
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
     expect(after).toContain('1 待到');
-    expect(after).toContain('CG20261008-001');
+    expect(after).toContain('CG20261008001');
     expect(after).toContain('TPE粒子');
     expect(errors).toEqual([]);
   });
 
-  it('receives a raw purchase line into raw stock from 到货入库 (bought products go to the procurement warehouse)', async () => {
+  it('receives a purchase raw line into raw stock with the remembered raw material (bought products go to the procurement warehouse)', async () => {
     const errors: unknown[] = [];
     mockEmptyPage();
     mocks.receiveRaw.mockResolvedValue(1);
@@ -348,13 +355,19 @@ describe('stage stock page', () => {
     expect(document.body.textContent).toContain('东莞原料厂');
     clickButton('收货', host);
     await flush();
-    expect(document.body.textContent).toContain('原材料到货入库');
+    expect(document.body.textContent).toContain('原料到货入库');
     clickButton('确认收货');
     await flush();
     expect(mocks.receiveRaw).toHaveBeenCalledWith(
-      expect.objectContaining({ purchaseLineId: 11, quantity: 400 }),
+      expect.objectContaining({
+        acceptedQuantity: 400,
+        orderId: 'o7',
+        orderLineId: 'l11',
+        quantity: 400,
+        rawMaterialCode: 'MAT-TPE',
+      }),
     );
-    expect(mocks.receiveRaw.mock.calls[0]![0].batchNo).toMatch(/^RM\d{4}$/);
+    expect(mocks.receiveRaw.mock.calls[0]![0].batchNo).toBeUndefined();
 
     // 外采成品到货已改由采购部门在仓库管理入库，工厂这里不再列外采待到货
     expect(host.textContent).not.toContain('外采成品待到货');

@@ -360,11 +360,6 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
             description: '批次、资料与费用',
             link: { path: '/fdmprocurement/platform-customs' },
           },
-          {
-            title: '原材料采购',
-            description: '工厂原料下单与到货',
-            link: { path: '/fdmprocurement/raw-purchase' },
-          },
         ],
       },
       {

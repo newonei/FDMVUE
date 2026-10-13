@@ -193,6 +193,13 @@ function producedQty(item: Api.Item) {
               <span>{{ i.productName }}</span>
               <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
               <span v-if="i.printing" class="text-xs text-muted-foreground">{{ i.printing }}</span>
+              <span v-if="(i.auxUsages ?? []).length > 0" class="text-xs text-muted-foreground">
+                辅料：{{
+                  (i.auxUsages ?? [])
+                    .map((a) => `${a.productName} 每件 ${num(a.perUnit)}${a.unit ?? ''}`)
+                    .join('，')
+                }}
+              </span>
               <span v-if="i.remark" class="text-xs text-warning">备注：{{ i.remark }}</span>
               <span v-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
                 工艺：旧单没有定工艺，从已包装成品交货

@@ -171,7 +171,15 @@ export interface PurchaseOrderEntry {
   /** 整单折扣 %，不传为 100 */
   discountRate?: Decimal;
   remark?: string;
+  /** 收货工厂：选了就由该工厂确认收货（只能买原料、辅料），不进采购仓库 */
+  receiveFactoryId?: number;
   lines: PurchaseOrderEntryLine[];
+}
+/** 采购单可选的收货工厂；工厂模块未启用时为空。 */
+export function getReceiveFactories() {
+  return requestClient.get<{ id: number; name: string }[]>(
+    `${procurementBase}/receive-factories`,
+  );
 }
 /** 新建采购单：关联合同时写进合同，不关联时为独立采购单。 */
 export function createProcurementOrder(data: PurchaseOrderEntry) {

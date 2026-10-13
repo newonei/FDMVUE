@@ -136,6 +136,9 @@ watch(() => props.orderId, load, { immediate: true });
               <Tag v-if="record.status === 'VOIDED'" :title="record.voidReason">
                 已作废
               </Tag>
+              <Tag v-if="record.kind === 'FACTORY_PURCHASE'" color="orange">
+                工厂收货
+              </Tag>
               <Tag v-if="record.directShip" color="blue">
                 直发 · {{ record.stockOutCode }}
               </Tag>

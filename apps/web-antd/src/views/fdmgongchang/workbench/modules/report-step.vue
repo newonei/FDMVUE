@@ -120,7 +120,7 @@ function next() {
 
       <section v-if="!job.createFinish && job.finish && job.order" class="flex flex-col gap-2.5 rounded-2xl bg-card p-4">
         <span class="text-[15px] font-bold">有没用完的料？退回去（没有就不用填）</span>
-        <div v-for="input in job.order.inputs ?? []" :key="input.id" class="flex flex-col gap-1.5">
+        <div v-for="input in (job.order.inputs ?? []).filter((i) => i.stage !== 'AUX')" :key="input.id" class="flex flex-col gap-1.5">
           <span class="text-[13px] text-muted-foreground">
             {{ attrSummary(input.stage, input.item, labels) || input.itemCode }} · 最多退 {{ formatQty((toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)) }} {{ source?.unit }}
           </span>

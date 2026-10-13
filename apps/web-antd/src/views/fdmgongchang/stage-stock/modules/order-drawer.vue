@@ -30,6 +30,7 @@ import { getOpenProductionOrders } from '#/api/fdmgongchang/production-order';
 import { getScheduleTasks } from '#/api/fdmgongchang/schedule';
 import {
   createOrder,
+  getAuxPlan,
   getMakeTasks,
   getOrder,
   getOrderOperators,
@@ -54,9 +55,12 @@ import {
   makeTaskRemaining,
   nextKey,
   normalizeForStage,
+  pickAuxStocks,
   processLabel,
   recipeCheck,
   recipePicks,
+  stockUnit,
+  suggestAuxQuantity,
   sumQty,
   toNumber,
   validateOutputs,
@@ -365,7 +369,8 @@ const defaultMaterial = computed(
 
 const inputs = computed<InputLine[]>(() => {
   if (props.mode === 'report') {
-    return (order.value?.inputs ?? []).map((line) => ({
+    // 辅料领用行不算工序领料，不参与产出预填和损耗
+    return (order.value?.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
       quantity:
         (toNumber(line.quantity) ?? 0) -
         (toNumber(line.returnedQuantity) ?? 0),
@@ -404,6 +409,65 @@ const inputUnit = computed(
   () => stageOf(inputs.value[0]?.stock.stage ?? sourceStage.value)?.unit ?? '',
 );
 const inputTotal = computed(() => sumQty(inputs.value.map((l) => l.quantity)));
+
+/**
+ * 辅料领用：关联的工厂订单或外贸任务定了在这道工序领的辅料时，按本次领料数量 × 每件用量带出建议数
+ * （先进先出，扣掉已领的），可改；定制辅料只列本合同的。
+ */
+const auxPlan = ref<Api.AuxPlan[]>([]);
+const auxQty = ref<Record<number, null | number>>({});
+const auxTouched = ref(false);
+let auxSeq = 0;
+async function loadAuxPlan() {
+  const mine = ++auxSeq;
+  auxTouched.value = false;
+  auxQty.value = {};
+  let params: Parameters<typeof getAuxPlan>[0] | undefined;
+  if (linkedProductionItemId.value) {
+    params = { process: processCode.value, productionOrderItemId: linkedProductionItemId.value };
+  } else if (linkedTask.value) {
+    params = {
+      assignmentId: linkedTask.value.assignmentId,
+      contractId: linkedTask.value.contractId,
+      process: processCode.value,
+    };
+  }
+  if (!params || props.mode !== 'create') {
+    auxPlan.value = [];
+    return;
+  }
+  try {
+    const plan = await getAuxPlan(params);
+    if (mine !== auxSeq) return;
+    auxPlan.value = plan;
+    fillAux();
+  } catch {
+    if (mine === auxSeq) auxPlan.value = [];
+  }
+}
+function fillAux() {
+  if (auxTouched.value) return;
+  const next: Record<number, null | number> = {};
+  for (const plan of auxPlan.value) {
+    for (const pick of pickAuxStocks(plan.stocks, suggestAuxQuantity(plan, inputTotal.value)))
+      next[pick.stockId] = pick.quantity;
+  }
+  auxQty.value = next;
+}
+function setAuxQty(stockId: number, value: null | number | string | undefined) {
+  auxTouched.value = true;
+  auxQty.value = {
+    ...auxQty.value,
+    [stockId]: value === null || value === undefined || value === '' ? null : Number(value),
+  };
+}
+watch([linkedProductionItemId, linkedAssignmentId, processCode], () => void loadAuxPlan());
+watch(inputTotal, fillAux);
+const auxInputs = computed(() =>
+  Object.entries(auxQty.value)
+    .filter(([, quantity]) => quantity !== null && quantity > 0)
+    .map(([stockId, quantity]) => ({ quantity: quantity as number, stockId: Number(stockId) })),
+);
 const goodTotal = computed(() =>
   sumQty(outputs.value.map((o) => o.goodQuantity)),
 );
@@ -846,6 +910,7 @@ async function submit() {
           quantity: l.quantity,
           stockId: l.stock.id,
         })),
+        auxInputs: auxInputs.value,
         operatorUserId: operatorUserId.value,
         outputs: finish.value ? outputPayload() : [],
         pieceworks: finish.value ? piecePayload() : [],
@@ -1514,6 +1579,59 @@ watch(processCode, warnNoPatterns);
                 placeholder="选填"
               />
             </label>
+          </div>
+        </section>
+
+        <!-- 辅料领用：关联的订单 / 任务定了辅料用量时出现 -->
+        <section
+          v-if="mode === 'create' && auxPlan.length > 0"
+          v-show="shown('other')"
+          class="flex flex-col gap-2"
+        >
+          <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
+            辅料领用
+            <span class="text-xs font-normal text-muted-foreground">
+              按本次领料 {{ formatQty(inputTotal) }} × 每件用量带出，扣掉已领的；可改，不领填 0
+            </span>
+          </h3>
+          <div
+            v-for="plan in auxPlan"
+            :key="plan.productId"
+            class="flex flex-col gap-1 rounded-md border border-border px-3 py-2 text-xs"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-sm">{{ plan.productName }}
+                <span class="text-xs text-muted-foreground">{{ plan.productCode }}</span></span>
+              <span class="text-muted-foreground">
+                每件 {{ formatQty(plan.perUnit) }} {{ plan.unit }} · 已领 {{ formatQty(plan.issuedQuantity) }}
+                <template v-if="plan.orderQuantity"> · 订单共需 {{ formatQty(Number(plan.orderQuantity) * Number(plan.perUnit)) }}</template>
+              </span>
+            </div>
+            <p v-if="plan.stocks.length === 0" class="m-0 text-warning">
+              辅料库存里没有这种辅料，请先到「到货入库」收货或「辅料」库存入库。
+            </p>
+            <div
+              v-for="stock in plan.stocks"
+              :key="stock.id"
+              class="flex flex-wrap items-center gap-2"
+            >
+              <span class="min-w-[12rem] text-muted-foreground">
+                批次 {{ stock.batchNo }} · {{ stock.location }} · 有 {{ formatQty(stock.quantity) }}
+                {{ stockUnit('AUX', stock.item) }}
+                <template v-if="stock.item?.contractCode"> · 定制 {{ stock.item.contractCode }}</template>
+              </span>
+              <InputNumber
+                :id="`order-aux-${stock.id}`"
+                :max="Number(stock.quantity)"
+                :min="0"
+                :precision="3"
+                :value="auxQty[stock.id] ?? undefined"
+                size="small"
+                :style="{ width: '7rem' }"
+                placeholder="领用数量"
+                @change="(v) => setAuxQty(stock.id, v as null | number)"
+              />
+            </div>
           </div>
         </section>
       </div>

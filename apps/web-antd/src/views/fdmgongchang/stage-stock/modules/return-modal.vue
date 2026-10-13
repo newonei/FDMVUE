@@ -7,7 +7,14 @@ import { Alert, Input, InputNumber, Modal, Spin } from 'ant-design-vue';
 
 import { getOrder, returnOrderMaterial } from '#/api/fdmgongchang/stage-stock';
 
-import { attrSummary, formatQty, makeLabels, sumQty, toNumber } from '../model';
+import {
+  attrSummary,
+  formatQty,
+  makeLabels,
+  stockUnit,
+  sumQty,
+  toNumber,
+} from '../model';
 
 /** 在制工序单退回余料：退回到原来那一行库存（同批次、同库位）。 */
 const props = defineProps<{ options: Api.Options; orderId?: number }>();
@@ -102,7 +109,7 @@ async function submit() {
             <span>领 {{ formatQty(line.quantity) }}，已退
               {{ formatQty(line.returnedQuantity ?? 0) }}，最多还能退
               <b class="tabular-nums">{{ formatQty(remaining(line)) }}</b>
-              {{ stageOf(line.stage)?.unit }}</span>
+              {{ stockUnit(line.stage, line.item, stageOf(line.stage)?.unit) }}</span>
           </div>
           <InputNumber
             :id="`return-${line.id}`"
