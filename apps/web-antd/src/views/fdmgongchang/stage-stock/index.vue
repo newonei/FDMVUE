@@ -30,7 +30,7 @@ import TxnPanel from './modules/txn-panel.vue';
 
 /**
  * 工厂部门 · 工序库存：每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
- * 宽屏左侧是生产链（竖排），右侧是库存 / 工序单 / 流水 / 设置。
+ * 顶部是六个业务页签；「库存」页签里左侧是库存阶段目录，右侧是当前阶段的库存明细。
  */
 defineOptions({ name: 'FdmGongchangStageStock' });
 
@@ -207,10 +207,12 @@ async function onSettingSaved() {
 <template>
   <Page>
     <div class="flex flex-col gap-4">
-      <header class="flex flex-wrap items-end justify-between gap-3">
+      <header class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <h1 class="m-0 text-xl font-semibold tracking-tight">工序库存</h1>
+            <h1 class="m-0 text-[26px] font-semibold leading-tight tracking-tight">
+              工序库存
+            </h1>
             <FactorySwitch
               v-if="factory.factories.value.length > 0"
               :factories="factory.factories.value"
@@ -218,12 +220,13 @@ async function onSettingSaved() {
               @change="switchFactory"
             />
           </div>
-          <p class="m-0 mt-1 text-sm text-muted-foreground">
+          <p class="m-0 mt-1.5 text-sm text-muted-foreground">
             每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
           </p>
         </div>
         <Button
           v-if="canOperate && options"
+          size="large"
           type="primary"
           @click="openCreate()"
         >
@@ -268,45 +271,44 @@ async function onSettingSaved() {
         <Spin />
       </div>
 
-      <div
-        v-else
-        :key="factory.factoryId.value ?? 0"
-        class="flex flex-col gap-4 xl:flex-row xl:items-start"
-      >
-        <aside class="flex flex-col gap-2 xl:sticky xl:top-2 xl:w-60 xl:shrink-0">
-          <StageRail
-            :active="activeTab === 'stock' ? activeStage : undefined"
-            :options="options"
-            :summary="summary"
-            @select="selectStage"
-          />
-          <p class="m-0 px-1 text-xs leading-relaxed text-muted-foreground">
-            每道工序只能向上游库存领料；跳过工序时可以领更早阶段的库存，例如冲裁直接领片材。
-          </p>
-        </aside>
-
-        <section
-          class="min-w-0 flex-1 rounded-lg border border-border bg-card px-4 pb-4"
-        >
-          <Tabs v-model:active-key="activeTab">
-            <Tabs.TabPane key="stock" tab="库存">
-              <StockPanel
-                :options="options"
-                :refresh-key="refreshKey"
-                :stage="activeStage"
-                @changed="onChanged"
-                @create="openCreate"
-                @ship="openShipment()"
-                @txn="showTxns"
-              />
-            </Tabs.TabPane>
-            <Tabs.TabPane key="orders">
-              <template #tab>
-                工序单
-                <span v-if="wipCount > 0" class="ml-1 text-xs text-warning">
-                  {{ wipCount }} 在制
-                </span>
-              </template>
+      <div v-else :key="factory.factoryId.value ?? 0" class="stage-stock">
+        <Tabs v-model:active-key="activeTab" class="stage-stock__tabs">
+          <Tabs.TabPane key="stock" tab="库存">
+            <div
+              class="flex flex-col overflow-hidden rounded-lg border border-border bg-card lg:flex-row"
+            >
+              <aside
+                class="shrink-0 border-b border-border lg:w-[220px] lg:border-b-0 lg:border-r"
+              >
+                <StageRail
+                  :active="activeStage"
+                  :options="options"
+                  :summary="summary"
+                  @select="selectStage"
+                />
+              </aside>
+              <div class="min-w-0 flex-1 p-4 lg:px-6 lg:py-5">
+                <StockPanel
+                  :options="options"
+                  :refresh-key="refreshKey"
+                  :stage="activeStage"
+                  :summary="summary"
+                  @changed="onChanged"
+                  @create="openCreate"
+                  @ship="openShipment()"
+                  @txn="showTxns"
+                />
+              </div>
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="orders">
+            <template #tab>
+              工序单
+              <span v-if="wipCount > 0" class="ml-1 text-xs text-warning">
+                {{ wipCount }} 在制
+              </span>
+            </template>
+            <div class="stage-stock__card">
               <OrderPanel
                 :options="options"
                 :refresh-key="refreshKey"
@@ -314,50 +316,58 @@ async function onSettingSaved() {
                 @create="openCreate()"
                 @report="openReport"
               />
-            </Tabs.TabPane>
-            <Tabs.TabPane key="trade">
-              <template #tab>
-                外贸订单
-                <span v-if="tradePending > 0" class="ml-1 text-xs text-primary">
-                  {{ tradePending }} 待生产
-                </span>
-              </template>
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="trade">
+            <template #tab>
+              外贸订单
+              <span v-if="tradePending > 0" class="ml-1 text-xs text-primary">
+                {{ tradePending }} 待生产
+              </span>
+            </template>
+            <div class="stage-stock__card">
               <TradePanel
                 :refresh-key="refreshKey"
                 @pending="(count) => (tradePending = count)"
                 @produce="openProduce"
                 @ship="openShipment"
               />
-            </Tabs.TabPane>
-            <Tabs.TabPane key="receiving">
-              <template #tab>
-                到货入库
-                <span
-                  v-if="receivingPending > 0"
-                  class="ml-1 text-xs text-primary"
-                >
-                  {{ receivingPending }} 待到
-                </span>
-              </template>
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="receiving">
+            <template #tab>
+              到货入库
+              <span
+                v-if="receivingPending > 0"
+                class="ml-1 text-xs text-primary"
+              >
+                {{ receivingPending }} 待到
+              </span>
+            </template>
+            <div class="stage-stock__card">
               <ReceivingPanel
                 :refresh-key="refreshKey"
                 @pending="(count) => (receivingPending = count)"
                 @receive-raw="openRawReceipt"
                 @receive-trade="openTradeReceipt"
               />
-            </Tabs.TabPane>
-            <Tabs.TabPane key="txns" tab="库存流水">
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="txns" tab="库存流水">
+            <div class="stage-stock__card">
               <TxnPanel
                 v-model:item-code="txnItemCode"
                 :options="options"
                 :refresh-key="refreshKey"
               />
-            </Tabs.TabPane>
-            <Tabs.TabPane key="settings" tab="基础设置">
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="settings" tab="基础设置">
+            <div class="stage-stock__card">
               <SettingPanel :options="options" @saved="onSettingSaved" />
-            </Tabs.TabPane>
-          </Tabs>
-        </section>
+            </div>
+          </Tabs.TabPane>
+        </Tabs>
 
         <OrderDrawer
           v-model:open="drawerOpen"
@@ -386,3 +396,22 @@ async function onSettingSaved() {
     </div>
   </Page>
 </template>
+
+<style scoped>
+.stage-stock__card {
+  padding: 16px 20px 20px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.stage-stock__tabs > :deep(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+
+/* 只调整页面这一层的页签，不影响各面板内部的页签 */
+.stage-stock__tabs > :deep(.ant-tabs-nav .ant-tabs-nav-list > .ant-tabs-tab) {
+  padding: 10px 4px;
+  font-size: 15px;
+}
+</style>

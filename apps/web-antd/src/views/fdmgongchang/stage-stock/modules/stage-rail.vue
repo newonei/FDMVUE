@@ -3,11 +3,12 @@ import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-
 
 import { computed } from 'vue';
 
-import { formatQty, toNumber } from '../model';
+import { formatQty, groupStages, toNumber } from '../model';
 
 /**
- * 生产链：宽屏（≥1280）时竖排在页面左侧，阶段之间标出产出下一段的工序和在制数量；
- * 较窄时改为顶部方块网格（1024 起一排 9 格），9 段都能一眼看全，不需要横向滚动。
+ * 库存阶段目录：按「原料与板材 / 半成品 / 成品」分组，每行显示该阶段的库存合计和单位。
+ * 宽屏（≥1024）竖排在库存面板左侧；较窄时改为分组的方块网格，放在明细上方。
+ * 每个阶段只有一种单位，合计只在阶段内部相加。
  */
 const props = defineProps<{
   active?: string;
@@ -17,155 +18,134 @@ const props = defineProps<{
 
 const emit = defineEmits<{ select: [stage: string] }>();
 
-const cells = computed(() =>
-  props.options.stages.map((stage, index) => {
-    const total = props.summary?.stages.find((s) => s.stage === stage.code);
-    const incoming = props.options.processes.find(
-      (p) => p.outputStage === stage.code,
-    );
-    const wip = incoming
-      ? props.summary?.processes.find((p) => p.process === incoming.code)
-      : undefined;
-    const sourceUnit = incoming
-      ? props.options.stages.find((s) => s.code === incoming.sources[0])?.unit
-      : undefined;
-    const quantity = toNumber(total?.quantity) ?? 0;
-    return {
-      incoming,
-      index,
-      quantity,
-      rowCount: total?.rowCount ?? 0,
-      sourceUnit,
-      stage,
-      wipQuantity:
-        (toNumber(wip?.inProgressQuantity) ?? 0) > 0
-          ? wip?.inProgressQuantity
-          : undefined,
-    };
-  }),
-);
-
-const wipOrders = computed(() =>
-  (props.summary?.processes ?? []).reduce(
-    (t, p) => t + (p.inProgressCount ?? 0),
-    0,
-  ),
+const groups = computed(() =>
+  groupStages(props.options.stages).map((group) => ({
+    label: group.label,
+    cells: group.stages.map((stage) => {
+      const total = props.summary?.stages.find((s) => s.stage === stage.code);
+      return {
+        quantity: props.summary ? (toNumber(total?.quantity) ?? 0) : undefined,
+        stage,
+      };
+    }),
+  })),
 );
 </script>
 
 <template>
-  <nav
-    aria-label="生产链"
-    class="rounded-lg border border-border bg-card"
-  >
-    <div
-      class="flex items-center justify-between gap-2 border-b border-border px-3 py-2"
-    >
-      <span class="text-sm font-semibold">生产链</span>
-      <span
-        v-if="wipOrders > 0"
-        class="rounded-full bg-warning/15 px-2 text-xs leading-5 text-warning"
-      >
-        {{ wipOrders }} 张单在制
-      </span>
-    </div>
-
-    <!-- 宽屏：竖排时间线 -->
-    <ol class="m-0 hidden list-none flex-col p-2 xl:flex">
-      <template v-for="cell in cells" :key="cell.stage.code">
-        <li
-          v-if="cell.index > 0"
-          class="flex min-h-6 items-center gap-2 pl-[13px] text-[11px] text-muted-foreground"
-          aria-hidden="true"
+  <nav aria-label="库存阶段">
+    <h2 class="m-0 hidden px-5 pb-2 pt-5 text-base font-semibold lg:block">
+      库存阶段
+    </h2>
+    <div class="flex flex-col gap-3 p-3 lg:gap-4 lg:px-3 lg:pb-5 lg:pt-2">
+      <section v-for="group in groups" :key="group.label">
+        <h3
+          class="m-0 mb-1.5 border-l-[3px] border-primary pl-2 text-[13px] font-medium leading-4 text-muted-foreground lg:mx-2"
         >
-          <span class="h-6 w-0.5 shrink-0 rounded bg-border"></span>
-          <span class="truncate">{{ cell.incoming?.label }}</span>
-          <span
-            v-if="cell.wipQuantity"
-            class="ml-auto shrink-0 whitespace-nowrap rounded-full bg-warning/15 px-1.5 leading-[18px] text-warning"
-          >
-            在制 {{ formatQty(cell.wipQuantity) }} {{ cell.sourceUnit }}
-          </span>
-        </li>
-        <li>
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
-            :class="
-              active === cell.stage.code
-                ? 'bg-primary/10 text-primary'
-                : 'text-foreground hover:bg-accent'
-            "
-            :aria-current="active === cell.stage.code ? 'true' : undefined"
-            @click="emit('select', cell.stage.code)"
-          >
-            <span
-              class="size-3 shrink-0 rounded-full border-2"
-              :class="
-                active === cell.stage.code
-                  ? 'border-primary bg-primary'
-                  : cell.quantity > 0
-                    ? 'border-primary/60 bg-card'
-                    : 'border-border bg-card'
-              "
-            ></span>
-            <span class="min-w-0 flex-1 truncate text-sm">
-              {{ cell.stage.label }}
-            </span>
-            <span
-              class="whitespace-nowrap text-sm font-semibold tabular-nums"
-              :class="cell.quantity > 0 ? '' : 'text-muted-foreground'"
+          {{ group.label }}
+        </h3>
+        <ul
+          class="stage-rail__list m-0 grid list-none gap-1.5 p-0 lg:flex lg:flex-col lg:gap-0.5"
+        >
+          <li v-for="cell in group.cells" :key="cell.stage.code">
+            <button
+              type="button"
+              class="stage-rail__item"
+              :class="{ 'is-active': active === cell.stage.code }"
+              :aria-current="active === cell.stage.code ? 'true' : undefined"
+              :title="cell.stage.label"
+              @click="emit('select', cell.stage.code)"
             >
-              {{ formatQty(cell.quantity) }}
-              <small class="text-xs font-normal text-muted-foreground">
-                {{ cell.stage.unit }}
-              </small>
-            </span>
-          </button>
-        </li>
-      </template>
-      <li
-        class="flex min-h-6 items-center gap-2 pl-[13px] text-[11px] text-muted-foreground"
-        aria-hidden="true"
-      >
-        <span class="h-6 w-0.5 shrink-0 rounded bg-border"></span>
-        <span>外贸出货</span>
-      </li>
-    </ol>
-
-    <!-- 窄屏：方块网格 -->
-    <div class="grid grid-cols-3 gap-1.5 p-2 sm:grid-cols-5 lg:grid-cols-9 xl:hidden">
-      <button
-        v-for="cell in cells"
-        :key="cell.stage.code"
-        type="button"
-        class="flex min-w-0 flex-col items-start rounded-md border px-2 py-1.5 text-left lg:px-1.5"
-        :class="
-          active === cell.stage.code
-            ? 'border-primary bg-primary/10'
-            : 'border-border'
-        "
-        :aria-current="active === cell.stage.code ? 'true' : undefined"
-        @click="emit('select', cell.stage.code)"
-      >
-        <span
-          class="w-full text-xs leading-4 text-muted-foreground lg:text-[11px]"
-        >
-          {{ cell.stage.label }}
-        </span>
-        <span class="text-sm font-semibold tabular-nums">
-          {{ formatQty(cell.quantity) }}
-          <small class="text-[11px] font-normal text-muted-foreground">
-            {{ cell.stage.unit }}
-          </small>
-        </span>
-        <span
-          v-if="cell.wipQuantity"
-          class="mt-0.5 truncate text-[11px] text-warning"
-        >
-          {{ cell.incoming?.label }}在制 {{ formatQty(cell.wipQuantity) }}
-        </span>
-      </button>
+              <span class="stage-rail__dot" aria-hidden="true"></span>
+              <span class="min-w-0 flex-1 truncate">{{ cell.stage.label }}</span>
+              <span class="stage-rail__qty">
+                <template v-if="cell.quantity === undefined">—</template>
+                <template v-else>{{ formatQty(cell.quantity) }}</template>
+                <small>{{ cell.stage.unit }}</small>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
     </div>
   </nav>
 </template>
+
+<style scoped>
+.stage-rail__list {
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+.stage-rail__item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.stage-rail__item:hover {
+  background: hsl(var(--primary) / 6%);
+}
+
+.stage-rail__item:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+.stage-rail__item.is-active {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-color: transparent;
+}
+
+/* 未选中时是一条细竖线，选中时换成蓝色圆点 */
+.stage-rail__dot {
+  flex-shrink: 0;
+  width: 2px;
+  height: 14px;
+  background: hsl(var(--border));
+  border-radius: 2px;
+}
+
+.stage-rail__item.is-active .stage-rail__dot {
+  width: 7px;
+  height: 7px;
+  background: hsl(var(--primary));
+  border-radius: 50%;
+}
+
+.stage-rail__qty {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stage-rail__qty small {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+
+.stage-rail__item.is-active .stage-rail__qty small {
+  color: hsl(var(--primary) / 75%);
+}
+
+@media (min-width: 1024px) {
+  .stage-rail__item {
+    border-color: transparent;
+  }
+}
+</style>
