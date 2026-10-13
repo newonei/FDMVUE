@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
+import type { AuxUsageDraft } from '../../shared/aux';
 import type { RouteDraft } from '../shared';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
@@ -15,14 +16,18 @@ import {
   createProductionOrder,
   getLastRoute,
   getRouteOptions,
+  searchAuxProducts,
   searchOrderProducts,
 } from '#/api/fdmgongchang/production-order';
 
+import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/aux';
+import AuxUsageEditor from '../../shared/aux-usage-editor.vue';
 import { routeProblem, sortSteps, specText } from '../shared';
 import RoutePicker from './route-picker.vue';
 
 /**
- * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量，并为每个产品定好要走的工序（工艺由下单人决定，工厂只能退回）。
+ * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量，并为每个产品定好要走的工序（工艺由下单人决定，工厂只能退回）
+ * 和要用的辅料（每件用量，开工序单时按用量带出领用数）。
  * 产品规格以下单这一刻的产品档案为准，之后产品改了不影响这张单。
  * copyFrom：从「我下的单」复制（例如被退回后改一改重新提交），带出工厂、用途、备注和产品数量，交期重新选。
  */
@@ -31,6 +36,7 @@ const emit = defineEmits<{ created: [id: number] }>();
 const open = defineModel<boolean>('open', { required: true });
 
 interface Line {
+  aux: AuxUsageDraft[];
   product: Api.Product;
   quantity: null | number;
   remark: string;
@@ -80,6 +86,7 @@ watch(open, (value) => {
   purpose.value = src?.purpose ?? '';
   remark.value = src?.remark ?? '';
   lines.value = (src?.items ?? []).map((i) => ({
+    aux: toAuxDrafts(i.auxUsages),
     product: fromSnapshot(i),
     quantity: Number(i.quantity) || null,
     remark: i.remark ?? '',
@@ -149,6 +156,7 @@ async function defaultRoute(line: Line) {
     const last = await getLastRoute(id, line.product.id);
     const options = routeOptions.value;
     if (id !== factoryId.value || line.route.steps.length > 0) return;
+    if (last && line.aux.length === 0) line.aux = toAuxDrafts(last.auxUsages);
     if (last && last.steps.length > 0) {
       line.route = {
         routeId: options?.routes.some((r) => r.id === last.routeId) ? (last.routeId ?? undefined) : undefined,
@@ -165,7 +173,7 @@ async function defaultRoute(line: Line) {
 
 function add(p: Api.Product) {
   if (pickedIds.value.has(p.id)) return;
-  lines.value = [...lines.value, { product: p, quantity: null, remark: '', route: { steps: [] } }];
+  lines.value = [...lines.value, { aux: [], product: p, quantity: null, remark: '', route: { steps: [] } }];
   void defaultRoute(lines.value[lines.value.length - 1]!);
 }
 
@@ -200,9 +208,9 @@ async function submit() {
     return;
   }
   for (const l of lines.value) {
-    const problem = routeProblem(l.route.steps, options.processes);
+    const problem = routeProblem(l.route.steps, options.processes) || auxProblem(l.aux);
     if (problem) {
-      error.value = `「${l.product.displayName ?? l.product.name}」的工艺：${problem}`;
+      error.value = `「${l.product.displayName ?? l.product.name}」：${problem}`;
       return;
     }
   }
@@ -211,6 +219,7 @@ async function submit() {
     const id = await createProductionOrder({
       factoryId: factoryId.value,
       items: lines.value.map((l) => ({
+        auxUsages: auxPayload(l.aux),
         productId: l.product.id,
         quantity: l.quantity as number,
         remark: l.remark.trim() || undefined,
@@ -309,6 +318,13 @@ async function submit() {
             <button class="text-xs text-destructive hover:underline" type="button" @click="remove(l.product.id)">删除</button>
           </div>
           <RoutePicker :id="`po-route-${l.product.id}`" v-model="l.route" :options="routeOptions" />
+          <AuxUsageEditor
+            :id="`po-aux-${l.product.id}`"
+            v-model="l.aux"
+            :options="routeOptions"
+            :search="searchAuxProducts"
+            :steps="l.route.steps"
+          />
         </div>
       </section>
 

@@ -5,6 +5,7 @@ import {
   entryErrors,
   entryPayload,
   entryTotals,
+  materialKind,
   parsePastedLines,
   setRowGift,
   setRowPrice,
@@ -118,5 +119,27 @@ describe('粘贴导入产品明细', () => {
       arrivalDate: '2026-10-20',
       remark: '黄石付款',
     });
+  });
+
+  it('only lets raw materials and accessories go to a receiving factory', () => {
+    expect(materialKind('原材料(YC2400000)')).toBe('RAW');
+    expect(materialKind('辅料(FL2400000)')).toBe('AUX');
+    expect(materialKind('纸箱')).toBe('AUX');
+    expect(materialKind('耗材(HC2400000)')).toBeUndefined();
+    const lines = [
+      row({ category: '原材料', quantity: '1', unitPrice: '1' }),
+      {
+        ...row({ category: 'TPE瑜伽垫', quantity: '1', unitPrice: '1' }),
+        key: 'r2',
+      },
+    ];
+    const header = { companyId: 2, receiveFactoryId: 9, supplierId: 's1' };
+    expect(entryErrors(lines, header).lines).toEqual({
+      r2: '工厂只收原料、辅料，这一行请另开采购单',
+    });
+    expect(
+      entryErrors(lines, { ...header, receiveFactoryId: undefined }).lines,
+    ).toEqual({});
+    expect(entryPayload(lines, header, 'k').receiveFactoryId).toBe(9);
   });
 });

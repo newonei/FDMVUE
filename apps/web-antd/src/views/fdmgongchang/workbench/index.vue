@@ -107,7 +107,8 @@ async function continueOrder(order: Api.Order) {
   loading.value = true;
   try {
     job.order = await getWorkbenchOrder(order.id);
-    job.inputs = (job.order.inputs ?? []).map((line) => ({
+    // 辅料领用行不算工序领料，不参与产出预填
+    job.inputs = (job.order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
       quantity: (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0),
       side: line.laminationSide ?? undefined,
       stock: {

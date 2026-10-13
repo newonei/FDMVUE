@@ -3,35 +3,25 @@ import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-
 
 import { computed, ref, watch } from 'vue';
 
-import { Alert, Button, Drawer, Input, InputNumber } from 'ant-design-vue';
-import dayjs from 'dayjs';
+import { Alert, Button, Drawer, Input, InputNumber, Select } from 'ant-design-vue';
+
+import { receivePurchase } from '#/api/fdmgongchang/stage-stock';
 
 import {
-  receiveRawPurchase,
-  receiveTradePurchase,
-} from '#/api/fdmgongchang/stage-stock';
-
-import {
-  contractProductText,
   formatDate,
   formatQty,
-  guessPackedAttrs,
-  normalizeForStage,
+  MATERIAL_KIND_LABELS,
   RAW_CATEGORY_LABELS,
-  stageFields,
   toNumber,
-  validateTradeReceipt,
 } from '../model';
-import AttrFields from './attr-fields.vue';
 
 /**
- * 到货入库：原材料采购到货进「原材料」；外贸合同的外采到货进「已包装成品」，
- * 同时登记为合同的到货记录（实收、可入库、异常原因沿用采购部门原来的到货规则）。
+ * 采购收货：采购单送到本厂的原料进「原材料」、辅料进「辅料」库存，实收与合格数回写采购单。
+ * 原料第一次收时选它对应的原材料（配方、成本按原材料算），以后自动带出；采购单关联合同的辅料记为该合同的定制辅料。
  */
 const props = defineProps<{
+  line?: Api.PurchaseLine;
   options: Api.Options;
-  rawLine?: Api.RawOpenLine;
-  tradeLine?: Api.TradePurchaseLine;
 }>();
 const emit = defineEmits<{ saved: [message: string, stage: string] }>();
 const open = defineModel<boolean>('open', { required: true });
@@ -40,25 +30,27 @@ const quantity = ref<number>();
 const accepted = ref<number>();
 const acceptedTouched = ref(false);
 const reason = ref('');
-const attrs = ref<Api.ItemAttrs>({});
+const rawMaterialCode = ref<string>();
 const batchNo = ref('');
 const location = ref('');
 const remark = ref('');
 const errors = ref<string[]>([]);
 const saving = ref(false);
 
-const isTrade = computed(() => !!props.tradeLine);
-const stage = computed(() => (isTrade.value ? 'PACKED' : 'RAW'));
+const isRaw = computed(() => props.line?.kind === 'RAW');
+const stage = computed(() => (isRaw.value ? 'RAW' : 'AUX'));
 const stageOption = computed(() =>
   props.options.stages.find((s) => s.code === stage.value),
 );
-const remaining = computed(() =>
-  toNumber(
-    props.tradeLine?.remainingQuantity ?? props.rawLine?.remainingQuantity,
-  ) ?? 0,
-);
-const unit = computed(() =>
-  isTrade.value ? (props.tradeLine?.unit ?? '') : 'kg',
+const remaining = computed(() => toNumber(props.line?.remainingQuantity) ?? 0);
+const unit = computed(() => props.line?.unit ?? '');
+const rawOptions = computed(() =>
+  props.options.rawMaterials
+    .filter((m) => m.enabled || m.code === rawMaterialCode.value)
+    .map((m) => ({
+      label: `${m.name}（${m.code}）· ${RAW_CATEGORY_LABELS[m.category] ?? m.category}`,
+      value: m.code,
+    })),
 );
 
 watch(open, (value) => {
@@ -67,83 +59,67 @@ watch(open, (value) => {
   accepted.value = quantity.value;
   acceptedTouched.value = false;
   reason.value = '';
-  attrs.value = props.tradeLine
-    ? guessPackedAttrs(props.tradeLine, props.options)
-    : {};
-  batchNo.value = `${isTrade.value ? 'WC' : 'RM'}${dayjs().format('MMDD')}`;
+  rawMaterialCode.value = props.line?.rawMaterialCode ?? undefined;
+  batchNo.value = '';
   location.value = '';
   remark.value = '';
   errors.value = [];
 });
 
-/** 可入库默认跟着实收走，手动改过之后不再跟随。 */
+/** 合格数默认跟着实收走，手动改过之后不再跟随。 */
 watch(quantity, (value) => {
   if (!acceptedTouched.value) accepted.value = value;
 });
 
 function onAccepted(value: null | number | string | undefined) {
   acceptedTouched.value = true;
-  accepted.value = value === null || value === undefined ? undefined : Number(value);
+  accepted.value =
+    value === null || value === undefined ? undefined : Number(value);
 }
 
-const shortfall = computed(
-  () => isTrade.value && (accepted.value ?? 0) < (quantity.value ?? 0),
-);
+const shortfall = computed(() => (accepted.value ?? 0) < (quantity.value ?? 0));
 
 async function submit() {
+  const line = props.line;
+  if (!line) return;
   const problems: string[] = [];
-  if (!batchNo.value.trim()) problems.push('请填写批次。');
-  if (props.tradeLine) {
-    problems.push(
-      ...validateTradeReceipt({
-        accepted: accepted.value,
-        quantity: quantity.value,
-        reason: reason.value,
-        remaining: props.tradeLine.remainingQuantity,
-      }),
-    );
-  } else if (!quantity.value || quantity.value <= 0) {
-    problems.push('请填写大于 0 的到货数量。');
+  if (!quantity.value || quantity.value <= 0) {
+    problems.push('请填写大于 0 的实收数量。');
   } else if (quantity.value > remaining.value) {
-    problems.push(`到货数量超过这行采购待到货的 ${formatQty(remaining.value)} kg。`);
+    problems.push(
+      `实收超过这行采购待收的 ${formatQty(remaining.value)} ${unit.value}。`,
+    );
   }
+  if (accepted.value === undefined || accepted.value < 0) {
+    problems.push('请填写合格数量。');
+  } else if (accepted.value > (quantity.value ?? 0)) {
+    problems.push('合格数量不能超过实收数量。');
+  }
+  if (shortfall.value && !reason.value.trim())
+    problems.push('有不合格时请填写原因。');
+  if (isRaw.value && !rawMaterialCode.value)
+    problems.push('请选这种原料对应的原材料。');
   errors.value = problems;
   if (problems.length > 0) return;
   saving.value = true;
   try {
-    const common = {
-      batchNo: batchNo.value.trim(),
+    await receivePurchase({
+      acceptedQuantity: accepted.value,
+      batchNo: batchNo.value.trim() || undefined,
+      contractId: line.contractId ?? undefined,
+      exceptionReason: shortfall.value ? reason.value.trim() : undefined,
       location: location.value.trim() || undefined,
+      orderId: line.orderId,
+      orderLineId: line.orderLineId,
+      quantity: quantity.value!,
+      rawMaterialCode: isRaw.value ? rawMaterialCode.value : undefined,
       remark: remark.value.trim() || undefined,
-    };
-    if (props.tradeLine) {
-      await receiveTradePurchase({
-        ...common,
-        acceptedQuantity: accepted.value ?? 0,
-        attrs: normalizeForStage('PACKED', attrs.value),
-        contractId: props.tradeLine.contractId,
-        exceptionReason: shortfall.value ? reason.value.trim() : undefined,
-        orderId: props.tradeLine.orderId,
-        orderLineId: props.tradeLine.orderLineId,
-        quantity: quantity.value!,
-      });
-      emit(
-        'saved',
-        `已收货 ${formatQty(quantity.value)} ${unit.value}，${formatQty(accepted.value)} 进已包装成品，并登记到合同 ${props.tradeLine.contractCode}`,
-        'PACKED',
-      );
-    } else if (props.rawLine) {
-      await receiveRawPurchase({
-        ...common,
-        purchaseLineId: props.rawLine.lineId,
-        quantity: quantity.value!,
-      });
-      emit(
-        'saved',
-        `${props.rawLine.rawMaterialName} 已到货入库 ${formatQty(quantity.value)} kg`,
-        'RAW',
-      );
-    }
+    });
+    emit(
+      'saved',
+      `${line.productName} 已收货 ${formatQty(quantity.value)} ${unit.value}，${formatQty(accepted.value)} 进${stageOption.value?.label ?? ''}，采购单 ${line.orderCode} 已更新到货`,
+      stage.value,
+    );
     open.value = false;
   } catch {
     // 后端错误已由全局提示展示，保留内容方便修改
@@ -156,69 +132,59 @@ async function submit() {
 <template>
   <Drawer
     v-model:open="open"
-    :title="isTrade ? '外采成品到货入库' : '原材料到货入库'"
+    :title="`${line ? MATERIAL_KIND_LABELS[line.kind] : ''}到货入库`"
     :width="640"
     class="max-w-full"
     destroy-on-close
   >
-    <div class="flex flex-col gap-5">
+    <div v-if="line" class="flex flex-col gap-5">
       <section
-        v-if="rawLine"
         class="grid grid-cols-2 gap-3 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-4"
       >
         <div class="col-span-2 flex flex-col">
-          <span class="text-muted-foreground">原材料</span>
-          <span class="text-sm">{{ rawLine.rawMaterialName }}</span>
+          <span class="text-muted-foreground">{{ MATERIAL_KIND_LABELS[line.kind] }}</span>
+          <span class="text-sm">{{ line.productName }}</span>
           <span class="text-muted-foreground">
-            {{ rawLine.rawMaterialCode }}
-            <template v-if="rawLine.rawCategory"> · {{ RAW_CATEGORY_LABELS[rawLine.rawCategory] ?? rawLine.rawCategory }}</template>
+            {{ [line.productCode, line.specification].filter(Boolean).join(' · ') }}
+          </span>
+          <span v-if="line.contractCode" class="text-muted-foreground">
+            合同 {{ line.contractCode }}<template v-if="!isRaw">（定制辅料，只给这个合同的生产领用）</template>
           </span>
         </div>
         <div class="flex flex-col">
           <span class="text-muted-foreground">采购单 / 供应商</span>
-          <span class="font-mono">{{ rawLine.purchaseNo }}</span>
-          <span>{{ rawLine.supplierName || '—' }}</span>
+          <span class="font-mono">{{ line.orderCode }}</span>
+          <span>{{ line.supplierName || '—' }}</span>
+          <span v-if="line.orderDate" class="text-muted-foreground">下单 {{ formatDate(line.orderDate) }}</span>
         </div>
         <div class="flex flex-col">
-          <span class="text-muted-foreground">采购 / 已到 / 待到</span>
+          <span class="text-muted-foreground">采购 / 已收 / 待收</span>
           <span class="tabular-nums">
-            {{ formatQty(rawLine.quantity) }} / {{ formatQty(rawLine.receivedQuantity) }} /
-            <b>{{ formatQty(rawLine.remainingQuantity) }}</b> kg
+            {{ formatQty(line.quantity) }} / {{ formatQty(line.receivedQuantity) }} /
+            <b>{{ formatQty(line.remainingQuantity) }}</b> {{ unit }}
           </span>
-          <span v-if="rawLine.expectedDate" class="text-muted-foreground">预计 {{ formatDate(rawLine.expectedDate) }}</span>
         </div>
       </section>
 
-      <section
-        v-if="tradeLine"
-        class="grid grid-cols-2 gap-3 rounded-md border border-border bg-muted/30 p-3 text-xs sm:grid-cols-4"
-      >
-        <div class="col-span-2 flex flex-col">
-          <span class="text-muted-foreground">合同产品</span>
-          <span class="text-sm">{{ contractProductText(tradeLine) }}</span>
-          <span class="text-muted-foreground">{{ tradeLine.contractCode }} · {{ tradeLine.customerName || '—' }}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">采购单 / 供应商</span>
-          <span class="font-mono">{{ tradeLine.orderCode || '—' }}</span>
-          <span>{{ tradeLine.supplierName || '—' }}</span>
-        </div>
-        <div class="flex flex-col">
-          <span class="text-muted-foreground">采购 / 已到 / 待到</span>
-          <span class="tabular-nums">
-            {{ formatQty(tradeLine.quantity) }} / {{ formatQty(tradeLine.arrivedQuantity) }} /
-            <b>{{ formatQty(tradeLine.remainingQuantity) }}</b> {{ tradeLine.unit }}
-          </span>
-        </div>
-      </section>
+      <label v-if="isRaw" for="receipt-raw" class="flex flex-col gap-1 text-xs text-muted-foreground">
+        对应的原材料（配方、成本按它算）
+        <Select
+          id="receipt-raw"
+          v-model:value="rawMaterialCode"
+          :options="rawOptions"
+          option-filter-prop="label"
+          placeholder="选这种原料对应的原材料，下次自动带出"
+          show-search
+        />
+      </label>
 
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label for="receipt-qty" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          {{ isTrade ? '实收数量' : '到货数量' }}（{{ unit }}）
+          实收数量（{{ unit }}）
           <InputNumber id="receipt-qty" v-model:value="quantity" :min="0" :precision="3" class="w-full" />
         </label>
-        <label v-if="isTrade" for="receipt-accepted" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          可入库数量（良品，{{ stageOption?.unit }}）
+        <label for="receipt-accepted" class="flex flex-col gap-1 text-xs text-muted-foreground">
+          合格数量（进库存，{{ unit }}）
           <InputNumber
             id="receipt-accepted"
             :value="accepted"
@@ -229,23 +195,15 @@ async function submit() {
           />
         </label>
         <label v-if="shortfall" for="receipt-reason" class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-          异常原因
-          <Input id="receipt-reason" v-model:value="reason" :maxlength="500" placeholder="例如 5 张破损、颜色不符" />
+          不合格原因
+          <Input id="receipt-reason" v-model:value="reason" :maxlength="500" placeholder="例如 2 包受潮、印刷错误" />
         </label>
-      </section>
-
-      <section v-if="isTrade" class="flex flex-col gap-2">
-        <h3 class="m-0 text-sm font-semibold">
-          成品规格
-          <span class="ml-1 text-xs font-normal text-muted-foreground">按合同产品预填，请核对实物后修改</span>
-        </h3>
-        <AttrFields v-model="attrs" :fields="stageFields('PACKED')" :options="options" id-prefix="receipt" />
       </section>
 
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label for="receipt-batch" class="flex flex-col gap-1 text-xs text-muted-foreground">
           批次
-          <Input id="receipt-batch" v-model:value="batchNo" :maxlength="128" />
+          <Input id="receipt-batch" v-model:value="batchNo" :maxlength="128" placeholder="不填用到货单号" />
         </label>
         <label for="receipt-location" class="flex flex-col gap-1 text-xs text-muted-foreground">
           库位
@@ -273,7 +231,7 @@ async function submit() {
         </Alert>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <span class="text-sm text-muted-foreground">
-            入库到「{{ stageOption?.label }}」
+            合格数进「{{ stageOption?.label }}」，实收与合格数回写采购单
           </span>
           <div class="flex gap-2">
             <Button @click="open = false">取消</Button>

@@ -81,7 +81,7 @@ const shipmentOpen = ref(false);
 const shipmentTarget = ref<{ contractId: string; contractItemId: string }>();
 
 const receiptOpen = ref(false);
-const receiptRawLine = ref<Api.RawOpenLine>();
+const receiptLine = ref<Api.PurchaseLine>();
 
 const wipCount = computed(() =>
   (summary.value?.processes ?? []).reduce(
@@ -164,8 +164,8 @@ function openShipment(target?: { contractId: string; contractItemId: string }) {
   shipmentOpen.value = true;
 }
 
-function openRawReceipt(line: Api.RawOpenLine) {
-  receiptRawLine.value = line;
+function openReceipt(line: Api.PurchaseLine) {
+  receiptLine.value = line;
   receiptOpen.value = true;
 }
 
@@ -342,7 +342,7 @@ async function onSettingSaved() {
               <ReceivingPanel
                 :refresh-key="refreshKey"
                 @pending="(count) => (receivingPending = count)"
-                @receive-raw="openRawReceipt"
+                @receive="openReceipt"
               />
             </div>
           </Tabs.TabPane>
@@ -381,7 +381,7 @@ async function onSettingSaved() {
         <ReceiptDrawer
           v-model:open="receiptOpen"
           :options="options"
-          :raw-line="receiptRawLine"
+          :line="receiptLine"
           @saved="onSaved"
         />
       </div>

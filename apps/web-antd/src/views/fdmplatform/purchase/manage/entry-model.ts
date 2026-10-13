@@ -15,8 +15,22 @@ export const PURCHASE_CATEGORIES = [
   '其他',
 ];
 
+/**
+ * 采购明细的物料类型，和后端一致按产品中心分类认：含「原材料」为原料，含「辅料」「纸箱」为辅料。
+ * 选了收货工厂的采购单只能买原料、辅料。
+ */
+export function materialKind(category?: null | string) {
+  if (!category) return undefined;
+  if (category.includes('原材料')) return 'RAW' as const;
+  if (category.includes('辅料') || category.includes('纸箱'))
+    return 'AUX' as const;
+  return undefined;
+}
+
 export interface EntryRow {
   key: string;
+  /** 产品中心分类，用来认原料、辅料 */
+  category?: string;
   /** 产品档案 id；选合同产品时为空 */
   productId?: string;
   contractItemId?: string;
@@ -41,6 +55,8 @@ export interface EntryHeader {
   /** 整单折扣 %，空或 100 表示不打折 */
   discountRate?: string;
   purchaseDate?: string;
+  /** 收货工厂：由工厂确认收货，不进采购仓库 */
+  receiveFactoryId?: number;
   remark?: string;
   roundOff?: string;
   subject?: string;
@@ -119,6 +135,8 @@ export function entryErrors(
     else if (!decimal(row.quantity).gt(0)) lines[row.key] = '数量须大于 0';
     else if (!row.gift && !decimal(row.unitPrice).gte(0))
       lines[row.key] = '请填单价或总价';
+    else if (header.receiveFactoryId && !materialKind(row.category))
+      lines[row.key] = '工厂只收原料、辅料，这一行请另开采购单';
   }
   let sheet = '';
   if (!header.supplierId) sheet = '请选择供应商';
@@ -157,6 +175,7 @@ export function entryPayload(
     roundOff: blank(header.roundOff) ? undefined : header.roundOff,
     discountRate: blank(header.discountRate) ? undefined : header.discountRate,
     remark: header.remark?.trim() || undefined,
+    receiveFactoryId: header.receiveFactoryId,
     lines: rows.map((row) => ({
       productId: row.contractItemId ? undefined : row.productId,
       contractItemId: row.contractItemId,

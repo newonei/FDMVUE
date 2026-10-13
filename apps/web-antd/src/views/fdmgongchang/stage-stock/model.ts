@@ -1,6 +1,6 @@
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
-/** 库存阶段按生产链排序，和后端 FactoryStage 一致。 */
+/** 库存阶段按生产链排序，和后端 FactoryStage 一致；辅料（AUX）不在生产链上，排在最后。 */
 export const STAGE_ORDER = [
   'RAW',
   'BOARD',
@@ -12,7 +12,14 @@ export const STAGE_ORDER = [
   'ENGRAVED',
   'FOLDED',
   'PACKED',
+  'AUX',
 ] as const;
+
+/** 采购单明细的物料类型：原料进原材料、辅料进辅料库存。 */
+export const MATERIAL_KIND_LABELS: Record<Api.MaterialKind, string> = {
+  AUX: '辅料',
+  RAW: '原料',
+};
 
 export type AttrField =
   | 'backColor'
@@ -73,11 +80,14 @@ export const TXN_TYPE_LABELS: Record<string, string> = {
   SHIP: '出货出库',
   STOCKTAKE: '盘点调整',
   TRADE_RECEIPT: '外采入库',
+  PURCHASE_RECEIPT: '采购收货',
+  DELIVER: '交货出库',
   VOID: '作废冲销',
   EXTRA_DEFECT: '附加工序残次',
 };
 
 export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
+  PURCHASE: '采购收货',
   RAW_PURCHASE: '原材料采购',
   TRADE_PURCHASE: '外采成品',
 };
@@ -101,20 +111,21 @@ export function stageIndex(stage: string) {
 
 /** 贴合之后颜色分正面、反面。 */
 export function isLayered(stage: string) {
-  return stageIndex(stage) >= stageIndex('LAMINATED');
+  return stage !== 'AUX' && stageIndex(stage) >= stageIndex('LAMINATED');
 }
 
 export function hasTexture(stage: string) {
-  return stageIndex(stage) >= stageIndex('EMBOSSED');
+  return stage !== 'AUX' && stageIndex(stage) >= stageIndex('EMBOSSED');
 }
 
 export function hasPattern(stage: string) {
-  return stageIndex(stage) >= stageIndex('ENGRAVED');
+  return stage !== 'AUX' && stageIndex(stage) >= stageIndex('ENGRAVED');
 }
 
 /** 库存表里每个阶段显示的属性列。 */
 export function stageColumns(stage: string): ColumnField[] {
   if (stage === 'RAW') return ['rawMaterial', 'rawCategory'];
+  if (stage === 'AUX') return [];
   if (stage === 'BOARD') return ['material', 'recipe', 'color', 'size'];
   if (stage === 'SHEET' || stage === 'CUT')
     return ['material', 'color', 'size'];
@@ -131,7 +142,7 @@ export function stageColumns(stage: string): ColumnField[] {
 
 /** 期初入库时某阶段需要填写的全部属性（原材料单独选料）。 */
 export function stageFields(stage: string): AttrField[] {
-  if (stage === 'RAW') return [];
+  if (stage === 'RAW' || stage === 'AUX') return [];
   const fields: AttrField[] = ['material'];
   if (stage === 'BOARD') fields.push('recipeCode');
   fields.push(
@@ -207,6 +218,15 @@ export function normalizeForStage(
   attrs: Api.ItemAttrs,
 ): Api.ItemAttrs {
   if (stage === 'RAW') return { rawMaterialCode: attrs.rawMaterialCode };
+  if (stage === 'AUX')
+    return {
+      contractCode: attrs.contractCode ?? null,
+      contractId: attrs.contractId ?? null,
+      productCode: attrs.productCode ?? null,
+      productId: attrs.productId ?? null,
+      productName: attrs.productName ?? null,
+      unit: attrs.unit ?? null,
+    };
   const out: Api.ItemAttrs = {
     length: toNumber(attrs.length) ?? null,
     material: attrs.material ?? null,
@@ -433,6 +453,7 @@ export function attrSummary(
   if (!attrs) return '';
   if (stage === 'RAW')
     return attrs.rawMaterialName || attrs.rawMaterialCode || '';
+  if (stage === 'AUX') return auxSpec(attrs);
   const parts: string[] = [];
   if (!skip.includes('material') && attrs.material)
     parts.push(labels.material(attrs.material));
@@ -707,6 +728,7 @@ export const STAGE_GROUPS: Array<{ label: string; stages: string[] }> = [
   { label: '原料与板材', stages: ['RAW', 'BOARD'] },
   { label: '半成品', stages: ['SHEET', 'CUT', 'LAMINATED', 'EMBOSSED'] },
   { label: '成品', stages: ['PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED'] },
+  { label: '辅料', stages: ['AUX'] },
 ];
 
 /** 按目录分组排列阶段，组内保持接口返回的顺序，空组不显示。 */
@@ -729,6 +751,8 @@ export function stageFlow(stage: string, options: Api.Options) {
   let from = '采购到货';
   if (incoming)
     from = `${incoming.label}产出`;
+  if (stage === 'AUX')
+    return { current: `当前${label}`, from, to: '开工序单时领用' };
   return {
     current: `当前${label}`,
     from,
@@ -750,6 +774,7 @@ export function stockTitle(
   if (!attrs) return itemCode;
   if (stage === 'RAW')
     return attrs.rawMaterialName || attrs.rawMaterialCode || itemCode;
+  if (stage === 'AUX') return attrs.productName || itemCode;
   let color = labels.color(attrs.color);
   if (isLayered(stage)) {
     const front = labels.color(attrs.frontColor);
@@ -775,6 +800,7 @@ export function stockSpec(
     const category = attrs?.rawCategory ?? '';
     return RAW_CATEGORY_LABELS[category] ?? category;
   }
+  if (stage === 'AUX') return attrs ? auxSpec(attrs) : '';
   const spec = attrSummary(stage, attrs, labels, [
     'material',
     'color',
@@ -825,3 +851,57 @@ export function materialGap(order: {
   );
 }
 
+
+/** 辅料的规格摘要：产品编码、定制合同（通用辅料不写）。 */
+export function auxSpec(attrs: Api.ItemAttrs) {
+  return [
+    attrs.productCode,
+    attrs.contractCode ? `定制 · ${attrs.contractCode}` : '通用',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** 库存数量的单位：辅料按产品单位，其他阶段按阶段单位。 */
+export function stockUnit(
+  stage: string,
+  attrs: Api.ItemAttrs | null | undefined,
+  stageUnit?: null | string,
+) {
+  return stage === 'AUX' ? (attrs?.unit ?? '') : (stageUnit ?? '');
+}
+
+/** 开工序单时按用量算的建议领用数：每件用量 × 本次数量，扣掉已经领过、超过订单总需求的部分。 */
+export function suggestAuxQuantity(
+  plan: Pick<Api.AuxPlan, 'issuedQuantity' | 'orderQuantity' | 'perUnit'>,
+  quantity: number,
+) {
+  const perUnit = Number(plan.perUnit) || 0;
+  let need = perUnit * Math.max(quantity, 0);
+  const total =
+    plan.orderQuantity === null || plan.orderQuantity === undefined
+      ? null
+      : Number(plan.orderQuantity) * perUnit;
+  if (total !== null && Number.isFinite(total)) {
+    need = Math.min(need, Math.max(total - (Number(plan.issuedQuantity) || 0), 0));
+  }
+  return Math.round(need * 1000) / 1000;
+}
+
+/** 把建议数按先进先出分到可领的库存行。 */
+export function pickAuxStocks(
+  stocks: Array<Pick<Api.Stock, 'id' | 'quantity'>>,
+  need: number,
+) {
+  const picks: Array<{ quantity: number; stockId: number }> = [];
+  let left = need;
+  for (const stock of stocks) {
+    if (left <= 0) break;
+    const take = Math.min(Number(stock.quantity) || 0, left);
+    if (take > 0) {
+      picks.push({ quantity: Math.round(take * 1000) / 1000, stockId: stock.id });
+      left -= take;
+    }
+  }
+  return picks;
+}

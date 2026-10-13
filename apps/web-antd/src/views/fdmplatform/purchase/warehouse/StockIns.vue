@@ -222,6 +222,13 @@ onMounted(async () => {
           >
             工厂交货 · {{ record.deliveryNo }}
           </Tag>
+          <Tag
+            v-if="record.kind === 'FACTORY_PURCHASE'"
+            color="green"
+            title="工厂收货的原料、辅料：不进采购仓库，要冲回请在工厂的到货记录上作废"
+          >
+            工厂收货 · {{ record.warehouseName }}
+          </Tag>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName

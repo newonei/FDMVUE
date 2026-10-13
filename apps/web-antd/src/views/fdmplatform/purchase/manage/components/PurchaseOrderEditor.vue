@@ -21,6 +21,7 @@ import { getContractBoard } from '#/api/fdmplatform/contract-board';
 import {
   createProcurementOrder,
   getProcurementSettings,
+  getReceiveFactories,
 } from '#/api/fdmplatform/procurement';
 import { getProducts } from '#/api/fdmplatform/products';
 
@@ -59,6 +60,7 @@ const contract = ref<Contract>();
 const contracts = ref<{ label: string; value: string }[]>([]);
 const productOptions = ref<
   {
+    category?: string;
     code?: string;
     label: string;
     name: string;
@@ -68,6 +70,8 @@ const productOptions = ref<
   }[]
 >([]);
 const categories = ref<string[]>([...PURCHASE_CATEGORIES]);
+/** 收货工厂：原料、辅料送到工厂，由工厂在「到货入库」确认收货。 */
+const factories = ref<{ label: string; value: number }[]>([]);
 const saving = ref(false);
 const error = ref('');
 const submitted = ref(false);
@@ -104,6 +108,7 @@ function openBulk() {
 function productRow(product: (typeof productOptions.value)[number]): EntryRow {
   return {
     ...emptyRow(key()),
+    category: product.category,
     productId: product.value,
     name: product.name,
     code: product.code,
@@ -139,6 +144,7 @@ async function applyBulk() {
         continue;
       }
       const row = productRow({
+        category: product.category ?? undefined,
         value: product.id,
         name: product.name,
         code: product.code,
@@ -195,6 +201,7 @@ async function searchProducts(keyword = '') {
     active: true,
   });
   productOptions.value = page.list.map((product) => ({
+    category: product.category ?? undefined,
     value: product.id,
     name: product.name,
     code: product.code,
@@ -244,6 +251,7 @@ function chooseProduct(row: EntryRow, value: unknown) {
   const product = productOptions.value.find((entry) => entry.value === value);
   if (!product) return;
   Object.assign(row, {
+    category: product.category,
     productId: product.value,
     contractItemId: undefined,
     name: product.name,
@@ -319,11 +327,16 @@ watch(
     rows.value = [emptyRow(key())];
     void searchProducts();
     try {
-      const [loaded, maintained] = await Promise.all([
+      const [loaded, maintained, receiveFactories] = await Promise.all([
         getDirectory(0),
         getProcurementSettings('categories', { active: true }).catch(() => []),
+        getReceiveFactories().catch(() => []),
       ]);
       directory.value = loaded;
+      factories.value = receiveFactories.map((entry) => ({
+        label: entry.name,
+        value: entry.id,
+      }));
       // 采购设置里维护了分类就用维护的，否则用内置的常用分类
       if (maintained.length > 0) {
         categories.value = maintained.map((entry) => entry.name);
@@ -415,6 +428,16 @@ async function save() {
         <label class="field">
           <span>采购日期</span>
           <Input v-model:value="header.purchaseDate" type="date" :max="today" />
+        </label>
+        <label class="field">
+          <span>收货工厂（原料、辅料）</span>
+          <Select
+            v-model:value="header.receiveFactoryId"
+            allow-clear
+            :options="factories"
+            :disabled="factories.length === 0"
+            placeholder="不选进采购仓库；选了由工厂确认收货"
+          />
         </label>
         <label class="field">
           <span><em v-if="!header.contractId">*</em>所属公司</span>

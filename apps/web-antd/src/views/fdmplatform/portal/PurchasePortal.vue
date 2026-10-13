@@ -141,12 +141,6 @@ function openTask(task: ProcurementWorkItem) {
         <div class="actions">
           <Button :loading="loading" @click="load">刷新</Button>
           <Button
-            v-if="reachable({ path: '/fdmprocurement/raw-purchase' })"
-            @click="go({ path: '/fdmprocurement/raw-purchase' })"
-          >
-            新建原材料采购
-          </Button>
-          <Button
             v-if="reachable(definition.primary.link)"
             type="primary"
             @click="go(definition.primary.link)"

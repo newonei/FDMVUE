@@ -19,6 +19,7 @@ import {
   stageFlow,
   stockSpec,
   stockTitle,
+  stockUnit,
   toNumber,
 } from '../model';
 import ExtraOrderModal from './extra-order-modal.vue';
@@ -233,7 +234,8 @@ function onExtraSaved(text: string) {
       <div>
         <div class="text-[13px] text-muted-foreground">当前库存</div>
         <div class="stock-panel__total">
-          <template v-if="stageTotal === undefined">—</template>
+          <!-- 辅料各产品单位不同，不合计 -->
+          <template v-if="stageTotal === undefined || stage === 'AUX'">—</template>
           <template v-else>{{ formatQty(stageTotal) }}</template>
           <small>{{ stageOption?.unit }}</small>
         </div>
@@ -254,7 +256,7 @@ function onExtraSaved(text: string) {
           显示零库存
         </Checkbox>
         <Button v-if="canReceive" @click="receiveOpen = true">
-          {{ stage === 'RAW' ? '原料入库' : '期初入库' }}
+          {{ stage === 'RAW' ? '原料入库' : stage === 'AUX' ? '辅料入库' : '期初入库' }}
         </Button>
         <Button v-if="canOperate && extras.length > 0" @click="extraOpen = true">
           附加工序
@@ -328,7 +330,7 @@ function onExtraSaved(text: string) {
           >
             {{ formatQty(record.quantity) }}
             <small class="ml-0.5 text-xs font-normal text-muted-foreground">
-              {{ stageOption?.unit }}
+              {{ stockUnit(stage, record.item, stageOption?.unit) }}
             </small>
           </span>
         </template>
@@ -385,7 +387,7 @@ function onExtraSaved(text: string) {
     <StocktakeModal
       v-model:open="stocktakeOpen"
       :stock="stocktakeRow"
-      :unit="stageOption?.unit"
+      :unit="stockUnit(stage, stocktakeRow?.item, stageOption?.unit)"
       @saved="onSaved"
     />
   </div>

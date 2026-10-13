@@ -10,6 +10,7 @@ import {
   EDITABLE_FIELDS,
   groupStages,
   guessPackedAttrs,
+  isLayered,
   issueSeqLabel,
   joinBatches,
   lineBatch,
@@ -17,12 +18,15 @@ import {
   materialGap,
   normalizeForStage,
   parseSizeText,
+  pickAuxStocks,
   recipeCheck,
   recipePicks,
   stageColumns,
   stageFlow,
   stockSpec,
   stockTitle,
+  stockUnit,
+  suggestAuxQuantity,
   sumQty,
   validateOutputs,
   validateTradeReceipt,
@@ -480,3 +484,30 @@ describe('material gap', () => {
   });
 });
 
+
+describe('辅料', () => {
+  it('suggests per-unit usage for this order, capped by what is still needed', () => {
+    expect(suggestAuxQuantity({ issuedQuantity: 0, orderQuantity: null, perUnit: 2 }, 15)).toBe(30);
+    expect(suggestAuxQuantity({ issuedQuantity: 150, orderQuantity: 100, perUnit: 2 }, 40)).toBe(50);
+    expect(suggestAuxQuantity({ issuedQuantity: 200, orderQuantity: 100, perUnit: 2 }, 40)).toBe(0);
+    expect(suggestAuxQuantity({ issuedQuantity: 0, orderQuantity: 10, perUnit: 0.333 }, 3)).toBe(0.999);
+  });
+
+  it('splits the suggestion over stock rows first in first out', () => {
+    expect(pickAuxStocks([{ id: 1, quantity: 20 }, { id: 2, quantity: 50 }, { id: 3, quantity: 9 }], 45)).toEqual([
+      { quantity: 20, stockId: 1 },
+      { quantity: 25, stockId: 2 },
+    ]);
+    expect(pickAuxStocks([{ id: 1, quantity: 5 }], 0)).toEqual([]);
+  });
+
+  it('shows aux stock by product with its own unit and contract', () => {
+    const aux = { contractCode: 'HT-1', productCode: 'FL1', productName: '彩盒', unit: '个' };
+    expect(stockTitle('AUX', '辅料', aux, makeLabels({} as Api.Options), 'FL-FL1-HT1')).toBe('彩盒');
+    expect(stockSpec('AUX', aux, makeLabels({} as Api.Options))).toBe('FL1 · 定制 · HT-1');
+    expect(stockSpec('AUX', { productCode: 'FL2' }, makeLabels({} as Api.Options))).toBe('FL2 · 通用');
+    expect(stockUnit('AUX', aux, null)).toBe('个');
+    expect(stockUnit('RAW', aux, 'kg')).toBe('kg');
+    expect(isLayered('AUX')).toBe(false);
+  });
+});

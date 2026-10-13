@@ -39,6 +39,7 @@ export namespace FdmgongchangProductionOrderApi {
   }
 
   export interface Item {
+    auxUsages?: AuxUsage[];
     color?: null | string;
     completedQuantity: number | string;
     id: number;
@@ -82,8 +83,19 @@ export namespace FdmgongchangProductionOrderApi {
     unit: string;
   }
 
+  /** 辅料用量：每做一件成品要用多少这种辅料，在哪道工序领。 */
+  export interface AuxUsage {
+    perUnit: number | string;
+    process?: null | string;
+    productCode?: null | string;
+    productId: string;
+    productName?: null | string;
+    unit?: null | string;
+  }
+
   /** 这个产品上次向这家工厂下单用的工艺。 */
   export interface LastRoute {
+    auxUsages?: AuxUsage[];
     orderNo: string;
     routeId?: null | number;
     routeName?: null | string;
@@ -124,6 +136,7 @@ export namespace FdmgongchangProductionOrderApi {
   export interface CreateReq {
     factoryId: number;
     items: Array<{
+      auxUsages?: AuxUsage[];
       productId: string;
       quantity: number;
       remark?: string;
@@ -189,6 +202,14 @@ const BASE = '/fdmgongchang/production-order';
 export function getOrderableFactories() {
   return requestClient.get<FdmgongchangProductionOrderApi.Factory[]>(
     `${BASE}/factories`,
+  );
+}
+
+/** 搜辅料（产品中心分类含「辅料」「纸箱」），定辅料用量用。 */
+export function searchAuxProducts(keyword: string) {
+  return requestClient.get<FdmgongchangProductionOrderApi.Product[]>(
+    `${BASE}/aux-products`,
+    { params: { keyword } },
   );
 }
 

@@ -383,10 +383,23 @@ const arrivalRow = computed(() =>
     ? resolveDocumentRow(contract.value, 'arrivals', arrivalId.value)
     : undefined,
 );
+/** 选了收货工厂的采购单由工厂在「到货入库」确认收货，采购仓库不再入库。 */
+const receiveFactory = computed(() =>
+  view.value?.order.receiveFactoryId
+    ? String(view.value.order.receiveFactoryName ?? '收货工厂')
+    : '',
+);
+/** 「入库单」不能点时的说明。 */
+const stockInHint = computed(() => {
+  if (receiveFactory.value)
+    return `由「${receiveFactory.value}」在到货入库里确认收货`;
+  return canReceive.value ? undefined : '没有未入库的数量';
+});
 /** 外采到货由采购在这里开采购入库单，不再进工厂的工序库存。 */
 const canReceive = computed(
   () =>
     !!view.value &&
+    !receiveFactory.value &&
     (standaloneOrder(view.value.contractId) ||
       ['CONFIRMED', 'EXECUTING'].includes(String(contract.value?.status))) &&
     canRecordOrderArrival(view.value.order),
@@ -483,7 +496,7 @@ const subDocItems = computed(() => {
       label: '入库单',
       group: '库存',
       disabled: !canReceive.value,
-      title: canReceive.value ? undefined : '没有未入库的数量',
+      title: stockInHint.value,
     },
     { key: 'reimbursement', label: '费用报销', group: '办公' },
   ];
@@ -1701,6 +1714,10 @@ watch(financeType, (value, previous) => {
                 <dd>{{ view.details.deliveryDate || '未定' }}</dd>
                 <dt>收票</dt>
                 <dd>{{ view.details.noInvoice ? '无需收票' : '需要收票' }}</dd>
+                <template v-if="receiveFactory">
+                  <dt>收货工厂</dt>
+                  <dd>{{ receiveFactory }}（工厂在到货入库里确认收货）</dd>
+                </template>
               </dl>
               <div class="order-context">
                 <Space
