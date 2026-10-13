@@ -68,12 +68,17 @@ export function returnRows(stockIn: StockIn): ReturnRow[] {
 
 /** 入库单能否办理：未作废且还有可退数量。 */
 export function canReturn(stockIn: StockIn) {
-  return stockIn.status !== 'VOIDED' && returnRows(stockIn).length > 0;
+  return (
+    stockIn.kind !== 'PRODUCTION' &&
+    stockIn.status !== 'VOIDED' &&
+    returnRows(stockIn).length > 0
+  );
 }
 
 /** 入库单能否作废：未作废且没有办理过退货（直发的出库单会一起作废）。 */
 export function canVoidStockIn(stockIn: StockIn) {
   return (
+    stockIn.kind !== 'PRODUCTION' &&
     stockIn.status !== 'VOIDED' &&
     stockIn.lines.every(
       (line) =>

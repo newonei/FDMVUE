@@ -728,7 +728,7 @@ export function stageFlow(stage: string, options: Api.Options) {
   const outgoing = options.processes.filter((p) => p.sources.includes(stage));
   let from = '采购到货';
   if (incoming)
-    from = `${incoming.label}产出${stage === 'PACKED' ? '、外采到货' : ''}`;
+    from = `${incoming.label}产出`;
   return {
     current: `当前${label}`,
     from,
@@ -799,5 +799,29 @@ export function processLabel(options: Api.Options | undefined, code?: null | str
 /** 挂在这个库存阶段的启用中的附加工序。 */
 export function extraProcessesAt(options: Api.Options | undefined, stage: string) {
   return (options?.extraProcesses ?? []).filter((p) => p.enabled && p.stage === stage);
+}
+
+/** 领料和产出一比一的工序：压花、雕刻、折叠、包装（开片、贴合、立切、冲裁的领料和产出不是一比一）。 */
+const ONE_TO_ONE = new Set(['EMBOSS', 'ENGRAVE', 'FOLD', 'PACK']);
+
+/**
+ * 已完工工序单的领料差额 = 领料 − 退料 − 良品 − 残次，大于 0 说明有损耗或漏报。
+ * 只对一比一的工序计算；其他工序或还没完工时返回 undefined。
+ */
+export function materialGap(order: {
+  defectQuantity?: unknown;
+  goodQuantity?: unknown;
+  inputQuantity?: unknown;
+  process: string;
+  returnedQuantity?: unknown;
+  status: string;
+}) {
+  if (order.status !== 'COMPLETED' || !ONE_TO_ONE.has(order.process)) return undefined;
+  return roundQty(
+    (toNumber(order.inputQuantity) ?? 0) -
+      (toNumber(order.returnedQuantity) ?? 0) -
+      (toNumber(order.goodQuantity) ?? 0) -
+      (toNumber(order.defectQuantity) ?? 0),
+  );
 }
 

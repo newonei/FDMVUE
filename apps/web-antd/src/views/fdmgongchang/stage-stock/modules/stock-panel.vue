@@ -267,7 +267,7 @@ function onExtraSaved(text: string) {
           从这里领料
         </Button>
         <Button
-          v-if="canShip && stage === 'PACKED'"
+          v-if="canShip && ['PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED'].includes(stage)"
           type="primary"
           @click="emit('ship')"
         >

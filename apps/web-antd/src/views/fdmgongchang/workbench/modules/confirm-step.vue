@@ -18,7 +18,7 @@ const labels = computed(() => makeLabels(job.options));
 const source = computed(() => stageOf(job, job.sourceStage));
 
 /**
- * 不按排单开工时，如果这道工序是某张工厂订单工艺的最后一道，选这批是做哪张单（报产出时累加完成数量）；
+ * 不按排单开工时，如果这道工序是某张工厂订单工艺的最后一道，选这批是做哪张单（记进订单的工序进度；完成数量按交货算）；
  * 按排单开工的由排单任务自动关联。补领沿用原来的单。
  */
 const mayAskOrder = computed(() => !job.supplement && !job.task && !!job.process);

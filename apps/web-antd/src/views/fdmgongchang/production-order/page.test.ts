@@ -8,6 +8,10 @@ import ProductionOrderPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
+  complete: vi.fn(),
+  delivery: vi.fn(),
+  stockPage: vi.fn(),
+  voidDelivery: vi.fn(),
   create: vi.fn(),
   factories: vi.fn(),
   factoryPage: vi.fn(),
@@ -26,12 +30,18 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmgongchang/production-order', () => ({
   acceptProductionOrder: mocks.accept,
   cancelProductionOrder: vi.fn(),
+  completeProductionOrder: mocks.complete,
+  createDelivery: mocks.delivery,
+  getDeliveryWarehouses: vi.fn().mockResolvedValue([
+    { id: 'w2', isDefault: false, name: '洛阳仓' },
+    { id: 'w1', isDefault: true, name: '武汉仓' },
+  ]),
+  voidDelivery: mocks.voidDelivery,
   createProductionOrder: mocks.create,
   getFactoryProductionOrders: mocks.factoryPage,
   getMyProductionOrders: mocks.myPage,
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
-  progressProductionOrder: vi.fn(),
   getLastRoute: mocks.lastRoute,
   getRouteOptions: vi.fn().mockResolvedValue({
     processes: [
@@ -52,6 +62,7 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   rejectProductionOrder: vi.fn(),
   searchOrderProducts: mocks.search,
 }));
+vi.mock('#/api/fdmgongchang/stage-stock', () => ({ getStockPage: mocks.stockPage }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,
@@ -218,4 +229,68 @@ describe('production order page', () => {
       [...document.querySelectorAll('.route-chip[aria-pressed="true"]')].map((c) => c.textContent?.trim()),
     ).toEqual(['开片', '冲裁']);
   });
+
+  it('delivers finished goods to the procurement warehouse and ends the order', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const accepted: Api.Order = {
+      ...order,
+      deliveries: [
+        {
+          deliveredDate: '2026-10-13',
+          deliveryNo: 'JH20261013001',
+          id: 1,
+          lines: [{ batchNo: 'B1', itemCode: 'CC-1', quantity: 100, stage: 'PUNCHED', stockId: 7 }],
+          productName: product.displayName,
+          productionOrderItemId: 91,
+          quantity: 100,
+          status: 'DELIVERED',
+          stockInCode: 'RK20261013001',
+          unit: '条',
+          warehouseName: '武汉仓',
+        },
+      ],
+      items: [{ ...order.items[0]!, completedQuantity: 100, deliveryStage: 'PUNCHED', deliveryStageLabel: '已冲裁成品', deliveryUnit: '件' }],
+      status: 'ACCEPTED',
+      statusLabel: '生产中',
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.stockPage.mockResolvedValue({
+      list: [{ batchNo: 'B2', id: 8, itemCode: 'CC-2', itemId: 2, location: '成品区', quantity: 500, stage: 'PUNCHED' }],
+      total: 1,
+    });
+    mocks.delivery.mockResolvedValue(2);
+    mocks.complete.mockResolvedValue(true);
+    unmount = mount();
+    await flush();
+    button('查看').click();
+    await flush();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('JH20261013001');
+    expect(text).toContain('入库单 RK20261013001');
+    expect(text.replaceAll(/\s/g, '')).toContain('已交货100');
+
+    button('交货').click();
+    await flush();
+    expect(mocks.stockPage).toHaveBeenCalledWith(expect.objectContaining({ stage: 'PUNCHED' }));
+    expect(document.body.textContent).toContain('交货按 1 件 = 1 条 计');
+    const input = document.querySelector<HTMLInputElement>('#delivery-qty-8')!;
+    input.value = '450';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    button('确认交货').click();
+    await flush();
+    // 还差 400，不能多交
+    expect(document.body.textContent).toContain('最多交这么多');
+    expect(mocks.delivery).not.toHaveBeenCalled();
+    input.value = '400';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    button('确认交货').click();
+    await flush();
+    expect(mocks.delivery).toHaveBeenCalledWith(
+      expect.objectContaining({ lines: [{ quantity: 400, stockId: 8 }], productionOrderItemId: 91, warehouseId: 'w1' }),
+    );
+  });
 });
+

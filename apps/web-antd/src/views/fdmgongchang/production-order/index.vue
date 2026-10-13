@@ -188,7 +188,7 @@ function progressPercent(o: Api.Order) {
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            从产品中心选产品向工厂下生产订单。工厂确认接单、回复交期后，这张单会进入 AI 排单的待生产订单；每个产品要走的工序由下单人定，工艺最后一道报产出时自动累加完成数量。
+            从产品中心选产品向工厂下生产订单。工厂确认接单、回复交期后，这张单会进入 AI 排单的待生产订单；每个产品要走的工序由下单人定；做好的货由工厂交货到采购部门仓库，完成数量按交货数累加。
           </p>
         </div>
         <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 向工厂下单</Button>

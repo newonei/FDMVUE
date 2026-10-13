@@ -14,6 +14,7 @@ import {
   joinBatches,
   lineBatch,
   makeLabels,
+  materialGap,
   normalizeForStage,
   parseSizeText,
   recipeCheck,
@@ -447,7 +448,7 @@ describe('stage stock catalog', () => {
   it('builds the flow from the configured processes, including skip-stage sources', () => {
     expect(stageFlow('SHEET', options)).toEqual({ current: '当前SHEET', from: '开片产出', to: '立切、贴合领料' });
     expect(stageFlow('RAW', options)).toEqual({ current: '当前RAW', from: '采购到货', to: '密炼领料' });
-    expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出、外采到货', to: '外贸出货' });
+    expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出', to: '外贸出货' });
   });
 
   it('names a stock row by material, colour and stage, and keeps the rest as spec', () => {
@@ -467,3 +468,15 @@ describe('stage stock catalog', () => {
     expect(stockTitle('SHEET', '片材', null, labels, 'C5')).toBe('C5');
   });
 });
+
+describe('material gap', () => {
+  it('shows input minus returned, good and defect only for finished one-to-one processes', () => {
+    const base = { defectQuantity: 2, goodQuantity: 90, inputQuantity: 100, returnedQuantity: 3 };
+    expect(materialGap({ ...base, process: 'PACK', status: 'COMPLETED' })).toBe(5);
+    expect(materialGap({ ...base, process: 'PACK', status: 'IN_PROGRESS' })).toBeUndefined();
+    // 开片、贴合、冲裁的领料和产出不是一比一，不算差额
+    expect(materialGap({ ...base, process: 'SLICE', status: 'COMPLETED' })).toBeUndefined();
+    expect(materialGap({ ...base, process: 'LAMINATE', status: 'COMPLETED' })).toBeUndefined();
+  });
+});
+

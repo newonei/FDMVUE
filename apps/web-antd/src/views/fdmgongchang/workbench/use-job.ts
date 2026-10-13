@@ -41,7 +41,7 @@ export function createJob() {
     picks: [] as Pick[],
     pieces: [] as PieceLine[],
     process: undefined as Api.Process | undefined,
-    /** 不按排单开包装单时，这批是做哪张工厂订单（明细编号）；包装报数量时累加到它的完成数量。 */
+    /** 不按排单开工时，这批是做哪张工厂订单（明细编号），记进订单的工序进度。 */
     productionItem: undefined as undefined | { id: number; label: string; orderNo: string },
     /** 密炼按配方领料时选的配方和锅数，开单时一起提交。 */
     recipe: undefined as undefined | { batches: number; code: string },

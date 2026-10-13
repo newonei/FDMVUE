@@ -14,12 +14,12 @@ import { getOpenProductionOrders } from '#/api/fdmgongchang/production-order';
 import { createExtraOrder, getOrderOperators, getStockPage } from '#/api/fdmgongchang/stage-stock';
 import { matchWageItems } from '#/api/fdmgongchang/wage';
 
-import { finalProcess, routeIncludes } from '../../production-order/shared';
+import { routeIncludes } from '../../production-order/shared';
 import { attrSummary, extraProcessesAt, formatQty, makeLabels, roundQty } from '../model';
 
 /**
  * 附加工序报工（打孔、全检等，不改变规格）：选这个阶段的库存行，填加工数量和其中的残次，一次登记完。
- * 残次从这一行库存扣掉，良品原地不动；可关联工厂订单（工艺最后一道时累加完成数量），可同时登记计件。
+ * 残次从这一行库存扣掉，良品原地不动；可关联工厂订单（只记进度，完成数量按交货算），可同时登记计件。
  */
 const props = defineProps<{ options: Api.Options; stage: string }>();
 const emit = defineEmits<{ saved: [text: string] }>();
@@ -62,7 +62,7 @@ const itemOptions = computed(() =>
       .filter((i) => Number(i.quantity) > Number(i.completedQuantity) && (i.processes ?? []).length > 0)
       .filter((i) => process.value && routeIncludes(i, process.value))
       .map((i) => ({
-        label: `${o.orderNo} · ${o.requesterDeptName || o.requesterName || ''} · ${i.productName}${finalProcess(i) === process.value ? '（最后一道，累加完成数量）' : ''}`,
+        label: `${o.orderNo} · ${o.requesterDeptName || o.requesterName || ''} · ${i.productName}`,
         value: i.id,
       })),
   ),

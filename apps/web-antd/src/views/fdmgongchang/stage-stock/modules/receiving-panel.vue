@@ -13,11 +13,9 @@ import { Input, Segmented, Table, Tag } from 'ant-design-vue';
 import {
   getRawOpenLines,
   getReceiptPage,
-  getTradeOpenLines,
 } from '#/api/fdmgongchang/stage-stock';
 
 import {
-  contractProductText,
   formatDate,
   formatQty,
   RAW_CATEGORY_LABELS,
@@ -25,14 +23,13 @@ import {
 } from '../model';
 
 /**
- * 到货入库：原材料采购单（采购部门「原材料采购」下单）和外贸合同外采采购单的待到货明细，
- * 收货后分别进「原材料」和「已包装成品」库存；到货记录列出每次收货。
+ * 到货入库：原材料采购单（采购部门「原材料采购」下单）的待到货明细，收货后进「原材料」库存；到货记录列出每次收货。
+ * 外采成品到货已改由采购部门在仓库管理开采购入库单，不再进工厂；以前收过的外采到货仍在到货记录里。
  */
 const props = defineProps<{ refreshKey: number }>();
 const emit = defineEmits<{
   pending: [count: number];
   receiveRaw: [line: Api.RawOpenLine];
-  receiveTrade: [line: Api.TradePurchaseLine];
 }>();
 
 const { hasAccessByCodes } = useAccess();
@@ -40,10 +37,9 @@ const canReceive = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:receive']),
 );
 
-type View = 'raw' | 'records' | 'trade';
+type View = 'raw' | 'records';
 const view = ref<View>('raw');
 const rawLines = ref<Api.RawOpenLine[]>([]);
-const tradeLines = ref<Api.TradePurchaseLine[]>([]);
 const loading = ref(false);
 const keyword = ref('');
 
@@ -55,7 +51,6 @@ const receiptLoading = ref(false);
 
 const viewOptions = computed(() => [
   { label: `原材料待到货${rawLines.value.length > 0 ? ` ${rawLines.value.length}` : ''}`, value: 'raw' },
-  { label: `外采成品待到货${tradeLines.value.length > 0 ? ` ${tradeLines.value.length}` : ''}`, value: 'trade' },
   { label: '到货记录', value: 'records' },
 ]);
 
@@ -68,19 +63,13 @@ const visibleRaw = computed(() =>
     matches([l.purchaseNo, l.supplierName, l.rawMaterialName, l.rawMaterialCode]),
   ),
 );
-const visibleTrade = computed(() =>
-  tradeLines.value.filter((l) =>
-    matches([l.contractCode, l.orderCode, l.supplierName, l.customerName, l.productName, l.productCode]),
-  ),
-);
 
 async function loadOpen() {
   loading.value = true;
   try {
-    const [raw, trade] = await Promise.all([getRawOpenLines(), getTradeOpenLines()]);
+    const raw = await getRawOpenLines();
     rawLines.value = raw;
-    tradeLines.value = trade;
-    emit('pending', raw.length + trade.length);
+    emit('pending', raw.length);
   } finally {
     loading.value = false;
   }
@@ -135,14 +124,6 @@ const rawColumns = [
   { align: 'right' as const, key: 'remaining', title: '待到货' },
   { align: 'right' as const, key: 'actions', title: '', width: 80 },
 ];
-const tradeColumns = [
-  { key: 'contract', title: '合同 / 客户' },
-  { key: 'order', title: '采购单 / 供应商' },
-  { key: 'product', title: '产品' },
-  { align: 'right' as const, key: 'progress', title: '已到 / 采购' },
-  { align: 'right' as const, key: 'remaining', title: '待到货' },
-  { align: 'right' as const, key: 'actions', title: '', width: 80 },
-];
 const receiptColumns = [
   { key: 'no', title: '到货单 / 时间' },
   { key: 'source', title: '来源' },
@@ -169,9 +150,6 @@ const receiptColumns = [
     <p class="m-0 text-xs text-muted-foreground">
       <template v-if="view === 'raw'">
         采购部门「原材料采购」下的单。收货后进「原材料」库存，采购单同步更新到货数量。
-      </template>
-      <template v-else-if="view === 'trade'">
-        外贸合同分派为「外采」的采购单。收货后良品进「已包装成品」，并登记为合同的到货记录，之后从「外贸订单」出货。
       </template>
       <template v-else>每次收货的记录，可按到货单号、采购单号、合同号或供应商搜索。</template>
     </p>
@@ -227,59 +205,6 @@ const receiptColumns = [
       <template #emptyText>
         <div class="py-6 text-sm text-muted-foreground">
           没有待到货的原材料。采购部门在「原材料采购」下单后会出现在这里。
-        </div>
-      </template>
-    </Table>
-
-    <Table
-      v-else-if="view === 'trade'"
-      :columns="tradeColumns"
-      :data-source="visibleTrade"
-      :loading="loading"
-      :pagination="{ pageSize: 20, showTotal: (t: number) => `共 ${t} 行` }"
-      :scroll="{ x: 'max-content' }"
-      :row-key="(row: Api.TradePurchaseLine) => `${row.orderId}:${row.orderLineId}`"
-      size="small"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'contract'">
-          <div class="flex flex-col">
-            <span class="font-mono text-xs">{{ record.contractCode }}</span>
-            <span class="text-xs text-muted-foreground">{{ record.customerName || '—' }}</span>
-          </div>
-        </template>
-        <template v-else-if="column.key === 'order'">
-          <div class="flex flex-col">
-            <span class="font-mono text-xs">{{ record.orderCode || '—' }}</span>
-            <span class="text-xs text-muted-foreground">{{ record.supplierName || '—' }}</span>
-          </div>
-        </template>
-        <template v-else-if="column.key === 'product'">
-          <span class="text-sm">{{ contractProductText(record as Api.TradePurchaseLine) }}</span>
-        </template>
-        <template v-else-if="column.key === 'progress'">
-          <span class="whitespace-nowrap tabular-nums">
-            {{ formatQty(record.arrivedQuantity) }} / {{ formatQty(record.quantity) }}
-            <small class="text-xs text-muted-foreground">{{ record.unit }}</small>
-          </span>
-        </template>
-        <template v-else-if="column.key === 'remaining'">
-          <b class="tabular-nums">{{ formatQty(record.remainingQuantity) }}</b>
-        </template>
-        <template v-else-if="column.key === 'actions'">
-          <button
-            v-if="canReceive"
-            type="button"
-            class="whitespace-nowrap text-xs text-primary hover:underline"
-            @click="emit('receiveTrade', record as Api.TradePurchaseLine)"
-          >
-            收货
-          </button>
-        </template>
-      </template>
-      <template #emptyText>
-        <div class="py-6 text-sm text-muted-foreground">
-          没有待到货的外采成品。外贸合同的外采采购单下达后会出现在这里。
         </div>
       </template>
     </Table>

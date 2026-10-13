@@ -325,13 +325,13 @@ describe('stage stock page', () => {
     expect(after).toContain('生产中');
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
-    expect(after).toContain('2 待到');
+    expect(after).toContain('1 待到');
     expect(after).toContain('CG20261008-001');
     expect(after).toContain('TPE粒子');
     expect(errors).toEqual([]);
   });
 
-  it('receives a raw purchase line into raw stock and a bought product into packed stock from 到货入库', async () => {
+  it('receives a raw purchase line into raw stock from 到货入库 (bought products go to the procurement warehouse)', async () => {
     const errors: unknown[] = [];
     mockEmptyPage();
     mocks.receiveRaw.mockResolvedValue(1);
@@ -356,25 +356,9 @@ describe('stage stock page', () => {
     );
     expect(mocks.receiveRaw.mock.calls[0]![0].batchNo).toMatch(/^RM\d{4}$/);
 
-    const trade = [...host.querySelectorAll('.ant-segmented-item')].find((el) => el.textContent?.includes('外采成品待到货'));
-    (trade as HTMLElement).click();
-    await flush();
-    expect(host.textContent).toContain('义乌垫子厂');
-    clickButton('收货', host);
-    await flush();
-    expect(document.body.textContent).toContain('外采成品到货入库');
-    clickButton('确认收货');
-    await flush();
-    expect(mocks.receiveTrade).toHaveBeenCalledWith(
-      expect.objectContaining({
-        acceptedQuantity: 200,
-        attrs: expect.objectContaining({ backColor: 'PU', frontColor: 'PU', length: 183, material: 'TPE', thickness: 0.6, width: 61 }),
-        contractId: 'c2',
-        orderId: 'o1',
-        orderLineId: 'ol1',
-        quantity: 200,
-      }),
-    );
+    // 外采成品到货已改由采购部门在仓库管理入库，工厂这里不再列外采待到货
+    expect(host.textContent).not.toContain('外采成品待到货');
+    expect(mocks.tradeLines).not.toHaveBeenCalled();
     expect(errors).toEqual([]);
     mocks.route.query = {};
   });

@@ -23,6 +23,7 @@ import {
   formatRate,
   issueSeqLabel,
   makeLabels,
+  materialGap,
   processLabel as processLabelOf,
 } from '../model';
 import ReturnModal from './return-modal.vue';
@@ -379,6 +380,13 @@ const statCards = computed(() =>
               </span>
               <span class="whitespace-nowrap text-xs text-muted-foreground">
                 {{ stageOf(record.sourceStage)?.label }}
+              </span>
+              <span
+                v-if="(materialGap(record as Api.Order) ?? 0) !== 0"
+                class="whitespace-nowrap text-xs text-warning"
+                :title="`领料 ${formatQty(record.inputQuantity)} − 退料 ${formatQty(record.returnedQuantity ?? 0)} − 良品 ${formatQty(record.goodQuantity)} − 残次 ${formatQty(record.defectQuantity)}`"
+              >
+                差额 {{ formatQty(materialGap(record as Api.Order)) }}（损耗或漏报）
               </span>
             </div>
           </template>

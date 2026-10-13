@@ -82,7 +82,6 @@ const shipmentTarget = ref<{ contractId: string; contractItemId: string }>();
 
 const receiptOpen = ref(false);
 const receiptRawLine = ref<Api.RawOpenLine>();
-const receiptTradeLine = ref<Api.TradePurchaseLine>();
 
 const wipCount = computed(() =>
   (summary.value?.processes ?? []).reduce(
@@ -166,16 +165,10 @@ function openShipment(target?: { contractId: string; contractItemId: string }) {
 }
 
 function openRawReceipt(line: Api.RawOpenLine) {
-  receiptTradeLine.value = undefined;
   receiptRawLine.value = line;
   receiptOpen.value = true;
 }
 
-function openTradeReceipt(line: Api.TradePurchaseLine) {
-  receiptRawLine.value = undefined;
-  receiptTradeLine.value = line;
-  receiptOpen.value = true;
-}
 
 function openReport(orderId: number) {
   drawerMode.value = 'report';
@@ -350,7 +343,6 @@ async function onSettingSaved() {
                 :refresh-key="refreshKey"
                 @pending="(count) => (receivingPending = count)"
                 @receive-raw="openRawReceipt"
-                @receive-trade="openTradeReceipt"
               />
             </div>
           </Tabs.TabPane>
@@ -390,7 +382,6 @@ async function onSettingSaved() {
           v-model:open="receiptOpen"
           :options="options"
           :raw-line="receiptRawLine"
-          :trade-line="receiptTradeLine"
           @saved="onSaved"
         />
       </div>

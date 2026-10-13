@@ -33,7 +33,7 @@ import {
   toNumber,
 } from '../model';
 
-/** 工厂出货：选外贸合同明细 → 从已包装成品选库存和数量 → 出库并登记到合同出货记录。 */
+/** 工厂出货：选外贸合同明细 → 从成品库存（已冲裁及之后，默认已包装成品）选库存和数量 → 出库并登记到合同出货记录。 */
 const props = defineProps<{
   initialContractId?: string;
   initialItemId?: string;
@@ -57,9 +57,17 @@ const errors = ref<string[]>([]);
 const submitting = ref(false);
 
 const labels = computed(() => makeLabels(props.options));
-const packedUnit = computed(
-  () => props.options.stages.find((s) => s.code === 'PACKED')?.unit ?? '',
+/** 出货可以从成品阶段出：工艺做到哪一道就从哪一道的库存出，默认已包装成品。 */
+const SHIP_STAGES = new Set(['ENGRAVED', 'FOLDED', 'PACKED', 'PUNCHED']);
+const shipStage = ref('PACKED');
+const stageOptions = computed(() =>
+  props.options.stages.filter((s) => SHIP_STAGES.has(s.code)).map((s) => ({ label: s.label, value: s.code })),
 );
+const stageLabel = computed(() => props.options.stages.find((s) => s.code === shipStage.value)?.label ?? '');
+const packedUnit = computed(
+  () => props.options.stages.find((s) => s.code === shipStage.value)?.unit ?? '',
+);
+watch(shipStage, () => loadStock());
 const keyOf = (row: Pick<Api.ShippableItem, 'contractId' | 'contractItemId'>) =>
   `${row.contractId}:${row.contractItemId}`;
 const selected = computed(() =>
@@ -112,7 +120,7 @@ async function loadStock() {
       keyword: stockKeyword.value.trim() || undefined,
       pageNo: 1,
       pageSize: 200,
-      stage: 'PACKED',
+      stage: shipStage.value,
     });
     stockRows.value = page.list;
     stockTotal.value = page.total;
@@ -159,7 +167,7 @@ const summaryText = computed(() => {
 async function submit() {
   const problems: string[] = [];
   if (!selected.value) problems.push('请选择要出货的合同明细。');
-  if (lines.value.length === 0) problems.push('请在已包装成品里至少填一行出货数量。');
+  if (lines.value.length === 0) problems.push('请在成品库存里至少填一行出货数量。');
   for (const line of lines.value) {
     if (line.quantity > (toNumber(line.stock.quantity) ?? 0))
       problems.push(`${line.stock.itemCode}（批次 ${line.stock.batchNo}）只剩 ${formatQty(line.stock.quantity)}。`);
@@ -225,10 +233,11 @@ async function submit() {
       <section class="flex flex-col gap-2">
         <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
           <span class="inline-flex size-5 items-center justify-center rounded-full bg-primary/10 text-xs text-primary">2</span>
-          从已包装成品出库
-          <span class="text-xs font-normal text-muted-foreground">请核对成品规格和合同产品一致</span>
+          从成品库存出库
+          <span class="text-xs font-normal text-muted-foreground">工艺做到哪一道就从哪一道的库存出；请核对成品规格和合同产品一致</span>
         </h3>
         <div class="flex flex-wrap items-center gap-3">
+          <Select id="shipment-stage" v-model:value="shipStage" :options="stageOptions" :style="{ width: '9rem' }" size="small" />
           <Input id="shipment-stock-search" v-model:value="stockKeyword" allow-clear :style="{ width: '13rem' }" placeholder="搜编码或批次" size="small" />
           <span v-if="stockTotal > 200" class="text-xs text-muted-foreground">共 {{ stockTotal }} 行，只显示前 200 行</span>
         </div>
@@ -245,7 +254,7 @@ async function submit() {
             <template v-if="column.key === 'item'">
               <div class="flex min-w-[200px] flex-col">
                 <span class="font-mono text-xs">{{ record.itemCode }}</span>
-                <span class="text-xs text-muted-foreground">{{ attrSummary('PACKED', record.item, labels) }}</span>
+                <span class="text-xs text-muted-foreground">{{ attrSummary(record.stage, record.item, labels) }}</span>
               </div>
             </template>
             <template v-else-if="column.key === 'batchNo'">
@@ -270,7 +279,7 @@ async function submit() {
             </template>
           </template>
           <template #emptyText>
-            <Empty description="已包装成品没有库存。包装工序报完工后会入库到这里。" />
+            <Empty :description="`${stageLabel}没有库存。`" />
           </template>
         </Table>
       </section>

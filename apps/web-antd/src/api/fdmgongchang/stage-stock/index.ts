@@ -1,6 +1,9 @@
 import type { PageParam, PageResult } from '@vben/request';
 
-import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
+import type {
+  FdmgongchangFactoryApi,
+  FdmgongchangRouteApi,
+} from '#/api/fdmgongchang/factory';
 
 import { factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
@@ -429,6 +432,9 @@ export namespace FdmgongchangStageStockApi {
     contractItemId: string;
     customerName?: null | string;
     inProgressOrderCount: number;
+    /** 工厂为这个任务设定的工艺（工序编码）；没设时为空，按包装回写合同进度。 */
+    processes?: string[];
+    routeName?: null | string;
     itemQuantity: Decimal;
     linkedOrderCount: number;
     material?: null | string;
@@ -813,6 +819,28 @@ export function createExtraOrder(
   data: FdmgongchangStageStockApi.ExtraOrderReq,
 ) {
   return requestClient.post<number>(`${BASE}/extra-order/create`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 本厂启用的工序和工艺路线（给外贸自制任务设工艺用）。 */
+export function getStageRouteOptions() {
+  return requestClient.get<FdmgongchangRouteApi.Options>(
+    `${BASE}/route-options`,
+    {
+      headers: factoryHeaders(),
+    },
+  );
+}
+
+/** 设定外贸自制任务的工艺：合同进度按最后一道回写；steps 为空时清除，回到按包装回写。 */
+export function saveTaskRoute(data: {
+  assignmentId: string;
+  contractId: string;
+  routeId?: number;
+  steps: string[];
+}) {
+  return requestClient.post<boolean>(`${BASE}/trade/task-route`, data, {
     headers: factoryHeaders(),
   });
 }

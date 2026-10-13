@@ -39,6 +39,8 @@ export interface StockIn extends VoidInfo {
   id: string;
   code: string;
   status: 'RECEIVED' | 'VOIDED';
+  /** PRODUCTION：工厂交货的生产入库，只能由工厂作废交货单冲回，不能在这里作废或退货。 */
+  kind?: 'PRODUCTION';
   standalone?: boolean;
   warehouseId: string;
   warehouseName: string;
