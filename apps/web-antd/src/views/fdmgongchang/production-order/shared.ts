@@ -1,3 +1,4 @@
+import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import dayjs from 'dayjs';
@@ -37,4 +38,46 @@ export function specText(p: {
 }) {
   const parts = [p.size, p.material, p.color].filter(Boolean);
   return parts.length > 0 ? parts.join(' · ') : (p.specification ?? '').replaceAll('\n', ' ');
+}
+
+export interface RouteDraft {
+  routeId?: number;
+  steps: string[];
+}
+
+/** 按本厂工序的生产链顺序排好，去掉本厂没启用的工序。 */
+export function sortSteps(steps: string[], processes: RouteApi.ProcessOption[]) {
+  return processes.map((p) => p.code).filter((code) => steps.includes(code));
+}
+
+/** 工艺的问题：没选工序，或跳过工序后下一道领不到上一道的产出（以工厂设置的领料来源为准）。 */
+export function routeProblem(steps: string[], processes: RouteApi.ProcessOption[]) {
+  const picked = processes.filter((p) => steps.includes(p.code));
+  if (picked.length === 0) return '请选择要走的工序';
+  for (let i = 1; i < picked.length; i++) {
+    const prev = picked[i - 1]!;
+    const next = picked[i]!;
+    if (!next.sources.includes(prev.outputStage)) {
+      return `「${next.label}」不能直接领「${prev.outputStageLabel}」，中间还要经过其他工序`;
+    }
+  }
+  return '';
+}
+
+/** 选了路线又调整过工序时，名称后面带「已调整」。 */
+export function routeLabel(draft: RouteDraft, options?: RouteApi.Options) {
+  const route = options?.routes.find((r) => r.id === draft.routeId);
+  if (!route) return '自选工序';
+  const same = route.steps.length === draft.steps.length && route.steps.every((s) => draft.steps.includes(s));
+  return same ? route.name : `${route.name}（已调整）`;
+}
+
+/** 订单明细工艺的最后一道工序：完成数量只在这道报产出时累加；旧单没有工艺，按包装。 */
+export function finalProcess(item: Pick<Api.Item, 'processes'>) {
+  return item.processes?.at(-1) ?? 'PACK';
+}
+
+/** 这道工序在不在订单明细的工艺里；旧单没有工艺，哪道都能关联。 */
+export function routeIncludes(item: Pick<Api.Item, 'processes'>, process: string) {
+  return (item.processes ?? []).length === 0 || item.processes!.includes(process);
 }

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
+import type { RouteDraft } from '../shared';
+
+import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -8,12 +11,18 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { AutoComplete, DatePicker, Empty, Input, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
-import { createProductionOrder, searchOrderProducts } from '#/api/fdmgongchang/production-order';
+import {
+  createProductionOrder,
+  getLastRoute,
+  getRouteOptions,
+  searchOrderProducts,
+} from '#/api/fdmgongchang/production-order';
 
-import { specText } from '../shared';
+import { routeProblem, sortSteps, specText } from '../shared';
+import RoutePicker from './route-picker.vue';
 
 /**
- * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量。
+ * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量，并为每个产品定好要走的工序（工艺由下单人决定，工厂只能退回）。
  * 产品规格以下单这一刻的产品档案为准，之后产品改了不影响这张单。
  * copyFrom：从「我下的单」复制（例如被退回后改一改重新提交），带出工厂、用途、备注和产品数量，交期重新选。
  */
@@ -25,6 +34,7 @@ interface Line {
   product: Api.Product;
   quantity: null | number;
   remark: string;
+  route: RouteDraft;
 }
 
 const PURPOSES = ['电商备货', '客户订单', '样品', '补货'].map((value) => ({ value }));
@@ -40,6 +50,8 @@ const searching = ref(false);
 const searched = ref(false);
 const submitting = ref(false);
 const error = ref('');
+const routeOptions = ref<RouteApi.Options>();
+const routeLoading = ref(false);
 
 const factoryOptions = computed(() => props.factories.map((f) => ({ label: f.name, value: f.id })));
 const pickedIds = computed(() => new Set(lines.value.map((l) => l.product.id)));
@@ -71,6 +83,7 @@ watch(open, (value) => {
     product: fromSnapshot(i),
     quantity: Number(i.quantity) || null,
     remark: i.remark ?? '',
+    route: { routeId: i.routeId ?? undefined, steps: i.processes ?? [] },
   }));
   keyword.value = '';
   results.value = [];
@@ -104,9 +117,56 @@ watch(keyword, (value) => {
 });
 onBeforeUnmount(() => clearTimeout(timer));
 
+/** 换工厂时重新取这家工厂的工序和常用路线；本厂没启用的工序从已选工艺里去掉。 */
+let optionsSeq = 0;
+watch(factoryId, async (id) => {
+  const mine = ++optionsSeq;
+  routeOptions.value = undefined;
+  if (!id) return;
+  routeLoading.value = true;
+  try {
+    const options = await getRouteOptions(id);
+    if (mine !== optionsSeq) return;
+    routeOptions.value = options;
+    for (const line of lines.value) {
+      line.route = {
+        routeId: options.routes.some((r) => r.id === line.route.routeId) ? line.route.routeId : undefined,
+        steps: sortSteps(line.route.steps, options.processes),
+      };
+    }
+  } catch {
+    if (mine === optionsSeq) routeOptions.value = undefined;
+  } finally {
+    if (mine === optionsSeq) routeLoading.value = false;
+  }
+});
+
+/** 新加的产品默认带出它上次向这家工厂下单的工艺；没下过且工厂只有一条路线时用那条。 */
+async function defaultRoute(line: Line) {
+  const id = factoryId.value;
+  if (!id) return;
+  try {
+    const last = await getLastRoute(id, line.product.id);
+    const options = routeOptions.value;
+    if (id !== factoryId.value || line.route.steps.length > 0) return;
+    if (last && last.steps.length > 0) {
+      line.route = {
+        routeId: options?.routes.some((r) => r.id === last.routeId) ? (last.routeId ?? undefined) : undefined,
+        steps: options ? sortSteps(last.steps, options.processes) : last.steps,
+      };
+    } else if (options?.routes.length === 1) {
+      const only = options.routes[0]!;
+      line.route = { routeId: only.id, steps: sortSteps(only.steps, options.processes) };
+    }
+  } catch {
+    // 带不出来就让下单人自己选
+  }
+}
+
 function add(p: Api.Product) {
   if (pickedIds.value.has(p.id)) return;
-  lines.value = [...lines.value, { product: p, quantity: null, remark: '' }];
+  lines.value = [...lines.value, { product: p, quantity: null, remark: '', route: { steps: [] } }];
+  void defaultRoute(lines.value[lines.value.length - 1]!);
 }
 
 function remove(id: string) {
@@ -134,6 +194,18 @@ async function submit() {
     error.value = `请填写「${missing.product.displayName ?? missing.product.name}」的数量`;
     return;
   }
+  const options = routeOptions.value;
+  if (!options) {
+    error.value = routeLoading.value ? '工厂的工序还在加载，请稍等' : '工厂的工序没有加载出来，请重新选一下工厂';
+    return;
+  }
+  for (const l of lines.value) {
+    const problem = routeProblem(l.route.steps, options.processes);
+    if (problem) {
+      error.value = `「${l.product.displayName ?? l.product.name}」的工艺：${problem}`;
+      return;
+    }
+  }
   submitting.value = true;
   try {
     const id = await createProductionOrder({
@@ -142,6 +214,8 @@ async function submit() {
         productId: l.product.id,
         quantity: l.quantity as number,
         remark: l.remark.trim() || undefined,
+        routeId: l.route.routeId,
+        steps: l.route.steps,
       })),
       purpose: purpose.value.trim() || undefined,
       remark: remark.value.trim() || undefined,
@@ -213,25 +287,28 @@ async function submit() {
       <section class="flex flex-col gap-2">
         <h3 class="m-0 text-sm font-semibold">明细（{{ lines.length }}）</h3>
         <Empty v-if="lines.length === 0" description="还没有加产品" />
-        <div v-for="l in lines" v-else :key="l.product.id" class="grid grid-cols-1 items-center gap-2 rounded-md border border-border px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,180px)_auto]">
-          <span class="flex min-w-0 flex-col">
-            <span class="truncate">{{ l.product.displayName ?? l.product.name }}</span>
-            <span class="truncate text-xs text-muted-foreground">{{ l.product.code }} · {{ specText(l.product) }}</span>
-          </span>
-          <span class="flex items-center gap-1 text-xs text-muted-foreground">
-            <InputNumber
-              :id="`po-qty-${l.product.id}`"
-              :min="0"
-              :precision="0"
-              :value="l.quantity ?? undefined"
-              :style="{ width: '7rem' }"
-              placeholder="数量"
-              @change="(v) => (l.quantity = (v as null | number | undefined) ?? null)"
-            />
-            {{ l.product.unit }}
-          </span>
-          <Input v-model:value="l.remark" :maxlength="255" placeholder="备注（选填）" size="small" />
-          <button class="text-xs text-destructive hover:underline" type="button" @click="remove(l.product.id)">删除</button>
+        <div v-for="l in lines" v-else :key="l.product.id" class="flex flex-col gap-2 rounded-md border border-border px-3 py-2">
+          <div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,180px)_auto]">
+            <span class="flex min-w-0 flex-col">
+              <span class="truncate">{{ l.product.displayName ?? l.product.name }}</span>
+              <span class="truncate text-xs text-muted-foreground">{{ l.product.code }} · {{ specText(l.product) }}</span>
+            </span>
+            <span class="flex items-center gap-1 text-xs text-muted-foreground">
+              <InputNumber
+                :id="`po-qty-${l.product.id}`"
+                :min="0"
+                :precision="0"
+                :value="l.quantity ?? undefined"
+                :style="{ width: '7rem' }"
+                placeholder="数量"
+                @change="(v) => (l.quantity = (v as null | number | undefined) ?? null)"
+              />
+              {{ l.product.unit }}
+            </span>
+            <Input v-model:value="l.remark" :maxlength="255" placeholder="备注（选填）" size="small" />
+            <button class="text-xs text-destructive hover:underline" type="button" @click="remove(l.product.id)">删除</button>
+          </div>
+          <RoutePicker :id="`po-route-${l.product.id}`" v-model="l.route" :options="routeOptions" />
         </div>
       </section>
 

@@ -213,3 +213,56 @@ export function saveFactorySetting(
     },
   );
 }
+
+export namespace FdmgongchangRouteApi {
+  /** 工艺路线：本厂常用的工序组合，下单时选一条再按需调整。 */
+  export interface Route {
+    id?: number;
+    /** 工序里有本厂已停用的，下单时不能直接用。 */
+    invalid?: boolean;
+    name: string;
+    remark?: null | string;
+    sort?: null | number;
+    /** 0 启用 / 1 停用。 */
+    status?: number;
+    /** 工序编码，按生产链顺序。 */
+    steps: string[];
+  }
+
+  export interface ProcessOption {
+    code: string;
+    label: string;
+    outputStage: string;
+    outputStageLabel: string;
+    /** 可领料的库存阶段，用来判断跳过工序后能不能接上。 */
+    sources: string[];
+    unit: string;
+  }
+
+  export interface Options {
+    processes: ProcessOption[];
+    routes: Route[];
+  }
+}
+
+export function getFactoryRoutes() {
+  return requestClient.get<FdmgongchangRouteApi.Route[]>(
+    '/fdmgongchang/factory-setting/route/list',
+    { headers: factoryHeaders() },
+  );
+}
+
+export function saveFactoryRoute(data: FdmgongchangRouteApi.Route) {
+  return requestClient.post<number>(
+    '/fdmgongchang/factory-setting/route/save',
+    data,
+    { headers: factoryHeaders() },
+  );
+}
+
+export function deleteFactoryRoute(id: number) {
+  return requestClient.delete<boolean>(
+    '/fdmgongchang/factory-setting/route/delete',
+    { headers: factoryHeaders(), params: { id } },
+  );
+}

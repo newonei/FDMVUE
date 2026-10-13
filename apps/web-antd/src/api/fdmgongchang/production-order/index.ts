@@ -1,5 +1,7 @@
 import type { PageParam, PageResult } from '@vben/request';
 
+import type { FdmgongchangRouteApi } from '../factory';
+
 import { requestClient } from '#/api/request';
 
 import { factoryHeaders } from '../factory';
@@ -48,9 +50,37 @@ export namespace FdmgongchangProductionOrderApi {
     productName: string;
     quantity: number | string;
     remark?: null | string;
+    /** 要走的工序编码，按生产链顺序；旧单为空。 */
+    processes?: string[];
+    routeId?: null | number;
+    /** 路线名称快照；调整过工序时带「已调整」。 */
+    routeName?: null | string;
     size?: null | string;
     specification?: null | string;
+    /** 每道工序的进度（不含作废的工序单）。 */
+    steps?: Step[];
     unit?: null | string;
+  }
+
+  export interface Step {
+    defectQuantity: number | string;
+    goodQuantity: number | string;
+    inProgressCount: number;
+    label: string;
+    orderCount: number;
+    outputStage: string;
+    /** 订单工艺里的工序；旧单关联过的工序为 false。 */
+    planned: boolean;
+    process: string;
+    unit: string;
+  }
+
+  /** 这个产品上次向这家工厂下单用的工艺。 */
+  export interface LastRoute {
+    orderNo: string;
+    routeId?: null | number;
+    routeName?: null | string;
+    steps: string[];
   }
 
   export interface Order {
@@ -84,7 +114,14 @@ export namespace FdmgongchangProductionOrderApi {
 
   export interface CreateReq {
     factoryId: number;
-    items: Array<{ productId: string; quantity: number; remark?: string }>;
+    items: Array<{
+      productId: string;
+      quantity: number;
+      remark?: string;
+      routeId?: number;
+      /** 这个产品要走的工序编码。 */
+      steps: string[];
+    }>;
     purpose?: string;
     remark?: string;
     requiredDate: string;
@@ -117,6 +154,22 @@ export function searchOrderProducts(keyword: string) {
     {
       params: { keyword },
     },
+  );
+}
+
+/** 下单选工艺：这家工厂启用的工序和工艺路线。 */
+export function getRouteOptions(factoryId: number) {
+  return requestClient.get<FdmgongchangRouteApi.Options>(
+    `${BASE}/route-options`,
+    { params: { factoryId } },
+  );
+}
+
+/** 这个产品上次向这家工厂下单用的工艺，没有时为空。 */
+export function getLastRoute(factoryId: number, productId: string) {
+  return requestClient.get<FdmgongchangProductionOrderApi.LastRoute | null>(
+    `${BASE}/last-route`,
+    { params: { factoryId, productId } },
   );
 }
 

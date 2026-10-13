@@ -40,6 +40,7 @@ import {
 } from '#/api/fdmgongchang/stage-stock';
 import { matchWageItems } from '#/api/fdmgongchang/wage';
 
+import { finalProcess, routeIncludes } from '../../production-order/shared';
 import {
   attrSummary,
   contractProductText,
@@ -126,13 +127,17 @@ async function loadMakeTasks() {
     makeTasksLoading.value = false;
   }
 }
-/** 工厂订单（内部向工厂下单）已接单的明细；包装报产出时良品自动累加到完成数量。 */
+/** 工厂订单（内部向工厂下单）已接单、工艺里有这道工序的明细；工艺最后一道报产出时良品自动累加到完成数量。 */
 const productionOrders = ref<FdmgongchangProductionOrderApi.Order[]>([]);
 const linkedProductionItemId = ref<number>();
 const productionItemOptions = computed(() =>
   productionOrders.value.flatMap((o) =>
     o.items
-      .filter((i) => Number(i.quantity) > Number(i.completedQuantity) || i.id === linkedProductionItemId.value)
+      .filter(
+        (i) =>
+          i.id === linkedProductionItemId.value ||
+          (Number(i.quantity) > Number(i.completedQuantity) && routeIncludes(i, processCode.value)),
+      )
       .map((i) => ({
         label: `${o.orderNo} · ${o.requesterDeptName || o.requesterName || ''} · ${i.productName} · 待做 ${formatQty(Number(i.quantity) - Number(i.completedQuantity))}${i.unit ?? ''}`,
         value: i.id,
@@ -142,6 +147,20 @@ const productionItemOptions = computed(() =>
 const linkedProductionOrderNo = computed(
   () => productionOrders.value.find((o) => o.items.some((i) => i.id === linkedProductionItemId.value))?.orderNo,
 );
+const linkedProductionItem = computed(() =>
+  productionOrders.value.flatMap((o) => o.items).find((i) => i.id === linkedProductionItemId.value),
+);
+/** 关联明细工艺的最后一道工序名，这道工序报产出时才累加完成数量。 */
+const linkedFinalLabel = computed(() => {
+  const code = linkedProductionItem.value ? finalProcess(linkedProductionItem.value) : '';
+  return props.options.processes.find((p) => p.code === code)?.label ?? code;
+});
+// 换了工序后，原来关联的明细工艺里没有这道工序时取消关联
+watch(processCode, (code) => {
+  if (linkedProductionItem.value && !routeIncludes(linkedProductionItem.value, code)) {
+    linkedProductionItemId.value = undefined;
+  }
+});
 async function loadProductionOrders() {
   try {
     productionOrders.value = await getOpenProductionOrders();
@@ -1427,11 +1446,14 @@ watch(processCode, warnNoPatterns);
                 placeholder="选内部部门下给本厂、已接单的生产订单"
                 show-search
               />
-              <span v-if="linkedProductionItemId && outputStage === 'PACKED'" class="text-primary">
-                每次报产出的良品会自动累加到工厂订单 {{ linkedProductionOrderNo }} 的完成数量。
+              <span
+                v-if="linkedProductionItem && finalProcess(linkedProductionItem) === processCode"
+                class="text-primary"
+              >
+                这是订单工艺的最后一道，每次报产出的良品会自动累加到工厂订单 {{ linkedProductionOrderNo }} 的完成数量。
               </span>
               <span v-else-if="linkedProductionItemId">
-                包装报产出时才累加完成数量，这道工序只做关联记录。
+                订单工艺最后一道（{{ linkedFinalLabel }}）报产出时才累加完成数量，这道工序只做关联记录。
               </span>
             </label>
             <label

@@ -26,11 +26,13 @@ import {
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
+import RoutePanel from './modules/route-panel.vue';
 import WageItemPanel from './modules/wage-item-panel.vue';
 
 /**
  * 工厂部门 · 工厂设置：各厂自己的配置集中在这里。
  * - 本厂工序：各厂工序不一样，没勾的工序不会出现在开单、生产链和人员岗位里；
+ * - 工艺路线：本厂常用的工序组合，下单人向工厂下单时选用并按产品调整；
  * - AI 排单：本厂排单用哪个模型，只能选 AI 网关已给本厂放行的模型；
  * - 计价项目：本厂的计件、计时、杂活、补助价格（单独权限，普通人员看不到）。
  */
@@ -43,7 +45,7 @@ const canEdit = computed(() =>
 const canSeeWage = computed(() =>
   hasAccessByCodes(['fdmgongchang:wage-item:query']),
 );
-const activeTab = ref<'ai' | 'processes' | 'wage'>('processes');
+const activeTab = ref<'ai' | 'processes' | 'routes' | 'wage'>('processes');
 
 const factory = useFactory();
 const setting = ref<Api.Setting>();
@@ -158,7 +160,7 @@ async function save() {
           </p>
         </div>
         <Button
-          v-if="canEdit && setting && activeTab !== 'wage'"
+          v-if="canEdit && setting && activeTab !== 'wage' && activeTab !== 'routes'"
           :disabled="!dirty"
           :loading="saving"
           type="primary"
@@ -244,6 +246,9 @@ async function save() {
           </p>
         </section>
       </Spin>
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="setting" key="routes" tab="工艺路线">
+            <RoutePanel :can-edit="canEdit" :processes="setting.processes" />
           </Tabs.TabPane>
           <Tabs.TabPane key="ai" tab="AI 排单">
             <section class="flex flex-col gap-3">
