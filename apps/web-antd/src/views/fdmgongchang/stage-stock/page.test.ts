@@ -288,12 +288,28 @@ describe('stage stock page', () => {
     expect(mocks.setFactory).toHaveBeenCalledWith(2);
     expect(document.querySelector('#factory-switch')).not.toBeNull();
     expect(text).toContain('已包装成品');
-    expect(text).toContain('在制 40 片');
+    expect(text).toContain('库存阶段');
+    for (const group of ['原料与板材', '半成品', '成品']) expect(text).toContain(group);
     expect(text).toContain('板材库存');
+    expect(text).toContain('密炼挤出发泡产出');
+    expect(text).toContain('开片领料');
+    expect(text).toContain('当前库存');
+    expect(document.querySelector('.stock-panel__total')?.textContent?.replaceAll(/\s/g, '')).toBe('300张');
+    expect(text).toContain('TPE 紫色板材');
     expect(text).toContain('BC-TPE-REC001-PU-190X130X0.3');
-    expect(text).toContain('TPE · 紫色 · 190×130×0.3 · 常规款（密度110）');
-    expect(text).toContain('生产链');
+    expect(text).toContain('190×130×0.3 · 常规款（密度110）');
+    expect(text).toContain('共 1 条');
     expect(text).toContain('1 在制');
+
+    // 切到已压花片材：标题、流转关系（含跳过工序领料）与在制数量随阶段更新
+    clickButton('已压花片材0片');
+    await flush();
+    const embossed = document.body.textContent ?? '';
+    expect(embossed).toContain('已压花片材库存');
+    expect(embossed).toContain('压花产出');
+    expect(embossed).toContain('冲裁领料');
+    expect(embossed).toContain('压花在制 40 片');
+    expect(mocks.stockPage).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'EMBOSSED' }));
 
     for (const tab of ['工序单', '外贸订单', '到货入库', '库存流水', '基础设置']) {
       const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));

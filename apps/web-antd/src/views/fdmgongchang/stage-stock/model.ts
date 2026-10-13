@@ -700,3 +700,87 @@ export function recipeCheck(
 export function issueSeqLabel(seq?: null | number) {
   return seq && seq > 0 ? `第 ${seq} 次补领` : '';
 }
+
+/** 库存阶段目录的分组；后端新增、这里没登记的阶段归到「其他」。 */
+export const STAGE_GROUPS: Array<{ label: string; stages: string[] }> = [
+  { label: '原料与板材', stages: ['RAW', 'BOARD'] },
+  { label: '半成品', stages: ['SHEET', 'CUT', 'LAMINATED', 'EMBOSSED'] },
+  { label: '成品', stages: ['PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED'] },
+];
+
+/** 按目录分组排列阶段，组内保持接口返回的顺序，空组不显示。 */
+export function groupStages<T extends { code: string }>(stages: T[]) {
+  const known = new Set(STAGE_GROUPS.flatMap((g) => g.stages));
+  return [
+    ...STAGE_GROUPS.map((g) => ({
+      label: g.label,
+      stages: stages.filter((s) => g.stages.includes(s.code)),
+    })),
+    { label: '其他', stages: stages.filter((s) => !known.has(s.code)) },
+  ].filter((g) => g.stages.length > 0);
+}
+
+/** 阶段的流转关系：来源 → 当前 → 去向；去向包含允许跳过工序直接领料的下游工序。 */
+export function stageFlow(stage: string, options: Api.Options) {
+  const label = options.stages.find((s) => s.code === stage)?.label ?? stage;
+  const incoming = options.processes.find((p) => p.outputStage === stage);
+  const outgoing = options.processes.filter((p) => p.sources.includes(stage));
+  let from = '采购到货';
+  if (incoming)
+    from = `${incoming.label}产出${stage === 'PACKED' ? '、外采到货' : ''}`;
+  return {
+    current: `当前${label}`,
+    from,
+    to:
+      outgoing.length > 0
+        ? `${outgoing.map((p) => p.label).join('、')}领料`
+        : '外贸出货',
+  };
+}
+
+/** 库存行的物料名，例如「TPE 紫色片材」；原材料用原料名称。缺属性时退回编码。 */
+export function stockTitle(
+  stage: string,
+  stageLabel: string,
+  attrs: Api.ItemAttrs | null | undefined,
+  labels: Labels,
+  itemCode: string,
+) {
+  if (!attrs) return itemCode;
+  if (stage === 'RAW')
+    return attrs.rawMaterialName || attrs.rawMaterialCode || itemCode;
+  let color = labels.color(attrs.color);
+  if (isLayered(stage)) {
+    const front = labels.color(attrs.frontColor);
+    const back = labels.color(attrs.backColor);
+    color =
+      attrs.frontColor === attrs.backColor
+        ? front
+        : [front, back].filter(Boolean).join('/');
+  }
+  const head = [labels.material(attrs.material), color]
+    .filter(Boolean)
+    .join(' ');
+  return head ? `${head}${stageLabel}` : itemCode;
+}
+
+/** 物料名之外的规格摘要（尺寸、配方、纹路、图案），原材料显示分类。 */
+export function stockSpec(
+  stage: string,
+  attrs: Api.ItemAttrs | null | undefined,
+  labels: Labels,
+) {
+  if (stage === 'RAW') {
+    const category = attrs?.rawCategory ?? '';
+    return RAW_CATEGORY_LABELS[category] ?? category;
+  }
+  const spec = attrSummary(stage, attrs, labels, [
+    'material',
+    'color',
+    'frontColor',
+    'backColor',
+  ]);
+  const single =
+    isLayered(stage) && attrs?.frontColor && attrs.frontColor === attrs.backColor;
+  return single ? ['单层', spec].filter(Boolean).join(' · ') : spec;
+}

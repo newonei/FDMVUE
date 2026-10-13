@@ -8,6 +8,7 @@ import {
   attrSummary,
   deriveOutputs,
   EDITABLE_FIELDS,
+  groupStages,
   guessPackedAttrs,
   issueSeqLabel,
   joinBatches,
@@ -18,6 +19,9 @@ import {
   recipeCheck,
   recipePicks,
   stageColumns,
+  stageFlow,
+  stockSpec,
+  stockTitle,
   sumQty,
   validateOutputs,
   validateTradeReceipt,
@@ -405,5 +409,61 @@ describe('recipe issuing', () => {
     expect(issueSeqLabel(0)).toBe('');
     expect(issueSeqLabel(null)).toBe('');
     expect(issueSeqLabel(2)).toBe('第 2 次补领');
+  });
+});
+
+describe('stage stock catalog', () => {
+  const stages = [
+    'RAW', 'BOARD', 'SHEET', 'CUT', 'LAMINATED', 'EMBOSSED', 'PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED', 'NEW',
+  ].map((code) => ({ code, defaultLocation: '', label: code, unit: '片' }));
+  const options = {
+    colors: [{ label: '紫色', value: 'PU' }, { label: '灰色', value: 'GR' }],
+    materials: [{ label: 'TPE', value: 'TPE' }],
+    patterns: [],
+    processes: [
+      { allowedSources: ['RAW'], code: 'MIX', label: '密炼', outputStage: 'BOARD', sources: ['RAW'] },
+      { allowedSources: ['BOARD'], code: 'SLICE', label: '开片', outputStage: 'SHEET', sources: ['BOARD'] },
+      { allowedSources: ['SHEET'], code: 'CUT', label: '立切', outputStage: 'CUT', sources: ['SHEET'] },
+      { allowedSources: ['SHEET', 'CUT'], code: 'LAMINATE', label: '贴合', outputStage: 'LAMINATED', sources: ['CUT', 'SHEET'] },
+      { allowedSources: ['FOLDED'], code: 'PACK', label: '包装', outputStage: 'PACKED', sources: ['FOLDED'] },
+    ],
+    rawMaterials: [],
+    recipes: [{ code: 'REC-001', enabled: true, name: '密度110' }],
+    stages,
+    textures: [],
+  } as Api.Options;
+  const labels = makeLabels(options);
+
+  it('groups stages by catalog and keeps unknown stages under 其他', () => {
+    expect(groupStages(stages).map((g) => [g.label, g.stages.map((s) => s.code)])).toEqual([
+      ['原料与板材', ['RAW', 'BOARD']],
+      ['半成品', ['SHEET', 'CUT', 'LAMINATED', 'EMBOSSED']],
+      ['成品', ['PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED']],
+      ['其他', ['NEW']],
+    ]);
+    expect(groupStages(stages.slice(0, 2)).map((g) => g.label)).toEqual(['原料与板材']);
+  });
+
+  it('builds the flow from the configured processes, including skip-stage sources', () => {
+    expect(stageFlow('SHEET', options)).toEqual({ current: '当前SHEET', from: '开片产出', to: '立切、贴合领料' });
+    expect(stageFlow('RAW', options)).toEqual({ current: '当前RAW', from: '采购到货', to: '密炼领料' });
+    expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出、外采到货', to: '外贸出货' });
+  });
+
+  it('names a stock row by material, colour and stage, and keeps the rest as spec', () => {
+    const sheet = { color: 'PU', length: 180, material: 'TPE', thickness: 0.1, width: 100 };
+    expect(stockTitle('SHEET', '片材', sheet, labels, 'C1')).toBe('TPE 紫色片材');
+    expect(stockSpec('SHEET', sheet, labels)).toBe('180×100×0.1');
+    const board = { ...sheet, recipeCode: 'REC-001' };
+    expect(stockSpec('BOARD', board, labels)).toBe('180×100×0.1 · 密度110');
+    const layered = { backColor: 'GR', frontColor: 'PU', material: 'TPE' };
+    expect(stockTitle('LAMINATED', '已贴合片材', layered, labels, 'C2')).toBe('TPE 紫色/灰色已贴合片材');
+    const single = { backColor: 'PU', frontColor: 'PU', material: 'TPE' };
+    expect(stockTitle('LAMINATED', '已贴合片材', single, labels, 'C3')).toBe('TPE 紫色已贴合片材');
+    expect(stockSpec('LAMINATED', single, labels)).toBe('单层');
+    expect(stockTitle('RAW', '原材料', { rawCategory: 'MAIN', rawMaterialName: 'TPE粒子' }, labels, 'R1')).toBe('TPE粒子');
+    expect(stockSpec('RAW', { rawCategory: 'MAIN' }, labels)).toBe('主材料');
+    expect(stockTitle('SHEET', '片材', {}, labels, 'C4')).toBe('C4');
+    expect(stockTitle('SHEET', '片材', null, labels, 'C5')).toBe('C5');
   });
 });
