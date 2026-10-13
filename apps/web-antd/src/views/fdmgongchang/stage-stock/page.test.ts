@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import StageStockPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  createExtra: vi.fn(),
   openProductionOrders: vi.fn().mockResolvedValue([]),
   defect: vi.fn(),
   makeTasks: vi.fn(),
@@ -35,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   txnPage: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
+  createExtraOrder: mocks.createExtra,
   createOrder: vi.fn(),
   createShipment: vi.fn(),
   getMakeTasks: mocks.makeTasks,
@@ -375,5 +377,49 @@ describe('stage stock page', () => {
     );
     expect(errors).toEqual([]);
     mocks.route.query = {};
+  });
+
+  it('registers an extra process at the current stage: defects leave stock, good stays', async () => {
+    const errors: unknown[] = [];
+    mockEmptyPage();
+    mocks.options.mockResolvedValue({
+      ...options,
+      extraProcesses: [
+        { code: 'X1', enabled: true, label: '打孔', stage: 'BOARD' },
+        { code: 'X2', enabled: false, label: '旧工序', stage: 'BOARD' },
+      ],
+    });
+    mocks.stockPage.mockResolvedValue({
+      list: [
+        { batchNo: 'MB1', id: 7, item: { material: 'TPE' }, itemCode: 'BC-TPE-1', itemId: 3, location: '板材区', quantity: 50, stage: 'BOARD' },
+      ],
+      total: 1,
+    });
+    mocks.createExtra.mockResolvedValue(99);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(StageStockPage);
+    app.config.errorHandler = (err) => errors.push(err);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    expect(host.textContent).toContain('附加工序：打孔');
+    expect(host.textContent).not.toContain('旧工序');
+    clickButton('附加工序', host);
+    await flush();
+    for (const [id, value] of [['#extra-qty-7', '30'], ['#extra-defect-7', '2']] as const) {
+      const input = document.querySelector<HTMLInputElement>(id)!;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await flush();
+    expect(document.body.textContent?.replaceAll(/\s/g, '')).toContain('残次2，良品28');
+    clickButton('登记');
+    await flush();
+    expect(mocks.createExtra).toHaveBeenCalledWith(
+      expect.objectContaining({ lines: [{ defectQuantity: 2, quantity: 30, stockId: 7 }], process: 'X1' }),
+    );
+    expect(errors).toEqual([]);
   });
 });

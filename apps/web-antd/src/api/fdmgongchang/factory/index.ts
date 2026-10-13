@@ -234,6 +234,8 @@ export namespace FdmgongchangRouteApi {
     label: string;
     outputStage: string;
     outputStageLabel: string;
+    /** 附加工序：不改变规格，从 outputStage 领、良品留在 outputStage。 */
+    custom?: boolean;
     /** 可领料的库存阶段，用来判断跳过工序后能不能接上。 */
     sources: string[];
     unit: string;
@@ -243,6 +245,43 @@ export namespace FdmgongchangRouteApi {
     processes: ProcessOption[];
     routes: Route[];
   }
+}
+
+/** 附加工序：工厂自定义的打孔、全检等工序，不改变规格；只停用不删除。 */
+export interface FdmgongchangCustomProcess {
+  code?: string;
+  id?: number;
+  name: string;
+  remark?: null | string;
+  sort?: null | number;
+  stage: string;
+  stageLabel?: string;
+  /** 0 启用 / 1 停用。 */
+  status?: number;
+  unit?: string;
+}
+
+export function getCustomProcesses() {
+  return requestClient.get<FdmgongchangCustomProcess[]>(
+    '/fdmgongchang/factory-setting/custom-process/list',
+    { headers: factoryHeaders() },
+  );
+}
+
+export function saveCustomProcess(data: FdmgongchangCustomProcess) {
+  return requestClient.post<number>(
+    '/fdmgongchang/factory-setting/custom-process/save',
+    data,
+    { headers: factoryHeaders() },
+  );
+}
+
+/** 维护路线用的工序：本厂启用的主干工序和附加工序，按生产链排好。 */
+export function getSettingRouteOptions() {
+  return requestClient.get<FdmgongchangRouteApi.Options>(
+    '/fdmgongchang/factory-setting/route/options',
+    { headers: factoryHeaders() },
+  );
 }
 
 export function getFactoryRoutes() {

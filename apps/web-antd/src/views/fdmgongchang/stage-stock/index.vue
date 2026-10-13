@@ -295,6 +295,7 @@ async function onSettingSaved() {
                   :summary="summary"
                   @changed="onChanged"
                   @create="openCreate"
+                  @saved="(text) => message.success(text)"
                   @ship="openShipment()"
                   @txn="showTxns"
                 />

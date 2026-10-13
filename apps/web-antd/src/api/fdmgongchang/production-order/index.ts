@@ -63,6 +63,8 @@ export namespace FdmgongchangProductionOrderApi {
   }
 
   export interface Step {
+    /** 附加工序（不改变规格）。 */
+    custom?: boolean;
     defectQuantity: number | string;
     goodQuantity: number | string;
     inProgressCount: number;

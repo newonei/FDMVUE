@@ -74,6 +74,7 @@ export const TXN_TYPE_LABELS: Record<string, string> = {
   STOCKTAKE: '盘点调整',
   TRADE_RECEIPT: '外采入库',
   VOID: '作废冲销',
+  EXTRA_DEFECT: '附加工序残次',
 };
 
 export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
@@ -784,3 +785,19 @@ export function stockSpec(
     isLayered(stage) && attrs?.frontColor && attrs.frontColor === attrs.backColor;
   return single ? ['单层', spec].filter(Boolean).join(' · ') : spec;
 }
+
+/** 工序名称：主干工序或附加工序（含停用的附加工序），找不到时显示编码。 */
+export function processLabel(options: Api.Options | undefined, code?: null | string) {
+  if (!code) return '';
+  return (
+    options?.processes.find((p) => p.code === code)?.label ??
+    options?.extraProcesses?.find((p) => p.code === code)?.label ??
+    code
+  );
+}
+
+/** 挂在这个库存阶段的启用中的附加工序。 */
+export function extraProcessesAt(options: Api.Options | undefined, stage: string) {
+  return (options?.extraProcesses ?? []).filter((p) => p.enabled && p.stage === stage);
+}
+
