@@ -100,6 +100,7 @@ import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
 import OrderExportMenu from './components/OrderExportMenu.vue';
 import OrderInvoices from './components/OrderInvoices.vue';
+import OrderLines from './components/OrderLines.vue';
 import OrderStockDocs from './components/OrderStockDocs.vue';
 import OrderSubDocMenu from './components/OrderSubDocMenu.vue';
 import OrderSummaryCards from './components/OrderSummaryCards.vue';
@@ -1729,6 +1730,7 @@ watch(financeType, (value, previous) => {
                 </Button>
               </template>
             </Alert>
+            <OrderLines :view="view" />
             <Tabs v-model:active-key="tab" class="order-tabs">
               <TabPane
                 key="timeline"
