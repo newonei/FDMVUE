@@ -4,6 +4,7 @@ import type { DetailTab, WorkspaceKey } from '../workspaces';
 import type { ContractDocumentKind } from './contract-document-launcher';
 import type { MainlineAction } from './contract-mainline';
 import type { WorkboardLaunch } from './contract-workboard';
+import type { LineColumn } from './line-table-model';
 
 import type {
   BusinessRecord,
@@ -69,6 +70,7 @@ import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
 import ContractTimeline from './ContractTimeline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
+import LineTable from './LineTable.vue';
 import RecordTable from './RecordTable.vue';
 import SummaryCards from './SummaryCards.vue';
 
@@ -177,6 +179,32 @@ const standardFiles = computed(() => [
   ).values(),
 ]);
 const pipeline = computed(() => contractItemPipeline(props.contract));
+const lineColumns: LineColumn[] = [
+  { key: 'skuName', title: '产品名称', width: 240, locked: true },
+  { key: 'skuCode', title: '产品编号', width: 140, optional: true },
+  { key: 'specification', title: '规格', width: 200 },
+  { key: 'material', title: '材质', optional: true },
+  { key: 'size', title: '尺寸', optional: true },
+  { key: 'color', title: '颜色', optional: true },
+  { key: 'shape', title: '形状', width: 110, optional: true },
+  { key: 'printing', title: '印刷', optional: true },
+  { key: 'packaging', title: '包装', optional: true },
+  { key: 'quantity', title: '数量', width: 110, align: 'right' },
+  { key: 'unit', title: '单位', width: 80 },
+  { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+  { key: 'lineAmount', title: '金额', width: 130, align: 'right' },
+  { key: 'requiredDate', title: '交期', width: 120 },
+  { key: 'requestedQuantity', title: '已申请', width: 100, align: 'right' },
+  { key: 'orderedQuantity', title: '已下单', width: 100, align: 'right' },
+  { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
+  { key: 'shippedQuantity', title: '已发货', width: 100, align: 'right' },
+  {
+    key: 'suggestedSupplierName',
+    title: '建议供应商',
+    width: 180,
+    optional: true,
+  },
+];
 /** 主线只给第一项；全部可办理事项收在下面，可展开逐项办理 */
 const allTasks = computed(() =>
   props.contract
@@ -813,63 +841,82 @@ async function download(file: { id: string; name: string }) {
           :native-source="{ kind: 'CONTRACT', nativeId: contract.id }"
         />
         <section class="products-card" aria-label="产品明细">
-          <h3 class="section-title">产品明细</h3>
-          <div class="ptable" role="table" aria-label="产品明细">
-            <div class="pr th" role="row">
-              <span>产品 / 规格</span><span class="r">数量</span><span class="r">单价</span><span class="r">金额</span><span>交期</span><span>申请 · 下单 · 到货</span><span class="r">已发</span>
-            </div>
-            <div v-for="item in pipeline" :key="item.id" class="pr" role="row">
-              <div class="prod">
+          <LineTable
+            table="contract"
+            :columns="lineColumns"
+            :data-source="pipeline"
+          >
+            <template #extra>
+              <Tooltip
+                title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
+              >
+                <span class="note" tabindex="0">数量口径说明</span>
+              </Tooltip>
+            </template>
+            <template #bodyCell="{ column, record: item }">
+              <div v-if="column.key === 'skuName'" class="prod">
                 <img
                   v-if="item.productImageUrl"
                   :src="item.productImageUrl"
                   alt=""
                   class="thumb"
                 />
-                <div class="prod-text">
-                  <span class="strong" :title="item.skuName">{{
-                    item.skuName
-                  }}</span>
-                  <span class="sub" :title="item.specification">{{
-                    item.specification || item.size || '—'
-                  }}</span>
-                </div>
+                <span class="strong" :title="item.skuName">{{
+                  item.skuName
+                }}</span>
               </div>
-              <span class="r">{{ Number(item.quantity).toLocaleString('en-US') }}
-                {{ item.unit }}</span>
-              <span class="r">{{ item.unitPrice ?? '待定价' }}</span>
-              <span class="r">{{
+              <span v-else-if="column.key === 'specification'">{{
+                item.specification || item.size || '—'
+              }}</span>
+              <span v-else-if="column.key === 'quantity'">{{
+                Number(item.quantity).toLocaleString('en-US')
+              }}</span>
+              <span v-else-if="column.key === 'unitPrice'">{{
+                item.unitPrice ?? '待定价'
+              }}</span>
+              <span v-else-if="column.key === 'lineAmount'">{{
                 item.lineAmount
                   ? Number(item.lineAmount).toLocaleString('en-US', {
                       minimumFractionDigits: 2,
                     })
                   : '—'
               }}</span>
-              <span>{{ item.requiredDate ?? '未约定' }}</span>
-              <span class="sub">{{ item.requestedQuantity ?? '待核对' }} ·
-                {{ item.orderedQuantity ?? '—' }} ·
-                {{ item.arrivedQuantity ?? '—' }}</span>
-              <span class="r" :class="{ done: item.deliveryComplete }">{{
-                item.shippedQuantity ?? '待核对'
+              <span v-else-if="column.key === 'requiredDate'">{{
+                item.requiredDate ?? '未约定'
               }}</span>
-            </div>
-            <div class="pr foot" role="row">
-              <span>合计 {{ pipeline.length }} 项</span><span class="r">{{ totalQuantity }}</span><span></span><span class="r">{{
-                nativeMoney(contract.amount, contract.currency)
-              }}</span><span class="sub" style="grid-column: span 3">{{
-                Number(contract.additionalAmount) > 0
-                  ? `含附加费用 ${nativeMoney(contract.additionalAmount, contract.currency)}`
-                  : '没有附加费用'
-              }}</span>
-            </div>
-            <p class="note">
-              <Tooltip
-                title="数量只统计已匹配到本合同明细的单据；未匹配或独立单据计入关联总数。数量缺失时显示待核对，不按零判定完成。"
-              >
-                <span tabindex="0">数量口径说明</span>
-              </Tooltip>
-            </p>
-          </div>
+              <span
+                v-else-if="
+                  ['requestedQuantity', 'shippedQuantity'].includes(
+                    String(column.key),
+                  )
+                "
+                :class="{
+                  done:
+                    column.key === 'shippedQuantity' && item.deliveryComplete,
+                }"
+                >{{ item[String(column.key)] ?? '待核对' }}</span>
+              <span
+                v-else-if="
+                  ['orderedQuantity', 'arrivedQuantity'].includes(
+                    String(column.key),
+                  )
+                "
+                >{{ item[String(column.key)] ?? '—' }}</span>
+            </template>
+            <template #footer>
+              <p class="line-total">
+                <span>合计 {{ pipeline.length }} 项</span>
+                <span>数量 {{ totalQuantity }}</span>
+                <span>金额
+                  {{ nativeMoney(contract.amount, contract.currency) }}</span>
+                <span class="sub">{{
+                  Number(contract.additionalAmount) > 0
+                    ? `含附加费用 ${nativeMoney(contract.additionalAmount, contract.currency)}`
+                    : '没有附加费用'
+                }}</span>
+              </p>
+            </template>
+          </LineTable>
         </section>
         <Tabs v-model:active-key="activeTab">
           <TabPane
@@ -1339,6 +1386,7 @@ async function download(file: { id: string; name: string }) {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  align-self: stretch;
   min-width: 0;
 }
 
@@ -1485,44 +1533,21 @@ section.identity {
   gap: 14px;
 }
 
-.ptable {
+.line-total {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid hsl(var(--border));
-  border-radius: 10px;
-}
-
-.pr {
-  display: grid;
-  grid-template-columns: minmax(0, 2.2fr) 0.8fr 0.55fr 0.9fr 0.8fr 1.15fr 0.5fr;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 12px;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  align-items: baseline;
+  margin: 8px 0 0;
   font-size: 12.5px;
-  border-top: 1px solid hsl(var(--border));
-}
-
-.pr.th {
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--muted) / 50%);
-  border-top: 0;
-}
-
-.pr.foot {
   font-weight: 600;
-  background: hsl(var(--muted) / 50%);
 }
 
-.pr .r {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
+.line-total .sub {
+  font-weight: normal;
 }
 
-.pr .done {
+.done {
   color: hsl(var(--success));
 }
 
@@ -1539,12 +1564,6 @@ section.identity {
   height: 34px;
   object-fit: cover;
   border-radius: 6px;
-}
-
-.prod-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
 }
 
 .strong {

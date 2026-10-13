@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LineColumn } from '../components/line-table-model';
 import type { ActionDefinition } from '../data';
 import type { DocumentKind } from './model';
 
@@ -44,6 +45,7 @@ import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submiss
 
 import ActionDialog from '../components/ActionDialog.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
+import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import { errorText, label, rows } from '../data';
 import { downloadBlob } from '../purchase/manage/model';
@@ -106,6 +108,26 @@ let actionSequence = 0;
 const lines = computed(() =>
   view.value ? businessDocumentLines(view.value) : [],
 );
+const lineColumns: LineColumn[] = [
+  { key: 'product', title: '产品名称', width: 220, locked: true },
+  { key: 'skuCode', title: '产品编号', width: 140, optional: true },
+  { key: 'specification', title: '规格', width: 200 },
+  { key: 'material', title: '材质', optional: true },
+  { key: 'size', title: '尺寸', optional: true },
+  { key: 'color', title: '颜色', optional: true },
+  { key: 'shape', title: '形状', width: 110, optional: true },
+  { key: 'printing', title: '印刷', optional: true },
+  { key: 'packaging', title: '包装', optional: true },
+  { key: 'unit', title: '单位', width: 80 },
+  { key: 'quantity', title: '数量', width: 110, align: 'right' },
+  { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+  { key: 'amount', title: '金额', width: 130, align: 'right' },
+  { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
+  { key: 'returnedQuantity', title: '已退货', width: 100, align: 'right' },
+  { key: 'cancelledQuantity', title: '已取消', width: 100, align: 'right' },
+  { key: 'requiredDate', title: '需求日期', width: 120, optional: true },
+  { key: 'remark', title: '备注', width: 200, optional: true },
+];
 const title = computed(() =>
   view.value
     ? `${nativeTypeLabels[view.value.type] ?? '业务单据'} · ${view.value.code || view.value.name || view.value.record.name || ''}`
@@ -530,24 +552,12 @@ async function submit(
             :migration="view.migration"
             :block-reasons="view.blockReasons"
           />
-          <Card v-if="lines.length" size="small" title="产品明细">
-            <Table
+          <Card v-if="lines.length" size="small">
+            <LineTable
+              table="business-document"
+              :columns="lineColumns"
               :data-source="lines"
-              row-key="id"
-              size="small"
               :pagination="{ pageSize: 20 }"
-              :scroll="{ x: 1100 }"
-              :columns="[
-                { title: '产品', key: 'product' },
-                { title: '规格', key: 'specification' },
-                { title: '单位', dataIndex: 'unit' },
-                { title: '数量', dataIndex: 'quantity' },
-                { title: '单价', dataIndex: 'unitPrice' },
-                { title: '金额', dataIndex: 'amount' },
-                { title: '已到货', dataIndex: 'arrivedQuantity' },
-                { title: '已退货', dataIndex: 'returnedQuantity' },
-                { title: '已取消', dataIndex: 'cancelledQuantity' },
-              ]"
             >
               <template #bodyCell="{ column, record: line }">
                 <RelatedLink
@@ -560,13 +570,14 @@ async function submit(
                     line.name ||
                     '待关联产品'
                   }}
-</RelatedLink><span v-else-if="column.key === 'specification'">{{
+                </RelatedLink>
+                <span v-else-if="column.key === 'specification'">{{
                   line.specification ||
                   line.specificationSnapshot?.specification ||
                   '未注明'
                 }}</span>
               </template>
-            </Table>
+            </LineTable>
           </Card>
           <Card
             v-if="rows(record?.arrivals).length"

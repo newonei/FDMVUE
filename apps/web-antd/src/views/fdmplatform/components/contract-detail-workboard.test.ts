@@ -201,6 +201,9 @@ vi.mock('../finance/procurement/components/FinanceDocument.vue', () => ({
 vi.mock('./ContractFilesPanel.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./LineTable.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./ContractReviewPanel.vue', () => ({
   default: defineComponent({
     props: {

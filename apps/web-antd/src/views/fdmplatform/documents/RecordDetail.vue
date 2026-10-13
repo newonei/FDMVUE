@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LineColumn } from '../components/line-table-model';
 import type { DocumentKind } from './model';
 import type {
   RelatedCreation,
@@ -42,13 +43,13 @@ import { getContractFiles } from '#/api/fdmplatform/contract-files';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
+import LineTable from '../components/LineTable.vue';
 import { errorText, label, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
-import LinkedRecordTable from './LinkedRecordTable.vue';
 import { migrationCell } from './migration-display';
 import MigrationSource from './MigrationSource.vue';
 import {
@@ -62,6 +63,7 @@ import {
 import {
   contractTarget,
   entityTarget,
+  lineTarget,
   relatedDocumentLinks,
 } from './navigation';
 import { relatedCreations } from './related-creation';
@@ -333,30 +335,41 @@ function contributionValue(key: string) {
 const contribution = computed(
   () => contract.value?.profit as Record<string, unknown> | undefined,
 );
-const lineColumns = computed(() =>
-  [
-    'productName|产品',
-    'shape|形状',
-    'suggestedSupplier|建议采购工厂',
-    'quantity|数量',
-    'requiredDate|需求日期',
-    'assignmentName|采购方式',
-    'supplierName|供应商',
-    'unitPrice|单价',
-    'arrivedQuantity|已到数量',
-    'acceptedQuantity|合格数量',
-    'cancelledQuantity|已取消数量',
-    'remark|说明',
-  ]
-    .map((pair) => {
-      const [key, title] = pair.split('|');
-      return { key: key!, title: title! };
-    })
-    .filter((column) =>
-      lines.value.some(
+/** 明细字段：本单据有数据的默认显示，其余在字段设置里可勾选 */
+const lineColumns = computed<LineColumn[]>(() =>
+  (
+    [
+      { key: 'productName', title: '产品名称', width: 220, locked: true },
+      { key: 'shape', title: '形状', width: 110 },
+      { key: 'suggestedSupplier', title: '建议采购工厂', width: 180 },
+      { key: 'quantity', title: '数量', width: 110, align: 'right' },
+      { key: 'requiredDate', title: '需求日期', width: 120 },
+      { key: 'assignmentName', title: '采购方式', width: 120 },
+      { key: 'supplierName', title: '供应商', width: 180 },
+      { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+      { key: 'arrivedQuantity', title: '已到数量', width: 110, align: 'right' },
+      {
+        key: 'acceptedQuantity',
+        title: '合格数量',
+        width: 110,
+        align: 'right',
+      },
+      {
+        key: 'cancelledQuantity',
+        title: '已取消数量',
+        width: 110,
+        align: 'right',
+      },
+      { key: 'remark', title: '说明', width: 200 },
+    ] as LineColumn[]
+  ).map((column) => ({
+    ...column,
+    optional:
+      !column.locked &&
+      !lines.value.some(
         (line) => (line as BusinessRecord)[column.key] !== undefined,
       ),
-    ),
+  })),
 );
 async function load() {
   if (!props.open || !props.row || childOpen.value) return;
@@ -633,12 +646,23 @@ const mainAction = computed(() => {
           nativeId: contract.id,
           recordId: record.id,
         }"
-      /><Card v-if="lines.length" title="当前单据明细" size="small">
-        <LinkedRecordTable
-          :contract="contract"
-          :data="lines"
+      /><Card v-if="lines.length" size="small">
+        <LineTable
+          :table="`record-${kind}`"
+          title="当前单据明细"
           :columns="lineColumns"
-        />
+          :data-source="lines"
+          :pagination="lines.length > 10 ? { pageSize: 10 } : false"
+        >
+          <template #bodyCell="{ column, record: line }">
+            <RelatedLink
+              :target="lineTarget(contract, String(column.key), line)"
+              :title="label(line[String(column.key)])"
+            >
+              {{ label(line[String(column.key)]) }}
+            </RelatedLink>
+          </template>
+        </LineTable>
 </Card><Card
         v-if="kind === 'costs' && contribution"
         title="当前合同成本与贡献口径"

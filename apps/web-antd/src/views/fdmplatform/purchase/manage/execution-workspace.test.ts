@@ -153,6 +153,9 @@ vi.mock('./components/StandaloneOrderFiles.vue', () => ({
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/OrderLines.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('../../finance/procurement/components/PaymentRecordDialog.vue', () => ({
   default: defineComponent({
     props: {
