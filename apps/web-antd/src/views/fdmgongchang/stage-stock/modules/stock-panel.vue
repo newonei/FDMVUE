@@ -13,6 +13,7 @@ import { Button, Checkbox, Input, Table, Tooltip } from 'ant-design-vue';
 import { getStockPage } from '#/api/fdmgongchang/stage-stock';
 
 import {
+  extraProcessesAt,
   formatQty,
   makeLabels,
   stageFlow,
@@ -20,6 +21,7 @@ import {
   stockTitle,
   toNumber,
 } from '../model';
+import ExtraOrderModal from './extra-order-modal.vue';
 import ReceiveModal from './receive-modal.vue';
 import StocktakeModal from './stocktake-modal.vue';
 
@@ -34,6 +36,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   changed: [];
   create: [stage: string];
+  saved: [text: string];
   ship: [];
   txn: [itemCode: string];
 }>();
@@ -76,6 +79,9 @@ const outgoing = computed(() =>
   props.options.processes.filter((p) => p.sources.includes(props.stage)),
 );
 const flow = computed(() => stageFlow(props.stage, props.options));
+/** 挂在这个阶段的附加工序（不改变规格，在这个阶段原地加工）。 */
+const extras = computed(() => extraProcessesAt(props.options, props.stage));
+const extraOpen = ref(false);
 
 /** 本阶段库存合计（单一单位）；概览还没加载时不显示数字。 */
 const stageTotal = computed(() => {
@@ -188,6 +194,11 @@ function onSaved() {
   load();
   emit('changed');
 }
+
+function onExtraSaved(text: string) {
+  emit('saved', text);
+  onSaved();
+}
 </script>
 
 <template>
@@ -205,6 +216,10 @@ function onSaved() {
         <span>{{ flow.current }}</span>
         <span class="text-primary" aria-hidden="true">→</span>
         <span>{{ flow.to }}</span>
+        <template v-if="extras.length > 0">
+          <span class="mx-1">·</span>
+          <span>附加工序：{{ extras.map((p) => p.label).join('、') }}</span>
+        </template>
       </p>
       <span
         v-if="incomingWip"
@@ -240,6 +255,9 @@ function onSaved() {
         </Checkbox>
         <Button v-if="canReceive" @click="receiveOpen = true">
           {{ stage === 'RAW' ? '原料入库' : '期初入库' }}
+        </Button>
+        <Button v-if="canOperate && extras.length > 0" @click="extraOpen = true">
+          附加工序
         </Button>
         <Button
           v-if="canOperate && outgoing.length > 0"
@@ -357,6 +375,12 @@ function onSaved() {
       :options="options"
       :stage="stage"
       @saved="onSaved"
+    />
+    <ExtraOrderModal
+      v-model:open="extraOpen"
+      :options="options"
+      :stage="stage"
+      @saved="onExtraSaved"
     />
     <StocktakeModal
       v-model:open="stocktakeOpen"

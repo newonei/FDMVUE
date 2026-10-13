@@ -61,10 +61,10 @@ function toggle(code: string) {
           class="route-chip"
           :class="{ 'is-on': draft.steps.includes(p.code) }"
           :aria-pressed="draft.steps.includes(p.code)"
-          :title="`${p.label}：产出${p.outputStageLabel}`"
+          :title="p.custom ? `${p.label}：附加工序，在${p.outputStageLabel}原地加工，不改变规格` : `${p.label}：产出${p.outputStageLabel}`"
           @click="toggle(p.code)"
         >
-          {{ p.label }}
+          {{ p.label }}<span v-if="p.custom" class="ml-0.5 text-[10px]">附加</span>
         </button>
       </template>
     </div>

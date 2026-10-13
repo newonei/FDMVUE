@@ -8,17 +8,19 @@ import { Button, Empty, Input, message, Modal, Popconfirm, Spin, Switch, Tag } f
 import {
   deleteFactoryRoute,
   getFactoryRoutes,
+  getSettingRouteOptions,
   saveFactoryRoute,
 } from '#/api/fdmgongchang/factory';
 
 /**
  * 工艺路线：本厂常用的工序组合，例如「双层雕刻垫」「单层散装（不包装）」。
  * 下单人向工厂下单时先选一条，再按产品勾掉或加回工序；改路线不影响已经下的单。
- * 工序按生产链顺序排列，跳过工序后接不上（下一道领不到上一道的产出）时保存会提示。
+ * 工序按生产链顺序排列（附加工序排在它挂的阶段后面），跳过工序后接不上（下一道领不到上一道的产出）时保存会提示。
  */
 const props = defineProps<{
   canEdit: boolean;
-  processes: Array<{ code: string; enabled: boolean; label: string }>;
+  /** 所有工序的名称（含停用的附加工序），用来显示已有路线。 */
+  processes: Array<{ code: string; label: string }>;
 }>();
 
 const routes = ref<RouteApi.Route[]>([]);
@@ -30,14 +32,20 @@ type Draft = Omit<RouteApi.Route, 'remark'> & { remark: string };
 const draft = ref<Draft>({ name: '', remark: '', steps: [] });
 const error = ref('');
 
-const labelOf = (code: string) => props.processes.find((p) => p.code === code)?.label ?? code;
-const enabledProcesses = computed(() => props.processes.filter((p) => p.enabled));
+/** 本厂启用的工序（主干 + 附加），按生产链排好，新建、编辑路线时可选。 */
+const options = ref<RouteApi.Options>();
+const enabledProcesses = computed(() => options.value?.processes ?? []);
+const labelOf = (code: string) =>
+  enabledProcesses.value.find((p) => p.code === code)?.label ??
+  props.processes.find((p) => p.code === code)?.label ??
+  code;
+const isCustom = (code: string) => code.startsWith('X');
 
 async function load() {
   loading.value = true;
   loadError.value = false;
   try {
-    routes.value = await getFactoryRoutes();
+    [routes.value, options.value] = await Promise.all([getFactoryRoutes(), getSettingRouteOptions()]);
   } catch {
     loadError.value = true;
   } finally {
@@ -59,7 +67,7 @@ function toggle(code: string) {
   const steps = draft.value.steps.includes(code)
     ? draft.value.steps.filter((s) => s !== code)
     : [...draft.value.steps, code];
-  draft.value.steps = props.processes.map((p) => p.code).filter((c) => steps.includes(c));
+  draft.value.steps = enabledProcesses.value.map((p) => p.code).filter((c) => steps.includes(c));
 }
 
 async function save() {
@@ -135,7 +143,11 @@ async function remove(route: RouteApi.Route) {
             <span class="flex flex-wrap items-center gap-1 text-xs">
               <template v-for="(code, index) in r.steps" :key="code">
                 <span v-if="index > 0" class="text-muted-foreground" aria-hidden="true">›</span>
-                <span class="rounded bg-primary/10 px-1.5 leading-5 text-primary">{{ labelOf(code) }}</span>
+                <span
+                  class="rounded px-1.5 leading-5"
+                  :class="isCustom(code) ? 'border border-dashed border-primary/50 text-primary' : 'bg-primary/10 text-primary'"
+                  :title="isCustom(code) ? '附加工序，不改变规格' : undefined"
+                >{{ labelOf(code) }}</span>
               </template>
             </span>
             <span v-if="r.remark" class="text-xs text-muted-foreground">{{ r.remark }}</span>
@@ -163,7 +175,7 @@ async function remove(route: RouteApi.Route) {
           <Input id="route-name" v-model:value="draft.name" :maxlength="64" placeholder="例如 双层雕刻垫、单层散装（不包装）" />
         </label>
         <div class="flex flex-col gap-1">
-          <span class="text-xs text-muted-foreground">要走的工序（按生产链顺序，点一下选中或取消）</span>
+          <span class="text-xs text-muted-foreground">要走的工序（按生产链顺序，点一下选中或取消；标「附加」的是附加工序）</span>
           <div class="flex flex-wrap gap-1.5" role="group" aria-label="路线工序">
             <button
               v-for="p in enabledProcesses"
@@ -173,8 +185,9 @@ async function remove(route: RouteApi.Route) {
               :class="draft.steps.includes(p.code) ? 'border-primary bg-primary/10 text-primary' : 'border-dashed border-border text-muted-foreground'"
               :aria-pressed="draft.steps.includes(p.code)"
               @click="toggle(p.code)"
+              :title="p.custom ? `附加工序：在${p.outputStageLabel}原地加工，不改变规格` : `产出${p.outputStageLabel}`"
             >
-              {{ p.label }}
+              {{ p.label }}<span v-if="p.custom" class="ml-0.5 text-[10px]">附加</span>
             </button>
           </div>
         </div>

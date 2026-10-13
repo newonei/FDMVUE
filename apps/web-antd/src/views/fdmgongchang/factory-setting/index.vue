@@ -1,5 +1,8 @@
 <script lang="ts" setup>
-import type { FdmgongchangFactorySettingApi as Api } from '#/api/fdmgongchang/factory';
+import type {
+  FdmgongchangFactorySettingApi as Api,
+  FdmgongchangCustomProcess,
+} from '#/api/fdmgongchang/factory';
 
 import { computed, onMounted, ref } from 'vue';
 
@@ -20,18 +23,21 @@ import {
 } from 'ant-design-vue';
 
 import {
+  getCustomProcesses,
   getFactorySetting,
   saveFactorySetting,
 } from '#/api/fdmgongchang/factory';
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
+import CustomProcessPanel from './modules/custom-process-panel.vue';
 import RoutePanel from './modules/route-panel.vue';
 import WageItemPanel from './modules/wage-item-panel.vue';
 
 /**
  * 工厂部门 · 工厂设置：各厂自己的配置集中在这里。
  * - 本厂工序：各厂工序不一样，没勾的工序不会出现在开单、生产链和人员岗位里；
+ *   附加工序（打孔、全检等，不改变规格）也在这里新建、停用；
  * - 工艺路线：本厂常用的工序组合，下单人向工厂下单时选用并按产品调整；
  * - AI 排单：本厂排单用哪个模型，只能选 AI 网关已给本厂放行的模型；
  * - 计价项目：本厂的计件、计时、杂活、补助价格（单独权限，普通人员看不到）。
@@ -67,6 +73,32 @@ const models = computed(() => setting.value?.scheduleModels ?? []);
 const autoModel = computed(() => models.value.find((m) => m.allowed));
 const loading = ref(false);
 const saving = ref(false);
+/** 附加工序（含停用的）。 */
+const customs = ref<FdmgongchangCustomProcess[]>([]);
+/** 附加工序改了以后让工艺路线重新取可选工序。 */
+const routeKey = ref(0);
+/** 库存阶段（板材起）：附加工序挂在其中一个之后。 */
+const stages = computed(() =>
+  (setting.value?.processes ?? []).map((p) => ({ code: p.outputStage, label: p.outputStageLabel })),
+);
+/** 所有工序名称（主干 + 附加），路线和计价项目里显示用。 */
+const allProcesses = computed(() => [
+  ...(setting.value?.processes ?? []).map((p) => ({ code: p.code, label: p.label })),
+  ...customs.value.map((c) => ({ code: c.code ?? '', label: `${c.name}（附加）` })),
+]);
+
+async function loadCustoms() {
+  try {
+    customs.value = await getCustomProcesses();
+  } catch {
+    customs.value = [];
+  }
+}
+
+async function onCustomsChanged() {
+  await loadCustoms();
+  routeKey.value += 1;
+}
 const loadError = ref(false);
 const noFactory = ref(false);
 
@@ -94,7 +126,7 @@ async function load() {
       noFactory.value = true;
       return;
     }
-    setting.value = await getFactorySetting();
+    [setting.value] = await Promise.all([getFactorySetting(), loadCustoms()]);
     enabled.value = setting.value.processes
       .filter((p) => p.enabled)
       .map((p) => p.code);
@@ -245,10 +277,17 @@ async function save() {
             日产能是这道工序整个车间一天大概能做多少，AI 排单时用来控制每天的量；不填时按最近 14 天的实际产出估算。
           </p>
         </section>
+        <CustomProcessPanel
+          class="mt-6"
+          :can-edit="canEdit"
+          :list="customs"
+          :stages="stages"
+          @changed="onCustomsChanged"
+        />
       </Spin>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="routes" tab="工艺路线">
-            <RoutePanel :can-edit="canEdit" :processes="setting.processes" />
+            <RoutePanel :key="routeKey" :can-edit="canEdit" :processes="allProcesses" />
           </Tabs.TabPane>
           <Tabs.TabPane key="ai" tab="AI 排单">
             <section class="flex flex-col gap-3">
@@ -294,11 +333,7 @@ async function save() {
             </section>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
-            <WageItemPanel
-              :processes="
-                setting.processes.map((p) => ({ code: p.code, label: p.label }))
-              "
-            />
+            <WageItemPanel :processes="allProcesses" />
           </Tabs.TabPane>
         </Tabs>
       </section>

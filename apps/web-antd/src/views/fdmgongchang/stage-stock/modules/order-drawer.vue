@@ -54,6 +54,7 @@ import {
   makeTaskRemaining,
   nextKey,
   normalizeForStage,
+  processLabel,
   recipeCheck,
   recipePicks,
   sumQty,
@@ -153,7 +154,7 @@ const linkedProductionItem = computed(() =>
 /** 关联明细工艺的最后一道工序名，这道工序报产出时才累加完成数量。 */
 const linkedFinalLabel = computed(() => {
   const code = linkedProductionItem.value ? finalProcess(linkedProductionItem.value) : '';
-  return props.options.processes.find((p) => p.code === code)?.label ?? code;
+  return processLabel(props.options, code);
 });
 // 换了工序后，原来关联的明细工艺里没有这道工序时取消关联
 watch(processCode, (code) => {

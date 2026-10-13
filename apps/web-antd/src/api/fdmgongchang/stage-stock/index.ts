@@ -65,8 +65,30 @@ export namespace FdmgongchangStageStockApi {
     name: string;
   }
 
+  /** 附加工序：工厂自定义、不改变规格；从 stage 领、良品留在 stage。含停用的，用来显示旧单名称。 */
+  export interface ExtraProcessOption {
+    code: string;
+    enabled: boolean;
+    label: string;
+    stage: string;
+  }
+
+  export interface ExtraOrderReq {
+    lines: Array<{
+      defectQuantity?: Decimal;
+      quantity: Decimal;
+      stockId: number;
+    }>;
+    operatorUserId?: number;
+    pieceworks?: Piecework[];
+    process: string;
+    productionOrderItemId?: number;
+    remark?: string;
+  }
+
   export interface Options {
     colors: DictOption[];
+    extraProcesses?: ExtraProcessOption[];
     materials: DictOption[];
     patterns: DictOption[];
     processes: ProcessOption[];
@@ -784,4 +806,13 @@ export function getReceiptPage(
     `${BASE}/receiving/page`,
     { headers: factoryHeaders(), params },
   );
+}
+
+/** 附加工序报工：选这个阶段的库存行，填加工数量和残次；残次从库存扣掉，良品原地不动。 */
+export function createExtraOrder(
+  data: FdmgongchangStageStockApi.ExtraOrderReq,
+) {
+  return requestClient.post<number>(`${BASE}/extra-order/create`, data, {
+    headers: factoryHeaders(),
+  });
 }

@@ -23,6 +23,7 @@ import {
   formatRate,
   issueSeqLabel,
   makeLabels,
+  processLabel as processLabelOf,
 } from '../model';
 import ReturnModal from './return-modal.vue';
 import SupplementModal from './supplement-modal.vue';
@@ -83,8 +84,7 @@ const voidable = (order: Api.Order) =>
   order.status !== 'VOIDED' && Number(order.productionWriteback ?? 0) <= 0;
 
 const labels = computed(() => makeLabels(props.options));
-const processLabel = (code?: string) =>
-  props.options.processes.find((p) => p.code === code)?.label ?? code ?? '';
+const processLabel = (code?: string) => processLabelOf(props.options, code);
 const stageOf = (code?: string) =>
   props.options.stages.find((s) => s.code === code);
 
@@ -181,9 +181,10 @@ const statusOptions = [
   { label: '已完工', value: 'COMPLETED' },
   { label: '已作废', value: 'VOIDED' },
 ];
-const processOptions = computed(() =>
-  props.options.processes.map((p) => ({ label: p.label, value: p.code })),
-);
+const processOptions = computed(() => [
+  ...props.options.processes.map((p) => ({ label: p.label, value: p.code })),
+  ...(props.options.extraProcesses ?? []).map((p) => ({ label: `${p.label}（附加）`, value: p.code })),
+]);
 
 function isSkipped(order: Api.Order) {
   const option = props.options.processes.find((p) => p.code === order.process);
@@ -193,7 +194,12 @@ function isSkipped(order: Api.Order) {
 }
 
 const statCards = computed(() =>
-  props.options.processes.map((p) => {
+  [
+    ...props.options.processes,
+    ...(props.options.extraProcesses ?? [])
+      .filter((p) => p.enabled)
+      .map((p) => ({ code: p.code, label: p.label, outputStage: p.stage })),
+  ].map((p) => {
     const s = stats.value.find((x) => x.process === p.code);
     const rate = defectRate(s?.goodQuantity, s?.defectQuantity);
     return {
