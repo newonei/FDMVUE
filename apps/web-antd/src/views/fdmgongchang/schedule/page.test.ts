@@ -34,6 +34,7 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   discardSchedule: vi.fn(),
   getScheduleFormOptions: mocks.options,
   saveScheduleTask: mocks.saveTask,
+  searchScheduleProducts: vi.fn().mockResolvedValue([]),
   generateSchedule: mocks.generate,
   getSchedule: mocks.get,
   getSchedules: mocks.list,
@@ -212,6 +213,7 @@ describe('schedule page', () => {
     clickButton('保存');
     await flush();
     expect(document.body.textContent).toContain('请选择工序。');
+    expect(document.body.textContent).toContain('请从产品中心选择产品。');
     [...document.querySelectorAll('button')].find((b) => ['Cancel', '取消'].includes(b.textContent?.replaceAll(/\s/g, '') ?? ''))!.click();
     await flush();
 
@@ -229,7 +231,7 @@ describe('schedule page', () => {
     expect(mocks.saveTask).toHaveBeenCalledWith({
       id: 31,
       scheduleId: 12,
-      task: expect.objectContaining({ contractCode: 'HT-001', date: '2026-10-10', process: 'SLICE', quantity: 200, sequence: 1, workerIds: [2] }),
+      task: expect.objectContaining({ contractCode: 'HT-001', date: '2026-10-10', process: 'SLICE', product: '紫色瑜伽垫', quantity: 200, sequence: 1, workerIds: [2] }),
     });
   });
 });

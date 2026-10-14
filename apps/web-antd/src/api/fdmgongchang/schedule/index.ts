@@ -1,3 +1,5 @@
+import type { FdmgongchangProductionOrderApi } from '#/api/fdmgongchang/production-order';
+
 import { factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
 
@@ -61,7 +63,15 @@ export namespace FdmgongchangScheduleApi {
 
   /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
   export interface FormOptions {
-    demand: Array<{ contractCode: string; product?: null | string }>;
+    demand: Array<{
+      contractCode: string;
+      product?: null | string;
+      productCode?: null | string;
+      /** 产品中心的产品编号；外贸自制任务可能为空。 */
+      productId?: null | string;
+      /** 规格：尺寸 · 材质 · 颜色。 */
+      spec?: null | string;
+    }>;
     processes: Array<{ code: string; label: string; unit: string }>;
   }
 
@@ -196,5 +206,13 @@ export function deleteScheduleTask(scheduleId: number, id: number) {
       ...headers(),
       params: { id, scheduleId },
     },
+  );
+}
+
+/** 加任务时从产品中心搜产品（名称、编码或规格）。 */
+export function searchScheduleProducts(keyword: string) {
+  return requestClient.get<FdmgongchangProductionOrderApi.Product[]>(
+    '/fdmgongchang/schedule/products',
+    { ...headers(), params: { keyword } },
   );
 }
