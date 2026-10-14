@@ -74,6 +74,7 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.productionItem = undefined;
   job.recipe = undefined;
   job.supplement = false;
+  job.supplementRemark = '';
   job.sourceStage = process.sources[0] ?? '';
   job.picks = [];
   job.inputs = [];
@@ -128,7 +129,7 @@ async function continueOrder(order: Api.Order) {
   }
 }
 
-/** 手上在做的单料不够：选料补领，补完回首页，单子继续在制。 */
+/** 手上在做的单料不够：选料补领，补完回首页，单子继续在制；最近完工的单实际多拿了料，也走这里补登。 */
 async function supplementOrder(order: Api.Order) {
   const process = job.my?.processes.find((p) => p.code === order.process);
   if (!process) {
@@ -174,12 +175,17 @@ function piecePayload() {
 
 /** 只领料：单子进「我手上在做的」；补领时把料加到原来那张单上。 */
 async function issueOnly() {
+  if (job.supplement && job.order?.status === 'COMPLETED' && !job.supplementRemark.trim()) {
+    message.warning('已完工的单补登领料要写原因');
+    return;
+  }
   submitting.value = true;
   try {
     await (job.supplement && job.order
       ? supplementWorkbenchOrder({
           id: job.order.id,
           inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+          remark: job.supplementRemark.trim() || undefined,
         })
       : createWorkbenchOrder(createPayload(false)));
     await reload();

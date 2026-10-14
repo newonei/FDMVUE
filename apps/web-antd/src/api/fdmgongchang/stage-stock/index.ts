@@ -348,6 +348,9 @@ export namespace FdmgongchangStageStockApi {
     id: number;
     /** 领料行：这一行的领料时间；第几次领料（0 开单领料，1 起为第几次补领）。 */
     issuedAt?: null | number | string;
+    /** 领料行：谁登记的、补领原因。 */
+    issuedBy?: null | string;
+    issueRemark?: null | string;
     issueSeq?: null | number;
     item?: ItemAttrs | null;
     itemCode: string;
@@ -375,6 +378,8 @@ export namespace FdmgongchangStageStockApi {
     inputQuantity: Decimal;
     inputs?: OrderLine[];
     issuedAt: number | string;
+    /** 已完工但还在补登期限内（完工 3 天内），可以补登领料。 */
+    lateSupplementable?: boolean | null;
     operatorName?: null | string;
     operatorUserId?: null | number;
     orderNo: string;

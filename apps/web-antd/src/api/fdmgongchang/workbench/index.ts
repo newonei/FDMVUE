@@ -26,6 +26,7 @@ export namespace FdmgongchangWorkbenchApi {
   }
 
   export interface Order {
+    completedAt?: null | number | string;
     contractCode?: null | string;
     goodQuantity: Decimal;
     id: number;
@@ -46,6 +47,8 @@ export namespace FdmgongchangWorkbenchApi {
     factoryName: string;
     inProgress: Order[];
     processes: Process[];
+    /** 我最近完工的单（完工 3 天内，还能补登领料）。 */
+    recentDone?: Order[];
     tasks: FdmgongchangScheduleApi.Task[];
     team?: null | string;
     today: FdmgongchangScheduleApi.DateValue;

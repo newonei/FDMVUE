@@ -49,8 +49,10 @@ export function createJob() {
     returns: {} as Record<number, null | number>,
     sourceStage: '',
     step: 'home' as Step,
-    /** 给手上在做的单补领：领料、确认两步走完就结束，不新开单。 */
+    /** 给手上在做的单补领（或给 3 天内完工的单补登领料）：领料、确认两步走完就结束，不新开单。 */
     supplement: false,
+    /** 补领原因；已完工的单补登必填。 */
+    supplementRemark: '',
     task: undefined as Api.My['tasks'][number] | undefined,
   });
 }
