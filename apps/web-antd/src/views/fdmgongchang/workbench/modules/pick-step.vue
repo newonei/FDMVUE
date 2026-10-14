@@ -146,8 +146,8 @@ function next() {
   <div class="flex min-h-full flex-col">
     <StepHeader
       :current="1"
-      :subtitle="job.supplement ? `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领` : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, job.task.spec].filter(Boolean).join(' ')}` : '自己开单'"
-      :title="`${job.process?.label} · 第 1 步 ${job.supplement ? '补领' : '领材料'}`"
+      :subtitle="job.supplement ? (job.order?.status === 'COMPLETED' ? `补登到已完工的 ${job.order?.orderNo ?? ''}，实际多拿的料在这里登记` : `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领`) : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, job.task.spec].filter(Boolean).join(' ')}` : '自己开单'"
+      :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : '领材料'}`"
       :total="job.supplement ? 2 : 3"
       @back="emit('back')"
     />

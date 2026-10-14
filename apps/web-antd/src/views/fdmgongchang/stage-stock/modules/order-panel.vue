@@ -462,6 +462,15 @@ const statCards = computed(() =>
                 退料
               </button>
               <button
+                v-if="canOperate && record.lateSupplementable"
+                type="button"
+                class="text-primary hover:underline"
+                title="完工 3 天内，实际多拿的料没登记的在这里补登"
+                @click="openSupplement(record as Api.Order)"
+              >
+                补登领料
+              </button>
+              <button
                 v-if="canVoid && voidable(record as Api.Order)"
                 type="button"
                 class="text-destructive hover:underline"
@@ -507,6 +516,10 @@ const statCards = computed(() =>
                     <Tag v-if="line.laminationSide" class="ml-1">
                       {{ line.laminationSide === 'FRONT' ? '正面' : '反面' }}
                     </Tag>
+                    <span
+                      v-if="(line.issueSeq ?? 0) > 0 && (line.issuedBy || line.issueRemark)"
+                      class="ml-1 text-muted-foreground"
+                    >（{{ [line.issuedBy && `${line.issuedBy} 登记`, line.issueRemark].filter(Boolean).join('：') }}）</span>
                   </li>
                 </ul>
                 <div

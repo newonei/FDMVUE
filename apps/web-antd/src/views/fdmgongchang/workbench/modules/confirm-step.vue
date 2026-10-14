@@ -49,8 +49,11 @@ onMounted(async () => {
 function choose(c?: { id: number; label: string; orderNo: string }) {
   job.productionItem = c ? { id: c.id, label: c.label, orderNo: c.orderNo } : undefined;
 }
+/** 已完工的单补登领料：要写原因。 */
+const late = computed(() => job.supplement && job.order?.status === 'COMPLETED');
+const reasons = ['实际多拿了料没登记', '损耗比预计多'];
 const orderText = computed(() =>
-  job.supplement ? `补到 ${job.order?.orderNo ?? ''}` : job.task?.contractCode || job.productionItem?.orderNo || '备货',
+  job.supplement ? `${late.value ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}` : job.task?.contractCode || job.productionItem?.orderNo || '备货',
 );
 
 async function issue() {
@@ -67,8 +70,8 @@ async function issue() {
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
       :current="2"
-      :subtitle="job.supplement ? `补到 ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
-      :title="`${job.process?.label} · 第 2 步 ${job.supplement ? '确认补领' : '确认领料'}`"
+      :subtitle="job.supplement ? `${late ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
+      :title="`${job.process?.label} · 第 2 步 ${late ? '确认补登' : job.supplement ? '确认补领' : '确认领料'}`"
       :total="job.supplement ? 2 : 3"
       @back="emit('back')"
     />
@@ -129,7 +132,32 @@ async function issue() {
           <span class="text-xs text-muted-foreground">{{ c.orderNo }} · {{ c.party }} · {{ c.left }}</span>
         </button>
       </section>
-      <p v-if="job.supplement" class="m-0 text-xs leading-relaxed text-muted-foreground">
+      <section v-if="late" class="flex flex-col gap-1.5 rounded-lg border border-warning/60 bg-card p-3">
+        <label for="workbench-late-reason" class="text-sm font-bold">为什么要补登？<span class="font-normal text-destructive">（必填）</span></label>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="r in reasons"
+            :key="r"
+            :class="job.supplementRemark === r ? 'border-primary bg-primary/10 text-primary' : 'border-border'"
+            class="h-8 rounded-md border px-2.5 text-sm"
+            type="button"
+            @click="job.supplementRemark = r"
+          >
+            {{ r }}
+          </button>
+        </div>
+        <input
+          id="workbench-late-reason"
+          v-model="job.supplementRemark"
+          class="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          maxlength="200"
+          placeholder="也可以自己写"
+        />
+      </section>
+      <p v-if="late" class="m-0 text-xs leading-relaxed text-muted-foreground">
+        这张单已经完工。补登的料从{{ source?.label }}库存扣掉，算进这张单的领料，会记下是你补登的和原因。
+      </p>
+      <p v-else-if="job.supplement" class="m-0 text-xs leading-relaxed text-muted-foreground">
         补领的料从{{ source?.label }}库存扣掉，加到你手上这张单里。做完回来照常点「做完了，报数量」。
       </p>
       <p v-else class="m-0 text-xs leading-relaxed text-muted-foreground">
@@ -137,8 +165,13 @@ async function issue() {
       </p>
     </main>
     <footer class="sticky bottom-0 grid grid-cols-1 gap-2 border-t border-border bg-card px-4 pb-4 pt-3 sm:grid-cols-2">
-      <button :disabled="submitting" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="issue">
-        {{ job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
+      <button
+        :disabled="submitting || (late && !job.supplementRemark.trim())"
+        class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
+        type="button"
+        @click="issue"
+      >
+        {{ late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
       <button v-if="!job.supplement" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary" type="button" @click="emit('reportNow')">
         已经做完了，领料同时报数量

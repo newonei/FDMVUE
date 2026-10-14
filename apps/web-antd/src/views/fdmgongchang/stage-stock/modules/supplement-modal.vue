@@ -37,6 +37,7 @@ import {
 /**
  * 在制工序单补领：生产过程中发现领少了，从同一段库存再领，一次可以补多种料。
  * 按配方领料的密炼单会列出每种原料还差多少，可以一键按配方补齐。
+ * 完工 3 天内的单也能补登领料（实际多拿了料、系统少登记），要写原因。
  */
 const props = defineProps<{ options: Api.Options; orderId?: number }>();
 const emit = defineEmits<{ saved: [message: string] }>();
@@ -62,6 +63,9 @@ const stageOf = (code?: string) =>
   props.options.stages.find((s) => s.code === code);
 const source = computed(() => stageOf(order.value?.sourceStage));
 const laminate = computed(() => order.value?.process === 'LAMINATE');
+/** 已完工的单：完工后补登领料。 */
+const late = computed(() => order.value?.status === 'COMPLETED');
+const actionText = computed(() => (late.value ? '补登领料' : '补领'));
 const processLabel = computed(
   () =>
     props.options.processes.find((p) => p.code === order.value?.process)
@@ -175,6 +179,8 @@ async function submit() {
     if (laminate.value && !line.side)
       errors.value.push(`${line.stock.itemCode} 请选择是正面还是反面片材。`);
   }
+  if (late.value && !remark.value.trim())
+    errors.value.push('已完工的单补登领料要写原因，例如：实际多拿了料没登记。');
   if (errors.value.length > 0 || !order.value) return;
   submitting.value = true;
   try {
@@ -189,7 +195,7 @@ async function submit() {
     });
     emit(
       'saved',
-      `${order.value.orderNo} 已补领 ${lines.value.length} 种料，共 ${formatQty(total.value)} ${source.value?.unit ?? ''}`,
+      `${order.value.orderNo} 已${actionText.value} ${lines.value.length} 种料，共 ${formatQty(total.value)} ${source.value?.unit ?? ''}`,
     );
     open.value = false;
   } catch {
@@ -204,14 +210,17 @@ async function submit() {
   <Modal
     v-model:open="open"
     :confirm-loading="submitting"
-    :title="`补领 · ${order?.orderNo ?? ''}`"
+    :title="`${actionText} · ${order?.orderNo ?? ''}`"
     :width="860"
-    ok-text="确认补领"
+    :ok-text="`确认${actionText}`"
     @ok="submit"
   >
     <Spin :spinning="loading">
       <div class="flex flex-col gap-3">
-        <p class="m-0 text-xs text-muted-foreground">
+        <p v-if="late" class="m-0 text-xs text-muted-foreground">
+          这张{{ processLabel }}单已完工，实际多拿的料系统里没登记的，在这里补登：从{{ source?.label }}库存扣掉、算进这张单的领料，会记下谁补登的和原因。完工 3 天内可以补登。
+        </p>
+        <p v-else class="m-0 text-xs text-muted-foreground">
           {{ processLabel }}生产中领少了，从{{ source?.label }}库存再领，提交后立即扣库存；单子继续在制。
           一次可以补多种料，补领单独记一行，之后也能退回。
         </p>
@@ -353,8 +362,13 @@ async function submit() {
           <b class="tabular-nums">{{ formatQty(total) }}</b> {{ source?.unit }}
         </div>
         <label for="supplement-remark" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          补领原因
-          <Input id="supplement-remark" v-model:value="remark" :maxlength="200" placeholder="选填，例如 色母不够、损耗" />
+          {{ late ? '补登原因（必填）' : '补领原因' }}
+          <Input
+            id="supplement-remark"
+            v-model:value="remark"
+            :maxlength="200"
+            :placeholder="late ? '例如 实际多拿了料没登记' : '选填，例如 色母不够、损耗'"
+          />
         </label>
         <Alert v-if="errors.length > 0" type="error" show-icon>
           <template #message>

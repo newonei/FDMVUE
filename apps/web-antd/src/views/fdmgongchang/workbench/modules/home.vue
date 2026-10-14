@@ -36,6 +36,7 @@ const process = computed(() => my.value.processes.find((p) => p.code === process
 const processOf = (code: string) => my.value.processes.find((p) => p.code === code);
 const labelOf = (code: string) => processOf(code)?.label ?? code;
 const stageLabel = (code?: string) => job.options?.stages.find((s) => s.code === code)?.label ?? '';
+const stageUnit = (code?: string) => job.options?.stages.find((s) => s.code === code)?.unit ?? '';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 const todayText = computed(() => {
@@ -143,6 +144,32 @@ const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)
               </button>
               <button class="h-9 rounded-md border border-warning text-sm font-semibold text-warning" type="button" @click="emit('supplementOrder', order)">
                 料不够，补领
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="(my.recentDone ?? []).length > 0" class="flex flex-col gap-2">
+          <h2 class="m-0 text-sm font-bold">
+            最近做完的<span class="ml-1 text-xs font-normal text-muted-foreground">实际多拿了料没登记，3 天内可以补登</span>
+          </h2>
+          <div class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            <div v-for="order in my.recentDone" :key="order.id" class="flex items-center gap-2 px-3 py-2">
+              <div class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate text-sm">
+                  {{ labelOf(order.process) }} · 领 {{ formatQty(Number(order.inputQuantity) - Number(order.returnedQuantity ?? 0)) }} {{ order.inputUnit }}，好的
+                  {{ formatQty(order.goodQuantity) }} {{ stageUnit(order.outputStage) }}
+                </span>
+                <span class="truncate text-xs text-muted-foreground">
+                  {{ order.orderNo }} · {{ formatDateTime(order.completedAt ?? undefined) }} 完工
+                </span>
+              </div>
+              <button
+                class="h-8 shrink-0 rounded-md border border-border px-2.5 text-sm text-foreground"
+                type="button"
+                @click="emit('supplementOrder', order)"
+              >
+                补登领料
               </button>
             </div>
           </div>
