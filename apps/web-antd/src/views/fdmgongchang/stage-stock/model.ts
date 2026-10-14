@@ -259,6 +259,8 @@ export interface InputLine {
 
 export interface OutputDraft {
   attrs: Api.ItemAttrs;
+  /** 开片时按板材规格自动带入的良品数；良品还等于它时说明没手动改过，规格变了会跟着重算。 */
+  autoGood?: number;
   batchNo: string;
   defectQuantity?: number;
   goodQuantity?: number;
@@ -288,7 +290,7 @@ function inputColor(line: InputLine) {
 /**
  * 按领料生成默认产出行：
  * - 密炼：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
- * - 开片：领料按 颜色+厚度 分组，每组一行（可以颜色规格混开），长宽由人填写；
+ * - 开片：领料按 颜色+厚度 分组，每组一行（可以颜色规格混开），长宽由人填写，厚度默认沿用板材（分层开时改薄）；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
  * - 立切：按领料编码分组，沿用单色属性，长宽待改；
  * - 其余工序：按领料编码分组，沿用属性；压花待选纹路，雕刻待选图案，冲裁沿用尺寸待改。
@@ -904,4 +906,70 @@ export function pickAuxStocks(
     }
   }
   return picks;
+}
+
+/** 浮点误差容差：例如 4.5 / 0.9 算成 4.999999 时也按 5 片。 */
+const FIT_EPSILON = 1e-6;
+const fit = (whole: number, part: number) => Math.floor(whole / part + FIT_EPSILON);
+
+/**
+ * 一张板材能开多少片：长、宽、厚三个方向各能放几片相乘；长宽两种摆法取多的那种。不算锯缝损耗。
+ * 规格不全或片材比板材大时返回 0 / undefined。
+ */
+export function slicePerBoard(
+  board: Pick<Api.ItemAttrs, 'length' | 'thickness' | 'width'>,
+  sheet: Pick<Api.ItemAttrs, 'length' | 'thickness' | 'width'>,
+) {
+  const [bl, bw, bt] = [toNumber(board.length), toNumber(board.width), toNumber(board.thickness)];
+  const [sl, sw, st] = [toNumber(sheet.length), toNumber(sheet.width), toNumber(sheet.thickness)];
+  if (!bl || !bw || !bt || !sl || !sw || !st) return undefined;
+  const layers = fit(bt, st);
+  return Math.max(fit(bl, sl) * fit(bw, sw), fit(bl, sw) * fit(bw, sl)) * layers;
+}
+
+/**
+ * 开片这一行产出能开多少片：同颜色的领料（没选颜色时是全部领料）每张板按 {@link slicePerBoard} 算，乘领用张数合计。
+ * 同颜色开了好几种规格时不知道各用几张板，返回 undefined 让人手填。
+ */
+export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
+  const color = line.attrs.color ?? null;
+  const sameColor = (c?: null | string) => !color || !c || c === color;
+  if (outputs.filter((o) => sameColor(o.attrs.color)).length > 1) return undefined;
+  const boards = inputs.filter((l) => sameColor(inputColor(l)));
+  if (boards.length === 0) return undefined;
+  let total = 0;
+  for (const board of boards) {
+    const perBoard = slicePerBoard(board.stock.item ?? {}, line.attrs);
+    if (perBoard === undefined) return undefined;
+    total += perBoard * Math.floor(board.quantity + FIT_EPSILON);
+  }
+  return total;
+}
+
+/** 开片：按板材规格把能开的片数带进良品（没手动改过的行才带），返回每行的计算说明。 */
+export function applySliceYield(inputs: InputLine[], outputs: OutputDraft[]) {
+  for (const line of outputs) {
+    const value = sliceYield(inputs, outputs, line);
+    const untouched =
+      line.goodQuantity === undefined || line.goodQuantity === null || line.goodQuantity === line.autoGood;
+    if (value === undefined || !untouched) continue;
+    line.goodQuantity = value;
+    line.autoGood = value;
+  }
+}
+
+/** 开片计算说明，例如「每张板开 6 片 × 领 10 张 = 60 片」；算不出时说明原因。 */
+export function sliceHint(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
+  const color = line.attrs.color ?? null;
+  const sameColor = (c?: null | string) => !color || !c || c === color;
+  if (outputs.filter((o) => sameColor(o.attrs.color)).length > 1)
+    return '同一种颜色开了几种规格，不知道各用几张板，请手填良品';
+  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '填好片材长、宽、厚后自动算能开多少片';
+  const boards = inputs.filter((l) => sameColor(inputColor(l)));
+  const parts = boards.map((b) => {
+    const per = slicePerBoard(b.stock.item ?? {}, line.attrs);
+    return per === undefined ? '板材规格不全' : `每张开 ${per} 片 × ${Math.floor(b.quantity + FIT_EPSILON)} 张`;
+  });
+  const value = sliceYield(inputs, outputs, line);
+  return value === undefined ? parts.join('，') : `${parts.join(' + ')} = ${value} 片（不算锯缝损耗）`;
 }

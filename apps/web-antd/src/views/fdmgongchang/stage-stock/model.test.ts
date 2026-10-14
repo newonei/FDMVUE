@@ -5,6 +5,7 @@ import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-
 import { describe, expect, it } from 'vitest';
 
 import {
+  applySliceYield,
   attrSummary,
   deriveOutputs,
   EDITABLE_FIELDS,
@@ -21,6 +22,8 @@ import {
   pickAuxStocks,
   recipeCheck,
   recipePicks,
+  sliceHint,
+  slicePerBoard,
   stageColumns,
   stageFlow,
   stockSpec,
@@ -509,5 +512,45 @@ describe('辅料', () => {
     expect(stockUnit('AUX', aux, null)).toBe('个');
     expect(stockUnit('RAW', aux, 'kg')).toBe('kg');
     expect(isLayered('AUX')).toBe(false);
+  });
+});
+
+describe('开片按板材规格算片数', () => {
+  const board = { color: 'PU', length: 190, material: 'TPE', thickness: 4.5, width: 130 };
+  const sheet = { color: 'PU', length: 183, thickness: 0.6, width: 61 };
+
+  it('multiplies how many fit along length, width and thickness, trying both orientations', () => {
+    expect(slicePerBoard(board, sheet)).toBe(1 * 2 * 7);
+    // 长宽对调摆：190/61×130/183=0，换个方向 190/183×130/61=2，取多的；厚 4.5/0.9=5 层
+    expect(slicePerBoard(board, { length: 61, thickness: 0.9, width: 183 })).toBe(2 * 5);
+    expect(slicePerBoard(board, { length: 200, thickness: 0.6, width: 61 })).toBe(0);
+    expect(slicePerBoard(board, { length: 183, width: 61 })).toBeUndefined();
+  });
+
+  it('fills good quantity from boards issued until the worker changes it', () => {
+    const inputs = [line(1, 'BOARD', board, 'B1', 10)];
+    const outputs = deriveOutputs('SLICE', inputs);
+    Object.assign(outputs[0]!.attrs, { length: 183, thickness: 0.6, width: 61 });
+    applySliceYield(inputs, outputs);
+    expect(outputs[0]!.goodQuantity).toBe(140);
+    expect(sliceHint(inputs, outputs, outputs[0]!)).toBe('每张开 14 片 × 10 张 = 140 片（不算锯缝损耗）');
+
+    outputs[0]!.attrs.thickness = 0.9;
+    applySliceYield(inputs, outputs);
+    expect(outputs[0]!.goodQuantity).toBe(100);
+
+    outputs[0]!.goodQuantity = 95;
+    outputs[0]!.attrs.thickness = 0.6;
+    applySliceYield(inputs, outputs);
+    expect(outputs[0]!.goodQuantity).toBe(95);
+  });
+
+  it('leaves it to the worker when one color is cut into several sizes', () => {
+    const inputs = [line(1, 'BOARD', board, 'B1', 10)];
+    const outputs = [...deriveOutputs('SLICE', inputs), ...deriveOutputs('SLICE', inputs)];
+    for (const o of outputs) Object.assign(o.attrs, { length: 183, thickness: 0.6, width: 61 });
+    applySliceYield(inputs, outputs);
+    expect(outputs[0]!.goodQuantity).toBeUndefined();
+    expect(sliceHint(inputs, outputs, outputs[0]!)).toContain('请手填良品');
   });
 });

@@ -43,6 +43,7 @@ import { matchWageItems } from '#/api/fdmgongchang/wage';
 
 import { routeIncludes } from '../../production-order/shared';
 import {
+  applySliceYield,
   attrSummary,
   contractProductText,
   defectRate,
@@ -59,6 +60,7 @@ import {
   processLabel,
   recipeCheck,
   recipePicks,
+  sliceHint,
   stockUnit,
   suggestAuxQuantity,
   sumQty,
@@ -409,6 +411,15 @@ const inputUnit = computed(
   () => stageOf(inputs.value[0]?.stock.stage ?? sourceStage.value)?.unit ?? '',
 );
 const inputTotal = computed(() => sumQty(inputs.value.map((l) => l.quantity)));
+
+/** 开片：按领的板材规格和片材规格算能开多少片，带进良品（手动改过的不再覆盖），残次品手填。 */
+watch(
+  () => [inputs.value, outputs.value.map((o) => [o.attrs.color, o.attrs.length, o.attrs.width, o.attrs.thickness])],
+  () => {
+    if (processCode.value === 'SLICE') applySliceYield(inputs.value, outputs.value);
+  },
+  { deep: true },
+);
 
 /**
  * 辅料领用：关联的工厂订单或外贸任务定了在这道工序领的辅料时，按本次领料数量 × 每件用量带出建议数
@@ -1301,7 +1312,7 @@ watch(processCode, warnNoPatterns);
             v-if="processCode === 'SLICE'"
             class="text-xs text-muted-foreground"
           >
-            一次可以开多种颜色、多种规格，每种一行。每张板开几片由人工填写。
+            一次可以开多种颜色、多种规格，每种一行。填好片材长宽厚后按板材规格算能开多少片，自动带进良品，可以改；残次品手填。
           </div>
           <div
             v-if="outputs.length === 0"
@@ -1357,6 +1368,12 @@ watch(processCode, warnNoPatterns);
               class="text-xs text-muted-foreground"
             >
               沿用：{{ attrSummary(outputStage, line.attrs, labels, editable) }}
+            </div>
+            <div
+              v-if="processCode === 'SLICE'"
+              class="text-xs text-primary"
+            >
+              {{ sliceHint(inputs, outputs, line) }}
             </div>
             <div class="flex flex-wrap items-center gap-4">
               <label
