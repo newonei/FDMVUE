@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { Alert, InputNumber } from 'ant-design-vue';
 
 import {
+  applySliceYield,
   attrSummary,
   EDITABLE_FIELDS,
   formatQty,
   makeLabels,
+  sliceHint,
   toNumber,
   validateOutputs,
 } from '../../stage-stock/model';
@@ -36,7 +38,19 @@ const specErrors = computed(() =>
 );
 const editing = ref(false);
 const showEditor = computed(() => editing.value || specErrors.value.length > 0);
+/** 开片的片材长宽厚要现场定，规格区一直展开，填好就能算出良品。 */
+const needsSpec = () => slicing.value;
 const errors = ref<string[]>([]);
+
+/** 开片：按领的板材规格和片材规格算能开多少片，带进良品（手动改过的不再覆盖），残次品手填。 */
+const slicing = computed(() => job.process?.code === 'SLICE');
+watch(
+  () => [job.inputs, job.outputs.map((o) => [o.attrs.color, o.attrs.length, o.attrs.width, o.attrs.thickness])],
+  () => {
+    if (slicing.value) applySliceYield(job.inputs, job.outputs);
+  },
+  { deep: true, immediate: true },
+);
 
 const inputColors = computed(
   () =>
@@ -64,31 +78,33 @@ function next() {
       <p v-if="reportedBefore > 0" class="m-0 rounded-md bg-primary/10 p-2.5 text-xs text-primary">
         这张单已经报过 {{ reportedBefore }} 次，共 {{ formatQty(job.order?.goodQuantity) }} {{ output?.unit }}，这次只报新做的。
       </p>
-      <template v-for="(line, index) in job.outputs" :key="line.key">
+      <div v-for="(line, index) in job.outputs" :key="line.key" class="flex flex-col gap-3">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">
             好的有多少{{ output?.unit }}？<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
           </span>
           <BigCounter :id="`good-${line.key}`" v-model="line.goodQuantity" label="好的数量" :precision="3" />
-          <span class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
+          <span v-if="slicing" class="text-center text-xs text-primary">{{ sliceHint(job.inputs, job.outputs, line) }}</span>
+          <span v-else class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
         </section>
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">坏的（残次）有多少{{ output?.unit }}？</span>
           <BigCounter :id="`bad-${line.key}`" v-model="line.defectQuantity" label="坏的数量" :precision="3" size="medium" tone="danger" />
         </section>
         </div>
-        <section class="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5">
+        <!-- 开片先定片材规格，放在数量上面 -->
+        <section :class="slicing ? 'order-first border-primary/40' : 'border-border'" class="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
           <div class="flex items-center justify-between">
-            <span class="text-sm font-bold">做出来的{{ output?.label }}</span>
-            <button v-if="editable.length > 0 && specErrors.length === 0" class="h-8 px-2 text-xs font-semibold text-primary" type="button" @click="editing = !editing">
+            <span class="text-sm font-bold">{{ slicing ? `开成什么规格的${output?.label}？` : `做出来的${output?.label}` }}</span>
+            <button v-if="editable.length > 0 && specErrors.length === 0 && !slicing" class="h-8 px-2 text-xs font-semibold text-primary" type="button" @click="editing = !editing">
               {{ editing ? '收起' : '不对？改一下' }}
             </button>
           </div>
           <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels) || '—' }}</span>
           <span v-if="specErrors.length > 0" class="text-xs text-warning">还差几个规格，请补上：</span>
           <AttrFields
-            v-if="showEditor && editable.length > 0"
+            v-if="(showEditor || needsSpec()) && editable.length > 0"
             v-model="line.attrs"
             :color-choices="['SLICE', 'LAMINATE'].includes(job.process?.code ?? '') ? inputColors : undefined"
             :fields="editable"
@@ -97,7 +113,7 @@ function next() {
           />
           <span v-else class="text-xs text-muted-foreground">按领的料自动带出，一般不用改</span>
         </section>
-      </template>
+      </div>
 
       <section v-if="!job.createFinish" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button
