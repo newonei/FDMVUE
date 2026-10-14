@@ -5,6 +5,7 @@ import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
@@ -39,6 +40,7 @@ const detailLoading = ref(false);
 const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const generating = ref(false);
 const form = ref({ days: 3, note: '', startDate: dayjs() as Dayjs });
+const route = useRoute();
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -74,8 +76,10 @@ async function load() {
     }
     const [, list] = await Promise.all([loadList(), getWorkerList({ assigned: true, status: 0 }).catch(() => [])]);
     workers.value = list;
-    const first = schedules.value[0];
-    if (first) select(first.id);
+    // 从「工厂下单 → 本厂收到的单」生成后跳过来，直接打开那一份
+    const fromQuery = Number(route?.query?.id);
+    const target = schedules.value.find((s) => s.id === fromQuery) ?? schedules.value[0];
+    if (target) select(target.id);
   } catch {
     loadError.value = true;
   }
@@ -98,12 +102,22 @@ async function switchFactory(id: number) {
   await load();
 }
 
-async function generate(override?: { days: number; note?: null | string; startDate: string }) {
+async function generate(override?: {
+  days: number;
+  note?: null | string;
+  productionOrderIds?: null | number[];
+  startDate: string;
+}) {
   generating.value = true;
   try {
     const id = await generateSchedule(
       override
-        ? { days: override.days, note: override.note ?? undefined, startDate: override.startDate }
+        ? {
+            days: override.days,
+            note: override.note ?? undefined,
+            productionOrderIds: override.productionOrderIds ?? undefined,
+            startDate: override.startDate,
+          }
         : {
             days: form.value.days,
             note: form.value.note.trim() || undefined,
@@ -123,6 +137,7 @@ function retry(schedule: Api.Schedule) {
   void generate({
     days: schedule.days,
     note: schedule.note,
+    productionOrderIds: schedule.scopeOrderIds,
     startDate: dayjs(start).isBefore(dayjs(), 'day') ? dayjs().format('YYYY-MM-DD') : start,
   });
 }
@@ -215,6 +230,9 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
               </span>
               <span class="text-xs text-muted-foreground">
                 {{ dateText(s.startDate) }} 起 {{ s.days }} 天<template v-if="s.revision > 1"> · 第 {{ s.revision }} 版</template>
+              </span>
+              <span v-if="s.scopeOrderNos?.length" class="truncate text-xs text-primary">
+                只排 {{ s.scopeOrderNos.join('、') }}
               </span>
             </button>
           </section>

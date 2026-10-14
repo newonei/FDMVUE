@@ -18,11 +18,13 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CreateModal from './modules/create-modal.vue';
 import OrderDrawer from './modules/order-drawer.vue';
+import ScheduleModal from './modules/schedule-modal.vue';
 import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
 
 /**
  * 工厂部门 · 工厂下单：运营、内贸等部门从产品中心选 SKU 向工厂下生产订单；
- * 工厂在「本厂收到的单」里确认接单、回复交期，接单后进入 AI 排单的待生产订单，做完登记完成。
+ * 工厂在「本厂收到的单」里确认接单、回复交期，接单后进入 AI 排单的待生产订单，做完登记完成；
+ * 也可以在这里勾选已接单的订单，只拿这几张单做 AI 排单。
  */
 defineOptions({ name: 'FdmGongchangProductionOrder' });
 
@@ -31,6 +33,7 @@ type Tab = 'factory' | 'mine';
 const { hasAccessByCodes } = useAccess();
 const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:production-order:create']));
 const canHandle = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
+const canSchedule = computed(() => hasAccessByCodes(['fdmgongchang:schedule:generate']));
 const tab = ref<Tab>(canCreate.value ? 'mine' : 'factory');
 
 const factory = useFactory();
@@ -46,6 +49,31 @@ const pendingCount = ref(0);
 const filters = reactive({ keyword: '', status: undefined as Api.Status | undefined });
 const pageNo = ref(1);
 const pageSize = ref(20);
+
+/** 本厂收到的单里勾选的已接单订单，拿去 AI 排单；翻页、筛选时保留已勾选的。 */
+const selected = ref<Map<number, Api.Order>>(new Map());
+const scheduleOpen = ref(false);
+const selectable = computed(() => tab.value === 'factory' && canSchedule.value);
+const rowSelection = computed(() =>
+  selectable.value
+    ? {
+        getCheckboxProps: (record: Api.Order) => ({
+          disabled: record.status !== 'ACCEPTED',
+          title: record.status === 'ACCEPTED' ? undefined : '接单后才能排单',
+        }),
+        onChange: (keys: (number | string)[], records: Api.Order[]) => {
+          const next = new Map([...selected.value].filter(([id]) => !rows.value.some((r) => r.id === id)));
+          for (const r of records) if (r && keys.includes(r.id)) next.set(r.id, r);
+          selected.value = next;
+        },
+        preserveSelectedRowKeys: true,
+        selectedRowKeys: [...selected.value.keys()],
+      }
+    : undefined,
+);
+function onScheduled() {
+  selected.value = new Map();
+}
 
 const createOpen = ref(false);
 const copyFrom = ref<Api.Order>();
@@ -121,6 +149,7 @@ async function switchFactory(id: number) {
 
 watch(tab, () => {
   pageNo.value = 1;
+  selected.value = new Map();
   filters.status = undefined;
   loadRows();
 });
@@ -217,6 +246,18 @@ function progressPercent(o: Api.Order) {
         </Result>
         <div v-else class="flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-2">
+            <template v-if="selectable">
+              <Button
+                :disabled="selected.size === 0"
+                size="small"
+                type="primary"
+                @click="scheduleOpen = true"
+              >
+                AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
+              </Button>
+              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，只拿这几张单让 AI 排</span>
+              <button v-else class="text-xs text-primary hover:underline" type="button" @click="selected = new Map()">清空</button>
+            </template>
             <Select
               id="po-filter-status"
               v-model:value="filters.status"
@@ -240,6 +281,7 @@ function progressPercent(o: Api.Order) {
             :data-source="rows"
             :loading="loading"
             :pagination="{ current: pageNo, pageSize, showSizeChanger: true, total, showTotal: (t: number) => `共 ${t} 张` }"
+            :row-selection="rowSelection"
             :scroll="{ x: 'max-content' }"
             row-key="id"
             size="small"
@@ -300,6 +342,7 @@ function progressPercent(o: Api.Order) {
       </section>
 
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
+      <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
       <OrderDrawer v-model:open="drawerOpen" :mode="tab" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>
   </Page>
