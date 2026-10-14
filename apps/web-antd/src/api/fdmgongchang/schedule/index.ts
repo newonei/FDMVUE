@@ -71,6 +71,9 @@ export namespace FdmgongchangScheduleApi {
     plan?: null | Plan;
     revision: number;
     scheduleNo: string;
+    /** 只排了这些工厂订单；为空是全部待生产订单。 */
+    scopeOrderIds?: null | number[];
+    scopeOrderNos?: null | string[];
     startDate: DateValue;
     status: Status;
     tasks?: null | Task[];
@@ -97,6 +100,8 @@ export function getSchedule(id: number) {
 export function generateSchedule(data: {
   days: number;
   note?: string;
+  /** 只排这些工厂订单（已接单）；不传是排全部待生产订单。 */
+  productionOrderIds?: number[];
   startDate: string;
 }) {
   return requestClient.post<number>(

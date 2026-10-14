@@ -130,6 +130,7 @@ function discard() {
           {{ range }} · {{ schedule.operatorName || '—' }} · {{ formatDateTime(schedule.createTime ?? undefined) }}
           <template v-if="schedule.confirmedBy"> · {{ schedule.confirmedBy }} 下发</template>
         </span>
+        <span v-if="schedule.scopeOrderNos?.length" class="text-xs text-primary">只排这几张工厂订单：{{ schedule.scopeOrderNos.join('、') }}</span>
         <span v-if="schedule.note" class="text-xs">补充说明：{{ schedule.note }}</span>
         <span v-if="schedule.feedback" class="text-xs">调整意见：{{ schedule.feedback }}</span>
       </div>

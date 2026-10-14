@@ -8,6 +8,8 @@ import ProductionOrderPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
+  generate: vi.fn(),
+  push: vi.fn(),
   complete: vi.fn(),
   delivery: vi.fn(),
   stockPage: vi.fn(),
@@ -67,6 +69,12 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({ getStockPage: mocks.stockPage
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,
+}));
+vi.mock('#/api/fdmgongchang/schedule', () => ({
+  generateSchedule: mocks.generate,
+}));
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: mocks.push }),
 }));
 vi.mock('@vben/access', () => ({
   useAccess: () => ({ hasAccessByCodes: (codes: string[]) => codes.some((c) => mocks.perms.includes(c)) }),
@@ -293,5 +301,26 @@ describe('production order page', () => {
       expect.objectContaining({ lines: [{ quantity: 400, stockId: 8 }], productionOrderItemId: 91, warehouseId: 'w1' }),
     );
   });
-});
 
+  it('lets the factory pick accepted orders and hand only those to AI scheduling', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate');
+    const accepted: Api.Order = { ...order, id: 11, orderNo: 'GD20261011-002', status: 'ACCEPTED', statusLabel: '生产中' };
+    mocks.factoryPage.mockResolvedValue({ list: [order, accepted], total: 2 });
+    mocks.generate.mockResolvedValue(77);
+    unmount = mount();
+    await flush();
+
+    const boxes = [...document.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0]!.disabled).toBe(true);
+    boxes[1]!.click();
+    await flush();
+    button('AI排单（已选1张）').click();
+    await flush();
+    expect(document.body.textContent).toContain('GD20261011-002');
+    button('交给AI排单').click();
+    await flush();
+    expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ days: 3, productionOrderIds: [11] }));
+    expect(mocks.push).toHaveBeenCalledWith({ path: '/gongchang/production/schedule', query: { id: '77' } });
+  });
+});
