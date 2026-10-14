@@ -177,7 +177,16 @@ export namespace FdmgongchangFactorySettingApi {
     structured: boolean;
   }
 
+  /** 密炼出板：板材长宽厚（cm）、每锅出几张（没填时 AI 排单按配方估算）。 */
+  export interface MixBoard {
+    boardsPerBatch?: null | number | string;
+    length?: null | number | string;
+    thickness?: null | number | string;
+    width?: null | number | string;
+  }
+
   export interface Setting {
+    mixBoard?: MixBoard | null;
     processes: ProcessToggle[];
     /** AI 排单选的模型；为空表示自动（本厂放行的第一个）。 */
     scheduleModelId?: null | number | string;
@@ -187,6 +196,8 @@ export namespace FdmgongchangFactorySettingApi {
   export interface SaveReq {
     /** 各工序日产能（工序编码 → 产出单位 / 天）。 */
     dailyCapacities?: Record<string, null | number>;
+    /** 密炼出板规格；长宽厚都空表示清掉。 */
+    mixBoard?: MixBoard;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];
     /** AI 排单用的模型；为空表示自动。 */
