@@ -8,11 +8,12 @@ import { Button, Empty, InputNumber, Select, Tag } from 'ant-design-vue';
 
 import { dayLabel, groupByDate, PROCESS_LABELS } from '../../shared/schedule';
 
-/** 待确认方案的任务表：按天分组，可以改数量、换人、删任务。 */
+/** 待确认方案的任务表：按天分组，可以改数量、换人、删任务，或打开表单整条修改。 */
 const props = defineProps<{
   editable: boolean;
   workers: FdmgongchangFactoryApi.Worker[];
 }>();
+const emit = defineEmits<{ edit: [task: Api.PlanTask] }>();
 const tasks = defineModel<Api.PlanTask[]>('tasks', { required: true });
 
 const groups = computed(() => groupByDate(tasks.value, (t) => t.date));
@@ -45,7 +46,7 @@ function remove(task: Api.PlanTask) {
               <th class="w-32 px-2 py-1.5 text-right font-medium">数量</th>
               <th class="w-64 px-2 py-1.5 text-left font-medium">人员</th>
               <th class="px-2 py-1.5 text-left font-medium">理由</th>
-              <th v-if="editable" class="w-12 px-2 py-1.5"></th>
+              <th v-if="editable" class="w-20 px-2 py-1.5"></th>
             </tr>
           </thead>
           <tbody>
@@ -88,7 +89,8 @@ function remove(task: Api.PlanTask) {
                 <span v-else class="text-xs">{{ task.workerIds.map(nameOf).join('、') || '—' }}</span>
               </td>
               <td class="px-2 py-1.5 text-xs text-muted-foreground">{{ task.reason }}</td>
-              <td v-if="editable" class="px-2 py-1.5">
+              <td v-if="editable" class="whitespace-nowrap px-2 py-1.5">
+                <Button size="small" type="link" @click="emit('edit', task)">改</Button>
                 <Button danger size="small" type="link" @click="remove(task)">删</Button>
               </td>
             </tr>

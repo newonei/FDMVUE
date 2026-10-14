@@ -54,7 +54,15 @@ export namespace FdmgongchangScheduleApi {
     spec?: null | string;
     unit?: null | string;
     workDate: DateValue;
+    /** 人员编号，逗号分隔。 */
+    workerIds?: null | string;
     workerNames?: null | string;
+  }
+
+  /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
+  export interface FormOptions {
+    demand: Array<{ contractCode: string; product?: null | string }>;
+    processes: Array<{ code: string; label: string; unit: string }>;
   }
 
   export interface Schedule {
@@ -65,6 +73,8 @@ export namespace FdmgongchangScheduleApi {
     errorMessage?: null | string;
     feedback?: null | string;
     id: number;
+    /** 手动派工（没经过 AI）。 */
+    manual?: boolean | null;
     note?: null | string;
     operatorName?: null | string;
     parentId?: null | number;
@@ -142,5 +152,49 @@ export function getScheduleTasks(process: string) {
   return requestClient.get<FdmgongchangScheduleApi.Task[]>(
     '/fdmgongchang/schedule/tasks',
     { ...headers(), params: { process } },
+  );
+}
+
+/** 手动派工：不经过 AI 新建一份空的待确认排单，返回编号。 */
+export function createManualSchedule(data: {
+  days: number;
+  note?: string;
+  startDate: string;
+}) {
+  return requestClient.post<number>(
+    '/fdmgongchang/schedule/manual',
+    data,
+    headers(),
+  );
+}
+
+export function getScheduleFormOptions(id: number) {
+  return requestClient.get<FdmgongchangScheduleApi.FormOptions>(
+    '/fdmgongchang/schedule/form-options',
+    { ...headers(), params: { id } },
+  );
+}
+
+/** 已下发的排单追加（不传 id）或修改一个任务。 */
+export function saveScheduleTask(data: {
+  id?: number;
+  scheduleId: number;
+  task: FdmgongchangScheduleApi.PlanTask;
+}) {
+  return requestClient.post<number>(
+    '/fdmgongchang/schedule/task/save',
+    data,
+    headers(),
+  );
+}
+
+export function deleteScheduleTask(scheduleId: number, id: number) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/schedule/task/delete',
+    null,
+    {
+      ...headers(),
+      params: { id, scheduleId },
+    },
   );
 }

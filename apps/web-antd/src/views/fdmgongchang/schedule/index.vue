@@ -14,7 +14,7 @@ import { Button, DatePicker, Empty, Input, message, Result, Select, Spin, Tag } 
 import dayjs from 'dayjs';
 
 import { getWorkerList } from '#/api/fdmgongchang/factory';
-import { generateSchedule, getSchedule, getSchedules } from '#/api/fdmgongchang/schedule';
+import { createManualSchedule, generateSchedule, getSchedule, getSchedules } from '#/api/fdmgongchang/schedule';
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { dateText, SCHEDULE_STATUS } from '../shared/schedule';
@@ -29,6 +29,7 @@ defineOptions({ name: 'FdmGongchangSchedule' });
 
 const { hasAccessByCodes } = useAccess();
 const canGenerate = computed(() => hasAccessByCodes(['fdmgongchang:schedule:generate']));
+const canConfirm = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
 
 const factory = useFactory();
 const noFactory = ref(false);
@@ -39,6 +40,7 @@ const detail = ref<Api.Schedule>();
 const detailLoading = ref(false);
 const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const generating = ref(false);
+const creatingManual = ref(false);
 const form = ref({ days: 3, note: '', startDate: dayjs() as Dayjs });
 const route = useRoute();
 
@@ -132,6 +134,23 @@ async function generate(override?: {
   }
 }
 
+/** 手动派工：不用 AI，按左边的日期和天数建一份空排单，在右边自己加任务、派人。 */
+async function createManual() {
+  creatingManual.value = true;
+  try {
+    const id = await createManualSchedule({
+      days: form.value.days,
+      note: form.value.note.trim() || undefined,
+      startDate: form.value.startDate.format('YYYY-MM-DD'),
+    });
+    message.success('已新建手动派工，在右边添加任务、选人，然后确认下发');
+    await loadList();
+    select(id);
+  } finally {
+    creatingManual.value = false;
+  }
+}
+
 function retry(schedule: Api.Schedule) {
   const start = dateText(schedule.startDate);
   void generate({
@@ -170,7 +189,8 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            AI 根据待生产订单、各段库存、车间在制、人员岗位和产能排未来几天的任务；只出方案，确认下发后开工序单时可以关联任务。
+            AI 根据待生产订单、各段库存、车间在制、人员岗位和产能排未来几天的任务；也可以不用 AI，手动派工。
+            确认下发后任务出现在工人的工作台上，开工序单时可以关联任务；已下发的还能追加任务、改人。
           </p>
         </div>
       </header>
@@ -184,7 +204,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
 
       <div v-else class="flex flex-col gap-4 xl:flex-row xl:items-start">
         <aside class="flex flex-col gap-3 xl:w-72 xl:shrink-0">
-          <section v-if="canGenerate" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+          <section v-if="canGenerate || canConfirm" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
             <h3 class="m-0 text-sm font-semibold text-foreground">新排单</h3>
             <label for="schedule-start" class="flex flex-col gap-1">
               从哪天开始
@@ -210,7 +230,8 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
                 placeholder="例如：2 号压花机周三保养；HT-001 要提前；周日不开工"
               />
             </label>
-            <Button :loading="generating" block type="primary" @click="generate()">生成排单</Button>
+            <Button v-if="canGenerate" :loading="generating" block type="primary" @click="generate()">AI 生成排单</Button>
+            <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
           </section>
 
           <section class="flex flex-col gap-1 rounded-lg border border-border bg-card p-2">
@@ -226,7 +247,10 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             >
               <span class="flex items-center justify-between gap-2">
                 <span class="font-mono text-xs">{{ s.scheduleNo }}</span>
-                <Tag :color="SCHEDULE_STATUS[s.status].color" class="m-0">{{ SCHEDULE_STATUS[s.status].label }}</Tag>
+                <span class="flex gap-1">
+                  <Tag v-if="s.manual" class="m-0" color="purple">手动</Tag>
+                  <Tag :color="SCHEDULE_STATUS[s.status].color" class="m-0">{{ SCHEDULE_STATUS[s.status].label }}</Tag>
+                </span>
               </span>
               <span class="text-xs text-muted-foreground">
                 {{ dateText(s.startDate) }} 起 {{ s.days }} 天<template v-if="s.revision > 1"> · 第 {{ s.revision }} 版</template>

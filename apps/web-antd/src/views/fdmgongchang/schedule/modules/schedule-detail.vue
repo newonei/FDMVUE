@@ -11,8 +11,11 @@ import { Alert, Button, Input, message, Modal, Progress, Spin, Tag } from 'ant-d
 
 import {
   confirmSchedule,
+  deleteScheduleTask,
   discardSchedule,
+  getScheduleFormOptions,
   regenerateSchedule,
+  saveScheduleTask,
 } from '#/api/fdmgongchang/schedule';
 
 import {
@@ -24,8 +27,12 @@ import {
   SCHEDULE_STATUS,
 } from '../../shared/schedule';
 import PlanEditor from './plan-editor.vue';
+import TaskFormModal from './task-form-modal.vue';
 
-/** 一份排单：生成中、失败、待确认（可调整、带意见重新生成、下发）、已下发（计划 vs 实际）。 */
+/**
+ * 一份排单：生成中、失败、待确认（可调整、加任务、带意见重新生成、下发）、已下发（计划 vs 实际，可追加、改人、删任务）。
+ * 手动派工的排单没有经过 AI，从空方案开始自己加任务。
+ */
 const props = defineProps<{
   schedule: Api.Schedule;
   workers: FdmgongchangFactoryApi.Worker[];
@@ -64,6 +71,77 @@ const confirmedGroups = computed(() =>
   groupByDate(props.schedule.tasks ?? [], (t) => dateText(t.workDate)),
 );
 const noWorker = computed(() => tasks.value.filter((t) => t.workerIds.length === 0).length);
+
+// ========== 手动加任务、改任务 ==========
+const formOpen = ref(false);
+const formInitial = ref<Api.PlanTask | null>(null);
+/** 已下发排单里正在改的任务编号；为空是追加。 */
+const editingTaskId = ref<number>();
+/** 待确认方案里正在改的那一条。 */
+const editingPlanTask = ref<Api.PlanTask>();
+const formOptions = ref<Api.FormOptions | null>(null);
+const formOptionsFor = ref<number>();
+
+async function ensureOptions() {
+  if (formOptionsFor.value === props.schedule.id && formOptions.value) return;
+  formOptions.value = await getScheduleFormOptions(props.schedule.id);
+  formOptionsFor.value = props.schedule.id;
+}
+
+async function openForm(initial: Api.PlanTask | null, taskId?: number, planTask?: Api.PlanTask) {
+  await ensureOptions();
+  formInitial.value = initial;
+  editingTaskId.value = taskId;
+  editingPlanTask.value = planTask;
+  formOpen.value = true;
+}
+
+function editConfirmed(task: Api.Task) {
+  void openForm(
+    {
+      contractCode: task.contractCode,
+      date: dateText(task.workDate),
+      process: task.process,
+      product: task.product,
+      quantity: task.quantity,
+      reason: task.reason,
+      sequence: task.sequence,
+      spec: task.spec,
+      unit: task.unit,
+      workerIds: (task.workerIds ?? '').split(',').filter(Boolean).map(Number),
+    },
+    task.id,
+  );
+}
+
+async function submitForm(task: Api.PlanTask) {
+  if (props.schedule.status === 'DRAFT') {
+    // 待确认：只改本地方案，下发时一起校验
+    const workerNames = task.workerIds.map((id) => props.workers.find((w) => w.userId === id)?.nickname ?? String(id));
+    const next = { ...task, workerNames };
+    tasks.value = editingPlanTask.value
+      ? tasks.value.map((t) => (t === editingPlanTask.value ? next : t))
+      : [...tasks.value, next];
+    return;
+  }
+  await saveScheduleTask({ id: editingTaskId.value, scheduleId: props.schedule.id, task });
+  message.success(editingTaskId.value ? '任务已修改，工人工作台马上能看到' : '任务已追加，工人工作台马上能看到');
+  emit('changed', props.schedule.id);
+}
+
+function removeConfirmed(task: Api.Task) {
+  Modal.confirm({
+    content: '删掉后这个任务不再出现在工人工作台；已经有工序单关联的任务不能删。',
+    okButtonProps: { danger: true },
+    okText: '删除',
+    onOk: async () => {
+      await deleteScheduleTask(props.schedule.id, task.id);
+      message.success('任务已删除');
+      emit('changed', props.schedule.id);
+    },
+    title: `删除 ${dayLabel(dateText(task.workDate))} 的${PROCESS_LABELS[task.process] ?? task.process}任务？`,
+  });
+}
 
 function percent(task: Api.Task) {
   const plan = Number(task.quantity);
@@ -124,6 +202,7 @@ function discard() {
         <div class="flex flex-wrap items-center gap-2">
           <h2 class="m-0 font-mono text-base font-semibold">{{ schedule.scheduleNo }}</h2>
           <Tag :color="status.color" class="m-0">{{ status.label }}</Tag>
+          <Tag v-if="schedule.manual" class="m-0" color="purple">手动派工</Tag>
           <Tag v-if="schedule.revision > 1" class="m-0">第 {{ schedule.revision }} 版</Tag>
         </div>
         <span class="text-xs text-muted-foreground">
@@ -136,9 +215,11 @@ function discard() {
       </div>
       <div class="flex flex-wrap gap-2">
         <template v-if="schedule.status === 'DRAFT'">
-          <Button v-if="canGenerate" :disabled="busy" @click="feedbackOpen = true">带意见重新生成</Button>
+          <Button v-if="canConfirm" :disabled="busy" @click="openForm(null)">＋ 添加任务</Button>
+          <Button v-if="canGenerate && !schedule.manual" :disabled="busy" @click="feedbackOpen = true">带意见重新生成</Button>
           <Button v-if="canConfirm" :loading="busy" type="primary" @click="confirm">确认下发</Button>
         </template>
+        <Button v-if="schedule.status === 'CONFIRMED' && canConfirm" @click="openForm(null)">＋ 追加任务</Button>
         <Button v-if="schedule.status === 'FAILED' && canGenerate" type="primary" @click="emit('retry', schedule)">
           重新生成
         </Button>
@@ -187,7 +268,16 @@ function discard() {
 
     <template v-if="schedule.status === 'DRAFT'">
       <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人，下发前可以补上。</p>
-      <PlanEditor v-model:tasks="tasks" :editable="canConfirm" :workers="workers" />
+      <p v-if="schedule.manual && tasks.length === 0" class="m-0 text-sm text-muted-foreground">
+        手动派工：点右上角「＋ 添加任务」，选哪天、哪道工序、做多少、谁来做；加完点「确认下发」，工人工作台就能看到。
+      </p>
+      <PlanEditor
+        v-else
+        v-model:tasks="tasks"
+        :editable="canConfirm"
+        :workers="workers"
+        @edit="(t) => openForm({ ...t, workerIds: [...t.workerIds] }, undefined, t)"
+      />
     </template>
 
     <template v-else-if="schedule.status === 'CONFIRMED' || (schedule.status === 'DISCARDED' && (schedule.tasks ?? []).length > 0)">
@@ -207,12 +297,31 @@ function discard() {
                 实际 {{ Number(task.actualQuantity) }} / 计划 {{ Number(task.quantity) }} {{ task.unit }}
               </span>
             </div>
-            <span class="text-xs text-muted-foreground">{{ task.orderCount }} 张工序单关联</span>
+            <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{{ task.orderCount }} 张工序单关联</span>
+              <span v-if="schedule.status === 'CONFIRMED' && canConfirm" class="flex gap-1">
+                <Button size="small" type="link" @click="editConfirmed(task)">改人 / 改量</Button>
+                <Button v-if="task.orderCount === 0" danger size="small" type="link" @click="removeConfirmed(task)">删</Button>
+              </span>
+            </div>
           </div>
         </div>
       </section>
     </template>
     <PlanEditor v-else-if="schedule.status === 'DISCARDED' && schedule.plan" v-model:tasks="tasks" :editable="false" :workers="workers" />
+
+    <p v-if="schedule.status === 'CONFIRMED' && (schedule.tasks ?? []).length === 0" class="m-0 text-sm text-muted-foreground">
+      这份排单的任务都删完了，可以点「＋ 追加任务」。
+    </p>
+
+    <TaskFormModal
+      v-model:open="formOpen"
+      :initial="formInitial"
+      :options="formOptions"
+      :schedule="schedule"
+      :submit="submitForm"
+      :workers="workers"
+    />
 
     <Modal v-model:open="feedbackOpen" :confirm-loading="busy" ok-text="重新生成" title="带意见重新生成" @ok="regenerate">
       <p class="m-0 mb-2 text-xs text-muted-foreground">写清楚要怎么改，AI 会参考这一版方案重新排，这一版作废。</p>

@@ -8,6 +8,9 @@ import SchedulePage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
   confirm: vi.fn(),
+  manual: vi.fn(),
+  options: vi.fn(),
+  saveTask: vi.fn(),
   generate: vi.fn(),
   get: vi.fn(),
   list: vi.fn(),
@@ -26,7 +29,11 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
   confirmSchedule: mocks.confirm,
+  createManualSchedule: mocks.manual,
+  deleteScheduleTask: vi.fn(),
   discardSchedule: vi.fn(),
+  getScheduleFormOptions: mocks.options,
+  saveScheduleTask: mocks.saveTask,
   generateSchedule: mocks.generate,
   getSchedule: mocks.get,
   getSchedules: mocks.list,
@@ -126,7 +133,7 @@ describe('schedule page', () => {
 
     mocks.list.mockResolvedValue([base]);
     mocks.get.mockResolvedValueOnce(base).mockResolvedValue(draft);
-    clickButton('生成排单');
+    clickButton('AI生成排单');
     await flush();
     expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ days: 3 }));
     expect(document.body.textContent).toContain('AI 正在根据订单');
@@ -148,6 +155,81 @@ describe('schedule page', () => {
         expect.objectContaining({ process: 'SLICE', quantity: 400, workerIds: [2] }),
         expect.objectContaining({ process: 'PACK', workerIds: [] }),
       ],
+    });
+  });
+
+  it('creates a manual dispatch without AI and edits a dispatched task', async () => {
+    const manualDraft: Api.Schedule = { ...base, id: 12, manual: true, plan: { risks: [], tasks: [], warnings: [] }, status: 'DRAFT' };
+    const confirmed: Api.Schedule = {
+      ...base,
+      id: 12,
+      manual: true,
+      status: 'CONFIRMED',
+      tasks: [
+        {
+          actualQuantity: 0,
+          contractCode: 'HT-001',
+          id: 31,
+          orderCount: 0,
+          process: 'SLICE',
+          product: '紫色瑜伽垫',
+          quantity: 200,
+          scheduleId: 12,
+          sequence: 1,
+          unit: '片',
+          workDate: '2026-10-10',
+          workerIds: '2',
+          workerNames: '张三',
+        },
+      ],
+    };
+    mocks.manual.mockResolvedValue(12);
+    mocks.options.mockResolvedValue({
+      demand: [{ contractCode: 'HT-001', product: '紫色瑜伽垫' }],
+      processes: [{ code: 'SLICE', label: '开片', unit: '片' }],
+    });
+    mocks.saveTask.mockResolvedValue(31);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(SchedulePage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    mocks.list.mockResolvedValue([manualDraft]);
+    mocks.get.mockResolvedValue(manualDraft);
+    clickButton('手动派工（不用AI）');
+    await flush();
+    expect(mocks.manual).toHaveBeenCalledWith(expect.objectContaining({ days: 3 }));
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('手动派工：点右上角');
+    expect(document.body.textContent).not.toContain('带意见重新生成');
+
+    // 空表单保存：提示要填的项
+    clickButton('＋添加任务');
+    await flush();
+    expect(mocks.options).toHaveBeenCalledWith(12);
+    clickButton('保存');
+    await flush();
+    expect(document.body.textContent).toContain('请选择工序。');
+    [...document.querySelectorAll('button')].find((b) => ['Cancel', '取消'].includes(b.textContent?.replaceAll(/\s/g, '') ?? ''))!.click();
+    await flush();
+
+    // 已下发：改人 / 改量，表单带出原来的内容，保存时带任务编号
+    mocks.list.mockResolvedValue([confirmed]);
+    mocks.get.mockResolvedValue(confirmed);
+    const item = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('PB20261010-001'));
+    item!.click();
+    await flush();
+    clickButton('改人/改量');
+    await flush();
+    const saves = [...document.querySelectorAll('button')].filter((b) => b.textContent?.replaceAll(/\s/g, '') === '保存');
+    saves.at(-1)!.click();
+    await flush();
+    expect(mocks.saveTask).toHaveBeenCalledWith({
+      id: 31,
+      scheduleId: 12,
+      task: expect.objectContaining({ contractCode: 'HT-001', date: '2026-10-10', process: 'SLICE', quantity: 200, sequence: 1, workerIds: [2] }),
     });
   });
 });
