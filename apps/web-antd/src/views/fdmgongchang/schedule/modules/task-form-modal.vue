@@ -2,15 +2,19 @@
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Alert, Input, InputNumber, Modal, Select } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
+import { searchScheduleProducts } from '#/api/fdmgongchang/schedule';
+
+import { specText } from '../../production-order/shared';
 import { dateText, dayLabel } from '../../shared/schedule';
 
 /**
- * 手动派工的一个任务：哪天、哪道工序、做哪张订单（或备货）、做多少、谁来做。
+ * 手动派工的一个任务：哪天、哪道工序、做哪张订单（或备货）、做什么产品、做多少、谁来做。
+ * 产品从产品中心选：选了订单时列这张订单里的产品，备货时搜产品中心；规格跟着产品带出，不手填。
  * 待确认的排单加进方案里；已下发的排单直接保存，工人工作台马上能看到。
  */
 const props = defineProps<{
@@ -27,8 +31,19 @@ const STOCK = '__STOCK__';
 const date = ref('');
 const process = ref<string>();
 const order = ref<string>(STOCK);
-const product = ref('');
-const spec = ref('');
+/** 选中的产品（下拉的 key）；产品名称和规格跟着它带出。 */
+const productKey = ref<string>();
+const keyword = ref('');
+const searching = ref(false);
+/** 备货时搜到的产品中心产品。 */
+const found = ref<ProductChoice[]>([]);
+
+interface ProductChoice {
+  code?: null | string;
+  key: string;
+  name: string;
+  spec: string;
+}
 const quantity = ref<null | number>(null);
 const workerIds = ref<number[]>([]);
 const reason = ref('');
@@ -62,6 +77,52 @@ const orderOptions = computed(() => {
     ...[...products].map(([code, set]) => ({ label: [code, ...set].join(' · '), value: code })),
   ];
 });
+/** 原来任务上的产品（AI 排的或旧数据，不一定在产品中心里），改任务时保留可选。 */
+const current = computed<null | ProductChoice>(() =>
+  props.initial?.product ? { key: '__CURRENT__', name: props.initial.product, spec: props.initial.spec ?? '' } : null,
+);
+const choices = computed<ProductChoice[]>(() => {
+  const list: ProductChoice[] =
+    order.value === STOCK
+      ? found.value
+      : (props.options?.demand ?? [])
+          .filter((d) => d.contractCode === order.value && d.product)
+          .map((d) => ({ code: d.productCode, key: d.productId || `name:${d.product}`, name: d.product!, spec: d.spec ?? '' }));
+  const keep = current.value;
+  return keep && !list.some((c) => c.name === keep.name && c.spec === keep.spec) ? [keep, ...list] : list;
+});
+const productOptions = computed(() =>
+  choices.value.map((c) => ({ label: [c.name, c.code].filter(Boolean).join(' · '), value: c.key })),
+);
+const picked = computed(() => choices.value.find((c) => c.key === productKey.value));
+
+let timer: ReturnType<typeof setTimeout> | undefined;
+let seq = 0;
+onBeforeUnmount(() => clearTimeout(timer));
+/** 备货时按名称、编码或规格搜产品中心。 */
+function search(value: string) {
+  keyword.value = value;
+  if (order.value !== STOCK) return;
+  clearTimeout(timer);
+  const k = value.trim();
+  if (!k) return;
+  timer = setTimeout(async () => {
+    const mine = ++seq;
+    searching.value = true;
+    try {
+      const list = await searchScheduleProducts(k);
+      if (mine !== seq) return;
+      const keep = picked.value;
+      found.value = [
+        ...(keep && keep.key !== '__CURRENT__' && !list.some((p) => p.id === keep.key) ? [keep] : []),
+        ...list.map((p) => ({ code: p.code, key: p.id, name: p.displayName ?? p.name, spec: specText(p) })),
+      ];
+    } finally {
+      if (mine === seq) searching.value = false;
+    }
+  }, 300);
+}
+
 const workerOptions = computed(() =>
   props.workers
     .filter((w) => !process.value || w.posts.includes(process.value))
@@ -74,8 +135,9 @@ watch([open, () => props.initial], ([value]) => {
   date.value = t?.date ?? dates.value.find((d) => d >= dayjs().format('YYYY-MM-DD')) ?? dates.value[0] ?? '';
   process.value = t?.process ?? undefined;
   order.value = t?.contractCode || STOCK;
-  product.value = t?.product ?? '';
-  spec.value = t?.spec ?? '';
+  found.value = [];
+  keyword.value = '';
+  productKey.value = t?.product ? '__CURRENT__' : undefined;
   quantity.value = t ? Number(t.quantity) : null;
   workerIds.value = [...(t?.workerIds ?? [])];
   reason.value = t?.reason ?? '';
@@ -88,16 +150,18 @@ watch(process, () => {
   workerIds.value = workerIds.value.filter((id) => allowed.has(id));
 });
 
-/** 选了订单、产品还没填时，带出订单上的产品。 */
-watch(order, (code) => {
-  if (code === STOCK || product.value.trim()) return;
-  product.value = props.options?.demand.find((d) => d.contractCode === code)?.product ?? '';
+/** 换了订单：原来选的产品不在这张单里就清掉；单里只有一个产品时直接选上。 */
+watch(order, () => {
+  if (!choices.value.some((c) => c.key === productKey.value)) productKey.value = undefined;
+  const own = choices.value.filter((c) => c.key !== '__CURRENT__');
+  if (!productKey.value && order.value !== STOCK && own.length === 1) productKey.value = own[0]!.key;
 });
 
 async function save() {
   errors.value = [];
   if (!date.value) errors.value.push('请选择日期。');
   if (!process.value) errors.value.push('请选择工序。');
+  if (!picked.value) errors.value.push('请从产品中心选择产品。');
   if (!(quantity.value && quantity.value > 0)) errors.value.push('请填写数量，要大于 0。');
   if (errors.value.length > 0) return;
   saving.value = true;
@@ -106,11 +170,11 @@ async function save() {
       contractCode: order.value === STOCK ? null : order.value,
       date: date.value,
       process: process.value!,
-      product: product.value.trim() || null,
+      product: picked.value!.name,
       quantity: quantity.value!,
       reason: reason.value.trim() || null,
       sequence: props.initial?.date === date.value && props.initial?.process === process.value ? props.initial?.sequence : null,
-      spec: spec.value.trim() || null,
+      spec: picked.value!.spec || null,
       unit: unit.value || null,
       workerIds: workerIds.value,
     });
@@ -145,13 +209,21 @@ async function save() {
         做哪张订单
         <Select id="task-form-order" v-model:value="order" :options="orderOptions" option-filter-prop="label" show-search />
       </label>
-      <label for="task-form-product" class="flex flex-col gap-1">
-        产品（选填）
-        <Input id="task-form-product" v-model:value="product" :maxlength="200" placeholder="例如 紫色瑜伽垫" />
-      </label>
-      <label for="task-form-spec" class="flex flex-col gap-1">
-        规格（选填）
-        <Input id="task-form-spec" v-model:value="spec" :maxlength="200" placeholder="例如 183x61x0.6" />
+      <label for="task-form-product" class="flex flex-col gap-1 sm:col-span-2">
+        做什么产品（从产品中心选）
+        <Select
+          id="task-form-product"
+          v-model:value="productKey"
+          :filter-option="order === STOCK ? false : undefined"
+          :loading="searching"
+          :not-found-content="order === STOCK ? (keyword.trim() ? '产品中心没有找到，新产品请先在「产品中心 → 产品档案」建档' : '输入名称、编码或规格搜索') : '这张订单里没有产品'"
+          :options="productOptions"
+          :placeholder="order === STOCK ? '搜产品中心：名称、编码或规格' : '选这张订单里的产品'"
+          option-filter-prop="label"
+          show-search
+          @search="search"
+        />
+        <span v-if="picked" class="text-foreground">规格：{{ picked.spec || '—' }}</span>
       </label>
       <label for="task-form-quantity" class="flex flex-col gap-1">
         做多少
