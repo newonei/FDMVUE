@@ -62,6 +62,14 @@ const savedCapacity = (code: string) => {
   const v = setting.value?.processes.find((p) => p.code === code)?.dailyCapacity;
   return v === null || v === undefined || v === '' ? null : Number(v);
 };
+/** 密炼出板规格（cm）和每锅出几张，AI 排单用来把原料换算成板材、再换算成成品。 */
+const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
+type MixField = (typeof MIX_FIELDS)[number];
+const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, length: null, thickness: null, width: null });
+const savedMix = (key: MixField) => {
+  const v = setting.value?.mixBoard?.[key];
+  return v === null || v === undefined || v === '' ? null : Number(v);
+};
 /** 选的排单模型，'' 表示自动。模型编号是长整数，按字符串比较避免精度问题。 */
 const modelId = ref('');
 const savedModelId = computed(() =>
@@ -112,7 +120,8 @@ const dirty = computed(() => {
     (setting.value?.processes ?? []).some(
       (p) => (capacities.value[p.code] ?? null) !== savedCapacity(p.code),
     ) ||
-    modelId.value !== savedModelId.value
+    modelId.value !== savedModelId.value ||
+    MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k))
   );
 });
 
@@ -134,6 +143,7 @@ async function load() {
       setting.value.processes.map((p) => [p.code, savedCapacity(p.code)]),
     );
     modelId.value = savedModelId.value;
+    mixBoard.value = Object.fromEntries(MIX_FIELDS.map((k) => [k, savedMix(k)])) as Record<MixField, null | number>;
   } catch {
     loadError.value = true;
   } finally {
@@ -155,6 +165,11 @@ async function save() {
     message.warning('本厂至少要启用一道工序');
     return;
   }
+  const sizes = [mixBoard.value.length, mixBoard.value.width, mixBoard.value.thickness];
+  if (sizes.some((v) => v !== null) && sizes.some((v) => !(v && v > 0))) {
+    message.warning('密炼出板规格的长、宽、厚要一起填');
+    return;
+  }
   saving.value = true;
   try {
     const order = (setting.value?.processes ?? []).map((p) => p.code);
@@ -163,6 +178,7 @@ async function save() {
         order.map((code) => [code, capacities.value[code] ?? null]),
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
+      mixBoard: { ...mixBoard.value },
       scheduleModelId: modelId.value || null,
     });
     message.success(`${factory.current.value?.name ?? '本厂'}的工厂设置已保存`);
@@ -275,6 +291,37 @@ async function save() {
           </Checkbox.Group>
           <p class="m-0 text-xs text-muted-foreground">
             日产能是这道工序整个车间一天大概能做多少，AI 排单时用来控制每天的量；不填时按最近 14 天的实际产出估算。
+          </p>
+          <h2 class="m-0 mt-2 text-sm font-semibold">
+            密炼出板规格<span class="ml-2 text-xs font-normal text-muted-foreground">AI 排单用它把原料换算成板材、再换算成能出几条成品</span>
+          </h2>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            <label
+              v-for="f in [
+                { key: 'length', label: '长', unit: 'cm' },
+                { key: 'width', label: '宽', unit: 'cm' },
+                { key: 'thickness', label: '厚', unit: 'cm' },
+                { key: 'boardsPerBatch', label: '每锅出', unit: '张（选填）' },
+              ] as const"
+              :key="f.key"
+              :for="`mix-board-${f.key}`"
+              class="flex items-center gap-1"
+            >
+              {{ f.label }}
+              <InputNumber
+                :id="`mix-board-${f.key}`"
+                :disabled="!canEdit"
+                :min="0"
+                :value="mixBoard[f.key] ?? undefined"
+                :style="{ width: '6rem' }"
+                size="small"
+                @change="(v) => (mixBoard[f.key] = (v as null | number | undefined) ?? null)"
+              />
+              {{ f.unit }}
+            </label>
+          </div>
+          <p class="m-0 text-xs text-muted-foreground">
+            每锅出几张不填时，按配方一锅的重量 × 出材率 ÷（板材体积 × 配方密度）估算。
           </p>
         </section>
         <CustomProcessPanel
