@@ -1,9 +1,10 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemDeptApi } from '#/api/system/dept';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { downloadFileFromBlobPart } from '@vben/utils';
+import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
 import {
   Alert,
   Button,
@@ -19,6 +20,7 @@ import {
   Tabs,
   Tag,
   Textarea,
+  TreeSelect,
 } from 'ant-design-vue';
 import {
   cancelInstance,
@@ -27,6 +29,7 @@ import {
   getInstancePage,
   remindInstances,
 } from '#/api/fdmperformance';
+import { getSimpleDeptList } from '#/api/system/dept';
 import { usePerformanceAccess } from '../shared/access';
 import {
   INSTANCE_STATUS_MAP,
@@ -51,6 +54,8 @@ const loading = ref(false);
 const loadError = ref(false);
 const exporting = ref(false);
 const reminding = ref(false);
+const deptLoading = ref(false);
+const deptTreeOptions = ref<SystemDeptApi.Dept[]>([]);
 const rows = ref<JixiaoApi.Instance[]>([]);
 const total = ref(0);
 const selectedIds = ref<number[]>([]);
@@ -72,6 +77,7 @@ const query = reactive<JixiaoApi.InstancePageParams>({
   status: undefined,
   userName: undefined,
   creatorUserId: undefined,
+  deptId: undefined,
 });
 const scopes = computed(() => managementScopes(access.value));
 const creatorOptions = computed(() => [
@@ -219,7 +225,18 @@ async function confirmDelete() {
 async function initialize() {
   const capability = await loadAccess();
   query.scope = defaultManagementScope(capability);
-  await load();
+  await Promise.all([load(), loadDepartments()]);
+}
+async function loadDepartments() {
+  if (!access.value?.canManage) return;
+  deptLoading.value = true;
+  try {
+    deptTreeOptions.value = handleTree(await getSimpleDeptList());
+  } catch {
+    message.warning('部门列表加载失败，请刷新后重试');
+  } finally {
+    deptLoading.value = false;
+  }
 }
 onMounted(initialize);
 </script>
@@ -265,6 +282,16 @@ onMounted(initialize);
               :tab="SCOPE_LABELS[scope]"
           /></Tabs>
           <div class="filter-bar">
+            <TreeSelect
+              v-model:value="query.deptId"
+              :tree-data="deptTreeOptions"
+              :field-names="{ children: 'children', label: 'name', value: 'id' }"
+              :loading="deptLoading"
+              placeholder="全部部门（含下级）"
+              allow-clear
+              show-search
+              tree-node-filter-prop="name"
+            />
             <DatePicker
               v-model:value="query.periodKey"
               picker="month"
