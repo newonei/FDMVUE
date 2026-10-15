@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   getReturnableTaskNodes: vi.fn(),
   getScoreDraft: vi.fn(),
   saveScoreDraft: vi.fn(),
+  skipTask: vi.fn(),
   returnTask: vi.fn(),
   submitHrReview: vi.fn(),
   submitManagerScore: vi.fn(),
@@ -178,6 +179,7 @@ async function mount(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.skipTask.mockReset().mockResolvedValue(true);
   api.getScoreDraft.mockReset().mockResolvedValue(null);
   api.saveScoreDraft
     .mockReset()
@@ -185,6 +187,199 @@ beforeEach(() => {
       ...payload,
       updateTime: '2026-09-18T10:00:00',
     }));
+});
+
+describe('HR 跳过当前节点', () => {
+  function skipButton(container: HTMLElement) {
+    return [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === '跳过',
+    );
+  }
+
+  it.each([
+    { allowedActions: ['TRANSFER'] },
+    { status: 2 },
+    { status: 3 },
+    { currentTaskId: undefined },
+  ])('缺少权限、运行状态或当前任务时不展示跳过：%j', async (override) => {
+    const { container } = await mount(
+      'JIXIAO_INDICATOR_CONFIRM',
+      {
+        allowedActions: ['SKIP_TASK'],
+        ...override,
+      },
+      0,
+    );
+    expect(skipButton(container)).toBeUndefined();
+    expect(api.skipTask).not.toHaveBeenCalled();
+  });
+
+  it('每次只提交当前任务，刷新后才能继续下一节点，完成后隐藏', async () => {
+    const { container } = await mount(
+      'JIXIAO_INDICATOR_CONFIRM',
+      {
+        allowedActions: ['SKIP_TASK'],
+      },
+      0,
+    );
+    api.getInstance.mockResolvedValueOnce({
+      id: 7,
+      status: 1,
+      currentTaskId: 'task-next',
+      currentTaskKey: 'JIXIAO_SELF_SCORE',
+      allowedActions: ['SKIP_TASK'],
+    });
+    skipButton(container)!.click();
+    await settle();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(api.skipTask).toHaveBeenNthCalledWith(1, {
+      instanceId: 7,
+      taskId: 'task-7',
+    });
+    expect(api.getInstance).toHaveBeenCalledTimes(2);
+    api.getInstance.mockResolvedValueOnce({
+      id: 7,
+      status: 2,
+      allowedActions: [],
+    });
+    skipButton(container)!.click();
+    await settle();
+    expect(api.skipTask).toHaveBeenNthCalledWith(2, {
+      instanceId: 7,
+      taskId: 'task-next',
+    });
+    expect(skipButton(container)).toBeUndefined();
+  });
+
+  it('请求及刷新期间禁用操作并阻止重复点击', async () => {
+    let finishSkip!: () => void;
+    api.skipTask.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSkip = resolve;
+        }),
+    );
+    const { container } = await mount(
+      'JIXIAO_INDICATOR_CONFIRM',
+      {
+        allowedActions: ['SKIP_TASK', 'INDICATOR_CONFIRM', 'TRANSFER'],
+      },
+      0,
+    );
+    const button = skipButton(container)!;
+    button.click();
+    button.click();
+    await settle();
+    expect(api.skipTask).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(true);
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (item) => item.textContent?.trim() === '确认指标',
+      )!.disabled,
+    ).toBe(true);
+    let finishLoad!: (value: unknown) => void;
+    api.getInstance.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishLoad = resolve;
+        }),
+    );
+    finishSkip();
+    await settle();
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(api.skipTask).toHaveBeenCalledOnce();
+    finishLoad({ id: 7, status: 2, allowedActions: [] });
+    await settle();
+  });
+
+  it('未保存评分先确认，取消保留输入，确认后不提交评分或草稿', async () => {
+    const { container, fill, fields } = await mount('JIXIAO_SELF_SCORE', {
+      allowedActions: ['SELF_SCORE', 'SAVE_SCORE_DRAFT', 'SKIP_TASK'],
+    });
+    await fill(0, '88');
+    const button = skipButton(container)!;
+    button.click();
+    button.click();
+    await settle();
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(api.skipTask).not.toHaveBeenCalled();
+    confirm.mock.calls.at(-1)![0].onCancel();
+    await settle();
+    expect(fields[0]!.value).toBe('88');
+    expect(button.disabled).toBe(false);
+    button.click();
+    await settle();
+    confirm.mock.calls.at(-1)![0].onOk();
+    await settle();
+    expect(api.skipTask).toHaveBeenCalledExactlyOnceWith({
+      instanceId: 7,
+      taskId: 'task-7',
+    });
+    expect(api.submitSelfScore).not.toHaveBeenCalled();
+    expect(api.saveScoreDraft).not.toHaveBeenCalled();
+    expect(
+      container.querySelector<HTMLInputElement>('#performance-score-11')!.value,
+    ).toBe('');
+    expect(guards.leave?.()).toBe(true);
+  });
+
+  it('请求失败也刷新实际任务，避免再次提交陈旧节点', async () => {
+    const { container } = await mount(
+      'JIXIAO_INDICATOR_CONFIRM',
+      {
+        allowedActions: ['SKIP_TASK'],
+      },
+      0,
+    );
+    api.skipTask.mockRejectedValueOnce(new Error('任务已被处理'));
+    api.getInstance.mockResolvedValueOnce({
+      id: 7,
+      status: 2,
+      allowedActions: [],
+    });
+    skipButton(container)!.click();
+    await settle();
+    expect(api.getInstance).toHaveBeenCalledTimes(2);
+    expect(skipButton(container)).toBeUndefined();
+  });
+
+  it('请求失败且任务仍未完成时，解除锁定并允许重试', async () => {
+    const { container } = await mount(
+      'JIXIAO_INDICATOR_CONFIRM',
+      {
+        allowedActions: ['SKIP_TASK'],
+      },
+      0,
+    );
+    api.skipTask.mockRejectedValueOnce(new Error('网络错误'));
+    skipButton(container)!.click();
+    await settle();
+    expect(skipButton(container)!.disabled).toBe(false);
+    skipButton(container)!.click();
+    await settle();
+    expect(api.skipTask).toHaveBeenCalledTimes(2);
+    expect(api.skipTask).toHaveBeenLastCalledWith({
+      instanceId: 7,
+      taskId: 'task-7',
+    });
+  });
+
+  it('放弃本地评分后跳过成功但刷新失败时，移除旧任务操作', async () => {
+    const { container, fill } = await mount('JIXIAO_SELF_SCORE', {
+      allowedActions: ['SELF_SCORE', 'SAVE_SCORE_DRAFT', 'SKIP_TASK'],
+    });
+    await fill(0, '88');
+    api.getInstance.mockRejectedValueOnce(new Error('详情加载失败'));
+    skipButton(container)!.click();
+    await settle();
+    confirm.mock.calls.at(-1)![0].onOk();
+    await settle();
+    expect(api.skipTask).toHaveBeenCalledOnce();
+    expect(skipButton(container)).toBeUndefined();
+    expect(container.textContent).not.toContain('提交评分');
+    expect(guards.leave?.()).toBe(true);
+  });
 });
 
 describe('评分权限、草稿和离开保护', () => {

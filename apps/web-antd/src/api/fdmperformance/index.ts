@@ -62,6 +62,7 @@ export namespace JixiaoApi {
     | 'RETURN'
     | 'SAVE_SCORE_DRAFT'
     | 'SELF_SCORE'
+    | 'SKIP_TASK'
     | 'SUPERVISOR_SCORE'
     | 'TRANSFER';
   export interface Access {
@@ -801,6 +802,13 @@ export function getSelfScoreAttachmentDownloadUrl(id: string) {
 export function confirmIndicatorTask(data: JixiaoApi.TaskReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/indicator-confirm',
+    data,
+  );
+}
+
+export function skipTask(data: JixiaoApi.TaskReq) {
+  return requestClient.post<boolean>(
+    '/fdmperformance/assessment/task/skip',
     data,
   );
 }

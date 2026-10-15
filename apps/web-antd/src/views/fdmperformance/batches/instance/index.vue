@@ -40,6 +40,7 @@ import {
   getScoreDraft,
   returnTask,
   saveScoreDraft,
+  skipTask,
   submitHrReview,
   submitManagerScore,
   submitSelfScore,
@@ -74,6 +75,7 @@ const submitting = ref(false);
 const selfScoreAttachmentHasError = ref(false);
 const selfScoreAttachmentUploading = ref(false);
 const transferring = ref(false);
+const skipping = ref(false);
 const transferVisible = ref(false);
 const returning = ref(false);
 const returnNodesLoading = ref(false);
@@ -230,6 +232,22 @@ const canTransfer = computed(
     hasAction(instance.value, 'TRANSFER') &&
     instance.value?.status === 1 &&
     !!instance.value?.currentTaskId,
+);
+const canSkip = computed(
+  () =>
+    !!instance.value &&
+    hasAction(instance.value, 'SKIP_TASK') &&
+    instance.value.status === 1 &&
+    !!instance.value.currentTaskId,
+);
+const skipDisabled = computed(
+  () =>
+    loading.value ||
+    submitting.value ||
+    savingDraft.value ||
+    transferring.value ||
+    returning.value ||
+    selfScoreAttachmentUploading.value,
 );
 const userOptions = computed(() =>
   users.value.map((user) => ({
@@ -523,7 +541,7 @@ function taskReq() {
 }
 
 async function approveCurrent() {
-  if (!canApproveCurrent.value || submitting.value) return;
+  if (!canApproveCurrent.value || submitting.value || skipping.value) return;
   const req = taskReq();
   if (!req) return;
   submitting.value = true;
@@ -548,7 +566,8 @@ async function submitScore() {
     draftLoadFailed.value ||
     loading.value ||
     submitting.value ||
-    savingDraft.value
+    savingDraft.value ||
+    skipping.value
   )
     return;
   const req = taskReq();
@@ -606,7 +625,8 @@ async function submitScore() {
 }
 
 async function openTransfer() {
-  if (!canTransfer.value || !instance.value?.currentTaskId) return;
+  if (!canTransfer.value || !instance.value?.currentTaskId || skipping.value)
+    return;
   if (!(await confirmLeave())) return;
   transferForm.assigneeUserId = undefined;
   transferForm.reason = '';
@@ -617,7 +637,7 @@ async function openTransfer() {
 }
 
 async function submitTransfer() {
-  if (!canTransfer.value) return;
+  if (!canTransfer.value || skipping.value) return;
   if (!instance.value?.id || !instance.value.currentTaskId) return;
   if (!transferForm.assigneeUserId) {
     message.warning('请选择转交人');
@@ -644,8 +664,34 @@ async function submitTransfer() {
   }
 }
 
+async function skipCurrent() {
+  if (!canSkip.value || skipping.value || skipDisabled.value) return;
+  const req = taskReq();
+  if (!req) return;
+  // Lock before the unsaved-score prompt, so repeated clicks cannot queue skips.
+  skipping.value = true;
+  try {
+    if (!(await confirmLeave())) return;
+    if (
+      !canSkip.value ||
+      instance.value?.id !== req.instanceId ||
+      instance.value.currentTaskId !== req.taskId
+    )
+      return;
+    await skipTask(req);
+    message.success('已跳过当前节点');
+    savedSnapshot.value = draftSnapshot.value;
+    await load(true);
+  } catch {
+    // A timeout may still have advanced the process; obtain the actual task.
+    await load();
+  } finally {
+    skipping.value = false;
+  }
+}
+
 async function openReturn(targetTaskDefinitionKey?: string) {
-  if (!canReturn.value) return;
+  if (!canReturn.value || skipping.value) return;
   if (!(await confirmLeave())) return;
   await loadReturnableNodes();
   if (returnableNodes.value.length === 0) {
@@ -665,7 +711,7 @@ async function openReturn(targetTaskDefinitionKey?: string) {
 }
 
 async function submitReturn() {
-  if (!canReturn.value) return;
+  if (!canReturn.value || skipping.value) return;
   if (!instance.value?.id) return;
   if (instance.value.status === 1 && !instance.value.currentTaskId) return;
   if (!returnForm.targetTaskDefinitionKey) {
@@ -703,7 +749,8 @@ async function saveDraft() {
     !payload ||
     loading.value ||
     savingDraft.value ||
-    submitting.value
+    submitting.value ||
+    skipping.value
   )
     return;
   const invalid = payload.items.find(
@@ -804,6 +851,7 @@ onBeforeUnmount(() => {
           <Button
             v-if="canReturn && returnableNodes.length"
             :loading="returnNodesLoading"
+            :disabled="skipping"
             @click="openReturn()"
           >
             <template #icon><Undo2 :size="15" /></template>
@@ -812,9 +860,18 @@ onBeforeUnmount(() => {
           <Button
             v-if="canTransfer"
             :loading="transferring"
+            :disabled="skipping"
             @click="openTransfer"
           >
             转交
+          </Button>
+          <Button
+            v-if="canSkip"
+            :loading="skipping"
+            :disabled="skipDisabled || skipping"
+            @click="skipCurrent"
+          >
+            跳过
           </Button>
           <Tag :color="statusMeta(instance.status).color">
             {{ statusMeta(instance.status).text }}
@@ -998,7 +1055,11 @@ onBeforeUnmount(() => {
               :manager-editable="canEditManagerScore"
               :manager-enabled="managerScoreEnabled"
               :disabled="
-                loading || submitting || savingDraft || draftLoadFailed
+                loading ||
+                submitting ||
+                savingDraft ||
+                skipping ||
+                draftLoadFailed
               "
               @update:row="Object.assign(record, $event)"
             />
@@ -1029,7 +1090,9 @@ onBeforeUnmount(() => {
             :supervisor-editable="canEditSupervisorScore"
             :manager-editable="canEditManagerScore"
             :manager-enabled="managerScoreEnabled"
-            :disabled="loading || submitting || savingDraft || draftLoadFailed"
+            :disabled="
+              loading || submitting || savingDraft || skipping || draftLoadFailed
+            "
             @update:row="Object.assign(row, $event)"
           />
           <div v-if="row.indicator.actionPlanEnabled" class="indicator-action">
@@ -1056,7 +1119,8 @@ onBeforeUnmount(() => {
           canEditSelfScore &&
           !!instance.currentTaskId &&
           !loading &&
-          !submitting
+          !submitting &&
+          !skipping
         "
         :instance-id="instance.id"
         :task-id="instance.currentTaskId"
@@ -1072,7 +1136,9 @@ onBeforeUnmount(() => {
       <label v-if="canScore" class="draft-reason"
         >本次评分说明（可选）<Textarea
           v-model:value="draftReason"
-          :disabled="submitting || savingDraft || loading || draftLoadFailed"
+          :disabled="
+            submitting || savingDraft || skipping || loading || draftLoadFailed
+          "
           :maxlength="500"
           :rows="2"
           placeholder="补充本次评分或提交说明"
@@ -1095,14 +1161,14 @@ onBeforeUnmount(() => {
           <Button
             v-if="canSaveDraft"
             :loading="savingDraft"
-            :disabled="submitting || loading"
+            :disabled="submitting || loading || skipping"
             @click="saveDraft"
             >暂存草稿</Button
           >
           <Button
             v-if="canScore"
             :loading="submitting"
-            :disabled="savingDraft || loading || draftLoadFailed"
+            :disabled="savingDraft || loading || skipping || draftLoadFailed"
             type="primary"
             @click="submitScore"
           >
@@ -1111,6 +1177,7 @@ onBeforeUnmount(() => {
           <Button
             v-else-if="canApproveCurrent"
             :loading="submitting"
+            :disabled="skipping"
             type="primary"
             @click="approveCurrent"
           >
