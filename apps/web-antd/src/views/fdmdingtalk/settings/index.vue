@@ -36,6 +36,7 @@ import {
 } from '#/api/fdmdingtalk/settings';
 
 import InteractiveCards from './interactive-cards.vue';
+import WorkNotifications from './work-notifications.vue';
 import {
   buildDingTalkEntryUrls,
   buildDingTalkPlatformUrl,
@@ -662,7 +663,15 @@ onMounted(loadSettings);
                 </div>
               </Tabs.TabPane>
 
-              <Tabs.TabPane key="cards" tab="互动卡片">
+              <Tabs.TabPane key="work-notifications" tab="工作通知">
+                <WorkNotifications
+                  :app-client-id="saved.clientId"
+                  :app-dirty="dirty"
+                  :app-enabled="saved.enabled"
+                  :frontend-base-url="saved.frontendBaseUrl"
+                />
+              </Tabs.TabPane>
+              <Tabs.TabPane key="cards" tab="机器人互动卡片">
                 <InteractiveCards
                   :key="`${saved.socialClientId}:${saved.clientId}:${saved.corpId}:${saved.robotCode}:${saved.enabled}`"
                   :app-dirty="dirty"

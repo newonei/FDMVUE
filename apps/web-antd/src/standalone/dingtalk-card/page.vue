@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CardDetail } from './model';
+import type { CardDetail, CardDetailType } from './model';
 
 import { onMounted, ref } from 'vue';
 
@@ -10,11 +10,13 @@ import {
   cardSessionKey,
   createCardSession,
   detailStatusLabel,
+  parseCardDetailType,
   parseCardId,
   readCardSession,
 } from './model';
 
 const detail = ref<CardDetail>();
+const detailType = ref<CardDetailType>('interactive-card');
 const loading = ref(false);
 const stage = ref('正在读取通知');
 const pageError = ref('');
@@ -37,6 +39,7 @@ async function loadDetail() {
   loading.value = true;
   try {
     const id = parseCardId(window.location.search);
+    detailType.value = parseCardDetailType(window.location.search);
     if (!inDingTalk) throw new Error('请在钉钉客户端内打开这条通知');
     stage.value = '正在确认企业';
     const tenantId = await api.resolveTenant(window.location.hostname);
@@ -54,7 +57,12 @@ async function loadDetail() {
     if (cached) {
       stage.value = '正在加载通知';
       try {
-        detail.value = await api.detail(tenantId, cached.accessToken, id);
+        detail.value = await api.detail(
+          tenantId,
+          cached.accessToken,
+          id,
+          detailType.value,
+        );
         return;
       } catch (error) {
         if (!(error instanceof CardApiError) || error.code !== 401) throw error;
@@ -75,7 +83,12 @@ async function loadDetail() {
       /* Continue with the current in-memory token. */
     }
     stage.value = '正在加载通知';
-    detail.value = await api.detail(tenantId, session.accessToken, id);
+    detail.value = await api.detail(
+      tenantId,
+      session.accessToken,
+      id,
+      detailType.value,
+    );
   } catch (error) {
     pageError.value =
       error instanceof Error ? error.message : '加载失败，请稍后重试';
@@ -96,12 +109,21 @@ onMounted(loadDetail);
       <div class="notification-meta">
         <span
           class="status"
-          :class="[{ confirmed: detail.status === 'ACKNOWLEDGED' }]"
-          >{{ detailStatusLabel(detail.status) }}</span><time>{{ formatDingTalkCardTime(detail.createTime) }}</time>
+          :class="[
+            {
+              confirmed:
+                detailType === 'interactive-card' &&
+                detail.status === 'ACKNOWLEDGED',
+            },
+          ]"
+          >{{ detailStatusLabel(detail.status, detailType) }}</span><time>{{ formatDingTalkCardTime(detail.createTime) }}</time>
       </div>
       <h1>{{ detail.title }}</h1>
       <div class="notification-content">{{ detail.content }}</div>
-      <footer v-if="detail.acknowledgedAt" class="receipt">
+      <footer v-if="detailType === 'work-notification'" class="receipt">
+        通过企业应用工作通知发送
+      </footer>
+      <footer v-else-if="detail.acknowledgedAt" class="receipt">
         已于 {{ formatDingTalkCardTime(detail.acknowledgedAt) }} 确认知晓
       </footer>
       <footer v-else class="receipt">

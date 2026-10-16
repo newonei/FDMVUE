@@ -18,6 +18,16 @@ export interface CardSession {
   expiresAt: number;
 }
 
+export type CardDetailType = 'interactive-card' | 'work-notification';
+
+export function parseCardDetailType(search: string): CardDetailType {
+  const values = new URLSearchParams(search).getAll('type');
+  if (values.length === 0) return 'interactive-card';
+  if (values.length === 1 && values[0] === 'work-notification')
+    return 'work-notification';
+  throw new Error('通知链接类型无效，请从钉钉通知重新打开');
+}
+
 export function parseCardId(search: string): number {
   const raw = new URLSearchParams(search).get('id');
   if (!raw || !/^[1-9]\d*$/.test(raw)) {
@@ -75,7 +85,21 @@ export function createCardSession(
   };
 }
 
-export function detailStatusLabel(status: string) {
+export function detailStatusLabel(
+  status: string,
+  type: CardDetailType = 'interactive-card',
+) {
+  if (type === 'work-notification')
+    return (
+      (
+        {
+          ACCEPTED: '已受理',
+          SENDING: '处理中',
+          FAILED: '发送失败',
+          UNKNOWN: '结果待核实',
+        } as Record<string, string>
+      )[status] || '工作通知'
+    );
   return (
     (
       {

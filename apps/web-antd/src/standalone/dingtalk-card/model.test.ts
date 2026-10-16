@@ -3,11 +3,29 @@ import { describe, expect, it } from 'vitest';
 import {
   cardSessionKey,
   createCardSession,
+  detailStatusLabel,
+  parseCardDetailType,
   parseCardId,
   readCardSession,
 } from './model';
 
 describe('standalone card detail identity and session boundaries', () => {
+  it('uses separate record types and rejects unknown or ambiguous type parameters', () => {
+    expect(parseCardDetailType('?id=1')).toBe('interactive-card');
+    expect(parseCardDetailType('?type=work-notification&id=1')).toBe(
+      'work-notification',
+    );
+    for (const value of [
+      '?type=unknown',
+      '?type=',
+      '?type=work-notification&type=work-notification',
+    ])
+      expect(() => parseCardDetailType(value)).toThrow('类型无效');
+    expect(detailStatusLabel('ACCEPTED', 'work-notification')).toBe('已受理');
+    expect(detailStatusLabel('ACKNOWLEDGED', 'work-notification')).toBe(
+      '工作通知',
+    );
+  });
   it.each([
     '',
     '?id=',
