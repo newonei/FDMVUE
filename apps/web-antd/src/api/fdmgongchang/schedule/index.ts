@@ -59,7 +59,26 @@ export namespace FdmgongchangScheduleApi {
     /** 人员编号，逗号分隔。 */
     workerIds?: null | string;
     workerNames?: null | string;
+    /** 关联工序单的残次合计。 */
+    defectQuantity?: Decimal | null;
+    /** 排单时的数量；接单时按上道良品改小了数量才有。 */
+    plannedQuantity?: Decimal | null;
+    status?: null | TaskStatus;
+    claimedAt?: DateValue | null;
+    doneAt?: DateValue | null;
+    closedReason?: null | string;
+    /** 报工良品少于任务数量、还没处理的差额。 */
+    shortage?: Decimal | null;
+    shortageNote?: null | string;
+    shortageHandledAt?: DateValue | null;
+    /** 工作台用：上道还没报工，暂时不能接单的原因。 */
+    lockReason?: null | string;
+    /** 工作台用：按上道已报工的良品，现在最多能做多少。 */
+    available?: Decimal | null;
   }
+
+  /** 待领取 / 已接单 / 已报工 / 已关闭。 */
+  export type TaskStatus = 'CLAIMED' | 'CLOSED' | 'DONE' | 'OPEN';
 
   /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
   export interface FormOptions {
@@ -214,5 +233,26 @@ export function searchScheduleProducts(keyword: string) {
   return requestClient.get<FdmgongchangProductionOrderApi.Product[]>(
     '/fdmgongchang/schedule/products',
     { ...headers(), params: { keyword } },
+  );
+}
+
+/** 关闭还没报工的任务（不做了、排错了），要写原因。 */
+export function closeScheduleTask(data: { id: number; note: string }) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/schedule/task/close',
+    data,
+    headers(),
+  );
+}
+
+/** 处理报工少于任务数量的差额：记下再派或不补了。 */
+export function handleScheduleTaskShortage(data: {
+  id: number;
+  note?: string;
+}) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/schedule/task/shortage',
+    data,
+    headers(),
   );
 }

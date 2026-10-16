@@ -21,6 +21,14 @@ export const SCHEDULE_STATUS: Record<Api.Status, { color: string; label: string 
   GENERATING: { color: 'processing', label: 'AI 生成中' },
 };
 
+/** 排单任务：没派人的待领取，抢单或派单后已接单，报工后已报工；管理员可以关闭没报工的任务。 */
+export const TASK_STATUS: Record<Api.TaskStatus, { color: string; label: string }> = {
+  CLAIMED: { color: 'processing', label: '已接单' },
+  CLOSED: { color: 'default', label: '已关闭' },
+  DONE: { color: 'success', label: '已报工' },
+  OPEN: { color: 'warning', label: '待领取' },
+};
+
 export const RISK_TYPES: Record<string, 'error' | 'info' | 'warning'> = {
   HIGH: 'error',
   LOW: 'info',

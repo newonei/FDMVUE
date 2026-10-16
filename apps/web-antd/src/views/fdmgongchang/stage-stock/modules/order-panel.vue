@@ -8,7 +8,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 import { formatDateTime } from '@vben/utils';
 
-import { Button, Input, message, Select, Spin, Table, Tag } from 'ant-design-vue';
+import { Button, Image, Input, message, Select, Spin, Table, Tag } from 'ant-design-vue';
 
 import {
   getDefectStats,
@@ -575,6 +575,19 @@ const statCards = computed(() =>
               </div>
               <div v-if="record.remark" class="md:col-span-2">
                 <b class="mr-2">备注</b>{{ record.remark }}
+              </div>
+              <div v-if="record.issueSheetUrls" class="flex flex-wrap items-start gap-2 md:col-span-2">
+                <b class="mr-2">领料单</b>
+                <Image.PreviewGroup>
+                  <Image
+                    v-for="url in record.issueSheetUrls.split(',')"
+                    :key="url"
+                    :src="url"
+                    :width="72"
+                    alt="纸质领料单照片"
+                    class="rounded border border-border object-cover"
+                  />
+                </Image.PreviewGroup>
               </div>
               <div
                 v-if="record.status === 'VOIDED'"

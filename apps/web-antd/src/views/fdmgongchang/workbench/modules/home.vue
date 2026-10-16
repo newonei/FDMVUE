@@ -6,17 +6,21 @@ import { computed, ref, watch } from 'vue';
 
 import { formatDateTime } from '@vben/utils';
 
-import { Empty } from 'ant-design-vue';
+import { Empty, Spin } from 'ant-design-vue';
 
-import { formatQty } from '../../stage-stock/model';
+import { getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
+
+import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
 
 /**
- * 工人首页：顶部一行是我、今天的活、在做几单、今天计件；左边今天安排给我的活，
+ * 工人首页：顶部一行是我、我的任务、在做几单、今天计件；左边是「我的任务 / 任务大厅 / 领料清单」，
  * 右边我手上在做的单和自己开单。手机上上下排，电脑上左右两栏，一屏看全。
  */
 const emit = defineEmits<{
+  claimTask: [task: FdmgongchangScheduleApi.Task];
   continueOrder: [order: Api.Order];
+  releaseTask: [task: FdmgongchangScheduleApi.Task];
   startFree: [process: Api.Process];
   startTask: [task: FdmgongchangScheduleApi.Task, process: Api.Process];
   supplementOrder: [order: Api.Order];
@@ -44,11 +48,84 @@ const todayText = computed(() => {
   return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEK[d.getDay()]}`;
 });
 
-const percent = (t: FdmgongchangScheduleApi.Task) => {
-  const plan = Number(t.quantity);
-  return plan > 0 ? Math.min(100, Math.round((Number(t.actualQuantity) / plan) * 100)) : 0;
-};
 const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)));
+const hall = computed(() => (my.value.hall ?? []).filter((t) => processOf(t.process)));
+const dateText = (v: FdmgongchangScheduleApi.DateValue) => {
+  if (!v) return '';
+  const d = new Date(Array.isArray(v) ? `${v[0]}-${v[1]}-${v[2]}` : (v as number | string));
+  return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日`;
+};
+
+type Tab = 'hall' | 'mine' | 'picks';
+const tab = ref<Tab>('mine');
+const TABS: Array<{ count: () => number; key: Tab; label: string }> = [
+  { count: () => myTasks.value.length, key: 'mine', label: '我的任务' },
+  { count: () => hall.value.filter((t) => !t.lockReason).length, key: 'hall', label: '任务大厅' },
+  { count: () => 0, key: 'picks', label: '领料清单' },
+];
+
+/** 领料清单：同一行库存合在一起，注明是哪些任务要的。 */
+interface PickLine {
+  batchNo: string;
+  key: string;
+  location?: null | string;
+  name: string;
+  qty: number;
+  stage: string;
+  tasks: string[];
+  unit: string;
+}
+const labels = computed(() => makeLabels(job.options));
+const pickLoading = ref(false);
+const pickLines = ref<PickLine[]>([]);
+const pickHints = ref<string[]>([]);
+async function loadPicks() {
+  pickLoading.value = true;
+  try {
+    const list = await getWorkbenchPickList();
+    const lines = new Map<string, PickLine>();
+    const add = (key: string, base: Omit<PickLine, 'key' | 'qty' | 'tasks'>, qty: number, taskName: string) => {
+      const line = lines.get(key) ?? { ...base, key, qty: 0, tasks: [] };
+      line.qty += qty;
+      if (!line.tasks.includes(taskName)) line.tasks.push(taskName);
+      lines.set(key, line);
+    };
+    const hints: string[] = [];
+    for (const p of list) {
+      const taskName = `${labelOf(p.task.process)}${p.task.contractCode ? ` ${p.task.contractCode}` : ''}`;
+      for (const pick of p.picks) {
+        add(`s${pick.stock.id}`, {
+          batchNo: pick.stock.batchNo,
+          location: pick.stock.location,
+          name: attrSummary(pick.stock.stage, pick.stock.item, labels.value) || pick.stock.itemCode,
+          stage: stageLabel(pick.stock.stage),
+          unit: stageUnit(pick.stock.stage),
+        }, toNumber(pick.quantity) ?? 0, taskName);
+      }
+      for (const a of p.aux) {
+        const stock = a.stocks[0];
+        const qty = (toNumber(a.perUnit) ?? 0) * (toNumber(p.task.quantity) ?? 0);
+        if (stock && qty > 0) {
+          add(`s${stock.id}`, {
+            batchNo: stock.batchNo,
+            location: stock.location,
+            name: a.productName ?? a.productCode ?? '',
+            stage: '辅料',
+            unit: a.unit ?? '',
+          }, qty, taskName);
+        }
+      }
+      if (p.hint) hints.push(`${taskName}：${p.hint}`);
+    }
+    pickLines.value = [...lines.values()];
+    pickHints.value = hints;
+  } finally {
+    pickLoading.value = false;
+  }
+}
+watch(tab, (t) => {
+  if (t === 'picks') void loadPicks();
+});
 </script>
 
 <template>
@@ -63,7 +140,7 @@ const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)
       </div>
       <div class="flex items-center gap-5 text-right">
         <div class="flex flex-col">
-          <span class="text-xs text-muted-foreground">今天的活</span>
+          <span class="text-xs text-muted-foreground">我的任务</span>
           <b class="text-lg tabular-nums">{{ myTasks.length }}</b>
         </div>
         <div class="flex flex-col">
@@ -83,38 +160,118 @@ const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)
 
     <main v-else class="grid flex-1 grid-cols-1 content-start gap-4 p-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <section class="flex min-w-0 flex-col gap-2">
-        <h2 class="m-0 text-sm font-bold">今天安排给我的活</h2>
-        <p v-if="myTasks.length === 0" class="m-0 rounded-lg bg-card p-3 text-sm text-muted-foreground">
-          今天还没有给你排活。有活要做，在「自己开单」里选工序开单。
-        </p>
-        <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-          <div v-for="task in myTasks" :key="task.id" class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
-            <div class="flex min-w-0 flex-1 flex-col">
-              <span class="flex items-center gap-1.5 text-sm font-semibold">
-                <span class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
-                <span class="truncate">{{ [task.product, task.spec].filter(Boolean).join(' · ') || `${labelOf(task.process)}任务` }}</span>
-              </span>
-              <span class="text-xs text-muted-foreground">{{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }}</span>
-            </div>
-            <div class="flex w-40 shrink-0 flex-col gap-1">
-              <span class="flex justify-between text-xs">
-                <span class="tabular-nums text-muted-foreground">{{ formatQty(task.actualQuantity) }} / {{ formatQty(task.quantity) }} {{ task.unit }}</span>
-                <b class="text-primary">{{ percent(task) }}%</b>
-              </span>
-              <div class="h-1.5 overflow-hidden rounded-full bg-muted">
-                <div :style="{ width: `${percent(task)}%` }" class="h-1.5 bg-primary"></div>
+        <div class="flex gap-1 rounded-lg bg-muted p-1" role="tablist">
+          <button
+            v-for="t in TABS"
+            :key="t.key"
+            :aria-selected="tab === t.key"
+            :class="tab === t.key ? 'bg-card font-semibold text-foreground shadow-sm' : 'text-muted-foreground'"
+            class="h-9 flex-1 rounded-md text-sm"
+            role="tab"
+            type="button"
+            @click="tab = t.key"
+          >
+            {{ t.label }}<span v-if="t.count() > 0" class="ml-1 tabular-nums">{{ t.count() }}</span>
+          </button>
+        </div>
+
+        <!-- 我的任务：派给我或我接的，做完了下班前报工 -->
+        <template v-if="tab === 'mine'">
+          <p v-if="myTasks.length === 0" class="m-0 rounded-lg bg-card p-3 text-sm text-muted-foreground">
+            手上没有任务。去「任务大厅」接单，或等班组长派单。
+          </p>
+          <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            <div v-for="task in myTasks" :key="task.id" class="flex flex-col gap-1.5 px-3 py-2.5">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <div class="flex min-w-0 flex-1 flex-col">
+                  <span class="flex items-center gap-1.5 text-sm font-semibold">
+                    <span class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
+                    <span class="truncate">{{ [task.product, task.spec].filter(Boolean).join(' · ') || `${labelOf(task.process)}任务` }}</span>
+                  </span>
+                  <span class="text-xs text-muted-foreground">
+                    {{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }} · {{ dateText(task.workDate) }} ·
+                    <b class="text-foreground">{{ formatQty(task.quantity) }} {{ task.unit }}</b>
+                    <template v-if="task.plannedQuantity"> （排单 {{ formatQty(task.plannedQuantity) }}，按上道良品改的）</template>
+                  </span>
+                </div>
+                <button
+                  class="h-9 shrink-0 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground"
+                  type="button"
+                  @click="emit('startTask', task, processOf(task.process)!)"
+                >
+                  做完了，报工
+                </button>
+              </div>
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span v-if="task.lockReason" class="text-warning">{{ task.lockReason }}</span>
+                <span v-else class="text-muted-foreground">{{ task.workerNames }}</span>
+                <button
+                  v-if="task.orderCount === 0"
+                  class="shrink-0 text-muted-foreground hover:text-destructive"
+                  type="button"
+                  @click="emit('releaseTask', task)"
+                >
+                  退单
+                </button>
               </div>
             </div>
-            <button
-              :class="Number(task.actualQuantity) > 0 ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'"
-              class="h-9 shrink-0 rounded-md px-3 text-sm font-semibold"
-              type="button"
-              @click="emit('startTask', task, processOf(task.process)!)"
-            >
-              {{ Number(task.actualQuantity) > 0 ? '接着做' : '开始做' }}
-            </button>
           </div>
-        </div>
+        </template>
+
+        <!-- 任务大厅：没人接的任务，先到先得；下道工序要等上道报工 -->
+        <template v-else-if="tab === 'hall'">
+          <p v-if="hall.length === 0" class="m-0 rounded-lg bg-card p-3 text-sm text-muted-foreground">现在没有可以接的任务。</p>
+          <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            <div v-for="task in hall" :key="task.id" class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
+              <div class="flex min-w-0 flex-1 flex-col">
+                <span class="flex items-center gap-1.5 text-sm font-semibold">
+                  <span class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
+                  <span class="truncate">{{ [task.product, task.spec].filter(Boolean).join(' · ') || `${labelOf(task.process)}任务` }}</span>
+                </span>
+                <span class="text-xs text-muted-foreground">
+                  {{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }} · {{ dateText(task.workDate) }} ·
+                  <b class="text-foreground">{{ formatQty(task.quantity) }} {{ task.unit }}</b>
+                  <template v-if="!task.lockReason && task.available !== null && task.available !== undefined && Number(task.available) < Number(task.quantity)">
+                    · 上道已报，现在能做 {{ formatQty(task.available) }}
+                  </template>
+                </span>
+                <span v-if="task.lockReason" class="text-xs text-warning">{{ task.lockReason }}</span>
+              </div>
+              <button
+                :disabled="!!task.lockReason"
+                class="h-9 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
+                type="button"
+                @click="emit('claimTask', task)"
+              >
+                接单
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- 领料清单：手上所有任务合起来要领哪些料，拿着去领 -->
+        <template v-else>
+          <Spin :spinning="pickLoading">
+            <p v-if="!pickLoading && pickLines.length === 0" class="m-0 rounded-lg bg-card p-3 text-sm text-muted-foreground">
+              {{ myTasks.length === 0 ? '手上没有任务。' : '没有算出要领的料（密炼按配方领、贴合要自己选正反面）。' }}
+            </p>
+            <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+              <div v-for="line in pickLines" :key="line.key" class="flex items-center gap-3 px-3 py-2">
+                <div class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-sm font-semibold">{{ line.name }}</span>
+                  <span class="truncate text-xs text-muted-foreground">
+                    {{ line.stage }} · 批次 {{ line.batchNo }}<template v-if="line.location"> · {{ line.location }}</template> · {{ line.tasks.join('、') }}
+                  </span>
+                </div>
+                <b class="shrink-0 tabular-nums">{{ formatQty(line.qty) }} {{ line.unit }}</b>
+              </div>
+            </div>
+            <ul v-if="pickHints.length > 0" class="m-0 mt-2 list-disc pl-5 text-xs text-warning">
+              <li v-for="h in pickHints" :key="h">{{ h }}</li>
+            </ul>
+            <p class="m-0 mt-2 text-xs text-muted-foreground">只是按任务算的建议，库存不会扣；实际领了多少，报工时照实填。</p>
+          </Spin>
+        </template>
       </section>
 
       <div class="flex min-w-0 flex-col gap-4">

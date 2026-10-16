@@ -389,6 +389,8 @@ export namespace FdmgongchangStageStockApi {
     /** 包装完工回写到合同的数量。 */
     productionWriteback?: Decimal | null;
     remark?: null | string;
+    /** 报工时上传的纸质领料单照片（逗号分隔）。 */
+    issueSheetUrls?: null | string;
     /** 这张单带出的计件（详情接口返回）。 */
     pieceworks?: Array<{
       amount: Decimal;
