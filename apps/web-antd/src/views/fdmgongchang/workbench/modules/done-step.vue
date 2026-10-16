@@ -21,9 +21,10 @@ const percent = computed(() => {
       <div class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <svg aria-label="提交成功" fill="none" height="30" role="img" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6" viewBox="0 0 24 24" width="30"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
       </div>
-      <h1 class="m-0 text-xl font-bold">{{ job.result.good > 0 ? '报好了' : job.supplement ? (job.order?.status === 'COMPLETED' ? '补登好了' : '补好了') : '领好了' }}</h1>
+      <h1 class="m-0 text-xl font-bold">{{ job.prepare ? '报工好了' : job.result.good > 0 ? '报好了' : job.supplement ? (job.order?.status === 'COMPLETED' ? '补登好了' : '补好了') : '领好了' }}</h1>
       <p class="m-0 text-sm leading-relaxed text-muted-foreground">
-        <template v-if="job.result.good > 0">{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已经进库存<br />{{ job.finish || job.createFinish ? '这张单已结束' : '单子还留着，下次接着报' }}</template>
+        <template v-if="job.prepare">任务已报工，料按实际领的扣了库存<template v-if="job.result.good > 0">，{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已经进库存</template><br />下一道工序现在可以接单了</template>
+        <template v-else-if="job.result.good > 0">{{ formatQty(job.result.good) }} {{ output?.unit }}{{ output?.label }}已经进库存<br />{{ job.finish || job.createFinish ? '这张单已结束' : '单子还留着，下次接着报' }}</template>
         <template v-else-if="job.supplement && job.order?.status === 'COMPLETED'">补登的料已经算进 {{ job.order?.orderNo }} 的领料</template>
         <template v-else-if="job.supplement">补的料已经加到 {{ job.order?.orderNo }}，做完回来点「做完了，报数量」</template>
         <template v-else>料已经从库存扣掉，做完回来点「做完了，报数量」</template>
@@ -37,7 +38,7 @@ const percent = computed(() => {
           <span class="text-xs text-muted-foreground">今天累计</span>
           <span class="text-lg font-bold">¥{{ formatQty(job.my?.todayAmount) }}</span>
         </div>
-        <div v-if="task" class="col-span-2 flex flex-col gap-1.5">
+        <div v-if="task && !job.prepare" class="col-span-2 flex flex-col gap-1.5">
           <div class="flex justify-between text-sm">
             <span class="text-muted-foreground">{{ task.contractCode || '这个活' }}进度</span>
             <b>{{ formatQty(task.actualQuantity) }} / {{ formatQty(task.quantity) }} {{ task.unit }}</b>
@@ -50,7 +51,7 @@ const percent = computed(() => {
     </main>
     <footer class="grid grid-cols-1 gap-2 px-4 pb-4 pt-3 sm:grid-cols-2">
       <button class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('home')">看下一个活</button>
-      <button class="h-10 rounded-md border border-border bg-card text-sm font-semibold text-foreground" type="button" @click="emit('again')">再领一批料</button>
+      <button v-if="!job.prepare" class="h-10 rounded-md border border-border bg-card text-sm font-semibold text-foreground" type="button" @click="emit('again')">再领一批料</button>
     </footer>
   </div>
 </template>

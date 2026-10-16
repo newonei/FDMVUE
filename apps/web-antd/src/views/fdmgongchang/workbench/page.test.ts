@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkbenchPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  claim: vi.fn(),
   create: vi.fn(),
+  prepare: vi.fn(),
+  report: vi.fn(),
   my: vi.fn(),
   options: vi.fn(),
   order: vi.fn(),
@@ -24,7 +27,20 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
   }),
   setCurrentFactoryId: vi.fn(),
 }));
+// 领料单照片：点一下就当作上传好了一张
+vi.mock('#/components/upload/image-upload.vue', async () => {
+  const { defineComponent, h } = await import('vue');
+  return {
+    default: defineComponent({
+      emits: ['update:value'],
+      setup(_, { emit }) {
+        return () => h('button', { onClick: () => emit('update:value', ['https://f/sheet.jpg']), type: 'button' }, '模拟拍照');
+      },
+    }),
+  };
+});
 vi.mock('#/api/fdmgongchang/workbench', () => ({
+  claimWorkbenchTask: mocks.claim,
   createWorkbenchOrder: mocks.create,
   getWorkbench: mocks.my,
   getWorkbenchMates: vi.fn().mockResolvedValue([]),
@@ -32,8 +48,12 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchOrder: mocks.order,
   getWorkbenchRecipePlan: mocks.plan,
   getWorkbenchStock: mocks.stock,
+  getWorkbenchPickList: vi.fn().mockResolvedValue([]),
   matchWorkbenchWage: vi.fn().mockResolvedValue([]),
+  prepareWorkbenchTask: mocks.prepare,
+  releaseWorkbenchTask: vi.fn(),
   reportWorkbenchOrder: vi.fn(),
+  reportWorkbenchTask: mocks.report,
   returnWorkbenchMaterial: vi.fn(),
   supplementWorkbenchOrder: mocks.supplement,
 }));
@@ -79,19 +99,53 @@ const my: Api.My = {
       sources: ['BOARD'],
     },
   ],
+  hall: [
+    {
+      actualQuantity: 0,
+      available: 300,
+      contractCode: 'HT-002',
+      id: 32,
+      orderCount: 0,
+      process: 'SLICE',
+      product: '蓝色瑜伽垫',
+      quantity: 400,
+      scheduleId: 9,
+      sequence: 2,
+      status: 'OPEN',
+      unit: '片',
+      workDate: '2026-10-11',
+    },
+    {
+      actualQuantity: 0,
+      contractCode: 'HT-003',
+      id: 33,
+      lockReason: '等上道「密炼挤出发泡」报工后才能接',
+      orderCount: 0,
+      process: 'SLICE',
+      product: '绿色瑜伽垫',
+      quantity: 100,
+      scheduleId: 9,
+      sequence: 3,
+      status: 'OPEN',
+      unit: '片',
+      workDate: '2026-10-11',
+    },
+  ],
   tasks: [
     {
-      actualQuantity: 236,
+      actualQuantity: 0,
       contractCode: 'HT-001',
       id: 31,
-      orderCount: 1,
+      orderCount: 0,
       process: 'SLICE',
       product: '紫色瑜伽垫',
       quantity: 400,
       scheduleId: 9,
       sequence: 1,
+      status: 'CLAIMED',
       unit: '片',
       workDate: '2026-10-11',
+      workerNames: '张三',
     },
   ],
   team: '开片一组',
@@ -153,7 +207,17 @@ describe('workbench page', () => {
     vi.clearAllMocks();
   });
 
-  it('shows today for the worker and issues material for an assigned task', async () => {
+  it('reports a task in one go: actual material, output, piecework and the paper issue sheet', async () => {
+    mocks.prepare.mockResolvedValue({
+      aux: [],
+      picks: [{ quantity: 50, stock: { batchNo: 'MB261007-01', id: 11, item: { color: 'PU', length: 190, material: 'TPE', thickness: 4.8, width: 130 }, itemCode: 'BC-1', location: '板材区', quantity: 180, stage: 'BOARD' } }],
+      required: 50,
+      sourceStage: 'BOARD',
+      target: 'TPE · 紫色 · 183×61×0.6cm',
+      targetAttrs: { color: 'PU', length: 183, material: 'TPE', thickness: 0.6, width: 61 },
+      task: my.tasks[0],
+    });
+    mocks.report.mockResolvedValue(70);
     const host = document.createElement('div');
     document.body.append(host);
     const app = createApp(WorkbenchPage);
@@ -168,34 +232,67 @@ describe('workbench page', () => {
     expect(text).toContain('订单 HT-001');
     expect(text).toContain('已领 120 张板材');
 
-    clickButton('接着做');
+    clickButton('做完了，报工');
     await flush();
-    expect(mocks.stock).toHaveBeenCalledWith('BOARD');
-    expect(document.body.textContent).toContain('开片 · 第 1 步 领材料');
-    clickButton('紫色');
+    expect(mocks.prepare).toHaveBeenCalledWith(31);
+    expect(document.body.textContent).toContain('开片 · 第 1 步 实际领了多少料');
+    expect(document.body.textContent).toContain('系统按任务算好要领 50 张');
+    // 对照实际：多领了 2 张
+    fill('pick-11', 52);
     await flush();
-    // 选上后数量在同一行填，右边清单显示这种料领多少
-    clickButton('下一步');
+    clickButton('下一步：报数量');
     await flush();
     expect(mocks.create).not.toHaveBeenCalled();
-    fill('pick-11', 100);
+    // 产出行的编号是自动生成的，取第一行
+    fill(document.querySelector('[id^="good-"]')!.id, 380);
+    fill(document.querySelector('[id^="bad-"]')!.id, 6);
     await flush();
-    expect(document.body.textContent).toContain('本次领料');
     clickButton('下一步');
     await flush();
-    expect(document.body.textContent).toContain('100 张');
-    clickButton('确认领料，去干活');
+    expect(document.body.textContent).toContain('计件和领料单');
+    clickButton('报工');
     await flush();
-    expect(mocks.create).toHaveBeenCalledWith(
+    expect(mocks.report).not.toHaveBeenCalled();
+    clickButton('模拟拍照');
+    await flush();
+    clickButton('报工');
+    await flush();
+    expect(mocks.report).toHaveBeenCalledWith(
       expect.objectContaining({
-        finish: false,
-        inputs: [{ laminationSide: undefined, quantity: 100, stockId: 11 }],
-        process: 'SLICE',
-        scheduleTaskId: 31,
+        inputs: [{ laminationSide: undefined, quantity: 52, stockId: 11 }],
+        issueSheetUrls: ['https://f/sheet.jpg'],
+        // 片材规格按订单带出：长宽同板材，厚度是成品厚
+        outputs: [expect.objectContaining({ attrs: expect.objectContaining({ length: 190, thickness: 0.6, width: 130 }), defectQuantity: 6, goodQuantity: 380 })],
         sourceStage: 'BOARD',
+        taskId: 31,
       }),
     );
-    expect(document.body.textContent).toContain('领好了');
+    expect(document.body.textContent).toContain('报工好了');
+    expect(document.body.textContent).not.toContain('再领一批料');
+  });
+
+  it('claims an open task from the hall; tasks waiting for the upstream cannot be claimed', async () => {
+    mocks.claim.mockResolvedValue(true);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(WorkbenchPage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    clickButton('任务大厅1');
+    await flush();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('订单 HT-002');
+    expect(text).toContain('上道已报，现在能做 300');
+    expect(text).toContain('等上道「密炼挤出发泡」报工后才能接');
+    const buttons = [...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === '接单');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[1]!.disabled).toBe(true);
+    buttons[0]!.click();
+    await flush();
+    expect(mocks.claim).toHaveBeenCalledWith(32);
+    expect(mocks.my).toHaveBeenCalledTimes(2);
   });
 
   it('lets a worker add the material they ran short of to the order in hand', async () => {
@@ -325,7 +422,7 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('接着做');
+    clickButton('开一张');
     await flush();
     const cards = [...document.querySelectorAll('button')].filter((b) => b.textContent?.includes('批次 B'));
     cards[0]!.click();

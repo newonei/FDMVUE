@@ -178,6 +178,25 @@ describe('schedule page', () => {
           scheduleId: 12,
           sequence: 1,
           unit: '片',
+          status: 'CLAIMED',
+          workDate: '2026-10-10',
+          workerIds: '2',
+          workerNames: '张三',
+        },
+        {
+          actualQuantity: 160,
+          contractCode: 'HT-001',
+          defectQuantity: 3,
+          id: 32,
+          orderCount: 1,
+          process: 'CUT',
+          product: '紫色瑜伽垫',
+          quantity: 200,
+          scheduleId: 12,
+          sequence: 2,
+          shortage: 40,
+          status: 'DONE',
+          unit: '片',
           workDate: '2026-10-10',
           workerIds: '2',
           workerNames: '张三',
@@ -223,7 +242,11 @@ describe('schedule page', () => {
     const item = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('PB20261010-001'));
     item!.click();
     await flush();
-    clickButton('改人/改量');
+    // 已报工的任务显示差额待处理，不能再改派、关闭
+    expect(document.body.textContent).toContain('已报工');
+    expect(document.body.textContent).toContain('报工差 40 片，待处理');
+    expect([...document.querySelectorAll('button')].filter((b) => b.textContent?.replaceAll(/\s/g, '') === '关闭')).toHaveLength(1);
+    clickButton('改派/改量');
     await flush();
     const saves = [...document.querySelectorAll('button')].filter((b) => b.textContent?.replaceAll(/\s/g, '') === '保存');
     saves.at(-1)!.click();
