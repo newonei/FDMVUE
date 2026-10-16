@@ -7,6 +7,20 @@ function response(data: unknown, code = 0) {
 }
 
 describe('standalone card detail API', () => {
+  it('reads a work-notification record from its own authorized endpoint', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(response({ id: 1, content: '独立通知记录' }));
+    await createCardApi('/admin-api', fetcher).detail(
+      1,
+      'token',
+      1,
+      'work-notification',
+    );
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      '/admin-api/fdmdingtalk/work-notification/my-detail?id=1',
+    );
+  });
   it('resolves the exact current hostname without a default tenant fallback', async () => {
     const fetcher = vi.fn().mockResolvedValue(response({ id: 1 }));
     const api = createCardApi('/admin-api/', fetcher);

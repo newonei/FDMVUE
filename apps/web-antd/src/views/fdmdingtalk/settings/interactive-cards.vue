@@ -254,7 +254,7 @@ onMounted(async () => {
 <template>
   <div class="interactive-cards">
     <div class="section-heading">
-      <h2>通知与卡片内确认 <Tag color="blue">应用机器人单聊</Tag></h2>
+      <h2>机器人通知与卡片内确认 <Tag color="blue">应用机器人单聊</Tag></h2>
       <p>用户可直接在钉钉卡片内点击“我已知晓”；详情按钮进入系统中仅本人可见的通知内容。</p>
     </div>
     <Alert v-if="pageError" class="mb-4" type="error" show-icon :message="pageError">

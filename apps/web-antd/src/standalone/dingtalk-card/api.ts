@@ -1,4 +1,4 @@
-import type { CardDetail, PublicConfig } from './model';
+import type { CardDetail, CardDetailType, PublicConfig } from './model';
 
 interface Envelope<T> {
   code: number;
@@ -73,9 +73,14 @@ export function createCardApi(apiBase: string, fetcher: typeof fetch = fetch) {
         undefined,
         { corpId, code },
       ),
-    detail: (tenantId: number, accessToken: string, id: number) =>
+    detail: (
+      tenantId: number,
+      accessToken: string,
+      id: number,
+      type: CardDetailType = 'interactive-card',
+    ) =>
       request<CardDetail>(
-        `/fdmdingtalk/interactive-card/my-detail?id=${id}`,
+        `/fdmdingtalk/${type}/my-detail?id=${id}`,
         tenantId,
         accessToken,
       ),
