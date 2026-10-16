@@ -7,13 +7,14 @@ import {
   sendDingTalkWorkNotificationDetail,
 } from './index';
 
-const { post, get, globalPost } = vi.hoisted(() => ({
+const { post, get, globalPost, access } = vi.hoisted(() => ({
   post: vi.fn(),
   get: vi.fn(),
   globalPost: vi.fn(),
+  access: { accessToken: 'test-token' },
 }));
 vi.mock('@vben/stores', () => ({
-  useAccessStore: () => ({ accessToken: 'test-token' }),
+  useAccessStore: () => access,
 }));
 vi.mock('#/api/request', () => ({
   baseRequestClient: { post },
@@ -25,6 +26,7 @@ describe('work notification transport does not replay sends', () => {
     post.mockReset();
     get.mockReset();
     globalPost.mockReset();
+    access.accessToken = 'test-token';
   });
   const card = {
     title: '通知',
@@ -32,6 +34,50 @@ describe('work notification transport does not replay sends', () => {
     detailUrl: 'https://example.com',
     buttonTitle: '详情',
   };
+  it('waits for GET authentication and uses the token refreshed by that GET', async () => {
+    let authenticate: (() => void) | undefined;
+    get.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          authenticate = () => {
+            access.accessToken = 'refreshed-token';
+            resolve();
+          };
+        }),
+    );
+    post.mockResolvedValue({ data: '{"code":0,"data":123}' });
+    const sending = sendDingTalkWorkNotification({
+      systemUserIds: [164],
+      card,
+    });
+    expect(get).toHaveBeenCalledWith('/system/auth/get-permission-info', {
+      silent: true,
+    });
+    expect(post).not.toHaveBeenCalled();
+    authenticate?.();
+    await expect(sending).resolves.toBe('123');
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0]?.[2].headers.Authorization).toBe(
+      'Bearer refreshed-token',
+    );
+  });
+  it('does not send either notification type when GET authentication fails', async () => {
+    get.mockRejectedValue(new Error('authentication failed'));
+    await expect(
+      sendDingTalkWorkNotification({ systemUserIds: [164], card }),
+    ).rejects.toThrow('authentication failed');
+    await expect(
+      sendDingTalkWorkNotificationDetail({
+        requestKey: 'uuid',
+        systemUserId: 164,
+        title: '通知',
+        description: '说明',
+        buttonTitle: '详情',
+      }),
+    ).rejects.toThrow('authentication failed');
+    expect(post).not.toHaveBeenCalled();
+    expect(globalPost).not.toHaveBeenCalled();
+  });
   it('uses the raw base client once and preserves the task ID before JSON number parsing', async () => {
     post.mockResolvedValue({ data: '{"code":0,"data":9223372036854775807}' });
     expect(
@@ -50,14 +96,18 @@ describe('work notification transport does not replay sends', () => {
       ),
     ).toBe('{"data":9223372036854775807}');
   });
-  it('does not refresh and replay a send after a 401 or uncertain network failure', async () => {
-    post.mockRejectedValue(new Error('request failed'));
-    await expect(
-      sendDingTalkWorkNotification({ systemUserIds: [164], card }),
-    ).rejects.toThrow('request failed');
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(globalPost).not.toHaveBeenCalled();
-  });
+  it.each([new Error('request failed'), { response: { status: 401 } }])(
+    'does not replay a POST after it fails: %s',
+    async (error) => {
+      post.mockRejectedValue(error);
+      await expect(
+        sendDingTalkWorkNotification({ systemUserIds: [164], card }),
+      ).rejects.toBe(error);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(globalPost).not.toHaveBeenCalled();
+    },
+  );
   it('uses a dedicated lightweight record endpoint and keeps UNKNOWN as unknown', async () => {
     post.mockResolvedValue({
       data: '{"code":0,"data":{"id":1,"taskId":null,"status":"UNKNOWN","detailUrl":"https://example.com/dingtalk-card.html?type=work-notification&id=1"}}',
