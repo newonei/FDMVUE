@@ -12,6 +12,15 @@ import { requestClient } from '#/api/request';
  * "按手机号匹配 system_users、不自动建号" 的钉钉登录链路。
  */
 export namespace DingTalkAuthApi {
+  /** 公开的当前租户应用配置，永不返回 AppSecret。 */
+  export interface PublicConfig {
+    enabled: boolean;
+    corpId: string;
+    clientId: string;
+    agentId?: string;
+    frontendBaseUrl?: string;
+  }
+
   /** OAuth2 网页登录请求体 */
   export interface OAuthLoginParams {
     code: string;
@@ -23,6 +32,13 @@ export namespace DingTalkAuthApi {
     code: string;
     corpId: string;
   }
+}
+
+export function getDingTalkPublicConfig() {
+  return requestClient.get<DingTalkAuthApi.PublicConfig>(
+    '/fdmdingtalk/auth/public-config',
+    { silent: true },
+  );
 }
 
 /**

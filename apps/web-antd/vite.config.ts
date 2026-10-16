@@ -6,6 +6,16 @@ export default defineConfig(async () => {
   return {
     application: {},
     vite: {
+      build: {
+        rolldownOptions: {
+          input: {
+            main: fileURLToPath(new URL('index.html', import.meta.url)),
+            dingtalkCard: fileURLToPath(
+              new URL('dingtalk-card.html', import.meta.url),
+            ),
+          },
+        },
+      },
       resolve: {
         alias: [
           // 官方 v2026.09 的财务页面引用了不存在的 auxiliary-select-modal.vue（应为 auxiliary-item-select.vue），

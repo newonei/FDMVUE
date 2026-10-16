@@ -9,6 +9,7 @@ import { message, Spin } from 'ant-design-vue';
 
 import { dingtalkLogin } from '#/api/fdmdingtalk/auth';
 import { useAuthStore } from '#/store';
+import { safeDingTalkRedirect } from '#/utils/dingtalk';
 
 /**
  * 钉钉 OAuth2 网页授权回调页（路径 A 专用）
@@ -60,10 +61,12 @@ onMounted(async () => {
 
     message.success('钉钉登录成功');
     // 跳到首页（或 ?redirect= 指定的页面）
-    const target = redirect.startsWith('/')
-      ? redirect
-      : userInfo?.homePath || preferences.app.defaultHomePath;
-    window.location.href = target;
+    await router.replace(
+      safeDingTalkRedirect(
+        redirect,
+        userInfo?.homePath || preferences.app.defaultHomePath,
+      ),
+    );
   } catch (error: any) {
     status.value = 'error';
     errorMsg.value = error?.message || '钉钉登录失败';
