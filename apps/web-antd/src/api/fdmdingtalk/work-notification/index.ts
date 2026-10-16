@@ -51,6 +51,8 @@ export namespace DingTalkWorkNotificationApi {
 }
 
 async function postOnce(path: string, payload: unknown) {
+  // Refresh an expired session through a safe GET before the one-shot send.
+  await requestClient.get('/system/auth/get-permission-info', { silent: true });
   const accessToken = useAccessStore().accessToken;
   if (!accessToken) throw new Error('登录已过期，请重新登录后核对本次发送状态');
   // The base client has no refresh/replay response interceptor. Never replay a POST.
