@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   factoryPage: vi.fn(),
   get: vi.fn(),
   lastRoute: vi.fn().mockResolvedValue(null),
+  materialPlan: vi.fn(),
+  saveMaterial: vi.fn(),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
     defaultFactoryId: 1,
@@ -45,6 +47,9 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
   getLastRoute: mocks.lastRoute,
+  getMaterialPlan: mocks.materialPlan,
+  getRecipeOptions: vi.fn().mockResolvedValue([{ recipeCode: 'REC-001', recipeName: '常规款（密度110）' }]),
+  saveItemMaterial: mocks.saveMaterial,
   searchAuxProducts: vi.fn().mockResolvedValue([]),
   getRouteOptions: vi.fn().mockResolvedValue({
     processes: [
@@ -202,6 +207,45 @@ describe('production order page', () => {
     mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 });
     mocks.get.mockResolvedValue(order);
     mocks.accept.mockResolvedValue(true);
+    const board = {
+      boards: 32,
+      kg: 576,
+      kgPerBoard: 18,
+      layers: 8,
+      name: '本厂密炼出板',
+      perBoard: 16,
+      piecesPerLayer: 2,
+      size: '210×136×4.8',
+      source: 'SETTING' as const,
+      utilization: 93.8,
+    };
+    mocks.materialPlan.mockResolvedValue({
+      items: [
+        {
+          batchKg: 144,
+          batches: 4,
+          board,
+          candidates: [board],
+          itemId: 91,
+          productName: product.displayName,
+          quantity: 500,
+          raws: [{ available: 300, rawMaterialCode: 'MAT-TPE', rawMaterialName: 'TPE', required: 540, shortage: 240 }],
+          rawKg: 576,
+          recipeCode: 'REC-001',
+          recipeName: '常规款（密度110）',
+          recipeSuggested: true,
+          remaining: 500,
+          stock: [],
+          targetSize: '183×61×0.6',
+          unit: '条',
+          warnings: [],
+        },
+      ],
+      orderId: 9,
+      orderNo: order.orderNo,
+      shortage: true,
+      totals: [],
+    });
     unmount = mount();
     await flush();
     expect(mocks.setFactory).toHaveBeenCalledWith(1);
@@ -212,6 +256,14 @@ describe('production order page', () => {
     await flush();
     expect(document.body.textContent).toContain('接单处理');
     expect(document.body.textContent).toContain('工艺 · 单层散装');
+    // 接单前就能看用料逆推：板材张数、原料 kg、锅数，缺的原料标出来
+    expect(mocks.materialPlan).toHaveBeenCalledWith(9);
+    const plan = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
+    expect(plan).toContain('用料逆推');
+    expect(plan).toContain('按上次建议');
+    expect(plan).toContain('一张出16条→要32张');
+    expect(plan).toContain('原料576kg（每张18kg）≈密炼4锅');
+    expect(plan).toContain('240kg');
     button('接单').click();
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
