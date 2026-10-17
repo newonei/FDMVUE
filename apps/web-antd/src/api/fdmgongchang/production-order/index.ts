@@ -56,6 +56,10 @@ export namespace FdmgongchangProductionOrderApi {
     routeId?: null | number;
     /** 路线名称快照；调整过工序时带「已调整」。 */
     routeName?: null | string;
+    /** 工厂选的配方（用料逆推）。 */
+    recipeCode?: null | string;
+    /** 工厂选的模具档案；空 = 本厂密炼出板规格。 */
+    mouldProfileId?: null | number;
     size?: null | string;
     specification?: null | string;
     /** 每道工序的进度（不含作废的工序单）。 */
@@ -194,6 +198,89 @@ export namespace FdmgongchangProductionOrderApi {
     id: string;
     isDefault: boolean;
     name: string;
+  }
+}
+
+/** 用料逆推：按订单规格倒推板材规格、张数、原料 kg。 */
+export namespace FdmgongchangMaterialPlanApi {
+  export interface Board {
+    boards: number;
+    /** 每张板要多少原料 kg；没选配方或档案没填投料量时为空。 */
+    kg?: null | number | string;
+    kgPerBoard?: null | number | string;
+    layers: number;
+    mouldProfileId?: null | number;
+    name: string;
+    perBoard: number;
+    piecesPerLayer: number;
+    size: string;
+    /** SETTING 本厂密炼出板规格 / MOULD 模具档案 */
+    source: 'MOULD' | 'SETTING';
+    utilization?: null | number | string;
+  }
+
+  export interface RawLine {
+    available: number | string;
+    rawMaterialCode: string;
+    rawMaterialName?: null | string;
+    required: number | string;
+    shortage: number | string;
+  }
+
+  export interface StockCover {
+    itemCode: string;
+    perUnit: number;
+    pieces: number | string;
+    quantity: number | string;
+    stage: string;
+    stageLabel: string;
+    unit?: null | string;
+  }
+
+  export interface ItemPlan {
+    batches?: null | number | string;
+    batchKg?: null | number | string;
+    board?: Board | null;
+    candidates: Board[];
+    itemId: number;
+    mouldProfileId?: null | number;
+    productName: string;
+    productType?: null | string;
+    quantity: number | string;
+    raws: RawLine[];
+    rawKg?: null | number | string;
+    recipeCode?: null | string;
+    recipeName?: null | string;
+    /** 配方是按这个产品上次用的建议的，还没选过。 */
+    recipeSuggested?: boolean | null;
+    remaining: number | string;
+    stock: StockCover[];
+    stockPieces?: null | number | string;
+    targetSize?: null | string;
+    unit?: null | string;
+    warnings: string[];
+  }
+
+  export interface Plan {
+    items: ItemPlan[];
+    orderId: number;
+    orderNo: string;
+    shortage: boolean;
+    totals: RawLine[];
+  }
+
+  export interface RecipeOption {
+    density?: null | string;
+    productType?: null | string;
+    recipeCode: string;
+    recipeName: string;
+    yieldRate?: null | number | string;
+  }
+
+  export interface ItemMaterialReq {
+    itemId: number;
+    mouldProfileId?: null | number;
+    recipeCode?: null | string;
   }
 }
 
@@ -337,6 +424,31 @@ export function createDelivery(
 /** 作废交货单：采购仓库扣回、工厂库存退回、扣回完成数量。 */
 export function voidDelivery(data: { id: number; reason: string }) {
   return requestClient.post<boolean>(`${BASE}/delivery/void`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 用料逆推：每条明细用什么板材、几张、多少原料，以及整张单的原料合计。 */
+export function getMaterialPlan(id: number) {
+  return requestClient.get<FdmgongchangMaterialPlanApi.Plan>(
+    `${BASE}/material-plan`,
+    { headers: factoryHeaders(), params: { id } },
+  );
+}
+
+/** 用料逆推可选的配方（启用的）。 */
+export function getRecipeOptions() {
+  return requestClient.get<FdmgongchangMaterialPlanApi.RecipeOption[]>(
+    `${BASE}/recipe-options`,
+    { headers: factoryHeaders() },
+  );
+}
+
+/** 给明细选配方和板材规格。 */
+export function saveItemMaterial(
+  data: FdmgongchangMaterialPlanApi.ItemMaterialReq,
+) {
+  return requestClient.post<boolean>(`${BASE}/item-material`, data, {
     headers: factoryHeaders(),
   });
 }

@@ -19,6 +19,7 @@ import {
 
 import { dateText, num, ORDER_STATUS, specText, timeText } from '../shared';
 import DeliveryModal from './delivery-modal.vue';
+import MaterialPlan from './material-plan.vue';
 
 /**
  * 订单详情。下单人（mode=mine）待接单时可以撤回；
@@ -43,6 +44,8 @@ const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : 
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED');
 const canHandle = computed(() => props.mode === 'factory' && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
+/** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
+const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
 const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
 );
@@ -238,6 +241,8 @@ function producedQty(item: Api.Item) {
             </span>
           </div>
         </section>
+
+        <MaterialPlan v-if="canPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
           <h3 class="m-0 text-sm font-semibold">接单处理</h3>
