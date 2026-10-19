@@ -45,6 +45,7 @@ import {
   SCOPE_LABELS,
   visibilityLabel,
 } from '../shared/workspace';
+import TemplateManager from '../templates/components/TemplateManager.vue';
 import HrReviewQueue from './components/HrReviewQueue.vue';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
@@ -456,6 +457,12 @@ onMounted(initialize);
       <Tabs.TabPane v-if="access.canConfigure" key="hr-review" tab="待人事审核"
         ><HrReviewQueue
       /></Tabs.TabPane>
+      <Tabs.TabPane
+        v-if="access.canManageTemplate"
+        key="templates"
+        tab="考评表"
+        ><div class="management-panel"><TemplateManager /></div
+      ></Tabs.TabPane>
     </Tabs>
     <Modal
       v-model:open="cancelOpen"
