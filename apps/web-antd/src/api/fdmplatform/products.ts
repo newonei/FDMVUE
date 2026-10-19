@@ -56,6 +56,17 @@ export interface ProductQuery {
   selectable?: boolean;
   currency?: string;
   taxBasis?: TaxBasis;
+  /** true 时按分类原文精确匹配，空字符串表示未分类 */
+  exactCategory?: boolean;
+}
+export interface ProductCategoryCount {
+  /** 空字符串为未分类 */
+  category: string;
+  count: number;
+}
+export interface ProductCategoryView {
+  total: number;
+  items: ProductCategoryCount[];
 }
 export interface ProductAttachment {
   id: string;
@@ -138,6 +149,17 @@ export function importProducts(data: {
 }
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
+}
+/** 产品档案左侧分类：各分类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
+export function getProductCategories(params: {
+  active?: boolean;
+  companyId: number;
+  keyword?: string;
+  selectable?: boolean;
+}) {
+  return requestClient.get<ProductCategoryView>(`${base}/categories`, {
+    params,
+  });
 }
 export function getProduct(id: string, companyId = 0) {
   return requestClient.get<Product>(`${base}/${encodeURIComponent(id)}`, {
