@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   claim: vi.fn(),
   create: vi.fn(),
   prepare: vi.fn(),
+  pickList: vi.fn(),
   report: vi.fn(),
   my: vi.fn(),
   options: vi.fn(),
@@ -48,7 +49,7 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchOrder: mocks.order,
   getWorkbenchRecipePlan: mocks.plan,
   getWorkbenchStock: mocks.stock,
-  getWorkbenchPickList: vi.fn().mockResolvedValue([]),
+  getWorkbenchPickList: mocks.pickList,
   matchWorkbenchWage: vi.fn().mockResolvedValue([]),
   prepareWorkbenchTask: mocks.prepare,
   releaseWorkbenchTask: vi.fn(),
@@ -144,6 +145,7 @@ const my: Api.My = {
       sequence: 1,
       status: 'CLAIMED',
       unit: '片',
+      reason: '先做这单，交期近',
       workDate: '2026-10-11',
       workerNames: '张三',
     },
@@ -185,6 +187,7 @@ describe('workbench page', () => {
     mocks.my.mockResolvedValue(my);
     mocks.options.mockResolvedValue(options);
     mocks.create.mockResolvedValue(7);
+    mocks.pickList.mockResolvedValue([]);
     mocks.stock.mockResolvedValue({
       list: [
         {
@@ -218,6 +221,11 @@ describe('workbench page', () => {
       task: my.tasks[0],
     });
     mocks.report.mockResolvedValue(70);
+    mocks.pickList.mockResolvedValue([{
+      aux: [],
+      picks: [{ quantity: 50, stock: { batchNo: 'MB261007-01', id: 11, item: { color: 'PU', length: 190, material: 'TPE', thickness: 4.8, width: 130 }, itemCode: 'BC-1', location: '板材区', quantity: 180, stage: 'BOARD' } }],
+      task: my.tasks[0],
+    }]);
     const host = document.createElement('div');
     document.body.append(host);
     const app = createApp(WorkbenchPage);
@@ -229,8 +237,13 @@ describe('workbench page', () => {
     expect(text).toContain('张三');
     expect(text).toContain('我的岗位：开片');
     expect(text).toContain('¥63.72');
-    expect(text).toContain('订单 HT-001');
-    expect(text).toContain('已领 120 张板材');
+    // 只有我的任务和任务大厅；任务卡片写清楚做什么、领什么料
+    expect(text).toContain('HT-001');
+    expect(text).toContain('先做这单，交期近');
+    expect(text).toContain('批次 MB261007-01 · 板材区');
+    expect(text).not.toContain('自己开单');
+    expect(text).not.toContain('我手上在做的');
+    expect(text).not.toContain('领料清单');
 
     clickButton('做完了，报工');
     await flush();
@@ -295,45 +308,6 @@ describe('workbench page', () => {
     expect(mocks.my).toHaveBeenCalledTimes(2);
   });
 
-  it('lets a worker add the material they ran short of to the order in hand', async () => {
-    mocks.order.mockResolvedValue({
-      id: 5,
-      inputs: [],
-      orderNo: 'GX20261011-001',
-      process: 'SLICE',
-      sourceStage: 'BOARD',
-      status: 'IN_PROGRESS',
-    });
-    mocks.supplement.mockResolvedValue(true);
-    const host = document.createElement('div');
-    document.body.append(host);
-    const app = createApp(WorkbenchPage);
-    app.mount(host);
-    unmount = () => app.unmount();
-    await flush();
-
-    clickButton('料不够，补领');
-    await flush();
-    expect(mocks.order).toHaveBeenCalledWith(5);
-    expect(document.body.textContent).toContain('开片 · 第 1 步 补领');
-    clickButton('紫色');
-    await flush();
-    fill('pick-11', 100);
-    await flush();
-    clickButton('下一步');
-    await flush();
-    expect(document.body.textContent).toContain('补到 GX20261011-001');
-    expect(document.body.textContent).not.toContain('已经做完了，领料同时报数量');
-    clickButton('确认补领，接着干活');
-    await flush();
-    expect(mocks.create).not.toHaveBeenCalled();
-    expect(mocks.supplement).toHaveBeenCalledWith({
-      id: 5,
-      inputs: [{ laminationSide: undefined, quantity: 100, stockId: 11 }],
-    });
-    expect(document.body.textContent).toContain('补好了');
-  });
-
   it('issues every raw material of a recipe in one go for mixing', async () => {
     const raw = (id: number, code: string, name: string, quantity: number) => ({
       batchNo: `R${id}`,
@@ -345,14 +319,16 @@ describe('workbench page', () => {
       quantity,
       stage: 'RAW',
     });
+    const mixTask = { ...my.tasks[0]!, id: 41, process: 'MIX', product: '紫色板材', unit: '张' };
     mocks.my.mockResolvedValue({
       ...my,
       inProgress: [],
       processes: [
         { code: 'MIX', label: '密炼', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] },
       ],
-      tasks: [],
+      tasks: [mixTask],
     });
+    mocks.prepare.mockResolvedValue({ aux: [], picks: [], sourceStage: 'RAW', task: mixTask });
     mocks.stock.mockResolvedValue({
       list: [raw(21, 'MAT-TPE', 'TPE', 500), raw(22, 'MAT-EVA', 'EVA', 3), raw(23, 'MAT-CM', '紫色母', 9)],
       total: 3,
@@ -378,7 +354,7 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('开一张');
+    clickButton('做完了，报工');
     await flush();
     expect(mocks.stock).toHaveBeenCalledWith('RAW');
     // 只有一个配方时直接选上
@@ -388,26 +364,16 @@ describe('workbench page', () => {
     // 配方对照表：每种原料配方要多少、本次领多少、库存缺多少
     const recipeRow = [...document.querySelectorAll('tr')].find((r) => r.textContent?.includes('EVA') && r.textContent.includes('10 kg'));
     expect(recipeRow?.textContent?.replaceAll(/\s/g, '')).toContain('EVA10kg3kg7kg');
-    clickButton('下一步');
+    clickButton('下一步：报数量');
     await flush();
-    clickButton('确认领料，去干活');
-    await flush();
-    expect(mocks.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        inputs: [
-          { laminationSide: undefined, quantity: 20, stockId: 21 },
-          { laminationSide: undefined, quantity: 3, stockId: 22 },
-          { laminationSide: undefined, quantity: 1, stockId: 23 },
-        ],
-        process: 'MIX',
-        recipeBatches: 1,
-        recipeCode: 'REC-001',
-        sourceStage: 'RAW',
-      }),
-    );
+    // 领料和报工一起提交：报数量这一步带着按配方领的料
+    const text = document.body.textContent?.replaceAll(/\s/g, '') ?? '';
+    expect(text).toContain('领了TPE20·EVA3·紫色母1kg');
+    expect(text).toContain('TPE·常规款按领的料自动带出');
   });
 
   it('picks more than one kind of material by tapping several cards', async () => {
+    mocks.prepare.mockResolvedValue({ aux: [], picks: [], sourceStage: 'BOARD', task: my.tasks[0] });
     mocks.stock.mockResolvedValue({
       list: [
         { batchNo: 'B1', id: 11, item: { color: 'PU', material: 'TPE' }, itemCode: 'BC-1', itemId: 1, location: '板材区', quantity: 180, stage: 'BOARD' },
@@ -422,7 +388,7 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('开一张');
+    clickButton('做完了，报工');
     await flush();
     const cards = [...document.querySelectorAll('button')].filter((b) => b.textContent?.includes('批次 B'));
     cards[0]!.click();
@@ -432,17 +398,8 @@ describe('workbench page', () => {
     fill('pick-11', 100);
     fill('pick-12', 40);
     await flush();
-    clickButton('下一步');
+    clickButton('下一步：报数量');
     await flush();
-    clickButton('确认领料，去干活');
-    await flush();
-    expect(mocks.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        inputs: [
-          { laminationSide: undefined, quantity: 100, stockId: 11 },
-          { laminationSide: undefined, quantity: 40, stockId: 12 },
-        ],
-      }),
-    );
+    expect(document.body.textContent?.replaceAll(/\s/g, '')).toContain('领了TPE·紫色100·TPE·紫色40张');
   });
 });
