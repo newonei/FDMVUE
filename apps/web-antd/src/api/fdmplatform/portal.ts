@@ -5,7 +5,7 @@ import type { SupplierDepartment } from './supplier-stats';
 
 import { requestClient } from '#/api/request';
 
-export type PortalDepartment = 'finance' | 'purchase' | 'trade';
+export type PortalDepartment = 'domestic' | 'finance' | 'purchase' | 'trade';
 /** Amounts per currency; currencies are never added together. */
 export type CurrencyAmounts = Record<string, number | string>;
 export interface PortalTodo {

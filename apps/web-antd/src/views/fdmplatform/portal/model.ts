@@ -46,8 +46,9 @@ export interface PortalDefinition {
   functions: { group: string; items: FunctionEntry[] }[];
 }
 
-const CONTRACTS = '/fdmwaimao/platform-contracts';
-const SHIPMENTS = '/fdmwaimao/platform-shipments';
+/** 外贸、内销部门菜单目录；两边的合同、客户、发货页面路径相同。 */
+const SALES_BASE = { trade: '/fdmwaimao', domestic: '/neixiao' } as const;
+const CONTRACTS = `${SALES_BASE.trade}/platform-contracts`;
 const TASKS = '/fdmprocurement/platform-tasks';
 const ORDERS = '/fdmprocurement/platform-orders';
 const RECEIPTS = '/caiwu/platform-receipts';
@@ -57,13 +58,21 @@ export const EC_INVOICES = '/caiwu/fpadmiin/ecinvoiceapply';
 export const FINANCE_RECEIPTS = RECEIPTS;
 export const FINANCE_PAYMENTS = PAYMENTS;
 
-export function contractLink(contractId: string): PortalLink {
-  return { path: CONTRACTS, query: { contractId } };
+export function contractLink(
+  contractId: string,
+  department: 'domestic' | 'trade' = 'trade',
+): PortalLink {
+  return {
+    path: `${SALES_BASE[department]}/platform-contracts`,
+    query: { contractId },
+  };
 }
 /** One waiting contract opens directly; several open the filtered list. */
-function contractOr(list: PortalLink) {
+function contractOr(department: 'domestic' | 'trade', list: PortalLink) {
   return (todo: PortalTodo): PortalLink =>
-    todo.count === 1 && todo.contractId ? contractLink(todo.contractId) : list;
+    todo.count === 1 && todo.contractId
+      ? contractLink(todo.contractId, department)
+      : list;
 }
 function task(stage: string) {
   return (): PortalLink => ({ path: TASKS, query: { stage, mine: 'true' } });
@@ -126,22 +135,27 @@ export function pickTrend(trend: PortalTrend | undefined) {
   };
 }
 
-export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
-  trade: {
-    department: 'trade',
-    name: '外贸门户',
+/** 外贸与内销门户是同一套，只是各自的菜单、业务线和待办不同。 */
+function salesPortal(department: 'domestic' | 'trade'): PortalDefinition {
+  const domestic = department === 'domestic';
+  const base = SALES_BASE[department];
+  const contracts = `${base}/platform-contracts`;
+  const shipments = `${base}/platform-shipments`;
+  return {
+    department,
+    name: domestic ? '内销门户' : '外贸门户',
     dataTitle: '我的数据',
     primary: {
       label: '新建合同',
-      link: { path: CONTRACTS, query: { create: 'contract' } },
+      link: { path: contracts, query: { create: 'contract' } },
     },
     todos: [
       {
         key: 'draft',
         label: '草稿待生效',
         empty: '没有未生效的草稿',
-        target: contractOr({
-          path: CONTRACTS,
+        target: contractOr(department, {
+          path: contracts,
           query: { mine: 'true', status: 'DRAFT' },
         }),
       },
@@ -149,8 +163,8 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
         key: 'request',
         label: '待提交采购申请',
         empty: '合同产品都已申请',
-        target: contractOr({
-          path: CONTRACTS,
+        target: contractOr(department, {
+          path: contracts,
           query: { mine: 'true', status: 'EXECUTING' },
         }),
       },
@@ -159,13 +173,16 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
         label: '回款待确认',
         empty: '没有待确认的回款',
         hot: true,
-        target: contractOr({ path: RECEIPTS, query: { view: 'receipts' } }),
+        target: contractOr(department, {
+          path: RECEIPTS,
+          query: { view: 'receipts' },
+        }),
       },
       {
         key: 'ship',
         label: '待安排发货',
         empty: '到货后会出现在这里',
-        target: contractOr({ path: SHIPMENTS }),
+        target: contractOr(department, { path: shipments }),
       },
       {
         key: 'quote',
@@ -177,15 +194,20 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
           query: todo.contractId ? { contractId: todo.contractId } : undefined,
         }),
       },
-      {
-        key: 'history',
-        label: '金智合同未发齐',
-        empty: '最近签的金智合同都已发齐',
-        target: () => ({ path: CONTRACTS, query: { scope: 'pending' } }),
-      },
+      // 金智合同都是外贸的，内销没有这一项
+      ...(domestic
+        ? []
+        : [
+            {
+              key: 'history',
+              label: '金智合同未发齐',
+              empty: '最近签的金智合同都已发齐',
+              target: () => ({ path: contracts, query: { scope: 'pending' } }),
+            },
+          ]),
     ],
     listTitle: '我负责的合同进度',
-    listMore: { path: CONTRACTS, query: { mine: 'true' } },
+    listMore: { path: contracts, query: { mine: 'true' } },
     listEmpty: '你还没有负责的合同，新建合同后会显示办理进度。',
     metrics: [
       {
@@ -220,22 +242,22 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
           {
             title: '客户管理',
             description: '客户档案与往来汇总',
-            link: { path: '/fdmwaimao/platform-customers' },
+            link: { path: `${base}/platform-customers` },
           },
           {
             title: '合同订单',
             description: '新建、生效、跟进主线',
-            link: { path: CONTRACTS },
+            link: { path: contracts },
           },
           {
             title: '采购申请',
             description: '提交给采购的需求',
-            link: { path: '/fdmwaimao/platform-requests' },
+            link: { path: `${base}/platform-requests` },
           },
           {
             title: '发货与退货',
             description: '发货单 · 销售退货单',
-            link: { path: SHIPMENTS },
+            link: { path: shipments },
           },
         ],
       },
@@ -257,15 +279,25 @@ export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
             description: '选品与销售价格',
             link: { path: '/fdmproducts/catalog' },
           },
-          {
-            title: '汇率中心',
-            description: '回款折算参考',
-            link: { path: '/caiwu/platform-exchange-rates' },
-          },
+          // 内销只用人民币，不需要汇率
+          ...(domestic
+            ? []
+            : [
+                {
+                  title: '汇率中心',
+                  description: '回款折算参考',
+                  link: { path: '/caiwu/platform-exchange-rates' },
+                },
+              ]),
         ],
       },
     ],
-  },
+  };
+}
+
+export const portalDefinitions: Record<PortalDepartment, PortalDefinition> = {
+  trade: salesPortal('trade'),
+  domestic: salesPortal('domestic'),
   purchase: {
     department: 'purchase',
     name: '采购门户',
