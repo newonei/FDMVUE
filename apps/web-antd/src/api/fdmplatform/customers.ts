@@ -17,6 +17,10 @@ export interface Customer extends MasterRecord {
   sourceCountry?: string;
   sourceCustomerSource?: string;
   sourceCode?: string;
+  /** 外贸 / 内销，创建后不可改；历史客户为外贸 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
+  /** 内销客户开票信息 */
+  invoice?: CustomerInvoice;
   province?: string;
   city?: string;
   address?: string;
@@ -28,6 +32,18 @@ export interface Customer extends MasterRecord {
   sourceUpdatedAt?: string;
   /** 列表带 withStats 时附带；无共用范围的账号没有 */
   stats?: CustomerStats;
+}
+/** 增值税发票：SPECIAL 专用发票、NORMAL 普通发票；保存时不传表示保持原值 */
+export interface CustomerInvoice {
+  type?: '' | 'NORMAL' | 'SPECIAL' | null;
+  /** 留空时后端用客户全称 */
+  title?: string;
+  taxNo?: string;
+  address?: string;
+  phone?: string;
+  bankName?: string;
+  bankAccount?: string;
+  email?: string;
 }
 /** 按最近一次签约分层：≤90 天活跃、91–365 天需跟进、超过 1 年沉睡、没有合同未成交 */
 export type CustomerTier = 'ACTIVE' | 'FOLLOW' | 'NONE' | 'SLEEP';
@@ -182,6 +198,7 @@ export function getCustomers(params: {
   order?: 'ASC' | 'DESC';
   pageNo: number;
   pageSize: number;
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
   sort?: CustomerSort;
   sourceSystem?: string;
   tier?: CustomerListTier;
@@ -192,9 +209,10 @@ export function getCustomers(params: {
     timeout: 60_000,
   });
 }
-export function getCustomerOverview() {
+export function getCustomerOverview(salesChannel?: 'DOMESTIC' | 'FOREIGN') {
   /** 无共用范围的账号返回 null */
   return requestClient.get<CustomerOverview | null>(`${base}/overview`, {
+    params: { salesChannel },
     timeout: 60_000,
   });
 }

@@ -33,7 +33,7 @@ import {
   portalDefinitions,
 } from './model';
 
-/** 外贸门户; 采购与财务门户有各自的页面（PurchasePortal、FinancePortal）。 */
+/** 外贸与内销门户; 采购与财务门户有各自的页面（PurchasePortal、FinancePortal）。 */
 const props = defineProps<{ department: PortalDepartment }>();
 const router = useRouter();
 const userStore = useUserStore();
@@ -208,13 +208,15 @@ const contractRows = computed(() =>
                 查看全部
               </Button>
             </div>
-            <template v-if="department === 'trade'">
+            <template
+              v-if="department === 'trade' || department === 'domestic'"
+            >
               <button
                 v-for="row in contractRows"
                 :key="row.contract.id"
                 type="button"
                 class="list-row"
-                @click="go(contractLink(row.contract.id))"
+                @click="go(contractLink(row.contract.id, department))"
               >
                 <span class="list-main">
                   <b>{{ row.contract.code }}</b>

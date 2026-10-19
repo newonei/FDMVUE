@@ -9,13 +9,13 @@ const views = [
     key: 'shipments',
     title: '发货单',
     component: DocumentWorkspace,
-    props: { kind: 'shipments' },
+    props: { kind: 'shipments', salesChannel: 'FOREIGN' },
   },
   {
     key: 'salesReturns',
     title: '销售退货单',
     component: DocumentWorkspace,
-    props: { kind: 'salesReturns' },
+    props: { kind: 'salesReturns', salesChannel: 'FOREIGN' },
   },
 ];
 </script>

@@ -5,5 +5,5 @@ defineOptions({ name: 'FdmPlatformTradeContracts' });
 </script>
 
 <template>
-  <ContractBoard />
+  <ContractBoard sales-channel="FOREIGN" />
 </template>

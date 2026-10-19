@@ -56,6 +56,7 @@ export interface ContractBoardRow {
   departmentId?: null | number;
   productCategory?: null | string;
   sample: boolean;
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
   currency?: null | string;
   amount?: Decimal | null;
   additionalAmount?: Decimal | null;
@@ -149,6 +150,8 @@ export interface ContractBoardQuery {
   ownerUserId?: number;
   customerId?: string;
   companyId?: number;
+  /** 外贸 / 内销；不传不分业务线 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
   productCategory?: string;
   signedFrom?: string;
   signedTo?: string;
@@ -164,9 +167,12 @@ export function getContractBoard(params: ContractBoardQuery) {
   });
 }
 
-export function getContractBoardOverview(mine?: boolean) {
+export function getContractBoardOverview(
+  mine?: boolean,
+  salesChannel?: 'DOMESTIC' | 'FOREIGN',
+) {
   return requestClient.get<ContractBoardOverview>(`${base}/overview`, {
-    params: { mine: mine || undefined },
+    params: { mine: mine || undefined, salesChannel },
   });
 }
 

@@ -31,6 +31,30 @@ describe('department portal model', () => {
     expect(moneyLines({ CNY: 0, USD: '0.00' })).toEqual([]);
   });
 
+  it('points the domestic portal at the domestic menus without 金智 history or exchange rates', () => {
+    const domestic = portalDefinitions.domestic;
+    expect(domestic.name).toBe('内销门户');
+    expect(domestic.todos.map((entry) => entry.key)).not.toContain('history');
+    expect(portalDefinitions.trade.todos.map((entry) => entry.key)).toContain(
+      'history',
+    );
+    expect(
+      target('domestic', 'draft', todo('draft', 1, { contractId: 'c1' })),
+    ).toEqual({
+      path: '/neixiao/platform-contracts',
+      query: { contractId: 'c1' },
+    });
+    expect(target('domestic', 'ship', todo('ship', 2)).path).toBe(
+      '/neixiao/platform-shipments',
+    );
+    const links = domestic.functions.flatMap((group) =>
+      group.items.map((item) => item.link.path),
+    );
+    expect(links).toContain('/neixiao/platform-customers');
+    expect(links).not.toContain('/caiwu/platform-exchange-rates');
+    expect(links.some((path) => path.startsWith('/fdmwaimao'))).toBe(false);
+  });
+
   it('opens a single waiting contract directly and several as a filtered list', () => {
     expect(
       target('trade', 'draft', todo('draft', 1, { contractId: 'c1' })),

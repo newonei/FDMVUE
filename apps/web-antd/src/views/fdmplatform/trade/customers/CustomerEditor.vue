@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../../sales-channel';
+
 import type { CountryOption, Customer } from '#/api/fdmplatform/customers';
 
 import { computed, reactive, ref, watch } from 'vue';
@@ -20,6 +22,7 @@ import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getCustomerOptions, saveCustomer } from '#/api/fdmplatform/customers';
 
 import { errorText } from '../../data';
+import { salesChannelOf } from '../../sales-channel';
 import CustomerSourceOptions from './CustomerSourceOptions.vue';
 import {
   countryMatches,
@@ -28,16 +31,23 @@ import {
   customerForm,
   customerMissingFields,
   customerSourceOptions,
+  invoiceFields,
+  invoiceForm,
+  invoiceMissingFields,
+  invoiceTypeOptions,
 } from './model';
 
 const props = defineProps<{
   customer?: Customer;
   initialName?: string;
   open: boolean;
+  /** 新建客户的业务线；维护已有客户时以档案为准 */
+  salesChannel?: SalesChannel;
   selectAfterSave?: boolean;
 }>();
 const emit = defineEmits<{ close: []; saved: [customer: Customer] }>();
 const form = reactive<Record<string, string>>({});
+const invoice = reactive<Record<string, string>>({});
 const active = ref(true);
 const remark = ref('');
 const saving = ref(false);
@@ -50,7 +60,24 @@ const sourceDetail = ref('');
 const sourceOptions = computed(() =>
   customerSourceOptions(sources.value, form.customerSource),
 );
+const channel = computed<SalesChannel>(() =>
+  props.customer
+    ? salesChannelOf(props.customer.salesChannel)
+    : (props.salesChannel ?? 'FOREIGN'),
+);
+/** 内销客户国家固定为中国，不显示国家选择 */
+const domestic = computed(() => channel.value === 'DOMESTIC');
+const visibleFields = computed(() =>
+  customerFields.filter(
+    ([field]) =>
+      field !== 'shortName' && !(domestic.value && field === 'country'),
+  ),
+);
 const missingFields = computed(() => customerMissingFields(form));
+const invoiceMissing = computed(() => invoiceMissingFields(invoice));
+function fieldLabel(key: string, title: string) {
+  return domestic.value && key === 'province' ? '省份' : title;
+}
 const optionsLoading = ref(false);
 const optionsError = ref('');
 const countryOptions = computed(() => countrySelectOptions(countries.value));
@@ -85,6 +112,8 @@ watch(
     sourcesOpen.value = false;
     if (!open) return;
     Object.assign(form, customerForm(props.customer));
+    Object.assign(invoice, invoiceForm(props.customer));
+    if (domestic.value) form.country = 'CN';
     if (!props.customer && props.initialName) form.name = props.initialName;
     sourceDetail.value = '';
     if (form.customerSource?.startsWith('其他：')) {
@@ -101,8 +130,16 @@ watch(
 );
 async function save() {
   if (saving.value || sourcesOpen.value) return;
-  if (!form.name?.trim() || !currentCountryKnown.value) {
-    panelError.value = '请填写客户全称，并从国家 / 地区列表选择一个有效选项';
+  if (!form.name?.trim()) {
+    panelError.value = '请填写客户全称';
+    return;
+  }
+  if (!domestic.value && !currentCountryKnown.value) {
+    panelError.value = '请从国家 / 地区列表选择一个有效选项';
+    return;
+  }
+  if (domestic.value && invoiceMissing.value.length > 0) {
+    panelError.value = `增值税专用发票须填写${invoiceMissing.value.join('、')}`;
     return;
   }
   saving.value = true;
@@ -116,6 +153,9 @@ async function save() {
         form.customerSource === '其他' && sourceDetail.value.trim()
           ? `其他：${sourceDetail.value.trim()}`
           : form.customerSource,
+      salesChannel: channel.value,
+      // 外贸客户不填开票信息；不传表示保持原值
+      invoice: domestic.value ? { ...invoice } : undefined,
       active: active.value,
       remark: remark.value,
       id: props.customer?.id,
@@ -140,7 +180,7 @@ async function save() {
 <template>
   <Drawer
     :open="open"
-    :title="customer ? '维护客户档案' : '新建客户'"
+    :title="customer ? '维护客户档案' : domestic ? '新建内销客户' : '新建客户'"
     width="min(820px, 96vw)"
     :mask-closable="false"
     :closable="!saving && !sourcesOpen"
@@ -164,11 +204,9 @@ async function save() {
       />
       <Form layout="vertical" class="customer-fields">
         <Form.Item
-          v-for="[key, title] in customerFields.filter(
-            ([field]) => field !== 'shortName',
-          )"
+          v-for="[key, title] in visibleFields"
           :key="key"
-          :label="title"
+          :label="fieldLabel(key, title)"
           :required="['name', 'country'].includes(key)"
           :extra="
             key === 'code'
@@ -243,6 +281,47 @@ async function save() {
           <Input.TextArea v-model:value="remark" :rows="3" :disabled="saving" />
         </Form.Item>
       </Form>
+      <section v-if="domestic" class="invoice" aria-labelledby="invoice-title">
+        <h3 id="invoice-title">开票信息</h3>
+        <Form layout="vertical" class="customer-fields">
+          <Form.Item
+            label="发票类型"
+            extra="专用发票须填齐纳税人识别号、注册地址、电话、开户银行和账号。"
+          >
+            <Select
+              v-model:value="invoice.type"
+              :options="invoiceTypeOptions"
+              allow-clear
+              :disabled="saving"
+              placeholder="选择发票类型"
+            />
+          </Form.Item>
+          <Form.Item
+            v-for="[key, title] in invoiceFields"
+            :key="key"
+            :label="title"
+            :required="
+              invoice.type === 'SPECIAL' && !['email', 'title'].includes(key)
+            "
+            :class="{ wide: key === 'address' }"
+          >
+            <Input
+              v-model:value="invoice[key]"
+              :maxlength="key === 'address' ? 1000 : 200"
+              :disabled="saving"
+              :placeholder="
+                key === 'title'
+                  ? '留空时使用客户全称'
+                  : key === 'taxNo'
+                    ? '统一社会信用代码'
+                    : key === 'email'
+                      ? '接收电子发票'
+                      : undefined
+              "
+            />
+          </Form.Item>
+        </Form>
+      </section>
       <Collapse>
         <Collapse.Panel key="additional" header="更多资料">
           <Form.Item
@@ -308,6 +387,12 @@ async function save() {
 
 .wide {
   grid-column: 1 / -1;
+}
+
+.invoice h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .muted {

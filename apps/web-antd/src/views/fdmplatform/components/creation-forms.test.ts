@@ -456,6 +456,8 @@ describe('business creation attachment queues', () => {
       keyword: undefined,
       pageNo: 1,
       pageSize: 30,
+      // 合同没有业务类型（历史合同）按外贸，只列外贸客户
+      salesChannel: 'FOREIGN',
     });
     expect(
       view.host.querySelector<HTMLSelectElement>('[data-label="客户"] select')

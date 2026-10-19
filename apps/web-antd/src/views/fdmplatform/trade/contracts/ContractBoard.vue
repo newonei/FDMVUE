@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
+import type { SalesChannel } from '../../sales-channel';
 import type { FlowStage } from './model';
 
 import type { Access, Contract, Directory } from '#/api/fdmplatform';
@@ -76,6 +77,14 @@ import {
 import '../../components/compact-tables.css';
 
 defineOptions({ name: 'FdmPlatformContractBoard' });
+/** 外贸、内销部门各看本业务线的合同；金智历史合同都算外贸，内销没有这一页签 */
+const props = withDefaults(defineProps<{ salesChannel?: SalesChannel }>(), {
+  salesChannel: 'FOREIGN',
+});
+const domestic = computed(() => props.salesChannel === 'DOMESTIC');
+const tabKeys = computed<Tab[]>(() =>
+  domestic.value ? ['ACTIVE', 'ENDED'] : ['ACTIVE', 'JINZHI', 'ENDED'],
+);
 
 type Tab = 'ACTIVE' | 'ENDED' | 'JINZHI';
 const SCOPE_KEY = 'fdm.contracts.scope';
@@ -214,6 +223,7 @@ function query(page = pageNo.value, size = pageSize.value): ContractBoardQuery {
     productCategory: category.value,
     ownerUserId: !jinzhi && !mine.value ? owner.value : undefined,
     companyId: jinzhi ? undefined : company.value,
+    salesChannel: props.salesChannel,
     ...signedFilter(),
     sort: sort.value,
     order: sort.value === 'DUE' ? 'ASC' : 'DESC',
@@ -245,7 +255,10 @@ async function load(reset = false) {
 }
 async function loadOverview() {
   try {
-    overview.value = await getContractBoardOverview(mine.value);
+    overview.value = await getContractBoardOverview(
+      mine.value,
+      props.salesChannel,
+    );
   } catch (error) {
     pageError.value = errorText(error);
   }
@@ -405,8 +418,8 @@ async function onNewContractSaved(contract: Contract) {
 
 function applyEntry() {
   const entry = entryFromQuery(route.query);
-  tab.value = entry.tab;
-  if (route.query.scope === 'pending') {
+  tab.value = domestic.value && entry.tab === 'JINZHI' ? 'ACTIVE' : entry.tab;
+  if (route.query.scope === 'pending' && !domestic.value) {
     jinzhiRecent.value = true;
     shipState.value = 'OPEN';
     year.value = 'ALL';
@@ -432,7 +445,7 @@ async function exportCsv() {
       if (all.length >= result.total || result.list.length === 0) break;
     }
     downloadFileFromBlobPart({
-      fileName: `合同订单-${tabLabels[tab.value]}-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
+      fileName: `${domestic.value ? '内销' : '外贸'}合同订单-${tabLabels[tab.value]}-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
       source: new Blob(
         [contractCsv(all, (id) => personLabel(directory.value, id))],
         {
@@ -501,7 +514,10 @@ onMounted(async () => {
       <header class="head">
         <div>
           <h1>合同订单</h1>
-          <p>
+          <p v-if="domestic">
+            内销部门 · 新建合同、跟进到回款；内销合同统一用人民币
+          </p>
+          <p v-else>
             外贸部门 · 新建合同、跟进到回款；金智迁入的合同在「金智历史合同」
           </p>
         </div>
@@ -570,7 +586,7 @@ onMounted(async () => {
       <section class="card">
         <div class="tabs" role="tablist" aria-label="合同范围">
           <button
-            v-for="key in ['ACTIVE', 'JINZHI', 'ENDED'] as Tab[]"
+            v-for="key in tabKeys"
             :key="key"
             type="button"
             role="tab"
@@ -993,7 +1009,7 @@ onMounted(async () => {
     </div>
 
     <ContractEditor
-      default-business-type="FOREIGN"
+      :default-business-type="salesChannel"
       :open="editorOpen"
       :directory="directory"
       :master="[]"
