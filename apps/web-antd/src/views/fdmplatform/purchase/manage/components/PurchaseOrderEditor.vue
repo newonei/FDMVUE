@@ -128,8 +128,8 @@ function pickProducts(products: Product[]) {
     ),
     ...productOptions.value,
   ];
+  // pickerRow 保留到下次打开，关闭动画期间弹窗保持原来的单选 / 多选
   const target = pickerRow.value;
-  pickerRow.value = undefined;
   if (target) {
     if (options[0]) chooseProduct(target, options[0].value);
     return;
@@ -733,10 +733,7 @@ async function save() {
     :company-id="0"
     :open="pickerOpen"
     :title="pickerRow ? '选择产品（替换本行）' : '从产品中心选择采购产品'"
-    @close="
-      pickerOpen = false;
-      pickerRow = undefined;
-    "
+    @close="pickerOpen = false"
     @selected="pickProducts"
   />
 </template>

@@ -37,6 +37,7 @@ const props = withDefaults(
 const emit = defineEmits<{ 'update:value': [value: string | undefined] }>();
 const items = ref<ProductCategoryCount[]>([]);
 const total = ref(0);
+const truncated = ref(false);
 const loading = ref(false);
 const loadError = ref('');
 const search = ref('');
@@ -76,6 +77,7 @@ async function load() {
     if (run !== sequence) return;
     items.value = result.items;
     total.value = result.total;
+    truncated.value = Boolean(result.truncated);
   } catch (error) {
     if (run === sequence) loadError.value = errorText(error);
   } finally {
@@ -111,8 +113,8 @@ onBeforeUnmount(() => {
       allow-clear
     >
       <template #suffix>
-<IconifyIcon icon="lucide:search" class="muted" />
-</template>
+        <IconifyIcon icon="lucide:search" class="muted" />
+      </template>
     </Input>
     <Alert v-if="loadError" type="error" show-icon :message="loadError" />
     <Spin :spinning="loading" wrapper-class-name="category-spin">
@@ -170,6 +172,9 @@ onBeforeUnmount(() => {
           </ul>
         </li>
       </ul>
+      <p v-if="truncated" class="truncated muted">
+        分类较多，只列出产品数最多的一部分；其余可用右侧搜索查找。
+      </p>
       <Empty
         v-if="!loading && search && named.length === 0"
         :image="Empty.PRESENTED_IMAGE_SIMPLE"
@@ -287,5 +292,10 @@ onBeforeUnmount(() => {
 
 .muted {
   color: hsl(var(--muted-foreground));
+}
+
+.truncated {
+  margin: 8px 4px 0;
+  font-size: 12px;
 }
 </style>
