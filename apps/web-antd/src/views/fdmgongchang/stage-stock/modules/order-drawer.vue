@@ -1534,7 +1534,7 @@ watch(processCode, warnNoPatterns);
                 show-search
               />
               <span v-if="linkedProductionItemId">
-                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂下单」里交货。
+                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
               </span>
             </label>
             <label
