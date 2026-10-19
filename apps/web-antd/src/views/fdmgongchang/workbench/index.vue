@@ -13,7 +13,6 @@ import {
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
-  getWorkbenchOrder,
   prepareWorkbenchTask,
   releaseWorkbenchTask,
   reportWorkbenchOrder,
@@ -33,8 +32,8 @@ import ReportStep from './modules/report-step.vue';
 import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
- * 工厂部门 · 我的工作台（工人手机端）：打开就是「今天做什么」，一屏只做一件事——
- * 领材料 → 确认领料 → 做完报数量 → 确认计件 → 完成。领料、报数量都按自己的名字记。
+ * 工厂部门 · 我的工作台（工人手机端）：活都从派单、接单来——任务大厅接单，我的任务里看清楚做什么、领什么料，
+ * 做完了报工：对照实际改领料 → 报好的、坏的数量 → 确认计件、拍领料单 → 完成。领料、报数量都按自己的名字记。
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
@@ -143,62 +142,6 @@ function releaseTask(task: FdmgongchangScheduleApi.Task) {
       await reload();
     },
   });
-}
-
-function startFree(process: Api.Process) {
-  reset(process);
-  job.step = 'pick';
-}
-
-async function continueOrder(order: Api.Order) {
-  const process = job.my?.processes.find((p) => p.code === order.process);
-  if (!process) {
-    message.warning('你现在没有这道工序的岗位，请找班组长处理');
-    return;
-  }
-  reset(process, job.my?.tasks.find((t) => t.id === order.scheduleTaskId));
-  job.sourceStage = order.sourceStage;
-  loading.value = true;
-  try {
-    job.order = await getWorkbenchOrder(order.id);
-    // 辅料领用行不算工序领料，不参与产出预填
-    job.inputs = (job.order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
-      quantity: (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0),
-      side: line.laminationSide ?? undefined,
-      stock: {
-        batchNo: line.batchNo,
-        id: line.stockId ?? line.id,
-        item: line.item,
-        itemCode: line.itemCode,
-        location: line.location,
-        quantity: line.quantity ?? 0,
-        stage: line.stage,
-      },
-    }));
-    job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.order.recipeCode);
-    job.step = 'report';
-  } finally {
-    loading.value = false;
-  }
-}
-
-/** 手上在做的单料不够：选料补领，补完回首页，单子继续在制；最近完工的单实际多拿了料，也走这里补登。 */
-async function supplementOrder(order: Api.Order) {
-  const process = job.my?.processes.find((p) => p.code === order.process);
-  if (!process) {
-    message.warning('你现在没有这道工序的岗位，请找班组长处理');
-    return;
-  }
-  reset(process, job.my?.tasks.find((t) => t.id === order.scheduleTaskId));
-  job.sourceStage = order.sourceStage;
-  loading.value = true;
-  try {
-    job.order = await getWorkbenchOrder(order.id);
-    job.supplement = true;
-    job.step = 'pick';
-  } finally {
-    loading.value = false;
-  }
 }
 
 function pickInputs(): InputLine[] {
@@ -366,11 +309,8 @@ function back() {
         <Home
           v-if="job.step === 'home'"
           @claim-task="claimTask"
-          @continue-order="continueOrder"
           @release-task="releaseTask"
-          @start-free="startFree"
           @start-task="startTask"
-          @supplement-order="supplementOrder"
         />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
