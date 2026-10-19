@@ -403,13 +403,9 @@ describe('order entry without changing menus', () => {
         ?.value,
     ).toBe('人民币（CNY）');
     expect(host.querySelector('[data-label="合同币种"] select')).toBeNull();
-    for (const label of [
-      '阿里信保订单',
-      '样品单',
-      '业务部门（可选）',
-      '业务类型',
-    ])
+    for (const label of ['阿里信保订单', '业务部门（可选）', '业务类型'])
       expect(host.querySelector(`[data-label="${label}"]`)).toBeNull();
+    expect(host.querySelector('[data-label="样品单"]')).toBeTruthy();
     button(host, '新增客户并选用').click();
     await nextTick();
     const customer = host.querySelector<HTMLElement>(

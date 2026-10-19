@@ -57,7 +57,12 @@ import {
 } from '../../contract-categories';
 import { errorText, money } from '../../data';
 import { personLabel } from '../../directory';
-import { DOMESTIC_CURRENCY, salesChannelOf } from '../../sales-channel';
+import {
+  DOMESTIC_CURRENCY,
+  isSampleBusinessType,
+  salesChannelOf,
+  sampleBusinessType,
+} from '../../sales-channel';
 import CustomerEditor from '../../trade/customers/CustomerEditor.vue';
 import {
   attachmentPurposeOptions,
@@ -119,15 +124,18 @@ const channel = computed(() =>
 const domestic = computed(() => channel.value === 'DOMESTIC');
 /** 关掉样品时回到的业务类型：原合同的政府等类型保留，否则就是业务线本身 */
 const baseBusinessType = computed(() =>
-  props.contract?.businessType && props.contract.businessType !== 'SAMPLE'
+  props.contract?.businessType &&
+  !isSampleBusinessType(props.contract.businessType)
     ? props.contract.businessType
     : channel.value,
 );
-/** 外贸样品单允许零价；内销暂不区分样品 */
+/** 样品单允许零价；外贸、内销各有自己的样品类型 */
 const sample = computed({
-  get: () => form.businessType === 'SAMPLE',
+  get: () => isSampleBusinessType(form.businessType),
   set: (value: boolean) => {
-    form.businessType = value ? 'SAMPLE' : baseBusinessType.value;
+    form.businessType = value
+      ? sampleBusinessType(channel.value)
+      : baseBusinessType.value;
   },
 });
 const lines = ref<ContractItem[]>([]);
@@ -950,11 +958,7 @@ async function save(activate = false) {
               placeholder="请输入实际阿里信保单号"
             />
           </Form.Item>
-          <Form.Item
-            v-if="!domestic"
-            label="样品单"
-            extra="免费样品可以把成交单价填为 0。"
-          >
+          <Form.Item label="样品单" extra="免费样品可以把成交单价填为 0。">
             <Switch v-model:checked="sample" />
           </Form.Item>
           <Form.Item
@@ -1240,7 +1244,7 @@ async function save(activate = false) {
                       />
                     </Space>
                   </Form.Item>
-                  <template v-if="form.businessType === 'SAMPLE'">
+                  <template v-if="sample">
                     <Form.Item label="建议采购工厂（可选）">
                       <RemoteMasterSelect
                         v-model:value="record.suggestedSupplierId"

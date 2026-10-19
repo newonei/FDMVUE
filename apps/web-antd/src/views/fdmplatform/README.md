@@ -43,8 +43,8 @@
 外贸、内销分成两个业务线，共用同一套合同、单据、产品中心与采购 / 财务 / 仓库流程（Issue #38）。合同的 `businessType` 就是业务线：`DOMESTIC` 为内销，其余（含历史空值、样品、政府）为外贸；客户档案记 `salesChannel`。没有标记的金智历史合同、客户与单据一律算外贸。
 
 - 内销页面是 `domestic/*` 薄入口，把 `salesChannel="DOMESTIC"` 传给外贸同一套组件；外贸页面传 `FOREIGN`。列表、合同看板、客户列表与概况都按业务线请求，从其他页面带 `contractId` 进入时只按合同筛选（`sales-channel.ts` 的 `channelFilter`）。
-- 合同编辑不再选业务类型和业务部门：业务线由入口决定、创建后不可改，部门由后端按负责人记录；外贸保留「样品单」开关（允许零价）。内销合同币种固定人民币，不显示阿里信保；合同详情不显示报关。
-- 内销客户不接 OKKI、不选国家（后端固定为 CN），合同只能选同业务线的客户。
+- 合同编辑不再选业务类型和业务部门：业务线由入口决定、创建后不可改，部门由后端按负责人记录；外贸、内销都有「样品单」开关（允许零价，外贸记 `SAMPLE`、内销记 `DOMESTIC_SAMPLE`）。内销合同币种固定人民币，不显示阿里信保；合同详情不显示报关。
+- 内销客户不接 OKKI、不选国家（后端固定为 CN），与外贸共用 `KH-` 客户编号；合同只能选同业务线的客户。
 - 菜单由后端补丁 `20261018_fdmplatform_domestic_menus.sql` 挂到「内销部门」，并加入全员共用菜单。
 - **内销门户**：`portal/domestic/index.vue` 复用 `DepartmentPortal.vue`，定义与外贸门户同由 `model.ts` 的 `salesPortal()` 生成，链接指向 `/neixiao/*`，没有「金智合同未发齐」和汇率中心。接口 `/portal/domestic` 只汇总当前用户的内销合同，外贸门户 `/portal/trade` 只汇总外贸合同。与其他门户一样按角色授权（`fdmplatform:portal:domestic`，补丁 `20261019_fdmplatform_domestic_portal.sql` 授给内销角色）。财务、采购、仓库门户仍汇总两条业务线。
 

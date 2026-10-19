@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { channelFilter, salesChannelOf } from './sales-channel';
+import {
+  channelFilter,
+  isSampleBusinessType,
+  salesChannelOf,
+  sampleBusinessType,
+} from './sales-channel';
 
 describe('sales channel', () => {
-  it('treats everything except DOMESTIC as foreign trade', () => {
+  it('treats everything except domestic and domestic samples as foreign trade', () => {
     expect(salesChannelOf('DOMESTIC')).toBe('DOMESTIC');
+    expect(salesChannelOf('DOMESTIC_SAMPLE')).toBe('DOMESTIC');
     for (const value of [
       undefined,
       null,
@@ -14,6 +20,14 @@ describe('sales channel', () => {
       'GOVERNMENT',
     ])
       expect(salesChannelOf(value)).toBe('FOREIGN');
+  });
+
+  it('keeps samples within their business line', () => {
+    expect(sampleBusinessType('DOMESTIC')).toBe('DOMESTIC_SAMPLE');
+    expect(sampleBusinessType('FOREIGN')).toBe('SAMPLE');
+    expect(isSampleBusinessType('DOMESTIC_SAMPLE')).toBe(true);
+    expect(isSampleBusinessType('SAMPLE')).toBe(true);
+    expect(isSampleBusinessType('DOMESTIC')).toBe(false);
   });
 
   it('drops the channel filter when a contract is already selected', () => {

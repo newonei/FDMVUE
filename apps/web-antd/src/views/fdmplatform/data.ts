@@ -81,6 +81,7 @@ export const statusLabels: Record<string, string> = {
   CONFIRMED: '已确认',
   CREATED: '已创建',
   DOMESTIC: '国内 B2B',
+  DOMESTIC_SAMPLE: '内销样品',
   DRAFT: '草稿',
   ESTIMATED: '预计',
   EXECUTING: '执行中',
