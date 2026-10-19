@@ -31,12 +31,6 @@ const links = computed(() =>
       show: access.value?.canManage,
     },
     {
-      path: '/fdmperformance/templates',
-      label: '考评表',
-      // HR reaches templates through the configuration center.
-      show: access.value?.canManageTemplate && !access.value?.canConfigure,
-    },
-    {
       path: '/fdmperformance/configuration',
       label: '配置中心',
       show: access.value?.canConfigure,
