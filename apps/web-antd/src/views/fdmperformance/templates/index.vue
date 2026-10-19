@@ -32,6 +32,7 @@ import {
   enableTemplate,
   getEnabledIndicators,
   getTemplate,
+  getTemplateManageableUserIds,
   getTemplatePage,
   saveTemplate,
   validateTemplateProcess,
@@ -65,6 +66,8 @@ const indicatorImportPagination = reactive({
 });
 const departments = ref<SystemDeptApi.Dept[]>([]);
 const users = ref<SystemUserApi.User[]>([]);
+/** Supervisors may only assess their own subordinates; null means unrestricted. */
+const assessableUserIds = ref<null | Set<number>>(null);
 const indicators = ref<JixiaoApi.Indicator[]>([]);
 const processDefinitions = ref<any[]>([]);
 const rows = ref<JixiaoApi.Template[]>([]);
@@ -103,7 +106,15 @@ function personUserOptions(person: JixiaoApi.TemplatePerson, role: PersonRole) {
       : (role === 'supervisor'
         ? [person.userId, person.superiorSupervisorUserId]
         : [person.userId, person.supervisorUserId]);
-  return userOptions.value.map((option) => ({
+  const options =
+    role === 'employee' && assessableUserIds.value
+      ? userOptions.value.filter(
+          (option) =>
+            assessableUserIds.value?.has(option.value!) ||
+            option.value === person.userId,
+        )
+      : userOptions.value;
+  return options.map((option) => ({
     ...option,
     disabled: blockedIds.some((id) => id === option.value),
   }));
@@ -259,14 +270,16 @@ function search() {
 }
 
 async function loadOptions() {
-  const [userList, indicatorList, processData, departmentList] =
+  const [userList, indicatorList, processData, departmentList, assessableIds] =
     await Promise.all([
       getSimpleUserList(),
       getEnabledIndicators(),
       getSimpleProcessDefinitionList() as any,
       getSimpleDeptList(),
+      getTemplateManageableUserIds(),
     ]);
   users.value = userList;
+  assessableUserIds.value = assessableIds ? new Set(assessableIds) : null;
   indicators.value = indicatorList;
   departments.value = departmentList;
   processDefinitions.value = Array.isArray(processData)

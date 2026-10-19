@@ -71,6 +71,7 @@ export namespace JixiaoApi {
     canManage: boolean;
     canConfigure: boolean;
     canExport: boolean;
+    canManageTemplate: boolean;
     availableScopes: Scope[];
   }
   export interface ManagementRelation {
@@ -616,6 +617,13 @@ export function getTemplatePage(params: JixiaoApi.TemplatePageParams) {
   return requestClient.get<PageResult<JixiaoApi.Template>>(
     '/fdmperformance/template/page',
     { params },
+  );
+}
+
+/** null means unrestricted (performance HR). */
+export function getTemplateManageableUserIds() {
+  return requestClient.get<null | number[]>(
+    '/fdmperformance/template/manageable-user-ids',
   );
 }
 
