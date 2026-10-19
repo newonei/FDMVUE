@@ -408,7 +408,7 @@ async function save() {
   <Modal
     :open="open"
     title="新建采购单"
-    width="1180px"
+    width="min(1320px, 96vw)"
     :mask-closable="false"
     @cancel="emit('close')"
   >
@@ -493,19 +493,20 @@ async function save() {
           带出合同产品
         </Button>
       </div>
+      <!-- 固定列宽：长产品名在列内换行，列放不下时横向滚动，序号/产品/删除列冻结 -->
       <div class="table-wrap">
         <table class="entry-grid">
           <thead>
             <tr>
               <th class="no">#</th>
               <th class="product"><em>*</em>产品</th>
-              <th>规格 / 单位</th>
+              <th class="spec-col">规格 / 单位</th>
               <th class="money"><em>*</em>单价</th>
               <th class="money"><em>*</em>数量</th>
               <th class="money"><em>*</em>总价</th>
               <th class="date">到货日期</th>
               <th class="gift">赠品</th>
-              <th>备注</th>
+              <th class="remark">备注</th>
               <th class="ops"></th>
             </tr>
           </thead>
@@ -516,7 +517,7 @@ async function save() {
               :class="{ invalid: submitted && errors.lines[row.key] }"
             >
               <td class="no">{{ index + 1 }}</td>
-              <td>
+              <td class="product">
                 <div class="product-pick">
                   <Select
                     :value="
@@ -528,6 +529,7 @@ async function save() {
                     :filter-option="false"
                     :options="[...contractItems, ...productOptions]"
                     :placeholder="row.name || '搜索产品编号、名称'"
+                    :dropdown-match-select-width="460"
                     style="width: 100%"
                     @search="searchProducts"
                     @update:value="(value) => chooseProduct(row, value)"
@@ -541,14 +543,20 @@ async function save() {
                     选择
                   </Button>
                 </div>
-                <span v-if="row.name" class="hint">{{ row.code }} {{ row.name }}</span>
+                <span
+                  v-if="row.name"
+                  class="hint clamp"
+                  :title="`${row.code ?? ''} ${row.name}`"
+                  >{{ row.code }} {{ row.name }}</span>
                 <span
                   v-if="submitted && errors.lines[row.key]"
                   class="field-error"
                   >{{ errors.lines[row.key] }}</span>
               </td>
               <td>
-                <span class="spec">{{ row.specification || '—' }}</span>
+                <span class="spec clamp" :title="row.specification">{{
+                  row.specification || '—'
+                }}</span>
                 <span class="hint">{{ row.unit }}</span>
               </td>
               <td>
@@ -806,6 +814,15 @@ em {
   white-space: pre-line;
 }
 
+/* 长名称、长规格在列内换行，最多三行，悬停看全文 */
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+}
+
 .table-wrap {
   max-height: 46vh;
   overflow: auto;
@@ -815,8 +832,11 @@ em {
 
 .entry-grid {
   width: 100%;
+  min-width: 1260px;
   font-size: 13px;
-  border-collapse: collapse;
+  table-layout: fixed;
+  border-spacing: 0;
+  border-collapse: separate;
 }
 
 .entry-grid th {
@@ -831,6 +851,11 @@ em {
   background: hsl(var(--accent));
 }
 
+.entry-grid th,
+.entry-grid td {
+  box-sizing: border-box;
+}
+
 .entry-grid td {
   padding: 6px;
   vertical-align: top;
@@ -841,13 +866,48 @@ em {
   background: hsl(var(--destructive) / 5%);
 }
 
+/* 冻结列：横向滚动时序号、产品、删除始终可见 */
+.entry-grid .no,
+.entry-grid .product,
+.entry-grid .ops {
+  position: sticky;
+  z-index: 1;
+}
+
+.entry-grid td.no,
+.entry-grid td.product,
+.entry-grid td.ops {
+  background: var(--ant-color-bg-elevated, #fff);
+}
+
+.entry-grid tr.invalid td.no,
+.entry-grid tr.invalid td.product,
+.entry-grid tr.invalid td.ops {
+  background:
+    linear-gradient(hsl(var(--destructive) / 5%), hsl(var(--destructive) / 5%)),
+    var(--ant-color-bg-elevated, #fff);
+}
+
+.entry-grid th.no,
+.entry-grid th.product,
+.entry-grid th.ops {
+  z-index: 3;
+}
+
 .entry-grid .no {
-  width: 36px;
+  left: 0;
+  width: 40px;
   color: hsl(var(--muted-foreground));
 }
 
 .entry-grid .product {
-  width: 280px;
+  left: 40px;
+  width: 300px;
+  border-right: 1px solid hsl(var(--border));
+}
+
+.entry-grid .spec-col {
+  width: 180px;
 }
 
 .entry-grid .money {
@@ -864,7 +924,9 @@ em {
 }
 
 .entry-grid .ops {
-  width: 60px;
+  right: 0;
+  width: 64px;
+  border-left: 1px solid hsl(var(--border));
 }
 
 .field-error {
