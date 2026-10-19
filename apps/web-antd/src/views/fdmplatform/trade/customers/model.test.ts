@@ -243,3 +243,50 @@ describe('domestic customer invoice details', () => {
     ).toEqual([]);
   });
 });
+
+describe('customer CSV invoice columns', () => {
+  const row = {
+    id: '1',
+    type: 'CUSTOMER',
+    companyId: 0,
+    code: 'KH-1',
+    name: '内销客户',
+    sourceSystem: 'LOCAL',
+    active: true,
+    version: 1,
+    salesChannel: 'DOMESTIC' as const,
+    invoice: {
+      type: 'SPECIAL' as const,
+      title: '上海某某有限公司',
+      taxNo: '91310000AB1234567X',
+      bankAccount: '6222',
+    },
+  };
+
+  it('appends invoice columns only for domestic exports', () => {
+    const [header, line] = customerCsv([row], { invoice: true })
+      .replace('\uFEFF', '')
+      .split('\r\n');
+    expect(header!.split(',').slice(-8)).toEqual([
+      '发票类型',
+      '发票抬头',
+      '纳税人识别号',
+      '注册地址',
+      '注册电话',
+      '开户银行',
+      '银行账号',
+      '收票邮箱',
+    ]);
+    expect(line!.split(',').slice(-8)).toEqual([
+      '增值税专用发票',
+      '上海某某有限公司',
+      '91310000AB1234567X',
+      '',
+      '',
+      '',
+      '6222',
+      '',
+    ]);
+    expect(customerCsv([row])).not.toContain('纳税人识别号');
+  });
+});

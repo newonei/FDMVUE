@@ -3,6 +3,7 @@ import type { MasterType } from '#/api/fdmplatform/masters';
 
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import { requestLineDefaults } from './products/feedback-model';
+import { salesChannelOf } from './sales-channel';
 
 export interface Option {
   label: string;
@@ -45,6 +46,8 @@ export interface ActionDefinition {
   optionalLines?: boolean;
   submitLabel?: string;
   initialValues?: Record<string, unknown>;
+  /** 登记内销发票时，弹窗显示该客户的开票信息 */
+  buyerCustomerId?: string;
 }
 
 export const masterTypes: Option[] = [
@@ -671,6 +674,10 @@ export function financeActions(
       title: '登记真实发票',
       description:
         '仅记录已开具的凭证，不直接开税务发票。形式发票与正式开票分开统计。',
+      buyerCustomerId:
+        salesChannelOf(contract.businessType) === 'DOMESTIC'
+          ? contract.customerId
+          : undefined,
       fields: [
         source,
         field('invoiceNumber', '真实发票号'),

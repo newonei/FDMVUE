@@ -321,7 +321,9 @@ async function exportCsv() {
       if (result.list.length === 0 || rows.length >= result.total) break;
     }
     downloadFileFromBlobPart({
-      source: new Blob([customerCsv(rows)], { type: 'text/csv;charset=utf-8' }),
+      source: new Blob([customerCsv(rows, { invoice: domestic.value })], {
+        type: 'text/csv;charset=utf-8',
+      }),
       fileName: `${domestic.value ? '内销' : '外贸'}客户-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
     });
     message.success(`已导出 ${rows.length} 个客户`);

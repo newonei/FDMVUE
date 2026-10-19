@@ -268,7 +268,14 @@ export function receivableHint(source?: CustomerStats['receivableSource']) {
 }
 
 /** 导出当前筛选的客户：Excel 可直接打开的 UTF-8 CSV */
-export function customerCsv(rows: Customer[]) {
+/** 内销导出在末尾追加开票信息列，外贸导出不带 */
+export function customerCsv(
+  rows: Customer[],
+  options: { invoice?: boolean } = {},
+) {
+  const invoiceHeader = options.invoice
+    ? ['发票类型', ...invoiceFields.map(([, title]) => title)]
+    : [];
   const header = [
     '客户编号',
     '客户名称',
@@ -293,6 +300,7 @@ export function customerCsv(rows: Customer[]) {
     '未回款',
     '未回款口径',
     '其他币种',
+    ...invoiceHeader,
   ];
   const cell = (value: unknown) => {
     const text = value === null || value === undefined ? '' : String(value);
@@ -332,6 +340,14 @@ export function customerCsv(rows: Customer[]) {
             `${currencyLabel(item.currency)} 合同 ${item.contractAmount} 未回款 ${item.receivable}`,
         )
         .join('；'),
+      ...(options.invoice
+        ? [
+            invoiceTypeOptions.find(
+              (option) => option.value === row.invoice?.type,
+            )?.label,
+            ...invoiceFields.map(([key]) => row.invoice?.[key]),
+          ]
+        : []),
     ]
       .map((value) => cell(value))
       .join(',');
