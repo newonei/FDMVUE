@@ -17,6 +17,8 @@ export interface Customer extends MasterRecord {
   sourceCountry?: string;
   sourceCustomerSource?: string;
   sourceCode?: string;
+  /** 外贸 / 内销，创建后不可改；历史客户为外贸 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
   province?: string;
   city?: string;
   address?: string;
@@ -182,6 +184,7 @@ export function getCustomers(params: {
   order?: 'ASC' | 'DESC';
   pageNo: number;
   pageSize: number;
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
   sort?: CustomerSort;
   sourceSystem?: string;
   tier?: CustomerListTier;
@@ -192,9 +195,10 @@ export function getCustomers(params: {
     timeout: 60_000,
   });
 }
-export function getCustomerOverview() {
+export function getCustomerOverview(salesChannel?: 'DOMESTIC' | 'FOREIGN') {
   /** 无共用范围的账号返回 null */
   return requestClient.get<CustomerOverview | null>(`${base}/overview`, {
+    params: { salesChannel },
     timeout: 60_000,
   });
 }

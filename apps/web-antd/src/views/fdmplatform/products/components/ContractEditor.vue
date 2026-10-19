@@ -56,7 +56,8 @@ import {
   validProductCategory,
 } from '../../contract-categories';
 import { errorText, money } from '../../data';
-import { departmentLabel, personLabel } from '../../directory';
+import { personLabel } from '../../directory';
+import { DOMESTIC_CURRENCY, salesChannelOf } from '../../sales-channel';
 import CustomerEditor from '../../trade/customers/CustomerEditor.vue';
 import {
   attachmentPurposeOptions,
@@ -109,6 +110,26 @@ const form = reactive({
   deliveryRequirement: '',
   attachmentIds: [] as string[],
 });
+/** 业务线由入口决定（外贸 / 内销部门），编辑时沿用原合同；历史合同没有业务类型算外贸 */
+const channel = computed(() =>
+  props.contract
+    ? salesChannelOf(props.contract.businessType)
+    : salesChannelOf(props.defaultBusinessType ?? 'DOMESTIC'),
+);
+const domestic = computed(() => channel.value === 'DOMESTIC');
+/** 关掉样品时回到的业务类型：原合同的政府等类型保留，否则就是业务线本身 */
+const baseBusinessType = computed(() =>
+  props.contract?.businessType && props.contract.businessType !== 'SAMPLE'
+    ? props.contract.businessType
+    : channel.value,
+);
+/** 外贸样品单允许零价；内销暂不区分样品 */
+const sample = computed({
+  get: () => form.businessType === 'SAMPLE',
+  set: (value: boolean) => {
+    form.businessType = value ? 'SAMPLE' : baseBusinessType.value;
+  },
+});
 const lines = ref<ContractItem[]>([]);
 const expanded = ref<string[]>([]);
 const saving = ref(false);
@@ -148,22 +169,6 @@ const recentContracts = ref<ContractBoardRow[]>([]);
 const copyChoice = ref<string>();
 const copying = ref(false);
 let recentSequence = 0;
-const departmentOptions = computed(() => {
-  const options = (props.directory?.departments ?? []).map((department) => ({
-    value: department.id,
-    label: department.name,
-  }));
-  if (
-    form.departmentId !== undefined &&
-    form.departmentId !== null &&
-    !options.some((option) => option.value === form.departmentId)
-  )
-    options.unshift({
-      value: form.departmentId,
-      label: departmentLabel(props.directory, form.departmentId),
-    });
-  return options;
-});
 const recentOptions = computed(() =>
   recentContracts.value.map((row) => ({
     value: row.id,
@@ -200,7 +205,7 @@ async function loadRecentContracts(customerId: string) {
       );
       if (known) form.companyId = last.companyId ?? undefined;
     }
-    if (last?.currency && lines.value.length === 0)
+    if (last?.currency && lines.value.length === 0 && !domestic.value)
       form.currency = last.currency;
   } catch {
     // 最近合同只是便利信息，读取失败不影响新建
@@ -213,7 +218,7 @@ function applyCopy(source: Contract) {
     orderCompanies.value.some((o) => o.value === source.companyId)
   )
     form.companyId = form.companyId ?? source.companyId;
-  if (/^[A-Z]{3}$/.test(String(source.currency ?? '')))
+  if (/^[A-Z]{3}$/.test(String(source.currency ?? '')) && !domestic.value)
     form.currency = source.currency;
   form.taxBasis =
     source.items[0]?.taxBasis === 'TAX_EXCLUDED'
@@ -277,6 +282,7 @@ async function loadCustomers(reset = false) {
   try {
     const result = await getCustomers({
       keyword: customerKeyword.value.trim() || undefined,
+      salesChannel: channel.value,
       active: true,
       pageNo: customerPage.value,
       pageSize: 30,
@@ -431,10 +437,13 @@ watch(
       code: contract?.code ?? '',
       name: contract?.name ?? '',
       customerId: contract?.customerId ?? '',
-      businessType:
-        contract?.businessType ?? props.defaultBusinessType ?? 'DOMESTIC',
+      businessType: contract
+        ? (contract.businessType ?? 'FOREIGN')
+        : channel.value,
       productCategory: contract?.productCategory || undefined,
-      currency: contract?.currency ?? 'CNY',
+      currency: domestic.value
+        ? DOMESTIC_CURRENCY
+        : (contract?.currency ?? 'CNY'),
       taxBasis:
         contract?.items[0]?.taxBasis === 'TAX_EXCLUDED'
           ? 'TAX_EXCLUDED'
@@ -922,11 +931,14 @@ async function save(activate = false) {
               placeholder="便于识别的补充说明，订单号由系统生成"
             />
           </Form.Item>
-          <Form.Item label="阿里信保订单">
+          <Form.Item v-if="!domestic" label="阿里信保订单">
             <Switch v-model:checked="form.useTradeAssurance" />
           </Form.Item>
           <Form.Item
-            v-if="form.useTradeAssurance || form.alibabaTradeAssuranceNo"
+            v-if="
+              !domestic &&
+              (form.useTradeAssurance || form.alibabaTradeAssuranceNo)
+            "
             label="阿里信保单号"
             :required="form.useTradeAssurance"
             extra="信保订单生效前填写实际单号。报关安排在报关业务中登记。"
@@ -938,16 +950,12 @@ async function save(activate = false) {
               placeholder="请输入实际阿里信保单号"
             />
           </Form.Item>
-          <Form.Item label="业务类型">
-            <Select
-              v-model:value="form.businessType"
-              :options="[
-                { value: 'FOREIGN', label: '外贸 B2B' },
-                { value: 'DOMESTIC', label: '国内 B2B' },
-                { value: 'GOVERNMENT', label: '政府客户' },
-                { value: 'SAMPLE', label: '样品（允许零价）' },
-              ]"
-            />
+          <Form.Item
+            v-if="!domestic"
+            label="样品单"
+            extra="免费样品可以把成交单价填为 0。"
+          >
+            <Switch v-model:checked="sample" />
           </Form.Item>
           <Form.Item
             label="产品分类"
@@ -977,17 +985,14 @@ async function save(activate = false) {
               option-filter-prop="label"
             />
           </Form.Item>
-          <Form.Item label="业务部门（可选）">
-            <Select
-              v-model:value="form.departmentId"
-              allow-clear
-              placeholder="可留空"
-              :options="departmentOptions"
-              show-search
-              option-filter-prop="label"
-            />
+          <Form.Item
+            v-if="domestic"
+            label="合同币种"
+            extra="内销合同统一使用人民币。"
+          >
+            <Input value="人民币（CNY）" readonly />
           </Form.Item>
-          <Form.Item label="合同币种" required>
+          <Form.Item v-else label="合同币种" required>
             <Select
               v-model:value="form.currency"
               :options="currencyOptions"
@@ -1357,6 +1362,7 @@ async function save(activate = false) {
   <CustomerEditor
     :open="open && customerEditorOpen"
     :initial-name="newCustomerName"
+    :sales-channel="channel"
     select-after-save
     @close="customerEditorOpen = false"
     @saved="selectCreatedCustomer"

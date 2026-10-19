@@ -33,6 +33,19 @@
 | 财务部门 | 回款核销单       | fdmplatform/finance/allocations/index    |
 | 工厂部门 | 库存与合同收发   | fdmplatform/inventory/stock/index        |
 | 基础资料 | 业务主数据与迁移 | fdmplatform/admin/master-data/index      |
+| 内销部门 | 客户管理         | fdmplatform/domestic/customers/index     |
+| 内销部门 | 合同订单         | fdmplatform/domestic/contracts/index     |
+| 内销部门 | 采购申请         | fdmplatform/domestic/requests/index      |
+| 内销部门 | 发货与退货       | fdmplatform/domestic/shipments/index     |
+
+### 内销部门（2026-10-18）
+
+外贸、内销分成两个业务线，共用同一套合同、单据、产品中心与采购 / 财务 / 仓库流程（Issue #38）。合同的 `businessType` 就是业务线：`DOMESTIC` 为内销，其余（含历史空值、样品、政府）为外贸；客户档案记 `salesChannel`。没有标记的金智历史合同、客户与单据一律算外贸。
+
+- 内销页面是 `domestic/*` 薄入口，把 `salesChannel="DOMESTIC"` 传给外贸同一套组件；外贸页面传 `FOREIGN`。列表、合同看板、客户列表与概况都按业务线请求，从其他页面带 `contractId` 进入时只按合同筛选（`sales-channel.ts` 的 `channelFilter`）。
+- 合同编辑不再选业务类型和业务部门：业务线由入口决定、创建后不可改，部门由后端按负责人记录；外贸保留「样品单」开关（允许零价）。内销合同币种固定人民币，不显示阿里信保；合同详情不显示报关。
+- 内销客户不接 OKKI、不选国家（后端固定为 CN），合同只能选同业务线的客户。
+- 菜单由后端补丁 `20261018_fdmplatform_domestic_menus.sql` 挂到「内销部门」，并加入全员共用菜单。内销门户和统计在下一阶段。
 
 ### 菜单合并（2026-09-29）
 

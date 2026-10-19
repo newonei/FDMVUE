@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../sales-channel';
 import type { CompletionScope } from './completion-scope';
 import type { DocumentKind } from './model';
 import type { RelatedDocumentSource } from './related-creation';
@@ -31,6 +32,7 @@ import { useInMergedView } from '../components/merged-view';
 import { errorText, label, money, statusLabels } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
+import { channelFilter } from '../sales-channel';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import {
   completionFilter,
@@ -65,7 +67,11 @@ import { useRouteOwner } from './useRouteOwner';
 
 import '../components/compact-tables.css';
 
-const props = defineProps<{ kind: DocumentKind }>();
+const props = defineProps<{
+  kind: DocumentKind;
+  /** 外贸 / 内销部门的列表只看本业务线；不传不分业务线 */
+  salesChannel?: SalesChannel;
+}>();
 const route = useRoute();
 const router = useRouter();
 const inMergedView = useInMergedView();
@@ -366,6 +372,7 @@ async function load() {
         effectiveKind.value === 'requests' ? assignmentStatus.value : undefined,
       contractId: contractId.value,
       pendingCompletion: completionFilter(scope.value),
+      salesChannel: channelFilter(props.salesChannel, contractId.value),
     });
     if (current === sequence) {
       records.value = result.list;
@@ -388,6 +395,7 @@ async function loadPendingTotal() {
       pageSize: 1,
       contractId: contractId.value,
       pendingCompletion: true,
+      salesChannel: channelFilter(props.salesChannel, contractId.value),
     });
     if (current === pendingSequence) pendingTotal.value = result.total;
   } catch {
@@ -796,6 +804,7 @@ onMounted(async () => {
       :row="actionRow"
       :source="actionSource"
       :contract-id="actionContractId"
+      :sales-channel="salesChannel"
       :lock-contract="Boolean(actionContractId)"
       @close="actionOpen = false"
       @updated="actionSaved"

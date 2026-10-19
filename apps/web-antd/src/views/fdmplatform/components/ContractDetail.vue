@@ -60,6 +60,7 @@ import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
+import { salesChannelOf } from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
@@ -213,6 +214,10 @@ const allTasks = computed(() =>
         0,
       )
     : 0,
+);
+/** 内销合同没有报关和阿里信保 */
+const domestic = computed(
+  () => salesChannelOf(props.contract?.businessType) === 'DOMESTIC',
 );
 const ended = computed(() =>
   ['CANCELLED', 'CLOSED'].includes(props.contract?.status ?? ''),
@@ -798,13 +803,15 @@ async function download(file: { id: string; name: string }) {
             <dd>{{ company || '待补齐' }}</dd>
             <dt>业务部门</dt>
             <dd>{{ departmentLabel(directory, contract.departmentId) }}</dd>
-            <dt>阿里信保</dt>
-            <dd>
-              {{
-                contract.alibabaTradeAssuranceNo ||
-                (contract.useTradeAssurance ? '是' : '否')
-              }}
-            </dd>
+            <template v-if="!domestic">
+              <dt>阿里信保</dt>
+              <dd>
+                {{
+                  contract.alibabaTradeAssuranceNo ||
+                  (contract.useTradeAssurance ? '是' : '否')
+                }}
+              </dd>
+            </template>
             <dt>付款条件</dt>
             <dd :class="{ muted: !contract.paymentTerms }">
               {{ contract.paymentTerms || '未填写' }}
@@ -1030,7 +1037,7 @@ async function download(file: { id: string; name: string }) {
             </div>
           </TabPane>
 
-          <TabPane key="delivery" tab="发货与报关">
+          <TabPane key="delivery" :tab="domestic ? '发货' : '发货与报关'">
             <div class="dept">
               <div class="dept-actions">
                 <Button
@@ -1067,8 +1074,8 @@ async function download(file: { id: string; name: string }) {
                 </div>
               </div>
               <p v-else class="muted">还没有发货记录</p>
-              <h4>报关</h4>
-              <p v-if="customs" class="muted">
+              <h4 v-if="!domestic">报关</h4>
+              <p v-if="customs && !domestic" class="muted">
                 {{
                   customs.total
                     ? `${customs.completed} / ${customs.total} 批已完成，${customs.pending} 批办理中`
@@ -1076,7 +1083,7 @@ async function download(file: { id: string; name: string }) {
                 }}
               </p>
               <Alert
-                v-if="customsError"
+                v-if="customsError && !domestic"
                 :message="customsError"
                 type="warning"
               />
@@ -1092,6 +1099,7 @@ async function download(file: { id: string; name: string }) {
                   {{ documentDefinitions[kind].title }}
                 </Button>
                 <Button
+                  v-if="!domestic"
                   size="small"
                   :disabled="childOpen"
                   @click="openDocuments('customs', 'list')"

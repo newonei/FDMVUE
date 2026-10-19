@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../../sales-channel';
+
 import type { CountryOption, Customer } from '#/api/fdmplatform/customers';
 
 import { computed, reactive, ref, watch } from 'vue';
@@ -20,6 +22,7 @@ import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getCustomerOptions, saveCustomer } from '#/api/fdmplatform/customers';
 
 import { errorText } from '../../data';
+import { salesChannelOf } from '../../sales-channel';
 import CustomerSourceOptions from './CustomerSourceOptions.vue';
 import {
   countryMatches,
@@ -34,6 +37,8 @@ const props = defineProps<{
   customer?: Customer;
   initialName?: string;
   open: boolean;
+  /** 新建客户的业务线；维护已有客户时以档案为准 */
+  salesChannel?: SalesChannel;
   selectAfterSave?: boolean;
 }>();
 const emit = defineEmits<{ close: []; saved: [customer: Customer] }>();
@@ -49,6 +54,19 @@ const sourcesOpen = ref(false);
 const sourceDetail = ref('');
 const sourceOptions = computed(() =>
   customerSourceOptions(sources.value, form.customerSource),
+);
+const channel = computed<SalesChannel>(() =>
+  props.customer
+    ? salesChannelOf(props.customer.salesChannel)
+    : (props.salesChannel ?? 'FOREIGN'),
+);
+/** 内销客户国家固定为中国，不显示国家选择 */
+const domestic = computed(() => channel.value === 'DOMESTIC');
+const visibleFields = computed(() =>
+  customerFields.filter(
+    ([field]) =>
+      field !== 'shortName' && !(domestic.value && field === 'country'),
+  ),
 );
 const missingFields = computed(() => customerMissingFields(form));
 const optionsLoading = ref(false);
@@ -85,6 +103,7 @@ watch(
     sourcesOpen.value = false;
     if (!open) return;
     Object.assign(form, customerForm(props.customer));
+    if (domestic.value) form.country = 'CN';
     if (!props.customer && props.initialName) form.name = props.initialName;
     sourceDetail.value = '';
     if (form.customerSource?.startsWith('其他：')) {
@@ -101,8 +120,12 @@ watch(
 );
 async function save() {
   if (saving.value || sourcesOpen.value) return;
-  if (!form.name?.trim() || !currentCountryKnown.value) {
-    panelError.value = '请填写客户全称，并从国家 / 地区列表选择一个有效选项';
+  if (!form.name?.trim()) {
+    panelError.value = '请填写客户全称';
+    return;
+  }
+  if (!domestic.value && !currentCountryKnown.value) {
+    panelError.value = '请从国家 / 地区列表选择一个有效选项';
     return;
   }
   saving.value = true;
@@ -116,6 +139,7 @@ async function save() {
         form.customerSource === '其他' && sourceDetail.value.trim()
           ? `其他：${sourceDetail.value.trim()}`
           : form.customerSource,
+      salesChannel: channel.value,
       active: active.value,
       remark: remark.value,
       id: props.customer?.id,
@@ -140,7 +164,7 @@ async function save() {
 <template>
   <Drawer
     :open="open"
-    :title="customer ? '维护客户档案' : '新建客户'"
+    :title="customer ? '维护客户档案' : domestic ? '新建内销客户' : '新建客户'"
     width="min(820px, 96vw)"
     :mask-closable="false"
     :closable="!saving && !sourcesOpen"
@@ -164,9 +188,7 @@ async function save() {
       />
       <Form layout="vertical" class="customer-fields">
         <Form.Item
-          v-for="[key, title] in customerFields.filter(
-            ([field]) => field !== 'shortName',
-          )"
+          v-for="[key, title] in visibleFields"
           :key="key"
           :label="title"
           :required="['name', 'country'].includes(key)"
