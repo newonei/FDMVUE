@@ -27,6 +27,45 @@ export const customerFields = [
   ['phone', '联系电话'],
 ] as const;
 
+/** 内销客户开票信息，按增值税发票票面内容 */
+export const invoiceFields = [
+  ['title', '发票抬头'],
+  ['taxNo', '纳税人识别号'],
+  ['address', '注册地址'],
+  ['phone', '注册电话'],
+  ['bankName', '开户银行'],
+  ['bankAccount', '银行账号'],
+  ['email', '收票邮箱'],
+] as const;
+export type InvoiceField = (typeof invoiceFields)[number][0];
+export const invoiceTypeOptions = [
+  { value: 'SPECIAL', label: '增值税专用发票' },
+  { value: 'NORMAL', label: '增值税普通发票' },
+];
+
+export function invoiceForm(customer?: Partial<Customer>) {
+  const invoice = customer?.invoice;
+  return {
+    type: invoice?.type ?? '',
+    ...Object.fromEntries(
+      invoiceFields.map(([key]) => [key, String(invoice?.[key] ?? '')]),
+    ),
+  } as Record<'type' | InvoiceField, string>;
+}
+
+/** 专用发票须填齐的项目（抬头留空时用客户全称，不算缺）；与后端校验一致 */
+export function invoiceMissingFields(
+  invoice: Partial<Record<string, string>>,
+): string[] {
+  if (invoice.type !== 'SPECIAL') return [];
+  return invoiceFields
+    .filter(
+      ([key]) =>
+        !['email', 'title'].includes(key) && !String(invoice[key] ?? '').trim(),
+    )
+    .map(([, title]) => title);
+}
+
 export function customerForm(customer?: Partial<Customer>) {
   return Object.fromEntries(
     customerFields.map(([key]) => [key, String(customer?.[key] ?? '')]),

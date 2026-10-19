@@ -413,7 +413,9 @@ describe('order entry without changing menus', () => {
     )!;
     expect(customer).toBeTruthy();
     expect(customer.querySelector('[data-label="国家 / 地区"]')).toBeNull();
+    expect(customer.querySelector('[data-label="省份"]')).toBeTruthy();
     await fill(customer, '客户全称', '内销客户甲');
+    await fill(customer, '纳税人识别号', '91310000AB1234567X');
     api.saveCustomer.mockResolvedValueOnce({
       id: 'domestic-customer',
       name: '内销客户甲',
@@ -429,7 +431,11 @@ describe('order entry without changing menus', () => {
     button(customer, '保存并选用').click();
     await vi.waitFor(() =>
       expect(api.saveCustomer).toHaveBeenCalledWith(
-        expect.objectContaining({ salesChannel: 'DOMESTIC', country: 'CN' }),
+        expect.objectContaining({
+          salesChannel: 'DOMESTIC',
+          country: 'CN',
+          invoice: expect.objectContaining({ taxNo: '91310000AB1234567X' }),
+        }),
       ),
     );
   });

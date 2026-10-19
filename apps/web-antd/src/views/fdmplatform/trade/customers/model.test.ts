@@ -10,6 +10,8 @@ import {
   customerRegion,
   customerSourceLabel,
   customerSourceOptions,
+  invoiceForm,
+  invoiceMissingFields,
   mergeOkkiCustomers,
   moneyShort,
   recentTrend,
@@ -213,5 +215,31 @@ describe('客户经营统计展示', () => {
     expect(row).toContain(",'=cmd,");
     expect(row).toContain(',沉睡,2,');
     expect(row).toContain(',未注明币种,100,');
+  });
+});
+
+describe('domestic customer invoice details', () => {
+  it('fills an empty form for customers without invoice details', () => {
+    expect(invoiceForm()).toMatchObject({ type: '', taxNo: '', title: '' });
+    expect(
+      invoiceForm({ invoice: { type: 'SPECIAL', taxNo: '91310000AB' } }),
+    ).toMatchObject({ type: 'SPECIAL', taxNo: '91310000AB', bankName: '' });
+  });
+
+  it('requires the full set only for special VAT invoices; the title falls back to the customer name', () => {
+    expect(invoiceMissingFields({ type: 'NORMAL' })).toEqual([]);
+    expect(
+      invoiceMissingFields({ type: 'SPECIAL', taxNo: '91310000AB' }),
+    ).toEqual(['注册地址', '注册电话', '开户银行', '银行账号']);
+    expect(
+      invoiceMissingFields({
+        type: 'SPECIAL',
+        taxNo: '91310000AB',
+        address: '上海',
+        phone: '021',
+        bankName: '工行',
+        bankAccount: '6222',
+      }),
+    ).toEqual([]);
   });
 });

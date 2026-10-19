@@ -47,6 +47,8 @@ import {
   customerMissingFields,
   customerRegion,
   customerSourceLabel,
+  invoiceFields,
+  invoiceTypeOptions,
 } from './model';
 
 const props = defineProps<{
@@ -344,6 +346,22 @@ function close() {
                 >{{ customer.website }}</a>
               <template v-else>{{ customer[key] || '—' }}</template>
             </Descriptions.Item>
+            <template v-if="customer.salesChannel === 'DOMESTIC'">
+              <Descriptions.Item label="发票类型">
+                {{
+                  invoiceTypeOptions.find(
+                    (option) => option.value === customer?.invoice?.type,
+                  )?.label || '—'
+                }}
+              </Descriptions.Item>
+              <Descriptions.Item
+                v-for="[key, title] in invoiceFields"
+                :key="`invoice-${key}`"
+                :label="title"
+              >
+                {{ customer.invoice?.[key] || '—' }}
+              </Descriptions.Item>
+            </template>
             <Descriptions.Item label="资料来源">
               {{ customerSourceLabel(customer.sourceSystem) }}
               <span v-if="customer.externalId" class="muted">
