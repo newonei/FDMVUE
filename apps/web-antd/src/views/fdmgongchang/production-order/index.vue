@@ -2,6 +2,7 @@
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
@@ -14,6 +15,7 @@ import {
   getOrderableFactories,
 } from '#/api/fdmgongchang/production-order';
 
+import ScheduleBoard from '../schedule/modules/schedule-board.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CreateModal from './modules/create-modal.vue';
@@ -22,19 +24,33 @@ import ScheduleModal from './modules/schedule-modal.vue';
 import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
 
 /**
- * 工厂部门 · 工厂下单：运营、内贸等部门从产品中心选 SKU 向工厂下生产订单；
- * 工厂在「本厂收到的单」里确认接单、回复交期，接单后进入 AI 排单的待生产订单，做完登记完成；
- * 也可以在这里勾选已接单的订单，只拿这几张单做 AI 排单。
+ * 工厂部门 · 工厂排单（原「工厂下单」，并入了原「AI 排单」）：工厂的人在这里操作。
+ * - 本厂收到的单：运营、内贸等部门提的生产需求，工厂确认接单、回复交期，看用料逆推，勾选订单交给 AI 排单；
+ * - 排单方案：AI 生成或手动派工的排单，调整后确认下发成任务；
+ * - 我提的需求：其他部门从产品中心选 SKU 向工厂提生产需求，做好的货由工厂交货到采购部门仓库。
  */
 defineOptions({ name: 'FdmGongchangProductionOrder' });
 
-type Tab = 'factory' | 'mine';
+type Tab = 'factory' | 'mine' | 'schedule';
 
 const { hasAccessByCodes } = useAccess();
 const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:production-order:create']));
 const canHandle = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 const canSchedule = computed(() => hasAccessByCodes(['fdmgongchang:schedule:generate']));
-const tab = ref<Tab>(canCreate.value ? 'mine' : 'factory');
+const canViewSchedule = computed(() => hasAccessByCodes(['fdmgongchang:schedule:query']));
+const route = useRoute();
+const tab = ref<Tab>(initialTab());
+/** 从看板、旧的 AI 排单地址或勾选订单生成后切过来时要打开的那份排单。 */
+const scheduleFocus = ref<number | undefined>(Number(route?.query?.id) || undefined);
+
+function initialTab(): Tab {
+  const want = route?.query?.tab;
+  if (want === 'schedule' && canViewSchedule.value) return 'schedule';
+  if (want === 'mine' && canCreate.value) return 'mine';
+  if (canHandle.value) return 'factory';
+  if (canViewSchedule.value && !canCreate.value) return 'schedule';
+  return 'mine';
+}
 
 const factory = useFactory();
 const factoryReady = ref(false);
@@ -71,8 +87,10 @@ const rowSelection = computed(() =>
       }
     : undefined,
 );
-function onScheduled() {
+function onScheduled(id: number) {
   selected.value = new Map();
+  scheduleFocus.value = id;
+  tab.value = 'schedule';
 }
 
 const createOpen = ref(false);
@@ -91,6 +109,7 @@ const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
 async function loadRows() {
+  if (tab.value === 'schedule') return;
   if (tab.value === 'factory' && (!factoryReady.value || noFactory.value)) return;
   loading.value = true;
   loadError.value = false;
@@ -122,7 +141,7 @@ async function loadPending() {
 }
 
 async function initFactory() {
-  if (!canHandle.value) return;
+  if (!canHandle.value && !canViewSchedule.value) return;
   try {
     await factory.load();
     noFactory.value = factory.factoryId.value === null;
@@ -147,11 +166,11 @@ async function switchFactory(id: number) {
   await Promise.all([loadRows(), loadPending()]);
 }
 
-watch(tab, () => {
+watch(tab, (value) => {
   pageNo.value = 1;
   selected.value = new Map();
   filters.status = undefined;
-  loadRows();
+  if (value !== 'schedule') loadRows();
 });
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -208,39 +227,43 @@ function progressPercent(o: Api.Order) {
       <header class="flex flex-wrap items-end justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <h1 class="m-0 text-xl font-semibold tracking-tight">工厂下单</h1>
+            <h1 class="m-0 text-xl font-semibold tracking-tight">工厂排单</h1>
             <FactorySwitch
-              v-if="tab === 'factory' && factory.factories.value.length > 0"
+              v-if="tab !== 'mine' && factory.factories.value.length > 0"
               :factories="factory.factories.value"
               :value="factory.factoryId.value"
               @change="switchFactory"
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            从产品中心选产品向工厂下生产订单。工厂确认接单、回复交期后，这张单会进入 AI 排单的待生产订单；每个产品要走的工序由下单人定；做好的货由工厂交货到采购部门仓库，完成数量按交货数累加。
+            其他部门从产品中心选产品向工厂提生产需求，每个产品要走的工序由提需求的人定。工厂接单后看用料逆推（要几张板、多少原料），勾选订单让 AI 排单或手动派工，确认下发后工人在工作台领任务；做好的货交到采购部门仓库，完成数量按交货数累加。
           </p>
         </div>
-        <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 向工厂下单</Button>
+        <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 提生产需求</Button>
       </header>
 
-      <Result v-if="!canCreate && !canHandle" status="info" title="还没有工厂下单的权限">
-        <template #subTitle>需要向工厂下单的话，请联系管理员分配「工厂下单」角色。</template>
+      <Result v-if="!canCreate && !canHandle && !canViewSchedule" status="info" title="还没有工厂排单的权限">
+        <template #subTitle>需要向工厂提生产需求的话，请联系管理员分配「工厂下单」角色。</template>
       </Result>
 
       <section v-else class="rounded-lg border border-border bg-card px-4 pb-4">
         <Tabs v-model:active-key="tab">
-          <Tabs.TabPane v-if="canCreate" key="mine" tab="我下的单" />
           <Tabs.TabPane v-if="canHandle" key="factory">
             <template #tab>
               本厂收到的单
               <Tag v-if="pendingCount > 0" class="ml-1" color="orange">{{ pendingCount }} 待接单</Tag>
             </template>
           </Tabs.TabPane>
+          <Tabs.TabPane v-if="canViewSchedule" key="schedule" tab="排单方案" />
+          <Tabs.TabPane v-if="canCreate" key="mine" tab="我提的需求" />
         </Tabs>
 
-        <Result v-if="tab === 'factory' && noFactory" status="info" title="你的账号还不属于任何工厂">
-          <template #subTitle>接单处理只能处理自己所在工厂的单。</template>
+        <Result v-if="tab !== 'mine' && noFactory" status="info" title="你的账号还不属于任何工厂">
+          <template #subTitle>接单、排单只能处理自己所在工厂的单。</template>
         </Result>
+        <template v-else-if="tab === 'schedule'">
+          <ScheduleBoard v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" :focus-id="scheduleFocus" />
+        </template>
         <Result v-else-if="loadError" status="warning" title="订单没有加载出来">
           <template #extra><Button type="primary" @click="loadRows">重新加载</Button></template>
         </Result>
@@ -288,7 +311,7 @@ function progressPercent(o: Api.Order) {
             @change="(p) => ((pageNo = p.current ?? 1), (pageSize = p.pageSize ?? 20), loadRows())"
           >
             <template #emptyText>
-              <span class="text-muted-foreground">{{ tab === 'mine' ? '还没有下过单，点右上角「向工厂下单」' : '还没有收到订单' }}</span>
+              <span class="text-muted-foreground">{{ tab === 'mine' ? '还没有提过需求，点右上角「提生产需求」' : '还没有收到订单' }}</span>
             </template>
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'orderNo'">
@@ -343,7 +366,7 @@ function progressPercent(o: Api.Order) {
 
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
-      <OrderDrawer v-model:open="drawerOpen" :mode="tab" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
+      <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>
   </Page>
 </template>

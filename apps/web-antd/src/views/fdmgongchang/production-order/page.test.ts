@@ -9,6 +9,8 @@ import ProductionOrderPage from './index.vue';
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
   generate: vi.fn(),
+  getSchedule: vi.fn(),
+  getSchedules: vi.fn().mockResolvedValue([]),
   push: vi.fn(),
   complete: vi.fn(),
   delivery: vi.fn(),
@@ -73,12 +75,16 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({ getStockPage: mocks.stockPage }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
+  getWorkerList: vi.fn().mockResolvedValue([]),
   setCurrentFactoryId: mocks.setFactory,
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
   generateSchedule: mocks.generate,
+  getSchedule: mocks.getSchedule,
+  getSchedules: mocks.getSchedules,
 }));
 vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: mocks.push }),
 }));
 vi.mock('@vben/access', () => ({
@@ -170,10 +176,12 @@ describe('production order page', () => {
     mocks.get.mockResolvedValue(order);
     unmount = mount();
     await flush();
-    expect(document.body.textContent).toContain('还没有下过单');
+    // 工厂排单页给工厂的人用，先看本厂收到的单；其他部门提需求在「我提的需求」
+    expect(document.body.textContent).toContain('工厂排单');
     expect(document.body.textContent).toContain('1 待接单');
+    expect(document.body.textContent).toContain('我提的需求');
 
-    button('＋向工厂下单').click();
+    button('＋提生产需求').click();
     await flush();
     const input = document.querySelector<HTMLInputElement>('#po-product-keyword')!;
     input.value = 'Mishty';
@@ -250,7 +258,7 @@ describe('production order page', () => {
     await flush();
     expect(mocks.setFactory).toHaveBeenCalledWith(1);
     expect(document.body.textContent).toContain('运营小王');
-    expect(document.body.textContent).not.toContain('向工厂下单');
+    expect(document.body.textContent).not.toContain('＋ 提生产需求');
 
     button('去接单').click();
     await flush();
@@ -281,7 +289,7 @@ describe('production order page', () => {
     button('改了重下').click();
     await flush();
     const text = document.body.textContent ?? '';
-    expect(text).toContain('复制下单（来自 GD20261010-001）');
+    expect(text).toContain('复制需求（来自 GD20261010-001）');
     expect(text).toContain('明细（1）');
     expect(document.querySelector<HTMLInputElement>('#po-qty-p1')?.value).toBe('500');
     expect(document.querySelector<HTMLInputElement>('#po-purpose')?.value).toBe('电商备货');
@@ -355,10 +363,15 @@ describe('production order page', () => {
   });
 
   it('lets the factory pick accepted orders and hand only those to AI scheduling', async () => {
-    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate');
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate',
+      'fdmgongchang:schedule:query');
     const accepted: Api.Order = { ...order, id: 11, orderNo: 'GD20261011-002', status: 'ACCEPTED', statusLabel: '生产中' };
     mocks.factoryPage.mockResolvedValue({ list: [order, accepted], total: 2 });
     mocks.generate.mockResolvedValue(77);
+    mocks.getSchedules.mockResolvedValue([
+      { days: 3, id: 77, revision: 1, scheduleNo: 'PB20261011-001', scopeOrderNos: ['GD20261011-002'], startDate: '2026-10-11', status: 'GENERATING' },
+    ]);
+    mocks.getSchedule.mockResolvedValue({ days: 3, id: 77, revision: 1, scheduleNo: 'PB20261011-001', startDate: '2026-10-11', status: 'GENERATING' });
     unmount = mount();
     await flush();
 
@@ -373,6 +386,9 @@ describe('production order page', () => {
     button('交给AI排单').click();
     await flush();
     expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ days: 3, productionOrderIds: [11] }));
-    expect(mocks.push).toHaveBeenCalledWith({ path: '/gongchang/production/schedule', query: { id: '77' } });
+    // 生成后不跳页，切到「排单方案」标签并打开这一份
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.getSchedule).toHaveBeenCalledWith(77);
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('排单方案');
   });
 });
