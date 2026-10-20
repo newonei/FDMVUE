@@ -206,6 +206,8 @@ async function submitEdit() {
     designImageUrl: imageUrl,
     previewImageUrl: previewImageUrl.value.trim() || undefined,
     productionSent: Number(formValues.productionSent ?? 0),
+    // 清空单号时要显式传空字符串，未传字段后端会保留原值。
+    expressNo: String(formValues.expressNo ?? '').trim(),
     status: 0,
   } as FdmNeixiaoPatternDesignItemApi.PatternDesignItem;
   delete data.recognitionStatus;

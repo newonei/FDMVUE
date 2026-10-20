@@ -39,6 +39,12 @@ export const PRODUCTION_SENT_OPTIONS = [
   { label: '已发出', value: 1 },
 ];
 
+/** 与后端一致：去掉空白后只允许字母、数字和短横线，最长 64 位 */
+export const EXPRESS_NO_RULE = z
+  .string()
+  .max(64, '快递单号最长 64 位')
+  .regex(/^[\sA-Za-z0-9-]*$/, '快递单号只能包含字母、数字和短横线');
+
 export const DOWNLOADED_OPTIONS = [
   { label: '未下载', value: 0 },
   { label: '已下载', value: 1 },
@@ -301,6 +307,18 @@ export function useFormSchema(
         optionType: 'button',
         options: PRODUCTION_SENT_OPTIONS,
       },
+    },
+    {
+      fieldName: 'expressNo',
+      label: '快递单号',
+      component: 'Input',
+      help: '整单共用，修改后同步到该订单所有明细',
+      componentProps: {
+        allowClear: true,
+        maxlength: 64,
+        placeholder: '请输入快递单号',
+      },
+      rules: EXPRESS_NO_RULE.optional(),
     },
     {
       fieldName: 'remark',
@@ -573,6 +591,12 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
             ),
           ]),
       },
+    },
+    {
+      field: 'expressNo',
+      title: '快递单号',
+      minWidth: 150,
+      showOverflow: 'tooltip',
     },
     {
       field: 'shopName',
