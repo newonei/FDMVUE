@@ -504,6 +504,30 @@ export function receiptAvailable(
     ),
   );
 }
+/** 回款详情的结算口径：退款/冲销合计、已核销、可核销余额，以及对应的明细记录 */
+export function receiptSettlement(contract: Contract, receipt: BusinessRecord) {
+  const allocations = contract.finance?.allocations ?? [];
+  const refunds = (contract.finance?.receipts ?? []).filter(
+    (entry) => entry.originalReceiptId === receipt.id,
+  );
+  let refunded = new BigNumber(0);
+  for (const entry of refunds)
+    refunded = refunded.plus(decimal(entry.amount).abs());
+  return {
+    allocated: decimalText(
+      allocationBalance(contract, 'receiptId', receipt.id),
+    ),
+    allocations: allocations.filter(
+      (entry) =>
+        (entry.receiptId ??
+          allocations.find((row) => row.id === entry.originalAllocationId)
+            ?.receiptId) === receipt.id,
+    ),
+    available: receiptAvailable(contract, receipt),
+    refunded: decimalText(refunded),
+    refunds,
+  };
+}
 export function invoiceAvailable(
   contract: Contract,
   invoice: BusinessRecord,

@@ -11,6 +11,7 @@ import {
   documentActionUnavailableReason,
   invoiceAvailable,
   receiptAvailable,
+  receiptSettlement,
 } from './model';
 const fields: Field[] = [
   {
@@ -196,6 +197,22 @@ describe('remaining quantities and monetary balances', () => {
     expect(invoiceAvailable(contract, contract.finance!.invoices![0]!)).toBe(
       '0.15',
     );
+  });
+  it('summarizes refunds, allocations and the remaining balance of a receipt', () => {
+    const settlement = receiptSettlement(
+      contract,
+      contract.finance!.receipts![0]!,
+    );
+    expect(settlement).toMatchObject({
+      allocated: '0.05',
+      available: '0.15',
+      refunded: '0.1',
+    });
+    expect(settlement.refunds.map((entry) => entry.id)).toEqual(['refund']);
+    expect(settlement.allocations.map((entry) => entry.id)).toEqual([
+      'a',
+      'undo',
+    ]);
   });
   it('offers only eligible invoices and defaults the smaller available balance', () => {
     const definition = documentActionDefinition(

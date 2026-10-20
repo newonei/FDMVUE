@@ -36,6 +36,7 @@ import {
   Spin,
   Tag,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
@@ -44,7 +45,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
 import LineTable from '../components/LineTable.vue';
-import { errorText, label, rows } from '../data';
+import { errorText, label, money, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
@@ -66,6 +67,8 @@ import {
   lineTarget,
   relatedDocumentLinks,
 } from './navigation';
+import ReceiptSections from './ReceiptSections.vue';
+import ReceiptSummary from './ReceiptSummary.vue';
 import { relatedCreations } from './related-creation';
 import RelatedLink from './RelatedLink.vue';
 
@@ -171,6 +174,8 @@ const purchaseOrder = computed(() => {
   };
 });
 const config = computed(() => documentDefinitions[props.kind]);
+/** 回款记录用金智式抬头 + 分组字段，其它单据沿用通用字段表 */
+const receipt = computed(() => props.kind === 'receipts');
 const procurement = computed(() =>
   [
     'arrivals',
@@ -276,13 +281,19 @@ const fields = computed(() =>
         ['receipts', 'refunds'].includes(props.kind)),
   ),
 );
+/** 后端 Instant 字段是 ISO 时间戳，按本机时区显示到秒 */
+function timeText(text: string) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)
+    ? dayjs(text).format('YYYY-MM-DD HH:mm:ss')
+    : text;
+}
 function display(key: string) {
   if (key === 'allocationType') return allocationKind(record.value!);
   const value = record.value?.[key];
   const formatted =
     migrationCell(record.value ?? {}, key) ??
     receiptFxDisplay(record.value ?? {}, key);
-  if (formatted !== undefined && formatted !== null) return formatted;
+  if (formatted !== undefined && formatted !== null) return timeText(formatted);
   if (
     /UserId$/i.test(key) ||
     ['actorId', 'confirmedBy', 'createdBy'].includes(key)
@@ -290,7 +301,9 @@ function display(key: string) {
     return personLabel(directory.value, value);
   if (Array.isArray(value))
     return value.map((entry) => label(entry)).join('；');
-  return label(value);
+  if (key === 'amount' && record.value?.currency && value !== undefined)
+    return money(value, String(record.value.currency));
+  return timeText(label(value));
 }
 const lines = computed(() =>
   rows(record.value?.items ?? record.value?.lines).map((line) => ({
@@ -559,7 +572,15 @@ const mainAction = computed(() => {
       size="large"
       style="width: 100%"
     >
+      <ReceiptSummary
+        v-if="receipt"
+        :contract="contract"
+        :record="record"
+        :company="company"
+        :display="display"
+      />
       <Descriptions
+        v-else
         :bordered="!procurement"
         size="small"
         :column="{ xs: 1, sm: 2 }"
@@ -579,7 +600,7 @@ const mainAction = computed(() => {
           <Tag v-else>{{ label(record.status) }}</Tag>
         </Descriptions.Item>
 </Descriptions><Descriptions
-        v-if="sourceContext.length"
+        v-if="sourceContext.length && !receipt"
         :bordered="!procurement"
         size="small"
         :column="2"
@@ -627,7 +648,14 @@ const mainAction = computed(() => {
         >
           {{ filesOpen ? '收起附件' : '凭证附件' }}
         </Button>
-</Space><Descriptions
+</Space><ReceiptSections
+        v-if="receipt"
+        :contract="contract"
+        :record="record"
+        :directory="directory"
+        :display="display"
+      /><Descriptions
+        v-else
         :bordered="!procurement"
         size="small"
         :column="{ xs: 1, sm: 2 }"
@@ -684,7 +712,11 @@ const mainAction = computed(() => {
         </Descriptions>
 </Card><Card
         v-if="filesOpen"
-        :title="allContractFiles ? '合同全部附件' : '当前单据附件'"
+        :title="
+          allContractFiles
+            ? '合同全部附件'
+            : `当前单据附件${attachments?.items.length ? `（${attachments.items.length}）` : ''}`
+        "
         size="small"
       >
         <template #extra>
@@ -715,11 +747,14 @@ const mainAction = computed(() => {
           :loading="false"
           :error="attachmentError"
           :categories="attachments?.uploadCategories ?? []"
+          :default-category="
+            ['receipts', 'refunds'].includes(kind) ? 'RECEIPT' : undefined
+          "
           @refresh="loadFiles"
           @busy="(value) => (attachmentBusy = value)"
         />
       </Card>
-      <details>
+      <details v-if="!receipt">
         <summary>单据追溯信息</summary>
         <p>单据引用：{{ record.id }} · 合同数据版本：{{ contract.version }}</p>
       </details>
