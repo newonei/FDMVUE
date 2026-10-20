@@ -69,8 +69,11 @@ export interface ProductCategoryCount {
   count: number;
 }
 export interface ProductCategoryView {
+  /** 全部匹配产品数，不受分类条数上限影响 */
   total: number;
   items: ProductCategoryCount[];
+  /** 分类超过上限、只返回产品数最多的一部分时为 true */
+  truncated?: boolean;
 }
 export interface ProductAttachment {
   id: string;

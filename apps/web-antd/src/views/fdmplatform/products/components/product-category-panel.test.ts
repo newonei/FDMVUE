@@ -1,3 +1,4 @@
+/* eslint-disable vue/one-component-per-file -- Each case mounts its own small host app around the panel. */
 import { createApp, h, nextTick, ref } from 'vue';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -64,6 +65,7 @@ describe('产品分类侧栏', () => {
       active: undefined,
       selectable: true,
     });
+    expect(root.querySelector('.truncated')).toBeNull();
     expect(names(root)).toEqual([
       '全部类别 6',
       '无分类产品 2',
@@ -97,5 +99,23 @@ describe('产品分类侧栏', () => {
       '辅料 0',
       '外采产品(OC2400000) 3',
     ]);
+  });
+
+  it('分类超过上限时提示只列出一部分，全部类别仍是总数', async () => {
+    mocks.getProductCategories.mockResolvedValue({
+      total: 9,
+      truncated: true,
+      items: [{ category: '辅料', count: 4 }],
+    });
+    root = document.createElement('div');
+    document.body.append(root);
+    createApp({
+      render: () => h(ProductCategoryPanel, { companyId: 0 }),
+    }).mount(root);
+    await flush();
+    expect(names(root)[0]).toBe('全部类别 9');
+    expect(root.querySelector('.truncated')?.textContent).toContain(
+      '只列出产品数最多的一部分',
+    );
   });
 });
