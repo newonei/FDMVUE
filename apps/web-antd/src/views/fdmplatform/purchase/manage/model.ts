@@ -202,18 +202,21 @@ export function orderArrivalProgress(order: BusinessRecord) {
     const arrived = knownNumber(line.arrivedQuantity);
     const cancelled = knownNumber(line.cancelledQuantity);
     const returned = knownNumber(line.returnedQuantity);
+    // 作废入库单和采购退货都记为退回，净到货 = 到货 - 退回，退回的数量可以再收补发的货（与后端一致）。
+    const net = arrived && returned ? arrived.minus(returned) : undefined;
     if (
       !quantity ||
-      !arrived ||
+      !net ||
       !cancelled ||
-      arrived.plus(cancelled).gt(quantity)
+      net.lt(0) ||
+      net.plus(cancelled).gt(quantity)
     )
       group.known = false;
     else {
       group.ordered = group.ordered.plus(quantity.minus(cancelled));
-      group.arrived = group.arrived.plus(arrived);
+      group.arrived = group.arrived.plus(net);
       group.remaining = group.remaining.plus(
-        quantity.minus(cancelled).minus(arrived),
+        quantity.minus(cancelled).minus(net),
       );
     }
     if (returned) group.returned = group.returned.plus(returned);
@@ -252,11 +255,9 @@ export function canRecordOrderArrival(order: BusinessRecord) {
 }
 
 export function canReturnOrderArrival(order: BusinessRecord) {
-  return orderArrivalProgress(order).some((group) => {
-    const arrived = knownNumber(group.arrived);
-    const returned = knownNumber(group.returned);
-    return arrived && returned && arrived.gt(returned);
-  });
+  return orderArrivalProgress(order).some(
+    (group) => group.known && knownNumber(group.arrived)?.gt(0),
+  );
 }
 
 export function orderPaymentProgress(summary: Record<string, unknown>) {
