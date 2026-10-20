@@ -227,7 +227,7 @@ function afterCreated(product: Product) {
               width: 130,
               ellipsis: true,
             },
-            { title: '完整规格', key: 'specification', ellipsis: true },
+            { title: '型号 · 规格', key: 'specification', ellipsis: true },
             { title: '单位', dataIndex: 'unit', width: 60 },
             allowIncomplete
               ? { title: '资料', key: 'state', width: 90 }
