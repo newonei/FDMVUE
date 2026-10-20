@@ -50,7 +50,7 @@ const rows = computed(() =>
 const columns = [
   { title: 'Excel 行', dataIndex: 'rowNumber', width: 80 },
   { title: '产品编号 / 名称', key: 'product', width: 215 },
-  { title: '规格 / 单位', key: 'specification', width: 160 },
+  { title: '型号 / 规格 / 单位', key: 'specification', width: 180 },
   { title: '分类 / 状态', key: 'category', width: 125 },
   { title: '处理结果', key: 'status', width: 105 },
   { title: '说明', dataIndex: 'message', key: 'message', width: 235 },
@@ -255,7 +255,7 @@ async function downloadTemplate() {
         type="info"
         show-icon
         message="产品编号必须唯一，名称 + 型号 + 规格三项不能同时和已有产品或文件里其他行相同；不符合的行导入失败并写明原因，其余行新增为产品档案。"
-        description="产品状态为空或正常时启用，停售或下架时停用。型号、克重、纹路、条码等补充信息保存在备注中；库存设置仅保留说明。请先删除模板中的示例行。"
+        description="产品状态为空或正常时启用，停售或下架时停用。型号单独保存；克重、纹路、条码等补充信息保存在备注中；库存设置仅保留说明。请先删除模板中的示例行。"
       />
       <template v-if="result">
         <Alert
@@ -314,6 +314,9 @@ async function downloadTemplate() {
               <strong>{{ record.name || '未填名称' }}</strong><span>{{ record.code || '未填编号' }}</span>
             </div>
             <div v-else-if="column.key === 'specification'">
+              <div v-if="record.values?.model" class="import-muted">
+                型号：{{ record.values.model }}
+              </div>
               {{ record.values?.specification || '—' }}
               <div class="import-muted">
                 单位：{{ record.values?.unit || '—' }}

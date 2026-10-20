@@ -315,8 +315,11 @@ function refresh() {
             <Descriptions.Item label="单位">
               {{ product.unit || '—' }}
             </Descriptions.Item>
+            <Descriptions.Item label="型号">
+              {{ product.model || '—' }}
+            </Descriptions.Item>
             <Descriptions.Item label="规格">
-              {{ product.specification || '—' }}
+              {{ product.spec ?? product.specification ?? '—' }}
             </Descriptions.Item>
             <Descriptions.Item label="材质 / 尺寸">
               {{
@@ -353,8 +356,11 @@ function refresh() {
               <Descriptions.Item label="销售展示名称">
                 {{ product.displayName || product.name }}
               </Descriptions.Item>
-              <Descriptions.Item label="完整规格">
-                {{ product.specification || '—' }}
+              <Descriptions.Item label="型号">
+                {{ product.model || '—' }}
+              </Descriptions.Item>
+              <Descriptions.Item label="规格">
+                {{ product.spec ?? product.specification ?? '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="材质">
                 {{ product.material || '—' }}
@@ -368,7 +374,7 @@ function refresh() {
               <Descriptions.Item label="形状">
                 {{ product.shape || '—' }}
               </Descriptions.Item>
-              <Descriptions.Item label="印刷要求">
+              <Descriptions.Item label="定制要求">
                 {{ product.printing || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="标准包装">

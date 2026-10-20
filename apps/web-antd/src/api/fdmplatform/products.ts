@@ -26,7 +26,11 @@ export interface Product {
   displayName?: string;
   category?: string;
   imageUrl?: string;
+  /** 合同、仓库、采购使用的规格文本；填写型号时为「型号：X\n规格：Y」。 */
   specification?: string;
+  /** 产品档案单独维护的型号与规格，由 specification 拆出。 */
+  model?: string;
+  spec?: string;
   unit?: string;
   material?: string;
   size?: string;
@@ -104,6 +108,7 @@ export interface ProductImportRow {
       | 'displayName'
       | 'imageUrl'
       | 'material'
+      | 'model'
       | 'packaging'
       | 'printing'
       | 'remark'

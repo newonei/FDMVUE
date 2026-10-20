@@ -33,7 +33,8 @@ export const productFieldLabels: Record<string, string> = {
 };
 export function productDescription(product: Product) {
   return [
-    product.specification,
+    product.model,
+    product.spec ?? product.specification,
     product.material,
     product.size,
     product.color,
