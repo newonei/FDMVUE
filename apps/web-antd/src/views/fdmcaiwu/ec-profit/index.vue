@@ -19,6 +19,7 @@ const activeTab = ref('month');
 const month = ref<string>();
 const groupKey = ref<string>();
 const configRevision = ref(0);
+const monthlyWorkspace = ref<InstanceType<typeof MonthlyWorkspace>>();
 
 /** 默认打开最近一个已建单的月份：当月月报通常次月才建，直接落在空白月体验很差。 */
 onMounted(async () => {
@@ -42,6 +43,15 @@ onMounted(async () => {
   month.value = today.format('YYYY-MM');
 });
 
+async function changeTab(tab: string | number) {
+  if (tab === activeTab.value) return;
+  if (
+    activeTab.value === 'month' &&
+    monthlyWorkspace.value &&
+    !(await monthlyWorkspace.value.confirmLeave())
+  ) return;
+  activeTab.value = String(tab);
+}
 function locate(value: { key?: string; month: string }) {
   month.value = value.month;
   groupKey.value = value.key;
@@ -59,13 +69,14 @@ function locate(value: { key?: string; month: string }) {
         </p>
       </header>
       <div v-if="!month" class="flex h-60 items-center justify-center"><Spin /></div>
-      <Tabs v-else v-model:active-key="activeTab" destroy-inactive-tab-pane>
+      <Tabs v-else :active-key="activeTab" destroy-inactive-tab-pane @change="changeTab">
         <Tabs.TabPane key="month" tab="月度毛利">
           <MonthlyWorkspace
+            ref="monthlyWorkspace"
             v-model:month="month"
             :focus-group-key="groupKey"
             :config-revision="configRevision"
-            @configured="activeTab = 'settings'"
+            @configured="changeTab('settings')"
             @clear-focus="groupKey = undefined"
           />
         </Tabs.TabPane>
