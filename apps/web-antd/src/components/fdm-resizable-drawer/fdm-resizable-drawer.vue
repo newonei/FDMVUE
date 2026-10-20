@@ -172,6 +172,8 @@ onBeforeUnmount(() => stopResize?.());
   z-index: 10;
   width: 8px;
   cursor: col-resize;
+  /* Drawer 外层是 pointer-events: none，只有内容区恢复了 */
+  pointer-events: auto;
   touch-action: none;
 }
 
