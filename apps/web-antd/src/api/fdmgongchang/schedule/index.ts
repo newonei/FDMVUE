@@ -58,6 +58,8 @@ export namespace FdmgongchangScheduleApi {
     workDate: DateValue;
     /** 人员编号，逗号分隔。 */
     workerIds?: null | string;
+    /** 来自哪份排单（任务管理列表返回）。 */
+    scheduleNo?: null | string;
     workerNames?: null | string;
     /** 关联工序单的残次合计。 */
     defectQuantity?: Decimal | null;
@@ -253,6 +255,43 @@ export function handleScheduleTaskShortage(data: {
   return requestClient.post<boolean>(
     '/fdmgongchang/schedule/task/shortage',
     data,
+    headers(),
+  );
+}
+
+/** 任务管理：跨排单按日期查已下发的任务（默认今天起 7 天，最多 31 天）。 */
+export function listScheduleTasks(params: {
+  from?: string;
+  keyword?: string;
+  process?: string;
+  status?: FdmgongchangScheduleApi.TaskStatus;
+  to?: string;
+  workerId?: number;
+}) {
+  return requestClient.get<FdmgongchangScheduleApi.Task[]>(
+    '/fdmgongchang/schedule/task/list',
+    { ...headers(), params },
+  );
+}
+
+/** 改派待领取、已接单的任务（改派即派单）：传 fromWorkerId 只换这个人，不传把人员整个换成 toWorkerIds；返回改了几个。 */
+export function reassignScheduleTasks(data: {
+  fromWorkerId?: number;
+  taskIds: number[];
+  toWorkerIds: number[];
+}) {
+  return requestClient.post<number>(
+    '/fdmgongchang/schedule/task/reassign',
+    data,
+    headers(),
+  );
+}
+
+/** 已接单还没报工的任务退回任务大厅；返回改了几个。 */
+export function returnScheduleTasksToHall(taskIds: number[]) {
+  return requestClient.post<number>(
+    '/fdmgongchang/schedule/task/return-to-hall',
+    { taskIds },
     headers(),
   );
 }

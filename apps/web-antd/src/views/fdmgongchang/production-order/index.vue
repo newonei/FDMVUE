@@ -16,6 +16,7 @@ import {
 } from '#/api/fdmgongchang/production-order';
 
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
+import TaskManage from '../schedule/modules/task-manage.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CreateModal from './modules/create-modal.vue';
@@ -27,11 +28,12 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
  * 工厂部门 · 工厂排单（原「工厂下单」，并入了原「AI 排单」）：工厂的人在这里操作。
  * - 本厂收到的单：运营、内贸等部门提的生产需求，工厂确认接单、回复交期，看用料逆推，勾选订单交给 AI 排单；
  * - 排单方案：AI 生成或手动派工的排单，调整后确认下发成任务；
+ * - 任务管理：跨排单看已下发的任务，改派或退回任务大厅；
  * - 我提的需求：其他部门从产品中心选 SKU 向工厂提生产需求，做好的货由工厂交货到采购部门仓库。
  */
 defineOptions({ name: 'FdmGongchangProductionOrder' });
 
-type Tab = 'factory' | 'mine' | 'schedule';
+type Tab = 'factory' | 'mine' | 'schedule' | 'tasks';
 
 const { hasAccessByCodes } = useAccess();
 const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:production-order:create']));
@@ -46,6 +48,7 @@ const scheduleFocus = ref<number | undefined>(Number(route?.query?.id) || undefi
 function initialTab(): Tab {
   const want = route?.query?.tab;
   if (want === 'schedule' && canViewSchedule.value) return 'schedule';
+  if (want === 'tasks' && canViewSchedule.value) return 'tasks';
   if (want === 'mine' && canCreate.value) return 'mine';
   if (canHandle.value) return 'factory';
   if (canViewSchedule.value && !canCreate.value) return 'schedule';
@@ -87,6 +90,12 @@ const rowSelection = computed(() =>
       }
     : undefined,
 );
+/** 任务管理里点排单号：切到排单方案打开那一份。 */
+function openSchedule(id: number) {
+  scheduleFocus.value = id;
+  tab.value = 'schedule';
+}
+
 function onScheduled(id: number) {
   selected.value = new Map();
   scheduleFocus.value = id;
@@ -109,7 +118,7 @@ const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
 async function loadRows() {
-  if (tab.value === 'schedule') return;
+  if (tab.value === 'schedule' || tab.value === 'tasks') return;
   if (tab.value === 'factory' && (!factoryReady.value || noFactory.value)) return;
   loading.value = true;
   loadError.value = false;
@@ -255,6 +264,7 @@ function progressPercent(o: Api.Order) {
             </template>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canViewSchedule" key="schedule" tab="排单方案" />
+          <Tabs.TabPane v-if="canViewSchedule" key="tasks" tab="任务管理" />
           <Tabs.TabPane v-if="canCreate" key="mine" tab="我提的需求" />
         </Tabs>
 
@@ -263,6 +273,9 @@ function progressPercent(o: Api.Order) {
         </Result>
         <template v-else-if="tab === 'schedule'">
           <ScheduleBoard v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" :focus-id="scheduleFocus" />
+        </template>
+        <template v-else-if="tab === 'tasks'">
+          <TaskManage v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" @open-schedule="openSchedule" />
         </template>
         <Result v-else-if="loadError" status="warning" title="订单没有加载出来">
           <template #extra><Button type="primary" @click="loadRows">重新加载</Button></template>
