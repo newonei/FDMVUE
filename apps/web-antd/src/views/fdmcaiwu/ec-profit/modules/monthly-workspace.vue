@@ -5,6 +5,7 @@ import type { MetricKey } from '../model';
 import type { LeafRow } from '../tree-model';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { IconifyIcon } from '@vben/icons';
@@ -67,6 +68,7 @@ import GroupRanking from './group-ranking.vue';
 import ImportDialog from './import-dialog.vue';
 import ItemDrawer from './item-drawer.vue';
 import ItemEditor from './item-editor.vue';
+import ItemTableEditor from './item-table-editor.vue';
 import MonthStrip from './month-strip.vue';
 import ReportForm from './report-form.vue';
 import ScopeDialog from './scope-dialog.vue';
@@ -103,6 +105,8 @@ const importOpen = ref(false);
 const exporting = ref(false);
 const itemDetail = ref<Api.GroupNode>();
 const detailOpen = ref(false);
+const tableEditing = ref(false);
+const tableEditor = ref<InstanceType<typeof ItemTableEditor>>();
 let sequence = 0;
 let yearSequence = 0;
 
@@ -123,8 +127,13 @@ const noGroupConfigured = computed(
 function shiftMonth(step: number) {
   return dayjs(`${props.month}-01`).add(step, 'month').format('YYYY-MM');
 }
-function changeMonth(value: unknown) {
-  if (typeof value === 'string' && value) emit('update:month', value);
+async function changeMonth(value: unknown) {
+  if (
+    typeof value === 'string' && value && value !== props.month &&
+    await confirmLeaveTable()
+  ) {
+    emit('update:month', value);
+  }
 }
 const previousReport = computed(() => {
   const month = shiftMonth(-1);
@@ -197,9 +206,32 @@ onBeforeUnmount(() => {
   sequence++;
   yearSequence++;
 });
-function refresh() {
+async function confirmLeaveTable() {
+  if (
+    tableEditing.value && tableEditor.value &&
+    !(await tableEditor.value.confirmLeave())
+  ) return false;
+  tableEditing.value = false;
+  return true;
+}
+onBeforeRouteLeave(confirmLeaveTable);
+defineExpose({ confirmLeave: confirmLeaveTable });
+async function refresh() {
+  if (!(await confirmLeaveTable())) return;
   void load();
   void loadYear();
+}
+function tableSaved() {
+  tableEditing.value = false;
+  message.success('表格修改已保存');
+  void refresh();
+}
+function tableCancelled(hasSaved: boolean) {
+  tableEditing.value = false;
+  if (hasSaved) {
+    message.info('已保留成功保存的行，其余修改已放弃');
+    void refresh();
+  }
 }
 
 // ==================== 概览 ====================
@@ -598,12 +630,13 @@ async function exportExcel() {
       <div class="flex flex-wrap items-center gap-2">
         <Button
           v-access:code="['fdmcaiwu:ec-profit:update']"
+          :disabled="tableEditing"
           @click="importOpen = true"
         >
           <template #icon><IconifyIcon icon="lucide:upload" /></template>导入 Excel
         </Button>
         <Tooltip :title="report ? '分层汇总（可折叠）+ 店铺明细两张表' : '本月尚未建单'">
-          <Button :disabled="!report" :loading="exporting" @click="exportExcel">
+          <Button :disabled="!report || tableEditing" :loading="exporting" @click="exportExcel">
             <template #icon><IconifyIcon icon="lucide:download" /></template>导出 Excel
           </Button>
         </Tooltip>
@@ -612,7 +645,7 @@ async function exportExcel() {
             <template #icon><IconifyIcon icon="lucide:refresh-cw" /></template>
           </Button>
         </Tooltip>
-        <Dropdown v-if="moreActions.length > 0" :trigger="['click']">
+        <Dropdown v-if="moreActions.length > 0" :trigger="['click']" :disabled="tableEditing">
           <Button>
             更多<IconifyIcon icon="lucide:chevron-down" class="ml-1 inline-block" />
           </Button>
@@ -776,6 +809,7 @@ async function exportExcel() {
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div class="flex flex-wrap items-center gap-2">
               <Segmented
+                v-if="!tableEditing"
                 v-model:value="mode"
                 :options="[
                   { label: '按分组', value: 'tree' },
@@ -803,14 +837,18 @@ async function exportExcel() {
               <Button v-if="filtered" type="link" size="small" @click="clearFilters">清除筛选</Button>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <Checkbox v-if="!totalComplete" v-model:checked="received">显示已导入小计</Checkbox>
-              <Button v-if="mode === 'tree'" size="small" @click="toggleExpand">
+              <Button v-if="canUpdate && !tableEditing" type="primary" @click="tableEditing = true">
+                <template #icon><IconifyIcon icon="lucide:table-2" /></template>表格编辑
+              </Button>
+              <Checkbox v-if="!tableEditing && !totalComplete" v-model:checked="received">显示已导入小计</Checkbox>
+              <Button v-if="!tableEditing && mode === 'tree'" size="small" @click="toggleExpand">
                 <template #icon>
                   <IconifyIcon :icon="allExpanded ? 'lucide:chevrons-down-up' : 'lucide:chevrons-up-down'" />
                 </template>
                 {{ allExpanded ? '收起到分组' : '展开全部店铺' }}
               </Button>
               <Segmented
+                v-if="!tableEditing"
                 v-model:value="columnMode"
                 size="small"
                 :options="[
@@ -820,10 +858,21 @@ async function exportExcel() {
               />
             </div>
           </div>
-          <div class="mb-2 text-xs text-muted-foreground">
+          <ItemTableEditor
+            v-if="tableEditing"
+            ref="tableEditor"
+            :month="month"
+            :report-version="report.version"
+            :rows="leafRows(groups)"
+            :visible-rows="flatRows"
+            @saved="tableSaved"
+            @cancel="tableCancelled"
+          />
+          <div v-if="!tableEditing" class="mb-2 text-xs text-muted-foreground">
             单位：元 · 红色为负数 · 「—」表示未导入或缺少口径
           </div>
           <Table
+            v-if="!tableEditing"
             :columns="columns"
             :data-source="mode === 'tree' ? treeRows : flatRows"
             :loading="loading"
