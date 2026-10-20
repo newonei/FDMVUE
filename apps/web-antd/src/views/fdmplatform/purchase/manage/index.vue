@@ -378,6 +378,12 @@ const arrivalRows = computed(() =>
     (entry) => entry.orderId === view.value?.id,
   ),
 );
+/** 没有采购入库单的到货（如工厂以前的外采到货 DH…），入库比例算它们，入库单页签单独列出。 */
+const otherArrivals = computed(() =>
+  arrivalRows.value.filter(
+    (entry) => !String(entry.evidenceRef ?? '').startsWith('stock-in:'),
+  ),
+);
 const arrivalRow = computed(() =>
   contract.value && arrivalId.value
     ? resolveDocumentRow(contract.value, 'arrivals', arrivalId.value)
@@ -515,7 +521,10 @@ const subDocCounts = computed(() => {
     ? financeSummary.value.payments.length
     : 0;
   const invoices = orderInvoiceList.value.length;
-  const stock = orderStockIns.value.length + orderReturns.value.length;
+  const stock =
+    orderStockIns.value.length +
+    orderReturns.value.length +
+    otherArrivals.value.length;
   return { payments, invoices, stock, all: payments + invoices + stock };
 });
 function counted(label: string, count: number) {
@@ -1827,6 +1836,7 @@ watch(financeType, (value, previous) => {
                   :contract-id="view.contractId"
                   :order-id="view.id"
                   :can-receive="canReceive"
+                  :other-arrivals="otherArrivals"
                   @changed="invoicesChanged"
                 />
               </TabPane>
