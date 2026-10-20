@@ -337,6 +337,7 @@ export interface PurchaseInvoice {
   file?: { id: string; name: string; size: number; type?: string };
   createdBy: number;
   createdAt: string;
+  version: number;
 }
 /** 采购收票：采购单上的发票与有效合计。 */
 export function getOrderInvoices(contractId: string, orderId: string) {
@@ -371,6 +372,34 @@ export function createPurchaseInvoice(
     `${procurementBase}/invoices`,
     { file, ...fields },
     { timeout: 300_000 },
+  );
+}
+/** 修改付款发票：字段整体覆盖，带 file 时换原件；采购单不能改。 */
+export function updatePurchaseInvoice(
+  id: string,
+  file: File | undefined,
+  data: {
+    amount: Decimal;
+    expectedVersion: number;
+    idempotencyKey: string;
+    invoiceDate?: string;
+    invoiceNo?: string;
+    invoiceType: PurchaseInvoice['invoiceType'];
+    paymentId?: string;
+    remark?: string;
+    taxRate?: Decimal;
+  },
+) {
+  // 不换原件时也走 multipart（后端同一个接口），所以自己拼 FormData
+  const form = new FormData();
+  if (file) form.append('file', file);
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined && value !== '') form.append(key, String(value));
+  }
+  return requestClient.post<PurchaseInvoice>(
+    `${procurementBase}/invoices/${encodeURIComponent(id)}`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300_000 },
   );
 }
 /** 发票识别结果：识别不到的字段为空，由采购员手填。 */

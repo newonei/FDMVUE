@@ -4,7 +4,7 @@ import type {
   PurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
 
-import { computed, h, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { downloadFileFromBlobPart } from '@vben/utils';
 
@@ -12,7 +12,6 @@ import {
   Alert,
   Button,
   Checkbox,
-  Input,
   message,
   Modal,
   Table,
@@ -24,11 +23,11 @@ import {
   downloadPurchaseInvoiceFile,
   getOrderInvoices,
   setOrderNoInvoice,
-  voidPurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
 
 import { errorText } from '../../../data';
 import InvoiceUpload from '../../../finance/procurement/components/InvoiceUpload.vue';
+import { confirmVoidInvoice } from '../../../finance/procurement/components/void-invoice';
 
 /**
  * 采购收票（金智「付款发票」）：和入库、付款各自独立；发票合计到采购金额，或勾「无需收票」，收票才算办完。
@@ -49,6 +48,7 @@ const TYPE_NAMES: Record<PurchaseInvoice['invoiceType'], string> = {
 const invoices = ref<PurchaseInvoice[]>([]);
 const invoiced = ref('0');
 const loading = ref(false);
+const editing = ref<PurchaseInvoice>();
 const error = ref('');
 
 const currency = computed(() => String(props.view.order.currency ?? 'CNY'));
@@ -102,35 +102,16 @@ async function download(invoice: PurchaseInvoice) {
     error.value = errorText(error_);
   }
 }
+async function edited() {
+  editing.value = undefined;
+  message.success('发票已修改');
+  await load();
+  emit('changed');
+}
 function remove(invoice: PurchaseInvoice) {
-  let reason = '';
-  Modal.confirm({
-    title: `作废发票 ${invoice.invoiceNo}？`,
-    content: () =>
-      h('div', [
-        h('p', '作废后不再计入收票合计，记录保留。'),
-        h(Input, {
-          placeholder: '作废原因（必填）',
-          'onUpdate:value': (value: string) => {
-            reason = value;
-          },
-        }),
-      ]),
-    okText: '作废',
-    okButtonProps: { danger: true },
-    onOk: async () => {
-      if (!reason.trim()) {
-        message.error('请填写作废原因');
-        throw new Error('missing reason');
-      }
-      await voidPurchaseInvoice(invoice.id, {
-        idempotencyKey: crypto.randomUUID(),
-        reason: reason.trim(),
-      });
-      message.success('发票已作废');
-      await load();
-      emit('changed');
-    },
+  confirmVoidInvoice(invoice, async () => {
+    await load();
+    emit('changed');
   });
 }
 async function toggleNoInvoice(value: boolean) {
@@ -172,6 +153,7 @@ watch(() => props.view.id, load, { immediate: true });
       :order-id="view.id"
       :currency="currency"
       :default-amount="gap?.gt(0) ? gap.toFixed(2) : undefined"
+      :remaining="gap?.toFixed(2)"
       :payment-options="paymentOptions"
       @saved="saved"
     />
@@ -191,7 +173,7 @@ watch(() => props.view.id, load, { immediate: true });
         { title: '开票日期', dataIndex: 'invoiceDate' },
         { title: '对应付款', key: 'payment' },
         { title: '状态', key: 'status' },
-        { title: '', key: 'action', width: 70 },
+        { title: '', key: 'action', width: 100 },
       ]"
     >
       <template #emptyText>还没有登记发票</template>
@@ -228,17 +210,48 @@ watch(() => props.view.id, load, { immediate: true });
         >
           {{ record.status === 'VALID' ? '有效' : '已作废' }}
         </Tag>
-        <Button
+        <span
           v-else-if="column.key === 'action' && record.status === 'VALID'"
-          type="link"
-          size="small"
-          danger
-          @click="remove(record as PurchaseInvoice)"
+          class="actions"
         >
-          作废
-        </Button>
+          <Button
+            type="link"
+            size="small"
+            @click="editing = record as PurchaseInvoice"
+          >
+            修改
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            danger
+            @click="remove(record as PurchaseInvoice)"
+          >
+            作废
+          </Button>
+        </span>
       </template>
     </Table>
+    <Modal
+      :open="!!editing"
+      :title="`修改付款发票 ${editing?.invoiceNo ?? ''}`"
+      width="760px"
+      :footer="null"
+      :mask-closable="false"
+      destroy-on-close
+      @cancel="editing = undefined"
+    >
+      <InvoiceUpload
+        v-if="editing"
+        :invoice="editing"
+        :contract-id="view.contractId"
+        :order-id="view.id"
+        :currency="currency"
+        :remaining="gap?.toFixed(2)"
+        :payment-options="paymentOptions"
+        @saved="edited"
+      />
+    </Modal>
   </div>
 </template>
 
@@ -281,5 +294,9 @@ watch(() => props.view.id, load, { immediate: true });
 
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  white-space: nowrap;
 }
 </style>
