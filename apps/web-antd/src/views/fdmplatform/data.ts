@@ -3,6 +3,7 @@ import type { MasterType } from '#/api/fdmplatform/masters';
 
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import { requestLineDefaults } from './products/feedback-model';
+import { currencyOptions } from './products/model';
 import { salesChannelOf } from './sales-channel';
 
 export interface Option {
@@ -309,7 +310,9 @@ export function contractDraftAction(
         default: userId,
         min: 1,
       }),
-      field('currency', '合同币种', undefined, { default: 'CNY' }),
+      selectField('currency', '合同币种', currencyOptions, {
+        default: 'CNY',
+      }),
       field('signedDate', '签订日期', 'date'),
       field('paymentTerms', '付款条件', 'textarea'),
       field('deliveryRequirement', '交付要求', 'textarea'),
@@ -479,7 +482,9 @@ export function contractActions(
       fields: [
         selectField('assignmentId', '外采任务', assignmentOptions),
         selectField('supplierId', '供应商', masterOptions(master, 'SUPPLIER')),
-        field('currency', '币种', undefined, { default: contract.currency }),
+        selectField('currency', '币种', currencyOptions, {
+          default: contract.currency,
+        }),
         field('unitPrice', '采购单价', 'decimal', { min: 0 }),
         field('unit', '计价单位', undefined, { default: '件' }),
         field('minQuantity', '最低数量', 'decimal', {
@@ -605,7 +610,7 @@ export function financeActions(
       fields: [
         source,
         { ...amount, label: '回款金额' },
-        field('currency', '回款币种', undefined, {
+        selectField('currency', '回款币种', currencyOptions, {
           default: contract.currency,
         }),
         field('receivedAt', '到账日期', 'date'),
@@ -688,7 +693,9 @@ export function financeActions(
           { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
         ]),
         amount,
-        field('currency', '币种', undefined, { default: contract.currency }),
+        selectField('currency', '币种', currencyOptions, {
+          default: contract.currency,
+        }),
         field('issuedAt', '开票日期', 'date'),
         field('evidenceRef', '发票附件引用'),
         selectField('originalInvoiceId', '原发票', invoiceOptions, {
@@ -754,7 +761,9 @@ export function financeActions(
           { value: 'COLLECTED', label: '已归集' },
         ]),
         { ...amount, min: 0 },
-        field('currency', '原币种', undefined, { default: contract.currency }),
+        selectField('currency', '原币种', currencyOptions, {
+          default: contract.currency,
+        }),
         field('exchangeRate', '换算合同币种汇率', 'decimal', {
           default: '1',
           min: 0.000001,
