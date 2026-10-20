@@ -48,6 +48,14 @@ import {
   TEMPLATE_STATUS_MAP,
 } from '../../shared/constants';
 import { formatPerformanceDateTime } from '../../shared/format';
+import {
+  defaultScoreWeights,
+  formatWeight,
+  managerLevelLabel,
+  MAX_MANAGER_LEVELS,
+  scoreWeightsError,
+  scoreWeightsTotal,
+} from '../../shared/score-weights';
 
 defineOptions({ name: 'FdmPerformanceTemplateManager' });
 
@@ -86,8 +94,12 @@ const form = reactive<JixiaoApi.Template>({
   persons: [],
   processDefinitionKey: '',
   remark: '',
+  scoreWeights: defaultScoreWeights(),
   status: 0,
 });
+
+const scoreWeights = computed(() => form.scoreWeights ?? defaultScoreWeights());
+const managerLevels = computed(() => scoreWeights.value.managerWeights.length);
 
 const userOptions = computed(() =>
   users.value.map((item) => ({
@@ -98,13 +110,31 @@ const userOptions = computed(() =>
 
 type PersonRole = 'employee' | 'manager' | 'supervisor';
 
-function personUserOptions(person: JixiaoApi.TemplatePerson, role: PersonRole) {
+function personManagerIds(person: JixiaoApi.TemplatePerson) {
+  person.managerUserIds ||= [];
+  return person.managerUserIds;
+}
+
+/** 选中的各级上级，去掉末尾未选的层级。 */
+function selectedManagerIds(person: JixiaoApi.TemplatePerson) {
+  const ids = [...(person.managerUserIds ?? [])];
+  while (ids.length > 0 && !ids.at(-1)) ids.pop();
+  return ids;
+}
+
+function personUserOptions(
+  person: JixiaoApi.TemplatePerson,
+  role: PersonRole,
+  managerIndex = -1,
+) {
+  const managerIds = person.managerUserIds ?? [];
+  const otherManagerIds = managerIds.filter((_, index) => index !== managerIndex);
   const blockedIds =
     role === 'employee'
-      ? [person.supervisorUserId, person.superiorSupervisorUserId]
+      ? [person.supervisorUserId, ...managerIds]
       : (role === 'supervisor'
-        ? [person.userId, person.superiorSupervisorUserId]
-        : [person.userId, person.supervisorUserId]);
+        ? [person.userId, ...managerIds]
+        : [person.userId, person.supervisorUserId, ...otherManagerIds]);
   const options =
     role === 'employee' && assessableUserIds.value
       ? userOptions.value.filter(
@@ -126,13 +156,38 @@ function personRelationError(person: JixiaoApi.TemplatePerson) {
   if (person.userId === person.supervisorUserId) {
     return '被考核人不能与直属主管相同';
   }
-  if (person.superiorSupervisorUserId === person.userId) {
-    return '主管上级不能是被考核人本人';
+  const managerIds = selectedManagerIds(person);
+  const missingLevel = managerIds.findIndex((id) => !id);
+  if (missingLevel >= 0) {
+    return `请先选择${managerLevelLabel(missingLevel + 1)}`;
   }
-  if (person.superiorSupervisorUserId === person.supervisorUserId) {
-    return '主管上级不能与直属主管相同';
+  if (managerIds.includes(person.userId)) {
+    return '上级不能是被考核人本人';
+  }
+  if (managerIds.includes(person.supervisorUserId)) {
+    return '上级不能与直属主管相同';
+  }
+  if (new Set(managerIds).size !== managerIds.length) {
+    return '各级上级不能是同一人';
   }
   return undefined;
+}
+
+function addManagerLevel() {
+  if (managerLevels.value >= MAX_MANAGER_LEVELS) return;
+  form.scoreWeights = {
+    ...scoreWeights.value,
+    managerWeights: [...scoreWeights.value.managerWeights, 0],
+  };
+}
+
+function removeManagerLevel(index: number) {
+  const managerWeights = [...scoreWeights.value.managerWeights];
+  managerWeights.splice(index, 1);
+  form.scoreWeights = { ...scoreWeights.value, managerWeights };
+  for (const person of form.persons ?? []) {
+    person.managerUserIds?.splice(index, 1);
+  }
 }
 
 const processOptions = computed(() =>
@@ -295,6 +350,7 @@ function resetForm() {
     persons: [],
     processDefinitionKey: '',
     remark: '',
+    scoreWeights: defaultScoreWeights(),
     status: 0,
   });
 }
@@ -310,14 +366,22 @@ async function openEdit(record: JixiaoApi.Template) {
   resetForm();
   const detail = await getTemplate(record.id!);
   Object.assign(form, detail);
+  form.scoreWeights = detail.scoreWeights
+    ? { ...detail.scoreWeights, managerWeights: [...(detail.scoreWeights.managerWeights ?? [])] }
+    : defaultScoreWeights();
   form.persons ||= [];
+  for (const person of form.persons) {
+    person.managerUserIds = person.managerUserIds?.length
+      ? [...person.managerUserIds]
+      : (person.superiorSupervisorUserId ? [person.superiorSupervisorUserId] : []);
+  }
   form.dimensions ||= [];
   drawerOpen.value = true;
 }
 
 function addPerson() {
   form.persons ||= [];
-  form.persons.push({});
+  form.persons.push({ managerUserIds: [] });
 }
 
 function removePerson(index: number) {
@@ -435,6 +499,11 @@ async function save() {
     message.warning('请填写基础信息和流程定义');
     return;
   }
+  const weightError = scoreWeightsError(scoreWeights.value);
+  if (weightError) {
+    message.warning(`评分比重：${weightError}`);
+    return;
+  }
   const invalidPersonIndex =
     form.persons?.findIndex((person) => !!personRelationError(person)) ?? -1;
   if (invalidPersonIndex >= 0) {
@@ -443,7 +512,14 @@ async function save() {
     );
     return;
   }
-  await saveTemplate(form);
+  await saveTemplate({
+    ...form,
+    persons: form.persons?.map((person) => {
+      const managerUserIds = selectedManagerIds(person).slice(0, managerLevels.value);
+      return { ...person, managerUserIds, superiorSupervisorUserId: managerUserIds[0] };
+    }),
+    scoreWeights: scoreWeights.value,
+  });
   message.success('已保存');
   drawerOpen.value = false;
   await load();
@@ -636,6 +712,74 @@ onMounted(async () => {
 
         <section>
           <div class="section-title">
+            <h2>评分比重</h2>
+            <Button
+              :disabled="managerLevels >= MAX_MANAGER_LEVELS"
+              size="small"
+              @click="addManagerLevel"
+            >
+              添加上级层级
+            </Button>
+          </div>
+          <div class="weight-grid">
+            <label class="weight-item">
+              <span>员工自评</span>
+              <InputNumber
+                v-model:value="scoreWeights.selfWeight"
+                :max="100"
+                :min="0"
+                :precision="2"
+                addon-after="%"
+              />
+            </label>
+            <label class="weight-item">
+              <span>主管评分</span>
+              <InputNumber
+                v-model:value="scoreWeights.supervisorWeight"
+                :max="100"
+                :min="0"
+                :precision="2"
+                addon-after="%"
+              />
+            </label>
+            <div
+              v-for="(_, levelIndex) in scoreWeights.managerWeights"
+              :key="levelIndex"
+              class="weight-item"
+            >
+              <span>
+                {{ managerLevelLabel(levelIndex + 1) }}
+                <Button
+                  danger
+                  size="small"
+                  type="link"
+                  @click="removeManagerLevel(levelIndex)"
+                >
+                  移除
+                </Button>
+              </span>
+              <InputNumber
+                v-model:value="scoreWeights.managerWeights[levelIndex]"
+                :max="100"
+                :min="0"
+                :precision="2"
+                addon-after="%"
+              />
+            </div>
+          </div>
+          <div
+            :class="scoreWeightsError(scoreWeights) ? 'relation-error' : 'weight-hint'"
+          >
+            合计 {{ formatWeight(scoreWeightsTotal(scoreWeights)) }}%
+            <template v-if="scoreWeightsError(scoreWeights)">
+              ，{{ scoreWeightsError(scoreWeights) }}
+            </template>
+            。被考核人缺少某级上级时，该级比重并入主管评分。
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">
             <h2>人员与主管</h2>
             <Button size="small" @click="addPerson">添加人员</Button>
           </div>
@@ -645,7 +789,12 @@ onMounted(async () => {
               :key="index"
               class="person-item"
             >
-              <div class="person-row">
+              <div
+                class="person-row"
+                :style="{
+                  gridTemplateColumns: `repeat(${managerLevels + 2}, minmax(160px, 1fr)) auto`,
+                }"
+              >
                 <Select
                   v-model:value="person.userId"
                   show-search
@@ -663,12 +812,14 @@ onMounted(async () => {
                   :status="personRelationError(person) ? 'error' : undefined"
                 />
                 <Select
-                  v-model:value="person.superiorSupervisorUserId"
+                  v-for="levelIndex in managerLevels"
+                  :key="levelIndex"
+                  v-model:value="personManagerIds(person)[levelIndex - 1]"
                   allow-clear
                   show-search
-                  :options="personUserOptions(person, 'manager')"
+                  :options="personUserOptions(person, 'manager', levelIndex - 1)"
                   option-filter-prop="label"
-                  placeholder="主管上级（可选）"
+                  :placeholder="`${managerLevelLabel(levelIndex)}（可选）`"
                   :status="personRelationError(person) ? 'error' : undefined"
                 />
                 <Button danger @click="removePerson(index)">移除</Button>
@@ -765,7 +916,7 @@ onMounted(async () => {
             </Form.Item>
           </Form>
           <Alert
-            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_MANAGER_SCORE、JIXIAO_EMPLOYEE_CONFIRM、JIXIAO_HR_REVIEW 六个用户任务 key；上级评分节点按是否配置主管上级条件执行。"
+            message="流程必须包含 JIXIAO_INDICATOR_CONFIRM、JIXIAO_SELF_SCORE、JIXIAO_SUPERVISOR_SCORE、JIXIAO_MANAGER_SCORE、JIXIAO_EMPLOYEE_CONFIRM、JIXIAO_HR_REVIEW 六个用户任务 key；上级评分节点按是否配置上级条件执行，多级上级依次在该节点评分。"
             show-icon
             type="warning"
           />
@@ -932,7 +1083,26 @@ h2 {
 }
 
 .person-row {
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.weight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.weight-item {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #3c4149;
+}
+
+.weight-hint {
+  font-size: 12px;
+  color: #8a9099;
 }
 
 .relation-error {

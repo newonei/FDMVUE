@@ -58,3 +58,26 @@ describe('评分草稿隔离', () => {
     ]);
   });
 });
+
+describe('多级上级评分', () => {
+  it('按层级拆分上级评分，可编辑分数取当前层级', () => {
+    const rows = scoreRowsFromInstance({
+      ...instance,
+      currentManagerLevel: 2,
+      scores: [
+        { instanceIndicatorId: 11, scoreType: 'MANAGER', scoreLevel: 1, score: 60 },
+        { instanceIndicatorId: 11, scoreType: 'MANAGER', scoreLevel: 2, score: 50 },
+      ],
+    });
+    expect(rows[0]?.managerScores?.map((item) => item.score)).toEqual([60, 50]);
+    expect(rows[0]?.managerScore).toBe(50);
+  });
+  it('旧数据没有层级时视为第 1 级', () => {
+    const rows = scoreRowsFromInstance({
+      ...instance,
+      scores: [{ instanceIndicatorId: 11, scoreType: 'MANAGER', score: 70 }],
+    });
+    expect(rows[0]?.managerScores?.[0]?.score).toBe(70);
+    expect(rows[0]?.managerScore).toBe(70);
+  });
+});

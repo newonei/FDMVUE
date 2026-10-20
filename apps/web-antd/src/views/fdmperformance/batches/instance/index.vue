@@ -52,6 +52,13 @@ import { getSimpleUserList } from '#/api/system/user';
 import { INSTANCE_STATUS_MAP } from '../../shared/constants';
 import { formatPerformanceDateTime } from '../../shared/format';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
+import {
+  defaultScoreWeights,
+  effectiveScoreWeights,
+  formatWeight,
+  managerLevelLabel,
+  personManagerNames,
+} from '../../shared/score-weights';
 import { hasAction } from '../../shared/workspace';
 import {
   activeScoreStage,
@@ -147,6 +154,21 @@ const SCORE_MAX = 100;
 const managerScoreEnabled = computed(
   () => instance.value?.managerScoreEnabled === true,
 );
+const managerNames = computed(() =>
+  instance.value ? personManagerNames(instance.value) : [],
+);
+const managerLevels = computed(() =>
+  managerScoreEnabled.value ? Math.max(managerNames.value.length, 1) : 0,
+);
+/** 本次考核实际比重；旧接口未返回时按默认 50/40/10 推算。 */
+const scoreWeights = computed(
+  () =>
+    instance.value?.scoreWeights ??
+    effectiveScoreWeights(defaultScoreWeights(), managerLevels.value),
+);
+const managerEditLevel = computed(
+  () => instance.value?.currentManagerLevel ?? 1,
+);
 const scoreSummary = computed(() => {
   const sum = (
     field: keyof Pick<
@@ -163,8 +185,18 @@ const scoreSummary = computed(() => {
     return Number(values.reduce((total, score) => total + score, 0).toFixed(2));
   };
 
+  const managers = Array.from({ length: managerLevels.value }, (_, index) => {
+    const values = scoreRows.value
+      .map((row) => row.managerScores?.[index]?.score)
+      .filter(
+        (score): score is number => score !== undefined && score !== null,
+      );
+    return values.length === 0
+      ? undefined
+      : Number(values.reduce((total, score) => total + score, 0).toFixed(2));
+  });
   return {
-    manager: sum('managerScore'),
+    managers,
     self: sum('selfScore'),
     supervisor: sum('supervisorScore'),
   };
@@ -195,7 +227,7 @@ const indicatorColumns = computed<TableColumnsType>(() => {
     {
       dataIndex: 'scores',
       title: '各阶段评分与说明',
-      width: managerScoreEnabled.value ? 520 : 360,
+      width: 360 + managerLevels.value * 160,
     },
     { dataIndex: 'actionPlan', title: '行动计划', width: 130 },
   ];
@@ -283,7 +315,7 @@ const processSteps = computed(() => {
   ];
   if (managerScoreEnabled.value) {
     steps.push({
-      description: detail?.superiorSupervisorUserName || '主管上级',
+      description: managerNames.value.join(' → ') || '上级',
       key: 'JIXIAO_MANAGER_SCORE',
       title: '上级评分',
     });
@@ -920,8 +952,16 @@ onBeforeUnmount(() => {
         <Descriptions.Item label="主管">
           {{ instance.supervisorUserName }}
         </Descriptions.Item>
-        <Descriptions.Item label="主管上级">
-          {{ instance.superiorSupervisorUserName || '-' }}
+        <Descriptions.Item label="上级评分人">
+          {{ managerNames.join(' → ') || '-' }}
+          <Tag
+            v-if="
+              instance.currentTaskKey === 'JIXIAO_MANAGER_SCORE' &&
+              managerNames.length > 1
+            "
+            color="processing"
+            >{{ managerLevelLabel(managerEditLevel) }}评分中</Tag
+          >
           <Tag v-if="managerRelationInvalid" color="warning">关系无效</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="发起人">
@@ -935,21 +975,22 @@ onBeforeUnmount(() => {
             {{ statusMeta(instance.status).text }}
           </Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="员工自评汇总（50%）">
+        <Descriptions.Item
+          :label="`员工自评汇总（${formatWeight(scoreWeights.selfWeight)}%）`"
+        >
           {{ scoreSummary.self ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item
-          :label="
-            managerScoreEnabled ? '主管评分汇总（40%）' : '主管评分汇总（50%）'
-          "
+          :label="`主管评分汇总（${formatWeight(scoreWeights.supervisorWeight)}%）`"
         >
           {{ scoreSummary.supervisor ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item
-          v-if="managerScoreEnabled"
-          label="上级评分汇总（10%）"
+          v-for="(summary, levelIndex) in scoreSummary.managers"
+          :key="levelIndex"
+          :label="`${managerLevels > 1 ? managerLevelLabel(levelIndex + 1) : '上级'}评分汇总（${formatWeight(scoreWeights.managerWeights[levelIndex])}%）`"
         >
-          {{ scoreSummary.manager ?? '-' }}
+          {{ summary ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item :label="scoreResultLabel">
           {{ instance.finalScore ?? '-' }}
@@ -1000,7 +1041,7 @@ onBeforeUnmount(() => {
         :data-source="scoreRows"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: managerScoreEnabled ? 1020 : 860 }"
+        :scroll="{ x: 860 + managerLevels * 160 }"
         row-key="indicator.id"
         size="small"
       >
@@ -1054,6 +1095,9 @@ onBeforeUnmount(() => {
               :supervisor-editable="canEditSupervisorScore"
               :manager-editable="canEditManagerScore"
               :manager-enabled="managerScoreEnabled"
+              :manager-levels="managerLevels"
+              :manager-edit-level="managerEditLevel"
+              :weights="scoreWeights"
               :disabled="
                 loading ||
                 submitting ||
@@ -1090,6 +1134,9 @@ onBeforeUnmount(() => {
             :supervisor-editable="canEditSupervisorScore"
             :manager-editable="canEditManagerScore"
             :manager-enabled="managerScoreEnabled"
+            :manager-levels="managerLevels"
+            :manager-edit-level="managerEditLevel"
+            :weights="scoreWeights"
             :disabled="
               loading || submitting || savingDraft || skipping || draftLoadFailed
             "

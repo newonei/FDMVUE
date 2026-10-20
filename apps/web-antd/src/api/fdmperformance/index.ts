@@ -115,9 +115,19 @@ export namespace JixiaoApi {
     total: number;
   }
 
+  /** 评分比重（%）。被考核人缺少的上级层级，其比重并入主管评分。 */
+  export interface ScoreWeights {
+    managerWeights: number[];
+    selfWeight: number;
+    supervisorWeight: number;
+  }
+
   export interface TemplatePerson {
     deptId?: number;
     id?: number;
+    /** 各级上级，按层级排序；第 1 级同 superiorSupervisorUserId。 */
+    managerUserIds?: number[];
+    managerUserNames?: string[];
     superiorSupervisorUserId?: number;
     superiorSupervisorUserName?: string;
     supervisorUserId?: number;
@@ -160,6 +170,7 @@ export namespace JixiaoApi {
     persons?: TemplatePerson[];
     processDefinitionKey?: string;
     remark?: string;
+    scoreWeights?: ScoreWeights;
     status?: number;
   }
 
@@ -219,6 +230,7 @@ export namespace JixiaoApi {
     periodType?: string;
     persons?: TemplatePerson[];
     processDefinitionKey?: string;
+    scoreWeights?: ScoreWeights;
     templateId?: number;
     templateName?: string;
   }
@@ -271,6 +283,8 @@ export namespace JixiaoApi {
     instanceId?: number;
     instanceIndicatorId?: number;
     score?: number;
+    /** 上级评分层级，从 1 开始；自评、主管评分为空。 */
+    scoreLevel?: number;
     scoreType?: string;
     scorerUserId?: number;
     scorerUserName?: string;
@@ -318,6 +332,8 @@ export namespace JixiaoApi {
     currentTaskAssigneeUserName?: string;
     currentTaskKey?: string;
     currentTaskName?: string;
+    /** 当前节点为上级评分时，正在等待第几级上级。 */
+    currentManagerLevel?: number;
     deptId?: number;
     deptName?: string;
     finalScore?: number;
@@ -326,11 +342,15 @@ export namespace JixiaoApi {
     id?: number;
     indicators?: InstanceIndicator[];
     managerScoreEnabled?: boolean;
+    managerUserIds?: number[];
+    managerUserNames?: string[];
     periodKey?: string;
     processDefinitionKey?: string;
     processInstanceId?: string;
     publicTime?: DateTimeValue;
     result?: Result;
+    /** 本次考核实际采用的比重，上级比重与 managerUserIds 一一对应。 */
+    scoreWeights?: ScoreWeights;
     scores?: Score[];
     status?: number;
     superiorSupervisorUserId?: number;
