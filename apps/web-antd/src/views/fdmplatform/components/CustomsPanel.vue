@@ -65,6 +65,7 @@ import {
 } from '../documents/navigation';
 import RelatedLink from '../documents/RelatedLink.vue';
 import { useRouteOwner } from '../documents/useRouteOwner';
+import { currencyOptions } from '../products/model';
 import CreationAttachments from './CreationAttachments.vue';
 import CustomsEditor from './CustomsEditor.vue';
 
@@ -1270,12 +1271,7 @@ onBeforeUnmount(() => {
           <Form.Item label="费用币种" required>
             <Select
               v-model:value="expenseCurrency"
-              :options="
-                ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD'].map((value) => ({
-                  value,
-                  label: value,
-                }))
-              "
+              :options="currencyOptions"
             />
           </Form.Item>
           <Form.Item label="折算为合同币种的汇率（不同币种时填写）">
