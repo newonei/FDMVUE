@@ -24,20 +24,20 @@ import {
   Table,
   Tag,
 } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { newIdempotencyKey, uploadAttachment } from '#/api/fdmplatform';
 import { downloadContractFile } from '#/api/fdmplatform/contract-files';
 import { attachmentSize } from '#/api/fdmplatform/submission-files';
 
 import { errorText } from '../data';
+import { attachmentTime, previewMimeType } from './attachment-preview';
+import AttachmentPreview from './AttachmentPreview.vue';
 import {
   contractAttachmentCategories,
   contractFileCounts,
   contractFileGroups,
   filterContractFiles,
 } from './contract-files';
-import FilePreviewButton from './FilePreviewButton.vue';
 
 const props = defineProps<{
   contractId: string;
@@ -125,22 +125,34 @@ async function upload() {
     uploading.value = false;
   }
 }
-async function download(file: ContractFile) {
+const preview = ref<InstanceType<typeof AttachmentPreview>>();
+const previewing = ref<ContractFile>();
+async function fetchFile(file: ContractFile) {
   downloading.value = `${file.source}:${file.id}`;
   operationError.value = '';
   try {
-    const blob = await downloadContractFile(props.contractId, file);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return await downloadContractFile(props.contractId, file);
   } catch (error) {
     operationError.value = errorText(error);
   } finally {
     downloading.value = '';
   }
+}
+async function show(file: ContractFile) {
+  const blob = await fetchFile(file);
+  if (!blob) return;
+  previewing.value = file;
+  preview.value?.show(blob, file.name);
+}
+async function download(file: ContractFile) {
+  const blob = await fetchFile(file);
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 function uploader(id?: null | number) {
   if (!id) return '—';
@@ -149,9 +161,6 @@ function uploader(id?: null | number) {
     `用户 #${id}`
   );
 }
-function time(value?: null | number | string) {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
-}
 const columns = [
   { title: '附件名称', key: 'name', ellipsis: true },
   { title: '来源单据', key: 'source', width: 260 },
@@ -159,7 +168,7 @@ const columns = [
   { title: '大小', key: 'size', width: 90 },
   { title: '上传人', key: 'uploadedBy', width: 100 },
   { title: '上传时间', key: 'createdAt', width: 140 },
-  { title: '操作', key: 'action', width: 70, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
 ];
 </script>
 
@@ -262,7 +271,7 @@ const columns = [
       :loading="loading"
       :columns="columns"
       :pagination="{ pageSize: 20, hideOnSinglePage: true, size: 'small' }"
-      :scroll="{ x: 940 }"
+      :scroll="{ x: 980 }"
       size="small"
     >
       <template #emptyText>
@@ -295,27 +304,33 @@ const columns = [
           {{ uploader(record.uploadedBy) }}
         </span>
         <span v-else-if="column.key === 'createdAt'">
-          {{ time(record.createdAt) }}
+          {{ attachmentTime(record.createdAt) }}
         </span>
-        <template v-else-if="column.key === 'action'">
-          <FilePreviewButton
-            :name="record.name"
+        <Space v-else-if="column.key === 'action'" :size="0">
+          <Button
+            v-if="previewMimeType(record.name)"
+            type="link"
             size="small"
-            :load="
-              () => downloadContractFile(contractId, record as ContractFile)
-            "
-          />
+            :disabled="downloading === `${record.source}:${record.id}`"
+            @click="show(record as ContractFile)"
+          >
+            预览
+          </Button>
           <Button
             type="link"
             size="small"
-            :loading="downloading === `${record.source}:${record.id}`"
+            :disabled="downloading === `${record.source}:${record.id}`"
             @click="download(record as ContractFile)"
           >
             下载
           </Button>
-        </template>
+        </Space>
       </template>
     </Table>
+    <AttachmentPreview
+      ref="preview"
+      @download="previewing && download(previewing)"
+    />
   </div>
 </template>
 
