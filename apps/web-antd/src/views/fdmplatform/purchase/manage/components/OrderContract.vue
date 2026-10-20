@@ -12,6 +12,7 @@ import { Alert, Button, Card, Select, Space, Table } from 'ant-design-vue';
 
 import { downloadProcurementFile } from '#/api/fdmplatform/procurement';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 import { downloadBlob } from '../model';
 
@@ -123,13 +124,17 @@ function upload(event: Event) {
             record.createdAt == null ? undefined : String(record.createdAt),
             'YYYY-MM-DD HH:mm',
           ) || '—'
-        }}</span><Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          @click="download(record as ProcurementFile)"
-        >
-          下载
-        </Button>
+        }}</span><template v-else-if="column.key === 'action'">
+          <FilePreviewButton
+            :name="record.name"
+            :load="
+              () => downloadProcurementFile(view.contractId, view.id, record.id)
+            "
+          />
+          <Button type="link" @click="download(record as ProcurementFile)">
+            下载
+          </Button>
+        </template>
       </template>
     </Table>
   </Card>

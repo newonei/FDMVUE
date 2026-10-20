@@ -1,5 +1,7 @@
 import type { ReceiptConversion } from '#/api/fdmplatform/exchange-rates';
 
+import BigNumber from 'bignumber.js';
+
 export function conversionInput(
   date?: string,
   currency?: string,
@@ -17,6 +19,19 @@ export function conversionInput(
   )
     return undefined;
   return { date, currency: normalizedCurrency, amount };
+}
+/** 跨币种回款计入合同的金额：原币 × 回款币种汇率 ÷ 合同币种汇率（同一到账日），与服务端一致保留两位 */
+export function contractEquivalent(
+  amount: number | string,
+  rateToCny: number | string,
+  contractRateToCny: number | string,
+) {
+  const rate = new BigNumber(contractRateToCny);
+  if (!rate.isFinite() || rate.lte(0)) return undefined;
+  const value = new BigNumber(amount).times(rateToCny).div(rate);
+  return value.isFinite()
+    ? value.decimalPlaces(2, BigNumber.ROUND_HALF_UP).toFixed(2)
+    : undefined;
 }
 export function conversionDateNote(
   value: Pick<ReceiptConversion, 'fallback' | 'rateDate' | 'requestedDate'>,
