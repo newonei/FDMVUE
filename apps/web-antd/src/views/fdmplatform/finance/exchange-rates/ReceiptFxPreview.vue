@@ -8,16 +8,38 @@ import { Alert, Button, Descriptions, Spin } from 'ant-design-vue';
 import { convertReceiptToRmb } from '#/api/fdmplatform/exchange-rates';
 
 import { errorText, money } from '../../data';
-import { conversionDateNote, conversionInput } from './model';
+import {
+  contractEquivalent,
+  conversionDateNote,
+  conversionInput,
+} from './model';
 
 const props = defineProps<{
   amount?: number | string;
+  /** 合同币种；与回款币种不同时，再按同日汇率折成合同币种 */
+  contractCurrency?: string;
   currency?: string;
   date?: string;
   open: boolean;
 }>();
 const emit = defineEmits<{ ready: [value: boolean] }>();
 const conversion = ref<ReceiptConversion>();
+const contractRate = ref<ReceiptConversion>();
+const crossCurrency = computed(
+  () =>
+    Boolean(props.contractCurrency) &&
+    Boolean(input.value) &&
+    props.contractCurrency !== input.value?.currency,
+);
+const contractAmount = computed(() =>
+  conversion.value && contractRate.value && input.value
+    ? contractEquivalent(
+        input.value.amount,
+        conversion.value.rateToCny,
+        contractRate.value.rateToCny,
+      )
+    : undefined,
+);
 const loading = ref(false);
 const panelError = ref('');
 const input = computed(() =>
@@ -26,12 +48,19 @@ const input = computed(() =>
 let sequence = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(
-  () => [props.open, props.date, props.currency, props.amount],
+  () => [
+    props.open,
+    props.date,
+    props.currency,
+    props.amount,
+    props.contractCurrency,
+  ],
   () => {
     clearTimeout(timer);
     sequence++;
     emit('ready', false);
     conversion.value = undefined;
+    contractRate.value = undefined;
     panelError.value = '';
     loading.value = false;
     if (props.open && input.value) {
@@ -51,9 +80,22 @@ async function load() {
   panelError.value = '';
   emit('ready', false);
   try {
-    const result = await convertReceiptToRmb(params);
+    const contractCurrency = crossCurrency.value
+      ? props.contractCurrency
+      : undefined;
+    const [result, rate] = await Promise.all([
+      convertReceiptToRmb(params),
+      contractCurrency
+        ? convertReceiptToRmb({
+            date: params.date,
+            currency: contractCurrency,
+            amount: 1,
+          })
+        : undefined,
+    ]);
     if (request !== sequence || !props.open) return;
     conversion.value = result;
+    contractRate.value = rate;
     emit('ready', true);
   } catch (error) {
     if (request === sequence) panelError.value = errorText(error);
@@ -95,6 +137,14 @@ onBeforeUnmount(() => {
         <Descriptions.Item label="折算人民币">
           {{ money(conversion.rmbAmount, 'CNY') }}
         </Descriptions.Item>
+        <template v-if="contractRate">
+          <Descriptions.Item label="合同币种参考汇率">
+            1 {{ contractRate.currency }} = {{ contractRate.rateToCny }} CNY
+          </Descriptions.Item>
+          <Descriptions.Item :label="`计入合同（${contractRate.currency}）`">
+            {{ money(contractAmount, contractRate.currency) }}
+          </Descriptions.Item>
+        </template>
         <Descriptions.Item label="来源">
           {{ conversion.source }}
         </Descriptions.Item>
@@ -109,6 +159,9 @@ onBeforeUnmount(() => {
       />
     </template>
     <p class="muted">
+      <template v-if="crossCurrency">
+        回款币种与合同币种不同：先按到账日汇率折算人民币，再按同日合同币种汇率计入合同应收。
+      </template>
       使用公开参考汇率进行业务折算，不代表银行实际结汇价格。保存时由服务端计算并冻结采用的汇率，确认到账后不随汇率更新改写。
     </p>
   </div>

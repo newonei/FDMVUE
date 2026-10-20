@@ -65,7 +65,7 @@ describe('采购执行事实与金额展示', () => {
       '箱',
     ]);
   });
-  it('取消量扣除待到货范围，退货事实不自动重新增加应到货量', () => {
+  it('取消量扣除待到货范围，退回（作废入库/退货）后按净到货算进度并可再收货', () => {
     const entry = order([
       {
         ...line('件', '10', '6'),
@@ -75,13 +75,26 @@ describe('采购执行事实与金额展示', () => {
     ]);
     expect(orderArrivalProgress(entry)[0]).toMatchObject({
       ordered: '8',
-      arrived: '6',
-      remaining: '2',
+      arrived: '5',
+      remaining: '3',
       returned: '1',
-      percent: 75,
+      percent: 62.5,
     });
     expect(canRecordOrderArrival(entry)).toBe(true);
     expect(canReturnOrderArrival(entry)).toBe(true);
+  });
+  it('入库单全部作废后入库比例归零，可重新入库', () => {
+    const entry = order(
+      [{ ...line('件', '10', '10'), returnedQuantity: '10' }],
+      'ORDERED',
+    );
+    expect(orderArrivalProgress(entry)[0]).toMatchObject({
+      arrived: '0',
+      remaining: '10',
+      percent: 0,
+    });
+    expect(canRecordOrderArrival(entry)).toBe(true);
+    expect(canReturnOrderArrival(entry)).toBe(false);
   });
   it('未知或矛盾执行量不伪装成零/完成，也不显示到货主动作', () => {
     for (const item of [

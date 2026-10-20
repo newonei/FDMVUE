@@ -48,6 +48,8 @@ export interface ActionDefinition {
   initialValues?: Record<string, unknown>;
   /** 登记内销发票时，弹窗显示该客户的开票信息 */
   buyerCustomerId?: string;
+  /** 登记回款时的合同币种，用于跨币种折算预览 */
+  contractCurrency?: string;
 }
 
 export const masterTypes: Option[] = [
@@ -265,6 +267,17 @@ export function selectField(
 ) {
   return field(key, name, 'select', { options: values, ...extra });
 }
+/** 回款可用币种：合同币种排第一，其余为常用外币 */
+export function receiptCurrencyOptions(contractCurrency?: string): Option[] {
+  const common = ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CAD'];
+  const first = /^[A-Z]{3}$/.test(contractCurrency ?? '')
+    ? [contractCurrency!]
+    : [];
+  return [...new Set([...first, ...common])].map((value) => ({
+    value,
+    label: value === contractCurrency ? `${value}（合同币种）` : value,
+  }));
+}
 export function contractDraftAction(
   master: MasterRecord[],
   userId?: number,
@@ -326,7 +339,7 @@ export function contractDraftAction(
       field('unitPrice', '销售单价', 'decimal', { min: 0, default: '0' }),
       field('unit', '单位', undefined, { default: '件' }),
       field('taxBasis', '税费口径'),
-      field('requiredDate', '产品交期', 'date'),
+      field('requiredDate', '产品交期', 'date', { required: false }),
       field('material', '材质', undefined, { required: false }),
       field('size', '尺寸', undefined, { required: false }),
       field('color', '颜色', undefined, { required: false }),
@@ -596,18 +609,36 @@ export function financeActions(
   });
   const amount = field('amount', '金额', 'decimal', { min: 0.000001 });
   const reason = field('reason', '原因与依据', 'textarea');
+  // 发票只能按合同币种登记（后端校验），合同币种有效时直接锁定，避免填错后提交不了
+  const contractCurrencyValid = /^[A-Z]{3}$/.test(
+    String(contract.currency ?? ''),
+  );
+  const lockedCurrency: Partial<Field> = {
+    default: contract.currency,
+    disabled: contractCurrencyValid,
+    hint: contractCurrencyValid
+      ? `发票按合同币种 ${contract.currency} 登记。`
+      : undefined,
+  };
   return {
     CREATE_RECEIPT: {
       action: 'CREATE_RECEIPT',
       title: '新建回款记录',
       description:
         '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
+      contractCurrency: contract.currency,
       fields: [
         source,
         { ...amount, label: '回款金额' },
-        field('currency', '回款币种', undefined, {
-          default: contract.currency,
-        }),
+        selectField(
+          'currency',
+          '回款币种',
+          receiptCurrencyOptions(contract.currency),
+          {
+            default: contract.currency,
+            hint: `按客户实际到账币种填写。与合同币种 ${contract.currency ?? ''} 不同时，按到账日汇率折算人民币，再按同日汇率计入合同应收。`,
+          },
+        ),
         field('receivedAt', '到账日期', 'date'),
         selectField(
           'paymentMethod',
@@ -688,7 +719,7 @@ export function financeActions(
           { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
         ]),
         amount,
-        field('currency', '币种', undefined, { default: contract.currency }),
+        field('currency', '币种', undefined, lockedCurrency),
         field('issuedAt', '开票日期', 'date'),
         field('evidenceRef', '发票附件引用'),
         selectField('originalInvoiceId', '原发票', invoiceOptions, {

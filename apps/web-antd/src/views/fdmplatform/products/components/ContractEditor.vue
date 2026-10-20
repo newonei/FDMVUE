@@ -252,7 +252,7 @@ function applyCopy(source: Contract) {
     ),
   );
   const skipped = source.items.length - usable.length;
-  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价并填写交期。`;
+  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价${domestic.value ? '并填写交期' : ''}。`;
 }
 async function copyRecent() {
   const id = copyChoice.value;
@@ -405,15 +405,18 @@ const lockedIds = computed(
         ),
     ),
 );
-const columns = [
-  { title: '产品与规格', key: 'product', width: 320 },
-  { title: '单位', dataIndex: 'unit', width: 60 },
-  { title: '数量', key: 'quantity', width: 130 },
-  { title: '成交单价', key: 'unitPrice', width: 150 },
-  { title: '金额', key: 'amount', width: 130 },
-  { title: '交期', key: 'date', width: 165 },
-  { title: '操作', key: 'action', width: 150 },
-];
+/** 外贸建合同不填交期；内销保留 */
+const columns = computed(() =>
+  [
+    { title: '产品与规格', key: 'product', width: 320 },
+    { title: '单位', dataIndex: 'unit', width: 60 },
+    { title: '数量', key: 'quantity', width: 130 },
+    { title: '成交单价', key: 'unitPrice', width: 150 },
+    { title: '金额', key: 'amount', width: 130 },
+    { title: '交期', key: 'date', width: 165 },
+    { title: '操作', key: 'action', width: 150 },
+  ].filter((column) => domestic.value || column.key !== 'date'),
+);
 watch(
   () => props.open,
   async (open) => {
@@ -606,7 +609,9 @@ async function chooseProducts(products: Product[]) {
     }
     pickerOpen.value = false;
     if (duplicate)
-      message.info('重复 SKU 已保留独立明细，方便分别填写包装、图稿或交期');
+      message.info(
+        `重复 SKU 已保留独立明细，方便分别填写包装、图稿${domestic.value ? '或交期' : ''}`,
+      );
     void focusQuantity(focusId);
   } catch (error) {
     if (
@@ -904,7 +909,7 @@ async function save(activate = false) {
             v-if="!contract && recentContracts.length"
             label="这个客户最近的合同"
             class="recent-contracts"
-            extra="订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，交期和附件不带。"
+            :extra="`订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，${domestic ? '交期和' : ''}附件不带。`"
           >
             <div class="recent-row">
               <Select
@@ -1033,16 +1038,20 @@ async function save(activate = false) {
           <Space wrap>
             <Button type="primary" :loading="resolving" @click="showPicker()">
               从产品中心选择
-</Button><Input
-              v-model:value="batchDate"
-              type="date"
-              style="width: 170px"
-            /><Button
-              :disabled="!batchDate || !lines.length"
-              @click="lines.forEach((line) => (line.requiredDate = batchDate))"
-            >
-              统一设置交期
-</Button><Button
+</Button><template v-if="domestic">
+              <Input
+                v-model:value="batchDate"
+                type="date"
+                style="width: 170px"
+              /><Button
+                :disabled="!batchDate || !lines.length"
+                @click="
+                  lines.forEach((line) => (line.requiredDate = batchDate))
+                "
+              >
+                统一设置交期
+              </Button>
+</template><Button
               :disabled="!lines.length"
               :loading="resolving"
               @click="requestReprice"

@@ -489,14 +489,21 @@ function allocationBalance(
   }
   return sum;
 }
+/** 回款计入合同台账的金额（合同币种）：跨币种回款取服务端按到账日折算的 contractAmount */
+function receiptContractValue(contract: Contract, receipt: BusinessRecord) {
+  return !receipt.currency || receipt.currency === contract.currency
+    ? decimal(receipt.amount)
+    : decimal(receipt.contractAmount);
+}
+/** 可核销余额，按合同币种 */
 export function receiptAvailable(
   contract: Contract,
   receipt: BusinessRecord,
 ): string {
-  let amount = decimal(receipt.amount);
+  let amount = receiptContractValue(contract, receipt);
   for (const entry of contract.finance?.receipts ?? [])
     if (entry.originalReceiptId === receipt.id)
-      amount = amount.plus(decimal(entry.amount));
+      amount = amount.plus(receiptContractValue(contract, entry));
   return decimalText(
     BigNumber.maximum(
       0,
@@ -527,6 +534,25 @@ export function receiptSettlement(contract: Contract, receipt: BusinessRecord) {
     refunded: decimalText(refunded),
     refunds,
   };
+}
+
+/** 不用先解绑即可退款或冲销的金额，按回款原币；跨币种按原回款的折算比例换回原币 */
+export function receiptRefundable(
+  contract: Contract,
+  receipt: BusinessRecord,
+): string {
+  const available = decimal(receiptAvailable(contract, receipt));
+  if (!receipt.currency || receipt.currency === contract.currency)
+    return decimalText(available);
+  const original = decimal(receipt.amount);
+  const converted = decimal(receipt.contractAmount);
+  if (!converted.isGreaterThan(0)) return '0';
+  return decimalText(
+    available
+      .times(original)
+      .div(converted)
+      .decimalPlaces(2, BigNumber.ROUND_DOWN),
+  );
 }
 export function invoiceAvailable(
   contract: Contract,
@@ -834,9 +860,12 @@ export function documentActionDefinition(
       )
       .map((receipt) => ({
         value: receipt.id,
-        label: `${receipt.receivedAt ?? '回款'} · 可用 ${receipt.currency ?? contract.currency} ${receiptAvailable(contract, receipt)}`,
+        label:
+          action === 'REVERSE_RECEIPT'
+            ? `${receipt.receivedAt ?? '回款'} · 可退 ${receipt.currency ?? contract.currency} ${receiptRefundable(contract, receipt)}`
+            : `${receipt.receivedAt ?? '回款'} · 可用 ${contract.currency} ${receiptAvailable(contract, receipt)}`,
         ...(action === 'REVERSE_RECEIPT'
-          ? { fill: { amount: receiptAvailable(contract, receipt) } }
+          ? { fill: { amount: receiptRefundable(contract, receipt) } }
           : {}),
       }));
   }
@@ -847,7 +876,7 @@ export function documentActionDefinition(
           (invoice) =>
             invoice.status === 'VALID' &&
             ['COMMERCIAL', 'TAX'].includes(String(invoice.type)) &&
-            invoice.currency === receipt.currency &&
+            invoice.currency === contract.currency &&
             decimal(invoiceAvailable(contract, invoice)).isGreaterThan(0),
         )
         .map((invoice) => ({
