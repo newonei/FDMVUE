@@ -19,7 +19,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -48,6 +47,7 @@ import {
   contractActionWithAttachments,
   createContractWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
@@ -860,7 +860,8 @@ async function save(activate = false) {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="contract-editor"
     :open="open"
     :title="contract ? `编辑合同 · ${contract.code}` : '新建合同 / 样品'"
     width="min(1480px, 98vw)"
@@ -1351,7 +1352,7 @@ async function save(activate = false) {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
   <ProductPicker
     :single="Boolean(replacementId)"
     :busy="resolving"

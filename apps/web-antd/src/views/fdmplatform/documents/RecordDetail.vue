@@ -30,7 +30,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   message,
   Space,
@@ -40,6 +39,7 @@ import {
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
@@ -514,7 +514,8 @@ const mainAction = computed(() => {
     @close="emit('close')"
     @updated="emit('updated')"
   />
-  <Drawer
+  <FdmResizableDrawer
+    :resize-key="procurement ? 'procurement-record' : 'business-record'"
     v-else-if="!purchaseOrder"
     :open="open"
     :title="drawerTitle"
@@ -726,7 +727,7 @@ const mainAction = computed(() => {
       v-else-if="!loading && !pageError"
       description="请重新选择单据"
     />
-</Drawer><DocumentAction
+</FdmResizableDrawer><DocumentAction
     :open="open && actionOpen"
     :kind="selectedKind"
     :action="selectedAction"

@@ -5,7 +5,7 @@ import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/p
 
 import { computed, ref, watch } from 'vue';
 
-import { Button, DatePicker, Descriptions, Drawer, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
+import { Button, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import {
@@ -16,6 +16,7 @@ import {
   rejectProductionOrder,
   voidDelivery,
 } from '#/api/fdmgongchang/production-order';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { dateText, num, ORDER_STATUS, specText, timeText } from '../shared';
 import DeliveryModal from './delivery-modal.vue';
@@ -170,7 +171,7 @@ function producedQty(item: Api.Item) {
 </script>
 
 <template>
-  <Drawer v-model:open="open" :title="order ? `生产订单 ${order.orderNo}` : '生产订单'" width="min(760px, 100vw)">
+  <FdmResizableDrawer resize-key="factory-production-order" v-model:open="open" :title="order ? `生产订单 ${order.orderNo}` : '生产订单'" width="min(760px, 100vw)">
     <Spin :spinning="loading">
       <div v-if="order" class="flex flex-col gap-4 text-sm">
         <div class="flex flex-wrap items-center gap-2">
@@ -331,5 +332,5 @@ function producedQty(item: Api.Item) {
       </p>
       <Input id="delivery-void-reason" v-model:value="voidReason" :maxlength="255" placeholder="作废原因（必填）" />
     </Modal>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>

@@ -15,7 +15,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -36,6 +35,7 @@ import {
   getProducts,
   saveProductPrice,
 } from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, money } from '../../data';
 import { useEntityDetail } from '../../documents/useEntityDetail';
@@ -721,7 +721,8 @@ async function savePrice() {
         @close="closeEditor"
         @saved="productSaved"
       />
-      <Drawer
+      <FdmResizableDrawer
+        resize-key="product-files"
         :open="Boolean(filesProduct)"
         :title="`产品标准资料 · ${filesProduct?.displayName || filesProduct?.name || ''}`"
         width="min(900px, 96vw)"
@@ -733,7 +734,7 @@ async function savePrice() {
           :product-id="filesProduct.id"
           @changed="load()"
         />
-      </Drawer>
+      </FdmResizableDrawer>
       <Modal
         :open="Boolean(deletingProduct)"
         title="删除产品档案"
