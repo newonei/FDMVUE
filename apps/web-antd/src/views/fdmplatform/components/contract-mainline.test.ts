@@ -188,6 +188,17 @@ describe('contract main line', () => {
     });
   });
 
+  it('shows received amounts to the cent instead of whole units', () => {
+    const value = contract({
+      financeSummary: {
+        confirmedReceipts: '1061.89',
+        unpaidAmount: '2478.11',
+      },
+    });
+    expect(stage(value, 'receipt').summary).toBe('USD 1,061.89');
+    expect(stage(value, 'receipt').details).toContain('应收合计：USD 3,540.00');
+  });
+
   it('suggests activation for a priced draft and price completion otherwise', () => {
     expect(next(contract({ status: 'DRAFT' }))).toMatchObject({
       button: '合同生效',

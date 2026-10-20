@@ -71,6 +71,7 @@ import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
 import ContractTimeline from './ContractTimeline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
+import FilePreviewButton from './FilePreviewButton.vue';
 import LineTable from './LineTable.vue';
 import RecordTable from './RecordTable.vue';
 import SummaryCards from './SummaryCards.vue';
@@ -1162,6 +1163,12 @@ async function download(file: { id: string; name: string }) {
                       receipt.rmbAmount
                         ? ` · 折 CNY ${Number(receipt.rmbAmount).toLocaleString('en-US')}`
                         : ''
+                    }}{{
+                      receipt.contractAmount !== undefined &&
+                      receipt.contractAmount !== null &&
+                      receipt.currency !== contract?.currency
+                        ? ` · 计入合同 ${nativeMoney(receipt.contractAmount, contract?.currency)}`
+                        : ''
                     }}</span>
                   <span><Tag
                       :color="
@@ -1261,16 +1268,24 @@ async function download(file: { id: string; name: string }) {
           </details>
         </section>
         <Card v-if="standardFiles.length" size="small" title="产品标准资料">
-          <Button
-            v-for="file in standardFiles"
-            :key="file.id"
-            type="link"
-            size="small"
-            class="file-link"
-            @click="download(file)"
-          >
-            {{ file.skuName }} · {{ file.name }}
-          </Button>
+          <div v-for="file in standardFiles" :key="file.id" class="file-row">
+            <Button
+              type="link"
+              size="small"
+              class="file-link"
+              @click="download(file)"
+            >
+              {{ file.skuName }} · {{ file.name }}
+            </Button>
+            <FilePreviewButton
+              v-if="contract"
+              :name="file.name"
+              size="small"
+              :load="
+                () => downloadContractProductAttachment(contract!.id, file.id)
+              "
+            />
+          </div>
         </Card>
       </aside>
     </div>
@@ -1635,10 +1650,19 @@ section.identity {
   font-size: 12.5px;
 }
 
+.file-row {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
 .file-link {
   display: block;
+  flex: 1;
+  min-width: 0;
   height: auto;
   padding: 2px 0;
+  text-align: left;
   white-space: normal;
 }
 

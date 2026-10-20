@@ -469,6 +469,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
         :open="open"
         :date="textValue(values.receivedAt)"
         :currency="textValue(values.currency)"
+        :contract-currency="definition.contractCurrency"
         :amount="scalarValue(values.amount)"
         @ready="setFxReady"
       />

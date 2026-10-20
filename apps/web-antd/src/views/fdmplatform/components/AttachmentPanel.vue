@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import type { Ref } from 'vue';
+
 import type {
   AttachmentTarget,
   AttachmentView,
   ContractAttachment,
+  Directory,
 } from '#/api/fdmplatform';
 
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Upload } from '@vben/icons';
 
@@ -24,13 +27,19 @@ import {
   newIdempotencyKey,
   uploadAttachment,
 } from '#/api/fdmplatform';
+import { attachmentSize } from '#/api/fdmplatform/submission-files';
 
 import { errorText } from '../data';
+import { personLabel } from '../directory';
+import { attachmentTime, previewMimeType } from './attachment-preview';
+import AttachmentPreview from './AttachmentPreview.vue';
 import { contractAttachmentCategories } from './contract-files';
 
 const props = defineProps<{
   categories: string[];
   contractId: string;
+  /** 打开时默认选中的资料分类（如回款单据默认「回款凭证」） */
+  defaultCategory?: string;
   error: string;
   loading: boolean;
   target?: AttachmentTarget;
@@ -38,6 +47,14 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ busy: [value: boolean]; refresh: [] }>();
 const category = ref<string>();
+/** 单据详情提供的人员目录，用于显示上传人；其它入口没有时不显示该列 */
+const injectedDirectory = inject<Ref<Directory | undefined> | undefined>(
+  'fdmPlatformDirectory',
+  undefined,
+);
+const directory = computed(() => injectedDirectory?.value);
+const preview = ref<InstanceType<typeof AttachmentPreview>>();
+const previewing = ref<ContractAttachment>();
 const selectedFile = ref<File>();
 const fileInput = ref<HTMLInputElement>();
 const uploading = ref(false);
@@ -47,6 +64,16 @@ const uploadKey = ref('');
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
 onBeforeUnmount(() => emit('busy', false));
 const categoryLabels = contractAttachmentCategories;
+watch(
+  () => props.categories,
+  (values) => {
+    if (category.value && values.includes(category.value)) return;
+    if (props.defaultCategory && values.includes(props.defaultCategory))
+      category.value = props.defaultCategory;
+    else category.value = values.length === 1 ? values[0] : undefined;
+  },
+  { immediate: true },
+);
 function chooseFile(event: Event) {
   selectedFile.value = (event.target as HTMLInputElement).files?.[0];
   uploadKey.value = newIdempotencyKey();
@@ -77,22 +104,32 @@ async function upload() {
     uploading.value = false;
   }
 }
-async function download(item: ContractAttachment) {
+async function fetchFile(item: ContractAttachment) {
   downloading.value = item.id;
   operationError.value = '';
   try {
-    const blob = await downloadAttachment(props.contractId, item.id);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = item.name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return await downloadAttachment(props.contractId, item.id);
   } catch (error) {
     operationError.value = errorText(error);
   } finally {
     downloading.value = '';
   }
+}
+async function show(item: ContractAttachment) {
+  const blob = await fetchFile(item);
+  if (!blob) return;
+  previewing.value = item;
+  preview.value?.show(blob, item.name);
+}
+async function download(item: ContractAttachment) {
+  const blob = await fetchFile(item);
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = item.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 </script>
 
@@ -110,13 +147,6 @@ async function download(item: ContractAttachment) {
       show-icon
       message="系统文件存储暂不可用，请检查基础设施中的文件配置。附件上传复用系统当前存储。"
     />
-    <p>
-      {{
-        target
-          ? '附件与当前单据关联保存，可在这里继续上传和下载。'
-          : '可在这里上传和下载合同资料。'
-      }}
-    </p>
     <input
       v-if="view?.enabled && categories.length"
       ref="fileInput"
@@ -126,8 +156,8 @@ async function download(item: ContractAttachment) {
       :disabled="uploading"
       @change="chooseFile"
     />
-    <Space wrap>
-      <template v-if="view?.enabled && categories.length">
+    <div class="attachment-toolbar">
+      <Space v-if="view?.enabled && categories.length" wrap>
         <Select
           v-model:value="category"
           :options="
@@ -137,20 +167,15 @@ async function download(item: ContractAttachment) {
             }))
           "
           placeholder="资料分类"
-          style="width: 170px"
+          style="width: 150px"
           :disabled="uploading"
           @change="uploadKey = newIdempotencyKey()"
         />
-        <Button
-          type="primary"
-          ghost
-          :disabled="uploading"
-          @click="fileInput?.click()"
-        >
+        <Button :disabled="uploading" @click="fileInput?.click()">
           <template #icon>
             <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
           </template>
-          {{ selectedFile ? '重新选择文件' : '选择文件' }}
+          {{ selectedFile ? '重新选择' : '选择文件' }}
         </Button>
         <span
           class="inline-block max-w-60 truncate align-middle"
@@ -164,50 +189,79 @@ async function download(item: ContractAttachment) {
           type="primary"
           :loading="uploading"
           :disabled="!selectedFile || !category"
+          :title="!category ? '请先选择资料分类' : undefined"
           @click="upload"
         >
-          上传附件
+          上传
         </Button>
-      </template>
-      <Button :loading="loading" @click="emit('refresh')">刷新附件</Button>
-    </Space>
-    <p
-      v-if="view?.enabled && categories.length"
-      class="text-muted-foreground text-sm"
-    >
-      先选择资料分类和文件，再点击“上传附件”完成上传。
-    </p>
+      </Space>
+      <span v-else class="text-muted-foreground text-sm">
+        {{ target ? '附件与当前单据关联保存' : '合同资料' }}
+      </span>
+      <Button :loading="loading" @click="emit('refresh')">刷新</Button>
+    </div>
     <Table
       :data-source="view?.items ?? []"
       row-key="id"
+      size="small"
       :loading="loading"
+      :pagination="{ pageSize: 10, hideOnSinglePage: true, size: 'small' }"
       :columns="[
-        { title: '附件名称', dataIndex: 'name' },
-        { title: '分类', key: 'category' },
-        { title: '大小', key: 'size' },
-        { title: '上传时间', dataIndex: 'createdAt' },
-        { title: '操作', key: 'action' },
+        { title: '附件名称', key: 'name', ellipsis: true },
+        { title: '分类', key: 'category', width: 110 },
+        { title: '大小', key: 'size', width: 90 },
+        ...(directory
+          ? [{ title: '上传人', key: 'uploadedBy', width: 110 }]
+          : []),
+        { title: '上传时间', key: 'createdAt', width: 140 },
+        { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
       ]"
-      :scroll="{ x: 800 }"
+      :scroll="{ x: 720 }"
     >
       <template #emptyText>
         <Empty description="暂无当前身份可读取的附件" />
       </template>
       <template #bodyCell="{ column, record }">
-        <span v-if="column.key === 'category'">{{
+        <span v-if="column.key === 'name'" :title="record.name">
+          {{ record.name }}
+        </span>
+        <span v-else-if="column.key === 'category'">{{
           categoryLabels[record.category] ?? record.category
         }}</span>
-        <span v-else-if="column.key === 'size'">{{ (Number(record.size) / 1024).toFixed(1) }} KB</span>
-        <Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          :loading="downloading === record.id"
-          @click="download(record as ContractAttachment)"
-        >
-          下载
-        </Button>
+        <span v-else-if="column.key === 'size'">
+          {{ attachmentSize(Number(record.size)) }}
+        </span>
+        <span v-else-if="column.key === 'uploadedBy'">
+          {{ personLabel(directory, record.uploadedBy) }}
+        </span>
+        <span v-else-if="column.key === 'createdAt'">
+          {{ attachmentTime(record.createdAt) }}
+        </span>
+        <Space v-else-if="column.key === 'action'" :size="0">
+          <Button
+            v-if="previewMimeType(record.name)"
+            type="link"
+            size="small"
+            :disabled="downloading === record.id"
+            @click="show(record as ContractAttachment)"
+          >
+            预览
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            :disabled="downloading === record.id"
+            @click="download(record as ContractAttachment)"
+          >
+            下载
+          </Button>
+        </Space>
       </template>
     </Table>
+    <AttachmentPreview
+      ref="preview"
+      @download="previewing && download(previewing)"
+    />
   </div>
 </template>
 
@@ -215,6 +269,14 @@ async function download(item: ContractAttachment) {
 .attachment-stack {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+}
+
+.attachment-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
 }
 </style>

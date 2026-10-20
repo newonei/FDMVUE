@@ -161,7 +161,7 @@ export function stockFinanceRelatedDefinition(
         matches(option.when?.receiptId, record.id),
       ).length === 0
     )
-      throw new Error('当前回款没有可核销的同币种有效发票');
+      throw new Error('当前回款没有可核销的有效发票');
     return result;
   }
   if (
@@ -175,14 +175,13 @@ export function stockFinanceRelatedDefinition(
     (receipt) =>
       receiptKind(receipt) === 'PAYMENT' &&
       receipt.status === 'CONFIRMED' &&
-      receipt.currency === record.currency &&
       positive(receiptAvailable(contract, receipt)),
   );
   const receiptOptions = restrict('receiptId', (option) =>
     receipts.some((receipt) => matches(receipt.id, option.value)),
   );
   if (receiptOptions.length === 0)
-    throw new Error('当前发票没有可核销的同币种已确认回款');
+    throw new Error('当前发票没有可核销的已确认回款');
   field('receiptId').options = receiptOptions.map((option) => ({
     ...option,
     fill: {
