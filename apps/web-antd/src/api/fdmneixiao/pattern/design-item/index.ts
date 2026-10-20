@@ -25,6 +25,8 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    /** 快递单号，整单共用 */
+    expressNo?: string;
     recognitionStatus?: number;
     readonly recognizedCount?: number;
     readonly lastRecognizedTime?: number | string;
@@ -190,11 +192,14 @@ export function notifyFdmNeixiaoPatternDesignItemOrder(orderNo: string) {
   );
 }
 
-/** 标记内销定制订单制作发出并发送通知 */
-export function productionSendFdmNeixiaoPatternDesignItem(id: number) {
+/** 填写快递单号，整单标记制作发出并发送通知；已填写的单号会被覆盖 */
+export function productionSendFdmNeixiaoPatternDesignItem(
+  id: number,
+  expressNo: string,
+) {
   return requestClient.post<boolean>(
     '/fdmneixiao/pattern/design-item/production-send',
-    { id },
+    { expressNo, id },
   );
 }
 

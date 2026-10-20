@@ -33,6 +33,20 @@
 | 财务部门 | 回款核销单       | fdmplatform/finance/allocations/index    |
 | 工厂部门 | 库存与合同收发   | fdmplatform/inventory/stock/index        |
 | 基础资料 | 业务主数据与迁移 | fdmplatform/admin/master-data/index      |
+| 内销部门 | 客户管理         | fdmplatform/domestic/customers/index     |
+| 内销部门 | 合同订单         | fdmplatform/domestic/contracts/index     |
+| 内销部门 | 采购申请         | fdmplatform/domestic/requests/index      |
+| 内销部门 | 发货与退货       | fdmplatform/domestic/shipments/index     |
+
+### 内销部门（2026-10-18）
+
+外贸、内销分成两个业务线，共用同一套合同、单据、产品中心与采购 / 财务 / 仓库流程（Issue #38）。合同的 `businessType` 就是业务线：`DOMESTIC` 为内销，其余（含历史空值、样品、政府）为外贸；客户档案记 `salesChannel`。没有标记的金智历史合同、客户与单据一律算外贸。
+
+- 内销页面是 `domestic/*` 薄入口，把 `salesChannel="DOMESTIC"` 传给外贸同一套组件；外贸页面传 `FOREIGN`。列表、合同看板、客户列表与概况都按业务线请求，从其他页面带 `contractId` 进入时只按合同筛选（`sales-channel.ts` 的 `channelFilter`）。
+- 合同编辑不再选业务类型和业务部门：业务线由入口决定、创建后不可改，部门由后端按负责人记录；外贸、内销都有「样品单」开关（允许零价，外贸记 `SAMPLE`、内销记 `DOMESTIC_SAMPLE`）。内销合同币种固定人民币，不显示阿里信保；合同详情不显示报关。
+- 内销客户不接 OKKI、不选国家（后端固定为 CN），与外贸共用 `KH-` 客户编号；合同只能选同业务线的客户。内销客户有开票信息（`invoice`：发票类型、抬头、纳税人识别号、注册地址与电话、开户银行与账号、收票邮箱），专用发票须填齐，抬头留空用客户全称；保存时不传 `invoice` 保持原值。内销客户导出 CSV 末尾追加开票信息列；内销合同「登记发票」弹窗用 `BuyerInvoicePanel` 显示购方开票信息（可逐项复制，只读，不随发票保存）。
+- 菜单由后端补丁 `20261018_fdmplatform_domestic_menus.sql` 挂到「内销部门」，并加入全员共用菜单。
+- **内销门户**：`portal/domestic/index.vue` 复用 `DepartmentPortal.vue`，定义与外贸门户同由 `model.ts` 的 `salesPortal()` 生成，链接指向 `/neixiao/*`，没有「金智合同未发齐」和汇率中心。接口 `/portal/domestic` 只汇总当前用户的内销合同，外贸门户 `/portal/trade` 只汇总外贸合同。与其他门户一样按角色授权（`fdmplatform:portal:domestic`，补丁 `20261019_fdmplatform_domestic_portal.sql` 授给内销角色）。财务、采购、仓库门户仍汇总两条业务线。
 
 ### 菜单合并（2026-09-29）
 
@@ -70,6 +84,12 @@
 - **财务门户**：`portal/FinancePortal.vue` 独立于外贸门户；`/portal/finance` 新增 `cashflow`：近 24 个月收付、本月与今年累计对比、收付款账户、回款前 5 客户与付款前 5 供应商。付款只含采购付款，不含报销。
 - **客户回款**（收款与开票 `?view=customers`）与 **供应商付款**（付款与报销 `?view=suppliers`）：共用 `finance/cash/CashPartyList.vue`，按最近一次收付分层（≤90 天活跃、91–365 天需跟进、超过 1 年沉睡），可按近 12 个月、累计、最近收付排序并导出；客户另列未回款（与客户管理同口径），供应商另列同期采购额与付款占比。供应商按收款方名称归并（金智逐单付款只有名称）。
 - **汇率中心**：常用币种卡片切换走势，`/fx-rates/history` 只读已保存的每日参考值；参考换算在前端按当日参考值估算，回款折算仍以登记时冻结的汇率为准。
+
+### 产品分类与选品（2026-10-16，Issue #32）
+
+- **产品档案**改为左分类、右产品两栏：左侧 `products/components/ProductCategoryPanel.vue` 列出全部分类及产品数（`GET /products/categories`，口径同列表的搜索词与启用状态，不含分类本身），点击分类按原文精确筛选（`/products?category=&exactCategory=true`，空分类为「未分类」）。深链接 `catalogCategory` 同样为精确分类。
+- **产品中心弹窗** `ProductPicker.vue` 改为同样两栏的弹窗：左分类、右可勾选表格，跨分类、跨页保留勾选，底部汇总已选后确定。合同选品只列资料齐全产品；`allow-incomplete` 时列全部启用产品。
+- **采购单录入**：明细上方「从产品中心选择」批量勾选追加明细，每行「选择」按分类替换本行产品；原行内搜索下拉和 Excel 粘贴保留。
 
 ### 待补齐历史单据
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../sales-channel';
+
 import type { Contract, Directory } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -10,7 +12,12 @@ import { getBusinessPage, getDirectory } from '#/api/fdmplatform';
 import { contractQuickActionReason } from '../components/contract-workflow';
 import { errorText, label, money } from '../data';
 import { actionTitle } from './model';
-const props = defineProps<{ action?: string; open: boolean }>();
+const props = defineProps<{
+  action?: string;
+  open: boolean;
+  /** 只列出该业务线的合同；不传不分业务线 */
+  salesChannel?: SalesChannel;
+}>();
 const emit = defineEmits<{ close: []; select: [contract: Contract] }>();
 const keyword = ref('');
 const directory = ref<Directory>();
@@ -47,6 +54,7 @@ async function load() {
       pageNo: pageNo.value,
       pageSize: pageSize.value,
       keyword: keyword.value.trim() || undefined,
+      salesChannel: props.salesChannel,
     });
     if (current === sequence) {
       records.value = result.list;

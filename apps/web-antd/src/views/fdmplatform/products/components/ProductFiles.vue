@@ -23,6 +23,7 @@ import {
   uploadProductAttachment,
 } from '#/api/fdmplatform/products';
 
+import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
 
 const props = defineProps<{ companyId: number; productId: string }>();
@@ -171,13 +172,17 @@ async function download(file: ProductAttachment) {
         >
           v{{ record.revision }} · {{ record.active ? '当前' : '历史' }}
         </Tag>
-        <Button
-          v-if="column.key === 'action'"
-          type="link"
-          @click="download(record as ProductAttachment)"
-        >
-          下载
-        </Button>
+        <template v-if="column.key === 'action'">
+          <FilePreviewButton
+            :name="record.name"
+            :load="
+              () => downloadProductAttachment(companyId, productId, record.id)
+            "
+          />
+          <Button type="link" @click="download(record as ProductAttachment)">
+            下载
+          </Button>
+        </template>
       </template>
     </Table>
   </Space>

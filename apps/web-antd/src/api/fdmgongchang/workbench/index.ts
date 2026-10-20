@@ -43,13 +43,48 @@ export namespace FdmgongchangWorkbenchApi {
     sourceStage: string;
   }
 
+  /** 任务的建议领料：按订单规格从上道库存先进先出带出要领哪些料、各领多少。 */
+  export interface TaskPrepare {
+    aux: FdmgongchangStageStockApi.AuxPlan[];
+    hint?: null | string;
+    picks: Array<{ quantity: Decimal; stock: FdmgongchangStageStockApi.Stock }>;
+    productionOrderItemId?: null | number;
+    /** 按任务数量算出要领多少（来源阶段单位）。 */
+    required?: Decimal | null;
+    /** 库存不够时还差多少（任务单位）。 */
+    shortfall?: Decimal | null;
+    sourceStage?: null | string;
+    /** 订单的产品规格。 */
+    target?: null | string;
+    /** 订单成品的材质、颜色、长宽厚（cm）：开片按它定片材厚度，立切按它定长宽。 */
+    targetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+    task: FdmgongchangScheduleApi.Task;
+  }
+
+  /** 报工：一次登记实际领料、产出、计件和纸质领料单，任务随之完成。 */
+  export interface TaskReportReq {
+    auxInputs?: FdmgongchangStageStockApi.OrderInput[];
+    inputs: FdmgongchangStageStockApi.OrderInput[];
+    issueSheetUrls: string[];
+    outputs: FdmgongchangStageStockApi.OrderOutput[];
+    pieceworks?: FdmgongchangStageStockApi.Piecework[];
+    recipeBatches?: Decimal;
+    recipeCode?: string;
+    remark?: string;
+    sourceStage: string;
+    taskId: number;
+  }
+
   export interface My {
     factoryName: string;
     inProgress: Order[];
     processes: Process[];
     /** 我最近完工的单（完工 3 天内，还能补登领料）。 */
     recentDone?: Order[];
+    /** 我的任务：派给我或我接的、还没报工的。 */
     tasks: FdmgongchangScheduleApi.Task[];
+    /** 任务大厅：我有岗位的工序里没人接的任务；lockReason 不为空时要等上道报工。 */
+    hall?: FdmgongchangScheduleApi.Task[];
     team?: null | string;
     today: FdmgongchangScheduleApi.DateValue;
     todayAmount: Decimal;
@@ -150,4 +185,46 @@ export function matchWorkbenchWage(params: {
     ...headers(),
     params,
   });
+}
+
+/** 抢单：接任务大厅里没人接的任务。 */
+export function claimWorkbenchTask(id: number) {
+  return requestClient.post<boolean>(`${BASE}/task/claim`, undefined, {
+    ...headers(),
+    params: { id },
+  });
+}
+
+/** 退单：还没报工的任务放回任务大厅。 */
+export function releaseWorkbenchTask(id: number) {
+  return requestClient.post<boolean>(`${BASE}/task/release`, undefined, {
+    ...headers(),
+    params: { id },
+  });
+}
+
+/** 报工前带出这个任务的建议领料。 */
+export function prepareWorkbenchTask(id: number) {
+  return requestClient.get<FdmgongchangWorkbenchApi.TaskPrepare>(
+    `${BASE}/task/prepare`,
+    {
+      ...headers(),
+      params: { id },
+    },
+  );
+}
+
+/** 领料清单：我手上所有任务合起来要领哪些料。 */
+export function getWorkbenchPickList() {
+  return requestClient.get<FdmgongchangWorkbenchApi.TaskPrepare[]>(
+    `${BASE}/task/pick-list`,
+    headers(),
+  );
+}
+
+/** 报工：按实际领料扣库存、登记产出和计件、上传纸质领料单，任务完成；返回生成的工序单编号。 */
+export function reportWorkbenchTask(
+  data: FdmgongchangWorkbenchApi.TaskReportReq,
+) {
+  return requestClient.post<number>(`${BASE}/task/report`, data, headers());
 }

@@ -17,7 +17,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   message,
   Modal,
   Space,
@@ -38,9 +37,11 @@ import {
   createProcurementFinanceWithAttachments,
   procurementFinanceActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
 import CreationAttachments from '../../../components/CreationAttachments.vue';
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, rows, selectField } from '../../../data';
 import { needsImportedValue } from '../../../documents/import-completion';
@@ -544,7 +545,8 @@ async function relatedUpdated() {
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    :resize-key="`finance-${type}`"
     :open="open"
     :title="
       record
@@ -802,13 +804,20 @@ async function relatedUpdated() {
             ]"
           >
             <template #bodyCell="{ column, record: file }">
-              <Button
-                v-if="column.key === 'action'"
-                type="link"
-                @click="download(file as ProcurementFinanceFile)"
-              >
-                下载
-              </Button>
+              <template v-if="column.key === 'action' && record">
+                <FilePreviewButton
+                  :name="file.name"
+                  :load="
+                    () => downloadProcurementFinanceFile(record!.id, file.id)
+                  "
+                />
+                <Button
+                  type="link"
+                  @click="download(file as ProcurementFinanceFile)"
+                >
+                  下载
+                </Button>
+              </template>
             </template>
           </Table>
 </Card><Card
@@ -826,13 +835,28 @@ async function relatedUpdated() {
             ]"
           >
             <template #bodyCell="{ column, record: file }">
-              <Button
-                v-if="column.key === 'action'"
-                type="link"
-                @click="downloadSource(file as BusinessDocumentFile)"
+              <template
+                v-if="
+                  column.key === 'action' && record?.sourceAttachmentDocumentId
+                "
               >
-                下载
-              </Button>
+                <FilePreviewButton
+                  :name="file.name"
+                  :load="
+                    () =>
+                      downloadBusinessDocumentFile(
+                        record!.sourceAttachmentDocumentId!,
+                        file.id,
+                      )
+                  "
+                />
+                <Button
+                  type="link"
+                  @click="downloadSource(file as BusinessDocumentFile)"
+                >
+                  下载
+                </Button>
+              </template>
             </template>
           </Table>
 </Card><Card
@@ -893,7 +917,7 @@ async function relatedUpdated() {
         />
       </template>
     </ActionDialog>
-  </Drawer>
+  </FdmResizableDrawer>
   <FinanceDocument
     v-if="related"
     :open="open"

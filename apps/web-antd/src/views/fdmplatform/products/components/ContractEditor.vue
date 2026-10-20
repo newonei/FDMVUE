@@ -19,7 +19,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -48,6 +47,7 @@ import {
   contractActionWithAttachments,
   createContractWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
@@ -56,7 +56,13 @@ import {
   validProductCategory,
 } from '../../contract-categories';
 import { errorText, money } from '../../data';
-import { departmentLabel, personLabel } from '../../directory';
+import { personLabel } from '../../directory';
+import {
+  DOMESTIC_CURRENCY,
+  isSampleBusinessType,
+  salesChannelOf,
+  sampleBusinessType,
+} from '../../sales-channel';
 import CustomerEditor from '../../trade/customers/CustomerEditor.vue';
 import {
   attachmentPurposeOptions,
@@ -109,6 +115,29 @@ const form = reactive({
   deliveryRequirement: '',
   attachmentIds: [] as string[],
 });
+/** 业务线由入口决定（外贸 / 内销部门），编辑时沿用原合同；历史合同没有业务类型算外贸 */
+const channel = computed(() =>
+  props.contract
+    ? salesChannelOf(props.contract.businessType)
+    : salesChannelOf(props.defaultBusinessType ?? 'DOMESTIC'),
+);
+const domestic = computed(() => channel.value === 'DOMESTIC');
+/** 关掉样品时回到的业务类型：原合同的政府等类型保留，否则就是业务线本身 */
+const baseBusinessType = computed(() =>
+  props.contract?.businessType &&
+  !isSampleBusinessType(props.contract.businessType)
+    ? props.contract.businessType
+    : channel.value,
+);
+/** 样品单允许零价；外贸、内销各有自己的样品类型 */
+const sample = computed({
+  get: () => isSampleBusinessType(form.businessType),
+  set: (value: boolean) => {
+    form.businessType = value
+      ? sampleBusinessType(channel.value)
+      : baseBusinessType.value;
+  },
+});
 const lines = ref<ContractItem[]>([]);
 const expanded = ref<string[]>([]);
 const saving = ref(false);
@@ -148,22 +177,6 @@ const recentContracts = ref<ContractBoardRow[]>([]);
 const copyChoice = ref<string>();
 const copying = ref(false);
 let recentSequence = 0;
-const departmentOptions = computed(() => {
-  const options = (props.directory?.departments ?? []).map((department) => ({
-    value: department.id,
-    label: department.name,
-  }));
-  if (
-    form.departmentId !== undefined &&
-    form.departmentId !== null &&
-    !options.some((option) => option.value === form.departmentId)
-  )
-    options.unshift({
-      value: form.departmentId,
-      label: departmentLabel(props.directory, form.departmentId),
-    });
-  return options;
-});
 const recentOptions = computed(() =>
   recentContracts.value.map((row) => ({
     value: row.id,
@@ -200,7 +213,7 @@ async function loadRecentContracts(customerId: string) {
       );
       if (known) form.companyId = last.companyId ?? undefined;
     }
-    if (last?.currency && lines.value.length === 0)
+    if (last?.currency && lines.value.length === 0 && !domestic.value)
       form.currency = last.currency;
   } catch {
     // 最近合同只是便利信息，读取失败不影响新建
@@ -213,7 +226,7 @@ function applyCopy(source: Contract) {
     orderCompanies.value.some((o) => o.value === source.companyId)
   )
     form.companyId = form.companyId ?? source.companyId;
-  if (/^[A-Z]{3}$/.test(String(source.currency ?? '')))
+  if (/^[A-Z]{3}$/.test(String(source.currency ?? '')) && !domestic.value)
     form.currency = source.currency;
   form.taxBasis =
     source.items[0]?.taxBasis === 'TAX_EXCLUDED'
@@ -239,7 +252,7 @@ function applyCopy(source: Contract) {
     ),
   );
   const skipped = source.items.length - usable.length;
-  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价并填写交期。`;
+  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价${domestic.value ? '并填写交期' : ''}。`;
 }
 async function copyRecent() {
   const id = copyChoice.value;
@@ -277,6 +290,7 @@ async function loadCustomers(reset = false) {
   try {
     const result = await getCustomers({
       keyword: customerKeyword.value.trim() || undefined,
+      salesChannel: channel.value,
       active: true,
       pageNo: customerPage.value,
       pageSize: 30,
@@ -391,15 +405,18 @@ const lockedIds = computed(
         ),
     ),
 );
-const columns = [
-  { title: '产品与规格', key: 'product', width: 320 },
-  { title: '单位', dataIndex: 'unit', width: 60 },
-  { title: '数量', key: 'quantity', width: 130 },
-  { title: '成交单价', key: 'unitPrice', width: 150 },
-  { title: '金额', key: 'amount', width: 130 },
-  { title: '交期', key: 'date', width: 165 },
-  { title: '操作', key: 'action', width: 150 },
-];
+/** 外贸建合同不填交期；内销保留 */
+const columns = computed(() =>
+  [
+    { title: '产品与规格', key: 'product', width: 320 },
+    { title: '单位', dataIndex: 'unit', width: 60 },
+    { title: '数量', key: 'quantity', width: 130 },
+    { title: '成交单价', key: 'unitPrice', width: 150 },
+    { title: '金额', key: 'amount', width: 130 },
+    { title: '交期', key: 'date', width: 165 },
+    { title: '操作', key: 'action', width: 150 },
+  ].filter((column) => domestic.value || column.key !== 'date'),
+);
 watch(
   () => props.open,
   async (open) => {
@@ -431,10 +448,13 @@ watch(
       code: contract?.code ?? '',
       name: contract?.name ?? '',
       customerId: contract?.customerId ?? '',
-      businessType:
-        contract?.businessType ?? props.defaultBusinessType ?? 'DOMESTIC',
+      businessType: contract
+        ? (contract.businessType ?? 'FOREIGN')
+        : channel.value,
       productCategory: contract?.productCategory || undefined,
-      currency: contract?.currency ?? 'CNY',
+      currency: domestic.value
+        ? DOMESTIC_CURRENCY
+        : (contract?.currency ?? 'CNY'),
       taxBasis:
         contract?.items[0]?.taxBasis === 'TAX_EXCLUDED'
           ? 'TAX_EXCLUDED'
@@ -589,7 +609,9 @@ async function chooseProducts(products: Product[]) {
     }
     pickerOpen.value = false;
     if (duplicate)
-      message.info('重复 SKU 已保留独立明细，方便分别填写包装、图稿或交期');
+      message.info(
+        `重复 SKU 已保留独立明细，方便分别填写包装、图稿${domestic.value ? '或交期' : ''}`,
+      );
     void focusQuantity(focusId);
   } catch (error) {
     if (
@@ -843,7 +865,8 @@ async function save(activate = false) {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="contract-editor"
     :open="open"
     :title="contract ? `编辑合同 · ${contract.code}` : '新建合同 / 样品'"
     width="min(1480px, 98vw)"
@@ -886,7 +909,7 @@ async function save(activate = false) {
             v-if="!contract && recentContracts.length"
             label="这个客户最近的合同"
             class="recent-contracts"
-            extra="订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，交期和附件不带。"
+            :extra="`订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，${domestic ? '交期和' : ''}附件不带。`"
           >
             <div class="recent-row">
               <Select
@@ -922,11 +945,14 @@ async function save(activate = false) {
               placeholder="便于识别的补充说明，订单号由系统生成"
             />
           </Form.Item>
-          <Form.Item label="阿里信保订单">
+          <Form.Item v-if="!domestic" label="阿里信保订单">
             <Switch v-model:checked="form.useTradeAssurance" />
           </Form.Item>
           <Form.Item
-            v-if="form.useTradeAssurance || form.alibabaTradeAssuranceNo"
+            v-if="
+              !domestic &&
+              (form.useTradeAssurance || form.alibabaTradeAssuranceNo)
+            "
             label="阿里信保单号"
             :required="form.useTradeAssurance"
             extra="信保订单生效前填写实际单号。报关安排在报关业务中登记。"
@@ -938,16 +964,8 @@ async function save(activate = false) {
               placeholder="请输入实际阿里信保单号"
             />
           </Form.Item>
-          <Form.Item label="业务类型">
-            <Select
-              v-model:value="form.businessType"
-              :options="[
-                { value: 'FOREIGN', label: '外贸 B2B' },
-                { value: 'DOMESTIC', label: '国内 B2B' },
-                { value: 'GOVERNMENT', label: '政府客户' },
-                { value: 'SAMPLE', label: '样品（允许零价）' },
-              ]"
-            />
+          <Form.Item label="样品单" extra="免费样品可以把成交单价填为 0。">
+            <Switch v-model:checked="sample" />
           </Form.Item>
           <Form.Item
             label="产品分类"
@@ -977,17 +995,14 @@ async function save(activate = false) {
               option-filter-prop="label"
             />
           </Form.Item>
-          <Form.Item label="业务部门（可选）">
-            <Select
-              v-model:value="form.departmentId"
-              allow-clear
-              placeholder="可留空"
-              :options="departmentOptions"
-              show-search
-              option-filter-prop="label"
-            />
+          <Form.Item
+            v-if="domestic"
+            label="合同币种"
+            extra="内销合同统一使用人民币。"
+          >
+            <Input value="人民币（CNY）" readonly />
           </Form.Item>
-          <Form.Item label="合同币种" required>
+          <Form.Item v-else label="合同币种" required>
             <Select
               v-model:value="form.currency"
               :options="currencyOptions"
@@ -1023,16 +1038,20 @@ async function save(activate = false) {
           <Space wrap>
             <Button type="primary" :loading="resolving" @click="showPicker()">
               从产品中心选择
-</Button><Input
-              v-model:value="batchDate"
-              type="date"
-              style="width: 170px"
-            /><Button
-              :disabled="!batchDate || !lines.length"
-              @click="lines.forEach((line) => (line.requiredDate = batchDate))"
-            >
-              统一设置交期
-</Button><Button
+</Button><template v-if="domestic">
+              <Input
+                v-model:value="batchDate"
+                type="date"
+                style="width: 170px"
+              /><Button
+                :disabled="!batchDate || !lines.length"
+                @click="
+                  lines.forEach((line) => (line.requiredDate = batchDate))
+                "
+              >
+                统一设置交期
+              </Button>
+</template><Button
               :disabled="!lines.length"
               :loading="resolving"
               @click="requestReprice"
@@ -1235,7 +1254,7 @@ async function save(activate = false) {
                       />
                     </Space>
                   </Form.Item>
-                  <template v-if="form.businessType === 'SAMPLE'">
+                  <template v-if="sample">
                     <Form.Item label="建议采购工厂（可选）">
                       <RemoteMasterSelect
                         v-model:value="record.suggestedSupplierId"
@@ -1342,7 +1361,7 @@ async function save(activate = false) {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
   <ProductPicker
     :single="Boolean(replacementId)"
     :busy="resolving"
@@ -1357,6 +1376,7 @@ async function save(activate = false) {
   <CustomerEditor
     :open="open && customerEditorOpen"
     :initial-name="newCustomerName"
+    :sales-channel="channel"
     select-after-save
     @close="customerEditorOpen = false"
     @saved="selectCreatedCustomer"

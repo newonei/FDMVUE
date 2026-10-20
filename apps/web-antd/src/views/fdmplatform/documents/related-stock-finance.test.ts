@@ -409,7 +409,7 @@ describe('source-bound stock and finance creation', () => {
     state.settle();
     expect(state.values.amount).toBe('5');
   });
-  it('rejects unavailable source balances and excludes unconfirmed or different-currency receipts', () => {
+  it('rejects unavailable source balances and excludes unconfirmed or unconverted different-currency receipts', () => {
     const { contract, pools } = fixture();
     expect(() =>
       related(
@@ -444,7 +444,7 @@ describe('source-bound stock and finance creation', () => {
         invoice,
         'BIND_ALLOCATION',
       ),
-    ).toThrow('没有可核销的同币种已确认回款');
+    ).toThrow('没有可核销的已确认回款');
   });
   it('returns undefined for unrelated actions without changing their definitions', () => {
     const { contract, pools, production } = fixture();

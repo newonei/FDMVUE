@@ -4,7 +4,6 @@ import type { Dayjs } from 'dayjs';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import { ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
 
 import { DatePicker, Input, message, Modal, Select } from 'ant-design-vue';
 import dayjs from 'dayjs';
@@ -15,12 +14,11 @@ import { dateText, num } from '../shared';
 
 /**
  * 选中的订单做 AI 排单：只把这几张单交给 AI 排（外贸任务和其他订单这次不排），
- * 提交后跳到「AI 排单」看方案、调整、确认下发。
+ * 提交后切到「排单方案」看方案、调整、确认下发。
  */
 const props = defineProps<{ orders: Api.Order[] }>();
 const emit = defineEmits<{ generated: [id: number] }>();
 const open = defineModel<boolean>('open', { required: true });
-const router = useRouter();
 
 const startDate = ref<Dayjs>(dayjs());
 const days = ref(3);
@@ -44,10 +42,9 @@ async function submit() {
       productionOrderIds: props.orders.map((o) => o.id),
       startDate: startDate.value.format('YYYY-MM-DD'),
     });
-    message.success('已提交，AI 正在排单，可以在「AI 排单」里看方案');
+    message.success('已提交，AI 正在排单');
     open.value = false;
     emit('generated', id);
-    void router.push({ path: '/gongchang/production/schedule', query: { id: String(id) } });
   } catch {
     // 后端错误已由全局提示展示
   } finally {

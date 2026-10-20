@@ -149,13 +149,13 @@ const alerts = computed(() => {
   if (!d) return [];
   const list: Array<{ action: string; detail: string; path: FactoryRoute; title: string; tone: 'danger' | 'warning' }> = [];
   if (d.kpi.overdueOrders > 0) {
-    list.push({ action: '去工厂下单', detail: '交期已过、还没做完', path: FACTORY_ROUTES.productionOrder, title: `${d.kpi.overdueOrders} 张订单已逾期`, tone: 'danger' });
+    list.push({ action: '去工厂排单', detail: '交期已过、还没做完', path: FACTORY_ROUTES.productionOrder, title: `${d.kpi.overdueOrders} 张订单已逾期`, tone: 'danger' });
   }
   if (d.kpi.pendingOrders > 0) {
     list.push({ action: '去接单', detail: '内部部门下给本厂、还没接单', path: FACTORY_ROUTES.productionOrder, title: `${d.kpi.pendingOrders} 张工厂订单待接单`, tone: 'warning' });
   }
   for (const s of d.today.shortages) {
-    list.push({ action: '去 AI 排单', detail: `明天排了 ${big(s.planned)}${s.unit}，${s.sourceLabel}只有 ${big(s.available)}${s.unit}`, path: FACTORY_ROUTES.schedule, title: `${s.label}明天可能缺料`, tone: 'danger' });
+    list.push({ action: '去排单', detail: `明天排了 ${big(s.planned)}${s.unit}，${s.sourceLabel}只有 ${big(s.available)}${s.unit}`, path: FACTORY_ROUTES.schedule, title: `${s.label}明天可能缺料`, tone: 'danger' });
   }
   for (const o of d.today.staleOrders.slice(0, 3)) {
     list.push({ action: '去工序库存', detail: `${o.orderNo} · 已领 ${big(o.inputQuantity)}${o.unit}`, path: FACTORY_ROUTES.stageStock, title: `${o.operatorName ?? ''} 领料超过 8 小时没报数量`, tone: 'warning' });

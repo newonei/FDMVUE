@@ -4,18 +4,11 @@ import type { StockBalance, StockTxn } from '#/api/fdmplatform/warehouse';
 
 import { computed, onMounted, ref } from 'vue';
 
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Drawer,
-  Input,
-  Select,
-  Table,
-} from 'ant-design-vue';
+import { Alert, Button, Checkbox, Input, Select, Table } from 'ant-design-vue';
 
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import { getStocks, getStockTxns } from '#/api/fdmplatform/warehouse';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { averageCost, money, qty } from './model';
@@ -197,7 +190,8 @@ onMounted(async () => {
         }
       "
     />
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="warehouse-stock-flow"
       v-else
       :open="!!selected"
       width="1000px"
@@ -216,6 +210,6 @@ onMounted(async () => {
           }
         "
       />
-    </Drawer>
+    </FdmResizableDrawer>
   </div>
 </template>

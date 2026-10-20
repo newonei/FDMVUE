@@ -15,7 +15,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   Pagination,
@@ -28,6 +27,7 @@ import {
 } from 'ant-design-vue';
 
 import { getCustomerActivity } from '#/api/fdmplatform/customers';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, label } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
@@ -47,6 +47,8 @@ import {
   customerMissingFields,
   customerRegion,
   customerSourceLabel,
+  invoiceFields,
+  invoiceTypeOptions,
 } from './model';
 
 const props = defineProps<{
@@ -223,7 +225,9 @@ function close() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="customer-detail"
+    :resizable="!fullscreen"
     :open="open"
     :width="fullscreen ? '100vw' : 'min(1440px, 96vw)'"
     :body-style="{
@@ -344,6 +348,22 @@ function close() {
                 >{{ customer.website }}</a>
               <template v-else>{{ customer[key] || '—' }}</template>
             </Descriptions.Item>
+            <template v-if="customer.salesChannel === 'DOMESTIC'">
+              <Descriptions.Item label="发票类型">
+                {{
+                  invoiceTypeOptions.find(
+                    (option) => option.value === customer?.invoice?.type,
+                  )?.label || '—'
+                }}
+              </Descriptions.Item>
+              <Descriptions.Item
+                v-for="[key, title] in invoiceFields"
+                :key="`invoice-${key}`"
+                :label="title"
+              >
+                {{ customer.invoice?.[key] || '—' }}
+              </Descriptions.Item>
+            </template>
             <Descriptions.Item label="资料来源">
               {{ customerSourceLabel(customer.sourceSystem) }}
               <span v-if="customer.externalId" class="muted">
@@ -625,7 +645,7 @@ function close() {
         </Card>
       </aside>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

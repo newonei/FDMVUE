@@ -13,7 +13,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   Select,
@@ -30,6 +29,7 @@ import {
   getLegacyRecords,
   getNativeSource,
 } from '#/api/fdmplatform/legacy';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../data';
 import RelatedLink from '../documents/RelatedLink.vue';
@@ -232,7 +232,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="legacy-detail"
     :open="open"
     width="min(1380px, 96vw)"
     title="原系统记录详情"
@@ -434,7 +435,7 @@ onBeforeUnmount(() => {
         </Tabs>
       </template>
     </Space>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

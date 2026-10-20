@@ -152,6 +152,7 @@ async function submit() {
             { value: 'DOMESTIC', label: '国内 B2B' },
             { value: 'GOVERNMENT', label: '政府客户' },
             { value: 'SAMPLE', label: '样品' },
+            { value: 'DOMESTIC_SAMPLE', label: '内销样品' },
           ]"
           allow-clear
         />

@@ -4,9 +4,10 @@ import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
 
 import { computed, onMounted, ref } from 'vue';
 
-import { Select, Spin } from 'ant-design-vue';
+import { message, Select, Spin } from 'ant-design-vue';
 
 import { getWorkbenchMates, matchWorkbenchWage } from '#/api/fdmgongchang/workbench';
+import ImageUpload from '#/components/upload/image-upload.vue';
 
 import { formatQty, toNumber } from '../../stage-stock/model';
 import { defectTotal, goodTotal, stageOf, useJob } from '../use-job';
@@ -14,7 +15,7 @@ import StepHeader from './step-header.vue';
 
 /**
  * 确认计件：按做出来的规格自动选好计价项目，默认算给自己、数量 = 好的数量；
- * 两人一起做（压花送片 / 接片）点「还有人跟我一起做」。
+ * 两人一起做（压花送片 / 接片）点「还有人跟我一起做」。按任务报工时还要拍纸质领料单。
  */
 const props = defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{ back: []; submit: [] }>();
@@ -70,6 +71,14 @@ const nameOf = (userId?: number) =>
 const amountOf = (line: (typeof job.pieces)[number]) => Math.round((line.quantity ?? 0) * priceOf(line.itemId) * 100) / 100;
 const total = computed(() => job.pieces.reduce((t, l) => t + amountOf(l), 0));
 
+function submit() {
+  if (job.prepare && job.sheets.length === 0) {
+    message.warning('请拍照上传纸质领料单');
+    return;
+  }
+  emit('submit');
+}
+
 function addMate() {
   const firstRole = matches.value.find((m) => m.itemId === job.pieces[0]?.itemId)?.role;
   job.pieces.push({ itemId: best(firstRole)?.itemId, key: ++seed, quantity: goodTotal(job), userId: undefined });
@@ -80,7 +89,7 @@ function addMate() {
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
       :subtitle="`好的 ${formatQty(goodTotal(job))} ${unit} · 残次 ${formatQty(defectTotal(job))} ${unit}`"
-      title="这批活算给谁？"
+      :title="job.prepare ? '计件和领料单' : '这批活算给谁？'"
       @back="emit('back')"
     />
     <Spin :spinning="loading">
@@ -122,6 +131,18 @@ function addMate() {
           ＋ 还有人跟我一起做
         </button>
         <p class="m-0 text-xs leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
+        <section v-if="job.prepare" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+          <span class="text-sm font-bold">拍纸质领料单<span class="ml-1 text-destructive">*</span></span>
+          <ImageUpload
+            v-model:value="job.sheets"
+            :max-number="9"
+            :max-size="10"
+            :show-description="false"
+            directory="fdmgongchang/issue-sheet"
+            multiple
+          />
+          <span class="text-xs text-muted-foreground">领料单上的数量要和第 1 步填的实际领料对得上，可以拍多张。</span>
+        </section>
       </main>
     </Spin>
     <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-4 pt-3">
@@ -129,9 +150,9 @@ function addMate() {
         :disabled="props.submitting"
         class="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
         type="button"
-        @click="emit('submit')"
+        @click="submit"
       >
-        {{ props.submitting ? '提交中…' : total > 0 ? `提交（计件 ¥${formatQty(total)}）` : '提交' }}
+        {{ props.submitting ? '提交中…' : `${job.prepare ? '报工' : '提交'}${total > 0 ? `（计件 ¥${formatQty(total)}）` : ''}` }}
       </button>
     </footer>
   </div>

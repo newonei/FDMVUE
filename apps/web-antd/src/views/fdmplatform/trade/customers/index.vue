@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../../sales-channel';
+
 import type {
   Customer,
   CustomerActivityType,
@@ -64,6 +66,19 @@ import OkkiCustomerPicker from './OkkiCustomerPicker.vue';
 import '../../components/compact-tables.css';
 
 defineOptions({ name: 'FdmPlatformTradeCustomers' });
+/** 外贸、内销部门各管自己的客户；内销不接 OKKI、不选国家 */
+const props = withDefaults(defineProps<{ salesChannel?: SalesChannel }>(), {
+  salesChannel: 'FOREIGN',
+});
+const domestic = computed(() => props.salesChannel === 'DOMESTIC');
+const pageTitle = computed(() =>
+  domestic.value ? '内销客户管理' : '外贸客户管理',
+);
+const currencyNote = computed(() =>
+  domestic.value
+    ? '内销合同均为人民币'
+    : '金智迁入的历史合同未注明币种，单独合计，不与 USD / CNY 相加',
+);
 const customers = ref<Customer[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -216,6 +231,7 @@ function query() {
     active: active.value === undefined ? undefined : active.value === 'true',
     country: country.value,
     customerSource: customerSource.value,
+    salesChannel: props.salesChannel,
     missing: missing.value || undefined,
     tier: tier.value === 'ALL' ? undefined : tier.value,
     sort: sort.value,
@@ -250,7 +266,7 @@ async function loadOverview() {
   const run = ++overviewSequence;
   overviewLoading.value = true;
   try {
-    const result = await getCustomerOverview();
+    const result = await getCustomerOverview(props.salesChannel);
     if (run === overviewSequence) overview.value = result ?? undefined;
   } catch {
     if (run === overviewSequence) overview.value = undefined;
@@ -305,8 +321,10 @@ async function exportCsv() {
       if (result.list.length === 0 || rows.length >= result.total) break;
     }
     downloadFileFromBlobPart({
-      source: new Blob([customerCsv(rows)], { type: 'text/csv;charset=utf-8' }),
-      fileName: `外贸客户-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
+      source: new Blob([customerCsv(rows, { invoice: domestic.value })], {
+        type: 'text/csv;charset=utf-8',
+      }),
+      fileName: `${domestic.value ? '内销' : '外贸'}客户-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
     });
     message.success(`已导出 ${rows.length} 个客户`);
   } catch (error) {
@@ -457,12 +475,14 @@ onBeforeUnmount(() => {
 
 <template>
   <Page
-    title="外贸客户管理"
+    :title="pageTitle"
     description="客户资料与往来业务一览。点客户名称打开完整档案，点行首箭头快速展开。"
   >
     <template #extra>
       <div class="header-actions">
-        <Button @click="chooseOkki()">从 OKKI 选择客户</Button>
+        <Button v-if="!domestic" @click="chooseOkki()">
+          从 OKKI 选择客户
+        </Button>
         <Button type="primary" @click="create()">新建客户</Button>
       </div>
     </template>
@@ -477,8 +497,7 @@ onBeforeUnmount(() => {
         />
         <p v-if="overview" class="statistics-note">
           统计截至 {{ overview.asOf }} · 按最近一次签约日期分层 ·
-          金额满一万显示为「万」；金智迁入的历史合同未注明币种，单独合计，不与
-          USD / CNY 相加
+          金额满一万显示为「万」；{{ currencyNote }}
         </p>
       </template>
       <Card :body-style="{ padding: '16px' }">
@@ -493,6 +512,7 @@ onBeforeUnmount(() => {
               @change="keywordChanged"
             />
             <Select
+              v-if="!domestic"
               v-model:value="country"
               :options="countryOptions"
               :filter-option="countryMatches"
@@ -514,8 +534,12 @@ onBeforeUnmount(() => {
               v-model:value="source"
               :options="[
                 { label: '本地新增', value: 'LOCAL' },
-                { label: 'OKKI 同步', value: 'OKKI' },
-                { label: '金智导入', value: 'JINZHI' },
+                ...(domestic
+                  ? []
+                  : [
+                      { label: 'OKKI 同步', value: 'OKKI' },
+                      { label: '金智导入', value: 'JINZHI' },
+                    ]),
               ]"
               placeholder="资料来源"
               allow-clear
@@ -803,6 +827,7 @@ onBeforeUnmount(() => {
     <CustomerEditor
       :open="editorOpen"
       :customer="selected"
+      :sales-channel="salesChannel"
       @close="closeEditor"
       @saved="saved"
     />

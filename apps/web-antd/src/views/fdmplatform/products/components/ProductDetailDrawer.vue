@@ -14,7 +14,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   Pagination,
@@ -28,6 +27,7 @@ import {
 } from 'ant-design-vue';
 
 import { getProductActivity } from '#/api/fdmplatform/product-activity';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, label } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
@@ -264,7 +264,9 @@ function refresh() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="product-detail"
+    :resizable="!fullscreen"
     :open="open"
     :width="fullscreen ? '100vw' : 'min(1440px, 96vw)'"
     :body-style="{
@@ -315,8 +317,11 @@ function refresh() {
             <Descriptions.Item label="单位">
               {{ product.unit || '—' }}
             </Descriptions.Item>
+            <Descriptions.Item label="型号">
+              {{ product.model || '—' }}
+            </Descriptions.Item>
             <Descriptions.Item label="规格">
-              {{ product.specification || '—' }}
+              {{ product.spec ?? product.specification ?? '—' }}
             </Descriptions.Item>
             <Descriptions.Item label="材质 / 尺寸">
               {{
@@ -353,8 +358,11 @@ function refresh() {
               <Descriptions.Item label="销售展示名称">
                 {{ product.displayName || product.name }}
               </Descriptions.Item>
-              <Descriptions.Item label="完整规格">
-                {{ product.specification || '—' }}
+              <Descriptions.Item label="型号">
+                {{ product.model || '—' }}
+              </Descriptions.Item>
+              <Descriptions.Item label="规格">
+                {{ product.spec ?? product.specification ?? '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="材质">
                 {{ product.material || '—' }}
@@ -368,7 +376,7 @@ function refresh() {
               <Descriptions.Item label="形状">
                 {{ product.shape || '—' }}
               </Descriptions.Item>
-              <Descriptions.Item label="印刷要求">
+              <Descriptions.Item label="定制要求">
                 {{ product.printing || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="标准包装">
@@ -673,7 +681,7 @@ function refresh() {
         </Card>
       </aside>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

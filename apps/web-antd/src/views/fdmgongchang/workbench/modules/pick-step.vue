@@ -147,12 +147,22 @@ function next() {
     <StepHeader
       :current="1"
       :subtitle="job.supplement ? (job.order?.status === 'COMPLETED' ? `补登到已完工的 ${job.order?.orderNo ?? ''}，实际多拿的料在这里登记` : `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领`) : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, job.task.spec].filter(Boolean).join(' ')}` : '自己开单'"
-      :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : '领材料'}`"
+      :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : job.prepare ? '实际领了多少料' : '领材料'}`"
       :total="job.supplement ? 2 : 3"
       @back="emit('back')"
     />
     <main class="grid flex-1 grid-cols-1 content-start gap-4 p-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div class="flex min-w-0 flex-col gap-3">
+        <section v-if="job.prepare" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+          <span class="font-bold">
+            任务 {{ formatQty(job.task?.quantity) }} {{ job.task?.unit }}<template v-if="job.prepare.target"> · {{ job.prepare.target }}</template>
+          </span>
+          <span v-if="job.prepare.picks.length > 0" class="text-muted-foreground">
+            系统按任务算好要领 {{ formatQty(job.prepare.required) }} {{ unit }}，已经帮你选上。对照实际领的料改数量：多领了加上，少领了减掉。
+          </span>
+          <span v-else class="text-muted-foreground">没有算出建议领料，请在下面点实际领的料，填领了多少。</span>
+          <span v-if="job.prepare.hint" class="text-warning">{{ job.prepare.hint }}</span>
+        </section>
         <section v-if="mixFromRaw && (!job.supplement || orderRecipe)" class="flex flex-col gap-2 rounded-lg border border-primary/40 bg-card p-3">
           <span class="text-sm font-bold">{{ job.supplement ? '按配方补齐' : '按配方领（一次领齐所有原料）' }}</span>
           <div v-if="!job.supplement" class="flex flex-wrap items-center gap-2">
@@ -316,7 +326,28 @@ function next() {
             </tbody>
           </table>
         </section>
-        <button class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="next">下一步：确认领料</button>
+        <section v-if="job.prepare && job.auxPicks.length > 0" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+          <h3 class="m-0 text-sm font-bold">辅料（按订单用量带出，改成实际领的）</h3>
+          <div v-for="a in job.auxPicks" :key="a.stock.id" class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5">
+            <span class="flex min-w-0 flex-col">
+              <span class="truncate text-sm font-semibold">{{ a.name }}</span>
+              <span class="text-xs text-muted-foreground">批次 {{ a.stock.batchNo }} · 库里有 {{ formatQty(a.stock.quantity) }} {{ a.unit }}</span>
+            </span>
+            <InputNumber
+              :id="`aux-${a.stock.id}`"
+              v-model:value="a.qty"
+              :aria-label="`${a.name} 实际领用数量`"
+              :addon-after="a.unit"
+              :max="toNumber(a.stock.quantity)"
+              :min="0"
+              :precision="3"
+              class="w-36"
+            />
+          </div>
+        </section>
+        <button class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="next">
+          {{ job.prepare ? '下一步：报数量' : '下一步：确认领料' }}
+        </button>
       </aside>
     </main>
   </div>

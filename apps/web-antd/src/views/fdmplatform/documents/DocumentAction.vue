@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ActionDefinition } from '../data';
+import type { SalesChannel } from '../sales-channel';
 import type { DocumentKind } from './model';
 import type { RelatedDocumentSource } from './related-creation';
 
@@ -51,6 +52,8 @@ const props = defineProps<{
   lockContract?: boolean;
   open: boolean;
   row?: DocumentRow;
+  /** 新建时选合同只列出该业务线 */
+  salesChannel?: SalesChannel;
   source?: RelatedDocumentSource;
 }>();
 const emit = defineEmits<{ close: []; updated: [contract: Contract] }>();
@@ -371,6 +374,7 @@ async function execute(input: Record<string, unknown>, key: string) {
   <ContractPicker
     :open="pickerOpen && open && !lockContract"
     :action="action"
+    :sales-channel="salesChannel"
     @close="close"
     @select="
       (selected) =>

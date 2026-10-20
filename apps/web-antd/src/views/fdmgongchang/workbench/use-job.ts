@@ -17,6 +17,13 @@ export interface Pick {
   stock: StockApi.Stock;
 }
 
+export interface AuxPick {
+  name: string;
+  qty: number;
+  stock: StockApi.Stock;
+  unit: string;
+}
+
 export interface PieceLine {
   itemId?: number;
   key: number;
@@ -54,6 +61,15 @@ export function createJob() {
     /** 补领原因；已完工的单补登必填。 */
     supplementRemark: '',
     task: undefined as Api.My['tasks'][number] | undefined,
+    /**
+     * 按任务报工：系统带出的建议领料。有值时整个流程是「实际领料 → 报数量 → 计件和领料单」，
+     * 一次提交，按实际领料扣库存，任务随之完成。
+     */
+    prepare: undefined as Api.TaskPrepare | undefined,
+    /** 按任务报工时同时领的辅料。 */
+    auxPicks: [] as AuxPick[],
+    /** 纸质领料单照片（上传后的地址），按任务报工必传。 */
+    sheets: [] as string[],
   });
 }
 

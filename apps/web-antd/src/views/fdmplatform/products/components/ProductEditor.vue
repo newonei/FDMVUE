@@ -8,7 +8,6 @@ import {
   AutoComplete,
   Button,
   Checkbox,
-  Drawer,
   Form,
   Input,
   message,
@@ -17,6 +16,7 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { saveProduct } from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { missingProductFields } from '../model';
@@ -38,12 +38,13 @@ const fields = [
   ['displayName', '销售展示名称'],
   ['category', '分类'],
   ['unit', '计量单位'],
-  ['specification', '完整规格'],
+  ['model', '型号'],
+  ['spec', '规格'],
   ['material', '材质'],
   ['size', '尺寸'],
   ['color', '颜色'],
   ['shape', '形状'],
-  ['printing', '标准印刷要求'],
+  ['printing', '定制要求'],
   ['packaging', '标准包装'],
   ['imageUrl', '产品图片地址'],
 ];
@@ -70,8 +71,10 @@ async function save() {
   loading.value = true;
   panelError.value = '';
   try {
+    const { spec, ...fieldsWithoutSpec } = form;
     const result = await saveProduct({
-      ...form,
+      ...fieldsWithoutSpec,
+      specification: spec,
       active: active.value,
       companyId: props.companyId,
       id: props.product?.id,
@@ -94,7 +97,8 @@ async function save() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="product-editor"
     :open="open"
     :title="product ? '产品档案' : '新建产品档案'"
     width="min(760px, 96vw)"
@@ -149,7 +153,7 @@ async function save() {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

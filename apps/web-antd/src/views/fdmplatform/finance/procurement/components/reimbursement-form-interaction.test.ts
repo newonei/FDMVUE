@@ -43,6 +43,9 @@ vi.mock('../../../documents/ContractPicker.vue', () => ({
 vi.mock('../../../purchase/manage/components/OrderPicker.vue', () => ({
   default: defineComponent({ setup: () => () => null }),
 }));
+vi.mock('../../../components/FilePreviewButton.vue', () => ({
+  default: defineComponent({ setup: () => () => null }),
+}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     props: { message: { type: String, default: '' } },

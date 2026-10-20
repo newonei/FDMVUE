@@ -14,7 +14,6 @@ import { useUserStore } from '@vben/stores';
 import {
   Alert,
   Button,
-  Drawer,
   Empty,
   Input,
   InputNumber,
@@ -40,6 +39,7 @@ import {
   reportOrder,
 } from '#/api/fdmgongchang/stage-stock';
 import { matchWageItems } from '#/api/fdmgongchang/wage';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { routeIncludes } from '../../production-order/shared';
 import {
@@ -993,7 +993,8 @@ watch(processCode, warnNoPatterns);
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="factory-stage-order"
     v-model:open="open"
     :title="
       mode === 'create' ? '新建工序单' : `报产出 · ${order?.orderNo ?? ''}`
@@ -1534,7 +1535,7 @@ watch(processCode, warnNoPatterns);
                 show-search
               />
               <span v-if="linkedProductionItemId">
-                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂下单」里交货。
+                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
               </span>
             </label>
             <label
@@ -1685,5 +1686,5 @@ watch(processCode, warnNoPatterns);
         </div>
       </div>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>

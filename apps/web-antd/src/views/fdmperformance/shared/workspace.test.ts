@@ -66,6 +66,7 @@ describe('performance workspace access', () => {
       canManage: true,
       canConfigure: false,
       canExport: true,
+      canManageTemplate: false,
       availableScopes: ['SELF', 'INITIATED', 'MANAGED'],
     };
     expect(managementScopes(access)).toEqual(['INITIATED', 'MANAGED']);

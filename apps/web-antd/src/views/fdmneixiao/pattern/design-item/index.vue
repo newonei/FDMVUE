@@ -30,7 +30,6 @@ import {
   getFdmNeixiaoPatternDesignItemShopNameOptions,
   markFdmNeixiaoPatternDesignItemDownloaded,
   notifyFdmNeixiaoPatternDesignItemOrder,
-  productionSendFdmNeixiaoPatternDesignItem,
 } from '#/api/fdmneixiao/pattern/design-item';
 import { $t } from '#/locales';
 
@@ -42,6 +41,7 @@ import {
 import { usePatternDesignItemCreateDraft } from './modules/create-draft';
 import CreateForm from './modules/create-form.vue';
 import EditForm from './modules/edit-form.vue';
+import ProductionSendForm from './modules/production-send-form.vue';
 
 defineOptions({ name: 'FdmNeixiaoPatternDesignItem' });
 
@@ -58,6 +58,10 @@ const [CreateFormModal, createFormModalApi] = useVbenModal({
 });
 const [EditFormModal, editFormModalApi] = useVbenModal({
   connectedComponent: EditForm,
+  destroyOnClose: true,
+});
+const [ProductionSendFormModal, productionSendFormModalApi] = useVbenModal({
+  connectedComponent: ProductionSendForm,
   destroyOnClose: true,
 });
 const checkedRows = shallowRef<
@@ -329,11 +333,9 @@ async function handleNotifySelectedOrder() {
   });
 }
 
-async function handleProductionSend(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
+function handleProductionSend(row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem) {
   if (!row.id) return;
-  await productionSendFdmNeixiaoPatternDesignItem(row.id);
-  message.success('制作发出通知已发送');
-  await gridApi.query();
+  productionSendFormModalApi.setData(row).open();
 }
 
 const shopNameOptions = ref<PatternDesignItemShopOption[]>([]);
@@ -433,6 +435,7 @@ onBeforeUnmount(() => {
   <Page auto-content-height>
     <CreateFormModal @success="gridApi.query()" />
     <EditFormModal @success="gridApi.query()" />
+    <ProductionSendFormModal @success="gridApi.query()" />
 
     <div class="flex h-full flex-col">
       <header
@@ -515,13 +518,10 @@ onBeforeUnmount(() => {
                 label: '发货',
                 type: 'link',
                 icon: 'lucide:truck',
-                // 已发出的明细也允许再次点击，用于补发群通知；后端会保持状态幂等。
+                // 必须填写快递单号；已发出的订单再次提交会覆盖单号并补发群通知。
                 disabled: !row.id,
                 auth: ['fdmneixiao:pattern-design-item:production-send'],
-                popConfirm: {
-                  title: '确认发送制作发出通知吗？未发出的明细会标记为已发出。',
-                  confirm: handleProductionSend.bind(null, row),
-                },
+                onClick: handleProductionSend.bind(null, row),
               },
               {
                 label: $t('common.edit'),

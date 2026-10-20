@@ -22,7 +22,6 @@ import { formatDate } from '@vben/utils';
 import {
   Alert,
   Button,
-  Drawer,
   Dropdown,
   Empty,
   Input,
@@ -58,6 +57,7 @@ import {
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
@@ -1341,7 +1341,7 @@ watch(financeType, (value, previous) => {
             showTotal: (value: number) => `共 ${value} 单`,
           }"
           :columns="[
-            { title: '操作/状态', key: 'flags', width: 110 },
+            { title: '操作/状态', key: 'flags', width: 130 },
             { title: '采购单 / 供应商', key: 'supplier', width: 250 },
             { title: '关联合同 / 客户', key: 'contract', width: 200 },
             { title: '采购日期', key: 'date', width: 110 },
@@ -1559,7 +1559,8 @@ watch(financeType, (value, previous) => {
       </div>
     </div>
 
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="purchase-order"
       :open="Boolean(detailId) && active"
       width="min(1320px, 96vw)"
       root-class-name="procurement-record-drawer"
@@ -1931,7 +1932,7 @@ watch(financeType, (value, previous) => {
           </aside>
         </div>
       </div>
-    </Drawer>
+    </FdmResizableDrawer>
     <PurchaseOrderEditor
       :open="editorOpen && active"
       @close="editorOpen = false"

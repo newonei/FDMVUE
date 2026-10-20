@@ -251,10 +251,13 @@ async function fill(
   );
   await nextTick();
 }
-async function mountEditor() {
+async function mountEditor(
+  defaultBusinessType: 'DOMESTIC' | 'FOREIGN' = 'FOREIGN',
+) {
   const host = document.createElement('div');
   document.body.append(host);
   const props = reactive({
+    defaultBusinessType,
     open: false,
     master: [],
     directory: {
@@ -386,6 +389,68 @@ describe('order entry without changing menus', () => {
       )?.value,
     ).toBe('尚未保存');
     expect(button(host, '保存草稿').disabled).toBe(false);
+  });
+
+  it('opens a domestic order in RMB with only domestic customers and no trade-only fields', async () => {
+    const { host } = await mountEditor('DOMESTIC');
+    await vi.waitFor(() =>
+      expect(api.customers).toHaveBeenCalledWith(
+        expect.objectContaining({ salesChannel: 'DOMESTIC' }),
+      ),
+    );
+    expect(
+      host.querySelector<HTMLInputElement>('[data-label="合同币种"] input')
+        ?.value,
+    ).toBe('人民币（CNY）');
+    expect(host.querySelector('[data-label="合同币种"] select')).toBeNull();
+    for (const label of ['阿里信保订单', '业务部门（可选）', '业务类型'])
+      expect(host.querySelector(`[data-label="${label}"]`)).toBeNull();
+    expect(host.querySelector('[data-label="样品单"]')).toBeTruthy();
+    button(host, '新增客户并选用').click();
+    await nextTick();
+    const customer = host.querySelector<HTMLElement>(
+      '[data-drawer="新建内销客户"]',
+    )!;
+    expect(customer).toBeTruthy();
+    expect(customer.querySelector('[data-label="国家 / 地区"]')).toBeNull();
+    expect(customer.querySelector('[data-label="省份"]')).toBeTruthy();
+    await fill(customer, '客户全称', '内销客户甲');
+    await fill(customer, '纳税人识别号', '91310000AB1234567X');
+    api.saveCustomer.mockResolvedValueOnce({
+      id: 'domestic-customer',
+      name: '内销客户甲',
+      active: true,
+      type: 'CUSTOMER',
+      code: 'KH-2',
+      version: 0,
+      salesChannel: 'DOMESTIC',
+    });
+    await vi.waitFor(() =>
+      expect(button(customer, '保存并选用').disabled).toBe(false),
+    );
+    button(customer, '保存并选用').click();
+    await vi.waitFor(() =>
+      expect(api.saveCustomer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          salesChannel: 'DOMESTIC',
+          country: 'CN',
+          invoice: expect.objectContaining({ taxNo: '91310000AB1234567X' }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps foreign currency choice and offers a sample switch instead of business types', async () => {
+    const { host } = await mountEditor('FOREIGN');
+    await vi.waitFor(() =>
+      expect(api.customers).toHaveBeenCalledWith(
+        expect.objectContaining({ salesChannel: 'FOREIGN' }),
+      ),
+    );
+    expect(host.querySelector('[data-label="合同币种"] select')).toBeTruthy();
+    expect(host.querySelector('[data-label="样品单"]')).toBeTruthy();
+    expect(host.querySelector('[data-label="业务类型"]')).toBeNull();
+    expect(host.querySelector('[data-label="业务部门（可选）"]')).toBeNull();
   });
 
   it('focuses the newly added duplicate and copied row, and Enter moves quantity to price to the next line', async () => {

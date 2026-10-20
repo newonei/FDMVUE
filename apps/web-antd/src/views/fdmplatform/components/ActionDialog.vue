@@ -27,6 +27,7 @@ import {
 } from '../documents/formDefaults';
 import { availableOptions } from '../documents/model';
 import ReceiptFxPreview from '../finance/exchange-rates/ReceiptFxPreview.vue';
+import BuyerInvoicePanel from './BuyerInvoicePanel.vue';
 import RemoteMasterSelect from './RemoteMasterSelect.vue';
 import RemoteStockSelect from './RemoteStockSelect.vue';
 
@@ -359,6 +360,10 @@ function setValue(target: FormValues, key: string, value: unknown) {
   >
     <div v-if="definition" ref="actionBody" class="action-dialog">
       <Alert :message="definition.description" type="info" show-icon />
+      <BuyerInvoicePanel
+        v-if="definition.buyerCustomerId"
+        :customer-id="definition.buyerCustomerId"
+      />
       <slot name="context"></slot>
       <Alert
         v-if="validation || error"
@@ -464,6 +469,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
         :open="open"
         :date="textValue(values.receivedAt)"
         :currency="textValue(values.currency)"
+        :contract-currency="definition.contractCurrency"
         :amount="scalarValue(values.amount)"
         @ready="setFxReady"
       />

@@ -218,7 +218,7 @@ onMounted(async () => {
           <Tag
             v-if="record.kind === 'PRODUCTION'"
             color="green"
-            title="工厂交货入库：要冲回请在工厂下单的交货单上作废"
+            title="工厂交货入库：要冲回请在工厂排单的交货单上作废"
           >
             工厂交货 · {{ record.deliveryNo }}
           </Tag>

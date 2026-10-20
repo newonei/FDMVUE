@@ -9,6 +9,8 @@ import ProductionOrderPage from './index.vue';
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
   generate: vi.fn(),
+  getSchedule: vi.fn(),
+  getSchedules: vi.fn().mockResolvedValue([]),
   push: vi.fn(),
   complete: vi.fn(),
   delivery: vi.fn(),
@@ -19,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   factoryPage: vi.fn(),
   get: vi.fn(),
   lastRoute: vi.fn().mockResolvedValue(null),
+  materialPlan: vi.fn(),
+  saveMaterial: vi.fn(),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
     defaultFactoryId: 1,
@@ -45,6 +49,9 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getOrderableFactories: mocks.factories,
   getProductionOrder: mocks.get,
   getLastRoute: mocks.lastRoute,
+  getMaterialPlan: mocks.materialPlan,
+  getRecipeOptions: vi.fn().mockResolvedValue([{ recipeCode: 'REC-001', recipeName: '常规款（密度110）' }]),
+  saveItemMaterial: mocks.saveMaterial,
   searchAuxProducts: vi.fn().mockResolvedValue([]),
   getRouteOptions: vi.fn().mockResolvedValue({
     processes: [
@@ -68,12 +75,16 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({ getStockPage: mocks.stockPage }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
+  getWorkerList: vi.fn().mockResolvedValue([]),
   setCurrentFactoryId: mocks.setFactory,
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
   generateSchedule: mocks.generate,
+  getSchedule: mocks.getSchedule,
+  getSchedules: mocks.getSchedules,
 }));
 vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: mocks.push }),
 }));
 vi.mock('@vben/access', () => ({
@@ -165,10 +176,12 @@ describe('production order page', () => {
     mocks.get.mockResolvedValue(order);
     unmount = mount();
     await flush();
-    expect(document.body.textContent).toContain('还没有下过单');
+    // 工厂排单页给工厂的人用，先看本厂收到的单；其他部门提需求在「我提的需求」
+    expect(document.body.textContent).toContain('工厂排单');
     expect(document.body.textContent).toContain('1 待接单');
+    expect(document.body.textContent).toContain('我提的需求');
 
-    button('＋向工厂下单').click();
+    button('＋提生产需求').click();
     await flush();
     const input = document.querySelector<HTMLInputElement>('#po-product-keyword')!;
     input.value = 'Mishty';
@@ -202,16 +215,63 @@ describe('production order page', () => {
     mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 });
     mocks.get.mockResolvedValue(order);
     mocks.accept.mockResolvedValue(true);
+    const board = {
+      boards: 32,
+      kg: 576,
+      kgPerBoard: 18,
+      layers: 8,
+      name: '本厂密炼出板',
+      perBoard: 16,
+      piecesPerLayer: 2,
+      size: '210×136×4.8',
+      source: 'SETTING' as const,
+      utilization: 93.8,
+    };
+    mocks.materialPlan.mockResolvedValue({
+      items: [
+        {
+          batchKg: 144,
+          batches: 4,
+          board,
+          candidates: [board],
+          itemId: 91,
+          productName: product.displayName,
+          quantity: 500,
+          raws: [{ available: 300, rawMaterialCode: 'MAT-TPE', rawMaterialName: 'TPE', required: 540, shortage: 240 }],
+          rawKg: 576,
+          recipeCode: 'REC-001',
+          recipeName: '常规款（密度110）',
+          recipeSuggested: true,
+          remaining: 500,
+          stock: [],
+          targetSize: '183×61×0.6',
+          unit: '条',
+          warnings: [],
+        },
+      ],
+      orderId: 9,
+      orderNo: order.orderNo,
+      shortage: true,
+      totals: [],
+    });
     unmount = mount();
     await flush();
     expect(mocks.setFactory).toHaveBeenCalledWith(1);
     expect(document.body.textContent).toContain('运营小王');
-    expect(document.body.textContent).not.toContain('向工厂下单');
+    expect(document.body.textContent).not.toContain('＋ 提生产需求');
 
     button('去接单').click();
     await flush();
     expect(document.body.textContent).toContain('接单处理');
     expect(document.body.textContent).toContain('工艺 · 单层散装');
+    // 接单前就能看用料逆推：板材张数、原料 kg、锅数，缺的原料标出来
+    expect(mocks.materialPlan).toHaveBeenCalledWith(9);
+    const plan = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
+    expect(plan).toContain('用料逆推');
+    expect(plan).toContain('按上次建议');
+    expect(plan).toContain('一张出16条→要32张');
+    expect(plan).toContain('原料576kg（每张18kg）≈密炼4锅');
+    expect(plan).toContain('240kg');
     button('接单').click();
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
@@ -229,7 +289,7 @@ describe('production order page', () => {
     button('改了重下').click();
     await flush();
     const text = document.body.textContent ?? '';
-    expect(text).toContain('复制下单（来自 GD20261010-001）');
+    expect(text).toContain('复制需求（来自 GD20261010-001）');
     expect(text).toContain('明细（1）');
     expect(document.querySelector<HTMLInputElement>('#po-qty-p1')?.value).toBe('500');
     expect(document.querySelector<HTMLInputElement>('#po-purpose')?.value).toBe('电商备货');
@@ -303,10 +363,15 @@ describe('production order page', () => {
   });
 
   it('lets the factory pick accepted orders and hand only those to AI scheduling', async () => {
-    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate');
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate',
+      'fdmgongchang:schedule:query');
     const accepted: Api.Order = { ...order, id: 11, orderNo: 'GD20261011-002', status: 'ACCEPTED', statusLabel: '生产中' };
     mocks.factoryPage.mockResolvedValue({ list: [order, accepted], total: 2 });
     mocks.generate.mockResolvedValue(77);
+    mocks.getSchedules.mockResolvedValue([
+      { days: 3, id: 77, revision: 1, scheduleNo: 'PB20261011-001', scopeOrderNos: ['GD20261011-002'], startDate: '2026-10-11', status: 'GENERATING' },
+    ]);
+    mocks.getSchedule.mockResolvedValue({ days: 3, id: 77, revision: 1, scheduleNo: 'PB20261011-001', startDate: '2026-10-11', status: 'GENERATING' });
     unmount = mount();
     await flush();
 
@@ -321,6 +386,9 @@ describe('production order page', () => {
     button('交给AI排单').click();
     await flush();
     expect(mocks.generate).toHaveBeenCalledWith(expect.objectContaining({ days: 3, productionOrderIds: [11] }));
-    expect(mocks.push).toHaveBeenCalledWith({ path: '/gongchang/production/schedule', query: { id: '77' } });
+    // 生成后不跳页，切到「排单方案」标签并打开这一份
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.getSchedule).toHaveBeenCalledWith(77);
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('排单方案');
   });
 });

@@ -10,10 +10,12 @@ import { formatDateTime } from '@vben/utils';
 import { Alert, Button, Input, message, Modal, Progress, Spin, Tag } from 'ant-design-vue';
 
 import {
+  closeScheduleTask,
   confirmSchedule,
   deleteScheduleTask,
   discardSchedule,
   getScheduleFormOptions,
+  handleScheduleTaskShortage,
   regenerateSchedule,
   saveScheduleTask,
 } from '#/api/fdmgongchang/schedule';
@@ -25,6 +27,7 @@ import {
   PROCESS_LABELS,
   RISK_TYPES,
   SCHEDULE_STATUS,
+  TASK_STATUS,
 } from '../../shared/schedule';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
@@ -114,6 +117,74 @@ function editConfirmed(task: Api.Task) {
   );
 }
 
+// ========== 接单制：关闭任务、报工差额 ==========
+const finished = (task: Api.Task) => task.status === 'DONE' || task.status === 'CLOSED';
+/** 「再派一个」补差额的原任务：追加成功后记成已补派。 */
+const resendFor = ref<Api.Task>();
+
+/** 补派默认今天；排单范围已经过了就放在最后一天（超出范围的要另开一份手动派工）。 */
+function resendDate() {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const d = new Date();
+  const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const end = range.value.slice(-10);
+  return today > end ? end : today;
+}
+
+function resend(task: Api.Task) {
+  resendFor.value = task;
+  void openForm({
+    contractCode: task.contractCode,
+    date: resendDate(),
+    process: task.process,
+    product: task.product,
+    quantity: Number(task.shortage),
+    reason: `补 ${dateText(task.workDate)} 报工差额`,
+    sequence: null,
+    spec: task.spec,
+    unit: task.unit,
+    workerIds: [],
+  });
+}
+
+function dropShortage(task: Api.Task) {
+  Modal.confirm({
+    content: `差的 ${Number(task.shortage)} ${task.unit ?? ''} 不再安排生产。`,
+    okText: '不补了',
+    title: '不补这个差额？',
+    onOk: async () => {
+      await handleScheduleTaskShortage({ id: task.id, note: '不补了' });
+      message.success('已处理');
+      emit('changed', props.schedule.id);
+    },
+  });
+}
+
+const closeOpen = ref(false);
+const closeReason = ref('');
+const closing = ref<Api.Task>();
+function openClose(task: Api.Task) {
+  closing.value = task;
+  closeReason.value = '';
+  closeOpen.value = true;
+}
+async function submitClose() {
+  if (!closing.value) return;
+  if (!closeReason.value.trim()) {
+    message.warning('请写关闭原因');
+    return;
+  }
+  busy.value = true;
+  try {
+    await closeScheduleTask({ id: closing.value.id, note: closeReason.value.trim() });
+    closeOpen.value = false;
+    message.success('任务已关闭');
+    emit('changed', props.schedule.id);
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function submitForm(task: Api.PlanTask) {
   if (props.schedule.status === 'DRAFT') {
     // 待确认：只改本地方案，下发时一起校验
@@ -125,6 +196,10 @@ async function submitForm(task: Api.PlanTask) {
     return;
   }
   await saveScheduleTask({ id: editingTaskId.value, scheduleId: props.schedule.id, task });
+  if (resendFor.value && !editingTaskId.value) {
+    await handleScheduleTaskShortage({ id: resendFor.value.id, note: `已补派 ${Number(task.quantity)}` });
+  }
+  resendFor.value = undefined;
   message.success(editingTaskId.value ? '任务已修改，工人工作台马上能看到' : '任务已追加，工人工作台马上能看到');
   emit('changed', props.schedule.id);
 }
@@ -267,7 +342,7 @@ function discard() {
     </template>
 
     <template v-if="schedule.status === 'DRAFT'">
-      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人，下发前可以补上。</p>
+      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人，下发后进工人工作台的任务大厅，有这道工序岗位的人可以抢单；要指定人就在下发前补上。</p>
       <p v-if="schedule.manual && tasks.length === 0" class="m-0 text-sm text-muted-foreground">
         手动派工：点右上角「＋ 添加任务」，选哪天、哪道工序、做多少、谁来做；加完点「确认下发」，工人工作台就能看到。
       </p>
@@ -287,10 +362,25 @@ function discard() {
           <div v-for="task in list" :key="task.id" class="flex flex-col gap-1 rounded-md border border-border p-3 text-sm">
             <div class="flex items-center justify-between gap-2">
               <b>{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</b>
-              <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
+              <span class="flex items-center gap-1.5">
+                <Tag v-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
+                <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
+              </span>
             </div>
             <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
-            <div class="text-xs">{{ task.workerNames || '未排人' }}</div>
+            <div class="text-xs">
+              {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
+              <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 {{ Number(task.plannedQuantity) }}，接单时按上道良品改成 {{ Number(task.quantity) }}</span>
+            </div>
+            <div v-if="task.shortage" class="flex flex-wrap items-center justify-between gap-2 rounded bg-warning/10 px-2 py-1 text-xs text-warning">
+              <span>报工差 {{ Number(task.shortage) }} {{ task.unit }}，待处理</span>
+              <span v-if="canConfirm && schedule.status === 'CONFIRMED'" class="flex gap-1">
+                <Button size="small" type="link" @click="resend(task)">再派一个</Button>
+                <Button size="small" type="link" @click="dropShortage(task)">不补了</Button>
+              </span>
+            </div>
+            <div v-else-if="task.shortageNote" class="text-xs text-muted-foreground">差额：{{ task.shortageNote }}</div>
+            <div v-if="task.closedReason" class="text-xs text-muted-foreground">关闭原因：{{ task.closedReason }}</div>
             <div class="flex items-center gap-2">
               <Progress :percent="percent(task)" :show-info="false" class="m-0 flex-1" size="small" />
               <span class="whitespace-nowrap text-xs tabular-nums">
@@ -300,8 +390,11 @@ function discard() {
             <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>{{ task.orderCount }} 张工序单关联</span>
               <span v-if="schedule.status === 'CONFIRMED' && canConfirm" class="flex gap-1">
-                <Button size="small" type="link" @click="editConfirmed(task)">改人 / 改量</Button>
-                <Button v-if="task.orderCount === 0" danger size="small" type="link" @click="removeConfirmed(task)">删</Button>
+                <template v-if="!finished(task)">
+                  <Button size="small" type="link" @click="editConfirmed(task)">{{ task.status === 'OPEN' ? '派单 / 改量' : '改派 / 改量' }}</Button>
+                  <Button size="small" type="link" @click="openClose(task)">关闭</Button>
+                </template>
+                <Button v-if="task.orderCount === 0 && task.status !== 'DONE'" danger size="small" type="link" @click="removeConfirmed(task)">删</Button>
               </span>
             </div>
           </div>
@@ -322,6 +415,11 @@ function discard() {
       :submit="submitForm"
       :workers="workers"
     />
+
+    <Modal v-model:open="closeOpen" :confirm-loading="busy" ok-text="关闭任务" title="关闭任务" @ok="submitClose">
+      <p class="m-0 mb-2 text-xs text-muted-foreground">关闭后任务不再出现在工人工作台，也不能再报工。</p>
+      <Input id="task-close-reason" v-model:value="closeReason" :maxlength="200" placeholder="原因，例如：订单取消、排错了" />
+    </Modal>
 
     <Modal v-model:open="feedbackOpen" :confirm-loading="busy" ok-text="重新生成" title="带意见重新生成" @ok="regenerate">
       <p class="m-0 mb-2 text-xs text-muted-foreground">写清楚要怎么改，AI 会参考这一版方案重新排，这一版作废。</p>

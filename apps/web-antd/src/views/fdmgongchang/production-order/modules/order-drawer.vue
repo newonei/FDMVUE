@@ -5,7 +5,7 @@ import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/p
 
 import { computed, ref, watch } from 'vue';
 
-import { Button, DatePicker, Descriptions, Drawer, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
+import { Button, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import {
@@ -16,9 +16,11 @@ import {
   rejectProductionOrder,
   voidDelivery,
 } from '#/api/fdmgongchang/production-order';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { dateText, num, ORDER_STATUS, specText, timeText } from '../shared';
 import DeliveryModal from './delivery-modal.vue';
+import MaterialPlan from './material-plan.vue';
 
 /**
  * 订单详情。下单人（mode=mine）待接单时可以撤回；
@@ -43,6 +45,8 @@ const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : 
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED');
 const canHandle = computed(() => props.mode === 'factory' && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
+/** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
+const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
 const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
 );
@@ -167,7 +171,7 @@ function producedQty(item: Api.Item) {
 </script>
 
 <template>
-  <Drawer v-model:open="open" :title="order ? `生产订单 ${order.orderNo}` : '生产订单'" width="min(760px, 100vw)">
+  <FdmResizableDrawer resize-key="factory-production-order" v-model:open="open" :title="order ? `生产订单 ${order.orderNo}` : '生产订单'" width="min(760px, 100vw)">
     <Spin :spinning="loading">
       <div v-if="order" class="flex flex-col gap-4 text-sm">
         <div class="flex flex-wrap items-center gap-2">
@@ -238,6 +242,8 @@ function producedQty(item: Api.Item) {
             </span>
           </div>
         </section>
+
+        <MaterialPlan v-if="canPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
           <h3 class="m-0 text-sm font-semibold">接单处理</h3>
@@ -326,5 +332,5 @@ function producedQty(item: Api.Item) {
       </p>
       <Input id="delivery-void-reason" v-model:value="voidReason" :maxlength="255" placeholder="作废原因（必填）" />
     </Modal>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>

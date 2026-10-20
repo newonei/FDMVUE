@@ -29,7 +29,7 @@ import RoutePicker from './route-picker.vue';
  * 向工厂下单：选工厂、交期，从产品中心搜 SKU 加到明细里填数量，并为每个产品定好要走的工序（工艺由下单人决定，工厂只能退回）
  * 和要用的辅料（每件用量，开工序单时按用量带出领用数）。
  * 产品规格以下单这一刻的产品档案为准，之后产品改了不影响这张单。
- * copyFrom：从「我下的单」复制（例如被退回后改一改重新提交），带出工厂、用途、备注和产品数量，交期重新选。
+ * copyFrom：从「我提的需求」复制（例如被退回后改一改重新提交），带出工厂、用途、备注和产品数量，交期重新选。
  */
 const props = defineProps<{ copyFrom?: Api.Order; factories: Api.Factory[] }>();
 const emit = defineEmits<{ created: [id: number] }>();
@@ -246,7 +246,7 @@ async function submit() {
     :confirm-loading="submitting"
     :width="860"
     ok-text="提交给工厂"
-    :title="copyFrom ? `复制下单（来自 ${copyFrom.orderNo}）` : '向工厂下单'"
+    :title="copyFrom ? `复制需求（来自 ${copyFrom.orderNo}）` : '提生产需求'"
     @ok="submit"
   >
     <div class="flex flex-col gap-4 text-sm">

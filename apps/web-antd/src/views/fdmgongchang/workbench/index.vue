@@ -6,14 +6,17 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { onMounted, ref } from 'vue';
 
-import { Button, message, Result, Spin } from 'ant-design-vue';
+import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
 
 import {
+  claimWorkbenchTask,
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
-  getWorkbenchOrder,
+  prepareWorkbenchTask,
+  releaseWorkbenchTask,
   reportWorkbenchOrder,
+  reportWorkbenchTask,
   returnWorkbenchMaterial,
   supplementWorkbenchOrder,
 } from '#/api/fdmgongchang/workbench';
@@ -29,8 +32,8 @@ import ReportStep from './modules/report-step.vue';
 import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
- * 工厂部门 · 我的工作台（工人手机端）：打开就是「今天做什么」，一屏只做一件事——
- * 领材料 → 确认领料 → 做完报数量 → 确认计件 → 完成。领料、报数量都按自己的名字记。
+ * 工厂部门 · 我的工作台（工人手机端）：活都从派单、接单来——任务大厅接单，我的任务里看清楚做什么、领什么料，
+ * 做完了报工：对照实际改领料 → 报好的、坏的数量 → 确认计件、拍领料单 → 完成。领料、报数量都按自己的名字记。
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
@@ -85,67 +88,60 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.finish = true;
   job.createFinish = false;
   job.result = { amount: 0, good: 0, unit: '' };
+  job.prepare = undefined;
+  job.auxPicks = [];
+  job.sheets = [];
 }
 
-function startTask(task: FdmgongchangScheduleApi.Task, process: Api.Process) {
+/**
+ * 按任务报工（下班前做完了来报）：系统按任务带出建议领料，工人对照实际改数量；
+ * 接着报好的、坏的数量，最后确认计件、拍领料单，一次提交，任务完成。
+ */
+async function startTask(task: FdmgongchangScheduleApi.Task, process: Api.Process) {
   reset(process, task);
-  job.step = 'pick';
-}
-
-function startFree(process: Api.Process) {
-  reset(process);
-  job.step = 'pick';
-}
-
-async function continueOrder(order: Api.Order) {
-  const process = job.my?.processes.find((p) => p.code === order.process);
-  if (!process) {
-    message.warning('你现在没有这道工序的岗位，请找班组长处理');
-    return;
-  }
-  reset(process, job.my?.tasks.find((t) => t.id === order.scheduleTaskId));
-  job.sourceStage = order.sourceStage;
   loading.value = true;
   try {
-    job.order = await getWorkbenchOrder(order.id);
-    // 辅料领用行不算工序领料，不参与产出预填
-    job.inputs = (job.order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
-      quantity: (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0),
-      side: line.laminationSide ?? undefined,
-      stock: {
-        batchNo: line.batchNo,
-        id: line.stockId ?? line.id,
-        item: line.item,
-        itemCode: line.itemCode,
-        location: line.location,
-        quantity: line.quantity ?? 0,
-        stage: line.stage,
-      },
-    }));
-    job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.order.recipeCode);
-    job.step = 'report';
-  } finally {
-    loading.value = false;
-  }
-}
-
-/** 手上在做的单料不够：选料补领，补完回首页，单子继续在制；最近完工的单实际多拿了料，也走这里补登。 */
-async function supplementOrder(order: Api.Order) {
-  const process = job.my?.processes.find((p) => p.code === order.process);
-  if (!process) {
-    message.warning('你现在没有这道工序的岗位，请找班组长处理');
-    return;
-  }
-  reset(process, job.my?.tasks.find((t) => t.id === order.scheduleTaskId));
-  job.sourceStage = order.sourceStage;
-  loading.value = true;
-  try {
-    job.order = await getWorkbenchOrder(order.id);
-    job.supplement = true;
+    const prepare = await prepareWorkbenchTask(task.id);
+    job.prepare = prepare;
+    if (prepare.sourceStage && process.sources.includes(prepare.sourceStage)) job.sourceStage = prepare.sourceStage;
+    job.picks = prepare.picks.map((p) => ({ qty: toNumber(p.quantity) ?? 0, stock: p.stock }));
+    const qty = toNumber(task.quantity) ?? 0;
+    job.auxPicks = prepare.aux
+      .filter((a) => a.stocks.length > 0)
+      .map((a) => ({
+        name: a.productName ?? a.productCode ?? '',
+        qty: Math.round((toNumber(a.perUnit) ?? 0) * qty * 1000) / 1000,
+        stock: a.stocks[0]!,
+        unit: a.unit ?? '',
+      }));
     job.step = 'pick';
   } finally {
     loading.value = false;
   }
+}
+
+async function claimTask(task: FdmgongchangScheduleApi.Task) {
+  submitting.value = true;
+  try {
+    await claimWorkbenchTask(task.id);
+    message.success('接单成功，做完了在「我的任务」里报工');
+    await reload();
+  } finally {
+    submitting.value = false;
+  }
+}
+
+function releaseTask(task: FdmgongchangScheduleApi.Task) {
+  Modal.confirm({
+    content: '退单后任务回到任务大厅，别人可以接。',
+    okText: '退单',
+    title: '不做这个任务了？',
+    async onOk() {
+      await releaseWorkbenchTask(task.id);
+      message.success('已退单');
+      await reload();
+    },
+  });
 }
 
 function pickInputs(): InputLine[] {
@@ -201,12 +197,41 @@ function reportNow() {
   job.createFinish = true;
   job.inputs = pickInputs();
   job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
+  applyTarget();
   job.step = 'report';
 }
 
+/**
+ * 按任务报工时产出规格按订单带出，工人只填数量：开片的片材长宽同板材、厚度是成品厚；立切切成成品长宽。
+ * 其他工序的规格本来就按领的料带出。
+ */
+function applyTarget() {
+  const target = job.prepare?.targetAttrs;
+  if (!target) return;
+  const code = job.process?.code;
+  for (const out of job.outputs) {
+    if (code === 'SLICE') {
+      const board = job.inputs[0]?.stock.item;
+      out.attrs.length = out.attrs.length ?? board?.length ?? null;
+      out.attrs.width = out.attrs.width ?? board?.width ?? null;
+      if (target.thickness !== null && target.thickness !== undefined) out.attrs.thickness = target.thickness;
+    } else if (code === 'CUT') {
+      if (target.length !== null && target.length !== undefined) out.attrs.length = target.length;
+      if (target.width !== null && target.width !== undefined) out.attrs.width = target.width;
+    }
+  }
+}
+
 function afterReport() {
-  if (goodTotal(job) > 0) job.step = 'piece';
+  // 按任务报工最后一步要拍领料单，所以总要进计件这一步
+  if (job.prepare || goodTotal(job) > 0) job.step = 'piece';
   else void submit();
+}
+
+/** 领料这一步点下一步：按任务报工时直接报数量（领料和报工一起提交），否则先确认领料。 */
+function afterPick() {
+  if (job.prepare) reportNow();
+  else job.step = 'confirm';
 }
 
 async function submit() {
@@ -214,7 +239,19 @@ async function submit() {
   const before = toNumber(job.my?.todayAmount) ?? 0;
   const good = goodTotal(job);
   try {
-    if (job.createFinish) {
+    if (job.prepare && job.task) {
+      await reportWorkbenchTask({
+        auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
+        inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+        issueSheetUrls: job.sheets,
+        outputs: outputPayload(job),
+        pieceworks: piecePayload(),
+        recipeBatches: job.recipe?.batches,
+        recipeCode: job.recipe?.code,
+        sourceStage: job.sourceStage,
+        taskId: job.task.id,
+      });
+    } else if (job.createFinish) {
       await createWorkbenchOrder(createPayload(true));
     } else if (job.order) {
       const lines = Object.entries(job.returns)
@@ -250,7 +287,10 @@ async function goHome() {
 function back() {
   if (job.step === 'pick') job.step = 'home';
   else if (job.step === 'confirm') job.step = 'pick';
-  else if (job.step === 'report') job.step = job.createFinish ? 'confirm' : 'home';
+  else if (job.step === 'report') {
+    if (job.prepare) job.step = 'pick';
+    else job.step = job.createFinish ? 'confirm' : 'home';
+  }
   else if (job.step === 'piece') job.step = 'report';
 }
 </script>
@@ -266,8 +306,13 @@ function back() {
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
-        <Home v-if="job.step === 'home'" @continue-order="continueOrder" @start-free="startFree" @start-task="startTask" @supplement-order="supplementOrder" />
-        <PickStep v-else-if="job.step === 'pick'" @back="back" @next="job.step = 'confirm'" />
+        <Home
+          v-if="job.step === 'home'"
+          @claim-task="claimTask"
+          @release-task="releaseTask"
+          @start-task="startTask"
+        />
+        <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep v-else-if="job.step === 'report'" @back="back" @next="afterReport" />
         <PieceStep v-else-if="job.step === 'piece'" :submitting="submitting" @back="back" @submit="submit" />

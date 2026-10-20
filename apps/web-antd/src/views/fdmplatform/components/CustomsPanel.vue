@@ -21,7 +21,6 @@ import {
   Checkbox,
   Descriptions,
   DescriptionsItem,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -52,6 +51,7 @@ import {
   createCustomsWithAttachments,
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText } from '../data';
@@ -65,6 +65,7 @@ import {
 } from '../documents/navigation';
 import RelatedLink from '../documents/RelatedLink.vue';
 import { useRouteOwner } from '../documents/useRouteOwner';
+import { currencyOptions } from '../products/model';
 import CreationAttachments from './CreationAttachments.vue';
 import CustomsEditor from './CustomsEditor.vue';
 
@@ -794,7 +795,8 @@ onBeforeUnmount(() => {
       :error="editorError"
       @save="saveBatch"
     />
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="customs-detail"
       :open="detailOpen && (embedded || routeActive)"
       @close="closeDetail"
       :title="selected?.name ?? '报关跟进'"
@@ -1202,7 +1204,7 @@ onBeforeUnmount(() => {
           </TabPane>
         </Tabs>
       </div>
-    </Drawer>
+    </FdmResizableDrawer>
     <Modal
       :open="actionOpen"
       @cancel="closeAction"
@@ -1269,12 +1271,7 @@ onBeforeUnmount(() => {
           <Form.Item label="费用币种" required>
             <Select
               v-model:value="expenseCurrency"
-              :options="
-                ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD'].map((value) => ({
-                  value,
-                  label: value,
-                }))
-              "
+              :options="currencyOptions"
             />
           </Form.Item>
           <Form.Item label="折算为合同币种的汇率（不同币种时填写）">

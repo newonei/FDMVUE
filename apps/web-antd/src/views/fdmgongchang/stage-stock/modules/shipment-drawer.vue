@@ -9,7 +9,6 @@ import {
   Alert,
   Button,
   DatePicker,
-  Drawer,
   Empty,
   Input,
   InputNumber,
@@ -23,6 +22,7 @@ import {
   getShippableItems,
   getStockPage,
 } from '#/api/fdmgongchang/stage-stock';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import {
   attrSummary,
@@ -197,7 +197,7 @@ async function submit() {
 </script>
 
 <template>
-  <Drawer v-model:open="open" :width="820" class="max-w-full" destroy-on-close title="工厂出货">
+  <FdmResizableDrawer resize-key="factory-shipment" v-model:open="open" :width="820" class="max-w-full" destroy-on-close title="工厂出货">
     <div class="flex flex-col gap-6">
       <section class="flex flex-col gap-2">
         <h3 class="m-0 flex items-center gap-2 text-sm font-semibold">
@@ -323,5 +323,5 @@ async function submit() {
         </div>
       </div>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>

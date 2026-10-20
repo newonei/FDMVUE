@@ -165,6 +165,8 @@ export interface PageQuery {
   ownerUserId?: number;
   /** true: imported records awaiting completion; false: current business; absent: both. */
   pendingCompletion?: boolean;
+  /** 外贸 / 内销；不传不分业务线 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
 }
 export interface PageResult<T> {
   list: T[];

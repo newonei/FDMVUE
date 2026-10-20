@@ -17,7 +17,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Input,
   message,
   Select,
@@ -31,6 +30,7 @@ import {
   getSupplierOverview,
   getSupplierStatsPage,
 } from '#/api/fdmplatform/supplier-stats';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import { errorText, field } from '../../data';
@@ -542,7 +542,8 @@ onMounted(refresh);
       @close="entityDetail.close"
       @submit="save"
     />
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="supplier-contacts"
       :open="!!contactSupplier && activeRoute"
       :title="`${contactSupplier?.name ?? ''} · 工厂联系人`"
       width="900px"
@@ -552,7 +553,7 @@ onMounted(refresh);
         v-if="contactSupplier"
         :supplier-id="contactSupplier.id"
       />
-    </Drawer>
+    </FdmResizableDrawer>
   </Page>
 </template>
 

@@ -23,7 +23,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Dropdown,
   Input,
   Menu,
@@ -45,6 +44,7 @@ import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, rows } from '../data';
@@ -60,6 +60,7 @@ import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
+import { salesChannelOf } from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
@@ -70,6 +71,7 @@ import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
 import ContractTimeline from './ContractTimeline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
+import FilePreviewButton from './FilePreviewButton.vue';
 import LineTable from './LineTable.vue';
 import RecordTable from './RecordTable.vue';
 import SummaryCards from './SummaryCards.vue';
@@ -213,6 +215,10 @@ const allTasks = computed(() =>
         0,
       )
     : 0,
+);
+/** 内销合同没有报关和阿里信保 */
+const domestic = computed(
+  () => salesChannelOf(props.contract?.businessType) === 'DOMESTIC',
 );
 const ended = computed(() =>
   ['CANCELLED', 'CLOSED'].includes(props.contract?.status ?? ''),
@@ -682,7 +688,8 @@ async function download(file: { id: string; name: string }) {
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="contract-detail"
     :open="open"
     :title="
       contract
@@ -798,13 +805,15 @@ async function download(file: { id: string; name: string }) {
             <dd>{{ company || '待补齐' }}</dd>
             <dt>业务部门</dt>
             <dd>{{ departmentLabel(directory, contract.departmentId) }}</dd>
-            <dt>阿里信保</dt>
-            <dd>
-              {{
-                contract.alibabaTradeAssuranceNo ||
-                (contract.useTradeAssurance ? '是' : '否')
-              }}
-            </dd>
+            <template v-if="!domestic">
+              <dt>阿里信保</dt>
+              <dd>
+                {{
+                  contract.alibabaTradeAssuranceNo ||
+                  (contract.useTradeAssurance ? '是' : '否')
+                }}
+              </dd>
+            </template>
             <dt>付款条件</dt>
             <dd :class="{ muted: !contract.paymentTerms }">
               {{ contract.paymentTerms || '未填写' }}
@@ -1030,7 +1039,7 @@ async function download(file: { id: string; name: string }) {
             </div>
           </TabPane>
 
-          <TabPane key="delivery" tab="发货与报关">
+          <TabPane key="delivery" :tab="domestic ? '发货' : '发货与报关'">
             <div class="dept">
               <div class="dept-actions">
                 <Button
@@ -1067,8 +1076,8 @@ async function download(file: { id: string; name: string }) {
                 </div>
               </div>
               <p v-else class="muted">还没有发货记录</p>
-              <h4>报关</h4>
-              <p v-if="customs" class="muted">
+              <h4 v-if="!domestic">报关</h4>
+              <p v-if="customs && !domestic" class="muted">
                 {{
                   customs.total
                     ? `${customs.completed} / ${customs.total} 批已完成，${customs.pending} 批办理中`
@@ -1076,7 +1085,7 @@ async function download(file: { id: string; name: string }) {
                 }}
               </p>
               <Alert
-                v-if="customsError"
+                v-if="customsError && !domestic"
                 :message="customsError"
                 type="warning"
               />
@@ -1092,6 +1101,7 @@ async function download(file: { id: string; name: string }) {
                   {{ documentDefinitions[kind].title }}
                 </Button>
                 <Button
+                  v-if="!domestic"
                   size="small"
                   :disabled="childOpen"
                   @click="openDocuments('customs', 'list')"
@@ -1152,6 +1162,12 @@ async function download(file: { id: string; name: string }) {
                     }}{{
                       receipt.rmbAmount
                         ? ` · 折 CNY ${Number(receipt.rmbAmount).toLocaleString('en-US')}`
+                        : ''
+                    }}{{
+                      receipt.contractAmount !== undefined &&
+                      receipt.contractAmount !== null &&
+                      receipt.currency !== contract?.currency
+                        ? ` · 计入合同 ${nativeMoney(receipt.contractAmount, contract?.currency)}`
                         : ''
                     }}</span>
                   <span><Tag
@@ -1252,20 +1268,28 @@ async function download(file: { id: string; name: string }) {
           </details>
         </section>
         <Card v-if="standardFiles.length" size="small" title="产品标准资料">
-          <Button
-            v-for="file in standardFiles"
-            :key="file.id"
-            type="link"
-            size="small"
-            class="file-link"
-            @click="download(file)"
-          >
-            {{ file.skuName }} · {{ file.name }}
-          </Button>
+          <div v-for="file in standardFiles" :key="file.id" class="file-row">
+            <Button
+              type="link"
+              size="small"
+              class="file-link"
+              @click="download(file)"
+            >
+              {{ file.skuName }} · {{ file.name }}
+            </Button>
+            <FilePreviewButton
+              v-if="contract"
+              :name="file.name"
+              size="small"
+              :load="
+                () => downloadContractProductAttachment(contract!.id, file.id)
+              "
+            />
+          </div>
         </Card>
       </aside>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
   <Modal
     :open="open && !!terminateAction"
     :title="terminateAction === 'CANCEL_CONTRACT' ? '取消合同' : '合同结案'"
@@ -1626,10 +1650,19 @@ section.identity {
   font-size: 12.5px;
 }
 
+.file-row {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
 .file-link {
   display: block;
+  flex: 1;
+  min-width: 0;
   height: auto;
   padding: 2px 0;
+  text-align: left;
   white-space: normal;
 }
 
