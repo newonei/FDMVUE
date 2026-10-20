@@ -27,6 +27,7 @@ import {
 
 import { errorText } from '../data';
 import { contractAttachmentCategories } from './contract-files';
+import FilePreviewButton from './FilePreviewButton.vue';
 
 const props = defineProps<{
   categories: string[];
@@ -198,14 +199,19 @@ async function download(item: ContractAttachment) {
           categoryLabels[record.category] ?? record.category
         }}</span>
         <span v-else-if="column.key === 'size'">{{ (Number(record.size) / 1024).toFixed(1) }} KB</span>
-        <Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          :loading="downloading === record.id"
-          @click="download(record as ContractAttachment)"
-        >
-          下载
-        </Button>
+        <template v-else-if="column.key === 'action'">
+          <FilePreviewButton
+            :name="record.name"
+            :load="() => downloadAttachment(contractId, record.id)"
+          />
+          <Button
+            type="link"
+            :loading="downloading === record.id"
+            @click="download(record as ContractAttachment)"
+          >
+            下载
+          </Button>
+        </template>
       </template>
     </Table>
   </div>

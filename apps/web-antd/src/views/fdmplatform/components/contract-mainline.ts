@@ -270,7 +270,7 @@ function moneyStage(
 ): MainlineStage {
   const facts = ledger(contract);
   const money = (value: BigNumber | undefined) =>
-    value ? nativeMoney(value.toFixed(0), contract.currency) : '待核对';
+    value ? nativeMoney(value.toFixed(2), contract.currency) : '待核对';
   if (!facts)
     return {
       key,

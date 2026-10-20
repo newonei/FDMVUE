@@ -37,6 +37,7 @@ import {
   contractFileGroups,
   filterContractFiles,
 } from './contract-files';
+import FilePreviewButton from './FilePreviewButton.vue';
 
 const props = defineProps<{
   contractId: string;
@@ -296,15 +297,23 @@ const columns = [
         <span v-else-if="column.key === 'createdAt'">
           {{ time(record.createdAt) }}
         </span>
-        <Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          size="small"
-          :loading="downloading === `${record.source}:${record.id}`"
-          @click="download(record as ContractFile)"
-        >
-          下载
-        </Button>
+        <template v-else-if="column.key === 'action'">
+          <FilePreviewButton
+            :name="record.name"
+            size="small"
+            :load="
+              () => downloadContractFile(contractId, record as ContractFile)
+            "
+          />
+          <Button
+            type="link"
+            size="small"
+            :loading="downloading === `${record.source}:${record.id}`"
+            @click="download(record as ContractFile)"
+          >
+            下载
+          </Button>
+        </template>
       </template>
     </Table>
   </div>

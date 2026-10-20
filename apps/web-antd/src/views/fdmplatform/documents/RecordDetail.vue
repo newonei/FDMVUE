@@ -44,7 +44,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
 import LineTable from '../components/LineTable.vue';
-import { errorText, label, rows } from '../data';
+import { errorText, label, money, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
@@ -254,6 +254,8 @@ const extraFields = [
   'evidenceRef|历史凭证',
   'accountRef|收款账户',
   'exchangeRateToCny|人民币参考汇率',
+  'contractRateToCny|合同币种参考汇率',
+  'contractAmount|计入合同金额',
   'exchangeRateDate|实际汇率日期',
   'exchangeRateSource|汇率来源',
   'exchangeRateFallback|汇率日期匹配',
@@ -261,6 +263,7 @@ const extraFields = [
   'occurredAt|登记时间',
   'createdAt|创建时间',
 ];
+const CONTRACT_FX = new Set(['contractAmount', 'contractRateToCny']);
 const fields = computed(() =>
   [
     ...new Map(
@@ -269,11 +272,14 @@ const fields = computed(() =>
         return [key!, { key: key!, title: name! }] as const;
       }),
     ).values(),
-  ].filter(
-    (item) =>
-      record.value?.[item.key] !== undefined ||
-      (item.key.startsWith('exchangeRate') &&
-        ['receipts', 'refunds'].includes(props.kind)),
+  ].filter((item) =>
+    // 合同币种折算只有跨币种回款才有，同币种回款不显示空行
+    CONTRACT_FX.has(item.key)
+      ? record.value?.[item.key] !== undefined &&
+        record.value?.[item.key] !== null
+      : record.value?.[item.key] !== undefined ||
+        (item.key.startsWith('exchangeRate') &&
+          ['receipts', 'refunds'].includes(props.kind)),
   ),
 );
 function display(key: string) {
@@ -283,6 +289,8 @@ function display(key: string) {
     migrationCell(record.value ?? {}, key) ??
     receiptFxDisplay(record.value ?? {}, key);
   if (formatted !== undefined && formatted !== null) return formatted;
+  if (key === 'contractAmount' && value !== null && value !== undefined)
+    return money(value, contract.value?.currency);
   if (
     /UserId$/i.test(key) ||
     ['actorId', 'confirmedBy', 'createdBy'].includes(key)
