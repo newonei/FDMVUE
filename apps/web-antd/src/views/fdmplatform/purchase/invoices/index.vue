@@ -26,6 +26,7 @@ import BigNumber from 'bignumber.js';
 
 import {
   downloadPurchaseInvoiceFile,
+  getOrderInvoices,
   getPurchaseInvoicePage,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
@@ -33,11 +34,13 @@ import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-fina
 import { errorText } from '../../data';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import InvoiceUpload from '../../finance/procurement/components/InvoiceUpload.vue';
+import { confirmVoidInvoice } from '../../finance/procurement/components/void-invoice';
 import OrderPicker from '../manage/components/OrderPicker.vue';
 
 /**
  * 付款发票（金智「付款发票」）：所有采购单登记的供应商发票，按收票时间倒序；
- * 点采购单弹出采购单抽屉（与采购订单页同一个），可在这里先选采购单再上传发票。
+ * 点采购单弹出采购单抽屉（与采购订单页同一个），可在这里先选采购单再上传发票；
+ * 识别错、录错的发票在这里直接作废后重传。
  */
 defineOptions({ name: 'FdmPlatformPurchaseInvoices' });
 
@@ -63,8 +66,11 @@ const pickingOrder = ref(false);
 const uploadOrder = ref<{
   contractId: string;
   currency?: string;
+  /** 修改这张发票；为空是新登记 */
+  invoice?: PurchaseInvoice;
   orderId: string;
   payments: Array<{ label: string; value: string }>;
+  remaining?: string;
   title: string;
 }>();
 const openedOrder = ref<{ contractId: string; orderId: string }>();
@@ -150,12 +156,32 @@ function openOrder(row: PurchaseInvoice) {
 }
 async function orderPicked(row: DocumentRow) {
   pickingOrder.value = false;
-  const orderId = String(row.standaloneId ?? row.id);
-  const contractId = row.standaloneId
-    ? 'standalone'
-    : String(row.contractId ?? '');
+  await openUpload(
+    row.standaloneId ? 'standalone' : String(row.contractId ?? ''),
+    String(row.standaloneId ?? row.id),
+    String(row.record?.code ?? row.record?.orderCode ?? '采购单'),
+  );
+}
+function edit(row: PurchaseInvoice) {
+  // 独立采购单的发票 contractId 存的是空串
+  const contractId =
+    String((row as unknown as Record<string, unknown>).contractId ?? '') ||
+    'standalone';
+  void openUpload(contractId, row.orderId, row.orderCode ?? '采购单', row);
+}
+/** 登记 / 修改发票前取采购单的币种、付款记录和未收票金额 */
+async function openUpload(
+  contractId: string,
+  orderId: string,
+  title: string,
+  invoice?: PurchaseInvoice,
+) {
   try {
-    const summary = await getProcurementFinanceSummary(contractId, orderId);
+    const [summary, invoices] = await Promise.all([
+      getProcurementFinanceSummary(contractId, orderId),
+      getOrderInvoices(contractId, orderId),
+    ]);
+    const orderAmount = new BigNumber(String(summary.orderAmount ?? ''));
     const payments = Array.isArray(summary.payments)
       ? (summary.payments as Array<Record<string, unknown>>)
       : [];
@@ -163,7 +189,11 @@ async function orderPicked(row: DocumentRow) {
       contractId,
       orderId,
       currency: String(summary.currency ?? ''),
-      title: String(row.record?.code ?? row.record?.orderCode ?? '采购单'),
+      invoice,
+      title,
+      remaining: orderAmount.isFinite()
+        ? orderAmount.minus(String(invoices.invoicedAmount)).toFixed(2)
+        : undefined,
       payments: payments
         .filter((entry) =>
           ['CONFIRMED', 'PARTIALLY_REVERSED', 'REVERSED'].includes(
@@ -179,9 +209,12 @@ async function orderPicked(row: DocumentRow) {
     message.error(errorText(error));
   }
 }
+function remove(row: PurchaseInvoice) {
+  confirmVoidInvoice(row, load);
+}
 function uploaded() {
+  message.success(uploadOrder.value?.invoice ? '发票已修改' : '付款发票已登记');
   uploadOrder.value = undefined;
-  message.success('付款发票已登记');
   void load();
 }
 watch(active, (value) => value && void load(), { immediate: true });
@@ -235,7 +268,7 @@ watch(active, (value) => value && void load(), { immediate: true });
           size="small"
           row-key="id"
           table-layout="fixed"
-          :scroll="{ x: 1250 }"
+          :scroll="{ x: 1350 }"
           :data-source="rows"
           :loading="loading"
           :pagination="{
@@ -261,6 +294,7 @@ watch(active, (value) => value && void load(), { immediate: true });
             { title: '对应付款', key: 'payment', width: 150 },
             { title: '原件', key: 'file', width: 160, ellipsis: true },
             { title: '状态', key: 'status', width: 80 },
+            { title: '操作', key: 'action', width: 100, fixed: 'right' },
           ]"
           @change="
             (value) => {
@@ -276,7 +310,7 @@ watch(active, (value) => value && void load(), { immediate: true });
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ pageTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="9">
+                <TableSummaryCell :index="1" :col-span="10">
                   本页合计（有效发票）
                 </TableSummaryCell>
               </TableSummaryRow>
@@ -284,7 +318,7 @@ watch(active, (value) => value && void load(), { immediate: true });
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ allTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="9">
+                <TableSummaryCell :index="1" :col-span="10">
                   全部合计（有效发票）
                 </TableSummaryCell>
               </TableSummaryRow>
@@ -339,6 +373,26 @@ watch(active, (value) => value && void load(), { immediate: true });
             >
               {{ record.status === 'VALID' ? '有效' : '已作废' }}
             </Tag>
+            <span
+              v-else-if="column.key === 'action' && record.status === 'VALID'"
+              class="actions"
+            >
+              <Button
+                type="link"
+                size="small"
+                @click="edit(record as PurchaseInvoice)"
+              >
+                修改
+              </Button>
+              <Button
+                type="link"
+                size="small"
+                danger
+                @click="remove(record as PurchaseInvoice)"
+              >
+                作废
+              </Button>
+            </span>
           </template>
         </Table>
       </Space>
@@ -350,7 +404,7 @@ watch(active, (value) => value && void load(), { immediate: true });
     />
     <Modal
       :open="!!uploadOrder && active"
-      :title="`上传付款发票 · ${uploadOrder?.title ?? ''}`"
+      :title="`${uploadOrder?.invoice ? '修改' : '上传'}付款发票 · ${uploadOrder?.title ?? ''}`"
       width="760px"
       :footer="null"
       :mask-closable="false"
@@ -359,10 +413,12 @@ watch(active, (value) => value && void load(), { immediate: true });
     >
       <InvoiceUpload
         v-if="uploadOrder"
+        :invoice="uploadOrder.invoice"
         :contract-id="uploadOrder.contractId"
         :order-id="uploadOrder.orderId"
         :currency="uploadOrder.currency"
         :payment-options="uploadOrder.payments"
+        :remaining="uploadOrder.remaining"
         @saved="uploaded"
       />
     </Modal>
@@ -378,6 +434,10 @@ watch(active, (value) => value && void load(), { immediate: true });
 <style scoped>
 .num {
   font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  white-space: nowrap;
 }
 
 .muted {
