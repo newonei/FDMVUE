@@ -25,7 +25,7 @@ import {
 
 /**
  * 到货入库：采购部门的采购单选了本厂收货的原料、辅料，在这里确认收货；原料进「原材料」、辅料进「辅料」库存，
- * 采购单同步更新到货。到货记录列出每次收货，采购收货可以作废（扣回库存、冲回采购单）。
+ * 采购单同步更新到货。到货记录列出每次收货，采购收货和以前的外采到货都可以作废（扣回库存、冲回采购单）。
  */
 const props = defineProps<{ refreshKey: number }>();
 const emit = defineEmits<{
@@ -132,7 +132,7 @@ function onReceiptPage(pagination: TablePaginationConfig) {
 function canVoid(record: Api.Receipt) {
   return (
     canReceive.value &&
-    record.sourceType === 'PURCHASE' &&
+    ['PURCHASE', 'TRADE_PURCHASE'].includes(record.sourceType) &&
     record.status !== 'VOIDED'
   );
 }
@@ -365,7 +365,7 @@ const receiptColumns = [
       @ok="confirmVoid"
     >
       <p class="text-xs text-muted-foreground">
-        作废后这批货从库存扣回（已经领用的要先退回），采购单的到货一并冲回，可以重新收货。
+        作废后这批货从库存扣回（已经领用或出货的要先退回），采购单的到货一并冲回，可以重新收货。
       </p>
       <Input
         id="receipt-void-reason"

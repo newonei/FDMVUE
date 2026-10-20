@@ -30,6 +30,8 @@ const props = defineProps<{
   canReceive: boolean;
   contractId: string;
   orderId: string;
+  /** 合同里登记、但没有采购入库单的到货（工厂外采到货等） */
+  otherArrivals?: Record<string, unknown>[];
 }>();
 const emit = defineEmits<{ changed: [] }>();
 
@@ -53,6 +55,11 @@ const returnedOf = (row: StockIn) =>
       Number(line.returnedExceptionQuantity ?? 0),
     0,
   );
+const arrivalReturned = (row: Record<string, unknown>) =>
+  Number(row.returnedAcceptedQuantity ?? 0) +
+  Number(row.returnedExceptionQuantity ?? 0);
+const factoryArrival = (row: Record<string, unknown>) =>
+  String(row.evidenceRef ?? '').startsWith('DH');
 const effective = computed(() =>
   stockIns.value.filter((row) => row.status !== 'VOIDED'),
 );
@@ -182,6 +189,52 @@ watch(() => props.orderId, load, { immediate: true });
               </Button>
             </template>
           </div>
+        </template>
+      </Table>
+    </Card>
+    <Card v-if="otherArrivals?.length" size="small">
+      <template #title>
+        其他到货登记
+        <span class="procurement-muted">
+          {{ otherArrivals.length }} 笔，没有入库单，但计入入库比例
+        </span>
+      </template>
+      <Table
+        class="warehouse-page fdm-business-table"
+        size="small"
+        row-key="id"
+        :data-source="otherArrivals"
+        :pagination="false"
+        :scroll="{ x: 860 }"
+        :columns="[
+          { title: '到货凭据', key: 'code', width: 190 },
+          { title: '登记时间', key: 'time', width: 140 },
+          { title: '实收 / 合格', key: 'quantity', width: 110, align: 'right' },
+          { title: '已退', key: 'returned', width: 70, align: 'right' },
+          { title: '说明', key: 'note' },
+        ]"
+      >
+        <template #bodyCell="{ column, record }">
+          <b v-if="column.key === 'code'" class="mono">{{
+            record.evidenceRef || '—'
+          }}</b>
+          <span v-else-if="column.key === 'time'">{{
+            String(record.occurredAt ?? '')
+              .replace('T', ' ')
+              .slice(0, 16)
+          }}</span>
+          <span v-else-if="column.key === 'quantity'" class="num">
+            {{ qty(record.quantity) }} /
+            <b>{{ qty(record.acceptedQuantity) }}</b>
+          </span>
+          <span v-else-if="column.key === 'returned'" class="num">{{
+            arrivalReturned(record) ? qty(arrivalReturned(record)) : '—'
+          }}</span>
+          <span v-else-if="column.key === 'note'" class="muted">{{
+            factoryArrival(record)
+              ? '工厂外采到货，要作废请到工厂「到货入库」的到货记录里作废'
+              : '直接登记的合同到货'
+          }}</span>
         </template>
       </Table>
     </Card>
