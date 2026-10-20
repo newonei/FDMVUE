@@ -247,6 +247,8 @@ export interface ProcurementOrderRow extends DocumentRow {
   orderCode?: string;
   /** A signed contract has been uploaded for this order. */
   signed?: boolean;
+  /** 采购单附件页签里上传过附件（合同附件、单据附件或盖章件） */
+  attached?: boolean;
   /** 下单资料交货日期，没填时取报价承诺到货日。 */
   dueDate?: string;
   /** NONE 未入库 / PARTIAL 部分入库 / ALL 已入齐 */

@@ -328,7 +328,7 @@ export function orderRowDue(
 }
 
 /**
- * 采购单列表「操作/状态」小图标（金智同款）：入库、付款、收票、盖章各一个，
+ * 采购单列表「操作/状态」小图标（金智同款）：入库、付款、收票、盖章、附件各一个，
  * done=已办完、part=部分、none=未办、skip=无需。
  */
 function tone(done: boolean, partial: boolean) {
@@ -380,6 +380,12 @@ export function orderRowFlags(
       text: '章',
       tone: row.signed ? 'done' : 'none',
       title: row.signed ? '已上传盖章件' : '未上传盖章件',
+    },
+    {
+      key: 'attachment',
+      text: '附',
+      tone: row.attached ? 'done' : 'none',
+      title: row.attached ? '已上传附件' : '未上传附件',
     },
   ];
 }

@@ -231,7 +231,7 @@ describe('采购单列表状态图标（金智式）', () => {
     ({ id: 'o', record: {}, ...extra }) as unknown as Parameters<
       typeof orderRowFlags
     >[0];
-  it('入库、付款、收票、盖章分别按办完 / 部分 / 未办着色', () => {
+  it('入库、付款、收票、盖章、附件分别按办完 / 部分 / 未办着色', () => {
     const flags = orderRowFlags(
       row({
         receivedState: 'PARTIAL',
@@ -240,6 +240,7 @@ describe('采购单列表状态图标（金智式）', () => {
         unpaidAmount: '0',
         invoicedAmount: '40',
         signed: true,
+        attached: true,
       }),
       names,
     );
@@ -248,6 +249,7 @@ describe('采购单列表状态图标（金智式）', () => {
       ['付', 'done'],
       ['票', 'part'],
       ['章', 'done'],
+      ['附', 'done'],
     ]);
   });
   it('无需收票显示为跳过，未付款与未收票为灰', () => {
@@ -264,6 +266,7 @@ describe('采购单列表状态图标（金智式）', () => {
       'none',
       'none',
       'skip',
+      'none',
       'none',
     ]);
     expect(flags[2]!.title).toBe('无需收票');
