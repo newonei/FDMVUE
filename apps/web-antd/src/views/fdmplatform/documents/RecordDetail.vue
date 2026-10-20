@@ -263,6 +263,7 @@ const extraFields = [
   'occurredAt|登记时间',
   'createdAt|创建时间',
 ];
+const CONTRACT_FX = new Set(['contractAmount', 'contractRateToCny']);
 const fields = computed(() =>
   [
     ...new Map(
@@ -271,11 +272,14 @@ const fields = computed(() =>
         return [key!, { key: key!, title: name! }] as const;
       }),
     ).values(),
-  ].filter(
-    (item) =>
-      record.value?.[item.key] !== undefined ||
-      (item.key.startsWith('exchangeRate') &&
-        ['receipts', 'refunds'].includes(props.kind)),
+  ].filter((item) =>
+    // 合同币种折算只有跨币种回款才有，同币种回款不显示空行
+    CONTRACT_FX.has(item.key)
+      ? record.value?.[item.key] !== undefined &&
+        record.value?.[item.key] !== null
+      : record.value?.[item.key] !== undefined ||
+        (item.key.startsWith('exchangeRate') &&
+          ['receipts', 'refunds'].includes(props.kind)),
   ),
 );
 function display(key: string) {
