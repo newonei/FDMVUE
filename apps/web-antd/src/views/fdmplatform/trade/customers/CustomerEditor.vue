@@ -65,12 +65,14 @@ const channel = computed<SalesChannel>(() =>
     ? salesChannelOf(props.customer.salesChannel)
     : (props.salesChannel ?? 'FOREIGN'),
 );
-/** 内销客户国家固定为中国，不显示国家选择 */
+/** 内销客户国家固定为中国，不显示国家选择；外贸客户只填国家，不填省 / 州和城市 */
 const domestic = computed(() => channel.value === 'DOMESTIC');
 const visibleFields = computed(() =>
   customerFields.filter(
     ([field]) =>
-      field !== 'shortName' && !(domestic.value && field === 'country'),
+      field !== 'shortName' &&
+      !(domestic.value && field === 'country') &&
+      !(!domestic.value && (field === 'province' || field === 'city')),
   ),
 );
 const missingFields = computed(() => customerMissingFields(form));

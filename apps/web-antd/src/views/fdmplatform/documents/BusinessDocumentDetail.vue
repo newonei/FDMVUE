@@ -45,6 +45,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../components/ActionDialog.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
+import FilePreviewButton from '../components/FilePreviewButton.vue';
 import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import { errorText, label, rows } from '../data';
@@ -636,13 +637,20 @@ async function submit(
               ]"
             >
               <template #bodyCell="{ column, record: file }">
-                <Button
-                  v-if="column.key === 'action'"
-                  type="link"
-                  @click="download(file as BusinessDocumentFile)"
-                >
-                  下载
-                </Button>
+                <template v-if="column.key === 'action' && view">
+                  <FilePreviewButton
+                    :name="file.name"
+                    :load="
+                      () => downloadBusinessDocumentFile(view!.id, file.id)
+                    "
+                  />
+                  <Button
+                    type="link"
+                    @click="download(file as BusinessDocumentFile)"
+                  >
+                    下载
+                  </Button>
+                </template>
               </template>
             </Table>
           </Card>

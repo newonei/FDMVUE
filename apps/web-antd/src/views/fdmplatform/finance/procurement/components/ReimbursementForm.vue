@@ -39,6 +39,7 @@ import {
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { costCategories, errorText, rows } from '../../../data';
 import { personLabel } from '../../../directory';
 import ContractPicker from '../../../documents/ContractPicker.vue';
@@ -293,10 +294,14 @@ function existingFile(line: ReimbursementLine, value: unknown) {
   line.evidenceRef = value ? String(value) : '';
   line.pendingFile = undefined;
 }
+function evidenceFile(line: ReimbursementLine) {
+  return line.evidenceRef
+    ? props.files.find((entry) => entry.id === line.evidenceRef)
+    : undefined;
+}
 async function download(line: ReimbursementLine) {
-  if (!props.record || !line.evidenceRef) return;
-  const file = props.files.find((entry) => entry.id === line.evidenceRef);
-  if (!file) return;
+  const file = evidenceFile(line);
+  if (!props.record || !file) return;
   try {
     downloadBlob(
       await downloadProcurementFinanceFile(props.record.id, file.id),
@@ -616,7 +621,20 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                 </p>
               </div>
               <div class="voucher-actions">
-                <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><Button
+                <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><FilePreviewButton
+                  v-if="record && evidenceFile(line) && !line.pendingFile"
+                  type="default"
+                  size="small"
+                  :disabled="saving"
+                  :name="evidenceFile(line)!.name"
+                  :load="
+                    () =>
+                      downloadProcurementFinanceFile(
+                        record!.id,
+                        evidenceFile(line)!.id,
+                      )
+                  "
+                /><Button
                   v-if="line.evidenceRef && !line.pendingFile"
                   size="small"
                   :disabled="
