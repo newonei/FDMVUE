@@ -3,9 +3,10 @@ import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-
 
 import { computed, ref, watch } from 'vue';
 
-import { Alert, Button, Drawer, Input, InputNumber, Select } from 'ant-design-vue';
+import { Alert, Button, Input, InputNumber, Select } from 'ant-design-vue';
 
 import { receivePurchase } from '#/api/fdmgongchang/stage-stock';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import {
   formatDate,
@@ -130,7 +131,8 @@ async function submit() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="factory-receipt"
     v-model:open="open"
     :title="`${line ? MATERIAL_KIND_LABELS[line.kind] : ''}到货入库`"
     :width="640"
@@ -240,5 +242,5 @@ async function submit() {
         </div>
       </div>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>

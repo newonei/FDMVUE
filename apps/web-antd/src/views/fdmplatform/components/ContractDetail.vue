@@ -23,7 +23,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Dropdown,
   Input,
   Menu,
@@ -45,6 +44,7 @@ import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, rows } from '../data';
@@ -687,7 +687,8 @@ async function download(file: { id: string; name: string }) {
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="contract-detail"
     :open="open"
     :title="
       contract
@@ -1273,7 +1274,7 @@ async function download(file: { id: string; name: string }) {
         </Card>
       </aside>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
   <Modal
     :open="open && !!terminateAction"
     :title="terminateAction === 'CANCEL_CONTRACT' ? '取消合同' : '合同结案'"

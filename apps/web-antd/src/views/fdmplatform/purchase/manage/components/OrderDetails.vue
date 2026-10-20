@@ -12,7 +12,6 @@ import {
   Alert,
   Button,
   Card,
-  Drawer,
   Form,
   Input,
   Select,
@@ -25,6 +24,7 @@ import {
   getProcurementSettings,
   getSupplierContacts,
 } from '#/api/fdmplatform/procurement';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../../data';
 import {
@@ -408,7 +408,8 @@ function confirm() {
         </span>
       </Space>
     </Card>
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="supplier-contacts"
       :open="contactsOpen"
       title="工厂联系人"
       width="900px"
@@ -418,7 +419,7 @@ function confirm() {
         :supplier-id="String(view.order.supplierId)"
         @saved="changed"
       />
-    </Drawer>
+    </FdmResizableDrawer>
   </Space>
 </template>
 <style scoped>

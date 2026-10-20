@@ -8,7 +8,6 @@ import {
   AutoComplete,
   Button,
   Checkbox,
-  Drawer,
   Form,
   Input,
   message,
@@ -17,6 +16,7 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { saveProduct } from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { missingProductFields } from '../model';
@@ -94,7 +94,8 @@ async function save() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="product-editor"
     :open="open"
     :title="product ? '产品档案' : '新建产品档案'"
     width="min(760px, 96vw)"
@@ -149,7 +150,7 @@ async function save() {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

@@ -10,7 +10,6 @@ import {
   Button,
   Checkbox,
   Collapse,
-  Drawer,
   Form,
   Input,
   message,
@@ -20,6 +19,7 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getCustomerOptions, saveCustomer } from '#/api/fdmplatform/customers';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { salesChannelOf } from '../../sales-channel';
@@ -178,7 +178,8 @@ async function save() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="customer-editor"
     :open="open"
     :title="customer ? '维护客户档案' : domestic ? '新建内销客户' : '新建客户'"
     width="min(820px, 96vw)"
@@ -360,7 +361,7 @@ async function save() {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
   <CustomerSourceOptions
     :open="sourcesOpen"
     @close="sourcesOpen = false"

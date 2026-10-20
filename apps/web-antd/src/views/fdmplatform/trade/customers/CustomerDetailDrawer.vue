@@ -15,7 +15,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   Pagination,
@@ -28,6 +27,7 @@ import {
 } from 'ant-design-vue';
 
 import { getCustomerActivity } from '#/api/fdmplatform/customers';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, label } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
@@ -225,7 +225,9 @@ function close() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="customer-detail"
+    :resizable="!fullscreen"
     :open="open"
     :width="fullscreen ? '100vw' : 'min(1440px, 96vw)'"
     :body-style="{
@@ -643,7 +645,7 @@ function close() {
         </Card>
       </aside>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

@@ -19,7 +19,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   message,
   Modal,
   Space,
@@ -42,6 +41,7 @@ import {
 } from '#/api/fdmplatform/business-documents';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../components/ActionDialog.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
@@ -443,7 +443,8 @@ async function submit(
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="business-document"
     :open="open"
     :title="title"
     :width="1140"
@@ -648,7 +649,7 @@ async function submit(
         </template>
       </Space>
     </Spin>
-  </Drawer>
+  </FdmResizableDrawer>
   <ContractPicker
     :open="pickerOpen && open"
     @close="pickerOpen = false"

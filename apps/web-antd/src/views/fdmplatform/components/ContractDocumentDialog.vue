@@ -12,7 +12,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   Select,
@@ -24,6 +23,7 @@ import {
 } from 'ant-design-vue';
 
 import { getBusinessPage, getContract } from '#/api/fdmplatform';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, label } from '../data';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
@@ -330,7 +330,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="contract-document"
     :open="open"
     :title="`${title} · ${contract?.code || contract?.name || ''}`"
     width="min(1220px, 97vw)"
@@ -510,7 +511,7 @@ onBeforeUnmount(() => {
         @busy="(value) => (customsBusy = value)"
       />
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
   <DocumentAction
     :open="open && actionOpen"
     :kind="documentKind"

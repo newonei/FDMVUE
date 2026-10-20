@@ -21,7 +21,6 @@ import {
   Checkbox,
   Descriptions,
   DescriptionsItem,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -52,6 +51,7 @@ import {
   createCustomsWithAttachments,
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText } from '../data';
@@ -794,7 +794,8 @@ onBeforeUnmount(() => {
       :error="editorError"
       @save="saveBatch"
     />
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="customs-detail"
       :open="detailOpen && (embedded || routeActive)"
       @close="closeDetail"
       :title="selected?.name ?? '报关跟进'"
@@ -1202,7 +1203,7 @@ onBeforeUnmount(() => {
           </TabPane>
         </Tabs>
       </div>
-    </Drawer>
+    </FdmResizableDrawer>
     <Modal
       :open="actionOpen"
       @cancel="closeAction"

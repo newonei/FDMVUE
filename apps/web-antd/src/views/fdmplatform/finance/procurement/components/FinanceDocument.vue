@@ -17,7 +17,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   message,
   Modal,
   Space,
@@ -38,6 +37,7 @@ import {
   createProcurementFinanceWithAttachments,
   procurementFinanceActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
 import CreationAttachments from '../../../components/CreationAttachments.vue';
@@ -544,7 +544,8 @@ async function relatedUpdated() {
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    :resize-key="`finance-${type}`"
     :open="open"
     :title="
       record
@@ -893,7 +894,7 @@ async function relatedUpdated() {
         />
       </template>
     </ActionDialog>
-  </Drawer>
+  </FdmResizableDrawer>
   <FinanceDocument
     v-if="related"
     :open="open"
