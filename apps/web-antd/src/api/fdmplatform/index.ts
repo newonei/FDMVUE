@@ -317,6 +317,10 @@ export function getContract(id: string) {
     `${base}/contracts/${encodeURIComponent(id)}`,
   );
 }
+/** 新建合同弹窗回填的建议订单号；只读不占号 */
+export function getNextContractCode() {
+  return requestClient.get<string>(`${base}/contracts/next-code`);
+}
 export function createContract(data: Record<string, unknown>) {
   return requestClient.post<Contract>(`${base}/contracts`, data);
 }

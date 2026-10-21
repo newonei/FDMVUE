@@ -127,7 +127,7 @@ function afterCreated(product: Product) {
   <Modal
     :open="open"
     :title="title || '从产品中心选择'"
-    width="min(1280px, 96vw)"
+    width="min(1680px, 98vw)"
     :mask-closable="false"
     :body-style="{ paddingTop: '4px' }"
     centered
@@ -193,7 +193,7 @@ function afterCreated(product: Product) {
           :data-source="data"
           row-key="id"
           :loading="loading"
-          :scroll="{ x: 860, y: 'calc(100vh - 420px)' }"
+          :scroll="{ x: 1040, y: 'calc(100vh - 420px)' }"
           :row-selection="{
             type: single ? 'radio' : 'checkbox',
             selectedRowKeys: selectedKeys,
@@ -219,15 +219,14 @@ function afterCreated(product: Product) {
             showTotal: (count: number) => `共 ${count} 个规格`,
           }"
           :columns="[
-            { title: '产品', key: 'product', width: 260 },
+            { title: '产品', key: 'product', width: 320 },
             {
               title: '分类',
               dataIndex: 'category',
               key: 'category',
-              width: 130,
-              ellipsis: true,
+              width: 150,
             },
-            { title: '型号 · 规格', key: 'specification', ellipsis: true },
+            { title: '型号 · 规格', key: 'specification' },
             { title: '单位', dataIndex: 'unit', width: 60 },
             allowIncomplete
               ? { title: '资料', key: 'state', width: 90 }
@@ -327,7 +326,7 @@ function afterCreated(product: Product) {
 <style scoped>
 .picker-layout {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   gap: 14px;
   height: calc(100vh - 240px);
   min-height: 420px;
@@ -364,9 +363,7 @@ function afterCreated(product: Product) {
 
 .product-copy strong {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .image-placeholder {

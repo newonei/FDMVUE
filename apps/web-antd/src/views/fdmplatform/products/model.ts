@@ -146,11 +146,17 @@ export function contractCompanyOptions(
   return options;
 }
 
-/** The server owns numbering; a form cannot introduce or replace a contract identity. */
+/**
+ * 新建时弹窗先回填系统建议的订单号：没改过就不传，由后端保存时重新取号（避免两人同时新建撞号）；
+ * 改过就把手填的订单号交给后端查重。已保存的合同订单号不能再改。
+ */
 export function contractHeaderPayload<T extends Record<string, unknown>>(
   form: T,
   current?: Pick<Contract, 'code'>,
+  suggestedCode?: string,
 ) {
-  const { code: _code, taxBasis: _taxBasis, ...header } = form;
-  return { ...header, ...(current ? { code: current.code } : {}) };
+  const { code, taxBasis: _taxBasis, ...header } = form;
+  if (current) return { ...header, code: current.code };
+  const typed = typeof code === 'string' ? code.trim() : '';
+  return typed && typed !== suggestedCode ? { ...header, code: typed } : header;
 }

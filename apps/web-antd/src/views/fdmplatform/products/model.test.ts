@@ -114,7 +114,7 @@ describe('contract product selection and pricing', () => {
 });
 
 describe('order company attribute with shared products', () => {
-  it('omits supplied contract numbers on creation and preserves the saved number during edits', () => {
+  it('sends only an edited contract number on creation and preserves the saved number during edits', () => {
     const form = {
       code: 'typed-by-user',
       companyId: 21,
@@ -122,6 +122,18 @@ describe('order company attribute with shared products', () => {
       taxBasis: 'TAX_INCLUDED',
     };
     expect(contractHeaderPayload(form)).toEqual({
+      code: 'typed-by-user',
+      companyId: 21,
+      name: '新合同',
+    });
+    expect(
+      contractHeaderPayload(
+        { ...form, code: ' HT-20260907-000003 ' },
+        undefined,
+        'HT-20260907-000003',
+      ),
+    ).toEqual({ companyId: 21, name: '新合同' });
+    expect(contractHeaderPayload({ ...form, code: '  ' })).toEqual({
       companyId: 21,
       name: '新合同',
     });
