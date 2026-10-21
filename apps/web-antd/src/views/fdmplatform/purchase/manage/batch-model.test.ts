@@ -3,6 +3,7 @@ import type { ProcurementOrderRow } from '#/api/fdmplatform/procurement';
 import { describe, expect, it } from 'vitest';
 
 import {
+  batchInvoiceLines,
   batchOrders,
   batchPaymentInputs,
   batchPaymentNo,
@@ -29,6 +30,31 @@ function row(extra: Partial<ProcurementOrderRow> = {}): ProcurementOrderRow {
 }
 
 describe('采购单批量操作', () => {
+  it('集中收票只带未收齐、需要收票的单，未开票按采购金额减已收票', () => {
+    const orders = batchOrders([
+      row({
+        orderAmount: '3000',
+        invoicedAmount: '1000',
+        unpaidAmount: '3000',
+      }),
+      row({ id: 'o2', orderAmount: '500', invoicedAmount: '500' }),
+      row({ id: 'o3', orderAmount: '800', noInvoice: true }),
+    ]);
+    expect(batchProblem(orders, 'invoice')).toBe('');
+    expect(batchInvoiceLines(orders)).toEqual([
+      {
+        key: 'o1',
+        contractId: 'c1',
+        orderId: 'o1',
+        code: 'CG001',
+        remaining: '2000.00',
+      },
+    ]);
+    expect(batchProblem(orders.slice(1), 'invoice')).toBe(
+      '选中的采购单发票都已收齐',
+    );
+  });
+
   it('skips 金智 history orders and keys standalone orders by their document', () => {
     expect(batchSelectable(row({ standaloneId: 'jz-1' }))).toBe(false);
     expect(

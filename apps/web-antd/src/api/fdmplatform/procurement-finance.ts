@@ -24,6 +24,17 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   allowedActions: string[];
   contractId: string;
   orderId: string;
+  /** 发票付款：挂的付款发票及其摘要（sourceType=PURCHASE_INVOICE） */
+  invoiceId?: string;
+  invoice?: {
+    amount: Decimal;
+    code?: string;
+    id: string;
+    invoiceNo?: string;
+    orderCount: number;
+    status?: string;
+    supplierName?: string;
+  };
   currency: string;
   amount: Decimal;
   payerEntityId?: string;
@@ -48,7 +59,7 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   };
   history?: BusinessRecord[];
   summary?: Record<string, unknown>;
-  /** 付款记录：直接挂采购单时为 PURCHASE_ORDER */
+  /** 付款记录：直接挂采购单时为 PURCHASE_ORDER，从付款发票增加付款时为 PURCHASE_INVOICE */
   sourceType?: string;
   paidAt?: string;
   payerAccount?: string;
@@ -131,14 +142,20 @@ export async function registerOrderPayment(
   input: OrderPaymentInput,
   key: string,
 ) {
-  const draft = await createProcurementFinance({
-    type: 'PAYMENT',
-    idempotencyKey: `${key}:create`,
-    payload: {
+  return registerPayment(
+    {
       ...input,
       contractId: input.contractId || undefined,
       sourceType: 'PURCHASE_ORDER',
     },
+    key,
+  );
+}
+async function registerPayment(payload: Record<string, unknown>, key: string) {
+  const draft = await createProcurementFinance({
+    type: 'PAYMENT',
+    idempotencyKey: `${key}:create`,
+    payload,
   });
   if (draft.status === 'CANCELLED')
     throw new Error('上次登记未完成已取消，请重新提交');
@@ -160,6 +177,20 @@ export async function registerOrderPayment(
     }).catch(() => undefined);
     throw error;
   }
+}
+/** 从付款发票「增加付款」：付款挂整张发票，不选采购单（来源采购单经发票查询）。 */
+export interface InvoicePaymentInput extends Omit<
+  OrderPaymentInput,
+  'batchNo' | 'contractId' | 'orderId'
+> {
+  invoiceId: string;
+}
+/** 发票付款登记：同样建单后确认（登记确认流程不变），确认后计入发票已付。 */
+export async function registerInvoicePayment(
+  input: InvoicePaymentInput,
+  key: string,
+) {
+  return registerPayment({ ...input, sourceType: 'PURCHASE_INVOICE' }, key);
 }
 export function getProcurementFinanceSummary(
   contractId: string,

@@ -318,11 +318,34 @@ export function getProcurementOrdersOverview(mine: boolean) {
   );
 }
 
+/** 发票关联的一张采购单：amount 为本发票对应这张单的金额（部分开票时小于采购金额）。 */
+export interface PurchaseInvoiceOrder {
+  amount: Decimal;
+  contractId: string;
+  orderCode?: string;
+  orderId: string;
+}
+/** 付款状态：系统按有效付款记录计算，不能手改。 */
+export type InvoicePaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
 export interface PurchaseInvoice {
   id: string;
+  /** 系统发票编号（FP-…）；老发票没有 */
+  code?: string;
   status: 'VALID' | 'VOID';
+  /** 第一张关联采购单，兼容只认单张单的页面；全部关联看 orders */
   orderId: string;
   orderCode?: string;
+  /** 关联的全部采购单；老发票没有，按 orderId 一张单 */
+  orders?: PurchaseInvoiceOrder[];
+  orderCount?: number;
+  /** 采购单发票列表里：本发票对应这张单的金额 */
+  allocatedAmount?: Decimal;
+  /** 经手人（登记人姓名） */
+  createdByName?: string;
+  /** 有效发票：累计已付、剩余未付、付款状态 */
+  paidAmount?: Decimal;
+  unpaidAmount?: Decimal;
+  paymentStatus?: InvoicePaymentStatus;
   supplierName?: string;
   currency?: string;
   invoiceNo?: string;
@@ -359,6 +382,8 @@ export function createPurchaseInvoice(
     invoiceNo?: string;
     invoiceType: PurchaseInvoice['invoiceType'];
     orderId: string;
+    /** 集中收票：多张采购单及各单关联金额；传了就不用 contractId / orderId */
+    orders?: PurchaseInvoiceOrder[];
     paymentId?: string;
     remark?: string;
     taxRate?: Decimal;
@@ -368,6 +393,7 @@ export function createPurchaseInvoice(
     Object.entries({
       ...data,
       contractId: data.contractId === 'standalone' ? '' : data.contractId,
+      orders: invoiceOrders(data.orders),
     }).filter(([, value]) => value !== undefined && value !== ''),
   );
   return requestClient.upload<PurchaseInvoice>(
@@ -376,7 +402,17 @@ export function createPurchaseInvoice(
     { timeout: 300_000 },
   );
 }
-/** 修改付款发票：字段整体覆盖，带 file 时换原件；采购单不能改。 */
+function invoiceOrders(orders?: PurchaseInvoiceOrder[]) {
+  if (!orders || orders.length === 0) return undefined;
+  return JSON.stringify(
+    orders.map((order) => ({
+      contractId: order.contractId === 'standalone' ? '' : order.contractId,
+      orderId: order.orderId,
+      amount: order.amount,
+    })),
+  );
+}
+/** 修改付款发票：字段整体覆盖，带 file 时换原件；采购单不能换，集中收票可用 orders 重新分配各单金额。 */
 export function updatePurchaseInvoice(
   id: string,
   file: File | undefined,
@@ -387,6 +423,7 @@ export function updatePurchaseInvoice(
     invoiceDate?: string;
     invoiceNo?: string;
     invoiceType: PurchaseInvoice['invoiceType'];
+    orders?: PurchaseInvoiceOrder[];
     paymentId?: string;
     remark?: string;
     taxRate?: Decimal;
@@ -395,7 +432,10 @@ export function updatePurchaseInvoice(
   // 不换原件时也走 multipart（后端同一个接口），所以自己拼 FormData
   const form = new FormData();
   if (file) form.append('file', file);
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, value] of Object.entries({
+    ...data,
+    orders: invoiceOrders(data.orders),
+  })) {
     if (value !== undefined && value !== '') form.append(key, String(value));
   }
   return requestClient.post<PurchaseInvoice>(
@@ -434,6 +474,7 @@ export function getPurchaseInvoicePage(params: {
   linked?: boolean;
   pageNo: number;
   pageSize: number;
+  paymentStatus?: InvoicePaymentStatus;
   status?: PurchaseInvoice['status'];
 }) {
   return requestClient.get<{
@@ -441,6 +482,49 @@ export function getPurchaseInvoicePage(params: {
     total: number;
     validTotals: Array<{ amount: Decimal; currency: string }>;
   }>(`${procurementBase}/invoices/page`, { params });
+}
+/** 发票的来源采购单（查看来源）：采购单信息与本发票关联金额。 */
+export interface InvoiceSourceOrder {
+  allocatedAmount: Decimal;
+  category?: string;
+  contractId: string;
+  currency?: string;
+  /** 采购单已读不到（被删或无权） */
+  missing?: boolean;
+  orderAmount?: Decimal;
+  orderCode?: string;
+  orderId: string;
+  ownerName?: string;
+  ownerUserId?: number;
+  purchaseDate?: string;
+  status?: string;
+  subject?: string;
+  supplierName?: string;
+}
+export interface InvoiceSources {
+  allocatedTotal: Decimal;
+  amount: Decimal;
+  code?: string;
+  currency?: string;
+  invoiceId: string;
+  invoiceNo?: string;
+  orders: InvoiceSourceOrder[];
+}
+/** 查看来源：发票关联的全部采购单（付款记录按它挂的发票查）。 */
+export function getPurchaseInvoiceSources(id: string) {
+  return requestClient.get<InvoiceSources>(
+    `${procurementBase}/invoices/${encodeURIComponent(id)}/sources`,
+  );
+}
+/** 付款发票详情：发票信息、来源采购单、这张发票的付款记录与已付 / 未付。 */
+export function getPurchaseInvoiceDetail(id: string) {
+  return requestClient.get<
+    PurchaseInvoice & {
+      payments: Array<Record<string, unknown>>;
+      sourceAllocatedTotal: Decimal;
+      sources: InvoiceSourceOrder[];
+    }
+  >(`${procurementBase}/invoices/${encodeURIComponent(id)}`);
 }
 /** 把发票挂到本采购单的某张付款记录下；paymentId 为空即取消关联。 */
 export function assignInvoicePayment(

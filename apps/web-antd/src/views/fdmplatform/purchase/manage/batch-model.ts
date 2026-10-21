@@ -14,6 +14,11 @@ export interface BatchOrder {
   supplierName: string;
   currency: string;
   unpaid: string;
+  /** 采购金额，读不到时为空 */
+  orderAmount?: string;
+  /** 未开票金额（采购金额 − 有效发票合计），读不到时为空 */
+  uninvoiced?: string;
+  noInvoice?: boolean;
   ended: boolean;
 }
 
@@ -36,18 +41,33 @@ export function batchOrders(rows: ProcurementOrderRow[]): BatchOrder[] {
         supplierName: labels.supplier,
         currency: String(row.record?.currency ?? 'CNY'),
         unpaid: String(row.unpaidAmount ?? '0'),
+        orderAmount:
+          row.orderAmount === undefined || row.orderAmount === null
+            ? undefined
+            : String(row.orderAmount),
+        uninvoiced: uninvoiced(row),
+        noInvoice: row.noInvoice === true,
         ended: row.operationStatus === 'ENDED',
       };
     });
 }
 
+function uninvoiced(row: ProcurementOrderRow) {
+  const amount = new BigNumber(String(row.orderAmount ?? ''));
+  if (!amount.isFinite()) return undefined;
+  return BigNumber.max(
+    amount.minus(String(row.invoicedAmount ?? 0)),
+    0,
+  ).toFixed(2);
+}
+
 /**
- * 集中付款、转入库要求同一供应商、同一币种（一张付款对应一个收款方）；结束不限制。
+ * 集中付款、集中收票、转入库要求同一供应商、同一币种（一张付款 / 发票对应一个供应商）；结束不限制。
  * 返回不能一起办的原因，空串表示可以。
  */
 export function batchProblem(
   orders: BatchOrder[],
-  mode: 'end' | 'payment' | 'stockIn',
+  mode: 'end' | 'invoice' | 'payment' | 'stockIn',
 ) {
   if (orders.length === 0) return '请先勾选采购单';
   const active = orders.filter((order) => !order.ended);
@@ -62,7 +82,36 @@ export function batchProblem(
     !active.some((order) => new BigNumber(order.unpaid).gt(0))
   )
     return '选中的采购单都已付清';
+  if (
+    mode === 'invoice' &&
+    !active.some(
+      (order) =>
+        !order.noInvoice &&
+        (order.uninvoiced === undefined ||
+          new BigNumber(order.uninvoiced).gt(0)),
+    )
+  )
+    return '选中的采购单发票都已收齐';
   return '';
+}
+
+/** 集中收票的采购单：结束的、无需收票的、发票已收齐的不参与。 */
+export function batchInvoiceLines(orders: BatchOrder[]) {
+  return orders
+    .filter(
+      (order) =>
+        !order.ended &&
+        !order.noInvoice &&
+        (order.uninvoiced === undefined ||
+          new BigNumber(order.uninvoiced).gt(0)),
+    )
+    .map((order) => ({
+      key: order.key,
+      contractId: order.contractId,
+      orderId: order.orderId,
+      code: order.code,
+      remaining: order.uninvoiced,
+    }));
 }
 
 export interface BatchPaymentForm {
@@ -134,4 +183,16 @@ export function batchPaymentInputs(
         batchNo,
       },
     }));
+}
+
+/** 集中收票里已经付过款（未付少于采购金额）的单号，用来提醒别从发票重复付。 */
+export function batchPrepaidCodes(orders: BatchOrder[]) {
+  const keys = new Set(batchInvoiceLines(orders).map((line) => line.key));
+  return orders
+    .filter((order) => {
+      if (!keys.has(order.key)) return false;
+      const amount = new BigNumber(order.orderAmount ?? '');
+      return amount.isFinite() && new BigNumber(order.unpaid).lt(amount);
+    })
+    .map((order) => order.code);
 }

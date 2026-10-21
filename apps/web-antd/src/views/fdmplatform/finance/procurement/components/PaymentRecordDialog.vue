@@ -19,6 +19,7 @@ import BigNumber from 'bignumber.js';
 
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
+  registerInvoicePayment,
   registerOrderPayment,
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
@@ -35,12 +36,25 @@ import {
 /**
  * 登记付款记录（金智「付款记录」）：采购单每付一笔钱登记一张，分期付款就是登记多张。
  * 不经请款，保存即确认、计入已付；银行回单可一起上传，也可以之后在付款记录里补。
+ * 传了 invoice 是付款发票「增加付款」：付款挂整张发票，不再选采购单（来源经发票查），
+ * 带出发票金额、已付、剩余可付，本次付款不能超过剩余可付。
  */
 const props = defineProps<{
   /** 本单最多还能登记的金额（采购应付 − 已付 − 历史请款未付部分） */
   available?: unknown;
   contractId: string;
   currency?: string;
+  /** 从付款发票增加付款；此时 contractId / orderId 不用 */
+  invoice?: {
+    amount: unknown;
+    code?: string;
+    id: string;
+    invoiceNo?: string;
+    orderCount?: number;
+    paidAmount?: unknown;
+    supplierName?: string;
+    unpaidAmount?: unknown;
+  };
   open: boolean;
   orderCode?: string;
   orderId: string;
@@ -69,12 +83,27 @@ const error = ref('');
 let key = crypto.randomUUID();
 
 const referenceItems = computed(() => {
-  const value = props.reference;
-  if (!value) return [];
   const money = (input: unknown) => {
     const number = new BigNumber(String(input ?? ''));
     return number.isFinite() ? number : undefined;
   };
+  const invoice = props.invoice;
+  if (invoice) {
+    const text = (input: unknown) => money(input)?.toFormat(2) ?? '—';
+    return [
+      {
+        label: '供应商',
+        text: invoice.supplierName ?? props.supplierName ?? '—',
+      },
+      { label: '付款发票', text: invoice.code ?? invoice.invoiceNo ?? '—' },
+      { label: '发票金额', text: text(invoice.amount) },
+      { label: '累计已付', text: text(invoice.paidAmount) },
+      { label: '剩余可付', text: text(invoice.unpaidAmount) },
+      { label: '来源采购单', text: `${invoice.orderCount ?? 1} 个` },
+    ];
+  }
+  const value = props.reference;
+  if (!value) return [];
   const order = money(value.orderAmount);
   const invoiced = money(value.invoiced) ?? new BigNumber(0);
   return [
@@ -135,23 +164,36 @@ async function save() {
   if (error.value) return;
   saving.value = true;
   try {
-    let record = await registerOrderPayment(
-      {
-        contractId: props.contractId === 'standalone' ? '' : props.contractId,
-        orderId: props.orderId,
-        name: `${props.orderCode ?? ''} 付款`.trim(),
-        amount: form.value.amount!,
-        paidAt: form.value.paidAt!,
-        payerEntityId: form.value.payerEntityId!,
-        payerAccount: form.value.payerAccount!.trim(),
-        paymentMethod: form.value.paymentMethod?.trim() || undefined,
-        payeeName: form.value.payeeName!.trim(),
-        payeeAccount: form.value.payeeAccount?.trim() || undefined,
-        remark: form.value.remark?.trim() || undefined,
-        noInvoice: form.value.noInvoice || undefined,
-      },
-      key,
-    );
+    const fields = {
+      amount: form.value.amount!,
+      paidAt: form.value.paidAt!,
+      payerEntityId: form.value.payerEntityId!,
+      payerAccount: form.value.payerAccount!.trim(),
+      paymentMethod: form.value.paymentMethod?.trim() || undefined,
+      payeeName: form.value.payeeName!.trim(),
+      payeeAccount: form.value.payeeAccount?.trim() || undefined,
+      remark: form.value.remark?.trim() || undefined,
+    };
+    let record = props.invoice
+      ? await registerInvoicePayment(
+          {
+            ...fields,
+            invoiceId: props.invoice.id,
+            name: `${props.invoice.code ?? props.invoice.invoiceNo ?? '发票'} 付款`,
+          },
+          key,
+        )
+      : await registerOrderPayment(
+          {
+            ...fields,
+            contractId:
+              props.contractId === 'standalone' ? '' : props.contractId,
+            orderId: props.orderId,
+            name: `${props.orderCode ?? ''} 付款`.trim(),
+            noInvoice: form.value.noInvoice || undefined,
+          },
+          key,
+        );
     // 回单在付款确认后追加；某个文件失败不影响已登记的付款
     const failed: string[] = [];
     for (const [index, file] of files.value.entries()) {
@@ -183,7 +225,11 @@ async function save() {
 <template>
   <Modal
     :open="open"
-    :title="`登记付款${orderCode ? ` · ${orderCode}` : ''}`"
+    :title="
+      invoice
+        ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
+        : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
+    "
     width="760px"
     :mask-closable="false"
     @cancel="emit('close')"
@@ -192,13 +238,25 @@ async function save() {
       <Alert
         type="info"
         show-icon
-        :message="`每付一笔钱登记一张付款记录，分期付款就登记多张。${
-          limit ? `本单还可登记 ${currency ?? ''} ${limit.toFormat(2)}。` : ''
-        }`"
+        :message="
+          invoice
+            ? `付款针对整张发票，可以只付一部分，之后再增加付款。来源采购单跟随发票，不用重新选。${
+                limit
+                  ? `本次最多可付 ${currency ?? ''} ${limit.toFormat(2)}。`
+                  : ''
+              }`
+            : `每付一笔钱登记一张付款记录，分期付款就登记多张。${
+                limit
+                  ? `本单还可登记 ${currency ?? ''} ${limit.toFormat(2)}。`
+                  : ''
+              }`
+        "
       />
       <Alert v-if="error" type="error" :message="error" show-icon />
       <div v-if="referenceItems.length > 0" class="reference">
-        <span class="reference-title">采购单数据参考</span>
+        <span class="reference-title">
+          {{ invoice ? '发票数据参考' : '采购单数据参考' }}
+        </span>
         <span v-for="item in referenceItems" :key="item.label">
           {{ item.label }}：<b>{{ item.text }}</b>
         </span>
@@ -280,7 +338,7 @@ async function save() {
             </ul>
           </div>
         </div>
-        <label>
+        <label v-if="!invoice">
           <span><em>*</em>是否收票</span>
           <Select
             :value="form.noInvoice ? 'NONE' : 'PENDING'"
