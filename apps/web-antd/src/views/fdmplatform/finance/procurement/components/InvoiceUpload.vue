@@ -1,16 +1,11 @@
 <script setup lang="ts">
+import type { InvoiceOrderLine } from '../invoice-model';
+
 import type { PurchaseInvoice } from '#/api/fdmplatform/procurement';
 
 import { computed, ref, watch } from 'vue';
 
-import {
-  Alert,
-  Button,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-} from 'ant-design-vue';
+import { Alert, Button, Input, InputNumber, Select } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
 import {
@@ -21,12 +16,20 @@ import {
 
 import { errorText } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
+import {
+  allocatedTotal,
+  allocateInvoice,
+  allocationInputs,
+  allocationProblem,
+} from '../invoice-model';
 
 /**
  * 上传付款发票：先选发票原件（PDF、OFD、数电 XML 或图片），PDF / XML 自动识别号码、日期、
  * 价税合计带入，采购员核对金额后保存。图片识别不了时手填金额。
- * 传了 remaining 时，金额超过采购单未收票会提示（不拦截，运费、补差等可确认后照存）。
- * 传了 invoice 就是修改这张发票：字段带入可改，原件可删掉换一份，但保存时必须有原件。
+ * 传了 remaining 时，金额超过采购单未收票不能保存（后端同样拦截；运费、补差先加到采购单附加金额）。
+ * 传了 orders 是集中收票：一张发票关联多张采购单，逐单填本发票对应金额，合计须等于发票金额。
+ * 传了 invoice 就是修改这张发票：字段带入可改，原件可删掉换一份，但保存时必须有原件；
+ * 集中收票的发票改金额时重新分配各单金额（采购单不能换）。
  */
 const props = defineProps<{
   contractId: string;
@@ -36,6 +39,8 @@ const props = defineProps<{
   /** 修改哪张发票；不传是新登记 */
   invoice?: PurchaseInvoice;
   orderId: string;
+  /** 集中收票：同一供应商的多张采购单及各自未开票金额 */
+  orders?: InvoiceOrderLine[];
   /** 固定挂到这笔付款下；不传时可在 paymentOptions 里选 */
   paymentId?: string;
   paymentOptions?: Array<{ label: string; value: string }>;
@@ -61,6 +66,35 @@ const saving = ref(false);
 const error = ref('');
 const form = ref(blank());
 let key = crypto.randomUUID();
+/** 分配表里的采购单：新集中收票用传入的；修改集中收票的发票用发票上已关联的 */
+const lines = computed<InvoiceOrderLine[]>(() => {
+  if (props.orders && props.orders.length > 0) return props.orders;
+  const linked = props.invoice?.orders ?? [];
+  if (linked.length < 2) return [];
+  return linked.map((order) => ({
+    key: order.orderId,
+    contractId: order.contractId,
+    orderId: order.orderId,
+    code: order.orderCode ?? '采购单',
+  }));
+});
+const central = computed(() => lines.value.length > 0);
+const allocations =
+  ref<Record<string, string | undefined>>(initialAllocations());
+const allocated = computed(() => allocatedTotal(allocations.value));
+function initialAllocations() {
+  const linked = props.invoice?.orders ?? [];
+  if (props.invoice && linked.length > 1)
+    return Object.fromEntries(
+      linked.map((order) => [order.orderId, String(order.amount)]),
+    );
+  if (props.orders && props.orders.length > 0)
+    return allocateInvoice(props.defaultAmount, props.orders);
+  return {};
+}
+function autoAllocate() {
+  allocations.value = allocateInvoice(form.value.amount, lines.value);
+}
 
 function blank() {
   const invoice = props.invoice;
@@ -156,6 +190,7 @@ async function pick(event: Event) {
           : String(result.amount),
     };
     hint.value = `已识别${result.sellerName ? `：${result.sellerName}` : ''}，请核对金额`;
+    if (central.value && !props.invoice) autoAllocate();
   } catch (error_) {
     hint.value = `识别失败，请手填：${errorText(error_)}`;
   } finally {
@@ -172,18 +207,18 @@ function save() {
     error.value = '发票金额须大于 0';
     return;
   }
-  if (!excess.value) {
-    void submit(file.value);
+  if (central.value) {
+    error.value = allocationProblem(
+      form.value.amount,
+      allocations.value,
+      lines.value,
+    );
+    if (error.value) return;
+  } else if (excess.value) {
+    error.value = `本单未收票 ${unit.value} ${available.value?.toFormat(2)}，这张发票多出 ${excess.value.toFormat(2)}，不能超额开票。请先核对金额是否识别错；运费、补差请先加到采购单附加金额。`;
     return;
   }
-  const chosen = file.value;
-  Modal.confirm({
-    title: '发票金额超出采购单未收票',
-    content: `本单未收票 ${unit.value} ${available.value?.toFormat(2)}，这张发票 ${unit.value} ${new BigNumber(form.value.amount ?? 0).toFormat(2)}，多出 ${excess.value.toFormat(2)}。请先核对金额是否识别错，确认无误再保存。`,
-    okText: '仍然保存',
-    cancelText: '返回核对',
-    onOk: () => submit(chosen),
-  });
+  void submit(file.value);
 }
 
 async function submit(chosen: File | undefined) {
@@ -198,6 +233,9 @@ async function submit(chosen: File | undefined) {
     taxRate: form.value.taxRate || undefined,
     amount: form.value.amount!,
     remark: form.value.remark.trim() || undefined,
+    orders: central.value
+      ? allocationInputs(allocations.value, lines.value)
+      : undefined,
   };
   try {
     const invoice = props.invoice
@@ -218,6 +256,7 @@ async function submit(chosen: File | undefined) {
     file.value = undefined;
     hint.value = '';
     form.value = { ...blank(), amount: undefined };
+    allocations.value = {};
     emit('saved', invoice);
   } catch (error_) {
     key = crypto.randomUUID();
@@ -255,8 +294,8 @@ async function submit(chosen: File | undefined) {
           :controls="false"
           style="width: 100%"
         />
-        <span v-if="excess" class="over">
-          超出未收票 {{ excess.toFormat(2) }}，请核对
+        <span v-if="!central && excess" class="over">
+          超出未收票 {{ excess.toFormat(2) }}，不能保存
         </span>
       </label>
       <label>
@@ -306,6 +345,53 @@ async function submit(chosen: File | undefined) {
         <span>备注</span>
         <Input v-model:value="form.remark" />
       </label>
+      <div v-if="central" class="allocation">
+        <div class="allocation-head">
+          <span>
+            关联采购单 {{ lines.length }} 张 · 关联合计
+            <b class="num">{{ unit }} {{ allocated.toFormat(2) }}</b>
+            <template v-if="!allocated.eq(form.amount || 0)">
+              ，与发票金额相差
+              <b class="over num">{{
+                new BigNumber(form.amount || 0).minus(allocated).toFormat(2)
+              }}</b>
+            </template>
+          </span>
+          <Button size="small" @click="autoAllocate">按未开票自动分配</Button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>采购单</th>
+              <th class="right">未开票</th>
+              <th class="right">本发票关联金额</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="line in lines" :key="line.key">
+              <td>{{ line.code }}</td>
+              <td class="right num">
+                {{
+                  line.remaining === undefined
+                    ? '—'
+                    : new BigNumber(line.remaining).toFormat(2)
+                }}
+              </td>
+              <td class="right">
+                <InputNumber
+                  v-model:value="allocations[line.key]"
+                  string-mode
+                  :min="0"
+                  :precision="2"
+                  :controls="false"
+                  size="small"
+                  style="width: 140px"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <Button type="primary" :loading="saving" @click="save">
         {{ invoice ? '保存修改' : '保存发票' }}
       </Button>
@@ -360,6 +446,47 @@ label {
 
 .note {
   grid-column: span 2;
+}
+
+.allocation {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1 / -1;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.allocation-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.allocation table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.allocation th,
+.allocation td {
+  padding: 4px 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.allocation th {
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  text-align: left;
+}
+
+.allocation .right {
+  text-align: right;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
 }
 
 .over {

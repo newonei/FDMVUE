@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { DocumentRow } from '#/api/fdmplatform';
-import type { PurchaseInvoice } from '#/api/fdmplatform/procurement';
+import type {
+  InvoicePaymentStatus,
+  InvoiceSourceOrder,
+  PurchaseInvoice,
+} from '#/api/fdmplatform/procurement';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 
@@ -33,14 +37,24 @@ import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-fina
 
 import { errorText } from '../../data';
 import { useRouteOwner } from '../../documents/useRouteOwner';
+import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
+import InvoiceSourcesDialog from '../../finance/procurement/components/InvoiceSourcesDialog.vue';
 import InvoiceUpload from '../../finance/procurement/components/InvoiceUpload.vue';
+import PaymentRecordDialog from '../../finance/procurement/components/PaymentRecordDialog.vue';
 import { confirmVoidInvoice } from '../../finance/procurement/components/void-invoice';
+import {
+  invoicePaymentLimit,
+  invoicePaymentStates,
+} from '../../finance/procurement/invoice-model';
 import OrderPicker from '../manage/components/OrderPicker.vue';
+import InvoiceDetail from './components/InvoiceDetail.vue';
 
 /**
  * 付款发票（金智「付款发票」）：所有采购单登记的供应商发票，按收票时间倒序；
  * 点采购单弹出采购单抽屉（与采购订单页同一个），可在这里先选采购单再上传发票；
- * 识别错、录错的发票在这里直接作废后重传。
+ * 集中收票（多张采购单合开一张）在采购订单列表勾选后办理，这里显示「N 个采购单 · 查看来源」。
+ * 收票不等于付款：「增加付款」新建一张付款记录挂在这张发票上，已付、未付、付款状态由付款记录汇总。
+ * 识别错、录错的发票在这里直接作废后重传（已有付款的须先冲销付款）。
  */
 defineOptions({ name: 'FdmPlatformPurchaseInvoices' });
 
@@ -60,6 +74,13 @@ const page = ref(1);
 const keyword = ref('');
 const status = ref<PurchaseInvoice['status']>();
 const linked = ref<'NO' | 'YES'>();
+const paymentStatus = ref<InvoicePaymentStatus>();
+/** 查看来源 / 详情 / 增加付款 / 打开付款记录 */
+const sourceInvoice = ref<PurchaseInvoice>();
+const detailId = ref<string>();
+const detailReload = ref(0);
+const paying = ref<PurchaseInvoice>();
+const openedPayment = ref<string>();
 const loading = ref(false);
 const pageError = ref('');
 const pickingOrder = ref(false);
@@ -120,6 +141,7 @@ async function load() {
       keyword: keyword.value.trim() || undefined,
       status: status.value,
       linked: linked.value === undefined ? undefined : linked.value === 'YES',
+      paymentStatus: paymentStatus.value,
       pageNo: page.value,
       pageSize: 20,
     });
@@ -162,7 +184,31 @@ async function orderPicked(row: DocumentRow) {
     String(row.record?.code ?? row.record?.orderCode ?? '采购单'),
   );
 }
+function openSourceOrder(order: InvoiceSourceOrder) {
+  openedOrder.value = { contractId: order.contractId, orderId: order.orderId };
+}
+function addPayment(row: PurchaseInvoice) {
+  paying.value = row;
+}
+function paid() {
+  message.success('付款已登记');
+  paying.value = undefined;
+  detailReload.value += 1;
+  void load();
+}
 function edit(row: PurchaseInvoice) {
+  // 集中收票的发票：分配表用发票上已关联的采购单，不再按单张单取未收票
+  if ((row.orders?.length ?? 0) > 1) {
+    uploadOrder.value = {
+      contractId: row.orders![0]!.contractId || 'standalone',
+      orderId: row.orderId,
+      currency: row.currency,
+      invoice: row,
+      title: `${row.orderCount} 个采购单`,
+      payments: [],
+    };
+    return;
+  }
   // 独立采购单的发票 contractId 存的是空串
   const contractId =
     String((row as unknown as Record<string, unknown>).contractId ?? '') ||
@@ -215,6 +261,7 @@ function remove(row: PurchaseInvoice) {
 function uploaded() {
   message.success(uploadOrder.value?.invoice ? '发票已修改' : '付款发票已登记');
   uploadOrder.value = undefined;
+  detailReload.value += 1;
   void load();
 }
 watch(active, (value) => value && void load(), { immediate: true });
@@ -223,7 +270,7 @@ watch(active, (value) => value && void load(), { immediate: true });
 <template>
   <Page
     title="付款发票"
-    description="供应商开来的发票，挂在采购单和付款记录下。"
+    description="供应商开来的发票，挂在采购单上；集中收票一张发票可关联多张采购单。收票不等于付款，付款从「增加付款」登记。"
   >
     <Card>
       <Space direction="vertical" size="middle" style="width: 100%">
@@ -232,8 +279,8 @@ watch(active, (value) => value && void load(), { immediate: true });
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="发票号码、采购单号、供应商、付款单号"
-            style="width: 300px"
+            placeholder="发票编号、号码、采购单号、供应商、付款单号"
+            style="width: 320px"
             @search="search"
           />
           <Select
@@ -245,6 +292,19 @@ watch(active, (value) => value && void load(), { immediate: true });
               { value: 'VALID', label: '有效' },
               { value: 'VOID', label: '已作废' },
             ]"
+            @change="search"
+          />
+          <Select
+            v-model:value="paymentStatus"
+            allow-clear
+            placeholder="付款状态"
+            style="width: 120px"
+            :options="
+              Object.entries(invoicePaymentStates).map(([value, state]) => ({
+                value,
+                label: state.label,
+              }))
+            "
             @change="search"
           />
           <Select
@@ -262,13 +322,14 @@ watch(active, (value) => value && void load(), { immediate: true });
             上传付款发票
           </Button>
           <Button :loading="loading" @click="load">刷新</Button>
+          <span class="muted">集中收票：在采购订单列表勾选同一供应商的采购单后办理</span>
         </Space>
         <Table
           class="fdm-business-table"
           size="small"
           row-key="id"
           table-layout="fixed"
-          :scroll="{ x: 1350 }"
+          :scroll="{ x: 1780 }"
           :data-source="rows"
           :loading="loading"
           :pagination="{
@@ -279,22 +340,27 @@ watch(active, (value) => value && void load(), { immediate: true });
             showTotal: (value: number) => `共 ${value} 张`,
           }"
           :columns="[
-            { title: '票据金额', key: 'amount', width: 130, align: 'right' },
+            { title: '发票金额', key: 'amount', width: 130, align: 'right' },
+            { title: '已付款', key: 'paid', width: 110, align: 'right' },
+            { title: '未付款', key: 'unpaid', width: 110, align: 'right' },
+            { title: '付款状态', key: 'paymentStatus', width: 90 },
             {
               title: '供应商',
               dataIndex: 'supplierName',
-              width: 200,
+              width: 190,
               ellipsis: true,
             },
-            { title: '采购单', key: 'order', width: 170 },
-            { title: '发票号码', key: 'invoiceNo', width: 190 },
-            { title: '开票日期', dataIndex: 'invoiceDate', width: 110 },
-            { title: '票据类型', key: 'type', width: 140 },
-            { title: '税金', key: 'tax', width: 100, align: 'right' },
-            { title: '对应付款', key: 'payment', width: 150 },
-            { title: '原件', key: 'file', width: 160, ellipsis: true },
-            { title: '状态', key: 'status', width: 80 },
-            { title: '操作', key: 'action', width: 100, fixed: 'right' },
+            { title: '关联采购单', key: 'order', width: 190 },
+            { title: '发票编号 / 号码', key: 'invoiceNo', width: 200 },
+            { title: '收票日期', key: 'receivedAt', width: 100 },
+            { title: '开票日期', dataIndex: 'invoiceDate', width: 100 },
+            { title: '票据类型', key: 'type', width: 130 },
+            { title: '税金', key: 'tax', width: 90, align: 'right' },
+            { title: '经手人', dataIndex: 'createdByName', width: 80 },
+            { title: '对应付款', key: 'payment', width: 140 },
+            { title: '原件', key: 'file', width: 140, ellipsis: true },
+            { title: '状态', key: 'status', width: 70 },
+            { title: '操作', key: 'action', width: 200, fixed: 'right' },
           ]"
           @change="
             (value) => {
@@ -310,17 +376,19 @@ watch(active, (value) => value && void load(), { immediate: true });
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ pageTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="10">
+                <TableSummaryCell :index="1" :col-span="14">
                   本页合计（有效发票）
                 </TableSummaryCell>
+                <TableSummaryCell :index="15" />
               </TableSummaryRow>
               <TableSummaryRow class="sum-row">
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ allTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="10">
+                <TableSummaryCell :index="1" :col-span="14">
                   全部合计（有效发票）
                 </TableSummaryCell>
+                <TableSummaryCell :index="15" />
               </TableSummaryRow>
             </TableSummary>
           </template>
@@ -328,6 +396,37 @@ watch(active, (value) => value && void load(), { immediate: true });
             <span v-if="column.key === 'amount'" class="num">
               {{ record.currency ?? '' }} {{ money(record.amount) }}
             </span>
+            <span v-else-if="column.key === 'paid'" class="num">
+              {{ record.status === 'VALID' ? money(record.paidAmount) : '—' }}
+            </span>
+            <span v-else-if="column.key === 'unpaid'" class="num">
+              {{ record.status === 'VALID' ? money(record.unpaidAmount) : '—' }}
+            </span>
+            <template v-else-if="column.key === 'paymentStatus'">
+              <Tag
+                v-if="record.paymentStatus"
+                :color="
+                  invoicePaymentStates[
+                    record.paymentStatus as InvoicePaymentStatus
+                  ].color
+                "
+              >
+                {{
+                  invoicePaymentStates[
+                    record.paymentStatus as InvoicePaymentStatus
+                  ].label
+                }}
+              </Tag>
+              <span v-else class="muted">—</span>
+            </template>
+            <Button
+              v-else-if="column.key === 'order' && (record.orderCount ?? 1) > 1"
+              type="link"
+              size="small"
+              @click="sourceInvoice = record as PurchaseInvoice"
+            >
+              {{ record.orderCount }} 个采购单 · 查看来源
+            </Button>
             <Button
               v-else-if="column.key === 'order'"
               type="link"
@@ -336,9 +435,13 @@ watch(active, (value) => value && void load(), { immediate: true });
             >
               {{ record.orderCode || '查看采购单' }}
             </Button>
-            <span v-else-if="column.key === 'invoiceNo'">{{
-              record.invoiceNo || '—'
-            }}</span>
+            <span v-else-if="column.key === 'invoiceNo'" class="stack">
+              <span>{{ record.code || '—' }}</span>
+              <span class="muted">{{ record.invoiceNo || '无号码' }}</span>
+            </span>
+            <span v-else-if="column.key === 'receivedAt'">
+              {{ String(record.createdAt ?? '').slice(0, 10) || '—' }}
+            </span>
             <span v-else-if="column.key === 'type'">
               {{
                 TYPE_NAMES[
@@ -354,7 +457,7 @@ watch(active, (value) => value && void load(), { immediate: true });
               taxOf(record as PurchaseInvoice)
             }}</span>
             <span v-else-if="column.key === 'payment'">{{
-              record.paymentCode || '未挂付款'
+              record.paymentCode || '—'
             }}</span>
             <Button
               v-else-if="column.key === 'file' && record.file"
@@ -373,25 +476,39 @@ watch(active, (value) => value && void load(), { immediate: true });
             >
               {{ record.status === 'VALID' ? '有效' : '已作废' }}
             </Tag>
-            <span
-              v-else-if="column.key === 'action' && record.status === 'VALID'"
-              class="actions"
-            >
+            <span v-else-if="column.key === 'action'" class="actions">
               <Button
                 type="link"
                 size="small"
-                @click="edit(record as PurchaseInvoice)"
+                @click="detailId = String(record.id)"
               >
-                修改
+                详情
               </Button>
-              <Button
-                type="link"
-                size="small"
-                danger
-                @click="remove(record as PurchaseInvoice)"
-              >
-                作废
-              </Button>
+              <template v-if="record.status === 'VALID'">
+                <Button
+                  type="link"
+                  size="small"
+                  :disabled="!(Number(record.unpaidAmount ?? 0) > 0)"
+                  @click="addPayment(record as PurchaseInvoice)"
+                >
+                  增加付款
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  @click="edit(record as PurchaseInvoice)"
+                >
+                  修改
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  @click="remove(record as PurchaseInvoice)"
+                >
+                  作废
+                </Button>
+              </template>
             </span>
           </template>
         </Table>
@@ -422,6 +539,57 @@ watch(active, (value) => value && void load(), { immediate: true });
         @saved="uploaded"
       />
     </Modal>
+    <InvoiceSourcesDialog
+      :open="!!sourceInvoice && active"
+      :invoice-id="sourceInvoice?.id"
+      @close="sourceInvoice = undefined"
+      @open-order="openSourceOrder"
+    />
+    <InvoiceDetail
+      :open="!!detailId && active"
+      :invoice-id="detailId"
+      :reload="detailReload"
+      @close="detailId = undefined"
+      @add-payment="addPayment"
+      @open-order="openSourceOrder"
+      @open-payment="(id) => (openedPayment = id)"
+    />
+    <PaymentRecordDialog
+      :open="!!paying && active"
+      contract-id=""
+      order-id=""
+      :currency="paying?.currency"
+      :supplier-name="paying?.supplierName"
+      :available="invoicePaymentLimit(paying?.unpaidAmount)?.toFixed(2)"
+      :invoice="
+        paying
+          ? {
+              id: paying.id,
+              code: paying.code,
+              invoiceNo: paying.invoiceNo,
+              amount: paying.amount,
+              paidAmount: paying.paidAmount,
+              unpaidAmount: paying.unpaidAmount,
+              orderCount: paying.orderCount,
+              supplierName: paying.supplierName,
+            }
+          : undefined
+      "
+      @close="paying = undefined"
+      @saved="paid"
+    />
+    <FinanceDocument
+      :open="!!openedPayment && active"
+      type="PAYMENT"
+      :record-id="openedPayment"
+      @close="openedPayment = undefined"
+      @updated="
+        () => {
+          detailReload += 1;
+          load();
+        }
+      "
+    />
     <PurchaseOrderExecution
       v-if="openedOrder && active"
       :embedded-order="openedOrder"
@@ -438,6 +606,12 @@ watch(active, (value) => value && void load(), { immediate: true });
 
 .actions {
   white-space: nowrap;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
 }
 
 .muted {

@@ -95,6 +95,7 @@ import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
 import StockInDialog from '../warehouse/StockInDialog.vue';
 import { batchOrders, batchProblem, batchSelectable } from './batch-model';
+import BatchInvoiceDialog from './components/BatchInvoiceDialog.vue';
 import BatchPaymentDialog from './components/BatchPaymentDialog.vue';
 import OrderContract from './components/OrderContract.vue';
 import OrderDetails from './components/OrderDetails.vue';
@@ -149,9 +150,10 @@ const selectedOrders = computed(() =>
   ),
 );
 const batchPaymentOpen = ref(false);
+const batchInvoiceOpen = ref(false);
 const batchStockInTargets =
   ref<{ code: string; contractId: string; orderId: string }[]>();
-function runBatch(mode: 'end' | 'payment' | 'stockIn') {
+function runBatch(mode: 'end' | 'invoice' | 'payment' | 'stockIn') {
   const problem = batchProblem(selectedOrders.value, mode);
   if (problem) {
     message.warning(problem);
@@ -159,6 +161,7 @@ function runBatch(mode: 'end' | 'payment' | 'stockIn') {
   }
   const active = selectedOrders.value.filter((order) => !order.ended);
   if (mode === 'payment') batchPaymentOpen.value = true;
+  else if (mode === 'invoice') batchInvoiceOpen.value = true;
   else if (mode === 'stockIn')
     batchStockInTargets.value = active.map((order) => ({
       code: order.code,
@@ -222,6 +225,7 @@ function endSelected(orders: ReturnType<typeof batchOrders>) {
 }
 function batchDone() {
   batchPaymentOpen.value = false;
+  batchInvoiceOpen.value = false;
   batchStockInTargets.value = undefined;
   selectedKeys.value = [];
   void loadList();
@@ -1549,6 +1553,13 @@ watch(financeType, (value, previous) => {
           <Button
             size="small"
             :disabled="selectedKeys.length === 0"
+            @click="runBatch('invoice')"
+          >
+            集中收票
+          </Button>
+          <Button
+            size="small"
+            :disabled="selectedKeys.length === 0"
             @click="runBatch('stockIn')"
           >
             转入库
@@ -1563,7 +1574,7 @@ watch(financeType, (value, previous) => {
           <span v-if="selectedKeys.length > 0">已选 {{ selectedKeys.length }} 张
             <Button size="small" type="link" @click="selectedKeys = []">清除选择</Button>
           </span>
-          <span v-else class="procurement-muted">勾选采购单后可集中付款、转入库或结束；集中付款和转入库要求同一家供应商</span>
+          <span v-else class="procurement-muted">勾选采购单后可集中付款、集中收票、转入库或结束；除结束外都要求同一家供应商</span>
         </div>
       </div>
     </div>
@@ -1953,6 +1964,17 @@ watch(financeType, (value, previous) => {
       :orders="selectedOrders"
       @close="batchDone"
       @done="(count) => message.success(`已登记 ${count} 张付款记录`)"
+    />
+    <BatchInvoiceDialog
+      :open="batchInvoiceOpen && active"
+      :orders="selectedOrders"
+      @close="batchInvoiceOpen = false"
+      @done="
+        () => {
+          message.success('付款发票已登记');
+          batchDone();
+        }
+      "
     />
     <StockInDialog
       :open="!!batchStockInTargets && active"

@@ -59,6 +59,7 @@ import {
   payableBalance,
 } from '../model';
 import FinanceForm from './FinanceForm.vue';
+import InvoiceSourcesDialog from './InvoiceSourcesDialog.vue';
 import ReimbursementDetail from './ReimbursementDetail.vue';
 import ReimbursementForm from './ReimbursementForm.vue';
 const props = defineProps<{
@@ -91,7 +92,11 @@ const related = ref<{
   context: Record<string, unknown>;
   type: ProcurementFinanceType;
 }>();
-const childOpen = computed(() => actionOpen.value || !!related.value);
+/** 发票付款查看来源：采购单经付款记录挂的发票查，付款记录自己不存 */
+const sourcesOpen = ref(false);
+const childOpen = computed(
+  () => actionOpen.value || !!related.value || sourcesOpen.value,
+);
 const busy = computed(() => saving.value || submitting.value);
 const operationKeys = new Map<string, string>();
 const uploadKeys = new WeakMap<File, string>();
@@ -586,7 +591,19 @@ async function relatedUpdated() {
                 )
               }}
             </RelatedLink>
-</Descriptions.Item><Descriptions.Item label="关联采购单">
+</Descriptions.Item><Descriptions.Item v-if="record.invoiceId" label="来源（付款发票）">
+            {{
+              record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票'
+            }}
+            · {{ record.invoice?.orderCount ?? 1 }} 个采购单
+            <Button type="link" size="small" @click="sourcesOpen = true">
+              {{
+                (record.invoice?.orderCount ?? 1) > 1
+                  ? '集中收票-查看来源'
+                  : '查看来源'
+              }}
+            </Button>
+</Descriptions.Item><Descriptions.Item v-else label="关联采购单">
             <RelatedLink
               :target="
                 documentTarget('orders', record.contractId, record.orderId)
@@ -917,6 +934,12 @@ async function relatedUpdated() {
         />
       </template>
     </ActionDialog>
+    <InvoiceSourcesDialog
+      :open="sourcesOpen && open"
+      :invoice-id="record?.invoiceId"
+      title="付款记录"
+      @close="sourcesOpen = false"
+    />
   </FdmResizableDrawer>
   <FinanceDocument
     v-if="related"

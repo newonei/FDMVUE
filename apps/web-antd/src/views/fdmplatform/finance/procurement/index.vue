@@ -37,6 +37,7 @@ import { withoutDetailQuery } from '../../documents/navigation';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
+import InvoiceSourcesDialog from './components/InvoiceSourcesDialog.vue';
 import PaymentRecordDialog from './components/PaymentRecordDialog.vue';
 import { financeStatus, financeTitles, invoiceStates } from './model';
 
@@ -64,6 +65,8 @@ const loading = ref(false);
 const pageError = ref('');
 const open = ref(false);
 const selectedId = ref<string>();
+/** 发票付款查看来源：经付款记录挂的发票查采购单 */
+const sourceInvoiceId = ref<string>();
 const standaloneId = computed(() =>
   typeof route.query.standaloneId === 'string'
     ? route.query.standaloneId
@@ -441,14 +444,24 @@ watch(
             </TableSummary>
           </template>
           <template #bodyCell="{ column, record }">
-            <Button
-              v-if="column.key === 'name'"
-              type="link"
-              :title="[record.code, record.name].filter(Boolean).join(' · ')"
-              @click="show(record as ProcurementFinanceRecord)"
-            >
-              {{ record.code }} · {{ record.name }}
-</Button><span
+            <span v-if="column.key === 'name'" class="name-cell"><Button
+                type="link"
+                :title="[record.code, record.name].filter(Boolean).join(' · ')"
+                @click="show(record as ProcurementFinanceRecord)"
+              >
+                {{ record.code }} · {{ record.name }} </Button><Button
+                v-if="record.invoiceId"
+                type="link"
+                size="small"
+                class="source-link"
+                @click="sourceInvoiceId = String(record.invoiceId)"
+              >
+                {{
+                  (record.invoice?.orderCount ?? 1) > 1
+                    ? `集中收票-查看来源（${record.invoice?.orderCount} 个采购单）`
+                    : `付款发票 ${record.invoice?.code ?? ''} · 查看来源`
+                }}
+              </Button></span><span
               v-else-if="column.key === 'payer'"
               class="fdm-cell-line"
               :title="payerText(record as ProcurementFinanceRecord)"
@@ -484,7 +497,12 @@ watch(
           </template>
         </Table>
       </Space>
-</Card><FinanceDocument
+</Card><InvoiceSourcesDialog
+      :open="!!sourceInvoiceId && active"
+      :invoice-id="sourceInvoiceId"
+      title="付款记录"
+      @close="sourceInvoiceId = undefined"
+    /><FinanceDocument
       :open="open && active"
       :type="newType"
       :record-id="selectedId"
@@ -521,6 +539,18 @@ watch(
 </template>
 
 <style scoped>
+.name-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.name-cell .source-link {
+  height: auto;
+  padding: 0 15px;
+  font-size: 12px;
+}
+
 .source-switch {
   display: inline-flex;
   overflow: hidden;
