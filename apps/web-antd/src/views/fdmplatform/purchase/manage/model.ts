@@ -352,6 +352,18 @@ function paymentTitle(paidOff: boolean, paid: number) {
   if (paidOff) return '已付清';
   return paid > 0 ? '部分付款' : '未付款';
 }
+/**
+ * 列表「⋯」菜单复制采购单的来源；金智迁入的历史独立单没有新系统的采购明细，不能复制。
+ */
+export function orderCopySource(row: ProcurementOrderRow) {
+  if (row.standaloneId)
+    return row.nativeStandalone === true
+      ? { contractId: 'standalone', orderId: row.standaloneId }
+      : undefined;
+  return row.contractId
+    ? { contractId: row.contractId, orderId: row.id }
+    : undefined;
+}
 export function orderRowFlags(
   row: ProcurementOrderRow,
   receivedNames: Record<string, string>,

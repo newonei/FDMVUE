@@ -11,6 +11,7 @@ import {
   compatibleClauses,
   detailsChecklist,
   onlyChoice,
+  orderCopySource,
   orderDetailsPayload,
   orderRowDue,
   orderRowFlags,
@@ -270,5 +271,24 @@ describe('采购单列表状态图标（金智式）', () => {
       'none',
     ]);
     expect(flags[2]!.title).toBe('无需收票');
+  });
+});
+
+describe('采购单列表「⋯」菜单复制', () => {
+  it('合同采购单与新系统独立单可复制，金智历史独立单不能', () => {
+    const row = (extra: Record<string, unknown>) =>
+      ({ id: 'o1', contractId: 'c1', ...extra }) as never;
+    expect(orderCopySource(row({}))).toEqual({
+      contractId: 'c1',
+      orderId: 'o1',
+    });
+    expect(
+      orderCopySource(
+        row({ contractId: '', standaloneId: 's1', nativeStandalone: true }),
+      ),
+    ).toEqual({ contractId: 'standalone', orderId: 's1' });
+    expect(
+      orderCopySource(row({ contractId: '', standaloneId: 's2' })),
+    ).toBeUndefined();
   });
 });
