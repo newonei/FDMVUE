@@ -17,6 +17,7 @@ import { computed, h, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
 import { formatDate } from '@vben/utils';
 
 import {
@@ -113,6 +114,7 @@ import {
   canReturnOrderArrival,
   downloadBlob,
   orderArrivalProgress,
+  orderCopySource,
   orderDetailsPayload,
   orderMoney,
   orderPaymentProgress,
@@ -420,6 +422,26 @@ function standaloneOrder(id: string | undefined) {
   return !id || id === 'standalone';
 }
 const editorOpen = ref(false);
+/** 「⋯」菜单复制时的原采购单；新建时为空 */
+const copySource = ref<{ contractId: string; orderId: string }>();
+function openEditor(source?: { contractId: string; orderId: string }) {
+  if (childOpen.value) return;
+  copySource.value = source;
+  editorOpen.value = true;
+}
+/** 每行「⋯」菜单：对这张采购单的操作，目前只有复制。 */
+function rowMenu(row: ProcurementOrderRow) {
+  return [
+    {
+      key: 'copy',
+      label: orderCopySource(row) ? '复制' : '复制（金智历史单不能复制）',
+      disabled: !orderCopySource(row),
+    },
+  ];
+}
+function rowMenuClick(row: ProcurementOrderRow, key: string) {
+  if (key === 'copy') openEditor(orderCopySource(row));
+}
 /** 收票合计（抽屉摘要卡）；收票页签改动后重新读 */
 const invoicedTotal = ref<string>();
 /** 下属单据（时间线、页签数量用）：付款发票、入库单、退货单 */
@@ -1166,11 +1188,7 @@ watch(financeType, (value, previous) => {
           >
             从方案生成
           </Button>
-          <Button
-            type="primary"
-            :disabled="childOpen"
-            @click="editorOpen = true"
-          >
+          <Button type="primary" :disabled="childOpen" @click="openEditor()">
             新建采购单
           </Button>
         </template>
@@ -1412,6 +1430,28 @@ watch(financeType, (value, previous) => {
           </template>
           <template #bodyCell="{ column, record }">
             <span v-if="column.key === 'flags'" class="order-flags">
+              <Dropdown :trigger="['click']" :disabled="childOpen">
+                <button
+                  type="button"
+                  class="order-row-menu"
+                  title="更多操作"
+                  aria-label="更多操作"
+                >
+                  <IconifyIcon icon="lucide:ellipsis" />
+                </button>
+                <template #overlay>
+                  <Menu
+                    :items="rowMenu(record as ProcurementOrderRow)"
+                    @click="
+                      (info: { key: string | number }) =>
+                        rowMenuClick(
+                          record as ProcurementOrderRow,
+                          String(info.key),
+                        )
+                    "
+                  />
+                </template>
+              </Dropdown>
               <i
                 v-for="flag in rowFlags(record as ProcurementOrderRow)"
                 :key="flag.key"
@@ -1956,6 +1996,7 @@ watch(financeType, (value, previous) => {
     </FdmResizableDrawer>
     <PurchaseOrderEditor
       :open="editorOpen && active"
+      :copy-from="copySource"
       @close="editorOpen = false"
       @saved="editorSaved"
     />
@@ -2080,6 +2121,22 @@ watch(financeType, (value, previous) => {
 .order-flags {
   display: inline-flex;
   gap: 3px;
+}
+
+.order-row-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.order-row-menu:hover {
+  color: hsl(var(--primary));
+  background: hsl(var(--accent));
 }
 
 .order-flags i {

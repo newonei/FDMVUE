@@ -21,6 +21,7 @@ import { getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
 import {
   createProcurementOrder,
+  getProcurementOrder,
   getProcurementSettings,
   getReceiveFactories,
 } from '#/api/fdmplatform/procurement';
@@ -30,6 +31,7 @@ import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
 import { errorText } from '../../../data';
 import { localDate } from '../../quotes/comparison';
 import {
+  copyEntry,
   emptyRow,
   entryErrors,
   entryPayload,
@@ -44,6 +46,8 @@ import {
 
 const props = defineProps<{
   contractId?: string;
+  /** 复制这张采购单：带出合同、供应商、表头和明细，另存为新单 */
+  copyFrom?: { contractId: string; orderId: string };
   open: boolean;
   /** 从采购申请开单：带出申请里的合同产品与数量 */
   requestId?: string;
@@ -341,6 +345,42 @@ function fillFromRequest(requestId: string) {
         : String(line.quantity),
   }));
 }
+/** 复制采购单：先关联原合同（合同产品行要用），再带出表头和明细。 */
+async function copyOrder(
+  source: { contractId: string; orderId: string },
+  searching: Promise<void>,
+) {
+  const view = await getProcurementOrder(source.contractId, source.orderId);
+  const copied = copyEntry(view, key, today);
+  await (copied.header.contractId
+    ? chooseContract(copied.header.contractId)
+    : searchContracts());
+  header.value = {
+    ...header.value,
+    ...copied.header,
+    category: copied.header.category ?? header.value.category,
+  };
+  // 等首次产品搜索回来再补上复制行的产品，免得下拉框只显示产品 id
+  await searching;
+  const copiedOptions = copied.rows
+    .filter((row) => row.productId)
+    .map((row) => ({
+      value: row.productId!,
+      name: row.name,
+      code: row.code,
+      category: row.category,
+      specification: row.specification,
+      unit: row.unit,
+      label: `${row.code ?? ''} · ${row.name}`,
+    }));
+  productOptions.value = [
+    ...copiedOptions,
+    ...productOptions.value.filter(
+      (entry) => !copiedOptions.some((option) => option.value === entry.value),
+    ),
+  ];
+  rows.value = copied.rows.length > 0 ? copied.rows : [emptyRow(key())];
+}
 watch(
   () => props.open,
   async (open) => {
@@ -351,7 +391,7 @@ watch(
     contract.value = undefined;
     header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
     rows.value = [emptyRow(key())];
-    void searchProducts();
+    const searching = searchProducts().catch(() => undefined);
     try {
       const [loaded, maintained, receiveFactories] = await Promise.all([
         getDirectory(0),
@@ -371,6 +411,10 @@ watch(
         )
           ? PURCHASE_CATEGORIES[0]
           : categories.value[0];
+      }
+      if (props.copyFrom) {
+        await copyOrder(props.copyFrom, searching);
+        return;
       }
       await (props.contractId
         ? chooseContract(props.contractId)
@@ -407,7 +451,7 @@ async function save() {
 <template>
   <Modal
     :open="open"
-    title="新建采购单"
+    :title="copyFrom ? '复制采购单' : '新建采购单'"
     width="min(1320px, 96vw)"
     :mask-closable="false"
     @cancel="emit('close')"

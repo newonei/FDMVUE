@@ -1,4 +1,7 @@
-import type { PurchaseOrderEntry } from '#/api/fdmplatform/procurement';
+import type {
+  ProcurementOrderView,
+  PurchaseOrderEntry,
+} from '#/api/fdmplatform/procurement';
 
 import BigNumber from 'bignumber.js';
 
@@ -186,6 +189,92 @@ export function entryPayload(
       remark: row.remark?.trim() || undefined,
     })),
   };
+}
+
+interface CopiedLine {
+  id?: string;
+  contractItemId?: null | string;
+  skuId?: null | string;
+  quantity?: unknown;
+  unitPrice?: unknown;
+  specificationSnapshot?: null | {
+    category?: null | string;
+    skuCode?: null | string;
+    skuName?: null | string;
+    specification?: null | string;
+    unit?: null | string;
+  };
+}
+const copiedText = (value: unknown) =>
+  typeof value === 'string' && value.trim() !== '' ? value : undefined;
+const copiedNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return undefined;
+  const number = decimal(value);
+  return number.isFinite()
+    ? number.toFixed(number.decimalPlaces() ?? 0)
+    : undefined;
+};
+/**
+ * 复制采购单：带出合同、供应商、表头和明细（数量、单价、赠品、备注），
+ * 采购日期改为今天，到货日期不带；附加费用为 0、折扣 100 时留空，和新建一样。
+ */
+export function copyEntry(
+  view: ProcurementOrderView,
+  key: () => string,
+  today: string,
+): { header: EntryHeader; rows: EntryRow[] } {
+  const order = view.order;
+  const details = view.details as Record<string, unknown>;
+  const notes = (details.lineNotes ?? {}) as Record<
+    string,
+    { gift?: boolean; remark?: null | string }
+  >;
+  const nonZero = (value: unknown, empty: string) => {
+    const number = copiedNumber(value);
+    return number === undefined || decimal(number).isEqualTo(empty)
+      ? undefined
+      : number;
+  };
+  const header: EntryHeader = {
+    contractId: view.contractId || undefined,
+    supplierId: copiedText(order.supplierId),
+    subject: copiedText(details.subject),
+    category: copiedText(details.category),
+    purchaseDate: today,
+    companyId:
+      typeof order.companyId === 'number' ? order.companyId : view.companyId,
+    additionalCategory: copiedText(details.additionalCategory),
+    additionalAmount: nonZero(details.additionalAmount, '0'),
+    roundOff: nonZero(details.roundOff, '0'),
+    discountRate: nonZero(details.discountRate, '100'),
+    remark: copiedText(details.remark),
+    receiveFactoryId:
+      typeof order.receiveFactoryId === 'number'
+        ? order.receiveFactoryId
+        : undefined,
+  };
+  const rows = ((order.lines ?? []) as CopiedLine[])
+    .filter((line) => line.contractItemId || line.skuId)
+    .map((line) => {
+      const snapshot = line.specificationSnapshot ?? {};
+      const note = line.id ? notes[line.id] : undefined;
+      const row: EntryRow = {
+        ...emptyRow(key()),
+        category: snapshot.category ?? undefined,
+        productId: line.contractItemId ? undefined : (line.skuId ?? undefined),
+        contractItemId: line.contractItemId ?? undefined,
+        name: snapshot.skuName || '产品',
+        code: snapshot.skuCode ?? undefined,
+        specification: snapshot.specification ?? undefined,
+        unit: snapshot.unit ?? undefined,
+        quantity: copiedNumber(line.quantity),
+        remark: copiedText(note?.remark),
+      };
+      if (note?.gift === true) setRowGift(row, true);
+      else setRowPrice(row, copiedNumber(line.unitPrice));
+      return row;
+    });
+  return { header, rows };
 }
 
 export interface PastedLine {
