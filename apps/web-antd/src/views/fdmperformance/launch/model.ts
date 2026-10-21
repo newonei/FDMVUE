@@ -1,5 +1,7 @@
 import type { JixiaoApi } from '#/api/fdmperformance';
 
+import { personManagerUserIds } from '../shared/score-weights';
+
 export function buildPeriodOptions(periodType?: string, now = new Date()) {
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -63,11 +65,10 @@ export function personIssue(person: JixiaoApi.TemplatePerson) {
   if (!person.supervisorUserId || person.supervisorUserId <= 0)
     return '缺少主管评分人';
   if (person.supervisorUserId === person.userId) return '不能给本人主管评分';
+  const managerIds = personManagerUserIds(person);
   if (
-    person.superiorSupervisorUserId &&
-    [person.userId, person.supervisorUserId].includes(
-      person.superiorSupervisorUserId,
-    )
+    managerIds.some((id) => [person.userId, person.supervisorUserId].includes(id)) ||
+    new Set(managerIds).size !== managerIds.length
   )
     return '上级评分人与其他角色重复';
   return '';

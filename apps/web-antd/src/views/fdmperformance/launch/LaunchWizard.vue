@@ -21,6 +21,11 @@ import { batchLaunchAssessments, getLaunchPreview } from '#/api/fdmperformance';
 import { usePerformanceAccess } from '../shared/access';
 import { PERIOD_OPTIONS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
+import {
+  personManagerNames,
+  personManagerUserIds,
+  scoreWeightsText,
+} from '../shared/score-weights';
 import TemplatePickerModal from './components/TemplatePickerModal.vue';
 import {
   buildPeriodOptions,
@@ -77,7 +82,7 @@ const reviewerSignature = computed(() =>
         .map((person) => [
           person.userId,
           person.supervisorUserId,
-          person.superiorSupervisorUserId,
+          personManagerUserIds(person),
         ])
         .sort((a, b) => Number(a[0]) - Number(b[0])),
     ]),
@@ -100,11 +105,15 @@ const personColumns: TableColumnsType = [
   },
   {
     dataIndex: 'superiorSupervisorUserName',
-    title: '上级评分人（选配）',
-    width: 180,
+    title: '上级评分人（按层级依次评分）',
+    width: 220,
   },
   { dataIndex: 'validation', title: '关系核验', width: 180 },
 ];
+function managerNamesText(person: JixiaoApi.TemplatePerson) {
+  const names = personManagerNames(person);
+  return names.length > 0 ? names.join(' → ') : '不启用上级评分';
+}
 const indicatorColumns: TableColumnsType = [
   { dataIndex: 'dimensionName', title: '维度', width: 130 },
   { dataIndex: 'name', title: '指标', width: 180 },
@@ -443,9 +452,7 @@ onMounted(initialize);
               <template #bodyCell="{ column, record }">
                 <template
                   v-if="column.dataIndex === 'superiorSupervisorUserName'"
-                  >{{
-                    record.superiorSupervisorUserName || '不启用上级评分'
-                  }}</template
+                  >{{ managerNamesText(record) }}</template
                 >
                 <template v-else-if="column.dataIndex === 'validation'"
                   ><Tag :color="personIssue(record) ? 'error' : 'success'">{{
@@ -483,6 +490,9 @@ onMounted(initialize);
                   >{{ item.template.name }} · 考核周期 {{ item.periodKey }} ·
                   {{ item.selectedUserIds.length }} 人</span
                 >
+                <div class="secondary-text">
+                  评分比重：{{ scoreWeightsText(item.preview?.scoreWeights) }}（缺少的上级层级并入主管）
+                </div>
               </div>
             </div>
             <h4>被考核人与评分人</h4>
@@ -496,9 +506,7 @@ onMounted(initialize);
               ><template #bodyCell="{ column, record }"
                 ><template
                   v-if="column.dataIndex === 'superiorSupervisorUserName'"
-                  >{{
-                    record.superiorSupervisorUserName || '不启用上级评分'
-                  }}</template
+                  >{{ managerNamesText(record) }}</template
                 ></template
               ></Table
             >
