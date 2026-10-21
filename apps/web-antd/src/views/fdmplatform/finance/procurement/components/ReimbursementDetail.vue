@@ -25,6 +25,7 @@ import {
 const props = defineProps<{
   busy?: boolean;
   files: ProcurementFinanceFile[];
+  hidePayment?: boolean;
   record: ProcurementFinanceRecord;
   userNames?: Record<string, string>;
 }>();
@@ -42,6 +43,7 @@ const actions = computed(() =>
 );
 const canPay = computed(
   () =>
+    !props.hidePayment &&
     props.record.status === 'APPROVED' &&
     props.record.summary?.complete !== false &&
     props.record.summary?.paidAmount !== null &&
@@ -68,8 +70,10 @@ const flowMessage = computed(() => {
   if (props.record.status === 'APPROVED') {
     if (paymentLabel.value === '付款资料待核实')
       return '单据已生效，付款资料仍需核实。核实完成后再办理付款。';
-    return canPay.value
-      ? '单据已生效，可直接登记付款。付款经确认后更新实际已付金额。'
+    if (canPay.value)
+      return '单据已生效，可直接登记付款。付款经确认后更新实际已付金额。';
+    return hasPayableBalance(props.record.summary?.availablePaymentAmount)
+      ? '单据已生效，等待财务办理付款。'
       : '单据已生效，当前报销已付清。';
   }
   if (props.record.status === 'REJECTED')
@@ -160,7 +164,7 @@ function factName(value: unknown) {
             {{ actionNames[action] ?? action }}
           </Button>
           <Button
-            v-if="record.status === 'APPROVED'"
+            v-if="!hidePayment && record.status === 'APPROVED'"
             :disabled="busy"
             @click="emit('allocate')"
           >
