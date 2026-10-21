@@ -75,11 +75,16 @@ export function expensePayment(record: ProcurementFinanceRecord) {
   };
 }
 
-export function expenseAction(record: ProcurementFinanceRecord) {
+/** payable=false：外贸、内销入口不办理付款。 */
+export function expenseAction(
+  record: ProcurementFinanceRecord,
+  payable = true,
+) {
   if (record.standaloneId || record.blockReasons?.length) return '查看详情';
   if (record.allowedActions.includes('UPDATE')) return '继续填写';
   if (record.allowedActions.includes('SUBMIT')) return '提交生效';
   if (
+    payable &&
     record.status === 'APPROVED' &&
     new BigNumber(String(expensePayment(record).unpaid ?? 0)).gt(0)
   )

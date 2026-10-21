@@ -30,6 +30,15 @@ import {
   reimbursementViews,
 } from './workspace';
 
+const props = withDefaults(
+  defineProps<{
+    /** 页头所属部门，四个部门菜单共用这个列表。 */
+    department?: string;
+    /** 外贸、内销只办报销本身；付款与成本归集归采购、财务。 */
+    payable?: boolean;
+  }>(),
+  { department: '财务管理', payable: true },
+);
 const inMergedView = useInMergedView();
 const route = useRoute();
 const router = useRouter();
@@ -217,10 +226,16 @@ onBeforeUnmount(() => {
       <header class="expense-heading">
         <div>
           <template v-if="!inMergedView">
-            <span class="expense-eyebrow">财务管理 / 费用报销</span>
+            <span class="expense-eyebrow">{{ props.department }} / 费用报销</span>
             <h1>费用报销</h1>
           </template>
-          <p>填写费用与凭证，提交生效后继续办理实际付款。</p>
+          <p>
+            {{
+              props.payable
+                ? '填写费用与凭证，提交生效后继续办理实际付款。'
+                : '填写费用与凭证，提交生效后由财务办理付款。'
+            }}
+          </p>
         </div>
         <Button type="primary" size="large" @click="create">新建报销</Button>
       </header>
@@ -354,7 +369,9 @@ onBeforeUnmount(() => {
               type="link"
               @click="show(row as ProcurementFinanceRecord)"
             >
-              {{ expenseAction(row as ProcurementFinanceRecord) }}
+              {{
+                expenseAction(row as ProcurementFinanceRecord, props.payable)
+              }}
             </Button>
           </template>
           <template #emptyText>
@@ -374,6 +391,7 @@ onBeforeUnmount(() => {
     <FinanceDocument
       :open="open && active"
       type="REIMBURSEMENT"
+      :hide-payment="!props.payable"
       :record-id="selectedId"
       :context="context"
       @close="close"

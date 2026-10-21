@@ -44,10 +44,6 @@ export const mergedRoutes: Record<string, { path: string; view: string }> = {
     path: '/caiwu/platform-procurement-requests',
     view: 'payments',
   },
-  '/caiwu/platform-procurement-reimbursements': {
-    path: '/caiwu/platform-procurement-requests',
-    view: 'reimbursements',
-  },
   '/caiwu/platform-procurement-costs': {
     path: '/caiwu/platform-costs',
     view: 'procurementCosts',

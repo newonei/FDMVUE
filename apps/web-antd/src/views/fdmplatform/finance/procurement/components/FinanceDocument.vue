@@ -64,6 +64,8 @@ import ReimbursementDetail from './ReimbursementDetail.vue';
 import ReimbursementForm from './ReimbursementForm.vue';
 const props = defineProps<{
   context?: Record<string, unknown>;
+  /** 外贸、内销入口只办报销本身，付款与成本归集归采购、财务。 */
+  hidePayment?: boolean;
   open: boolean;
   recordId?: string;
   type: ProcurementFinanceType;
@@ -691,6 +693,7 @@ async function relatedUpdated() {
           :files="files"
           :user-names="userNames"
           :busy="busy || childOpen"
+          :hide-payment="hidePayment"
           @action="openAction"
           @pay="pay"
           @allocate="allocateCosts"
