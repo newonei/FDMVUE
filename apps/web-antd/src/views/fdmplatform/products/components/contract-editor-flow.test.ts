@@ -275,7 +275,7 @@ async function mountEditor(
   props.open = true;
   await vi.waitFor(() =>
     expect(
-      host.querySelector('[data-label="订单所属公司"] option[value="1"]'),
+      host.querySelector('[data-label="合同主体"] option[value="1"]'),
     ).toBeTruthy(),
   );
   return { host, props };

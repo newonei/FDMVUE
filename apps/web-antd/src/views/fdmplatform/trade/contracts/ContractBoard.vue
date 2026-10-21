@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import type { Dayjs } from 'dayjs';
-
 import type { SalesChannel } from '../../sales-channel';
+import type { ContractFilters } from './filters';
 import type { FlowStage } from './model';
 
 import type { Access, Contract, Directory } from '#/api/fdmplatform';
@@ -22,6 +21,7 @@ import { downloadFileFromBlobPart, formatDate } from '@vben/utils';
 
 import {
   Alert,
+  Badge,
   Button,
   DatePicker,
   Empty,
@@ -54,7 +54,14 @@ import {
 import RelatedLink from '../../documents/RelatedLink.vue';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ContractEditor from '../../products/components/ContractEditor.vue';
+import ContractFilterPanel from './ContractFilterPanel.vue';
 import ContractRowPanel from './ContractRowPanel.vue';
+import {
+  activeFilterCount,
+  emptyFilters,
+  filterQuery,
+  shipStateOptions,
+} from './filters';
 import {
   amountText,
   contractCsv,
@@ -111,10 +118,9 @@ const mine = ref(false);
 const stage = ref<FlowStage>();
 const due = ref<ContractDueBucket>();
 const keyword = ref('');
-const category = ref<string>();
-const owner = ref<number>();
-const company = ref<number>();
-const signedRange = ref<[Dayjs, Dayjs]>();
+/** 负责人、合同主体、分类等都可多选；高级筛选里的条件也存在这里 */
+const filters = ref<ContractFilters>(emptyFilters());
+const filterPanelOpen = ref(false);
 const sort = ref<ContractBoardSort>('SIGNED');
 const year = ref<'ALL' | 'EARLIER' | number>(new Date().getFullYear());
 const shipState = ref<'ALL' | 'OPEN'>('OPEN');
@@ -144,18 +150,67 @@ const yearOptions = [
   { label: '更早', value: 'EARLIER' },
 ];
 const flows = computed(() => flowCounts(overview.value));
+const filterCount = computed(() =>
+  activeFilterCount(filters.value, mine.value),
+);
 const filtered = computed(
   () =>
-    !!(
-      keyword.value.trim() ||
-      category.value ||
-      owner.value ||
-      company.value ||
-      signedRange.value ||
-      stage.value ||
-      due.value
-    ),
+    !!(keyword.value.trim() || filterCount.value || stage.value || due.value),
 );
+const companyOptions = computed(
+  () =>
+    access.value?.companies.map((item) => ({
+      value: item.companyId,
+      label: item.companyName ?? `公司 ${item.companyId}`,
+    })) ?? [],
+);
+const userOptions = computed(
+  () =>
+    directory.value?.users.map((user) => ({
+      value: user.id,
+      label: personLabel(directory.value, user.id),
+    })) ?? [],
+);
+/** 工具栏上没有的高级条件，用标签列出来，点叉单独去掉 */
+const advancedTags = computed(() => {
+  const value = filters.value;
+  const names = (ids: number[]) =>
+    ids.map((id) => personName(directory.value, id) || `#${id}`).join('、');
+  const tags: Array<{ key: keyof ContractFilters; text: string }> = [];
+  if (value.customers.length > 0)
+    tags.push({
+      key: 'customers',
+      text: `客户：${value.customers.map((item) => item.name).join('、')}`,
+    });
+  if (value.buyers.length > 0)
+    tags.push({ key: 'buyers', text: `采购员：${names(value.buyers)}` });
+  if (value.shipStates.length > 0)
+    tags.push({
+      key: 'shipStates',
+      text: `发货：${value.shipStates
+        .map(
+          (state) =>
+            shipStateOptions.find((item) => item.value === state)?.label,
+        )
+        .join('、')}`,
+    });
+  if (value.due)
+    tags.push({ key: 'due', text: `交期 ${value.due[0]} ~ ${value.due[1]}` });
+  const hasMin = value.amountMin !== null && value.amountMin !== undefined;
+  const hasMax = value.amountMax !== null && value.amountMax !== undefined;
+  if (hasMin || hasMax)
+    tags.push({
+      key: 'amountMin',
+      text: `金额 ${hasMin ? value.amountMin : '不限'} ~ ${hasMax ? value.amountMax : '不限'}`,
+    });
+  if (value.kind)
+    tags.push({
+      key: 'kind',
+      text: value.kind === 'SAMPLE' ? '只看样品单' : '只看正式合同',
+    });
+  if (value.unpaid) tags.push({ key: 'unpaid', text: '还有未收款' });
+  return tags;
+});
 const companyName = (id?: null | number) =>
   access.value?.companies.find((item) => item.companyId === id)?.companyName ??
   directory.value?.companies.find((item) => item.companyId === id)
@@ -202,13 +257,7 @@ function signedFilter() {
         : yearRange(year.value)),
       shipState: shipState.value === 'OPEN' ? ('OPEN' as const) : undefined,
     };
-  const range = signedRange.value;
-  return range
-    ? {
-        signedFrom: range[0].format('YYYY-MM-DD'),
-        signedTo: range[1].format('YYYY-MM-DD'),
-      }
-    : {};
+  return filterQuery(filters.value, mine.value);
 }
 function query(page = pageNo.value, size = pageSize.value): ContractBoardQuery {
   const jinzhi = tab.value === 'JINZHI';
@@ -220,9 +269,6 @@ function query(page = pageNo.value, size = pageSize.value): ContractBoardQuery {
     mine: !jinzhi && mine.value ? true : undefined,
     stage: tab.value === 'ACTIVE' ? stage.value : undefined,
     due: tab.value === 'ACTIVE' ? due.value : undefined,
-    productCategory: category.value,
-    ownerUserId: !jinzhi && !mine.value ? owner.value : undefined,
-    companyId: jinzhi ? undefined : company.value,
     salesChannel: props.salesChannel,
     ...signedFilter(),
     sort: sort.value,
@@ -291,7 +337,6 @@ function setScope(value: boolean) {
   if (mine.value === value) return;
   mine.value = value;
   rememberScope(value);
-  owner.value = undefined;
   void load(true);
   void loadOverview();
 }
@@ -318,7 +363,13 @@ function showUnpaid() {
 }
 function showThisMonth() {
   tab.value = 'ACTIVE';
-  signedRange.value = [dayjs().startOf('month'), dayjs().endOf('month')];
+  filters.value = {
+    ...filters.value,
+    signed: [
+      dayjs().startOf('month').format('YYYY-MM-DD'),
+      dayjs().endOf('month').format('YYYY-MM-DD'),
+    ],
+  };
   void load(true);
 }
 function showJinzhiOpen() {
@@ -331,13 +382,25 @@ function showJinzhiOpen() {
 }
 function resetFilters() {
   keyword.value = '';
-  category.value = undefined;
-  owner.value = undefined;
-  company.value = undefined;
-  signedRange.value = undefined;
+  filters.value = emptyFilters();
   stage.value = undefined;
   due.value = undefined;
   void load(true);
+}
+function applyFilters(next: ContractFilters) {
+  filters.value = next;
+  filterPanelOpen.value = false;
+  void load(true);
+}
+function clearAdvanced(key: keyof ContractFilters) {
+  const next = { ...filters.value };
+  if (key === 'amountMin') {
+    next.amountMin = undefined;
+    next.amountMax = undefined;
+  } else {
+    Reflect.set(next, key, emptyFilters()[key]);
+  }
+  applyFilters(next);
 }
 function tableChange(pagination: { current?: number; pageSize?: number }) {
   pageNo.value = pagination.current ?? 1;
@@ -687,51 +750,52 @@ onMounted(async () => {
           </template>
           <template v-else>
             <Select
-              v-model:value="category"
+              v-model:value="filters.categories"
+              mode="multiple"
               :options="[
                 ...productCategoryOptions,
                 { value: 'NONE', label: '未分类' },
               ]"
               placeholder="产品分类"
+              :max-tag-count="1"
               allow-clear
-              style="width: 120px"
+              style="width: 160px"
               @change="load(true)"
             />
             <Select
               v-if="!mine"
-              v-model:value="owner"
-              :options="
-                directory?.users.map((user) => ({
-                  value: user.id,
-                  label: personLabel(directory, user.id),
-                }))
-              "
-              placeholder="负责人"
+              v-model:value="filters.owners"
+              mode="multiple"
+              :options="userOptions"
+              placeholder="负责人（可多选）"
+              :max-tag-count="1"
               show-search
               option-filter-prop="label"
               allow-clear
-              style="width: 130px"
+              style="width: 190px"
               @change="load(true)"
             />
             <DatePicker.RangePicker
-              v-model:value="signedRange"
+              v-model:value="filters.signed"
+              value-format="YYYY-MM-DD"
               :placeholder="['签订从', '到']"
               style="width: 210px"
               @change="load(true)"
             />
             <Select
-              v-model:value="company"
-              :options="
-                access?.companies.map((item) => ({
-                  value: item.companyId,
-                  label: item.companyName ?? `公司 ${item.companyId}`,
-                }))
-              "
-              placeholder="订单所属公司"
+              v-model:value="filters.companies"
+              mode="multiple"
+              :options="companyOptions"
+              placeholder="合同主体"
+              :max-tag-count="1"
+              option-filter-prop="label"
               allow-clear
-              style="width: 150px"
+              style="width: 190px"
               @change="load(true)"
             />
+            <Badge :count="filterCount" :offset="[-4, 4]" size="small">
+              <Button @click="filterPanelOpen = true">高级筛选</Button>
+            </Badge>
           </template>
           <Button
             v-if="filtered && tab !== 'JINZHI'"
@@ -778,6 +842,21 @@ onMounted(async () => {
             style="width: 140px"
             @change="load(true)"
           />
+        </div>
+        <div
+          v-if="tab !== 'JINZHI' && advancedTags.length"
+          class="advanced-tags"
+        >
+          <span class="muted">高级筛选：</span>
+          <Tag
+            v-for="item in advancedTags"
+            :key="item.key"
+            closable
+            color="blue"
+            @close.prevent="clearAdvanced(item.key)"
+          >
+            {{ item.text }}
+          </Tag>
         </div>
 
         <Table
@@ -1008,6 +1087,17 @@ onMounted(async () => {
       </section>
     </div>
 
+    <ContractFilterPanel
+      :open="filterPanelOpen"
+      :channel="salesChannel"
+      :companies="companyOptions"
+      :directory="directory"
+      :filters="filters"
+      :mine="mine"
+      :user-id="access?.userId"
+      @apply="applyFilters"
+      @close="filterPanelOpen = false"
+    />
     <ContractEditor
       :default-business-type="salesChannel"
       :open="editorOpen"
@@ -1310,6 +1400,19 @@ onMounted(async () => {
 
 .grow {
   flex: 1;
+}
+
+.advanced-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: -4px;
+  font-size: 12px;
+}
+
+.advanced-tags :deep(.ant-tag) {
+  margin: 0;
 }
 
 .chips {

@@ -155,6 +155,21 @@ export interface ContractBoardQuery {
   productCategory?: string;
   signedFrom?: string;
   signedTo?: string;
+  /** 自定义筛选：多选以逗号拼接；同一项“任一”，各项之间“同时满足” */
+  ownerUserIds?: string;
+  companyIds?: string;
+  customerIds?: string;
+  buyerUserIds?: string;
+  productCategories?: string;
+  shipStates?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  amountMin?: number;
+  amountMax?: number;
+  /** true 只看样品单 · false 只看正式合同 */
+  sample?: boolean;
+  /** true 只看还有未收款的合同 */
+  unpaid?: boolean;
   sort?: ContractBoardSort;
   order?: 'ASC' | 'DESC';
 }

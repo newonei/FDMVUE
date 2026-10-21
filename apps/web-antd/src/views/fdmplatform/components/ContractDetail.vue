@@ -801,7 +801,7 @@ async function download(file: { id: string; name: string }) {
             <dd>{{ nativeMoney(contract.amount, contract.currency) }}</dd>
             <dt>所有者</dt>
             <dd>{{ personLabel(directory, contract.ownerUserId) }}</dd>
-            <dt>订单所属公司</dt>
+            <dt>合同主体</dt>
             <dd>{{ company || '待补齐' }}</dd>
             <dt>业务部门</dt>
             <dd>{{ departmentLabel(directory, contract.departmentId) }}</dd>

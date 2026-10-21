@@ -37,6 +37,7 @@ import {
   getAccess,
   getAttachments,
   getContract,
+  getNextContractCode,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
@@ -94,6 +95,8 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: []; saved: [contract: Contract] }>();
 const access = ref<Access>();
+/** 新建时回填的系统建议订单号；保存时没改过就重新取号，改过就按手填 */
+const suggestedCode = ref('');
 const orderCompanies = computed(() =>
   contractCompanyOptions(access.value?.companies ?? [], props.contract),
 );
@@ -417,6 +420,16 @@ const columns = computed(() =>
     { title: '操作', key: 'action', width: 150 },
   ].filter((column) => domestic.value || column.key !== 'date'),
 );
+async function fillSuggestedCode(run: number) {
+  try {
+    const code = await getNextContractCode();
+    if (run !== editorSequence || !props.open || form.code) return;
+    suggestedCode.value = code;
+    form.code = code;
+  } catch {
+    // 取不到建议编号也能保存：留空时后端自动编号
+  }
+}
 watch(
   () => props.open,
   async (open) => {
@@ -429,6 +442,7 @@ watch(
     resolving.value = false;
     if (!open) return;
     const contract = props.contract;
+    suggestedCode.value = '';
     panelError.value = '';
     priceNotice.value = '';
     attachmentsError.value = '';
@@ -492,6 +506,7 @@ watch(
     );
     customerKeyword.value = '';
     void loadCustomers(true);
+    if (!contract) void fillSuggestedCode(run);
     try {
       const currentAccess = await getAccess();
       if (run !== editorSequence || !props.open) return;
@@ -728,7 +743,7 @@ async function save(activate = false) {
     !form.ownerUserId ||
     !form.signedDate
   ) {
-    panelError.value = '请补齐订单所属公司、客户、负责人和签订日期';
+    panelError.value = '请补齐合同主体、客户、负责人和签订日期';
     return;
   }
   if (lines.value.length === 0) {
@@ -794,7 +809,11 @@ async function save(activate = false) {
   saving.value = true;
   panelError.value = '';
   try {
-    const header = contractHeaderPayload(form, props.contract);
+    const header = contractHeaderPayload(
+      form,
+      props.contract,
+      suggestedCode.value,
+    );
     const payload = {
       ...header,
       salesCharges: charges.value,
@@ -832,6 +851,15 @@ async function save(activate = false) {
         );
     draftFiles.value = [];
     lineFiles.value = {};
+    if (
+      !props.contract &&
+      suggestedCode.value &&
+      form.code.trim() === suggestedCode.value &&
+      result.code !== suggestedCode.value
+    )
+      message.info(
+        `订单号 ${suggestedCode.value} 刚被别人用了，已改为 ${result.code}`,
+      );
     if (activate && (!props.contract || props.contract.status === 'DRAFT')) {
       try {
         result = await contractAction(
@@ -909,7 +937,7 @@ async function save(activate = false) {
             v-if="!contract && recentContracts.length"
             label="这个客户最近的合同"
             class="recent-contracts"
-            :extra="`订单公司和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，${domestic ? '交期和' : ''}附件不带。`"
+            :extra="`合同主体和币种已按最近一份新系统合同带出，可以改。复制会带入产品、规格和成交价，${domestic ? '交期和' : ''}附件不带。`"
           >
             <div class="recent-row">
               <Select
@@ -920,30 +948,33 @@ async function save(activate = false) {
               <Button :loading="copying" @click="copyRecent">复制这一单</Button>
             </div>
           </Form.Item>
-          <Form.Item label="订单所属公司" required>
+          <Form.Item label="合同主体" required>
             <Select
               v-model:value="form.companyId"
               :options="orderCompanies"
               :disabled="Boolean(contract)"
-              placeholder="请选择订单所属公司"
+              placeholder="请选择签约的合同主体（公司）"
               show-search
               option-filter-prop="label"
             />
           </Form.Item>
           <Form.Item
             label="订单号"
-            extra="首次保存时由系统自动生成，保存后保持不变。"
+            :extra="
+              contract
+                ? '订单号保存后不能修改。'
+                : '已按系统规则自动填好，可以改成自己的单号；保存时检查不能重复，留空则自动编号。'
+            "
           >
             <Input
-              :value="form.code"
-              readonly
-              placeholder="首次保存后自动生成"
+              v-model:value="form.code"
+              :readonly="Boolean(contract)"
+              :maxlength="64"
+              allow-clear
+              placeholder="留空保存时自动编号"
             />
 </Form.Item><Form.Item label="内部名称（可选）">
-            <Input
-              v-model:value="form.name"
-              placeholder="便于识别的补充说明，订单号由系统生成"
-            />
+            <Input v-model:value="form.name" placeholder="便于识别的补充说明" />
           </Form.Item>
           <Form.Item v-if="!domestic" label="阿里信保订单">
             <Switch v-model:checked="form.useTradeAssurance" />

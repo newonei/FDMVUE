@@ -317,11 +317,11 @@ async function newContract(category: string | undefined = 'YOGA') {
   await vi.waitFor(() =>
     expect(
       view.host.querySelector(
-        '[data-label="订单所属公司"] select option[value="1"]',
+        '[data-label="合同主体"] select option[value="1"]',
       ),
     ).toBeTruthy(),
   );
-  await fill(view.host, '订单所属公司', '1');
+  await fill(view.host, '合同主体', '1');
   await fill(view.host, '内部名称（可选）', '含附件的测试合同');
   await fill(view.host, '客户', 'customer');
   if (category) await fill(view.host, '产品分类', category);
