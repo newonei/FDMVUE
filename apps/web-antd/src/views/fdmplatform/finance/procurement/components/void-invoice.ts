@@ -18,7 +18,7 @@ export function confirmVoidInvoice(
       h('div', [
         h(
           'p',
-          '作废后不再计入收票合计，记录保留。识别错的发票作废后重新上传。',
+          '作废后不再计入收票合计，记录保留；已登记的付款不受影响。识别错的发票作废后重新上传。',
         ),
         h(Input, {
           placeholder: '作废原因（必填）',
