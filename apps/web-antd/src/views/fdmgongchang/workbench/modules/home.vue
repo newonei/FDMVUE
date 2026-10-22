@@ -28,6 +28,17 @@ const processOf = (code: string) => my.value.processes.find((p) => p.code === co
 const labelOf = (code: string) => processOf(code)?.label ?? code;
 const stageLabel = (code?: string) => job.options?.stages.find((s) => s.code === code)?.label ?? '';
 const stageUnit = (code?: string) => job.options?.stages.find((s) => s.code === code)?.unit ?? '';
+/** 密炼做板材、开片做片材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
+const INTERMEDIATE = new Set(['BOARD', 'SHEET']);
+const intermediateOf = (task: FdmgongchangScheduleApi.Task) => {
+  const p = processOf(task.process);
+  return p && INTERMEDIATE.has(p.outputStage) ? p.outputLabel : '';
+};
+const titleOf = (task: FdmgongchangScheduleApi.Task) => {
+  const made = intermediateOf(task);
+  if (made) return task.product ? `${made}（给 ${task.product} 用）` : made;
+  return task.product || `${labelOf(task.process)}任务`;
+};
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 const todayText = computed(() => {
@@ -177,7 +188,7 @@ watch(
           <div class="flex flex-col gap-1">
             <span class="flex items-start gap-2 text-base font-semibold">
               <span class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
-              <span class="min-w-0 break-words">{{ task.product || `${labelOf(task.process)}任务` }}</span>
+              <span class="min-w-0 break-words">{{ titleOf(task) }}</span>
             </span>
             <span v-if="task.spec" class="text-sm text-muted-foreground">规格：{{ task.spec }}</span>
           </div>
@@ -255,7 +266,7 @@ watch(
             <div class="flex min-w-0 flex-1 flex-col">
               <span class="flex items-center gap-1.5 text-sm font-semibold">
                 <span class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
-                <span class="truncate">{{ [task.product, task.spec].filter(Boolean).join(' · ') || `${labelOf(task.process)}任务` }}</span>
+                <span class="truncate">{{ [titleOf(task), task.spec].filter(Boolean).join(' · ') }}</span>
               </span>
               <span class="text-xs text-muted-foreground">
                 {{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }} · {{ dateText(task.workDate) }} ·

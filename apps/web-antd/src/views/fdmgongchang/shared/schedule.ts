@@ -61,3 +61,45 @@ export function groupByDate<T>(items: T[], dateOf: (item: T) => string) {
   }
   return [...groups.entries()].toSorted(([a], [b]) => a.localeCompare(b));
 }
+
+/** 选中的产品：订单成品规格，加上用料逆推带出的板材、片材和还要做多少。 */
+export interface StageChoice {
+  boards?: null | number;
+  boardSpec?: null | string;
+  name: string;
+  remaining?: null | number;
+  sheets?: null | number;
+  sheetSpec?: null | string;
+  spec: string;
+}
+
+/** 产出板材、片材的工序（不是订单成品）。 */
+const STAGE_OUTPUT: Record<string, 'board' | 'sheet'> = { MIX: 'board', SLICE: 'sheet' };
+
+/**
+ * 一道工序的任务做什么：密炼做板材、开片做片材，其他工序就是订单成品。
+ * spec 是任务规格（算不出板材时写明是给哪个成品做的），suggested 是建议数量，hint 是给排单员看的说明。
+ */
+export function stageTaskPlan(process: null | string | undefined, choice: StageChoice) {
+  const kind = process ? STAGE_OUTPUT[process] : undefined;
+  if (!kind) {
+    return { hint: '', kind, spec: choice.spec, suggested: positive(choice.remaining) };
+  }
+  const board = kind === 'board';
+  const spec = (board ? choice.boardSpec : choice.sheetSpec) || `${board ? '板材' : '片材'}（成品 ${choice.spec || choice.name}）`;
+  const suggested = positive(board ? choice.boards : choice.sheets);
+  const remaining = choice.remaining ? `订单还要做 ${choice.remaining} 条成品，` : '';
+  let hint: string;
+  if (board) {
+    hint = suggested
+      ? `${remaining}按用料逆推要 ${suggested} 张板`
+      : '密炼做的是板材，不是成品；这张单还算不出要几张板（订单规格没有长宽厚或本厂没填出板规格），请按实际填张数';
+  } else {
+    hint = suggested ? `${remaining}按用料逆推要开 ${suggested} 片` : '开片做的是片材，不是成品；这张单还算不出要开几片，请按实际填片数';
+  }
+  return { hint, kind, spec, suggested };
+}
+
+function positive(value: null | number | undefined) {
+  return value && value > 0 ? value : null;
+}
