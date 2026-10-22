@@ -12,6 +12,7 @@ import {
   contractEquivalent,
   conversionDateNote,
   conversionInput,
+  rateSourceLabel,
 } from './model';
 
 const props = defineProps<{
@@ -146,7 +147,7 @@ onBeforeUnmount(() => {
           </Descriptions.Item>
         </template>
         <Descriptions.Item label="来源">
-          {{ conversion.source }}
+          {{ rateSourceLabel(conversion.source) }}
         </Descriptions.Item>
         <Descriptions.Item label="获取时间">
           {{ conversion.fetchedAt }}

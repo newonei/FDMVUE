@@ -71,9 +71,21 @@ export function receiptFxDisplay(
   const value = record[key];
   if (value === null || value === undefined || value === '') return '待补齐';
   if (key === 'exchangeRateFallback') return value ? '此前公布日' : '当日值';
+  if (key === 'exchangeRateSource') return rateSourceLabel(String(value));
   if (key === 'rmbAmount')
     return `CNY ${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   return String(value);
+}
+
+const RATE_SOURCE_LABELS: Record<string, string> = {
+  CNY: '人民币',
+  ECB: '欧洲央行参考价（外汇局未公布的币种）',
+  MANUAL: '财务手动修改',
+  SAFE: '国家外汇管理局中间价',
+};
+/** 汇率来源显示名：外汇局中间价为主，外汇局不公布的币种才用欧洲央行补充 */
+export function rateSourceLabel(source?: null | string) {
+  return source ? (RATE_SOURCE_LABELS[source] ?? source) : '—';
 }
 
 /** 外贸常用币种，汇率中心置顶显示 */

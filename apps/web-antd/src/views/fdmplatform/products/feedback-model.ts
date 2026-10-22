@@ -51,6 +51,16 @@ export function requestLineDefaults(contract: Contract, item: ContractItem) {
   };
 }
 
+/** 新建采购申请默认带入合同里还有未申请数量的产品明细；全部已申请时返回空，弹窗保留一行空白 */
+export function requestPrefillLines(contract: Contract) {
+  return contract.items
+    .map((item) => ({
+      contractItemId: item.id,
+      ...requestLineDefaults(contract, item),
+    }))
+    .filter((line) => line.quantity !== '');
+}
+
 export const attachmentPurposeOptions = [
   { value: 'ARTWORK', label: '产品图稿' },
   { value: 'LOGO', label: 'LOGO' },

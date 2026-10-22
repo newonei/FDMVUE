@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ExchangeRateBundle } from '#/api/fdmplatform/exchange-rates';
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { Page } from '@vben/common-ui';
 
@@ -11,13 +11,16 @@ import {
   Card,
   Descriptions,
   Empty,
+  Form,
   Input,
   InputNumber,
   message,
+  Modal,
   Select,
   Space,
   Table,
   Tag,
+  Tooltip,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
@@ -25,11 +28,13 @@ import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
   fetchExchangeRates,
   getExchangeRates,
+  overrideExchangeRate,
 } from '#/api/fdmplatform/exchange-rates';
 
 import { errorText } from '../../data';
 import {
   conversionDateNote,
+  rateSourceLabel,
   rateText,
   referenceConvert,
   splitCommonRates,
@@ -96,8 +101,74 @@ const columns = [
   { title: '查询日期', dataIndex: 'requestedDate', key: 'requestedDate' },
   { title: '实际汇率日期', dataIndex: 'rateDate', key: 'rateDate' },
   { title: '日期匹配', key: 'fallback' },
-  { title: '来源', dataIndex: 'source', key: 'source' },
+  { title: '来源', dataIndex: 'source', key: 'source', width: 300 },
 ];
+/** 财务核对后可手动修改某币种当日汇率，自动刷新不会覆盖 */
+const editOpen = ref(false);
+const editing = ref(false);
+const editError = ref('');
+const editCurrency = ref<string>();
+const editRate = ref<string>();
+const editReason = ref('');
+let editKey = '';
+const editRow = computed(() =>
+  bundle.value?.rows.find((row) => row.currency === editCurrency.value),
+);
+function resetEdit() {
+  editRate.value = editRow.value ? String(editRow.value.rateToCny) : undefined;
+  editReason.value = editRow.value?.reason ?? '';
+  editError.value = '';
+  editKey = newIdempotencyKey();
+}
+function openEdit(currency?: string) {
+  editCurrency.value = currency ?? selected.value;
+  resetEdit();
+  editOpen.value = true;
+}
+watch(editCurrency, resetEdit);
+async function saveEdit(restore = false) {
+  if (!bundle.value || !editCurrency.value) return;
+  if (!restore && !(Number(editRate.value) > 0)) {
+    editError.value = '请填写大于 0 的汇率';
+    return;
+  }
+  if (!restore && !editReason.value.trim()) {
+    editError.value = '请填写修改原因';
+    return;
+  }
+  editing.value = true;
+  editError.value = '';
+  try {
+    bundle.value = await overrideExchangeRate({
+      currency: editCurrency.value,
+      date: bundle.value.requestedDate,
+      idempotencyKey: editKey,
+      rateToCny: restore ? null : String(editRate.value).trim(),
+      reason: restore ? '' : editReason.value.trim(),
+    });
+    editOpen.value = false;
+    message.success(restore ? '已恢复来源公布值' : '汇率已修改');
+  } catch (error) {
+    editError.value = errorText(error);
+  } finally {
+    editing.value = false;
+  }
+}
+function manualTitle(row: {
+  overriddenAt?: null | string;
+  reason?: null | string;
+  sourceName?: null | string;
+  sourceRate?: null | number | string;
+}) {
+  const origin =
+    row.sourceRate === null || row.sourceRate === undefined
+      ? '来源未公布此币种'
+      : `${rateSourceLabel(row.sourceName)}：${rateText(row.sourceRate)}`;
+  const time = row.overriddenAt
+    ? dayjs(row.overriddenAt).format('YYYY-MM-DD HH:mm')
+    : '';
+  return `${origin}；修改原因：${row.reason ?? '—'}${time ? `（${time}）` : ''}`;
+}
 async function load(refresh = false) {
   if (!date.value) {
     panelError.value = '请选择查询日期';
@@ -168,13 +239,16 @@ onBeforeUnmount(() => {
           >
             抓取并更新此日期
           </Button>
+          <Button :disabled="!bundle || loading" @click="openEdit()">
+            手动修改汇率
+          </Button>
         </Space>
       </Card>
       <Alert v-if="panelError" type="error" show-icon :message="panelError" />
       <Alert
         type="info"
         show-icon
-        message="使用欧洲央行公开参考值，每小时自动查询更新。当日尚未公布或休市时采用此前已公布日期；汇率用于业务折算，不代表银行实际结汇价。已确认回款保留原采用快照。"
+        message="使用国家外汇管理局公布的人民币汇率中间价（与财务查询页面一致），每小时自动查询更新；外汇局未公布的币种用欧洲央行参考价补充并单独标注。当日尚未公布或休市时采用此前已公布日期。与外汇局页面有出入时，财务可「手动修改汇率」，自动刷新不会覆盖。汇率用于业务折算，不代表银行实际结汇价；已登记回款保留原采用快照。"
       />
       <Card :loading="loading">
         <div v-if="bundle" class="fx-stack">
@@ -192,7 +266,7 @@ onBeforeUnmount(() => {
                 :href="sourceUrl"
                 target="_blank"
                 rel="noopener noreferrer"
-                >{{ bundle.source }} 公开参考汇率</a><span v-else>{{ bundle.source }}</span>
+                >{{ rateSourceLabel(bundle.source) }}</a><span v-else>{{ rateSourceLabel(bundle.source) }}</span>
             </Descriptions.Item>
           </Descriptions>
           <Alert
@@ -214,7 +288,15 @@ onBeforeUnmount(() => {
               <b :title="`1 ${rate.currency} = ${rate.rateToCny} CNY`">{{
                 rateText(rate.rateToCny)
               }}</b>
-              <small>1 {{ rate.currency }} 折人民币</small>
+              <small>
+                1 {{ rate.currency }} 折人民币
+                <Tooltip
+                  v-if="rate.source === 'MANUAL'"
+                  :title="manualTitle(rate)"
+                >
+                  <Tag color="orange" class="ml-1">手动</Tag>
+                </Tooltip>
+              </small>
             </button>
           </div>
           <div class="tools">
@@ -303,12 +385,88 @@ onBeforeUnmount(() => {
               >
                 {{ record.fallback ? '此前公布日' : '所选日期' }}
               </Tag>
+              <Space v-else-if="column.key === 'source'" :size="4">
+                <Tooltip
+                  v-if="record.source === 'MANUAL'"
+                  :title="manualTitle(record)"
+                >
+                  <Tag color="orange">{{ rateSourceLabel(record.source) }}</Tag>
+                </Tooltip>
+                <span v-else>{{ rateSourceLabel(record.source) }}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  @click="openEdit(record.currency)"
+                >
+                  修改
+                </Button>
+              </Space>
             </template>
           </Table>
         </div>
         <Empty v-else description="尚未读取参考汇率" />
       </Card>
     </div>
+    <Modal v-model:open="editOpen" title="手动修改汇率">
+      <Form layout="vertical">
+        <Form.Item label="日期">{{ bundle?.requestedDate }}</Form.Item>
+        <Form.Item label="币种" required>
+          <Select
+            v-model:value="editCurrency"
+            :options="currencyOptions"
+            show-search
+            style="width: 160px"
+          />
+        </Form.Item>
+        <Form.Item
+          :label="`1 ${editCurrency ?? '外币'} 折人民币`"
+          required
+          :extra="
+            editRow
+              ? `当前：${rateText(editRow.rateToCny)}（${rateSourceLabel(editRow.source)}）`
+              : undefined
+          "
+        >
+          <Input
+            v-model:value="editRate"
+            placeholder="例如 7.1856（外汇局页面按每 100 外币公布，需除以 100）"
+          />
+        </Form.Item>
+        <Form.Item label="修改原因" required>
+          <Input.TextArea
+            v-model:value="editReason"
+            :maxlength="200"
+            :rows="2"
+            placeholder="例如：与外汇管理局页面公布值不一致"
+          />
+        </Form.Item>
+      </Form>
+      <Alert
+        type="info"
+        show-icon
+        message="只影响之后登记或补齐汇率的回款，已登记回款保留原快照；仅财务部门可修改。"
+      />
+      <Alert
+        v-if="editError"
+        class="mt-2"
+        type="error"
+        show-icon
+        :message="editError"
+      />
+      <template #footer>
+        <Button :disabled="editing" @click="editOpen = false">取消</Button>
+        <Button
+          v-if="editRow?.source === 'MANUAL'"
+          :loading="editing"
+          @click="saveEdit(true)"
+        >
+          恢复来源公布值
+        </Button>
+        <Button type="primary" :loading="editing" @click="saveEdit()">
+          保存
+        </Button>
+      </template>
+    </Modal>
   </Page>
 </template>
 

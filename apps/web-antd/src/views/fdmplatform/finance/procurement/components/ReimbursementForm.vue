@@ -35,6 +35,7 @@ import {
 import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_LIMIT_TEXT,
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
@@ -616,7 +617,7 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                           ?.name ||
                         (line.evidenceRef
                           ? '已有凭证（保留原引用）'
-                          : '支持 PDF、图片及文档，单份不超过 20 MB')
+                          : `支持 PDF、图片及文档，单份不超过 ${ATTACHMENT_LIMIT_TEXT}`)
                   }}
                 </p>
               </div>

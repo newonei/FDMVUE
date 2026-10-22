@@ -5,15 +5,21 @@ import { ref, watch } from 'vue';
 
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Alert, Button, message, Table } from 'ant-design-vue';
+import { Alert, Button, message, Space, Table } from 'ant-design-vue';
 
 import {
   downloadBusinessDocumentFile,
   getBusinessDocument,
   getBusinessDocumentFiles,
+  renameBusinessDocumentFile,
   uploadBusinessDocumentFile,
 } from '#/api/fdmplatform/business-documents';
+import { newIdempotencyKey } from '#/api/fdmplatform/idempotency';
+import { attachmentSize } from '#/api/fdmplatform/submission-files';
 
+import { attachmentTime } from '../../../components/attachment-preview';
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
+import RenameFileDialog from '../../../components/RenameFileDialog.vue';
 import { errorText } from '../../../data';
 
 /**
@@ -71,6 +77,25 @@ async function download(file: BusinessDocumentFile) {
     error.value = errorText(error_);
   }
 }
+const renaming = ref<BusinessDocumentFile>();
+const renameOpen = ref(false);
+const renameKey = ref('');
+function startRename(file: BusinessDocumentFile) {
+  renaming.value = file;
+  renameKey.value = newIdempotencyKey();
+  renameOpen.value = true;
+}
+async function saveRename(name: string) {
+  if (!renaming.value) return;
+  await renameBusinessDocumentFile(
+    props.orderId,
+    renaming.value.id,
+    name,
+    renameKey.value,
+  );
+  message.success('文件名称已修改');
+  await load();
+}
 watch(() => props.orderId, load, { immediate: true });
 </script>
 
@@ -95,22 +120,52 @@ watch(() => props.orderId, load, { immediate: true });
       :loading="loading"
       :pagination="false"
       :columns="[
-        { title: '文件', key: 'name' },
-        { title: '上传时间', dataIndex: 'createdAt' },
+        { title: '文件', key: 'name', ellipsis: true },
+        { title: '大小', key: 'size', width: 90 },
+        { title: '上传时间', key: 'createdAt', width: 140 },
+        { title: '操作', key: 'action', width: 160 },
       ]"
     >
       <template #emptyText>还没有附件</template>
       <template #bodyCell="{ column, record }">
-        <Button
-          v-if="column.key === 'name'"
-          type="link"
-          size="small"
-          @click="download(record as BusinessDocumentFile)"
-        >
+        <span v-if="column.key === 'name'" :title="record.name">
           {{ record.name }}
-        </Button>
+        </span>
+        <span v-else-if="column.key === 'size'">
+          {{ attachmentSize(Number(record.size)) }}
+        </span>
+        <span v-else-if="column.key === 'createdAt'">
+          {{ attachmentTime(record.createdAt) }}
+        </span>
+        <Space v-else-if="column.key === 'action'" :size="0">
+          <FilePreviewButton
+            :name="record.name"
+            size="small"
+            :load="() => downloadBusinessDocumentFile(orderId, record.id)"
+          />
+          <Button
+            v-if="canUpload"
+            type="link"
+            size="small"
+            @click="startRename(record as BusinessDocumentFile)"
+          >
+            改名
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            @click="download(record as BusinessDocumentFile)"
+          >
+            下载
+          </Button>
+        </Space>
       </template>
     </Table>
+    <RenameFileDialog
+      v-model:open="renameOpen"
+      :name="renaming?.name"
+      :save="saveRename"
+    />
   </div>
 </template>
 

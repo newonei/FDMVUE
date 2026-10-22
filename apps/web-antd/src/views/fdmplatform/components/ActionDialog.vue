@@ -42,6 +42,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [hasChanges: boolean];
+  draft: [payload: Record<string, unknown>];
   submit: [payload: Record<string, unknown>, idempotencyKey: string];
 }>();
 const automatic = new WeakMap<FormValues, FormValues>();
@@ -314,6 +315,15 @@ function submit() {
     payload[definition.lineKey] = lines.value.map(clean);
   emit('submit', payload, idempotencyKey.value);
 }
+/** 草稿只保存已填写内容，不校验必填和汇率折算 */
+function saveDraft() {
+  const definition = props.definition;
+  if (!definition || props.saving) return;
+  const payload: Record<string, unknown> = clean(values.value);
+  if (definition.lineKey && lines.value.length > 0)
+    payload[definition.lineKey] = lines.value.map(clean);
+  emit('draft', payload);
+}
 function setValue(target: FormValues, key: string, value: unknown) {
   if (props.saving) return;
   if (
@@ -358,6 +368,15 @@ function setValue(target: FormValues, key: string, value: unknown) {
     @cancel="requestClose"
     @ok="submit"
   >
+    <template v-if="definition?.draftLabel" #footer>
+      <Button :disabled="saving" @click="requestClose">取消</Button>
+      <Button :loading="saving" @click="saveDraft">
+        {{ definition.draftLabel }}
+      </Button>
+      <Button type="primary" :loading="saving" @click="submit">
+        {{ definition.submitLabel || '提交' }}
+      </Button>
+    </template>
     <div v-if="definition" ref="actionBody" class="action-dialog">
       <Alert :message="definition.description" type="info" show-icon />
       <BuyerInvoicePanel

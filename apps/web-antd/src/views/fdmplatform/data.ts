@@ -2,7 +2,10 @@ import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import type { MasterType } from '#/api/fdmplatform/masters';
 
 import { hasReceiptFx } from './finance/exchange-rates/model';
-import { requestLineDefaults } from './products/feedback-model';
+import {
+  requestLineDefaults,
+  requestPrefillLines,
+} from './products/feedback-model';
 import { currencyOptions } from './products/model';
 import { salesChannelOf } from './sales-channel';
 
@@ -46,6 +49,8 @@ export interface ActionDefinition {
   lineKey?: string;
   optionalLines?: boolean;
   submitLabel?: string;
+  /** 有值时弹窗多一个「保存草稿」按钮，草稿不校验必填 */
+  draftLabel?: string;
   initialValues?: Record<string, unknown>;
   /** 登记内销发票时，弹窗显示该客户的开票信息 */
   buyerCustomerId?: string;
@@ -440,7 +445,8 @@ export function contractActions(
       action: 'CREATE_REQUEST',
       title: '新建采购申请',
       description:
-        '可分批提交，同一明细允许超量申请。申请不会自动扩大合同数量。',
+        '已带入合同中尚未申请的产品明细，可删减或调整数量；同一明细允许超量申请。申请不会自动扩大合同数量。',
+      initialValues: { items: requestPrefillLines(contract) },
       fields: [
         field('name', '申请名称', undefined, {
           default: contract.code,

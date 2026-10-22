@@ -9,6 +9,7 @@ import { documentActionDefinition } from '../documents/model';
 import {
   historicalAdditionalAmount,
   requestLineDefaults,
+  requestPrefillLines,
   salesChargesTotal,
 } from './feedback-model';
 import { contractItemsTotal, copyContractLine } from './model';
@@ -89,6 +90,18 @@ describe('feedback business defaults', () => {
     expect(requestLineDefaults(order, order.items[0]!).quantity).toBe('');
     delete (order as Partial<Contract>).requests;
     expect(requestLineDefaults(order, order.items[0]!).quantity).toBe('');
+  });
+
+  it('prefills a new purchase request with every contract line that still has quantity to request', () => {
+    const order = contract();
+    const lines = requestPrefillLines(order);
+    expect(lines.map((line) => line.contractItemId)).toEqual(['a']);
+    expect(lines[0]!.quantity).toBe('65');
+    expect(
+      contractActions(order, []).CREATE_REQUEST!.initialValues?.items,
+    ).toEqual(lines);
+    order.requests![0]!.items = [{ contractItemId: 'a', quantity: '100' }];
+    expect(requestPrefillLines(order)).toEqual([]);
   });
 
   it('retains historical charges without counting previously itemized charges twice', () => {
