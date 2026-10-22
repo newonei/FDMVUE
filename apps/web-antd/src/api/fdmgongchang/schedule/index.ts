@@ -85,11 +85,19 @@ export namespace FdmgongchangScheduleApi {
   /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
   export interface FormOptions {
     demand: Array<{
+      boards?: null | number;
+      /** 密炼产出的板材规格和还要几张（用料逆推选的板材）；算不出时为空。 */
+      boardSpec?: null | string;
       contractCode: string;
       product?: null | string;
       productCode?: null | string;
       /** 产品中心的产品编号；外贸自制任务可能为空。 */
       productId?: null | string;
+      /** 还要做几条成品；不是工厂订单时为空。 */
+      remaining?: null | number | string;
+      sheets?: null | number;
+      /** 开片产出的片材规格和还要几片。 */
+      sheetSpec?: null | string;
       /** 规格：尺寸 · 材质 · 颜色。 */
       spec?: null | string;
     }>;

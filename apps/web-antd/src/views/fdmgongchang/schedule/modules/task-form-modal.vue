@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { StageChoice } from '../../shared/schedule';
+
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
@@ -10,11 +12,12 @@ import dayjs from 'dayjs';
 import { searchScheduleProducts } from '#/api/fdmgongchang/schedule';
 
 import { specText } from '../../production-order/shared';
-import { dateText, dayLabel } from '../../shared/schedule';
+import { dateText, dayLabel, stageTaskPlan } from '../../shared/schedule';
 
 /**
  * 手动派工的一个任务：哪天、哪道工序、做哪张订单（或备货）、做什么产品、做多少、谁来做。
  * 产品从产品中心选：选了订单时列这张订单里的产品，备货时搜产品中心；规格跟着产品带出，不手填。
+ * 密炼产出的是板材、开片产出的是片材，不是成品：规格和建议数量按用料逆推的板材带出。
  * 待确认的排单加进方案里；已下发的排单直接保存，工人工作台马上能看到。
  */
 const props = defineProps<{
@@ -38,13 +41,13 @@ const searching = ref(false);
 /** 备货时搜到的产品中心产品。 */
 const found = ref<ProductChoice[]>([]);
 
-interface ProductChoice {
+interface ProductChoice extends StageChoice {
   code?: null | string;
   key: string;
-  name: string;
-  spec: string;
 }
 const quantity = ref<null | number>(null);
+/** 数量是系统带出的建议（没手改过）：换工序、换产品时跟着换。 */
+const autoQuantity = ref(false);
 const workerIds = ref<number[]>([]);
 const reason = ref('');
 const errors = ref<string[]>([]);
@@ -87,7 +90,17 @@ const choices = computed<ProductChoice[]>(() => {
       ? found.value
       : (props.options?.demand ?? [])
           .filter((d) => d.contractCode === order.value && d.product)
-          .map((d) => ({ code: d.productCode, key: d.productId || `name:${d.product}`, name: d.product!, spec: d.spec ?? '' }));
+          .map((d) => ({
+            boards: d.boards,
+            boardSpec: d.boardSpec,
+            code: d.productCode,
+            key: d.productId || `name:${d.product}`,
+            name: d.product!,
+            remaining: d.remaining === null || d.remaining === undefined ? null : Number(d.remaining),
+            sheets: d.sheets,
+            sheetSpec: d.sheetSpec,
+            spec: d.spec ?? '',
+          }));
   const keep = current.value;
   return keep && !list.some((c) => c.name === keep.name && c.spec === keep.spec) ? [keep, ...list] : list;
 });
@@ -95,6 +108,14 @@ const productOptions = computed(() =>
   choices.value.map((c) => ({ label: [c.name, c.code].filter(Boolean).join(' · '), value: c.key })),
 );
 const picked = computed(() => choices.value.find((c) => c.key === productKey.value));
+
+/** 密炼做板材、开片做片材：规格、建议数量按用料逆推带出；原来任务上的产品保留原规格、不带建议。 */
+const keepCurrent = computed(() => picked.value?.key === '__CURRENT__');
+const stagePlan = computed(() => (picked.value ? stageTaskPlan(process.value, picked.value) : null));
+const stageOutput = computed(() => stagePlan.value?.kind);
+const taskSpec = computed(() => (keepCurrent.value ? picked.value!.spec : (stagePlan.value?.spec ?? '')));
+const suggested = computed(() => (keepCurrent.value ? null : (stagePlan.value?.suggested ?? null)));
+const suggestText = computed(() => (keepCurrent.value ? '' : (stagePlan.value?.hint ?? '')));
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
@@ -139,6 +160,7 @@ watch([open, () => props.initial], ([value]) => {
   keyword.value = '';
   productKey.value = t?.product ? '__CURRENT__' : undefined;
   quantity.value = t ? Number(t.quantity) : null;
+  autoQuantity.value = !t;
   workerIds.value = [...(t?.workerIds ?? [])];
   reason.value = t?.reason ?? '';
   errors.value = [];
@@ -149,6 +171,16 @@ watch(process, () => {
   const allowed = new Set(workerOptions.value.map((w) => w.value));
   workerIds.value = workerIds.value.filter((id) => allowed.has(id));
 });
+
+/** 换工序、换产品时带出建议数量；手改过的不动。 */
+watch(suggested, (value) => {
+  if (!open.value || !autoQuantity.value) return;
+  quantity.value = value;
+});
+function inputQuantity(v: null | number | undefined) {
+  quantity.value = v ?? null;
+  autoQuantity.value = false;
+}
 
 /** 换了订单：原来选的产品不在这张单里就清掉；单里只有一个产品时直接选上。 */
 watch(order, () => {
@@ -174,7 +206,7 @@ async function save() {
       quantity: quantity.value!,
       reason: reason.value.trim() || null,
       sequence: props.initial?.date === date.value && props.initial?.process === process.value ? props.initial?.sequence : null,
-      spec: picked.value!.spec || null,
+      spec: taskSpec.value || null,
       unit: unit.value || null,
       workerIds: workerIds.value,
     });
@@ -223,7 +255,9 @@ async function save() {
           show-search
           @search="search"
         />
-        <span v-if="picked" class="text-foreground">规格：{{ picked.spec || '—' }}</span>
+        <span v-if="picked" class="text-foreground">
+          <template v-if="stageOutput">{{ stageOutput === 'board' ? '做板材' : '做片材' }}，</template>规格：{{ taskSpec || '—' }}
+        </span>
       </label>
       <label for="task-form-quantity" class="flex flex-col gap-1">
         做多少
@@ -233,10 +267,11 @@ async function save() {
             :min="0"
             :value="quantity ?? undefined"
             class="flex-1"
-            @update:value="(v) => (quantity = (v as null | number | undefined) ?? null)"
+            @update:value="(v) => inputQuantity(v as null | number | undefined)"
           />
           <span class="w-6 shrink-0 text-foreground">{{ unit }}</span>
         </span>
+        <span v-if="suggestText" :class="suggested ? 'text-muted-foreground' : 'text-warning'">{{ suggestText }}</span>
       </label>
       <label for="task-form-workers" class="flex flex-col gap-1">
         谁来做
