@@ -1,3 +1,4 @@
+import type { Contract } from '#/api/fdmplatform';
 import type {
   ProcurementOrderView,
   PurchaseOrderEntry,
@@ -5,6 +6,8 @@ import type {
 
 import BigNumber from 'bignumber.js';
 
+import { latestTaskQuotes } from '../quotes/comparison';
+import { orderableQuote } from '../quotes/quick-order';
 import { priceFromTotal, totalFromPrice } from '../tasks/request-batch';
 
 /** 金智常用的采购分类；先固定选项，后续再做成可维护。 */
@@ -47,6 +50,8 @@ export interface EntryRow {
   arrivalDate?: string;
   gift: boolean;
   remark?: string;
+  /** 这一行的供应商；不填用表头供应商。不同供应商的行保存时拆成多张采购单。 */
+  supplierId?: string;
 }
 
 export interface EntryHeader {
@@ -128,6 +133,59 @@ export function entryTotals(rows: EntryRow[], header: EntryHeader) {
   };
 }
 
+/**
+ * 申请明细已有供应商报价时带出供应商和单价：取该明细外采任务里仍有效、单位一致的最低价。
+ * 没有报价返回 undefined，由采购员自己选。
+ */
+export function quotedSupplier(
+  contract: Contract,
+  requestItemId: string,
+  unit: string | undefined,
+  today: string,
+) {
+  let best: Record<string, unknown> | undefined;
+  for (const assignment of contract.assignments ?? []) {
+    if (
+      assignment.requestItemId !== requestItemId ||
+      assignment.method !== 'BUY' ||
+      assignment.status === 'CANCELLED'
+    )
+      continue;
+    for (const quote of latestTaskQuotes(contract, String(assignment.id))) {
+      if (!orderableQuote(contract, quote, today) || !quote.supplierId)
+        continue;
+      if (unit && quote.unit !== unit) continue;
+      if (!best || decimal(quote.unitPrice).isLessThan(decimal(best.unitPrice)))
+        best = quote;
+    }
+  }
+  return best
+    ? {
+        supplierId: String(best.supplierId),
+        supplierName:
+          typeof best.supplierName === 'string' ? best.supplierName : undefined,
+        unitPrice: decimal(best.unitPrice).isFinite()
+          ? decimal(best.unitPrice).toFixed(0)
+          : undefined,
+      }
+    : undefined;
+}
+
+/** 保存后会生成的采购单：每个供应商一张，按明细里首次出现的顺序。 */
+export function entrySuppliers(rows: EntryRow[], header: EntryHeader) {
+  const groups = new Map<string, EntryRow[]>();
+  for (const row of rows) {
+    const supplierId = row.supplierId || header.supplierId;
+    if (!supplierId) continue;
+    groups.set(supplierId, [...(groups.get(supplierId) ?? []), row]);
+  }
+  return [...groups].map(([supplierId, lines]) => ({
+    supplierId,
+    rows: lines,
+    total: entryTotals(lines, { discountRate: header.discountRate }).total,
+  }));
+}
+
 export function entryErrors(
   rows: EntryRow[],
   header: EntryHeader,
@@ -142,7 +200,8 @@ export function entryErrors(
       lines[row.key] = '工厂只收原料、辅料，这一行请另开采购单';
   }
   let sheet = '';
-  if (!header.supplierId) sheet = '请选择供应商';
+  if (rows.some((row) => !row.supplierId) && !header.supplierId)
+    sheet = '请选择供应商';
   else if (!header.contractId && !header.companyId) sheet = '请选择所属公司';
   else if (rows.length === 0) sheet = '请至少添加一行产品';
   else if (
@@ -153,6 +212,12 @@ export function entryErrors(
     )
   )
     sheet = '整单折扣须在 0 到 100 之间';
+  else if (
+    entrySuppliers(rows, header).length > 1 &&
+    (decimal(header.additionalAmount).gt(0) || decimal(header.roundOff).gt(0))
+  )
+    sheet =
+      '明细分属多个供应商、会拆成多张采购单，附加费用和优惠抹零无法分摊，请清空或按供应商分别开单';
   else if (new BigNumber(entryTotals(rows, header).total).lt(0))
     sheet = '优惠抹零不能超过采购金额';
   return { lines, sheet };
@@ -187,6 +252,10 @@ export function entryPayload(
       arrivalDate: row.arrivalDate || undefined,
       gift: row.gift,
       remark: row.remark?.trim() || undefined,
+      supplierId:
+        row.supplierId && row.supplierId !== header.supplierId
+          ? row.supplierId
+          : undefined,
     })),
   };
 }

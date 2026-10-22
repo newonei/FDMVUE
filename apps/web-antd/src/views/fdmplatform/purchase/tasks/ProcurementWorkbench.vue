@@ -2,6 +2,7 @@
 import type { DocumentKind } from '../../documents/model';
 
 import type { Directory, DocumentRow } from '#/api/fdmplatform';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 import type {
   ProcurementStage,
   ProcurementWorkbenchResult,
@@ -31,6 +32,7 @@ import {
   getDirectory,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { getProcurementWorkbench } from '#/api/fdmplatform/procurement-workbench';
 
 import { errorText } from '../../data';
@@ -150,13 +152,9 @@ function openOrderEntry(entry: ProcurementWorkItem) {
       : String(record.requestId ?? record.assignmentId ?? entry.row.id);
   orderEntry.value = { contractId: String(entry.row.contractId), requestId };
 }
-function orderEntered(value: {
-  code: string;
-  contractId: string;
-  orderId: string;
-}) {
+function orderEntered(value: CreatedProcurementOrders) {
   orderEntry.value = undefined;
-  message.success(`已新建采购单 ${value.code}`);
+  message.success(createdOrdersText(value));
   void router.push({
     path: '/fdmprocurement/platform-orders',
     query: { contractId: value.contractId, documentId: value.orderId },

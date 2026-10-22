@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { EntryHeader, EntryRow } from '../entry-model';
 
-import type { Contract, Directory } from '#/api/fdmplatform';
+import type { Contract, Directory, MasterRecord } from '#/api/fdmplatform';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 import type { Product } from '#/api/fdmplatform/products';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
@@ -19,6 +20,7 @@ import {
 
 import { getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
+import { getMasterPage } from '#/api/fdmplatform/masters';
 import {
   createProcurementOrder,
   getProcurementOrder,
@@ -35,9 +37,11 @@ import {
   emptyRow,
   entryErrors,
   entryPayload,
+  entrySuppliers,
   entryTotals,
   parsePastedLines,
   PURCHASE_CATEGORIES,
+  quotedSupplier,
   setRowGift,
   setRowPrice,
   setRowQuantity,
@@ -54,7 +58,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  saved: [value: { code: string; contractId: string; orderId: string }];
+  saved: [value: CreatedProcurementOrders];
 }>();
 
 const today = localDate();
@@ -85,6 +89,43 @@ let sequence = 0;
 
 const errors = computed(() => entryErrors(rows.value, header.value));
 const totals = computed(() => entryTotals(rows.value, header.value));
+/** 供应商名称：下拉选中或报价带出时记下，用来提示拆单结果。 */
+const supplierNames = ref<Record<string, string>>({});
+function rememberSupplier(record: MasterRecord | undefined) {
+  if (record?.id && record.name)
+    supplierNames.value = { ...supplierNames.value, [record.id]: record.name };
+}
+/** 明细行共用一份供应商候选（搜索一次全表可用），已选但不在本次搜索结果里的按记下的名称补上。 */
+const supplierResults = ref<string[]>([]);
+const rowSupplierOptions = computed(() => {
+  const selected = rows.value
+    .map((row) => row.supplierId)
+    .filter((id): id is string => !!id && !supplierResults.value.includes(id));
+  return [...new Set([...selected, ...supplierResults.value])].map((id) => ({
+    value: id,
+    label: supplierNames.value[id] ?? id,
+  }));
+});
+let supplierSearch = 0;
+async function searchSuppliers(keyword = '') {
+  const run = ++supplierSearch;
+  try {
+    const page = await getMasterPage({
+      type: 'SUPPLIER',
+      keyword: keyword.trim() || undefined,
+      active: true,
+      pageNo: 1,
+      pageSize: 30,
+    });
+    if (run !== supplierSearch) return;
+    page.list.forEach((record) => rememberSupplier(record));
+    supplierResults.value = page.list.map((record) => record.id);
+  } catch (error_) {
+    if (run === supplierSearch) error.value = errorText(error_);
+  }
+}
+/** 明细分属多个供应商时，保存会按供应商拆成多张采购单。 */
+const splits = computed(() => entrySuppliers(rows.value, header.value));
 const companyOptions = computed(() =>
   (directory.value?.companies ?? []).map((entry) => ({
     value: entry.companyId,
@@ -326,24 +367,44 @@ function fillFromRequest(requestId: string) {
     (contract.value?.items ?? []).map((item) => [item.id, item]),
   );
   const lines = (
-    (request?.items ?? []) as { contractItemId?: string; quantity?: unknown }[]
+    (request?.items ?? []) as {
+      contractItemId?: string;
+      id?: string;
+      quantity?: unknown;
+    }[]
   )
     .map((line) => ({ line, item: items.get(String(line.contractItemId)) }))
     .filter((entry) => entry.item);
   if (lines.length === 0) return;
-  header.value.subject = `${contract.value?.code ?? ''} 采购单`;
-  rows.value = lines.map(({ line, item }) => ({
-    ...emptyRow(key()),
-    contractItemId: item!.id,
-    name: item!.skuName || '合同产品',
-    code: item!.skuCode,
-    specification: item!.specification,
-    unit: item!.unit,
-    quantity:
-      line.quantity === null || line.quantity === undefined
-        ? undefined
-        : String(line.quantity),
-  }));
+  // 采购主题留空：后端按「合同号 供应商 采购单」生成，拆单时每张带各自的供应商
+  rows.value = lines.map(({ line, item }) => {
+    const row: EntryRow = {
+      ...emptyRow(key()),
+      contractItemId: item!.id,
+      name: item!.skuName || '合同产品',
+      code: item!.skuCode,
+      specification: item!.specification,
+      unit: item!.unit,
+      quantity:
+        line.quantity === null || line.quantity === undefined
+          ? undefined
+          : String(line.quantity),
+    };
+    // 已登记供应商报价的明细直接带出供应商和单价；不同供应商保存时自动拆单
+    const quoted = line.id
+      ? quotedSupplier(contract.value!, String(line.id), item!.unit, today)
+      : undefined;
+    if (quoted) {
+      row.supplierId = quoted.supplierId;
+      if (quoted.supplierName)
+        supplierNames.value = {
+          ...supplierNames.value,
+          [quoted.supplierId]: quoted.supplierName,
+        };
+      if (quoted.unitPrice) setRowPrice(row, quoted.unitPrice);
+    }
+    return row;
+  });
 }
 /** 复制采购单：先关联原合同（合同产品行要用），再带出表头和明细。 */
 async function copyOrder(
@@ -391,6 +452,9 @@ watch(
     contract.value = undefined;
     header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
     rows.value = [emptyRow(key())];
+    supplierNames.value = {};
+    supplierResults.value = [];
+    void searchSuppliers();
     const searching = searchProducts().catch(() => undefined);
     try {
       const [loaded, maintained, receiveFactories] = await Promise.all([
@@ -485,7 +549,8 @@ async function save() {
           <RemoteMasterSelect
             v-model:value="header.supplierId"
             type="SUPPLIER"
-            placeholder="输入名称或编码搜索"
+            placeholder="明细没单独选供应商的都用这家"
+            @selected="rememberSupplier"
           />
         </div>
         <label class="field">
@@ -544,6 +609,7 @@ async function save() {
             <tr>
               <th class="no">#</th>
               <th class="product"><em>*</em>产品</th>
+              <th class="supplier-col">供应商（不选同表头）</th>
               <th class="spec-col">规格 / 单位</th>
               <th class="money"><em>*</em>单价</th>
               <th class="money"><em>*</em>数量</th>
@@ -596,6 +662,20 @@ async function save() {
                   v-if="submitted && errors.lines[row.key]"
                   class="field-error"
                   >{{ errors.lines[row.key] }}</span>
+              </td>
+              <td>
+                <Select
+                  v-model:value="row.supplierId"
+                  show-search
+                  allow-clear
+                  :filter-option="false"
+                  :options="rowSupplierOptions"
+                  placeholder="同表头"
+                  :dropdown-match-select-width="300"
+                  style="width: 100%"
+                  :aria-label="`第${index + 1}行供应商`"
+                  @search="searchSuppliers"
+                />
               </td>
               <td>
                 <span class="spec clamp" :title="row.specification">{{
@@ -681,6 +761,29 @@ async function save() {
           </tbody>
         </table>
       </div>
+
+      <Alert
+        v-if="splits.length > 1"
+        type="info"
+        show-icon
+        :message="`明细分属 ${splits.length} 个供应商，保存后按供应商拆成 ${splits.length} 张采购单`"
+      >
+        <template #description>
+          <ul class="splits">
+            <li v-for="(split, index) in splits" :key="split.supplierId">
+              {{ index + 1 }}.
+              {{
+                supplierNames[split.supplierId] ||
+                (split.supplierId === header.supplierId
+                  ? '表头供应商'
+                  : '所选供应商')
+              }}：第
+              {{ split.rows.map((row) => rows.indexOf(row) + 1).join('、') }}
+              行，¥{{ split.total }}
+            </li>
+          </ul>
+        </template>
+      </Alert>
 
       <section class="entry-foot">
         <label class="field">
@@ -873,7 +976,7 @@ em {
 
 .entry-grid {
   width: 100%;
-  min-width: 1260px;
+  min-width: 1460px;
   font-size: 13px;
   table-layout: fixed;
   border-spacing: 0;
@@ -947,8 +1050,18 @@ em {
   border-right: 1px solid hsl(var(--border));
 }
 
+.entry-grid .supplier-col {
+  width: 200px;
+}
+
 .entry-grid .spec-col {
   width: 180px;
+}
+
+.splits {
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
 .entry-grid .money {

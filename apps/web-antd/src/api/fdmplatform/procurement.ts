@@ -153,6 +153,8 @@ export interface PurchaseOrderEntryLine {
   arrivalDate?: string;
   gift: boolean;
   remark?: string;
+  /** 这一行的供应商，不填用表头供应商；不同供应商自动拆成多张采购单 */
+  supplierId?: string;
 }
 export interface PurchaseOrderEntry {
   idempotencyKey: string;
@@ -181,13 +183,35 @@ export function getReceiveFactories() {
     `${procurementBase}/receive-factories`,
   );
 }
-/** 新建采购单：关联合同时写进合同，不关联时为独立采购单。 */
+export interface CreatedProcurementOrder {
+  orderId: string;
+  code: string;
+  supplierId?: string;
+  supplierName?: string;
+}
+/** orderId / code 是第一张；明细分属多个供应商时 orders 里是按供应商拆出的每一张。 */
+export interface CreatedProcurementOrders {
+  code: string;
+  contractId: string;
+  orderId: string;
+  orders?: CreatedProcurementOrder[];
+}
+/** 新建采购单：关联合同时写进合同，不关联时为独立采购单；不同供应商的明细拆成多张。 */
 export function createProcurementOrder(data: PurchaseOrderEntry) {
-  return requestClient.post<{
-    code: string;
-    contractId: string;
-    orderId: string;
-  }>(`${procurementBase}/orders`, data);
+  return requestClient.post<CreatedProcurementOrders>(
+    `${procurementBase}/orders`,
+    data,
+  );
+}
+/** 「已新建采购单 CG001」；拆单时「已按供应商拆成 2 张采购单：CG001、CG002」。 */
+export function createdOrdersText(
+  value: CreatedProcurementOrders,
+  single = '已新建采购单',
+) {
+  const orders = value.orders ?? [];
+  return orders.length > 1
+    ? `已按供应商拆成 ${orders.length} 张采购单：${orders.map((order) => order.code).join('、')}`
+    : `${single} ${value.code}`;
 }
 export function getProcurementOrder(contractId: string, orderId: string) {
   return requestClient.get<ProcurementOrderView>(
