@@ -8,6 +8,10 @@ export const mergedRoutes: Record<string, { path: string; view: string }> = {
     path: '/fdmwaimao/platform-shipments',
     view: 'salesReturns',
   },
+  '/neixiao/platform-returns': {
+    path: '/neixiao/platform-shipments',
+    view: 'salesReturns',
+  },
   '/fdmprocurement/platform-plans': {
     path: '/fdmprocurement/platform-quotes',
     view: 'plans',

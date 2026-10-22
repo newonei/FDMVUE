@@ -104,6 +104,15 @@ function chooseFile(event: Event) {
   selectedFile.value = (event.target as HTMLInputElement).files?.[0];
   uploadKey.value = newIdempotencyKey();
 }
+/** 也可把文件直接拖到上传区，效果同「选择文件」 */
+const dragging = ref(false);
+function dropFile(event: DragEvent) {
+  dragging.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file || uploading.value) return;
+  selectedFile.value = file;
+  uploadKey.value = newIdempotencyKey();
+}
 async function upload() {
   if (!selectedFile.value || !category.value) return;
   uploading.value = true;
@@ -180,7 +189,14 @@ const columns = [
       show-icon
       :message="error || operationError"
     />
-    <div v-if="uploadable && categories.length" class="upload-row">
+    <div
+      v-if="uploadable && categories.length"
+      class="upload-row"
+      :class="{ dragging: dragging && !uploading }"
+      @dragover.prevent="dragging = true"
+      @dragleave.prevent="dragging = false"
+      @drop.prevent="dropFile"
+    >
       <input
         ref="fileInput"
         type="file"
@@ -216,7 +232,7 @@ const columns = [
           :title="selectedFile?.name"
           role="status"
         >
-          {{ selectedFile?.name ?? '尚未选择文件' }}
+          {{ selectedFile?.name ?? '尚未选择文件，也可将文件拖到这里' }}
         </span>
         <Button
           type="primary"
@@ -367,5 +383,11 @@ const columns = [
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.upload-row.dragging {
+  outline: 1px dashed #1677ff;
+  outline-offset: 2px;
+  background: #e6f4ff;
 }
 </style>

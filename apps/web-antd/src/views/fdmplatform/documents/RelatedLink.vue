@@ -2,12 +2,13 @@
 import type { RelatedTarget } from './navigation';
 
 import { computed } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRoute } from 'vue-router';
 
 import { navigationRoute } from './navigation';
 const props = defineProps<{ target?: RelatedTarget }>();
+const route = useRoute();
 const destination = computed(() =>
-  props.target ? navigationRoute(props.target) : undefined,
+  props.target ? navigationRoute(props.target, route.path) : undefined,
 );
 </script>
 <template>

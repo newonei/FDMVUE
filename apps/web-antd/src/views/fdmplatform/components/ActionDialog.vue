@@ -305,7 +305,11 @@ function submit() {
     focusFirstError();
     return;
   }
-  if (definition.action === 'CREATE_RECEIPT' && !fxPreviewReady.value) {
+  if (
+    definition.action === 'CREATE_RECEIPT' &&
+    !definition.rmbOnly &&
+    !fxPreviewReady.value
+  ) {
     validation.value = conversionRequiredMessage;
     return;
   }
@@ -465,7 +469,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
         </Form.Item>
       </Form>
       <ReceiptFxPreview
-        v-if="definition.action === 'CREATE_RECEIPT'"
+        v-if="definition.action === 'CREATE_RECEIPT' && !definition.rmbOnly"
         :open="open"
         :date="textValue(values.receivedAt)"
         :currency="textValue(values.currency)"

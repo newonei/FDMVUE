@@ -9,6 +9,7 @@ import { attachmentTime } from '../components/attachment-preview';
 import { label, money } from '../data';
 import { personLabel } from '../directory';
 import { rateText } from '../finance/exchange-rates/model';
+import { salesChannelOf } from '../sales-channel';
 import { receiptSettlement } from './model';
 
 /** 回款详情分组字段（金智式）：默认只显示有值的字段，可切换显示空字段 */
@@ -56,8 +57,17 @@ const groups = [
     ],
   },
 ];
+/** 内销回款都是人民币，不显示汇率折算 */
+const domestic = computed(
+  () => salesChannelOf(props.contract.businessType) === 'DOMESTIC',
+);
+const visibleGroups = computed(() =>
+  domestic.value
+    ? groups.filter((group) => group.title !== '人民币折算')
+    : groups,
+);
 const sections = computed(() =>
-  groups
+  visibleGroups.value
     .map((group) => ({
       title: group.title,
       items: group.fields
@@ -83,7 +93,7 @@ const sections = computed(() =>
 );
 const hiddenCount = computed(
   () =>
-    groups.flatMap((group) => group.fields).length -
+    visibleGroups.value.flatMap((group) => group.fields).length -
     sections.value.reduce((sum, group) => sum + group.items.length, 0),
 );
 

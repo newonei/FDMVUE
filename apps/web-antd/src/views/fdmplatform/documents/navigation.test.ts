@@ -157,6 +157,32 @@ describe('stable related-document navigation', () => {
     expect(entityTarget('product', undefined)).toBeUndefined();
     expect(contractTarget(12)).toBeUndefined();
   });
+  it('keeps links opened from the domestic menu inside the domestic pages', () => {
+    const from = '/neixiao/platform-contracts';
+    expect(
+      navigationRoute(entityTarget('customer', 'customer-a')!, from),
+    ).toEqual({
+      path: '/neixiao/platform-customers',
+      query: { customerId: 'customer-a' },
+    });
+    expect(navigationRoute(contractTarget('contract-a')!, from).path).toBe(
+      '/neixiao/platform-contracts',
+    );
+    expect(
+      navigationRoute(documentTarget('requests', 'contract-a', 'r1')!, from)
+        .path,
+    ).toBe('/neixiao/platform-requests');
+    // 采购、财务页面两条业务线共用，外贸菜单下仍去外贸页面
+    expect(
+      navigationRoute(documentTarget('orders', 'contract-a', 'o1')!, from).path,
+    ).toBe('/fdmprocurement/platform-orders');
+    expect(
+      navigationRoute(
+        entityTarget('customer', 'customer-a')!,
+        '/fdmwaimao/platform-contracts',
+      ).path,
+    ).toBe('/fdmwaimao/platform-customers');
+  });
   it('rejects malformed, repeated, and parentless document links', () => {
     expect(detailLocation({})).toBeUndefined();
     expect(() =>

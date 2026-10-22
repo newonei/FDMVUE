@@ -28,8 +28,14 @@ vi.mock('#/api/fdmplatform/customers', () => ({
   saveCustomer: api.saveCustomer,
   getCustomerOptions: vi.fn().mockResolvedValue({
     countries: [{ code: 'CN', nameZh: '中国', nameEn: 'China', iso3: 'CHN' }],
-    customerSources: [],
+    customerSources: ['展会'],
+    productCategories: [{ value: 'YOGA', label: '瑜伽系列产品' }],
   }),
+}));
+vi.mock('#/api/system/area', () => ({
+  getAreaTree: vi
+    .fn()
+    .mockResolvedValue([{ name: '上海市', children: [{ name: '上海市' }] }]),
 }));
 vi.mock('#/api/fdmplatform/products', () => ({ resolveProducts: api.resolve }));
 vi.mock('#/api/fdmplatform/contract-review', () => ({
@@ -416,6 +422,18 @@ describe('order entry without changing menus', () => {
     expect(customer.querySelector('[data-label="省份"]')).toBeTruthy();
     await fill(customer, '客户全称', '内销客户甲');
     await fill(customer, '纳税人识别号', '91310000AB1234567X');
+    await vi.waitFor(() =>
+      expect(
+        customer.querySelector('[data-label="省份"] option[value="上海市"]'),
+      ).toBeTruthy(),
+    );
+    await fill(customer, '省份', '上海市', 'select');
+    await fill(customer, '城市', '上海市', 'select');
+    await fill(customer, '详细地址', '浦东新区某路 1 号');
+    await fill(customer, '联系人', '张三');
+    await fill(customer, '联系电话', '13800000000');
+    await fill(customer, '客户来源', '展会', 'select');
+    await fill(customer, '产品种类', 'YOGA', 'select');
     api.saveCustomer.mockResolvedValueOnce({
       id: 'domestic-customer',
       name: '内销客户甲',
@@ -434,6 +452,10 @@ describe('order entry without changing menus', () => {
         expect.objectContaining({
           salesChannel: 'DOMESTIC',
           country: 'CN',
+          province: '上海市',
+          city: '上海市',
+          contactName: '张三',
+          productCategories: expect.anything(),
           invoice: expect.objectContaining({ taxNo: '91310000AB1234567X' }),
         }),
       ),

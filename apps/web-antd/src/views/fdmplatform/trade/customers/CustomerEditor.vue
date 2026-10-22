@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SalesChannel } from '../../sales-channel';
+import type { AreaNode } from './model';
 
 import type { CountryOption, Customer } from '#/api/fdmplatform/customers';
 
@@ -19,18 +20,23 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getCustomerOptions, saveCustomer } from '#/api/fdmplatform/customers';
+import { getAreaTree } from '#/api/system/area';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { salesChannelOf } from '../../sales-channel';
 import CustomerSourceOptions from './CustomerSourceOptions.vue';
 import {
+  areaOptions,
+  cityNodes,
   countryMatches,
   countrySelectOptions,
   customerFields,
   customerForm,
   customerMissingFields,
   customerSourceOptions,
+  domesticMissingFields,
+  domesticRequiredFields,
   invoiceFields,
   invoiceForm,
   invoiceMissingFields,
@@ -57,6 +63,26 @@ const countries = ref<CountryOption[]>([]);
 const sources = ref<string[]>([]);
 const sourcesOpen = ref(false);
 const sourceDetail = ref('');
+/** 内销客户经营的产品种类，选项取合同产品类别 */
+const productCategories = ref<string[]>([]);
+const categoryOptions = ref<{ label: string; value: string }[]>([]);
+/** 内销客户的省、市从系统地区树选择；地区树读取失败时退回手填 */
+const areas = ref<AreaNode[]>([]);
+const provinceOptions = computed(() => areaOptions(areas.value, form.province));
+const cityOptions = computed(() =>
+  areaOptions(cityNodes(areas.value, form.province), form.city),
+);
+function changeProvince() {
+  if (!cityNodes(areas.value, form.province).some((c) => c.name === form.city))
+    form.city = '';
+}
+function requiredField(key: string) {
+  return (
+    ['country', 'name'].includes(key) ||
+    (domestic.value &&
+      (domesticRequiredFields as readonly string[]).includes(key))
+  );
+}
 const sourceOptions = computed(() =>
   customerSourceOptions(sources.value, form.customerSource),
 );
@@ -92,10 +118,17 @@ async function loadOptions() {
   optionsLoading.value = true;
   optionsError.value = '';
   try {
-    const result = await getCustomerOptions();
+    const [result, tree] = await Promise.all([
+      getCustomerOptions(),
+      domestic.value
+        ? getAreaTree().catch(() => [] as AreaNode[])
+        : Promise.resolve([] as AreaNode[]),
+    ]);
     if (run === optionsSequence && props.open) {
       countries.value = result.countries;
       sources.value = result.customerSources ?? [];
+      categoryOptions.value = result.productCategories ?? [];
+      areas.value = tree;
     }
   } catch (error) {
     if (run === optionsSequence && props.open)
@@ -118,6 +151,7 @@ watch(
     if (domestic.value) form.country = 'CN';
     if (!props.customer && props.initialName) form.name = props.initialName;
     sourceDetail.value = '';
+    productCategories.value = [...(props.customer?.productCategories ?? [])];
     if (form.customerSource?.startsWith('其他：')) {
       sourceDetail.value = form.customerSource.slice(3);
       form.customerSource = '其他';
@@ -140,6 +174,13 @@ async function save() {
     panelError.value = '请从国家 / 地区列表选择一个有效选项';
     return;
   }
+  const domesticMissing = domestic.value
+    ? domesticMissingFields(form, productCategories.value)
+    : [];
+  if (domesticMissing.length > 0) {
+    panelError.value = `内销客户须填写${domesticMissing.join('、')}`;
+    return;
+  }
   if (domestic.value && invoiceMissing.value.length > 0) {
     panelError.value = `增值税专用发票须填写${invoiceMissing.value.join('、')}`;
     return;
@@ -158,6 +199,7 @@ async function save() {
       salesChannel: channel.value,
       // 外贸客户不填开票信息；不传表示保持原值
       invoice: domestic.value ? { ...invoice } : undefined,
+      productCategories: domestic.value ? productCategories.value : undefined,
       active: active.value,
       remark: remark.value,
       id: props.customer?.id,
@@ -210,7 +252,7 @@ async function save() {
           v-for="[key, title] in visibleFields"
           :key="key"
           :label="fieldLabel(key, title)"
-          :required="['name', 'country'].includes(key)"
+          :required="requiredField(key)"
           :extra="
             key === 'code'
               ? '首次保存时由系统自动生成，已有编号保持不变。'
@@ -265,6 +307,37 @@ async function save() {
               地区列表重新选择后保存。
             </p>
           </template>
+          <template
+            v-else-if="
+              domestic &&
+              (key === 'province' || key === 'city') &&
+              areas.length > 0
+            "
+          >
+            <Select
+              v-if="key === 'province'"
+              v-model:value="form.province"
+              :options="provinceOptions"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving"
+              placeholder="输入关键字搜索省份"
+              @change="changeProvince"
+            />
+            <Select
+              v-else
+              v-model:value="form.city"
+              :options="cityOptions"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving || !form.province"
+              :placeholder="
+                form.province ? '输入关键字搜索城市' : '请先选择省份'
+              "
+            />
+          </template>
           <Input
             v-else-if="key === 'code'"
             :value="form.code"
@@ -278,6 +351,16 @@ async function save() {
               ['customerSource', 'companyName'].includes(key) ? 200 : undefined
             "
             :disabled="saving"
+          />
+        </Form.Item>
+        <Form.Item v-if="domestic" label="产品种类" required class="wide">
+          <Select
+            v-model:value="productCategories"
+            mode="multiple"
+            :options="categoryOptions"
+            option-filter-prop="label"
+            :disabled="saving"
+            placeholder="选择客户采购的产品种类，可多选"
           />
         </Form.Item>
         <Form.Item label="本地备注" class="wide">
@@ -340,7 +423,7 @@ async function save() {
         </Collapse.Panel>
       </Collapse>
       <Alert
-        v-if="missingFields.length"
+        v-if="!domestic && missingFields.length"
         type="info"
         show-icon
         :message="`待补资料：${missingFields.join('、')}`"

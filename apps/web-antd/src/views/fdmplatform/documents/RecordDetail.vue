@@ -49,6 +49,7 @@ import { errorText, label, money, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
+import { salesChannelOf } from '../sales-channel';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
 import { migrationCell } from './migration-display';
@@ -269,6 +270,9 @@ const extraFields = [
   'createdAt|创建时间',
 ];
 const CONTRACT_FX = new Set(['contractAmount', 'contractRateToCny']);
+const domesticContract = computed(
+  () => salesChannelOf(contract.value?.businessType) === 'DOMESTIC',
+);
 const fields = computed(() =>
   [
     ...new Map(
@@ -282,9 +286,11 @@ const fields = computed(() =>
     CONTRACT_FX.has(item.key)
       ? record.value?.[item.key] !== undefined &&
         record.value?.[item.key] !== null
-      : record.value?.[item.key] !== undefined ||
-        (item.key.startsWith('exchangeRate') &&
-          ['receipts', 'refunds'].includes(props.kind)),
+      : // 内销回款都是人民币，不显示汇率字段
+        !(item.key.startsWith('exchangeRate') && domesticContract.value) &&
+        (record.value?.[item.key] !== undefined ||
+          (item.key.startsWith('exchangeRate') &&
+            ['receipts', 'refunds'].includes(props.kind))),
   ),
 );
 /** 后端 Instant 字段是 ISO 时间戳，按本机时区显示到秒 */

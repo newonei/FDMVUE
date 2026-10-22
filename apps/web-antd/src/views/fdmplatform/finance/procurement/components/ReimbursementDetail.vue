@@ -11,6 +11,9 @@ import { formatDate } from '@vben/utils';
 import { Alert, Button, Descriptions, Space, Tag } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
+
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { costCategories, rows } from '../../../data';
 import { contractReferenceText } from '../../../documents/migration-display';
 import { contractTarget, documentTarget } from '../../../documents/navigation';
@@ -263,6 +266,18 @@ function factName(value: unknown) {
             >
               {{ voucher(expense.evidenceRef)!.name }}
             </Button>
+            <FilePreviewButton
+              v-if="voucher(expense.evidenceRef)"
+              :disabled="busy"
+              :name="voucher(expense.evidenceRef)!.name"
+              :load="
+                () =>
+                  downloadProcurementFinanceFile(
+                    record.id,
+                    voucher(expense.evidenceRef)!.id,
+                  )
+              "
+            />
             <span v-else class="muted">{{
               expense.evidenceRef ? '凭证信息尚未加载或无权读取' : '未关联凭证'
             }}</span>

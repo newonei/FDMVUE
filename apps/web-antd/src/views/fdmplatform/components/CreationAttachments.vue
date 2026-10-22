@@ -9,6 +9,8 @@ import {
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
 
+import FilePreviewButton from './FilePreviewButton.vue';
+
 const props = withDefaults(
   defineProps<{ disabled?: boolean; files: File[]; title?: string }>(),
   { disabled: false, title: '附件' },
@@ -95,7 +97,7 @@ function remove(index: number) {
         { title: '文件名称', dataIndex: 'name' },
         { title: '大小', key: 'size', width: 100 },
         { title: '状态', key: 'status', width: 110 },
-        { title: '操作', key: 'action', width: 80 },
+        { title: '操作', key: 'action', width: 120 },
       ]"
     >
       <template #bodyCell="{ column, record }">
@@ -108,16 +110,21 @@ function remove(index: number) {
         >
           {{ disabled ? '正在保存' : '待保存' }}
         </Tag>
-        <Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          danger
-          size="small"
-          :disabled="disabled"
-          @click="remove(record.index)"
-        >
-          移除
-        </Button>
+        <template v-else-if="column.key === 'action'">
+          <FilePreviewButton
+            size="small"
+            :name="record.name"
+            :file="files[record.index]"
+          /><Button
+            type="link"
+            danger
+            size="small"
+            :disabled="disabled"
+            @click="remove(record.index)"
+          >
+            移除
+          </Button>
+        </template>
       </template>
     </Table>
     <div v-if="files.length" class="attachment-total">

@@ -72,6 +72,45 @@ export function customerForm(customer?: Partial<Customer>) {
   );
 }
 
+/** 内销客户必填项（客户全称另行校验）；与后端校验一致 */
+export const domesticRequiredFields = [
+  'address',
+  'customerSource',
+  'contactName',
+  'phone',
+] as const;
+export function domesticMissingFields(
+  form: Partial<Record<string, string>>,
+  productCategories: string[],
+): string[] {
+  const titles: Record<string, string> = {
+    address: '详细地址',
+    customerSource: '客户来源',
+    contactName: '联系人',
+    phone: '联系电话',
+  };
+  const missing = domesticRequiredFields
+    .filter((key) => !String(form[key] ?? '').trim())
+    .map((key) => titles[key]!);
+  if (productCategories.length === 0) missing.push('产品种类');
+  return missing;
+}
+
+/** 省 / 市下拉：系统地区树取省、市两级，保留不在列表中的原值 */
+export interface AreaNode {
+  name: string;
+  children?: AreaNode[];
+}
+export function areaOptions(nodes: AreaNode[] = [], current = '') {
+  const options = nodes.map((node) => ({ label: node.name, value: node.name }));
+  if (current && !options.some((option) => option.value === current))
+    options.push({ label: `${current}（原值）`, value: current });
+  return options;
+}
+export function cityNodes(provinces: AreaNode[], province = '') {
+  return provinces.find((node) => node.name === province)?.children ?? [];
+}
+
 export function customerSourceOptions(values: string[], current = '') {
   const options = values.map((value) => ({ label: value, value }));
   if (current && !values.includes(current))

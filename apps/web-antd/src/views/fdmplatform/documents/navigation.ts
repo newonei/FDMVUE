@@ -104,7 +104,33 @@ export function standaloneLocation(
     throw new Error('单据链接包含冲突的定位，请从单据列表重新打开');
   return id;
 }
-export function navigationRoute(target: RelatedTarget): {
+/** 外贸页面在内销菜单下的对应页面；其余采购、财务等页面两条业务线共用 */
+const domesticPaths: Record<string, string> = {
+  '/fdmwaimao/platform-customers': '/neixiao/platform-customers',
+  '/fdmwaimao/platform-contracts': '/neixiao/platform-contracts',
+  '/fdmwaimao/platform-requests': '/neixiao/platform-requests',
+  '/fdmwaimao/platform-shipments': '/neixiao/platform-shipments',
+  '/fdmwaimao/platform-returns': '/neixiao/platform-returns',
+};
+/** 从内销菜单打开的链接留在内销菜单，避免跳到外贸的客户、合同等页面 */
+export function channelRoute<T extends { path: string }>(
+  location: T,
+  fromPath?: string,
+): T {
+  if (!fromPath?.startsWith('/neixiao/')) return location;
+  const path = domesticPaths[location.path];
+  return path ? { ...location, path } : location;
+}
+export function navigationRoute(
+  target: RelatedTarget,
+  fromPath?: string,
+): {
+  path: string;
+  query: Record<string, string>;
+} {
+  return channelRoute(targetRoute(target), fromPath);
+}
+function targetRoute(target: RelatedTarget): {
   path: string;
   query: Record<string, string>;
 } {

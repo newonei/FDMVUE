@@ -408,15 +408,24 @@ const lockedIds = computed(
         ),
     ),
 );
-/** 外贸建合同不填交期；内销保留 */
+/** 外贸建合同不填交期；内销保留，按内销习惯叫销售数量、单价、总价 */
 const columns = computed(() =>
   [
-    { title: '产品与规格', key: 'product', width: 320 },
+    { title: '产品与规格', key: 'product', width: 300 },
     { title: '单位', dataIndex: 'unit', width: 60 },
-    { title: '数量', key: 'quantity', width: 130 },
-    { title: '成交单价', key: 'unitPrice', width: 150 },
-    { title: '金额', key: 'amount', width: 130 },
+    {
+      title: domestic.value ? '销售数量' : '数量',
+      key: 'quantity',
+      width: 130,
+    },
+    {
+      title: domestic.value ? '单价' : '成交单价',
+      key: 'unitPrice',
+      width: 150,
+    },
+    { title: domestic.value ? '总价' : '金额', key: 'amount', width: 130 },
     { title: '交期', key: 'date', width: 165 },
+    { title: '明细备注', key: 'remark', width: 200 },
     { title: '操作', key: 'action', width: 150 },
   ].filter((column) => domestic.value || column.key !== 'date'),
 );
@@ -746,6 +755,10 @@ async function save(activate = false) {
     panelError.value = '请补齐合同主体、客户、负责人和签订日期';
     return;
   }
+  if (domestic.value && !form.name.trim()) {
+    panelError.value = '请填写内部名称';
+    return;
+  }
   if (lines.value.length === 0) {
     panelError.value = '请至少从产品中心选择一个具体规格';
     return;
@@ -973,8 +986,17 @@ async function save(activate = false) {
               allow-clear
               placeholder="留空保存时自动编号"
             />
-</Form.Item><Form.Item label="内部名称（可选）">
-            <Input v-model:value="form.name" placeholder="便于识别的补充说明" />
+</Form.Item><Form.Item
+            :label="domestic ? '内部名称' : '内部名称（可选）'"
+            :required="domestic"
+          >
+            <Input
+              v-model:value="form.name"
+              :maxlength="1000"
+              :placeholder="
+                domestic ? '内部订单号或便于识别的名称' : '便于识别的补充说明'
+              "
+            />
           </Form.Item>
           <Form.Item v-if="!domestic" label="阿里信保订单">
             <Switch v-model:checked="form.useTradeAssurance" />
@@ -1104,7 +1126,7 @@ async function save(activate = false) {
             :data-source="lines"
             row-key="id"
             :pagination="false"
-            :scroll="{ x: 1250 }"
+            :scroll="{ x: 1450 }"
             :expanded-row-keys="expanded"
             :show-expand-column="false"
           >
@@ -1174,6 +1196,13 @@ async function save(activate = false) {
                 v-else-if="column.key === 'date'"
                 v-model:value="record.requiredDate"
                 type="date"
+              />
+              <Input.TextArea
+                v-else-if="column.key === 'remark'"
+                v-model:value="record.remark"
+                :maxlength="1000"
+                :auto-size="{ minRows: 1, maxRows: 4 }"
+                placeholder="本行补充说明"
               />
               <Space v-else-if="column.key === 'action'" :size="0" wrap>
                 <Button

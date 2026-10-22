@@ -622,6 +622,13 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
               </div>
               <div class="voucher-actions">
                 <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><FilePreviewButton
+                  v-if="line.pendingFile"
+                  type="default"
+                  size="small"
+                  :disabled="saving"
+                  :name="line.pendingFile.name"
+                  :file="line.pendingFile"
+                /><FilePreviewButton
                   v-if="record && evidenceFile(line) && !line.pendingFile"
                   type="default"
                   size="small"

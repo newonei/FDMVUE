@@ -916,8 +916,9 @@ onMounted(async () => {
               >
                 {{ record.code || '订单号待补齐' }}
               </button>
-              <span class="sub" :title="record.name">{{ record.name || '—'
-                }}{{
+              <span class="sub" :title="record.name"><span v-if="record.name" class="internal-name">{{
+                  record.name
+                }}</span><template v-else>—</template>{{
                   tab !== 'JINZHI' && record.signedDate
                     ? ` · ${String(record.signedDate).slice(5)}`
                     : ''
@@ -1503,6 +1504,12 @@ onMounted(async () => {
 .bad,
 .late {
   color: hsl(var(--destructive));
+}
+
+.sub .internal-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--primary));
 }
 
 .sub.late {

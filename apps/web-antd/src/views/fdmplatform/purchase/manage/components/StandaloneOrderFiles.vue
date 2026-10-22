@@ -14,6 +14,7 @@ import {
   uploadBusinessDocumentFile,
 } from '#/api/fdmplatform/business-documents';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 
 /**
@@ -101,14 +102,20 @@ watch(() => props.orderId, load, { immediate: true });
     >
       <template #emptyText>还没有附件</template>
       <template #bodyCell="{ column, record }">
-        <Button
-          v-if="column.key === 'name'"
-          type="link"
-          size="small"
-          @click="download(record as BusinessDocumentFile)"
-        >
-          {{ record.name }}
-        </Button>
+        <template v-if="column.key === 'name'">
+          <Button
+            type="link"
+            size="small"
+            @click="download(record as BusinessDocumentFile)"
+          >
+            {{ record.name }}
+          </Button>
+          <FilePreviewButton
+            size="small"
+            :name="record.name"
+            :load="() => downloadBusinessDocumentFile(orderId, record.id)"
+          />
+        </template>
       </template>
     </Table>
   </div>

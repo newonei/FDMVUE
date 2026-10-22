@@ -56,6 +56,8 @@ export interface ContractItem extends BusinessRecord {
   unit: string;
   quantity: Decimal;
   unitPrice?: Decimal | null;
+  /** 明细备注 */
+  remark?: null | string;
   requiredDate?: string;
   taxBasis?: string;
   material?: string;
