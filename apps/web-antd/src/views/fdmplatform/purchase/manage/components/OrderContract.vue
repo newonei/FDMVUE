@@ -18,7 +18,7 @@ import { downloadBlob } from '../model';
 
 /**
  * 采购单导出记录与供应商盖章件（放在「附件」页签）。导出本身在采购单右上角「导出」，
- * 每次导出（PDF / Word / Excel）都存一版；盖章件上传时对应其中一版。
+ * 每次导出（PDF / Excel）都存一版；盖章件上传时对应其中一版。
  */
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
 const emit = defineEmits<{ signed: [file: File, exportId: string] }>();
@@ -114,7 +114,7 @@ function upload(event: Event) {
       ]"
     >
       <template #emptyText>
-        还没有导出过。确认下单资料后，在右上角「导出」选择 PDF、Word 或 Excel。
+        还没有导出过。确认下单资料后，在右上角「导出」选择 PDF 或 Excel。
       </template>
       <template #bodyCell="{ column, record }">
         <span v-if="column.key === 'kind'">{{

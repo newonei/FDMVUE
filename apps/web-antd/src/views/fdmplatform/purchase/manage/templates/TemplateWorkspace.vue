@@ -61,7 +61,7 @@ const titles = {
   accessories: '常用辅料',
 };
 const TEXT_HINT =
-  '保存已由业务确认的模板与条款正文。生成Word会冻结当时版本，修改后旧文件继续保留。';
+  '保存已由业务确认的模板与条款正文。导出采购单会冻结当时版本，修改后旧文件继续保留。';
 const descriptions: Partial<Record<TemplateType, string>> = {
   entities:
     '付款主体、签约公司和成本归属分别选择。签约资料按导出版本保存，不回写已生成的采购单。',
@@ -101,7 +101,7 @@ function typeFields() {
     ];
   if (tab.value === 'templates')
     return [
-      field('title', 'Word合同标题'),
+      field('title', '采购单标题'),
       field('headerText', '前言正文', 'textarea', { required: false }),
       field('footerText', '结尾正文', 'textarea', { required: false }),
       field('requiredClauseGroups', '必要条款组', 'references', {

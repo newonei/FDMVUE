@@ -415,7 +415,7 @@ function confirm() {
           不能直接撤回：{{ view.blockReasons.join('；') }}
         </span>
         <span v-else-if="canEdit" class="muted">
-          确认后可在「采购单模板」页签生成采购单 Word 发给供应商
+          确认后可在右上角「导出」生成采购单 PDF / Excel 发给供应商
         </span>
       </Space>
     </Card>
