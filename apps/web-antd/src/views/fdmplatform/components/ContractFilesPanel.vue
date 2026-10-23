@@ -26,7 +26,11 @@ import {
 } from 'ant-design-vue';
 
 import { newIdempotencyKey, uploadAttachment } from '#/api/fdmplatform';
-import { downloadContractFile } from '#/api/fdmplatform/contract-files';
+import {
+  contractFileRenamable,
+  downloadContractFile,
+  renameContractFile,
+} from '#/api/fdmplatform/contract-files';
 import { attachmentSize } from '#/api/fdmplatform/submission-files';
 
 import { errorText } from '../data';
@@ -38,6 +42,7 @@ import {
   contractFileGroups,
   filterContractFiles,
 } from './contract-files';
+import RenameFileDialog from './RenameFileDialog.vue';
 
 const props = defineProps<{
   contractId: string;
@@ -163,6 +168,25 @@ async function download(file: ContractFile) {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+const renaming = ref<ContractFile>();
+const renameOpen = ref(false);
+const renameKey = ref('');
+function startRename(file: ContractFile) {
+  renaming.value = file;
+  renameKey.value = newIdempotencyKey();
+  renameOpen.value = true;
+}
+async function saveRename(name: string) {
+  if (!renaming.value) return;
+  await renameContractFile(
+    props.contractId,
+    renaming.value,
+    name,
+    renameKey.value,
+  );
+  message.success('文件名称已修改');
+  emit('refresh');
+}
 function uploader(id?: null | number) {
   if (!id) return '—';
   return (
@@ -177,7 +201,7 @@ const columns = [
   { title: '大小', key: 'size', width: 90 },
   { title: '上传人', key: 'uploadedBy', width: 100 },
   { title: '上传时间', key: 'createdAt', width: 140 },
-  { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 160, fixed: 'right' as const },
 ];
 </script>
 
@@ -333,6 +357,14 @@ const columns = [
             预览
           </Button>
           <Button
+            v-if="contractFileRenamable(record as ContractFile)"
+            type="link"
+            size="small"
+            @click="startRename(record as ContractFile)"
+          >
+            改名
+          </Button>
+          <Button
             type="link"
             size="small"
             :disabled="downloading === `${record.source}:${record.id}`"
@@ -346,6 +378,11 @@ const columns = [
     <AttachmentPreview
       ref="preview"
       @download="previewing && download(previewing)"
+    />
+    <RenameFileDialog
+      v-model:open="renameOpen"
+      :name="renaming?.name"
+      :save="saveRename"
     />
   </div>
 </template>

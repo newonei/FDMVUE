@@ -1,6 +1,8 @@
 export const MAX_SUBMISSION_FILES = 10;
-export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-export const MAX_SUBMISSION_BYTES = 50 * 1024 * 1024;
+/** 与内销定制订单一致：服务端流式转存对象存储，单个附件和单次提交都不超过 1GB */
+export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
+export const MAX_SUBMISSION_BYTES = 1024 * 1024 * 1024;
+export const ATTACHMENT_LIMIT_TEXT = '1 GB';
 export const ATTACHMENT_ACCEPT =
   '.pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.docx,.doc,.csv,.txt';
 
@@ -28,11 +30,11 @@ export function submissionFilesError(files: readonly FileInfo[]): string {
       file.size <= 0 ||
       file.size > MAX_ATTACHMENT_BYTES
     )
-      return `${file.name} 大小须大于 0 且不超过 20 MB`;
+      return `${file.name} 大小须大于 0 且不超过 ${ATTACHMENT_LIMIT_TEXT}`;
     total += file.size;
   }
   return total > MAX_SUBMISSION_BYTES
-    ? '本次附件总大小不能超过 50 MB，请减少文件或压缩后重试'
+    ? `本次附件总大小不能超过 ${ATTACHMENT_LIMIT_TEXT}，请减少文件或分次上传`
     : '';
 }
 

@@ -37,9 +37,11 @@ import {
   downloadBusinessDocumentFile,
   getBusinessDocument,
   getBusinessDocumentFiles,
+  renameBusinessDocumentFile,
   uploadBusinessDocumentFile,
 } from '#/api/fdmplatform/business-documents';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
+import { attachmentSize } from '#/api/fdmplatform/submission-files';
 import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submissions';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
@@ -48,6 +50,7 @@ import CreationAttachments from '../components/CreationAttachments.vue';
 import FilePreviewButton from '../components/FilePreviewButton.vue';
 import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
+import RenameFileDialog from '../components/RenameFileDialog.vue';
 import { errorText, label, rows } from '../data';
 import { downloadBlob } from '../purchase/manage/model';
 import {
@@ -195,6 +198,26 @@ async function download(file: BusinessDocumentFile) {
   } catch (error) {
     fileError.value = errorText(error);
   }
+}
+const renaming = ref<BusinessDocumentFile>();
+const renameOpen = ref(false);
+const renameKey = ref('');
+function startRename(file: BusinessDocumentFile) {
+  renaming.value = file;
+  renameKey.value = newIdempotencyKey();
+  renameOpen.value = true;
+}
+async function saveRename(name: string) {
+  const current = view.value;
+  if (!renaming.value || !current) return;
+  await renameBusinessDocumentFile(
+    current.id,
+    renaming.value.id,
+    name,
+    renameKey.value,
+  );
+  message.success('文件名称已修改');
+  await loadFiles();
 }
 async function upload(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
@@ -631,12 +654,15 @@ async function submit(
               row-key="id"
               size="small"
               :columns="[
-                { title: '文件', dataIndex: 'name' },
-                { title: '大小（字节）', dataIndex: 'size' },
-                { title: '操作', key: 'action' },
+                { title: '文件', dataIndex: 'name', ellipsis: true },
+                { title: '大小', key: 'size', width: 90 },
+                { title: '操作', key: 'action', width: 200 },
               ]"
             >
               <template #bodyCell="{ column, record: file }">
+                <span v-if="column.key === 'size'">
+                  {{ attachmentSize(Number(file.size)) }}
+                </span>
                 <template v-if="column.key === 'action' && view">
                   <FilePreviewButton
                     :name="file.name"
@@ -644,6 +670,14 @@ async function submit(
                       () => downloadBusinessDocumentFile(view!.id, file.id)
                     "
                   />
+                  <Button
+                    v-if="attachments?.canUpload"
+                    type="link"
+                    :disabled="saving"
+                    @click="startRename(file as BusinessDocumentFile)"
+                  >
+                    改名
+                  </Button>
                   <Button
                     type="link"
                     @click="download(file as BusinessDocumentFile)"
@@ -658,6 +692,11 @@ async function submit(
       </Space>
     </Spin>
   </FdmResizableDrawer>
+  <RenameFileDialog
+    v-model:open="renameOpen"
+    :name="renaming?.name"
+    :save="saveRename"
+  />
   <ContractPicker
     :open="pickerOpen && open"
     @close="pickerOpen = false"

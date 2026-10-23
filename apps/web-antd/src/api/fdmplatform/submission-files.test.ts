@@ -22,7 +22,7 @@ describe('business document attachment submission', () => {
       submissionFilesError([
         { name: 'large.pdf', size: MAX_ATTACHMENT_BYTES + 1 },
       ]),
-    ).toContain('20 MB');
+    ).toContain('1 GB');
     expect(submissionFilesError([{ name: '../合同.pdf', size: 1 }])).toContain(
       '文件名',
     );
@@ -39,7 +39,7 @@ describe('business document attachment submission', () => {
     ).toContain('10 个');
     expect(
       submissionFilesError(
-        [20, 20, 10].map((n, i) => ({
+        [500, 300, 224].map((n, i) => ({
           name: `${i}.pdf`,
           size: n * 1024 * 1024,
         })),
@@ -48,13 +48,12 @@ describe('business document attachment submission', () => {
     expect(
       submissionFilesError([
         { name: '1.pdf', size: MAX_ATTACHMENT_BYTES },
-        { name: '2.pdf', size: MAX_ATTACHMENT_BYTES },
         {
-          name: '3.pdf',
-          size: MAX_SUBMISSION_BYTES - 2 * MAX_ATTACHMENT_BYTES + 1,
+          name: '2.pdf',
+          size: MAX_SUBMISSION_BYTES - MAX_ATTACHMENT_BYTES + 1,
         },
       ]),
-    ).toContain('50 MB');
+    ).toContain('总大小不能超过 1 GB');
   });
 
   it('sends the original command as JSON and preserves repeated file parts in order', async () => {

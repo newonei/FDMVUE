@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 
-import { Alert, Button, Card, Table, Tag } from 'ant-design-vue';
+import { downloadFileFromBlobPart } from '@vben/utils';
+
+import { Alert, Button, Card, Space, Table, Tag } from 'ant-design-vue';
 
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_LIMIT_TEXT,
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
 
-import FilePreviewButton from './FilePreviewButton.vue';
+import { previewMimeType } from './attachment-preview';
+import AttachmentPreview from './AttachmentPreview.vue';
+import { renameLocalFile } from './file-name';
+import RenameFileDialog from './RenameFileDialog.vue';
 
 const props = withDefaults(
   defineProps<{ disabled?: boolean; files: File[]; title?: string }>(),
@@ -44,6 +50,33 @@ function drop(event: DragEvent) {
   dragging.value = false;
   add([...(event.dataTransfer?.files ?? [])]);
 }
+const preview = ref<InstanceType<typeof AttachmentPreview>>();
+const previewing = ref<File>();
+const renamingIndex = ref(-1);
+const renameOpen = ref(false);
+function show(index: number) {
+  const file = props.files[index];
+  if (!file) return;
+  previewing.value = file;
+  preview.value?.show(file, file.name);
+}
+function download(file?: File) {
+  if (file) downloadFileFromBlobPart({ source: file, fileName: file.name });
+}
+function startRename(index: number) {
+  renamingIndex.value = index;
+  renameOpen.value = true;
+}
+function saveRename(name: string) {
+  const index = renamingIndex.value;
+  const file = props.files[index];
+  if (!file || props.disabled) return;
+  const next = [...props.files];
+  next[index] = renameLocalFile(file, name);
+  const problem = submissionFilesError(next);
+  if (problem) throw new Error(problem);
+  emit('update:files', next);
+}
 function remove(index: number) {
   if (props.disabled) return;
   emit(
@@ -77,8 +110,8 @@ function remove(index: number) {
       <span>支持多选，也可将文件拖到这里</span>
     </div>
     <p class="attachment-hint">
-      支持 PDF、图片、Word、Excel、CSV、TXT。最多 10 个，单个不超过 20
-      MB，总计不超过 50 MB。附件将随单据保存上传。
+      支持 PDF、图片、Word、Excel、CSV、TXT。最多 10 个，单个和总计都不超过
+      {{ ATTACHMENT_LIMIT_TEXT }}。附件将随单据保存上传，大文件会显示上传进度。
     </p>
     <Alert
       v-if="error"
@@ -97,7 +130,7 @@ function remove(index: number) {
         { title: '文件名称', dataIndex: 'name' },
         { title: '大小', key: 'size', width: 100 },
         { title: '状态', key: 'status', width: 110 },
-        { title: '操作', key: 'action', width: 120 },
+        { title: '操作', key: 'action', width: 210 },
       ]"
     >
       <template #bodyCell="{ column, record }">
@@ -110,12 +143,31 @@ function remove(index: number) {
         >
           {{ disabled ? '正在保存' : '待保存' }}
         </Tag>
-        <template v-else-if="column.key === 'action'">
-          <FilePreviewButton
+        <Space v-else-if="column.key === 'action'" :size="0">
+          <Button
+            v-if="previewMimeType(record.name)"
+            type="link"
             size="small"
-            :name="record.name"
-            :file="files[record.index]"
-          /><Button
+            @click="show(record.index)"
+          >
+            预览
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            :disabled="disabled"
+            @click="startRename(record.index)"
+          >
+            改名
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            @click="download(files[record.index])"
+          >
+            下载
+          </Button>
+          <Button
             type="link"
             danger
             size="small"
@@ -124,12 +176,18 @@ function remove(index: number) {
           >
             移除
           </Button>
-        </template>
+        </Space>
       </template>
     </Table>
     <div v-if="files.length" class="attachment-total">
       已选 {{ files.length }} 个附件，共 {{ attachmentSize(total) }}
     </div>
+    <AttachmentPreview ref="preview" @download="download(previewing)" />
+    <RenameFileDialog
+      v-model:open="renameOpen"
+      :name="files[renamingIndex]?.name"
+      :save="saveRename"
+    />
   </Card>
 </template>
 

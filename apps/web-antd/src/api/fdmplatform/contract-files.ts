@@ -1,8 +1,11 @@
 import { requestClient } from '#/api/request';
 
-import { downloadBusinessDocumentFile } from './business-documents';
+import {
+  downloadBusinessDocumentFile,
+  renameBusinessDocumentFile,
+} from './business-documents';
 import { downloadCustomsFile } from './customs';
-import { downloadAttachment } from './index';
+import { downloadAttachment, renameAttachment } from './index';
 import { downloadProcurementFile } from './procurement';
 import { downloadProcurementFinanceFile } from './procurement-finance';
 import { downloadContractProductAttachment } from './products';
@@ -82,4 +85,25 @@ export function downloadContractFile(
       return downloadAttachment(contractId, file.id);
     }
   }
+}
+
+/** 合同资料和独立单据附件支持改名；报关、采购财务等仍按各自流程管理 */
+export function contractFileRenamable(file: ContractFile) {
+  return file.source === 'CONTRACT' || file.source === 'BUSINESS';
+}
+
+export function renameContractFile(
+  contractId: string,
+  file: ContractFile,
+  name: string,
+  idempotencyKey: string,
+) {
+  return file.source === 'BUSINESS'
+    ? renameBusinessDocumentFile(
+        file.parentId ?? '',
+        file.id,
+        name,
+        idempotencyKey,
+      )
+    : renameAttachment(contractId, file.id, name, idempotencyKey);
 }

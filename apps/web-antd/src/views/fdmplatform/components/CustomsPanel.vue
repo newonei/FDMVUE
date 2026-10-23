@@ -48,6 +48,10 @@ import {
   uploadCustomsFile,
 } from '#/api/fdmplatform/customs';
 import {
+  ATTACHMENT_LIMIT_TEXT,
+  MAX_ATTACHMENT_BYTES,
+} from '#/api/fdmplatform/submission-files';
+import {
   createCustomsWithAttachments,
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
@@ -537,10 +541,10 @@ async function upload() {
   }
   if (
     pendingFiles.value.some(
-      (file) => file.size === 0 || file.size > 20 * 1024 * 1024,
+      (file) => file.size === 0 || file.size > MAX_ATTACHMENT_BYTES,
     )
   ) {
-    uploadError.value = '单个文件须大于 0 且不超过 20 MB。';
+    uploadError.value = `单个文件须大于 0 且不超过 ${ATTACHMENT_LIMIT_TEXT}。`;
     return;
   }
   uploading.value = true;

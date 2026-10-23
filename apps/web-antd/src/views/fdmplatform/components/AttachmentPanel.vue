@@ -11,6 +11,7 @@ import type {
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Upload } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 
 import {
   Alert,
@@ -25,6 +26,7 @@ import {
 import {
   downloadAttachment,
   newIdempotencyKey,
+  renameAttachment,
   uploadAttachment,
 } from '#/api/fdmplatform';
 import { attachmentSize } from '#/api/fdmplatform/submission-files';
@@ -34,6 +36,7 @@ import { personLabel } from '../directory';
 import { attachmentTime, previewMimeType } from './attachment-preview';
 import AttachmentPreview from './AttachmentPreview.vue';
 import { contractAttachmentCategories } from './contract-files';
+import RenameFileDialog from './RenameFileDialog.vue';
 
 const props = defineProps<{
   categories: string[];
@@ -61,6 +64,10 @@ const uploading = ref(false);
 const downloading = ref('');
 const operationError = ref('');
 const uploadKey = ref('');
+const userStore = useUserStore();
+const renaming = ref<ContractAttachment>();
+const renameOpen = ref(false);
+const renameKey = ref('');
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
 onBeforeUnmount(() => emit('busy', false));
 const categoryLabels = contractAttachmentCategories;
@@ -118,6 +125,29 @@ async function upload() {
   } finally {
     uploading.value = false;
   }
+}
+/** 上传人或可上传该分类资料的人可以改名，最终以服务端校验为准 */
+function canRename(item: ContractAttachment) {
+  return (
+    props.categories.includes(item.category) ||
+    String(item.uploadedBy) === String(userStore.userInfo?.id ?? '')
+  );
+}
+function startRename(item: ContractAttachment) {
+  renaming.value = item;
+  renameKey.value = newIdempotencyKey();
+  renameOpen.value = true;
+}
+async function saveRename(name: string) {
+  if (!renaming.value) return;
+  await renameAttachment(
+    props.contractId,
+    renaming.value.id,
+    name,
+    renameKey.value,
+  );
+  message.success('文件名称已修改');
+  emit('refresh');
 }
 async function fetchFile(item: ContractAttachment) {
   downloading.value = item.id;
@@ -235,7 +265,7 @@ async function download(item: ContractAttachment) {
           ? [{ title: '上传人', key: 'uploadedBy', width: 110 }]
           : []),
         { title: '上传时间', key: 'createdAt', width: 140 },
-        { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
+        { title: '操作', key: 'action', width: 160, fixed: 'right' as const },
       ]"
       :scroll="{ x: 720 }"
     >
@@ -269,6 +299,14 @@ async function download(item: ContractAttachment) {
             预览
           </Button>
           <Button
+            v-if="canRename(record as ContractAttachment)"
+            type="link"
+            size="small"
+            @click="startRename(record as ContractAttachment)"
+          >
+            改名
+          </Button>
+          <Button
             type="link"
             size="small"
             :disabled="downloading === record.id"
@@ -282,6 +320,11 @@ async function download(item: ContractAttachment) {
     <AttachmentPreview
       ref="preview"
       @download="previewing && download(previewing)"
+    />
+    <RenameFileDialog
+      v-model:open="renameOpen"
+      :name="renaming?.name"
+      :save="saveRename"
     />
   </div>
 </template>

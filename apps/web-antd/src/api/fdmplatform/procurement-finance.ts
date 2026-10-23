@@ -3,6 +3,10 @@ import type { BusinessRecord, Decimal, PageResult } from './index';
 import type { PurchaseInvoice } from './procurement';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 export type ProcurementFinanceType =
   | 'COST_ALLOCATION'
   | 'PAYMENT'
@@ -221,18 +225,21 @@ export function uploadProcurementFinanceFile(
   file: File,
   data: { expectedVersion: number; idempotencyKey: string },
 ) {
-  return requestClient.upload<{
-    file: ProcurementFinanceFile;
-    version: number;
-  }>(
-    `${base}/${encodeURIComponent(id)}/attachments`,
-    { file, ...data },
-    { timeout: 300_000 },
+  return withUploadProgress([file], (onUploadProgress) =>
+    requestClient.upload<{
+      file: ProcurementFinanceFile;
+      version: number;
+    }>(
+      `${base}/${encodeURIComponent(id)}/attachments`,
+      { file, ...data },
+      { onUploadProgress, timeout: LARGE_FILE_TIMEOUT },
+    ),
   );
 }
 export function downloadProcurementFinanceFile(id: string, fileId: string) {
   return requestClient.download<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
+    { timeout: LARGE_FILE_TIMEOUT },
   );
 }
 

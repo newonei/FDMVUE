@@ -1,6 +1,10 @@
 import type { BusinessRecord, Decimal, PageResult } from './index';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 
 export interface CustomsLine {
   contractItemId: string;
@@ -151,15 +155,18 @@ export function uploadCustomsFile(
     replacesId?: string;
   },
 ) {
-  return requestClient.upload<{ file: CustomsFile; version: number }>(
-    `${base}/${encodeURIComponent(id)}/attachments`,
-    { file, ...fields },
-    { timeout: 300_000 },
+  return withUploadProgress([file], (onUploadProgress) =>
+    requestClient.upload<{ file: CustomsFile; version: number }>(
+      `${base}/${encodeURIComponent(id)}/attachments`,
+      { file, ...fields },
+      { onUploadProgress, timeout: LARGE_FILE_TIMEOUT },
+    ),
   );
 }
 export function downloadCustomsFile(id: string, fileId: string) {
   return requestClient.download<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
+    { timeout: LARGE_FILE_TIMEOUT },
   );
 }
 export function getCustomsSummary(contractId: string) {

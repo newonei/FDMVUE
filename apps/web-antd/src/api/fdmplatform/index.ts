@@ -1,6 +1,10 @@
 import type { MigrationInfo } from './business-documents';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 
 export { newIdempotencyKey } from './idempotency';
 
@@ -246,15 +250,29 @@ export function uploadAttachment(
   idempotencyKey: string,
   target?: AttachmentTarget,
 ) {
-  return requestClient.upload<ContractAttachment>(
-    `${base}/contracts/${encodeURIComponent(contractId)}/attachments`,
-    { file, category, idempotencyKey, ...target },
-    { timeout: 300_000 },
+  return withUploadProgress([file], (onUploadProgress) =>
+    requestClient.upload<ContractAttachment>(
+      `${base}/contracts/${encodeURIComponent(contractId)}/attachments`,
+      { file, category, idempotencyKey, ...target },
+      { onUploadProgress, timeout: LARGE_FILE_TIMEOUT },
+    ),
+  );
+}
+export function renameAttachment(
+  contractId: string,
+  attachmentId: string,
+  name: string,
+  idempotencyKey: string,
+) {
+  return requestClient.post<ContractAttachment>(
+    `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/rename`,
+    { idempotencyKey, name },
   );
 }
 export function downloadAttachment(contractId: string, attachmentId: string) {
   return requestClient.download<Blob>(
     `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+    { timeout: LARGE_FILE_TIMEOUT },
   );
 }
 export function getMasterSourceTypes(companyId: number) {

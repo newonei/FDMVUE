@@ -12,8 +12,9 @@ import type {
   DocumentRow,
   MasterRecord,
 } from '#/api/fdmplatform';
+import type { ReceiptDraft } from '#/api/fdmplatform/receipt-drafts';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -24,6 +25,7 @@ import {
   Modal,
   Space,
   Spin,
+  Tag,
 } from 'ant-design-vue';
 
 import {
@@ -32,13 +34,18 @@ import {
   getDirectory,
   getMasterData,
 } from '#/api/fdmplatform';
+import {
+  deleteReceiptDraft,
+  getReceiptDrafts,
+  saveReceiptDraft,
+} from '#/api/fdmplatform/receipt-drafts';
 import { getContractStockPools } from '#/api/fdmplatform/stock';
 import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 
 import ActionDialog from '../components/ActionDialog.vue';
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
-import { errorText } from '../data';
+import { errorText, statusLabels } from '../data';
 import { withDirectory, withEvidence } from '../directory';
 import RequestAssignDialog from '../purchase/tasks/RequestAssignDialog.vue';
 import ContractPicker from './ContractPicker.vue';
@@ -71,6 +78,10 @@ const attachments = ref<AttachmentView>();
 const attachmentError = ref('');
 const draftFiles = ref<File[]>([]);
 const attachmentBusy = ref(false);
+/** 新建回款时可先保存草稿，之后从这里继续编辑并提交 */
+const receiptDrafts = ref<ReceiptDraft[]>([]);
+const activeDraft = ref<ReceiptDraft>();
+const usesReceiptDrafts = computed(() => props.action === 'CREATE_RECEIPT');
 const lockedContractId = computed(
   () => props.contractId ?? props.row?.contractId,
 );
@@ -119,14 +130,101 @@ const needsEvidence = computed(() =>
     ['attachmentIds', 'evidenceIds', 'evidenceRef'].includes(field.key),
   ),
 );
-const decorated = computed(() =>
-  definition.value
-    ? withEvidence(
-        withDirectory(definition.value, directory.value),
-        attachments.value?.items ?? [],
-      )
-    : undefined,
-);
+const decorated = computed(() => {
+  if (!definition.value) return undefined;
+  const base = withEvidence(
+    withDirectory(definition.value, directory.value),
+    attachments.value?.items ?? [],
+  );
+  if (!usesReceiptDrafts.value) return base;
+  return {
+    ...base,
+    draftLabel: '保存草稿',
+    initialValues: activeDraft.value
+      ? { ...base.initialValues, ...activeDraft.value.values }
+      : base.initialValues,
+  };
+});
+function draftSummary(draft: ReceiptDraft) {
+  const values = draft.values;
+  const method = values.paymentMethod
+    ? (statusLabels[values.paymentMethod] ?? values.paymentMethod)
+    : '';
+  return (
+    [
+      values.amount ? `${values.amount} ${values.currency ?? ''}`.trim() : '',
+      values.receivedAt ? `到账 ${values.receivedAt}` : '',
+      method,
+    ]
+      .filter(Boolean)
+      .join(' · ') || '未填写金额'
+  );
+}
+function draftTime(draft: ReceiptDraft) {
+  return draft.updatedAt
+    ? new Date(draft.updatedAt).toLocaleString('zh-CN', { hour12: false })
+    : '';
+}
+async function loadReceiptDrafts(id: string) {
+  try {
+    receiptDrafts.value = await getReceiptDrafts(id);
+  } catch {
+    // 草稿只是便利功能，读取失败不影响直接登记回款
+    receiptDrafts.value = [];
+  }
+}
+/** 载入草稿后重新打开表单，让弹窗按草稿内容初始化 */
+async function useDraft(draft?: ReceiptDraft) {
+  activeDraft.value = draft;
+  actionOpen.value = false;
+  await nextTick();
+  actionOpen.value = true;
+}
+function removeDraft(draft: ReceiptDraft) {
+  const current = contract.value;
+  if (!current) return;
+  Modal.confirm({
+    title: '删除回款草稿',
+    content: `确定删除「${draftSummary(draft)}」这份草稿吗？`,
+    okText: '删除',
+    okButtonProps: { danger: true },
+    zIndex: 2100,
+    async onOk() {
+      try {
+        await deleteReceiptDraft(current.id, draft.id);
+        receiptDrafts.value = receiptDrafts.value.filter(
+          (entry) => entry.id !== draft.id,
+        );
+        if (activeDraft.value?.id === draft.id) await useDraft(undefined);
+        message.success('草稿已删除');
+      } catch (error) {
+        message.error(errorText(error));
+      }
+    },
+  });
+}
+async function saveDraft(values: Record<string, unknown>) {
+  const current = contract.value;
+  if (!current || saving.value || !usesReceiptDrafts.value) return;
+  const run = sequence;
+  saving.value = true;
+  pageError.value = '';
+  try {
+    const saved = await saveReceiptDraft(current.id, values, activeDraft.value);
+    if (run !== sequence || !props.open) return;
+    message.success(
+      draftFiles.value.length > 0
+        ? '草稿已保存。附件不随草稿保存，提交时请重新添加'
+        : '草稿已保存，可稍后在「新建回款记录」里继续编辑并提交',
+    );
+    activeDraft.value = saved;
+    finishClose();
+  } catch (error) {
+    if (run === sequence) pageError.value = errorText(error);
+  } finally {
+    saving.value = false;
+  }
+}
 const company = computed(
   () =>
     directory.value?.companies.find(
@@ -196,6 +294,8 @@ async function prepare(id: string) {
     master.value = [...suppliers, ...warehouses];
     pools.value = stock.pools;
     attachments.value = files;
+    if (action === 'CREATE_RECEIPT') await loadReceiptDrafts(id);
+    if (current !== sequence || !props.open) return;
     const record = row ? currentDocument(loaded, kind, row.id) : undefined;
     definition.value = source
       ? relatedActionDefinition(
@@ -246,6 +346,8 @@ watch(
     }
     pageError.value = '';
     draftFiles.value = [];
+    receiptDrafts.value = [];
+    activeDraft.value = undefined;
     contract.value = undefined;
     definition.value = undefined;
     attachments.value = undefined;
@@ -305,10 +407,12 @@ async function execute(input: Record<string, unknown>, key: string) {
   pageError.value = '';
   try {
     let payload = { ...input };
-    if (action === 'CREATE_RECEIPT')
+    if (action === 'CREATE_RECEIPT') {
       payload.currency = String(payload.currency ?? '')
         .trim()
         .toUpperCase();
+      if (activeDraft.value) payload.draftId = activeDraft.value.id;
+    }
     if (action === 'CREATE_QUOTE') {
       payload.evidenceIds = Array.isArray(payload.evidenceIds)
         ? payload.evidenceIds
@@ -421,6 +525,7 @@ async function execute(input: Record<string, unknown>, key: string) {
     :error="pageError"
     :evidence-ready="draftFiles.length > 0"
     @close="close"
+    @draft="saveDraft"
     @submit="execute"
   >
     <template #attachments>
@@ -431,6 +536,39 @@ async function execute(input: Record<string, unknown>, key: string) {
       />
     </template>
     <template #context>
+      <Alert
+        v-if="usesReceiptDrafts && (activeDraft || receiptDrafts.length > 0)"
+        type="warning"
+        show-icon
+      >
+        <template #message>
+          <span v-if="activeDraft">
+            正在编辑草稿（{{ draftTime(activeDraft) }}
+            保存），提交后草稿自动删除。
+            <Button type="link" size="small" @click="useDraft(undefined)">
+              改为新建
+            </Button>
+          </span>
+          <span v-else>你在这个合同有 {{ receiptDrafts.length }} 份回款草稿：</span>
+        </template>
+        <template v-if="!activeDraft" #description>
+          <div
+            v-for="draft in receiptDrafts"
+            :key="draft.id"
+            class="receipt-draft-row"
+          >
+            <Tag>草稿</Tag>
+            <span>{{ draftSummary(draft) }}</span>
+            <span class="receipt-draft-time">{{ draftTime(draft) }}</span>
+            <Button type="link" size="small" @click="useDraft(draft)">
+              继续编辑
+            </Button>
+            <Button type="link" size="small" danger @click="removeDraft(draft)">
+              删除
+            </Button>
+          </div>
+        </template>
+      </Alert>
       <Descriptions v-if="contract" bordered size="small" :column="2">
         <Descriptions.Item label="关联合同">
           {{ contract.code }} · {{ contract.name }}
@@ -463,3 +601,17 @@ async function execute(input: Record<string, unknown>, key: string) {
     </template>
   </ActionDialog>
 </template>
+
+<style scoped>
+.receipt-draft-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.receipt-draft-time {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+</style>
