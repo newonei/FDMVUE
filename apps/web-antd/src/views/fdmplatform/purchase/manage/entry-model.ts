@@ -159,16 +159,17 @@ export function quotedSupplier(
         best = quote;
     }
   }
-  return best
-    ? {
-        supplierId: String(best.supplierId),
-        supplierName:
-          typeof best.supplierName === 'string' ? best.supplierName : undefined,
-        unitPrice: decimal(best.unitPrice).isFinite()
-          ? decimal(best.unitPrice).toFixed(0)
-          : undefined,
-      }
-    : undefined;
+  if (!best) return undefined;
+  // 保留报价原有小数位，不能按整数取整
+  const price = decimal(best.unitPrice);
+  return {
+    supplierId: String(best.supplierId),
+    supplierName:
+      typeof best.supplierName === 'string' ? best.supplierName : undefined,
+    unitPrice: price.isFinite()
+      ? price.toFixed(price.decimalPlaces() ?? 0)
+      : undefined,
+  };
 }
 
 /** 保存后会生成的采购单：每个供应商一张，按明细里首次出现的顺序。 */

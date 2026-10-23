@@ -545,7 +545,7 @@ async function save() {
           />
         </label>
         <div class="field">
-          <span><em>*</em>供应商</span>
+          <span><em v-if="rows.some((row) => !row.supplierId)">*</em>供应商</span>
           <RemoteMasterSelect
             v-model:value="header.supplierId"
             type="SUPPLIER"

@@ -187,7 +187,7 @@ describe('申请转采购单按供应商拆单', () => {
       ],
       quotes: [
         quote('q1', 'mat-a', '30'),
-        quote('q2', 'mat-b', '25'),
+        quote('q2', 'mat-b', '25.125'),
         quote('q3', 'mat-c', '10', { validUntil: '2026-01-01' }),
         quote('q4', 'mat-d', '5', { unit: '箱' }),
       ],
@@ -195,7 +195,7 @@ describe('申请转采购单按供应商拆单', () => {
     expect(quotedSupplier(contract, 'ri-1', '条', '2026-10-22')).toEqual({
       supplierId: 'mat-b',
       supplierName: 'mat-b',
-      unitPrice: '25',
+      unitPrice: '25.125',
     });
     expect(
       quotedSupplier(contract, 'ri-2', '条', '2026-10-22'),
