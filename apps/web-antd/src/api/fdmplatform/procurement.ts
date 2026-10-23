@@ -184,6 +184,8 @@ export interface ProcurementOrderView {
   files: ProcurementFile[];
   storageEnabled: boolean;
 }
+/** 带图片的采购单导出稿有几 MB，生成和下载都不受默认 30 秒超时限制。 */
+const FILE_TIMEOUT = 300_000;
 /** 不关联合同的采购单 contractId 为空，接口路径用 standalone 占位。 */
 function orderPath(contractId: string, orderId: string) {
   return `${procurementBase}/orders/${encodeURIComponent(contractId || 'standalone')}/${encodeURIComponent(orderId)}`;
@@ -286,6 +288,7 @@ export function exportProcurementOrder(
   return requestClient.post<ProcurementOrderView>(
     `${orderPath(contractId, orderId)}/exports`,
     data,
+    { timeout: FILE_TIMEOUT },
   );
 }
 export function downloadProcurementFile(
@@ -295,6 +298,7 @@ export function downloadProcurementFile(
 ) {
   return requestClient.download<Blob>(
     `${orderPath(contractId, orderId)}/files/${encodeURIComponent(fileId)}/download`,
+    { timeout: FILE_TIMEOUT },
   );
 }
 /** 下单资料图片：上传后由后端压缩存档，保存资料时引用返回的 id。 */
@@ -316,6 +320,7 @@ export function getProcurementImage(
 ) {
   return requestClient.download<Blob>(
     `${orderPath(contractId, orderId)}/images/${encodeURIComponent(imageId)}`,
+    { timeout: FILE_TIMEOUT },
   );
 }
 /** 从历史采购单复制图片引用到本单；返回 来源图片 id → 本单新 id。 */
