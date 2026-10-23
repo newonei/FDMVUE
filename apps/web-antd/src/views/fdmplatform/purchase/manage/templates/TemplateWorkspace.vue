@@ -26,6 +26,7 @@ import {
 import { getDirectory, newIdempotencyKey } from '#/api/fdmplatform';
 import {
   deleteProcurementSetting,
+  getAccessoryCatalog,
   getProcurementSettings,
   saveProcurementSetting,
 } from '#/api/fdmplatform/procurement';
@@ -36,7 +37,7 @@ import { errorText, field, selectField } from '../../../data';
 
 defineOptions({ name: 'FdmPlatformPurchaseTemplateWorkspace' });
 const inMergedView = useInMergedView();
-/** 仓库在「仓库管理」维护，这里管签约主体、模板、条款和采购分类。 */
+/** 仓库在「仓库管理」维护，这里管签约主体、模板、条款、采购分类和常用辅料。 */
 type TemplateType = Exclude<SettingType, 'warehouses'>;
 const tab = ref<TemplateType>('entities');
 const data = ref<Record<TemplateType, ProcurementSetting[]>>({
@@ -44,6 +45,7 @@ const data = ref<Record<TemplateType, ProcurementSetting[]>>({
   templates: [],
   clauses: [],
   categories: [],
+  accessories: [],
 });
 const companies = ref<{ label: string; value: number }[]>([]);
 const pageError = ref('');
@@ -56,9 +58,25 @@ const titles = {
   templates: '采购单模板',
   clauses: '可选条款',
   categories: '采购分类',
+  accessories: '常用辅料',
+};
+const TEXT_HINT =
+  '保存已由业务确认的模板与条款正文。生成Word会冻结当时版本，修改后旧文件继续保留。';
+const descriptions: Partial<Record<TemplateType, string>> = {
+  entities:
+    '付款主体、签约公司和成本归属分别选择。签约资料按导出版本保存，不回写已生成的采购单。',
+  accessories:
+    '采购单下单资料「辅料明细表」里可勾选的辅料。已保存的采购单保留当时的清单。',
 };
 function typeFields() {
   if (tab.value === 'categories') return [];
+  if (tab.value === 'accessories')
+    return [
+      field('sortNo', '排序（小的在前）', 'number', {
+        required: false,
+        default: (data.value.accessories.length + 1) * 10,
+      }),
+    ];
   if (tab.value === 'entities')
     return [
       field('code', '主体编码'),
@@ -103,10 +121,7 @@ function typeFields() {
 const definition = computed<ActionDefinition>(() => ({
   action: 'SAVE_SETTING',
   title: `${editing.value ? '维护' : '新建'}${titles[tab.value]}`,
-  description:
-    tab.value === 'entities'
-      ? '付款主体、签约公司和成本归属分别选择。签约资料按导出版本保存，不回写已生成的采购单。'
-      : '保存已由业务确认的模板与条款正文。生成Word会冻结当时版本，修改后旧文件继续保留。',
+  description: descriptions[tab.value] ?? TEXT_HINT,
   fields: [
     field('name', '名称'),
     ...typeFields(),
@@ -118,15 +133,16 @@ async function load() {
   loading.value = true;
   pageError.value = '';
   try {
-    const [entities, templates, clauses, categories, directory] =
+    const [entities, templates, clauses, categories, accessories, directory] =
       await Promise.all([
         getProcurementSettings('entities'),
         getProcurementSettings('templates'),
         getProcurementSettings('clauses'),
         getProcurementSettings('categories'),
+        getProcurementSettings('accessories'),
         getDirectory(0),
       ]);
-    data.value = { entities, templates, clauses, categories };
+    data.value = { entities, templates, clauses, categories, accessories };
     companies.value = directory.companies.map((entry) => ({
       label: entry.companyName,
       value: entry.companyId,
@@ -152,6 +168,28 @@ async function save(payload: Record<string, unknown>, idempotencyKey: string) {
     message.success('资料已保存');
   } catch (error) {
     pageError.value = errorText(error);
+  } finally {
+    saving.value = false;
+  }
+}
+/** 还没维护常用辅料时采购单用默认清单；一键把默认清单存成可维护的资料。 */
+async function seedAccessories() {
+  saving.value = true;
+  pageError.value = '';
+  try {
+    const names = await getAccessoryCatalog();
+    for (const [index, name] of names.entries())
+      await saveProcurementSetting('accessories', {
+        name,
+        sortNo: (index + 1) * 10,
+        active: true,
+        idempotencyKey: newIdempotencyKey(),
+      });
+    await load();
+    message.success(`已载入 ${names.length} 项常用辅料`);
+  } catch (error) {
+    pageError.value = errorText(error);
+    await load();
   } finally {
     saving.value = false;
   }
@@ -193,7 +231,21 @@ onMounted(load);
           :key="key"
           :tab="title"
         />
-</Tabs><Space>
+</Tabs><Alert
+        v-if="
+          tab === 'accessories' && !loading && data.accessories.length === 0
+        "
+        type="info"
+        show-icon
+        message="还没有维护常用辅料，采购单「辅料明细表」暂用系统默认清单（OPP透明膜、定制卡纸、定制网包、定制内盒等）"
+        style="margin-bottom: 12px"
+      >
+        <template #action>
+          <Button size="small" :loading="saving" @click="seedAccessories">
+            以默认清单开始维护
+          </Button>
+        </template>
+</Alert><Space>
         <Button
           type="primary"
           @click="
@@ -227,7 +279,9 @@ onMounted(load);
                   .join(' / ')
               : tab === 'clauses'
                 ? record.groupCode
-                : (record.title ?? '—')
+                : tab === 'accessories'
+                  ? `排序 ${record.sortNo ?? 0}`
+                  : (record.title ?? '—')
           }}</span><Tag v-else-if="column.key === 'state'">
             {{ record.active ? '启用' : '停用' }}
 </Tag><Space v-else-if="column.key === 'action'">

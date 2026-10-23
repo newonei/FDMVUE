@@ -280,6 +280,10 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'remark',
       'accessoryNote',
       'reason',
+      'lineExtras',
+      'sharedColumns',
+      'accessories',
+      'packagingSteps',
     ]
       .filter((key) => value[key] !== undefined)
       .map((key) => [

@@ -34,6 +34,7 @@ import {
   onlyChoice,
   preferredContact,
 } from '../model';
+import OrderPrintExtras from './OrderPrintExtras.vue';
 import SupplierContacts from './SupplierContacts.vue';
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
 const emit = defineEmits<{
@@ -50,6 +51,7 @@ const settingsLoaded = ref(false);
 const contacts = ref<SupplierContact[]>([]);
 const pageError = ref('');
 const contactsOpen = ref(false);
+const printExtras = ref<InstanceType<typeof OrderPrintExtras>>();
 watch(contactsOpen, (value) => emit('busy', value));
 onBeforeUnmount(() => emit('busy', false));
 const form = reactive({
@@ -196,7 +198,11 @@ function changed(entry: SupplierContact) {
   form.contactId = entry.id;
 }
 function payload() {
-  return { ...props.view.details, ...form };
+  return {
+    ...props.view.details,
+    ...form,
+    ...(canEdit.value ? printExtras.value?.payload() : {}),
+  };
 }
 function save() {
   emit('save', payload());
@@ -286,7 +292,7 @@ function confirm() {
         <Form.Item
           label="辅料情况说明（印在采购单上）"
           class="wide"
-          extra="写明彩盒、标签、包装袋等辅料由谁提供、怎么配，导出 Word 时印在「辅料情况说明」一栏"
+          extra="写明彩盒、标签、包装袋等辅料由谁提供、怎么配，导出时印在「辅料情况说明」一栏；需要逐项勾选的用下方「辅料明细表」"
         >
           <Textarea
             v-model:value="form.accessoryNote"
@@ -303,6 +309,11 @@ function confirm() {
           />
         </Form.Item>
       </Form>
+      <OrderPrintExtras
+        ref="printExtras"
+        :view="view"
+        :disabled="!canEdit || saving"
+      />
       <h4 class="section-title">签约与条款</h4>
       <Form layout="vertical" class="order-fields">
         <Form.Item label="采购签约公司" required>

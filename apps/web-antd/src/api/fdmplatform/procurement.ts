@@ -2,6 +2,7 @@ import type { BusinessRecord, Decimal, DocumentRow, PageResult } from './index';
 
 import { requestClient } from '#/api/request';
 export type SettingType =
+  | 'accessories'
   | 'categories'
   | 'clauses'
   | 'entities'
@@ -28,6 +29,8 @@ export interface ProcurementSetting {
   footerText?: string;
   requiredClauseGroups?: string[];
   groupCode?: string;
+  /** 常用辅料的排列顺序 */
+  sortNo?: number;
   text?: string;
   /** 仓库：库管人员、默认仓库、是否计入总库存 */
   managerUserIds?: number[];
@@ -103,6 +106,39 @@ export interface ProcurementFile {
   orderId: string;
   contractId: string;
 }
+/** 采购单明细行的补充资料，印在导出的采购单上（#88） */
+export interface OrderLineExtra {
+  customerColor?: string;
+  weight?: string;
+  /** 型号（如正反面颜色） */
+  model?: string;
+  /** 装箱数：每箱几件，箱数按数量自动算 */
+  packQty?: number;
+  imageId?: string;
+}
+/** 整单共用说明列（如纹路、定制）：明细各行合并成一格，文字加配图 */
+export interface OrderSharedColumn {
+  title: string;
+  text?: string;
+  imageIds: string[];
+}
+export interface OrderAccessory {
+  name: string;
+  checked: boolean;
+  remark?: string;
+}
+export interface OrderPackagingStep {
+  title: string;
+  text?: string;
+  imageIds: string[];
+}
+export interface ProcurementOrderImage {
+  id: string;
+  name: string;
+  type: string;
+  width: number;
+  height: number;
+}
 export interface ProcurementOrderView {
   id: string;
   contractId: string;
@@ -113,6 +149,8 @@ export interface ProcurementOrderView {
   contractName: string;
   order: BusinessRecord;
   details: {
+    /** 辅料明细表：整份清单，勾选本次需要的 */
+    accessories?: OrderAccessory[];
     /** 辅料情况说明，导出到采购单 Word（金智「采购概要」） */
     accessoryNote?: string;
     clauseIds: string[];
@@ -121,11 +159,15 @@ export interface ProcurementOrderView {
     contactSnapshot?: SupplierContact;
     deliveryAddress?: string;
     deliveryDate?: string;
+    /** 明细行 id → 补充资料 */
+    lineExtras?: Record<string, OrderLineExtra>;
     /** 这张单不需要收票（淘宝、个体等） */
     noInvoice?: boolean;
+    packagingSteps?: OrderPackagingStep[];
     /** 内部下单备注，不导出给供应商 */
     remark?: string;
     revision?: number;
+    sharedColumns?: OrderSharedColumn[];
     signingEntityId?: string;
     signingEntitySnapshot?: ProcurementSetting;
     status: 'CONFIRMED' | 'DRAFT';
@@ -133,6 +175,8 @@ export interface ProcurementOrderView {
     templateSnapshot?: ProcurementSetting;
     version: number;
   };
+  /** 辅料明细表可勾选的常用辅料 */
+  accessoryCatalog?: string[];
   allowedActions: string[];
   blockReasons: string[];
   history: BusinessRecord[];
@@ -252,6 +296,42 @@ export function downloadProcurementFile(
   return requestClient.download<Blob>(
     `${orderPath(contractId, orderId)}/files/${encodeURIComponent(fileId)}/download`,
   );
+}
+/** 下单资料图片：上传后由后端压缩存档，保存资料时引用返回的 id。 */
+export function uploadProcurementImage(
+  contractId: string,
+  orderId: string,
+  file: File,
+) {
+  return requestClient.upload<ProcurementOrderImage>(
+    `${orderPath(contractId, orderId)}/images`,
+    { file },
+    { timeout: 300_000 },
+  );
+}
+export function getProcurementImage(
+  contractId: string,
+  orderId: string,
+  imageId: string,
+) {
+  return requestClient.download<Blob>(
+    `${orderPath(contractId, orderId)}/images/${encodeURIComponent(imageId)}`,
+  );
+}
+/** 从历史采购单复制图片引用到本单；返回 来源图片 id → 本单新 id。 */
+export function copyProcurementImages(
+  contractId: string,
+  orderId: string,
+  data: { imageIds: string[]; sourceContractId: string; sourceOrderId: string },
+) {
+  return requestClient.post<Record<string, string>>(
+    `${orderPath(contractId, orderId)}/images/copy`,
+    { ...data, sourceContractId: data.sourceContractId || 'standalone' },
+  );
+}
+/** 采购单辅料明细表的勾选清单：维护过常用辅料用维护的，否则为默认清单。 */
+export function getAccessoryCatalog() {
+  return requestClient.get<string[]>(`${procurementBase}/accessory-catalog`);
 }
 export function uploadProcurementSigned(
   contractId: string,
