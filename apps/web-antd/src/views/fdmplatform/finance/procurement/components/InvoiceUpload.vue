@@ -10,10 +10,12 @@ import BigNumber from 'bignumber.js';
 
 import {
   createPurchaseInvoice,
+  downloadPurchaseInvoiceFile,
   recognizePurchaseInvoice,
   updatePurchaseInvoice,
 } from '#/api/fdmplatform/procurement';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
@@ -277,6 +279,14 @@ async function submit(chosen: File | undefined) {
       </Button>
       <span v-if="file || kept" class="attachment">
         <span class="name">{{ file?.name ?? invoice?.file?.name }}</span>
+        <FilePreviewButton
+          size="small"
+          :name="file?.name ?? invoice?.file?.name ?? ''"
+          :file="file"
+          :load="
+            file ? undefined : () => downloadPurchaseInvoiceFile(invoice!.id)
+          "
+        />
         <Button type="link" size="small" danger @click="removeFile">
           删除
         </Button>

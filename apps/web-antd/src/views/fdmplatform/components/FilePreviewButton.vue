@@ -6,16 +6,23 @@ import { Button, message, Modal } from 'ant-design-vue';
 import { errorText } from '../data';
 import { filePreviewKind } from './file-preview';
 
-/** PDF / 图片附件直接在弹窗里查看，不用先下载；其他格式不显示按钮 */
+/** PDF / 图片附件直接在弹窗里查看，不用先下载；其他格式不显示按钮。待上传的本地文件传 file。 */
 const props = withDefaults(
   defineProps<{
     disabled?: boolean;
-    load: () => Promise<Blob>;
+    file?: Blob;
+    load?: () => Promise<Blob>;
     name: string;
     size?: 'middle' | 'small';
     type?: 'default' | 'link';
   }>(),
-  { disabled: false, size: undefined, type: 'link' },
+  {
+    disabled: false,
+    file: undefined,
+    load: undefined,
+    size: undefined,
+    type: 'link',
+  },
 );
 const kind = computed(() => filePreviewKind(props.name));
 const open = ref(false);
@@ -32,7 +39,8 @@ async function show() {
   const run = ++sequence;
   loading.value = true;
   try {
-    const blob = await props.load();
+    const blob = props.file ?? (await props.load?.());
+    if (!blob) return;
     if (run !== sequence) return;
     release();
     // 下载接口常返回 octet-stream，PDF 需标明类型浏览器才会内嵌显示
@@ -67,7 +75,7 @@ onBeforeUnmount(() => {
       :loading="loading"
       @click.stop="show"
     >
-      查看
+      预览
     </Button>
     <Modal
       :open="open"

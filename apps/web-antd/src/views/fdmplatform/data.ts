@@ -56,6 +56,8 @@ export interface ActionDefinition {
   buyerCustomerId?: string;
   /** 登记回款时的合同币种，用于跨币种折算预览 */
   contractCurrency?: string;
+  /** 内销回款只收人民币，不查询汇率 */
+  rmbOnly?: boolean;
 }
 
 export const masterTypes: Option[] = [
@@ -466,6 +468,16 @@ export function contractActions(
           required: false,
           hint: '默认合同产品交期；尚未确定可留空。',
         }),
+        // 内销申请时填预计采购单价，供采购参考
+        ...(salesChannelOf(contract.businessType) === 'DOMESTIC'
+          ? [
+              field('unitPrice', '采购单价', 'decimal', {
+                required: false,
+                min: 0,
+                hint: `预计采购单价（${contract.currency ?? 'CNY'}），实际以报价和采购单为准。`,
+              }),
+            ]
+          : []),
       ],
     },
     ASSIGN_FULFILLMENT: {
@@ -631,25 +643,34 @@ export function financeActions(
       ? `发票按合同币种 ${contract.currency} 登记。`
       : undefined,
   };
+  // 内销全部人民币回款：币种固定 CNY，不显示汇率折算
+  const rmbOnly = salesChannelOf(contract.businessType) === 'DOMESTIC';
   return {
     CREATE_RECEIPT: {
       action: 'CREATE_RECEIPT',
       title: '新建回款记录',
-      description:
-        '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
+      description: rmbOnly
+        ? '登记真实到账，内销回款均为人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。'
+        : '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
       contractCurrency: contract.currency,
+      rmbOnly,
       fields: [
         source,
-        { ...amount, label: '回款金额' },
-        selectField(
-          'currency',
-          '回款币种',
-          receiptCurrencyOptions(contract.currency),
-          {
-            default: contract.currency,
-            hint: `按客户实际到账币种填写。与合同币种 ${contract.currency ?? ''} 不同时，按到账日汇率折算人民币，再按同日汇率计入合同应收。`,
-          },
-        ),
+        { ...amount, label: rmbOnly ? '回款金额（人民币）' : '回款金额' },
+        rmbOnly
+          ? field('currency', '回款币种', undefined, {
+              default: 'CNY',
+              hidden: true,
+            })
+          : selectField(
+              'currency',
+              '回款币种',
+              receiptCurrencyOptions(contract.currency),
+              {
+                default: contract.currency,
+                hint: `按客户实际到账币种填写。与合同币种 ${contract.currency ?? ''} 不同时，按到账日汇率折算人民币，再按同日汇率计入合同应收。`,
+              },
+            ),
         field('receivedAt', '到账日期', 'date'),
         selectField(
           'paymentMethod',

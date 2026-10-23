@@ -85,6 +85,21 @@ function chooseFile(event: Event) {
   selectedFile.value = (event.target as HTMLInputElement).files?.[0];
   uploadKey.value = newIdempotencyKey();
 }
+/** 也可把文件直接拖到上传区，效果同「选择文件」 */
+const dragging = ref(false);
+function dropFile(event: DragEvent) {
+  dragging.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (
+    !file ||
+    uploading.value ||
+    !props.view?.enabled ||
+    props.categories.length === 0
+  )
+    return;
+  selectedFile.value = file;
+  uploadKey.value = newIdempotencyKey();
+}
 async function upload() {
   if (!selectedFile.value || !category.value || !props.view?.enabled) return;
   uploading.value = true;
@@ -186,7 +201,13 @@ async function download(item: ContractAttachment) {
       :disabled="uploading"
       @change="chooseFile"
     />
-    <div class="attachment-toolbar">
+    <div
+      class="attachment-toolbar"
+      :class="{ dragging: dragging && !uploading }"
+      @dragover.prevent="dragging = Boolean(view?.enabled && categories.length)"
+      @dragleave.prevent="dragging = false"
+      @drop.prevent="dropFile"
+    >
       <Space v-if="view?.enabled && categories.length" wrap>
         <Select
           v-model:value="category"
@@ -213,7 +234,7 @@ async function download(item: ContractAttachment) {
           :title="selectedFile?.name"
           role="status"
         >
-          {{ selectedFile?.name ?? '尚未选择文件' }}
+          {{ selectedFile?.name ?? '尚未选择文件，也可将文件拖到这里' }}
         </span>
         <Button
           type="primary"
@@ -321,5 +342,11 @@ async function download(item: ContractAttachment) {
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.attachment-toolbar.dragging {
+  outline: 1px dashed #1677ff;
+  outline-offset: 2px;
+  background: #e6f4ff;
 }
 </style>

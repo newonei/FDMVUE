@@ -196,6 +196,7 @@ const lineColumns: LineColumn[] = [
   { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
   { key: 'lineAmount', title: '金额', width: 130, align: 'right' },
   { key: 'requiredDate', title: '交期', width: 120 },
+  { key: 'remark', title: '明细备注', width: 200 },
   { key: 'requestedQuantity', title: '已申请', width: 100, align: 'right' },
   { key: 'orderedQuantity', title: '已下单', width: 100, align: 'right' },
   { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
@@ -795,6 +796,10 @@ async function download(file: { id: string; name: string }) {
             </dd>
             <dt>合同单号</dt>
             <dd>{{ contract.code || '—' }}</dd>
+            <dt>内部名称</dt>
+            <dd :class="contract.name ? 'internal-name' : 'muted'">
+              {{ contract.name || '未填写' }}
+            </dd>
             <dt>签单日期</dt>
             <dd>{{ contract.signedDate ?? '未填写' }}</dd>
             <dt>总金额</dt>
@@ -1749,5 +1754,10 @@ section.identity {
     grid-row: auto;
     grid-column: 1;
   }
+}
+
+.internal-name {
+  font-weight: 600;
+  color: hsl(var(--primary));
 }
 </style>

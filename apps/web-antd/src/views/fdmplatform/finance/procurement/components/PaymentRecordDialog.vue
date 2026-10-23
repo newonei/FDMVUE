@@ -24,6 +24,7 @@ import {
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
@@ -327,6 +328,11 @@ async function save() {
             <ul v-if="files.length > 0">
               <li v-for="(file, index) in files" :key="`${file.name}-${index}`">
                 {{ file.name }}
+                <FilePreviewButton
+                  size="small"
+                  :name="file.name"
+                  :file="file"
+                />
                 <Button
                   type="link"
                   size="small"

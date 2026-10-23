@@ -15,6 +15,7 @@ import type {
 } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 
 import {
   computed,
@@ -40,6 +41,7 @@ import dayjs from 'dayjs';
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
@@ -49,6 +51,7 @@ import { errorText, label, money, rows } from '../data';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
+import { salesChannelOf } from '../sales-channel';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
 import { migrationCell } from './migration-display';
@@ -136,13 +139,9 @@ const canConvert = computed(
     !!contract.value &&
     !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
 );
-function converted(value: {
-  code: string;
-  contractId: string;
-  orderId: string;
-}) {
+function converted(value: CreatedProcurementOrders) {
   convertTo.value = undefined;
-  message.success(`已转成采购单 ${value.code}`);
+  message.success(createdOrdersText(value, '已转成采购单'));
   emit('updated');
   convertedOrder.value = {
     contractId: value.contractId,
@@ -269,6 +268,9 @@ const extraFields = [
   'createdAt|创建时间',
 ];
 const CONTRACT_FX = new Set(['contractAmount', 'contractRateToCny']);
+const domesticContract = computed(
+  () => salesChannelOf(contract.value?.businessType) === 'DOMESTIC',
+);
 const fields = computed(() =>
   [
     ...new Map(
@@ -282,9 +284,11 @@ const fields = computed(() =>
     CONTRACT_FX.has(item.key)
       ? record.value?.[item.key] !== undefined &&
         record.value?.[item.key] !== null
-      : record.value?.[item.key] !== undefined ||
-        (item.key.startsWith('exchangeRate') &&
-          ['receipts', 'refunds'].includes(props.kind)),
+      : // 内销回款都是人民币，不显示汇率字段
+        !(item.key.startsWith('exchangeRate') && domesticContract.value) &&
+        (record.value?.[item.key] !== undefined ||
+          (item.key.startsWith('exchangeRate') &&
+            ['receipts', 'refunds'].includes(props.kind))),
   ),
 );
 /** 后端 Instant 字段是 ISO 时间戳，按本机时区显示到秒 */

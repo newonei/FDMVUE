@@ -29,6 +29,7 @@ import {
 import { getCustomerActivity } from '#/api/fdmplatform/customers';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import { productCategoryLabel } from '../../contract-categories';
 import { errorText, label } from '../../data';
 import { contractReferenceText } from '../../documents/migration-display';
 import RelatedLink from '../../documents/RelatedLink.vue';
@@ -289,6 +290,16 @@ function close() {
             </Descriptions.Item>
             <Descriptions.Item label="联系人">
               {{ customer.contactName || '—' }}
+            </Descriptions.Item>
+            <Descriptions.Item
+              v-if="customer.salesChannel === 'DOMESTIC'"
+              label="产品种类"
+            >
+              {{
+                (customer.productCategories ?? [])
+                  .map((value) => productCategoryLabel(value))
+                  .join('、') || '—'
+              }}
             </Descriptions.Item>
             <Descriptions.Item label="邮箱 / 电话">
               {{

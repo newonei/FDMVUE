@@ -21,6 +21,8 @@ export interface Customer extends MasterRecord {
   salesChannel?: 'DOMESTIC' | 'FOREIGN';
   /** 内销客户开票信息 */
   invoice?: CustomerInvoice;
+  /** 内销客户经营的产品种类（合同产品类别代码），可多选 */
+  productCategories?: string[];
   province?: string;
   city?: string;
   address?: string;

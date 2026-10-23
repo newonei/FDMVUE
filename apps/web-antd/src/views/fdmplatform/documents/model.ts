@@ -958,6 +958,16 @@ export function documentActionDefinition(
           : entry,
       );
   }
+  // 新建采购申请默认带出合同全部尚未申请完的产品明细，可删减或调整
+  if (action === 'CREATE_REQUEST' && !record) {
+    const items = contract.items
+      .map((item) => ({
+        contractItemId: item.id,
+        ...requestLineDefaults(contract, item),
+      }))
+      .filter((line) => line.quantity);
+    if (items.length > 0) context.items = items;
+  }
   if (action === 'ASSIGN_FULFILLMENT') {
     const pending = pendingRequestItems(
       contract,

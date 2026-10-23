@@ -10,6 +10,10 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   recognizePurchaseInvoice: api.recognize,
   createPurchaseInvoice: api.create,
 }));
+vi.mock('../../../components/FilePreviewButton.vue', async () => {
+  const { defineComponent } = await import('vue');
+  return { default: defineComponent({ setup: () => () => null }) };
+});
 vi.mock('ant-design-vue', () => {
   const field = defineComponent({
     props: { value: { type: null, default: undefined } },
