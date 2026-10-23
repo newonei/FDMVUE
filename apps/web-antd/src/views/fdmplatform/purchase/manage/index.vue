@@ -6,6 +6,7 @@ import type { DocumentKind } from '../../documents/model';
 import type { AttachmentView, Contract, DocumentRow } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type {
+  CreatedProcurementOrders,
   ProcurementOrderRow,
   ProcurementOrdersOverview,
   ProcurementOrderView,
@@ -46,6 +47,7 @@ import {
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import {
+  createdOrdersText,
   downloadProcurementFile,
   endProcurementOrder,
   exportProcurementOrder,
@@ -615,13 +617,9 @@ async function invoicesChanged() {
   await refreshFacts();
   void loadList();
 }
-function editorSaved(value: {
-  code: string;
-  contractId: string;
-  orderId: string;
-}) {
+function editorSaved(value: CreatedProcurementOrders) {
   editorOpen.value = false;
-  message.success(`已新建采购单 ${value.code}`);
+  message.success(createdOrdersText(value));
   void loadList();
   localTab.value = 'details';
   selection.value = {

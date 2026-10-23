@@ -5,9 +5,11 @@ import {
   emptyRow,
   entryErrors,
   entryPayload,
+  entrySuppliers,
   entryTotals,
   materialKind,
   parsePastedLines,
+  quotedSupplier,
   setRowGift,
   setRowPrice,
   setRowQuantity,
@@ -98,6 +100,106 @@ describe('新建采购单表单', () => {
       }),
     ]);
     expect(payload.additionalAmount).toBeUndefined();
+  });
+});
+
+describe('申请转采购单按供应商拆单', () => {
+  const lines = () => [
+    row({ quantity: '10', unitPrice: '5', supplierId: 'yoga-mat' }),
+    row({ key: 'r2', quantity: '4', unitPrice: '2', supplierId: 'yoga-brick' }),
+    row({ key: 'r3', quantity: '1', unitPrice: '1' }),
+  ];
+
+  it('groups rows by their own supplier and falls back to the header one', () => {
+    const groups = entrySuppliers(lines(), {
+      supplierId: 'yoga-mat',
+      discountRate: '90',
+    });
+    expect(
+      groups.map((group) => [group.supplierId, group.rows.length]),
+    ).toEqual([
+      ['yoga-mat', 2],
+      ['yoga-brick', 1],
+    ]);
+    expect(groups.map((group) => group.total)).toEqual(['45.90', '7.20']);
+  });
+
+  it('only needs a header supplier when some row has none', () => {
+    const all = lines().slice(0, 2);
+    expect(entryErrors(all, { contractId: 'c' }).sheet).toBe('');
+    expect(entryErrors(lines(), { contractId: 'c' }).sheet).toBe(
+      '请选择供应商',
+    );
+  });
+
+  it('refuses fees and round-off that cannot be shared across split orders', () => {
+    expect(
+      entryErrors(lines(), {
+        contractId: 'c',
+        supplierId: 'yoga-mat',
+        additionalAmount: '30',
+      }).sheet,
+    ).toContain('附加费用和优惠抹零无法分摊');
+    expect(
+      entryErrors(lines().slice(0, 1), {
+        contractId: 'c',
+        supplierId: 'yoga-mat',
+        additionalAmount: '30',
+      }).sheet,
+    ).toBe('');
+  });
+
+  it('sends a row supplier only when it differs from the header', () => {
+    const payload = entryPayload(
+      lines().map((line) => ({ ...line, productId: 'p1' })),
+      { supplierId: 'yoga-mat', contractId: 'c' },
+      'key-123456',
+    );
+    expect(payload.lines.map((line) => line.supplierId)).toEqual([
+      undefined,
+      'yoga-brick',
+      undefined,
+    ]);
+  });
+
+  it('takes the cheapest valid quote of the request item', () => {
+    const quote = (
+      id: string,
+      supplierId: string,
+      unitPrice: string,
+      extra = {},
+    ) => ({
+      id,
+      seriesId: id,
+      version: 1,
+      assignmentId: 'a1',
+      supplierId,
+      supplierName: supplierId,
+      unitPrice,
+      unit: '条',
+      confirmed: true,
+      validUntil: '2026-12-31',
+      ...extra,
+    });
+    const contract = {
+      assignments: [
+        { id: 'a1', requestItemId: 'ri-1', method: 'BUY', status: 'ASSIGNED' },
+      ],
+      quotes: [
+        quote('q1', 'mat-a', '30'),
+        quote('q2', 'mat-b', '25.125'),
+        quote('q3', 'mat-c', '10', { validUntil: '2026-01-01' }),
+        quote('q4', 'mat-d', '5', { unit: '箱' }),
+      ],
+    } as never;
+    expect(quotedSupplier(contract, 'ri-1', '条', '2026-10-22')).toEqual({
+      supplierId: 'mat-b',
+      supplierName: 'mat-b',
+      unitPrice: '25.125',
+    });
+    expect(
+      quotedSupplier(contract, 'ri-2', '条', '2026-10-22'),
+    ).toBeUndefined();
   });
 });
 

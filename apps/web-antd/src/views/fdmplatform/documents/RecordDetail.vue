@@ -15,6 +15,7 @@ import type {
 } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 
 import {
   computed,
@@ -40,6 +41,7 @@ import dayjs from 'dayjs';
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
@@ -137,13 +139,9 @@ const canConvert = computed(
     !!contract.value &&
     !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
 );
-function converted(value: {
-  code: string;
-  contractId: string;
-  orderId: string;
-}) {
+function converted(value: CreatedProcurementOrders) {
   convertTo.value = undefined;
-  message.success(`已转成采购单 ${value.code}`);
+  message.success(createdOrdersText(value, '已转成采购单'));
   emit('updated');
   convertedOrder.value = {
     contractId: value.contractId,
