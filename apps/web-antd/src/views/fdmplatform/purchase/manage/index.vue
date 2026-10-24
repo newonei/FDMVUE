@@ -639,7 +639,7 @@ function stockInSaved(value: StockIn) {
 }
 /**
  * 采购单下属单据各自独立（模板、入库、付款没有先后），这里只汇总各自进度。
- * 采购单模板：下单资料确认后可生成 Word，盖章件为选填附件。
+ * 采购单模板：下单资料确认后可导出 PDF / Excel，盖章件为选填附件。
  */
 const templateState = computed(() => {
   if (!view.value) return undefined;
@@ -649,8 +649,7 @@ const templateState = computed(() => {
   ).length;
   if (view.value.details.status !== 'CONFIRMED')
     return { label: '下单资料未确认', sub: '确认后可在右上角导出' };
-  if (words === 0)
-    return { label: '可导出', sub: '右上角「导出」PDF / Word / Excel' };
+  if (words === 0) return { label: '可导出', sub: '右上角「导出」PDF / Excel' };
   return {
     label: `已生成 ${words} 版`,
     sub: signed > 0 ? `已上传盖章件 ${signed} 份` : '盖章件选填',
@@ -1027,7 +1026,7 @@ async function command(
       action === 'EXPORT_CONTRACT'
         ? await exportProcurementOrder(view.value.contractId, view.value.id, {
             ...args,
-            format: String(payload.format ?? 'DOCX') as 'DOCX' | 'PDF' | 'XLSX',
+            format: String(payload.format ?? 'PDF') as 'PDF' | 'XLSX',
           })
         : await procurementOrderAction(view.value.contractId, view.value.id, {
             ...args,

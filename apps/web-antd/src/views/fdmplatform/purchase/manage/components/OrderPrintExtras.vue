@@ -50,7 +50,7 @@ import OrderImages from './OrderImages.vue';
 
 /**
  * 印到采购单上的附加资料（#88）：明细补充（产品图、客户颜色、克重、型号、装箱数）、整单共用说明列、
- * 辅料明细勾选、包装步骤。随下单资料一起保存、确认，导出 PDF / Word / Excel 时带出。
+ * 辅料明细勾选、包装步骤。随下单资料一起保存、确认，导出 PDF / Excel 时带出。
  */
 const props = defineProps<{ disabled: boolean; view: ProcurementOrderView }>();
 /** 采购单明细行（表格单元格里拿到的是宽松类型）。 */

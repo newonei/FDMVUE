@@ -151,7 +151,7 @@ export interface ProcurementOrderView {
   details: {
     /** 辅料明细表：整份清单，勾选本次需要的 */
     accessories?: OrderAccessory[];
-    /** 辅料情况说明，导出到采购单 Word（金智「采购概要」） */
+    /** 辅料情况说明，导出到采购单（金智「采购概要」） */
     accessoryNote?: string;
     clauseIds: string[];
     clauseSnapshots?: ProcurementSetting[];
@@ -279,11 +279,11 @@ export function procurementOrderAction(
     data,
   );
 }
-/** format：PDF、DOCX（Word）或 XLSX（Excel），都按金智采购单模板生成并存档一版。 */
+/** format：PDF 或 XLSX（Excel），都按金智采购单模板生成并存档一版；历史 Word 版本仍可下载。 */
 export function exportProcurementOrder(
   contractId: string,
   orderId: string,
-  data: OrderCommand & { format?: 'DOCX' | 'PDF' | 'XLSX' },
+  data: OrderCommand & { format?: 'PDF' | 'XLSX' },
 ) {
   return requestClient.post<ProcurementOrderView>(
     `${orderPath(contractId, orderId)}/exports`,
