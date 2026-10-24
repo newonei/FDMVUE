@@ -33,6 +33,12 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinanceSummary: mocks.finance,
 }));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiCheckLevels: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
