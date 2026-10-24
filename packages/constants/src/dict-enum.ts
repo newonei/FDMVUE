@@ -210,6 +210,10 @@ const FDM_DATA_DICT = {
   YOGA_MAT: 'YogaMat',
   /** 飞德慕材质（字典类型 material_type） */
   MATERIAL_TYPE: 'material_type',
+  /** 电商公司底价：产品系列（取自 YogaMat 另建，可独立维护） */
+  FDM_EC_PRICE_SERIES: 'fdm_ec_price_series',
+  /** 电商公司底价：垫子类型（平铺 / 折叠 / 二代折叠 / 赠品） */
+  FDM_EC_PRICE_MAT_KIND: 'fdm_ec_price_mat_kind',
   /** 飞德慕成品分类（字典类型 fdm_yoga_category，成品编码生成，与 YogaMat 独立） */
   FDM_YOGA_CATEGORY: 'fdm_yoga_category',
   /** 飞德慕颜色（货号颜色段） */
