@@ -141,6 +141,12 @@ vi.mock('./components/OrderDetails.vue', () => ({
 vi.mock('./components/OrderLines.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiCheckLevels: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/BatchRequestDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));

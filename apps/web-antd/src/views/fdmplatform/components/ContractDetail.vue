@@ -45,6 +45,7 @@ import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, rows } from '../data';
@@ -838,6 +839,8 @@ async function download(file: { id: string; name: string }) {
             </div>
           </div>
         </section>
+
+        <AiCheckPanel v-if="!ended" doc-type="CONTRACT" :doc-id="contract.id" />
 
         <Button
           v-if="

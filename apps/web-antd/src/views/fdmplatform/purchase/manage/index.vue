@@ -61,6 +61,9 @@ import {
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
+import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
+import AiRiskTag from '#/views/fdmaicheck/components/AiRiskTag.vue';
+import { useAiRiskLevels } from '#/views/fdmaicheck/components/useAiRiskLevels';
 
 import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
@@ -141,6 +144,17 @@ const router = useRouter();
 const embedded = computed(() => !!props.embeddedOrder);
 const active = useRouteOwner();
 const records = ref<ProcurementOrderRow[]>([]);
+/** AI 风险检查的单据编号：关联合同的采购单是行编号，新建的独立采购单是 standaloneId；金智迁入的历史单不检查。 */
+function riskDocId(row: DocumentRow) {
+  if (row.standaloneId)
+    return (row as ProcurementOrderRow).nativeStandalone === true
+      ? row.standaloneId
+      : '';
+  return row.id;
+}
+const { levels: riskLevels } = useAiRiskLevels('PURCHASE_ORDER', () =>
+  records.value.map((row) => riskDocId(row)),
+);
 /**
  * 列表批量操作（金智「选中付款 / 转入库单 / 选中结束」）：只对新系统采购单，金智历史单不可选。
  * 选择只在当前页有效，翻页或筛选后清空。
@@ -1468,6 +1482,9 @@ watch(financeType, (value, previous) => {
                 <ProcurementStatusBadge
                   :status="String(record.record.status ?? '')"
                 />
+                <AiRiskTag
+                  :level="riskLevels[riskDocId(record as DocumentRow)]"
+                />
               </span>
               <RelatedLink
                 class="procurement-muted"
@@ -1805,6 +1822,10 @@ watch(financeType, (value, previous) => {
                 </Button>
               </template>
             </Alert>
+            <AiCheckPanel
+              doc-type="PURCHASE_ORDER"
+              :doc-id="String(view.order.id ?? detailId ?? '')"
+            />
             <OrderLines :view="view" />
             <Tabs v-model:active-key="tab" class="order-tabs">
               <TabPane

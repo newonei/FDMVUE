@@ -38,6 +38,8 @@ import {
   getContractBoard,
   getContractBoardOverview,
 } from '#/api/fdmplatform/contract-board';
+import AiRiskTag from '#/views/fdmaicheck/components/AiRiskTag.vue';
+import { useAiRiskLevels } from '#/views/fdmaicheck/components/useAiRiskLevels';
 
 import ContractDetail from '../../components/ContractDetail.vue';
 import {
@@ -105,6 +107,9 @@ const directory = ref<Directory>();
 provide('fdmPlatformDirectory', directory);
 const overview = ref<ContractBoardOverview>();
 const rows = ref<ContractBoardRow[]>([]);
+const { levels: riskLevels } = useAiRiskLevels('CONTRACT', () =>
+  rows.value.map((row) => row.id),
+);
 const total = ref(0);
 const pageNo = ref(1);
 const pageSize = ref(20);
@@ -926,12 +931,15 @@ onMounted(async () => {
               <span
                 v-if="
                   tab !== 'JINZHI' &&
-                  (record.sample || record.status === 'DRAFT')
+                  (record.sample ||
+                    record.status === 'DRAFT' ||
+                    riskLevels[record.id])
                 "
                 class="tags"
               >
                 <Tag v-if="record.status === 'DRAFT'" class="mini">草稿</Tag>
                 <Tag v-if="record.sample" class="mini">样品</Tag>
+                <AiRiskTag :level="riskLevels[record.id]" />
               </span>
             </div>
             <div v-else-if="column.key === 'customer'" class="cell">
