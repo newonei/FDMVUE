@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   setFactory: vi.fn(),
   route: { query: { tab: 'stock' } as Record<string, string> },
   shipmentPage: vi.fn(),
-  shippable: vi.fn(),
   options: vi.fn(),
   orderPage: vi.fn(),
   rawLines: vi.fn(),
@@ -38,10 +37,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   createExtraOrder: mocks.createExtra,
   createOrder: vi.fn(),
-  createShipment: vi.fn(),
   getMakeTasks: mocks.makeTasks,
   getShipmentPage: mocks.shipmentPage,
-  getShippableItems: mocks.shippable,
   getDefectStats: mocks.defect,
   getOrder: vi.fn(),
   getOrderOperators: vi.fn().mockResolvedValue([]),
@@ -181,7 +178,6 @@ function mockEmptyPage() {
   mocks.defect.mockResolvedValue([]);
   mocks.txnPage.mockResolvedValue({ list: [], total: 0 });
   mocks.makeTasks.mockResolvedValue([]);
-  mocks.shippable.mockResolvedValue([]);
   mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
   mocks.rawLines.mockResolvedValue([rawLine]);
   mocks.tradeLines.mockResolvedValue([tradeLine]);
@@ -271,7 +267,6 @@ describe('stage stock page', () => {
         unit: '张',
       },
     ]);
-    mocks.shippable.mockResolvedValue([]);
     mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
     mocks.rawLines.mockResolvedValue([rawLine]);
     mocks.tradeLines.mockResolvedValue([tradeLine]);

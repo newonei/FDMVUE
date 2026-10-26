@@ -21,6 +21,7 @@ import { getStockOuts } from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
+import PickDialog from '../../inventory-center/components/PickDialog.vue';
 import { linesTitle, money, qty } from './model';
 import StockOutDialog from './StockOutDialog.vue';
 import VoidDialog from './VoidDialog.vue';
@@ -29,22 +30,26 @@ import './warehouse-pages.css';
 
 defineOptions({ name: 'FdmPlatformStockOuts' });
 
+/** 出库单：销售出库（按合同）和其它出库（不关联合同，记去向）；采购部门和库存中心共用。 */
+
 const rows = ref<StockOut[]>([]);
 const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
 const warehouseId = ref<string>();
+const kind = ref<'OTHER' | 'SALES'>();
 const warehouses = ref<ProcurementSetting[]>([]);
 const directory = ref<Directory>();
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
+const creatingOther = ref(false);
 const voiding = ref<StockOut>();
 
 const columns = [
   { title: '出库单号', key: 'code', width: 180 },
   { title: '仓库', key: 'warehouse', width: 110 },
-  { title: '合同 / 客户', key: 'contract', width: 220 },
+  { title: '合同 / 客户 / 去向', key: 'contract', width: 220 },
   { title: '产品', key: 'product', width: 240 },
   { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
   { title: '出库成本', key: 'cost', width: 130, align: 'right' as const },
@@ -62,6 +67,7 @@ async function load(reset = false) {
       pageSize: 20,
       keyword: keyword.value.trim() || undefined,
       warehouseId: warehouseId.value,
+      kind: kind.value,
     });
     rows.value = page.list;
     total.value = page.total;
@@ -77,6 +83,11 @@ function sum(row: StockOut) {
 function saved(value: StockOut) {
   creating.value = false;
   message.success(`已出库 ${value.code}`);
+  void load(true);
+}
+function savedOther(code: string) {
+  creatingOther.value = false;
+  message.success(`已出库 ${code}`);
   void load(true);
 }
 function voided(code: string) {
@@ -103,7 +114,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="出库单号、合同、客户、产品"
+        placeholder="出库单号、合同、客户、去向、产品"
         style="width: 320px"
         @search="load(true)"
       />
@@ -117,8 +128,20 @@ onMounted(async () => {
         "
         @change="load(true)"
       />
+      <Select
+        v-model:value="kind"
+        allow-clear
+        placeholder="全部出库"
+        style="width: 130px"
+        :options="[
+          { value: 'SALES', label: '销售出库' },
+          { value: 'OTHER', label: '其它出库' },
+        ]"
+        @change="load(true)"
+      />
       <span class="grow"></span>
       <Button :loading="loading" @click="load()">刷新</Button>
+      <Button @click="creatingOther = true">其它出库</Button>
       <Button type="primary" @click="creating = true">新建销售出库</Button>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
@@ -149,7 +172,7 @@ onMounted(async () => {
       "
     >
       <template #emptyText>
-        还没有销售出库单。从仓库给客户发货时点右上角「新建销售出库」；直发的货在采购入库时勾选「直发客户」会自动生成。
+        还没有出库单。给客户发货点「新建销售出库」；没有合同的货（电商仓、样品、报废等）点「其它出库」；直发的货在采购入库时勾选「直发客户」会自动生成。
       </template>
       <template #expandedRowRender="{ record }">
         <table class="lines">
@@ -160,7 +183,10 @@ onMounted(async () => {
             <th>成本金额</th>
             <th>合同单价</th>
           </tr>
-          <tr v-for="line in record.lines" :key="line.contractItemId">
+          <tr
+            v-for="line in record.lines"
+            :key="line.contractItemId ?? line.stockId"
+          >
             <td>
               {{ line.productName }}
               <span class="muted">{{ line.specification }}</span>
@@ -181,13 +207,20 @@ onMounted(async () => {
           <Tag v-if="record.kind === 'DIRECT'" color="blue">
             直发 · {{ record.stockInCode }}
           </Tag>
+          <Tag v-else-if="record.kind === 'OTHER'" color="orange">其它出库</Tag>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName
         }}</span>
         <div v-else-if="column.key === 'contract'" class="cell">
-          <span>{{ record.contractCode }}</span>
-          <span class="muted ellipsis">{{ record.customerName }}</span>
+          <template v-if="record.kind === 'OTHER'">
+            <span>去向：{{ record.destination }}</span>
+            <span class="muted ellipsis">{{ record.remark }}</span>
+          </template>
+          <template v-else>
+            <span>{{ record.contractCode }}</span>
+            <span class="muted ellipsis">{{ record.customerName }}</span>
+          </template>
         </div>
         <span v-else-if="column.key === 'product'" class="ellipsis">{{
           linesTitle(record.lines)
@@ -228,6 +261,12 @@ onMounted(async () => {
       </template>
     </Table>
     <StockOutDialog :open="creating" @close="creating = false" @saved="saved" />
+    <PickDialog
+      kind="other"
+      :open="creatingOther"
+      @close="creatingOther = false"
+      @saved="savedOther"
+    />
     <VoidDialog
       :stock-out="voiding"
       @close="voiding = undefined"

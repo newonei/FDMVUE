@@ -38,7 +38,6 @@ const emit = defineEmits<{
   changed: [];
   create: [stage: string];
   saved: [text: string];
-  ship: [];
   txn: [itemCode: string];
 }>();
 
@@ -51,9 +50,6 @@ const canReceive = computed(() =>
 );
 const canStocktake = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:stocktake']),
-);
-const canShip = computed(() =>
-  hasAccessByCodes(['fdmgongchang:stage-stock:ship']),
 );
 
 const keyword = ref('');
@@ -267,13 +263,6 @@ function onExtraSaved(text: string) {
           @click="emit('create', stage)"
         >
           从这里领料
-        </Button>
-        <Button
-          v-if="canShip && ['PUNCHED', 'ENGRAVED', 'FOLDED', 'PACKED'].includes(stage)"
-          type="primary"
-          @click="emit('ship')"
-        >
-          外贸出货
         </Button>
       </div>
     </div>

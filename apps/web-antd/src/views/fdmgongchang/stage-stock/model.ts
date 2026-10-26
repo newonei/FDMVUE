@@ -561,7 +561,7 @@ export function formatDate(value: Api.DateValue | undefined) {
 
 /** 合同产品的一行描述，例如「紫灰双色瑜伽垫 · 183x61x0.6cm · 丁香紫/灰」。 */
 export function contractProductText(
-  row: Pick<Api.ShippableItem, 'color' | 'productName' | 'size' | 'specification'>,
+  row: Pick<Api.MakeTask, 'color' | 'productName' | 'size' | 'specification'>,
 ) {
   const { size: itemSize, specification } = row;
   return [row.productName, specification || itemSize, row.color]
@@ -761,7 +761,7 @@ export function stageFlow(stage: string, options: Api.Options) {
     to:
       outgoing.length > 0
         ? `${outgoing.map((p) => p.label).join('、')}领料`
-        : '外贸出货',
+        : '生产入库进仓库',
   };
 }
 

@@ -154,6 +154,14 @@ const ACTION_LABELS: Record<string, string> = {
   VOID_STOCK_IN: '作废入库',
   VOID_STOCK_OUT: '作废出库',
   PURCHASE_RETURN: '采购退货',
+  FACTORY_IN: '生产入库',
+  VOID_FACTORY_IN: '作废生产入库',
+  OTHER_OUT: '其它出库',
+  TRANSFER_OUT: '调拨调出',
+  TRANSFER_IN: '调拨调入',
+  VOID_TRANSFER: '作废调拨',
+  STOCKTAKE_GAIN: '盘盈',
+  STOCKTAKE_LOSS: '盘亏',
 };
 
 /** 流水来源名称；早期流水没有 action，按入 / 出推断。 */

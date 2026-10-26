@@ -16,47 +16,38 @@ import { Input, message, Segmented, Table, Tag } from 'ant-design-vue';
 import {
   getMakeTasks,
   getShipmentPage,
-  getShippableItems,
   getStageRouteOptions,
 } from '#/api/fdmgongchang/stage-stock';
 
 import {
-  contractProductText,
   formatDate,
   formatQty,
   MAKE_TASK_STATE_LABELS,
   makeTaskRemaining,
   makeTaskState,
-  toNumber,
 } from '../model';
 import TaskRouteModal from './task-route-modal.vue';
 
 /**
- * 外贸订单：外贸合同分派给工厂的自制任务（待生产订单）、可出货的合同明细、工厂出货记录。
- * 工厂可为每个自制任务设定工艺：最后一道（没设时为包装）报产出后良品自动回写合同生产进度；
- * 出货从成品库存（已冲裁及之后）扣减并登记到合同。
+ * 外贸订单：外贸合同分派给工厂的自制任务（待生产订单）、早期的工厂出货记录。
+ * 工厂可为每个自制任务设定工艺：最后一道（没设时为包装）报产出后良品自动回写合同生产进度。
+ * 工厂不再直接出货：做好的货先入本厂仓库，由仓库在库存中心出库。
  */
 const props = defineProps<{ refreshKey: number }>();
 const emit = defineEmits<{
   pending: [count: number];
   produce: [task: Api.MakeTask];
-  ship: [target: { contractId: string; contractItemId: string }];
 }>();
 
 const { hasAccessByCodes } = useAccess();
 const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
 );
-const canShip = computed(() =>
-  hasAccessByCodes(['fdmgongchang:stage-stock:ship']),
-);
-
-type View = 'shipments' | 'shippable' | 'tasks';
+type View = 'shipments' | 'tasks';
 const view = ref<View>('tasks');
 const viewOptions = [
   { label: '待生产订单', value: 'tasks' },
-  { label: '可出货', value: 'shippable' },
-  { label: '出货记录', value: 'shipments' },
+  { label: '早期出货记录', value: 'shipments' },
 ];
 
 const tasks = ref<Api.MakeTask[]>([]);
@@ -84,7 +75,6 @@ async function onRouteSaved(text: string) {
   message.success(text);
   await loadTrade();
 }
-const shippable = ref<Api.ShippableItem[]>([]);
 const loading = ref(false);
 const keyword = ref('');
 
@@ -93,12 +83,6 @@ const shipmentTotal = ref(0);
 const shipmentPageNo = ref(1);
 const shipmentPageSize = ref(20);
 const shipmentLoading = ref(false);
-
-const METHOD_LABELS: Record<string, string> = {
-  BUY: '外采',
-  MAKE: '自制',
-  STOCK: '库存',
-};
 
 const stateColor: Record<MakeTaskState, string> = {
   done: 'green',
@@ -117,21 +101,12 @@ const visibleTasks = computed(() =>
     matches([t.contractCode, t.customerName, t.productName, t.productCode]),
   ),
 );
-const visibleShippable = computed(() =>
-  shippable.value.filter((t) =>
-    matches([t.contractCode, t.customerName, t.productName, t.productCode]),
-  ),
-);
 
 async function loadTrade() {
   loading.value = true;
   try {
-    const [makeTasks, items] = await Promise.all([
-      getMakeTasks(),
-      getShippableItems(),
-    ]);
+    const makeTasks = await getMakeTasks();
     tasks.value = makeTasks;
-    shippable.value = items;
     emit(
       'pending',
       makeTasks.filter((t) => ['producing', 'waiting'].includes(makeTaskState(t)))
@@ -183,10 +158,6 @@ function onShipmentPage(pagination: TablePaginationConfig) {
   loadShipments();
 }
 
-function remainingToShip(row: { itemQuantity: Api.Decimal; shippedQuantity: Api.Decimal }) {
-  return (toNumber(row.itemQuantity) ?? 0) - (toNumber(row.shippedQuantity) ?? 0);
-}
-
 const taskColumns = [
   { key: 'contract', title: '合同 / 客户' },
   { key: 'product', title: '产品' },
@@ -195,15 +166,6 @@ const taskColumns = [
   { align: 'right' as const, key: 'shipped', title: '已出货' },
   { key: 'state', title: '状态' },
   { align: 'right' as const, key: 'actions', title: '', width: 150 },
-];
-const shippableColumns = [
-  { key: 'contract', title: '合同 / 客户' },
-  { key: 'product', title: '产品' },
-  { key: 'method', title: '履约方式' },
-  { align: 'right' as const, key: 'quantity', title: '合同数量' },
-  { align: 'right' as const, key: 'shipped', title: '已出货' },
-  { align: 'right' as const, key: 'remaining', title: '待出货' },
-  { align: 'right' as const, key: 'actions', title: '', width: 80 },
 ];
 const shipmentColumns = [
   { key: 'no', title: '出货单 / 日期' },
@@ -232,10 +194,9 @@ const shipmentColumns = [
       <template v-if="view === 'tasks'">
         外贸合同分派给工厂「自制」的产品。新建工序单时关联对应任务，工艺最后一道（没设工艺时为包装）报产出后良品数量自动回写到合同的生产进度。
       </template>
-      <template v-else-if="view === 'shippable'">
-        自制、库存履约、还没出完货的合同明细。工厂出货从成品库存（已冲裁及之后的阶段）扣减，并登记到合同的出货记录上；外采成品由采购部门在仓库管理出库。
+      <template v-else>
+        工厂以前直接出货的记录（同时显示在外贸合同的发货记录里）。现在工厂做好的货先入本厂仓库，由仓库在「库存中心 → 出库单」出库。
       </template>
-      <template v-else>工厂已出货的记录，同时显示在外贸合同的发货记录里。</template>
     </p>
 
     <Table
@@ -306,72 +267,12 @@ const shipmentColumns = [
             >
               安排生产
             </button>
-            <button
-              v-if="canShip"
-              type="button"
-              class="text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
-              :disabled="remainingToShip(record as Api.MakeTask) <= 0"
-              @click="emit('ship', { contractId: record.contractId, contractItemId: record.contractItemId })"
-            >
-              出货
-            </button>
           </span>
         </template>
       </template>
       <template #emptyText>
         <div class="py-6 text-sm text-muted-foreground">
           外贸合同里还没有分派给工厂的自制任务。采购部门在合同里把产品分派为「自制」后，会出现在这里。
-        </div>
-      </template>
-    </Table>
-
-    <Table
-      v-else-if="view === 'shippable'"
-      :columns="shippableColumns"
-      :data-source="visibleShippable"
-      :loading="loading"
-      :pagination="{ pageSize: 20, showTotal: (t: number) => `共 ${t} 项` }"
-      :scroll="{ x: 'max-content' }"
-      :row-key="(row: Api.ShippableItem) => `${row.contractId}:${row.contractItemId}`"
-      size="small"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'contract'">
-          <div class="flex flex-col">
-            <span class="font-mono text-xs">{{ record.contractCode }}</span>
-            <span class="text-xs text-muted-foreground">{{ record.customerName || '—' }}</span>
-          </div>
-        </template>
-        <template v-else-if="column.key === 'product'">
-          <span class="text-sm">{{ contractProductText(record as Api.ShippableItem) }}</span>
-        </template>
-        <template v-else-if="column.key === 'method'">
-          <Tag class="m-0">{{ METHOD_LABELS[record.method] ?? record.method }}</Tag>
-        </template>
-        <template v-else-if="column.key === 'quantity'">
-          <span class="tabular-nums">{{ formatQty(record.itemQuantity) }}</span>
-          <small class="ml-1 text-xs text-muted-foreground">{{ record.unit }}</small>
-        </template>
-        <template v-else-if="column.key === 'shipped'">
-          <span class="tabular-nums">{{ formatQty(record.shippedQuantity) }}</span>
-        </template>
-        <template v-else-if="column.key === 'remaining'">
-          <b class="tabular-nums">{{ formatQty(record.remainingQuantity) }}</b>
-        </template>
-        <template v-else-if="column.key === 'actions'">
-          <button
-            v-if="canShip"
-            type="button"
-            class="whitespace-nowrap text-xs text-primary hover:underline"
-            @click="emit('ship', { contractId: record.contractId, contractItemId: record.contractItemId })"
-          >
-            出货
-          </button>
-        </template>
-      </template>
-      <template #emptyText>
-        <div class="py-6 text-sm text-muted-foreground">
-          没有待出货的合同明细。
         </div>
       </template>
     </Table>

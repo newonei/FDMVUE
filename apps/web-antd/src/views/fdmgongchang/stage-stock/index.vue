@@ -22,7 +22,6 @@ import OrderPanel from './modules/order-panel.vue';
 import ReceiptDrawer from './modules/receipt-drawer.vue';
 import ReceivingPanel from './modules/receiving-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
-import ShipmentDrawer from './modules/shipment-drawer.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
 import TradePanel from './modules/trade-panel.vue';
@@ -77,8 +76,6 @@ const drawerStage = ref<string>();
 const drawerOrderId = ref<number>();
 const drawerTask = ref<{ assignmentId: string; contractId: string }>();
 
-const shipmentOpen = ref(false);
-const shipmentTarget = ref<{ contractId: string; contractItemId: string }>();
 
 const receiptOpen = ref(false);
 const receiptLine = ref<Api.PurchaseLine>();
@@ -157,11 +154,6 @@ function openProduce(task: Api.MakeTask) {
     contractId: task.contractId,
   };
   drawerOpen.value = true;
-}
-
-function openShipment(target?: { contractId: string; contractItemId: string }) {
-  shipmentTarget.value = target;
-  shipmentOpen.value = true;
 }
 
 function openReceipt(line: Api.PurchaseLine) {
@@ -289,7 +281,6 @@ async function onSettingSaved() {
                   @changed="onChanged"
                   @create="openCreate"
                   @saved="(text) => message.success(text)"
-                  @ship="openShipment()"
                   @txn="showTxns"
                 />
               </div>
@@ -324,7 +315,6 @@ async function onSettingSaved() {
                 :refresh-key="refreshKey"
                 @pending="(count) => (tradePending = count)"
                 @produce="openProduce"
-                @ship="openShipment"
               />
             </div>
           </Tabs.TabPane>
@@ -369,13 +359,6 @@ async function onSettingSaved() {
           :mode="drawerMode"
           :options="options"
           :order-id="drawerOrderId"
-          @saved="onSaved"
-        />
-        <ShipmentDrawer
-          v-model:open="shipmentOpen"
-          :initial-contract-id="shipmentTarget?.contractId"
-          :initial-item-id="shipmentTarget?.contractItemId"
-          :options="options"
           @saved="onSaved"
         />
         <ReceiptDrawer

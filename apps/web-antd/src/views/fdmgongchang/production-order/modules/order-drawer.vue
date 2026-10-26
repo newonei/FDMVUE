@@ -30,15 +30,14 @@ import DeliveryModal from './delivery-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
 import RoutePicker from './route-picker.vue';
-import ShipModal from './ship-modal.vue';
 
 /**
  * 订单详情。下单人（mode=mine）待接单时可以撤回；
- * 工厂（mode=factory）待接单时接单（回复交期）或退回；生产中把做好的货交到采购仓库（交货单），
+ * 工厂（mode=factory）待接单时接单（回复交期）或退回；生产中把做好的货交到仓库（交货单），
  * 完成数量 = 净交货数量；可以结束这张单（没交够也可以，比如下单人同意少做）。
  * 供应商是本厂的采购单自动生成的单：工厂接单时给每个产品定工艺（还没开工序单前都能改），
- * 生产要求读采购单下单资料，数量跟着采购单走（接单后有变更要工厂确认）；做好的货「完工登记」后留在工厂库存，
- * 采购单到货随之更新，再从这批货「出货」（有合同登记合同出货，没有合同记去向）。
+ * 生产要求读采购单下单资料，数量跟着采购单走（接单后有变更要工厂确认）；做好的货开「生产入库」单进本厂仓库，
+ * 采购单到货随之更新，之后由仓库销售出库或其它出库（库存中心）。
  */
 const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number }>();
 const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
@@ -50,8 +49,6 @@ const busy = ref(false);
 const promisedDate = ref<Dayjs>();
 const reply = ref('');
 const deliveryOpen = ref(false);
-const shipOpen = ref(false);
-const shipItem = ref<Api.Item>();
 const deliveryItem = ref<Api.Item>();
 const voidTarget = ref<Api.Delivery>();
 const voidReason = ref('');
@@ -203,20 +200,6 @@ function finish() {
   if (!order.value) return;
   const id = order.value.id;
   return run(() => completeProductionOrder(id), '这张单已完成');
-}
-
-/** 采购单生成的单：生产中、已完成都能出已完工的货。 */
-const canShip = computed(
-  () => props.mode === 'factory' && fromPurchase.value && ['ACCEPTED', 'COMPLETED'].includes(order.value?.status ?? ''),
-);
-
-function shippable(item: Api.Item) {
-  return num(item.completedQuantity) - num(item.shippedQuantity);
-}
-
-function openShip(item: Api.Item) {
-  shipItem.value = item;
-  shipOpen.value = true;
 }
 
 function openDelivery(item: Api.Item) {
@@ -377,31 +360,21 @@ function producedQty(item: Api.Item) {
             <span class="flex shrink-0 flex-col items-end gap-1 text-right">
               <span><b>{{ num(i.quantity) }}</b> {{ i.unit }}</span>
               <span v-if="order.status !== 'SUBMITTED' && fromPurchase" class="text-xs text-muted-foreground">
-                已完工 <b class="text-foreground">{{ num(i.completedQuantity) }}</b> · 已出货 {{ num(i.shippedQuantity) }}
+                已入库 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
+                <template v-if="num(i.shippedQuantity) > 0"> · 早期工厂出货 {{ num(i.shippedQuantity) }}</template>
                 <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
               </span>
               <span v-else-if="order.status !== 'SUBMITTED'" class="text-xs text-muted-foreground">
                 已交货 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
                 <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
               </span>
-              <span v-if="fromPurchase && (canProgress || canShip)" class="flex gap-1">
-                <Button
-                  v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
-                  size="small"
-                  type="primary"
-                  @click="openDelivery(i)"
-                >
-                  完工登记
-                </Button>
-                <Button v-if="canShip && shippable(i) > 0" size="small" @click="openShip(i)">出货</Button>
-              </span>
               <Button
-                v-if="canProgress && !fromPurchase && num(i.completedQuantity) < num(i.quantity)"
+                v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
                 size="small"
                 type="primary"
                 @click="openDelivery(i)"
               >
-                交货
+                {{ fromPurchase ? '生产入库' : '交货' }}
               </Button>
             </span>
           </div>
@@ -431,16 +404,16 @@ function producedQty(item: Api.Item) {
         </section>
 
         <p v-if="order.status === 'ACCEPTED' && fromPurchase" class="m-0 text-xs text-muted-foreground">
-          这张单来自采购单：做好的货点「完工登记」，货留在工厂（转到批次 {{ order.orderNo }}），采购单到货同一步更新；
-          要发走时点「出货」，有合同登记合同出货，没有合同记出货去向。数量跟着采购单走，采购员改了会提示。
+          这张单来自采购单：做好的货点「生产入库」开入库单进本厂仓库，采购单到货同一步更新；
+          发货由仓库在「库存中心 → 出库单」办理（有合同做销售出库，没有合同做其它出库）。数量跟着采购单走，采购员改了会提示。
         </p>
         <p v-else-if="order.status === 'ACCEPTED'" class="m-0 text-xs text-muted-foreground">
-          做好的货点「交货」交到采购部门仓库，完成数量按交货数累加。工序单关联这张单只用来看各道工序的进度。
+          做好的货点「交货」交到仓库，完成数量按交货数累加。工序单关联这张单只用来看各道工序的进度。
         </p>
 
         <section v-if="deliveries.length > 0" class="flex flex-col gap-2">
           <h3 class="m-0 text-sm font-semibold">
-            {{ fromPurchase ? '完工记录' : '交货记录' }}（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）
+            {{ fromPurchase ? '入库记录' : '交货记录' }}（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）
           </h3>
           <div
             v-for="d in deliveries"
@@ -460,7 +433,7 @@ function producedQty(item: Api.Item) {
                   <template v-if="d.stockInCode">（采购单到货 {{ d.stockInCode }}）</template>
                 </template>
                 <template v-else>
-                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} → {{ d.warehouseName || '采购仓库' }}
+                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} → {{ d.warehouseName || '仓库' }}
                   <template v-if="d.stockInCode">（入库单 {{ d.stockInCode }}）</template>
                 </template>
               </span>
@@ -483,7 +456,7 @@ function producedQty(item: Api.Item) {
 
         <section v-if="canProgress" class="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 p-3">
           <span class="text-xs text-muted-foreground">
-            <template v-if="fromPurchase">采购单做完或不再做时结束这张单；结束后已完工的货还能出货。</template>
+            <template v-if="fromPurchase">采购单做完或不再做时结束这张单；已入库的货照常由仓库出库。</template>
             <template v-else>{{ allDone ? '已全部交货，可以结束这张单。' : '还没交够也可以结束，比如下单人同意少做。' }}</template>
           </span>
           <Popconfirm title="结束这张单？结束后不能再交货" ok-text="结束" @confirm="finish">
@@ -504,16 +477,9 @@ function producedQty(item: Api.Item) {
     </Spin>
     <DeliveryModal
       v-model:open="deliveryOpen"
-      :finish="fromPurchase"
+      :factory-id="order?.factoryId"
       :item="deliveryItem"
-      :order-no="order?.orderNo"
-      @saved="onDelivered"
-    />
-    <ShipModal
-      v-model:open="shipOpen"
-      :contract-code="order?.sourceContractCode"
-      :item="shipItem"
-      :order-no="order?.orderNo"
+      :purchase="fromPurchase"
       @saved="onDelivered"
     />
     <Modal
@@ -521,7 +487,7 @@ function producedQty(item: Api.Item) {
       :confirm-loading="busy"
       ok-text="作废"
       :ok-button-props="{ danger: true }"
-      :title="`作废${voidTarget?.kind === 'FACTORY' ? '完工登记' : '交货单'} ${voidTarget?.deliveryNo ?? ''}`"
+      :title="`作废${voidTarget?.kind === 'FACTORY' ? '完工登记' : voidTarget?.kind === 'PURCHASE' ? '生产入库单' : '交货单'} ${voidTarget?.deliveryNo ?? ''}`"
       @cancel="voidTarget = undefined"
       @ok="confirmVoid"
     >
@@ -529,7 +495,11 @@ function producedQty(item: Api.Item) {
         作废后采购单到货冲回，货从批次 {{ order?.orderNo }} 转回原来的库存行，订单完成数量扣回；这批货已经出货的不能作废。
       </p>
       <p v-else class="text-xs text-muted-foreground">
-        作废后采购仓库扣回这批货（已经从仓库出库的不能作废），工厂库存退回原来的行，订单完成数量扣回。
+        作废后仓库扣回这批货（已经从仓库出库的不能作废），工厂库存退回原来的行，订单完成数量扣回<template
+          v-if="voidTarget?.kind === 'PURCHASE'"
+        >
+，采购单到货冲回
+</template>。
       </p>
       <Input id="delivery-void-reason" v-model:value="voidReason" :maxlength="255" placeholder="作废原因（必填）" />
     </Modal>
