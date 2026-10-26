@@ -26,7 +26,8 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
 
 /**
  * 工厂部门 · 工厂排单（原「工厂下单」，并入了原「AI 排单」）：工厂的人在这里操作。
- * - 本厂收到的单：运营、内贸等部门提的生产需求，工厂确认接单、回复交期，看用料逆推，勾选订单交给 AI 排单；
+ * - 本厂收到的单：运营、内贸等部门提的生产需求，以及供应商是本厂的采购单自动生成的单；
+ *   工厂确认接单、回复交期（采购单的单由工厂定工艺），看用料逆推，勾选订单交给 AI 排单；
  * - 排单方案：AI 生成或手动派工的排单，调整后确认下发成任务；
  * - 任务管理：跨排单看已下发的任务，改派或退回任务大厅；
  * - 我提的需求：其他部门从产品中心选 SKU 向工厂提生产需求，做好的货由工厂交货到采购部门仓库。
@@ -245,7 +246,7 @@ function progressPercent(o: Api.Order) {
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            其他部门从产品中心选产品向工厂提生产需求，每个产品要走的工序由提需求的人定。工厂接单后看用料逆推（要几张板、多少原料），勾选订单让 AI 排单或手动派工，确认下发后工人在工作台领任务；做好的货交到采购部门仓库，完成数量按交货数累加。
+            其他部门从产品中心选产品向工厂提生产需求，每个产品要走的工序由提需求的人定；采购单的供应商是本厂时自动生成一张单，工艺由工厂接单时定，做好的货留在工厂库存。工厂接单后看用料逆推（要几张板、多少原料），勾选订单让 AI 排单或手动派工，确认下发后工人在工作台领任务；内部需求做好的货交到采购部门仓库，完成数量按交货数累加。
           </p>
         </div>
         <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 提生产需求</Button>
@@ -308,7 +309,7 @@ function progressPercent(o: Api.Order) {
               v-model:value="filters.keyword"
               allow-clear
               :style="{ width: '14rem' }"
-              placeholder="订单号、用途、下单人、备注"
+              placeholder="订单号、采购单号、合同号、下单人"
               size="small"
             />
           </div>
@@ -330,7 +331,12 @@ function progressPercent(o: Api.Order) {
               <template v-if="column.key === 'orderNo'">
                 <div class="flex flex-col">
                   <button class="text-left text-primary hover:underline" type="button" @click="openOrder(record.id)">{{ record.orderNo }}</button>
-                  <span class="text-xs text-muted-foreground">{{ timeText(record.createTime) }}<template v-if="record.purpose"> · {{ record.purpose }}</template></span>
+                  <span class="text-xs text-muted-foreground">{{ timeText(record.createTime) }}<template v-if="record.purpose && record.sourceType !== 'PURCHASE_ORDER'"> · {{ record.purpose }}</template></span>
+                  <span v-if="record.sourceType === 'PURCHASE_ORDER'" class="flex flex-wrap items-center gap-1 text-xs">
+                    <Tag class="m-0" color="blue">采购单 {{ record.sourceOrderCode }}</Tag>
+                    <Tag v-if="record.sourceChanged" class="m-0" color="orange">有变更</Tag>
+                    <span v-if="record.sourceContractCode" class="text-muted-foreground">{{ record.sourceContractCode }}</span>
+                  </span>
                 </div>
               </template>
               <template v-else-if="column.key === 'requester'">
@@ -355,7 +361,7 @@ function progressPercent(o: Api.Order) {
               </template>
               <template v-else-if="column.key === 'date'">
                 <div class="flex flex-col">
-                  <span>{{ dateText(record.promisedDate) || dateText(record.requiredDate) }}</span>
+                  <span>{{ dateText(record.promisedDate) || dateText(record.requiredDate) || '没填' }}</span>
                   <span class="text-xs text-muted-foreground">{{ record.promisedDate ? '工厂交期' : '希望交货' }}</span>
                 </div>
               </template>
@@ -367,7 +373,12 @@ function progressPercent(o: Api.Order) {
                   <button class="text-primary hover:underline" type="button" @click="openOrder(record.id)">
                     {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
                   </button>
-                  <button v-if="tab === 'mine'" class="text-primary hover:underline" type="button" @click="openCreate(record as Api.Order)">
+                  <button
+                    v-if="tab === 'mine' && record.sourceType !== 'PURCHASE_ORDER'"
+                    class="text-primary hover:underline"
+                    type="button"
+                    @click="openCreate(record as Api.Order)"
+                  >
                     {{ record.status === 'REJECTED' ? '改了重下' : '复制' }}
                   </button>
                 </span>

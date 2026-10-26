@@ -104,14 +104,16 @@ describe('按单分派', () => {
     expect(assignRows(contract(), 'missing')).toEqual([]);
   });
 
-  it('拆分行取剩余数量，合计超量和自产缺工厂逐行提示', () => {
+  it('拆分行取剩余数量（另一行走库存），合计超量逐行提示', () => {
     const rows = assignRows(contract(), 'r1', 7);
     rows[0]!.quantity = '10';
     const split = splitRow(rows, rows[0]!);
-    expect(split).toMatchObject({ split: true, method: 'MAKE', quantity: '8' });
+    expect(split).toMatchObject({
+      split: true,
+      method: 'STOCK',
+      quantity: '8',
+    });
     const all = [...rows, split];
-    expect(assignErrors(all)).toEqual({ [split.key]: '自产请填写承接工厂' });
-    split.factoryId = '一车间';
     split.quantity = '9';
     expect(assignErrors(all)[rows[0]!.key]).toContain('超过待分派 18');
     split.quantity = '8';
@@ -129,10 +131,9 @@ describe('按单分派', () => {
         {
           requestId: 'r1',
           requestItemId: 'ri-a',
-          method: 'MAKE',
+          method: 'STOCK',
           quantity: '8',
           ownerUserId: 7,
-          factoryId: '一车间',
         },
       ],
     });

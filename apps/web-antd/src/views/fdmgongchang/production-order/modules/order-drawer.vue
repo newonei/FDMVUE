@@ -1,31 +1,44 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
+import type { RouteDraft } from '../shared';
+
+import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
 import { computed, ref, watch } from 'vue';
 
-import { Button, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
+import { Alert, Button, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import {
   acceptProductionOrder,
   cancelProductionOrder,
   completeProductionOrder,
+  confirmProductionOrderChange,
+  getLastRoute,
   getProductionOrder,
+  getRouteOptions,
   rejectProductionOrder,
+  saveItemRoute,
   voidDelivery,
 } from '#/api/fdmgongchang/production-order';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
-import { dateText, num, ORDER_STATUS, specText, timeText } from '../shared';
+import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import DeliveryModal from './delivery-modal.vue';
 import MaterialPlan from './material-plan.vue';
+import PurchaseSheet from './purchase-sheet.vue';
+import RoutePicker from './route-picker.vue';
+import ShipModal from './ship-modal.vue';
 
 /**
  * 订单详情。下单人（mode=mine）待接单时可以撤回；
  * 工厂（mode=factory）待接单时接单（回复交期）或退回；生产中把做好的货交到采购仓库（交货单），
  * 完成数量 = 净交货数量；可以结束这张单（没交够也可以，比如下单人同意少做）。
+ * 供应商是本厂的采购单自动生成的单：工厂接单时给每个产品定工艺（还没开工序单前都能改），
+ * 生产要求读采购单下单资料，数量跟着采购单走（接单后有变更要工厂确认）；做好的货「完工登记」后留在工厂库存，
+ * 采购单到货随之更新，再从这批货「出货」（有合同登记合同出货，没有合同记去向）。
  */
 const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number }>();
 const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
@@ -37,12 +50,20 @@ const busy = ref(false);
 const promisedDate = ref<Dayjs>();
 const reply = ref('');
 const deliveryOpen = ref(false);
+const shipOpen = ref(false);
+const shipItem = ref<Api.Item>();
 const deliveryItem = ref<Api.Item>();
 const voidTarget = ref<Api.Delivery>();
 const voidReason = ref('');
 
 const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : undefined));
-const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED');
+const fromPurchase = computed(() => order.value?.sourceType === 'PURCHASE_ORDER');
+/** 采购单生成的单：工厂定工艺用的工序和路线、每个产品的工艺草稿。 */
+const routeOptions = ref<RouteApi.Options>();
+const drafts = ref<Record<number, RouteDraft>>({});
+const editingRoute = ref<number>();
+const activeItems = computed(() => (order.value?.items ?? []).filter((i) => num(i.quantity) > 0));
+const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED' && !fromPurchase.value);
 const canHandle = computed(() => props.mode === 'factory' && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
 /** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
@@ -57,11 +78,60 @@ async function load() {
   loading.value = true;
   try {
     order.value = await getProductionOrder(props.orderId);
-    promisedDate.value = dayjs(dateText(order.value.requiredDate));
+    const required = dateText(order.value.requiredDate);
+    promisedDate.value = required ? dayjs(required) : undefined;
     reply.value = '';
+    editingRoute.value = undefined;
   } finally {
     loading.value = false;
   }
+  await loadRoutes();
+}
+
+/** 工厂定工艺：已定过的沿用，没定过的带出这个产品上次在本厂用的工艺。 */
+async function loadRoutes() {
+  const o = order.value;
+  if (!o || props.mode !== 'factory' || !fromPurchase.value || !['ACCEPTED', 'SUBMITTED'].includes(o.status)) return;
+  routeOptions.value = await getRouteOptions(o.factoryId).catch(() => undefined);
+  const next: Record<number, RouteDraft> = {};
+  await Promise.all(
+    o.items.map(async (i) => {
+      if ((i.processes ?? []).length > 0) {
+        next[i.id] = { routeId: i.routeId ?? undefined, steps: [...(i.processes ?? [])] };
+        return;
+      }
+      const last = await getLastRoute(o.factoryId, i.productId).catch(() => null);
+      next[i.id] = last ? { routeId: last.routeId ?? undefined, steps: [...last.steps] } : { steps: [] };
+    }),
+  );
+  drafts.value = next;
+}
+
+function draftProblem(item: Api.Item) {
+  const processes = routeOptions.value?.processes ?? [];
+  const draft = drafts.value[item.id];
+  return draft && processes.length > 0 ? routeProblem(draft.steps, processes) : '请选择要走的工序';
+}
+
+/** 开过工序单的产品不能再改工艺。 */
+function itemStarted(item: Api.Item) {
+  return (item.steps ?? []).some((s) => s.orderCount > 0);
+}
+
+function saveRoute(item: Api.Item) {
+  const draft = drafts.value[item.id];
+  const problem = draftProblem(item);
+  if (!draft || problem) {
+    message.warning(problem || '请选择要走的工序');
+    return;
+  }
+  return run(() => saveItemRoute({ itemId: item.id, routeId: draft.routeId, steps: draft.steps }), '工艺已保存');
+}
+
+function confirmChange() {
+  if (!order.value) return;
+  const id = order.value.id;
+  return run(() => confirmProductionOrderChange(id), '已确认采购单变更');
 }
 
 watch(open, (value) => {
@@ -86,8 +156,29 @@ async function run(action: () => Promise<unknown>, text: string) {
 function accept() {
   if (!order.value) return;
   const id = order.value.id;
+  if (!promisedDate.value) {
+    message.warning('采购单没填交期，请回复交期');
+    return;
+  }
+  let routes: Api.RouteReq[] | undefined;
+  if (fromPurchase.value) {
+    for (const item of activeItems.value) {
+      const problem = draftProblem(item);
+      if (problem) {
+        message.warning(`「${item.productName}」：${problem}`);
+        return;
+      }
+    }
+    routes = activeItems.value.map((i) => ({ itemId: i.id, routeId: drafts.value[i.id]!.routeId, steps: drafts.value[i.id]!.steps }));
+  }
   return run(
-    () => acceptProductionOrder({ id, promisedDate: promisedDate.value?.format('YYYY-MM-DD'), reply: reply.value.trim() || undefined }),
+    () =>
+      acceptProductionOrder({
+        id,
+        promisedDate: promisedDate.value?.format('YYYY-MM-DD'),
+        reply: reply.value.trim() || undefined,
+        routes,
+      }),
     '已接单，这张单会进入 AI 排单的待生产订单',
   );
 }
@@ -112,6 +203,20 @@ function finish() {
   if (!order.value) return;
   const id = order.value.id;
   return run(() => completeProductionOrder(id), '这张单已完成');
+}
+
+/** 采购单生成的单：生产中、已完成都能出已完工的货。 */
+const canShip = computed(
+  () => props.mode === 'factory' && fromPurchase.value && ['ACCEPTED', 'COMPLETED'].includes(order.value?.status ?? ''),
+);
+
+function shippable(item: Api.Item) {
+  return num(item.completedQuantity) - num(item.shippedQuantity);
+}
+
+function openShip(item: Api.Item) {
+  shipItem.value = item;
+  shipOpen.value = true;
 }
 
 function openDelivery(item: Api.Item) {
@@ -177,12 +282,32 @@ function producedQty(item: Api.Item) {
         <div class="flex flex-wrap items-center gap-2">
           <Tag v-if="status" :color="status.color" class="m-0">{{ status.label }}</Tag>
           <span class="text-muted-foreground">{{ order.factoryName }}</span>
-          <span v-if="order.purpose" class="text-muted-foreground">· {{ order.purpose }}</span>
+          <span v-if="order.purpose && !fromPurchase" class="text-muted-foreground">· {{ order.purpose }}</span>
+          <Tag v-if="fromPurchase" class="m-0" color="blue">采购单 {{ order.sourceOrderCode }}</Tag>
         </div>
+        <Alert
+          v-if="fromPurchase && order.sourceChanged && mode === 'factory'"
+          show-icon
+          type="warning"
+          message="采购单有变更"
+          :description="order.sourceChangeNote ?? ''"
+        >
+          <template #action>
+            <Button :loading="busy" size="small" @click="confirmChange">知道了</Button>
+          </template>
+        </Alert>
+        <p v-else-if="fromPurchase && order.sourceChangeNote && order.status === 'SUBMITTED'" class="m-0 text-xs text-warning">
+          {{ order.sourceChangeNote }}
+        </p>
         <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
-          <Descriptions.Item label="下单人">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
+          <Descriptions.Item v-if="fromPurchase" :span="2" label="来源">
+            采购单 {{ order.sourceOrderCode }}
+            <template v-if="order.sourceContractCode"> · 合同 {{ order.sourceContractCode }}</template>
+            <span v-if="order.customerName" class="text-muted-foreground">（{{ order.customerName }}）</span>
+          </Descriptions.Item>
+          <Descriptions.Item :label="fromPurchase ? '采购员' : '下单人'">{{ order.requesterName }}<span v-if="order.requesterDeptName" class="text-muted-foreground">（{{ order.requesterDeptName }}）</span></Descriptions.Item>
           <Descriptions.Item label="下单时间">{{ timeText(order.createTime) }}</Descriptions.Item>
-          <Descriptions.Item label="希望交货">{{ dateText(order.requiredDate) }}</Descriptions.Item>
+          <Descriptions.Item :label="fromPurchase ? '采购单交期' : '希望交货'">{{ dateText(order.requiredDate) || '没填' }}</Descriptions.Item>
           <Descriptions.Item label="工厂交期">{{ dateText(order.promisedDate) || '—' }}</Descriptions.Item>
           <Descriptions.Item v-if="order.remark" :span="2" label="备注">{{ order.remark }}</Descriptions.Item>
           <Descriptions.Item v-if="order.reply" :span="2" :label="order.status === 'REJECTED' ? '退回原因' : '工厂回复'">
@@ -205,11 +330,35 @@ function producedQty(item: Api.Item) {
                 }}
               </span>
               <span v-if="i.remark" class="text-xs text-warning">备注：{{ i.remark }}</span>
-              <span v-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
-                工艺：旧单没有定工艺，从已包装成品交货
+              <span v-if="num(i.quantity) === 0" class="text-xs text-muted-foreground">采购单已取消这一行</span>
+              <div
+                v-else-if="fromPurchase && drafts[i.id] && (canHandle || (editingRoute === i.id && canProgress))"
+                class="mt-1 flex flex-col gap-1"
+              >
+                <RoutePicker
+                  :id="`po-item-${i.id}`"
+                  :model-value="drafts[i.id]!"
+                  :options="routeOptions"
+                  @update:model-value="(v: RouteDraft) => (drafts[i.id] = v)"
+                />
+                <span v-if="editingRoute === i.id" class="flex gap-2">
+                  <Button :loading="busy" size="small" type="primary" @click="saveRoute(i)">保存工艺</Button>
+                  <Button size="small" @click="(editingRoute = undefined), loadRoutes()">取消</Button>
+                </span>
+              </div>
+              <span v-else-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
+                {{ fromPurchase ? '工艺：工厂接单时定' : '工艺：旧单没有定工艺，从已包装成品交货' }}
               </span>
               <span v-else class="mt-1 flex flex-wrap items-center gap-1 text-xs">
                 <span class="text-muted-foreground">工艺 · {{ i.routeName || '自选工序' }}：</span>
+                <button
+                  v-if="fromPurchase && canProgress && !itemStarted(i) && editingRoute === undefined"
+                  class="text-primary hover:underline"
+                  type="button"
+                  @click="editingRoute = i.id"
+                >
+                  改工艺
+                </button>
                 <template v-for="(step, index) in plannedSteps(i)" :key="step.process">
                   <span v-if="index > 0" class="text-muted-foreground" aria-hidden="true">›</span>
                   <span
@@ -227,12 +376,27 @@ function producedQty(item: Api.Item) {
             </span>
             <span class="flex shrink-0 flex-col items-end gap-1 text-right">
               <span><b>{{ num(i.quantity) }}</b> {{ i.unit }}</span>
-              <span v-if="order.status !== 'SUBMITTED'" class="text-xs text-muted-foreground">
+              <span v-if="order.status !== 'SUBMITTED' && fromPurchase" class="text-xs text-muted-foreground">
+                已完工 <b class="text-foreground">{{ num(i.completedQuantity) }}</b> · 已出货 {{ num(i.shippedQuantity) }}
+                <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
+              </span>
+              <span v-else-if="order.status !== 'SUBMITTED'" class="text-xs text-muted-foreground">
                 已交货 <b class="text-foreground">{{ num(i.completedQuantity) }}</b>
                 <template v-if="producedQty(i) > 0"> · 最后一道已做 {{ producedQty(i) }}</template>
               </span>
+              <span v-if="fromPurchase && (canProgress || canShip)" class="flex gap-1">
+                <Button
+                  v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
+                  size="small"
+                  type="primary"
+                  @click="openDelivery(i)"
+                >
+                  完工登记
+                </Button>
+                <Button v-if="canShip && shippable(i) > 0" size="small" @click="openShip(i)">出货</Button>
+              </span>
               <Button
-                v-if="canProgress && num(i.completedQuantity) < num(i.quantity)"
+                v-if="canProgress && !fromPurchase && num(i.completedQuantity) < num(i.quantity)"
                 size="small"
                 type="primary"
                 @click="openDelivery(i)"
@@ -243,30 +407,41 @@ function producedQty(item: Api.Item) {
           </div>
         </section>
 
+        <PurchaseSheet v-if="fromPurchase" :order-id="order.id" />
+
         <MaterialPlan v-if="canPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
           <h3 class="m-0 text-sm font-semibold">接单处理</h3>
           <label for="po-promised" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            回复交期（默认是下单人希望的日期）
+            {{ fromPurchase ? '回复交期（默认是采购单交期，没填要自己选）' : '回复交期（默认是下单人希望的日期）' }}
             <DatePicker id="po-promised" v-model:value="promisedDate" :disabled-date="disabledDate" class="w-48" />
           </label>
           <label for="po-reply" class="flex flex-col gap-1 text-xs text-muted-foreground">
             说明（退回时必填）
             <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="例如 排在下周三开工 / 这个颜色缺料" />
           </label>
+          <p v-if="fromPurchase" class="m-0 text-xs text-muted-foreground">
+            工艺由工厂定：在上面每个产品下面选好要走的工序再接单；没开工序单前都还能改。
+          </p>
           <div class="flex gap-2">
             <Button :loading="busy" type="primary" @click="accept">接单</Button>
             <Button :loading="busy" danger @click="reject">退回</Button>
           </div>
         </section>
 
-        <p v-if="order.status === 'ACCEPTED'" class="m-0 text-xs text-muted-foreground">
+        <p v-if="order.status === 'ACCEPTED' && fromPurchase" class="m-0 text-xs text-muted-foreground">
+          这张单来自采购单：做好的货点「完工登记」，货留在工厂（转到批次 {{ order.orderNo }}），采购单到货同一步更新；
+          要发走时点「出货」，有合同登记合同出货，没有合同记出货去向。数量跟着采购单走，采购员改了会提示。
+        </p>
+        <p v-else-if="order.status === 'ACCEPTED'" class="m-0 text-xs text-muted-foreground">
           做好的货点「交货」交到采购部门仓库，完成数量按交货数累加。工序单关联这张单只用来看各道工序的进度。
         </p>
 
         <section v-if="deliveries.length > 0" class="flex flex-col gap-2">
-          <h3 class="m-0 text-sm font-semibold">交货记录（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）</h3>
+          <h3 class="m-0 text-sm font-semibold">
+            {{ fromPurchase ? '完工记录' : '交货记录' }}（{{ deliveries.filter((d) => d.status === 'DELIVERED').length }}）
+          </h3>
           <div
             v-for="d in deliveries"
             :key="d.id"
@@ -280,8 +455,14 @@ function producedQty(item: Api.Item) {
                 <span class="text-xs text-muted-foreground">{{ dateText(d.deliveredDate) }} · {{ d.operatorName }}</span>
               </span>
               <span class="text-xs text-muted-foreground">
-                {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} → {{ d.warehouseName || '采购仓库' }}
-                <template v-if="d.stockInCode">（入库单 {{ d.stockInCode }}）</template>
+                <template v-if="d.kind === 'FACTORY'">
+                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} 完工，留在{{ d.warehouseName || '工厂' }}
+                  <template v-if="d.stockInCode">（采购单到货 {{ d.stockInCode }}）</template>
+                </template>
+                <template v-else>
+                  {{ d.productName }} {{ num(d.quantity) }}{{ d.unit }} → {{ d.warehouseName || '采购仓库' }}
+                  <template v-if="d.stockInCode">（入库单 {{ d.stockInCode }}）</template>
+                </template>
               </span>
               <span class="text-xs text-muted-foreground">
                 {{ d.lines.map((l) => `${l.batchNo} × ${num(l.quantity)}`).join('，') }}
@@ -302,14 +483,18 @@ function producedQty(item: Api.Item) {
 
         <section v-if="canProgress" class="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 p-3">
           <span class="text-xs text-muted-foreground">
-            {{ allDone ? '已全部交货，可以结束这张单。' : '还没交够也可以结束，比如下单人同意少做。' }}
+            <template v-if="fromPurchase">采购单做完或不再做时结束这张单；结束后已完工的货还能出货。</template>
+            <template v-else>{{ allDone ? '已全部交货，可以结束这张单。' : '还没交够也可以结束，比如下单人同意少做。' }}</template>
           </span>
           <Popconfirm title="结束这张单？结束后不能再交货" ok-text="结束" @confirm="finish">
             <Button :loading="busy" :type="allDone ? 'primary' : 'default'">结束这张单</Button>
           </Popconfirm>
         </section>
 
-        <div v-if="mode === 'mine'" class="flex flex-wrap justify-end gap-2">
+        <p v-if="mode === 'mine' && fromPurchase" class="m-0 text-xs text-muted-foreground">
+          这张单是采购单 {{ order.sourceOrderCode }} 自动生成的，改数量、取消请改采购单。
+        </p>
+        <div v-else-if="mode === 'mine'" class="flex flex-wrap justify-end gap-2">
           <Button @click="emit('copy', order)">{{ order.status === 'REJECTED' ? '修改后重新下单' : '复制下单' }}</Button>
           <Popconfirm v-if="canCancel" title="撤回这张单？工厂还没接单" ok-text="撤回" @confirm="cancel">
             <Button :loading="busy" danger>撤回</Button>
@@ -317,17 +502,33 @@ function producedQty(item: Api.Item) {
         </div>
       </div>
     </Spin>
-    <DeliveryModal v-model:open="deliveryOpen" :item="deliveryItem" @saved="onDelivered" />
+    <DeliveryModal
+      v-model:open="deliveryOpen"
+      :finish="fromPurchase"
+      :item="deliveryItem"
+      :order-no="order?.orderNo"
+      @saved="onDelivered"
+    />
+    <ShipModal
+      v-model:open="shipOpen"
+      :contract-code="order?.sourceContractCode"
+      :item="shipItem"
+      :order-no="order?.orderNo"
+      @saved="onDelivered"
+    />
     <Modal
       :open="!!voidTarget"
       :confirm-loading="busy"
       ok-text="作废"
       :ok-button-props="{ danger: true }"
-      :title="`作废交货单 ${voidTarget?.deliveryNo ?? ''}`"
+      :title="`作废${voidTarget?.kind === 'FACTORY' ? '完工登记' : '交货单'} ${voidTarget?.deliveryNo ?? ''}`"
       @cancel="voidTarget = undefined"
       @ok="confirmVoid"
     >
-      <p class="text-xs text-muted-foreground">
+      <p v-if="voidTarget?.kind === 'FACTORY'" class="text-xs text-muted-foreground">
+        作废后采购单到货冲回，货从批次 {{ order?.orderNo }} 转回原来的库存行，订单完成数量扣回；这批货已经出货的不能作废。
+      </p>
+      <p v-else class="text-xs text-muted-foreground">
         作废后采购仓库扣回这批货（已经从仓库出库的不能作废），工厂库存退回原来的行，订单完成数量扣回。
       </p>
       <Input id="delivery-void-reason" v-model:value="voidReason" :maxlength="255" placeholder="作废原因（必填）" />

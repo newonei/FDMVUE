@@ -32,6 +32,7 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CustomProcessPanel from './modules/custom-process-panel.vue';
 import RoutePanel from './modules/route-panel.vue';
+import SupplierPanel from './modules/supplier-panel.vue';
 import WageItemPanel from './modules/wage-item-panel.vue';
 
 /**
@@ -40,6 +41,7 @@ import WageItemPanel from './modules/wage-item-panel.vue';
  *   附加工序（打孔、全检等，不改变规格）也在这里新建、停用；
  * - 工艺路线：本厂常用的工序组合，下单人向工厂下单时选用并按产品调整；
  * - AI 排单：本厂排单用哪个模型，只能选 AI 网关已给本厂放行的模型；
+ * - 对应供应商：采购单的供应商是这些公司时自动生成工厂订单；
  * - 计价项目：本厂的计件、计时、杂活、补助价格（单独权限，普通人员看不到）。
  */
 defineOptions({ name: 'FdmGongchangFactorySetting' });
@@ -51,7 +53,7 @@ const canEdit = computed(() =>
 const canSeeWage = computed(() =>
   hasAccessByCodes(['fdmgongchang:wage-item:query']),
 );
-const activeTab = ref<'ai' | 'processes' | 'routes' | 'wage'>('processes');
+const activeTab = ref<'ai' | 'processes' | 'routes' | 'suppliers' | 'wage'>('processes');
 
 const factory = useFactory();
 const setting = ref<Api.Setting>();
@@ -378,6 +380,9 @@ async function save() {
                 选的模型以后不再放行时，自动改用第一个放行的模型。
               </p>
             </section>
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="setting" key="suppliers" tab="对应供应商">
+            <SupplierPanel :can-edit="canEdit" :suppliers="setting.suppliers" @saved="load" />
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
             <WageItemPanel :processes="allProcesses" />

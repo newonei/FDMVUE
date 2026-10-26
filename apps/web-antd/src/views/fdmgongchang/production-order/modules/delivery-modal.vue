@@ -18,8 +18,9 @@ import { num } from '../shared';
  * 交货：把这个产品做好的货交到采购部门仓库。
  * 从订单工艺最后一道的库存阶段选库存行扣减，采购仓库同一步登记生产入库；订单完成数量随之累加。
  * 订单按产品单位，库存按工序产出单位，交货按 1:1 计。
+ * 采购单生成的单（finish）是完工登记：货留在工厂，转到订单号批次，采购单到货随之更新，不选仓库。
  */
-const props = defineProps<{ item?: Api.Item }>();
+const props = defineProps<{ finish?: boolean; item?: Api.Item; orderNo?: string }>();
 const emit = defineEmits<{ saved: [text: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 
@@ -61,7 +62,10 @@ async function loadStock() {
     const kept = filled.value;
     rows.value = [
       ...kept,
-      ...page.list.filter((s) => !kept.some((k) => k.stock.id === s.id)).map((stock) => ({ quantity: null, stock })),
+      ...page.list
+        // 已经完工登记过的货（订单号批次）不再列出
+        .filter((s) => !kept.some((k) => k.stock.id === s.id) && !(props.finish && s.batchNo === props.orderNo))
+        .map((stock) => ({ quantity: null, stock })),
     ];
   } catch {
     rows.value = filled.value;
@@ -86,7 +90,9 @@ watch(open, async (value) => {
   deliveredDate.value = dayjs();
   await Promise.all([
     loadStock(),
-    getDeliveryWarehouses()
+    props.finish
+      ? undefined
+      : getDeliveryWarehouses()
       .then((list) => {
         warehouses.value = list;
         warehouseId.value = list.find((w) => w.isDefault)?.id ?? list[0]?.id;
@@ -98,7 +104,7 @@ watch(open, async (value) => {
 async function submit() {
   error.value = '';
   if (!props.item) return;
-  if (!warehouseId.value) {
+  if (!props.finish && !warehouseId.value) {
     error.value = '请选择交到哪个仓库';
     return;
   }
@@ -122,9 +128,13 @@ async function submit() {
       lines: filled.value.map((r) => ({ quantity: r.quantity as number, stockId: r.stock.id })),
       productionOrderItemId: props.item.id,
       remark: remark.value.trim() || undefined,
-      warehouseId: warehouseId.value,
+      warehouseId: props.finish ? undefined : warehouseId.value,
     });
     open.value = false;
+    if (props.finish) {
+      emit('saved', `已登记完工 ${total.value}${props.item.unit ?? ''}，货在工厂，采购单到货已更新`);
+      return;
+    }
     const warehouse = warehouses.value.find((w) => w.id === warehouseId.value)?.name ?? '';
     emit('saved', `已交货 ${total.value}${props.item.unit ?? ''}，入${warehouse}`);
   } catch {
@@ -140,12 +150,16 @@ async function submit() {
     v-model:open="open"
     :confirm-loading="saving"
     :width="780"
-    ok-text="确认交货"
-    :title="`交货 · ${item?.productName ?? ''}`"
+    :ok-text="finish ? '确认完工' : '确认交货'"
+    :title="`${finish ? '完工登记' : '交货'} · ${item?.productName ?? ''}`"
     @ok="submit"
   >
     <div v-if="item" class="flex flex-col gap-3 text-sm">
-      <p class="m-0 text-xs text-muted-foreground">
+      <p v-if="finish" class="m-0 text-xs text-muted-foreground">
+        选「{{ item.deliveryStageLabel }}」库存登记完工：货留在工厂，转到批次 {{ orderNo }}（留给这张单出货），采购单到货同一步更新。
+        这个产品还差 <b class="text-foreground">{{ remaining }}</b> {{ item.unit }}。
+      </p>
+      <p v-else class="m-0 text-xs text-muted-foreground">
         从「{{ item.deliveryStageLabel }}」库存交到采购部门仓库，仓库同一步登记生产入库，订单完成数量随之累加。
         这个产品还差 <b class="text-foreground">{{ remaining }}</b> {{ item.unit }}。
       </p>
@@ -153,7 +167,7 @@ async function submit() {
         库存单位是「{{ item.deliveryUnit }}」，订单单位是「{{ item.unit }}」，交货按 1 {{ item.deliveryUnit }} = 1 {{ item.unit }} 计。
       </p>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label for="delivery-warehouse" class="flex flex-col gap-1 text-xs text-muted-foreground">
+        <label v-if="!finish" for="delivery-warehouse" class="flex flex-col gap-1 text-xs text-muted-foreground">
           交到哪个仓库
           <Select
             id="delivery-warehouse"
@@ -163,7 +177,7 @@ async function submit() {
           />
         </label>
         <label for="delivery-date" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          交货日期
+          {{ finish ? '完工日期' : '交货日期' }}
           <DatePicker id="delivery-date" v-model:value="deliveredDate" :allow-clear="false" class="w-full" />
         </label>
       </div>
@@ -205,7 +219,7 @@ async function submit() {
         备注
         <Input id="delivery-remark" v-model:value="remark" :maxlength="255" placeholder="选填，例如 送货车牌、签收人" />
       </label>
-      <p class="m-0 text-sm">本次交货 <b class="tabular-nums">{{ total }}</b> {{ item.unit }}</p>
+      <p class="m-0 text-sm">本次{{ finish ? '完工' : '交货' }} <b class="tabular-nums">{{ total }}</b> {{ item.unit }}</p>
       <p v-if="error" class="m-0 text-sm text-destructive">{{ error }}</p>
     </div>
   </Modal>
