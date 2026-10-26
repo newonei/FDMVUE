@@ -248,7 +248,7 @@ async function save() {
                     :min="0"
                     :controls="false"
                     placeholder="不盘留空"
-                    style="width: 100%"
+                    style="width: 120px"
                     :aria-label="`${row.productName} 实盘数`"
                   />
                   <Button size="small" type="link" @click="sameAsBook(row)">同账面</Button>
