@@ -229,6 +229,13 @@ onMounted(async () => {
           >
             工厂收货 · {{ record.warehouseName }}
           </Tag>
+          <Tag
+            v-if="record.kind === 'FACTORY_MADE'"
+            color="green"
+            title="自家工厂完工登记：货留在工厂库存，要冲回请在工厂排单的完工记录上作废"
+          >
+            工厂完工 · {{ record.warehouseName }}
+          </Tag>
         </div>
         <span v-else-if="column.key === 'warehouse'">{{
           record.warehouseName

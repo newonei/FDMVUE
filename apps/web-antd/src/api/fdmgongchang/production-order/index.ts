@@ -42,6 +42,10 @@ export namespace FdmgongchangProductionOrderApi {
     auxUsages?: AuxUsage[];
     /** 来源采购单的明细行（采购单生成的单才有）。 */
     sourceLineId?: null | string;
+    /** 来源采购明细对应的合同明细；有就从工厂出货登记到合同。 */
+    sourceContractItemId?: null | string;
+    /** 已出货数量（采购单生成的单从工厂出货）。 */
+    shippedQuantity?: number | string;
     color?: null | string;
     completedQuantity: number | string;
     id: number;
@@ -241,8 +245,10 @@ export namespace FdmgongchangProductionOrderApi {
     };
   }
 
-  /** 交货单：工厂把内部订单的成品交到采购仓库，订单完成数量 = 净交货数量。 */
+  /** 交货单：工厂把内部订单的成品交到采购仓库，订单完成数量 = 净交货数量；采购单生成的单是完工登记（kind=FACTORY）。 */
   export interface Delivery {
+    /** WAREHOUSE 交到采购仓库 / FACTORY 完工登记，货留在工厂。 */
+    kind?: 'FACTORY' | 'WAREHOUSE';
     createTime?: number | string;
     deliveredDate: number[] | string;
     deliveryNo: string;
@@ -273,7 +279,18 @@ export namespace FdmgongchangProductionOrderApi {
     lines: Array<{ quantity: number; stockId: number }>;
     productionOrderItemId: number;
     remark?: string;
-    warehouseId: string;
+    /** 完工登记（采购单生成的单）不用填。 */
+    warehouseId?: string;
+  }
+
+  /** 采购单生成的单从工厂出货。 */
+  export interface ShipReq {
+    /** 没有合同时必填，例如 电商仓。 */
+    destination?: string;
+    itemId: number;
+    lines: Array<{ quantity: number; stockId: number }>;
+    remark?: string;
+    shippedDate?: string;
   }
 
   export interface Warehouse {
@@ -481,6 +498,13 @@ export function rejectProductionOrder(
 /** 工厂给采购单生成的订单明细定工艺（开过工序单后不能再改）。 */
 export function saveItemRoute(data: FdmgongchangProductionOrderApi.RouteReq) {
   return requestClient.post<boolean>(`${BASE}/item-route`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 采购单生成的单从工厂出货：有合同登记合同出货，没有合同记出货去向。 */
+export function shipFactoryOrder(data: FdmgongchangProductionOrderApi.ShipReq) {
+  return requestClient.post<number>(`${BASE}/ship`, data, {
     headers: factoryHeaders(),
   });
 }
