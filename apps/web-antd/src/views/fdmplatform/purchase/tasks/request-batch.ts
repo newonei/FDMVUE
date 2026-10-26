@@ -13,10 +13,10 @@ import { quoteFormErrors, taskContext } from '../quotes/quick-order';
  * 服务端仍逐行按单条规则校验，任何一行不通过整单不生效。
  */
 
+/** MAKE 只出现在停用前的旧任务里；自家工厂生产改开采购单（供应商选自家工厂）。 */
 export type FulfillmentMethod = 'BUY' | 'MAKE' | 'STOCK';
 export const METHOD_OPTIONS: { label: string; value: FulfillmentMethod }[] = [
   { value: 'BUY', label: '外采' },
-  { value: 'MAKE', label: '自产' },
   { value: 'STOCK', label: '库存' },
 ];
 
@@ -118,7 +118,7 @@ export function splitRow(all: AssignRow[], source: AssignRow): AssignRow {
     ...source,
     key: nextKey(),
     split: true,
-    method: source.method === 'BUY' ? 'MAKE' : 'BUY',
+    method: source.method === 'BUY' ? 'STOCK' : 'BUY',
     quantity: rest.isGreaterThan(0) ? plain(rest) : undefined,
     factoryId: undefined,
   };

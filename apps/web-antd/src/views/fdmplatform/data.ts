@@ -484,7 +484,7 @@ export function contractActions(
       action: 'ASSIGN_FULFILLMENT',
       title: '分派采购任务',
       description:
-        '同一申请明细可以分配库存、自制与外采；累计分配不能超过申请数量。',
+        '同一申请明细可以分配库存与外采；累计分配不能超过申请数量。需要自家工厂生产时，开采购单并选自家工厂作为供应商。',
       fields: [
         selectField('requestId', '采购申请', requestOptions),
         selectField('requestItemId', '申请明细', options(requestItems)),
@@ -493,16 +493,12 @@ export function contractActions(
           '采购方式',
           [
             { value: 'BUY', label: '外采' },
-            { value: 'MAKE', label: '自产' },
             { value: 'STOCK', label: '库存' },
           ],
           { default: 'BUY' },
         ),
         quantity(),
         field('ownerUserId', '经办人', 'number', { min: 1 }),
-        field('factoryId', '承接工厂名称或业务编码（自产时填写）', undefined, {
-          required: false,
-        }),
         field('remark', '分派说明', 'textarea', { required: false }),
       ],
     },

@@ -40,6 +40,8 @@ export namespace FdmgongchangProductionOrderApi {
 
   export interface Item {
     auxUsages?: AuxUsage[];
+    /** 来源采购单的明细行（采购单生成的单才有）。 */
+    sourceLineId?: null | string;
     color?: null | string;
     completedQuantity: number | string;
     id: number;
@@ -124,7 +126,18 @@ export namespace FdmgongchangProductionOrderApi {
     requesterDeptName?: null | string;
     requesterName?: null | string;
     requesterUserId: number;
-    requiredDate: number[] | string;
+    /** 希望交货日期；采购单没填交期时为空。 */
+    requiredDate?: null | number[] | string;
+    /** MANUAL 内部下单 / PURCHASE_ORDER 供应商是本厂的采购单自动生成。 */
+    sourceType?: 'MANUAL' | 'PURCHASE_ORDER';
+    sourceOrderId?: null | string;
+    sourceOrderCode?: null | string;
+    sourceContractId?: null | string;
+    sourceContractCode?: null | string;
+    customerName?: null | string;
+    /** 接单后采购单改了数量、交期或取消了，等工厂确认。 */
+    sourceChanged?: boolean | null;
+    sourceChangeNote?: null | string;
     status: Status;
     statusLabel: string;
     totalQuantity: number | string;
@@ -157,6 +170,75 @@ export namespace FdmgongchangProductionOrderApi {
     id: number;
     promisedDate?: string;
     reply?: string;
+    /** 采购单生成的单接单时，每条明细的工艺（工厂定）。 */
+    routes?: RouteReq[];
+  }
+
+  export interface RouteReq {
+    itemId: number;
+    routeId?: number;
+    steps: string[];
+  }
+
+  /** 采购单生成的单的生产要求：采购单本身和下单资料（实时读采购单）。 */
+  export interface PurchaseSheet {
+    details: {
+      accessories?: Array<{
+        checked?: boolean;
+        name: string;
+        remark?: null | string;
+      }>;
+      accessoryNote?: null | string;
+      deliveryAddress?: null | string;
+      deliveryDate?: null | string;
+      lineExtras?: Record<
+        string,
+        {
+          customerColor?: string;
+          imageId?: string;
+          model?: string;
+          packQty?: number;
+          weight?: string;
+        }
+      >;
+      lineNotes?: Record<string, { gift?: boolean; remark?: null | string }>;
+      packagingSteps?: Array<{
+        imageIds?: string[];
+        text?: null | string;
+        title: string;
+      }>;
+      purchaseDate?: null | string;
+      revision?: number;
+      sharedColumns?: Array<{
+        imageIds?: string[];
+        text?: null | string;
+        title: string;
+      }>;
+      status?: 'CONFIRMED' | 'DRAFT';
+      subject?: null | string;
+    };
+    order: {
+      code: string;
+      contractCode?: null | string;
+      customerName?: null | string;
+      id: string;
+      lines: Array<{
+        cancelledQuantity?: number | string;
+        color?: null | string;
+        id: string;
+        material?: null | string;
+        packaging?: null | string;
+        printing?: null | string;
+        quantity: number | string;
+        size?: null | string;
+        skuCode?: null | string;
+        skuName?: null | string;
+        specification?: null | string;
+        unit?: null | string;
+      }>;
+      status?: null | string;
+      supplierName?: null | string;
+    };
   }
 
   /** 交货单：工厂把内部订单的成品交到采购仓库，订单完成数量 = 净交货数量。 */
@@ -393,6 +475,37 @@ export function rejectProductionOrder(
 ) {
   return requestClient.post<boolean>(`${BASE}/reject`, data, {
     headers: factoryHeaders(),
+  });
+}
+
+/** 工厂给采购单生成的订单明细定工艺（开过工序单后不能再改）。 */
+export function saveItemRoute(data: FdmgongchangProductionOrderApi.RouteReq) {
+  return requestClient.post<boolean>(`${BASE}/item-route`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 确认采购单的变更，去掉「有变更」标记。 */
+export function confirmProductionOrderChange(id: number) {
+  return requestClient.post<boolean>(`${BASE}/confirm-change`, undefined, {
+    headers: factoryHeaders(),
+    params: { id },
+  });
+}
+
+/** 采购单生成的单的生产要求（采购单下单资料）。 */
+export function getPurchaseSheet(id: number) {
+  return requestClient.get<FdmgongchangProductionOrderApi.PurchaseSheet>(
+    `${BASE}/purchase-sheet`,
+    { headers: factoryHeaders(), params: { id } },
+  );
+}
+
+/** 下单资料里的配图。 */
+export function getPurchaseImage(id: number, imageId: string) {
+  return requestClient.download<Blob>(`${BASE}/purchase-image`, {
+    headers: factoryHeaders(),
+    params: { id, imageId },
   });
 }
 

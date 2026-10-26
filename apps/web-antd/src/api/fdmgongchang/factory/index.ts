@@ -185,8 +185,16 @@ export namespace FdmgongchangFactorySettingApi {
     width?: null | number | string;
   }
 
+  /** 采购模块的供应商。 */
+  export interface SupplierOption {
+    id: string;
+    name: string;
+  }
+
   export interface Setting {
     mixBoard?: MixBoard | null;
+    /** 本厂对应的供应商：采购单的供应商是这些时，自动生成工厂订单。 */
+    suppliers?: SupplierOption[];
     processes: ProcessToggle[];
     /** AI 排单选的模型；为空表示自动（本厂放行的第一个）。 */
     scheduleModelId?: null | number | string;
@@ -203,6 +211,23 @@ export namespace FdmgongchangFactorySettingApi {
     /** AI 排单用的模型；为空表示自动。 */
     scheduleModelId?: null | number | string;
   }
+}
+
+/** 搜采购模块的供应商（选本厂对应的供应商）。 */
+export function searchFactorySuppliers(keyword: string) {
+  return requestClient.get<FdmgongchangFactorySettingApi.SupplierOption[]>(
+    '/fdmgongchang/factory-setting/supplier-search',
+    { headers: factoryHeaders(), params: { keyword } },
+  );
+}
+
+/** 保存本厂对应的供应商（整体覆盖）。 */
+export function saveFactorySuppliers(supplierIds: string[]) {
+  return requestClient.put<boolean>(
+    '/fdmgongchang/factory-setting/suppliers/save',
+    supplierIds,
+    { headers: factoryHeaders() },
+  );
 }
 
 /** 工厂设置：本厂工序等各厂自己的配置。 */
