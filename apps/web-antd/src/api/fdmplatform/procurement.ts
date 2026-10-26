@@ -36,6 +36,9 @@ export interface ProcurementSetting {
   managerUserIds?: number[];
   isDefault?: boolean;
   countInTotal?: boolean;
+  /** 仓库所属工厂：工厂完工的货入本厂仓库，工厂库管只能操作本厂仓库 */
+  factoryId?: null | number;
+  factoryName?: null | string;
 }
 export interface SupplierContact {
   id: string;

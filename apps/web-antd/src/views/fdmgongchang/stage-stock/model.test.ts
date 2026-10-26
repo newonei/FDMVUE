@@ -455,7 +455,7 @@ describe('stage stock catalog', () => {
   it('builds the flow from the configured processes, including skip-stage sources', () => {
     expect(stageFlow('SHEET', options)).toEqual({ current: '当前SHEET', from: '开片产出', to: '立切、贴合领料' });
     expect(stageFlow('RAW', options)).toEqual({ current: '当前RAW', from: '采购到货', to: '密炼领料' });
-    expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出', to: '外贸出货' });
+    expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出', to: '生产入库进仓库' });
   });
 
   it('names a stock row by material, colour and stage, and keeps the rest as spec', () => {

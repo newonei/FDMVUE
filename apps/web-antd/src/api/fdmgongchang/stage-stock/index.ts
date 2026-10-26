@@ -162,6 +162,9 @@ export namespace FdmgongchangStageStockApi {
 
   export interface Stock {
     batchNo: string;
+    /** 库存中心跨厂查询时带上工厂 */
+    factoryId?: number;
+    factoryName?: null | string;
     id: number;
     item?: ItemAttrs | null;
     itemCode: string;
@@ -170,6 +173,13 @@ export namespace FdmgongchangStageStockApi {
     quantity: Decimal;
     stage: string;
     updateTime?: number | string;
+  }
+
+  /** 库存中心：各工厂工序库存，工厂、阶段不填为全部 */
+  export interface CenterStockPageReq extends PageParam {
+    factoryId?: number;
+    keyword?: string;
+    stage?: string;
   }
 
   export interface StockPageReq extends PageParam {
@@ -473,35 +483,6 @@ export namespace FdmgongchangStageStockApi {
     unit?: null | string;
   }
 
-  /** 可从工序库存出货的合同明细（自制或库存履约）。 */
-  export interface ShippableItem {
-    color?: null | string;
-    contractCode: string;
-    contractId: string;
-    contractItemId: string;
-    customerName?: null | string;
-    itemQuantity: Decimal;
-    material?: null | string;
-    method: 'BUY' | 'MAKE' | 'STOCK';
-    productCode?: null | string;
-    productName?: null | string;
-    remainingQuantity: Decimal;
-    requiredDate?: DateValue;
-    shippedQuantity: Decimal;
-    size?: null | string;
-    specification?: null | string;
-    unit?: null | string;
-  }
-
-  export interface ShipmentCreateReq {
-    contractId: string;
-    contractItemId: string;
-    lines: Array<{ quantity: Decimal; stockId: number }>;
-    operatorName?: string;
-    remark?: string;
-    shippedDate?: string;
-  }
-
   export interface Shipment {
     contractCode?: null | string;
     contractId: string;
@@ -687,6 +668,23 @@ export function getStockPage(params: FdmgongchangStageStockApi.StockPageReq) {
   );
 }
 
+/** 库存中心：各工厂有货的工序库存（只读，不带工厂请求头）。 */
+export function getCenterStockPage(
+  params: FdmgongchangStageStockApi.CenterStockPageReq,
+) {
+  return requestClient.get<PageResult<FdmgongchangStageStockApi.Stock>>(
+    `${BASE}/center/stock-page`,
+    { params },
+  );
+}
+
+/** 库存中心：启用中的工厂。 */
+export function getCenterFactories() {
+  return requestClient.get<Array<{ code?: string; id: number; name: string }>>(
+    `${BASE}/center/factories`,
+  );
+}
+
 export function receiveStock(data: FdmgongchangStageStockApi.ReceiveReq) {
   return requestClient.post<number>(`${BASE}/stock/receive`, data, {
     headers: factoryHeaders(),
@@ -811,21 +809,6 @@ export function getMakeTasks() {
     `${BASE}/trade/make-tasks`,
     { headers: factoryHeaders() },
   );
-}
-
-export function getShippableItems() {
-  return requestClient.get<FdmgongchangStageStockApi.ShippableItem[]>(
-    `${BASE}/trade/shippable-items`,
-    { headers: factoryHeaders() },
-  );
-}
-
-export function createShipment(
-  data: FdmgongchangStageStockApi.ShipmentCreateReq,
-) {
-  return requestClient.post<number>(`${BASE}/shipment/create`, data, {
-    headers: factoryHeaders(),
-  });
 }
 
 export function getShipmentPage(

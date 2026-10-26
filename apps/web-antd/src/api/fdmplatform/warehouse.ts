@@ -68,7 +68,9 @@ export interface StockIn extends VoidInfo {
 }
 
 export interface StockOutLine extends StockProduct {
-  contractItemId: string;
+  /** 销售出库按合同明细；其它出库按库存行 */
+  contractItemId?: string;
+  stockId?: string;
   quantity: Decimal;
   salesUnitPrice?: Decimal;
   unitCost?: Decimal;
@@ -79,11 +81,13 @@ export interface StockOut extends VoidInfo {
   id: string;
   code: string;
   status: 'SHIPPED' | 'VOIDED';
-  kind: 'DIRECT' | 'SALES';
+  /** SALES 销售出库 / DIRECT 入库直发 / OTHER 其它出库（不关联合同，记去向） */
+  kind: 'DIRECT' | 'OTHER' | 'SALES';
   warehouseId: string;
   warehouseName: string;
-  contractId: string;
-  contractCode: string;
+  contractId?: null | string;
+  contractCode?: null | string;
+  destination?: string;
   customerName?: string;
   shippedDate: string;
   remark?: string;
@@ -106,13 +110,21 @@ export interface StockBalance extends StockProduct {
   lastOutDate?: string;
 }
 
-/** 流水来源：采购入库、销售出库、作废入库（扣回）、作废出库（加回）、采购退货 */
+/** 流水来源：采购入库、销售出库、作废、采购退货、生产入库、其它出库、调拨、盘点 */
 export type StockTxnAction =
+  | 'FACTORY_IN'
+  | 'OTHER_OUT'
   | 'PURCHASE_RETURN'
   | 'STOCK_IN'
   | 'STOCK_OUT'
+  | 'STOCKTAKE_GAIN'
+  | 'STOCKTAKE_LOSS'
+  | 'TRANSFER_IN'
+  | 'TRANSFER_OUT'
+  | 'VOID_FACTORY_IN'
   | 'VOID_STOCK_IN'
-  | 'VOID_STOCK_OUT';
+  | 'VOID_STOCK_OUT'
+  | 'VOID_TRANSFER';
 
 export interface StockTxn extends StockProduct {
   id: string;
@@ -194,6 +206,97 @@ export interface StockOutCreate {
   lines: { contractItemId: string; quantity: Decimal }[];
 }
 
+/** 库存中心的仓库；writable 表示当前登录人能在这个仓库出库、调出、盘点（工厂库管只能操作本厂仓库） */
+export interface InventoryWarehouse {
+  id: string;
+  name: string;
+  code?: string;
+  isDefault: boolean;
+  factoryId?: null | number;
+  factoryName?: null | string;
+  writable: boolean;
+}
+
+export interface StockLineInput {
+  stockId: string;
+  quantity: Decimal;
+}
+
+export interface OtherOutCreate {
+  idempotencyKey: string;
+  warehouseId: string;
+  shippedDate?: string;
+  /** 去向：电商仓、平台仓、样品、报废等 */
+  destination: string;
+  remark?: string;
+  lines: StockLineInput[];
+}
+
+export interface TransferLine extends StockProduct {
+  stockId: string;
+  quantity: Decimal;
+  unitCost?: Decimal;
+  costKnown: boolean;
+}
+
+export interface Transfer extends VoidInfo {
+  id: string;
+  code: string;
+  status: 'TRANSFERRED' | 'VOIDED';
+  fromWarehouseId: string;
+  fromWarehouseName: string;
+  toWarehouseId: string;
+  toWarehouseName: string;
+  transferDate: string;
+  remark?: string;
+  lines: TransferLine[];
+  createdBy: number;
+  createdAt: string;
+}
+
+export interface TransferCreate {
+  idempotencyKey: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  transferDate?: string;
+  remark?: string;
+  lines: StockLineInput[];
+}
+
+export interface StocktakeLine extends StockProduct {
+  stockId: string;
+  bookQuantity: Decimal;
+  actualQuantity: Decimal;
+  diffQuantity: Decimal;
+  unitCost?: Decimal;
+  diffAmount?: Decimal;
+}
+
+export interface Stocktake {
+  id: string;
+  code: string;
+  status: 'POSTED';
+  warehouseId: string;
+  warehouseName: string;
+  countedDate: string;
+  remark?: string;
+  changedCount: number;
+  gainAmount: Decimal;
+  lossAmount: Decimal;
+  lines: StocktakeLine[];
+  createdBy: number;
+  createdAt: string;
+}
+
+export interface StocktakeCreate {
+  idempotencyKey: string;
+  warehouseId: string;
+  countedDate?: string;
+  remark?: string;
+  /** bookQuantity 是盘点时看到的账面数，过账时账面变了要重盘 */
+  lines: { actualQuantity: Decimal; bookQuantity: Decimal; stockId: string }[];
+}
+
 /** ACCEPTED 退合格品（扣库存）/ EXCEPTION 退回不合格品（未进库存，只登记） */
 export type ReturnKind = 'ACCEPTED' | 'EXCEPTION';
 
@@ -260,13 +363,44 @@ export function getStockIns(
 export function createStockIn(data: StockInCreate) {
   return requestClient.post<StockIn>(`${base}/stock-ins`, data);
 }
-export function getStockOuts(params: PageParams & { contractId?: string }) {
+/** kind：SALES 销售出库（含直发）/ OTHER 其它出库；不填全部 */
+export function getStockOuts(
+  params: PageParams & { contractId?: string; kind?: 'OTHER' | 'SALES' },
+) {
   return requestClient.get<PageResult<StockOut>>(`${base}/stock-outs/page`, {
     params,
   });
 }
 export function createStockOut(data: StockOutCreate) {
   return requestClient.post<StockOut>(`${base}/stock-outs`, data);
+}
+export function createOtherOut(data: OtherOutCreate) {
+  return requestClient.post<StockOut>(`${base}/other-outs`, data);
+}
+export function getInventoryWarehouses() {
+  return requestClient.get<InventoryWarehouse[]>(`${base}/warehouses`);
+}
+export function getTransfers(params: PageParams) {
+  return requestClient.get<PageResult<Transfer>>(`${base}/transfers/page`, {
+    params,
+  });
+}
+export function createTransfer(data: TransferCreate) {
+  return requestClient.post<Transfer>(`${base}/transfers`, data);
+}
+export function voidTransfer(
+  id: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<Transfer>(`${base}/transfers/${id}/void`, data);
+}
+export function getStocktakes(params: PageParams) {
+  return requestClient.get<PageResult<Stocktake>>(`${base}/stocktakes/page`, {
+    params,
+  });
+}
+export function createStocktake(data: StocktakeCreate) {
+  return requestClient.post<Stocktake>(`${base}/stocktakes`, data);
 }
 export function getStocks(params: {
   inStockOnly?: boolean;
