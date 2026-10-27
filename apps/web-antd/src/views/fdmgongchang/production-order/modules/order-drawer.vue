@@ -26,6 +26,7 @@ import {
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
+import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
@@ -382,6 +383,15 @@ function producedQty(item: Api.Item) {
 
         <PurchaseSheet v-if="fromPurchase" :order-id="order.id" />
 
+        <AuxPanel
+          v-if="fromPurchase && mode === 'factory'"
+          :key="`aux-${order.id}-${order.items.map((i) => (i.processes ?? []).join(',')).join('|')}`"
+          :editable="canProgress"
+          :items="order.items"
+          :order-id="order.id"
+          :route-options="routeOptions"
+        />
+
         <MaterialPlan v-if="canPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
@@ -395,7 +405,7 @@ function producedQty(item: Api.Item) {
             <Input id="po-reply" v-model:value="reply" :maxlength="255" placeholder="例如 排在下周三开工 / 这个颜色缺料" />
           </label>
           <p v-if="fromPurchase" class="m-0 text-xs text-muted-foreground">
-            工艺由工厂定：在上面每个产品下面选好要走的工序再接单；没开工序单前都还能改。
+            工艺由工厂定：在上面每个产品下面选好要走的工序再接单；没开工序单前都还能改。接单后再按采购单定辅料用量。
           </p>
           <div class="flex gap-2">
             <Button :loading="busy" type="primary" @click="accept">接单</Button>

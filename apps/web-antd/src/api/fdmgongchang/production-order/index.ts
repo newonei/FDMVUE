@@ -283,6 +283,49 @@ export namespace FdmgongchangProductionOrderApi {
     warehouseId: string;
   }
 
+  /** 采购单生成的单的辅料：采购单要求的辅料建议、每条明细的用量和齐套。 */
+  export interface OrderAux {
+    accessoryNote?: null | string;
+    items: Array<{
+      itemId: number;
+      process?: null | string;
+      processLabel?: null | string;
+      productName: string;
+      ready: boolean;
+      remaining: number | string;
+      suggestions: Array<{
+        basis?: null | string;
+        name: string;
+        perUnit: number | string;
+        productId?: null | string;
+        productName?: null | string;
+        remark?: null | string;
+        unit?: null | string;
+      }>;
+      unit?: null | string;
+      usages: Array<{
+        inbound: number | string;
+        need: number | string;
+        perUnit: number | string;
+        process?: null | string;
+        processLabel?: null | string;
+        productCode?: null | string;
+        productId: string;
+        productName?: null | string;
+        shortage: number | string;
+        stock: number | string;
+        unit?: null | string;
+      }>;
+    }>;
+    ready: boolean;
+  }
+
+  export interface OrderAuxSaveReq {
+    itemId: number;
+    names?: Array<{ name: string; productId: string }>;
+    usages: AuxUsage[];
+  }
+
   export interface Warehouse {
     /** 所属工厂；工厂的货默认入本厂仓库。 */
     factoryId?: null | number;
@@ -490,6 +533,26 @@ export function rejectProductionOrder(
 /** 工厂给采购单生成的订单明细定工艺（开过工序单后不能再改）。 */
 export function saveItemRoute(data: FdmgongchangProductionOrderApi.RouteReq) {
   return requestClient.post<boolean>(`${BASE}/item-route`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+/** 采购单生成的单的辅料：建议、用量和齐套。 */
+export function getOrderAux(id: number) {
+  return requestClient.get<FdmgongchangProductionOrderApi.OrderAux>(
+    `${BASE}/aux`,
+    {
+      headers: factoryHeaders(),
+      params: { id },
+    },
+  );
+}
+
+/** 工厂确认辅料用量（整体覆盖），并记住辅料名称对应的产品。 */
+export function saveOrderItemAux(
+  data: FdmgongchangProductionOrderApi.OrderAuxSaveReq,
+) {
+  return requestClient.post<boolean>(`${BASE}/item-aux`, data, {
     headers: factoryHeaders(),
   });
 }
