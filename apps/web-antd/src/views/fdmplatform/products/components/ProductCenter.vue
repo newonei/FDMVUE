@@ -79,11 +79,15 @@ const pageNo = ref(catalogPage('catalogPage', 1));
 const pageSize = ref(Math.min(catalogPage('catalogSize', 10), 100));
 const total = ref(0);
 const keyword = ref(catalogQuery('catalogKeyword'));
-/** undefined 为全部分类，空字符串为未分类 */
+/** 分类 id：undefined 为全部分类，空字符串为未分类，大类含其下全部小类 */
 const category = ref<string | undefined>(
   props.mode === 'catalog' && typeof route.query.catalogCategory === 'string'
     ? route.query.catalogCategory
     : undefined,
+);
+/** 列表标题显示的「大类 / 小类」 */
+const categoryLabel = ref<string | undefined>(
+  catalogQuery('catalogCategoryLabel') || undefined,
 );
 /** 分类计数跟随已提交的搜索条件，输入过程中不重算 */
 const appliedKeyword = ref(keyword.value);
@@ -175,11 +179,13 @@ onMounted(() => {
 function resetFilters() {
   keyword.value = '';
   category.value = undefined;
+  categoryLabel.value = undefined;
   active.value = undefined;
   void load(true);
 }
-function chooseCategory(value: string | undefined) {
+function chooseCategory(value: string | undefined, label?: string) {
   category.value = value;
+  categoryLabel.value = label;
   void load(true);
 }
 function refreshCategories() {
@@ -209,8 +215,7 @@ async function load(reset = false) {
       const result = await getProducts({
         ...scope,
         keyword: keyword.value,
-        category: category.value,
-        exactCategory: category.value === undefined ? undefined : true,
+        categoryId: category.value,
         active:
           active.value === undefined ? undefined : active.value === 'true',
       });
@@ -268,6 +273,7 @@ function openProductDetail(id: string) {
       productId: id,
       catalogKeyword: keyword.value || undefined,
       catalogCategory: category.value,
+      catalogCategoryLabel: categoryLabel.value,
       catalogActive: active.value,
       catalogPage: String(pageNo.value),
       catalogSize: String(pageSize.value),
@@ -506,9 +512,11 @@ async function savePrice() {
             </Space>
             <div v-if="mode === 'catalog'" class="catalog-list-heading">
               <div class="catalog-list-title">
-                <h2 :title="category">
+                <h2 :title="categoryLabel">
                   {{
-                    category === undefined ? '产品档案' : category || '未分类'
+                    category === undefined
+                      ? '产品档案'
+                      : categoryLabel || (category ? '所选分类' : '未分类')
                   }}
                 </h2>
                 <span class="catalog-count">{{ total }} 个</span>

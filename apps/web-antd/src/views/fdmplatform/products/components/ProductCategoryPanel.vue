@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { ProductCategoryCount } from '#/api/fdmplatform/products';
+import type { CategoryNode } from '../category-model';
+
+import type { ProductCategory } from '#/api/fdmplatform/products';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -10,10 +12,15 @@ import { Alert, Empty, Input, Spin } from 'ant-design-vue';
 import { getProductCategories } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
+import {
+  categoryPath,
+  categoryTree,
+  searchCategoryTree,
+} from '../category-model';
 
 /**
- * 产品分类侧栏：value 为 undefined 表示全部，空字符串表示未分类。
- * 计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
+ * 产品分类侧栏：两级树（大类 / 小类）。value 为分类 id，undefined 表示全部，空字符串表示未分类；
+ * 选大类即含其下全部小类。计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
  */
 const props = withDefaults(
   defineProps<{
@@ -34,34 +41,49 @@ const props = withDefaults(
     value: undefined,
   },
 );
-const emit = defineEmits<{ 'update:value': [value: string | undefined] }>();
-const items = ref<ProductCategoryCount[]>([]);
+const emit = defineEmits<{
+  /** label 为「大类 / 小类」，供列表标题显示 */
+  'update:value': [value: string | undefined, label: string | undefined];
+}>();
+const categories = ref<ProductCategory[]>([]);
+const tree = ref<CategoryNode[]>([]);
+const uncategorized = ref(0);
 const total = ref(0);
-const truncated = ref(false);
 const loading = ref(false);
 const loadError = ref('');
 const search = ref('');
 const expanded = ref(true);
+/** 展开的大类；选中项所在的大类自动展开 */
+const open = ref(new Set<string>());
 let sequence = 0;
 
-const uncategorized = computed(
-  () => items.value.find((item) => !item.category.trim())?.count ?? 0,
+/** 没有产品的分类不列出，当前选中的除外，便于看到并取消 */
+const visible = computed(() =>
+  searchCategoryTree(tree.value, search.value).flatMap((top) => {
+    const children = top.children.filter(
+      (child) => child.count > 0 || child.id === props.value,
+    );
+    return top.count > 0 || top.id === props.value || children.length > 0
+      ? [{ ...top, children }]
+      : [];
+  }),
 );
-const named = computed(() => {
-  const needle = search.value.trim().toLowerCase();
-  return items.value.filter(
-    (item) =>
-      item.category.trim() &&
-      (!needle || item.category.toLowerCase().includes(needle)),
+const showChildren = computed(() => expanded.value || Boolean(search.value));
+function isOpen(id: string) {
+  return (
+    Boolean(search.value) ||
+    open.value.has(id) ||
+    tree.value
+      .find((top) => top.id === id)
+      ?.children.some((child) => child.id === props.value) === true
   );
-});
-/** 当前选中的分类在新条件下没有产品时仍保留一行，便于看到并取消。 */
-const missingSelected = computed(
-  () =>
-    props.value !== undefined &&
-    props.value.trim() !== '' &&
-    !items.value.some((item) => item.category === props.value),
-);
+}
+function toggle(id: string) {
+  const next = new Set(open.value);
+  if (isOpen(id)) next.delete(id);
+  else next.add(id);
+  open.value = next;
+}
 
 async function load() {
   const run = ++sequence;
@@ -75,18 +97,23 @@ async function load() {
       selectable: props.selectable,
     });
     if (run !== sequence) return;
-    items.value = result.items;
+    categories.value = result.categories ?? [];
+    tree.value = categoryTree(categories.value, result.items);
+    uncategorized.value =
+      result.items.find((item) => !item.categoryId)?.count ?? 0;
     total.value = result.total;
-    truncated.value = Boolean(result.truncated);
   } catch (error) {
     if (run === sequence) loadError.value = errorText(error);
   } finally {
     if (run === sequence) loading.value = false;
   }
 }
-const showChildren = computed(() => expanded.value || Boolean(search.value));
 function choose(value: string | undefined) {
-  if (value !== props.value) emit('update:value', value);
+  if (value === props.value) return;
+  let label: string | undefined;
+  if (value === '') label = '未分类';
+  else if (value !== undefined) label = categoryPath(categories.value, value);
+  emit('update:value', value, label);
 }
 watch(
   () => [
@@ -141,6 +168,50 @@ onBeforeUnmount(() => {
           </div>
           <ul v-show="showChildren" class="children" role="group">
             <li
+              v-for="top in visible"
+              :key="top.id"
+              role="treeitem"
+              :aria-expanded="isOpen(top.id)"
+            >
+              <div class="tree-row">
+                <button
+                  type="button"
+                  class="caret"
+                  :class="{ open: isOpen(top.id) }"
+                  :aria-label="isOpen(top.id) ? '收起小类' : '展开小类'"
+                  @click="toggle(top.id)"
+                >
+                  <IconifyIcon icon="lucide:chevron-right" />
+                </button>
+                <button
+                  type="button"
+                  class="node"
+                  :class="{ current: value === top.id }"
+                  :title="top.name"
+                  @click="choose(top.id)"
+                >
+                  <span class="name">{{ top.name }}</span><span class="count">{{ top.count }}</span>
+                </button>
+              </div>
+              <ul v-show="isOpen(top.id)" class="children leaf" role="group">
+                <li
+                  v-for="child in top.children"
+                  :key="child.id"
+                  role="treeitem"
+                >
+                  <button
+                    type="button"
+                    class="node"
+                    :class="{ current: value === child.id }"
+                    :title="child.name"
+                    @click="choose(child.id)"
+                  >
+                    <span class="name">{{ child.name }}</span><span class="count">{{ child.count }}</span>
+                  </button>
+                </li>
+              </ul>
+            </li>
+            <li
               v-if="(uncategorized || value === '') && !search"
               role="treeitem"
             >
@@ -150,33 +221,14 @@ onBeforeUnmount(() => {
                 :class="{ current: value === '' }"
                 @click="choose('')"
               >
-                <span class="name">无分类产品</span><span class="count">{{ uncategorized }}</span>
-              </button>
-            </li>
-            <li v-if="missingSelected" role="treeitem">
-              <button type="button" class="node current" :title="value">
-                <span class="name">{{ value }}</span><span class="count">0</span>
-              </button>
-            </li>
-            <li v-for="item in named" :key="item.category" role="treeitem">
-              <button
-                type="button"
-                class="node"
-                :class="{ current: value === item.category }"
-                :title="item.category"
-                @click="choose(item.category)"
-              >
-                <span class="name">{{ item.category }}</span><span class="count">{{ item.count }}</span>
+                <span class="name">未分类</span><span class="count">{{ uncategorized }}</span>
               </button>
             </li>
           </ul>
         </li>
       </ul>
-      <p v-if="truncated" class="truncated muted">
-        分类较多，只列出产品数最多的一部分；其余可用右侧搜索查找。
-      </p>
       <Empty
-        v-if="!loading && search && named.length === 0"
+        v-if="!loading && search && visible.length === 0"
         :image="Empty.PRESENTED_IMAGE_SIMPLE"
         description="没有匹配的分类"
       />
@@ -216,6 +268,10 @@ onBeforeUnmount(() => {
   padding: 0 0 0 22px;
   margin: 0;
   list-style: none;
+}
+
+.children.leaf {
+  padding-left: 20px;
 }
 
 .tree-row {
@@ -292,10 +348,5 @@ onBeforeUnmount(() => {
 
 .muted {
   color: hsl(var(--muted-foreground));
-}
-
-.truncated {
-  margin: 8px 4px 0;
-  font-size: 12px;
 }
 </style>
