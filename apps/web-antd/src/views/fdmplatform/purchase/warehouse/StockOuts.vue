@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { Directory } from '#/api/fdmplatform';
 import type { ProcurementSetting } from '#/api/fdmplatform/procurement';
-import type { StockOut } from '#/api/fdmplatform/warehouse';
+import type { InventoryWarehouse, StockOut } from '#/api/fdmplatform/warehouse';
 
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import {
   Alert,
@@ -17,7 +17,10 @@ import {
 
 import { getDirectory } from '#/api/fdmplatform';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
-import { getStockOuts } from '#/api/fdmplatform/warehouse';
+import {
+  getInventoryWarehouses,
+  getStockOuts,
+} from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
 import { personName } from '../../directory';
@@ -40,6 +43,15 @@ const warehouseId = ref<string>();
 const kind = ref<'OTHER' | 'SALES'>();
 const warehouses = ref<ProcurementSetting[]>([]);
 const directory = ref<Directory>();
+/** 库存中心里启用的仓库 → 当前登录人能不能出库；没查到时不隐藏按钮，由后端拦。业务员只能看。 */
+const writable = ref<Map<string, boolean>>();
+const canCreate = computed(
+  () => !writable.value || [...writable.value.values()].some(Boolean),
+);
+/** 停用仓库的单据不在列表里，有出库权限就显示，由后端判断。 */
+function canVoid(row: StockOut) {
+  return canCreate.value && writable.value?.get(row.warehouseId) !== false;
+}
 const loading = ref(false);
 const error = ref('');
 const creating = ref(false);
@@ -97,6 +109,11 @@ function voided(code: string) {
 }
 onMounted(async () => {
   void load();
+  getInventoryWarehouses()
+    .then((list: InventoryWarehouse[]) => {
+      writable.value = new Map(list.map((entry) => [entry.id, entry.writable]));
+    })
+    .catch(() => {});
   try {
     [warehouses.value, directory.value] = await Promise.all([
       getProcurementSettings('warehouses'),
@@ -141,8 +158,10 @@ onMounted(async () => {
       />
       <span class="grow"></span>
       <Button :loading="loading" @click="load()">刷新</Button>
-      <Button @click="creatingOther = true">其它出库</Button>
-      <Button type="primary" @click="creating = true">新建销售出库</Button>
+      <template v-if="canCreate">
+        <Button @click="creatingOther = true">其它出库</Button>
+        <Button type="primary" @click="creating = true">新建销售出库</Button>
+      </template>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
     <Table
@@ -249,7 +268,7 @@ onMounted(async () => {
             title="直发出库随对应入库单一起作废"
             >随入库单作废</span>
           <Button
-            v-else
+            v-else-if="canVoid(record as StockOut)"
             danger
             size="small"
             type="link"
