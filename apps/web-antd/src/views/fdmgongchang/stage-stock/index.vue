@@ -22,9 +22,9 @@ import OrderPanel from './modules/order-panel.vue';
 import ReceiptDrawer from './modules/receipt-drawer.vue';
 import ReceivingPanel from './modules/receiving-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
+import ShipmentPanel from './modules/shipment-panel.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
-import TradePanel from './modules/trade-panel.vue';
 import TxnPanel from './modules/txn-panel.vue';
 
 /**
@@ -64,7 +64,6 @@ const router = useRouter();
 const activeTab = ref<TabKey>('stock');
 /** 手机上打开时提示去工人端。 */
 const onPhone = typeof window !== 'undefined' && window.innerWidth < 768;
-const tradePending = ref(0);
 const receivingPending = ref(0);
 const activeStage = ref('BOARD');
 const refreshKey = ref(0);
@@ -74,7 +73,6 @@ const drawerOpen = ref(false);
 const drawerMode = ref<'create' | 'report'>('create');
 const drawerStage = ref<string>();
 const drawerOrderId = ref<number>();
-const drawerTask = ref<{ assignmentId: string; contractId: string }>();
 
 
 const receiptOpen = ref(false);
@@ -115,13 +113,12 @@ async function switchFactory(id: number) {
   factory.select(id);
   options.value = undefined;
   summary.value = undefined;
-  tradePending.value = 0;
   receivingPending.value = 0;
   txnItemCode.value = '';
   await loadAll();
 }
 
-/** 外贸合同主线的「去工序库存」带 ?tab=trade / ?tab=receiving 进来，直接打开对应标签。 */
+/** 外贸合同主线的「去工序库存」带 ?tab=receiving 进来，直接打开对应标签。 */
 watch(
   () => route.query.tab,
   (tab) => {
@@ -140,19 +137,6 @@ function openCreate(stage?: string) {
   drawerMode.value = 'create';
   drawerStage.value = stage ?? activeStage.value;
   drawerOrderId.value = undefined;
-  drawerTask.value = undefined;
-  drawerOpen.value = true;
-}
-
-/** 外贸订单「安排生产」：预选自制任务，默认从当前选中的库存段开始。 */
-function openProduce(task: Api.MakeTask) {
-  drawerMode.value = 'create';
-  drawerStage.value = activeStage.value;
-  drawerOrderId.value = undefined;
-  drawerTask.value = {
-    assignmentId: task.assignmentId,
-    contractId: task.contractId,
-  };
   drawerOpen.value = true;
 }
 
@@ -303,19 +287,9 @@ async function onSettingSaved() {
               />
             </div>
           </Tabs.TabPane>
-          <Tabs.TabPane key="trade">
-            <template #tab>
-              外贸订单
-              <span v-if="tradePending > 0" class="ml-1 text-xs text-primary">
-                {{ tradePending }} 待生产
-              </span>
-            </template>
+          <Tabs.TabPane key="trade" tab="早期出货">
             <div class="stage-stock__card">
-              <TradePanel
-                :refresh-key="refreshKey"
-                @pending="(count) => (tradePending = count)"
-                @produce="openProduce"
-              />
+              <ShipmentPanel :refresh-key="refreshKey" />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane key="receiving">
@@ -355,7 +329,6 @@ async function onSettingSaved() {
         <OrderDrawer
           v-model:open="drawerOpen"
           :initial-stage="drawerStage"
-          :initial-task="drawerTask"
           :mode="drawerMode"
           :options="options"
           :order-id="drawerOrderId"

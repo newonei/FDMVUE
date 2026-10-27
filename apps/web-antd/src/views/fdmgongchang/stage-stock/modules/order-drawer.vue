@@ -30,7 +30,6 @@ import { getScheduleTasks } from '#/api/fdmgongchang/schedule';
 import {
   createOrder,
   getAuxPlan,
-  getMakeTasks,
   getOrder,
   getOrderOperators,
   getRecipePlan,
@@ -45,7 +44,6 @@ import { routeIncludes } from '../../production-order/shared';
 import {
   applySliceYield,
   attrSummary,
-  contractProductText,
   defectRate,
   deriveOutputs,
   EDITABLE_FIELDS,
@@ -53,11 +51,9 @@ import {
   formatRate,
   lineBatch,
   makeLabels,
-  makeTaskRemaining,
   nextKey,
   normalizeForStage,
   pickAuxStocks,
-  processLabel,
   recipeCheck,
   recipePicks,
   sliceHint,
@@ -76,8 +72,6 @@ import AttrFields from './attr-fields.vue';
  */
 const props = defineProps<{
   initialStage?: string;
-  /** 从「外贸订单 → 安排生产」进入时预选的自制任务。 */
-  initialTask?: { assignmentId: string; contractId: string };
   mode: 'create' | 'report';
   options: Api.Options;
   orderId?: number;
@@ -108,41 +102,6 @@ const recipeOptions = computed(() =>
     .map((r) => ({ label: `${r.name}（${r.code}）`, value: r.code })),
 );
 const codes = ref<Array<null | string>>([]);
-/** 外贸合同的自制任务，工序单从中选择关联订单。 */
-const makeTasks = ref<Api.MakeTask[]>([]);
-const makeTasksLoading = ref(false);
-const linkedAssignmentId = ref<string>();
-const linkedTask = computed(() =>
-  makeTasks.value.find((t) => t.assignmentId === linkedAssignmentId.value),
-);
-/** 回写合同进度的那道工序：任务工艺的最后一道，没设工艺时为包装。 */
-const taskFinal = computed(() => linkedTask.value?.processes?.at(-1) ?? 'PACK');
-const makeTaskOptions = computed(() =>
-  makeTasks.value
-    .filter((t) => makeTaskRemaining(t) > 0 || t.assignmentId === linkedAssignmentId.value)
-    // 任务设了工艺时只列工艺里有这道工序的任务
-    .filter(
-      (t) =>
-        (t.processes ?? []).length === 0 ||
-        t.processes!.includes(processCode.value) ||
-        t.assignmentId === linkedAssignmentId.value,
-    )
-    .map((t) => ({
-      disabled: !t.ready,
-      label: `${t.contractCode} · ${t.customerName ?? ''} · ${contractProductText(t)} · 待产 ${formatQty(makeTaskRemaining(t))}${t.unit ?? ''}${t.ready ? '' : '（采购方案未生效）'}`,
-      value: t.assignmentId,
-    })),
-);
-async function loadMakeTasks() {
-  makeTasksLoading.value = true;
-  try {
-    makeTasks.value = await getMakeTasks();
-  } catch {
-    makeTasks.value = [];
-  } finally {
-    makeTasksLoading.value = false;
-  }
-}
 /** 工厂订单（内部向工厂下单）已接单、工艺里有这道工序的明细；关联只记进度，完成数量按交货算。 */
 const productionOrders = ref<FdmgongchangProductionOrderApi.Order[]>([]);
 const linkedProductionItemId = ref<number>();
@@ -179,13 +138,6 @@ async function loadProductionOrders() {
     productionOrders.value = [];
   }
 }
-// 外贸自制任务和工厂订单只能关联一个
-watch(linkedAssignmentId, (v) => {
-  if (v) linkedProductionItemId.value = undefined;
-});
-watch(linkedProductionItemId, (v) => {
-  if (v) linkedAssignmentId.value = undefined;
-});
 const meta = reactive({
   remark: '',
 });
@@ -422,7 +374,7 @@ watch(
 );
 
 /**
- * 辅料领用：关联的工厂订单或外贸任务定了在这道工序领的辅料时，按本次领料数量 × 每件用量带出建议数
+ * 辅料领用：关联的工厂订单定了在这道工序领的辅料时，按本次领料数量 × 每件用量带出建议数
  * （先进先出，扣掉已领的），可改；定制辅料只列本合同的。
  */
 const auxPlan = ref<Api.AuxPlan[]>([]);
@@ -436,12 +388,6 @@ async function loadAuxPlan() {
   let params: Parameters<typeof getAuxPlan>[0] | undefined;
   if (linkedProductionItemId.value) {
     params = { process: processCode.value, productionOrderItemId: linkedProductionItemId.value };
-  } else if (linkedTask.value) {
-    params = {
-      assignmentId: linkedTask.value.assignmentId,
-      contractId: linkedTask.value.contractId,
-      process: processCode.value,
-    };
   }
   if (!params || props.mode !== 'create') {
     auxPlan.value = [];
@@ -472,7 +418,7 @@ function setAuxQty(stockId: number, value: null | number | string | undefined) {
     [stockId]: value === null || value === undefined || value === '' ? null : Number(value),
   };
 }
-watch([linkedProductionItemId, linkedAssignmentId, processCode], () => void loadAuxPlan());
+watch([linkedProductionItemId, processCode], () => void loadAuxPlan());
 watch(inputTotal, fillAux);
 const auxInputs = computed(() =>
   Object.entries(auxQty.value)
@@ -551,9 +497,7 @@ watch(open, async (value) => {
     return;
   }
   order.value = undefined;
-  linkedAssignmentId.value = props.initialTask?.assignmentId;
   linkedProductionItemId.value = undefined;
-  void loadMakeTasks();
   void loadProductionOrders();
   const code = defaultProcessFor(props.initialStage);
   processCode.value = code;
@@ -912,9 +856,7 @@ async function submit() {
     const out = outputStageOption.value;
     if (props.mode === 'create') {
       await createOrder({
-        assignmentId: linkedTask.value?.assignmentId,
         productionOrderItemId: linkedProductionItemId.value,
-        contractId: linkedTask.value?.contractId,
         finish: finish.value,
         inputs: inputs.value.map((l) => ({
           laminationSide: processCode.value === 'LAMINATE' ? l.side : undefined,
@@ -1496,29 +1438,6 @@ watch(processCode, warnNoPatterns);
             其他信息
           </h3>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label
-              for="order-contract"
-              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
-            >
-              关联外贸订单（选填）
-              <Select
-                id="order-contract"
-                v-model:value="linkedAssignmentId"
-                :loading="makeTasksLoading"
-                :not-found-content="makeTasksLoading ? '加载中…' : '外贸合同里暂无分派给工厂的自制任务'"
-                :options="makeTaskOptions"
-                allow-clear
-                option-filter-prop="label"
-                placeholder="选择外贸合同的自制任务"
-                show-search
-              />
-              <span v-if="linkedTask && taskFinal === processCode" class="text-primary">
-                这是任务工艺的最后一道，良品数量会自动回写到合同 {{ linkedTask.contractCode }} 的生产进度。
-              </span>
-              <span v-else-if="linkedTask">
-                任务工艺最后一道（{{ processLabel(options, taskFinal) }}）报产出时才回写合同进度，这道工序只做关联记录。
-              </span>
-            </label>
             <label
               v-if="productionItemOptions.length > 0 || linkedProductionItemId"
               for="order-production-item"

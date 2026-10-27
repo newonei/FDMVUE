@@ -1,9 +1,6 @@
 import type { PageParam, PageResult } from '@vben/request';
 
-import type {
-  FdmgongchangFactoryApi,
-  FdmgongchangRouteApi,
-} from '#/api/fdmgongchang/factory';
+import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 
 import { factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
@@ -252,10 +249,7 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface OrderCreateReq {
-    /** 关联外贸自制任务：contractId 与 assignmentId 一起填。 */
-    assignmentId?: string;
     contractCode?: string;
-    contractId?: string;
     finish: boolean;
     inputs: OrderInput[];
     /** 同时领的辅料（辅料库存行），不计入工序领料数量。 */
@@ -449,39 +443,6 @@ export namespace FdmgongchangStageStockApi {
 
   /** 后端 LocalDate 可能是 "2026-10-08" 或 [2026, 10, 8]。 */
   export type DateValue = null | number[] | string;
-
-  /** 外贸合同的自制任务（待生产订单）。ready=false 表示采购方案未生效。 */
-  export interface MakeTask {
-    approvedQuantity: Decimal;
-    assignmentId: string;
-    assignmentQuantity: Decimal;
-    color?: null | string;
-    completedQuantity: Decimal;
-    contractCode: string;
-    contractId: string;
-    contractItemId: string;
-    customerName?: null | string;
-    inProgressOrderCount: number;
-    /** 工厂为这个任务设定的工艺（工序编码）；没设时为空，按包装回写合同进度。 */
-    processes?: string[];
-    routeName?: null | string;
-    /** 工厂为这个任务定的辅料用量。 */
-    auxUsages?: AuxUsage[];
-    itemQuantity: Decimal;
-    linkedOrderCount: number;
-    material?: null | string;
-    packaging?: null | string;
-    printing?: null | string;
-    productCode?: null | string;
-    productName?: null | string;
-    ready: boolean;
-    requiredDate?: DateValue;
-    shippedQuantity: Decimal;
-    size?: null | string;
-    specification?: null | string;
-    status?: null | string;
-    unit?: null | string;
-  }
 
   export interface Shipment {
     contractCode?: null | string;
@@ -804,13 +765,6 @@ export function saveStageStockSetting(data: FdmgongchangStageStockApi.Setting) {
   });
 }
 
-export function getMakeTasks() {
-  return requestClient.get<FdmgongchangStageStockApi.MakeTask[]>(
-    `${BASE}/trade/make-tasks`,
-    { headers: factoryHeaders() },
-  );
-}
-
 export function getShipmentPage(
   params: FdmgongchangStageStockApi.ShipmentPageReq,
 ) {
@@ -851,10 +805,8 @@ export function voidReceipt(data: { id: number; reason: string }) {
   });
 }
 
-/** 开工序单时带出的辅料：订单 / 任务定的用量、已领数量和可领库存。 */
+/** 开工序单时带出的辅料：订单定的用量、已领数量和可领库存。 */
 export function getAuxPlan(params: {
-  assignmentId?: string;
-  contractId?: string;
   process?: string;
   productionOrderItemId?: number;
 }) {
@@ -864,7 +816,7 @@ export function getAuxPlan(params: {
   );
 }
 
-/** 搜辅料产品（设任务辅料、辅料入库用）。 */
+/** 搜辅料产品（设订单辅料、辅料入库用）。 */
 export function searchStageAuxProducts(keyword: string) {
   return requestClient.get<
     Array<{
@@ -900,29 +852,6 @@ export function createExtraOrder(
   data: FdmgongchangStageStockApi.ExtraOrderReq,
 ) {
   return requestClient.post<number>(`${BASE}/extra-order/create`, data, {
-    headers: factoryHeaders(),
-  });
-}
-
-/** 本厂启用的工序和工艺路线（给外贸自制任务设工艺用）。 */
-export function getStageRouteOptions() {
-  return requestClient.get<FdmgongchangRouteApi.Options>(
-    `${BASE}/route-options`,
-    {
-      headers: factoryHeaders(),
-    },
-  );
-}
-
-/** 设定外贸自制任务的工艺：合同进度按最后一道回写；steps 为空时清除，回到按包装回写。 */
-export function saveTaskRoute(data: {
-  assignmentId: string;
-  auxUsages?: FdmgongchangStageStockApi.AuxUsage[];
-  contractId: string;
-  routeId?: number;
-  steps: string[];
-}) {
-  return requestClient.post<boolean>(`${BASE}/trade/task-route`, data, {
     headers: factoryHeaders(),
   });
 }

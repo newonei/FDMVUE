@@ -549,10 +549,7 @@ function pickSubDoc(key: string) {
   else if (key === 'orders')
     openQuickDocument({ action: 'GENERATE_ORDERS', kind: 'orders' });
   else if (key === 'shipment')
-    void router.push({
-      path: '/gongchang/stage-stock',
-      query: { tab: 'trade' },
-    });
+    void router.push({ path: '/fdmstock/inventory-outbound' });
 }
 /** 右侧「摘要」（金智同款）：总金额、未回款、实际回款、待确认、已开票、未开票 */
 const summaryCards = computed(() => {
@@ -1053,16 +1050,12 @@ async function download(file: { id: string; name: string }) {
                 <Button
                   type="primary"
                   :disabled="ended || childOpen"
-                  @click="
-                    router.push({
-                      path: '/gongchang/stage-stock',
-                      query: { tab: 'trade' },
-                    })
-                  "
+                  @click="router.push({ path: '/fdmstock/inventory-outbound' })"
                 >
-                  去工序库存安排出货
+                  去库存中心安排出货
                 </Button>
-                <span class="muted">出货在工厂「工序库存」从已包装成品办理，数量自动记到本合同。</span>
+                <span class="muted">出货在「库存中心 ·
+                  出库单」从工厂仓库按合同销售出库，数量自动记到本合同。</span>
               </div>
               <h4>发货记录</h4>
               <div v-if="shipmentRows.length" class="mini-table">
