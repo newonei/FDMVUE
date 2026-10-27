@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   createExtra: vi.fn(),
   openProductionOrders: vi.fn().mockResolvedValue([]),
   defect: vi.fn(),
-  makeTasks: vi.fn(),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: true,
     defaultFactoryId: 2,
@@ -22,7 +21,6 @@ const mocks = vi.hoisted(() => ({
   setFactory: vi.fn(),
   route: { query: { tab: 'stock' } as Record<string, string> },
   shipmentPage: vi.fn(),
-  shippable: vi.fn(),
   options: vi.fn(),
   orderPage: vi.fn(),
   rawLines: vi.fn(),
@@ -38,10 +36,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   createExtraOrder: mocks.createExtra,
   createOrder: vi.fn(),
-  createShipment: vi.fn(),
-  getMakeTasks: mocks.makeTasks,
   getShipmentPage: mocks.shipmentPage,
-  getShippableItems: mocks.shippable,
   getDefectStats: mocks.defect,
   getOrder: vi.fn(),
   getOrderOperators: vi.fn().mockResolvedValue([]),
@@ -180,8 +175,6 @@ function mockEmptyPage() {
   mocks.orderPage.mockResolvedValue({ list: [], total: 0 });
   mocks.defect.mockResolvedValue([]);
   mocks.txnPage.mockResolvedValue({ list: [], total: 0 });
-  mocks.makeTasks.mockResolvedValue([]);
-  mocks.shippable.mockResolvedValue([]);
   mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
   mocks.rawLines.mockResolvedValue([rawLine]);
   mocks.tradeLines.mockResolvedValue([tradeLine]);
@@ -250,29 +243,22 @@ describe('stage stock page', () => {
     });
     mocks.defect.mockResolvedValue([{ defectQuantity: 3, goodQuantity: 147, orderCount: 1, process: 'EMBOSS' }]);
     mocks.txnPage.mockResolvedValue({ list: [], total: 0 });
-    mocks.makeTasks.mockResolvedValue([
-      {
-        approvedQuantity: 100,
-        assignmentId: 'a1',
-        assignmentQuantity: 100,
-        color: '丁香紫/灰',
-        completedQuantity: 30,
-        contractCode: 'HT-20261008-001',
-        contractId: 'c1',
-        contractItemId: 'i1',
-        customerName: '美国客户',
-        inProgressOrderCount: 1,
-        itemQuantity: 100,
-        linkedOrderCount: 2,
-        productName: '紫灰双色瑜伽垫',
-        ready: true,
-        requiredDate: [2026, 11, 1],
-        shippedQuantity: 0,
-        unit: '张',
-      },
-    ]);
-    mocks.shippable.mockResolvedValue([]);
-    mocks.shipmentPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.shipmentPage.mockResolvedValue({
+      list: [
+        {
+          contractCode: 'HT-20261008-001',
+          contractId: 'c1',
+          contractItemId: 'i1',
+          customerName: '美国客户',
+          id: 1,
+          lines: [],
+          quantity: 20,
+          shipmentNo: 'CH20261020-001',
+          shippedDate: [2026, 10, 20],
+        },
+      ],
+      total: 1,
+    });
     mocks.rawLines.mockResolvedValue([rawLine]);
     mocks.tradeLines.mockResolvedValue([tradeLine]);
     mocks.receiptPage.mockResolvedValue({ list: [], total: 0 });
@@ -320,16 +306,15 @@ describe('stage stock page', () => {
     expect(embossed).toContain('压花在制 40 片');
     expect(mocks.stockPage).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'EMBOSSED' }));
 
-    for (const tab of ['工序单', '外贸订单', '到货入库', '库存流水', '基础设置']) {
+    for (const tab of ['工序单', '早期出货', '到货入库', '库存流水', '基础设置']) {
       const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));
       (el?.querySelector('.ant-tabs-tab-btn') as HTMLElement | null)?.click();
       await flush();
     }
     const after = document.body.textContent ?? '';
     expect(after).toContain('GX20261007-004');
-    expect(after).toContain('HT-20261008-001');
-    expect(after).toContain('2026-11-01');
-    expect(after).toContain('生产中');
+    expect(after).toContain('CH20261020-001');
+    expect(after).toContain('2026-10-20');
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
     expect(after).toContain('1 待到');

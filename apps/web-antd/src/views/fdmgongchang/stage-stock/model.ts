@@ -559,36 +559,6 @@ export function formatDate(value: Api.DateValue | undefined) {
   return String(value).slice(0, 10);
 }
 
-/** 合同产品的一行描述，例如「紫灰双色瑜伽垫 · 183x61x0.6cm · 丁香紫/灰」。 */
-export function contractProductText(
-  row: Pick<Api.ShippableItem, 'color' | 'productName' | 'size' | 'specification'>,
-) {
-  const { size: itemSize, specification } = row;
-  return [row.productName, specification || itemSize, row.color]
-    .filter(Boolean)
-    .join(' · ');
-}
-
-/** 自制任务还能排产的数量：任务数量 - 已回写完工。 */
-export function makeTaskRemaining(task: Api.MakeTask) {
-  return Math.max(0, roundQty((toNumber(task.assignmentQuantity) ?? 0) - (toNumber(task.completedQuantity) ?? 0)));
-}
-
-export type MakeTaskState = 'done' | 'not-ready' | 'producing' | 'waiting';
-
-export function makeTaskState(task: Api.MakeTask): MakeTaskState {
-  if (!task.ready) return 'not-ready';
-  if (makeTaskRemaining(task) <= 0) return 'done';
-  return task.linkedOrderCount > 0 || (toNumber(task.completedQuantity) ?? 0) > 0 ? 'producing' : 'waiting';
-}
-
-export const MAKE_TASK_STATE_LABELS: Record<MakeTaskState, string> = {
-  done: '已完工',
-  'not-ready': '方案未生效',
-  producing: '生产中',
-  waiting: '待生产',
-};
-
 /** 把合同上的尺寸文字（如「183x61x0.6」「183×61×0.6cm」）拆成长宽厚，拆不出来返回空对象。 */
 export function parseSizeText(text?: null | string): Pick<
   Api.ItemAttrs,
@@ -761,7 +731,7 @@ export function stageFlow(stage: string, options: Api.Options) {
     to:
       outgoing.length > 0
         ? `${outgoing.map((p) => p.label).join('、')}领料`
-        : '外贸出货',
+        : '生产入库进仓库',
   };
 }
 

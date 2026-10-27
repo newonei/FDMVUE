@@ -20,6 +20,7 @@ import {
 import { getDirectory } from '#/api/fdmplatform';
 import {
   getProcurementSettings,
+  getReceiveFactories,
   saveProcurementSetting,
 } from '#/api/fdmplatform/procurement';
 import { getStocks } from '#/api/fdmplatform/warehouse';
@@ -35,6 +36,8 @@ defineOptions({ name: 'FdmPlatformWarehouses' });
 const rows = ref<ProcurementSetting[]>([]);
 const stocks = ref<StockBalance[]>([]);
 const directory = ref<Directory>();
+/** 自家工厂：仓库选所属工厂后，工厂完工的货入本厂仓库，工厂库管只能操作本厂仓库。 */
+const factories = ref<{ id: number; name: string }[]>([]);
 const loading = ref(false);
 const error = ref('');
 const editing = ref<Partial<ProcurementSetting>>();
@@ -118,6 +121,7 @@ async function save() {
       name: value.name.trim(),
       code: value.code.trim(),
       companyId: value.companyId ?? null,
+      factoryId: value.factoryId ?? null,
       address: value.address?.trim() || null,
       managerUserIds: value.managerUserIds ?? [],
       isDefault: !!value.isDefault,
@@ -137,9 +141,12 @@ async function save() {
 onMounted(async () => {
   void load();
   try {
-    directory.value = await getDirectory(0);
+    [directory.value, factories.value] = await Promise.all([
+      getDirectory(0),
+      getReceiveFactories(),
+    ]);
   } catch {
-    // 只影响公司和库管人员显示
+    // 只影响公司、库管人员和工厂显示
   }
 });
 </script>
@@ -166,7 +173,7 @@ onMounted(async () => {
       :scroll="{ x: 1000 }"
       :columns="[
         { title: '仓库', key: 'name', width: 180 },
-        { title: '所属公司', key: 'company', width: 200 },
+        { title: '所属公司 / 工厂', key: 'company', width: 200 },
         { title: '库管人员', key: 'managers', width: 220 },
         { title: '地址', key: 'address', width: 220 },
         { title: '库存', key: 'stock', width: 160, align: 'right' },
@@ -186,11 +193,16 @@ onMounted(async () => {
             <Tag v-if="record.countInTotal === false">不计总库存</Tag>
           </span>
         </div>
-        <span v-else-if="column.key === 'company'">{{
-          directory?.companies.find(
-            (entry) => entry.companyId === record.companyId,
-          )?.companyName ?? '—'
-        }}</span>
+        <div v-else-if="column.key === 'company'" class="cell">
+          <span class="ellipsis">{{
+            directory?.companies.find(
+              (entry) => entry.companyId === record.companyId,
+            )?.companyName ?? '—'
+          }}</span>
+          <span v-if="record.factoryName" class="muted">
+            {{ record.factoryName }}的仓库
+          </span>
+        </div>
         <span v-else-if="column.key === 'managers'" class="ellipsis">{{
           (record.managerUserIds ?? [])
             .map((id: number) => personName(directory, id))
@@ -247,6 +259,21 @@ onMounted(async () => {
             option-filter-prop="label"
             :options="companyOptions"
             placeholder="库存挂在哪家公司名下"
+          />
+        </label>
+        <label>
+          <span>所属工厂</span>
+          <Select
+            :value="editing.factoryId ?? undefined"
+            allow-clear
+            :options="
+              factories.map((entry) => ({ value: entry.id, label: entry.name }))
+            "
+            placeholder="工厂的仓库才选，例如 黄石仓库 → 黄石工厂"
+            @update:value="
+              (value) =>
+                editing && (editing.factoryId = (value as number) ?? null)
+            "
           />
         </label>
         <label>

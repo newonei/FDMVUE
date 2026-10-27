@@ -91,7 +91,7 @@ export namespace FdmgongchangScheduleApi {
       contractCode: string;
       product?: null | string;
       productCode?: null | string;
-      /** 产品中心的产品编号；外贸自制任务可能为空。 */
+      /** 产品中心的产品编号。 */
       productId?: null | string;
       /** 还要做几条成品；不是工厂订单时为空。 */
       remaining?: null | number | string;

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { OutRow } from './model';
 
-import type { ProcurementSetting } from '#/api/fdmplatform/procurement';
-import type { StockOut } from '#/api/fdmplatform/warehouse';
+import type { InventoryWarehouse, StockOut } from '#/api/fdmplatform/warehouse';
 
 import { computed, ref, watch } from 'vue';
 
@@ -16,18 +15,19 @@ import {
 } from 'ant-design-vue';
 
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
-import { getProcurementSettings } from '#/api/fdmplatform/procurement';
-import { createStockOut, getOutboundItems } from '#/api/fdmplatform/warehouse';
+import {
+  createStockOut,
+  getInventoryWarehouses,
+  getOutboundItems,
+} from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
-import { localDate } from '../quotes/comparison';
 import {
-  defaultWarehouse,
-  outboundRows,
-  qty,
-  stockOutErrors,
-  stockOutPayload,
-} from './model';
+  firstWarehouse,
+  writableWarehouses,
+} from '../../inventory-center/components/model';
+import { localDate } from '../quotes/comparison';
+import { outboundRows, qty, stockOutErrors, stockOutPayload } from './model';
 
 import './stock-dialog.css';
 
@@ -35,7 +35,8 @@ const props = defineProps<{ contractId?: string; open: boolean }>();
 const emit = defineEmits<{ close: []; saved: [value: StockOut] }>();
 
 const today = localDate();
-const warehouses = ref<ProcurementSetting[]>([]);
+/** 只能选自己能操作的仓库：工厂库管只能出本厂仓库。 */
+const warehouses = ref<InventoryWarehouse[]>([]);
 const contracts = ref<{ label: string; value: string }[]>([]);
 const picked = ref<string>();
 const rows = ref<OutRow[]>([]);
@@ -92,10 +93,8 @@ watch(
     picked.value = undefined;
     form.value = { warehouseId: undefined, shippedDate: today, remark: '' };
     try {
-      warehouses.value = await getProcurementSettings('warehouses', {
-        active: true,
-      });
-      form.value.warehouseId = defaultWarehouse(warehouses.value);
+      warehouses.value = writableWarehouses(await getInventoryWarehouses());
+      form.value.warehouseId = firstWarehouse(warehouses.value);
       await (props.contractId ? loadItems() : loadContracts());
     } catch (error_) {
       error.value = errorText(error_);

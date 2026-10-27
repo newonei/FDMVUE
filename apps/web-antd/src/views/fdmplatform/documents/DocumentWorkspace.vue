@@ -542,16 +542,11 @@ onMounted(async () => {
         </Tabs>
         <Space wrap>
           <Button
-            v-if="handoff"
+            v-if="handoff?.path"
             type="primary"
-            @click="
-              router.push({
-                path: '/gongchang/stage-stock',
-                query: { tab: handoff.tab },
-              })
-            "
+            @click="router.push({ path: handoff.path, query: handoff.query })"
           >
-            去工序库存办理
+            {{ handoff.label }}
           </Button>
           <Button
             v-for="(action, index) in createActions"

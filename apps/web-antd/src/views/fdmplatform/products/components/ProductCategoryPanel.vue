@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { ProductCategoryCount } from '#/api/fdmplatform/products';
+import type { CategoryNode } from '../category-model';
+
+import type { ProductCategory } from '#/api/fdmplatform/products';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -10,9 +12,14 @@ import { Alert, Empty, Input, Spin } from 'ant-design-vue';
 import { getProductCategories } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
+import {
+  categoryList,
+  categoryName,
+  searchCategories,
+} from '../category-model';
 
 /**
- * 产品分类侧栏：value 为 undefined 表示全部，空字符串表示未分类。
+ * 产品分类侧栏：value 为分类 id，undefined 表示全部，空字符串表示未分类。
  * 计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
  */
 const props = withDefaults(
@@ -34,34 +41,27 @@ const props = withDefaults(
     value: undefined,
   },
 );
-const emit = defineEmits<{ 'update:value': [value: string | undefined] }>();
-const items = ref<ProductCategoryCount[]>([]);
+const emit = defineEmits<{
+  /** label 为分类名称，供列表标题显示 */
+  'update:value': [value: string | undefined, label: string | undefined];
+}>();
+const categories = ref<ProductCategory[]>([]);
+const list = ref<CategoryNode[]>([]);
+const uncategorized = ref(0);
 const total = ref(0);
-const truncated = ref(false);
 const loading = ref(false);
 const loadError = ref('');
 const search = ref('');
 const expanded = ref(true);
 let sequence = 0;
 
-const uncategorized = computed(
-  () => items.value.find((item) => !item.category.trim())?.count ?? 0,
+/** 没有产品的分类不列出，当前选中的除外，便于看到并取消 */
+const visible = computed(() =>
+  searchCategories(list.value, search.value).filter(
+    (item) => item.count > 0 || item.id === props.value,
+  ),
 );
-const named = computed(() => {
-  const needle = search.value.trim().toLowerCase();
-  return items.value.filter(
-    (item) =>
-      item.category.trim() &&
-      (!needle || item.category.toLowerCase().includes(needle)),
-  );
-});
-/** 当前选中的分类在新条件下没有产品时仍保留一行，便于看到并取消。 */
-const missingSelected = computed(
-  () =>
-    props.value !== undefined &&
-    props.value.trim() !== '' &&
-    !items.value.some((item) => item.category === props.value),
-);
+const showChildren = computed(() => expanded.value || Boolean(search.value));
 
 async function load() {
   const run = ++sequence;
@@ -75,18 +75,23 @@ async function load() {
       selectable: props.selectable,
     });
     if (run !== sequence) return;
-    items.value = result.items;
+    categories.value = result.categories ?? [];
+    list.value = categoryList(categories.value, result.items);
+    uncategorized.value =
+      result.items.find((item) => !item.categoryId)?.count ?? 0;
     total.value = result.total;
-    truncated.value = Boolean(result.truncated);
   } catch (error) {
     if (run === sequence) loadError.value = errorText(error);
   } finally {
     if (run === sequence) loading.value = false;
   }
 }
-const showChildren = computed(() => expanded.value || Boolean(search.value));
 function choose(value: string | undefined) {
-  if (value !== props.value) emit('update:value', value);
+  if (value === props.value) return;
+  let label: string | undefined;
+  if (value === '') label = '未分类';
+  else if (value !== undefined) label = categoryName(categories.value, value);
+  emit('update:value', value, label);
 }
 watch(
   () => [
@@ -140,6 +145,17 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <ul v-show="showChildren" class="children" role="group">
+            <li v-for="item in visible" :key="item.id" role="treeitem">
+              <button
+                type="button"
+                class="node"
+                :class="{ current: value === item.id }"
+                :title="item.name"
+                @click="choose(item.id)"
+              >
+                <span class="name">{{ item.name }}</span><span class="count">{{ item.count }}</span>
+              </button>
+            </li>
             <li
               v-if="(uncategorized || value === '') && !search"
               role="treeitem"
@@ -150,33 +166,14 @@ onBeforeUnmount(() => {
                 :class="{ current: value === '' }"
                 @click="choose('')"
               >
-                <span class="name">无分类产品</span><span class="count">{{ uncategorized }}</span>
-              </button>
-            </li>
-            <li v-if="missingSelected" role="treeitem">
-              <button type="button" class="node current" :title="value">
-                <span class="name">{{ value }}</span><span class="count">0</span>
-              </button>
-            </li>
-            <li v-for="item in named" :key="item.category" role="treeitem">
-              <button
-                type="button"
-                class="node"
-                :class="{ current: value === item.category }"
-                :title="item.category"
-                @click="choose(item.category)"
-              >
-                <span class="name">{{ item.category }}</span><span class="count">{{ item.count }}</span>
+                <span class="name">未分类</span><span class="count">{{ uncategorized }}</span>
               </button>
             </li>
           </ul>
         </li>
       </ul>
-      <p v-if="truncated" class="truncated muted">
-        分类较多，只列出产品数最多的一部分；其余可用右侧搜索查找。
-      </p>
       <Empty
-        v-if="!loading && search && named.length === 0"
+        v-if="!loading && search && visible.length === 0"
         :image="Empty.PRESENTED_IMAGE_SIMPLE"
         description="没有匹配的分类"
       />
@@ -292,10 +289,5 @@ onBeforeUnmount(() => {
 
 .muted {
   color: hsl(var(--muted-foreground));
-}
-
-.truncated {
-  margin: 8px 4px 0;
-  font-size: 12px;
 }
 </style>

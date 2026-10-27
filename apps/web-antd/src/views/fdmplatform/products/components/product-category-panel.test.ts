@@ -1,4 +1,3 @@
-/* eslint-disable vue/one-component-per-file -- Each case mounts its own small host app around the panel. */
 import { createApp, h, nextTick, ref } from 'vue';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -26,6 +25,12 @@ function names(root: HTMLElement) {
   );
 }
 
+const categories = [
+  { id: 'tpe', name: 'TPE瑜伽垫', sort: 10, active: true, version: 0 },
+  { id: 'pu', name: 'PU橡胶瑜伽垫', sort: 20, active: true, version: 0 },
+  { id: 'box', name: '纸箱', sort: 30, active: true, version: 0 },
+];
+
 describe('产品分类侧栏', () => {
   let root: HTMLElement | undefined;
   afterEach(() => {
@@ -33,16 +38,18 @@ describe('产品分类侧栏', () => {
     mocks.getProductCategories.mockReset();
   });
 
-  it('全部在前、未分类在末，点击发出分类原文，空字符串表示未分类', async () => {
+  it('按排序显示分类产品数，点击发出分类 id 和名称，未分类在末', async () => {
     mocks.getProductCategories.mockResolvedValue({
       total: 6,
+      categories,
       items: [
-        { category: '外采产品(OC2400000)', count: 3 },
-        { category: '', count: 2 },
-        { category: '辅料', count: 1 },
+        { categoryId: 'tpe', count: 3 },
+        { categoryId: '', count: 2 },
+        { categoryId: 'box', count: 1 },
       ],
     });
     const value = ref<string | undefined>();
+    const label = ref<string | undefined>();
     const keyword = ref('');
     root = document.createElement('div');
     document.body.append(root);
@@ -53,8 +60,9 @@ describe('产品分类侧栏', () => {
           keyword: keyword.value,
           selectable: true,
           value: value.value,
-          'onUpdate:value': (next: string | undefined) => {
+          'onUpdate:value': (next: string | undefined, path?: string) => {
             value.value = next;
+            label.value = path;
           },
         }),
     }).mount(root);
@@ -65,57 +73,38 @@ describe('产品分类侧栏', () => {
       active: undefined,
       selectable: true,
     });
-    expect(root.querySelector('.truncated')).toBeNull();
+    // 没有产品的分类（PU橡胶瑜伽垫）不列出
     expect(names(root)).toEqual([
       '全部类别 6',
-      '无分类产品 2',
-      '外采产品(OC2400000) 3',
-      '辅料 1',
+      'TPE瑜伽垫 3',
+      '纸箱 1',
+      '未分类 2',
     ]);
 
-    nodes(root)[3]!.click();
-    await nextTick();
-    expect(value.value).toBe('辅料');
     nodes(root)[1]!.click();
     await nextTick();
+    expect(value.value).toBe('tpe');
+    expect(label.value).toBe('TPE瑜伽垫');
+    nodes(root)[3]!.click();
+    await nextTick();
     expect(value.value).toBe('');
+    expect(label.value).toBe('未分类');
     nodes(root)[0]!.click();
     await nextTick();
     expect(value.value).toBeUndefined();
 
     // 搜索后选中的分类没有结果时仍显示，便于看到当前筛选
-    value.value = '辅料';
+    value.value = 'box';
     mocks.getProductCategories.mockResolvedValue({
       total: 3,
-      items: [{ category: '外采产品(OC2400000)', count: 3 }],
+      categories,
+      items: [{ categoryId: 'tpe', count: 3 }],
     });
     keyword.value = '瑜伽垫';
     await flush();
     expect(mocks.getProductCategories).toHaveBeenLastCalledWith(
       expect.objectContaining({ keyword: '瑜伽垫' }),
     );
-    expect(names(root)).toEqual([
-      '全部类别 3',
-      '辅料 0',
-      '外采产品(OC2400000) 3',
-    ]);
-  });
-
-  it('分类超过上限时提示只列出一部分，全部类别仍是总数', async () => {
-    mocks.getProductCategories.mockResolvedValue({
-      total: 9,
-      truncated: true,
-      items: [{ category: '辅料', count: 4 }],
-    });
-    root = document.createElement('div');
-    document.body.append(root);
-    createApp({
-      render: () => h(ProductCategoryPanel, { companyId: 0 }),
-    }).mount(root);
-    await flush();
-    expect(names(root)[0]).toBe('全部类别 9');
-    expect(root.querySelector('.truncated')?.textContent).toContain(
-      '只列出产品数最多的一部分',
-    );
+    expect(names(root)).toEqual(['全部类别 3', 'TPE瑜伽垫 3', '纸箱 0']);
   });
 });
