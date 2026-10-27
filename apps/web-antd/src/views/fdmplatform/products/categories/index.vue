@@ -23,7 +23,6 @@ import {
   Switch,
   Table,
   Tag,
-  TreeSelect,
 } from 'ant-design-vue';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
@@ -36,32 +35,24 @@ import {
 
 import { errorText } from '../../data';
 import {
+  categoryList,
+  categoryName,
   categoryOptions,
-  categoryPath,
-  categoryTree,
-  searchCategoryTree,
+  searchCategories,
 } from '../category-model';
 
 defineOptions({ name: 'FdmPlatformProductCategories' });
 
-/** 产品分类维护：两级（大类 / 小类），产品只挂小类。改名、合并会同步改写产品上的分类名称。 */
+/** 产品分类维护：一层分类。改名、合并会同步改写产品上的分类名称。 */
 const companyId = 0;
 const router = useRouter();
 const categories = ref<ProductCategory[]>([]);
-const tree = ref<CategoryNode[]>([]);
+const list = ref<CategoryNode[]>([]);
 const uncategorized = ref(0);
 const loading = ref(false);
 const panelError = ref('');
 const search = ref('');
-const rows = computed(() =>
-  searchCategoryTree(tree.value, search.value).map((top) => ({
-    ...top,
-    // 没有小类的大类不显示展开箭头
-    children: top.children.length > 0 ? top.children : undefined,
-  })),
-);
-const expandedKeys = ref<string[]>([]);
-const tops = computed(() => categories.value.filter((item) => !item.parentId));
+const rows = computed(() => searchCategories(list.value, search.value));
 
 async function load() {
   loading.value = true;
@@ -69,7 +60,7 @@ async function load() {
   try {
     const result = await getProductCategories({ companyId });
     categories.value = result.categories ?? [];
-    tree.value = categoryTree(categories.value, result.items);
+    list.value = categoryList(categories.value, result.items);
     uncategorized.value =
       result.items.find((item) => !item.categoryId)?.count ?? 0;
   } catch (error) {
@@ -88,7 +79,7 @@ function openProducts(node: CategoryNode) {
     path: '/fdmproducts/catalog',
     query: {
       catalogCategory: node.id,
-      catalogCategoryLabel: categoryPath(categories.value, node.id),
+      catalogCategoryLabel: node.name,
     },
   });
 }
@@ -101,13 +92,11 @@ const editor = reactive({
   key: '',
   id: undefined as string | undefined,
   version: undefined as number | undefined,
-  parentId: undefined as string | undefined,
   name: '',
   sort: undefined as number | undefined,
   active: true,
 });
-const editingTop = computed(() => !editor.parentId);
-function openEditor(category?: ProductCategory, parentId?: string) {
+function openEditor(category?: ProductCategory) {
   Object.assign(editor, {
     open: true,
     saving: false,
@@ -115,7 +104,6 @@ function openEditor(category?: ProductCategory, parentId?: string) {
     key: newIdempotencyKey(),
     id: category?.id,
     version: category?.version,
-    parentId: category ? (category.parentId ?? undefined) : parentId,
     name: category?.name ?? '',
     sort: category?.sort,
     active: category?.active ?? true,
@@ -133,15 +121,12 @@ async function saveEditor() {
       companyId,
       id: editor.id,
       expectedVersion: editor.version,
-      parentId: editor.parentId ?? null,
       name: editor.name.trim(),
       sort: editor.sort ?? undefined,
       active: editor.active,
       idempotencyKey: editor.key,
     });
     message.success(editor.id ? '分类已保存' : '分类已新增');
-    if (editor.parentId && !expandedKeys.value.includes(editor.parentId))
-      expandedKeys.value = [...expandedKeys.value, editor.parentId];
     editor.open = false;
     await load();
   } catch (error) {
@@ -161,10 +146,9 @@ const merger = reactive({
   targetId: undefined as string | undefined,
 });
 const mergeTargets = computed(() =>
-  categoryOptions(categories.value).map((top) => ({
-    ...top,
-    children: top.children.filter((child) => child.value !== merger.source?.id),
-  })),
+  categoryOptions(categories.value).filter(
+    (item) => item.value !== merger.source?.id,
+  ),
 );
 function openMerge(node: CategoryNode) {
   Object.assign(merger, {
@@ -178,7 +162,7 @@ function openMerge(node: CategoryNode) {
 }
 async function saveMerge() {
   if (!merger.source || !merger.targetId) {
-    merger.error = '请选择要并入的小类';
+    merger.error = '请选择要并入的分类';
     return;
   }
   merger.saving = true;
@@ -190,7 +174,7 @@ async function saveMerge() {
       idempotencyKey: merger.key,
     });
     message.success(
-      `已把 ${result.movedCount} 个产品并入“${categoryPath(categories.value, merger.targetId)}”`,
+      `已把 ${result.movedCount} 个产品并入“${categoryName(categories.value, merger.targetId)}”`,
     );
     merger.open = false;
     await load();
@@ -237,10 +221,10 @@ const columns = [
           <div class="category-eyebrow">产品中心</div>
           <h1>产品分类</h1>
           <p>
-            分两级：大类下设小类，产品挂在小类下。改名或合并后，产品档案中的分类会同步更新。
+            新建、编辑和导入产品时只能选这里的分类。改名或合并后，产品档案中的分类会同步更新。
           </p>
         </div>
-        <Button type="primary" @click="openEditor()">新增大类</Button>
+        <Button type="primary" @click="openEditor()">新增分类</Button>
       </header>
       <Alert v-if="panelError" type="error" show-icon :message="panelError" />
       <Alert
@@ -254,28 +238,19 @@ const columns = [
           <Input
             v-model:value="search"
             class="category-search"
-            placeholder="搜索大类或小类名称"
+            placeholder="搜索分类名称"
             allow-clear
           />
           <Table
-            v-model:expanded-row-keys="expandedKeys"
             :columns="columns"
             :data-source="rows"
             :loading="loading"
             :pagination="false"
             row-key="id"
             size="middle"
-            :expand-row-by-click="false"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'name'">
-                <span :class="{ 'top-name': !record.parentId }">{{
-                  record.name
-                }}</span>
-                <span v-if="!record.parentId" class="muted">
-                  · {{ record.children?.length ?? 0 }} 个小类</span>
-              </template>
-              <template v-else-if="column.key === 'count'">
+              <template v-if="column.key === 'count'">
                 <Button
                   v-if="record.count > 0"
                   type="link"
@@ -296,14 +271,6 @@ const columns = [
               <template v-else-if="column.key === 'actions'">
                 <Space :size="2" wrap>
                   <Button
-                    v-if="!record.parentId"
-                    type="link"
-                    size="small"
-                    @click="openEditor(undefined, record.id)"
-                  >
-                    新增小类
-                  </Button>
-                  <Button
                     type="link"
                     size="small"
                     @click="openEditor(byId(record.id))"
@@ -311,7 +278,6 @@ const columns = [
                     编辑
                   </Button>
                   <Button
-                    v-if="record.parentId"
                     type="link"
                     size="small"
                     @click="openMerge(record as CategoryNode)"
@@ -336,15 +302,7 @@ const columns = [
 
     <Modal
       v-model:open="editor.open"
-      :title="
-        editor.id
-          ? editingTop
-            ? '编辑大类'
-            : '编辑小类'
-          : editingTop
-            ? '新增大类'
-            : '新增小类'
-      "
+      :title="editor.id ? '编辑分类' : '新增分类'"
       :confirm-loading="editor.saving"
       ok-text="保存"
       cancel-text="取消"
@@ -363,27 +321,7 @@ const columns = [
             <Input
               v-model:value="editor.name"
               :maxlength="50"
-              placeholder="例如：瑜伽垫、TPE瑜伽垫"
-            />
-          </Form.Item>
-          <Form.Item
-            v-if="!editingTop || editor.id"
-            label="所属大类"
-            :extra="
-              editor.id && !editingTop
-                ? '改到其他大类后，产品随小类一起移动'
-                : undefined
-            "
-          >
-            <Select
-              v-model:value="editor.parentId"
-              :options="
-                tops
-                  .filter((top) => top.id !== editor.id)
-                  .map((top) => ({ value: top.id, label: top.name }))
-              "
-              :allow-clear="Boolean(editor.id)"
-              :placeholder="editor.id ? '不选则为大类' : '选择大类'"
+              placeholder="例如：TPE瑜伽垫"
             />
           </Form.Item>
           <Form.Item label="排序" extra="数字小的排前面；不填则排在最后">
@@ -407,7 +345,7 @@ const columns = [
 
     <Modal
       v-model:open="merger.open"
-      title="合并小类"
+      title="合并分类"
       :confirm-loading="merger.saving"
       ok-text="合并"
       cancel-text="取消"
@@ -424,15 +362,14 @@ const columns = [
         <Alert
           type="info"
           show-icon
-          :message="`“${merger.source?.name}”下的 ${merger.source?.count ?? 0} 个产品将并入所选小类，合并后“${merger.source?.name}”删除，不能撤销。`"
+          :message="`“${merger.source?.name}”下的 ${merger.source?.count ?? 0} 个产品将并入所选分类，合并后“${merger.source?.name}”删除，不能撤销。`"
         />
-        <TreeSelect
+        <Select
           v-model:value="merger.targetId"
-          :tree-data="mergeTargets"
-          placeholder="选择并入的小类"
+          :options="mergeTargets"
+          placeholder="选择并入的分类"
           show-search
-          tree-node-filter-prop="title"
-          tree-default-expand-all
+          option-filter-prop="label"
           :list-height="360"
           style="width: 100%"
         />
@@ -477,10 +414,6 @@ const columns = [
 
 .category-search {
   max-width: 320px;
-}
-
-.top-name {
-  font-weight: 600;
 }
 
 .muted {

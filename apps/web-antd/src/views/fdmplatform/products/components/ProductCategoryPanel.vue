@@ -13,14 +13,14 @@ import { getProductCategories } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
 import {
-  categoryPath,
-  categoryTree,
-  searchCategoryTree,
+  categoryList,
+  categoryName,
+  searchCategories,
 } from '../category-model';
 
 /**
- * 产品分类侧栏：两级树（大类 / 小类）。value 为分类 id，undefined 表示全部，空字符串表示未分类；
- * 选大类即含其下全部小类。计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
+ * 产品分类侧栏：value 为分类 id，undefined 表示全部，空字符串表示未分类。
+ * 计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
  */
 const props = withDefaults(
   defineProps<{
@@ -42,48 +42,26 @@ const props = withDefaults(
   },
 );
 const emit = defineEmits<{
-  /** label 为「大类 / 小类」，供列表标题显示 */
+  /** label 为分类名称，供列表标题显示 */
   'update:value': [value: string | undefined, label: string | undefined];
 }>();
 const categories = ref<ProductCategory[]>([]);
-const tree = ref<CategoryNode[]>([]);
+const list = ref<CategoryNode[]>([]);
 const uncategorized = ref(0);
 const total = ref(0);
 const loading = ref(false);
 const loadError = ref('');
 const search = ref('');
 const expanded = ref(true);
-/** 展开的大类；选中项所在的大类自动展开 */
-const open = ref(new Set<string>());
 let sequence = 0;
 
 /** 没有产品的分类不列出，当前选中的除外，便于看到并取消 */
 const visible = computed(() =>
-  searchCategoryTree(tree.value, search.value).flatMap((top) => {
-    const children = top.children.filter(
-      (child) => child.count > 0 || child.id === props.value,
-    );
-    return top.count > 0 || top.id === props.value || children.length > 0
-      ? [{ ...top, children }]
-      : [];
-  }),
+  searchCategories(list.value, search.value).filter(
+    (item) => item.count > 0 || item.id === props.value,
+  ),
 );
 const showChildren = computed(() => expanded.value || Boolean(search.value));
-function isOpen(id: string) {
-  return (
-    Boolean(search.value) ||
-    open.value.has(id) ||
-    tree.value
-      .find((top) => top.id === id)
-      ?.children.some((child) => child.id === props.value) === true
-  );
-}
-function toggle(id: string) {
-  const next = new Set(open.value);
-  if (isOpen(id)) next.delete(id);
-  else next.add(id);
-  open.value = next;
-}
 
 async function load() {
   const run = ++sequence;
@@ -98,7 +76,7 @@ async function load() {
     });
     if (run !== sequence) return;
     categories.value = result.categories ?? [];
-    tree.value = categoryTree(categories.value, result.items);
+    list.value = categoryList(categories.value, result.items);
     uncategorized.value =
       result.items.find((item) => !item.categoryId)?.count ?? 0;
     total.value = result.total;
@@ -112,7 +90,7 @@ function choose(value: string | undefined) {
   if (value === props.value) return;
   let label: string | undefined;
   if (value === '') label = '未分类';
-  else if (value !== undefined) label = categoryPath(categories.value, value);
+  else if (value !== undefined) label = categoryName(categories.value, value);
   emit('update:value', value, label);
 }
 watch(
@@ -167,49 +145,16 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <ul v-show="showChildren" class="children" role="group">
-            <li
-              v-for="top in visible"
-              :key="top.id"
-              role="treeitem"
-              :aria-expanded="isOpen(top.id)"
-            >
-              <div class="tree-row">
-                <button
-                  type="button"
-                  class="caret"
-                  :class="{ open: isOpen(top.id) }"
-                  :aria-label="isOpen(top.id) ? '收起小类' : '展开小类'"
-                  @click="toggle(top.id)"
-                >
-                  <IconifyIcon icon="lucide:chevron-right" />
-                </button>
-                <button
-                  type="button"
-                  class="node"
-                  :class="{ current: value === top.id }"
-                  :title="top.name"
-                  @click="choose(top.id)"
-                >
-                  <span class="name">{{ top.name }}</span><span class="count">{{ top.count }}</span>
-                </button>
-              </div>
-              <ul v-show="isOpen(top.id)" class="children leaf" role="group">
-                <li
-                  v-for="child in top.children"
-                  :key="child.id"
-                  role="treeitem"
-                >
-                  <button
-                    type="button"
-                    class="node"
-                    :class="{ current: value === child.id }"
-                    :title="child.name"
-                    @click="choose(child.id)"
-                  >
-                    <span class="name">{{ child.name }}</span><span class="count">{{ child.count }}</span>
-                  </button>
-                </li>
-              </ul>
+            <li v-for="item in visible" :key="item.id" role="treeitem">
+              <button
+                type="button"
+                class="node"
+                :class="{ current: value === item.id }"
+                :title="item.name"
+                @click="choose(item.id)"
+              >
+                <span class="name">{{ item.name }}</span><span class="count">{{ item.count }}</span>
+              </button>
             </li>
             <li
               v-if="(uncategorized || value === '') && !search"
@@ -268,10 +213,6 @@ onBeforeUnmount(() => {
   padding: 0 0 0 22px;
   margin: 0;
   list-style: none;
-}
-
-.children.leaf {
-  padding-left: 20px;
 }
 
 .tree-row {

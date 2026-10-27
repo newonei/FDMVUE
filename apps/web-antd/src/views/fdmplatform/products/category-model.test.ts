@@ -3,82 +3,54 @@ import type { ProductCategory } from '#/api/fdmplatform/products';
 import { describe, expect, it } from 'vitest';
 
 import {
+  categoryList,
+  categoryName,
   categoryOptions,
-  categoryPath,
-  categoryTree,
-  searchCategoryTree,
+  searchCategories,
 } from './category-model';
 
 const categories: ProductCategory[] = [
-  { id: 'aux', name: '包装辅料', sort: 20, active: true, version: 0 },
-  { id: 'mat', name: '瑜伽垫', sort: 10, active: true, version: 0 },
-  {
-    id: 'pu',
-    parentId: 'mat',
-    name: 'PU橡胶瑜伽垫',
-    sort: 20,
-    active: true,
-    version: 0,
-  },
-  {
-    id: 'tpe',
-    parentId: 'mat',
-    name: 'TPE瑜伽垫',
-    sort: 10,
-    active: true,
-    version: 0,
-  },
-  {
-    id: 'box',
-    parentId: 'aux',
-    name: '纸箱/彩盒',
-    sort: 10,
-    active: false,
-    version: 0,
-  },
+  { id: 'aux', name: '辅料', sort: 30, active: true, version: 0 },
+  { id: 'pu', name: 'PU橡胶瑜伽垫', sort: 20, active: true, version: 0 },
+  { id: 'tpe', name: 'TPE瑜伽垫', sort: 10, active: true, version: 0 },
+  { id: 'box', name: '纸箱', sort: 40, active: false, version: 0 },
 ];
 
-describe('产品分类树', () => {
-  it('按排序组装两级树，大类产品数为小类之和', () => {
-    const tree = categoryTree(categories, [
+describe('产品分类', () => {
+  it('按排序列出并挂上产品数', () => {
+    const list = categoryList(categories, [
       { categoryId: 'tpe', count: 5 },
       { categoryId: 'pu', count: 2 },
       { categoryId: '', count: 9 },
     ]);
-    expect(tree.map((top) => [top.name, top.count])).toEqual([
-      ['瑜伽垫', 7],
-      ['包装辅料', 0],
-    ]);
-    expect(tree[0]!.children.map((child) => child.name)).toEqual([
-      'TPE瑜伽垫',
-      'PU橡胶瑜伽垫',
+    expect(list.map((item) => [item.name, item.count])).toEqual([
+      ['TPE瑜伽垫', 5],
+      ['PU橡胶瑜伽垫', 2],
+      ['辅料', 0],
+      ['纸箱', 0],
     ]);
   });
 
-  it('搜索大类保留全部小类，搜索小类只留命中的小类', () => {
-    const tree = categoryTree(categories);
-    expect(
-      searchCategoryTree(tree, '瑜伽垫').map((top) => top.children.length),
-    ).toEqual([2]);
-    const found = searchCategoryTree(tree, 'pu');
-    expect(found.map((top) => top.name)).toEqual(['瑜伽垫']);
-    expect(found[0]!.children.map((child) => child.id)).toEqual(['pu']);
-    expect(searchCategoryTree(tree, '不存在')).toEqual([]);
+  it('按名称搜索', () => {
+    const list = categoryList(categories);
+    expect(searchCategories(list, 'pu').map((item) => item.id)).toEqual(['pu']);
+    expect(searchCategories(list, '不存在')).toEqual([]);
   });
 
-  it('小类显示大类路径', () => {
-    expect(categoryPath(categories, 'tpe')).toBe('瑜伽垫 / TPE瑜伽垫');
-    expect(categoryPath(categories, 'mat')).toBe('瑜伽垫');
-    expect(categoryPath(categories, 'gone')).toBeUndefined();
+  it('显示分类名称', () => {
+    expect(categoryName(categories, 'tpe')).toBe('TPE瑜伽垫');
+    expect(categoryName(categories, 'gone')).toBeUndefined();
   });
 
-  it('下拉只能选小类，停用的小类只对当前产品保留', () => {
-    const options = categoryOptions(categories);
-    expect(options.every((top) => top.selectable === false)).toBe(true);
-    const box = options[1]!.children[0]!;
-    expect(box).toMatchObject({ title: '纸箱/彩盒（停用）', disabled: true });
-    expect(categoryOptions(categories, 'box')[1]!.children[0]!.disabled).toBe(
-      false,
-    );
+  it('下拉不列停用的分类，产品当前所在的除外', () => {
+    expect(categoryOptions(categories).map((item) => item.value)).toEqual([
+      'tpe',
+      'pu',
+      'aux',
+    ]);
+    expect(categoryOptions(categories, 'box').at(-1)).toEqual({
+      label: '纸箱（停用）',
+      value: 'box',
+    });
   });
 });

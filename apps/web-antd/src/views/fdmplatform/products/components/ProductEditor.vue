@@ -11,8 +11,8 @@ import {
   Form,
   Input,
   message,
+  Select,
   Space,
-  TreeSelect,
 } from 'ant-design-vue';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
@@ -38,7 +38,7 @@ const loading = ref(false);
 const panelError = ref('');
 const key = ref('');
 const categories = ref<ProductCategory[]>([]);
-const categoryTreeData = computed(() =>
+const categorySelectOptions = computed(() =>
   categoryOptions(categories.value, props.product?.categoryId),
 );
 async function loadCategories() {
@@ -140,14 +140,13 @@ async function save() {
           :label="title"
           :required="['categoryId', 'code', 'name'].includes(field!)"
         >
-          <TreeSelect
+          <Select
             v-if="field === 'categoryId'"
             v-model:value="form[field]"
-            :tree-data="categoryTreeData"
-            placeholder="选择大类下的小类"
+            :options="categorySelectOptions"
+            placeholder="选择产品分类"
             show-search
-            tree-node-filter-prop="title"
-            tree-default-expand-all
+            option-filter-prop="label"
             :list-height="360"
             allow-clear
           />

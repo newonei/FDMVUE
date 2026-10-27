@@ -26,32 +26,9 @@ function names(root: HTMLElement) {
 }
 
 const categories = [
-  { id: 'mat', name: '瑜伽垫', sort: 10, active: true, version: 0 },
-  { id: 'aux', name: '包装辅料', sort: 20, active: true, version: 0 },
-  {
-    id: 'tpe',
-    parentId: 'mat',
-    name: 'TPE瑜伽垫',
-    sort: 10,
-    active: true,
-    version: 0,
-  },
-  {
-    id: 'pu',
-    parentId: 'mat',
-    name: 'PU橡胶瑜伽垫',
-    sort: 20,
-    active: true,
-    version: 0,
-  },
-  {
-    id: 'box',
-    parentId: 'aux',
-    name: '纸箱',
-    sort: 10,
-    active: true,
-    version: 0,
-  },
+  { id: 'tpe', name: 'TPE瑜伽垫', sort: 10, active: true, version: 0 },
+  { id: 'pu', name: 'PU橡胶瑜伽垫', sort: 20, active: true, version: 0 },
+  { id: 'box', name: '纸箱', sort: 30, active: true, version: 0 },
 ];
 
 describe('产品分类侧栏', () => {
@@ -61,7 +38,7 @@ describe('产品分类侧栏', () => {
     mocks.getProductCategories.mockReset();
   });
 
-  it('按大类 / 小类显示产品数，点击发出分类 id 和路径，未分类在末', async () => {
+  it('按排序显示分类产品数，点击发出分类 id 和名称，未分类在末', async () => {
     mocks.getProductCategories.mockResolvedValue({
       total: 6,
       categories,
@@ -96,24 +73,19 @@ describe('产品分类侧栏', () => {
       active: undefined,
       selectable: true,
     });
-    // 没有产品的小类（PU橡胶瑜伽垫）不列出
+    // 没有产品的分类（PU橡胶瑜伽垫）不列出
     expect(names(root)).toEqual([
       '全部类别 6',
-      '瑜伽垫 3',
       'TPE瑜伽垫 3',
-      '包装辅料 1',
       '纸箱 1',
       '未分类 2',
     ]);
 
-    nodes(root)[2]!.click();
-    await nextTick();
-    expect(value.value).toBe('tpe');
-    expect(label.value).toBe('瑜伽垫 / TPE瑜伽垫');
     nodes(root)[1]!.click();
     await nextTick();
-    expect(value.value).toBe('mat');
-    nodes(root)[5]!.click();
+    expect(value.value).toBe('tpe');
+    expect(label.value).toBe('TPE瑜伽垫');
+    nodes(root)[3]!.click();
     await nextTick();
     expect(value.value).toBe('');
     expect(label.value).toBe('未分类');
@@ -121,7 +93,7 @@ describe('产品分类侧栏', () => {
     await nextTick();
     expect(value.value).toBeUndefined();
 
-    // 搜索后选中的小类没有结果时仍显示，便于看到当前筛选
+    // 搜索后选中的分类没有结果时仍显示，便于看到当前筛选
     value.value = 'box';
     mocks.getProductCategories.mockResolvedValue({
       total: 3,
@@ -133,12 +105,6 @@ describe('产品分类侧栏', () => {
     expect(mocks.getProductCategories).toHaveBeenLastCalledWith(
       expect.objectContaining({ keyword: '瑜伽垫' }),
     );
-    expect(names(root)).toEqual([
-      '全部类别 3',
-      '瑜伽垫 3',
-      'TPE瑜伽垫 3',
-      '包装辅料 0',
-      '纸箱 0',
-    ]);
+    expect(names(root)).toEqual(['全部类别 3', 'TPE瑜伽垫 3', '纸箱 0']);
   });
 });

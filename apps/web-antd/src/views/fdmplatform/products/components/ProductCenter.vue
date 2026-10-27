@@ -79,13 +79,13 @@ const pageNo = ref(catalogPage('catalogPage', 1));
 const pageSize = ref(Math.min(catalogPage('catalogSize', 10), 100));
 const total = ref(0);
 const keyword = ref(catalogQuery('catalogKeyword'));
-/** 分类 id：undefined 为全部分类，空字符串为未分类，大类含其下全部小类 */
+/** 分类 id：undefined 为全部分类，空字符串为未分类 */
 const category = ref<string | undefined>(
   props.mode === 'catalog' && typeof route.query.catalogCategory === 'string'
     ? route.query.catalogCategory
     : undefined,
 );
-/** 列表标题显示的「大类 / 小类」 */
+/** 列表标题显示的分类名称 */
 const categoryLabel = ref<string | undefined>(
   catalogQuery('catalogCategoryLabel') || undefined,
 );

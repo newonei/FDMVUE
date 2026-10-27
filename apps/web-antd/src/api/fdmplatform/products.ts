@@ -24,7 +24,7 @@ export interface Product {
   name: string;
   code: string;
   displayName?: string;
-  /** 所属小类名称，随分类改名、合并自动更新 */
+  /** 所属分类名称，随分类改名、合并自动更新 */
   category?: string;
   categoryId?: string;
   imageUrl?: string;
@@ -64,13 +64,12 @@ export interface ProductQuery {
   taxBasis?: TaxBasis;
   /** true 时按分类原文精确匹配，空字符串表示未分类 */
   exactCategory?: boolean;
-  /** 按维护的分类筛选：大类含其下全部小类，空字符串为未分类 */
+  /** 按维护的分类筛选，空字符串为未分类 */
   categoryId?: string;
 }
-/** 产品分类，两级：parentId 为空是大类，产品只挂小类 */
+/** 产品分类（一层） */
 export interface ProductCategory {
   id: string;
-  parentId?: null | string;
   name: string;
   sort: number;
   active: boolean;
@@ -86,7 +85,7 @@ export interface ProductCategoryView {
   total: number;
   items: ProductCategoryCount[];
   truncated?: boolean;
-  /** 维护好的分类树（平铺，按 parentId 组装） */
+  /** 维护好的分类 */
   categories: ProductCategory[];
 }
 export interface ProductAttachment {
@@ -172,7 +171,7 @@ export function importProducts(data: {
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
 }
-/** 产品档案左侧分类：分类树和各小类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
+/** 产品档案左侧分类：分类和各分类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
 export function getProductCategories(params: {
   active?: boolean;
   companyId: number;
@@ -196,12 +195,11 @@ export function saveProductCategory(data: {
   id?: string;
   idempotencyKey: string;
   name: string;
-  parentId?: null | string;
   sort?: number;
 }) {
   return requestClient.post<ProductCategory>(categoryBase, data);
 }
-/** 把小类的全部产品并入另一个小类，原小类删除；返回移动的产品数 */
+/** 把分类的全部产品并入另一个分类，原分类删除；返回移动的产品数 */
 export function mergeProductCategory(
   id: string,
   data: { companyId: number; idempotencyKey: string; targetId: string },
