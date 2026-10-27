@@ -499,13 +499,12 @@ export function contractNextStep(
     return {
       title: '安排出货',
       description:
-        '工厂在「工序库存」从已包装成品出货，出货数量自动记到本合同。',
-      department: '工厂部门',
-      button: '去工序库存',
+        '仓库在「库存中心 · 出库单」按合同做销售出库，出货数量自动记到本合同。',
+      department: '仓库',
+      button: '去库存中心',
       action: {
         type: 'route',
-        path: '/gongchang/stage-stock',
-        query: { tab: 'trade' },
+        path: '/fdmstock/inventory-outbound',
       },
     };
   if (open('receipt'))

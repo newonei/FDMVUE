@@ -13,7 +13,7 @@ import { generateSchedule } from '#/api/fdmgongchang/schedule';
 import { dateText, num } from '../shared';
 
 /**
- * 选中的订单做 AI 排单：只把这几张单交给 AI 排（外贸任务和其他订单这次不排），
+ * 选中的订单做 AI 排单：只把这几张单交给 AI 排（其他订单这次不排），
  * 提交后切到「排单方案」看方案、调整、确认下发。
  */
 const props = defineProps<{ orders: Api.Order[] }>();
@@ -64,7 +64,7 @@ async function submit() {
   >
     <div class="flex flex-col gap-3 text-sm">
       <p class="m-0 text-xs text-muted-foreground">
-        只把这几张单交给 AI 排（外贸任务和其他订单这次不排），AI 会参考库存、在制、人员和产能排出未来几天的任务。
+        只把这几张单交给 AI 排（其他订单这次不排），AI 会参考库存、在制、人员和产能排出未来几天的任务。
         出方案后在「AI 排单」里调整、确认下发。
       </p>
       <ul class="m-0 flex max-h-48 list-none flex-col divide-y divide-border overflow-auto rounded-md border border-border p-0">

@@ -9,7 +9,6 @@ import OrderDrawer from './modules/order-drawer.vue';
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   getOrder: vi.fn(),
-  makeTasks: vi.fn(),
   operators: vi.fn(),
   page: vi.fn(),
   preview: vi.fn(),
@@ -18,7 +17,6 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   createOrder: mocks.create,
-  getMakeTasks: mocks.makeTasks,
   getOrder: mocks.getOrder,
   getOrderOperators: mocks.operators,
   getStockPage: mocks.page,
@@ -184,7 +182,6 @@ describe('order drawer', () => {
     mode: 'create' | 'report';
     open: boolean;
     orderId?: number;
-    task?: { assignmentId: string; contractId: string };
   }>({ mode: 'create', open: false });
   const saved = vi.fn();
 
@@ -201,7 +198,6 @@ describe('order drawer', () => {
       rows.map((_, i) => `CODE-${i}`),
     );
     mocks.create.mockResolvedValue(9);
-    mocks.makeTasks.mockResolvedValue([]);
     mocks.match.mockResolvedValue([]);
     mocks.operators.mockResolvedValue([
       { deptName: '开片车间', nickname: '张三', team: '开片一组', userId: 3 },
@@ -214,7 +210,6 @@ describe('order drawer', () => {
         setup: () => () =>
           h(OrderDrawer, {
             initialStage: 'BOARD',
-            initialTask: state.task,
             mode: state.mode,
             orderId: state.orderId,
             onSaved: saved,
@@ -235,7 +230,6 @@ describe('order drawer', () => {
     state.open = false;
     state.mode = 'create';
     state.orderId = undefined;
-    state.task = undefined;
     vi.clearAllMocks();
     vi.useRealTimers();
   });
@@ -358,46 +352,6 @@ describe('order drawer', () => {
       expect.stringContaining('进入车间在制'),
       'BOARD',
     );
-  });
-
-  it('links a ready make task from the trade list and submits its contract and assignment', async () => {
-    mocks.makeTasks.mockResolvedValue([
-      {
-        approvedQuantity: 100,
-        assignmentId: 'a1',
-        assignmentQuantity: 100,
-        completedQuantity: 0,
-        contractCode: 'HT-20261008-001',
-        contractId: 'c1',
-        contractItemId: 'i1',
-        customerName: '美国客户',
-        inProgressOrderCount: 0,
-        itemQuantity: 100,
-        linkedOrderCount: 0,
-        productName: '紫灰双色瑜伽垫',
-        ready: true,
-        shippedQuantity: 0,
-        unit: '张',
-      },
-    ]);
-    state.task = { assignmentId: 'a1', contractId: 'c1' };
-    await nextTick();
-    state.open = true;
-    await flush();
-    expect(document.body.textContent).toContain('HT-20261008-001');
-    typeInto('order-take-1', '10');
-    await flush();
-    [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
-      .find((r) => r.value === 'false')!
-      .click();
-    await flush();
-    await submitCreate('提交领料');
-    await flush();
-    expect(mocks.create.mock.calls[0]![0]).toMatchObject({
-      assignmentId: 'a1',
-      contractId: 'c1',
-      finish: false,
-    });
   });
 
   it('asks to assign the post first when nobody can do this process', async () => {
