@@ -87,7 +87,8 @@
 
 ### 产品分类与选品（2026-10-16，Issue #32）
 
-- **产品档案**改为左分类、右产品两栏：左侧 `products/components/ProductCategoryPanel.vue` 列出全部分类及产品数（`GET /products/categories`，口径同列表的搜索词与启用状态，不含分类本身），点击分类按原文精确筛选（`/products?category=&exactCategory=true`，空分类为「未分类」）。深链接 `catalogCategory` 同样为精确分类。
+- **产品档案**改为左分类、右产品两栏：左侧 `products/components/ProductCategoryPanel.vue` 按维护的分类列出产品数（`GET /products/categories` 同时返回分类和按 `categoryId` 的计数，口径同列表的搜索词与启用状态，不含分类本身），点击分类按 `categoryId` 筛选（`/products?categoryId=`，空字符串为「未分类」）。深链接 `catalogCategory` 为分类 id，`catalogCategoryLabel` 为标题。
+- **产品分类**（`products/categories/index.vue`，#103）：维护一层分类（由各产品原有分类名称建成），`/fdmplatform/v1/product-categories` 新增、改名、停用、合并、删除；编辑产品和导入时必须选已有分类（`products/category-model.ts`），改名与合并由后端同步改写产品上的分类名称。
 - **产品中心弹窗** `ProductPicker.vue` 改为同样两栏的弹窗：左分类、右可勾选表格，跨分类、跨页保留勾选，底部汇总已选后确定。合同选品只列资料齐全产品；`allow-incomplete` 时列全部启用产品。
 - **采购单录入**：明细上方「从产品中心选择」批量勾选追加明细，每行「选择」按分类替换本行产品；原行内搜索下拉和 Excel 粘贴保留。
 

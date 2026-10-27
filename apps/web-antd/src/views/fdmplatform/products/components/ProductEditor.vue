@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Product } from '#/api/fdmplatform/products';
+import type { Product, ProductCategory } from '#/api/fdmplatform/products';
 
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -11,14 +11,19 @@ import {
   Form,
   Input,
   message,
+  Select,
   Space,
 } from 'ant-design-vue';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
-import { saveProduct } from '#/api/fdmplatform/products';
+import {
+  getProductCategoryList,
+  saveProduct,
+} from '#/api/fdmplatform/products';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
+import { categoryOptions } from '../category-model';
 import { missingProductFields } from '../model';
 
 const props = defineProps<{
@@ -32,11 +37,22 @@ const active = ref(false);
 const loading = ref(false);
 const panelError = ref('');
 const key = ref('');
+const categories = ref<ProductCategory[]>([]);
+const categorySelectOptions = computed(() =>
+  categoryOptions(categories.value, props.product?.categoryId),
+);
+async function loadCategories() {
+  try {
+    categories.value = await getProductCategoryList(props.companyId);
+  } catch (error) {
+    panelError.value = errorText(error);
+  }
+}
 const fields = [
   ['code', 'SKU 编号'],
   ['name', '产品名称'],
   ['displayName', '销售展示名称'],
-  ['category', '分类'],
+  ['categoryId', '分类'],
   ['unit', '计量单位'],
   ['model', '型号'],
   ['spec', '规格'],
@@ -61,11 +77,16 @@ watch(
     active.value = props.product?.active ?? false;
     key.value = newIdempotencyKey();
     panelError.value = '';
+    void loadCategories();
   },
 );
 async function save() {
   if (!String(form.code).trim() || !String(form.name).trim()) {
     panelError.value = '请填写 SKU 编号和产品名称';
+    return;
+  }
+  if (!form.categoryId) {
+    panelError.value = '请选择产品分类；没有合适的分类可先在“产品分类”中新增';
     return;
   }
   loading.value = true;
@@ -117,10 +138,20 @@ async function save() {
           v-for="[field, title] in fields"
           :key="field"
           :label="title"
-          :required="['code', 'name'].includes(field!)"
+          :required="['categoryId', 'code', 'name'].includes(field!)"
         >
+          <Select
+            v-if="field === 'categoryId'"
+            v-model:value="form[field]"
+            :options="categorySelectOptions"
+            placeholder="选择产品分类"
+            show-search
+            option-filter-prop="label"
+            :list-height="360"
+            allow-clear
+          />
           <AutoComplete
-            v-if="field === 'shape'"
+            v-else-if="field === 'shape'"
             v-model:value="form[field]"
             :options="[{ value: '圆角' }, { value: '方形' }]"
             placeholder="选择圆角、方形，也可输入其他形状"
