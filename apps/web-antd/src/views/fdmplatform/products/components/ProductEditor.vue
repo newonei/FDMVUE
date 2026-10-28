@@ -48,19 +48,21 @@ async function loadCategories() {
     panelError.value = errorText(error);
   }
 }
+// 前几项与金智产品档案顺序一致
 const fields = [
   ['code', 'SKU 编号'],
   ['name', '产品名称'],
-  ['displayName', '销售展示名称'],
-  ['categoryId', '分类'],
-  ['unit', '计量单位'],
-  ['model', '型号'],
-  ['spec', '规格'],
+  ['model', '产品型号'],
+  ['weight', '产品克重'],
   ['material', '材质'],
+  ['spec', '产品规格'],
+  ['printing', '定制说明'],
+  ['categoryId', '产品类别'],
+  ['unit', '单位'],
+  ['displayName', '销售展示名称'],
   ['size', '尺寸'],
   ['color', '颜色'],
   ['shape', '形状'],
-  ['printing', '定制要求'],
   ['packaging', '标准包装'],
   ['imageUrl', '产品图片地址'],
 ];
@@ -164,7 +166,9 @@ async function save() {
             :placeholder="
               field === 'unit'
                 ? '例如：张、个、套；请按实际资料填写'
-                : undefined
+                : field === 'weight'
+                  ? '例如：800g'
+                  : undefined
             "
           />
         </Form.Item>

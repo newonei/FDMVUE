@@ -323,6 +323,9 @@ function refresh() {
             <Descriptions.Item label="规格">
               {{ product.spec ?? product.specification ?? '—' }}
             </Descriptions.Item>
+            <Descriptions.Item label="克重">
+              {{ product.weight || '—' }}
+            </Descriptions.Item>
             <Descriptions.Item label="材质 / 尺寸">
               {{
                 [product.material, product.size].filter(Boolean).join(' / ') ||
@@ -364,6 +367,9 @@ function refresh() {
               <Descriptions.Item label="规格">
                 {{ product.spec ?? product.specification ?? '—' }}
               </Descriptions.Item>
+              <Descriptions.Item label="克重">
+                {{ product.weight || '—' }}
+              </Descriptions.Item>
               <Descriptions.Item label="材质">
                 {{ product.material || '—' }}
               </Descriptions.Item>
@@ -376,7 +382,7 @@ function refresh() {
               <Descriptions.Item label="形状">
                 {{ product.shape || '—' }}
               </Descriptions.Item>
-              <Descriptions.Item label="定制要求">
+              <Descriptions.Item label="定制说明">
                 {{ product.printing || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="标准包装">

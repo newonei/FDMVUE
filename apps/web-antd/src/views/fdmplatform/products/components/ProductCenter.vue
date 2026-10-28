@@ -39,12 +39,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText, money } from '../../data';
 import { useEntityDetail } from '../../documents/useEntityDetail';
-import {
-  currencyOptions,
-  missingProductFields,
-  productDescription,
-  taxOptions,
-} from '../model';
+import { currencyOptions, missingProductFields, taxOptions } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 import ProductDetailDrawer from './ProductDetailDrawer.vue';
 import ProductEditor from './ProductEditor.vue';
@@ -150,17 +145,21 @@ const pageIncompleteCount = computed(
 const columns = computed(() =>
   props.mode === 'catalog'
     ? [
-        { title: '产品 / SKU', key: 'product', width: 330 },
+        // 列顺序参考金智产品档案：名称、型号、克重、材质、规格、定制说明、类别、单位
+        { title: '产品名称', key: 'product', width: 240 },
+        { title: '产品型号', key: 'text', dataIndex: 'model', width: 120 },
+        { title: '产品克重', key: 'text', dataIndex: 'weight', width: 90 },
+        { title: '材质', key: 'text', dataIndex: 'material', width: 110 },
+        { title: '产品规格', key: 'text', dataIndex: 'spec', width: 170 },
+        { title: '定制说明', key: 'text', dataIndex: 'printing', width: 160 },
         {
-          title: '分类',
+          title: '产品类别',
           key: 'category',
           dataIndex: 'category',
-          width: 150,
-          ellipsis: true,
+          width: 110,
         },
-        { title: '规格与包装', key: 'specification' },
         { title: '单位', dataIndex: 'unit', width: 60 },
-        { title: '可用状态', key: 'state', width: 150 },
+        { title: '可用状态', key: 'state', width: 130 },
         { title: '操作', key: 'action', width: 210, fixed: 'right' as const },
       ]
     : [
@@ -537,7 +536,7 @@ async function savePrice() {
               :columns="columns"
               row-key="id"
               :loading="loading"
-              :scroll="{ x: mode === 'catalog' ? 1240 : 1050 }"
+              :scroll="{ x: mode === 'catalog' ? 1610 : 1050 }"
               :pagination="{
                 current: pageNo,
                 pageSize,
@@ -590,10 +589,10 @@ async function savePrice() {
                     <div class="catalog-product-copy">
                       <button
                         class="cell-line product-detail-link"
-                        :title="record.displayName || record.name"
+                        :title="record.name"
                         @click="openProductDetail(record.id)"
                       >
-                        {{ record.displayName || record.name }}
+                        {{ record.name }}
                       </button>
                       <div class="muted cell-line" :title="record.code">
                         {{ record.code }}
@@ -606,21 +605,11 @@ async function savePrice() {
                   class="catalog-category"
                   :title="record.category"
                   >{{ record.category || '未分类' }}</span>
-                <template v-else-if="column.key === 'specification'">
-                  <div
-                    class="cell-line"
-                    :title="productDescription(record as Product)"
-                  >
-                    {{ productDescription(record as Product) }}
-                  </div>
-                  <div
-                    class="muted cell-line"
-                    :title="`形状：${record.shape || '未维护'} · ${record.packaging || '包装待补充'}`"
-                  >
-                    形状：{{ record.shape || '未维护' }} ·
-                    {{ record.packaging || '包装待补充' }}
-                  </div>
-                </template>
+                <span
+                  v-else-if="column.key === 'text'"
+                  class="cell-line"
+                  :title="record[column.dataIndex as string]"
+                  >{{ record[column.dataIndex as string] || '—' }}</span>
                 <template v-else-if="column.key === 'state'">
                   <Tag
                     :color="
