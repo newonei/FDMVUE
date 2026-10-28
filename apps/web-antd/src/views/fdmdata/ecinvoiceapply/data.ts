@@ -383,7 +383,8 @@ export function useGridFormSchema(): VbenFormSchema[] {
 }
 
 /**
- * 常用的 12 列默认显示；其余字段保留在列设置里，需要时勾出来。
+ * 常用的 16 列默认显示；其余字段保留在列设置里，需要时勾出来。
+ * 列设置按租户 + 用户存在浏览器本地（见 grid-persistence.ts）。
  * 开票截止时间放在前面并用倒计时着色（见 index.vue 的 due 插槽）。
  */
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.EcInvoiceApply>['columns'] {
@@ -429,11 +430,23 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       showOverflow: 'tooltip',
     },
     {
+      field: 'payerRegisterNo',
+      title: '付款方税号',
+      minWidth: 160,
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'amount',
       title: '开票金额',
       minWidth: 100,
       align: 'right',
       formatter: formatAmount,
+    },
+    {
+      field: 'quantity',
+      title: '数量',
+      minWidth: 90,
+      align: 'right',
     },
     { field: 'invoiceType', title: '发票类型', minWidth: 110 },
     { field: 'invoiceNo', title: '发票号码', minWidth: 130 },
@@ -449,25 +462,23 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       minWidth: 150,
       formatter: formatOptionalDateTime,
     },
-    { field: 'platformCode', title: '平台', minWidth: 90, ...hidden },
     {
-      field: 'quantity',
-      title: '数量',
-      minWidth: 90,
-      align: 'right',
-      ...hidden,
+      field: 'createTime',
+      title: '创建时间',
+      minWidth: 160,
+      formatter: 'formatDateTime',
     },
+    {
+      field: 'creatorName',
+      title: '创建人',
+      minWidth: 100,
+      showOverflow: 'tooltip',
+    },
+    { field: 'platformCode', title: '平台', minWidth: 90, ...hidden },
     {
       field: 'payerName',
       title: '付款方',
       minWidth: 180,
-      showOverflow: 'tooltip',
-      ...hidden,
-    },
-    {
-      field: 'payerRegisterNo',
-      title: '付款方税号',
-      minWidth: 160,
       showOverflow: 'tooltip',
       ...hidden,
     },
@@ -521,13 +532,6 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       title: '订单完成时间',
       minWidth: 160,
       formatter: formatOptionalDateTime,
-      ...hidden,
-    },
-    {
-      field: 'createTime',
-      title: '创建时间',
-      minWidth: 160,
-      formatter: 'formatDateTime',
       ...hidden,
     },
     {

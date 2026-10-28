@@ -6,6 +6,7 @@ import { computed, ref } from 'vue';
 
 import { confirm, Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { useAccessStore, useUserStore } from '@vben/stores';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button, message, Tag } from 'ant-design-vue';
@@ -22,10 +23,21 @@ import {
 import { $t } from '#/locales';
 
 import { formatInvoiceStatus, useGridColumns, useGridFormSchema } from './data';
+import {
+  createEcInvoiceApplyGridId,
+  EC_INVOICE_APPLY_GRID_CUSTOM_CONFIG,
+} from './grid-persistence';
 import { isInvoiceApplyLocked } from './invoice-lock';
 import Form from './modules/form.vue';
 
 defineOptions({ name: 'EcInvoiceApply' });
+
+const accessStore = useAccessStore();
+const userStore = useUserStore();
+const ecInvoiceApplyGridId = createEcInvoiceApplyGridId(
+  accessStore.tenantId,
+  userStore.userInfo?.id ?? userStore.userInfo?.userId,
+);
 
 type StatusTab = 'ALL' | 'DONE' | 'SOON' | 'TODO';
 const SOON_DAYS = 3;
@@ -372,7 +384,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
   gridOptions: {
     autoResize: true,
     columns: useGridColumns(),
+    customConfig: EC_INVOICE_APPLY_GRID_CUSTOM_CONFIG,
     height: '600px',
+    id: ecInvoiceApplyGridId,
     keepSource: false,
     stripe: true,
     proxyConfig: {
