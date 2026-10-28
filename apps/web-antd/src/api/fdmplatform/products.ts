@@ -38,6 +38,9 @@ export interface Product {
   size?: string;
   color?: string;
   shape?: string;
+  /** 产品克重，原样保存（如 800g、1.2kg） */
+  weight?: string;
+  /** 定制说明 */
   printing?: string;
   packaging?: string;
   remark?: string;
