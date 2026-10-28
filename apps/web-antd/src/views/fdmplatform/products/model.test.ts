@@ -11,6 +11,7 @@ import {
   hasProductVersion,
   invalidateLinePrices,
   mergeProductSelection,
+  unitPriceFromAmount,
 } from './model';
 
 const line = (overrides: Partial<ContractItem> = {}): ContractItem => ({
@@ -63,6 +64,16 @@ describe('contract product selection and pricing', () => {
     expect(contractLineAmount(line({ unitPrice: '' }))).toBeUndefined();
     expect(contractLineAmount(line({ unitPrice: '0' }))).toBe('0.00');
     expect(contractLineAmount(line())).toBe('37.50');
+  });
+  it('derives the unit price from a typed line total', () => {
+    expect(unitPriceFromAmount('3', '100')).toBe('33.333333');
+    expect(contractLineAmount(line({ unitPrice: '33.333333' }))).toBe('100.00');
+    expect(unitPriceFromAmount('4', '50')).toBe('12.5');
+    expect(unitPriceFromAmount('3', null)).toBeNull();
+    expect(unitPriceFromAmount('3', '')).toBeNull();
+    expect(unitPriceFromAmount('0', '100')).toBeUndefined();
+    expect(unitPriceFromAmount('', '100')).toBeUndefined();
+    expect(unitPriceFromAmount('3', '-1')).toBeUndefined();
   });
   it('copies a customized SKU into an independent contract line without sharing attachment arrays', () => {
     const original = line();

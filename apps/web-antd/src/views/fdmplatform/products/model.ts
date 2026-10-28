@@ -75,6 +75,23 @@ export function contractLineAmount(
     ? amount.toFixed(2, BigNumber.ROUND_HALF_UP)
     : undefined;
 }
+/**
+ * 填总价反推单价：单价最多 6 位小数（与后端一致）。数量未填或为 0 时无法反推，返回 undefined；
+ * 总价清空返回 null（待定价）。
+ */
+export function unitPriceFromAmount(
+  quantity: ContractItem['quantity'] | null | undefined,
+  amount: null | number | string | undefined,
+) {
+  if (amount === null || amount === undefined || amount === '') return null;
+  const qty = new BigNumber(quantity ?? Number.NaN);
+  const total = new BigNumber(amount);
+  if (!qty.isFinite() || qty.lte(0) || !total.isFinite() || total.lt(0))
+    return undefined;
+  return new BigNumber(
+    total.div(qty).toFixed(6, BigNumber.ROUND_HALF_UP),
+  ).toFixed();
+}
 /** Match the server: round each line to cents before summing. */
 export function contractItemsTotal(lines: ContractItem[]) {
   let total = new BigNumber(0);

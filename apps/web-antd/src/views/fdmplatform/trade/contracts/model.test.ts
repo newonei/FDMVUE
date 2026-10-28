@@ -242,4 +242,15 @@ describe('contract board model', () => {
     expect(csv).toContain('"含,逗号"');
     expect(csv).toContain('陈若彤 · 月迦部');
   });
+
+  it('exports only the internal number for domestic contracts', () => {
+    const csv = contractCsv(
+      [row({ code: 'HT-001', name: 'NX-2026-01' })],
+      () => '',
+      true,
+    );
+    expect(csv.startsWith('﻿内部单号,客户,')).toBe(true);
+    expect(csv).toContain('NX-2026-01');
+    expect(csv).not.toContain('HT-001');
+  });
 });

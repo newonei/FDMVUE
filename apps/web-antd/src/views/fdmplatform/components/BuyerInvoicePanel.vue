@@ -15,8 +15,9 @@ import {
   invoiceTypeOptions,
 } from '../trade/customers/model';
 
-/** 登记内销发票时显示购方开票信息，方便照着开票或核对；只读，不随发票保存 */
+/** 登记内销发票时显示购方开票信息，方便照着开票或核对；登记时后端另存一份快照 */
 const props = defineProps<{ customerId: string }>();
+const emit = defineEmits<{ type: [value: string] }>();
 const customer = ref<Customer>();
 const loading = ref(false);
 const loadError = ref('');
@@ -33,7 +34,10 @@ watch(
     loading.value = true;
     try {
       const result = await getCustomer(id);
-      if (run === sequence) customer.value = result;
+      if (run === sequence) {
+        customer.value = result;
+        if (result.invoice?.type) emit('type', result.invoice.type);
+      }
     } catch (error) {
       if (run === sequence) loadError.value = errorText(error);
     } finally {

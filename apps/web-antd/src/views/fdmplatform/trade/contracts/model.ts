@@ -267,13 +267,14 @@ function csvCell(value: unknown) {
   const text = value === null || value === undefined ? '' : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
+/** 内销只认内部单号，不导出合同号 */
 export function contractCsv(
   rows: ContractBoardRow[],
   people: (id: null | number | undefined) => string,
+  domestic = false,
 ) {
   const header = [
-    '合同号',
-    '订单名称',
+    ...(domestic ? ['内部单号'] : ['合同号', '订单名称']),
     '客户',
     '签订日期',
     '产品',
@@ -290,8 +291,7 @@ export function contractCsv(
   ];
   const lines = rows.map((row) =>
     [
-      row.code,
-      row.name,
+      ...(domestic ? [row.name || row.code] : [row.code, row.name]),
       row.customerName,
       row.signedDate,
       productText(row),

@@ -31,6 +31,7 @@ import {
   Table,
   Tag,
 } from 'ant-design-vue';
+import BigNumber from 'bignumber.js';
 
 import {
   contractAction,
@@ -81,6 +82,7 @@ import {
   hasProductVersion,
   invalidateLinePrices,
   taxOptions,
+  unitPriceFromAmount,
 } from '../model';
 import ProductPicker from './ProductPicker.vue';
 
@@ -169,6 +171,8 @@ const chargeTotal = computed(() =>
 const attachmentsError = ref('');
 const quantityInputs = new Map<string, { focus: () => void }>();
 const priceInputs = new Map<string, { focus: () => void }>();
+/** 内销总价输入中的原值；离开输入框后改回按单价计算的总价 */
+const amountDrafts = reactive<Record<string, string>>({});
 const customerChoices = ref<MasterRecord[]>([]);
 const customerLoading = ref(false);
 const customerError = ref('');
@@ -429,6 +433,25 @@ const columns = computed(() =>
     { title: '操作', key: 'action', width: 150 },
   ].filter((column) => domestic.value || column.key !== 'date'),
 );
+function lineAmountValue(line: ContractItem) {
+  return amountDrafts[line.id] ?? contractLineAmount(line);
+}
+/** 内销单价、总价互相联动：填总价按数量反推单价 */
+function changeLineAmount(line: ContractItem, value: null | number | string) {
+  amountDrafts[line.id] = value === null ? '' : String(value);
+  const price = unitPriceFromAmount(line.quantity, value);
+  if (price !== undefined) line.unitPrice = price;
+}
+function lineAmountHint(line: ContractItem) {
+  const draft = amountDrafts[line.id];
+  if (draft === undefined || draft === '') return '';
+  if (unitPriceFromAmount(line.quantity, draft) === undefined)
+    return '先填销售数量';
+  const actual = contractLineAmount(line);
+  return actual !== undefined && !new BigNumber(actual).eq(draft)
+    ? `按单价折算为 ${money(actual)}`
+    : '';
+}
 async function fillSuggestedCode(run: number) {
   try {
     const code = await getNextContractCode();
@@ -756,7 +779,7 @@ async function save(activate = false) {
     return;
   }
   if (domestic.value && !form.name.trim()) {
-    panelError.value = '请填写内部名称';
+    panelError.value = '请填写内部单号';
     return;
   }
   if (lines.value.length === 0) {
@@ -909,7 +932,11 @@ async function save(activate = false) {
   <FdmResizableDrawer
     resize-key="contract-editor"
     :open="open"
-    :title="contract ? `编辑合同 · ${contract.code}` : '新建合同 / 样品'"
+    :title="
+      contract
+        ? `编辑合同 · ${domestic ? contract.name || contract.code : contract.code}`
+        : '新建合同 / 样品'
+    "
     width="min(1480px, 98vw)"
     :mask-closable="false"
     :keyboard="false"
@@ -972,6 +999,7 @@ async function save(activate = false) {
             />
           </Form.Item>
           <Form.Item
+            v-if="!domestic"
             label="订单号"
             :extra="
               contract
@@ -987,15 +1015,13 @@ async function save(activate = false) {
               placeholder="留空保存时自动编号"
             />
 </Form.Item><Form.Item
-            :label="domestic ? '内部名称' : '内部名称（可选）'"
+            :label="domestic ? '内部单号' : '内部名称（可选）'"
             :required="domestic"
           >
             <Input
               v-model:value="form.name"
               :maxlength="1000"
-              :placeholder="
-                domestic ? '内部订单号或便于识别的名称' : '便于识别的补充说明'
-              "
+              :placeholder="domestic ? '填写内部订单号' : '便于识别的补充说明'"
             />
           </Form.Item>
           <Form.Item v-if="!domestic" label="阿里信保订单">
@@ -1185,6 +1211,26 @@ async function save(activate = false) {
                         ? '待定价 · 可先存草稿'
                         : '本合同成交价'
                   }}
+                </div>
+              </template>
+              <template v-else-if="column.key === 'amount' && domestic">
+                <InputNumber
+                  :value="lineAmountValue(record as ContractItem)"
+                  :min="0"
+                  :precision="2"
+                  string-mode
+                  placeholder="待定价"
+                  style="width: 120px"
+                  @update:value="
+                    (value) => changeLineAmount(record as ContractItem, value)
+                  "
+                  @blur="delete amountDrafts[record.id]"
+                />
+                <div
+                  v-if="lineAmountHint(record as ContractItem)"
+                  class="muted"
+                >
+                  {{ lineAmountHint(record as ContractItem) }}
                 </div>
               </template>
               <span v-else-if="column.key === 'amount'">{{

@@ -507,6 +507,31 @@ describe('order entry without changing menus', () => {
     );
   });
 
+  it('links domestic unit price and line total, and hides the contract number', async () => {
+    const { host } = await mountEditor('DOMESTIC');
+    expect(host.querySelector('[data-label="订单号"]')).toBeNull();
+    expect(host.querySelector('[data-label="内部单号"]')).toBeTruthy();
+    await addProduct(host);
+    const row = host.querySelector<HTMLElement>('[data-row]')!;
+    const input = (key: string) =>
+      row.querySelector<HTMLInputElement>(`[data-column="${key}"] input`)!;
+    const type = async (key: string, value: string) => {
+      input(key).value = value;
+      input(key).dispatchEvent(new Event('input', { bubbles: true }));
+      await nextTick();
+    };
+    await type('quantity', '3');
+    await type('unitPrice', '12.5');
+    expect(input('amount').value).toBe('37.50');
+    await type('amount', '100');
+    expect(input('unitPrice').value).toBe('33.333333');
+    input('amount').dispatchEvent(new Event('blur'));
+    await nextTick();
+    expect(input('amount').value).toBe('100.00');
+    await type('quantity', '4');
+    expect(input('amount').value).toBe('133.33');
+  });
+
   it('ignores delayed product resolution after the editor is closed and reopened', async () => {
     let finish!: (value: unknown) => void;
     api.resolve.mockReturnValueOnce(

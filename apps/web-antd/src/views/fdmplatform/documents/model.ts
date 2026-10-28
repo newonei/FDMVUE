@@ -282,19 +282,23 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
   },
   invoices: {
     title: '开票记录',
-    description: '登记已开具的真实发票和作废结果，核销单独办理。',
+    description:
+      '登记开票和作废结果，核销单独办理；内销可先登记、开出后补录发票号。',
     resource: 'invoices',
     route: `${finance}invoices`,
     fields: [
       'invoiceNumber|发票号',
       'type|类型',
+      'ticketKind|票据类型',
+      'content|开票内容',
       'issuedAt|开票日期',
       'amount|金额',
+      'taxAmount|税额',
       'currency|币种',
       'status|状态',
     ],
     create: ['CREATE_INVOICE'],
-    actions: ['VOID_INVOICE'],
+    actions: ['SUPPLEMENT_INVOICE', 'VOID_INVOICE'],
   },
   allocations: {
     title: '回款核销单',

@@ -238,7 +238,11 @@ const columns = computed(() =>
         { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
       ]
     : [
-        { title: '合同', key: 'contract', width: 196 },
+        {
+          title: domestic.value ? '内部单号' : '合同',
+          key: 'contract',
+          width: 196,
+        },
         { title: '客户', key: 'customer', width: 150 },
         { title: '产品', key: 'product', width: 210 },
         { title: '进度', key: 'progress', width: 186 },
@@ -515,7 +519,13 @@ async function exportCsv() {
     downloadFileFromBlobPart({
       fileName: `${domestic.value ? '内销' : '外贸'}合同订单-${tabLabels[tab.value]}-${formatDate(new Date(), 'YYYYMMDD-HHmm')}.csv`,
       source: new Blob(
-        [contractCsv(all, (id) => personLabel(directory.value, id))],
+        [
+          contractCsv(
+            all,
+            (id) => personLabel(directory.value, id),
+            domestic.value,
+          ),
+        ],
         {
           type: 'text/csv;charset=utf-8',
         },
@@ -703,7 +713,9 @@ onMounted(async () => {
             :placeholder="
               tab === 'JINZHI'
                 ? '金智单号 / 客户 / 产品'
-                : '合同号 / 客户 / 产品 / 金智单号'
+                : domestic
+                  ? '内部单号 / 客户 / 产品'
+                  : '合同号 / 客户 / 产品 / 金智单号'
             "
             allow-clear
             class="search"
@@ -919,9 +931,16 @@ onMounted(async () => {
                 class="code"
                 @click="openContract(record.id)"
               >
-                {{ record.code || '订单号待补齐' }}
+                {{
+                  domestic
+                    ? record.name || record.code || '内部单号待补齐'
+                    : record.code || '订单号待补齐'
+                }}
               </button>
-              <span class="sub" :title="record.name"><span v-if="record.name" class="internal-name">{{
+              <span v-if="domestic" class="sub">{{
+                record.signedDate ? String(record.signedDate).slice(5) : '—'
+              }}</span>
+              <span v-else class="sub" :title="record.name"><span v-if="record.name" class="internal-name">{{
                   record.name
                 }}</span><template v-else>—</template>{{
                   tab !== 'JINZHI' && record.signedDate

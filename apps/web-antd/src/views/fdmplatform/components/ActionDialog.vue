@@ -328,6 +328,14 @@ function saveDraft() {
     payload[definition.lineKey] = lines.value.map(clean);
   emit('draft', payload);
 }
+/** 票据类型默认取客户档案的发票类型，已手动选过的不覆盖 */
+function defaultTicketKind(type: string) {
+  if (
+    props.definition?.fields.some((item) => item.key === 'ticketKind') &&
+    !values.value.ticketKind
+  )
+    values.value.ticketKind = type;
+}
 function setValue(target: FormValues, key: string, value: unknown) {
   if (props.saving) return;
   if (
@@ -386,6 +394,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
       <BuyerInvoicePanel
         v-if="definition.buyerCustomerId"
         :customer-id="definition.buyerCustomerId"
+        @type="defaultTicketKind"
       />
       <slot name="context"></slot>
       <Alert
@@ -468,6 +477,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
             :string-mode="item.type === 'decimal'"
             :precision="item.type === 'number' ? 0 : undefined"
             :min="item.min"
+            :placeholder="item.placeholderOf?.(values)"
             style="width: 100%"
             @update:value="(value) => setValue(values, item.key, value)"
           />
