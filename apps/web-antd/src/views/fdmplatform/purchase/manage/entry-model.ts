@@ -52,6 +52,8 @@ export interface EntryRow {
   remark?: string;
   /** 这一行的供应商；不填用表头供应商。不同供应商的行保存时拆成多张采购单。 */
   supplierId?: string;
+  /** 修改草稿采购单时原明细行的 id，保存时沿用 */
+  lineId?: string;
 }
 
 export interface EntryHeader {
@@ -257,6 +259,7 @@ export function entryPayload(
         row.supplierId && row.supplierId !== header.supplierId
           ? row.supplierId
           : undefined,
+      id: row.lineId,
     })),
   };
 }
@@ -287,11 +290,13 @@ const copiedNumber = (value: unknown) => {
 /**
  * 复制采购单：带出合同、供应商、表头和明细（数量、单价、赠品、备注），
  * 采购日期改为今天，到货日期不带；附加费用为 0、折扣 100 时留空，和新建一样。
+ * edit=true 时是修改撤回为草稿的这张单：采购日期、到货日期照原单带出，明细保留原行 id。
  */
 export function copyEntry(
   view: ProcurementOrderView,
   key: () => string,
   today: string,
+  edit = false,
 ): { header: EntryHeader; rows: EntryRow[] } {
   const order = view.order;
   const details = view.details as Record<string, unknown>;
@@ -299,6 +304,7 @@ export function copyEntry(
     string,
     { gift?: boolean; remark?: null | string }
   >;
+  const dates = (details.lineDates ?? {}) as Record<string, string>;
   const nonZero = (value: unknown, empty: string) => {
     const number = copiedNumber(value);
     return number === undefined || decimal(number).isEqualTo(empty)
@@ -310,7 +316,7 @@ export function copyEntry(
     supplierId: copiedText(order.supplierId),
     subject: copiedText(details.subject),
     category: copiedText(details.category),
-    purchaseDate: today,
+    purchaseDate: (edit && copiedText(details.purchaseDate)) || today,
     companyId:
       typeof order.companyId === 'number' ? order.companyId : view.companyId,
     additionalCategory: copiedText(details.additionalCategory),
@@ -340,6 +346,10 @@ export function copyEntry(
         quantity: copiedNumber(line.quantity),
         remark: copiedText(note?.remark),
       };
+      if (edit && line.id) {
+        row.lineId = line.id;
+        row.arrivalDate = copiedText(dates[line.id]);
+      }
       if (note?.gift === true) setRowGift(row, true);
       else setRowPrice(row, copiedNumber(line.unitPrice));
       return row;

@@ -182,6 +182,8 @@ export interface ProcurementOrderView {
   accessoryCatalog?: string[];
   allowedActions: string[];
   blockReasons: string[];
+  /** 采购单不能撤回为草稿的原因（只在已下单时给出） */
+  withdrawOrderBlockReasons?: string[];
   history: BusinessRecord[];
   exports: ProcurementFile[];
   files: ProcurementFile[];
@@ -204,6 +206,8 @@ export interface PurchaseOrderEntryLine {
   remark?: string;
   /** 这一行的供应商，不填用表头供应商；不同供应商自动拆成多张采购单 */
   supplierId?: string;
+  /** 修改草稿时原明细行的 id，新建不填 */
+  id?: string;
 }
 export interface PurchaseOrderEntry {
   idempotencyKey: string;
@@ -261,6 +265,30 @@ export function createdOrdersText(
   return orders.length > 1
     ? `已按供应商拆成 ${orders.length} 张采购单：${orders.map((order) => order.code).join('、')}`
     : `${single} ${value.code}`;
+}
+/** 修改撤回为草稿的采购单（不拆单、不换合同和公司）；submit 时同时提交，恢复为已下单。 */
+export function updateProcurementOrder(
+  contractId: string,
+  orderId: string,
+  data: PurchaseOrderEntry,
+  submit: boolean,
+) {
+  return requestClient.post<CreatedProcurementOrders>(
+    `${orderPath(contractId, orderId)}/update`,
+    data,
+    { params: { submit } },
+  );
+}
+/** 撤回采购单为草稿：下单有误时用，修改后重新提交。 */
+export function withdrawProcurementOrder(
+  contractId: string,
+  orderId: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<boolean>(
+    `${orderPath(contractId, orderId)}/withdraw`,
+    data,
+  );
 }
 export function getProcurementOrder(contractId: string, orderId: string) {
   return requestClient.get<ProcurementOrderView>(

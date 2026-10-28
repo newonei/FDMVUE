@@ -323,4 +323,28 @@ describe('复制采购单', () => {
       remark: '送样',
     });
   });
+
+  it('修改草稿时照原单带出采购日期、到货日期，明细保留原行 id 并随保存提交', () => {
+    const { header, rows } = copyEntry(
+      {
+        contractId: '',
+        companyId: 11,
+        order: {
+          id: 'o1',
+          supplierId: 'sup-1',
+          lines: [{ id: 'l1', skuId: 'p1', quantity: 10, unitPrice: 2 }],
+        },
+        details: {
+          purchaseDate: '2026-01-02',
+          lineDates: { l1: '2026-01-10' },
+        },
+      } as never,
+      () => 'k1',
+      '2026-10-21',
+      true,
+    );
+    expect(header.purchaseDate).toBe('2026-01-02');
+    expect(rows[0]).toMatchObject({ lineId: 'l1', arrivalDate: '2026-01-10' });
+    expect(entryPayload(rows, header, 'key').lines[0]!.id).toBe('l1');
+  });
 });
