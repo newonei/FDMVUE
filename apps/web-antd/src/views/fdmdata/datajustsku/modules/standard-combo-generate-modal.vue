@@ -53,8 +53,8 @@ const finishedSourceRows = ref<FdmdataDataJustSkuApi.DataJustSku[]>([]);
 const finishedSelectedIds = ref<number[]>([]);
 const finishedQuery = reactive({
   productName: '',
-  styleCode: undefined as string | undefined,
-  categoryName: undefined as string | undefined,
+  styleCodes: [] as string[],
+  categoryNames: [] as string[],
 });
 const finishedStyleOptions = ref<{ label: string; value: string }[]>([]);
 const finishedCategoryOptions = ref<{ label: string; value: string }[]>([]);
@@ -449,9 +449,21 @@ function trimOrUndef(s: string | undefined) {
   return t || undefined;
 }
 
+/** 多选下拉的选项只会增加：查询结果被已选条件收窄后，其余选项仍保留可选 */
+function trimList(values: string[]) {
+  const list = values.map((v) => v.trim()).filter(Boolean);
+  return list.length > 0 ? list : undefined;
+}
+
 function rebuildFinishedFilterOptionsFromSource() {
-  const styles = new Set<string>();
-  const cats = new Set<string>();
+  const styles = new Set<string>([
+    ...finishedStyleOptions.value.map((o) => o.value),
+    ...finishedQuery.styleCodes,
+  ]);
+  const cats = new Set<string>([
+    ...finishedCategoryOptions.value.map((o) => o.value),
+    ...finishedQuery.categoryNames,
+  ]);
   for (const r of finishedSourceRows.value) {
     const sc = (r.styleCode ?? '').trim();
     if (sc) {
@@ -505,8 +517,8 @@ async function fetchFinishedByQuery() {
       pageNo: 1,
       pageSize: COMBO_PICKER_PAGE_SIZE,
       productName: trimOrUndef(finishedQuery.productName),
-      styleCode: trimOrUndef(finishedQuery.styleCode),
-      categoryName: trimOrUndef(finishedQuery.categoryName),
+      styleCodes: trimList(finishedQuery.styleCodes),
+      categoryNames: trimList(finishedQuery.categoryNames),
     });
     finishedSourceRows.value = res.list ?? [];
     const total = res.total ?? finishedSourceRows.value.length;
@@ -554,8 +566,8 @@ async function loadAccessoryList() {
 
 function resetFinishedQuery() {
   finishedQuery.productName = '';
-  finishedQuery.styleCode = undefined;
-  finishedQuery.categoryName = undefined;
+  finishedQuery.styleCodes = [];
+  finishedQuery.categoryNames = [];
 }
 
 async function resetFinishedQueryAndReload() {
@@ -804,25 +816,29 @@ const [VbenModal, modalApi] = useVbenModal({
               <Input
                 v-model:value="finishedQuery.productName"
                 allow-clear
-                placeholder="商品名称（模糊）"
+                placeholder="商品名称（模糊，逗号分隔多个）"
                 @press-enter="loadFinishedList"
               />
               <Select
-                v-model:value="finishedQuery.styleCode"
+                v-model:value="finishedQuery.styleCodes"
                 :options="finishedStyleOptions"
+                mode="multiple"
+                :max-tag-count="2"
                 allow-clear
                 show-search
                 option-filter-prop="label"
-                placeholder="款式编码"
+                placeholder="款式编码（可多选）"
                 class="w-full"
               />
               <Select
-                v-model:value="finishedQuery.categoryName"
+                v-model:value="finishedQuery.categoryNames"
                 :options="finishedCategoryOptions"
+                mode="multiple"
+                :max-tag-count="2"
                 allow-clear
                 show-search
                 option-filter-prop="label"
-                placeholder="分类"
+                placeholder="分类（可多选）"
                 class="w-full"
               />
             </div>

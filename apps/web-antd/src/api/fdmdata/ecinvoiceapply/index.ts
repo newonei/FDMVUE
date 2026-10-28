@@ -70,6 +70,8 @@ export namespace FdmdataEcInvoiceApplyApi {
     bizErrorDesc?: string;
     message?: string;
     rawJson?: string;
+    creator?: string;
+    creatorName?: string;
     createTime?: DateTimeValue;
     updateTime?: DateTimeValue;
   }
