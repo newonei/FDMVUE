@@ -39,7 +39,8 @@ export type MainlineAction =
   | { path: string; query?: Record<string, string>; type: 'route' }
   | { type: 'activate' }
   | { type: 'complete' }
-  | { type: 'edit' };
+  | { type: 'edit' }
+  | { type: 'stockOut' };
 export interface MainlineNext {
   title: string;
   description: string;
@@ -498,14 +499,10 @@ export function contractNextStep(
   if (open('shipment'))
     return {
       title: '安排出货',
-      description:
-        '仓库在「库存中心 · 出库单」按合同做销售出库，出货数量自动记到本合同。',
+      description: '从工厂仓库按合同开销售出库单，出货数量自动记到本合同。',
       department: '仓库',
-      button: '去库存中心',
-      action: {
-        type: 'route',
-        path: '/fdmstock/inventory-outbound',
-      },
+      button: '新建出库单',
+      action: { type: 'stockOut' },
     };
   if (open('receipt'))
     return quick(contract, 'receipts', 'CREATE_RECEIPT', {

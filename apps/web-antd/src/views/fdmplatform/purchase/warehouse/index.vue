@@ -12,8 +12,8 @@ defineOptions({ name: 'FdmPlatformWarehouse' });
  * 工厂的原料、辅料与工序在制品归工厂部门，不在这里。
  */
 const views = [
-  { key: 'stock-ins', title: '采购入库', component: StockIns },
-  { key: 'stock-outs', title: '销售出库', component: StockOuts },
+  { key: 'stock-ins', title: '入库单', component: StockIns },
+  { key: 'stock-outs', title: '出库单', component: StockOuts },
   { key: 'purchase-returns', title: '采购退货', component: PurchaseReturns },
   { key: 'stocks', title: '库存', component: Stocks },
   {

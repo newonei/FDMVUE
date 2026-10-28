@@ -15,6 +15,7 @@ import type {
   PageResource,
 } from '#/api/fdmplatform';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
+import type { StockOut } from '#/api/fdmplatform/warehouse';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -44,6 +45,7 @@ import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
+import { getStockOuts } from '#/api/fdmplatform/warehouse';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
@@ -61,6 +63,7 @@ import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
+import { linesTitle } from '../purchase/warehouse/model';
 import { salesChannelOf } from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
@@ -99,6 +102,48 @@ const emit = defineEmits<{
   updated: [value: Contract];
 }>();
 
+/** 出库单：新建弹窗、详情抽屉和库存中心同一组件，在合同订单里直接弹出 */
+const StockOutDialog = defineAsyncComponent(
+  () => import('../purchase/warehouse/StockOutDialog.vue'),
+);
+const StockDocDrawer = defineAsyncComponent(
+  () => import('../inventory-center/components/StockDocDrawer.vue'),
+);
+const stockOutOpen = ref(false);
+const stockOutViewing = ref<StockOut>();
+const stockOuts = ref<StockOut[]>([]);
+const stockOutsError = ref('');
+async function loadStockOuts() {
+  const id = props.contract?.id;
+  if (!id) return;
+  stockOutsError.value = '';
+  try {
+    const page = await getStockOuts({
+      pageNo: 1,
+      pageSize: 100,
+      contractId: id,
+    });
+    if (props.contract?.id === id) stockOuts.value = page.list;
+  } catch (error) {
+    stockOutsError.value = errorText(error);
+  }
+}
+function openStockOut() {
+  if (!props.contract || childOpen.value) return;
+  if (ended.value) {
+    message.warning('合同已结束，不能再出库');
+    return;
+  }
+  stockOutOpen.value = true;
+}
+function stockOutSaved(value: StockOut) {
+  stockOutOpen.value = false;
+  message.success(`已出库 ${value.code}`);
+  stockOutViewing.value = value;
+  void loadStockOuts();
+  emit('refresh');
+}
+
 /** 采购单执行抽屉：和采购订单页同一个组件，在合同订单里直接弹出 */
 const PurchaseOrderExecution = defineAsyncComponent(
   () => import('../purchase/manage/index.vue'),
@@ -120,6 +165,8 @@ const childOpen = computed(
     editorOpen.value ||
     completionOpen.value ||
     reimbursementOpen.value ||
+    stockOutOpen.value ||
+    !!stockOutViewing.value ||
     !!workLaunch.value ||
     !!purchaseOrder.value ||
     activating.value ||
@@ -366,6 +413,9 @@ watch(
     editorOpen.value = false;
     completionOpen.value = false;
     reimbursementOpen.value = false;
+    stockOutOpen.value = false;
+    stockOutViewing.value = undefined;
+    stockOuts.value = [];
     workLaunch.value = undefined;
     workRow.value = undefined;
     terminateAction.value = undefined;
@@ -378,6 +428,7 @@ watch(
       customs.value = undefined;
       void loadFiles();
       void loadSummary();
+      void loadStockOuts();
       if (activeTab.value === 'audit') void loadAudit();
     }
   },
@@ -531,10 +582,10 @@ const subDocItems = computed(() => {
       : []),
     {
       key: 'shipment',
-      label: '出库发货',
+      label: '出库单',
       group: '库存',
       disabled: ended.value,
-      title: '出货在工厂「工序库存」从已包装成品办理',
+      title: ended.value ? '合同已结束' : undefined,
     },
   ];
 });
@@ -548,8 +599,7 @@ function pickSubDoc(key: string) {
     openQuickDocument({ action: 'CREATE_REQUEST', kind: 'requests' });
   else if (key === 'orders')
     openQuickDocument({ action: 'GENERATE_ORDERS', kind: 'orders' });
-  else if (key === 'shipment')
-    void router.push({ path: '/fdmstock/inventory-outbound' });
+  else if (key === 'shipment') openStockOut();
 }
 /** 右侧「摘要」（金智同款）：总金额、未回款、实际回款、待确认、已开票、未开票 */
 const summaryCards = computed(() => {
@@ -661,6 +711,10 @@ function runNext(action: MainlineAction) {
     }
     case 'route': {
       void router.push({ path: action.path, query: action.query });
+      break;
+    }
+    case 'stockOut': {
+      openStockOut();
       break;
     }
   }
@@ -1050,13 +1104,33 @@ async function download(file: { id: string; name: string }) {
                 <Button
                   type="primary"
                   :disabled="ended || childOpen"
-                  @click="router.push({ path: '/fdmstock/inventory-outbound' })"
+                  @click="openStockOut"
                 >
-                  去库存中心安排出货
+                  新建出库单
                 </Button>
-                <span class="muted">出货在「库存中心 ·
-                  出库单」从工厂仓库按合同销售出库，数量自动记到本合同。</span>
+                <span class="muted">从工厂仓库按合同销售出库，数量自动记到本合同。</span>
               </div>
+              <h4>出库单（{{ stockOuts.length }}）</h4>
+              <Alert
+                v-if="stockOutsError"
+                :message="stockOutsError"
+                type="warning"
+              />
+              <div v-if="stockOuts.length" class="mini-table">
+                <div v-for="out in stockOuts" :key="out.id" class="mini-row">
+                  <a
+                    class="strong"
+                    :class="{ muted: out.status === 'VOIDED' }"
+                    @click="childOpen || (stockOutViewing = out)"
+                    >{{ out.code }}</a>
+                  <span>{{ out.warehouseName }}</span>
+                  <span>{{ linesTitle(out.lines) }}</span>
+                  <span>{{
+                    out.status === 'VOIDED' ? '已作废' : out.shippedDate
+                  }}</span>
+                </div>
+              </div>
+              <p v-else-if="!stockOutsError" class="muted">还没有出库单</p>
               <h4>发货记录</h4>
               <div v-if="shipmentRows.length" class="mini-table">
                 <div
@@ -1366,6 +1440,18 @@ async function download(file: { id: string; name: string }) {
     lock-contract
     @close="workLaunch = undefined"
     @updated="documentUpdated"
+  />
+  <StockOutDialog
+    v-if="stockOutOpen && open && contract"
+    :open="stockOutOpen"
+    :contract-id="contract.id"
+    @close="stockOutOpen = false"
+    @saved="stockOutSaved"
+  />
+  <StockDocDrawer
+    v-if="open && stockOutViewing"
+    :stock-out="stockOutViewing"
+    @close="stockOutViewing = undefined"
   />
   <PurchaseOrderExecution
     v-if="purchaseOrder && open"

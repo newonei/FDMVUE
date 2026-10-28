@@ -75,10 +75,13 @@ export function canReturn(stockIn: StockIn) {
   );
 }
 
-/** 入库单能否作废：未作废且没有办理过退货（直发的出库单会一起作废）。 */
+/**
+ * 入库单能否作废：采购入库、常规入库，未作废且没有办理过退货（直发的出库单会一起作废）。
+ * 工厂那边登记的入库只能在工厂作废。
+ */
 export function canVoidStockIn(stockIn: StockIn) {
   return (
-    !stockIn.kind &&
+    (!stockIn.kind || stockIn.kind === 'OTHER') &&
     stockIn.status !== 'VOIDED' &&
     stockIn.lines.every(
       (line) =>
@@ -156,6 +159,8 @@ const ACTION_LABELS: Record<string, string> = {
   PURCHASE_RETURN: '采购退货',
   FACTORY_IN: '生产入库',
   VOID_FACTORY_IN: '作废生产入库',
+  OTHER_IN: '常规入库',
+  VOID_OTHER_IN: '作废常规入库',
   OTHER_OUT: '其它出库',
   TRANSFER_OUT: '调拨调出',
   TRANSFER_IN: '调拨调入',
