@@ -26,6 +26,7 @@ import {
   getProcurementOrder,
   getProcurementSettings,
   getReceiveFactories,
+  updateProcurementOrder,
 } from '#/api/fdmplatform/procurement';
 import { getProducts } from '#/api/fdmplatform/products';
 
@@ -52,13 +53,16 @@ const props = defineProps<{
   contractId?: string;
   /** 复制这张采购单：带出合同、供应商、表头和明细，另存为新单 */
   copyFrom?: { contractId: string; orderId: string };
+  /** 修改撤回为草稿的这张采购单：带出原单，保存草稿或提交，不拆单、不换合同和公司 */
+  editOf?: { code?: string; contractId: string; orderId: string };
   open: boolean;
   /** 从采购申请开单：带出申请里的合同产品与数量 */
   requestId?: string;
 }>();
 const emit = defineEmits<{
   close: [];
-  saved: [value: CreatedProcurementOrders];
+  /** mode：修改草稿时为 draft（保存草稿）或 submitted（已提交），新建、复制时为空 */
+  saved: [value: CreatedProcurementOrders, mode?: 'draft' | 'submitted'];
 }>();
 
 const today = localDate();
@@ -406,13 +410,14 @@ function fillFromRequest(requestId: string) {
     return row;
   });
 }
-/** 复制采购单：先关联原合同（合同产品行要用），再带出表头和明细。 */
+/** 复制采购单：先关联原合同（合同产品行要用），再带出表头和明细；edit 时是修改这张草稿。 */
 async function copyOrder(
   source: { contractId: string; orderId: string },
   searching: Promise<void>,
+  edit = false,
 ) {
   const view = await getProcurementOrder(source.contractId, source.orderId);
-  const copied = copyEntry(view, key, today);
+  const copied = copyEntry(view, key, today, edit);
   await (copied.header.contractId
     ? chooseContract(copied.header.contractId)
     : searchContracts());
@@ -476,8 +481,12 @@ watch(
           ? PURCHASE_CATEGORIES[0]
           : categories.value[0];
       }
-      if (props.copyFrom) {
-        await copyOrder(props.copyFrom, searching);
+      if (props.editOf || props.copyFrom) {
+        await copyOrder(
+          (props.editOf ?? props.copyFrom)!,
+          searching,
+          !!props.editOf,
+        );
         return;
       }
       await (props.contractId
@@ -491,18 +500,34 @@ watch(
   { immediate: true },
 );
 
-async function save() {
+/** 修改草稿：submit=false 只保存草稿，true 时提交恢复为已下单。 */
+async function save(submit = true) {
   submitted.value = true;
   if (errors.value.sheet || Object.keys(errors.value.lines).length > 0) return;
+  if (props.editOf && splits.value.length > 1) {
+    error.value =
+      '修改采购单不能拆成多张，明细须是同一个供应商；别的供应商请另开采购单';
+    return;
+  }
   saving.value = true;
   error.value = '';
   try {
+    const payload = entryPayload(rows.value, header.value, idempotencyKey);
+    if (props.editOf) {
+      const saved = await updateProcurementOrder(
+        props.editOf.contractId,
+        props.editOf.orderId,
+        payload,
+        submit,
+      );
+      // 同一次打开里再保存是新的一次操作
+      idempotencyKey = crypto.randomUUID();
+      emit('saved', saved, submit ? 'submitted' : 'draft');
+      return;
+    }
     emit(
       'saved',
-      await createProcurementOrder({
-        ...entryPayload(rows.value, header.value, idempotencyKey),
-        requestId: props.requestId,
-      }),
+      await createProcurementOrder({ ...payload, requestId: props.requestId }),
     );
   } catch (error_) {
     error.value = errorText(error_);
@@ -515,7 +540,13 @@ async function save() {
 <template>
   <Modal
     :open="open"
-    :title="copyFrom ? '复制采购单' : '新建采购单'"
+    :title="
+      editOf
+        ? `修改采购单 ${editOf.code ?? ''}`.trim()
+        : copyFrom
+          ? '复制采购单'
+          : '新建采购单'
+    "
     width="min(1320px, 96vw)"
     :mask-closable="false"
     @cancel="emit('close')"
@@ -531,7 +562,7 @@ async function save() {
             allow-clear
             :filter-option="false"
             :options="contracts"
-            :disabled="!!contractId"
+            :disabled="!!contractId || !!editOf"
             placeholder="不关联则为独立采购单，如原材料"
             @search="searchContracts"
             @update:value="chooseContract"
@@ -581,6 +612,7 @@ async function save() {
             show-search
             option-filter-prop="label"
             :options="companyOptions"
+            :disabled="!!editOf"
             placeholder="关联合同时默认合同公司"
           />
         </label>
@@ -840,7 +872,15 @@ async function save() {
     </div>
     <template #footer>
       <Button @click="emit('close')">取消</Button>
-      <Button type="primary" :loading="saving" @click="save">保存</Button>
+      <template v-if="editOf">
+        <Button :loading="saving" @click="save(false)">保存草稿</Button>
+        <Button type="primary" :loading="saving" @click="save(true)">
+          提交采购单
+        </Button>
+      </template>
+      <Button v-else type="primary" :loading="saving" @click="save()">
+        保存
+      </Button>
     </template>
   </Modal>
   <Modal

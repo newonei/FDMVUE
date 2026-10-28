@@ -57,6 +57,7 @@ import {
   getProcurementOrdersOverview,
   procurementOrderAction,
   uploadProcurementSigned,
+  withdrawProcurementOrder,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
@@ -440,9 +441,27 @@ function standaloneOrder(id: string | undefined) {
 const editorOpen = ref(false);
 /** 「⋯」菜单复制时的原采购单；新建时为空 */
 const copySource = ref<{ contractId: string; orderId: string }>();
+/** 修改撤回为草稿的采购单时的这张单；新建、复制时为空 */
+const editSource = ref<{
+  code?: string;
+  contractId: string;
+  orderId: string;
+}>();
 function openEditor(source?: { contractId: string; orderId: string }) {
   if (childOpen.value) return;
   copySource.value = source;
+  editSource.value = undefined;
+  editorOpen.value = true;
+}
+function editCurrentOrder() {
+  const current = view.value;
+  if (!current || childOpen.value) return;
+  copySource.value = undefined;
+  editSource.value = {
+    code: String(current.order.code ?? ''),
+    contractId: current.contractId,
+    orderId: current.id,
+  };
   editorOpen.value = true;
 }
 /** 每行「⋯」菜单：对这张采购单的操作，目前只有复制。 */
@@ -582,6 +601,55 @@ const arrivalPercent = computed(() => {
       groups.length,
   );
 });
+/** 下单有误：撤回为草稿，接着打开修改，改好后重新提交。 */
+function withdrawCurrentOrder() {
+  const current = view.value;
+  if (!current || childOpen.value) return;
+  if (!current.allowedActions.includes('WITHDRAW_ORDER')) {
+    Modal.warning({
+      title: '这张采购单不能撤回',
+      content:
+        (current.withdrawOrderBlockReasons ?? []).join('；') || '没有撤回权限',
+    });
+    return;
+  }
+  let reason = '';
+  Modal.confirm({
+    title: `撤回采购单 ${String(current.order.code ?? '')} 为草稿？`,
+    content: () =>
+      h('div', [
+        h(
+          'p',
+          '撤回后不能收货入库、请款付款、收票；自家工厂待接单的单先撤销。修改后提交恢复为已下单。已确认的下单资料退回草稿，需重新确认。',
+        ),
+        h(Input, {
+          placeholder: '撤回原因（必填），如：数量打错、单价不对',
+          'onUpdate:value': (value: string) => {
+            reason = value;
+          },
+        }),
+      ]),
+    okText: '撤回并修改',
+    onOk: async () => {
+      if (!reason.trim()) {
+        message.error('请填写撤回原因');
+        throw new Error('missing reason');
+      }
+      try {
+        await withdrawProcurementOrder(current.contractId, current.id, {
+          reason: reason.trim(),
+          idempotencyKey: key('WITHDRAW_ORDER'),
+        });
+        message.success('采购单已撤回为草稿');
+        await Promise.all([loadDetail(), loadList()]);
+        editCurrentOrder();
+      } catch (error) {
+        message.error(errorText(error));
+        throw error;
+      }
+    },
+  });
+}
 /** 采购终止（金智同款）：未到货余额全部取消，已到货、已付款的保留 */
 function endCurrentOrder() {
   const current = view.value;
@@ -631,8 +699,21 @@ async function invoicesChanged() {
   await refreshFacts();
   void loadList();
 }
-function editorSaved(value: CreatedProcurementOrders) {
+function editorSaved(
+  value: CreatedProcurementOrders,
+  mode?: 'draft' | 'submitted',
+) {
   editorOpen.value = false;
+  if (mode) {
+    message.success(
+      mode === 'submitted'
+        ? `采购单 ${value.code} 已重新提交`
+        : `已保存草稿 ${value.code}，记得提交`,
+    );
+    void loadList();
+    void Promise.all([loadDetail(), refreshFacts()]);
+    return;
+  }
   message.success(createdOrdersText(value));
   void loadList();
   localTab.value = 'details';
@@ -1573,6 +1654,15 @@ watch(financeType, (value, previous) => {
               <span v-else class="procurement-muted">已付清</span>
             </button>
             <Tag
+              v-else-if="
+                column.key === 'operation' &&
+                String(record.record?.status) === 'DRAFT'
+              "
+              color="orange"
+            >
+              草稿
+            </Tag>
+            <Tag
               v-else-if="column.key === 'operation'"
               :color="
                 operationNames[
@@ -1699,6 +1789,24 @@ watch(financeType, (value, previous) => {
             "
           />
           <Button
+            v-if="view.allowedActions.includes('EDIT_ORDER')"
+            type="primary"
+            :disabled="childOpen"
+            @click="editCurrentOrder"
+          >
+            修改并提交
+          </Button>
+          <Button
+            v-else-if="
+              view.allowedActions.includes('WITHDRAW_ORDER') ||
+              (view.withdrawOrderBlockReasons ?? []).length > 0
+            "
+            :disabled="childOpen"
+            @click="withdrawCurrentOrder"
+          >
+            撤回修改
+          </Button>
+          <Button
             v-if="
               !['CANCELLED', 'RECEIVED', 'ENDED'].includes(
                 String(view.order.status ?? ''),
@@ -1757,6 +1865,12 @@ watch(financeType, (value, previous) => {
       </template>
       <div class="procurement-workspace order-execution">
         <Alert v-if="pageError" type="error" :message="pageError" show-icon />
+        <Alert
+          v-if="view && active && String(view.order.status) === 'DRAFT'"
+          type="warning"
+          show-icon
+          message="采购单已撤回为草稿：不能收货入库、请款付款、收票。点「修改并提交」改好后提交，恢复为已下单。"
+        />
         <Alert
           v-if="detailLoading && !view"
           type="info"
@@ -2015,6 +2129,7 @@ watch(financeType, (value, previous) => {
     <PurchaseOrderEditor
       :open="editorOpen && active"
       :copy-from="copySource"
+      :edit-of="editSource"
       @close="editorOpen = false"
       @saved="editorSaved"
     />
