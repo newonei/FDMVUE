@@ -30,6 +30,15 @@ async function initApplication() {
     updatePreferences({ app: { compact: false } });
   }
 
+  // 备案号以本项目配置为准；浏览器里缓存的旧备案号会优先生效，这里覆盖掉。
+  const { icp, icpLink } = overridesPreferences.copyright ?? {};
+  if (
+    preferences.copyright.icp !== icp ||
+    preferences.copyright.icpLink !== icpLink
+  ) {
+    updatePreferences({ copyright: { icp, icpLink } });
+  }
+
   // Dashboard children changed from top-level paths (/analytics, /workspace)
   // to nested paths in v2026.07. Migrate persisted preferences before the
   // router is imported so an old default home path cannot land on the 404 page.
