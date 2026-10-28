@@ -136,6 +136,7 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
       );
     }
     if (allowed('CREATE_QUOTE') && Array.isArray(contract.quotes)) {
+      const ordered = orderedBuyAssignments(contract);
       add(
         'quote',
         '外采任务待报价',
@@ -146,7 +147,10 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
           (record) =>
             record.method === 'BUY' &&
             record.status !== 'CANCELLED' &&
-            !contract.quotes!.some((quote) => quote.assignmentId === record.id),
+            !contract.quotes!.some(
+              (quote) => quote.assignmentId === record.id,
+            ) &&
+            !ordered.has(record.id),
         ),
         source('quotes', 'CREATE_QUOTE', 'tasks'),
       );
@@ -369,6 +373,55 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
       (record) => ({ kind: 'receipts', recordId: record.id }),
     );
   return result;
+}
+
+/**
+ * 报价不是必经步骤：采购员可以直接开采购单。外采任务的数量已被未取消的采购单覆盖，就不再提醒报价。
+ * 采购单行带任务的直接算到该任务；直接开单的行只挂申请，按申请 + 合同产品依次分给其下的外采任务。
+ * 没读到采购单时不当作已下单。
+ */
+function orderedBuyAssignments(contract: Contract) {
+  const covered = new Set<string>();
+  if (
+    !Array.isArray(contract.purchaseOrders) ||
+    !contract.purchaseOrders.every((order) => Array.isArray(order.lines))
+  )
+    return covered;
+  const direct = new Map<string, BigNumber>();
+  const pool = new Map<string, BigNumber>();
+  const poolKey = (requestId: unknown, contractItemId: unknown) =>
+    `${String(requestId ?? '')}|${String(contractItemId ?? '')}`;
+  for (const order of contract.purchaseOrders) {
+    if (order.status === 'CANCELLED') continue;
+    for (const line of rows(order.lines)) {
+      const net = new BigNumber(String(line.quantity ?? '')).minus(
+        String(line.cancelledQuantity ?? 0),
+      );
+      if (!net.isFinite() || net.isLessThanOrEqualTo(0)) continue;
+      const [map, key] = line.assignmentId
+        ? [direct, String(line.assignmentId)]
+        : [pool, poolKey(order.requestId, line.contractItemId)];
+      map.set(key, (map.get(key) ?? new BigNumber(0)).plus(net));
+    }
+  }
+  for (const assignment of contract.assignments ?? []) {
+    if (assignment.method !== 'BUY' || assignment.status === 'CANCELLED')
+      continue;
+    const quantity = new BigNumber(String(assignment.quantity ?? ''));
+    if (!quantity.isFinite()) continue;
+    const need = quantity.minus(direct.get(assignment.id) ?? 0);
+    if (need.isLessThanOrEqualTo(0)) {
+      covered.add(assignment.id);
+      continue;
+    }
+    const key = poolKey(assignment.requestId, assignment.contractItemId);
+    const left = pool.get(key) ?? new BigNumber(0);
+    if (left.isGreaterThanOrEqualTo(need)) {
+      covered.add(assignment.id);
+      pool.set(key, left.minus(need));
+    }
+  }
+  return covered;
 }
 
 export function workboardDocumentRow(

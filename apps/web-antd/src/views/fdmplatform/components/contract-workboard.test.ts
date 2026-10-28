@@ -309,6 +309,41 @@ describe('合同工作台只推荐有依据的下一步', () => {
     expect(keys(contract)).toContain('arrival');
   });
 
+  it('stops asking for a quote once purchase orders cover the task without one', () => {
+    const contract = fixture();
+    const order = (lines: Record<string, unknown>[], status = 'ORDERED') => ({
+      id: 'order',
+      requestId: 'request',
+      status,
+      lines: lines.map((line, index) => ({
+        id: `line-${index}`,
+        contractItemId: 'item',
+        cancelledQuantity: '0',
+        ...line,
+      })),
+    });
+    contract.purchaseOrders = [order([{ quantity: '60' }])];
+    expect(keys(contract)).toContain('quote');
+    contract.purchaseOrders = [order([{ quantity: '60' }, { quantity: '40' }])];
+    expect(keys(contract)).not.toContain('quote');
+    contract.purchaseOrders = [
+      order([{ quantity: '100', cancelledQuantity: '1' }]),
+    ];
+    expect(keys(contract)).toContain('quote');
+    contract.purchaseOrders = [order([{ quantity: '100' }], 'CANCELLED')];
+    expect(keys(contract)).toContain('quote');
+    contract.purchaseOrders = [
+      order([{ quantity: '100', assignmentId: 'task', contractItemId: 'x' }]),
+    ];
+    expect(keys(contract)).not.toContain('quote');
+    contract.purchaseOrders = [
+      { ...order([{ quantity: '100' }]), requestId: 'other' },
+    ];
+    expect(keys(contract)).toContain('quote');
+    contract.purchaseOrders = undefined;
+    expect(keys(contract)).toContain('quote');
+  });
+
   it('does not treat unavailable assignment, quote or order collections as an empty completed stage', () => {
     const contract = quoted();
     contract.assignments = undefined;
