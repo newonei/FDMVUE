@@ -3,6 +3,7 @@ import type { DocumentKind } from '../documents/model';
 import type { DetailTab, WorkspaceKey } from '../workspaces';
 import type { ContractDocumentKind } from './contract-document-launcher';
 import type { MainlineAction } from './contract-mainline';
+import type { RelatedDocGroup, RelatedDocRow } from './contract-related-docs';
 import type { WorkboardLaunch } from './contract-workboard';
 import type { LineColumn } from './line-table-model';
 
@@ -15,7 +16,8 @@ import type {
   PageResource,
 } from '#/api/fdmplatform';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
-import type { StockOut } from '#/api/fdmplatform/warehouse';
+import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-finance';
+import type { StockIn, StockOut } from '#/api/fdmplatform/warehouse';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -52,6 +54,7 @@ import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, rows } from '../data';
 import { departmentLabel, personLabel, personName } from '../directory';
+import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../documents/DocumentAction.vue';
 import ImportedContractCompletion from '../documents/ImportedContractCompletion.vue';
 import { nativeMoney } from '../documents/migration-display';
@@ -68,11 +71,13 @@ import { salesChannelOf } from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
+import { loadContractRelatedDocs } from './contract-related-docs';
 import { contractWorkboard, workboardDocumentRow } from './contract-workboard';
 import { contractQuickActionReason } from './contract-workflow';
 import ContractDocumentDialog from './ContractDocumentDialog.vue';
 import ContractFilesPanel from './ContractFilesPanel.vue';
 import ContractMainline from './ContractMainline.vue';
+import ContractRelatedDocs from './ContractRelatedDocs.vue';
 import ContractTimeline from './ContractTimeline.vue';
 import ContractWorkboard from './ContractWorkboard.vue';
 import FilePreviewButton from './FilePreviewButton.vue';
@@ -141,6 +146,59 @@ function stockOutSaved(value: StockOut) {
   message.success(`已出库 ${value.code}`);
   stockOutViewing.value = value;
   void loadStockOuts();
+  void loadRelatedDocs();
+  emit('refresh');
+}
+
+/**
+ * 下属单据页签（#112）：合同下每类单据一个页签，没有这类单据就不显示。
+ * 点单号打开原来的详情：采购类、发货、收款开票走单据详情，出入库走库存单据抽屉，付款与报销走财务单据。
+ */
+type RelatedTabKey = `doc:${string}`;
+const relatedDocs = ref<RelatedDocGroup[]>([]);
+const relatedDocsError = ref('');
+let relatedDocsSequence = 0;
+const stockInViewing = ref<StockIn>();
+const financeViewing = ref<ProcurementFinanceRecord>();
+const standaloneViewing = ref<{ id: string; kind: DocumentKind }>();
+async function loadRelatedDocs() {
+  const id = props.contract?.id;
+  if (!id) return;
+  const run = ++relatedDocsSequence;
+  relatedDocsError.value = '';
+  try {
+    const groups = await loadContractRelatedDocs(id);
+    if (run !== relatedDocsSequence || id !== props.contract?.id) return;
+    relatedDocs.value = groups;
+    if (
+      activeTab.value.startsWith('doc:') &&
+      !groups.some((group) => `doc:${group.key}` === activeTab.value)
+    )
+      activeTab.value = 'products';
+  } catch (error) {
+    if (run === relatedDocsSequence)
+      relatedDocsError.value = `下属单据未读取：${errorText(error)}`;
+  }
+}
+function openRelatedDoc(row: RelatedDocRow) {
+  if (!props.contract || childOpen.value) return;
+  const target = row.ref;
+  if (target.source === 'stockIn') stockInViewing.value = target.stockIn;
+  else if (target.source === 'stockOut')
+    stockOutViewing.value = target.stockOut;
+  else if (target.source === 'finance') financeViewing.value = target.record;
+  else if (target.row.standaloneId)
+    standaloneViewing.value = {
+      id: target.row.standaloneId,
+      kind: target.kind,
+    };
+  else {
+    workRow.value = target.row;
+    workLaunch.value = { kind: target.kind };
+  }
+}
+function relatedDocChanged() {
+  void loadRelatedDocs();
   emit('refresh');
 }
 
@@ -167,6 +225,9 @@ const childOpen = computed(
     reimbursementOpen.value ||
     stockOutOpen.value ||
     !!stockOutViewing.value ||
+    !!stockInViewing.value ||
+    !!financeViewing.value ||
+    !!standaloneViewing.value ||
     !!workLaunch.value ||
     !!purchaseOrder.value ||
     activating.value ||
@@ -195,7 +256,7 @@ function openQuickDocument(entry: { action: string; kind: DocumentKind }) {
   }
   startWork({ kind: entry.kind, action: entry.action });
 }
-const activeTab = ref<DetailTab>('products');
+const activeTab = ref<DetailTab | RelatedTabKey>('products');
 const editorOpen = ref(false);
 const completionOpen = ref(false);
 const reimbursementOpen = ref(false);
@@ -416,6 +477,12 @@ watch(
     stockOutOpen.value = false;
     stockOutViewing.value = undefined;
     stockOuts.value = [];
+    ++relatedDocsSequence;
+    relatedDocs.value = [];
+    relatedDocsError.value = '';
+    stockInViewing.value = undefined;
+    financeViewing.value = undefined;
+    standaloneViewing.value = undefined;
     workLaunch.value = undefined;
     workRow.value = undefined;
     terminateAction.value = undefined;
@@ -429,6 +496,7 @@ watch(
       void loadFiles();
       void loadSummary();
       void loadStockOuts();
+      void loadRelatedDocs();
       if (activeTab.value === 'audit') void loadAudit();
     }
   },
@@ -444,7 +512,9 @@ watch(
 watch(
   () => props.contract?.version,
   () => {
-    if (props.open) void loadSummary();
+    if (!props.open) return;
+    void loadSummary();
+    void loadRelatedDocs();
   },
 );
 watch(activeTab, (tab) => {
@@ -1285,6 +1355,19 @@ async function download(file: { id: string; name: string }) {
             </div>
           </TabPane>
 
+          <TabPane
+            v-for="group in relatedDocs"
+            :key="`doc:${group.key}`"
+            :tab="`${group.title} ${group.total}`"
+          >
+            <ContractRelatedDocs
+              :group="group"
+              :disabled="childOpen"
+              @open="openRelatedDoc"
+              @more="group.kind && openDocuments(group.kind, 'list')"
+            />
+          </TabPane>
+
           <TabPane key="attachments" tab="合同附件">
             <ContractFilesPanel
               :contract-id="contract.id"
@@ -1312,6 +1395,15 @@ async function download(file: { id: string; name: string }) {
             />
           </TabPane>
         </Tabs>
+        <Alert
+          v-if="relatedDocsError"
+          :message="relatedDocsError"
+          type="warning"
+        >
+          <template #action>
+            <Button size="small" @click="loadRelatedDocs">重新读取</Button>
+          </template>
+        </Alert>
         <Alert v-if="relatedError" :message="relatedError" type="warning">
           <template #action>
             <Button size="small" @click="loadSummary">重新读取</Button>
@@ -1449,9 +1541,30 @@ async function download(file: { id: string; name: string }) {
     @saved="stockOutSaved"
   />
   <StockDocDrawer
-    v-if="open && stockOutViewing"
+    v-if="open && (stockOutViewing || stockInViewing)"
     :stock-out="stockOutViewing"
-    @close="stockOutViewing = undefined"
+    :stock-in="stockInViewing"
+    @close="
+      stockOutViewing = undefined;
+      stockInViewing = undefined;
+    "
+  />
+  <FinanceDocument
+    v-if="open && financeViewing"
+    open
+    :type="financeViewing.type"
+    :record-id="financeViewing.id"
+    @close="financeViewing = undefined"
+    @updated="relatedDocChanged"
+  />
+  <BusinessDocumentDetail
+    :open="open && !!standaloneViewing"
+    :id="standaloneViewing?.id"
+    :kind="standaloneViewing?.kind ?? 'requests'"
+    :contract-id="contract?.id"
+    embedded
+    @close="standaloneViewing = undefined"
+    @updated="relatedDocChanged"
   />
   <PurchaseOrderExecution
     v-if="purchaseOrder && open"
@@ -1466,7 +1579,7 @@ async function download(file: { id: string; name: string }) {
     :row="workRow"
     embedded
     @close="workLaunch = undefined"
-    @updated="emit('refresh')"
+    @updated="relatedDocChanged"
   />
 </template>
 <style scoped>
