@@ -94,3 +94,12 @@
 .warehouse-page .voided .mono {
   text-decoration: line-through;
 }
+
+/* 单据类型页签（金智同款） */
+.warehouse-page .doc-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.warehouse-page .doc-link {
+  cursor: pointer;
+}

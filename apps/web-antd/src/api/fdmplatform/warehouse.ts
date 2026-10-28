@@ -41,10 +41,13 @@ export interface StockIn extends VoidInfo {
   status: 'RECEIVED' | 'VOIDED';
   /**
    * PRODUCTION 工厂交货的生产入库 / FACTORY_PURCHASE 工厂收货的原料、辅料（不进采购仓库）/
-   * FACTORY_MADE 发给自家工厂的采购单完工登记（货留在工厂库存）；都只能在工厂那边作废，不能在这里作废或退货。
+   * FACTORY_MADE 自家工厂的采购单生产入库；都只能在工厂那边作废，不能在这里作废或退货。
+   * OTHER 常规入库（不关联采购单，记来源）。没有 kind 的是采购入库。
    */
-  kind?: 'FACTORY_MADE' | 'FACTORY_PURCHASE' | 'PRODUCTION';
+  kind?: 'FACTORY_MADE' | 'FACTORY_PURCHASE' | 'OTHER' | 'PRODUCTION';
   factoryName?: null | string;
+  /** 常规入库的来源：期初、客户退回、样品退回等 */
+  source?: string;
   standalone?: boolean;
   warehouseId: string;
   warehouseName: string;
@@ -65,6 +68,23 @@ export interface StockIn extends VoidInfo {
   lines: StockInLine[];
   createdBy: number;
   createdAt: string;
+}
+
+/** 入库单列表页签：PURCHASE 采购入库 / PRODUCTION 生产入库 / FACTORY_PURCHASE 工厂收货 / OTHER 常规入库 */
+export type StockInKind =
+  | 'FACTORY_PURCHASE'
+  | 'OTHER'
+  | 'PRODUCTION'
+  | 'PURCHASE';
+
+export interface OtherInCreate {
+  idempotencyKey: string;
+  warehouseId: string;
+  receivedDate?: string;
+  source: string;
+  remark?: string;
+  /** 产品中心的产品；unitCost 不填表示成本未知 */
+  lines: { productId: string; quantity: Decimal; unitCost?: Decimal }[];
 }
 
 export interface StockOutLine extends StockProduct {
@@ -113,6 +133,7 @@ export interface StockBalance extends StockProduct {
 /** 流水来源：采购入库、销售出库、作废、采购退货、生产入库、其它出库、调拨、盘点 */
 export type StockTxnAction =
   | 'FACTORY_IN'
+  | 'OTHER_IN'
   | 'OTHER_OUT'
   | 'PURCHASE_RETURN'
   | 'STOCK_IN'
@@ -122,6 +143,7 @@ export type StockTxnAction =
   | 'TRANSFER_IN'
   | 'TRANSFER_OUT'
   | 'VOID_FACTORY_IN'
+  | 'VOID_OTHER_IN'
   | 'VOID_STOCK_IN'
   | 'VOID_STOCK_OUT'
   | 'VOID_TRANSFER';
@@ -354,11 +376,21 @@ interface PageParams {
 }
 
 export function getStockIns(
-  params: PageParams & { contractId?: string; orderId?: string },
+  params: PageParams & {
+    contractId?: string;
+    kind?: StockInKind;
+    orderId?: string;
+  },
 ) {
   return requestClient.get<PageResult<StockIn>>(`${base}/stock-ins/page`, {
     params,
   });
+}
+export function getStockIn(id: string) {
+  return requestClient.get<StockIn>(`${base}/stock-ins/${id}`);
+}
+export function createOtherIn(data: OtherInCreate) {
+  return requestClient.post<StockIn>(`${base}/other-ins`, data);
 }
 export function createStockIn(data: StockInCreate) {
   return requestClient.post<StockIn>(`${base}/stock-ins`, data);
@@ -370,6 +402,9 @@ export function getStockOuts(
   return requestClient.get<PageResult<StockOut>>(`${base}/stock-outs/page`, {
     params,
   });
+}
+export function getStockOut(id: string) {
+  return requestClient.get<StockOut>(`${base}/stock-outs/${id}`);
 }
 export function createStockOut(data: StockOutCreate) {
   return requestClient.post<StockOut>(`${base}/stock-outs`, data);
