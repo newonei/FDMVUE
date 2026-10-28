@@ -1,12 +1,14 @@
 import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import type { MasterType } from '#/api/fdmplatform/masters';
 
+import BigNumber from 'bignumber.js';
+
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import {
   requestLineDefaults,
   requestPrefillLines,
 } from './products/feedback-model';
-import { currencyOptions } from './products/model';
+import { contractLineAmount, currencyOptions } from './products/model';
 import { salesChannelOf } from './sales-channel';
 
 export interface Option {
@@ -39,6 +41,8 @@ export interface Field {
   hint?: string;
   default?: boolean | number | string;
   min?: number;
+  /** 留空时后端按其他字段自动计算，输入框里显示预计结果 */
+  placeholderOf?: (values: Record<string, unknown>) => string | undefined;
 }
 export interface ActionDefinition {
   action: string;
@@ -131,6 +135,8 @@ export const statusLabels: Record<string, string> = {
   COMMERCIAL: '商业发票',
   PROFORMA: '形式发票',
   CREDIT_NOTE: '红字 / 贷项',
+  SPECIAL: '增值税专用发票',
+  NORMAL: '增值税普通发票',
   PURCHASE: '采购',
   PRODUCTION: '生产',
   PACKAGING: '包装',
@@ -189,6 +195,7 @@ export const statusLabels: Record<string, string> = {
   REVERSE_RECEIPT: '退款 / 回款冲销',
   REFRESH_RECEIPT_FX: '补齐回款汇率',
   CREATE_INVOICE: '登记发票',
+  SUPPLEMENT_INVOICE: '补录发票号',
   VOID_INVOICE: '作废发票',
   BIND_ALLOCATION: '回款发票金额绑定',
   UNBIND_ALLOCATION: '解除金额绑定',
@@ -599,6 +606,113 @@ export function contractActions(
   };
 }
 
+/** 金智「开票内容」习惯：产品 数量单位 金额元，多行用分号隔开 */
+export function invoiceContent(contract: Contract) {
+  return contract.items
+    .map((item) => {
+      const amount = contractLineAmount(item);
+      return [
+        item.skuName,
+        `${item.quantity ?? ''}${item.unit ?? ''}`,
+        amount === undefined ? '' : `${amount}元`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    })
+    .join('；');
+}
+/** 含税：金额 × 税率 ÷ (100 + 税率)；不含税：金额 × 税率 ÷ 100（与后端一致） */
+export function invoiceTaxAmount(
+  amount: unknown,
+  rate: unknown,
+  included: unknown,
+) {
+  const value = new BigNumber(String(amount ?? ''));
+  const percent = new BigNumber(String(rate ?? ''));
+  if (!value.isFinite() || !percent.isFinite() || percent.lt(0))
+    return undefined;
+  return value
+    .times(percent)
+    .div(included === false ? 100 : percent.plus(100))
+    .toFixed(2, BigNumber.ROUND_HALF_UP);
+}
+/** 内销开票记录按金智：业务员先登记开票内容和税率，发票号、凭证可以开出后再补 */
+function domesticInvoiceAction(
+  contract: Contract,
+  invoiceOptions: Option[],
+  source: Field,
+  amount: Field,
+): ActionDefinition {
+  return {
+    action: 'CREATE_INVOICE',
+    title: '新建开票记录',
+    description:
+      '按客户开票信息登记本次开票；发票号和发票凭证可先不填，开出后用「补录发票号」补上。购方开票信息随记录保存。',
+    buyerCustomerId: contract.customerId,
+    fields: [
+      source,
+      selectField(
+        'type',
+        '开票类型',
+        [
+          { value: 'TAX', label: '正常开票' },
+          { value: 'CREDIT_NOTE', label: '红字发票' },
+        ],
+        { default: 'TAX' },
+      ),
+      selectField(
+        'ticketKind',
+        '票据类型',
+        [
+          { value: 'SPECIAL', label: '增值税专用发票' },
+          { value: 'NORMAL', label: '增值税普通发票' },
+          { value: 'OTHER', label: '其他票据' },
+        ],
+        { hint: '默认取客户档案里的发票类型。' },
+      ),
+      { ...amount, label: '票据金额（人民币）' },
+      field('currency', '币种', undefined, {
+        default: contract.currency ?? 'CNY',
+        hidden: true,
+      }),
+      field('taxRate', '税率（%）', 'decimal', { default: '13', min: 0 }),
+      field('taxIncluded', '含税', 'boolean', { default: true }),
+      field('taxAmount', '税额', 'decimal', {
+        required: false,
+        min: 0,
+        hint: '留空按金额和税率自动计算。',
+        placeholderOf: (values) => {
+          const tax = invoiceTaxAmount(
+            values.amount,
+            values.taxRate,
+            values.taxIncluded,
+          );
+          return tax === undefined ? undefined : `自动计算：${tax}`;
+        },
+      }),
+      field('issuedAt', '开票日期', 'date', {
+        default: new Date().toLocaleDateString('sv-SE', {
+          timeZone: 'Asia/Shanghai',
+        }),
+      }),
+      field('content', '开票内容', 'textarea', {
+        default: invoiceContent(contract),
+        hint: '已按合同明细预填，可按实际开票改。',
+      }),
+      field('invoiceNumber', '发票号码', undefined, {
+        required: false,
+        hint: '还没开出可以先不填。',
+      }),
+      field('evidenceRef', '发票凭证', undefined, { required: false }),
+      selectField('originalInvoiceId', '原发票', invoiceOptions, {
+        required: true,
+        visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
+      }),
+      field('remark', '备注', 'textarea', { required: false }),
+    ],
+  };
+}
+
 export const costCategories: Option[] = [
   ['PURCHASE', '采购'],
   ['PRODUCTION', '生产'],
@@ -728,32 +842,56 @@ export function financeActions(
         reason,
       ],
     },
-    CREATE_INVOICE: {
-      action: 'CREATE_INVOICE',
-      title: '登记真实发票',
+    CREATE_INVOICE: rmbOnly
+      ? domesticInvoiceAction(contract, invoiceOptions, source, amount)
+      : {
+          action: 'CREATE_INVOICE',
+          title: '登记真实发票',
+          description:
+            '仅记录已开具的凭证，不直接开税务发票。形式发票与正式开票分开统计。',
+          buyerCustomerId:
+            salesChannelOf(contract.businessType) === 'DOMESTIC'
+              ? contract.customerId
+              : undefined,
+          fields: [
+            source,
+            field('invoiceNumber', '真实发票号'),
+            selectField('type', '发票类型', [
+              { value: 'TAX', label: '国内税务发票' },
+              { value: 'COMMERCIAL', label: '商业发票' },
+              { value: 'PROFORMA', label: '形式发票' },
+              { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
+            ]),
+            amount,
+            field('currency', '币种', undefined, lockedCurrency),
+            field('issuedAt', '开票日期', 'date'),
+            field('evidenceRef', '发票附件引用'),
+            selectField('originalInvoiceId', '原发票', invoiceOptions, {
+              required: true,
+              visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
+            }),
+          ],
+        },
+    SUPPLEMENT_INVOICE: {
+      action: 'SUPPLEMENT_INVOICE',
+      title: '补录发票号',
       description:
-        '仅记录已开具的凭证，不直接开税务发票。形式发票与正式开票分开统计。',
-      buyerCustomerId:
-        salesChannelOf(contract.businessType) === 'DOMESTIC'
-          ? contract.customerId
-          : undefined,
+        '先登记、后开出的发票，在这里补上真实发票号和发票凭证；已登记的发票号不能在这里改。',
       fields: [
-        source,
-        field('invoiceNumber', '真实发票号'),
-        selectField('type', '发票类型', [
-          { value: 'TAX', label: '国内税务发票' },
-          { value: 'COMMERCIAL', label: '商业发票' },
-          { value: 'PROFORMA', label: '形式发票' },
-          { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
-        ]),
-        amount,
-        field('currency', '币种', undefined, lockedCurrency),
-        field('issuedAt', '开票日期', 'date'),
-        field('evidenceRef', '发票附件引用'),
-        selectField('originalInvoiceId', '原发票', invoiceOptions, {
-          required: true,
-          visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
-        }),
+        selectField(
+          'invoiceId',
+          '开票记录',
+          options(
+            (ledger.invoices ?? []).filter(
+              (invoice) =>
+                invoice.status === 'VALID' &&
+                (!invoice.invoiceNumber || !invoice.evidenceRef),
+            ),
+            ['issuedAt', 'content', 'amount'],
+          ),
+        ),
+        field('invoiceNumber', '真实发票号', undefined, { required: false }),
+        field('evidenceRef', '发票凭证', undefined, { required: false }),
       ],
     },
     VOID_INVOICE: {

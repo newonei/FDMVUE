@@ -322,7 +322,7 @@ async function newContract(category: string | undefined = 'YOGA') {
     ).toBeTruthy(),
   );
   await fill(view.host, '合同主体', '1');
-  await fill(view.host, '内部名称', '含附件的测试合同');
+  await fill(view.host, '内部单号', '含附件的测试合同');
   await fill(view.host, '客户', 'customer');
   if (category) await fill(view.host, '产品分类', category);
   clickText(view.host, '产品中心');
@@ -517,7 +517,7 @@ describe('business creation attachment queues', () => {
     );
     expect(view.host.textContent).toContain(file.name);
     expect(
-      view.host.querySelector<HTMLInputElement>('[data-label="内部名称"] input')
+      view.host.querySelector<HTMLInputElement>('[data-label="内部单号"] input')
         ?.value,
     ).toBe('含附件的测试合同');
     const [firstBody, firstFiles] = mocks.create.mock.calls[0]!;
@@ -766,13 +766,13 @@ describe('customer identity and fixed country selection', () => {
 describe('new contract form hides optional commercial fields', () => {
   it('requires an internal name for domestic orders, then submits its persisted identity and version to take effect', async () => {
     const view = await newContract();
-    await fill(view.host, '内部名称', '');
+    await fill(view.host, '内部单号', '');
     clickText(view.host, '保存并生效');
     await vi.waitFor(() =>
-      expect(view.host.textContent).toContain('请填写内部名称'),
+      expect(view.host.textContent).toContain('请填写内部单号'),
     );
     expect(mocks.create).not.toHaveBeenCalled();
-    await fill(view.host, '内部名称', 'NX-001');
+    await fill(view.host, '内部单号', 'NX-001');
     mocks.create.mockResolvedValueOnce({
       id: 'created',
       code: 'HT-1',

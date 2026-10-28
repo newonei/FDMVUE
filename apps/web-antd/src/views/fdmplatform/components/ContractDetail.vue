@@ -330,6 +330,14 @@ const allTasks = computed(() =>
 const domestic = computed(
   () => salesChannelOf(props.contract?.businessType) === 'DOMESTIC',
 );
+/** 内销只显示内部单号；历史单没填时退回订单号 */
+const contractTitle = computed(() => {
+  const value = props.contract;
+  if (!value) return '';
+  return domestic.value
+    ? value.name || value.code || ''
+    : [value.code, value.name].filter(Boolean).join(' · ');
+});
 const ended = computed(() =>
   ['CANCELLED', 'CLOSED'].includes(props.contract?.status ?? ''),
 );
@@ -814,11 +822,7 @@ async function download(file: { id: string; name: string }) {
   <FdmResizableDrawer
     resize-key="contract-detail"
     :open="open"
-    :title="
-      contract
-        ? [contract.code, contract.name].filter(Boolean).join(' · ')
-        : '合同详情'
-    "
+    :title="contract ? contractTitle : '合同详情'"
     width="min(1320px,96vw)"
     :closable="!childOpen"
     :mask-closable="!childOpen"
@@ -828,9 +832,7 @@ async function download(file: { id: string; name: string }) {
     <template #title>
       <div v-if="contract" class="contract-title">
         <span class="doc-type">合同单</span>
-        <span>{{
-          [contract.code, contract.name].filter(Boolean).join(' · ')
-        }}</span>
+        <span>{{ contractTitle }}</span>
       </div>
       <span v-else>合同详情</span>
     </template>
@@ -916,9 +918,11 @@ async function download(file: { id: string; name: string }) {
                 {{ contract.customerName }}
               </RelatedLink>
             </dd>
-            <dt>合同单号</dt>
-            <dd>{{ contract.code || '—' }}</dd>
-            <dt>内部名称</dt>
+            <template v-if="!domestic">
+              <dt>合同单号</dt>
+              <dd>{{ contract.code || '—' }}</dd>
+            </template>
+            <dt>{{ domestic ? '内部单号' : '内部名称' }}</dt>
             <dd :class="contract.name ? 'internal-name' : 'muted'">
               {{ contract.name || '未填写' }}
             </dd>
