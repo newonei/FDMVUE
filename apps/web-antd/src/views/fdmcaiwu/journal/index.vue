@@ -14,10 +14,13 @@ import EntryForm from './modules/entry-form.vue';
 import EntryList from './modules/entry-list.vue';
 import ImportDialog from './modules/import-dialog.vue';
 import SummaryPanel from './modules/summary-panel.vue';
+import BalancePanel from './modules/balance-panel.vue';
 
 defineOptions({ name: 'FdmcaiwuJournal' });
 
-const activeTab = ref<'EXPENSE' | 'INCOME' | 'SUMMARY'>('INCOME');
+const activeTab = ref<'BALANCE' | 'EXPENSE' | 'INCOME' | 'SUMMARY'>(
+  'INCOME',
+);
 const options = ref<Record<Api.Direction, Api.Options | undefined>>({
   EXPENSE: undefined,
   INCOME: undefined,
@@ -30,6 +33,7 @@ const importOpen = ref(false);
 const incomeList = ref<InstanceType<typeof EntryList>>();
 const expenseList = ref<InstanceType<typeof EntryList>>();
 const summaryPanel = ref<InstanceType<typeof SummaryPanel>>();
+const balancePanel = ref<InstanceType<typeof BalancePanel>>();
 
 async function loadOptions() {
   const [income, expense] = await Promise.all([
@@ -67,6 +71,7 @@ function refresh() {
   incomeList.value?.reload();
   expenseList.value?.reload();
   summaryPanel.value?.reload();
+  balancePanel.value?.reload();
   loadOptions();
 }
 </script>
@@ -76,7 +81,7 @@ function refresh() {
     <header class="mb-1">
       <h1 class="mb-1 text-xl font-semibold tracking-tight">日记账</h1>
       <p class="mb-0 text-sm text-muted-foreground">
-        逐笔登记公司收入、支出；外币按汇率中心自动折人民币，按月份汇总各账户、经手人、部门的收支。
+        逐笔登记公司收入、支出；外币按汇率中心自动折人民币，按月份汇总收支，按期初余额算出各银行账户的逐月余额。
       </p>
     </header>
     <Tabs v-model:active-key="activeTab">
@@ -104,6 +109,13 @@ function refresh() {
       </Tabs.TabPane>
       <Tabs.TabPane key="SUMMARY" tab="收支汇总">
         <SummaryPanel ref="summaryPanel" :company-names="companyNames" />
+      </Tabs.TabPane>
+      <Tabs.TabPane key="BALANCE" tab="银行余额">
+        <BalancePanel
+          ref="balancePanel"
+          :bank-names="options.INCOME?.bankAccounts ?? []"
+          @changed="refresh"
+        />
       </Tabs.TabPane>
     </Tabs>
 

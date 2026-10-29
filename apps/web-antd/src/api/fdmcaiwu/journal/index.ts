@@ -214,3 +214,80 @@ export function applyJournalImport(file: File) {
     { file },
   );
 }
+
+export namespace FdmcaiwuBankBalanceApi {
+  type Decimal = FdmcaiwuJournalApi.Decimal;
+
+  /** 开户行名称与日记账「收款行/付款行」一致；期初余额是期初月份月初的余额 */
+  export interface Account {
+    currency: string;
+    enabled?: boolean;
+    id?: number;
+    name: string;
+    nature?: string;
+    openingBalance: Decimal;
+    openingMonth: string;
+    remark?: string;
+    sort?: number;
+  }
+
+  export interface Month {
+    /** 期初前或还没到的月份为 null */
+    balance: Decimal | null;
+    expense: Decimal;
+    income: Decimal;
+    month: number;
+  }
+
+  export interface Row {
+    /** 只在日记账里出现、还没设置成账户时为空 */
+    accountId: null | number;
+    currency: string;
+    /** 外币账户里币种不同、未计入的笔数 */
+    mismatchCount: number;
+    months: Month[];
+    name: string;
+    nature: null | string;
+    openingMonth: null | string;
+    previousBalance: Decimal | null;
+    yearBalance: Decimal | null;
+    yearExpense: Decimal;
+    yearIncome: Decimal;
+  }
+
+  export interface Table {
+    currentMonth: number;
+    rows: Row[];
+    totals: Row[];
+    year: number;
+  }
+}
+
+export function getBankAccounts() {
+  return requestClient.get<FdmcaiwuBankBalanceApi.Account[]>(
+    `${baseUrl}/bank-account/list`,
+  );
+}
+
+/** 新增或修改；改名时日记账里的收付款行一起改 */
+export function saveBankAccount(data: FdmcaiwuBankBalanceApi.Account) {
+  return requestClient.post<number>(`${baseUrl}/bank-account/save`, data);
+}
+
+export function deleteBankAccount(id: number) {
+  return requestClient.delete<boolean>(`${baseUrl}/bank-account/delete`, {
+    params: { id },
+  });
+}
+
+export function getBankBalance(year: number) {
+  return requestClient.get<FdmcaiwuBankBalanceApi.Table>(`${baseUrl}/balance`, {
+    params: { year },
+  });
+}
+
+export function exportBankBalanceExcel(year: number) {
+  return requestClient.download(`${baseUrl}/balance/export-excel`, {
+    params: { year },
+  });
+}
