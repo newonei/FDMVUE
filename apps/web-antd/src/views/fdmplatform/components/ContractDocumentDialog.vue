@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
     :title="`${title} · ${contract?.code || contract?.name || ''}`"
     width="min(1220px, 97vw)"
     :closable="!nestedOpen"
-    :mask-closable="false"
+    :mask-closable="!nestedOpen"
     :keyboard="!nestedOpen"
     @close="close"
   >

@@ -938,7 +938,7 @@ async function save(activate = false) {
         : '新建合同 / 样品'
     "
     width="min(1480px, 98vw)"
-    :mask-closable="false"
+    :mask-closable="!saving && !resolving && !childOpen"
     :keyboard="false"
     :closable="!saving && !resolving && !childOpen"
     @close="close"

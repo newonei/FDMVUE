@@ -57,11 +57,11 @@ function pointer(type: string, clientX: number) {
 }
 
 describe('clampDrawerWidth', () => {
-  it('keeps the width between min width and viewport', () => {
+  it('keeps the width between min width and viewport minus the outside gutter', () => {
     expect(clampDrawerWidth(200, 360, 1440)).toBe(360);
     expect(clampDrawerWidth(900.4, 360, 1440)).toBe(900);
-    expect(clampDrawerWidth(2000, 360, 1440)).toBe(1440);
-    expect(clampDrawerWidth(500, 360, 300)).toBe(300);
+    expect(clampDrawerWidth(2000, 360, 1440)).toBe(1392);
+    expect(clampDrawerWidth(500, 360, 300)).toBe(252);
   });
 });
 
@@ -94,7 +94,7 @@ describe('FdmResizableDrawer', () => {
     handle!.dispatchEvent(pointer('pointerdown', 600));
     handle!.dispatchEvent(pointer('pointermove', 400));
     await flush();
-    expect(wrapper!.dataset.width).toBe('min(1200px, 100vw)');
+    expect(wrapper!.dataset.width).toBe('min(1200px, calc(100vw - 48px))');
 
     handle!.dispatchEvent(pointer('pointerup', 400));
     expect(localStorage.getItem(drawerWidthStorageKey('purchase-order'))).toBe(
@@ -104,7 +104,7 @@ describe('FdmResizableDrawer', () => {
     unmount();
     unmount = mountDrawer({ resizeKey: 'purchase-order', width: 1000 });
     await flush();
-    expect(wrapperEl()?.dataset.width).toBe('min(1200px, 100vw)');
+    expect(wrapperEl()?.dataset.width).toBe('min(1200px, calc(100vw - 48px))');
   });
 
   it('double click resets to the default width', async () => {
@@ -112,7 +112,7 @@ describe('FdmResizableDrawer', () => {
     unmount = mountDrawer({ resizeKey: 'contract-detail', width: 1320 });
     await flush();
     const wrapper = wrapperEl();
-    expect(wrapper?.dataset.width).toBe('min(900px, 100vw)');
+    expect(wrapper?.dataset.width).toBe('min(900px, calc(100vw - 48px))');
 
     wrapper!
       .querySelector<HTMLElement>('.fdm-resizable-drawer__handle')!
