@@ -8,6 +8,7 @@ import { computed, inject } from 'vue';
 import { Table, Tag } from 'ant-design-vue';
 
 import { label } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import { lineTarget } from './navigation';
@@ -44,6 +45,8 @@ function cell(record: Record<string, unknown>, key: string) {
         ? (value as Record<string, unknown>)[part]
         : undefined;
   }
+  const dateValue = formatTemporalField(key, value);
+  if (dateValue !== undefined) return dateValue;
   if (
     /userId$/i.test(key) ||
     ['actor_id', 'actorId', 'confirmedBy', 'uploadedBy'].includes(key)

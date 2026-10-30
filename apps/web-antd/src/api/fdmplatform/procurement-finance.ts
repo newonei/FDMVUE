@@ -104,7 +104,7 @@ export interface ProcurementFinanceFile {
   name: string;
   type?: string;
   size: number;
-  createdAt?: string;
+  createdAt?: number | string;
 }
 export function getProcurementFinanceFiles(id: string) {
   return requestClient.get<{

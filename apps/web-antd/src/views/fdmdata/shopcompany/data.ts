@@ -6,6 +6,7 @@ import { getDataCompanySimpleList } from '#/api/fdmdata/datacompany';
 import { getRangePickerDefaultProps } from '#/utils';
 
 export const PLATFORM_OPTIONS = [
+  { label: '1688', value: '1688' },
   { label: '淘宝/天猫', value: 'TAOBAO' },
   { label: '拼多多', value: 'PDD' },
   { label: '京东', value: 'JD' },

@@ -6,6 +6,7 @@ import type { FdmdataEcShopDailyApi } from '#/api/fdmdata/ecshopdaily';
 import { computed, h, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+import { formatDate, formatDateTime } from '@vben/utils';
 
 import { Descriptions, Divider, message, Tag, Tooltip } from 'ant-design-vue';
 
@@ -25,15 +26,12 @@ const detail = ref<FdmdataEcShopDailyApi.EcShopDaily | null>(null);
 const platformDetail =
   ref<FdmdataEcShopDailyApi.EcShopDailyPlatformDetail | null>(null);
 
-function fmtDate(value: any) {
-  if (value === null || value === undefined || value === '') return '-';
-  const s = String(value);
-  return s.length >= 10 ? s.slice(0, 10) : s;
+function fmtDate(value?: number | string) {
+  return formatDate(value) || '-';
 }
 
-function fmtDateTime(value: any) {
-  if (value === null || value === undefined || value === '') return '-';
-  return String(value);
+function fmtDateTime(value?: number | string) {
+  return formatDateTime(value) || '-';
 }
 
 function fmtNumber(value: any) {

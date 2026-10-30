@@ -186,12 +186,7 @@ function factName(value: unknown) {
           }}
         </Descriptions.Item>
         <Descriptions.Item label="申请日期">
-          {{
-            formatDate(
-              record.createdAt ? String(record.createdAt) : undefined,
-              'YYYY-MM-DD',
-            ) || '未提供'
-          }}
+          {{ formatDate(record.createdAt) || '未提供' }}
         </Descriptions.Item>
         <Descriptions.Item label="垫付人">
           {{ record.advanceUserName || '未填写' }}

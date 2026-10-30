@@ -73,8 +73,8 @@ function applicant(record: ProcurementFinanceRecord) {
   );
 }
 function dateText(value: unknown) {
-  return value
-    ? formatDate(String(value), 'YYYY-MM-DD') || '日期待核实'
+  return typeof value === 'number' || typeof value === 'string'
+    ? formatDate(value) || '日期待核实'
     : '日期待核实';
 }
 async function load() {

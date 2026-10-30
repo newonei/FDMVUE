@@ -51,7 +51,7 @@ export interface BusinessDocumentFile {
   size: number;
   sha256: string;
   uploadedBy: number;
-  createdAt: string;
+  createdAt: number | string;
 }
 export function getBusinessDocumentFiles(id: string) {
   return requestClient.get<{

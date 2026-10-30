@@ -28,8 +28,8 @@ export interface ContractReview {
   decisionSource?: 'HUMAN' | 'SYSTEM_AI';
   decidedBy?: number;
   decisionReason?: string;
-  createdAt: string;
-  completedAt?: string;
+  createdAt: number | string;
+  completedAt?: number | string;
   ruleVersion: string;
   promptVersion: string;
   result?: {

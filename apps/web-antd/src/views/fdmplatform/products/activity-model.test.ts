@@ -1,5 +1,7 @@
 import type { ProductActivityRecord } from '#/api/fdmplatform/product-activity';
 
+import { getCurrentTimezone, setCurrentTimezone } from '@vben/utils';
+
 import { describe, expect, it } from 'vitest';
 
 import { navigationRoute } from '../documents/navigation';
@@ -145,6 +147,19 @@ describe('product activity navigation and quantity display', () => {
       '开始日期不能晚于结束日期',
     );
     expect(dateRangeError('2026-09-08', '2026-09-08')).toBe('');
+  });
+
+  it('shows product activity timestamps in the selected timezone', () => {
+    const originalTimezone = getCurrentTimezone();
+    setCurrentTimezone('Asia/Shanghai');
+    try {
+      for (const occurredAt of [1_789_973_875_794, '1789973875794'])
+        expect(activityDate(record({ occurredAt }))).toBe(
+          '2026-09-21 14:57:55',
+        );
+    } finally {
+      setCurrentTimezone(originalTimezone);
+    }
   });
 
   it('keeps missing units explicit and gives unnamed documents readable labels', () => {

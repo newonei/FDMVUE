@@ -13,7 +13,6 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
-import { formatDate } from '@vben/utils';
 
 import {
   Alert,
@@ -152,13 +151,6 @@ const historyRows = computed(() =>
   (view.value?.history ?? []).map((entry) => ({
     ...entry,
     action: historyActionNames[String(entry.action)] ?? entry.action,
-    occurredAt:
-      formatDate(
-        entry.occurredAt === null || entry.occurredAt === undefined
-          ? undefined
-          : String(entry.occurredAt),
-        'YYYY-MM-DD HH:mm',
-      ) || '—',
   })),
 );
 let sequence = 0;

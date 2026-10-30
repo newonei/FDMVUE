@@ -25,6 +25,7 @@ import {
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
 import { errorText, label, statusLabels } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
@@ -222,6 +223,7 @@ function cell(row: DocumentRow, key: string) {
   return (
     migrationCell(row.record, key) ??
     receiptFxDisplay(row.record, key) ??
+    formatTemporalField(key, value) ??
     (/UserId$/i.test(key) ? personLabel(directory.value, value) : label(value))
   );
 }

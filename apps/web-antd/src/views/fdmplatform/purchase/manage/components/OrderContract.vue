@@ -7,7 +7,7 @@ import type {
 
 import { computed, reactive, ref, watch } from 'vue';
 
-import { formatDate } from '@vben/utils';
+import { formatDateTime } from '@vben/utils';
 
 import {
   Alert,
@@ -291,10 +291,7 @@ function upload(event: Event) {
           <span v-if="column.key === 'kind'">{{
             record.kind === 'SIGNED' ? '签章文件' : 'Word导出'
           }}</span><span v-else-if="column.key === 'createdAt'">{{
-            formatDate(
-              record.createdAt == null ? undefined : String(record.createdAt),
-              'YYYY-MM-DD HH:mm',
-            ) || '—'
+            formatDateTime(record.createdAt) || '—'
           }}</span><Button
             v-else-if="column.key === 'action'"
             type="link"

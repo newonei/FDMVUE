@@ -41,6 +41,7 @@ import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import DocumentAction from '../documents/DocumentAction.vue';
 import ImportedContractCompletion from '../documents/ImportedContractCompletion.vue';
@@ -431,7 +432,9 @@ async function download(file: { id: string; name: string }) {
                   )?.name ?? '未指定'
                 }}
 </Descriptions.Item><Descriptions.Item label="签订日期">
-                {{ label(contract.signedDate) }}
+                {{
+                  formatTemporalField('signedDate', contract.signedDate)
+                }}
 </Descriptions.Item><Descriptions.Item label="阿里信保单号" :span="2">
                 {{
                   contract.alibabaTradeAssuranceNo || '未填写'

@@ -4,6 +4,7 @@ import type { ExchangeRateBundle } from '#/api/fdmplatform/exchange-rates';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
+import { formatDateTime } from '@vben/utils';
 
 import {
   Alert,
@@ -140,7 +141,7 @@ onBeforeUnmount(() => {
 </Descriptions.Item><Descriptions.Item label="实际来源日期">
               {{ bundle.rateDate }}
 </Descriptions.Item><Descriptions.Item label="获取时间">
-              {{ bundle.fetchedAt }}
+              {{ formatDateTime(bundle.fetchedAt) || '—' }}
             </Descriptions.Item>
             <Descriptions.Item label="来源">
               <a

@@ -26,6 +26,7 @@ import {
 } from '#/api/fdmplatform';
 
 import { errorText } from '../data';
+import { formatTemporalField } from '../date-display';
 
 const props = defineProps<{
   categories: string[];
@@ -191,7 +192,7 @@ async function download(item: ContractAttachment) {
         { title: '附件名称', dataIndex: 'name' },
         { title: '分类', key: 'category' },
         { title: '大小', key: 'size' },
-        { title: '上传时间', dataIndex: 'createdAt' },
+        { title: '上传时间', dataIndex: 'createdAt', width: 180 },
         { title: '操作', key: 'action' },
       ]"
       :scroll="{ x: 800 }"
@@ -204,6 +205,9 @@ async function download(item: ContractAttachment) {
           categoryLabels[record.category] ?? record.category
         }}</span>
         <span v-else-if="column.key === 'size'">{{ (Number(record.size) / 1024).toFixed(1) }} KB</span>
+        <span v-else-if="column.dataIndex === 'createdAt'">{{
+          formatTemporalField('createdAt', record.createdAt)
+        }}</span>
         <Button
           v-else-if="column.key === 'action'"
           type="link"

@@ -4,6 +4,7 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 import { ref } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { formatDate } from '@vben/utils';
 
 import { Button, Empty, Input, Tag, Tooltip } from 'ant-design-vue';
 
@@ -41,16 +42,8 @@ function saveRename(conversation: FdmCreativeApi.AgentConversation) {
   editingId.value = undefined;
 }
 
-function formatTime(value?: string) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    month: '2-digit',
-  });
+function formatTime(value?: number | string) {
+  return formatDate(value, 'MM-DD HH:mm') || '-';
 }
 </script>
 

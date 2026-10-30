@@ -10,6 +10,7 @@ import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
+import { formatDateTime as formatSystemDateTime } from '@vben/utils';
 
 import {
   Alert,
@@ -774,12 +775,8 @@ function formatPriceCell(value: unknown) {
   });
 }
 
-function formatDateTime(value: unknown) {
-  if (!hasValue(value)) return '—';
-  const date = new Date(String(value));
-  return Number.isNaN(date.getTime())
-    ? String(value)
-    : date.toLocaleString('zh-CN', { hour12: false });
+function formatDateTime(value?: number | string) {
+  return formatSystemDateTime(value) || '-';
 }
 
 function normalizeStatus(

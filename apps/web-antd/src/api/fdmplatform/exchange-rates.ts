@@ -8,7 +8,7 @@ export interface ExchangeRate {
   requestedDate: string;
   rateDate: string;
   source: string;
-  fetchedAt: string;
+  fetchedAt: number | string;
   fallback: boolean;
 }
 export interface ExchangeRateBundle {
@@ -16,7 +16,7 @@ export interface ExchangeRateBundle {
   rateDate: string;
   source: string;
   sourceUrl: string;
-  fetchedAt: string;
+  fetchedAt: number | string;
   fallback: boolean;
   rows: ExchangeRate[];
 }

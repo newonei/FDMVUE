@@ -4,6 +4,7 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 import { computed } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { formatDate } from '@vben/utils';
 
 import { Empty, Spin, Tag } from 'ant-design-vue';
 
@@ -44,14 +45,8 @@ function referenceLabel(reference: FdmCreativeApi.AgentReference) {
   return `${reference.type === 'ASSET' ? '素材' : '提示词'} · ${reference.id}`;
 }
 
-function formatTime(value?: string) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+function formatTime(value?: number | string) {
+  return formatDate(value, 'HH:mm') || '-';
 }
 </script>
 

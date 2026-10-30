@@ -10,6 +10,8 @@ import type {
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
+import { formatDateTime } from '@vben/utils';
+
 import {
   Alert,
   Button,
@@ -343,7 +345,7 @@ onBeforeUnmount(() => {
           "
           :description="
             directory
-              ? `可搜索 ${directory.indexedCount} 条；本轮已读取 ${directory.scannedCount} 条${directory.remoteTotal === null ? '' : `，来源总数参考 ${directory.remoteTotal}`}。${directory.completedAt ? `上次完整更新时间：${directory.completedAt}。` : '尚无完整目录。'}${directory.lastError || ''}`
+              ? `可搜索 ${directory.indexedCount} 条；本轮已读取 ${directory.scannedCount} 条${directory.remoteTotal === null ? '' : `，来源总数参考 ${directory.remoteTotal}`}。${directory.completedAt ? `上次完整更新时间：${formatDateTime(directory.completedAt)}。` : '尚无完整目录。'}${directory.lastError || ''}`
               : '读取目录状态中…'
           "
         />
@@ -529,8 +531,10 @@ onBeforeUnmount(() => {
               </Descriptions>
             </div>
             <p class="muted">
-              预览获取时间：{{ preview.fetchedAt }}；来源更新时间：{{
-                preview.customer.sourceUpdatedAt || '来源未提供'
+              预览获取时间：{{
+                formatDateTime(preview.fetchedAt) || '—'
+              }}；来源更新时间：{{
+                formatDateTime(preview.customer.sourceUpdatedAt) || '来源未提供'
               }}
             </p>
             <Space wrap>

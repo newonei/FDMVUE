@@ -19,6 +19,7 @@ import {
 } from '#/api/fdmplatform/contract-review';
 
 import { errorText } from '../data';
+import { formatTemporalField } from '../date-display';
 
 const props = withDefaults(
   defineProps<{ contract?: Contract; open?: boolean }>(),
@@ -492,7 +493,8 @@ defineExpose({
             class="review-history"
           >
             <Tag>{{ labels[review.status] }}</Tag>
-            业务版本 {{ review.businessVersion }} · {{ review.createdAt }}
+            业务版本 {{ review.businessVersion }} ·
+            {{ formatTemporalField('createdAt', review.createdAt) }}
             <p>{{ review.summary }}</p>
             <p v-if="review.decisionReason">
               {{

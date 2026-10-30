@@ -38,6 +38,7 @@ import {
 } from '#/api/fdmplatform/products';
 
 import { errorText, money } from '../../data';
+import { formatTemporalField } from '../../date-display';
 import { useEntityDetail } from '../../documents/useEntityDetail';
 import {
   currencyOptions,
@@ -618,8 +619,12 @@ async function savePrice() {
               <span v-else-if="column.key === 'tax'">{{
                 record.taxBasis === 'TAX_INCLUDED' ? '含税' : '未税'
               }}</span>
-              <span v-else-if="column.key === 'valid'">{{ record.validFrom }} ～
-                {{ record.validUntil || '长期' }}</span>
+              <span v-else-if="column.key === 'valid'">{{ formatTemporalField('validFrom', record.validFrom) }} ～
+                {{
+                  record.validUntil
+                    ? formatTemporalField('validUntil', record.validUntil)
+                    : '长期'
+                }}</span>
               <Tag
                 v-else-if="column.key === 'active'"
                 :color="record.active ? 'green' : 'default'"

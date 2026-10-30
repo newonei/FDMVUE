@@ -10,8 +10,6 @@ import type {
 
 import { computed, nextTick, ref, watch } from 'vue';
 
-import { formatDate } from '@vben/utils';
-
 import {
   Alert,
   Button,
@@ -855,11 +853,6 @@ async function relatedUpdated() {
               rows(record.history).map((entry) => ({
                 ...entry,
                 actorId: userNames[String(entry.actorId)] || entry.actorId,
-                at:
-                  formatDate(
-                    entry.at == null ? undefined : String(entry.at),
-                    'YYYY-MM-DD HH:mm',
-                  ) || '—',
                 action:
                   actionNames[String(entry.action)] ??
                   (entry.action === 'CREATE' ? '新建草稿' : entry.action),

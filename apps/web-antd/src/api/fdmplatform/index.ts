@@ -6,6 +6,7 @@ export { newIdempotencyKey } from './idempotency';
 
 export type Decimal = number | string;
 export type BusinessRecord = Record<string, unknown> & {
+  createdAt?: number | string;
   id: string;
   name?: string;
   status?: string;
@@ -201,7 +202,7 @@ export interface ContractAttachment extends BusinessRecord {
   sha256: string;
   category: string;
   uploadedBy: number;
-  createdAt: string;
+  createdAt: number | string;
   targets?: { id: string; kind: string }[];
 }
 export interface AttachmentTarget {

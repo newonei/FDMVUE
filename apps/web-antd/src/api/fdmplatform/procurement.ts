@@ -90,7 +90,7 @@ export interface ProcurementFile {
   exportId?: string;
   detailsRevision?: number;
   detailsVersion?: number;
-  createdAt?: string;
+  createdAt?: number | string;
   orderId: string;
   contractId: string;
 }

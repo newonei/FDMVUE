@@ -24,6 +24,7 @@ import {
 } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
+import { formatTemporalField } from '../../date-display';
 
 const props = defineProps<{ companyId: number; productId: string }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -160,7 +161,7 @@ async function download(file: ProductAttachment) {
       :columns="[
         { title: '资料名称', dataIndex: 'name' },
         { title: '版本', key: 'revision' },
-        { title: '上传时间', dataIndex: 'createdAt' },
+        { title: '上传时间', dataIndex: 'createdAt', width: 180 },
         { title: '操作', key: 'action' },
       ]"
     >
@@ -171,8 +172,11 @@ async function download(file: ProductAttachment) {
         >
           v{{ record.revision }} · {{ record.active ? '当前' : '历史' }}
         </Tag>
+        <span v-else-if="column.dataIndex === 'createdAt'">{{
+          formatTemporalField('createdAt', record.createdAt)
+        }}</span>
         <Button
-          v-if="column.key === 'action'"
+          v-else-if="column.key === 'action'"
           type="link"
           @click="download(record as ProductAttachment)"
         >

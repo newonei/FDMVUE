@@ -8,6 +8,7 @@ import { computed, inject } from 'vue';
 import { Table, Tag } from 'ant-design-vue';
 
 import { label } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 
@@ -43,6 +44,8 @@ function cell(record: Record<string, unknown>, key: string) {
         ? (value as Record<string, unknown>)[part]
         : undefined;
   }
+  const temporalValue = formatTemporalField(key, value);
+  if (temporalValue !== undefined) return temporalValue;
   if (
     /userId$/i.test(key) ||
     ['actor_id', 'actorId', 'confirmedBy', 'uploadedBy'].includes(key)
@@ -66,7 +69,10 @@ function cell(record: Record<string, unknown>, key: string) {
     );
   if (value && typeof value === 'object')
     return Object.entries(value as Record<string, unknown>)
-      .map(([name, entry]) => `${name}: ${label(entry)}`)
+      .map(
+        ([name, entry]) =>
+          `${name}: ${formatTemporalField(name, entry) ?? label(entry)}`,
+      )
       .join('；');
   return label(value);
 }
