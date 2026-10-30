@@ -56,37 +56,51 @@ export namespace FdmcaiwuEcProfitApi {
     manualFields?: string;
   }
 
-  /** Excel 中取到的五项金额 */
+  /** 导入模板的金额（毛利润由系统计算） */
   export interface ImportValues {
     salesAmount?: Decimal;
+    newProductGiftAmount?: Decimal;
+    customerRefundAmount?: Decimal;
     purchaseCost?: Decimal;
+    ownPurchaseCost?: Decimal;
+    accessoryPurchaseCost?: Decimal;
+    dropshipPurchaseCost?: Decimal;
     freightCost?: Decimal;
     promotionCost?: Decimal;
-    platformFeeBill?: Decimal;
+    platformFee?: Decimal;
+    taxFee?: Decimal;
+    grossProfit?: Decimal;
   }
   export interface ImportRow {
     rowNumber: number;
-    shopId: string;
+    month: string;
+    /** 为空表示不在店铺目录中 */
+    shopId?: string;
+    /** Excel 里填写的店铺 */
     shopName: string;
     directoryShopName?: string;
     action: 'NEW' | 'UNCHANGED' | 'UPDATE';
     imported: ImportValues;
     current?: ImportValues;
-    keptManualFields: string[];
-    grossProfitAfter?: Decimal;
+  }
+  export interface ImportMonth {
+    month: string;
+    reportId?: number;
+    reportVersion?: number;
+    rowCount: number;
+    newCount: number;
+    updateCount: number;
+    unchangedCount: number;
+    salesAmount?: Decimal;
+    grossProfit?: Decimal;
+    keptItems: { itemId: number; lineType: string; shopName: string }[];
   }
   export interface ImportPreview {
-    month: string;
     fileName: string;
     fileSha256: string;
     sheetName?: string;
-    conditions: Record<string, string>;
-    shipDateFrom?: string;
-    shipDateTo?: string;
-    reportId?: number;
-    reportVersion?: number;
+    months: ImportMonth[];
     rows: ImportRow[];
-    keptItems: { itemId: number; lineType: string; shopName: string }[];
     newCount: number;
     updateCount: number;
     unchangedCount: number;
@@ -95,8 +109,7 @@ export namespace FdmcaiwuEcProfitApi {
     previewToken: string;
   }
   export interface ImportResult {
-    reportId: number;
-    batchId: number;
+    months: string[];
     created: number;
     updated: number;
     unchanged: number;
@@ -410,8 +423,12 @@ export function getEcProfitGroupMembers(month?: string) {
     { params: { month } },
   );
 }
-/** 设置默认分组；groupId 为空表示移出默认分组 */
+/**
+ * 设置默认分组；groupId 为空表示移出默认分组。
+ * fromMonth：从该月起生效，之前已有数据的月份保留原分组；不传则所有月份都按新分组。
+ */
 export function saveEcProfitDefaultGroups(data: {
+  fromMonth?: string;
   groupId?: number;
   shopIds: string[];
 }) {
@@ -482,11 +499,16 @@ export function exportEcProfitYearExcel(year: number) {
   });
 }
 
-/** 预览聚水潭「经营利润明细表」导入，不写库 */
-export function previewEcProfitImport(month: string, file: File) {
+/** 下载导入模板（含店铺列表与填写说明） */
+export function downloadEcProfitImportTemplate() {
+  return requestClient.download(`${baseUrl}/import/template`);
+}
+
+/** 预览模板导入，不写库；文件可包含多个月份 */
+export function previewEcProfitImport(file: File) {
   return requestClient.upload<FdmcaiwuEcProfitApi.ImportPreview>(
     `${baseUrl}/import/preview`,
-    { month, file },
+    { file },
   );
 }
 
@@ -494,8 +516,6 @@ export function previewEcProfitImport(month: string, file: File) {
 export function applyEcProfitImport(data: {
   file: File;
   idempotencyKey: string;
-  month: string;
-  overwriteManual: boolean;
   previewToken: string;
 }) {
   return requestClient.upload<FdmcaiwuEcProfitApi.ImportResult>(
