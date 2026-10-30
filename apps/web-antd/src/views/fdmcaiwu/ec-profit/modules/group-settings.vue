@@ -3,6 +3,8 @@ import type { TableColumnsType } from 'ant-design-vue';
 import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
 import type { GroupView, MemberFilter } from '../config-model';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+
+import dayjs from 'dayjs';
 import { useAccess } from '@vben/access';
 import {
   Alert,
@@ -35,8 +37,8 @@ import GroupMoveDialog from './group-move-dialog.vue';
 
 /**
  * 电商分组配置：
- * - 默认分组：店铺平时属于哪个组，所有月份都按它汇总；
- * - 按月调整：某个月临时变化（如有人请假，店铺交给别人），只改那个月。
+ * - 默认分组：店铺平时属于哪个组；改默认分组时可选从某月起，之前已导入的月份保留原分组；
+ * - 按月调整：只改某个月（如有人请假，店铺交给别人），或从该月起都改（同时改默认分组）。
  */
 const props = defineProps<{ defaultMonth: string }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -57,6 +59,8 @@ const selectedKeys = ref<(number | string)[]>([]);
 const groupOpen = ref(false);
 const editingGroup = ref<Api.Group>();
 const moveOpen = ref(false);
+const moveShops = ref<Api.GroupMemberShop[]>([]);
+const moveGroupId = ref<number>();
 const historyRevision = ref(0);
 let sequence = 0;
 const groups = computed(() => data.value?.groups ?? []);
@@ -126,9 +130,6 @@ async function changed() {
   historyRevision.value++;
   emit('changed');
 }
-function groupName(id?: number) {
-  return groups.value.find((group) => group.id === id)?.name ?? '未配置';
-}
 /** 下拉选项：只能选启用的分组；当前所在的已停用分组也列出（不可选），避免显示成编号。按月视图里默认分组标注「默认」，选它即恢复默认。 */
 function groupOptions(current?: number, defaultId?: number) {
   return groups.value
@@ -153,26 +154,34 @@ async function run(action: () => Promise<number>, done: string) {
     saving.value = false;
   }
 }
+/** 打开分组弹窗选择生效范围；表格里直接选了分组时带入该店和所选分组 */
+function openMove(shops: Api.GroupMemberShop[], target?: number) {
+  moveShops.value = shops;
+  moveGroupId.value = target;
+  moveOpen.value = true;
+}
+/** 从本月起移出默认分组；之前已导入的月份保留原分组 */
+function removeDefault(shopIds: string[]) {
+  return saveEcProfitDefaultGroups({
+    fromMonth: dayjs().format('YYYY-MM'),
+    shopIds,
+  });
+}
 function setDefault(shop: Api.GroupMemberShop, target?: number) {
-  void run(
-    () => saveEcProfitDefaultGroups({ groupId: target, shopIds: [shop.shopId] }),
-    target
-      ? `「${shop.shopName}」默认分组改为 ${groupName(target)}`
-      : `「${shop.shopName}」已移出默认分组`,
-  );
+  if (target) {
+    openMove([shop], target);
+    return;
+  }
+  void run(() => removeDefault([shop.shopId]), `「${shop.shopName}」已移出默认分组`);
 }
 function setMonth(shop: Api.GroupMemberShop, target?: number) {
-  const reset = !target || target === shop.defaultGroupId;
+  if (target) {
+    openMove([shop], target);
+    return;
+  }
   void run(
-    () =>
-      saveEcProfitMonthGroups({
-        groupId: target,
-        month: month.value,
-        shopIds: [shop.shopId],
-      }),
-    reset
-      ? `「${shop.shopName}」${month.value} 已恢复默认分组`
-      : `「${shop.shopName}」${month.value} 调到 ${groupName(target)}`,
+    () => saveEcProfitMonthGroups({ month: month.value, shopIds: [shop.shopId] }),
+    `「${shop.shopName}」${month.value} 已恢复默认分组`,
   );
 }
 function removeSelected() {
@@ -184,7 +193,7 @@ function removeSelected() {
       ? `将 ${targets.length} 家店铺移出默认分组？`
       : `${targets.length} 家店铺 ${month.value} 恢复默认分组？`,
     content: isDefault
-      ? '移出后这些店铺没有默认分组，月报中归入「未配置」（已单独调整的月份不受影响）。'
+      ? '从本月起这些店铺没有默认分组，月报中归入「未配置」；之前已导入的月份保留原分组。'
       : '取消这些店铺在本月的临时调整，本月改回按默认分组汇总。',
     okText: isDefault ? '移出' : '恢复默认',
     cancelText: '取消',
@@ -192,7 +201,7 @@ function removeSelected() {
       run(
         () =>
           isDefault
-            ? saveEcProfitDefaultGroups({ shopIds: targets.map((shop) => shop.shopId) })
+            ? removeDefault(targets.map((shop) => shop.shopId))
             : saveEcProfitMonthGroups({
                 month: month.value,
                 shopIds: targets.map((shop) => shop.shopId),
@@ -245,10 +254,10 @@ function removeGroup(group: Api.Group) {
             :allow-clear="false"
             aria-label="调整月份"
           /><span class="text-xs text-muted-foreground"
-            >只改这个月，其他月份仍按默认分组</span
+            >调整这个月的分组，可选只改本月或本月及以后</span
           ></template
         ><span v-else class="text-xs text-muted-foreground"
-          >店铺平时属于哪个组；所有月份都按它汇总</span
+          >店铺平时属于哪个组；改动时可选从哪个月起生效</span
         >
       </div>
       <Button :loading="loading" @click="load">刷新</Button>
@@ -393,7 +402,7 @@ function removeGroup(group: Api.Group) {
             ><Button
               type="primary"
               :disabled="!selectedKeys.length || loading || saving"
-              @click="moveOpen = true"
+              @click="openMove(selectedShops)"
               >{{
                 view === 'default' ? '设为默认分组' : `${month} 调到…`
               }}（{{ selectedKeys.length }}）</Button
@@ -510,7 +519,8 @@ function removeGroup(group: Api.Group) {
     v-model:open="moveOpen"
     :groups="groups"
     :month="month"
-    :shops="selectedShops"
+    :initial-group-id="moveGroupId"
+    :shops="moveShops"
     :view="view"
     @saved="changed"
   />
