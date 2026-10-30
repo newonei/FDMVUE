@@ -2,17 +2,20 @@ const STORAGE_PREFIX = 'fdm-drawer-width:';
 
 export const DEFAULT_MIN_DRAWER_WIDTH = 360;
 
+/** 拖宽时给左侧留出的遮罩宽度，保证还能点抽屉外面关闭 */
+export const DRAWER_OUTSIDE_GUTTER = 48;
+
 export function drawerWidthStorageKey(key: string) {
   return `${STORAGE_PREFIX}${key}`;
 }
 
-/** 宽度限制在 [最小宽度, 视口宽度]，视口比最小宽度还窄时以视口为准 */
+/** 宽度限制在 [最小宽度, 视口宽度 - 留白]，可用空间比最小宽度还窄时以可用空间为准 */
 export function clampDrawerWidth(
   width: number,
   minWidth: number,
   viewportWidth: number,
 ) {
-  const max = Math.max(viewportWidth, 0);
+  const max = Math.max(viewportWidth - DRAWER_OUTSIDE_GUTTER, 0);
   const min = Math.min(minWidth, max);
   return Math.round(Math.min(Math.max(width, min), max));
 }

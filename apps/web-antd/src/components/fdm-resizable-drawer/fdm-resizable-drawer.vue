@@ -7,6 +7,7 @@ import {
   clampDrawerWidth,
   clearDrawerWidth,
   DEFAULT_MIN_DRAWER_WIDTH,
+  DRAWER_OUTSIDE_GUTTER,
   loadDrawerWidth,
   saveDrawerWidth,
 } from './drawer-width';
@@ -61,8 +62,10 @@ const drawerWidth = computed(() => {
   const width = enabled.value
     ? (dragWidth.value ?? savedWidth.value)
     : undefined;
-  // 记住的宽度在更窄的屏幕上不超出视口
-  return width ? `min(${width}px, 100vw)` : props.width;
+  // 记住的宽度在更窄的屏幕上也要留出抽屉外可点击的区域
+  return width
+    ? `min(${width}px, calc(100vw - ${DRAWER_OUTSIDE_GUTTER}px))`
+    : props.width;
 });
 
 /** 抽屉内容插入页面后，从锚点找到宽度所在的外层容器，把拖动条挂上去 */
