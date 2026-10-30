@@ -7,6 +7,7 @@ import { onMounted, reactive, ref } from 'vue';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { formatDateTime } from '@vben/utils';
 
 import {
   Alert,
@@ -505,6 +506,9 @@ onMounted(loadData);
           </template>
           <template v-else-if="column.key === 'remark'">
             {{ record.remark || '—' }}
+          </template>
+          <template v-else-if="column.key === 'updateTime'">
+            {{ formatDateTime(record.updateTime) || '-' }}
           </template>
           <template v-else-if="column.key === 'source'">
             <span :title="formatSource(record)">{{

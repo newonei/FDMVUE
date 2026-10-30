@@ -2,6 +2,8 @@ import type { ReceiptConversion } from '#/api/fdmplatform/exchange-rates';
 
 import BigNumber from 'bignumber.js';
 
+import { formatTemporalField } from '../../date-display';
+
 export function conversionInput(
   date?: string,
   currency?: string,
@@ -71,6 +73,8 @@ export function receiptFxDisplay(
   const value = record[key];
   if (value === null || value === undefined || value === '') return '待补齐';
   if (key === 'exchangeRateFallback') return value ? '此前公布日' : '当日值';
+  const dateValue = formatTemporalField(key, value);
+  if (dateValue !== undefined) return dateValue;
   if (key === 'exchangeRateSource') return rateSourceLabel(String(value));
   if (key === 'rmbAmount')
     return `CNY ${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

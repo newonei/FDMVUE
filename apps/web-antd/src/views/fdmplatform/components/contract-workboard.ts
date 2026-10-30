@@ -6,6 +6,7 @@ import type { BusinessRecord, Contract, DocumentRow } from '#/api/fdmplatform';
 import BigNumber from 'bignumber.js';
 
 import { label, rows } from '../data';
+import { formatTemporalField } from '../date-display';
 import {
   currentDocument,
   pendingRequestItems,
@@ -57,7 +58,9 @@ export function contractWorkboard(contract: Contract): WorkboardGroup[] {
         record.name ||
         record.supplierName ||
         record.batchNo ||
-        record.receivedAt,
+        (record.receivedAt
+          ? formatTemporalField('receivedAt', record.receivedAt)
+          : undefined),
       product?.skuName,
     ];
     if (kind === 'tasks')

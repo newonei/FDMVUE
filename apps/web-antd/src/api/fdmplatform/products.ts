@@ -98,7 +98,7 @@ export interface ProductAttachment {
   type: string;
   size: number;
   sha256: string;
-  createdAt: string;
+  createdAt: number | string;
   uploadedBy: number;
   active: boolean;
   seriesId: string;

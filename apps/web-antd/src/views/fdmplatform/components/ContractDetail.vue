@@ -53,6 +53,7 @@ import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import { productCategoryLabel } from '../contract-categories';
 import { errorText, label, rows } from '../data';
+import { formatTemporalField } from '../date-display';
 import { departmentLabel, personLabel, personName } from '../directory';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../documents/DocumentAction.vue';
@@ -927,7 +928,9 @@ async function download(file: { id: string; name: string }) {
               {{ contract.name || '未填写' }}
             </dd>
             <dt>签单日期</dt>
-            <dd>{{ contract.signedDate ?? '未填写' }}</dd>
+            <dd>
+              {{ formatTemporalField('signedDate', contract.signedDate) }}
+            </dd>
             <dt>总金额</dt>
             <dd>{{ nativeMoney(contract.amount, contract.currency) }}</dd>
             <dt>所有者</dt>

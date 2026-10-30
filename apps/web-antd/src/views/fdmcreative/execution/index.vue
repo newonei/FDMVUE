@@ -6,6 +6,8 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
+import { formatDateTime } from '@vben/utils';
+
 import {
   Alert,
   Button,
@@ -222,6 +224,9 @@ onMounted(() => {
         <template v-else-if="column.dataIndex === 'progress'">
           <Progress :percent="executionProgress(record)" size="small" />
         </template>
+        <template v-else-if="column.dataIndex === 'startedTime'">
+          {{ formatDateTime(record.startedTime) || '-' }}
+        </template>
         <template v-else-if="column.dataIndex === 'failure'">
           <Tooltip
             v-if="failureSummary(record)"
@@ -287,10 +292,10 @@ onMounted(() => {
             {{ detail.failedNodeCount ?? 0 }} 个
           </Descriptions.Item>
           <Descriptions.Item label="开始时间">
-            {{ detail.startedTime ?? '—' }}
+            {{ formatDateTime(detail.startedTime) || '-' }}
           </Descriptions.Item>
           <Descriptions.Item label="完成时间">
-            {{ detail.completedTime ?? '—' }}
+            {{ formatDateTime(detail.completedTime) || '-' }}
           </Descriptions.Item>
         </Descriptions>
 
@@ -340,12 +345,20 @@ onMounted(() => {
           </template>
         </Table.Column>
         <Table.Column data-index="attemptNo" title="尝试次数" :width="100" />
-        <Table.Column data-index="startedTime" title="开始时间" :width="170" />
+        <Table.Column data-index="startedTime" title="开始时间" :width="170">
+          <template #default="{ record }">
+            {{ formatDateTime(record.startedTime) || '-' }}
+          </template>
+        </Table.Column>
         <Table.Column
           data-index="completedTime"
           title="完成时间"
           :width="170"
-        />
+        >
+          <template #default="{ record }">
+            {{ formatDateTime(record.completedTime) || '-' }}
+          </template>
+        </Table.Column>
         <Table.Column title="失败原因" :width="320">
           <template #default="{ record }">
             <template v-if="nodeFailure(record)">

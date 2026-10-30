@@ -11,6 +11,8 @@ import type {
 
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 
+import { formatDate } from '@vben/utils';
+
 import {
   Alert,
   Button,
@@ -98,7 +100,7 @@ const applicant = computed(() =>
   personLabel(directory.value, props.record?.createdBy ?? currentUserId.value),
 );
 const applicationDate = computed(() =>
-  String(props.record?.createdAt ?? localDate()).slice(0, 10),
+  formatDate(props.record?.createdAt ?? localDate()),
 );
 const payerOptions = computed(() =>
   entityOptions('PAY', form.payerEntityId, props.record?.payerSnapshot?.name),

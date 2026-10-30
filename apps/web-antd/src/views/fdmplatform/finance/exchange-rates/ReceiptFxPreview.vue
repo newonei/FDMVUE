@@ -3,6 +3,8 @@ import type { ReceiptConversion } from '#/api/fdmplatform/exchange-rates';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
+import { formatDateTime } from '@vben/utils';
+
 import { Alert, Button, Descriptions, Spin } from 'ant-design-vue';
 
 import { convertReceiptToRmb } from '#/api/fdmplatform/exchange-rates';
@@ -150,7 +152,7 @@ onBeforeUnmount(() => {
           {{ rateSourceLabel(conversion.source) }}
         </Descriptions.Item>
         <Descriptions.Item label="获取时间">
-          {{ conversion.fetchedAt }}
+          {{ formatDateTime(conversion.fetchedAt) || '—' }}
         </Descriptions.Item>
       </Descriptions>
       <Alert

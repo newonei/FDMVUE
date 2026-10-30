@@ -4,6 +4,7 @@ import type { WorkflowAutosaveSnapshot } from '../use-workflow-autosave';
 import type { FdmCreativeApi } from '#/api/fdmcreative';
 
 import { IconifyIcon } from '@vben/icons';
+import { formatDateTime } from '@vben/utils';
 
 import { Alert, Button, Modal, Tag } from 'ant-design-vue';
 
@@ -24,9 +25,7 @@ const emit = defineEmits<{
 }>();
 
 function formatTime(value: FdmCreativeApi.WorkflowDraft['savedTime']) {
-  if (!value) return '未知';
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString('zh-CN');
+  return formatDateTime(value) || '未知';
 }
 </script>
 

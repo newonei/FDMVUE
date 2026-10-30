@@ -4,6 +4,7 @@ import type { FdmCreativeApi } from '#/api/fdmcreative';
 import { computed, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { formatDateTime } from '@vben/utils';
 
 import { Button, Empty, Modal, Tag, Tooltip } from 'ant-design-vue';
 
@@ -190,14 +191,8 @@ function closePreview() {
   previewZoom.value = 1;
 }
 
-function formatTime(value?: string) {
-  if (!value) return '时间未知';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('zh-CN', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  }).format(date);
+function formatTime(value?: number | string) {
+  return formatDateTime(value) || '时间未知';
 }
 
 function formatBytes(value?: number) {

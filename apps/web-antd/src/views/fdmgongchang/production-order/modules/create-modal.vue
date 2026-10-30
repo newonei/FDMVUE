@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Dayjs } from 'dayjs';
 
-import type { AuxUsageDraft } from '../../shared/aux';
+import type { AuxUsageDraft } from '../../shared/auxiliary-usage';
 import type { RouteDraft } from '../shared';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
@@ -20,8 +20,8 @@ import {
   searchOrderProducts,
 } from '#/api/fdmgongchang/production-order';
 
-import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/aux';
 import AuxUsageEditor from '../../shared/aux-usage-editor.vue';
+import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/auxiliary-usage';
 import { routeProblem, sortSteps, specText } from '../shared';
 import RoutePicker from './route-picker.vue';
 

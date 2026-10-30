@@ -6,7 +6,7 @@ import type {
 
 import { computed, ref, watch } from 'vue';
 
-import { formatDate } from '@vben/utils';
+import { formatDateTime } from '@vben/utils';
 
 import { Alert, Button, Card, Select, Space, Table } from 'ant-design-vue';
 
@@ -120,10 +120,7 @@ function upload(event: Event) {
         <span v-if="column.key === 'kind'">{{
           kindLabel(record as ProcurementFile)
         }}</span><span v-else-if="column.key === 'createdAt'">{{
-          formatDate(
-            record.createdAt == null ? undefined : String(record.createdAt),
-            'YYYY-MM-DD HH:mm',
-          ) || '—'
+          formatDateTime(record.createdAt) || '—'
         }}</span><template v-else-if="column.key === 'action'">
           <FilePreviewButton
             :name="record.name"

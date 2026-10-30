@@ -90,7 +90,7 @@ export interface CustomsFile extends BusinessRecord {
   type?: string;
   size: number;
   uploadedBy?: number;
-  createdAt?: string;
+  createdAt?: number | string;
   replacesId?: string;
   remark?: string;
 }

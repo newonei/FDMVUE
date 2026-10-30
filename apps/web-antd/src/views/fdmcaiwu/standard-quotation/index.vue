@@ -8,6 +8,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
+import { formatDateTime as formatSystemDateTime } from '@vben/utils';
 import { IconifyIcon } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
 
@@ -774,14 +775,8 @@ function formatPriceCell(value: unknown) {
   });
 }
 
-function formatDateTime(value: unknown) {
-  if (!hasValue(value)) return '—';
-  // 后端时间可能是毫秒时间戳（数字或数字字符串），也可能是 ISO 文本
-  const text = String(value);
-  const date = new Date(/^\d{11,}$/.test(text) ? Number(text) : text);
-  return Number.isNaN(date.getTime())
-    ? text
-    : date.toLocaleString('zh-CN', { hour12: false });
+function formatDateTime(value?: number | string) {
+  return formatSystemDateTime(value) || '-';
 }
 
 function normalizeStatus(

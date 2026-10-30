@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AuxUsageDraft } from './aux';
+import type { AuxUsageDraft } from './auxiliary-usage';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 

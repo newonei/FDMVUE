@@ -5,6 +5,8 @@ import type { FdmcaiwuEcProfitApi } from '#/api/fdmcaiwu/ec-profit';
 
 import { computed, ref, watch } from 'vue';
 
+import { formatDateTime } from '@vben/utils';
+
 import { Alert, Button, Empty, Modal, Spin, Table, Tag } from 'ant-design-vue';
 
 import { getEcProfit } from '#/api/fdmcaiwu/ec-profit';
@@ -186,7 +188,7 @@ watch(
             备注：{{ report.remark }}
           </p>
           <div class="text-xs text-muted-foreground">
-            更新时间：{{ report.updateTime || '—' }}
+            更新时间：{{ formatDateTime(report.updateTime) || '-' }}
           </div>
         </template>
       </div>

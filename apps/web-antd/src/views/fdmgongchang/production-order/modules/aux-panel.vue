@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AuxUsageDraft } from '../../shared/aux';
+import type { AuxUsageDraft } from '../../shared/auxiliary-usage';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
@@ -10,8 +10,8 @@ import { Button, message, Select, Spin, Tag } from 'ant-design-vue';
 
 import { getOrderAux, saveOrderItemAux, searchAuxProducts } from '#/api/fdmgongchang/production-order';
 
-import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/aux';
 import AuxUsageEditor from '../../shared/aux-usage-editor.vue';
+import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/auxiliary-usage';
 import { num } from '../shared';
 
 /**

@@ -25,7 +25,12 @@ export function formatDate(time?: FormatDate, format: Format = 'YYYY-MM-DD') {
     return '';
   }
   try {
-    const date = dayjs.isDayjs(time) ? time : dayjs(time);
+    // 接口可能把毫秒时间戳序列化为字符串；仅识别 13 位，保留年份、紧凑日期等字符串的原有语义。
+    const value =
+      typeof time === 'string' && /^-?\d{13}$/.test(time)
+        ? Number(time)
+        : time;
+    const date = dayjs.isDayjs(value) ? value : dayjs(value);
     if (!date.isValid()) {
       throw new Error('Invalid date');
     }

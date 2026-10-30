@@ -30,6 +30,7 @@ import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 import CompletionScopeFilter from '../components/CompletionScope.vue';
 import { useInMergedView } from '../components/merged-view';
 import { errorText, label, money, statusLabels } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import { channelFilter } from '../sales-channel';
@@ -341,7 +342,9 @@ function cell(row: DocumentRow, key: string) {
     return requestCell(row.record, key);
   const value = row.record[key];
   const special =
-    migrationCell(row.record, key) ?? receiptFxDisplay(row.record, key);
+    migrationCell(row.record, key) ??
+    receiptFxDisplay(row.record, key) ??
+    formatTemporalField(key, value);
   if (special !== undefined) return special;
   if (PEOPLE.test(key))
     return value === null || value === undefined || value === ''

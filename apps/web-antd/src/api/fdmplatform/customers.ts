@@ -30,7 +30,7 @@ export interface Customer extends MasterRecord {
   contactName?: string;
   email?: string;
   phone?: string;
-  lastSyncedAt?: string;
+  lastSyncedAt?: number | string;
   sourceUpdatedAt?: string;
   /** 列表带 withStats 时附带；无共用范围的账号没有 */
   stats?: CustomerStats;
@@ -128,7 +128,7 @@ export interface OkkiCustomerPreview {
   previewHash: string;
   existingId?: string;
   existingVersion?: number;
-  fetchedAt: string;
+  fetchedAt: number | string;
 }
 export interface OkkiCustomerSearch {
   items: OkkiCustomerSource[];
@@ -146,8 +146,8 @@ export interface OkkiDirectoryStatus {
   scannedCount: number;
   remoteTotal: null | number;
   complete: boolean;
-  updatedAt: null | string;
-  completedAt: null | string;
+  updatedAt: null | number | string;
+  completedAt: null | number | string;
   lastError: null | string;
 }
 export interface CustomerOptions {

@@ -44,6 +44,47 @@ describe('dateUtils', () => {
       expect(formatted).toMatch(/2024-10-30/);
     });
 
+    it('should format millisecond timestamp strings like numbers in the selected timezone', () => {
+      const attachmentTimestamp = 1789973875794;
+
+      setCurrentTimezone('Asia/Shanghai');
+      expect(formatDateTime(String(attachmentTimestamp))).toBe(
+        '2026-09-21 14:57:55',
+      );
+      expect(formatDateTime(String(attachmentTimestamp))).toBe(
+        formatDateTime(attachmentTimestamp),
+      );
+
+      setCurrentTimezone('UTC');
+      expect(formatDateTime(String(attachmentTimestamp))).toBe(
+        '2026-09-21 06:57:55',
+      );
+    });
+
+    it('should preserve calendar date strings instead of treating them as timestamps', () => {
+      setCurrentTimezone('UTC');
+      for (const input of ['2024', '20241030', '2024-10-30']) {
+        expect(formatDate(input)).toBe(dayjs(input).tz().format('YYYY-MM-DD'));
+      }
+      expect(formatDateTime(sampleISO)).toBe('2024-10-30 12:34:56');
+    });
+
+    it('should preserve empty inputs and the numeric zero timestamp', () => {
+      setCurrentTimezone('UTC');
+      expect(formatDate()).toBe('');
+      expect(formatDate(null as unknown as undefined)).toBe('');
+      expect(formatDate('')).toBe('');
+      expect(formatDateTime(0)).toBe('1970-01-01 00:00:00');
+      expect(formatDateTime('0')).toBe(
+        dayjs('0').tz().format('YYYY-MM-DD HH:mm:ss'),
+      );
+    });
+
+    it('should keep numeric inputs in milliseconds without inferring seconds', () => {
+      setCurrentTimezone('UTC');
+      expect(formatDateTime(1789973875)).toBe('1970-01-21 17:12:53');
+    });
+
     it('should format a Date object', () => {
       const formatted = formatDate(new Date(sampleISO));
       expect(formatted).toMatch(/2024-10-30/);

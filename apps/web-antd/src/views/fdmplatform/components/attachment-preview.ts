@@ -1,4 +1,4 @@
-import dayjs from 'dayjs';
+import { formatDateTime } from '@vben/utils';
 
 const PREVIEW_TYPES: Record<string, string> = {
   gif: 'image/gif',
@@ -18,7 +18,7 @@ export function previewMimeType(fileName: string): string | undefined {
     : PREVIEW_TYPES[fileName.slice(index + 1).toLowerCase()];
 }
 
-/** 附件上传时间：后端返回 ISO 时间戳，界面统一显示到分钟 */
+/** 附件上传时间：兼容毫秒与 ISO，统一按用户所选时区显示。 */
 export function attachmentTime(value?: null | number | string) {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
+  return formatDateTime(value ?? undefined) || '—';
 }

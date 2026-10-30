@@ -8,7 +8,7 @@ export interface ExchangeRate {
   requestedDate: string;
   rateDate: string;
   source: string;
-  fetchedAt: string;
+  fetchedAt: number | string;
   fallback: boolean;
   /** 手动修改时保留的来源公布值、来源名称、修改人和原因 */
   sourceRate?: Decimal | null;
@@ -22,7 +22,7 @@ export interface ExchangeRateBundle {
   rateDate: string;
   source: string;
   sourceUrl: string;
-  fetchedAt: string;
+  fetchedAt: number | string;
   fallback: boolean;
   rows: ExchangeRate[];
 }

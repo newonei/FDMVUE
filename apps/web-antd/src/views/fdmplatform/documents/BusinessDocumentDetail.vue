@@ -12,8 +12,6 @@ import type {
 import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { formatDate } from '@vben/utils';
-
 import {
   Alert,
   Button,
@@ -629,9 +627,6 @@ async function submit(
                   action:
                     businessDocumentActionTitle(String(entry.action)) ??
                     label(entry.action),
-                  occurredAt: entry.occurredAt
-                    ? formatDate(String(entry.occurredAt), 'YYYY-MM-DD HH:mm')
-                    : '未记录',
                 }))
               "
               :columns="[

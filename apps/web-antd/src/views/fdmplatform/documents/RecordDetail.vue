@@ -48,6 +48,7 @@ import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
 import LineTable from '../components/LineTable.vue';
 import { errorText, label, money, rows } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
@@ -343,7 +344,8 @@ function display(key: string) {
   const value = record.value?.[key];
   const formatted =
     migrationCell(record.value ?? {}, key) ??
-    receiptFxDisplay(record.value ?? {}, key);
+    receiptFxDisplay(record.value ?? {}, key) ??
+    formatTemporalField(key, value);
   if (formatted !== undefined && formatted !== null) return timeText(formatted);
   if (props.kind === 'invoices' && key === 'taxRate') return `${value}%`;
   if (props.kind === 'invoices' && key === 'taxIncluded')

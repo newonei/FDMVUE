@@ -59,6 +59,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText } from '../data';
+import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import LinkedRecordTable from '../documents/LinkedRecordTable.vue';
 import {
@@ -195,8 +196,8 @@ const summary = computed(() => {
     ['负责人', personLabel(directory.value, value.ownerUserId)],
     ['办理状态', customsLabel(value.status)],
     ['资料状态', customsLabel(value.documentStatus)],
-    ['计划出运', value.plannedDate],
-    ['实际出运', value.actualDate],
+    ['计划出运', formatTemporalField('plannedDate', value.plannedDate)],
+    ['实际出运', formatTemporalField('actualDate', value.actualDate)],
     ['目的地', value.destination],
     ['运输方式', value.transportMode],
     ['货代 / 报关服务方', value.agentName],
@@ -213,6 +214,8 @@ const columns = [
     title: '计划出运',
     dataIndex: 'plannedDate',
     width: 120,
+    customRender: ({ text }: { text: unknown }) =>
+      formatTemporalField('plannedDate', text),
   },
   { key: 'action', title: '操作', width: 90 },
 ];
@@ -220,7 +223,14 @@ const fileColumns = [
   { key: 'file', title: '文件 / 类别', width: 250 },
   { key: 'version', title: '版本', width: 100 },
   { key: 'uploadedBy', title: '上传人', width: 150 },
-  { key: 'createdAt', title: '上传时间', dataIndex: 'createdAt', width: 175 },
+  {
+    key: 'createdAt',
+    title: '上传时间',
+    dataIndex: 'createdAt',
+    width: 180,
+    customRender: ({ text }: { text: unknown }) =>
+      formatTemporalField('createdAt', text),
+  },
   { key: 'action', title: '操作', width: 130 },
 ];
 const checklistColumns = [
@@ -232,7 +242,14 @@ const checklistColumns = [
 ];
 const feedbackColumns = [
   { key: 'message', title: '待补内容', dataIndex: 'message', width: 250 },
-  { key: 'dueDate', title: '要求日期', dataIndex: 'dueDate', width: 110 },
+  {
+    key: 'dueDate',
+    title: '要求日期',
+    dataIndex: 'dueDate',
+    width: 110,
+    customRender: ({ text }: { text: unknown }) =>
+      formatTemporalField('dueDate', text),
+  },
   { key: 'resolution', title: '处理结果', width: 200 },
   { key: 'action', title: '操作', width: 90 },
 ];
@@ -241,7 +258,14 @@ const historyColumns = [
   { key: 'status', title: '办理状态', width: 140 },
   { key: 'remark', title: '记录 / 依据', width: 250 },
   { key: 'actorId', title: '操作人', width: 150 },
-  { key: 'createdAt', title: '时间', dataIndex: 'createdAt', width: 180 },
+  {
+    key: 'createdAt',
+    title: '时间',
+    dataIndex: 'createdAt',
+    width: 180,
+    customRender: ({ text }: { text: unknown }) =>
+      formatTemporalField('createdAt', text),
+  },
 ];
 const expenseColumns = [
   { key: 'amount', title: '费用金额', width: 140 },

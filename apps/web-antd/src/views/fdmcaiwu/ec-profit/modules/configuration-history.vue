@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+
+import { formatDateTime } from '@vben/utils';
+
 import {
   Alert,
   Button,
@@ -10,6 +14,7 @@ import {
   Table,
   Tag,
 } from 'ant-design-vue';
+
 import { getEcProfitConfigurationHistory } from '#/api/fdmcaiwu/ec-profit';
 
 const props = defineProps<{ revision: number }>();
@@ -60,7 +65,13 @@ function text(value: unknown) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
 }
 const columns = [
-  { title: '操作时间', dataIndex: 'createTime', width: 180 },
+  {
+    title: '操作时间',
+    dataIndex: 'createTime',
+    width: 180,
+    customRender: ({ text }: { text?: number | string }) =>
+      formatDateTime(text) || '-',
+  },
   { title: '变更类型', key: 'action', width: 150 },
   { title: '操作人', dataIndex: 'creator', width: 110 },
   { title: '变更摘要', key: 'summary', width: 300 },
@@ -220,7 +231,7 @@ onBeforeUnmount(() => sequence++);
           detail.creator
         }}</Descriptions.Item
         ><Descriptions.Item label="时间">{{
-          detail.createTime
+          formatDateTime(detail.createTime) || '-'
         }}</Descriptions.Item
         ><Descriptions.Item label="配置版本">{{
           detail.result.configVersion ?? '—'

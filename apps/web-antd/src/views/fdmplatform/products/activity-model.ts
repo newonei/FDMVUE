@@ -9,6 +9,7 @@ import type {
 import BigNumber from 'bignumber.js';
 
 import { label } from '../data';
+import { formatTemporalField } from '../date-display';
 import { businessRecordTarget, referenceId } from '../documents/navigation';
 
 export const activityTypes: { label: string; value: ProductActivityType }[] = [
@@ -131,12 +132,13 @@ export function activityQuantity(record: ProductActivityRecord) {
 }
 
 export function activityDate(record: ProductActivityRecord) {
-  const value = record.occurredAt || record.businessDate;
-  if (!value) return '时间未记录';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '时间未记录';
-  return parsed.toLocaleString('zh-CN', { hour12: false });
+  const formatted =
+    record.occurredAt === null ||
+    record.occurredAt === undefined ||
+    record.occurredAt === ''
+      ? formatTemporalField('businessDate', record.businessDate)
+      : formatTemporalField('occurredAt', record.occurredAt);
+  return formatted && formatted !== '—' ? formatted : '时间未记录';
 }
 
 export function dateRangeError(fromDate: string, toDate: string) {

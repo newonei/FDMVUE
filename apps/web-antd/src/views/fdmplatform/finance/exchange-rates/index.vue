@@ -4,6 +4,7 @@ import type { ExchangeRateBundle } from '#/api/fdmplatform/exchange-rates';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { Page } from '@vben/common-ui';
+import { formatDateTime } from '@vben/utils';
 
 import {
   Alert,
@@ -86,9 +87,7 @@ const rows = computed(() => {
   return split.value.others;
 });
 const fetchedText = computed(() =>
-  bundle.value?.fetchedAt
-    ? dayjs(bundle.value.fetchedAt).format('YYYY-MM-DD HH:mm')
-    : '—',
+  bundle.value?.fetchedAt ? formatDateTime(bundle.value.fetchedAt) : '—',
 );
 const sourceUrl = computed(() =>
   bundle.value?.sourceUrl.startsWith('https://')

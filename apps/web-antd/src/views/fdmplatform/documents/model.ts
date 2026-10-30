@@ -17,6 +17,7 @@ import {
   rows,
   statusLabels,
 } from '../data';
+import { formatTemporalField } from '../date-display';
 import { requestLineDefaults } from '../products/feedback-model';
 export function actionTitle(action: string): string {
   return (
@@ -809,7 +810,7 @@ export function documentActionDefinition(
       .filter((shipment) => shipmentKind(shipment) === 'OUTBOUND')
       .map((shipment) => ({
         value: String(shipment.eventId),
-        label: `${itemName(shipment.contractItemId)} · 发货 ${shipment.quantity} · ${shipment.occurredAt ?? ''}`,
+        label: `${itemName(shipment.contractItemId)} · 发货 ${shipment.quantity} · ${formatTemporalField('occurredAt', shipment.occurredAt)}`,
         when: { poolId: shipment.poolId },
       })),
   };
