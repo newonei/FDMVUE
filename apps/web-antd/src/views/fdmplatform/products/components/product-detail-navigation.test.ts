@@ -22,6 +22,7 @@ vi.mock('#/api/fdmplatform', () => ({
 vi.mock('#/api/fdmplatform/products', () => ({
   getProduct: mocks.getProduct,
   getProducts: mocks.getProducts,
+  getProductCategories: vi.fn(async () => ({ total: 0, items: [] })),
   getProductPrices: vi.fn(),
   deleteProduct: vi.fn(),
   saveProductPrice: vi.fn(),

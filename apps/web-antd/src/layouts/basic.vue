@@ -29,6 +29,7 @@ import {
   updateNotifyMessageRead,
 } from '#/api/system/notify/message';
 import { getSimpleTenantList } from '#/api/system/tenant';
+import { UploadTaskPanel } from '#/components/upload-task';
 import { $t } from '#/locales';
 import { router } from '#/router';
 import { useAuthStore } from '#/store';
@@ -240,7 +241,12 @@ watch(
 </script>
 
 <template>
-  <BasicLayout @clear-preferences-and-logout="handleLogout">
+  <BasicLayout
+    :avatar
+    :text="userStore.userInfo?.realName"
+    @clear-preferences-and-logout="handleLogout"
+    @logout="handleLogout"
+  >
     <template #user-dropdown>
       <UserDropdown
         :avatar
@@ -248,8 +254,8 @@ watch(
         :text="userStore.userInfo?.nickname"
         :description="userStore.userInfo?.email"
         :tag-text="userStore.userInfo?.username"
-        @logout="handleLogout"
         @clear-preferences-and-logout="handleLogout"
+        @logout="handleLogout"
       />
     </template>
     <template #notification>
@@ -293,6 +299,7 @@ watch(
       >
         <LoginForm />
       </AuthenticationLoginExpiredModal>
+      <UploadTaskPanel />
     </template>
     <template #lock-screen>
       <LockScreen :avatar @to-login="handleLogout" />

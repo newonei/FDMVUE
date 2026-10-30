@@ -396,7 +396,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmdataEcShopDailyApi.EcShopDaily>();
+    const row = (modalApi.getData() as FdmdataEcShopDailyApi.EcShopDaily);
     if (!row?.id) {
       message.error('缺少记录ID，无法查看详情');
       await modalApi.close();

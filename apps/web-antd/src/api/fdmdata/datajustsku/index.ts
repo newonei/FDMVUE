@@ -104,11 +104,13 @@ export function getFinishedSkuPage(params: PageParam) {
 export function getFinishedSkuPageForComboPicker(
   params: PageParam & {
     categoryName?: string;
+    categoryNames?: string[];
     itemCode?: string;
     materialKey?: string;
     productName?: string;
     status?: number;
     styleCode?: string;
+    styleCodes?: string[];
   },
 ) {
   return requestClient.get<PageResult<FdmdataDataJustSkuApi.FinishedSku>>(

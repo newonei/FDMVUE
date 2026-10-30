@@ -11,6 +11,8 @@ import {
   documentActionUnavailableReason,
   invoiceAvailable,
   receiptAvailable,
+  receiptSettlement,
+  receiptRefundable,
 } from './model';
 const fields: Field[] = [
   {
@@ -188,6 +190,45 @@ const contract = {
     },
   ],
 } as unknown as Contract;
+describe('cross-currency receipts', () => {
+  const usd = {
+    id: 'usd',
+    currency: 'USD',
+    finance: {
+      receipts: [
+        {
+          id: 'cny',
+          kind: 'PAYMENT',
+          status: 'CONFIRMED',
+          currency: 'CNY',
+          amount: '7100',
+          contractAmount: '1000',
+        },
+        {
+          id: 'refund',
+          kind: 'REFUND',
+          originalReceiptId: 'cny',
+          currency: 'CNY',
+          amount: '-710',
+          contractAmount: '-100',
+        },
+      ],
+      invoices: [],
+      allocations: [
+        { id: 'a', receiptId: 'cny', invoiceId: 'i', amount: '300' },
+      ],
+    },
+  } as unknown as Contract;
+  it('binds in contract currency and refunds in the original currency', () => {
+    const receipt = usd.finance!.receipts![0]!;
+    expect(receiptAvailable(usd, receipt)).toBe('600');
+    expect(receiptRefundable(usd, receipt)).toBe('4260');
+  });
+  it('treats an unconverted cross-currency receipt as unavailable', () => {
+    const receipt = { id: 'x', currency: 'EUR', amount: '10' };
+    expect(receiptRefundable(usd, receipt)).toBe('0');
+  });
+});
 describe('remaining quantities and monetary balances', () => {
   it('computes exact usable receipt and invoice amounts including reverse records', () => {
     expect(receiptAvailable(contract, contract.finance!.receipts![0]!)).toBe(
@@ -196,6 +237,22 @@ describe('remaining quantities and monetary balances', () => {
     expect(invoiceAvailable(contract, contract.finance!.invoices![0]!)).toBe(
       '0.15',
     );
+  });
+  it('summarizes refunds, allocations and the remaining balance of a receipt', () => {
+    const settlement = receiptSettlement(
+      contract,
+      contract.finance!.receipts![0]!,
+    );
+    expect(settlement).toMatchObject({
+      allocated: '0.05',
+      available: '0.15',
+      refunded: '0.1',
+    });
+    expect(settlement.refunds.map((entry) => entry.id)).toEqual(['refund']);
+    expect(settlement.allocations.map((entry) => entry.id)).toEqual([
+      'a',
+      'undo',
+    ]);
   });
   it('offers only eligible invoices and defaults the smaller available balance', () => {
     const definition = documentActionDefinition(

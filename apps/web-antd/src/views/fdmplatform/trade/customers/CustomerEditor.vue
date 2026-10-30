@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../../sales-channel';
+import type { AreaNode } from './model';
+
 import type { CountryOption, Customer } from '#/api/fdmplatform/customers';
 
 import { computed, reactive, ref, watch } from 'vue';
@@ -8,7 +11,6 @@ import {
   Button,
   Checkbox,
   Collapse,
-  Drawer,
   Form,
   Input,
   message,
@@ -18,26 +20,40 @@ import {
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import { getCustomerOptions, saveCustomer } from '#/api/fdmplatform/customers';
+import { getAreaTree } from '#/api/system/area';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
+import { salesChannelOf } from '../../sales-channel';
 import CustomerSourceOptions from './CustomerSourceOptions.vue';
 import {
+  areaOptions,
+  cityNodes,
   countryMatches,
   countrySelectOptions,
   customerFields,
   customerForm,
   customerMissingFields,
   customerSourceOptions,
+  domesticMissingFields,
+  domesticRequiredFields,
+  invoiceFields,
+  invoiceForm,
+  invoiceMissingFields,
+  invoiceTypeOptions,
 } from './model';
 
 const props = defineProps<{
   customer?: Customer;
   initialName?: string;
   open: boolean;
+  /** 新建客户的业务线；维护已有客户时以档案为准 */
+  salesChannel?: SalesChannel;
   selectAfterSave?: boolean;
 }>();
 const emit = defineEmits<{ close: []; saved: [customer: Customer] }>();
 const form = reactive<Record<string, string>>({});
+const invoice = reactive<Record<string, string>>({});
 const active = ref(true);
 const remark = ref('');
 const saving = ref(false);
@@ -47,10 +63,49 @@ const countries = ref<CountryOption[]>([]);
 const sources = ref<string[]>([]);
 const sourcesOpen = ref(false);
 const sourceDetail = ref('');
+/** 内销客户经营的产品种类，选项取合同产品类别 */
+const productCategories = ref<string[]>([]);
+const categoryOptions = ref<{ label: string; value: string }[]>([]);
+/** 内销客户的省、市从系统地区树选择；地区树读取失败时退回手填 */
+const areas = ref<AreaNode[]>([]);
+const provinceOptions = computed(() => areaOptions(areas.value, form.province));
+const cityOptions = computed(() =>
+  areaOptions(cityNodes(areas.value, form.province), form.city),
+);
+function changeProvince() {
+  if (!cityNodes(areas.value, form.province).some((c) => c.name === form.city))
+    form.city = '';
+}
+function requiredField(key: string) {
+  return (
+    ['country', 'name'].includes(key) ||
+    (domestic.value &&
+      (domesticRequiredFields as readonly string[]).includes(key))
+  );
+}
 const sourceOptions = computed(() =>
   customerSourceOptions(sources.value, form.customerSource),
 );
+const channel = computed<SalesChannel>(() =>
+  props.customer
+    ? salesChannelOf(props.customer.salesChannel)
+    : (props.salesChannel ?? 'FOREIGN'),
+);
+/** 内销客户国家固定为中国，不显示国家选择；外贸客户只填国家，不填省 / 州和城市 */
+const domestic = computed(() => channel.value === 'DOMESTIC');
+const visibleFields = computed(() =>
+  customerFields.filter(
+    ([field]) =>
+      field !== 'shortName' &&
+      !(domestic.value && field === 'country') &&
+      !(!domestic.value && (field === 'province' || field === 'city')),
+  ),
+);
 const missingFields = computed(() => customerMissingFields(form));
+const invoiceMissing = computed(() => invoiceMissingFields(invoice));
+function fieldLabel(key: string, title: string) {
+  return domestic.value && key === 'province' ? '省份' : title;
+}
 const optionsLoading = ref(false);
 const optionsError = ref('');
 const countryOptions = computed(() => countrySelectOptions(countries.value));
@@ -63,10 +118,17 @@ async function loadOptions() {
   optionsLoading.value = true;
   optionsError.value = '';
   try {
-    const result = await getCustomerOptions();
+    const [result, tree] = await Promise.all([
+      getCustomerOptions(),
+      domestic.value
+        ? getAreaTree().catch(() => [] as AreaNode[])
+        : Promise.resolve([] as AreaNode[]),
+    ]);
     if (run === optionsSequence && props.open) {
       countries.value = result.countries;
       sources.value = result.customerSources ?? [];
+      categoryOptions.value = result.productCategories ?? [];
+      areas.value = tree;
     }
   } catch (error) {
     if (run === optionsSequence && props.open)
@@ -85,8 +147,11 @@ watch(
     sourcesOpen.value = false;
     if (!open) return;
     Object.assign(form, customerForm(props.customer));
+    Object.assign(invoice, invoiceForm(props.customer));
+    if (domestic.value) form.country = 'CN';
     if (!props.customer && props.initialName) form.name = props.initialName;
     sourceDetail.value = '';
+    productCategories.value = [...(props.customer?.productCategories ?? [])];
     if (form.customerSource?.startsWith('其他：')) {
       sourceDetail.value = form.customerSource.slice(3);
       form.customerSource = '其他';
@@ -101,8 +166,23 @@ watch(
 );
 async function save() {
   if (saving.value || sourcesOpen.value) return;
-  if (!form.name?.trim() || !currentCountryKnown.value) {
-    panelError.value = '请填写客户全称，并从国家 / 地区列表选择一个有效选项';
+  if (!form.name?.trim()) {
+    panelError.value = '请填写客户全称';
+    return;
+  }
+  if (!domestic.value && !currentCountryKnown.value) {
+    panelError.value = '请从国家 / 地区列表选择一个有效选项';
+    return;
+  }
+  const domesticMissing = domestic.value
+    ? domesticMissingFields(form, productCategories.value)
+    : [];
+  if (domesticMissing.length > 0) {
+    panelError.value = `内销客户须填写${domesticMissing.join('、')}`;
+    return;
+  }
+  if (domestic.value && invoiceMissing.value.length > 0) {
+    panelError.value = `增值税专用发票须填写${invoiceMissing.value.join('、')}`;
     return;
   }
   saving.value = true;
@@ -116,6 +196,10 @@ async function save() {
         form.customerSource === '其他' && sourceDetail.value.trim()
           ? `其他：${sourceDetail.value.trim()}`
           : form.customerSource,
+      salesChannel: channel.value,
+      // 外贸客户不填开票信息；不传表示保持原值
+      invoice: domestic.value ? { ...invoice } : undefined,
+      productCategories: domestic.value ? productCategories.value : undefined,
       active: active.value,
       remark: remark.value,
       id: props.customer?.id,
@@ -138,9 +222,10 @@ async function save() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="customer-editor"
     :open="open"
-    :title="customer ? '维护客户档案' : '新建客户'"
+    :title="customer ? '维护客户档案' : domestic ? '新建内销客户' : '新建客户'"
     width="min(820px, 96vw)"
     :mask-closable="false"
     :closable="!saving && !sourcesOpen"
@@ -164,12 +249,10 @@ async function save() {
       />
       <Form layout="vertical" class="customer-fields">
         <Form.Item
-          v-for="[key, title] in customerFields.filter(
-            ([field]) => field !== 'shortName',
-          )"
+          v-for="[key, title] in visibleFields"
           :key="key"
-          :label="title"
-          :required="['name', 'country'].includes(key)"
+          :label="fieldLabel(key, title)"
+          :required="requiredField(key)"
           :extra="
             key === 'code'
               ? '首次保存时由系统自动生成，已有编号保持不变。'
@@ -224,6 +307,37 @@ async function save() {
               地区列表重新选择后保存。
             </p>
           </template>
+          <template
+            v-else-if="
+              domestic &&
+              (key === 'province' || key === 'city') &&
+              areas.length > 0
+            "
+          >
+            <Select
+              v-if="key === 'province'"
+              v-model:value="form.province"
+              :options="provinceOptions"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving"
+              placeholder="输入关键字搜索省份"
+              @change="changeProvince"
+            />
+            <Select
+              v-else
+              v-model:value="form.city"
+              :options="cityOptions"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving || !form.province"
+              :placeholder="
+                form.province ? '输入关键字搜索城市' : '请先选择省份'
+              "
+            />
+          </template>
           <Input
             v-else-if="key === 'code'"
             :value="form.code"
@@ -239,10 +353,61 @@ async function save() {
             :disabled="saving"
           />
         </Form.Item>
+        <Form.Item v-if="domestic" label="产品种类" required class="wide">
+          <Select
+            v-model:value="productCategories"
+            mode="multiple"
+            :options="categoryOptions"
+            option-filter-prop="label"
+            :disabled="saving"
+            placeholder="选择客户采购的产品种类，可多选"
+          />
+        </Form.Item>
         <Form.Item label="本地备注" class="wide">
           <Input.TextArea v-model:value="remark" :rows="3" :disabled="saving" />
         </Form.Item>
       </Form>
+      <section v-if="domestic" class="invoice" aria-labelledby="invoice-title">
+        <h3 id="invoice-title">开票信息</h3>
+        <Form layout="vertical" class="customer-fields">
+          <Form.Item
+            label="发票类型"
+            extra="专用发票须填齐纳税人识别号、注册地址、电话、开户银行和账号。"
+          >
+            <Select
+              v-model:value="invoice.type"
+              :options="invoiceTypeOptions"
+              allow-clear
+              :disabled="saving"
+              placeholder="选择发票类型"
+            />
+          </Form.Item>
+          <Form.Item
+            v-for="[key, title] in invoiceFields"
+            :key="key"
+            :label="title"
+            :required="
+              invoice.type === 'SPECIAL' && !['email', 'title'].includes(key)
+            "
+            :class="{ wide: key === 'address' }"
+          >
+            <Input
+              v-model:value="invoice[key]"
+              :maxlength="key === 'address' ? 1000 : 200"
+              :disabled="saving"
+              :placeholder="
+                key === 'title'
+                  ? '留空时使用客户全称'
+                  : key === 'taxNo'
+                    ? '统一社会信用代码'
+                    : key === 'email'
+                      ? '接收电子发票'
+                      : undefined
+              "
+            />
+          </Form.Item>
+        </Form>
+      </section>
       <Collapse>
         <Collapse.Panel key="additional" header="更多资料">
           <Form.Item
@@ -258,7 +423,7 @@ async function save() {
         </Collapse.Panel>
       </Collapse>
       <Alert
-        v-if="missingFields.length"
+        v-if="!domestic && missingFields.length"
         type="info"
         show-icon
         :message="`待补资料：${missingFields.join('、')}`"
@@ -281,7 +446,7 @@ async function save() {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
   <CustomerSourceOptions
     :open="sourcesOpen"
     @close="sourcesOpen = false"
@@ -308,6 +473,12 @@ async function save() {
 
 .wide {
   grid-column: 1 / -1;
+}
+
+.invoice h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .muted {

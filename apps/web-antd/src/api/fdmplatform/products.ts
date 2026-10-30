@@ -24,14 +24,23 @@ export interface Product {
   name: string;
   code: string;
   displayName?: string;
+  /** 所属分类名称，随分类改名、合并自动更新 */
   category?: string;
+  categoryId?: string;
   imageUrl?: string;
+  /** 合同、仓库、采购使用的规格文本；填写型号时为「型号：X\n规格：Y」。 */
   specification?: string;
+  /** 产品档案单独维护的型号与规格，由 specification 拆出。 */
+  model?: string;
+  spec?: string;
   unit?: string;
   material?: string;
   size?: string;
   color?: string;
   shape?: string;
+  /** 产品克重，原样保存（如 800g、1.2kg） */
+  weight?: string;
+  /** 定制说明 */
   printing?: string;
   packaging?: string;
   remark?: string;
@@ -56,6 +65,31 @@ export interface ProductQuery {
   selectable?: boolean;
   currency?: string;
   taxBasis?: TaxBasis;
+  /** true 时按分类原文精确匹配，空字符串表示未分类 */
+  exactCategory?: boolean;
+  /** 按维护的分类筛选，空字符串为未分类 */
+  categoryId?: string;
+}
+/** 产品分类（一层） */
+export interface ProductCategory {
+  id: string;
+  name: string;
+  sort: number;
+  active: boolean;
+  version: number;
+}
+export interface ProductCategoryCount {
+  /** 空字符串为未分类 */
+  categoryId: string;
+  count: number;
+}
+export interface ProductCategoryView {
+  /** 全部匹配产品数 */
+  total: number;
+  items: ProductCategoryCount[];
+  truncated?: boolean;
+  /** 维护好的分类 */
+  categories: ProductCategory[];
 }
 export interface ProductAttachment {
   id: string;
@@ -93,6 +127,7 @@ export interface ProductImportRow {
       | 'displayName'
       | 'imageUrl'
       | 'material'
+      | 'model'
       | 'packaging'
       | 'printing'
       | 'remark'
@@ -138,6 +173,53 @@ export function importProducts(data: {
 }
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
+}
+/** 产品档案左侧分类：分类和各分类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
+export function getProductCategories(params: {
+  active?: boolean;
+  companyId: number;
+  keyword?: string;
+  selectable?: boolean;
+}) {
+  return requestClient.get<ProductCategoryView>(`${base}/categories`, {
+    params,
+  });
+}
+const categoryBase = '/fdmplatform/v1/product-categories';
+export function getProductCategoryList(companyId = 0) {
+  return requestClient.get<ProductCategory[]>(categoryBase, {
+    params: { companyId },
+  });
+}
+export function saveProductCategory(data: {
+  active: boolean;
+  companyId: number;
+  expectedVersion?: number;
+  id?: string;
+  idempotencyKey: string;
+  name: string;
+  sort?: number;
+}) {
+  return requestClient.post<ProductCategory>(categoryBase, data);
+}
+/** 把分类的全部产品并入另一个分类，原分类删除；返回移动的产品数 */
+export function mergeProductCategory(
+  id: string,
+  data: { companyId: number; idempotencyKey: string; targetId: string },
+) {
+  return requestClient.post<{ movedCount: number; targetId: string }>(
+    `${categoryBase}/${encodeURIComponent(id)}/merge`,
+    data,
+  );
+}
+export function deleteProductCategory(
+  id: string,
+  data: { companyId: number; idempotencyKey: string },
+) {
+  return requestClient.post<boolean>(
+    `${categoryBase}/${encodeURIComponent(id)}/delete`,
+    data,
+  );
 }
 export function getProduct(id: string, companyId = 0) {
   return requestClient.get<Product>(`${base}/${encodeURIComponent(id)}`, {

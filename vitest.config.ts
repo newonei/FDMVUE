@@ -24,5 +24,12 @@ export default defineConfig({
       '**/{stylelint,eslint}.config.*',
       '**/{oxfmt,oxlint}.config.*',
     ],
+    server: {
+      deps: {
+        // X6 3's ES build uses directory imports, which Node's native ESM
+        // loader rejects; let Vite transform and resolve it instead.
+        inline: [/@antv\/x6/],
+      },
+    },
   },
 });

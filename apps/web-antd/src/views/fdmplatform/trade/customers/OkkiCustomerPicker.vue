@@ -17,7 +17,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
   Input,
   message,
@@ -40,6 +39,7 @@ import {
   searchOkkiCustomers,
   syncOkkiCustomer,
 } from '#/api/fdmplatform/customers';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import {
@@ -308,7 +308,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="okki-customer-picker"
     :open="open"
     :title="refreshCustomer ? '预览并刷新 OKKI 客户' : '从 OKKI 选择客户'"
     width="min(1080px, 96vw)"
@@ -555,7 +556,7 @@ onBeforeUnmount(() => {
         </Card>
       </section>
     </div>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

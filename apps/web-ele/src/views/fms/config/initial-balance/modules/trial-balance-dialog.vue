@@ -42,7 +42,7 @@ const [Modal, modalApi] = useVbenModal({
       result.value = undefined;
       return;
     }
-    const data = modalApi.getData<{ accountSetId: number }>();
+    const data = (modalApi.getData() as { accountSetId: number });
     if (!data?.accountSetId) {
       return;
     }

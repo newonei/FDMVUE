@@ -25,8 +25,7 @@ export function stockLocation(
     return undefined;
   const poolId = referenceId(query.poolId);
   const eventId = referenceId(query.eventId);
-  if (!poolId)
-    throw new Error('库存链接缺少有效的库存池，请从产品详情重新打开');
+  if (!poolId) throw new Error('库存链接缺少有效的库存，请从产品详情重新打开');
   if (query.eventId !== undefined && !eventId)
     throw new Error('库存流水链接无效，请从产品详情重新打开');
   return { poolId, ...(eventId ? { eventId } : {}) };
@@ -86,7 +85,7 @@ export function stockNavigationView(
     return {
       ...empty,
       status: 'missing',
-      message: '未找到关联库存池，可能已不可访问。请核对来源或清除库存定位。',
+      message: '未找到关联库存，可能已不可访问。请核对来源或清除库存定位。',
     };
   const selected = poolRows([pool]);
   if (location.eventId) {
@@ -97,13 +96,13 @@ export function stockNavigationView(
       return {
         ...empty,
         status: 'missing',
-        message: '未在关联库存池中找到该流水。请核对来源或清除库存定位。',
+        message: '未在关联库存中找到该流水。请核对来源或清除库存定位。',
       };
   }
   return {
     ...selected,
     filtered: true,
     status: 'located',
-    message: `已定位库存池 ${location.poolId}${location.eventId ? `；库存流水 ${location.eventId}（仅显示此条流水）` : '（仅显示该池余额、预留与流水）'}`,
+    message: `已定位库存 ${location.poolId}${location.eventId ? `；库存流水 ${location.eventId}（仅显示此条流水）` : '（仅显示该池余额、预留与流水）'}`,
   };
 }

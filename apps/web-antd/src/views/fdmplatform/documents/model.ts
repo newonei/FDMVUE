@@ -56,6 +56,53 @@ export interface DocumentDefinition {
   create: string[];
   actions: string[];
 }
+/** 履约库存下线（10/8）后，这些动作改由工厂「工序库存」办理；列表只查记录，不再新建。 */
+export const RETIRED_STOCK_ACTIONS = new Set([
+  'RECORD_ARRIVAL',
+  'RETURN_ARRIVAL',
+  'STOCK_RECEIVE',
+  'STOCK_RELEASE',
+  'STOCK_RESERVE',
+  'STOCK_RETURN',
+  'STOCK_SHIP',
+  'UPDATE_PRODUCTION',
+]);
+/** 改到别处办理的单据：列表顶部说明和入口（没有入口的只查历史） */
+export const factoryHandoff: Partial<
+  Record<
+    DocumentKind,
+    {
+      label?: string;
+      note: string;
+      path?: string;
+      query?: Record<string, string>;
+    }
+  >
+> = {
+  shipments: {
+    note: '出货改在「库存中心 · 出库单」从工厂仓库按合同销售出库，数量自动记到合同；这里汇总查看全部发货记录。',
+    label: '去库存中心办理',
+    path: '/fdmstock/inventory-outbound',
+  },
+  salesReturns: {
+    note: '客户退货不再在这里新建，这里只查已有的销售退货记录。',
+  },
+  arrivals: {
+    note: '外采到货改在工厂「工序库存 · 到货入库」办理并自动记到采购单；这里只查历史到货单。',
+    label: '去工序库存办理',
+    path: '/gongchang/stage-stock',
+    query: { tab: 'receiving' },
+  },
+  purchaseReturns: {
+    note: '采购退货随到货一起改到工序库存处理；这里只查历史退货记录。',
+    label: '去工序库存办理',
+    path: '/gongchang/stage-stock',
+    query: { tab: 'receiving' },
+  },
+  production: {
+    note: '自制方式已停用：需要自家工厂生产时开采购单、供应商选自家工厂；这里只查历史自产进度。',
+  },
+};
 const procurement = '/fdmprocurement/platform-';
 const trade = '/fdmwaimao/platform-';
 const finance = '/caiwu/platform-';
@@ -66,8 +113,9 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     resource: 'purchase-requests',
     route: `${trade}requests`,
     fields: [
-      'name|申请名称',
-      'status|状态',
+      'requestItems|产品 · 数量',
+      'requiredDate|需求日期',
+      'ownerUserId|采购经办',
       'assignmentStatus|分派进度',
       'remark|说明',
     ],
@@ -80,7 +128,7 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     resource: 'assignments',
     route: `${procurement}tasks`,
     fields: [
-      'method|履约方式',
+      'method|采购方式',
       'quantity|数量',
       'ownerUserId|经办人',
       'status|状态',
@@ -108,18 +156,13 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     description: '编制采购方案，校验并生效后继续下单、预留或自产。',
     resource: 'purchase-plans',
     route: `${procurement}plans`,
-    fields: [
-      'name|方案名称',
-      'status|状态',
-      'version|方案版本',
-      'rationale|推荐理由',
-    ],
+    fields: ['name|方案名称', 'status|状态', 'rationale|推荐理由'],
     create: ['SAVE_PLAN'],
     actions: ['SAVE_PLAN', 'SUBMIT_PLAN'],
   },
   orders: {
     title: '采购单',
-    description: '按已生效方案生成采购单，查看当前订单明细与未执行余额。',
+    description: '按已确认的采购方案生成采购单，查看当前订单明细与未执行余额。',
     resource: 'purchase-orders',
     route: `${procurement}orders`,
     fields: [
@@ -127,7 +170,6 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'status|状态',
       'amount|采购金额',
       'currency|币种',
-      'approvedPlanVersion|生效版本',
     ],
     create: ['GENERATE_ORDERS'],
     actions: ['CANCEL_ORDER'],
@@ -177,14 +219,16 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
   },
   shipments: {
     title: '发货单',
-    description: '按生效方案预留库存，引用预留分批发货，并释放未使用预留。',
+    description:
+      '按已确认的采购方案预留库存，引用预留分批发货，并释放未使用的预留。',
     resource: 'outbound-shipments',
     route: `${trade}shipments`,
     fields: [
+      'product|产品',
       'quantity|发货数量',
-      'shippedDate|实际发货日期',
-      'occurredAt|登记时间',
+      'shippedDate|发货日期',
       'evidenceRef|物流凭证',
+      'occurredAt|登记时间',
     ],
     create: ['STOCK_SHIP', 'STOCK_RESERVE', 'STOCK_RELEASE'],
     actions: [],
@@ -194,7 +238,12 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     description: '引用原发货登记客户退货，待检数量单独冻结。',
     resource: 'sales-returns',
     route: `${trade}returns`,
-    fields: ['quantity|退货数量', 'occurredAt|退货时间', 'reason|退货原因'],
+    fields: [
+      'product|产品',
+      'quantity|退货数量',
+      'occurredAt|退货时间',
+      'reason|退货原因',
+    ],
     create: ['STOCK_RETURN'],
     actions: [],
   },
@@ -203,14 +252,11 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     description: '登记真实到账、确认回款，按到账日期保存人民币折算快照。',
     resource: 'receipt-records',
     route: `${finance}receipts`,
+    // 原币金额带币种；汇率、汇率日期、原账面金额在单据详情里看
     fields: [
       'receivedAt|到账日期',
       'amount|回款金额',
-      'sourceBookAmount|原账面金额',
-      'currency|回款币种',
-      'rmbAmount|人民币金额',
-      'exchangeRateToCny|汇率',
-      'exchangeRateDate|汇率日期',
+      'rmbAmount|折人民币',
       'status|确认状态',
       'paymentMethod|到款方式',
       'actorId|登记人',
@@ -237,19 +283,23 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
   },
   invoices: {
     title: '开票记录',
-    description: '登记已开具的真实发票和作废结果，核销单独办理。',
+    description:
+      '登记开票和作废结果，核销单独办理；内销可先登记、开出后补录发票号。',
     resource: 'invoices',
     route: `${finance}invoices`,
     fields: [
       'invoiceNumber|发票号',
       'type|类型',
+      'ticketKind|票据类型',
+      'content|开票内容',
       'issuedAt|开票日期',
       'amount|金额',
+      'taxAmount|税额',
       'currency|币种',
       'status|状态',
     ],
     create: ['CREATE_INVOICE'],
-    actions: ['VOID_INVOICE'],
+    actions: ['SUPPLEMENT_INVOICE', 'VOID_INVOICE'],
   },
   allocations: {
     title: '回款核销单',
@@ -455,19 +505,69 @@ function allocationBalance(
   }
   return sum;
 }
+/** 回款计入合同台账的金额（合同币种）：跨币种回款取服务端按到账日折算的 contractAmount */
+function receiptContractValue(contract: Contract, receipt: BusinessRecord) {
+  return !receipt.currency || receipt.currency === contract.currency
+    ? decimal(receipt.amount)
+    : decimal(receipt.contractAmount);
+}
+/** 可核销余额，按合同币种 */
 export function receiptAvailable(
   contract: Contract,
   receipt: BusinessRecord,
 ): string {
-  let amount = decimal(receipt.amount);
+  let amount = receiptContractValue(contract, receipt);
   for (const entry of contract.finance?.receipts ?? [])
     if (entry.originalReceiptId === receipt.id)
-      amount = amount.plus(decimal(entry.amount));
+      amount = amount.plus(receiptContractValue(contract, entry));
   return decimalText(
     BigNumber.maximum(
       0,
       amount.minus(allocationBalance(contract, 'receiptId', receipt.id)),
     ),
+  );
+}
+/** 回款详情的结算口径：退款/冲销合计、已核销、可核销余额，以及对应的明细记录 */
+export function receiptSettlement(contract: Contract, receipt: BusinessRecord) {
+  const allocations = contract.finance?.allocations ?? [];
+  const refunds = (contract.finance?.receipts ?? []).filter(
+    (entry) => entry.originalReceiptId === receipt.id,
+  );
+  let refunded = new BigNumber(0);
+  for (const entry of refunds)
+    refunded = refunded.plus(decimal(entry.amount).abs());
+  return {
+    allocated: decimalText(
+      allocationBalance(contract, 'receiptId', receipt.id),
+    ),
+    allocations: allocations.filter(
+      (entry) =>
+        (entry.receiptId ??
+          allocations.find((row) => row.id === entry.originalAllocationId)
+            ?.receiptId) === receipt.id,
+    ),
+    available: receiptAvailable(contract, receipt),
+    refunded: decimalText(refunded),
+    refunds,
+  };
+}
+
+/** 不用先解绑即可退款或冲销的金额，按回款原币；跨币种按原回款的折算比例换回原币 */
+export function receiptRefundable(
+  contract: Contract,
+  receipt: BusinessRecord,
+): string {
+  const available = decimal(receiptAvailable(contract, receipt));
+  if (!receipt.currency || receipt.currency === contract.currency)
+    return decimalText(available);
+  const original = decimal(receipt.amount);
+  const converted = decimal(receipt.contractAmount);
+  if (!converted.isGreaterThan(0)) return '0';
+  return decimalText(
+    available
+      .times(original)
+      .div(converted)
+      .decimalPlaces(2, BigNumber.ROUND_DOWN),
   );
 }
 export function invoiceAvailable(
@@ -776,9 +876,12 @@ export function documentActionDefinition(
       )
       .map((receipt) => ({
         value: receipt.id,
-        label: `${receipt.receivedAt ?? '回款'} · 可用 ${receipt.currency ?? contract.currency} ${receiptAvailable(contract, receipt)}`,
+        label:
+          action === 'REVERSE_RECEIPT'
+            ? `${receipt.receivedAt ?? '回款'} · 可退 ${receipt.currency ?? contract.currency} ${receiptRefundable(contract, receipt)}`
+            : `${receipt.receivedAt ?? '回款'} · 可用 ${contract.currency} ${receiptAvailable(contract, receipt)}`,
         ...(action === 'REVERSE_RECEIPT'
-          ? { fill: { amount: receiptAvailable(contract, receipt) } }
+          ? { fill: { amount: receiptRefundable(contract, receipt) } }
           : {}),
       }));
   }
@@ -789,7 +892,7 @@ export function documentActionDefinition(
           (invoice) =>
             invoice.status === 'VALID' &&
             ['COMMERCIAL', 'TAX'].includes(String(invoice.type)) &&
-            invoice.currency === receipt.currency &&
+            invoice.currency === contract.currency &&
             decimal(invoiceAvailable(contract, invoice)).isGreaterThan(0),
         )
         .map((invoice) => ({
@@ -870,6 +973,16 @@ export function documentActionDefinition(
           ? { ...entry, default: decimalText(remaining) }
           : entry,
       );
+  }
+  // 新建采购申请默认带出合同全部尚未申请完的产品明细，可删减或调整
+  if (action === 'CREATE_REQUEST' && !record) {
+    const items = contract.items
+      .map((item) => ({
+        contractItemId: item.id,
+        ...requestLineDefaults(contract, item),
+      }))
+      .filter((line) => line.quantity);
+    if (items.length > 0) context.items = items;
   }
   if (action === 'ASSIGN_FULFILLMENT') {
     const pending = pendingRequestItems(

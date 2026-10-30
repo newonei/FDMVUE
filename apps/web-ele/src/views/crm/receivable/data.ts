@@ -57,7 +57,8 @@ export function useFormSchema(): VbenFormSchema[] {
       label: '客户名称',
       component: 'ApiSelect',
       rules: 'required',
-      componentProps: (_values, form) => ({
+      // FDM：form 设为可选，才能同时匹配两种 componentProps 签名（官方类型问题）
+      componentProps: (_values: any, form?: any) => ({
         api: getCustomerSimpleList,
         labelField: 'name',
         valueField: 'id',

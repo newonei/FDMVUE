@@ -239,9 +239,19 @@ function formatCategory(value?: null | string) {
   );
 }
 
+/** 后端可能返回毫秒时间戳，统一显示到分钟 */
+function formatTime(value: unknown) {
+  if (value === null || value === undefined || value === '') return '';
+  const text = String(value);
+  const date = new Date(/^\d{11,}$/.test(text) ? Number(text) : text);
+  if (Number.isNaN(date.getTime())) return text;
+  const pad = (number: number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function formatEffective(record: Material | Record<string, unknown>) {
   const material = record as Material;
-  return `${material.effectiveStartTime || '—'} ~ ${material.effectiveEndTime || '长期'}`;
+  return `${formatTime(material.effectiveStartTime) || '—'} ~ ${formatTime(material.effectiveEndTime) || '长期'}`;
 }
 
 async function loadData() {

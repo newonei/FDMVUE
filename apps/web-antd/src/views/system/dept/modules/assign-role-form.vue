@@ -89,7 +89,7 @@ const [Modal, modalApi] = useVbenModal({
       resetState();
       return;
     }
-    const data = modalApi.getData<SystemDeptApi.Dept>();
+    const data = (modalApi.getData() as SystemDeptApi.Dept);
     if (!data?.id) {
       return;
     }

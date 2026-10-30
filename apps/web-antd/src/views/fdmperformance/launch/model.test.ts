@@ -7,13 +7,13 @@ import {
   validateSelection,
 } from './model';
 
-const fields = {
+const item = {
   templateId: 1,
+  templateName: '运营月度',
   name: '月度考核',
   periodKey: '2026-09',
-  startDate: '2026-09-01',
-  endDate: '2026-09-30',
 };
+const fields = { startDate: '2026-09-01', items: [item] };
 const persons = [
   {
     userId: 3,
@@ -43,30 +43,56 @@ describe('发起校验与重试', () => {
     ).not.toBe('');
     expect(personIssue(persons[1]!)).toBe('');
   });
-  it('校验日期真实存在且截止不早于开始', () => {
+  it('只校验开始日期，不再要求截止日期', () => {
     expect(validateLaunchFields(fields)).toEqual([]);
-    expect(validateLaunchFields({ ...fields, endDate: '' })).toHaveLength(1);
+    expect(validateLaunchFields({ ...fields, startDate: '' })).toEqual([
+      '请选择有效的开始日期',
+    ]);
     expect(
       validateLaunchFields({ ...fields, startDate: '2026-02-30' }),
     ).toHaveLength(1);
-    expect(validateLaunchFields({ ...fields, endDate: '2026-08-31' })).toEqual([
-      '截止日期不能早于开始日期',
-    ]);
   });
-  it('相同请求网络重试复用键，改变人员或周期生成新键', () => {
+  it('多张考评表逐张校验周期和名称并标明考评表', () => {
+    expect(validateLaunchFields({ ...fields, items: [] })).toEqual([
+      '请先选择考评表',
+    ]);
+    expect(
+      validateLaunchFields({
+        ...fields,
+        items: [
+          item,
+          { ...item, templateId: 2, templateName: '财务季度', periodKey: '' },
+        ],
+      }),
+    ).toEqual(['「财务季度」请选择考核周期']);
+  });
+  it('相同请求网络重试复用各表的键，只为改动的考评表生成新键', () => {
     let id = 0;
     const attempt = createLaunchAttempt(() => `attempt-${++id}`);
-    const first = attempt.request({ ...fields, userIds: [4, 3] });
-    expect(attempt.request({ ...fields, userIds: [3, 4] }).idempotencyKey).toBe(
-      first.idempotencyKey,
-    );
-    expect(
-      attempt.request({ ...fields, userIds: [4] }).idempotencyKey,
-    ).not.toBe(first.idempotencyKey);
-    expect(
-      attempt.request({ ...fields, periodKey: '2026-10', userIds: [4] })
-        .idempotencyKey,
-    ).toBe('attempt-3');
+    const other = { templateId: 2, name: '财务季度', periodKey: '2026-Q3' };
+    const request = (userIds: number[], remark = '') =>
+      attempt.request({
+        startDate: fields.startDate,
+        remark,
+        items: [
+          { ...item, userIds },
+          { ...other, userIds: [8] },
+        ],
+      }).items;
+    const [first, second] = request([4, 3]);
+    expect(first!.userIds).toEqual([3, 4]);
+    expect(request([3, 4]).map((row) => row.idempotencyKey)).toEqual([
+      first!.idempotencyKey,
+      second!.idempotencyKey,
+    ]);
+    expect(request([4]).map((row) => row.idempotencyKey)).toEqual([
+      'attempt-3',
+      second!.idempotencyKey,
+    ]);
+    expect(request([4], '补充说明').map((row) => row.idempotencyKey)).toEqual([
+      'attempt-4',
+      'attempt-5',
+    ]);
   });
   it('周期默认值沿用月、季、半年、年和试用期格式', () => {
     const now = new Date(2026, 8, 18);

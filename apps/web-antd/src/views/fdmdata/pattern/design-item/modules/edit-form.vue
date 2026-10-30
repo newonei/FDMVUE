@@ -269,7 +269,7 @@ const [Modal, modalApi] = useVbenModal({
     }
     const mySeq = ++openSeq;
     const row =
-      modalApi.getData<FdmdataPatternDesignItemApi.PatternDesignItem>();
+      (modalApi.getData() as FdmdataPatternDesignItemApi.PatternDesignItem);
     const rowId = row?.id;
     resetShopNameOptions();
     await resetModalState();

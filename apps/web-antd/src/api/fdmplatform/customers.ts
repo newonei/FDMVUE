@@ -1,4 +1,8 @@
-import type { MasterRecord, PageResult } from './index';
+import type { Decimal, MasterRecord, PageResult } from './index';
+import type {
+  ProductActivityRecord,
+  ProductActivityType,
+} from './product-activity';
 
 import { requestClient } from '#/api/request';
 
@@ -13,6 +17,12 @@ export interface Customer extends MasterRecord {
   sourceCountry?: string;
   sourceCustomerSource?: string;
   sourceCode?: string;
+  /** 外贸 / 内销，创建后不可改；历史客户为外贸 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
+  /** 内销客户开票信息 */
+  invoice?: CustomerInvoice;
+  /** 内销客户经营的产品种类（合同产品类别代码），可多选 */
+  productCategories?: string[];
   province?: string;
   city?: string;
   address?: string;
@@ -22,6 +32,88 @@ export interface Customer extends MasterRecord {
   phone?: string;
   lastSyncedAt?: number | string;
   sourceUpdatedAt?: string;
+  /** 列表带 withStats 时附带；无共用范围的账号没有 */
+  stats?: CustomerStats;
+}
+/** 增值税发票：SPECIAL 专用发票、NORMAL 普通发票；保存时不传表示保持原值 */
+export interface CustomerInvoice {
+  type?: '' | 'NORMAL' | 'SPECIAL' | null;
+  /** 留空时后端用客户全称 */
+  title?: string;
+  taxNo?: string;
+  address?: string;
+  phone?: string;
+  bankName?: string;
+  bankAccount?: string;
+  email?: string;
+}
+/** 按最近一次签约分层：≤90 天活跃、91–365 天需跟进、超过 1 年沉睡、没有合同未成交 */
+export type CustomerTier = 'ACTIVE' | 'FOLLOW' | 'NONE' | 'SLEEP';
+export type CustomerListTier = 'NEW' | 'RECEIVABLE' | CustomerTier;
+export type CustomerSort =
+  | 'CONTRACT_AMOUNT'
+  | 'LAST_SIGNED'
+  | 'RECEIVABLE'
+  | 'RECENT_12';
+export interface CustomerCurrencyAmounts {
+  /** 金智迁入合同没有币种，为空 */
+  currency?: null | string;
+  contractAmount: Decimal;
+  recent12Amount: Decimal;
+  receivable: Decimal;
+}
+/** 金额取合同最多的币种；其余币种在 otherCurrencies，不跨币种相加 */
+export interface CustomerStats extends Partial<CustomerCurrencyAmounts> {
+  contractCount: number;
+  firstSignedDate?: null | string;
+  lastSignedDate?: null | string;
+  lastContractId?: null | string;
+  lastContractCode?: null | string;
+  daysSinceLastSigned?: null | number;
+  tier: CustomerTier;
+  newThisYear: boolean;
+  newRecent90: boolean;
+  /** JINZHI 金智汇总的客户未回款额；NATIVE 新系统合同额减回款；MIXED 两者都有 */
+  receivableSource?: 'JINZHI' | 'MIXED' | 'NATIVE' | null;
+  previous12Amount?: Decimal;
+  /** 近 12 个自然月（含本月）每月签约额，与 overview.months 对齐 */
+  monthly?: Decimal[];
+  otherCurrencies?: CustomerCurrencyAmounts[];
+}
+export interface CustomerOverview {
+  total: number;
+  activeCount: number;
+  inactiveCount: number;
+  tiers: Record<CustomerTier, number>;
+  newThisYear: number;
+  newRecent90: number;
+  receivableCustomers: number;
+  receivables: { amount: Decimal; currency?: null | string }[];
+  missingProfile: number;
+  months: string[];
+  activeDays: number;
+  followDays: number;
+  asOf: string;
+}
+export interface CustomerSnapshot {
+  customerId: string;
+  contractCount: number;
+  currency?: null | string;
+  years: { amount: Decimal; year: number }[];
+  recentContracts: {
+    amount?: Decimal | null;
+    code?: null | string;
+    currency?: null | string;
+    id: string;
+    signedDate?: null | string;
+    status?: null | string;
+  }[];
+  products: {
+    name: string;
+    orders: number;
+    quantity: Decimal;
+    unit?: null | string;
+  }[];
 }
 export interface OkkiCustomerSource {
   externalId: string;
@@ -101,12 +193,36 @@ export function pauseOkkiDirectory() {
 }
 export function getCustomers(params: {
   active?: boolean;
+  country?: string;
+  customerSource?: string;
   keyword?: string;
+  missing?: boolean;
+  order?: 'ASC' | 'DESC';
   pageNo: number;
   pageSize: number;
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
+  sort?: CustomerSort;
   sourceSystem?: string;
+  tier?: CustomerListTier;
+  withStats?: boolean;
 }) {
-  return requestClient.get<PageResult<Customer>>(`${base}/page`, { params });
+  return requestClient.get<PageResult<Customer>>(`${base}/page`, {
+    params,
+    timeout: 60_000,
+  });
+}
+export function getCustomerOverview(salesChannel?: 'DOMESTIC' | 'FOREIGN') {
+  /** 无共用范围的账号返回 null */
+  return requestClient.get<CustomerOverview | null>(`${base}/overview`, {
+    params: { salesChannel },
+    timeout: 60_000,
+  });
+}
+export function getCustomerSnapshot(id: string) {
+  return requestClient.get<CustomerSnapshot>(
+    `${base}/${encodeURIComponent(id)}/snapshot`,
+    { timeout: 60_000 },
+  );
 }
 export function getCustomer(id: string) {
   return requestClient.get<Customer>(`${base}/${encodeURIComponent(id)}`);
@@ -175,5 +291,72 @@ export function refreshOkkiCustomer(
     `${base}/${encodeURIComponent(id)}/okki-refresh`,
     data,
     { timeout: 120_000 },
+  );
+}
+
+/** 客户档案里能出现的单据类型（与产品档案共用类型名、跳转和展示规则） */
+export type CustomerActivityType = Extract<
+  ProductActivityType,
+  | 'ALL'
+  | 'ARRIVAL'
+  | 'ASSIGNMENT'
+  | 'CONTRACT'
+  | 'CUSTOMS'
+  | 'PRODUCTION_PROGRESS'
+  | 'PURCHASE_INVOICE'
+  | 'PURCHASE_ORDER'
+  | 'PURCHASE_PAYMENT'
+  | 'PURCHASE_PLAN'
+  | 'PURCHASE_REQUEST'
+  | 'PURCHASE_RETURN'
+  | 'QUOTE'
+  | 'RECEIPT'
+  | 'REFUND'
+  | 'SALES_INVOICE'
+  | 'SALES_RETURN'
+  | 'SHIPMENT'
+  | 'STOCK_IN'
+  | 'STOCK_OUT'
+>;
+export interface CustomerAmountSummary {
+  /** 未注明币种的历史单据为空 */
+  currency?: null | string;
+  contractAmount: Decimal;
+  receivedAmount: Decimal;
+  refundedAmount: Decimal;
+  invoicedAmount: Decimal;
+}
+/** 与产品档案的记录同形，另带备注/原因（如回款扣款原因） */
+export interface CustomerActivityRecord extends ProductActivityRecord {
+  note?: null | string;
+}
+export interface CustomerActivityView {
+  customerId: string;
+  list: CustomerActivityRecord[];
+  total: number;
+  counts: Partial<Record<Exclude<CustomerActivityType, 'ALL'>, number>>;
+  summary: {
+    amounts: CustomerAmountSummary[];
+    firstDate?: null | string;
+    lastDate?: null | string;
+  };
+  pageNo: number;
+  pageSize: number;
+  notes: string[];
+}
+export function getCustomerActivity(
+  id: string,
+  params: {
+    fromDate?: string;
+    keyword?: string;
+    pageNo: number;
+    pageSize: number;
+    toDate?: string;
+    type: CustomerActivityType;
+  },
+) {
+  return requestClient.get<CustomerActivityView>(
+    `${base}/${encodeURIComponent(id)}/activity`,
+    { params, timeout: 60_000 },
   );
 }

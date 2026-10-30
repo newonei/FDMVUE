@@ -93,7 +93,7 @@ describe('stock deep-link destination', () => {
       eventId: 'event-other',
     });
     expect(result.status).toBe('missing');
-    expect(result.message).toContain('未在关联库存池中找到该流水');
+    expect(result.message).toContain('未在关联库存中找到该流水');
     expect(result.pools).toEqual([]);
     expect(result.events).toEqual([]);
     expect(result.reservations).toEqual([]);
@@ -103,7 +103,7 @@ describe('stock deep-link destination', () => {
       poolId: 'missing',
     });
     expect(result.status).toBe('missing');
-    expect(result.message).toContain('未找到关联库存池');
+    expect(result.message).toContain('未找到关联库存');
     expect(result.pools).toEqual([]);
   });
   it('rejects blank, repeated or parentless references', () => {
@@ -113,7 +113,7 @@ describe('stock deep-link destination', () => {
       { eventId: 'event-a' },
     ]) {
       expect(() => stockLocation('inventory-stock', query)).toThrow(
-        '库存链接缺少有效的库存池',
+        '库存链接缺少有效的库存',
       );
       expect(
         stockNavigationView(pools, 'inventory-stock', query).pools,

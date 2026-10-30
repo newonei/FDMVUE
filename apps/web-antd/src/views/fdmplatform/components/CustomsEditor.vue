@@ -14,7 +14,6 @@ import {
   Alert,
   Button,
   Checkbox,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -26,6 +25,7 @@ import {
 
 import { getBusinessPage } from '#/api/fdmplatform';
 import { getCustomsSource } from '#/api/fdmplatform/customs';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../data';
 import CreationAttachments from './CreationAttachments.vue';
@@ -300,7 +300,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="customs-editor"
     :open="open"
     :title="batch ? '编辑报关批次' : '新建报关批次'"
     width="min(1040px, 96vw)"
@@ -517,7 +518,7 @@ onBeforeUnmount(() => {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LineColumn } from '../components/line-table-model';
 import type { ActionDefinition } from '../data';
 import type { DocumentKind } from './model';
 
@@ -16,7 +17,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   message,
   Modal,
   Space,
@@ -35,14 +35,20 @@ import {
   downloadBusinessDocumentFile,
   getBusinessDocument,
   getBusinessDocumentFiles,
+  renameBusinessDocumentFile,
   uploadBusinessDocumentFile,
 } from '#/api/fdmplatform/business-documents';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
+import { attachmentSize } from '#/api/fdmplatform/submission-files';
 import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../components/ActionDialog.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
+import FilePreviewButton from '../components/FilePreviewButton.vue';
+import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
+import RenameFileDialog from '../components/RenameFileDialog.vue';
 import { errorText, label, rows } from '../data';
 import { downloadBlob } from '../purchase/manage/model';
 import {
@@ -104,6 +110,26 @@ let actionSequence = 0;
 const lines = computed(() =>
   view.value ? businessDocumentLines(view.value) : [],
 );
+const lineColumns: LineColumn[] = [
+  { key: 'product', title: '产品名称', width: 220, locked: true },
+  { key: 'skuCode', title: '产品编号', width: 140, optional: true },
+  { key: 'specification', title: '规格', width: 200 },
+  { key: 'material', title: '材质', optional: true },
+  { key: 'size', title: '尺寸', optional: true },
+  { key: 'color', title: '颜色', optional: true },
+  { key: 'shape', title: '形状', width: 110, optional: true },
+  { key: 'printing', title: '印刷', optional: true },
+  { key: 'packaging', title: '包装', optional: true },
+  { key: 'unit', title: '单位', width: 80 },
+  { key: 'quantity', title: '数量', width: 110, align: 'right' },
+  { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+  { key: 'amount', title: '金额', width: 130, align: 'right' },
+  { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
+  { key: 'returnedQuantity', title: '已退货', width: 100, align: 'right' },
+  { key: 'cancelledQuantity', title: '已取消', width: 100, align: 'right' },
+  { key: 'requiredDate', title: '需求日期', width: 120, optional: true },
+  { key: 'remark', title: '备注', width: 200, optional: true },
+];
 const title = computed(() =>
   view.value
     ? `${nativeTypeLabels[view.value.type] ?? '业务单据'} · ${view.value.code || view.value.name || view.value.record.name || ''}`
@@ -170,6 +196,26 @@ async function download(file: BusinessDocumentFile) {
   } catch (error) {
     fileError.value = errorText(error);
   }
+}
+const renaming = ref<BusinessDocumentFile>();
+const renameOpen = ref(false);
+const renameKey = ref('');
+function startRename(file: BusinessDocumentFile) {
+  renaming.value = file;
+  renameKey.value = newIdempotencyKey();
+  renameOpen.value = true;
+}
+async function saveRename(name: string) {
+  const current = view.value;
+  if (!renaming.value || !current) return;
+  await renameBusinessDocumentFile(
+    current.id,
+    renaming.value.id,
+    name,
+    renameKey.value,
+  );
+  message.success('文件名称已修改');
+  await loadFiles();
 }
 async function upload(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
@@ -368,7 +414,7 @@ async function submit(
       new BigNumber(String(payload.acceptedQuantity ?? 0)).isPositive() &&
       !payload.stockPoolId
     )
-      throw new Error('有合格入库数量时请选择对应库存池');
+      throw new Error('有合格入库数量时请选择对应库存');
     const clean = { ...payload };
     delete clean.selectedSkuId;
     delete clean.selectedSpecVersion;
@@ -419,7 +465,8 @@ async function submit(
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="business-document"
     :open="open"
     :title="title"
     :width="1140"
@@ -528,24 +575,12 @@ async function submit(
             :migration="view.migration"
             :block-reasons="view.blockReasons"
           />
-          <Card v-if="lines.length" size="small" title="产品明细">
-            <Table
+          <Card v-if="lines.length" size="small">
+            <LineTable
+              table="business-document"
+              :columns="lineColumns"
               :data-source="lines"
-              row-key="id"
-              size="small"
               :pagination="{ pageSize: 20 }"
-              :scroll="{ x: 1100 }"
-              :columns="[
-                { title: '产品', key: 'product' },
-                { title: '规格', key: 'specification' },
-                { title: '单位', dataIndex: 'unit' },
-                { title: '数量', dataIndex: 'quantity' },
-                { title: '单价', dataIndex: 'unitPrice' },
-                { title: '金额', dataIndex: 'amount' },
-                { title: '已到货', dataIndex: 'arrivedQuantity' },
-                { title: '已退货', dataIndex: 'returnedQuantity' },
-                { title: '已取消', dataIndex: 'cancelledQuantity' },
-              ]"
             >
               <template #bodyCell="{ column, record: line }">
                 <RelatedLink
@@ -558,13 +593,14 @@ async function submit(
                     line.name ||
                     '待关联产品'
                   }}
-</RelatedLink><span v-else-if="column.key === 'specification'">{{
+                </RelatedLink>
+                <span v-else-if="column.key === 'specification'">{{
                   line.specification ||
                   line.specificationSnapshot?.specification ||
                   '未注明'
                 }}</span>
               </template>
-            </Table>
+            </LineTable>
           </Card>
           <Card
             v-if="rows(record?.arrivals).length"
@@ -613,26 +649,49 @@ async function submit(
               row-key="id"
               size="small"
               :columns="[
-                { title: '文件', dataIndex: 'name' },
-                { title: '大小（字节）', dataIndex: 'size' },
-                { title: '操作', key: 'action' },
+                { title: '文件', dataIndex: 'name', ellipsis: true },
+                { title: '大小', key: 'size', width: 90 },
+                { title: '操作', key: 'action', width: 200 },
               ]"
             >
               <template #bodyCell="{ column, record: file }">
-                <Button
-                  v-if="column.key === 'action'"
-                  type="link"
-                  @click="download(file as BusinessDocumentFile)"
-                >
-                  下载
-                </Button>
+                <span v-if="column.key === 'size'">
+                  {{ attachmentSize(Number(file.size)) }}
+                </span>
+                <template v-if="column.key === 'action' && view">
+                  <FilePreviewButton
+                    :name="file.name"
+                    :load="
+                      () => downloadBusinessDocumentFile(view!.id, file.id)
+                    "
+                  />
+                  <Button
+                    v-if="attachments?.canUpload"
+                    type="link"
+                    :disabled="saving"
+                    @click="startRename(file as BusinessDocumentFile)"
+                  >
+                    改名
+                  </Button>
+                  <Button
+                    type="link"
+                    @click="download(file as BusinessDocumentFile)"
+                  >
+                    下载
+                  </Button>
+                </template>
               </template>
             </Table>
           </Card>
         </template>
       </Space>
     </Spin>
-  </Drawer>
+  </FdmResizableDrawer>
+  <RenameFileDialog
+    v-model:open="renameOpen"
+    :name="renaming?.name"
+    :save="saveRename"
+  />
   <ContractPicker
     :open="pickerOpen && open"
     @close="pickerOpen = false"

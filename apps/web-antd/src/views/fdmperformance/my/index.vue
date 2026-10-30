@@ -45,7 +45,6 @@ import {
   actionLabel,
   canAcknowledgeAdjustment,
   canHandleReview,
-  deadlineMeta,
 } from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceMy' });
@@ -98,7 +97,6 @@ const instanceColumns: TableColumnsType = [
   { dataIndex: 'currentTaskName', title: '当前节点', width: 160 },
   { dataIndex: 'periodKey', title: '考核周期', width: 130 },
   { dataIndex: 'supervisorUserName', title: '主管', width: 150 },
-  { dataIndex: 'endDate', title: '截止时间', width: 180 },
   { dataIndex: 'finalScore', title: '待确认综合分', width: 120 },
   { dataIndex: 'status', title: '状态', width: 100 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 90 },
@@ -416,11 +414,6 @@ onMounted(load);
           <template v-else-if="column.dataIndex === 'periodKey'">
             {{ periodLabel(record.periodKey) }}
           </template>
-          <template v-else-if="column.dataIndex === 'endDate'"
-            ><Tag :color="deadlineMeta(record.endDate).color">{{
-              deadlineMeta(record.endDate).text
-            }}</Tag></template
-          >
           <template v-else-if="column.dataIndex === 'status'">
             <Tag :color="instanceStatus(record.status).color">
               {{ instanceStatus(record.status).text }}

@@ -39,6 +39,12 @@ export const PRODUCTION_SENT_OPTIONS = [
   { label: '已发出', value: 1 },
 ];
 
+/** 与后端一致：去掉空白后只允许字母、数字和短横线，最长 64 位 */
+export const EXPRESS_NO_RULE = z
+  .string()
+  .max(64, '快递单号最长 64 位')
+  .regex(/^[\sA-Za-z0-9-]*$/, '快递单号只能包含字母、数字和短横线');
+
 export const DOWNLOADED_OPTIONS = [
   { label: '未下载', value: 0 },
   { label: '已下载', value: 1 },
@@ -102,7 +108,7 @@ function formatDownloaded(value: unknown) {
   return Number(value) === 1 ? '已下载' : '未下载';
 }
 
-function formatPurchasePrice(value: unknown) {
+function formatPrice(value: unknown) {
   if (value === undefined || value === null || value === '') return '';
   const amount = Number(value);
   if (!Number.isFinite(amount)) return String(value);
@@ -237,6 +243,18 @@ export function useFormSchema(
       },
     },
     {
+      fieldName: 'salePrice',
+      label: '售价',
+      component: 'InputNumber',
+      componentProps: {
+        class: 'w-full',
+        min: 0,
+        placeholder: '请输入售价，单位：元',
+        precision: 6,
+        step: 0.01,
+      },
+    },
+    {
       fieldName: 'purchasePrice',
       label: '采购价',
       component: 'InputNumber',
@@ -291,11 +309,28 @@ export function useFormSchema(
       },
     },
     {
+      fieldName: 'expressNo',
+      label: '快递单号',
+      component: 'Input',
+      help: '整单共用，修改后同步到该订单所有明细',
+      componentProps: {
+        allowClear: true,
+        maxlength: 64,
+        placeholder: '请输入快递单号',
+      },
+      rules: EXPRESS_NO_RULE.optional(),
+    },
+    {
       fieldName: 'remark',
       label: '备注',
       component: 'Textarea',
       formItemClass: 'col-span-2',
-      componentProps: { rows: 3, maxlength: 512, showCount: true },
+      componentProps: {
+        class: 'w-full',
+        rows: 3,
+        maxlength: 512,
+        showCount: true,
+      },
     },
   ];
 }
@@ -331,14 +366,6 @@ export function useBatchFormSchema(
       label: '店铺',
       component: 'Select',
       componentProps: getShopNameSelectProps(shopOptions),
-      formItemClass: 'col-span-2',
-    },
-    {
-      fieldName: 'attachmentUrl',
-      label: '附件',
-      component: 'FileUpload',
-      componentProps: getAttachmentUploadProps(),
-      formItemClass: 'col-span-2',
     },
     {
       fieldName: 'orderDate',
@@ -353,16 +380,16 @@ export function useBatchFormSchema(
       },
     },
     {
-      fieldName: 'importSequence',
-      label: '起始顺序',
-      component: 'InputNumber',
-      componentProps: { class: 'w-full', min: 0, precision: 0 },
-    },
-    {
       fieldName: 'followUser',
       label: '跟进人',
       component: 'ApiSelect',
       componentProps: getFollowUserSelectProps(),
+    },
+    {
+      fieldName: 'importSequence',
+      label: '起始顺序',
+      component: 'InputNumber',
+      componentProps: { class: 'w-full', min: 0, precision: 0 },
     },
     {
       fieldName: 'productionSent',
@@ -376,11 +403,23 @@ export function useBatchFormSchema(
       },
     },
     {
+      fieldName: 'attachmentUrl',
+      label: '附件',
+      component: 'FileUpload',
+      componentProps: getAttachmentUploadProps(),
+      formItemClass: 'md:col-span-2',
+    },
+    {
       fieldName: 'remark',
       label: '备注',
       component: 'Textarea',
-      formItemClass: 'col-span-2',
-      componentProps: { rows: 2, maxlength: 512, showCount: true },
+      formItemClass: 'md:col-span-3',
+      componentProps: {
+        class: 'w-full',
+        rows: 2,
+        maxlength: 512,
+        showCount: true,
+      },
     },
   ];
 }
@@ -474,6 +513,10 @@ export function useGridFormSchema(
   ];
 }
 
+function renderStatusTag(color: string, text: string) {
+  return h(Tag, { color, style: { marginInlineEnd: 0 } }, () => text);
+}
+
 export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignItemApi.PatternDesignItem>['columns'] {
   return [
     { type: 'checkbox', width: 40, fixed: 'left' },
@@ -485,86 +528,16 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       showOverflow: 'tooltip',
     },
     {
-      field: 'internalOrderNo',
-      title: '内部单号',
-      minWidth: 150,
-      fixed: 'left',
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'productionSent',
-      title: '是否制作发出',
-      fixed: 'left',
-      width: 120,
-      slots: {
-        default: ({ row }) =>
-          h(
-            Tag,
-            { color: Number(row.productionSent) === 1 ? 'blue' : 'default' },
-            () => formatProductionSent(row.productionSent),
-          ),
-      },
-    },
-    {
-      field: 'recognitionStatus',
-      title: '识别状态',
-      fixed: 'left',
-      width: 120,
-      slots: {
-        default: ({ row }) =>
-          h(Tag, { color: recognitionStatusColor(row.recognitionStatus) }, () =>
-            formatRecognitionStatus(row.recognitionStatus),
-          ),
-      },
-    },
-    {
-      field: 'recognizedCount',
-      title: '识别进度',
-      fixed: 'left',
-      width: 100,
-      align: 'center',
-      slots: {
-        default: ({ row }) => formatRecognitionProgress(row),
-      },
-    },
-    {
-      field: 'downloaded',
-      title: '是否下载',
-      fixed: 'left',
-      width: 100,
-      slots: {
-        default: ({ row }) =>
-          h(
-            Tag,
-            { color: Number(row.downloaded) === 1 ? 'blue' : 'default' },
-            () => formatDownloaded(row.downloaded),
-          ),
-      },
-    },
-    {
-      field: 'shopName',
-      title: '店铺',
-      minWidth: 130,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'itemNo',
-      title: '图案明细号',
-      minWidth: 140,
-      showOverflow: 'tooltip',
-      slots: {
-        default: ({ row }) => formatItemNoWithTotal(row),
-      },
-    },
-    {
       field: 'previewImage',
       title: '预览图',
-      width: 100,
+      width: 84,
+      fixed: 'left',
+      align: 'center',
       slots: {
         default: ({ row }) =>
           row.previewImageUrl
             ? h(Image, {
-                height: 64,
+                height: 56,
                 preview: {
                   src: getPatternDesignImagePreviewUrl(
                     row.previewImageUrl,
@@ -575,21 +548,60 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
                   row.previewImageUrl,
                   'thumb',
                 ),
-                width: 64,
+                style: { objectFit: 'cover', borderRadius: '4px' },
+                width: 56,
               })
             : '',
       },
     },
     {
-      field: 'previewImageUrl',
-      title: '预览图 URL',
-      minWidth: 220,
+      field: 'internalOrderNo',
+      title: '内部单号',
+      minWidth: 140,
       showOverflow: 'tooltip',
     },
     {
-      field: 'designImageUrl',
-      title: '原图 URL',
-      minWidth: 260,
+      field: 'itemNo',
+      title: '明细号',
+      width: 90,
+      align: 'center',
+      slots: {
+        default: ({ row }) => formatItemNoWithTotal(row),
+      },
+    },
+    {
+      // 制作 / 识别 / 下载三个状态合并展示，减少横向滚动
+      field: 'processSummary',
+      title: '处理进度',
+      width: 250,
+      slots: {
+        default: ({ row }) =>
+          h('div', { class: 'flex flex-wrap gap-1' }, [
+            renderStatusTag(
+              Number(row.productionSent) === 1 ? 'blue' : 'default',
+              formatProductionSent(row.productionSent),
+            ),
+            renderStatusTag(
+              recognitionStatusColor(row.recognitionStatus),
+              `${formatRecognitionStatus(row.recognitionStatus)} ${formatRecognitionProgress(row)}`,
+            ),
+            renderStatusTag(
+              Number(row.downloaded) === 1 ? 'blue' : 'default',
+              formatDownloaded(row.downloaded),
+            ),
+          ]),
+      },
+    },
+    {
+      field: 'expressNo',
+      title: '快递单号',
+      minWidth: 150,
+      showOverflow: 'tooltip',
+    },
+    {
+      field: 'shopName',
+      title: '店铺',
+      minWidth: 130,
       showOverflow: 'tooltip',
     },
     {
@@ -598,22 +610,31 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       minWidth: 160,
       showOverflow: 'tooltip',
     },
+    { field: 'quantity', title: '数量', width: 80, align: 'right' },
     {
-      field: 'packagingMethod',
-      title: '包装方式',
-      minWidth: 140,
-      showOverflow: 'tooltip',
+      field: 'salePrice',
+      title: '售价',
+      minWidth: 110,
+      align: 'right',
+      slots: {
+        default: ({ row }) => formatPrice(row.salePrice),
+      },
     },
     {
       field: 'purchasePrice',
       title: '采购价',
-      minWidth: 120,
+      minWidth: 110,
       align: 'right',
       slots: {
-        default: ({ row }) => formatPurchasePrice(row.purchasePrice),
+        default: ({ row }) => formatPrice(row.purchasePrice),
       },
     },
-    { field: 'quantity', title: '数量', minWidth: 90, align: 'right' },
+    {
+      field: 'packagingMethod',
+      title: '包装方式',
+      minWidth: 120,
+      showOverflow: 'tooltip',
+    },
     {
       field: 'orderDate',
       title: '订单时间',
@@ -621,34 +642,33 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       formatter: 'formatDateTime',
     },
     {
-      field: 'importSequence',
-      title: '导入顺序',
-      minWidth: 100,
-      align: 'right',
-    },
-    {
       field: 'followUser',
       title: '跟进人',
-      minWidth: 110,
+      minWidth: 100,
       showOverflow: 'tooltip',
+    },
+    {
+      field: 'importSequence',
+      title: '导入顺序',
+      width: 90,
+      align: 'right',
     },
     {
       field: 'status',
       title: '状态',
-      minWidth: 90,
+      width: 80,
       slots: {
         default: ({ row }) =>
-          h(
-            Tag,
-            { color: Number(row.status) === 1 ? 'default' : 'green' },
-            () => formatStatus(row.status),
+          renderStatusTag(
+            Number(row.status) === 1 ? 'default' : 'green',
+            formatStatus(row.status),
           ),
       },
     },
     {
       field: 'remark',
       title: '备注',
-      minWidth: 180,
+      minWidth: 160,
       showOverflow: 'tooltip',
     },
     {
@@ -658,9 +678,23 @@ export function useGridColumns(): VxeTableGridOptions<FdmNeixiaoPatternDesignIte
       formatter: 'formatDateTime',
     },
     {
+      field: 'previewImageUrl',
+      title: '预览图 URL',
+      minWidth: 220,
+      showOverflow: 'tooltip',
+      visible: false,
+    },
+    {
+      field: 'designImageUrl',
+      title: '原图 URL',
+      minWidth: 260,
+      showOverflow: 'tooltip',
+      visible: false,
+    },
+    {
       field: '__actions',
       title: '操作',
-      width: 480,
+      width: 260,
       fixed: 'right',
       slots: { default: 'actions' },
     },

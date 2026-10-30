@@ -1,6 +1,10 @@
 import type { BusinessRecord, Decimal } from './index';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 
 export interface MigrationInfo {
   sourceSystem: string;
@@ -65,15 +69,29 @@ export function uploadBusinessDocumentFile(
   file: File,
   data: { expectedVersion: number; idempotencyKey: string },
 ) {
-  return requestClient.upload<{ file: BusinessDocumentFile; version: number }>(
-    `${base}/${encodeURIComponent(id)}/attachments`,
-    { file, ...data },
+  return withUploadProgress([file], (onUploadProgress) =>
+    requestClient.upload<{ file: BusinessDocumentFile; version: number }>(
+      `${base}/${encodeURIComponent(id)}/attachments`,
+      { file, ...data },
+      { onUploadProgress, timeout: LARGE_FILE_TIMEOUT },
+    ),
+  );
+}
+export function renameBusinessDocumentFile(
+  id: string,
+  fileId: string,
+  name: string,
+  idempotencyKey: string,
+) {
+  return requestClient.post<BusinessDocumentFile>(
+    `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/rename`,
+    { idempotencyKey, name },
   );
 }
 export function downloadBusinessDocumentFile(id: string, fileId: string) {
   return requestClient.get<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
-    { responseType: 'blob' },
+    { responseType: 'blob', timeout: LARGE_FILE_TIMEOUT },
   );
 }
 export function getBusinessDocument(id: string) {

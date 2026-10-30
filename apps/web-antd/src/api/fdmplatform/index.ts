@@ -1,6 +1,10 @@
 import type { MigrationInfo } from './business-documents';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 
 export { newIdempotencyKey } from './idempotency';
 
@@ -57,6 +61,8 @@ export interface ContractItem extends BusinessRecord {
   unit: string;
   quantity: Decimal;
   unitPrice?: Decimal | null;
+  /** 明细备注 */
+  remark?: null | string;
   requiredDate?: string;
   taxBasis?: string;
   material?: string;
@@ -164,6 +170,10 @@ export interface PageQuery {
   assignmentStatus?: string;
   contractId?: string;
   ownerUserId?: number;
+  /** true: imported records awaiting completion; false: current business; absent: both. */
+  pendingCompletion?: boolean;
+  /** 外贸 / 内销；不传不分业务线 */
+  salesChannel?: 'DOMESTIC' | 'FOREIGN';
 }
 export interface PageResult<T> {
   list: T[];
@@ -241,15 +251,29 @@ export function uploadAttachment(
   idempotencyKey: string,
   target?: AttachmentTarget,
 ) {
-  return requestClient.upload<ContractAttachment>(
-    `${base}/contracts/${encodeURIComponent(contractId)}/attachments`,
-    { file, category, idempotencyKey, ...target },
-    { timeout: 300_000 },
+  return withUploadProgress([file], (onUploadProgress) =>
+    requestClient.upload<ContractAttachment>(
+      `${base}/contracts/${encodeURIComponent(contractId)}/attachments`,
+      { file, category, idempotencyKey, ...target },
+      { onUploadProgress, timeout: LARGE_FILE_TIMEOUT },
+    ),
+  );
+}
+export function renameAttachment(
+  contractId: string,
+  attachmentId: string,
+  name: string,
+  idempotencyKey: string,
+) {
+  return requestClient.post<ContractAttachment>(
+    `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/rename`,
+    { idempotencyKey, name },
   );
 }
 export function downloadAttachment(contractId: string, attachmentId: string) {
   return requestClient.download<Blob>(
     `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+    { timeout: LARGE_FILE_TIMEOUT },
   );
 }
 export function getMasterSourceTypes(companyId: number) {
@@ -313,6 +337,10 @@ export function getContract(id: string) {
   return requestClient.get<Contract>(
     `${base}/contracts/${encodeURIComponent(id)}`,
   );
+}
+/** 新建合同弹窗回填的建议订单号；只读不占号 */
+export function getNextContractCode() {
+  return requestClient.get<string>(`${base}/contracts/next-code`);
 }
 export function createContract(data: Record<string, unknown>) {
   return requestClient.post<Contract>(`${base}/contracts`, data);

@@ -98,10 +98,22 @@ function formatUnitPrice(value: unknown) {
   })} 元/kg`;
 }
 
+/** 完整来源（版本 · 单元格）只放悬停提示 */
 function formatSource(row: FdmcaiwuRawMaterialApi.RawMaterial) {
   return (
     [row.sourceVersion, row.sourceLocation].filter(Boolean).join(' · ') || '—'
   );
+}
+
+/** 列表里只说来源类型：Excel 导入还是手工维护 */
+function sourceLabel(row: FdmcaiwuRawMaterialApi.RawMaterial) {
+  const version = String(row.sourceVersion ?? '');
+  if (!version && !row.sourceLocation) return '手工维护';
+  if (/^EXCEL/i.test(version)) {
+    const year = version.match(/20\d{2}/)?.[0];
+    return year ? `Excel 导入（${year}）` : 'Excel 导入';
+  }
+  return '手工维护';
 }
 
 const queryFormSchema: VbenFormSchema[] = [
@@ -172,7 +184,7 @@ const gridColumns: VxeTableGridOptions<FdmcaiwuRawMaterialApi.RawMaterial>['colu
     },
     {
       field: 'sourceVersion',
-      minWidth: 260,
+      width: 140,
       slots: { default: 'source' },
       title: '来源',
     },
@@ -331,7 +343,7 @@ async function handleSave() {
         </template>
         <template #source="{ row }">
           <span class="source-text" :title="formatSource(row)">
-            {{ formatSource(row) }}
+            {{ sourceLabel(row) }}
           </span>
         </template>
         <template #actions="{ row }">

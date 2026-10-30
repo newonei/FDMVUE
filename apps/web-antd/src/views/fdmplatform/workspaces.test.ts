@@ -61,16 +61,20 @@ describe('shared business collaboration', () => {
     expect(workspaces['finance-invoices'].groups?.[0]?.resource).toBe(
       'invoices',
     );
-    expect(detailTabFor('trade-requests', 'cost')).toBe('progress');
-    expect(detailTabFor('finance-costs', 'purchase')).toBe('progress');
-    expect(detailTabFor('purchase-orders', 'unknown')).toBe('progress');
-    expect(detailTabFor('finance-costs', undefined)).toBe('progress');
+    expect(detailTabFor('trade-requests', 'cost')).toBe('finance');
+    expect(detailTabFor('finance-costs', 'purchase')).toBe('purchase');
+    expect(detailTabFor('purchase-orders', 'unknown')).toBe('delivery');
+    expect(detailTabFor('finance-costs', undefined)).toBe('finance');
+    expect(detailTabFor('trade-contracts', 'overview')).toBe('products');
+    expect(detailTabFor('trade-contracts', 'progress')).toBe('products');
+    expect(detailTabFor('trade-contracts', undefined)).toBe('products');
     expect(contractDetailTabs).toEqual([
-      'overview',
       'products',
-      'progress',
-      'audit',
+      'purchase',
+      'delivery',
+      'finance',
       'attachments',
+      'audit',
     ]);
   });
   it('carries a selected document identity and approval version, never replacing contract version', () => {
@@ -135,7 +139,7 @@ describe('real identity and evidence inputs', () => {
     expect(result.fields[0]?.type).toBe('select');
     expect(result.fields[0]?.options?.[0]).toEqual({
       value: 12,
-      label: '采购甲 · 采购部门 (#12)',
+      label: '采购甲 · 采购部门',
     });
     expect(result.fields[1]?.options).toEqual([
       { value: 3, label: '采购部门' },

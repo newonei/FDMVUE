@@ -48,6 +48,95 @@ export namespace FdmcaiwuEcProfitApi {
     companyName?: string;
     dataStatus: 'IMPORTED' | 'PENDING';
     sourceBatchId?: number;
+    /** 聚水潭「6001 账单费用」；平台扣费 = 账单费用 + 调整 */
+    platformFeeBill?: Decimal;
+    platformFeeAdjustment?: Decimal;
+    platformFeeAdjustmentReason?: string;
+    /** 网页手工改过的字段，逗号分隔 */
+    manualFields?: string;
+  }
+
+  /** 导入模板的金额（毛利润由系统计算） */
+  export interface ImportValues {
+    salesAmount?: Decimal;
+    newProductGiftAmount?: Decimal;
+    customerRefundAmount?: Decimal;
+    purchaseCost?: Decimal;
+    ownPurchaseCost?: Decimal;
+    accessoryPurchaseCost?: Decimal;
+    dropshipPurchaseCost?: Decimal;
+    freightCost?: Decimal;
+    promotionCost?: Decimal;
+    platformFee?: Decimal;
+    taxFee?: Decimal;
+    grossProfit?: Decimal;
+  }
+  export interface ImportRow {
+    rowNumber: number;
+    month: string;
+    /** 为空表示不在店铺目录中 */
+    shopId?: string;
+    /** Excel 里填写的店铺 */
+    shopName: string;
+    directoryShopName?: string;
+    action: 'NEW' | 'UNCHANGED' | 'UPDATE';
+    imported: ImportValues;
+    current?: ImportValues;
+  }
+  export interface ImportMonth {
+    month: string;
+    reportId?: number;
+    reportVersion?: number;
+    rowCount: number;
+    newCount: number;
+    updateCount: number;
+    unchangedCount: number;
+    salesAmount?: Decimal;
+    grossProfit?: Decimal;
+    keptItems: { itemId: number; lineType: string; shopName: string }[];
+  }
+  export interface ImportPreview {
+    fileName: string;
+    fileSha256: string;
+    sheetName?: string;
+    months: ImportMonth[];
+    rows: ImportRow[];
+    newCount: number;
+    updateCount: number;
+    unchangedCount: number;
+    warnings: string[];
+    errors: string[];
+    previewToken: string;
+  }
+  export interface ImportResult {
+    months: string[];
+    created: number;
+    updated: number;
+    unchanged: number;
+  }
+  /** 新增（无 id，按 month）或修改（有 id）一行明细 */
+  export interface ItemSave {
+    id?: number;
+    month?: string;
+    reportVersion?: number;
+    lineType?: 'ADJUSTMENT' | 'SHOP';
+    shopId?: string;
+    shopName?: string;
+    salesAmount?: Decimal;
+    newProductGiftAmount?: Decimal;
+    customerRefundAmount?: Decimal;
+    purchaseCost?: Decimal;
+    accessoryPurchaseCost?: Decimal;
+    dropshipPurchaseCost?: Decimal;
+    estimatedFreight?: Decimal;
+    freightAdjustment?: Decimal;
+    freightCost?: Decimal;
+    promotionCost?: Decimal;
+    platformFeeBill?: Decimal;
+    platformFeeAdjustment?: Decimal;
+    platformFeeAdjustmentReason?: string;
+    taxFee?: Decimal;
+    remark?: string;
   }
 
   export interface Report {
@@ -95,21 +184,21 @@ export namespace FdmcaiwuEcProfitApi {
     result: Record<string, unknown>;
   }
 
+  /** 分组 → 店铺/费用；分组来自电商分组配置，未配置的店铺与费用行归入 UNCONFIGURED */
   export interface GroupNode {
     key: string;
-    nodeType: 'ADJUSTMENT' | 'DEPARTMENT' | 'GROUP' | 'SHOP' | 'TOTAL';
+    nodeType: 'ADJUSTMENT' | 'GROUP' | 'SHOP' | 'TOTAL';
     name: string;
-    departmentCode?: string;
-    departmentName?: string;
     groupId?: number;
     groupName?: string;
-    legacyGroup: boolean;
+    sortOrder?: number;
     item?: Item;
     children: GroupNode[];
     expectedShopCount: number;
     importedShopCount: number;
     adjustmentCount: number;
     pendingAdjustmentCount: number;
+    /** 归入「未配置」分组的明细条数 */
     unassignedCount: number;
     missingShopIds: string[];
     missingMetricCounts: Record<string, number>;
@@ -120,17 +209,13 @@ export namespace FdmcaiwuEcProfitApi {
   export interface MonthlyView {
     month: string;
     report: Report | null;
-    departments: GroupNode[];
+    groups: GroupNode[];
     total: GroupNode;
   }
   export interface YearGroup {
     key: string;
     name: string;
-    departmentCode?: string;
-    departmentName?: string;
     groupId?: number;
-    groupName?: string;
-    legacyGroup: boolean;
     months: {
       month: string;
       reportId?: number;
@@ -172,6 +257,22 @@ export namespace FdmcaiwuEcProfitApi {
     departmentCode?: string;
     departmentName?: string;
     reason?: string;
+  }
+  /** 店铺分组：默认分组对所有月份生效；某月有临时调整时该月按调整 */
+  export interface GroupMemberShop extends ShopOption {
+    enabled: boolean;
+    defaultGroupId?: number;
+    defaultGroupName?: string;
+    overrideGroupId?: number;
+    overrideGroupName?: string;
+    overrideReason?: string;
+    effectiveGroupId?: number;
+    effectiveGroupName?: string;
+  }
+  export interface GroupMembers {
+    month?: string;
+    groups: Group[];
+    shops: GroupMemberShop[];
   }
   export interface AssignmentList {
     effectiveMonth: string;
@@ -315,6 +416,33 @@ export function deleteFinanceGroup(id: number, expectedVersion: number) {
     params: { id, expectedVersion },
   });
 }
+/** 店铺分组一览；不传月份只看默认分组 */
+export function getEcProfitGroupMembers(month?: string) {
+  return requestClient.get<FdmcaiwuEcProfitApi.GroupMembers>(
+    `${baseUrl}/group-members`,
+    { params: { month } },
+  );
+}
+/**
+ * 设置默认分组；groupId 为空表示移出默认分组。
+ * fromMonth：从该月起生效，之前已有数据的月份保留原分组；不传则所有月份都按新分组。
+ */
+export function saveEcProfitDefaultGroups(data: {
+  fromMonth?: string;
+  groupId?: number;
+  shopIds: string[];
+}) {
+  return requestClient.post<number>(`${baseUrl}/default-groups/save`, data);
+}
+/** 某月临时调整；groupId 为空表示恢复默认分组 */
+export function saveEcProfitMonthGroups(data: {
+  groupId?: number;
+  month: string;
+  reason?: string;
+  shopIds: string[];
+}) {
+  return requestClient.post<number>(`${baseUrl}/month-groups/save`, data);
+}
 export function getShopAssignments(effectiveMonth: string) {
   return requestClient.get<FdmcaiwuEcProfitApi.AssignmentList>(
     `${baseUrl}/shop-assignments`,
@@ -355,4 +483,74 @@ export function getEcProfitConfigurationHistory(limit = 50) {
     `${baseUrl}/configuration-history`,
     { params: { limit } },
   );
+}
+
+/** 月度毛利 Excel：分层汇总（可折叠）+ 店铺明细 */
+export function exportEcProfitMonthlyExcel(month: string) {
+  return requestClient.download(`${baseUrl}/export-monthly-excel`, {
+    params: { month },
+  });
+}
+
+/** 年度 Excel：全年汇总 + 各指标小组逐月对比 */
+export function exportEcProfitYearExcel(year: number) {
+  return requestClient.download(`${baseUrl}/export-year-excel`, {
+    params: { year },
+  });
+}
+
+/** 下载导入模板（含店铺列表与填写说明） */
+export function downloadEcProfitImportTemplate() {
+  return requestClient.download(`${baseUrl}/import/template`);
+}
+
+/** 预览模板导入，不写库；文件可包含多个月份 */
+export function previewEcProfitImport(file: File) {
+  return requestClient.upload<FdmcaiwuEcProfitApi.ImportPreview>(
+    `${baseUrl}/import/preview`,
+    { file },
+  );
+}
+
+/** 确认导入，previewToken 须与预览一致 */
+export function applyEcProfitImport(data: {
+  file: File;
+  idempotencyKey: string;
+  previewToken: string;
+}) {
+  return requestClient.upload<FdmcaiwuEcProfitApi.ImportResult>(
+    `${baseUrl}/import/apply`,
+    data,
+  );
+}
+
+export function saveEcProfitItem(data: FdmcaiwuEcProfitApi.ItemSave) {
+  return requestClient.post<number>(`${baseUrl}/item/save`, data);
+}
+
+export function deleteEcProfitItem(id: number, reportVersion: number) {
+  return requestClient.delete<boolean>(`${baseUrl}/item/delete`, {
+    params: { id, reportVersion },
+  });
+}
+
+/** 把某一项在本月所有空白明细里统一填成同一个值，返回填写条数 */
+export function fillBlankEcProfitItems(data: {
+  field: string;
+  reportId: number;
+  reportVersion: number;
+  value: number;
+}) {
+  return requestClient.post<number>(`${baseUrl}/item/fill-blank`, data);
+}
+
+/** 清空整月数据，confirmMonth 须与月报月份一致 */
+export function purgeEcProfitReport(
+  id: number,
+  expectedVersion: number,
+  confirmMonth: string,
+) {
+  return requestClient.delete<boolean>(`${baseUrl}/purge`, {
+    params: { id, expectedVersion, confirmMonth },
+  });
 }

@@ -974,10 +974,18 @@ function handleDelete(row: FdmcaiwuRecipeApi.Recipe) {
           {{ formatWeight(row.batchWeightKg) }}
         </template>
         <template #batchCost="{ row }">
-          {{ formatMoney(row.batchCostYuan, 4) }}
+          <span :title="formatMoney(row.batchCostYuan, 6)">{{
+            formatMoney(row.batchCostYuan, 2)
+          }}</span>
         </template>
         <template #rawUnitCost="{ row }">
-          {{ formatUnitCost(row.rawUnitCostPerKg, true) }}
+          <span :title="formatUnitCost(row.rawUnitCostPerKg, true)">{{
+            formatDecimal(row.rawUnitCostPerKg, {
+              maximumFractionDigits: 4,
+              minimumFractionDigits: 2,
+            })
+          }}
+            元/kg</span>
         </template>
         <template #effectiveUnitCost="{ row }">
           <strong :class="{ 'effective-cost': row.costAvailable }">

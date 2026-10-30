@@ -363,6 +363,7 @@ function cropImage(file: File, aspectRatio: string | undefined) {
               ]),
               centered: true,
               width: 548,
+              zIndex: 9999,
               keyboard: false,
               maskClosable: false,
               closable: false,

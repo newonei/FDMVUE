@@ -11,6 +11,7 @@ import {
   hasProductVersion,
   invalidateLinePrices,
   mergeProductSelection,
+  unitPriceFromAmount,
 } from './model';
 
 const line = (overrides: Partial<ContractItem> = {}): ContractItem => ({
@@ -64,6 +65,16 @@ describe('contract product selection and pricing', () => {
     expect(contractLineAmount(line({ unitPrice: '0' }))).toBe('0.00');
     expect(contractLineAmount(line())).toBe('37.50');
   });
+  it('derives the unit price from a typed line total', () => {
+    expect(unitPriceFromAmount('3', '100')).toBe('33.333333');
+    expect(contractLineAmount(line({ unitPrice: '33.333333' }))).toBe('100.00');
+    expect(unitPriceFromAmount('4', '50')).toBe('12.5');
+    expect(unitPriceFromAmount('3', null)).toBeNull();
+    expect(unitPriceFromAmount('3', '')).toBeNull();
+    expect(unitPriceFromAmount('0', '100')).toBeUndefined();
+    expect(unitPriceFromAmount('', '100')).toBeUndefined();
+    expect(unitPriceFromAmount('3', '-1')).toBeUndefined();
+  });
   it('copies a customized SKU into an independent contract line without sharing attachment arrays', () => {
     const original = line();
     const copied = copyContractLine(original, 'line-b');
@@ -114,7 +125,7 @@ describe('contract product selection and pricing', () => {
 });
 
 describe('order company attribute with shared products', () => {
-  it('omits supplied contract numbers on creation and preserves the saved number during edits', () => {
+  it('sends only an edited contract number on creation and preserves the saved number during edits', () => {
     const form = {
       code: 'typed-by-user',
       companyId: 21,
@@ -122,6 +133,18 @@ describe('order company attribute with shared products', () => {
       taxBasis: 'TAX_INCLUDED',
     };
     expect(contractHeaderPayload(form)).toEqual({
+      code: 'typed-by-user',
+      companyId: 21,
+      name: '新合同',
+    });
+    expect(
+      contractHeaderPayload(
+        { ...form, code: ' HT-20260907-000003 ' },
+        undefined,
+        'HT-20260907-000003',
+      ),
+    ).toEqual({ companyId: 21, name: '新合同' });
+    expect(contractHeaderPayload({ ...form, code: '  ' })).toEqual({
       companyId: 21,
       name: '新合同',
     });

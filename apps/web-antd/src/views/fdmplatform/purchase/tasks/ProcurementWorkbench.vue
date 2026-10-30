@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import type { DocumentKind } from '../../documents/model';
+
 import type { Directory, DocumentRow } from '#/api/fdmplatform';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 import type {
   ProcurementStage,
   ProcurementWorkbenchResult,
@@ -7,7 +10,7 @@ import type {
 } from '#/api/fdmplatform/procurement-workbench';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -16,12 +19,20 @@ import {
   Button,
   Empty,
   Input,
+  message,
+  Modal,
   Pagination,
   Select,
   Table,
 } from 'ant-design-vue';
 
-import { getContract, getDirectory } from '#/api/fdmplatform';
+import {
+  contractAction,
+  getContract,
+  getDirectory,
+  newIdempotencyKey,
+} from '#/api/fdmplatform';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { getProcurementWorkbench } from '#/api/fdmplatform/procurement-workbench';
 
 import { errorText } from '../../data';
@@ -41,12 +52,20 @@ import RelatedLink from '../../documents/RelatedLink.vue';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
+import PurchaseOrderEditor from '../manage/components/PurchaseOrderEditor.vue';
+import { localDate } from '../quotes/comparison';
 import QuoteComparisonDialog from '../quotes/QuoteComparisonDialog.vue';
 import {
+  dueBadge,
+  MAINLINE_STEPS,
+  mainlineStates,
   procurementStageLabel,
-  procurementStages,
+  shortTitle,
+  visibleStages,
   workbenchAction,
 } from './model';
+import RequestAssignDialog from './RequestAssignDialog.vue';
+import RequestQuoteDialog from './RequestQuoteDialog.vue';
 
 import '../components/procurement.css';
 
@@ -54,8 +73,32 @@ const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const archive = ref(false);
-const stage = ref<'all' | ProcurementStage>('all');
-const mine = ref(false);
+const stages = new Set<string>([
+  'all',
+  'arrival',
+  'intake',
+  'order',
+  'plan',
+  'production',
+  'quote',
+  'review',
+]);
+/** Portal links open the workbench on one stage and/or the user's own tasks. */
+function queryStage(value: unknown): 'all' | ProcurementStage | undefined {
+  return typeof value === 'string' && stages.has(value)
+    ? (value as 'all' | ProcurementStage)
+    : undefined;
+}
+const stage = ref<'all' | ProcurementStage>(
+  queryStage(route.query.stage) ?? 'all',
+);
+const mine = ref(route.query.mine === 'true');
+type DueFilter = 'overdue' | 'soon';
+function queryDue(value: unknown): DueFilter | undefined {
+  return value === 'overdue' || value === 'soon' ? value : undefined;
+}
+const due = ref<DueFilter | undefined>(queryDue(route.query.due));
+const today = localDate();
 const keyword = ref('');
 const page = ref(1);
 const pageSize = 10;
@@ -68,15 +111,65 @@ const result = ref<ProcurementWorkbenchResult>();
 const directory = ref<Directory>();
 const selectedKey = ref<string>();
 const actionEntry = ref<ProcurementWorkItem>();
+/** The secondary way to handle a step (e.g. 分派… next to 我来接单). */
+const actionOverride = ref<{ action: string; kind: DocumentKind }>();
 const compareEntry = ref<ProcurementWorkItem>();
+const quoteEntry = ref<ProcurementWorkItem>();
+const assignEntry = ref<ProcurementWorkItem>();
+const claiming = ref<string>();
 const detail = ref<{ kind: ProcurementWorkItem['kind']; row: DocumentRow }>();
 const standalone = ref<{ id: string; kind: 'requests' | 'tasks' }>();
 const childOpen = computed(
   () =>
     !!actionEntry.value ||
     !!compareEntry.value ||
+    !!quoteEntry.value ||
+    !!assignEntry.value ||
     !!detail.value ||
-    !!standalone.value,
+    !!standalone.value ||
+    !!orderEntry.value ||
+    !!claiming.value,
+);
+const stageTabs = computed(() => visibleStages(result.value?.counts));
+/**
+ * 采购员直接开采购单（金智做法）：从申请或任务带出合同产品，报价与方案不再是必经环节。
+ * 只在还要采购的阶段显示。
+ */
+const orderEntry = ref<{ contractId: string; requestId?: string }>();
+function canEnterOrder(entry: ProcurementWorkItem) {
+  return (
+    ['intake', 'order', 'plan', 'quote'].includes(entry.stage) &&
+    !!entry.row.contractId
+  );
+}
+function openOrderEntry(entry: ProcurementWorkItem) {
+  if (childOpen.value) return;
+  // 申请行直接用申请 id；任务 / 报价行给出申请或任务 id，开单表单会顺着任务找到申请
+  const record = entry.row.record ?? {};
+  const requestId =
+    entry.kind === 'requests'
+      ? String(entry.row.id)
+      : String(record.requestId ?? record.assignmentId ?? entry.row.id);
+  orderEntry.value = { contractId: String(entry.row.contractId), requestId };
+}
+function orderEntered(value: CreatedProcurementOrders) {
+  orderEntry.value = undefined;
+  message.success(createdOrdersText(value));
+  void router.push({
+    path: '/fdmprocurement/platform-orders',
+    query: { contractId: value.contractId, documentId: value.orderId },
+  });
+}
+const launchKind = computed(() =>
+  actionEntry.value
+    ? (actionOverride.value?.kind ?? workbenchAction(actionEntry.value).kind)
+    : 'tasks',
+);
+const launchAction = computed(() =>
+  actionEntry.value
+    ? (actionOverride.value?.action ??
+      workbenchAction(actionEntry.value).action)
+    : undefined,
 );
 const entries = computed(() => result.value?.list ?? []);
 const selected = computed(() =>
@@ -91,7 +184,7 @@ const contractId = computed(() =>
     : undefined,
 );
 const boardColumns = computed(() =>
-  procurementStages
+  stageTabs.value
     .filter(
       (item) =>
         item.key !== 'all' &&
@@ -129,7 +222,7 @@ function quantityText(entry: ProcurementWorkItem) {
     return '数量与单位见明细';
   return `${entry.quantity} ${entry.unit}`;
 }
-function count(key: 'all' | ProcurementStage) {
+function count(key: 'all' | 'overdue' | 'soon' | ProcurementStage) {
   const value = result.value?.counts?.[key];
   return typeof value === 'number' && Number.isFinite(value) ? value : '—';
 }
@@ -158,9 +251,77 @@ function showDetails(entry: ProcurementWorkItem) {
 function perform(entry: ProcurementWorkItem) {
   if (childOpen.value) return;
   const action = workbenchAction(entry);
-  if (action.action) actionEntry.value = entry;
-  else if (action.title === '比较报价') compareEntry.value = entry;
+  actionOverride.value = undefined;
+  if (action.mode === 'claim') claim(entry);
+  else if (action.mode === 'quote') quoteEntry.value = entry;
+  else if (action.mode === 'assign') assignEntry.value = entry;
+  else if (action.mode === 'compare') compareEntry.value = entry;
+  else if (action.action) actionEntry.value = entry;
   else showDetails(entry);
+}
+function performSecondary(entry: ProcurementWorkItem) {
+  const secondary = workbenchAction(entry).secondary;
+  if (childOpen.value || !secondary) return;
+  if (secondary.mode === 'assign') {
+    assignEntry.value = entry;
+    return;
+  }
+  actionOverride.value = { action: secondary.action, kind: secondary.kind };
+  actionEntry.value = entry;
+}
+/** 我来接单: the whole remaining request goes to the signed-in buyer as outside purchase. */
+function claim(entry: ProcurementWorkItem) {
+  Modal.confirm({
+    title: '接下这条采购申请？',
+    content: `「${shortTitle(entry.title)}」剩余的 ${quantityText(entry)} 会交给你办理，接单后可以直接「开采购单」。要交给别的采购员，请点「分派…」。`,
+    okText: '接单',
+    cancelText: '取消',
+    onOk: async () => {
+      claiming.value = entry.key;
+      try {
+        await contractAction(
+          entry.row.contractId,
+          'CLAIM_REQUEST',
+          Number(entry.row.contractVersion),
+          newIdempotencyKey(),
+          { requestId: entry.row.id },
+        );
+        message.success('已接单，下一步录入报价');
+        await load();
+      } catch (error) {
+        message.error(errorText(error));
+      } finally {
+        claiming.value = undefined;
+      }
+    },
+  });
+}
+function changeDue(value: DueFilter) {
+  due.value = due.value === value ? undefined : value;
+  page.value = 1;
+  void load();
+}
+function assignSaved() {
+  assignEntry.value = undefined;
+  void load();
+}
+/** The request a quote-stage task belongs to; the dialog lists all its BUY tasks. */
+function requestOf(entry: ProcurementWorkItem | undefined) {
+  const id = entry?.row.record?.requestId;
+  return typeof id === 'string' ? id : undefined;
+}
+function quoteSaved(_: unknown, quoteIds: string[], orderNow: boolean) {
+  const entry = quoteEntry.value;
+  quoteEntry.value = undefined;
+  void load();
+  // Open 选价下单 on the clicked product's new quote; same-request quotes join as companions.
+  const quoteId = quoteIds[0];
+  if (orderNow && quoteId && entry)
+    compareEntry.value = {
+      ...entry,
+      kind: 'quotes',
+      row: { ...entry.row, id: quoteId },
+    };
 }
 function changeStage(value: 'all' | ProcurementStage) {
   stage.value = value;
@@ -174,6 +335,7 @@ function applyFilters() {
 async function clearFilters() {
   stage.value = 'all';
   mine.value = false;
+  due.value = undefined;
   keyword.value = '';
   page.value = 1;
   if (contractId.value) {
@@ -190,6 +352,7 @@ async function load() {
     mine: mine.value,
     keyword: keyword.value.trim() || undefined,
     contractId: contractId.value,
+    ...(due.value ? { due: due.value } : {}),
     pageNo: page.value,
     pageSize,
   };
@@ -225,6 +388,7 @@ async function load() {
 }
 async function updated() {
   actionEntry.value = undefined;
+  actionOverride.value = undefined;
   await load();
 }
 async function closeDetail() {
@@ -268,6 +432,8 @@ watch(
     if (previous && current[2] !== previous[2]) page.value = 1;
     actionEntry.value = undefined;
     compareEntry.value = undefined;
+    quoteEntry.value = undefined;
+    assignEntry.value = undefined;
     if (!active.value || archive.value) {
       sequence++;
       loading.value = false;
@@ -282,6 +448,21 @@ watch(
         .catch(() => undefined);
   },
   { immediate: true },
+);
+watch(
+  () => [route.query.stage, route.query.mine, route.query.due],
+  (current, previous) => {
+    if (
+      !active.value ||
+      current.every((value, index) => value === previous[index])
+    )
+      return;
+    stage.value = queryStage(route.query.stage) ?? 'all';
+    mine.value = route.query.mine === 'true';
+    due.value = queryDue(route.query.due);
+    page.value = 1;
+    void load();
+  },
 );
 watch(
   () => [
@@ -341,16 +522,29 @@ onBeforeUnmount(() => {
       />
       <nav class="workbench-stages" aria-label="采购阶段">
         <button
-          v-for="item in procurementStages"
+          v-for="item in stageTabs"
           :key="item.key"
           type="button"
-          :class="{ selected: stage === item.key }"
+          :class="{
+            selected: stage === item.key,
+            hot: item.key === 'quote' && Number(count(item.key)) > 0,
+          }"
           :aria-pressed="stage === item.key"
           :disabled="childOpen"
           @click="changeStage(item.key)"
         >
-          <span>{{ item.label }}</span><strong class="procurement-number">{{ count(item.key) }}</strong>
+          <span>{{ item.label }}</span><strong class="procurement-number">{{ count(item.key) }}</strong><small>{{
+            item.key === 'all' && Number(count('overdue')) > 0
+              ? `${count('overdue')} 条已超期`
+              : item.hint
+          }}</small>
         </button>
+        <RouterLink
+          class="workbench-onward"
+          :to="{ path: '/fdmprocurement/platform-orders' }"
+        >
+          <span>下单之后</span><strong>采购单 →</strong><small>跟单、到货、付款</small>
+        </RouterLink>
       </nav>
       <div class="procurement-toolbar">
         <div class="procurement-toolbar-actions">
@@ -382,8 +576,28 @@ onBeforeUnmount(() => {
           >
             我负责的
           </Button>
+          <button
+            type="button"
+            class="due-chip danger"
+            :class="{ on: due === 'overdue' }"
+            :aria-pressed="due === 'overdue'"
+            :disabled="childOpen"
+            @click="changeDue('overdue')"
+          >
+            已超期 {{ count('overdue') }}
+          </button>
+          <button
+            type="button"
+            class="due-chip warn"
+            :class="{ on: due === 'soon' }"
+            :aria-pressed="due === 'soon'"
+            :disabled="childOpen"
+            @click="changeDue('soon')"
+          >
+            3 天内到期 {{ count('soon') }}
+          </button>
           <Button
-            v-if="mine || keyword || stage !== 'all' || contractId"
+            v-if="mine || keyword || due || stage !== 'all' || contractId"
             type="text"
             :disabled="childOpen"
             @click="clearFilters"
@@ -433,11 +647,12 @@ onBeforeUnmount(() => {
                 entry.key === selectedKey ? 'procurement-row-selected' : ''
             "
             :columns="[
-              { title: '产品 / 需求', key: 'title', width: 245 },
-              { title: '关联订单 / 客户', key: 'contract', width: 200 },
-              { title: '阶段 / 经办人', key: 'stage', width: 160 },
-              { title: '期望到货', key: 'date', width: 120 },
-              { title: '下一步', key: 'action', width: 130, fixed: 'right' },
+              { title: '产品 / 需求', key: 'title', width: 250 },
+              { title: '关联订单 / 客户', key: 'contract', width: 190 },
+              { title: '主线', key: 'mainline', width: 150 },
+              { title: '经办人', key: 'owner', width: 100 },
+              { title: '交期', key: 'date', width: 120 },
+              { title: '下一步', key: 'action', width: 170, fixed: 'right' },
             ]"
           >
             <template #emptyText>
@@ -466,13 +681,17 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="workbench-record-link"
+                  :title="record.title"
                   :disabled="childOpen"
                   @click="select(record as ProcurementWorkItem, $event)"
                 >
-                  {{ record.title }}
-</button><span class="procurement-muted">{{
-                  record.subtitle || quantityText(record as ProcurementWorkItem)
-                }}</span>
+                  {{ shortTitle(record.title) }}
+</button><span
+                  class="procurement-muted workbench-subtitle"
+                  :title="record.subtitle"
+                  >{{ quantityText(record as ProcurementWorkItem)
+                  }}<template v-if="record.subtitle">
+                    · {{ record.subtitle }}</template></span>
               </div>
               <div v-else-if="column.key === 'contract'" class="workbench-cell">
                 <RelatedLink :target="contractTarget(record.row.contractId)">
@@ -487,26 +706,80 @@ onBeforeUnmount(() => {
                   record.row.customerName || '客户未注明'
                 }}</span>
               </div>
-              <div v-else-if="column.key === 'stage'" class="workbench-cell">
-                <ProcurementStatusBadge
-                  :status="record.stage"
-                  :label="procurementStageLabel(record.stage)"
-                /><span class="procurement-muted">{{
-                  ownerNames(record as ProcurementWorkItem)
+              <div
+                v-else-if="column.key === 'mainline'"
+                class="workbench-mainline"
+                :aria-label="`当前：${procurementStageLabel(record.stage)}`"
+              >
+                <span class="mainline-bars">
+                  <i
+                    v-for="(state, index) in mainlineStates(record.stage)"
+                    :key="index"
+                    :class="`is-${state}`"
+                    :title="MAINLINE_STEPS[index]"
+                  ></i>
+                </span>
+                <span class="mainline-names" aria-hidden="true">
+                  <span v-for="name in MAINLINE_STEPS" :key="name">{{
+                    name.slice(0, 1)
+                  }}</span>
+                </span>
+                <span class="procurement-muted">{{
+                  procurementStageLabel(record.stage)
                 }}</span>
               </div>
               <span
+                v-else-if="column.key === 'owner'"
+                class="procurement-muted"
+                >{{ ownerNames(record as ProcurementWorkItem) }}</span>
+              <span
                 v-else-if="column.key === 'date'"
-                class="procurement-number"
-                >{{ record.dueDate || '未约定' }}</span>
-              <Button
+                class="due-pill procurement-number"
+                :class="dueBadge(record.dueDate, today).tone"
+                :title="record.dueDate"
+                >{{ dueBadge(record.dueDate, today).text }}</span>
+              <div
                 v-else-if="column.key === 'action'"
-                type="link"
-                :disabled="childOpen"
-                @click="perform(record as ProcurementWorkItem)"
+                class="workbench-actions"
               >
-                {{ workbenchAction(record as ProcurementWorkItem).title }}
-              </Button>
+                <Button
+                  :type="
+                    workbenchAction(record as ProcurementWorkItem).action ||
+                    workbenchAction(record as ProcurementWorkItem).mode
+                      ? 'primary'
+                      : 'link'
+                  "
+                  size="small"
+                  :loading="claiming === record.key"
+                  :disabled="childOpen"
+                  @click="perform(record as ProcurementWorkItem)"
+                >
+                  {{ workbenchAction(record as ProcurementWorkItem).title }}
+                </Button>
+                <Button
+                  v-if="
+                    workbenchAction(record as ProcurementWorkItem).secondary
+                  "
+                  type="link"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="performSecondary(record as ProcurementWorkItem)"
+                >
+                  {{
+                    workbenchAction(record as ProcurementWorkItem).secondary
+                      ?.title
+                  }}
+                </Button>
+                <Button
+                  v-if="canEnterOrder(record as ProcurementWorkItem)"
+                  type="link"
+                  size="small"
+                  :disabled="childOpen"
+                  @click="openOrderEntry(record as ProcurementWorkItem)"
+                >
+                  开采购单
+                </Button>
+              </div>
             </template>
           </Table>
           <div v-else class="workbench-board" :aria-busy="loading">
@@ -531,7 +804,7 @@ onBeforeUnmount(() => {
                   :disabled="childOpen"
                   @click="select(entry, $event)"
                 >
-                  {{ entry.title }}
+                  {{ shortTitle(entry.title) }}
                 </button>
                 <p class="procurement-muted">
                   {{
@@ -545,8 +818,11 @@ onBeforeUnmount(() => {
                 <p class="procurement-muted">
                   {{ quantityText(entry) }} · {{ ownerNames(entry) }}
                 </p>
-                <p class="procurement-muted">
-                  交期 {{ entry.dueDate || '未约定' }}
+                <p>
+                  <span
+                    class="due-pill procurement-number"
+                    :class="dueBadge(entry.dueDate, today).tone"
+                    >{{ dueBadge(entry.dueDate, today).text }}</span>
                 </p>
                 <Button
                   size="small"
@@ -635,7 +911,14 @@ onBeforeUnmount(() => {
             <dt>经办人</dt>
             <dd>{{ ownerNames(selected) }}</dd>
             <dt>期望到货</dt>
-            <dd>{{ selected.dueDate || '未约定' }}</dd>
+            <dd>
+              {{ selected.dueDate || '未约定' }}
+              <span
+                v-if="selected.dueDate"
+                class="due-pill"
+                :class="dueBadge(selected.dueDate, today).tone"
+                >{{ dueBadge(selected.dueDate, today).text }}</span>
+            </dd>
           </dl>
           <div class="workbench-next-step">
             <span class="procurement-muted">下一步</span>
@@ -643,14 +926,29 @@ onBeforeUnmount(() => {
             <Button
               type="primary"
               block
+              :loading="claiming === selected.key"
               :disabled="childOpen"
               @click="perform(selected)"
             >
               {{ workbenchAction(selected).title }}
 </Button><Button
+              v-if="workbenchAction(selected).secondary"
+              block
+              :disabled="childOpen"
+              @click="performSecondary(selected)"
+            >
+              {{ workbenchAction(selected).secondary?.title }}
+</Button><Button
+              v-if="canEnterOrder(selected)"
+              block
+              :disabled="childOpen"
+              @click="openOrderEntry(selected)"
+            >
+              开采购单
+</Button><Button
               v-if="
                 workbenchAction(selected).action ||
-                workbenchAction(selected).title === '比较报价'
+                workbenchAction(selected).mode
               "
               type="text"
               block
@@ -671,8 +969,8 @@ onBeforeUnmount(() => {
     </div>
     <DocumentAction
       :open="!!actionEntry && active"
-      :kind="actionEntry ? workbenchAction(actionEntry).kind : 'tasks'"
-      :action="actionEntry ? workbenchAction(actionEntry).action : undefined"
+      :kind="launchKind"
+      :action="launchAction"
       :contract-id="actionEntry?.row.contractId"
       :source="
         actionEntry
@@ -680,8 +978,26 @@ onBeforeUnmount(() => {
           : undefined
       "
       lock-contract
-      @close="actionEntry = undefined"
+      @close="
+        actionEntry = undefined;
+        actionOverride = undefined;
+      "
       @updated="updated"
+    />
+    <RequestQuoteDialog
+      :open="!!quoteEntry && active"
+      :contract-id="quoteEntry?.row.contractId"
+      :request-id="requestOf(quoteEntry)"
+      :assignment-id="quoteEntry?.row.id"
+      @close="quoteEntry = undefined"
+      @saved="quoteSaved"
+    />
+    <RequestAssignDialog
+      :open="!!assignEntry && active"
+      :contract-id="assignEntry?.row.contractId"
+      :request-id="assignEntry?.row.id"
+      @close="assignEntry = undefined"
+      @saved="assignSaved"
     />
     <RecordDetail
       :open="!!detail && active"
@@ -703,6 +1019,14 @@ onBeforeUnmount(() => {
       :source-quote-id="compareEntry?.row.id"
       @close="compareEntry = undefined"
       @updated="load"
+      @ordered="compareEntry = undefined"
+    />
+    <PurchaseOrderEditor
+      :open="!!orderEntry"
+      :contract-id="orderEntry?.contractId"
+      :request-id="orderEntry?.requestId"
+      @close="orderEntry = undefined"
+      @saved="orderEntered"
     />
   </Page>
 </template>
@@ -713,42 +1037,195 @@ onBeforeUnmount(() => {
   container-type: inline-size;
 }
 
+/* Stages read left to right as the order of work: each step is an arrow into the next. */
 .workbench-stages {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 0;
   margin-top: 20px;
 }
 
-.workbench-stages button {
+.workbench-stages button,
+.workbench-onward {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
-  gap: 9px;
+  gap: 2px;
   align-items: flex-start;
   min-width: 0;
-  padding: 12px;
+  padding: 10px 14px 10px 24px;
+  margin-right: -6px;
   color: var(--procurement-secondary);
   text-align: left;
   cursor: pointer;
   background: var(--procurement-muted);
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 50%,
+    calc(100% - 12px) 100%,
+    0 100%,
+    12px 50%
+  );
+}
+
+.workbench-stages button:first-child {
+  padding-left: 14px;
+  border-radius: 8px 0 0 8px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 50%,
+    calc(100% - 12px) 100%,
+    0 100%
+  );
 }
 
 .workbench-stages strong {
   font-size: 22px;
   font-weight: 600;
+  line-height: 1.25;
   color: var(--procurement-text);
+}
+
+.workbench-stages small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .workbench-stages .selected {
   color: var(--procurement-accent);
   background: var(--procurement-selected);
-  border-color: var(--procurement-accent);
 }
 
 .workbench-stages .selected strong {
   color: inherit;
+}
+
+.workbench-stages .hot:not(.selected) strong {
+  color: hsl(var(--destructive));
+}
+
+.workbench-onward {
+  flex: 0.9 1 0;
+  margin-right: 0;
+  text-decoration: none;
+  background: transparent;
+  border: 1px dashed var(--procurement-line);
+  border-radius: 0 8px 8px 0;
+  clip-path: none;
+}
+
+.workbench-onward strong {
+  font-size: 15px;
+  color: var(--procurement-accent);
+}
+
+.workbench-onward:hover {
+  border-color: var(--procurement-accent);
+}
+
+.due-chip {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--procurement-secondary);
+  cursor: pointer;
+  background: var(--procurement-surface);
+  border: 1px solid var(--procurement-line);
+  border-radius: 999px;
+}
+
+.due-chip.danger.on {
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 10%);
+  border-color: hsl(var(--destructive));
+}
+
+.due-chip.warn.on {
+  color: hsl(var(--warning));
+  background: hsl(var(--warning) / 10%);
+  border-color: hsl(var(--warning));
+}
+
+.due-chip:focus-visible {
+  outline: 2px solid var(--procurement-accent);
+  outline-offset: 2px;
+}
+
+.due-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.due-pill.danger {
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 12%);
+}
+
+.due-pill.warn {
+  color: hsl(var(--warning));
+  background: hsl(var(--warning) / 12%);
+}
+
+.due-pill.muted {
+  color: var(--procurement-secondary);
+  background: var(--procurement-muted);
+}
+
+.workbench-subtitle {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.workbench-mainline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mainline-bars,
+.mainline-names {
+  display: flex;
+  gap: 3px;
+}
+
+.mainline-bars i {
+  display: block;
+  width: 20px;
+  height: 6px;
+  background: var(--procurement-line);
+  border-radius: 3px;
+}
+
+.mainline-bars i.is-done {
+  background: hsl(var(--success));
+}
+
+.mainline-bars i.is-active {
+  background: var(--procurement-accent);
+}
+
+.mainline-names span {
+  width: 20px;
+  font-size: 10px;
+  color: var(--procurement-secondary);
+  text-align: center;
+}
+
+.workbench-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
 }
 
 .workbench-stages button:focus-visible,
@@ -931,15 +1408,24 @@ onBeforeUnmount(() => {
   .workbench-panel {
     grid-row: 1;
   }
+}
 
+@container procurement-workbench (max-width: 760px) {
   .workbench-stages {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .workbench-stages button,
+  .workbench-onward {
+    flex-basis: 30%;
   }
 }
 
 @media (max-width: 640px) {
-  .workbench-stages {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .workbench-stages button,
+  .workbench-onward {
+    flex-basis: 45%;
   }
 
   .workbench-search {

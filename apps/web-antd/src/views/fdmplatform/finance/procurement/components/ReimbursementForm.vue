@@ -37,10 +37,12 @@ import {
 import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_LIMIT_TEXT,
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { costCategories, errorText, rows } from '../../../data';
 import { personLabel } from '../../../directory';
 import ContractPicker from '../../../documents/ContractPicker.vue';
@@ -295,10 +297,14 @@ function existingFile(line: ReimbursementLine, value: unknown) {
   line.evidenceRef = value ? String(value) : '';
   line.pendingFile = undefined;
 }
+function evidenceFile(line: ReimbursementLine) {
+  return line.evidenceRef
+    ? props.files.find((entry) => entry.id === line.evidenceRef)
+    : undefined;
+}
 async function download(line: ReimbursementLine) {
-  if (!props.record || !line.evidenceRef) return;
-  const file = props.files.find((entry) => entry.id === line.evidenceRef);
-  if (!file) return;
+  const file = evidenceFile(line);
+  if (!props.record || !file) return;
   try {
     downloadBlob(
       await downloadProcurementFinanceFile(props.record.id, file.id),
@@ -613,12 +619,32 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                           ?.name ||
                         (line.evidenceRef
                           ? '已有凭证（保留原引用）'
-                          : '支持 PDF、图片及文档，单份不超过 20 MB')
+                          : `支持 PDF、图片及文档，单份不超过 ${ATTACHMENT_LIMIT_TEXT}`)
                   }}
                 </p>
               </div>
               <div class="voucher-actions">
-                <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><Button
+                <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><FilePreviewButton
+                  v-if="line.pendingFile"
+                  type="default"
+                  size="small"
+                  :disabled="saving"
+                  :name="line.pendingFile.name"
+                  :file="line.pendingFile"
+                /><FilePreviewButton
+                  v-if="record && evidenceFile(line) && !line.pendingFile"
+                  type="default"
+                  size="small"
+                  :disabled="saving"
+                  :name="evidenceFile(line)!.name"
+                  :load="
+                    () =>
+                      downloadProcurementFinanceFile(
+                        record!.id,
+                        evidenceFile(line)!.id,
+                      )
+                  "
+                /><Button
                   v-if="line.evidenceRef && !line.pendingFile"
                   size="small"
                   :disabled="

@@ -237,7 +237,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<Partial<FdmdataEcShopDailyApi.EcShopDaily>>();
+    const row = (modalApi.getData() as Partial<FdmdataEcShopDailyApi.EcShopDaily>);
     formData.value = undefined;
     currentPlatformCode.value = normalizeEcPlatformCode(row?.platformCode);
     shopFetchSeq++;

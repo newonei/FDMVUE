@@ -144,7 +144,7 @@ const columns = [
         ><template #emptyText>{{
           loading
             ? '正在计算差异'
-            : '店铺范围未变化；确认后同步当前配置版本与财务小组快照。'
+            : '店铺范围未变化；确认后同步当前配置版本与分组快照。'
         }}</template></Table
       >
     </div>

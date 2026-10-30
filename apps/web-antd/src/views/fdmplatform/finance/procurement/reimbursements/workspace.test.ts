@@ -29,7 +29,6 @@ vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
 }));
-vi.mock('../../../documents/procurement-tabs', () => ({}));
 vi.mock('#/api/fdmplatform', () => ({ getDirectory: mocks.directory }));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinancePage: mocks.page,
@@ -246,6 +245,9 @@ describe('费用报销真实列表和付款事实', () => {
     expect(expenseAction({ ...entry(), blockReasons: ['资料缺失'] })).toBe(
       '查看详情',
     );
+    expect(expenseAction(entry())).toBe('办理付款');
+    // 外贸、内销入口不办理付款。
+    expect(expenseAction(entry(), false)).toBe('查看详情');
   });
   it('状态视图请求服务端全范围筛选，分页和编辑刷新保留条件', async () => {
     const { host } = await mount('?contractId=contract-1');

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DocumentRow } from '#/api/fdmplatform';
 import type {
   ProcurementFinanceRecord,
   ProcurementFinanceType,
@@ -14,26 +15,36 @@ import {
   Button,
   Card,
   Input,
+  message,
   Select,
   Space,
   Table,
+  TableSummary,
+  TableSummaryCell,
+  TableSummaryRow,
   Tag,
 } from 'ant-design-vue';
 
-import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
+import {
+  getProcurementFinancePage,
+  getProcurementFinanceSummary,
+} from '#/api/fdmplatform/procurement-finance';
 
+import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
 import { useRouteOwner } from '../../documents/useRouteOwner';
+import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
-import { financeStatus, financeTitles } from './model';
-
-import '../../documents/procurement-tabs';
+import InvoiceSourcesDialog from './components/InvoiceSourcesDialog.vue';
+import PaymentRecordDialog from './components/PaymentRecordDialog.vue';
+import { financeStatus, financeTitles, invoiceStates } from './model';
 
 import '../../components/compact-tables.css';
 
 const props = defineProps<{ type: ProcurementFinanceType }>();
+const inMergedView = useInMergedView();
 const route = useRoute();
 const router = useRouter();
 const active = useRouteOwner();
@@ -47,10 +58,15 @@ const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
 const status = ref<string>();
+/** 采购付款里金智迁入的 9 千多条历史付款默认不混进来 */
+const source = ref<'ALL' | 'JINZHI' | 'NATIVE'>('NATIVE');
+const isPayment = computed(() => effectiveType.value === 'PAYMENT');
 const loading = ref(false);
 const pageError = ref('');
 const open = ref(false);
 const selectedId = ref<string>();
+/** 发票付款查看来源：经付款记录挂的发票查采购单 */
+const sourceInvoiceId = ref<string>();
 const standaloneId = computed(() =>
   typeof route.query.standaloneId === 'string'
     ? route.query.standaloneId
@@ -94,6 +110,8 @@ async function load() {
       orderId: orderId.value,
       status: status.value,
       keyword: keyword.value || undefined,
+      source:
+        isPayment.value && source.value !== 'ALL' ? source.value : undefined,
       pageNo: page.value,
       pageSize: 10,
     });
@@ -119,6 +137,123 @@ function create(
   };
   selectedId.value = undefined;
   open.value = true;
+}
+function selectSource(value: 'ALL' | 'JINZHI' | 'NATIVE') {
+  if (source.value === value) return;
+  source.value = value;
+  page.value = 1;
+  void load();
+}
+const columns = computed(() =>
+  isPayment.value
+    ? [
+        // 列顺序参考金智「付款记录」：付款金额、供应商、采购单、付款日期、付款分类、是否收票
+        {
+          title: '付款金额',
+          key: 'money',
+          width: 140,
+          align: 'right' as const,
+        },
+        { title: '供应商 / 收款方', key: 'payee', width: 200, ellipsis: true },
+        { title: '采购单 / 付款单号', key: 'name', width: 260 },
+        { title: '付款日期', key: 'paidAt', width: 110 },
+        { title: '付款分类', key: 'method', width: 110 },
+        { title: '是否收票', key: 'invoice', width: 100 },
+        {
+          title: '所属公司 / 付款方式',
+          key: 'payer',
+          width: 200,
+          ellipsis: true,
+        },
+        { title: '状态', key: 'state', width: 100 },
+        { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
+      ]
+    : [
+        { title: '单据号 / 名称', key: 'name', width: 330 },
+        { title: '金额', key: 'money', width: 170, align: 'right' as const },
+        { title: '付款主体', key: 'payer', width: 250, ellipsis: true },
+        { title: '状态', key: 'state', width: 120 },
+        { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
+      ],
+);
+function moneyText(record: ProcurementFinanceRecord) {
+  if (record.amount === null || record.amount === undefined) return '未注明';
+  const amount = Number(record.amount).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return record.currency ? `${record.currency} ${amount}` : amount;
+}
+function payerText(record: ProcurementFinanceRecord) {
+  if (isPayment.value)
+    return (
+      [record.payerSnapshot?.name, record.payerAccount]
+        .filter(Boolean)
+        .join(' · ') || '—'
+    );
+  return payerSummary(record);
+}
+/** 本页合计（金智列表底部），按币种分开 */
+const pageTotal = computed(() => {
+  const totals = new Map<string, number>();
+  for (const row of rows.value) {
+    const value = Number(row.amount);
+    if (!Number.isFinite(value)) continue;
+    const currency = row.currency || '';
+    totals.set(currency, (totals.get(currency) ?? 0) + value);
+  }
+  return (
+    [...totals.entries()]
+      .map(([currency, value]) =>
+        `${currency} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim(),
+      )
+      .join(' / ') || '—'
+  );
+});
+/** 列表「新建」：先选采购单，再登记付款记录（不经请款） */
+const pickingOrder = ref(false);
+const paymentOrder = ref<{
+  available?: unknown;
+  code?: string;
+  contractId: string;
+  currency?: string;
+  orderId: string;
+  previous: Array<Record<string, unknown>>;
+  reference: Record<string, unknown>;
+  supplierName?: string;
+}>();
+async function orderPicked(row: DocumentRow) {
+  pickingOrder.value = false;
+  const orderId = String(row.standaloneId ?? row.id);
+  const contractId = row.standaloneId
+    ? 'standalone'
+    : String(row.contractId ?? '');
+  try {
+    const summary = await getProcurementFinanceSummary(contractId, orderId);
+    paymentOrder.value = {
+      contractId,
+      orderId,
+      code: String(row.record?.code ?? row.record?.orderCode ?? ''),
+      supplierName: String(row.record?.supplierName ?? ''),
+      currency: String(summary.currency ?? row.record?.currency ?? ''),
+      available: summary.availablePaymentAmount,
+      previous: Array.isArray(summary.payments)
+        ? (summary.payments as Array<Record<string, unknown>>)
+        : [],
+      reference: {
+        orderAmount: summary.orderAmount,
+        paid: summary.paidAmount,
+        unpaid: summary.unpaidAmount,
+      },
+    };
+  } catch (error) {
+    message.error(errorText(error));
+  }
+}
+function paymentSaved(record: ProcurementFinanceRecord) {
+  paymentOrder.value = undefined;
+  message.success(`已登记付款 ${record.code}`);
+  void load();
 }
 function close() {
   open.value = false;
@@ -174,7 +309,7 @@ watch(
 </script>
 <template>
   <Page
-    :title="financeTitles[effectiveType]"
+    :title="inMergedView ? undefined : financeTitles[effectiveType]"
     description="独立办理采购资金与费用，确认付款后才计入已付，成本按自身来源与归属单独管理。"
   >
     <Card>
@@ -226,7 +361,13 @@ watch(
               page = 1;
               load();
             "
-          /><Button type="primary" @click="create(effectiveType)">
+          /><Button
+            v-if="isPayment"
+            type="primary"
+            @click="pickingOrder = true"
+          >
+            登记付款记录
+</Button><Button v-else type="primary" @click="create(effectiveType)">
             新建{{ financeTitles[effectiveType] }}
 </Button><Button
             v-if="effectiveType === 'REQUEST'"
@@ -252,6 +393,27 @@ watch(
               effectiveType === 'PAYMENT_PLAN' ? '查看采购请款' : '查看付款计划'
             }}
 </Button><Button :loading="loading" @click="load">刷新</Button>
+          <div
+            v-if="isPayment"
+            class="source-switch"
+            role="group"
+            aria-label="付款来源"
+          >
+            <button
+              v-for="option in [
+                { key: 'NATIVE', label: '新系统' },
+                { key: 'JINZHI', label: '金智历史' },
+                { key: 'ALL', label: '全部' },
+              ] as const"
+              :key="option.key"
+              type="button"
+              :class="{ on: source === option.key }"
+              :aria-pressed="source === option.key"
+              @click="selectSource(option.key)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
 </Space><Table
           class="fdm-business-table"
           size="small"
@@ -261,14 +423,7 @@ watch(
           :loading="loading"
           row-key="id"
           :pagination="{ current: page, pageSize: 10, total }"
-          :columns="[
-            { title: '单据号 / 名称', key: 'name', width: 330 },
-            { title: '金额', dataIndex: 'amount', width: 150 },
-            { title: '币种', dataIndex: 'currency', width: 90 },
-            { title: '付款主体', key: 'payer', width: 250, ellipsis: true },
-            { title: '状态', key: 'state', width: 120 },
-            { title: '操作', key: 'action', width: 140, fixed: 'right' },
-          ]"
+          :columns="columns"
           @change="
             (value) => {
               page = value.current ?? 1;
@@ -276,19 +431,41 @@ watch(
             }
           "
         >
+          <template v-if="isPayment" #summary>
+            <TableSummary v-if="rows.length > 0">
+              <TableSummaryRow class="sum-row">
+                <TableSummaryCell :index="0" align="right">
+                  <span class="num">{{ pageTotal }}</span>
+                </TableSummaryCell>
+                <TableSummaryCell :index="1" :col-span="8">
+                  本页合计
+                </TableSummaryCell>
+              </TableSummaryRow>
+            </TableSummary>
+          </template>
           <template #bodyCell="{ column, record }">
-            <Button
-              v-if="column.key === 'name'"
-              type="link"
-              :title="[record.code, record.name].filter(Boolean).join(' · ')"
-              @click="show(record as ProcurementFinanceRecord)"
-            >
-              {{ record.code }} · {{ record.name }}
-</Button><span
+            <span v-if="column.key === 'name'" class="name-cell"><Button
+                type="link"
+                :title="[record.code, record.name].filter(Boolean).join(' · ')"
+                @click="show(record as ProcurementFinanceRecord)"
+              >
+                {{ record.code }} · {{ record.name }} </Button><Button
+                v-if="record.invoiceId"
+                type="link"
+                size="small"
+                class="source-link"
+                @click="sourceInvoiceId = String(record.invoiceId)"
+              >
+                {{
+                  (record.invoice?.orderCount ?? 1) > 1
+                    ? `集中收票-查看来源（${record.invoice?.orderCount} 个采购单）`
+                    : `付款发票 ${record.invoice?.code ?? ''} · 查看来源`
+                }}
+              </Button></span><span
               v-else-if="column.key === 'payer'"
               class="fdm-cell-line"
-              :title="payerSummary(record as ProcurementFinanceRecord)"
-              >{{ payerSummary(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
+              :title="payerText(record as ProcurementFinanceRecord)"
+              >{{ payerText(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
               {{ financeStatus(record.status) }}
 </Tag><Button
               v-else-if="column.key === 'action'"
@@ -297,22 +474,60 @@ watch(
             >
               查看 / 办理
             </Button>
-            <span v-else-if="column.dataIndex === 'amount'">{{
-              record.amount ?? '未注明'
+            <span v-else-if="column.key === 'money'" class="num">{{ moneyText(record as ProcurementFinanceRecord)
+              }}<small v-if="!record.currency" class="muted">
+                币种未注明</small></span>
+            <span
+              v-else-if="column.key === 'payee'"
+              class="fdm-cell-line"
+              :title="String(record.payeeName ?? '')"
+              >{{ record.payeeName || '—' }}</span>
+            <span v-else-if="column.key === 'paidAt'" class="num">{{
+              record.paidAt ?? '—'
             }}</span>
-            <span v-else-if="column.dataIndex === 'currency'">{{
-              record.currency || '未注明'
+            <span v-else-if="column.key === 'method'">{{
+              record.paymentMethod || '—'
             }}</span>
+            <Tag
+              v-else-if="column.key === 'invoice' && record.invoiceState"
+              :color="invoiceStates[String(record.invoiceState)]?.color"
+            >
+              {{ invoiceStates[String(record.invoiceState)]?.label }}
+            </Tag>
           </template>
         </Table>
       </Space>
-</Card><FinanceDocument
+</Card><InvoiceSourcesDialog
+      :open="!!sourceInvoiceId && active"
+      :invoice-id="sourceInvoiceId"
+      title="付款记录"
+      @close="sourceInvoiceId = undefined"
+    /><FinanceDocument
       :open="open && active"
       :type="newType"
       :record-id="selectedId"
       :context="context"
       @close="close"
       @updated="load"
+    />
+    <OrderPicker
+      :open="pickingOrder && active"
+      @close="pickingOrder = false"
+      @selected="orderPicked"
+    />
+    <PaymentRecordDialog
+      v-if="paymentOrder"
+      :open="!!paymentOrder && active"
+      :contract-id="paymentOrder.contractId"
+      :order-id="paymentOrder.orderId"
+      :order-code="paymentOrder.code"
+      :supplier-name="paymentOrder.supplierName"
+      :currency="paymentOrder.currency"
+      :available="paymentOrder.available"
+      :previous="paymentOrder.previous"
+      :reference="paymentOrder.reference"
+      @close="paymentOrder = undefined"
+      @saved="paymentSaved"
     />
   </Page>
   <BusinessDocumentDetail
@@ -322,3 +537,59 @@ watch(
     @updated="load"
   />
 </template>
+
+<style scoped>
+.name-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.name-cell .source-link {
+  height: auto;
+  padding: 0 15px;
+  font-size: 12px;
+}
+
+.source-switch {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.source-switch button {
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.source-switch button.on {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+}
+
+.source-switch button:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+.sum-row :deep(td) {
+  font-weight: 600;
+  background: hsl(var(--accent));
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+</style>

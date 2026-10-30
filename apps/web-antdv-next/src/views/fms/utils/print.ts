@@ -94,12 +94,16 @@ export function printFmsHtml(printHtml: string) {
   iframe.style.height = '0';
   iframe.style.border = '0';
   iframe.srcdoc = printHtml;
-  iframe.onload = () => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-    window.setTimeout(() => iframe.remove(), 1000);
-  };
-  document.body.appendChild(iframe);
+  iframe.addEventListener(
+    'load',
+    () => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      window.setTimeout(() => iframe.remove(), 1000);
+    },
+    { once: true },
+  );
+  document.body.append(iframe);
 }
 
 /** 克隆表格区域并清理不可打印元素 */

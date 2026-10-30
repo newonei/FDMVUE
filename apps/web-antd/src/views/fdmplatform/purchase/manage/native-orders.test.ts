@@ -8,18 +8,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Workspace from './index.vue';
 const mocks = vi.hoisted(() => ({
+  overview: vi.fn(),
   page: vi.fn(),
   detail: vi.fn(),
   contract: vi.fn(),
 }));
-vi.mock('../../documents/procurement-tabs', () => ({}));
 vi.mock('#/api/fdmplatform', () => ({
   getAttachments: vi.fn(),
   getContract: mocks.contract,
   newIdempotencyKey: () => 'test-key',
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
+  getOrderInvoices: vi.fn(async () => ({ invoicedAmount: 0, invoices: [] })),
   getProcurementOrders: mocks.page,
+  getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
   downloadProcurementFile: vi.fn(),
   exportProcurementOrder: vi.fn(),
@@ -130,7 +132,106 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/StandaloneOrderFiles.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderDetails.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderLines.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiCheckLevels: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/BatchRequestDialog.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('#/api/fdmplatform/warehouse', () => ({
+  getStockIns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+  getPurchaseReturns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+}));
+vi.mock('./components/OrderSubDocMenu.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: { type: Array, default: () => [] },
+      disabled: Boolean,
+    },
+    emits: ['pick'],
+    setup: (props, ctx) => () =>
+      h(
+        'div',
+        (
+          props.items as Array<{
+            disabled?: boolean;
+            key: string;
+            label: string;
+          }>
+        ).map((item) =>
+          h(
+            'button',
+            {
+              disabled: props.disabled || item.disabled,
+              onClick: () => ctx.emit('pick', item.key),
+            },
+            item.label,
+          ),
+        ),
+      ),
+  }),
+}));
+vi.mock('./components/OrderTimeline.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderSummaryCards.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderStockDocs.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderInvoices.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/PurchaseOrderEditor.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('../warehouse/StockInDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup(props, { emit }) {
+      return () =>
+        props.open
+          ? h(
+              'div',
+              {
+                'data-stock-in': props.orderId,
+                'data-contract': props.contractId,
+              },
+              [
+                h(
+                  'button',
+                  {
+                    onClick: () =>
+                      emit('saved', { code: 'RK001', directShip: false }),
+                  },
+                  '确认入库',
+                ),
+                h('button', { onClick: () => emit('close') }, '取消入库'),
+              ],
+            )
+          : null;
+    },
+  }),
+}));
+vi.mock('./components/OrderExportMenu.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderContract.vue', () => ({
@@ -197,7 +298,9 @@ vi.mock('ant-design-vue', () => {
     Drawer: defineComponent({
       props: { open: Boolean },
       setup: (props, ctx) => () =>
-        props.open ? h('section', ctx.slots.default?.()) : null,
+        props.open
+          ? h('section', [ctx.slots.extra?.(), ctx.slots.default?.()])
+          : null,
     }),
     Empty: block,
     Progress: block,
@@ -205,9 +308,45 @@ vi.mock('ant-design-vue', () => {
     Select: block,
     Space: block,
     Table: table,
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: defineComponent({
+      props: { items: { type: Array, default: () => [] } },
+      emits: ['click'],
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          (
+            props.items as Array<{
+              children?: Array<{
+                disabled?: boolean;
+                key: string;
+                label: string;
+              }>;
+              disabled?: boolean;
+              key: string;
+              label: string;
+            }>
+          )
+            .flatMap((item) => item.children ?? [item])
+            .map((item) =>
+              h(
+                'button',
+                {
+                  disabled: item.disabled,
+                  onClick: () => ctx.emit('click', { key: item.key }),
+                },
+                item.label,
+              ),
+            ),
+        ),
+    }),
     TabPane: block,
     Tabs: block,
     Tag: block,
+    Modal: { confirm: vi.fn(), warning: vi.fn() },
     message: { success: vi.fn() },
   };
 });
@@ -236,7 +375,7 @@ function contractFixture() {
     code: 'HT-1',
     name: '采购合同',
     version: 1,
-    status: 'ACTIVE',
+    status: 'EXECUTING',
     currency: 'CNY',
     companyId: 1,
     items: [],
@@ -275,6 +414,19 @@ function orderFixture(id = 'order-1') {
 const dispose: (() => void)[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.overview.mockResolvedValue({
+    orders: 0,
+    open: 0,
+    overdue: 0,
+    maxOverdueDays: 0,
+    unsigned: 0,
+    unpaid: 0,
+    asOf: '2026-10-08',
+    openAmount: {},
+    unpaidAmount: {},
+    arrivedUnpaidAmount: {},
+    attention: [],
+  });
   mocks.page.mockResolvedValue({ list: nativeRows(), total: 6 });
   mocks.contract.mockImplementation(async () => contractFixture());
   mocks.detail.mockImplementation(async (_contractId, id) => orderFixture(id));
@@ -385,7 +537,7 @@ describe('related creation inside the purchase workspace', () => {
   it('generates orders directly from the filtered list without leaving the page', async () => {
     const { host, router } = await mount();
     const location = router.currentRoute.value.fullPath;
-    click(host, '生成采购单');
+    click(host, '从方案生成');
     await settle();
     const dialog = host.querySelector<HTMLElement>(
       '[data-related-action="GENERATE_ORDERS"]',
@@ -403,7 +555,7 @@ describe('related creation inside the purchase workspace', () => {
   });
   it('lets the existing action select a contract on the unfiltered list and refreshes after creation', async () => {
     const { host, router } = await mount('/fdmprocurement/platform-orders');
-    click(host, '生成采购单');
+    click(host, '从方案生成');
     await settle();
     const dialog = host.querySelector<HTMLElement>(
       '[data-related-action="GENERATE_ORDERS"]',
@@ -413,31 +565,29 @@ describe('related creation inside the purchase workspace', () => {
     expect(dialog?.dataset.contractId).toBeUndefined();
     click(host, '保存关联单据');
     await settle();
-    expect(mocks.page).toHaveBeenCalledTimes(2);
+    // The completion-queue size request is separate from the list refresh.
+    expect(
+      mocks.page.mock.calls.filter(
+        ([params]) => params?.pendingCompletion !== true,
+      ),
+    ).toHaveLength(2);
     expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
     expect(router.currentRoute.value.fullPath).toBe(
       '/fdmprocurement/platform-orders',
     );
   });
-  it('passes the current order into arrival and return creation and refreshes the parent after saving', async () => {
+  it('passes the current order into stock-in and return creation and refreshes the parent after saving', async () => {
     const { host, router } = await mount(detailLocation);
-    click(host, '登记到货');
+    click(host, '入库单');
     await settle();
-    const dialog = host.querySelector<HTMLElement>(
-      '[data-related-action="RECORD_ARRIVAL"]',
-    );
-    expect(dialog?.dataset.kind).toBe('arrivals');
-    expect(dialog?.dataset.contractId).toBe('contract-1');
-    expect(dialog?.dataset.contractLocked).toBe('true');
-    expect(JSON.parse(dialog!.dataset.source!)).toEqual({
-      kind: 'orders',
-      id: 'order-1',
-    });
+    const dialog = host.querySelector<HTMLElement>('[data-stock-in]');
+    expect(dialog?.dataset.stockIn).toBe('order-1');
+    expect(dialog?.dataset.contract).toBe('contract-1');
     expect(router.currentRoute.value.fullPath).toBe(detailLocation);
-    click(host, '取消关联建单');
+    click(host, '取消入库');
     await settle();
     expect(mocks.detail).toHaveBeenCalledTimes(1);
-    click(host, '采购退货');
+    click(host, '采购退货单');
     await settle();
     const returns = host.querySelector<HTMLElement>(
       '[data-related-action="RETURN_ARRIVAL"]',
@@ -474,18 +624,15 @@ describe('related creation inside the purchase workspace', () => {
     });
     await settle();
     expect(host.querySelector<HTMLElement>('[data-related-list]')).toBeNull();
-    click(host, '登记到货');
+    click(host, '入库单');
     await settle();
     expect(
-      JSON.parse(
-        host.querySelector<HTMLElement>('[data-related-action]')!.dataset
-          .source!,
-      ),
-    ).toEqual({ kind: 'orders', id: 'order-2' });
+      host.querySelector<HTMLElement>('[data-stock-in]')?.dataset.stockIn,
+    ).toBe('order-2');
     await router.push({ query: { contractId: 'contract-1' } });
     await settle();
-    expect(host.querySelector<HTMLElement>('[data-related-action]')).toBeNull();
-    click(host, '生成采购单');
+    expect(host.querySelector<HTMLElement>('[data-stock-in]')).toBeNull();
+    click(host, '从方案生成');
     await settle();
     const generation = host.querySelector<HTMLElement>('[data-related-action]');
     expect(generation).not.toBeNull();

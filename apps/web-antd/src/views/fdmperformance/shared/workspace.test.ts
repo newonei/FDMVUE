@@ -4,7 +4,6 @@ import {
   actionLabel,
   canAcknowledgeAdjustment,
   canHandleReview,
-  deadlineMeta,
   defaultManagementScope,
   hasAction,
   managementScopes,
@@ -67,10 +66,19 @@ describe('performance workspace access', () => {
       canManage: true,
       canConfigure: false,
       canExport: true,
+      canManageTemplate: false,
       availableScopes: ['SELF', 'INITIATED', 'MANAGED'],
     };
     expect(managementScopes(access)).toEqual(['INITIATED', 'MANAGED']);
     expect(defaultManagementScope(access)).toBe('INITIATED');
+    expect(
+      defaultManagementScope({
+        ...access,
+        role: 'ADMIN',
+        canConfigure: true,
+        availableScopes: ['VISIBLE', 'SELF', 'INITIATED', 'MANAGED', 'ALL'],
+      }),
+    ).toBe('ALL');
     expect(
       managementScopes({
         ...access,
@@ -79,15 +87,5 @@ describe('performance workspace access', () => {
       }),
     ).toEqual([]);
     expect(managementScopes()).toEqual([]);
-  });
-  it('uses the end of the local cutoff date before marking a task overdue', () => {
-    expect(
-      deadlineMeta('2026-09-18', new Date('2026-09-18T10:00:00')).overdue,
-    ).toBe(false);
-    expect(
-      deadlineMeta('2026-09-18', new Date('2026-09-19T00:00:00')).overdue,
-    ).toBe(true);
-    expect(deadlineMeta(undefined).text).toBe('未设截止日期');
-    expect(deadlineMeta('invalid').overdue).toBe(false);
   });
 });

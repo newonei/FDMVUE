@@ -10,6 +10,12 @@ export interface ExchangeRate {
   source: string;
   fetchedAt: number | string;
   fallback: boolean;
+  /** 手动修改时保留的来源公布值、来源名称、修改人和原因 */
+  sourceRate?: Decimal | null;
+  sourceName?: null | string;
+  overriddenBy?: null | number;
+  overriddenAt?: null | string;
+  reason?: null | string;
 }
 export interface ExchangeRateBundle {
   requestedDate: string;
@@ -37,6 +43,18 @@ export function fetchExchangeRates(date: string, idempotencyKey: string) {
     { timeout: 120_000 },
   );
 }
+/** 财务手动修改某日某币种汇率；rateToCny 为空表示恢复来源公布值 */
+export function overrideExchangeRate(body: {
+  currency: string;
+  date: string;
+  idempotencyKey: string;
+  rateToCny?: null | string;
+  reason?: string;
+}) {
+  return requestClient.post<ExchangeRateBundle>(`${base}/override`, body, {
+    timeout: 120_000,
+  });
+}
 export function convertReceiptToRmb(params: {
   amount: Decimal;
   currency: string;
@@ -45,5 +63,15 @@ export function convertReceiptToRmb(params: {
   return requestClient.get<ReceiptConversion>(`${base}/convert`, {
     params,
     timeout: 120_000,
+  });
+}
+export interface ExchangeRatePoint {
+  rateDate: string;
+  rateToCny: Decimal;
+}
+/** 只读已保存的每日参考值；同一来源日期只出现一次。 */
+export function getExchangeRateHistory(currency: string, days: number) {
+  return requestClient.get<ExchangeRatePoint[]>(`${base}/history`, {
+    params: { currency, days },
   });
 }

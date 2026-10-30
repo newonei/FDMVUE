@@ -15,7 +15,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   message,
   Modal,
   Space,
@@ -36,9 +35,11 @@ import {
   createProcurementFinanceWithAttachments,
   procurementFinanceActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
 import CreationAttachments from '../../../components/CreationAttachments.vue';
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, rows, selectField } from '../../../data';
 import { needsImportedValue } from '../../../documents/import-completion';
@@ -56,10 +57,13 @@ import {
   payableBalance,
 } from '../model';
 import FinanceForm from './FinanceForm.vue';
+import InvoiceSourcesDialog from './InvoiceSourcesDialog.vue';
 import ReimbursementDetail from './ReimbursementDetail.vue';
 import ReimbursementForm from './ReimbursementForm.vue';
 const props = defineProps<{
   context?: Record<string, unknown>;
+  /** 外贸、内销入口只办报销本身，付款与成本归集归采购、财务。 */
+  hidePayment?: boolean;
   open: boolean;
   recordId?: string;
   type: ProcurementFinanceType;
@@ -88,7 +92,11 @@ const related = ref<{
   context: Record<string, unknown>;
   type: ProcurementFinanceType;
 }>();
-const childOpen = computed(() => actionOpen.value || !!related.value);
+/** 发票付款查看来源：采购单经付款记录挂的发票查，付款记录自己不存 */
+const sourcesOpen = ref(false);
+const childOpen = computed(
+  () => actionOpen.value || !!related.value || sourcesOpen.value,
+);
 const busy = computed(() => saving.value || submitting.value);
 const operationKeys = new Map<string, string>();
 const uploadKeys = new WeakMap<File, string>();
@@ -542,7 +550,8 @@ async function relatedUpdated() {
 }
 </script>
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    :resize-key="`finance-${type}`"
     :open="open"
     :title="
       record
@@ -582,7 +591,19 @@ async function relatedUpdated() {
                 )
               }}
             </RelatedLink>
-</Descriptions.Item><Descriptions.Item label="关联采购单">
+</Descriptions.Item><Descriptions.Item v-if="record.invoiceId" label="来源（付款发票）">
+            {{
+              record.invoice?.code ?? record.invoice?.invoiceNo ?? '付款发票'
+            }}
+            · {{ record.invoice?.orderCount ?? 1 }} 个采购单
+            <Button type="link" size="small" @click="sourcesOpen = true">
+              {{
+                (record.invoice?.orderCount ?? 1) > 1
+                  ? '集中收票-查看来源'
+                  : '查看来源'
+              }}
+            </Button>
+</Descriptions.Item><Descriptions.Item v-else label="关联采购单">
             <RelatedLink
               :target="
                 documentTarget('orders', record.contractId, record.orderId)
@@ -670,6 +691,7 @@ async function relatedUpdated() {
           :files="files"
           :user-names="userNames"
           :busy="busy || childOpen"
+          :hide-payment="hidePayment"
           @action="openAction"
           @pay="pay"
           @allocate="allocateCosts"
@@ -800,13 +822,20 @@ async function relatedUpdated() {
             ]"
           >
             <template #bodyCell="{ column, record: file }">
-              <Button
-                v-if="column.key === 'action'"
-                type="link"
-                @click="download(file as ProcurementFinanceFile)"
-              >
-                下载
-              </Button>
+              <template v-if="column.key === 'action' && record">
+                <FilePreviewButton
+                  :name="file.name"
+                  :load="
+                    () => downloadProcurementFinanceFile(record!.id, file.id)
+                  "
+                />
+                <Button
+                  type="link"
+                  @click="download(file as ProcurementFinanceFile)"
+                >
+                  下载
+                </Button>
+              </template>
             </template>
           </Table>
 </Card><Card
@@ -824,13 +853,28 @@ async function relatedUpdated() {
             ]"
           >
             <template #bodyCell="{ column, record: file }">
-              <Button
-                v-if="column.key === 'action'"
-                type="link"
-                @click="downloadSource(file as BusinessDocumentFile)"
+              <template
+                v-if="
+                  column.key === 'action' && record?.sourceAttachmentDocumentId
+                "
               >
-                下载
-              </Button>
+                <FilePreviewButton
+                  :name="file.name"
+                  :load="
+                    () =>
+                      downloadBusinessDocumentFile(
+                        record!.sourceAttachmentDocumentId!,
+                        file.id,
+                      )
+                  "
+                />
+                <Button
+                  type="link"
+                  @click="downloadSource(file as BusinessDocumentFile)"
+                >
+                  下载
+                </Button>
+              </template>
             </template>
           </Table>
 </Card><Card
@@ -886,7 +930,13 @@ async function relatedUpdated() {
         />
       </template>
     </ActionDialog>
-  </Drawer>
+    <InvoiceSourcesDialog
+      :open="sourcesOpen && open"
+      :invoice-id="record?.invoiceId"
+      title="付款记录"
+      @close="sourcesOpen = false"
+    />
+  </FdmResizableDrawer>
   <FinanceDocument
     v-if="related"
     :open="open"

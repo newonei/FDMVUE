@@ -19,7 +19,6 @@ export type RelatedTarget =
     }
   | { contractId: string; documentId: string; type: 'customs' }
   | { contractId: string; type: 'contract' }
-  | { eventId?: string; poolId: string; type: 'stock' }
   | { id: string; type: 'customer' | 'product' | 'supplier' }
   | { id: string; type: 'procurementFinance' }
   | { kind: DocumentKind; standaloneId: string; type: 'businessDocument' }
@@ -70,18 +69,10 @@ const nativeRoutes: Record<
     query: { invoiceType: 'PURCHASE' },
   },
   PURCHASE_PAYMENT: { path: '/caiwu/platform-procurement-payments' },
-  STOCK_IN: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stock-ins' },
-  },
-  STOCK_OUT: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stock-outs' },
-  },
-  STOCKTAKE: {
-    path: '/gongchang/platform-stock',
-    query: { inventoryType: 'stocktakes' },
-  },
+};
+const fulfillmentMethodLabels: Record<string, string> = {
+  BUY: '外采',
+  MAKE: '自产',
 };
 export function businessRecordTarget(
   recordType: unknown,
@@ -113,16 +104,33 @@ export function standaloneLocation(
     throw new Error('单据链接包含冲突的定位，请从单据列表重新打开');
   return id;
 }
-export function stockTarget(
-  poolId: unknown,
-  eventId?: unknown,
-): RelatedTarget | undefined {
-  const pool = referenceId(poolId);
-  const event = referenceId(eventId);
-  if (!pool || (eventId !== undefined && !event)) return undefined;
-  return { type: 'stock', poolId: pool, ...(event ? { eventId: event } : {}) };
+/** 外贸页面在内销菜单下的对应页面；其余采购、财务等页面两条业务线共用 */
+const domesticPaths: Record<string, string> = {
+  '/fdmwaimao/platform-customers': '/neixiao/platform-customers',
+  '/fdmwaimao/platform-contracts': '/neixiao/platform-contracts',
+  '/fdmwaimao/platform-requests': '/neixiao/platform-requests',
+  '/fdmwaimao/platform-shipments': '/neixiao/platform-shipments',
+  '/fdmwaimao/platform-returns': '/neixiao/platform-returns',
+};
+/** 从内销菜单打开的链接留在内销菜单，避免跳到外贸的客户、合同等页面 */
+export function channelRoute<T extends { path: string }>(
+  location: T,
+  fromPath?: string,
+): T {
+  if (!fromPath?.startsWith('/neixiao/')) return location;
+  const path = domesticPaths[location.path];
+  return path ? { ...location, path } : location;
 }
-export function navigationRoute(target: RelatedTarget): {
+export function navigationRoute(
+  target: RelatedTarget,
+  fromPath?: string,
+): {
+  path: string;
+  query: Record<string, string>;
+} {
+  return channelRoute(targetRoute(target), fromPath);
+}
+function targetRoute(target: RelatedTarget): {
   path: string;
   query: Record<string, string>;
 } {
@@ -156,14 +164,6 @@ export function navigationRoute(target: RelatedTarget): {
         contractId: target.contractId,
         documentId: target.documentId,
         ...(target.kind === 'tasks' ? { queue: 'tasks' } : {}),
-      },
-    };
-  if (target.type === 'stock')
-    return {
-      path: '/gongchang/platform-stock',
-      query: {
-        poolId: target.poolId,
-        ...(target.eventId ? { eventId: target.eventId } : {}),
       },
     };
   if (target.type === 'customs')
@@ -263,11 +263,11 @@ export function relatedDocumentLinks(
   function assignment(id: unknown) {
     const current = find(contract.assignments, id);
     doc(
-      '来源履约任务',
+      '来源采购任务',
       'tasks',
       id,
       current
-        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '履约任务'} · ${current.method === 'BUY' ? '外采' : current.method === 'MAKE' ? '自产' : '库存'} ${current.quantity}`
+        ? `${contract.items.find((entry) => entry.id === current.contractItemId)?.skuName ?? '采购任务'} · ${fulfillmentMethodLabels[String(current.method)] ?? '库存'} ${current.quantity}`
         : undefined,
     );
     if (current) {

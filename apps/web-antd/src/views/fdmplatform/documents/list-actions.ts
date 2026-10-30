@@ -68,7 +68,7 @@ export function documentListNextStep(
     }
     case 'plans': {
       if (['DRAFT', 'REJECTED', 'RETURNED', 'SUBMITTED'].includes(status))
-        return own('SUBMIT_PLAN', '方案生效');
+        return own('SUBMIT_PLAN', '确认方案');
       if (['APPROVED', 'PARTIALLY_APPROVED'].includes(status))
         return related('GENERATE_ORDERS');
       return { hint: '请查看方案当前执行进度' };

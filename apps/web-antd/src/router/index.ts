@@ -6,6 +6,9 @@ import {
 
 import { resetStaticRoutes } from '@vben/utils';
 
+import { installMergedRouteRedirects } from '#/views/fdmplatform/documents/merged-routes';
+import { installPlatformTabPolicy } from '#/views/fdmplatform/documents/tab-policy';
+
 import { createRouterGuard } from './guard';
 import { routes } from './routes';
 import { setupBaiduTongJi } from './tongji';
@@ -34,6 +37,10 @@ const resetRoutes = () => resetStaticRoutes(router, routes);
 
 // 创建路由守卫
 createRouterGuard(router);
+// 业务协同平台页面按菜单复用标签，详情与筛选参数不再另开标签
+installPlatformTabPolicy(router);
+// 业务协同平台合并后的旧菜单地址跳转到部门页面的对应页签
+installMergedRouteRedirects(router);
 // 设置百度统计
 setupBaiduTongJi(router);
 

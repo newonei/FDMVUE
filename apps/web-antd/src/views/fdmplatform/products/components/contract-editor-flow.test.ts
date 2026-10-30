@@ -28,8 +28,14 @@ vi.mock('#/api/fdmplatform/customers', () => ({
   saveCustomer: api.saveCustomer,
   getCustomerOptions: vi.fn().mockResolvedValue({
     countries: [{ code: 'CN', nameZh: '中国', nameEn: 'China', iso3: 'CHN' }],
-    customerSources: [],
+    customerSources: ['展会'],
+    productCategories: [{ value: 'YOGA', label: '瑜伽系列产品' }],
   }),
+}));
+vi.mock('#/api/system/area', () => ({
+  getAreaTree: vi
+    .fn()
+    .mockResolvedValue([{ name: '上海市', children: [{ name: '上海市' }] }]),
 }));
 vi.mock('#/api/fdmplatform/products', () => ({ resolveProducts: api.resolve }));
 vi.mock('#/api/fdmplatform/contract-review', () => ({
@@ -251,10 +257,13 @@ async function fill(
   );
   await nextTick();
 }
-async function mountEditor() {
+async function mountEditor(
+  defaultBusinessType: 'DOMESTIC' | 'FOREIGN' = 'FOREIGN',
+) {
   const host = document.createElement('div');
   document.body.append(host);
   const props = reactive({
+    defaultBusinessType,
     open: false,
     master: [],
     directory: {
@@ -272,7 +281,7 @@ async function mountEditor() {
   props.open = true;
   await vi.waitFor(() =>
     expect(
-      host.querySelector('[data-label="订单所属公司"] option[value="1"]'),
+      host.querySelector('[data-label="合同主体"] option[value="1"]'),
     ).toBeTruthy(),
   );
   return { host, props };
@@ -388,6 +397,84 @@ describe('order entry without changing menus', () => {
     expect(button(host, '保存草稿').disabled).toBe(false);
   });
 
+  it('opens a domestic order in RMB with only domestic customers and no trade-only fields', async () => {
+    const { host } = await mountEditor('DOMESTIC');
+    await vi.waitFor(() =>
+      expect(api.customers).toHaveBeenCalledWith(
+        expect.objectContaining({ salesChannel: 'DOMESTIC' }),
+      ),
+    );
+    expect(
+      host.querySelector<HTMLInputElement>('[data-label="合同币种"] input')
+        ?.value,
+    ).toBe('人民币（CNY）');
+    expect(host.querySelector('[data-label="合同币种"] select')).toBeNull();
+    for (const label of ['阿里信保订单', '业务部门（可选）', '业务类型'])
+      expect(host.querySelector(`[data-label="${label}"]`)).toBeNull();
+    expect(host.querySelector('[data-label="样品单"]')).toBeTruthy();
+    button(host, '新增客户并选用').click();
+    await nextTick();
+    const customer = host.querySelector<HTMLElement>(
+      '[data-drawer="新建内销客户"]',
+    )!;
+    expect(customer).toBeTruthy();
+    expect(customer.querySelector('[data-label="国家 / 地区"]')).toBeNull();
+    expect(customer.querySelector('[data-label="省份"]')).toBeTruthy();
+    await fill(customer, '客户全称', '内销客户甲');
+    await fill(customer, '纳税人识别号', '91310000AB1234567X');
+    await vi.waitFor(() =>
+      expect(
+        customer.querySelector('[data-label="省份"] option[value="上海市"]'),
+      ).toBeTruthy(),
+    );
+    await fill(customer, '省份', '上海市', 'select');
+    await fill(customer, '城市', '上海市', 'select');
+    await fill(customer, '详细地址', '浦东新区某路 1 号');
+    await fill(customer, '联系人', '张三');
+    await fill(customer, '联系电话', '13800000000');
+    await fill(customer, '客户来源', '展会', 'select');
+    await fill(customer, '产品种类', 'YOGA', 'select');
+    api.saveCustomer.mockResolvedValueOnce({
+      id: 'domestic-customer',
+      name: '内销客户甲',
+      active: true,
+      type: 'CUSTOMER',
+      code: 'KH-2',
+      version: 0,
+      salesChannel: 'DOMESTIC',
+    });
+    await vi.waitFor(() =>
+      expect(button(customer, '保存并选用').disabled).toBe(false),
+    );
+    button(customer, '保存并选用').click();
+    await vi.waitFor(() =>
+      expect(api.saveCustomer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          salesChannel: 'DOMESTIC',
+          country: 'CN',
+          province: '上海市',
+          city: '上海市',
+          contactName: '张三',
+          productCategories: expect.anything(),
+          invoice: expect.objectContaining({ taxNo: '91310000AB1234567X' }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps foreign currency choice and offers a sample switch instead of business types', async () => {
+    const { host } = await mountEditor('FOREIGN');
+    await vi.waitFor(() =>
+      expect(api.customers).toHaveBeenCalledWith(
+        expect.objectContaining({ salesChannel: 'FOREIGN' }),
+      ),
+    );
+    expect(host.querySelector('[data-label="合同币种"] select')).toBeTruthy();
+    expect(host.querySelector('[data-label="样品单"]')).toBeTruthy();
+    expect(host.querySelector('[data-label="业务类型"]')).toBeNull();
+    expect(host.querySelector('[data-label="业务部门（可选）"]')).toBeNull();
+  });
+
   it('focuses the newly added duplicate and copied row, and Enter moves quantity to price to the next line', async () => {
     const { host } = await mountEditor();
     await addProduct(host);
@@ -418,6 +505,31 @@ describe('order entry without changing menus', () => {
     expect(document.activeElement).toBe(
       rows[2]!.querySelector('[data-column="quantity"] input'),
     );
+  });
+
+  it('links domestic unit price and line total, and hides the contract number', async () => {
+    const { host } = await mountEditor('DOMESTIC');
+    expect(host.querySelector('[data-label="订单号"]')).toBeNull();
+    expect(host.querySelector('[data-label="内部单号"]')).toBeTruthy();
+    await addProduct(host);
+    const row = host.querySelector<HTMLElement>('[data-row]')!;
+    const input = (key: string) =>
+      row.querySelector<HTMLInputElement>(`[data-column="${key}"] input`)!;
+    const type = async (key: string, value: string) => {
+      input(key).value = value;
+      input(key).dispatchEvent(new Event('input', { bubbles: true }));
+      await nextTick();
+    };
+    await type('quantity', '3');
+    await type('unitPrice', '12.5');
+    expect(input('amount').value).toBe('37.50');
+    await type('amount', '100');
+    expect(input('unitPrice').value).toBe('33.333333');
+    input('amount').dispatchEvent(new Event('blur'));
+    await nextTick();
+    expect(input('amount').value).toBe('100.00');
+    await type('quantity', '4');
+    expect(input('amount').value).toBe('133.33');
   });
 
   it('ignores delayed product resolution after the editor is closed and reopened', async () => {

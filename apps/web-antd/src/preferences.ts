@@ -31,6 +31,8 @@ export const overridesPreferences = defineOverridesPreferences({
   copyright: {
     companyName: import.meta.env.VITE_APP_TITLE,
     companySiteLink: 'https://www.feidemou.com',
+    icp: '鄂ICP备2026054272号-1',
+    icpLink: 'https://beian.miit.gov.cn/',
   },
 });
 

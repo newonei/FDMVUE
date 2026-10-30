@@ -21,7 +21,6 @@ import {
   Checkbox,
   Descriptions,
   DescriptionsItem,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -49,9 +48,14 @@ import {
   uploadCustomsFile,
 } from '#/api/fdmplatform/customs';
 import {
+  ATTACHMENT_LIMIT_TEXT,
+  MAX_ATTACHMENT_BYTES,
+} from '#/api/fdmplatform/submission-files';
+import {
   createCustomsWithAttachments,
   customsActionWithAttachments,
 } from '#/api/fdmplatform/submissions';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { customsCategories, customsLabel, customsStatuses } from '../customs';
 import { errorText } from '../data';
@@ -66,6 +70,7 @@ import {
 } from '../documents/navigation';
 import RelatedLink from '../documents/RelatedLink.vue';
 import { useRouteOwner } from '../documents/useRouteOwner';
+import { currencyOptions } from '../products/model';
 import CreationAttachments from './CreationAttachments.vue';
 import CustomsEditor from './CustomsEditor.vue';
 
@@ -560,10 +565,10 @@ async function upload() {
   }
   if (
     pendingFiles.value.some(
-      (file) => file.size === 0 || file.size > 20 * 1024 * 1024,
+      (file) => file.size === 0 || file.size > MAX_ATTACHMENT_BYTES,
     )
   ) {
-    uploadError.value = '单个文件须大于 0 且不超过 20 MB。';
+    uploadError.value = `单个文件须大于 0 且不超过 ${ATTACHMENT_LIMIT_TEXT}。`;
     return;
   }
   uploading.value = true;
@@ -818,7 +823,8 @@ onBeforeUnmount(() => {
       :error="editorError"
       @save="saveBatch"
     />
-    <Drawer
+    <FdmResizableDrawer
+      resize-key="customs-detail"
       :open="detailOpen && (embedded || routeActive)"
       @close="closeDetail"
       :title="selected?.name ?? '报关跟进'"
@@ -1226,7 +1232,7 @@ onBeforeUnmount(() => {
           </TabPane>
         </Tabs>
       </div>
-    </Drawer>
+    </FdmResizableDrawer>
     <Modal
       :open="actionOpen"
       @cancel="closeAction"
@@ -1293,12 +1299,7 @@ onBeforeUnmount(() => {
           <Form.Item label="费用币种" required>
             <Select
               v-model:value="expenseCurrency"
-              :options="
-                ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD'].map((value) => ({
-                  value,
-                  label: value,
-                }))
-              "
+              :options="currencyOptions"
             />
           </Form.Item>
           <Form.Item label="折算为合同币种的汇率（不同币种时填写）">

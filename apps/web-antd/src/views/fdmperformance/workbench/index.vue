@@ -16,11 +16,7 @@ import {
 import { usePerformanceAccess } from '../shared/access';
 import { TASK_LABELS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import {
-  actionLabel,
-  canHandleReview,
-  deadlineMeta,
-} from '../shared/workspace';
+import { actionLabel, canHandleReview } from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceWorkbench' });
 const router = useRouter();
@@ -38,11 +34,6 @@ const supervisorReviews = ref<JixiaoApi.Review[]>([]);
 let requestId = 0;
 const reviewsCount = computed(
   () => employeeReviews.value.length + supervisorReviews.value.length,
-);
-const pendingRows = computed(() =>
-  [...rows.value].sort((a, b) =>
-    (a.endDate || '9999').localeCompare(b.endDate || '9999'),
-  ),
 );
 
 async function loadPending() {
@@ -179,14 +170,13 @@ onMounted(initialize);
         @click="router.push('/fdmperformance/batches')"
       >
         <span>我发起的进行中考核</span><strong>{{ ongoing ?? '—' }}</strong
-        ><small>查看阶段、截止时间与处理人</small>
+        ><small>查看阶段与处理人</small>
       </button>
     </section>
     <section class="workbench-panel">
       <div class="section-head">
         <div>
           <h2>需要我处理</h2>
-          <span>本页按截止时间排列</span>
         </div>
         <Button :loading="loading" @click="loadPending">刷新</Button>
       </div>
@@ -198,11 +188,11 @@ onMounted(initialize);
       />
       <Spin :spinning="loading">
         <Empty
-          v-if="!loading && !failed && !pendingRows.length"
+          v-if="!loading && !failed && !rows.length"
           description="当前没有需要处理的考核任务"
         />
         <article
-          v-for="record in pendingRows"
+          v-for="record in rows"
           :key="record.id"
           class="task-row"
         >
@@ -221,9 +211,6 @@ onMounted(initialize);
               >
             </p>
           </div>
-          <Tag :color="deadlineMeta(record.endDate).color">{{
-            deadlineMeta(record.endDate).text
-          }}</Tag>
           <Button type="primary" @click="openInstance(record)">{{
             actionLabel(record)
           }}</Button>

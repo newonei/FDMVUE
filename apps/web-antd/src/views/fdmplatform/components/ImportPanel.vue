@@ -244,7 +244,7 @@ onMounted(load);
       <p class="muted">
         表头：<code>type,name,code,externalId,specification,unit</code>。type
         使用 SKU 产品、SUPPLIER 供应商、WAREHOUSE 仓库、STOCK_OWNER
-        货权主体。编号按文本处理，保留前导零。 客户请到客户中心新建或从 OKKI
+        货主。编号按文本处理，保留前导零。 客户请到客户中心新建或从 OKKI
         选择，系统生成编号并要求选择国家 / 地区。
       </p>
       <div v-if="sourceFilename" class="file-evidence">

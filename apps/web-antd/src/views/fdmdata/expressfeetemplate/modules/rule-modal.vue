@@ -68,7 +68,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     template.value =
-      modalApi.getData<FdmdataExpressFeeTemplateApi.ExpressFeeTemplate>();
+      (modalApi.getData() as FdmdataExpressFeeTemplateApi.ExpressFeeTemplate);
     await loadRules();
   },
 });

@@ -25,7 +25,7 @@
 | 外贸部门 | 发货单           | fdmplatform/trade/shipments/index        |
 | 外贸部门 | 销售退货单       | fdmplatform/trade/returns/index          |
 | 采购部门 | 供应商管理       | fdmplatform/purchase/suppliers/index     |
-| 采购部门 | 采购方案     | fdmplatform/purchase/plans/index         |
+| 采购部门 | 采购方案         | fdmplatform/purchase/plans/index         |
 | 采购部门 | 到货单           | fdmplatform/purchase/arrivals/index      |
 | 采购部门 | 采购退货单       | fdmplatform/purchase/returns/index       |
 | 采购部门 | 自产进度单       | fdmplatform/purchase/production/index    |
@@ -33,6 +33,68 @@
 | 财务部门 | 回款核销单       | fdmplatform/finance/allocations/index    |
 | 工厂部门 | 库存与合同收发   | fdmplatform/inventory/stock/index        |
 | 基础资料 | 业务主数据与迁移 | fdmplatform/admin/master-data/index      |
+| 内销部门 | 客户管理         | fdmplatform/domestic/customers/index     |
+| 内销部门 | 合同订单         | fdmplatform/domestic/contracts/index     |
+| 内销部门 | 采购申请         | fdmplatform/domestic/requests/index      |
+| 内销部门 | 发货与退货       | fdmplatform/domestic/shipments/index     |
+
+### 内销部门（2026-10-18）
+
+外贸、内销分成两个业务线，共用同一套合同、单据、产品中心与采购 / 财务 / 仓库流程（Issue #38）。合同的 `businessType` 就是业务线：`DOMESTIC` 为内销，其余（含历史空值、样品、政府）为外贸；客户档案记 `salesChannel`。没有标记的金智历史合同、客户与单据一律算外贸。
+
+- 内销页面是 `domestic/*` 薄入口，把 `salesChannel="DOMESTIC"` 传给外贸同一套组件；外贸页面传 `FOREIGN`。列表、合同看板、客户列表与概况都按业务线请求，从其他页面带 `contractId` 进入时只按合同筛选（`sales-channel.ts` 的 `channelFilter`）。
+- 合同编辑不再选业务类型和业务部门：业务线由入口决定、创建后不可改，部门由后端按负责人记录；外贸、内销都有「样品单」开关（允许零价，外贸记 `SAMPLE`、内销记 `DOMESTIC_SAMPLE`）。内销合同币种固定人民币，不显示阿里信保；合同详情不显示报关。
+- 内销客户不接 OKKI、不选国家（后端固定为 CN），与外贸共用 `KH-` 客户编号；合同只能选同业务线的客户。内销客户有开票信息（`invoice`：发票类型、抬头、纳税人识别号、注册地址与电话、开户银行与账号、收票邮箱），专用发票须填齐，抬头留空用客户全称；保存时不传 `invoice` 保持原值。内销客户导出 CSV 末尾追加开票信息列；内销合同「登记发票」弹窗用 `BuyerInvoicePanel` 显示购方开票信息（可逐项复制，只读，不随发票保存）。
+- 菜单由后端补丁 `20261018_fdmplatform_domestic_menus.sql` 挂到「内销部门」，并加入全员共用菜单。
+- **内销门户**：`portal/domestic/index.vue` 复用 `DepartmentPortal.vue`，定义与外贸门户同由 `model.ts` 的 `salesPortal()` 生成，链接指向 `/neixiao/*`，没有「金智合同未发齐」和汇率中心。接口 `/portal/domestic` 只汇总当前用户的内销合同，外贸门户 `/portal/trade` 只汇总外贸合同。与其他门户一样按角色授权（`fdmplatform:portal:domestic`，补丁 `20261019_fdmplatform_domestic_portal.sql` 授给内销角色）。财务、采购、仓库门户仍汇总两条业务线。
+
+### 菜单合并（2026-09-29）
+
+同一部门内按单据类型拆开的菜单合并为带页签的部门页面，页签由 `?view=` 选择，切换页签只保留 `contractId` 筛选：
+
+| 保留菜单 | 页签 |
+| --- | --- |
+| 发货与退货 `platform-shipments` | 发货单 · 销售退货单 |
+| 报价与方案 `platform-quotes` | 供应商报价 · 采购方案 |
+| 采购单 `platform-orders` | 采购单 · 到货单 · 采购退货单 · 自产进度 |
+| 采购设置 `platform-templates` | 合同模板与主体 · 采购分派规则 |
+| 收款与开票 `platform-receipts` | 回款记录 · 退款与冲销 · 开票记录 · 回款核销 |
+| 付款与报销 `platform-procurement-requests` | 采购请款 · 采购付款 · 费用报销 |
+| 成本与利润 `platform-costs` | 合同成本与贡献 · 采购成本归属 |
+
+被合并菜单的组件和路由保留，旧链接由 `documents/merged-routes.ts` 跳转到对应页签并保留原查询参数；侧边栏隐藏与改名由后端补丁 `20260929_fdmplatform_menu_consolidation.sql` 完成。本模块全部页面按菜单路径复用标签（`documents/tab-policy.ts`），打开详情、切换筛选不再另开标签。
+
+### 部门门户
+
+外贸、采购、财务、仓库各有一个门户页（`portal/*/index`，菜单路径 `platform-portal`，排在部门第一位），内容为我的待办、进度列表、本月数据与近 6 个月趋势、本部门全部功能。门户不在全员共享菜单内：只有被分配对应菜单的角色可见，`/fdmplatform/v1/portal/{trade|purchase|finance|stock}` 同时校验 `fdmplatform:portal:*` 权限。外贸、采购按“我负责的”统计，财务、仓库按部门共享；金额按币种分开，历史待补齐只计数不读取。待办卡片跳转到已筛选的列表：采购工作台支持 `?stage=&mine=true`，合同订单支持 `?mine=true&status=&scope=&create=contract`，单据列表支持 `?scope=`。
+
+### 采购部门改版（2026-10-08）
+
+- **选价下单**：比价卡片「选此报价下单」和录入报价后的「保存并下单」调用合同动作 `ORDER_FROM_QUOTE`（`lines[{quoteId, quantity?}]`、`rationale?`），后端在一个事务里依次保存方案、确认方案、生成采购单，复用原有校验；选的不是同口径最低价时须填理由。同一申请里同供应商的其他有效报价可勾选一起下单，商务条件一致的合并成一张采购单。原「编制方案 → 确认方案 → 生成采购单」入口保留，用于拆分或调整数量。
+- **我来接单**：工作台待接单行调用 `CLAIM_REQUEST`（`requestId`），把申请剩余数量全部按外采分给自己；拆分、自产仍走「分派…」。
+- **录入报价**：`purchase/quotes/QuoteEntryDialog.vue` 分价格 / 条件 / 凭证三组，币种下拉默认 CNY，计价单位固定为需求单位，有效期 7 / 15 / 30 天快捷选；上传的文件就是报价凭证（随 `CREATE_QUOTE` 提交，后端追加到 `evidenceIds`）。
+- **工作台**：阶段改为流程条，交期倒计时，`/procurement-workbench/page?due=overdue|soon` 筛选，`counts.overdue / counts.soon` 覆盖全部阶段；已下线的待到货、自产阶段不再显示。
+- **采购单**：`/procurement/orders/overview?mine=` 返回新系统采购单的在途、超期未到（交期取下单资料，没填取报价承诺到货日）、待签回、未付款和需要处理的单子；抽屉顶部的执行步骤条只用于新系统采购单。「我负责的」改为单个开关。
+- **供应商管理**：`/suppliers/stats/page|overview`、`/suppliers/{id}/stats-snapshot`（`PlatformSupplierStatsService`）汇总合同内采购单与金智独立采购单，按租户缓存、合同按 `updated_at` 增量读取。金智采购单没有币种，按人民币统计；「在途」只算新系统采购单。分层：常用 ≤90 天、偶尔 91–365 天、沉睡超过 1 年、未合作从没下单。
+- **采购门户**：`portal/PurchasePortal.vue` 独立于外贸 / 财务门户；`/portal/purchase` 新增 `sign / transit / pay` 待办、`metrics.overdueTasks / soonTasks` 和全部门的 `purchasing`（近 12 个月人民币采购额、前 5 家供应商）。
+
+### 财务部门改版（2026-10-12）
+
+- **收支统计**：`/finance-stats/overview|customers|suppliers|party`（`PlatformFinanceStatsService`）汇总合同回款、采购付款与金智集中回款 / 集中付款（只认金智「审核通过」），按租户缓存、合同按 `updated_at` 增量读取。金额一律折人民币：回款取冻结汇率快照，没有取金智本位币金额；金智付款没有币种按人民币计；折不了的外币单独计数，不按 1 计。退款与冲销为负数，部分冲销的付款按净额。`migratedUntil` 为最晚一笔金智收付日期，之后只有新系统登记的收付，跨过这一天的对比页面会提示。
+- **财务门户**：`portal/FinancePortal.vue` 独立于外贸门户；`/portal/finance` 新增 `cashflow`：近 24 个月收付、本月与今年累计对比、收付款账户、回款前 5 客户与付款前 5 供应商。付款只含采购付款，不含报销。
+- **客户回款**（收款与开票 `?view=customers`）与 **供应商付款**（付款与报销 `?view=suppliers`）：共用 `finance/cash/CashPartyList.vue`，按最近一次收付分层（≤90 天活跃、91–365 天需跟进、超过 1 年沉睡），可按近 12 个月、累计、最近收付排序并导出；客户另列未回款（与客户管理同口径），供应商另列同期采购额与付款占比。供应商按收款方名称归并（金智逐单付款只有名称）。
+- **汇率中心**：常用币种卡片切换走势，`/fx-rates/history` 只读已保存的每日参考值；参考换算在前端按当日参考值估算，回款折算仍以登记时冻结的汇率为准。
+
+### 产品分类与选品（2026-10-16，Issue #32）
+
+- **产品档案**改为左分类、右产品两栏：左侧 `products/components/ProductCategoryPanel.vue` 按维护的分类列出产品数（`GET /products/categories` 同时返回分类和按 `categoryId` 的计数，口径同列表的搜索词与启用状态，不含分类本身），点击分类按 `categoryId` 筛选（`/products?categoryId=`，空字符串为「未分类」）。深链接 `catalogCategory` 为分类 id，`catalogCategoryLabel` 为标题。
+- **产品分类**（`products/categories/index.vue`，#103）：维护一层分类（由各产品原有分类名称建成），`/fdmplatform/v1/product-categories` 新增、改名、停用、合并、删除；编辑产品和导入时必须选已有分类（`products/category-model.ts`），改名与合并由后端同步改写产品上的分类名称。
+- **产品中心弹窗** `ProductPicker.vue` 改为同样两栏的弹窗：左分类、右可勾选表格，跨分类、跨页保留勾选，底部汇总已选后确定。合同选品只列资料齐全产品；`allow-incomplete` 时列全部启用产品。
+- **采购单录入**：明细上方「从产品中心选择」批量勾选追加明细，每行「选择」按分类替换本行产品；原行内搜索下拉和 Excel 粘贴保留。
+
+### 待补齐历史单据
+
+列表默认只显示“当前业务”。金智导入后仍需补齐的合同、单据及其子记录进入“待补齐历史单据”队列，有待补齐记录时列表顶部显示切换；从合同进入的列表默认显示全部。数据来自索引行的 `pendingCompletion`，存量数据由 `20260929_fdmplatform_index_pending_completion.sql` 回填，未回填前一律视为当前业务。
 
 组件由现有 `router/access.ts` 的页面扫描载入。菜单父目录由后端增量 SQL 管理，本模块通过独立扩展提供全员菜单可见性，不恢复旧的退役采购或仓储页面。
 
@@ -50,8 +112,9 @@
 
 客户编号首次保存由系统生成，原有编号只读保留。国家 / 地区从 `/customers/options` 的 249 个 ISO 选项选择，支持中文、英文、二字码、三字码及接口提供的常见别名搜索，不能新建自由国家值；历史非标准值原样提示，维护保存前须重新选择。`customerSource` 是展会、转介绍等业务来源，区别 `sourceSystem` 的资料来源；`companyName` 可人工维护。OKKI 预览展示公司及来源资料并核对国家，刷新保留系统编号、本地业务来源、备注与启用状态。
 
-业务列表通过本模块 `compact-tables.css` 限定样式：单元格上下各 8px，名称与摘要至多双行，长文本省略且可悬停查看，操作区保持单行与横向滚动，不修改宿主或官方模块表格。
+客户列表带经营统计（`/customers/page?withStats=true`、`/customers/overview`、`/customers/{id}/snapshot`）：按最近一次签约日期分层（≤90 天活跃、91–365 天需跟进、超过 1 年沉睡、无合同未成交），列出累计合同额、近 12 个自然月每月签约额与上年同期比较、未回款、最近签约合同，可按这四项排序，行首展开看年度合同额、常购产品、最近合同与待补资料。草稿与作废合同不计。金额按币种分开，金智迁入合同没有币种归入「未注明币种」，不与 USD / CNY 相加。未回款：金智客户取金智「按客户汇总」的客户未回款额（截至迁移），新系统合同按合同额减同币种净回款。统计需要读取全部合同，只对共用范围账号提供；合同事实在服务端按租户缓存，启动后预热，之后只增量读取有变化的合同。「资料待补」与档案的资料完整度同一规则：国家、客户来源、公司名称、联系人、邮箱或电话、详细地址任一为空。
 
+业务列表通过本模块 `compact-tables.css` 限定样式：单元格上下各 8px，名称与摘要至多双行，长文本省略且可悬停查看，操作区保持单行与横向滚动，不修改宿主或官方模块表格。
 
 每个部门有独立的服务端分页列表。合同、采购申请、履约任务、报价、方案、采购订单、回款、发票和成本调用各自 `/page` 接口，支持页码、关键词、状态及可选经办人筛选，默认显示全部。采购申请使用 `assignmentStatus` 筛选分派状态，成本使用 `status` 筛选归集阶段；金额不跨币种合并。
 
@@ -99,9 +162,9 @@ OKKI 接口只读远程资料，状态接口不返回凭据。按关键词搜索
 
 ## 合同附件和业务凭证
 
-新建或编辑合同、采购申请、报价、采购方案、采购单生成、到货、出入库、回款、开票、成本以及采购财务和报关表单，均可在附件区多选或拖入文件。文件在点击保存时与业务数据一起提交，最多10个、单个20MB、总计50MB；保存中禁止关闭或改动队列，失败保留输入和文件供原键重试。无附件时沿用原JSON接口，有附件时使用`/submissions`下对应multipart接口，业务和附件关联在同一事务内保存。
+新建或编辑合同、采购申请、报价、采购方案、采购单生成、到货、出入库、回款、开票、成本以及采购财务和报关表单，均可在附件区多选或拖入文件。文件在点击保存时与业务数据一起提交，最多10个、单个和总计都不超过1GB（服务端流式转存对象存储，超过2MB显示上传进度）；保存中禁止关闭或改动队列，失败保留输入和文件供原键重试。无附件时沿用原JSON接口，有附件时使用`/submissions`下对应multipart接口，业务和附件关联在同一事务内保存。
 
-普通单据详情默认显示当前单据附件，可切换查看合同全部附件；采购单管理页有独立“单据附件”页签。使用平台合同附件接口与私有存储，新文件绑定服务端核定的具体单据ID，各资料分类保留业务用途；下载通过带当前认证信息的请求获取文件流，不生成公开API链接。采购财务和报关继续使用各自单据附件及版本规则。
+合同详情“合同附件”页签通过 `/contracts/{id}/related-files` 汇总合同全部附件：合同本身及合同内单据（采购申请、报价、采购单、到货、发货、回款、开票等）的凭据、产品标准资料、采购合同导出稿与签章稿、报关资料（含历史版本）、采购请款/付款/报销凭据和迁移独立单据附件，按合同资料、产品标准资料、采购、报关、仓储物流、财务分组并标注来源单据；下载仍走各来源原有接口并重新校验权限，此处只上传合同本身的资料。普通单据详情默认显示当前单据附件，可切换查看同一份合同全部附件；采购单管理页有独立“单据附件”页签。使用平台合同附件接口与私有存储，新文件绑定服务端核定的具体单据ID，各资料分类保留业务用途；下载通过带当前认证信息的请求获取文件流，不生成公开API链接。采购财务和报关继续使用各自单据附件及版本规则。
 
 表单中的附件和证据字段可从当前合同附件选择，历史外部凭证仍可保留引用。私有存储未配置时明确显示配置需求，不回退到公开上传。上传有独立幂等标识；合同、库存和财务动作继续携带业务版本和稳定幂等标识。
 

@@ -27,11 +27,43 @@ const open = ref(false);
 let sequence = 0;
 const labels: Record<string, string> = {
   ASSIGNMENTS: '店铺归属变更',
+  DEFAULT_GROUP_SET: '设置默认分组',
+  MONTH_GROUP_SET: '按月调整分组',
+  MONTH_GROUP_RESET: '恢复默认分组',
   SCOPE_SYNC: '月报范围同步',
-  GROUP_CREATE: '新增财务小组',
-  GROUP_UPDATE: '修改财务小组',
-  GROUP_DELETE: '删除财务小组',
+  GROUP_CREATE: '新增分组',
+  GROUP_UPDATE: '修改分组',
+  GROUP_DELETE: '删除分组',
+  IMPORT_APPLY: '导入 Excel',
+  ITEM_CREATE: '添加明细',
+  ITEM_UPDATE: '修改明细',
+  ITEM_DELETE: '删除明细',
+  ITEM_FILL_BLANK: '批量填写空白',
+  REPORT_PURGE: '清空整月',
 };
+/** 明细字段的中文名，用于修改记录逐项展示 */
+const FIELD_LABELS: Record<string, string> = {
+  salesAmount: '销售额',
+  newProductGiftAmount: '新品礼金',
+  customerRefundAmount: '客户返款',
+  purchaseCost: '采购成本',
+  accessoryPurchaseCost: '其中周边',
+  dropshipPurchaseCost: '代发采购',
+  estimatedFreight: '暂估运费',
+  freightAdjustment: '运费差异',
+  freightCost: '快递运费',
+  promotionCost: '推广费',
+  platformFeeBill: '平台账单费用',
+  platformFeeAdjustment: '平台费用调整',
+  platformFeeAdjustmentReason: '调整原因',
+  platformFee: '平台扣费',
+  taxFee: '税费',
+  grossProfit: '毛利润',
+};
+const DATA_ACTIONS = new Set(['IMPORT_APPLY', 'ITEM_CREATE', 'ITEM_UPDATE', 'ITEM_DELETE', 'ITEM_FILL_BLANK', 'REPORT_PURGE']);
+function text(value: unknown) {
+  return value === null || value === undefined || value === '' ? '—' : String(value);
+}
 const columns = [
   {
     title: '操作时间',
@@ -73,6 +105,19 @@ function label(value: unknown) {
 }
 const changes = computed(() => {
   const result = detail.value?.result ?? {};
+  if (detail.value && DATA_ACTIONS.has(detail.value.action)) {
+    const before = object(result.before);
+    const after = object(result.after);
+    return Object.keys(FIELD_LABELS)
+      .filter((key) => key in before || key in after)
+      .filter((key) => text(before[key]) !== text(after[key]))
+      .map((key) => ({
+        rowKey: key,
+        shopName: FIELD_LABELS[key],
+        before: text(before[key]),
+        after: text(after[key]),
+      }));
+  }
   if (Array.isArray(result.changes))
     return result.changes.map((change, index) => ({
       ...object(change),
@@ -82,7 +127,7 @@ const changes = computed(() => {
     return [
       {
         rowKey: 'group',
-        shopName: '财务小组',
+        shopName: '分组',
         before: result.before,
         after: result.after,
       },
@@ -91,6 +136,25 @@ const changes = computed(() => {
 });
 function summary(row: Api.ConfigurationHistory) {
   const result = row.result;
+  if (DATA_ACTIONS.has(row.action)) {
+    const inner = object(result.result);
+    switch (row.action) {
+      case 'IMPORT_APPLY':
+        return `${text(result.month)} · ${text(result.fileName)}：新增 ${text(inner.created)}，更新 ${text(inner.updated)}，无变化 ${text(inner.unchanged)}`;
+      case 'ITEM_FILL_BLANK':
+        return `${text(result.month)} · ${FIELD_LABELS[String(result.field)] ?? text(result.field)} 空白填为 ${text(result.value)}（${text(result.count)} 行）`;
+      case 'REPORT_PURGE':
+        return `${text(result.month)} · 清空 ${text(result.itemCount)} 行明细`;
+      default:
+        return `${text(result.month)} · ${text(result.shopName)}`;
+    }
+  }
+  if (row.action === 'DEFAULT_GROUP_SET')
+    return `${text(result.count)} 家店铺默认分组 → ${text(result.groupName)}`;
+  if (row.action === 'MONTH_GROUP_SET')
+    return `${text(result.month)} · ${text(result.count)} 家店铺本月调到 ${text(result.groupName)}${result.reason ? `（${result.reason}）` : ''}`;
+  if (row.action === 'MONTH_GROUP_RESET')
+    return `${text(result.month)} · ${text(result.count)} 家店铺恢复默认分组`;
   if (Array.isArray(result.changes))
     return `${result.changes.length} 项变更${result.effectiveMonth ? ` · ${result.effectiveMonth} 起` : ''}`;
   if (result.before || result.after)
@@ -123,7 +187,7 @@ onBeforeUnmount(() => sequence++);
 
 <template>
   <Collapse v-model:active-key="active" class="mt-4"
-    ><Collapse.Panel key="history" header="最近配置与范围变更（最多 50 条）"
+    ><Collapse.Panel key="history" header="最近变更记录（分组配置、导入、手工修改；最多 50 条）"
       ><Alert v-if="error" type="error" :message="error" class="mb-3" />
       <div class="mb-3 flex justify-end">
         <Button size="small" :loading="loading" @click="load">刷新记录</Button>
@@ -181,10 +245,10 @@ onBeforeUnmount(() => sequence++);
         size="small"
         ><template #bodyCell="{ column, record }"
           ><template v-if="column.key === 'before'">{{
-            label(record.before)
+            typeof record.before === 'string' ? record.before : label(record.before)
           }}</template
           ><template v-else-if="column.key === 'after'">{{
-            label(record.after)
+            typeof record.after === 'string' ? record.after : label(record.after)
           }}</template></template
         ><template #emptyText
           >本次记录未包含逐项前后值，请查看变更摘要。</template

@@ -4,6 +4,10 @@ import type { Contract } from './index';
 import type { ProcurementFinanceRecord } from './procurement-finance';
 
 import { requestClient } from '#/api/request';
+import {
+  LARGE_FILE_TIMEOUT,
+  withUploadProgress,
+} from '#/components/upload-task';
 
 import { businessDocumentAction } from './business-documents';
 import { createCustoms, customsAction } from './customs';
@@ -21,14 +25,14 @@ function submit<T>(
   files: File[],
   categories?: string[],
 ) {
+  const form = submissionFormData(request, files, categories);
   // The standard uploader indexes arrays; these endpoints require repeated multipart "files" parts.
-  return requestClient.post<T>(
-    `${base}${path}`,
-    submissionFormData(request, files, categories),
-    {
+  return withUploadProgress(files, (onUploadProgress) =>
+    requestClient.post<T>(`${base}${path}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300_000,
-    },
+      onUploadProgress,
+      timeout: LARGE_FILE_TIMEOUT,
+    }),
   );
 }
 

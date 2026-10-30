@@ -1,9 +1,36 @@
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from '@vben/vite-config';
 
 export default defineConfig(async () => {
   return {
     application: {},
     vite: {
+      build: {
+        rolldownOptions: {
+          input: {
+            main: fileURLToPath(new URL('index.html', import.meta.url)),
+            dingtalkCard: fileURLToPath(
+              new URL('dingtalk-card.html', import.meta.url),
+            ),
+          },
+        },
+      },
+      resolve: {
+        alias: [
+          // 官方 v2026.09 的财务页面引用了不存在的 auxiliary-select-modal.vue（应为 auxiliary-item-select.vue），
+          // 官方目录必须与官方代码一致不能直接改，构建时在这里映射；官方修复后删除
+          {
+            find: /^#\/views\/fms\/config\/auxiliary\/components\/auxiliary-select-modal\.vue$/,
+            replacement: fileURLToPath(
+              new URL(
+                'src/views/fms/config/auxiliary/components/auxiliary-item-select.vue',
+                import.meta.url,
+              ),
+            ),
+          },
+        ],
+      },
       server: {
         allowedHosts: true,
         proxy: {

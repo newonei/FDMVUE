@@ -1,9 +1,18 @@
 import type { JixiaoApi } from '#/api/fdmperformance';
 
+export interface ManagerLevelScore {
+  comment?: string;
+  score?: number;
+  scorerUserName?: string;
+}
+
 export interface ScoreRow {
   indicator: JixiaoApi.InstanceIndicator;
+  /** 当前待评分上级层级的可编辑分数；其余层级见 managerScores。 */
   managerComment?: string;
   managerScore?: null | number;
+  /** 已保存的各级上级评分，下标为层级减一。 */
+  managerScores?: ManagerLevelScore[];
   selfComment?: string;
   selfScore?: null | number;
   supervisorComment?: string;
@@ -90,20 +99,34 @@ export function applyScoreDraft(
 export function scoreRowsFromInstance(
   instance: JixiaoApi.Instance,
 ): ScoreRow[] {
+  const editLevel = instance.currentManagerLevel ?? 1;
   return (instance.indicators || []).map((indicator) => {
-    const score = (type: string) =>
+    const score = (type: string, level?: number) =>
       instance.scores?.find(
         (item) =>
-          item.instanceIndicatorId === indicator.id && item.scoreType === type,
+          item.instanceIndicatorId === indicator.id &&
+          item.scoreType === type &&
+          (level === undefined || (item.scoreLevel ?? 1) === level),
       );
+    const managerScores: ManagerLevelScore[] = [];
+    for (const item of instance.scores ?? []) {
+      if (item.instanceIndicatorId !== indicator.id || item.scoreType !== 'MANAGER')
+        continue;
+      managerScores[(item.scoreLevel ?? 1) - 1] = {
+        comment: item.comment,
+        score: item.score,
+        scorerUserName: item.scorerUserName,
+      };
+    }
     return {
       indicator,
       selfScore: score('SELF')?.score,
       selfComment: score('SELF')?.comment,
       supervisorScore: score('SUPERVISOR')?.score,
       supervisorComment: score('SUPERVISOR')?.comment,
-      managerScore: score('MANAGER')?.score,
-      managerComment: score('MANAGER')?.comment,
+      managerScore: score('MANAGER', editLevel)?.score,
+      managerComment: score('MANAGER', editLevel)?.comment,
+      managerScores,
     };
   });
 }

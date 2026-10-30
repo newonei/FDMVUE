@@ -14,9 +14,11 @@ export function contractQuickActionReason(
   if (
     [
       'ASSIGN_FULFILLMENT',
+      'CLAIM_REQUEST',
       'CREATE_QUOTE',
       'CREATE_REQUEST',
       'GENERATE_ORDERS',
+      'ORDER_FROM_QUOTE',
       'SAVE_PLAN',
       'STOCK_RESERVE',
       'STOCK_SHIP',

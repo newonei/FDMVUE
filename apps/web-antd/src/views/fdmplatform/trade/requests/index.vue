@@ -2,4 +2,6 @@
 import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
 defineOptions({ name: 'FdmPlatformTradeRequests' });
 </script>
-<template><DocumentWorkspace kind="requests" /></template>
+<template>
+  <DocumentWorkspace kind="requests" sales-channel="FOREIGN" />
+</template>

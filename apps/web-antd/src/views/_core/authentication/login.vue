@@ -4,13 +4,15 @@ import type { VbenFormSchema } from '@vben/common-ui';
 import type { AuthApi } from '#/api/core/auth';
 
 import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { AuthenticationLogin, Verification, z } from '@vben/common-ui';
 import { isCaptchaEnable, isTenantEnable } from '@vben/hooks';
 import { $t } from '@vben/locales';
 import { preferences } from '@vben/preferences';
 import { useAccessStore } from '@vben/stores';
+
+import { message } from 'ant-design-vue';
 
 import {
   checkCaptcha,
@@ -24,11 +26,13 @@ import {
   buildDingTalkOAuthUrl,
   isInDingTalk,
   performDingTalkWorkbenchLogin,
+  safeDingTalkRedirect,
 } from '#/utils/dingtalk';
 
 defineOptions({ name: 'Login' });
 
 const { query } = useRoute();
+const router = useRouter();
 const authStore = useAuthStore();
 const accessStore = useAccessStore();
 const tenantEnable = isTenantEnable();
@@ -138,19 +142,22 @@ async function handleDingTalkLogin() {
       if (!token) return;
       accessStore.setAccessToken(token.accessToken);
       accessStore.setRefreshToken(token.refreshToken);
-      // 用 location.href 强刷，触发守卫重新加载权限和动态路由
-      const target = (redirect as string) || preferences.app.defaultHomePath;
-      window.location.href = decodeURIComponent(target);
+      await router.replace(
+        safeDingTalkRedirect(redirect, preferences.app.defaultHomePath),
+      );
       return;
     }
 
     // 外部浏览器：跳钉钉 OAuth
     const redirectUri = `${location.origin}/user/auth?redirect=${encodeURIComponent(
-      (redirect as string) || '/',
+      safeDingTalkRedirect(redirect, preferences.app.defaultHomePath),
     )}`;
-    window.location.href = buildDingTalkOAuthUrl(redirectUri);
+    window.location.href = await buildDingTalkOAuthUrl(redirectUri);
   } catch (error) {
     console.error('钉钉登录失败:', error);
+    message.error(
+      error instanceof Error ? error.message : '钉钉登录失败，请稍后重试',
+    );
   } finally {
     dingtalkAutoLoading.value = false;
   }
@@ -166,8 +173,9 @@ async function tryDingTalkAutoLogin() {
     if (!token) return;
     accessStore.setAccessToken(token.accessToken);
     accessStore.setRefreshToken(token.refreshToken);
-    const target = (redirect as string) || preferences.app.defaultHomePath;
-    window.location.href = decodeURIComponent(target);
+    await router.replace(
+      safeDingTalkRedirect(redirect, preferences.app.defaultHomePath),
+    );
   } catch (error) {
     // 失败仅 warn，降级到手动登录页
     console.warn('钉钉工作台免登失败，降级为手动登录', error);

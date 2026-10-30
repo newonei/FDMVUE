@@ -60,7 +60,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmxuiPanelApi.Panel>();
+    const row = (modalApi.getData() as FdmxuiPanelApi.Panel);
     formData.value = undefined;
     await formApi.setValues(FDMXUI_PANEL_DEFAULTS as any, false);
     if (!row?.id) return;

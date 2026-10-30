@@ -3,7 +3,14 @@ import type { AuthApi } from '#/api/core/auth';
 import { useAccessStore } from '@vben/stores';
 
 import { getTenantByWebsite } from '#/api/core/auth';
-import { dingtalkMiniLogin } from '#/api/fdmdingtalk/auth';
+import {
+  dingtalkMiniLogin,
+  getDingTalkPublicConfig,
+} from '#/api/fdmdingtalk/auth';
+
+import { resolveDingTalkLoginConfig } from './dingtalk-config';
+
+export { safeDingTalkRedirect } from './dingtalk-config';
 
 /**
  * 钉钉登录的环境检测与 JSAPI 封装。
@@ -46,14 +53,36 @@ interface DingTalkSdk {
 }
 
 /**
- * 读取钉钉应用配置（corpId + clientId）。
- * 优先环境变量 VITE_APP_DINGTALK_CORP_ID / VITE_APP_DINGTALK_CLIENT_ID。
+ * 读取旧版本兼容配置；只有后端尚无公开配置接口（HTTP 404）时使用。
  */
 export function getDingTalkConfig(): DingTalkConfig {
   return {
     corpId: import.meta.env.VITE_APP_DINGTALK_CORP_ID || '',
     clientId: import.meta.env.VITE_APP_DINGTALK_CLIENT_ID || '',
   };
+}
+
+// Deduplicate only concurrent requests. A new login reads the saved settings again.
+const pendingConfigs = new Map<string, Promise<DingTalkConfig>>();
+
+export async function loadDingTalkConfig(): Promise<DingTalkConfig> {
+  const accessStore = useAccessStore();
+  const contextKey = () =>
+    `${accessStore.tenantId ?? ''}:${accessStore.visitTenantId ?? ''}`;
+  const key = contextKey();
+  let pending = pendingConfigs.get(key);
+  if (!pending) {
+    pending = resolveDingTalkLoginConfig(
+      getDingTalkPublicConfig,
+      getDingTalkConfig(),
+    ).finally(() => pendingConfigs.delete(key));
+    pendingConfigs.set(key, pending);
+  }
+  const config = await pending;
+  if (key !== contextKey()) {
+    throw new Error('企业已切换，请重新发起钉钉登录');
+  }
+  return config;
 }
 
 /** 当前是否处于钉钉客户端环境（PC / 手机客户端 / 内置浏览器） */
@@ -154,12 +183,7 @@ export async function performDingTalkWorkbenchLogin(): Promise<AuthApi.LoginResu
     throw new Error('租户未配置，无法走钉钉免登');
   }
 
-  const { corpId, clientId } = getDingTalkConfig();
-  if (!corpId || !clientId) {
-    throw new Error(
-      '钉钉 corpId / clientId 未配置，请检查 VITE_APP_DINGTALK_* 环境变量',
-    );
-  }
+  const { corpId, clientId } = await loadDingTalkConfig();
 
   const code = await requestDingTalkAuthCode(corpId, clientId);
   return await dingtalkMiniLogin({ code, corpId });
@@ -168,11 +192,14 @@ export async function performDingTalkWorkbenchLogin(): Promise<AuthApi.LoginResu
 /**
  * 构造钉钉 OAuth2 授权 URL（路径 A 用，前端跳转用）
  */
-export function buildDingTalkOAuthUrl(redirectUri: string, state?: string) {
-  const { corpId, clientId } = getDingTalkConfig();
-  if (!corpId || !clientId) {
-    throw new Error('钉钉 corpId / clientId 未配置');
+export async function buildDingTalkOAuthUrl(
+  redirectUri: string,
+  state?: string,
+) {
+  if (!(await ensureDingTalkTenantId())) {
+    throw new Error('租户未配置，无法发起钉钉登录');
   }
+  const { corpId, clientId } = await loadDingTalkConfig();
   const params = new URLSearchParams({
     redirect_uri: redirectUri,
     response_type: 'code',

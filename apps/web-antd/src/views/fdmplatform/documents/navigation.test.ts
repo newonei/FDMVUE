@@ -17,7 +17,6 @@ import {
   relatedDocumentLinks,
   resolveDocumentRow,
   standaloneLocation,
-  stockTarget,
   withoutDetailQuery,
 } from './navigation';
 const contract = {
@@ -96,12 +95,8 @@ describe('stable related-document navigation', () => {
       path: '/caiwu/platform-invoices',
       query: { invoiceType: 'PURCHASE', standaloneId: 'invoice/a' },
     });
-    expect(
-      navigationRoute(businessRecordTarget('STOCK_OUT', 'stock-out')!),
-    ).toEqual({
-      path: '/gongchang/platform-stock',
-      query: { inventoryType: 'stock-outs', standaloneId: 'stock-out' },
-    });
+    // 履约库存已下线：金智迁移的出入库单只展示，不再提供跳转
+    expect(businessRecordTarget('STOCK_OUT', 'stock-out')).toBeUndefined();
     expect(businessRecordTarget('UNSUPPORTED', 'a')).toBeUndefined();
     expect(businessRecordTarget('RECEIPT', '')).toBeUndefined();
     expect(
@@ -161,6 +156,32 @@ describe('stable related-document navigation', () => {
       });
     expect(entityTarget('product', undefined)).toBeUndefined();
     expect(contractTarget(12)).toBeUndefined();
+  });
+  it('keeps links opened from the domestic menu inside the domestic pages', () => {
+    const from = '/neixiao/platform-contracts';
+    expect(
+      navigationRoute(entityTarget('customer', 'customer-a')!, from),
+    ).toEqual({
+      path: '/neixiao/platform-customers',
+      query: { customerId: 'customer-a' },
+    });
+    expect(navigationRoute(contractTarget('contract-a')!, from).path).toBe(
+      '/neixiao/platform-contracts',
+    );
+    expect(
+      navigationRoute(documentTarget('requests', 'contract-a', 'r1')!, from)
+        .path,
+    ).toBe('/neixiao/platform-requests');
+    // 采购、财务页面两条业务线共用，外贸菜单下仍去外贸页面
+    expect(
+      navigationRoute(documentTarget('orders', 'contract-a', 'o1')!, from).path,
+    ).toBe('/fdmprocurement/platform-orders');
+    expect(
+      navigationRoute(
+        entityTarget('customer', 'customer-a')!,
+        '/fdmwaimao/platform-contracts',
+      ).path,
+    ).toBe('/fdmwaimao/platform-customers');
   });
   it('rejects malformed, repeated, and parentless document links', () => {
     expect(detailLocation({})).toBeUndefined();
@@ -262,67 +283,5 @@ describe('stable related-document navigation', () => {
     expect(
       lineTarget(contract, 'productName', { contractItemId: 'missing' }),
     ).toBeUndefined();
-  });
-  it('opens the real stock menu with exact pool and optional event identity', () => {
-    expect(navigationRoute(stockTarget('pool-a')!)).toEqual({
-      path: '/gongchang/platform-stock',
-      query: { poolId: 'pool-a' },
-    });
-    expect(navigationRoute(stockTarget('pool-a', 'event-a')!).query).toEqual({
-      poolId: 'pool-a',
-      eventId: 'event-a',
-    });
-  });
-  it('rejects malformed stock references instead of dropping the requested event', () => {
-    expect(stockTarget(undefined, 'event-a')).toBeUndefined();
-    expect(stockTarget(['pool-a'])).toBeUndefined();
-    expect(stockTarget('pool-a', '')).toBeUndefined();
-    expect(stockTarget('pool-a', null)).toBeUndefined();
-    expect(stockTarget('pool-a', ['event-a'])).toBeUndefined();
-  });
-  it('lets the router encode stock IDs once and round-trips reserved characters', async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: '/gongchang/platform-stock', component: {} }],
-    });
-    const target = stockTarget('pool /库存&one', 'event#1?part=2%')!;
-    const resolved = router.resolve(navigationRoute(target));
-    expect(resolved.href).toContain('poolId=pool+/');
-    expect(resolved.href).toContain('%26one');
-    expect(resolved.href).toContain('eventId=event%231?part=2%25');
-    await router.push(resolved.href);
-    expect(router.currentRoute.value.query).toEqual({
-      poolId: 'pool /库存&one',
-      eventId: 'event#1?part=2%',
-    });
-  });
-  it('switches stock to a document with a clean query and restores stock on back', async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: '/gongchang/platform-stock', component: {} },
-        { path: '/fdmprocurement/platform-orders', component: {} },
-      ],
-    });
-    await router.push(navigationRoute(stockTarget('pool-a', 'event-a')!));
-    await router.push(
-      navigationRoute(documentTarget('orders', 'contract-a', 'order-a')!),
-    );
-    expect(router.currentRoute.value.query).toEqual({
-      contractId: 'contract-a',
-      documentId: 'order-a',
-    });
-    const backCompleted = new Promise<void>((resolve) => {
-      const remove = router.afterEach(() => {
-        remove();
-        resolve();
-      });
-    });
-    router.back();
-    await backCompleted;
-    expect(router.currentRoute.value.query).toEqual({
-      poolId: 'pool-a',
-      eventId: 'event-a',
-    });
   });
 });

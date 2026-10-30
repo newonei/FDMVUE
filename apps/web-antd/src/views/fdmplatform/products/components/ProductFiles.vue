@@ -23,6 +23,7 @@ import {
   uploadProductAttachment,
 } from '#/api/fdmplatform/products';
 
+import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
 import { formatTemporalField } from '../../date-display';
 
@@ -175,13 +176,17 @@ async function download(file: ProductAttachment) {
         <span v-else-if="column.dataIndex === 'createdAt'">{{
           formatTemporalField('createdAt', record.createdAt)
         }}</span>
-        <Button
-          v-else-if="column.key === 'action'"
-          type="link"
-          @click="download(record as ProductAttachment)"
-        >
-          下载
-        </Button>
+        <template v-else-if="column.key === 'action'">
+          <FilePreviewButton
+            :name="record.name"
+            :load="
+              () => downloadProductAttachment(companyId, productId, record.id)
+            "
+          />
+          <Button type="link" @click="download(record as ProductAttachment)">
+            下载
+          </Button>
+        </template>
       </template>
     </Table>
   </Space>

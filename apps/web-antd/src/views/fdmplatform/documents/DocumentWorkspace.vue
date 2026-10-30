@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { SalesChannel } from '../sales-channel';
+import type { CompletionScope } from './completion-scope';
 import type { DocumentKind } from './model';
 import type { RelatedDocumentSource } from './related-creation';
 
@@ -21,14 +23,23 @@ import {
   Tabs,
   Tag,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
-import { errorText, label, statusLabels } from '../data';
+import CompletionScopeFilter from '../components/CompletionScope.vue';
+import { useInMergedView } from '../components/merged-view';
+import { errorText, label, money, statusLabels } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
+import { channelFilter } from '../sales-channel';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
+import {
+  completionFilter,
+  defaultCompletionScope,
+  scopeFromQuery,
+} from './completion-scope';
 import DocumentAction from './DocumentAction.vue';
 import { documentListNextStep } from './list-actions';
 import { contractReferenceText, migrationCell } from './migration-display';
@@ -37,9 +48,11 @@ import {
   allocationKind,
   documentDefinitions,
   documentStatuses,
+  factoryHandoff,
   procurementDocumentDefinition,
   procurementDocumentKind,
   queryContractId,
+  RETIRED_STOCK_ACTIONS,
 } from './model';
 import {
   contractTarget,
@@ -55,9 +68,14 @@ import { useRouteOwner } from './useRouteOwner';
 
 import '../components/compact-tables.css';
 
-const props = defineProps<{ kind: DocumentKind }>();
+const props = defineProps<{
+  kind: DocumentKind;
+  /** 外贸 / 内销部门的列表只看本业务线；不传不分业务线 */
+  salesChannel?: SalesChannel;
+}>();
 const route = useRoute();
 const router = useRouter();
+const inMergedView = useInMergedView();
 const routeActive = useRouteOwner();
 const procurementQueue = computed<'intake' | 'tasks'>({
   get: () => (route.query.queue === 'tasks' ? 'tasks' : 'intake'),
@@ -110,8 +128,14 @@ const records = ref<DocumentRow[]>([]);
 const loading = ref(false);
 const pageError = ref('');
 const keyword = ref('');
-const status = ref<string>();
+/** 采购申请默认只看有效的；合同取消后申请也随之取消，不再占列表 */
+const defaultStatus = () => (props.kind === 'requests' ? 'ACTIVE' : undefined);
+const status = ref<string | undefined>(defaultStatus());
 const assignmentStatus = ref<string>();
+const scope = ref<CompletionScope>(
+  scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
+);
+const pendingTotal = ref(0);
 const pageNo = ref(1);
 const pageSize = ref(10);
 const total = ref(0);
@@ -206,6 +230,13 @@ const columns = computed(() => [
     fixed: 'right' as const,
   },
 ]);
+/** 已改到工序库存的动作不再在列表上新建 */
+const createActions = computed(() =>
+  config.value.create.filter((action) => !RETIRED_STOCK_ACTIONS.has(action)),
+);
+const handoff = computed(() =>
+  purchaseInvoice.value ? undefined : factoryHandoff[effectiveKind.value],
+);
 const statusOptions = computed(() =>
   (isIntake.value ? [] : documentStatuses(effectiveKind.value)).map(
     (value) => ({ value, label: statusLabels[value] }),
@@ -217,15 +248,117 @@ const assignmentOptions = computed(() =>
     : ['UNASSIGNED', 'PARTIALLY_ASSIGNED', 'ASSIGNED']
   ).map((value) => ({ value, label: label(value) })),
 );
+const PEOPLE = /UserId$|^actorId$|^confirmedBy$|^createdBy$|^cancelledBy$/i;
+const INSTANTS = new Set([
+  'confirmedAt',
+  'createdAt',
+  'occurredAt',
+  'updatedAt',
+]);
+const AMOUNTS = new Set(['amount', 'rmbAmount', 'unitPrice']);
+/** 采购申请：首个产品名 + 项数 + 总数量；需求日期取最早一项 */
+function requestCell(record: Record<string, unknown>, key: string) {
+  const items = Array.isArray(record.items)
+    ? (record.items as Record<string, unknown>[])
+    : [];
+  if (key === 'requiredDate') {
+    const dates = items
+      .map((item) => String(item.requiredDate ?? ''))
+      .filter(Boolean)
+      .toSorted();
+    return dates[0] ?? '未填写';
+  }
+  if (items.length === 0) return '没有明细';
+  const snapshot = (items[0]!.specificationSnapshot ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const name = String(snapshot.skuName ?? snapshot.skuCode ?? '产品');
+  const units = new Set(
+    items.map((item) =>
+      String(
+        (item.specificationSnapshot as Record<string, unknown> | undefined)
+          ?.unit ?? '',
+      ),
+    ),
+  );
+  const total = items.reduce(
+    (sum, item) => sum + Number(item.quantity ?? 0),
+    0,
+  );
+  const quantity = `${total.toLocaleString('en-US')}${units.size === 1 ? ` ${[...units][0]}` : ''}`;
+  return items.length > 1
+    ? `${name} 等 ${items.length} 项 · 共 ${quantity}`
+    : `${name} · ${quantity}`;
+}
+/** 金智迁入的出入库单把产品和数量放在明细行里，单头没有 */
+function lineCell(row: DocumentRow, key: string) {
+  const lines = Array.isArray(row.record.lines)
+    ? (row.record.lines as Record<string, unknown>[])
+    : [];
+  const value = row.record[key];
+  if (key === 'product') {
+    if (lines.length === 0) return undefined;
+    const first = lines[0]!;
+    const snapshot = (first.specificationSnapshot ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const name = String(first.skuName ?? snapshot.skuName ?? '产品');
+    return lines.length > 1 ? `${name} 等 ${lines.length} 项` : name;
+  }
+  if (
+    key === 'quantity' &&
+    (value === null || value === undefined) &&
+    lines.length > 0
+  ) {
+    const units = new Set(lines.map((line) => String(line.unit ?? '')));
+    const total = lines.reduce(
+      (sum, line) => sum + Number(line.quantity ?? 0),
+      0,
+    );
+    return `${total.toLocaleString('en-US')}${units.size === 1 ? ` ${[...units][0]}` : ''}`;
+  }
+  if (key === 'shippedDate' && !value) {
+    const source = (row as { migration?: { sourceDate?: string } }).migration
+      ?.sourceDate;
+    if (source) return source.slice(0, 10);
+    const occurred = row.record.occurredAt;
+    return typeof occurred === 'string'
+      ? dayjs(occurred).format('YYYY-MM-DD')
+      : undefined;
+  }
+  return undefined;
+}
 function cell(row: DocumentRow, key: string) {
   if (key === 'allocationType') return allocationKind(row.record);
+  const fromLines = lineCell(row, key);
+  if (fromLines !== undefined) return fromLines;
+  if (key === 'product') return '—';
+  if (
+    key === 'requestItems' ||
+    (key === 'requiredDate' && Array.isArray(row.record.items))
+  )
+    return requestCell(row.record, key);
   const value = row.record[key];
-  return (
+  const special =
     migrationCell(row.record, key) ??
     receiptFxDisplay(row.record, key) ??
-    formatTemporalField(key, value) ??
-    (/UserId$/i.test(key) ? personLabel(directory.value, value) : label(value))
-  );
+    formatTemporalField(key, value);
+  if (special !== undefined) return special;
+  if (PEOPLE.test(key))
+    return value === null || value === undefined || value === ''
+      ? '—'
+      : personLabel(directory.value, value);
+  // 时间按本地时区到分钟；日期字段原样显示
+  if (INSTANTS.has(key) && typeof value === 'string' && value.includes('T'))
+    return dayjs(value).format('YYYY-MM-DD HH:mm');
+  if (AMOUNTS.has(key) && value !== null && value !== undefined && value !== '')
+    return money(
+      value,
+      typeof row.record.currency === 'string' ? row.record.currency : '',
+    );
+  return label(value);
 }
 async function load() {
   const current = ++sequence;
@@ -241,6 +374,8 @@ async function load() {
       assignmentStatus:
         effectiveKind.value === 'requests' ? assignmentStatus.value : undefined,
       contractId: contractId.value,
+      pendingCompletion: completionFilter(scope.value),
+      salesChannel: channelFilter(props.salesChannel, contractId.value),
     });
     if (current === sequence) {
       records.value = result.list;
@@ -250,6 +385,24 @@ async function load() {
     if (current === sequence) pageError.value = errorText(error);
   } finally {
     if (current === sequence) loading.value = false;
+  }
+}
+/** Only the queue size; it decides whether the scope switch is shown at all. */
+let pendingSequence = 0;
+async function loadPendingTotal() {
+  const current = ++pendingSequence;
+  try {
+    const result = await getBusinessPage<DocumentRow>(config.value.resource, {
+      companyId: 0,
+      pageNo: 1,
+      pageSize: 1,
+      contractId: contractId.value,
+      pendingCompletion: true,
+      salesChannel: channelFilter(props.salesChannel, contractId.value),
+    });
+    if (current === pendingSequence) pendingTotal.value = result.total;
+  } catch {
+    if (current === pendingSequence) pendingTotal.value = 0;
   }
 }
 function search() {
@@ -295,7 +448,11 @@ function quickAction(row: DocumentRow) {
   actionOpen.value = true;
 }
 const hasSearch = computed(() =>
-  Boolean(keyword.value.trim() || status.value || assignmentStatus.value),
+  Boolean(
+    keyword.value.trim() ||
+    (status.value && status.value !== defaultStatus()) ||
+    assignmentStatus.value,
+  ),
 );
 const emptyMessage = computed(() =>
   hasSearch.value ? '没有符合当前查询条件的单据' : kindEmptyMessage(),
@@ -304,14 +461,14 @@ function kindEmptyMessage() {
   if (props.kind === 'tasks')
     return isIntake.value
       ? '当前没有未分派或部分分派的采购申请'
-      : '尚无履约任务，请先在待接单申请中接单分派';
+      : '尚无采购任务，请先在待接单申请中接单分派';
   return contractId.value
     ? `该合同尚无${config.value.title}`
     : `尚无${config.value.title}`;
 }
 function clearSearch() {
   keyword.value = '';
-  status.value = undefined;
+  status.value = defaultStatus();
   assignmentStatus.value = undefined;
   search();
 }
@@ -336,11 +493,16 @@ watch(
     actionRow.value = undefined;
     actionSource.value = undefined;
     actionContractId.value = undefined;
-    status.value = undefined;
+    status.value = defaultStatus();
     assignmentStatus.value = undefined;
+    scope.value =
+      scopeFromQuery(route.query.scope) ??
+      defaultCompletionScope(contractId.value);
+    pendingTotal.value = 0;
     if (!routeActive.value) return;
     void loadContext();
     void load();
+    void loadPendingTotal();
   },
 );
 onBeforeUnmount(() => {
@@ -350,6 +512,7 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   void loadContext();
   void load();
+  void loadPendingTotal();
   try {
     directory.value = await getDirectory(0);
   } catch (error) {
@@ -359,8 +522,14 @@ onMounted(async () => {
 </script>
 <template>
   <Page
-    :title="kind === 'tasks' ? documentDefinitions.tasks.title : config.title"
-    :description="config.description"
+    :title="
+      inMergedView
+        ? undefined
+        : kind === 'tasks'
+          ? documentDefinitions.tasks.title
+          : config.title
+    "
+    :description="handoff?.note ?? config.description"
   >
     <Card>
       <Space direction="vertical" size="middle" style="width: 100%">
@@ -372,11 +541,18 @@ onMounted(async () => {
         </Tabs>
         <Tabs v-if="kind === 'tasks'" v-model:active-key="procurementQueue">
           <TabPane key="intake" tab="待接单申请" />
-          <TabPane key="tasks" tab="履约任务" />
+          <TabPane key="tasks" tab="采购任务" />
         </Tabs>
         <Space wrap>
           <Button
-            v-for="(action, index) in config.create"
+            v-if="handoff?.path"
+            type="primary"
+            @click="router.push({ path: handoff.path, query: handoff.query })"
+          >
+            {{ handoff.label }}
+          </Button>
+          <Button
+            v-for="(action, index) in createActions"
             :key="action"
             :type="index === 0 ? 'primary' : 'default'"
             @click="create(action)"
@@ -397,6 +573,11 @@ onMounted(async () => {
             </Space>
           </template>
 </Alert><Space wrap>
+          <CompletionScopeFilter
+            v-model="scope"
+            :pending-total="pendingTotal"
+            @change="search"
+          />
           <Input.Search
             v-model:value="keyword"
             placeholder="搜索合同、客户或单据内容"
@@ -475,11 +656,11 @@ onMounted(async () => {
                 查看待接单申请
               </Button>
               <Button
-                v-else-if="config.create[0]"
+                v-else-if="createActions[0]"
                 type="primary"
-                @click="create(config.create[0])"
+                @click="create(createActions[0])"
               >
-                {{ actionTitle(config.create[0]) }}
+                {{ actionTitle(createActions[0]) }}
               </Button>
               <Button v-else-if="contractId" @click="clearContext">
                 查看全部合同的单据
@@ -621,6 +802,7 @@ onMounted(async () => {
       :row="actionRow"
       :source="actionSource"
       :contract-id="actionContractId"
+      :sales-channel="salesChannel"
       :lock-contract="Boolean(actionContractId)"
       @close="actionOpen = false"
       @updated="actionSaved"

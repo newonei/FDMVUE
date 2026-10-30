@@ -18,12 +18,15 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     attachmentUrl?: string;
     productSpec?: string;
     packagingMethod?: string;
+    salePrice?: number;
     purchasePrice?: number;
     quantity?: number;
     orderDate?: number | string;
     importSequence?: number;
     followUser?: string;
     productionSent?: number;
+    /** 快递单号，整单共用 */
+    expressNo?: string;
     recognitionStatus?: number;
     readonly recognizedCount?: number;
     readonly lastRecognizedTime?: number | string;
@@ -41,6 +44,7 @@ export namespace FdmNeixiaoPatternDesignItemApi {
     previewImageUrl?: string;
     productSpec?: string;
     packagingMethod?: string;
+    salePrice?: number;
     purchasePrice?: number;
     quantity: number;
     remark?: string;
@@ -118,12 +122,15 @@ export function getFdmNeixiaoPatternDesignItem(id: number) {
 export function uploadFdmNeixiaoPatternDesignItemDesignImage(
   file: File,
   onUploadProgress?: AxiosProgressEvent,
+  options: { signal?: AbortSignal; silent?: boolean } = {},
 ) {
   return requestClient.upload<FdmNeixiaoPatternDesignItemApi.UploadResp>(
     '/fdmneixiao/pattern/design-item/upload-design-image',
     { file },
     {
       onUploadProgress,
+      signal: options.signal,
+      silent: options.silent,
       timeout: PATTERN_DESIGN_ITEM_UPLOAD_TIMEOUT,
     },
   );
@@ -185,11 +192,14 @@ export function notifyFdmNeixiaoPatternDesignItemOrder(orderNo: string) {
   );
 }
 
-/** 标记内销定制订单制作发出并发送通知 */
-export function productionSendFdmNeixiaoPatternDesignItem(id: number) {
+/** 填写快递单号，整单标记制作发出并发送通知；已填写的单号会被覆盖 */
+export function productionSendFdmNeixiaoPatternDesignItem(
+  id: number,
+  expressNo: string,
+) {
   return requestClient.post<boolean>(
     '/fdmneixiao/pattern/design-item/production-send',
-    { id },
+    { expressNo, id },
   );
 }
 

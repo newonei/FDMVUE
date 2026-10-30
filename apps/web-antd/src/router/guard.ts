@@ -1,4 +1,4 @@
-import type { Router } from 'vue-router';
+import type { RouteLocationNormalized, Router } from 'vue-router';
 
 import { LOGIN_PATH } from '@vben/constants';
 import { $t } from '@vben/locales';
@@ -13,11 +13,24 @@ import { accessRoutes, coreRouteNames } from '#/router/routes';
 import { useAuthStore } from '#/store';
 
 import { generateAccess } from './access';
+import { resolveLegacyFallbackPath } from './legacy-route-redirects';
 
 /**
  * 通用守卫配置
  * @param router
  */
+
+/** 菜单挪到新目录后，旧地址找不到页面时跳到新地址（带上原来的查询参数）。 */
+function legacyFallback(
+  to: ReturnType<Router['resolve']> | RouteLocationNormalized,
+) {
+  if (!to.matched.some((r) => r.name === 'FallbackNotFound')) return undefined;
+  const path = resolveLegacyFallbackPath(to.path);
+  return path
+    ? { hash: to.hash, path, query: to.query, replace: true }
+    : undefined;
+}
+
 function setupCommonGuard(router: Router) {
   // 记录已经加载的页面
   const loadedPaths = new Set<string>();
@@ -92,7 +105,7 @@ function setupAccessGuard(router: Router) {
 
     // 是否已经生成过动态路由
     if (accessStore.isAccessChecked) {
-      return true;
+      return legacyFallback(to) ?? true;
     }
 
     // 加载字典数据（不阻塞加载）
@@ -135,8 +148,11 @@ function setupAccessGuard(router: Router) {
         ? userInfo?.homePath || preferences.app.defaultHomePath
         : to.fullPath)) as string;
 
+    const target = router.resolve(decodeURIComponent(redirectPath));
+    const legacy = legacyFallback(target);
+    if (legacy) return legacy;
     return {
-      ...router.resolve(decodeURIComponent(redirectPath)),
+      ...target,
       replace: true,
     };
   });

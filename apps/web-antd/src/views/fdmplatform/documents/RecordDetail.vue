@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { LineColumn } from '../components/line-table-model';
 import type { DocumentKind } from './model';
 import type {
   RelatedCreation,
@@ -13,32 +14,47 @@ import type {
   DocumentRow,
 } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
+import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 
-import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  provide,
+  ref,
+  watch,
+} from 'vue';
 
 import {
   Alert,
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
+  message,
   Space,
   Spin,
   Tag,
 } from 'ant-design-vue';
+import dayjs from 'dayjs';
 
 import { getAttachments, getContract, getDirectory } from '#/api/fdmplatform';
+import { getContractFiles } from '#/api/fdmplatform/contract-files';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import AttachmentPanel from '../components/AttachmentPanel.vue';
-import { errorText, label, rows } from '../data';
+import ContractFilesPanel from '../components/ContractFilesPanel.vue';
+import LineTable from '../components/LineTable.vue';
+import { errorText, label, money, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
+import { salesChannelOf } from '../sales-channel';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
-import LinkedRecordTable from './LinkedRecordTable.vue';
 import { migrationCell } from './migration-display';
 import MigrationSource from './MigrationSource.vue';
 import {
@@ -52,12 +68,16 @@ import {
 import {
   contractTarget,
   entityTarget,
+  lineTarget,
   relatedDocumentLinks,
 } from './navigation';
+import ReceiptSections from './ReceiptSections.vue';
+import ReceiptSummary from './ReceiptSummary.vue';
 import { relatedCreations } from './related-creation';
 import RelatedLink from './RelatedLink.vue';
 
 import '../purchase/components/procurement.css';
+
 const props = defineProps<{
   embedded?: boolean;
   kind: DocumentKind;
@@ -69,6 +89,17 @@ const emit = defineEmits<{
   navigate: [kind: DocumentKind];
   updated: [];
 }>();
+/** 采购单执行抽屉（采购订单页同一个组件），异步加载避免与采购订单页循环引用 */
+const PurchaseOrderExecution = defineAsyncComponent(
+  () => import('../purchase/manage/index.vue'),
+);
+/** 采购申请「转成采购单 / 转成供应商报价」（金智同款）：复用采购工作台的开单、录报价表单 */
+const PurchaseOrderEditor = defineAsyncComponent(
+  () => import('../purchase/manage/components/PurchaseOrderEditor.vue'),
+);
+const RequestQuoteDialog = defineAsyncComponent(
+  () => import('../purchase/tasks/RequestQuoteDialog.vue'),
+);
 const contract = ref<Contract>();
 const record = ref<BusinessRecord>();
 const migration = computed(
@@ -82,6 +113,8 @@ const attachments = ref<AttachmentView>();
 const attachmentError = ref('');
 const filesOpen = ref(false);
 const allContractFiles = ref(false);
+const contractFiles = ref<ContractFileListing>();
+const contractFilesLoading = ref(false);
 const attachmentTarget = computed(() =>
   record.value
     ? documentAttachmentTarget(props.kind, record.value.id)
@@ -89,12 +122,60 @@ const attachmentTarget = computed(() =>
 );
 const actionOpen = ref(false);
 const attachmentBusy = ref(false);
-const childOpen = computed(() => actionOpen.value || attachmentBusy.value);
+const convertTo = ref<'order' | 'quote'>();
+const convertedOrder = ref<{ contractId: string; orderId: string }>();
+const childOpen = computed(
+  () =>
+    actionOpen.value ||
+    attachmentBusy.value ||
+    !!convertTo.value ||
+    !!convertedOrder.value,
+);
+/** 申请没取消、合同允许时才能转单 */
+const canConvert = computed(
+  () =>
+    props.kind === 'requests' &&
+    !!record.value &&
+    record.value.status !== 'CANCELLED' &&
+    !!contract.value &&
+    !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
+);
+function converted(value: CreatedProcurementOrders) {
+  convertTo.value = undefined;
+  message.success(createdOrdersText(value, '已转成采购单'));
+  emit('updated');
+  convertedOrder.value = {
+    contractId: value.contractId,
+    orderId: value.orderId,
+  };
+}
+function quoted() {
+  convertTo.value = undefined;
+  message.success('供应商报价已登记');
+  emit('updated');
+  void load();
+}
 const selectedAction = ref<string>();
 const selectedKind = ref<DocumentKind>(props.kind);
 const relatedSource = ref<RelatedDocumentSource>();
 let sequence = 0;
+/**
+ * 新系统采购单统一弹出采购订单执行抽屉（金智式：哪里打开都是同一个采购单详情）；
+ * 金智迁入的历史采购单仍按原单据显示。
+ */
+const purchaseOrder = computed(() => {
+  const row = props.row;
+  if (props.kind !== 'orders' || !row) return undefined;
+  const native = (row as { nativeStandalone?: boolean }).nativeStandalone;
+  if (row.standaloneId && native !== true) return undefined;
+  return {
+    contractId: row.standaloneId ? '' : String(row.contractId ?? ''),
+    orderId: String(row.standaloneId ?? row.id),
+  };
+});
 const config = computed(() => documentDefinitions[props.kind]);
+/** 回款记录用金智式抬头 + 分组字段，其它单据沿用通用字段表 */
+const receipt = computed(() => props.kind === 'receipts');
 const procurement = computed(() =>
   [
     'arrivals',
@@ -140,6 +221,11 @@ const actions = computed(() =>
       if (action === 'CONFIRM_RECEIPT')
         return record.value?.status === 'PENDING';
       if (action === 'VOID_INVOICE') return record.value?.status === 'VALID';
+      if (action === 'SUPPLEMENT_INVOICE')
+        return (
+          record.value?.status === 'VALID' &&
+          (!record.value.invoiceNumber || !record.value.evidenceRef)
+        );
       if (action === 'SUBMIT_PLAN')
         return [
           'DRAFT',
@@ -178,6 +264,8 @@ const extraFields = [
   'evidenceRef|历史凭证',
   'accountRef|收款账户',
   'exchangeRateToCny|人民币参考汇率',
+  'contractRateToCny|合同币种参考汇率',
+  'contractAmount|计入合同金额',
   'exchangeRateDate|实际汇率日期',
   'exchangeRateSource|汇率来源',
   'exchangeRateFallback|汇率日期匹配',
@@ -185,21 +273,72 @@ const extraFields = [
   'occurredAt|登记时间',
   'createdAt|创建时间',
 ];
+/** 内销开票记录按金智补充的字段；外贸发票没有这些值，不显示空行 */
+const invoiceFields = [
+  'taxRate|税率',
+  'buyer|购方开票信息',
+  'remark|备注',
+  'actorId|经手人',
+];
+const OPTIONAL_KEYS = new Set([
+  'buyer',
+  'content',
+  'invoiceNumber',
+  'remark',
+  'taxAmount',
+  'taxIncluded',
+  'taxRate',
+  'ticketKind',
+]);
+const CONTRACT_FX = new Set(['contractAmount', 'contractRateToCny']);
+const domesticContract = computed(
+  () => salesChannelOf(contract.value?.businessType) === 'DOMESTIC',
+);
 const fields = computed(() =>
   [
     ...new Map(
-      [...config.value.fields, ...extraFields].map((pair) => {
+      [
+        ...config.value.fields,
+        ...(props.kind === 'invoices' ? invoiceFields : []),
+        ...extraFields,
+      ].map((pair) => {
         const [key, name] = pair.split('|');
         return [key!, { key: key!, title: name! }] as const;
       }),
     ).values(),
-  ].filter(
-    (item) =>
-      record.value?.[item.key] !== undefined ||
-      (item.key.startsWith('exchangeRate') &&
-        ['receipts', 'refunds'].includes(props.kind)),
+  ].filter((item) =>
+    // 合同币种折算只有跨币种回款才有，同币种回款不显示空行
+    CONTRACT_FX.has(item.key) ||
+    (props.kind === 'invoices' && OPTIONAL_KEYS.has(item.key))
+      ? record.value?.[item.key] !== undefined &&
+        record.value?.[item.key] !== null
+      : // 内销回款都是人民币，不显示汇率字段
+        !(item.key.startsWith('exchangeRate') && domesticContract.value) &&
+        (record.value?.[item.key] !== undefined ||
+          (item.key.startsWith('exchangeRate') &&
+            ['receipts', 'refunds'].includes(props.kind))),
   ),
 );
+/** 后端 Instant 字段是 ISO 时间戳，按本机时区显示到秒 */
+function timeText(text: string) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)
+    ? dayjs(text).format('YYYY-MM-DD HH:mm:ss')
+    : text;
+}
+function buyerText(buyer: Record<string, unknown>) {
+  return [
+    ['title', '名称'],
+    ['taxNo', '税号'],
+    ['address', '地址'],
+    ['phone', '电话'],
+    ['bankName', '开户行'],
+    ['bankAccount', '账号'],
+    ['email', '收票邮箱'],
+  ]
+    .filter(([key]) => buyer[key!])
+    .map(([key, name]) => `${name}：${buyer[key!]}`)
+    .join('；');
+}
 function display(key: string) {
   if (key === 'allocationType') return allocationKind(record.value!);
   const value = record.value?.[key];
@@ -207,7 +346,14 @@ function display(key: string) {
     migrationCell(record.value ?? {}, key) ??
     receiptFxDisplay(record.value ?? {}, key) ??
     formatTemporalField(key, value);
-  if (formatted !== undefined && formatted !== null) return formatted;
+  if (formatted !== undefined && formatted !== null) return timeText(formatted);
+  if (props.kind === 'invoices' && key === 'taxRate') return `${value}%`;
+  if (props.kind === 'invoices' && key === 'taxIncluded')
+    return value ? '含税' : '不含税';
+  if (props.kind === 'invoices' && key === 'buyer')
+    return buyerText(value as Record<string, unknown>);
+  if (key === 'contractAmount' && value !== null && value !== undefined)
+    return money(value, contract.value?.currency);
   if (
     /UserId$/i.test(key) ||
     ['actorId', 'confirmedBy', 'createdBy'].includes(key)
@@ -215,7 +361,9 @@ function display(key: string) {
     return personLabel(directory.value, value);
   if (Array.isArray(value))
     return value.map((entry) => label(entry)).join('；');
-  return label(value);
+  if (key === 'amount' && record.value?.currency && value !== undefined)
+    return money(value, String(record.value.currency));
+  return timeText(label(value));
 }
 const lines = computed(() =>
   rows(record.value?.items ?? record.value?.lines).map((line) => ({
@@ -260,30 +408,41 @@ function contributionValue(key: string) {
 const contribution = computed(
   () => contract.value?.profit as Record<string, unknown> | undefined,
 );
-const lineColumns = computed(() =>
-  [
-    'productName|产品',
-    'shape|形状',
-    'suggestedSupplier|建议采购工厂',
-    'quantity|数量',
-    'requiredDate|需求日期',
-    'assignmentName|履约方式',
-    'supplierName|供应商',
-    'unitPrice|单价',
-    'arrivedQuantity|已到数量',
-    'acceptedQuantity|合格数量',
-    'cancelledQuantity|已取消数量',
-    'remark|说明',
-  ]
-    .map((pair) => {
-      const [key, title] = pair.split('|');
-      return { key: key!, title: title! };
-    })
-    .filter((column) =>
-      lines.value.some(
+/** 明细字段：本单据有数据的默认显示，其余在字段设置里可勾选 */
+const lineColumns = computed<LineColumn[]>(() =>
+  (
+    [
+      { key: 'productName', title: '产品名称', width: 220, locked: true },
+      { key: 'shape', title: '形状', width: 110 },
+      { key: 'suggestedSupplier', title: '建议采购工厂', width: 180 },
+      { key: 'quantity', title: '数量', width: 110, align: 'right' },
+      { key: 'requiredDate', title: '需求日期', width: 120 },
+      { key: 'assignmentName', title: '采购方式', width: 120 },
+      { key: 'supplierName', title: '供应商', width: 180 },
+      { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
+      { key: 'arrivedQuantity', title: '已到数量', width: 110, align: 'right' },
+      {
+        key: 'acceptedQuantity',
+        title: '合格数量',
+        width: 110,
+        align: 'right',
+      },
+      {
+        key: 'cancelledQuantity',
+        title: '已取消数量',
+        width: 110,
+        align: 'right',
+      },
+      { key: 'remark', title: '说明', width: 200 },
+    ] as LineColumn[]
+  ).map((column) => ({
+    ...column,
+    optional:
+      !column.locked &&
+      !lines.value.some(
         (line) => (line as BusinessRecord)[column.key] !== undefined,
       ),
-    ),
+  })),
 );
 async function load() {
   if (!props.open || !props.row || childOpen.value) return;
@@ -311,6 +470,7 @@ watch(
   () => [props.open, props.row?.id, props.row?.contractId, props.kind],
   () => {
     ++sequence;
+    if (purchaseOrder.value) return;
     actionOpen.value = false;
     selectedAction.value = undefined;
     selectedKind.value = props.kind;
@@ -322,6 +482,7 @@ watch(
       filesOpen.value = !procurement.value;
       allContractFiles.value = false;
       attachments.value = undefined;
+      contractFiles.value = undefined;
       attachmentError.value = '';
       void load();
     } else {
@@ -340,18 +501,20 @@ async function loadFiles() {
   const recordId = record.value.id;
   const allFiles = allContractFiles.value;
   attachmentError.value = '';
+  const current = () =>
+    props.open &&
+    contract.value?.id === contractId &&
+    record.value?.id === recordId &&
+    allContractFiles.value === allFiles;
   try {
-    const response = await getAttachments(
-      contractId,
-      allFiles ? undefined : attachmentTarget.value,
-    );
-    if (
-      props.open &&
-      contract.value?.id === contractId &&
-      record.value?.id === recordId &&
-      allContractFiles.value === allFiles
-    )
-      attachments.value = response;
+    if (allFiles) {
+      contractFilesLoading.value = true;
+      const response = await getContractFiles(contractId);
+      if (current()) contractFiles.value = response;
+      return;
+    }
+    const response = await getAttachments(contractId, attachmentTarget.value);
+    if (current()) attachments.value = response;
   } catch (error) {
     if (
       props.open &&
@@ -360,6 +523,8 @@ async function loadFiles() {
       allContractFiles.value === allFiles
     )
       attachmentError.value = errorText(error);
+  } finally {
+    if (allFiles) contractFilesLoading.value = false;
   }
 }
 function openAction(action: string) {
@@ -416,7 +581,15 @@ const mainAction = computed(() => {
 });
 </script>
 <template>
-  <Drawer
+  <PurchaseOrderExecution
+    v-if="purchaseOrder && open"
+    :embedded-order="purchaseOrder"
+    @close="emit('close')"
+    @updated="emit('updated')"
+  />
+  <FdmResizableDrawer
+    :resize-key="procurement ? 'procurement-record' : 'business-record'"
+    v-else-if="!purchaseOrder"
     :open="open"
     :title="drawerTitle"
     :root-class-name="procurement ? 'procurement-record-drawer' : undefined"
@@ -427,9 +600,27 @@ const mainAction = computed(() => {
     @close="close"
   >
     <template #extra>
-      <Button :loading="loading" :disabled="childOpen" @click="load">
-        刷新当前单据
-      </Button>
+      <Space>
+        <template v-if="canConvert">
+          <Button
+            v-if="contract?.allowedActions.includes('CREATE_QUOTES')"
+            :disabled="childOpen"
+            @click="convertTo = 'quote'"
+          >
+            转成供应商报价
+          </Button>
+          <Button
+            type="primary"
+            :disabled="childOpen"
+            @click="convertTo = 'order'"
+          >
+            转成采购单
+          </Button>
+        </template>
+        <Button :loading="loading" :disabled="childOpen" @click="load">
+          刷新当前单据
+        </Button>
+      </Space>
 </template><Spin v-if="loading" /><Alert
       v-if="pageError"
       :message="pageError"
@@ -441,7 +632,15 @@ const mainAction = computed(() => {
       size="large"
       style="width: 100%"
     >
+      <ReceiptSummary
+        v-if="receipt"
+        :contract="contract"
+        :record="record"
+        :company="company"
+        :display="display"
+      />
       <Descriptions
+        v-else
         :bordered="!procurement"
         size="small"
         :column="{ xs: 1, sm: 2 }"
@@ -461,7 +660,7 @@ const mainAction = computed(() => {
           <Tag v-else>{{ label(record.status) }}</Tag>
         </Descriptions.Item>
 </Descriptions><Descriptions
-        v-if="sourceContext.length"
+        v-if="sourceContext.length && !receipt"
         :bordered="!procurement"
         size="small"
         :column="2"
@@ -509,7 +708,14 @@ const mainAction = computed(() => {
         >
           {{ filesOpen ? '收起附件' : '凭证附件' }}
         </Button>
-</Space><Descriptions
+</Space><ReceiptSections
+        v-if="receipt"
+        :contract="contract"
+        :record="record"
+        :directory="directory"
+        :display="display"
+      /><Descriptions
+        v-else
         :bordered="!procurement"
         size="small"
         :column="{ xs: 1, sm: 2 }"
@@ -529,12 +735,23 @@ const mainAction = computed(() => {
           nativeId: contract.id,
           recordId: record.id,
         }"
-      /><Card v-if="lines.length" title="当前单据明细" size="small">
-        <LinkedRecordTable
-          :contract="contract"
-          :data="lines"
+      /><Card v-if="lines.length" size="small">
+        <LineTable
+          :table="`record-${kind}`"
+          title="当前单据明细"
           :columns="lineColumns"
-        />
+          :data-source="lines"
+          :pagination="lines.length > 10 ? { pageSize: 10 } : false"
+        >
+          <template #bodyCell="{ column, record: line }">
+            <RelatedLink
+              :target="lineTarget(contract, String(column.key), line)"
+              :title="label(line[String(column.key)])"
+            >
+              {{ label(line[String(column.key)]) }}
+            </RelatedLink>
+          </template>
+        </LineTable>
 </Card><Card
         v-if="kind === 'costs' && contribution"
         title="当前合同成本与贡献口径"
@@ -555,7 +772,11 @@ const mainAction = computed(() => {
         </Descriptions>
 </Card><Card
         v-if="filesOpen"
-        :title="allContractFiles ? '合同全部附件' : '当前单据附件'"
+        :title="
+          allContractFiles
+            ? '合同全部附件'
+            : `当前单据附件${attachments?.items.length ? `（${attachments.items.length}）` : ''}`
+        "
         size="small"
       >
         <template #extra>
@@ -569,18 +790,31 @@ const mainAction = computed(() => {
             {{ allContractFiles ? '返回当前单据附件' : '查看合同全部附件' }}
           </Button>
         </template>
+        <ContractFilesPanel
+          v-if="allContractFiles"
+          :contract-id="contract.id"
+          :listing="contractFiles"
+          :directory="directory"
+          :error="attachmentError"
+          :loading="contractFilesLoading"
+          @refresh="loadFiles"
+        />
         <AttachmentPanel
+          v-else
           :contract-id="contract.id"
           :target="attachmentTarget"
           :view="attachments"
           :loading="false"
           :error="attachmentError"
           :categories="attachments?.uploadCategories ?? []"
+          :default-category="
+            ['receipts', 'refunds'].includes(kind) ? 'RECEIPT' : undefined
+          "
           @refresh="loadFiles"
           @busy="(value) => (attachmentBusy = value)"
         />
       </Card>
-      <details>
+      <details v-if="!receipt">
         <summary>单据追溯信息</summary>
         <p>单据引用：{{ record.id }} · 合同数据版本：{{ contract.version }}</p>
       </details>
@@ -588,7 +822,7 @@ const mainAction = computed(() => {
       v-else-if="!loading && !pageError"
       description="请重新选择单据"
     />
-</Drawer><DocumentAction
+</FdmResizableDrawer><DocumentAction
     :open="open && actionOpen"
     :kind="selectedKind"
     :action="selectedAction"
@@ -598,5 +832,27 @@ const mainAction = computed(() => {
     :lock-contract="true"
     @close="actionOpen = false"
     @updated="updated"
+  />
+  <PurchaseOrderEditor
+    v-if="convertTo === 'order'"
+    :open="open"
+    :contract-id="contract?.id"
+    :request-id="record?.id ? String(record.id) : undefined"
+    @close="convertTo = undefined"
+    @saved="converted"
+  />
+  <RequestQuoteDialog
+    v-if="convertTo === 'quote'"
+    :open="open"
+    :contract-id="contract?.id"
+    :request-id="record?.id ? String(record.id) : undefined"
+    @close="convertTo = undefined"
+    @saved="quoted"
+  />
+  <PurchaseOrderExecution
+    v-if="convertedOrder && open"
+    :embedded-order="convertedOrder"
+    @close="convertedOrder = undefined"
+    @updated="emit('updated')"
   />
 </template>

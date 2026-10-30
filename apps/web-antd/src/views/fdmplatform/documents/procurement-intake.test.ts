@@ -175,9 +175,9 @@ describe('procurement intake navigation', () => {
     expect(procurementDocumentKind('tasks', 'intake')).toBe('requests');
     const config = procurementDocumentDefinition('tasks', 'intake');
     expect(config.resource).toBe('purchase-intake');
-    expect(config.fields).toContain('name|申请名称');
+    expect(config.fields).toContain('requestItems|产品 · 数量');
     expect(config.actions).toContain('ASSIGN_FULFILLMENT');
-    expect(config.fields).not.toContain('method|履约方式');
+    expect(config.fields).not.toContain('method|采购方式');
   });
 
   it('keeps existing assignment records in the second queue', () => {
@@ -186,7 +186,7 @@ describe('procurement intake navigation', () => {
       'assignments',
     );
     expect(procurementDocumentDefinition('tasks', 'tasks').fields).toContain(
-      'method|履约方式',
+      'method|采购方式',
     );
   });
 

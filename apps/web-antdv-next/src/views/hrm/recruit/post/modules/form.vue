@@ -107,7 +107,8 @@ const [Modal, modalApi] = useVbenModal({
       formData.value = undefined;
       return;
     }
-    const data = modalApi.getData<HrmRecruitPostApi.RecruitPost>();
+    formApi.setState({ schema: useFormSchema(formApi) });
+    const data = modalApi.getData() as HrmRecruitPostApi.RecruitPost;
     if (!data?.id) {
       await formApi.setValues({
         postName: '',

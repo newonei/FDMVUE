@@ -27,6 +27,7 @@ import {
 } from '../documents/formDefaults';
 import { availableOptions } from '../documents/model';
 import ReceiptFxPreview from '../finance/exchange-rates/ReceiptFxPreview.vue';
+import BuyerInvoicePanel from './BuyerInvoicePanel.vue';
 import RemoteMasterSelect from './RemoteMasterSelect.vue';
 import RemoteStockSelect from './RemoteStockSelect.vue';
 
@@ -41,6 +42,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [hasChanges: boolean];
+  draft: [payload: Record<string, unknown>];
   submit: [payload: Record<string, unknown>, idempotencyKey: string];
 }>();
 const automatic = new WeakMap<FormValues, FormValues>();
@@ -304,7 +306,11 @@ function submit() {
     focusFirstError();
     return;
   }
-  if (definition.action === 'CREATE_RECEIPT' && !fxPreviewReady.value) {
+  if (
+    definition.action === 'CREATE_RECEIPT' &&
+    !definition.rmbOnly &&
+    !fxPreviewReady.value
+  ) {
     validation.value = conversionRequiredMessage;
     return;
   }
@@ -312,6 +318,23 @@ function submit() {
   if (definition.lineKey && lines.value.length > 0)
     payload[definition.lineKey] = lines.value.map(clean);
   emit('submit', payload, idempotencyKey.value);
+}
+/** 草稿只保存已填写内容，不校验必填和汇率折算 */
+function saveDraft() {
+  const definition = props.definition;
+  if (!definition || props.saving) return;
+  const payload: Record<string, unknown> = clean(values.value);
+  if (definition.lineKey && lines.value.length > 0)
+    payload[definition.lineKey] = lines.value.map(clean);
+  emit('draft', payload);
+}
+/** 票据类型默认取客户档案的发票类型，已手动选过的不覆盖 */
+function defaultTicketKind(type: string) {
+  if (
+    props.definition?.fields.some((item) => item.key === 'ticketKind') &&
+    !values.value.ticketKind
+  )
+    values.value.ticketKind = type;
 }
 function setValue(target: FormValues, key: string, value: unknown) {
   if (props.saving) return;
@@ -357,8 +380,22 @@ function setValue(target: FormValues, key: string, value: unknown) {
     @cancel="requestClose"
     @ok="submit"
   >
+    <template v-if="definition?.draftLabel" #footer>
+      <Button :disabled="saving" @click="requestClose">取消</Button>
+      <Button :loading="saving" @click="saveDraft">
+        {{ definition.draftLabel }}
+      </Button>
+      <Button type="primary" :loading="saving" @click="submit">
+        {{ definition.submitLabel || '提交' }}
+      </Button>
+    </template>
     <div v-if="definition" ref="actionBody" class="action-dialog">
       <Alert :message="definition.description" type="info" show-icon />
+      <BuyerInvoicePanel
+        v-if="definition.buyerCustomerId"
+        :customer-id="definition.buyerCustomerId"
+        @type="defaultTicketKind"
+      />
       <slot name="context"></slot>
       <Alert
         v-if="validation || error"
@@ -440,6 +477,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
             :string-mode="item.type === 'decimal'"
             :precision="item.type === 'number' ? 0 : undefined"
             :min="item.min"
+            :placeholder="item.placeholderOf?.(values)"
             style="width: 100%"
             @update:value="(value) => setValue(values, item.key, value)"
           />
@@ -460,10 +498,11 @@ function setValue(target: FormValues, key: string, value: unknown) {
         </Form.Item>
       </Form>
       <ReceiptFxPreview
-        v-if="definition.action === 'CREATE_RECEIPT'"
+        v-if="definition.action === 'CREATE_RECEIPT' && !definition.rmbOnly"
         :open="open"
         :date="textValue(values.receivedAt)"
         :currency="textValue(values.currency)"
+        :contract-currency="definition.contractCurrency"
         :amount="scalarValue(values.amount)"
         @ready="setFxReady"
       />

@@ -46,7 +46,7 @@ let sequence = 0;
 const kinds: Record<string, string> = {
   BLANK: '空白 SKU',
   FINISHED: '成品 SKU',
-  COMPANY: '公司货权主体',
+  COMPANY: '公司货主',
 };
 watch(
   () => props.companyId,

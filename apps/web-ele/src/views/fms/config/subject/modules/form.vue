@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+// oxlint-disable no-nested-ternary
 import type { FormRules } from 'element-plus';
 
 import type { FmsAuxiliaryTypeApi } from '#/api/fms/config/auxiliary/type';
@@ -31,7 +32,7 @@ import {
   getSubjectUsage,
   updateSubject,
 } from '#/api/fms/config/subject';
-import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-item-select.vue';
+import FmsAuxiliaryItemSelect from '#/views/fms/config/auxiliary/components/auxiliary-item-select.vue'; // FDM：官方误引用了不存在的 auxiliary-select-modal
 import FmsAuxiliaryTypeSelect from '#/views/fms/config/auxiliary/components/auxiliary-type-select.vue';
 import FmsCurrencySelect from '#/views/fms/config/currency/components/fms-currency-select.vue';
 import { useFmsStore } from '#/views/fms/store/fms';
@@ -229,10 +230,13 @@ function handleCodeBlur() {
 function findParentByCode(code?: string) {
   if (!code || !/^\d+$/.test(code)) return undefined;
   const codeRules = subjectCodeRule.value.split('-').map(Number);
-  const parentLength = codeRules.reduce((total, length) => {
-    const currentLength = total + length;
-    return currentLength < code.length ? currentLength : total;
-  }, 0);
+  let parentLength = 0;
+  for (const length of codeRules) {
+    const currentLength = parentLength + length;
+    if (currentLength < code.length) {
+      parentLength = currentLength;
+    }
+  }
   if (parentLength <= 0 || parentLength >= code.length) return undefined;
   const parentCode = code.slice(0, parentLength);
   return subjectCandidates.value.find((subject) => subject.code === parentCode);
@@ -325,21 +329,22 @@ const [Modal, modalApi] = useVbenModal({
   onConfirm: submitForm,
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) return;
-    const data = modalApi.getData<{
+    const data = modalApi.getData() as {
       parent?: FmsSubjectApi.Subject;
       row?: FmsSubjectApi.Subject;
       subjectType: number;
       type: string;
-    }>();
+    };
     const accountSetId = fmsStore.getAccountSetId;
     if (!data || !accountSetId) return;
     formType.value = data.type;
-    dialogTitle.value =
-      data.type === 'update'
-        ? '编辑科目'
-        : data.parent
-          ? '新建下级科目'
-          : '新建科目';
+    dialogTitle.value = '新建科目';
+    if (data.parent) {
+      dialogTitle.value = '新建下级科目';
+    }
+    if (data.type === 'update') {
+      dialogTitle.value = '编辑科目';
+    }
     resetForm(accountSetId, data.subjectType, data.parent);
     modalApi.lock();
     try {

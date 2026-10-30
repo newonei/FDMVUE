@@ -33,7 +33,8 @@ export const productFieldLabels: Record<string, string> = {
 };
 export function productDescription(product: Product) {
   return [
-    product.specification,
+    product.model,
+    product.spec ?? product.specification,
     product.material,
     product.size,
     product.color,
@@ -73,6 +74,23 @@ export function contractLineAmount(
   return amount.isFinite()
     ? amount.toFixed(2, BigNumber.ROUND_HALF_UP)
     : undefined;
+}
+/**
+ * 填总价反推单价：单价最多 6 位小数（与后端一致）。数量未填或为 0 时无法反推，返回 undefined；
+ * 总价清空返回 null（待定价）。
+ */
+export function unitPriceFromAmount(
+  quantity: ContractItem['quantity'] | null | undefined,
+  amount: null | number | string | undefined,
+) {
+  if (amount === null || amount === undefined || amount === '') return null;
+  const qty = new BigNumber(quantity ?? Number.NaN);
+  const total = new BigNumber(amount);
+  if (!qty.isFinite() || qty.lte(0) || !total.isFinite() || total.lt(0))
+    return undefined;
+  return new BigNumber(
+    total.div(qty).toFixed(6, BigNumber.ROUND_HALF_UP),
+  ).toFixed();
 }
 /** Match the server: round each line to cents before summing. */
 export function contractItemsTotal(lines: ContractItem[]) {
@@ -145,11 +163,17 @@ export function contractCompanyOptions(
   return options;
 }
 
-/** The server owns numbering; a form cannot introduce or replace a contract identity. */
+/**
+ * 新建时弹窗先回填系统建议的订单号：没改过就不传，由后端保存时重新取号（避免两人同时新建撞号）；
+ * 改过就把手填的订单号交给后端查重。已保存的合同订单号不能再改。
+ */
 export function contractHeaderPayload<T extends Record<string, unknown>>(
   form: T,
   current?: Pick<Contract, 'code'>,
+  suggestedCode?: string,
 ) {
-  const { code: _code, taxBasis: _taxBasis, ...header } = form;
-  return { ...header, ...(current ? { code: current.code } : {}) };
+  const { code, taxBasis: _taxBasis, ...header } = form;
+  if (current) return { ...header, code: current.code };
+  const typed = typeof code === 'string' ? code.trim() : '';
+  return typed && typed !== suggestedCode ? { ...header, code: typed } : header;
 }

@@ -1,9 +1,10 @@
 <script lang="ts" setup>
 import type { TableColumnsType } from 'ant-design-vue';
 import type { JixiaoApi } from '#/api/fdmperformance';
+import type { SystemDeptApi } from '#/api/system/dept';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { downloadFileFromBlobPart } from '@vben/utils';
+import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
 import {
   Alert,
   Button,
@@ -19,6 +20,7 @@ import {
   Tabs,
   Tag,
   Textarea,
+  TreeSelect,
 } from 'ant-design-vue';
 import {
   cancelInstance,
@@ -27,6 +29,7 @@ import {
   getInstancePage,
   remindInstances,
 } from '#/api/fdmperformance';
+import { getSimpleDeptList } from '#/api/system/dept';
 import { usePerformanceAccess } from '../shared/access';
 import {
   INSTANCE_STATUS_MAP,
@@ -36,13 +39,13 @@ import {
 import PerformanceShell from '../shared/PerformanceShell.vue';
 import {
   actionLabel,
-  deadlineMeta,
   defaultManagementScope,
   hasAction,
   managementScopes,
   SCOPE_LABELS,
   visibilityLabel,
 } from '../shared/workspace';
+import TemplateManager from '../templates/components/TemplateManager.vue';
 import HrReviewQueue from './components/HrReviewQueue.vue';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
@@ -52,6 +55,8 @@ const loading = ref(false);
 const loadError = ref(false);
 const exporting = ref(false);
 const reminding = ref(false);
+const deptLoading = ref(false);
+const deptTreeOptions = ref<SystemDeptApi.Dept[]>([]);
 const rows = ref<JixiaoApi.Instance[]>([]);
 const total = ref(0);
 const selectedIds = ref<number[]>([]);
@@ -60,6 +65,10 @@ const cancelOpen = ref(false);
 const cancelTarget = ref<JixiaoApi.Instance>();
 const cancelReason = ref('');
 const cancelLoading = ref(false);
+const deleteOpen = ref(false);
+const deleteTarget = ref<JixiaoApi.Instance>();
+const deleteReason = ref('');
+const deleteLoading = ref(false);
 let requestId = 0;
 const query = reactive<JixiaoApi.InstancePageParams>({
   pageNo: 1,
@@ -69,6 +78,7 @@ const query = reactive<JixiaoApi.InstancePageParams>({
   status: undefined,
   userName: undefined,
   creatorUserId: undefined,
+  deptId: undefined,
 });
 const scopes = computed(() => managementScopes(access.value));
 const creatorOptions = computed(() => [
@@ -106,7 +116,6 @@ const columns: TableColumnsType = [
   { dataIndex: 'templateName', title: '考核与周期', width: 200 },
   { dataIndex: 'creatorUserName', title: '发起人', width: 120 },
   { dataIndex: 'currentTaskName', title: '阶段与处理人', width: 180 },
-  { dataIndex: 'endDate', title: '截止时间', width: 190 },
   { dataIndex: 'finalScore', title: '成绩', width: 130 },
   { dataIndex: 'action', title: '操作', fixed: 'right', width: 220 },
 ];
@@ -192,16 +201,43 @@ async function confirmCancel() {
     cancelLoading.value = false;
   }
 }
-async function remove(row: JixiaoApi.Instance) {
-  if (!row.id || !hasAction(row, 'DELETE')) return;
-  await deleteInstance(row.id);
-  message.success('已删除');
-  await load();
+function openDelete(row: JixiaoApi.Instance) {
+  deleteTarget.value = row;
+  deleteReason.value = '';
+  deleteOpen.value = true;
+}
+async function confirmDelete() {
+  const target = deleteTarget.value;
+  if (!target?.id || !hasAction(target, 'DELETE')) return;
+  if (!deleteReason.value.trim()) {
+    message.warning('请填写删除原因');
+    return;
+  }
+  deleteLoading.value = true;
+  try {
+    await deleteInstance(target.id, deleteReason.value.trim());
+    message.success('考核已删除');
+    deleteOpen.value = false;
+    await load();
+  } finally {
+    deleteLoading.value = false;
+  }
 }
 async function initialize() {
   const capability = await loadAccess();
   query.scope = defaultManagementScope(capability);
-  await load();
+  await Promise.all([load(), loadDepartments()]);
+}
+async function loadDepartments() {
+  if (!access.value?.canManage) return;
+  deptLoading.value = true;
+  try {
+    deptTreeOptions.value = handleTree(await getSimpleDeptList());
+  } catch {
+    message.warning('部门列表加载失败，请刷新后重试');
+  } finally {
+    deptLoading.value = false;
+  }
 }
 onMounted(initialize);
 </script>
@@ -247,6 +283,16 @@ onMounted(initialize);
               :tab="SCOPE_LABELS[scope]"
           /></Tabs>
           <div class="filter-bar">
+            <TreeSelect
+              v-model:value="query.deptId"
+              :tree-data="deptTreeOptions"
+              :field-names="{ children: 'children', label: 'name', value: 'id' }"
+              :loading="deptLoading"
+              placeholder="全部部门（含下级）"
+              allow-clear
+              show-search
+              tree-node-filter-prop="name"
+            />
             <DatePicker
               v-model:value="query.periodKey"
               picker="month"
@@ -314,7 +360,7 @@ onMounted(initialize);
               showSizeChanger: true,
               pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
             }"
-            :scroll="{ x: 1240 }"
+            :scroll="{ x: 1050 }"
             row-key="id"
             size="small"
             @change="
@@ -361,20 +407,6 @@ onMounted(initialize);
                   {{ record.currentTaskAssigneeUserName || '—' }}
                 </div></template
               >
-              <template v-else-if="column.dataIndex === 'endDate'"
-                ><Tag
-                  :color="
-                    record.status === 1
-                      ? deadlineMeta(record.endDate).color
-                      : 'default'
-                  "
-                  >{{
-                    record.status === 1
-                      ? deadlineMeta(record.endDate).text
-                      : record.endDate || '—'
-                  }}</Tag
-                ></template
-              >
               <template v-else-if="column.dataIndex === 'finalScore'"
                 >{{ record.finalScore ?? '—' }}
                 <Tag v-if="record.grade">{{ record.grade }}</Tag>
@@ -408,13 +440,13 @@ onMounted(initialize);
                     type="link"
                     @click="openCancel(record)"
                     >撤销</Button
-                  ><Popconfirm
+                  ><Button
                     v-if="access.canConfigure && hasAction(record, 'DELETE')"
-                    title="仅已撤销且没有正式评分的考核可删除。确认永久删除该考核及关联数据？"
-                    @confirm="remove(record)"
-                    ><Button danger size="small" type="link"
-                      >删除</Button
-                    ></Popconfirm
+                    danger
+                    size="small"
+                    type="link"
+                    @click="openDelete(record)"
+                    >删除</Button
                   ></Space
                 ></template
               >
@@ -425,6 +457,12 @@ onMounted(initialize);
       <Tabs.TabPane v-if="access.canConfigure" key="hr-review" tab="待人事审核"
         ><HrReviewQueue
       /></Tabs.TabPane>
+      <Tabs.TabPane
+        v-if="access.canManageTemplate"
+        key="templates"
+        tab="考评表"
+        ><div class="management-panel"><TemplateManager /></div
+      ></Tabs.TabPane>
     </Tabs>
     <Modal
       v-model:open="cancelOpen"
@@ -442,6 +480,40 @@ onMounted(initialize);
         :maxlength="500"
         placeholder="填写撤销原因"
     /></Modal>
+    <Modal
+      v-model:open="deleteOpen"
+      title="删除考核"
+      :confirm-loading="deleteLoading"
+      :ok-button-props="{ danger: true }"
+      ok-text="确认删除"
+      @ok="confirmDelete"
+      ><p>
+        删除 {{ deleteTarget?.userName }} 的
+        {{ deleteTarget?.periodKey }} 考核（{{
+          INSTANCE_STATUS_MAP[deleteTarget?.status ?? -1]?.text || '未知状态'
+        }}）。
+      </p>
+      <Alert
+        class="delete-alert"
+        type="warning"
+        show-icon
+        message="删除后无法在页面上恢复"
+        ><template #description
+          ><ul class="delete-effects">
+            <li>进行中的考核会先终止流程，并关闭相关待办。</li>
+            <li>
+              评分、结果和复核记录会一并删除，绩效结果和绩效分析中不再显示。
+            </li>
+            <li>删除后可以为此人在同一周期重新发起考核。</li>
+          </ul></template
+        ></Alert
+      >
+      <Textarea
+        v-model:value="deleteReason"
+        :rows="3"
+        :maxlength="200"
+        placeholder="填写删除原因，例如：此人本期不需要考核"
+    /></Modal>
   </PerformanceShell>
 </template>
 
@@ -451,6 +523,14 @@ onMounted(initialize);
   border: 1px solid hsl(var(--border));
   border-radius: 12px;
   background: hsl(var(--card));
+}
+.delete-alert {
+  margin-bottom: 12px;
+}
+.delete-effects {
+  padding-left: 18px;
+  margin: 0;
+  list-style: disc;
 }
 .filter-bar {
   display: flex;

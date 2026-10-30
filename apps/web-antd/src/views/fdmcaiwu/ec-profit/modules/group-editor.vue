@@ -1,59 +1,109 @@
 <script setup lang="ts">
 import type { FormInstance } from 'ant-design-vue';
 import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
-import { reactive, ref, watch } from 'vue';
+
+import { computed, reactive, ref, watch } from 'vue';
+
 import {
+  Alert,
   Form,
   FormItem,
   Input,
   InputNumber,
   message,
   Modal,
+  Select,
   Switch,
+  Tag,
 } from 'ant-design-vue';
+
 import {
   createFinanceGroup,
+  saveEcProfitDefaultGroups,
   updateFinanceGroup,
 } from '#/api/fdmcaiwu/ec-profit';
-const props = defineProps<{ open: boolean; group?: Api.Group }>();
+
+/**
+ * 电商分组 = 分组名称 + 哪些店铺默认在这个组。与财务核算无关，不需要部门和代码；
+ * 这里改的是「默认分组」，对所有月份生效；某个月临时调整在「按月调整」里改。
+ */
+const props = defineProps<{
+  group?: Api.Group;
+  groups: Api.Group[];
+  open: boolean;
+  shops: Api.GroupMemberShop[];
+}>();
 const emit = defineEmits<{ 'update:open': [open: boolean]; saved: [] }>();
+
 const formRef = ref<FormInstance>();
 const saving = ref(false);
-const form = reactive<Api.GroupCreate>({
-  code: '',
+const form = reactive({
   name: '',
-  departmentCode: '',
-  departmentName: '',
+  shopIds: [] as string[],
   sort: 0,
   enabled: true,
 });
+
+/** 默认在该组的店铺 */
+const members = computed(() =>
+  props.group
+    ? props.shops
+        .filter((shop) => shop.defaultGroupId === props.group!.id)
+        .map((shop) => shop.shopId)
+    : [],
+);
 watch(
   () => [props.open, props.group] as const,
   ([open]) => {
     if (!open) return;
-    Object.assign(
-      form,
-      props.group
-        ? {
-            code: props.group.code,
-            name: props.group.name,
-            departmentCode: props.group.departmentCode,
-            departmentName: props.group.departmentName,
-            sort: props.group.sort,
-            enabled: props.group.enabled,
-          }
-        : {
-            code: '',
-            name: '',
-            departmentCode: '',
-            departmentName: '',
-            sort: 0,
-            enabled: true,
-          },
-    );
+    Object.assign(form, {
+      name: props.group?.name ?? '',
+      shopIds: [...members.value],
+      sort: props.group?.sort ?? props.groups.length,
+      enabled: props.group?.enabled ?? true,
+    });
     formRef.value?.clearValidate();
   },
 );
+
+const shopById = computed(() => new Map(props.shops.map((shop) => [shop.shopId, shop])));
+const shopOptions = computed(() =>
+  props.shops.map((shop) => {
+    const other =
+      shop.defaultGroupId && shop.defaultGroupId !== props.group?.id
+        ? `（现属 ${shop.defaultGroupName}）`
+        : '';
+    return {
+      label: `${shop.shopName}${shop.platformCode ? ` · ${shop.platformCode}` : ''}${other}`,
+      value: shop.shopId,
+    };
+  }),
+);
+const added = computed(() => form.shopIds.filter((id) => !members.value.includes(id)));
+const removed = computed(() => members.value.filter((id) => !form.shopIds.includes(id)));
+const movedFromOther = computed(() =>
+  added.value
+    .map((id) => shopById.value.get(id))
+    .filter((shop) => shop?.defaultGroupId && shop.defaultGroupId !== props.group?.id),
+);
+const disabling = computed(() => !!props.group && props.group.enabled && !form.enabled);
+
+function nameRule(_rule: unknown, value: string) {
+  const name = value?.trim();
+  if (!name) return Promise.reject(new Error('填写分组名称'));
+  const duplicated = props.groups.some(
+    (group) => group.id !== props.group?.id && group.name.trim().toLowerCase() === name.toLowerCase(),
+  );
+  return duplicated ? Promise.reject(new Error('已有同名分组')) : Promise.resolve();
+}
+
+/** 设置默认分组；groupId 为空表示移出默认分组。每批最多 500 家。 */
+async function moveShops(shopIds: string[], groupId?: number) {
+  for (let index = 0; index < shopIds.length; index += 500) {
+    await saveEcProfitDefaultGroups({ groupId, shopIds: shopIds.slice(index, index + 500) });
+  }
+}
+
 async function save() {
   if (saving.value) return;
   try {
@@ -62,24 +112,41 @@ async function save() {
     return;
   }
   saving.value = true;
+  let groupId = props.group?.id;
   try {
-    const data = {
-      ...form,
-      code: form.code.trim(),
-      name: form.name.trim(),
-      departmentCode: form.departmentCode.trim(),
-      departmentName: form.departmentName.trim(),
-    };
-    if (props.group)
+    const base = { name: form.name.trim(), sort: form.sort ?? 0 };
+    if (props.group) {
+      // 停用前先把默认成员全部移出，否则服务端会因「仍有店铺」拒绝停用
+      if (disabling.value && members.value.length > 0) await moveShops(members.value);
       await updateFinanceGroup({
-        ...data,
-        id: props.group.id,
+        ...props.group,
+        ...base,
+        enabled: form.enabled,
         expectedVersion: props.group.version,
       });
-    else await createFinanceGroup(data);
-    message.success('财务小组已保存');
+    } else {
+      groupId = await createFinanceGroup({
+        ...base,
+        code: '',
+        departmentCode: '',
+        departmentName: '',
+        enabled: true,
+      });
+    }
+    if (form.enabled) {
+      if (added.value.length > 0) await moveShops(added.value, groupId);
+      if (removed.value.length > 0) await moveShops(removed.value);
+    }
+    message.success(props.group ? '分组已保存' : `已新增分组「${base.name}」`);
     emit('update:open', false);
     emit('saved');
+  } catch {
+    // 分组本身可能已保存；刷新后让用户看到真实状态再决定是否重试
+    if (!props.group && groupId) {
+      message.warning('分组已创建，但部分店铺未能加入，请刷新后重试');
+      emit('update:open', false);
+      emit('saved');
+    }
   } finally {
     saving.value = false;
   }
@@ -89,81 +156,88 @@ async function save() {
 <template>
   <Modal
     :open="open"
-    :title="group ? '编辑财务小组' : '新增财务小组'"
+    :title="group ? `编辑分组「${group.name}」` : '新增分组'"
+    :width="620"
     :confirm-loading="saving"
     :closable="!saving"
     :keyboard="!saving"
     :mask-closable="!saving"
     :cancel-button-props="{ disabled: saving }"
-    ok-text="保存小组"
+    ok-text="保存"
     @cancel="emit('update:open', false)"
     @ok="save"
   >
     <Form ref="formRef" :model="form" layout="vertical" class="pt-3">
+      <FormItem label="分组名称" name="name" :rules="[{ validator: nameRule, trigger: 'blur' }]">
+        <Input
+          v-model:value="form.name"
+          :maxlength="100"
+          :disabled="saving"
+          placeholder="例如：一组古米梵、抖音组"
+        />
+      </FormItem>
+      <FormItem>
+        <template #label>
+          <span>组内店铺</span>
+          <span class="ml-2 text-xs font-normal text-muted-foreground"
+            >已选 {{ form.shopIds.length }} 家 · 默认分组，所有月份生效</span
+          >
+        </template>
+        <Select
+          v-model:value="form.shopIds"
+          mode="multiple"
+          :options="shopOptions"
+          :disabled="saving || !form.enabled"
+          option-filter-prop="label"
+          placeholder="搜索并选择店铺"
+          :max-tag-count="12"
+          allow-clear
+        />
+      </FormItem>
       <div class="grid grid-cols-2 gap-x-4">
-        <FormItem
-          label="财务部门代码"
-          name="departmentCode"
-          :rules="[
-            { required: true, whitespace: true, message: '填写财务部门代码' },
-          ]"
-          ><Input
-            v-model:value="form.departmentCode"
-            :maxlength="64"
-            :disabled="saving" /></FormItem
-        ><FormItem
-          label="财务部门名称"
-          name="departmentName"
-          :rules="[
-            { required: true, whitespace: true, message: '填写财务部门名称' },
-          ]"
-          ><Input
-            v-model:value="form.departmentName"
-            :maxlength="100"
-            :disabled="saving" /></FormItem
-        ><FormItem
-          label="小组代码"
-          name="code"
-          :rules="[
-            { required: true, whitespace: true, message: '填写小组代码' },
-          ]"
-          ><Input
-            v-model:value="form.code"
-            :maxlength="64"
-            :disabled="saving || !!group" /></FormItem
-        ><FormItem
-          label="小组名称"
-          name="name"
-          :rules="[
-            { required: true, whitespace: true, message: '填写小组名称' },
-          ]"
-          ><Input
-            v-model:value="form.name"
-            :maxlength="100"
-            :disabled="saving" /></FormItem
-        ><FormItem
-          label="排序"
-          name="sort"
-          :rules="[
-            {
-              required: true,
-              type: 'number',
-              min: 0,
-              message: '填写大于等于 0 的排序值',
-            },
-          ]"
-          ><InputNumber
+        <FormItem label="排序" name="sort">
+          <InputNumber
             v-model:value="form.sort"
             :min="0"
             :precision="0"
             :disabled="saving"
-            class="!w-full" /></FormItem
-        ><FormItem label="启用"
-          ><Switch v-model:checked="form.enabled" :disabled="saving"
-        /></FormItem>
+            class="!w-full"
+          />
+        </FormItem>
+        <FormItem v-if="group" label="启用">
+          <Switch v-model:checked="form.enabled" :disabled="saving" />
+        </FormItem>
       </div>
+      <Alert
+        v-if="added.length || removed.length || disabling"
+        type="info"
+        show-icon
+        class="mb-2"
+      >
+        <template #message>
+          <div class="space-y-1 text-sm">
+            <div v-if="disabling">
+              停用后该组不再接收店铺；组内 {{ members.length }} 家店铺将变为「未配置」。
+            </div>
+            <template v-else>
+              <div v-if="added.length">
+                加入 {{ added.length }} 家
+                <template v-if="movedFromOther.length"
+                  >，其中 {{ movedFromOther.length }} 家从其他分组移入</template
+                >
+              </div>
+              <div v-if="removed.length">
+                移出 {{ removed.length }} 家（变为「未配置」）：
+                <Tag v-for="id in removed" :key="id" class="!mb-1">{{
+                  shopById.get(id)?.shopName
+                }}</Tag>
+              </div>
+            </template>
+          </div>
+        </template>
+      </Alert>
       <p class="mb-0 text-xs leading-6 text-muted-foreground">
-        财务部门和小组独立于聚水潭分组。改名或停用不修改历史月报；停用前须先处理仍然生效的店铺归属。
+        这里设置的是店铺的<strong>默认分组</strong>，所有月份都按它汇总。某个月临时有变化（如有人请假，店铺交给别人），到「按月调整」里只改那个月。
       </p>
     </Form>
   </Modal>

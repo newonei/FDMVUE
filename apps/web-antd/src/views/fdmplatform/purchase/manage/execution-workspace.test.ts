@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Workspace from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  overview: vi.fn(),
   list: vi.fn(),
   detail: vi.fn(),
   contract: vi.fn(),
@@ -20,7 +21,9 @@ vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: vi.fn(() => 'key'),
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
+  getOrderInvoices: vi.fn(async () => ({ invoicedAmount: 0, invoices: [] })),
   getProcurementOrders: mocks.list,
+  getProcurementOrdersOverview: mocks.overview,
   getProcurementOrder: mocks.detail,
   downloadProcurementFile: vi.fn(),
   exportProcurementOrder: vi.fn(),
@@ -30,7 +33,12 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinanceSummary: mocks.finance,
 }));
-vi.mock('../../documents/procurement-tabs', () => ({}));
+vi.mock('#/api/fdmaicheck', () => ({
+  getAiCheckLevels: vi.fn().mockResolvedValue({}),
+}));
+vi.mock('#/views/fdmaicheck/components/AiCheckPanel.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
@@ -55,11 +63,129 @@ vi.mock('../../documents/MigrationSource.vue', () => ({
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('./components/BatchRequestDialog.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('#/api/fdmplatform/warehouse', () => ({
+  getStockIns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+  getPurchaseReturns: vi.fn().mockResolvedValue({ list: [], total: 0 }),
+}));
+vi.mock('./components/OrderSubDocMenu.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: { type: Array, default: () => [] },
+      disabled: Boolean,
+    },
+    emits: ['pick'],
+    setup: (props, ctx) => () =>
+      h(
+        'div',
+        (
+          props.items as Array<{
+            disabled?: boolean;
+            key: string;
+            label: string;
+          }>
+        ).map((item) =>
+          h(
+            'button',
+            {
+              disabled: props.disabled || item.disabled,
+              onClick: () => ctx.emit('pick', item.key),
+            },
+            item.label,
+          ),
+        ),
+      ),
+  }),
+}));
+vi.mock('./components/OrderTimeline.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderSummaryCards.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderStockDocs.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderInvoices.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/PurchaseOrderEditor.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('../warehouse/StockInDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup(props, { emit }) {
+      return () =>
+        props.open
+          ? h(
+              'div',
+              {
+                'data-stock-in': props.orderId,
+                'data-contract': props.contractId,
+              },
+              [
+                h(
+                  'button',
+                  {
+                    onClick: () =>
+                      emit('saved', { code: 'RK001', directShip: false }),
+                  },
+                  '确认入库',
+                ),
+                h('button', { onClick: () => emit('close') }, '取消入库'),
+              ],
+            )
+          : null;
+    },
+  }),
+}));
+vi.mock('./components/OrderExportMenu.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
 vi.mock('./components/OrderContract.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/StandaloneOrderFiles.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderDetails.vue', () => ({
   default: defineComponent({ render: () => null }),
+}));
+vi.mock('./components/OrderLines.vue', () => ({
+  default: defineComponent({ render: () => null }),
+}));
+vi.mock('../../finance/procurement/components/PaymentRecordDialog.vue', () => ({
+  default: defineComponent({
+    props: {
+      open: Boolean,
+      available: { type: null, default: undefined },
+      contractId: { type: String, default: undefined },
+      orderId: { type: String, default: undefined },
+    },
+    emits: ['close', 'saved'],
+    setup:
+      (props, { emit }) =>
+      () =>
+        props.open
+          ? h(
+              'section',
+              {
+                'data-payment': props.orderId,
+                'data-contract': props.contractId,
+                'data-available': String(props.available),
+              },
+              [h('button', { onClick: () => emit('close') }, '关闭登记付款')],
+            )
+          : null,
+  }),
 }));
 vi.mock('../../finance/procurement/components/OrderFinance.vue', () => ({
   default: defineComponent({
@@ -210,8 +336,45 @@ vi.mock('ant-design-vue', () => {
     },
     Progress: block,
     Space: block,
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: defineComponent({
+      props: { items: { type: Array, default: () => [] } },
+      emits: ['click'],
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          (
+            props.items as Array<{
+              children?: Array<{
+                disabled?: boolean;
+                key: string;
+                label: string;
+              }>;
+              disabled?: boolean;
+              key: string;
+              label: string;
+            }>
+          )
+            .flatMap((item) => item.children ?? [item])
+            .map((item) =>
+              h(
+                'button',
+                {
+                  disabled: item.disabled,
+                  onClick: () => ctx.emit('click', { key: item.key }),
+                },
+                item.label,
+              ),
+            ),
+        ),
+    }),
     TabPane: block,
     Tabs: block,
+    Tag: block,
+    Modal: { confirm: vi.fn(), warning: vi.fn() },
     message: { success: vi.fn() },
     Table: defineComponent({
       props: {
@@ -349,8 +512,33 @@ function button(host: HTMLElement, text: string) {
   expect(result).toBeDefined();
   return result!;
 }
+const overview = {
+  orders: 2,
+  open: 1,
+  overdue: 1,
+  maxOverdueDays: 9,
+  unsigned: 1,
+  unpaid: 1,
+  asOf: '2026-10-08',
+  openAmount: { CNY: 246 },
+  unpaidAmount: { CNY: 146 },
+  arrivedUnpaidAmount: {},
+  attention: [
+    {
+      reason: 'OVERDUE',
+      days: 9,
+      code: 'CG-OVERDUE',
+      orderId: 'po-a',
+      contractId: 'contract-a',
+      contractCode: 'HT-1',
+      supplierName: '工厂甲',
+      currency: 'CNY',
+    },
+  ],
+};
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.overview.mockResolvedValue(overview);
   mocks.list.mockResolvedValue({ list: [row()], total: 21 });
   mocks.contract.mockResolvedValue(contract());
   mocks.detail.mockResolvedValue(detail());
@@ -360,6 +548,7 @@ beforeEach(() => {
     paidAmount: '40',
     unpaidAmount: '60',
     availableRequestAmount: '25',
+    availablePaymentAmount: '25',
   });
 });
 afterEach(() => {
@@ -381,7 +570,12 @@ describe('采购订单原页执行', () => {
     expect(host.querySelector<HTMLElement>('[data-drawer]')).toBeNull();
     expect(mocks.list).toHaveBeenCalledTimes(count);
     expect(host.querySelector('input')?.value).toBe('工厂');
-    expect(mocks.list).toHaveBeenLastCalledWith(
+    // The completion-queue size request is separate from the list request.
+    expect(
+      mocks.list.mock.calls
+        .map(([params]) => params)
+        .findLast((params) => params?.pendingCompletion !== true),
+    ).toEqual(
       expect.objectContaining({
         pageNo: 2,
         contractId: undefined,
@@ -389,47 +583,73 @@ describe('采购订单原页执行', () => {
       }),
     );
   });
-  it('登记到货继承源订单并锁定合同，保存后更新原页并保留选择', async () => {
+  it('登记入库打开采购入库并带出当前采购单，保存后刷新原页并保留选择', async () => {
     const { host, router } = await mount('?page=2');
     button(host, 'CG-001').click();
     await settle();
-    button(host, '登记到货').click();
+    button(host, '入库单').click();
     await settle();
-    const action = host.querySelector<HTMLElement>('[data-action]')!;
-    expect(action.dataset.action).toBe('RECORD_ARRIVAL');
-    expect(action.dataset.contract).toBe('contract-a');
-    expect(action.dataset.source).toBe(
-      JSON.stringify({ kind: 'orders', id: 'po-a' }),
-    );
-    expect(action.dataset.locked).toBe('true');
+    const dialog = host.querySelector<HTMLElement>('[data-stock-in]')!;
+    expect(dialog.dataset.stockIn).toBe('po-a');
+    expect(dialog.dataset.contract).toBe('contract-a');
     expect(button(host, '关闭执行详情').disabled).toBe(true);
-    button(host, '完成办理').click();
+    button(host, '确认入库').click();
     await settle();
-    expect(host.querySelector<HTMLElement>('[data-action]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-stock-in]')).toBeNull();
     expect(host.querySelector<HTMLElement>('[data-drawer]')).not.toBeNull();
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ pageNo: 2 }),
     );
     expect(router.currentRoute.value.query.contractId).toBeUndefined();
   });
-  it('请款使用服务端可请款余额，报销也直接关联当前订单', async () => {
+  it('嵌入合同订单时只弹出同一个采购单执行抽屉，不读列表，关闭通知调用方', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/contracts', component: { render: () => null } }],
+    });
+    await router.push('/contracts?contractId=contract-a');
+    await router.isReady();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const closed = vi.fn();
+    const app = createApp({
+      render: () =>
+        h(Workspace, {
+          embeddedOrder: { contractId: 'contract-a', orderId: 'po-a' },
+          onClose: closed,
+        }),
+    });
+    app.use(router);
+    app.mount(host);
+    disposals.push(() => {
+      app.unmount();
+      host.remove();
+    });
+    await settle();
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.overview).not.toHaveBeenCalled();
+    expect(mocks.detail).toHaveBeenCalledWith('contract-a', 'po-a');
+    expect(host.querySelector('[data-drawer]')).not.toBeNull();
+    expect(button(host, '付款记录')).toBeDefined();
+    button(host, '关闭执行详情').click();
+    await settle();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(router.currentRoute.value.fullPath).toBe(
+      '/contracts?contractId=contract-a',
+    );
+  });
+  it('登记付款带出服务端可付余额，报销也直接关联当前订单', async () => {
     const { host } = await mount();
     button(host, 'CG-001').click();
     await settle();
-    button(host, '申请付款').click();
+    button(host, '付款记录').click();
     await settle();
-    expect(
-      JSON.parse(
-        host.querySelector<HTMLElement>('[data-finance-type]')!.dataset
-          .context!,
-      ),
-    ).toEqual({
-      contractId: 'contract-a',
-      orderId: 'po-a',
-      currency: 'CNY',
-      amount: '25',
-    });
-    button(host, '关闭财务单据').click();
+    const payment = host.querySelector<HTMLElement>('[data-payment]')!;
+    expect(payment.dataset.payment).toBe('po-a');
+    expect(payment.dataset.contract).toBe('contract-a');
+    expect(payment.dataset.available).toBe('25');
+    expect(button(host, '关闭执行详情').disabled).toBe(true);
+    button(host, '关闭登记付款').click();
     await settle();
     button(host, '费用报销').click();
     await settle();
@@ -446,7 +666,7 @@ describe('采购订单原页执行', () => {
   });
   it('负责人筛选发送服务端条件并回第一页，刷新失败保留已有结果', async () => {
     const { host } = await mount('?page=2');
-    button(host, '我负责的').click();
+    button(host, '只看我负责的').click();
     await settle();
     expect(mocks.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ mine: true, pageNo: 1 }),
@@ -484,7 +704,7 @@ describe('采购订单原页执行', () => {
     await settle();
     expect(host.querySelector<HTMLElement>('[data-standalone]')).toBeNull();
   });
-  it('不存在未到余额时隐藏登记到货，付款资料未读取时不启用请款', async () => {
+  it('不存在未到余额时隐藏登记入库，付款资料未读取时不启用登记付款', async () => {
     const complete = detail();
     complete.order.lines[0]!.arrivedQuantity = 10;
     complete.order.status = 'RECEIVED';
@@ -493,12 +713,8 @@ describe('采购订单原页执行', () => {
     const { host } = await mount();
     button(host, 'CG-001').click();
     await settle();
-    expect(
-      [...host.querySelectorAll('button')].some(
-        (entry) => entry.textContent?.trim() === '登记到货',
-      ),
-    ).toBe(false);
-    expect(button(host, '申请付款').disabled).toBe(true);
+    expect(button(host, '入库单').disabled).toBe(true);
+    expect(button(host, '付款记录').disabled).toBe(true);
     expect(host.textContent).toContain('待核实');
   });
   it('付款页内的关联子表单打开时阻止关闭执行抽屉，关闭子表单后恢复', async () => {
@@ -511,5 +727,31 @@ describe('采购订单原页执行', () => {
     button(host, '付款页关闭子表单').click();
     await settle();
     expect(button(host, '关闭执行详情').disabled).toBe(false);
+  });
+  it('统计卡跟随我负责的筛选，进行中卡按操作状态筛选，需要处理的采购单可直接打开', async () => {
+    const { host } = await mount();
+    expect(mocks.overview).toHaveBeenLastCalledWith(false);
+    expect(host.textContent).toContain('最长超期 9 天');
+    expect(host.textContent).toContain('CNY 146.00');
+    button(host, '只看我负责的').click();
+    await settle();
+    expect(mocks.overview).toHaveBeenLastCalledWith(true);
+    const open = [...host.querySelectorAll('button')].find(
+      (entry) =>
+        entry.textContent?.includes('进行中') &&
+        entry.classList.contains('order-kpi'),
+    )!;
+    open.click();
+    await settle();
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: 'IN_PROGRESS', pageNo: 1 }),
+    );
+    const attention = [...host.querySelectorAll('button')].find((entry) =>
+      entry.textContent?.includes('CG-OVERDUE'),
+    )!;
+    expect(attention.textContent).toContain('超期 9 天');
+    attention.click();
+    await settle();
+    expect(mocks.detail).toHaveBeenLastCalledWith('contract-a', 'po-a');
   });
 });

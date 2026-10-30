@@ -11,6 +11,9 @@ import { formatDate } from '@vben/utils';
 import { Alert, Button, Descriptions, Space, Tag } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
+
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { costCategories, rows } from '../../../data';
 import { contractReferenceText } from '../../../documents/migration-display';
 import { contractTarget, documentTarget } from '../../../documents/navigation';
@@ -25,6 +28,7 @@ import {
 const props = defineProps<{
   busy?: boolean;
   files: ProcurementFinanceFile[];
+  hidePayment?: boolean;
   record: ProcurementFinanceRecord;
   userNames?: Record<string, string>;
 }>();
@@ -42,6 +46,7 @@ const actions = computed(() =>
 );
 const canPay = computed(
   () =>
+    !props.hidePayment &&
     props.record.status === 'APPROVED' &&
     props.record.summary?.complete !== false &&
     props.record.summary?.paidAmount !== null &&
@@ -68,8 +73,10 @@ const flowMessage = computed(() => {
   if (props.record.status === 'APPROVED') {
     if (paymentLabel.value === '付款资料待核实')
       return '单据已生效，付款资料仍需核实。核实完成后再办理付款。';
-    return canPay.value
-      ? '单据已生效，可直接登记付款。付款经确认后更新实际已付金额。'
+    if (canPay.value)
+      return '单据已生效，可直接登记付款。付款经确认后更新实际已付金额。';
+    return hasPayableBalance(props.record.summary?.availablePaymentAmount)
+      ? '单据已生效，等待财务办理付款。'
       : '单据已生效，当前报销已付清。';
   }
   if (props.record.status === 'REJECTED')
@@ -160,7 +167,7 @@ function factName(value: unknown) {
             {{ actionNames[action] ?? action }}
           </Button>
           <Button
-            v-if="record.status === 'APPROVED'"
+            v-if="!hidePayment && record.status === 'APPROVED'"
             :disabled="busy"
             @click="emit('allocate')"
           >
@@ -254,6 +261,18 @@ function factName(value: unknown) {
             >
               {{ voucher(expense.evidenceRef)!.name }}
             </Button>
+            <FilePreviewButton
+              v-if="voucher(expense.evidenceRef)"
+              :disabled="busy"
+              :name="voucher(expense.evidenceRef)!.name"
+              :load="
+                () =>
+                  downloadProcurementFinanceFile(
+                    record.id,
+                    voucher(expense.evidenceRef)!.id,
+                  )
+              "
+            />
             <span v-else class="muted">{{
               expense.evidenceRef ? '凭证信息尚未加载或无权读取' : '未关联凭证'
             }}</span>

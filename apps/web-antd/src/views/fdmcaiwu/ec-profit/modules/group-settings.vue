@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { TableColumnsType } from 'ant-design-vue';
 import type { FdmcaiwuEcProfitApi as Api } from '#/api/fdmcaiwu/ec-profit';
-import type { AssignmentFilter } from '../config-model';
+import type { GroupView, MemberFilter } from '../config-model';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+
+import dayjs from 'dayjs';
+import { useAccess } from '@vben/access';
 import {
   Alert,
   Button,
@@ -11,85 +14,202 @@ import {
   Input,
   message,
   Modal,
+  Segmented,
   Select,
   Table,
   Tag,
 } from 'ant-design-vue';
 import {
   deleteFinanceGroup,
-  getShopAssignments,
+  getEcProfitGroupMembers,
+  saveEcProfitDefaultGroups,
+  saveEcProfitMonthGroups,
 } from '#/api/fdmcaiwu/ec-profit';
-import { assignmentLabel, filterAssignments } from '../config-model';
-import AssignmentDialog from './assignment-dialog.vue';
-import GroupEditor from './group-editor.vue';
+import {
+  filterMembers,
+  isAdjusted,
+  memberCounts,
+  UNCONFIGURED_GROUP,
+} from '../config-model';
 import ConfigurationHistory from './configuration-history.vue';
+import GroupEditor from './group-editor.vue';
+import GroupMoveDialog from './group-move-dialog.vue';
 
+/**
+ * 电商分组配置：
+ * - 默认分组：店铺平时属于哪个组；改默认分组时可选从某月起，之前已导入的月份保留原分组；
+ * - 按月调整：只改某个月（如有人请假，店铺交给别人），或从该月起都改（同时改默认分组）。
+ */
 const props = defineProps<{ defaultMonth: string }>();
 const emit = defineEmits<{ changed: [] }>();
+const { hasAccessByCodes } = useAccess();
+const canConfig = computed(() =>
+  hasAccessByCodes(['fdmcaiwu:ec-profit:group-config']),
+);
+const view = ref<GroupView>('default');
 const month = ref(props.defaultMonth);
-const data = ref<Api.AssignmentList>();
+const data = ref<Api.GroupMembers>();
 const loading = ref(false);
+const saving = ref(false);
 const error = ref('');
 const keyword = ref('');
-const filter = ref<AssignmentFilter>('all');
+const filter = ref<MemberFilter>('all');
 const groupId = ref<number>();
 const selectedKeys = ref<(number | string)[]>([]);
 const groupOpen = ref(false);
 const editingGroup = ref<Api.Group>();
-const assignOpen = ref(false);
-const assignedShops = ref<Api.AssignmentShop[]>([]);
+const moveOpen = ref(false);
+const moveShops = ref<Api.GroupMemberShop[]>([]);
+const moveGroupId = ref<number>();
 const historyRevision = ref(0);
 let sequence = 0;
 const groups = computed(() => data.value?.groups ?? []);
 const shops = computed(() => data.value?.shops ?? []);
 const rows = computed(() =>
-  filterAssignments(shops.value, filter.value, keyword.value, groupId.value),
+  filterMembers(shops.value, view.value, filter.value, keyword.value, groupId.value),
 );
 const selectedShops = computed(() =>
   shops.value.filter((shop) => selectedKeys.value.includes(shop.shopId)),
 );
+const counts = computed(() => memberCounts(shops.value, view.value));
 const unconfiguredCount = computed(
-  () => shops.value.filter((shop) => !shop.configured).length,
+  () => counts.value.get(UNCONFIGURED_GROUP)?.total ?? 0,
 );
-const columns: TableColumnsType<Api.AssignmentShop> = [
-  { title: '店铺 / 编号', key: 'name', width: 230 },
-  { title: '平台', dataIndex: 'platformCode', width: 100 },
-  { title: '当前财务归属', key: 'assignment', width: 260 },
-  { title: '范围', key: 'scope', width: 110 },
-  { title: '生效月份', dataIndex: 'effectiveMonth', width: 110 },
-  { title: '备注 / 原因', dataIndex: 'reason', width: 200 },
+const adjustedCount = computed(
+  () => shops.value.filter((shop) => isAdjusted(shop)).length,
+);
+const viewOptions = [
+  { label: '默认分组', value: 'default' },
+  { label: '按月调整', value: 'month' },
 ];
-const filterOptions = [
+const filterOptions = computed(() => [
   { label: '全部店铺', value: 'all' },
-  { label: '未配置待核实', value: 'unconfigured' },
-  { label: '已纳入 / 未分组', value: 'unassigned' },
-  { label: '已纳入毛利', value: 'included' },
-  { label: '已排除', value: 'excluded' },
-];
+  { label: view.value === 'default' ? '没有默认分组' : '本月未配置', value: 'unconfigured' },
+  ...(view.value === 'month' ? [{ label: '本月有调整', value: 'adjusted' }] : []),
+]);
+const columns = computed<TableColumnsType<Api.GroupMemberShop>>(() =>
+  view.value === 'default'
+    ? [
+        { title: '店铺 / 编号', key: 'name', width: 260 },
+        { title: '平台', dataIndex: 'platformCode', width: 110 },
+        { title: '默认分组', key: 'default', width: 240 },
+      ]
+    : [
+        { title: '店铺 / 编号', key: 'name', width: 240 },
+        { title: '平台', dataIndex: 'platformCode', width: 100 },
+        { title: '默认分组', key: 'defaultName', width: 130 },
+        { title: `${month.value} 分组`, key: 'month', width: 300 },
+        { title: '调整原因', dataIndex: 'overrideReason', width: 200 },
+      ],
+);
+
 async function load() {
   const current = ++sequence;
   loading.value = true;
   error.value = '';
-  data.value = undefined;
-  selectedKeys.value = [];
   try {
-    const result = await getShopAssignments(month.value);
+    const result = await getEcProfitGroupMembers(month.value);
     if (current === sequence) data.value = result;
   } catch {
-    if (current === sequence) error.value = '店铺归属配置加载失败，请重试。';
+    if (current === sequence) error.value = '分组配置加载失败，请重试。';
   } finally {
     if (current === sequence) loading.value = false;
   }
 }
-watch(
-  month,
-  () => {
-    groupId.value = undefined;
-    void load();
-  },
-  { immediate: true },
-);
+watch(month, () => void load(), { immediate: true });
+watch(view, () => {
+  groupId.value = undefined;
+  filter.value = 'all';
+  selectedKeys.value = [];
+});
 onBeforeUnmount(() => sequence++);
+
+async function changed() {
+  selectedKeys.value = [];
+  await load();
+  historyRevision.value++;
+  emit('changed');
+}
+/** 下拉选项：只能选启用的分组；当前所在的已停用分组也列出（不可选），避免显示成编号。按月视图里默认分组标注「默认」，选它即恢复默认。 */
+function groupOptions(current?: number, defaultId?: number) {
+  return groups.value
+    .filter((group) => group.enabled || group.id === current)
+    .map((group) => ({
+      label: `${group.name}${group.id === defaultId ? '（默认）' : ''}${group.enabled ? '' : '（已停用）'}`,
+      value: group.id,
+      disabled: !group.enabled,
+    }));
+}
+async function run(action: () => Promise<number>, done: string) {
+  if (saving.value) return;
+  saving.value = true;
+  try {
+    const count = await action();
+    message.success(count ? done : '没有变化');
+    await changed();
+  } catch {
+    // 请求层已提示具体原因；重新加载显示真实状态
+    await load();
+  } finally {
+    saving.value = false;
+  }
+}
+/** 打开分组弹窗选择生效范围；表格里直接选了分组时带入该店和所选分组 */
+function openMove(shops: Api.GroupMemberShop[], target?: number) {
+  moveShops.value = shops;
+  moveGroupId.value = target;
+  moveOpen.value = true;
+}
+/** 从本月起移出默认分组；之前已导入的月份保留原分组 */
+function removeDefault(shopIds: string[]) {
+  return saveEcProfitDefaultGroups({
+    fromMonth: dayjs().format('YYYY-MM'),
+    shopIds,
+  });
+}
+function setDefault(shop: Api.GroupMemberShop, target?: number) {
+  if (target) {
+    openMove([shop], target);
+    return;
+  }
+  void run(() => removeDefault([shop.shopId]), `「${shop.shopName}」已移出默认分组`);
+}
+function setMonth(shop: Api.GroupMemberShop, target?: number) {
+  if (target) {
+    openMove([shop], target);
+    return;
+  }
+  void run(
+    () => saveEcProfitMonthGroups({ month: month.value, shopIds: [shop.shopId] }),
+    `「${shop.shopName}」${month.value} 已恢复默认分组`,
+  );
+}
+function removeSelected() {
+  const targets = selectedShops.value;
+  if (!targets.length) return;
+  const isDefault = view.value === 'default';
+  Modal.confirm({
+    title: isDefault
+      ? `将 ${targets.length} 家店铺移出默认分组？`
+      : `${targets.length} 家店铺 ${month.value} 恢复默认分组？`,
+    content: isDefault
+      ? '从本月起这些店铺没有默认分组，月报中归入「未配置」；之前已导入的月份保留原分组。'
+      : '取消这些店铺在本月的临时调整，本月改回按默认分组汇总。',
+    okText: isDefault ? '移出' : '恢复默认',
+    cancelText: '取消',
+    onOk: () =>
+      run(
+        () =>
+          isDefault
+            ? removeDefault(targets.map((shop) => shop.shopId))
+            : saveEcProfitMonthGroups({
+                month: month.value,
+                shopIds: targets.map((shop) => shop.shopId),
+              }),
+        isDefault ? '已移出默认分组' : '已恢复默认分组',
+      ),
+  });
+}
 function newGroup() {
   editingGroup.value = undefined;
   groupOpen.value = true;
@@ -98,33 +218,22 @@ function editGroup(group: Api.Group) {
   editingGroup.value = group;
   groupOpen.value = true;
 }
-function assign() {
-  if (!selectedShops.value.length) return;
-  assignedShops.value = [...selectedShops.value];
-  assignOpen.value = true;
-}
-function selectUnconfigured() {
-  filter.value = 'unconfigured';
-  groupId.value = undefined;
+function showUnconfigured() {
+  groupId.value = UNCONFIGURED_GROUP;
+  filter.value = 'all';
   keyword.value = '';
-  selectedKeys.value = [];
-}
-async function changed() {
-  await load();
-  historyRevision.value++;
-  emit('changed');
 }
 function removeGroup(group: Api.Group) {
   Modal.confirm({
-    title: `删除财务小组「${group.name}」？`,
+    title: `删除分组「${group.name}」？`,
     content:
-      '仅未被归属配置或月报引用的小组可删除；已有历史记录的小组请使用停用。',
+      '仅从未放过店铺、也未被月报引用的分组可删除；已有历史记录的分组请编辑后停用。',
     okText: '删除',
     okType: 'danger',
     cancelText: '取消',
     async onOk() {
       await deleteFinanceGroup(group.id, group.version);
-      message.success('财务小组已删除');
+      message.success('分组已删除');
       await changed();
     },
   });
@@ -135,42 +244,61 @@ function removeGroup(group: Api.Group) {
   <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-3">
-        <span class="text-sm">配置生效月份</span
-        ><DatePicker
-          v-model:value="month"
-          picker="month"
-          value-format="YYYY-MM"
-          format="YYYY 年 MM 月"
-          :allow-clear="false"
-          aria-label="归属生效月份"
-        /><span class="text-xs text-muted-foreground"
-          >当月及后续月份生效，已有月报保留快照</span
+        <Segmented v-model:value="view" :options="viewOptions" />
+        <template v-if="view === 'month'"
+          ><DatePicker
+            v-model:value="month"
+            picker="month"
+            value-format="YYYY-MM"
+            format="YYYY 年 MM 月"
+            :allow-clear="false"
+            aria-label="调整月份"
+          /><span class="text-xs text-muted-foreground"
+            >调整这个月的分组，可选只改本月或本月及以后</span
+          ></template
+        ><span v-else class="text-xs text-muted-foreground"
+          >店铺平时属于哪个组；改动时可选从哪个月起生效</span
         >
       </div>
-      <Button :loading="loading" @click="load">刷新配置</Button>
+      <Button :loading="loading" @click="load">刷新</Button>
     </div>
     <Alert v-if="error" type="error" show-icon :message="error" />
+    <Alert
+      v-if="view === 'month' && adjustedCount"
+      type="info"
+      show-icon
+      :message="`${month} 有 ${adjustedCount} 家店铺临时调整了分组，其余按默认分组。`"
+      ><template #action
+        ><Button size="small" @click="filter = 'adjusted'"
+          >只看调整</Button
+        ></template
+      ></Alert
+    >
     <Alert
       v-if="unconfiguredCount"
       type="warning"
       show-icon
-      :message="`${unconfiguredCount} 家店铺尚未配置，请确认纳入范围或填写排除原因。`"
+      :message="
+        view === 'default'
+          ? `${unconfiguredCount} 家店铺还没有默认分组，月度毛利和年度对比中归入「未配置」。`
+          : `${month} 有 ${unconfiguredCount} 家店铺没有分组，归入「未配置」。`
+      "
       ><template #action
-        ><Button size="small" @click="selectUnconfigured"
-          >查看未配置</Button
+        ><Button size="small" @click="showUnconfigured"
+          >查看</Button
         ></template
       ></Alert
     >
     <div class="grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
       <section class="rounded-xl border border-border bg-card p-4">
         <div class="mb-3 flex items-center justify-between">
-          <strong>财务部门与小组</strong
+          <strong>电商分组</strong
           ><Button
             v-access:code="['fdmcaiwu:ec-profit:group-config']"
             size="small"
             type="primary"
             @click="newGroup"
-            >新增小组</Button
+            >新增分组</Button
           >
         </div>
         <Button
@@ -178,7 +306,7 @@ function removeGroup(group: Api.Group) {
           :type="groupId === undefined ? 'primary' : 'default'"
           ghost
           @click="groupId = undefined"
-          >全部小组 / 未分配店铺</Button
+          >全部店铺（{{ shops.length }}）</Button
         >
         <div class="mt-3 max-h-[600px] space-y-2 overflow-auto">
           <div
@@ -192,15 +320,22 @@ function removeGroup(group: Api.Group) {
             "
           >
             <button class="w-full text-left" @click="groupId = group.id">
-              <div class="text-xs text-muted-foreground">
-                {{ group.departmentName }} · {{ group.departmentCode }}
-              </div>
-              <div class="mt-1 flex items-center justify-between">
+              <div class="flex items-center justify-between">
                 <strong>{{ group.name }}</strong
                 ><Tag v-if="!group.enabled">已停用</Tag>
               </div>
               <div class="mt-1 text-xs text-muted-foreground">
-                {{ group.code }}
+                {{ counts.get(group.id)?.total ?? 0 }} 家店铺<template
+                  v-if="view === 'month' && counts.get(group.id)?.in"
+                  ><span class="text-orange-500">
+                    · 调入 {{ counts.get(group.id)?.in }}</span
+                  ></template
+                ><template
+                  v-if="view === 'month' && counts.get(group.id)?.out"
+                  ><span class="text-orange-500">
+                    · 调出 {{ counts.get(group.id)?.out }}</span
+                  ></template
+                >
               </div>
             </button>
             <div
@@ -218,14 +353,28 @@ function removeGroup(group: Api.Group) {
               >
             </div>
           </div>
+          <button
+            class="w-full rounded-lg border border-dashed p-3 text-left"
+            :class="
+              groupId === UNCONFIGURED_GROUP
+                ? 'border-primary bg-primary/5'
+                : 'border-border'
+            "
+            @click="groupId = UNCONFIGURED_GROUP"
+          >
+            <strong class="text-muted-foreground">未配置</strong>
+            <div class="mt-1 text-xs text-muted-foreground">
+              {{ unconfiguredCount }} 家店铺
+            </div>
+          </button>
           <Empty
             v-if="!loading && !groups.length"
             :image="Empty.PRESENTED_IMAGE_SIMPLE"
-            description="尚未创建财务小组"
+            description="还没有分组，点「新增分组」选择店铺"
           />
         </div>
         <p class="mb-0 mt-4 text-xs leading-6 text-muted-foreground">
-          独立财务核算分类，不读取聚水潭分组作为归属。
+          分组只决定哪些店铺算一个组，月报按分组汇总，与财务核算无关。某月有调整就按调整，没有就按默认分组。
         </p>
       </section>
       <section class="min-w-0 rounded-xl border border-border bg-card p-4">
@@ -239,20 +388,30 @@ function removeGroup(group: Api.Group) {
             /><Select
               v-model:value="filter"
               :options="filterOptions"
-              class="w-44"
+              class="w-40"
             />
           </div>
-          <Button
+          <div
             v-access:code="['fdmcaiwu:ec-profit:group-config']"
-            type="primary"
-            :disabled="!selectedKeys.length || loading"
-            @click="assign"
-            >批量配置（{{ selectedKeys.length }}）</Button
+            class="flex flex-wrap gap-2"
           >
+            <Button
+              :disabled="!selectedKeys.length || loading || saving"
+              @click="removeSelected"
+              >{{ view === 'default' ? '移出默认分组' : '恢复默认' }}</Button
+            ><Button
+              type="primary"
+              :disabled="!selectedKeys.length || loading || saving"
+              @click="openMove(selectedShops)"
+              >{{
+                view === 'default' ? '设为默认分组' : `${month} 调到…`
+              }}（{{ selectedKeys.length }}）</Button
+            >
+          </div>
         </div>
         <div class="mb-3 text-xs text-muted-foreground">
-          共 {{ shops.length }} 家目录店铺 · 当前筛选 {{ rows.length }} 家 ·
-          已选 {{ selectedShops.length }} 家（跨筛选保留）<Button
+          共 {{ shops.length }} 家店铺 · 当前筛选 {{ rows.length }} 家 · 已选
+          {{ selectedShops.length }} 家（跨筛选保留）<Button
             v-if="selectedKeys.length"
             size="small"
             type="link"
@@ -265,12 +424,16 @@ function removeGroup(group: Api.Group) {
           :data-source="rows"
           :loading="loading"
           :pagination="{ pageSize: 20, showSizeChanger: false }"
-          :scroll="{ x: 1010 }"
-          :row-selection="{
-            selectedRowKeys: selectedKeys,
-            preserveSelectedRowKeys: true,
-            onChange: (keys) => (selectedKeys = [...keys]),
-          }"
+          :scroll="{ x: view === 'default' ? 610 : 970 }"
+          :row-selection="
+            canConfig
+              ? {
+                  selectedRowKeys: selectedKeys,
+                  preserveSelectedRowKeys: true,
+                  onChange: (keys) => (selectedKeys = [...keys]),
+                }
+              : undefined
+          "
           row-key="shopId"
           size="small"
           ><template #bodyCell="{ column, record, text }"
@@ -281,26 +444,64 @@ function removeGroup(group: Api.Group) {
                 {{ record.shopId }}
               </div>
             </div>
-            <template v-else-if="column.key === 'assignment'">{{
-              assignmentLabel(record as Api.AssignmentShop)
-            }}</template
-            ><Tag
-              v-else-if="column.key === 'scope'"
-              :color="
-                !record.configured
-                  ? 'orange'
-                  : record.included
-                    ? 'success'
-                    : 'default'
-              "
-              >{{
-                !record.configured
-                  ? '未配置'
-                  : record.included
-                    ? '纳入毛利'
-                    : '已排除'
-              }}</Tag
-            ><template v-else>{{ text || '—' }}</template></template
+            <template v-else-if="column.key === 'default'"
+              ><Select
+                v-if="canConfig"
+                :value="record.defaultGroupId ?? undefined"
+                :options="groupOptions(record.defaultGroupId)"
+                :disabled="saving"
+                placeholder="未配置"
+                allow-clear
+                class="w-48"
+                size="small"
+                @change="
+                  (value) =>
+                    setDefault(
+                      record as Api.GroupMemberShop,
+                      value as number | undefined,
+                    )
+                "
+              /><span v-else>{{ record.defaultGroupName || '未配置' }}</span></template
+            >
+            <template v-else-if="column.key === 'defaultName'">{{
+              record.defaultGroupName || '未配置'
+            }}</template>
+            <div
+              v-else-if="column.key === 'month'"
+              class="flex flex-wrap items-center gap-2"
+            >
+              <Select
+                v-if="canConfig"
+                :value="record.effectiveGroupId ?? undefined"
+                :options="
+                  groupOptions(record.effectiveGroupId, record.defaultGroupId)
+                "
+                :disabled="saving"
+                placeholder="未配置"
+                class="w-44"
+                size="small"
+                @change="
+                  (value) =>
+                    setMonth(
+                      record as Api.GroupMemberShop,
+                      value as number | undefined,
+                    )
+                "
+              /><span v-else>{{ record.effectiveGroupName || '未配置' }}</span
+              ><template v-if="isAdjusted(record as Api.GroupMemberShop)"
+                ><Tag color="orange" class="!m-0">本月调整</Tag
+                ><Button
+                  v-if="canConfig"
+                  size="small"
+                  type="link"
+                  class="!px-0"
+                  :disabled="saving"
+                  @click="setMonth(record as Api.GroupMemberShop)"
+                  >恢复默认</Button
+                ></template
+              >
+            </div>
+            <template v-else>{{ text || '—' }}</template></template
           ></Table
         >
       </section>
@@ -310,13 +511,17 @@ function removeGroup(group: Api.Group) {
   <GroupEditor
     v-model:open="groupOpen"
     :group="editingGroup"
+    :groups="groups"
+    :shops="shops"
     @saved="changed"
   />
-  <AssignmentDialog
-    v-model:open="assignOpen"
-    :month="month"
-    :shops="assignedShops"
+  <GroupMoveDialog
+    v-model:open="moveOpen"
     :groups="groups"
+    :month="month"
+    :initial-group-id="moveGroupId"
+    :shops="moveShops"
+    :view="view"
     @saved="changed"
   />
 </template>

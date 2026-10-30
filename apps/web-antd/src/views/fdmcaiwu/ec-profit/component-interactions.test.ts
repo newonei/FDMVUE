@@ -288,10 +288,10 @@ describe('预览后提交的交互保护', () => {
     await settle();
     click(host, '预览变更');
     await settle();
-    click(host, '确认保存归属');
+    click(host, '确认保存');
     await settle();
     expect(host.textContent).toContain('提交未确认成功');
-    click(host, '确认保存归属');
+    click(host, '确认保存');
     await settle();
     const first = mocks.apply.mock.calls[0]![0] as Api.AssignmentApply;
     expect(mocks.apply.mock.calls[1]![0]).toEqual(first);

@@ -1,0 +1,105 @@
+.warehouse-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 16px;
+}
+
+.warehouse-page .toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.warehouse-page .grow {
+  flex: 1;
+}
+
+.warehouse-page .cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.warehouse-page .mono {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+.warehouse-page .muted {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.warehouse-page .ellipsis {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warehouse-page .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.warehouse-page .lines {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+.warehouse-page .lines th {
+  padding: 4px 8px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  text-align: left;
+}
+
+.warehouse-page .lines td {
+  padding: 4px 8px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.warehouse-page .lines .muted {
+  margin-left: 6px;
+}
+
+.warehouse-page .in {
+  color: color-mix(in srgb, hsl(var(--success)) 60%, hsl(var(--foreground)));
+}
+
+.warehouse-page .out {
+  color: hsl(var(--destructive));
+}
+
+.warehouse-page .row-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.warehouse-page .row-actions .ant-btn-link {
+  padding: 0 4px;
+}
+
+/* 作废的单据保留可查，整行淡化 */
+.warehouse-page .voided td {
+  color: hsl(var(--muted-foreground));
+}
+
+.warehouse-page .voided .mono {
+  text-decoration: line-through;
+}
+
+/* 单据类型页签（金智同款） */
+.warehouse-page .doc-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.warehouse-page .doc-link {
+  cursor: pointer;
+}

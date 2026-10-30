@@ -7,6 +7,32 @@
     },
     "allowJs": true
   },
-  "references": [{ "path": "./tsconfig.node.json" }],
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "exclude": [
+    "src/api/ai",
+    "src/api/bpm",
+    "src/api/crm",
+    "src/api/erp",
+    "src/api/fms",
+    "src/api/mes",
+    "src/api/wms",
+    "src/router/routes/modules/ai.ts",
+    "src/router/routes/modules/bpm.ts",
+    "src/router/routes/modules/crm.ts",
+    "src/router/routes/modules/mes.ts",
+    "src/views/ai",
+    "src/views/bpm",
+    "src/views/crm",
+    "src/views/erp",
+    "src/views/fms",
+    "src/views/mall",
+    "src/views/mes",
+    "src/views/mp",
+    "src/views/wms"
+  ]
 }

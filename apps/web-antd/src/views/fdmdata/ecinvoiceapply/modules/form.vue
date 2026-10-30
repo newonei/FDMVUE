@@ -111,7 +111,7 @@ const [Modal, modalApi] = useVbenModal({
       return;
     }
     const mySeq = ++openSeq;
-    const row = modalApi.getData<FdmdataEcInvoiceApplyApi.EcInvoiceApply>();
+    const row = (modalApi.getData() as FdmdataEcInvoiceApplyApi.EcInvoiceApply);
     formData.value = undefined;
     setTidDisabled(Boolean(row?.id));
     await formApi.resetForm();

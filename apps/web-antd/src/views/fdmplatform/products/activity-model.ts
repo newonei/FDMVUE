@@ -24,7 +24,7 @@ export const activityTypes: { label: string; value: ProductActivityType }[] = [
   { value: 'SALES_RETURN', label: '销售退货' },
   { value: 'PRODUCTION_PROGRESS', label: '生产进度' },
   { value: 'STOCK_EVENT', label: '库存流水' },
-  { value: 'ASSIGNMENT', label: '履约任务' },
+  { value: 'ASSIGNMENT', label: '采购任务' },
   { value: 'PURCHASE_PLAN', label: '采购方案' },
   { value: 'CUSTOMS', label: '报关跟进' },
   { value: 'STOCK_IN', label: '入库单' },
@@ -77,11 +77,8 @@ export function activityTarget(
     const id = referenceId(record.financeDocumentId);
     return id ? { type: 'procurementFinance', id } : undefined;
   }
-  if (record.type === 'STOCK_EVENT') {
-    return record.poolId && record.eventId
-      ? { type: 'stock', poolId: record.poolId, eventId: record.eventId }
-      : undefined;
-  }
+  // 履约库存已下线，金智迁移的库存流水只展示、不再提供跳转
+  if (record.type === 'STOCK_EVENT') return undefined;
   if (!record.contractId) return undefined;
   if (record.type === 'CONTRACT')
     return { type: 'contract', contractId: record.contractId };

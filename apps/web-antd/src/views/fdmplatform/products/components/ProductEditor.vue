@@ -1,24 +1,29 @@
 <script setup lang="ts">
-import type { Product } from '#/api/fdmplatform/products';
+import type { Product, ProductCategory } from '#/api/fdmplatform/products';
 
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
   AutoComplete,
   Button,
   Checkbox,
-  Drawer,
   Form,
   Input,
   message,
+  Select,
   Space,
 } from 'ant-design-vue';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
-import { saveProduct } from '#/api/fdmplatform/products';
+import {
+  getProductCategoryList,
+  saveProduct,
+} from '#/api/fdmplatform/products';
+import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
+import { categoryOptions } from '../category-model';
 import { missingProductFields } from '../model';
 
 const props = defineProps<{
@@ -32,18 +37,32 @@ const active = ref(false);
 const loading = ref(false);
 const panelError = ref('');
 const key = ref('');
+const categories = ref<ProductCategory[]>([]);
+const categorySelectOptions = computed(() =>
+  categoryOptions(categories.value, props.product?.categoryId),
+);
+async function loadCategories() {
+  try {
+    categories.value = await getProductCategoryList(props.companyId);
+  } catch (error) {
+    panelError.value = errorText(error);
+  }
+}
+// 前几项与金智产品档案顺序一致
 const fields = [
   ['code', 'SKU 编号'],
   ['name', '产品名称'],
-  ['displayName', '销售展示名称'],
-  ['category', '分类'],
-  ['unit', '计量单位'],
-  ['specification', '完整规格'],
+  ['model', '产品型号'],
+  ['weight', '产品克重'],
   ['material', '材质'],
+  ['spec', '产品规格'],
+  ['printing', '定制说明'],
+  ['categoryId', '产品类别'],
+  ['unit', '单位'],
+  ['displayName', '销售展示名称'],
   ['size', '尺寸'],
   ['color', '颜色'],
   ['shape', '形状'],
-  ['printing', '标准印刷要求'],
   ['packaging', '标准包装'],
   ['imageUrl', '产品图片地址'],
 ];
@@ -60,6 +79,7 @@ watch(
     active.value = props.product?.active ?? false;
     key.value = newIdempotencyKey();
     panelError.value = '';
+    void loadCategories();
   },
 );
 async function save() {
@@ -67,11 +87,17 @@ async function save() {
     panelError.value = '请填写 SKU 编号和产品名称';
     return;
   }
+  if (!form.categoryId) {
+    panelError.value = '请选择产品分类；没有合适的分类可先在“产品分类”中新增';
+    return;
+  }
   loading.value = true;
   panelError.value = '';
   try {
+    const { spec, ...fieldsWithoutSpec } = form;
     const result = await saveProduct({
-      ...form,
+      ...fieldsWithoutSpec,
+      specification: spec,
       active: active.value,
       companyId: props.companyId,
       id: props.product?.id,
@@ -94,7 +120,8 @@ async function save() {
 </script>
 
 <template>
-  <Drawer
+  <FdmResizableDrawer
+    resize-key="product-editor"
     :open="open"
     :title="product ? '产品档案' : '新建产品档案'"
     width="min(760px, 96vw)"
@@ -113,10 +140,20 @@ async function save() {
           v-for="[field, title] in fields"
           :key="field"
           :label="title"
-          :required="['code', 'name'].includes(field!)"
+          :required="['categoryId', 'code', 'name'].includes(field!)"
         >
+          <Select
+            v-if="field === 'categoryId'"
+            v-model:value="form[field]"
+            :options="categorySelectOptions"
+            placeholder="选择产品分类"
+            show-search
+            option-filter-prop="label"
+            :list-height="360"
+            allow-clear
+          />
           <AutoComplete
-            v-if="field === 'shape'"
+            v-else-if="field === 'shape'"
             v-model:value="form[field]"
             :options="[{ value: '圆角' }, { value: '方形' }]"
             placeholder="选择圆角、方形，也可输入其他形状"
@@ -129,7 +166,9 @@ async function save() {
             :placeholder="
               field === 'unit'
                 ? '例如：张、个、套；请按实际资料填写'
-                : undefined
+                : field === 'weight'
+                  ? '例如：800g'
+                  : undefined
             "
           />
         </Form.Item>
@@ -149,7 +188,7 @@ async function save() {
         </Button>
       </Space>
     </template>
-  </Drawer>
+  </FdmResizableDrawer>
 </template>
 
 <style scoped>

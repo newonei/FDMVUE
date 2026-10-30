@@ -1,8 +1,15 @@
 import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import type { MasterType } from '#/api/fdmplatform/masters';
 
+import BigNumber from 'bignumber.js';
+
 import { hasReceiptFx } from './finance/exchange-rates/model';
-import { requestLineDefaults } from './products/feedback-model';
+import {
+  requestLineDefaults,
+  requestPrefillLines,
+} from './products/feedback-model';
+import { contractLineAmount, currencyOptions } from './products/model';
+import { salesChannelOf } from './sales-channel';
 
 export interface Option {
   label: string;
@@ -34,6 +41,8 @@ export interface Field {
   hint?: string;
   default?: boolean | number | string;
   min?: number;
+  /** 留空时后端按其他字段自动计算，输入框里显示预计结果 */
+  placeholderOf?: (values: Record<string, unknown>) => string | undefined;
 }
 export interface ActionDefinition {
   action: string;
@@ -44,7 +53,15 @@ export interface ActionDefinition {
   lineKey?: string;
   optionalLines?: boolean;
   submitLabel?: string;
+  /** 有值时弹窗多一个「保存草稿」按钮，草稿不校验必填 */
+  draftLabel?: string;
   initialValues?: Record<string, unknown>;
+  /** 登记内销发票时，弹窗显示该客户的开票信息 */
+  buyerCustomerId?: string;
+  /** 登记回款时的合同币种，用于跨币种折算预览 */
+  contractCurrency?: string;
+  /** 内销回款只收人民币，不查询汇率 */
+  rmbOnly?: boolean;
 }
 
 export const masterTypes: Option[] = [
@@ -52,7 +69,7 @@ export const masterTypes: Option[] = [
   ['SKU', '产品 / SKU'],
   ['SUPPLIER', '供应商'],
   ['WAREHOUSE', '仓库'],
-  ['STOCK_OWNER', '货权主体'],
+  ['STOCK_OWNER', '货主'],
 ].map(([value, label]) => ({ value: value!, label: label! }));
 export const statusLabels: Record<string, string> = {
   BANK_TRANSFER: '银行转账',
@@ -67,7 +84,7 @@ export const statusLabels: Record<string, string> = {
   LINKED: '已关联办理',
   ACTIVE: '有效',
   ALLOCATED: '已分配',
-  APPROVED: '已生效',
+  APPROVED: '已确认',
   ARCHIVED: '已归档',
   ASSIGNED: '已分派',
   AVAILABLE: '可用',
@@ -81,6 +98,7 @@ export const statusLabels: Record<string, string> = {
   CONFIRMED: '已确认',
   CREATED: '已创建',
   DOMESTIC: '国内 B2B',
+  DOMESTIC_SAMPLE: '内销样品',
   DRAFT: '草稿',
   ESTIMATED: '预计',
   EXECUTING: '执行中',
@@ -90,7 +108,7 @@ export const statusLabels: Record<string, string> = {
   MAKE: '自产',
   PAID: '已收足',
   PARTIAL: '部分完成',
-  PARTIALLY_APPROVED: '部分生效',
+  PARTIALLY_APPROVED: '部分确认',
   PENDING: '待确认',
   PENDING_APPROVAL: '待生效',
   RECEIVED: '已到货',
@@ -102,7 +120,7 @@ export const statusLabels: Record<string, string> = {
   SHIPPED: '已发货',
   STALE: '已失效',
   STOCK: '库存',
-  SUBMITTED: '待生效',
+  SUBMITTED: '待确认',
   UNASSIGNED: '待分派',
   VALID: '有效',
   VERIFIED: '已核定',
@@ -117,6 +135,8 @@ export const statusLabels: Record<string, string> = {
   COMMERCIAL: '商业发票',
   PROFORMA: '形式发票',
   CREDIT_NOTE: '红字 / 贷项',
+  SPECIAL: '增值税专用发票',
+  NORMAL: '增值税普通发票',
   PURCHASE: '采购',
   PRODUCTION: '生产',
   PACKAGING: '包装',
@@ -155,17 +175,17 @@ export const statusLabels: Record<string, string> = {
   SKU: '产品 / SKU',
   SUPPLIER: '供应商',
   WAREHOUSE: '仓库',
-  STOCK_OWNER: '货权主体',
+  STOCK_OWNER: '货主',
   CONTRACT_CREATE: '创建合同',
   CONFIRM_CONTRACT: '合同生效',
   UPDATE_CONTRACT: '修订合同',
   CREATE_REQUEST: '创建采购申请',
-  ASSIGN_FULFILLMENT: '分派履约任务',
+  ASSIGN_FULFILLMENT: '分派采购任务',
   TRANSFER_ASSIGNMENT: '转派任务',
   CREATE_QUOTE: '登记报价',
   SAVE_PLAN: '保存采购方案',
-  SUBMIT_PLAN: '方案生效',
-  GENERATE_ORDERS: '生成采购执行单',
+  SUBMIT_PLAN: '确认方案',
+  GENERATE_ORDERS: '生成采购单',
   RECORD_ARRIVAL: '确认到货入库',
   RETURN_ARRIVAL: '采购到货退货',
   CANCEL_ORDER: '取消采购余额',
@@ -175,6 +195,7 @@ export const statusLabels: Record<string, string> = {
   REVERSE_RECEIPT: '退款 / 回款冲销',
   REFRESH_RECEIPT_FX: '补齐回款汇率',
   CREATE_INVOICE: '登记发票',
+  SUPPLEMENT_INVOICE: '补录发票号',
   VOID_INVOICE: '作废发票',
   BIND_ALLOCATION: '回款发票金额绑定',
   UNBIND_ALLOCATION: '解除金额绑定',
@@ -261,6 +282,17 @@ export function selectField(
 ) {
   return field(key, name, 'select', { options: values, ...extra });
 }
+/** 回款可用币种：合同币种排第一，其余为常用外币 */
+export function receiptCurrencyOptions(contractCurrency?: string): Option[] {
+  const common = ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CAD'];
+  const first = /^[A-Z]{3}$/.test(contractCurrency ?? '')
+    ? [contractCurrency!]
+    : [];
+  return [...new Set([...first, ...common])].map((value) => ({
+    value,
+    label: value === contractCurrency ? `${value}（合同币种）` : value,
+  }));
+}
 export function contractDraftAction(
   master: MasterRecord[],
   userId?: number,
@@ -305,7 +337,9 @@ export function contractDraftAction(
         default: userId,
         min: 1,
       }),
-      field('currency', '合同币种', undefined, { default: 'CNY' }),
+      selectField('currency', '合同币种', currencyOptions, {
+        default: 'CNY',
+      }),
       field('signedDate', '签订日期', 'date'),
       field('paymentTerms', '付款条件', 'textarea'),
       field('deliveryRequirement', '交付要求', 'textarea'),
@@ -317,12 +351,12 @@ export function contractDraftAction(
     lineFields: [
       selectField('skuId', '产品 / SKU', masterOptions(master, 'SKU')),
       field('specVersion', '定制规格版本', undefined, { default: '1' }),
-      field('specification', '本合同冻结规格'),
+      field('specification', '本合同规格'),
       field('quantity', '合同数量', 'decimal', { min: 0.000001, default: '1' }),
       field('unitPrice', '销售单价', 'decimal', { min: 0, default: '0' }),
       field('unit', '单位', undefined, { default: '件' }),
       field('taxBasis', '税费口径'),
-      field('requiredDate', '产品交期', 'date'),
+      field('requiredDate', '产品交期', 'date', { required: false }),
       field('material', '材质', undefined, { required: false }),
       field('size', '尺寸', undefined, { required: false }),
       field('color', '颜色', undefined, { required: false }),
@@ -384,7 +418,11 @@ export function contractActions(
     field('quantity', '数量', 'decimal', { default: '1', min: 0.000001 });
   const planFields = [
     selectField('planId', '采购方案', planOptions),
-    field('planVersion', '方案版本', 'number', { default: 1, min: 1 }),
+    field('planVersion', '方案版本', 'number', {
+      default: 1,
+      min: 1,
+      hidden: true,
+    }),
   ];
   return {
     UPDATE_CONTRACT: contractDraftAction(
@@ -416,7 +454,8 @@ export function contractActions(
       action: 'CREATE_REQUEST',
       title: '新建采购申请',
       description:
-        '可分批提交，同一明细允许超量申请。申请不会自动扩大合同数量。',
+        '已带入合同中尚未申请的产品明细，可删减或调整数量；同一明细允许超量申请。申请不会自动扩大合同数量。',
+      initialValues: { items: requestPrefillLines(contract) },
       fields: [
         field('name', '申请名称', undefined, {
           default: contract.code,
@@ -436,42 +475,50 @@ export function contractActions(
           required: false,
           hint: '默认合同产品交期；尚未确定可留空。',
         }),
+        // 内销申请时填预计采购单价，供采购参考
+        ...(salesChannelOf(contract.businessType) === 'DOMESTIC'
+          ? [
+              field('unitPrice', '采购单价', 'decimal', {
+                required: false,
+                min: 0,
+                hint: `预计采购单价（${contract.currency ?? 'CNY'}），实际以报价和采购单为准。`,
+              }),
+            ]
+          : []),
       ],
     },
     ASSIGN_FULFILLMENT: {
       action: 'ASSIGN_FULFILLMENT',
-      title: '分派履约任务',
+      title: '分派采购任务',
       description:
-        '同一申请明细可以分配库存、自制与外采；累计分配不能超过申请数量。',
+        '同一申请明细可以分配库存与外采；累计分配不能超过申请数量。需要自家工厂生产时，开采购单并选自家工厂作为供应商。',
       fields: [
         selectField('requestId', '采购申请', requestOptions),
         selectField('requestItemId', '申请明细', options(requestItems)),
         selectField(
           'method',
-          '履约方式',
+          '采购方式',
           [
             { value: 'BUY', label: '外采' },
-            { value: 'MAKE', label: '自产' },
             { value: 'STOCK', label: '库存' },
           ],
           { default: 'BUY' },
         ),
         quantity(),
-        field('ownerUserId', '经办人用户 ID', 'number', { min: 1 }),
-        field('factoryId', '承接工厂名称或业务编码（自产时填写）', undefined, {
-          required: false,
-        }),
+        field('ownerUserId', '经办人', 'number', { min: 1 }),
         field('remark', '分派说明', 'textarea', { required: false }),
       ],
     },
     CREATE_QUOTE: {
       action: 'CREATE_QUOTE',
-      title: '登记已核实报价',
+      title: '登记供应商报价',
       description: '报价证据与价格口径经人工核对后登记。修订报价保留原版本。',
       fields: [
         selectField('assignmentId', '外采任务', assignmentOptions),
         selectField('supplierId', '供应商', masterOptions(master, 'SUPPLIER')),
-        field('currency', '币种', undefined, { default: contract.currency }),
+        selectField('currency', '币种', currencyOptions, {
+          default: contract.currency,
+        }),
         field('unitPrice', '采购单价', 'decimal', { min: 0 }),
         field('unit', '计价单位', undefined, { default: '件' }),
         field('minQuantity', '最低数量', 'decimal', {
@@ -489,7 +536,7 @@ export function contractActions(
           default: false,
         }),
         field('freightIncluded', '价格包含运费', 'boolean', { default: false }),
-        field('evidenceIds', '报价证据文件 ID（逗号分隔）', 'textarea'),
+        field('evidenceIds', '报价凭证', 'textarea'),
         selectField('previousQuoteId', '被修订报价', quoteOptions, {
           required: false,
         }),
@@ -517,7 +564,7 @@ export function contractActions(
       ],
       lineKey: 'lines',
       lineFields: [
-        selectField('assignmentId', '履约任务', assignmentOptions),
+        selectField('assignmentId', '采购任务', assignmentOptions),
         selectField('quoteId', '已确认报价（外采必选）', quoteOptions, {
           required: false,
         }),
@@ -526,16 +573,16 @@ export function contractActions(
     },
     SUBMIT_PLAN: {
       action: 'SUBMIT_PLAN',
-      title: '方案生效',
+      title: '确认方案',
       description:
-        '校验当前方案版本、报价和可用数量后生效；下单、预留和自产继续单独办理。',
+        '系统核对报价和可用数量后确认方案；确认后即可下单、预留库存或安排自产。',
       fields: [...planFields],
     },
     GENERATE_ORDERS: {
       action: 'GENERATE_ORDERS',
-      title: '生成采购执行单',
+      title: '生成采购单',
       description:
-        '仅生成当前生效版本的未执行数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单，各行保留原报价版本。',
+        '只生成已确认方案中尚未下单的数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单。',
       fields: [
         ...planFields,
         field(
@@ -556,6 +603,113 @@ export function contractActions(
         quantity(),
       ],
     },
+  };
+}
+
+/** 金智「开票内容」习惯：产品 数量单位 金额元，多行用分号隔开 */
+export function invoiceContent(contract: Contract) {
+  return contract.items
+    .map((item) => {
+      const amount = contractLineAmount(item);
+      return [
+        item.skuName,
+        `${item.quantity ?? ''}${item.unit ?? ''}`,
+        amount === undefined ? '' : `${amount}元`,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    })
+    .join('；');
+}
+/** 含税：金额 × 税率 ÷ (100 + 税率)；不含税：金额 × 税率 ÷ 100（与后端一致） */
+export function invoiceTaxAmount(
+  amount: unknown,
+  rate: unknown,
+  included: unknown,
+) {
+  const value = new BigNumber(String(amount ?? ''));
+  const percent = new BigNumber(String(rate ?? ''));
+  if (!value.isFinite() || !percent.isFinite() || percent.lt(0))
+    return undefined;
+  return value
+    .times(percent)
+    .div(included === false ? 100 : percent.plus(100))
+    .toFixed(2, BigNumber.ROUND_HALF_UP);
+}
+/** 内销开票记录按金智：业务员先登记开票内容和税率，发票号、凭证可以开出后再补 */
+function domesticInvoiceAction(
+  contract: Contract,
+  invoiceOptions: Option[],
+  source: Field,
+  amount: Field,
+): ActionDefinition {
+  return {
+    action: 'CREATE_INVOICE',
+    title: '新建开票记录',
+    description:
+      '按客户开票信息登记本次开票；发票号和发票凭证可先不填，开出后用「补录发票号」补上。购方开票信息随记录保存。',
+    buyerCustomerId: contract.customerId,
+    fields: [
+      source,
+      selectField(
+        'type',
+        '开票类型',
+        [
+          { value: 'TAX', label: '正常开票' },
+          { value: 'CREDIT_NOTE', label: '红字发票' },
+        ],
+        { default: 'TAX' },
+      ),
+      selectField(
+        'ticketKind',
+        '票据类型',
+        [
+          { value: 'SPECIAL', label: '增值税专用发票' },
+          { value: 'NORMAL', label: '增值税普通发票' },
+          { value: 'OTHER', label: '其他票据' },
+        ],
+        { hint: '默认取客户档案里的发票类型。' },
+      ),
+      { ...amount, label: '票据金额（人民币）' },
+      field('currency', '币种', undefined, {
+        default: contract.currency ?? 'CNY',
+        hidden: true,
+      }),
+      field('taxRate', '税率（%）', 'decimal', { default: '13', min: 0 }),
+      field('taxIncluded', '含税', 'boolean', { default: true }),
+      field('taxAmount', '税额', 'decimal', {
+        required: false,
+        min: 0,
+        hint: '留空按金额和税率自动计算。',
+        placeholderOf: (values) => {
+          const tax = invoiceTaxAmount(
+            values.amount,
+            values.taxRate,
+            values.taxIncluded,
+          );
+          return tax === undefined ? undefined : `自动计算：${tax}`;
+        },
+      }),
+      field('issuedAt', '开票日期', 'date', {
+        default: new Date().toLocaleDateString('sv-SE', {
+          timeZone: 'Asia/Shanghai',
+        }),
+      }),
+      field('content', '开票内容', 'textarea', {
+        default: invoiceContent(contract),
+        hint: '已按合同明细预填，可按实际开票改。',
+      }),
+      field('invoiceNumber', '发票号码', undefined, {
+        required: false,
+        hint: '还没开出可以先不填。',
+      }),
+      field('evidenceRef', '发票凭证', undefined, { required: false }),
+      selectField('originalInvoiceId', '原发票', invoiceOptions, {
+        required: true,
+        visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
+      }),
+      field('remark', '备注', 'textarea', { required: false }),
+    ],
   };
 }
 
@@ -588,18 +742,45 @@ export function financeActions(
   });
   const amount = field('amount', '金额', 'decimal', { min: 0.000001 });
   const reason = field('reason', '原因与依据', 'textarea');
+  // 发票只能按合同币种登记（后端校验），合同币种有效时直接锁定，避免填错后提交不了
+  const contractCurrencyValid = /^[A-Z]{3}$/.test(
+    String(contract.currency ?? ''),
+  );
+  const lockedCurrency: Partial<Field> = {
+    default: contract.currency,
+    disabled: contractCurrencyValid,
+    hint: contractCurrencyValid
+      ? `发票按合同币种 ${contract.currency} 登记。`
+      : undefined,
+  };
+  // 内销全部人民币回款：币种固定 CNY，不显示汇率折算
+  const rmbOnly = salesChannelOf(contract.businessType) === 'DOMESTIC';
   return {
     CREATE_RECEIPT: {
       action: 'CREATE_RECEIPT',
       title: '新建回款记录',
-      description:
-        '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
+      description: rmbOnly
+        ? '登记真实到账，内销回款均为人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。'
+        : '登记真实到账，按到账日期自动折算人民币；账户和凭证引用暂不要求填写，附件可选。财务确认后计入合同回款，可暂时没有发票。',
+      contractCurrency: contract.currency,
+      rmbOnly,
       fields: [
         source,
-        { ...amount, label: '回款金额' },
-        field('currency', '回款币种', undefined, {
-          default: contract.currency,
-        }),
+        { ...amount, label: rmbOnly ? '回款金额（人民币）' : '回款金额' },
+        rmbOnly
+          ? field('currency', '回款币种', undefined, {
+              default: 'CNY',
+              hidden: true,
+            })
+          : selectField(
+              'currency',
+              '回款币种',
+              receiptCurrencyOptions(contract.currency),
+              {
+                default: contract.currency,
+                hint: `按客户实际到账币种填写。与合同币种 ${contract.currency ?? ''} 不同时，按到账日汇率折算人民币，再按同日汇率计入合同应收。`,
+              },
+            ),
         field('receivedAt', '到账日期', 'date'),
         selectField(
           'paymentMethod',
@@ -661,28 +842,56 @@ export function financeActions(
         reason,
       ],
     },
-    CREATE_INVOICE: {
-      action: 'CREATE_INVOICE',
-      title: '登记真实发票',
+    CREATE_INVOICE: rmbOnly
+      ? domesticInvoiceAction(contract, invoiceOptions, source, amount)
+      : {
+          action: 'CREATE_INVOICE',
+          title: '登记真实发票',
+          description:
+            '仅记录已开具的凭证，不直接开税务发票。形式发票与正式开票分开统计。',
+          buyerCustomerId:
+            salesChannelOf(contract.businessType) === 'DOMESTIC'
+              ? contract.customerId
+              : undefined,
+          fields: [
+            source,
+            field('invoiceNumber', '真实发票号'),
+            selectField('type', '发票类型', [
+              { value: 'TAX', label: '国内税务发票' },
+              { value: 'COMMERCIAL', label: '商业发票' },
+              { value: 'PROFORMA', label: '形式发票' },
+              { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
+            ]),
+            amount,
+            field('currency', '币种', undefined, lockedCurrency),
+            field('issuedAt', '开票日期', 'date'),
+            field('evidenceRef', '发票附件引用'),
+            selectField('originalInvoiceId', '原发票', invoiceOptions, {
+              required: true,
+              visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
+            }),
+          ],
+        },
+    SUPPLEMENT_INVOICE: {
+      action: 'SUPPLEMENT_INVOICE',
+      title: '补录发票号',
       description:
-        '仅记录已开具的凭证，不直接开税务发票。形式发票与正式开票分开统计。',
+        '先登记、后开出的发票，在这里补上真实发票号和发票凭证；已登记的发票号不能在这里改。',
       fields: [
-        source,
-        field('invoiceNumber', '真实发票号'),
-        selectField('type', '发票类型', [
-          { value: 'TAX', label: '国内税务发票' },
-          { value: 'COMMERCIAL', label: '商业发票' },
-          { value: 'PROFORMA', label: '形式发票' },
-          { value: 'CREDIT_NOTE', label: '红字 / 贷项凭证' },
-        ]),
-        amount,
-        field('currency', '币种', undefined, { default: contract.currency }),
-        field('issuedAt', '开票日期', 'date'),
-        field('evidenceRef', '发票附件引用'),
-        selectField('originalInvoiceId', '原发票', invoiceOptions, {
-          required: true,
-          visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },
-        }),
+        selectField(
+          'invoiceId',
+          '开票记录',
+          options(
+            (ledger.invoices ?? []).filter(
+              (invoice) =>
+                invoice.status === 'VALID' &&
+                (!invoice.invoiceNumber || !invoice.evidenceRef),
+            ),
+            ['issuedAt', 'content', 'amount'],
+          ),
+        ),
+        field('invoiceNumber', '真实发票号', undefined, { required: false }),
+        field('evidenceRef', '发票凭证', undefined, { required: false }),
       ],
     },
     VOID_INVOICE: {
@@ -742,7 +951,9 @@ export function financeActions(
           { value: 'COLLECTED', label: '已归集' },
         ]),
         { ...amount, min: 0 },
-        field('currency', '原币种', undefined, { default: contract.currency }),
+        selectField('currency', '原币种', currencyOptions, {
+          default: contract.currency,
+        }),
         field('exchangeRate', '换算合同币种汇率', 'decimal', {
           default: '1',
           min: 0.000001,
@@ -821,8 +1032,11 @@ export function executionActions(
   ]);
   const quantity = field('quantity', '本次数量', 'decimal', { min: 0.000001 });
   const reason = field('reason', '原因与依据', 'textarea');
-  const pool = selectField('poolId', '库存池', poolOptions);
-  const source = field('sourceKey', '本次业务事件唯一编号');
+  const pool = selectField('poolId', '库存', poolOptions);
+  // Filled with the stable idempotency key by ActionDialog; users never type it.
+  const source = field('sourceKey', '本次业务事件唯一编号', undefined, {
+    hidden: true,
+  });
   const contractItem = selectField(
     'contractItemId',
     '合同产品明细',
@@ -838,21 +1052,21 @@ export function executionActions(
   );
   const reservation = selectField(
     'reservationId',
-    '合同预留记录',
+    '预留记录',
     options(reservations, ['name', 'remainingQuantity', 'id']),
   );
   return {
     TRANSFER_ASSIGNMENT: {
       action: 'TRANSFER_ASSIGNMENT',
-      title: '转派履约任务',
+      title: '转派采购任务',
       description: '记录新责任人及转派依据，历史责任和操作记录保持可追溯。',
       fields: [
         selectField(
           'assignmentId',
-          '履约任务',
+          '采购任务',
           options(contract.assignments ?? [], ['method', 'id']),
         ),
-        field('ownerUserId', '新经办人用户 ID', 'number', { min: 1 }),
+        field('ownerUserId', '新经办人', 'number', { min: 1 }),
         reason,
       ],
     },
@@ -870,7 +1084,7 @@ export function executionActions(
           '收货仓库',
           masterOptions(master, 'WAREHOUSE'),
         ),
-        selectField('stockPoolId', '收货库存池', poolOptions),
+        selectField('stockPoolId', '收货库存', poolOptions),
         quantity,
         field('acceptedQuantity', '合格数量', 'decimal', { min: 0 }),
         field('exceptionReason', '异常说明（有差异时必填）', 'textarea', {
@@ -965,16 +1179,16 @@ export function executionActions(
     },
     STOCK_RESERVE: {
       action: 'STOCK_RESERVE',
-      title: '预留合同库存',
+      title: '预留库存',
       description:
-        '按已生效方案明细原子预留，后台校验生效版本、剩余额度与可用库存。',
+        '按已确认的采购方案预留库存，系统自动核对剩余额度与可用库存。',
       fields: [
         pool,
         source,
         contractItem,
         selectField(
           'planId',
-          '已生效方案',
+          '采购方案',
           (contract.plans ?? [])
             .filter((plan) =>
               ['APPROVED', 'PARTIALLY_APPROVED'].includes(String(plan.status)),
@@ -985,10 +1199,10 @@ export function executionActions(
               fill: { planVersion: plan.version ?? 1 },
             })),
         ),
-        field('planVersion', '生效方案版本', 'number', { min: 1 }),
+        field('planVersion', '方案版本', 'number', { min: 1, hidden: true }),
         selectField(
           'planLineId',
-          '生效方案明细',
+          '方案明细',
           options(
             (contract.plans ?? []).flatMap((plan) => rows(plan.lines)),
             ['method', 'contractItemId', 'id'],
@@ -999,13 +1213,13 @@ export function executionActions(
     },
     STOCK_RELEASE: {
       action: 'STOCK_RELEASE',
-      title: '释放未出库预留',
+      title: '释放预留',
       description: '释放已有预留的剩余数量，保留事件与原预留的关系。',
       fields: [pool, source, reservation, quantity, reason],
     },
     STOCK_SHIP: {
       action: 'STOCK_SHIP',
-      title: '确认分批发货',
+      title: '登记发货',
       description:
         '实际发货扣减现存并释放对应预留，登记发货证据后更新合同交付事实。',
       fields: [

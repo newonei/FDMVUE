@@ -1481,19 +1481,25 @@ export function useFormSchema(
         options: EC_PLATFORM_SUGGESTIONS,
       },
     },
-    {
-      fieldName: 'shopId',
-      label: '店铺 ID',
-      rules: isPddPlatform ? 'selectRequired' : undefined,
-      component: isPddPlatform ? 'Select' : 'Input',
-      componentProps: isPddPlatform
-        ? getPddShopIdSelectProps
-        : {
+    // 拼多多选店铺，其他平台手填；分两种写法，组件和参数类型才对得上
+    isPddPlatform
+      ? {
+          fieldName: 'shopId',
+          label: '店铺 ID',
+          rules: 'selectRequired',
+          component: 'Select',
+          componentProps: getPddShopIdSelectProps,
+        }
+      : {
+          fieldName: 'shopId',
+          label: '店铺 ID',
+          component: 'Input',
+          componentProps: {
             allowClear: true,
             placeholder: '无则留空',
             maxlength: 64,
           },
-    },
+        },
     {
       fieldName: 'shopName',
       label: '店铺名称',

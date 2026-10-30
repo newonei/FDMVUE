@@ -40,6 +40,7 @@ import {
   getScoreDraft,
   returnTask,
   saveScoreDraft,
+  skipTask,
   submitHrReview,
   submitManagerScore,
   submitSelfScore,
@@ -51,6 +52,13 @@ import { getSimpleUserList } from '#/api/system/user';
 import { INSTANCE_STATUS_MAP } from '../../shared/constants';
 import { formatPerformanceDateTime } from '../../shared/format';
 import PerformanceShell from '../../shared/PerformanceShell.vue';
+import {
+  defaultScoreWeights,
+  effectiveScoreWeights,
+  formatWeight,
+  managerLevelLabel,
+  personManagerNames,
+} from '../../shared/score-weights';
 import { hasAction } from '../../shared/workspace';
 import {
   activeScoreStage,
@@ -74,6 +82,7 @@ const submitting = ref(false);
 const selfScoreAttachmentHasError = ref(false);
 const selfScoreAttachmentUploading = ref(false);
 const transferring = ref(false);
+const skipping = ref(false);
 const transferVisible = ref(false);
 const returning = ref(false);
 const returnNodesLoading = ref(false);
@@ -145,6 +154,21 @@ const SCORE_MAX = 100;
 const managerScoreEnabled = computed(
   () => instance.value?.managerScoreEnabled === true,
 );
+const managerNames = computed(() =>
+  instance.value ? personManagerNames(instance.value) : [],
+);
+const managerLevels = computed(() =>
+  managerScoreEnabled.value ? Math.max(managerNames.value.length, 1) : 0,
+);
+/** 本次考核实际比重；旧接口未返回时按默认 50/40/10 推算。 */
+const scoreWeights = computed(
+  () =>
+    instance.value?.scoreWeights ??
+    effectiveScoreWeights(defaultScoreWeights(), managerLevels.value),
+);
+const managerEditLevel = computed(
+  () => instance.value?.currentManagerLevel ?? 1,
+);
 const scoreSummary = computed(() => {
   const sum = (
     field: keyof Pick<
@@ -161,8 +185,18 @@ const scoreSummary = computed(() => {
     return Number(values.reduce((total, score) => total + score, 0).toFixed(2));
   };
 
+  const managers = Array.from({ length: managerLevels.value }, (_, index) => {
+    const values = scoreRows.value
+      .map((row) => row.managerScores?.[index]?.score)
+      .filter(
+        (score): score is number => score !== undefined && score !== null,
+      );
+    return values.length === 0
+      ? undefined
+      : Number(values.reduce((total, score) => total + score, 0).toFixed(2));
+  });
   return {
-    manager: sum('managerScore'),
+    managers,
     self: sum('selfScore'),
     supervisor: sum('supervisorScore'),
   };
@@ -193,7 +227,7 @@ const indicatorColumns = computed<TableColumnsType>(() => {
     {
       dataIndex: 'scores',
       title: '各阶段评分与说明',
-      width: managerScoreEnabled.value ? 520 : 360,
+      width: 360 + managerLevels.value * 160,
     },
     { dataIndex: 'actionPlan', title: '行动计划', width: 130 },
   ];
@@ -231,6 +265,22 @@ const canTransfer = computed(
     instance.value?.status === 1 &&
     !!instance.value?.currentTaskId,
 );
+const canSkip = computed(
+  () =>
+    !!instance.value &&
+    hasAction(instance.value, 'SKIP_TASK') &&
+    instance.value.status === 1 &&
+    !!instance.value.currentTaskId,
+);
+const skipDisabled = computed(
+  () =>
+    loading.value ||
+    submitting.value ||
+    savingDraft.value ||
+    transferring.value ||
+    returning.value ||
+    selfScoreAttachmentUploading.value,
+);
 const userOptions = computed(() =>
   users.value.map((user) => ({
     label: `${user.nickname || user.username} (${user.username || user.id})`,
@@ -265,7 +315,7 @@ const processSteps = computed(() => {
   ];
   if (managerScoreEnabled.value) {
     steps.push({
-      description: detail?.superiorSupervisorUserName || '主管上级',
+      description: managerNames.value.join(' → ') || '上级',
       key: 'JIXIAO_MANAGER_SCORE',
       title: '上级评分',
     });
@@ -523,7 +573,7 @@ function taskReq() {
 }
 
 async function approveCurrent() {
-  if (!canApproveCurrent.value || submitting.value) return;
+  if (!canApproveCurrent.value || submitting.value || skipping.value) return;
   const req = taskReq();
   if (!req) return;
   submitting.value = true;
@@ -548,7 +598,8 @@ async function submitScore() {
     draftLoadFailed.value ||
     loading.value ||
     submitting.value ||
-    savingDraft.value
+    savingDraft.value ||
+    skipping.value
   )
     return;
   const req = taskReq();
@@ -606,7 +657,8 @@ async function submitScore() {
 }
 
 async function openTransfer() {
-  if (!canTransfer.value || !instance.value?.currentTaskId) return;
+  if (!canTransfer.value || !instance.value?.currentTaskId || skipping.value)
+    return;
   if (!(await confirmLeave())) return;
   transferForm.assigneeUserId = undefined;
   transferForm.reason = '';
@@ -617,7 +669,7 @@ async function openTransfer() {
 }
 
 async function submitTransfer() {
-  if (!canTransfer.value) return;
+  if (!canTransfer.value || skipping.value) return;
   if (!instance.value?.id || !instance.value.currentTaskId) return;
   if (!transferForm.assigneeUserId) {
     message.warning('请选择转交人');
@@ -644,8 +696,34 @@ async function submitTransfer() {
   }
 }
 
+async function skipCurrent() {
+  if (!canSkip.value || skipping.value || skipDisabled.value) return;
+  const req = taskReq();
+  if (!req) return;
+  // Lock before the unsaved-score prompt, so repeated clicks cannot queue skips.
+  skipping.value = true;
+  try {
+    if (!(await confirmLeave())) return;
+    if (
+      !canSkip.value ||
+      instance.value?.id !== req.instanceId ||
+      instance.value.currentTaskId !== req.taskId
+    )
+      return;
+    await skipTask(req);
+    message.success('已跳过当前节点');
+    savedSnapshot.value = draftSnapshot.value;
+    await load(true);
+  } catch {
+    // A timeout may still have advanced the process; obtain the actual task.
+    await load();
+  } finally {
+    skipping.value = false;
+  }
+}
+
 async function openReturn(targetTaskDefinitionKey?: string) {
-  if (!canReturn.value) return;
+  if (!canReturn.value || skipping.value) return;
   if (!(await confirmLeave())) return;
   await loadReturnableNodes();
   if (returnableNodes.value.length === 0) {
@@ -665,7 +743,7 @@ async function openReturn(targetTaskDefinitionKey?: string) {
 }
 
 async function submitReturn() {
-  if (!canReturn.value) return;
+  if (!canReturn.value || skipping.value) return;
   if (!instance.value?.id) return;
   if (instance.value.status === 1 && !instance.value.currentTaskId) return;
   if (!returnForm.targetTaskDefinitionKey) {
@@ -703,7 +781,8 @@ async function saveDraft() {
     !payload ||
     loading.value ||
     savingDraft.value ||
-    submitting.value
+    submitting.value ||
+    skipping.value
   )
     return;
   const invalid = payload.items.find(
@@ -804,6 +883,7 @@ onBeforeUnmount(() => {
           <Button
             v-if="canReturn && returnableNodes.length"
             :loading="returnNodesLoading"
+            :disabled="skipping"
             @click="openReturn()"
           >
             <template #icon><Undo2 :size="15" /></template>
@@ -812,9 +892,18 @@ onBeforeUnmount(() => {
           <Button
             v-if="canTransfer"
             :loading="transferring"
+            :disabled="skipping"
             @click="openTransfer"
           >
             转交
+          </Button>
+          <Button
+            v-if="canSkip"
+            :loading="skipping"
+            :disabled="skipDisabled || skipping"
+            @click="skipCurrent"
+          >
+            跳过
           </Button>
           <Tag :color="statusMeta(instance.status).color">
             {{ statusMeta(instance.status).text }}
@@ -863,15 +952,20 @@ onBeforeUnmount(() => {
         <Descriptions.Item label="主管">
           {{ instance.supervisorUserName }}
         </Descriptions.Item>
-        <Descriptions.Item label="主管上级">
-          {{ instance.superiorSupervisorUserName || '-' }}
+        <Descriptions.Item label="上级评分人">
+          {{ managerNames.join(' → ') || '-' }}
+          <Tag
+            v-if="
+              instance.currentTaskKey === 'JIXIAO_MANAGER_SCORE' &&
+              managerNames.length > 1
+            "
+            color="processing"
+            >{{ managerLevelLabel(managerEditLevel) }}评分中</Tag
+          >
           <Tag v-if="managerRelationInvalid" color="warning">关系无效</Tag>
         </Descriptions.Item>
         <Descriptions.Item label="发起人">
           {{ instance.creatorUserName || '-' }}
-        </Descriptions.Item>
-        <Descriptions.Item label="截止日期">
-          {{ instance.endDate || '未设置' }}
         </Descriptions.Item>
         <Descriptions.Item label="当前处理人">
           {{ instance.currentTaskAssigneeUserName || '-' }}
@@ -881,21 +975,22 @@ onBeforeUnmount(() => {
             {{ statusMeta(instance.status).text }}
           </Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="员工自评汇总（50%）">
+        <Descriptions.Item
+          :label="`员工自评汇总（${formatWeight(scoreWeights.selfWeight)}%）`"
+        >
           {{ scoreSummary.self ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item
-          :label="
-            managerScoreEnabled ? '主管评分汇总（40%）' : '主管评分汇总（50%）'
-          "
+          :label="`主管评分汇总（${formatWeight(scoreWeights.supervisorWeight)}%）`"
         >
           {{ scoreSummary.supervisor ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item
-          v-if="managerScoreEnabled"
-          label="上级评分汇总（10%）"
+          v-for="(summary, levelIndex) in scoreSummary.managers"
+          :key="levelIndex"
+          :label="`${managerLevels > 1 ? managerLevelLabel(levelIndex + 1) : '上级'}评分汇总（${formatWeight(scoreWeights.managerWeights[levelIndex])}%）`"
         >
-          {{ scoreSummary.manager ?? '-' }}
+          {{ summary ?? '-' }}
         </Descriptions.Item>
         <Descriptions.Item :label="scoreResultLabel">
           {{ instance.finalScore ?? '-' }}
@@ -946,7 +1041,7 @@ onBeforeUnmount(() => {
         :data-source="scoreRows"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: managerScoreEnabled ? 1020 : 860 }"
+        :scroll="{ x: 860 + managerLevels * 160 }"
         row-key="indicator.id"
         size="small"
       >
@@ -1000,8 +1095,15 @@ onBeforeUnmount(() => {
               :supervisor-editable="canEditSupervisorScore"
               :manager-editable="canEditManagerScore"
               :manager-enabled="managerScoreEnabled"
+              :manager-levels="managerLevels"
+              :manager-edit-level="managerEditLevel"
+              :weights="scoreWeights"
               :disabled="
-                loading || submitting || savingDraft || draftLoadFailed
+                loading ||
+                submitting ||
+                savingDraft ||
+                skipping ||
+                draftLoadFailed
               "
               @update:row="Object.assign(record, $event)"
             />
@@ -1032,7 +1134,12 @@ onBeforeUnmount(() => {
             :supervisor-editable="canEditSupervisorScore"
             :manager-editable="canEditManagerScore"
             :manager-enabled="managerScoreEnabled"
-            :disabled="loading || submitting || savingDraft || draftLoadFailed"
+            :manager-levels="managerLevels"
+            :manager-edit-level="managerEditLevel"
+            :weights="scoreWeights"
+            :disabled="
+              loading || submitting || savingDraft || skipping || draftLoadFailed
+            "
             @update:row="Object.assign(row, $event)"
           />
           <div v-if="row.indicator.actionPlanEnabled" class="indicator-action">
@@ -1059,7 +1166,8 @@ onBeforeUnmount(() => {
           canEditSelfScore &&
           !!instance.currentTaskId &&
           !loading &&
-          !submitting
+          !submitting &&
+          !skipping
         "
         :instance-id="instance.id"
         :task-id="instance.currentTaskId"
@@ -1075,7 +1183,9 @@ onBeforeUnmount(() => {
       <label v-if="canScore" class="draft-reason"
         >本次评分说明（可选）<Textarea
           v-model:value="draftReason"
-          :disabled="submitting || savingDraft || loading || draftLoadFailed"
+          :disabled="
+            submitting || savingDraft || skipping || loading || draftLoadFailed
+          "
           :maxlength="500"
           :rows="2"
           placeholder="补充本次评分或提交说明"
@@ -1098,14 +1208,14 @@ onBeforeUnmount(() => {
           <Button
             v-if="canSaveDraft"
             :loading="savingDraft"
-            :disabled="submitting || loading"
+            :disabled="submitting || loading || skipping"
             @click="saveDraft"
             >暂存草稿</Button
           >
           <Button
             v-if="canScore"
             :loading="submitting"
-            :disabled="savingDraft || loading || draftLoadFailed"
+            :disabled="savingDraft || loading || skipping || draftLoadFailed"
             type="primary"
             @click="submitScore"
           >
@@ -1114,6 +1224,7 @@ onBeforeUnmount(() => {
           <Button
             v-else-if="canApproveCurrent"
             :loading="submitting"
+            :disabled="skipping"
             type="primary"
             @click="approveCurrent"
           >

@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  contractEquivalent,
   conversionDateNote,
   conversionInput,
   hasReceiptFx,
   receiptFxDisplay,
 } from './model';
 
+describe('contractEquivalent', () => {
+  it('converts through CNY with both same-day rates, rounded half up to cents', () => {
+    expect(contractEquivalent('7100', '1', '7.1')).toBe('1000.00');
+    expect(contractEquivalent('200', '7.8', '7.1')).toBe('219.72');
+    expect(contractEquivalent('100', '9', '7.2')).toBe('125.00');
+  });
+  it('refuses a missing or zero contract rate', () => {
+    expect(contractEquivalent('100', '9', '0')).toBeUndefined();
+    expect(contractEquivalent('100', '9', '')).toBeUndefined();
+  });
+});
 describe('receipt reference exchange rate presentation', () => {
   it('requires valid conversion inputs and normalizes currency without calculating a rate locally', () => {
     expect(conversionInput('2026-09-06', ' usd ', '125.50')).toEqual({

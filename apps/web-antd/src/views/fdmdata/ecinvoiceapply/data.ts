@@ -46,7 +46,7 @@ const invoiceStatusOptions = [
   { label: '已开票', value: 1 },
 ];
 
-function formatInvoiceStatus({
+export function formatInvoiceStatus({
   cellValue,
   row,
 }: {
@@ -382,17 +382,35 @@ export function useGridFormSchema(): VbenFormSchema[] {
   ];
 }
 
+/**
+ * 常用的 16 列默认显示；其余字段保留在列设置里，需要时勾出来。
+ * 列设置按租户 + 用户存在浏览器本地（见 grid-persistence.ts）。
+ * 开票截止时间放在前面并用倒计时着色（见 index.vue 的 due 插槽）。
+ */
 export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.EcInvoiceApply>['columns'] {
+  const hidden = { visible: false };
   return [
     { type: 'checkbox', width: 40, fixed: 'left' },
+    {
+      field: 'invoiceStatus',
+      title: '开票状态',
+      width: 86,
+      fixed: 'left',
+      slots: { default: 'status' },
+    },
+    {
+      field: 'invoiceDueTime',
+      title: '开票截止',
+      width: 150,
+      fixed: 'left',
+      slots: { default: 'due' },
+    },
     {
       field: 'tid',
       title: '交易订单号',
       minWidth: 170,
-      fixed: 'left',
       showOverflow: 'tooltip',
     },
-    { field: 'platformCode', title: '平台', minWidth: 90 },
     {
       field: 'shopName',
       title: '店铺',
@@ -412,6 +430,12 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       showOverflow: 'tooltip',
     },
     {
+      field: 'payerRegisterNo',
+      title: '付款方税号',
+      minWidth: 160,
+      showOverflow: 'tooltip',
+    },
+    {
       field: 'amount',
       title: '开票金额',
       minWidth: 100,
@@ -424,89 +448,18 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       minWidth: 90,
       align: 'right',
     },
-    {
-      field: 'payerName',
-      title: '付款方',
-      minWidth: 180,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'payerRegisterNo',
-      title: '付款方税号',
-      minWidth: 160,
-      showOverflow: 'tooltip',
-    },
-    { field: 'applySource', title: '申请来源', minWidth: 100 },
-    { field: 'invoiceType', title: '发票类型', minWidth: 96 },
-    {
-      field: 'invoiceItem',
-      title: '开票项目',
-      minWidth: 110,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'remark',
-      title: '备注',
-      minWidth: 160,
-      showOverflow: 'tooltip',
-    },
+    { field: 'invoiceType', title: '发票类型', minWidth: 110 },
     { field: 'invoiceNo', title: '发票号码', minWidth: 130 },
-    { field: 'orderPayStatus', title: '支付状态', minWidth: 90 },
-    { field: 'applyStatus', title: '申请状态', minWidth: 90 },
-    {
-      field: 'invoiceStatus',
-      title: '开票状态',
-      minWidth: 90,
-      fixed: 'left',
-      formatter: formatInvoiceStatus,
-    },
     {
       field: 'invoiceFileUrl',
       title: '附件',
-      width: 90,
-      fixed: 'left',
+      width: 80,
       slots: { default: 'attachment' },
-    },
-    {
-      field: 'platformStatusText',
-      title: '平台状态',
-      minWidth: 110,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'countdownText',
-      title: '开票倒计时',
-      minWidth: 140,
-      showOverflow: 'tooltip',
-    },
-    {
-      field: 'printInvoiceFlag',
-      title: '可打印',
-      minWidth: 80,
-      formatter: formatBoolean,
-    },
-    {
-      field: 'startTime',
-      title: '开始日期',
-      minWidth: 110,
-      formatter: formatStartDate,
     },
     {
       field: 'applyGmtCreate',
       title: '申请时间',
-      minWidth: 160,
-      formatter: formatOptionalDateTime,
-    },
-    {
-      field: 'orderFinishTime',
-      title: '订单完成时间',
-      minWidth: 160,
-      formatter: formatOptionalDateTime,
-    },
-    {
-      field: 'invoiceDueTime',
-      title: '开票截止时间',
-      minWidth: 160,
+      minWidth: 150,
       formatter: formatOptionalDateTime,
     },
     {
@@ -514,6 +467,72 @@ export function useGridColumns(): VxeTableGridOptions<FdmdataEcInvoiceApplyApi.E
       title: '创建时间',
       minWidth: 160,
       formatter: 'formatDateTime',
+    },
+    {
+      field: 'creatorName',
+      title: '创建人',
+      minWidth: 100,
+      showOverflow: 'tooltip',
+    },
+    { field: 'platformCode', title: '平台', minWidth: 90, ...hidden },
+    {
+      field: 'payerName',
+      title: '付款方',
+      minWidth: 180,
+      showOverflow: 'tooltip',
+      ...hidden,
+    },
+    { field: 'applySource', title: '申请来源', minWidth: 100, ...hidden },
+    {
+      field: 'invoiceItem',
+      title: '开票项目',
+      minWidth: 110,
+      showOverflow: 'tooltip',
+      ...hidden,
+    },
+    {
+      field: 'remark',
+      title: '备注',
+      minWidth: 160,
+      showOverflow: 'tooltip',
+      ...hidden,
+    },
+    { field: 'orderPayStatus', title: '支付状态', minWidth: 90, ...hidden },
+    { field: 'applyStatus', title: '申请状态', minWidth: 90, ...hidden },
+    {
+      field: 'platformStatusText',
+      title: '平台状态',
+      minWidth: 110,
+      showOverflow: 'tooltip',
+      ...hidden,
+    },
+    {
+      field: 'countdownText',
+      title: '平台倒计时',
+      minWidth: 140,
+      showOverflow: 'tooltip',
+      ...hidden,
+    },
+    {
+      field: 'printInvoiceFlag',
+      title: '可打印',
+      minWidth: 80,
+      formatter: formatBoolean,
+      ...hidden,
+    },
+    {
+      field: 'startTime',
+      title: '开始日期',
+      minWidth: 110,
+      formatter: formatStartDate,
+      ...hidden,
+    },
+    {
+      field: 'orderFinishTime',
+      title: '订单完成时间',
+      minWidth: 160,
+      formatter: formatOptionalDateTime,
+      ...hidden,
     },
     {
       title: '操作',

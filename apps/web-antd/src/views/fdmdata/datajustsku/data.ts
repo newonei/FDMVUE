@@ -1,6 +1,6 @@
 import type { VbenFormSchema } from '#/adapter/form';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
-import type { SkuDisplayRow } from './display';
+import type { SkuDisplayRow, SkuListTab } from './display';
 
 import { useUserStore } from '@vben/stores';
 
@@ -621,8 +621,14 @@ export function useAccessoryFormSchema(): VbenFormSchema[] {
 }
 
 /** 列表的搜索表单（高频字段靠前；分类、创建时间靠后可配合表单「收起」） */
-export function useGridFormSchema(): VbenFormSchema[] {
+/** 只有空白版、成品列表有「尺寸 / 颜色」（attr1 / attr2）查询条件。 */
+export function supportsSizeColorFilter(listTab: SkuListTab) {
+  return listTab === 'blank' || listTab === 'finished';
+}
+
+export function useGridFormSchema(listTab: SkuListTab): VbenFormSchema[] {
   const userStore = useUserStore();
+  const hideSizeColor = !supportsSizeColorFilter(listTab);
   return [
     {
       fieldName: 'creator',
@@ -666,6 +672,27 @@ export function useGridFormSchema(): VbenFormSchema[] {
       componentProps: {
         allowClear: true,
         placeholder: '模糊查询款式编码',
+      },
+    },
+    {
+      fieldName: 'attr1',
+      label: '尺寸',
+      component: 'Input',
+      hide: hideSizeColor,
+      help: '按尺寸模糊查询，如 185*61 可匹配 185*61*0.6cm、185*61*1cm；配合颜色可查出同色所有编码',
+      componentProps: {
+        allowClear: true,
+        placeholder: '如 185*61*0.8cm',
+      },
+    },
+    {
+      fieldName: 'attr2',
+      label: '颜色',
+      component: 'Input',
+      hide: hideSizeColor,
+      componentProps: {
+        allowClear: true,
+        placeholder: '如 宁静蓝',
       },
     },
     {

@@ -9,6 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AttachmentPanel from './AttachmentPanel.vue';
 import RecordTable from './RecordTable.vue';
 
+vi.mock('@vben/stores', () => ({
+  useUserStore: () => ({ userInfo: { id: 1 } }),
+}));
+
 vi.mock('#/api/fdmplatform', () => ({
   downloadAttachment: vi.fn(),
   newIdempotencyKey: () => 'unused',
@@ -80,9 +84,9 @@ describe('business table date rendering', () => {
         },
       ],
     });
-    const cells = [...host.querySelectorAll('tbody tr:first-child td')].map(
-      (cell) => cell.textContent,
-    );
+    const cells = [
+      ...host.querySelectorAll('tbody tr[data-row-key="1789973875794"] td'),
+    ].map((cell) => cell.textContent);
     expect(cells).toEqual([
       '1789973875794',
       '2026-09-21 14:57:55',

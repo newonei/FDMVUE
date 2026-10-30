@@ -30,7 +30,7 @@ const ready = computed(() =>
 const options = computed(() =>
   list.value.map((row) => ({
     value: row.id,
-    label: `${row.warehouseName ?? '仓库未维护'} · ${row.skuName ?? '产品'} · ${row.stockOwnerName ?? '货权待核实'} · 可用 ${row.available ?? '待核实'}`,
+    label: `${row.warehouseName ?? '仓库未维护'} · ${row.skuName ?? '产品'} · ${row.stockOwnerName ?? '货主待核实'} · 可用 ${row.available ?? '待核实'}`,
     disabled: row.authority !== 'PLATFORM',
   })),
 );
@@ -113,9 +113,7 @@ onBeforeUnmount(() => {
     :options="options"
     :loading="loading"
     :disabled="disabled || !ready"
-    :placeholder="
-      ready ? '选择已接管的匹配库存池' : '先选择产品、仓库并补齐规格'
-    "
+    :placeholder="ready ? '选择已接管的匹配库存' : '先选择产品、仓库并补齐规格'"
     show-search
     :filter-option="false"
     allow-clear

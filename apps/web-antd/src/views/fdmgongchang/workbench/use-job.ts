@@ -1,0 +1,116 @@
+import type { InjectionKey } from 'vue';
+
+import type { InputLine, OutputDraft } from '../stage-stock/model';
+
+import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
+import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
+
+import { inject, provide, reactive } from 'vue';
+
+import { normalizeForStage, toNumber } from '../stage-stock/model';
+
+export type Step = 'confirm' | 'done' | 'home' | 'pick' | 'piece' | 'report';
+
+export interface Pick {
+  qty: number;
+  side?: StockApi.LaminationSide;
+  stock: StockApi.Stock;
+}
+
+export interface AuxPick {
+  name: string;
+  qty: number;
+  stock: StockApi.Stock;
+  unit: string;
+}
+
+export interface PieceLine {
+  itemId?: number;
+  key: number;
+  quantity: null | number;
+  userId?: number;
+}
+
+/**
+ * 工人这一单的全部状态：从首页选活开始，经过领料、报数量、计件，到完成页。
+ * 每一步只改自己那部分，index.vue 负责切换步骤和加载数据。
+ */
+export function createJob() {
+  return reactive({
+    /** 领料同时报数量（新建工序单时直接报完）。 */
+    createFinish: false,
+    finish: true,
+    inputs: [] as InputLine[],
+    my: undefined as Api.My | undefined,
+    options: undefined as StockApi.Options | undefined,
+    order: undefined as StockApi.Order | undefined,
+    outputs: [] as OutputDraft[],
+    picks: [] as Pick[],
+    pieces: [] as PieceLine[],
+    process: undefined as Api.Process | undefined,
+    /** 不按排单开工时，这批是做哪张工厂订单（明细编号），记进订单的工序进度。 */
+    productionItem: undefined as undefined | { id: number; label: string; orderNo: string },
+    /** 密炼按配方领料时选的配方和锅数，开单时一起提交。 */
+    recipe: undefined as undefined | { batches: number; code: string },
+    result: { amount: 0, good: 0, unit: '' },
+    returns: {} as Record<number, null | number>,
+    sourceStage: '',
+    step: 'home' as Step,
+    /** 给手上在做的单补领（或给 3 天内完工的单补登领料）：领料、确认两步走完就结束，不新开单。 */
+    supplement: false,
+    /** 补领原因；已完工的单补登必填。 */
+    supplementRemark: '',
+    task: undefined as Api.My['tasks'][number] | undefined,
+    /**
+     * 按任务报工：系统带出的建议领料。有值时整个流程是「实际领料 → 报数量 → 计件和领料单」，
+     * 一次提交，按实际领料扣库存，任务随之完成。
+     */
+    prepare: undefined as Api.TaskPrepare | undefined,
+    /** 按任务报工时同时领的辅料。 */
+    auxPicks: [] as AuxPick[],
+    /** 纸质领料单照片（上传后的地址），按任务报工必传。 */
+    sheets: [] as string[],
+  });
+}
+
+export type Job = ReturnType<typeof createJob>;
+
+const KEY: InjectionKey<Job> = Symbol('fdmgongchang-workbench-job');
+
+export function provideJob(job: Job) {
+  provide(KEY, job);
+}
+
+export function useJob(): Job {
+  const job = inject(KEY);
+  if (!job) throw new Error('workbench job not provided');
+  return job;
+}
+
+export function stageOf(job: Job, code?: string) {
+  return job.options?.stages.find((s) => s.code === code);
+}
+
+/** 有数量的产出行，按产出阶段只保留用到的属性。 */
+export function outputPayload(job: Job): StockApi.OrderOutput[] {
+  const stage = job.process?.outputStage ?? '';
+  return job.outputs
+    .filter(
+      (o) =>
+        (toNumber(o.goodQuantity) ?? 0) + (toNumber(o.defectQuantity) ?? 0) > 0,
+    )
+    .map((o) => ({
+      attrs: normalizeForStage(stage, o.attrs),
+      batchNo: o.batchNo.trim() || undefined,
+      defectQuantity: toNumber(o.defectQuantity) ?? 0,
+      goodQuantity: toNumber(o.goodQuantity) ?? 0,
+    }));
+}
+
+export function goodTotal(job: Job) {
+  return job.outputs.reduce((t, o) => t + (toNumber(o.goodQuantity) ?? 0), 0);
+}
+
+export function defectTotal(job: Job) {
+  return job.outputs.reduce((t, o) => t + (toNumber(o.defectQuantity) ?? 0), 0);
+}

@@ -2,4 +2,6 @@
 import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
 defineOptions({ name: 'FdmPlatformTradeReturns' });
 </script>
-<template><DocumentWorkspace kind="salesReturns" /></template>
+<template>
+  <DocumentWorkspace kind="salesReturns" sales-channel="FOREIGN" />
+</template>

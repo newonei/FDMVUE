@@ -55,10 +55,10 @@ const [Modal, modalApi] = useVbenModal({
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) return;
-    const payload = modalApi.getData<{
+    const payload = modalApi.getData() as {
       id?: number;
       type: 'create' | 'update';
-    }>();
+    };
     formType.value = payload?.type || 'create';
     if (payload?.id) {
       modalApi.lock();
@@ -80,12 +80,6 @@ const [Modal, modalApi] = useVbenModal({
     }
   },
 });
-
-function open(type: 'create' | 'update', id?: number) {
-  modalApi.setData({ type, id }).open();
-}
-
-defineExpose({ open });
 </script>
 
 <template>
