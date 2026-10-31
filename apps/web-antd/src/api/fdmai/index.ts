@@ -547,3 +547,50 @@ export function updateFdmAiCompanyModelPolicy(
     data,
   );
 }
+
+export namespace FdmAiWorkbenchApi {
+  /** 响应不含完整 Key。 */
+  export interface Key {
+    deptName?: string;
+    id: number;
+    maskedKey: string;
+    nickname?: string;
+    updateTime?: number | string;
+    userId: number;
+  }
+
+  export interface Settings {
+    enabled: boolean;
+    gateway?: string;
+  }
+}
+
+const WORKBENCH_KEY = '/fdmai/workbench-key';
+
+export function getFdmAiWorkbenchSettings() {
+  return requestClient.get<FdmAiWorkbenchApi.Settings>(
+    `${WORKBENCH_KEY}/settings`,
+  );
+}
+
+export function getFdmAiWorkbenchKeyPage(
+  params: PageParam & { userId?: number },
+) {
+  return requestClient.get<PageResult<FdmAiWorkbenchApi.Key>>(
+    `${WORKBENCH_KEY}/page`,
+    { params },
+  );
+}
+
+export function setFdmAiWorkbenchKey(data: { apiKey: string; userId: number }) {
+  return requestClient.post<FdmAiWorkbenchApi.Key>(
+    `${WORKBENCH_KEY}/set`,
+    data,
+  );
+}
+
+export function removeFdmAiWorkbenchKey(userId: number) {
+  return requestClient.delete<boolean>(`${WORKBENCH_KEY}/remove`, {
+    params: { userId },
+  });
+}
