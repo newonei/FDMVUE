@@ -21,7 +21,14 @@
 
 ## 验证记录（2026-11-01）
 
+首次实现及独立浏览器行为验收基于旧本地 `main@8749eeb5c1a288bc1df902addece5bf33a029cd4`：
+
 - `pnpm exec vitest run apps/web-antd/src/utils/workbench-login.test.ts apps/web-antd/src/utils/dingtalk-config.test.ts packages/stores/src/modules/access.test.ts`：49/49，3 个文件；其中新增 24 项覆盖引导顺序、一次性读取、非法/重复参数、匿名兑换请求、固定错误、权限身份不符、身份切换顺序和迟到结果。首轮 2 项失败为测试环境对 `import.meta.url` 的 URL 转换，改为明确的测试工作区文件路径后通过。
 - `pnpm --filter @vben/web-antd run typecheck`、`pnpm --filter @vben/web-antd run build`、受影响文件 oxfmt、`node scripts/check-fdm-boundaries.mjs`、`git diff --check` 通过。构建保留既有其他组件的 `:deep` CSS 警告，无新增构建错误。
 - Ego 浏览器使用本机 production 包和隔离 API fixture，通过五组行为：成功显示模拟员工并进入首页；旧身份下兑换失败后旧会话清除；权限 401 原地失败且无 refresh/扫码；刷新不重复消费；非法 fragment 清除且零 HTTP。兑换请求经 fixture 核对无旧 Authorization/tenant/visit-tenant/Cookie。未访问生产或真实账号。
 - Ego 当时窗口最小化，截图工具返回 viewport=0，未将该次行为验证记为视觉验收。完整桌面容器的最终视觉和前后端组合验收由桌面集成任务单独记录。
+
+最终交付代码 `3949c47b5bda7720a47016171d93b4267ca66722` 已无冲突 rebase 到 `origin/main@21042c0cfd45cf9489863021a066e7fe686d6579`，保留 #116 的 `fdmai/workbench-key` 页面以及旧 `fdmrelay/admin`、`fdmrelay/developer` 页面的删除。本地 `main` 未移动。
+
+- 在该新基线上重新实跑上述 3 文件 49/49 单测、完整 `@vben/web-antd` typecheck 和 production build（26.44 秒），并通过 FDM 官方边界检查、格式和 diff 检查。旧基线的浏览器行为结果没有计为新基线视觉验收。
+- 新基线生产包 `apps/web-antd/dist.zip` 的 SHA-256 为 `465692C59DA19816E9AA6BCC749EF08906B5EA2FAFAF18084597A82456A4A505`。该包通过本机模拟服务交给桌面任务做独立 Electron 组合验收，不接触生产账号。
