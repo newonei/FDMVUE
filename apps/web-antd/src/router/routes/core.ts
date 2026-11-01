@@ -24,6 +24,18 @@ const fallbackNotFoundRoute: RouteRecordRaw = {
 
 /** 基本路由，这些路由是必须存在的 */
 const coreRoutes: RouteRecordRaw[] = [
+  {
+    component: () => import('#/views/_core/authentication/workbench-login.vue'),
+    meta: {
+      hideInBreadcrumb: true,
+      hideInMenu: true,
+      hideInTab: true,
+      ignoreAccess: true,
+      title: '工作台登录',
+    },
+    name: 'WorkbenchLogin',
+    path: '/auth/workbench',
+  },
   ...LEGACY_ROUTE_REDIRECTS.map(({ from, name, to }) => ({
     meta: {
       hideInBreadcrumb: true,

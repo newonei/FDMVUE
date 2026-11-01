@@ -131,10 +131,12 @@ export const useAuthStore = defineStore('auth', () => {
     });
   }
 
-  async function fetchUserInfo() {
+  async function fetchUserInfo(
+    loadPermissions: () => Promise<AuthPermissionInfo> = getAuthPermissionInfoApi,
+  ) {
     // 加载
     const authPermissionInfo: AuthPermissionInfo | null =
-      await getAuthPermissionInfoApi();
+      await loadPermissions();
     // userStore
     userStore.setUserInfo(authPermissionInfo.user);
     userStore.setUserRoles(authPermissionInfo.roles);
