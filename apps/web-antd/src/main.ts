@@ -7,6 +7,9 @@ import { unmountGlobalLoading } from '@vben/utils';
 
 import { overridesPreferences, preferencesExtension } from './preferences';
 import { resolveLegacyRoutePath } from './router/legacy-route-redirects';
+import { captureWorkbenchLogin } from './utils/workbench-login';
+
+captureWorkbenchLogin(window);
 
 /**
  * 应用初始化完成之后再进行页面加载渲染
