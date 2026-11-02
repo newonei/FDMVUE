@@ -38,6 +38,7 @@ import {
 import AiCenterShell from '../../fdmai/shared/AiCenterShell.vue';
 import {
   aiStatusText,
+  attachmentSummary,
   SEVERITY_COLORS,
   SEVERITY_LABELS,
   sortFindings,
@@ -73,6 +74,10 @@ const dryDocs = ref<FdmAiCheckApi.DocOption[]>([]);
 const dryDocId = ref<string>();
 const dryLoading = ref(false);
 const dryResult = ref<FdmAiCheckApi.DryRun>();
+const dryAttachmentLines = computed(() => {
+  const info = attachmentSummary(dryResult.value?.task.attachments);
+  return [info.read, ...info.others].filter(Boolean);
+});
 let dryTimer: ReturnType<typeof setTimeout> | undefined;
 
 const shown = computed(() =>
@@ -114,6 +119,7 @@ async function loadDetail() {
       triggerOnCreate: p.triggerOnCreate,
       triggerOnUpdate: p.triggerOnUpdate,
       includeBatch: p.includeBatch,
+      readAttachments: p.readAttachments,
       notifyLevel: p.notifyLevel,
     });
     editing.value = false;
@@ -331,6 +337,12 @@ onBeforeUnmount(stopDry);
               <label>导入、迁移也检查（夜间）
                 <Switch
                   v-model:checked="settings.includeBatch"
+                  :disabled="!canEdit"
+              /></label>
+              <label title="图片、Excel、PDF、Word 的内容会发给 AI 模型。文字里的长号码会脱敏，图片无法脱敏。">
+                读取附件内容
+                <Switch
+                  v-model:checked="settings.readAttachments"
                   :disabled="!canEdit"
               /></label>
               <label class="wide">
@@ -580,6 +592,13 @@ onBeforeUnmount(stopDry);
                 class="aicheck-muted"
               >
                 {{ aiStatusText(dryResult.task.aiStatus) }}
+              </p>
+              <p
+                v-for="line in dryAttachmentLines"
+                :key="line"
+                class="aicheck-muted"
+              >
+                {{ line }}
               </p>
               <p v-if="dryResult.task.errorMessage" class="aicheck-muted">
                 {{ dryResult.task.errorMessage }}

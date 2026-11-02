@@ -24,6 +24,7 @@ import {
 
 import {
   aiStatusText,
+  attachmentSummary,
   needsReason,
   SEVERITY_COLORS,
   SEVERITY_LABELS,
@@ -63,6 +64,9 @@ const handled = computed(() =>
 );
 const level = computed(() => result.value?.riskLevel);
 const notice = computed(() => aiStatusText(result.value?.latest?.aiStatus));
+const attachmentInfo = computed(() =>
+  attachmentSummary(result.value?.latest?.attachments),
+);
 const checkedAt = computed(() => {
   const time = result.value?.latest?.finishedTime;
   return time ? formatDateTime(time) : '';
@@ -225,6 +229,16 @@ defineExpose({ reload: () => load(true) });
       class="ai-check-alert"
     />
     <div v-if="notice" class="ai-check-muted ai-check-notice">{{ notice }}</div>
+    <div v-if="attachmentInfo.read" class="ai-check-muted ai-check-notice">
+      {{ attachmentInfo.read }}
+    </div>
+    <div
+      v-for="line in attachmentInfo.others"
+      :key="line"
+      class="ai-check-notice ai-check-unread"
+    >
+      {{ line }}
+    </div>
     <ul v-if="open.length" class="ai-check-list">
       <li v-for="finding in open" :key="finding.id" class="ai-check-item">
         <div class="ai-check-line">
@@ -360,6 +374,12 @@ defineExpose({ reload: () => load(true) });
 .ai-check-muted {
   font-size: 12px;
   color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.ai-check-unread {
+  font-size: 12px;
+  color: var(--ant-color-warning-text, #d48806);
+  overflow-wrap: anywhere;
 }
 
 .ai-check-notice,
