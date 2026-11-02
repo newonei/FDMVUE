@@ -176,6 +176,8 @@ export namespace FdmgongchangStageStockApi {
   export interface CenterStockPageReq extends PageParam {
     factoryId?: number;
     keyword?: string;
+    /** 查这个产品各工厂的工序库存。 */
+    productId?: string;
     stage?: string;
   }
 
@@ -814,6 +816,29 @@ export function getAuxPlan(params: {
     `${BASE}/order/aux-plan`,
     { headers: factoryHeaders(), params },
   );
+}
+
+/** 把半成品改绑到已有产品；不传产品时恢复自动建的产品。 */
+export function bindStageItemProduct(itemId: number, productId?: string) {
+  return requestClient.post<FdmgongchangStageStockApi.ItemAttrs>(
+    `${BASE}/item/bind-product`,
+    { itemId, productId },
+  );
+}
+
+/** 搜可绑定给半成品的产品。 */
+export function searchSemiProducts(keyword: string) {
+  return requestClient.get<
+    Array<{
+      category?: null | string;
+      code?: null | string;
+      displayName?: null | string;
+      id: string;
+      name: string;
+      specification?: null | string;
+      unit?: null | string;
+    }>
+  >(`${BASE}/semi-products`, { params: { keyword } });
 }
 
 /** 搜辅料产品（设订单辅料、辅料入库用）。 */

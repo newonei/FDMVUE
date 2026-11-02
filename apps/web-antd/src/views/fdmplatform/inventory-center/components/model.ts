@@ -22,12 +22,26 @@ export const STAGES: Array<{ code: string; label: string; unit: string }> = [
   { code: 'CUT', label: '已立切片材', unit: '片' },
   { code: 'LAMINATED', label: '已贴合片材', unit: '片' },
   { code: 'EMBOSSED', label: '已压花片材', unit: '片' },
-  { code: 'PUNCHED', label: '已冲裁成品', unit: '件' },
-  { code: 'ENGRAVED', label: '已雕刻成品', unit: '件' },
-  { code: 'FOLDED', label: '已折叠成品', unit: '件' },
+  { code: 'PUNCHED', label: '已冲裁半成品', unit: '件' },
+  { code: 'ENGRAVED', label: '已雕刻半成品', unit: '件' },
+  { code: 'FOLDED', label: '已折叠半成品', unit: '件' },
   { code: 'PACKED', label: '已包装成品', unit: '件' },
   { code: 'AUX', label: '辅料', unit: '' },
 ];
+
+/** 板材到已折叠是半成品，可以改绑产品中心的产品。 */
+export function isSemiFinishedStage(code: string) {
+  return [
+    'BOARD',
+    'CUT',
+    'EMBOSSED',
+    'ENGRAVED',
+    'FOLDED',
+    'LAMINATED',
+    'PUNCHED',
+    'SHEET',
+  ].includes(code);
+}
 
 export function stageOf(code: string) {
   return STAGES.find((stage) => stage.code === code);
