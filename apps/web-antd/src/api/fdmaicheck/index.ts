@@ -35,6 +35,15 @@ export namespace FdmAiCheckApi {
     errorMessage?: string;
     createTime?: string;
     finishedTime?: string;
+    /** 这次检查读了哪些附件，没读的写明原因 */
+    attachments?: AttachmentNote[];
+  }
+
+  export interface AttachmentNote {
+    name: string;
+    /** READ 全部读取；PARTIAL 只读了一部分；SKIPPED 没读 */
+    status: 'PARTIAL' | 'READ' | 'SKIPPED';
+    note?: string;
   }
 
   export interface Result {
@@ -73,6 +82,7 @@ export namespace FdmAiCheckApi {
     triggerOnCreate: boolean;
     triggerOnUpdate: boolean;
     includeBatch: boolean;
+    readAttachments: boolean;
     notifyLevel: Exclude<Severity, 'NONE'>;
     publishedVersionNo?: number;
     hasDraft: boolean;
@@ -102,6 +112,7 @@ export namespace FdmAiCheckApi {
     triggerOnCreate?: boolean;
     triggerOnUpdate?: boolean;
     includeBatch?: boolean;
+    readAttachments?: boolean;
     notifyLevel?: string;
   }
 

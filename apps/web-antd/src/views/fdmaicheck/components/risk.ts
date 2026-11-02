@@ -62,3 +62,20 @@ export function sortFindings(findings: FdmAiCheckApi.Finding[]) {
 export function needsReason(status: FdmAiCheckApi.FindingStatus) {
   return status === 'FALSE_POSITIVE' || status === 'IGNORED';
 }
+
+/** 这次检查读了哪些附件：读全的一句带过，没读全的逐个写原因，负责人才知道哪些还得自己看。 */
+export function attachmentSummary(attachments?: FdmAiCheckApi.AttachmentNote[]) {
+  const list = attachments ?? [];
+  const read = list.filter((a) => a.status === 'READ');
+  const others = list.filter((a) => a.status !== 'READ');
+  return {
+    read:
+      read.length > 0
+        ? `已读附件 ${read.length} 个：${read.map((a) => a.name).join('、')}`
+        : '',
+    others: others.map((a) => {
+      const label = a.status === 'PARTIAL' ? '只读了部分' : '没读';
+      return `${label}：${a.name}${a.note ? `（${a.note}）` : ''}`;
+    }),
+  };
+}
