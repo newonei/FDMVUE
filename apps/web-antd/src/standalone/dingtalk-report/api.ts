@@ -92,7 +92,7 @@ export function createReportApi(
       const form = new FormData();
       form.append('file', file, name);
       form.append('directory', 'fdmgongchang/issue-sheet');
-      return call<string>(context, '/infra/file/upload', {
+      return call<string>(context, '/fdmstorage/object/upload', {
         body: form,
         method: 'POST',
         timeout: UPLOAD_TIMEOUT,

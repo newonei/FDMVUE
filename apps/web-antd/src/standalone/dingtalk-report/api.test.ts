@@ -46,7 +46,7 @@ describe('createReportApi', () => {
       string,
       RequestInit,
     ];
-    expect(uploadUrl).toBe('/infra/file/upload');
+    expect(uploadUrl).toBe('/fdmstorage/object/upload');
     expect((uploadInit.body as FormData).get('directory')).toBe(
       'fdmgongchang/issue-sheet',
     );
