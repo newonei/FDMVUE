@@ -52,8 +52,10 @@ import { currencyOptions } from '../../../products/model';
 import { downloadBlob, sumAmounts } from '../../../purchase/manage/model';
 import {
   actionNames,
+  DINGTALK_STAGE,
+  dingTalkApprovalMessage,
   expenseActionNames,
-  financeStatus,
+  financeRecordStatus,
   financeTitles,
   hasPayableBalance,
   payableBalance,
@@ -480,6 +482,8 @@ async function execute(
     await loadFiles();
     let successMessage = '操作已完成';
     if (action === 'WITHDRAW') successMessage = '已撤回，可在当前页面直接编辑';
+    else if (value.approvalStage === DINGTALK_STAGE)
+      successMessage = '已提交钉钉审批，通过后自动生效';
     else if (action === 'SUBMIT')
       successMessage =
         value.type === 'REIMBURSEMENT'
@@ -629,6 +633,17 @@ async function relatedUpdated() {
         type="info"
         message="正在读取当前单据…"
       /><template v-else>
+        <Alert
+          v-if="
+            record &&
+            type !== 'REIMBURSEMENT' &&
+            record.approvalStage === DINGTALK_STAGE
+          "
+          :message="dingTalkApprovalMessage(record)"
+          :type="record.approval?.lastError ? 'warning' : 'info'"
+          show-icon
+          style="margin-bottom: 12px"
+        />
         <Descriptions
           v-if="record && type !== 'REIMBURSEMENT'"
           bordered
@@ -636,7 +651,7 @@ async function relatedUpdated() {
           :column="3"
         >
           <Descriptions.Item label="名称">{{ record.name }}</Descriptions.Item><Descriptions.Item label="状态">
-            <Tag>{{ financeStatus(record.status) }}</Tag>
+            <Tag>{{ financeRecordStatus(record) }}</Tag>
 </Descriptions.Item><Descriptions.Item label="单据金额">
             {{ record.currency || '币种未注明' }}
             {{ record.amount ?? '金额未注明' }}

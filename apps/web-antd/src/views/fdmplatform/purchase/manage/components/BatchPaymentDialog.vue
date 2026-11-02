@@ -146,7 +146,11 @@ async function submit() {
       );
       created += 1;
       finished.value.add(order.key);
-      results.value.push(`${order.code}：已登记付款 ${record.code}`);
+      results.value.push(
+        record.status === 'SUBMITTED'
+          ? `${order.code}：付款 ${record.code} 已提交钉钉审批`
+          : `${order.code}：已登记付款 ${record.code}`,
+      );
     } catch (error_) {
       attempts.set(order.key, (attempts.get(order.key) ?? 0) + 1);
       results.value.push(`${order.code}：失败，${errorText(error_)}`);

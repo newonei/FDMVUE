@@ -39,7 +39,7 @@ import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
 import InvoiceSourcesDialog from './components/InvoiceSourcesDialog.vue';
 import PaymentRecordDialog from './components/PaymentRecordDialog.vue';
-import { financeStatus, financeTitles, invoiceStates } from './model';
+import { financeRecordStatus, financeTitles, invoiceStates } from './model';
 
 import '../../components/compact-tables.css';
 
@@ -466,7 +466,7 @@ watch(
               class="fdm-cell-line"
               :title="payerText(record as ProcurementFinanceRecord)"
               >{{ payerText(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
-              {{ financeStatus(record.status) }}
+              {{ financeRecordStatus(record) }}
 </Tag><Button
               v-else-if="column.key === 'action'"
               type="link"

@@ -55,6 +55,9 @@ const emit = defineEmits<{
 }>();
 const form = reactive(financeDraft());
 const entities = ref<ProcurementSetting[]>([]);
+/** 钉钉审批通过的报销还没有公司主体，第一笔付款时确认。 */
+const sourceNeedsCompanies = ref(false);
+const expenseEntityId = ref('');
 const orderPickerOpen = ref(false);
 const sourcePickerOpen = ref(false);
 const expenseIndex = ref<number>();
@@ -83,6 +86,13 @@ const linkedOrderNeeded = computed(
     props.type !== 'PAYMENT' &&
     !(props.type === 'COST_ALLOCATION' && form.sourceType === 'REIMBURSEMENT'),
 );
+function needsCompanies(source: ProcurementFinanceRecord) {
+  return (
+    props.type === 'PAYMENT' &&
+    source.type === 'REIMBURSEMENT' &&
+    (!source.payerEntityId || !source.expenseEntityId)
+  );
+}
 async function loadSource() {
   if (!form.sourceDocumentId) return;
   const id = form.sourceDocumentId;
@@ -90,6 +100,7 @@ async function loadSource() {
     const value = await getProcurementFinance(id);
     if (form.sourceDocumentId !== id) return;
     sourceLabel.value = `${value.code} · ${value.name}`;
+    sourceNeedsCompanies.value = needsCompanies(value);
     if (
       props.type === 'COST_ALLOCATION' &&
       form.sourceType === 'REIMBURSEMENT'
@@ -158,6 +169,8 @@ watch(
     sourceLabel.value = '';
     sourceLines.value = [];
     orderAmount.value = '';
+    sourceNeedsCompanies.value = false;
+    expenseEntityId.value = String(props.record?.expenseEntityId ?? '');
     Object.assign(form, financeDraft(props.record ?? props.context));
     if (props.type === 'PAYMENT_PLAN' && form.periods.length === 0)
       form.periods.push({
@@ -220,6 +233,7 @@ async function chooseOrder(row: DocumentRow) {
 function chooseSource(record: ProcurementFinanceRecord) {
   sourcePickerOpen.value = false;
   sourceLabel.value = `${record.code} · ${record.name}`;
+  sourceNeedsCompanies.value = needsCompanies(record);
   if (props.type === 'COST_ALLOCATION')
     form.groups = allocationGroupsAfterSourceChange(
       form.groups,
@@ -255,6 +269,10 @@ function validate() {
     return '请选择关联采购单';
   if (props.type === 'PAYMENT' && !form.sourceDocumentId)
     return '请选择付款来源请款或报销单';
+  if (sourceNeedsCompanies.value && !form.payerEntityId)
+    return '请选择付款主体';
+  if (sourceNeedsCompanies.value && !expenseEntityId.value)
+    return '请选择费用所属公司';
   if (
     props.type === 'COST_ALLOCATION' &&
     form.sourceType === 'REIMBURSEMENT' &&
@@ -264,7 +282,10 @@ function validate() {
   return '';
 }
 function payload() {
-  return financePayload(props.type, form);
+  const value = financePayload(props.type, form);
+  return sourceNeedsCompanies.value
+    ? { ...value, expenseEntityId: expenseEntityId.value }
+    : value;
 }
 function save(submit = false) {
   if (props.saving) return;
@@ -328,11 +349,24 @@ defineExpose({ payload });
       >
         <Select
           v-model:value="form.payerEntityId"
-          :disabled="saving || type === 'PAYMENT' || !!form.periodId"
+          :disabled="
+            saving ||
+            (type === 'PAYMENT' && !sourceNeedsCompanies) ||
+            !!form.periodId
+          "
           :options="payerOptions"
           show-search
           option-filter-prop="label"
           placeholder="选择实际付款主体"
+        />
+</Form.Item><Form.Item v-if="sourceNeedsCompanies" label="费用所属公司">
+        <Select
+          v-model:value="expenseEntityId"
+          :disabled="saving"
+          :options="costOptions"
+          show-search
+          option-filter-prop="label"
+          placeholder="选择费用所属公司"
         />
 </Form.Item><Form.Item
         v-if="

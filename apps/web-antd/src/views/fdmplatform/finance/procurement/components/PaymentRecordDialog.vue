@@ -210,7 +210,7 @@ async function save() {
     }
     if (failed.length > 0)
       Modal.warning({
-        title: `付款已登记，${failed.length} 个回单没传上`,
+        title: `付款已提交，${failed.length} 个回单没传上`,
         content: `${failed.join('、')}，可在付款记录里补传。`,
       });
     emit('saved', record);

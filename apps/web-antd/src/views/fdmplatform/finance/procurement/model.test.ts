@@ -7,9 +7,12 @@ import {
   allocationDifference,
   allocationGroupsAfterSourceChange,
   allocationPreview,
+  dingTalkApprovalMessage,
+  expenseStatus,
   financeDraft,
   financePayload,
   financeRecordRoute,
+  financeRecordStatus,
   hasPayableBalance,
   newExpense,
   newGroup,
@@ -242,5 +245,27 @@ describe('成本来源选择', () => {
     expect(allocationGroupsAfterSourceChange(groups, 'same', 'same')).toBe(
       groups,
     );
+  });
+});
+
+describe('dingtalk approval labels', () => {
+  it('shows approval in progress only while submitted on DingTalk', () => {
+    const inProgress = { approvalStage: 'DINGTALK', status: 'SUBMITTED' };
+    expect(financeRecordStatus(inProgress)).toBe('钉钉审批中');
+    expect(expenseStatus(inProgress)).toBe('钉钉审批中');
+    expect(financeRecordStatus({ status: 'SUBMITTED' })).toBe('待生效');
+    expect(
+      expenseStatus({ approvalStage: 'MANAGER', status: 'SUBMITTED' }),
+    ).toBe('待负责人审批');
+  });
+
+  it('explains a failed start and a running approval', () => {
+    expect(
+      dingTalkApprovalMessage({ approval: { lastError: '网络请求失败' } }),
+    ).toContain('网络请求失败');
+    expect(
+      dingTalkApprovalMessage({ approval: { processInstanceId: 'proc-1' } }),
+    ).toContain('请在钉钉里处理');
+    expect(dingTalkApprovalMessage({ approval: null })).toContain('正在发起');
   });
 });
