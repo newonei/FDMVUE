@@ -13,6 +13,9 @@ export default defineConfig(async () => {
             dingtalkCard: fileURLToPath(
               new URL('dingtalk-card.html', import.meta.url),
             ),
+            dingtalkReport: fileURLToPath(
+              new URL('dingtalk-report.html', import.meta.url),
+            ),
           },
         },
       },
