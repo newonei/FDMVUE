@@ -11,6 +11,7 @@ import {
   countPayload,
   countRows,
   firstWarehouse,
+  isSemiFinishedStage,
   pickErrors,
   pickLines,
   pickRows,
@@ -107,5 +108,26 @@ describe('库存中心', () => {
       unit: '件',
     });
     expect(stageOf('NOPE')).toBeUndefined();
+  });
+});
+
+describe('半成品阶段', () => {
+  it('板材到已折叠可以绑定产品，原料、成品、辅料不可以', () => {
+    for (const code of [
+      'BOARD',
+      'SHEET',
+      'CUT',
+      'LAMINATED',
+      'EMBOSSED',
+      'PUNCHED',
+      'ENGRAVED',
+      'FOLDED',
+    ]) {
+      expect(isSemiFinishedStage(code)).toBe(true);
+    }
+    for (const code of ['RAW', 'PACKED', 'AUX']) {
+      expect(isSemiFinishedStage(code)).toBe(false);
+    }
+    expect(stageOf('PUNCHED')?.label).toBe('已冲裁半成品');
   });
 });

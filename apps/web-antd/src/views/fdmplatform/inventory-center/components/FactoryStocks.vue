@@ -21,12 +21,13 @@ import {
 
 import { errorText } from '../../data';
 import { qty } from '../../purchase/warehouse/model';
-import { stageOf, STAGES } from './model';
+import BindProductDialog from './BindProductDialog.vue';
+import { isSemiFinishedStage, stageOf, STAGES } from './model';
 
 import '../../purchase/warehouse/warehouse-pages.css';
 
 /**
- * 各工厂的工序库存（只读）：原材料、各道工序的半成品、还没入库的成品、辅料。
+ * 各工厂的工序库存：原材料、各道工序的半成品、还没入库的成品、辅料。数量只读，半成品可以改绑产品中心的产品。
  * 领料、报工、盘点在「工厂部门 → 工序库存」办理；做好的成品由工厂生产入库进本厂仓库后，在「仓库库存」里出库。
  */
 defineOptions({ name: 'FdmInventoryFactoryStocks' });
@@ -42,6 +43,11 @@ const factories = ref<Array<{ id: number; name: string }>>([]);
 const options = ref<Api.Options>();
 const loading = ref(false);
 const error = ref('');
+
+const binding = ref<Api.Stock>();
+const canBind = computed(() =>
+  hasAccessByCodes(['fdmgongchang:stage-stock:setting']),
+);
 
 const labels = computed(() => makeLabels(options.value));
 
@@ -93,7 +99,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="物料编码、批次"
+        placeholder="物料编码、批次、产品"
         style="width: 240px"
         @search="load(true)"
       />
@@ -118,7 +124,7 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <span class="muted">只读；领料、报工、盘点在「工厂部门 → 工序库存」</span>
+      <span class="muted">数量只读；领料、报工、盘点在「工厂部门 → 工序库存」</span>
       <Button :loading="loading" @click="load()">刷新</Button>
     </div>
     <Alert v-if="error" type="error" :message="error" show-icon />
@@ -129,11 +135,12 @@ onMounted(async () => {
       row-key="id"
       :data-source="rows"
       :loading="loading"
-      :scroll="{ x: 1000 }"
+      :scroll="{ x: 1220 }"
       :columns="[
         { title: '工厂', key: 'factory', width: 110 },
         { title: '阶段', key: 'stage', width: 110 },
         { title: '物料 / 规格', key: 'item', width: 320 },
+        { title: '产品中心', key: 'product', width: 220 },
         { title: '批次 / 库位', key: 'batch', width: 180 },
         { title: '数量', key: 'quantity', width: 120, align: 'right' },
       ]"
@@ -164,6 +171,21 @@ onMounted(async () => {
             {{ stockSpec(record.stage, record.item, labels) }}
           </span>
         </div>
+        <div v-else-if="column.key === 'product'" class="cell">
+          <template v-if="record.item?.productId">
+            <span class="ellipsis">{{ record.item.productName }}</span>
+            <span class="muted ellipsis mono">{{
+              record.item.productCode
+            }}</span>
+          </template>
+          <span v-else class="muted">—</span>
+          <a
+            v-if="canBind && isSemiFinishedStage(record.stage)"
+            @click="binding = record as Api.Stock"
+          >
+            绑定产品
+          </a>
+        </div>
         <div v-else-if="column.key === 'batch'" class="cell">
           <span class="mono">{{ record.batchNo }}</span>
           <span class="muted">{{ record.location }}</span>
@@ -176,5 +198,10 @@ onMounted(async () => {
         </b>
       </template>
     </Table>
+    <BindProductDialog
+      :stock="binding"
+      @close="binding = undefined"
+      @saved="load()"
+    />
   </div>
 </template>

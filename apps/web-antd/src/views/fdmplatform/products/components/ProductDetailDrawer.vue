@@ -45,6 +45,7 @@ import {
 } from '../activity-model';
 import { missingProductFields } from '../model';
 import ProductFiles from './ProductFiles.vue';
+import ProductStageStocks from './ProductStageStocks.vue';
 
 const props = defineProps<{ open: boolean; product?: Product }>();
 const emit = defineEmits<{
@@ -398,6 +399,7 @@ function refresh() {
                 }}
               </Descriptions.Item>
             </Descriptions>
+            <ProductStageStocks :product-id="product.id" />
           </template>
           <ProductFiles
             v-else-if="tab === 'FILES'"
