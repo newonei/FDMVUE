@@ -303,11 +303,35 @@ export function financeStatus(value: unknown) {
     )[String(value)] ?? String(value ?? '—')
   );
 }
+/** 钉钉审批中的单据只能在钉钉里同意或拒绝。 */
+export const DINGTALK_STAGE = 'DINGTALK';
+export function financeRecordStatus(record: {
+  approvalStage?: unknown;
+  status?: unknown;
+}) {
+  return record.status === 'SUBMITTED' &&
+    record.approvalStage === DINGTALK_STAGE
+    ? '钉钉审批中'
+    : financeStatus(record.status);
+}
+/** 钉钉审批中的提示；发起失败时说明原因和处理办法。 */
+export function dingTalkApprovalMessage(record: { approval?: unknown }) {
+  const approval = record.approval as
+    | null
+    | undefined
+    | { lastError?: string; processInstanceId?: string };
+  if (approval?.lastError && !approval.processInstanceId)
+    return `发起钉钉审批失败：${approval.lastError}。系统会自动重试，也可以撤回后重新提交。`;
+  if (!approval?.processInstanceId) return '正在发起钉钉审批…';
+  return '已提交钉钉审批，请在钉钉里处理。结果最晚两分钟同步回来。';
+}
 /** 报销单的状态按审批走到哪一步显示。 */
 export function expenseStatus(record: {
   approvalStage?: unknown;
   status?: unknown;
 }) {
+  if (record.status === 'SUBMITTED' && record.approvalStage === DINGTALK_STAGE)
+    return '钉钉审批中';
   if (record.status === 'SUBMITTED')
     return record.approvalStage === 'MANAGER' ? '待负责人审批' : '待财务审核';
   if (record.status === 'APPROVED') return '已通过';
@@ -315,6 +339,7 @@ export function expenseStatus(record: {
   return financeStatus(record.status);
 }
 export const expenseActionNames: Record<string, string> = {
+  APPROVAL_TERMINATED: '钉钉审批已撤销',
   APPROVE: '同意',
   CREATE: '创建',
   REJECT: '退回',

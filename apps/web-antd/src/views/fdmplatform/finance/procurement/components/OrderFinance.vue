@@ -27,7 +27,8 @@ import { errorText } from '../../../data';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import {
-  financeStatus,
+  DINGTALK_STAGE,
+  financeRecordStatus,
   financeTitles,
   hasPayableBalance,
   invoiceStates,
@@ -140,7 +141,11 @@ function updated() {
 }
 function paymentSaved(record: ProcurementFinanceRecord) {
   paymentOpen.value = false;
-  message.success(`已登记付款 ${record.code}`);
+  message.success(
+    record.approvalStage === DINGTALK_STAGE
+      ? `付款 ${record.code} 已提交钉钉审批，通过后计入已付`
+      : `已登记付款 ${record.code}`,
+  );
   updated();
 }
 function invoiceSaved() {
@@ -300,7 +305,7 @@ watch(
               </small>
             </template>
             <Tag v-else-if="column.key === 'state'">
-              {{ financeStatus(record.status) }}
+              {{ financeRecordStatus(record) }}
             </Tag>
           </template>
           <template #expandedRowRender="{ record }">
@@ -394,7 +399,7 @@ watch(
               {{ record.code }} · {{ record.name }}
             </Button>
             <Tag v-else-if="column.key === 'state'">
-              {{ financeStatus(record.status) }}
+              {{ financeRecordStatus(record) }}
             </Tag>
           </template>
         </Table>
@@ -432,7 +437,7 @@ watch(
             {{ record.code }} · {{ record.name }}
           </Button>
           <Tag v-else-if="column.key === 'state'">
-            {{ financeStatus(record.status) }}
+            {{ financeRecordStatus(record) }}
           </Tag>
         </template>
       </Table>

@@ -20,6 +20,8 @@ import { contractTarget, documentTarget } from '../../../documents/navigation';
 import RelatedLink from '../../../documents/RelatedLink.vue';
 import {
   currencyScale,
+  DINGTALK_STAGE,
+  dingTalkApprovalMessage,
   expenseActionNames,
   expenseStatus,
   hasPayableBalance,
@@ -81,6 +83,8 @@ const paymentLabel = computed(() => {
 });
 const flowMessage = computed(() => {
   if (props.record.status === 'SUBMITTED') {
+    if (props.record.approvalStage === DINGTALK_STAGE)
+      return dingTalkApprovalMessage(props.record);
     if (props.record.approvalStage === 'MANAGER') {
       const who = String(props.record.approverName ?? '部门负责人');
       return canApprove.value
@@ -95,7 +99,9 @@ const flowMessage = computed(() => {
     if (paymentLabel.value === '付款资料待核实')
       return '已通过审核，付款资料仍需核实。核实完成后再办理付款。';
     if (canPay.value)
-      return '已通过审核，可以登记付款。付款确认后更新实际已付金额。';
+      return props.record.payerEntityId
+        ? '已通过审核，可以登记付款。付款确认后更新实际已付金额。'
+        : '已通过审核，可以登记付款。第一次付款时确认付款公司和费用所属公司。';
     return hasPayableBalance(props.record.summary?.availablePaymentAmount)
       ? '已通过审核，等待财务付款。'
       : '已通过审核，这张报销已付清。';
@@ -158,7 +164,11 @@ function factName(value: unknown) {
     <section class="reimbursement-section">
       <div class="section-heading">
         <h3>当前办理</h3>
-        <span class="muted">提交 → 部门负责人 → 财务审核 → 付款</span>
+        <span class="muted">{{
+          record.approvalStage === DINGTALK_STAGE
+            ? '提交 → 钉钉审批 → 付款'
+            : '提交 → 部门负责人 → 财务审核 → 付款'
+        }}</span>
       </div>
       <Alert
         :message="flowMessage"

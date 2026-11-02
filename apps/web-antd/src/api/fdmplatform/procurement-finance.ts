@@ -45,13 +45,13 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   payerSnapshot?: { name?: string };
   expenseEntityId?: string;
   expenseEntitySnapshot?: { name?: string };
-  approval?: {
-    handlerUserId: number;
-    openedAt: string;
-    requesterUserId: number;
-    round: number;
+  /** 钉钉审批中才有：发起状态和最近一次失败原因。 */
+  approval?: null | {
+    lastError?: string;
+    processInstanceId?: null | string;
     status: string;
   };
+  approvalStage?: string;
   exchange?: {
     fallback: boolean;
     fetchedAt: string;
