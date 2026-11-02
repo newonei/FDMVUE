@@ -29,9 +29,12 @@ vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
 }));
-vi.mock('#/api/fdmplatform', () => ({ getDirectory: mocks.directory }));
-vi.mock('#/api/fdmplatform/procurement-finance', () => ({
-  getProcurementFinancePage: mocks.page,
+vi.mock('#/api/fdmplatform/expense', () => ({
+  getExpenseContext: mocks.directory,
+  getExpensePage: mocks.page,
+}));
+vi.mock('./ExpenseSummaryPanel.vue', () => ({
+  default: defineComponent({ setup: () => () => h('p', '费用汇总面板') }),
 }));
 vi.mock('@vben/common-ui', () => ({
   Page: defineComponent({
@@ -91,6 +94,8 @@ vi.mock('ant-design-vue', () => {
       setup: (props) => () => h('p', props.description),
     }),
     Tag: block,
+    Select: block,
+    DatePicker: { RangePicker: block },
     Button: defineComponent({
       props: { disabled: Boolean, loading: Boolean },
       setup: (props, ctx) => () =>
@@ -165,6 +170,7 @@ function entry(id = 'expense-a'): ProcurementFinanceRecord {
     orderId: '',
     currency: 'CNY',
     amount: '100',
+    applicantName: '王珊',
     createdBy: 1,
     createdAt: '2026-09-18T09:00:00',
     summary: { complete: true, paidAmount: '25', availablePaymentAmount: '75' },
@@ -278,7 +284,7 @@ describe('费用报销真实列表和付款事实', () => {
     expect(mocks.page).toHaveBeenLastCalledWith(
       expect.objectContaining({ paymentStatus: 'PAID', pageNo: 1 }),
     );
-    button(host, '待生效').click();
+    button(host, '审批中').click();
     await settle();
     expect(mocks.page).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: 'SUBMITTED' }),
@@ -330,7 +336,7 @@ describe('费用报销真实列表和付款事实', () => {
     await settle();
     expect(host.textContent).not.toContain('999');
     mocks.page.mockRejectedValue(new Error('网络失败'));
-    button(host, '待补充').click();
+    button(host, '已退回').click();
     await settle();
     expect(host.querySelector<HTMLElement>('[data-row]')).toBeNull();
     expect(host.textContent).not.toContain('共 0');

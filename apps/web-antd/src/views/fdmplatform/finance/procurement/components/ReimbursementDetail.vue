@@ -14,14 +14,14 @@ import BigNumber from 'bignumber.js';
 import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
-import { costCategories, rows } from '../../../data';
+import { expenseCategoryLabel, rows } from '../../../data';
 import { contractReferenceText } from '../../../documents/migration-display';
 import { contractTarget, documentTarget } from '../../../documents/navigation';
 import RelatedLink from '../../../documents/RelatedLink.vue';
 import {
-  actionNames,
   currencyScale,
-  financeStatus,
+  expenseActionNames,
+  expenseStatus,
   hasPayableBalance,
 } from '../model';
 
@@ -43,6 +43,18 @@ const actions = computed(() =>
   props.record.allowedActions.filter(
     (action) => !['APPROVE', 'REJECT', 'UPDATE'].includes(action),
   ),
+);
+/** 不绑定合同的报销不进合同成本，只进费用汇总。 */
+const hasBusinessLine = computed(
+  () =>
+    Boolean(props.record.contractId) ||
+    expenseRows.value.some((line) => line.contractId),
+);
+const canApprove = computed(() =>
+  props.record.allowedActions.includes('APPROVE'),
+);
+const canReject = computed(() =>
+  props.record.allowedActions.includes('REJECT'),
 );
 const canPay = computed(
   () =>
@@ -68,19 +80,28 @@ const paymentLabel = computed(() => {
     : '已付清';
 });
 const flowMessage = computed(() => {
-  if (props.record.status === 'SUBMITTED')
-    return '当前单据尚未生效，点击提交生效后即可继续办理付款与成本归集。';
+  if (props.record.status === 'SUBMITTED') {
+    if (props.record.approvalStage === 'MANAGER') {
+      const who = String(props.record.approverName ?? '部门负责人');
+      return canApprove.value
+        ? '这张报销等你审批，同意后转财务审核。'
+        : `等待 ${who} 审批，同意后转财务审核。`;
+    }
+    return canApprove.value
+      ? '这张报销等财务审核，通过时确认付款公司和费用所属公司。'
+      : '等待财务审核。';
+  }
   if (props.record.status === 'APPROVED') {
     if (paymentLabel.value === '付款资料待核实')
-      return '单据已生效，付款资料仍需核实。核实完成后再办理付款。';
+      return '已通过审核，付款资料仍需核实。核实完成后再办理付款。';
     if (canPay.value)
-      return '单据已生效，可直接登记付款。付款经确认后更新实际已付金额。';
+      return '已通过审核，可以登记付款。付款确认后更新实际已付金额。';
     return hasPayableBalance(props.record.summary?.availablePaymentAmount)
-      ? '单据已生效，等待财务办理付款。'
-      : '单据已生效，当前报销已付清。';
+      ? '已通过审核，等待财务付款。'
+      : '已通过审核，这张报销已付清。';
   }
   if (props.record.status === 'REJECTED')
-    return '当前单据可继续修改，补齐资料后提交生效。';
+    return '这张报销被退回了，修改后可以重新提交。';
   return '当前单据按实际付款及成本归集记录展示。';
 });
 function money(value: unknown) {
@@ -92,12 +113,7 @@ function money(value: unknown) {
 function voucher(value: unknown) {
   return props.files.find((file) => file.id === value);
 }
-function expenseLabel(value: unknown) {
-  return (
-    costCategories.find((option) => option.value === value)?.label ??
-    String(value || '未填写')
-  );
-}
+const expenseLabel = expenseCategoryLabel;
 function factName(value: unknown) {
   return value && typeof value === 'object' && 'name' in value
     ? String(value.name || '未填写')
@@ -114,7 +130,7 @@ function factName(value: unknown) {
         <span class="muted">{{ record.code }}</span>
       </div>
       <Space wrap>
-        <Tag color="blue">{{ financeStatus(record.status) }}</Tag><Tag>{{ paymentLabel }}</Tag>
+        <Tag color="blue">{{ expenseStatus(record) }}</Tag><Tag>{{ paymentLabel }}</Tag>
       </Space>
     </header>
     <div class="reimbursement-metrics">
@@ -129,18 +145,20 @@ function factName(value: unknown) {
       </div>
       <div>
         <span>成本归集</span><strong>{{
-          record.summary?.hasConfirmedCost === true
-            ? '已有确认归集'
-            : record.summary?.hasConfirmedCost === false
-              ? '待归集'
-              : '待核实'
+          !hasBusinessLine
+            ? '不涉及'
+            : record.summary?.hasConfirmedCost === true
+              ? '已有确认归集'
+              : record.summary?.hasConfirmedCost === false
+                ? '待归集'
+                : '待核实'
         }}</strong>
       </div>
     </div>
     <section class="reimbursement-section">
       <div class="section-heading">
         <h3>当前办理</h3>
-        <span class="muted">单据生效后继续办理付款</span>
+        <span class="muted">提交 → 部门负责人 → 财务审核 → 付款</span>
       </div>
       <Alert
         :message="flowMessage"
@@ -149,6 +167,22 @@ function factName(value: unknown) {
       />
       <div class="processing-actions">
         <Space wrap>
+          <Button
+            v-if="canApprove"
+            type="primary"
+            :disabled="busy"
+            @click="emit('action', 'APPROVE')"
+          >
+            同意
+          </Button>
+          <Button
+            v-if="canReject"
+            danger
+            :disabled="busy"
+            @click="emit('action', 'REJECT')"
+          >
+            退回
+          </Button>
           <Button
             v-if="canPay"
             type="primary"
@@ -164,10 +198,12 @@ function factName(value: unknown) {
             :danger="action === 'CANCEL'"
             @click="emit('action', action)"
           >
-            {{ actionNames[action] ?? action }}
+            {{ expenseActionNames[action] ?? action }}
           </Button>
           <Button
-            v-if="!hidePayment && record.status === 'APPROVED'"
+            v-if="
+              !hidePayment && hasBusinessLine && record.status === 'APPROVED'
+            "
             :disabled="busy"
             @click="emit('allocate')"
           >
@@ -180,17 +216,25 @@ function factName(value: unknown) {
       <div class="section-heading"><h3>基本信息与收款资料</h3></div>
       <Descriptions :column="2" size="small">
         <Descriptions.Item label="费用所属公司">
-          {{ factName(record.expenseEntitySnapshot) }}
+          {{
+            record.expenseEntitySnapshot
+              ? factName(record.expenseEntitySnapshot)
+              : '财务审核时确认'
+          }}
         </Descriptions.Item>
         <Descriptions.Item label="付款公司">
-          {{ record.payerSnapshot?.name || '未填写' }}
+          {{ record.payerSnapshot?.name || '财务审核时确认' }}
         </Descriptions.Item>
         <Descriptions.Item label="申请人">
           {{
+            record.applicantName ||
             record.createdByName ||
             userNames?.[String(record.createdBy)] ||
             (record.createdBy ? `用户 #${record.createdBy}` : '未提供')
           }}
+        </Descriptions.Item>
+        <Descriptions.Item label="申请部门">
+          {{ record.applicantDeptName || '未记录' }}
         </Descriptions.Item>
         <Descriptions.Item label="申请日期">
           {{ formatDate(record.createdAt) || '未提供' }}
@@ -252,7 +296,7 @@ function factName(value: unknown) {
             >
               {{ expense.orderCode || '查看关联采购单' }}
             </RelatedLink>
-            <span v-if="!expense.contractId && !expense.orderId" class="muted">独立费用</span>
+            <span v-if="!expense.contractId && !expense.orderId" class="muted">不关联业务单据</span>
             <Button
               v-if="voucher(expense.evidenceRef)"
               type="link"

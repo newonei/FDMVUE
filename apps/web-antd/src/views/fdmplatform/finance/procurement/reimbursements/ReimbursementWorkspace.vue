@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ReimbursementView } from './workspace';
 
-import type { Directory } from '#/api/fdmplatform';
+import type { ExpenseContext } from '#/api/fdmplatform/expense';
 import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-finance';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -10,18 +10,27 @@ import { useRoute, useRouter } from 'vue-router';
 import { Page } from '@vben/common-ui';
 import { formatDate } from '@vben/utils';
 
-import { Alert, Button, Empty, Input, Table, Tag } from 'ant-design-vue';
+import {
+  Alert,
+  Button,
+  DatePicker,
+  Empty,
+  Input,
+  Select,
+  Table,
+  Tag,
+} from 'ant-design-vue';
 
-import { getDirectory } from '#/api/fdmplatform';
-import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
+import { getExpenseContext, getExpensePage } from '#/api/fdmplatform/expense';
 
 import { useInMergedView } from '../../../components/merged-view';
-import { errorText } from '../../../data';
+import { errorText, expenseCategories } from '../../../data';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../../documents/navigation';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import FinanceDocument from '../components/FinanceDocument.vue';
-import { financeStatus } from '../model';
+import { expenseStatus } from '../model';
+import ExpenseSummaryPanel from './ExpenseSummaryPanel.vue';
 import {
   expenseAction,
   expenseMoney,
@@ -51,7 +60,12 @@ const pageSize = ref(15);
 const result = ref<{ list: ProcurementFinanceRecord[]; total: number }>();
 const loading = ref(false);
 const pageError = ref('');
-const directory = ref<Directory>();
+const me = ref<ExpenseContext>();
+const showSummary = ref(false);
+const category = ref<string>();
+const dateRange = ref<[string, string] | undefined>();
+/** 付款只有财务能办，外贸、内销入口的 payable=false 继续生效。 */
+const canPay = computed(() => props.payable && me.value?.canPay === true);
 const open = ref(false);
 const selectedId = ref<string>();
 const context = ref<Record<string, unknown>>({});
@@ -73,13 +87,7 @@ let lastQuery = '';
 let disposed = false;
 let openedFromRoute = false;
 function applicant(record: ProcurementFinanceRecord) {
-  if (record.createdBy === undefined || record.createdBy === null)
-    return '申请人待核实';
-  return (
-    directory.value?.users.find(
-      (user) => String(user.id) === String(record.createdBy),
-    )?.nickname ?? `用户 #${record.createdBy}`
-  );
+  return String(record.applicantName ?? `用户 #${record.createdBy}`);
 }
 function dateText(value: unknown) {
   return typeof value === 'number' || typeof value === 'string'
@@ -89,8 +97,10 @@ function dateText(value: unknown) {
 async function load() {
   if (!active.value) return;
   const params = {
-    type: 'REIMBURSEMENT' as const,
     ...reimbursementQuery(view.value),
+    category: category.value,
+    from: dateRange.value?.[0],
+    to: dateRange.value?.[1],
     contractId: contractId.value,
     orderId: orderId.value,
     keyword: search.value || undefined,
@@ -104,7 +114,7 @@ async function load() {
   loading.value = true;
   pageError.value = '';
   try {
-    const value = await getProcurementFinancePage(params);
+    const value = await getExpensePage(params);
     if (disposed || run !== sequence || !active.value) return;
     const lastPage = Math.max(1, Math.ceil(value.total / pageSize.value));
     if (page.value > lastPage) {
@@ -120,6 +130,7 @@ async function load() {
   }
 }
 function filter(value: ReimbursementView) {
+  showSummary.value = false;
   if (view.value === value) return;
   view.value = value;
   page.value = 1;
@@ -209,9 +220,11 @@ watch(
 );
 onMounted(async () => {
   try {
-    directory.value = await getDirectory(0);
+    me.value = await getExpenseContext();
+    // 有待审批的单时，审批人打开就看到自己要办的
+    if (me.value.canAudit && view.value === 'all') filter('pending');
   } catch {
-    /* IDs remain visible if the directory is unavailable. */
+    /* 取不到身份时不显示财务操作，列表照常。 */
   }
 });
 onBeforeUnmount(() => {
@@ -231,9 +244,7 @@ onBeforeUnmount(() => {
           </template>
           <p>
             {{
-              props.payable
-                ? '填写费用与凭证，提交生效后继续办理实际付款。'
-                : '填写费用与凭证，提交生效后由财务办理付款。'
+              '填写费用和凭证后提交，部门负责人同意、财务审核后付款。费用可以关联合同或采购单，也可以不关联。'
             }}
           </p>
         </div>
@@ -256,20 +267,44 @@ onBeforeUnmount(() => {
             v-for="item in reimbursementViews"
             :key="item.key"
             type="button"
-            :aria-pressed="view === item.key"
-            :class="{ active: view === item.key }"
+            :aria-pressed="!showSummary && view === item.key"
+            :class="{ active: !showSummary && view === item.key }"
             @click="filter(item.key)"
           >
             {{ item.label }}
           </button>
+          <button
+            v-if="me?.canSummarize"
+            type="button"
+            :aria-pressed="showSummary"
+            :class="{ active: showSummary }"
+            @click="showSummary = true"
+          >
+            费用汇总
+          </button>
         </nav>
-        <div class="expense-toolbar">
+        <ExpenseSummaryPanel v-if="showSummary" />
+        <div v-show="!showSummary" class="expense-toolbar">
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索报销主题或单号"
-            aria-label="搜索报销主题或单号"
+            placeholder="搜索主题、单号或收款人"
+            aria-label="搜索主题、单号或收款人"
             @search="searchRecords"
+          />
+          <Select
+            v-model:value="category"
+            allow-clear
+            class="expense-filter"
+            placeholder="费用类别"
+            :options="expenseCategories"
+            @change="searchRecords"
+          />
+          <DatePicker.RangePicker
+            v-model:value="dateRange"
+            value-format="YYYY-MM-DD"
+            allow-clear
+            @change="searchRecords"
           />
           <span class="expense-count">{{
             result
@@ -281,6 +316,7 @@ onBeforeUnmount(() => {
           <Button :loading="loading" @click="load">刷新</Button>
         </div>
         <Table
+          v-show="!showSummary"
           :data-source="result?.list ?? []"
           :loading="loading"
           row-key="id"
@@ -296,7 +332,7 @@ onBeforeUnmount(() => {
           :columns="[
             { title: '报销主题 / 单号', key: 'subject', width: 270 },
             { title: '申请人 / 日期', key: 'applicant', width: 150 },
-            { title: '费用所属公司', key: 'company', width: 190 },
+            { title: '部门 / 费用归属', key: 'company', width: 190 },
             { title: '报销金额', key: 'amount', width: 150, align: 'right' },
             { title: '单据状态', key: 'status', width: 105 },
             { title: '付款进度', key: 'payment', width: 165 },
@@ -324,7 +360,9 @@ onBeforeUnmount(() => {
               <span>{{ applicant(row as ProcurementFinanceRecord) }}</span><small>{{ dateText(row.createdAt) }}</small>
             </template>
             <template v-else-if="column.key === 'company'">
-              <span>{{ row.expenseEntitySnapshot?.name || '待补充' }}</span><small>付款：{{ row.payerSnapshot?.name || '待选择' }}</small>
+              <span>{{ row.applicantDeptName || '未记录部门' }}</span><small>{{
+                row.expenseEntitySnapshot?.name || '财务审核时确认'
+              }}</small>
             </template>
             <strong
               v-else-if="column.key === 'amount'"
@@ -342,7 +380,7 @@ onBeforeUnmount(() => {
                       : undefined
               "
             >
-              {{ financeStatus(row.status) }}
+              {{ expenseStatus(row) }}
             </Tag>
             <template v-else-if="column.key === 'payment'">
               <Tag
@@ -369,9 +407,7 @@ onBeforeUnmount(() => {
               type="link"
               @click="show(row as ProcurementFinanceRecord)"
             >
-              {{
-                expenseAction(row as ProcurementFinanceRecord, props.payable)
-              }}
+              {{ expenseAction(row as ProcurementFinanceRecord, canPay) }}
             </Button>
           </template>
           <template #emptyText>
@@ -391,7 +427,7 @@ onBeforeUnmount(() => {
     <FinanceDocument
       :open="open && active"
       type="REIMBURSEMENT"
-      :hide-payment="!props.payable"
+      :hide-payment="!canPay"
       :record-id="selectedId"
       :context="context"
       @close="close"
@@ -407,6 +443,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.expense-filter {
+  min-width: 140px;
+}
+
 .expense-workspace {
   display: grid;
   gap: 16px;

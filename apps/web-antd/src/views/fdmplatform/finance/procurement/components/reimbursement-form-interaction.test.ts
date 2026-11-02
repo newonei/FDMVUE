@@ -12,24 +12,23 @@ import ReimbursementForm from './ReimbursementForm.vue';
 const mocks = vi.hoisted(() => ({ counter: 0 }));
 vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => `line-${++mocks.counter}`,
-  getAccess: vi.fn().mockResolvedValue({ userId: 1 }),
-  getDirectory: vi
-    .fn()
-    .mockResolvedValue({ users: [{ id: 1, nickname: '申请人' }] }),
-  getContract: vi.fn().mockResolvedValue({ code: 'HT-1', items: [] }),
 }));
-vi.mock('#/api/fdmplatform/procurement', () => ({
-  getProcurementSettings: vi.fn().mockResolvedValue([
-    { id: 'cost', name: '费用公司', active: true, usages: ['COST'] },
-    { id: 'pay', name: '付款公司', active: true, usages: ['PAY'] },
-  ]),
-  getProcurementOrder: vi.fn(),
+vi.mock('#/api/fdmplatform/expense', () => ({
+  getExpenseContext: vi.fn().mockResolvedValue({
+    userId: 1,
+    userName: '申请人',
+    departmentName: '行政部',
+    lastPayee: { payeeName: '申请人', payeeAccount: '招行 6222' },
+  }),
+  getExpenseSource: vi
+    .fn()
+    .mockResolvedValue({ contractId: 'c', label: 'HT-1', products: [] }),
 }));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   downloadProcurementFinanceFile: vi.fn(),
 }));
 vi.mock('../../../data', () => ({
-  costCategories: [{ value: 'TRANSPORT', label: '运输' }],
+  expenseCategories: [{ value: 'TRANSPORT', label: '运输' }],
   errorText: (error: Error) => error.message,
   rows: (value: unknown) => (Array.isArray(value) ? value : []),
 }));
@@ -37,10 +36,7 @@ vi.mock('../../../products/model', () => ({
   currencyOptions: [{ value: 'CNY', label: '人民币' }],
 }));
 vi.mock('../../../purchase/manage/model', () => ({ downloadBlob: vi.fn() }));
-vi.mock('../../../documents/ContractPicker.vue', () => ({
-  default: defineComponent({ setup: () => () => null }),
-}));
-vi.mock('../../../purchase/manage/components/OrderPicker.vue', () => ({
+vi.mock('./ExpenseSourcePicker.vue', () => ({
   default: defineComponent({ setup: () => () => null }),
 }));
 vi.mock('../../../components/FilePreviewButton.vue', () => ({
@@ -202,7 +198,7 @@ describe('专用报销编辑器实际交互', () => {
     expect(host.textContent).toContain('receipt.pdf');
     expect(editor.value!.pendingAttachments()).toEqual([file]);
   });
-  it('无需选择处理人即可携带已有凭据提交生效', async () => {
+  it('无需选择处理人即可携带已有凭据提交审批', async () => {
     const { host, submitted } = await mountEditor({
       name: '费用',
       currency: 'CNY',
@@ -221,7 +217,7 @@ describe('专用报销编辑器实际交互', () => {
       ],
     });
     expect(host.querySelector('[data-field="handlerUserId"]')).toBeNull();
-    button(host, '提交生效').click();
+    button(host, '提交审批').click();
     expect(submitted).toHaveBeenCalledWith(
       expect.objectContaining({
         expenseEntityId: 'cost',
@@ -234,6 +230,19 @@ describe('专用报销编辑器实际交互', () => {
         ],
       }),
     );
+  });
+  it('新单带出申请人和上次收款信息，员工不用选公司主体', async () => {
+    const { host, editor } = await mountEditor({});
+    await nextTick();
+    await nextTick();
+    expect(editor.value!.payload()).toMatchObject({
+      advanceUserName: '申请人',
+      payeeAccount: '招行 6222',
+      payeeName: '申请人',
+    });
+    expect(editor.value!.isDirty()).toBe(false);
+    expect(host.querySelector('[data-field="payerEntityId"]')).toBeNull();
+    expect(host.querySelector('[data-field="expenseEntityId"]')).toBeNull();
   });
   it('复制费用立即清空凭证且保留金额，移除后总额恢复', async () => {
     const { host, editor } = await mountEditor({
@@ -280,7 +289,7 @@ describe('专用报销编辑器实际交互', () => {
     });
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
     await nextTick();
-    button(host, '提交生效').click();
+    button(host, '提交审批').click();
     expect(submitted).toHaveBeenCalledTimes(1);
     props.record = {
       ...context,
@@ -315,7 +324,7 @@ describe('专用报销编辑器实际交互', () => {
       evidenceRef: 'uploaded',
     });
     expect(line).not.toHaveProperty('evidenceFileIndex');
-    button(host, '提交生效').click();
+    button(host, '提交审批').click();
     expect(submitted).toHaveBeenLastCalledWith(
       expect.objectContaining({
         expenses: [expect.objectContaining({ evidenceRef: 'uploaded' })],

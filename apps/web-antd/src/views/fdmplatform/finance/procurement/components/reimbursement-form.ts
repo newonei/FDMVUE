@@ -31,6 +31,8 @@ export function reimbursementLine(
 ): ReimbursementLine {
   return {
     ...newExpense(),
+    // 全公司都用，不预选类别，免得行政的办公用品被默认记成运输。
+    category: '',
     expenseDate: localDate(),
     ...source,
     localKey: key,
@@ -116,8 +118,6 @@ export function validateReimbursement(
     return missing('currency', '请选择报销币种');
   if (submit) {
     if (!draft.name.trim()) return missing('name', '请填写报销主题');
-    if (!draft.expenseEntityId)
-      return missing('expenseEntityId', '请选择费用所属公司');
     if (draft.expenses.length === 0)
       return missing('expenses', '请添加至少一项费用');
   }
@@ -141,25 +141,17 @@ export function validateReimbursement(
     if (submit && !line.expenseDate) return fail('date', '请选择费用日期');
     if (line.expenseDate && line.expenseDate > today)
       return fail('date', '费用日期不能晚于今天');
-    if (
-      submit &&
-      ![
-        'CUSTOMIZATION',
-        'LABOR',
-        'PACKAGING',
-        'PRODUCTION',
-        'RETURN_LOSS',
-        'TRANSPORT',
-      ].includes(line.category)
-    )
-      return fail('category', '请选择有效费用类别；采购货款请使用采购请款');
+    if (submit && line.category === 'PURCHASE')
+      return fail('category', '采购货款请使用采购请款');
+    if (submit && !line.category) return fail('category', '请选择费用类别');
+    if (submit && line.category === 'OTHER' && !line.remark?.trim())
+      return fail('remark', '选「其他」时请写清用途');
     if (submit && line.contractId && !line.contractItemId)
       return fail('product', '关联合同时请选择归属产品');
     if (submit && !line.evidenceRef && !line.pendingFile)
       return fail('file', '请上传或选择一份报销凭证');
   }
   if (submit) {
-    if (!draft.payerEntityId) return missing('payerEntityId', '请选择付款公司');
     if (!draft.advanceUserName.trim())
       return missing('advanceUserName', '请填写实际垫付人');
     if (!draft.payeeName.trim()) return missing('payeeName', '请填写收款人');

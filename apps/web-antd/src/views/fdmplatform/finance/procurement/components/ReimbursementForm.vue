@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { ReimbursementLine } from './reimbursement-form';
 
-import type { Contract, Directory, DocumentRow } from '#/api/fdmplatform';
-import type { ProcurementSetting } from '#/api/fdmplatform/procurement';
+import type {
+  ExpenseContext,
+  ExpenseSourceRow,
+} from '#/api/fdmplatform/expense';
 import type {
   ProcurementFinanceFile,
   ProcurementFinanceRecord,
@@ -24,16 +26,8 @@ import {
   Textarea,
 } from 'ant-design-vue';
 
-import {
-  getAccess,
-  getContract,
-  getDirectory,
-  newIdempotencyKey,
-} from '#/api/fdmplatform';
-import {
-  getProcurementOrder,
-  getProcurementSettings,
-} from '#/api/fdmplatform/procurement';
+import { newIdempotencyKey } from '#/api/fdmplatform';
+import { getExpenseContext, getExpenseSource } from '#/api/fdmplatform/expense';
 import { downloadProcurementFinanceFile } from '#/api/fdmplatform/procurement-finance';
 import {
   ATTACHMENT_ACCEPT,
@@ -43,12 +37,10 @@ import {
 } from '#/api/fdmplatform/submission-files';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
-import { costCategories, errorText, rows } from '../../../data';
-import { personLabel } from '../../../directory';
-import ContractPicker from '../../../documents/ContractPicker.vue';
+import { errorText, expenseCategories } from '../../../data';
 import { currencyOptions } from '../../../products/model';
-import OrderPicker from '../../../purchase/manage/components/OrderPicker.vue';
 import { downloadBlob } from '../../../purchase/manage/model';
+import ExpenseSourcePicker from './ExpenseSourcePicker.vue';
 import {
   copyReimbursementLine,
   localDate,
@@ -75,17 +67,15 @@ const emit = defineEmits<{
 }>();
 const root = ref<HTMLElement>();
 const form = reactive(reimbursementDraft({}, newIdempotencyKey));
-const directory = ref<Directory>();
-const currentUserId = ref<number>();
-const entities = ref<ProcurementSetting[]>([]);
+const me = ref<ExpenseContext>();
 const pageError = ref('');
 const lookupError = ref('');
 const loadingOptions = ref(false);
 const errorField = ref('');
 const baseline = ref('');
 const pickerKey = ref('');
-const contractPickerOpen = ref(false);
-const orderPickerOpen = ref(false);
+const pickerType = ref<'CONTRACT' | 'ORDER'>('CONTRACT');
+const pickerOpen = ref(false);
 const sourceLabels = reactive<Record<string, string>>({});
 const productChoices = reactive<
   Record<string, { label: string; value: string }[]>
@@ -97,35 +87,18 @@ const attachmentCount = computed(
     form.expenses.filter((line) => line.evidenceRef || line.pendingFile).length,
 );
 const applicant = computed(() =>
-  personLabel(directory.value, props.record?.createdBy ?? currentUserId.value),
+  props.record
+    ? String(props.record.applicantName ?? `用户 #${props.record.createdBy}`)
+    : (me.value?.userName ?? '当前账号'),
+);
+const applicantDept = computed(() =>
+  props.record
+    ? String(props.record.applicantDeptName ?? '')
+    : (me.value?.departmentName ?? ''),
 );
 const applicationDate = computed(() =>
   formatDate(props.record?.createdAt ?? localDate()),
 );
-const payerOptions = computed(() =>
-  entityOptions('PAY', form.payerEntityId, props.record?.payerSnapshot?.name),
-);
-const expenseOptions = computed(() =>
-  entityOptions(
-    'COST',
-    form.expenseEntityId,
-    (props.record?.expenseEntitySnapshot as undefined | { name?: string })
-      ?.name,
-  ),
-);
-
-function entityOptions(usage: string, selected: string, snapshot?: string) {
-  const result = entities.value
-    .filter((entry) => entry.active && entry.usages?.includes(usage))
-    .map((entry) => ({ value: entry.id, label: entry.name, disabled: false }));
-  if (selected && !result.some((entry) => entry.value === selected))
-    result.push({
-      value: selected,
-      label: `${snapshot ?? '历史公司'}（请重新选择启用公司）`,
-      disabled: true,
-    });
-  return result;
-}
 function fingerprint() {
   return JSON.stringify({
     payload: payload(),
@@ -161,47 +134,31 @@ async function loadSource(line: ReimbursementLine) {
   const key = sourceKey(line);
   if (productChoices[key]) return;
   try {
-    if (line.orderId) {
-      const result = await getProcurementOrder(line.contractId, line.orderId);
-      sourceLabels[key] =
-        `${result.contractCode} · ${String(result.order.supplierName ?? '采购单')}`;
-      productChoices[key] = rows(result.order.lines).map((entry) => ({
-        value: String(entry.contractItemId),
-        label: String(
-          entry.skuName ??
-            (entry.specificationSnapshot as Record<string, unknown> | undefined)
-              ?.skuName ??
-            '采购产品',
-        ),
-      }));
-    } else {
-      const contract = await getContract(line.contractId);
-      sourceLabels[key] =
-        `${contract.code} · ${contract.name || contract.customerName}`;
-      productChoices[key] = contract.items.map((entry) => ({
-        value: entry.id,
-        label: `${entry.skuName}${entry.specification ? ` · ${entry.specification}` : ''}`,
-      }));
-    }
+    const source = await getExpenseSource(line.contractId, line.orderId);
+    sourceLabels[key] = source.label;
+    productChoices[key] = source.products;
   } catch (error) {
     pageError.value = errorText(error);
   }
 }
+/** 新单带出申请人和上次的收款信息，大多数人不用再填。 */
+function applyPayeeDefaults() {
+  if (props.record || !me.value) return;
+  const wasClean = !isDirty();
+  form.advanceUserName ||= me.value.userName;
+  form.payeeName ||= me.value.lastPayee?.payeeName || me.value.userName;
+  form.payeeAccount ||= me.value.lastPayee?.payeeAccount || '';
+  if (wasClean) markSaved();
+}
 async function loadOptions() {
   loadingOptions.value = true;
   lookupError.value = '';
-  const results = await Promise.allSettled([
-    getProcurementSettings('entities'),
-    getDirectory(0),
-    getAccess(),
-  ]);
-  if (results[0].status === 'fulfilled') entities.value = results[0].value;
-  if (results[1].status === 'fulfilled') directory.value = results[1].value;
-  if (results[2].status === 'fulfilled')
-    currentUserId.value = results[2].value.userId;
-  const failure = results.find((result) => result.status === 'rejected');
-  if (failure?.status === 'rejected')
-    lookupError.value = `基础资料加载失败：${errorText(failure.reason)}`;
+  try {
+    me.value = await getExpenseContext();
+    applyPayeeDefaults();
+  } catch (error) {
+    lookupError.value = `基础资料加载失败：${errorText(error)}`;
+  }
   loadingOptions.value = false;
 }
 watch(
@@ -218,6 +175,7 @@ watch(
     errorField.value = '';
     markSaved();
     for (const line of form.expenses) void loadSource(line);
+    applyPayeeDefaults();
   },
   { immediate: true },
 );
@@ -241,36 +199,19 @@ function duplicate(index: number) {
       copyReimbursementLine(line, newIdempotencyKey()),
     );
 }
-function openPicker(line: ReimbursementLine, type: 'contract' | 'order') {
+function openPicker(line: ReimbursementLine, type: 'CONTRACT' | 'ORDER') {
   pickerKey.value = line.localKey;
-  if (type === 'contract') contractPickerOpen.value = true;
-  else orderPickerOpen.value = true;
+  pickerType.value = type;
+  pickerOpen.value = true;
 }
-async function selectedContract(contract: Contract) {
-  contractPickerOpen.value = false;
+async function selectedSource(row: ExpenseSourceRow) {
+  pickerOpen.value = false;
   const line = form.expenses.find(
     (entry) => entry.localKey === pickerKey.value,
   );
   if (!line) return;
-  line.contractId = contract.id;
-  line.orderId = '';
-  line.contractItemId =
-    contract.items.length === 1 ? contract.items[0]!.id : '';
-  sourceLabels[sourceKey(line)] =
-    `${contract.code} · ${contract.name || contract.customerName}`;
-  productChoices[sourceKey(line)] = contract.items.map((entry) => ({
-    value: entry.id,
-    label: `${entry.skuName}${entry.specification ? ` · ${entry.specification}` : ''}`,
-  }));
-}
-async function selectedOrder(order: DocumentRow) {
-  orderPickerOpen.value = false;
-  const line = form.expenses.find(
-    (entry) => entry.localKey === pickerKey.value,
-  );
-  if (!line) return;
-  line.contractId = order.contractId;
-  line.orderId = order.id;
+  line.contractId = row.contractId;
+  line.orderId = row.orderId ?? '';
   line.contractItemId = '';
   await loadSource(line);
   if (productOptions(line).length === 1)
@@ -361,7 +302,7 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
           :loading="saving"
           @click="save(true)"
         >
-          提交生效
+          提交审批
         </Button>
       </div>
     </header>
@@ -396,7 +337,7 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
           <div class="section-title">
             <span>01</span>
             <h3>基本信息</h3>
-            <small>费用归属与付款公司分别选择</small>
+            <small>付款公司由财务审核时确认</small>
           </div>
           <div class="field-grid">
             <Form.Item
@@ -411,7 +352,7 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                 v-model:value="form.name"
                 :disabled="saving"
                 :maxlength="200"
-                placeholder="例如：9 月样品寄送及包装费用"
+                placeholder="例如：10 月办公用品采购"
               />
             </Form.Item>
             <Form.Item label="报销单号">
@@ -421,27 +362,9 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
             </Form.Item>
             <Form.Item label="申请人 / 申请日期">
               <div class="readonly-value">
-                {{ applicant }}<span>{{ applicationDate }}</span>
+                {{ applicant
+                }}<span v-if="applicantDept">{{ applicantDept }}</span><span>{{ applicationDate }}</span>
               </div>
-            </Form.Item>
-            <Form.Item
-              label="费用所属公司"
-              required
-              data-field="expenseEntityId"
-              v-bind="validation('expenseEntityId')"
-              :validate-status="
-                errorField === 'expenseEntityId' ? 'error' : undefined
-              "
-            >
-              <Select
-                v-model:value="form.expenseEntityId"
-                :disabled="saving"
-                :loading="loadingOptions"
-                :options="expenseOptions"
-                show-search
-                option-filter-prop="label"
-                placeholder="选择承担本次费用的公司"
-              />
             </Form.Item>
             <Form.Item
               label="报销币种"
@@ -530,7 +453,9 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
                   v-model:value="line.category"
                   :disabled="saving"
                   :options="
-                    costCategories.filter((entry) => entry.value !== 'PURCHASE')
+                    expenseCategories.filter(
+                      (entry) => entry.value !== 'PURCHASE',
+                    )
                   "
                 />
               </Form.Item>
@@ -562,19 +487,19 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
               <span class="source-caption">关联业务</span><span class="source-label">{{
                 line.contractId
                   ? sourceLabels[sourceKey(line)] || '正在读取关联单据…'
-                  : '独立费用，未关联订单'
+                  : '不关联业务单据'
               }}</span>
               <div class="source-actions">
                 <Button
                   size="small"
                   :disabled="saving"
-                  @click="openPicker(line, 'order')"
+                  @click="openPicker(line, 'ORDER')"
                 >
                   选择采购单
 </Button><Button
                   size="small"
                   :disabled="saving"
-                  @click="openPicker(line, 'contract')"
+                  @click="openPicker(line, 'CONTRACT')"
                 >
                   选择合同
 </Button><Button
@@ -720,22 +645,6 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
           </div>
           <div class="field-grid">
             <Form.Item
-              label="付款公司"
-              required
-              data-field="payerEntityId"
-              v-bind="validation('payerEntityId')"
-            >
-              <Select
-                v-model:value="form.payerEntityId"
-                :disabled="saving"
-                :loading="loadingOptions"
-                :options="payerOptions"
-                show-search
-                option-filter-prop="label"
-                placeholder="选择实际付款公司"
-              />
-            </Form.Item>
-            <Form.Item
               label="垫付人"
               required
               data-field="advanceUserName"
@@ -783,37 +692,22 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
         <p>{{ form.expenses.length }} 项费用 · {{ attachmentCount }} 份凭证</p>
         <dl>
           <div>
-            <dt>费用所属公司</dt>
-            <dd>
-              {{
-                expenseOptions.find(
-                  (entry) => entry.value === form.expenseEntityId,
-                )?.label || '尚未选择'
-              }}
-            </dd>
-          </div>
-          <div>
-            <dt>付款公司</dt>
-            <dd>
-              {{
-                payerOptions.find((entry) => entry.value === form.payerEntityId)
-                  ?.label || '尚未选择'
-              }}
-            </dd>
-          </div>
-          <div>
             <dt>收款人</dt>
             <dd>{{ form.payeeName || '尚未填写' }}</dd>
           </div>
         </dl>
         <ol class="summary-steps">
           <li class="active">
-            <strong>填写并生效</strong><span>可先保存草稿，稍后补齐</span>
+            <strong>填写提交</strong><span>可先保存草稿，稍后补齐</span>
           </li>
-          <li><strong>登记实际付款</strong><span>生效后可分次付款</span></li>
+          <li>
+            <strong>部门负责人审批</strong><span>本部门没设负责人时跳过</span>
+          </li>
+          <li><strong>财务审核</strong><span>确认付款公司和费用归属</span></li>
+          <li><strong>财务付款</strong><span>付款后钉钉通知你</span></li>
         </ol>
         <p class="summary-note">
-          费用所属公司用于说明费用归属，成本入账仍以已确认的成本归集为准。
+          费用可以关联合同或采购单，也可以不关联，例如行政采购办公用品。
         </p>
       </aside>
     </div>
@@ -828,19 +722,15 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
           :loading="saving"
           @click="save(true)"
         >
-          提交生效
+          提交审批
         </Button>
       </div>
     </footer>
-    <ContractPicker
-      :open="contractPickerOpen"
-      @close="contractPickerOpen = false"
-      @select="selectedContract"
-    />
-    <OrderPicker
-      :open="orderPickerOpen"
-      @close="orderPickerOpen = false"
-      @selected="selectedOrder"
+    <ExpenseSourcePicker
+      :open="pickerOpen"
+      :type="pickerType"
+      @close="pickerOpen = false"
+      @select="selectedSource"
     />
   </div>
 </template>

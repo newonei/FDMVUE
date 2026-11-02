@@ -144,6 +144,13 @@ export const statusLabels: Record<string, string> = {
   LABOR: '人工',
   CUSTOMIZATION: '定制',
   RETURN_LOSS: '退货损耗',
+  OFFICE: '办公用品',
+  TRAVEL: '差旅交通',
+  ENTERTAINMENT: '业务招待',
+  WELFARE: '员工福利',
+  SOFTWARE: '软件与服务',
+  UTILITIES: '房租水电',
+  MAINTENANCE: '维修保养',
   PLATFORM: '本平台主账',
   EXTERNAL: '外部主账',
   RECEIVE: '入库',
@@ -722,6 +729,31 @@ export const costCategories: Option[] = [
   ['CUSTOMIZATION', '定制'],
   ['RETURN_LOSS', '退货损耗'],
 ].map(([value, name]) => ({ value: value!, label: name! }));
+
+/** 报销能选的费用类别：通用费用在前，合同成本类在后；采购货款走采购请款，不在这里。 */
+export const expenseCategories: Option[] = [
+  ['OFFICE', '办公用品'],
+  ['TRAVEL', '差旅交通'],
+  ['ENTERTAINMENT', '业务招待'],
+  ['WELFARE', '员工福利'],
+  ['SOFTWARE', '软件与服务'],
+  ['UTILITIES', '房租水电'],
+  ['MAINTENANCE', '维修保养'],
+  ['TRANSPORT', '运输快递'],
+  ['PRODUCTION', '生产'],
+  ['PACKAGING', '包装'],
+  ['LABOR', '人工'],
+  ['CUSTOMIZATION', '定制'],
+  ['RETURN_LOSS', '退货损耗'],
+  ['OTHER', '其他'],
+].map(([value, name]) => ({ value: value!, label: name! }));
+export function expenseCategoryLabel(value: unknown) {
+  return (
+    expenseCategories.find((option) => option.value === value)?.label ??
+    costCategories.find((option) => option.value === value)?.label ??
+    String(value || '未填写')
+  );
+}
 
 export function financeActions(
   contract: Contract,
