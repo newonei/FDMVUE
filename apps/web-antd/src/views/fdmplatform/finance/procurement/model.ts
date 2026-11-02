@@ -303,6 +303,29 @@ export function financeStatus(value: unknown) {
     )[String(value)] ?? String(value ?? '—')
   );
 }
+/** 报销单的状态按审批走到哪一步显示。 */
+export function expenseStatus(record: {
+  approvalStage?: unknown;
+  status?: unknown;
+}) {
+  if (record.status === 'SUBMITTED')
+    return record.approvalStage === 'MANAGER' ? '待负责人审批' : '待财务审核';
+  if (record.status === 'APPROVED') return '已通过';
+  if (record.status === 'REJECTED') return '已退回';
+  return financeStatus(record.status);
+}
+export const expenseActionNames: Record<string, string> = {
+  APPROVE: '同意',
+  CREATE: '创建',
+  REJECT: '退回',
+  SUBMIT: '提交审批',
+  UPDATE: '修改',
+  UPLOAD: '上传凭证',
+  WITHDRAW: '撤回',
+  CANCEL: '取消单据',
+  ACTIVATE: '提交生效',
+  REDUCE_REMAINING: '调整未付款余额',
+};
 export function allocationPreview(
   group: GroupDraft,
   baseValue: unknown,

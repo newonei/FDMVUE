@@ -22,6 +22,14 @@ vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => `finance-action-${++mocks.counter}`,
   getDirectory: mocks.directory,
 }));
+vi.mock('#/api/fdmplatform/expense', () => ({
+  getExpenseContext: vi.fn().mockResolvedValue({
+    entities: [
+      { id: 'cost', name: '费用公司', usages: ['COST'] },
+      { id: 'pay', name: '付款公司', usages: ['PAY'] },
+    ],
+  }),
+}));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinance: mocks.read,
   getProcurementFinanceFiles: mocks.files,
@@ -392,13 +400,13 @@ describe('专用报销表单保存和提交', () => {
       }),
       [],
     );
-    await vi.waitFor(() => expect(host.textContent).toContain('单据已生效'));
+    await vi.waitFor(() => expect(host.textContent).toContain('已通过审核'));
     expect(
       host.querySelector<HTMLElement>('[data-submit-reimbursement]'),
     ).toBeNull();
     await vi.waitFor(() =>
       expect(mocks.success).toHaveBeenCalledWith(
-        expect.stringContaining('单据已生效'),
+        expect.stringContaining('已提交审批'),
       ),
     );
     (
@@ -572,7 +580,7 @@ describe('专用报销表单保存和提交', () => {
     await vi.waitFor(() =>
       expect(
         [...host.querySelectorAll('button')].find(
-          (button) => button.textContent?.trim() === '提交生效',
+          (button) => button.textContent?.trim() === '提交审批',
         )?.disabled,
       ).toBe(false),
     );
@@ -582,7 +590,7 @@ describe('专用报销表单保存和提交', () => {
           finishSubmit = resolve;
         }),
     );
-    click(host, '提交生效');
+    click(host, '提交审批');
     await nextTick();
     mocks.read.mockResolvedValue({
       ...document(),

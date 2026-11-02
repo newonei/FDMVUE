@@ -24,6 +24,7 @@ import {
 
 import { getDirectory, newIdempotencyKey } from '#/api/fdmplatform';
 import { downloadBusinessDocumentFile } from '#/api/fdmplatform/business-documents';
+import { getExpenseContext } from '#/api/fdmplatform/expense';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
   downloadProcurementFinanceFile,
@@ -51,6 +52,7 @@ import { currencyOptions } from '../../../products/model';
 import { downloadBlob, sumAmounts } from '../../../purchase/manage/model';
 import {
   actionNames,
+  expenseActionNames,
   financeStatus,
   financeTitles,
   hasPayableBalance,
@@ -309,11 +311,63 @@ async function submitDocument(payload: Record<string, unknown>) {
     submitting.value = false;
   }
 }
+/** 部门负责人同意只留可选意见；财务通过时确认公司主体；退回必须写原因。 */
+async function openExpenseApproval(action: string) {
+  if (!record.value) return;
+  const finance = record.value.approvalStage !== 'MANAGER';
+  const fields = [
+    field('reason', action === 'REJECT' ? '退回原因' : '审批意见', 'textarea', {
+      required: action === 'REJECT',
+    }),
+  ];
+  if (action === 'APPROVE' && finance) {
+    try {
+      const { entities = [] } = await getExpenseContext();
+      const options = (usage: string) =>
+        entities
+          .filter((entity) => entity.usages?.includes(usage))
+          .map((entity) => ({ value: entity.id, label: entity.name }));
+      const costs = options('COST');
+      const payers = options('PAY');
+      fields.unshift(
+        selectField('expenseEntityId', '费用所属公司', costs, {
+          default:
+            (record.value.expenseEntityId as string) ||
+            (costs.length === 1 ? costs[0]!.value : undefined),
+        }),
+        selectField('payerEntityId', '付款公司', payers, {
+          default:
+            (record.value.payerEntityId as string) ||
+            (payers.length === 1 ? payers[0]!.value : undefined),
+        }),
+      );
+    } catch (error) {
+      pageError.value = errorText(error);
+      return;
+    }
+  }
+  let title = '退回报销';
+  if (action === 'APPROVE') title = finance ? '财务审核通过' : '同意报销';
+  let description = '退回后申请人可以修改再提交，钉钉会通知对方。';
+  if (action === 'APPROVE')
+    description = finance
+      ? '通过后可以登记付款。公司主体确认后写入单据，后续改名不影响。'
+      : '同意后转财务审核。';
+  actionDefinition.value = { action, title, description, fields };
+  actionOpen.value = true;
+}
 async function openAction(action: string) {
   if (busy.value) return;
   actionFiles.value = [];
   if (['CONFIRM', 'SUBMIT'].includes(action)) {
     void execute(action, {}, key(action));
+    return;
+  }
+  if (
+    type.value === 'REIMBURSEMENT' &&
+    ['APPROVE', 'REJECT'].includes(action)
+  ) {
+    await openExpenseApproval(action);
     return;
   }
   const fields = [field('reason', '原因与依据', 'textarea')];
@@ -427,7 +481,12 @@ async function execute(
     let successMessage = '操作已完成';
     if (action === 'WITHDRAW') successMessage = '已撤回，可在当前页面直接编辑';
     else if (action === 'SUBMIT')
-      successMessage = '单据已生效，可继续办理付款与成本归集';
+      successMessage =
+        value.type === 'REIMBURSEMENT'
+          ? '已提交审批'
+          : '单据已生效，可继续办理付款与成本归集';
+    else if (action === 'APPROVE') successMessage = '已同意';
+    else if (action === 'REJECT') successMessage = '已退回';
     message.success(successMessage);
   } catch (error) {
     if (run === sequence && props.open) pageError.value = errorText(error);
@@ -673,7 +732,7 @@ async function relatedUpdated() {
           v-if="type === 'REIMBURSEMENT' && record?.status === 'REJECTED'"
           type="warning"
           show-icon
-          :message="`待补充资料：${returnReason || '请补齐资料后提交生效。'}`"
+          :message="`被退回：${returnReason || '请修改后重新提交。'}`"
         />
         <ReimbursementForm
           v-if="editable && type === 'REIMBURSEMENT'"
@@ -896,15 +955,23 @@ async function relatedUpdated() {
             :data="
               rows(record.history).map((entry) => ({
                 ...entry,
-                actorId: userNames[String(entry.actorId)] || entry.actorId,
+                actor:
+                  (record?.actorNames as Record<string, string> | undefined)?.[
+                    String(entry.actorId)
+                  ] ||
+                  userNames[String(entry.actorId)] ||
+                  `用户 #${entry.actorId}`,
                 action:
+                  (type === 'REIMBURSEMENT'
+                    ? expenseActionNames[String(entry.action)]
+                    : undefined) ??
                   actionNames[String(entry.action)] ??
                   (entry.action === 'CREATE' ? '新建草稿' : entry.action),
               }))
             "
             :columns="[
               { key: 'action', title: '操作' },
-              { key: 'actorId', title: '经办人' },
+              { key: 'actor', title: '经办人' },
               { key: 'at', title: '时间' },
               { key: 'reason', title: '原因' },
             ]"

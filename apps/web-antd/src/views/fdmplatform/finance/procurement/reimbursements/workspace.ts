@@ -5,26 +5,30 @@ import BigNumber from 'bignumber.js';
 import { currencyScale } from '../model';
 
 export const reimbursementViews = [
-  { key: 'all', label: '全部报销' },
+  { key: 'all', label: '全部' },
+  { key: 'pending', label: '待我审批' },
+  { key: 'mine', label: '我提交的' },
   { key: 'draft', label: '草稿' },
-  { key: 'pending', label: '待生效' },
+  { key: 'approving', label: '审批中' },
+  { key: 'returned', label: '已退回' },
   { key: 'unpaid', label: '待付款' },
   { key: 'paid', label: '已付清' },
-  { key: 'returned', label: '待补充' },
 ] as const;
 export type ReimbursementView = (typeof reimbursementViews)[number]['key'];
 
 export function reimbursementQuery(view: ReimbursementView): {
   paymentStatus?: 'PAID' | 'UNPAID';
   status?: string;
+  view?: 'mine' | 'pending';
 } {
   if (view === 'unpaid') return { paymentStatus: 'UNPAID' };
   if (view === 'paid') return { paymentStatus: 'PAID' };
+  if (view === 'pending' || view === 'mine') return { view };
   return {
     status: {
       all: undefined,
       draft: 'DRAFT',
-      pending: 'SUBMITTED',
+      approving: 'SUBMITTED',
       returned: 'REJECTED',
     }[view],
   };
@@ -47,7 +51,7 @@ export function expenseMoney(value: unknown, currency?: string) {
 export function expensePayment(record: ProcurementFinanceRecord) {
   if (record.status !== 'APPROVED')
     return {
-      label: '生效后办理付款',
+      label: '通过后付款',
       color: undefined,
       paid: undefined,
       unpaid: undefined,
@@ -82,7 +86,7 @@ export function expenseAction(
 ) {
   if (record.standaloneId || record.blockReasons?.length) return '查看详情';
   if (record.allowedActions.includes('UPDATE')) return '继续填写';
-  if (record.allowedActions.includes('SUBMIT')) return '提交生效';
+  if (record.allowedActions.includes('APPROVE')) return '去审批';
   if (
     payable &&
     record.status === 'APPROVED' &&

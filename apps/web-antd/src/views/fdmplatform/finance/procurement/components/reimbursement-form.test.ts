@@ -146,6 +146,24 @@ describe('报销编辑器金额、来源和行凭证', () => {
       '归属产品',
     );
   });
+  it('通用费用不绑定合同也能提交，不用选公司主体；选其他要写用途', () => {
+    const draft = readyDraft();
+    draft.expenseEntityId = '';
+    draft.payerEntityId = '';
+    const line = draft.expenses[0]!;
+    line.contractId = '';
+    line.orderId = '';
+    line.contractItemId = '';
+    line.category = 'OFFICE';
+    expect(validateReimbursement(draft, true, '2026-09-18')).toBeUndefined();
+    line.category = 'OTHER';
+    line.remark = ' ';
+    expect(validateReimbursement(draft, true, '2026-09-18')?.message).toContain(
+      '用途',
+    );
+    line.remark = '饮水机换水';
+    expect(validateReimbursement(draft, true, '2026-09-18')).toBeUndefined();
+  });
   it('独立费用不伪造合同关联，从合同入口新建时带入首行来源', () => {
     expect(reimbursementPayload(readyDraft()).contractId).toBeUndefined();
     const source = reimbursementDraft(
