@@ -184,6 +184,12 @@ export interface ProcurementOrderView {
   blockReasons: string[];
   /** 采购单不能撤回为草稿的原因（只在已下单时给出） */
   withdrawOrderBlockReasons?: string[];
+  /** 钉钉审批中才有：发起状态和最近一次失败原因。 */
+  approval?: null | {
+    lastError?: string;
+    processInstanceId?: null | string;
+    status: string;
+  };
   history: BusinessRecord[];
   exports: ProcurementFile[];
   files: ProcurementFile[];
@@ -248,6 +254,8 @@ export interface CreatedProcurementOrders {
   contractId: string;
   orderId: string;
   orders?: CreatedProcurementOrder[];
+  /** 走钉钉审批时为 true：采购单还是草稿，通过后才变成已下单。 */
+  pendingApproval?: boolean;
 }
 /** 新建采购单：关联合同时写进合同，不关联时为独立采购单；不同供应商的明细拆成多张。 */
 export function createProcurementOrder(data: PurchaseOrderEntry) {
@@ -280,6 +288,16 @@ export function updateProcurementOrder(
   );
 }
 /** 撤回采购单为草稿：下单有误时用，修改后重新提交。 */
+export function withdrawProcurementOrderApproval(
+  contractId: string,
+  orderId: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<boolean>(
+    `${orderPath(contractId, orderId)}/withdraw-approval`,
+    data,
+  );
+}
 export function withdrawProcurementOrder(
   contractId: string,
   orderId: string,

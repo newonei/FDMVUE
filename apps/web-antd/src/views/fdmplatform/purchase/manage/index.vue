@@ -57,6 +57,7 @@ import {
   procurementOrderAction,
   uploadProcurementSigned,
   withdrawProcurementOrder,
+  withdrawProcurementOrderApproval,
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 import { getPurchaseReturns, getStockIns } from '#/api/fdmplatform/warehouse';
@@ -95,7 +96,11 @@ import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
 import OrderFinance from '../../finance/procurement/components/OrderFinance.vue';
 import PaymentRecordDialog from '../../finance/procurement/components/PaymentRecordDialog.vue';
-import { hasPayableBalance } from '../../finance/procurement/model';
+import {
+  DINGTALK_STAGE,
+  dingTalkApprovalMessage,
+  hasPayableBalance,
+} from '../../finance/procurement/model';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
 import { localDate } from '../quotes/comparison';
@@ -314,6 +319,10 @@ const historyActionNames: Record<string, string> = {
   CONFIRM_DETAILS: '确认采购资料',
   WITHDRAW_DETAILS: '撤回并编辑',
   REVISE_DETAILS: '新建资料变更版本',
+  APPROVAL_TERMINATED: '钉钉审批已撤销',
+  APPROVE_ORDER: '钉钉审批通过',
+  REJECT_ORDER: '钉钉审批退回',
+  WITHDRAW_ORDER_APPROVAL: '撤回钉钉审批',
 };
 const historyRows = computed(() =>
   (view.value?.history ?? []).map((entry) => ({
@@ -642,6 +651,28 @@ function withdrawCurrentOrder() {
     },
   });
 }
+function withdrawCurrentApproval() {
+  const current = view.value;
+  if (!current || childOpen.value) return;
+  Modal.confirm({
+    title: `撤回采购单 ${String(current.order.code ?? '')} 的钉钉审批？`,
+    content: '撤回后回到草稿，钉钉里的审批单会被撤销。修改后可以重新提交。',
+    okText: '撤回审批',
+    onOk: async () => {
+      try {
+        await withdrawProcurementOrderApproval(current.contractId, current.id, {
+          reason: '申请人撤回审批',
+          idempotencyKey: key('WITHDRAW_APPROVAL'),
+        });
+        message.success('已撤回审批，采购单回到草稿');
+        await Promise.all([loadDetail(), loadList()]);
+      } catch (error) {
+        message.error(errorText(error));
+        throw error;
+      }
+    },
+  });
+}
 /** 采购终止（金智同款）：未到货余额全部取消，已到货、已付款的保留 */
 function endCurrentOrder() {
   const current = view.value;
@@ -697,16 +728,21 @@ function editorSaved(
 ) {
   editorOpen.value = false;
   if (mode) {
-    message.success(
-      mode === 'submitted'
-        ? `采购单 ${value.code} 已重新提交`
-        : `已保存草稿 ${value.code}，记得提交`,
-    );
+    let text = `已保存草稿 ${value.code}，记得提交`;
+    if (mode === 'submitted')
+      text = value.pendingApproval
+        ? `采购单 ${value.code} 已提交钉钉审批，通过后变成已下单`
+        : `采购单 ${value.code} 已重新提交`;
+    message.success(text);
     void loadList();
     void Promise.all([loadDetail(), refreshFacts()]);
     return;
   }
-  message.success(createdOrdersText(value));
+  message.success(
+    value.pendingApproval
+      ? `${createdOrdersText(value)}，已提交钉钉审批，通过后变成已下单`
+      : createdOrdersText(value),
+  );
   void loadList();
   localTab.value = 'details';
   selection.value = {
@@ -1650,9 +1686,17 @@ watch(financeType, (value, previous) => {
                 column.key === 'operation' &&
                 String(record.record?.status) === 'DRAFT'
               "
-              color="orange"
+              :color="
+                record.record?.approvalStage === DINGTALK_STAGE
+                  ? 'blue'
+                  : 'orange'
+              "
             >
-              草稿
+              {{
+                record.record?.approvalStage === DINGTALK_STAGE
+                  ? '钉钉审批中'
+                  : '草稿'
+              }}
             </Tag>
             <Tag
               v-else-if="column.key === 'operation'"
@@ -1781,7 +1825,14 @@ watch(financeType, (value, previous) => {
             "
           />
           <Button
-            v-if="view.allowedActions.includes('EDIT_ORDER')"
+            v-if="view.allowedActions.includes('WITHDRAW_APPROVAL')"
+            :disabled="childOpen"
+            @click="withdrawCurrentApproval"
+          >
+            撤回审批
+          </Button>
+          <Button
+            v-else-if="view.allowedActions.includes('EDIT_ORDER')"
             type="primary"
             :disabled="childOpen"
             @click="editCurrentOrder"
@@ -1858,7 +1909,13 @@ watch(financeType, (value, previous) => {
       <div class="procurement-workspace order-execution">
         <Alert v-if="pageError" type="error" :message="pageError" show-icon />
         <Alert
-          v-if="view && active && String(view.order.status) === 'DRAFT'"
+          v-if="view && active && view.order.approvalStage === DINGTALK_STAGE"
+          :type="view.approval?.lastError ? 'warning' : 'info'"
+          show-icon
+          :message="`${dingTalkApprovalMessage(view)} 审批通过前不能修改、收货入库、请款付款、收票。`"
+        />
+        <Alert
+          v-else-if="view && active && String(view.order.status) === 'DRAFT'"
           type="warning"
           show-icon
           message="采购单已撤回为草稿：不能收货入库、请款付款、收票。点「修改并提交」改好后提交，恢复为已下单。"
