@@ -22,7 +22,7 @@ import {
 } from '#/api/fdmgongchang/workbench';
 
 import { useFactory } from '../shared/use-factory';
-import { deriveOutputs, toNumber } from '../stage-stock/model';
+import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
 import ConfirmStep from './modules/confirm-step.vue';
 import DoneStep from './modules/done-step.vue';
 import Home from './modules/home.vue';
@@ -197,29 +197,8 @@ function reportNow() {
   job.createFinish = true;
   job.inputs = pickInputs();
   job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
-  applyTarget();
+  applyTaskTarget(job.process!.code, job.prepare?.targetAttrs, job.inputs, job.outputs);
   job.step = 'report';
-}
-
-/**
- * 按任务报工时产出规格按订单带出，工人只填数量：开片的片材长宽同板材、厚度是成品厚；立切切成成品长宽。
- * 其他工序的规格本来就按领的料带出。
- */
-function applyTarget() {
-  const target = job.prepare?.targetAttrs;
-  if (!target) return;
-  const code = job.process?.code;
-  for (const out of job.outputs) {
-    if (code === 'SLICE') {
-      const board = job.inputs[0]?.stock.item;
-      out.attrs.length = out.attrs.length ?? board?.length ?? null;
-      out.attrs.width = out.attrs.width ?? board?.width ?? null;
-      if (target.thickness !== null && target.thickness !== undefined) out.attrs.thickness = target.thickness;
-    } else if (code === 'CUT') {
-      if (target.length !== null && target.length !== undefined) out.attrs.length = target.length;
-      if (target.width !== null && target.width !== undefined) out.attrs.width = target.width;
-    }
-  }
 }
 
 function afterReport() {

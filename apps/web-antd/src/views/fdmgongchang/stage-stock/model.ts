@@ -916,6 +916,36 @@ export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: Ou
   return total;
 }
 
+/**
+ * 按任务报工时产出规格按订单带出，工人只填数量：开片的片材长宽同板材、厚度是成品厚；立切切成成品长宽。
+ * 其他工序的规格本来就按领的料带出。
+ */
+export function applyTaskTarget(
+  process: string | undefined,
+  target: Api.ItemAttrs | null | undefined,
+  inputs: InputLine[],
+  outputs: OutputDraft[],
+) {
+  if (!target) return;
+  for (const out of outputs) {
+    if (process === 'SLICE') {
+      const board = inputs[0]?.stock.item;
+      out.attrs.length = out.attrs.length ?? board?.length ?? null;
+      out.attrs.width = out.attrs.width ?? board?.width ?? null;
+      if (target.thickness !== null && target.thickness !== undefined) {
+        out.attrs.thickness = target.thickness;
+      }
+    } else if (process === 'CUT') {
+      if (target.length !== null && target.length !== undefined) {
+        out.attrs.length = target.length;
+      }
+      if (target.width !== null && target.width !== undefined) {
+        out.attrs.width = target.width;
+      }
+    }
+  }
+}
+
 /** 开片：按板材规格把能开的片数带进良品（没手动改过的行才带），返回每行的计算说明。 */
 export function applySliceYield(inputs: InputLine[], outputs: OutputDraft[]) {
   for (const line of outputs) {
