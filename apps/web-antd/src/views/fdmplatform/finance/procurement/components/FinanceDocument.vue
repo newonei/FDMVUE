@@ -40,6 +40,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
 import CreationAttachments from '../../../components/CreationAttachments.vue';
+import DocumentApprovalPanel from '../../../components/DocumentApprovalPanel.vue';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, rows, selectField } from '../../../data';
@@ -203,6 +204,19 @@ function closeAction() {
       onOk: finish,
     });
   else finish();
+}
+/** 在面板里同意或拒绝后，单据状态可能已经回写，重新读一次并通知列表。 */
+async function reloadAfterApproval() {
+  const id = record.value?.id;
+  if (!id) return;
+  try {
+    const value = await getProcurementFinance(id);
+    if (record.value?.id !== id) return;
+    record.value = value;
+    emit('updated', value);
+  } catch (error) {
+    pageError.value = errorText(error);
+  }
 }
 async function load() {
   const run = ++sequence;
@@ -643,6 +657,18 @@ async function relatedUpdated() {
           :type="record.approval?.lastError ? 'warning' : 'info'"
           show-icon
           style="margin-bottom: 12px"
+        />
+        <DocumentApprovalPanel
+          v-if="
+            record &&
+            (record.type === 'REIMBURSEMENT' || record.type === 'PAYMENT')
+          "
+          :target="{
+            docType: record.type === 'PAYMENT' ? 'PAYMENT' : 'REIMBURSEMENT',
+            id: record.id,
+          }"
+          style="margin-bottom: 12px"
+          @changed="reloadAfterApproval"
         />
         <Descriptions
           v-if="record && type !== 'REIMBURSEMENT'"

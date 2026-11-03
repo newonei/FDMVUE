@@ -323,7 +323,7 @@ export function dingTalkApprovalMessage(record: { approval?: unknown }) {
   if (approval?.lastError && !approval.processInstanceId)
     return `发起钉钉审批失败：${approval.lastError}。系统会自动重试，也可以撤回后重新提交。`;
   if (!approval?.processInstanceId) return '正在发起钉钉审批…';
-  return '已提交钉钉审批，请在钉钉里处理。结果最晚两分钟同步回来。';
+  return '已提交钉钉审批，审批人可以在钉钉或本页「审批流程」里处理。';
 }
 /** 报销单的状态按审批走到哪一步显示。 */
 export function expenseStatus(record: {

@@ -265,7 +265,7 @@ describe('dingtalk approval labels', () => {
     ).toContain('网络请求失败');
     expect(
       dingTalkApprovalMessage({ approval: { processInstanceId: 'proc-1' } }),
-    ).toContain('请在钉钉里处理');
+    ).toContain('审批人可以在钉钉或本页');
     expect(dingTalkApprovalMessage({ approval: null })).toContain('正在发起');
   });
 });
