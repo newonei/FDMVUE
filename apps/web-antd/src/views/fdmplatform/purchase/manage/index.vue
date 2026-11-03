@@ -70,6 +70,7 @@ import ActionDialog from '../../components/ActionDialog.vue';
 import AttachmentPanel from '../../components/AttachmentPanel.vue';
 import CompletionScopeFilter from '../../components/CompletionScope.vue';
 import ContractDocumentDialog from '../../components/ContractDocumentDialog.vue';
+import DocumentApprovalPanel from '../../components/DocumentApprovalPanel.vue';
 import RecordTable from '../../components/RecordTable.vue';
 import { errorText, field, rows } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
@@ -2154,6 +2155,14 @@ watch(financeType, (value, previous) => {
             </Tabs>
           </div>
           <aside class="order-side">
+            <DocumentApprovalPanel
+              :target="{
+                docType: 'PURCHASE_ORDER',
+                contractId: view.contractId,
+                id: String(view.order.id ?? view.id),
+              }"
+              @changed="loadDetail"
+            />
             <OrderSummaryCards
               :currency="
                 String(financeSummary.currency ?? view.order.currency ?? '')
