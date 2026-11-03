@@ -1,6 +1,8 @@
 <script lang="ts" setup>
-import type { BpmTaskApi } from '#/api/bpm/task';
+import type { WorkGroup, WorkItem, WorkLink } from './model';
+
 import type { FdmDashboardApi } from '#/api/fdmdata/dashboard';
+import type { PortalDepartment } from '#/api/fdmplatform/portal';
 import type { SystemNotifyMessageApi } from '#/api/system/notify/message';
 
 import { computed, onActivated, onMounted, reactive, ref } from 'vue';
@@ -17,6 +19,7 @@ import {
   Button,
   Empty,
   Modal,
+  Segmented,
   Skeleton,
   Tabs,
   Tag,
@@ -29,48 +32,35 @@ import {
   getFdmDashboardBuildInfo,
   getFdmDashboardPublishedNoticePage,
 } from '#/api/fdmdata/dashboard';
+import { getApprovalTasks } from '#/api/fdmplatform/approval-inbox';
+import { getPortalSummary } from '#/api/fdmplatform/portal';
 import { getNoticePage } from '#/api/system/notice';
 import {
   getUnreadNotifyMessageCount,
   getUnreadNotifyMessageList,
 } from '#/api/system/notify/message';
 
+import { sum } from '../shared/format';
+import {
+  approvalItems,
+  bpmItems,
+  DEPARTMENT_LABELS,
+  greetingText,
+  plainText,
+  PORTAL_PERMISSIONS,
+  portalItems,
+  sortWork,
+  summaryLine,
+  workCount,
+} from './model';
+
 defineOptions({ name: 'DashboardHome' });
 
-interface DashboardLoadingState {
-  dingTalk: boolean;
-  messages: boolean;
-  notices: boolean;
-  tasks: boolean;
-  version: boolean;
-}
-
-interface DashboardErrorState {
-  dingTalk: boolean;
-  messages: boolean;
-  notices: boolean;
-  tasks: boolean;
-  version: boolean;
-}
-
 interface QuickEntry {
-  color: string;
-  description: string;
   icon: string;
   path: string;
   permissions?: string[];
   title: string;
-}
-
-interface MetricCard {
-  color: string;
-  description: string;
-  icon: string;
-  key: string;
-  loading: boolean;
-  path: string;
-  title: string;
-  value: null | number;
 }
 
 const router = useRouter();
@@ -78,338 +68,299 @@ const userStore = useUserStore();
 const { hasAccessByCodes } = useAccess();
 const frontendBuildInfo = useBuildInfo(import.meta.env, import.meta.env.PROD);
 
-const tasks = ref<BpmTaskApi.Task[]>([]);
-const taskTotal = ref(0);
-const dingTalkTodoCount = ref<null | number>(null);
-const unreadMessageCount = ref<null | number>(null);
+const can = {
+  approvalInbox: computed(() =>
+    hasAccessByCodes(['fdmplatform:approval-inbox:query']),
+  ),
+  bpm: computed(() => hasAccessByCodes(['bpm:task:query'])),
+  dingTalk: computed(() => hasAccessByCodes(['fdmdingtalk:approval:query'])),
+  notices: computed(() => hasAccessByCodes(['system:notice:query'])),
+};
+
+const portals = computed(() =>
+  (Object.keys(PORTAL_PERMISSIONS) as PortalDepartment[]).filter(
+    (department) => hasAccessByCodes([PORTAL_PERMISSIONS[department]]),
+  ),
+);
+
+const loading = reactive({
+  messages: false,
+  notices: false,
+  work: false,
+});
+const failed = reactive({
+  bpm: false,
+  dingTalk: false,
+  messages: false,
+  notices: false,
+  version: false,
+});
+
+const bpmWork = ref<WorkItem[]>([]);
+const bpmTotal = ref(0);
+const approvalWork = ref<WorkItem[]>([]);
+const approvalTotal = ref(0);
+const businessWork = ref<WorkItem[]>([]);
+const failedPortals = ref<PortalDepartment[]>([]);
+const dingTalkCount = ref(0);
+const unreadCount = ref(0);
 const unreadMessages = ref<SystemNotifyMessageApi.NotifyMessage[]>([]);
 const notices = ref<FdmDashboardApi.Notice[]>([]);
-const activeInformationTab = ref<'messages' | 'notices'>('notices');
-const selectedNotice = ref<FdmDashboardApi.Notice | null>(null);
-const noticeModalOpen = ref(false);
+const backendBuildInfo = ref<FdmDashboardApi.BuildInfo | null>(null);
 const lastUpdatedAt = ref<null | number>(null);
 const refreshing = ref(false);
-const backendBuildInfo = ref<FdmDashboardApi.BuildInfo | null>(null);
-
-const loading = reactive<DashboardLoadingState>({
-  dingTalk: false,
-  messages: false,
-  notices: false,
-  tasks: false,
-  version: false,
-});
-
-const failed = reactive<DashboardErrorState>({
-  dingTalk: false,
-  messages: false,
-  notices: false,
-  tasks: false,
-  version: false,
-});
-
-const canViewBpmTasks = computed(() => hasAccessByCodes(['bpm:task:query']));
-const canViewDingTalkApprovals = computed(() =>
-  hasAccessByCodes(['fdmdingtalk:approval:query']),
-);
-const canManageNotices = computed(() =>
-  hasAccessByCodes(['system:notice:query']),
-);
-const systemVersionStatus = computed(() => {
-  if (loading.version) return { color: 'blue', text: '正在读取' };
-  if (backendBuildInfo.value) return { color: 'green', text: '后端已连接' };
-  return {
-    color: failed.version ? 'orange' : 'default',
-    text: failed.version ? '后端未上报' : '等待读取',
-  };
-});
-
-const currentDateText = computed(() => {
-  const weekday = [
-    '星期日',
-    '星期一',
-    '星期二',
-    '星期三',
-    '星期四',
-    '星期五',
-    '星期六',
-  ][dayjs().day()];
-  return `${dayjs().format('YYYY年M月D日')} · ${weekday}`;
-});
-
-const greetingText = computed(() => {
-  const hour = dayjs().hour();
-  if (hour < 6) return '夜深了';
-  if (hour < 9) return '早上好';
-  if (hour < 12) return '上午好';
-  if (hour < 14) return '中午好';
-  if (hour < 18) return '下午好';
-  return '晚上好';
-});
+const loadedOnce = ref(false);
+const activeGroup = ref<'all' | WorkGroup>('all');
+const infoTab = ref<'messages' | 'notices'>('notices');
+const selectedNotice = ref<FdmDashboardApi.Notice | null>(null);
+const noticeOpen = ref(false);
+const now = ref(dayjs());
 
 const displayName = computed(
   () => userStore.userInfo?.nickname || userStore.userInfo?.username || '同事',
 );
-
-const totalPending = computed(
-  () => taskTotal.value + (dingTalkTodoCount.value ?? 0),
-);
-
-const totalPendingLoading = computed(
-  () => loading.tasks || (canViewDingTalkApprovals.value && loading.dingTalk),
-);
-
-const totalPendingFailed = computed(
-  () =>
-    (canViewBpmTasks.value && failed.tasks) ||
-    (canViewDingTalkApprovals.value && failed.dingTalk),
-);
-
-const primaryTaskPath = computed(() => {
-  if (canViewBpmTasks.value) return '/bpm/task/todo';
-  if (canViewDingTalkApprovals.value) return '/caiwu/dingtalk-approval';
-  return '/system/notify-message';
+const dateText = computed(() => {
+  const weekday = ['日', '一', '二', '三', '四', '五', '六'][now.value.day()];
+  return `${now.value.format('YYYY年M月D日')} · 星期${weekday}`;
 });
 
-const allQuickEntries: QuickEntry[] = [
+const approvalCount = computed(() => bpmTotal.value + approvalTotal.value);
+const businessCount = computed(() =>
+  sum(businessWork.value.map((item) => workCount(item))),
+);
+const totalCount = computed(
+  () => approvalCount.value + businessCount.value + dingTalkCount.value,
+);
+
+const allWork = computed(() =>
+  sortWork([...bpmWork.value, ...approvalWork.value, ...businessWork.value]),
+);
+const visibleWork = computed(() =>
+  activeGroup.value === 'all'
+    ? allWork.value
+    : allWork.value.filter((item) => item.group === activeGroup.value),
+);
+const groupOptions = computed(() => [
+  { label: `全部 ${approvalCount.value + businessCount.value}`, value: 'all' },
+  { label: `审批 ${approvalCount.value}`, value: 'approval' },
+  { label: `部门待办 ${businessCount.value}`, value: 'business' },
+]);
+
+const longestWaitDays = computed(() => {
+  const created = [...bpmWork.value, ...approvalWork.value]
+    .map((item) => item.rank)
+    .filter((rank) => rank > -1_000_000);
+  const hours = created.length > 0 ? -Math.min(...created) : 0;
+  return Math.floor(hours / 24);
+});
+
+const summary = computed(() =>
+  summaryLine({
+    approvals: approvalCount.value,
+    business: businessCount.value,
+    dingTalk: dingTalkCount.value,
+    longestWaitDays: longestWaitDays.value,
+    unread: unreadCount.value,
+  }),
+);
+
+interface StatTile {
+  key: string;
+  label: string;
+  value: number | string;
+  hint: string;
+  icon: string;
+  link: WorkLink;
+}
+
+const stats = computed<StatTile[]>(() => {
+  const tiles: StatTile[] = [];
+  if (can.bpm.value || can.approvalInbox.value) {
+    tiles.push({
+      hint:
+        failed.bpm && can.bpm.value
+          ? '流程服务暂不可用'
+          : `流程 ${bpmTotal.value} · 业务单据 ${approvalTotal.value}`,
+      icon: 'lucide:stamp',
+      key: 'approval',
+      label: '待我审批',
+      link: { path: can.bpm.value ? '/bpm/task/todo' : '/fdmprocurement/platform-approvals' },
+      value: approvalCount.value,
+    });
+  }
+  if (portals.value.length > 0) {
+    tiles.push({
+      hint: portals.value.map((key) => DEPARTMENT_LABELS[key]).join(' · '),
+      icon: 'lucide:list-todo',
+      key: 'business',
+      label: '部门待办',
+      link: { path: portalPath(portals.value[0]!) },
+      value: businessCount.value,
+    });
+  }
+  if (can.dingTalk.value) {
+    tiles.push({
+      hint: failed.dingTalk ? '钉钉服务暂不可用' : '全部模板待我审批',
+      icon: 'lucide:clipboard-check',
+      key: 'dingtalk',
+      label: '钉钉待审',
+      link: { path: '/caiwu/dingtalk-approval' },
+      value: failed.dingTalk ? '—' : dingTalkCount.value,
+    });
+  }
+  tiles.push({
+    hint: failed.messages ? '消息服务暂不可用' : '站内通知与提醒',
+    icon: 'lucide:bell',
+    key: 'messages',
+    label: '未读消息',
+    link: { path: '/system/notify-message' },
+    value: failed.messages ? '—' : unreadCount.value,
+  });
+  return tiles;
+});
+
+function portalPath(department: PortalDepartment) {
+  const base: Record<PortalDepartment, string> = {
+    domestic: '/neixiao',
+    finance: '/caiwu',
+    purchase: '/fdmprocurement',
+    trade: '/fdmwaimao',
+  };
+  return `${base[department]}/platform-portal`;
+}
+
+const allQuickEntries = computed<QuickEntry[]>(() => [
+  ...portals.value.map((department) => ({
+    icon: 'lucide:door-open',
+    path: portalPath(department),
+    title: `${DEPARTMENT_LABELS[department]}门户`,
+  })),
+  { icon: 'lucide:building-2', path: '/dashboard/workspace', title: '公司看板' },
   {
-    color: '#2563eb',
-    description: '查看并办理当前流程任务',
-    icon: 'lucide:list-checks',
-    path: '/bpm/task/todo',
-    permissions: ['bpm:task:query'],
-    title: '待办任务',
-  },
-  {
-    color: '#0f766e',
-    description: '提交新的审批或业务流程',
     icon: 'lucide:circle-play',
     path: '/bpm/process-instance/create',
     permissions: ['bpm:process-instance:create'],
     title: '发起流程',
   },
   {
-    color: '#1677ff',
-    description: '处理钉钉同步审批单',
-    icon: 'lucide:clipboard-check',
-    path: '/caiwu/dingtalk-approval',
-    permissions: ['fdmdingtalk:approval:query'],
-    title: '钉钉审批',
+    icon: 'lucide:receipt',
+    path: '/fdmexpense/platform-expenses',
+    permissions: ['fdmplatform:expense:query'],
+    title: '费用报销',
   },
   {
-    color: '#7c3aed',
-    description: '查看考核、复盘与确认事项',
     icon: 'lucide:chart-no-axes-combined',
     path: '/fdmperformance/my',
     permissions: ['fdmperformance:assessment:query'],
     title: '我的绩效',
   },
   {
-    color: '#db2777',
-    description: '进入图像与视频创作项目',
+    icon: 'lucide:hammer',
+    path: '/gongchang/workbench',
+    permissions: ['fdmgongchang:workbench:use'],
+    title: '工厂工作台',
+  },
+  {
     icon: 'lucide:sparkles',
     path: '/fdmcreative/workbench',
     permissions: ['fdmcreative:project:query'],
     title: '智能创作',
   },
   {
-    color: '#0891b2',
-    description: '打开常用办公与业务工具',
-    icon: 'lucide:layout-grid',
-    path: '/dashboard/workspace',
-    title: '应用工作台',
+    icon: 'lucide:shopping-cart',
+    path: '/fdmdata/ec-shop-daily/summary',
+    permissions: ['fdmdata:ec-shop-daily:query'],
+    title: '电商经营',
   },
-  {
-    color: '#475569',
-    description: '查看全部系统通知与消息',
-    icon: 'lucide:mail',
-    path: '/system/notify-message',
-    title: '我的消息',
-  },
-];
+  { icon: 'lucide:mail', path: '/system/notify-message', title: '我的消息' },
+]);
 
 const quickEntries = computed(() =>
-  allQuickEntries
-    .filter((item) => !item.permissions || hasAccessByCodes(item.permissions))
-    .slice(0, 6),
+  allQuickEntries.value
+    .filter((entry) => !entry.permissions || hasAccessByCodes(entry.permissions))
+    .slice(0, 8),
 );
 
-const metricCards = computed<MetricCard[]>(() => {
-  const cards: MetricCard[] = [
-    {
-      color: '#2563eb',
-      description: '需要我处理的全部事项',
-      icon: 'lucide:inbox',
-      key: 'all',
-      loading: totalPendingLoading.value,
-      path: primaryTaskPath.value,
-      title: '我的待办',
-      value: totalPendingFailed.value ? null : totalPending.value,
-    },
-  ];
-
-  if (canViewBpmTasks.value) {
-    cards.push({
-      color: '#ea580c',
-      description: '内部工作流待办理',
-      icon: 'lucide:workflow',
-      key: 'bpm',
-      loading: loading.tasks,
-      path: '/bpm/task/todo',
-      title: '流程待办',
-      value: failed.tasks ? null : taskTotal.value,
-    });
-  }
-
-  if (canViewDingTalkApprovals.value) {
-    cards.push({
-      color: '#0891b2',
-      description: failed.dingTalk ? '钉钉服务暂不可用' : '全部模板待我审批',
-      icon: 'lucide:clipboard-check',
-      key: 'dingtalk',
-      loading: loading.dingTalk,
-      path: '/caiwu/dingtalk-approval',
-      title: '钉钉待审',
-      value: failed.dingTalk ? null : dingTalkTodoCount.value,
-    });
-  }
-
-  cards.push({
-    color: '#7c3aed',
-    description: failed.messages ? '消息服务暂不可用' : '尚未阅读的站内消息',
-    icon: 'lucide:mail-open',
-    key: 'messages',
-    loading: loading.messages,
-    path: '/system/notify-message',
-    title: '未读消息',
-    value: failed.messages ? null : unreadMessageCount.value,
-  });
-
-  return cards;
-});
-
-const lastUpdatedText = computed(() => {
-  if (!lastUpdatedAt.value) return '正在获取最新数据';
-  return `更新于 ${dayjs(lastUpdatedAt.value).format('HH:mm')}`;
-});
-
-function formatDateTime(value?: Date | number | string) {
-  if (value === undefined || value === null || value === '') return '—';
+function formatTime(value?: Date | number | string) {
+  if (value === undefined || value === null || value === '') return '';
   const parsed = dayjs(value);
-  return parsed.isValid() ? parsed.format('MM-DD HH:mm') : '—';
+  if (!parsed.isValid()) return '';
+  return parsed.isSame(now.value, 'day')
+    ? parsed.format('HH:mm')
+    : parsed.format('MM-DD HH:mm');
 }
 
-function formatBuildVersion(value?: string) {
+function versionText(value?: string) {
   return !value || value === 'local' ? '本地开发' : value;
 }
 
-function formatBuildMetadata(commit?: string, buildTime?: string) {
-  if (!commit || commit === 'local') return '本地开发构建';
+function commitText(commit?: string, buildTime?: string) {
+  if (!commit || commit === 'local') return '本地构建';
   const parsed = dayjs(buildTime);
-  const time = parsed.isValid()
-    ? parsed.format('YYYY-MM-DD HH:mm')
-    : '时间未记录';
-  return `提交 ${commit.slice(0, 12)} · 构建 ${time}`;
+  return `${commit.slice(0, 8)}${parsed.isValid() ? ` · ${parsed.format('MM-DD HH:mm')}` : ''}`;
 }
 
-function plainText(value?: string) {
-  return (value || '')
-    .replaceAll(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replaceAll(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replaceAll(/<[^>]+>/g, ' ')
-    .replaceAll(/&nbsp;|&#160;/gi, ' ')
-    .replaceAll(/&amp;/gi, '&')
-    .replaceAll(/\s+/g, ' ')
-    .trim();
-}
-
-function taskProcessName(task: BpmTaskApi.Task) {
-  return task.processInstance?.name || '流程待办';
-}
-
-function taskStarterName(task: BpmTaskApi.Task) {
-  return task.processInstance?.startUser?.nickname || '未知发起人';
-}
-
-function taskWaitingInfo(task: BpmTaskApi.Task) {
-  const createdAt = Number(task.createTime);
-  if (!Number.isFinite(createdAt) || createdAt <= 0) {
-    return { color: 'default', text: '等待处理' };
-  }
-  const elapsedHours = Math.max(0, dayjs().diff(dayjs(createdAt), 'hour'));
-  if (elapsedHours < 1) return { color: 'blue', text: '刚刚到达' };
-  if (elapsedHours < 24) {
-    return { color: 'blue', text: `已等待 ${elapsedHours} 小时` };
-  }
-  const elapsedDays = Math.max(1, Math.floor(elapsedHours / 24));
-  if (elapsedDays >= 7) {
-    return { color: 'red', text: `已等待 ${elapsedDays} 天` };
-  }
-  if (elapsedDays >= 3) {
-    return { color: 'orange', text: `已等待 ${elapsedDays} 天` };
-  }
-  return { color: 'blue', text: `已等待 ${elapsedDays} 天` };
-}
-
-function noticeTypeLabel(type?: number) {
-  return type === 2 ? '公告' : '通知';
-}
-
-function navigateTo(path: string) {
-  void router.push(path);
-}
-
-function openTask(task: BpmTaskApi.Task) {
-  void router.push({
-    name: 'BpmProcessInstanceDetail',
-    query: {
-      id: task.processInstance?.id || task.processInstanceId,
-      taskId: task.id,
-    },
-  });
+function go(link: WorkLink) {
+  void router.push(link.name ? { name: link.name, query: link.query } : link);
 }
 
 function openNotice(notice: FdmDashboardApi.Notice) {
   selectedNotice.value = notice;
-  noticeModalOpen.value = true;
+  noticeOpen.value = true;
 }
 
-async function loadTasks() {
-  failed.tasks = false;
-  if (!canViewBpmTasks.value) {
-    tasks.value = [];
-    taskTotal.value = 0;
-    return;
-  }
-  loading.tasks = true;
-  try {
-    const result = await getTaskTodoPage({ pageNo: 1, pageSize: 6 });
-    tasks.value = result.list || [];
-    taskTotal.value = Number(result.total || 0);
-  } catch {
-    failed.tasks = true;
-    tasks.value = [];
-    taskTotal.value = 0;
-  } finally {
-    loading.tasks = false;
-  }
-}
-
-async function loadDingTalkTodoCount() {
+async function loadWork() {
+  const time = Date.now();
+  failed.bpm = false;
   failed.dingTalk = false;
-  if (!canViewDingTalkApprovals.value) {
-    dingTalkTodoCount.value = 0;
-    return;
+  const [bpm, approvals, dingTalk, ...portalResults] = await Promise.allSettled([
+    can.bpm.value
+      ? getTaskTodoPage({ pageNo: 1, pageSize: 8 })
+      : Promise.resolve(null),
+    can.approvalInbox.value
+      ? getApprovalTasks({
+          pageNo: 1,
+          pageSize: 8,
+          scope: 'assigned',
+          status: 'OPEN',
+        })
+      : Promise.resolve(null),
+    can.dingTalk.value ? getDingTalkApprovalTodoCount() : Promise.resolve(null),
+    ...portals.value.map((department) => getPortalSummary(department)),
+  ]);
+  if (bpm.status === 'fulfilled' && bpm.value) {
+    bpmWork.value = bpmItems(bpm.value.list ?? [], time);
+    bpmTotal.value = Number(bpm.value.total || 0);
+  } else {
+    failed.bpm = bpm.status === 'rejected';
+    bpmWork.value = [];
+    bpmTotal.value = 0;
   }
-  loading.dingTalk = true;
-  try {
-    const result = await getDingTalkApprovalTodoCount();
-    dingTalkTodoCount.value = Number(result.count || 0);
-  } catch {
+  if (approvals.status === 'fulfilled' && approvals.value) {
+    approvalWork.value = approvalItems(approvals.value.list ?? [], time);
+    approvalTotal.value = Number(approvals.value.total || 0);
+  } else {
+    approvalWork.value = [];
+    approvalTotal.value = 0;
+  }
+  if (dingTalk.status === 'fulfilled') {
+    dingTalkCount.value = Number(dingTalk.value?.count || 0);
+  } else {
     failed.dingTalk = true;
-    dingTalkTodoCount.value = null;
-  } finally {
-    loading.dingTalk = false;
+    dingTalkCount.value = 0;
   }
+  const business: WorkItem[] = [];
+  const portalFailures: PortalDepartment[] = [];
+  portalResults.forEach((result, index) => {
+    const department = portals.value[index]!;
+    if (result.status === 'fulfilled') {
+      business.push(...portalItems(department, result.value));
+    } else {
+      portalFailures.push(department);
+    }
+  });
+  businessWork.value = business;
+  failedPortals.value = portalFailures;
 }
 
 async function loadMessages() {
@@ -420,11 +371,11 @@ async function loadMessages() {
       getUnreadNotifyMessageCount(),
       getUnreadNotifyMessageList(),
     ]);
-    unreadMessageCount.value = Number(count || 0);
+    unreadCount.value = Number(count || 0);
     unreadMessages.value = (list || []).slice(0, 5);
   } catch {
     failed.messages = true;
-    unreadMessageCount.value = null;
+    unreadCount.value = 0;
     unreadMessages.value = [];
   } finally {
     loading.messages = false;
@@ -442,7 +393,7 @@ async function loadNotices() {
     notices.value = result.list || [];
   } catch {
     // 兼容前后端分批更新：旧服务仅管理员拥有公告查询权限。
-    if (canManageNotices.value) {
+    if (can.notices.value) {
       try {
         const fallback = await getNoticePage({
           pageNo: 1,
@@ -452,7 +403,7 @@ async function loadNotices() {
         notices.value = fallback.list || [];
         return;
       } catch {
-        // 统一由下方空状态承接，不阻断其他首页模块。
+        // 由空状态承接，不阻断其他模块。
       }
     }
     failed.notices = true;
@@ -462,326 +413,300 @@ async function loadNotices() {
   }
 }
 
-async function loadSystemVersion() {
+async function loadVersion() {
   failed.version = false;
-  loading.version = true;
   try {
     backendBuildInfo.value = await getFdmDashboardBuildInfo();
   } catch {
-    // 新前端可先于后端发布；旧后端不存在接口时在版本卡片中明确提示即可。
     failed.version = true;
     backendBuildInfo.value = null;
-  } finally {
-    loading.version = false;
   }
 }
 
-async function refreshDashboard() {
+async function refresh() {
   if (refreshing.value) return;
   refreshing.value = true;
+  loading.work = true;
+  now.value = dayjs();
   try {
     await Promise.allSettled([
-      loadTasks(),
-      loadDingTalkTodoCount(),
+      loadWork().finally(() => {
+        loading.work = false;
+      }),
       loadMessages(),
       loadNotices(),
-      loadSystemVersion(),
+      loadVersion(),
     ]);
     lastUpdatedAt.value = Date.now();
   } finally {
     refreshing.value = false;
+    loadedOnce.value = true;
   }
 }
 
-onMounted(() => {
-  void refreshDashboard();
-});
-
+onMounted(() => void refresh());
 onActivated(() => {
   if (lastUpdatedAt.value && Date.now() - lastUpdatedAt.value > 60_000) {
-    void refreshDashboard();
+    void refresh();
   }
 });
 </script>
 
 <template>
-  <div class="dashboard-home">
-    <section class="welcome-panel">
-      <div class="welcome-panel__content">
-        <div class="welcome-panel__identity">
-          <Avatar
-            :size="52"
-            :src="userStore.userInfo?.avatar || preferences.app.defaultAvatar"
-          />
-          <div>
-            <p class="welcome-panel__date">{{ currentDateText }}</p>
-            <h1>{{ greetingText }}，{{ displayName }}</h1>
-            <p class="welcome-panel__description">
-              先处理重要待办，再开始今天的工作。
-            </p>
-          </div>
-        </div>
-        <div class="welcome-panel__actions">
-          <span class="welcome-panel__updated">{{ lastUpdatedText }}</span>
-          <Button ghost :loading="refreshing" @click="refreshDashboard">
-            <template #icon>
-              <IconifyIcon icon="lucide:refresh-cw" />
-            </template>
-            刷新
-          </Button>
-        </div>
-      </div>
-
-      <div class="welcome-panel__focus">
-        <div class="focus-icon">
-          <IconifyIcon icon="lucide:check-check" />
-        </div>
+  <div class="home">
+    <header class="home-head">
+      <div class="home-head__who">
+        <Avatar
+          :size="56"
+          :src="userStore.userInfo?.avatar || preferences.app.defaultAvatar"
+        />
         <div>
-          <span>今日工作焦点</span>
-          <div class="focus-count">
-            <Skeleton.Button
-              v-if="totalPendingLoading"
-              active
-              size="small"
-              style="width: 72px"
-            />
-            <strong v-else>{{
-              totalPendingFailed ? '—' : totalPending
-            }}</strong>
-            <span>项待处理</span>
-          </div>
-          <button
-            v-if="canViewBpmTasks"
-            class="focus-link"
-            type="button"
-            @click="navigateTo('/bpm/task/todo')"
-          >
-            立即处理
-            <IconifyIcon icon="lucide:arrow-right" />
-          </button>
+          <p class="home-eyebrow">{{ dateText }}</p>
+          <h1>{{ greetingText(now.hour()) }}，{{ displayName }}</h1>
+          <p class="home-lead">
+            <template v-if="loadedOnce">{{ summary }}</template>
+            <template v-else>正在整理你的待办…</template>
+          </p>
         </div>
       </div>
-    </section>
+      <div class="home-head__actions">
+        <span v-if="lastUpdatedAt" class="home-updated">
+          更新于 {{ dayjs(lastUpdatedAt).format('HH:mm') }}
+        </span>
+        <Button :loading="refreshing" @click="refresh">
+          <template #icon><IconifyIcon icon="lucide:refresh-cw" /></template>
+          刷新
+        </Button>
+      </div>
+    </header>
 
-    <section class="metrics-grid" aria-label="工作摘要">
+    <section aria-label="待办概览" class="stat-strip">
       <button
-        v-for="card in metricCards"
-        :key="card.key"
-        class="metric-card"
+        class="stat stat--total"
         type="button"
-        :style="{ '--metric-color': card.color }"
-        @click="navigateTo(card.path)"
+        @click="activeGroup = 'all'"
       >
-        <span class="metric-card__icon">
-          <IconifyIcon :icon="card.icon" />
+        <span class="stat__label">待处理合计</span>
+        <Skeleton.Button
+          v-if="loading.work && !loadedOnce"
+          active
+          size="small"
+          style="width: 64px"
+        />
+        <strong v-else class="stat__hero">{{ totalCount }}</strong>
+        <span class="stat__hint">审批、部门待办与钉钉审批</span>
+      </button>
+      <button
+        v-for="tile in stats"
+        :key="tile.key"
+        class="stat"
+        type="button"
+        @click="go(tile.link)"
+      >
+        <span class="stat__label">
+          <IconifyIcon :icon="tile.icon" />
+          {{ tile.label }}
         </span>
-        <span class="metric-card__body">
-          <span class="metric-card__title">{{ card.title }}</span>
-          <Skeleton.Button
-            v-if="card.loading"
-            active
-            size="small"
-            style="width: 56px"
-          />
-          <strong v-else>{{ card.value === null ? '—' : card.value }}</strong>
-          <span class="metric-card__description">{{ card.description }}</span>
-        </span>
-        <IconifyIcon class="metric-card__arrow" icon="lucide:arrow-up-right" />
+        <Skeleton.Button
+          v-if="loading.work && !loadedOnce"
+          active
+          size="small"
+          style="width: 48px"
+        />
+        <strong v-else class="stat__value">{{ tile.value }}</strong>
+        <span class="stat__hint">{{ tile.hint }}</span>
       </button>
     </section>
 
-    <section class="dashboard-grid">
-      <article class="home-card todo-card">
-        <header class="home-card__header">
+    <section class="home-grid">
+      <article class="panel work-panel">
+        <header class="panel-head">
           <div>
-            <div class="home-card__eyebrow">MY TASKS</div>
             <h2>待我处理</h2>
+            <p>等得最久的审批排在最前，点击直接办理</p>
           </div>
-          <Button
-            v-if="canViewBpmTasks"
-            type="link"
-            @click="navigateTo('/bpm/task/todo')"
-          >
-            查看全部
-            <IconifyIcon icon="lucide:chevron-right" />
-          </Button>
+          <Segmented
+            v-model:value="activeGroup"
+            :options="groupOptions"
+            size="small"
+          />
         </header>
 
-        <div v-if="loading.tasks" class="card-loading">
+        <div v-if="loading.work && !loadedOnce" class="work-loading">
           <Skeleton
             v-for="item in 4"
             :key="item"
             active
             :paragraph="{ rows: 1 }"
+            :title="false"
           />
         </div>
 
-        <div v-else-if="failed.tasks" class="card-empty">
-          <Empty description="待办加载失败，请稍后重试" />
-          <Button size="small" @click="loadTasks">重新加载</Button>
-        </div>
-
-        <div v-else-if="!canViewBpmTasks" class="card-empty">
-          <Empty description="当前账号暂无流程待办权限" />
-        </div>
-
-        <div v-else-if="tasks.length === 0" class="card-empty">
-          <Empty description="暂时没有待办，今天可以轻松一点" />
-        </div>
-
-        <div v-else class="todo-list">
+        <template v-else>
           <button
-            v-for="task in tasks"
-            :key="task.id"
-            class="todo-item"
+            v-if="dingTalkCount > 0 && activeGroup !== 'business'"
+            class="work-banner"
             type="button"
-            @click="openTask(task)"
+            @click="go({ path: '/caiwu/dingtalk-approval' })"
           >
-            <span class="todo-item__icon">
-              <IconifyIcon icon="lucide:file-check-2" />
-            </span>
-            <span class="todo-item__content">
-              <span class="todo-item__topline">
-                <strong>{{ taskProcessName(task) }}</strong>
-                <Tag :color="taskWaitingInfo(task).color">
-                  {{ taskWaitingInfo(task).text }}
-                </Tag>
-              </span>
-              <span class="todo-item__task">{{ task.name || '待办理' }}</span>
-              <span class="todo-item__meta">
-                <span>
-                  <IconifyIcon icon="lucide:user-round" />
-                  {{ taskStarterName(task) }}
-                </span>
-                <span>
-                  <IconifyIcon icon="lucide:clock-3" />
-                  {{ formatDateTime(task.createTime) }}
-                </span>
-              </span>
-            </span>
-            <span class="todo-item__action">
-              办理
-              <IconifyIcon icon="lucide:arrow-right" />
-            </span>
+            <IconifyIcon icon="lucide:clipboard-check" />
+            钉钉里还有 <strong>{{ dingTalkCount }}</strong> 项审批等你处理
+            <IconifyIcon class="work-banner__go" icon="lucide:arrow-right" />
           </button>
-        </div>
+
+          <ul v-if="visibleWork.length" class="work-list">
+            <li v-for="item in visibleWork" :key="item.key">
+              <button
+                class="work-item"
+                :class="{ 'work-item--hot': item.hot }"
+                type="button"
+                @click="go(item.link)"
+              >
+                <span
+                  class="work-item__source"
+                  :class="`work-item__source--${item.group}`"
+                >
+                  {{ item.source }}
+                </span>
+                <span class="work-item__body">
+                  <span class="work-item__title">
+                    <strong>{{ item.title }}</strong>
+                    <span v-if="item.count" class="work-item__count">
+                      {{ item.count }}
+                    </span>
+                  </span>
+                  <small>{{ item.detail }}</small>
+                </span>
+                <span
+                  v-if="item.wait"
+                  class="wait"
+                  :class="`wait--${item.wait.tone}`"
+                >
+                  <IconifyIcon icon="lucide:clock-3" />
+                  {{ item.wait.text }}
+                </span>
+                <IconifyIcon class="work-item__go" icon="lucide:chevron-right" />
+              </button>
+            </li>
+          </ul>
+
+          <div v-else-if="dingTalkCount === 0" class="work-empty">
+            <span class="work-empty__icon">
+              <IconifyIcon icon="lucide:check-check" />
+            </span>
+            <strong>
+              {{
+                activeGroup === 'business' ? '部门待办都处理完了' : '没有待办'
+              }}
+            </strong>
+            <small>新的审批和待办会出现在这里</small>
+          </div>
+
+          <footer class="work-foot">
+            <span v-if="failed.bpm" class="work-foot__warn">
+              <IconifyIcon icon="lucide:circle-alert" />
+              流程待办读取失败
+            </span>
+            <span v-if="failedPortals.length" class="work-foot__warn">
+              <IconifyIcon icon="lucide:circle-alert" />
+              {{
+                failedPortals.map((key) => DEPARTMENT_LABELS[key]).join('、')
+              }}待办读取失败
+            </span>
+            <Button
+              v-if="bpmTotal > bpmWork.length"
+              size="small"
+              type="link"
+              @click="go({ path: '/bpm/task/todo' })"
+            >
+              全部 {{ bpmTotal }} 条流程待办
+            </Button>
+            <Button
+              v-if="approvalTotal > approvalWork.length"
+              size="small"
+              type="link"
+              @click="go({ path: '/fdmprocurement/platform-approvals' })"
+            >
+              全部 {{ approvalTotal }} 条业务审批
+            </Button>
+          </footer>
+        </template>
       </article>
 
-      <aside class="dashboard-sidebar">
-        <article class="home-card information-card">
-          <Tabs v-model:active-key="activeInformationTab" centered>
-            <Tabs.TabPane key="notices">
-              <template #tab>
-                <span class="information-tab">
-                  <IconifyIcon icon="lucide:megaphone" />
-                  公告通知
-                </span>
-              </template>
-
-              <div v-if="loading.notices" class="card-loading compact">
+      <aside class="home-side">
+        <article class="panel info-panel">
+          <Tabs v-model:active-key="infoTab" size="small">
+            <Tabs.TabPane key="notices" tab="公告通知">
+              <div v-if="loading.notices && !loadedOnce" class="work-loading">
                 <Skeleton
                   v-for="item in 3"
                   :key="item"
                   active
                   :paragraph="{ rows: 1 }"
+                  :title="false"
                 />
               </div>
-              <div v-else-if="notices.length" class="information-list">
-                <button
-                  v-for="notice in notices"
-                  :key="notice.id"
-                  class="information-item"
-                  type="button"
-                  @click="openNotice(notice)"
-                >
-                  <span class="information-item__marker notice-marker">
-                    <IconifyIcon icon="lucide:megaphone" />
-                  </span>
-                  <span class="information-item__content">
-                    <span class="information-item__title-row">
-                      <strong>{{ notice.title }}</strong>
-                      <Tag :color="notice.type === 2 ? 'blue' : 'green'">
-                        {{ noticeTypeLabel(notice.type) }}
+              <ul v-else-if="notices.length" class="info-list">
+                <li v-for="notice in notices" :key="notice.id">
+                  <button
+                    class="info-item"
+                    type="button"
+                    @click="openNotice(notice)"
+                  >
+                    <span class="info-item__title">
+                      <Tag
+                        class="info-item__tag"
+                        :color="notice.type === 2 ? 'blue' : 'green'"
+                      >
+                        {{ notice.type === 2 ? '公告' : '通知' }}
                       </Tag>
+                      <strong>{{ notice.title }}</strong>
                     </span>
-                    <span class="information-item__preview">
-                      {{ plainText(notice.content) || '点击查看公告详情' }}
-                    </span>
-                    <span class="information-item__time">
-                      {{ formatDateTime(notice.createTime) }}
-                    </span>
-                  </span>
-                </button>
-              </div>
-              <div v-else class="card-empty compact">
-                <Empty
-                  :description="
-                    failed.notices ? '公告暂时不可用' : '暂无最新公告'
-                  "
-                />
-              </div>
+                    <small>{{ plainText(notice.content) || '点击查看详情' }}</small>
+                    <time>{{ formatTime(notice.createTime) }}</time>
+                  </button>
+                </li>
+              </ul>
+              <Empty
+                v-else
+                :description="failed.notices ? '公告暂时不可用' : '暂无公告'"
+                :image="Empty.PRESENTED_IMAGE_SIMPLE"
+              />
             </Tabs.TabPane>
-
             <Tabs.TabPane key="messages">
               <template #tab>
-                <span class="information-tab">
-                  <IconifyIcon icon="lucide:mail" />
-                  我的消息
-                  <span v-if="unreadMessageCount" class="tab-count">
-                    {{ unreadMessageCount > 99 ? '99+' : unreadMessageCount }}
-                  </span>
+                未读消息
+                <span v-if="unreadCount" class="tab-count">
+                  {{ unreadCount > 99 ? '99+' : unreadCount }}
                 </span>
               </template>
-
-              <div v-if="loading.messages" class="card-loading compact">
-                <Skeleton
-                  v-for="item in 3"
-                  :key="item"
-                  active
-                  :paragraph="{ rows: 1 }"
-                />
-              </div>
-              <div v-else-if="unreadMessages.length" class="information-list">
-                <button
-                  v-for="message in unreadMessages"
-                  :key="message.id"
-                  class="information-item"
-                  type="button"
-                  @click="navigateTo('/system/notify-message')"
-                >
-                  <span class="information-item__marker message-marker">
-                    <IconifyIcon icon="lucide:mail" />
-                  </span>
-                  <span class="information-item__content">
-                    <span class="information-item__title-row">
-                      <strong>{{
-                        message.templateNickname || '系统消息'
-                      }}</strong>
+              <ul v-if="unreadMessages.length" class="info-list">
+                <li v-for="message in unreadMessages" :key="message.id">
+                  <button
+                    class="info-item"
+                    type="button"
+                    @click="go({ path: '/system/notify-message' })"
+                  >
+                    <span class="info-item__title">
                       <span class="unread-dot"></span>
+                      <strong>{{ message.templateNickname || '系统消息' }}</strong>
                     </span>
-                    <span class="information-item__preview">
-                      {{
-                        plainText(message.templateContent) || '点击查看消息详情'
-                      }}
-                    </span>
-                    <span class="information-item__time">
-                      {{ formatDateTime(message.createTime) }}
-                    </span>
-                  </span>
-                </button>
-              </div>
-              <div v-else class="card-empty compact">
-                <Empty
-                  :description="
-                    failed.messages ? '消息暂时不可用' : '没有未读消息'
-                  "
-                />
-              </div>
+                    <small>{{
+                      plainText(message.templateContent) || '点击查看详情'
+                    }}</small>
+                    <time>{{ formatTime(message.createTime) }}</time>
+                  </button>
+                </li>
+              </ul>
+              <Empty
+                v-else
+                :description="failed.messages ? '消息暂时不可用' : '没有未读消息'"
+                :image="Empty.PRESENTED_IMAGE_SIMPLE"
+              />
               <Button
-                v-if="!loading.messages"
                 block
-                class="information-more"
-                @click="navigateTo('/system/notify-message')"
+                class="info-more"
+                @click="go({ path: '/system/notify-message' })"
               >
                 查看全部消息
               </Button>
@@ -789,115 +714,40 @@ onActivated(() => {
           </Tabs>
         </article>
 
-        <article class="home-card quick-card">
-          <header class="home-card__header compact-header">
-            <div>
-              <div class="home-card__eyebrow">QUICK ACCESS</div>
-              <h2>快捷入口</h2>
-            </div>
+        <article class="panel">
+          <header class="panel-head">
+            <div><h2>常用功能</h2></div>
           </header>
           <div class="quick-grid">
             <button
               v-for="entry in quickEntries"
               :key="entry.path"
-              class="quick-entry"
+              class="quick"
               type="button"
-              @click="navigateTo(entry.path)"
+              @click="go({ path: entry.path })"
             >
-              <span
-                class="quick-entry__icon"
-                :style="{
-                  color: entry.color,
-                  backgroundColor: `${entry.color}14`,
-                }"
-              >
-                <IconifyIcon :icon="entry.icon" />
-              </span>
-              <span>
-                <strong>{{ entry.title }}</strong>
-                <small>{{ entry.description }}</small>
-              </span>
+              <span class="quick__icon"><IconifyIcon :icon="entry.icon" /></span>
+              <span>{{ entry.title }}</span>
             </button>
           </div>
         </article>
 
-        <article class="home-card version-card">
-          <header class="home-card__header compact-header">
-            <div>
-              <div class="home-card__eyebrow">SYSTEM VERSION</div>
-              <h2>系统版本</h2>
-            </div>
-            <Tag :color="systemVersionStatus.color">
-              {{ systemVersionStatus.text }}
-            </Tag>
-          </header>
-
-          <div class="version-card__body">
-            <div class="version-item">
-              <span class="version-item__icon frontend-version-icon">
-                <IconifyIcon icon="lucide:monitor-smartphone" />
-              </span>
-              <span class="version-item__content">
-                <span class="version-item__label">前端构建版本</span>
-                <code>{{ formatBuildVersion(frontendBuildInfo.version) }}</code>
-                <span class="version-item__meta">
-                  {{
-                    formatBuildMetadata(
-                      frontendBuildInfo.commit,
-                      frontendBuildInfo.buildTime,
-                    )
-                  }}
-                </span>
-              </span>
-            </div>
-
-            <div v-if="loading.version" class="version-item">
-              <span class="version-item__icon backend-version-icon">
-                <IconifyIcon icon="lucide:server-cog" />
-              </span>
-              <span class="version-item__content version-item__loading">
-                <Skeleton.Button active size="small" style="width: 152px" />
-                <Skeleton.Button active size="small" style="width: 116px" />
-              </span>
-            </div>
-            <div v-else-if="backendBuildInfo" class="version-item">
-              <span class="version-item__icon backend-version-icon">
-                <IconifyIcon icon="lucide:server-cog" />
-              </span>
-              <span class="version-item__content">
-                <span class="version-item__label">后端运行版本</span>
-                <code>{{ formatBuildVersion(backendBuildInfo.version) }}</code>
-                <span class="version-item__meta">
-                  {{
-                    formatBuildMetadata(
-                      backendBuildInfo.commit,
-                      backendBuildInfo.buildTime,
-                    )
-                  }}
-                </span>
-              </span>
-            </div>
-            <div v-else class="version-item version-item--unavailable">
-              <span class="version-item__icon unavailable-version-icon">
-                <IconifyIcon icon="lucide:triangle-alert" />
-              </span>
-              <span class="version-item__content">
-                <span class="version-item__label">后端运行版本</span>
-                <strong>未上报</strong>
-                <span class="version-item__meta">
-                  {{
-                    failed.version ? '后端尚未部署版本接口' : '等待版本信息返回'
-                  }}
-                </span>
-              </span>
-            </div>
-          </div>
-        </article>
+        <footer class="version">
+          <span>
+            前端 <code>{{ versionText(frontendBuildInfo.version) }}</code>
+            {{ commitText(frontendBuildInfo.commit, frontendBuildInfo.buildTime) }}
+          </span>
+          <span v-if="backendBuildInfo">
+            后端 <code>{{ versionText(backendBuildInfo.version) }}</code>
+            {{ commitText(backendBuildInfo.commit, backendBuildInfo.buildTime) }}
+          </span>
+          <span v-else-if="failed.version">后端版本未上报</span>
+        </footer>
       </aside>
     </section>
 
     <Modal
-      v-model:open="noticeModalOpen"
+      v-model:open="noticeOpen"
       destroy-on-close
       :footer="null"
       :title="selectedNotice?.title || '公告详情'"
@@ -906,9 +756,9 @@ onActivated(() => {
       <div v-if="selectedNotice" class="notice-detail">
         <div class="notice-detail__meta">
           <Tag :color="selectedNotice.type === 2 ? 'blue' : 'green'">
-            {{ noticeTypeLabel(selectedNotice.type) }}
+            {{ selectedNotice.type === 2 ? '公告' : '通知' }}
           </Tag>
-          <span>{{ formatDateTime(selectedNotice.createTime) }}</span>
+          <span>{{ formatTime(selectedNotice.createTime) }}</span>
         </div>
         <div
           v-dompurify-html="selectedNotice.content"
@@ -920,674 +770,533 @@ onActivated(() => {
 </template>
 
 <style scoped>
-.dashboard-home {
+.home {
+  --tone-bad: #d03b3b;
+  --tone-warning: #9a6200;
+  --tone-good: #006300;
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   min-height: 100%;
   padding: 20px;
   color: hsl(var(--foreground));
 }
 
-.welcome-panel {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  min-height: 190px;
-  overflow: hidden;
-  color: #fff;
-  background:
-    radial-gradient(circle at 82% 16%, rgb(255 255 255 / 18%), transparent 24%),
-    radial-gradient(circle at 62% 120%, rgb(34 211 238 / 34%), transparent 38%),
-    linear-gradient(120deg, #173f91 0%, #2563eb 48%, #3b82f6 100%);
-  border: 1px solid rgb(255 255 255 / 14%);
-  border-radius: 18px;
-  box-shadow: 0 18px 50px rgb(30 64 175 / 20%);
+:global(.dark) .home {
+  --tone-bad: #e66767;
+  --tone-warning: #fab219;
+  --tone-good: #0ca30c;
 }
 
-.welcome-panel::before,
-.welcome-panel::after {
-  position: absolute;
-  content: '';
-  border: 1px solid rgb(255 255 255 / 10%);
-  border-radius: 999px;
-}
-
-.welcome-panel::before {
-  right: 170px;
-  bottom: -145px;
-  width: 360px;
-  height: 360px;
-}
-
-.welcome-panel::after {
-  top: -110px;
-  right: -60px;
-  width: 270px;
-  height: 270px;
-}
-
-.welcome-panel__content {
-  z-index: 1;
+.home-head {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
   justify-content: space-between;
-  min-width: 0;
-  padding: 30px 34px 28px;
 }
 
-.welcome-panel__identity {
+.home-head__who {
   display: flex;
   gap: 16px;
   align-items: center;
 }
 
-.welcome-panel__identity :deep(.ant-avatar) {
-  flex: none;
-  border: 2px solid rgb(255 255 255 / 75%);
-  box-shadow: 0 8px 24px rgb(15 23 42 / 24%);
-}
-
-.welcome-panel__date {
-  margin: 0 0 5px;
+.home-eyebrow {
+  margin: 0 0 2px;
   font-size: 13px;
-  color: rgb(255 255 255 / 76%);
+  color: hsl(var(--muted-foreground));
 }
 
-.welcome-panel h1 {
+.home-head h1 {
   margin: 0;
-  font-size: clamp(24px, 2vw, 32px);
-  font-weight: 700;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-}
-
-.welcome-panel__description {
-  margin: 7px 0 0;
-  font-size: 14px;
-  color: rgb(255 255 255 / 78%);
-}
-
-.welcome-panel__actions {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-}
-
-.welcome-panel__updated {
-  font-size: 12px;
-  color: rgb(255 255 255 / 68%);
-}
-
-.welcome-panel__focus {
-  z-index: 1;
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  padding: 30px;
-  background: rgb(8 31 79 / 20%);
-  border-left: 1px solid rgb(255 255 255 / 12%);
-  backdrop-filter: blur(8px);
-}
-
-.focus-icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 48px;
-  height: 48px;
   font-size: 24px;
-  color: #dbeafe;
-  background: rgb(255 255 255 / 14%);
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 14px;
-}
-
-.welcome-panel__focus > div:last-child > span {
-  font-size: 13px;
-  color: rgb(255 255 255 / 70%);
-}
-
-.focus-count {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  margin-top: 5px;
-}
-
-.focus-count strong {
-  font-size: 34px;
-  line-height: 1;
-}
-
-.focus-count > span {
-  font-size: 13px;
-  color: rgb(255 255 255 / 74%);
-}
-
-.focus-link {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  padding: 0;
-  margin-top: 12px;
-  font-size: 13px;
-  color: #fff;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 16px;
-}
-
-.metric-card {
-  position: relative;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  min-width: 0;
-  padding: 18px;
-  color: hsl(var(--foreground));
-  text-align: left;
-  cursor: pointer;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border) / 78%);
-  border-radius: 14px;
-  box-shadow: 0 4px 14px rgb(15 23 42 / 4%);
-  transition:
-    transform 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.metric-card:hover {
-  border-color: color-mix(in srgb, var(--metric-color) 38%, transparent);
-  box-shadow: 0 12px 28px rgb(15 23 42 / 8%);
-  transform: translateY(-2px);
-}
-
-.metric-card__icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  font-size: 23px;
-  color: var(--metric-color);
-  background: color-mix(in srgb, var(--metric-color) 10%, transparent);
-  border-radius: 14px;
-}
-
-.metric-card__body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.metric-card__title {
-  margin-bottom: 1px;
-  font-size: 13px;
-  color: hsl(var(--muted-foreground));
-}
-
-.metric-card__body strong {
-  font-size: 27px;
-  line-height: 1.25;
-}
-
-.metric-card__description {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-  white-space: nowrap;
-}
-
-.metric-card__arrow {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  font-size: 15px;
-  color: hsl(var(--muted-foreground) / 55%);
-}
-
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(340px, 1fr);
-  gap: 16px;
-  align-items: start;
-  margin-top: 16px;
-}
-
-.dashboard-sidebar {
-  display: grid;
-  gap: 16px;
-}
-
-.home-card {
-  overflow: hidden;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border) / 78%);
-  border-radius: 14px;
-  box-shadow: 0 4px 14px rgb(15 23 42 / 4%);
-}
-
-.home-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 22px 16px;
-  border-bottom: 1px solid hsl(var(--border) / 65%);
-}
-
-.home-card__header h2 {
-  margin: 1px 0 0;
-  font-size: 18px;
   font-weight: 650;
 }
 
-.home-card__eyebrow {
-  font-size: 10px;
-  font-weight: 700;
-  color: #2563eb;
-  letter-spacing: 0.13em;
+.home-lead {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
-.compact-header {
-  padding-bottom: 13px;
+.home-head__actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
-.card-loading {
+.home-updated {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* 概览条 */
+.stat-strip {
   display: grid;
-  gap: 10px;
-  padding: 20px 22px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
 }
 
-.card-loading.compact {
-  min-height: 286px;
-  padding: 10px 4px;
-}
-
-.card-empty {
+.stat {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 360px;
-}
-
-.card-empty.compact {
-  min-height: 270px;
-}
-
-.todo-list {
-  padding: 4px 10px 10px;
-}
-
-.todo-item {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  gap: 13px;
-  align-items: center;
-  width: 100%;
-  padding: 15px 12px;
-  color: hsl(var(--foreground));
+  gap: 4px;
+  min-width: 0;
+  padding: 16px 18px;
+  font: inherit;
+  color: inherit;
   text-align: left;
   cursor: pointer;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid hsl(var(--border) / 58%);
-  border-radius: 10px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
   transition:
-    background 140ms ease,
-    transform 140ms ease;
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.todo-item:last-child {
-  border-bottom-color: transparent;
+.stat:hover {
+  border-color: hsl(var(--primary) / 45%);
+  box-shadow: 0 10px 28px -18px hsl(var(--foreground) / 40%);
 }
 
-.todo-item:hover {
-  background: hsl(var(--muted) / 42%);
-  transform: translateX(2px);
+.stat:focus-visible,
+.work-item:focus-visible,
+.quick:focus-visible,
+.info-item:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
 }
 
-.todo-item__icon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  font-size: 19px;
-  color: #2563eb;
-  background: rgb(37 99 235 / 9%);
-  border-radius: 12px;
+.stat--total {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  border-color: transparent;
 }
 
-.todo-item__content {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+.stat--total .stat__label,
+.stat--total .stat__hint {
+  color: hsl(var(--primary-foreground) / 80%);
 }
 
-.todo-item__topline {
-  display: flex;
-  gap: 8px;
+.stat__label {
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
-}
-
-.todo-item__topline strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.todo-item__topline :deep(.ant-tag) {
-  flex: none;
-  margin-inline-end: 0;
-  font-size: 11px;
-}
-
-.todo-item__task {
-  margin-top: 3px;
   font-size: 13px;
   color: hsl(var(--muted-foreground));
 }
 
-.todo-item__meta {
+.stat__hero {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.stat__value {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.stat__hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
+/* 主体 */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.home-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.panel {
+  min-width: 0;
+  padding: 18px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+}
+
+.panel-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  margin-top: 7px;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground) / 82%);
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
 }
 
-.todo-item__meta span {
-  display: inline-flex;
-  gap: 5px;
+.panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.panel-head p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.work-panel {
+  min-height: 420px;
+}
+
+.work-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.work-banner {
+  display: flex;
+  gap: 8px;
   align-items: center;
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: hsl(var(--primary) / 8%);
+  border: 1px solid hsl(var(--primary) / 20%);
+  border-radius: 10px;
 }
 
-.todo-item__action {
+.work-banner strong {
+  color: hsl(var(--primary));
+}
+
+.work-banner__go {
+  margin-left: auto;
+  color: hsl(var(--primary));
+}
+
+.work-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.work-list li + li {
+  border-top: 1px solid hsl(var(--border) / 70%);
+}
+
+.work-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto 16px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px 8px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+}
+
+.work-item:hover {
+  background: hsl(var(--accent) / 70%);
+}
+
+.work-item__source {
+  justify-self: start;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: 6px;
+}
+
+.work-item__source--approval {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+}
+
+.work-item__source--business {
+  color: hsl(var(--foreground) / 75%);
+  background: hsl(var(--accent));
+}
+
+.work-item__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.work-item__title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.work-item__title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.work-item__count {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  background: hsl(var(--accent));
+  border-radius: 999px;
+}
+
+.work-item--hot .work-item__count {
+  color: #fff;
+  background: var(--tone-bad);
+}
+
+.work-item__body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
+.wait {
   display: inline-flex;
   gap: 4px;
   align-items: center;
   font-size: 12px;
-  color: #2563eb;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
 }
 
-.information-card {
-  min-height: 390px;
-  padding: 0 18px 16px;
+.wait--warning {
+  font-weight: 600;
+  color: var(--tone-warning);
 }
 
-.information-card :deep(.ant-tabs-nav) {
-  margin-bottom: 8px;
+.wait--critical {
+  font-weight: 600;
+  color: var(--tone-bad);
 }
 
-.information-tab {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
+.work-item__go {
+  color: hsl(var(--muted-foreground));
 }
 
-.tab-count {
-  display: inline-flex;
+.work-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  font-size: 10px;
-  color: #fff;
-  background: #ef4444;
-  border-radius: 999px;
+  min-height: 280px;
+  text-align: center;
 }
 
-.information-list {
+.work-empty__icon {
   display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  font-size: 24px;
+  color: var(--tone-good);
+  background: hsl(var(--accent));
+  border-radius: 50%;
 }
 
-.information-item {
+.work-empty small {
+  color: hsl(var(--muted-foreground));
+}
+
+.work-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.work-foot:empty {
+  display: none;
+}
+
+.work-foot__warn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--tone-warning);
+}
+
+/* 公告与消息 */
+.info-panel {
+  padding-top: 8px;
+}
+
+.info-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.info-item {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
   width: 100%;
-  padding: 12px 4px;
-  color: hsl(var(--foreground));
+  padding: 10px 6px;
+  font: inherit;
+  color: inherit;
   text-align: left;
   cursor: pointer;
   background: transparent;
-  border: 0;
-  border-bottom: 1px solid hsl(var(--border) / 55%);
+  border: none;
+  border-radius: 8px;
 }
 
-.information-item:last-child {
-  border-bottom: 0;
+.info-item:hover {
+  background: hsl(var(--accent) / 70%);
 }
 
-.information-item:hover strong {
-  color: #2563eb;
-}
-
-.information-item__marker {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  font-size: 16px;
-  border-radius: 10px;
-}
-
-.notice-marker {
-  color: #2563eb;
-  background: rgb(37 99 235 / 9%);
-}
-
-.message-marker {
-  color: #7c3aed;
-  background: rgb(124 58 237 / 9%);
-}
-
-.information-item__content {
+.info-item__title {
   display: flex;
-  flex-direction: column;
+  gap: 6px;
+  align-items: center;
   min-width: 0;
 }
 
-.information-item__title-row {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-}
-
-.information-item__title-row strong {
+.info-item__title strong {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
-  transition: color 140ms ease;
 }
 
-.information-item__title-row :deep(.ant-tag) {
-  flex: none;
-  margin-inline-end: 0;
-  font-size: 10px;
-  line-height: 18px;
+.info-item__tag {
+  margin: 0;
 }
 
-.information-item__preview {
-  display: -webkit-box;
-  margin-top: 3px;
+.info-item small {
+  grid-column: 1 / -1;
   overflow: hidden;
-  -webkit-line-clamp: 1;
-  font-size: 11px;
+  text-overflow: ellipsis;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
 }
 
-.information-item__time {
-  margin-top: 4px;
-  font-size: 10px;
-  color: hsl(var(--muted-foreground) / 72%);
-}
-
-.unread-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  background: #ef4444;
-  border-radius: 999px;
-}
-
-.information-more {
-  margin-top: 12px;
-}
-
-.version-card__body {
-  display: grid;
-  padding: 4px 20px 10px;
-}
-
-.version-item {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 14px 0;
-}
-
-.version-item + .version-item {
-  border-top: 1px solid hsl(var(--border) / 58%);
-}
-
-.version-item__icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  font-size: 17px;
-  border-radius: 10px;
-}
-
-.frontend-version-icon {
-  color: #2563eb;
-  background: rgb(37 99 235 / 9%);
-}
-
-.backend-version-icon {
-  color: #0f766e;
-  background: rgb(15 118 110 / 10%);
-}
-
-.unavailable-version-icon {
-  color: #d97706;
-  background: rgb(217 119 6 / 10%);
-}
-
-.version-item__content {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.version-item__label {
+.info-item time {
+  grid-row: 1;
+  grid-column: 2;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
 }
 
-.version-item code,
-.version-item strong {
-  display: block;
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.45;
-  white-space: nowrap;
+.unread-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  background: hsl(var(--primary));
+  border-radius: 50%;
 }
 
-.version-item__meta {
-  display: block;
-  margin-top: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10px;
-  line-height: 1.5;
-  color: hsl(var(--muted-foreground) / 78%);
-  white-space: nowrap;
+.tab-count {
+  padding: 0 6px;
+  margin-left: 4px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--tone-bad);
+  border-radius: 999px;
 }
 
-.version-item__loading {
-  gap: 6px;
-  padding-top: 2px;
+.info-more {
+  margin-top: 10px;
 }
 
-.version-item__loading :deep(.ant-skeleton-button) {
-  height: 16px;
-}
-
+/* 常用功能 */
 .quick-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  padding: 12px;
 }
 
-.quick-entry {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  gap: 9px;
+.quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   align-items: center;
-  min-width: 0;
-  padding: 10px;
-  color: hsl(var(--foreground));
-  text-align: left;
+  padding: 10px 4px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
   cursor: pointer;
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 10px;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease;
 }
 
-.quick-entry:hover {
-  background: hsl(var(--muted) / 36%);
-  border-color: hsl(var(--border) / 72%);
+.quick:hover {
+  background: hsl(var(--accent) / 70%);
 }
 
-.quick-entry__icon {
+.quick__icon {
   display: grid;
   place-items: center;
   width: 38px;
   height: 38px;
   font-size: 18px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
   border-radius: 10px;
 }
 
-.quick-entry strong,
-.quick-entry small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.quick-entry strong {
+.version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 4px;
   font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
-.quick-entry small {
-  margin-top: 2px;
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
+.version code {
+  padding: 0 4px;
+  font-size: 11px;
+  background: hsl(var(--accent));
+  border-radius: 4px;
 }
 
 .notice-detail__meta {
@@ -1614,77 +1323,28 @@ onActivated(() => {
   border-radius: 8px;
 }
 
-@media (max-width: 1280px) {
-  .metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .dashboard-grid {
-    grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr);
-  }
-}
-
-@media (max-width: 980px) {
-  .welcome-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .welcome-panel__focus {
-    padding: 20px 30px;
-    border-top: 1px solid rgb(255 255 255 / 12%);
-    border-left: 0;
-  }
-
-  .dashboard-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 1100px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 640px) {
-  .dashboard-home {
+  .home {
     padding: 12px;
   }
 
-  .welcome-panel__content {
-    padding: 24px 20px;
+  .work-item {
+    grid-template-columns: minmax(0, 1fr) 16px;
   }
 
-  .welcome-panel__identity {
-    align-items: flex-start;
-  }
-
-  .welcome-panel__actions {
-    justify-content: space-between;
-    margin-top: 24px;
-  }
-
-  .welcome-panel__focus {
-    padding: 18px 20px;
-  }
-
-  .metrics-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .metric-card {
-    padding: 15px;
-  }
-
-  .todo-item {
-    grid-template-columns: 36px minmax(0, 1fr);
-  }
-
-  .todo-item__icon {
-    width: 36px;
-    height: 36px;
-  }
-
-  .todo-item__action {
+  .work-item__source,
+  .wait {
     display: none;
   }
 
   .quick-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>
