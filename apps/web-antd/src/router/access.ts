@@ -7,7 +7,10 @@ import type {
 import { generateAccessible } from '@vben/access';
 import { preferences } from '@vben/preferences';
 import { useAccessStore } from '@vben/stores';
-import { convertServerMenuToRouteRecordStringComponent } from '@vben/utils';
+import {
+  convertServerMenuToRouteRecordStringComponent,
+  filterTree,
+} from '@vben/utils';
 
 import { BasicLayout, IFrameView } from '#/layouts';
 
@@ -32,8 +35,18 @@ async function generateAccess(options: GenerateMenuAndRoutesOptions) {
     IFrameView,
   };
 
+  // 后端菜单模式下前端静态路由不按角色过滤；meta.authority 写了角色的（如公司看板只给超级管理员）在这里过滤
+  const roles = options.roles ?? [];
+  const routes = filterTree(
+    options.routes,
+    (route) =>
+      !route.meta?.authority ||
+      route.meta.authority.some((role) => roles.includes(role)),
+  );
+
   return await generateAccessible(preferences.app.accessMode, {
     ...options,
+    routes,
     fetchMenuListAsync: async () => {
       // 菜单从 accessStore 读取，这里不再进行 message.loading 提示
       // 补充说明：accessStore.accessMenus 一开始是 AppRouteRecordRaw 类型（后端加载），后面被赋值成 MenuRecordRaw 类型（前端转换）

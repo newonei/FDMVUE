@@ -55,15 +55,39 @@ export interface BoardInput {
   today: string;
 }
 
+/** 看板主图能切换的指标；每个都是 24 个月（最后一个是本月）的人民币金额。 */
+export type MetricKey = 'ec' | 'inflow' | 'outflow' | 'purchasing' | 'signed';
+
+export interface Metric {
+  key: MetricKey;
+  label: string;
+  /** 主图标题里的说明 */
+  caption: string;
+  values: number[];
+  /** 堆叠显示的组成部分（签约额分外贸、内销） */
+  parts?: { name: string; values: number[] }[];
+  ytd: number;
+  lastYtd: null | number;
+  /** 去年 1–12 月合计；数据不满 24 个月时没有 */
+  lastYearTotal: null | number;
+  /** true 时涨跌不评价好坏（付款） */
+  neutral?: boolean;
+  /** 某天之后的数据还没迁全，主图上标出这一段 */
+  gapFrom?: string;
+  gapNote?: string;
+  link: BoardLink;
+}
+
 export interface KpiTile {
   key: string;
   label: string;
+  icon: string;
   value: string;
-  sub: string;
   delta: Delta | null;
-  deltaLabel: string;
-  /** 近 12 个月，最后一个是本月 */
-  spark: number[];
+  /** 例：去年同期 ¥6,640万 */
+  compare: string;
+  /** 点击切换主图；没有的点击进入明细 */
+  metric?: MetricKey;
   link: BoardLink;
 }
 
@@ -175,101 +199,170 @@ export function combinedSigned(board: CompanyBoard | null, months: string[]) {
 
 const last12 = (values: number[]) => values.slice(-12);
 
-export function buildKpis(input: BoardInput, months: string[]): KpiTile[] {
-  const { board, ec } = input;
-  const tiles: KpiTile[] = [];
+/** months 中某一年各月的下标；不在范围内的月份不返回。 */
+function yearIndexes(months: readonly string[], year: number) {
+  return months
+    .map((month, index) => (month.startsWith(`${year}-`) ? index : -1))
+    .filter((index) => index >= 0);
+}
+
+function lastYearTotal(months: readonly string[], values: number[]) {
+  const year = Number(months.at(-1)?.slice(0, 4)) - 1;
+  const indexes = yearIndexes(months, year);
+  if (indexes.length < 12) return null;
+  // 去年整年都没有数据（如电商从今年才开始导入）时不做对比
+  const total = sum(indexes.map((index) => values[index]));
+  return total > 0 ? total : null;
+}
+
+/** 迁移缺口：迁入截止日在近 12 个月内、且离今天超过 20 天才提示。 */
+function migrationGap(until: null | string | undefined, months: string[], today: string) {
+  if (!until) return {};
+  const month = until.slice(0, 7);
+  const lagDays = (Date.parse(today) - Date.parse(until)) / 86_400_000;
+  if (!months.slice(-12).includes(month) || !(lagDays > 20)) return {};
+  const [, m, d] = until.split('-').map(Number);
+  return {
+    gapFrom: until,
+    gapNote: `金智历史数据只迁入到 ${m}月${d}日，之后只含新系统登记的数据，这段会偏低`,
+  };
+}
+
+function latestDate(values: (null | string | undefined)[]) {
+  return values.filter((value): value is string => !!value).toSorted().at(-1);
+}
+
+export function buildMetrics(input: BoardInput, months: string[]): Metric[] {
+  const { board, ec, today } = input;
+  const metrics: Metric[] = [];
   const lines = salesLines(board);
   if (lines.length > 0) {
-    const ytd = sum(lines.map((line) => line.ytd.amount));
-    const lastYtd = sum(lines.map((line) => line.lastYtd.amount));
-    const parts = lines.map(
-      (line) =>
-        `${line.channel === 'FOREIGN' ? '外贸' : '内销'} ${compactMoney(toNumber(line.ytd.amount))}`,
-    );
-    tiles.push({
+    const values = combinedSigned(board, months);
+    metrics.push({
+      caption: '按签约日期，外币按当天汇率折人民币',
       key: 'signed',
-      label: '今年签约额',
-      value: compactMoney(ytd),
-      sub: parts.join(' · '),
-      delta: delta(ytd, lastYtd),
-      deltaLabel: '较去年同期',
-      spark: last12(combinedSigned(board, months)),
+      label: '签约额',
+      lastYearTotal: lastYearTotal(months, values),
+      lastYtd: sum(lines.map((line) => line.lastYtd.amount)),
       link: lines[0]!.channel === 'FOREIGN' ? LINKS.foreign : LINKS.domestic,
+      parts:
+        lines.length > 1
+          ? lines.map((line) => ({
+              name: line.channel === 'FOREIGN' ? '外贸' : '内销',
+              values: alignMonths(months, line.months, line.signed),
+            }))
+          : undefined,
+      values,
+      ytd: sum(lines.map((line) => line.ytd.amount)),
+      ...migrationGap(
+        latestDate(lines.map((line) => line.migratedUntil)),
+        months,
+        today,
+      ),
     });
   }
   const cash = board?.cashflow;
   if (cash) {
-    const ytdIn = toNumber(cash.ytd.in);
-    const ytdOut = toNumber(cash.ytd.out);
-    tiles.push(
+    const gap = migrationGap(cash.migratedUntil, months, today);
+    const inflow = alignMonths(months, cash.months, cash.inflow);
+    const outflow = alignMonths(months, cash.months, cash.outflow);
+    metrics.push(
       {
+        caption: '已确认的客户回款，含金智迁入的历史收付',
         key: 'inflow',
-        label: '今年回款',
-        value: compactMoney(ytdIn),
-        sub: `本月 ${compactMoney(toNumber(cash.thisMonth.in))}`,
-        delta: delta(ytdIn, toNumber(cash.lastYtd.in)),
-        deltaLabel: '较去年同期',
-        spark: last12(alignMonths(months, cash.months, cash.inflow)),
+        label: '回款',
+        lastYearTotal: lastYearTotal(months, inflow),
+        lastYtd: toNumber(cash.lastYtd.in),
         link: LINKS.cash,
+        values: inflow,
+        ytd: toNumber(cash.ytd.in),
+        ...gap,
       },
       {
+        caption: '已确认的供应商付款，含金智迁入的历史收付',
         key: 'outflow',
-        label: '今年付款',
-        value: compactMoney(ytdOut),
-        sub: `净流入 ${compactMoney(ytdIn - ytdOut)}`,
-        delta: delta(ytdOut, toNumber(cash.lastYtd.out), null),
-        deltaLabel: '较去年同期',
-        spark: last12(alignMonths(months, cash.months, cash.outflow)),
+        label: '付款',
+        lastYearTotal: lastYearTotal(months, outflow),
+        lastYtd: toNumber(cash.lastYtd.out),
         link: LINKS.payments,
+        neutral: true,
+        values: outflow,
+        ytd: toNumber(cash.ytd.out),
+        ...gap,
       },
     );
   }
   if (ec) {
-    tiles.push({
+    const values = alignMonths(months, ec.months, ec.sales);
+    metrics.push({
+      caption: '店铺后台日汇总的实际销售额',
       key: 'ec',
-      label: '电商今年销售额',
-      value: compactMoney(ec.ytd),
-      sub: `${monthLabel(ec.months[ec.latest] ?? '')} ${compactMoney(ec.sales[ec.latest] ?? 0)} · ${formatCount(ec.shops)} 家店铺`,
-      delta: delta(ec.ytd, ec.lastYtd),
-      deltaLabel: '较去年同期',
-      spark: last12(ec.sales),
+      label: '电商销售额',
+      lastYearTotal: lastYearTotal(months, values),
+      lastYtd: ec.lastYtd,
       link: LINKS.ecSummary,
-    });
-  }
-  if (lines.length > 0) {
-    const unpaid = sum(lines.map((line) => line.unpaid.amount));
-    const over90 = sum(
-      lines.map((line) => line.aging?.OVER90?.amount ?? 0),
-    );
-    const hasAging = lines.some((line) => line.aging);
-    tiles.push({
-      key: 'unpaid',
-      label: '在手合同未回款',
-      value: compactMoney(unpaid),
-      sub: hasAging
-        ? `90 天以上 ${compactMoney(over90)}`
-        : `${formatCount(sum(lines.map((line) => line.unpaid.count)))} 份合同`,
-      delta: null,
-      deltaLabel: '',
-      spark: [],
-      link: hasAging ? LINKS.receivables : LINKS.foreign,
+      values,
+      ytd: sum(ec.months.map((month, index) => (month.startsWith(today.slice(0, 4)) ? ec.sales[index] : 0))),
     });
   }
   const purchasing = board?.purchasing;
   if (purchasing) {
-    tiles.push({
+    const values = alignMonths(months, purchasing.months, purchasing.monthly);
+    const year = Number(today.slice(0, 4));
+    metrics.push({
+      caption: '采购单金额（人民币），只有近 12 个月',
       key: 'purchasing',
-      label: '近 12 个月采购额',
-      value: compactMoney(toNumber(purchasing.recent12Amount)),
-      sub: `${formatCount(purchasing.recent12Orders)} 张采购单`,
-      delta: null,
-      deltaLabel: '',
-      spark: alignMonths(
-        months.slice(-12),
-        purchasing.months,
-        purchasing.monthly,
-      ),
+      label: '采购额',
+      lastYearTotal: null,
+      lastYtd: null,
       link: LINKS.orders,
+      values,
+      ytd: sum(yearIndexes(months, year).map((index) => values[index])),
+    });
+  }
+  return metrics;
+}
+
+const METRIC_TILES: Record<MetricKey, { icon: string; label: string }> = {
+  ec: { icon: 'lucide:shopping-cart', label: '电商今年销售额' },
+  inflow: { icon: 'lucide:arrow-down-to-line', label: '今年回款' },
+  outflow: { icon: 'lucide:arrow-up-from-line', label: '今年付款' },
+  purchasing: { icon: 'lucide:package-search', label: '今年采购额' },
+  signed: { icon: 'lucide:file-signature', label: '今年签约额' },
+};
+
+export function buildKpis(input: BoardInput, months: string[]): KpiTile[] {
+  const tiles: KpiTile[] = buildMetrics(input, months).map((metric) => {
+    let compare = '去年同期无数据';
+    if (metric.lastYtd) compare = `去年同期 ${compactMoney(metric.lastYtd)}`;
+    if (metric.key === 'purchasing') {
+      compare = `近 12 个月 ${compactMoney(toNumber(input.board?.purchasing?.recent12Amount))}`;
+    }
+    return {
+      compare,
+      delta: delta(metric.ytd, metric.lastYtd, metric.neutral ? null : true),
+      icon: METRIC_TILES[metric.key].icon,
+      key: metric.key,
+      label: METRIC_TILES[metric.key].label,
+      link: metric.link,
+      metric: metric.key,
+      value: compactMoney(metric.ytd),
+    };
+  });
+  const lines = salesLines(input.board);
+  if (lines.length > 0) {
+    const unpaid = sum(lines.map((line) => line.unpaid.amount));
+    const aging = agingRows(input.board);
+    tiles.push({
+      compare: aging
+        ? `已发货未收 ${compactMoney(aging.total)}`
+        : `${formatCount(sum(lines.map((line) => line.unpaid.count)))} 份合同`,
+      delta: null,
+      icon: 'lucide:hourglass',
+      key: 'unpaid',
+      label: '在手合同未回款',
+      link: aging ? LINKS.receivables : LINKS.foreign,
+      value: compactMoney(unpaid),
     });
   }
   return tiles;
@@ -474,21 +567,33 @@ export interface AgingRow {
   share: number;
 }
 
-export function agingRows(board: CompanyBoard | null): AgingRow[] | null {
+export interface AgingSummary {
+  /** 已发货的未回款，按最后一次发货算账龄 */
+  rows: AgingRow[];
+  total: number;
+  /** 还没发货的合同未收款，不算账龄 */
+  unshipped: { amount: number; count: number };
+}
+
+export function agingRows(board: CompanyBoard | null): AgingSummary | null {
   const lines = salesLines(board).filter((line) => line.aging);
   if (lines.length === 0) return null;
-  const rows = AGING_ORDER.map((bucket) => ({
-    bucket,
-    label: AGING_LABELS[bucket],
+  const pick = (bucket: CompanyAgingBucket) => ({
     amount: sum(lines.map((line) => line.aging?.[bucket]?.amount ?? 0)),
     count: sum(lines.map((line) => line.aging?.[bucket]?.count ?? 0)),
-    share: 0,
-  }));
+  });
+  const rows = AGING_ORDER.filter((bucket) => bucket !== 'UNSHIPPED').map(
+    (bucket) => ({ bucket, label: AGING_LABELS[bucket], share: 0, ...pick(bucket) }),
+  );
   const total = sum(rows.map((row) => row.amount));
-  return rows.map((row) => ({
-    ...row,
-    share: total > 0 ? (row.amount / total) * 100 : 0,
-  }));
+  return {
+    rows: rows.map((row) => ({
+      ...row,
+      share: total > 0 ? (row.amount / total) * 100 : 0,
+    })),
+    total,
+    unshipped: pick('UNSHIPPED'),
+  };
 }
 
 export interface RankRow {
@@ -549,7 +654,10 @@ export function buildAlerts(input: BoardInput): BoardAlert[] {
     const link = line.channel === 'FOREIGN' ? LINKS.foreign : LINKS.domestic;
     if (line.due.overdue > 0) {
       alerts.push({
-        detail: `另有 ${line.due.soon} 份 ${line.due.soonDays} 天内到期`,
+        detail:
+          line.due.soon > 0
+            ? `另有 ${line.due.soon} 份 ${line.due.soonDays} 天内到期`
+            : '点击查看逾期合同，安排发货或调整交期',
         key: `${line.channel}-overdue`,
         level: 'critical',
         link,
@@ -639,20 +747,4 @@ export function buildAlerts(input: BoardInput): BoardAlert[] {
     }
   }
   return alerts.toSorted((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
-}
-
-/** 签约 / 收付 / 电商 / 采购 四个趋势视图里，当前账号能看的。 */
-export type TrendView = 'cash' | 'ec' | 'purchasing' | 'signed';
-
-export function trendViews(input: BoardInput) {
-  const views: { label: string; value: TrendView }[] = [];
-  if (salesLines(input.board).length > 0) {
-    views.push({ label: '签约额', value: 'signed' });
-  }
-  if (input.board?.cashflow) views.push({ label: '回款与付款', value: 'cash' });
-  if (input.ec) views.push({ label: '电商销售', value: 'ec' });
-  if (input.board?.purchasing) {
-    views.push({ label: '采购额', value: 'purchasing' });
-  }
-  return views;
 }

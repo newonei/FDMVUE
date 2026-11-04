@@ -6,16 +6,16 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { compactMoney, delta } from '../shared/format';
-import { trendOption, LIGHT_PALETTE } from './charts';
+import { heroOption, LIGHT_PALETTE } from './charts';
 import {
   agingRows,
   alignMonths,
   buildAlerts,
   buildKpis,
   buildLines,
+  buildMetrics,
   topCustomers,
   trailingMonths,
-  trendViews,
 } from './model';
 
 const months = trailingMonths('2026-10', 24);
@@ -88,17 +88,18 @@ describe('company board model', () => {
     const signed = kpis.find((tile) => tile.key === 'signed')!;
     expect(signed.value).toBe('¥2,400');
     expect(signed.delta?.text).toBe('+20.0%');
-    expect(signed.spark).toHaveLength(12);
-    expect(signed.spark.at(-1)).toBe(600);
-    // 没有收付、采购、电商时只出签约和未回款
+    expect(signed.compare).toBe('去年同期 ¥2,000');
+    expect(signed.metric).toBe('signed');
+    // 没有收付、采购、电商时只出签约和未回款；未回款点击进入明细，不切换主图
     expect(kpis.map((tile) => tile.key)).toEqual(['signed', 'unpaid']);
+    expect(kpis[1]!.metric).toBeUndefined();
   });
 
   it('shows only the sections the account received', () => {
     const tradeOnly = board({ domestic: undefined, sections: ['foreign'] });
     const input = { board: tradeOnly, ec: null, factories: [], today: '2026-10-09' };
     expect(buildLines(input).map((line) => line.key)).toEqual(['foreign']);
-    expect(trendViews(input).map((view) => view.value)).toEqual(['signed']);
+    expect(buildMetrics(input, months).map((metric) => metric.key)).toEqual(['signed']);
     expect(agingRows(tradeOnly)).toBeNull();
   });
 
@@ -117,7 +118,8 @@ describe('company board model', () => {
     const input = { board: board({ foreign }), ec: null, factories: [], today: '2026-10-09' };
     expect(buildAlerts(input).map((alert) => alert.level)).toEqual(['critical', 'serious', 'warning']);
     const aging = agingRows(input.board)!;
-    expect(aging.find((row) => row.bucket === 'OVER90')?.share).toBe(75);
+    expect(aging.rows.find((row) => row.bucket === 'OVER90')?.share).toBe(75);
+    expect(aging.total).toBe(400);
   });
 
   it('flags stale e-commerce data', () => {
@@ -149,15 +151,32 @@ describe('company board model', () => {
     expect(rows[0]!.tag).toBe('内销');
   });
 
-  it('stacks both lines with a dashed last-year line on one axis', () => {
-    const option = trendOption(
-      'signed',
-      { board: board(), ec: null, factories: [], today: '2026-10-09' },
-      months,
-      LIGHT_PALETTE,
-    ) as any;
-    expect(option.series.map((item: any) => item.type)).toEqual(['bar', 'bar', 'line']);
-    expect(option.series[2].data.at(-1)).toBe(400);
-    expect(Array.isArray(option.yAxis)).toBe(false);
+  it('notes the history migration gap only when it is old and recent', () => {
+    const foreign = sales('FOREIGN', { migratedUntil: '2026-09-08' });
+    const domestic = sales('DOMESTIC', { migratedUntil: '2026-08-20' });
+    const input = { board: board({ domestic, foreign }), ec: null, factories: [], today: '2026-10-09' };
+    const signed = buildMetrics(input, months)[0]!;
+    expect(signed.gapFrom).toBe('2026-09-08');
+    expect(signed.gapNote).toContain('9月8日');
+    // 离今天不到 20 天不提示
+    const fresh = buildMetrics({ ...input, today: '2026-09-20' }, months)[0]!;
+    expect(fresh.gapNote).toBeUndefined();
+  });
+
+  it('compares the running total with last year and stacks both lines by month', () => {
+    const input = { board: board(), ec: null, factories: [], today: '2026-10-09' };
+    const signed = buildMetrics(input, months)[0]!;
+    // 去年 1–12 月每月两条线各 100，其中 2025-10 各 200
+    expect(signed.lastYearTotal).toBe(2600);
+    const cumulative = heroOption(signed, months, 'cumulative', LIGHT_PALETTE) as any;
+    expect(cumulative.series.map((item: any) => item.name)).toEqual(['2025 年', '2026 年']);
+    expect(cumulative.series[0].data).toHaveLength(12);
+    // 今年只画到本月
+    expect(cumulative.series[1].data).toHaveLength(10);
+    expect(cumulative.series[1].data.at(-1)).toBe(2400);
+    const monthly = heroOption(signed, months, 'monthly', LIGHT_PALETTE) as any;
+    expect(monthly.series.map((item: any) => item.type)).toEqual(['bar', 'bar', 'line']);
+    expect(monthly.series[2].data.at(-1)).toBe(400);
+    expect(Array.isArray(monthly.yAxis)).toBe(false);
   });
 });

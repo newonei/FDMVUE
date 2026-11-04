@@ -1,10 +1,11 @@
 <script lang="ts" setup>
+import type { HeroMode } from './charts';
 import type {
   BoardInput,
   BoardLink,
   EcBoard,
   FactoryBoard,
-  TrendView,
+  MetricKey,
 } from './model';
 
 import type { CompanyBoard } from '#/api/fdmplatform/company-board';
@@ -22,7 +23,6 @@ import {
   Empty,
   Segmented,
   Skeleton,
-  Tag,
   Tooltip,
 } from 'ant-design-vue';
 import dayjs from 'dayjs';
@@ -35,23 +35,24 @@ import { getEcShopDailySummary } from '#/api/fdmdata/ecshopdaily';
 import BoardChart from '../shared/board-chart.vue';
 import {
   compactMoney,
+  delta,
   formatCount,
   formatPercent,
   sum,
   toNumber,
 } from '../shared/format';
-import Sparkline from '../shared/sparkline.vue';
-import { DARK_PALETTE, LIGHT_PALETTE, trendOption } from './charts';
+import MiniBars from '../shared/mini-bars.vue';
+import { DARK_PALETTE, heroOption, LIGHT_PALETTE } from './charts';
 import {
   agingRows,
   buildAlerts,
   buildKpis,
   buildLines,
+  buildMetrics,
   LINKS,
   topCustomers,
   topSuppliers,
   trailingMonths,
-  trendViews,
 } from './model';
 
 defineOptions({ name: 'CompanyDashboard' });
@@ -73,7 +74,9 @@ const factories = ref<FactoryBoard[]>([]);
 const loading = ref(false);
 const loadedOnce = ref(false);
 const lastUpdatedAt = ref<null | number>(null);
-const activeTrend = ref<TrendView>('signed');
+const activeMetric = ref<MetricKey>('signed');
+const heroMode = ref<HeroMode>('cumulative');
+const showAllAlerts = ref(false);
 
 const today = ref(dayjs());
 const todayText = computed(() => today.value.format('YYYY-MM-DD'));
@@ -100,28 +103,44 @@ const alerts = computed(() => buildAlerts(input.value));
 const aging = computed(() => agingRows(board.value));
 const customers = computed(() => topCustomers(board.value));
 const suppliers = computed(() => topSuppliers(board.value));
-const views = computed(() => trendViews(input.value));
-const palette = computed(() => (isDark.value ? DARK_PALETTE : LIGHT_PALETTE));
-const trend = computed(() =>
-  trendOption(activeTrend.value, input.value, months.value, palette.value),
+const metrics = computed(() => buildMetrics(input.value, months.value));
+const metric = computed(
+  () =>
+    metrics.value.find((item) => item.key === activeMetric.value) ??
+    metrics.value[0],
 );
+const palette = computed(() => (isDark.value ? DARK_PALETTE : LIGHT_PALETTE));
+const hero = computed(() =>
+  heroOption(metric.value, months.value, heroMode.value, palette.value),
+);
+const heroDelta = computed(() => {
+  const current = metric.value;
+  return current
+    ? delta(current.ytd, current.lastYtd, current.neutral ? null : true)
+    : null;
+});
+/** 今年累计占去年全年的比例 */
+const heroProgress = computed(() => {
+  const current = metric.value;
+  if (!current?.lastYearTotal) return null;
+  return (current.ytd / current.lastYearTotal) * 100;
+});
+const visibleAlerts = computed(() =>
+  showAllAlerts.value ? alerts.value : alerts.value.slice(0, 6),
+);
+
+/** 业务线卡片的识别色：外贸、内销与主图堆叠柱同色。 */
+function lineAccent(key: string) {
+  const [blue, orange, aqua] = palette.value.series;
+  if (key === 'foreign') return blue;
+  if (key === 'domestic') return orange;
+  if (key === 'ec') return aqua;
+  return isDark.value ? '#9a7ee0' : '#7c5cc4';
+}
 
 const hasAnything = computed(
   () => kpis.value.length > 0 || lines.value.length > 0,
 );
-
-const sources = computed(() => {
-  const result: string[] = [];
-  if (board.value?.foreign) result.push('外贸');
-  if (board.value?.domestic) result.push('内销');
-  if (board.value?.cashflow) result.push('资金');
-  if (board.value?.purchasing) result.push('采购');
-  if (ec.value) result.push('电商');
-  if (factories.value.some((factory) => factory.dashboard)) {
-    result.push('工厂');
-  }
-  return result;
-});
 
 const unavailableText = computed(() => {
   const names: Record<string, string> = {
@@ -154,15 +173,6 @@ const summary = computed(() => {
   return `${parts.join('；')}。`;
 });
 
-const trendTitle = computed(() => {
-  const titles: Record<TrendView, string> = {
-    cash: '近 12 个月回款与付款（人民币，含金智历史）',
-    ec: '近 12 个月电商实际销售额，虚线为去年同月',
-    purchasing: '近 12 个月采购额（人民币）',
-    signed: '近 12 个月签约额（折人民币），虚线为去年同月合计',
-  };
-  return titles[activeTrend.value];
-});
 
 const ALERT_META = {
   critical: { icon: 'lucide:octagon-alert', label: '紧急' },
@@ -172,7 +182,12 @@ const ALERT_META = {
 } as const;
 
 /** 账龄是有序的：越久越接近警示色。 */
-const AGING_TONES = ['#86b6ef', '#2a78d6', '#fab219', '#ec835a', '#d03b3b'];
+const AGING_TONES = ['#2a78d6', '#fab219', '#ec835a', '#d03b3b'];
+
+function selectTile(tile: { link: BoardLink; metric?: MetricKey }) {
+  if (tile.metric) activeMetric.value = tile.metric;
+  else go(tile.link);
+}
 
 function go(link?: BoardLink) {
   if (link) void router.push(link);
@@ -305,12 +320,12 @@ async function refresh() {
   }
 }
 
-watch(views, (available) => {
+watch(metrics, (available) => {
   if (
     available.length > 0 &&
-    !available.some((view) => view.value === activeTrend.value)
+    !available.some((item) => item.key === activeMetric.value)
   ) {
-    activeTrend.value = available[0]!.value;
+    activeMetric.value = available[0]!.key;
   }
 });
 
@@ -328,9 +343,6 @@ onActivated(() => {
       <div>
         <p class="board-eyebrow">
           {{ todayText }} · {{ weekdayText }}
-          <template v-if="lastUpdatedAt">
-            · 更新于 {{ dayjs(lastUpdatedAt).format('HH:mm') }}
-          </template>
         </p>
         <h1>公司看板</h1>
         <p v-if="loadedOnce && hasAnything" class="board-lead">
@@ -339,9 +351,9 @@ onActivated(() => {
         <p v-else-if="!loadedOnce" class="board-lead">正在汇总各部门数据…</p>
       </div>
       <div class="board-head__actions">
-        <div v-if="sources.length" aria-label="数据来源" class="board-sources">
-          <span v-for="source in sources" :key="source">{{ source }}</span>
-        </div>
+        <span v-if="lastUpdatedAt" class="board-updated">
+          更新于 {{ dayjs(lastUpdatedAt).format('HH:mm') }}
+        </span>
         <Button :loading="loading" @click="refresh">
           <template #icon><IconifyIcon icon="lucide:refresh-cw" /></template>
           刷新
@@ -356,7 +368,7 @@ onActivated(() => {
 
     <template v-if="!loadedOnce">
       <section class="kpi-grid">
-        <div v-for="item in 5" :key="item" class="panel kpi-tile">
+        <div v-for="item in 5" :key="item" class="panel kpi">
           <Skeleton active :paragraph="{ rows: 2 }" />
         </div>
       </section>
@@ -364,10 +376,9 @@ onActivated(() => {
     </template>
 
     <section v-else-if="!hasAnything" class="panel board-empty">
-      <Empty description="当前账号还没有可看的公司经营数据">
+      <Empty description="暂时没有读到公司经营数据">
         <p class="board-empty__hint">
-          公司看板只显示你所在部门本来就能看到的全公司数字：外贸、内销看本业务线签约，
-          财务看收付与应收，采购看采购额，电商、工厂看各自看板。需要更多数据请联系管理员分配部门权限。
+          公司看板只对超级管理员开放。如果你是超级管理员仍看到这里，可能是各部门数据暂时读不出来，请稍后点「刷新」。
         </p>
       </Empty>
     </section>
@@ -377,82 +388,134 @@ onActivated(() => {
         <button
           v-for="tile in kpis"
           :key="tile.key"
-          class="panel kpi-tile"
+          :aria-pressed="tile.metric ? tile.metric === metric?.key : undefined"
+          class="panel kpi"
+          :class="{ 'kpi--active': tile.metric && tile.metric === metric?.key }"
+          :title="tile.metric ? '在下方图表中查看' : '查看明细'"
           type="button"
-          @click="go(tile.link)"
+          @click="selectTile(tile)"
         >
-          <span class="kpi-tile__label">{{ tile.label }}</span>
-          <span class="kpi-tile__value">{{ tile.value }}</span>
-          <span class="kpi-tile__foot">
+          <span class="kpi__label">
+            <span class="kpi__icon"><IconifyIcon :icon="tile.icon" /></span>
+            {{ tile.label }}
+            <IconifyIcon
+              v-if="!tile.metric"
+              class="kpi__go"
+              icon="lucide:arrow-up-right"
+            />
+          </span>
+          <span class="kpi__value">{{ tile.value }}</span>
+          <span class="kpi__foot">
             <span
               v-if="tile.delta"
-              class="delta"
-              :class="`delta--${tile.delta.tone}`"
+              class="pill"
+              :class="`pill--${tile.delta.tone}`"
             >
               <IconifyIcon
                 :icon="
                   tile.delta.direction === 'up'
-                    ? 'lucide:trending-up'
+                    ? 'lucide:arrow-up-right'
                     : tile.delta.direction === 'down'
-                      ? 'lucide:trending-down'
+                      ? 'lucide:arrow-down-right'
                       : 'lucide:minus'
                 "
               />
               {{ tile.delta.text }}
-              <small>{{ tile.deltaLabel }}</small>
             </span>
-            <span class="kpi-tile__sub">{{ tile.sub }}</span>
+            <span class="kpi__compare">{{ tile.compare }}</span>
           </span>
-          <Sparkline
-            v-if="tile.spark.length > 1"
-            class="kpi-tile__spark"
-            :label="`${tile.label}近 12 个月趋势`"
-            :values="tile.spark"
-            :width="96"
-          />
         </button>
       </section>
 
-      <section class="board-row board-row--trend">
-        <article v-if="views.length" class="panel">
+      <section class="board-row board-row--hero">
+        <article v-if="metric" class="panel hero">
           <header class="panel-head">
             <div>
-              <h2>经营趋势</h2>
-              <p>{{ trendTitle }}</p>
+              <h2>{{ metric.label }} · 今年与去年对比</h2>
+              <p>{{ metric.caption }}；点上方指标卡切换</p>
             </div>
-            <Segmented
-              v-if="views.length > 1"
-              v-model:value="activeTrend"
-              :options="views"
-            />
+            <div class="hero-tools">
+              <Segmented
+                v-if="metric.lastYearTotal !== null"
+                v-model:value="heroMode"
+                :options="[
+                  { label: '累计', value: 'cumulative' },
+                  { label: '每月', value: 'monthly' },
+                ]"
+                size="small"
+              />
+              <Button size="small" type="link" @click="go(metric.link)">
+                明细
+                <IconifyIcon icon="lucide:chevron-right" />
+              </Button>
+            </div>
           </header>
-          <BoardChart v-if="trend" :height="380" :option="trend" />
-          <Empty v-else description="暂无趋势数据" />
+
+          <div class="hero-figures">
+            <div class="figure figure--main">
+              <small>今年累计</small>
+              <strong>{{ compactMoney(metric.ytd) }}</strong>
+            </div>
+            <div v-if="metric.lastYtd" class="figure">
+              <small>去年同期</small>
+              <strong>{{ compactMoney(metric.lastYtd) }}</strong>
+              <span
+                v-if="heroDelta"
+                class="pill"
+                :class="`pill--${heroDelta.tone}`"
+              >
+                {{ heroDelta.text }}
+              </span>
+            </div>
+            <div v-if="heroProgress !== null" class="figure figure--progress">
+              <small>
+                已达去年全年 {{ compactMoney(metric.lastYearTotal) }} 的
+              </small>
+              <strong>{{ formatPercent(heroProgress, 0) }}</strong>
+              <span class="progress" role="presentation">
+                <span :style="{ width: `${Math.min(100, heroProgress)}%` }"></span>
+              </span>
+            </div>
+          </div>
+
+          <BoardChart v-if="hero" :height="300" :option="hero" />
+          <p v-if="metric.gapNote" class="hero-gap">
+            <IconifyIcon icon="lucide:info" />
+            {{ metric.gapNote }}
+          </p>
         </article>
 
-        <article class="panel">
+        <article class="panel alerts">
           <header class="panel-head">
             <div>
               <h2>需要关注</h2>
               <p>按紧急程度排列，点击进入处理</p>
             </div>
-            <Tag v-if="alerts.length">{{ alerts.length }} 项</Tag>
+            <span v-if="alerts.length" class="count-chip">
+              {{ alerts.length }}
+            </span>
           </header>
           <ul v-if="alerts.length" class="alert-list">
-            <li v-for="alert in alerts.slice(0, 6)" :key="alert.key">
+            <li v-for="alert in visibleAlerts" :key="alert.key">
               <button
                 class="alert-item"
                 :class="`alert-item--${alert.level}`"
                 type="button"
                 @click="go(alert.link)"
               >
-                <span class="alert-item__badge">
+                <span class="alert-item__icon">
                   <IconifyIcon :icon="ALERT_META[alert.level].icon" />
-                  {{ ALERT_META[alert.level].label }}
                 </span>
                 <span class="alert-item__body">
-                  <strong>{{ alert.title }}</strong>
-                  <small>{{ alert.detail }}</small>
+                  <span class="alert-item__title">
+                    <strong>{{ alert.title }}</strong>
+                  </span>
+                  <small>
+                    <span class="alert-item__level">
+                      {{ ALERT_META[alert.level].label }}
+                    </span>
+                    {{ alert.detail }}
+                  </small>
                 </span>
                 <IconifyIcon
                   class="alert-item__go"
@@ -468,19 +531,30 @@ onActivated(() => {
             <strong>暂无需要关注的事项</strong>
             <small>交期、应收、汇率、电商与工厂都在正常范围</small>
           </div>
+          <Button
+            v-if="alerts.length > 6"
+            block
+            class="alerts__more"
+            size="small"
+            type="text"
+            @click="showAllAlerts = !showAllAlerts"
+          >
+            {{ showAllAlerts ? '收起' : `展开其余 ${alerts.length - 6} 项` }}
+          </Button>
         </article>
       </section>
 
       <section v-if="lines.length" class="board-section">
         <header class="section-head">
           <h2>业务线</h2>
-          <p>各部门本月与今年的关键数字，点击卡片进入部门</p>
+          <p>各部门的关键数字，点击卡片进入部门</p>
         </header>
         <div class="line-grid">
           <button
             v-for="line in lines"
             :key="line.key"
             class="panel line-card"
+            :style="{ '--line-accent': lineAccent(line.key) }"
             type="button"
             @click="go(line.link)"
           >
@@ -495,28 +569,36 @@ onActivated(() => {
             </span>
             <span class="line-card__headline">
               <small>{{ line.headlineLabel }}</small>
-              <strong>{{ line.headline }}</strong>
-              <span
-                v-if="line.delta"
-                class="delta"
-                :class="`delta--${line.delta.tone}`"
-              >
-                {{ line.delta.text }}
-                <small>{{ line.deltaLabel }}</small>
+              <span class="line-card__value">
+                <strong>{{ line.headline }}</strong>
+                <span
+                  v-if="line.delta"
+                  class="pill"
+                  :class="`pill--${line.delta.tone}`"
+                  :title="line.deltaLabel"
+                >
+                  {{ line.delta.text }}
+                </span>
               </span>
             </span>
-            <Sparkline
+            <MiniBars
               v-if="line.spark.length > 1"
-              class="line-card__spark"
-              :height="32"
+              :height="36"
               :label="`${line.name}趋势`"
               :values="line.spark"
-              :width="240"
             />
             <dl class="line-card__stats">
               <div v-for="stat in line.stats" :key="stat.label">
                 <dt>{{ stat.label }}</dt>
                 <dd :class="stat.tone ? `tone--${stat.tone}` : ''">
+                  <IconifyIcon
+                    v-if="stat.tone === 'critical'"
+                    icon="lucide:octagon-alert"
+                  />
+                  <IconifyIcon
+                    v-else-if="stat.tone === 'warning'"
+                    icon="lucide:triangle-alert"
+                  />
                   {{ stat.value }}
                 </dd>
               </div>
@@ -536,14 +618,22 @@ onActivated(() => {
           <header class="panel-head">
             <div>
               <h2>应收账龄</h2>
-              <p>执行中合同的未回款，从最后一次发货算起</p>
+              <p>已发货未收齐的合同，从最后一次发货算起</p>
             </div>
             <Button size="small" type="link" @click="go(LINKS.receivables)">
               明细
+              <IconifyIcon icon="lucide:chevron-right" />
             </Button>
           </header>
+          <div class="aging-total">
+            <strong>{{ compactMoney(aging.total) }}</strong>
+            <small>
+              {{ formatCount(sum(aging.rows.map((row) => row.count))) }}
+              份合同已发货未收齐
+            </small>
+          </div>
           <div aria-label="应收账龄分布" class="aging-bar" role="img">
-            <template v-for="(row, index) in aging" :key="row.bucket">
+            <template v-for="(row, index) in aging.rows" :key="row.bucket">
               <Tooltip
                 v-if="row.share > 0"
                 :title="`${row.label}：${compactMoney(row.amount)} · ${row.count} 份 · ${formatPercent(row.share)}`"
@@ -560,7 +650,11 @@ onActivated(() => {
           </div>
           <table class="rank-table">
             <tbody>
-              <tr v-for="(row, index) in aging" :key="row.bucket">
+              <tr
+                v-for="(row, index) in aging.rows"
+                :key="row.bucket"
+                :class="{ 'is-zero': row.count === 0 }"
+              >
                 <td>
                   <span
                     class="swatch"
@@ -574,6 +668,10 @@ onActivated(() => {
               </tr>
             </tbody>
           </table>
+          <p v-if="aging.unshipped.count > 0" class="aging-note">
+            另有 {{ formatCount(aging.unshipped.count) }} 份未发货合同未收
+            {{ compactMoney(aging.unshipped.amount) }}，发货后才开始算账龄。
+          </p>
         </article>
 
         <article v-if="customers.length" class="panel">
@@ -589,16 +687,17 @@ onActivated(() => {
               <span class="rank-list__name">
                 <strong :title="row.name">{{ row.name }}</strong>
                 <small>{{ row.tag }} · {{ row.detail }}</small>
+                <span class="rank-list__track">
+                  <span
+                    :style="{
+                      width: `${(row.amount / customers[0]!.amount) * 100}%`,
+                    }"
+                  ></span>
+                </span>
               </span>
               <span class="rank-list__value">{{
                 compactMoney(row.amount)
               }}</span>
-              <span
-                class="rank-list__bar"
-                :style="{
-                  width: `${(row.amount / customers[0]!.amount) * 100}%`,
-                }"
-              ></span>
             </li>
           </ol>
         </article>
@@ -611,6 +710,7 @@ onActivated(() => {
             </div>
             <Button size="small" type="link" @click="go(LINKS.suppliers)">
               全部
+              <IconifyIcon icon="lucide:chevron-right" />
             </Button>
           </header>
           <ol class="rank-list">
@@ -619,16 +719,17 @@ onActivated(() => {
               <span class="rank-list__name">
                 <strong :title="row.name">{{ row.name }}</strong>
                 <small>{{ row.detail }}</small>
+                <span class="rank-list__track">
+                  <span
+                    :style="{
+                      width: `${suppliers[0]!.amount > 0 ? (row.amount / suppliers[0]!.amount) * 100 : 0}%`,
+                    }"
+                  ></span>
+                </span>
               </span>
               <span class="rank-list__value">{{
                 compactMoney(row.amount)
               }}</span>
-              <span
-                class="rank-list__bar"
-                :style="{
-                  width: `${suppliers[0]!.amount > 0 ? (row.amount / suppliers[0]!.amount) * 100 : 0}%`,
-                }"
-              ></span>
             </li>
           </ol>
         </article>
@@ -648,21 +749,24 @@ onActivated(() => {
   --tone-bad: #d03b3b;
   --tone-warning: #9a6200;
   --tone-serious: #c4511f;
+  --tone-info: #5f6b7a;
 
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px;
+  padding: 20px 24px 28px;
 }
 
 :global(.dark) .board {
   --board-accent: #3987e5;
-  --tone-good: #0ca30c;
+  --tone-good: #2fbf4a;
   --tone-bad: #e66767;
   --tone-warning: #fab219;
   --tone-serious: #ec835a;
+  --tone-info: #9aa4b2;
 }
 
+/* 头部 */
 .board-head {
   display: flex;
   flex-wrap: wrap;
@@ -680,11 +784,12 @@ onActivated(() => {
 .board-head h1 {
   margin: 0;
   font-size: 26px;
-  font-weight: 650;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .board-lead {
-  max-width: 760px;
+  max-width: 820px;
   margin: 6px 0 0;
   font-size: 14px;
   color: hsl(var(--muted-foreground));
@@ -692,23 +797,13 @@ onActivated(() => {
 
 .board-head__actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
 }
 
-.board-sources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.board-sources span {
-  padding: 2px 10px;
+.board-updated {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
-  background: hsl(var(--accent));
-  border-radius: 999px;
 }
 
 .board-warning {
@@ -724,27 +819,30 @@ onActivated(() => {
   border-radius: 10px;
 }
 
+/* 通用面板 */
 .panel {
   min-width: 0;
-  padding: 18px;
+  padding: 18px 20px;
   font: inherit;
   color: inherit;
   text-align: left;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
-  border-radius: 14px;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 4%);
 }
 
 button.panel {
   cursor: pointer;
   transition:
     border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 button.panel:hover {
-  border-color: hsl(var(--primary) / 45%);
-  box-shadow: 0 10px 28px -18px hsl(var(--foreground) / 40%);
+  border-color: hsl(var(--primary) / 40%);
+  box-shadow: 0 12px 30px -20px hsl(var(--foreground) / 45%);
 }
 
 button.panel:focus-visible,
@@ -765,7 +863,7 @@ button.panel:focus-visible,
 .section-head h2 {
   margin: 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .panel-head p,
@@ -775,80 +873,113 @@ button.panel:focus-visible,
   color: hsl(var(--muted-foreground));
 }
 
+/* 涨跌胶囊：颜色之外始终带箭头和数字 */
+.pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  border-radius: 999px;
+}
+
+.pill--good {
+  color: var(--tone-good);
+  background: color-mix(in srgb, var(--tone-good) 12%, transparent);
+}
+
+.pill--bad {
+  color: var(--tone-bad);
+  background: color-mix(in srgb, var(--tone-bad) 12%, transparent);
+}
+
+.pill--neutral {
+  color: hsl(var(--foreground) / 80%);
+  background: hsl(var(--accent));
+}
+
 /* 核心指标 */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
 
-.kpi-tile {
+.kpi {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-height: 140px;
+  gap: 8px;
+  min-height: 124px;
   overflow: hidden;
 }
 
-.kpi-tile__label {
+.kpi--active {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--board-accent) 7%, hsl(var(--card))) 0%,
+    hsl(var(--card)) 70%
+  );
+  border-color: color-mix(in srgb, var(--board-accent) 55%, transparent);
+}
+
+.kpi--active::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  content: '';
+  background: var(--board-accent);
+}
+
+.kpi__label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   font-size: 13px;
   color: hsl(var(--muted-foreground));
 }
 
-.kpi-tile__value {
-  font-size: 28px;
-  font-weight: 650;
+.kpi__icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  color: var(--board-accent);
+  background: color-mix(in srgb, var(--board-accent) 12%, transparent);
+  border-radius: 7px;
+}
+
+.kpi__go {
+  margin-left: auto;
+}
+
+.kpi__value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 
-.kpi-tile__foot {
+.kpi__foot {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding-right: 100px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
   margin-top: auto;
 }
 
-.kpi-tile__sub {
+.kpi__compare {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
-}
-
-.kpi-tile__spark {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-}
-
-.delta {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.delta small {
-  font-weight: 400;
-  color: hsl(var(--muted-foreground));
-}
-
-.delta--good {
-  color: var(--tone-good);
-}
-
-.delta--bad {
-  color: var(--tone-bad);
-}
-
-.delta--neutral {
-  color: hsl(var(--foreground));
 }
 
 /* 行布局 */
@@ -857,83 +988,196 @@ button.panel:focus-visible,
   gap: 16px;
 }
 
-.board-row--trend {
-  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 1fr);
+.board-row--hero {
+  grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr);
+  align-items: stretch;
 }
 
 .board-row--detail {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
+/* 主图 */
+.hero-tools {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+}
+
+.hero-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 0;
+  margin-bottom: 8px;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+  padding: 0 24px;
+  border-left: 1px solid hsl(var(--border));
+}
+
+.figure:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+.figure small {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.figure strong {
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.figure .pill {
+  align-self: flex-start;
+}
+
+.figure--main strong {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--board-accent);
+}
+
+.figure--progress {
+  flex: 1;
+  max-width: 280px;
+}
+
+.progress {
+  display: block;
+  height: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  background: hsl(var(--accent));
+  border-radius: 999px;
+}
+
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--board-accent);
+  border-radius: 999px;
+}
+
+.hero-gap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 12px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent) / 60%);
+  border-radius: 8px;
+}
+
 /* 需要关注 */
+.alerts {
+  display: flex;
+  flex-direction: column;
+}
+
+.count-chip {
+  min-width: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 22px;
+  color: var(--tone-bad);
+  text-align: center;
+  background: color-mix(in srgb, var(--tone-bad) 12%, transparent);
+  border-radius: 999px;
+}
+
 .alert-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
 .alert-item {
+  --level: var(--tone-info);
+
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  background: hsl(var(--accent) / 55%);
+  background: transparent;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .alert-item:hover {
-  border-color: hsl(var(--border));
+  background: hsl(var(--accent) / 70%);
 }
 
-.alert-item__badge {
-  display: inline-flex;
+.alert-item--critical {
+  --level: var(--tone-bad);
+}
+
+.alert-item--serious {
+  --level: var(--tone-serious);
+}
+
+.alert-item--warning {
+  --level: var(--tone-warning);
+}
+
+.alert-item__icon {
+  display: grid;
   flex-shrink: 0;
-  gap: 4px;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.alert-item--critical .alert-item__badge {
-  color: var(--tone-bad);
-}
-
-.alert-item--serious .alert-item__badge {
-  color: var(--tone-serious);
-}
-
-.alert-item--warning .alert-item__badge {
-  color: var(--tone-warning);
-}
-
-.alert-item--info .alert-item__badge {
-  color: hsl(var(--muted-foreground));
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  font-size: 17px;
+  color: var(--level);
+  background: color-mix(in srgb, var(--level) 12%, transparent);
+  border-radius: 10px;
 }
 
 .alert-item__body {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
-.alert-item__body strong {
+.alert-item__title strong {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .alert-item__body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
+.alert-item__level {
+  margin-right: 4px;
+  font-weight: 650;
+  color: var(--level);
 }
 
 .alert-item__go {
@@ -941,8 +1185,14 @@ button.panel:focus-visible,
   color: hsl(var(--muted-foreground));
 }
 
+.alerts__more {
+  margin-top: auto;
+  color: hsl(var(--muted-foreground));
+}
+
 .alert-clear {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
   align-items: center;
@@ -959,7 +1209,7 @@ button.panel:focus-visible,
   margin-bottom: 6px;
   font-size: 22px;
   color: var(--tone-good);
-  background: hsl(var(--accent));
+  background: color-mix(in srgb, var(--tone-good) 12%, transparent);
   border-radius: 50%;
 }
 
@@ -983,14 +1233,24 @@ button.panel:focus-visible,
 
 .line-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 12px;
 }
 
 .line-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow: hidden;
+}
+
+.line-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  content: '';
+  background: var(--line-accent);
 }
 
 .line-card__top {
@@ -1004,7 +1264,7 @@ button.panel:focus-visible,
   gap: 8px;
   align-items: center;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .line-card__icon {
@@ -1012,8 +1272,8 @@ button.panel:focus-visible,
   place-items: center;
   width: 28px;
   height: 28px;
-  color: var(--board-accent);
-  background: hsl(var(--accent));
+  color: var(--line-accent);
+  background: color-mix(in srgb, var(--line-accent) 13%, transparent);
   border-radius: 8px;
 }
 
@@ -1032,13 +1292,17 @@ button.panel:focus-visible,
   color: hsl(var(--muted-foreground));
 }
 
-.line-card__headline strong {
-  font-size: 22px;
-  font-weight: 650;
+.line-card__value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
-.line-card__spark {
-  width: 100%;
+.line-card__value strong {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .line-card__stats {
@@ -1048,7 +1312,7 @@ button.panel:focus-visible,
   width: 100%;
   padding-top: 12px;
   margin: 0;
-  border-top: 1px solid hsl(var(--border));
+  border-top: 1px dashed hsl(var(--border));
 }
 
 .line-card__stats dt {
@@ -1057,9 +1321,12 @@ button.panel:focus-visible,
 }
 
 .line-card__stats dd {
+  display: flex;
+  gap: 4px;
+  align-items: center;
   margin: 0;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1081,11 +1348,30 @@ button.panel:focus-visible,
 }
 
 /* 账龄与排行 */
+.aging-total {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.aging-total strong {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.aging-total small {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
 .aging-bar {
   display: flex;
   gap: 2px;
-  height: 12px;
-  margin-bottom: 14px;
+  height: 10px;
+  margin-bottom: 12px;
   overflow: hidden;
   background: hsl(var(--accent));
   border-radius: 999px;
@@ -1111,13 +1397,17 @@ button.panel:focus-visible,
   border-top: none;
 }
 
+.rank-table tr.is-zero td {
+  color: hsl(var(--muted-foreground));
+}
+
 .num {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .strong {
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .muted {
@@ -1133,22 +1423,30 @@ button.panel:focus-visible,
   border-radius: 2px;
 }
 
+.aging-note {
+  padding: 8px 10px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent) / 60%);
+  border-radius: 8px;
+}
+
 .rank-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
 .rank-list li {
-  position: relative;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  padding: 8px 0 10px;
+  padding: 8px 0;
 }
 
 .rank-list__no {
@@ -1157,15 +1455,21 @@ button.panel:focus-visible,
   width: 22px;
   height: 22px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
   color: hsl(var(--muted-foreground));
   background: hsl(var(--accent));
   border-radius: 6px;
 }
 
+.rank-list li:first-child .rank-list__no {
+  color: #fff;
+  background: var(--board-accent);
+}
+
 .rank-list__name {
   display: flex;
   flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 
@@ -1173,7 +1477,7 @@ button.panel:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -1182,21 +1486,27 @@ button.panel:focus-visible,
   color: hsl(var(--muted-foreground));
 }
 
-.rank-list__value {
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+.rank-list__track {
+  display: block;
+  height: 4px;
+  margin-top: 5px;
+  overflow: hidden;
+  background: hsl(var(--accent));
+  border-radius: 999px;
 }
 
-.rank-list__bar {
-  position: absolute;
-  bottom: 2px;
-  left: 34px;
-  max-width: calc(100% - 34px);
-  height: 3px;
+.rank-list__track > span {
+  display: block;
+  height: 100%;
   background: var(--board-accent);
   border-radius: 999px;
-  opacity: 0.35;
+  opacity: 0.7;
+}
+
+.rank-list__value {
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .board-empty {
@@ -1216,18 +1526,27 @@ button.panel:focus-visible,
   color: hsl(var(--muted-foreground));
 }
 
-@media (max-width: 1100px) {
-  .board-row--trend {
+@media (max-width: 1200px) {
+  .board-row--hero {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 640px) {
   .board {
-    padding: 12px;
+    padding: 12px 16px;
   }
 
-  .kpi-tile__value {
+  .kpi__value {
+    font-size: 22px;
+  }
+
+  .figure {
+    min-width: 0;
+    padding: 0 12px;
+  }
+
+  .figure--main strong {
     font-size: 24px;
   }
 

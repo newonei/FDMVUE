@@ -19,7 +19,6 @@ import {
   Button,
   Empty,
   Modal,
-  Segmented,
   Skeleton,
   Tabs,
   Tag,
@@ -44,12 +43,14 @@ import { sum } from '../shared/format';
 import {
   approvalItems,
   bpmItems,
+  DEPARTMENT_ICONS,
   DEPARTMENT_LABELS,
   greetingText,
+  groupWork,
   plainText,
+  PORTAL_PATHS,
   PORTAL_PERMISSIONS,
   portalItems,
-  sortWork,
   summaryLine,
   workCount,
 } from './model';
@@ -60,12 +61,13 @@ interface QuickEntry {
   icon: string;
   path: string;
   permissions?: string[];
+  roles?: string[];
   title: string;
 }
 
 const router = useRouter();
 const userStore = useUserStore();
-const { hasAccessByCodes } = useAccess();
+const { hasAccessByCodes, hasAccessByRoles } = useAccess();
 const frontendBuildInfo = useBuildInfo(import.meta.env, import.meta.env.PROD);
 
 const can = {
@@ -128,23 +130,24 @@ const approvalCount = computed(() => bpmTotal.value + approvalTotal.value);
 const businessCount = computed(() =>
   sum(businessWork.value.map((item) => workCount(item))),
 );
-const totalCount = computed(
-  () => approvalCount.value + businessCount.value + dingTalkCount.value,
-);
-
-const allWork = computed(() =>
-  sortWork([...bpmWork.value, ...approvalWork.value, ...businessWork.value]),
-);
-const visibleWork = computed(() =>
-  activeGroup.value === 'all'
-    ? allWork.value
-    : allWork.value.filter((item) => item.group === activeGroup.value),
-);
-const groupOptions = computed(() => [
-  { label: `全部 ${approvalCount.value + businessCount.value}`, value: 'all' },
-  { label: `审批 ${approvalCount.value}`, value: 'approval' },
-  { label: `部门待办 ${businessCount.value}`, value: 'business' },
+const allWork = computed(() => [
+  ...bpmWork.value,
+  ...approvalWork.value,
+  ...businessWork.value,
 ]);
+const sections = computed(() =>
+  groupWork(
+    activeGroup.value === 'all'
+      ? allWork.value
+      : allWork.value.filter((item) => item.group === activeGroup.value),
+    approvalCount.value,
+  ),
+);
+const listSubtitle = computed(() => {
+  if (activeGroup.value === 'approval') return '等得最久的排在最前，超时的标红';
+  if (activeGroup.value === 'business') return '各部门门户里等你处理的单据，按部门分组';
+  return '审批在前，部门待办按部门分组，点击直接办理';
+});
 
 const longestWaitDays = computed(() => {
   const created = [...bpmWork.value, ...approvalWork.value]
@@ -170,13 +173,28 @@ interface StatTile {
   value: number | string;
   hint: string;
   icon: string;
-  link: WorkLink;
+  /** 有 filter 的是列表筛选，没有的点击跳转 */
+  filter?: 'all' | WorkGroup;
+  link?: WorkLink;
 }
 
 const stats = computed<StatTile[]>(() => {
-  const tiles: StatTile[] = [];
+  const tiles: StatTile[] = [
+    {
+      filter: 'all',
+      hint:
+        dingTalkCount.value > 0
+          ? `另有钉钉待审 ${dingTalkCount.value} 项`
+          : '审批与部门待办',
+      icon: 'lucide:inbox',
+      key: 'all',
+      label: '待处理合计',
+      value: approvalCount.value + businessCount.value,
+    },
+  ];
   if (can.bpm.value || can.approvalInbox.value) {
     tiles.push({
+      filter: 'approval',
       hint:
         failed.bpm && can.bpm.value
           ? '流程服务暂不可用'
@@ -184,23 +202,22 @@ const stats = computed<StatTile[]>(() => {
       icon: 'lucide:stamp',
       key: 'approval',
       label: '待我审批',
-      link: { path: can.bpm.value ? '/bpm/task/todo' : '/fdmprocurement/platform-approvals' },
       value: approvalCount.value,
     });
   }
   if (portals.value.length > 0) {
     tiles.push({
+      filter: 'business',
       hint: portals.value.map((key) => DEPARTMENT_LABELS[key]).join(' · '),
       icon: 'lucide:list-todo',
       key: 'business',
       label: '部门待办',
-      link: { path: portalPath(portals.value[0]!) },
       value: businessCount.value,
     });
   }
   if (can.dingTalk.value) {
     tiles.push({
-      hint: failed.dingTalk ? '钉钉服务暂不可用' : '全部模板待我审批',
+      hint: failed.dingTalk ? '钉钉服务暂不可用' : '到钉钉审批页处理',
       icon: 'lucide:clipboard-check',
       key: 'dingtalk',
       label: '钉钉待审',
@@ -219,23 +236,23 @@ const stats = computed<StatTile[]>(() => {
   return tiles;
 });
 
-function portalPath(department: PortalDepartment) {
-  const base: Record<PortalDepartment, string> = {
-    domestic: '/neixiao',
-    finance: '/caiwu',
-    purchase: '/fdmprocurement',
-    trade: '/fdmwaimao',
-  };
-  return `${base[department]}/platform-portal`;
+function selectStat(tile: StatTile) {
+  if (tile.filter) activeGroup.value = tile.filter;
+  else if (tile.link) go(tile.link);
 }
 
 const allQuickEntries = computed<QuickEntry[]>(() => [
   ...portals.value.map((department) => ({
-    icon: 'lucide:door-open',
-    path: portalPath(department),
+    icon: DEPARTMENT_ICONS[department],
+    path: PORTAL_PATHS[department],
     title: `${DEPARTMENT_LABELS[department]}门户`,
   })),
-  { icon: 'lucide:building-2', path: '/dashboard/workspace', title: '公司看板' },
+  {
+    icon: 'lucide:layout-dashboard',
+    path: '/dashboard/workspace',
+    roles: ['super_admin'],
+    title: '公司看板',
+  },
   {
     icon: 'lucide:circle-play',
     path: '/bpm/process-instance/create',
@@ -277,7 +294,11 @@ const allQuickEntries = computed<QuickEntry[]>(() => [
 
 const quickEntries = computed(() =>
   allQuickEntries.value
-    .filter((entry) => !entry.permissions || hasAccessByCodes(entry.permissions))
+    .filter(
+      (entry) =>
+        (!entry.permissions || hasAccessByCodes(entry.permissions)) &&
+        (!entry.roles || hasAccessByRoles(entry.roles)),
+    )
     .slice(0, 8),
 );
 
@@ -482,36 +503,31 @@ onActivated(() => {
 
     <section aria-label="待办概览" class="stat-strip">
       <button
-        class="stat stat--total"
-        type="button"
-        @click="activeGroup = 'all'"
-      >
-        <span class="stat__label">待处理合计</span>
-        <Skeleton.Button
-          v-if="loading.work && !loadedOnce"
-          active
-          size="small"
-          style="width: 64px"
-        />
-        <strong v-else class="stat__hero">{{ totalCount }}</strong>
-        <span class="stat__hint">审批、部门待办与钉钉审批</span>
-      </button>
-      <button
         v-for="tile in stats"
         :key="tile.key"
+        :aria-pressed="tile.filter ? tile.filter === activeGroup : undefined"
         class="stat"
+        :class="{
+          'stat--active': tile.filter && tile.filter === activeGroup,
+          'stat--link': !tile.filter,
+        }"
         type="button"
-        @click="go(tile.link)"
+        @click="selectStat(tile)"
       >
         <span class="stat__label">
-          <IconifyIcon :icon="tile.icon" />
+          <span class="stat__icon"><IconifyIcon :icon="tile.icon" /></span>
           {{ tile.label }}
+          <IconifyIcon
+            v-if="!tile.filter"
+            class="stat__go"
+            icon="lucide:arrow-up-right"
+          />
         </span>
         <Skeleton.Button
           v-if="loading.work && !loadedOnce"
           active
           size="small"
-          style="width: 48px"
+          style="width: 56px"
         />
         <strong v-else class="stat__value">{{ tile.value }}</strong>
         <span class="stat__hint">{{ tile.hint }}</span>
@@ -522,14 +538,25 @@ onActivated(() => {
       <article class="panel work-panel">
         <header class="panel-head">
           <div>
-            <h2>待我处理</h2>
-            <p>等得最久的审批排在最前，点击直接办理</p>
+            <h2>
+              {{
+                activeGroup === 'approval'
+                  ? '待我审批'
+                  : activeGroup === 'business'
+                    ? '部门待办'
+                    : '待我处理'
+              }}
+            </h2>
+            <p>{{ listSubtitle }}</p>
           </div>
-          <Segmented
-            v-model:value="activeGroup"
-            :options="groupOptions"
+          <Button
+            v-if="activeGroup !== 'all'"
             size="small"
-          />
+            type="link"
+            @click="activeGroup = 'all'"
+          >
+            看全部
+          </Button>
         </header>
 
         <div v-if="loading.work && !loadedOnce" class="work-loading">
@@ -554,41 +581,67 @@ onActivated(() => {
             <IconifyIcon class="work-banner__go" icon="lucide:arrow-right" />
           </button>
 
-          <ul v-if="visibleWork.length" class="work-list">
-            <li v-for="item in visibleWork" :key="item.key">
-              <button
-                class="work-item"
-                :class="{ 'work-item--hot': item.hot }"
-                type="button"
-                @click="go(item.link)"
-              >
-                <span
-                  class="work-item__source"
-                  :class="`work-item__source--${item.group}`"
-                >
-                  {{ item.source }}
+          <div v-if="sections.length" class="work-sections">
+            <section
+              v-for="section in sections"
+              :key="section.key"
+              class="work-section"
+            >
+              <header class="work-section__head">
+                <span class="work-section__icon">
+                  <IconifyIcon :icon="section.icon" />
                 </span>
-                <span class="work-item__body">
-                  <span class="work-item__title">
-                    <strong>{{ item.title }}</strong>
-                    <span v-if="item.count" class="work-item__count">
-                      {{ item.count }}
+                <strong>{{ section.title }}</strong>
+                <span class="work-section__total">{{ section.total }} 项</span>
+                <Button
+                  v-if="section.link"
+                  class="work-section__link"
+                  size="small"
+                  type="link"
+                  @click="go(section.link)"
+                >
+                  进入{{ section.title }}门户
+                  <IconifyIcon icon="lucide:chevron-right" />
+                </Button>
+              </header>
+              <ul class="work-list">
+                <li v-for="item in section.items" :key="item.key">
+                  <button
+                    class="work-item"
+                    :class="{ 'work-item--hot': item.hot }"
+                    type="button"
+                    @click="go(item.link)"
+                  >
+                    <span class="work-item__count">
+                      <template v-if="item.count">{{ item.count }}</template>
+                      <IconifyIcon v-else icon="lucide:file-check-2" />
                     </span>
-                  </span>
-                  <small>{{ item.detail }}</small>
-                </span>
-                <span
-                  v-if="item.wait"
-                  class="wait"
-                  :class="`wait--${item.wait.tone}`"
-                >
-                  <IconifyIcon icon="lucide:clock-3" />
-                  {{ item.wait.text }}
-                </span>
-                <IconifyIcon class="work-item__go" icon="lucide:chevron-right" />
-              </button>
-            </li>
-          </ul>
+                    <span class="work-item__body">
+                      <strong>{{ item.title }}</strong>
+                      <small>
+                        <template v-if="item.group === 'approval'">
+                          {{ item.source }} ·
+                        </template>
+                        {{ item.detail }}
+                      </small>
+                    </span>
+                    <span
+                      v-if="item.wait"
+                      class="wait"
+                      :class="`wait--${item.wait.tone}`"
+                    >
+                      <IconifyIcon icon="lucide:clock-3" />
+                      {{ item.wait.text }}
+                    </span>
+                    <span class="work-item__go">
+                      办理
+                      <IconifyIcon icon="lucide:chevron-right" />
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </section>
+          </div>
 
           <div v-else-if="dingTalkCount === 0" class="work-empty">
             <span class="work-empty__icon">
@@ -596,7 +649,11 @@ onActivated(() => {
             </span>
             <strong>
               {{
-                activeGroup === 'business' ? '部门待办都处理完了' : '没有待办'
+                activeGroup === 'business'
+                  ? '部门待办都处理完了'
+                  : activeGroup === 'approval'
+                    ? '没有等你审批的事项'
+                    : '没有待办'
               }}
             </strong>
             <small>新的审批和待办会出现在这里</small>
@@ -720,9 +777,10 @@ onActivated(() => {
           </header>
           <div class="quick-grid">
             <button
-              v-for="entry in quickEntries"
+              v-for="(entry, index) in quickEntries"
               :key="entry.path"
               class="quick"
+              :class="`quick--${index % 8}`"
               type="button"
               @click="go({ path: entry.path })"
             >
@@ -832,34 +890,37 @@ onActivated(() => {
   color: hsl(var(--muted-foreground));
 }
 
-/* 概览条 */
+/* 概览条：前三个是列表筛选，后两个跳转 */
 .stat-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
 .stat {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   padding: 16px 18px;
+  overflow: hidden;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
-  border-radius: 14px;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 4%);
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
 .stat:hover {
-  border-color: hsl(var(--primary) / 45%);
-  box-shadow: 0 10px 28px -18px hsl(var(--foreground) / 40%);
+  border-color: hsl(var(--primary) / 40%);
+  box-shadow: 0 12px 30px -20px hsl(var(--foreground) / 45%);
 }
 
 .stat:focus-visible,
@@ -870,35 +931,57 @@ onActivated(() => {
   outline-offset: 2px;
 }
 
-.stat--total {
-  color: hsl(var(--primary-foreground));
-  background: hsl(var(--primary));
-  border-color: transparent;
+.stat--active {
+  background: linear-gradient(
+    180deg,
+    hsl(var(--primary) / 8%) 0%,
+    hsl(var(--card)) 75%
+  );
+  border-color: hsl(var(--primary) / 55%);
 }
 
-.stat--total .stat__label,
-.stat--total .stat__hint {
-  color: hsl(var(--primary-foreground) / 80%);
+.stat--active::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  content: '';
+  background: hsl(var(--primary));
 }
 
 .stat__label {
-  display: inline-flex;
-  gap: 6px;
+  display: flex;
+  gap: 8px;
   align-items: center;
   font-size: 13px;
   color: hsl(var(--muted-foreground));
 }
 
-.stat__hero {
-  font-size: 34px;
-  font-weight: 700;
-  line-height: 1.1;
+.stat__icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 7px;
+}
+
+.stat--link .stat__icon {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent));
+}
+
+.stat__go {
+  margin-left: auto;
 }
 
 .stat__value {
-  font-size: 26px;
-  font-weight: 650;
-  line-height: 1.15;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
 
 .stat__hint {
@@ -926,10 +1009,11 @@ onActivated(() => {
 
 .panel {
   min-width: 0;
-  padding: 18px;
+  padding: 18px 20px;
   background: hsl(var(--card));
   border: 1px solid hsl(var(--border));
-  border-radius: 14px;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 4%);
 }
 
 .panel-head {
@@ -989,6 +1073,45 @@ onActivated(() => {
   color: hsl(var(--primary));
 }
 
+.work-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.work-section__head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0 4px 8px;
+  font-size: 13px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.work-section__icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 7px;
+}
+
+.work-section__head strong {
+  font-weight: 650;
+}
+
+.work-section__total {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.work-section__link {
+  margin-left: auto;
+}
+
 .work-list {
   display: flex;
   flex-direction: column;
@@ -998,46 +1121,45 @@ onActivated(() => {
 }
 
 .work-list li + li {
-  border-top: 1px solid hsl(var(--border) / 70%);
+  border-top: 1px solid hsl(var(--border) / 50%);
 }
 
 .work-item {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr) auto 16px;
-  gap: 12px;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  gap: 14px;
   align-items: center;
   width: 100%;
-  padding: 12px 8px;
+  padding: 10px 8px;
   font: inherit;
   color: inherit;
   text-align: left;
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .work-item:hover {
   background: hsl(var(--accent) / 70%);
 }
 
-.work-item__source {
-  justify-self: start;
-  padding: 2px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  border-radius: 6px;
-}
-
-.work-item__source--approval {
+.work-item__count {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 40px;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
+  background: hsl(var(--primary) / 9%);
+  border-radius: 10px;
 }
 
-.work-item__source--business {
-  color: hsl(var(--foreground) / 75%);
-  background: hsl(var(--accent));
+.work-item--hot .work-item__count {
+  color: var(--tone-bad);
+  background: color-mix(in srgb, var(--tone-bad) 12%, transparent);
 }
 
 .work-item__body {
@@ -1047,36 +1169,12 @@ onActivated(() => {
   min-width: 0;
 }
 
-.work-item__title {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.work-item__title strong {
+.work-item__body strong {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 650;
   white-space: nowrap;
-}
-
-.work-item__count {
-  flex-shrink: 0;
-  min-width: 22px;
-  padding: 0 7px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
-  text-align: center;
-  background: hsl(var(--accent));
-  border-radius: 999px;
-}
-
-.work-item--hot .work-item__count {
-  color: #fff;
-  background: var(--tone-bad);
 }
 
 .work-item__body small {
@@ -1107,7 +1205,16 @@ onActivated(() => {
 }
 
 .work-item__go {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
+.work-item:hover .work-item__go {
+  color: hsl(var(--primary));
 }
 
 .work-empty {
@@ -1254,6 +1361,8 @@ onActivated(() => {
 }
 
 .quick {
+  --quick: #2a78d6;
+
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1272,15 +1381,43 @@ onActivated(() => {
   background: hsl(var(--accent) / 70%);
 }
 
+.quick--1 {
+  --quick: #eb6834;
+}
+
+.quick--2 {
+  --quick: #1baf7a;
+}
+
+.quick--3 {
+  --quick: #7c5cc4;
+}
+
+.quick--4 {
+  --quick: #c98a00;
+}
+
+.quick--5 {
+  --quick: #d0457a;
+}
+
+.quick--6 {
+  --quick: #0f8fa8;
+}
+
+.quick--7 {
+  --quick: #5f6b7a;
+}
+
 .quick__icon {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  font-size: 18px;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 10%);
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  font-size: 19px;
+  color: var(--quick);
+  background: color-mix(in srgb, var(--quick) 12%, transparent);
+  border-radius: 12px;
 }
 
 .version {
@@ -1335,10 +1472,9 @@ onActivated(() => {
   }
 
   .work-item {
-    grid-template-columns: minmax(0, 1fr) 16px;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
   }
 
-  .work-item__source,
   .wait {
     display: none;
   }

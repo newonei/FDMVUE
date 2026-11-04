@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   approvalItems,
   bpmItems,
+  groupWork,
   portalItems,
   sortWork,
   summaryLine,
@@ -64,5 +65,23 @@ describe('home model', () => {
       '今天有 6 项待处理，最久的已等待 4 天，2 条未读消息。',
     );
     expect(summaryLine({ approvals: 0, business: 0, dingTalk: 0, longestWaitDays: 0, unread: 0 })).toContain('没有待办');
+  });
+
+  it('groups work into approvals first, then departments with the most work', () => {
+    const approvals = approvalItems(
+      [{ id: 'a', openedAt: new Date(hoursAgo(2)).toISOString(), overdue: false, title: '合同评审' }] as ApprovalTask[],
+      NOW,
+    );
+    const finance = portalItems('finance', {
+      todos: [{ count: 35, key: 'receipt', preview: '' }],
+    } as unknown as PortalSummary);
+    const trade = portalItems('trade', {
+      todos: [{ count: 2, key: 'receipt', preview: '' }],
+    } as unknown as PortalSummary);
+    const sections = groupWork([...trade, ...finance, ...approvals], 5);
+    expect(sections.map((section) => section.key)).toEqual(['approval', 'finance', 'trade']);
+    expect(sections[0]!.total).toBe(5);
+    expect(sections[1]!.total).toBe(35);
+    expect(sections[1]!.link?.path).toBe('/caiwu/platform-portal');
   });
 });

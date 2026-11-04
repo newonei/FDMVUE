@@ -27,6 +27,8 @@ const routes: RouteRecordRaw[] = [
         path: 'workspace',
         component: () => import('#/views/dashboard/workspace/index.vue'),
         meta: {
+          // 公司看板只给超级管理员；接口同样只对超级管理员开放
+          authority: ['super_admin'],
           icon: 'lucide:building-2',
           title: $t('page.dashboard.workspace'),
         },

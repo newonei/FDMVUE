@@ -7,6 +7,8 @@ import type {
 
 import { portalDefinitions } from '#/views/fdmplatform/portal/model';
 
+import { sum } from '../shared/format';
+
 export type WorkGroup = 'approval' | 'business';
 export type WaitTone = 'critical' | 'fresh' | 'normal' | 'warning';
 
@@ -25,6 +27,7 @@ export interface WorkItem {
   detail: string;
   /** 部门待办是汇总数，审批是单条 */
   count?: number;
+  department?: PortalDepartment;
   hot?: boolean;
   wait?: { text: string; tone: WaitTone };
   /** 越小越靠前 */
@@ -37,6 +40,20 @@ export const DEPARTMENT_LABELS: Record<PortalDepartment, string> = {
   finance: '财务',
   purchase: '采购',
   trade: '外贸',
+};
+
+export const DEPARTMENT_ICONS: Record<PortalDepartment, string> = {
+  domestic: 'lucide:store',
+  finance: 'lucide:wallet',
+  purchase: 'lucide:package-search',
+  trade: 'lucide:globe-2',
+};
+
+export const PORTAL_PATHS: Record<PortalDepartment, string> = {
+  domestic: '/neixiao/platform-portal',
+  finance: '/caiwu/platform-portal',
+  purchase: '/fdmprocurement/platform-portal',
+  trade: '/fdmwaimao/platform-portal',
 };
 
 export const PORTAL_PERMISSIONS: Record<PortalDepartment, string> = {
@@ -126,6 +143,7 @@ export function portalItems(
       return [
         {
           count: Number(todo.count),
+          department,
           detail: todo.preview || definition.empty,
           group: 'business' as const,
           hot: !!definition.hot,
@@ -149,6 +167,53 @@ export function sortWork(items: WorkItem[]): WorkItem[] {
 
 export function workCount(item: WorkItem) {
   return item.count ?? 1;
+}
+
+/** 待我处理按来源分段：审批一段，各部门一段（待办多的部门在前）。 */
+export interface WorkSection {
+  key: 'approval' | PortalDepartment;
+  title: string;
+  icon: string;
+  total: number;
+  link?: WorkLink;
+  items: WorkItem[];
+}
+
+export function groupWork(
+  items: WorkItem[],
+  approvalTotal = 0,
+): WorkSection[] {
+  const sorted = sortWork(items);
+  const sections: WorkSection[] = [];
+  const approvals = sorted.filter((item) => item.group === 'approval');
+  if (approvals.length > 0) {
+    sections.push({
+      icon: 'lucide:stamp',
+      items: approvals,
+      key: 'approval',
+      title: '审批',
+      total: Math.max(approvalTotal, approvals.length),
+    });
+  }
+  const byDepartment = new Map<PortalDepartment, WorkItem[]>();
+  for (const item of sorted) {
+    if (item.group !== 'business' || !item.department) continue;
+    byDepartment.set(item.department, [
+      ...(byDepartment.get(item.department) ?? []),
+      item,
+    ]);
+  }
+  const departments = [...byDepartment.entries()]
+    .map(([department, list]) => ({
+      icon: DEPARTMENT_ICONS[department],
+      items: list,
+      key: department,
+      link: { path: PORTAL_PATHS[department] },
+      title: DEPARTMENT_LABELS[department],
+      total: sum(list.map((item) => workCount(item))),
+    }))
+    .toSorted((a, b) => b.total - a.total);
+  return [...sections, ...departments];
 }
 
 /** 首页问候下面的一句话。 */

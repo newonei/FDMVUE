@@ -50,6 +50,8 @@ export interface CompanySales {
   unconverted: string[];
   /** 金智迁入、还没补齐的合同：只计签约，不计在手和应收 */
   historyContracts: number;
+  /** 金智迁入合同里最晚的签约日；之后的签约只来自新系统 */
+  migratedUntil?: null | string;
 }
 
 export interface CompanyBoard {
