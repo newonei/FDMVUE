@@ -23,8 +23,6 @@ import {
   toNumber,
 } from '../model';
 import ExtraOrderModal from './extra-order-modal.vue';
-import ReceiveModal from './receive-modal.vue';
-import StocktakeModal from './stocktake-modal.vue';
 
 /** 当前阶段的库存明细：标题与流转关系、当前库存合计、搜索与操作、库存表格。 */
 const props = defineProps<{
@@ -38,18 +36,11 @@ const emit = defineEmits<{
   changed: [];
   create: [stage: string];
   saved: [text: string];
-  txn: [itemCode: string];
 }>();
 
 const { hasAccessByCodes } = useAccess();
 const canOperate = computed(() =>
   hasAccessByCodes(['fdmgongchang:stage-stock:operate']),
-);
-const canReceive = computed(() =>
-  hasAccessByCodes(['fdmgongchang:stage-stock:receive']),
-);
-const canStocktake = computed(() =>
-  hasAccessByCodes(['fdmgongchang:stage-stock:stocktake']),
 );
 
 const keyword = ref('');
@@ -60,9 +51,6 @@ const rows = ref<Api.Stock[]>([]);
 const total = ref(0);
 const loading = ref(false);
 const loadFailed = ref(false);
-const receiveOpen = ref(false);
-const stocktakeOpen = ref(false);
-const stocktakeRow = ref<Api.Stock>();
 
 const labels = computed(() => makeLabels(props.options));
 const stageOption = computed(() =>
@@ -115,7 +103,6 @@ const columns = computed<TableColumnsType<Api.Stock>>(() => [
     title: '库存',
     width: 132,
   },
-  { fixed: 'right' as const, key: 'actions', title: '操作', width: 112 },
 ]);
 
 function rowTitle(row: Api.Stock) {
@@ -182,11 +169,6 @@ function onTableChange(pagination: TablePaginationConfig) {
   load();
 }
 
-function openStocktake(row: Api.Stock) {
-  stocktakeRow.value = row;
-  stocktakeOpen.value = true;
-}
-
 function onSaved() {
   load();
   emit('changed');
@@ -251,9 +233,6 @@ function onExtraSaved(text: string) {
         <Checkbox id="stock-show-zero" v-model:checked="showZero">
           显示零库存
         </Checkbox>
-        <Button v-if="canReceive" @click="receiveOpen = true">
-          {{ stage === 'RAW' ? '原料入库' : stage === 'AUX' ? '辅料入库' : '期初入库' }}
-        </Button>
         <Button v-if="canOperate && extras.length > 0" @click="extraOpen = true">
           附加工序
         </Button>
@@ -323,25 +302,6 @@ function onExtraSaved(text: string) {
             </small>
           </span>
         </template>
-        <template v-else-if="column.key === 'actions'">
-          <span class="inline-flex gap-4 whitespace-nowrap">
-            <button
-              type="button"
-              class="text-primary hover:underline"
-              @click="emit('txn', record.itemCode)"
-            >
-              流水
-            </button>
-            <button
-              v-if="canStocktake"
-              type="button"
-              class="text-primary hover:underline"
-              @click="openStocktake(record as Api.Stock)"
-            >
-              盘点
-            </button>
-          </span>
-        </template>
       </template>
       <template #emptyText>
         <div v-if="loadFailed" class="py-8 text-sm text-muted-foreground">
@@ -356,28 +316,16 @@ function onExtraSaved(text: string) {
             在「{{ incoming.label }}」工序单报完工后会入库到这里。
           </template>
           <template v-else>
-            原材料采购单在「到货入库」收货后会入库到这里。
+            原料、辅料在「到货入库」收货，或在库存中心常规入库进本厂原料仓后会显示在这里。
           </template>
         </div>
       </template>
     </Table>
-    <ReceiveModal
-      v-model:open="receiveOpen"
-      :options="options"
-      :stage="stage"
-      @saved="onSaved"
-    />
     <ExtraOrderModal
       v-model:open="extraOpen"
       :options="options"
       :stage="stage"
       @saved="onExtraSaved"
-    />
-    <StocktakeModal
-      v-model:open="stocktakeOpen"
-      :stock="stocktakeRow"
-      :unit="stockUnit(stage, stocktakeRow?.item, stageOption?.unit)"
-      @saved="onSaved"
     />
   </div>
 </template>

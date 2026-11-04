@@ -22,14 +22,13 @@ import OrderPanel from './modules/order-panel.vue';
 import ReceiptDrawer from './modules/receipt-drawer.vue';
 import ReceivingPanel from './modules/receiving-panel.vue';
 import SettingPanel from './modules/setting-panel.vue';
-import ShipmentPanel from './modules/shipment-panel.vue';
 import StageRail from './modules/stage-rail.vue';
 import StockPanel from './modules/stock-panel.vue';
-import TxnPanel from './modules/txn-panel.vue';
 
 /**
- * 工厂部门 · 工序库存：每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
- * 顶部是六个业务页签；「库存」页签里左侧是库存阶段目录，右侧是当前阶段的库存明细。
+ * 工厂部门 · 工序单：每道工序从库存中心的本厂原料仓 / 半成品仓领料，良品进半成品仓，
+ * 订单工艺最后一道的良品直接交本厂成品仓；残次品只登记数量。
+ * 库存、流水、入库、盘点都在「库存中心」（工序库存已并入库存中心，这里不再单独记账）。
  */
 defineOptions({ name: 'FdmGongchangStageStock' });
 
@@ -44,30 +43,16 @@ const summary = ref<Api.Summary>();
 const loadError = ref(false);
 /** 账号不属于任何工厂，且没有「查看全部工厂」权限。 */
 const noFactory = ref(false);
-type TabKey =
-  | 'orders'
-  | 'receiving'
-  | 'settings'
-  | 'stock'
-  | 'trade'
-  | 'txns';
-const TAB_KEYS = new Set<TabKey>([
-  'orders',
-  'receiving',
-  'settings',
-  'stock',
-  'trade',
-  'txns',
-]);
+type TabKey = 'orders' | 'receiving' | 'settings' | 'stock';
+const TAB_KEYS = new Set<TabKey>(['orders', 'receiving', 'settings', 'stock']);
 const route = useRoute();
 const router = useRouter();
-const activeTab = ref<TabKey>('stock');
+const activeTab = ref<TabKey>('orders');
 /** 手机上打开时提示去工人端。 */
 const onPhone = typeof window !== 'undefined' && window.innerWidth < 768;
 const receivingPending = ref(0);
 const activeStage = ref('BOARD');
 const refreshKey = ref(0);
-const txnItemCode = ref('');
 
 const drawerOpen = ref(false);
 const drawerMode = ref<'create' | 'report'>('create');
@@ -114,7 +99,6 @@ async function switchFactory(id: number) {
   options.value = undefined;
   summary.value = undefined;
   receivingPending.value = 0;
-  txnItemCode.value = '';
   await loadAll();
 }
 
@@ -152,19 +136,13 @@ function openReport(orderId: number) {
   drawerOpen.value = true;
 }
 
-function showTxns(itemCode: string) {
-  txnItemCode.value = itemCode;
-  activeTab.value = 'txns';
-}
-
 async function onChanged() {
   refreshKey.value += 1;
   await loadSummary();
 }
 
-async function onSaved(text: string, stage?: string) {
+async function onSaved(text: string) {
   message.success(text);
-  if (stage && activeTab.value === 'stock') activeStage.value = stage;
   await onChanged();
 }
 
@@ -180,7 +158,7 @@ async function onSettingSaved() {
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
             <h1 class="m-0 text-[26px] font-semibold leading-tight tracking-tight">
-              工序库存
+              工序单
             </h1>
             <FactorySwitch
               v-if="factory.factories.value.length > 0"
@@ -190,7 +168,7 @@ async function onSettingSaved() {
             />
           </div>
           <p class="m-0 mt-1.5 text-sm text-muted-foreground">
-            每道工序向上游库存领料，良品进入本段库存，残次品只登记数量。
+            每道工序从本厂原料仓、半成品仓领料，良品进半成品仓，订单最后一道的成品直接进成品仓；残次品只登记数量。
           </p>
         </div>
         <Button
@@ -203,6 +181,15 @@ async function onSettingSaved() {
         </Button>
       </header>
 
+      <Alert
+        message="工厂库存已并入库存中心：原料仓、半成品仓、成品仓的库存、流水、入库和盘点都在「库存中心」查看和办理"
+        show-icon
+        type="info"
+      >
+        <template #action>
+          <Button size="small" @click="router.push('/fdmstock/inventory-stock')">去库存中心</Button>
+        </template>
+      </Alert>
       <Alert
         v-if="onPhone"
         message="在手机上？工人请用「我的工作台」，一步一步领料、报数量更方便"
@@ -221,16 +208,16 @@ async function onSettingSaved() {
         title="你的账号还不属于任何工厂"
       >
         <template #subTitle>
-          工序库存按工厂分开记账。请在钉钉里把你调到所在工厂的部门，或联系管理员分配「查看全部工厂」权限。
+          工序单按工厂分开。请在钉钉里把你调到所在工厂的部门，或联系管理员分配「查看全部工厂」权限。
         </template>
       </Result>
       <Result
         v-else-if="loadError"
         status="warning"
-        title="工序库存没有加载出来"
+        title="工序单没有加载出来"
       >
         <template #subTitle>
-          可能是网络问题，或者还没有分配「工序库存」的查看权限。
+          可能是网络问题，或者还没有分配「工序单」的查看权限。
         </template>
         <template #extra>
           <Button type="primary" @click="loadAll">重新加载</Button>
@@ -242,7 +229,24 @@ async function onSettingSaved() {
 
       <div v-else :key="factory.factoryId.value ?? 0" class="stage-stock">
         <Tabs v-model:active-key="activeTab" class="stage-stock__tabs">
-          <Tabs.TabPane key="stock" tab="库存">
+          <Tabs.TabPane key="orders">
+            <template #tab>
+              工序单
+              <span v-if="wipCount > 0" class="ml-1 text-xs text-warning">
+                {{ wipCount }} 在制
+              </span>
+            </template>
+            <div class="stage-stock__card">
+              <OrderPanel
+                :options="options"
+                :refresh-key="refreshKey"
+                @changed="onChanged"
+                @create="openCreate()"
+                @report="openReport"
+              />
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="stock" tab="可领库存">
             <div
               class="flex flex-col overflow-hidden rounded-lg border border-border bg-card lg:flex-row"
             >
@@ -265,31 +269,8 @@ async function onSettingSaved() {
                   @changed="onChanged"
                   @create="openCreate"
                   @saved="(text) => message.success(text)"
-                  @txn="showTxns"
                 />
               </div>
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane key="orders">
-            <template #tab>
-              工序单
-              <span v-if="wipCount > 0" class="ml-1 text-xs text-warning">
-                {{ wipCount }} 在制
-              </span>
-            </template>
-            <div class="stage-stock__card">
-              <OrderPanel
-                :options="options"
-                :refresh-key="refreshKey"
-                @changed="onChanged"
-                @create="openCreate()"
-                @report="openReport"
-              />
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane key="trade" tab="早期出货">
-            <div class="stage-stock__card">
-              <ShipmentPanel :refresh-key="refreshKey" />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane key="receiving">
@@ -307,15 +288,6 @@ async function onSettingSaved() {
                 :refresh-key="refreshKey"
                 @pending="(count) => (receivingPending = count)"
                 @receive="openReceipt"
-              />
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane key="txns" tab="库存流水">
-            <div class="stage-stock__card">
-              <TxnPanel
-                v-model:item-code="txnItemCode"
-                :options="options"
-                :refresh-key="refreshKey"
               />
             </div>
           </Tabs.TabPane>

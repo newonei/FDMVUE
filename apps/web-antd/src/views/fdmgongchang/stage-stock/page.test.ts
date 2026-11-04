@@ -194,6 +194,11 @@ const flush = async () => {
   }
 };
 
+function clickTab(tab: string) {
+  const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));
+  (el?.querySelector('.ant-tabs-tab-btn') as HTMLElement | null)?.click();
+}
+
 describe('stage stock page', () => {
   let unmount: (() => void) | undefined;
   afterEach(() => {
@@ -278,8 +283,11 @@ describe('stage stock page', () => {
     unmount = () => app.unmount();
     await flush();
 
+    expect(document.body.textContent).toContain('工厂库存已并入库存中心');
+    clickTab('可领库存');
+    await flush();
     const text = document.body.textContent ?? '';
-    expect(text).toContain('工序库存');
+    expect(text).toContain('工序单');
     expect(mocks.setFactory).toHaveBeenCalledWith(2);
     expect(document.querySelector('#factory-switch')).not.toBeNull();
     expect(text).toContain('已包装成品');
@@ -306,15 +314,16 @@ describe('stage stock page', () => {
     expect(embossed).toContain('压花在制 40 片');
     expect(mocks.stockPage).toHaveBeenLastCalledWith(expect.objectContaining({ stage: 'EMBOSSED' }));
 
-    for (const tab of ['工序单', '早期出货', '到货入库', '库存流水', '基础设置']) {
-      const el = [...document.querySelectorAll('.ant-tabs-tab')].find((t) => t.textContent?.includes(tab));
-      (el?.querySelector('.ant-tabs-tab-btn') as HTMLElement | null)?.click();
+    // 早期出货、库存流水已下线（库存流水在库存中心）
+    for (const gone of ['早期出货', '库存流水']) {
+      expect([...document.querySelectorAll('.ant-tabs-tab')].some((t) => t.textContent?.includes(gone))).toBe(false);
+    }
+    for (const tab of ['工序单', '到货入库', '基础设置']) {
+      clickTab(tab);
       await flush();
     }
     const after = document.body.textContent ?? '';
     expect(after).toContain('GX20261007-004');
-    expect(after).toContain('CH20261020-001');
-    expect(after).toContain('2026-10-20');
     expect(after).toContain('2.0%');
     expect(after).toContain('工序与领料来源');
     expect(after).toContain('1 待到');
@@ -386,6 +395,8 @@ describe('stage stock page', () => {
     unmount = () => app.unmount();
     await flush();
 
+    clickTab('可领库存');
+    await flush();
     expect(host.textContent).toContain('附加工序：打孔');
     expect(host.textContent).not.toContain('旧工序');
     clickButton('附加工序', host);
