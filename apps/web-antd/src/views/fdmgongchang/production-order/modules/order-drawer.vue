@@ -58,6 +58,10 @@ const materialPlan = ref<InstanceType<typeof MaterialPlan>>();
 
 const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : undefined));
 const fromPurchase = computed(() => order.value?.sourceType === 'PURCHASE_ORDER');
+/** 补库单：订单用掉常备物料后系统自动下的，工厂接单时定工艺。 */
+const fromRestock = computed(() => order.value?.sourceType === 'RESTOCK');
+/** 工艺由工厂定的单：采购单生成的单、补库单。 */
+const factoryRoute = computed(() => fromPurchase.value || fromRestock.value);
 /** 采购单生成的单：工厂定工艺用的工序和路线、每个产品的工艺草稿。 */
 const routeOptions = ref<RouteApi.Options>();
 const drafts = ref<Record<number, RouteDraft>>({});
@@ -91,7 +95,7 @@ async function load() {
 /** 工厂定工艺：已定过的沿用，没定过的带出这个产品上次在本厂用的工艺。 */
 async function loadRoutes() {
   const o = order.value;
-  if (!o || props.mode !== 'factory' || !fromPurchase.value || !['ACCEPTED', 'SUBMITTED'].includes(o.status)) return;
+  if (!o || props.mode !== 'factory' || !factoryRoute.value || !['ACCEPTED', 'SUBMITTED'].includes(o.status)) return;
   routeOptions.value = await getRouteOptions(o.factoryId).catch(() => undefined);
   const next: Record<number, RouteDraft> = {};
   await Promise.all(
@@ -170,7 +174,7 @@ function accept() {
     return;
   }
   let routes: Api.RouteReq[] | undefined;
-  if (fromPurchase.value) {
+  if (factoryRoute.value) {
     for (const item of activeItems.value) {
       const problem = draftProblem(item);
       if (problem) {
@@ -279,6 +283,7 @@ function producedQty(item: Api.Item) {
           <span class="text-muted-foreground">{{ order.factoryName }}</span>
           <span v-if="order.purpose && !fromPurchase" class="text-muted-foreground">· {{ order.purpose }}</span>
           <Tag v-if="fromPurchase" class="m-0" color="blue">采购单 {{ order.sourceOrderCode }}</Tag>
+          <Tag v-if="fromRestock" class="m-0" color="purple">补库</Tag>
         </div>
         <Alert
           v-if="fromPurchase && order.sourceChanged && mode === 'factory'"
@@ -327,7 +332,7 @@ function producedQty(item: Api.Item) {
               <span v-if="i.remark" class="text-xs text-warning">备注：{{ i.remark }}</span>
               <span v-if="num(i.quantity) === 0" class="text-xs text-muted-foreground">采购单已取消这一行</span>
               <div
-                v-else-if="fromPurchase && drafts[i.id] && (canHandle || (editingRoute === i.id && canProgress))"
+                v-else-if="factoryRoute && drafts[i.id] && (canHandle || (editingRoute === i.id && canProgress))"
                 class="mt-1 flex flex-col gap-1"
               >
                 <RoutePicker
@@ -342,12 +347,12 @@ function producedQty(item: Api.Item) {
                 </span>
               </div>
               <span v-else-if="(i.processes ?? []).length === 0" class="text-xs text-muted-foreground">
-                {{ fromPurchase ? '工艺：工厂接单时定' : '工艺：旧单没有定工艺，从已包装成品交货' }}
+                {{ factoryRoute ? '工艺：工厂接单时定' : '工艺：旧单没有定工艺，从已包装成品交货' }}
               </span>
               <span v-else class="mt-1 flex flex-wrap items-center gap-1 text-xs">
                 <span class="text-muted-foreground">工艺 · {{ i.routeName || '自选工序' }}：</span>
                 <button
-                  v-if="fromPurchase && canProgress && !itemStarted(i) && editingRoute === undefined"
+                  v-if="factoryRoute && canProgress && !itemStarted(i) && editingRoute === undefined"
                   class="text-primary hover:underline"
                   type="button"
                   @click="editingRoute = i.id"

@@ -32,6 +32,7 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CustomProcessPanel from './modules/custom-process-panel.vue';
 import RoutePanel from './modules/route-panel.vue';
+import StandingPanel from './modules/standing-panel.vue';
 import SupplierPanel from './modules/supplier-panel.vue';
 import WageItemPanel from './modules/wage-item-panel.vue';
 
@@ -383,6 +384,9 @@ async function save() {
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="suppliers" tab="对应供应商">
             <SupplierPanel :can-edit="canEdit" :suppliers="setting.suppliers" @saved="load" />
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="setting" key="standing" tab="常备物料">
+            <StandingPanel :can-edit="canEdit" />
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
             <WageItemPanel :processes="allProcesses" />

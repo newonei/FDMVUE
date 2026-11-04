@@ -200,7 +200,9 @@ defineExpose({ reload: load });
                 <tbody>
                   <tr v-for="(l, index) in matchByItem.get(item.id)!.lines" :key="index" class="border-t border-border">
                     <td class="py-1">
-                      <Tag :color="l.source === 'TASK' ? 'blue' : undefined">{{ l.source === 'TASK' ? '已排任务' : l.stageLabel }}</Tag>
+                      <Tag :color="l.source === 'TASK' ? 'blue' : l.source === 'OWN' ? 'green' : undefined">
+                        {{ l.source === 'TASK' ? '已排任务' : l.source === 'OWN' ? `已锁 · ${l.stageLabel}` : l.stageLabel }}
+                      </Tag>
                       {{ l.code }}
                     </td>
                     <td class="py-1 text-right tabular-nums">{{ fmt(l.used) }} {{ l.unit }}</td>

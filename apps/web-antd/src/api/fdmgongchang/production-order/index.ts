@@ -147,7 +147,7 @@ export namespace FdmgongchangProductionOrderApi {
     /** 希望交货日期；采购单没填交期时为空。 */
     requiredDate?: null | number[] | string;
     /** MANUAL 内部下单 / PURCHASE_ORDER 供应商是本厂的采购单自动生成。 */
-    sourceType?: 'MANUAL' | 'PURCHASE_ORDER';
+    sourceType?: 'MANUAL' | 'PURCHASE_ORDER' | 'RESTOCK';
     sourceOrderId?: null | string;
     sourceOrderCode?: null | string;
     sourceContractId?: null | string;
@@ -688,8 +688,8 @@ export namespace FdmgongchangSupplyMatchApi {
     /** 后面还要做的工序。 */
     nextProcesses: string[];
     perUnit: number;
-    /** STOCK 现成库存 / TASK 已下发任务的预计产出。 */
-    source: 'STOCK' | 'TASK';
+    /** STOCK 现成库存 / OWN 已锁给这张单的库存 / TASK 已下发任务的预计产出。 */
+    source: 'OWN' | 'STOCK' | 'TASK';
     stage: string;
     stageLabel: string;
     unit?: null | string;
