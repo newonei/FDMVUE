@@ -2,7 +2,7 @@ import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { requestClient } from '#/api/request';
 
-import { factoryHeaders } from '../factory';
+import { FACTORY_HEADER, factoryHeaders } from '../factory';
 
 export namespace FdmgongchangDashboardApi {
   type Decimal = number | string;
@@ -97,6 +97,20 @@ export namespace FdmgongchangDashboardApi {
     today: FdmgongchangStageStockApi.Today;
     trend: TrendPoint[];
   }
+}
+
+/** 指定工厂的看板，不改当前工厂；公司看板逐个工厂读取。 */
+export function getFactoryDashboardOf(
+  factoryId: number,
+  range: FdmgongchangDashboardApi.Range,
+) {
+  return requestClient.get<FdmgongchangDashboardApi.Dashboard>(
+    '/fdmgongchang/dashboard/get',
+    {
+      headers: { [FACTORY_HEADER]: String(factoryId) },
+      params: { range },
+    },
+  );
 }
 
 export function getFactoryDashboard(range: FdmgongchangDashboardApi.Range) {
