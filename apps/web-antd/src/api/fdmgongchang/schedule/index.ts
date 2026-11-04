@@ -73,8 +73,8 @@ export namespace FdmgongchangScheduleApi {
     shortage?: Decimal | null;
     shortageNote?: null | string;
     shortageHandledAt?: DateValue | null;
-    /** 工作台用：上道还没报工，暂时不能接单的原因。 */
-    lockReason?: null | string;
+    /** 工作台用：上道还没报工或报的不够的提示，不拦接单（各工序下班时才报工）。 */
+    upstreamNote?: null | string;
     /** 工作台用：按上道已报工的良品，现在最多能做多少。 */
     available?: Decimal | null;
   }

@@ -56,7 +56,7 @@ const dateText = (v: FdmgongchangScheduleApi.DateValue) => {
 
 type Tab = 'hall' | 'mine';
 const tab = ref<Tab>('mine');
-const hallOpen = computed(() => hall.value.filter((t) => !t.lockReason).length);
+const hallOpen = computed(() => hall.value.length);
 const TABS: Array<{ count: () => number; key: Tab; label: string }> = [
   { count: () => myTasks.value.length, key: 'mine', label: '我的任务' },
   { count: () => hallOpen.value, key: 'hall', label: '任务大厅' },
@@ -215,7 +215,7 @@ watch(
             排单是 {{ formatQty(task.plannedQuantity) }} {{ task.unit }}，按上道报的良品改成了 {{ formatQty(task.quantity) }}。
           </p>
           <p v-if="task.reason" class="m-0 rounded-md bg-muted/50 px-3 py-2 text-sm">{{ task.reason }}</p>
-          <p v-if="task.lockReason" class="m-0 text-sm text-warning">{{ task.lockReason }}</p>
+          <p v-if="task.upstreamNote" class="m-0 text-xs text-muted-foreground">{{ task.upstreamNote }}</p>
 
           <div class="flex flex-col gap-1">
             <span class="text-xs font-semibold text-muted-foreground">要领的料（建议，报工时按实际改）</span>
@@ -271,14 +271,10 @@ watch(
               <span class="text-xs text-muted-foreground">
                 {{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }} · {{ dateText(task.workDate) }} ·
                 <b class="text-foreground">{{ formatQty(task.quantity) }} {{ task.unit }}</b>
-                <template v-if="!task.lockReason && task.available !== null && task.available !== undefined && Number(task.available) < Number(task.quantity)">
-                  · 上道已报，现在能做 {{ formatQty(task.available) }}
-                </template>
               </span>
-              <span v-if="task.lockReason" class="text-xs text-warning">{{ task.lockReason }}</span>
+              <span v-if="task.upstreamNote" class="text-xs text-muted-foreground">{{ task.upstreamNote }}</span>
             </div>
             <button
-              :disabled="!!task.lockReason"
               class="h-10 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
               type="button"
               @click="emit('claimTask', task)"

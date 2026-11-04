@@ -66,7 +66,8 @@ function toggle(stock: StockApi.Stock) {
 
 function setQty(stock: StockApi.Stock, value: unknown) {
   const pick = pickOf(stock);
-  if (pick) pick.qty = Math.min(Number(value) || 0, toNumber(stock.quantity) ?? 0);
+  // 按纸质领料单照实际数领，账面不够时会暂时为负，上道报工后补平
+  if (pick) pick.qty = Math.max(Number(value) || 0, 0);
 }
 
 /** 右边清单里某种原料本次一共领多少。 */
@@ -218,7 +219,7 @@ function next() {
             </tbody>
           </table>
           <p v-if="recipeLines.some((l) => Number(l.shortage) > 0)" class="m-0 text-xs text-destructive">
-            标红的原料库存不够，先领有的，到料后在「我手上在做的」里点「料不够，补领」。
+            标红的原料账面不够；照纸质领料单的实际数领，账面会暂时为负，入库补录后补平。
           </p>
         </section>
 
@@ -276,7 +277,6 @@ function next() {
                   <InputNumber
                     :id="`pick-${s.id}`"
                     :aria-label="`${nameOf(s)} 领用数量`"
-                    :max="toNumber(s.quantity)"
                     :min="0"
                     :precision="3"
                     :addon-after="unit"
@@ -338,7 +338,6 @@ function next() {
               v-model:value="a.qty"
               :aria-label="`${a.name} 实际领用数量`"
               :addon-after="a.unit"
-              :max="toNumber(a.stock.quantity)"
               :min="0"
               :precision="3"
               class="w-36"

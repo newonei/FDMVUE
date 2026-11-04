@@ -83,7 +83,7 @@ export namespace FdmgongchangWorkbenchApi {
     recentDone?: Order[];
     /** 我的任务：派给我或我接的、还没报工的。 */
     tasks: FdmgongchangScheduleApi.Task[];
-    /** 任务大厅：我有岗位的工序里没人接的任务；lockReason 不为空时要等上道报工。 */
+    /** 任务大厅：我有岗位的工序里没人接的任务；upstreamNote 是上道还没报工的提示，不拦接单。 */
     hall?: FdmgongchangScheduleApi.Task[];
     team?: null | string;
     today: FdmgongchangScheduleApi.DateValue;

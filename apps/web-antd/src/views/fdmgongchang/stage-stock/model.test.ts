@@ -502,6 +502,9 @@ describe('辅料', () => {
       { quantity: 25, stockId: 2 },
     ]);
     expect(pickAuxStocks([{ id: 1, quantity: 5 }], 0)).toEqual([]);
+    // 账面不够或为负：剩下的照样记到第一行，领料后账面暂时为负
+    expect(pickAuxStocks([{ id: 1, quantity: 10 }, { id: 2, quantity: -5 }], 30)).toEqual([{ quantity: 30, stockId: 1 }]);
+    expect(pickAuxStocks([{ id: 7, quantity: 0 }], 12)).toEqual([{ quantity: 12, stockId: 7 }]);
   });
 
   it('shows aux stock by product with its own unit and contract', () => {

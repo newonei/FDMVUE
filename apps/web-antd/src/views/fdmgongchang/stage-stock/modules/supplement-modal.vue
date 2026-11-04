@@ -31,7 +31,6 @@ import {
   recipeCheck,
   recipePicks,
   sumQty,
-  toNumber,
 } from '../model';
 
 /**
@@ -115,6 +114,7 @@ async function loadStock() {
       keyword: keyword.value.trim() || undefined,
       pageNo: 1,
       pageSize: 200,
+      showZero: true,
       stage: order.value.sourceStage,
     });
     stockRows.value = page.list;
@@ -172,10 +172,6 @@ async function submit() {
   errors.value = [];
   if (lines.value.length === 0) errors.value.push('请至少填写一行补领数量。');
   for (const line of lines.value) {
-    if (line.quantity > (toNumber(line.stock.quantity) ?? 0))
-      errors.value.push(
-        `${line.stock.itemCode}（批次 ${line.stock.batchNo}）只剩 ${formatQty(line.stock.quantity)}，补领数量不能超过库存。`,
-      );
     if (laminate.value && !line.side)
       errors.value.push(`${line.stock.itemCode} 请选择是正面还是反面片材。`);
   }
@@ -323,7 +319,6 @@ async function submit() {
                 :id="`supplement-take-${record.id}`"
                 :value="quantities[record.id] ?? undefined"
                 :aria-label="`${record.itemCode} 补领数量`"
-                :max="Number(record.quantity)"
                 :min="0"
                 :precision="3"
                 :style="{ width: '7rem' }"
