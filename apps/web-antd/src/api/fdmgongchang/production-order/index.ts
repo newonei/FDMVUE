@@ -168,11 +168,63 @@ export namespace FdmgongchangProductionOrderApi {
     status?: Status;
   }
 
+  /** 产品中心还没有、提交时新建的规格。 */
+  export interface NewProduct {
+    category: string;
+    color?: string;
+    material?: string;
+    model?: string;
+    name: string;
+    packaging?: string;
+    printing?: string;
+    specification: string;
+    unit: string;
+  }
+
+  /** AI 识别需求的一行明细。 */
+  export interface FillLine {
+    candidates: Product[];
+    category?: null | string;
+    color?: null | string;
+    material?: null | string;
+    model?: null | string;
+    name?: null | string;
+    packaging?: null | string;
+    printing?: null | string;
+    /** 产品中心里对得上的产品；为空是没找到。 */
+    product?: null | Product;
+    productCode?: null | string;
+    quantity?: null | number;
+    remark?: null | string;
+    specification?: null | string;
+    unit?: null | string;
+  }
+
+  export interface Fill {
+    errorMessage?: null | string;
+    files: Array<{
+      name: string;
+      note?: null | string;
+      status: 'PARTIAL' | 'READ' | 'SKIPPED';
+    }>;
+    id: number;
+    result?: null | {
+      lines: FillLine[];
+      notes: string[];
+      purpose?: null | string;
+      remark?: null | string;
+      requiredDate?: null | string;
+    };
+    status: 'DONE' | 'FAILED' | 'GENERATING';
+  }
+
   export interface CreateReq {
     factoryId: number;
     items: Array<{
       auxUsages?: AuxUsage[];
-      productId: string;
+      newProduct?: NewProduct;
+      /** 产品中心的产品；新规格不填，改填 newProduct。 */
+      productId?: string;
       quantity: number;
       remark?: string;
       routeId?: number;
@@ -739,4 +791,43 @@ export function saveItemTarget(data: FdmgongchangSupplyMatchApi.TargetReq) {
   return requestClient.post<boolean>(`${BASE}/item-target`, data, {
     headers: factoryHeaders(),
   });
+}
+
+// ========== AI 识别需求 ==========
+
+/** AI 识别需求的默认提示词（工厂设置里改过的优先）。 */
+export function getDefaultFillPrompt(factoryId?: number) {
+  return requestClient.get<string>(`${BASE}/ai-fill/default-prompt`, {
+    params: { factoryId },
+  });
+}
+
+/** 上传附件、提示词和粘贴的文字交给 AI 识别，返回识别记录编号。 */
+export function submitDemandFill(data: {
+  factoryId: number;
+  files: File[];
+  prompt?: string;
+  text?: string;
+}) {
+  const form = new FormData();
+  form.append('factoryId', String(data.factoryId));
+  if (data.prompt) form.append('prompt', data.prompt);
+  if (data.text) form.append('text', data.text);
+  for (const file of data.files) form.append('files', file);
+  return requestClient.post<number>(`${BASE}/ai-fill`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180_000,
+  });
+}
+
+export function getDemandFill(id: number) {
+  return requestClient.get<FdmgongchangProductionOrderApi.Fill>(
+    `${BASE}/ai-fill/get`,
+    { params: { id } },
+  );
+}
+
+/** 产品中心启用中的分类（新规格建档时选）。 */
+export function getProductCategories() {
+  return requestClient.get<string[]>(`${BASE}/product-categories`);
 }

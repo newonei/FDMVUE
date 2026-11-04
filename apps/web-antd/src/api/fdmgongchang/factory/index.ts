@@ -199,6 +199,10 @@ export namespace FdmgongchangFactorySettingApi {
     /** AI 排单选的模型；为空表示自动（本厂放行的第一个）。 */
     scheduleModelId?: null | number | string;
     scheduleModels?: ModelOption[];
+    /** 提生产需求时 AI 识别附件的默认提示词（没改过时是系统默认）。 */
+    demandFillPrompt?: null | string;
+    /** 系统默认的识别提示词，用于「恢复系统默认」。 */
+    demandFillDefaultPrompt?: null | string;
   }
 
   export interface SaveReq {
@@ -210,6 +214,8 @@ export namespace FdmgongchangFactorySettingApi {
     enabledProcesses: string[];
     /** AI 排单用的模型；为空表示自动。 */
     scheduleModelId?: null | number | string;
+    /** AI 识别需求的默认提示词；不传不改，空白表示恢复系统默认。 */
+    demandFillPrompt?: string;
   }
 }
 

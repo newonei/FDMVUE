@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   voidDelivery: vi.fn(),
   create: vi.fn(),
   factories: vi.fn(),
+  fillGet: vi.fn(),
+  fillSubmit: vi.fn(),
   factoryPage: vi.fn(),
   get: vi.fn(),
   lastRoute: vi.fn().mockResolvedValue(null),
@@ -46,6 +48,10 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   ]),
   voidDelivery: mocks.voidDelivery,
   createProductionOrder: mocks.create,
+  getDefaultFillPrompt: vi.fn().mockResolvedValue('默认提示词'),
+  getDemandFill: mocks.fillGet,
+  getProductCategories: vi.fn().mockResolvedValue(['TPE瑜伽垫', '辅料']),
+  submitDemandFill: mocks.fillSubmit,
   getFactoryProductionOrders: mocks.factoryPage,
   getMyProductionOrders: mocks.myPage,
   getOrderableFactories: mocks.factories,
@@ -218,6 +224,85 @@ describe('production order page', () => {
     await flush();
     expect(document.body.textContent).toContain('请选择希望交货的日期');
     expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('fills the demand from AI and creates new specifications when submitting', async () => {
+    mocks.factories.mockResolvedValue([{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }]);
+    mocks.myPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.factoryPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.create.mockResolvedValue(10);
+    mocks.fillSubmit.mockResolvedValue(5);
+    const other: Api.Product = { code: 'DZ2401970', id: 'p2', name: 'TPE单色瑜伽垫-Jack', size: '183*61*0.6cm', unit: '条' };
+    mocks.fillGet.mockResolvedValue({
+      files: [{ name: '截图.png', note: '图片太多，有 2 张没看', status: 'PARTIAL' }],
+      id: 5,
+      result: {
+        lines: [
+          { candidates: [], product, quantity: 500 },
+          {
+            candidates: [],
+            category: 'TPE瑜伽垫',
+            material: 'TPE',
+            model: '灰',
+            name: 'TPE瑜伽垫',
+            quantity: 30,
+            specification: '120*60*0.8cm',
+            unit: '条',
+          },
+          { candidates: [other], category: '不存在的分类', name: 'TPE单色瑜伽垫', quantity: 20, specification: '183*61*0.6cm', unit: '条' },
+        ],
+        notes: ['第 3 行颜色看不清'],
+        purpose: '客户订单',
+        requiredDate: '2099-01-15',
+      },
+      status: 'DONE',
+    });
+    unmount = mount();
+    await flush();
+    button('＋提生产需求').click();
+    await flush();
+    const text = document.querySelector<HTMLTextAreaElement>('#po-ai-text')!;
+    text.value = '183*61*0.6 米白 500 条';
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    button('AI识别并回填').click();
+    await flush();
+    expect(mocks.fillSubmit).toHaveBeenCalledWith({ factoryId: 1, files: [], prompt: undefined, text: '183*61*0.6 米白 500 条' });
+    expect(mocks.fillGet).toHaveBeenCalledWith(5);
+    const body = () => document.body.textContent ?? '';
+    expect(body()).toContain('AI 回填了 3 行：1 行对上产品中心，2 行是新规格');
+    expect(body()).toContain('第 3 行颜色看不清');
+    expect(body()).toContain('「截图.png」图片太多，有 2 张没看');
+    expect(body()).toContain('其中 2 个是新规格，提交时在产品中心新建');
+    expect(document.querySelector<HTMLInputElement>('#po-purpose')!.value).toBe('客户订单');
+
+    // 第三行其实是产品中心已有的，点「改用这个」就不新建
+    [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('改用这个'))!.click();
+    await flush();
+    expect(body()).toContain('其中 1 个是新规格');
+
+    button('提交给工厂').click();
+    await flush();
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    const req = mocks.create.mock.calls[0]![0] as Api.CreateReq;
+    expect(req.requiredDate).toBe('2099-01-15');
+    expect(req.items.map((i) => [i.productId, i.newProduct?.name, i.quantity])).toEqual([
+      ['p1', undefined, 500],
+      [undefined, 'TPE瑜伽垫', 30],
+      ['p2', undefined, 20],
+    ]);
+    expect(req.items[1]!.newProduct).toEqual({
+      category: 'TPE瑜伽垫',
+      color: undefined,
+      material: 'TPE',
+      model: '灰',
+      name: 'TPE瑜伽垫',
+      packaging: undefined,
+      printing: undefined,
+      specification: '120*60*0.8cm',
+      unit: '条',
+    });
+    expect(req.items[1]!.steps).toEqual(['SLICE', 'PUNCH']);
   });
 
   it('lets the factory accept an order it received', async () => {
