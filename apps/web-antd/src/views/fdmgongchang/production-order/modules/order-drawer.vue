@@ -31,6 +31,7 @@ import DeliveryModal from './delivery-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
 import RoutePicker from './route-picker.vue';
+import SupplyMatch from './supply-match.vue';
 
 /**
  * 订单详情。下单人（mode=mine）待接单时可以撤回；
@@ -53,6 +54,7 @@ const deliveryOpen = ref(false);
 const deliveryItem = ref<Api.Item>();
 const voidTarget = ref<Api.Delivery>();
 const voidReason = ref('');
+const materialPlan = ref<InstanceType<typeof MaterialPlan>>();
 
 const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : undefined));
 const fromPurchase = computed(() => order.value?.sourceType === 'PURCHASE_ORDER');
@@ -124,6 +126,15 @@ function saveRoute(item: Api.Item) {
     return;
   }
   return run(() => saveItemRoute({ itemId: item.id, routeId: draft.routeId, steps: draft.steps }), '工艺已保存');
+}
+
+/** 确认规格后订单明细和用料逆推都要按新规格重算。 */
+async function onTargetChanged() {
+  if (!order.value) return;
+  // 只换明细，不重置接单表单里已经填的交期和回复
+  const fresh = await getProductionOrder(order.value.id);
+  order.value = { ...order.value, items: fresh.items };
+  await materialPlan.value?.reload();
 }
 
 function confirmChange() {
@@ -392,7 +403,8 @@ function producedQty(item: Api.Item) {
           :route-options="routeOptions"
         />
 
-        <MaterialPlan v-if="canPlan" :editable="canPlan" :order-id="order.id" />
+        <SupplyMatch v-if="canPlan" :editable="canPlan" :items="order.items" :order-id="order.id" @changed="onTargetChanged" />
+        <MaterialPlan v-if="canPlan" ref="materialPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
           <h3 class="m-0 text-sm font-semibold">接单处理</h3>

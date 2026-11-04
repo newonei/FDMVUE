@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   lastRoute: vi.fn().mockResolvedValue(null),
   materialPlan: vi.fn(),
   saveMaterial: vi.fn(),
+  saveTarget: vi.fn(),
+  supplyMatch: vi.fn().mockResolvedValue([]),
   myFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
     defaultFactoryId: 1,
@@ -52,6 +54,14 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   getMaterialPlan: mocks.materialPlan,
   getRecipeOptions: vi.fn().mockResolvedValue([{ recipeCode: 'REC-001', recipeName: '常规款（密度110）' }]),
   saveItemMaterial: mocks.saveMaterial,
+  getSupplyMatch: mocks.supplyMatch,
+  getTargetOptions: vi.fn().mockResolvedValue({
+    colors: [{ label: '粉', value: 'PK' }],
+    materials: [{ label: 'TPE', value: 'TPE' }],
+    patterns: [{ label: '哆啦A梦', value: 'DM' }],
+    textures: [{ label: '贝壳纹', value: 'SH' }],
+  }),
+  saveItemTarget: mocks.saveTarget,
   searchAuxProducts: vi.fn().mockResolvedValue([]),
   getRouteOptions: vi.fn().mockResolvedValue({
     processes: [
@@ -275,6 +285,63 @@ describe('production order page', () => {
     button('接单').click();
     await flush();
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
+  });
+
+  it('lets the factory confirm the structured spec and shows how stock covers the order', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const suggested = { frontColor: 'PK', length: 183, material: 'TPE', thickness: 0.6, width: 61 };
+    const accepted = {
+      ...order,
+      items: [{ ...order.items[0]!, targetSuggested: suggested }],
+      status: 'ACCEPTED',
+      statusLabel: '生产中',
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.supplyMatch.mockResolvedValue([
+      {
+        covered: 200,
+        itemId: 91,
+        lines: [
+          { code: 'CC-1', covers: 200, nextProcesses: [], perUnit: 1, source: 'STOCK', stage: 'PUNCHED', stageLabel: '已冲裁半成品', unit: '件', used: 200 },
+        ],
+        newProduction: 300,
+        notes: ['已冲裁半成品 CC-2：颜色不同'],
+        pending: null,
+        processes: [
+          { label: '开片', process: 'SLICE', quantity: 300 },
+          { label: '冲裁', process: 'PUNCH', quantity: 300 },
+        ],
+        productName: product.displayName,
+        remaining: 500,
+        targetConfirmed: false,
+      },
+    ]);
+    mocks.saveTarget.mockResolvedValue(true);
+    unmount = mount();
+    await flush();
+    button('查看').click();
+    await flush();
+    const text = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
+    expect(mocks.supplyMatch).toHaveBeenCalledWith(9);
+    expect(text).toContain('规格与库存匹配');
+    expect(text).toContain('未确认');
+    expect(text).toContain('还要交500：现成料覆盖200，缺料300');
+    expect(text).toContain('开片300·冲裁300');
+    expect(text).toContain('CC-2：颜色不同');
+
+    button('确认规格').click();
+    await flush();
+    const ok = [...document.querySelectorAll('.ant-modal button')].find(
+      (b) => b.textContent?.replaceAll(/\s/g, '') === '确认规格',
+    ) as HTMLButtonElement;
+    ok.click();
+    await flush();
+    // 没压花、没雕刻的工艺不带压纹和图案；预填的是从规格文本解析的值
+    expect(mocks.saveTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ frontColor: 'PK', itemId: 91, length: 183, material: 'TPE', pattern: undefined, thickness: 0.6, width: 61 }),
+    );
   });
 
   it('copies a rejected order into a new one so the requester only fixes what was wrong', async () => {
