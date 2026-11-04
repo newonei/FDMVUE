@@ -66,6 +66,20 @@ export namespace FdmgongchangProductionOrderApi {
     recipeCode?: null | string;
     /** 工厂选的模具档案；空 = 本厂密炼出板规格。 */
     mouldProfileId?: null | number;
+    /** 工厂确认的结构化规格（#154）：确认后库存匹配、排单按它比对正反面色、压纹、图案。 */
+    targetMaterial?: null | string;
+    targetFrontColor?: null | string;
+    targetBackColor?: null | string;
+    targetLength?: null | number | string;
+    targetWidth?: null | number | string;
+    targetThickness?: null | number | string;
+    targetTextureFront?: null | string;
+    targetTextureBack?: null | string;
+    targetPattern?: null | string;
+    targetConfirmedBy?: null | string;
+    targetConfirmedAt?: null | string;
+    /** 没确认时从规格文本解析出的建议值。 */
+    targetSuggested?: FdmgongchangSupplyMatchApi.TargetReq | null;
     size?: null | string;
     specification?: null | string;
     /** 每道工序的进度（不含作废的工序单）。 */
@@ -634,6 +648,95 @@ export function saveItemMaterial(
   data: FdmgongchangMaterialPlanApi.ItemMaterialReq,
 ) {
   return requestClient.post<boolean>(`${BASE}/item-material`, data, {
+    headers: factoryHeaders(),
+  });
+}
+
+export namespace FdmgongchangSupplyMatchApi {
+  /** 工厂确认的规格；长宽厚单位 cm，压纹、图案空 = 不要。 */
+  export interface TargetReq {
+    backColor?: null | string;
+    frontColor?: null | string;
+    itemId?: null | number;
+    length?: null | number | string;
+    material?: null | string;
+    pattern?: null | string;
+    textureBack?: null | string;
+    textureFront?: null | string;
+    thickness?: null | number | string;
+    width?: null | number | string;
+  }
+
+  export interface DictOption {
+    label: string;
+    value: string;
+  }
+
+  export interface TargetOptions {
+    colors: DictOption[];
+    materials: DictOption[];
+    patterns: DictOption[];
+    textures: DictOption[];
+  }
+
+  export interface Line {
+    /** 任务的计划日期；库存为空。 */
+    availableDate?: null | string;
+    code: string;
+    /** 折成多少件成品。 */
+    covers: number | string;
+    /** 后面还要做的工序。 */
+    nextProcesses: string[];
+    perUnit: number;
+    /** STOCK 现成库存 / TASK 已下发任务的预计产出。 */
+    source: 'STOCK' | 'TASK';
+    stage: string;
+    stageLabel: string;
+    unit?: null | string;
+    /** 用多少（这一段的单位）。 */
+    used: number | string;
+  }
+
+  /** 一条明细的库存匹配：现成库存和已排任务能覆盖多少、还要新做多少、每道工序要做多少。 */
+  export interface Match {
+    covered: number | string;
+    itemId: number;
+    lines: Line[];
+    /** 现成料覆盖不了的成品数：工艺从密炼开始时要新做，否则是缺料。 */
+    newProduction: number | string;
+    notes: string[];
+    /** 不为空时规格不全，不能匹配和排单。 */
+    pending?: null | string;
+    processes: Array<{
+      label: string;
+      process: string;
+      quantity: number | string;
+    }>;
+    productName: string;
+    remaining: number | string;
+    targetConfirmed: boolean;
+  }
+}
+
+/** 库存匹配：本厂全部已接单订单按交期一起算，返回这张单每条明细的结果。 */
+export function getSupplyMatch(id: number) {
+  return requestClient.get<FdmgongchangSupplyMatchApi.Match[]>(
+    `${BASE}/supply-match`,
+    { headers: factoryHeaders(), params: { id } },
+  );
+}
+
+/** 确认规格用的字典选项。 */
+export function getTargetOptions() {
+  return requestClient.get<FdmgongchangSupplyMatchApi.TargetOptions>(
+    `${BASE}/target-options`,
+    { headers: factoryHeaders() },
+  );
+}
+
+/** 工厂确认明细规格。 */
+export function saveItemTarget(data: FdmgongchangSupplyMatchApi.TargetReq) {
+  return requestClient.post<boolean>(`${BASE}/item-target`, data, {
     headers: factoryHeaders(),
   });
 }
