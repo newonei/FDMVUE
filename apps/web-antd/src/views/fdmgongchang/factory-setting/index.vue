@@ -13,6 +13,7 @@ import {
   Alert,
   Button,
   Checkbox,
+  Input,
   InputNumber,
   message,
   Radio,
@@ -81,6 +82,9 @@ const savedModelId = computed(() =>
     : String(setting.value.scheduleModelId),
 );
 const models = computed(() => setting.value?.scheduleModels ?? []);
+/** 提生产需求时 AI 识别附件的默认提示词；提需求的人每次还能当场改。 */
+const fillPrompt = ref('');
+const savedFillPrompt = computed(() => setting.value?.demandFillPrompt ?? '');
 const autoModel = computed(() => models.value.find((m) => m.allowed));
 const loading = ref(false);
 const saving = ref(false);
@@ -124,6 +128,7 @@ const dirty = computed(() => {
       (p) => (capacities.value[p.code] ?? null) !== savedCapacity(p.code),
     ) ||
     modelId.value !== savedModelId.value ||
+    fillPrompt.value.trim() !== savedFillPrompt.value.trim() ||
     MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k))
   );
 });
@@ -146,6 +151,7 @@ async function load() {
       setting.value.processes.map((p) => [p.code, savedCapacity(p.code)]),
     );
     modelId.value = savedModelId.value;
+    fillPrompt.value = savedFillPrompt.value;
     mixBoard.value = Object.fromEntries(MIX_FIELDS.map((k) => [k, savedMix(k)])) as Record<MixField, null | number>;
   } catch {
     loadError.value = true;
@@ -183,6 +189,7 @@ async function save() {
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
       mixBoard: { ...mixBoard.value },
       scheduleModelId: modelId.value || null,
+      ...(fillPrompt.value.trim() === savedFillPrompt.value.trim() ? {} : { demandFillPrompt: fillPrompt.value.trim() }),
     });
     message.success(`${factory.current.value?.name ?? '本厂'}的工厂设置已保存`);
     await load();
@@ -339,7 +346,7 @@ async function save() {
           <Tabs.TabPane v-if="setting" key="routes" tab="工艺路线">
             <RoutePanel :key="routeKey" :can-edit="canEdit" :processes="allProcesses" />
           </Tabs.TabPane>
-          <Tabs.TabPane key="ai" tab="AI 排单">
+          <Tabs.TabPane key="ai" tab="AI 设置">
             <section class="flex flex-col gap-3">
               <h2 class="m-0 text-sm font-semibold">
                 排单模型<span class="ml-2 text-xs font-normal text-muted-foreground">生成排单方案时用哪个 AI 模型；只有 AI 网关已给本厂放行「工厂排单」用途的模型才能选</span>
@@ -380,6 +387,29 @@ async function save() {
                 想用新的模型：先在「模型中心」接入服务商和文本模型，再由 AI 管理员给本厂放行「工厂排单」用途（FDM_GONGCHANG_SCHEDULE，INTERNAL），这里就能选了。
                 选的模型以后不再放行时，自动改用第一个放行的模型。
               </p>
+            </section>
+            <section v-if="setting" class="mt-6 flex flex-col gap-2">
+              <h2 class="m-0 text-sm font-semibold">
+                识别需求的默认提示词<span class="ml-2 text-xs font-normal text-muted-foreground">别的部门向本厂提生产需求、上传附件让 AI 识别时默认用这段话；提需求的人每次还能当场改</span>
+              </h2>
+              <Input.TextArea
+                id="factory-demand-fill-prompt"
+                v-model:value="fillPrompt"
+                :auto-size="{ minRows: 6, maxRows: 16 }"
+                :disabled="!canEdit"
+                :maxlength="4000"
+              />
+              <span class="flex items-center gap-3 text-xs text-muted-foreground">
+                输出格式、今天日期、产品分类由系统自动补上，这里只写要怎么识别。
+                <button
+                  v-if="canEdit && fillPrompt.trim() !== (setting.demandFillDefaultPrompt ?? '').trim()"
+                  class="text-primary hover:underline"
+                  type="button"
+                  @click="fillPrompt = setting.demandFillDefaultPrompt ?? ''"
+                >
+                  恢复系统默认
+                </button>
+              </span>
             </section>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="suppliers" tab="对应供应商">
