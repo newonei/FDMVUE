@@ -860,7 +860,9 @@ export function suggestAuxQuantity(
   return Math.round(need * 1000) / 1000;
 }
 
-/** 把建议数按先进先出分到可领的库存行。 */
+/**
+ * 把建议数按先进先出分到可领的库存行；账面不够时剩下的照样记到第一行（领料后账面暂时为负，入库补录后补平）。
+ */
 export function pickAuxStocks(
   stocks: Array<Pick<Api.Stock, 'id' | 'quantity'>>,
   need: number,
@@ -869,11 +871,17 @@ export function pickAuxStocks(
   let left = need;
   for (const stock of stocks) {
     if (left <= 0) break;
-    const take = Math.min(Number(stock.quantity) || 0, left);
+    const take = Math.min(Math.max(Number(stock.quantity) || 0, 0), left);
     if (take > 0) {
       picks.push({ quantity: Math.round(take * 1000) / 1000, stockId: stock.id });
       left -= take;
     }
+  }
+  const first = stocks[0];
+  if (left > 1e-9 && first) {
+    const existing = picks.find((p) => p.stockId === first.id);
+    if (existing) existing.quantity = Math.round((existing.quantity + left) * 1000) / 1000;
+    else picks.unshift({ quantity: Math.round(left * 1000) / 1000, stockId: first.id });
   }
   return picks;
 }

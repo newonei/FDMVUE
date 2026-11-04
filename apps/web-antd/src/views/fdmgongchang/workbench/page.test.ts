@@ -106,6 +106,7 @@ const my: Api.My = {
       available: 300,
       contractCode: 'HT-002',
       id: 32,
+      upstreamNote: '上道「密炼挤出发泡」已报的够做 300，其余等上道报工',
       orderCount: 0,
       process: 'SLICE',
       product: '蓝色瑜伽垫',
@@ -120,7 +121,7 @@ const my: Api.My = {
       actualQuantity: 0,
       contractCode: 'HT-003',
       id: 33,
-      lockReason: '等上道「密炼挤出发泡」报工后才能接',
+      upstreamNote: '上道「密炼挤出发泡」今天还没报工，照常领料干活，报工时账面可能暂时为负',
       orderCount: 0,
       process: 'SLICE',
       product: '绿色瑜伽垫',
@@ -293,15 +294,16 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    clickButton('任务大厅1');
+    // 各工序下班才报工：上道没报工也能接单，只提示
+    clickButton('任务大厅2');
     await flush();
     const text = document.body.textContent ?? '';
     expect(text).toContain('订单 HT-002');
-    expect(text).toContain('上道已报，现在能做 300');
-    expect(text).toContain('等上道「密炼挤出发泡」报工后才能接');
+    expect(text).toContain('已报的够做 300');
+    expect(text).toContain('今天还没报工，照常领料干活');
     const buttons = [...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === '接单');
     expect(buttons).toHaveLength(2);
-    expect(buttons[1]!.disabled).toBe(true);
+    expect(buttons[1]!.disabled).toBe(false);
     buttons[0]!.click();
     await flush();
     expect(mocks.claim).toHaveBeenCalledWith(32);

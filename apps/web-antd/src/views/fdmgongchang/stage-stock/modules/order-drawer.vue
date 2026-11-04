@@ -539,6 +539,8 @@ async function loadStock() {
       keyword: stockKeyword.value.trim() || undefined,
       pageNo: 1,
       pageSize: 200,
+      // 账面为 0 或负数的行也要能选：上道可能还没报工，按纸质领料单照实际数领
+      showZero: true,
       stage: sourceStage.value,
     });
     stockRows.value = page.list;
@@ -732,13 +734,6 @@ function inputErrors() {
   const problems: string[] = [];
   if (props.mode === 'create') {
     if (inputs.value.length === 0) problems.push('请至少填写一行领用数量。');
-    for (const line of inputs.value) {
-      if (line.quantity > (toNumber(line.stock.quantity) ?? 0)) {
-        problems.push(
-          `${line.stock.itemCode}（批次 ${line.stock.batchNo}）只剩 ${formatQty(line.stock.quantity)}，领用数量不能超过库存。`,
-        );
-      }
-    }
     if (recipeCode.value && !(recipeBatches.value && recipeBatches.value > 0))
       problems.push('按配方领料请填写锅数（大于 0）。');
     if (processCode.value === 'LAMINATE' && inputs.value.length > 0) {
@@ -1083,7 +1078,7 @@ watch(processCode, warnNoPatterns);
                   v-if="recipePlan.shortage"
                   show-icon
                   type="warning"
-                  message="有原料库存不够，可以先领现有的，到料后在「车间在制」里补领。"
+                  message="有原料账面不够；按纸质领料单照实际数领，账面会暂时为负，入库补录后补平。"
                 />
                 <div class="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
                   <span
@@ -1141,7 +1136,6 @@ watch(processCode, warnNoPatterns);
                     :id="`order-take-${record.id}`"
                     :value="quantities[record.id] ?? undefined"
                     :min="0"
-                    :max="Number(record.quantity)"
                     :precision="3"
                     :style="{ width: '7rem' }"
                     size="small"
@@ -1559,7 +1553,6 @@ watch(processCode, warnNoPatterns);
               </span>
               <InputNumber
                 :id="`order-aux-${stock.id}`"
-                :max="Number(stock.quantity)"
                 :min="0"
                 :precision="3"
                 :value="auxQty[stock.id] ?? undefined"
