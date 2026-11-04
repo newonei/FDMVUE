@@ -88,14 +88,14 @@ export const factoryHandoff: Partial<
     note: '客户退货不再在这里新建，这里只查已有的销售退货记录。',
   },
   arrivals: {
-    note: '外采到货改在工厂「工序库存 · 到货入库」办理并自动记到采购单；这里只查历史到货单。',
-    label: '去工序库存办理',
+    note: '外采到货改在工厂「工序单 · 到货入库」办理并自动记到采购单；这里只查历史到货单。',
+    label: '去工厂工序单办理',
     path: '/gongchang/stage-stock',
     query: { tab: 'receiving' },
   },
   purchaseReturns: {
-    note: '采购退货随到货一起改到工序库存处理；这里只查历史退货记录。',
-    label: '去工序库存办理',
+    note: '采购退货随到货一起改到工厂「工序单 · 到货入库」处理；这里只查历史退货记录。',
+    label: '去工厂工序单办理',
     path: '/gongchang/stage-stock',
     query: { tab: 'receiving' },
   },

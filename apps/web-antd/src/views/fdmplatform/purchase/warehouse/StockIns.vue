@@ -96,10 +96,12 @@ const viewActions = computed(() => {
 const factoryHint = computed(() => {
   const row = viewing.value;
   if (!row || row.status === 'VOIDED') return '';
+  if (row.factoryDoc)
+    return `工厂生产单据：要冲回请在工厂作废工序单${row.sourceNo ? ` ${row.sourceNo}` : ''}或办理退料`;
   if (row.kind === 'PRODUCTION')
     return '工厂交货入库：要冲回请在工厂排单的交货单上作废';
   if (row.kind === 'FACTORY_PURCHASE')
-    return '工厂收货的原料、辅料：不进仓库库存，要冲回请在工厂的到货记录上作废';
+    return '工厂收货的原料、辅料（进本厂原料仓）：要冲回请在工厂的到货记录上作废';
   if (row.kind === 'FACTORY_MADE')
     return '自家工厂生产入库：要冲回请在工厂排单的入库记录上作废';
   return '';
@@ -207,7 +209,9 @@ onMounted(async () => {
       <TabPane key="PURCHASE" tab="采购入库" />
       <TabPane key="OTHER" tab="常规入库" />
       <TabPane key="PRODUCTION" tab="生产入库" />
+      <TabPane key="PRODUCTION_RETURN" tab="生产退料" />
       <TabPane key="FACTORY_PURCHASE" tab="工厂收货" />
+      <TabPane key="PRODUCTION_REVERSAL" tab="生产冲回" />
     </Tabs>
     <div class="toolbar">
       <Input.Search

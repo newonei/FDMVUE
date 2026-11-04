@@ -43,8 +43,19 @@ export interface StockIn extends VoidInfo {
    * PRODUCTION 工厂交货的生产入库 / FACTORY_PURCHASE 工厂收货的原料、辅料（不进采购仓库）/
    * FACTORY_MADE 自家工厂的采购单生产入库；都只能在工厂那边作废，不能在这里作废或退货。
    * OTHER 常规入库（不关联采购单，记来源）。没有 kind 的是采购入库。
+   * 工厂报工、退料、作废自动生成的：PRODUCTION 生产入库 / PRODUCTION_RETURN 生产退料 / PRODUCTION_REVERSAL 生产冲回（factoryDoc=true）。
    */
-  kind?: 'FACTORY_MADE' | 'FACTORY_PURCHASE' | 'OTHER' | 'PRODUCTION';
+  kind?:
+    | 'FACTORY_MADE'
+    | 'FACTORY_PURCHASE'
+    | 'OTHER'
+    | 'PRODUCTION'
+    | 'PRODUCTION_RETURN'
+    | 'PRODUCTION_REVERSAL';
+  /** 工厂生产单据：只能在工厂作废工序单、退料冲回 */
+  factoryDoc?: boolean;
+  /** 工厂单据号（工序单 GX…） */
+  sourceNo?: null | string;
   factoryName?: null | string;
   /** 常规入库的来源：期初、客户退回、样品退回等 */
   source?: string;
@@ -75,6 +86,8 @@ export type StockInKind =
   | 'FACTORY_PURCHASE'
   | 'OTHER'
   | 'PRODUCTION'
+  | 'PRODUCTION_RETURN'
+  | 'PRODUCTION_REVERSAL'
   | 'PURCHASE';
 
 export interface OtherInCreate {
@@ -101,8 +114,19 @@ export interface StockOut extends VoidInfo {
   id: string;
   code: string;
   status: 'SHIPPED' | 'VOIDED';
-  /** SALES 销售出库 / DIRECT 入库直发 / OTHER 其它出库（不关联合同，记去向） */
-  kind: 'DIRECT' | 'OTHER' | 'SALES';
+  /**
+   * SALES 销售出库 / DIRECT 入库直发 / OTHER 其它出库（不关联合同，记去向）；
+   * 工厂开工序单、作废时自动生成的：PRODUCTION_ISSUE 生产领料 / PRODUCTION_REVERSAL 生产冲回（factoryDoc=true）
+   */
+  kind:
+    | 'DIRECT'
+    | 'OTHER'
+    | 'PRODUCTION_ISSUE'
+    | 'PRODUCTION_REVERSAL'
+    | 'SALES';
+  factoryDoc?: boolean;
+  sourceNo?: null | string;
+  factoryName?: null | string;
   warehouseId: string;
   warehouseName: string;
   contractId?: null | string;
@@ -395,9 +419,9 @@ export function createOtherIn(data: OtherInCreate) {
 export function createStockIn(data: StockInCreate) {
   return requestClient.post<StockIn>(`${base}/stock-ins`, data);
 }
-/** kind：SALES 销售出库（含直发）/ OTHER 其它出库；不填全部 */
+/** kind：SALES 销售出库（含直发）/ OTHER 其它出库 / PRODUCTION_ISSUE 生产领料 / PRODUCTION_REVERSAL 生产冲回；不填全部 */
 export function getStockOuts(
-  params: PageParams & { contractId?: string; kind?: 'OTHER' | 'SALES' },
+  params: PageParams & { contractId?: string; kind?: StockOut['kind'] },
 ) {
   return requestClient.get<PageResult<StockOut>>(`${base}/stock-outs/page`, {
     params,

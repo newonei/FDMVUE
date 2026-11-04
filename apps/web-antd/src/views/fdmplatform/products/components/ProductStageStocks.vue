@@ -52,7 +52,7 @@ watch(
 <template>
   <div v-if="rows.length > 0" style="margin-top: 16px">
     <h4>
-      工序库存
+      工厂库存（原料仓 / 半成品仓）
       <span v-if="total > rows.length">（显示前 {{ rows.length }} 行，共 {{ total }} 行）</span>
     </h4>
     <Table

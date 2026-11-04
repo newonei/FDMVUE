@@ -39,6 +39,8 @@ export interface ProcurementSetting {
   /** 仓库所属工厂：工厂完工的货入本厂仓库，工厂库管只能操作本厂仓库 */
   factoryId?: null | number;
   factoryName?: null | string;
+  /** 工厂仓库的用途：RAW 原料仓（原料、辅料）/ SEMI 半成品仓 / FINISHED 成品仓；工厂领料、报工按它找仓库 */
+  factoryRole?: 'FINISHED' | 'RAW' | 'SEMI' | null;
 }
 export interface SupplierContact {
   id: string;

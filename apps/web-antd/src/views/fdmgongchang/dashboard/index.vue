@@ -158,7 +158,7 @@ const alerts = computed(() => {
     list.push({ action: '去排单', detail: `明天排了 ${big(s.planned)}${s.unit}，${s.sourceLabel}只有 ${big(s.available)}${s.unit}`, path: FACTORY_ROUTES.schedule, title: `${s.label}明天可能缺料`, tone: 'danger' });
   }
   for (const o of d.today.staleOrders.slice(0, 3)) {
-    list.push({ action: '去工序库存', detail: `${o.orderNo} · 已领 ${big(o.inputQuantity)}${o.unit}`, path: FACTORY_ROUTES.stageStock, title: `${o.operatorName ?? ''} 领料超过 8 小时没报数量`, tone: 'warning' });
+    list.push({ action: '去工序单', detail: `${o.orderNo} · 已领 ${big(o.inputQuantity)}${o.unit}`, path: FACTORY_ROUTES.stageStock, title: `${o.operatorName ?? ''} 领料超过 8 小时没报数量`, tone: 'warning' });
   }
   if (d.kpi.pendingRecords > 0) {
     list.push({ action: '去确认', detail: '确认后才能月底结算', path: FACTORY_ROUTES.wage, title: `${d.kpi.pendingRecords} 条报工待确认`, tone: 'warning' });

@@ -54,7 +54,7 @@ const total = ref(0);
 const pageNo = ref(1);
 const keyword = ref('');
 const warehouseId = ref<string>();
-const kind = ref<'' | 'OTHER' | 'SALES'>('');
+const kind = ref<'' | StockOut['kind']>('');
 const warehouses = ref<ProcurementSetting[]>([]);
 const directory = ref<Directory>();
 /** 库存中心里启用的仓库 → 当前登录人能不能出库；没查到时不隐藏按钮，由后端拦。业务员只能看。 */
@@ -67,6 +67,7 @@ function canVoid(row: StockOut) {
   return (
     row.status !== 'VOIDED' &&
     row.kind !== 'DIRECT' &&
+    !row.factoryDoc &&
     canCreate.value &&
     writable.value?.get(row.warehouseId) !== false
   );
@@ -168,6 +169,8 @@ onMounted(async () => {
       <TabPane key="" tab="全部" />
       <TabPane key="SALES" tab="销售出库" />
       <TabPane key="OTHER" tab="其它出库" />
+      <TabPane key="PRODUCTION_ISSUE" tab="生产领料" />
+      <TabPane key="PRODUCTION_REVERSAL" tab="生产冲回" />
     </Tabs>
     <div class="toolbar">
       <Input.Search

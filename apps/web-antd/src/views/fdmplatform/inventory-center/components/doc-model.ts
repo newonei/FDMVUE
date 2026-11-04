@@ -21,12 +21,16 @@ export const IN_KIND_LABELS: Record<StockInKind, string> = {
   PRODUCTION: '生产入库',
   FACTORY_PURCHASE: '工厂收货',
   OTHER: '常规入库',
+  PRODUCTION_RETURN: '生产退料',
+  PRODUCTION_REVERSAL: '生产冲回',
 };
 
 export const OUT_KIND_LABELS: Record<StockOut['kind'], string> = {
   SALES: '销售出库',
   DIRECT: '直发出库',
   OTHER: '其它出库',
+  PRODUCTION_ISSUE: '生产领料',
+  PRODUCTION_REVERSAL: '生产冲回',
 };
 
 /** 列表页签：没有 kind 的是采购入库，自产采购单的生产入库归到生产入库。 */
@@ -39,36 +43,48 @@ export function inKindLabel(row: Pick<StockIn, 'kind'>) {
   return IN_KIND_LABELS[inKind(row)];
 }
 
+/** 工厂报工、领料、退料、作废自动生成的单据：主题写工厂和工序单号。 */
+function factorySubject(
+  head: string,
+  row: Pick<StockIn, 'factoryName' | 'sourceNo'>,
+) {
+  return `${head}${[row.sourceNo, row.factoryName].filter(Boolean).join(' ')}`;
+}
+
 /** 供应商 / 工厂 / 来源 */
 export function inPartner(row: StockIn) {
+  if (row.factoryDoc) return row.factoryName ?? '';
   if (row.kind === 'OTHER') return row.source ?? '';
   return row.supplierName || row.factoryName || '';
 }
 
-/** 对应单据：采购单号；工厂交货是内部订单号。 */
+/** 对应单据：采购单号；工厂交货是内部订单号；工厂生产单据是工序单号。 */
 export function inRelated(row: StockIn) {
-  return row.orderCode || '';
+  return row.orderCode || row.sourceNo || '';
 }
 
 export function inSubject(row: StockIn) {
   const head = `【${inKindLabel(row)}】`;
+  if (row.factoryDoc) return factorySubject(head, row);
   if (row.kind === 'OTHER') return `${head}${row.source ?? ''}`;
   return `${head}${[inRelated(row), inPartner(row)].filter(Boolean).join(' ')}`;
 }
 
 export function outPartner(row: StockOut) {
+  if (row.factoryDoc) return row.factoryName ?? '';
   return row.kind === 'OTHER'
     ? (row.destination ?? '')
     : (row.customerName ?? '');
 }
 
-/** 对应单据：合同号；直发另带入库单号。 */
+/** 对应单据：合同号；直发另带入库单号；工厂生产单据是工序单号。 */
 export function outRelated(row: StockOut) {
-  return row.contractCode || '';
+  return row.contractCode || row.sourceNo || '';
 }
 
 export function outSubject(row: StockOut) {
   const head = `【${OUT_KIND_LABELS[row.kind] ?? '出库'}】`;
+  if (row.factoryDoc) return factorySubject(head, row);
   if (row.kind === 'OTHER') return `${head}${row.destination ?? ''}`;
   return `${head}${[row.contractCode, row.customerName].filter(Boolean).join(' ')}`;
 }

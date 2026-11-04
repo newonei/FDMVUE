@@ -107,7 +107,7 @@ onMounted(async () => {
         @change="load(true)"
       />
       <span class="grow"></span>
-      <span class="muted">工厂原料、辅料和在制品在「工厂部门 → 工序库存」盘点</span>
+      <span class="muted">工厂的原料仓、半成品仓也在这里盘点</span>
       <Button :loading="loading" @click="load()">刷新</Button>
       <Button type="primary" @click="creating = true">新建盘点</Button>
     </div>

@@ -93,6 +93,12 @@ async function load() {
     loading.value = false;
   }
 }
+/** 工厂仓库的用途：每个工厂一个原料仓、半成品仓、成品仓（工厂第一次领料、报工时自动建）。 */
+const FACTORY_ROLES: Record<string, string> = {
+  RAW: '原料仓',
+  SEMI: '半成品仓',
+  FINISHED: '成品仓',
+};
 function edit(row?: ProcurementSetting) {
   idempotencyKey = crypto.randomUUID();
   formError.value = '';
@@ -122,6 +128,7 @@ async function save() {
       code: value.code.trim(),
       companyId: value.companyId ?? null,
       factoryId: value.factoryId ?? null,
+      factoryRole: value.factoryId ? (value.factoryRole ?? null) : null,
       address: value.address?.trim() || null,
       managerUserIds: value.managerUserIds ?? [],
       isDefault: !!value.isDefault,
@@ -200,7 +207,8 @@ onMounted(async () => {
             )?.companyName ?? '—'
           }}</span>
           <span v-if="record.factoryName" class="muted">
-            {{ record.factoryName }}的仓库
+            {{ record.factoryName
+            }}{{ FACTORY_ROLES[record.factoryRole as string] ?? '的仓库' }}
           </span>
         </div>
         <span v-else-if="column.key === 'managers'" class="ellipsis">{{
@@ -273,6 +281,26 @@ onMounted(async () => {
             @update:value="
               (value) =>
                 editing && (editing.factoryId = (value as number) ?? null)
+            "
+          />
+        </label>
+        <label v-if="editing.factoryId">
+          <span>仓库用途</span>
+          <Select
+            :value="editing.factoryRole ?? undefined"
+            allow-clear
+            :options="
+              Object.entries(FACTORY_ROLES).map(([value, label]) => ({
+                value,
+                label,
+              }))
+            "
+            placeholder="工厂领料、报工按用途找仓库"
+            @update:value="
+              (value) =>
+                editing &&
+                (editing.factoryRole =
+                  (value as ProcurementSetting['factoryRole']) ?? null)
             "
           />
         </label>
