@@ -17,6 +17,7 @@ import {
 import FactorySwitch from '../shared/factory-switch.vue';
 import { FACTORY_ROUTES } from '../shared/routes';
 import { useFactory } from '../shared/use-factory';
+import HoldPanel from './modules/hold-panel.vue';
 import OrderDrawer from './modules/order-drawer.vue';
 import OrderPanel from './modules/order-panel.vue';
 import ReceiptDrawer from './modules/receipt-drawer.vue';
@@ -43,8 +44,8 @@ const summary = ref<Api.Summary>();
 const loadError = ref(false);
 /** 账号不属于任何工厂，且没有「查看全部工厂」权限。 */
 const noFactory = ref(false);
-type TabKey = 'orders' | 'receiving' | 'settings' | 'stock';
-const TAB_KEYS = new Set<TabKey>(['orders', 'receiving', 'settings', 'stock']);
+type TabKey = 'holds' | 'orders' | 'receiving' | 'settings' | 'stock';
+const TAB_KEYS = new Set<TabKey>(['holds', 'orders', 'receiving', 'settings', 'stock']);
 const route = useRoute();
 const router = useRouter();
 const activeTab = ref<TabKey>('orders');
@@ -289,6 +290,11 @@ async function onSettingSaved() {
                 @pending="(count) => (receivingPending = count)"
                 @receive="openReceipt"
               />
+            </div>
+          </Tabs.TabPane>
+          <Tabs.TabPane key="holds" tab="质量冻结">
+            <div class="stage-stock__card">
+              <HoldPanel :options="options" :refresh-key="refreshKey" @changed="onChanged" />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane key="settings" tab="基础设置">

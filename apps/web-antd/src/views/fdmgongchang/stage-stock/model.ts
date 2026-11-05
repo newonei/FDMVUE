@@ -84,6 +84,7 @@ export const TXN_TYPE_LABELS: Record<string, string> = {
   DELIVER: '交货出库',
   VOID: '作废冲销',
   EXTRA_DEFECT: '附加工序残次',
+  QUALITY_SCRAP: '质量报废',
 };
 
 export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
