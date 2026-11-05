@@ -6,10 +6,10 @@ import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/p
 import { ref, watch } from 'vue';
 
 import { DatePicker, Input, message, Modal, Select } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { generateSchedule } from '#/api/fdmgongchang/schedule';
 
+import { factoryToday } from '../../shared/factory-date';
 import { dateText, num } from '../shared';
 
 /**
@@ -20,7 +20,7 @@ const props = defineProps<{ orders: Api.Order[] }>();
 const emit = defineEmits<{ generated: [id: number] }>();
 const open = defineModel<boolean>('open', { required: true });
 
-const startDate = ref<Dayjs>(dayjs());
+const startDate = ref<Dayjs>(factoryToday());
 const days = ref(3);
 const note = ref('');
 const submitting = ref(false);
@@ -28,7 +28,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
 
 watch(open, (value) => {
   if (!value) return;
-  startDate.value = dayjs();
+  startDate.value = factoryToday();
   days.value = 3;
   note.value = '';
 });
@@ -87,7 +87,7 @@ async function submit() {
             id="po-schedule-start"
             v-model:value="startDate"
             :allow-clear="false"
-            :disabled-date="(d: Dayjs) => d.isBefore(dayjs(), 'day')"
+            :disabled-date="(d: Dayjs) => d.isBefore(factoryToday(), 'day')"
             class="w-full"
           />
         </label>

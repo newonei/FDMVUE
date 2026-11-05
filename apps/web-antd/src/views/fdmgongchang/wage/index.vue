@@ -6,8 +6,8 @@ import { onMounted, ref } from 'vue';
 import { Page } from '@vben/common-ui';
 
 import { Button, DatePicker, Result, Tabs } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
+import { factoryToday } from '../shared/factory-date';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import RecordPanel from './modules/record-panel.vue';
@@ -20,7 +20,7 @@ import SummaryPanel from './modules/summary-panel.vue';
 defineOptions({ name: 'FdmGongchangWage' });
 
 const factory = useFactory();
-const month = ref<Dayjs>(dayjs());
+const month = ref<Dayjs>(factoryToday());
 const tab = ref<'records' | 'summary'>('records');
 const refreshKey = ref(0);
 const noFactory = ref(false);

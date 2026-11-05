@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router';
 
 import { QRCode } from 'ant-design-vue';
 
+import { factoryHour } from '../../shared/factory-date';
 import { FACTORY_ROUTES } from '../../shared/routes';
 import { big, n, pct } from '../shared';
 
@@ -24,7 +25,7 @@ const lanes = computed(() =>
     const total = done + n(l.defect);
     const percent = plan > 0 ? Math.min(100, Math.round((done / plan) * 100)) : 0;
     const rate = total > 0 ? n(l.defect) / total : 0;
-    const behind = plan > 0 && percent < 50 && new Date().getHours() >= 14;
+    const behind = plan > 0 && percent < 50 && factoryHour() >= 14;
     let note = plan > 0 ? '正常' : '今天没排';
     if (behind) note = '进度落后';
     if (rate >= 0.02) note = `残次 ${pct(rate)}`;

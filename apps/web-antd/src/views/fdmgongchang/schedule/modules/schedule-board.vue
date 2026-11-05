@@ -14,6 +14,7 @@ import dayjs from 'dayjs';
 import { getWorkerList } from '#/api/fdmgongchang/factory';
 import { createManualSchedule, generateSchedule, getSchedule, getSchedules } from '#/api/fdmgongchang/schedule';
 
+import { factoryToday } from '../../shared/factory-date';
 import { dateText, SCHEDULE_STATUS } from '../../shared/schedule';
 import ScheduleDetail from './schedule-detail.vue';
 
@@ -36,7 +37,7 @@ const detailLoading = ref(false);
 const workers = ref<FdmgongchangFactoryApi.Worker[]>([]);
 const generating = ref(false);
 const creatingManual = ref(false);
-const form = ref({ days: 3, note: '', startDate: dayjs() as Dayjs });
+const form = ref({ days: 3, note: '', startDate: factoryToday() as Dayjs });
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -146,7 +147,7 @@ function retry(schedule: Api.Schedule) {
     days: schedule.days,
     note: schedule.note,
     productionOrderIds: schedule.scopeOrderIds,
-    startDate: dayjs(start).isBefore(dayjs(), 'day') ? dayjs().format('YYYY-MM-DD') : start,
+    startDate: dayjs(start).isBefore(factoryToday(), 'day') ? factoryToday().format('YYYY-MM-DD') : start,
   });
 }
 
@@ -175,7 +176,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             id="schedule-start"
             v-model:value="form.startDate"
             :allow-clear="false"
-            :disabled-date="(d: Dayjs) => d.isBefore(dayjs(), 'day')"
+            :disabled-date="(d: Dayjs) => d.isBefore(factoryToday(), 'day')"
             class="w-full"
           />
         </label>

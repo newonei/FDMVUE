@@ -7,10 +7,10 @@ import type { FdmgongchangWageApi as Api } from '#/api/fdmgongchang/wage';
 import { computed, ref, watch } from 'vue';
 
 import { Alert, DatePicker, Input, InputNumber, Modal, Radio, Select } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { createWorkRecords } from '#/api/fdmgongchang/wage';
 
+import { factoryToday } from '../../shared/factory-date';
 import { CATEGORY_LABELS, formatMoney, toNum } from '../../shared/wage';
 
 /**
@@ -24,7 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{ saved: [message: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 
-const workDate = ref<Dayjs>(dayjs());
+const workDate = ref<Dayjs>(factoryToday());
 const shift = ref<Api.Shift>('DAY');
 const itemId = ref<number>();
 const userIds = ref<number[]>([]);
@@ -67,7 +67,7 @@ const total = computed(() =>
 
 watch(open, (value) => {
   if (!value) return;
-  workDate.value = dayjs();
+  workDate.value = factoryToday();
   shift.value = 'DAY';
   itemId.value = undefined;
   userIds.value = [];
@@ -134,7 +134,7 @@ async function submit() {
             id="record-date"
             v-model:value="workDate"
             :allow-clear="false"
-            :disabled-date="(d: Dayjs) => d.isAfter(dayjs(), 'day')"
+            :disabled-date="(d: Dayjs) => d.isAfter(factoryToday(), 'day')"
             class="w-full"
           />
         </label>

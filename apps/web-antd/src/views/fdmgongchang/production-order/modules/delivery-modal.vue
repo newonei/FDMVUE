@@ -7,11 +7,11 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { DatePicker, Empty, Input, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { createDelivery, getDeliveryWarehouses } from '#/api/fdmgongchang/production-order';
 import { getStockPage } from '#/api/fdmgongchang/stage-stock';
 
+import { factoryToday } from '../../shared/factory-date';
 import { num } from '../shared';
 
 /**
@@ -31,7 +31,7 @@ interface Row {
 
 const warehouses = ref<Api.Warehouse[]>([]);
 const warehouseId = ref<string>();
-const deliveredDate = ref<Dayjs>(dayjs());
+const deliveredDate = ref<Dayjs>(factoryToday());
 const keyword = ref('');
 const rows = ref<Row[]>([]);
 const loading = ref(false);
@@ -86,7 +86,7 @@ watch(open, async (value) => {
   rows.value = [];
   remark.value = '';
   error.value = '';
-  deliveredDate.value = dayjs();
+  deliveredDate.value = factoryToday();
   await Promise.all([
     loadStock(),
     getDeliveryWarehouses()

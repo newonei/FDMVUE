@@ -6,10 +6,10 @@ import type { FdmgongchangWageApi as Api } from '#/api/fdmgongchang/wage';
 import { ref, watch } from 'vue';
 
 import { Alert, DatePicker, InputNumber, Modal } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { saveWagePrice } from '#/api/fdmgongchang/wage';
 
+import { factoryToday } from '../../shared/factory-date';
 import { formatDateValue, formatMoney } from '../../shared/wage';
 
 /** 调价：新增一个价格版本；报工按干活日期取当时生效的价格，补录旧日期也按旧价算。 */
@@ -18,7 +18,7 @@ const emit = defineEmits<{ saved: [message: string] }>();
 const open = defineModel<boolean>('open', { required: true });
 
 const price = ref<number>();
-const effectiveFrom = ref<Dayjs>(dayjs().add(1, 'month').startOf('month'));
+const effectiveFrom = ref<Dayjs>(factoryToday().add(1, 'month').startOf('month'));
 const error = ref('');
 const saving = ref(false);
 
@@ -26,7 +26,7 @@ watch(open, (value) => {
   if (!value) return;
   price.value = undefined;
   error.value = '';
-  effectiveFrom.value = dayjs().add(1, 'month').startOf('month');
+  effectiveFrom.value = factoryToday().add(1, 'month').startOf('month');
 });
 
 async function submit() {

@@ -1,3 +1,5 @@
+import { factoryTodayText } from '../shared/factory-date';
+
 /** 看板用的数字和日期格式。 */
 export function n(value: unknown) {
   const v = Number(value ?? 0);
@@ -48,8 +50,7 @@ export function daysLeft(value: null | number[] | string | undefined) {
   const text = dateText(value);
   if (!text) return null;
   const due = new Date(`${text}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = new Date(`${factoryTodayText()}T00:00:00`);
   return Math.round((due.getTime() - today.getTime()) / 86_400_000);
 }
 

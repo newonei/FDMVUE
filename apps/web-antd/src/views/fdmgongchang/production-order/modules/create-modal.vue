@@ -23,6 +23,7 @@ import {
 
 import AuxUsageEditor from '../../shared/aux-usage-editor.vue';
 import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/auxiliary-usage';
+import { factoryToday } from '../../shared/factory-date';
 import { routeProblem, sortSteps, specText } from '../shared';
 import AiFillPanel from './ai-fill-panel.vue';
 import RoutePicker from './route-picker.vue';
@@ -325,7 +326,7 @@ function newPayload(d: NewDraft): Api.NewProduct {
   };
 }
 
-const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
+const disabledDate = (d: Dayjs) => d.isBefore(factoryToday().startOf('day'));
 
 async function submit() {
   error.value = '';
