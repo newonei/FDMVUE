@@ -80,10 +80,49 @@ describe('factory setting page', () => {
       .click();
     await flush();
     expect(mocks.save).toHaveBeenCalledWith({
-      dailyCapacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
+      capacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
       enabledProcesses: ['MIX', 'SLICE', 'PACK'],
       mixBoard: { boardsPerBatch: null, length: null, thickness: null, width: null },
       scheduleModelId: null,
     });
+  });
+
+  it('shows machines x per-machine range and saves capacities', async () => {
+    const capacityOf: Record<string, object> = {
+      PACK: { capacityMax: 3500, capacityMin: 1000, capacityUnit: '件', dailyCapacity: 7000, machines: 2 },
+      SLICE: { capacityMax: 400, capacityUnit: '张', dailyCapacity: 400 },
+    };
+    mocks.get.mockResolvedValue({
+      processes: processes.map((p) => ({ ...p, ...capacityOf[p.code] })),
+    });
+    mocks.save.mockResolvedValue(true);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(FactorySettingPage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    expect(document.body.textContent).toContain('合计 2000~7000件/天');
+    expect(document.body.textContent).toContain('张板材/天');
+    const engrave = [
+      ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((c) => c.value === 'ENGRAVE');
+    engrave!.click();
+    await flush();
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.replaceAll(/\s/g, '') === '保存设置')!
+      .click();
+    await flush();
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capacities: {
+          ENGRAVE: null,
+          MIX: null,
+          PACK: { machines: 2, max: 3500, min: 1000 },
+          SLICE: { machines: null, max: 400, min: null },
+        },
+      }),
+    );
   });
 });

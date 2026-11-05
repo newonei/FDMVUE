@@ -163,8 +163,23 @@ export namespace FdmgongchangFactorySettingApi {
     outputStage: string;
     outputStageLabel: string;
     outputUnit?: string;
-    /** 日产能（产出单位 / 天），AI 排单参考。 */
+    /** 整道工序日产能上限（= 单台上限 × 台数），排单硬校验。 */
     dailyCapacity?: null | number | string;
+    /** 机台数；空表示整道工序一起算。 */
+    machines?: null | number;
+    /** 单台每天下限；空表示固定值。 */
+    capacityMin?: null | number | string;
+    /** 单台每天上限。 */
+    capacityMax?: null | number | string;
+    /** 产能计量单位：开片是张（投入板材），其他同产出单位。 */
+    capacityUnit?: string;
+  }
+
+  /** 一道工序的产能：台数 × 单台每天下限~上限。 */
+  export interface Capacity {
+    machines: null | number;
+    max: null | number;
+    min: null | number;
   }
 
   export interface ModelOption {
@@ -208,6 +223,8 @@ export namespace FdmgongchangFactorySettingApi {
   export interface SaveReq {
     /** 各工序日产能（工序编码 → 产出单位 / 天）。 */
     dailyCapacities?: Record<string, null | number>;
+    /** 各工序产能明细；传了就以它为准。 */
+    capacities?: Record<string, Capacity | null>;
     /** 密炼出板规格；长宽厚都空表示清掉。 */
     mixBoard?: MixBoard;
     /** 本厂有哪些工序，至少一道。 */

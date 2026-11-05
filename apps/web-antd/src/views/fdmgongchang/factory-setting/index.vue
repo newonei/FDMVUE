@@ -60,12 +60,28 @@ const activeTab = ref<'ai' | 'processes' | 'routes' | 'suppliers' | 'wage'>('pro
 const factory = useFactory();
 const setting = ref<Api.Setting>();
 const enabled = ref<string[]>([]);
-/** 工序日产能（产出单位 / 天），AI 排单在没有历史产出时参考。 */
-const capacities = ref<Record<string, null | number>>({});
-const savedCapacity = (code: string) => {
-  const v = setting.value?.processes.find((p) => p.code === code)?.dailyCapacity;
-  return v === null || v === undefined || v === '' ? null : Number(v);
+/** 工序产能：台数 × 单台每天下限~上限；AI 按订单难度在范围里估计，下发时按上限硬校验。 */
+const CAPACITY_FIELDS = ['machines', 'min', 'max'] as const;
+const capacities = ref<Record<string, Api.Capacity>>({});
+const toNumber = (v: null | number | string | undefined) =>
+  v === null || v === undefined || v === '' ? null : Number(v);
+const savedCapacity = (code: string): Api.Capacity => {
+  const p = setting.value?.processes.find((x) => x.code === code);
+  return {
+    machines: toNumber(p?.machines),
+    max: toNumber(p?.capacityMax),
+    min: toNumber(p?.capacityMin),
+  };
 };
+/** 整道工序每天的范围，例如「4000~4800」。 */
+function dailyRange(code: string) {
+  const c = capacities.value[code];
+  if (!c?.max) return '';
+  const n = c.machines ?? 1;
+  const lo = (c.min ?? c.max) * n;
+  const hi = c.max * n;
+  return lo === hi ? `${hi}` : `${lo}~${hi}`;
+}
 /** 密炼出板规格（cm）和每锅出几张，AI 排单用来把原料换算成板材、再换算成成品。 */
 const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
 type MixField = (typeof MIX_FIELDS)[number];
@@ -124,8 +140,10 @@ const dirty = computed(() => {
   return (
     saved.length !== enabled.value.length ||
     saved.some((code) => !enabled.value.includes(code)) ||
-    (setting.value?.processes ?? []).some(
-      (p) => (capacities.value[p.code] ?? null) !== savedCapacity(p.code),
+    (setting.value?.processes ?? []).some((p) =>
+      CAPACITY_FIELDS.some(
+        (k) => (capacities.value[p.code]?.[k] ?? null) !== savedCapacity(p.code)[k],
+      ),
     ) ||
     modelId.value !== savedModelId.value ||
     fillPrompt.value.trim() !== savedFillPrompt.value.trim() ||
@@ -179,12 +197,23 @@ async function save() {
     message.warning('密炼出板规格的长、宽、厚要一起填');
     return;
   }
+  const badRange = (setting.value?.processes ?? []).find((p) => {
+    const c = capacities.value[p.code];
+    return c && ((c.min !== null && !c.max) || (c.min !== null && c.max !== null && c.min > c.max));
+  });
+  if (badRange) {
+    message.warning(`${badRange.label}的产能下限不能大于上限，填了下限也要填上限`);
+    return;
+  }
   saving.value = true;
   try {
     const order = (setting.value?.processes ?? []).map((p) => p.code);
     await saveFactorySetting({
-      dailyCapacities: Object.fromEntries(
-        order.map((code) => [code, capacities.value[code] ?? null]),
+      capacities: Object.fromEntries(
+        order.map((code) => {
+          const c = capacities.value[code];
+          return [code, c?.max ? { ...c } : null];
+        }),
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
       mixBoard: { ...mixBoard.value },
@@ -264,7 +293,7 @@ async function save() {
             id="factory-processes"
             v-model:value="enabled"
             :disabled="!canEdit"
-            class="grid grid-cols-1 gap-2 md:grid-cols-2"
+            class="grid grid-cols-1 gap-2 xl:grid-cols-2"
           >
             <div
               v-for="p in setting?.processes ?? []"
@@ -275,32 +304,57 @@ async function save() {
                 {{ p.label }}
                 <span class="text-xs text-muted-foreground">产出{{ p.outputStageLabel }}</span>
               </Checkbox>
-              <label
-                :for="`capacity-${p.code}`"
-                class="flex items-center gap-1 text-xs text-muted-foreground"
-              >
-                日产能
+              <div class="flex flex-wrap items-center justify-end gap-1 text-xs text-muted-foreground">
+                <label :for="`capacity-machines-${p.code}`">台数</label>
                 <InputNumber
-                  :id="`capacity-${p.code}`"
+                  :id="`capacity-machines-${p.code}`"
+                  :disabled="!canEdit || !enabled.includes(p.code)"
+                  :min="1"
+                  :max="100"
+                  :precision="0"
+                  :value="capacities[p.code]?.machines ?? undefined"
+                  :style="{ width: '4rem' }"
+                  placeholder="选填"
+                  size="small"
+                  @change="(v) => (capacities[p.code]!.machines = (v as null | number | undefined) ?? null)"
+                />
+                <label :for="`capacity-min-${p.code}`">{{ capacities[p.code]?.machines ? '× 单台' : '每天' }}</label>
+                <InputNumber
+                  :id="`capacity-min-${p.code}`"
+                  :aria-label="`${p.label}产能下限`"
                   :disabled="!canEdit || !enabled.includes(p.code)"
                   :min="0"
                   :precision="0"
-                  :value="capacities[p.code] ?? undefined"
-                  :style="{ width: '7rem' }"
-                  placeholder="选填"
+                  :value="capacities[p.code]?.min ?? undefined"
+                  :style="{ width: '5.5rem' }"
+                  placeholder="下限"
                   size="small"
-                  @change="
-                    (v) =>
-                      (capacities[p.code] =
-                        (v as null | number | undefined) ?? null)
-                  "
+                  @change="(v) => (capacities[p.code]!.min = (v as null | number | undefined) ?? null)"
                 />
-                {{ p.outputUnit }}/天
-              </label>
+                ~
+                <InputNumber
+                  :id="`capacity-max-${p.code}`"
+                  :aria-label="`${p.label}产能上限`"
+                  :disabled="!canEdit || !enabled.includes(p.code)"
+                  :min="0"
+                  :precision="0"
+                  :value="capacities[p.code]?.max ?? undefined"
+                  :style="{ width: '5.5rem' }"
+                  placeholder="上限"
+                  size="small"
+                  @change="(v) => (capacities[p.code]!.max = (v as null | number | undefined) ?? null)"
+                />
+                {{ p.capacityUnit ?? p.outputUnit }}{{ p.code === 'SLICE' ? '板材' : '' }}/天
+                <span v-if="capacities[p.code]?.machines && dailyRange(p.code)" class="w-full text-right">
+                  合计 {{ dailyRange(p.code) }}{{ p.capacityUnit ?? p.outputUnit }}/天
+                </span>
+              </div>
             </div>
           </Checkbox.Group>
           <p class="m-0 text-xs text-muted-foreground">
-            日产能是这道工序整个车间一天大概能做多少，AI 排单时用来控制每天的量；不填时按最近 14 天的实际产出估算。
+            产能填一台机器一天能做多少，有几台填台数（没有机器的工序不填台数，直接填整道工序一天的量）。
+            快慢看产品难度时填下限和上限，AI 按订单难度在范围里估计；下发时按「上限 × 台数」硬校验，超了拒绝。
+            开片按每天投入的板材张数填，其他工序 1 条 = 1 片/1 件。不填时 AI 按最近 14 天的实际产出估算。
           </p>
           <h2 class="m-0 mt-2 text-sm font-semibold">
             密炼出板规格<span class="ml-2 text-xs font-normal text-muted-foreground">AI 排单用它把原料换算成板材、再换算成能出几条成品</span>
