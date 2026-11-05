@@ -25,6 +25,7 @@ import {
 } from '#/api/fdmgongchang/production-order';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import { factoryToday } from '../../shared/factory-date';
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
@@ -245,7 +246,7 @@ async function confirmVoid() {
   voidTarget.value = undefined;
 }
 
-const disabledDate = (d: Dayjs) => d.isBefore(dayjs().startOf('day'));
+const disabledDate = (d: Dayjs) => d.isBefore(factoryToday().startOf('day'));
 
 /** 订单工艺里的工序（旧单列出关联过的工序）。 */
 function plannedSteps(item: Api.Item) {

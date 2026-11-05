@@ -15,10 +15,10 @@ import {
   Radio,
   Select,
 } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { createWageItem, updateWageItem } from '#/api/fdmgongchang/wage';
 
+import { factoryToday } from '../../shared/factory-date';
 import {
   CATEGORY_LABELS,
   PRODUCT_TYPE_OPTIONS,
@@ -54,7 +54,7 @@ const form = reactive({
   unit: '',
   widthMm: undefined as number | undefined,
 });
-const effectiveFrom = ref<Dayjs>(dayjs().startOf('month'));
+const effectiveFrom = ref<Dayjs>(factoryToday().startOf('month'));
 const error = ref('');
 const saving = ref(false);
 const editing = computed(() => !!props.item);
@@ -92,7 +92,7 @@ watch(open, (value) => {
     unit: i?.unit ?? '',
     widthMm: i?.widthMm ?? undefined,
   });
-  effectiveFrom.value = dayjs().startOf('month');
+  effectiveFrom.value = factoryToday().startOf('month');
 });
 
 /** 修改时从按系数改成按单价，需要补一个价格。 */

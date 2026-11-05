@@ -12,13 +12,13 @@ import {
   Radio,
   Select,
 } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import {
   receiveStock,
   searchStageAuxProducts,
 } from '#/api/fdmgongchang/stage-stock';
 
+import { factoryToday } from '../../shared/factory-date';
 import { normalizeForStage, RAW_CATEGORY_LABELS, stageFields } from '../model';
 import AttrFields from './attr-fields.vue';
 
@@ -89,8 +89,8 @@ watch(open, (value) => {
         )?.value,
       };
   batchNo.value = '';
-  if (isRaw.value) batchNo.value = `RM${dayjs().format('MMDD')}`;
-  if (isAux.value) batchNo.value = `FL${dayjs().format('MMDD')}`;
+  if (isRaw.value) batchNo.value = `RM${factoryToday().format('MMDD')}`;
+  if (isAux.value) batchNo.value = `FL${factoryToday().format('MMDD')}`;
   auxOptions.value = [];
   location.value = '';
   quantity.value = undefined;

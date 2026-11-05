@@ -21,6 +21,7 @@ import {
   saveScheduleTask,
 } from '#/api/fdmgongchang/schedule';
 
+import { factoryTodayText } from '../../shared/factory-date';
 import {
   dateText,
   dayLabel,
@@ -125,9 +126,7 @@ const resendFor = ref<Api.Task>();
 
 /** 补派默认今天；排单范围已经过了就放在最后一天（超出范围的要另开一份手动派工）。 */
 function resendDate() {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const d = new Date();
-  const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const today = factoryTodayText();
   const end = range.value.slice(-10);
   return today > end ? end : today;
 }

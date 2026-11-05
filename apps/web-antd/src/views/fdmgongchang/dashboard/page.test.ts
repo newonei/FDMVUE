@@ -4,6 +4,7 @@ import { createApp, defineComponent, h, nextTick } from 'vue';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { factoryToday } from '../shared/factory-date';
 import DashboardPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
@@ -33,7 +34,8 @@ vi.mock('@vben/plugins/echarts', () => ({
   useEcharts: () => ({ renderEcharts: mocks.render }),
 }));
 
-const today = new Date();
+// 「今天」按工厂（北京时间）算，和页面一致，不受跑测试机器的时区影响
+const today = factoryToday().toDate();
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const past = new Date(today);
 past.setDate(past.getDate() - 2);

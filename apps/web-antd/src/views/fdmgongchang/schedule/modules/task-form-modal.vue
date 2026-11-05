@@ -7,11 +7,11 @@ import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Alert, Input, InputNumber, Modal, Select } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { searchScheduleProducts } from '#/api/fdmgongchang/schedule';
 
 import { specText } from '../../production-order/shared';
+import { factoryToday } from '../../shared/factory-date';
 import { dateText, dayLabel, stageTaskPlan } from '../../shared/schedule';
 
 /**
@@ -153,7 +153,7 @@ const workerOptions = computed(() =>
 watch([open, () => props.initial], ([value]) => {
   if (!value) return;
   const t = props.initial;
-  date.value = t?.date ?? dates.value.find((d) => d >= dayjs().format('YYYY-MM-DD')) ?? dates.value[0] ?? '';
+  date.value = t?.date ?? dates.value.find((d) => d >= factoryToday().format('YYYY-MM-DD')) ?? dates.value[0] ?? '';
   process.value = t?.process ?? undefined;
   order.value = t?.contractCode || STOCK;
   found.value = [];

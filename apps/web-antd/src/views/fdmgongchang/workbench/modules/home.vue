@@ -8,6 +8,7 @@ import { Empty, Spin } from 'ant-design-vue';
 
 import { getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
+import { factoryToday } from '../../shared/factory-date';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
 
@@ -42,8 +43,8 @@ const titleOf = (task: FdmgongchangScheduleApi.Task) => {
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 const todayText = computed(() => {
-  const d = new Date();
-  return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEK[d.getDay()]}`;
+  const d = factoryToday();
+  return `${d.month() + 1}月${d.date()}日 周${WEEK[d.day()]}`;
 });
 
 const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)));

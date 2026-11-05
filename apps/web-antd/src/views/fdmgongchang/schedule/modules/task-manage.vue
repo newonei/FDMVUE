@@ -9,11 +9,11 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useAccess } from '@vben/access';
 
 import { Button, Checkbox, DatePicker, Empty, Input, message, Modal, Progress, Select, Spin, Tag } from 'ant-design-vue';
-import dayjs from 'dayjs';
 
 import { getWorkerList } from '#/api/fdmgongchang/factory';
 import { listScheduleTasks, reassignScheduleTasks, returnScheduleTasksToHall } from '#/api/fdmgongchang/schedule';
 
+import { factoryToday } from '../../shared/factory-date';
 import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS } from '../../shared/schedule';
 
 /**
@@ -27,7 +27,7 @@ const emit = defineEmits<{ openSchedule: [id: number] }>();
 const { hasAccessByCodes } = useAccess();
 const canEdit = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
 
-const range = ref<[Dayjs, Dayjs]>([dayjs(), dayjs().add(6, 'day')]);
+const range = ref<[Dayjs, Dayjs]>([factoryToday(), factoryToday().add(6, 'day')]);
 const process = ref<string>();
 const status = ref<Api.TaskStatus>();
 const workerId = ref<number>();
@@ -90,7 +90,7 @@ function toggle(id: number, checked: boolean) {
   selected.value = checked ? [...selected.value, id] : selected.value.filter((x) => x !== id);
 }
 function toggleDay(list: Api.Task[], checked: boolean) {
-  const ids = new Set(list.filter(manageable).map((t) => t.id));
+  const ids = new Set(list.filter((t) => manageable(t)).map((t) => t.id));
   selected.value = checked
     ? [...new Set([...selected.value, ...ids])]
     : selected.value.filter((id) => !ids.has(id));
