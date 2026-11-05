@@ -10,9 +10,10 @@ import { DICT_TYPE } from '@vben/constants';
 import { getDictLabel } from '@vben/hooks';
 import { downloadFileFromBlobPart, isEmpty } from '@vben/utils';
 
-import { Card, message } from 'ant-design-vue';
+import { Card, message, Modal } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
+import { syncDingTalkUsers } from '#/api/fdmdingtalk/settings';
 import {
   deleteUser,
   deleteUserList,
@@ -75,6 +76,39 @@ function handleCreate() {
 /** 导入用户 */
 function handleImport() {
   importModalApi.open();
+}
+
+/** 从钉钉同步全部员工 */
+const syncingDingTalk = ref(false);
+async function handleSyncDingTalk() {
+  try {
+    await confirm(
+      '将按钉钉通讯录同步全部在职员工：没有账号的按手机号自动创建（账号即手机号，通过钉钉登录），已有账号更新部门。建议先在钉钉设置里同步部门。',
+    );
+  } catch {
+    return;
+  }
+  syncingDingTalk.value = true;
+  try {
+    const result = await syncDingTalkUsers();
+    const summary = `新建 ${result.created} 个，更新部门 ${result.updated} 个，跳过 ${result.skipped} 个，失败 ${result.failed} 个`;
+    const notes = (result.messages ?? []).filter((msg) =>
+      /[\u4E00-\u9FA5]|failed/.test(msg),
+    );
+    if (notes.length > 0) {
+      Modal.info({
+        title: '钉钉同步完成',
+        content: [summary, ...notes].join('\n'),
+        width: 560,
+        style: { whiteSpace: 'pre-line' },
+      });
+    } else {
+      message.success(`钉钉同步完成：${summary}`);
+    }
+    handleRefresh();
+  } finally {
+    syncingDingTalk.value = false;
+  }
 }
 
 /** 编辑用户 */
@@ -235,6 +269,14 @@ const [Grid, gridApi] = useVbenVxeGrid({
                   icon: ACTION_ICON.UPLOAD,
                   auth: ['system:user:import'],
                   onClick: handleImport,
+                },
+                {
+                  label: '从钉钉同步',
+                  type: 'primary',
+                  icon: 'lucide:refresh-cw',
+                  loading: syncingDingTalk,
+                  auth: ['system:user:create'],
+                  onClick: handleSyncDingTalk,
                 },
                 {
                   label: $t('ui.actionTitle.deleteBatch'),

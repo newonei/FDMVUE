@@ -81,3 +81,10 @@ export function syncDingTalkUserDepartments() {
     '/fdmdingtalk/user/sync-dept',
   );
 }
+
+/** 同步钉钉通讯录全部员工：没有账号的自动建号，已有账号更新部门 */
+export function syncDingTalkUsers() {
+  return requestClient.post<DingTalkSettingsApi.SyncResult>(
+    '/fdmdingtalk/user/sync-all',
+  );
+}
