@@ -371,7 +371,7 @@ function discard() {
     </template>
 
     <template v-if="schedule.status === 'DRAFT'">
-      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人，下发后进工人工作台的任务大厅，有这道工序岗位的人可以抢单；要指定人就在下发前补上。</p>
+      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人：工人工作台只显示派给自己的任务，没排人的谁都看不到。请在下发前补上，或下发后在「任务管理」里改派。</p>
       <p v-if="schedule.manual && tasks.length === 0" class="m-0 text-sm text-muted-foreground">
         手动派工：点右上角「＋ 添加任务」，选哪天、哪道工序、做多少、谁来做；加完点「确认下发」，工人工作台就能看到。
       </p>

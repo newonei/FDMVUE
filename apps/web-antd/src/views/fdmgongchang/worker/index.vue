@@ -10,7 +10,7 @@ import { Page } from '@vben/common-ui';
 
 import { Button, Input, message, Popconfirm, Result, Select, Table, Tag } from 'ant-design-vue';
 
-import { getWorkerList, getWorkerOptions, removeWorkers } from '#/api/fdmgongchang/factory';
+import { getWorkerList, getWorkerOptions, removeWorkers, syncWorkersFromDingTalk } from '#/api/fdmgongchang/factory';
 
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
@@ -145,6 +145,26 @@ async function onAdded(text: string) {
   await loadRows();
 }
 
+// ========== 从钉钉同步人员 ==========
+const syncing = ref(false);
+async function syncFromDingTalk() {
+  syncing.value = true;
+  try {
+    const r = await syncWorkersFromDingTalk();
+    const parts = [`新加进来 ${r.created} 人`];
+    if (r.updated > 0) parts.push(`调整部门 ${r.updated} 人`);
+    if (r.failed > 0) parts.push(`失败 ${r.failed} 人`);
+    const noMobile = r.messages.filter((m) => m.includes('手机号')).length;
+    if (noMobile > 0) parts.push(`${noMobile} 人钉钉没给手机号，没建账号`);
+    if (r.failed > 0 || noMobile > 0) message.warning(`已从钉钉同步：${parts.join('，')}`);
+    else message.success(`已从钉钉同步：${parts.join('，')}`);
+    filters.state = undefined;
+    await loadRows();
+  } finally {
+    syncing.value = false;
+  }
+}
+
 async function removeOne(worker: Api.Worker) {
   await removeWorkers([worker.userId]);
   message.success(`已把 ${worker.nickname} 移出本厂`);
@@ -189,13 +209,14 @@ const stateOptions = [
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            钉钉部门「{{ factoryDeptName }}」及下级部门的人登录一次就会出现在这里；不在这个部门下的人，点「添加人员」从系统里搜出来加进来。分配工序岗位后，开工序单时才能选他做操作人。
+            钉钉部门「{{ factoryDeptName }}」及下级部门的人登录一次就会出现在这里，没登录过的点「从钉钉同步人员」一次拉进来；不在这个部门下的人，点「添加人员」从系统里搜出来加进来。分配工序岗位后，开工序单时才能选他做操作人。
           </p>
         </div>
         <div v-if="canUpdate && !noFactory && !loadError" class="flex flex-wrap gap-2">
           <Button v-if="selectedKeys.length > 0" @click="openAssign(rows.filter((r) => selectedKeys.includes(r.userId)))">
             批量分配（{{ selectedKeys.length }} 人）
           </Button>
+          <Button :loading="syncing" @click="syncFromDingTalk">从钉钉同步人员</Button>
           <Button type="primary" @click="addOpen = true">＋ 添加人员</Button>
         </div>
       </header>

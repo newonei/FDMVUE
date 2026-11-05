@@ -147,6 +147,23 @@ export function addWorkers(userIds: number[]) {
   );
 }
 
+/** 从钉钉同步本厂人员：本厂钉钉部门（含下级）里没登录过的人也建账号。 */
+export interface WorkerSyncResult {
+  created: number;
+  failed: number;
+  messages: string[];
+  skipped: number;
+  updated: number;
+}
+
+export function syncWorkersFromDingTalk() {
+  return requestClient.post<WorkerSyncResult>(
+    '/fdmgongchang/worker/sync-dingtalk',
+    undefined,
+    { headers: factoryHeaders(), timeout: 120_000 },
+  );
+}
+
 export function removeWorkers(userIds: number[]) {
   return requestClient.post<boolean>(
     '/fdmgongchang/worker/remove',

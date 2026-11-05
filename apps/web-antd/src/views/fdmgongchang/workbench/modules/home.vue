@@ -13,13 +13,10 @@ import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/
 import { useJob } from '../use-job';
 
 /**
- * 工人首页：活都从派单、接单来，只有「我的任务」和「任务大厅」两块。
- * 我的任务一张卡片写清楚做什么（产品规格、订单、数量、日期、排单说明）和要领哪些料，做完了点报工；
- * 任务大厅是没人接的任务，先到先得。
+ * 工人首页：活都从派单来，只有「我的任务」。
+ * 一张卡片写清楚做什么（产品规格、订单、数量、日期、排单说明）和要领哪些料，做完了点报工。
  */
 const emit = defineEmits<{
-  claimTask: [task: FdmgongchangScheduleApi.Task];
-  releaseTask: [task: FdmgongchangScheduleApi.Task];
   startTask: [task: FdmgongchangScheduleApi.Task, process: Api.Process];
 }>();
 const job = useJob();
@@ -48,20 +45,11 @@ const todayText = computed(() => {
 });
 
 const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)));
-const hall = computed(() => (my.value.hall ?? []).filter((t) => processOf(t.process)));
 const dateText = (v: FdmgongchangScheduleApi.DateValue) => {
   if (!v) return '';
   const d = new Date(Array.isArray(v) ? `${v[0]}-${v[1]}-${v[2]}` : (v as number | string));
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}月${d.getDate()}日`;
 };
-
-type Tab = 'hall' | 'mine';
-const tab = ref<Tab>('mine');
-const hallOpen = computed(() => hall.value.length);
-const TABS: Array<{ count: () => number; key: Tab; label: string }> = [
-  { count: () => myTasks.value.length, key: 'mine', label: '我的任务' },
-  { count: () => hallOpen.value, key: 'hall', label: '任务大厅' },
-];
 
 /** 一个任务要领的一行料（建议，报工时照实际改）。 */
 interface PickLine {
@@ -146,10 +134,6 @@ watch(
           <b class="text-lg tabular-nums">{{ myTasks.length }}</b>
         </div>
         <div class="flex flex-col">
-          <span class="text-xs text-muted-foreground">可以接</span>
-          <b class="text-lg tabular-nums">{{ hallOpen }}</b>
-        </div>
-        <div class="flex flex-col">
           <span class="text-xs text-muted-foreground">今天计件</span>
           <b class="text-lg tabular-nums text-primary">¥{{ formatQty(my.todayAmount) }}</b>
         </div>
@@ -161,25 +145,10 @@ watch(
     </div>
 
     <main v-else class="flex flex-1 flex-col gap-3 p-4">
-      <div class="flex gap-1 rounded-lg bg-muted p-1" role="tablist">
-        <button
-          v-for="t in TABS"
-          :key="t.key"
-          :aria-selected="tab === t.key"
-          :class="tab === t.key ? 'bg-card font-semibold text-foreground shadow-sm' : 'text-muted-foreground'"
-          class="h-10 flex-1 rounded-md text-sm"
-          role="tab"
-          type="button"
-          @click="tab = t.key"
-        >
-          {{ t.label }}<span v-if="t.count() > 0" class="ml-1 tabular-nums">{{ t.count() }}</span>
-        </button>
-      </div>
-
-      <!-- 我的任务：派给我或我接的；卡片写清楚做什么、领什么料，做完了报工 -->
-      <template v-if="tab === 'mine'">
+      <!-- 我的任务：派给我的；卡片写清楚做什么、领什么料，做完了报工 -->
+      <h2 class="m-0 text-sm font-semibold">我的任务</h2>
         <p v-if="myTasks.length === 0" class="m-0 rounded-lg bg-card p-4 text-sm text-muted-foreground">
-          手上没有任务。去「任务大厅」接单，或等班组长派单。
+          手上没有任务，等班组长派单。
         </p>
         <article
           v-for="task in myTasks"
@@ -239,52 +208,14 @@ watch(
             <p v-if="picksByTask.get(task.id)?.hint" class="m-0 text-xs text-warning">{{ picksByTask.get(task.id)!.hint }}</p>
           </div>
 
-          <div class="flex items-center gap-3">
-            <button
-              class="h-11 flex-1 rounded-md bg-primary text-base font-semibold text-primary-foreground"
-              type="button"
-              @click="emit('startTask', task, processOf(task.process)!)"
-            >
-              做完了，报工
-            </button>
-            <button
-              v-if="task.orderCount === 0"
-              class="h-11 shrink-0 px-2 text-sm text-muted-foreground hover:text-destructive"
-              type="button"
-              @click="emit('releaseTask', task)"
-            >
-              退单
-            </button>
-          </div>
+          <button
+            class="h-11 rounded-md bg-primary text-base font-semibold text-primary-foreground"
+            type="button"
+            @click="emit('startTask', task, processOf(task.process)!)"
+          >
+            做完了，报工
+          </button>
         </article>
-      </template>
-
-      <!-- 任务大厅：没人接的任务，先到先得；下道工序要等上道报工 -->
-      <template v-else>
-        <p v-if="hall.length === 0" class="m-0 rounded-lg bg-card p-4 text-sm text-muted-foreground">现在没有可以接的任务。</p>
-        <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-          <div v-for="task in hall" :key="task.id" class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
-            <div class="flex min-w-0 flex-1 flex-col">
-              <span class="flex items-center gap-1.5 text-sm font-semibold">
-                <span class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
-                <span class="truncate">{{ [titleOf(task), task.spec].filter(Boolean).join(' · ') }}</span>
-              </span>
-              <span class="text-xs text-muted-foreground">
-                {{ task.contractCode ? `订单 ${task.contractCode}` : '备货' }} · {{ dateText(task.workDate) }} ·
-                <b class="text-foreground">{{ formatQty(task.quantity) }} {{ task.unit }}</b>
-              </span>
-              <span v-if="task.upstreamNote" class="text-xs text-muted-foreground">{{ task.upstreamNote }}</span>
-            </div>
-            <button
-              class="h-10 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:bg-muted disabled:text-muted-foreground"
-              type="button"
-              @click="emit('claimTask', task)"
-            >
-              接单
-            </button>
-          </div>
-        </div>
-      </template>
     </main>
   </div>
 </template>

@@ -2,6 +2,7 @@ import type { FdmgongchangFactoryApi as Api } from '#/api/fdmgongchang/factory';
 
 import { createApp, defineComponent, h, nextTick } from 'vue';
 
+import { message } from 'ant-design-vue';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import WorkerPage from './index.vue';
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   search: vi.fn(),
   setFactory: vi.fn(),
+  sync: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
@@ -29,6 +31,7 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
   saveWorkers: mocks.save,
   searchWorkerCandidates: mocks.search,
   setCurrentFactoryId: mocks.setFactory,
+  syncWorkersFromDingTalk: mocks.sync,
 }));
 vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
 vi.mock('@vben/common-ui', () => ({
@@ -129,6 +132,25 @@ describe('worker page', () => {
       userIds: [12],
       wageMode: undefined,
     });
+  });
+
+  it('pulls in factory people from DingTalk who never logged in', async () => {
+    mocks.options.mockResolvedValue(options);
+    mocks.list.mockResolvedValue(workers);
+    mocks.sync.mockResolvedValue({ created: 25, failed: 0, messages: ['钉钉没有返回手机号，没建账号：赵六'], skipped: 9, updated: 1 });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(WorkerPage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+
+    const warn = vi.spyOn(message, 'warning').mockImplementation(() => (() => {}) as never);
+    clickButton('从钉钉同步人员');
+    await flush();
+    expect(mocks.sync).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('已从钉钉同步：新加进来 25 人，调整部门 1 人，1 人钉钉没给手机号，没建账号');
+    expect(mocks.list).toHaveBeenCalledTimes(2);
   });
 
   it('adds people from outside the factory dept, skipping ones already in another factory', async () => {

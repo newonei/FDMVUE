@@ -6,15 +6,13 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { onMounted, ref } from 'vue';
 
-import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
+import { Button, message, Result, Spin } from 'ant-design-vue';
 
 import {
-  claimWorkbenchTask,
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
   prepareWorkbenchTask,
-  releaseWorkbenchTask,
   reportWorkbenchOrder,
   reportWorkbenchTask,
   returnWorkbenchMaterial,
@@ -32,7 +30,7 @@ import ReportStep from './modules/report-step.vue';
 import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
- * 工厂部门 · 我的工作台（工人手机端）：活都从派单、接单来——任务大厅接单，我的任务里看清楚做什么、领什么料，
+ * 工厂部门 · 我的工作台（工人手机端）：活都从派单来——我的任务里看清楚做什么、领什么料，
  * 做完了报工：对照实际改领料 → 报好的、坏的数量 → 确认计件、拍领料单 → 完成。领料、报数量都按自己的名字记。
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
@@ -118,30 +116,6 @@ async function startTask(task: FdmgongchangScheduleApi.Task, process: Api.Proces
   } finally {
     loading.value = false;
   }
-}
-
-async function claimTask(task: FdmgongchangScheduleApi.Task) {
-  submitting.value = true;
-  try {
-    await claimWorkbenchTask(task.id);
-    message.success('接单成功，做完了在「我的任务」里报工');
-    await reload();
-  } finally {
-    submitting.value = false;
-  }
-}
-
-function releaseTask(task: FdmgongchangScheduleApi.Task) {
-  Modal.confirm({
-    content: '退单后任务回到任务大厅，别人可以接。',
-    okText: '退单',
-    title: '不做这个任务了？',
-    async onOk() {
-      await releaseWorkbenchTask(task.id);
-      message.success('已退单');
-      await reload();
-    },
-  });
 }
 
 function pickInputs(): InputLine[] {
@@ -285,12 +259,7 @@ function back() {
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
-        <Home
-          v-if="job.step === 'home'"
-          @claim-task="claimTask"
-          @release-task="releaseTask"
-          @start-task="startTask"
-        />
+        <Home v-if="job.step === 'home'" @start-task="startTask" />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep v-else-if="job.step === 'report'" @back="back" @next="afterReport" />
