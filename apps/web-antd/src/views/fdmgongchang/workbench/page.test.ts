@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkbenchPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
-  claim: vi.fn(),
   create: vi.fn(),
   prepare: vi.fn(),
   pickList: vi.fn(),
@@ -41,7 +40,6 @@ vi.mock('#/components/upload/image-upload.vue', async () => {
   };
 });
 vi.mock('#/api/fdmgongchang/workbench', () => ({
-  claimWorkbenchTask: mocks.claim,
   createWorkbenchOrder: mocks.create,
   getWorkbench: mocks.my,
   getWorkbenchMates: vi.fn().mockResolvedValue([]),
@@ -52,7 +50,6 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchPickList: mocks.pickList,
   matchWorkbenchWage: vi.fn().mockResolvedValue([]),
   prepareWorkbenchTask: mocks.prepare,
-  releaseWorkbenchTask: vi.fn(),
   reportWorkbenchOrder: vi.fn(),
   reportWorkbenchTask: mocks.report,
   returnWorkbenchMaterial: vi.fn(),
@@ -238,7 +235,7 @@ describe('workbench page', () => {
     expect(text).toContain('张三');
     expect(text).toContain('我的岗位：开片');
     expect(text).toContain('¥63.72');
-    // 只有我的任务和任务大厅；任务卡片写清楚做什么、领什么料
+    // 只有我的任务；任务卡片写清楚做什么、领什么料
     expect(text).toContain('HT-001');
     expect(text).toContain('先做这单，交期近');
     expect(text).toContain('批次 MB261007-01 · 板材区');
@@ -285,8 +282,7 @@ describe('workbench page', () => {
     expect(document.body.textContent).not.toContain('再领一批料');
   });
 
-  it('claims an open task from the hall; tasks waiting for the upstream cannot be claimed', async () => {
-    mocks.claim.mockResolvedValue(true);
+  it('has no task hall: only tasks assigned to me, no claiming or giving back', async () => {
     const host = document.createElement('div');
     document.body.append(host);
     const app = createApp(WorkbenchPage);
@@ -294,20 +290,14 @@ describe('workbench page', () => {
     unmount = () => app.unmount();
     await flush();
 
-    // 各工序下班才报工：上道没报工也能接单，只提示
-    clickButton('任务大厅2');
-    await flush();
     const text = document.body.textContent ?? '';
-    expect(text).toContain('订单 HT-002');
-    expect(text).toContain('已报的够做 300');
-    expect(text).toContain('今天还没报工，照常领料干活');
-    const buttons = [...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === '接单');
-    expect(buttons).toHaveLength(2);
-    expect(buttons[1]!.disabled).toBe(false);
-    buttons[0]!.click();
-    await flush();
-    expect(mocks.claim).toHaveBeenCalledWith(32);
-    expect(mocks.my).toHaveBeenCalledTimes(2);
+    expect(text).not.toContain('任务大厅');
+    expect(text).not.toContain('可以接');
+    // 大厅里那张 HT-002 不显示
+    expect(text).not.toContain('订单 HT-002');
+    const labels = [...document.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(labels).not.toContain('接单');
+    expect(labels).not.toContain('退单');
   });
 
   it('issues every raw material of a recipe in one go for mixing', async () => {

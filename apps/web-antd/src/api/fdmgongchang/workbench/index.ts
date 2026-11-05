@@ -187,22 +187,6 @@ export function matchWorkbenchWage(params: {
   });
 }
 
-/** 抢单：接任务大厅里没人接的任务。 */
-export function claimWorkbenchTask(id: number) {
-  return requestClient.post<boolean>(`${BASE}/task/claim`, undefined, {
-    ...headers(),
-    params: { id },
-  });
-}
-
-/** 退单：还没报工的任务放回任务大厅。 */
-export function releaseWorkbenchTask(id: number) {
-  return requestClient.post<boolean>(`${BASE}/task/release`, undefined, {
-    ...headers(),
-    params: { id },
-  });
-}
-
 /** 报工前带出这个任务的建议领料。 */
 export function prepareWorkbenchTask(id: number) {
   return requestClient.get<FdmgongchangWorkbenchApi.TaskPrepare>(
