@@ -2,7 +2,7 @@
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
-import { computed, ref, watch } from 'vue';
+import { computed, h, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 import { formatDateTime } from '@vben/utils';
@@ -14,6 +14,7 @@ import {
   confirmSchedule,
   deleteScheduleTask,
   discardSchedule,
+  getScheduleChanges,
   getScheduleFormOptions,
   handleScheduleTaskShortage,
   regenerateSchedule,
@@ -223,11 +224,40 @@ function percent(task: Api.Task) {
   return plan > 0 ? Math.min(100, Math.round((Number(task.actualQuantity) / plan) * 100)) : 0;
 }
 
+/** 下发前先看生成方案之后数据变了什么：有变化时列出来让排单员再确认（按现在的数据重新校验，通过就能下发）。 */
 async function confirm() {
   if (tasks.value.length === 0) {
     message.warning('请至少保留一个任务再下发');
     return;
   }
+  let changes: string[] = [];
+  if (!props.schedule.manual) {
+    busy.value = true;
+    try {
+      changes = await getScheduleChanges(props.schedule.id);
+    } catch {
+      changes = [];
+    } finally {
+      busy.value = false;
+    }
+  }
+  if (changes.length === 0) {
+    await doConfirm();
+    return;
+  }
+  Modal.confirm({
+    content: h('div', { class: 'flex flex-col gap-2' }, [
+      h('p', { class: 'm-0 text-sm' }, '下发时会按现在的数据重新校验工序、人员和产能，通过就能下发；变化大的话建议带意见重新生成。'),
+      h('ul', { class: 'm-0 max-h-72 list-disc overflow-auto pl-4 text-xs' }, changes.map((c) => h('li', { key: c }, c))),
+    ]),
+    okText: '仍然下发',
+    onOk: doConfirm,
+    title: `生成方案之后有 ${changes.length} 处数据变了`,
+    width: 560,
+  });
+}
+
+async function doConfirm() {
   busy.value = true;
   try {
     await confirmSchedule({ id: props.schedule.id, tasks: tasks.value });

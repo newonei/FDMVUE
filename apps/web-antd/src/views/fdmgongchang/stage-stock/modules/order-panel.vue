@@ -10,6 +10,7 @@ import { formatDateTime } from '@vben/utils';
 
 import { Button, Image, Input, message, Select, Spin, Table, Tag } from 'ant-design-vue';
 
+import { getHolds } from '#/api/fdmgongchang/quality';
 import {
   getDefectStats,
   getOrder,
@@ -26,6 +27,7 @@ import {
   materialGap,
   processLabel as processLabelOf,
 } from '../model';
+import HoldModal from './hold-modal.vue';
 import ReturnModal from './return-modal.vue';
 import SupplementModal from './supplement-modal.vue';
 import VoidModal from './void-modal.vue';
@@ -77,6 +79,35 @@ function openVoid(order: Api.Order) {
 
 function onAdjusted(text: string) {
   message.success(text);
+  emit('changed');
+}
+
+// ===== 质量冻结：产出行冻结一部分数量 =====
+/** 工序单 → 产出行 → 冻结中的数量。 */
+const held = ref<Record<number, Record<number, number>>>({});
+async function loadHolds(orderId: number) {
+  try {
+    const list = await getHolds({ processOrderId: orderId });
+    const map: Record<number, number> = {};
+    for (const h of list) {
+      if (h.status === 'HELD') map[h.outputId] = (map[h.outputId] ?? 0) + Number(h.quantity);
+    }
+    held.value = { ...held.value, [orderId]: map };
+  } catch {
+    // 没有权限或接口异常时不显示冻结
+  }
+}
+const holdOpen = ref(false);
+const holdLine = ref<Api.OrderLine>();
+const holdOrder = ref<Api.Order>();
+function openHold(order: Api.Order, line: Api.OrderLine) {
+  holdOrder.value = order;
+  holdLine.value = line;
+  holdOpen.value = true;
+}
+async function onHeld(text: string) {
+  message.success(text);
+  if (holdOrder.value) await loadHolds(holdOrder.value.id);
   emit('changed');
 }
 
@@ -160,6 +191,7 @@ function onTableChange(pagination: TablePaginationConfig) {
 }
 
 async function onExpand(expanded: boolean, record: Api.Order) {
+  if (expanded && !held.value[record.id]) void loadHolds(record.id);
   if (expanded && !details.value[record.id])
     details.value = {
       ...details.value,
@@ -569,6 +601,18 @@ const statCards = computed(() =>
                         formatQty(line.defectQuantity)
                       }}</b>
                       {{ stageOf(line.stage)?.unit }}</span>
+                    <Tag v-if="held[record.id]?.[line.id]" class="ml-2" color="red">
+                      冻结 {{ formatQty(held[record.id]?.[line.id]) }}
+                    </Tag>
+                    <Button
+                      v-if="canOperate && record.status !== 'VOIDED' && Number(line.goodQuantity ?? 0) > 0"
+                      class="ml-1"
+                      size="small"
+                      type="link"
+                      @click="openHold(details[record.id]!, line)"
+                    >
+                      冻结
+                    </Button>
                   </li>
                 </ul>
                 <p v-else class="m-0 text-muted-foreground">还没报产出。</p>
@@ -614,5 +658,13 @@ const statCards = computed(() =>
       @saved="onAdjusted"
     />
     <VoidModal v-model:open="voidOpen" :order="voidTarget" @saved="onAdjusted" />
+    <HoldModal
+      v-model:open="holdOpen"
+      :held="holdLine ? held[holdOrder?.id ?? 0]?.[holdLine.id] : undefined"
+      :line="holdLine"
+      :order-no="holdOrder?.orderNo"
+      :unit="stageOf(holdLine?.stage)?.unit"
+      @saved="onHeld"
+    />
   </div>
 </template>

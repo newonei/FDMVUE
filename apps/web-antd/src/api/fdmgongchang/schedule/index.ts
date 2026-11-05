@@ -168,6 +168,14 @@ export function regenerateSchedule(data: { feedback: string; id: number }) {
   );
 }
 
+/** 生成方案之后数据变了什么（确认前提示，不拦确认）。 */
+export function getScheduleChanges(id: number) {
+  return requestClient.get<string[]>('/fdmgongchang/schedule/changes', {
+    ...headers(),
+    params: { id },
+  });
+}
+
 export function confirmSchedule(data: {
   id: number;
   tasks: FdmgongchangScheduleApi.PlanTask[];

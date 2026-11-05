@@ -20,6 +20,7 @@ import TaskManage from '../schedule/modules/task-manage.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import CreateModal from './modules/create-modal.vue';
+import ExceptionLedger from './modules/exception-ledger.vue';
 import OrderDrawer from './modules/order-drawer.vue';
 import RestockLedger from './modules/restock-ledger.vue';
 import ScheduleModal from './modules/schedule-modal.vue';
@@ -35,7 +36,7 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
  */
 defineOptions({ name: 'FdmGongchangProductionOrder' });
 
-type Tab = 'factory' | 'mine' | 'restock' | 'schedule' | 'tasks';
+type Tab = 'exception' | 'factory' | 'mine' | 'restock' | 'schedule' | 'tasks';
 
 const { hasAccessByCodes } = useAccess();
 const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:production-order:create']));
@@ -52,6 +53,7 @@ function initialTab(): Tab {
   if (want === 'schedule' && canViewSchedule.value) return 'schedule';
   if (want === 'tasks' && canViewSchedule.value) return 'tasks';
   if (want === 'restock' && canViewSchedule.value) return 'restock';
+  if (want === 'exception' && canViewSchedule.value) return 'exception';
   if (want === 'mine' && canCreate.value) return 'mine';
   if (canHandle.value) return 'factory';
   if (canViewSchedule.value && !canCreate.value) return 'schedule';
@@ -121,7 +123,7 @@ const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
 async function loadRows() {
-  if (tab.value === 'schedule' || tab.value === 'tasks' || tab.value === 'restock') return;
+  if (['exception', 'restock', 'schedule', 'tasks'].includes(tab.value)) return;
   if (tab.value === 'factory' && (!factoryReady.value || noFactory.value)) return;
   loading.value = true;
   loadError.value = false;
@@ -269,6 +271,7 @@ function progressPercent(o: Api.Order) {
           <Tabs.TabPane v-if="canViewSchedule" key="schedule" tab="排单方案" />
           <Tabs.TabPane v-if="canViewSchedule" key="tasks" tab="任务管理" />
           <Tabs.TabPane v-if="canViewSchedule" key="restock" tab="补库台账" />
+          <Tabs.TabPane v-if="canViewSchedule" key="exception" tab="异常台账" />
           <Tabs.TabPane v-if="canCreate" key="mine" tab="我提的需求" />
         </Tabs>
 
@@ -280,6 +283,9 @@ function progressPercent(o: Api.Order) {
         </template>
         <template v-else-if="tab === 'restock'">
           <RestockLedger v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" @open-order="openOrder" />
+        </template>
+        <template v-else-if="tab === 'exception'">
+          <ExceptionLedger v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" />
         </template>
         <template v-else-if="tab === 'tasks'">
           <TaskManage v-if="factory.factoryId.value !== null" :factory-id="factory.factoryId.value" @open-schedule="openSchedule" />
