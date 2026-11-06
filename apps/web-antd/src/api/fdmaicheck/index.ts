@@ -37,6 +37,44 @@ export namespace FdmAiCheckApi {
     finishedTime?: string;
     /** 这次检查读了哪些附件，没读的写明原因 */
     attachments?: AttachmentNote[];
+    /** 逐个检查点的结论；改版前的检查为空 */
+    checks?: null | Verdict[];
+  }
+
+  export type VerdictResult =
+    | 'FAIL'
+    | 'NOT_APPLICABLE'
+    | 'PASS'
+    | 'UNKNOWN'
+    | 'WARN';
+
+  /** 一个检查点的结论。 */
+  export interface Verdict {
+    source: 'AI' | 'RULE';
+    checkCode: string;
+    /** 检查时的名称 */
+    name: string;
+    group?: null | string;
+    result: VerdictResult;
+    /** 判断依据：看了什么、看到什么 */
+    basis?: null | string;
+    evidenceIds: string[];
+  }
+
+  /** 一个检查点近 30 天的结论次数。 */
+  export interface ItemStats {
+    total: number;
+    pass: number;
+    fail: number;
+    warn: number;
+    notApplicable: number;
+    unknown: number;
+    falsePositive: number;
+  }
+
+  export interface RuleItem {
+    code: string;
+    name: string;
   }
 
   export interface AttachmentNote {
@@ -59,11 +97,19 @@ export namespace FdmAiCheckApi {
   }
 
   export interface Item {
-    code: string;
+    /** 系统生成，页面不显示；新检查点为空，保存时生成 */
+    code?: string;
     name: string;
+    /** 不通过时的严重程度；INFO 表示只提醒 */
     severity: Exclude<Severity, 'NONE'>;
+    /** 检查什么 */
     description?: string;
     enabled: boolean;
+    /** 什么情况算不通过 */
+    failWhen?: string;
+    /** 什么情况只提醒 */
+    warnWhen?: string;
+    group?: string;
   }
 
   export interface Prompt {
@@ -102,6 +148,7 @@ export namespace FdmAiCheckApi {
     published: Prompt;
     draft?: null | Prompt;
     defaultItems: Item[];
+    ruleItems?: RuleItem[];
     departments: Record<string, string>;
     versions: Version[];
   }
@@ -227,6 +274,14 @@ export function rollbackAiCheckPrompt(docType: string, promptId: number) {
     docType,
     promptId,
   });
+}
+
+/** 每个检查点近 30 天的结论统计，按编码。 */
+export function getAiCheckStats(docType: string) {
+  return requestClient.get<Record<string, FdmAiCheckApi.ItemStats>>(
+    `${base}/profile/stats`,
+    { params: { docType } },
+  );
 }
 
 export function getAiCheckModels() {

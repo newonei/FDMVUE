@@ -5,16 +5,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { formatDateTime } from '@vben/utils';
 
-import {
-  Alert,
-  Button,
-  Input,
-  message,
-  Modal,
-  Space,
-  Tag,
-  Tooltip,
-} from 'ant-design-vue';
+import { Alert, Button, Input, message, Modal, Tooltip } from 'ant-design-vue';
 
 import {
   getAiCheckResult,
@@ -22,18 +13,15 @@ import {
   recheckAiCheck,
 } from '#/api/fdmaicheck';
 
-import {
-  aiStatusText,
-  attachmentSummary,
-  needsReason,
-  SEVERITY_COLORS,
-  SEVERITY_LABELS,
-  sortFindings,
-  STATUS_LABELS,
-} from './risk';
+import AiCheckBar from './AiCheckBar.vue';
+import AiCheckChecklist from './AiCheckChecklist.vue';
+import AiCheckDrawer from './AiCheckDrawer.vue';
+import { buildChecklist, defaultExpanded } from './checklist';
+import { aiStatusText, attachmentSummary, needsReason } from './risk';
 
 /**
- * 单据详情里的 AI 风险检查：单据保存后后台自动检查，这里显示结论和风险项，负责人逐条处理。
+ * 单据详情里的 AI 检查：单据保存后后台自动检查，每个检查点都有结论。
+ * 收起时一行结果条；展开后问题逐条处理、通过的缩成标签；「全部依据」在侧边抽屉里逐项看。
  * 只是提醒，不影响单据办理。
  */
 const props = defineProps<{ docId?: string; docType: FdmAiCheckApi.DocType }>();
@@ -45,7 +33,9 @@ const MAX_POLLS = 60;
 const result = ref<FdmAiCheckApi.Result>();
 const loading = ref(false);
 const error = ref('');
-const showHandled = ref(false);
+const drawerOpen = ref(false);
+/** 用户手动展开或收起过（按单据类型记住）；没选过时按有没有问题决定。 */
+const expandChoice = ref<null | string>(null);
 const rechecking = ref(false);
 const handling = ref<number>();
 const reasonFor = ref<{
@@ -57,12 +47,13 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let polls = 0;
 let seq = 0;
 
-const findings = computed(() => sortFindings(result.value?.findings ?? []));
-const open = computed(() => findings.value.filter((f) => f.status === 'OPEN'));
-const handled = computed(() =>
-  findings.value.filter((f) => f.status !== 'OPEN'),
+const list = computed(() =>
+  buildChecklist(result.value?.latest?.checks, result.value?.findings ?? []),
 );
-const level = computed(() => result.value?.riskLevel);
+const expanded = computed(() =>
+  defaultExpanded(list.value, expandChoice.value),
+);
+const storageKey = computed(() => `fdmaicheck.expanded.${props.docType}`);
 const notice = computed(() => aiStatusText(result.value?.latest?.aiStatus));
 const attachmentInfo = computed(() =>
   attachmentSummary(result.value?.latest?.attachments),
@@ -71,6 +62,24 @@ const checkedAt = computed(() => {
   const time = result.value?.latest?.finishedTime;
   return time ? formatDateTime(time) : '';
 });
+
+function readChoice() {
+  try {
+    expandChoice.value = localStorage.getItem(storageKey.value);
+  } catch {
+    expandChoice.value = null;
+  }
+}
+
+function toggle() {
+  const next = expanded.value ? '0' : '1';
+  expandChoice.value = next;
+  try {
+    localStorage.setItem(storageKey.value, next);
+  } catch {
+    // 浏览器不让存时只对这次有效
+  }
+}
 
 function stop() {
   if (timer) clearTimeout(timer);
@@ -165,7 +174,8 @@ watch(
   () => [props.docType, props.docId],
   () => {
     polls = 0;
-    showHandled.value = false;
+    drawerOpen.value = false;
+    readChoice();
     void load();
   },
   { immediate: true },
@@ -176,44 +186,40 @@ defineExpose({ reload: () => load(true) });
 </script>
 
 <template>
-  <section v-if="docId" class="ai-check" aria-label="AI 风险检查">
-    <header class="ai-check-head">
-      <span class="ai-check-title">AI 风险检查</span>
-      <Tag v-if="level" :color="SEVERITY_COLORS[level]">
-        {{
-          level === 'NONE'
-            ? '未发现风险'
-            : `${SEVERITY_LABELS[level]} · ${open.length} 条待处理`
-        }}
-      </Tag>
-      <Tag v-if="result?.running" color="processing">检查中…</Tag>
-      <span
-        v-if="result?.latest?.summary"
-        class="ai-check-summary"
-        :title="result.latest.summary"
+  <section v-if="docId" class="ai-check" aria-label="AI 检查">
+    <AiCheckBar :list="list" :summary="result?.latest?.summary">
+      <span v-if="result?.running" class="ai-check-running">检查中…</span>
+      <span v-else-if="!result?.latest && !loading" class="ai-check-muted">单据保存后会自动检查</span>
+      <span v-if="checkedAt">{{ checkedAt }}</span>
+      <Tooltip title="按单据当前内容重新检查">
+        <Button
+          size="small"
+          :loading="rechecking"
+          :disabled="result?.running"
+          @click="recheck"
+        >
+          重新检查
+        </Button>
+      </Tooltip>
+      <Button
+        v-if="list.total > 0"
+        size="small"
+        type="link"
+        class="ai-check-link"
+        @click="toggle"
       >
-        {{ result.latest.summary }}
-      </span>
-      <span
-        v-else-if="!result?.latest && !result?.running && !loading"
-        class="ai-check-muted"
+        {{ expanded ? '收起' : '展开' }}
+      </Button>
+      <Button
+        v-if="list.total > 0"
+        size="small"
+        type="link"
+        class="ai-check-link"
+        @click="drawerOpen = true"
       >
-        单据保存后会自动检查
-      </span>
-      <Space class="ai-check-actions" size="small">
-        <span v-if="checkedAt" class="ai-check-muted">{{ checkedAt }}</span>
-        <Tooltip title="按单据当前内容重新检查">
-          <Button
-            size="small"
-            :loading="rechecking"
-            :disabled="result?.running"
-            @click="recheck"
-          >
-            重新检查
-          </Button>
-        </Tooltip>
-      </Space>
-    </header>
+        全部依据
+      </Button>
+    </AiCheckBar>
     <Alert
       v-if="error"
       type="warning"
@@ -228,95 +234,46 @@ defineExpose({ reload: () => load(true) });
       show-icon
       class="ai-check-alert"
     />
-    <div v-if="notice" class="ai-check-muted ai-check-notice">{{ notice }}</div>
-    <div v-if="attachmentInfo.read" class="ai-check-muted ai-check-notice">
-      {{ attachmentInfo.read }}
-    </div>
-    <div
-      v-for="line in attachmentInfo.others"
-      :key="line"
-      class="ai-check-notice ai-check-unread"
-    >
-      {{ line }}
-    </div>
-    <ul v-if="open.length" class="ai-check-list">
-      <li v-for="finding in open" :key="finding.id" class="ai-check-item">
-        <div class="ai-check-line">
-          <Tag :color="SEVERITY_COLORS[finding.severity]" class="ai-check-sev">
-            {{ SEVERITY_LABELS[finding.severity] }}
-          </Tag>
-          <span class="ai-check-source">{{
-            finding.source === 'RULE' ? '规则' : 'AI'
-          }}</span>
-          <span class="ai-check-message">{{ finding.message }}</span>
-        </div>
-        <div v-if="finding.suggestion" class="ai-check-suggestion">
-          建议：{{ finding.suggestion }}
-        </div>
-        <Space size="small" class="ai-check-item-actions">
-          <Button
-            size="small"
-            type="link"
-            :loading="handling === finding.id"
-            @click="startHandle(finding, 'RESOLVED')"
-          >
-            已处理
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            :disabled="handling === finding.id"
-            @click="startHandle(finding, 'FALSE_POSITIVE')"
-          >
-            误报
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            :disabled="handling === finding.id"
-            @click="startHandle(finding, 'IGNORED')"
-          >
-            忽略
-          </Button>
-        </Space>
-      </li>
-    </ul>
-    <div v-if="handled.length" class="ai-check-handled">
-      <Button
-        size="small"
-        type="link"
-        class="ai-check-toggle"
-        @click="showHandled = !showHandled"
+    <template v-if="expanded || list.total === 0">
+      <div v-if="notice" class="ai-check-muted ai-check-notice">
+        {{ notice }}
+      </div>
+      <div
+        v-if="result?.latest?.summary && list.total > 0"
+        class="ai-check-muted ai-check-notice"
       >
-        {{ showHandled ? '收起' : '查看' }}已处理的 {{ handled.length }} 条
-      </Button>
-      <ul v-if="showHandled" class="ai-check-list">
-        <li
-          v-for="finding in handled"
-          :key="finding.id"
-          class="ai-check-item is-handled"
-        >
-          <div class="ai-check-line">
-            <Tag class="ai-check-sev">{{ STATUS_LABELS[finding.status] }}</Tag>
-            <span class="ai-check-source">{{
-              finding.source === 'RULE' ? '规则' : 'AI'
-            }}</span>
-            <span class="ai-check-message">{{ finding.message }}</span>
-          </div>
-          <div v-if="finding.handledReason" class="ai-check-suggestion">
-            理由：{{ finding.handledReason }}
-          </div>
-          <Button
-            size="small"
-            type="link"
-            :loading="handling === finding.id"
-            @click="startHandle(finding, 'OPEN')"
-          >
-            重新打开
-          </Button>
-        </li>
-      </ul>
-    </div>
+        AI 结论：{{ result.latest.summary }}
+      </div>
+      <div v-if="attachmentInfo.read" class="ai-check-muted ai-check-notice">
+        {{ attachmentInfo.read }}
+      </div>
+      <div
+        v-for="line in attachmentInfo.others"
+        :key="line"
+        class="ai-check-notice ai-check-unread"
+      >
+        {{ line }}
+      </div>
+      <div
+        v-if="result?.latest && !list.hasChecks && list.total > 0"
+        class="ai-check-muted ai-check-notice"
+      >
+        这次检查是旧版本，只列出了问题；点「重新检查」可看到每个检查点的结论。
+      </div>
+      <AiCheckChecklist
+        v-if="list.total > 0"
+        class="ai-check-list"
+        :list="list"
+        :handling="handling"
+        actions
+        @handle="startHandle"
+      />
+    </template>
+    <AiCheckDrawer
+      :list="list"
+      :open="drawerOpen"
+      @close="drawerOpen = false"
+    />
     <Modal
       :open="!!reasonFor"
       :title="
@@ -341,39 +298,25 @@ defineExpose({ reload: () => load(true) });
 
 <style scoped>
 .ai-check {
-  padding: 10px 12px;
+  padding: 8px 12px;
   margin: 8px 0;
   background: var(--ant-color-fill-quaternary, rgb(0 0 0 / 2%));
   border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
   border-radius: 6px;
 }
 
-.ai-check-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  align-items: center;
-}
-
-.ai-check-title {
-  font-weight: 600;
-}
-
-.ai-check-summary {
-  flex: 1 1 200px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-check-actions {
-  margin-inline-start: auto;
-}
-
 .ai-check-muted {
   font-size: 12px;
   color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.ai-check-running {
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.ai-check-link {
+  height: 22px;
+  padding: 0 2px;
 }
 
 .ai-check-unread {
@@ -388,53 +331,6 @@ defineExpose({ reload: () => load(true) });
 }
 
 .ai-check-list {
-  padding: 0;
-  margin: 6px 0 0;
-  list-style: none;
-}
-
-.ai-check-item {
-  padding: 6px 0;
-  border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
-}
-
-.ai-check-item.is-handled {
-  opacity: 0.75;
-}
-
-.ai-check-line {
-  display: flex;
-  gap: 6px;
-  align-items: baseline;
-}
-
-.ai-check-sev {
-  flex: none;
-  margin-inline-end: 0;
-}
-
-.ai-check-source {
-  flex: none;
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-}
-
-.ai-check-message {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ai-check-suggestion {
-  margin: 2px 0 0 4px;
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #595959);
-}
-
-.ai-check-item-actions {
-  margin-top: 2px;
-}
-
-.ai-check-toggle {
-  padding-inline: 0;
+  margin-top: 8px;
 }
 </style>
