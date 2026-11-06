@@ -106,6 +106,7 @@ describe('factory setting page', () => {
 
     expect(document.body.textContent).toContain('合计 2000~7000件/天');
     expect(document.querySelector<HTMLInputElement>('#capacity-crew-min-MIX')!.value).toBe('2');
+    expect(document.body.textContent).toContain('合计 800张/天，一台 2~3 人');
     expect(document.querySelector('#capacity-crew-min-SLICE')).toBeNull();
     expect(document.body.textContent).toContain('张板材/天');
     const engrave = [

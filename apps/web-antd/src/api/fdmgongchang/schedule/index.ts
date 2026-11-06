@@ -14,8 +14,21 @@ export namespace FdmgongchangScheduleApi {
   /** 后端 LocalDate 可能是 "2026-10-08" 或 [2026, 10, 8]。 */
   export type DateValue = null | number[] | string;
 
+  /** 一份领料或产出：库存段、规格说明、数量（算不出来为空）。 */
+  export interface Material {
+    name: string;
+    quantity?: Decimal | null;
+    /** 库存段，如 RAW、BOARD、SHEET。 */
+    stage: string;
+    unit?: null | string;
+  }
+
   export interface PlanTask {
     assignmentId?: null | string;
+    /** 领料：贴合是正面、反面两份片材。 */
+    inputs?: Material[];
+    /** 产出。 */
+    output?: Material | null;
     contractCode?: null | string;
     /** yyyy-MM-dd */
     date: string;
@@ -44,6 +57,10 @@ export namespace FdmgongchangScheduleApi {
 
   export interface Task {
     actualQuantity: Decimal;
+    /** 领料；旧任务为空。 */
+    inputs?: Material[] | null;
+    /** 产出；旧任务为空。 */
+    output?: Material | null;
     contractCode?: null | string;
     id: number;
     orderCount: number;

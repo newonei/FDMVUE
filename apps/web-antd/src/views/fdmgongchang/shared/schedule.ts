@@ -44,6 +44,49 @@ export function dateText(value: Api.DateValue | undefined) {
   return String(value).slice(0, 10);
 }
 
+/** 按任务数量的变化换算领料、产出数量；kg 留两位小数，张、片、件向上取整。 */
+function scaled(quantity: Api.Decimal | null | undefined, unit: null | string | undefined, ratio: number) {
+  if (quantity === null || quantity === undefined || quantity === '') return null;
+  const v = Number(quantity) * ratio;
+  if (!Number.isFinite(v)) return null;
+  return unit === 'kg' ? Math.round(v * 100) / 100 : Math.ceil(v - 1e-9);
+}
+
+/** 「板材 132×192×4.5cm 雾霾蓝 13张」；数量算不出来时只写规格。 */
+export function materialText(m: Api.Material, ratio = 1) {
+  let q = scaled(m.quantity, m.unit, ratio);
+  if (ratio === 1 && q !== null) q = Number(m.quantity);
+  return q === null ? m.name : `${m.name} ${q}${m.unit ?? ''}`;
+}
+
+/**
+ * 任务的领料、产出两行文字；旧任务没有时为空。
+ * 接单时按上道良品改小了数量（plannedQuantity）的，按比例换算显示。
+ */
+export function taskMaterials(task: {
+  inputs?: Api.Material[] | null;
+  output?: Api.Material | null;
+  plannedQuantity?: Api.Decimal | null;
+  quantity: Api.Decimal;
+}) {
+  if (!task.output && !(task.inputs?.length)) return null;
+  const ratio = task.plannedQuantity ? Number(task.quantity) / Number(task.plannedQuantity) : 1;
+  return {
+    input: (task.inputs ?? []).map((m) => materialText(m, ratio)).join('；'),
+    output: task.output ? materialText({ ...task.output, quantity: task.quantity }) : '',
+  };
+}
+
+/** 改了任务数量：领料、产出跟着按比例变（贴合、压花之后 1 进 1 出，后端下发时还会再算一遍）。 */
+export function rescaleMaterials<T extends Pick<Api.PlanTask, 'inputs' | 'output'>>(task: T, from: Api.Decimal, to: Api.Decimal) {
+  const ratio = Number(from) > 0 ? Number(to) / Number(from) : 1;
+  return {
+    ...task,
+    inputs: (task.inputs ?? []).map((m) => ({ ...m, quantity: scaled(m.quantity, m.unit, ratio) })),
+    output: task.output ? { ...task.output, quantity: Number(to) } : task.output,
+  };
+}
+
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 /** 「10-11 周六」 */

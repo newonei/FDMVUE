@@ -27,12 +27,14 @@ import {
   dayLabel,
   groupByDate,
   PROCESS_LABELS,
+  rescaleMaterials,
   RISK_TYPES,
   SCHEDULE_STATUS,
   TASK_STATUS,
 } from '../../shared/schedule';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
+import TaskMaterials from './task-materials.vue';
 
 /**
  * 一份排单：生成中、失败、待确认（可调整、加任务、带意见重新生成、下发）、已下发（计划 vs 实际，可追加、改人、删任务）。
@@ -106,6 +108,8 @@ function editConfirmed(task: Api.Task) {
     {
       contractCode: task.contractCode,
       date: dateText(task.workDate),
+      inputs: task.inputs ?? [],
+      output: task.output,
       process: task.process,
       product: task.product,
       quantity: task.quantity,
@@ -133,9 +137,13 @@ function resendDate() {
 
 function resend(task: Api.Task) {
   resendFor.value = task;
+  const scaled = rescaleMaterials({ inputs: task.inputs ?? [], output: task.output }, task.plannedQuantity ?? task.quantity,
+    Number(task.shortage));
   void openForm({
     contractCode: task.contractCode,
     date: resendDate(),
+    inputs: scaled.inputs,
+    output: scaled.output,
     process: task.process,
     product: task.product,
     quantity: Number(task.shortage),
@@ -397,6 +405,7 @@ function discard() {
               </span>
             </div>
             <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+            <TaskMaterials :task="task" />
             <div class="text-xs">
               {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
               <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 {{ Number(task.plannedQuantity) }}，接单时按上道良品改成 {{ Number(task.quantity) }}</span>
