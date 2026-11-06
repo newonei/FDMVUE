@@ -16,7 +16,15 @@ export namespace FdmgongchangScheduleApi {
 
   /** 一份领料或产出：库存段、规格说明、数量（算不出来为空）。 */
   export interface Material {
+    /** 半成品物料编码；订单最后一道的产出是订单产品编码；算不出来为空。 */
+    code?: null | string;
     name: string;
+    /** 这个规格还没有物料，第一次报工时自动建档。 */
+    newItem?: boolean | null;
+    /** 没有编码或编码要注意的原因。 */
+    note?: null | string;
+    /** 产品中心的半成品档案编码。 */
+    productCode?: null | string;
     quantity?: Decimal | null;
     /** 库存段，如 RAW、BOARD、SHEET。 */
     stage: string;
