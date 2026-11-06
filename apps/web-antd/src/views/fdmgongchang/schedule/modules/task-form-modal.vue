@@ -12,7 +12,7 @@ import { searchScheduleProducts } from '#/api/fdmgongchang/schedule';
 
 import { specText } from '../../production-order/shared';
 import { factoryToday } from '../../shared/factory-date';
-import { dateText, dayLabel, stageTaskPlan } from '../../shared/schedule';
+import { dateText, dayLabel, rescaleMaterials, stageTaskPlan } from '../../shared/schedule';
 
 /**
  * 手动派工的一个任务：哪天、哪道工序、做哪张订单（或备货）、做什么产品、做多少、谁来做。
@@ -198,9 +198,16 @@ async function save() {
   if (errors.value.length > 0) return;
   saving.value = true;
   try {
+    // 工序和产品没换时带上原来的领料、产出（数量按比例换算）；换了由后端按工序重新补
+    const init = props.initial;
+    const same = init && init.process === process.value && init.product === picked.value!.name
+      && (init.spec ?? '') === (taskSpec.value || '');
+    const materials = same ? rescaleMaterials(init, init.quantity, quantity.value!) : { inputs: [], output: null };
     await props.submit({
       contractCode: order.value === STOCK ? null : order.value,
       date: date.value,
+      inputs: materials.inputs,
+      output: materials.output,
       process: process.value!,
       product: picked.value!.name,
       quantity: quantity.value!,

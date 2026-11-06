@@ -84,6 +84,14 @@ function dailyRange(code: string) {
   const hi = c.max * n;
   return lo === hi ? `${hi}` : `${lo}~${hi}`;
 }
+/** 每台几人，例如「2~3」；两头都填了才是范围。 */
+function crewText(code: string) {
+  const c = capacities.value[code];
+  if (!c?.machines || (c.crewMin === null && c.crewMax === null)) return '';
+  if (c.crewMin === null) return `最多 ${c.crewMax}`;
+  if (c.crewMax === null) return `至少 ${c.crewMin}`;
+  return c.crewMin === c.crewMax ? `${c.crewMin}` : `${c.crewMin}~${c.crewMax}`;
+}
 /** 发泡出板规格（cm）和每锅出几张，AI 排单用来把原料换算成板材、再换算成成品。 */
 const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
 type MixField = (typeof MIX_FIELDS)[number];
@@ -363,11 +371,11 @@ async function save() {
                     :aria-label="`${p.label}每台最少人数`"
                     :disabled="!canEdit || !enabled.includes(p.code)"
                     :min="1"
-                    :max="50"
+                    :max="10"
                     :precision="0"
                     :value="capacities[p.code]?.crewMin ?? undefined"
                     :style="{ width: '3.5rem' }"
-                    placeholder="人"
+                    placeholder="最少"
                     size="small"
                     @change="(v) => (capacities[p.code]!.crewMin = (v as null | number | undefined) ?? null)"
                   />
@@ -377,18 +385,18 @@ async function save() {
                     :aria-label="`${p.label}每台最多人数`"
                     :disabled="!canEdit || !enabled.includes(p.code)"
                     :min="1"
-                    :max="50"
+                    :max="10"
                     :precision="0"
                     :value="capacities[p.code]?.crewMax ?? undefined"
                     :style="{ width: '3.5rem' }"
-                    placeholder="人"
+                    placeholder="最多"
                     size="small"
                     @change="(v) => (capacities[p.code]!.crewMax = (v as null | number | undefined) ?? null)"
                   />
                   人
                 </template>
                 <span v-if="capacities[p.code]?.machines && dailyRange(p.code)" class="w-full text-right">
-                  合计 {{ dailyRange(p.code) }}{{ p.capacityUnit ?? p.outputUnit }}/天
+                  合计 {{ dailyRange(p.code) }}{{ p.capacityUnit ?? p.outputUnit }}/天<template v-if="crewText(p.code)">，一台 {{ crewText(p.code) }} 人</template>
                 </span>
               </div>
             </div>

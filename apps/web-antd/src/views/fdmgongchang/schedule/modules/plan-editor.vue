@@ -6,7 +6,8 @@ import { computed } from 'vue';
 
 import { Button, Empty, InputNumber, Select, Tag } from 'ant-design-vue';
 
-import { dayLabel, groupByDate, PROCESS_LABELS } from '../../shared/schedule';
+import { dayLabel, groupByDate, PROCESS_LABELS, rescaleMaterials } from '../../shared/schedule';
+import TaskMaterials from './task-materials.vue';
 
 /** 待确认方案的任务表：按天分组，可以改数量、换人、删任务，或打开表单整条修改。 */
 const props = defineProps<{
@@ -27,6 +28,14 @@ const workerOptions = (process: string) =>
 const nameOf = (id: number) =>
   props.workers.find((w) => w.userId === id)?.nickname ?? String(id);
 
+/** 改数量时领料、产出跟着按比例变。 */
+function setQuantity(task: Api.PlanTask, value: number) {
+  const next = rescaleMaterials(task, task.quantity, value);
+  task.inputs = next.inputs;
+  task.output = next.output;
+  task.quantity = value;
+}
+
 function remove(task: Api.PlanTask) {
   tasks.value = tasks.value.filter((t) => t !== task);
 }
@@ -42,7 +51,7 @@ function remove(task: Api.PlanTask) {
           <thead class="bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th class="px-2 py-1.5 text-left font-medium">工序</th>
-              <th class="px-2 py-1.5 text-left font-medium">订单 / 产品</th>
+              <th class="px-2 py-1.5 text-left font-medium">订单 / 产品 / 领料产出</th>
               <th class="w-32 px-2 py-1.5 text-right font-medium">数量</th>
               <th class="w-64 px-2 py-1.5 text-left font-medium">人员</th>
               <th class="px-2 py-1.5 text-left font-medium">理由</th>
@@ -59,6 +68,7 @@ function remove(task: Api.PlanTask) {
                 <div v-if="task.contractCode" class="font-mono text-xs">{{ task.contractCode }}</div>
                 <div v-else class="text-xs text-muted-foreground">备货</div>
                 <div class="text-xs">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+                <TaskMaterials :task="task" class="mt-1" />
               </td>
               <td class="px-2 py-1.5 text-right">
                 <InputNumber
@@ -69,7 +79,7 @@ function remove(task: Api.PlanTask) {
                   :value="Number(task.quantity)"
                   :style="{ width: '6rem' }"
                   size="small"
-                  @change="(v) => (task.quantity = (v as number | null) ?? 0)"
+                  @change="(v) => setQuantity(task, (v as number | null) ?? 0)"
                 />
                 <b v-else class="tabular-nums">{{ task.quantity }}</b>
                 <span class="ml-1 text-xs text-muted-foreground">{{ task.unit }}</span>

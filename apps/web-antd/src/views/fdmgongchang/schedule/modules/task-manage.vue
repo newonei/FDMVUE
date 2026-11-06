@@ -15,6 +15,7 @@ import { listScheduleTasks, reassignScheduleTasks, returnScheduleTasksToHall } f
 
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS } from '../../shared/schedule';
+import TaskMaterials from './task-materials.vue';
 
 /**
  * 任务管理：跨排单按日期看已下发的任务和进度，可按工序、状态、人员、订单筛选；
@@ -249,6 +250,7 @@ function returnToHall() {
                 <td class="px-2 py-1.5">
                   <div class="font-mono text-xs">{{ task.contractCode || '备货' }}</div>
                   <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+                  <TaskMaterials :task="task" class="mt-0.5" />
                 </td>
                 <td class="px-2 py-1.5">
                   <div class="flex items-center gap-2">

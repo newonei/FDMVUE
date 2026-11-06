@@ -8,6 +8,7 @@ import { Empty, Spin } from 'ant-design-vue';
 
 import { getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
+import TaskMaterials from '../../schedule/modules/task-materials.vue';
 import { factoryToday } from '../../shared/factory-date';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
@@ -161,6 +162,7 @@ watch(
               <span class="min-w-0 break-words">{{ titleOf(task) }}</span>
             </span>
             <span v-if="task.spec" class="text-sm text-muted-foreground">规格：{{ task.spec }}</span>
+            <TaskMaterials :task="task" class="text-sm" />
           </div>
 
           <dl class="m-0 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
