@@ -372,6 +372,53 @@ describe('production order page', () => {
     expect(mocks.accept).toHaveBeenCalledWith({ id: 9, promisedDate: '2026-10-20', reply: undefined });
   });
 
+  it('sets the same processes for several products at once when accepting a purchase order', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const item = { ...order.items[0]!, processes: [], routeId: null, routeName: null, steps: [] };
+    const purchase = {
+      ...order,
+      items: [item, { ...item, id: 92, productName: '双色TPE瑜伽垫' }, { ...item, id: 93, productName: '加厚瑜伽垫' }],
+      sourceOrderCode: 'CG-001',
+      sourceType: 'PURCHASE_ORDER',
+    };
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.accept.mockResolvedValue(true);
+    unmount = mount();
+    await flush();
+    button('去接单').click();
+    await flush();
+    expect(document.body.textContent).toContain('批量设置工序');
+
+    const batchChips = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-batch 要走的工序"] .route-chip')];
+    batchChips[0]!.click();
+    await flush();
+    batchChips[1]!.click();
+    await flush();
+    // 第三个产品不套用，单独定
+    const third = [...document.querySelectorAll<HTMLInputElement>('[aria-label="套用到哪些产品"] input[type="checkbox"]')].at(-1)!;
+    third.click();
+    await flush();
+    button('套用到勾选的2个产品').click();
+    await flush();
+    const thirdChips = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-item-93 要走的工序"] .route-chip')];
+    thirdChips[0]!.click();
+    await flush();
+
+    button('接单').click();
+    await flush();
+    expect(mocks.accept).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [
+          { itemId: 91, routeId: undefined, steps: ['SLICE', 'PUNCH'] },
+          { itemId: 92, routeId: undefined, steps: ['SLICE', 'PUNCH'] },
+          { itemId: 93, routeId: undefined, steps: ['SLICE'] },
+        ],
+      }),
+    );
+  });
+
   it('lets the factory confirm the structured spec and shows how stock covers the order', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
     const suggested = { frontColor: 'PK', length: 183, material: 'TPE', thickness: 0.6, width: 61 };

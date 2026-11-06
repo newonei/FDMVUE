@@ -8,7 +8,7 @@ import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/p
 
 import { computed, ref, watch } from 'vue';
 
-import { Alert, Button, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
+import { Alert, Button, Checkbox, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import {
@@ -67,11 +67,16 @@ const factoryRoute = computed(() => fromPurchase.value || fromRestock.value);
 const routeOptions = ref<RouteApi.Options>();
 const drafts = ref<Record<number, RouteDraft>>({});
 const editingRoute = ref<number>();
+/** 接单时批量定工艺：先选好工序，再套用到勾选的产品（默认全选）。 */
+const batchDraft = ref<RouteDraft>({ steps: [] });
+const batchIds = ref<number[]>([]);
 const activeItems = computed(() => (order.value?.items ?? []).filter((i) => num(i.quantity) > 0));
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED' && !fromPurchase.value);
 const canHandle = computed(() => props.mode === 'factory' && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
 /** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
+/** 多个产品待定工艺时才显示批量设置。 */
+const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
 const canPlan = computed(() => props.mode === 'factory' && (canHandle.value || canProgress.value));
 const allDone = computed(() =>
   (order.value?.items ?? []).every((i) => num(i.completedQuantity) >= num(i.quantity)),
@@ -110,6 +115,30 @@ async function loadRoutes() {
     }),
   );
   drafts.value = next;
+  batchDraft.value = { steps: [] };
+  batchIds.value = o.items.filter((i) => num(i.quantity) > 0).map((i) => i.id);
+}
+
+function applyBatchRoute() {
+  const processes = routeOptions.value?.processes ?? [];
+  const problem = processes.length > 0 ? routeProblem(batchDraft.value.steps, processes) : '请选择要走的工序';
+  if (problem) {
+    message.warning(problem);
+    return;
+  }
+  const targets = activeItems.value.filter((i) => batchIds.value.includes(i.id));
+  if (targets.length === 0) {
+    message.warning('请勾选要套用的产品');
+    return;
+  }
+  const next = { ...drafts.value };
+  for (const i of targets) next[i.id] = { routeId: batchDraft.value.routeId, steps: [...batchDraft.value.steps] };
+  drafts.value = next;
+  message.success(`已套用到 ${targets.length} 个产品，个别产品还可以在下面单独调整`);
+}
+
+function toggleBatchAll(checked: boolean) {
+  batchIds.value = checked ? activeItems.value.map((i) => i.id) : [];
 }
 
 function draftProblem(item: Api.Item) {
@@ -318,6 +347,27 @@ function producedQty(item: Api.Item) {
 
         <section class="flex flex-col gap-2">
           <h3 class="m-0 text-sm font-semibold">明细</h3>
+          <div v-if="canBatchRoute" class="flex flex-col gap-2 rounded-md bg-muted/40 p-3">
+            <span class="text-xs font-semibold text-foreground">批量设置工序</span>
+            <RoutePicker id="po-batch" v-model="batchDraft" :options="routeOptions" />
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" role="group" aria-label="套用到哪些产品">
+              <Checkbox
+                :checked="batchIds.length === activeItems.length"
+                :indeterminate="batchIds.length > 0 && batchIds.length < activeItems.length"
+                @change="(e) => toggleBatchAll(e.target.checked)"
+              >
+                全部
+              </Checkbox>
+              <Checkbox.Group v-model:value="batchIds">
+                <Checkbox v-for="i in activeItems" :key="i.id" :value="i.id">
+                  {{ i.productName }}<span class="text-muted-foreground"> {{ specText(i) }}</span>
+                </Checkbox>
+              </Checkbox.Group>
+            </div>
+            <span>
+              <Button size="small" type="primary" @click="applyBatchRoute">套用到勾选的 {{ batchIds.length }} 个产品</Button>
+            </span>
+          </div>
           <div v-for="i in order.items" :key="i.id" class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
             <span class="flex min-w-0 flex-1 flex-col">
               <span>{{ i.productName }}</span>

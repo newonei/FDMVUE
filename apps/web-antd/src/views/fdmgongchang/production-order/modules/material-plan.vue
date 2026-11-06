@@ -3,7 +3,7 @@ import type { FdmgongchangMaterialPlanApi as Api } from '#/api/fdmgongchang/prod
 
 import { computed, ref, watch } from 'vue';
 
-import { Select, Spin, Tag } from 'ant-design-vue';
+import { Checkbox, message, Select, Spin, Tag } from 'ant-design-vue';
 
 import { getMaterialPlan, getRecipeOptions, saveItemMaterial } from '#/api/fdmgongchang/production-order';
 
@@ -12,6 +12,7 @@ import { num } from '../shared';
 /**
  * 用料逆推（工厂看）：按订单成品规格倒推用什么板材、要几张、要多少原料，系统直接算。
  * 工厂可以给每条明细换配方（决定每张板投多少料、原料比例）和板材规格（默认本厂密炼出板规格，可换模具档案）。
+ * 一般不同规格用不同配方，所以给一条明细选了配方或模具，同规格（成品长宽厚一样）的明细默认跟着设成一样的。
  */
 const props = defineProps<{ editable: boolean; orderId: number }>();
 
@@ -21,6 +22,8 @@ const plan = ref<Api.Plan>();
 const recipes = ref<Api.RecipeOption[]>([]);
 const loading = ref(false);
 const saving = ref<number>();
+/** 选配方、模具时同规格的明细一起改。 */
+const syncSameSize = ref(true);
 
 const recipeOptions = computed(() =>
   recipes.value.map((r) => ({
@@ -28,6 +31,12 @@ const recipeOptions = computed(() =>
     value: r.recipeCode,
   })),
 );
+/** 同规格的其它明细（成品长宽厚一样）。 */
+function sameSize(item: Api.ItemPlan) {
+  if (!item.targetSize) return [];
+  return (plan.value?.items ?? []).filter((i) => i.itemId !== item.itemId && i.targetSize === item.targetSize);
+}
+const hasSameSize = computed(() => (plan.value?.items ?? []).some((i) => sameSize(i).length > 0));
 const showTotals = computed(() => (plan.value?.items.length ?? 0) > 1 && (plan.value?.totals.length ?? 0) > 0);
 
 async function load() {
@@ -48,8 +57,13 @@ watch(() => props.orderId, load, { immediate: true });
 
 async function save(item: Api.ItemPlan, recipeCode: null | string | undefined, mouldProfileId: null | number | undefined) {
   saving.value = item.itemId;
+  const others = syncSameSize.value ? sameSize(item) : [];
   try {
-    await saveItemMaterial({ itemId: item.itemId, mouldProfileId: mouldProfileId ?? null, recipeCode: recipeCode ?? null });
+    // 同规格的明细设成和这条一样的配方、模具
+    for (const target of [item, ...others]) {
+      await saveItemMaterial({ itemId: target.itemId, mouldProfileId: mouldProfileId ?? null, recipeCode: recipeCode ?? null });
+    }
+    if (others.length > 0) message.success(`同规格的 ${others.length} 个产品也设成了一样的配方和板材规格`);
     await load();
   } catch {
     // 后端错误已由全局提示展示
@@ -86,14 +100,17 @@ defineExpose({ reload: load });
 
 <template>
   <section class="flex flex-col gap-2">
-    <h3 class="m-0 text-sm font-semibold">用料逆推</h3>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h3 class="m-0 text-sm font-semibold">用料逆推</h3>
+      <Checkbox v-if="editable && hasSameSize" v-model:checked="syncSameSize" class="text-xs">同规格的产品一起改配方和模具</Checkbox>
+    </div>
     <Spin :spinning="loading">
       <div v-if="plan" class="flex flex-col gap-3">
         <div v-for="item in plan.items" :key="item.itemId" class="flex flex-col gap-2 rounded-md border border-border p-3">
           <div class="flex flex-wrap items-baseline justify-between gap-2">
             <span class="font-medium">{{ item.productName }}</span>
             <span class="text-xs text-muted-foreground">
-              <template v-if="item.targetSize">成品 {{ item.targetSize }}cm · </template>
+              <template v-if="item.targetSize">成品 {{ item.targetSize }}cm<template v-if="sameSize(item).length > 0">（同规格 {{ sameSize(item).length + 1 }} 个）</template> · </template>
               还要做 <b class="text-foreground tabular-nums">{{ fmt(item.remaining) }}</b> {{ item.unit }}
             </span>
           </div>
