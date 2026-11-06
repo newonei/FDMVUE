@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { rescaleMaterials, stageTaskPlan, taskMaterials } from './schedule';
+import { materialRows, rescaleMaterials, stageTaskPlan, taskMaterials } from './schedule';
 
 describe('stageTaskPlan', () => {
   const choice = {
@@ -56,5 +56,17 @@ describe('task materials', () => {
     expect(taskMaterials({ ...slice, plannedQuantity: 70, quantity: 63 })!.input).toBe('板材 132×192×4.5cm 雾霾蓝 9张');
     const mix = rescaleMaterials({ inputs: [{ name: '原材料 REC-001', quantity: 1701.54, stage: 'RAW', unit: 'kg' }] }, 92, 46);
     expect(mix.inputs[0]!.quantity).toBe(850.77);
+  });
+
+  it('lists each material with its semi-product code', () => {
+    const rows = materialRows({
+      inputs: [{ ...slice.inputs[0]!, code: 'BC-TPE-REC001-WB-132X192X4.5', productCode: 'BCP0001' }],
+      output: { ...slice.output, code: 'PC-TPE-WB-132X192X0.6', newItem: true, note: '新规格，第一次报工时自动建档' },
+      quantity: 70,
+    });
+    expect(rows).toEqual([
+      expect.objectContaining({ code: 'BC-TPE-REC001-WB-132X192X4.5', kind: '领料', productCode: 'BCP0001' }),
+      expect.objectContaining({ code: 'PC-TPE-WB-132X192X0.6', kind: '产出', newItem: true, text: '片材 132×192×0.6cm 雾霾蓝 70片' }),
+    ]);
   });
 });

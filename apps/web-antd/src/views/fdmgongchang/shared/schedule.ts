@@ -77,6 +77,32 @@ export function taskMaterials(task: {
   };
 }
 
+/** 领料、产出逐份列出：文字、物料编码、产品档案编码、提示。 */
+export interface MaterialRow {
+  code?: null | string;
+  kind: '产出' | '领料';
+  newItem?: boolean | null;
+  note?: null | string;
+  productCode?: null | string;
+  text: string;
+}
+
+export function materialRows(task: Parameters<typeof taskMaterials>[0]): MaterialRow[] {
+  const ratio = task.plannedQuantity ? Number(task.quantity) / Number(task.plannedQuantity) : 1;
+  const row = (kind: MaterialRow['kind'], m: Api.Material, text: string): MaterialRow => ({
+    code: m.code,
+    kind,
+    newItem: m.newItem,
+    note: m.note,
+    productCode: m.productCode && m.productCode !== m.code ? m.productCode : null,
+    text,
+  });
+  return [
+    ...(task.inputs ?? []).map((m) => row('领料', m, materialText(m, ratio))),
+    ...(task.output ? [row('产出', task.output, materialText({ ...task.output, quantity: task.quantity }))] : []),
+  ];
+}
+
 /** 改了任务数量：领料、产出跟着按比例变（贴合、压花之后 1 进 1 出，后端下发时还会再算一遍）。 */
 export function rescaleMaterials<T extends Pick<Api.PlanTask, 'inputs' | 'output'>>(task: T, from: Api.Decimal, to: Api.Decimal) {
   const ratio = Number(from) > 0 ? Number(to) / Number(from) : 1;
