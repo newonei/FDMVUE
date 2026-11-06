@@ -61,13 +61,15 @@ const factory = useFactory();
 const setting = ref<Api.Setting>();
 const enabled = ref<string[]>([]);
 /** 工序产能：台数 × 单台每天下限~上限；AI 按订单难度在范围里估计，下发时按上限硬校验。 */
-const CAPACITY_FIELDS = ['machines', 'min', 'max'] as const;
+const CAPACITY_FIELDS = ['machines', 'min', 'max', 'crewMin', 'crewMax'] as const;
 const capacities = ref<Record<string, Api.Capacity>>({});
 const toNumber = (v: null | number | string | undefined) =>
   v === null || v === undefined || v === '' ? null : Number(v);
 const savedCapacity = (code: string): Api.Capacity => {
   const p = setting.value?.processes.find((x) => x.code === code);
   return {
+    crewMax: toNumber(p?.crewMax),
+    crewMin: toNumber(p?.crewMin),
     machines: toNumber(p?.machines),
     max: toNumber(p?.capacityMax),
     min: toNumber(p?.capacityMin),
@@ -82,7 +84,7 @@ function dailyRange(code: string) {
   const hi = c.max * n;
   return lo === hi ? `${hi}` : `${lo}~${hi}`;
 }
-/** 密炼出板规格（cm）和每锅出几张，AI 排单用来把原料换算成板材、再换算成成品。 */
+/** 发泡出板规格（cm）和每锅出几张，AI 排单用来把原料换算成板材、再换算成成品。 */
 const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
 type MixField = (typeof MIX_FIELDS)[number];
 const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, length: null, thickness: null, width: null });
@@ -194,7 +196,7 @@ async function save() {
   }
   const sizes = [mixBoard.value.length, mixBoard.value.width, mixBoard.value.thickness];
   if (sizes.some((v) => v !== null) && sizes.some((v) => !(v && v > 0))) {
-    message.warning('密炼出板规格的长、宽、厚要一起填');
+    message.warning('发泡出板规格的长、宽、厚要一起填');
     return;
   }
   const badRange = (setting.value?.processes ?? []).find((p) => {
@@ -205,6 +207,14 @@ async function save() {
     message.warning(`${badRange.label}的产能下限不能大于上限，填了下限也要填上限`);
     return;
   }
+  const badCrew = (setting.value?.processes ?? []).find((p) => {
+    const c = capacities.value[p.code];
+    return c && c.crewMin !== null && c.crewMax !== null && c.crewMin > c.crewMax;
+  });
+  if (badCrew) {
+    message.warning(`${badCrew.label}每台最少人数不能大于最多人数`);
+    return;
+  }
   saving.value = true;
   try {
     const order = (setting.value?.processes ?? []).map((p) => p.code);
@@ -212,7 +222,8 @@ async function save() {
       capacities: Object.fromEntries(
         order.map((code) => {
           const c = capacities.value[code];
-          return [code, c?.max ? { ...c } : null];
+          // 没填台数时每台人数没有意义，不保存
+          return [code, c?.max ? { ...c, ...(c.machines ? {} : { crewMax: null, crewMin: null }) } : null];
         }),
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
@@ -345,6 +356,37 @@ async function save() {
                   @change="(v) => (capacities[p.code]!.max = (v as null | number | undefined) ?? null)"
                 />
                 {{ p.capacityUnit ?? p.outputUnit }}{{ p.code === 'SLICE' ? '板材' : '' }}/天
+                <template v-if="capacities[p.code]?.machines">
+                  <label :for="`capacity-crew-min-${p.code}`" class="ml-2">每台</label>
+                  <InputNumber
+                    :id="`capacity-crew-min-${p.code}`"
+                    :aria-label="`${p.label}每台最少人数`"
+                    :disabled="!canEdit || !enabled.includes(p.code)"
+                    :min="1"
+                    :max="50"
+                    :precision="0"
+                    :value="capacities[p.code]?.crewMin ?? undefined"
+                    :style="{ width: '3.5rem' }"
+                    placeholder="人"
+                    size="small"
+                    @change="(v) => (capacities[p.code]!.crewMin = (v as null | number | undefined) ?? null)"
+                  />
+                  ~
+                  <InputNumber
+                    :id="`capacity-crew-max-${p.code}`"
+                    :aria-label="`${p.label}每台最多人数`"
+                    :disabled="!canEdit || !enabled.includes(p.code)"
+                    :min="1"
+                    :max="50"
+                    :precision="0"
+                    :value="capacities[p.code]?.crewMax ?? undefined"
+                    :style="{ width: '3.5rem' }"
+                    placeholder="人"
+                    size="small"
+                    @change="(v) => (capacities[p.code]!.crewMax = (v as null | number | undefined) ?? null)"
+                  />
+                  人
+                </template>
                 <span v-if="capacities[p.code]?.machines && dailyRange(p.code)" class="w-full text-right">
                   合计 {{ dailyRange(p.code) }}{{ p.capacityUnit ?? p.outputUnit }}/天
                 </span>
@@ -353,11 +395,12 @@ async function save() {
           </Checkbox.Group>
           <p class="m-0 text-xs text-muted-foreground">
             产能填一台机器一天能做多少，有几台填台数（没有机器的工序不填台数，直接填整道工序一天的量）。
+            填了台数的工序 AI 按机台派人：一台机当天的规格派给同一组人（人数按「每台几人」），一台做得完就只开一台。
             快慢看产品难度时填下限和上限，AI 按订单难度在范围里估计；下发时按「上限 × 台数」硬校验，超了拒绝。
             开片按每天投入的板材张数填，其他工序 1 条 = 1 片/1 件。不填时 AI 按最近 14 天的实际产出估算。
           </p>
           <h2 class="m-0 mt-2 text-sm font-semibold">
-            密炼出板规格<span class="ml-2 text-xs font-normal text-muted-foreground">AI 排单用它把原料换算成板材、再换算成能出几条成品</span>
+            发泡出板规格<span class="ml-2 text-xs font-normal text-muted-foreground">AI 排单用它把原料换算成板材、再换算成能出几条成品</span>
           </h2>
           <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
             <label

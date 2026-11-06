@@ -64,7 +64,7 @@ export namespace FdmgongchangProductionOrderApi {
     routeName?: null | string;
     /** 工厂选的配方（用料逆推）。 */
     recipeCode?: null | string;
-    /** 工厂选的模具档案；空 = 本厂密炼出板规格。 */
+    /** 工厂选的模具档案；空 = 本厂发泡出板规格。 */
     mouldProfileId?: null | number;
     /** 工厂确认的结构化规格（#154）：确认后库存匹配、排单按它比对正反面色、压纹、图案。 */
     targetMaterial?: null | string;
@@ -414,7 +414,7 @@ export namespace FdmgongchangMaterialPlanApi {
     perBoard: number;
     piecesPerLayer: number;
     size: string;
-    /** SETTING 本厂密炼出板规格 / MOULD 模具档案 */
+    /** SETTING 本厂发泡出板规格 / MOULD 模具档案 */
     source: 'MOULD' | 'SETTING';
     utilization?: null | number | string;
   }
@@ -754,7 +754,7 @@ export namespace FdmgongchangSupplyMatchApi {
     covered: number | string;
     itemId: number;
     lines: Line[];
-    /** 现成料覆盖不了的成品数：工艺从密炼开始时要新做，否则是缺料。 */
+    /** 现成料覆盖不了的成品数：工艺从发泡开始时要新做，否则是缺料。 */
     newProduction: number | string;
     notes: string[];
     /** 不为空时规格不全，不能匹配和排单。 */

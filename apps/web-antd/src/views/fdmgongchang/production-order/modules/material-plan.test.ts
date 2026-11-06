@@ -36,7 +36,7 @@ vi.mock('ant-design-vue', async (importOriginal) => ({
 const board = {
   boards: 32,
   layers: 8,
-  name: '本厂密炼出板',
+  name: '本厂发泡出板',
   perBoard: 16,
   piecesPerLayer: 2,
   size: '210×136×4.8',

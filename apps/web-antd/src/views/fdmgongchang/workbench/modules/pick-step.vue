@@ -14,7 +14,7 @@ import StepHeader from './step-header.vue';
 /**
  * 第 1 步 领材料：左边是上道库存，点一行选上，数量就在这一行里填；右边「本次领料」逐行列出
  * 领哪种料、哪个批次、领多少，一眼对得上。贴合要领两种片材：第一种是正面，第二种是反面。
- * 密炼可以按配方领：选配方和锅数，自动带出每种原料要领多少；补领时按单上的配方补齐还差的。
+ * 发泡可以按配方领：选配方和锅数，自动带出每种原料要领多少；补领时按单上的配方补齐还差的。
  */
 const emit = defineEmits<{ back: []; next: [] }>();
 const job = useJob();
@@ -59,7 +59,7 @@ function toggle(stock: StockApi.Stock) {
     const side = job.picks.some((p) => p.side === 'FRONT') ? 'BACK' : 'FRONT';
     job.picks = [...job.picks, { qty: 0, side, stock }];
   } else {
-    // 一次可以领多种料（密炼一个配方要好几种原料）
+    // 一次可以领多种料（发泡一个配方要好几种原料）
     job.picks = [...job.picks, { qty: 0, stock }];
   }
 }
@@ -75,7 +75,7 @@ const pickedOf = (code: string) =>
   job.picks.filter((p) => p.stock.item?.rawMaterialCode === code).reduce((t, p) => t + (p.qty || 0), 0);
 const pickTotal = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
 
-// ===== 按配方领（密炼） =====
+// ===== 按配方领（发泡） =====
 const mixFromRaw = computed(() => job.process?.code === 'MIX' && job.sourceStage === 'RAW');
 const recipeOptions = computed(() =>
   (job.options?.recipes ?? []).filter((r) => r.enabled).map((r) => ({ label: `${r.name}（${r.code}）`, value: r.code })),

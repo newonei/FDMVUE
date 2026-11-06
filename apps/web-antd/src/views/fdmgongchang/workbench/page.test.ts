@@ -103,7 +103,7 @@ const my: Api.My = {
       available: 300,
       contractCode: 'HT-002',
       id: 32,
-      upstreamNote: '上道「密炼挤出发泡」已报的够做 300，其余等上道报工',
+      upstreamNote: '上道「发泡」已报的够做 300，其余等上道报工',
       orderCount: 0,
       process: 'SLICE',
       product: '蓝色瑜伽垫',
@@ -118,7 +118,7 @@ const my: Api.My = {
       actualQuantity: 0,
       contractCode: 'HT-003',
       id: 33,
-      upstreamNote: '上道「密炼挤出发泡」今天还没报工，照常领料干活，报工时账面可能暂时为负',
+      upstreamNote: '上道「发泡」今天还没报工，照常领料干活，报工时账面可能暂时为负',
       orderCount: 0,
       process: 'SLICE',
       product: '绿色瑜伽垫',
@@ -316,7 +316,7 @@ describe('workbench page', () => {
       ...my,
       inProgress: [],
       processes: [
-        { code: 'MIX', label: '密炼', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] },
+        { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] },
       ],
       tasks: [mixTask],
     });

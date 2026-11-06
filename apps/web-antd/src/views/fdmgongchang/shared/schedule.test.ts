@@ -28,6 +28,6 @@ describe('stageTaskPlan', () => {
     const plan = stageTaskPlan('MIX', { name: '单色TPE瑜伽垫', spec: '183*61*0.6cm · TPE' });
     expect(plan.spec).toBe('板材（成品 183*61*0.6cm · TPE）');
     expect(plan.suggested).toBeNull();
-    expect(plan.hint).toContain('密炼做的是板材，不是成品');
+    expect(plan.hint).toContain('发泡做的是板材，不是成品');
   });
 });

@@ -429,7 +429,7 @@ describe('stage stock catalog', () => {
     materials: [{ label: 'TPE', value: 'TPE' }],
     patterns: [],
     processes: [
-      { allowedSources: ['RAW'], code: 'MIX', label: '密炼', outputStage: 'BOARD', sources: ['RAW'] },
+      { allowedSources: ['RAW'], code: 'MIX', label: '发泡', outputStage: 'BOARD', sources: ['RAW'] },
       { allowedSources: ['BOARD'], code: 'SLICE', label: '开片', outputStage: 'SHEET', sources: ['BOARD'] },
       { allowedSources: ['SHEET'], code: 'CUT', label: '立切', outputStage: 'CUT', sources: ['SHEET'] },
       { allowedSources: ['SHEET', 'CUT'], code: 'LAMINATE', label: '贴合', outputStage: 'LAMINATED', sources: ['CUT', 'SHEET'] },
@@ -454,7 +454,7 @@ describe('stage stock catalog', () => {
 
   it('builds the flow from the configured processes, including skip-stage sources', () => {
     expect(stageFlow('SHEET', options)).toEqual({ current: '当前SHEET', from: '开片产出', to: '立切、贴合领料' });
-    expect(stageFlow('RAW', options)).toEqual({ current: '当前RAW', from: '采购到货', to: '密炼领料' });
+    expect(stageFlow('RAW', options)).toEqual({ current: '当前RAW', from: '采购到货', to: '发泡领料' });
     expect(stageFlow('PACKED', options)).toEqual({ current: '当前PACKED', from: '包装产出', to: '生产入库进仓库' });
   });
 

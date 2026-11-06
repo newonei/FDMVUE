@@ -30,7 +30,7 @@ vi.mock('@vben/common-ui', () => ({
 }));
 
 const processes = [
-  ['MIX', '密炼挤出发泡', '板材'],
+  ['MIX', '发泡', '板材'],
   ['SLICE', '开片', '片材'],
   ['ENGRAVE', '雕刻', '已雕刻成品'],
   ['PACK', '包装', '已包装成品'],
@@ -89,6 +89,7 @@ describe('factory setting page', () => {
 
   it('shows machines x per-machine range and saves capacities', async () => {
     const capacityOf: Record<string, object> = {
+      MIX: { capacityMax: 400, capacityUnit: '张', crewMax: 3, crewMin: 2, dailyCapacity: 800, machines: 2 },
       PACK: { capacityMax: 3500, capacityMin: 1000, capacityUnit: '件', dailyCapacity: 7000, machines: 2 },
       SLICE: { capacityMax: 400, capacityUnit: '张', dailyCapacity: 400 },
     };
@@ -104,6 +105,8 @@ describe('factory setting page', () => {
     await flush();
 
     expect(document.body.textContent).toContain('合计 2000~7000件/天');
+    expect(document.querySelector<HTMLInputElement>('#capacity-crew-min-MIX')!.value).toBe('2');
+    expect(document.querySelector('#capacity-crew-min-SLICE')).toBeNull();
     expect(document.body.textContent).toContain('张板材/天');
     const engrave = [
       ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
@@ -118,9 +121,10 @@ describe('factory setting page', () => {
       expect.objectContaining({
         capacities: {
           ENGRAVE: null,
-          MIX: null,
-          PACK: { machines: 2, max: 3500, min: 1000 },
-          SLICE: { machines: null, max: 400, min: null },
+          // 发泡 2 台、每台 400 张、一台 2~3 人
+          MIX: { crewMax: 3, crewMin: 2, machines: 2, max: 400, min: null },
+          PACK: { crewMax: null, crewMin: null, machines: 2, max: 3500, min: 1000 },
+          SLICE: { crewMax: null, crewMin: null, machines: null, max: 400, min: null },
         },
       }),
     );

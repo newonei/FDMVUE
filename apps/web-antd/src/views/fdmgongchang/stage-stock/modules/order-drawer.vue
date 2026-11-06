@@ -91,7 +91,7 @@ const sides = ref<Record<number, Api.LaminationSide>>({});
 const picked = ref<Record<number, Api.Stock>>({});
 const outputs = ref<OutputDraft[]>([]);
 const touched = ref(false);
-/** 密炼按配方领料：选配方和锅数，按配方带出每种原料的领用数量（先进先出）。 */
+/** 发泡按配方领料：选配方和锅数，按配方带出每种原料的领用数量（先进先出）。 */
 const recipeCode = ref<string>();
 const recipeBatches = ref<null | number>(1);
 const recipePlan = ref<Api.RecipePlan>();
