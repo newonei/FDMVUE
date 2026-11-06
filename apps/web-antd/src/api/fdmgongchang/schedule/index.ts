@@ -86,7 +86,7 @@ export namespace FdmgongchangScheduleApi {
   export interface FormOptions {
     demand: Array<{
       boards?: null | number;
-      /** 密炼产出的板材规格和还要几张（用料逆推选的板材）；算不出时为空。 */
+      /** 发泡产出的板材规格和还要几张（用料逆推选的板材）；算不出时为空。 */
       boardSpec?: null | string;
       contractCode: string;
       product?: null | string;

@@ -44,7 +44,7 @@ const options: Api.WorkerOptions = {
     { id: 165, name: '密炼车间', parentId: 145 },
   ],
   posts: [
-    { code: 'MIX', label: '密炼挤出发泡', process: 'MIX' },
+    { code: 'MIX', label: '发泡', process: 'MIX' },
     { code: 'SLICE', label: '开片', process: 'SLICE' },
     { code: 'TEAM_LEADER', label: '班组长', process: null },
   ],
@@ -106,7 +106,7 @@ describe('worker page', () => {
     const text = document.body.textContent ?? '';
     expect(text).toContain('洛阳飞德慕');
     expect(text).toContain('1 人待分配岗位');
-    expect(text).toContain('密炼挤出发泡');
+    expect(text).toContain('发泡');
     expect(text).toContain('班组长');
     expect(text).toContain('计件');
 

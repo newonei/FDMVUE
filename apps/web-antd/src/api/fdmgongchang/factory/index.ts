@@ -188,12 +188,18 @@ export namespace FdmgongchangFactorySettingApi {
     capacityMin?: null | number | string;
     /** 单台每天上限。 */
     capacityMax?: null | number | string;
+    /** 一台机最少 / 最多几个人做；空表示不限。 */
+    crewMin?: null | number;
+    crewMax?: null | number;
     /** 产能计量单位：开片是张（投入板材），其他同产出单位。 */
     capacityUnit?: string;
   }
 
   /** 一道工序的产能：台数 × 单台每天下限~上限。 */
   export interface Capacity {
+    /** 一台机最少 / 最多几个人做；只在填了台数时有用。 */
+    crewMax: null | number;
+    crewMin: null | number;
     machines: null | number;
     max: null | number;
     min: null | number;
@@ -209,7 +215,7 @@ export namespace FdmgongchangFactorySettingApi {
     structured: boolean;
   }
 
-  /** 密炼出板：板材长宽厚（cm）、每锅出几张（没填时 AI 排单按配方估算）。 */
+  /** 发泡出板：板材长宽厚（cm）、每锅出几张（没填时 AI 排单按配方估算）。 */
   export interface MixBoard {
     boardsPerBatch?: null | number | string;
     length?: null | number | string;
@@ -242,7 +248,7 @@ export namespace FdmgongchangFactorySettingApi {
     dailyCapacities?: Record<string, null | number>;
     /** 各工序产能明细；传了就以它为准。 */
     capacities?: Record<string, Capacity | null>;
-    /** 密炼出板规格；长宽厚都空表示清掉。 */
+    /** 发泡出板规格；长宽厚都空表示清掉。 */
     mixBoard?: MixBoard;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];

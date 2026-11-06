@@ -55,7 +55,7 @@ const base: Api.Schedule = {
 const draft: Api.Schedule = {
   ...base,
   plan: {
-    risks: [{ detail: '后天需要密炼补料', level: 'MEDIUM', title: '板材只够两天' }],
+    risks: [{ detail: '后天需要发泡补料', level: 'MEDIUM', title: '板材只够两天' }],
     summary: '先开片保交期',
     tasks: [
       {

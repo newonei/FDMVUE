@@ -290,7 +290,7 @@ function inputColor(line: InputLine) {
 
 /**
  * 按领料生成默认产出行：
- * - 密炼：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
+ * - 发泡：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
  * - 开片：领料按 颜色+厚度 分组，每组一行（可以颜色规格混开），长宽由人填写，厚度默认沿用板材（分层开时改薄）；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
  * - 立切：按领料编码分组，沿用单色属性，长宽待改；
@@ -300,7 +300,7 @@ export function deriveOutputs(
   process: string,
   inputs: InputLine[],
   defaultMaterial = 'TPE',
-  /** 密炼按配方领料时，产出板材的配方版本默认用这个配方。 */
+  /** 发泡按配方领料时，产出板材的配方版本默认用这个配方。 */
   recipeCode?: null | string,
 ): OutputDraft[] {
   if (inputs.length === 0) return [];

@@ -261,7 +261,7 @@ export namespace FdmgongchangStageStockApi {
     outputs: OrderOutput[];
     pieceworks?: Piecework[];
     process: string;
-    /** 密炼按配方领料：配方编码与锅数（一锅 = 配方明细的一批用量）。 */
+    /** 发泡按配方领料：配方编码与锅数（一锅 = 配方明细的一批用量）。 */
     recipeBatches?: Decimal;
     recipeCode?: string;
     remark?: string;
@@ -294,7 +294,7 @@ export namespace FdmgongchangStageStockApi {
     remark?: string;
   }
 
-  /** 按配方算密炼领料：每种原料应领、已领、还要领，建议从哪几行库存领（先进先出）。 */
+  /** 按配方算发泡领料：每种原料应领、已领、还要领，建议从哪几行库存领（先进先出）。 */
   export interface RecipePlanLine {
     available: Decimal;
     issued: Decimal;

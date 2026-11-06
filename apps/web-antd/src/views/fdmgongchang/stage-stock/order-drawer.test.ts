@@ -40,7 +40,7 @@ const options: Api.Options = {
     {
       allowedSources: ['RAW'],
       code: 'MIX',
-      label: '密炼挤出发泡',
+      label: '发泡',
       outputStage: 'BOARD',
       sources: ['RAW'],
     },

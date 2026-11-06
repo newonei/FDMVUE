@@ -315,7 +315,7 @@ describe('production order page', () => {
       kg: 576,
       kgPerBoard: 18,
       layers: 8,
-      name: '本厂密炼出板',
+      name: '本厂发泡出板',
       perBoard: 16,
       piecesPerLayer: 2,
       size: '210×136×4.8',
@@ -365,7 +365,7 @@ describe('production order page', () => {
     expect(plan).toContain('用料逆推');
     expect(plan).toContain('按上次建议');
     expect(plan).toContain('一张出16条→要32张');
-    expect(plan).toContain('原料576kg（每张18kg）≈密炼4锅');
+    expect(plan).toContain('原料576kg（每张18kg）≈发泡4锅');
     expect(plan).toContain('240kg');
     button('接单').click();
     await flush();

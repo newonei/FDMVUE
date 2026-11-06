@@ -26,7 +26,7 @@ const processOf = (code: string) => my.value.processes.find((p) => p.code === co
 const labelOf = (code: string) => processOf(code)?.label ?? code;
 const stageLabel = (code?: string) => job.options?.stages.find((s) => s.code === code)?.label ?? '';
 const stageUnit = (code?: string) => job.options?.stages.find((s) => s.code === code)?.unit ?? '';
-/** 密炼做板材、开片做片材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
+/** 发泡做板材、开片做片材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
 const INTERMEDIATE = new Set(['BOARD', 'SHEET']);
 const intermediateOf = (task: FdmgongchangScheduleApi.Task) => {
   const p = processOf(task.process);
@@ -191,7 +191,7 @@ watch(
             <span class="text-xs font-semibold text-muted-foreground">要领的料（建议，报工时按实际改）</span>
             <Spin :spinning="pickLoading && !picksByTask.has(task.id)" size="small">
               <p v-if="(picksByTask.get(task.id)?.lines.length ?? 0) === 0" class="m-0 text-sm text-muted-foreground">
-                {{ pickLoading ? '正在算…' : '没有算出要领的料（密炼按配方领、贴合要自己选正反面），报工时自己选。' }}
+                {{ pickLoading ? '正在算…' : '没有算出要领的料（发泡按配方领、贴合要自己选正反面），报工时自己选。' }}
               </p>
               <ul v-else class="m-0 flex list-none flex-col divide-y divide-border rounded-md border border-border p-0">
                 <li v-for="line in picksByTask.get(task.id)!.lines" :key="line.key" class="flex items-center gap-3 px-3 py-1.5">

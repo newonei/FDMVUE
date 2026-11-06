@@ -17,7 +17,7 @@ import { dateText, dayLabel, stageTaskPlan } from '../../shared/schedule';
 /**
  * 手动派工的一个任务：哪天、哪道工序、做哪张订单（或备货）、做什么产品、做多少、谁来做。
  * 产品从产品中心选：选了订单时列这张订单里的产品，备货时搜产品中心；规格跟着产品带出，不手填。
- * 密炼产出的是板材、开片产出的是片材，不是成品：规格和建议数量按用料逆推的板材带出。
+ * 发泡产出的是板材、开片产出的是片材，不是成品：规格和建议数量按用料逆推的板材带出。
  * 待确认的排单加进方案里；已下发的排单直接保存，工人工作台马上能看到。
  */
 const props = defineProps<{
@@ -109,7 +109,7 @@ const productOptions = computed(() =>
 );
 const picked = computed(() => choices.value.find((c) => c.key === productKey.value));
 
-/** 密炼做板材、开片做片材：规格、建议数量按用料逆推带出；原来任务上的产品保留原规格、不带建议。 */
+/** 发泡做板材、开片做片材：规格、建议数量按用料逆推带出；原来任务上的产品保留原规格、不带建议。 */
 const keepCurrent = computed(() => picked.value?.key === '__CURRENT__');
 const stagePlan = computed(() => (picked.value ? stageTaskPlan(process.value, picked.value) : null));
 const stageOutput = computed(() => stagePlan.value?.kind);

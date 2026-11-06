@@ -11,7 +11,7 @@ import { num } from '../shared';
 
 /**
  * 用料逆推（工厂看）：按订单成品规格倒推用什么板材、要几张、要多少原料，系统直接算。
- * 工厂可以给每条明细换配方（决定每张板投多少料、原料比例）和板材规格（默认本厂密炼出板规格，可换模具档案）。
+ * 工厂可以给每条明细换配方（决定每张板投多少料、原料比例）和板材规格（默认本厂发泡出板规格，可换模具档案）。
  * 一般不同规格用不同配方，所以给一条明细选了配方或模具，同规格（成品长宽厚一样）的明细默认跟着设成一样的。
  */
 const props = defineProps<{ editable: boolean; orderId: number }>();
@@ -154,7 +154,7 @@ defineExpose({ reload: load });
             <span class="text-xs text-muted-foreground">（利用率 {{ fmt(item.board.utilization) }}%）</span>
             <template v-if="item.rawKg">
               <br />
-              原料 <b class="tabular-nums">{{ fmt(item.rawKg) }}</b> kg（每张 {{ fmt(item.board.kgPerBoard) }}kg）≈ 密炼
+              原料 <b class="tabular-nums">{{ fmt(item.rawKg) }}</b> kg（每张 {{ fmt(item.board.kgPerBoard) }}kg）≈ 发泡
               <b class="tabular-nums">{{ fmt(item.batches) }}</b> 锅<span class="text-xs text-muted-foreground">（一锅 {{ fmt(item.batchKg) }}kg）</span>
             </template>
           </p>
@@ -198,7 +198,7 @@ defineExpose({ reload: load });
           </span>
         </div>
         <p class="m-0 text-xs text-muted-foreground">
-          按成品长宽厚切板，不算锯缝和切边损耗；原料按配方整锅算。板材下拉列出全部能切的规格，当前用的在最前，其余按用料从少到多。没选板材规格时用「工厂设置」里的密炼出板规格。
+          按成品长宽厚切板，不算锯缝和切边损耗；原料按配方整锅算。板材下拉列出全部能切的规格，当前用的在最前，其余按用料从少到多。没选板材规格时用「工厂设置」里的发泡出板规格。
         </p>
       </div>
     </Spin>
