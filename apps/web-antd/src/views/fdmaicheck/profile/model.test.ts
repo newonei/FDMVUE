@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   draftFrom,
   draftProblem,
+  groupItems,
+  manyFalsePositives,
   newItem,
   normalizeDraft,
   versionLabel,
@@ -37,27 +39,24 @@ describe('aI 单据检查配置', () => {
   });
 
   it('finds the first problem before saving', () => {
-    const item = (code: string, name = '名称') => ({
-      code,
+    const item = (name = '名称') => ({
       name,
       severity: 'INFO' as const,
       enabled: true,
     });
-    expect(draftProblem({ items: [item('OK_1')], departmentNotes: {} })).toBe(
-      '',
-    );
+    expect(draftProblem({ items: [item()], departmentNotes: {} })).toBe('');
     expect(
-      draftProblem({ items: [item('1X')], departmentNotes: {} }),
-    ).toContain('大写字母开头');
+      draftProblem({ items: [item('a'), item(' ')], departmentNotes: {} }),
+    ).toContain('第 2 个');
     expect(
-      draftProblem({ items: [item('dup'), item('DUP')], departmentNotes: {} }),
-    ).toContain('重复');
-    expect(
-      draftProblem({ items: [item('NO_NAME', ' ')], departmentNotes: {} }),
-    ).toContain('名称');
+      draftProblem({
+        items: [item('同名'), item(' 同名 ')],
+        departmentNotes: {},
+      }),
+    ).toContain('重名');
   });
 
-  it('normalizes codes and drops blank notes', () => {
+  it('trims fields and leaves new codes for the server', () => {
     expect(
       normalizeDraft({
         items: [
@@ -67,7 +66,11 @@ describe('aI 单据检查配置', () => {
             severity: 'HIGH',
             description: ' ',
             enabled: false,
+            failWhen: ' 高 20% ',
+            warnWhen: '',
+            group: ' 价格 ',
           },
+          newItem('附件'),
         ],
         departmentNotes: { TRADE: '  ', FINANCE: ' 发票 ' },
         notes: '  ',
@@ -80,6 +83,19 @@ describe('aI 单据检查配置', () => {
           severity: 'HIGH',
           description: undefined,
           enabled: false,
+          failWhen: '高 20%',
+          warnWhen: undefined,
+          group: '价格',
+        },
+        {
+          code: undefined,
+          name: '',
+          severity: 'WARNING',
+          description: undefined,
+          enabled: true,
+          failWhen: undefined,
+          warnWhen: undefined,
+          group: '附件',
         },
       ],
       departmentNotes: { FINANCE: '发票' },
@@ -87,12 +103,37 @@ describe('aI 单据检查配置', () => {
     });
   });
 
-  it('picks an unused code for a new item', () => {
-    expect(
-      newItem([{ code: 'CUSTOM_2', name: '', severity: 'INFO', enabled: true }])
-        .code,
-    ).toBe('CUSTOM_3');
-    expect(newItem([]).code).toBe('CUSTOM_1');
+  it('groups items and keeps ungrouped last', () => {
+    const item = (name: string, group?: string) => ({
+      name,
+      group,
+      severity: 'INFO' as const,
+      enabled: true,
+    });
+    const groups = groupItems([
+      item('a'),
+      item('b', '价格'),
+      item('c', '附件'),
+      item('d', '价格'),
+    ]);
+    expect(groups.map((g) => g.name)).toEqual(['价格', '附件', '未分组']);
+    expect(groups[0]!.rows.map((r) => r.index)).toEqual([1, 3]);
+  });
+
+  it('flags items with many false positives', () => {
+    const stats = (fail: number, warn: number, falsePositive: number) => ({
+      total: 10,
+      pass: 0,
+      fail,
+      warn,
+      notApplicable: 0,
+      unknown: 0,
+      falsePositive,
+    });
+    expect(manyFalsePositives(stats(4, 2, 3))).toBe(true);
+    expect(manyFalsePositives(stats(10, 0, 2))).toBe(false);
+    expect(manyFalsePositives(stats(0, 0, 1))).toBe(false);
+    expect(manyFalsePositives(undefined)).toBe(false);
   });
 
   it('labels versions', () => {

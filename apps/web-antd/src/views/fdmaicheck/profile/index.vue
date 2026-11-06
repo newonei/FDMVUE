@@ -27,6 +27,7 @@ import {
   getAiCheckModels,
   getAiCheckProfile,
   getAiCheckProfiles,
+  getAiCheckStats,
   publishAiCheckDraft,
   rollbackAiCheckPrompt,
   saveAiCheckDraft,
@@ -36,17 +37,14 @@ import {
 } from '#/api/fdmaicheck';
 
 import AiCenterShell from '../../fdmai/shared/AiCenterShell.vue';
-import {
-  aiStatusText,
-  attachmentSummary,
-  SEVERITY_COLORS,
-  SEVERITY_LABELS,
-  sortFindings,
-} from '../components/risk';
+import AiCheckBar from '../components/AiCheckBar.vue';
+import AiCheckChecklist from '../components/AiCheckChecklist.vue';
+import { buildChecklist } from '../components/checklist';
+import { aiStatusText, attachmentSummary } from '../components/risk';
+import CheckItemList from './CheckItemList.vue';
 import {
   draftFrom,
   draftProblem,
-  newItem,
   normalizeDraft,
   SEVERITY_OPTIONS,
   versionLabel,
@@ -74,6 +72,11 @@ const dryDocs = ref<FdmAiCheckApi.DocOption[]>([]);
 const dryDocId = ref<string>();
 const dryLoading = ref(false);
 const dryResult = ref<FdmAiCheckApi.DryRun>();
+const dryList = computed(() =>
+  buildChecklist(dryResult.value?.task.checks, dryResult.value?.findings ?? []),
+);
+const stats = ref<Record<string, FdmAiCheckApi.ItemStats>>({});
+const itemList = ref<InstanceType<typeof CheckItemList>>();
 const dryAttachmentLines = computed(() => {
   const info = attachmentSummary(dryResult.value?.task.attachments);
   return [info.read, ...info.others].filter(Boolean);
@@ -111,7 +114,13 @@ async function loadDetail() {
   if (!current.value) return;
   loading.value = true;
   try {
-    detail.value = await getAiCheckProfile(current.value);
+    const docType = current.value;
+    const [value, itemStats] = await Promise.all([
+      getAiCheckProfile(docType),
+      getAiCheckStats(docType).catch(() => ({})),
+    ]);
+    detail.value = value;
+    stats.value = itemStats;
     const p = detail.value.profile;
     Object.assign(settings, {
       enabled: p.enabled,
@@ -339,7 +348,9 @@ onBeforeUnmount(stopDry);
                   v-model:checked="settings.includeBatch"
                   :disabled="!canEdit"
               /></label>
-              <label title="图片、Excel、PDF、Word 的内容会发给 AI 模型。文字里的长号码会脱敏，图片无法脱敏。">
+              <label
+                title="图片、Excel、PDF、Word 的内容会发给 AI 模型。文字里的长号码会脱敏，图片无法脱敏。"
+              >
                 读取附件内容
                 <Switch
                   v-model:checked="settings.readAttachments"
@@ -387,7 +398,7 @@ onBeforeUnmount(stopDry);
           <section class="aicheck-card">
             <div class="aicheck-card-head">
               <h3>
-                检查项与注意事项
+                检查点与注意事项
                 <Tag v-if="!editing && detail.draft" color="orange">
                   草稿（未发布）
                 </Tag>
@@ -429,56 +440,19 @@ onBeforeUnmount(stopDry);
             <Alert
               type="info"
               show-icon
-              message="系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条风险须引用证据。这里只写要检查什么、什么情况不算问题。"
+              message="AI 会对每个启用的检查点给出结论（通过、不通过、提醒、不适用、资料不足）并写明依据。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。"
             />
 
             <template v-if="editing">
-              <div
-                v-for="(item, index) in draft.items"
-                :key="index"
-                class="aicheck-item edit"
-              >
-                <div class="row">
-                  <Input
-                    v-model:value="item.code"
-                    placeholder="编码，如 PRICE_HIGH"
-                    class="code"
-                  />
-                  <Input
-                    v-model:value="item.name"
-                    placeholder="名称"
-                    :maxlength="50"
-                    class="name"
-                  />
-                  <Select
-                    v-model:value="item.severity"
-                    :options="SEVERITY_OPTIONS"
-                    class="sev"
-                  />
-                  <Switch
-                    v-model:checked="item.enabled"
-                    checked-children="启用"
-                    un-checked-children="停用"
-                  />
-                  <Button
-                    type="link"
-                    danger
-                    @click="draft.items.splice(index, 1)"
-                  >
-                    删除
-                  </Button>
-                </div>
-                <Input.TextArea
-                  v-model:value="item.description"
-                  :rows="2"
-                  :maxlength="1000"
-                  placeholder="要检查什么、什么情况不算问题"
-                />
-              </div>
+              <CheckItemList
+                ref="itemList"
+                v-model:items="draft.items"
+                editing
+                :stats="stats"
+                :rule-items="detail.ruleItems"
+              />
               <Space>
-                <Button @click="draft.items.push(newItem(draft.items))">
-                  添加检查项
-                </Button>
+                <Button @click="itemList?.add()">添加检查点</Button>
                 <Button
                   type="link"
                   @click="
@@ -489,7 +463,7 @@ onBeforeUnmount(stopDry);
                     })
                   "
                 >
-                  用出厂默认检查项重新开始
+                  用出厂默认检查点重新开始
                 </Button>
               </Space>
               <h4>部门补充说明</h4>
@@ -513,25 +487,11 @@ onBeforeUnmount(stopDry);
               />
             </template>
             <template v-else-if="shown">
-              <div
-                v-for="item in shown.items"
-                :key="item.code"
-                class="aicheck-item"
-                :class="[{ off: !item.enabled }]"
-              >
-                <div class="row">
-                  <Tag :color="SEVERITY_COLORS[item.severity]">
-                    {{ SEVERITY_LABELS[item.severity] }}
-                  </Tag>
-                  <strong>{{ item.name }}</strong>
-                  <code>{{ item.code }}</code>
-                  <Tag v-if="!item.enabled">已停用</Tag>
-                </div>
-                <p v-if="item.description">{{ item.description }}</p>
-              </div>
-              <Empty
-                v-if="shown.items.length === 0"
-                description="没有检查项，AI 只按通用要求检查"
+              <CheckItemList
+                :items="shown.items"
+                :editing="false"
+                :stats="stats"
+                :rule-items="detail.ruleItems"
               />
               <template v-for="(name, key) in detail.departments" :key="key">
                 <p v-if="shown.departmentNotes[key]" class="aicheck-note">
@@ -573,20 +533,21 @@ onBeforeUnmount(stopDry);
               </Button>
             </Space>
             <div v-if="dryResult" class="aicheck-dry">
-              <div class="row">
-                <Tag
-                  v-if="dryResult.task.riskLevel"
-                  :color="SEVERITY_COLORS[dryResult.task.riskLevel]"
+              <AiCheckBar :list="dryList" :summary="dryResult.task.summary">
+                <span
+                  v-if="
+                    ['PREPARING', 'QUEUED', 'WAITING_AI'].includes(
+                      dryResult.task.status,
+                    )
+                  "
                 >
-                  {{ SEVERITY_LABELS[dryResult.task.riskLevel] }}
-                </Tag>
-                <Tag v-else color="processing">
-                  {{
-                    dryResult.task.status === 'FAILED' ? '未完成' : '检查中…'
-                  }}
-                </Tag>
-                <span>{{ dryResult.task.summary }}</span>
-              </div>
+                  检查中…
+                </span>
+                <span v-else-if="dryResult.task.status === 'FAILED'">未完成</span>
+              </AiCheckBar>
+              <p v-if="dryResult.task.summary" class="aicheck-muted">
+                AI 结论：{{ dryResult.task.summary }}
+              </p>
               <p
                 v-if="aiStatusText(dryResult.task.aiStatus)"
                 class="aicheck-muted"
@@ -603,19 +564,7 @@ onBeforeUnmount(stopDry);
               <p v-if="dryResult.task.errorMessage" class="aicheck-muted">
                 {{ dryResult.task.errorMessage }}
               </p>
-              <ul>
-                <li v-for="f in sortFindings(dryResult.findings)" :key="f.id">
-                  <Tag :color="SEVERITY_COLORS[f.severity]">
-                    {{ SEVERITY_LABELS[f.severity] }}
-                  </Tag>
-                  <span class="aicheck-muted">{{ f.source === 'RULE' ? '规则' : 'AI'
-                    }}{{ f.checkCode ? ` · ${f.checkCode}` : '' }}</span>
-                  {{ f.message }}
-                  <div v-if="f.suggestion" class="aicheck-muted">
-                    建议：{{ f.suggestion }}
-                  </div>
-                </li>
-              </ul>
+              <AiCheckChecklist v-if="dryList.total > 0" :list="dryList" />
             </div>
           </section>
 
@@ -781,43 +730,13 @@ onBeforeUnmount(stopDry);
   color: var(--ant-color-text-tertiary, #8c8c8c);
 }
 
-.aicheck-item {
-  padding: 8px 0;
-  border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
-}
-
-.aicheck-item.off {
-  opacity: 0.55;
-}
-
-.aicheck-item .row,
-.aicheck-dry .row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.aicheck-item p {
-  margin: 4px 0 0;
-  color: var(--ant-color-text-secondary, #595959);
-}
-
-.aicheck-item.edit {
+.aicheck-dry {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.aicheck-item.edit .code {
-  width: 200px;
-}
-
-.aicheck-item.edit .name {
-  width: 220px;
-}
-
-.aicheck-item.edit .sev {
-  width: 110px;
+  padding: 10px 12px;
+  background: var(--ant-color-fill-quaternary, rgb(0 0 0 / 2%));
+  border-radius: 6px;
 }
 
 .aicheck-notes {
@@ -828,16 +747,6 @@ onBeforeUnmount(stopDry);
 
 .aicheck-note {
   margin: 0;
-}
-
-.aicheck-dry ul {
-  padding: 0;
-  margin: 6px 0 0;
-  list-style: none;
-}
-
-.aicheck-dry li {
-  padding: 4px 0;
 }
 
 @media (max-width: 900px) {
