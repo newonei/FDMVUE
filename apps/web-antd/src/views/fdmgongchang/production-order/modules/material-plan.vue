@@ -134,11 +134,14 @@ defineExpose({ reload: load });
               />
             </label>
             <label v-if="item.candidates.length > 0" :for="`mp-board-${item.itemId}`" class="flex flex-col gap-1 text-xs text-muted-foreground">
-              板材规格
+              板材规格（共 {{ item.candidates.length }} 种能切）
               <Select
                 :id="`mp-board-${item.itemId}`"
                 :disabled="!editable || saving === item.itemId"
                 :options="boardOptions(item)"
+                option-filter-prop="label"
+                placeholder="输入模具尺寸搜索，如 780"
+                show-search
                 :value="item.board ? boardKey(item.board) : undefined"
                 @change="(v) => onBoard(item, v)"
               />
@@ -195,7 +198,7 @@ defineExpose({ reload: load });
           </span>
         </div>
         <p class="m-0 text-xs text-muted-foreground">
-          按成品长宽厚切板，不算锯缝和切边损耗；原料按配方整锅算。没选板材规格时用「工厂设置」里的密炼出板规格。
+          按成品长宽厚切板，不算锯缝和切边损耗；原料按配方整锅算。板材下拉列出全部能切的规格，当前用的在最前，其余按用料从少到多。没选板材规格时用「工厂设置」里的密炼出板规格。
         </p>
       </div>
     </Spin>
