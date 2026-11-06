@@ -7,7 +7,7 @@ import { materialRows } from '../../shared/schedule';
 
 /**
  * 任务的领料和产出，逐份写规格、数量和对应的半成品编码：
- * 例如开片「领料 板材 … 10张 · BC-TPE-REC001-HY-132X192X4.5」「产出 片材 … 70片 · PC-TPE-HY-132X192X0.6 新规格」。
+ * 例如开片「领料 板材 … 10张 · BC-TPE-REC001-HY-132X192X4.5」「产出 已开片板材 … 70片 · PC-TPE-HY-132X192X0.6 新规格」。
  * 旧任务没有时不显示。
  */
 const props = defineProps<{

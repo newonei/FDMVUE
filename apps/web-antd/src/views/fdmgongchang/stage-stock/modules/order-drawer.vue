@@ -1249,7 +1249,7 @@ watch(processCode, warnNoPatterns);
             v-if="processCode === 'SLICE'"
             class="text-xs text-muted-foreground"
           >
-            一次可以开多种颜色、多种规格，每种一行。填好片材长宽厚后按板材规格算能开多少片，自动带进良品，可以改；残次品手填。
+            一次可以开多种颜色、多种规格，每种一行。填好开出的长宽厚后按板材规格算能开多少片，自动带进良品，可以改；残次品手填。
           </div>
           <div
             v-if="outputs.length === 0"

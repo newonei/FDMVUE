@@ -205,7 +205,7 @@ async function save() {
           >
             <div>前缀 - 材质 [- 配方] - 颜色 - 长X宽X厚 [- 纹路] [- 图案]</div>
             <div class="text-muted-foreground">
-              板材、片材一个色码；贴合之后是正面色码 +
+              贴合前一个色码；贴合之后是正面色码 +
               反面色码。属性完全相同就是同一个编码，不会重复建料。
             </div>
             <div class="font-mono">BC-TPE-REC001-DX-190X130X0.3</div>

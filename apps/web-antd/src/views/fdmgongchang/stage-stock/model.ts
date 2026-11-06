@@ -973,7 +973,7 @@ export function sliceHint(inputs: InputLine[], outputs: OutputDraft[], line: Out
   const sameColor = (c?: null | string) => !color || !c || c === color;
   if (outputs.filter((o) => sameColor(o.attrs.color)).length > 1)
     return '同一种颜色开了几种规格，不知道各用几张板，请手填良品';
-  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '填好片材长、宽、厚后自动算能开多少片';
+  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '填好开出的长、宽、厚后自动算能开多少片';
   const boards = inputs.filter((l) => sameColor(inputColor(l)));
   const parts = boards.map((b) => {
     const per = slicePerBoard(b.stock.item ?? {}, line.attrs);
