@@ -1,9 +1,12 @@
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
-export type Tone = 'fail' | 'na' | 'pass' | 'unknown' | 'warn';
+export type Tone = 'fail' | 'na' | 'pass' | 'pending' | 'unknown' | 'warn';
+
+/** 一行的结论：检查给出的结论，或者 PENDING（配置了但这次还没有结论）。 */
+export type RowResult = 'PENDING' | FdmAiCheckApi.VerdictResult;
 
 export const RESULT_META: Record<
-  FdmAiCheckApi.VerdictResult,
+  RowResult,
   { label: string; mark: string; tone: Tone }
 > = {
   PASS: { label: '通过', mark: '✓', tone: 'pass' },
@@ -11,15 +14,17 @@ export const RESULT_META: Record<
   WARN: { label: '有疑问', mark: '!', tone: 'warn' },
   UNKNOWN: { label: '缺资料', mark: '?', tone: 'unknown' },
   NOT_APPLICABLE: { label: '不适用', mark: '—', tone: 'na' },
+  PENDING: { label: '未检查', mark: '○', tone: 'pending' },
 };
 
-/** 结果条、清单里各结论的先后：先看要处理的，再看缺资料的，最后是通过和不适用。 */
-export const RESULT_ORDER: FdmAiCheckApi.VerdictResult[] = [
+/** 结果条、清单里各结论的先后：先看要处理的，再看缺资料的，然后通过、不适用，最后是还没检查的。 */
+export const RESULT_ORDER: RowResult[] = [
   'FAIL',
   'WARN',
   'UNKNOWN',
   'PASS',
   'NOT_APPLICABLE',
+  'PENDING',
 ];
 
 /** 清单里的一行：一个检查点，或者一条不属于任何检查点的问题。 */
@@ -28,8 +33,10 @@ export interface CheckRow {
   name: string;
   source: 'AI' | 'RULE';
   group?: null | string;
-  result: FdmAiCheckApi.VerdictResult;
+  result: RowResult;
   basis?: null | string;
+  /** 检查什么（配置里写的），还没检查时显示 */
+  description?: null | string;
   /** 这个检查点报出的问题 */
   findings: FdmAiCheckApi.Finding[];
   /** 其中还没处理的 */
@@ -49,11 +56,13 @@ export interface Checklist {
   unknown: CheckRow[];
   /** 不适用的项 */
   notApplicable: CheckRow[];
+  /** 配置了、但还没有结论的项（没检查过、AI 没跑、检查后新加的） */
+  pending: CheckRow[];
   /** 不适用、缺资料的项 */
   others: CheckRow[];
   /** 还有没处理问题的项 */
   openIssues: CheckRow[];
-  tally: Record<FdmAiCheckApi.VerdictResult, number>;
+  tally: Record<RowResult, number>;
   total: number;
 }
 
@@ -61,19 +70,19 @@ function keyOf(source: string, code?: null | string) {
   return `${source}|${code ?? ''}`;
 }
 
-function resultOfFindings(
-  findings: FdmAiCheckApi.Finding[],
-): FdmAiCheckApi.VerdictResult {
+function resultOfFindings(findings: FdmAiCheckApi.Finding[]): RowResult {
   return findings.some((f) => f.severity !== 'INFO') ? 'FAIL' : 'WARN';
 }
 
 /**
  * 把逐项结论和问题对到一起。问题按「来源 + 编码」归到检查点；对不上的（AI 的其他发现、没登记的规则、
  * 改版前的检查）各自成一行，放在问题里。
+ * items 是当前配置的检查点：没有结论的也列出来，记为未检查，没检查过的单据也能看到要查哪些点。
  */
 export function buildChecklist(
   checks: FdmAiCheckApi.Verdict[] | null | undefined,
   findings: FdmAiCheckApi.Finding[],
+  items?: FdmAiCheckApi.CheckPoint[] | null,
 ): Checklist {
   const rows: CheckRow[] = [];
   const byKey = new Map<string, CheckRow>();
@@ -87,6 +96,28 @@ export function buildChecklist(
       group: v.group,
       result: v.result,
       basis: v.basis,
+      findings: [],
+      open: [],
+      extra: false,
+    };
+    byKey.set(key, row);
+    rows.push(row);
+  }
+  const described = new Map(
+    (items ?? []).map((i) => [keyOf(i.source, i.checkCode), i]),
+  );
+  for (const row of rows)
+    row.description = described.get(row.key)?.description ?? null;
+  for (const item of items ?? []) {
+    const key = keyOf(item.source, item.checkCode);
+    if (byKey.has(key)) continue;
+    const row: CheckRow = {
+      key,
+      name: item.name,
+      source: item.source,
+      group: item.group,
+      result: 'PENDING',
+      description: item.description,
       findings: [],
       open: [],
       extra: false,
@@ -129,12 +160,13 @@ export function buildChecklist(
         Number(a.result !== 'FAIL') - Number(b.result !== 'FAIL') ||
         order.get(a.key)! - order.get(b.key)!,
     );
-  const tally: Record<FdmAiCheckApi.VerdictResult, number> = {
+  const tally: Record<RowResult, number> = {
     PASS: 0,
     FAIL: 0,
     WARN: 0,
     NOT_APPLICABLE: 0,
     UNKNOWN: 0,
+    PENDING: 0,
   };
   for (const r of rows) tally[r.result] += 1;
   return {
@@ -143,6 +175,7 @@ export function buildChecklist(
     passed: rows.filter((r) => r.result === 'PASS'),
     unknown: rows.filter((r) => r.result === 'UNKNOWN'),
     notApplicable: rows.filter((r) => r.result === 'NOT_APPLICABLE'),
+    pending: rows.filter((r) => r.result === 'PENDING'),
     others: rows.filter(
       (r) => r.result === 'NOT_APPLICABLE' || r.result === 'UNKNOWN',
     ),
@@ -176,6 +209,7 @@ export type DrawerFilter =
   | 'FAIL'
   | 'NOT_APPLICABLE'
   | 'PASS'
+  | 'PENDING'
   | 'UNKNOWN'
   | 'WARN';
 
@@ -190,6 +224,7 @@ export function filterRows(
     ...list.unknown,
     ...list.passed,
     ...list.notApplicable,
+    ...list.pending,
   ];
   const word = keyword.trim();
   return all.filter(

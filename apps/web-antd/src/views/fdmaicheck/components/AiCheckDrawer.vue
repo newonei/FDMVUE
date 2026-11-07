@@ -26,6 +26,9 @@ const options = computed(() => [
     value: 'NOT_APPLICABLE',
     label: `不适用 ${props.list.tally.NOT_APPLICABLE}`,
   },
+  ...(props.list.tally.PENDING
+    ? [{ value: 'PENDING', label: `未检查 ${props.list.tally.PENDING}` }]
+    : []),
 ]);
 
 watch(
@@ -82,6 +85,9 @@ watch(
               class="dr-basis"
             >
               {{ row.basis }}
+            </p>
+            <p v-else-if="row.result === 'PENDING'" class="dr-basis">
+              {{ row.description || '还没有检查这一项' }}
             </p>
             <p
               v-else-if="!row.basis && row.findings.length === 0"
@@ -195,5 +201,11 @@ watch(
 .is-na {
   color: var(--ant-color-text-tertiary, #8c8c8c);
   background: var(--ant-color-fill-secondary, rgb(0 0 0 / 6%));
+}
+
+.is-pending {
+  color: var(--ant-color-text-quaternary, #bfbfbf);
+  background: var(--ant-color-bg-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--ant-color-border, #d9d9d9);
 }
 </style>

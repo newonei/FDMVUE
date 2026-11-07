@@ -122,6 +122,7 @@ const allPass = computed(
   color: var(--ant-color-success, #52c41a);
 }
 
+.bar-counts .is-pending,
 .bar-counts .is-na {
   color: var(--ant-color-text-tertiary, #8c8c8c);
 }

@@ -94,6 +94,18 @@ export namespace FdmAiCheckApi {
     latest?: Task;
     lastError?: string;
     findings: Finding[];
+    /** 当前配置的检查点（系统规则 + 启用的 AI 检查点），没检查过也照样列出 */
+    items?: CheckPoint[];
+  }
+
+  /** 单据详情里列出的一个检查点。 */
+  export interface CheckPoint {
+    source: 'AI' | 'RULE';
+    checkCode: string;
+    name: string;
+    group?: null | string;
+    /** 检查什么 */
+    description?: null | string;
   }
 
   export interface Item {
