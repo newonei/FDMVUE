@@ -1,6 +1,6 @@
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
-export type Tone = 'fail' | 'na' | 'pass' | 'warn';
+export type Tone = 'fail' | 'na' | 'pass' | 'unknown' | 'warn';
 
 export const RESULT_META: Record<
   FdmAiCheckApi.VerdictResult,
@@ -8,10 +8,19 @@ export const RESULT_META: Record<
 > = {
   PASS: { label: '通过', mark: '✓', tone: 'pass' },
   FAIL: { label: '不通过', mark: '✕', tone: 'fail' },
-  WARN: { label: '提醒', mark: '!', tone: 'warn' },
+  WARN: { label: '有疑问', mark: '!', tone: 'warn' },
+  UNKNOWN: { label: '缺资料', mark: '?', tone: 'unknown' },
   NOT_APPLICABLE: { label: '不适用', mark: '—', tone: 'na' },
-  UNKNOWN: { label: '资料不足', mark: '?', tone: 'na' },
 };
+
+/** 结果条、清单里各结论的先后：先看要处理的，再看缺资料的，最后是通过和不适用。 */
+export const RESULT_ORDER: FdmAiCheckApi.VerdictResult[] = [
+  'FAIL',
+  'WARN',
+  'UNKNOWN',
+  'PASS',
+  'NOT_APPLICABLE',
+];
 
 /** 清单里的一行：一个检查点，或者一条不属于任何检查点的问题。 */
 export interface CheckRow {
@@ -36,7 +45,11 @@ export interface Checklist {
   issues: CheckRow[];
   /** 通过的项 */
   passed: CheckRow[];
-  /** 不适用、资料不足的项 */
+  /** 缺资料、没法判断的项 */
+  unknown: CheckRow[];
+  /** 不适用的项 */
+  notApplicable: CheckRow[];
+  /** 不适用、缺资料的项 */
   others: CheckRow[];
   /** 还有没处理问题的项 */
   openIssues: CheckRow[];
@@ -128,6 +141,8 @@ export function buildChecklist(
     hasChecks: (checks ?? []).length > 0,
     issues,
     passed: rows.filter((r) => r.result === 'PASS'),
+    unknown: rows.filter((r) => r.result === 'UNKNOWN'),
+    notApplicable: rows.filter((r) => r.result === 'NOT_APPLICABLE'),
     others: rows.filter(
       (r) => r.result === 'NOT_APPLICABLE' || r.result === 'UNKNOWN',
     ),
@@ -156,7 +171,13 @@ export function defaultExpanded(list: Checklist, stored?: null | string) {
   return list.openIssues.some((r) => r.open.some((f) => f.severity !== 'INFO'));
 }
 
-export type DrawerFilter = 'ALL' | 'FAIL' | 'OTHER' | 'PASS' | 'WARN';
+export type DrawerFilter =
+  | 'ALL'
+  | 'FAIL'
+  | 'NOT_APPLICABLE'
+  | 'PASS'
+  | 'UNKNOWN'
+  | 'WARN';
 
 /** 全部依据抽屉的筛选和搜索。 */
 export function filterRows(
@@ -164,24 +185,18 @@ export function filterRows(
   filter: DrawerFilter,
   keyword = '',
 ) {
-  const all = [...list.issues, ...list.passed, ...list.others];
+  const all = [
+    ...list.issues,
+    ...list.unknown,
+    ...list.passed,
+    ...list.notApplicable,
+  ];
   const word = keyword.trim();
-  return all.filter((r) => {
-    if (word && !r.name.includes(word)) return false;
-    switch (filter) {
-      case 'FAIL':
-      case 'PASS':
-      case 'WARN': {
-        return r.result === filter;
-      }
-      case 'OTHER': {
-        return r.result === 'NOT_APPLICABLE' || r.result === 'UNKNOWN';
-      }
-      default: {
-        return true;
-      }
-    }
-  });
+  return all.filter(
+    (r) =>
+      (!word || r.name.includes(word)) &&
+      (filter === 'ALL' || r.result === filter),
+  );
 }
 
 /** 比例条各段宽度（百分比）。 */
@@ -191,6 +206,7 @@ export function segments(list: Checklist) {
   return {
     fail: pct(list.tally.FAIL),
     warn: pct(list.tally.WARN),
+    unknown: pct(list.tally.UNKNOWN),
     pass: pct(list.tally.PASS),
   };
 }

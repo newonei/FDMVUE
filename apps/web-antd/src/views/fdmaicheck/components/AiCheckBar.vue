@@ -3,7 +3,7 @@ import type { Checklist } from './checklist';
 
 import { computed } from 'vue';
 
-import { headline, segments } from './checklist';
+import { headline, RESULT_META, RESULT_ORDER, segments } from './checklist';
 
 /** 一行结果条：比例条、各结论数量、最要紧的问题。右侧按钮由使用方放进 default 插槽。 */
 const props = defineProps<{ list: Checklist; summary?: string }>();
@@ -25,20 +25,22 @@ const allPass = computed(
       <span class="bar-seg" aria-hidden="true">
         <i class="f" :style="{ width: seg.fail }"></i>
         <i class="w" :style="{ width: seg.warn }"></i>
+        <i class="u" :style="{ width: seg.unknown }"></i>
         <i class="p" :style="{ width: seg.pass }"></i>
       </span>
       <span v-if="allPass" class="bar-counts">
         <span class="p">✓ {{ list.total }} 项全部通过</span>
       </span>
       <span v-else class="bar-counts">
-        <span v-if="list.tally.FAIL" class="f" title="不通过">✕ {{ list.tally.FAIL }}</span>
-        <span v-if="list.tally.WARN" class="w" title="提醒">! {{ list.tally.WARN }}</span>
-        <span class="p" title="通过">✓ {{ list.tally.PASS }}</span>
-        <span
-          v-if="list.tally.NOT_APPLICABLE + list.tally.UNKNOWN"
-          class="n"
-          title="不适用或资料不足"
-          >— {{ list.tally.NOT_APPLICABLE + list.tally.UNKNOWN }}</span>
+        <span class="bar-total">共 {{ list.total }} 项</span>
+        <template v-for="r in RESULT_ORDER" :key="r">
+          <span
+            v-if="list.tally[r]"
+            :class="`is-${RESULT_META[r].tone}`"
+            :title="RESULT_META[r].label"
+            >{{ RESULT_META[r].mark }} {{ RESULT_META[r].label }}
+            {{ list.tally[r] }}</span>
+        </template>
       </span>
     </template>
     <span v-if="title" class="bar-headline" :title="title">{{ title }}</span>
@@ -83,30 +85,44 @@ const allPass = computed(
   background: var(--ant-color-warning, #faad14);
 }
 
+.bar-seg .u {
+  background: var(--ant-geekblue-6, #2f54eb);
+}
+
 .bar-seg .p {
   background: var(--ant-color-success, #52c41a);
 }
 
 .bar-counts {
   display: inline-flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.bar-counts .f {
+.bar-total {
+  color: var(--ant-color-text-secondary, #595959);
+}
+
+.bar-counts .is-fail {
   color: var(--ant-color-error, #ff4d4f);
 }
 
-.bar-counts .w {
-  color: var(--ant-color-warning, #faad14);
+.bar-counts .is-warn {
+  color: var(--ant-color-warning-text, #d48806);
 }
 
-.bar-counts .p {
+.bar-counts .is-unknown {
+  color: var(--ant-geekblue-6, #2f54eb);
+}
+
+.bar-counts .p,
+.bar-counts .is-pass {
   color: var(--ant-color-success, #52c41a);
 }
 
-.bar-counts .n {
+.bar-counts .is-na {
   color: var(--ant-color-text-tertiary, #8c8c8c);
 }
 
