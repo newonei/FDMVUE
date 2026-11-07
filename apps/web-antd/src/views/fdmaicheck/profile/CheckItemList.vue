@@ -8,19 +8,24 @@ import { IconifyIcon } from '@vben/icons';
 import {
   AutoComplete,
   Button,
+  Checkbox,
   Empty,
   Input,
+  message,
+  Modal,
   Popconfirm,
   Select,
   Switch,
 } from 'ant-design-vue';
 
 import {
+  applyGroup,
   groupItems,
   ITEM_SEVERITY_LABELS,
   ITEM_SEVERITY_OPTIONS,
   manyFalsePositives,
   newItem,
+  UNGROUPED,
 } from './model';
 
 /**
@@ -96,12 +101,53 @@ function add(group?: string) {
   }
 }
 
+/** 新建、编辑分组的弹窗：填名称，勾选这组包含哪些检查点。 */
+const groupEdit = ref<{
+  from: null | string;
+  name: string;
+  selected: Set<number>;
+}>();
+
+function openGroup(from: null | string = null) {
+  const selected = new Set<number>();
+  if (from)
+    for (const [index, item] of items.value.entries())
+      if (item.group?.trim() === from) selected.add(index);
+  groupEdit.value = { from, name: from ?? '', selected };
+}
+
+function toggleMember(index: number, checked: boolean) {
+  const edit = groupEdit.value;
+  if (!edit) return;
+  const next = new Set(edit.selected);
+  if (checked) next.add(index);
+  else next.delete(index);
+  edit.selected = next;
+}
+
+function confirmGroup() {
+  const edit = groupEdit.value;
+  if (!edit) return;
+  const name = edit.name.trim();
+  const problem = applyGroup(items.value, edit.from, name, edit.selected);
+  if (problem) {
+    message.warning(problem);
+    return;
+  }
+  groupEdit.value = undefined;
+  const next = new Set(collapsed.value);
+  next.delete(name);
+  collapsed.value = next;
+  // 一个都没选：新建一个空检查点放进这组，分组才留得住
+  if (edit.selected.size === 0) add(name);
+}
+
 function remove(index: number) {
   items.value.splice(index, 1);
   openIndex.value = undefined;
 }
 
-defineExpose({ add });
+defineExpose({ add, openGroup });
 </script>
 
 <template>
@@ -146,10 +192,18 @@ defineExpose({ add });
           <span class="cl-count">{{ group.rows.length }}</span>
         </button>
         <Button
+          v-if="editing && group.name !== UNGROUPED"
+          size="small"
+          type="link"
+          @click="openGroup(group.name)"
+        >
+          编辑分组
+        </Button>
+        <Button
           v-if="editing"
           size="small"
           type="link"
-          @click="add(group.name === '未分组' ? undefined : group.name)"
+          @click="add(group.name === UNGROUPED ? undefined : group.name)"
         >
           在这组添加
         </Button>
@@ -345,6 +399,44 @@ defineExpose({ add });
         </span>
       </div>
     </template>
+    <Modal
+      :open="!!groupEdit"
+      :title="groupEdit?.from ? '编辑分组' : '新建分组'"
+      ok-text="确定"
+      @ok="confirmGroup"
+      @cancel="groupEdit = undefined"
+    >
+      <template v-if="groupEdit">
+        <label class="cl-field">
+          <span>分组名称</span>
+          <Input
+            v-model:value="groupEdit.name"
+            :maxlength="20"
+            placeholder="例如：附件、价格、合同一致"
+          />
+        </label>
+        <div class="cl-pick-head">
+          勾选放进这组的检查点（已选 {{ groupEdit.selected.size }} 个）；
+          一个都不选会新建一个空检查点
+        </div>
+        <div class="cl-pick">
+          <Checkbox
+            v-for="(item, index) in items"
+            :key="index"
+            :checked="groupEdit.selected.has(index)"
+            @update:checked="(v: boolean) => toggleMember(index, v)"
+          >
+            {{ item.name || `第 ${index + 1} 个（未命名）` }}
+            <span
+              v-if="item.group?.trim() && item.group.trim() !== groupEdit.from"
+              class="cl-pick-group"
+            >
+              现在在「{{ item.group.trim() }}」
+            </span>
+          </Checkbox>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>
 
@@ -643,5 +735,29 @@ defineExpose({ add });
   .cl-fields {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.cl-pick-head {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.cl-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.cl-pick :deep(.ant-checkbox-wrapper) {
+  margin-inline-start: 0;
+}
+
+.cl-pick-group {
+  margin-inline-start: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
 }
 </style>
