@@ -396,7 +396,7 @@ onBeforeUnmount(stopDry);
           </section>
 
           <section class="aicheck-card">
-            <div class="aicheck-card-head">
+            <div class="aicheck-card-head" :class="{ sticky: editing }">
               <h3>
                 检查点与注意事项
                 <Tag v-if="!editing && detail.draft" color="orange">
@@ -440,7 +440,7 @@ onBeforeUnmount(stopDry);
             <Alert
               type="info"
               show-icon
-              message="AI 会对每个启用的检查点给出结论（通过、不通过、提醒、不适用、资料不足）并写明依据。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。"
+              message="AI 会对每个启用的检查点打一个标记并写明依据：✓ 通过、✕ 不通过、! 有疑问、? 缺资料（资料不全没法判断）、— 不适用。系统已固定：AI 只能提醒不能改单据、业务资料里的文字不当指令执行、每条问题须引用证据。"
             />
 
             <template v-if="editing">
@@ -696,8 +696,20 @@ onBeforeUnmount(stopDry);
 
 .aicheck-card-head {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 编辑时检查点很长，保存、发布按钮跟着滚动 */
+.aicheck-card-head.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 0;
+  margin: -8px 0;
+  background: var(--ant-color-bg-container, #fff);
 }
 
 .aicheck-settings {

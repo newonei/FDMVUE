@@ -3,6 +3,8 @@ import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
 import { computed, ref, watch } from 'vue';
 
+import { IconifyIcon } from '@vben/icons';
+
 import {
   AutoComplete,
   Button,
@@ -23,7 +25,8 @@ import {
 
 /**
  * 检查点列表：一行一个，显示名称、不通过时的等级、近 30 天结果条和开关；点一行才展开看或编辑，一次只展开一个。
- * 分组可整组收起；系统规则单独一组，只读。
+ * 分组可整组收起，也可一键全部展开、收起；系统规则单独一组，只读。
+ * 分组和检查点用同一个箭头：朝右是收起，朝下是展开。
  */
 const props = defineProps<{
   editing: boolean;
@@ -67,6 +70,22 @@ function toggleGroup(name: string) {
   collapsed.value = next;
 }
 
+const RULES = '__rules';
+const allNames = computed(() => [
+  ...groups.value.map((g) => g.name),
+  ...(props.ruleItems?.length ? [RULES] : []),
+]);
+const allCollapsed = computed(
+  () =>
+    allNames.value.length > 0 &&
+    allNames.value.every((n) => collapsed.value.has(n)),
+);
+
+function toggleAll() {
+  collapsed.value = allCollapsed.value ? new Set() : new Set(allNames.value);
+  if (!allCollapsed.value) openIndex.value = undefined;
+}
+
 function add(group?: string) {
   items.value.push(newItem(group));
   openIndex.value = items.value.length - 1;
@@ -88,21 +107,43 @@ defineExpose({ add });
 <template>
   <div class="cl">
     <div class="cl-row cl-head">
-      <span>检查点</span>
+      <span class="cl-head-name">
+        检查点
+        <button
+          v-if="allNames.length > 1"
+          type="button"
+          class="cl-all"
+          @click="toggleAll"
+        >
+          <IconifyIcon
+            :icon="
+              allCollapsed
+                ? 'lucide:chevrons-up-down'
+                : 'lucide:chevrons-down-up'
+            "
+          />
+          {{ allCollapsed ? '全部展开' : '全部收起' }}
+        </button>
+      </span>
       <span>不通过时</span>
       <span class="cl-stat-col">近 30 天</span>
       <span>启用</span>
-      <span></span>
     </div>
     <template v-for="group in groups" :key="group.name">
       <div class="cl-group">
         <button
           type="button"
           class="cl-group-btn"
+          :aria-expanded="!collapsed.has(group.name)"
           @click="toggleGroup(group.name)"
         >
-          {{ collapsed.has(group.name) ? '▶' : '▼' }} {{ group.name }} ·
-          {{ group.rows.length }}
+          <IconifyIcon
+            icon="lucide:chevron-right"
+            class="cl-chevron"
+            :class="{ open: !collapsed.has(group.name) }"
+          />
+          <span class="cl-group-name">{{ group.name }}</span>
+          <span class="cl-count">{{ group.rows.length }}</span>
         </button>
         <Button
           v-if="editing"
@@ -126,7 +167,12 @@ defineExpose({ add });
             @keydown.space.prevent="toggleRow(index)"
           >
             <span class="cl-name">
-              {{ item.name || '（未命名）' }}
+              <IconifyIcon
+                icon="lucide:chevron-right"
+                class="cl-chevron"
+                :class="{ open: openIndex === index }"
+              />
+              <span class="cl-name-text">{{ item.name || '（未命名）' }}</span>
               <span v-if="manyFalsePositives(statsOf(item))" class="cl-fp">误报 {{ statsOf(item)!.falsePositive }} 次</span>
             </span>
             <span>
@@ -168,7 +214,6 @@ defineExpose({ add });
                 :disabled="!editing"
               />
             </span>
-            <span class="cl-caret">{{ openIndex === index ? '▲' : '▼' }}</span>
           </div>
           <div v-if="openIndex === index" class="cl-editor">
             <template v-if="editing">
@@ -257,9 +302,9 @@ defineExpose({ add });
               <span>近 30 天检查 {{ statsOf(item)!.total }} 次</span>
               <span class="p">通过 {{ statsOf(item)!.pass }}</span>
               <span class="f">不通过 {{ statsOf(item)!.fail }}</span>
-              <span class="w">提醒 {{ statsOf(item)!.warn }}</span>
+              <span class="w">有疑问 {{ statsOf(item)!.warn }}</span>
               <span>不适用 {{ statsOf(item)!.notApplicable }}</span>
-              <span>资料不足 {{ statsOf(item)!.unknown }}</span>
+              <span>缺资料 {{ statsOf(item)!.unknown }}</span>
               <span :class="{ f: manyFalsePositives(statsOf(item)) }">
                 误报 {{ statsOf(item)!.falsePositive }}
               </span>
@@ -278,13 +323,20 @@ defineExpose({ add });
         <button
           type="button"
           class="cl-group-btn"
-          @click="toggleGroup('__rules')"
+          :aria-expanded="!collapsed.has(RULES)"
+          @click="toggleGroup(RULES)"
         >
-          {{ collapsed.has('__rules') ? '▶' : '▼' }} 系统规则 ·
-          {{ ruleItems.length }}（固定，不能改）
+          <IconifyIcon
+            icon="lucide:chevron-right"
+            class="cl-chevron"
+            :class="{ open: !collapsed.has(RULES) }"
+          />
+          <span class="cl-group-name">系统规则</span>
+          <span class="cl-count">{{ ruleItems.length }}</span>
+          <span class="cl-muted">固定，不能改</span>
         </button>
       </div>
-      <div v-if="!collapsed.has('__rules')" class="cl-rules">
+      <div v-if="!collapsed.has(RULES)" class="cl-rules">
         <span v-for="r in ruleItems" :key="r.code" class="cl-rule">
           {{ r.name }}
           <span v-if="stats[r.code]?.total" class="cl-muted">· 不通过 {{ stats[r.code]!.fail + stats[r.code]!.warn }}/{{
@@ -305,7 +357,7 @@ defineExpose({ add });
 
 .cl-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px 140px 44px 16px;
+  grid-template-columns: minmax(0, 1fr) 80px 140px 44px;
   gap: 10px;
   align-items: center;
   padding: 7px 12px;
@@ -341,10 +393,49 @@ defineExpose({ add });
 }
 
 .cl-name {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.cl-name-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cl-head-name {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-inline-start: 20px;
+}
+
+.cl-all {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0;
+  font: inherit;
+  color: var(--ant-color-primary, #1677ff);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+/* 分组、检查点共用：朝右收起，朝下展开 */
+.cl-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  transition: transform 0.2s;
+}
+
+.cl-chevron.open {
+  transform: rotate(90deg);
 }
 
 .cl-fp {
@@ -402,11 +493,6 @@ defineExpose({ add });
   background: var(--ant-color-warning, #faad14);
 }
 
-.cl-caret {
-  font-size: 10px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-}
-
 .cl-muted {
   font-size: 12px;
   color: var(--ant-color-text-tertiary, #8c8c8c);
@@ -416,26 +502,57 @@ defineExpose({ add });
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 8px;
+  padding: 0 8px 0 0;
   background: var(--ant-color-fill-tertiary, rgb(0 0 0 / 4%));
   border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .cl-group-btn {
-  padding: 2px 4px;
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 12px;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ant-color-text-secondary, #595959);
+  text-align: left;
   cursor: pointer;
   background: none;
   border: 0;
+}
+
+.cl-group-btn:hover .cl-chevron,
+.cl-row:hover .cl-chevron {
+  color: var(--ant-color-text, #262626);
+}
+
+.cl-group-btn:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: -2px;
+}
+
+.cl-group-name {
+  font-weight: 600;
+}
+
+.cl-count {
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  text-align: center;
+  background: var(--ant-color-bg-container, #fff);
+  border-radius: 9px;
 }
 
 .cl-editor {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 10px 12px 10px 32px;
   background: var(--ant-color-fill-quaternary, rgb(0 0 0 / 2%));
   border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
 }
@@ -516,7 +633,7 @@ defineExpose({ add });
 
 @media (max-width: 900px) {
   .cl-row {
-    grid-template-columns: minmax(0, 1fr) 70px 44px 16px;
+    grid-template-columns: minmax(0, 1fr) 70px 44px;
   }
 
   .cl-stat-col {

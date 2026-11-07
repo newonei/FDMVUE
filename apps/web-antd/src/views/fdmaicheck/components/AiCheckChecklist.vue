@@ -11,7 +11,8 @@ import { RESULT_META } from './checklist';
 import { SEVERITY_LABELS, STATUS_LABELS } from './risk';
 
 /**
- * 展开后的检查清单：不通过、提醒逐条列出（可处理）；通过、不适用缩成小标签，点标签看判断依据。
+ * 展开后的检查清单：每个检查点一行，前面打标记：✕ 不通过、! 有疑问（逐条列出，可处理），
+ * ? 缺资料、✓ 通过（写出依据），— 不适用（缩成标签，点开看原因）。
  * 单据详情和配置页试跑共用。
  */
 const props = defineProps<{
@@ -31,7 +32,12 @@ const openIssues = computed(() =>
 const handledIssues = computed(() =>
   props.list.issues.filter((r) => r.open.length === 0),
 );
-const chips = computed(() => [...props.list.passed, ...props.list.others]);
+const sections = computed(() =>
+  [
+    { result: 'UNKNOWN' as const, rows: props.list.unknown },
+    { result: 'PASS' as const, rows: props.list.passed },
+  ].filter((s) => s.rows.length > 0),
+);
 
 function handledLabel(findings: FdmAiCheckApi.Finding[]) {
   const labels = new Set(findings.map((f) => STATUS_LABELS[f.status]));
@@ -106,17 +112,47 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
       </li>
     </ul>
 
-    <template v-if="chips.length">
+    <!-- 缺资料、通过逐条列出依据，一眼看到每个点查了什么；不适用缩成标签 -->
+    <template v-for="sec in sections" :key="sec.result">
       <div class="ck-group">
-        通过 {{ list.passed.length
-        }}<template v-if="list.others.length">
-          · 不适用或资料不足 {{ list.others.length }}
-        </template>
-        <span class="ck-hint">点标签看依据</span>
+        <span class="ck-mark sm" :class="`is-${RESULT_META[sec.result].tone}`">
+          {{ RESULT_META[sec.result].mark }}
+        </span>
+        {{ RESULT_META[sec.result].label }} {{ sec.rows.length }}
+        <span v-if="sec.result === 'UNKNOWN'" class="ck-hint">
+          资料不全，AI 没法判断，补上资料后重新检查
+        </span>
+      </div>
+      <ul class="ck-rows">
+        <li v-for="row in sec.rows" :key="row.key" class="ck-row">
+          <span
+            class="ck-mark sm"
+            :class="`is-${RESULT_META[row.result].tone}`"
+          >
+            {{ RESULT_META[row.result].mark }}
+          </span>
+          <span class="ck-body">
+            <span class="ck-line">
+              <span class="ck-name">{{ row.name }}</span>
+              <span v-if="row.source === 'RULE'" class="ck-src">规则</span>
+            </span>
+            <span v-if="row.basis || row.source === 'RULE'" class="ck-basis">
+              {{ row.basis || '系统规则没有发现问题' }}
+            </span>
+          </span>
+        </li>
+      </ul>
+    </template>
+
+    <template v-if="list.notApplicable.length">
+      <div class="ck-group">
+        <span class="ck-mark sm is-na">—</span>
+        不适用 {{ list.notApplicable.length }}
+        <span class="ck-hint">点标签看原因</span>
       </div>
       <div class="ck-chips">
         <Popover
-          v-for="row in chips"
+          v-for="row in list.notApplicable"
           :key="row.key"
           trigger="click"
           placement="bottomLeft"
@@ -125,21 +161,12 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
           <template #content>
             <div class="ck-pop">
               <b>{{ row.name }}</b>
-              <span>{{ RESULT_META[row.result].label }} ·
+              <span>不适用 ·
                 {{ row.source === 'RULE' ? '系统规则' : 'AI 判断' }}</span>
-              <p>{{ row.basis || '系统规则没有发现问题' }}</p>
+              <p>{{ row.basis || '没有写原因' }}</p>
             </div>
           </template>
-          <button type="button" class="ck-pchip">
-            <span
-              class="ck-mark sm"
-              :class="`is-${RESULT_META[row.result].tone}`"
-            >
-              {{ RESULT_META[row.result].mark }}
-            </span>
-            {{ row.name }}
-            <span v-if="row.source === 'RULE'" class="ck-src">规则</span>
-          </button>
+          <button type="button" class="ck-pchip">{{ row.name }}</button>
         </Popover>
       </div>
     </template>
@@ -273,6 +300,11 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
   background: var(--ant-color-warning-bg, #fffbe6);
 }
 
+.is-unknown {
+  color: var(--ant-geekblue-6, #2f54eb);
+  background: var(--ant-geekblue-1, #f0f5ff);
+}
+
 .is-na {
   color: var(--ant-color-text-tertiary, #8c8c8c);
   background: var(--ant-color-fill-secondary, rgb(0 0 0 / 6%));
@@ -344,6 +376,27 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
   height: 1px;
   content: '';
   background: var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.ck-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.ck-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 0 10px;
+  align-items: start;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.ck-row .ck-mark {
+  margin: 1px 1px 0;
 }
 
 .ck-chips {

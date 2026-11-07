@@ -109,7 +109,7 @@ describe('aI 检查清单', () => {
     );
     expect(filterRows(list, 'ALL')).toHaveLength(3);
     expect(filterRows(list, 'PASS').map((r) => r.name)).toEqual(['单价']);
-    expect(filterRows(list, 'OTHER').map((r) => r.name)).toEqual(['交期']);
+    expect(filterRows(list, 'UNKNOWN').map((r) => r.name)).toEqual(['交期']);
     expect(filterRows(list, 'ALL', '附').map((r) => r.name)).toEqual(['附件']);
   });
 });

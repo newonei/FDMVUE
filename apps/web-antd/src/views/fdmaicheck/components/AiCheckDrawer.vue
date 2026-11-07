@@ -19,11 +19,12 @@ const rows = computed(() =>
 const options = computed(() => [
   { value: 'ALL', label: `全部 ${props.list.total}` },
   { value: 'FAIL', label: `不通过 ${props.list.tally.FAIL}` },
-  { value: 'WARN', label: `提醒 ${props.list.tally.WARN}` },
+  { value: 'WARN', label: `有疑问 ${props.list.tally.WARN}` },
+  { value: 'UNKNOWN', label: `缺资料 ${props.list.tally.UNKNOWN}` },
   { value: 'PASS', label: `通过 ${props.list.tally.PASS}` },
   {
-    value: 'OTHER',
-    label: `其他 ${props.list.tally.NOT_APPLICABLE + props.list.tally.UNKNOWN}`,
+    value: 'NOT_APPLICABLE',
+    label: `不适用 ${props.list.tally.NOT_APPLICABLE}`,
   },
 ]);
 
@@ -184,6 +185,11 @@ watch(
 .is-warn {
   color: var(--ant-color-warning, #faad14);
   background: var(--ant-color-warning-bg, #fffbe6);
+}
+
+.is-unknown {
+  color: var(--ant-geekblue-6, #2f54eb);
+  background: var(--ant-geekblue-1, #f0f5ff);
 }
 
 .is-na {
