@@ -350,8 +350,8 @@ export interface FinishedGenReq {
   category: string;
   /** 规格：一行一条，长*宽*厚，如 185*61*0.6cm */
   sizeTextBlock: string;
-  /** 图案对照主键（fdm_data_just_pattern_cost），与图案编码生成弹窗「已维护的图案」一致 */
-  patternCostId: number;
+  /** 图案对照主键列表（fdm_data_just_pattern_cost），可多选，与图案编码生成弹窗「已维护的图案」一致 */
+  patternCostIds: number[];
   /** 字典 fdm_color value */
   colors: string[];
 }

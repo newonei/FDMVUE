@@ -18,7 +18,7 @@ function skuLabel(row: { itemCode?: string; productName?: string }) {
 
 /** 图案 SKU（fdm_data_just_pattern）远程搜索，用于定制组合「选择图案系列」等 */
 export function usePatternSkuRemoteSelect(
-  getSelectedId?: () => number | undefined,
+  getSelectedId?: () => number | number[] | undefined,
 ) {
   const patternSkuLoading = ref(false);
   const patternSkuRows = shallowRef<FdmdataDataJustPatternApi.Pattern[]>([]);
@@ -26,17 +26,20 @@ export function usePatternSkuRemoteSelect(
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function mergeSelectedRow(
+  function toIdList(value: number | number[] | undefined | null): number[] {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    return Array.isArray(value) ? value : [value];
+  }
+
+  /** 已选项不在搜索结果中时补到列表前面，保证 Select 能显示已选标签 */
+  function mergeSelectedRows(
     list: FdmdataDataJustPatternApi.Pattern[],
-    selected: FdmdataDataJustPatternApi.Pattern | null,
+    selected: FdmdataDataJustPatternApi.Pattern[],
   ) {
-    if (!selected) {
-      return list;
-    }
-    if (list.some((p) => p.id === selected.id)) {
-      return list;
-    }
-    return [selected, ...list];
+    const missing = selected.filter((s) => !list.some((p) => p.id === s.id));
+    return missing.length > 0 ? [...missing, ...list] : list;
   }
 
   async function fetchSelectedRow(
@@ -56,14 +59,24 @@ export function usePatternSkuRemoteSelect(
     }
   }
 
+  async function fetchSelectedRows(
+    ids: number | number[] | undefined,
+  ): Promise<FdmdataDataJustPatternApi.Pattern[]> {
+    const rows = await Promise.all(
+      toIdList(ids).map((id) => fetchSelectedRow(id)),
+    );
+    return rows.filter(
+      (r): r is FdmdataDataJustPatternApi.Pattern => r !== null,
+    );
+  }
+
   async function loadPatternSkuOptions(keyword?: string) {
     const kw = (keyword ?? patternKeyword.value ?? '').trim();
-    const selectedId = getSelectedId?.();
+    const selectedIds = getSelectedId?.();
     patternSkuLoading.value = true;
     try {
       if (!kw) {
-        const selected = await fetchSelectedRow(selectedId);
-        patternSkuRows.value = selected ? [selected] : [];
+        patternSkuRows.value = await fetchSelectedRows(selectedIds);
         return;
       }
       const page = await getDataJustPatternPage({
@@ -71,8 +84,8 @@ export function usePatternSkuRemoteSelect(
         pageSize: SEARCH_PAGE_SIZE,
         keyword: kw,
       });
-      const selected = await fetchSelectedRow(selectedId);
-      patternSkuRows.value = mergeSelectedRow(page?.list ?? [], selected);
+      const selected = await fetchSelectedRows(selectedIds);
+      patternSkuRows.value = mergeSelectedRows(page?.list ?? [], selected);
     } finally {
       patternSkuLoading.value = false;
     }
@@ -109,13 +122,10 @@ export function usePatternSkuRemoteSelect(
     }
   }
 
-  async function ensureSelectedPatternSku(id: number | undefined) {
-    if (id === undefined || id === null) {
-      return;
-    }
-    const row = await fetchSelectedRow(id);
-    if (row) {
-      patternSkuRows.value = mergeSelectedRow(patternSkuRows.value, row);
+  async function ensureSelectedPatternSku(ids: number | number[] | undefined) {
+    const rows = await fetchSelectedRows(ids);
+    if (rows.length > 0) {
+      patternSkuRows.value = mergeSelectedRows(patternSkuRows.value, rows);
     }
   }
 

@@ -34,8 +34,8 @@ const generating = ref(false);
 const preview = ref<CustomComboPreviewResp | null>(null);
 
 const formState = reactive({
-  /** 任选一条同系列图案 SKU，用于解析「图案名」并加载该系列全部尺寸 */
-  patternFamilySeedId: undefined as number | undefined,
+  /** 每个图案系列任选一条图案 SKU（可多选多个系列），用于解析「图案名」并加载该系列全部尺寸 */
+  patternFamilySeedIds: [] as number[],
   qty: 1,
   salePrice: undefined as number | undefined,
 });
@@ -52,7 +52,7 @@ const blankQuery = reactive({
 });
 const blankStyleOptions = ref<{ label: string; value: string }[]>([]);
 const blankCategoryOptions = ref<{ label: string; value: string }[]>([]);
-const patternGroupName = ref<string>('');
+const patternGroupNames = ref<string[]>([]);
 
 const {
   patternSkuLoading,
@@ -61,7 +61,7 @@ const {
   onPatternSkuDropdownOpen,
   resetPatternSkuSelect,
   ensureSelectedPatternSku,
-} = usePatternSkuRemoteSelect(() => formState.patternFamilySeedId);
+} = usePatternSkuRemoteSelect(() => formState.patternFamilySeedIds);
 /** 当前图案系列下全部尺寸行 */
 const patternVariantRows = ref<FdmdataDataJustPatternApi.Pattern[]>([]);
 const selectedPatternSkuIds = ref<number[]>([]);
@@ -81,6 +81,14 @@ const patternSizeKeys = computed(() => {
 const patternSizeKeySet = computed(() => new Set(patternSizeKeys.value));
 
 const patternVariantColumns: ColumnsType = [
+  {
+    title: '图案系列',
+    key: 'series',
+    width: 120,
+    ellipsis: true,
+    customRender: ({ record }: { record: FdmdataDataJustPatternApi.Pattern }) =>
+      resolvePatternGroupName(record) || '-',
+  },
   { title: '尺寸(attr1)', dataIndex: 'attr1', width: 160, ellipsis: true },
   {
     title: '匹配键(长*宽)',
@@ -129,9 +137,9 @@ function resolvePatternGroupName(
 }
 
 watch(
-  () => formState.patternFamilySeedId,
-  (id) => {
-    void ensureSelectedPatternSku(id);
+  () => [...formState.patternFamilySeedIds],
+  (ids) => {
+    void ensureSelectedPatternSku(ids);
   },
 );
 
@@ -247,51 +255,92 @@ function onBlankRowSelectionChange(keys: (string | number)[]) {
   blankSelectedIds.value = keys.map((k) => Number(k));
 }
 
-async function loadPatternFamilyVariants(seedId: number | undefined) {
-  patternVariantRows.value = [];
-  selectedPatternSkuIds.value = [];
-  patternGroupName.value = '';
-  if (seedId == null || Number.isNaN(seedId)) {
+let patternVariantsRevision = 0;
+
+/** 加载一个系列的全部尺寸行；无法识别系列时返回 null */
+async function loadOnePatternSeries(seedId: number) {
+  const seed = await getDataJustPattern(seedId);
+  const groupName =
+    resolvePatternGroupName(seed) ||
+    (seed?.productShortName ?? '').trim() ||
+    (seed?.productName ?? '').trim() ||
+    '';
+  if (!groupName) {
+    return null;
+  }
+  const res = await getDataJustPatternPage({
+    pageNo: 1,
+    pageSize: -1,
+    keyword: groupName,
+  });
+  const rows = (res.list ?? []).filter(
+    (r: FdmdataDataJustPatternApi.Pattern) =>
+      resolvePatternGroupName(r) === groupName,
+  );
+  return { groupName, rows };
+}
+
+async function loadPatternFamilyVariants(seedIds: number[]) {
+  const revision = ++patternVariantsRevision;
+  const ids = seedIds.filter((id) => id != null && !Number.isNaN(id));
+  if (!ids.length) {
+    patternVariantRows.value = [];
+    selectedPatternSkuIds.value = [];
+    patternGroupNames.value = [];
+    loadingPatternVariants.value = false;
     applyBlankQueryFilters();
     return;
   }
   loadingPatternVariants.value = true;
   try {
-    const seed = await getDataJustPattern(seedId);
-    const groupName = resolvePatternGroupName(seed);
-    patternGroupName.value =
-      groupName ||
-      (seed?.productShortName ?? '').trim() ||
-      (seed?.productName ?? '').trim() ||
-      '';
-    if (!patternGroupName.value) {
-      message.warning('无法解析图案系列，请换一条图案');
-      applyBlankQueryFilters();
+    const results = await Promise.all(
+      ids.map((id) => loadOnePatternSeries(id)),
+    );
+    if (revision !== patternVariantsRevision) {
       return;
     }
-    const res = await getDataJustPatternPage({
-      pageNo: 1,
-      pageSize: -1,
-      keyword: patternGroupName.value,
-    });
-    const list = (res.list ?? []).filter(
-      (r: FdmdataDataJustPatternApi.Pattern) =>
-        resolvePatternGroupName(r) === patternGroupName.value,
+    if (results.includes(null)) {
+      message.warning('部分图案无法解析图案系列，请换一条图案');
+    }
+    const names: string[] = [];
+    const rowById = new Map<number, FdmdataDataJustPatternApi.Pattern>();
+    for (const r of results) {
+      if (!r || names.includes(r.groupName)) {
+        continue;
+      }
+      names.push(r.groupName);
+      for (const row of r.rows) {
+        if (row.id != null && !rowById.has(row.id)) {
+          rowById.set(row.id, row);
+        }
+      }
+    }
+    const list = [...rowById.values()];
+    list.sort(
+      (a, b) =>
+        names.indexOf(resolvePatternGroupName(a)) -
+          names.indexOf(resolvePatternGroupName(b)) ||
+        extractSizeLWKey(a.attr1).localeCompare(extractSizeLWKey(b.attr1)),
     );
-    list.sort((a, b) =>
-      extractSizeLWKey(a.attr1).localeCompare(extractSizeLWKey(b.attr1)),
-    );
+    patternGroupNames.value = names;
     patternVariantRows.value = list;
+    // 增减系列时保留仍存在的已勾选尺寸
+    selectedPatternSkuIds.value = selectedPatternSkuIds.value.filter((id) =>
+      rowById.has(id),
+    );
   } finally {
-    loadingPatternVariants.value = false;
-    applyBlankQueryFilters();
+    if (revision === patternVariantsRevision) {
+      loadingPatternVariants.value = false;
+      applyBlankQueryFilters();
+    }
   }
 }
 
 async function handlePatternFamilyChange(v: unknown) {
-  const id =
-    v == null || v === '' ? undefined : typeof v === 'number' ? v : Number(v);
-  await loadPatternFamilyVariants(id);
+  const ids = (Array.isArray(v) ? v : [])
+    .map((x) => (typeof x === 'number' ? x : Number(x)))
+    .filter((x) => !Number.isNaN(x));
+  await loadPatternFamilyVariants(ids);
 }
 
 function onPatternVariantSelectionChange(keys: (string | number)[]) {
@@ -310,6 +359,10 @@ function clearPatternVariantSelection() {
 }
 
 const previewList = computed(() => preview.value?.rows ?? []);
+/** 多系列时同一空白版会有多行（含不可生成提示行），用编码 + 名称区分 */
+function previewRowKey(record: any) {
+  return `${record?.data?.itemCode ?? ''}|${record?.data?.productName ?? ''}`;
+}
 const willCreate = computed(() => preview.value?.willCreate ?? 0);
 const willSkip = computed(() => preview.value?.willSkip ?? 0);
 
@@ -402,7 +455,9 @@ async function handleGenerate() {
 
 function reset() {
   preview.value = null;
-  formState.patternFamilySeedId = undefined;
+  patternVariantsRevision++;
+  loadingPatternVariants.value = false;
+  formState.patternFamilySeedIds = [];
   formState.qty = 1;
   formState.salePrice = undefined;
   blankRows.value = [];
@@ -412,7 +467,7 @@ function reset() {
   resetPatternSkuSelect();
   blankStyleOptions.value = [];
   blankCategoryOptions.value = [];
-  patternGroupName.value = '';
+  patternGroupNames.value = [];
   patternVariantRows.value = [];
   selectedPatternSkuIds.value = [];
 }
@@ -538,21 +593,22 @@ const [VbenModal, modalApi] = useVbenModal({
             />
           </FormItem>
           <div class="flex flex-col gap-3">
-            <FormItem required label="选择图案（系列）">
+            <FormItem required label="选择图案（系列，可多选）">
               <div class="mb-2 text-xs text-muted-foreground">
-                搜索并<strong>任选一条</strong>该系列的图案
-                SKU（仅用于识别图案名）；再在下方勾选要参与组合的<strong>图案尺寸</strong>（可多选）。组合子商品仍为
+                搜索并为每个系列<strong>任选一条</strong>图案
+                SKU（仅用于识别图案名，可选多个系列）；再在下方勾选要参与组合的<strong>图案尺寸</strong>（可多选）。每条空白版会与每个已选系列各生成一条组合，组合子商品仍为
                 2 个：空白版 + 对应尺寸的图案 SKU。
               </div>
               <Select
-                v-model:value="formState.patternFamilySeedId"
+                v-model:value="formState.patternFamilySeedIds"
+                mode="multiple"
                 :loading="patternSkuLoading"
                 :options="patternSkuSelectOptions"
                 allow-clear
                 show-search
                 option-filter-prop="label"
                 :filter-option="false"
-                placeholder="输入商品编码/名称/款式搜索（至少 1 个字），任选一条同系列图案"
+                placeholder="输入商品编码/名称/款式搜索（至少 1 个字），每个系列任选一条图案"
                 :not-found-content="
                   patternSkuLoading ? undefined : '请输入关键词搜索图案'
                 "
@@ -561,10 +617,10 @@ const [VbenModal, modalApi] = useVbenModal({
                 @change="handlePatternFamilyChange"
               />
               <div
-                v-if="patternGroupName"
+                v-if="patternGroupNames.length"
                 class="mt-2 text-xs text-muted-foreground"
               >
-                当前系列：<strong>{{ patternGroupName }}</strong
+                当前系列：<strong>{{ patternGroupNames.join('、') }}</strong
                 >；已加载 <strong>{{ patternVariantRows.length }}</strong>
                 条尺寸行，请勾选参与组合的尺寸（长*宽匹配，忽略厚度）。
               </div>
@@ -628,7 +684,7 @@ const [VbenModal, modalApi] = useVbenModal({
         :data-source="previewList"
         :pagination="false"
         :scroll="{ x: 1180, y: 'calc(100vh - 520px)' }"
-        row-key="data.id"
+        :row-key="previewRowKey"
         bordered
       />
     </Spin>

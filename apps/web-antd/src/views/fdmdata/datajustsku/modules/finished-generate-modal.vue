@@ -169,7 +169,7 @@ const formState = reactive({
   materialKey: '',
   productType: '',
   category: '',
-  patternCostId: undefined as number | undefined,
+  patternCostIds: [] as number[],
   colors: [] as string[],
 });
 
@@ -181,7 +181,7 @@ const {
   onPatternDropdownOpen,
   resetPatternCostSelect,
   ensureSelectedOption,
-} = usePatternCostRemoteSelect(() => formState.patternCostId);
+} = usePatternCostRemoteSelect(() => formState.patternCostIds);
 
 const materialOptions = computed(() =>
   (blankOptions.value?.materials ?? []).map((x) => ({
@@ -204,16 +204,16 @@ const willCreate = computed(() => preview.value?.willCreate ?? 0);
 const willUpdate = computed(() => preview.value?.willUpdate ?? 0);
 const willSkip = computed(() => preview.value?.willSkip ?? 0);
 
-const selectedPatternCost = computed(() => {
-  const id = formState.patternCostId;
-  if (id == null) return null;
-  return patternCostList.value.find((p) => p.id === id) ?? null;
-});
+const selectedPatternCosts = computed(() =>
+  formState.patternCostIds
+    .map((id) => patternCostList.value.find((p) => p.id === id))
+    .filter((p) => p != null),
+);
 
 watch(
-  () => formState.patternCostId,
-  (id) => {
-    void ensureSelectedOption(id);
+  () => [...formState.patternCostIds],
+  (ids) => {
+    void ensureSelectedOption(ids);
   },
 );
 
@@ -240,7 +240,7 @@ function buildFinishedPayload(): FinishedGenReq {
     productType: formState.productType,
     category: formState.category,
     sizeTextBlock: buildSizeTextBlock(),
-    patternCostId: formState.patternCostId!,
+    patternCostIds: [...formState.patternCostIds],
     colors: [...formState.colors],
   };
 }
@@ -320,7 +320,7 @@ const [VbenModal, modalApi] = useVbenModal({
       formState.materialKey = '';
       formState.productType = '';
       formState.category = '';
-      formState.patternCostId = undefined;
+      formState.patternCostIds = [];
       formState.colors = [];
       resetPatternCostSelect();
       blankOptions.value = null;
@@ -441,8 +441,8 @@ async function handleGenerate() {
     :show-confirm-button="false"
   >
     <p class="mb-3 text-sm text-muted-foreground">
-      选择材质、分类和已维护的图案，再选择颜色及长、宽、厚。
-      系统会按所选尺寸组合生成规格；请先预览，核对商品编码和新增、覆盖数量后再确认生成。
+      选择材质、分类和已维护的图案（可多选），再选择颜色及长、宽、厚。
+      系统会按所选图案 × 尺寸组合 × 颜色生成规格；请先预览，核对商品编码和新增、覆盖数量后再确认生成。
     </p>
 
     <Form
@@ -483,12 +483,20 @@ async function handleGenerate() {
         </FormItem>
 
         <FormItem
-          label="图案（已维护）"
-          name="patternCostId"
-          :rules="[{ required: true, message: '请选择图案' }]"
+          label="图案（已维护，可多选）"
+          name="patternCostIds"
+          :rules="[
+            {
+              type: 'array',
+              required: true,
+              min: 1,
+              message: '请至少选择一个图案',
+            },
+          ]"
         >
           <Select
-            v-model:value="formState.patternCostId"
+            v-model:value="formState.patternCostIds"
+            mode="multiple"
             :loading="patternCostLoading"
             :options="patternCostSelectOptions"
             placeholder="输入图案名称或对照编码搜索（至少 1 个字）"
@@ -521,16 +529,20 @@ async function handleGenerate() {
       </div>
 
       <div
-        v-if="selectedPatternCost?.picUrl"
-        class="mb-3 flex items-center gap-2"
+        v-if="selectedPatternCosts.some((p) => p.picUrl)"
+        class="mb-3 flex flex-wrap items-center gap-2"
       >
         <span class="text-sm text-muted-foreground">图案预览</span>
-        <Image
-          :src="selectedPatternCost.picUrl"
-          :width="48"
-          :height="48"
-          class="rounded object-cover"
-        />
+        <template v-for="p in selectedPatternCosts" :key="p.id">
+          <Image
+            v-if="p.picUrl"
+            :src="p.picUrl"
+            :width="48"
+            :height="48"
+            :title="p.patternName"
+            class="rounded object-cover"
+          />
+        </template>
       </div>
 
       <FormItem required>
