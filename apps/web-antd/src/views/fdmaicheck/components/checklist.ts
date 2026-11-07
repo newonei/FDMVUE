@@ -163,12 +163,12 @@ export function headline(list: Checklist) {
 }
 
 /**
- * 默认展开还是收起：上次手动选过就按上次的；否则有没处理的需核对及以上问题时展开，只有提醒或全部通过时收起。
+ * 默认展开还是收起：上次手动选过就按上次的；否则有结论就展开，通过的项也要直接看得到。
  */
 export function defaultExpanded(list: Checklist, stored?: null | string) {
   if (stored === '1') return true;
   if (stored === '0') return false;
-  return list.openIssues.some((r) => r.open.some((f) => f.severity !== 'INFO'));
+  return list.total > 0;
 }
 
 export type DrawerFilter =

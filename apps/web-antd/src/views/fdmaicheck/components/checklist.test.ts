@@ -83,7 +83,7 @@ describe('aI 检查清单', () => {
     expect(list.issues[0]!.extra).toBe(true);
   });
 
-  it('opens when serious problems are waiting unless the user chose otherwise', () => {
+  it('opens whenever there are results unless the user chose otherwise', () => {
     const serious = buildChecklist([verdict('A', 'FAIL')], [finding(1, 'A')]);
     const mild = buildChecklist(
       [verdict('A', 'WARN')],
@@ -91,8 +91,9 @@ describe('aI 检查清单', () => {
     );
     const clean = buildChecklist([verdict('A', 'PASS')], []);
     expect(defaultExpanded(serious)).toBe(true);
-    expect(defaultExpanded(mild)).toBe(false);
-    expect(defaultExpanded(clean)).toBe(false);
+    expect(defaultExpanded(mild)).toBe(true);
+    expect(defaultExpanded(clean)).toBe(true);
+    expect(defaultExpanded(buildChecklist([], []))).toBe(false);
     expect(defaultExpanded(clean, '1')).toBe(true);
     expect(defaultExpanded(serious, '0')).toBe(false);
     expect(headline(clean)).toBe('');
