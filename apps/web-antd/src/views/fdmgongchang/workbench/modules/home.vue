@@ -27,7 +27,7 @@ const processOf = (code: string) => my.value.processes.find((p) => p.code === co
 const labelOf = (code: string) => processOf(code)?.label ?? code;
 const stageLabel = (code?: string) => job.options?.stages.find((s) => s.code === code)?.label ?? '';
 const stageUnit = (code?: string) => job.options?.stages.find((s) => s.code === code)?.unit ?? '';
-/** 发泡做板材、开片做片材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
+/** 发泡做板材、开片做已开片板材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
 const INTERMEDIATE = new Set(['BOARD', 'SHEET']);
 const intermediateOf = (task: FdmgongchangScheduleApi.Task) => {
   const p = processOf(task.process);

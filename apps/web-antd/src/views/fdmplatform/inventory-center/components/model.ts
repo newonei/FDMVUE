@@ -18,8 +18,8 @@ const filled = (value?: string) => (value ?? '').trim() !== '';
 export const STAGES: Array<{ code: string; label: string; unit: string }> = [
   { code: 'RAW', label: '原材料', unit: 'kg' },
   { code: 'BOARD', label: '板材', unit: '张' },
-  { code: 'SHEET', label: '片材', unit: '片' },
-  { code: 'CUT', label: '已立切片材', unit: '片' },
+  { code: 'SHEET', label: '已开片板材', unit: '片' },
+  { code: 'CUT', label: '片材', unit: '片' },
   { code: 'LAMINATED', label: '已贴合片材', unit: '片' },
   { code: 'EMBOSSED', label: '已压花片材', unit: '片' },
   { code: 'PUNCHED', label: '已冲裁半成品', unit: '件' },

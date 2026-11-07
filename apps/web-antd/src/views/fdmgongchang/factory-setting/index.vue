@@ -324,7 +324,7 @@ async function save() {
                 <span class="text-xs text-muted-foreground">产出{{ p.outputStageLabel }}</span>
               </Checkbox>
               <div class="flex flex-wrap items-center justify-end gap-1 text-xs text-muted-foreground">
-                <label :for="`capacity-machines-${p.code}`">台数</label>
+                <label :for="`capacity-machines-${p.code}`">{{ p.code === 'PACK' ? '流水线' : '台数' }}</label>
                 <InputNumber
                   :id="`capacity-machines-${p.code}`"
                   :disabled="!canEdit || !enabled.includes(p.code)"
@@ -365,13 +365,13 @@ async function save() {
                 />
                 {{ p.capacityUnit ?? p.outputUnit }}{{ p.code === 'SLICE' ? '板材' : '' }}/天
                 <template v-if="capacities[p.code]?.machines">
-                  <label :for="`capacity-crew-min-${p.code}`" class="ml-2">每台</label>
+                  <label :for="`capacity-crew-min-${p.code}`" class="ml-2">{{ p.code === 'PACK' ? '每条线' : '每台' }}</label>
                   <InputNumber
                     :id="`capacity-crew-min-${p.code}`"
                     :aria-label="`${p.label}每台最少人数`"
                     :disabled="!canEdit || !enabled.includes(p.code)"
                     :min="1"
-                    :max="10"
+                    :max="100"
                     :precision="0"
                     :value="capacities[p.code]?.crewMin ?? undefined"
                     :style="{ width: '3.5rem' }"
@@ -385,7 +385,7 @@ async function save() {
                     :aria-label="`${p.label}每台最多人数`"
                     :disabled="!canEdit || !enabled.includes(p.code)"
                     :min="1"
-                    :max="10"
+                    :max="100"
                     :precision="0"
                     :value="capacities[p.code]?.crewMax ?? undefined"
                     :style="{ width: '3.5rem' }"
