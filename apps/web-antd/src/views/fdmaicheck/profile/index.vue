@@ -453,6 +453,7 @@ onBeforeUnmount(stopDry);
               />
               <Space>
                 <Button @click="itemList?.add()">添加检查点</Button>
+                <Button @click="itemList?.openGroup()">新建分组</Button>
                 <Button
                   type="link"
                   @click="

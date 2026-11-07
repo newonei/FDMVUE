@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyGroup,
   draftFrom,
   draftProblem,
   groupItems,
@@ -148,5 +149,31 @@ describe('aI 单据检查配置', () => {
         departmentNotes: {},
       }),
     ).toBe('第 4 版');
+  });
+});
+
+describe('applyGroup', () => {
+  const make = () =>
+    ['单价', '数量', '附件', '交期'].map((name, i) => ({
+      ...newItem(i === 3 ? '交期' : undefined),
+      name,
+    }));
+
+  it('moves selected items into a new group', () => {
+    const items = make();
+    expect(applyGroup(items, null, ' 价格 ', new Set([0, 1]))).toBe('');
+    expect(items.map((i) => i.group)).toEqual(['价格', '价格', '', '交期']);
+  });
+
+  it('renames a group and returns unselected members to ungrouped', () => {
+    const items = make();
+    applyGroup(items, null, '价格', new Set([0, 1]));
+    expect(applyGroup(items, '价格', '金额', new Set([0]))).toBe('');
+    expect(items.map((i) => i.group)).toEqual(['金额', '', '', '交期']);
+  });
+
+  it('rejects empty or reserved names', () => {
+    expect(applyGroup(make(), null, ' ', new Set([0]))).not.toBe('');
+    expect(applyGroup(make(), null, '未分组', new Set([0]))).not.toBe('');
   });
 });

@@ -105,6 +105,26 @@ export function groupItems(items: FdmAiCheckApi.Item[]) {
   ];
 }
 
+/**
+ * 新建或编辑一个分组：选中的检查点归到 name 这组（和已有同名分组合并）；原来在 from 组、
+ * 这次没选中的退回未分组。返回的问题为空表示改好了。
+ */
+export function applyGroup(
+  items: FdmAiCheckApi.Item[],
+  from: null | string,
+  name: string,
+  selected: Set<number>,
+) {
+  const target = name.trim();
+  if (!target) return '请填写分组名称';
+  if (target === UNGROUPED) return `「${UNGROUPED}」不能当分组名称`;
+  for (const [index, item] of items.entries()) {
+    if (selected.has(index)) item.group = target;
+    else if (from && item.group?.trim() === from) item.group = '';
+  }
+  return '';
+}
+
 /** 近 30 天误报多的检查点：误报至少 2 次且占报出问题的三成以上。 */
 export function manyFalsePositives(stats?: FdmAiCheckApi.ItemStats) {
   if (!stats || stats.falsePositive < 2) return false;
