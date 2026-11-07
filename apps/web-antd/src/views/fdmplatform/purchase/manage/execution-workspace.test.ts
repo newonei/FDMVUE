@@ -44,7 +44,10 @@ vi.mock('@vben/common-ui', () => ({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
   }),
 }));
-vi.mock('@vben/utils', () => ({ formatDate: (value: unknown) => value }));
+vi.mock('@vben/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@vben/utils')>()),
+  formatDate: (value: unknown) => value,
+}));
 vi.mock('../../components/ActionDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));

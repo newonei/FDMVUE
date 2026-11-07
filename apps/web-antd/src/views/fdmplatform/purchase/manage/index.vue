@@ -101,6 +101,7 @@ import {
   DINGTALK_STAGE,
   dingTalkApprovalMessage,
   hasPayableBalance,
+  paymentSavedMessage,
 } from '../../finance/procurement/model';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
@@ -832,9 +833,13 @@ function openPayment() {
     return;
   paymentOpen.value = true;
 }
-async function paymentSaved(record: { code: string }) {
+async function paymentSaved(record: {
+  approvalStage?: string;
+  code: string;
+  status?: string;
+}) {
   paymentOpen.value = false;
-  message.success(`已登记付款 ${record.code}`);
+  message.success(paymentSavedMessage(record));
   financeRevision.value += 1;
   await financeChanged();
 }
@@ -2285,6 +2290,7 @@ watch(financeType, (value, previous) => {
       :reference="{
         orderAmount: financeSummary.orderAmount,
         paid: financeSummary.paidAmount,
+        pending: financeSummary.pendingPaymentAmount,
         unpaid: financeSummary.unpaidAmount,
         invoiced: invoicedTotal,
       }"

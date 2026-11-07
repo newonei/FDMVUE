@@ -42,7 +42,11 @@ vi.mock('@vben/common-ui', () => ({
     setup: (_, ctx) => () => h('main', ctx.slots.default?.()),
   }),
 }));
-vi.mock('@vben/utils', () => ({
+vi.mock('@vben/access', () => ({
+  useAccess: () => ({ hasAccessByCodes: () => false }),
+}));
+vi.mock('@vben/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@vben/utils')>()),
   formatDate: (value: unknown) => String(value ?? ''),
 }));
 vi.mock('../../components/ActionDialog.vue', () => ({

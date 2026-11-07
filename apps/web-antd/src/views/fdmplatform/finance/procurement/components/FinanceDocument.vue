@@ -30,6 +30,7 @@ import {
   downloadProcurementFinanceFile,
   getProcurementFinance,
   getProcurementFinanceFiles,
+  getProcurementFinanceSummary,
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
 import {
@@ -60,9 +61,15 @@ import {
   financeTitles,
   hasPayableBalance,
   payableBalance,
+  paymentActionNames,
+  paymentSavedMessage,
+  reviewedPayment,
 } from '../model';
 import FinanceForm from './FinanceForm.vue';
 import InvoiceSourcesDialog from './InvoiceSourcesDialog.vue';
+import PaymentDetail from './PaymentDetail.vue';
+import PaymentRecordDialog from './PaymentRecordDialog.vue';
+import PaymentReviewDialog from './PaymentReviewDialog.vue';
 import ReimbursementDetail from './ReimbursementDetail.vue';
 import ReimbursementForm from './ReimbursementForm.vue';
 const props = defineProps<{
@@ -99,8 +106,22 @@ const related = ref<{
 }>();
 /** 发票付款查看来源：采购单经付款记录挂的发票查，付款记录自己不存 */
 const sourcesOpen = ref(false);
+/** 采购登记的付款：财务确认付款弹窗、修改后重新提交弹窗 */
+const reviewOpen = ref(false);
+const paymentEdit = ref<{
+  available?: unknown;
+  reference?: Record<string, unknown>;
+}>();
 const childOpen = computed(
-  () => actionOpen.value || !!related.value || sourcesOpen.value,
+  () =>
+    actionOpen.value ||
+    !!related.value ||
+    sourcesOpen.value ||
+    reviewOpen.value ||
+    !!paymentEdit.value,
+);
+const paymentView = computed(
+  () => !!record.value && reviewedPayment(record.value),
 );
 const busy = computed(() => saving.value || submitting.value);
 const operationKeys = new Map<string, string>();
@@ -128,7 +149,9 @@ const supportsActionFiles = computed(
         ))),
 );
 const editable = computed(
-  () => !record.value || record.value.allowedActions.includes('UPDATE'),
+  () =>
+    !record.value ||
+    (!paymentView.value && record.value.allowedActions.includes('UPDATE')),
 );
 const actions = computed(
   () =>
@@ -372,6 +395,74 @@ async function openExpenseApproval(action: string) {
   actionDefinition.value = { action, title, description, fields };
   actionOpen.value = true;
 }
+/** 付款记录详情上的操作：确认付款、修改重新提交用专门的弹窗，其余沿用通用办理。 */
+async function paymentAction(action: string) {
+  const value = record.value;
+  if (busy.value || childOpen.value || !value) return;
+  pageError.value = '';
+  if (action === 'APPROVE') {
+    reviewOpen.value = true;
+    return;
+  }
+  if (action === 'SET_NO_INVOICE') {
+    void execute(action, { noInvoice: !value.noInvoice }, key(action));
+    return;
+  }
+  if (action === 'UPDATE') {
+    if (value.invoiceId) {
+      paymentEdit.value = {};
+      return;
+    }
+    try {
+      const summary = await getProcurementFinanceSummary(
+        value.contractId || 'standalone',
+        value.orderId,
+      );
+      if (record.value?.id !== value.id) return;
+      paymentEdit.value = {
+        available: summary.availablePaymentAmount,
+        reference: {
+          orderAmount: summary.orderAmount,
+          paid: summary.paidAmount,
+          pending: summary.pendingPaymentAmount,
+          unpaid: summary.unpaidAmount,
+        },
+      };
+    } catch (error) {
+      pageError.value = errorText(error);
+    }
+    return;
+  }
+  if (action === 'REJECT' || action === 'WITHDRAW') {
+    actionFiles.value = [];
+    actionDefinition.value =
+      action === 'REJECT'
+        ? {
+            action,
+            title: '退回采购',
+            description:
+              '退回后采购可以按原因修改再提交，系统会通知登记人。退回不计入已付。',
+            fields: [field('reason', '退回原因', 'textarea')],
+          }
+        : {
+            action,
+            title: '撤回付款',
+            description: '撤回后变回草稿，财务看不到，修改后可以重新提交。',
+            fields: [field('reason', '撤回原因', 'textarea')],
+          };
+    actionOpen.value = true;
+    return;
+  }
+  await openAction(action);
+}
+function paymentChanged(value: ProcurementFinanceRecord, text: string) {
+  reviewOpen.value = false;
+  paymentEdit.value = undefined;
+  record.value = value;
+  emit('updated', value);
+  void loadFiles();
+  message.success(text);
+}
 async function openAction(action: string) {
   if (busy.value) return;
   actionFiles.value = [];
@@ -495,7 +586,14 @@ async function execute(
     emit('updated', value);
     await loadFiles();
     let successMessage = '操作已完成';
-    if (action === 'WITHDRAW') successMessage = '已撤回，可在当前页面直接编辑';
+    if (paymentView.value && ['CONFIRM', 'SUBMIT'].includes(action))
+      successMessage = paymentSavedMessage(value);
+    else if (paymentView.value && action === 'REJECT')
+      successMessage = '已退回采购';
+    else if (paymentView.value && action === 'WITHDRAW')
+      successMessage = '已撤回为草稿';
+    else if (action === 'WITHDRAW')
+      successMessage = '已撤回，可在当前页面直接编辑';
     else if (value.approvalStage === DINGTALK_STAGE)
       successMessage = '已提交钉钉审批，通过后自动生效';
     else if (action === 'SUBMIT')
@@ -671,7 +769,7 @@ async function relatedUpdated() {
           @changed="reloadAfterApproval"
         />
         <Descriptions
-          v-if="record && type !== 'REIMBURSEMENT'"
+          v-if="record && type !== 'REIMBURSEMENT' && !paymentView"
           bordered
           size="small"
           :column="3"
@@ -744,7 +842,7 @@ async function relatedUpdated() {
           :migration="record.migration"
           :block-reasons="record.blockReasons"
           :native-source="{ kind: 'PROC_FINANCE', nativeId: record.id }"
-        /><Space v-if="type !== 'REIMBURSEMENT'" wrap>
+        /><Space v-if="type !== 'REIMBURSEMENT' && !paymentView" wrap>
           <Button
             v-for="action in actions"
             :key="action"
@@ -796,6 +894,13 @@ async function relatedUpdated() {
           @pay="pay"
           @allocate="allocateCosts"
           @download="download"
+        />
+        <PaymentDetail
+          v-else-if="record && paymentView"
+          :record="record"
+          :busy="busy || childOpen"
+          @action="paymentAction"
+          @sources="sourcesOpen = true"
         />
         <FinanceForm
           v-else-if="editable"
@@ -903,7 +1008,11 @@ async function relatedUpdated() {
             {{ actionNames[action] ?? action }}
           </Button>
         </Space>
-        <Card v-if="record" title="凭证附件" size="small">
+        <Card
+          v-if="record"
+          :title="paymentView ? '银行回单 / 凭证' : '凭证附件'"
+          size="small"
+        >
           <Space>
             <Button
               v-if="!editable"
@@ -1005,7 +1114,9 @@ async function relatedUpdated() {
                 action:
                   (type === 'REIMBURSEMENT'
                     ? expenseActionNames[String(entry.action)]
-                    : undefined) ??
+                    : paymentView
+                      ? paymentActionNames[String(entry.action)]
+                      : undefined) ??
                   actionNames[String(entry.action)] ??
                   (entry.action === 'CREATE' ? '新建草稿' : entry.action),
               }))
@@ -1038,6 +1149,29 @@ async function relatedUpdated() {
         />
       </template>
     </ActionDialog>
+    <PaymentReviewDialog
+      :open="reviewOpen && open"
+      :record="record"
+      @close="reviewOpen = false"
+      @uploaded="
+        reloadAfterApproval();
+        loadFiles();
+      "
+      @done="(value) => paymentChanged(value, `已确认付款 ${value.code}`)"
+    />
+    <PaymentRecordDialog
+      v-if="paymentEdit && record"
+      :open="!!paymentEdit && open"
+      :record="record"
+      :contract-id="record.contractId"
+      :order-id="record.orderId"
+      :order-code="String(record.orderCode ?? '')"
+      :currency="record.currency"
+      :available="paymentEdit.available"
+      :reference="paymentEdit.reference"
+      @close="paymentEdit = undefined"
+      @saved="(value) => paymentChanged(value, paymentSavedMessage(value))"
+    />
     <InvoiceSourcesDialog
       :open="sourcesOpen && open"
       :invoice-id="record?.invoiceId"

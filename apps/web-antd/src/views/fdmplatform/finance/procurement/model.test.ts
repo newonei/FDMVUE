@@ -16,8 +16,11 @@ import {
   hasPayableBalance,
   newExpense,
   newGroup,
+  paymentSavedMessage,
+  paymentStatus,
   procurementLineAmount,
   procurementOrderAmount,
+  reviewedPayment,
 } from './model';
 describe('采购财务编辑与金额口径', () => {
   it('生效历史显示中文操作名，同时保留既有审核记录的历史含义', () => {
@@ -267,5 +270,69 @@ describe('dingtalk approval labels', () => {
       dingTalkApprovalMessage({ approval: { processInstanceId: 'proc-1' } }),
     ).toContain('审批人可以在钉钉或本页');
     expect(dingTalkApprovalMessage({ approval: null })).toContain('正在发起');
+  });
+});
+
+describe('采购付款记录的财务审核', () => {
+  const order = { type: 'PAYMENT', sourceType: 'PURCHASE_ORDER' };
+  it('只有采购直接登记的付款走财务审核，迁入和请款付款不走', () => {
+    expect(reviewedPayment(order)).toBe(true);
+    expect(
+      reviewedPayment({ type: 'PAYMENT', sourceType: 'PURCHASE_INVOICE' }),
+    ).toBe(true);
+    expect(reviewedPayment({ ...order, migration: { batchId: 'b1' } })).toBe(
+      false,
+    );
+    expect(reviewedPayment({ type: 'PAYMENT' })).toBe(false);
+    expect(
+      reviewedPayment({ type: 'REQUEST', sourceType: 'PURCHASE_ORDER' }),
+    ).toBe(false);
+  });
+  it('按办理进度显示状态，未审核的不显示为已确认', () => {
+    expect(
+      financeRecordStatus({
+        ...order,
+        status: 'SUBMITTED',
+        approvalStage: 'FINANCE',
+      }),
+    ).toBe('待财务审核');
+    expect(financeRecordStatus({ ...order, status: 'REJECTED' })).toBe(
+      '财务退回',
+    );
+    expect(financeRecordStatus({ ...order, status: 'CONFIRMED' })).toBe(
+      '已付款',
+    );
+    expect(
+      financeRecordStatus({
+        ...order,
+        status: 'SUBMITTED',
+        approvalStage: 'DINGTALK',
+      }),
+    ).toBe('钉钉审批中');
+    expect(financeRecordStatus({ type: 'PAYMENT', status: 'CONFIRMED' })).toBe(
+      '已确认',
+    );
+    expect(paymentStatus({ status: 'SUBMITTED' }).step).toBe('REVIEW');
+    expect(paymentStatus({ status: 'REJECTED' }).step).toBe('REGISTER');
+    expect(paymentStatus({ status: 'PARTIALLY_REVERSED' }).step).toBe('DONE');
+  });
+  it('登记后提示要等财务确认才计入已付', () => {
+    expect(
+      paymentSavedMessage({
+        code: 'CGFK-1',
+        status: 'SUBMITTED',
+        approvalStage: 'FINANCE',
+      }),
+    ).toBe('付款 CGFK-1 已提交财务审核，财务确认付款后计入已付');
+    expect(
+      paymentSavedMessage({
+        code: 'CGFK-1',
+        status: 'SUBMITTED',
+        approvalStage: 'DINGTALK',
+      }),
+    ).toContain('钉钉审批');
+    expect(paymentSavedMessage({ code: 'CGFK-1', status: 'CONFIRMED' })).toBe(
+      '已确认付款 CGFK-1',
+    );
   });
 });

@@ -8,6 +8,7 @@ import type {
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
 import {
@@ -39,7 +40,15 @@ import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
 import InvoiceSourcesDialog from './components/InvoiceSourcesDialog.vue';
 import PaymentRecordDialog from './components/PaymentRecordDialog.vue';
-import { financeRecordStatus, financeTitles, invoiceStates } from './model';
+import {
+  financeRecordStatus,
+  financeTitles,
+  invoiceStates,
+  PAYMENT_AUDIT,
+  paymentSavedMessage,
+  paymentStatus,
+  reviewedPayment,
+} from './model';
 
 import '../../components/compact-tables.css';
 
@@ -61,6 +70,53 @@ const status = ref<string>();
 /** 采购付款里金智迁入的 9 千多条历史付款默认不混进来 */
 const source = ref<'ALL' | 'JINZHI' | 'NATIVE'>('NATIVE');
 const isPayment = computed(() => effectiveType.value === 'PAYMENT');
+const { hasAccessByCodes } = useAccess();
+const canAudit = computed(() => hasAccessByCodes([PAYMENT_AUDIT]));
+type PaymentTab = 'ALL' | 'CONFIRMED' | 'DRAFT' | 'REJECTED' | 'SUBMITTED';
+/** 付款记录按办理进度分页签；财务默认看待审核 */
+const paymentTab = ref<PaymentTab>(canAudit.value ? 'SUBMITTED' : 'ALL');
+const paymentTabs: Array<{ key: PaymentTab; label: string }> = [
+  { key: 'SUBMITTED', label: '待财务审核' },
+  { key: 'REJECTED', label: '财务退回' },
+  { key: 'CONFIRMED', label: '已付款' },
+  { key: 'DRAFT', label: '草稿' },
+  { key: 'ALL', label: '全部' },
+];
+/** 待审核、退回的笔数（同样的来源、关键词筛选） */
+const tabCounts = ref<Partial<Record<PaymentTab, number>>>({});
+const listStatus = computed(() => {
+  if (!isPayment.value) return status.value;
+  return paymentTab.value === 'ALL' ? undefined : paymentTab.value;
+});
+function selectTab(value: PaymentTab) {
+  if (paymentTab.value === value) return;
+  paymentTab.value = value;
+  page.value = 1;
+  void load();
+}
+async function loadCounts(run: number) {
+  const counts: Partial<Record<PaymentTab, number>> = {};
+  await Promise.all(
+    (['SUBMITTED', 'REJECTED'] as const).map(async (value) => {
+      try {
+        const result = await getProcurementFinancePage({
+          type: 'PAYMENT',
+          contractId: contractId.value,
+          orderId: orderId.value,
+          status: value,
+          keyword: keyword.value || undefined,
+          source: source.value === 'ALL' ? undefined : source.value,
+          pageNo: 1,
+          pageSize: 1,
+        });
+        counts[value] = result.total;
+      } catch {
+        /* 角标读不到时不显示，不影响列表 */
+      }
+    }),
+  );
+  if (run === sequence) tabCounts.value = counts;
+}
 const loading = ref(false);
 const pageError = ref('');
 const open = ref(false);
@@ -104,11 +160,12 @@ async function load() {
   loading.value = true;
   pageError.value = '';
   try {
+    if (isPayment.value) void loadCounts(run);
     const result = await getProcurementFinancePage({
       type: effectiveType.value,
       contractId: contractId.value,
       orderId: orderId.value,
-      status: status.value,
+      status: listStatus.value,
       keyword: keyword.value || undefined,
       source:
         isPayment.value && source.value !== 'ALL' ? source.value : undefined,
@@ -165,8 +222,9 @@ const columns = computed(() =>
           width: 200,
           ellipsis: true,
         },
-        { title: '状态', key: 'state', width: 100 },
-        { title: '操作', key: 'action', width: 110, fixed: 'right' as const },
+        { title: '状态', key: 'state', width: 110 },
+        { title: '登记人', key: 'creator', width: 100, ellipsis: true },
+        { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
       ]
     : [
         { title: '单据号 / 名称', key: 'name', width: 330 },
@@ -243,6 +301,7 @@ async function orderPicked(row: DocumentRow) {
       reference: {
         orderAmount: summary.orderAmount,
         paid: summary.paidAmount,
+        pending: summary.pendingPaymentAmount,
         unpaid: summary.unpaidAmount,
       },
     };
@@ -252,7 +311,7 @@ async function orderPicked(row: DocumentRow) {
 }
 function paymentSaved(record: ProcurementFinanceRecord) {
   paymentOrder.value = undefined;
-  message.success(`已登记付款 ${record.code}`);
+  message.success(paymentSavedMessage(record));
   void load();
 }
 function close() {
@@ -310,7 +369,11 @@ watch(
 <template>
   <Page
     :title="inMergedView ? undefined : financeTitles[effectiveType]"
-    description="独立办理采购资金与费用，确认付款后才计入已付，成本按自身来源与归属单独管理。"
+    :description="
+      isPayment
+        ? '采购登记付款记录，提交后由财务审核；财务确认已付款后才计入采购单已付。'
+        : '独立办理采购资金与费用，确认付款后才计入已付，成本按自身来源与归属单独管理。'
+    "
   >
     <Card>
       <Space direction="vertical" size="middle" style="width: 100%">
@@ -331,6 +394,7 @@ watch(
               load();
             "
           /><Select
+            v-if="!isPayment"
             v-model:value="status"
             :options="
               [
@@ -414,7 +478,26 @@ watch(
               {{ option.label }}
             </button>
           </div>
-</Space><Table
+        </Space>
+        <div v-if="isPayment" class="tabs" role="tablist" aria-label="付款进度">
+          <button
+            v-for="tab in paymentTabs"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            :class="{ on: paymentTab === tab.key }"
+            :aria-selected="paymentTab === tab.key"
+            @click="selectTab(tab.key)"
+          >
+            {{ tab.label }}
+            <span
+              v-if="tabCounts[tab.key]"
+              class="count"
+              :class="{ alert: tab.key === 'SUBMITTED' && canAudit }"
+              >{{ tabCounts[tab.key] }}</span>
+          </button>
+        </div>
+        <Table
           class="fdm-business-table"
           size="small"
           table-layout="fixed"
@@ -437,7 +520,7 @@ watch(
                 <TableSummaryCell :index="0" align="right">
                   <span class="num">{{ pageTotal }}</span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="1" :col-span="8">
+                <TableSummaryCell :index="1" :col-span="9">
                   本页合计
                 </TableSummaryCell>
               </TableSummaryRow>
@@ -465,14 +548,34 @@ watch(
               v-else-if="column.key === 'payer'"
               class="fdm-cell-line"
               :title="payerText(record as ProcurementFinanceRecord)"
-              >{{ payerText(record as ProcurementFinanceRecord) }}</span><Tag v-else-if="column.key === 'state'">
+              >{{ payerText(record as ProcurementFinanceRecord) }}</span><Tag
+              v-else-if="column.key === 'state'"
+              :color="
+                reviewedPayment(record)
+                  ? paymentStatus(record).color
+                  : undefined
+              "
+            >
               {{ financeRecordStatus(record) }}
-</Tag><Button
+</Tag><span v-else-if="column.key === 'creator'" class="fdm-cell-line">{{
+              record.createdByName || '—'
+            }}</span><Button
               v-else-if="column.key === 'action'"
-              type="link"
+              :type="
+                record.allowedActions?.includes('APPROVE') ? 'primary' : 'link'
+              "
+              :size="
+                record.allowedActions?.includes('APPROVE') ? 'small' : 'middle'
+              "
               @click="show(record as ProcurementFinanceRecord)"
             >
-              查看 / 办理
+              {{
+                record.allowedActions?.includes('APPROVE')
+                  ? '审核'
+                  : isPayment
+                    ? '查看'
+                    : '查看 / 办理'
+              }}
             </Button>
             <span v-else-if="column.key === 'money'" class="num">{{ moneyText(record as ProcurementFinanceRecord)
               }}<small v-if="!record.currency" class="muted">
@@ -577,6 +680,56 @@ watch(
 .source-switch button:focus-visible {
   outline: 2px solid hsl(var(--primary));
   outline-offset: -2px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.tabs button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs button.on {
+  font-weight: 600;
+  color: hsl(var(--primary));
+  border-bottom-color: hsl(var(--primary));
+}
+
+.tabs button:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+}
+
+.tabs .count {
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  background: hsl(var(--accent));
+  border-radius: 9px;
+}
+
+.tabs .count.alert {
+  color: #fff;
+  background: hsl(var(--destructive));
 }
 
 .sum-row :deep(td) {
