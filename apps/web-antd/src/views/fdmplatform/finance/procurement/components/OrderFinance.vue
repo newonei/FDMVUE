@@ -27,11 +27,13 @@ import { errorText } from '../../../data';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import {
-  DINGTALK_STAGE,
   financeRecordStatus,
   financeTitles,
   hasPayableBalance,
   invoiceStates,
+  paymentSavedMessage,
+  paymentStatus,
+  reviewedPayment,
 } from '../model';
 import FinanceDocument from './FinanceDocument.vue';
 import PaymentInvoiceDialog from './PaymentInvoiceDialog.vue';
@@ -141,11 +143,7 @@ function updated() {
 }
 function paymentSaved(record: ProcurementFinanceRecord) {
   paymentOpen.value = false;
-  message.success(
-    record.approvalStage === DINGTALK_STAGE
-      ? `付款 ${record.code} 已提交钉钉审批，通过后计入已付`
-      : `已登记付款 ${record.code}`,
-  );
+  message.success(paymentSavedMessage(record));
   updated();
 }
 function invoiceSaved() {
@@ -187,6 +185,12 @@ watch(
       </Descriptions.Item>
       <Descriptions.Item label="实际已付款">
         {{ money(summary.paidAmount) }}
+        <span
+          v-if="mode === 'payments' && Number(summary.pendingPaymentAmount) > 0"
+          class="pending"
+        >
+          （另有 {{ money(summary.pendingPaymentAmount) }} 待财务审核）
+        </span>
       </Descriptions.Item>
       <Descriptions.Item label="尚未付款">
         {{ money(summary.unpaidAmount) }}
@@ -304,7 +308,14 @@ watch(
                 {{ money(record.invoicedAmount) }}
               </small>
             </template>
-            <Tag v-else-if="column.key === 'state'">
+            <Tag
+              v-else-if="column.key === 'state'"
+              :color="
+                reviewedPayment(record)
+                  ? paymentStatus(record).color
+                  : undefined
+              "
+            >
               {{ financeRecordStatus(record) }}
             </Tag>
           </template>
@@ -477,6 +488,7 @@ watch(
       :reference="{
         orderAmount: summary.orderAmount,
         paid: summary.paidAmount,
+        pending: summary.pendingPaymentAmount,
         unpaid: summary.unpaidAmount,
         invoiced,
       }"
@@ -513,5 +525,10 @@ watch(
 
 .invoices .muted {
   display: inline;
+}
+
+.pending {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 </style>

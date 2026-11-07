@@ -6,10 +6,13 @@ import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-fin
 
 import { computed, ref, watch } from 'vue';
 
+import { useAccess } from '@vben/access';
+
 import {
   Alert,
   AutoComplete,
   Button,
+  Checkbox,
   Input,
   InputNumber,
   Modal,
@@ -19,6 +22,7 @@ import BigNumber from 'bignumber.js';
 
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
+  procurementFinanceAction,
   registerInvoicePayment,
   registerOrderPayment,
   uploadProcurementFinanceFile,
@@ -29,6 +33,7 @@ import { errorText } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
   payerAccountLabel,
+  PAYMENT_AUDIT,
   paymentDefaults,
   paymentFormProblem,
   paymentMethods,
@@ -36,7 +41,9 @@ import {
 
 /**
  * 登记付款记录（金智「付款记录」）：采购单每付一笔钱登记一张，分期付款就是登记多张。
- * 不经请款，保存即确认、计入已付；银行回单可一起上传，也可以之后在付款记录里补。
+ * 不经请款，提交后由财务审核，财务确认已付款才计入已付；有审核权限的财务可以勾选直接确认。
+ * 银行回单可一起上传，也可以之后在付款记录里补。
+ * 传了 record 是修改被退回（或草稿）的付款记录，保存后重新提交。
  * 传了 invoice 是付款发票「增加付款」：付款挂整张发票，不再选采购单（来源经发票查），
  * 带出发票金额、已付、剩余可付，本次付款不能超过剩余可付。
  */
@@ -61,11 +68,14 @@ const props = defineProps<{
   orderId: string;
   /** 本单已有的付款记录，用来带入上一笔的付款公司和收款账户 */
   previous?: Array<Record<string, unknown>>;
-  /** 采购单数据参考（金智同款）：采购金额、已付、未付、已收票 */
+  /** 修改被退回或草稿的付款记录，保存后重新提交 */
+  record?: ProcurementFinanceRecord;
+  /** 采购单数据参考（金智同款）：采购金额、已付、待审核、未付、已收票 */
   reference?: {
     invoiced?: unknown;
     orderAmount?: unknown;
     paid?: unknown;
+    pending?: unknown;
     unpaid?: unknown;
   };
   supplierName?: string;
@@ -76,6 +86,10 @@ const emit = defineEmits<{
 }>();
 
 const today = localDate();
+const { hasAccessByCodes } = useAccess();
+/** 财务可以不走审核，登记即确认已付款 */
+const canConfirm = computed(() => hasAccessByCodes([PAYMENT_AUDIT]));
+const confirmDirectly = ref(false);
 const payers = ref<ProcurementSetting[]>([]);
 const form = ref<PaymentForm>({});
 const files = ref<File[]>([]);
@@ -110,6 +124,9 @@ const referenceItems = computed(() => {
   return [
     { label: '采购金额', value: order },
     { label: '已付款金额', value: money(value.paid) },
+    ...(money(value.pending)?.gt(0)
+      ? [{ label: '待财务审核', value: money(value.pending) }]
+      : []),
     { label: '未付款金额', value: money(value.unpaid) },
     { label: '已收票额', value: invoiced },
     { label: '未收票额', value: order?.minus(invoiced) },
@@ -130,11 +147,26 @@ watch(
     key = crypto.randomUUID();
     error.value = '';
     files.value = [];
-    form.value = {
-      ...paymentDefaults(props.previous ?? [], props.supplierName),
-      paidAt: today,
-      amount: limit.value?.gt(0) ? limit.value.toFixed(0) : undefined,
-    };
+    confirmDirectly.value = false;
+    const record = props.record;
+    form.value = record
+      ? {
+          amount:
+            record.amount === undefined ? undefined : String(record.amount),
+          paidAt: record.paidAt ?? today,
+          payerEntityId: record.payerEntityId,
+          payerAccount: record.payerAccount,
+          paymentMethod: record.paymentMethod,
+          payeeName: record.payeeName,
+          payeeAccount: record.payeeAccount,
+          remark: record.remark,
+          noInvoice: record.noInvoice,
+        }
+      : {
+          ...paymentDefaults(props.previous ?? [], props.supplierName),
+          paidAt: today,
+          amount: limit.value?.gt(0) ? limit.value.toFixed(0) : undefined,
+        };
     try {
       payers.value = await getProcurementSettings('entities', {
         usage: 'PAY',
@@ -160,6 +192,36 @@ function pickFiles(event: Event) {
   input.value = '';
 }
 
+/** 修改被退回的付款：整单保存后重新提交（或财务直接确认），来源和已有回单不变。 */
+async function resubmit(
+  record: ProcurementFinanceRecord,
+  fields: Record<string, unknown>,
+  mode: 'CONFIRM' | 'SUBMIT',
+) {
+  const updated = await procurementFinanceAction(record.id, {
+    action: 'UPDATE',
+    expectedVersion: record.version,
+    idempotencyKey: `${key}:update`,
+    payload: {
+      ...fields,
+      name: record.name,
+      sourceType: record.sourceType,
+      contractId: record.invoiceId ? undefined : record.contractId || undefined,
+      orderId: record.invoiceId ? undefined : record.orderId,
+      invoiceId: record.invoiceId,
+      batchNo: record.batchNo,
+      noInvoice: form.value.noInvoice || undefined,
+      evidenceRefs: (record.evidenceRefs as string[] | undefined) ?? [],
+    },
+  });
+  return procurementFinanceAction(record.id, {
+    action: mode,
+    expectedVersion: updated.version,
+    idempotencyKey: `${key}:${mode.toLowerCase()}`,
+    payload: {},
+  });
+}
+
 async function save() {
   error.value = paymentFormProblem(form.value, today, props.available);
   if (error.value) return;
@@ -175,26 +237,32 @@ async function save() {
       payeeAccount: form.value.payeeAccount?.trim() || undefined,
       remark: form.value.remark?.trim() || undefined,
     };
-    let record = props.invoice
-      ? await registerInvoicePayment(
-          {
-            ...fields,
-            invoiceId: props.invoice.id,
-            name: `${props.invoice.code ?? props.invoice.invoiceNo ?? '发票'} 付款`,
-          },
-          key,
-        )
-      : await registerOrderPayment(
-          {
-            ...fields,
-            contractId:
-              props.contractId === 'standalone' ? '' : props.contractId,
-            orderId: props.orderId,
-            name: `${props.orderCode ?? ''} 付款`.trim(),
-            noInvoice: form.value.noInvoice || undefined,
-          },
-          key,
-        );
+    const mode =
+      canConfirm.value && confirmDirectly.value ? 'CONFIRM' : 'SUBMIT';
+    let record: ProcurementFinanceRecord;
+    if (props.record) record = await resubmit(props.record, fields, mode);
+    else if (props.invoice)
+      record = await registerInvoicePayment(
+        {
+          ...fields,
+          invoiceId: props.invoice.id,
+          name: `${props.invoice.code ?? props.invoice.invoiceNo ?? '发票'} 付款`,
+        },
+        key,
+        mode,
+      );
+    else
+      record = await registerOrderPayment(
+        {
+          ...fields,
+          contractId: props.contractId === 'standalone' ? '' : props.contractId,
+          orderId: props.orderId,
+          name: `${props.orderCode ?? ''} 付款`.trim(),
+          noInvoice: form.value.noInvoice || undefined,
+        },
+        key,
+        mode,
+      );
     // 回单在付款确认后追加；某个文件失败不影响已登记的付款
     const failed: string[] = [];
     for (const [index, file] of files.value.entries()) {
@@ -210,7 +278,7 @@ async function save() {
     }
     if (failed.length > 0)
       Modal.warning({
-        title: `付款已提交，${failed.length} 个回单没传上`,
+        title: `付款已保存，${failed.length} 个回单没传上`,
         content: `${failed.join('、')}，可在付款记录里补传。`,
       });
     emit('saved', record);
@@ -227,9 +295,11 @@ async function save() {
   <Modal
     :open="open"
     :title="
-      invoice
-        ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
-        : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
+      record
+        ? `修改付款 · ${record.code}`
+        : invoice
+          ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
+          : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
     "
     width="760px"
     :mask-closable="false"
@@ -241,12 +311,12 @@ async function save() {
         show-icon
         :message="
           invoice
-            ? `付款针对整张发票，可以只付一部分，之后再增加付款。来源采购单跟随发票，不用重新选。${
+            ? `付款针对整张发票，可以只付一部分，之后再增加付款。来源采购单跟随发票，不用重新选。提交后由财务审核付款。${
                 limit
                   ? `本次最多可付 ${currency ?? ''} ${limit.toFormat(2)}。`
                   : ''
               }`
-            : `每付一笔钱登记一张付款记录，分期付款就登记多张。${
+            : `每付一笔钱登记一张付款记录，分期付款就登记多张。提交后由财务审核付款，财务确认已付款后才计入已付。${
                 limit
                   ? `本单还可登记 ${currency ?? ''} ${limit.toFormat(2)}。`
                   : ''
@@ -274,7 +344,7 @@ async function save() {
           />
         </label>
         <label>
-          <span><em>*</em>付款日期</span>
+          <span><em>*</em>付款日期（财务确认时填实际日期）</span>
           <Input v-model:value="form.paidAt" type="date" :max="today" />
         </label>
         <label>
@@ -344,7 +414,7 @@ async function save() {
             </ul>
           </div>
         </div>
-        <label v-if="!invoice">
+        <label v-if="!invoice && !record?.invoiceId">
           <span><em>*</em>是否收票</span>
           <Select
             :value="form.noInvoice ? 'NONE' : 'PENDING'"
@@ -358,8 +428,17 @@ async function save() {
       </div>
     </div>
     <template #footer>
+      <Checkbox
+        v-if="canConfirm"
+        v-model:checked="confirmDirectly"
+        class="direct"
+      >
+        我是财务，已转账，直接确认已付款
+      </Checkbox>
       <Button @click="emit('close')">取消</Button>
-      <Button type="primary" :loading="saving" @click="save"> 登记付款 </Button>
+      <Button type="primary" :loading="saving" @click="save">
+        {{ confirmDirectly && canConfirm ? '确认已付款' : '提交财务审核' }}
+      </Button>
     </template>
   </Modal>
 </template>
@@ -369,6 +448,11 @@ async function save() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.direct {
+  float: left;
+  margin-top: 5px;
 }
 
 .sheet {

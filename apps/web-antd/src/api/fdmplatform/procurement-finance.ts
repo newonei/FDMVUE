@@ -77,6 +77,14 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   invoices?: PurchaseInvoice[];
   invoicedAmount?: Decimal;
   invoiceState?: 'INVOICED' | 'NOT_REQUIRED' | 'PARTIAL' | 'PENDING';
+  /** 付款记录：登记人、最近一次提交与财务审核的经办人和时间 */
+  createdByName?: string;
+  submittedAt?: string;
+  submittedByName?: string;
+  reviewedAt?: string;
+  reviewedByName?: string;
+  reviewAction?: 'APPROVE' | 'CONFIRM' | 'REJECT';
+  actorNames?: Record<string, string>;
 }
 /** 付款记录的内容（金智「付款记录」）：每付一笔钱登记一张，分期就是多张。 */
 export interface OrderPaymentInput {
@@ -139,12 +147,18 @@ export function procurementFinanceAction(
   );
 }
 /**
- * 登记付款记录：建单后直接确认，确认即计入已付。幂等键按调用方给的前缀区分，
+ * 付款登记后怎么办：SUBMIT 提交财务审核（采购登记，财务确认付款后才计入已付）；
+ * CONFIRM 直接确认已付款（只有财务有权限）。
+ */
+export type PaymentRegisterMode = 'CONFIRM' | 'SUBMIT';
+/**
+ * 登记付款记录：建单后提交财务审核（或财务直接确认）。幂等键按调用方给的前缀区分，
  * 中途失败重试时已建好的单不会重复。
  */
 export async function registerOrderPayment(
   input: OrderPaymentInput,
   key: string,
+  mode: PaymentRegisterMode = 'SUBMIT',
 ) {
   return registerPayment(
     {
@@ -153,9 +167,14 @@ export async function registerOrderPayment(
       sourceType: 'PURCHASE_ORDER',
     },
     key,
+    mode,
   );
 }
-async function registerPayment(payload: Record<string, unknown>, key: string) {
+async function registerPayment(
+  payload: Record<string, unknown>,
+  key: string,
+  mode: PaymentRegisterMode,
+) {
   const draft = await createProcurementFinance({
     type: 'PAYMENT',
     idempotencyKey: `${key}:create`,
@@ -166,13 +185,13 @@ async function registerPayment(payload: Record<string, unknown>, key: string) {
   if (draft.status !== 'DRAFT') return draft;
   try {
     return await procurementFinanceAction(draft.id, {
-      action: 'CONFIRM',
+      action: mode,
       expectedVersion: draft.version,
-      idempotencyKey: `${key}:confirm`,
+      idempotencyKey: `${key}:${mode === 'CONFIRM' ? 'confirm' : 'submit'}`,
       payload: {},
     });
   } catch (error) {
-    // 确认没过就把草稿取消，不在采购单下留半截付款；调用方换新键重试
+    // 提交没过就把草稿取消，不在采购单下留半截付款；调用方换新键重试
     await procurementFinanceAction(draft.id, {
       action: 'CANCEL',
       expectedVersion: draft.version,
@@ -189,12 +208,17 @@ export interface InvoicePaymentInput extends Omit<
 > {
   invoiceId: string;
 }
-/** 发票付款登记：同样建单后确认（登记确认流程不变），确认后计入发票已付。 */
+/** 发票付款登记：同样建单后提交财务审核，财务确认后计入发票已付。 */
 export async function registerInvoicePayment(
   input: InvoicePaymentInput,
   key: string,
+  mode: PaymentRegisterMode = 'SUBMIT',
 ) {
-  return registerPayment({ ...input, sourceType: 'PURCHASE_INVOICE' }, key);
+  return registerPayment(
+    { ...input, sourceType: 'PURCHASE_INVOICE' },
+    key,
+    mode,
+  );
 }
 export function getProcurementFinanceSummary(
   contractId: string,

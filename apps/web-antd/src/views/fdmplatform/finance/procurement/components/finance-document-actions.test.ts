@@ -46,7 +46,10 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
 vi.mock('#/api/fdmplatform/business-documents', () => ({
   downloadBusinessDocumentFile: vi.fn(),
 }));
-vi.mock('@vben/utils', () => ({ formatDate: (value: string) => value }));
+vi.mock('@vben/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@vben/utils')>()),
+  formatDate: (value: string) => value,
+}));
 vi.mock('./FinanceForm.vue', () => ({
   default: defineComponent({
     props: {
@@ -136,6 +139,15 @@ vi.mock('./ReimbursementForm.vue', () => ({
             '保存报销草稿',
           ),
         ]);
+    },
+  }),
+}));
+vi.mock('./PaymentReviewDialog.vue', () => ({
+  default: defineComponent({
+    props: { open: Boolean },
+    setup(props) {
+      return () =>
+        props.open ? h('section', { 'data-review-dialog': true }) : null;
     },
   }),
 }));
@@ -263,6 +275,7 @@ vi.mock('ant-design-vue', () => {
     Card: block,
     Descriptions: descriptions,
     Space: block,
+    Steps: block,
     Table: block,
     Tag: block,
     message: { success: mocks.success, warning: vi.fn() },
@@ -875,5 +888,79 @@ describe('采购财务直接生效与历史单据兼容', () => {
     expect(first[2][0].name).toBe('payment-evidence.pdf');
     expect(retry[1]).toEqual(first[1]);
     expect(retry[2]).toEqual(first[2]);
+  });
+
+  it('采购登记的付款显示财务审核进度，财务可确认付款或填写原因退回', async () => {
+    const payment = {
+      ...document(),
+      id: 'payment',
+      code: 'CGFK-1',
+      name: '付款申请',
+      type: 'PAYMENT',
+      sourceType: 'PURCHASE_ORDER',
+      contractId: 'c1',
+      orderId: 'o1',
+      approvalStage: 'FINANCE',
+      allowedActions: ['APPROVE', 'REJECT', 'WITHDRAW'],
+      payeeName: '申请付款的供应商',
+      createdByName: '采购甲',
+    };
+    mocks.read.mockResolvedValue(payment);
+    mocks.action.mockResolvedValue({
+      ...payment,
+      status: 'REJECTED',
+      approvalStage: undefined,
+      allowedActions: ['UPDATE', 'SUBMIT', 'CANCEL'],
+    });
+    const host = await mount({ type: 'PAYMENT', recordId: 'payment' });
+    expect(host.textContent).toContain('待财务审核');
+    expect(host.textContent).toContain('财务审核');
+    expect(host.textContent).not.toContain('确认实际付款');
+    click(host, '确认已付款');
+    await nextTick();
+    expect(host.querySelector('[data-review-dialog]')).toBeTruthy();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+  it('财务退回必须写原因，退回后显示可修改重新提交', async () => {
+    const payment = {
+      ...document(),
+      id: 'payment',
+      code: 'CGFK-1',
+      name: '付款申请',
+      type: 'PAYMENT',
+      sourceType: 'PURCHASE_ORDER',
+      approvalStage: 'FINANCE',
+      allowedActions: ['APPROVE', 'REJECT', 'WITHDRAW'],
+      payeeName: '申请付款的供应商',
+    };
+    mocks.read.mockResolvedValue(payment);
+    mocks.action.mockResolvedValue({
+      ...payment,
+      status: 'REJECTED',
+      approvalStage: undefined,
+      allowedActions: ['UPDATE', 'SUBMIT', 'CANCEL'],
+      history: [{ action: 'REJECT', reason: '已核验', actorId: 9 }],
+    });
+    const host = await mount({ type: 'PAYMENT', recordId: 'payment' });
+    click(host, '退回采购');
+    await nextTick();
+    expect(host.querySelector('[data-fields]')?.textContent).toContain(
+      '退回原因',
+    );
+    (
+      host.querySelector<HTMLElement>(
+        '[data-confirm-action]',
+      ) as HTMLButtonElement
+    ).click();
+    await vi.waitFor(() =>
+      expect(mocks.success).toHaveBeenCalledWith('已退回采购'),
+    );
+    expect(mocks.action.mock.calls[0]![1]).toMatchObject({
+      action: 'REJECT',
+      expectedVersion: 4,
+      payload: { reason: '已核验' },
+    });
+    expect(host.textContent).toContain('财务退回：已核验');
+    expect(host.textContent).toContain('修改并提交审核');
   });
 });

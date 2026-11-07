@@ -305,14 +305,93 @@ export function financeStatus(value: unknown) {
 }
 /** 钉钉审批中的单据只能在钉钉里同意或拒绝。 */
 export const DINGTALK_STAGE = 'DINGTALK';
+/** 采购付款审核（财务确认付款、退回、直接确认）的按钮权限。 */
+export const PAYMENT_AUDIT = 'fdmplatform:procurement-payments:audit';
+/** 采购登记的付款等财务审核时的 approvalStage。 */
+export const FINANCE_STAGE = 'FINANCE';
 export function financeRecordStatus(record: {
   approvalStage?: unknown;
+  migration?: unknown;
+  sourceType?: unknown;
+  status?: unknown;
+  type?: unknown;
+}) {
+  if (record.status === 'SUBMITTED' && record.approvalStage === DINGTALK_STAGE)
+    return '钉钉审批中';
+  if (reviewedPayment(record)) return paymentStatus(record).label;
+  return financeStatus(record.status);
+}
+/** 采购直接登记的付款（挂采购单或付款发票、不是金智迁入的）：要财务审核付款。 */
+export function reviewedPayment(record: {
+  migration?: unknown;
+  sourceType?: unknown;
+  type?: unknown;
+}) {
+  return (
+    record.type === 'PAYMENT' &&
+    !record.migration &&
+    ['PURCHASE_INVOICE', 'PURCHASE_ORDER'].includes(String(record.sourceType))
+  );
+}
+export type PaymentStep = 'DONE' | 'REGISTER' | 'REVIEW';
+/** 付款记录的状态标签、颜色和走到哪一步（采购登记 → 财务审核 → 已付款）。 */
+export function paymentStatus(record: {
+  approvalStage?: unknown;
+  status?: unknown;
+}): { color: string; label: string; step: PaymentStep } {
+  switch (record.status) {
+    case 'CANCELLED': {
+      return { color: 'default', label: '已取消', step: 'REGISTER' };
+    }
+    case 'CONFIRMED': {
+      return { color: 'success', label: '已付款', step: 'DONE' };
+    }
+    case 'PARTIALLY_REVERSED': {
+      return { color: 'orange', label: '部分退款', step: 'DONE' };
+    }
+    case 'REJECTED': {
+      return { color: 'error', label: '财务退回', step: 'REGISTER' };
+    }
+    case 'REVERSED': {
+      return { color: 'default', label: '已全额退款', step: 'DONE' };
+    }
+    case 'SUBMITTED': {
+      return record.approvalStage === DINGTALK_STAGE
+        ? { color: 'processing', label: '钉钉审批中', step: 'REVIEW' }
+        : { color: 'processing', label: '待财务审核', step: 'REVIEW' };
+    }
+    default: {
+      return { color: 'default', label: '草稿', step: 'REGISTER' };
+    }
+  }
+}
+/** 付款记录操作记录里的动作名。 */
+export const paymentActionNames: Record<string, string> = {
+  APPROVAL_TERMINATED: '钉钉审批已撤销',
+  APPROVE: '财务确认付款',
+  CANCEL: '取消',
+  CONFIRM: '确认付款',
+  CREATE: '登记',
+  REJECT: '财务退回',
+  REVERSE: '退款 / 冲销',
+  SET_NO_INVOICE: '设置收票',
+  SUBMIT: '提交财务审核',
+  UPDATE: '修改',
+  UPLOAD: '上传回单',
+  WITHDRAW: '撤回',
+};
+/** 登记付款之后的提示：提交审核、钉钉审批或财务直接确认。 */
+export function paymentSavedMessage(record: {
+  approvalStage?: unknown;
+  code?: string;
   status?: unknown;
 }) {
-  return record.status === 'SUBMITTED' &&
-    record.approvalStage === DINGTALK_STAGE
-    ? '钉钉审批中'
-    : financeStatus(record.status);
+  const code = record.code ?? '';
+  if (record.status === 'SUBMITTED' && record.approvalStage === DINGTALK_STAGE)
+    return `付款 ${code} 已提交钉钉审批，通过后计入已付`;
+  if (record.status === 'SUBMITTED')
+    return `付款 ${code} 已提交财务审核，财务确认付款后计入已付`;
+  return `已确认付款 ${code}`;
 }
 /** 钉钉审批中的提示；发起失败时说明原因和处理办法。 */
 export function dingTalkApprovalMessage(record: { approval?: unknown }) {
