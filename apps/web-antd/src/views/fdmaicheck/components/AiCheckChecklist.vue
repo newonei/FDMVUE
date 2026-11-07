@@ -20,6 +20,8 @@ const props = defineProps<{
   actions?: boolean;
   handling?: number;
   list: Checklist;
+  /** 未检查那组的说明 */
+  pendingHint?: string;
 }>();
 const emit = defineEmits<{
   handle: [finding: FdmAiCheckApi.Finding, status: FdmAiCheckApi.FindingStatus];
@@ -169,6 +171,32 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
           <button type="button" class="ck-pchip">{{ row.name }}</button>
         </Popover>
       </div>
+    </template>
+
+    <!-- 配置了但还没有结论的检查点：没检查过的单据也能看到会查哪些点 -->
+    <template v-if="list.pending.length">
+      <div class="ck-group">
+        <span class="ck-mark sm is-pending">○</span>
+        未检查 {{ list.pending.length }}
+        <span class="ck-hint">{{ pendingHint }}</span>
+      </div>
+      <ul class="ck-rows">
+        <li v-for="row in list.pending" :key="row.key" class="ck-row">
+          <span class="ck-mark sm is-pending">○</span>
+          <span class="ck-body">
+            <span class="ck-line">
+              <span class="ck-name is-muted">{{ row.name }}</span>
+              <span class="ck-src">{{
+                row.source === 'RULE' ? '规则' : 'AI'
+              }}</span>
+              <span v-if="row.group" class="ck-src">· {{ row.group }}</span>
+            </span>
+            <span v-if="row.description" class="ck-basis">
+              {{ row.description }}
+            </span>
+          </span>
+        </li>
+      </ul>
     </template>
 
     <div v-if="handledIssues.length" class="ck-handled">
@@ -442,5 +470,16 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
 
 .ck-toggle {
   padding-inline: 0;
+}
+
+.ck-name.is-muted {
+  font-weight: 400;
+  color: var(--ant-color-text-secondary, #595959);
+}
+
+.is-pending {
+  color: var(--ant-color-text-quaternary, #bfbfbf);
+  background: var(--ant-color-bg-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--ant-color-border, #d9d9d9);
 }
 </style>

@@ -72,6 +72,7 @@ describe('aI 检查清单', () => {
       WARN: 2,
       NOT_APPLICABLE: 1,
       UNKNOWN: 0,
+      PENDING: 0,
     });
     expect(headline(list)).toBe('问题 1 等 3 项需处理');
   });
@@ -112,5 +113,47 @@ describe('aI 检查清单', () => {
     expect(filterRows(list, 'PASS').map((r) => r.name)).toEqual(['单价']);
     expect(filterRows(list, 'UNKNOWN').map((r) => r.name)).toEqual(['交期']);
     expect(filterRows(list, 'ALL', '附').map((r) => r.name)).toEqual(['附件']);
+  });
+
+  it('lists configured check points even before any check', () => {
+    const items: FdmAiCheckApi.CheckPoint[] = [
+      { source: 'RULE', checkCode: 'PRICE_MISSING', name: '单价已填写' },
+      {
+        source: 'AI',
+        checkCode: 'ATTACH',
+        name: '附件和合同对不上',
+        group: '附件',
+        description: '核对附件',
+      },
+    ];
+    const never = buildChecklist(undefined, [], items);
+    expect(never.total).toBe(2);
+    expect(never.pending.map((r) => r.key)).toEqual([
+      'RULE|PRICE_MISSING',
+      'AI|ATTACH',
+    ]);
+    expect(never.pending[1]?.description).toBe('核对附件');
+    expect(defaultExpanded(never)).toBe(true);
+
+    // AI 没跑：规则有结论，AI 检查点仍列为未检查；报了问题的检查点不算未检查
+    const rulesOnly = buildChecklist(
+      [verdict('PRICE_MISSING', 'PASS', 'RULE')],
+      [],
+      items,
+    );
+    expect(rulesOnly.tally.PASS).toBe(1);
+    expect(rulesOnly.tally.PENDING).toBe(1);
+    expect(filterRows(rulesOnly, 'PENDING').map((r) => r.key)).toEqual([
+      'AI|ATTACH',
+    ]);
+    const withFinding = buildChecklist(
+      undefined,
+      [finding(1, 'ATTACH')],
+      items,
+    );
+    expect(withFinding.pending.map((r) => r.key)).toEqual([
+      'RULE|PRICE_MISSING',
+    ]);
+    expect(withFinding.issues.map((r) => r.key)).toEqual(['AI|ATTACH']);
   });
 });

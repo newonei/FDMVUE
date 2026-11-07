@@ -48,8 +48,18 @@ let polls = 0;
 let seq = 0;
 
 const list = computed(() =>
-  buildChecklist(result.value?.latest?.checks, result.value?.findings ?? []),
+  buildChecklist(
+    result.value?.latest?.checks,
+    result.value?.findings ?? [],
+    result.value?.items,
+  ),
 );
+const pendingHint = computed(() => {
+  if (result.value?.running) return '正在检查，稍后自动刷新';
+  if (!result.value?.latest)
+    return '单据保存后会自动检查，也可以点「重新检查」';
+  return '这次检查没有覆盖（检查后新加的，或 AI 没有运行），点「重新检查」';
+});
 const expanded = computed(() =>
   defaultExpanded(list.value, expandChoice.value),
 );
@@ -265,6 +275,7 @@ defineExpose({ reload: () => load(true) });
         class="ai-check-list"
         :list="list"
         :handling="handling"
+        :pending-hint="pendingHint"
         actions
         @handle="startHandle"
       />
