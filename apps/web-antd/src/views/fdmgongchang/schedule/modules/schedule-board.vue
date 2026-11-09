@@ -238,6 +238,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
         <Button v-if="canConfirm" :loading="releasing" block type="primary" @click="releasePackages">下发任务包（只排发泡先后，不定日期）</Button>
         <p class="m-0">按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。</p>
         <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
+        <p v-if="canGenerate" class="m-0">AI 只排发泡的先后（同配方、同板材、同颜色合成一个任务）；确认下发时，开片以后由系统按工序生成任务包。</p>
         <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
       </section>
 
