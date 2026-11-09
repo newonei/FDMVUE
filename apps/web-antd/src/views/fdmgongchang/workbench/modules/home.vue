@@ -10,6 +10,7 @@ import { getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
 import TaskMaterials from '../../schedule/modules/task-materials.vue';
 import { factoryToday } from '../../shared/factory-date';
+import { upstreamBadge } from '../../shared/upstream';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
 
@@ -187,7 +188,14 @@ watch(
             排单是 {{ formatQty(task.plannedQuantity) }} {{ task.unit }}，按上道报的良品改成了 {{ formatQty(task.quantity) }}。
           </p>
           <p v-if="task.reason" class="m-0 rounded-md bg-muted/50 px-3 py-2 text-sm">{{ task.reason }}</p>
-          <p v-if="task.upstreamNote" class="m-0 text-xs text-muted-foreground">{{ task.upstreamNote }}</p>
+          <p v-if="task.upstreamNote || upstreamBadge(task.upstreamState)" class="m-0 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span
+              v-if="upstreamBadge(task.upstreamState)"
+              class="rounded px-1.5 py-0.5 font-semibold"
+              :class="upstreamBadge(task.upstreamState)!.cls"
+            >{{ upstreamBadge(task.upstreamState)!.text }}</span>
+            <span v-if="task.upstreamNote">{{ task.upstreamNote }}</span>
+          </p>
 
           <div class="flex flex-col gap-1">
             <span class="text-xs font-semibold text-muted-foreground">要领的料（建议，报工时按实际改）</span>
