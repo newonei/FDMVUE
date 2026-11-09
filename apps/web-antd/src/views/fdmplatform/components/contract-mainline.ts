@@ -488,7 +488,7 @@ export function contractNextStep(
       title: '等待到货',
       description:
         '外采成品由工厂在「工序单 · 到货入库」收货并自动记到本合同；自制产品包装完工后自动回写进度。',
-      department: '工厂部门',
+      department: '黄石工厂',
       button: '去到货入库',
       action: {
         type: 'route',
