@@ -4,9 +4,9 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { computed, ref, watch } from 'vue';
 
-import { Empty, Spin } from 'ant-design-vue';
+import { Empty, Modal, Select, Spin } from 'ant-design-vue';
 
-import { getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
+import { getWorkbenchMates, getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
 import TaskMaterials from '../../schedule/modules/task-materials.vue';
 import { factoryToday } from '../../shared/factory-date';
@@ -19,7 +19,11 @@ import { useJob } from '../use-job';
  * 一张卡片写清楚做什么（产品规格、订单、数量、日期、排单说明）和要领哪些料，做完了点报工。
  */
 const emit = defineEmits<{
-  startTask: [task: FdmgongchangScheduleApi.Task, process: Api.Process];
+  startTask: [
+    task: FdmgongchangScheduleApi.Task,
+    process: Api.Process,
+    onBehalfOf?: { id: number; name: string },
+  ];
 }>();
 const job = useJob();
 
@@ -47,6 +51,33 @@ const todayText = computed(() => {
 });
 
 const myTasks = computed(() => my.value.tasks.filter((t) => processOf(t.process)));
+
+/** 组长代报：组员的任务（自己的不重复列）。 */
+const teamTasks = computed(() => {
+  const mine = new Set(myTasks.value.map((t) => t.id));
+  return (my.value.teamTasks ?? []).filter((t) => !mine.has(t.id) && teamProcessOf(t.process));
+});
+const teamProcessOf = (code: string) => (my.value.teamProcesses ?? []).find((p) => p.code === code);
+const behalf = ref<{ options: { label: string; value: number }[]; task: FdmgongchangScheduleApi.Task; userId?: number }>();
+
+/** 选替谁报：有人接了默认是接单的人。 */
+async function openBehalf(task: FdmgongchangScheduleApi.Task) {
+  const mates = await getWorkbenchMates(task.process);
+  const first = Number(String(task.workerIds ?? '').split(',').find(Boolean)) || undefined;
+  behalf.value = {
+    options: mates.map((m) => ({ label: m.team ? `${m.nickname}（${m.team}）` : m.nickname, value: m.userId })),
+    task,
+    userId: mates.some((m) => m.userId === first) ? first : undefined,
+  };
+}
+
+function confirmBehalf() {
+  const b = behalf.value;
+  if (!b?.userId) return;
+  const name = b.options.find((o) => o.value === b.userId)?.label ?? '';
+  behalf.value = undefined;
+  emit('startTask', b.task, teamProcessOf(b.task.process)!, { id: b.userId, name });
+}
 const dateText = (v: FdmgongchangScheduleApi.DateValue) => {
   if (!v) return '';
   const d = new Date(Array.isArray(v) ? `${v[0]}-${v[1]}-${v[2]}` : (v as number | string));
@@ -226,6 +257,44 @@ watch(
             做完了，报工
           </button>
         </article>
+      <section v-if="teamTasks.length > 0" class="flex flex-col gap-2">
+        <h2 class="m-0 text-sm font-bold">组员的任务（组长代报）<span class="ml-1 text-xs font-normal text-muted-foreground">{{ teamTasks.length }} 个，组员忘了报可以替他报</span></h2>
+        <ul class="m-0 flex list-none flex-col divide-y divide-border rounded-lg border border-border bg-card p-0">
+          <li v-for="t in teamTasks" :key="t.id" class="flex flex-wrap items-center gap-2 px-3 py-2">
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span class="truncate text-sm font-semibold">{{ teamProcessOf(t.process)?.label }} · {{ t.product || '备货' }}</span>
+              <span class="truncate text-xs text-muted-foreground">
+                {{ t.contractCode || '备货' }} · {{ formatQty(t.quantity) }} {{ t.unit }} · {{ t.workerNames || '还没人接' }}
+              </span>
+            </span>
+            <span
+              v-if="upstreamBadge(t.upstreamState)"
+              class="rounded px-1.5 py-0.5 text-xs font-semibold"
+              :class="upstreamBadge(t.upstreamState)!.cls"
+            >{{ upstreamBadge(t.upstreamState)!.text }}</span>
+            <button class="rounded-md border border-primary px-3 py-1 text-sm text-primary" type="button" @click="openBehalf(t)">代报</button>
+          </li>
+        </ul>
+      </section>
+      <Modal
+        :open="!!behalf"
+        title="替谁报工"
+        ok-text="下一步"
+        :ok-button-props="{ disabled: !behalf?.userId }"
+        @ok="confirmBehalf"
+        @cancel="behalf = undefined"
+      >
+        <p class="text-xs text-muted-foreground">工序单记在他名下，计件也算他的；代报人会写在备注里。</p>
+        <Select
+          v-if="behalf"
+          v-model:value="behalf.userId"
+          :options="behalf.options"
+          class="w-full"
+          placeholder="选组员"
+          show-search
+          :filter-option="(input: string, o: any) => String(o?.label ?? '').includes(input)"
+        />
+      </Modal>
     </main>
   </div>
 </template>

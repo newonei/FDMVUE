@@ -75,6 +75,9 @@ function next() {
       @back="emit('back')"
     />
     <main class="flex flex-1 flex-col gap-3 p-4">
+      <p v-if="job.onBehalfOf" class="m-0 rounded-md bg-warning/10 p-2.5 text-xs text-warning">
+        正在替 {{ job.onBehalfOf.name }} 报工：工序单和计件记在他名下，备注写你代报。
+      </p>
       <p v-if="reportedBefore > 0" class="m-0 rounded-md bg-primary/10 p-2.5 text-xs text-primary">
         这张单已经报过 {{ reportedBefore }} 次，共 {{ formatQty(job.order?.goodQuantity) }} {{ output?.unit }}，这次只报新做的。
       </p>
@@ -122,8 +125,8 @@ function next() {
           type="button"
           @click="job.finish = true"
         >
-          <b class="text-sm">这批都做完了</b>
-          <span class="text-xs text-muted-foreground">结束这张单</span>
+          <b class="text-sm">{{ job.prepare ? '这个任务做完了' : '这批都做完了' }}</b>
+          <span class="text-xs text-muted-foreground">{{ job.prepare ? '任务算报完' : '结束这张单' }}</span>
         </button>
         <button
           :class="!job.finish ? 'border-2 border-primary' : 'border border-border'"
@@ -132,7 +135,7 @@ function next() {
           @click="job.finish = false"
         >
           <b class="text-sm">先报这些，还没做完</b>
-          <span class="text-xs text-muted-foreground">单子留着，下次接着报</span>
+          <span class="text-xs text-muted-foreground">{{ job.prepare ? '任务留着，明天接着报' : '单子留着，下次接着报' }}</span>
         </button>
       </section>
 

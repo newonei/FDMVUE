@@ -70,6 +70,10 @@ export function createJob() {
     auxPicks: [] as AuxPick[],
     /** 纸质领料单照片（上传后的地址），按任务报工必传。 */
     sheets: [] as string[],
+    /** 防重复提交的键：进入报工时生成，重发同一个键只报一次。 */
+    requestKey: '',
+    /** 组长代报：替谁报。 */
+    onBehalfOf: undefined as undefined | { id: number; name: string },
     /** 加急：领用还在静置期的板材（一般发泡第二天才用）。 */
     urgent: false,
     urgentReason: '',

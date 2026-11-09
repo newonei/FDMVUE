@@ -105,6 +105,9 @@ type MixField = (typeof MIX_FIELDS)[number];
 const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, length: null, thickness: null, width: null });
 /** 板材静置天数：发泡后几天才能开片。 */
 const restDays = ref<number>(1);
+/** 收工时间（HH:mm，空为不提醒）、多报容差（%）。 */
+const closeTime = ref('');
+const tolerance = ref<number>(5);
 const savedMix = (key: MixField) => {
   const v = setting.value?.mixBoard?.[key];
   return v === null || v === undefined || v === '' ? null : Number(v);
@@ -167,7 +170,9 @@ const dirty = computed(() => {
     modelId.value !== savedModelId.value ||
     fillPrompt.value.trim() !== savedFillPrompt.value.trim() ||
     MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k)) ||
-    restDays.value !== (setting.value?.boardRestDays ?? 1)
+    restDays.value !== (setting.value?.boardRestDays ?? 1) ||
+    closeTime.value.trim() !== (setting.value?.reportCloseTime ?? '') ||
+    tolerance.value !== (setting.value?.reportTolerance ?? 5)
   );
 });
 
@@ -192,6 +197,8 @@ async function load() {
     fillPrompt.value = savedFillPrompt.value;
     mixBoard.value = Object.fromEntries(MIX_FIELDS.map((k) => [k, savedMix(k)])) as Record<MixField, null | number>;
     restDays.value = setting.value.boardRestDays ?? 1;
+    closeTime.value = setting.value.reportCloseTime ?? '';
+    tolerance.value = setting.value.reportTolerance ?? 5;
   } catch {
     loadError.value = true;
   } finally {
@@ -248,6 +255,8 @@ async function save() {
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
       mixBoard: { ...mixBoard.value },
       boardRestDays: restDays.value,
+      reportCloseTime: closeTime.value.trim(),
+      reportTolerance: tolerance.value,
       scheduleModelId: modelId.value || null,
       ...(fillPrompt.value.trim() === savedFillPrompt.value.trim() ? {} : { demandFillPrompt: fillPrompt.value.trim() }),
     });
@@ -464,6 +473,34 @@ async function save() {
             />
             天后才能开片
             <span class="text-xs text-muted-foreground">（1 = 第二天用；0 = 不限制。领了还在静置的板要选加急写原因）</span>
+          </label>
+          <label for="report-close-time" class="flex flex-wrap items-center gap-1 text-sm">
+            收工时间
+            <Input
+              id="report-close-time"
+              v-model:value="closeTime"
+              :disabled="!canEdit"
+              :maxlength="5"
+              :style="{ width: '5rem' }"
+              placeholder="21:00"
+              size="small"
+            />
+            <span class="text-xs text-muted-foreground">到点把已接单还没报完的任务和负数库存发给管理员；空着不提醒</span>
+          </label>
+          <label for="report-tolerance" class="flex flex-wrap items-center gap-1 text-sm">
+            多报容差
+            <InputNumber
+              id="report-tolerance"
+              v-model:value="tolerance"
+              :disabled="!canEdit"
+              :min="0"
+              :max="100"
+              :precision="0"
+              :style="{ width: '5rem' }"
+              size="small"
+            />
+            %
+            <span class="text-xs text-muted-foreground">报工累计超过任务数量这么多，记一条「多报待核」，不拦报工</span>
           </label>
         </section>
         <CustomProcessPanel

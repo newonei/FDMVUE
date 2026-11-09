@@ -54,6 +54,7 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   reportWorkbenchTask: mocks.report,
   returnWorkbenchMaterial: vi.fn(),
   supplementWorkbenchOrder: mocks.supplement,
+  TASK_REPORTED_TODAY: 1_215_024_000,
 }));
 
 const options = {
@@ -276,6 +277,8 @@ describe('workbench page', () => {
         outputs: [expect.objectContaining({ attrs: expect.objectContaining({ length: 190, thickness: 0.6, width: 130 }), defectQuantity: 6, goodQuantity: 380 })],
         sourceStage: 'BOARD',
         taskId: 31,
+        finish: true,
+        requestKey: expect.any(String),
       }),
     );
     expect(document.body.textContent).toContain('报工好了');
