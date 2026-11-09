@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ScheduleBoard from './modules/schedule-board.vue';
 
 const mocks = vi.hoisted(() => ({
+  mixQueue: vi.fn().mockResolvedValue([]),
+  moveMix: vi.fn().mockResolvedValue(true),
+  release: vi.fn(),
   confirm: vi.fn(),
   manual: vi.fn(),
   options: vi.fn(),
@@ -39,6 +42,9 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   getSchedule: mocks.get,
   getSchedules: mocks.list,
   regenerateSchedule: vi.fn(),
+  getMixQueue: mocks.mixQueue,
+  moveMixPackage: mocks.moveMix,
+  releaseTaskPackages: mocks.release,
 }));
 vi.mock('@vben/access', () => ({
   useAccess: () => ({ hasAccessByCodes: () => true }),
@@ -152,6 +158,31 @@ describe('schedule page', () => {
         expect.objectContaining({ process: 'PACK', workerIds: [] }),
       ],
     });
+  });
+
+  it('releases undated task packages and reorders the mix queue', async () => {
+    const mix = (id: number, product: string) => ({ ...({} as Api.Task), id, process: 'MIX', product, quantity: 10, unit: '张', undated: true });
+    mocks.mixQueue.mockResolvedValue([mix(1, '板材甲'), mix(2, '板材乙')]);
+    mocks.release.mockResolvedValue({ mixTasks: 1, scheduleId: 7, scheduleNo: 'PB1', tasks: 3, warnings: ['GD-2：辅料还不齐，包装先不下发'] });
+    mocks.get.mockResolvedValue({ ...base, id: 7 });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(ScheduleBoard, { factoryId: 1 });
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+    expect(document.body.textContent).toContain('发泡先后');
+    expect(document.body.textContent).toContain('板材乙');
+
+    clickButton('下发任务包（只排发泡先后，不定日期）');
+    await flush();
+    expect(mocks.release).toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+
+    const down = document.querySelector<HTMLButtonElement>('button[aria-label="板材甲 往后"]');
+    down?.click();
+    await flush();
+    expect(mocks.moveMix).toHaveBeenCalledWith(1, 2);
   });
 
   it('creates a manual dispatch without AI and edits a dispatched task', async () => {

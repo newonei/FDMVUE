@@ -85,6 +85,7 @@ describe('factory setting page', () => {
       boardRestDays: 1,
       reportCloseTime: '',
       reportTolerance: 5,
+      rules: {},
       mixBoard: { boardsPerBatch: null, length: null, thickness: null, width: null },
       scheduleModelId: null,
     });

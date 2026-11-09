@@ -102,6 +102,8 @@ export namespace FdmgongchangScheduleApi {
     upstreamNote?: null | string;
     /** 工作台用：按上道已报工的良品，现在最多能做多少。 */
     available?: Decimal | null;
+    /** 任务包：不定日期（workDate 是下发日期）；发泡按 sequence 排先后。 */
+    undated?: boolean | null;
     /** 工作台用：上道状态，只做标记不拦：NONE 没有上道 / WAITING 还没人接 / WORKING 在做 / PARTIAL 报了一部分 / DONE 报完了。 */
     upstreamState?: null | string;
   }
@@ -336,5 +338,43 @@ export function returnScheduleTasksToHall(taskIds: number[]) {
     '/fdmgongchang/schedule/task/return-to-hall',
     { taskIds },
     headers(),
+  );
+}
+
+/** 下发任务包的结果：下发了几个（其中发泡几个），以及没下发或要注意的。 */
+export interface FdmgongchangPackageRelease {
+  mixTasks: number;
+  scheduleId: number;
+  scheduleNo: string;
+  tasks: number;
+  warnings: string[];
+}
+
+/** 下发任务包：不经过 AI，发泡只排先后，其他工序按工序分包，都不定日期。 */
+export function releaseTaskPackages(data: {
+  note?: string;
+  productionOrderIds?: number[];
+}) {
+  return requestClient.post<FdmgongchangPackageRelease>(
+    '/fdmgongchang/schedule/package/release',
+    data,
+    headers(),
+  );
+}
+
+/** 发泡任务包的先后（还没报完的）。 */
+export function getMixQueue() {
+  return requestClient.get<FdmgongchangScheduleApi.Task[]>(
+    '/fdmgongchang/schedule/package/mix-queue',
+    headers(),
+  );
+}
+
+/** 发泡任务包挪到第几个。 */
+export function moveMixPackage(id: number, position: number) {
+  return requestClient.post<boolean>(
+    '/fdmgongchang/schedule/package/mix-move',
+    undefined,
+    { ...headers(), params: { id, position } },
   );
 }
