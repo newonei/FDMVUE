@@ -83,6 +83,8 @@ describe('factory setting page', () => {
       capacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
       enabledProcesses: ['MIX', 'SLICE', 'PACK'],
       boardRestDays: 1,
+      reportCloseTime: '',
+      reportTolerance: 5,
       mixBoard: { boardsPerBatch: null, length: null, thickness: null, width: null },
       scheduleModelId: null,
     });

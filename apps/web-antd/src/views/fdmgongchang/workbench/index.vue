@@ -6,7 +6,7 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { onMounted, ref } from 'vue';
 
-import { Button, message, Result, Spin } from 'ant-design-vue';
+import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
 
 import {
   createWorkbenchOrder,
@@ -17,8 +17,10 @@ import {
   reportWorkbenchTask,
   returnWorkbenchMaterial,
   supplementWorkbenchOrder,
+  TASK_REPORTED_TODAY,
 } from '#/api/fdmgongchang/workbench';
 
+import { businessError } from '../shared/business-error';
 import { useFactory } from '../shared/use-factory';
 import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
 import ConfirmStep from './modules/confirm-step.vue';
@@ -91,14 +93,25 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.sheets = [];
   job.urgent = false;
   job.urgentReason = '';
+  job.onBehalfOf = undefined;
+  job.requestKey = newRequestKey();
+}
+
+function newRequestKey() {
+  return `wb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /**
  * 按任务报工（下班前做完了来报）：系统按任务带出建议领料，工人对照实际改数量；
  * 接着报好的、坏的数量，最后确认计件、拍领料单，一次提交，任务完成。
  */
-async function startTask(task: FdmgongchangScheduleApi.Task, process: Api.Process) {
+async function startTask(
+  task: FdmgongchangScheduleApi.Task,
+  process: Api.Process,
+  onBehalfOf?: { id: number; name: string },
+) {
   reset(process, task);
+  job.onBehalfOf = onBehalfOf;
   loading.value = true;
   try {
     const prepare = await prepareWorkbenchTask(task.id);
@@ -203,18 +216,7 @@ async function submit() {
   const good = goodTotal(job);
   try {
     if (job.prepare && job.task) {
-      await reportWorkbenchTask({
-        auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
-        inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
-        issueSheetUrls: job.sheets,
-        outputs: outputPayload(job),
-        pieceworks: piecePayload(),
-        recipeBatches: job.recipe?.batches,
-        recipeCode: job.recipe?.code,
-        sourceStage: job.sourceStage,
-        taskId: job.task.id,
-        ...urgentPayload(),
-      });
+      await reportTask();
     } else if (job.createFinish) {
       await createWorkbenchOrder(createPayload(true));
     } else if (job.order) {
@@ -234,6 +236,47 @@ async function submit() {
     job.step = 'done';
   } finally {
     submitting.value = false;
+  }
+}
+
+/** 按任务报工：今天已经报过时问要不要追加一批；其他错误照常提示。 */
+async function reportTask(duplicateAction?: 'APPEND'): Promise<void> {
+  const payload = {
+    auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
+    duplicateAction,
+    finish: job.finish,
+    inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+    issueSheetUrls: job.sheets,
+    onBehalfOf: job.onBehalfOf?.id,
+    outputs: outputPayload(job),
+    pieceworks: piecePayload(),
+    recipeBatches: job.recipe?.batches,
+    recipeCode: job.recipe?.code,
+    requestKey: job.requestKey,
+    sourceStage: job.sourceStage,
+    taskId: job.task!.id,
+    ...urgentPayload(),
+  };
+  try {
+    await reportWorkbenchTask(payload);
+  } catch (error) {
+    const { code, msg } = businessError(error);
+    if (code === TASK_REPORTED_TODAY && !duplicateAction) {
+      const append = await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          cancelText: '不报了',
+          content: msg,
+          okText: '追加一批',
+          onCancel: () => resolve(false),
+          onOk: () => resolve(true),
+          title: '这个任务今天已经报过',
+        });
+      });
+      if (append) return reportTask('APPEND');
+      throw error;
+    }
+    message.error(msg);
+    throw error;
   }
 }
 

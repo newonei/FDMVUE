@@ -232,6 +232,10 @@ export namespace FdmgongchangFactorySettingApi {
   export interface Setting {
     /** 板材静置天数：发泡后几天才能开片，0 表示不限制。 */
     boardRestDays?: number;
+    /** 收工时间 HH:mm，空表示不提醒。 */
+    reportCloseTime?: string;
+    /** 多报容差（%）。 */
+    reportTolerance?: number;
     mixBoard?: MixBoard | null;
     /** 本厂对应的供应商：采购单的供应商是这些时，自动生成工厂订单。 */
     suppliers?: SupplierOption[];
@@ -254,6 +258,8 @@ export namespace FdmgongchangFactorySettingApi {
     mixBoard?: MixBoard;
     /** 板材静置天数（0-30）。 */
     boardRestDays?: number;
+    reportCloseTime?: string;
+    reportTolerance?: number;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];
     /** AI 排单用的模型；为空表示自动。 */

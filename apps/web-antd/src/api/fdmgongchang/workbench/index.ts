@@ -76,6 +76,14 @@ export namespace FdmgongchangWorkbenchApi {
     /** 加急：领用还在静置期的板材（一般发泡第二天才用），要写原因。 */
     urgent?: boolean;
     urgentReason?: string;
+    /** 防重复提交的键：同一个键只报一次（页面重发、点两次）。 */
+    requestKey?: string;
+    /** 组长代报：替谁报（用户编号）。 */
+    onBehalfOf?: number;
+    /** false：只报这一批，任务保持在做。 */
+    finish?: boolean;
+    /** 今天已经报过时再报传 APPEND（追加一批）。 */
+    duplicateAction?: 'APPEND';
   }
 
   export interface My {
@@ -88,6 +96,10 @@ export namespace FdmgongchangWorkbenchApi {
     tasks: FdmgongchangScheduleApi.Task[];
     /** 任务大厅：我有岗位的工序里没人接的任务；upstreamNote 是上道还没报工的提示，不拦接单。 */
     hall?: FdmgongchangScheduleApi.Task[];
+    /** 组长代报：本班组接了没报完的任务和没人接的任务；不是组长为空。 */
+    teamTasks?: FdmgongchangScheduleApi.Task[];
+    /** 组长代报用：本厂启用的全部工序。 */
+    teamProcesses?: Process[];
     team?: null | string;
     today: FdmgongchangScheduleApi.DateValue;
     todayAmount: Decimal;
@@ -210,8 +222,15 @@ export function getWorkbenchPickList() {
 }
 
 /** 报工：按实际领料扣库存、登记产出和计件、上传纸质领料单，任务完成；返回生成的工序单编号。 */
+/** 报工；今天已经报过时后端返回这个错误码，页面问要不要追加。 */
+export const TASK_REPORTED_TODAY = 1_215_024_000;
+
+/** 报工：错误不自动弹提示（今天已报过时由页面问要不要追加），其他错误页面自己提示。 */
 export function reportWorkbenchTask(
   data: FdmgongchangWorkbenchApi.TaskReportReq,
 ) {
-  return requestClient.post<number>(`${BASE}/task/report`, data, headers());
+  return requestClient.post<number>(`${BASE}/task/report`, data, {
+    ...headers(),
+    silent: true,
+  } as Record<string, unknown>);
 }
