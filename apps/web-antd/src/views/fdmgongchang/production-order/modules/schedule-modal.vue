@@ -64,7 +64,7 @@ async function submit() {
   >
     <div class="flex flex-col gap-3 text-sm">
       <p class="m-0 text-xs text-muted-foreground">
-        只把这几张单交给 AI 排（其他订单这次不排），AI 会参考库存、在制、人员和产能排出未来几天的任务。
+        只把这几张单交给 AI 排（其他订单这次不排），AI 参考库存、原料、人员和产能排出未来几天发泡的先后；确认下发时，开片以后由系统按工序生成任务包。
         出方案后在「AI 排单」里调整、确认下发。
       </p>
       <ul class="m-0 flex max-h-48 list-none flex-col divide-y divide-border overflow-auto rounded-md border border-border p-0">
