@@ -7,6 +7,9 @@ import {
   defaultExpanded,
   filterRows,
   headline,
+  rowBasis,
+  rowSummary,
+  tableRows,
 } from './checklist';
 
 const verdict = (
@@ -155,5 +158,62 @@ describe('aI 检查清单', () => {
       'RULE|PRICE_MISSING',
     ]);
     expect(withFinding.issues.map((r) => r.key)).toEqual(['AI|ATTACH']);
+  });
+});
+
+describe('tableRows / rowSummary', () => {
+  it('要处理的在最上面，已处理的问题排在缺资料之前', () => {
+    const list = buildChecklist(
+      [
+        verdict('pass', 'PASS'),
+        verdict('na', 'NOT_APPLICABLE'),
+        verdict('unknown', 'UNKNOWN'),
+        verdict('done', 'FAIL'),
+        verdict('open', 'WARN'),
+      ],
+      [finding(1, 'done', 'HIGH', 'RESOLVED'), finding(2, 'open')],
+      [
+        {
+          source: 'RULE',
+          checkCode: 'todo',
+          name: 'todo',
+          description: '查交期',
+        },
+      ],
+    );
+    expect(tableRows(list).map((r) => r.name)).toEqual([
+      'open',
+      'done',
+      'unknown',
+      'pass',
+      'na',
+      'todo',
+    ]);
+  });
+
+  it('摘要优先写没处理的问题，多条时写总数', () => {
+    const list = buildChecklist(
+      [verdict('a', 'FAIL')],
+      [finding(1, 'a', 'HIGH', 'RESOLVED'), finding(2, 'a'), finding(3, 'a')],
+    );
+    expect(rowSummary(list.issues[0]!)).toBe('问题 2（共 2 条）');
+  });
+
+  it('没有问题时写依据，规则通过没写依据时给默认说明', () => {
+    const list = buildChecklist(
+      [verdict('a', 'PASS'), { ...verdict('r', 'PASS', 'RULE'), basis: null }],
+      [],
+    );
+    expect(rowSummary(list.passed[0]!)).toBe('a 依据');
+    expect(rowSummary(list.passed[1]!)).toBe('系统规则没有发现问题');
+    expect(rowBasis(list.passed[0]!)).toBe('a 依据');
+  });
+
+  it('依据和问题一样时展开后不再重复', () => {
+    const list = buildChecklist(
+      [{ ...verdict('a', 'FAIL'), basis: '问题 1' }],
+      [finding(1, 'a')],
+    );
+    expect(rowBasis(list.issues[0]!)).toBe('');
   });
 });
