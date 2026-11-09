@@ -16,7 +16,9 @@ import {
   extraProcessesAt,
   formatQty,
   makeLabels,
+  sharedLocation,
   stageFlow,
+  stockColors,
   stockSpec,
   stockTitle,
   stockUnit,
@@ -88,22 +90,29 @@ const incomingWip = computed(() => {
   return `${incoming.value.label}在制 ${formatQty(wip?.inProgressQuantity)} ${unit ?? ''}`.trim();
 });
 
-/** 窄屏横向滚动时，库存和操作固定在右侧。 */
+/**
+ * 库存并入库存中心后不分批次，库位就是仓库：不再单列批次、库位（批次里是重复的物料编码，库位整页都是同一个仓库），
+ * 仓库名写在表格上方。物料一列带颜色色块和规格，编码单独一列、太长时省略。窄屏横向滚动时库存固定在右侧。
+ */
 const columns = computed<TableColumnsType<Api.Stock>>(() => [
   {
     key: 'item',
     title: props.stage === 'RAW' ? '原材料与分类' : '物料与规格',
   },
-  { dataIndex: 'batchNo', key: 'batchNo', title: '批次', width: 168 },
-  { dataIndex: 'location', key: 'location', title: '库位', width: 140 },
+  { ellipsis: true, key: 'code', title: '编码', width: 280 },
   {
     align: 'right' as const,
     fixed: 'right' as const,
     key: 'quantity',
     title: '库存',
-    width: 132,
+    width: 120,
   },
 ]);
+const warehouse = computed(() => sharedLocation(rows.value));
+
+function colorsOf(row: Api.Stock) {
+  return stockColors(props.stage, row.item, props.options);
+}
 
 function rowTitle(row: Api.Stock) {
   return stockTitle(
@@ -200,6 +209,9 @@ function onExtraSaved(text: string) {
           <span>附加工序：{{ extras.map((p) => p.label).join('、') }}</span>
         </template>
       </p>
+      <span v-if="warehouse" class="text-[13px] text-muted-foreground">
+        存放在 <b class="font-medium text-foreground">{{ warehouse }}</b>
+      </span>
       <span
         v-if="incomingWip"
         class="rounded-full bg-warning/15 px-2 text-xs leading-5 text-warning"
@@ -224,7 +236,7 @@ function onExtraSaved(text: string) {
           v-model:value="keyword"
           allow-clear
           :style="{ width: '15rem', maxWidth: '100%' }"
-          placeholder="搜索编码或批次"
+          placeholder="搜色号、颜色、尺寸或编码"
         >
           <template #prefix>
             <IconifyIcon class="text-muted-foreground" icon="lucide:search" />
@@ -264,32 +276,39 @@ function onExtraSaved(text: string) {
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'item'">
-          <div class="flex min-w-[220px] max-w-[460px] flex-col gap-0.5">
-            <span class="truncate text-[15px] font-semibold">
-              {{ rowTitle(record as Api.Stock) }}
-            </span>
-            <Tooltip placement="topLeft">
-              <template #title>
-                <div class="break-all font-mono">{{ record.itemCode }}</div>
-                <div v-if="rowDetail(record as Api.Stock).spec">
-                  {{ rowDetail(record as Api.Stock).spec }}
-                </div>
+          <div class="flex min-w-[240px] items-center gap-3">
+            <span v-if="colorsOf(record as Api.Stock).length > 0" class="flex shrink-0 gap-1">
+              <template v-for="c in colorsOf(record as Api.Stock)" :key="c.value">
+                <img
+                  v-if="c.imageUrl"
+                  :src="c.imageUrl"
+                  :alt="c.label"
+                  :title="c.label"
+                  class="stock-panel__swatch object-cover"
+                />
+                <span
+                  v-else
+                  :title="c.label"
+                  class="stock-panel__swatch"
+                  :class="{ 'stock-panel__swatch--empty': !c.hex }"
+                  :style="c.hex ? { background: c.hex } : undefined"
+                ></span>
               </template>
-              <span class="truncate text-xs text-muted-foreground">
-                <span class="font-mono">{{ record.itemCode }}</span>
-                <template v-if="rowDetail(record as Api.Stock).spec">
-                  <span class="mx-1.5 text-border">|</span>
-                  {{ rowDetail(record as Api.Stock).spec }}
-                </template>
+            </span>
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <span class="truncate text-[15px] font-semibold">
+                {{ rowTitle(record as Api.Stock) }}
               </span>
-            </Tooltip>
+              <span v-if="rowDetail(record as Api.Stock).spec" class="truncate text-xs text-muted-foreground">
+                {{ rowDetail(record as Api.Stock).spec }}
+              </span>
+            </div>
           </div>
         </template>
-        <template v-else-if="column.key === 'batchNo'">
-          <span class="whitespace-nowrap tabular-nums">{{ record.batchNo }}</span>
-        </template>
-        <template v-else-if="column.key === 'location'">
-          <span class="whitespace-nowrap">{{ record.location }}</span>
+        <template v-else-if="column.key === 'code'">
+          <Tooltip placement="topLeft" :title="record.itemCode">
+            <span class="block truncate font-mono text-xs text-muted-foreground">{{ record.itemCode }}</span>
+          </Tooltip>
         </template>
         <template v-else-if="column.key === 'quantity'">
           <span
@@ -309,7 +328,7 @@ function onExtraSaved(text: string) {
           <Button size="small" type="link" @click="load">重试</Button>
         </div>
         <div v-else-if="keyword.trim()" class="py-8 text-sm text-muted-foreground">
-          没有找到编码或批次包含「{{ keyword.trim() }}」的{{ stageLabel }}库存。
+          没有找到色号、颜色或编码包含「{{ keyword.trim() }}」的{{ stageLabel }}库存。
         </div>
         <div v-else class="py-8 text-sm text-muted-foreground">
           {{ stageLabel }}暂无库存。<template v-if="incoming">
@@ -346,6 +365,24 @@ function onExtraSaved(text: string) {
   font-weight: 500;
   color: hsl(var(--foreground) / 75%);
   letter-spacing: 0;
+}
+
+.stock-panel__swatch {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.stock-panel__swatch--empty {
+  background: repeating-linear-gradient(
+    45deg,
+    hsl(var(--muted)),
+    hsl(var(--muted)) 4px,
+    hsl(var(--background)) 4px,
+    hsl(var(--background)) 8px
+  );
 }
 
 .stock-panel__table :deep(.ant-table-thead > tr > th) {

@@ -57,6 +57,10 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface DictOption {
+    /** 颜色的色值 #RRGGBB（颜色配置里填的），其他字典为空 */
+    hex?: null | string;
+    /** 颜色的实物照片，其他字典为空 */
+    imageUrl?: null | string;
     label: string;
     value: string;
   }
