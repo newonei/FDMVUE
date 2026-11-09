@@ -103,6 +103,8 @@ function crewText(code: string) {
 const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
 type MixField = (typeof MIX_FIELDS)[number];
 const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, length: null, thickness: null, width: null });
+/** 板材静置天数：发泡后几天才能开片。 */
+const restDays = ref<number>(1);
 const savedMix = (key: MixField) => {
   const v = setting.value?.mixBoard?.[key];
   return v === null || v === undefined || v === '' ? null : Number(v);
@@ -164,7 +166,8 @@ const dirty = computed(() => {
     ) ||
     modelId.value !== savedModelId.value ||
     fillPrompt.value.trim() !== savedFillPrompt.value.trim() ||
-    MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k))
+    MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k)) ||
+    restDays.value !== (setting.value?.boardRestDays ?? 1)
   );
 });
 
@@ -188,6 +191,7 @@ async function load() {
     modelId.value = savedModelId.value;
     fillPrompt.value = savedFillPrompt.value;
     mixBoard.value = Object.fromEntries(MIX_FIELDS.map((k) => [k, savedMix(k)])) as Record<MixField, null | number>;
+    restDays.value = setting.value.boardRestDays ?? 1;
   } catch {
     loadError.value = true;
   } finally {
@@ -243,6 +247,7 @@ async function save() {
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
       mixBoard: { ...mixBoard.value },
+      boardRestDays: restDays.value,
       scheduleModelId: modelId.value || null,
       ...(fillPrompt.value.trim() === savedFillPrompt.value.trim() ? {} : { demandFillPrompt: fillPrompt.value.trim() }),
     });
@@ -445,6 +450,21 @@ async function save() {
           <p class="m-0 text-xs text-muted-foreground">
             每锅出几张不填时，按配方一锅的重量 × 出材率 ÷（板材体积 × 配方密度）估算。
           </p>
+          <label for="board-rest-days" class="flex flex-wrap items-center gap-1 text-sm">
+            板材静置
+            <InputNumber
+              id="board-rest-days"
+              v-model:value="restDays"
+              :disabled="!canEdit"
+              :min="0"
+              :max="30"
+              :precision="0"
+              :style="{ width: '5rem' }"
+              size="small"
+            />
+            天后才能开片
+            <span class="text-xs text-muted-foreground">（1 = 第二天用；0 = 不限制。领了还在静置的板要选加急写原因）</span>
+          </label>
         </section>
         <CustomProcessPanel
           class="mt-6"

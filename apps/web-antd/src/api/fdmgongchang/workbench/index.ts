@@ -73,6 +73,9 @@ export namespace FdmgongchangWorkbenchApi {
     remark?: string;
     sourceStage: string;
     taskId: number;
+    /** 加急：领用还在静置期的板材（一般发泡第二天才用），要写原因。 */
+    urgent?: boolean;
+    urgentReason?: string;
   }
 
   export interface My {

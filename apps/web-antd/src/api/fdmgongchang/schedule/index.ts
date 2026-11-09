@@ -102,6 +102,8 @@ export namespace FdmgongchangScheduleApi {
     upstreamNote?: null | string;
     /** 工作台用：按上道已报工的良品，现在最多能做多少。 */
     available?: Decimal | null;
+    /** 工作台用：上道状态，只做标记不拦：NONE 没有上道 / WAITING 还没人接 / WORKING 在做 / PARTIAL 报了一部分 / DONE 报完了。 */
+    upstreamState?: null | string;
   }
 
   /** 待领取 / 已接单 / 已报工 / 已关闭。 */

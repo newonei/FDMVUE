@@ -89,6 +89,8 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.prepare = undefined;
   job.auxPicks = [];
   job.sheets = [];
+  job.urgent = false;
+  job.urgentReason = '';
 }
 
 /**
@@ -134,7 +136,15 @@ function createPayload(finish: boolean) {
     productionOrderItemId: job.task ? undefined : job.productionItem?.id,
     scheduleTaskId: job.task?.id,
     sourceStage: job.sourceStage,
+    ...urgentPayload(),
   };
+}
+
+/** 领板材时勾了加急才带上。 */
+function urgentPayload() {
+  return job.urgent && job.sourceStage === 'BOARD'
+    ? { urgent: true, urgentReason: job.urgentReason.trim() }
+    : {};
 }
 
 function piecePayload() {
@@ -203,6 +213,7 @@ async function submit() {
         recipeCode: job.recipe?.code,
         sourceStage: job.sourceStage,
         taskId: job.task.id,
+        ...urgentPayload(),
       });
     } else if (job.createFinish) {
       await createWorkbenchOrder(createPayload(true));

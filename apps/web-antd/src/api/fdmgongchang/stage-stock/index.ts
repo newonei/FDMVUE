@@ -252,6 +252,9 @@ export namespace FdmgongchangStageStockApi {
 
   export interface OrderCreateReq {
     contractCode?: string;
+    /** 加急：领用还在静置期的板材，要写原因。 */
+    urgent?: boolean;
+    urgentReason?: string;
     finish: boolean;
     inputs: OrderInput[];
     /** 同时领的辅料（辅料库存行），不计入工序领料数量。 */

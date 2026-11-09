@@ -70,6 +70,9 @@ export function createJob() {
     auxPicks: [] as AuxPick[],
     /** 纸质领料单照片（上传后的地址），按任务报工必传。 */
     sheets: [] as string[],
+    /** 加急：领用还在静置期的板材（一般发泡第二天才用）。 */
+    urgent: false,
+    urgentReason: '',
   });
 }
 
