@@ -267,8 +267,15 @@ async function confirm() {
 async function doConfirm() {
   busy.value = true;
   try {
-    await confirmSchedule({ id: props.schedule.id, tasks: tasks.value });
+    const notices = await confirmSchedule({ id: props.schedule.id, tasks: tasks.value });
     message.success(`${props.schedule.scheduleNo} 已下发，开工序单时可以关联这些任务`);
+    if (Array.isArray(notices) && notices.length > 0) {
+      Modal.warning({
+        content: h('ul', { class: 'm-0 list-disc pl-4 text-sm' }, notices.map((n) => h('li', { key: n }, n))),
+        title: `已下发，有 ${notices.length} 处产能、机台超了，请现场安排`,
+        width: 560,
+      });
+    }
     emit('changed', props.schedule.id);
   } finally {
     busy.value = false;
@@ -364,6 +371,18 @@ function discard() {
           show-icon
         />
       </div>
+      <Alert
+        v-if="(schedule.plan.notices?.length ?? 0) > 0"
+        :message="`有 ${schedule.plan.notices!.length} 处产能、机台超了：只提醒，不影响下发`"
+        show-icon
+        type="warning"
+      >
+        <template #description>
+          <ul class="m-0 list-disc pl-4 text-xs">
+            <li v-for="n in schedule.plan.notices" :key="n">{{ n }}</li>
+          </ul>
+        </template>
+      </Alert>
       <Alert
         v-if="schedule.plan.warnings.length > 0"
         :message="`系统校验时调整了 ${schedule.plan.warnings.length} 处`"

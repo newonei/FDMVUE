@@ -61,6 +61,8 @@ export namespace FdmgongchangScheduleApi {
     tasks: PlanTask[];
     /** 系统校验时调整或剔除的内容。 */
     warnings: string[];
+    /** 只提醒、不拦下发的：产能超了、一台机一天的量超了、人员分组和机台数对不上。 */
+    notices?: string[];
   }
 
   export interface Task {
@@ -209,7 +211,8 @@ export function confirmSchedule(data: {
   id: number;
   tasks: FdmgongchangScheduleApi.PlanTask[];
 }) {
-  return requestClient.post<boolean>(
+  /** 返回只提醒、不拦下发的：产能、机台超了 */
+  return requestClient.post<string[]>(
     '/fdmgongchang/schedule/confirm',
     data,
     headers(),
