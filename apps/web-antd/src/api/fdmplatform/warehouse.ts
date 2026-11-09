@@ -152,6 +152,9 @@ export interface StockBalance extends StockProduct {
   costKnown: boolean;
   lastInDate?: string;
   lastOutDate?: string;
+  /** 最近一次出入库的单位成本 */
+  lastUnitCost?: Decimal;
+  updatedAt?: string;
 }
 
 /** 流水来源：采购入库、销售出库、作废、采购退货、生产入库、其它出库、调拨、盘点 */
@@ -468,9 +471,24 @@ export function getStocks(params: {
 }) {
   return requestClient.get<StockBalance[]>(`${base}/stocks`, { params });
 }
-export function getStockTxns(params: PageParams & { stockId?: string }) {
+/**
+ * 出入库流水。stockId 可传多个（同一产品在几个仓库的流水）；type 为 IN / OUT；
+ * dateFrom / dateTo 按业务日期筛选，含首尾。
+ */
+export function getStockTxns(
+  params: PageParams & {
+    dateFrom?: string;
+    dateTo?: string;
+    stockId?: string | string[];
+    type?: StockTxn['type'];
+  },
+) {
+  const { stockId, ...rest } = params;
   return requestClient.get<PageResult<StockTxn>>(`${base}/txns/page`, {
-    params,
+    params: {
+      ...rest,
+      stockId: Array.isArray(stockId) ? stockId.join(',') : stockId,
+    },
   });
 }
 export function getInboundLines(contractId: string, orderId?: string) {
