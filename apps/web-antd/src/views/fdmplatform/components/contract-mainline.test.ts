@@ -273,7 +273,7 @@ describe('contract main line', () => {
     });
     expect(next(bought)).toMatchObject({
       title: '等待到货',
-      department: '工厂部门',
+      department: '黄石工厂',
       button: '去到货入库',
       action: {
         type: 'route',

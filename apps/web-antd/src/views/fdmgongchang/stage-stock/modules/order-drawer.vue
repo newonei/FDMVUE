@@ -751,7 +751,7 @@ function operatorErrors() {
   const problems: string[] = [];
   if (props.mode === 'create' && operators.value.length === 0) {
     problems.push(
-      `还没有人分配「${processOption.value?.label ?? ''}」岗位，请先到 工厂部门 → 人员与工资 → 人员岗位 里分配。`,
+      `还没有人分配「${processOption.value?.label ?? ''}」岗位，请先到 黄石工厂 → 人员与工资 → 人员岗位 里分配。`,
     );
   } else if (props.mode === 'create' && !operatorUserId.value) {
     problems.push('请选择操作人。');

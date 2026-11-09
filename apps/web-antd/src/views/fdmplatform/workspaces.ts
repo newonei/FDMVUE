@@ -256,7 +256,7 @@ export const workspaces: Record<WorkspaceKey, WorkspaceDefinition> = {
   },
   'inventory-stock': {
     title: '库存与合同收发',
-    department: '工厂部门',
+    department: '黄石工厂',
     section: 'stock',
     description:
       '按货主、仓库、SKU 和规格管理库存，在已生效的合同范围内预留、收货和发货。',

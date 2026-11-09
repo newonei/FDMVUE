@@ -368,7 +368,7 @@ describe('order drawer', () => {
     await flush();
     expect(mocks.create).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain(
-      '还没有人分配「开片」岗位，请先到 工厂部门 → 人员与工资 → 人员岗位 里分配。',
+      '还没有人分配「开片」岗位，请先到 黄石工厂 → 人员与工资 → 人员岗位 里分配。',
     );
   });
 
