@@ -836,6 +836,37 @@ export function auxSpec(attrs: Api.ItemAttrs) {
 }
 
 /** 库存数量的单位：辅料按产品单位，其他阶段按阶段单位。 */
+/** 库存行的颜色：单色一个，贴合以后正反面不同时两个；带色值和照片，列表画色块用。 */
+export function stockColors(
+  stage: string,
+  attrs: Api.ItemAttrs | null | undefined,
+  options?: Api.Options,
+) {
+  if (!attrs || stage === 'RAW' || stage === 'AUX') return [];
+  const values = isLayered(stage)
+    ? [attrs.frontColor, attrs.backColor].filter(
+        (v, i, all) => v && all.indexOf(v) === i,
+      )
+    : [attrs.color];
+  return values
+    .filter((v): v is string => !!v)
+    .map((value) => {
+      const o = options?.colors.find((c) => c.value === value);
+      return {
+        hex: o?.hex ?? null,
+        imageUrl: o?.imageUrl ?? null,
+        label: o?.label ?? value,
+        value,
+      };
+    });
+}
+
+/** 这一页的库存都在同一个仓库时返回仓库名（库存并入库存中心后，库位就是仓库）。 */
+export function sharedLocation(rows: Array<{ location?: null | string }>) {
+  const names = new Set(rows.map((r) => r.location).filter(Boolean));
+  return names.size === 1 ? [...names][0]! : '';
+}
+
 export function stockUnit(
   stage: string,
   attrs: Api.ItemAttrs | null | undefined,

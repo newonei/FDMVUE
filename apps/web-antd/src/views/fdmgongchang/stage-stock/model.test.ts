@@ -22,10 +22,12 @@ import {
   pickAuxStocks,
   recipeCheck,
   recipePicks,
+  sharedLocation,
   sliceHint,
   slicePerBoard,
   stageColumns,
   stageFlow,
+  stockColors,
   stockSpec,
   stockTitle,
   stockUnit,
@@ -555,5 +557,30 @@ describe('开片按板材规格算片数', () => {
     applySliceYield(inputs, outputs);
     expect(outputs[0]!.goodQuantity).toBeUndefined();
     expect(sliceHint(inputs, outputs, outputs[0]!)).toContain('请手填良品');
+  });
+});
+
+describe('可领库存的颜色和仓库', () => {
+  const options = {
+    colors: [
+      { hex: '#2E6B4F', label: '菘蓝绿', value: 'C001' },
+      { imageUrl: 'https://x/pu.jpg', label: '紫色', value: 'PU' },
+    ],
+  } as unknown as Parameters<typeof stockColors>[2];
+
+  it('returns the swatch for single colors and both sides after laminating', () => {
+    expect(stockColors('BOARD', { color: 'C001' }, options)).toEqual([
+      { hex: '#2E6B4F', imageUrl: null, label: '菘蓝绿', value: 'C001' },
+    ]);
+    expect(stockColors('LAMINATED', { backColor: 'PU', frontColor: 'C001' }, options).map((c) => c.value)).toEqual(['C001', 'PU']);
+    expect(stockColors('LAMINATED', { backColor: 'PU', frontColor: 'PU' }, options)).toHaveLength(1);
+    expect(stockColors('RAW', { color: 'PU' }, options)).toEqual([]);
+    expect(stockColors('BOARD', { color: 'XX' }, options)[0]?.label).toBe('XX');
+  });
+
+  it('names the warehouse only when the whole page shares it', () => {
+    expect(sharedLocation([{ location: '黄石工厂半成品仓' }, { location: '黄石工厂半成品仓' }])).toBe('黄石工厂半成品仓');
+    expect(sharedLocation([{ location: 'A' }, { location: 'B' }])).toBe('');
+    expect(sharedLocation([])).toBe('');
   });
 });
