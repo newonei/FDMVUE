@@ -387,3 +387,44 @@ export function deleteFactoryRoute(id: number) {
     { headers: factoryHeaders(), params: { id } },
   );
 }
+
+/** 颜色配置：板材、片材等的色号，带色值和实物照片；字典 fdm_color 的颜色也在里面（只能补色值、照片）。各厂共用。 */
+export interface FdmgongchangColor {
+  /** 物料颜色字段存的值，进物料编码；新建时由系统生成 */
+  colorKey?: string;
+  code: string;
+  /** 是否系统字典里的颜色 */
+  dictLinked?: boolean;
+  hex?: null | string;
+  id?: number;
+  imageUrl?: null | string;
+  /** 在用的物料种数 */
+  itemCount?: number;
+  name?: null | string;
+  remark?: null | string;
+  sort?: null | number;
+  /** 0 启用 / 1 停用 */
+  status?: number;
+}
+
+export function getFactoryColors() {
+  return requestClient.get<FdmgongchangColor[]>(
+    '/fdmgongchang/factory-setting/color/list',
+    { headers: factoryHeaders() },
+  );
+}
+
+export function saveFactoryColor(data: FdmgongchangColor) {
+  return requestClient.post<number>(
+    '/fdmgongchang/factory-setting/color/save',
+    data,
+    { headers: factoryHeaders() },
+  );
+}
+
+export function deleteFactoryColor(id: number) {
+  return requestClient.delete<boolean>(
+    '/fdmgongchang/factory-setting/color/delete',
+    { headers: factoryHeaders(), params: { id } },
+  );
+}
