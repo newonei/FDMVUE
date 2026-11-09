@@ -33,6 +33,7 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import ColorPanel from './modules/color-panel.vue';
 import CustomProcessPanel from './modules/custom-process-panel.vue';
+import OpeningImportPanel from './modules/opening-import-panel.vue';
 import RoutePanel from './modules/route-panel.vue';
 import StandingPanel from './modules/standing-panel.vue';
 import SupplierPanel from './modules/supplier-panel.vue';
@@ -53,11 +54,14 @@ const { hasAccessByCodes } = useAccess();
 const canEdit = computed(() =>
   hasAccessByCodes(['fdmgongchang:factory-setting:update']),
 );
+const canImportOpening = computed(() =>
+  hasAccessByCodes(['fdmgongchang:stage-stock:setting']),
+);
 const canSeeWage = computed(() =>
   hasAccessByCodes(['fdmgongchang:wage-item:query']),
 );
 const activeTab = ref<
-  'ai' | 'colors' | 'processes' | 'routes' | 'suppliers' | 'wage'
+  'ai' | 'colors' | 'opening' | 'processes' | 'routes' | 'suppliers' | 'wage'
 >('processes');
 
 const factory = useFactory();
@@ -528,6 +532,9 @@ async function save() {
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="colors" tab="颜色配置">
             <ColorPanel :can-edit="canEdit" />
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="canImportOpening && setting" key="opening" tab="期初导入">
+            <OpeningImportPanel />
           </Tabs.TabPane>
           <Tabs.TabPane v-if="canSeeWage && setting" key="wage" tab="计价项目">
             <WageItemPanel :processes="allProcesses" />

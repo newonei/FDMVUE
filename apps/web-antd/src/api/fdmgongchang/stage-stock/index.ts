@@ -880,3 +880,42 @@ export function createExtraOrder(
     headers: factoryHeaders(),
   });
 }
+
+/** 期初库存导入：按属性建物料（色号自动进颜色配置），在本厂仓库开一张常规入库单。 */
+export namespace FdmgongchangOpeningApi {
+  export interface Row {
+    attrs: FdmgongchangStageStockApi.ItemAttrs;
+    /** 色号原文，颜色配置里没有时自动新建 */
+    colorCode?: string;
+    quantity: number;
+    /** 这一行的备注，如库位 */
+    remark?: string;
+  }
+
+  export interface Req {
+    idempotencyKey: string;
+    receivedDate?: string;
+    remark?: string;
+    rows: Row[];
+    source?: string;
+    stage: string;
+  }
+
+  export interface Result {
+    docCode: string;
+    docId: string;
+    lines: number;
+    newColors: number;
+    newItems: number;
+    quantity: number;
+    warehouseName: string;
+  }
+}
+
+export function importOpeningStock(data: FdmgongchangOpeningApi.Req) {
+  return requestClient.post<FdmgongchangOpeningApi.Result>(
+    `${BASE}/center/opening-import`,
+    data,
+    { headers: factoryHeaders(), timeout: 300_000 },
+  );
+}
