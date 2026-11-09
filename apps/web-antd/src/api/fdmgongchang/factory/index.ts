@@ -229,6 +229,15 @@ export namespace FdmgongchangFactorySettingApi {
     name: string;
   }
 
+  /** 一条检查规则：可插拔，每个厂自己选级别。 */
+  export interface Rule {
+    code: string;
+    description: string;
+    label: string;
+    level: string;
+    levels: Array<{ label: string; value: string }>;
+  }
+
   export interface Setting {
     /** 板材静置天数：发泡后几天才能开片，0 表示不限制。 */
     boardRestDays?: number;
@@ -236,6 +245,8 @@ export namespace FdmgongchangFactorySettingApi {
     reportCloseTime?: string;
     /** 多报容差（%）。 */
     reportTolerance?: number;
+    /** 检查规则：每条规则的可选级别和当前级别。 */
+    rules?: Rule[];
     mixBoard?: MixBoard | null;
     /** 本厂对应的供应商：采购单的供应商是这些时，自动生成工厂订单。 */
     suppliers?: SupplierOption[];
@@ -260,6 +271,8 @@ export namespace FdmgongchangFactorySettingApi {
     boardRestDays?: number;
     reportCloseTime?: string;
     reportTolerance?: number;
+    /** 检查规则级别（规则编码 → 级别）。 */
+    rules?: Record<string, string>;
     /** 本厂有哪些工序，至少一道。 */
     enabledProcesses: string[];
     /** AI 排单用的模型；为空表示自动。 */

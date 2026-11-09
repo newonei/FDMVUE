@@ -8,11 +8,19 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 
-import { Button, DatePicker, Empty, Input, message, Result, Select, Spin, Tag } from 'ant-design-vue';
+import { Button, DatePicker, Empty, Input, message, Modal, Result, Select, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { getWorkerList } from '#/api/fdmgongchang/factory';
-import { createManualSchedule, generateSchedule, getSchedule, getSchedules } from '#/api/fdmgongchang/schedule';
+import {
+  createManualSchedule,
+  generateSchedule,
+  getMixQueue,
+  getSchedule,
+  getSchedules,
+  moveMixPackage,
+  releaseTaskPackages,
+} from '#/api/fdmgongchang/schedule';
 
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, SCHEDULE_STATUS } from '../../shared/schedule';
@@ -77,7 +85,10 @@ async function load() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadMixQueue();
+});
 onBeforeUnmount(() => clearTimeout(pollTimer));
 watch(() => props.factoryId, load);
 watch(
@@ -141,6 +152,36 @@ async function createManual() {
   }
 }
 
+/** 发泡任务包的先后（还没报完的）。 */
+const mixQueue = ref<Api.Task[]>([]);
+const releasing = ref(false);
+
+async function loadMixQueue() {
+  mixQueue.value = await getMixQueue().catch(() => []);
+}
+
+/** 下发任务包：不经过 AI，发泡只排先后，其他工序按工序分包，都不定日期。 */
+async function releasePackages() {
+  releasing.value = true;
+  try {
+    const res = await releaseTaskPackages({ note: form.value.note.trim() || undefined });
+    Modal.info({
+      content: res.warnings.length > 0 ? `要注意：${res.warnings.join('；')}` : '都下发了，工人在工作台的任务大厅里就能看到。',
+      title: `已下发 ${res.tasks} 个任务包（发泡 ${res.mixTasks} 个）`,
+      width: 560,
+    });
+    await Promise.all([loadList(), loadMixQueue()]);
+    select(res.scheduleId);
+  } finally {
+    releasing.value = false;
+  }
+}
+
+async function moveMix(task: Api.Task, position: number) {
+  await moveMixPackage(task.id, position);
+  await loadMixQueue();
+}
+
 function retry(schedule: Api.Schedule) {
   const start = dateText(schedule.startDate);
   void generate({
@@ -194,8 +235,26 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             placeholder="例如：2 号压花机周三保养；HT-001 要提前；周日不开工"
           />
         </label>
-        <Button v-if="canGenerate" :loading="generating" block type="primary" @click="generate()">AI 生成排单</Button>
+        <Button v-if="canConfirm" :loading="releasing" block type="primary" @click="releasePackages">下发任务包（只排发泡先后，不定日期）</Button>
+        <p class="m-0">按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。</p>
+        <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
         <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
+      </section>
+
+      <section v-if="mixQueue.length > 0" class="flex flex-col gap-1 rounded-lg border border-border bg-card p-2">
+        <h3 class="m-0 px-1 py-1 text-sm font-semibold">发泡先后<span class="ml-1 text-xs font-normal text-muted-foreground">还没报完的发泡任务包，车间按这个顺序做</span></h3>
+        <ol class="m-0 flex list-none flex-col gap-1 p-0">
+          <li v-for="(t, i) in mixQueue" :key="t.id" class="flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/50">
+            <b class="w-5 shrink-0 text-right tabular-nums">{{ i + 1 }}</b>
+            <span class="min-w-0 flex-1 truncate" :title="`${t.contractCode ?? '备货'} · ${t.product} · ${t.quantity} ${t.unit}`">
+              {{ t.contractCode || '备货' }} · {{ t.product }} · {{ t.quantity }} {{ t.unit }}<template v-if="t.workerNames"> · {{ t.workerNames }}</template>
+            </span>
+            <template v-if="canConfirm">
+              <button :disabled="i === 0" class="px-1 text-muted-foreground disabled:opacity-30" type="button" :aria-label="`${t.product} 往前`" @click="moveMix(t, i)">↑</button>
+              <button :disabled="i === mixQueue.length - 1" class="px-1 text-muted-foreground disabled:opacity-30" type="button" :aria-label="`${t.product} 往后`" @click="moveMix(t, i + 2)">↓</button>
+            </template>
+          </li>
+        </ol>
       </section>
 
       <section class="flex flex-col gap-1 rounded-lg border border-border bg-card p-2">

@@ -98,6 +98,9 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   generateSchedule: mocks.generate,
   getSchedule: mocks.getSchedule,
   getSchedules: mocks.getSchedules,
+  getMixQueue: vi.fn().mockResolvedValue([]),
+  moveMixPackage: vi.fn(),
+  releaseTaskPackages: vi.fn(),
 }));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),

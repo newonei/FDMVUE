@@ -18,6 +18,7 @@ import {
   message,
   Radio,
   Result,
+  Select,
   Spin,
   Tabs,
   Tag,
@@ -61,7 +62,7 @@ const canSeeWage = computed(() =>
   hasAccessByCodes(['fdmgongchang:wage-item:query']),
 );
 const activeTab = ref<
-  'ai' | 'colors' | 'opening' | 'processes' | 'routes' | 'suppliers' | 'wage'
+  'ai' | 'colors' | 'opening' | 'processes' | 'routes' | 'rules' | 'suppliers' | 'wage'
 >('processes');
 
 const factory = useFactory();
@@ -107,6 +108,11 @@ const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, le
 const restDays = ref<number>(1);
 /** 收工时间（HH:mm，空为不提醒）、多报容差（%）。 */
 const closeTime = ref('');
+/** 检查规则级别（规则编码 → 级别）。 */
+const rules = ref<Record<string, string>>({});
+const savedRules = computed<Record<string, string>>(() =>
+  Object.fromEntries((setting.value?.rules ?? []).map((r) => [r.code, r.level])),
+);
 const tolerance = ref<number>(5);
 const savedMix = (key: MixField) => {
   const v = setting.value?.mixBoard?.[key];
@@ -172,7 +178,8 @@ const dirty = computed(() => {
     MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k)) ||
     restDays.value !== (setting.value?.boardRestDays ?? 1) ||
     closeTime.value.trim() !== (setting.value?.reportCloseTime ?? '') ||
-    tolerance.value !== (setting.value?.reportTolerance ?? 5)
+    tolerance.value !== (setting.value?.reportTolerance ?? 5) ||
+    Object.entries(savedRules.value).some(([code, level]) => rules.value[code] !== level)
   );
 });
 
@@ -199,6 +206,7 @@ async function load() {
     restDays.value = setting.value.boardRestDays ?? 1;
     closeTime.value = setting.value.reportCloseTime ?? '';
     tolerance.value = setting.value.reportTolerance ?? 5;
+    rules.value = { ...savedRules.value };
   } catch {
     loadError.value = true;
   } finally {
@@ -257,6 +265,7 @@ async function save() {
       boardRestDays: restDays.value,
       reportCloseTime: closeTime.value.trim(),
       reportTolerance: tolerance.value,
+      rules: { ...rules.value },
       scheduleModelId: modelId.value || null,
       ...(fillPrompt.value.trim() === savedFillPrompt.value.trim() ? {} : { demandFillPrompt: fillPrompt.value.trim() }),
     });
@@ -586,6 +595,29 @@ async function save() {
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="standing" tab="常备物料">
             <StandingPanel :can-edit="canEdit" />
+          </Tabs.TabPane>
+          <Tabs.TabPane v-if="setting" key="rules" tab="检查规则">
+            <section class="flex flex-col gap-3">
+              <p class="m-0 text-xs text-muted-foreground">
+                每条检查单独选级别，改完点右上角「保存设置」。默认都不拦人干活：要写原因、要确认的只多一步，记异常的照常办理、事后在异常台账核对。
+              </p>
+              <ul class="m-0 flex list-none flex-col divide-y divide-border rounded-lg border border-border p-0">
+                <li v-for="r in setting.rules ?? []" :key="r.code" class="flex flex-wrap items-center gap-3 px-3 py-2">
+                  <span class="flex min-w-0 flex-1 flex-col">
+                    <b class="text-sm">{{ r.label }}</b>
+                    <span class="text-xs text-muted-foreground">{{ r.description }}</span>
+                  </span>
+                  <Select
+                    :id="`rule-${r.code}`"
+                    v-model:value="rules[r.code]"
+                    :disabled="!canEdit"
+                    :options="r.levels"
+                    :style="{ width: '11rem' }"
+                    size="small"
+                  />
+                </li>
+              </ul>
+            </section>
           </Tabs.TabPane>
           <Tabs.TabPane v-if="setting" key="colors" tab="颜色配置">
             <ColorPanel :can-edit="canEdit" />

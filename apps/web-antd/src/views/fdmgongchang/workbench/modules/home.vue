@@ -207,8 +207,8 @@ watch(
               <dd class="m-0">{{ task.contractCode || '备货' }}</dd>
             </div>
             <div class="flex flex-col">
-              <dt class="text-xs text-muted-foreground">安排在</dt>
-              <dd class="m-0">{{ dateText(task.workDate) }}</dd>
+              <dt class="text-xs text-muted-foreground">{{ task.undated ? '任务包' : '安排在' }}</dt>
+              <dd class="m-0">{{ task.undated ? (task.process === 'MIX' ? `发泡第 ${task.sequence} 个` : '不定日期') : dateText(task.workDate) }}</dd>
             </div>
             <div class="flex flex-col">
               <dt class="text-xs text-muted-foreground">一起做的人</dt>
