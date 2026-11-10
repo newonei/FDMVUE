@@ -21,8 +21,7 @@ export default defineConfig({
     // change. Their lint debt is tracked separately; this gate covers the
     // composition seams and the procurement/warehouse/factory/storage cut-over.
     'apps/web-antd/src/api/fdmdata/**',
-    'apps/web-antd/src/views/{fdmai,fdmcaiwu,fdmcreative,fdmdata,fdmdingtalk,fdmneixiao,fdmperformance,fdmxui}/**',
-    'apps/web-antd/e2e/fixtures/FdmCreativeWorkbenchFixture.vue',
+    'apps/web-antd/src/views/{fdmai,fdmcaiwu,fdmdata,fdmdingtalk,fdmneixiao,fdmperformance,fdmxui}/**',
     'packages/**',
   ],
 });

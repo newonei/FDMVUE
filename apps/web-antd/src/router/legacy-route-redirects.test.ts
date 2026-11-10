@@ -13,8 +13,8 @@ describe('legacy dashboard route redirects', () => {
   });
 
   it('keeps current routes unchanged', () => {
-    expect(resolveLegacyRoutePath('/fdmcreative/workbench')).toBe(
-      '/fdmcreative/workbench',
+    expect(resolveLegacyRoutePath('/dashboard/workspace')).toBe(
+      '/dashboard/workspace',
     );
   });
 });
