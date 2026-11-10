@@ -291,3 +291,8 @@ export function exportBankBalanceExcel(year: number) {
     params: { year },
   });
 }
+
+/** 导入模板：收入、支出两张工作表，列头与导出一致 */
+export function downloadJournalImportTemplate() {
+  return requestClient.download(`${baseUrl}/import-template`);
+}

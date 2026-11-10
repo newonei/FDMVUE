@@ -97,3 +97,7 @@ export function importAccessorySkuExcel(file: File) {
 export function exportDataJustAccessoryExcel(params: Record<string, unknown>) {
   return requestClient.download('/fdmdata/data-just-accessory/export-excel', { params });
 }
+
+export function downloadAccessoryImportTemplate() {
+  return requestClient.download('/fdmdata/data-just-accessory/import-template');
+}

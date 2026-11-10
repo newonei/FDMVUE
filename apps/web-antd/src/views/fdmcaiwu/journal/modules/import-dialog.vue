@@ -6,6 +6,7 @@ import type { FdmcaiwuJournalApi as Api } from '#/api/fdmcaiwu/journal';
 import { computed, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 
 import {
   Alert,
@@ -20,6 +21,7 @@ import {
 
 import {
   applyJournalImport,
+  downloadJournalImportTemplate,
   previewJournalImport,
 } from '#/api/fdmcaiwu/journal';
 
@@ -99,6 +101,11 @@ const sampleColumns = [
   { dataIndex: 'bankAccount', ellipsis: true, key: 'bankAccount', title: '收付款行', width: 110 },
   { dataIndex: 'counterparty', ellipsis: true, key: 'counterparty', title: '往来单位/收款方', width: 130 },
 ];
+
+async function downloadTemplate() {
+  const data = await downloadJournalImportTemplate();
+  downloadFileFromBlobPart({ fileName: '日记账导入模板.xlsx', source: data });
+}
 </script>
 
 <template>
@@ -131,7 +138,14 @@ const sampleColumns = [
           收入表、支出表可以放在同一个文件的不同工作表里，一次导入
         </p>
       </Upload.Dragger>
-      <div class="mt-3 text-xs leading-5 text-muted-foreground">
+      <div class="mt-2">
+        <Button type="link" size="small" class="!px-0" @click="downloadTemplate">
+          <template #icon><IconifyIcon icon="lucide:file-down" /></template>
+          下载导入模板
+        </Button>
+        <span class="text-xs text-muted-foreground">收入、支出两张表，填好后直接导入</span>
+      </div>
+      <div class="mt-2 text-xs leading-5 text-muted-foreground">
         <p class="mb-1">
           按表头名称取列，列的顺序不限，表头上方可以有标题行。需要「日期」和「金额」（支出为「付款金额」）两列；
           有「付款金额 / 付款行 / 收款方」等列的表按支出导入，否则按收入导入。
