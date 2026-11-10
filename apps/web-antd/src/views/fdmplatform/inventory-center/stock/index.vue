@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import Stocks from '../../purchase/warehouse/Stocks.vue';
+import StockQuery from './StockQuery.vue';
 
 defineOptions({ name: 'FdmInventoryStock' });
 /**
@@ -7,4 +7,4 @@ defineOptions({ name: 'FdmInventoryStock' });
  * 半成品仓（各道工序的半成品）和成品仓，工厂领料、报工自动生成生产领料、生产入库单。
  */
 </script>
-<template><Stocks /></template>
+<template><StockQuery /></template>
