@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AttrField } from '../model';
+import type { DimensionUnit } from '../../shared/dimensions';
 
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
@@ -8,12 +9,14 @@ import { computed } from 'vue';
 import { InputNumber, Select } from 'ant-design-vue';
 
 import { FIELD_LABELS } from '../model';
+import { dimensionFromDisplay, dimensionToDisplay } from '../../shared/dimensions';
 
 /**
  * 物料属性编辑框：按 fields 顺序渲染。颜色可用 colorChoices 限定在领料颜色范围内（开片、贴合）。
  */
 const props = defineProps<{
   colorChoices?: string[];
+  dimensionUnit?: DimensionUnit;
   fields: AttrField[];
   idPrefix: string;
   options: Api.Options;
@@ -59,10 +62,7 @@ function selectOptions(field: AttrField) {
 }
 
 function numberValue(field: AttrField) {
-  const value = attrs.value[field];
-  return value === null || value === undefined || value === ''
-    ? undefined
-    : Number(value);
+  return dimensionToDisplay(attrs.value[field], props.dimensionUnit);
 }
 
 function isNumberField(field: AttrField) {
@@ -70,7 +70,8 @@ function isNumberField(field: AttrField) {
 }
 
 function update(field: AttrField, value: unknown) {
-  attrs.value = { ...attrs.value, [field]: value ?? null };
+  const stored = isNumberField(field) ? dimensionFromDisplay(value, props.dimensionUnit) : value ?? null;
+  attrs.value = { ...attrs.value, [field]: stored };
   emit('changed', field);
 }
 
@@ -96,12 +97,12 @@ function emptyHint(field: AttrField) {
         :id="`${idPrefix}-${field}`"
         :value="numberValue(field)"
         :min="0"
-        :max="9999.99"
-        :precision="field === 'thickness' ? 2 : 1"
-        :step="field === 'thickness' ? 0.1 : 1"
-        :style="{ width: '6rem' }"
+        :max="dimensionUnit === 'mm' ? 99999.9 : 9999.99"
+        :precision="dimensionUnit === 'mm' ? 1 : field === 'thickness' ? 2 : 1"
+        :step="dimensionUnit === 'mm' ? 1 : field === 'thickness' ? 0.1 : 1"
+        :style="{ width: dimensionUnit === 'mm' ? '7rem' : '6rem' }"
         size="small"
-        addon-after="cm"
+        :addon-after="dimensionUnit ?? 'cm'"
         @change="(v) => update(field, v)"
       />
       <Select

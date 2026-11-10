@@ -30,7 +30,7 @@ vi.mock('@vben/common-ui', () => ({
 }));
 
 const processes = [
-  ['MIX', '密炼挤出发泡', '板材'],
+  ['MIX', '发泡', '板材'],
   ['SLICE', '开片', '片材'],
   ['ENGRAVE', '雕刻', '已雕刻成品'],
   ['PACK', '包装', '已包装成品'],

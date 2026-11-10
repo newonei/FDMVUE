@@ -28,6 +28,7 @@ import {
   RISK_TYPES,
   SCHEDULE_STATUS,
   TASK_STATUS,
+  taskMaterialText,
 } from '../../shared/schedule';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
@@ -102,9 +103,13 @@ async function openForm(initial: Api.PlanTask | null, taskId?: number, planTask?
 function editConfirmed(task: Api.Task) {
   void openForm(
     {
+      assignmentId: task.assignmentId,
       contractCode: task.contractCode,
+      covers: task.covers,
       date: dateText(task.workDate),
       process: task.process,
+      inputs: task.inputs,
+      output: task.output,
       product: task.product,
       quantity: task.quantity,
       reason: task.reason,
@@ -134,9 +139,13 @@ function resendDate() {
 function resend(task: Api.Task) {
   resendFor.value = task;
   void openForm({
+    assignmentId: task.assignmentId,
     contractCode: task.contractCode,
+    covers: task.covers,
     date: resendDate(),
     process: task.process,
+    inputs: task.inputs,
+    output: task.output,
     product: task.product,
     quantity: Number(task.shortage),
     reason: `补 ${dateText(task.workDate)} 报工差额`,
@@ -367,7 +376,9 @@ function discard() {
                 <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
               </span>
             </div>
-            <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+            <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+            <div class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
+            <div v-if="task.inputs?.length" class="text-xs text-muted-foreground">领料：{{ task.inputs.map((m) => taskMaterialText(m)).join('；') }}</div>
             <div class="text-xs">
               {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
               <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 {{ Number(task.plannedQuantity) }}，接单时按上道良品改成 {{ Number(task.quantity) }}</span>
@@ -409,6 +420,7 @@ function discard() {
 
     <TaskFormModal
       v-model:open="formOpen"
+      :existing-task-id="editingTaskId"
       :initial="formInitial"
       :options="formOptions"
       :schedule="schedule"

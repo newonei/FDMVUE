@@ -4,10 +4,12 @@ import type { FdmgongchangProductionOrderApi as OrderApi } from '#/api/fdmgongch
 import { computed, onMounted, ref } from 'vue';
 
 import { getWorkbenchProductionOrders } from '#/api/fdmgongchang/workbench';
+import ImageUpload from '#/components/upload/image-upload.vue';
 
 import { finalProcess } from '../../production-order/shared';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { stageOf, useJob } from '../use-job';
+import IssueShortages from './issue-shortages.vue';
 import StepHeader from './step-header.vue';
 
 /** 第 2 步 确认领料：只显示领多少、领什么、领完还剩多少。 */
@@ -22,7 +24,7 @@ const total = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
  * 不按排单开工时，如果这道工序是某张工厂订单工艺的最后一道，选这批是做哪张单（记进订单的工序进度；完成数量按交货算）；
  * 按排单开工的由排单任务自动关联。补领沿用原来的单。
  */
-const mayAskOrder = computed(() => !job.supplement && !job.task && !!job.process);
+const mayAskOrder = computed(() => !job.supplement && !job.task && !!job.process && job.process.code !== 'SLICE');
 const openOrders = ref<OrderApi.Order[]>([]);
 const orderChoices = computed(() =>
   openOrders.value.flatMap((o) =>
@@ -72,14 +74,14 @@ async function issue() {
       :current="2"
       :subtitle="job.supplement ? `${late ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}，看一眼，对了就点确认` : '看一眼，对了就点确认'"
       :title="`${job.process?.label} · 第 2 步 ${late ? '确认补登' : job.supplement ? '确认补领' : '确认领料'}`"
-      :total="job.supplement ? 2 : 3"
+      :total="2"
       @back="emit('back')"
     />
     <main class="flex flex-1 flex-col gap-3 p-4">
       <section class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
         <h3 class="m-0 flex items-baseline justify-between text-sm font-bold">
           从{{ source?.label }}领走
-          <span class="text-xs font-normal text-muted-foreground">{{ job.picks.length }} 种 · 共 {{ formatQty(total) }} {{ source?.unit }}</span>
+          <span class="text-xs font-normal text-muted-foreground">{{ job.picks.length }} 批次 · 共 {{ formatQty(total) }} {{ source?.unit }}</span>
         </h3>
         <table class="w-full text-sm">
           <thead>
@@ -93,12 +95,12 @@ async function issue() {
           <tbody>
             <tr v-for="p in job.picks" :key="p.stock.id" class="border-t border-border">
               <td class="py-1.5 pr-2">
-                <span class="font-semibold">{{ attrSummary(p.stock.stage, p.stock.item, labels) || p.stock.itemCode }}</span>
+                <span class="font-semibold">{{ attrSummary(p.stock.stage, p.stock.item, labels, [], 'mm') || p.stock.itemCode }}</span>
                 <span v-if="p.side" class="ml-1 text-xs text-primary">{{ p.side === 'FRONT' ? '正面' : '反面' }}</span>
               </td>
               <td class="py-1.5 pr-2 font-mono text-xs text-muted-foreground">{{ p.stock.batchNo }}</td>
               <td class="whitespace-nowrap py-1.5 text-right font-semibold tabular-nums">{{ formatQty(p.qty) }} {{ source?.unit }}</td>
-              <td class="whitespace-nowrap py-1.5 text-right tabular-nums text-muted-foreground">
+              <td class="whitespace-nowrap py-1.5 text-right tabular-nums" :class="(toNumber(p.stock.quantity) ?? 0) - p.qty < 0 ? 'font-semibold text-destructive' : 'text-muted-foreground'">
                 {{ formatQty((toNumber(p.stock.quantity) ?? 0) - p.qty) }} {{ source?.unit }}
               </td>
             </tr>
@@ -108,6 +110,15 @@ async function issue() {
           <div class="flex flex-col"><span class="text-muted-foreground">做的订单</span><b class="text-sm">{{ orderText }}</b></div>
           <div class="flex flex-col"><span class="text-muted-foreground">做的人</span><b class="text-sm">{{ job.my?.userName }}{{ job.my?.team ? `（${job.my.team}）` : '' }}</b></div>
         </div>
+      </section>
+      <IssueShortages />
+      <p v-if="!job.task && !job.supplement && job.process?.code === 'SLICE'" class="m-0 rounded-md bg-primary/5 p-3 text-sm">
+        本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色和长宽厚分别入库，不计入已下发任务或订单进度。
+      </p>
+      <section v-if="job.task && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <span class="text-sm font-bold">本次领料凭证<span class="ml-1 text-destructive">*</span></span>
+        <ImageUpload v-model:value="job.sheets" :max-number="9" :max-size="10" :show-description="false" directory="fdmgongchang/issue-sheet" multiple />
+        <span class="text-xs text-muted-foreground">拍照留存实际领取批次和数量。后续报工沿用本凭证。</span>
       </section>
       <section v-if="askOrder && orderChoices.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
         <span class="text-sm font-bold">这批是做哪张工厂订单？</span>
@@ -158,10 +169,10 @@ async function issue() {
         这张单已经完工。补登的料从{{ source?.label }}库存扣掉，算进这张单的领料，会记下是你补登的和原因。
       </p>
       <p v-else-if="job.supplement" class="m-0 text-xs leading-relaxed text-muted-foreground">
-        补领的料从{{ source?.label }}库存扣掉，加到你手上这张单里。做完回来照常点「做完了，报数量」。
+        补领的料从{{ source?.label }}库存扣掉，加到你手上这张单里。做完后在「在制工序单」点「报本工序产出」。
       </p>
       <p v-else class="m-0 text-xs leading-relaxed text-muted-foreground">
-        领料后这些料就从{{ source?.label }}库存扣掉，算到你「手上在做的」里。做完回来点「做完了，报数量」。
+        确认后从{{ source?.label }}库存扣减本次领料，生成在制工序单。生产完成后，在「在制工序单」报本工序实际产出。
       </p>
     </main>
     <footer class="sticky bottom-0 grid grid-cols-1 gap-2 border-t border-border bg-card px-4 pb-4 pt-3 sm:grid-cols-2">
@@ -173,7 +184,7 @@ async function issue() {
       >
         {{ late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
-      <button v-if="!job.supplement" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary" type="button" @click="emit('reportNow')">
+      <button v-if="!job.supplement && !job.task" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary" type="button" @click="emit('reportNow')">
         已经做完了，领料同时报数量
       </button>
     </footer>

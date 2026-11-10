@@ -24,6 +24,7 @@ import {
   recipePicks,
   sliceHint,
   slicePerBoard,
+  sliceYield,
   stageColumns,
   stageFlow,
   stockSpec,
@@ -93,9 +94,46 @@ describe('deriveOutputs', () => {
     ]);
     expect(outputs).toHaveLength(2);
     expect(outputs[0]!.attrs).toMatchObject({ color: 'PU', thickness: 0.3 });
-    expect(outputs[0]!.attrs.length).toBeUndefined();
+    expect(outputs[0]!.attrs.length).toBe(190);
     expect(outputs[0]!.batchNo).toBe('MB1/MB3');
     expect(outputs[1]!.batchNo).toBe('MB2');
+  });
+
+  it('keeps different actual board thicknesses and dimensions in separate slicing rows', () => {
+    const inputs = [
+      line(1, 'BOARD', board('PU', 4.5), 'THICK', 10),
+      line(2, 'BOARD', board('PU', 3), 'THIN', 5),
+      line(3, 'BOARD', { ...board('PU', 4.5), length: 180 }, 'SHORT', 2),
+      line(4, 'BOARD', board('PU', 1), 'RETURNED', 0),
+    ];
+    const outputs = deriveOutputs('SLICE', inputs);
+    expect(outputs).toHaveLength(3);
+    expect(outputs.map((output) => output.attrs.thickness)).toEqual([4.5, 3, 4.5]);
+    expect(outputs.map((output) => lineBatch('SLICE', output, inputs))).toEqual(['THICK', 'THIN', 'SHORT']);
+    expect(EDITABLE_FIELDS.SLICE).not.toContain('thickness');
+  });
+
+  it('keeps otherwise identical boards with different recipes separate through slicing and cutting', () => {
+    const inputs = [
+      line(1, 'BOARD', { ...board('PU', 4.5), recipeName: '常规款' }, 'REGULAR-1', 10),
+      line(2, 'BOARD', { ...board('PU', 4.5), recipeCode: 'REC-002', recipeName: '高弹款' }, 'ELASTIC', 5),
+      line(3, 'BOARD', { ...board('PU', 4.5), recipeName: '常规款' }, 'REGULAR-2', 2),
+    ];
+    const sliced = deriveOutputs('SLICE', inputs);
+    expect(sliced).toHaveLength(2);
+    expect(sliced.map((output) => lineBatch('SLICE', output, inputs))).toEqual(['REGULAR-1/REGULAR-2', 'ELASTIC']);
+    expect(sliced.map((output) => sliceYield(inputs, sliced, output))).toEqual([12, 5]);
+    expect(sliced.map((output) => normalizeForStage('SHEET', output.attrs))).toEqual([
+      { ...board('PU', 4.5), recipeName: '常规款' },
+      { ...board('PU', 4.5), recipeCode: 'REC-002', recipeName: '高弹款' },
+    ]);
+    const cut = deriveOutputs('CUT', sliced.map((output, index) => line(index + 1, 'SHEET', output.attrs, output.batchNo, 1)));
+    expect(cut).toHaveLength(2);
+    for (const output of cut) {
+      output.attrs = { ...output.attrs, length: 183, width: 61, thickness: 0.6 };
+      expect(normalizeForStage('CUT', output.attrs)).toMatchObject({ thickness: 0.6, recipeCode: output.attrs.recipeCode, recipeName: output.attrs.recipeName });
+    }
+    expect(attrSummary('SHEET', sliced[1]!.attrs, makeLabels(options))).toContain('高弹款');
   });
 
   it('builds a laminated sheet from the front and back sides', () => {
@@ -210,7 +248,7 @@ describe('batches and labels', () => {
   });
 
   it('shows layered colours and textures only from the stages that have them', () => {
-    expect(stageColumns('SHEET')).toEqual(['material', 'color', 'size']);
+    expect(stageColumns('SHEET')).toEqual(['material', 'recipe', 'color', 'size']);
     expect(stageColumns('ENGRAVED')).toContain('pattern');
     expect(stageColumns('LAMINATED')).not.toContain('textureFront');
   });
@@ -311,7 +349,7 @@ describe('receiving helpers', () => {
 });
 
 describe('cross cutting', () => {
-  it('keeps the single colour sheet and its batch so length and width can be cut', () => {
+  it('keeps the single colour board and its batch so length, width and thickness can be cut', () => {
     const [line] = deriveOutputs('CUT', [
       {
         quantity: 10,
@@ -329,8 +367,8 @@ describe('cross cutting', () => {
     expect(line!.attrs).toMatchObject({ color: 'PU', length: 185, thickness: 0.6, width: 63 });
     expect(line!.attrs.frontColor).toBeUndefined();
     expect(line!.batchNo).toBe('MB1');
-    expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width']);
-    expect(stageColumns('CUT')).toEqual(['material', 'color', 'size']);
+    expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width', 'thickness']);
+    expect(stageColumns('CUT')).toEqual(['material', 'recipe', 'color', 'size']);
   });
 });
 
@@ -515,40 +553,47 @@ describe('辅料', () => {
   });
 });
 
-describe('开片按板材规格算片数', () => {
+describe('开片沿用板材厚度算片数', () => {
   const board = { color: 'PU', length: 190, material: 'TPE', thickness: 4.5, width: 130 };
-  const sheet = { color: 'PU', length: 183, thickness: 0.6, width: 61 };
+  const sheet = { color: 'PU', length: 183, thickness: 4.5, width: 61 };
 
-  it('multiplies how many fit along length, width and thickness, trying both orientations', () => {
-    expect(slicePerBoard(board, sheet)).toBe(1 * 2 * 7);
-    // 长宽对调摆：190/61×130/183=0，换个方向 190/183×130/61=2，取多的；厚 4.5/0.9=5 层
-    expect(slicePerBoard(board, { length: 61, thickness: 0.9, width: 183 })).toBe(2 * 5);
-    expect(slicePerBoard(board, { length: 200, thickness: 0.6, width: 61 })).toBe(0);
+  it('never multiplies output by thickness layers and rejects different thicknesses', () => {
+    expect(slicePerBoard(board, board)).toBe(1);
+    expect(slicePerBoard(board, sheet)).toBe(0);
+    expect(slicePerBoard(board, { length: 61, thickness: 4.5, width: 183 })).toBe(0);
+    expect(slicePerBoard(board, { length: 183, thickness: 0.9, width: 61 })).toBe(0);
+    expect(slicePerBoard(board, { length: 200, thickness: 4.5, width: 61 })).toBe(0);
     expect(slicePerBoard(board, { length: 183, width: 61 })).toBeUndefined();
   });
 
   it('fills good quantity from boards issued until the worker changes it', () => {
     const inputs = [line(1, 'BOARD', board, 'B1', 10)];
     const outputs = deriveOutputs('SLICE', inputs);
-    Object.assign(outputs[0]!.attrs, { length: 183, thickness: 0.6, width: 61 });
     applySliceYield(inputs, outputs);
-    expect(outputs[0]!.goodQuantity).toBe(140);
-    expect(sliceHint(inputs, outputs, outputs[0]!)).toBe('每张开 14 片 × 10 张 = 140 片（不算锯缝损耗）');
+    expect(outputs[0]!.goodQuantity).toBe(10);
+    expect(sliceHint(inputs, outputs, outputs[0]!)).toBe('每张开 1 片 × 10 张 = 10 片（不算锯缝损耗）');
 
-    outputs[0]!.attrs.thickness = 0.9;
+    inputs[0]!.quantity = 20;
     applySliceYield(inputs, outputs);
-    expect(outputs[0]!.goodQuantity).toBe(100);
+    expect(outputs[0]!.goodQuantity).toBe(20);
 
-    outputs[0]!.goodQuantity = 95;
-    outputs[0]!.attrs.thickness = 0.6;
+    outputs[0]!.goodQuantity = 19;
+    inputs[0]!.quantity = 30;
     applySliceYield(inputs, outputs);
-    expect(outputs[0]!.goodQuantity).toBe(95);
+    expect(outputs[0]!.goodQuantity).toBe(19);
+  });
+
+  it('counts each thickness from its own issued batches without merging the same colour', () => {
+    const inputs = [line(1, 'BOARD', board, 'B1', 10), line(2, 'BOARD', { ...board, thickness: 3 }, 'B2', 7)];
+    const outputs = deriveOutputs('SLICE', inputs);
+    applySliceYield(inputs, outputs);
+    expect(outputs.map((output) => output.goodQuantity)).toEqual([10, 7]);
+    expect(sliceHint(inputs, outputs, outputs[1]!)).toBe('每张开 1 片 × 7 张 = 7 片（不算锯缝损耗）');
   });
 
   it('leaves it to the worker when one color is cut into several sizes', () => {
     const inputs = [line(1, 'BOARD', board, 'B1', 10)];
     const outputs = [...deriveOutputs('SLICE', inputs), ...deriveOutputs('SLICE', inputs)];
-    for (const o of outputs) Object.assign(o.attrs, { length: 183, thickness: 0.6, width: 61 });
     applySliceYield(inputs, outputs);
     expect(outputs[0]!.goodQuantity).toBeUndefined();
     expect(sliceHint(inputs, outputs, outputs[0]!)).toContain('请手填良品');

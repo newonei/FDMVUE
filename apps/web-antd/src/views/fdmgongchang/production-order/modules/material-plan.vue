@@ -7,6 +7,7 @@ import { Select, Spin, Tag } from 'ant-design-vue';
 
 import { getMaterialPlan, getRecipeOptions, saveItemMaterial } from '#/api/fdmgongchang/production-order';
 
+import { dimensionTextInMm } from '../../shared/dimensions';
 import { num } from '../shared';
 
 /**
@@ -129,9 +130,10 @@ defineExpose({ reload: load });
           </div>
 
           <p v-if="item.board" class="m-0 text-sm">
-            板材 <b>{{ item.board.size }}cm</b>：开 {{ item.board.layers }} 层 × 每层 {{ item.board.piecesPerLayer }} 条 =
-            一张出 {{ item.board.perBoard }} 条 → 要 <b class="tabular-nums">{{ item.board.boards }}</b> 张
+            成品理论换算：板材 <b>{{ dimensionTextInMm(item.board.size + 'cm') }}</b>，{{ item.board.layers }} 层 × 每层 {{ item.board.piecesPerLayer }} 条 =
+            每张理论 {{ item.board.perBoard }} 条 → 预计需 <b class="tabular-nums">{{ item.board.boards }}</b> 张
             <span class="text-xs text-muted-foreground">（利用率 {{ fmt(item.board.utilization) }}%）</span>
+            <br /><span class="text-xs text-muted-foreground">以上用于成品备料估算；开片产出沿用板材原规格，不按厚度分层计算开片数量。</span>
             <template v-if="item.rawKg">
               <br />
               原料 <b class="tabular-nums">{{ fmt(item.rawKg) }}</b> kg（每张 {{ fmt(item.board.kgPerBoard) }}kg）≈ 密炼
