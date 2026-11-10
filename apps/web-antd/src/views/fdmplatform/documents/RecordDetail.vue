@@ -63,6 +63,8 @@ import {
   currentDocument,
   documentActionUnavailableReason,
   documentDefinitions,
+  invoiceBuyerText,
+  invoiceIssuer,
   pendingRequestItems,
 } from './model';
 import {
@@ -274,16 +276,12 @@ const extraFields = [
   'createdAt|创建时间',
 ];
 /** 内销开票记录按金智补充的字段；外贸发票没有这些值，不显示空行 */
-const invoiceFields = [
-  'taxRate|税率',
-  'buyer|购方开票信息',
-  'remark|备注',
-  'actorId|经手人',
-];
+const invoiceFields = ['taxRate|税率', 'remark|备注', 'actorId|经手人'];
 const OPTIONAL_KEYS = new Set([
-  'buyer',
+  'buyerInfo',
   'content',
   'invoiceNumber',
+  'issuerName',
   'remark',
   'taxAmount',
   'taxIncluded',
@@ -306,38 +304,34 @@ const fields = computed(() =>
         return [key!, { key: key!, title: name! }] as const;
       }),
     ).values(),
-  ].filter((item) =>
+  ].filter((item) => {
+    if (item.key === 'issuerName')
+      return invoiceIssuer(record.value ?? {}) !== undefined;
+    if (item.key === 'buyerInfo')
+      return invoiceBuyerText(record.value ?? {}) !== undefined;
     // 合同币种折算只有跨币种回款才有，同币种回款不显示空行
-    CONTRACT_FX.has(item.key) ||
-    (props.kind === 'invoices' && OPTIONAL_KEYS.has(item.key))
-      ? record.value?.[item.key] !== undefined &&
+    if (
+      CONTRACT_FX.has(item.key) ||
+      (props.kind === 'invoices' && OPTIONAL_KEYS.has(item.key))
+    )
+      return (
+        record.value?.[item.key] !== undefined &&
         record.value?.[item.key] !== null
-      : // 内销回款都是人民币，不显示汇率字段
-        !(item.key.startsWith('exchangeRate') && domesticContract.value) &&
-        (record.value?.[item.key] !== undefined ||
-          (item.key.startsWith('exchangeRate') &&
-            ['receipts', 'refunds'].includes(props.kind))),
-  ),
+      );
+    // 内销回款都是人民币，不显示汇率字段
+    return (
+      !(item.key.startsWith('exchangeRate') && domesticContract.value) &&
+      (record.value?.[item.key] !== undefined ||
+        (item.key.startsWith('exchangeRate') &&
+          ['receipts', 'refunds'].includes(props.kind)))
+    );
+  }),
 );
 /** 后端 Instant 字段是 ISO 时间戳，按本机时区显示到秒 */
 function timeText(text: string) {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)
     ? dayjs(text).format('YYYY-MM-DD HH:mm:ss')
     : text;
-}
-function buyerText(buyer: Record<string, unknown>) {
-  return [
-    ['title', '名称'],
-    ['taxNo', '税号'],
-    ['address', '地址'],
-    ['phone', '电话'],
-    ['bankName', '开户行'],
-    ['bankAccount', '账号'],
-    ['email', '收票邮箱'],
-  ]
-    .filter(([key]) => buyer[key!])
-    .map(([key, name]) => `${name}：${buyer[key!]}`)
-    .join('；');
 }
 function display(key: string) {
   if (key === 'allocationType') return allocationKind(record.value!);
@@ -350,8 +344,10 @@ function display(key: string) {
   if (props.kind === 'invoices' && key === 'taxRate') return `${value}%`;
   if (props.kind === 'invoices' && key === 'taxIncluded')
     return value ? '含税' : '不含税';
-  if (props.kind === 'invoices' && key === 'buyer')
-    return buyerText(value as Record<string, unknown>);
+  if (props.kind === 'invoices' && key === 'issuerName')
+    return invoiceIssuer(record.value ?? {}) ?? '';
+  if (props.kind === 'invoices' && key === 'buyerInfo')
+    return invoiceBuyerText(record.value ?? {}) ?? '';
   if (key === 'contractAmount' && value !== null && value !== undefined)
     return money(value, contract.value?.currency);
   if (
@@ -725,7 +721,9 @@ const mainAction = computed(() => {
           :key="item.key"
           :label="item.title"
         >
-          {{ display(item.key) }}
+          <span
+            :style="item.key === 'buyerInfo' ? 'white-space: pre-line' : ''"
+            >{{ display(item.key) }}</span>
         </Descriptions.Item>
 </Descriptions><MigrationSource
         v-if="contract && record"

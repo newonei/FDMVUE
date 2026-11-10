@@ -643,6 +643,13 @@ export function invoiceTaxAmount(
     .div(included === false ? 100 : percent.plus(100))
     .toFixed(2, BigNumber.ROUND_HALF_UP);
 }
+/** 开票主体单位：默认订单所属公司，实际由哪家公司开票可以改；选项由 withDirectory 填公司目录 */
+function issuerField(contract: Contract) {
+  return selectField('issuerCompanyId', '开票主体单位', [], {
+    default: contract.companyId || undefined,
+    hint: '默认订单所属公司，实际由其他公司开票时改选。',
+  });
+}
 /** 内销开票记录按金智：业务员先登记开票内容和税率，发票号、凭证可以开出后再补 */
 function domesticInvoiceAction(
   contract: Contract,
@@ -658,6 +665,7 @@ function domesticInvoiceAction(
     buyerCustomerId: contract.customerId,
     fields: [
       source,
+      issuerField(contract),
       selectField(
         'type',
         '开票类型',
@@ -705,6 +713,9 @@ function domesticInvoiceAction(
       field('content', '开票内容', 'textarea', {
         default: invoiceContent(contract),
         hint: '已按合同明细预填，可按实际开票改。',
+      }),
+      field('buyerInfo', '购买方开票信息', 'textarea', {
+        hint: '已按客户档案预填，可按本次开票改；资料在附件里可填「见附件」。',
       }),
       field('invoiceNumber', '发票号码', undefined, {
         required: false,
@@ -887,6 +898,7 @@ export function financeActions(
               : undefined,
           fields: [
             source,
+            issuerField(contract),
             field('invoiceNumber', '真实发票号'),
             selectField('type', '发票类型', [
               { value: 'TAX', label: '国内税务发票' },
@@ -898,6 +910,10 @@ export function financeActions(
             field('currency', '币种', undefined, lockedCurrency),
             field('issuedAt', '开票日期', 'date'),
             field('evidenceRef', '发票附件引用'),
+            field('buyerInfo', '购买方开票信息', 'textarea', {
+              required: false,
+              hint: '买方名称、税号、地址、银行等，按客户要求填写。',
+            }),
             selectField('originalInvoiceId', '原发票', invoiceOptions, {
               required: true,
               visibleWhen: { key: 'type', value: 'CREDIT_NOTE' },

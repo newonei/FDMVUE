@@ -31,6 +31,38 @@ export function actionTitle(action: string): string {
   );
 }
 
+/** 开票主体单位：金智迁入的记录只有来源里的文字 */
+export function invoiceIssuer(record: Record<string, unknown>) {
+  const migration = record.migration as
+    | undefined
+    | { sourceCompanyName?: null | string };
+  return (
+    (record.issuerName as string | undefined) ||
+    migration?.sourceCompanyName ||
+    undefined
+  );
+}
+/** 购买方开票信息：#142 之前登记的内销记录只有结构化快照 */
+export function invoiceBuyerText(record: Record<string, unknown>) {
+  if (record.buyerInfo) return String(record.buyerInfo);
+  const buyer = record.buyer as null | Record<string, unknown> | undefined;
+  if (!buyer) return undefined;
+  return (
+    [
+      ['title', '名称'],
+      ['taxNo', '税号'],
+      ['address', '地址'],
+      ['phone', '电话'],
+      ['bankName', '开户行'],
+      ['bankAccount', '账号'],
+      ['email', '收票邮箱'],
+    ]
+      .filter(([key]) => buyer[key!])
+      .map(([key, name]) => `${name}：${buyer[key!]}`)
+      .join('\n') || undefined
+  );
+}
+
 export type DocumentKind =
   | 'allocations'
   | 'arrivals'
@@ -289,6 +321,8 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
     route: `${finance}invoices`,
     fields: [
       'invoiceNumber|发票号',
+      'issuerName|开票主体单位',
+      'buyerInfo|购买方开票信息',
       'type|类型',
       'ticketKind|票据类型',
       'content|开票内容',
