@@ -4,9 +4,11 @@ import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 import { Button, message, Upload } from 'ant-design-vue';
 
-import { importBlankCostExcel } from '#/api/fdmdata/datajustsku';
+import { downloadBlankCostImportTemplate, importBlankCostExcel } from '#/api/fdmdata/datajustsku';
 
 const emit = defineEmits(['success']);
 
@@ -46,6 +48,11 @@ const [Modal, modalApi] = useVbenModal({
 function beforeUpload() {
   return false;
 }
+
+async function downloadTemplate() {
+  const data = await downloadBlankCostImportTemplate();
+  downloadFileFromBlobPart({ fileName: '空白版成本导入模板.xlsx', source: data });
+}
 </script>
 
 <template>
@@ -61,6 +68,12 @@ function beforeUpload() {
         <strong>长/宽/高</strong>，按「材质+类型+规格」写入<strong
           >空白版 SKU 成本对照维护</strong
         >。
+      </div>
+      <div>
+        <Button type="link" size="small" class="!px-0" @click="downloadTemplate">
+          <template #icon><IconifyIcon icon="lucide:file-down" /></template>
+          下载导入模板
+        </Button>
       </div>
       <Upload
         v-model:file-list="fileList"

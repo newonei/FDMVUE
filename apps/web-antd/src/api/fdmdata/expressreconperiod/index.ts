@@ -89,3 +89,7 @@ export function exportUnreconciledWaybillsExcel(periodId: number) {
     { params: { periodId } },
   );
 }
+
+export function downloadExpressOrderTemplate() {
+  return requestClient.download('/fdmdata/express-recon-period/order-template');
+}

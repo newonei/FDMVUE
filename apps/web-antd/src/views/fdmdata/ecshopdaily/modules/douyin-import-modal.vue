@@ -5,10 +5,14 @@ import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 
 import { Button, Input, message, Upload } from 'ant-design-vue';
 
-import { importDouyinEcShopDailyExcel } from '#/api/fdmdata/ecshopdaily';
+import {
+  downloadEcShopDailyImportTemplate,
+  importDouyinEcShopDailyExcel,
+} from '#/api/fdmdata/ecshopdaily';
 
 defineOptions({ name: 'EcShopDailyDouyinImportModal' });
 
@@ -57,6 +61,11 @@ const [Modal, modalApi] = useVbenModal({
 function beforeUpload() {
   return false;
 }
+
+async function downloadTemplate() {
+  const data = await downloadEcShopDailyImportTemplate('DOUYIN');
+  downloadFileFromBlobPart({ fileName: '抖音成交概览导入模板.xlsx', source: data });
+}
 </script>
 
 <template>
@@ -71,7 +80,13 @@ function beforeUpload() {
         <Input v-model:value="shopId" allow-clear placeholder="请输入店铺ID" />
       </div>
       <div>
-        <div class="mb-1 text-sm font-medium">Excel 文件</div>
+        <div class="mb-1 flex items-center justify-between">
+          <span class="text-sm font-medium">Excel 文件</span>
+          <Button type="link" size="small" class="!px-0" @click="downloadTemplate">
+            <template #icon><IconifyIcon icon="lucide:file-down" /></template>
+            下载导入模板
+          </Button>
+        </div>
         <Upload
           v-model:file-list="fileList"
           :before-upload="beforeUpload"

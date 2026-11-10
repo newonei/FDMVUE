@@ -781,3 +781,11 @@ export function deleteDataJustPatternSkuCost(id: number) {
     `/fdmdata/data-just-pattern-sku-cost/delete?id=${id}`,
   );
 }
+
+export function downloadBlankCostImportTemplate() {
+  return requestClient.download('/fdmdata/data-just-sku-cost/import-template');
+}
+
+export function downloadBlankSkuImportTemplate() {
+  return requestClient.download('/fdmdata/data-just-sku/import-blank-template');
+}

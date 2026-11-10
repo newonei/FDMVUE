@@ -4,9 +4,11 @@ import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 import { Button, message, Upload } from 'ant-design-vue';
 
-import { importAccessorySkuExcel } from '#/api/fdmdata/datajustaccessory';
+import { downloadAccessoryImportTemplate, importAccessorySkuExcel } from '#/api/fdmdata/datajustaccessory';
 
 const emit = defineEmits(['success']);
 
@@ -46,6 +48,11 @@ const [Modal, modalApi] = useVbenModal({
 function beforeUpload() {
   return false;
 }
+
+async function downloadTemplate() {
+  const data = await downloadAccessoryImportTemplate();
+  downloadFileFromBlobPart({ fileName: '配件导入模板.xlsx', source: data });
+}
 </script>
 
 <template>
@@ -61,6 +68,12 @@ function beforeUpload() {
       </div>
       <div>
         仅<strong>款式编码以「配件-」开头</strong>的行会写入配件列表；其它行计入跳过。
+      </div>
+      <div>
+        <Button type="link" size="small" class="!px-0" @click="downloadTemplate">
+          <template #icon><IconifyIcon icon="lucide:file-down" /></template>
+          下载导入模板
+        </Button>
       </div>
       <Upload
         v-model:file-list="fileList"

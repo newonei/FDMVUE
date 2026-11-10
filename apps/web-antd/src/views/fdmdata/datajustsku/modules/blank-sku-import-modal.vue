@@ -4,9 +4,11 @@ import type { UploadFile } from 'ant-design-vue/es/upload/interface';
 import { computed, ref } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 import { Button, message, Upload } from 'ant-design-vue';
 
-import { importBlankSkuExcel } from '#/api/fdmdata/datajustsku';
+import { downloadBlankSkuImportTemplate, importBlankSkuExcel } from '#/api/fdmdata/datajustsku';
 
 const emit = defineEmits(['success']);
 
@@ -46,6 +48,11 @@ const [Modal, modalApi] = useVbenModal({
 function beforeUpload() {
   return false;
 }
+
+async function downloadTemplate() {
+  const data = await downloadBlankSkuImportTemplate();
+  downloadFileFromBlobPart({ fileName: '空白版导入模板.xlsx', source: data });
+}
 </script>
 
 <template>
@@ -63,6 +70,12 @@ function beforeUpload() {
       <div>
         导入成功的行将把<strong>聚水潭同步状态</strong>设置为<strong>已同步</strong>（不要求填
         jstSkuId）。
+      </div>
+      <div>
+        <Button type="link" size="small" class="!px-0" @click="downloadTemplate">
+          <template #icon><IconifyIcon icon="lucide:file-down" /></template>
+          下载导入模板
+        </Button>
       </div>
       <Upload
         v-model:file-list="fileList"

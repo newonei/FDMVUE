@@ -336,3 +336,10 @@ export function importDouyinEcShopDailyExcel(
     },
   );
 }
+
+/** 平台日数据导入模板：JD / DOUYIN / TAOBAO */
+export function downloadEcShopDailyImportTemplate(platformCode: string) {
+  return requestClient.download('/fdmdata/ec-shop-daily/import-template', {
+    params: { platformCode },
+  });
+}
