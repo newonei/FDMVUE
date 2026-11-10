@@ -6,12 +6,6 @@ settings:
 
 catalogs:
   default:
-    '@antv/x6':
-      specifier: 3.1.8
-      version: 3.1.8
-    '@antv/x6-vue-shape':
-      specifier: 3.0.2
-      version: 3.0.2
     '@changesets/changelog-github':
       specifier: ^0.7.0
       version: 0.7.0
@@ -748,12 +742,6 @@ importers:
 
   apps/web-antd:
     dependencies:
-      '@antv/x6':
-        specifier: 'catalog:'
-        version: 3.1.8
-      '@antv/x6-vue-shape':
-        specifier: 'catalog:'
-        version: 3.0.2(@antv/x6@3.1.8)(vue@3.5.42(typescript@6.0.3))
       '@form-create/ant-design-vue':
         specifier: 'catalog:'
         version: 3.3.3(vue@3.5.42(typescript@6.0.3))
@@ -899,9 +887,6 @@ importers:
       '@types/sortablejs':
         specifier: 'catalog:'
         version: 1.15.9
-      playwright:
-        specifier: 'catalog:'
-        version: 1.62.1
 
   apps/web-antdv-next:
     dependencies:
@@ -2478,20 +2463,6 @@ packages:
 
   '@antfu/install-pkg@1.1.0':
     resolution: {integrity: sha512-MGQsmw10ZyI+EJo45CdSER4zEb+p31LpDAFp2Z3gkSd1yqVZGi0Ebx++YTEMonJy4oChEMLsxZ64j8FH6sSqtQ==}
-
-  '@antv/x6-vue-shape@3.0.2':
-    resolution: {integrity: sha512-HWnYFvLCaUD9ernINxTn9vCRj66eG/nXKErSSq0hfI4U1HOitC/1oUrzDdwL/BT80HKAQeSsmy7gpDA/79jYlw==}
-    peerDependencies:
-      '@antv/x6': ^3.x
-      '@vue/composition-api': ^1.0.0-rc.1
-      vue: ^3.5.40
-    peerDependenciesMeta:
-      '@vue/composition-api':
-        optional: true
-
-  '@antv/x6@3.1.8':
-    resolution: {integrity: sha512-JVGxBRmjnqDr7W7Ql5XWc6FUtFcy+QlFaV31cv0pHIeVIJmyYnB5rHmdzz93CY5lCS/XcNBtOnNIIq6JVgfZ5w==}
-    engines: {node: '>=20.0.0'}
 
   '@apideck/better-ajv-errors@0.3.7':
     resolution: {integrity: sha512-TajUJwGWbDwkCx/CZi7tRE8PVB7simCvKJfHUsSdvps+aTM/PDPP4gkLmKnc+x3CE//y9i/nj74GqdL/hwk7Iw==}
@@ -9825,9 +9796,6 @@ packages:
     resolution: {integrity: sha512-gN54ddmyzEg10orwZ2u4OOv+bjpMWdIl5jIkodK97bMq8QBSL5c0D7YX0lT1Ooz+99S7+PvFbnxzdjgHo1r41g==}
     engines: {node: '>=18.0.0'}
 
-  mousetrap@1.6.5:
-    resolution: {integrity: sha512-QNo4kEepaIBwiT8CDhP98umTetp+JNfQYBWvC1pc6/OAibuXtRcxZ58Qz8skvEHYvURne/7R8T5VoOI7rDsEUA==}
-
   mpd-parser@0.22.1:
     resolution: {integrity: sha512-fwBebvpyPUU8bOzvhX0VQZgSohncbgYwUyJJoTSNpmy7ccD2ryiCvM7oRkn/xQH5cv73/xU7rJSNCLjdGFor0Q==}
     hasBin: true
@@ -11296,8 +11264,8 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  sync-child-process@1.1.0:
-    resolution: {integrity: sha512-1LMf/x0kU0CKFSesh5DfYktvj1KhiqYi5LAh5HU2G4SkKk1TGDhsMFBOL47g/E+mNfYpgs365pVNlIYOIHPvlQ==}
+  sync-child-process@1.0.2:
+    resolution: {integrity: sha512-8lD+t2KrrScJ/7KXCSyfhT3/hRq78rC0wBFqNJXv3mZyn6hW2ypM05JmlSvtqRbeq6jqA94oHbxAr2vYsJ8vDA==}
     engines: {node: '>=16.0.0'}
 
   sync-message-port@1.2.0:
@@ -11856,10 +11824,6 @@ packages:
 
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
-
-  utility-types@3.11.0:
-    resolution: {integrity: sha512-6Z7Ma2aVEWisaL6TvBCy7P8rm2LQoPv6dJ7ecIaIixHcwfbJ0x7mWdbcwlIM5IGQxPZSFYeqRCqlOOeKoJYMkw==}
-    engines: {node: '>= 4'}
 
   valibot@1.4.2:
     resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
@@ -12517,19 +12481,6 @@ snapshots:
     dependencies:
       package-manager-detector: 1.8.0
       tinyexec: 1.3.0
-
-  '@antv/x6-vue-shape@3.0.2(@antv/x6@3.1.8)(vue@3.5.42(typescript@6.0.3))':
-    dependencies:
-      '@antv/x6': 3.1.8
-      vue: 3.5.42(typescript@6.0.3)
-      vue-demi: 0.14.10(vue@3.5.42(typescript@6.0.3))
-
-  '@antv/x6@3.1.8':
-    dependencies:
-      dom-align: 1.12.4
-      lodash-es: 4.18.1
-      mousetrap: 1.6.5
-      utility-types: 3.11.0
 
   '@apideck/better-ajv-errors@0.3.7(ajv@8.20.0)':
     dependencies:
@@ -13698,7 +13649,7 @@ snapshots:
   '@commitlint/ensure@21.2.0':
     dependencies:
       '@commitlint/types': 21.2.0
-      es-toolkit: 1.51.0
+      es-toolkit: 1.52.0
 
   '@commitlint/execute-rule@21.0.1': {}
 
@@ -20175,8 +20126,6 @@ snapshots:
 
   modern-tar@0.8.4: {}
 
-  mousetrap@1.6.5: {}
-
   mpd-parser@0.22.1:
     dependencies:
       '@babel/runtime': 7.29.7
@@ -21374,7 +21323,7 @@ snapshots:
       immutable: 5.1.9
       rxjs: 7.8.2
       supports-color: 8.1.1
-      sync-child-process: 1.1.0
+      sync-child-process: 1.0.2
       varint: 6.0.0
     optionalDependencies:
       sass-embedded-all-unknown: 1.103.1
@@ -21933,7 +21882,7 @@ snapshots:
       picocolors: 1.1.1
       sax: 1.6.1
 
-  sync-child-process@1.1.0:
+  sync-child-process@1.0.2:
     dependencies:
       sync-message-port: 1.2.0
 
@@ -22473,8 +22422,6 @@ snapshots:
   url-toolkit@2.2.5: {}
 
   util-deprecate@1.0.2: {}
-
-  utility-types@3.11.0: {}
 
   valibot@1.4.2(typescript@6.0.3):
     optionalDependencies:

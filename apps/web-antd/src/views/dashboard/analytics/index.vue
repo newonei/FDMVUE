@@ -278,12 +278,6 @@ const allQuickEntries = computed<QuickEntry[]>(() => [
     title: '工厂工作台',
   },
   {
-    icon: 'lucide:sparkles',
-    path: '/fdmcreative/workbench',
-    permissions: ['fdmcreative:project:query'],
-    title: '智能创作',
-  },
-  {
     icon: 'lucide:shopping-cart',
     path: '/fdmdata/ec-shop-daily/summary',
     permissions: ['fdmdata:ec-shop-daily:query'],

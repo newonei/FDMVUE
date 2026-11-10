@@ -38,9 +38,7 @@ export default defineConfig({
     'apps/web-antd/src/api/fdmdata',
     'apps/web-antd/src/api/fdmxui',
     'apps/web-antd/src/views/dashboard',
-    'apps/web-antd/src/views/{fdmai,fdmcaiwu,fdmcreative,fdmdata,fdmdingtalk,fdmgongchang,fdmneixiao,fdmperformance,fdmxui}',
-    'apps/web-antd/e2e/fixtures/FdmCreativeWorkbenchFixture.vue',
+    'apps/web-antd/src/views/{fdmai,fdmcaiwu,fdmdata,fdmdingtalk,fdmgongchang,fdmneixiao,fdmperformance,fdmxui}',
     'packages',
-    'docs/src/guide/fdmcreative',
   ],
 });
