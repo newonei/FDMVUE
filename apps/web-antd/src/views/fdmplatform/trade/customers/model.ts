@@ -53,6 +53,30 @@ export function invoiceForm(customer?: Partial<Customer>) {
   } as Record<'type' | InvoiceField, string>;
 }
 
+/** 客户档案的开票信息转成金智「购买方开票信息」的文本格式（与后端一致）；抬头留空用客户全称 */
+export function buyerInfoText(
+  invoice: Partial<Record<InvoiceField, null | string>> | undefined,
+  customerName?: string,
+) {
+  const join = (...values: (null | string | undefined)[]) =>
+    values
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(' ');
+  const details = [
+    ['纳税人识别号', invoice?.taxNo?.trim()],
+    ['地址电话', join(invoice?.address, invoice?.phone)],
+    ['开户行及账号', join(invoice?.bankName, invoice?.bankAccount)],
+    ['收票邮箱', invoice?.email?.trim()],
+  ].filter(([, value]) => value);
+  const title = invoice?.title?.trim();
+  if (!title && details.length === 0) return '';
+  return [['名称', title || customerName], ...details]
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}:${value}`)
+    .join('\n');
+}
+
 /** 专用发票须填齐的项目（抬头留空时用客户全称，不算缺）；与后端校验一致 */
 export function invoiceMissingFields(
   invoice: Partial<Record<string, string>>,

@@ -54,6 +54,15 @@ export function withDirectory(
         hint: '从当前系统的启用用户中选择。',
       };
     }
+    if (field.key === 'issuerCompanyId') {
+      return {
+        ...field,
+        options: (directory?.companies ?? []).map((company) => ({
+          value: company.companyId,
+          label: company.companyName,
+        })),
+      };
+    }
     if (field.key === 'departmentId') {
       return {
         ...field,

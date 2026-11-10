@@ -49,6 +49,8 @@ import {
   documentDefinitions,
   documentStatuses,
   factoryHandoff,
+  invoiceBuyerText,
+  invoiceIssuer,
   procurementDocumentDefinition,
   procurementDocumentKind,
   queryContractId,
@@ -90,7 +92,10 @@ const isIntake = computed(
   () => props.kind === 'tasks' && procurementQueue.value === 'intake',
 );
 const purchaseInvoice = computed(
-  () => props.kind === 'invoices' && route.query.invoiceType === 'PURCHASE',
+  () =>
+    props.kind === 'invoices' &&
+    !props.salesChannel &&
+    route.query.invoiceType === 'PURCHASE',
 );
 const invoiceTab = computed({
   get: () => (purchaseInvoice.value ? 'PURCHASE' : 'SALES'),
@@ -332,6 +337,9 @@ function lineCell(row: DocumentRow, key: string) {
 }
 function cell(row: DocumentRow, key: string) {
   if (key === 'allocationType') return allocationKind(row.record);
+  if (key === 'issuerName') return invoiceIssuer(row.record) ?? '未填写';
+  if (key === 'buyerInfo')
+    return invoiceBuyerText(row.record)?.replaceAll('\n', ' ') ?? '未填写';
   const fromLines = lineCell(row, key);
   if (fromLines !== undefined) return fromLines;
   if (key === 'product') return '—';
@@ -533,7 +541,10 @@ onMounted(async () => {
   >
     <Card>
       <Space direction="vertical" size="middle" style="width: 100%">
-        <Tabs v-if="kind === 'invoices'" v-model:active-key="invoiceTab">
+        <Tabs
+          v-if="kind === 'invoices' && !salesChannel"
+          v-model:active-key="invoiceTab"
+        >
           <TabPane key="SALES" tab="销售开票" /><TabPane
             key="PURCHASE"
             tab="采购进项票"

@@ -1342,7 +1342,8 @@ async function download(file: { id: string; name: string }) {
                   <span>{{
                     nativeMoney(invoice.amount, invoice.currency)
                   }}</span>
-                  <span>{{ invoice.issuedAt ?? '' }}
+                  <span>{{ invoice.issuerName ?? '' }}
+                    {{ invoice.issuedAt ?? '' }}
                     {{ label(invoice.status) }}</span>
                 </div>
               </div>

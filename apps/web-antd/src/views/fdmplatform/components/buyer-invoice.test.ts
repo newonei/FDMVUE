@@ -1,8 +1,11 @@
-import type { Contract } from '#/api/fdmplatform';
+import type { Contract, Directory } from '#/api/fdmplatform';
 
 import { describe, expect, it } from 'vitest';
 
 import { financeActions, invoiceTaxAmount } from '../data';
+import { withDirectory } from '../directory';
+import { invoiceBuyerText, invoiceIssuer } from '../documents/model';
+import { buyerInfoText } from '../trade/customers/model';
 
 const contract = (businessType: string) =>
   ({
@@ -28,6 +31,76 @@ describe('invoice registration shows the buyer invoice details', () => {
       expect(
         financeActions(contract(type)).CREATE_INVOICE?.buyerCustomerId,
       ).toBeUndefined();
+  });
+});
+
+describe('invoice records carry the issuer and buyer details', () => {
+  const keys = (type: string) =>
+    financeActions(contract(type)).CREATE_INVOICE?.fields ?? [];
+
+  it('defaults the issuing company to the contract company on both channels', () => {
+    for (const type of ['DOMESTIC', 'FOREIGN']) {
+      const value = contract(type);
+      value.companyId = 12;
+      const issuer = financeActions(value).CREATE_INVOICE?.fields.find(
+        (item) => item.key === 'issuerCompanyId',
+      );
+      expect(issuer?.required).toBe(true);
+      expect(issuer?.default).toBe(12);
+    }
+  });
+
+  it('requires buyer details on domestic invoices only', () => {
+    const required = (type: string) =>
+      keys(type).find((item) => item.key === 'buyerInfo')?.required;
+    expect(required('DOMESTIC')).toBe(true);
+    expect(required('FOREIGN')).toBe(false);
+  });
+
+  it('lists companies from the directory as issuer options', () => {
+    const issuer = withDirectory(
+      financeActions(contract('FOREIGN')).CREATE_INVOICE!,
+      {
+        companies: [{ companyId: 5, companyName: '武汉顶铭' }],
+        departments: [],
+        users: [],
+      } as unknown as Directory,
+    ).fields.find((item) => item.key === 'issuerCompanyId');
+    expect(issuer?.options).toEqual([{ value: 5, label: '武汉顶铭' }]);
+  });
+
+  it('formats the customer archive the way Jinzhi wrote buyer details', () => {
+    expect(
+      buyerInfoText(
+        {
+          taxNo: '9133',
+          address: '杭州',
+          phone: '137',
+          bankName: '工行',
+          bankAccount: '1202',
+        },
+        '杭州同尘',
+      ),
+    ).toBe(
+      '名称:杭州同尘\n纳税人识别号:9133\n地址电话:杭州 137\n开户行及账号:工行 1202',
+    );
+    expect(buyerInfoText(undefined, '杭州同尘')).toBe('');
+  });
+
+  it('shows the source text for imported records and the snapshot for older ones', () => {
+    expect(invoiceIssuer({ migration: { sourceCompanyName: '飞德慕' } })).toBe(
+      '飞德慕',
+    );
+    expect(invoiceIssuer({ issuerName: '武汉顶铭', migration: null })).toBe(
+      '武汉顶铭',
+    );
+    expect(
+      invoiceBuyerText({ buyerInfo: '见附件', buyer: { title: 'A' } }),
+    ).toBe('见附件');
+    expect(invoiceBuyerText({ buyer: { title: 'A', taxNo: 'B' } })).toBe(
+      '名称：A\n税号：B',
+    );
+    expect(invoiceBuyerText({})).toBeUndefined();
   });
 });
 

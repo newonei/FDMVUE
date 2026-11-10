@@ -336,6 +336,13 @@ function defaultTicketKind(type: string) {
   )
     values.value.ticketKind = type;
 }
+function defaultBuyerInfo(text: string) {
+  if (
+    props.definition?.fields.some((item) => item.key === 'buyerInfo') &&
+    !values.value.buyerInfo
+  )
+    values.value.buyerInfo = text;
+}
 function setValue(target: FormValues, key: string, value: unknown) {
   if (props.saving) return;
   if (
@@ -395,6 +402,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
         v-if="definition.buyerCustomerId"
         :customer-id="definition.buyerCustomerId"
         @type="defaultTicketKind"
+        @buyer-info="defaultBuyerInfo"
       />
       <slot name="context"></slot>
       <Alert

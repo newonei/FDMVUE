@@ -10,14 +10,18 @@ import { getCustomer } from '#/api/fdmplatform/customers';
 
 import { errorText } from '../data';
 import {
+  buyerInfoText,
   invoiceFields,
   invoiceMissingFields,
   invoiceTypeOptions,
 } from '../trade/customers/model';
 
-/** 登记内销发票时显示购方开票信息，方便照着开票或核对；登记时后端另存一份快照 */
+/** 登记内销发票时显示客户档案的开票信息，方便照着开票或核对，并预填「购买方开票信息」；登记时后端另存一份快照 */
 const props = defineProps<{ customerId: string }>();
-const emit = defineEmits<{ type: [value: string] }>();
+const emit = defineEmits<{
+  buyerInfo: [value: string];
+  type: [value: string];
+}>();
 const customer = ref<Customer>();
 const loading = ref(false);
 const loadError = ref('');
@@ -37,6 +41,8 @@ watch(
       if (run === sequence) {
         customer.value = result;
         if (result.invoice?.type) emit('type', result.invoice.type);
+        const text = buyerInfoText(result.invoice, result.name);
+        if (text) emit('buyerInfo', text);
       }
     } catch (error) {
       if (run === sequence) loadError.value = errorText(error);
@@ -71,7 +77,7 @@ async function copyValue(value: string) {
 <template>
   <section class="buyer-invoice" aria-labelledby="buyer-invoice-title">
     <h3 id="buyer-invoice-title">
-      购方开票信息<small v-if="typeLabel">{{ typeLabel }}</small>
+      客户档案开票信息<small v-if="typeLabel">{{ typeLabel }}</small>
     </h3>
     <p v-if="loading" class="muted">正在读取客户开票信息…</p>
     <Alert v-else-if="loadError" type="error" show-icon :message="loadError" />
@@ -80,7 +86,7 @@ async function copyValue(value: string) {
         v-if="rows.length === 0"
         type="warning"
         show-icon
-        message="客户还没有填写开票信息，请先在内销客户档案里补齐。"
+        message="客户档案没有开票信息，请在下方填写购买方开票信息，或填「见附件」。"
       />
       <template v-else>
         <dl>
