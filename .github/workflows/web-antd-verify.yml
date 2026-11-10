@@ -1,0 +1,47 @@
+name: Verify web-antd
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/web-antd-verify.yml'
+      - 'apps/web-antd/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'vitest*.config.ts'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/web-antd-verify.yml'
+      - 'apps/web-antd/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'vitest*.config.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, test and build web-antd
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Setup Node and pnpm
+        uses: ./.github/actions/setup-node
+
+      - name: Typecheck web-antd
+        run: pnpm --filter @vben/web-antd run typecheck
+
+      - name: Unit test web-antd
+        run: pnpm exec vitest run apps/web-antd --dom
+
+      - name: Build web-antd
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: pnpm run build:antd
