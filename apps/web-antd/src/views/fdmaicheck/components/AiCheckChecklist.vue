@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import type { Checklist } from './checklist';
+import type { Checklist, CheckRow } from './checklist';
 
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
 import { computed, ref } from 'vue';
 
-import { Button, Popover } from 'ant-design-vue';
+import { Button, Table } from 'ant-design-vue';
 
-import { RESULT_META } from './checklist';
+import { RESULT_META, rowBasis, rowSummary, tableRows } from './checklist';
 import { SEVERITY_LABELS, STATUS_LABELS } from './risk';
 
 /**
- * 展开后的检查清单：每个检查点一行，前面打标记：✕ 不通过、! 有疑问（逐条列出，可处理），
- * ? 缺资料、✓ 通过（写出依据），— 不适用（缩成标签，点开看原因）。
+ * 检查清单表格：一个检查点一行，默认收起，只看结论、名称、来源和一句摘要；
+ * 点一行展开看检查内容、依据和逐条问题，问题在展开里处理（已处理/误报/忽略/重新打开）。
  * 单据详情和配置页试跑共用。
  */
 const props = defineProps<{
@@ -27,224 +27,192 @@ const emit = defineEmits<{
   handle: [finding: FdmAiCheckApi.Finding, status: FdmAiCheckApi.FindingStatus];
 }>();
 
-const showHandled = ref(false);
-const openIssues = computed(() =>
-  props.list.issues.filter((r) => r.open.length > 0),
+const columns = [
+  { title: '结论', key: 'result', width: 112 },
+  { title: '检查点', key: 'name', width: 200 },
+  { title: '来源', key: 'source', width: 64 },
+  { title: '说明', key: 'summary', ellipsis: true },
+  { title: '问题', key: 'issues', width: 96, align: 'right' as const },
+];
+
+const rows = computed(() => tableRows(props.list));
+const expandedKeys = ref<string[]>([]);
+const allExpanded = computed(
+  () =>
+    rows.value.length > 0 &&
+    rows.value.every((r) => expandedKeys.value.includes(r.key)),
 );
-const handledIssues = computed(() =>
-  props.list.issues.filter((r) => r.open.length === 0),
-);
-const sections = computed(() =>
-  [
-    { result: 'UNKNOWN' as const, rows: props.list.unknown },
-    { result: 'PASS' as const, rows: props.list.passed },
-  ].filter((s) => s.rows.length > 0),
-);
+
+function toggleAll() {
+  expandedKeys.value = allExpanded.value ? [] : rows.value.map((r) => r.key);
+}
+
+function asRow(record: unknown) {
+  return record as CheckRow;
+}
 
 function handledLabel(findings: FdmAiCheckApi.Finding[]) {
   const labels = new Set(findings.map((f) => STATUS_LABELS[f.status]));
   return labels.size === 1 ? [...labels][0] : '已处理';
 }
+
+function rowClass(record: unknown) {
+  const row = asRow(record);
+  if (row.findings.length > 0 && row.open.length === 0) return 'is-handled';
+  if (row.result === 'PENDING' || row.result === 'NOT_APPLICABLE')
+    return 'is-muted';
+  return '';
+}
 </script>
 
 <template>
   <div class="ck">
-    <ul v-if="openIssues.length" class="ck-issues">
-      <li v-for="row in openIssues" :key="row.key" class="ck-issue">
-        <span class="ck-mark" :class="`is-${RESULT_META[row.result].tone}`">
-          {{ RESULT_META[row.result].mark }}
-        </span>
-        <div class="ck-body">
-          <div class="ck-line">
-            <span class="ck-name">{{ row.name }}</span>
-            <span class="ck-chip" :class="`is-${RESULT_META[row.result].tone}`">
-              {{ RESULT_META[row.result].label }}
-            </span>
-            <span class="ck-src">{{
-              row.source === 'RULE' ? '规则' : 'AI'
-            }}</span>
-          </div>
-          <div v-for="f in row.open" :key="f.id" class="ck-finding">
-            <p class="ck-msg">
-              <span
-                v-if="row.open.length > 1 || f.severity === 'HIGH'"
-                class="ck-sev"
-              >
-                {{ SEVERITY_LABELS[f.severity] }}
-              </span>
-              {{ f.message }}
-            </p>
-            <div class="ck-sub">
-              <span v-if="f.suggestion">建议：{{ f.suggestion }}</span>
-              <span v-if="actions" class="ck-actions">
-                <Button
-                  size="small"
-                  type="link"
-                  :loading="handling === f.id"
-                  @click="emit('handle', f, 'RESOLVED')"
-                >
-                  已处理
-                </Button>
-                <Button
-                  size="small"
-                  type="link"
-                  :disabled="handling === f.id"
-                  @click="emit('handle', f, 'FALSE_POSITIVE')"
-                >
-                  误报
-                </Button>
-                <Button
-                  size="small"
-                  type="link"
-                  :disabled="handling === f.id"
-                  @click="emit('handle', f, 'IGNORED')"
-                >
-                  忽略
-                </Button>
-              </span>
-            </div>
-          </div>
-          <p
-            v-if="row.basis && row.basis !== row.open[0]?.message"
-            class="ck-basis"
-          >
-            依据：{{ row.basis }}
-          </p>
-        </div>
-      </li>
-    </ul>
-
-    <!-- 缺资料、通过逐条列出依据，一眼看到每个点查了什么；不适用缩成标签 -->
-    <template v-for="sec in sections" :key="sec.result">
-      <div class="ck-group">
-        <span class="ck-mark sm" :class="`is-${RESULT_META[sec.result].tone}`">
-          {{ RESULT_META[sec.result].mark }}
-        </span>
-        {{ RESULT_META[sec.result].label }} {{ sec.rows.length }}
-        <span v-if="sec.result === 'UNKNOWN'" class="ck-hint">
-          资料不全，AI 没法判断，补上资料后重新检查
-        </span>
-      </div>
-      <ul class="ck-rows">
-        <li v-for="row in sec.rows" :key="row.key" class="ck-row">
+    <div class="ck-toolbar">
+      <span class="ck-hint">
+        共 {{ rows.length }} 项，点一行查看详情<template
+          v-if="list.pending.length && pendingHint"
+          >；{{ list.pending.length }} 项未检查：{{ pendingHint }}</template>
+      </span>
+      <Button size="small" type="link" class="ck-toggle" @click="toggleAll">
+        {{ allExpanded ? '全部收起' : '全部展开' }}
+      </Button>
+    </div>
+    <Table
+      v-model:expanded-row-keys="expandedKeys"
+      size="small"
+      row-key="key"
+      :columns="columns"
+      :data-source="rows"
+      :pagination="false"
+      :row-class-name="rowClass"
+      :scroll="{ x: 640 }"
+      expand-row-by-click
+    >
+      <template #bodyCell="{ column, record }">
+        <span
+          v-if="column.key === 'result'"
+          class="ck-result"
+          :class="`is-${RESULT_META[asRow(record).result].tone}-text`"
+        >
           <span
             class="ck-mark sm"
-            :class="`is-${RESULT_META[row.result].tone}`"
+            :class="`is-${RESULT_META[asRow(record).result].tone}`"
           >
-            {{ RESULT_META[row.result].mark }}
+            {{ RESULT_META[asRow(record).result].mark }}
           </span>
-          <span class="ck-body">
-            <span class="ck-line">
-              <span class="ck-name">{{ row.name }}</span>
-              <span v-if="row.source === 'RULE'" class="ck-src">规则</span>
-            </span>
-            <span v-if="row.basis || row.source === 'RULE'" class="ck-basis">
-              {{ row.basis || '系统规则没有发现问题' }}
-            </span>
+          {{ RESULT_META[asRow(record).result].label }}
+        </span>
+        <span v-else-if="column.key === 'name'" class="ck-name-cell">
+          <span class="ck-name">{{ asRow(record).name }}</span>
+          <span v-if="asRow(record).group" class="ck-src">
+            {{ asRow(record).group }}
           </span>
-        </li>
-      </ul>
-    </template>
-
-    <template v-if="list.notApplicable.length">
-      <div class="ck-group">
-        <span class="ck-mark sm is-na">—</span>
-        不适用 {{ list.notApplicable.length }}
-        <span class="ck-hint">点标签看原因</span>
-      </div>
-      <div class="ck-chips">
-        <Popover
-          v-for="row in list.notApplicable"
-          :key="row.key"
-          trigger="click"
-          placement="bottomLeft"
-          :overlay-style="{ maxWidth: '360px' }"
+        </span>
+        <span v-else-if="column.key === 'source'" class="ck-src">
+          {{ asRow(record).source === 'RULE' ? '规则' : 'AI' }}
+        </span>
+        <span
+          v-else-if="column.key === 'summary'"
+          class="ck-summary"
+          :title="rowSummary(asRow(record))"
         >
-          <template #content>
-            <div class="ck-pop">
-              <b>{{ row.name }}</b>
-              <span>不适用 ·
-                {{ row.source === 'RULE' ? '系统规则' : 'AI 判断' }}</span>
-              <p>{{ row.basis || '没有写原因' }}</p>
-            </div>
-          </template>
-          <button type="button" class="ck-pchip">{{ row.name }}</button>
-        </Popover>
-      </div>
-    </template>
-
-    <!-- 配置了但还没有结论的检查点：没检查过的单据也能看到会查哪些点 -->
-    <template v-if="list.pending.length">
-      <div class="ck-group">
-        <span class="ck-mark sm is-pending">○</span>
-        未检查 {{ list.pending.length }}
-        <span class="ck-hint">{{ pendingHint }}</span>
-      </div>
-      <ul class="ck-rows">
-        <li v-for="row in list.pending" :key="row.key" class="ck-row">
-          <span class="ck-mark sm is-pending">○</span>
-          <span class="ck-body">
-            <span class="ck-line">
-              <span class="ck-name is-muted">{{ row.name }}</span>
-              <span class="ck-src">{{
-                row.source === 'RULE' ? '规则' : 'AI'
-              }}</span>
-              <span v-if="row.group" class="ck-src">· {{ row.group }}</span>
-            </span>
-            <span v-if="row.description" class="ck-basis">
-              {{ row.description }}
-            </span>
+          {{ rowSummary(asRow(record)) }}
+        </span>
+        <template v-else-if="column.key === 'issues'">
+          <span v-if="asRow(record).open.length" class="ck-open">
+            {{ asRow(record).open.length }} 条待处理
           </span>
-        </li>
-      </ul>
-    </template>
-
-    <div v-if="handledIssues.length" class="ck-handled">
-      <Button
-        size="small"
-        type="link"
-        class="ck-toggle"
-        @click="showHandled = !showHandled"
-      >
-        {{ showHandled ? '收起' : '查看' }}已处理的
-        {{ handledIssues.length }} 项
-      </Button>
-      <ul v-if="showHandled" class="ck-issues">
-        <li
-          v-for="row in handledIssues"
-          :key="row.key"
-          class="ck-issue is-handled"
-        >
-          <span class="ck-mark" :class="`is-${RESULT_META[row.result].tone}`">
-            {{ RESULT_META[row.result].mark }}
+          <span v-else-if="asRow(record).findings.length" class="ck-src">
+            {{ handledLabel(asRow(record).findings) }}
           </span>
-          <div class="ck-body">
-            <div class="ck-line">
-              <span class="ck-name">{{ row.name }}</span>
-              <span class="ck-chip">
-                {{ RESULT_META[row.result].label }} ·
-                {{ handledLabel(row.findings) }}
-              </span>
-            </div>
-            <div v-for="f in row.findings" :key="f.id" class="ck-finding">
-              <p class="ck-msg">{{ f.message }}</p>
-              <div class="ck-sub">
-                <span v-if="f.handledReason">理由：{{ f.handledReason }}</span>
-                <Button
-                  v-if="actions"
-                  size="small"
-                  type="link"
-                  :loading="handling === f.id"
-                  @click="emit('handle', f, 'OPEN')"
-                >
-                  重新打开
-                </Button>
-              </div>
-            </div>
+          <span v-else class="ck-src">—</span>
+        </template>
+      </template>
+
+      <template #expandedRowRender="{ record }">
+        <div class="ck-detail">
+          <div v-if="asRow(record).description" class="ck-field">
+            <span class="ck-label">检查内容</span>
+            <span>{{ asRow(record).description }}</span>
           </div>
-        </li>
-      </ul>
-    </div>
+          <div v-if="rowBasis(asRow(record))" class="ck-field">
+            <span class="ck-label">
+              {{ asRow(record).result === 'NOT_APPLICABLE' ? '原因' : '依据' }}
+            </span>
+            <span>{{ rowBasis(asRow(record)) }}</span>
+          </div>
+          <div v-else-if="asRow(record).findings.length === 0" class="ck-field">
+            <span class="ck-label">
+              {{ asRow(record).result === 'PENDING' ? '状态' : '依据' }}
+            </span>
+            <span v-if="asRow(record).result === 'PENDING'">
+              {{ pendingHint || '还没有检查这一项' }}
+            </span>
+            <span v-else>{{ rowSummary(asRow(record)) }}</span>
+          </div>
+
+          <ul v-if="asRow(record).findings.length" class="ck-findings">
+            <li
+              v-for="f in asRow(record).findings"
+              :key="f.id"
+              class="ck-finding"
+              :class="{ 'is-handled': f.status !== 'OPEN' }"
+            >
+              <p class="ck-msg">
+                <span class="ck-sev" :class="`sev-${f.severity}`">
+                  {{ SEVERITY_LABELS[f.severity] }}
+                </span>
+                {{ f.message }}
+              </p>
+              <div class="ck-sub">
+                <span v-if="f.suggestion">建议：{{ f.suggestion }}</span>
+                <span v-if="f.status !== 'OPEN'">
+                  {{ STATUS_LABELS[f.status]
+                  }}{{ f.handledReason ? `：${f.handledReason}` : '' }}
+                </span>
+                <span v-if="actions" class="ck-actions">
+                  <template v-if="f.status === 'OPEN'">
+                    <Button
+                      size="small"
+                      type="link"
+                      :loading="handling === f.id"
+                      @click="emit('handle', f, 'RESOLVED')"
+                    >
+                      已处理
+                    </Button>
+                    <Button
+                      size="small"
+                      type="link"
+                      :disabled="handling === f.id"
+                      @click="emit('handle', f, 'FALSE_POSITIVE')"
+                    >
+                      误报
+                    </Button>
+                    <Button
+                      size="small"
+                      type="link"
+                      :disabled="handling === f.id"
+                      @click="emit('handle', f, 'IGNORED')"
+                    >
+                      忽略
+                    </Button>
+                  </template>
+                  <Button
+                    v-else
+                    size="small"
+                    type="link"
+                    :loading="handling === f.id"
+                    @click="emit('handle', f, 'OPEN')"
+                  >
+                    重新打开
+                  </Button>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </template>
+    </Table>
   </div>
 </template>
 
@@ -252,65 +220,160 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
 .ck {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
-.ck-issues {
-  padding: 0;
-  margin: 0;
-  list-style: none;
+.ck-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.ck-issue {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 2px 10px;
-  padding: 7px 0;
-  border-top: 1px dashed var(--ant-color-border-secondary, #f0f0f0);
+.ck-toggle {
+  height: 20px;
+  padding: 0 2px;
+  font-size: 12px;
 }
 
-.ck-issue:first-child {
-  border-top: 0;
+.ck :deep(.ant-table) {
+  background: transparent;
 }
 
-.ck-issue.is-handled {
+.ck :deep(.ant-table-tbody > tr.ant-table-row) {
+  cursor: pointer;
+}
+
+.ck :deep(.ant-table-tbody > tr.is-handled > td) {
   opacity: 0.65;
 }
 
-.ck-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.ck :deep(.ant-table-tbody > tr.is-muted .ck-name) {
+  font-weight: 400;
+  color: var(--ant-color-text-secondary, #595959);
 }
 
-.ck-line {
+.ck :deep(.ant-table-expanded-row > td) {
+  background: var(--ant-color-fill-quaternary, rgb(0 0 0 / 2%));
+}
+
+.ck-result {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.ck-name-cell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  align-items: baseline;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .ck-name {
   font-weight: 500;
 }
 
+.ck-summary {
+  color: var(--ant-color-text-secondary, #595959);
+}
+
+.ck-open {
+  font-size: 12px;
+  color: var(--ant-color-error, #ff4d4f);
+  white-space: nowrap;
+}
+
+.ck-src,
+.ck-hint {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.ck-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.ck-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.ck-label {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.ck-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.ck-finding {
+  padding: 6px 10px;
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 4px;
+}
+
+.ck-finding.is-handled {
+  opacity: 0.65;
+}
+
+.ck-msg {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ck-sev {
+  margin-inline-end: 4px;
+  font-size: 12px;
+  color: var(--ant-color-warning-text, #d48806);
+}
+
+.ck-sev.sev-HIGH {
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+.ck-sev.sev-INFO {
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.ck-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #595959);
+}
+
+.ck-actions :deep(.ant-btn) {
+  height: 20px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
 .ck-mark {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  border-radius: 50%;
-}
-
-.ck-mark.sm {
   width: 16px;
   height: 16px;
   font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 50%;
 }
 
 .is-pass {
@@ -338,148 +401,30 @@ function handledLabel(findings: FdmAiCheckApi.Finding[]) {
   background: var(--ant-color-fill-secondary, rgb(0 0 0 / 6%));
 }
 
-.ck-chip {
-  padding: 0 6px;
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-  white-space: nowrap;
-  background: var(--ant-color-fill-tertiary, rgb(0 0 0 / 4%));
-  border-radius: 4px;
-}
-
-.ck-src,
-.ck-hint {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-}
-
-.ck-finding {
-  min-width: 0;
-}
-
-.ck-msg {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.ck-sev {
-  margin-inline-end: 4px;
-  font-size: 12px;
-  color: var(--ant-color-error, #ff4d4f);
-}
-
-.ck-sub {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 12px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #595959);
-}
-
-.ck-actions :deep(.ant-btn) {
-  height: 20px;
-  padding: 0 4px;
-  font-size: 12px;
-}
-
-.ck-basis {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-  overflow-wrap: anywhere;
-}
-
-.ck-group {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #595959);
-}
-
-.ck-group::after {
-  flex: 1;
-  height: 1px;
-  content: '';
-  background: var(--ant-color-border-secondary, #f0f0f0);
-}
-
-.ck-rows {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.ck-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 0 10px;
-  align-items: start;
-  padding: 4px 0;
-  font-size: 13px;
-}
-
-.ck-row .ck-mark {
-  margin: 1px 1px 0;
-}
-
-.ck-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ck-pchip {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  padding: 1px 8px 1px 3px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--ant-color-text, rgb(0 0 0 / 88%));
-  cursor: pointer;
-  background: var(--ant-color-bg-container, #fff);
-  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
-  border-radius: 12px;
-}
-
-.ck-pchip:hover,
-.ck-pchip:focus-visible {
-  outline: none;
-  border-color: var(--ant-color-primary, #1677ff);
-}
-
-.ck-pop {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ck-pop span {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary, #8c8c8c);
-}
-
-.ck-pop p {
-  margin: 4px 0 0;
-}
-
-.ck-toggle {
-  padding-inline: 0;
-}
-
-.ck-name.is-muted {
-  font-weight: 400;
-  color: var(--ant-color-text-secondary, #595959);
-}
-
 .is-pending {
   color: var(--ant-color-text-quaternary, #bfbfbf);
   background: var(--ant-color-bg-container, #fff);
   box-shadow: inset 0 0 0 1px var(--ant-color-border, #d9d9d9);
+}
+
+.is-fail-text {
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+.is-warn-text {
+  color: var(--ant-color-warning-text, #d48806);
+}
+
+.is-unknown-text {
+  color: var(--ant-geekblue-6, #2f54eb);
+}
+
+.is-pass-text {
+  color: var(--ant-color-success, #52c41a);
+}
+
+.is-na-text,
+.is-pending-text {
+  color: var(--ant-color-text-tertiary, #8c8c8c);
 }
 </style>

@@ -245,3 +245,45 @@ export function segments(list: Checklist) {
     pass: pct(list.tally.PASS),
   };
 }
+
+/**
+ * 表格里的行顺序：没处理的问题、已处理的问题、缺资料、通过、不适用、未检查。
+ * 和收起时结果条的顺序一致，要处理的总在最上面。
+ */
+export function tableRows(list: Checklist): CheckRow[] {
+  return [
+    ...list.issues.filter((r) => r.open.length > 0),
+    ...list.issues.filter((r) => r.open.length === 0),
+    ...list.unknown,
+    ...list.passed,
+    ...list.notApplicable,
+    ...list.pending,
+  ];
+}
+
+/** 表格「说明」列的一行摘要：有问题写问题，没问题写依据，没检查写检查什么。 */
+export function rowSummary(row: CheckRow): string {
+  const findings = row.open.length > 0 ? row.open : row.findings;
+  if (findings.length > 0) {
+    const text = findings[0]!.message;
+    return findings.length > 1 ? `${text}（共 ${findings.length} 条）` : text;
+  }
+  if (row.basis) return row.basis;
+  switch (row.result) {
+    case 'NOT_APPLICABLE': {
+      return '没有写原因';
+    }
+    case 'PENDING': {
+      return row.description || '还没有检查这一项';
+    }
+    default: {
+      return row.source === 'RULE' ? '系统规则没有发现问题' : '没有写依据';
+    }
+  }
+}
+
+/** 展开后的「依据」：和第一条问题说的一样就不重复写。 */
+export function rowBasis(row: CheckRow): string {
+  if (!row.basis || row.basis === row.findings[0]?.message) return '';
+  return row.basis;
+}
