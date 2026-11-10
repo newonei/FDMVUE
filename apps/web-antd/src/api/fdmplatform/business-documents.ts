@@ -113,3 +113,40 @@ export function businessDocumentAction(
     body,
   );
 }
+
+/** 金智迁入的发货单：物流方式、单号、收货人与明细，只作合同附属资料，不计发货数量。 */
+export interface ShipmentNote {
+  id: string;
+  code?: string;
+  name?: string;
+  status?: null | string;
+  shippedDate?: null | string;
+  deliveryMethod?: null | string;
+  trackingNo?: null | string;
+  amount?: Decimal | null;
+  freight?: Decimal | null;
+  weightKg?: Decimal | null;
+  packages?: Decimal | null;
+  recipientName?: null | string;
+  recipientPhone?: null | string;
+  recipientAddress?: null | string;
+  platform?: null | string;
+  platformOrderNo?: null | string;
+  shipper?: null | string;
+  remark?: null | string;
+  lines?: {
+    amount?: Decimal | null;
+    productCode?: null | string;
+    productName?: null | string;
+    quantity?: Decimal | null;
+    remark?: null | string;
+    specification?: null | string;
+    unit?: null | string;
+    unitPrice?: Decimal | null;
+  }[];
+}
+export function getContractShipmentNotes(contractId: string) {
+  return requestClient.get<ShipmentNote[]>(`${base}/shipment-notes`, {
+    params: { contractId },
+  });
+}

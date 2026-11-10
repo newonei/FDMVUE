@@ -63,7 +63,7 @@ export interface ProcurementFinanceRecord extends BusinessRecord {
   };
   history?: BusinessRecord[];
   summary?: Record<string, unknown>;
-  /** 付款记录：直接挂采购单时为 PURCHASE_ORDER，从付款发票增加付款时为 PURCHASE_INVOICE */
+  /** 付款记录：直接挂采购单时为 PURCHASE_ORDER，从付款发票增加付款时为 PURCHASE_INVOICE，不挂采购单的其他付款为 OTHER */
   sourceType?: string;
   paidAt?: string;
   payerAccount?: string;
@@ -219,6 +219,20 @@ export async function registerInvoicePayment(
     key,
     mode,
   );
+}
+/** 其他付款：不挂采购单（集团内往来款、押金等），币种自选，只记付款事实，不计入任何采购单已付。 */
+export interface OtherPaymentInput extends Omit<
+  OrderPaymentInput,
+  'batchNo' | 'contractId' | 'orderId'
+> {
+  currency: string;
+}
+export async function registerOtherPayment(
+  input: OtherPaymentInput,
+  key: string,
+) {
+  // 其他付款不在财务审核范围内，登记即确认
+  return registerPayment({ ...input, sourceType: 'OTHER' }, key, 'CONFIRM');
 }
 export function getProcurementFinanceSummary(
   contractId: string,

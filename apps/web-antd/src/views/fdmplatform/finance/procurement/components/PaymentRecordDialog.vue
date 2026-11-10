@@ -25,11 +25,12 @@ import {
   procurementFinanceAction,
   registerInvoicePayment,
   registerOrderPayment,
+  registerOtherPayment,
   uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
-import { errorText } from '../../../data';
+import { errorText, receiptCurrencyOptions } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
   payerAccountLabel,
@@ -46,6 +47,7 @@ import {
  * 传了 record 是修改被退回（或草稿）的付款记录，保存后重新提交。
  * 传了 invoice 是付款发票「增加付款」：付款挂整张发票，不再选采购单（来源经发票查），
  * 带出发票金额、已付、剩余可付，本次付款不能超过剩余可付。
+ * other 是其他付款：不挂采购单（集团内往来款、押金等），币种自选，不计入任何采购单已付。
  */
 const props = defineProps<{
   /** 本单最多还能登记的金额（采购应付 − 已付 − 历史请款未付部分） */
@@ -66,6 +68,8 @@ const props = defineProps<{
   open: boolean;
   orderCode?: string;
   orderId: string;
+  /** 其他付款：不挂采购单；此时 contractId / orderId 不用 */
+  other?: boolean;
   /** 本单已有的付款记录，用来带入上一笔的付款公司和收款账户 */
   previous?: Array<Record<string, unknown>>;
   /** 修改被退回或草稿的付款记录，保存后重新提交 */
@@ -95,6 +99,10 @@ const form = ref<PaymentForm>({});
 const files = ref<File[]>([]);
 const saving = ref(false);
 const error = ref('');
+const otherCurrency = ref('CNY');
+const currencyText = computed(() =>
+  props.other ? otherCurrency.value : (props.currency ?? 'CNY'),
+);
 let key = crypto.randomUUID();
 
 const referenceItems = computed(() => {
@@ -147,6 +155,7 @@ watch(
     key = crypto.randomUUID();
     error.value = '';
     files.value = [];
+    otherCurrency.value = 'CNY';
     confirmDirectly.value = false;
     const record = props.record;
     form.value = record
@@ -241,6 +250,17 @@ async function save() {
       canConfirm.value && confirmDirectly.value ? 'CONFIRM' : 'SUBMIT';
     let record: ProcurementFinanceRecord;
     if (props.record) record = await resubmit(props.record, fields, mode);
+    else if (props.other)
+      // 其他付款不走财务审核，登记即确认
+      record = await registerOtherPayment(
+        {
+          ...fields,
+          currency: otherCurrency.value,
+          name: `${fields.paymentMethod ?? '其他付款'} · ${fields.payeeName}`,
+          noInvoice: form.value.noInvoice || undefined,
+        },
+        key,
+      );
     else if (props.invoice)
       record = await registerInvoicePayment(
         {
@@ -297,9 +317,11 @@ async function save() {
     :title="
       record
         ? `修改付款 · ${record.code}`
-        : invoice
-          ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
-          : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
+        : other
+          ? '登记其他付款'
+          : invoice
+            ? `增加付款 · ${invoice.code ?? invoice.invoiceNo ?? '付款发票'}`
+            : `登记付款${orderCode ? ` · ${orderCode}` : ''}`
     "
     width="760px"
     :mask-closable="false"
@@ -310,17 +332,19 @@ async function save() {
         type="info"
         show-icon
         :message="
-          invoice
-            ? `付款针对整张发票，可以只付一部分，之后再增加付款。来源采购单跟随发票，不用重新选。提交后由财务审核付款。${
-                limit
-                  ? `本次最多可付 ${currency ?? ''} ${limit.toFormat(2)}。`
-                  : ''
-              }`
-            : `每付一笔钱登记一张付款记录，分期付款就登记多张。提交后由财务审核付款，财务确认已付款后才计入已付。${
-                limit
-                  ? `本单还可登记 ${currency ?? ''} ${limit.toFormat(2)}。`
-                  : ''
-              }`
+          other
+            ? '不挂采购单的付款，如集团内公司往来款、押金。只登记付款事实，不计入任何采购单的已付。'
+            : invoice
+              ? `付款针对整张发票，可以只付一部分，之后再增加付款。来源采购单跟随发票，不用重新选。提交后由财务审核付款。${
+                  limit
+                    ? `本次最多可付 ${currency ?? ''} ${limit.toFormat(2)}。`
+                    : ''
+                }`
+              : `每付一笔钱登记一张付款记录，分期付款就登记多张。提交后由财务审核付款，财务确认已付款后才计入已付。${
+                  limit
+                    ? `本单还可登记 ${currency ?? ''} ${limit.toFormat(2)}。`
+                    : ''
+                }`
         "
       />
       <Alert v-if="error" type="error" :message="error" show-icon />
@@ -333,8 +357,15 @@ async function save() {
         </span>
       </div>
       <div class="sheet">
+        <label v-if="other">
+          <span><em>*</em>币种</span>
+          <Select
+            v-model:value="otherCurrency"
+            :options="receiptCurrencyOptions()"
+          />
+        </label>
         <label>
-          <span><em>*</em>付款金额（{{ currency ?? 'CNY' }}）</span>
+          <span><em>*</em>付款金额（{{ currencyText }}）</span>
           <InputNumber
             v-model:value="form.amount"
             string-mode
