@@ -9,13 +9,14 @@ import { message, Select, Spin } from 'ant-design-vue';
 import { getWorkbenchMates, matchWorkbenchWage } from '#/api/fdmgongchang/workbench';
 import ImageUpload from '#/components/upload/image-upload.vue';
 
+import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import { formatQty, toNumber } from '../../stage-stock/model';
 import { defectTotal, goodTotal, stageOf, useJob } from '../use-job';
 import StepHeader from './step-header.vue';
 
 /**
- * 确认计件：按做出来的规格自动选好计价项目，默认算给自己、数量 = 好的数量；
- * 两人一起做（压花送片 / 接片）点「还有人跟我一起做」。按任务报工时还要拍纸质领料单。
+ * 开片按本次良品体积统一计价并由参与人员均分；其他工序按各自计价项目登记。
+ * 按任务报工时还要拍纸质领料单。
  */
 const props = defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{ back: []; submit: [] }>();
@@ -24,8 +25,13 @@ const job = useJob();
 const matches = ref<FdmgongchangWageApi.Match[]>([]);
 const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
 const loading = ref(true);
-let seed = 0;
+let seed = Math.max(0, ...job.pieces.map((line) => line.key));
 const unit = computed(() => stageOf(job, job.process?.outputStage)?.unit ?? '');
+const primaryWorkerId = computed(() => job.onBehalfOf?.id ?? job.my?.userId);
+const isSlice = computed(() => job.process?.code === 'SLICE');
+const volume = computed(() => sliceVolume(job.outputs));
+const sliceItem = computed(() => sliceWageItem(matches.value));
+const allocation = computed(() => sliceWageAllocation(volume.value, sliceItem.value?.price ?? 0, job.pieces.map((line) => line.userId)));
 
 const best = (excludeRole?: null | string) =>
   matches.value.find((m) => m.matched && (!excludeRole || (m.role && m.role !== excludeRole))) ??
@@ -46,8 +52,14 @@ onMounted(async () => {
     ]);
     matches.value = list;
     mates.value = people;
-    if (job.pieces.length === 0 && list.length > 0) {
-      job.pieces = [{ itemId: best()?.itemId, key: ++seed, quantity: goodTotal(job), userId: job.my?.userId }];
+    if (job.pieces.length === 0 && (isSlice.value ? sliceItem.value : list.length > 0)) {
+      job.pieces = [{ itemId: isSlice.value ? sliceItem.value?.itemId : best()?.itemId, key: ++seed, quantity: isSlice.value ? volume.value : goodTotal(job), userId: primaryWorkerId.value }];
+    }
+    if (isSlice.value) {
+      for (const line of job.pieces) {
+        line.itemId = sliceItem.value?.itemId;
+        line.quantity = volume.value;
+      }
     }
   } finally {
     loading.value = false;
@@ -62,16 +74,28 @@ const itemOptions = computed(() =>
 );
 const mateOptions = computed(() =>
   mates.value
-    .filter((m) => m.userId !== job.my?.userId)
+    .filter((m) => m.userId !== primaryWorkerId.value)
     .map((m) => ({ label: [m.nickname, m.team].filter(Boolean).join(' · '), value: m.userId })),
 );
 const priceOf = (itemId?: number) => toNumber(matches.value.find((m) => m.itemId === itemId)?.price) ?? 0;
-const nameOf = (userId?: number) =>
-  userId === job.my?.userId ? `${job.my?.userName}（我）` : (mates.value.find((m) => m.userId === userId)?.nickname ?? '');
-const amountOf = (line: (typeof job.pieces)[number]) => Math.round((line.quantity ?? 0) * priceOf(line.itemId) * 100) / 100;
-const total = computed(() => job.pieces.reduce((t, l) => t + amountOf(l), 0));
+function nameOf(userId?: number) {
+  if (userId === job.my?.userId) return `${job.my?.userName}（我）`;
+  if (job.onBehalfOf && userId === job.onBehalfOf.id) return job.onBehalfOf.name;
+  return mates.value.find((m) => m.userId === userId)?.nickname ?? '';
+}
+const amountOf = (line: (typeof job.pieces)[number]) => Math.round((toNumber(line.quantity) ?? 0) * priceOf(line.itemId) * 100) / 100;
+const total = computed(() => isSlice.value ? allocation.value.amount : job.pieces.reduce((t, l) => t + amountOf(l), 0));
+const sliceShare = (userId?: number) => allocation.value.shares.find((share) => share.userId === userId)?.amount ?? 0;
 
 function submit() {
+  if (isSlice.value && goodTotal(job) > 0) {
+    const error = sliceItem.value ? sliceParticipantError(job.pieces.map((line) => line.userId))
+      : '开片计价未配置，请联系管理员设置「开片」的 m³ 单价后再报工。';
+    if (error) {
+      message.warning(error);
+      return;
+    }
+  }
   if (job.prepare && job.sheets.length === 0) {
     message.warning('请拍照上传纸质领料单');
     return;
@@ -81,7 +105,7 @@ function submit() {
 
 function addMate() {
   const firstRole = matches.value.find((m) => m.itemId === job.pieces[0]?.itemId)?.role;
-  job.pieces.push({ itemId: best(firstRole)?.itemId, key: ++seed, quantity: goodTotal(job), userId: undefined });
+  job.pieces.push({ itemId: isSlice.value ? sliceItem.value?.itemId : best(firstRole)?.itemId, key: ++seed, quantity: isSlice.value ? volume.value : goodTotal(job), userId: undefined });
 }
 </script>
 
@@ -94,7 +118,18 @@ function addMate() {
     />
     <Spin :spinning="loading">
       <main class="flex flex-1 flex-col gap-3 p-4">
-        <p v-if="!loading && matches.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
+        <section v-if="isSlice && sliceItem" class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-card p-3">
+          <span class="text-sm font-bold">本次开片工资</span>
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-sm">良品 {{ formatVolume(volume) }} m³ × ¥{{ priceOf(sliceItem.itemId) }}/m³</span>
+            <span class="text-lg font-bold text-primary">¥{{ total.toFixed(2) }}</span>
+          </div>
+          <span class="text-xs text-muted-foreground">多种规格分别计算体积后合计，残次不计薪；由 {{ allocation.shares.length }} 人平分，金额尾差按人员编号分配。</span>
+        </section>
+        <p v-else-if="isSlice && !loading" class="m-0 rounded-md bg-card p-3 text-sm text-destructive">
+          开片计价未配置，请联系管理员设置「开片」的 m³ 单价后再报工。
+        </p>
+        <p v-else-if="!loading && matches.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
           这道工序还没有计价项目，提交后由班组长补登计件。
         </p>
         <section v-for="(line, i) in job.pieces" :key="line.key" class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
@@ -104,7 +139,7 @@ function addMate() {
               v-else
               :id="`piece-mate-${line.key}`"
               v-model:value="line.userId"
-              :options="mateOptions"
+              :options="mateOptions.map((option) => ({ ...option, disabled: isSlice && job.pieces.some((other) => other !== line && other.userId === option.value) }))"
               aria-label="一起做的人"
               class="min-w-0 flex-1"
               placeholder="选一起做的人"
@@ -112,25 +147,26 @@ function addMate() {
             <button v-if="i > 0" class="h-8 shrink-0 px-2 text-xs font-semibold text-destructive" type="button" @click="job.pieces.splice(i, 1)">去掉</button>
           </div>
           <Select
+            v-if="!isSlice"
             :id="`piece-item-${line.key}`"
             v-model:value="line.itemId"
             :options="itemOptions"
             aria-label="计价项目"
           />
           <div class="flex items-baseline justify-between border-t border-dashed border-border pt-2">
-            <span class="text-sm text-muted-foreground">{{ formatQty(line.quantity) }} {{ unit }} × ¥{{ priceOf(line.itemId) }}</span>
-            <span class="text-lg font-bold text-primary">¥{{ formatQty(amountOf(line)) }}</span>
+            <span class="text-sm text-muted-foreground">{{ isSlice ? `本次工资 ÷ ${allocation.shares.length} 人` : `${formatQty(line.quantity)} ${unit} × ¥${priceOf(line.itemId)}` }}</span>
+            <span class="text-lg font-bold text-primary">{{ isSlice && !line.userId ? '待选人员' : `¥${isSlice ? sliceShare(line.userId).toFixed(2) : formatQty(amountOf(line))}` }}</span>
           </div>
         </section>
         <button
-          v-if="matches.length > 0 && mateOptions.length > 0"
+          v-if="(isSlice ? sliceItem : matches.length > 0) && mateOptions.length > 0"
           class="h-9 rounded-md border border-dashed border-muted-foreground text-sm text-muted-foreground"
           type="button"
           @click="addMate"
         >
           ＋ 还有人跟我一起做
         </button>
-        <p class="m-0 text-xs leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
+        <p class="m-0 text-xs leading-relaxed text-muted-foreground">{{ isSlice ? '开片按本次良品体积统一计价，参与人员平分同一笔工资。' : '计价项目按做出来的规格自动选好。' }}提交后由班组长确认，月底一起结算。</p>
         <section v-if="job.prepare" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <span class="text-sm font-bold">拍纸质领料单<span class="ml-1 text-destructive">*</span></span>
           <ImageUpload
@@ -147,7 +183,7 @@ function addMate() {
     </Spin>
     <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-4 pt-3">
       <button
-        :disabled="props.submitting"
+        :disabled="props.submitting || loading"
         class="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
         type="button"
         @click="submit"

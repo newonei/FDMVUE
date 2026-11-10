@@ -245,6 +245,8 @@ export namespace FdmgongchangStageStockApi {
     defectQuantity?: Decimal | null;
     goodQuantity?: Decimal | null;
     location?: string;
+    /** 开片产出对应的实际领料物料 ID，用于固定该行颜色。 */
+    sourceItemIds?: number[];
   }
 
   /** 报产出时的计件：谁、按哪个计价项目、算多少。 */
@@ -366,6 +368,7 @@ export namespace FdmgongchangStageStockApi {
     issueRemark?: null | string;
     issueSeq?: null | number;
     item?: ItemAttrs | null;
+    itemId?: null | number;
     itemCode: string;
     laminationSide?: LaminationSide | null;
     location: string;

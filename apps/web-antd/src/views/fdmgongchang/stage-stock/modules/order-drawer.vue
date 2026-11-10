@@ -41,6 +41,7 @@ import { matchWageItems } from '#/api/fdmgongchang/wage';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { routeIncludes } from '../../production-order/shared';
+import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import {
   applySliceYield,
   attrSummary,
@@ -175,13 +176,18 @@ interface PieceLine {
   itemId?: number;
   itemTouched: boolean;
   key: number;
-  quantity: null | number;
+  quantity: null | number | string;
   quantityTouched: boolean;
   userId?: number;
 }
 const pieceMatches = ref<FdmgongchangWageApi.Match[]>([]);
 const pieceMatchesLoaded = ref(false);
 const pieces = ref<PieceLine[]>([]);
+const isSlice = computed(() => processCode.value === 'SLICE');
+const sliceItem = computed(() => sliceWageItem(pieceMatches.value));
+const volume = computed(() => sliceVolume(outputs.value));
+const sliceAllocation = computed(() => sliceWageAllocation(volume.value, sliceItem.value?.price ?? 0, pieces.value.map((line) => line.userId)));
+const sliceShare = (userId?: number) => sliceAllocation.value.shares.find((share) => share.userId === userId)?.amount ?? 0;
 let pieceKey = 0;
 const pieceItemOptions = computed(() =>
   pieceMatches.value.map((m) => ({
@@ -194,16 +200,18 @@ const bestMatch = (excludeRole?: null | string) =>
   pieceMatches.value.find((m) => m.matched);
 /** 推荐项目里第一行用最匹配的；后加的行优先用不同角色（送片之后是接片）。 */
 function defaultItemFor(index: number) {
+  if (isSlice.value) return sliceItem.value?.itemId;
   if (index === 0) return bestMatch()?.itemId;
   const first = pieceMatches.value.find((m) => m.itemId === pieces.value[0]?.itemId);
   return bestMatch(first?.role)?.itemId;
 }
 function addPiece(userId?: number) {
+  const goodQuantity = goodTotal.value > 0 ? goodTotal.value : null;
   pieces.value.push({
     itemId: undefined,
     itemTouched: false,
     key: ++pieceKey,
-    quantity: goodTotal.value > 0 ? goodTotal.value : null,
+    quantity: isSlice.value ? volume.value : goodQuantity,
     quantityTouched: false,
     userId,
   });
@@ -239,7 +247,7 @@ async function loadPieceMatches() {
     addPiece(props.mode === 'report' ? (order.value?.operatorUserId ?? undefined) : operatorUserId.value);
   } else {
     pieces.value.forEach((line, index) => {
-      if (!line.itemTouched) line.itemId = defaultItemFor(index);
+      if (isSlice.value || !line.itemTouched) line.itemId = defaultItemFor(index);
     });
   }
 }
@@ -258,13 +266,19 @@ watch(operatorUserId, (id, old) => {
 });
 function piecePayload(): FdmgongchangWageApi.Piecework[] {
   return pieces.value
-    .filter((p) => p.userId && p.itemId && (p.quantity ?? 0) > 0)
-    .map((p) => ({ itemId: p.itemId!, quantity: p.quantity!, userId: p.userId! }));
+    .filter((p) => p.userId && p.itemId && (toNumber(isSlice.value ? volume.value : p.quantity) ?? 0) > 0)
+    .map((p) => ({ itemId: isSlice.value ? sliceItem.value!.itemId : p.itemId!, quantity: isSlice.value ? volume.value : p.quantity!, userId: p.userId! }));
 }
 function pieceErrors() {
   const problems: string[] = [];
+  if (isSlice.value) {
+    if (goodTotal.value <= 0) return problems;
+    if (!sliceItem.value) return ['开片计价未配置，请联系管理员设置「开片」的 m³ 单价后再报工。'];
+    const error = sliceParticipantError(pieces.value.map((line) => line.userId));
+    return error ? [error] : [];
+  }
   pieces.value.forEach((p, i) => {
-    const filled = [p.userId, p.itemId, (p.quantity ?? 0) > 0].filter(Boolean).length;
+    const filled = [p.userId, p.itemId, (toNumber(p.quantity) ?? 0) > 0].filter(Boolean).length;
     if (filled > 0 && filled < 3)
       problems.push(`计件第 ${i + 1} 行请选人员、计价项目并填写数量，不计件可以删掉这一行。`);
   });
@@ -333,6 +347,7 @@ const inputs = computed<InputLine[]>(() => {
         batchNo: line.batchNo,
         id: line.stockId ?? line.id,
         item: line.item,
+        itemId: line.itemId,
         itemCode: line.itemCode,
         location: line.location,
         quantity: line.quantity ?? 0,
@@ -434,10 +449,11 @@ const defectTotal = computed(() =>
 
 /** 没手动改过数量的行，跟着良品合计走。 */
 watch(
-  () => goodTotal.value,
-  (value) => {
+  () => [goodTotal.value, volume.value, isSlice.value],
+  () => {
+    const value = isSlice.value ? volume.value : goodTotal.value;
     for (const line of pieces.value)
-      if (!line.quantityTouched) line.quantity = value > 0 ? value : null;
+      if (isSlice.value || !line.quantityTouched) line.quantity = Number(value) > 0 ? value : null;
   },
 );
 
@@ -680,6 +696,7 @@ function addLine() {
     defectQuantity: undefined,
     goodQuantity: undefined,
     key: nextKey(),
+    sourceItemIds: base.sourceItemIds ? [...base.sourceItemIds] : undefined,
   });
   touched.value = true;
 }
@@ -840,6 +857,7 @@ function outputPayload(): Api.OrderOutput[] {
       batchNo: o.batchNo.trim() || undefined,
       defectQuantity: toNumber(o.defectQuantity) ?? 0,
       goodQuantity: toNumber(o.goodQuantity) ?? 0,
+      ...(processCode.value === 'SLICE' ? { sourceItemIds: o.sourceItemIds } : {}),
     }));
 }
 
@@ -1249,7 +1267,7 @@ watch(processCode, warnNoPatterns);
             v-if="processCode === 'SLICE'"
             class="text-xs text-muted-foreground"
           >
-            一次可以开多种颜色、多种规格，每种一行。填好开出的长宽厚后按板材规格算能开多少片，自动带进良品，可以改；残次品手填。
+            一次可以开多种颜色、多种规格，每种一行。颜色固定沿用对应领料，不可修改。填好开出的长宽厚后按板材规格算能开多少片，自动带进良品，可以改；残次品手填。
           </div>
           <div
             v-if="outputs.length === 0"
@@ -1371,12 +1389,20 @@ watch(processCode, warnNoPatterns);
         <section v-if="showOutputs && pieceMatchesLoaded" v-show="shown('output')" class="flex flex-col gap-2">
           <h3 class="m-0 flex flex-wrap items-center gap-2 text-sm font-semibold">
             计件
-            <span class="text-xs font-normal text-muted-foreground">按产出规格推荐计价项目；两人各算全量的（如压花送片、接片）各填一行</span>
+            <span class="text-xs font-normal text-muted-foreground">{{ isSlice ? '开片按本次良品体积计价，参与人员平分同一笔工资，残次不计薪' : '按产出规格推荐计价项目；两人各算全量的（如压花送片、接片）各填一行' }}</span>
           </h3>
-          <p v-if="pieceMatches.length === 0" class="m-0 text-xs text-muted-foreground">
+          <p v-if="isSlice && !sliceItem" class="m-0 text-xs text-destructive">
+            开片计价未配置，请联系管理员设置「开片」的 m³ 单价后再报工。
+          </p>
+          <p v-else-if="pieceMatches.length === 0" class="m-0 text-xs text-muted-foreground">
             这道工序还没有计价项目，可以到 工厂设置 → 计价项目 添加；不填计件也能报产出。
           </p>
           <template v-else>
+            <div v-if="isSlice && sliceItem" class="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+              本次良品 {{ formatVolume(volume) }} m³ × ¥{{ sliceItem.price }}/m³ =
+              <strong>¥{{ sliceAllocation.amount.toFixed(2) }}</strong>，由 {{ sliceAllocation.shares.length }} 人平分。
+              <span class="mt-1 block text-xs text-muted-foreground">不同规格分别算体积后合计；金额尾差按人员编号分配，每人相差最多 0.01 元。</span>
+            </div>
             <div
               v-for="(line, index) in pieces"
               :key="line.key"
@@ -1386,7 +1412,7 @@ watch(processCode, warnNoPatterns);
                 :id="`piece-user-${line.key}`"
                 v-model:value="line.userId"
                 :aria-label="`计件第 ${index + 1} 行人员`"
-                :options="operators.map((o) => ({ label: [o.nickname, o.team].filter(Boolean).join(' · '), value: o.userId }))"
+                :options="operators.map((o) => ({ label: [o.nickname, o.team].filter(Boolean).join(' · '), value: o.userId, disabled: isSlice && pieces.some((other) => other !== line && other.userId === o.userId) }))"
                 class="w-40"
                 option-filter-prop="label"
                 placeholder="人员"
@@ -1394,6 +1420,7 @@ watch(processCode, warnNoPatterns);
                 size="small"
               />
               <Select
+                v-if="!isSlice"
                 :id="`piece-item-${line.key}`"
                 :aria-label="`计件第 ${index + 1} 行计价项目`"
                 :options="pieceItemOptions"
@@ -1406,6 +1433,7 @@ watch(processCode, warnNoPatterns);
                 @change="(v) => ((line.itemId = v as number), (line.itemTouched = true))"
               />
               <InputNumber
+                v-if="!isSlice"
                 :id="`piece-qty-${line.key}`"
                 :aria-label="`计件第 ${index + 1} 行数量`"
                 :min="0"
@@ -1415,6 +1443,7 @@ watch(processCode, warnNoPatterns);
                 size="small"
                 @change="(v) => ((line.quantity = (v as null | number | undefined) ?? null), (line.quantityTouched = true))"
               />
+              <span v-if="isSlice" class="flex-1 text-right text-sm font-semibold text-primary">{{ line.userId ? `分得 ¥${sliceShare(line.userId).toFixed(2)}` : '待选人员' }}</span>
               <Button danger size="small" type="link" @click="removePiece(index)">删除</Button>
             </div>
             <div>

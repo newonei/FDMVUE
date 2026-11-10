@@ -103,7 +103,7 @@ export const EDITABLE_FIELDS: Record<string, AttrField[]> = {
   MIX: ['material', 'recipeCode', 'color', 'length', 'width', 'thickness'],
   PACK: [],
   PUNCH: ['length', 'width', 'thickness'],
-  SLICE: ['color', 'length', 'width', 'thickness'],
+  SLICE: ['length', 'width', 'thickness'],
 };
 
 export function stageIndex(stage: string) {
@@ -255,7 +255,7 @@ export interface InputLine {
   stock: Pick<
     Api.Stock,
     'batchNo' | 'id' | 'item' | 'itemCode' | 'location' | 'quantity' | 'stage'
-  >;
+  > & { itemId?: null | number };
 }
 
 export interface OutputDraft {
@@ -266,6 +266,8 @@ export interface OutputDraft {
   defectQuantity?: number;
   goodQuantity?: number;
   key: string;
+  /** 开片行关联的领料物料 ID；不可随产出颜色或规格编辑改变。 */
+  sourceItemIds?: number[];
 }
 
 let keySeed = 0;
@@ -317,7 +319,7 @@ export function deriveOutputs(
   if (process === 'SLICE') {
     const groups = new Map<
       string,
-      { attrs: Api.ItemAttrs; batches: string[] }
+      { attrs: Api.ItemAttrs; batches: string[]; sourceItemIds: number[] }
     >();
     for (const line of inputs) {
       const item = line.stock.item ?? {};
@@ -331,13 +333,18 @@ export function deriveOutputs(
           thickness: toNumber(item.thickness) ?? null,
         },
         batches: [],
+        sourceItemIds: [],
       };
       group.batches.push(line.stock.batchNo);
+      if (line.quantity > 0 && line.stock.itemId) {
+        group.sourceItemIds.push(line.stock.itemId);
+      }
       groups.set(key, group);
     }
-    return [...groups.values()].map((g) =>
-      draft(g.attrs, joinBatches(g.batches)),
-    );
+    return [...groups.values()].map((g) => ({
+      ...draft(g.attrs, joinBatches(g.batches)),
+      sourceItemIds: [...new Set(g.sourceItemIds)],
+    }));
   }
   if (process === 'LAMINATE') {
     const front = inputs.find((l) => l.side === 'FRONT') ?? inputs[0]!;

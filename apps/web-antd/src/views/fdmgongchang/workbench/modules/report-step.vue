@@ -105,6 +105,7 @@ function next() {
             </button>
           </div>
           <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels) || '—' }}</span>
+          <span v-if="slicing" class="text-xs text-muted-foreground">开片不会改变颜色，颜色固定沿用对应领料，不可修改。</span>
           <span v-if="specErrors.length > 0" class="text-xs text-warning">还差几个规格，请补上：</span>
           <AttrFields
             v-if="(showEditor || needsSpec()) && editable.length > 0"

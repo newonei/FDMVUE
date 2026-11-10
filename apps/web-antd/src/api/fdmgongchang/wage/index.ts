@@ -89,6 +89,10 @@ export namespace FdmgongchangWageApi {
     quantity?: Decimal | null;
     remark?: null | string;
     reportSeq?: null | number;
+    /** 开片工资按整批体积计价，由本次参与人数均分。 */
+    sharingCount?: null | number;
+    /** 同一笔手动开片工资的均分记录关联标识。 */
+    sharingKey?: null | string;
     shift: Shift;
     source: 'MANUAL' | 'ORDER';
     status: RecordStatus;

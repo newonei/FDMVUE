@@ -162,6 +162,8 @@ function clickButton(text: string) {
 
 /** 新建是分步填写：一路点「下一步」到最后一步再提交；某一步没通过检查时停在那一步。 */
 async function submitCreate(text: string) {
+  await vi.advanceTimersByTimeAsync(400);
+  await flush();
   for (let i = 0; i < 4; i++) {
     const next = findButton('下一步');
     if (!next) {
@@ -198,7 +200,7 @@ describe('order drawer', () => {
       rows.map((_, i) => `CODE-${i}`),
     );
     mocks.create.mockResolvedValue(9);
-    mocks.match.mockResolvedValue([]);
+    mocks.match.mockResolvedValue([{ itemId: 41, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
     mocks.operators.mockResolvedValue([
       { deptName: '开片车间', nickname: '张三', team: '开片一组', userId: 3 },
       { deptName: '开片车间', nickname: '测试', team: '开片一组', userId: 7 },
@@ -251,6 +253,8 @@ describe('order drawer', () => {
     const ids = [...outputs].map((el) => el.id.replace('out-batch-', ''));
     expect((outputs[0] as HTMLInputElement).value).toBe('MB1');
     expect((outputs[1] as HTMLInputElement).value).toBe('MB2');
+    expect(document.querySelector('[id^="out-"][id$="-color"]')).toBeNull();
+    expect(document.body.textContent).toContain('颜色固定沿用对应领料，不可修改');
     // 像人一样逐个输入：每次输入之间让界面先刷新
     for (const [index, key] of ids.entries()) {
       for (const [field, value] of [
@@ -295,6 +299,7 @@ describe('order drawer', () => {
         batchNo: 'MB1',
         defectQuantity: 4,
         goodQuantity: 236,
+        sourceItemIds: [1],
       },
       {
         attrs: {
@@ -307,6 +312,7 @@ describe('order drawer', () => {
         batchNo: 'MB2',
         defectQuantity: 2,
         goodQuantity: 198,
+        sourceItemIds: [2],
       },
     ]);
     expect(saved).toHaveBeenCalledWith(
@@ -393,6 +399,7 @@ describe('order drawer', () => {
       ],
       issuedAt: '2026-10-10 08:00:00',
       orderNo: 'GX20261010-001',
+      operatorUserId: 7,
       outputStage: 'SHEET',
       outputs: [],
       process: 'SLICE',
@@ -425,6 +432,8 @@ describe('order drawer', () => {
     [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
       .find((r) => r.value === 'false')!
       .click();
+    await flush();
+    await vi.advanceTimersByTimeAsync(400);
     await flush();
     clickButton('登记这一批');
     await flush();
@@ -459,9 +468,9 @@ describe('order drawer', () => {
     });
   });
 
-  it('records piecework for the operator with the best matching wage item and the good quantity', async () => {
+  it('records slice wages with total good cubic metres and a single shared rate', async () => {
     mocks.match.mockResolvedValue([
-      { itemId: 41, matched: true, name: '开片', price: 27, score: 0, unit: '张' },
+      { itemId: 41, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' },
       { itemId: 23, matched: false, name: '单片', price: 0.27, score: 0, unit: '片', productType: null },
     ]);
     state.open = true;
@@ -486,11 +495,69 @@ describe('order drawer', () => {
       expect.objectContaining({ process: 'SLICE', width: 63 }),
     );
     expect(document.body.textContent).toContain('计件');
+    expect(document.body.textContent).toContain('0.342657 m³ × ¥27/m³');
+    expect(document.body.textContent).toContain('¥9.25');
+    expect(document.querySelector('[id^="piece-item-"]')).toBeNull();
+    expect(document.querySelector('[id^="piece-qty-"]')).toBeNull();
 
     await submitCreate('提交领料并入库');
     await flush();
     expect(mocks.create.mock.calls[0]![0]).toMatchObject({
-      pieceworks: [{ itemId: 41, quantity: 98, userId: 7 }],
+      pieceworks: [{ itemId: 41, quantity: '0.342657', userId: 7 }],
     });
+  });
+
+  it('blocks slice reporting when only an obsolete per-piece rate is configured', async () => {
+    mocks.match.mockResolvedValue([{ itemId: 23, matched: true, name: '开片1700以上', price: 24, score: 0, unit: '待定' }]);
+    state.open = true;
+    await flush();
+    typeInto('order-take-2', '50');
+    await flush();
+    const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    typeInto(`out-${key}-length`, '190');
+    await flush();
+    typeInto(`out-${key}-width`, '130');
+    await flush();
+    typeInto(`out-good-${key}`, '30');
+    await flush();
+    await submitCreate('提交领料并入库');
+    await flush();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('开片计价未配置');
+  });
+
+  it('shares the same batch wage when a second slice worker is selected', async () => {
+    state.open = true;
+    await flush();
+    typeInto('order-take-2', '50');
+    await flush();
+    const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    typeInto(`out-${key}-length`, '190');
+    await flush();
+    typeInto(`out-${key}-width`, '130');
+    await flush();
+    typeInto(`out-good-${key}`, '98');
+    await vi.advanceTimersByTimeAsync(400);
+    await flush();
+    clickButton('加一个人');
+    await flush();
+    const people = [...document.querySelectorAll('[id^="piece-user-"]')];
+    people[1]!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await flush();
+    const option = [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')]
+      .find((element) => element.getAttribute('title')?.includes('张三'));
+    expect(option).toBeDefined();
+    option!.click();
+    await flush();
+    expect(document.body.textContent).toContain('¥19.61');
+    expect(document.body.textContent).toContain('分得 ¥9.81');
+    expect(document.body.textContent).toContain('分得 ¥9.80');
+    await submitCreate('提交领料并入库');
+    await flush();
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({ pieceworks: [
+      { itemId: 41, quantity: '0.72618', userId: 7 },
+      { itemId: 41, quantity: '0.72618', userId: 3 },
+    ] });
   });
 });

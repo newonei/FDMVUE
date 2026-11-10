@@ -21,6 +21,7 @@ import {
 } from '#/api/fdmgongchang/workbench';
 
 import { businessError } from '../shared/business-error';
+import { sliceVolume } from '../shared/slice-wage';
 import { useFactory } from '../shared/use-factory';
 import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
 import ConfirmStep from './modules/confirm-step.vue';
@@ -162,8 +163,8 @@ function urgentPayload() {
 
 function piecePayload() {
   return job.pieces
-    .filter((p) => p.userId && p.itemId && (p.quantity ?? 0) > 0)
-    .map((p) => ({ itemId: p.itemId!, quantity: p.quantity!, userId: p.userId! }));
+    .filter((p) => p.userId && p.itemId && (toNumber(p.quantity) ?? 0) > 0)
+    .map((p) => ({ itemId: p.itemId!, quantity: job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : p.quantity!, userId: p.userId! }));
 }
 
 /** 只领料：单子进「我手上在做的」；补领时把料加到原来那张单上。 */
@@ -199,6 +200,8 @@ function reportNow() {
 }
 
 function afterReport() {
+  // 返回修改产出后，开片计薪体积跟随本次良品重算。
+  for (const piece of job.pieces) piece.quantity = job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : goodTotal(job);
   // 按任务报工最后一步要拍领料单，所以总要进计件这一步
   if (job.prepare || goodTotal(job) > 0) job.step = 'piece';
   else void submit();

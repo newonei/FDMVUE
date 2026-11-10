@@ -48,7 +48,7 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchRecipePlan: mocks.plan,
   getWorkbenchStock: mocks.stock,
   getWorkbenchPickList: mocks.pickList,
-  matchWorkbenchWage: vi.fn().mockResolvedValue([]),
+  matchWorkbenchWage: vi.fn().mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]),
   prepareWorkbenchTask: mocks.prepare,
   reportWorkbenchOrder: vi.fn(),
   reportWorkbenchTask: mocks.report,
@@ -212,7 +212,7 @@ describe('workbench page', () => {
   it('reports a task in one go: actual material, output, piecework and the paper issue sheet', async () => {
     mocks.prepare.mockResolvedValue({
       aux: [],
-      picks: [{ quantity: 50, stock: { batchNo: 'MB261007-01', id: 11, item: { color: 'PU', length: 190, material: 'TPE', thickness: 4.8, width: 130 }, itemCode: 'BC-1', location: '板材区', quantity: 180, stage: 'BOARD' } }],
+      picks: [{ quantity: 50, stock: { batchNo: 'MB261007-01', id: 11, item: { color: 'PU', length: 190, material: 'TPE', thickness: 4.8, width: 130 }, itemCode: 'BC-1', itemId: 31, location: '板材区', quantity: 180, stage: 'BOARD' } }],
       required: 50,
       sourceStage: 'BOARD',
       target: 'TPE · 紫色 · 183×61×0.6cm',
@@ -255,6 +255,9 @@ describe('workbench page', () => {
     clickButton('下一步：报数量');
     await flush();
     expect(mocks.create).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('开片不会改变颜色，颜色固定沿用对应领料，不可修改。');
+    expect(document.querySelector('[id^="wb-"][id$="-color"]')).toBeNull();
+    expect(document.querySelector('[id^="wb-"][id$="-length"]')).not.toBeNull();
     // 产出行的编号是自动生成的，取第一行
     fill(document.querySelector('[id^="good-"]')!.id, 380);
     fill(document.querySelector('[id^="bad-"]')!.id, 6);
@@ -262,6 +265,8 @@ describe('workbench page', () => {
     clickButton('下一步');
     await flush();
     expect(document.body.textContent).toContain('计件和领料单');
+    expect(document.body.textContent).toContain('良品 5.6316 m³ × ¥27/m³');
+    expect(document.querySelector('[id^="piece-item-"]')).toBeNull();
     clickButton('报工');
     await flush();
     expect(mocks.report).not.toHaveBeenCalled();
@@ -274,7 +279,8 @@ describe('workbench page', () => {
         inputs: [{ laminationSide: undefined, quantity: 52, stockId: 11 }],
         issueSheetUrls: ['https://f/sheet.jpg'],
         // 片材规格按订单带出：长宽同板材，厚度是成品厚
-        outputs: [expect.objectContaining({ attrs: expect.objectContaining({ length: 190, thickness: 0.6, width: 130 }), defectQuantity: 6, goodQuantity: 380 })],
+        outputs: [expect.objectContaining({ attrs: expect.objectContaining({ length: 190, thickness: 0.6, width: 130 }), defectQuantity: 6, goodQuantity: 380, sourceItemIds: [31] })],
+        pieceworks: [{ itemId: 1, quantity: '5.6316', userId: 2 }],
         sourceStage: 'BOARD',
         taskId: 31,
         finish: true,
