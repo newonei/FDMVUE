@@ -270,6 +270,8 @@ const pageTotal = computed(() => {
 });
 /** 列表「新建」：先选采购单，再登记付款记录（不经请款） */
 const pickingOrder = ref(false);
+/** 不挂采购单的其他付款（集团内往来款等） */
+const otherPayment = ref(false);
 const paymentOrder = ref<{
   available?: unknown;
   code?: string;
@@ -311,6 +313,7 @@ async function orderPicked(row: DocumentRow) {
 }
 function paymentSaved(record: ProcurementFinanceRecord) {
   paymentOrder.value = undefined;
+  otherPayment.value = false;
   message.success(paymentSavedMessage(record));
   void load();
 }
@@ -431,6 +434,8 @@ watch(
             @click="pickingOrder = true"
           >
             登记付款记录
+</Button><Button v-if="isPayment" @click="otherPayment = true">
+            登记其他付款
 </Button><Button v-else type="primary" @click="create(effectiveType)">
             新建{{ financeTitles[effectiveType] }}
 </Button><Button
@@ -617,6 +622,15 @@ watch(
       :open="pickingOrder && active"
       @close="pickingOrder = false"
       @selected="orderPicked"
+    />
+    <PaymentRecordDialog
+      v-if="otherPayment"
+      :open="otherPayment && active"
+      contract-id=""
+      order-id=""
+      other
+      @close="otherPayment = false"
+      @saved="paymentSaved"
     />
     <PaymentRecordDialog
       v-if="paymentOrder"

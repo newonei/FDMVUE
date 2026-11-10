@@ -15,6 +15,7 @@ import type {
   MasterRecord,
   PageResource,
 } from '#/api/fdmplatform';
+import type { ShipmentNote } from '#/api/fdmplatform/business-documents';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
 import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-finance';
 import type { StockIn, StockOut } from '#/api/fdmplatform/warehouse';
@@ -43,6 +44,7 @@ import {
   getContractAudit,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
+import { getContractShipmentNotes } from '#/api/fdmplatform/business-documents';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
@@ -268,6 +270,9 @@ const attachmentError = ref('');
 const attachmentLoading = ref(false);
 const audit = ref<BusinessRecord[]>([]);
 const auditError = ref('');
+const shipmentNotes = ref<ShipmentNote[]>([]);
+const shipmentNotesError = ref('');
+const openNote = ref<string>();
 const customs = ref<Awaited<ReturnType<typeof getCustomsSummary>>>();
 const customsError = ref('');
 const related = ref<Awaited<ReturnType<typeof getContractRelatedSummary>>>();
@@ -440,6 +445,23 @@ async function loadSummary() {
   else
     relatedError.value = `关联单据统计未读取：${errorText(relatedResult.reason)}`;
 }
+/** 金智迁入的发货单（物流资料），在「发货」页签打开时读取。 */
+async function loadShipmentNotes() {
+  if (!props.contract) return;
+  const id = props.contract.id;
+  shipmentNotesError.value = '';
+  try {
+    const result = await getContractShipmentNotes(id);
+    if (id === props.contract?.id) shipmentNotes.value = result;
+  } catch (error) {
+    shipmentNotesError.value = `金智发货单未读取：${errorText(error)}`;
+  }
+}
+function noteText(...values: unknown[]) {
+  return values
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .join(' · ');
+}
 async function loadAudit() {
   if (!props.contract) return;
   const id = props.contract.id;
@@ -502,11 +524,14 @@ watch(
       attachments.value = undefined;
       audit.value = [];
       customs.value = undefined;
+      shipmentNotes.value = [];
+      openNote.value = undefined;
       void loadFiles();
       void loadSummary();
       void loadStockOuts();
       void loadRelatedDocs();
       if (activeTab.value === 'audit') void loadAudit();
+      if (activeTab.value === 'delivery') void loadShipmentNotes();
     }
   },
   { immediate: true },
@@ -528,6 +553,7 @@ watch(
 );
 watch(activeTab, (tab) => {
   if (tab === 'audit') void loadAudit();
+  if (tab === 'delivery') void loadShipmentNotes();
 });
 function openDocuments(kind: ContractDocumentKind, mode?: 'create' | 'list') {
   if (!props.contract || childOpen.value) return;
@@ -1228,6 +1254,80 @@ async function download(file: { id: string; name: string }) {
                 </div>
               </div>
               <p v-else class="muted">还没有发货记录</p>
+              <template v-if="shipmentNotes.length">
+                <h4>
+                  金智发货单
+                  <span class="muted">历史物流资料，不计入发货数量</span>
+                </h4>
+                <div class="mini-table">
+                  <template v-for="note in shipmentNotes" :key="note.id">
+                    <button
+                      type="button"
+                      class="mini-row mini-link"
+                      @click="
+                        openNote = openNote === note.id ? undefined : note.id
+                      "
+                    >
+                      <span class="strong">{{ note.code }}</span>
+                      <span>{{
+                        noteText(note.deliveryMethod, note.trackingNo) || '—'
+                      }}</span>
+                      <span>{{ note.shippedDate || '日期未填' }}</span>
+                    </button>
+                    <div v-if="openNote === note.id" class="note-detail">
+                      <div>
+                        收货：{{
+                          noteText(
+                            note.recipientName,
+                            note.recipientPhone,
+                            note.recipientAddress,
+                          ) || '未填'
+                        }}
+                      </div>
+                      <div>
+                        {{
+                          noteText(
+                            note.status,
+                            note.amount === null || note.amount === undefined
+                              ? ''
+                              : `发货金额 ¥${note.amount}`,
+                            note.freight ? `运费 ¥${note.freight}` : '',
+                            note.packages ? `${note.packages} 件` : '',
+                            note.weightKg ? `${note.weightKg} kg` : '',
+                            note.shipper ? `发货人 ${note.shipper}` : '',
+                          )
+                        }}
+                      </div>
+                      <div v-if="note.platform || note.platformOrderNo">
+                        平台：{{
+                          noteText(note.platform, note.platformOrderNo)
+                        }}
+                      </div>
+                      <div v-for="(line, index) in note.lines" :key="index">
+                        {{
+                          noteText(
+                            line.productName,
+                            line.specification?.replaceAll('\n', ' '),
+                            line.quantity === null ||
+                              line.quantity === undefined
+                              ? ''
+                              : `${line.quantity}${line.unit ?? ''}`,
+                            line.remark,
+                          )
+                        }}
+                      </div>
+                      <div v-if="note.remark" class="muted">
+                        {{ note.remark }}
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <Alert
+                v-if="shipmentNotesError"
+                :message="shipmentNotesError"
+                type="warning"
+              />
               <h4 v-if="!domestic">报关</h4>
               <p v-if="customs && !domestic" class="muted">
                 {{
@@ -1921,8 +2021,17 @@ section.identity {
   background: hsl(var(--accent));
 }
 
-.mini-row + .mini-row {
+.mini-row + .mini-row,
+.note-detail + .mini-row {
   border-top: 1px solid hsl(var(--border));
+}
+
+.note-detail {
+  display: grid;
+  gap: 2px;
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  background: hsl(var(--accent) / 40%);
 }
 
 .all-links {
