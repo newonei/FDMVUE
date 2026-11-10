@@ -8,7 +8,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 
-import { Button, DatePicker, Empty, Input, message, Modal, Result, Select, Spin, Tag } from 'ant-design-vue';
+import { Button, DatePicker, Empty, Input, message, Result, Select, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import { getWorkerList } from '#/api/fdmgongchang/factory';
@@ -19,11 +19,11 @@ import {
   getSchedule,
   getSchedules,
   moveMixPackage,
-  releaseTaskPackages,
 } from '#/api/fdmgongchang/schedule';
 
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, SCHEDULE_STATUS } from '../../shared/schedule';
+import PackageReleaseModal from './package-release-modal.vue';
 import ScheduleDetail from './schedule-detail.vue';
 
 /**
@@ -154,27 +154,17 @@ async function createManual() {
 
 /** 发泡任务包的先后（还没报完的）。 */
 const mixQueue = ref<Api.Task[]>([]);
-const releasing = ref(false);
 
 async function loadMixQueue() {
   mixQueue.value = await getMixQueue().catch(() => []);
 }
 
-/** 下发任务包：不经过 AI，发泡只排先后，其他工序按工序分包，都不定日期。 */
-async function releasePackages() {
-  releasing.value = true;
-  try {
-    const res = await releaseTaskPackages({ note: form.value.note.trim() || undefined });
-    Modal.info({
-      content: res.warnings.length > 0 ? `要注意：${res.warnings.join('；')}` : '都下发了，工人在工作台的任务大厅里就能看到。',
-      title: `已下发 ${res.tasks} 个任务包（发泡 ${res.mixTasks} 个）`,
-      width: 560,
-    });
-    await Promise.all([loadList(), loadMixQueue()]);
-    select(res.scheduleId);
-  } finally {
-    releasing.value = false;
-  }
+/** 下发任务包：不经过 AI，先勾选订单；发泡只排先后，其他工序按工序分包，都不定日期。 */
+const releaseOpen = ref(false);
+
+async function onReleased(scheduleId: number) {
+  await Promise.all([loadList(), loadMixQueue()]);
+  select(scheduleId);
 }
 
 async function moveMix(task: Api.Task, position: number) {
@@ -235,8 +225,8 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             placeholder="例如：2 号压花机周三保养；HT-001 要提前；周日不开工"
           />
         </label>
-        <Button v-if="canConfirm" :loading="releasing" block type="primary" @click="releasePackages">下发任务包（只排发泡先后，不定日期）</Button>
-        <p class="m-0">按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。</p>
+        <Button v-if="canConfirm" block type="primary" @click="releaseOpen = true">下发任务包（只排发泡先后，不定日期）</Button>
+        <p class="m-0">先勾选订单，按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。</p>
         <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
         <p v-if="canGenerate" class="m-0">AI 只排发泡的先后（同配方、同板材、同颜色合成一个任务）；确认下发时，开片以后由系统按工序生成任务包。</p>
         <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
@@ -292,5 +282,6 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
         <Empty v-else description="左边生成一份排单，或选一条排单记录" />
       </Spin>
     </section>
+    <PackageReleaseModal v-model:open="releaseOpen" @released="onReleased" />
   </div>
 </template>
