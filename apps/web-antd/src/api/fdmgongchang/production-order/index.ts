@@ -23,6 +23,26 @@ export namespace FdmgongchangProductionOrderApi {
 
   /** 产品中心的 SKU。 */
   export interface Product {
+    /** 工厂选品分页返回的本厂账面库存；未关联工序物料时为空。 */
+    currentStock?: null | number | string;
+    stockUnit?: null | string;
+    productStage?: null | string;
+    productStageLabel?: null | string;
+    /** 历史档案未填阶段时，按已关联工序物料只读解析。 */
+    resolvedProductStage?: null | string;
+    resolvedProductStageLabel?: null | string;
+    colorCode?: null | string;
+    colorCodeLabel?: null | string;
+    frontColor?: null | string;
+    frontColorLabel?: null | string;
+    backColor?: null | string;
+    backColorLabel?: null | string;
+    textureFront?: null | string;
+    textureFrontLabel?: null | string;
+    textureBack?: null | string;
+    textureBackLabel?: null | string;
+    matType?: null | string;
+    matTypeLabel?: null | string;
     category?: null | string;
     code?: null | string;
     color?: null | string;

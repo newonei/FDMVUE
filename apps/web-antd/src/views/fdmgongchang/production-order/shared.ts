@@ -1,7 +1,10 @@
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
+import type { ProductAttributeSource } from '#/views/fdmplatform/products/attributes';
 
 import dayjs from 'dayjs';
+
+import { productAttributesText } from '#/views/fdmplatform/products/attributes';
 
 export const ORDER_STATUS: Record<Api.Status, { color: string; label: string }> = {
   ACCEPTED: { color: 'processing', label: '生产中' },
@@ -30,13 +33,13 @@ export function num(value: null | number | string | undefined) {
 }
 
 /** 规格一行：尺寸 · 材质 · 颜色，没有时用规格原文。 */
-export function specText(p: {
-  color?: null | string;
+export function specText(p: ProductAttributeSource & {
   material?: null | string;
   size?: null | string;
   specification?: null | string;
 }) {
-  const parts = [p.size, p.material, p.color].filter(Boolean);
+  const structured = p.productStage || p.colorCode || p.frontColor || p.backColor || p.textureFront || p.textureBack || p.matType;
+  const parts = [p.size, p.material, structured ? productAttributesText(p) : p.color].filter(Boolean);
   return parts.length > 0 ? parts.join(' · ') : (p.specification ?? '').replaceAll('\n', ' ');
 }
 

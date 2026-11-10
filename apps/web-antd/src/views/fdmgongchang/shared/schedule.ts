@@ -1,4 +1,8 @@
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
+import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
+
+import { attrSummary, makeLabels, normalizeForStage } from '../stage-stock/model';
+import { dimensionTextInMm } from './dimensions';
 
 /** 工序名称，和后端 FactoryProcess 一致。 */
 export const PROCESS_LABELS: Record<string, string> = {
@@ -7,7 +11,7 @@ export const PROCESS_LABELS: Record<string, string> = {
   ENGRAVE: '雕刻',
   FOLD: '折叠',
   LAMINATE: '贴合',
-  MIX: '密炼挤出发泡',
+  MIX: '发泡',
   PACK: '包装',
   PUNCH: '冲裁',
   SLICE: '开片',
@@ -64,38 +68,74 @@ export function groupByDate<T>(items: T[], dateOf: (item: T) => string) {
 
 /** 选中的产品：订单成品规格，加上用料逆推带出的板材、片材和还要做多少。 */
 export interface StageChoice {
+  boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
   boards?: null | number;
   boardSpec?: null | string;
   name: string;
   remaining?: null | number;
   sheets?: null | number;
+  sheetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
   sheetSpec?: null | string;
   spec: string;
+  sourceStagesByProcess?: Record<string, string[]>;
+  targetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
 }
 
-/** 产出板材、片材的工序（不是订单成品）。 */
-const STAGE_OUTPUT: Record<string, 'board' | 'sheet'> = { MIX: 'board', SLICE: 'sheet' };
+/** 库存阶段代码保持不变，面向现场按实际产物显示。 */
+export const TASK_OUTPUT_STAGES: Record<string, string> = {
+  CUT: 'CUT', EMBOSS: 'EMBOSSED', ENGRAVE: 'ENGRAVED', FOLD: 'FOLDED',
+  LAMINATE: 'LAMINATED', MIX: 'BOARD', PACK: 'PACKED', PUNCH: 'PUNCHED', SLICE: 'SHEET',
+};
+
+export const TASK_STAGE_LABELS: Record<string, string> = {
+  RAW: '原材料', BOARD: '板材（发泡）', SHEET: '已开片板材', CUT: '片材（立切）',
+  LAMINATED: '贴合垫', EMBOSSED: '压花垫', PUNCHED: '冲裁垫', ENGRAVED: '雕刻垫', FOLDED: '折叠垫', PACKED: '已包装成品',
+};
+
+/** 单色中间物料不能默认拿双色成品的正面色代替。 */
+export function taskOutputAttrs(stage: string, attrs?: FdmgongchangStageStockApi.ItemAttrs | null) {
+  const source = { ...attrs };
+  if (['BOARD', 'SHEET', 'CUT'].includes(stage)) {
+    source.frontColor = null;
+    source.backColor = null;
+  }
+  return normalizeForStage(stage, source);
+}
+
+export function taskMaterialText(material?: Api.Material | null, fallback?: null | string) {
+  if (!material) return dimensionTextInMm(fallback) || '待确认产出规格';
+  const attributes = attrSummary(material.stage, material.attrs, makeLabels(), [], 'mm');
+  return attributes
+    ? [TASK_STAGE_LABELS[material.stage] ?? material.stage, attributes].join(' · ')
+    : dimensionTextInMm(material.name || fallback) || TASK_STAGE_LABELS[material.stage] || material.stage;
+}
+
+/** 产出板材、片材的工序。 */
+const STAGE_OUTPUT: Record<string, 'board' | 'sheet'> = { MIX: 'board', SLICE: 'board', CUT: 'sheet' };
 
 /**
- * 一道工序的任务做什么：密炼做板材、开片做片材，其他工序就是订单成品。
- * spec 是任务规格（算不出板材时写明是给哪个成品做的），suggested 是建议数量，hint 是给排单员看的说明。
+ * 发泡做板材，开片仍做板材，立切做片材；订单成品只用于说明用途。
+ * 规格算不出时留空，让排单员明确填写，不能把成品规格当成中间产物规格。
  */
 export function stageTaskPlan(process: null | string | undefined, choice: StageChoice) {
   const kind = process ? STAGE_OUTPUT[process] : undefined;
   if (!kind) {
-    return { hint: '', kind, spec: choice.spec, suggested: positive(choice.remaining) };
+    return { hint: '', kind, spec: dimensionTextInMm(choice.spec), suggested: positive(choice.remaining) };
   }
-  const board = kind === 'board';
-  const spec = (board ? choice.boardSpec : choice.sheetSpec) || `${board ? '板材' : '片材'}（成品 ${choice.spec || choice.name}）`;
-  const suggested = positive(board ? choice.boards : choice.sheets);
+  const mixing = process === 'MIX';
+  const slicing = process === 'SLICE';
+  const spec = dimensionTextInMm(mixing || slicing ? choice.boardSpec : choice.spec);
+  const suggested = positive(mixing || slicing ? choice.boards : choice.remaining);
   const remaining = choice.remaining ? `订单还要做 ${choice.remaining} 条成品，` : '';
   let hint: string;
-  if (board) {
+  if (mixing) {
     hint = suggested
       ? `${remaining}按用料逆推要 ${suggested} 张板`
-      : '密炼做的是板材，不是成品；这张单还算不出要几张板（订单规格没有长宽厚或本厂没填出板规格），请按实际填张数';
+      : '请确认本次发泡板材的尺寸、配方、单一颜色及计划张数';
+  } else if (slicing) {
+    hint = suggested ? `${remaining}建议安排 ${suggested} 片已开片板材，规格沿用领料板材` : '请选择领料板材，自动沿用其厚度，并确认计划片数';
   } else {
-    hint = suggested ? `${remaining}按用料逆推要开 ${suggested} 片` : '开片做的是片材，不是成品；这张单还算不出要开几片，请按实际填片数';
+    hint = suggested ? `${remaining}请按实际裁切方案确认 ${suggested} 片的建议数量` : '请确认立切后片材的长、宽、厚、颜色及计划片数';
   }
   return { hint, kind, spec, suggested };
 }

@@ -269,7 +269,9 @@ describe('production order page', () => {
     const plan = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
     expect(plan).toContain('用料逆推');
     expect(plan).toContain('按上次建议');
-    expect(plan).toContain('一张出16条→要32张');
+    expect(plan).toContain('成品理论换算：板材2100×1360×48mm');
+    expect(plan).toContain('每张理论16条→预计需32张');
+    expect(plan).toContain('不按厚度分层计算开片数量');
     expect(plan).toContain('原料576kg（每张18kg）≈密炼4锅');
     expect(plan).toContain('240kg');
     button('接单').click();

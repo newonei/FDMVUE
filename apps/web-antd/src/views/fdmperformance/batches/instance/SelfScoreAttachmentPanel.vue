@@ -3,12 +3,12 @@ import type { UploadRequestOption } from 'ant-design-vue/lib/vc-upload/interface
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 import { formatFileSize } from '@vben/utils';
 
-import { Button, message, Progress, Tag, Upload } from 'ant-design-vue';
+import { Button, Image, message, Progress, Tag, Upload } from 'ant-design-vue';
 
 import {
   deleteSelfScoreAttachment,
@@ -63,12 +63,18 @@ const ALLOWED_EXTENSIONS = [
   'zip',
 ] as const;
 const ACCEPT = ALLOWED_EXTENSIONS.map((extension) => `.${extension}`).join(',');
+const PREVIEW_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 
 const attachments = ref<JixiaoApi.SelfScoreAttachment[]>([]);
 const attachmentLoading = ref(false);
 const deletingIds = reactive(new Set<string>());
 const downloadingIds = reactive(new Set<string>());
+const previewingId = ref('');
+const previewVisible = ref(false);
+const previewUrl = ref('');
+const previewFileName = ref('');
 const uploadTasks = ref<UploadTask[]>([]);
+let previewRequestId = 0;
 let reservedUploadCount = 0;
 let reservedUploadBytes = 0;
 
@@ -97,6 +103,7 @@ watch(hasUploadError, (value) => emit('errorChange', value), {
 watch(
   () => props.instanceId,
   () => {
+    resetPreview();
     uploadTasks.value = [];
     reservedUploadCount = 0;
     reservedUploadBytes = 0;
@@ -104,6 +111,7 @@ watch(
   },
   { immediate: true },
 );
+onBeforeUnmount(resetPreview);
 
 function normalizedInstanceId() {
   const value = Number(props.instanceId);
@@ -326,6 +334,44 @@ function safeDownloadUrl(value: string) {
   return parsed.href;
 }
 
+function canPreviewAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
+  return PREVIEW_IMAGE_EXTENSIONS.has(fileExtension(attachment.fileName));
+}
+
+function resetPreview() {
+  previewRequestId += 1;
+  previewingId.value = '';
+  previewVisible.value = false;
+  previewUrl.value = '';
+  previewFileName.value = '';
+}
+
+function handlePreviewError() {
+  if (!previewVisible.value) return;
+  resetPreview();
+  message.error('图片加载失败，请重试或下载后查看');
+}
+
+async function previewAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
+  if (!canPreviewAttachment(attachment) || previewingId.value) return;
+  resetPreview();
+  const requestId = previewRequestId;
+  previewingId.value = attachment.id;
+  try {
+    const downloadUrl = await getSelfScoreAttachmentDownloadUrl(attachment.id);
+    if (requestId !== previewRequestId) return;
+    previewUrl.value = safeDownloadUrl(downloadUrl);
+    previewFileName.value = attachment.fileName;
+    previewVisible.value = true;
+  } catch {
+    if (requestId === previewRequestId) {
+      message.error('附件预览地址获取失败，请稍后重试');
+    }
+  } finally {
+    if (requestId === previewRequestId) previewingId.value = '';
+  }
+}
+
 async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
   if (downloadingIds.has(attachment.id)) return;
   const popup = createDownloadPopup();
@@ -348,7 +394,7 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
     <div class="self-score-attachments__header">
       <div>
         <h3>员工自评附件</h3>
-        <p>自评佐证资料会保留在本考核实例中，后续流程可查看并下载。</p>
+        <p>自评佐证资料会保留在本考核实例中，图片支持预览，附件可下载。</p>
       </div>
       <Tag v-if="attachments.length" color="blue">
         {{ attachments.length }} 个附件
@@ -433,6 +479,16 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
         </div>
         <div class="self-score-attachments__actions">
           <Button
+            v-if="canPreviewAttachment(attachment)"
+            :disabled="!!previewingId && previewingId !== attachment.id"
+            :loading="previewingId === attachment.id"
+            size="small"
+            type="link"
+            @click="previewAttachment(attachment)"
+          >
+            预览
+          </Button>
+          <Button
             :loading="downloadingIds.has(attachment.id)"
             size="small"
             type="link"
@@ -459,6 +515,21 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
       class="self-score-attachments__empty"
     >
       暂无员工自评附件
+    </div>
+
+    <div v-if="previewUrl" style="display: none">
+      <Image
+        :key="previewUrl"
+        :alt="previewFileName"
+        :preview="{
+          visible: previewVisible,
+          onVisibleChange: (visible: boolean) => {
+            previewVisible = visible;
+          },
+        }"
+        :src="previewUrl"
+        @error="handlePreviewError"
+      />
     </div>
   </section>
 </template>

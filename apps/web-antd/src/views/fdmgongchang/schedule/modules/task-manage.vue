@@ -14,7 +14,7 @@ import dayjs from 'dayjs';
 import { getWorkerList } from '#/api/fdmgongchang/factory';
 import { listScheduleTasks, reassignScheduleTasks, returnScheduleTasksToHall } from '#/api/fdmgongchang/schedule';
 
-import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS } from '../../shared/schedule';
+import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS, taskMaterialText } from '../../shared/schedule';
 
 /**
  * 任务管理：跨排单按日期看已下发的任务和进度，可按工序、状态、人员、订单筛选；
@@ -248,7 +248,8 @@ function returnToHall() {
                 <td class="whitespace-nowrap px-2 py-1.5">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</td>
                 <td class="px-2 py-1.5">
                   <div class="font-mono text-xs">{{ task.contractCode || '备货' }}</div>
-                  <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+                  <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                  <div class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
                 </td>
                 <td class="px-2 py-1.5">
                   <div class="flex items-center gap-2">

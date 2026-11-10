@@ -6,7 +6,7 @@ import { computed } from 'vue';
 
 import { Button, Empty, InputNumber, Select, Tag } from 'ant-design-vue';
 
-import { dayLabel, groupByDate, PROCESS_LABELS } from '../../shared/schedule';
+import { dayLabel, groupByDate, PROCESS_LABELS, taskMaterialText } from '../../shared/schedule';
 
 /** 待确认方案的任务表：按天分组，可以改数量、换人、删任务，或打开表单整条修改。 */
 const props = defineProps<{
@@ -42,7 +42,7 @@ function remove(task: Api.PlanTask) {
           <thead class="bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th class="px-2 py-1.5 text-left font-medium">工序</th>
-              <th class="px-2 py-1.5 text-left font-medium">订单 / 产品</th>
+              <th class="px-2 py-1.5 text-left font-medium">订单用途 / 本工序产出</th>
               <th class="w-32 px-2 py-1.5 text-right font-medium">数量</th>
               <th class="w-64 px-2 py-1.5 text-left font-medium">人员</th>
               <th class="px-2 py-1.5 text-left font-medium">理由</th>
@@ -58,7 +58,9 @@ function remove(task: Api.PlanTask) {
               <td class="px-2 py-1.5">
                 <div v-if="task.contractCode" class="font-mono text-xs">{{ task.contractCode }}</div>
                 <div v-else class="text-xs text-muted-foreground">备货</div>
-                <div class="text-xs">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
+                <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                <div class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
+                <div v-if="task.inputs?.length" class="text-xs text-muted-foreground">领料：{{ task.inputs.map((m) => taskMaterialText(m)).join('；') }}</div>
               </td>
               <td class="px-2 py-1.5 text-right">
                 <InputNumber

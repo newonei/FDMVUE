@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Product, TaxBasis } from '#/api/fdmplatform/products';
+import type { Product, ProductAttributeOptions, TaxBasis } from '#/api/fdmplatform/products';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -15,12 +15,13 @@ import {
   Tag,
 } from 'ant-design-vue';
 
-import { getProducts } from '#/api/fdmplatform/products';
+import { getProductAttributeOptions, getProducts } from '#/api/fdmplatform/products';
 
 import { errorText, money } from '../../data';
 import { mergeProductSelection, productDescription } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 import ProductEditor from './ProductEditor.vue';
+import ProductStageSelect from './ProductStageSelect.vue';
 
 const props = defineProps<{
   /** 采购等场景可选启用但资料未补齐的产品；合同选品仍只列可选用产品 */
@@ -42,6 +43,8 @@ const selectedKeys = computed(() => selected.value.map((item) => item.id));
 /** undefined 为全部分类，空字符串为未分类 */
 const category = ref<string>();
 const appliedKeyword = ref('');
+const appliedProductStage = ref<string>();
+const stageOptions = ref<ProductAttributeOptions['stages']>([]);
 const categoryRefresh = ref(0);
 const filters = reactive({
   keyword: '',
@@ -49,6 +52,7 @@ const filters = reactive({
   size: '',
   color: '',
   shape: '',
+  productStage: undefined as string | undefined,
 });
 const pageNo = ref(1);
 const pageSize = ref(10);
@@ -57,22 +61,33 @@ const loading = ref(false);
 const panelError = ref('');
 const editorOpen = ref(false);
 let sequence = 0;
+let optionsSequence = 0;
 watch(
   () => [props.open, props.companyId],
   () => {
     if (!props.open) {
       sequence += 1;
+      optionsSequence += 1;
       return;
     }
     selected.value = [];
     pageNo.value = 1;
     categoryRefresh.value++;
     void load();
+    const run = ++optionsSequence;
+    void getProductAttributeOptions().then((options) => {
+      if (run === optionsSequence) stageOptions.value = options.stages;
+    }).catch((error) => {
+      if (run === optionsSequence) panelError.value = errorText(error);
+    });
   },
+  { immediate: true },
 );
+onBeforeUnmount(() => { ++sequence; ++optionsSequence; });
 async function load(reset = false) {
   if (reset) pageNo.value = 1;
   appliedKeyword.value = filters.keyword;
+  appliedProductStage.value = filters.productStage;
   const run = ++sequence;
   loading.value = true;
   panelError.value = '';
@@ -139,6 +154,7 @@ function afterCreated(product: Product) {
           :company-id="companyId"
           :value="category"
           :keyword="appliedKeyword"
+          :filters="{ productStage: appliedProductStage }"
           :active="allowIncomplete ? true : undefined"
           :selectable="allowIncomplete ? undefined : true"
           :refresh-key="categoryRefresh"
@@ -154,6 +170,14 @@ function afterCreated(product: Product) {
           :message="selectionError"
         />
         <Space wrap :size="8">
+          <ProductStageSelect
+            allow-groups
+            v-model:value="filters.productStage"
+            :options="stageOptions"
+            style="width: 220px"
+            aria-label="筛选生产分类"
+            @update:value="load(true)"
+          />
           <Input
             v-model:value="filters.keyword"
             placeholder="名称 / SKU / 展示名称"

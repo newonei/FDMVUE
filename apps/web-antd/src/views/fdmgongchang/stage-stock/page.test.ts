@@ -104,7 +104,7 @@ const stages = [
   ['PACKED', '已包装成品', '件'],
 ] as const;
 const processes = [
-  ['MIX', '密炼挤出发泡', 'BOARD', ['RAW']],
+  ['MIX', '发泡', 'BOARD', ['RAW']],
   ['SLICE', '开片', 'SHEET', ['BOARD']],
   ['LAMINATE', '贴合', 'LAMINATED', ['SHEET']],
   ['EMBOSS', '压花', 'EMBOSSED', ['LAMINATED', 'SHEET']],
@@ -286,7 +286,7 @@ describe('stage stock page', () => {
     expect(text).toContain('库存阶段');
     for (const group of ['原料与板材', '半成品', '成品']) expect(text).toContain(group);
     expect(text).toContain('板材库存');
-    expect(text).toContain('密炼挤出发泡产出');
+    expect(text).toContain('发泡产出');
     expect(text).toContain('开片领料');
     expect(text).toContain('当前库存');
     expect(document.querySelector('.stock-panel__total')?.textContent?.replaceAll(/\s/g, '')).toBe('300张');
