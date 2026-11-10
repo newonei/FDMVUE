@@ -38,6 +38,8 @@ env:
 jobs:
   build:
     name: Build web-antd
+    # Source builds publish on the server; keep the separate verification workflow.
+    if: ${{ vars.DEPLOY_MODE != 'source' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
