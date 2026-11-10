@@ -46,6 +46,12 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   moveMixPackage: mocks.moveMix,
   releaseTaskPackages: mocks.release,
 }));
+vi.mock('#/api/fdmgongchang/production-order', () => ({
+  getOpenProductionOrders: vi.fn().mockResolvedValue([
+    { completedQuantity: 0, factoryId: 1, id: 11, items: [{ productName: '紫色瑜伽垫' }], orderNo: 'GD-1', requesterUserId: 1, status: 'ACCEPTED', totalQuantity: 10 },
+    { completedQuantity: 0, factoryId: 1, id: 12, items: [{ productName: '蓝色瑜伽垫' }], orderNo: 'GD-2', requesterUserId: 1, status: 'ACCEPTED', totalQuantity: 5 },
+  ]),
+}));
 vi.mock('@vben/access', () => ({
   useAccess: () => ({ hasAccessByCodes: () => true }),
 }));
@@ -176,7 +182,13 @@ describe('schedule page', () => {
 
     clickButton('下发任务包（只排发泡先后，不定日期）');
     await flush();
-    expect(mocks.release).toHaveBeenCalled();
+    expect(document.body.textContent).toContain('GD-1');
+    expect(document.body.textContent).toContain('GD-2');
+    document.querySelector<HTMLInputElement>('input[aria-label="GD-2"]')?.click();
+    await flush();
+    clickButton('下发1张单的任务包');
+    await flush();
+    expect(mocks.release).toHaveBeenCalledWith({ note: undefined, productionOrderIds: [12] });
     expect(mocks.generate).not.toHaveBeenCalled();
 
     const down = document.querySelector<HTMLButtonElement>('button[aria-label="板材甲 往后"]');

@@ -15,6 +15,7 @@ import {
   getOrderableFactories,
 } from '#/api/fdmgongchang/production-order';
 
+import PackageReleaseModal from '../schedule/modules/package-release-modal.vue';
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
 import TaskManage from '../schedule/modules/task-manage.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
@@ -42,6 +43,7 @@ const { hasAccessByCodes } = useAccess();
 const canCreate = computed(() => hasAccessByCodes(['fdmgongchang:production-order:create']));
 const canHandle = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 const canSchedule = computed(() => hasAccessByCodes(['fdmgongchang:schedule:generate']));
+const canRelease = computed(() => hasAccessByCodes(['fdmgongchang:schedule:confirm']));
 const canViewSchedule = computed(() => hasAccessByCodes(['fdmgongchang:schedule:query']));
 const route = useRoute();
 const tab = ref<Tab>(initialTab());
@@ -77,7 +79,8 @@ const pageSize = ref(20);
 /** 本厂收到的单里勾选的已接单订单，拿去 AI 排单；翻页、筛选时保留已勾选的。 */
 const selected = ref<Map<number, Api.Order>>(new Map());
 const scheduleOpen = ref(false);
-const selectable = computed(() => tab.value === 'factory' && canSchedule.value);
+const releaseOpen = ref(false);
+const selectable = computed(() => tab.value === 'factory' && (canSchedule.value || canRelease.value));
 const rowSelection = computed(() =>
   selectable.value
     ? {
@@ -297,6 +300,7 @@ function progressPercent(o: Api.Order) {
           <div class="flex flex-wrap items-center gap-2">
             <template v-if="selectable">
               <Button
+                v-if="canSchedule"
                 :disabled="selected.size === 0"
                 size="small"
                 type="primary"
@@ -304,7 +308,10 @@ function progressPercent(o: Api.Order) {
               >
                 AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
               </Button>
-              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，只拿这几张单让 AI 排</span>
+              <Button v-if="canRelease" :disabled="selected.size === 0" size="small" @click="releaseOpen = true">
+                下发任务包{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
+              </Button>
+              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，只拿这几张单让 AI 排或直接下发任务包</span>
               <button v-else class="text-xs text-primary hover:underline" type="button" @click="selected = new Map()">清空</button>
             </template>
             <Select
@@ -402,6 +409,7 @@ function progressPercent(o: Api.Order) {
 
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
+      <PackageReleaseModal v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onScheduled" />
       <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>
   </Page>
