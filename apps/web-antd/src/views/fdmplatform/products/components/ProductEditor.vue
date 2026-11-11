@@ -234,7 +234,6 @@ async function save() {
             v-else
             v-model:value="form[field!]"
             :aria-label="title"
-            :disabled="Boolean(product) && field === 'code'"
             :placeholder="
               field === 'unit'
                 ? '例如：张、个、套；请按实际资料填写'

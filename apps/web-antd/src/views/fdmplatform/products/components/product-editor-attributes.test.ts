@@ -285,7 +285,54 @@ async function save() {
   await flush();
 }
 
-describe('产品生产属性编辑与查看', () => {
+describe('产品档案编辑与查看', () => {
+  it('允许修改已有产品的 SKU 编号，并携带原产品 ID 和版本保存', async () => {
+    await mount();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="SKU 编号"]',
+    )!;
+    expect(input.disabled).toBe(false);
+    expect(input.value).toBe('SKU-1');
+    input.value = 'SKU-2';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'p1', code: 'SKU-2', expectedVersion: 1 }),
+    );
+    expect(
+      document.querySelector('.product-detail-drawer')!.textContent,
+    ).toContain('SKU-2');
+  });
+
+  it('编辑时不允许将 SKU 编号清空', async () => {
+    await mount();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="SKU 编号"]',
+    )!;
+    input.value = '   ';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('请填写 SKU 编号和产品名称');
+  });
+
+  it('编号重复时显示服务端错误并保留编辑内容', async () => {
+    api.save.mockRejectedValueOnce(
+      new Error('此自建产品编号已经存在，请使用已有产品：SKU-2'),
+    );
+    await mount();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="SKU 编号"]',
+    )!;
+    input.value = 'SKU-2';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await save();
+    expect(document.body.textContent).toContain('此自建产品编号已经存在');
+    expect(document.contains(input)).toBe(true);
+    expect(input.value).toBe('SKU-2');
+    expect(document.querySelector('.product-detail-drawer')).toBeNull();
+  });
+
   it('不会把历史物料解析阶段自动保存回产品档案', async () => {
     await mount({
       ...product,
