@@ -107,12 +107,15 @@ export function getFdmdataPatternDesignItem(id: number) {
 export function uploadFdmdataPatternDesignItemDesignImage(
   file: File,
   onUploadProgress?: AxiosProgressEvent,
+  options: { signal?: AbortSignal; silent?: boolean } = {},
 ) {
   return requestClient.upload<FdmdataPatternDesignItemApi.UploadResp>(
     '/fdmdata/pattern/design-item/upload-design-image',
     { file },
     {
       onUploadProgress,
+      signal: options.signal,
+      silent: options.silent,
       timeout: DESIGN_IMAGE_UPLOAD_TIMEOUT,
     },
   );

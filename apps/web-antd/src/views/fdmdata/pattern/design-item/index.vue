@@ -4,13 +4,22 @@ import type { PatternDesignItemShopOption } from './data';
 import type { VxeTableGridOptions } from '#/adapter/vxe-table';
 import type { FdmdataPatternDesignItemApi } from '#/api/fdmdata/pattern/design-item';
 
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import {
+  computed,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 
 import { Page, useVbenModal } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Button, message } from 'ant-design-vue';
+import { Badge, Button, message } from 'ant-design-vue';
 
 import { ACTION_ICON, TableAction, useVbenVxeGrid } from '#/adapter/vxe-table';
 import {
@@ -23,6 +32,7 @@ import {
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
+import { usePatternDesignItemCreateDraft } from './modules/create-draft';
 import CreateForm from './modules/create-form.vue';
 import EditForm from './modules/edit-form.vue';
 
@@ -43,9 +53,37 @@ const checkedCount = computed(() => checkedRows.value.length);
 
 const FILENAME_INVALID_CHARS = /[<>:"/\\|?*]/g;
 
+const {
+  hasContent: hasCreateDraft,
+  openRequested: createDraftOpenRequested,
+  stats: createDraftStats,
+} = usePatternDesignItemCreateDraft();
+
 function handleCreate() {
   createFormModalApi.open();
 }
+
+// 上传面板里点「查看」后回到本页并打开草稿。
+// 等页面挂载后再打开（弹窗子组件挂载前 modalApi 还不可用）；页面被标签页缓存时只由当前激活的实例响应
+const pageActive = ref(false);
+onMounted(() => {
+  pageActive.value = true;
+});
+onActivated(() => {
+  pageActive.value = true;
+});
+onDeactivated(() => {
+  pageActive.value = false;
+});
+watch(
+  [createDraftOpenRequested, pageActive],
+  ([requested, active]) => {
+    if (!requested || !active) return;
+    createDraftOpenRequested.value = false;
+    if (hasCreateDraft.value) handleCreate();
+  },
+  { immediate: true },
+);
 
 function handleEdit(row: FdmdataPatternDesignItemApi.PatternDesignItem) {
   editFormModalApi.setData(row).open();
@@ -347,12 +385,19 @@ onBeforeUnmount(() => {
             </template>
             导出
           </Button>
-          <Button type="primary" @click="handleCreate">
-            <template #icon>
-              <IconifyIcon icon="lucide:plus" />
-            </template>
-            新增
-          </Button>
+          <Badge
+            :count="hasCreateDraft ? createDraftStats.total : 0"
+            :title="hasCreateDraft ? '有未提交的新增草稿' : undefined"
+          >
+            <Button type="primary" @click="handleCreate">
+              <template #icon>
+                <IconifyIcon
+                  :icon="hasCreateDraft ? 'lucide:file-pen-line' : 'lucide:plus'"
+                />
+              </template>
+              {{ hasCreateDraft ? '继续新增' : '新增' }}
+            </Button>
+          </Badge>
         </div>
       </header>
 

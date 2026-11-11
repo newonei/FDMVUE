@@ -1,42 +1,49 @@
 <script lang="ts" setup>
 import type { FdmdataPatternDesignItemApi } from '#/api/fdmdata/pattern/design-item';
-import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
 
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 
 import { useVbenModal } from '@vben/common-ui';
+import { IconifyIcon } from '@vben/icons';
+import { defaultImageAccepts, getFileNameFromUrl } from '@vben/utils';
 
-import { Image, Input, message } from 'ant-design-vue';
+import {
+  Modal as AntModal,
+  Button,
+  Image,
+  Input,
+  message,
+  Tooltip,
+} from 'ant-design-vue';
 
 import { useVbenForm } from '#/adapter/form';
 import {
   getFdmdataPatternDesignItem,
   updateFdmdataPatternDesignItem,
-  uploadFdmdataPatternDesignItemDesignImage,
 } from '#/api/fdmdata/pattern/design-item';
-import ImageUpload from '#/components/upload/image-upload.vue';
-import { $t } from '#/locales';
-
 import {
-  getPatternDesignImagePreviewUrl,
-  PATTERN_DESIGN_ITEM_DEFAULTS,
-  useFormSchema,
-} from '../data';
+  createLocalThumbnail,
+  FileDropZone,
+  UploadTaskProgress,
+} from '#/components/upload-task';
+import { $t } from '#/locales';
+import { isUploadTaskActive, useUploadTaskStore } from '#/store/upload-task';
+
+import { PATTERN_DESIGN_ITEM_DEFAULTS, useFormSchema } from '../data';
+import {
+  DESIGN_IMAGE_UPLOAD_SOURCE,
+  uploadDesignImageTask,
+} from './create-draft';
 import { usePatternDesignItemShopOptions } from './shop-options';
 
 defineOptions({ name: 'FdmdataPatternDesignItemEditForm' });
 
 const emit = defineEmits<{ success: [] }>();
 
-interface UploadSuccessPayload {
-  designImageUrl?: string;
-  previewUrl?: string;
-  previewImageUrl?: string;
-  response?: unknown;
-  url?: string;
-}
-
 const SOURCE_IMAGE_MAX_SIZE_MB = 1024;
+const DESIGN_IMAGE_ACCEPT = defaultImageAccepts;
+/** antd 确认框默认层级低于 vben 弹窗（2000），在弹窗内弹出时需要抬高 */
+const CONFIRM_Z_INDEX = 2100;
 
 let openSeq = 0;
 const formData = ref<
@@ -44,7 +51,6 @@ const formData = ref<
 >();
 const designImageUrl = ref('');
 const previewImageUrl = ref('');
-const previewUrlByDesignImageUrl = ref<Record<string, string>>({});
 const {
   ensureShopNameOption,
   fetchShopNameOptions,
@@ -66,103 +72,84 @@ const [EditForm, editFormApi] = useVbenForm({
   commonConfig: { labelWidth: 110, colon: true },
 });
 
-function extractUploadUrl(res: unknown): string {
-  if (typeof res === 'string') return res;
-  if (!res || typeof res !== 'object') return '';
-  const record = res as Record<string, any>;
-  if (typeof record.url === 'string') return record.url;
-  if (typeof record.designImageUrl === 'string') return record.designImageUrl;
-  if (typeof record.data === 'string') return record.data;
-  if (record.data && typeof record.data === 'object') {
-    if (typeof record.data.url === 'string') return record.data.url;
-    return typeof record.data.designImageUrl === 'string'
-      ? record.data.designImageUrl
-      : '';
-  }
-  return '';
+// ---------- 替换设计图 ----------
+const uploadStore = useUploadTaskStore();
+const uploadTaskId = ref<string>();
+const selectedFile = shallowRef<File>();
+const localThumbUrl = ref('');
+const uploadComplete = ref(false);
+
+const uploadTask = computed(() => uploadStore.getTask(uploadTaskId.value));
+const uploading = computed(() => isUploadTaskActive(uploadTask.value));
+const pendingReplacement = computed(
+  () => !!selectedFile.value && !uploadComplete.value,
+);
+const uploadFailed = computed(
+  () => pendingReplacement.value && !uploading.value,
+);
+
+const displayThumbUrl = computed(() => {
+  // 替换完成前只展示新文件的缩略图，不能用上一张图的预览冒充新图。
+  if (pendingReplacement.value) return localThumbUrl.value;
+  return previewImageUrl.value.trim() || localThumbUrl.value;
+});
+const displayFileName = computed(() => {
+  if (selectedFile.value) return selectedFile.value.name;
+  const url = designImageUrl.value.trim();
+  return url ? getFileNameFromUrl(url) : '尚未上传设计图';
+});
+
+function revokeLocalThumb() {
+  if (localThumbUrl.value) URL.revokeObjectURL(localThumbUrl.value);
+  localThumbUrl.value = '';
 }
 
-function extractUploadPreviewUrl(res: unknown): string {
-  if (!res || typeof res !== 'object') return '';
-  const record = res as Record<string, any>;
-  if (typeof record.previewUrl === 'string') return record.previewUrl;
-  if (typeof record.previewImageUrl === 'string') return record.previewImageUrl;
-  if (record.data && typeof record.data === 'object') {
-    if (typeof record.data.previewUrl === 'string') {
-      return record.data.previewUrl;
-    }
-    return typeof record.data.previewImageUrl === 'string'
-      ? record.data.previewImageUrl
-      : '';
-  }
-  return '';
+function discardUpload() {
+  const taskId = uploadTaskId.value;
+  uploadTaskId.value = undefined;
+  if (taskId) uploadStore.remove(taskId);
+  selectedFile.value = undefined;
+  uploadComplete.value = false;
+  revokeLocalThumb();
 }
 
-function extractPatternDesignImageUrls(
-  payload: unknown | UploadSuccessPayload,
-) {
-  const record = (payload ?? {}) as UploadSuccessPayload;
-  const response = record.response;
-  return {
-    designImageUrl: extractUploadUrl(payload) || extractUploadUrl(response),
-    previewImageUrl:
-      extractUploadPreviewUrl(payload) || extractUploadPreviewUrl(response),
-  };
-}
-
-async function uploadDesignImageWithPreview(
-  file: File,
-  onUploadProgress?: AxiosProgressEvent,
-) {
-  const uploadRes = await uploadFdmdataPatternDesignItemDesignImage(
+function handleSelectDesignImage([file]: File[]) {
+  if (!file) return;
+  discardUpload();
+  selectedFile.value = file;
+  const taskId = uploadStore.add({
     file,
-    onUploadProgress,
-  );
-
-  return {
-    previewUrl: uploadRes.previewImageUrl,
-    response: uploadRes,
-    url: uploadRes.designImageUrl,
-  };
+    onSuccess(result) {
+      if (uploadTaskId.value !== taskId) return;
+      designImageUrl.value = result.designImageUrl ?? '';
+      previewImageUrl.value = result.previewImageUrl ?? '';
+      uploadComplete.value = true;
+    },
+    source: `${DESIGN_IMAGE_UPLOAD_SOURCE} · 修改`,
+    upload: uploadDesignImageTask,
+  });
+  uploadTaskId.value = taskId;
+  void createLocalThumbnail(file).then((url) => {
+    if (!url) return;
+    if (uploadTaskId.value === taskId) {
+      localThumbUrl.value = url;
+    } else {
+      URL.revokeObjectURL(url);
+    }
+  });
 }
 
-function setImageUrlsForDesign(designUrl: string, previewUrl?: string) {
-  const normalizedDesignUrl = designUrl.trim();
-  if (!normalizedDesignUrl) return;
-  const normalizedPreviewUrl = String(previewUrl ?? '').trim();
-  if (normalizedPreviewUrl) {
-    previewUrlByDesignImageUrl.value = {
-      ...previewUrlByDesignImageUrl.value,
-      [normalizedDesignUrl]: normalizedPreviewUrl,
-    };
+function handleRetryUpload() {
+  if (uploadTask.value && uploadTaskId.value) {
+    uploadStore.retry(uploadTaskId.value);
+  } else if (selectedFile.value) {
+    handleSelectDesignImage([selectedFile.value]);
   }
 }
 
-function getStoredPreviewUrl(designUrl?: string, previewUrl?: string) {
-  const directPreviewUrl = String(previewUrl ?? '').trim();
-  if (directPreviewUrl) return directPreviewUrl;
-  const normalizedDesignUrl = String(designUrl ?? '').trim();
-  return normalizedDesignUrl
-    ? previewUrlByDesignImageUrl.value[normalizedDesignUrl] || ''
-    : '';
-}
-
-function getUploadPreviewUrl(url: string) {
-  return getPatternDesignImagePreviewUrl(getStoredPreviewUrl(url));
-}
-
-function getSinglePreviewUrl() {
-  return getPatternDesignImagePreviewUrl(
-    getStoredPreviewUrl(designImageUrl.value, previewImageUrl.value),
-  );
-}
-
-function handleUploadSuccess(payload: unknown) {
-  const urls = extractPatternDesignImageUrls(payload);
-  if (!urls.designImageUrl) return;
-  designImageUrl.value = urls.designImageUrl;
-  previewImageUrl.value = urls.previewImageUrl ?? '';
-  setImageUrlsForDesign(urls.designImageUrl, urls.previewImageUrl);
+function handleCancelUpload() {
+  discardUpload();
+  message.info('已放弃本次替换，继续使用当前设计图');
 }
 
 function padDatePart(value: number) {
@@ -208,7 +195,6 @@ async function applyEditValues(
   formData.value = record;
   designImageUrl.value = record.designImageUrl ?? '';
   previewImageUrl.value = record.previewImageUrl ?? '';
-  setImageUrlsForDesign(record.designImageUrl ?? '', record.previewImageUrl);
   ensureShopNameOption(record.shopName);
   await nextTick();
   await editFormApi.setValues(buildEditFormValues(record) as any, false);
@@ -217,6 +203,14 @@ async function applyEditValues(
 async function submitEdit() {
   const { valid } = await editFormApi.validate();
   if (!valid) return false;
+  if (uploading.value) {
+    message.warning('设计图还在上传，请稍候');
+    return false;
+  }
+  if (pendingReplacement.value) {
+    message.warning('新图尚未上传成功，请重试或放弃本次替换');
+    return false;
+  }
   const imageUrl = designImageUrl.value.trim();
   if (!imageUrl) {
     message.warning('请上传原图');
@@ -226,8 +220,7 @@ async function submitEdit() {
   const data = {
     ...formValues,
     designImageUrl: imageUrl,
-    previewImageUrl:
-      getStoredPreviewUrl(imageUrl, previewImageUrl.value) || undefined,
+    previewImageUrl: previewImageUrl.value.trim() || undefined,
     productionSent: Number(formValues.productionSent ?? 0),
     status: 0,
   } as FdmdataPatternDesignItemApi.PatternDesignItem;
@@ -238,10 +231,10 @@ async function submitEdit() {
 }
 
 async function resetModalState() {
+  discardUpload();
   formData.value = undefined;
   designImageUrl.value = '';
   previewImageUrl.value = '';
-  previewUrlByDesignImageUrl.value = {};
   await editFormApi.resetForm();
   await editFormApi.setValues(PATTERN_DESIGN_ITEM_DEFAULTS as any, false);
 }
@@ -258,6 +251,21 @@ const [Modal, modalApi] = useVbenModal({
     } finally {
       modalApi.unlock();
     }
+  },
+  onBeforeClose() {
+    if (!uploading.value) return true;
+    return new Promise<boolean>((resolve) => {
+      AntModal.confirm({
+        title: '设计图还在上传，确定关闭吗？',
+        content: '关闭后会取消本次上传，记录保持原来的设计图。',
+        okText: '关闭并取消上传',
+        okButtonProps: { danger: true },
+        cancelText: '继续上传',
+        zIndex: CONFIRM_Z_INDEX,
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
   },
   async onOpenChange(isOpen: boolean) {
     if (!isOpen) {
@@ -301,49 +309,123 @@ const [Modal, modalApi] = useVbenModal({
     }
   },
 });
+
+watch(
+  [uploading, pendingReplacement],
+  ([active, pending]) => {
+    modalApi.setState({
+      confirmDisabled: pending,
+      confirmText: active
+        ? '设计图上传中…'
+        : pending
+          ? '请处理未完成的上传'
+          : '确定',
+    });
+  },
+  { immediate: true },
+);
+
+// 通过右下角的全局上传面板取消时，与弹窗内取消保持相同语义。
+watch(
+  () => uploadTask.value?.status,
+  (status) => {
+    if (status === 'canceled') handleCancelUpload();
+  },
+);
 </script>
 
 <template>
-  <Modal
-    title="修改图案识别订单设计图"
-    class="w-[1080px] max-w-[calc(100vw-2rem)]"
-  >
+  <Modal title="修改图案识别订单设计图" class="w-[1080px] max-w-[calc(100vw-2rem)]">
     <EditForm />
 
     <div class="design-image-panel">
       <div class="design-image-label">
         <span class="required">*</span>
-        原图 URL / 上传
+        设计图
       </div>
+      <div class="design-image-content">
+        <div class="design-image-card">
+          <div class="design-image-card__thumb">
+            <Image
+              v-if="displayThumbUrl"
+              :height="72"
+              :preview="{ src: displayThumbUrl }"
+              :src="displayThumbUrl"
+              :width="72"
+            />
+            <IconifyIcon v-else icon="lucide:image" />
+          </div>
+          <div class="design-image-card__body">
+            <div class="design-image-card__name" :title="displayFileName">
+              {{ displayFileName }}
+            </div>
+            <UploadTaskProgress
+              v-if="uploadTask && uploadTask.status !== 'success'"
+              :task="uploadTask"
+            />
+            <div
+              v-else-if="uploadComplete"
+              class="design-image-card__meta is-done"
+            >
+              <IconifyIcon icon="lucide:circle-check" />
+              新图已上传，保存后生效
+            </div>
+            <div v-else-if="pendingReplacement" class="design-image-card__meta">
+              上传任务已移除，请重试或放弃替换
+            </div>
+            <div v-else class="design-image-card__meta">当前设计图</div>
+            <div v-if="uploadFailed" class="design-image-card__meta mt-1">
+              新图尚未上传成功，请重试或放弃替换后再保存
+            </div>
+          </div>
+          <div class="design-image-card__actions">
+            <Tooltip v-if="uploading" title="取消上传">
+              <Button size="small" type="text" @click="handleCancelUpload">
+                <template #icon>
+                  <IconifyIcon icon="lucide:circle-x" />
+                </template>
+              </Button>
+            </Tooltip>
+            <Tooltip v-if="uploadFailed" title="重试">
+              <Button size="small" type="text" @click="handleRetryUpload">
+                <template #icon>
+                  <IconifyIcon icon="lucide:rotate-cw" />
+                </template>
+              </Button>
+            </Tooltip>
+            <Button
+              v-if="uploadFailed"
+              size="small"
+              type="link"
+              @click="handleCancelUpload"
+            >
+              放弃替换
+            </Button>
+          </div>
+        </div>
+
+        <FileDropZone
+          class="mt-3"
+          :accept="DESIGN_IMAGE_ACCEPT"
+          compact
+          :max-size-mb="SOURCE_IMAGE_MAX_SIZE_MB"
+          :multiple="false"
+          title="拖入新图片替换当前设计图，或"
+          @select="handleSelectDesignImage"
+        />
+      </div>
+    </div>
+
+    <div class="design-image-panel">
+      <div class="design-image-label">原图 URL</div>
       <div class="design-image-content">
         <Input
           v-model:value="designImageUrl"
           allow-clear
-          placeholder="上传图片后自动回填原图 URL"
+          :disabled="pendingReplacement"
+          placeholder="上传图片后自动回填，也可以直接粘贴"
+          @change="discardUpload"
         />
-        <div class="mt-3">
-          <ImageUpload
-            v-model:value="designImageUrl"
-            :api="uploadDesignImageWithPreview"
-            :max-number="1"
-            :max-size="SOURCE_IMAGE_MAX_SIZE_MB"
-            :preview-url-transform="getUploadPreviewUrl"
-            :show-description="false"
-            @success="handleUploadSuccess"
-          />
-        </div>
-        <div v-if="designImageUrl" class="mt-3 flex items-center gap-3">
-          <Image
-            :preview="{ src: getSinglePreviewUrl() }"
-            :src="getSinglePreviewUrl()"
-            :width="96"
-            :height="96"
-            class="rounded object-cover"
-          />
-          <span class="min-w-0 flex-1 break-all text-xs text-muted-foreground">
-            {{ designImageUrl }}
-          </span>
-        </div>
       </div>
     </div>
 
@@ -353,7 +435,9 @@ const [Modal, modalApi] = useVbenModal({
         <Input
           v-model:value="previewImageUrl"
           allow-clear
+          :disabled="pendingReplacement"
           placeholder="上传原图后自动生成，仅用于页面展示"
+          @change="discardUpload"
         />
       </div>
     </div>
@@ -365,7 +449,7 @@ const [Modal, modalApi] = useVbenModal({
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 12px;
 }
 
 .design-image-label {
@@ -381,6 +465,63 @@ const [Modal, modalApi] = useVbenModal({
 
 .design-image-content {
   min-width: 0;
+}
+
+.design-image-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.design-image-card__thumb {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 50%);
+  border-radius: 6px;
+}
+
+.design-image-card__thumb :deep(.ant-image-img) {
+  object-fit: cover;
+}
+
+.design-image-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.design-image-card__name {
+  margin-bottom: 4px;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-image-card__meta {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.design-image-card__meta.is-done {
+  color: hsl(var(--success));
+}
+
+.design-image-card__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
 }
 
 @media (max-width: 768px) {
