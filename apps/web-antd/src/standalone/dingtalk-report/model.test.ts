@@ -7,6 +7,7 @@ import {
   createDraft,
   parseReportQuery,
   reportErrors,
+  workbenchUrl,
 } from './model';
 
 const slice = {
@@ -50,6 +51,11 @@ function prepare(overrides: Record<string, unknown> = {}): any {
 }
 
 describe('parseReportQuery', () => {
+  it('keeps the factory and task in the full-workbench handoff', () => {
+    expect(workbenchUrl(parseReportQuery('?taskId=7&factoryId=2'))).toBe(
+      '/gongchang/workbench?factoryId=2&taskId=7',
+    );
+  });
   it('reads the task and factory from the card link', () => {
     expect(parseReportQuery('?taskId=7&factoryId=2')).toEqual({
       factoryId: 2,
@@ -70,13 +76,25 @@ describe('parseReportQuery', () => {
 });
 
 describe('createDraft', () => {
-  it('brings the suggested material and the order spec so the worker only fills quantities', () => {
+  it('keeps the actual slice material dimensions instead of the final product target', () => {
     const { draft } = createDraft(prepare(), slice as any, 'TPE');
     expect(draft?.inputs[0]?.quantity).toBe(5);
     expect(draft?.output.attrs).toMatchObject({
       length: 190,
-      thickness: 0.6,
+      thickness: 4.8,
       width: 130,
+    });
+  });
+
+  it('uses this cutting task output instead of the finished-product dimensions', () => {
+    const { draft } = createDraft(
+      prepare({ outputAttrs: { length: 185, width: 65, thickness: 4.8 } }),
+      { ...slice, code: 'CUT', outputStage: 'CUT' } as any,
+    );
+    expect(draft?.output.attrs).toMatchObject({
+      length: 185,
+      width: 65,
+      thickness: 4.8,
     });
   });
 
@@ -104,8 +122,9 @@ describe('createDraft', () => {
 describe('blockReason', () => {
   it('sends tasks without suggested material to the full workbench with the reason', () => {
     const task = prepare({ hint: '贴合请选正面、反面两种片材', picks: [] });
-    const { outputs } = createDraft(task, slice as any);
-    expect(blockReason(task, slice as any, outputs)).toBe(
+    const process = { ...slice, code: 'LAMINATE' };
+    const { outputs } = createDraft(task, process as any);
+    expect(blockReason(task, process as any, outputs)).toBe(
       '贴合请选正面、反面两种片材',
     );
   });
@@ -119,10 +138,19 @@ describe('blockReason', () => {
     );
   });
 
-  it('lets a normal slicing task be reported on one screen', () => {
+  it('routes even a single-spec slicing task to volume-based workbench reporting', () => {
     const task = prepare();
     const { outputs } = createDraft(task, slice as any);
-    expect(blockReason(task, slice as any, outputs)).toBeUndefined();
+    expect(blockReason(task, slice as any, outputs)).toContain('本次良品体积');
+  });
+
+  it('routes an already-issued non-slicing task to its existing order', () => {
+    const task = prepare({ inProgressOrderId: 91 });
+    const process = { ...slice, code: 'CUT', outputStage: 'CUT' };
+    const { outputs } = createDraft(task, process as any);
+    expect(blockReason(task, process as any, outputs)).toContain(
+      '继续原工序单报工',
+    );
   });
 });
 

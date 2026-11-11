@@ -54,6 +54,7 @@ function line(
       batchNo,
       id,
       item,
+      itemId: id + 100,
       itemCode: `CODE-${id}`,
       location: '库位',
       quantity: 100,
@@ -100,6 +101,18 @@ describe('deriveOutputs', () => {
     expect(outputs[0]!.attrs.length).toBe(190);
     expect(outputs[0]!.batchNo).toBe('MB1/MB3');
     expect(outputs[1]!.batchNo).toBe('MB2');
+    expect(outputs[0]!.sourceItemIds).toEqual([101, 103]);
+    expect(outputs[1]!.sourceItemIds).toEqual([102]);
+  });
+
+  it('keeps slice source material IDs stable and deduplicates batches of the same material', () => {
+    const first = line(1, 'BOARD', board('PU'), 'MB1', 10);
+    const second = line(2, 'BOARD', board('PU'), 'MB2', 5);
+    second.stock.itemId = first.stock.itemId;
+    const outputs = deriveOutputs('SLICE', [first, second]);
+    expect(outputs).toHaveLength(1);
+    outputs[0]!.attrs.length = 185;
+    expect(outputs[0]!.sourceItemIds).toEqual([101]);
   });
 
   it('keeps different actual board thicknesses and dimensions in separate slicing rows', () => {

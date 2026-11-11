@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WorkbenchPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
+  route: { query: {} as Record<string, string> },
   mates: vi.fn(),
   create: vi.fn(),
   issue: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   wage: vi.fn(),
   returnMaterial: vi.fn(),
 }));
+vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: vi.fn().mockResolvedValue({
     canSeeAll: false,
@@ -202,7 +204,7 @@ describe('workbench page', () => {
   const order = {
     id: 5, orderNo: 'GX20261011-001', process: 'SLICE', sourceStage: 'BOARD', outputStage: 'SHEET',
     status: 'IN_PROGRESS', reportCount: 0, goodQuantity: 0, defectQuantity: 0, inputQuantity: 52,
-    inputs: [{ id: 101, stockId: 11, batchNo: board.batchNo, item: board.item, itemCode: board.itemCode, location: board.location, quantity: 52, returnedQuantity: 0, stage: 'BOARD' }],
+    inputs: [{ id: 101, stockId: 11, itemId: board.itemId, batchNo: board.batchNo, item: board.item, itemCode: board.itemCode, location: board.location, quantity: 52, returnedQuantity: 0, stage: 'BOARD' }],
   };
   const mount = async () => {
     const host = document.createElement('div');
@@ -213,6 +215,7 @@ describe('workbench page', () => {
     await flush();
   };
   beforeEach(() => {
+    mocks.route.query = {};
     mocks.my.mockResolvedValue({ ...my, inProgress: [] });
     mocks.options.mockResolvedValue(options);
     mocks.create.mockResolvedValue(7);
@@ -224,6 +227,40 @@ describe('workbench page', () => {
     mocks.order.mockResolvedValue(order);
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
     mocks.mates.mockResolvedValue([]);
+  });
+
+  it('opens the linked slicing task directly in the full material workflow', async () => {
+    mocks.route.query = { factoryId: '1', taskId: '31' };
+    mocks.my.mockResolvedValue({ ...my, inProgress: [], tasks: [] });
+    await mount();
+    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(31);
+    expect(document.body.textContent).toContain('选择实际领料批次');
+    expect(document.body.textContent).toContain('1900×1300×48 mm');
+    expect(mocks.issue).not.toHaveBeenCalled();
+    expect(mocks.report).not.toHaveBeenCalled();
+  });
+
+  it('resumes the linked issued task on its original order without issuing material again', async () => {
+    mocks.route.query = { factoryId: '1', taskId: '31' };
+    const process = { ...my.processes[0]!, code: 'CUT', outputStage: 'CUT' };
+    const task = { ...my.tasks[0]!, process: 'CUT' };
+    mocks.my.mockResolvedValue({ ...my, inProgress: [], tasks: [], processes: [process] });
+    mocks.prepare.mockResolvedValue({ ...prepare, task, inProgressOrderId: 5 });
+    mocks.order.mockResolvedValue({ ...order, process: 'CUT', outputStage: 'CUT', scheduleTaskId: 31 });
+    await mount();
+    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(31);
+    expect(mocks.order).toHaveBeenCalledExactlyOnceWith(5);
+    expect(document.body.textContent).toContain('报本工序实际产出');
+    expect(mocks.issue).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('does not prepare a linked task in an inaccessible factory', async () => {
+    mocks.route.query = { factoryId: '999', taskId: '31' };
+    await mount();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.my).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('没有加载出来');
   });
   afterEach(() => {
     unmount?.();
@@ -407,6 +444,7 @@ describe('workbench page', () => {
       inputs: [blue, green].map((stock, index) => ({
         id: 201 + index,
         stockId: stock.id,
+        itemId: stock.itemId,
         stage: stock.stage,
         batchNo: stock.batchNo,
         item: stock.item,
@@ -483,8 +521,8 @@ describe('workbench page', () => {
       id: 7,
       finish: true,
       outputs: [
-        expect.objectContaining({ attrs: expect.objectContaining(blue.item), goodQuantity: 2, defectQuantity: 0 }),
-        expect.objectContaining({ attrs: expect.objectContaining(green.item), goodQuantity: 4, defectQuantity: 0 }),
+        expect.objectContaining({ attrs: expect.objectContaining(blue.item), goodQuantity: 2, defectQuantity: 0, sourceItemIds: [blue.itemId] }),
+        expect.objectContaining({ attrs: expect.objectContaining(green.item), goodQuantity: 4, defectQuantity: 0, sourceItemIds: [green.itemId] }),
       ],
       pieceworks: [{ itemId: 1, quantity: '0.56172', userId: 2 }],
     }));
@@ -539,6 +577,54 @@ describe('workbench page', () => {
     expect([...document.querySelectorAll('button')].some((button) => button.textContent?.includes('提交'))).toBe(false);
     expect(mocks.report).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.issue).not.toHaveBeenCalled();
+  });
+
+  it.each(['SLICE', 'CUT'])('issues %s with authoritative task sources and keeps the inherited recipe out of MIX-only fields', async (process) => {
+    const task = { ...my.tasks[0]!, process };
+    const outputStage = process === 'SLICE' ? 'SHEET' : 'CUT';
+    mocks.my.mockResolvedValue({ ...my, tasks: [task], inProgress: [], processes: [{
+      code: process, label: process === 'SLICE' ? '开片' : '立切', outputLabel: '本工序产出',
+      outputStage, outputUnit: '片', sources: process === 'SLICE' ? ['BOARD'] : ['SHEET'],
+    }] });
+    mocks.prepare.mockResolvedValue({ ...prepare, task, sourceStage: 'BOARD', sourceStages: ['BOARD'],
+      outputStage, outputAttrs: { ...plannedAttrs, recipeCode: 'REC-001' } });
+    await mount();
+    clickButton('领料开工');
+    await flush();
+    expect(mocks.stock).toHaveBeenCalledWith('BOARD', task.id);
+    clickButton('下一步：确认领料');
+    await flush();
+    clickButton('模拟拍照');
+    await flush();
+    clickButton('确认领料');
+    await flush();
+    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.id, sourceStage: 'BOARD' }));
+    const payload = JSON.parse(JSON.stringify(mocks.issue.mock.calls[0]![0]));
+    expect(payload).not.toHaveProperty('recipeCode');
+    expect(payload).not.toHaveProperty('recipeBatches');
+  });
+
+  it('restores the linked task from an older issued order even when it is missing from the recent task list', async () => {
+    mocks.my.mockResolvedValue({ ...my, tasks: [], inProgress: [my.inProgress[0]] });
+    mocks.order.mockResolvedValue({ ...order, scheduleTaskId: 31, reportCount: 2 });
+    await mount();
+    clickButton('报本工序产出');
+    await flush();
+    expect(mocks.prepare).toHaveBeenCalledWith(31);
+    fill(document.querySelector('[id^="good-"]')!.id, 3);
+    fill('return-101', 2);
+    await flush();
+    clickButton('下一步');
+    await flush();
+    clickButton('报工');
+    await flush();
+    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ taskId: 31, orderId: 5,
+      expectedReportCount: 2, returns: [{ inputId: 101, quantity: 2 }],
+      outputs: [expect.objectContaining({ goodQuantity: 3, sourceItemIds: [board.itemId] })],
+    }));
+    expect(mocks.reportOrder).not.toHaveBeenCalled();
+    expect(mocks.returnMaterial).not.toHaveBeenCalled();
     expect(mocks.issue).not.toHaveBeenCalled();
   });
 

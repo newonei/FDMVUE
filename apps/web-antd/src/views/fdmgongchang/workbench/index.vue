@@ -5,6 +5,7 @@ import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
 
 import { onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { buildUUID } from '@vben/utils';
 
@@ -43,6 +44,7 @@ import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
 const factory = useFactory();
+const route = useRoute();
 const job = createJob();
 provideJob(job);
 const loading = ref(true);
@@ -70,12 +72,25 @@ async function load() {
   loadError.value = false;
   try {
     if (!factory.loaded.value) await factory.load();
+    const linkedTask = linkedTaskQuery();
+    if (linkedTask) {
+      if (!factory.factories.value.some((item) => item.id === linkedTask.factoryId)) {
+        throw new Error('报工链接中的工厂不可访问，请联系管理员');
+      }
+      factory.select(linkedTask.factoryId);
+    }
     if (factory.factoryId.value === null) {
       noFactory.value = true;
       return;
     }
     const [, options] = await Promise.all([reload(), getWorkbenchOptions()]);
     job.options = options;
+    if (linkedTask) {
+      const prepare = await prepareWorkbenchTask(linkedTask.taskId);
+      const process = job.my?.processes.find((item) => item.code === prepare.task.process);
+      if (!process) throw new Error('你没有这道工序的岗位，请找班组长');
+      await startTask(prepare.task, process, undefined, prepare);
+    }
   } catch {
     loadError.value = true;
   } finally {
@@ -83,6 +98,16 @@ async function load() {
   }
 }
 onMounted(load);
+
+/** 钉钉简版入口只传工厂和任务 ID，工厂权限与任务内容仍由服务端确认。 */
+function linkedTaskQuery() {
+  const { factoryId, taskId } = route.query;
+  if (factoryId === undefined && taskId === undefined) return;
+  const validId = (value: unknown): value is string =>
+    typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value));
+  if (!validId(factoryId) || !validId(taskId)) throw new Error('报工链接无效，请重新打开');
+  return { factoryId: Number(factoryId), taskId: Number(taskId) };
+}
 
 const defaultMaterial = () =>
   job.options?.materials.find((m) => m.value.toUpperCase() === 'TPE')?.value ?? job.options?.materials[0]?.value;
@@ -126,23 +151,25 @@ async function startTask(
   task: FdmgongchangScheduleApi.Task,
   process: Api.Process,
   onBehalfOf?: { id: number; name: string },
+  prepared?: Api.TaskPrepare,
 ) {
   reset(process, task);
   job.onBehalfOf = onBehalfOf;
   loading.value = true;
   try {
-    const prepare = await prepareWorkbenchTask(task.id);
+    const prepare = prepared ?? await prepareWorkbenchTask(task.id);
     job.prepare = prepare;
     if (prepare.inProgressOrderId) {
       await openOrder(prepare.inProgressOrderId, false);
       return;
     }
-    if (prepare.sourceStage && process.sources.includes(prepare.sourceStage)) job.sourceStage = prepare.sourceStage;
+    const sourceStages = prepare.sourceStages?.length ? prepare.sourceStages : process.sources;
+    job.sourceStage = prepare.sourceStage && sourceStages.includes(prepare.sourceStage) ? prepare.sourceStage : sourceStages[0] ?? '';
     job.picks = prepare.picks
       .map((p) => ({ qty: Math.max(0, toNumber(p.quantity) ?? 0), stock: p.stock }));
     const plannedRecipe = prepare.outputAttrs?.recipeCode ?? task.output?.attrs?.recipeCode;
     const plannedBatches = toNumber(task.output?.recipeBatches ?? prepare.task.output?.recipeBatches);
-    if (plannedRecipe) job.recipe = { code: plannedRecipe, batches: plannedBatches && plannedBatches > 0 ? plannedBatches : 1 };
+    if (process.code === 'MIX' && plannedRecipe) job.recipe = { code: plannedRecipe, batches: plannedBatches && plannedBatches > 0 ? plannedBatches : 1 };
     const qty = toNumber(task.quantity) ?? 0;
     job.auxPicks = prepare.aux
       .filter((a) => a.stocks.length > 0)
@@ -170,8 +197,8 @@ function createPayload(finish: boolean) {
     outputs: finish ? outputPayload(job) : [],
     pieceworks: finish ? piecePayload() : [],
     process: job.process!.code,
-    recipeBatches: job.recipe?.batches,
-    recipeCode: job.recipe?.code,
+    recipeBatches: job.process?.code === 'MIX' ? job.recipe?.batches : undefined,
+    recipeCode: job.process?.code === 'MIX' ? job.recipe?.code : undefined,
     productionOrderItemId: job.task ? undefined : job.productionItem?.id,
     scheduleTaskId: job.task?.id,
     sourceStage: job.sourceStage,
@@ -216,8 +243,8 @@ async function issueOnly() {
             inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
             issueSheetUrls: job.sheets,
             onBehalfOf: job.onBehalfOf?.id,
-            recipeBatches: job.recipe?.batches,
-            recipeCode: job.recipe?.code,
+            recipeBatches: job.process?.code === 'MIX' ? job.recipe?.batches : undefined,
+            recipeCode: job.process?.code === 'MIX' ? job.recipe?.code : undefined,
             requestKey: job.requestKey,
             sourceStage: job.sourceStage,
             taskId: job.task.id,
@@ -265,16 +292,20 @@ async function openOrder(id: number, supplement: boolean) {
     ?? job.my?.teamProcesses?.find((p) => p.code === order.process);
   if (!process) throw new Error('当前账号没有这道工序岗位');
   const existing = job.my?.inProgress.find((o) => o.id === id) ?? job.my?.recentDone?.find((o) => o.id === id);
-  const task = job.my?.tasks.find((t) => t.id === existing?.scheduleTaskId) ?? job.task;
-  const prepare = job.prepare?.task.id === task?.id ? job.prepare : undefined;
+  const taskId = order.scheduleTaskId ?? existing?.scheduleTaskId ?? job.task?.id;
+  let task = job.my?.tasks.find((t) => t.id === taskId) ?? (job.task?.id === taskId ? job.task : undefined);
+  let prepare = job.prepare?.task.id === taskId ? job.prepare : undefined;
+  // 在制单不限日期，任务列表只显示近期任务；缺失时按关联 ID 恢复任务契约。
+  if (taskId && !prepare && (!supplement || !task)) prepare = await prepareWorkbenchTask(taskId);
+  task ??= prepare?.task;
   const onBehalfOf = job.onBehalfOf;
   reset(process, task);
   job.onBehalfOf = onBehalfOf;
-  job.prepare = prepare ?? (task ? await prepareWorkbenchTask(task.id) : undefined);
+  job.prepare = prepare;
   job.order = order;
   job.sourceStage = order.sourceStage;
   job.supplement = supplement;
-  job.recipe = order.recipeCode ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) ?? 1 } : undefined;
+  job.recipe = process.code === 'MIX' && order.recipeCode ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) ?? 1 } : undefined;
   if (supplement) {
     job.step = 'pick';
     return;
@@ -287,7 +318,7 @@ async function openOrder(id: number, supplement: boolean) {
       id: line.stockId ?? line.id,
       item: line.item,
       itemCode: line.itemCode,
-      itemId: 0,
+      itemId: line.itemId ?? 0,
       location: line.location,
       quantity: line.quantity ?? 0,
       stage: line.stage,
@@ -377,8 +408,8 @@ async function reportTask(duplicateAction?: 'APPEND'): Promise<void> {
       auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
       inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
       issueSheetUrls: job.sheets,
-      recipeBatches: job.recipe?.batches,
-      recipeCode: job.recipe?.code,
+      recipeBatches: job.process?.code === 'MIX' ? job.recipe?.batches : undefined,
+      recipeCode: job.process?.code === 'MIX' ? job.recipe?.code : undefined,
       sourceStage: job.sourceStage,
       ...urgentPayload(),
     }),

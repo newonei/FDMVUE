@@ -50,6 +50,14 @@ export function parseReportQuery(search: string): ReportQuery {
   };
 }
 
+export function workbenchUrl(query: ReportQuery) {
+  const params = new URLSearchParams({
+    factoryId: String(query.factoryId),
+    taskId: String(query.taskId),
+  });
+  return `/gongchang/workbench?${params}`;
+}
+
 export function createDraft(
   prepare: Api.TaskPrepare,
   process: Api.Process,
@@ -60,7 +68,12 @@ export function createDraft(
     stock: p.stock,
   }));
   const outputs = deriveOutputs(process.code, inputs, defaultMaterial);
-  applyTaskTarget(process.code, prepare.targetAttrs, inputs, outputs);
+  applyTaskTarget(
+    process.code,
+    prepare.outputAttrs ?? prepare.task.output?.attrs ?? prepare.targetAttrs,
+    inputs,
+    outputs,
+  );
   const taskQty = toNumber(prepare.task.quantity) ?? 0;
   const aux = prepare.aux.flatMap((a) => {
     const stock = a.stocks[0];
@@ -91,6 +104,10 @@ export function blockReason(
   process: Api.Process,
   outputs: OutputDraft[],
 ) {
+  if (prepare.inProgressOrderId)
+    return '这个任务已经领料，请到工作台继续原工序单报工';
+  if (process.code === 'SLICE')
+    return '开片按本次良品体积计薪，请到工作台确认规格和参与人员';
   if (prepare.picks.length === 0) {
     return prepare.hint || '这个任务要自己选料';
   }

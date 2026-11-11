@@ -256,6 +256,7 @@ describe('order drawer', () => {
     expect(document.querySelector('[id^="out-"][id$="-thickness"]')).toBeNull();
     expect(document.querySelector('[id^="out-"][id$="-length"]')).toBeNull();
     expect(document.body.textContent).toContain('厚度不可修改');
+    expect(document.querySelector('[id^="out-"][id$="-color"]')).toBeNull();
     // 像人一样逐个输入：每次输入之间让界面先刷新
     for (const [index, key] of ids.entries()) {
       expect((document.querySelector(`#out-good-${key}`) as HTMLInputElement).value).toBe('');
@@ -295,6 +296,7 @@ describe('order drawer', () => {
         batchNo: 'MB1',
         defectQuantity: 4,
         goodQuantity: 236,
+        sourceItemIds: [1],
       },
       {
         attrs: {
@@ -308,6 +310,7 @@ describe('order drawer', () => {
         batchNo: 'MB2',
         defectQuantity: 2,
         goodQuantity: 198,
+        sourceItemIds: [2],
       },
     ]);
     expect(saved).toHaveBeenCalledWith(

@@ -346,6 +346,7 @@ const inputs = computed<InputLine[]>(() => {
         batchNo: line.batchNo,
         id: line.stockId ?? line.id,
         item: line.item,
+        itemId: line.itemId,
         itemCode: line.itemCode,
         location: line.location,
         quantity: line.quantity ?? 0,
@@ -685,6 +686,7 @@ function addLine() {
     defectQuantity: undefined,
     goodQuantity: undefined,
     key: nextKey(),
+    sourceItemIds: base.sourceItemIds ? [...base.sourceItemIds] : undefined,
   });
   touched.value = true;
 }
@@ -845,6 +847,7 @@ function outputPayload(): Api.OrderOutput[] {
       batchNo: o.batchNo.trim() || undefined,
       defectQuantity: toNumber(o.defectQuantity) ?? 0,
       goodQuantity: toNumber(o.goodQuantity) ?? 0,
+      ...(processCode.value === 'SLICE' ? { sourceItemIds: o.sourceItemIds } : {}),
     }));
 }
 

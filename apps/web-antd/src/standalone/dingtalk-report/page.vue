@@ -28,9 +28,8 @@ import {
   createDraft,
   parseReportQuery,
   reportErrors,
+  workbenchUrl,
 } from './model';
-
-const WORKBENCH_PATH = '/gongchang/workbench';
 
 const appConfig = (
   window as Window & {
@@ -56,6 +55,7 @@ const submitting = ref(false);
 const errors = ref<string[]>([]);
 const editingPicks = ref(false);
 const doneAmount = ref(0);
+const workbenchHref = ref('/gongchang/workbench');
 
 let context: ReportContext | undefined;
 let taskId = 0;
@@ -110,6 +110,7 @@ async function load() {
   message.value = '正在打开';
   try {
     ({ factoryId, taskId } = parseReportQuery(window.location.search));
+    workbenchHref.value = workbenchUrl({ factoryId, taskId });
     if (!/DingTalk/i.test(navigator.userAgent)) {
       throw new Error('请在钉钉里打开');
     }
@@ -280,7 +281,7 @@ onMounted(load);
     <section v-else-if="stage === 'blocked'" class="panel center">
       <h1>这个任务要在工作台报工</h1>
       <p>{{ message }}</p>
-      <a class="primary link" :href="WORKBENCH_PATH">打开工作台</a>
+      <a class="primary link" :href="workbenchHref">打开工作台</a>
     </section>
 
     <section v-else-if="stage === 'done'" class="panel center">

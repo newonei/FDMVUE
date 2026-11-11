@@ -123,6 +123,7 @@ export function outputPayload(job: Job): StockApi.OrderOutput[] {
       batchNo: o.batchNo.trim() || undefined,
       defectQuantity: toNumber(o.defectQuantity) ?? 0,
       goodQuantity: toNumber(o.goodQuantity) ?? 0,
+      ...(job.process?.code === 'SLICE' ? { sourceItemIds: o.sourceItemIds } : {}),
     }));
 }
 
