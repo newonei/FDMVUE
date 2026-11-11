@@ -270,7 +270,7 @@ describe('workbench page', () => {
     vi.clearAllMocks();
   });
 
-  it('issues material before production and reports the planned intermediate output without issuing twice', async () => {
+  it('issues material without an optional voucher and reports the planned intermediate output without issuing twice', async () => {
     await mount();
     expect(document.body.textContent).toContain('计划产出');
     expect(document.body.textContent).toContain('预计领料');
@@ -286,17 +286,13 @@ describe('workbench page', () => {
     await flush();
     clickButton('下一步：确认领料');
     await flush();
-    clickButton('确认领料');
-    await flush();
-    expect(mocks.issue).not.toHaveBeenCalled();
-    clickButton('模拟拍照');
-    await flush();
+    expect(document.body.textContent).toContain('本次领料凭证（选填）');
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     clickButton('确认领料');
     await flush();
     expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({
       taskId: 31, sourceStage: 'BOARD', inputs: [{ laminationSide: undefined, quantity: 52, stockId: 11 }],
-      issueSheetUrls: ['https://f/sheet.jpg'], requestKey: expect.any(String),
+      issueSheetUrls: [], requestKey: expect.any(String),
     }));
     expect(mocks.report).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('领料开工完成');

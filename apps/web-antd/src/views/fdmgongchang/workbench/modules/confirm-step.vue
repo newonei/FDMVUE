@@ -116,9 +116,9 @@ async function issue() {
         本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色和长宽厚分别入库，不计入已下发任务或订单进度。
       </p>
       <section v-if="job.task && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
-        <span class="text-sm font-bold">本次领料凭证<span class="ml-1 text-destructive">*</span></span>
+        <span class="text-sm font-bold">本次领料凭证<span class="ml-1 font-normal text-muted-foreground">（选填）</span></span>
         <ImageUpload v-model:value="job.sheets" :max-number="9" :max-size="10" :show-description="false" directory="fdmgongchang/issue-sheet" multiple />
-        <span class="text-xs text-muted-foreground">拍照留存实际领取批次和数量。后续报工沿用本凭证。</span>
+        <span class="text-xs text-muted-foreground">可拍照留存实际领取批次和数量，后续报工沿用已上传的凭证。</span>
       </section>
       <section v-if="askOrder && orderChoices.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
         <span class="text-sm font-bold">这批是做哪张工厂订单？</span>

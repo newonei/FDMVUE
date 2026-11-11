@@ -225,10 +225,6 @@ async function issueOnly() {
     message.warning('已完工的单补登领料要写原因');
     return;
   }
-  if (job.task && !job.supplement && job.sheets.length === 0) {
-    message.warning('请拍照上传本次领料凭证');
-    return;
-  }
   submitting.value = true;
   try {
     if (job.supplement && job.order) {

@@ -73,7 +73,7 @@ export namespace FdmgongchangWorkbenchApi {
   export interface TaskIssueReq {
     auxInputs?: FdmgongchangStageStockApi.OrderInput[];
     inputs: FdmgongchangStageStockApi.OrderInput[];
-    issueSheetUrls: string[];
+    issueSheetUrls?: string[];
     recipeBatches?: Decimal;
     recipeCode?: string;
     remark?: string;
