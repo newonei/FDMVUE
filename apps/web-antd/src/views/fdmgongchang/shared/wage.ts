@@ -23,7 +23,7 @@ export const RECORD_STATUS: Record<Api.RecordStatus, { color: string; label: str
 export const SHIFT_LABELS: Record<Api.Shift, string> = { DAY: '白班', NIGHT: '夜班' };
 
 /** 计价项目上常用的单位、产品类型、岗位角色，表单里作为可选项，也可以手填。 */
-export const UNIT_OPTIONS = ['片', '件', '张', '包', '小时', '班', '车', '袋', '方', '次', '待定'];
+export const UNIT_OPTIONS = ['片', '件', '张', '包', '小时', '班', '车', '袋', 'm³', '方', '次', '待定'];
 export const PRODUCT_TYPE_OPTIONS = ['双人垫', '圆形垫', '圆形跳绳垫', '跪垫', '裸垫', '平铺', '大包装', '12+8折'];
 export const ROLE_OPTIONS = ['送片', '接片', '密炼', '挤出硫化'];
 

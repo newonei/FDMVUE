@@ -3,6 +3,35 @@ import type { ContractItem, Decimal, PageResult } from './index';
 import { requestClient } from '#/api/request';
 
 export type TaxBasis = 'TAX_EXCLUDED' | 'TAX_INCLUDED';
+export interface ProductAttributeOption {
+  value: string;
+  label: string;
+}
+export interface ProductAttributeOptions {
+  stages: Array<ProductAttributeOption & { group: string }>;
+  colors: ProductAttributeOption[];
+  textures: ProductAttributeOption[];
+  matTypes: ProductAttributeOption[];
+}
+export interface ProductAttributes {
+  productStage?: null | string;
+  productStageLabel?: null | string;
+  /** 查询时从已关联工序物料解析的有效阶段；不作为档案编辑保存值。 */
+  resolvedProductStage?: null | string;
+  resolvedProductStageLabel?: null | string;
+  colorCode?: null | string;
+  colorCodeLabel?: null | string;
+  frontColor?: null | string;
+  frontColorLabel?: null | string;
+  backColor?: null | string;
+  backColorLabel?: null | string;
+  textureFront?: null | string;
+  textureFrontLabel?: null | string;
+  textureBack?: null | string;
+  textureBackLabel?: null | string;
+  matType?: null | string;
+  matTypeLabel?: null | string;
+}
 export interface ProductPrice {
   id: string;
   version: number;
@@ -17,7 +46,7 @@ export interface ProductPrice {
   validUntil?: string;
   active: boolean;
 }
-export interface Product {
+export interface Product extends ProductAttributes {
   id: string;
   version: number;
   companyId: number;
@@ -61,6 +90,8 @@ export interface ProductQuery {
   size?: string;
   color?: string;
   shape?: string;
+  /** 具体阶段编码，或仅用于筛选的大类值，如 group:半成品。 */
+  productStage?: string;
   active?: boolean;
   selectable?: boolean;
   currency?: string;
@@ -136,7 +167,8 @@ export interface ProductImportRow {
       | 'specification'
       | 'unit'
     >
-  >;
+  > &
+    ProductAttributes;
 }
 export interface ProductImportResult {
   fileName: string;
@@ -174,11 +206,19 @@ export function importProducts(data: {
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });
 }
+/** 生产分类和生产属性字典，包含工厂维护的自定义颜色。 */
+export function getProductAttributeOptions() {
+  return requestClient.get<ProductAttributeOptions>(
+    `${base}/attribute-options`,
+  );
+}
 /** 产品档案左侧分类：分类和各分类产品数，口径与同条件下的产品列表一致（不含分类本身）。 */
 export function getProductCategories(params: {
   active?: boolean;
   companyId: number;
   keyword?: string;
+  /** 与产品列表使用相同的阶段 / 大类筛选。 */
+  productStage?: string;
   selectable?: boolean;
 }) {
   return requestClient.get<ProductCategoryView>(`${base}/categories`, {

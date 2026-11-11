@@ -24,7 +24,11 @@ import { aiStatusText, attachmentSummary, needsReason } from './risk';
  * 收起时一行结果条；展开后问题逐条处理、通过的缩成标签；「全部依据」在侧边抽屉里逐项看。
  * 只是提醒，不影响单据办理。
  */
-const props = defineProps<{ docId?: string; docType: FdmAiCheckApi.DocType }>();
+const props = defineProps<{
+  defaultCollapsed?: boolean;
+  docId?: string;
+  docType: FdmAiCheckApi.DocType;
+}>();
 const emit = defineEmits<{ changed: [level?: FdmAiCheckApi.Severity] }>();
 
 const POLL_MS = 5000;
@@ -34,7 +38,7 @@ const result = ref<FdmAiCheckApi.Result>();
 const loading = ref(false);
 const error = ref('');
 const drawerOpen = ref(false);
-/** 用户手动展开或收起过（按单据类型记住）；没选过时按有没有问题决定。 */
+/** 默认收起模式只保留当前单据内的选择；其他模式按单据类型记住。 */
 const expandChoice = ref<null | string>(null);
 const rechecking = ref(false);
 const handling = ref<number>();
@@ -74,6 +78,10 @@ const checkedAt = computed(() => {
 });
 
 function readChoice() {
+  if (props.defaultCollapsed) {
+    expandChoice.value = '0';
+    return;
+  }
   try {
     expandChoice.value = localStorage.getItem(storageKey.value);
   } catch {
@@ -84,6 +92,7 @@ function readChoice() {
 function toggle() {
   const next = expanded.value ? '0' : '1';
   expandChoice.value = next;
+  if (props.defaultCollapsed) return;
   try {
     localStorage.setItem(storageKey.value, next);
   } catch {
@@ -181,7 +190,7 @@ function confirmReason() {
 }
 
 watch(
-  () => [props.docType, props.docId],
+  () => [props.docType, props.docId, props.defaultCollapsed],
   () => {
     polls = 0;
     drawerOpen.value = false;

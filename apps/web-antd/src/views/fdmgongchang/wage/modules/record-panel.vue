@@ -103,6 +103,12 @@ watch(
 onBeforeUnmount(() => clearTimeout(timer));
 
 const selectedRows = computed(() => rows.value.filter((r) => selectedKeys.value.includes(r.id)));
+const canDeleteSelected = computed(() => selectedRows.value.length > 0 && selectedRows.value.every((record) => {
+  if (record.status !== 'PENDING') return false;
+  if (!record.sharingCount) return true;
+  return record.source === 'MANUAL' && !!record.sharingKey
+    && selectedRows.value.filter((row) => row.sharingKey === record.sharingKey).length === record.sharingCount;
+}));
 const rowSelection = computed<TableRowSelection<Api.WorkRecord>>(() => ({
   getCheckboxProps: (r) => ({ disabled: r.status === 'SETTLED' }),
   onChange: (keys) => (selectedKeys.value = keys as number[]),
@@ -168,7 +174,8 @@ const statusOptions = (Object.keys(RECORD_STATUS) as Api.RecordStatus[]).map((s)
           <span class="text-xs text-muted-foreground">已选 {{ selectedKeys.length }} 条</span>
           <Button v-if="canConfirm && selectedRows.some((r) => r.status === 'PENDING')" size="small" type="primary" @click="run('confirm')">确认</Button>
           <Button v-if="canConfirm && selectedRows.some((r) => r.status === 'CONFIRMED')" size="small" @click="run('unconfirm')">取消确认</Button>
-          <Button v-if="canCreate && selectedRows.every((r) => r.status === 'PENDING')" danger size="small" @click="run('delete')">删除</Button>
+          <Button v-if="canCreate && canDeleteSelected" danger size="small" @click="run('delete')">删除</Button>
+          <span v-if="canCreate && selectedRows.some((r) => r.sharingCount) && !canDeleteSelected" class="text-xs text-muted-foreground">开片均分：工序单需作废后重报；手动记录需选齐同批待确认人员后删除。</span>
         </template>
         <Button v-if="canCreate" size="small" type="primary" @click="openModal">＋ 登记报工</Button>
       </div>
@@ -201,7 +208,11 @@ const statusOptions = (Object.keys(RECORD_STATUS) as Api.RecordStatus[]).map((s)
           <span>{{ record.itemName }}</span>
         </template>
         <template v-else-if="column.key === 'value'">
-          <span class="whitespace-nowrap tabular-nums">
+          <span v-if="record.sharingCount" class="flex flex-col whitespace-nowrap tabular-nums">
+            <span>整批 {{ formatMoney(record.quantity, 15) }} {{ record.unit }}</span>
+            <span class="text-xs text-muted-foreground">{{ record.sharingCount }} 人平分，金额为个人份额</span>
+          </span>
+          <span v-else class="whitespace-nowrap tabular-nums">
             {{ record.category === 'TIME' ? `${formatMoney(record.hours)} 小时` : `${formatMoney(record.quantity, 3)} ${record.unit ?? ''}` }}
           </span>
         </template>

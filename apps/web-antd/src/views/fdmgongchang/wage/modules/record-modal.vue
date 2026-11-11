@@ -11,6 +11,7 @@ import { Alert, DatePicker, Input, InputNumber, Modal, Radio, Select } from 'ant
 import { createWorkRecords } from '#/api/fdmgongchang/wage';
 
 import { factoryToday } from '../../shared/factory-date';
+import { sliceWageAllocation } from '../../shared/slice-wage';
 import { CATEGORY_LABELS, formatMoney, toNum } from '../../shared/wage';
 
 /**
@@ -29,12 +30,15 @@ const shift = ref<Api.Shift>('DAY');
 const itemId = ref<number>();
 const userIds = ref<number[]>([]);
 const values = ref<Record<number, null | number>>({});
+const sliceBatchVolume = ref<Api.Decimal | null>(null);
 const remark = ref('');
 const error = ref('');
 const saving = ref(false);
 
 const item = computed(() => props.items.find((i) => i.id === itemId.value));
 const byHours = computed(() => item.value?.category === 'TIME');
+const bySliceVolume = computed(() => item.value?.category === 'PROCESS'
+  && item.value.process === 'SLICE' && item.value.name === '开片' && item.value.unit === 'm³');
 const valueLabel = computed(() => {
   if (byHours.value) return '工时（小时）';
   if (item.value?.category === 'ALLOWANCE') return '班数';
@@ -61,8 +65,10 @@ const peopleOptions = computed(() =>
   })),
 );
 const nameOf = (id: number) => props.people.find((p) => p.userId === id)?.nickname ?? String(id);
+const sliceAllocation = computed(() => sliceWageAllocation(sliceBatchVolume.value ?? 0, toNum(item.value?.currentPrice) ?? 0, userIds.value));
 const total = computed(() =>
-  userIds.value.reduce((t, id) => t + (values.value[id] ?? 0) * (toNum(item.value?.currentPrice) ?? 0), 0),
+  bySliceVolume.value ? sliceAllocation.value.amount
+    : userIds.value.reduce((t, id) => t + (values.value[id] ?? 0) * (toNum(item.value?.currentPrice) ?? 0), 0),
 );
 
 watch(open, (value) => {
@@ -72,6 +78,7 @@ watch(open, (value) => {
   itemId.value = undefined;
   userIds.value = [];
   values.value = {};
+  sliceBatchVolume.value = null;
   remark.value = '';
   error.value = '';
 });
@@ -100,7 +107,9 @@ async function submit() {
   error.value = '';
   if (!itemId.value) error.value = '请选择项目';
   else if (userIds.value.length === 0) error.value = '请选择人员';
-  else if (userIds.value.some((id) => !(values.value[id] && values.value[id]! > 0)))
+  else if (bySliceVolume.value && !((toNum(sliceBatchVolume.value) ?? 0) > 0))
+    error.value = '请填写本批良品总体积（m³）';
+  else if (!bySliceVolume.value && userIds.value.some((id) => !(values.value[id] && values.value[id]! > 0)))
     error.value = `请给每个人填写${valueLabel.value}`;
   if (error.value || !itemId.value) return;
   saving.value = true;
@@ -108,7 +117,8 @@ async function submit() {
     const count = await createWorkRecords({
       itemId: itemId.value,
       lines: userIds.value.map((id) =>
-        byHours.value ? { hours: values.value[id]!, userId: id } : { quantity: values.value[id]!, userId: id },
+        byHours.value ? { hours: values.value[id]!, userId: id }
+          : { quantity: bySliceVolume.value ? sliceBatchVolume.value! : values.value[id]!, userId: id },
       ),
       remark: remark.value.trim() || undefined,
       shift: shift.value,
@@ -168,7 +178,18 @@ async function submit() {
           />
         </label>
       </div>
-      <div v-if="userIds.length > 0 && item" class="flex flex-col gap-2 rounded-md border border-border p-3">
+      <div v-if="userIds.length > 0 && bySliceVolume" class="flex flex-col gap-2 rounded-md border border-border p-3">
+        <label for="record-slice-volume" class="flex items-center justify-between gap-2">
+          本批良品总体积（m³）
+          <InputNumber id="record-slice-volume" :value="sliceBatchVolume ?? undefined" :min="0" :precision="15" :style="{ width: '10rem' }" string-mode @change="(value) => (sliceBatchVolume = value ?? null)" />
+        </label>
+        <span>残次品不计薪。整批 {{ formatMoney(sliceBatchVolume, 15) }} m³ × {{ formatMoney(item?.currentPrice, 4) }} 元/m³ = {{ formatMoney(total) }} 元，由 {{ userIds.length }} 人平分。</span>
+        <div v-for="share in sliceAllocation.shares" :key="share.userId" class="flex justify-between gap-2 text-sm text-foreground">
+          <span>{{ nameOf(share.userId) }}</span>
+          <b>{{ formatMoney(share.amount) }} 元</b>
+        </div>
+      </div>
+      <div v-else-if="userIds.length > 0 && item" class="flex flex-col gap-2 rounded-md border border-border p-3">
         <div class="flex items-center justify-between gap-2">
           <span>{{ valueLabel }}</span>
           <span class="flex items-center gap-1">

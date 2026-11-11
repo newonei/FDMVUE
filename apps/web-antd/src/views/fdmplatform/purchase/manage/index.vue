@@ -1992,6 +1992,7 @@ watch(financeType, (value, previous) => {
               </template>
             </Alert>
             <AiCheckPanel
+              default-collapsed
               doc-type="PURCHASE_ORDER"
               :doc-id="String(view.order.id ?? detailId ?? '')"
             />

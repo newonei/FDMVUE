@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   Product,
+  ProductAttributeOptions,
   ProductPrice,
   TaxBasis,
 } from '#/api/fdmplatform/products';
@@ -31,6 +32,7 @@ import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
   deleteProduct,
   getProduct,
+  getProductAttributeOptions,
   getProductPrices,
   getProducts,
   saveProductPrice,
@@ -40,12 +42,14 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import { errorText, money } from '../../data';
 import { formatTemporalField } from '../../date-display';
 import { useEntityDetail } from '../../documents/useEntityDetail';
+import { productAttributesText } from '../attributes';
 import { currencyOptions, missingProductFields, taxOptions } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 import ProductDetailDrawer from './ProductDetailDrawer.vue';
 import ProductEditor from './ProductEditor.vue';
 import ProductFiles from './ProductFiles.vue';
 import ProductPicker from './ProductPicker.vue';
+import ProductStageSelect from './ProductStageSelect.vue';
 
 import '../../components/compact-tables.css';
 
@@ -75,6 +79,9 @@ const pageNo = ref(catalogPage('catalogPage', 1));
 const pageSize = ref(Math.min(catalogPage('catalogSize', 10), 100));
 const total = ref(0);
 const keyword = ref(catalogQuery('catalogKeyword'));
+const productStage = ref(catalogQuery('catalogProductStage') || undefined);
+const appliedProductStage = ref(productStage.value);
+const stageOptions = ref<ProductAttributeOptions['stages']>([]);
 /** 分类 id：undefined 为全部分类，空字符串为未分类 */
 const category = ref<string | undefined>(
   props.mode === 'catalog' && typeof route.query.catalogCategory === 'string'
@@ -132,7 +139,10 @@ const list = computed(() =>
 );
 const hasFilters = computed(() =>
   Boolean(
-    keyword.value || category.value !== undefined || active.value !== undefined,
+    keyword.value ||
+    productStage.value ||
+    category.value !== undefined ||
+    active.value !== undefined,
   ),
 );
 const pageSelectableCount = computed(
@@ -148,6 +158,7 @@ const columns = computed(() =>
     ? [
         // 列顺序参考金智产品档案：名称、型号、克重、材质、规格、定制说明、类别、单位
         { title: '产品名称', key: 'product', width: 240 },
+        { title: '生产分类 / 工艺属性', key: 'production', width: 270 },
         { title: '产品型号', key: 'text', dataIndex: 'model', width: 120 },
         { title: '产品克重', key: 'text', dataIndex: 'weight', width: 90 },
         { title: '材质', key: 'text', dataIndex: 'material', width: 110 },
@@ -175,9 +186,19 @@ const columns = computed(() =>
 );
 onMounted(() => {
   void load();
+  if (props.mode === 'catalog') {
+    void getProductAttributeOptions()
+      .then((options) => {
+        stageOptions.value = options.stages;
+      })
+      .catch((error) => {
+        panelError.value = errorText(error);
+      });
+  }
 });
 function resetFilters() {
   keyword.value = '';
+  productStage.value = undefined;
   category.value = undefined;
   categoryLabel.value = undefined;
   active.value = undefined;
@@ -202,6 +223,7 @@ function openImport() {
 async function load(reset = false) {
   if (reset) pageNo.value = 1;
   appliedKeyword.value = keyword.value;
+  appliedProductStage.value = productStage.value;
   const run = ++sequence;
   const scope = {
     companyId,
@@ -215,6 +237,7 @@ async function load(reset = false) {
       const result = await getProducts({
         ...scope,
         keyword: keyword.value,
+        productStage: productStage.value,
         categoryId: category.value,
         active:
           active.value === undefined ? undefined : active.value === 'true',
@@ -272,6 +295,7 @@ function openProductDetail(id: string) {
       ...route.query,
       productId: id,
       catalogKeyword: keyword.value || undefined,
+      catalogProductStage: productStage.value,
       catalogCategory: category.value,
       catalogCategoryLabel: categoryLabel.value,
       catalogActive: active.value,
@@ -434,6 +458,7 @@ async function savePrice() {
             :company-id="companyId"
             :value="category"
             :keyword="appliedKeyword"
+            :filters="{ productStage: appliedProductStage }"
             :active="active === undefined ? undefined : active === 'true'"
             :refresh-key="categoryRefresh"
             @update:value="chooseCategory"
@@ -473,6 +498,16 @@ async function savePrice() {
                   placeholder="名称 / SKU 编号"
                   aria-label="搜索产品名称或 SKU 编号"
                   allow-clear
+                />
+              </label>
+              <label class="catalog-filter">
+                <span>生产分类</span>
+                <ProductStageSelect
+                  allow-groups
+                  v-model:value="productStage"
+                  :options="stageOptions"
+                  aria-label="筛选生产分类"
+                  @update:value="load(true)"
                 />
               </label>
               <label class="catalog-filter">
@@ -537,7 +572,7 @@ async function savePrice() {
               :columns="columns"
               row-key="id"
               :loading="loading"
-              :scroll="{ x: mode === 'catalog' ? 1610 : 1050 }"
+              :scroll="{ x: mode === 'catalog' ? 1880 : 1050 }"
               :pagination="{
                 current: pageNo,
                 pageSize,
@@ -601,6 +636,12 @@ async function savePrice() {
                     </div>
                   </div>
                 </template>
+                <span
+                  v-else-if="column.key === 'production'"
+                  :title="productAttributesText(record as Product)"
+                  >{{
+                    productAttributesText(record as Product) || '未维护'
+                  }}</span>
                 <span
                   v-else-if="column.key === 'category'"
                   class="catalog-category"
@@ -870,7 +911,9 @@ async function savePrice() {
 
 .catalog-filters {
   display: grid;
-  grid-template-columns: minmax(240px, 2fr) minmax(140px, 1fr) auto;
+  grid-template-columns:
+    minmax(180px, 1.4fr) minmax(180px, 1.4fr) minmax(110px, 1fr)
+    auto;
   gap: 16px;
   align-items: end;
   padding: 6px 4px 20px;
@@ -902,6 +945,16 @@ async function savePrice() {
   min-width: 0;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+}
+
+.catalog-filter :deep(.ant-cascader) {
+  width: 100%;
+}
+
+@media (max-width: 1280px) {
+  .catalog-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .catalog-filter-actions,

@@ -6,12 +6,16 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { onMounted, ref } from 'vue';
 
+import { buildUUID } from '@vben/utils';
+
 import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
 
 import {
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
+  getWorkbenchOrder,
+  issueWorkbenchTask,
   prepareWorkbenchTask,
   reportWorkbenchOrder,
   reportWorkbenchTask,
@@ -21,8 +25,9 @@ import {
 } from '#/api/fdmgongchang/workbench';
 
 import { businessError } from '../shared/business-error';
+import { sliceVolume } from '../shared/slice-wage';
 import { useFactory } from '../shared/use-factory';
-import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
+import { deriveOutputs, toNumber } from '../stage-stock/model';
 import ConfirmStep from './modules/confirm-step.vue';
 import DoneStep from './modules/done-step.vue';
 import Home from './modules/home.vue';
@@ -33,7 +38,7 @@ import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
  * 工厂部门 · 我的工作台（工人手机端）：活都从派单来——我的任务里看清楚做什么、领什么料，
- * 做完了报工：对照实际改领料 → 报好的、坏的数量 → 确认计件、拍领料单 → 完成。领料、报数量都按自己的名字记。
+ * 先按实际批次领料开工，再对本工序的实际产出报工，支持分批、补领和余料退回。
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
@@ -47,6 +52,17 @@ const submitting = ref(false);
 
 async function reload() {
   job.my = await getWorkbench();
+}
+
+/** 业务已经保存成功，列表刷新失败不能把界面留在可重复提交的步骤。 */
+async function reloadAfterSave() {
+  try {
+    await reload();
+    return true;
+  } catch {
+    message.warning('已保存成功，但工作台刷新失败，请返回工作台重试刷新，无需重复提交。');
+    return false;
+  }
 }
 
 async function load() {
@@ -87,23 +103,24 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.returns = {};
   job.finish = true;
   job.createFinish = false;
-  job.result = { amount: 0, good: 0, unit: '' };
+  job.result = { action: 'issue', amount: 0, good: 0, unit: '' };
   job.prepare = undefined;
   job.auxPicks = [];
   job.sheets = [];
   job.urgent = false;
   job.urgentReason = '';
   job.onBehalfOf = undefined;
-  job.requestKey = newRequestKey();
+  job.requestKey = buildUUID();
 }
 
-function newRequestKey() {
-  return `wb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+/** 独立开片：一单可领多种板材，各规格实际产出分别入库。 */
+function startActual(process: Api.Process) {
+  reset(process);
+  job.step = 'pick';
 }
 
 /**
- * 按任务报工（下班前做完了来报）：系统按任务带出建议领料，工人对照实际改数量；
- * 接着报好的、坏的数量，最后确认计件、拍领料单，一次提交，任务完成。
+ * 按任务领料开工：确认计划产出和上工序批次；已开工时直接进入原工序单报工。
  */
 async function startTask(
   task: FdmgongchangScheduleApi.Task,
@@ -116,14 +133,22 @@ async function startTask(
   try {
     const prepare = await prepareWorkbenchTask(task.id);
     job.prepare = prepare;
+    if (prepare.inProgressOrderId) {
+      await openOrder(prepare.inProgressOrderId, false);
+      return;
+    }
     if (prepare.sourceStage && process.sources.includes(prepare.sourceStage)) job.sourceStage = prepare.sourceStage;
-    job.picks = prepare.picks.map((p) => ({ qty: toNumber(p.quantity) ?? 0, stock: p.stock }));
+    job.picks = prepare.picks
+      .map((p) => ({ qty: Math.max(0, toNumber(p.quantity) ?? 0), stock: p.stock }));
+    const plannedRecipe = prepare.outputAttrs?.recipeCode ?? task.output?.attrs?.recipeCode;
+    const plannedBatches = toNumber(task.output?.recipeBatches ?? prepare.task.output?.recipeBatches);
+    if (plannedRecipe) job.recipe = { code: plannedRecipe, batches: plannedBatches && plannedBatches > 0 ? plannedBatches : 1 };
     const qty = toNumber(task.quantity) ?? 0;
     job.auxPicks = prepare.aux
       .filter((a) => a.stocks.length > 0)
       .map((a) => ({
         name: a.productName ?? a.productCode ?? '',
-        qty: Math.round((toNumber(a.perUnit) ?? 0) * qty * 1000) / 1000,
+        qty: Math.max(0, Math.round((toNumber(a.perUnit) ?? 0) * qty * 1000) / 1000),
         stock: a.stocks[0]!,
         unit: a.unit ?? '',
       }));
@@ -139,6 +164,7 @@ function pickInputs(): InputLine[] {
 
 function createPayload(finish: boolean) {
   return {
+    auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
     finish,
     inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
     outputs: finish ? outputPayload(job) : [],
@@ -162,8 +188,8 @@ function urgentPayload() {
 
 function piecePayload() {
   return job.pieces
-    .filter((p) => p.userId && p.itemId && (p.quantity ?? 0) > 0)
-    .map((p) => ({ itemId: p.itemId!, quantity: p.quantity!, userId: p.userId! }));
+    .filter((p) => p.userId && p.itemId && (toNumber(p.quantity) ?? 0) > 0)
+    .map((p) => ({ itemId: p.itemId!, quantity: job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : p.quantity!, userId: p.userId! }));
 }
 
 /** 只领料：单子进「我手上在做的」；补领时把料加到原来那张单上。 */
@@ -172,18 +198,37 @@ async function issueOnly() {
     message.warning('已完工的单补登领料要写原因');
     return;
   }
+  if (job.task && !job.supplement && job.sheets.length === 0) {
+    message.warning('请拍照上传本次领料凭证');
+    return;
+  }
   submitting.value = true;
   try {
-    await (job.supplement && job.order
-      ? supplementWorkbenchOrder({
+    if (job.supplement && job.order) {
+      await supplementWorkbenchOrder({
           id: job.order.id,
           inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
           remark: job.supplementRemark.trim() || undefined,
-        })
-      : createWorkbenchOrder(createPayload(false)));
-    await reload();
-    job.result = { amount: 0, good: 0, unit: '' };
+        });
+    } else if (job.task) {
+      await issueWorkbenchTask({
+            auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
+            inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+            issueSheetUrls: job.sheets,
+            onBehalfOf: job.onBehalfOf?.id,
+            recipeBatches: job.recipe?.batches,
+            recipeCode: job.recipe?.code,
+            requestKey: job.requestKey,
+            sourceStage: job.sourceStage,
+            taskId: job.task.id,
+            ...urgentPayload(),
+          });
+    } else {
+      await createWorkbenchOrder(createPayload(false));
+    }
+    job.result = { action: job.supplement ? 'supplement' : 'issue', amount: 0, good: 0, unit: '' };
     job.step = 'done';
+    await reloadAfterSave();
   } finally {
     submitting.value = false;
   }
@@ -194,20 +239,88 @@ function reportNow() {
   job.createFinish = true;
   job.inputs = pickInputs();
   job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
-  applyTaskTarget(job.process!.code, job.prepare?.targetAttrs, job.inputs, job.outputs);
+  applyTarget();
   job.step = 'report';
 }
 
+/**
+ * 本工序计划属性用于报工预填；订单成品规格只作需求参考，不能覆盖半成品规格。
+ */
+function applyTarget() {
+  // 开片的来源属性由实际领料逐规格生成，不能被旧任务里的自定义厚度覆盖。
+  if (job.process?.code === 'SLICE') return;
+  const target = job.prepare?.outputAttrs ?? job.task?.output?.attrs;
+  if (!target) return;
+  for (const out of job.outputs) {
+    out.attrs = { ...out.attrs, ...Object.fromEntries(Object.entries(target).filter(([field, value]) =>
+      (job.process?.code !== 'CUT' || ['length', 'thickness', 'width'].includes(field))
+      && value !== null && value !== undefined && value !== '')) };
+  }
+}
+
+/** 复用已领料的工序单，报工只登记本次新增产出。 */
+async function openOrder(id: number, supplement: boolean) {
+  const order = await getWorkbenchOrder(id);
+  const process = job.my?.processes.find((p) => p.code === order.process)
+    ?? job.my?.teamProcesses?.find((p) => p.code === order.process);
+  if (!process) throw new Error('当前账号没有这道工序岗位');
+  const existing = job.my?.inProgress.find((o) => o.id === id) ?? job.my?.recentDone?.find((o) => o.id === id);
+  const task = job.my?.tasks.find((t) => t.id === existing?.scheduleTaskId) ?? job.task;
+  const prepare = job.prepare?.task.id === task?.id ? job.prepare : undefined;
+  const onBehalfOf = job.onBehalfOf;
+  reset(process, task);
+  job.onBehalfOf = onBehalfOf;
+  job.prepare = prepare ?? (task ? await prepareWorkbenchTask(task.id) : undefined);
+  job.order = order;
+  job.sourceStage = order.sourceStage;
+  job.supplement = supplement;
+  job.recipe = order.recipeCode ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) ?? 1 } : undefined;
+  if (supplement) {
+    job.step = 'pick';
+    return;
+  }
+  job.inputs = (order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
+    quantity: Math.max(0, (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0)),
+    side: line.laminationSide ?? undefined,
+    stock: {
+      batchNo: line.batchNo,
+      id: line.stockId ?? line.id,
+      item: line.item,
+      itemCode: line.itemCode,
+      itemId: 0,
+      location: line.location,
+      quantity: line.quantity ?? 0,
+      stage: line.stage,
+    },
+  }));
+  job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.recipe?.code);
+  applyTarget();
+  job.step = 'report';
+}
+
+async function continueOrder(order: Api.Order, supplement = false) {
+  loading.value = true;
+  try {
+    job.task = undefined;
+    job.prepare = undefined;
+    job.onBehalfOf = undefined;
+    await openOrder(order.id, supplement);
+  } finally {
+    loading.value = false;
+  }
+}
+
 function afterReport() {
-  // 按任务报工最后一步要拍领料单，所以总要进计件这一步
+  // 返回修改实际良品后，计件数量同步到这次实际产出。
+  for (const piece of job.pieces) piece.quantity = job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : goodTotal(job);
+  // 任务报工进入最终确认，即使本次全部为不良品。
   if (job.prepare || goodTotal(job) > 0) job.step = 'piece';
   else void submit();
 }
 
-/** 领料这一步点下一步：按任务报工时直接报数量（领料和报工一起提交），否则先确认领料。 */
+/** 先确认领料和凭证，提交后再从在制工序单报产出。 */
 function afterPick() {
-  if (job.prepare) reportNow();
-  else job.step = 'confirm';
+  job.step = 'confirm';
 }
 
 async function submit() {
@@ -215,15 +328,18 @@ async function submit() {
   const before = toNumber(job.my?.todayAmount) ?? 0;
   const good = goodTotal(job);
   try {
-    if (job.prepare && job.task) {
+    const lines = Object.entries(job.returns)
+      .filter(([, qty]) => (qty ?? 0) > 0)
+      .map(([inputId, qty]) => ({ inputId: Number(inputId), quantity: qty! }));
+    if (job.order && !job.task && lines.length > 0) {
+      await returnWorkbenchMaterial({ id: job.order.id, lines });
+      job.returns = {};
+    }
+    if (job.task && job.order) {
       await reportTask();
     } else if (job.createFinish) {
       await createWorkbenchOrder(createPayload(true));
     } else if (job.order) {
-      const lines = Object.entries(job.returns)
-        .filter(([, qty]) => (qty ?? 0) > 0)
-        .map(([inputId, qty]) => ({ inputId: Number(inputId), quantity: qty! }));
-      if (lines.length > 0) await returnWorkbenchMaterial({ id: job.order.id, lines });
       await reportWorkbenchOrder({
         finish: job.finish,
         id: job.order.id,
@@ -231,9 +347,11 @@ async function submit() {
         pieceworks: piecePayload(),
       });
     }
-    await reload();
-    job.result = { amount: Math.max(0, (toNumber(job.my?.todayAmount) ?? 0) - before), good, unit: '' };
+    job.result = { action: 'report', amount: 0, good, unit: '' };
     job.step = 'done';
+    if (await reloadAfterSave()) {
+      job.result.amount = Math.max(0, (toNumber(job.my?.todayAmount) ?? 0) - before);
+    }
   } finally {
     submitting.value = false;
   }
@@ -241,21 +359,29 @@ async function submit() {
 
 /** 按任务报工：今天已经报过时问要不要追加一批；其他错误照常提示。 */
 async function reportTask(duplicateAction?: 'APPEND'): Promise<void> {
-  const payload = {
-    auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
+  const payload: Api.TaskReportReq = {
     duplicateAction,
     finish: job.finish,
-    inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
-    issueSheetUrls: job.sheets,
     onBehalfOf: job.onBehalfOf?.id,
     outputs: outputPayload(job),
     pieceworks: piecePayload(),
-    recipeBatches: job.recipe?.batches,
-    recipeCode: job.recipe?.code,
     requestKey: job.requestKey,
-    sourceStage: job.sourceStage,
     taskId: job.task!.id,
-    ...urgentPayload(),
+    ...(job.order ? {
+      orderId: job.order.id,
+      expectedReportCount: job.order.reportCount ?? 0,
+      returns: Object.entries(job.returns)
+        .filter(([, qty]) => (qty ?? 0) > 0)
+        .map(([inputId, qty]) => ({ inputId: Number(inputId), quantity: qty! })),
+    } : {
+      auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
+      inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
+      issueSheetUrls: job.sheets,
+      recipeBatches: job.recipe?.batches,
+      recipeCode: job.recipe?.code,
+      sourceStage: job.sourceStage,
+      ...urgentPayload(),
+    }),
   };
   try {
     await reportWorkbenchTask(payload);
@@ -295,8 +421,7 @@ function back() {
   if (job.step === 'pick') job.step = 'home';
   else if (job.step === 'confirm') job.step = 'pick';
   else if (job.step === 'report') {
-    if (job.prepare) job.step = 'pick';
-    else job.step = job.createFinish ? 'confirm' : 'home';
+    job.step = job.createFinish ? 'confirm' : 'home';
   }
   else if (job.step === 'piece') job.step = 'report';
 }
@@ -313,7 +438,13 @@ function back() {
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
-        <Home v-if="job.step === 'home'" @start-task="startTask" />
+        <Home
+          v-if="job.step === 'home'"
+          @start-task="startTask"
+          @start-actual="startActual"
+          @report-order="continueOrder"
+          @supplement-order="(order) => continueOrder(order, true)"
+        />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep v-else-if="job.step === 'report'" @back="back" @next="afterReport" />

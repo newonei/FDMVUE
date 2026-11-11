@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { CategoryNode } from '../category-model';
 
-import type { ProductCategory } from '#/api/fdmplatform/products';
+import type {
+  ProductCategory,
+  ProductCategoryView,
+} from '#/api/fdmplatform/products';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -20,13 +23,29 @@ import {
 
 /**
  * 产品分类侧栏：value 为分类 id，undefined 表示全部，空字符串表示未分类。
- * 计数与右侧列表同一口径（搜索词、启用 / 可选状态），切换分类不影响计数。
+ * 计数与右侧列表同一口径，切换分类不影响计数。
  */
 const props = withDefaults(
   defineProps<{
     active?: boolean;
     companyId: number;
+    filters?: {
+      color?: string;
+      material?: string;
+      productStage?: string;
+      shape?: string;
+      size?: string;
+    };
     keyword?: string;
+    /** 工厂等场景可使用各自权限范围内的分类查询。 */
+    loadCategories?: (filters: {
+      color?: string;
+      keyword?: string;
+      material?: string;
+      productStage?: string;
+      shape?: string;
+      size?: string;
+    }) => Promise<ProductCategoryView>;
     /** 变化时重新统计（新建、导入、删除产品后） */
     refreshKey?: number;
     selectable?: boolean;
@@ -35,7 +54,9 @@ const props = withDefaults(
   // 未传时不按状态筛选，避免 Vue 把缺省的布尔属性当成 false
   {
     active: undefined,
+    filters: undefined,
     keyword: undefined,
+    loadCategories: undefined,
     refreshKey: 0,
     selectable: undefined,
     value: undefined,
@@ -68,12 +89,18 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const result = await getProductCategories({
-      companyId: props.companyId,
-      keyword: props.keyword?.trim() || undefined,
-      active: props.active,
-      selectable: props.selectable,
-    });
+    const keyword = props.keyword?.trim() || undefined;
+    const result = props.loadCategories
+      ? await props.loadCategories({ ...props.filters, keyword })
+      : await getProductCategories({
+          companyId: props.companyId,
+          keyword,
+          ...(props.filters?.productStage
+            ? { productStage: props.filters.productStage }
+            : {}),
+          active: props.active,
+          selectable: props.selectable,
+        });
     if (run !== sequence) return;
     categories.value = result.categories ?? [];
     list.value = categoryList(categories.value, result.items);
@@ -97,6 +124,12 @@ watch(
   () => [
     props.companyId,
     props.keyword?.trim(),
+    props.filters?.material,
+    props.filters?.size,
+    props.filters?.color,
+    props.filters?.shape,
+    props.filters?.productStage,
+    props.loadCategories,
     props.active,
     props.selectable,
     props.refreshKey,

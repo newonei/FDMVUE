@@ -43,6 +43,7 @@ import {
   dateRangeError,
   quantityText,
 } from '../activity-model';
+import { productAttributeDetails, productAttributesText } from '../attributes';
 import { missingProductFields } from '../model';
 import ProductFiles from './ProductFiles.vue';
 import ProductStageStocks from './ProductStageStocks.vue';
@@ -350,6 +351,11 @@ function refresh() {
                 }}
               </Tag>
             </Descriptions.Item>
+            <Descriptions.Item label="生产属性" :span="2">
+              {{
+                productAttributesText(product) || '尚未维护生产分类与工艺属性'
+              }}
+            </Descriptions.Item>
           </Descriptions>
         </Card>
         <Card size="small" class="product-relations">
@@ -377,8 +383,15 @@ function refresh() {
               <Descriptions.Item label="尺寸">
                 {{ product.size || '—' }}
               </Descriptions.Item>
-              <Descriptions.Item label="颜色">
+              <Descriptions.Item label="颜色原文">
                 {{ product.color || '—' }}
+              </Descriptions.Item>
+              <Descriptions.Item
+                v-for="item in productAttributeDetails(product)"
+                :key="item.label"
+                :label="item.label"
+              >
+                {{ item.value || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="形状">
                 {{ product.shape || '—' }}

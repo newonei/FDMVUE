@@ -14,7 +14,7 @@ import { getWorkerList } from '#/api/fdmgongchang/factory';
 import { listScheduleTasks, reassignScheduleTasks, returnScheduleTasksToHall } from '#/api/fdmgongchang/schedule';
 
 import { factoryToday } from '../../shared/factory-date';
-import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS } from '../../shared/schedule';
+import { dateText, dayLabel, groupByDate, PROCESS_LABELS, TASK_STATUS, taskMaterialText } from '../../shared/schedule';
 import TaskMaterials from './task-materials.vue';
 
 /**
@@ -249,8 +249,9 @@ function returnToHall() {
                 <td class="whitespace-nowrap px-2 py-1.5">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</td>
                 <td class="px-2 py-1.5">
                   <div class="font-mono text-xs">{{ task.contractCode || '备货' }}</div>
-                  <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
-                  <TaskMaterials :task="task" class="mt-0.5" />
+                  <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                  <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" class="mt-0.5" />
+                  <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
                 </td>
                 <td class="px-2 py-1.5">
                   <div class="flex items-center gap-2">

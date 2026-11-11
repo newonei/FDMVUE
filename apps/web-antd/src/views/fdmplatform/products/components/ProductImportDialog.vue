@@ -27,6 +27,7 @@ import {
 } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
+import { productAttributesText } from '../attributes';
 
 const props = defineProps<{ companyId: number; open: boolean }>();
 const emit = defineEmits<{ close: []; imported: [] }>();
@@ -51,6 +52,7 @@ const columns = [
   { title: 'Excel 行', dataIndex: 'rowNumber', width: 80 },
   { title: '产品编号 / 名称', key: 'product', width: 215 },
   { title: '型号 / 规格 / 单位', key: 'specification', width: 180 },
+  { title: '生产分类 / 工艺属性', key: 'production', width: 260 },
   { title: '分类 / 状态', key: 'category', width: 125 },
   { title: '处理结果', key: 'status', width: 105 },
   { title: '说明', dataIndex: 'message', key: 'message', width: 235 },
@@ -255,7 +257,7 @@ async function downloadTemplate() {
         type="info"
         show-icon
         message="产品编号必须唯一，名称 + 型号 + 规格三项不能同时和已有产品或文件里其他行相同；不符合的行导入失败并写明原因，其余行新增为产品档案。"
-        description="产品状态为空或正常时启用，停售或下架时停用。型号、克重单独保存；纹路、条码等补充信息保存在备注中；库存设置仅保留说明。请先删除模板中的示例行。"
+        description="产品状态为空或正常时启用，停售或下架时停用。生产分类、垫子类型、单色、正反颜色和正反压花分别保存；旧模板仍可导入，未填写的新属性可后续补齐。请先删除模板中的示例行。"
       />
       <template v-if="result">
         <Alert
@@ -302,7 +304,7 @@ async function downloadTemplate() {
           :columns="columns"
           row-key="rowNumber"
           size="small"
-          :scroll="{ x: 920, y: 310 }"
+          :scroll="{ x: 1180, y: 310 }"
           :pagination="{
             pageSize: 10,
             showSizeChanger: false,
@@ -321,6 +323,9 @@ async function downloadTemplate() {
               <div class="import-muted">
                 单位：{{ record.values?.unit || '—' }}
               </div>
+            </div>
+            <div v-else-if="column.key === 'production'">
+              {{ productAttributesText(record.values ?? {}) || '未填写' }}
             </div>
             <div v-else-if="column.key === 'category'">
               {{ record.values?.category || '未分类' }}

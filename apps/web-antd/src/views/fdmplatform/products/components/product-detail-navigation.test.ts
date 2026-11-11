@@ -15,14 +15,25 @@ const mocks = vi.hoisted(() => ({
   getProduct: vi.fn(),
   getProducts: vi.fn(),
   getProductActivity: vi.fn(),
+  getProductCategories: vi.fn(async (_params: { productStage?: string }) => ({
+    total: 0,
+    items: [],
+  })),
 }));
+vi.mock('@vben/icons', () => ({ IconifyIcon: () => h('span') }));
 vi.mock('#/api/fdmplatform', () => ({
   newIdempotencyKey: () => 'test-product-operation',
 }));
 vi.mock('#/api/fdmplatform/products', () => ({
   getProduct: mocks.getProduct,
   getProducts: mocks.getProducts,
-  getProductCategories: vi.fn(async () => ({ total: 0, items: [] })),
+  getProductCategories: mocks.getProductCategories,
+  getProductAttributeOptions: vi.fn(async () => ({
+    stages: [{ value: 'BOARD', label: '板材', group: '半成品' }],
+    colors: [],
+    textures: [],
+    matTypes: [],
+  })),
   getProductPrices: vi.fn(),
   deleteProduct: vi.fn(),
   saveProductPrice: vi.fn(),
@@ -201,6 +212,54 @@ vi.mock('ant-design-vue', () => {
     }),
     Button: button,
     Card: block,
+    Cascader: defineComponent({
+      props: ['value', 'options', 'changeOnSelect'],
+      emits: ['change'],
+      setup:
+        (props, { attrs, emit }) =>
+        () =>
+          h(
+            'select',
+            {
+              ...attrs,
+              value: props.value?.at(-1) ?? '',
+              onChange: (event: Event) => {
+                const value = (event.target as HTMLSelectElement).value;
+                if (
+                  props.changeOnSelect &&
+                  props.options.some(
+                    (item: { value: string }) => item.value === value,
+                  )
+                ) {
+                  emit('change', [value]);
+                  return;
+                }
+                const group = props.options.find(
+                  (item: { children: Array<{ value: string }> }) =>
+                    item.children.some((leaf) => leaf.value === value),
+                );
+                emit('change', group ? [group.value, value] : undefined);
+              },
+            },
+            [
+              h('option', { value: '' }, '全部生产分类'),
+              ...props.options.flatMap(
+                (group: {
+                  children: Array<{ label: string; value: string }>;
+                  label: string;
+                  value: string;
+                }) => [
+                  ...(props.changeOnSelect
+                    ? [h('option', { value: group.value }, group.label)]
+                    : []),
+                  ...group.children.map((item) =>
+                    h('option', { value: item.value }, item.label),
+                  ),
+                ],
+              ),
+            ],
+          ),
+    }),
     Checkbox: input,
     Descriptions: Object.assign(block, { Item: block }),
     Drawer: drawer,
@@ -355,6 +414,70 @@ function clickText(host: ParentNode, text: string) {
 }
 
 describe('actual product detail and edit route integration', () => {
+  it.each(['BOARD', 'group:半成品'])(
+    'filters by production stage %s, keeps the same category-count scope and preserves it in detail navigation',
+    async (stage) => {
+      const { host, router } = await mountCenter();
+      await vi.waitFor(() =>
+        expect(host.querySelectorAll('.product-detail-link')).toHaveLength(2),
+      );
+      const select = host.querySelector<HTMLSelectElement>(
+        '[aria-label="筛选生产分类"]',
+      )!;
+      select.value = stage;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await vi.waitFor(() =>
+        expect(mocks.getProducts).toHaveBeenLastCalledWith(
+          expect.objectContaining({ productStage: stage, pageNo: 1 }),
+        ),
+      );
+      expect(mocks.getProductCategories).toHaveBeenLastCalledWith(
+        expect.objectContaining({ productStage: stage }),
+      );
+      host.querySelector<HTMLButtonElement>('.product-detail-link')!.click();
+      await vi.waitFor(() =>
+        expect(router.currentRoute.value.query.catalogProductStage).toBe(stage),
+      );
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await vi.waitFor(() =>
+        expect(mocks.getProducts).toHaveBeenLastCalledWith(
+          expect.objectContaining({ productStage: undefined }),
+        ),
+      );
+      expect(mocks.getProductCategories.mock.lastCall?.[0]).not.toHaveProperty(
+        'productStage',
+      );
+    },
+  );
+  it('restores a parent filter from the detail URL without turning it into a child stage', async () => {
+    const { host } = await mountCenter(
+      '/fdmproducts/catalog?catalogProductStage=group%3A%E5%8D%8A%E6%88%90%E5%93%81&productId=A',
+    );
+    await vi.waitFor(() =>
+      expect(detail(host)?.textContent).toContain('产品A'),
+    );
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector<HTMLSelectElement>('[aria-label="筛选生产分类"]')
+          ?.value,
+      ).toBe('group:半成品'),
+    );
+    expect(mocks.getProducts).toHaveBeenLastCalledWith(
+      expect.objectContaining({ productStage: 'group:半成品' }),
+    );
+    expect(mocks.getProductCategories).toHaveBeenLastCalledWith(
+      expect.objectContaining({ productStage: 'group:半成品' }),
+    );
+    detail(host)!
+      .querySelector<HTMLButtonElement>('[data-drawer-close]')!
+      .click();
+    await vi.waitFor(() => expect(detail(host)).toBeNull());
+    expect(
+      host.querySelector<HTMLSelectElement>('[aria-label="筛选生产分类"]')
+        ?.value,
+    ).toBe('group:半成品');
+  });
   it('opens names as details and maintenance as an editor, preserving the detail when editing closes', async () => {
     const { host, router } = await mountCenter();
     await vi.waitFor(() =>

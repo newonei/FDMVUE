@@ -7,6 +7,7 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { inject, provide, reactive } from 'vue';
 
+import { dimensionToDisplay } from '../shared/dimensions';
 import { normalizeForStage, toNumber } from '../stage-stock/model';
 
 export type Step = 'confirm' | 'done' | 'home' | 'pick' | 'piece' | 'report';
@@ -27,7 +28,7 @@ export interface AuxPick {
 export interface PieceLine {
   itemId?: number;
   key: number;
-  quantity: null | number;
+  quantity: null | number | string;
   userId?: number;
 }
 
@@ -52,7 +53,7 @@ export function createJob() {
     productionItem: undefined as undefined | { id: number; label: string; orderNo: string },
     /** 发泡按配方领料时选的配方和锅数，开单时一起提交。 */
     recipe: undefined as undefined | { batches: number; code: string },
-    result: { amount: 0, good: 0, unit: '' },
+    result: { action: 'issue' as 'issue' | 'report' | 'supplement', amount: 0, good: 0, unit: '' },
     returns: {} as Record<number, null | number>,
     sourceStage: '',
     step: 'home' as Step,
@@ -62,13 +63,12 @@ export function createJob() {
     supplementRemark: '',
     task: undefined as Api.My['tasks'][number] | undefined,
     /**
-     * 按任务报工：系统带出的建议领料。有值时整个流程是「实际领料 → 报数量 → 计件和领料单」，
-     * 一次提交，按实际领料扣库存，任务随之完成。
+     * 任务的计划产出、建议领料；正式领料后保留作实际报工的对照。
      */
     prepare: undefined as Api.TaskPrepare | undefined,
     /** 按任务报工时同时领的辅料。 */
     auxPicks: [] as AuxPick[],
-    /** 纸质领料单照片（上传后的地址），按任务报工必传。 */
+    /** 领料凭证照片，正式领料时提交。 */
     sheets: [] as string[],
     /** 防重复提交的键：进入报工时生成，重发同一个键只报一次。 */
     requestKey: '',
@@ -98,6 +98,18 @@ export function stageOf(job: Job, code?: string) {
   return job.options?.stages.find((s) => s.code === code);
 }
 
+/** 历史任务可能留有自定义薄片厚度，不能覆盖实际板材或继续按错误计划报工。 */
+export function slicePlanThicknessError(job: Job, inputs = job.inputs) {
+  if (job.process?.code !== 'SLICE' || !job.task) return '';
+  const planned = toNumber((job.prepare?.outputAttrs ?? job.task.output?.attrs)?.thickness);
+  if (!(planned && planned > 0)) return '';
+  const actual = [...new Set(inputs.filter((input) => input.quantity > 0)
+    .map((input) => toNumber(input.stock.item?.thickness)))];
+  if (!actual.some((thickness) => thickness === undefined || Math.abs(thickness - planned) > 1e-6)) return '';
+  const actualText = actual.map((thickness) => thickness === undefined ? '未填写' : `${dimensionToDisplay(thickness, 'mm')} mm`).join('、');
+  return `开片计划厚度（${dimensionToDisplay(planned, 'mm')} mm）与实际领料（${actualText}）不一致，请联系排单人员核对并处理原任务。`;
+}
+
 /** 有数量的产出行，按产出阶段只保留用到的属性。 */
 export function outputPayload(job: Job): StockApi.OrderOutput[] {
   const stage = job.process?.outputStage ?? '';
@@ -120,4 +132,28 @@ export function goodTotal(job: Job) {
 
 export function defectTotal(job: Job) {
   return job.outputs.reduce((t, o) => t + (toNumber(o.defectQuantity) ?? 0), 0);
+}
+
+/** 按实际领取后的账面余额提示待补录数量，不限制如实登记的领料量。 */
+export function issueShortages(job: Job) {
+  return [
+    ...job.picks.map((pick) => ({
+      name: pick.stock.itemCode,
+      quantity: pick.qty,
+      stock: pick.stock,
+      unit: stageOf(job, pick.stock.stage)?.unit ?? '',
+    })),
+    ...job.auxPicks.map((pick) => ({
+      name: pick.name,
+      quantity: pick.qty,
+      stock: pick.stock,
+      unit: pick.unit,
+    })),
+  ].filter((line) => line.quantity > 0)
+    .map((line) => ({
+      ...line,
+      amount: Math.max(0, line.quantity - (toNumber(line.stock.quantity) ?? 0)),
+      action: ({ RAW: '补录原材料入库', AUX: '补录辅料入库' } as Record<string, string>)[line.stock.stage] ?? '补录上工序产出',
+    }))
+    .filter((line) => line.amount > 0);
 }

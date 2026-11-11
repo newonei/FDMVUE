@@ -9,38 +9,44 @@ import { Empty, Modal, Select, Spin } from 'ant-design-vue';
 import { getWorkbenchMates, getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
 import TaskMaterials from '../../schedule/modules/task-materials.vue';
+import { dimensionTextInMm } from '../../shared/dimensions';
 import { factoryToday } from '../../shared/factory-date';
 import { upstreamBadge } from '../../shared/upstream';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
+import PlannedInputs from './planned-inputs.vue';
 
 /**
- * 工人首页：活都从派单来，只有「我的任务」。
+ * 工人首页：按派单领料开工、报本工序产出，或登记独立开片。
  * 一张卡片写清楚做什么（产品规格、订单、数量、日期、排单说明）和要领哪些料，做完了点报工。
  */
 const emit = defineEmits<{
+  reportOrder: [order: Api.Order];
+  startActual: [process: Api.Process];
   startTask: [
     task: FdmgongchangScheduleApi.Task,
     process: Api.Process,
     onBehalfOf?: { id: number; name: string },
   ];
+  supplementOrder: [order: Api.Order];
 }>();
 const job = useJob();
 
 const my = computed(() => job.my!);
 const processOf = (code: string) => my.value.processes.find((p) => p.code === code);
+const actualSliceProcess = computed(() => processOf('SLICE'));
 const labelOf = (code: string) => processOf(code)?.label ?? code;
 const stageLabel = (code?: string) => job.options?.stages.find((s) => s.code === code)?.label ?? '';
 const stageUnit = (code?: string) => job.options?.stages.find((s) => s.code === code)?.unit ?? '';
-/** 发泡做板材、开片做已开片板材，不是订单成品：卡片标题写产出的半成品，成品写成「给谁用」。 */
-const INTERMEDIATE = new Set(['BOARD', 'SHEET']);
+/** 任务主标题是本工序产出，订单成品单独显示归属。 */
+const INTERMEDIATE = new Set(['BOARD', 'CUT', 'SHEET']);
 const intermediateOf = (task: FdmgongchangScheduleApi.Task) => {
   const p = processOf(task.process);
   return p && INTERMEDIATE.has(p.outputStage) ? p.outputLabel : '';
 };
 const titleOf = (task: FdmgongchangScheduleApi.Task) => {
   const made = intermediateOf(task);
-  if (made) return task.product ? `${made}（给 ${task.product} 用）` : made;
+  if (made) return dimensionTextInMm(task.output?.name) || made;
   return task.product || `${labelOf(task.process)}任务`;
 };
 
@@ -99,6 +105,10 @@ interface TaskPicks {
   lines: PickLine[];
 }
 const labels = computed(() => makeLabels(job.options));
+const outputSpec = (task: FdmgongchangScheduleApi.Task) =>
+  task.output?.attrs ? attrSummary(task.output.stage ?? processOf(task.process)?.outputStage ?? '', task.output.attrs, labels.value, [], 'mm') : dimensionTextInMm(task.spec);
+const inProgress = computed(() => my.value.inProgress.filter((o) => processOf(o.process)));
+const runningTask = (id: number) => inProgress.value.some((o) => o.scheduleTaskId === id);
 const pickLoading = ref(false);
 /** 按任务编号：这个任务要领的料。 */
 const picksByTask = ref<Map<number, TaskPicks>>(new Map());
@@ -112,7 +122,7 @@ async function loadPicks() {
         batchNo: pick.stock.batchNo,
         key: `s${pick.stock.id}`,
         location: pick.stock.location,
-        name: attrSummary(pick.stock.stage, pick.stock.item, labels.value) || pick.stock.itemCode,
+        name: attrSummary(pick.stock.stage, pick.stock.item, labels.value, [], 'mm') || pick.stock.itemCode,
         qty: toNumber(pick.quantity) ?? 0,
         stage: stageLabel(pick.stock.stage),
         unit: stageUnit(pick.stock.stage),
@@ -178,8 +188,31 @@ watch(
     </div>
 
     <main v-else class="flex flex-1 flex-col gap-3 p-4">
+      <p class="m-0 rounded-md bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+        先查看任务的预计领料，开工时登记实际批次和数量；生产后从「在制工序单」报本工序实际产出。
+      </p>
+      <section v-if="actualSliceProcess" class="flex flex-col gap-2 rounded-lg border border-primary/40 bg-card p-3">
+        <h2 class="m-0 text-sm font-bold">按实际领料开工</h2>
+        <p class="m-0 text-xs text-muted-foreground">一次领取多种板材，在同一张工序单逐批登记数量；报工按颜色、长宽厚分别入库。用于独立生产，不计入已下发任务或订单进度。</p>
+        <button class="h-10 self-start rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground" type="button" @click="emit('startActual', actualSliceProcess)">开片 · 选择板材</button>
+      </section>
       <!-- 我的任务：派给我的；卡片写清楚做什么、领什么料，做完了报工 -->
       <h2 class="m-0 text-sm font-semibold">我的任务</h2>
+        <section v-if="inProgress.length > 0" class="flex flex-col gap-2">
+          <h2 class="m-0 text-sm font-bold">在制工序单 · 已领料</h2>
+          <article v-for="order in inProgress" :key="order.id" class="flex flex-col gap-3 rounded-lg border border-primary/40 bg-card p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <b>{{ labelOf(order.process) }} → {{ stageLabel(order.outputStage) }}</b>
+              <span class="font-mono text-xs text-muted-foreground">{{ order.orderNo }}</span>
+            </div>
+            <p class="m-0 text-sm text-muted-foreground">{{ order.contractCode ? `关联订单 ${order.contractCode} · ` : '' }}已领 {{ formatQty(order.inputQuantity) }} {{ order.inputUnit }}{{ stageLabel(order.sourceStage) }}，累计良品 {{ formatQty(order.goodQuantity) }} {{ stageUnit(order.outputStage) }}</p>
+            <p v-if="order.inputSummary" class="m-0 break-all text-xs text-muted-foreground">已领物料：{{ order.inputSummary }}</p>
+            <div class="flex gap-2">
+              <button class="h-11 flex-1 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('reportOrder', order)">报本工序产出</button>
+              <button class="h-11 rounded-md border border-border px-4 text-sm" type="button" @click="emit('supplementOrder', order)">补领材料</button>
+            </div>
+          </article>
+        </section>
         <p v-if="myTasks.length === 0" class="m-0 rounded-lg bg-card p-4 text-sm text-muted-foreground">
           手上没有任务，等班组长派单。
         </p>
@@ -193,13 +226,15 @@ watch(
               <span class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">{{ labelOf(task.process) }}</span>
               <span class="min-w-0 break-words">{{ titleOf(task) }}</span>
             </span>
-            <span v-if="task.spec" class="text-sm text-muted-foreground">规格：{{ task.spec }}</span>
+            <span v-if="outputSpec(task)" class="text-sm text-muted-foreground">计划产出规格：{{ outputSpec(task) }}</span>
+            <span v-if="task.product" class="text-xs text-muted-foreground">关联订单产品：{{ task.product }}</span>
+            <span class="text-xs text-primary">领料来源：{{ processOf(task.process)?.sources.map(stageLabel).join(' / ') }} → 本工序产出：{{ processOf(task.process)?.outputLabel }}</span>
             <TaskMaterials :task="task" class="text-sm" />
           </div>
 
           <dl class="m-0 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
             <div class="flex flex-col">
-              <dt class="text-xs text-muted-foreground">要做</dt>
+              <dt class="text-xs text-muted-foreground">计划产出</dt>
               <dd class="m-0 font-semibold tabular-nums">{{ formatQty(task.quantity) }} {{ task.unit }}</dd>
             </div>
             <div class="flex flex-col">
@@ -228,11 +263,12 @@ watch(
             <span v-if="task.upstreamNote">{{ task.upstreamNote }}</span>
           </p>
 
+          <PlannedInputs :inputs="task.inputs" :labels="labels" />
           <div class="flex flex-col gap-1">
-            <span class="text-xs font-semibold text-muted-foreground">要领的料（建议，报工时按实际改）</span>
+            <span class="text-xs font-semibold text-muted-foreground">建议领料批次（开工前按实际领取确认）</span>
             <Spin :spinning="pickLoading && !picksByTask.has(task.id)" size="small">
               <p v-if="(picksByTask.get(task.id)?.lines.length ?? 0) === 0" class="m-0 text-sm text-muted-foreground">
-                {{ pickLoading ? '正在算…' : '没有算出要领的料（发泡按配方领、贴合要自己选正反面），报工时自己选。' }}
+                {{ pickLoading ? '正在算…' : '请按配方或本工序用料要求选择实际可领批次。' }}
               </p>
               <ul v-else class="m-0 flex list-none flex-col divide-y divide-border rounded-md border border-border p-0">
                 <li v-for="line in picksByTask.get(task.id)!.lines" :key="line.key" class="flex items-center gap-3 px-3 py-1.5">
@@ -254,7 +290,7 @@ watch(
             type="button"
             @click="emit('startTask', task, processOf(task.process)!)"
           >
-            做完了，报工
+            {{ runningTask(task.id) ? '继续报本工序产出' : '领料开工' }}
           </button>
         </article>
       <section v-if="teamTasks.length > 0" class="flex flex-col gap-2">
