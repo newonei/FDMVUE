@@ -3,6 +3,8 @@ import type { UploadTaskContext } from './upload-task';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { describeUploadTask } from '#/components/upload-task/format';
+
 import {
   resolveUploadErrorMessage,
   UPLOAD_TASK_CONCURRENCY,
@@ -113,6 +115,67 @@ describe('upload task store', () => {
     expect(onSuccess).toHaveBeenCalledWith('second');
   });
 
+  it('reports result recovery as processing and ignores late callbacks after retry', async () => {
+    const store = useUploadTaskStore();
+    const { pending, runner } = createControllableRunner();
+    const id = store.add({ file: makeFile('a.png'), upload: runner });
+    const first = pending[0]!.context;
+
+    first.onProcessing?.('正在确认服务器上传结果');
+    const task = store.getTask(id)!;
+    expect(task).toMatchObject({
+      processingAt: expect.any(Number),
+      processingMessage: '正在确认服务器上传结果',
+      progress: 0,
+      speed: 0,
+      status: 'processing',
+    });
+    expect(describeUploadTask(task, task.processingAt! + 2000)).toBe(
+      '正在确认服务器上传结果 · 已等待 2秒',
+    );
+
+    store.cancel(id);
+    first.onProcessing?.('已取消请求的迟到回调');
+    expect(task.status).toBe('canceled');
+    store.retry(id);
+    expect(task).toMatchObject({
+      processingAt: undefined,
+      processingMessage: undefined,
+      status: 'uploading',
+    });
+    first.onProcessing?.('上一轮的迟到回调');
+    first.onProgress(100, 100);
+    expect(task).toMatchObject({ progress: 0, status: 'uploading' });
+
+    pending[1]!.context.onProcessing?.('正在确认服务器上传结果');
+    pending[1]!.resolve('ok');
+    await flush();
+    pending[1]!.context.onProcessing?.('任务结束后的迟到回调');
+    expect(task.status).toBe('success');
+  });
+
+  it('ignores callbacks from a failed run after it is retried', async () => {
+    const store = useUploadTaskStore();
+    const { pending, runner } = createControllableRunner();
+    const id = store.add({ file: makeFile('a.png'), upload: runner });
+    const first = pending[0]!.context;
+    pending[0]!.reject(new Error('failure'));
+    await flush();
+    store.retry(id);
+
+    // 失败不触发abort，必须通过运行实例身份拦住上一轮迟到事件。
+    expect(first.signal.aborted).toBe(false);
+    first.onProcessing?.('旧请求');
+    first.onProgress(100, 100);
+    expect(store.getTask(id)).toMatchObject({
+      processingMessage: undefined,
+      progress: 0,
+      status: 'uploading',
+    });
+    pending[1]!.resolve('ok');
+    await flush();
+  });
+
   it('records a readable error and keeps the queue moving', async () => {
     const store = useUploadTaskStore();
     const { pending, runner } = createControllableRunner();
@@ -164,5 +227,42 @@ describe('resolveUploadErrorMessage', () => {
     expect(resolveUploadErrorMessage({ response: { status: 413 } })).toContain(
       '大小',
     );
+  });
+
+  it('does not display proxy HTML even when it arrives as a string or message', () => {
+    expect(resolveUploadErrorMessage('<html>504 Gateway Time-out</html>')).toBe(
+      '上传失败',
+    );
+    expect(
+      resolveUploadErrorMessage({ msg: '<script>alert(1)</script>' }),
+    ).toBe('上传失败');
+    expect(
+      resolveUploadErrorMessage(new Error('<html>502 Bad Gateway</html>')),
+    ).toBe('上传失败');
+  });
+
+  it('reads plain string failures and preserves structured business messages', () => {
+    expect(resolveUploadErrorMessage('  上传文件已失效  ')).toBe(
+      '上传文件已失效',
+    );
+    expect(
+      resolveUploadErrorMessage({
+        cause: { response: { data: { msg: '文件已损坏' }, status: 400 } },
+        httpStatus: 400,
+        name: 'UploadRequestError',
+      }),
+    ).toBe('文件已损坏');
+  });
+
+  it('keeps a recovery error message when its cause is a transport error', () => {
+    const message = '暂未确认服务器上传结果，请重试先查询';
+    const error = new Error(message, {
+      cause: {
+        cause: { response: { status: 504 } },
+        httpStatus: 504,
+        name: 'UploadRequestError',
+      },
+    });
+    expect(resolveUploadErrorMessage(error)).toBe(message);
   });
 });

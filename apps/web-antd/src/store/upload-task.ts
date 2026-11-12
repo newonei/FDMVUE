@@ -13,6 +13,8 @@ export type UploadTaskStatus =
   | 'uploading';
 
 export interface UploadTaskContext {
+  /** 请求发送后还需要查询服务端处理结果时，展示对应的等待说明。 */
+  onProcessing?: (message?: string) => void;
   /** 上报已发送字节数；发送完毕后任务自动进入「服务器处理中」 */
   onProgress: (loaded: number, total?: number) => void;
   signal: AbortSignal;
@@ -46,6 +48,7 @@ export interface UploadTask {
   openable: boolean;
   /** 文件字节全部发出、开始等待服务端处理的时间 */
   processingAt?: number;
+  processingMessage?: string;
   /** 0 ~ 1，按请求体发送进度计算 */
   progress: number;
   size: number;
@@ -79,17 +82,43 @@ export function isUploadTaskActive(task?: UploadTask) {
 
 export function resolveUploadErrorMessage(error: unknown) {
   const record = (error ?? {}) as Record<string, any>;
+  // 应用层上传保留原始 Axios 错误在 cause 中；兼容其他上传的既有错误格式。
+  const detail = (
+    record.name === 'UploadRequestError' ? (record.cause ?? record) : record
+  ) as Record<string, any>;
+  const readableMessage = (value: unknown) => {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    // 代理错误页可能是完整 HTML，不能直接作为用户提示显示。
+    return /<\/?[a-z][\s\S]*>|<!doctype/i.test(trimmed) ? '' : trimmed;
+  };
   // 业务错误会以 {code, msg, data} 本身被 reject；HTTP 错误则挂在 response.data 上
-  const businessMessage = [record.response?.data, record.data, record]
-    .map((item) => (item && typeof item === 'object' ? item.msg : undefined))
-    .find((item) => typeof item === 'string' && item.trim());
-  if (businessMessage) return businessMessage.trim();
-  const message = String(record.message ?? '');
-  if (message.includes('Network Error')) return '网络异常，请检查网络后重试';
-  if (message.includes('timeout')) return '上传超时，请重试';
-  const status = record.response?.status;
-  if (status === 413) return '文件超过服务器允许的大小';
+  const businessMessage = [detail.response?.data, detail.data, detail]
+    .map((item) => readableMessage(item?.msg))
+    .find(Boolean);
+  if (businessMessage) return businessMessage;
+  const message = readableMessage(
+    typeof detail === 'string' ? detail : detail.message,
+  );
+  const code = record.code ?? detail.code;
+  const status = record.httpStatus ?? detail.response?.status;
+  if (status === 401) return '登录已过期，请重新登录后重试（HTTP 401）';
+  if (status === 403) return '没有上传权限，请联系管理员（HTTP 403）';
+  if (status === 413) return '文件超过服务器允许的大小（HTTP 413）';
+  if (status === 502) return '上传服务响应异常，请稍后重试（HTTP 502）';
+  if (status === 503) return '上传服务暂不可用，请稍后重试（HTTP 503）';
+  if (status === 504) return '服务器处理超时，请稍后重试（HTTP 504）';
   if (status) return `上传失败（HTTP ${status}）`;
+  if (code === 'ERR_NETWORK' || message.includes('Network Error')) {
+    return '网络异常，请检查网络后重试';
+  }
+  if (
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    /timeout/i.test(message)
+  ) {
+    return '上传超时，请重试';
+  }
   return message || '上传失败';
 }
 
@@ -177,6 +206,7 @@ export const useUploadTaskStore = defineStore('fdm-upload-task', () => {
       error: undefined,
       finishedAt: undefined,
       processingAt: undefined,
+      processingMessage: undefined,
       progress: 0,
       speed: 0,
       startedAt: Date.now(),
@@ -185,8 +215,27 @@ export const useUploadTaskStore = defineStore('fdm-upload-task', () => {
 
     let sampleTime = performance.now();
     let sampleLoaded = 0;
+    const onProcessing = (message?: string) => {
+      if (
+        controller.signal.aborted ||
+        runtime.controller !== controller ||
+        (task.status !== 'uploading' && task.status !== 'processing')
+      ) {
+        return;
+      }
+      task.status = 'processing';
+      task.processingAt ??= Date.now();
+      task.processingMessage = message;
+      task.speed = 0;
+    };
     const onProgress = (loaded: number, total?: number) => {
-      if (controller.signal.aborted || task.status !== 'uploading') return;
+      if (
+        controller.signal.aborted ||
+        runtime.controller !== controller ||
+        task.status !== 'uploading'
+      ) {
+        return;
+      }
       const size = total && total > 0 ? total : task.size;
       task.progress = size > 0 ? Math.min(1, loaded / size) : 0;
       const current = performance.now();
@@ -206,6 +255,7 @@ export const useUploadTaskStore = defineStore('fdm-upload-task', () => {
 
     try {
       const result = await runtime.options.upload(runtime.options.file, {
+        onProcessing,
         onProgress,
         signal: controller.signal,
       });

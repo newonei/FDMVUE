@@ -19,6 +19,7 @@ import { message } from 'ant-design-vue';
 import { useAuthStore } from '#/store';
 
 import { refreshTokenApi } from './core';
+import { createUploadWithDiagnostics } from './upload';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const tenantEnable = isTenantEnable();
@@ -219,6 +220,8 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
 export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
 });
+
+export const uploadWithDiagnostics = createUploadWithDiagnostics(requestClient);
 
 export const baseRequestClient = new RequestClient({ baseURL: apiURL });
 baseRequestClient.addRequestInterceptor({

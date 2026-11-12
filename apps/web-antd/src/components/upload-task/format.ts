@@ -37,7 +37,7 @@ export function describeUploadTask(task: UploadTask, now: number) {
     }
     case 'processing': {
       const waited = (now - (task.processingAt ?? now)) / 1000;
-      return `服务器处理中（转存、生成预览）· 已等待 ${formatDuration(waited)}`;
+      return `${task.processingMessage || '服务器处理中（转存、生成预览）'} · 已等待 ${formatDuration(waited)}`;
     }
     case 'queued': {
       return '排队中';

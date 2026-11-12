@@ -1,8 +1,9 @@
 import type { PageParam, PageResult } from '@vben/request';
 
 import type { AxiosProgressEvent } from '#/api/fdmstorage/object';
+import type { DiagnosticUploadConfig } from '#/api/upload';
 
-import { requestClient } from '#/api/request';
+import { requestClient, uploadWithDiagnostics } from '#/api/request';
 
 const DESIGN_IMAGE_UPLOAD_TIMEOUT = 30 * 60 * 1000;
 
@@ -60,6 +61,12 @@ export namespace FdmdataPatternDesignItemApi {
     designImageUrl: string;
     previewImageUrl: string;
   }
+
+  export interface UploadState {
+    message?: string;
+    result?: UploadResp;
+    status: 'FAILED' | 'PROCESSING' | 'SUCCESS';
+  }
 }
 
 function toOrderDateTimestamp(value: number | string | undefined) {
@@ -107,17 +114,35 @@ export function getFdmdataPatternDesignItem(id: number) {
 export function uploadFdmdataPatternDesignItemDesignImage(
   file: File,
   onUploadProgress?: AxiosProgressEvent,
-  options: { signal?: AbortSignal; silent?: boolean } = {},
+  options: { signal?: AbortSignal; silent?: boolean; uploadId?: string } = {},
 ) {
-  return requestClient.upload<FdmdataPatternDesignItemApi.UploadResp>(
+  return uploadWithDiagnostics<FdmdataPatternDesignItemApi.UploadResp>(
     '/fdmdata/pattern/design-item/upload-design-image',
     { file },
     {
       onUploadProgress,
+      params: { uploadId: options.uploadId },
       signal: options.signal,
       silent: options.silent,
       timeout: DESIGN_IMAGE_UPLOAD_TIMEOUT,
     },
+  );
+}
+
+export function getFdmdataPatternDesignImageUploadResult(
+  uploadId: string,
+  signal?: AbortSignal,
+) {
+  const config: DiagnosticUploadConfig = {
+    params: { uploadId },
+    preserveUploadError: true,
+    signal,
+    silent: true,
+    timeout: 10_000,
+  };
+  return requestClient.get<FdmdataPatternDesignItemApi.UploadState | null>(
+    '/fdmdata/pattern/design-item/upload-design-image-result',
+    config,
   );
 }
 

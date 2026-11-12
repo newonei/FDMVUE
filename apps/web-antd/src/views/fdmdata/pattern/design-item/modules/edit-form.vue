@@ -30,11 +30,9 @@ import { $t } from '#/locales';
 import { isUploadTaskActive, useUploadTaskStore } from '#/store/upload-task';
 
 import { PATTERN_DESIGN_ITEM_DEFAULTS, useFormSchema } from '../data';
-import {
-  DESIGN_IMAGE_UPLOAD_SOURCE,
-  uploadDesignImageTask,
-} from './create-draft';
+import { DESIGN_IMAGE_UPLOAD_SOURCE } from './create-draft';
 import { usePatternDesignItemShopOptions } from './shop-options';
+import { createUploadDesignImageTask } from './upload-design-image';
 
 defineOptions({ name: 'FdmdataPatternDesignItemEditForm' });
 
@@ -126,7 +124,7 @@ function handleSelectDesignImage([file]: File[]) {
       uploadComplete.value = true;
     },
     source: `${DESIGN_IMAGE_UPLOAD_SOURCE} · 修改`,
-    upload: uploadDesignImageTask,
+    upload: createUploadDesignImageTask(),
   });
   uploadTaskId.value = taskId;
   void createLocalThumbnail(file).then((url) => {

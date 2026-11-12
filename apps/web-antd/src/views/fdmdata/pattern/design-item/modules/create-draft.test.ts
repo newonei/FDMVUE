@@ -8,11 +8,13 @@ import { useUploadTaskStore } from '#/store/upload-task';
 import { usePatternDesignItemCreateDraft } from './create-draft';
 
 const mocks = vi.hoisted(() => ({
+  result: vi.fn(),
   thumbnail: vi.fn(),
   upload: vi.fn(),
 }));
 
 vi.mock('#/api/fdmdata/pattern/design-item', () => ({
+  getFdmdataPatternDesignImageUploadResult: mocks.result,
   uploadFdmdataPatternDesignItemDesignImage: mocks.upload,
 }));
 vi.mock('#/components/upload-task', () => ({
@@ -54,6 +56,8 @@ function uploaded(name: string): UploadResult {
 async function flush() {
   await Promise.resolve();
   await nextTick();
+  await Promise.resolve();
+  await nextTick();
 }
 
 describe('客服设计图上传草稿', () => {
@@ -67,6 +71,7 @@ describe('客服设计图上传草稿', () => {
     draft = usePatternDesignItemCreateDraft();
     draft.clear();
     pending = [];
+    mocks.result.mockReset().mockResolvedValue(null);
     mocks.upload
       .mockReset()
       .mockImplementation(
@@ -110,6 +115,7 @@ describe('客服设计图上传草稿', () => {
     expect(request.options).toEqual({
       signal: expect.any(AbortSignal),
       silent: true,
+      uploadId: expect.any(String),
     });
     expect(draft.getRowTask(row)).toMatchObject({
       link,
@@ -185,6 +191,7 @@ describe('客服设计图上传草稿', () => {
 
     draft.retryRow(row);
     expect(row.taskId).toBe(id);
+    await flush();
     expect(pending).toHaveLength(2);
     expect(pending[1]!.options.signal).not.toBe(firstRequest.options.signal);
     expect(draft.getRowState(row)).toBe('uploading');

@@ -1,13 +1,13 @@
 import type { RouteLocationRaw } from 'vue-router';
 
-import type { FdmdataPatternDesignItemApi } from '#/api/fdmdata/pattern/design-item';
-import type { UploadTask, UploadTaskRunner } from '#/store/upload-task';
+import type { UploadTask } from '#/store/upload-task';
 
 import { computed, markRaw, reactive, ref } from 'vue';
 
-import { uploadFdmdataPatternDesignItemDesignImage } from '#/api/fdmdata/pattern/design-item';
 import { createLocalThumbnail } from '#/components/upload-task';
 import { isUploadTaskActive, useUploadTaskStore } from '#/store/upload-task';
+
+import { createUploadDesignImageTask } from './upload-design-image';
 
 export const DESIGN_IMAGE_UPLOAD_SOURCE = '客服设计图';
 
@@ -42,15 +42,6 @@ const draft = reactive({
 const openRequested = ref(false);
 
 let rowSeq = 0;
-
-export const uploadDesignImageTask: UploadTaskRunner<FdmdataPatternDesignItemApi.UploadResp> =
-  (file, { onProgress, signal }) =>
-    uploadFdmdataPatternDesignItemDesignImage(
-      file,
-      (event) => onProgress(event.loaded, event.total),
-      // 失败原因在行内和上传面板里展示，不再额外弹全局错误
-      { signal, silent: true },
-    );
 
 function revokeThumb(row: DesignRow) {
   if (row.localThumbUrl) URL.revokeObjectURL(row.localThumbUrl);
@@ -105,7 +96,7 @@ export function usePatternDesignItemCreateDraft() {
         row.previewImageUrl = result.previewImageUrl ?? '';
       },
       source: DESIGN_IMAGE_UPLOAD_SOURCE,
-      upload: uploadDesignImageTask,
+      upload: createUploadDesignImageTask(),
     });
     row.taskId = taskId;
   }
