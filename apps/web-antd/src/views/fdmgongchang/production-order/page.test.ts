@@ -74,7 +74,8 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
       ['SLICE', '开片', 'SHEET', '片材', ['BOARD']],
       ['PUNCH', '冲裁', 'PUNCHED', '已冲裁成品', ['SHEET']],
       ['ENGRAVE', '雕刻', 'ENGRAVED', '已雕刻成品', ['PUNCHED']],
-      ['PACK', '包装', 'PACKED', '已包装成品', ['ENGRAVED', 'PUNCHED']],
+      ['FOLD', '折叠', 'FOLDED', '已折叠成品', ['ENGRAVED', 'PUNCHED']],
+      ['PACK', '包装', 'PACKED', '已包装成品', ['ENGRAVED', 'PUNCHED', 'FOLDED']],
     ].map(([code, label, outputStage, outputStageLabel, sources]) => ({
       code,
       label,
@@ -101,10 +102,18 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   getMixQueue: vi.fn().mockResolvedValue([]),
   moveMixPackage: vi.fn(),
   releaseTaskPackages: vi.fn(),
+  previewOrderSplit: vi.fn(),
+  releaseOrderSplit: vi.fn(),
 }));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: mocks.push }),
+}));
+vi.mock('./modules/item-production-config-modal.vue', () => ({
+  default: defineComponent({
+    props: ['open', 'orderId', 'itemId'], emits: ['saved', 'update:open'],
+    setup: (props, { emit }) => () => props.open ? h('button', { id: 'save-order-config-test', onClick: () => { emit('update:open', false); emit('saved'); } }, `保存生产参数 ${props.orderId}/${props.itemId}`) : null,
+  }),
 }));
 vi.mock('@vben/access', () => ({
   useAccess: () => ({ hasAccessByCodes: (codes: string[]) => codes.some((c) => mocks.perms.includes(c)) }),
@@ -196,7 +205,7 @@ describe('production order page', () => {
     unmount = mount();
     await flush();
     // 工厂排单页给工厂的人用，先看本厂收到的单；其他部门提需求在「我提的需求」
-    expect(document.body.textContent).toContain('工厂排单');
+    expect(document.body.textContent).toContain('订单拆分与车间下发');
     expect(document.body.textContent).toContain('1 待接单');
     expect(document.body.textContent).toContain('我提的需求');
 
@@ -499,18 +508,17 @@ describe('production order page', () => {
 
     button('确认规格').click();
     await flush();
-    const ok = [...document.querySelectorAll('.ant-modal button')].find(
-      (b) => b.textContent?.replaceAll(/\s/g, '') === '确认规格',
-    ) as HTMLButtonElement;
-    ok.click();
+    expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
+    const previousReads = mocks.get.mock.calls.length;
+    document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click();
     await flush();
-    // 没压花、没雕刻的工艺不带压纹和图案；预填的是从规格文本解析的值
-    expect(mocks.saveTarget).toHaveBeenCalledWith(
-      expect.objectContaining({ frontColor: 'PK', itemId: 91, length: 183, material: 'TPE', pattern: undefined, thickness: 0.6, width: 61 }),
-    );
+    // 详情与主表共用完整参数编辑器，保存后重新读取明细和库存匹配。
+    expect(mocks.get.mock.calls.length).toBeGreaterThan(previousReads);
+    expect(mocks.supplyMatch.mock.calls.length).toBeGreaterThan(1);
+    expect(mocks.saveTarget).not.toHaveBeenCalled();
   });
 
-  it('confirms same-color double-layer manufacturing with unequal layer thicknesses', async () => {
+  it('opens the shared editor for legacy unequal layers without silently saving old manufacturing rules', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
     const suggested = { colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontColor: 'PK', backColor: 'PK', length: 183, width: 61, material: 'TPE', thickness: 0.6, frontThickness: 0.2, backThickness: 0.4 };
     const accepted = { ...order, status: 'ACCEPTED', statusLabel: '生产中', items: [{ ...order.items[0]!, targetSuggested: suggested }] };
@@ -520,11 +528,9 @@ describe('production order page', () => {
     mocks.saveTarget.mockResolvedValue(true);
     unmount = mount(); await flush(); button('查看').click(); await flush();
     button('确认规格').click(); await flush();
-    expect(document.querySelector<HTMLInputElement>('#target-front-thickness')?.value).toBe('0.200');
-    expect(document.querySelector<HTMLInputElement>('#target-back-thickness')?.value).toBe('0.400');
-    const ok = [...document.querySelectorAll<HTMLButtonElement>('.ant-modal button')].find((element) => element.textContent?.replaceAll(/\s/g, '') === '确认规格')!;
-    ok.click(); await flush();
-    expect(mocks.saveTarget).toHaveBeenCalledWith(expect.objectContaining({ colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontColor: 'PK', backColor: 'PK', thickness: 0.6, frontThickness: 0.2, backThickness: 0.4 }));
+    expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
+    expect(document.querySelector('#target-front-thickness')).toBeNull();
+    expect(mocks.saveTarget).not.toHaveBeenCalled();
   });
 
   it('copies a rejected order into a new one so the requester only fixes what was wrong', async () => {
@@ -639,6 +645,68 @@ describe('production order page', () => {
     // 生成后不跳页，切到「排单方案」标签并打开这一份
     expect(mocks.push).not.toHaveBeenCalled();
     expect(mocks.getSchedule).toHaveBeenCalledWith(77);
-    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('排单方案');
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toContain('辅助排单 / 历史方案');
+  });
+
+  it('opens production configuration from the order table and refreshes saved product parameters', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const accepted: Api.Order = { ...order, status: 'ACCEPTED', items: [{ ...order.items[0]!, targetColorMode: 'DUAL', targetThickness: 0.6, targetFrontThickness: 0.3, targetBackThickness: 0.3 }] };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue({ ...accepted, items: [{ ...accepted.items[0]!, targetThickness: 0.8, targetFrontThickness: 0.4, targetBackThickness: 0.4, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }] });
+    unmount = mount(); await flush();
+    button('产品参数').click(); await flush();
+    expect(document.querySelector('.ant-table-expanded-row')?.textContent).toContain('成品总厚 6 mm');
+    button('修改参数与工艺').click(); await flush();
+    expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
+    document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
+    expect(mocks.get).toHaveBeenCalledWith(9);
+    expect(document.querySelector('.ant-table-expanded-row')?.textContent).toContain('成品总厚 8 mm');
+    expect(document.querySelector('.ant-table-expanded-row')?.textContent).toContain('折叠 → 包装');
+  });
+
+  it('keeps the newly saved route when accepting an order and preserves other unsaved route drafts', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const purchase: Api.Order = { ...order, sourceType: 'PURCHASE_ORDER', items: [{ ...order.items[0]! }, { ...order.items[0]!, id: 92 }] };
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.supplyMatch.mockResolvedValue([]);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.accept.mockResolvedValue(true);
+    unmount = mount(); await flush(); button('去接单').click(); await flush();
+    const otherChips = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-item-92 要走的工序"] .route-chip')];
+    otherChips.find((chip) => chip.textContent?.trim() === '雕刻')!.click(); await flush();
+    button('确认规格').click(); await flush();
+    const changed: Api.Order = { ...purchase, items: [{ ...purchase.items[0]!, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }, purchase.items[1]!] };
+    mocks.get.mockResolvedValue(changed);
+    document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
+    button('接单').click(); await flush();
+    expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ routes: [
+      { itemId: 91, routeId: 3, steps: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] },
+      { itemId: 92, routeId: 3, steps: ['SLICE', 'PUNCH', 'ENGRAVE'] },
+    ] }));
+  });
+
+  it('blocks accepting stale route drafts after a saved configuration fails to refresh and allows retry', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const purchase: Api.Order = { ...order, sourceType: 'PURCHASE_ORDER' };
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    mocks.get.mockResolvedValue(purchase);
+    mocks.supplyMatch.mockResolvedValue([]);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    unmount = mount(); await flush(); button('去接单').click(); await flush();
+    button('确认规格').click(); await flush();
+    mocks.get.mockRejectedValueOnce(new Error('网络暂不可用'));
+    document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
+    expect(document.body.textContent).toContain('参数已保存，订单刷新失败');
+    expect(button('接单').disabled).toBe(true);
+    button('接单').click(); await flush();
+    expect(mocks.accept).not.toHaveBeenCalled();
+    mocks.get.mockResolvedValue({ ...purchase, items: [{ ...purchase.items[0]!, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }] });
+    button('重新加载已保存参数').click(); await flush();
+    expect(button('接单').disabled).toBe(false);
+    button('接单').click(); await flush();
+    expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ routes: [
+      { itemId: 91, routeId: 3, steps: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] },
+    ] }));
   });
 });

@@ -181,7 +181,7 @@ describe('schedule page', () => {
     expect(document.body.textContent).toContain('发泡先后');
     expect(document.body.textContent).toContain('板材乙');
 
-    clickButton('下发任务包（只排发泡先后，不定日期）');
+    clickButton('按库存下发任务包（旧流程）');
     await flush();
     expect(document.body.textContent).toContain('GD-1');
     expect(document.body.textContent).toContain('GD-2');

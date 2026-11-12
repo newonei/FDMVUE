@@ -70,14 +70,21 @@ vi.mock('../schedule/modules/mix-batch-modal.vue', () => ({
         : null,
   }),
 }));
-vi.mock('../schedule/modules/package-release-modal.vue', () => ({
-  default: defineComponent({ render: () => null }),
+vi.mock('../schedule/modules/order-split-modal.vue', () => ({
+  default: defineComponent({
+    props: ['open', 'orders'],
+    emits: ['released', 'update:open'],
+    setup: (props, { emit }) => () => props.open ? h('section', { id: 'split-entry' }, [
+      h('span', { id: 'split-selection' }, props.orders.map((order: { id: number }) => order.id).join(',')),
+      h('button', { id: 'finish-split', onClick: () => { emit('update:open', false); emit('released', 7); } }, '模拟已下发'),
+    ]) : null,
+  }),
 }));
 vi.mock('../schedule/modules/schedule-board.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('../schedule/modules/task-manage.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({ render: () => h('div', { id: 'task-manage' }, '任务管理') }),
 }));
 vi.mock('./modules/create-modal.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -225,5 +232,25 @@ describe('批量发泡订单入口', () => {
     await flush();
     expect(document.querySelector('#batch-entry')!.textContent).toBe('');
     expect(document.querySelector('#select-order-21')).not.toBeNull();
+  });
+
+  it('主入口默认展示有效订单，拆分下发后进入任务管理', async () => {
+    api.page.mockResolvedValue({ total: 1, list: [{ id: 31, orderNo: 'GD-31', status: 'ACCEPTED', items: [] }] });
+    const host = document.createElement('div');
+    document.body.append(host);
+    const app = createApp(ProductionOrderPage);
+    app.mount(host);
+    unmount = () => app.unmount();
+    await flush();
+    expect(api.page).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 20, status: 'ACCEPTED' }));
+    const split = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.includes('拆分工序任务'))!;
+    expect(split().disabled).toBe(true);
+    document.querySelector<HTMLInputElement>('#select-order-31')!.click(); await flush();
+    expect(split().disabled).toBe(false);
+    split().click(); await flush();
+    expect(document.querySelector('#split-selection')?.textContent).toBe('31');
+    document.querySelector<HTMLButtonElement>('#finish-split')!.click(); await flush();
+    expect(document.querySelector('#task-manage')).not.toBeNull();
+    expect(document.querySelector('#split-entry')).toBeNull();
   });
 });

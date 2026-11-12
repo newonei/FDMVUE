@@ -205,8 +205,10 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
 
   <div v-else class="flex flex-col gap-4 xl:flex-row xl:items-start">
     <aside class="flex flex-col gap-3 xl:w-72 xl:shrink-0">
-      <section v-if="canGenerate || canConfirm" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
-        <h3 class="m-0 text-sm font-semibold text-foreground">新排单</h3>
+      <p class="m-0 text-xs text-muted-foreground">正常订单请在「本厂收到的单」选择订单并拆分工序任务。这里保留辅助排单工具与历史方案。</p>
+      <details v-if="canGenerate || canConfirm" class="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+        <summary class="cursor-pointer text-sm font-semibold text-foreground">辅助排单（AI / 手动 / 旧流程）</summary>
+        <div class="mt-3 flex flex-col gap-2">
         <label for="schedule-start" class="flex flex-col gap-1">
           从哪天开始
           <DatePicker
@@ -231,13 +233,14 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
             placeholder="例如：2 号压花机周三保养；HT-001 要提前；周日不开工"
           />
         </label>
-        <Button v-if="canConfirm" block type="primary" @click="releaseOpen = true">下发任务包（只排发泡先后，不定日期）</Button>
-        <p class="m-0">先勾选订单，按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。</p>
+        <Button v-if="canConfirm" block @click="releaseOpen = true">按库存下发任务包（旧流程）</Button>
+        <p class="m-0">旧流程按库存净需求计算任务，不保证完整列出订单工艺。需要按订单逐工序下发时，请使用「拆分工序任务」。</p>
         <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
         <p v-if="canGenerate" class="m-0">AI 只排发泡的先后（同配方、同板材、同颜色合成一个任务）；确认下发时，开片以后由系统按工序生成任务包。</p>
         <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
         <Button v-if="canConfirm" block @click="batchMixOpen = true">批量安排发泡</Button>
-      </section>
+        </div>
+      </details>
 
       <section v-if="mixQueue.length > 0" class="flex flex-col gap-1 rounded-lg border border-border bg-card p-2">
         <h3 class="m-0 px-1 py-1 text-sm font-semibold">发泡先后<span class="ml-1 text-xs font-normal text-muted-foreground">还没报完的发泡任务包，车间按这个顺序做</span></h3>
@@ -286,7 +289,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
     <section class="min-w-0 flex-1 rounded-lg border border-border bg-card p-4">
       <Spin :spinning="detailLoading">
         <ScheduleDetail v-if="detail" :key="factoryId" :schedule="detail" :workers="workers" @changed="onChanged" @retry="retry" />
-        <Empty v-else description="左边生成一份排单，或选一条排单记录" />
+        <Empty v-else description="选择一条历史排单记录查看任务，或展开辅助排单工具" />
       </Spin>
     </section>
     <PackageReleaseModal v-model:open="releaseOpen" @released="onReleased" />

@@ -79,7 +79,7 @@ async function submit() {
     const res = await releaseTaskPackages({ note: note.value.trim() || undefined, productionOrderIds: checked.value });
     open.value = false;
     Modal.info({
-      content: res.warnings.length > 0 ? `要注意：${res.warnings.join('；')}` : '都下发了，工人在工作台的任务大厅里就能看到。',
+      content: res.warnings.length > 0 ? `要注意：${res.warnings.join('；')}` : '任务已分配到各自的工序车间，工人进入对应车间即可查看和领取。',
       title: `已下发 ${res.tasks} 个任务包（发泡 ${res.mixTasks} 个）`,
       width: 560,
     });
@@ -104,7 +104,7 @@ async function submit() {
   >
     <div class="flex flex-col gap-3 text-sm">
       <p class="m-0 text-xs text-muted-foreground">
-        只给勾选的订单下发：按库存算每张单各工序还要做多少，每道工序一个包进任务大厅；发泡按交期排先后，开片以后不排日期。已经有任务包的部分不会重复下发。
+        只给勾选的订单下发：按库存算每张单各工序还要做多少，每道工序的任务包进入各自车间；发泡按交期排先后，开片以后不排日期。已经有任务包的部分不会重复下发。
       </p>
       <div v-if="!preset" class="flex items-center gap-2">
         <Input id="package-order-search" v-model:value="keyword" allow-clear placeholder="搜订单号、合同号、客户、产品" size="small" />

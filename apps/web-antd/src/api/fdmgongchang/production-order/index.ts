@@ -285,6 +285,14 @@ export namespace FdmgongchangProductionOrderApi {
     steps: string[];
   }
 
+  /** 原子保存一条订单明细的生产参数和实际工艺；尺寸仍用 cm。 */
+  export interface ItemProductionConfigReq {
+    itemId: number;
+    target: FdmgongchangSupplyMatchApi.TargetReq;
+    routeId?: null | number;
+    processes: string[];
+  }
+
   /** 采购单生成的单的生产要求：采购单本身和下单资料（实时读采购单）。 */
   export interface PurchaseSheet {
     details: {
@@ -609,6 +617,14 @@ export function getProductionOrder(id: number) {
       params: { id },
     },
   );
+}
+
+export function saveItemProductionConfig(
+  data: FdmgongchangProductionOrderApi.ItemProductionConfigReq,
+) {
+  return requestClient.post<boolean>(`${BASE}/item-production-config`, data, {
+    headers: factoryHeaders(),
+  });
 }
 
 export function getFactoryProductionOrders(

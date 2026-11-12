@@ -12,6 +12,7 @@ import { buildUUID } from '@vben/utils';
 import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
 
 import {
+  claimWorkbenchTask,
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
@@ -26,9 +27,11 @@ import {
 } from '#/api/fdmgongchang/workbench';
 
 import { businessError } from '../shared/business-error';
+import FactorySwitch from '../shared/factory-switch.vue';
 import { sliceVolume } from '../shared/slice-wage';
 import { useFactory } from '../shared/use-factory';
 import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
+import WorkshopHome from '../workshop/home.vue';
 import ConfirmStep from './modules/confirm-step.vue';
 import DoneStep from './modules/done-step.vue';
 import Home from './modules/home.vue';
@@ -43,17 +46,19 @@ import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
+const props = defineProps<{ process?: string }>();
 const factory = useFactory();
 const route = useRoute();
 const job = createJob();
 provideJob(job);
 const loading = ref(true);
 const loadError = ref(false);
+const loadErrorMessage = ref('');
 const noFactory = ref(false);
 const submitting = ref(false);
 
 async function reload() {
-  job.my = await getWorkbench();
+  job.my = await getWorkbench(props.process);
 }
 
 /** 业务已经保存成功，列表刷新失败不能把界面留在可重复提交的步骤。 */
@@ -70,6 +75,7 @@ async function reloadAfterSave() {
 async function load() {
   loading.value = true;
   loadError.value = false;
+  noFactory.value = false;
   try {
     if (!factory.loaded.value) await factory.load();
     const linkedTask = linkedTaskQuery();
@@ -88,16 +94,35 @@ async function load() {
     if (linkedTask) {
       const prepare = await prepareWorkbenchTask(linkedTask.taskId);
       const process = job.my?.processes.find((item) => item.code === prepare.task.process);
-      if (!process) throw new Error('你没有这道工序的岗位，请找班组长');
+      if (!process || (props.process && prepare.task.process !== props.process)) throw new Error('这项任务不属于当前车间岗位，请从对应车间打开');
       await startTask(prepare.task, process, undefined, prepare);
     }
-  } catch {
+  } catch (error) {
     loadError.value = true;
+    loadErrorMessage.value = businessError(error).msg;
   } finally {
     loading.value = false;
   }
 }
 onMounted(load);
+
+async function claimTask(task: FdmgongchangScheduleApi.Task) {
+  submitting.value = true;
+  try {
+    await claimWorkbenchTask(task.id);
+    message.success('任务已领取，可以领料开工');
+    await reloadAfterSave();
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function changeFactory(id: number) {
+  factory.select(id);
+  job.step = 'home';
+  job.my = undefined;
+  await load();
+}
 
 /** 钉钉简版入口只传工厂和任务 ID，工厂权限与任务内容仍由服务端确认。 */
 function linkedTaskQuery() {
@@ -457,18 +482,37 @@ function back() {
 </script>
 
 <template>
-  <!-- 手机上全屏显示，盖住电脑端的顶部栏和标签页，工人只看到要做的活 -->
-  <div class="mx-auto min-h-full w-full max-w-[1080px] bg-background-deep max-md:fixed max-md:inset-0 max-md:z-[900] max-md:max-w-none max-md:overflow-y-auto">
+  <!-- 车间入口保留应用菜单，个人工作台仍支持手机全屏操作。 -->
+  <div class="mx-auto min-h-full min-w-0 w-full bg-background-deep" :class="{ 'max-w-[1080px] max-md:fixed max-md:inset-0 max-md:z-[900] max-md:max-w-none max-md:overflow-y-auto': !props.process }">
     <Result v-if="noFactory" status="info" title="你的账号还不属于任何工厂">
       <template #subTitle>请找工厂管理员在钉钉里把你调到所在工厂的部门。</template>
     </Result>
     <Result v-else-if="loadError" status="warning" title="没有加载出来">
-      <template #extra><Button size="large" type="primary" @click="load">再试一次</Button></template>
+      <template #subTitle>{{ loadErrorMessage }}</template>
+      <template #extra>
+        <div class="flex flex-wrap items-center justify-center gap-3">
+          <FactorySwitch v-if="props.process && factory.factories.value.length > 1" :factories="factory.factories.value" :value="factory.factoryId.value" @change="changeFactory" />
+          <Button size="large" type="primary" @click="load">再试一次</Button>
+        </div>
+      </template>
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
+        <WorkshopHome
+          v-if="job.step === 'home' && props.process"
+          :process="props.process"
+          :factories="factory.factories.value"
+          :factory-id="factory.factoryId.value"
+          @change-factory="changeFactory"
+          @refresh="load"
+          @claim-task="claimTask"
+          @start-task="startTask"
+          @start-actual="startActual"
+          @report-order="continueOrder"
+          @supplement-order="(order) => continueOrder(order, true)"
+        />
         <Home
-          v-if="job.step === 'home'"
+          v-else-if="job.step === 'home'"
           @start-task="startTask"
           @start-actual="startActual"
           @report-order="continueOrder"

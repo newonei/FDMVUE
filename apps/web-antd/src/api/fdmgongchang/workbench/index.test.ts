@@ -2,9 +2,9 @@ import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getWorkbenchStock } from './index';
+import { claimWorkbenchTask, getWorkbench, getWorkbenchStock } from './index';
 
-const requestMocks = vi.hoisted(() => ({ get: vi.fn() }));
+const requestMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('#/api/request', () => ({ requestClient: requestMocks }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   factoryHeaders: () => ({ 'factory-id': '1' }),
@@ -23,6 +23,43 @@ const stocks = (
     quantity: 10,
     stage: 'BOARD',
   }));
+
+describe('workshop API contract', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('passes a fixed process and keeps the selected factory header', async () => {
+    await getWorkbench('SLICE');
+    expect(requestMocks.get).toHaveBeenCalledWith(
+      '/fdmgongchang/workbench/my',
+      {
+        headers: { 'factory-id': '1' },
+        params: { process: 'SLICE' },
+      },
+    );
+  });
+
+  it('keeps the personal workbench request unfiltered', async () => {
+    await getWorkbench();
+    expect(requestMocks.get).toHaveBeenCalledWith(
+      '/fdmgongchang/workbench/my',
+      {
+        headers: { 'factory-id': '1' },
+      },
+    );
+  });
+
+  it('claims a task through the existing authenticated workbench endpoint', async () => {
+    await claimWorkbenchTask(32);
+    expect(requestMocks.post).toHaveBeenCalledWith(
+      '/fdmgongchang/workbench/task/claim',
+      undefined,
+      {
+        headers: { 'factory-id': '1' },
+        params: { id: 32 },
+      },
+    );
+  });
+});
 
 describe('workbench actual stock pagination', () => {
   beforeEach(() => requestMocks.get.mockReset());
