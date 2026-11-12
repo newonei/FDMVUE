@@ -126,10 +126,58 @@ export namespace FdmgongchangScheduleApi {
     taskCount: number;
   }
 
+  /** 车间任务精确关联的订单明细，数量是订单产品数量，尺寸仍以 cm 保存。 */
+  export interface RelatedOrderItem extends Partial<
+    Pick<
+      FdmgongchangProductionOrderApi.Item,
+      | 'color'
+      | 'completedQuantity'
+      | 'material'
+      | 'packaging'
+      | 'printing'
+      | 'productCode'
+      | 'productName'
+      | 'quantity'
+      | 'recipeCode'
+      | 'remark'
+      | 'routeName'
+      | 'size'
+      | 'specification'
+      | 'targetBackColor'
+      | 'targetBackThickness'
+      | 'targetColorMode'
+      | 'targetConfirmedAt'
+      | 'targetConfirmedBy'
+      | 'targetConstructionType'
+      | 'targetFrontColor'
+      | 'targetFrontThickness'
+      | 'targetLength'
+      | 'targetMaterial'
+      | 'targetPattern'
+      | 'targetTextureBack'
+      | 'targetTextureFront'
+      | 'targetThickness'
+      | 'targetWidth'
+      | 'unit'
+    >
+  > {
+    customerName?: null | string;
+    itemId: number;
+    orderId: number;
+    orderNo: string;
+    promisedDate?: DateValue;
+    requiredDate?: DateValue;
+    routeSteps?: null | string;
+  }
+
   export interface Task {
     actualQuantity: Decimal;
     assignmentId?: null | string;
     contractCode?: null | string;
+    /** 车间任务返回关联订单号；合并发泡时包含 covers 涉及的各张工厂订单。 */
+    relatedOrderNos?: null | string[];
+    /** 仅当前任务直接关联及合并 covers 覆盖的真实订单明细，不含同订单其他产品。 */
+    relatedOrderItems?: RelatedOrderItem[];
     covers?: Array<{ assignmentId: string; quantity: Decimal }>;
     id: number;
     orderCount: number;
@@ -502,6 +550,85 @@ export interface FdmgongchangPackageRelease {
   scheduleNo: string;
   tasks: number;
   warnings: string[];
+}
+
+/** 按订单需求完整拆分实际工艺，与按库存净需求下发的旧任务包接口独立。 */
+export namespace FdmgongchangOrderSplitApi {
+  export interface Row {
+    rowKey: string;
+    orderId: number;
+    orderNo: string;
+    itemId: number;
+    productCode?: null | string;
+    productName?: null | string;
+    process?: null | string;
+    processLabel?: null | string;
+    sequence?: null | number;
+    dueDate?: null | string;
+    side?: 'BACK' | 'BOTH' | 'FRONT' | null;
+    quantity?: null | number | string;
+    unit?: null | string;
+    status: 'BLOCKED' | 'DONE' | 'READY';
+    reason?: null | string;
+    upstreamProcesses: string[];
+    inputs: FdmgongchangScheduleApi.Material[];
+    output?: FdmgongchangScheduleApi.Material | null;
+    colorMode?: 'DUAL' | 'SINGLE' | 'UNKNOWN' | null;
+    constructionType?: 'DOUBLE_LAYER' | 'SINGLE_LAYER' | 'UNKNOWN' | null;
+    frontColor?: null | string;
+    backColor?: null | string;
+    frontColorName?: null | string;
+    backColorName?: null | string;
+    textureFront?: null | string;
+    textureBack?: null | string;
+    textureFrontName?: null | string;
+    textureBackName?: null | string;
+    /** 本次拆分的有效参数，尺寸单位为 cm；不代表已保存订单被改写。 */
+    finishedThickness?: null | number | string;
+    frontThickness?: null | number | string;
+    backThickness?: null | number | string;
+    stageThickness?: null | number | string;
+    stageColor?: null | string;
+    stageColorName?: null | string;
+  }
+
+  export interface Preview {
+    previewKey: string;
+    canRelease: boolean;
+    orderCount: number;
+    itemCount: number;
+    taskCount: number;
+    rows: Row[];
+    warnings: string[];
+    errors: string[];
+  }
+
+  export interface ReleaseRequest {
+    productionOrderIds: number[];
+    previewKey: string;
+    /** 同一预览确认失败后重试保持此值，避免重复创建任务。 */
+    requestId: string;
+    note?: string;
+  }
+}
+
+/** 只读预览，不创建任务、不占用或扣减库存。 */
+export function previewOrderSplit(productionOrderIds: number[]) {
+  return requestClient.post<FdmgongchangOrderSplitApi.Preview>(
+    '/fdmgongchang/schedule/order-split/preview',
+    { productionOrderIds },
+    headers(),
+  );
+}
+
+export function releaseOrderSplit(
+  data: FdmgongchangOrderSplitApi.ReleaseRequest,
+) {
+  return requestClient.post<FdmgongchangPackageRelease & { reused: boolean }>(
+    '/fdmgongchang/schedule/order-split/release',
+    data,
+    headers(),
+  );
 }
 
 /** 下发任务包：不经过 AI，发泡只排先后，其他工序按工序分包，都不定日期。 */

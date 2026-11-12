@@ -137,14 +137,25 @@ export namespace FdmgongchangWorkbenchApi {
     todayAmount: Decimal;
     userId: number;
     userName?: null | string;
+    /** 独立车间入口：当前工序，以及本车间权限范围内的全部已下发任务。 */
+    workshopProcess?: null | Process;
+    workshopTasks?: FdmgongchangScheduleApi.Task[];
   }
 }
 
-export function getWorkbench() {
+export function getWorkbench(process?: string) {
   return requestClient.get<FdmgongchangWorkbenchApi.My>(
     `${BASE}/my`,
-    headers(),
+    process ? { ...headers(), params: { process } } : headers(),
   );
+}
+
+/** 领取车间待领取任务；可领工序、人员和任务状态由后端确认。 */
+export function claimWorkbenchTask(id: number) {
+  return requestClient.post<boolean>(`${BASE}/task/claim`, undefined, {
+    ...headers(),
+    params: { id },
+  });
 }
 
 export function getWorkbenchOptions() {

@@ -13,17 +13,21 @@ import {
   getFactoryProductionOrders,
   getMyProductionOrders,
   getOrderableFactories,
+  getProductionOrder,
 } from '#/api/fdmgongchang/production-order';
 
 import MixBatchModal from '../schedule/modules/mix-batch-modal.vue';
-import PackageReleaseModal from '../schedule/modules/package-release-modal.vue';
+import OrderSplitModal from '../schedule/modules/order-split-modal.vue';
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
 import TaskManage from '../schedule/modules/task-manage.vue';
 import FactorySwitch from '../shared/factory-switch.vue';
+import { PROCESS_LABELS } from '../shared/schedule';
 import { useFactory } from '../shared/use-factory';
 import CreateModal from './modules/create-modal.vue';
 import ExceptionLedger from './modules/exception-ledger.vue';
+import ItemProductionConfigModal from './modules/item-production-config-modal.vue';
 import OrderDrawer from './modules/order-drawer.vue';
+import OrderItemsTable from './modules/order-items-table.vue';
 import RestockLedger from './modules/restock-ledger.vue';
 import ScheduleModal from './modules/schedule-modal.vue';
 import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
@@ -31,8 +35,8 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
 /**
  * 工厂部门 · 工厂排单（原「工厂下单」，并入了原「AI 排单」）：工厂的人在这里操作。
  * - 本厂收到的单：运营、内贸等部门提的生产需求，以及供应商是本厂的采购单自动生成的单；
- *   工厂确认接单、回复交期（采购单的单由工厂定工艺），看用料逆推，勾选订单交给 AI 排单；
- * - 排单方案：AI 生成或手动派工的排单，调整后确认下发成任务；
+ *   工厂确认接单、回复交期（采购单的单由工厂定工艺），勾选订单预览各工序任务并下发；
+ * - 辅助排单 / 历史方案：保留 AI、手动及按库存下发的旧流程；
  * - 任务管理：跨排单看已下发的任务，改派或退回任务大厅；
  * - 我提的需求：其他部门从产品中心选 SKU 向工厂提生产需求，做好的货由工厂交货到仓库。
  */
@@ -73,15 +77,50 @@ const total = ref(0);
 const loading = ref(false);
 const loadError = ref(false);
 const pendingCount = ref(0);
-const filters = reactive({ keyword: '', status: undefined as Api.Status | undefined });
+const filters = reactive({ keyword: '', status: (tab.value === 'factory' ? 'ACCEPTED' : undefined) as Api.Status | undefined });
 const pageNo = ref(1);
 const pageSize = ref(20);
 
-/** 本厂收到的单里勾选的已接单订单，拿去 AI 排单；翻页、筛选时保留已勾选的。 */
+/** 本厂收到的单里勾选的已接单订单；翻页、筛选时保留已勾选的。 */
 const selected = ref<Map<number, Api.Order>>(new Map());
 const scheduleOpen = ref(false);
 const releaseOpen = ref(false);
 const batchMixOpen = ref(false);
+const expandedOrderIds = ref<number[]>([]);
+const configOpen = ref(false);
+const configOrderId = ref<number>();
+const configItemId = ref<number>();
+let configRefreshVersion = 0;
+
+function editItem(orderId: number, item: Api.Item) {
+  if (!canHandle.value) return;
+  configOrderId.value = orderId;
+  configItemId.value = item.id;
+  configOpen.value = true;
+}
+
+function applyFreshOrder(order: Api.Order) {
+  rows.value = rows.value.map((row) => row.id === order.id ? order : row);
+  if (selected.value.has(order.id)) {
+    const next = new Map(selected.value);
+    if (order.status === 'ACCEPTED') next.set(order.id, order);
+    else next.delete(order.id);
+    selected.value = next;
+  }
+}
+
+async function onConfigSaved() {
+  const orderId = configOrderId.value;
+  if (!orderId) return;
+  const current = ++configRefreshVersion;
+  const factoryId = factory.factoryId.value;
+  try {
+    const fresh = await getProductionOrder(orderId);
+    if (current === configRefreshVersion && factoryId === factory.factoryId.value) applyFreshOrder(fresh);
+  } catch {
+    if (current === configRefreshVersion && factoryId === factory.factoryId.value) message.warning('参数已保存，列表刷新失败，请刷新订单后核对');
+  }
+}
 const selectable = computed(() => tab.value === 'factory' && (canSchedule.value || canRelease.value));
 const rowSelection = computed(() =>
   selectable.value
@@ -110,6 +149,12 @@ function onScheduled(id: number) {
   selected.value = new Map();
   scheduleFocus.value = id;
   tab.value = 'schedule';
+}
+
+function onSplitReleased() {
+  selected.value = new Map();
+  if (canViewSchedule.value) tab.value = 'tasks';
+  else void loadRows();
 }
 
 const createOpen = ref(false);
@@ -141,6 +186,13 @@ async function loadRows() {
     };
     const page = tab.value === 'mine' ? await getMyProductionOrders(params) : await getFactoryProductionOrders(params);
     rows.value = page.list;
+    const refreshed = new Map(selected.value);
+    for (const order of page.list) {
+      if (!refreshed.has(order.id)) continue;
+      if (order.status === 'ACCEPTED') refreshed.set(order.id, order);
+      else refreshed.delete(order.id);
+    }
+    selected.value = refreshed;
     total.value = page.total;
   } catch {
     loadError.value = true;
@@ -184,6 +236,9 @@ async function switchFactory(id: number) {
   batchMixOpen.value = false;
   scheduleOpen.value = false;
   releaseOpen.value = false;
+  configOpen.value = false;
+  ++configRefreshVersion;
+  expandedOrderIds.value = [];
   factory.select(id);
   pageNo.value = 1;
   await Promise.all([loadRows(), loadPending()]);
@@ -192,7 +247,7 @@ async function switchFactory(id: number) {
 watch(tab, (value) => {
   pageNo.value = 1;
   selected.value = new Map();
-  filters.status = undefined;
+  filters.status = value === 'factory' ? 'ACCEPTED' : undefined;
   if (value !== 'schedule') loadRows();
 });
 
@@ -223,6 +278,9 @@ async function onCreated(id: number) {
 
 async function onChanged() {
   await Promise.all([loadRows(), loadPending()]);
+  if (drawerId.value && selected.value.has(drawerId.value) && !rows.value.some((row) => row.id === drawerId.value)) {
+    applyFreshOrder(await getProductionOrder(drawerId.value));
+  }
 }
 
 const statusOptions = Object.entries(ORDER_STATUS).map(([value, s]) => ({ label: s.label, value }));
@@ -231,11 +289,12 @@ const columns = computed(() => [
   tab.value === 'mine'
     ? { dataIndex: 'factoryName', key: 'factoryName', title: '工厂' }
     : { key: 'requester', title: '下单人' },
-  { key: 'items', title: '产品' },
+  { key: 'items', title: '产品明细 / 订单数量', width: 340 },
+  { key: 'route', title: '实际工艺路线', width: 260 },
   { key: 'progress', title: '完成', width: 160 },
   { key: 'date', title: '交期' },
   { key: 'status', title: '状态' },
-  { align: 'right' as const, key: 'actions', title: '', width: 120 },
+  { align: 'right' as const, key: 'actions', title: '操作', width: 175 },
 ]);
 
 function progressPercent(o: Api.Order) {
@@ -250,7 +309,7 @@ function progressPercent(o: Api.Order) {
       <header class="flex flex-wrap items-end justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <h1 class="m-0 text-xl font-semibold tracking-tight">工厂排单</h1>
+            <h1 class="m-0 text-xl font-semibold tracking-tight">订单拆分与车间下发</h1>
             <FactorySwitch
               v-if="tab !== 'mine' && factory.factories.value.length > 0"
               :factories="factory.factories.value"
@@ -259,7 +318,7 @@ function progressPercent(o: Api.Order) {
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            其他部门从产品中心选产品向工厂提生产需求，每个产品要走的工序由提需求的人定；采购单的供应商是本厂时自动生成一张单，工艺由工厂接单时定，做好的货开生产入库单进本厂仓库。工厂接单后看用料逆推（要几张板、多少原料），勾选订单让 AI 排单或手动派工，确认下发后工人在工作台领任务；内部需求做好的货交到仓库，完成数量按交货数累加；发货在「库存中心 → 出库单」办理。
+            接单并确认产品工艺、生产参数后，勾选订单 → 预览各工序任务 → 确认下发。任务按每条产品明细的实际工艺分配到对应车间，工人在车间领取、领料和报工；订单数量与工序计划量分别显示。完成数量按交货数累加，发货在「库存中心 → 出库单」办理。
           </p>
         </div>
         <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 提生产需求</Button>
@@ -277,8 +336,8 @@ function progressPercent(o: Api.Order) {
               <Tag v-if="pendingCount > 0" class="ml-1" color="orange">{{ pendingCount }} 待接单</Tag>
             </template>
           </Tabs.TabPane>
-          <Tabs.TabPane v-if="canViewSchedule" key="schedule" tab="排单方案" />
           <Tabs.TabPane v-if="canViewSchedule" key="tasks" tab="任务管理" />
+          <Tabs.TabPane v-if="canViewSchedule" key="schedule" tab="辅助排单 / 历史方案" />
           <Tabs.TabPane v-if="canViewSchedule" key="restock" tab="补库台账" />
           <Tabs.TabPane v-if="canViewSchedule" key="exception" tab="异常台账" />
           <Tabs.TabPane v-if="canCreate" key="mine" tab="我提的需求" />
@@ -305,20 +364,18 @@ function progressPercent(o: Api.Order) {
         <div v-else class="flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-2">
             <template v-if="selectable">
-              <Button
-                v-if="canSchedule"
-                :disabled="selected.size === 0"
-                size="small"
-                type="primary"
-                @click="scheduleOpen = true"
-              >
-                AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
+              <Button v-if="canRelease" :disabled="selected.size === 0" size="small" type="primary" @click="releaseOpen = true">
+                拆分工序任务{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
               </Button>
-              <Button v-if="canRelease" :disabled="selected.size === 0" size="small" @click="releaseOpen = true">
-                下发任务包{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
-              </Button>
-              <Button v-if="canRelease" size="small" @click="batchMixOpen = true">批量安排发泡{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
-              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，只拿这几张单让 AI 排或直接下发任务包</span>
+              <details class="relative text-xs">
+                <summary class="cursor-pointer text-muted-foreground">辅助排单</summary>
+                <div class="absolute left-0 top-6 z-10 flex w-64 flex-col gap-2 rounded border border-border bg-background p-3 shadow-md">
+                  <span class="text-muted-foreground">特殊排产与旧流程，正常订单使用「拆分工序任务」。</span>
+                  <Button v-if="canSchedule" :disabled="selected.size === 0" size="small" @click="scheduleOpen = true">AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
+                  <Button v-if="canRelease" size="small" @click="batchMixOpen = true">批量安排发泡{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
+                </div>
+              </details>
+              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，按实际工艺预览并下发各车间任务</span>
               <button v-else class="text-xs text-primary hover:underline" type="button" @click="selected = new Map()">清空</button>
             </template>
             <Select
@@ -340,6 +397,7 @@ function progressPercent(o: Api.Order) {
             />
           </div>
           <Table
+            v-model:expanded-row-keys="expandedOrderIds"
             :columns="columns"
             :data-source="rows"
             :loading="loading"
@@ -353,6 +411,7 @@ function progressPercent(o: Api.Order) {
             <template #emptyText>
               <span class="text-muted-foreground">{{ tab === 'mine' ? '还没有提过需求，点右上角「提生产需求」' : '还没有收到订单' }}</span>
             </template>
+            <template #expandedRowRender="{ record }"><OrderItemsTable :items="record.items" :editable="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" @edit="editItem(record.id, $event)" /></template>
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'orderNo'">
                 <div class="flex flex-col">
@@ -372,11 +431,16 @@ function progressPercent(o: Api.Order) {
                 </div>
               </template>
               <template v-else-if="column.key === 'items'">
-                <div class="flex max-w-80 flex-col">
-                  <span class="truncate">{{ record.items[0]?.productName }}</span>
-                  <span class="truncate text-xs text-muted-foreground">
-                    {{ record.items[0] ? specText(record.items[0]) : '' }}<template v-if="record.items.length > 1"> 等 {{ record.items.length }} 个产品</template>
-                  </span>
+                <div v-for="item in record.items.slice(0, 2)" :key="item.id" class="mb-1 flex max-w-80 flex-col last:mb-0">
+                  <span>{{ item.productName }} · {{ num(item.quantity) }} {{ item.unit }}</span>
+                  <span class="text-xs text-muted-foreground">{{ item.productCode }} · {{ specText(item) }}</span>
+                </div>
+                <div v-if="record.items.length > 2" class="text-xs text-primary">共 {{ record.items.length }} 个产品，展开查看完整明细</div>
+              </template>
+              <template v-else-if="column.key === 'route'">
+                <div v-for="item in record.items.slice(0, 2)" :key="item.id" class="mb-1 text-xs last:mb-0">
+                  <div>{{ item.routeName || '自选工艺' }}</div>
+                  <span :class="item.processes?.length ? 'text-muted-foreground' : 'text-orange-600'">{{ item.processes?.length ? item.processes.map((code: string) => PROCESS_LABELS[code] || code).join(' → ') : '未配置工艺' }}</span>
                 </div>
               </template>
               <template v-else-if="column.key === 'progress'">
@@ -399,6 +463,7 @@ function progressPercent(o: Api.Order) {
                   <button class="text-primary hover:underline" type="button" @click="openOrder(record.id)">
                     {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
                   </button>
+                  <button v-if="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" class="text-primary hover:underline" type="button" @click="expandedOrderIds = [...new Set([...expandedOrderIds, record.id])]">产品参数</button>
                   <button
                     v-if="tab === 'mine' && record.sourceType !== 'PURCHASE_ORDER'"
                     class="text-primary hover:underline"
@@ -416,7 +481,8 @@ function progressPercent(o: Api.Order) {
 
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
-      <PackageReleaseModal v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onScheduled" />
+      <OrderSplitModal :key="`split-${factory.factoryId.value ?? 'none'}`" v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onSplitReleased" @changed="applyFreshOrder" />
+      <ItemProductionConfigModal v-if="configOrderId && configItemId" :key="factory.factoryId.value ?? 'none'" v-model:open="configOpen" :order-id="configOrderId" :item-id="configItemId" @saved="onConfigSaved" />
       <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
       <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>

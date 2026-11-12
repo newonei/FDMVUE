@@ -220,13 +220,13 @@ async function submitForm(task: Api.PlanTask) {
     await handleScheduleTaskShortage({ id: resendFor.value.id, note: `已补派 ${Number(task.quantity)}` });
   }
   resendFor.value = undefined;
-  message.success(editingTaskId.value ? '任务已修改，工人工作台马上能看到' : '任务已追加，工人工作台马上能看到');
+  message.success(editingTaskId.value ? '任务已修改，对应工序车间已同步' : '任务已追加，对应工序车间已同步');
   emit('changed', props.schedule.id);
 }
 
 function removeConfirmed(task: Api.Task) {
   Modal.confirm({
-    content: '删掉后这个任务不再出现在工人工作台；已经有工序单关联的任务不能删。',
+    content: '删掉后这个任务不再出现在对应工序车间；已经有工序单关联的任务不能删。',
     okButtonProps: { danger: true },
     okText: '删除',
     onOk: async () => {
@@ -410,9 +410,9 @@ function discard() {
     </template>
 
     <template v-if="schedule.status === 'DRAFT'">
-      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人：工人工作台只显示派给自己的任务，没排人的谁都看不到。请在下发前补上，或下发后在「任务管理」里改派。</p>
+      <p v-if="noWorker > 0" class="m-0 text-xs text-warning">{{ noWorker }} 个任务还没排人：下发后会进入对应工序车间待领取，本工序人员可在车间菜单领取；也可在「任务管理」里指定负责人。</p>
       <p v-if="schedule.manual && tasks.length === 0" class="m-0 text-sm text-muted-foreground">
-        手动派工：点右上角「＋ 添加任务」，选哪天、哪道工序、做多少、谁来做；加完点「确认下发」，工人工作台就能看到。
+        手动派工：点右上角「＋ 添加任务」，选哪天、哪道工序、做多少、谁来做；加完点「确认下发」，任务就会进入对应工序车间。
       </p>
       <PlanEditor
         v-else
@@ -443,7 +443,7 @@ function discard() {
               <span class="text-xs font-normal text-muted-foreground">产出：</span>{{ taskMaterialText(task.output, task.spec) }}
             </div>
             <div class="text-xs">
-              {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
+              {{ task.workerNames || (task.status === 'OPEN' ? '待领取，本工序人员可在车间领取' : '未排人') }}
               <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 <strong class="text-base text-foreground tabular-nums">{{ Number(task.plannedQuantity) }}</strong>，接单时按上道良品改成 <strong class="text-base text-foreground tabular-nums">{{ Number(task.quantity) }}</strong></span>
             </div>
             <div v-if="task.shortage" class="flex flex-wrap items-center justify-between gap-2 rounded bg-warning/10 px-2 py-1 text-xs text-warning">
@@ -497,7 +497,7 @@ function discard() {
     <MixBatchModal v-model:open="batchMixOpen" :initial-order-no="batchMixContext?.orderNo" :initial-date="batchMixContext?.workDate" @released="(id) => emit('changed', id)" />
 
     <Modal v-model:open="closeOpen" :confirm-loading="busy" ok-text="关闭任务" title="关闭任务" @ok="submitClose">
-      <p class="m-0 mb-2 text-xs text-muted-foreground">关闭后任务不再出现在工人工作台，也不能再报工。</p>
+      <p class="m-0 mb-2 text-xs text-muted-foreground">关闭后任务不能再报工，可在对应车间的「已关闭」任务中查看。</p>
       <Input id="task-close-reason" v-model:value="closeReason" :maxlength="200" placeholder="原因，例如：订单取消、排错了" />
     </Modal>
 

@@ -4,14 +4,15 @@ import type {
   FdmgongchangSupplyMatchApi as MatchApi,
 } from '#/api/fdmgongchang/production-order';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
-import { Alert, Button, InputNumber, message, Modal, Select, Spin, Tag } from 'ant-design-vue';
+import { Alert, Button, Spin, Tag } from 'ant-design-vue';
 
-import { getSupplyMatch, getTargetOptions, saveItemTarget } from '#/api/fdmgongchang/production-order';
-import { colorModeOptions, colorModeText, constructionOptions, constructionText, manufacturingError } from '#/views/fdmplatform/products/manufacturing';
+import { getSupplyMatch, getTargetOptions } from '#/api/fdmgongchang/production-order';
+import { colorModeText, constructionText } from '#/views/fdmplatform/products/manufacturing';
 
 import { num } from '../shared';
+import ItemProductionConfigModal from './item-production-config-modal.vue';
 
 /**
  * 规格确认与库存匹配（#154）。工厂给每条明细确认结构化规格（材质、正反面色、长宽厚、压纹、图案），
@@ -24,26 +25,8 @@ const emit = defineEmits<{ changed: [] }>();
 const matches = ref<MatchApi.Match[]>([]);
 const options = ref<MatchApi.TargetOptions>();
 const loading = ref(false);
-const saving = ref(false);
 const editing = ref<Api.Item>();
-/** 弹窗表单：下拉和数字框只认 undefined，不认 null。 */
-interface TargetForm {
-  colorMode: 'DUAL' | 'SINGLE' | 'UNKNOWN';
-  constructionType: 'DOUBLE_LAYER' | 'SINGLE_LAYER' | 'UNKNOWN';
-  frontThickness?: number;
-  backThickness?: number;
-  backColor?: string;
-  frontColor?: string;
-  itemId?: number;
-  length?: number;
-  material?: string;
-  pattern?: string;
-  textureBack?: string;
-  textureFront?: string;
-  thickness?: number;
-  width?: number;
-}
-const form = reactive<TargetForm>({ colorMode: 'UNKNOWN', constructionType: 'UNKNOWN' });
+const configOpen = ref(false);
 
 const matchByItem = computed(() => new Map(matches.value.map((m) => [m.itemId, m])));
 
@@ -104,10 +87,11 @@ function targetText(item: Api.Item) {
     `${size(item.targetLength, item.targetWidth, item.targetThickness)}cm`,
   ];
   if (item.targetConstructionType === 'DOUBLE_LAYER') parts.push(`正面层 ${item.targetFrontThickness ?? '未维护'}cm + 反面层 ${item.targetBackThickness ?? '未维护'}cm`);
-  if (item.targetTextureFront || item.targetTextureBack) {
-    parts.push(`压纹 正 ${label(o?.textures, item.targetTextureFront) || '无'} / 反 ${label(o?.textures, item.targetTextureBack) || '无'}`);
-  }
-  parts.push(item.targetPattern ? `图案 ${label(o?.patterns, item.targetPattern)}` : '不雕刻');
+  parts.push(needs(item, 'EMBOSS') === false
+    ? '无需压花'
+    : `压纹 正 ${label(o?.textures, item.targetTextureFront) || '未填写'} / 反 ${label(o?.textures, item.targetTextureBack) || '未填写'}`, needs(item, 'ENGRAVE') === false
+    ? '无需雕刻'
+    : `图案 ${label(o?.patterns, item.targetPattern) || '未填写'}`);
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -115,94 +99,15 @@ function needs(item: Api.Item, process: string) {
   return !item.processes || item.processes.length === 0 ? undefined : item.processes.includes(process);
 }
 
-function numOrUndefined(v: null | number | string | undefined) {
-  return v === null || v === undefined || v === '' ? undefined : num(v);
-}
-
 function openEdit(item: Api.Item) {
-  const src: MatchApi.TargetReq = confirmed(item)
-    ? {
-        colorMode: item.targetColorMode,
-        constructionType: item.targetConstructionType,
-        frontThickness: item.targetFrontThickness,
-        backThickness: item.targetBackThickness,
-        backColor: item.targetBackColor,
-        frontColor: item.targetFrontColor,
-        length: item.targetLength,
-        material: item.targetMaterial,
-        pattern: item.targetPattern,
-        textureBack: item.targetTextureBack,
-        textureFront: item.targetTextureFront,
-        thickness: item.targetThickness,
-        width: item.targetWidth,
-      }
-    : { ...item.targetSuggested };
-  Object.assign(form, {
-    colorMode: src.colorMode ?? 'UNKNOWN',
-    constructionType: src.constructionType ?? 'UNKNOWN',
-    frontThickness: numOrUndefined(src.frontThickness),
-    backThickness: numOrUndefined(src.backThickness),
-    backColor: src.backColor ?? undefined,
-    frontColor: src.frontColor ?? undefined,
-    itemId: item.id,
-    length: numOrUndefined(src.length),
-    material: src.material ?? undefined,
-    pattern: src.pattern ?? undefined,
-    textureBack: src.textureBack ?? undefined,
-    textureFront: src.textureFront ?? undefined,
-    thickness: numOrUndefined(src.thickness),
-    width: numOrUndefined(src.width),
-  });
   editing.value = item;
+  configOpen.value = true;
 }
 
-async function save() {
-  if (form.colorMode === 'UNKNOWN' || form.constructionType === 'UNKNOWN') {
-    message.warning('请先核实颜色方式和制造结构，再确认生产规格');
-    return;
-  }
-  if (form.colorMode === 'DUAL' && form.constructionType === 'SINGLE_LAYER') {
-    message.warning('当前工艺暂不支持单层双色，请核实制造结构');
-    return;
-  }
-  const structureError = manufacturingError({
-    colorMode: form.colorMode, colorCode: form.frontColor, frontColor: form.frontColor, backColor: form.backColor,
-    constructionType: form.constructionType,
-    finishedThicknessMm: (form.thickness === null || form.thickness === undefined) ? null : form.thickness * 10,
-    frontThicknessMm: (form.frontThickness === null || form.frontThickness === undefined) ? null : form.frontThickness * 10,
-    backThicknessMm: (form.backThickness === null || form.backThickness === undefined) ? null : form.backThickness * 10,
-  });
-  if (structureError) { message.warning(structureError); return; }
-  if (!form.material || !form.frontColor || form.length === 0 || !form.width || !form.thickness) {
-    message.warning('材质、颜色、长宽厚必填');
-    return;
-  }
-  const item = editing.value;
-  if (item && needs(item, 'EMBOSS') === false) {
-    form.textureFront = undefined;
-    form.textureBack = undefined;
-  }
-  if (item && needs(item, 'ENGRAVE') === false) {
-    form.pattern = undefined;
-  }
-  saving.value = true;
-  try {
-    await saveItemTarget({
-      ...form,
-      backColor: form.colorMode === 'SINGLE' ? form.frontColor : form.backColor,
-      frontThickness: form.constructionType === 'SINGLE_LAYER' ? form.thickness : form.frontThickness,
-      backThickness: form.constructionType === 'SINGLE_LAYER' ? null : form.backThickness,
-    });
-    message.success('规格已确认');
-    editing.value = undefined;
-    emit('changed');
-  } catch {
-    // 后端错误已由全局提示展示
-  } finally {
-    saving.value = false;
-  }
+function onConfigSaved() {
+  emit('changed');
+  void load();
 }
-
 function fmt(v: null | number | string | undefined) {
   return num(v).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 }
@@ -285,95 +190,12 @@ defineExpose({ reload: load });
       </div>
     </Spin>
 
-    <Modal
-      :open="!!editing"
-      :confirm-loading="saving"
-      ok-text="确认规格"
-      :title="`确认规格 · ${editing?.productName ?? ''}`"
-      @cancel="editing = undefined"
-      @ok="save"
-    >
-      <p v-if="editing" class="mt-0 text-xs text-muted-foreground">
-        订单写的：{{ [editing.specification, editing.size, editing.material, editing.color].filter(Boolean).join(' / ') || '无' }}
-      </p>
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label for="target-material" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          材质
-          <Select id="target-material" v-model:value="form.material" :options="options?.materials" show-search option-filter-prop="label" />
-        </label>
-        <label for="target-color-mode" class="flex flex-col gap-1 text-xs text-muted-foreground">颜色方式
-          <Select id="target-color-mode" v-model:value="form.colorMode" :options="colorModeOptions" />
-        </label>
-        <label for="target-front" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          {{ form.colorMode === 'SINGLE' ? '颜色（两面相同）' : '正面色' }}
-          <Select id="target-front" v-model:value="form.frontColor" :options="options?.colors" show-search option-filter-prop="label" />
-        </label>
-        <label v-if="form.colorMode !== 'SINGLE'" for="target-back" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          反面色
-          <Select id="target-back" v-model:value="form.backColor" allow-clear :options="options?.colors" show-search option-filter-prop="label" />
-        </label>
-        <label for="target-construction" class="flex flex-col gap-1 text-xs text-muted-foreground">制造结构
-          <Select id="target-construction" v-model:value="form.constructionType" :options="constructionOptions" />
-        </label>
-        <div class="grid grid-cols-3 gap-2 sm:col-span-2">
-          <label for="target-length" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            长 cm
-            <InputNumber id="target-length" v-model:value="form.length" :min="0.01" :max="9999.99" class="w-full" />
-          </label>
-          <label for="target-width" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            宽 cm
-            <InputNumber id="target-width" v-model:value="form.width" :min="0.01" :max="9999.99" class="w-full" />
-          </label>
-          <label for="target-thickness" class="flex flex-col gap-1 text-xs text-muted-foreground">
-            成品厚 cm
-            <InputNumber id="target-thickness" v-model:value="form.thickness" :precision="3" :min="0.001" :max="9999.99" class="w-full" />
-          </label>
-        </div>
-        <template v-if="form.constructionType === 'DOUBLE_LAYER'">
-          <label for="target-front-thickness" class="flex flex-col gap-1 text-xs text-muted-foreground">正面层厚 cm
-            <InputNumber id="target-front-thickness" v-model:value="form.frontThickness" :precision="3" :min="0.001" class="w-full" />
-          </label>
-          <label for="target-back-thickness" class="flex flex-col gap-1 text-xs text-muted-foreground">反面层厚 cm
-            <InputNumber id="target-back-thickness" v-model:value="form.backThickness" :precision="3" :min="0.001" class="w-full" />
-          </label>
-          <p class="m-0 text-xs text-muted-foreground sm:col-span-2">正面层 + 反面层须等于成品厚度；同色双层也分别按两层排产。</p>
-        </template>
-        <label for="target-tf" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          正面压纹{{ editing && needs(editing, 'EMBOSS') === false ? '（工艺没有压花）' : '' }}
-          <Select
-            id="target-tf"
-            v-model:value="form.textureFront"
-            allow-clear
-            :disabled="!!editing && needs(editing, 'EMBOSS') === false"
-            :options="options?.textures"
-            placeholder="不压"
-          />
-        </label>
-        <label for="target-tb" class="flex flex-col gap-1 text-xs text-muted-foreground">
-          反面压纹
-          <Select
-            id="target-tb"
-            v-model:value="form.textureBack"
-            allow-clear
-            :disabled="!!editing && needs(editing, 'EMBOSS') === false"
-            :options="options?.textures"
-            placeholder="不压"
-          />
-        </label>
-        <label for="target-pattern" class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-          雕刻图案{{ editing && needs(editing, 'ENGRAVE') === false ? '（工艺没有雕刻）' : editing && needs(editing, 'ENGRAVE') ? '（必选）' : '' }}
-          <Select
-            id="target-pattern"
-            v-model:value="form.pattern"
-            allow-clear
-            :disabled="!!editing && needs(editing, 'ENGRAVE') === false"
-            :options="options?.patterns"
-            placeholder="不雕刻"
-            show-search
-            option-filter-prop="label"
-          />
-        </label>
-      </div>
-    </Modal>
+    <ItemProductionConfigModal
+      v-if="editing"
+      v-model:open="configOpen"
+      :order-id="orderId"
+      :item-id="editing.id"
+      @saved="onConfigSaved"
+    />
   </section>
 </template>

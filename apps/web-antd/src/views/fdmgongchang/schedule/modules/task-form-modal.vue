@@ -509,7 +509,7 @@ async function save() {
     <div class="grid grid-cols-1 gap-3 text-xs text-muted-foreground sm:grid-cols-2">
       <div class="rounded-md bg-primary/5 px-3 py-2 leading-6 sm:col-span-2">
         <b class="text-foreground">下发任务：{{ selectsInput ? '选择领料产品 → 设置计划产出' : '计划产出 → 预计领料' }} → 指派人员</b><br />
-        任务下发后，在「我的工作台」确认实际领料，再登记本工序的实际产出。
+        任务下发后，进入对应工序的车间菜单确认实际领料，再登记本工序的实际产出。
       </div>
       <label for="task-form-date" class="flex flex-col gap-1">
         计划日期
@@ -549,7 +549,7 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
       </label>
       <section v-if="selectsInput" class="flex flex-col gap-2 rounded-md border border-border p-3 sm:col-span-2" aria-label="选择领料产品">
         <b class="text-foreground">预计领料产品：{{ sourceText }}</b>
-        <p class="m-0">从产品中心选择本次要领用的上工序板材；实际领料批次和数量在「我的工作台」确认。</p>
+        <p class="m-0">从产品中心选择本次要领用的上工序板材；实际领料批次和数量在对应工序车间确认。</p>
         <button id="task-form-input-product" type="button" :disabled="inputLoading" class="flex min-h-9 items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2 text-left text-sm hover:border-primary disabled:opacity-60" aria-haspopup="dialog" @click="inputPickerOpen = true">
           <span class="min-w-0 break-words" :class="selectedInput ? 'text-foreground' : 'text-muted-foreground'">{{ inputLoading ? '正在读取所选板材…' : selectedInput?.name || '点击从产品中心选择领料板材' }}</span>
           <span class="shrink-0 text-primary">{{ selectedInput ? '更换板材' : '选择板材' }}</span>
@@ -612,7 +612,7 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
           </div>
           <p v-for="warning in currentPreview.warnings" :key="warning" class="m-0 text-warning">{{ dimensionTextInMm(warning) }}</p>
         </template>
-        <p class="m-0 leading-5">实际领料的批次、数量在「我的工作台 → 领料开工」确认；库存不足时允许登记实际领料，并提示补录入库。</p>
+        <p class="m-0 leading-5">实际领料的批次、数量在「对应工序车间 → 领料开工」确认；库存不足时允许登记实际领料，并提示补录入库。</p>
       </section>
       <label for="task-form-workers" class="flex flex-col gap-1">
         指派人员

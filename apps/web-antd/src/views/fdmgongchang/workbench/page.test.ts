@@ -10,8 +10,11 @@ import WorkbenchPage from './index.vue';
 
 const mocks = vi.hoisted(() => ({
   route: { query: {} as Record<string, string> },
+  factories: vi.fn(),
+  setFactory: vi.fn(),
   mates: vi.fn(),
   create: vi.fn(),
+  claim: vi.fn(),
   issue: vi.fn(),
   prepare: vi.fn(),
   pickList: vi.fn(),
@@ -28,12 +31,8 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
-  getMyFactories: vi.fn().mockResolvedValue({
-    canSeeAll: false,
-    defaultFactoryId: 1,
-    factories: [{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }],
-  }),
-  setCurrentFactoryId: vi.fn(),
+  getMyFactories: mocks.factories,
+  setCurrentFactoryId: mocks.setFactory,
 }));
 // 领料单照片：点一下就当作上传好了一张
 vi.mock('#/components/upload/image-upload.vue', async () => {
@@ -48,6 +47,7 @@ vi.mock('#/components/upload/image-upload.vue', async () => {
   };
 });
 vi.mock('#/api/fdmgongchang/workbench', () => ({
+  claimWorkbenchTask: mocks.claim,
   createWorkbenchOrder: mocks.create,
   issueWorkbenchTask: mocks.issue,
   getWorkbench: mocks.my,
@@ -206,19 +206,25 @@ describe('workbench page', () => {
     status: 'IN_PROGRESS', reportCount: 0, goodQuantity: 0, defectQuantity: 0, inputQuantity: 52,
     inputs: [{ id: 101, stockId: 11, itemId: board.itemId, batchNo: board.batchNo, item: board.item, itemCode: board.itemCode, location: board.location, quantity: 52, returnedQuantity: 0, stage: 'BOARD' }],
   };
-  const mount = async () => {
+  const mount = async (process?: string) => {
     const host = document.createElement('div');
     document.body.append(host);
-    const app = createApp(WorkbenchPage);
+    const app = createApp(WorkbenchPage, { process });
     app.mount(host);
     unmount = () => app.unmount();
     await flush();
   };
   beforeEach(() => {
     mocks.route.query = {};
+    mocks.factories.mockResolvedValue({
+      canSeeAll: false,
+      defaultFactoryId: 1,
+      factories: [{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }],
+    });
     mocks.my.mockResolvedValue({ ...my, inProgress: [] });
     mocks.options.mockResolvedValue(options);
     mocks.create.mockResolvedValue(7);
+    mocks.claim.mockResolvedValue(true);
     mocks.issue.mockResolvedValue(5);
     mocks.report.mockResolvedValue(5);
     mocks.pickList.mockResolvedValue([prepare]);
@@ -227,6 +233,253 @@ describe('workbench page', () => {
     mocks.order.mockResolvedValue(order);
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
     mocks.mates.mockResolvedValue([]);
+  });
+
+  const workshop = (): Api.My => ({
+    ...my,
+    inProgress: [],
+    workshopProcess: my.processes[0],
+    workshopTasks: [
+      ...my.tasks,
+      ...my.hall!,
+      { ...my.tasks[0]!, id: 34, contractCode: 'HT-OTHER', workerIds: '3', workerNames: '李四', workDate: '2025-01-01' },
+      { ...my.tasks[0]!, id: 35, contractCode: 'HT-DONE', status: 'DONE', actualQuantity: 400, workerIds: '2' },
+      { ...my.tasks[0]!, id: 36, contractCode: 'HT-PACK', process: 'PACK' },
+      { ...my.tasks[0]!, id: 37, contractCode: 'HT-OTHER-DONE', status: 'DONE', actualQuantity: 400, workerIds: '3' },
+    ],
+  });
+
+  it('shows the fixed workshop queue including other workers and upstream waiting tasks without granting their actions', async () => {
+    mocks.my.mockResolvedValue(workshop());
+    await mount('SLICE');
+    expect(mocks.my).toHaveBeenCalledExactlyOnceWith('SLICE');
+    expect(document.querySelector('h1')?.textContent).toBe('开片车间');
+    expect(document.querySelector('.workshop-task-table table')).not.toBeNull();
+    expect(document.querySelector('.workshop-task-table article')).toBeNull();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(4);
+    expect(document.querySelector('[data-task-id="33"]')?.textContent).toContain('上道「发泡」今天还没报工');
+    const other = document.querySelector('[data-task-id="34"]')!;
+    expect(other.textContent).toContain('李四');
+    expect(other.textContent).toContain('由任务负责人领料、报工');
+    expect(other.querySelectorAll('[data-task-action]')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('HT-PACK');
+    expect(document.body.textContent).not.toContain('HT-DONE');
+    fill('workshop-keyword', 'HT-OTHER');
+    await flush();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
+    expect(document.querySelector('[data-task-id="34"]')).not.toBeNull();
+  });
+
+  it('claims an upstream-waiting task and reloads the same workshop before offering material issue', async () => {
+    const value = workshop();
+    mocks.my.mockResolvedValue(value);
+    await mount('SLICE');
+    const claimed = { ...my.hall![1]!, status: 'CLAIMED' as const, workerIds: '2', workerNames: '张三' };
+    mocks.my.mockResolvedValue({
+      ...value, tasks: [...my.tasks, claimed], hall: [my.hall![0]!],
+      workshopTasks: value.workshopTasks!.map((task) => task.id === claimed.id ? claimed : task),
+    });
+    document.querySelector<HTMLButtonElement>('[data-task-id="33"] [data-task-action="claim"]')!.click();
+    await flush();
+    expect(mocks.claim).toHaveBeenCalledExactlyOnceWith(33);
+    expect(mocks.my).toHaveBeenLastCalledWith('SLICE');
+    expect(document.querySelector('[data-task-id="33"]')?.textContent).toContain('领料开工');
+    expect(mocks.issue).not.toHaveBeenCalled();
+  });
+
+  it('shows and searches every related order in a merged foaming task', async () => {
+    const merged = { ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, relatedOrderNos: ['GC-101', 'GC-202'], covers: [{ assignmentId: 'GC:1', quantity: 100 }, { assignmentId: 'GC:2', quantity: 100 }] };
+    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
+    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], processes: [process], workshopProcess: process, workshopTasks: [merged] });
+    await mount('MIX');
+    expect(document.querySelector('h1')?.textContent).toBe('发泡车间');
+    expect(document.querySelector('[data-task-id="38"]')?.textContent).toContain('合并订单任务');
+    expect(document.querySelector('[data-task-id="38"]')?.textContent).toContain('关联订单：GC-101、GC-202');
+    fill('workshop-keyword', 'GC-202');
+    await flush();
+    expect(document.querySelector('[data-task-id="38"]')).not.toBeNull();
+    fill('workshop-keyword', 'GC-NONE');
+    await flush();
+    expect(document.querySelector('[data-task-id="38"]')).toBeNull();
+  });
+
+  it('expands every exact related product and keeps order quantities separate from foaming quantities', async () => {
+    const first = {
+      orderId: 101, orderNo: 'GC-101', itemId: 1001, productCode: 'SKU-FIRST', productName: '紫色双色垫',
+      specification: '183×61×0.6cm TPE 紫色', size: '183×61×0.6cm', material: 'TPE', color: '紫色',
+      quantity: 800, completedQuantity: 120, unit: '条', customerName: '甲客户',
+      requiredDate: '2026-11-20', promisedDate: '2026-11-18', printing: '丝印品牌A', packaging: '纸盒', remark: '正面图案居中',
+      routeName: '双色工艺', routeSteps: 'MIX,SLICE,LAMINATE,PACK', recipeCode: 'REC-001',
+      targetMaterial: 'TPE', targetLength: 183, targetWidth: 61, targetThickness: 0.6,
+      targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetFrontColor: 'PU', targetBackColor: 'GY',
+      targetFrontThickness: 0.3, targetBackThickness: 0.3, targetConfirmedBy: '工厂主管', targetConfirmedAt: '2026-11-12 08:00:00',
+    };
+    const second = { ...first, itemId: 1002, productCode: 'SKU-SECOND', productName: '同订单另一产品', quantity: 600, completedQuantity: 50 };
+    const third = { orderId: 202, orderNo: 'GC-202', itemId: 2001, productCode: 'SKU-THIRD', productName: '另一订单产品', specification: '200×100×0.8cm', unit: '件' };
+    const merged = {
+      ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, quantity: 20, actualQuantity: 5, unit: '张',
+      output: { stage: 'BOARD', attrs: { length: 200, width: 100, thickness: 5, color: 'PU', material: 'TPE' } },
+      relatedOrderNos: ['GC-101', 'GC-202'], relatedOrderItems: [first, second, third],
+      covers: [{ assignmentId: 'GC:1001', quantity: 12 }, { assignmentId: 'GC:1002', quantity: 5 }, { assignmentId: 'GC:2001', quantity: 3 }],
+    };
+    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
+    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], processes: [process], workshopProcess: process, workshopTasks: [merged] });
+    await mount('MIX');
+    const row = document.querySelector('[data-task-id="38"]')!;
+    expect(row.textContent).toContain('SKU-FIRST');
+    expect(row.textContent).toContain('紫色双色垫');
+    expect(row.textContent).toContain('1830×610×6 mm');
+    expect(row.textContent).toContain('2000×1000×50 mm');
+    expect(row.textContent?.replaceAll(/\s/g, '')).toContain('计划20张良品5张');
+    clickButton('查看3条订单产品明细');
+    await flush();
+    const details = document.querySelector('.workshop-related-orders')!;
+    expect(details.querySelectorAll('tbody tr[data-row-key]')).toHaveLength(3);
+    const detailText = details.textContent!.replaceAll(/\s/g, '');
+    expect(detailText).toContain('订购800条已完成120条');
+    expect(detailText).toContain('订购600条已完成50条');
+    expect(detailText).toContain('SKU-THIRD');
+    expect(detailText).toContain('订购未填写件已完成未填写件');
+    expect(detailText).toContain('尚未填写生产参数');
+    expect(detailText).toContain('1830×610×6mm');
+    expect(detailText).toContain('正面层3mm');
+    expect(detailText).toContain('已确认·工厂主管');
+    expect(detailText).toContain('印刷：丝印品牌A');
+    expect(detailText).toContain('包装：纸盒');
+    expect(detailText).toContain('发泡→开片→贴合→包装');
+    const snapshotCell = details.querySelector('tbody tr[data-row-key="101:1001"] td:nth-child(3)')!;
+    expect(snapshotCell.textContent?.match(/1830/g)).toHaveLength(1);
+    fill('workshop-keyword', 'SKU-THIRD');
+    await flush();
+    expect(document.querySelector('[data-task-id="38"]')).not.toBeNull();
+    clickButton('查看3条订单产品明细');
+    await flush();
+    expect(document.querySelectorAll('.workshop-related-orders tbody tr[data-row-key]')).toHaveLength(3);
+  });
+
+  it('keeps the order number visible when multiple covered products belong to one order', async () => {
+    const task = { ...my.tasks[0]!, relatedOrderNos: ['GC-ONE'], covers: [{ assignmentId: 'GC:1', quantity: 3 }, { assignmentId: 'GC:2', quantity: 5 }] };
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
+    await mount('SLICE');
+    const row = document.querySelector('[data-task-id="31"]')!;
+    expect(row.textContent).toContain('合并订单任务');
+    expect(row.textContent).toContain('关联订单：GC-ONE');
+  });
+
+  it('does not turn a legacy order number or process product hint into invented order product details', async () => {
+    const task = { ...my.tasks[0]!, product: '旧任务的工序提示', relatedOrderNos: ['GC-LEGACY'], relatedOrderItems: [] };
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
+    await mount('SLICE');
+    const row = document.querySelector('[data-task-id="31"]')!;
+    expect(row.textContent).toContain('未关联具体订单产品明细');
+    row.querySelector<HTMLButtonElement>('.ant-table-row-expand-icon')!.click();
+    await flush();
+    expect(document.querySelector('.workshop-related-orders')?.textContent).toContain('没有关联的工厂订单产品明细');
+    expect(document.querySelector('.workshop-related-orders')?.textContent).not.toContain('旧任务的工序提示');
+  });
+
+  it('paginates the workshop task table and returns to page one after filtering', async () => {
+    const tasks = Array.from({ length: 25 }, (_, index) => ({ ...my.tasks[0]!, id: 100 + index, contractCode: `HT-BULK-${  index}` }));
+    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], workshopTasks: tasks });
+    await mount('SLICE');
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(20);
+    document.querySelector<HTMLButtonElement>('.workshop-task-table .ant-pagination-next button')!.click();
+    await flush();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(5);
+    expect(document.querySelector('[data-task-id="124"]')).not.toBeNull();
+    fill('workshop-keyword', 'HT-BULK-24');
+    await flush();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
+    expect(document.querySelector('[data-task-id="124"]')).not.toBeNull();
+    expect(document.querySelector('.workshop-task-table .ant-pagination-item-active')?.textContent).toBe('1');
+  });
+
+  it('uses the existing material workflow and returns to the same workshop after saving', async () => {
+    const value = workshop();
+    mocks.my.mockResolvedValue(value);
+    await mount('SLICE');
+    document.querySelector<HTMLButtonElement>('[data-task-id="31"] [data-task-action="start"]')!.click();
+    await flush();
+    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(31);
+    expect(document.body.textContent).toContain('选择实际领料批次');
+    clickButton('下一步：确认领料');
+    await flush();
+    mocks.my.mockResolvedValue({ ...value, inProgress: [inProgress] });
+    clickButton('确认领料');
+    await flush();
+    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ taskId: 31, sourceStage: 'BOARD' }));
+    clickButton('看下一个活');
+    await flush();
+    expect(mocks.my).toHaveBeenLastCalledWith('SLICE');
+    expect(document.querySelector('h1')?.textContent).toBe('开片车间');
+    expect(document.body.textContent).toContain('我在本车间的在制工序单');
+  });
+
+  it('makes completed history discoverable without exposing task operation buttons', async () => {
+    mocks.my.mockResolvedValue(workshop());
+    await mount('SLICE');
+    document.querySelector('#workshop-status')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await flush();
+    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === '已报工')!.click();
+    await flush();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(2);
+    document.querySelector('#workshop-ownership')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await flush();
+    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === '我的任务')!.click();
+    await flush();
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
+    const done = document.querySelector('[data-task-id="35"]')!;
+    expect(done.textContent).toContain('HT-DONE');
+    expect(done.querySelectorAll('[data-task-action]')).toHaveLength(0);
+  });
+
+  it('keeps team reporting available for an authorized leader without a personal process post', async () => {
+    const value = workshop();
+    const other = value.workshopTasks!.find((task) => task.id === 34)!;
+    mocks.my.mockResolvedValue({ ...value, processes: [], tasks: [], hall: [], teamProcesses: my.processes, teamTasks: [other] });
+    mocks.mates.mockResolvedValue([{ userId: 3, nickname: '李四', team: '开片一组' }]);
+    mocks.prepare.mockResolvedValue({ ...prepare, task: other });
+    await mount('SLICE');
+    expect(document.body.textContent).toContain('开片车间');
+    document.querySelector<HTMLButtonElement>('[data-task-id="34"] [data-task-action="behalf"]')!.click();
+    await flush();
+    expect(mocks.mates).toHaveBeenCalledExactlyOnceWith('SLICE');
+    clickButton('下一步');
+    await flush();
+    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(34);
+    expect(document.body.textContent).toContain('选择实际领料批次');
+    clickButton('下一步：确认领料');
+    await flush();
+    clickButton('确认领料');
+    await flush();
+    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ taskId: 34, onBehalfOf: 3 }));
+  });
+
+  it('explains an inaccessible workshop using the backend qualification message', async () => {
+    mocks.my.mockRejectedValueOnce({ data: { msg: '当前账号没有开片工序岗位，请联系工厂管理员' } });
+    await mount('SLICE');
+    expect(document.body.textContent).toContain('当前账号没有开片工序岗位，请联系工厂管理员');
+    expect(document.querySelector('[data-task-id]')).toBeNull();
+  });
+
+  it('allows switching to another factory when the selected factory has disabled this workshop', async () => {
+    mocks.factories.mockResolvedValue({
+      canSeeAll: true, defaultFactoryId: 1,
+      factories: [{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }, { code: 'FDM2', deptId: 119, id: 2, name: '二号工厂' }],
+    });
+    mocks.my.mockRejectedValueOnce({ data: { msg: '当前工厂未启用开片工序' } });
+    await mount('SLICE');
+    expect(document.body.textContent).toContain('当前工厂未启用开片工序');
+    mocks.my.mockResolvedValue({ ...workshop(), factoryName: '二号工厂' });
+    document.querySelector('#factory-switch')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await flush();
+    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === '二号工厂')!.click();
+    await flush();
+    expect(mocks.setFactory).toHaveBeenLastCalledWith(2);
+    expect(document.querySelector('h1')?.textContent).toBe('开片车间');
   });
 
   it('opens the linked slicing task directly in the full material workflow', async () => {

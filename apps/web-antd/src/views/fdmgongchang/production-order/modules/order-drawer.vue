@@ -8,6 +8,8 @@ import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/p
 
 import { computed, ref, watch } from 'vue';
 
+import { useAccess } from '@vben/access';
+
 import { Alert, Button, Checkbox, DatePicker, Descriptions, Input, message, Modal, Popconfirm, Spin, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
@@ -45,10 +47,15 @@ import SupplyMatch from './supply-match.vue';
 const props = defineProps<{ mode: 'factory' | 'mine'; orderId?: number }>();
 const emit = defineEmits<{ changed: []; copy: [order: Api.Order] }>();
 const open = defineModel<boolean>('open', { required: true });
+const { hasAccessByCodes } = useAccess();
+const canHandleOrder = computed(() => hasAccessByCodes(['fdmgongchang:production-order:handle']));
 
 const order = ref<Api.Order>();
 const loading = ref(false);
 const busy = ref(false);
+const targetRefreshing = ref(false);
+const targetRefreshError = ref(false);
+let targetRefreshVersion = 0;
 const promisedDate = ref<Dayjs>();
 const reply = ref('');
 const deliveryOpen = ref(false);
@@ -72,8 +79,8 @@ const batchDraft = ref<RouteDraft>({ steps: [] });
 const batchIds = ref<number[]>([]);
 const activeItems = computed(() => (order.value?.items ?? []).filter((i) => num(i.quantity) > 0));
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED' && !fromPurchase.value);
-const canHandle = computed(() => props.mode === 'factory' && order.value?.status === 'SUBMITTED');
-const canProgress = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED');
+const canHandle = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'SUBMITTED');
+const canProgress = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'ACCEPTED');
 /** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
 /** 多个产品待定工艺时才显示批量设置。 */
 const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
@@ -85,6 +92,7 @@ const deliveries = computed(() => order.value?.deliveries ?? []);
 
 async function load() {
   if (!props.orderId) return;
+  targetRefreshError.value = false;
   loading.value = true;
   try {
     order.value = await getProductionOrder(props.orderId);
@@ -153,6 +161,7 @@ function itemStarted(item: Api.Item) {
 }
 
 function saveRoute(item: Api.Item) {
+  if (targetRefreshing.value || targetRefreshError.value) return;
   const draft = drafts.value[item.id];
   const problem = draftProblem(item);
   if (!draft || problem) {
@@ -165,10 +174,30 @@ function saveRoute(item: Api.Item) {
 /** 确认规格后订单明细和用料逆推都要按新规格重算。 */
 async function onTargetChanged() {
   if (!order.value) return;
+  const orderId = order.value.id;
+  const current = ++targetRefreshVersion;
+  targetRefreshing.value = true;
+  targetRefreshError.value = false;
   // 只换明细，不重置接单表单里已经填的交期和回复
-  const fresh = await getProductionOrder(order.value.id);
-  order.value = { ...order.value, items: fresh.items };
-  await materialPlan.value?.reload();
+  try {
+    const fresh = await getProductionOrder(orderId);
+    if (current !== targetRefreshVersion || !open.value || order.value?.id !== orderId) return;
+    const nextDrafts = { ...drafts.value };
+    for (const item of fresh.items) {
+      const previous = order.value.items.find((row) => row.id === item.id);
+      if (!previous || previous.routeId !== item.routeId || JSON.stringify(previous.processes ?? []) !== JSON.stringify(item.processes ?? [])) {
+        nextDrafts[item.id] = { routeId: item.routeId ?? undefined, steps: [...(item.processes ?? [])] };
+      }
+    }
+    drafts.value = nextDrafts;
+    order.value = { ...order.value, items: fresh.items };
+    emit('changed');
+    await materialPlan.value?.reload();
+  } catch {
+    if (current === targetRefreshVersion && open.value && order.value?.id === orderId) targetRefreshError.value = true;
+  } finally {
+    if (current === targetRefreshVersion) targetRefreshing.value = false;
+  }
 }
 
 function confirmChange() {
@@ -178,6 +207,9 @@ function confirmChange() {
 }
 
 watch(open, (value) => {
+  ++targetRefreshVersion;
+  targetRefreshing.value = false;
+  targetRefreshError.value = false;
   if (value) load();
   else order.value = undefined;
 });
@@ -197,6 +229,7 @@ async function run(action: () => Promise<unknown>, text: string) {
 }
 
 function accept() {
+  if (targetRefreshing.value || targetRefreshError.value) return;
   if (!order.value) return;
   const id = order.value.id;
   if (!promisedDate.value) {
@@ -393,7 +426,7 @@ function producedQty(item: Api.Item) {
                   @update:model-value="(v: RouteDraft) => (drafts[i.id] = v)"
                 />
                 <span v-if="editingRoute === i.id" class="flex gap-2">
-                  <Button :loading="busy" size="small" type="primary" @click="saveRoute(i)">保存工艺</Button>
+                  <Button :loading="busy" :disabled="targetRefreshing || targetRefreshError" size="small" type="primary" @click="saveRoute(i)">保存工艺</Button>
                   <Button size="small" @click="(editingRoute = undefined), loadRoutes()">取消</Button>
                 </span>
               </div>
@@ -459,7 +492,10 @@ function producedQty(item: Api.Item) {
           :route-options="routeOptions"
         />
 
-        <SupplyMatch v-if="canPlan" :editable="canPlan" :items="order.items" :order-id="order.id" @changed="onTargetChanged" />
+        <Alert v-if="targetRefreshError" type="warning" show-icon message="参数已保存，订单刷新失败。请重新加载后再接单或保存工艺，以免覆盖新参数。">
+          <template #action><Button size="small" :loading="targetRefreshing" @click="onTargetChanged">重新加载已保存参数</Button></template>
+        </Alert>
+        <SupplyMatch v-if="canPlan" :editable="canPlan && !targetRefreshing && !targetRefreshError" :items="order.items" :order-id="order.id" @changed="onTargetChanged" />
         <MaterialPlan v-if="canPlan" ref="materialPlan" :editable="canPlan" :order-id="order.id" />
 
         <section v-if="canHandle" class="flex flex-col gap-3 rounded-md bg-muted/40 p-3">
@@ -476,7 +512,7 @@ function producedQty(item: Api.Item) {
             工艺由工厂定：在上面每个产品下面选好要走的工序再接单；没开工序单前都还能改。接单后再按采购单定辅料用量。
           </p>
           <div class="flex gap-2">
-            <Button :loading="busy" type="primary" @click="accept">接单</Button>
+            <Button :loading="busy || targetRefreshing" :disabled="targetRefreshError" type="primary" @click="accept">接单</Button>
             <Button :loading="busy" danger @click="reject">退回</Button>
           </div>
         </section>
