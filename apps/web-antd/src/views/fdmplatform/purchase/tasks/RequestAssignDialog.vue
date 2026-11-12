@@ -17,6 +17,7 @@ import {
 } from '#/api/fdmplatform';
 
 import { errorText } from '../../data';
+import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { activeAssignRows, assignPayload, assignRows } from './request-batch';
 
 const props = defineProps<{
@@ -250,6 +251,7 @@ watch(
                   <span v-if="row.specification" class="hint">{{
                     row.specification
                   }}</span>
+                  <ProductStructureDetails :value="row.structure ?? {}" />
                 </td>
                 <td class="num">{{ row.remaining }} {{ row.unit }}</td>
               </tr>

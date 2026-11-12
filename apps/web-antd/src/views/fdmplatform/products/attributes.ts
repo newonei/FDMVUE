@@ -61,3 +61,13 @@ export function productAttributesText(product: ProductAttributeSource) {
   }
   return parts.join(' · ');
 }
+
+export function productProcessText(product: ProductAttributeSource) {
+  return productAttributeDetails(product)
+    .filter(
+      (item) =>
+        !['单色', '反面颜色', '正面颜色'].includes(item.label) && item.value,
+    )
+    .map((item) => `${item.label}：${item.value}`)
+    .join(' · ');
+}

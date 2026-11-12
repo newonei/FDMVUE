@@ -20,15 +20,15 @@ describe('stageTaskPlan', () => {
       spec: '板材 2100×1360×48 mm · TPE · 配方 REC-001',
       suggested: 12,
     });
-    expect(stageTaskPlan('SLICE', choice)).toMatchObject({ kind: 'board', spec: '板材 2100×1360×48 mm · TPE · 配方 REC-001', suggested: 12 });
+    expect(stageTaskPlan('SLICE', choice)).toMatchObject({ kind: 'sheet', spec: '已开片板材 2100×1360×6 mm · TPE', suggested: 96 });
     expect(stageTaskPlan('CUT', choice)).toMatchObject({ kind: 'sheet', spec: '1830×610×6 mm · TPE', suggested: 180 });
   });
 
-  it('does not use an old layer count or thin sheet specification as a slicing target', () => {
+  it('uses the single-layer sheet specification and count for slicing', () => {
     const plan = stageTaskPlan('SLICE', { name: '历史规格', spec: '183×61×0.3cm', sheets: 96, sheetSpec: '210×136×0.3cm' });
-    expect(plan.suggested).toBeNull();
-    expect(plan.spec).toBe('');
-    expect(plan.hint).toContain('自动沿用其厚度');
+    expect(plan.suggested).toBe(96);
+    expect(plan.spec).toBe('2100×1360×3 mm');
+    expect(plan.hint).toContain('按订单单层厚度开片');
   });
 
   it('leaves unknown board dimensions empty instead of substituting finished product dimensions', () => {

@@ -24,6 +24,7 @@ import {
 } from '#/api/fdmplatform';
 
 import { errorText } from '../../data';
+import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { localDate } from './comparison';
 import {
   cheaperQuote,
@@ -221,6 +222,7 @@ watch(
               {{ primary.context.title
               }}<span v-if="primary.context.specification" class="muted">
                 · {{ primary.context.specification }}</span>
+              <ProductStructureDetails :value="primary.context.structure" />
             </dd>
             <dt>单价</dt>
             <dd class="num">
@@ -276,6 +278,7 @@ watch(
               />
               <span class="companion-main">
                 <b>{{ line.context.title }}</b>
+                <ProductStructureDetails :value="line.context.structure" />
                 <span class="muted">{{ line.quantity }} {{ line.context.unit }} ×
                   {{ line.quote.currency }} {{ line.quote.unitPrice }}</span>
               </span>

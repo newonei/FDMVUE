@@ -6,11 +6,12 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Image, Spin, Tag } from 'ant-design-vue';
 
 import { getPurchaseImage, getPurchaseSheet } from '#/api/fdmgongchang/production-order';
+import ProductStructureDetails from '#/views/fdmplatform/products/components/ProductStructureDetails.vue';
 
 import { num } from '../shared';
 
 /**
- * 采购单生成的工厂订单的生产要求：实时读采购单的下单资料（采购员改了这里跟着变），
+ * 采购单生成的工厂订单的生产要求：产品结构读取下单时快照，补充说明实时读取采购资料，
  * 按采购单打印出来的顺序列出每行的定制说明、包装要求、明细备注，整单的共用说明、辅料和包装步骤。
  */
 const props = defineProps<{ orderId: number }>();
@@ -106,7 +107,7 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">生产要求</h3>
-      <span class="text-xs text-muted-foreground">采购单下单资料，采购员改了这里跟着变</span>
+      <span class="text-xs text-muted-foreground">产品结构以下单时资料为准，补充说明随采购资料更新</span>
       <Tag v-if="details.status" class="m-0" :color="details.status === 'CONFIRMED' ? 'green' : 'default'">
         {{ details.status === 'CONFIRMED' ? '已确认' : '采购员还在编辑' }}<template v-if="(details.revision ?? 1) > 1"> · 第 {{ details.revision }} 版</template>
       </Tag>
@@ -124,8 +125,8 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
               <span>{{ line.skuName }} <span class="text-xs text-muted-foreground">{{ line.skuCode }}</span></span>
               <span class="tabular-nums">{{ openQty(line) }} {{ line.unit }}</span>
             </span>
-            <span v-if="line.printing" class="text-xs"><span class="text-muted-foreground">定制说明：</span>{{ line.printing }}</span>
-            <span v-if="line.packaging" class="text-xs"><span class="text-muted-foreground">包装要求：</span>{{ line.packaging }}</span>
+            <span class="text-xs"><span class="text-muted-foreground">规格：</span>{{ line.specification || '未维护' }}</span>
+            <ProductStructureDetails :value="line" expanded />
             <span v-if="extraText(line.id)" class="text-xs text-muted-foreground">{{ extraText(line.id) }}</span>
             <span v-if="lineNote(line.id)" class="text-xs text-warning">备注：{{ lineNote(line.id) }}</span>
             <Image

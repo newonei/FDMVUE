@@ -47,7 +47,11 @@ export namespace FdmgongchangWorkbenchApi {
   export interface TaskPrepare {
     aux: FdmgongchangStageStockApi.AuxPlan[];
     hint?: null | string;
-    picks: Array<{ quantity: Decimal; stock: FdmgongchangStageStockApi.Stock }>;
+    picks: Array<{
+      quantity: Decimal;
+      side?: FdmgongchangStageStockApi.LaminationSide;
+      stock: FdmgongchangStageStockApi.Stock;
+    }>;
     productionOrderItemId?: null | number;
     /** 本人已经领料开工的工序单，报工时复用，避免重复扣料。 */
     inProgressOrderId?: null | number;

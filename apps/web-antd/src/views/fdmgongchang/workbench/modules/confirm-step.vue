@@ -93,7 +93,7 @@ async function issue() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in job.picks" :key="p.stock.id" class="border-t border-border">
+            <tr v-for="p in job.picks" :key="`${p.stock.id}:${p.side ?? ''}`" class="border-t border-border">
               <td class="py-1.5 pr-2">
                 <span class="font-semibold">{{ attrSummary(p.stock.stage, p.stock.item, labels, [], 'mm') || p.stock.itemCode }}</span>
                 <span v-if="p.side" class="ml-1 text-xs text-primary">{{ p.side === 'FRONT' ? '正面' : '反面' }}</span>
@@ -113,7 +113,7 @@ async function issue() {
       </section>
       <IssueShortages />
       <p v-if="!job.task && !job.supplement && job.process?.code === 'SLICE'" class="m-0 rounded-md bg-primary/5 p-3 text-sm">
-        本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色和长宽厚分别入库，不计入已下发任务或订单进度。
+        本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色、长宽和填写的单层厚度分别入库，不计入已下发任务或订单进度。
       </p>
       <section v-if="job.task && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
         <span class="text-sm font-bold">本次领料凭证<span class="ml-1 font-normal text-muted-foreground">（选填）</span></span>

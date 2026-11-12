@@ -31,7 +31,12 @@ const props = defineProps<{
   submit: (task: Api.PlanTask) => Promise<void>;
   workers: FdmgongchangFactoryApi.Worker[];
 }>();
+const emit = defineEmits<{ batchMix: [context: { orderNo?: string; workDate: string }] }>();
 const open = defineModel<boolean>('open', { required: true });
+function openBatchMix() {
+  emit('batchMix', { orderNo: order.value === STOCK ? undefined : order.value, workDate: date.value });
+  open.value = false;
+}
 
 interface ProductChoice extends StageChoice {
   assignmentId?: null | string;
@@ -50,11 +55,11 @@ const selectedInput = ref<Api.Material>();
 const inputLoading = ref(false);
 const inputError = ref('');
 const initialInputContextKey = ref('');
-const legacySliceThicknessMismatch = ref(false);
 let inputSequence = 0;
 const found = ref<ProductChoice[]>([]);
 const outputAttrs = ref<StockApi.ItemAttrs>({});
 const outputEdited = ref(false);
+const layerSide = ref<Api.ManufacturingLayer['side']>();
 const quantity = ref<null | number>(null);
 const autoQuantity = ref(false);
 const workerIds = ref<number[]>([]);
@@ -100,7 +105,7 @@ const inputStage = computed(() => sourceStages.value[0] || (process.value === 'S
 const inputSummary = computed(() => selectedInput.value?.attrs
   ? attrSummary(selectedInput.value.stage, selectedInput.value.attrs, makeLabels(materialOptions.value), [], 'mm') : '');
 const editableOutputFields = computed(() => selectsInput.value
-  ? outputFields.value.filter((field) => process.value !== 'SLICE' && (field === 'length' || field === 'width' || field === 'thickness'))
+  ? outputFields.value.filter((field) => process.value === 'SLICE' ? field === 'thickness' : field === 'length' || field === 'width')
   : outputFields.value);
 const outputSummary = computed(() => attrSummary(outputStage.value, outputAttrs.value, makeLabels(materialOptions.value), [], 'mm'));
 
@@ -138,12 +143,37 @@ const productOptions = computed(() => choices.value.map((c) => ({
   value: c.key,
 })));
 const picked = computed(() => choices.value.find((c) => c.key === productKey.value));
-const stagePlan = computed(() => picked.value ? stageTaskPlan(process.value, picked.value) : null);
+const selectedLayer = computed(() => picked.value?.layers?.find((layer) => layer.side === layerSide.value));
+const layerOptions = computed(() => (picked.value?.layers ?? []).map((layer) => ({
+  value: layer.side,
+  label: `${({ FRONT: '正面层', BACK: '反面层', BOTH: '正反同规格层' })[layer.side]} · ${materialOptions.value.colors.find((option) => option.value === layer.color)?.label || layer.color} · ${Number((layer.thickness * 10).toFixed(2))} mm${layer.perProduct === 2 ? ' · 每垫 2 片' : ''}`,
+})));
+const stagePlan = computed(() => {
+  const choice = picked.value;
+  if (!choice) return null;
+  const color = selectedInput.value?.attrs?.color || outputAttrs.value.color;
+  if (intermediate.value && choice.layers?.length) {
+    const layer = selectedLayer.value;
+    const plan = choice.layerPlans?.find((row) => row.side === layer?.side);
+    return stageTaskPlan(process.value, { ...choice,
+      boards: layer ? plan?.boards : null,
+      sheets: layer && plan ? plan.boards * plan.layers : null,
+      remaining: layer && choice.remaining ? choice.remaining * layer.perProduct : null,
+    });
+  }
+  return stageTaskPlan(process.value, { ...choice,
+    boards: color ? choice.boardsByColor?.[color] ?? choice.boards : choice.boards,
+    sheets: color ? choice.sheetsByColor?.[color] ?? choice.sheets : choice.sheets,
+  });
+});
 const sameOriginal = computed(() => !!props.initial && process.value === props.initial.process
   && (order.value === STOCK ? !props.initial.contractCode : order.value === props.initial.contractCode)
   && ((!!picked.value?.assignmentId && picked.value.assignmentId === initialAssignmentId.value) || picked.value?.key === '__CURRENT__'));
 const mergedOriginal = computed(() => sameOriginal.value && (props.initial?.covers?.length ?? 0) > 1);
-const suggested = computed(() => picked.value?.key === '__CURRENT__' ? null : stagePlan.value?.suggested ?? null);
+const suggested = computed(() => {
+  if (picked.value?.key === '__CURRENT__') return null;
+  return stagePlan.value?.suggested ?? null;
+});
 const inputContextKey = computed(() => JSON.stringify([process.value, order.value, productKey.value,
   quantity.value, taskOutputAttrs(outputStage.value, outputAttrs.value)]));
 /** 旧任务可只改日期/人员/备注；重排物料或数量时才要求明确选料。 */
@@ -209,7 +239,14 @@ async function calculateMaterials() {
 
 function applySuggestedOutput() {
   const choice = picked.value;
-  const attrs = process.value === 'MIX' || process.value === 'SLICE' ? choice?.boardAttrs : choice?.targetAttrs;
+  const layer = selectedLayer.value;
+  const useLayer = intermediate.value && !!choice?.layers?.length;
+  let attrs = useLayer ? layer?.cutAttrs : choice?.targetAttrs;
+  if (process.value === 'MIX') {
+    attrs = useLayer ? layer?.boardAttrs : choice?.boardAttrs;
+  } else if (process.value === 'SLICE') {
+    attrs = useLayer ? layer?.sheetAttrs : choice?.sheetAttrs;
+  }
   outputAttrs.value = taskOutputAttrs(outputStage.value, attrs);
   if (autoQuantity.value) quantity.value = suggested.value;
 }
@@ -220,7 +257,6 @@ function clearInput() {
   inputError.value = '';
   inputPickerOpen.value = false;
   selectedInput.value = undefined;
-  legacySliceThicknessMismatch.value = false;
 }
 
 function inheritInputAttrs() {
@@ -233,8 +269,8 @@ function inheritInputAttrs() {
     recipeCode: attrs.recipeCode,
     recipeName: attrs.recipeName,
     ...(process.value === 'SLICE'
-      ? { length: attrs.length, width: attrs.width, thickness: attrs.thickness }
-      : {}),
+      ? { length: attrs.length, width: attrs.width }
+      : { thickness: attrs.thickness }),
   });
   outputEdited.value = true;
 }
@@ -252,8 +288,8 @@ async function selectInputProduct(product: Api.Product) {
     if (run !== inputSequence || !open.value) return;
     selectedInput.value = material;
     initialPreviewKey.value = '';
-    legacySliceThicknessMismatch.value = false;
     inheritInputAttrs();
+    if (autoQuantity.value) quantity.value = suggested.value;
   } catch (error) {
     if (run === inputSequence) inputError.value = `领料产品读取失败：${  errorText(error)}`;
   } finally {
@@ -265,10 +301,16 @@ function selectProduct(p: Api.Product) {
   productPickerOpen.value = false;
   if (!open.value || order.value !== STOCK) return;
   const hasFaceColors = Boolean(p.frontColor || p.backColor);
+  let color: null | string = null;
+  if (p.colorMode === 'SINGLE') {
+    color = p.colorCode || null;
+  } else if (!hasFaceColors) {
+    color = p.colorCode || materialOptions.value.colors.find((c) => c.value === p.color || c.label === p.color)?.value || null;
+  }
   const attrs: StockApi.ItemAttrs = {
     ...parseSizeText(p.size),
     // 已按面维护的颜色不再从单色或旧颜色原文补另一面，缺失的一面需要现场确认。
-    color: hasFaceColors ? null : p.colorCode || materialOptions.value.colors.find((c) => c.value === p.color || c.label === p.color)?.value || null,
+    color,
     frontColor: p.frontColor || null,
     backColor: p.backColor || null,
     textureFront: p.textureFront || null,
@@ -315,6 +357,7 @@ watch([open, () => props.initial], ([value]) => {
   found.value = [];
   const fallbackProductKey = t?.product ? '__CURRENT__' : undefined;
   productKey.value = initialAssignmentId.value && choices.value.some((c) => c.key === initialAssignmentId.value) ? initialAssignmentId.value : fallbackProductKey;
+  layerSide.value = t?.output?.side || (picked.value?.layers?.length === 1 ? picked.value.layers[0]?.side : undefined);
   quantity.value = t ? Number(t.quantity) : null;
   autoQuantity.value = !t;
   workerIds.value = [...(t?.workerIds ?? [])];
@@ -323,25 +366,20 @@ watch([open, () => props.initial], ([value]) => {
   outputEdited.value = false;
   applySuggestedOutput();
   if (t?.output?.attrs) outputAttrs.value = { ...t.output.attrs };
-  legacySliceThicknessMismatch.value = process.value === 'SLICE' && !!t?.output?.attrs
-    && (t.inputs ?? []).some((row) => (toNumber(row.attrs?.thickness) ?? 0) > 0
-      && (toNumber(t.output?.attrs?.thickness) ?? 0) > 0
-      && toNumber(row.attrs?.thickness) !== toNumber(t.output?.attrs?.thickness));
   if (selectsInput.value && t?.inputs?.length === 1 && t.inputs[0]?.code && t.inputs[0].attrs
     && t.inputs[0].attrs.material && t.inputs[0].attrs.color
     && [t.inputs[0].attrs.length, t.inputs[0].attrs.width, t.inputs[0].attrs.thickness].every((v) => (toNumber(v) ?? 0) > 0)
     && sourceStages.value.includes(t.inputs[0].stage)
-    // 旧开片计划可能保存了削薄后的规格；不能在打开表单时改写原约定。
+    // 开片只要求来源长宽、材质和颜色匹配，计划厚度就是要开出的单层厚度。
     && (process.value !== 'SLICE' || (t.output?.attrs
       && (['material', 'color', 'recipeCode'] as const).every((field) => (t.inputs![0]!.attrs![field] || null) === (t.output!.attrs![field] || null))
-      && (['length', 'width', 'thickness'] as const).every((field) => toNumber(t.inputs![0]!.attrs![field]) === toNumber(t.output!.attrs![field]))))) {
+      && (['length', 'width'] as const).every((field) => toNumber(t.inputs![0]!.attrs![field]) === toNumber(t.output!.attrs![field]))))) {
     selectedInput.value = { ...t.inputs[0], attrs: t.inputs[0].attrs ? { ...t.inputs[0].attrs } : undefined };
     inheritInputAttrs();
     outputEdited.value = false;
   }
   initialInputContextKey.value = t && selectsInput.value && !selectedInput.value ? inputContextKey.value : '';
-  initialPreviewKey.value = !props.recalculateMaterials && t?.inputs?.length && (process.value !== 'SLICE'
-    || toNumber(t.inputs[0]?.quantity) === quantity.value) ? previewKey.value : '';
+  initialPreviewKey.value = !props.recalculateMaterials && t?.inputs?.length && process.value !== 'SLICE' ? previewKey.value : '';
   initializing = false;
 }, { immediate: true });
 
@@ -363,8 +401,18 @@ onBeforeUnmount(() => {
 watch([process, productKey], () => {
   if (initializing || !open.value) return;
   clearInput();
+  layerSide.value = picked.value?.layers?.length === 1 ? picked.value.layers[0]?.side : undefined;
   outputEdited.value = true;
   applySuggestedOutput();
+}, { flush: 'sync' });
+watch(layerSide, () => {
+  if (initializing || !open.value) return;
+  clearInput();
+  outputEdited.value = true;
+  applySuggestedOutput();
+}, { flush: 'sync' });
+watch(suggested, (value) => {
+  if (!initializing && autoQuantity.value) quantity.value = value;
 }, { flush: 'sync' });
 watch(process, () => {
   if (initializing) return;
@@ -390,6 +438,7 @@ async function save() {
   errors.value = [];
   if (!date.value) errors.value.push('请选择日期。');
   if (!process.value) errors.value.push('请选择工序。');
+  if (intermediate.value && picked.value?.layers?.length && !selectedLayer.value) errors.value.push('请选择本次生产的正面或反面层。');
   if (selectsInput.value && !preserveLegacyInputs.value && (!selectedInput.value?.code || inputLoading.value)) errors.value.push('请先从产品中心选择本次领料的板材。');
   if (selectsInput.value && inputError.value) errors.value.push('请重新选择有效的领料产品。');
   if (!preserveLegacyInputs.value && order.value !== STOCK && !picked.value?.assignmentId && !mergedOriginal.value) errors.value.push('请选择准确的关联订单明细。');
@@ -405,6 +454,7 @@ async function save() {
     if (!attrs.material) errors.value.push('请选择产出材质。');
     if (![attrs.length, attrs.width, attrs.thickness].every((v) => (toNumber(v) ?? 0) > 0)) errors.value.push('请填写产出的长、宽、厚，均应大于 0。');
     if (isLayered(outputStage.value) ? !attrs.frontColor || !attrs.backColor : !attrs.color) errors.value.push(intermediate.value ? '请选择本次产出的单一颜色；双色订单应按颜色分别安排。' : '请选择产出颜色。');
+    if (process.value === 'SLICE' && selectedInput.value?.attrs && (toNumber(attrs.thickness) ?? 0) > (toNumber(selectedInput.value.attrs.thickness) ?? 0)) errors.value.push('开片单层厚度不能超过领料板材厚度。');
     if (process.value === 'MIX' && !attrs.recipeCode) errors.value.push('请选择本次发泡的配方版本。');
   }
   if (errors.value.length > 0) return;
@@ -426,6 +476,8 @@ async function save() {
     const output: Api.Material = legacy ? { ...(props.initial?.output ?? { stage: outputStage.value }), quantity: quantity.value! }
       : { ...(sameOriginal.value && !outputEdited.value ? props.initial?.output : {}), attrs: taskOutputAttrs(outputStage.value, attrs), name: (`${outputLabel.value  } · ${  outputSummary.value}`).slice(0, 120), quantity: quantity.value!, stage: outputStage.value, unit: unit.value };
     output.recipeBatches = process.value === 'MIX' ? currentPreview.value?.recipeBatches ?? null : null;
+    if (intermediate.value && selectedLayer.value) output.side = selectedLayer.value.side;
+    else if (sameOriginal.value && props.initial?.output?.side) output.side = props.initial.output.side;
     const previewInputs = plannedInputs.value?.length ? plannedInputs.value : undefined;
     await props.submit({
       assignmentId: picked.value?.assignmentId || null,
@@ -467,6 +519,10 @@ async function save() {
         本次工序
         <Select id="task-form-process" v-model:value="process" :options="processOptions" placeholder="选工序" />
       </label>
+      <div v-if="process === 'MIX'" class="flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-primary/5 p-3 sm:col-span-2">
+        <Button id="task-form-batch-mix" @click="openBatchMix">批量安排发泡</Button>
+        <span>一次安排本订单所有明细和制造层，也可再选多个订单；按预览下发独立排单。</span>
+      </div>
       <label for="task-form-order" class="flex flex-col gap-1 sm:col-span-2">
         关联订单（说明这批物料的用途）
         <Select id="task-form-order" v-model:value="order" :options="orderOptions" option-filter-prop="label" show-search />
@@ -487,6 +543,10 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
         <span v-if="picked" class="text-xs">{{ order === STOCK ? '关联产品' : '订单目标' }}：{{ picked.code || picked.name }}<template v-if="picked.spec"> · {{ dimensionTextInMm(picked.spec) }}</template></span>
       </div>
 
+      <label v-if="intermediate && layerOptions.length" for="task-form-layer" class="flex flex-col gap-1 sm:col-span-2">
+        本次生产的层
+        <Select id="task-form-layer" v-model:value="layerSide" :options="layerOptions" placeholder="选择正面或反面，按各层实际厚度生产" />
+      </label>
       <section v-if="selectsInput" class="flex flex-col gap-2 rounded-md border border-border p-3 sm:col-span-2" aria-label="选择领料产品">
         <b class="text-foreground">预计领料产品：{{ sourceText }}</b>
         <p class="m-0">从产品中心选择本次要领用的上工序板材；实际领料批次和数量在「我的工作台」确认。</p>
@@ -496,7 +556,6 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
         </button>
         <p v-if="selectedInput" class="m-0 text-foreground">{{ selectedInput.code }}<br />{{ inputSummary }}</p>
         <p v-if="preserveLegacyInputs" class="m-0">当前保留历史任务的领料和产出约定，可直接调整日期、人员或说明；如需修改计划数量或产出，请重新选择领料板材。</p>
-        <p v-if="legacySliceThicknessMismatch" class="m-0 text-warning" role="alert">历史开片计划厚度与领料板材不一致。请重新选择领料板材，确认同厚度产出和预计领料后再下发或报工。</p>
         <p v-if="process === 'SLICE' && initial && !selectedInput && !preserveLegacyInputs" class="m-0">草稿或补派任务需要重新选择领料板材，确认本次产出规格后再保存。</p>
         <p v-if="inputError" class="m-0 text-destructive" role="alert">{{ inputError }}</p>
       </section>
@@ -509,15 +568,15 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
         </div>
         <b class="text-foreground">本工序计划产出规格</b>
         <template v-if="selectsInput">
-          <p class="m-0">{{ process === 'SLICE' ? '开片沿用所选板材的材质、配方、颜色和长宽厚，规格保持一致，无需填写。' : '立切沿用所选已开片板材的材质、配方和颜色，请填写目标片材的长、宽、厚（mm）。' }}</p>
+          <p class="m-0">{{ process === 'SLICE' ? '开片沿用板材的材质、配方、颜色和长宽，按已确认的制造层厚度开片（mm）；两层厚度相加为成品厚度。' : '立切沿用已开片板材的材质、配方、颜色和厚度，仅填写目标片材的长、宽（mm）。' }}</p>
           <p v-if="!selectedInput" class="m-0">{{ process === 'SLICE' ? '选择上方的领料板材后，自动带出本工序产出规格。' : '请先选择上方的领料板材，再填写产出规格。' }}</p>
           <p v-else class="m-0">已沿用所选板材属性，报工时登记本工序实际产出。</p>
         </template>
         <p v-else class="m-0">{{ process === 'MIX' ? '开工时按配方领取原材料；报工登记以下规格、颜色的板材。' : '开工时领取上工序已有库存批次；报工登记本工序实际产出，保留领料批次追溯。' }}</p>
         <AttrFields v-if="editableOutputFields.length && (!selectsInput || selectedInput)" v-model="outputAttrs" :fields="editableOutputFields" :options="materialOptions" dimension-unit="mm" id-prefix="task-output" @changed="outputEdited = true" />
-        <p v-if="intermediate" class="m-0">一项任务对应一种产出颜色。双色订单请分别安排正面色、反面色物料。</p>
+        <p v-if="intermediate" class="m-0">一项任务对应一个制造层规格。同色不同厚度也需分层安排；同色等厚可合并生产，数量按每垫两片计算。</p>
         <p v-if="initial && !initial.output?.attrs && sameOriginal" class="m-0 text-warning">历史任务尚未保存结构化产出；保持不填时沿用原约定，填写后请补全产出属性。</p>
-        <p v-if="outputSummary && (!selectsInput || selectedInput || preserveLegacyInputs || legacySliceThicknessMismatch)" class="m-0 text-foreground">计划产出：{{ outputLabel }} · {{ outputSummary }}</p>
+        <p v-if="outputSummary && (!selectsInput || selectedInput || preserveLegacyInputs)" class="m-0 text-foreground">计划产出：{{ outputLabel }} · {{ outputSummary }}</p>
       </section>
 
       <label for="task-form-quantity" class="flex flex-col gap-1 sm:col-span-2">
@@ -533,7 +592,7 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
           <div><b class="text-foreground">预计领料</b><span class="ml-2">用于备料，不占用或扣减库存</span></div>
           <Button size="small" :loading="previewLoading" :disabled="!previewRequest" @click="calculateMaterials">重新计算</Button>
         </div>
-        <p v-if="!previewRequest" class="m-0">{{ process === 'SLICE' ? '选择领料板材并填写计划数量后，按同规格一张板材对应一片已开片板材计算预计用量。' : selectsInput ? '选择领料板材，填写产出规格和计划数量后，自动计算该板材的预计用量。' : '填写本工序的产出规格和计划数量后，自动计算预计领料。' }}</p>
+        <p v-if="!previewRequest" class="m-0">{{ process === 'SLICE' ? '选择领料板材、填写单层厚度和计划片数后，按板厚除以单层厚度向下取整，计算预计领料张数。' : selectsInput ? '选择领料板材，填写产出规格和计划数量后，自动计算该板材的预计用量。' : '填写本工序的产出规格和计划数量后，自动计算预计领料。' }}</p>
         <p v-else-if="previewLoading" class="m-0" role="status">正在按计划产出计算预计领料…</p>
         <p v-if="previewError" class="m-0 text-destructive" role="alert">{{ previewError }}</p>
         <template v-if="currentPreview">

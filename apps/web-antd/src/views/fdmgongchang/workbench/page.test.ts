@@ -239,6 +239,26 @@ describe('workbench page', () => {
     expect(mocks.issue).not.toHaveBeenCalled();
     expect(mocks.report).not.toHaveBeenCalled();
   });
+  it('keeps same-batch front/back laminate picks separate and submits both while totaling shortages', async () => {
+    const sheet = { ...board, stage: 'SHEET', quantity: 15, item: { ...board.item, thickness: 0.3 } };
+    const process = { ...my.processes[0]!, code: 'LAMINATE', label: '贴合', outputStage: 'LAMINATED', sources: ['SHEET'] };
+    const task = { ...my.tasks[0]!, process: 'LAMINATE', unit: '片' };
+    mocks.route.query = { factoryId: '1', taskId: '31' };
+    mocks.my.mockResolvedValue({ ...my, tasks: [task], inProgress: [], processes: [process] });
+    mocks.prepare.mockResolvedValue({ ...prepare, task, outputStage: 'LAMINATED', sourceStage: 'SHEET', sourceStages: ['SHEET'], picks: [] });
+    mocks.stock.mockResolvedValue({ list: [sheet], total: 1 });
+    await mount();
+    clickButton('选择正面'); await flush(); clickButton('选择反面'); await flush();
+    fill('actual-pick-11-FRONT', 11); fill('actual-pick-11-BACK', 12); await flush();
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11-FRONT')!.value)).toBe(11);
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11-BACK')!.value)).toBe(12);
+    expect(document.body.textContent).toContain('领料后欠账 8 片');
+    clickButton('下一步：确认领料'); await flush();
+    clickButton('确认领料'); await flush();
+    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ inputs: [
+      { laminationSide: 'FRONT', quantity: 11, stockId: 11 }, { laminationSide: 'BACK', quantity: 12, stockId: 11 },
+    ] }));
+  });
 
   it('resumes the linked issued task on its original order without issuing material again', async () => {
     mocks.route.query = { factoryId: '1', taskId: '31' };
@@ -304,9 +324,9 @@ describe('workbench page', () => {
     expect(mocks.order).toHaveBeenCalledWith(5);
     expect(document.body.textContent).toContain('报本工序实际产出');
     expect(document.querySelector('[id^="wb-"][id$="-width"]')).toBeNull();
-    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     expect(document.body.textContent).toContain('1900×1300×48 mm');
-    expect(document.body.textContent).toContain('厚度不可修改');
+    expect(document.body.textContent).toContain('厚度填写单层厚度');
     expect(document.body.textContent).toContain('每张开 1 片 × 52 张 = 52 片');
     const goodInput = document.querySelector<HTMLInputElement>('[id^="good-"]')!;
     expect(Number(goodInput.value)).toBe(0);
@@ -498,7 +518,11 @@ describe('workbench page', () => {
     expect(document.body.textContent).toContain('2000×1400×30 mm');
     expect(document.body.textContent).toContain('开片不会改变颜色，颜色固定沿用对应领料，不可修改。');
     expect(document.querySelector('[id^="wb-"][id$="-color"]')).toBeNull();
-    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
+    for (const thickness of document.querySelectorAll<HTMLInputElement>('[id^="wb-"][id$="-thickness"]')) fill(thickness.id, 3);
+    await flush();
+    expect(document.body.textContent).toContain('每张开 15 片 × 3 张 = 45 片');
+    expect(document.body.textContent).toContain('每张开 10 片 × 5 张 = 50 片');
     const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="good-"]')];
     expect(goods).toHaveLength(2);
     expect(goods.map((input) => Number(input.value))).toEqual([0, 0]);
@@ -507,8 +531,8 @@ describe('workbench page', () => {
     await flush();
     clickButton('下一步');
     await flush();
-    expect(document.body.textContent).toContain('良品 0.56172 m³ × ¥27/m³');
-    expect(document.body.textContent).toContain('¥15.17');
+    expect(document.body.textContent).toContain('良品 0.048648 m³ × ¥27/m³');
+    expect(document.body.textContent).toContain('¥1.31');
     expect(document.querySelector('[id^="piece-item-"]')).toBeNull();
     expect(mocks.wage).toHaveBeenCalled();
     clickButton('提交');
@@ -517,10 +541,10 @@ describe('workbench page', () => {
       id: 7,
       finish: true,
       outputs: [
-        expect.objectContaining({ attrs: expect.objectContaining(blue.item), goodQuantity: 2, defectQuantity: 0, sourceItemIds: [blue.itemId] }),
-        expect.objectContaining({ attrs: expect.objectContaining(green.item), goodQuantity: 4, defectQuantity: 0, sourceItemIds: [green.itemId] }),
+        expect.objectContaining({ attrs: expect.objectContaining({ ...blue.item, thickness: 0.3 }), goodQuantity: 2, defectQuantity: 0, sourceItemIds: [blue.itemId] }),
+        expect.objectContaining({ attrs: expect.objectContaining({ ...green.item, thickness: 0.3 }), goodQuantity: 4, defectQuantity: 0, sourceItemIds: [green.itemId] }),
       ],
-      pieceworks: [{ itemId: 1, quantity: '0.56172', userId: 2 }],
+      pieceworks: [{ itemId: 1, quantity: '0.048648', userId: 2 }],
     }));
     expect(mocks.reportOrder.mock.calls[0]![0]).not.toHaveProperty('inputs');
     expect(mocks.reportOrder).toHaveBeenCalledTimes(1);
@@ -558,6 +582,7 @@ describe('workbench page', () => {
     await mount();
     clickButton('报本工序产出');
     await flush();
+    fill(document.querySelector('[id^="wb-"][id$="-thickness"]')!.id, 3);
     fill(document.querySelector('[id^="good-"]')!.id, 40);
     await flush();
     clickButton('下一步');
@@ -703,26 +728,28 @@ describe('workbench page', () => {
     expect(mocks.order).toHaveBeenCalledWith(5);
     expect(mocks.stock).not.toHaveBeenCalled();
     expect(mocks.issue).not.toHaveBeenCalled();
-    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     expect(document.body.textContent).toContain('1900×1300×48 mm');
   });
 
-  it('restores different issued thicknesses as separate immutable output rows on an independent order', async () => {
+  it('restores different issued thicknesses as separate output rows with editable single-layer thickness on an independent order', async () => {
     mocks.my.mockResolvedValue({ ...my, tasks: [], inProgress: [my.inProgress[0]] });
     mocks.order.mockResolvedValue({ ...order, inputs: [
-      ...order.inputs,
-      { ...order.inputs[0], id: 102, stockId: 12, batchNo: 'THIN', quantity: 7, item: { ...board.item, thickness: 3 } },
+      ...order.inputs.map((input) => ({ ...input, itemId: 11 })),
+      { ...order.inputs[0], id: 102, stockId: 12, itemId: 12, batchNo: 'THIN', quantity: 7, item: { ...board.item, thickness: 3 } },
       { ...order.inputs[0], id: 103, stockId: 13, batchNo: 'RETURNED', quantity: 5, returnedQuantity: 5, item: { ...board.item, thickness: 1 } },
     ] });
     await mount();
     clickButton('报本工序产出');
     await flush();
     expect(document.querySelectorAll('[id^="good-"]')).toHaveLength(2);
-    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     expect(document.body.textContent).toContain('1900×1300×48 mm');
     expect(document.body.textContent).toContain('1900×1300×30 mm');
-    expect(document.body.textContent).toContain('每张开 1 片 × 52 张 = 52 片');
-    expect(document.body.textContent).toContain('每张开 1 片 × 7 张 = 7 片');
+    for (const thickness of document.querySelectorAll<HTMLInputElement>('[id^="wb-"][id$="-thickness"]')) fill(thickness.id, 3);
+    await flush();
+    expect(document.body.textContent).toContain('每张开 16 片 × 52 张 = 832 片');
+    expect(document.body.textContent).toContain('每张开 10 片 × 7 张 = 70 片');
     const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="good-"]')];
     fill(goods[0]!.id, 40);
     fill(goods[1]!.id, 6);
@@ -732,37 +759,36 @@ describe('workbench page', () => {
     clickButton('提交');
     await flush();
     expect(mocks.reportOrder).toHaveBeenCalledWith(expect.objectContaining({ outputs: [
-      expect.objectContaining({ attrs: expect.objectContaining({ thickness: 4.8 }), goodQuantity: 40 }),
-      expect.objectContaining({ attrs: expect.objectContaining({ thickness: 3 }), goodQuantity: 6 }),
+      expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.3 }), goodQuantity: 40 }),
+      expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.3 }), goodQuantity: 6 }),
     ] }));
   });
 
-  it('shows the actual board thickness and blocks reporting an incompatible historical task plan', async () => {
+  it('reports the planned 3 mm layers from a 48 mm board without a false thickness mismatch', async () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     mocks.prepare.mockResolvedValue({ ...prepare, outputAttrs: { ...plannedAttrs, thickness: 0.3 } });
-    await mount();
-    clickButton('报本工序产出');
-    await flush();
-    expect(document.body.textContent).toContain('开片计划厚度（3 mm）与实际领料（48 mm）不一致');
-    expect(document.body.textContent).toContain('请联系排单人员核对并处理原任务');
-    expect(document.body.textContent).toContain('1900×1300×48 mm');
-    expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeNull();
+    await mount(); clickButton('报本工序产出'); await flush();
+    expect(document.body.textContent).not.toContain('超过实际领料厚度');
+    expect(document.body.textContent).toContain('1900×1300×3 mm');
+    expect(document.body.textContent).toContain('每张开 16 片 × 52 张 = 832 片');
     fill(document.querySelector('[id^="good-"]')!.id, 40);
-    await flush();
-    clickButton('下一步');
-    await flush();
-    expect(document.body.textContent).not.toContain('确认本次报工和计件');
-    expect(mocks.report).not.toHaveBeenCalled();
+    await flush(); clickButton('下一步'); await flush(); clickButton('报工'); await flush();
+    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ outputs: [expect.objectContaining({
+      attrs: expect.objectContaining({ thickness: 0.3 }), goodQuantity: 40,
+    })] }));
   });
 
-  it('blocks issuing a board that has a different thickness from the task plan', async () => {
+  it('allows issuing a thicker board for a thin-sheet task and blocks a target thicker than the board', async () => {
     mocks.prepare.mockResolvedValue({ ...prepare, outputAttrs: { ...plannedAttrs, thickness: 0.3 } });
-    await mount();
-    clickButton('领料开工');
-    await flush();
-    expect(document.body.textContent).toContain('开片计划厚度（3 mm）与实际领料（48 mm）不一致');
-    clickButton('下一步：确认领料');
-    await flush();
+    await mount(); clickButton('领料开工'); await flush();
+    expect(document.body.textContent).not.toContain('超过实际领料厚度');
+    clickButton('下一步：确认领料'); await flush();
+    expect(document.body.textContent).toContain('确认领料');
+    unmount?.(); document.body.innerHTML = '';
+    mocks.prepare.mockResolvedValue({ ...prepare, outputAttrs: { ...plannedAttrs, thickness: 5 } });
+    await mount(); clickButton('领料开工'); await flush();
+    expect(document.body.textContent).toContain('开片计划厚度（50 mm）超过实际领料厚度');
+    clickButton('下一步：确认领料'); await flush();
     expect(document.body.textContent).toContain('选择实际领料批次');
     expect(mocks.issue).not.toHaveBeenCalled();
   });
@@ -977,32 +1003,29 @@ describe('workbench page', () => {
     expect(mocks.report).not.toHaveBeenCalled();
   });
 
-  it('reports a 6 mm cut sheet from a 45 mm opened board and preserves the issued material recipe', async () => {
+  it('keeps 3 mm thickness while cutting a sheet for a 6 mm mat and preserves the issued material recipe', async () => {
     const task = { ...my.tasks[0]!, id: 51, process: 'CUT' };
     const attrs = { color: 'PU', material: 'TPE', length: 183, width: 61, thickness: 0.6, recipeCode: 'REC-001' };
     mocks.my.mockResolvedValue({ ...my, tasks: [task], inProgress: [{ ...inProgress, scheduleTaskId: 51, process: 'CUT', sourceStage: 'SHEET', outputStage: 'CUT' }], processes: [{ code: 'CUT', label: '立切', outputLabel: '片材', outputStage: 'CUT', outputUnit: '片', sources: ['SHEET'] }] });
     mocks.options.mockResolvedValue({ ...options, stages: [...options.stages, { code: 'CUT', label: '片材', unit: '片', defaultLocation: '片材区' }] });
     mocks.prepare.mockResolvedValue({ ...prepare, task, outputStage: 'CUT', outputLabel: '片材', outputAttrs: attrs });
-    mocks.order.mockResolvedValue({ ...order, process: 'CUT', sourceStage: 'SHEET', outputStage: 'CUT', inputs: [{ ...order.inputs[0], stage: 'SHEET', item: { ...plannedAttrs, thickness: 4.5, recipeCode: 'REC-001', recipeName: '常规款' } }] });
+    mocks.order.mockResolvedValue({ ...order, process: 'CUT', sourceStage: 'SHEET', outputStage: 'CUT', inputs: [{ ...order.inputs[0], stage: 'SHEET', item: { ...plannedAttrs, thickness: 0.3, recipeCode: 'REC-001', recipeName: '常规款' } }] });
     await mount();
     clickButton('报本工序产出');
     await flush();
     expect(document.body.textContent).toContain('实际产出：片材');
     expect(document.body.textContent).toContain('1830×610×6 mm');
-    expect(document.body.textContent).toContain('1900×1300×45 mm');
+    expect(document.body.textContent).toContain('1900×1300×3 mm');
+    expect(document.body.textContent).toContain('1830×610×3 mm');
     clickButton('不对？改一下'); await flush();
     const thickness = document.querySelector<HTMLInputElement>('[id^="wb-"][id$="-thickness"]');
-    expect(thickness).toBeTruthy();
-    expect(Number(thickness!.value)).toBe(6);
-    fill(thickness!.id, 7); await flush();
-    expect(document.body.textContent).toContain('1830×610×7 mm');
-    fill(thickness!.id, 6); await flush();
+    expect(thickness).toBeNull();
     fill(document.querySelector('[id^="good-"]')!.id, 40);
     await flush();
     clickButton('下一步');
     await flush();
     clickButton('报工');
     await flush();
-    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ taskId: 51, orderId: 5, outputs: [expect.objectContaining({ attrs: expect.objectContaining({ ...attrs, recipeName: '常规款' }), goodQuantity: 40 })] }));
+    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ taskId: 51, orderId: 5, outputs: [expect.objectContaining({ attrs: expect.objectContaining({ ...attrs, thickness: 0.3, recipeName: '常规款' }), goodQuantity: 40 })] }));
   });
 });

@@ -1,4 +1,5 @@
 import type { MigrationInfo } from './business-documents';
+import type { ProductAttributes } from './products';
 
 import { requestClient } from '#/api/request';
 import {
@@ -50,7 +51,7 @@ export interface MasterRecord extends BusinessRecord {
   active: boolean;
   remark?: string;
 }
-export interface ContractItem extends BusinessRecord {
+export interface ContractItem extends BusinessRecord, ProductAttributes {
   skuId: string;
   skuCode?: string;
   skuName: string;
@@ -69,6 +70,7 @@ export interface ContractItem extends BusinessRecord {
   size?: string;
   color?: string;
   shape?: string;
+  weight?: string;
   printing?: string;
   packaging?: string;
   suggestedSupplierId?: string;

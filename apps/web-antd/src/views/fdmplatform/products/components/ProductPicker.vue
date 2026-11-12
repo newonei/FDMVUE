@@ -27,6 +27,7 @@ import {
 import { errorText, money } from '../../data';
 import { mergeProductSelection, productDescription } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
+import ProductColorSummary from './ProductColorSummary.vue';
 import ProductEditor from './ProductEditor.vue';
 import ProductStageSelect from './ProductStageSelect.vue';
 
@@ -262,6 +263,7 @@ function afterCreated(product: Product) {
               width: 150,
             },
             { title: '型号 · 规格', key: 'specification' },
+            { title: '颜色 / 制造结构', key: 'colors', width: 220 },
             { title: '单位', dataIndex: 'unit', width: 60 },
             allowIncomplete
               ? { title: '资料', key: 'state', width: 90 }
@@ -289,6 +291,11 @@ function afterCreated(product: Product) {
                 <div class="muted">{{ record.code }}</div>
               </div>
             </div>
+            <ProductColorSummary
+              v-else-if="column.key === 'colors'"
+              :value="record as Product"
+              construction
+            />
             <span v-else-if="column.key === 'category'" class="muted">{{
               record.category || '未分类'
             }}</span>

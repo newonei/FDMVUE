@@ -138,12 +138,16 @@ export function groupByDate<T>(items: T[], dateOf: (item: T) => string) {
 
 /** 选中的产品：订单成品规格，加上用料逆推带出的板材、已开片板材和还要做多少。 */
 export interface StageChoice {
+  layers?: Api.ManufacturingLayer[];
+  layerPlans?: Api.LayerBoard[];
   boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
   boards?: null | number;
+  boardsByColor?: Record<string, number>;
   boardSpec?: null | string;
   name: string;
   remaining?: null | number;
   sheets?: null | number;
+  sheetsByColor?: Record<string, number>;
   sheetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
   sheetSpec?: null | string;
   spec: string;
@@ -175,16 +179,18 @@ export function taskOutputAttrs(stage: string, attrs?: FdmgongchangStageStockApi
 export function taskMaterialText(material?: Api.Material | null, fallback?: null | string) {
   if (!material) return dimensionTextInMm(fallback) || '待确认产出规格';
   const attributes = attrSummary(material.stage, material.attrs, makeLabels(), [], 'mm');
-  return attributes
+  const summary = attributes
     ? [TASK_STAGE_LABELS[material.stage] ?? material.stage, attributes].join(' · ')
     : dimensionTextInMm(material.name || fallback) || TASK_STAGE_LABELS[material.stage] || material.stage;
+  const side = material.side ? { FRONT: '正面层', BACK: '反面层', BOTH: '正反同规格层' }[material.side] : '';
+  return side ? `${side} · ${summary}` : summary;
 }
 
 /** 产出板材、片材的工序。 */
-const STAGE_OUTPUT: Record<string, 'board' | 'sheet'> = { MIX: 'board', SLICE: 'board', CUT: 'sheet' };
+const STAGE_OUTPUT: Record<string, 'board' | 'sheet'> = { MIX: 'board', SLICE: 'sheet', CUT: 'sheet' };
 
 /**
- * 发泡做板材，开片仍做板材，立切做片材；订单成品只用于说明用途。
+ * 发泡做板材，开片按单层厚度做整张片材，立切裁出目标长宽。
  * 规格算不出时留空，让排单员明确填写，不能把成品规格当成中间产物规格。
  */
 export function stageTaskPlan(process: null | string | undefined, choice: StageChoice) {
@@ -194,8 +200,17 @@ export function stageTaskPlan(process: null | string | undefined, choice: StageC
   }
   const mixing = process === 'MIX';
   const slicing = process === 'SLICE';
-  const spec = dimensionTextInMm(mixing || slicing ? choice.boardSpec : choice.spec);
-  const suggested = positive(mixing || slicing ? choice.boards : choice.remaining);
+  let sourceSpec: null | string | undefined = choice.spec;
+  let sourceQuantity = choice.remaining;
+  if (mixing) {
+    sourceSpec = choice.boardSpec;
+    sourceQuantity = choice.boards;
+  } else if (slicing) {
+    sourceSpec = choice.sheetSpec;
+    sourceQuantity = choice.sheets;
+  }
+  const spec = dimensionTextInMm(sourceSpec);
+  const suggested = positive(sourceQuantity);
   const remaining = choice.remaining ? `订单还要做 ${choice.remaining} 条成品，` : '';
   let hint: string;
   if (mixing) {
@@ -203,9 +218,9 @@ export function stageTaskPlan(process: null | string | undefined, choice: StageC
       ? `${remaining}按用料逆推要 ${suggested} 张板`
       : '请确认本次发泡板材的尺寸、配方、单一颜色及计划张数';
   } else if (slicing) {
-    hint = suggested ? `${remaining}建议安排 ${suggested} 片已开片板材，规格沿用领料板材` : '请选择领料板材，自动沿用其厚度，并确认计划片数';
+    hint = suggested ? `${remaining}建议安排 ${suggested} 片已开片板材，按订单单层厚度开片` : '请选择领料板材，填写单层厚度，并确认计划片数';
   } else {
-    hint = suggested ? `${remaining}请按实际裁切方案确认 ${suggested} 片的建议数量` : '请确认立切后片材的长、宽、厚、颜色及计划片数';
+    hint = suggested ? `${remaining}请按实际裁切方案确认 ${suggested} 片的建议数量` : '请确认立切后片材的长、宽及计划片数，厚度沿用领料';
   }
   return { hint, kind, spec, suggested };
 }

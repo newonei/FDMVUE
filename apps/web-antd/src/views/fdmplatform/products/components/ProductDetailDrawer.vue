@@ -43,8 +43,9 @@ import {
   dateRangeError,
   quantityText,
 } from '../activity-model';
-import { productAttributeDetails, productAttributesText } from '../attributes';
+import { productAttributeDetails, productProcessText } from '../attributes';
 import { missingProductFields } from '../model';
+import ProductColorSummary from './ProductColorSummary.vue';
 import ProductFiles from './ProductFiles.vue';
 import ProductStageStocks from './ProductStageStocks.vue';
 
@@ -334,11 +335,14 @@ function refresh() {
                 '—'
               }}
             </Descriptions.Item>
-            <Descriptions.Item label="颜色 / 形状">
-              {{
-                [product.color, product.shape].filter(Boolean).join(' / ') ||
-                '—'
-              }}
+            <Descriptions.Item label="形状">
+              {{ product.shape || '—' }}
+            </Descriptions.Item>
+            <Descriptions.Item label="颜色原文">
+              {{ product.color || '—' }}
+            </Descriptions.Item>
+            <Descriptions.Item label="颜色 / 制造结构" :span="2">
+              <ProductColorSummary :value="product" construction />
             </Descriptions.Item>
             <Descriptions.Item label="可用状态">
               <Tag :color="product.selectable ? 'green' : 'orange'">
@@ -352,9 +356,7 @@ function refresh() {
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="生产属性" :span="2">
-              {{
-                productAttributesText(product) || '尚未维护生产分类与工艺属性'
-              }}
+              {{ productProcessText(product) || '尚未维护生产分类与工艺属性' }}
             </Descriptions.Item>
           </Descriptions>
         </Card>
@@ -386,8 +388,14 @@ function refresh() {
               <Descriptions.Item label="颜色原文">
                 {{ product.color || '—' }}
               </Descriptions.Item>
+              <Descriptions.Item label="颜色 / 制造结构">
+                <ProductColorSummary :value="product" construction />
+              </Descriptions.Item>
               <Descriptions.Item
-                v-for="item in productAttributeDetails(product)"
+                v-for="item in productAttributeDetails(product).filter(
+                  (entry) =>
+                    !['单色', '正面颜色', '反面颜色'].includes(entry.label),
+                )"
                 :key="item.label"
                 :label="item.label"
               >

@@ -1,11 +1,14 @@
 import type { Contract } from '#/api/fdmplatform';
 import type {
   ProcurementOrderView,
+  ProcurementProductSnapshot,
   PurchaseOrderEntry,
 } from '#/api/fdmplatform/procurement';
+import type { ProductStructure } from '#/api/fdmplatform/products';
 
 import BigNumber from 'bignumber.js';
 
+import { productStructure } from '../../products/structure';
 import { latestTaskQuotes } from '../quotes/comparison';
 import { orderableQuote } from '../quotes/quick-order';
 import { priceFromTotal, totalFromPrice } from '../tasks/request-batch';
@@ -43,6 +46,8 @@ export interface EntryRow {
   name: string;
   code?: string;
   specification?: string;
+  /** 只读的来源结构资料；保存时由服务端按来源 ID 冻结，不提交任意快照。 */
+  structure?: ProductStructure;
   unit?: string;
   quantity?: string;
   unitPrice?: string;
@@ -54,9 +59,13 @@ export interface EntryRow {
   supplierId?: string;
   /** 修改草稿采购单时原明细行的 id，保存时沿用 */
   lineId?: string;
+  /** 复制原行的可信来源；换产品后清空。 */
+  sourceLineId?: string;
 }
 
 export interface EntryHeader {
+  sourceContractId?: string;
+  sourceOrderId?: string;
   additionalAmount?: string;
   additionalCategory?: string;
   category?: string;
@@ -81,6 +90,17 @@ const blank = (value: string | undefined) => (value ?? '').trim() === '';
 
 export function emptyRow(key: string): EntryRow {
   return { key, name: '', gift: false };
+}
+
+export function entryProductFields(source: ProcurementProductSnapshot) {
+  return {
+    category: source.category ?? undefined,
+    name: source.skuName || '产品',
+    code: source.skuCode ?? undefined,
+    specification: source.specification ?? undefined,
+    unit: source.unit ?? undefined,
+    structure: productStructure(source),
+  };
 }
 
 /** 填单价：总价跟着算；赠品单价总价都为 0。 */
@@ -234,6 +254,10 @@ export function entryPayload(
   return {
     idempotencyKey,
     contractId: header.contractId || undefined,
+    sourceContractId: header.sourceOrderId
+      ? header.sourceContractId
+      : undefined,
+    sourceOrderId: header.sourceOrderId,
     supplierId: header.supplierId ?? '',
     subject: header.subject?.trim() || undefined,
     category: header.category || undefined,
@@ -260,6 +284,7 @@ export function entryPayload(
           ? row.supplierId
           : undefined,
       id: row.lineId,
+      sourceLineId: row.sourceLineId,
     })),
   };
 }
@@ -270,13 +295,7 @@ interface CopiedLine {
   skuId?: null | string;
   quantity?: unknown;
   unitPrice?: unknown;
-  specificationSnapshot?: null | {
-    category?: null | string;
-    skuCode?: null | string;
-    skuName?: null | string;
-    specification?: null | string;
-    unit?: null | string;
-  };
+  specificationSnapshot?: null | ProcurementProductSnapshot;
 }
 const copiedText = (value: unknown) =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;
@@ -312,6 +331,8 @@ export function copyEntry(
       : number;
   };
   const header: EntryHeader = {
+    sourceContractId: edit ? undefined : view.contractId || 'standalone',
+    sourceOrderId: edit ? undefined : String(order.id),
     contractId: view.contractId || undefined,
     supplierId: copiedText(order.supplierId),
     subject: copiedText(details.subject),
@@ -336,13 +357,10 @@ export function copyEntry(
       const note = line.id ? notes[line.id] : undefined;
       const row: EntryRow = {
         ...emptyRow(key()),
-        category: snapshot.category ?? undefined,
+        ...entryProductFields(snapshot),
         productId: line.contractItemId ? undefined : (line.skuId ?? undefined),
         contractItemId: line.contractItemId ?? undefined,
-        name: snapshot.skuName || '产品',
-        code: snapshot.skuCode ?? undefined,
-        specification: snapshot.specification ?? undefined,
-        unit: snapshot.unit ?? undefined,
+        sourceLineId: edit ? undefined : line.id,
         quantity: copiedNumber(line.quantity),
         remark: copiedText(note?.remark),
       };

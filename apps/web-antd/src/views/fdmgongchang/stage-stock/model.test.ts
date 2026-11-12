@@ -97,7 +97,7 @@ describe('deriveOutputs', () => {
       line(3, 'BOARD', board('PU'), 'MB3', 2),
     ]);
     expect(outputs).toHaveLength(2);
-    expect(outputs[0]!.attrs).toMatchObject({ color: 'PU', thickness: 0.3 });
+    expect(outputs[0]!.attrs).toMatchObject({ color: 'PU', thickness: null });
     expect(outputs[0]!.attrs.length).toBe(190);
     expect(outputs[0]!.batchNo).toBe('MB1/MB3');
     expect(outputs[1]!.batchNo).toBe('MB2');
@@ -124,9 +124,9 @@ describe('deriveOutputs', () => {
     ];
     const outputs = deriveOutputs('SLICE', inputs);
     expect(outputs).toHaveLength(3);
-    expect(outputs.map((output) => output.attrs.thickness)).toEqual([4.5, 3, 4.5]);
+    expect(outputs.map((output) => output.attrs.thickness)).toEqual([null, null, null]);
     expect(outputs.map((output) => lineBatch('SLICE', output, inputs))).toEqual(['THICK', 'THIN', 'SHORT']);
-    expect(EDITABLE_FIELDS.SLICE).not.toContain('thickness');
+    expect(EDITABLE_FIELDS.SLICE).toEqual(['thickness']);
   });
 
   it('keeps otherwise identical boards with different recipes separate through slicing and cutting', () => {
@@ -137,11 +137,12 @@ describe('deriveOutputs', () => {
     ];
     const sliced = deriveOutputs('SLICE', inputs);
     expect(sliced).toHaveLength(2);
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, sliced);
     expect(sliced.map((output) => lineBatch('SLICE', output, inputs))).toEqual(['REGULAR-1/REGULAR-2', 'ELASTIC']);
-    expect(sliced.map((output) => sliceYield(inputs, sliced, output))).toEqual([12, 5]);
+    expect(sliced.map((output) => sliceYield(inputs, sliced, output))).toEqual([180, 75]);
     expect(sliced.map((output) => normalizeForStage('SHEET', output.attrs))).toEqual([
-      { ...board('PU', 4.5), recipeName: '常规款' },
-      { ...board('PU', 4.5), recipeCode: 'REC-002', recipeName: '高弹款' },
+      { ...board('PU', 0.3), recipeName: '常规款' },
+      { ...board('PU', 0.3), recipeCode: 'REC-002', recipeName: '高弹款' },
     ]);
     const cut = deriveOutputs('CUT', sliced.map((output, index) => line(index + 1, 'SHEET', output.attrs, output.batchNo, 1)));
     expect(cut).toHaveLength(2);
@@ -161,8 +162,8 @@ describe('deriveOutputs', () => {
 
     applyTaskTarget('SLICE', { length: 183, width: 61, thickness: 0.6 }, inputs, outputs);
 
-    expect(outputs.map((output) => output.attrs)).toEqual(inputs.map((input) => input.stock.item));
-    expect(outputs.map((output) => sliceYield(inputs, outputs, output))).toEqual([10, 5]);
+    expect(outputs.map((output) => output.attrs)).toEqual(inputs.map((input) => ({ ...input.stock.item, thickness: 0.6 })));
+    expect(outputs.map((output) => sliceYield(inputs, outputs, output))).toEqual([70, 25]);
     expect(outputs.map((output) => output.goodQuantity)).toEqual([undefined, undefined]);
   });
 
@@ -172,7 +173,7 @@ describe('deriveOutputs', () => {
 
     applyTaskTarget('CUT', { length: 183, width: 61, thickness: 0.6 }, inputs, outputs);
 
-    expect(outputs[0]!.attrs).toEqual({ ...board('PU', 0.6), length: 183, width: 61 });
+    expect(outputs[0]!.attrs).toEqual({ ...board('PU', 4.5), length: 183, width: 61 });
     expect(outputs[0]!.batchNo).toBe('REGULAR');
   });
 
@@ -204,6 +205,14 @@ describe('deriveOutputs', () => {
       width: 63,
     });
     expect(outputs[0]!.batchNo).toBe('B1/B2');
+  });
+
+  it('adds fractional millimetre layers without rounding away the laminate thickness', () => {
+    const outputs = deriveOutputs('LAMINATE', [
+      line(1, 'SHEET', board('PU', 0.325), 'FRONT', 1, 'FRONT'),
+      line(2, 'SHEET', board('GY', 0.3), 'BACK', 1, 'BACK'),
+    ]);
+    expect(outputs[0]!.attrs.thickness).toBe(0.625);
   });
 
   it('treats a single-layer sheet as same colour on both sides when lamination is skipped', () => {
@@ -250,14 +259,14 @@ describe('deriveOutputs', () => {
 });
 
 describe('batches and labels', () => {
-  it('re-picks the batch when the slicing colour changes', () => {
+  it('keeps source batch bound when an invalid colour is supplied', () => {
     const inputs = [
       line(1, 'BOARD', board('PU'), 'MB1', 1),
       line(2, 'BOARD', board('GY'), 'MB2', 1),
     ];
     const [out] = deriveOutputs('SLICE', inputs.slice(0, 1));
     out!.attrs.color = 'GY';
-    expect(lineBatch('SLICE', out!, inputs)).toBe('MB2');
+    expect(lineBatch('SLICE', out!, inputs)).toBe('MB1');
   });
 
   it('joins batches without duplicates even when they are already joined', () => {
@@ -420,7 +429,7 @@ describe('cross cutting', () => {
     expect(line!.attrs).toMatchObject({ color: 'PU', length: 185, thickness: 0.6, width: 63 });
     expect(line!.attrs.frontColor).toBeUndefined();
     expect(line!.batchNo).toBe('MB1');
-    expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width', 'thickness']);
+    expect(EDITABLE_FIELDS.CUT).toEqual(['length', 'width']);
     expect(stageColumns('CUT')).toEqual(['material', 'recipe', 'color', 'size']);
   });
 });
@@ -609,12 +618,15 @@ describe('辅料', () => {
   });
 });
 
-describe('开片沿用板材厚度算片数', () => {
+describe('开片按单层厚度算片数', () => {
   const board = { color: 'PU', length: 190, material: 'TPE', thickness: 4.5, width: 130 };
   const sheet = { color: 'PU', length: 183, thickness: 4.5, width: 61 };
 
-  it('never multiplies output by thickness layers and rejects different thicknesses', () => {
+  it('divides board thickness into whole layers and preserves length and width', () => {
     expect(slicePerBoard(board, board)).toBe(1);
+    expect(slicePerBoard(board, { ...board, thickness: 0.3 })).toBe(15);
+    expect(slicePerBoard(board, { ...board, thickness: 0.6 })).toBe(7);
+    expect(slicePerBoard(board, { ...board, thickness: 5 })).toBe(0);
     expect(slicePerBoard(board, sheet)).toBe(0);
     expect(slicePerBoard(board, { length: 61, thickness: 4.5, width: 183 })).toBe(0);
     expect(slicePerBoard(board, { length: 183, thickness: 0.9, width: 61 })).toBe(0);
@@ -625,16 +637,19 @@ describe('开片沿用板材厚度算片数', () => {
   it('fills good quantity from boards issued until the worker changes it', () => {
     const inputs = [line(1, 'BOARD', board, 'B1', 10)];
     const outputs = deriveOutputs('SLICE', inputs);
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, outputs);
     applySliceYield(inputs, outputs);
-    expect(outputs[0]!.goodQuantity).toBe(10);
-    expect(sliceHint(inputs, outputs, outputs[0]!)).toBe('每张开 1 片 × 10 张 = 10 片（不算锯缝损耗）');
+    expect(outputs[0]!.goodQuantity).toBe(150);
+    expect(sliceHint(inputs, outputs, outputs[0]!)).toBe('每张开 15 片 × 10 张 = 150 片（不算锯缝损耗）');
 
     inputs[0]!.quantity = 20;
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, outputs);
     applySliceYield(inputs, outputs);
-    expect(outputs[0]!.goodQuantity).toBe(20);
+    expect(outputs[0]!.goodQuantity).toBe(300);
 
     outputs[0]!.goodQuantity = 19;
     inputs[0]!.quantity = 30;
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, outputs);
     applySliceYield(inputs, outputs);
     expect(outputs[0]!.goodQuantity).toBe(19);
   });
@@ -642,14 +657,16 @@ describe('开片沿用板材厚度算片数', () => {
   it('counts each thickness from its own issued batches without merging the same colour', () => {
     const inputs = [line(1, 'BOARD', board, 'B1', 10), line(2, 'BOARD', { ...board, thickness: 3 }, 'B2', 7)];
     const outputs = deriveOutputs('SLICE', inputs);
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, outputs);
     applySliceYield(inputs, outputs);
-    expect(outputs.map((output) => output.goodQuantity)).toEqual([10, 7]);
-    expect(sliceHint(inputs, outputs, outputs[1]!)).toBe('每张开 1 片 × 7 张 = 7 片（不算锯缝损耗）');
+    expect(outputs.map((output) => output.goodQuantity)).toEqual([150, 70]);
+    expect(sliceHint(inputs, outputs, outputs[1]!)).toBe('每张开 10 片 × 7 张 = 70 片（不算锯缝损耗）');
   });
 
   it('leaves it to the worker when one color is cut into several sizes', () => {
     const inputs = [line(1, 'BOARD', board, 'B1', 10)];
     const outputs = [...deriveOutputs('SLICE', inputs), ...deriveOutputs('SLICE', inputs)];
+    applyTaskTarget('SLICE', { thickness: 0.3 }, inputs, outputs);
     applySliceYield(inputs, outputs);
     expect(outputs[0]!.goodQuantity).toBeUndefined();
     expect(sliceHint(inputs, outputs, outputs[0]!)).toContain('请手填良品');

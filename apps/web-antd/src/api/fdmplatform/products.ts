@@ -3,6 +3,11 @@ import type { ContractItem, Decimal, PageResult } from './index';
 import { requestClient } from '#/api/request';
 
 export type TaxBasis = 'TAX_EXCLUDED' | 'TAX_INCLUDED';
+export type ProductColorMode = 'DUAL' | 'SINGLE' | 'UNKNOWN';
+export type ProductConstructionType =
+  | 'DOUBLE_LAYER'
+  | 'SINGLE_LAYER'
+  | 'UNKNOWN';
 export interface ProductAttributeOption {
   value: string;
   label: string;
@@ -14,6 +19,11 @@ export interface ProductAttributeOptions {
   matTypes: ProductAttributeOption[];
 }
 export interface ProductAttributes {
+  colorMode?: null | ProductColorMode;
+  constructionType?: null | ProductConstructionType;
+  finishedThicknessMm?: null | number;
+  frontThicknessMm?: null | number;
+  backThicknessMm?: null | number;
   productStage?: null | string;
   productStageLabel?: null | string;
   /** 查询时从已关联工序物料解析的有效阶段；不作为档案编辑保存值。 */
@@ -31,6 +41,19 @@ export interface ProductAttributes {
   textureBackLabel?: null | string;
   matType?: null | string;
   matTypeLabel?: null | string;
+}
+/** 单据产品结构快照；只使用来源已维护的属性，不推测正反面。 */
+export interface ProductStructure extends Omit<
+  ProductAttributes,
+  'resolvedProductStage' | 'resolvedProductStageLabel'
+> {
+  material?: null | string;
+  size?: null | string;
+  color?: null | string;
+  shape?: null | string;
+  weight?: null | string;
+  printing?: null | string;
+  packaging?: null | string;
 }
 export interface ProductPrice {
   id: string;

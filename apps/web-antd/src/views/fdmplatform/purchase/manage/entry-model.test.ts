@@ -5,6 +5,7 @@ import {
   emptyRow,
   entryErrors,
   entryPayload,
+  entryProductFields,
   entrySuppliers,
   entryTotals,
   materialKind,
@@ -21,6 +22,46 @@ function row(extra = {}) {
 }
 
 describe('新建采购单表单', () => {
+  it('完整保留来源的结构资料，提交只传可信来源 ID', () => {
+    const line = {
+      ...row({ quantity: '10', unitPrice: '12' }),
+      ...entryProductFields({
+        skuName: '双色垫',
+        material: 'TPE',
+        size: '183*61*0.6cm',
+        productStage: 'PACKED',
+        productStageLabel: '已包装成品',
+        frontColor: 'PK',
+        frontColorLabel: '粉色',
+        backColor: 'GY',
+        backColorLabel: '灰色',
+        textureFront: 'SH',
+        textureBack: 'WA',
+        matType: 'DUAL',
+        weight: '800g',
+      }),
+    };
+    expect(line.structure).toMatchObject({
+      material: 'TPE',
+      size: '183*61*0.6cm',
+      productStage: 'PACKED',
+      frontColor: 'PK',
+      frontColorLabel: '粉色',
+      backColor: 'GY',
+      textureFront: 'SH',
+      textureBack: 'WA',
+      matType: 'DUAL',
+      weight: '800g',
+    });
+    const payload = entryPayload(
+      [line],
+      { supplierId: 's', companyId: 1 },
+      'key',
+    );
+    expect(payload.lines[0]).toMatchObject({ productId: 'p1', quantity: '10' });
+    expect(payload.lines[0]).not.toHaveProperty('structure');
+    expect(payload.lines[0]).not.toHaveProperty('specificationSnapshot');
+  });
   it('keeps unit price, quantity and total in step', () => {
     const line = row();
     setRowQuantity(line, '100');
@@ -271,6 +312,9 @@ describe('复制采购单', () => {
                 skuCode: 'YC2400098',
                 category: '原材料(YC2400000)',
                 unit: 'kg',
+                frontColor: 'PK',
+                backColor: 'GY',
+                textureFront: 'SH',
               },
             },
             { id: 'l2', skuId: 'p2', quantity: 5, unitPrice: 3 },
@@ -315,12 +359,19 @@ describe('复制采购单', () => {
       unitPrice: '12',
       total: '12000.00',
       gift: false,
+      structure: { frontColor: 'PK', backColor: 'GY', textureFront: 'SH' },
+      sourceLineId: 'l1',
     });
     expect(rows[0]!.arrivalDate).toBeUndefined();
     expect(rows[1]).toMatchObject({
       gift: true,
       unitPrice: '0',
       remark: '送样',
+    });
+    expect(entryPayload(rows, header, 'copy-key')).toMatchObject({
+      sourceContractId: 'standalone',
+      sourceOrderId: 'o1',
+      lines: [{ sourceLineId: 'l1' }, { sourceLineId: 'l2' }],
     });
   });
 
@@ -346,5 +397,7 @@ describe('复制采购单', () => {
     expect(header.purchaseDate).toBe('2026-01-02');
     expect(rows[0]).toMatchObject({ lineId: 'l1', arrivalDate: '2026-01-10' });
     expect(entryPayload(rows, header, 'key').lines[0]!.id).toBe('l1');
+    expect(header.sourceOrderId).toBeUndefined();
+    expect(rows[0]!.sourceLineId).toBeUndefined();
   });
 });

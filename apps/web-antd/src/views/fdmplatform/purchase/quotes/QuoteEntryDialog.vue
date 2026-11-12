@@ -30,6 +30,7 @@ import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
 import { errorText } from '../../data';
 import ContractPicker from '../../documents/ContractPicker.vue';
+import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { latestTaskQuotes, localDate } from './comparison';
 import {
   addDays,
@@ -320,6 +321,7 @@ watch(
         class="entry-alert"
       />
       <div v-if="contract" class="entry">
+        <ProductStructureDetails v-if="context" :value="context.structure" />
         <div class="entry-form">
           <div v-if="!assignmentId" class="field">
             <label for="quote-task"><em>*</em>采购任务</label>

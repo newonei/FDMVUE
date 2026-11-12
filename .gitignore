@@ -66,7 +66,8 @@ datalog
 .playwright-cli
 **/test-results/
 **/playwright-report/
-/output/playwright/
+# Temporary validation configs, reports and screenshots
+/output/
 
 # Local visual QA reports and screenshots may contain business data
 /design-qa.md

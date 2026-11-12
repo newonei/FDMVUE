@@ -1,6 +1,18 @@
 import type { BusinessRecord, Decimal, DocumentRow, PageResult } from './index';
+import type { ProductStructure } from './products';
 
 import { requestClient } from '#/api/request';
+
+/** 下单时服务端冻结的产品资料；历史快照缺失的属性不会用当前档案回填。 */
+export interface ProcurementProductSnapshot extends ProductStructure {
+  category?: null | string;
+  skuCode?: null | string;
+  skuName?: null | string;
+  specification?: null | string;
+  unit?: null | string;
+  productImageUrl?: null | string;
+}
+
 export type SettingType =
   | 'accessories'
   | 'categories'
@@ -205,6 +217,8 @@ function orderPath(contractId: string, orderId: string) {
 }
 
 export interface PurchaseOrderEntryLine {
+  /** 复制订单时的原明细 ID；服务端核验来源并沿用该行快照。 */
+  sourceLineId?: string;
   productId?: string;
   contractItemId?: string;
   quantity: Decimal;
@@ -218,6 +232,8 @@ export interface PurchaseOrderEntryLine {
   id?: string;
 }
 export interface PurchaseOrderEntry {
+  sourceContractId?: string;
+  sourceOrderId?: string;
   idempotencyKey: string;
   contractId?: string;
   requestId?: string;

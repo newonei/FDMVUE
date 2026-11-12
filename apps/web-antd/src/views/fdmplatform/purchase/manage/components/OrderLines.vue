@@ -8,7 +8,11 @@ import { computed } from 'vue';
 import LineTable from '../../../components/LineTable.vue';
 import { rows } from '../../../data';
 import { procurementLineAmount } from '../../../finance/procurement/model';
-import { snapshotShape } from '../model';
+import {
+  colorModeText,
+  constructionText,
+} from '../../../products/manufacturing';
+import { productStructure, structureValue } from '../../../products/structure';
 
 /**
  * 采购单产品明细：放在供应商信息下方、页签上方，切换页签时一直可见。
@@ -18,8 +22,20 @@ const columns: LineColumn[] = [
   { key: 'skuName', title: '产品名称', width: 220, locked: true },
   { key: 'skuCode', title: '产品编号', width: 140, optional: true },
   { key: 'specification', title: '规格', width: 200 },
-  { key: 'material', title: '材质', optional: true },
-  { key: 'size', title: '尺寸', optional: true },
+  { key: 'material', title: '材质', width: 100 },
+  { key: 'size', title: '尺寸', width: 160 },
+  { key: 'colorMode', title: '颜色方式', width: 100 },
+  { key: 'constructionType', title: '制造结构', width: 110 },
+  { key: 'finishedThickness', title: '成品厚度', width: 100 },
+  { key: 'layerThickness', title: '分层厚度', width: 160, optional: true },
+  { key: 'frontColor', title: '正面颜色', width: 120 },
+  { key: 'backColor', title: '反面颜色', width: 120 },
+  { key: 'textureFront', title: '正面压花', width: 120, optional: true },
+  { key: 'textureBack', title: '反面压花', width: 120, optional: true },
+  { key: 'productStage', title: '生产分类', width: 120, optional: true },
+  { key: 'matType', title: '垫子类型', width: 120, optional: true },
+  { key: 'colorCode', title: '单色', width: 120, optional: true },
+  { key: 'weight', title: '克重', width: 100, optional: true },
   { key: 'color', title: '颜色', optional: true },
   { key: 'shape', title: '形状', width: 110 },
   { key: 'printing', title: '印刷', optional: true },
@@ -40,20 +56,48 @@ const columns: LineColumn[] = [
 ];
 const productLines = computed(() =>
   rows(props.view.order.lines).map((line) => {
-    const snapshot = (line.specificationSnapshot ?? {}) as Record<
+    const snapshot = (line.specificationSnapshot ?? line) as Record<
       string,
       unknown
     >;
-    const pick = (field: string) => snapshot[field] ?? line[field];
+    const pick = (field: string) => snapshot[field];
+    const structure = productStructure(snapshot);
     return {
       ...line,
       skuName: pick('skuName') ?? '产品',
       skuCode: pick('skuCode'),
       specification: pick('specification') ?? '—',
-      material: pick('material'),
-      size: pick('size'),
+      material: structureValue(structure, 'material'),
+      size: structureValue(structure, 'size'),
+      colorMode: colorModeText(structure),
+      constructionType: constructionText(structure),
+      finishedThickness:
+        structure.finishedThicknessMm === null ||
+        structure.finishedThicknessMm === undefined
+          ? '未维护'
+          : `${structure.finishedThicknessMm} mm`,
+      layerThickness:
+        structure.constructionType === 'DOUBLE_LAYER'
+          ? `正面 ${structure.frontThicknessMm ?? '未维护'} + 反面 ${structure.backThicknessMm ?? '未维护'} mm`
+          : '—',
+      frontColor: structureValue(structure, 'frontColor', 'frontColorLabel'),
+      backColor: structureValue(structure, 'backColor', 'backColorLabel'),
+      textureFront: structureValue(
+        structure,
+        'textureFront',
+        'textureFrontLabel',
+      ),
+      textureBack: structureValue(structure, 'textureBack', 'textureBackLabel'),
+      productStage: structureValue(
+        structure,
+        'productStage',
+        'productStageLabel',
+      ),
+      matType: structureValue(structure, 'matType', 'matTypeLabel'),
+      colorCode: structureValue(structure, 'colorCode', 'colorCodeLabel'),
+      weight: structureValue(structure, 'weight'),
       color: pick('color'),
-      shape: snapshotShape(line),
+      shape: structureValue(structure, 'shape'),
       printing: pick('printing'),
       packaging: pick('packaging'),
       unit: pick('unit'),

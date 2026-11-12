@@ -79,7 +79,7 @@ function boardKey(b: Api.Board) {
 
 function boardOptions(item: Api.ItemPlan) {
   return item.candidates.map((b) => ({
-    label: `${b.name} ${b.size}cm · 一张出 ${b.perBoard} 条 · ${b.boards} 张${b.kg ? ` · ${num(b.kg)}kg` : ''}`,
+    label: `${b.name} ${b.size}cm · ${b.layerPlans?.length ? '按各层厚度换算' : `一张出 ${b.perBoard} ${b.layersPerProduct === 2 ? '片单层片材' : '条'}`} · ${b.boards} 张${b.kg ? ` · ${num(b.kg)}kg` : ''}`,
     value: boardKey(b),
   }));
 }
@@ -150,10 +150,16 @@ defineExpose({ reload: load });
           </div>
 
           <p v-if="item.board" class="m-0 text-sm">
-            成品理论换算：板材 <b>{{ dimensionTextInMm(`${item.board.size }cm`) }}</b>，{{ item.board.layers }} 层 × 每层 {{ item.board.piecesPerLayer }} 条 =
-            每张理论 {{ item.board.perBoard }} 条 → 预计需 <b class="tabular-nums">{{ item.board.boards }}</b> 张
+            {{ item.board.layersPerProduct === 2 ? '单层片材理论换算' : '成品理论换算' }}：板材 <b>{{ dimensionTextInMm(`${item.board.size }cm`) }}</b>，
+            <template v-if="!item.board.layerPlans?.length">{{ item.board.layers }} 层 × 每层 {{ item.board.piecesPerLayer }} {{ item.board.layersPerProduct === 2 ? '片' : '条' }} = 每张理论 {{ item.board.perBoard }} {{ item.board.layersPerProduct === 2 ? '片单层片材' : '条' }} → </template>预计需 <b class="tabular-nums">{{ item.board.boards }}</b> 张
             <span class="text-xs text-muted-foreground">（利用率 {{ fmt(item.board.utilization) }}%）</span>
-            <br /><span class="text-xs text-muted-foreground">以上用于成品备料估算；开片产出沿用板材原规格，不按厚度分层计算开片数量。</span>
+            <br /><span class="text-xs text-muted-foreground">开片按各制造层的实际厚度计算，长宽沿用板材；立切只裁长宽。双层贴合后厚度相加。</span>
+            <span v-for="layer in item.board.layerPlans" :key="layer.side" class="mt-1 block text-xs text-muted-foreground">
+              {{ layer.side === 'BOTH' ? '正反同规格层' : layer.side === 'FRONT' ? '正面层' : '反面层' }} · {{ layer.color }} · {{ Number((layer.thickness * 10).toFixed(2)) }} mm：每板开 {{ layer.layers }} 层、出 {{ layer.perBoard }} 片单层片材，需 {{ layer.boards }} 张板<span v-if="layer.perProduct === 2">（每垫 2 片）</span>
+            </span>
+            <span v-if="item.board.layersPerProduct === 2 && !item.board.layerPlans?.length" class="mt-1 block text-xs text-muted-foreground">
+              每条成品需要正反两层各 1 片；分色备板：{{ Object.entries(item.board.boardsByColor ?? {}).map(([color, count]) => `${color} ${count} 张`).join('；') }}
+            </span>
             <template v-if="item.rawKg">
               <br />
               原料 <b class="tabular-nums">{{ fmt(item.rawKg) }}</b> kg（每张 {{ fmt(item.board.kgPerBoard) }}kg）≈ 发泡
@@ -184,7 +190,7 @@ defineExpose({ reload: load });
 
           <p v-if="item.stock.length > 0" class="m-0 text-xs text-muted-foreground">
             库存里能用的（多张单共用，先用库存可以少做板）：
-            {{ item.stock.map((s) => `${s.stageLabel} ${s.itemCode} ${fmt(s.quantity)}${s.unit ?? ''} → ${fmt(s.pieces)} 条`).join('；') }}
+            {{ item.stock.map((s) => `${s.stageLabel} ${s.itemCode} ${fmt(s.quantity)}${s.unit ?? ''} → ${s.color ? `${s.side ? s.side === 'BOTH' ? '正反同规格 ' : s.side === 'FRONT' ? '正面 ' : '反面 ' : ''}${s.color}${s.thickness != null ? ` ${Number((s.thickness * 10).toFixed(2))} mm` : ''} 单层 ${fmt(s.pieces)} 片` : `${fmt(s.pieces)} 条成品`}`).join('；') }}
           </p>
           <p v-for="w in item.warnings" :key="w" class="m-0 text-xs text-warning">{{ w }}</p>
         </div>
@@ -200,7 +206,7 @@ defineExpose({ reload: load });
           </span>
         </div>
         <p class="m-0 text-xs text-muted-foreground">
-          按成品长宽厚切板，不算锯缝和切边损耗；原料按配方整锅算。板材下拉列出全部能切的规格，当前用的在最前，其余按用料从少到多。没选板材规格时用「工厂设置」里的发泡出板规格。
+          按成品长宽及各层厚度切板，双层按正反面的颜色和厚度分别备料，同色等厚可合并；不算锯缝和切边损耗，原料按配方整锅算。板材下拉列出全部能切的规格，当前用的在最前，其余按用料从少到多。没选板材规格时用「工厂设置」里的发泡出板规格。
         </p>
       </div>
     </Spin>

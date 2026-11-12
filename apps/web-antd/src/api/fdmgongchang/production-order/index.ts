@@ -2,6 +2,12 @@ import type { PageParam, PageResult } from '@vben/request';
 
 import type { FdmgongchangRouteApi } from '../factory';
 
+import type {
+  ProductColorMode,
+  ProductConstructionType,
+  ProductStructure,
+} from '#/api/fdmplatform/products';
+
 import { requestClient } from '#/api/request';
 
 import { factoryHeaders } from '../factory';
@@ -23,6 +29,11 @@ export namespace FdmgongchangProductionOrderApi {
 
   /** 产品中心的 SKU。 */
   export interface Product {
+    colorMode?: null | ProductColorMode;
+    constructionType?: null | ProductConstructionType;
+    finishedThicknessMm?: null | number;
+    frontThicknessMm?: null | number;
+    backThicknessMm?: null | number;
     /** 工厂选品分页返回的本厂账面库存；未关联工序物料时为空。 */
     currentStock?: null | number | string;
     stockUnit?: null | string;
@@ -88,6 +99,10 @@ export namespace FdmgongchangProductionOrderApi {
     mouldProfileId?: null | number;
     /** 工厂确认的结构化规格（#154）：确认后库存匹配、排单按它比对正反面色、压纹、图案。 */
     targetMaterial?: null | string;
+    targetColorMode?: null | ProductColorMode;
+    targetConstructionType?: null | ProductConstructionType;
+    targetFrontThickness?: null | number | string;
+    targetBackThickness?: null | number | string;
     targetFrontColor?: null | string;
     targetBackColor?: null | string;
     targetLength?: null | number | string;
@@ -312,20 +327,22 @@ export namespace FdmgongchangProductionOrderApi {
       contractCode?: null | string;
       customerName?: null | string;
       id: string;
-      lines: Array<{
-        cancelledQuantity?: number | string;
-        color?: null | string;
-        id: string;
-        material?: null | string;
-        packaging?: null | string;
-        printing?: null | string;
-        quantity: number | string;
-        size?: null | string;
-        skuCode?: null | string;
-        skuName?: null | string;
-        specification?: null | string;
-        unit?: null | string;
-      }>;
+      lines: Array<
+        ProductStructure & {
+          cancelledQuantity?: number | string;
+          color?: null | string;
+          id: string;
+          material?: null | string;
+          packaging?: null | string;
+          printing?: null | string;
+          quantity: number | string;
+          size?: null | string;
+          skuCode?: null | string;
+          skuName?: null | string;
+          specification?: null | string;
+          unit?: null | string;
+        }
+      >;
       status?: null | string;
       supplierName?: null | string;
     };
@@ -424,7 +441,19 @@ export namespace FdmgongchangProductionOrderApi {
 /** 用料逆推：按订单规格倒推板材规格、张数、原料 kg。 */
 export namespace FdmgongchangMaterialPlanApi {
   export interface Board {
+    layerPlans?: Array<{
+      boards: number;
+      color: string;
+      layers: number;
+      perBoard: number;
+      perProduct: number;
+      sheetSize: string;
+      side: string;
+      thickness: number;
+    }>;
     boards: number;
+    boardsByColor?: Record<string, number>;
+    layersPerProduct?: number;
     /** 每张板要多少原料 kg；没选配方或档案没填投料量时为空。 */
     kg?: null | number | string;
     kgPerBoard?: null | number | string;
@@ -448,6 +477,10 @@ export namespace FdmgongchangMaterialPlanApi {
   }
 
   export interface StockCover {
+    side?: null | string;
+    thickness?: null | number;
+    /** 双色贴合前库存对应的颜色；pieces为这一面的单层数量。 */
+    color?: null | string;
     itemCode: string;
     perUnit: number;
     pieces: number | string;
@@ -727,6 +760,10 @@ export function saveItemMaterial(
 export namespace FdmgongchangSupplyMatchApi {
   /** 工厂确认的规格；长宽厚单位 cm，压纹、图案空 = 不要。 */
   export interface TargetReq {
+    colorMode?: null | ProductColorMode;
+    constructionType?: null | ProductConstructionType;
+    frontThickness?: null | number | string;
+    backThickness?: null | number | string;
     backColor?: null | string;
     frontColor?: null | string;
     itemId?: null | number;
@@ -752,10 +789,13 @@ export namespace FdmgongchangSupplyMatchApi {
   }
 
   export interface Line {
+    side?: null | string;
+    thickness?: null | number;
     /** 任务的计划日期；库存为空。 */
     availableDate?: null | string;
     code: string;
-    /** 折成多少件成品。 */
+    /** 双色贴合前为对应颜色的单层数量，其他为成品数量。 */
+    color?: null | string;
     covers: number | string;
     /** 后面还要做的工序。 */
     nextProcesses: string[];
@@ -776,6 +816,17 @@ export namespace FdmgongchangSupplyMatchApi {
     lines: Line[];
     /** 现成料覆盖不了的成品数：工艺从发泡开始时要新做，否则是缺料。 */
     newProduction: number | string;
+    newProductionByColor?: Record<string, number | string>;
+    newProductionByLayer?: Record<
+      string,
+      {
+        color: string;
+        perProduct: number;
+        quantity: number | string;
+        side: string;
+        thickness: number;
+      }
+    >;
     notes: string[];
     /** 不为空时规格不全，不能匹配和排单。 */
     pending?: null | string;

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   match: vi.fn(),
   report: vi.fn(),
+  productionOrders: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   createOrder: mocks.create,
@@ -23,6 +24,7 @@ vi.mock('#/api/fdmgongchang/stage-stock', () => ({
   previewItemCodes: mocks.preview,
   reportOrder: mocks.report,
 }));
+vi.mock('#/api/fdmgongchang/production-order', () => ({ getOpenProductionOrders: mocks.productionOrders }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({ getScheduleTasks: vi.fn().mockResolvedValue([]) }));
 vi.mock('#/api/fdmgongchang/wage', () => ({ matchWageItems: mocks.match }));
 vi.mock('@vben/stores', () => ({
@@ -200,6 +202,7 @@ describe('order drawer', () => {
       rows.map((_, i) => `CODE-${i}`),
     );
     mocks.create.mockResolvedValue(9);
+    mocks.productionOrders.mockResolvedValue([]);
     mocks.match.mockResolvedValue([{ itemId: 41, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
     mocks.operators.mockResolvedValue([
       { deptName: '开片车间', nickname: '张三', team: '开片一组', userId: 3 },
@@ -253,13 +256,14 @@ describe('order drawer', () => {
     const ids = [...outputs].map((el) => el.id.replace('out-batch-', ''));
     expect((outputs[0] as HTMLInputElement).value).toBe('MB1');
     expect((outputs[1] as HTMLInputElement).value).toBe('MB2');
-    expect(document.querySelector('[id^="out-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="out-"][id$="-thickness"]')).toBeTruthy();
     expect(document.querySelector('[id^="out-"][id$="-length"]')).toBeNull();
-    expect(document.body.textContent).toContain('厚度不可修改');
+    expect(document.body.textContent).toContain('厚度填写目标单层厚度');
     expect(document.querySelector('[id^="out-"][id$="-color"]')).toBeNull();
     // 像人一样逐个输入：每次输入之间让界面先刷新
     for (const [index, key] of ids.entries()) {
       expect((document.querySelector(`#out-good-${key}`) as HTMLInputElement).value).toBe('');
+      typeInto(`out-${key}-thickness`, '3');
       typeInto(`out-good-${key}`, index === 0 ? '236' : '198');
       typeInto(`out-defect-${key}`, index === 0 ? '4' : '2');
     }
@@ -319,6 +323,29 @@ describe('order drawer', () => {
     );
   });
 
+  it('selects a two-colour 6.5 mm order before reporting and prefills 3.25 mm layers without rounding', async () => {
+    const thickBoard = stock(1, 'BOARD', 'PU', 'MB1', 100);
+    mocks.page.mockResolvedValue({ list: [{ ...thickBoard, item: { ...thickBoard.item, thickness: 4.8 } }], total: 1 });
+    mocks.productionOrders.mockResolvedValue([{ id: 9, orderNo: 'GC-009', items: [{ id: 90,
+      productName: '双色瑜伽垫', productId: 'MAT', quantity: 100, completedQuantity: 0,
+      processes: ['SLICE', 'LAMINATE'], targetThickness: 0.65, targetFrontColor: 'PU', targetBackColor: 'GY',
+      targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetFrontThickness: 0.325, targetBackThickness: 0.325,
+    }] }]);
+    state.open = true; await flush();
+    const selector = document.querySelector('#order-production-item')!.closest('.ant-select')!.querySelector('.ant-select-selector')!;
+    expect(selector.closest('section')?.style.display).not.toBe('none');
+    selector.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await flush();
+    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((element) => element.getAttribute('title')?.includes('GC-009'))!.click();
+    await flush(); typeInto('order-take-1', '2'); await flush();
+    const thickness = document.querySelector<HTMLInputElement>('[id^="out-"][id$="-thickness"]')!;
+    expect(Number(thickness.value)).toBe(3.25);
+    const key = thickness.id.replace(/^out-/, '').replace(/-thickness$/, '');
+    typeInto(`out-good-${key}`, '2'); await flush();
+    await submitCreate('提交领料并入库'); await flush();
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ productionOrderItemId: 90,
+      outputs: [expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.325 }) })] }));
+  });
+
   it('blocks submission with a readable list when sizes are missing', async () => {
     const incomplete = stock(1, 'BOARD', 'PU', 'MB1', 100);
     mocks.page.mockResolvedValue({ list: [{ ...incomplete, item: { ...incomplete.item, thickness: null } }], total: 1 });
@@ -358,6 +385,21 @@ describe('order drawer', () => {
       expect.stringContaining('进入车间在制'),
       'BOARD',
     );
+  });
+
+  it('allows one stock batch to supply both laminate faces as separate input lines', async () => {
+    mocks.page.mockResolvedValue({ list: [stock(1, 'SHEET', 'PU', 'SAME', 300)], total: 1 });
+    state.open = true; await flush();
+    const process = document.querySelector<HTMLInputElement>('input[value="LAMINATE"]');
+    expect(process).toBeTruthy(); process!.click(); await flush();
+    typeInto('order-take-1', '10'); await flush();
+    typeInto('order-take-opposite-1', '10'); await flush();
+    document.querySelector<HTMLInputElement>('input[value="false"]')!.click(); await flush();
+    await submitCreate('提交领料'); await flush();
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ process: 'LAMINATE', finish: false, inputs: [
+      { stockId: 1, quantity: 10, laminationSide: 'FRONT' },
+      { stockId: 1, quantity: 10, laminationSide: 'BACK' },
+    ] }));
   });
 
   it('asks to assign the post first when nobody can do this process', async () => {
@@ -401,6 +443,7 @@ describe('order drawer', () => {
       orderNo: 'GX20261010-001',
       operatorUserId: 7,
       outputStage: 'SHEET',
+      outputAttrs: { thickness: 0.3 },
       outputs: [],
       process: 'SLICE',
       reportCount: 0,
@@ -420,6 +463,7 @@ describe('order drawer', () => {
     const key = document
       .querySelector('[id^="out-batch-"]')!
       .id.replace('out-batch-', '');
+    expect(Number((document.querySelector(`#out-${key}-thickness`) as HTMLInputElement).value)).toBe(3);
     typeInto(`out-good-${key}`, '30');
     await flush();
     [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
@@ -473,6 +517,7 @@ describe('order drawer', () => {
     const key = document
       .querySelector('[id^="out-batch-"]')!
       .id.replace('out-batch-', '');
+    typeInto(`out-${key}-thickness`, '3');
     typeInto(`out-good-${key}`, '98');
     await flush();
     await vi.advanceTimersByTimeAsync(400);
@@ -500,6 +545,7 @@ describe('order drawer', () => {
     typeInto('order-take-2', '50');
     await flush();
     const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    typeInto(`out-${key}-thickness`, '3');
     typeInto(`out-good-${key}`, '30');
     await flush();
     await submitCreate('提交领料并入库');
@@ -514,6 +560,7 @@ describe('order drawer', () => {
     typeInto('order-take-2', '50');
     await flush();
     const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    typeInto(`out-${key}-thickness`, '3');
     typeInto(`out-good-${key}`, '98');
     await vi.advanceTimersByTimeAsync(400);
     await flush();

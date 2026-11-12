@@ -1,9 +1,11 @@
 import type { BusinessRecord, Contract } from '#/api/fdmplatform';
+import type { ProductStructure } from '#/api/fdmplatform/products';
 
 import BigNumber from 'bignumber.js';
 
 import { rows } from '../../data';
 import { planAvailable } from '../../documents/related-creation';
+import { productStructure } from '../../products/structure';
 import { latestTaskQuotes, localDate } from './comparison';
 
 /** Currencies a supplier quotes in; domestic factories almost always quote CNY. */
@@ -38,6 +40,7 @@ export interface TaskContext {
   requestItem?: BusinessRecord;
   title: string;
   specification: string;
+  structure: ProductStructure;
   /** The order must use the request unit, or the server rejects the plan. */
   unit: string;
   requiredDate?: string;
@@ -59,20 +62,21 @@ export function taskContext(
   const requestItem = rows(request?.items).find(
     (entry) => entry.id === assignment.requestItemId,
   );
-  const snapshot = (requestItem?.specificationSnapshot ?? {}) as Record<
-    string,
-    unknown
-  >;
   const item = contract.items.find(
     (entry) => entry.id === assignment.contractItemId,
   );
+  const snapshot = (requestItem?.specificationSnapshot ?? item ?? {}) as Record<
+    string,
+    unknown
+  >;
   return {
     assignment,
     request,
     requestItem,
-    title: text(snapshot.skuName) || text(item?.skuName) || '采购产品',
-    specification: text(snapshot.specification) || text(item?.specification),
-    unit: text(snapshot.unit) || text(item?.unit),
+    title: text(snapshot.skuName) || '采购产品',
+    specification: text(snapshot.specification),
+    structure: productStructure(snapshot),
+    unit: text(snapshot.unit),
     requiredDate:
       text(requestItem?.requiredDate) || text(item?.requiredDate) || undefined,
     quantity: plain(decimal(assignment.quantity)),

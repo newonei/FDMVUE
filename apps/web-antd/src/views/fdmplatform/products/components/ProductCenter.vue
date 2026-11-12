@@ -42,9 +42,10 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import { errorText, money } from '../../data';
 import { formatTemporalField } from '../../date-display';
 import { useEntityDetail } from '../../documents/useEntityDetail';
-import { productAttributesText } from '../attributes';
+import { productProcessText } from '../attributes';
 import { currencyOptions, missingProductFields, taxOptions } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
+import ProductColorSummary from './ProductColorSummary.vue';
 import ProductDetailDrawer from './ProductDetailDrawer.vue';
 import ProductEditor from './ProductEditor.vue';
 import ProductFiles from './ProductFiles.vue';
@@ -56,6 +57,9 @@ import '../../components/compact-tables.css';
 const props = defineProps<{ mode: 'catalog' | 'prices' }>();
 const ProductImportDialog = defineAsyncComponent(
   () => import('./ProductImportDialog.vue'),
+);
+const ProductColorRepairDialog = defineAsyncComponent(
+  () => import('./ProductColorRepairDialog.vue'),
 );
 const route = useRoute();
 const router = useRouter();
@@ -107,6 +111,8 @@ const busy = ref(false);
 const editorOpen = ref(false);
 const importOpen = ref(false);
 const importMounted = ref(false);
+const colorRepairOpen = ref(false);
+const colorRepairMounted = ref(false);
 const imageErrors = ref(new Set<string>());
 const detailOpen = ref(false);
 const selectedProduct = ref<Product>();
@@ -158,6 +164,7 @@ const columns = computed(() =>
     ? [
         // 列顺序参考金智产品档案：名称、型号、克重、材质、规格、定制说明、类别、单位
         { title: '产品名称', key: 'product', width: 240 },
+        { title: '颜色 / 制造结构', key: 'colors', width: 230 },
         { title: '生产分类 / 工艺属性', key: 'production', width: 270 },
         { title: '产品型号', key: 'text', dataIndex: 'model', width: 120 },
         { title: '产品克重', key: 'text', dataIndex: 'weight', width: 90 },
@@ -449,6 +456,14 @@ async function savePrice() {
         <Space wrap class="catalog-header-actions">
           <Button :loading="loading" @click="load()">刷新</Button>
           <Button @click="openImport">Excel 导入</Button>
+          <Button
+            @click="
+              colorRepairMounted = true;
+              colorRepairOpen = true;
+            "
+          >
+            历史颜色补录
+          </Button>
           <Button type="primary" @click="openProduct()">＋ 新建产品</Button>
         </Space>
       </header>
@@ -636,12 +651,15 @@ async function savePrice() {
                     </div>
                   </div>
                 </template>
+                <ProductColorSummary
+                  v-else-if="column.key === 'colors'"
+                  :value="record as Product"
+                  construction
+                />
                 <span
                   v-else-if="column.key === 'production'"
-                  :title="productAttributesText(record as Product)"
-                  >{{
-                    productAttributesText(record as Product) || '未维护'
-                  }}</span>
+                  :title="productProcessText(record as Product)"
+                  >{{ productProcessText(record as Product) || '未维护' }}</span>
                 <span
                   v-else-if="column.key === 'category'"
                   class="catalog-category"
@@ -756,6 +774,19 @@ async function savePrice() {
         @edit="openProduct"
         @remove="confirmDelete"
         @refresh="refreshProductDetail"
+      />
+      <ProductColorRepairDialog
+        v-if="colorRepairMounted"
+        :open="colorRepairOpen"
+        :company-id="companyId"
+        @close="colorRepairOpen = false"
+        @updated="productsImported"
+        @edit="
+          (id) => {
+            colorRepairOpen = false;
+            openProductDetail(id);
+          }
+        "
       />
       <ProductEditor
         :company-id="companyId"

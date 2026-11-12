@@ -369,7 +369,7 @@ describe('production order page', () => {
     expect(plan).toContain('按上次建议');
     expect(plan).toContain('成品理论换算：板材2100×1360×48mm');
     expect(plan).toContain('每张理论16条→预计需32张');
-    expect(plan).toContain('不按厚度分层计算开片数量');
+    expect(plan).toContain('开片按各制造层的实际厚度计算');
     expect(plan).toContain('原料576kg（每张18kg）≈发泡4锅');
     expect(plan).toContain('240kg');
     button('接单').click();
@@ -424,9 +424,38 @@ describe('production order page', () => {
     );
   });
 
+  it('shows two-colour material coverage as separate layers and pairs the finished mats', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const accepted = { ...order, status: 'ACCEPTED', statusLabel: '生产中',
+      items: [{ ...order.items[0]!, targetFrontColor: 'PK', targetBackColor: 'GY', targetThickness: 0.6 }] };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 }); mocks.get.mockResolvedValue(accepted);
+    const board = { boards: 10, boardsByColor: { PK: 4, GY: 6 }, layersPerProduct: 2,
+      layers: 16, piecesPerLayer: 2, perBoard: 32, name: '发泡板', size: '210×136×4.8', source: 'SETTING' };
+    mocks.materialPlan.mockResolvedValue({ orderId: 9, orderNo: order.orderNo, shortage: false, totals: [], items: [{
+      itemId: 91, productName: product.displayName, remaining: 300, quantity: 500, unit: '条', board, candidates: [board],
+      raws: [], warnings: [], stock: [{ stage: 'CUT', stageLabel: '立切片材', itemCode: 'CUT-PK', color: 'PK', quantity: 100, unit: '片', pieces: 100 }],
+    }] });
+    mocks.supplyMatch.mockResolvedValue([{ itemId: 91, remaining: 500, covered: 200, newProduction: 300,
+      newProductionByColor: { PK: 200, GY: 300 }, productName: product.displayName, targetConfirmed: true, notes: [],
+      lines: [{ code: 'CUT-PK', color: 'PK', covers: 300, used: 300, perUnit: 1, stage: 'CUT', stageLabel: '立切片材', source: 'STOCK', unit: '片', nextProcesses: ['贴合'] }],
+      processes: [{ label: '开片', process: 'SLICE', quantity: 500 }, { label: '贴合', process: 'LAMINATE', quantity: 500 }],
+    }]);
+    unmount = mount(); await flush(); button('查看').click(); await flush();
+    const text = document.body.textContent?.replaceAll(/\s+/g, '') ?? '';
+    expect(text).toContain('单层片材理论换算');
+    expect(text).toContain('每张理论32片单层片材');
+    expect(text).toContain('分色备板：PK4张；GY6张');
+    expect(text).toContain('PK单层100片');
+    expect(text).toContain('正反两层配齐后才计入整垫覆盖');
+    expect(text).toContain('300粉单层片材');
+    expect(text).toContain('单层缺口：粉200片；GY300片');
+    expect(text).toContain('开片500片单层');
+    expect(text).toContain('贴合500条成品');
+  });
+
   it('lets the factory confirm the structured spec and shows how stock covers the order', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
-    const suggested = { frontColor: 'PK', length: 183, material: 'TPE', thickness: 0.6, width: 61 };
+    const suggested = { colorMode: 'SINGLE', constructionType: 'SINGLE_LAYER', frontColor: 'PK', length: 183, material: 'TPE', thickness: 0.6, width: 61 };
     const accepted = {
       ...order,
       items: [{ ...order.items[0]!, targetSuggested: suggested }],
@@ -479,6 +508,23 @@ describe('production order page', () => {
     expect(mocks.saveTarget).toHaveBeenCalledWith(
       expect.objectContaining({ frontColor: 'PK', itemId: 91, length: 183, material: 'TPE', pattern: undefined, thickness: 0.6, width: 61 }),
     );
+  });
+
+  it('confirms same-color double-layer manufacturing with unequal layer thicknesses', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    const suggested = { colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontColor: 'PK', backColor: 'PK', length: 183, width: 61, material: 'TPE', thickness: 0.6, frontThickness: 0.2, backThickness: 0.4 };
+    const accepted = { ...order, status: 'ACCEPTED', statusLabel: '生产中', items: [{ ...order.items[0]!, targetSuggested: suggested }] };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 }); mocks.get.mockResolvedValue(accepted);
+    mocks.supplyMatch.mockResolvedValue([]);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    mocks.saveTarget.mockResolvedValue(true);
+    unmount = mount(); await flush(); button('查看').click(); await flush();
+    button('确认规格').click(); await flush();
+    expect(document.querySelector<HTMLInputElement>('#target-front-thickness')?.value).toBe('0.200');
+    expect(document.querySelector<HTMLInputElement>('#target-back-thickness')?.value).toBe('0.400');
+    const ok = [...document.querySelectorAll<HTMLButtonElement>('.ant-modal button')].find((element) => element.textContent?.replaceAll(/\s/g, '') === '确认规格')!;
+    ok.click(); await flush();
+    expect(mocks.saveTarget).toHaveBeenCalledWith(expect.objectContaining({ colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontColor: 'PK', backColor: 'PK', thickness: 0.6, frontThickness: 0.2, backThickness: 0.4 }));
   });
 
   it('copies a rejected order into a new one so the requester only fixes what was wrong', async () => {

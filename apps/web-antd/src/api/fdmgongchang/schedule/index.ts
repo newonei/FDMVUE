@@ -37,6 +37,8 @@ export namespace FdmgongchangScheduleApi {
 
   /** 任务约定的领料或产出，attrs 用于精确匹配规格、颜色及配方。 */
   export interface Material {
+    /** 工序任务所对应的面；同色双层也须保留。 */
+    side?: 'BACK' | 'BOTH' | 'FRONT' | null;
     attrs?: FdmgongchangStageStockApi.ItemAttrs | null;
     code?: null | string;
     name?: null | string;
@@ -110,6 +112,20 @@ export namespace FdmgongchangScheduleApi {
     notices?: string[];
   }
 
+  /** 任务管理中的整单进度，不受当前日期、工序、任务状态或人员筛选截断。 */
+  export interface OrderTaskProgress {
+    completed: boolean;
+    note?: null | string;
+    processes: Array<{
+      actualQuantity: Decimal;
+      completed: boolean;
+      process: string;
+      quantity: Decimal;
+      unit?: null | string;
+    }>;
+    taskCount: number;
+  }
+
   export interface Task {
     actualQuantity: Decimal;
     assignmentId?: null | string;
@@ -117,6 +133,8 @@ export namespace FdmgongchangScheduleApi {
     covers?: Array<{ assignmentId: string; quantity: Decimal }>;
     id: number;
     orderCount: number;
+    /** 同订单全部有效已下发任务的累计进度，仅任务管理列表返回。 */
+    orderProgress?: null | OrderTaskProgress;
     process: string;
     inputs?: Material[] | null;
     output?: Material | null;
@@ -159,14 +177,38 @@ export namespace FdmgongchangScheduleApi {
   export type TaskStatus = 'CLAIMED' | 'CLOSED' | 'DONE' | 'OPEN';
 
   /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
+  export interface ManufacturingLayer {
+    side: 'BACK' | 'BOTH' | 'FRONT';
+    color: string;
+    thickness: number;
+    perProduct: number;
+    boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+    sheetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+    cutAttrs: FdmgongchangStageStockApi.ItemAttrs;
+  }
+  export interface LayerBoard {
+    side: 'BACK' | 'BOTH' | 'FRONT';
+    color: string;
+    thickness: number;
+    perProduct: number;
+    layers: number;
+    perBoard: number;
+    boards: number;
+    sheetSize?: string;
+  }
   export interface FormOptions {
     demand: Array<{
       assignmentId?: null | string;
       boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
       boards?: null | number;
+      boardsByColor?: Record<string, number>;
       /** 发泡产出的板材规格和还要几张（用料逆推选的板材）；算不出时为空。 */
       boardSpec?: null | string;
+      colorMode?: string;
+      constructionType?: string;
       contractCode: string;
+      layerPlans?: LayerBoard[];
+      layers?: ManufacturingLayer[];
       product?: null | string;
       productCode?: null | string;
       /** 产品中心的产品编号。 */
@@ -175,6 +217,7 @@ export namespace FdmgongchangScheduleApi {
       remaining?: null | number | string;
       sheetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
       sheets?: null | number;
+      sheetsByColor?: Record<string, number>;
       /** 开片产出的板材规格和还要几片。 */
       sheetSpec?: null | string;
       /** 按这条订单工艺路线解析的各工序领料阶段，支持跳过中间工序。 */

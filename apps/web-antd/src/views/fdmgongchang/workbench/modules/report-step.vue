@@ -29,10 +29,10 @@ const output = computed(() => stageOf(job, job.process?.outputStage));
 const source = computed(() => stageOf(job, job.sourceStage));
 const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
 const reportedBefore = computed(() => job.order?.reportCount ?? 0);
-const plannedAttrs = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs);
+const plannedAttrs = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.prepare?.targetAttrs);
 const plannedSpec = computed(() => plannedAttrs.value ? attrSummary(job.process?.outputStage ?? '', plannedAttrs.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
 
-/** 立切等工序的目标规格不全时直接展开让人填写；开片规格由领料继承。 */
+/** 目标规格不全时展开填写；开片仅填写单层厚度。 */
 const specErrors = computed(() =>
   validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs).filter(
     (e) => !e.includes('数量'),
@@ -106,11 +106,11 @@ function next() {
             </button>
           </div>
           <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels, [], 'mm') || '—' }}</span>
-          <span v-if="slicing" class="text-xs text-muted-foreground">开片不会改变颜色，颜色固定沿用对应领料，不可修改。材质、配方和长宽厚沿用实际领料；不同颜色、配方或规格的板材已分别列出，厚度不可修改。</span>
-          <span v-else-if="job.process?.code === 'CUT'" class="text-xs text-muted-foreground">材质、配方和颜色沿用实际领料；长、宽、厚按本次实际立切产出的片材规格填写，单位 mm。</span>
+          <span v-if="slicing" class="text-xs text-muted-foreground">开片不会改变颜色，颜色固定沿用对应领料，不可修改。材质、配方和长宽沿用实际领料；厚度填写单层厚度，双色 6 mm 瑜伽垫开为两层各 3 mm，贴合后为 6 mm。</span>
+          <span v-else-if="job.process?.code === 'CUT'" class="text-xs text-muted-foreground">材质、配方、颜色和厚度沿用实际领料；仅填写本次立切产出的长、宽，单位 mm。</span>
           <span v-if="specErrors.length > 0" class="text-xs text-warning">还差几个规格，请补上：</span>
           <AttrFields
-            v-if="!slicing && showEditor && editable.length > 0"
+            v-if="(slicing || showEditor) && editable.length > 0"
             v-model="line.attrs"
             :color-choices="job.process?.code === 'LAMINATE' ? inputColors : undefined"
             :fields="editable"

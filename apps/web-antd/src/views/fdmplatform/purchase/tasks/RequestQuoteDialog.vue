@@ -27,6 +27,7 @@ import { contractActionWithAttachments } from '#/api/fdmplatform/submissions';
 import CreationAttachments from '../../components/CreationAttachments.vue';
 import RemoteMasterSelect from '../../components/RemoteMasterSelect.vue';
 import { errorText } from '../../data';
+import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
 import { localDate } from '../quotes/comparison';
 import {
   addDays,
@@ -388,6 +389,7 @@ watch(
                   <span v-if="row.specification" class="hint">{{
                     row.specification
                   }}</span>
+                  <ProductStructureDetails :value="row.structure ?? {}" />
                   <span
                     v-if="errors.lines[row.assignmentId]"
                     class="field-error"

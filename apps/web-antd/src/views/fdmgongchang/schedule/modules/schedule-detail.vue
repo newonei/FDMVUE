@@ -33,6 +33,7 @@ import {
   TASK_STATUS,
   taskMaterialText,
 } from '../../shared/schedule';
+import MixBatchModal from './mix-batch-modal.vue';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
 import TaskMaterials from './task-materials.vue';
@@ -82,6 +83,12 @@ const noWorker = computed(() => tasks.value.filter((t) => t.workerIds.length ===
 
 // ========== 手动加任务、改任务 ==========
 const formOpen = ref(false);
+const batchMixOpen = ref(false);
+const batchMixContext = ref<{ orderNo?: string; workDate: string }>();
+function openBatchMix(context: { orderNo?: string; workDate: string }) {
+  batchMixContext.value = context;
+  batchMixOpen.value = true;
+}
 const formInitial = ref<Api.PlanTask | null>(null);
 /** 已下发排单里正在改的任务编号；为空是追加。 */
 const editingTaskId = ref<number>();
@@ -484,7 +491,10 @@ function discard() {
       :schedule="schedule"
       :submit="submitForm"
       :workers="workers"
+      @batch-mix="openBatchMix"
     />
+
+    <MixBatchModal v-model:open="batchMixOpen" :initial-order-no="batchMixContext?.orderNo" :initial-date="batchMixContext?.workDate" @released="(id) => emit('changed', id)" />
 
     <Modal v-model:open="closeOpen" :confirm-loading="busy" ok-text="关闭任务" title="关闭任务" @ok="submitClose">
       <p class="m-0 mb-2 text-xs text-muted-foreground">关闭后任务不再出现在工人工作台，也不能再报工。</p>

@@ -76,12 +76,12 @@ describe('parseReportQuery', () => {
 });
 
 describe('createDraft', () => {
-  it('keeps the actual slice material dimensions instead of the final product target', () => {
+  it('keeps the board length and width and uses the planned slicing thickness', () => {
     const { draft } = createDraft(prepare(), slice as any, 'TPE');
     expect(draft?.inputs[0]?.quantity).toBe(5);
     expect(draft?.output.attrs).toMatchObject({
       length: 190,
-      thickness: 4.8,
+      thickness: 0.6,
       width: 130,
     });
   });

@@ -15,6 +15,7 @@ import {
   getOrderableFactories,
 } from '#/api/fdmgongchang/production-order';
 
+import MixBatchModal from '../schedule/modules/mix-batch-modal.vue';
 import PackageReleaseModal from '../schedule/modules/package-release-modal.vue';
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
 import TaskManage from '../schedule/modules/task-manage.vue';
@@ -80,6 +81,7 @@ const pageSize = ref(20);
 const selected = ref<Map<number, Api.Order>>(new Map());
 const scheduleOpen = ref(false);
 const releaseOpen = ref(false);
+const batchMixOpen = ref(false);
 const selectable = computed(() => tab.value === 'factory' && (canSchedule.value || canRelease.value));
 const rowSelection = computed(() =>
   selectable.value
@@ -178,6 +180,10 @@ onMounted(async () => {
 
 async function switchFactory(id: number) {
   if (id === factory.factoryId.value) return;
+  selected.value = new Map();
+  batchMixOpen.value = false;
+  scheduleOpen.value = false;
+  releaseOpen.value = false;
   factory.select(id);
   pageNo.value = 1;
   await Promise.all([loadRows(), loadPending()]);
@@ -311,6 +317,7 @@ function progressPercent(o: Api.Order) {
               <Button v-if="canRelease" :disabled="selected.size === 0" size="small" @click="releaseOpen = true">
                 下发任务包{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
               </Button>
+              <Button v-if="canRelease" size="small" @click="batchMixOpen = true">批量安排发泡{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
               <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，只拿这几张单让 AI 排或直接下发任务包</span>
               <button v-else class="text-xs text-primary hover:underline" type="button" @click="selected = new Map()">清空</button>
             </template>
@@ -410,6 +417,7 @@ function progressPercent(o: Api.Order) {
       <CreateModal v-model:open="createOpen" :copy-from="copyFrom" :factories="orderable" @created="onCreated" />
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
       <PackageReleaseModal v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onScheduled" />
+      <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
       <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>
   </Page>

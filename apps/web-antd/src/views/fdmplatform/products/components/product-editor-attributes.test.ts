@@ -95,6 +95,21 @@ vi.mock('ant-design-vue', () => {
     Tag: block,
     Checkbox: block,
     Input: input,
+    InputNumber: defineComponent({
+      props: ['value'],
+      emits: ['update:value'],
+      setup:
+        (props, { attrs, emit }) =>
+        () =>
+          h('input', {
+            ...attrs,
+            value: props.value ?? '',
+            onInput: (event: Event) => {
+              const text = (event.target as HTMLInputElement).value;
+              emit('update:value', text === '' ? null : Number(text));
+            },
+          }),
+    }),
     Form: Object.assign(block, { Item: field }),
     Descriptions: Object.assign(block, { Item: field }),
     Radio: Object.assign(block, { Group: block, Button: block }),
@@ -286,6 +301,83 @@ async function save() {
 }
 
 describe('产品档案编辑与查看', () => {
+  it('旧记录默认待核实，不能按颜色原文默认单色；可保存未核实草稿', async () => {
+    await mount({ ...product, frontColor: 'P', backColor: 'P' });
+    expect(
+      document.querySelector<HTMLSelectElement>('select[aria-label="颜色方式"]')
+        ?.value,
+    ).toBe('UNKNOWN');
+    expect(document.querySelector('select[aria-label="单色颜色"]')).toBeNull();
+    await save();
+    expect(api.save.mock.calls[0]![0]).toMatchObject({
+      colorMode: 'UNKNOWN',
+      constructionType: 'UNKNOWN',
+      frontColor: 'P',
+      backColor: 'P',
+    });
+  });
+  it('单色一个选择器，同色双层可独立保存 2+4mm，结构不按颜色推断', async () => {
+    await mount();
+    await choose('颜色方式', 'SINGLE');
+    await choose('单色颜色', 'P');
+    expect(document.querySelector('select[aria-label="正面颜色"]')).toBeNull();
+    expect(document.querySelector('select[aria-label="反面颜色"]')).toBeNull();
+    await choose('制造结构', 'DOUBLE_LAYER');
+    for (const [label, value] of [
+      ['成品厚度（mm）', '6'],
+      ['正面层厚度（mm）', '2'],
+      ['反面层厚度（mm）', '4'],
+    ]) {
+      const input = document.querySelector<HTMLInputElement>(
+        `input[aria-label="${label}"]`,
+      )!;
+      input.value = value!;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+    }
+    await flush();
+    await save();
+    expect(api.save.mock.calls[0]![0]).toMatchObject({
+      colorMode: 'SINGLE',
+      colorCode: 'P',
+      frontColor: 'P',
+      backColor: 'P',
+      constructionType: 'DOUBLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 2,
+      backThicknessMm: 4,
+    });
+    expect(document.body.textContent).toContain('双层贴合');
+  });
+  it('双层厚度之和不符或双色同色时阻止保存', async () => {
+    await mount({
+      ...product,
+      colorMode: 'DUAL',
+      frontColor: 'P',
+      backColor: 'P',
+    });
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('必须不同');
+    await choose('反面颜色', 'G');
+    await choose('制造结构', 'DOUBLE_LAYER');
+    for (const [label, value] of [
+      ['成品厚度（mm）', '6'],
+      ['正面层厚度（mm）', '2'],
+      ['反面层厚度（mm）', '3'],
+    ]) {
+      const input = document.querySelector<HTMLInputElement>(
+        `input[aria-label="${label}"]`,
+      )!;
+      input.value = value!;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+    }
+    await flush();
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('之和必须等于成品厚度');
+  });
   it('允许修改已有产品的 SKU 编号，并携带原产品 ID 和版本保存', async () => {
     await mount();
     const input = document.querySelector<HTMLInputElement>(
@@ -375,6 +467,7 @@ describe('产品档案编辑与查看', () => {
     ).toEqual(['BOARD', 'LAMINATED']);
     await choose('生产分类', 'LAMINATED');
     await choose('垫子类型', 'FLAT');
+    await choose('颜色方式', 'DUAL');
     await choose('正面颜色', 'P');
     await choose('反面颜色', 'G');
     await choose('正面压花', 'BK');
@@ -411,18 +504,20 @@ describe('产品档案编辑与查看', () => {
     await mount({
       ...product,
       productStage: 'BOARD',
+      colorMode: 'SINGLE',
       colorCode: 'OLD',
       colorCodeLabel: '旧单色',
       textureFront: 'OLD-TEXTURE',
       textureFrontLabel: '旧纹路',
     });
     const color = document.querySelector<HTMLSelectElement>(
-      'select[aria-label="单色"]',
+      'select[aria-label="单色颜色"]',
     )!;
     expect(color.value).toBe('OLD');
     expect(color.textContent).toContain('旧单色');
     await choose('生产分类', '');
-    await choose('单色', '');
+    await choose('单色颜色', '');
+    await choose('颜色方式', 'UNKNOWN');
     await choose('正面压花', '');
     await save();
     expect(api.save).toHaveBeenCalledWith(
@@ -435,7 +530,7 @@ describe('产品档案编辑与查看', () => {
     );
     expect(
       document.querySelector('.product-detail-drawer')!.textContent,
-    ).toContain('颜色：旧颜色原文');
+    ).toContain('颜色原文');
     expect(
       document.querySelector('.product-detail-drawer')!.textContent,
     ).not.toContain('旧纹路');

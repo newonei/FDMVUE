@@ -28,7 +28,7 @@ import {
 import { businessError } from '../shared/business-error';
 import { sliceVolume } from '../shared/slice-wage';
 import { useFactory } from '../shared/use-factory';
-import { deriveOutputs, toNumber } from '../stage-stock/model';
+import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
 import ConfirmStep from './modules/confirm-step.vue';
 import DoneStep from './modules/done-step.vue';
 import Home from './modules/home.vue';
@@ -166,7 +166,7 @@ async function startTask(
     const sourceStages = prepare.sourceStages?.length ? prepare.sourceStages : process.sources;
     job.sourceStage = prepare.sourceStage && sourceStages.includes(prepare.sourceStage) ? prepare.sourceStage : sourceStages[0] ?? '';
     job.picks = prepare.picks
-      .map((p) => ({ qty: Math.max(0, toNumber(p.quantity) ?? 0), stock: p.stock }));
+      .map((p) => ({ qty: Math.max(0, toNumber(p.quantity) ?? 0), side: p.side, stock: p.stock }));
     const plannedRecipe = prepare.outputAttrs?.recipeCode ?? task.output?.attrs?.recipeCode;
     const plannedBatches = toNumber(task.output?.recipeBatches ?? prepare.task.output?.recipeBatches);
     if (process.code === 'MIX' && plannedRecipe) job.recipe = { code: plannedRecipe, batches: plannedBatches && plannedBatches > 0 ? plannedBatches : 1 };
@@ -270,13 +270,15 @@ function reportNow() {
  * 本工序计划属性用于报工预填；订单成品规格只作需求参考，不能覆盖半成品规格。
  */
 function applyTarget() {
-  // 开片的来源属性由实际领料逐规格生成，不能被旧任务里的自定义厚度覆盖。
-  if (job.process?.code === 'SLICE') return;
-  const target = job.prepare?.outputAttrs ?? job.task?.output?.attrs;
+  const target = job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.prepare?.targetAttrs ?? job.order?.outputAttrs;
   if (!target) return;
+  if (job.process?.code === 'SLICE' || job.process?.code === 'CUT') {
+    applyTaskTarget(job.process.code, target, job.inputs, job.outputs);
+    return;
+  }
   for (const out of job.outputs) {
     out.attrs = { ...out.attrs, ...Object.fromEntries(Object.entries(target).filter(([field, value]) =>
-      (job.process?.code !== 'CUT' || ['length', 'thickness', 'width'].includes(field))
+      (job.process?.code !== 'LAMINATE' || field !== 'thickness')
       && value !== null && value !== undefined && value !== '')) };
   }
 }

@@ -3,6 +3,7 @@ import type {
   Product,
   ProductAttributeOption,
   ProductAttributeOptions,
+  ProductAttributes,
   ProductCategory,
 } from '#/api/fdmplatform/products';
 
@@ -30,7 +31,9 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { categoryOptions } from '../category-model';
+import { manufacturingError, manufacturingPayload } from '../manufacturing';
 import { missingProductFields } from '../model';
+import ProductManufacturingFields from './ProductManufacturingFields.vue';
 import ProductStageSelect from './ProductStageSelect.vue';
 
 const props = defineProps<{
@@ -40,6 +43,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: []; saved: [product: Product] }>();
 const form = reactive<Record<string, string>>({});
+const manufacturing = ref<ProductAttributes>({});
 const active = ref(false);
 const loading = ref(false);
 const panelError = ref('');
@@ -95,11 +99,8 @@ const fields = [
 const productionFields = [
   ['productStage', '生产分类'],
   ['matType', '垫子类型'],
-  ['frontColor', '正面颜色'],
-  ['backColor', '反面颜色'],
   ['textureFront', '正面压花'],
   ['textureBack', '反面压花'],
-  ['colorCode', '单色'],
 ] as const;
 type ProductionField = (typeof productionFields)[number][0];
 function retainedOptions(
@@ -141,6 +142,19 @@ watch(
         ] ?? '',
       );
     active.value = props.product?.active ?? false;
+    manufacturing.value = {
+      colorMode: props.product?.colorMode ?? 'UNKNOWN',
+      constructionType: props.product?.constructionType ?? 'UNKNOWN',
+      colorCode: props.product?.colorCode,
+      colorCodeLabel: props.product?.colorCodeLabel,
+      frontColor: props.product?.frontColor,
+      frontColorLabel: props.product?.frontColorLabel,
+      backColor: props.product?.backColor,
+      backColorLabel: props.product?.backColorLabel,
+      finishedThicknessMm: props.product?.finishedThicknessMm,
+      frontThicknessMm: props.product?.frontThicknessMm,
+      backThicknessMm: props.product?.backThicknessMm,
+    };
     key.value = newIdempotencyKey();
     panelError.value = '';
     void loadOptions();
@@ -159,12 +173,18 @@ async function save() {
     panelError.value = '请选择产品分类；没有合适的分类可先在“产品分类”中新增';
     return;
   }
+  const structureError = manufacturingError(manufacturing.value);
+  if (structureError) {
+    panelError.value = structureError;
+    return;
+  }
   loading.value = true;
   panelError.value = '';
   try {
     const { spec, ...fieldsWithoutSpec } = form;
     const result = await saveProduct({
       ...fieldsWithoutSpec,
+      ...manufacturingPayload(manufacturing.value),
       specification: spec,
       active: active.value,
       companyId: props.companyId,
@@ -244,10 +264,14 @@ async function save() {
           />
         </Form.Item>
       </Form>
+      <ProductManufacturingFields
+        v-model:value="manufacturing"
+        :colors="attributeOptions.colors"
+      />
       <section class="production-section">
         <h3 class="section-title">生产分类与工艺属性</h3>
         <p class="section-hint">
-          先选大类，再选板材、开片板材、片材等具体类型。单色板材填写“单色”；双面产品分别填写正反颜色和压花，未压花的一面可留空。
+          先选大类，再选板材、开片板材、片材等具体类型。正反压花分别维护，未压花的一面可留空。
         </p>
         <Form layout="vertical" class="product-fields">
           <Form.Item

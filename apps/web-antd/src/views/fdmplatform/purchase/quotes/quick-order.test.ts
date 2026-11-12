@@ -22,6 +22,36 @@ import {
 } from './quick-order';
 
 const today = '2026-10-08';
+
+describe('报价下单的产品结构', () => {
+  it('沿用申请快照，不拼入后来修改的合同颜色或压花', () => {
+    const contract = fixture();
+    Object.assign(contract.items[0]!, {
+      frontColor: 'NEW',
+      backColor: 'NEW',
+      textureBack: 'NEW',
+    });
+    const requestLine = (contract.requests![0]!.items as BusinessRecord[])[0]!;
+    requestLine.specificationSnapshot = {
+      skuName: '原双色垫',
+      unit: '件',
+      frontColor: 'PK',
+      frontColorLabel: '粉色',
+      backColor: 'GY',
+      textureFront: 'SH',
+      material: 'TPE',
+    };
+    expect(taskContext(contract, 'task-a')?.structure).toMatchObject({
+      frontColor: 'PK',
+      frontColorLabel: '粉色',
+      backColor: 'GY',
+      textureFront: 'SH',
+      textureBack: undefined,
+      material: 'TPE',
+    });
+    expect(taskContext(contract, 'task-a')?.specification).toBe('');
+  });
+});
 function quote(overrides: Partial<BusinessRecord> = {}): BusinessRecord {
   return {
     id: 'quote-a',

@@ -68,7 +68,7 @@ const visibleStocks = computed(() => {
     nameOf(stock), stock.item?.productName, stock.itemCode, stock.batchNo, stock.location,
   ].filter(Boolean).join(' ')).includes(keyword));
 });
-const pickOf = (stock: StockApi.Stock) => job.picks.find((p) => p.stock.id === stock.id);
+const pickOf = (stock: StockApi.Stock, side?: StockApi.LaminationSide) => job.picks.find((p) => p.stock.id === stock.id && (!side || p.side === side));
 const SIDE_TEXT: Record<StockApi.LaminationSide, string> = { BACK: '反面', FRONT: '正面' };
 const sideText = (side?: StockApi.LaminationSide) => (side ? SIDE_TEXT[side] : '');
 
@@ -89,9 +89,15 @@ function toggle(stock: StockApi.Stock) {
   }
 }
 
-function setQty(stock: StockApi.Stock, value: unknown) {
-  const pick = pickOf(stock);
+function setQty(stock: StockApi.Stock, value: unknown, side?: StockApi.LaminationSide) {
+  const pick = pickOf(stock, side);
   if (pick) pick.qty = Math.max(0, toNumber(value) ?? 0);
+}
+function toggleSide(stock: StockApi.Stock, side: StockApi.LaminationSide) {
+  const existing = pickOf(stock, side);
+  job.picks = existing
+    ? job.picks.filter((pick) => pick !== existing)
+    : [...job.picks.filter((pick) => pick.side !== side), { qty: 0, side, stock }];
 }
 
 /** 右边清单里某种原料本次一共领多少。 */
@@ -164,7 +170,7 @@ function next() {
   }
   // 补领贴合片材可以只补一面
   if (laminate.value && !job.supplement && job.picks.length < 2) {
-    message.warning('贴合要选正面和反面两种片材');
+    message.warning('贴合要分别领用正面和反面片材，同一批次可各领一面');
     return;
   }
   const empty = job.picks.find((p) => !(p.qty > 0));
@@ -328,7 +334,7 @@ function next() {
                     </span>
                   </span>
                 </button>
-                <span v-if="pickOf(s)" class="flex shrink-0 items-center gap-1.5">
+                <span v-if="pickOf(s) && !laminate" class="flex shrink-0 items-center gap-1.5">
                   <InputNumber
                     :id="`pick-${s.id}`"
                     :aria-label="`${nameOf(s)} 领用数量`"
@@ -342,6 +348,12 @@ function next() {
                   />
                   <button v-if="(toNumber(s.quantity) ?? 0) > 0" class="text-xs text-primary hover:underline" type="button" @click="setQty(s, s.quantity)">按账面量</button>
                 </span>
+                <div v-if="laminate" class="flex w-full flex-wrap gap-3">
+                  <span v-for="side in (['FRONT', 'BACK'] as const)" :key="side" class="flex items-center gap-2">
+                    <button type="button" class="text-xs text-primary" :aria-pressed="!!pickOf(s, side)" @click="toggleSide(s, side)">{{ pickOf(s, side) ? '已选' : '选择' }}{{ sideText(side) }}</button>
+                    <InputNumber v-if="pickOf(s, side)" :id="`pick-${s.id}-${side}`" :aria-label="`${nameOf(s)} ${sideText(side)}领用数量`" :min="0" :precision="3" :addon-after="unit" :value="pickOf(s, side)!.qty || undefined" class="w-32" @change="(v) => setQty(s, v, side)" />
+                  </span>
+                </div>
               </div>
             </div>
           </Spin>
@@ -364,7 +376,7 @@ function next() {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="p in job.picks" :key="p.stock.id" class="border-t border-border">
+              <tr v-for="p in job.picks" :key="`${p.stock.id}:${p.side ?? ''}`" class="border-t border-border">
                 <td class="py-2 pr-2">
                   <span class="font-semibold">{{ nameOf(p.stock) }}</span>
                   <span v-if="p.side" class="ml-1 text-xs text-primary">{{ sideText(p.side) }}</span>
@@ -372,7 +384,7 @@ function next() {
                 </td>
                 <td class="whitespace-nowrap py-1.5 text-right tabular-nums" :class="p.qty > 0 ? 'font-semibold' : 'text-destructive'">
                   <InputNumber
-                    :id="`actual-pick-${p.stock.id}`"
+                    :id="`actual-pick-${p.stock.id}${p.side ? `-${p.side}` : ''}`"
                     :aria-label="`${nameOf(p.stock)} 批次 ${p.stock.batchNo} 实际领用数量`"
                     :min="0"
                     :precision="3"
@@ -380,11 +392,11 @@ function next() {
                     :value="p.qty || undefined"
                     class="w-32"
                     placeholder="领多少"
-                    @change="(v) => setQty(p.stock, v)"
+                    @change="(v) => setQty(p.stock, v, p.side)"
                   />
                 </td>
                 <td class="py-1.5 text-right">
-                  <button :aria-label="`去掉 ${nameOf(p.stock)}`" class="text-muted-foreground hover:text-destructive" type="button" @click="toggle(p.stock)">×</button>
+                  <button :aria-label="`去掉 ${nameOf(p.stock)}${sideText(p.side)}`" class="text-muted-foreground hover:text-destructive" type="button" @click="job.picks = job.picks.filter((pick) => pick !== p)">×</button>
                 </td>
               </tr>
             </tbody>

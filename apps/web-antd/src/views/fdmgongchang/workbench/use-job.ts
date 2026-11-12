@@ -98,16 +98,16 @@ export function stageOf(job: Job, code?: string) {
   return job.options?.stages.find((s) => s.code === code);
 }
 
-/** 历史任务可能留有自定义薄片厚度，不能覆盖实际板材或继续按错误计划报工。 */
+/** 开片目标不得厚于实际领用板材；正常的分层开片无需拦截。 */
 export function slicePlanThicknessError(job: Job, inputs = job.inputs) {
   if (job.process?.code !== 'SLICE' || !job.task) return '';
-  const planned = toNumber((job.prepare?.outputAttrs ?? job.task.output?.attrs)?.thickness);
+  const planned = toNumber((job.prepare?.outputAttrs ?? job.task.output?.attrs ?? job.prepare?.targetAttrs)?.thickness);
   if (!(planned && planned > 0)) return '';
   const actual = [...new Set(inputs.filter((input) => input.quantity > 0)
     .map((input) => toNumber(input.stock.item?.thickness)))];
-  if (!actual.some((thickness) => thickness === undefined || Math.abs(thickness - planned) > 1e-6)) return '';
+  if (!actual.some((thickness) => thickness === undefined || thickness + 1e-6 < planned)) return '';
   const actualText = actual.map((thickness) => thickness === undefined ? '未填写' : `${dimensionToDisplay(thickness, 'mm')} mm`).join('、');
-  return `开片计划厚度（${dimensionToDisplay(planned, 'mm')} mm）与实际领料（${actualText}）不一致，请联系排单人员核对并处理原任务。`;
+  return `开片计划厚度（${dimensionToDisplay(planned, 'mm')} mm）超过实际领料厚度或领料厚度缺失（${actualText}），请核对任务与领料。`;
 }
 
 /** 有数量的产出行，按产出阶段只保留用到的属性。 */
@@ -137,7 +137,7 @@ export function defectTotal(job: Job) {
 
 /** 按实际领取后的账面余额提示待补录数量，不限制如实登记的领料量。 */
 export function issueShortages(job: Job) {
-  return [
+  const lines = [
     ...job.picks.map((pick) => ({
       name: pick.stock.itemCode,
       quantity: pick.qty,
@@ -150,8 +150,13 @@ export function issueShortages(job: Job) {
       stock: pick.stock,
       unit: pick.unit,
     })),
-  ].filter((line) => line.quantity > 0)
-    .map((line) => ({
+  ].filter((line) => line.quantity > 0);
+  const grouped = new Map<number, (typeof lines)[number]>();
+  for (const line of lines) {
+    const existing = grouped.get(line.stock.id);
+    grouped.set(line.stock.id, existing ? { ...existing, quantity: existing.quantity + line.quantity } : line);
+  }
+  return [...grouped.values()].map((line) => ({
       ...line,
       amount: Math.max(0, line.quantity - (toNumber(line.stock.quantity) ?? 0)),
       action: ({ RAW: '补录原材料入库', AUX: '补录辅料入库' } as Record<string, string>)[line.stock.stage] ?? '补录上工序产出',

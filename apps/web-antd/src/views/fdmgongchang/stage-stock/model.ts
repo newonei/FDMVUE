@@ -99,15 +99,15 @@ export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
 
 /** 报完工时各工序可以修改的产出属性，其余属性沿用领料。 */
 export const EDITABLE_FIELDS: Record<string, AttrField[]> = {
-  CUT: ['length', 'width', 'thickness'],
+  CUT: ['length', 'width'],
   EMBOSS: ['textureFront', 'textureBack'],
   ENGRAVE: ['pattern'],
   FOLD: [],
-  LAMINATE: ['frontColor', 'backColor', 'length', 'width', 'thickness'],
+  LAMINATE: ['frontColor', 'backColor', 'length', 'width'],
   MIX: ['material', 'recipeCode', 'color', 'length', 'width', 'thickness'],
   PACK: [],
   PUNCH: ['length', 'width', 'thickness'],
-  SLICE: [],
+  SLICE: ['thickness'],
 };
 
 export function stageIndex(stage: string) {
@@ -300,9 +300,9 @@ function inputColor(line: InputLine) {
 /**
  * 按领料生成默认产出行：
  * - 发泡：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
- * - 开片：按实际领料的材质、配方、颜色、长宽厚分组，每组一行，规格始终沿用板材；
+ * - 开片：按实际领料的材质、配方、颜色、长宽厚分组，每组一行，填写目标单层厚度；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
- * - 立切：按领料编码分组，沿用材质、配方和颜色，长宽厚按目标片材填写；
+ * - 立切：按领料编码分组，沿用材质、配方、颜色和厚度，仅裁长宽；
  * - 其余工序：按领料编码分组，沿用属性；压花待选纹路，雕刻待选图案，冲裁沿用尺寸待改。
  */
 export function deriveOutputs(
@@ -340,7 +340,7 @@ export function deriveOutputs(
           material: item.material ?? null,
           ...(item.recipeCode ? { recipeCode: item.recipeCode } : {}),
           ...(item.recipeName ? { recipeName: item.recipeName } : {}),
-          thickness: toNumber(item.thickness) ?? null,
+          thickness: null,
           width: toNumber(item.width) ?? null,
         },
         batches: [],
@@ -368,8 +368,8 @@ export function deriveOutputs(
     const thickness =
       toNumber(f.thickness) !== undefined && toNumber(b.thickness) !== undefined
         ? Math.round(
-            ((toNumber(f.thickness) ?? 0) + (toNumber(b.thickness) ?? 0)) * 100,
-          ) / 100
+            ((toNumber(f.thickness) ?? 0) + (toNumber(b.thickness) ?? 0)) * 1000,
+          ) / 1000
         : null;
     return [
       draft(
@@ -415,7 +415,7 @@ export function lineBatch(
   inputs: InputLine[],
 ): string {
   if (process === 'SLICE') {
-    const matched = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
+    const matched = inputs.filter((l) => matchesSliceInput(l, line));
     return matched.length > 0
       ? joinBatches(matched.map((l) => l.stock.batchNo))
       : line.batchNo;
@@ -943,8 +943,8 @@ export function pickAuxStocks(
 const FIT_EPSILON = 1e-6;
 
 /**
- * 开片沿用板材长宽厚，每张对应一片，不按厚度分层或长宽排版放大数量。
- * 规格不全返回 undefined，任一尺寸不一致时返回 0。
+ * 开片保留板材长宽，每张片数为板厚除以单层厚度后向下取整。
+ * 规格不全返回 undefined，长宽改变或目标厚度超过板厚时返回 0。
  */
 export function slicePerBoard(
   board: Pick<Api.ItemAttrs, 'length' | 'thickness' | 'width'>,
@@ -952,17 +952,27 @@ export function slicePerBoard(
 ) {
   const [bl, bw, bt] = [toNumber(board.length), toNumber(board.width), toNumber(board.thickness)];
   const [sl, sw, st] = [toNumber(sheet.length), toNumber(sheet.width), toNumber(sheet.thickness)];
-  if (!bl || !bw || !bt || !sl || !sw || !st) return undefined;
-  return Math.abs(bl - sl) <= FIT_EPSILON && Math.abs(bw - sw) <= FIT_EPSILON && Math.abs(bt - st) <= FIT_EPSILON ? 1 : 0;
+  if (!bl || !bw || !bt || !sl || !sw || !st || Math.min(bl, bw, bt, sl, sw, st) <= 0) return undefined;
+  return Math.abs(bl - sl) <= FIT_EPSILON && Math.abs(bw - sw) <= FIT_EPSILON
+    ? Math.floor((bt + FIT_EPSILON) / st) : 0;
 }
 
-/** 同一产出行只能使用同材质、同配方、同颜色、同长宽厚的板材，不能跨规格累计。 */
+/** 开片产出保留板材的材质、配方、颜色和长宽，厚度为目标单层厚度。 */
 function sliceSourceMatches(source: Api.ItemAttrs, output: Api.ItemAttrs) {
   return source.material === output.material && source.color === output.color
     && (source.recipeCode || null) === (output.recipeCode || null)
-    && toNumber(source.thickness) === toNumber(output.thickness)
     && toNumber(source.length) === toNumber(output.length)
     && toNumber(source.width) === toNumber(output.width);
+}
+
+function matchesSliceInput(input: InputLine, output: OutputDraft) {
+  return input.quantity > 0 && sliceSourceMatches(input.stock.item ?? {}, output.attrs)
+    && (!output.sourceItemIds?.length || output.sourceItemIds.some((id) => id === input.stock.itemId));
+}
+
+function sharedSliceSources(a: OutputDraft, b: OutputDraft) {
+  return sliceSourceMatches(a.attrs, b.attrs) && (!a.sourceItemIds?.length || !b.sourceItemIds?.length
+    || a.sourceItemIds.some((id) => b.sourceItemIds!.includes(id)));
 }
 
 /**
@@ -970,8 +980,8 @@ function sliceSourceMatches(source: Api.ItemAttrs, output: Api.ItemAttrs) {
  * 重复产出行无法分摊时返回 undefined。
  */
 export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
-  if (outputs.filter((o) => sliceSourceMatches(o.attrs, line.attrs)).length > 1) return undefined;
-  const boards = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
+  if (outputs.filter((o) => sharedSliceSources(o, line)).length > 1) return undefined;
+  const boards = inputs.filter((l) => matchesSliceInput(l, line));
   if (boards.length === 0) return undefined;
   let total = 0;
   for (const board of boards) {
@@ -983,7 +993,7 @@ export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: Ou
 }
 
 /**
- * 按任务报工时，立切按订单带出目标长宽厚；开片和其他工序保留按实际领料生成的规格。
+ * 开片按任务带出单层厚度，立切只带出目标长宽；来源属性保持实际领料值。
  */
 export function applyTaskTarget(
   process: string | undefined,
@@ -991,16 +1001,17 @@ export function applyTaskTarget(
   _inputs: InputLine[],
   outputs: OutputDraft[],
 ) {
-  if (!target || process !== 'CUT') return;
+  if (!target || (process !== 'CUT' && process !== 'SLICE')) return;
   for (const out of outputs) {
+    if (process === 'SLICE') {
+      out.attrs.thickness = target.thickness ?? null;
+      continue;
+    }
     if (target.length !== null && target.length !== undefined) {
       out.attrs.length = target.length;
     }
     if (target.width !== null && target.width !== undefined) {
       out.attrs.width = target.width;
-    }
-    if (target.thickness !== null && target.thickness !== undefined) {
-      out.attrs.thickness = target.thickness;
     }
   }
 }
@@ -1017,13 +1028,13 @@ export function applySliceYield(inputs: InputLine[], outputs: OutputDraft[]) {
   }
 }
 
-/** 开片计算说明，例如「每张开 1 片 × 10 张 = 10 片」；算不出时说明原因。 */
+/** 开片计算说明；算不出时说明缺少的规格。 */
 export function sliceHint(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
-  if (outputs.filter((o) => sliceSourceMatches(o.attrs, line.attrs)).length > 1)
+  if (outputs.filter((o) => sharedSliceSources(o, line)).length > 1)
     return '同一规格有多行产出，无法分摊领料数量，请手填良品';
-  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '请核对板材长、宽、厚；开片厚度沿用实际领料';
-  const boards = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
-  if (boards.length === 0) return '产出规格必须与对应领料板材一致，请核对实际领料';
+  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '请填写开片单层厚度；双色 6 mm 瑜伽垫通常开为两层各 3 mm';
+  const boards = inputs.filter((l) => matchesSliceInput(l, line));
+  if (boards.length === 0) return '材质、配方、颜色和长宽必须沿用对应领料板材，请核对实际领料';
   const parts = boards.map((b) => {
     const per = slicePerBoard(b.stock.item ?? {}, line.attrs);
     return per === undefined ? '板材规格不全' : `每张开 ${per} 片 × ${Math.floor(b.quantity + FIT_EPSILON)} 张`;

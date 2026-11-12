@@ -23,6 +23,7 @@ import {
 
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, SCHEDULE_STATUS } from '../../shared/schedule';
+import MixBatchModal from './mix-batch-modal.vue';
 import PackageReleaseModal from './package-release-modal.vue';
 import ScheduleDetail from './schedule-detail.vue';
 
@@ -90,7 +91,11 @@ onMounted(() => {
   void loadMixQueue();
 });
 onBeforeUnmount(() => clearTimeout(pollTimer));
-watch(() => props.factoryId, load);
+watch(() => props.factoryId, () => {
+  batchMixOpen.value = false;
+  releaseOpen.value = false;
+  void load();
+});
 watch(
   () => props.focusId,
   async (id) => {
@@ -161,6 +166,7 @@ async function loadMixQueue() {
 
 /** 下发任务包：不经过 AI，先勾选订单；发泡只排先后，其他工序按工序分包，都不定日期。 */
 const releaseOpen = ref(false);
+const batchMixOpen = ref(false);
 
 async function onReleased(scheduleId: number) {
   await Promise.all([loadList(), loadMixQueue()]);
@@ -230,6 +236,7 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
         <Button v-if="canGenerate" :loading="generating" block @click="generate()">AI 生成排单</Button>
         <p v-if="canGenerate" class="m-0">AI 只排发泡的先后（同配方、同板材、同颜色合成一个任务）；确认下发时，开片以后由系统按工序生成任务包。</p>
         <Button v-if="canConfirm" :loading="creatingManual" block @click="createManual">手动派工（不用 AI）</Button>
+        <Button v-if="canConfirm" block @click="batchMixOpen = true">批量安排发泡</Button>
       </section>
 
       <section v-if="mixQueue.length > 0" class="flex flex-col gap-1 rounded-lg border border-border bg-card p-2">
@@ -278,10 +285,11 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
 
     <section class="min-w-0 flex-1 rounded-lg border border-border bg-card p-4">
       <Spin :spinning="detailLoading">
-        <ScheduleDetail v-if="detail" :schedule="detail" :workers="workers" @changed="onChanged" @retry="retry" />
+        <ScheduleDetail v-if="detail" :key="factoryId" :schedule="detail" :workers="workers" @changed="onChanged" @retry="retry" />
         <Empty v-else description="左边生成一份排单，或选一条排单记录" />
       </Spin>
     </section>
     <PackageReleaseModal v-model:open="releaseOpen" @released="onReleased" />
+    <MixBatchModal :key="factoryId" v-model:open="batchMixOpen" :initial-date="form.startDate.format('YYYY-MM-DD')" @released="onReleased" />
   </div>
 </template>

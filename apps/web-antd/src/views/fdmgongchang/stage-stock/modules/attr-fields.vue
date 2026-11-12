@@ -98,7 +98,7 @@ function emptyHint(field: AttrField) {
         :value="numberValue(field)"
         :min="0"
         :max="dimensionUnit === 'mm' ? 99999.9 : 9999.99"
-        :precision="dimensionUnit === 'mm' ? 1 : field === 'thickness' ? 2 : 1"
+        :precision="field === 'thickness' ? (dimensionUnit === 'mm' ? 2 : 3) : 1"
         :step="dimensionUnit === 'mm' ? 1 : field === 'thickness' ? 0.1 : 1"
         :style="{ width: dimensionUnit === 'mm' ? '7rem' : '6rem' }"
         size="small"

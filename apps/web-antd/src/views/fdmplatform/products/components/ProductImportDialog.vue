@@ -27,7 +27,8 @@ import {
 } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
-import { productAttributesText } from '../attributes';
+import { productProcessText } from '../attributes';
+import ProductColorSummary from './ProductColorSummary.vue';
 
 const props = defineProps<{ companyId: number; open: boolean }>();
 const emit = defineEmits<{ close: []; imported: [] }>();
@@ -52,6 +53,7 @@ const columns = [
   { title: 'Excel 行', dataIndex: 'rowNumber', width: 80 },
   { title: '产品编号 / 名称', key: 'product', width: 215 },
   { title: '型号 / 规格 / 单位', key: 'specification', width: 180 },
+  { title: '颜色 / 制造结构', key: 'colors', width: 220 },
   { title: '生产分类 / 工艺属性', key: 'production', width: 260 },
   { title: '分类 / 状态', key: 'category', width: 125 },
   { title: '处理结果', key: 'status', width: 105 },
@@ -325,8 +327,13 @@ async function downloadTemplate() {
               </div>
             </div>
             <div v-else-if="column.key === 'production'">
-              {{ productAttributesText(record.values ?? {}) || '未填写' }}
+              {{ productProcessText(record.values ?? {}) || '未填写' }}
             </div>
+            <ProductColorSummary
+              v-else-if="column.key === 'colors'"
+              :value="record.values ?? {}"
+              construction
+            />
             <div v-else-if="column.key === 'category'">
               {{ record.values?.category || '未分类' }}
               <div class="import-muted">

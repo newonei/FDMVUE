@@ -383,6 +383,8 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface Order {
+    /** 本工序计划产出；开片厚度已经换算为单层厚度。 */
+    outputAttrs?: ItemAttrs | null;
     scheduleTaskId?: null | number;
     assignmentId?: null | string;
     completedAt?: null | number | string;

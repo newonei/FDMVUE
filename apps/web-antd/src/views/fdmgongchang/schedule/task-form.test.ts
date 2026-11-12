@@ -9,6 +9,7 @@ import TaskForm from './modules/task-form-modal.vue';
 const pickerState = vi.hoisted(() => ({ product: {} as Api.Product, inputProduct: {} as Api.Product }));
 const preview = vi.hoisted(() => vi.fn());
 const resolveInput = vi.hoisted(() => vi.fn());
+const batchMix = vi.fn();
 vi.mock('#/api/fdmgongchang/schedule', () => ({ previewScheduleTaskMaterials: preview, getScheduleTaskInputProduct: resolveInput }));
 vi.mock('./modules/product-picker-modal.vue', () => ({
   default: defineComponent({
@@ -75,13 +76,13 @@ const inputMaterial = (process = 'SLICE'): Api.Material => ({
   productId: 'INPUT-01', code: process === 'SLICE' ? 'BOARD-001' : 'SHEET-001',
   stage: process === 'SLICE' ? 'BOARD' : 'SHEET', name: process === 'SLICE' ? '紫色发泡板材' : '紫色已开片板材',
   unit: process === 'SLICE' ? '张' : '片',
-  attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 4.5 },
+  attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: process === 'SLICE' ? 4.5 : 0.3 },
 });
 let unmount: (() => void) | undefined;
 const flush = async () => { for (let i = 0; i < 5; i++) { await Promise.resolve(); await nextTick(); } };
 beforeEach(() => { vi.useFakeTimers();
   preview.mockImplementation(async (request: Api.MaterialPreviewRequest) => ['CUT', 'SLICE'].includes(request.process)
-    ? { inputs: [{ ...inputMaterial(request.process), quantity: request.process === 'SLICE' ? request.quantity : 2, available: 1, shortage: 1 }], sourceStages: [inputMaterial(request.process).stage], warnings: [], estimated: true }
+    ? { inputs: [{ ...inputMaterial(request.process), quantity: request.process === 'SLICE' ? Math.ceil(request.quantity / Math.floor(4.5 / Number(request.outputAttrs?.thickness))) : 2, available: 1, shortage: 1 }], sourceStages: [inputMaterial(request.process).stage], warnings: [], estimated: true }
     : { inputs: [], sourceStages: [], warnings: ['请确认实际用料'], estimated: false });
   resolveInput.mockImplementation(async (request: { process: string }) => inputMaterial(request.process));
   pickerState.inputProduct = { id: 'INPUT-01', code: 'BOARD-001', name: '历史板材', productStage: null, resolvedProductStage: 'BOARD', size: '999×999×999cm', colorCode: 'HUI' };
@@ -94,7 +95,7 @@ afterEach(() => { unmount?.(); document.body.innerHTML = ''; vi.clearAllMocks();
 async function mount(initial?: Api.PlanTask, existingTaskId?: number, status: Api.Status = existingTaskId ? 'CONFIRMED' : 'DRAFT', recalculateMaterials = false) {
   const submit = vi.fn().mockResolvedValue(undefined);
   const host = document.createElement('div'); document.body.append(host);
-  const app = createApp(TaskForm, { existingTaskId, initial, options, recalculateMaterials, schedule: { ...schedule, status }, submit, workers: [], open: true });
+  const app = createApp(TaskForm, { existingTaskId, initial, options, recalculateMaterials, schedule: { ...schedule, status }, submit, workers: [], open: true, onBatchMix: batchMix });
   app.mount(host); unmount = () => app.unmount(); await flush();
   return submit;
 }
@@ -110,10 +111,40 @@ async function save() { await clickButton('保存'); }
 async function selectInput() {
   document.querySelector<HTMLElement>('#task-form-input-product')!.click(); await flush();
   await clickButton('选入领料产品');
+  const thickness = document.querySelector<HTMLInputElement>('#task-output-thickness');
+  if (thickness && !thickness.value) await set('task-output-thickness', '3');
 }
 
 describe('production task dispatch', () => {
-  it('inherits all authoritative board dimensions including thickness without editable slicing fields', async () => {
+  it('opens batch mixing from the single-task form with current order and date without saving one task', async () => {
+    const submit = await mount(); await set('task-form-process', 'MIX');
+    await set('task-form-order', 'GD-01'); await set('task-form-date', '2026-11-11');
+    await clickButton('批量安排发泡');
+    expect(batchMix).toHaveBeenCalledWith({ orderNo: 'GD-01', workDate: '2026-11-11' });
+    expect(submit).not.toHaveBeenCalled();
+  });
+  it('selects same-color unequal layers explicitly and preserves side on edited dispatch', async () => {
+    const demand = options.demand[0]!;
+    demand.layers = [
+      { side: 'FRONT', color: 'ZI', thickness: 0.2, perProduct: 1, boardAttrs: baseAttrs, sheetAttrs: { ...baseAttrs, thickness: 0.2 }, cutAttrs: { ...baseAttrs, length: 183, width: 61, thickness: 0.2 } },
+      { side: 'BACK', color: 'ZI', thickness: 0.4, perProduct: 1, boardAttrs: baseAttrs, sheetAttrs: { ...baseAttrs, thickness: 0.4 }, cutAttrs: { ...baseAttrs, length: 183, width: 61, thickness: 0.4 } },
+    ];
+    demand.layerPlans = [
+      { side: 'FRONT', color: 'ZI', thickness: 0.2, perProduct: 1, layers: 24, perBoard: 48, boards: 4 },
+      { side: 'BACK', color: 'ZI', thickness: 0.4, perProduct: 1, layers: 12, perBoard: 24, boards: 7 },
+    ];
+    try {
+      const submit = await mount(); await set('task-form-process', 'SLICE');
+      await set('task-form-order', 'GD-01'); await set('task-form-product', 'POI:1');
+      expect((document.querySelector('#task-form-layer') as HTMLSelectElement).value).toBe('');
+      await set('task-form-layer', 'BACK'); await selectInput();
+      expect((document.querySelector('#task-output-thickness') as HTMLInputElement).value).toBe('4');
+      expect((document.querySelector('#task-form-quantity') as HTMLInputElement).value).toBe('84');
+      await save();
+      expect(submit).toHaveBeenCalledWith(expect.objectContaining({ quantity: 84, output: expect.objectContaining({ side: 'BACK', attrs: expect.objectContaining({ thickness: 0.4, color: 'ZI' }) }) }));
+    } finally { delete demand.layers; delete demand.layerPlans; }
+  });
+  it('inherits board length and width and opens a 45 mm board into 3 mm layers', async () => {
     const submit = await mount(); await set('task-form-process', 'SLICE');
     await set('task-form-quantity', '8');
     document.querySelector<HTMLElement>('#task-form-input-product')!.click(); await flush();
@@ -124,36 +155,36 @@ describe('production task dispatch', () => {
     expect(document.body.textContent).toContain('1900×1320×45 mm');
     expect(document.body.textContent).toContain('紫色');
     expect(document.body.textContent).not.toContain('9990');
-    for (const field of ['material', 'color', 'length', 'width', 'thickness']) expect(document.querySelector(`#task-output-${field}`)).toBeNull();
+    for (const field of ['material', 'color', 'length', 'width']) expect(document.querySelector(`#task-output-${field}`)).toBeNull();
+    await set('task-output-thickness', '3');
     await vi.advanceTimersByTimeAsync(350); await flush();
     expect(preview).toHaveBeenLastCalledWith({ process: 'SLICE', assignmentId: null, quantity: 8,
       inputProductId: 'INPUT-01', inputCode: 'BOARD-001',
-      outputAttrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 4.5 } });
+      outputAttrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 0.3 } });
     await save();
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ inputs: [{ ...inputMaterial(), quantity: 8 }],
-      output: expect.objectContaining({ stage: 'SHEET', attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 4.5 } }) }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ inputs: [{ ...inputMaterial(), quantity: 1 }],
+      output: expect.objectContaining({ stage: 'SHEET', attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 0.3 } }) }));
   });
 
-  it('inherits the selected board recipe for slicing and allows a 45 mm board to be cut into a specified 6 mm sheet', async () => {
+  it('preserves recipe and target slicing thickness, while cutting only changes length and width', async () => {
     resolveInput.mockImplementation(async (request: { process: string }) => ({ ...inputMaterial(request.process),
-      attrs: { ...inputMaterial(request.process).attrs, thickness: 4.5, recipeCode: 'REC-001', recipeName: '配方一' } }));
+      attrs: { ...inputMaterial(request.process).attrs, recipeCode: 'REC-001', recipeName: '配方一' } }));
     const submit = await mount();
     await set('task-form-process', 'SLICE'); await selectInput(); await set('task-form-quantity', '3');
     await save();
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ attrs: {
-      material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 4.5, recipeCode: 'REC-001', recipeName: '配方一',
+      material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 0.3, recipeCode: 'REC-001', recipeName: '配方一',
     } }) }));
     unmount?.(); document.body.innerHTML = '';
     const cutSubmit = await mount();
     await set('task-form-process', 'CUT'); await set('task-form-order', 'GD-01'); await set('task-form-product', 'POI:1');
     await selectInput();
-    expect((document.querySelector<HTMLElement>('#task-output-thickness') as HTMLInputElement).value).toBe('3');
-    expect(document.querySelector<HTMLElement>('#task-output-recipeCode')).toBeNull();
-    await set('task-output-length', '1800'); await set('task-output-width', '600'); await set('task-output-thickness', '6');
-    await selectInput(); // Replacing the source must not overwrite the explicit target dimensions.
-    expect((document.querySelector<HTMLElement>('#task-output-thickness') as HTMLInputElement).value).toBe('6');
+    expect(document.querySelector('#task-output-thickness')).toBeNull();
+    expect(document.querySelector('#task-output-recipeCode')).toBeNull();
+    await set('task-output-length', '1800'); await set('task-output-width', '600');
+    await selectInput();
     await save();
-    const target = { material: 'TPE', color: 'ZI', length: 180, width: 60, thickness: 0.6, recipeCode: 'REC-001', recipeName: '配方一' };
+    const target = { material: 'TPE', color: 'ZI', length: 180, width: 60, thickness: 0.3, recipeCode: 'REC-001', recipeName: '配方一' };
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ process: 'CUT', outputAttrs: target }));
     expect(cutSubmit).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ stage: 'CUT', attrs: target }) }));
   });
@@ -213,7 +244,6 @@ describe('production task dispatch', () => {
   });
 
   it.each([
-    { inputs: [{ ...inputMaterial(), quantity: 2 }] },
     { inputs: [{ ...inputMaterial(), quantity: 2 }, { ...inputMaterial(), code: 'BOARD-002', quantity: 1 }] },
     { inputs: [] },
     { inputs: [{ stage: 'BOARD', code: 'OLD-BOARD-WITHOUT-ATTRS', quantity: 2 }] },
@@ -227,46 +257,43 @@ describe('production task dispatch', () => {
     expect(submit).toHaveBeenCalledWith({ ...initial, date: '2026-11-11', sequence: null, reason: '调整开工日期' });
   });
 
-  it.each(['DRAFT', 'CONFIRMED'] as const)('requires reselection instead of preserving a stale thickness for a new %s task', async (status) => {
+  it.each(['DRAFT', 'CONFIRMED'] as const)('preserves a valid 3 mm target and recalculates the board requirement in %s', async (status) => {
     const initial: Api.PlanTask = { date: '2026-11-10', process: 'SLICE', quantity: 8, product: '历史开片任务', workerIds: [],
-      inputs: [{ ...inputMaterial(), quantity: 2 }],
+      inputs: [{ ...inputMaterial(), quantity: 8 }],
       output: { stage: 'SHEET', attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 0.3 } } };
     const submit = await mount(initial, undefined, status);
+    expect((document.querySelector('#task-output-thickness') as HTMLInputElement).value).toBe('3');
     await set('task-form-reason', '调整说明'); await save();
-    expect(submit).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('草稿或补派任务需要重新选择领料板材');
-    expect(document.body.textContent).not.toContain('可直接调整日期、人员或说明');
-    expect(initial.output?.attrs?.thickness).toBe(0.3);
+    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ outputAttrs: expect.objectContaining({ thickness: 0.3 }) }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ inputs: [{ ...inputMaterial(), quantity: 1 }],
+      output: expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.3 }) }) }));
+    expect(initial.inputs?.[0]?.quantity).toBe(8);
   });
 
-  it('requires explicit reselection to correct a historical thickness and discards its stale output identity and estimate', async () => {
-    const initial: Api.PlanTask = { date: '2026-11-10', process: 'SLICE', quantity: 8, product: '历史开片任务', workerIds: [],
-      inputs: [{ ...inputMaterial(), quantity: 2 }],
-      output: { stage: 'SHEET', code: 'OLD-THIN-SHEET', attrs: { material: 'TPE', color: 'ZI', length: 190, width: 132, thickness: 0.3 } } };
-    const submit = await mount(initial);
-    expect(document.body.textContent).toContain('历史开片计划厚度与领料板材不一致');
-    expect(document.body.textContent).toContain('1900×1320×3 mm');
-    expect(preview).not.toHaveBeenCalled();
-    await selectInput();
-    expect(document.body.textContent).not.toContain('历史开片计划厚度与领料板材不一致');
-    expect(document.body.textContent).toContain('1900×1320×45 mm');
-    await save();
-    expect(preview).toHaveBeenCalledWith(expect.objectContaining({ quantity: 8, outputAttrs: expect.objectContaining({ thickness: 4.5 }) }));
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ inputs: [{ ...inputMaterial(), quantity: 8 }],
-      output: expect.objectContaining({ attrs: expect.objectContaining({ thickness: 4.5 }) }) }));
-    expect(submit.mock.calls[0]![0].output.code).toBeUndefined();
-    expect(initial.output?.attrs?.thickness).toBe(0.3);
-    expect(initial.inputs?.[0]?.quantity).toBe(2);
-  });
-
-  it('updates inherited thickness when another board is selected', async () => {
+  it('keeps the requested layer thickness when replacing a board and rejects thickness above the board', async () => {
     const submit = await mount(); await set('task-form-process', 'SLICE'); await set('task-form-quantity', '4'); await selectInput();
     const replacement = { ...inputMaterial(), code: 'BOARD-48', attrs: { ...inputMaterial().attrs, thickness: 4.8 } };
     resolveInput.mockResolvedValueOnce(replacement);
-    preview.mockResolvedValue({ inputs: [{ ...replacement, quantity: 4 }], sourceStages: ['BOARD'], warnings: [], estimated: true });
+    await selectInput();
+    expect((document.querySelector('#task-output-thickness') as HTMLInputElement).value).toBe('3');
+    await set('task-output-thickness', '50'); await save();
+    expect(submit).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('开片单层厚度不能超过领料板材厚度');
+    await set('task-output-thickness', '3'); await save();
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.3 }) }) }));
+  });
+
+  it('takes the 3 mm layer and single-colour quantity from a 6 mm two-colour order', async () => {
+    const demand = options.demand[0]!;
+    demand.targetAttrs!.thickness = 0.6;
+    demand.sheetsByColor = { ZI: 40, HUI: 40 };
+    const submit = await mount();
+    await set('task-form-process', 'SLICE'); await set('task-form-order', 'GD-01'); await set('task-form-product', 'POI:1');
     await selectInput(); await save();
-    expect(document.querySelector<HTMLElement>('#task-output-thickness')).toBeNull();
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ output: expect.objectContaining({ attrs: expect.objectContaining({ thickness: 4.8 }) }) }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ quantity: 40,
+      output: expect.objectContaining({ attrs: expect.objectContaining({ thickness: 0.3, color: 'ZI' }) }) }));
+    delete demand.sheetsByColor;
+    demand.targetAttrs!.thickness = 0.3;
   });
 
   it('requires selecting material again when a legacy multi-material task changes planned quantity', async () => {
@@ -342,7 +369,7 @@ describe('production task dispatch', () => {
     await set('task-form-quantity', '8'); await save();
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({
       assignmentId: null, contractCode: null, product: '灰色瑜伽垫', quantity: 8,
-      output: expect.objectContaining({ stage: 'CUT', attrs: { length: 183, width: 61, thickness: 0.6, material: 'TPE', color: 'ZI' } }),
+      output: expect.objectContaining({ stage: 'CUT', attrs: { length: 183, width: 61, thickness: 0.3, material: 'TPE', color: 'ZI' } }),
     }));
   });
 

@@ -2,8 +2,11 @@
 import type { EntryHeader, EntryRow } from '../entry-model';
 
 import type { Contract, Directory, MasterRecord } from '#/api/fdmplatform';
-import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
-import type { Product } from '#/api/fdmplatform/products';
+import type {
+  CreatedProcurementOrders,
+  ProcurementProductSnapshot,
+} from '#/api/fdmplatform/procurement';
+import type { Product, ProductStructure } from '#/api/fdmplatform/products';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 
@@ -32,12 +35,15 @@ import { getProducts } from '#/api/fdmplatform/products';
 
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
 import { errorText } from '../../../data';
+import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
+import { productStructure } from '../../../products/structure';
 import { localDate } from '../../quotes/comparison';
 import {
   copyEntry,
   emptyRow,
   entryErrors,
   entryPayload,
+  entryProductFields,
   entrySuppliers,
   entryTotals,
   parsePastedLines,
@@ -78,6 +84,7 @@ const productOptions = ref<
     label: string;
     name: string;
     specification?: string;
+    structure?: ProductStructure;
     unit?: string;
     value: string;
   }[]
@@ -162,6 +169,7 @@ function productOption(product: Product) {
     name: product.name,
     code: product.code,
     specification: product.specification,
+    structure: productStructure(product),
     unit: product.unit,
     label: `${product.code} · ${product.name}${product.specification ? ` · ${product.specification.replaceAll('\n', ' ')}` : ''}`,
   };
@@ -171,11 +179,10 @@ function pickProducts(products: Product[]) {
   const options = products.map((product) => productOption(product));
   // 让行内下拉能显示刚选中的产品名称
   productOptions.value = [
-    ...options.filter(
-      (option) =>
-        !productOptions.value.some((entry) => entry.value === option.value),
+    ...options,
+    ...productOptions.value.filter(
+      (entry) => !options.some((option) => option.value === entry.value),
     ),
-    ...productOptions.value,
   ];
   // pickerRow 保留到下次打开，关闭动画期间弹窗保持原来的单选 / 多选
   const target = pickerRow.value;
@@ -207,6 +214,7 @@ function productRow(product: (typeof productOptions.value)[number]): EntryRow {
     name: product.name,
     code: product.code,
     specification: product.specification,
+    structure: product.structure,
     unit: product.unit,
   };
 }
@@ -308,18 +316,23 @@ async function chooseContract(value: unknown) {
 }
 function chooseProduct(row: EntryRow, value: unknown) {
   if (typeof value !== 'string') return;
+  // 复制行再次选中原产品仍沿用原单快照；真正换产品时解除来源绑定。
+  if (
+    row.sourceLineId &&
+    value ===
+      (row.contractItemId ? `item:${row.contractItemId}` : row.productId)
+  )
+    return;
   if (value.startsWith('item:')) {
     const item = contract.value?.items.find(
       (entry) => entry.id === value.slice(5),
     );
     if (!item) return;
     Object.assign(row, {
+      ...entryProductFields(item),
+      sourceLineId: undefined,
       contractItemId: item.id,
       productId: undefined,
-      name: item.skuName || '合同产品',
-      code: item.skuCode,
-      specification: item.specification,
-      unit: item.unit,
     });
     return;
   }
@@ -329,9 +342,11 @@ function chooseProduct(row: EntryRow, value: unknown) {
     category: product.category,
     productId: product.value,
     contractItemId: undefined,
+    sourceLineId: undefined,
     name: product.name,
     code: product.code,
     specification: product.specification,
+    structure: product.structure,
     unit: product.unit,
   });
 }
@@ -345,11 +360,8 @@ function addContractItems() {
       .filter((item) => !existing.has(item.id))
       .map((item) => ({
         ...emptyRow(key()),
+        ...entryProductFields(item),
         contractItemId: item.id,
-        name: item.skuName || '合同产品',
-        code: item.skuCode,
-        specification: item.specification,
-        unit: item.unit,
         quantity:
           item.quantity === null || item.quantity === undefined
             ? undefined
@@ -375,6 +387,7 @@ function fillFromRequest(requestId: string) {
       contractItemId?: string;
       id?: string;
       quantity?: unknown;
+      specificationSnapshot?: null | ProcurementProductSnapshot;
     }[]
   )
     .map((line) => ({ line, item: items.get(String(line.contractItemId)) }))
@@ -384,11 +397,8 @@ function fillFromRequest(requestId: string) {
   rows.value = lines.map(({ line, item }) => {
     const row: EntryRow = {
       ...emptyRow(key()),
+      ...entryProductFields(line.specificationSnapshot ?? item!),
       contractItemId: item!.id,
-      name: item!.skuName || '合同产品',
-      code: item!.skuCode,
-      specification: item!.specification,
-      unit: item!.unit,
       quantity:
         line.quantity === null || line.quantity === undefined
           ? undefined
@@ -396,7 +406,7 @@ function fillFromRequest(requestId: string) {
     };
     // 已登记供应商报价的明细直接带出供应商和单价；不同供应商保存时自动拆单
     const quoted = line.id
-      ? quotedSupplier(contract.value!, String(line.id), item!.unit, today)
+      ? quotedSupplier(contract.value!, String(line.id), row.unit, today)
       : undefined;
     if (quoted) {
       row.supplierId = quoted.supplierId;
@@ -436,13 +446,15 @@ async function copyOrder(
       code: row.code,
       category: row.category,
       specification: row.specification,
+      structure: row.structure,
       unit: row.unit,
       label: `${row.code ?? ''} · ${row.name}`,
     }));
   productOptions.value = [
-    ...copiedOptions,
-    ...productOptions.value.filter(
-      (entry) => !copiedOptions.some((option) => option.value === entry.value),
+    ...productOptions.value,
+    ...copiedOptions.filter(
+      (option) =>
+        !productOptions.value.some((entry) => entry.value === option.value),
     ),
   ];
   rows.value = copied.rows.length > 0 ? copied.rows : [emptyRow(key())];
@@ -642,7 +654,7 @@ async function save(submit = true) {
               <th class="no">#</th>
               <th class="product"><em>*</em>产品</th>
               <th class="supplier-col">供应商（不选同表头）</th>
-              <th class="spec-col">规格 / 单位</th>
+              <th class="spec-col">规格 / 单位 / 产品资料</th>
               <th class="money"><em>*</em>单价</th>
               <th class="money"><em>*</em>数量</th>
               <th class="money"><em>*</em>总价</th>
@@ -714,6 +726,10 @@ async function save(submit = true) {
                   row.specification || '—'
                 }}</span>
                 <span class="hint">{{ row.unit }}</span>
+                <ProductStructureDetails
+                  v-if="row.productId || row.contractItemId"
+                  :value="row.structure ?? {}"
+                />
               </td>
               <td>
                 <InputNumber
@@ -1095,7 +1111,7 @@ em {
 }
 
 .entry-grid .spec-col {
-  width: 180px;
+  width: 280px;
 }
 
 .splits {

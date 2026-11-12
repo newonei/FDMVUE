@@ -1,10 +1,12 @@
 import type { QuoteForm } from '../quotes/quick-order';
 
 import type { BusinessRecord, Contract } from '#/api/fdmplatform';
+import type { ProductStructure } from '#/api/fdmplatform/products';
 
 import BigNumber from 'bignumber.js';
 
 import { rows } from '../../data';
+import { productStructure } from '../../products/structure';
 import { latestTaskQuotes, localDate } from '../quotes/comparison';
 import { quoteFormErrors, taskContext } from '../quotes/quick-order';
 
@@ -34,6 +36,7 @@ export interface AssignRow {
   requestItemId: string;
   title: string;
   specification: string;
+  structure?: ProductStructure;
   unit: string;
   requested: string;
   /** Not yet given to any active task; split rows of one item share it. */
@@ -50,17 +53,18 @@ let rowSequence = 0;
 const nextKey = () => `row-${++rowSequence}`;
 
 function itemTitle(contract: Contract, item: BusinessRecord) {
-  const snapshot = (item.specificationSnapshot ?? {}) as Record<
-    string,
-    unknown
-  >;
   const product = contract.items.find(
     (entry) => entry.id === item.contractItemId,
   );
+  const snapshot = (item.specificationSnapshot ?? product ?? {}) as Record<
+    string,
+    unknown
+  >;
   return {
-    title: text(snapshot.skuName) || text(product?.skuName) || '采购产品',
-    specification: text(snapshot.specification) || text(product?.specification),
-    unit: text(snapshot.unit) || text(product?.unit),
+    title: text(snapshot.skuName) || '采购产品',
+    specification: text(snapshot.specification),
+    structure: productStructure(snapshot),
+    unit: text(snapshot.unit),
   };
 }
 
@@ -175,6 +179,7 @@ export interface QuoteRow {
   assignmentId: string;
   title: string;
   specification: string;
+  structure?: ProductStructure;
   unit: string;
   /** Quantity still to be planned or ordered for the task. */
   quantity: string;
@@ -219,6 +224,7 @@ export function requestQuoteRows(
         assignmentId: String(assignment.id),
         title: context.title,
         specification: context.specification,
+        structure: context.structure,
         unit: context.unit,
         quantity: context.plannable,
         requiredDate: context.requiredDate,

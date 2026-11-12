@@ -43,6 +43,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import { routeIncludes } from '../../production-order/shared';
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import {
+  applyTaskTarget,
   attrSummary,
   defectRate,
   deriveOutputs,
@@ -87,6 +88,9 @@ const stockLoading = ref(false);
 const stockKeyword = ref('');
 const quantities = ref<Record<number, null | number>>({});
 const sides = ref<Record<number, Api.LaminationSide>>({});
+/** 贴合时同一批次可另领一份作为另一面。 */
+const oppositeQuantities = ref<Record<number, null | number>>({});
+const sliceLayerSide = ref<Api.LaminationSide>();
 /** 已选领料的库存行，切换搜索后仍保留。 */
 const picked = ref<Record<number, Api.Stock>>({});
 const outputs = ref<OutputDraft[]>([]);
@@ -310,6 +314,33 @@ const scheduleTaskOptions = computed(() =>
 
 /** 报产出：true 报完关单；false 只登记这一批，单子继续在制。 */
 const reportFinish = ref(true);
+/** 关联任务优先；没有任务时按订单已确认的单层厚度开片。 */
+const sliceTargetThickness = computed(() => {
+  const planned = scheduleTasks.value.find((task) => task.id === scheduleTaskId.value)?.output?.attrs?.thickness;
+  if ((toNumber(planned) ?? 0) > 0) return toNumber(planned);
+  const item = linkedProductionItem.value;
+  const thickness = toNumber(item?.targetThickness ?? item?.targetSuggested?.thickness);
+  if (!thickness || thickness <= 0) return undefined;
+  const construction = item?.targetConstructionType ?? item?.targetSuggested?.constructionType;
+  if (construction === 'SINGLE_LAYER') return thickness;
+  if (construction !== 'DOUBLE_LAYER') return undefined;
+  const front = toNumber(item?.targetFrontThickness ?? item?.targetSuggested?.frontThickness);
+  const back = toNumber(item?.targetBackThickness ?? item?.targetSuggested?.backThickness);
+  if (sliceLayerSide.value === 'FRONT') return front;
+  if (sliceLayerSide.value === 'BACK') return back;
+  return front && front === back ? front : undefined;
+});
+const autoSliceThickness = new Map<string, number>();
+watch([sliceTargetThickness, () => outputs.value.map((line) => line.key).join(',')], () => {
+  const thickness = sliceTargetThickness.value;
+  if (props.mode !== 'create' || processCode.value !== 'SLICE' || !thickness) return;
+  for (const line of outputs.value) {
+    if (line.attrs.thickness === null || line.attrs.thickness === undefined || toNumber(line.attrs.thickness) === autoSliceThickness.get(line.key)) {
+      line.attrs.thickness = thickness;
+      autoSliceThickness.set(line.key, thickness);
+    }
+  }
+});
 const reportedBefore = computed(() => order.value?.reportCount ?? 0);
 const errors = ref<string[]>([]);
 const submitting = ref(false);
@@ -354,13 +385,14 @@ const inputs = computed<InputLine[]>(() => {
       },
     }));
   }
-  return Object.values(picked.value)
-    .filter((stock) => (quantities.value[stock.id] ?? 0) > 0)
-    .map((stock) => ({
-      quantity: quantities.value[stock.id]!,
-      side: sides.value[stock.id],
-      stock,
-    }));
+  return Object.values(picked.value).flatMap((stock) => {
+    const primary: InputLine[] = (quantities.value[stock.id] ?? 0) > 0
+      ? [{ quantity: quantities.value[stock.id]!, side: sides.value[stock.id], stock }] : [];
+    if (processCode.value === 'LAMINATE' && (oppositeQuantities.value[stock.id] ?? 0) > 0) {
+      primary.push({ quantity: oppositeQuantities.value[stock.id]!, side: sides.value[stock.id] === 'BACK' ? 'FRONT' : 'BACK', stock });
+    }
+    return primary;
+  });
 });
 
 const inputColors = computed(
@@ -455,8 +487,11 @@ function resetPicking() {
   recipePlan.value = undefined;
   quantities.value = {};
   sides.value = {};
+  oppositeQuantities.value = {};
+  sliceLayerSide.value = undefined;
   picked.value = {};
   outputs.value = [];
+  autoSliceThickness.clear();
   touched.value = false;
   codes.value = [];
   errors.value = [];
@@ -496,6 +531,7 @@ watch(open, async (value) => {
         defaultMaterial.value,
         order.value.recipeCode,
       );
+      applyTaskTarget(order.value.process, order.value.outputAttrs, inputs.value, outputs.value);
       void loadOperators();
     } finally {
       orderLoading.value = false;
@@ -586,6 +622,13 @@ function setQuantity(stock: Api.Stock, value: null | number) {
 function setSide(stock: Api.Stock, side: Api.LaminationSide) {
   sides.value[stock.id] = side;
 }
+function setOppositeQuantity(stock: Api.Stock, value: null | number) {
+  oppositeQuantities.value[stock.id] = value;
+  if (value && value > 0) {
+    picked.value[stock.id] = stock;
+    sides.value[stock.id] ??= 'FRONT';
+  }
+}
 
 /** 按配方 × 锅数带出每种原料的领用数量；原来填的数量会被替换。 */
 async function applyRecipe() {
@@ -637,7 +680,7 @@ const stockColumns = computed(() => [
   { align: 'right' as const, key: 'available', title: '可用' },
   { align: 'right' as const, key: 'take', title: '领用数量', width: 140 },
   ...(processCode.value === 'LAMINATE'
-    ? [{ key: 'side', title: '贴合面', width: 100 }]
+    ? [{ key: 'side', title: '贴合面', width: 100 }, { key: 'opposite', title: '同批次另一面领用', width: 180 }]
     : []),
 ]);
 
@@ -796,7 +839,7 @@ const step = ref<StepKey>('input');
 const steps = computed<Array<{ key: StepKey; title: string }>>(() => [
   { key: 'input', title: '工序与领料' },
   ...(finish.value ? [{ key: 'output' as const, title: '产出与计件' }] : []),
-  { key: 'other', title: '关联与操作人' },
+  { key: 'other', title: '操作人与备注' },
 ]);
 const stepIndex = computed(() => Math.max(0, steps.value.findIndex((s) => s.key === step.value)));
 const isLastStep = computed(() => stepIndex.value === steps.value.length - 1);
@@ -983,6 +1026,48 @@ watch(processCode, warnNoPatterns);
             产出入库到
             <b class="text-foreground">{{ outputStageOption?.label }}</b>（{{ outputStageOption?.defaultLocation }}）
           </div>
+        </section>
+
+        <section v-if="mode === 'create'" v-show="shown('input')" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label
+              v-if="productionItemOptions.length > 0 || linkedProductionItemId"
+              for="order-production-item"
+              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
+            >
+              关联工厂订单（选填）
+              <Select
+                id="order-production-item"
+                v-model:value="linkedProductionItemId"
+                :options="productionItemOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="选内部部门下给本厂、已接单的生产订单"
+                show-search
+              />
+              <span v-if="linkedProductionItemId">
+                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
+              </span>
+            </label>
+            <label
+              v-if="scheduleTasks.length > 0"
+              for="order-schedule-task"
+              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
+            >
+              关联排单任务（选填）
+              <Select
+                id="order-schedule-task"
+                v-model:value="scheduleTaskId"
+                :options="scheduleTaskOptions"
+                allow-clear
+                option-filter-prop="label"
+                placeholder="选这张单在做哪个排单任务，用来对比计划与实际"
+                show-search
+              />
+            </label>
+            <label v-if="processCode === 'SLICE' && !scheduleTaskId && (linkedProductionItem?.targetConstructionType ?? linkedProductionItem?.targetSuggested?.constructionType) === 'DOUBLE_LAYER'" class="flex flex-col gap-1 text-xs text-muted-foreground">
+              本次开片层面
+              <Select id="order-slice-side" v-model:value="sliceLayerSide" :options="[{ value: 'FRONT', label: '正面层' }, { value: 'BACK', label: '反面层' }]" placeholder="选正面层或反面层厚度" />
+            </label>
         </section>
 
         <!-- 2 领料 -->
@@ -1175,6 +1260,10 @@ watch(processCode, warnNoPatterns);
                     "
                   />
                 </template>
+                <template v-else-if="column.key === 'opposite'">
+                  <span class="text-xs">{{ sides[record.id] === 'BACK' ? '正面' : '反面' }}</span>
+                  <InputNumber :id="`order-take-opposite-${record.id}`" :value="oppositeQuantities[record.id] ?? undefined" :min="0" :precision="3" size="small" :aria-label="`${record.itemCode} 同批次另一面领用数量`" @change="(v) => setOppositeQuantity(record as Api.Stock, (v as null | number | undefined) ?? null)" />
+                </template>
               </template>
               <template #emptyText>
                 <Empty
@@ -1257,7 +1346,7 @@ watch(processCode, warnNoPatterns);
             v-if="processCode === 'SLICE'"
             class="text-xs text-muted-foreground"
           >
-            开片沿用实际领料的材质、颜色和长宽厚，不同规格分别一行，厚度不可修改。理论数量仅供核对，良品和残次品按实际产出填写。
+            开片沿用实际领料的材质、配方、颜色和长宽，厚度填写目标单层厚度。双层按各层实际厚度开片，贴合后厚度相加；例如 3 mm + 3 mm 或 2 mm + 4 mm 贴合为 6 mm。理论数量按板厚除以单层厚度计算，良品和残次品按实际产出填写。
           </div>
           <div
             v-if="outputs.length === 0"
@@ -1306,6 +1395,7 @@ watch(processCode, warnNoPatterns);
               :fields="editable"
               :id-prefix="`out-${line.key}`"
               :options="options"
+              dimension-unit="mm"
               @changed="(field) => onAttrChanged(index, field)"
             />
             <div
@@ -1451,41 +1541,6 @@ watch(processCode, warnNoPatterns);
             其他信息
           </h3>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label
-              v-if="productionItemOptions.length > 0 || linkedProductionItemId"
-              for="order-production-item"
-              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
-            >
-              关联工厂订单（选填）
-              <Select
-                id="order-production-item"
-                v-model:value="linkedProductionItemId"
-                :options="productionItemOptions"
-                allow-clear
-                option-filter-prop="label"
-                placeholder="选内部部门下给本厂、已接单的生产订单"
-                show-search
-              />
-              <span v-if="linkedProductionItemId">
-                关联后在工厂订单 {{ linkedProductionOrderNo }} 的工序进度里能看到这批产出；订单完成数量按交货算，做好后在「工厂排单」里交货。
-              </span>
-            </label>
-            <label
-              v-if="scheduleTasks.length > 0"
-              for="order-schedule-task"
-              class="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2"
-            >
-              关联排单任务（选填）
-              <Select
-                id="order-schedule-task"
-                v-model:value="scheduleTaskId"
-                :options="scheduleTaskOptions"
-                allow-clear
-                option-filter-prop="label"
-                placeholder="选这张单在做哪个排单任务，用来对比计划与实际"
-                show-search
-              />
-            </label>
             <label
               for="order-operator"
               class="flex flex-col gap-1 text-xs text-muted-foreground"
