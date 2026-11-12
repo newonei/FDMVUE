@@ -36,6 +36,7 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   deleteScheduleTask: vi.fn(),
   discardSchedule: vi.fn(),
   getScheduleFormOptions: mocks.options,
+  previewScheduleTaskMaterials: vi.fn().mockResolvedValue({ inputs: [], sourceStages: ['BOARD'], warnings: [], estimated: false }),
   saveScheduleTask: mocks.saveTask,
   searchScheduleProducts: vi.fn().mockResolvedValue([]),
   generateSchedule: mocks.generate,
@@ -207,6 +208,7 @@ describe('schedule page', () => {
       tasks: [
         {
           actualQuantity: 0,
+          assignmentId: 'POI:31',
           contractCode: 'HT-001',
           id: 31,
           orderCount: 0,
@@ -243,7 +245,7 @@ describe('schedule page', () => {
     };
     mocks.manual.mockResolvedValue(12);
     mocks.options.mockResolvedValue({
-      demand: [{ contractCode: 'HT-001', product: '紫色瑜伽垫' }],
+      demand: [{ assignmentId: 'POI:31', contractCode: 'HT-001', product: '紫色瑜伽垫' }],
       processes: [{ code: 'SLICE', label: '开片', unit: '片' }],
     });
     mocks.saveTask.mockResolvedValue(31);
@@ -270,7 +272,7 @@ describe('schedule page', () => {
     clickButton('保存');
     await flush();
     expect(document.body.textContent).toContain('请选择工序。');
-    expect(document.body.textContent).toContain('请从产品中心选择产品。');
+    expect(document.body.textContent).toContain('请选择备货产品。');
     [...document.querySelectorAll('button')].find((b) => ['Cancel', '取消'].includes(b.textContent?.replaceAll(/\s/g, '') ?? ''))!.click();
     await flush();
 
@@ -292,7 +294,7 @@ describe('schedule page', () => {
     expect(mocks.saveTask).toHaveBeenCalledWith({
       id: 31,
       scheduleId: 12,
-      task: expect.objectContaining({ contractCode: 'HT-001', date: '2026-10-10', process: 'SLICE', product: '紫色瑜伽垫', quantity: 200, sequence: 1, workerIds: [2] }),
+      task: expect.objectContaining({ assignmentId: 'POI:31', contractCode: 'HT-001', date: '2026-10-10', process: 'SLICE', product: '紫色瑜伽垫', quantity: 200, sequence: 1, workerIds: [2] }),
     });
   });
 });

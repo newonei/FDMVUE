@@ -1,0 +1,13 @@
+{
+  "extends": "../../apps/web-antd/tsconfig.json",
+  "include": [
+    "../../apps/web-antd/src/views/fdmai/models/ModelLibrary.vue",
+    "../../apps/web-antd/src/views/fdmai/models/ModelTypeDialog.vue",
+    "../../apps/web-antd/src/views/fdmai/models/model-library.ts",
+    "../../apps/web-antd/src/views/fdmai/models/model-types.ts"
+  ],
+  "exclude": [
+    "../../apps/web-antd/src/**/*.test.ts"
+  ],
+  "references": []
+}

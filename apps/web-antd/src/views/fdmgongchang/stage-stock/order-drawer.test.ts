@@ -251,15 +251,12 @@ describe('order drawer', () => {
     const ids = [...outputs].map((el) => el.id.replace('out-batch-', ''));
     expect((outputs[0] as HTMLInputElement).value).toBe('MB1');
     expect((outputs[1] as HTMLInputElement).value).toBe('MB2');
+    expect(document.querySelector('[id^="out-"][id$="-thickness"]')).toBeNull();
+    expect(document.querySelector('[id^="out-"][id$="-length"]')).toBeNull();
+    expect(document.body.textContent).toContain('厚度不可修改');
     // 像人一样逐个输入：每次输入之间让界面先刷新
     for (const [index, key] of ids.entries()) {
-      for (const [field, value] of [
-        ['length', '185'],
-        ['width', '63'],
-      ] as const) {
-        typeInto(`out-${key}-${field}`, value);
-        await flush();
-      }
+      expect((document.querySelector(`#out-good-${key}`) as HTMLInputElement).value).toBe('');
       typeInto(`out-good-${key}`, index === 0 ? '236' : '198');
       typeInto(`out-defect-${key}`, index === 0 ? '4' : '2');
     }
@@ -287,10 +284,11 @@ describe('order drawer', () => {
       {
         attrs: {
           color: 'PU',
-          length: 185,
+          length: 190,
           material: 'TPE',
+          recipeCode: 'REC-001',
           thickness: 0.3,
-          width: 63,
+          width: 130,
         },
         batchNo: 'MB1',
         defectQuantity: 4,
@@ -299,10 +297,11 @@ describe('order drawer', () => {
       {
         attrs: {
           color: 'GY',
-          length: 185,
+          length: 190,
           material: 'TPE',
+          recipeCode: 'REC-001',
           thickness: 0.3,
-          width: 63,
+          width: 130,
         },
         batchNo: 'MB2',
         defectQuantity: 2,
@@ -316,6 +315,8 @@ describe('order drawer', () => {
   });
 
   it('blocks submission with a readable list when sizes are missing', async () => {
+    const incomplete = stock(1, 'BOARD', 'PU', 'MB1', 100);
+    mocks.page.mockResolvedValue({ list: [{ ...incomplete, item: { ...incomplete.item, thickness: null } }], total: 1 });
     state.open = true;
     await flush();
     typeInto('order-take-1', '10');
@@ -413,13 +414,6 @@ describe('order drawer', () => {
     const key = document
       .querySelector('[id^="out-batch-"]')!
       .id.replace('out-batch-', '');
-    for (const [field, value] of [
-      ['length', '185'],
-      ['width', '63'],
-    ] as const) {
-      typeInto(`out-${key}-${field}`, value);
-      await flush();
-    }
     typeInto(`out-good-${key}`, '30');
     await flush();
     [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
@@ -471,19 +465,12 @@ describe('order drawer', () => {
     const key = document
       .querySelector('[id^="out-batch-"]')!
       .id.replace('out-batch-', '');
-    for (const [field, value] of [
-      ['length', '185'],
-      ['width', '63'],
-    ] as const) {
-      typeInto(`out-${key}-${field}`, value);
-      await flush();
-    }
     typeInto(`out-good-${key}`, '98');
     await flush();
     await vi.advanceTimersByTimeAsync(400);
     await flush();
     expect(mocks.match).toHaveBeenCalledWith(
-      expect.objectContaining({ process: 'SLICE', width: 63 }),
+      expect.objectContaining({ process: 'SLICE', width: 130, thickness: 0.3 }),
     );
     expect(document.body.textContent).toContain('计件');
 

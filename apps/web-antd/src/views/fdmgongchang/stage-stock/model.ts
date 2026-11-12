@@ -1,5 +1,9 @@
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
+import type { DimensionUnit } from '../shared/dimensions';
+
+import { dimensionToDisplay } from '../shared/dimensions';
+
 /** 库存阶段按生产链排序，和后端 FactoryStage 一致；辅料（AUX）不在生产链上，排在最后。 */
 export const STAGE_ORDER = [
   'RAW',
@@ -95,7 +99,7 @@ export const RECEIPT_SOURCE_LABELS: Record<Api.ReceiptSource, string> = {
 
 /** 报完工时各工序可以修改的产出属性，其余属性沿用领料。 */
 export const EDITABLE_FIELDS: Record<string, AttrField[]> = {
-  CUT: ['length', 'width'],
+  CUT: ['length', 'width', 'thickness'],
   EMBOSS: ['textureFront', 'textureBack'],
   ENGRAVE: ['pattern'],
   FOLD: [],
@@ -103,7 +107,7 @@ export const EDITABLE_FIELDS: Record<string, AttrField[]> = {
   MIX: ['material', 'recipeCode', 'color', 'length', 'width', 'thickness'],
   PACK: [],
   PUNCH: ['length', 'width', 'thickness'],
-  SLICE: ['color', 'length', 'width', 'thickness'],
+  SLICE: [],
 };
 
 export function stageIndex(stage: string) {
@@ -129,7 +133,7 @@ export function stageColumns(stage: string): ColumnField[] {
   if (stage === 'AUX') return [];
   if (stage === 'BOARD') return ['material', 'recipe', 'color', 'size'];
   if (stage === 'SHEET' || stage === 'CUT')
-    return ['material', 'color', 'size'];
+    return ['material', 'recipe', 'color', 'size'];
   const columns: ColumnField[] = [
     'material',
     'frontColor',
@@ -145,7 +149,7 @@ export function stageColumns(stage: string): ColumnField[] {
 export function stageFields(stage: string): AttrField[] {
   if (stage === 'RAW' || stage === 'AUX') return [];
   const fields: AttrField[] = ['material'];
-  if (stage === 'BOARD') fields.push('recipeCode');
+  if (['BOARD', 'SHEET', 'CUT'].includes(stage)) fields.push('recipeCode');
   fields.push(
     ...(isLayered(stage)
       ? (['frontColor', 'backColor'] as const)
@@ -234,7 +238,10 @@ export function normalizeForStage(
     thickness: toNumber(attrs.thickness) ?? null,
     width: toNumber(attrs.width) ?? null,
   };
-  if (stage === 'BOARD') out.recipeCode = attrs.recipeCode ?? null;
+  if (['BOARD', 'SHEET', 'CUT'].includes(stage)) {
+    if (stage === 'BOARD' || attrs.recipeCode) out.recipeCode = attrs.recipeCode ?? null;
+    if (attrs.recipeName) out.recipeName = attrs.recipeName;
+  }
   if (isLayered(stage)) {
     out.frontColor = attrs.frontColor || attrs.color || null;
     out.backColor = attrs.backColor || attrs.color || null;
@@ -291,9 +298,9 @@ function inputColor(line: InputLine) {
 /**
  * 按领料生成默认产出行：
  * - 发泡：一行，材质默认 TPE，颜色、配方、尺寸由人填写，批次保存时生成；
- * - 开片：领料按 颜色+厚度 分组，每组一行（可以颜色规格混开），长宽由人填写，厚度默认沿用板材（分层开时改薄）；
+ * - 开片：按实际领料的材质、配方、颜色、长宽厚分组，每组一行，规格始终沿用板材；
  * - 贴合：正面片材的颜色作正面色、反面片材的颜色作反面色，厚度相加；
- * - 立切：按领料编码分组，沿用单色属性，长宽待改；
+ * - 立切：按领料编码分组，沿用材质、配方和颜色，长宽厚按目标片材填写；
  * - 其余工序：按领料编码分组，沿用属性；压花待选纹路，雕刻待选图案，冲裁沿用尺寸待改。
  */
 export function deriveOutputs(
@@ -319,16 +326,20 @@ export function deriveOutputs(
       string,
       { attrs: Api.ItemAttrs; batches: string[] }
     >();
-    for (const line of inputs) {
+    for (const line of inputs.filter((input) => input.quantity > 0)) {
       const item = line.stock.item ?? {};
-      const key = [item.material, item.color, toNumber(item.thickness)].join(
+      const key = [item.material, item.recipeCode, item.color, toNumber(item.length), toNumber(item.width), toNumber(item.thickness)].join(
         '|',
       );
       const group = groups.get(key) ?? {
         attrs: {
           color: item.color ?? null,
+          length: toNumber(item.length) ?? null,
           material: item.material ?? null,
+          ...(item.recipeCode ? { recipeCode: item.recipeCode } : {}),
+          ...(item.recipeName ? { recipeName: item.recipeName } : {}),
           thickness: toNumber(item.thickness) ?? null,
+          width: toNumber(item.width) ?? null,
         },
         batches: [],
       };
@@ -369,6 +380,7 @@ export function deriveOutputs(
   }
   const groups = new Map<string, { attrs: Api.ItemAttrs; batches: string[] }>();
   for (const line of inputs) {
+    if (process === 'CUT' && line.quantity <= 0) continue;
     const item = line.stock.item ?? {};
     const group = groups.get(line.stock.itemCode) ?? {
       // 立切产出还是单色片材；之后的工序都按正反面色
@@ -396,7 +408,7 @@ export function lineBatch(
   inputs: InputLine[],
 ): string {
   if (process === 'SLICE') {
-    const matched = inputs.filter((l) => inputColor(l) === line.attrs.color);
+    const matched = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
     return matched.length > 0
       ? joinBatches(matched.map((l) => l.stock.batchNo))
       : line.batchNo;
@@ -438,12 +450,12 @@ export function makeLabels(options?: Api.Options): Labels {
   };
 }
 
-export function sizeText(attrs?: Api.ItemAttrs | null) {
+export function sizeText(attrs?: Api.ItemAttrs | null, dimensionUnit: DimensionUnit = 'cm') {
   if (!attrs) return '';
   const parts = [attrs.length, attrs.width, attrs.thickness].map((v) =>
-    toNumber(v) === undefined ? '?' : String(toNumber(v)),
+    dimensionToDisplay(v, dimensionUnit) === undefined ? '?' : String(dimensionToDisplay(v, dimensionUnit)),
   );
-  return parts.every((p) => p === '?') ? '' : parts.join('×');
+  return parts.every((p) => p === '?') ? '' : `${parts.join('×')}${dimensionUnit === 'mm' ? ' mm' : ''}`;
 }
 
 /** 属性的一行摘要，例如「紫色/灰色 · 185×63×0.6 · 贝壳纹/防滑纹」。skip 里的字段不显示（表单里已有编辑框）。 */
@@ -452,6 +464,7 @@ export function attrSummary(
   attrs: Api.ItemAttrs | null | undefined,
   labels: Labels,
   skip: AttrField[] = [],
+  dimensionUnit: DimensionUnit = 'cm',
 ) {
   if (!attrs) return '';
   if (stage === 'RAW')
@@ -482,11 +495,12 @@ export function attrSummary(
       skip.includes('thickness')
     )
   ) {
-    const size = sizeText(attrs);
+    const size = sizeText(attrs, dimensionUnit);
     if (size) parts.push(size);
   }
-  if (stage === 'BOARD' && !skip.includes('recipeCode') && attrs.recipeCode) {
-    parts.push(labels.recipe(attrs.recipeCode));
+  if (['BOARD', 'SHEET', 'CUT'].includes(stage) && !skip.includes('recipeCode') && attrs.recipeCode) {
+    const recipe = labels.recipe(attrs.recipeCode);
+    parts.push(recipe === attrs.recipeCode && attrs.recipeName ? attrs.recipeName : recipe);
   }
   if (hasTexture(stage) && !skip.includes('textureFront')) {
     parts.push(
@@ -918,13 +932,12 @@ export function pickAuxStocks(
   return picks;
 }
 
-/** 浮点误差容差：例如 4.5 / 0.9 算成 4.999999 时也按 5 片。 */
+/** 尺寸比较与领料张数的浮点误差容差。 */
 const FIT_EPSILON = 1e-6;
-const fit = (whole: number, part: number) => Math.floor(whole / part + FIT_EPSILON);
 
 /**
- * 一张板材能开多少片：长、宽、厚三个方向各能放几片相乘；长宽两种摆法取多的那种。不算锯缝损耗。
- * 规格不全或片材比板材大时返回 0 / undefined。
+ * 开片沿用板材长宽厚，每张对应一片，不按厚度分层或长宽排版放大数量。
+ * 规格不全返回 undefined，任一尺寸不一致时返回 0。
  */
 export function slicePerBoard(
   board: Pick<Api.ItemAttrs, 'length' | 'thickness' | 'width'>,
@@ -933,19 +946,25 @@ export function slicePerBoard(
   const [bl, bw, bt] = [toNumber(board.length), toNumber(board.width), toNumber(board.thickness)];
   const [sl, sw, st] = [toNumber(sheet.length), toNumber(sheet.width), toNumber(sheet.thickness)];
   if (!bl || !bw || !bt || !sl || !sw || !st) return undefined;
-  const layers = fit(bt, st);
-  return Math.max(fit(bl, sl) * fit(bw, sw), fit(bl, sw) * fit(bw, sl)) * layers;
+  return Math.abs(bl - sl) <= FIT_EPSILON && Math.abs(bw - sw) <= FIT_EPSILON && Math.abs(bt - st) <= FIT_EPSILON ? 1 : 0;
+}
+
+/** 同一产出行只能使用同材质、同配方、同颜色、同长宽厚的板材，不能跨规格累计。 */
+function sliceSourceMatches(source: Api.ItemAttrs, output: Api.ItemAttrs) {
+  return source.material === output.material && source.color === output.color
+    && (source.recipeCode || null) === (output.recipeCode || null)
+    && toNumber(source.thickness) === toNumber(output.thickness)
+    && toNumber(source.length) === toNumber(output.length)
+    && toNumber(source.width) === toNumber(output.width);
 }
 
 /**
- * 开片这一行产出能开多少片：同颜色的领料（没选颜色时是全部领料）每张板按 {@link slicePerBoard} 算，乘领用张数合计。
- * 同颜色开了好几种规格时不知道各用几张板，返回 undefined 让人手填。
+ * 开片这一行理论产出按同配方、同规格净领料张数合计，实际产出必须手填。
+ * 重复产出行无法分摊时返回 undefined。
  */
 export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
-  const color = line.attrs.color ?? null;
-  const sameColor = (c?: null | string) => !color || !c || c === color;
-  if (outputs.filter((o) => sameColor(o.attrs.color)).length > 1) return undefined;
-  const boards = inputs.filter((l) => sameColor(inputColor(l)));
+  if (outputs.filter((o) => sliceSourceMatches(o.attrs, line.attrs)).length > 1) return undefined;
+  const boards = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
   if (boards.length === 0) return undefined;
   let total = 0;
   for (const board of boards) {
@@ -957,31 +976,24 @@ export function sliceYield(inputs: InputLine[], outputs: OutputDraft[], line: Ou
 }
 
 /**
- * 按任务报工时产出规格按订单带出，工人只填数量：开片的片材长宽同板材、厚度是成品厚；立切切成成品长宽。
- * 其他工序的规格本来就按领的料带出。
+ * 按任务报工时，立切按订单带出目标长宽厚；开片和其他工序保留按实际领料生成的规格。
  */
 export function applyTaskTarget(
   process: string | undefined,
   target: Api.ItemAttrs | null | undefined,
-  inputs: InputLine[],
+  _inputs: InputLine[],
   outputs: OutputDraft[],
 ) {
-  if (!target) return;
+  if (!target || process !== 'CUT') return;
   for (const out of outputs) {
-    if (process === 'SLICE') {
-      const board = inputs[0]?.stock.item;
-      out.attrs.length = out.attrs.length ?? board?.length ?? null;
-      out.attrs.width = out.attrs.width ?? board?.width ?? null;
-      if (target.thickness !== null && target.thickness !== undefined) {
-        out.attrs.thickness = target.thickness;
-      }
-    } else if (process === 'CUT') {
-      if (target.length !== null && target.length !== undefined) {
-        out.attrs.length = target.length;
-      }
-      if (target.width !== null && target.width !== undefined) {
-        out.attrs.width = target.width;
-      }
+    if (target.length !== null && target.length !== undefined) {
+      out.attrs.length = target.length;
+    }
+    if (target.width !== null && target.width !== undefined) {
+      out.attrs.width = target.width;
+    }
+    if (target.thickness !== null && target.thickness !== undefined) {
+      out.attrs.thickness = target.thickness;
     }
   }
 }
@@ -998,14 +1010,13 @@ export function applySliceYield(inputs: InputLine[], outputs: OutputDraft[]) {
   }
 }
 
-/** 开片计算说明，例如「每张板开 6 片 × 领 10 张 = 60 片」；算不出时说明原因。 */
+/** 开片计算说明，例如「每张开 1 片 × 10 张 = 10 片」；算不出时说明原因。 */
 export function sliceHint(inputs: InputLine[], outputs: OutputDraft[], line: OutputDraft) {
-  const color = line.attrs.color ?? null;
-  const sameColor = (c?: null | string) => !color || !c || c === color;
-  if (outputs.filter((o) => sameColor(o.attrs.color)).length > 1)
-    return '同一种颜色开了几种规格，不知道各用几张板，请手填良品';
-  if (line.attrs.length === 0 || !line.attrs.width || !line.attrs.thickness) return '填好开出的长、宽、厚后自动算能开多少片';
-  const boards = inputs.filter((l) => sameColor(inputColor(l)));
+  if (outputs.filter((o) => sliceSourceMatches(o.attrs, line.attrs)).length > 1)
+    return '同一规格有多行产出，无法分摊领料数量，请手填良品';
+  if (!line.attrs.length || !line.attrs.width || !line.attrs.thickness) return '请核对板材长、宽、厚；开片厚度沿用实际领料';
+  const boards = inputs.filter((l) => l.quantity > 0 && sliceSourceMatches(l.stock.item ?? {}, line.attrs));
+  if (boards.length === 0) return '产出规格必须与对应领料板材一致，请核对实际领料';
   const parts = boards.map((b) => {
     const per = slicePerBoard(b.stock.item ?? {}, line.attrs);
     return per === undefined ? '板材规格不全' : `每张开 ${per} 片 × ${Math.floor(b.quantity + FIT_EPSILON)} 张`;

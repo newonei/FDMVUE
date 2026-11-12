@@ -31,6 +31,7 @@ import {
   RISK_TYPES,
   SCHEDULE_STATUS,
   TASK_STATUS,
+  taskMaterialText,
 } from '../../shared/schedule';
 import PlanEditor from './plan-editor.vue';
 import TaskFormModal from './task-form-modal.vue';
@@ -95,8 +96,9 @@ async function ensureOptions() {
   formOptionsFor.value = props.schedule.id;
 }
 
-async function openForm(initial: Api.PlanTask | null, taskId?: number, planTask?: Api.PlanTask) {
+async function openForm(initial: Api.PlanTask | null, taskId?: number, planTask?: Api.PlanTask, shortageTask?: Api.Task) {
   await ensureOptions();
+  resendFor.value = shortageTask;
   formInitial.value = initial;
   editingTaskId.value = taskId;
   editingPlanTask.value = planTask;
@@ -106,7 +108,9 @@ async function openForm(initial: Api.PlanTask | null, taskId?: number, planTask?
 function editConfirmed(task: Api.Task) {
   void openForm(
     {
+      assignmentId: task.assignmentId,
       contractCode: task.contractCode,
+      covers: task.covers,
       date: dateText(task.workDate),
       inputs: task.inputs ?? [],
       output: task.output,
@@ -136,11 +140,12 @@ function resendDate() {
 }
 
 function resend(task: Api.Task) {
-  resendFor.value = task;
   const scaled = rescaleMaterials({ inputs: task.inputs ?? [], output: task.output }, task.plannedQuantity ?? task.quantity,
     Number(task.shortage));
   void openForm({
+    assignmentId: task.assignmentId,
     contractCode: task.contractCode,
+    covers: task.covers?.map((cover) => ({ ...cover, quantity: task.covers?.length === 1 ? Number(task.shortage) : cover.quantity })),
     date: resendDate(),
     inputs: scaled.inputs,
     output: scaled.output,
@@ -152,7 +157,7 @@ function resend(task: Api.Task) {
     spec: task.spec,
     unit: task.unit,
     workerIds: [],
-  });
+  }, undefined, undefined, task);
 }
 
 function dropShortage(task: Api.Task) {
@@ -423,8 +428,9 @@ function discard() {
                 <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
               </span>
             </div>
-            <div class="text-xs text-muted-foreground">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
-            <TaskMaterials :task="task" />
+            <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+            <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" />
+            <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
             <div class="text-xs">
               {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
               <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 {{ Number(task.plannedQuantity) }}，接单时按上道良品改成 {{ Number(task.quantity) }}</span>
@@ -466,8 +472,10 @@ function discard() {
 
     <TaskFormModal
       v-model:open="formOpen"
+      :existing-task-id="editingTaskId"
       :initial="formInitial"
       :options="formOptions"
+      :recalculate-materials="!!resendFor && !!formInitial?.output?.attrs"
       :schedule="schedule"
       :submit="submitForm"
       :workers="workers"

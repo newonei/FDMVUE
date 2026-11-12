@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import type { Product, ProductCategory } from '#/api/fdmplatform/products';
+import type {
+  Product,
+  ProductAttributeOption,
+  ProductAttributeOptions,
+  ProductCategory,
+} from '#/api/fdmplatform/products';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -18,6 +23,7 @@ import {
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
   getProductCategoryList,
+  getProductAttributeOptions,
   saveProduct,
 } from '#/api/fdmplatform/products';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
@@ -25,6 +31,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import { errorText } from '../../data';
 import { categoryOptions } from '../category-model';
 import { missingProductFields } from '../model';
+import ProductStageSelect from './ProductStageSelect.vue';
 
 const props = defineProps<{
   companyId: number;
@@ -38,15 +45,22 @@ const loading = ref(false);
 const panelError = ref('');
 const key = ref('');
 const categories = ref<ProductCategory[]>([]);
+const attributeOptions = ref<ProductAttributeOptions>({ stages: [], colors: [], textures: [], matTypes: [] });
+let optionsSequence = 0;
 const categorySelectOptions = computed(() =>
   categoryOptions(categories.value, props.product?.categoryId),
 );
-async function loadCategories() {
-  try {
-    categories.value = await getProductCategoryList(props.companyId);
-  } catch (error) {
-    panelError.value = errorText(error);
-  }
+async function loadOptions() {
+  const run = ++optionsSequence;
+  const results = await Promise.allSettled([
+    getProductCategoryList(props.companyId), getProductAttributeOptions(),
+  ]);
+  if (run !== optionsSequence || !props.open) return;
+  const [categoryResult, attributesResult] = results;
+  if (categoryResult.status === 'fulfilled') categories.value = categoryResult.value;
+  if (attributesResult.status === 'fulfilled') attributeOptions.value = attributesResult.value;
+  const errors = results.filter((result) => result.status === 'rejected') as PromiseRejectedResult[];
+  if (errors.length) panelError.value = errors.map((result) => errorText(result.reason)).join('；');
 }
 // 前几项与金智产品档案顺序一致
 const fields = [
@@ -61,16 +75,38 @@ const fields = [
   ['unit', '单位'],
   ['displayName', '销售展示名称'],
   ['size', '尺寸'],
-  ['color', '颜色'],
   ['shape', '形状'],
   ['packaging', '标准包装'],
   ['imageUrl', '产品图片地址'],
 ];
+const productionFields = [
+  ['productStage', '生产分类'],
+  ['matType', '垫子类型'],
+  ['frontColor', '正面颜色'],
+  ['backColor', '反面颜色'],
+  ['textureFront', '正面压花'],
+  ['textureBack', '反面压花'],
+  ['colorCode', '单色'],
+] as const;
+type ProductionField = typeof productionFields[number][0];
+function retainedOptions(options: ProductAttributeOption[], field: ProductionField) {
+  const value = form[field];
+  if (!value || options.some((item) => item.value === value)) return options;
+  const label = props.product?.[`${field}Label`] || value;
+  return [...options, { value, label }];
+}
+function selectOptions(field: Exclude<ProductionField, 'productStage'>) {
+  return retainedOptions(field === 'matType' ? attributeOptions.value.matTypes
+    : field.startsWith('texture') ? attributeOptions.value.textures : attributeOptions.value.colors, field);
+}
+const stageOptions = computed(() => retainedOptions(attributeOptions.value.stages, 'productStage')
+  .map((item) => ({ ...item, group: 'group' in item ? String(item.group) : '其他' })));
 watch(
-  () => props.open,
-  (open) => {
-    if (!open) return;
-    for (const [field] of fields)
+  () => [props.open, props.product?.id],
+  () => {
+    ++optionsSequence;
+    if (!props.open) return;
+    for (const [field] of [...fields, ...productionFields, ['color']])
       form[field!] = String(
         (props.product as unknown as Record<string, unknown> | undefined)?.[
           field!
@@ -79,9 +115,11 @@ watch(
     active.value = props.product?.active ?? false;
     key.value = newIdempotencyKey();
     panelError.value = '';
-    void loadCategories();
+    void loadOptions();
   },
+  { immediate: true },
 );
+onBeforeUnmount(() => { ++optionsSequence; });
 async function save() {
   if (!String(form.code).trim() || !String(form.name).trim()) {
     panelError.value = '请填写 SKU 编号和产品名称';
@@ -135,6 +173,7 @@ async function save() {
         show-icon
         message="在产品中心建立和维护本业务产品。规格、单位、包装等填写一次，创建合同时直接选择带入；资料未齐可先保存，启用后供业务选用。"
       />
+      <h3 class="section-title">基本资料</h3>
       <Form layout="vertical" class="product-fields">
         <Form.Item
           v-for="[field, title] in fields"
@@ -145,6 +184,7 @@ async function save() {
           <Select
             v-if="field === 'categoryId'"
             v-model:value="form[field]"
+            :aria-label="title"
             :options="categorySelectOptions"
             placeholder="选择产品分类"
             show-search
@@ -155,6 +195,7 @@ async function save() {
           <AutoComplete
             v-else-if="field === 'shape'"
             v-model:value="form[field]"
+            :aria-label="title"
             :options="[{ value: '圆角' }, { value: '方形' }]"
             placeholder="选择圆角、方形，也可输入其他形状"
             :maxlength="64"
@@ -162,6 +203,7 @@ async function save() {
           <Input
             v-else
             v-model:value="form[field!]"
+            :aria-label="title"
             :disabled="Boolean(product) && field === 'code'"
             :placeholder="
               field === 'unit'
@@ -173,6 +215,37 @@ async function save() {
           />
         </Form.Item>
       </Form>
+      <section class="production-section">
+        <h3 class="section-title">生产分类与工艺属性</h3>
+        <p class="section-hint">先选大类，再选板材、开片板材、片材等具体类型。单色板材填写“单色”；双面产品分别填写正反颜色和压花，未压花的一面可留空。</p>
+        <Form layout="vertical" class="product-fields">
+          <Form.Item v-for="[field, title] in productionFields" :key="field" :label="title">
+            <ProductStageSelect
+              v-if="field === 'productStage'"
+              :value="form[field]"
+              :options="stageOptions"
+              placeholder="选择生产大类 / 具体类型（选填）"
+              :aria-label="title"
+              @update:value="(value) => form[field] = value ?? ''"
+            />
+            <Select
+              v-else
+              :value="form[field] || undefined"
+              :options="selectOptions(field)"
+              :aria-label="title"
+              :placeholder="field.startsWith('texture') ? '不压花 / 选择压花纹路' : '请选择（选填）'"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              @update:value="(value) => form[field] = String(value ?? '')"
+            />
+          </Form.Item>
+          <Form.Item label="颜色原文">
+            <Input v-model:value="form.color" aria-label="颜色原文" placeholder="保留旧产品的颜色描述" />
+          </Form.Item>
+        </Form>
+        <p class="section-hint">旧产品可保留颜色原文，新增属性可逐步补齐。颜色与压花从已维护选项中选择，保存后在订单和任务选品中展示。</p>
+      </section>
       <Checkbox v-model:checked="active">
         启用产品（必要资料完整后可选入合同）
       </Checkbox>
@@ -192,6 +265,10 @@ async function save() {
 </template>
 
 <style scoped>
+.section-title { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+.section-hint { margin: 0 0 16px; font-size: 12px; line-height: 1.7; color: hsl(var(--muted-foreground)); }
+.production-section { padding-top: 16px; border-top: 1px solid hsl(var(--border)); }
+.product-fields :deep(.ant-cascader) { width: 100%; }
 .product-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

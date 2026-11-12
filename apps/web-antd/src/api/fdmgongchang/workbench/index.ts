@@ -49,6 +49,14 @@ export namespace FdmgongchangWorkbenchApi {
     hint?: null | string;
     picks: Array<{ quantity: Decimal; stock: FdmgongchangStageStockApi.Stock }>;
     productionOrderItemId?: null | number;
+    /** 本人已经领料开工的工序单，报工时复用，避免重复扣料。 */
+    inProgressOrderId?: null | number;
+    outputStage?: null | string;
+    outputLabel?: null | string;
+    outputUnit?: null | string;
+    /** 本工序计划产出规格，与订单成品 targetAttrs 分开。 */
+    outputAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+    sourceStages?: string[];
     /** 按任务数量算出要领多少（来源阶段单位）。 */
     required?: Decimal | null;
     /** 库存不够时还差多少（任务单位）。 */
@@ -56,22 +64,42 @@ export namespace FdmgongchangWorkbenchApi {
     sourceStage?: null | string;
     /** 订单的产品规格。 */
     target?: null | string;
-    /** 订单成品的材质、颜色、长宽厚（cm）：开片按它定片材厚度，立切按它定长宽。 */
+    /** 关联订单成品规格，仅作需求参考；报工使用本工序 outputAttrs。 */
     targetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
     task: FdmgongchangScheduleApi.Task;
   }
 
-  /** 报工：一次登记实际领料、产出、计件和纸质领料单，任务随之完成。 */
-  export interface TaskReportReq {
+  /** 正式领料开工：扣减选定批次库存，建立在制工序单。 */
+  export interface TaskIssueReq {
     auxInputs?: FdmgongchangStageStockApi.OrderInput[];
     inputs: FdmgongchangStageStockApi.OrderInput[];
     issueSheetUrls: string[];
+    recipeBatches?: Decimal;
+    recipeCode?: string;
+    remark?: string;
+    requestKey?: string;
+    onBehalfOf?: number;
+    urgent?: boolean;
+    urgentReason?: string;
+    sourceStage: string;
+    taskId: number;
+  }
+
+  /** 报工：有 orderId 时只登记已有工序单的实际产出，不再扣领料库存。 */
+  export interface TaskReportReq {
+    auxInputs?: FdmgongchangStageStockApi.OrderInput[];
+    inputs?: FdmgongchangStageStockApi.OrderInput[];
+    issueSheetUrls?: string[];
+    orderId?: number;
+    expectedReportCount?: number;
+    /** 已领任务单报工时同步退回余料，和产出登记在同一事务内提交。 */
+    returns?: FdmgongchangStageStockApi.OrderReturnReq['lines'];
     outputs: FdmgongchangStageStockApi.OrderOutput[];
     pieceworks?: FdmgongchangStageStockApi.Piecework[];
     recipeBatches?: Decimal;
     recipeCode?: string;
     remark?: string;
-    sourceStage: string;
+    sourceStage?: string;
     taskId: number;
     /** 加急：领用还在静置期的板材（一般发泡第二天才用），要写原因。 */
     urgent?: boolean;
@@ -122,11 +150,24 @@ export function getWorkbenchOptions() {
   );
 }
 
-export function getWorkbenchStock(stage: string) {
-  return requestClient.get<PageResult<FdmgongchangStageStockApi.Stock>>(
+export async function getWorkbenchStock(stage: string, taskId?: number) {
+  const config = headers();
+  const getPage = (pageNo: number) => requestClient.get<PageResult<FdmgongchangStageStockApi.Stock>>(
     `${BASE}/stock`,
-    { ...headers(), params: { stage } },
+    { ...config, params: { pageNo, stage, taskId } },
   );
+  const first = await getPage(1);
+  // 任务批次由后端按计划筛选；独立领料需要让工人能查找全部上工序批次。
+  if (taskId !== undefined || first.list.length === 0) return first;
+  const list = [...first.list];
+  const pageCount = Math.ceil(first.total / 100);
+  for (let pageNo = 2; pageNo <= pageCount && list.length < first.total; pageNo++) {
+    const page = await getPage(pageNo);
+    // 库存在翻页期间可能变化，空页时停止，避免持续请求无数据页面。
+    if (page.list.length === 0) break;
+    list.push(...page.list);
+  }
+  return { ...first, list };
 }
 
 /** 本厂正在生产的工厂订单：包装开工时选这批是做哪张单。 */
@@ -221,7 +262,7 @@ export function getWorkbenchPickList() {
   );
 }
 
-/** 报工：按实际领料扣库存、登记产出和计件、上传纸质领料单，任务完成；返回生成的工序单编号。 */
+/** 报工：已有工序单仅登记产出与计件；无 orderId 的旧补录模式仍兼容。 */
 /** 报工；今天已经报过时后端返回这个错误码，页面问要不要追加。 */
 export const TASK_REPORTED_TODAY = 1_215_024_000;
 
@@ -233,4 +274,8 @@ export function reportWorkbenchTask(
     ...headers(),
     silent: true,
   } as Record<string, unknown>);
+}
+
+export function issueWorkbenchTask(data: FdmgongchangWorkbenchApi.TaskIssueReq) {
+  return requestClient.post<number>(`${BASE}/task/issue`, data, headers());
 }

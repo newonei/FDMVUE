@@ -26,6 +26,11 @@ const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
 const loading = ref(true);
 let seed = 0;
 const unit = computed(() => stageOf(job, job.process?.outputStage)?.unit ?? '');
+const primaryWorkerId = computed(() => job.onBehalfOf?.id ?? job.my?.userId);
+// 不同规格可能使用不同计价项目，不能用第一种规格的单价乘全部产量。
+const mixedSliceSpecs = computed(() => job.process?.code === 'SLICE' && new Set(job.outputs
+  .filter((out) => (toNumber(out.goodQuantity) ?? 0) > 0)
+  .map((out) => [out.attrs.length, out.attrs.width, out.attrs.thickness].map((value) => toNumber(value) ?? '').join('|'))).size > 1);
 
 const best = (excludeRole?: null | string) =>
   matches.value.find((m) => m.matched && (!excludeRole || (m.role && m.role !== excludeRole))) ??
@@ -34,6 +39,10 @@ const best = (excludeRole?: null | string) =>
 
 onMounted(async () => {
   try {
+    if (mixedSliceSpecs.value) {
+      job.pieces = [];
+      return;
+    }
     const first = job.outputs.find((o) => (toNumber(o.goodQuantity) ?? 0) > 0) ?? job.outputs[0];
     const [list, people] = await Promise.all([
       matchWorkbenchWage({
@@ -47,7 +56,7 @@ onMounted(async () => {
     matches.value = list;
     mates.value = people;
     if (job.pieces.length === 0 && list.length > 0) {
-      job.pieces = [{ itemId: best()?.itemId, key: ++seed, quantity: goodTotal(job), userId: job.my?.userId }];
+      job.pieces = [{ itemId: best()?.itemId, key: ++seed, quantity: goodTotal(job), userId: primaryWorkerId.value }];
     }
   } finally {
     loading.value = false;
@@ -62,17 +71,19 @@ const itemOptions = computed(() =>
 );
 const mateOptions = computed(() =>
   mates.value
-    .filter((m) => m.userId !== job.my?.userId)
+    .filter((m) => m.userId !== primaryWorkerId.value)
     .map((m) => ({ label: [m.nickname, m.team].filter(Boolean).join(' · '), value: m.userId })),
 );
 const priceOf = (itemId?: number) => toNumber(matches.value.find((m) => m.itemId === itemId)?.price) ?? 0;
 const nameOf = (userId?: number) =>
-  userId === job.my?.userId ? `${job.my?.userName}（我）` : (mates.value.find((m) => m.userId === userId)?.nickname ?? '');
+  userId === job.my?.userId ? `${job.my?.userName}（我）`
+    : job.onBehalfOf && userId === job.onBehalfOf.id ? job.onBehalfOf.name
+      : (mates.value.find((m) => m.userId === userId)?.nickname ?? '');
 const amountOf = (line: (typeof job.pieces)[number]) => Math.round((line.quantity ?? 0) * priceOf(line.itemId) * 100) / 100;
 const total = computed(() => job.pieces.reduce((t, l) => t + amountOf(l), 0));
 
 function submit() {
-  if (job.prepare && job.sheets.length === 0) {
+  if (job.prepare && !job.order && job.sheets.length === 0) {
     message.warning('请拍照上传纸质领料单');
     return;
   }
@@ -89,12 +100,17 @@ function addMate() {
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
       :subtitle="`好的 ${formatQty(goodTotal(job))} ${unit} · 残次 ${formatQty(defectTotal(job))} ${unit}`"
-      :title="job.prepare ? '计件和领料单' : '这批活算给谁？'"
+      :title="job.order ? '确认本次报工和计件' : job.prepare ? '计件和领料单' : '这批活算给谁？'"
+      :current="2"
+      :total="2"
       @back="emit('back')"
     />
     <Spin :spinning="loading">
       <main class="flex flex-1 flex-col gap-3 p-4">
-        <p v-if="!loading && matches.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
+        <p v-if="mixedSliceSpecs" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
+          本次包含多种开片规格，计件由班组长按各规格的实际产量分别补登。
+        </p>
+        <p v-else-if="!loading && matches.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">
           这道工序还没有计价项目，提交后由班组长补登计件。
         </p>
         <section v-for="(line, i) in job.pieces" :key="line.key" class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
@@ -130,8 +146,9 @@ function addMate() {
         >
           ＋ 还有人跟我一起做
         </button>
-        <p class="m-0 text-xs leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
-        <section v-if="job.prepare" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <p v-if="!mixedSliceSpecs" class="m-0 text-xs leading-relaxed text-muted-foreground">计价项目按做出来的规格自动选好。提交后由班组长确认，月底一起结算。</p>
+        <p v-if="job.order" class="m-0 rounded-md bg-primary/5 p-3 text-sm">本次报工沿用工序单 {{ job.order.orderNo }} 的已领材料及凭证，{{ job.finish ? '提交后结束本批生产' : '提交后继续在制，可再次报工' }}。</p>
+        <section v-if="job.prepare && !job.order" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <span class="text-sm font-bold">拍纸质领料单<span class="ml-1 text-destructive">*</span></span>
           <ImageUpload
             v-model:value="job.sheets"

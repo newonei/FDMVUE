@@ -1,9 +1,27 @@
 import type { FdmgongchangProductionOrderApi } from '#/api/fdmgongchang/production-order';
+import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
+import type { ProductAttributeOptions, ProductCategoryView } from '#/api/fdmplatform/products';
 
 import { factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
 
 export namespace FdmgongchangScheduleApi {
+  export type Product = FdmgongchangProductionOrderApi.Product;
+  export interface ProductFilters {
+    /** 具体阶段编码，或仅用于筛选的大类值，如 group:半成品。 */
+    productStage?: string;
+    color?: string;
+    keyword?: string;
+    material?: string;
+    shape?: string;
+    size?: string;
+  }
+  export interface ProductQuery extends ProductFilters {
+    /** undefined 为全部分类，空字符串为未分类。 */
+    categoryId?: string;
+    pageNo: number;
+    pageSize: number;
+  }
   export type Decimal = number | string;
   export type Status =
     | 'CONFIRMED'
@@ -14,33 +32,32 @@ export namespace FdmgongchangScheduleApi {
   /** 后端 LocalDate 可能是 "2026-10-08" 或 [2026, 10, 8]。 */
   export type DateValue = null | number[] | string;
 
-  /** 一份领料或产出：库存段、规格说明、数量（算不出来为空）。 */
+  /** 任务约定的领料或产出，attrs 用于精确匹配规格、颜色及配方。 */
   export interface Material {
-    /** 半成品物料编码；订单最后一道的产出是订单产品编码；算不出来为空。 */
+    attrs?: FdmgongchangStageStockApi.ItemAttrs | null;
     code?: null | string;
-    name: string;
-    /** 这个规格还没有物料，第一次报工时自动建档。 */
+    name?: null | string;
     newItem?: boolean | null;
-    /** 没有编码或编码要注意的原因。 */
     note?: null | string;
-    /** 产品中心的半成品档案编码。 */
     productCode?: null | string;
+    /** 明确选定的产品中心领料档案，工序物料由后端解析。 */
+    productId?: null | string;
     quantity?: Decimal | null;
-    /** 库存段，如 RAW、BOARD、SHEET。 */
+    /** 发泡任务预估锅数，仅供工作台实际领料预填，不参与物料规格编码。 */
+    recipeBatches?: Decimal | null;
     stage: string;
     unit?: null | string;
   }
 
   export interface PlanTask {
     assignmentId?: null | string;
-    /** 领料：贴合是正面、反面两份片材。 */
-    inputs?: Material[];
-    /** 产出。 */
-    output?: Material | null;
     contractCode?: null | string;
+    covers?: Array<{ assignmentId: string; quantity: Decimal }>;
     /** yyyy-MM-dd */
     date: string;
     process: string;
+    inputs?: Material[] | null;
+    output?: Material | null;
     product?: null | string;
     quantity: Decimal;
     reason?: null | string;
@@ -49,6 +66,29 @@ export namespace FdmgongchangScheduleApi {
     unit?: null | string;
     workerIds: number[];
     workerNames?: string[];
+  }
+
+  export interface MaterialPreviewRequest {
+    assignmentId?: null | string;
+    inputProductId?: null | string;
+    inputCode?: null | string;
+    outputAttrs?: FdmgongchangStageStockApi.ItemAttrs;
+    process: string;
+    quantity: number;
+  }
+
+  /** 只读预计领料，不创建物料、不占用或扣减库存。 */
+  export interface MaterialPreview {
+    basis?: null | string;
+    estimated: boolean;
+    inputs: Array<Material & {
+      available?: Decimal | null;
+      perBatch?: Decimal | null;
+      shortage?: Decimal | null;
+    }>;
+    recipeBatches?: Decimal | null;
+    sourceStages: string[];
+    warnings: string[];
   }
 
   export interface Plan {
@@ -67,14 +107,14 @@ export namespace FdmgongchangScheduleApi {
 
   export interface Task {
     actualQuantity: Decimal;
-    /** 领料；旧任务为空。 */
-    inputs?: Material[] | null;
-    /** 产出；旧任务为空。 */
-    output?: Material | null;
+    assignmentId?: null | string;
     contractCode?: null | string;
+    covers?: Array<{ assignmentId: string; quantity: Decimal }>;
     id: number;
     orderCount: number;
     process: string;
+    inputs?: Material[] | null;
+    output?: Material | null;
     product?: null | string;
     quantity: Decimal;
     reason?: null | string;
@@ -116,6 +156,8 @@ export namespace FdmgongchangScheduleApi {
   /** 手动加任务时的选项：本厂启用的工序（带产出单位）、可以选的订单。 */
   export interface FormOptions {
     demand: Array<{
+      assignmentId?: null | string;
+      boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
       boards?: null | number;
       /** 发泡产出的板材规格和还要几张（用料逆推选的板材）；算不出时为空。 */
       boardSpec?: null | string;
@@ -127,12 +169,23 @@ export namespace FdmgongchangScheduleApi {
       /** 还要做几条成品；不是工厂订单时为空。 */
       remaining?: null | number | string;
       sheets?: null | number;
-      /** 开片产出的片材规格和还要几片。 */
+      sheetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+      /** 开片产出的板材规格和还要几片。 */
       sheetSpec?: null | string;
       /** 规格：尺寸 · 材质 · 颜色。 */
       spec?: null | string;
+      /** 按这条订单工艺路线解析的各工序领料阶段，支持跳过中间工序。 */
+      sourceStagesByProcess?: Record<string, string[]>;
+      targetAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
     }>;
-    processes: Array<{ code: string; label: string; unit: string }>;
+    materialOptions?: FdmgongchangStageStockApi.Options;
+    processes: Array<{
+      code: string;
+      label: string;
+      outputStage?: string;
+      sourceStages?: string[];
+      unit: string;
+    }>;
   }
 
   export interface Schedule {
@@ -254,6 +307,27 @@ export function getScheduleFormOptions(id: number) {
   );
 }
 
+export function previewScheduleTaskMaterials(data: FdmgongchangScheduleApi.MaterialPreviewRequest) {
+  return requestClient.post<FdmgongchangScheduleApi.MaterialPreview>(
+    '/fdmgongchang/schedule/task/material-preview',
+    data,
+    headers(),
+  );
+}
+
+/** 只读解析上工序领料档案及其权威物料属性，不建立库存。 */
+export function getScheduleTaskInputProduct(params: {
+  assignmentId?: null | string;
+  inputCode?: null | string;
+  process: string;
+  productId?: null | string;
+}) {
+  return requestClient.get<FdmgongchangScheduleApi.Material>(
+    '/fdmgongchang/schedule/task/input-product',
+    { ...headers(), params },
+  );
+}
+
 /** 已下发的排单追加（不传 id）或修改一个任务。 */
 export function saveScheduleTask(data: {
   id?: number;
@@ -283,6 +357,29 @@ export function searchScheduleProducts(keyword: string) {
   return requestClient.get<FdmgongchangProductionOrderApi.Product[]>(
     '/fdmgongchang/schedule/products',
     { ...headers(), params: { keyword } },
+  );
+}
+
+/** 工厂权限下的产品中心选品，只包含启用且资料齐全的共享产品。 */
+export function getScheduleProductPage(params: FdmgongchangScheduleApi.ProductQuery) {
+  return requestClient.get<{ list: FdmgongchangScheduleApi.Product[]; total: number }>(
+    '/fdmgongchang/schedule/product-page',
+    { ...headers(), params },
+  );
+}
+
+export function getScheduleProductCategories(params: FdmgongchangScheduleApi.ProductFilters) {
+  return requestClient.get<ProductCategoryView>(
+    '/fdmgongchang/schedule/product-categories',
+    { ...headers(), params },
+  );
+}
+
+/** 与产品档案共用属性选项，通过工厂排产权限访问。 */
+export function getScheduleProductAttributeOptions() {
+  return requestClient.get<ProductAttributeOptions>(
+    '/fdmgongchang/schedule/product-attribute-options',
+    headers(),
   );
 }
 

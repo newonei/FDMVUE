@@ -6,7 +6,7 @@ import { computed } from 'vue';
 
 import { Button, Empty, InputNumber, Select, Tag } from 'ant-design-vue';
 
-import { dayLabel, groupByDate, PROCESS_LABELS, rescaleMaterials } from '../../shared/schedule';
+import { dayLabel, groupByDate, PROCESS_LABELS, rescaleMaterials, taskMaterialText } from '../../shared/schedule';
 import TaskMaterials from './task-materials.vue';
 
 /** 待确认方案的任务表：按天分组，可以改数量、换人、删任务，或打开表单整条修改。 */
@@ -28,12 +28,13 @@ const workerOptions = (process: string) =>
 const nameOf = (id: number) =>
   props.workers.find((w) => w.userId === id)?.nickname ?? String(id);
 
-/** 改数量时领料、产出跟着按比例变。 */
+/** 旧任务的固定物料按数量换算；结构化产出通过完整表单重新计算领料。 */
 function setQuantity(task: Api.PlanTask, value: number) {
   const next = rescaleMaterials(task, task.quantity, value);
   task.inputs = next.inputs;
   task.output = next.output;
   task.quantity = value;
+  if (task.covers?.length === 1) task.covers[0]!.quantity = value;
 }
 
 function remove(task: Api.PlanTask) {
@@ -51,7 +52,7 @@ function remove(task: Api.PlanTask) {
           <thead class="bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th class="px-2 py-1.5 text-left font-medium">工序</th>
-              <th class="px-2 py-1.5 text-left font-medium">订单 / 产品 / 领料产出</th>
+              <th class="px-2 py-1.5 text-left font-medium">订单用途 / 本工序产出</th>
               <th class="w-32 px-2 py-1.5 text-right font-medium">数量</th>
               <th class="w-64 px-2 py-1.5 text-left font-medium">人员</th>
               <th class="px-2 py-1.5 text-left font-medium">理由</th>
@@ -67,12 +68,13 @@ function remove(task: Api.PlanTask) {
               <td class="px-2 py-1.5">
                 <div v-if="task.contractCode" class="font-mono text-xs">{{ task.contractCode }}</div>
                 <div v-else class="text-xs text-muted-foreground">备货</div>
-                <div class="text-xs">{{ [task.product, task.spec].filter(Boolean).join(' · ') }}</div>
-                <TaskMaterials :task="task" class="mt-1" />
+                <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
+                <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" class="mt-1" />
+                <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
               </td>
               <td class="px-2 py-1.5 text-right">
                 <InputNumber
-                  v-if="editable"
+                  v-if="editable && !task.output?.attrs && (task.covers?.length ?? 0) <= 1"
                   :aria-label="`${dayLabel(date)} ${PROCESS_LABELS[task.process]} 数量`"
                   :min="0"
                   :precision="3"

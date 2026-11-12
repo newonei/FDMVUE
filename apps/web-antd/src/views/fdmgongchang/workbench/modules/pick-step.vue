@@ -3,12 +3,16 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, onMounted, ref, watch } from 'vue';
 
-import { Checkbox, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
+import { Alert, Checkbox, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
 
 import { getWorkbenchRecipePlan, getWorkbenchStock } from '#/api/fdmgongchang/workbench';
 
+import { dimensionTextInMm } from '../../shared/dimensions';
+
 import { attrSummary, formatQty, makeLabels, recipePicks, toNumber } from '../../stage-stock/model';
-import { stageOf, useJob } from '../use-job';
+import { slicePlanThicknessError, stageOf, useJob } from '../use-job';
+import IssueShortages from './issue-shortages.vue';
+import PlannedInputs from './planned-inputs.vue';
 import StepHeader from './step-header.vue';
 
 /**
@@ -21,28 +25,50 @@ const job = useJob();
 
 const stocks = ref<StockApi.Stock[]>([]);
 const loading = ref(false);
+const loadError = ref(false);
+const stockKeyword = ref('');
+let loadSequence = 0;
 const labels = computed(() => makeLabels(job.options));
 const laminate = computed(() => job.process?.code === 'LAMINATE');
 const source = computed(() => stageOf(job, job.sourceStage));
 const unit = computed(() => source.value?.unit ?? '');
+const sourceStages = computed(() => job.prepare?.sourceStages?.length ? job.prepare.sourceStages : job.process?.sources ?? []);
+const plannedOutput = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs);
+const outputSpec = computed(() => plannedOutput.value ? attrSummary(job.process?.outputStage ?? '', plannedOutput.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
+const planThicknessError = computed(() => slicePlanThicknessError(job, job.picks.map((pick) => ({ quantity: pick.qty, stock: pick.stock }))));
 
 async function load() {
+  const sequence = ++loadSequence;
   loading.value = true;
+  loadError.value = false;
   try {
-    const page = await getWorkbenchStock(job.sourceStage);
+    const page = await getWorkbenchStock(job.sourceStage, job.task?.id);
+    if (sequence !== loadSequence) return;
     // 先进先出：批次早的排前面
     stocks.value = page.list.toSorted((a, b) => a.batchNo.localeCompare(b.batchNo));
+    job.picks = job.picks.map((pick) => ({ ...pick, stock: stocks.value.find((stock) => stock.id === pick.stock.id) ?? pick.stock }));
+  } catch {
+    if (sequence === loadSequence) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) loading.value = false;
   }
 }
 onMounted(load);
 watch(() => job.sourceStage, () => {
   job.picks = [];
+  stockKeyword.value = '';
   void load();
 });
 
-const nameOf = (stock: StockApi.Stock) => attrSummary(stock.stage, stock.item, labels.value) || stock.itemCode;
+const nameOf = (stock: StockApi.Stock) => attrSummary(stock.stage, stock.item, labels.value, [], 'mm') || stock.itemCode;
+const normalizeSearch = (value: string) => value.toLocaleLowerCase().replaceAll(/[×*＊]/g, 'x').replaceAll(/\s/g, '');
+const visibleStocks = computed(() => {
+  const keyword = normalizeSearch(stockKeyword.value);
+  if (!keyword) return stocks.value;
+  return stocks.value.filter((stock) => normalizeSearch([
+    nameOf(stock), stock.item?.productName, stock.itemCode, stock.batchNo, stock.location,
+  ].filter(Boolean).join(' ')).includes(keyword));
+});
 const pickOf = (stock: StockApi.Stock) => job.picks.find((p) => p.stock.id === stock.id);
 const SIDE_TEXT: Record<StockApi.LaminationSide, string> = { BACK: '反面', FRONT: '正面' };
 const sideText = (side?: StockApi.LaminationSide) => (side ? SIDE_TEXT[side] : '');
@@ -66,8 +92,7 @@ function toggle(stock: StockApi.Stock) {
 
 function setQty(stock: StockApi.Stock, value: unknown) {
   const pick = pickOf(stock);
-  // 按纸质领料单照实际数领，账面不够时会暂时为负，上道报工后补平
-  if (pick) pick.qty = Math.max(Number(value) || 0, 0);
+  if (pick) pick.qty = Math.max(0, toNumber(value) ?? 0);
 }
 
 /** 右边清单里某种原料本次一共领多少。 */
@@ -86,6 +111,7 @@ const recipeCode = ref<string | undefined>(
   job.recipe?.code ?? (recipeOptions.value.length === 1 ? recipeOptions.value[0]!.value : undefined),
 );
 const batches = ref<null | number>(job.recipe?.batches ?? 1);
+const plannedBatches = computed(() => toNumber(job.task?.output?.recipeBatches ?? job.prepare?.task.output?.recipeBatches));
 const recipeLoading = ref(false);
 /** 配方每种原料：配方要多少、库存缺多少；本次领多少按右边清单实时算。 */
 const recipeLines = ref<StockApi.RecipePlanLine[]>([]);
@@ -129,6 +155,10 @@ function next() {
     message.warning('勾了加急要写原因');
     return;
   }
+  if (planThicknessError.value) {
+    message.warning(planThicknessError.value);
+    return;
+  }
   if (job.picks.length === 0) {
     message.warning('先在左边点一下要用的料');
     return;
@@ -151,19 +181,23 @@ function next() {
   <div class="flex min-h-full flex-col">
     <StepHeader
       :current="1"
-      :subtitle="job.supplement ? (job.order?.status === 'COMPLETED' ? `补登到已完工的 ${job.order?.orderNo ?? ''}，实际多拿的料在这里登记` : `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领`) : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, job.task.spec].filter(Boolean).join(' ')}` : '自己开单'"
-      :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : job.prepare ? '实际领了多少料' : '领材料'}`"
-      :total="job.supplement ? 2 : 3"
+      :subtitle="job.supplement ? (job.order?.status === 'COMPLETED' ? `补登到已完工的 ${job.order?.orderNo ?? ''}，实际多拿的料在这里登记` : `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领`) : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, outputSpec].filter(Boolean).join(' ')}` : job.process?.code === 'SLICE' ? '独立开片 · 多种板材分别报工' : '自己开单'"
+      :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : '选择实际领料批次'}`"
+      :total="2"
       @back="emit('back')"
     />
     <main class="grid flex-1 grid-cols-1 content-start gap-4 p-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div class="flex min-w-0 flex-col gap-3">
+        <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
+        <PlannedInputs v-if="job.task && !job.supplement" :inputs="job.task.inputs" :labels="labels" />
         <section v-if="job.prepare" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
           <span class="font-bold">
-            任务 {{ formatQty(job.task?.quantity) }} {{ job.task?.unit }}<template v-if="job.prepare.target"> · {{ job.prepare.target }}</template>
+            计划产出：{{ job.prepare.outputLabel || job.process?.outputLabel }} {{ formatQty(job.task?.quantity) }} {{ job.prepare.outputUnit || job.task?.unit }}
           </span>
+          <span v-if="outputSpec">产出规格：{{ outputSpec }}</span>
+          <span>本次领取：{{ source?.label }} → 报工产出：{{ job.prepare.outputLabel || job.process?.outputLabel }}</span>
           <span v-if="job.prepare.picks.length > 0" class="text-muted-foreground">
-            系统按任务算好要领 {{ formatQty(job.prepare.required) }} {{ unit }}，已经帮你选上。对照实际领的料改数量：多领了加上，少领了减掉。
+            系统按任务推荐领取 {{ formatQty(job.prepare.required) }} {{ unit }}，已预选批次。请按实际领取修改数量，确认后才扣库存。
           </span>
           <span v-else class="text-muted-foreground">没有算出建议领料，请在下面点实际领的料，填领了多少。</span>
           <span v-if="job.prepare.hint" class="text-warning">{{ job.prepare.hint }}</span>
@@ -180,18 +214,24 @@ function next() {
               placeholder="选配方，可输入名称搜索"
               show-search
             />
-            <InputNumber
-              id="recipe-batches"
-              :min="0"
-              :value="batches ?? undefined"
-              :precision="1"
-              :step="1"
-              addon-after="锅"
-              class="w-32"
-              @update:value="(v) => (batches = v === null || v === undefined || v === '' ? null : Number(v))"
-            />
+            <label for="recipe-batches" class="flex items-center gap-2 text-xs text-muted-foreground">
+              本次实际锅数
+              <InputNumber
+                id="recipe-batches"
+                :min="0"
+                :value="batches ?? undefined"
+                :precision="1"
+                :step="1"
+                addon-after="锅"
+                class="w-32"
+                @update:value="(v) => (batches = v === null || v === undefined || v === '' ? null : Number(v))"
+              />
+            </label>
           </div>
           <span v-else class="text-xs text-muted-foreground">这张单是按配方领的，点下面按配方算出还差哪些料</span>
+          <span v-if="!job.supplement" class="text-xs text-muted-foreground">
+            {{ plannedBatches && plannedBatches > 0 ? `任务预计 ${formatQty(plannedBatches)} 锅，已按计划预填，请核对本次实际锅数。` : '任务未填写预计锅数，暂按 1 锅预填，请核对本次实际锅数。' }}
+          </span>
           <button
             :disabled="recipeLoading"
             class="h-9 self-start rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
@@ -223,14 +263,14 @@ function next() {
             </tbody>
           </table>
           <p v-if="recipeLines.some((l) => Number(l.shortage) > 0)" class="m-0 text-xs text-destructive">
-            标红的原料账面不够；照纸质领料单的实际数领，账面会暂时为负，入库补录后补平。
+            标红的是账面缺料。请按实际领取数量登记，库存可暂时为负，并补录对应原材料入库。
           </p>
         </section>
 
-        <div v-if="!job.supplement && (job.process?.sources.length ?? 0) > 1" class="flex flex-wrap items-center gap-1.5 text-sm">
+        <div v-if="!job.supplement && sourceStages.length > 1" class="flex flex-wrap items-center gap-1.5 text-sm">
           <span class="text-muted-foreground">从哪领：</span>
           <button
-            v-for="code in job.process?.sources"
+            v-for="code in sourceStages"
             :key="code"
             :class="code === job.sourceStage ? 'border-primary bg-primary/10 text-primary' : 'border-border'"
             class="h-8 rounded-md border px-2.5"
@@ -245,11 +285,22 @@ function next() {
           <span class="text-xs text-muted-foreground">
             {{ laminate ? '先点正面用的片材，再点反面用的片材；选上后在这一行填领多少' : `点要用的${source?.label ?? ''}选上（可以选好几种），在这一行填领多少` }}
           </span>
+          <Input
+            id="stock-keyword"
+            v-model:value="stockKeyword"
+            allow-clear
+            aria-label="搜索领料批次"
+            placeholder="搜索名称、颜色、规格（mm）、编码、批次或库位"
+          />
           <Spin :spinning="loading">
-            <Empty v-if="!loading && stocks.length === 0" :description="`${source?.label ?? ''}现在没有库存`" />
+            <div v-if="loadError" class="flex flex-col items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm" role="alert">
+              <span>库存批次加载失败，已选批次和填写数量已保留，请重试。</span>
+              <button class="text-primary hover:underline" type="button" @click="load">重新加载领料批次</button>
+            </div>
+            <Empty v-else-if="!loading && visibleStocks.length === 0" :description="stocks.length > 0 ? '没有匹配的领料批次，请调整搜索关键词' : job.task ? '暂无符合当前任务条件的领料批次' : `${source?.label ?? ''}现在没有库存`" />
             <div v-else class="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
               <div
-                v-for="(s, i) in stocks"
+                v-for="(s, i) in visibleStocks"
                 :key="s.id"
                 :class="pickOf(s) ? 'bg-primary/5' : ''"
                 class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2"
@@ -269,10 +320,11 @@ function next() {
                     <span class="flex items-center gap-1.5 text-sm font-semibold">
                       <span class="truncate">{{ nameOf(s) }}</span>
                       <span v-if="pickOf(s)?.side" class="shrink-0 rounded bg-primary px-1.5 text-xs font-normal leading-5 text-primary-foreground">{{ sideText(pickOf(s)?.side) }}</span>
-                      <span v-else-if="i === 0 && !pickOf(s)" class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">先领这批</span>
+                      <span v-else-if="i === 0 && !pickOf(s) && (toNumber(s.quantity) ?? 0) > 0" class="shrink-0 rounded bg-primary/10 px-1.5 text-xs font-normal leading-5 text-primary">先领这批</span>
+                      <span v-if="(toNumber(s.quantity) ?? 0) <= 0" class="shrink-0 rounded bg-warning/10 px-1.5 text-xs font-normal leading-5 text-warning">待补录库存</span>
                     </span>
                     <span class="text-xs text-muted-foreground">
-                      批次 {{ s.batchNo }} · 库里有 {{ formatQty(s.quantity) }} {{ unit }}
+                      {{ source?.label }} · 批次 {{ s.batchNo }} · {{ s.location }} · 账面 {{ formatQty(s.quantity) }} {{ unit }}
                       <template v-if="s.item?.rawMaterialCode && recipeNeeds[s.item.rawMaterialCode] !== undefined"> · 配方要 {{ formatQty(recipeNeeds[s.item.rawMaterialCode]) }} {{ unit }}</template>
                     </span>
                   </span>
@@ -289,7 +341,7 @@ function next() {
                     placeholder="领多少"
                     @change="(v) => setQty(s, v)"
                   />
-                  <button class="text-xs text-primary hover:underline" type="button" @click="setQty(s, s.quantity)">全部</button>
+                  <button v-if="(toNumber(s.quantity) ?? 0) > 0" class="text-xs text-primary hover:underline" type="button" @click="setQty(s, s.quantity)">按账面量</button>
                 </span>
               </div>
             </div>
@@ -300,28 +352,37 @@ function next() {
       <aside class="flex min-w-0 flex-col gap-2 md:sticky md:top-4 md:self-start">
         <section class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <h3 class="m-0 flex items-baseline justify-between text-sm font-bold">
-            本次领料
-            <span class="text-xs font-normal text-muted-foreground">{{ job.picks.length }} 种 · 共 {{ formatQty(pickTotal) }} {{ unit }}</span>
+            本次实际领料
+            <span class="text-xs font-normal text-muted-foreground">{{ job.picks.length }} 批次 · 共 {{ formatQty(pickTotal) }} {{ unit }}</span>
           </h3>
           <p v-if="job.picks.length === 0" class="m-0 text-xs text-muted-foreground">还没选料，在左边点要用的料。</p>
           <table v-else class="w-full text-sm">
             <thead>
               <tr class="text-left text-xs text-muted-foreground">
-                <th class="py-1 font-normal">材料</th>
-                <th class="py-1 font-normal">批次</th>
+                <th class="py-1 font-normal">材料 / 批次</th>
                 <th class="py-1 text-right font-normal">领用</th>
                 <th class="w-6"></th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="p in job.picks" :key="p.stock.id" class="border-t border-border">
-                <td class="py-1.5 pr-2">
+                <td class="py-2 pr-2">
                   <span class="font-semibold">{{ nameOf(p.stock) }}</span>
                   <span v-if="p.side" class="ml-1 text-xs text-primary">{{ sideText(p.side) }}</span>
+                  <span class="mt-1 block break-all font-mono text-xs text-muted-foreground">{{ p.stock.batchNo }}</span>
                 </td>
-                <td class="py-1.5 pr-2 font-mono text-xs text-muted-foreground">{{ p.stock.batchNo }}</td>
                 <td class="whitespace-nowrap py-1.5 text-right tabular-nums" :class="p.qty > 0 ? 'font-semibold' : 'text-destructive'">
-                  {{ p.qty > 0 ? `${formatQty(p.qty)} ${unit}` : '未填' }}
+                  <InputNumber
+                    :id="`actual-pick-${p.stock.id}`"
+                    :aria-label="`${nameOf(p.stock)} 批次 ${p.stock.batchNo} 实际领用数量`"
+                    :min="0"
+                    :precision="3"
+                    :addon-after="unit"
+                    :value="p.qty || undefined"
+                    class="w-32"
+                    placeholder="领多少"
+                    @change="(v) => setQty(p.stock, v)"
+                  />
                 </td>
                 <td class="py-1.5 text-right">
                   <button :aria-label="`去掉 ${nameOf(p.stock)}`" class="text-muted-foreground hover:text-destructive" type="button" @click="toggle(p.stock)">×</button>
@@ -359,8 +420,9 @@ function next() {
             />
           </div>
         </section>
-        <button class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="next">
-          {{ job.prepare ? '下一步：报数量' : '下一步：确认领料' }}
+        <IssueShortages />
+        <button :disabled="loading || loadError" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
+          下一步：确认领料
         </button>
       </aside>
     </main>

@@ -1,0 +1,19 @@
+{
+  "exclude": [
+    "../../apps/web-antd/src/**/*.test.ts"
+  ],
+  "include": [
+    "../../apps/web-antd/src/views/fdmai/providers/index.vue",
+    "../../apps/web-antd/src/views/fdmai/providers/provider-presets.ts",
+    "../../apps/web-antd/src/views/fdmai/models/ModelLibrary.vue",
+    "../../apps/web-antd/src/views/fdmai/models/model-test-input.ts"
+  ],
+  "references": [],
+  "extends": "../../apps/web-antd/tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "../../apps/web-antd/node_modules/@vben/types/global"
+    ]
+  }
+}

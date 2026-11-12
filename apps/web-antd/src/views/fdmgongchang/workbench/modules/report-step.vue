@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 
 import { Alert, InputNumber } from 'ant-design-vue';
 
+import { dimensionTextInMm } from '../../shared/dimensions';
+
 import {
-  applySliceYield,
   attrSummary,
   EDITABLE_FIELDS,
   formatQty,
@@ -14,12 +15,12 @@ import {
   validateOutputs,
 } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
-import { goodTotal, outputPayload, stageOf, useJob } from '../use-job';
+import { goodTotal, outputPayload, slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import BigCounter from './big-counter.vue';
 import StepHeader from './step-header.vue';
 
 /**
- * 第 3 步 报数量：好的多少、坏的多少（大计数器），规格按领的料带出；
+ * 报实际产出：良品与不良品分别登记，规格按本工序计划和已领材料带出；
  * 这批做完了还是先报一部分；做完时可以把没用完的料退回去。
  */
 const emit = defineEmits<{ back: []; next: [] }>();
@@ -29,8 +30,10 @@ const output = computed(() => stageOf(job, job.process?.outputStage));
 const source = computed(() => stageOf(job, job.sourceStage));
 const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
 const reportedBefore = computed(() => job.order?.reportCount ?? 0);
+const plannedAttrs = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs);
+const plannedSpec = computed(() => plannedAttrs.value ? attrSummary(job.process?.outputStage ?? '', plannedAttrs.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
 
-/** 规格不全（例如开片要填长宽）时直接展开让人填。 */
+/** 立切等工序的目标规格不全时直接展开让人填写；开片规格由领料继承。 */
 const specErrors = computed(() =>
   validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs).filter(
     (e) => !e.includes('数量'),
@@ -38,19 +41,13 @@ const specErrors = computed(() =>
 );
 const editing = ref(false);
 const showEditor = computed(() => editing.value || specErrors.value.length > 0);
-/** 开片的片材长宽厚要现场定，规格区一直展开，填好就能算出良品。 */
+/** 开片规格只读沿用实际领料；理论产量只作参考。 */
 const needsSpec = () => slicing.value;
 const errors = ref<string[]>([]);
 
-/** 开片：按领的板材规格和片材规格算能开多少片，带进良品（手动改过的不再覆盖），残次品手填。 */
+/** 理论开片量只作参考，实际良品和不良品必须由工人填写。 */
 const slicing = computed(() => job.process?.code === 'SLICE');
-watch(
-  () => [job.inputs, job.outputs.map((o) => [o.attrs.color, o.attrs.length, o.attrs.width, o.attrs.thickness])],
-  () => {
-    if (slicing.value) applySliceYield(job.inputs, job.outputs);
-  },
-  { deep: true, immediate: true },
-);
+const planThicknessError = computed(() => slicePlanThicknessError(job));
 
 const inputColors = computed(
   () =>
@@ -60,6 +57,7 @@ const inputColors = computed(
 function next() {
   const closingOnly = !job.createFinish && job.finish && reportedBefore.value > 0 && outputPayload(job).length === 0;
   errors.value = closingOnly ? [] : validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs);
+  if (!closingOnly && planThicknessError.value) errors.value.push(planThicknessError.value);
   if (errors.value.length > 0) return;
   emit('next');
 }
@@ -68,16 +66,22 @@ function next() {
 <template>
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
-      :current="3"
-      :subtitle="`领了 ${job.inputs.map((l) => `${attrSummary(l.stock.stage, l.stock.item, labels) || l.stock.itemCode} ${formatQty(l.quantity)}`).join(' · ')} ${source?.unit ?? ''}`"
-      :title="`${job.process?.label} · 第 3 步 报数量`"
-      :total="3"
+      :current="1"
+      :subtitle="`领了 ${job.inputs.map((l) => `${attrSummary(l.stock.stage, l.stock.item, labels, [], 'mm') || l.stock.itemCode} ${formatQty(l.quantity)}`).join(' · ')} ${source?.unit ?? ''}`"
+      :title="`${job.process?.label} · 报本工序实际产出`"
+      :total="2"
       @back="emit('back')"
     />
     <main class="flex flex-1 flex-col gap-3 p-4">
       <p v-if="job.onBehalfOf" class="m-0 rounded-md bg-warning/10 p-2.5 text-xs text-warning">
         正在替 {{ job.onBehalfOf.name }} 报工：工序单和计件记在他名下，备注写你代报。
       </p>
+      <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
+      <section v-if="job.task" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+        <b>计划产出：{{ job.prepare?.outputLabel || output?.label }} {{ formatQty(job.task.quantity) }} {{ job.prepare?.outputUnit || job.task.unit }}</b>
+        <span v-if="plannedSpec">计划规格：{{ plannedSpec }}</span>
+        <span class="text-xs text-muted-foreground">关联订单产品：{{ job.task.product || '备货' }}。以下仅登记本次新产出的良品和不良品，领料已在开工时扣减。</span>
+      </section>
       <p v-if="reportedBefore > 0" class="m-0 rounded-md bg-primary/10 p-2.5 text-xs text-primary">
         这张单已经报过 {{ reportedBefore }} 次，共 {{ formatQty(job.order?.goodQuantity) }} {{ output?.unit }}，这次只报新做的。
       </p>
@@ -85,26 +89,28 @@ function next() {
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">
-            好的有多少{{ output?.unit }}？<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
+            本次良品（{{ output?.unit }}）<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
           </span>
           <BigCounter :id="`good-${line.key}`" v-model="line.goodQuantity" label="好的数量" :precision="3" />
           <span v-if="slicing" class="text-center text-xs text-primary">{{ sliceHint(job.inputs, job.outputs, line) }}</span>
           <span v-else class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
         </section>
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
-          <span class="text-sm font-bold">坏的（残次）有多少{{ output?.unit }}？</span>
+          <span class="text-sm font-bold">本次不良品（{{ output?.unit }}）</span>
           <BigCounter :id="`bad-${line.key}`" v-model="line.defectQuantity" label="坏的数量" :precision="3" size="medium" tone="danger" />
         </section>
         </div>
-        <!-- 开片先定片材规格，放在数量上面 -->
+        <!-- 开片先核对板材规格，放在数量上面 -->
         <section :class="slicing ? 'order-first border-primary/40' : 'border-border'" class="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
           <div class="flex items-center justify-between">
-            <span class="text-sm font-bold">{{ slicing ? `开成什么规格的${output?.label}？` : `做出来的${output?.label}` }}</span>
+            <span class="text-sm font-bold">实际产出：{{ output?.label }}</span>
             <button v-if="editable.length > 0 && specErrors.length === 0 && !slicing" class="h-8 px-2 text-xs font-semibold text-primary" type="button" @click="editing = !editing">
               {{ editing ? '收起' : '不对？改一下' }}
             </button>
           </div>
-          <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels) || '—' }}</span>
+          <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels, [], 'mm') || '—' }}</span>
+          <span v-if="slicing" class="text-xs text-muted-foreground">材质、配方、颜色和长宽厚沿用实际领料；不同配方或规格的板材已分别列出，厚度不可修改。</span>
+          <span v-else-if="job.process?.code === 'CUT'" class="text-xs text-muted-foreground">材质、配方和颜色沿用实际领料；长、宽、厚按本次实际立切产出的片材规格填写，单位 mm。</span>
           <span v-if="specErrors.length > 0" class="text-xs text-warning">还差几个规格，请补上：</span>
           <AttrFields
             v-if="(showEditor || needsSpec()) && editable.length > 0"
@@ -113,8 +119,9 @@ function next() {
             :fields="editable"
             :id-prefix="`wb-${line.key}`"
             :options="job.options!"
+            dimension-unit="mm"
           />
-          <span v-else class="text-xs text-muted-foreground">按领的料自动带出，一般不用改</span>
+          <span v-else class="text-xs text-muted-foreground">规格按本工序计划和已领物料带出，请核对实物</span>
         </section>
       </div>
 
@@ -147,14 +154,14 @@ function next() {
           class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5"
         >
           <span class="flex min-w-0 flex-col">
-            <span class="text-sm font-semibold">{{ attrSummary(input.stage, input.item, labels) || input.itemCode }}</span>
+            <span class="text-sm font-semibold">{{ attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode }}</span>
             <span class="text-xs text-muted-foreground">
               批次 {{ input.batchNo }} · 最多退 {{ formatQty((toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)) }} {{ source?.unit }}
             </span>
           </span>
           <InputNumber
             :id="`return-${input.id}`"
-            :aria-label="`${attrSummary(input.stage, input.item, labels) || input.itemCode} 退回数量`"
+            :aria-label="`${attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode} 退回数量`"
             :addon-after="source?.unit"
             :max="(toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)"
             :min="0"

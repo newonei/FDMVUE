@@ -3,6 +3,10 @@ import type { Product, TaxBasis } from '#/api/fdmplatform/products';
 
 import BigNumber from 'bignumber.js';
 
+import { productAttributesText } from './attributes';
+
+export { productAttributesText } from './attributes';
+
 export const taxOptions = [
   { label: '含税价', value: 'TAX_INCLUDED' },
   { label: '未税价', value: 'TAX_EXCLUDED' },
@@ -28,6 +32,13 @@ export const productFieldLabels: Record<string, string> = {
   material: '材质',
   size: '尺寸',
   color: '颜色',
+  productStage: '生产分类',
+  colorCode: '单色',
+  frontColor: '正面颜色',
+  backColor: '反面颜色',
+  textureFront: '正面压花',
+  textureBack: '反面压花',
+  matType: '垫子类型',
   shape: '形状',
   active: '启用状态',
 };
@@ -37,7 +48,7 @@ export function productDescription(product: Product) {
     product.spec ?? product.specification,
     product.material,
     product.size,
-    product.color,
+    productAttributesText(product),
     product.shape,
   ]
     .filter(Boolean)

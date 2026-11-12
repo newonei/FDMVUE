@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 
 const mocks = vi.hoisted(() => ({ getProductCategories: vi.fn() }));
+// 分类行为与图标网络加载无关，避免测试退出时仍等待外部图标请求。
+vi.mock('@vben/icons', () => ({ IconifyIcon: () => h('span') }));
 vi.mock('#/api/fdmplatform/products', () => ({
   getProductCategories: mocks.getProductCategories,
 }));

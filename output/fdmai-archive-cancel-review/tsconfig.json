@@ -1,0 +1,16 @@
+{
+  "references": [],
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "../../apps/web-antd/node_modules/@vben/types/global"
+    ]
+  },
+  "exclude": [
+    "../../apps/web-antd/src/**/*.test.ts"
+  ],
+  "include": [
+    "../../apps/web-antd/src/views/fdmai/models/ModelLibrary.vue"
+  ],
+  "extends": "../../apps/web-antd/tsconfig.json"
+}
