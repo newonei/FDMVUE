@@ -419,40 +419,45 @@ function discard() {
     <template v-else-if="schedule.status === 'CONFIRMED' || (schedule.status === 'DISCARDED' && (schedule.tasks ?? []).length > 0)">
       <section v-for="[date, list] in confirmedGroups" :key="date" class="flex flex-col gap-2">
         <h4 class="m-0 text-sm font-semibold">{{ dayLabel(date) }}</h4>
-        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-          <div v-for="task in list" :key="task.id" class="flex flex-col gap-1 rounded-md border border-border p-3 text-sm">
-            <div class="flex items-center justify-between gap-2">
-              <b>{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</b>
-              <span class="flex items-center gap-1.5">
+        <div class="grid grid-cols-1 items-start gap-2 md:grid-cols-2">
+          <div v-for="task in list" :key="task.id" class="flex min-w-0 flex-col gap-2 rounded-md border border-border p-3 text-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <b class="text-base">{{ task.sequence }}. {{ PROCESS_LABELS[task.process] ?? task.process }}</b>
+              <span class="flex flex-wrap items-center gap-1.5">
                 <Tag v-if="task.status" :color="TASK_STATUS[task.status].color" class="m-0">{{ TASK_STATUS[task.status].label }}</Tag>
                 <span class="font-mono text-xs">{{ task.contractCode || '备货' }}</span>
               </span>
             </div>
-            <div class="text-xs text-muted-foreground">关联产品：{{ task.product || '备货' }}</div>
-            <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" />
-            <div v-else class="text-xs">产出：{{ taskMaterialText(task.output, task.spec) }}</div>
+            <div class="break-words text-base font-medium leading-6">
+              <span class="text-xs font-normal text-muted-foreground">关联产品：</span>{{ task.product || '备货' }}
+            </div>
+            <TaskMaterials v-if="task.output || task.inputs?.length" :task="task" card-view />
+            <div v-else class="break-words text-base font-semibold leading-6">
+              <span class="text-xs font-normal text-muted-foreground">产出：</span>{{ taskMaterialText(task.output, task.spec) }}
+            </div>
             <div class="text-xs">
               {{ task.workerNames || (task.status === 'OPEN' ? '待领取，工人在工作台抢单' : '未排人') }}
-              <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 {{ Number(task.plannedQuantity) }}，接单时按上道良品改成 {{ Number(task.quantity) }}</span>
+              <span v-if="task.plannedQuantity" class="text-muted-foreground">· 排单 <strong class="text-base text-foreground tabular-nums">{{ Number(task.plannedQuantity) }}</strong>，接单时按上道良品改成 <strong class="text-base text-foreground tabular-nums">{{ Number(task.quantity) }}</strong></span>
             </div>
             <div v-if="task.shortage" class="flex flex-wrap items-center justify-between gap-2 rounded bg-warning/10 px-2 py-1 text-xs text-warning">
-              <span>报工差 {{ Number(task.shortage) }} {{ task.unit }}，待处理</span>
+              <span>报工差 <strong class="text-lg tabular-nums">{{ Number(task.shortage) }}</strong> {{ task.unit }}，待处理</span>
               <span v-if="canConfirm && schedule.status === 'CONFIRMED'" class="flex gap-1">
                 <Button size="small" type="link" @click="resend(task)">再派一个</Button>
                 <Button size="small" type="link" @click="dropShortage(task)">不补了</Button>
               </span>
             </div>
-            <div v-else-if="task.shortageNote" class="text-xs text-muted-foreground">差额：{{ task.shortageNote }}</div>
+            <div v-else-if="task.shortageNote" class="text-base font-medium">差额：{{ task.shortageNote }}</div>
             <div v-if="task.closedReason" class="text-xs text-muted-foreground">关闭原因：{{ task.closedReason }}</div>
-            <div class="flex items-center gap-2">
-              <Progress :percent="percent(task)" :show-info="false" class="m-0 flex-1" size="small" />
-              <span class="whitespace-nowrap text-xs tabular-nums">
-                实际 {{ Number(task.actualQuantity) }} / 计划 {{ Number(task.quantity) }} {{ task.unit }}
+            <div class="flex flex-wrap items-center gap-2">
+              <Progress :percent="percent(task)" :show-info="false" class="m-0 min-w-20 flex-1" size="small" />
+              <span class="flex flex-wrap items-baseline justify-end gap-x-1.5 text-sm tabular-nums">
+                实际 <strong class="text-xl text-primary">{{ Number(task.actualQuantity) }}</strong>
+                / 计划 <strong class="text-lg">{{ Number(task.quantity) }}</strong> {{ task.unit }}
               </span>
             </div>
-            <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>{{ task.orderCount }} 张工序单关联</span>
-              <span v-if="schedule.status === 'CONFIRMED' && canConfirm" class="flex gap-1">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span><strong class="text-base text-foreground tabular-nums">{{ task.orderCount }}</strong> 张工序单关联</span>
+              <span v-if="schedule.status === 'CONFIRMED' && canConfirm" class="flex flex-wrap gap-1">
                 <template v-if="!finished(task)">
                   <Button size="small" type="link" @click="editConfirmed(task)">{{ task.status === 'OPEN' ? '派单 / 改量' : '改派 / 改量' }}</Button>
                   <Button size="small" type="link" @click="openClose(task)">关闭</Button>
