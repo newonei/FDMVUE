@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { Alert, Checkbox, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
 
-import { getWorkbenchRecipePlan, getWorkbenchStock } from '#/api/fdmgongchang/workbench';
+import { getWorkbenchRecipePlan, getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang/workbench';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { attrSummary, formatQty, makeLabels, recipePicks, toNumber } from '../../stage-stock/model';
@@ -25,8 +25,11 @@ const job = useJob();
 const stocks = ref<StockApi.Stock[]>([]);
 const loading = ref(false);
 const loadError = ref(false);
+const prepareStockLoading = ref(false);
+const prepareStockError = ref(false);
 const stockKeyword = ref('');
 let loadSequence = 0;
+let disposed = false;
 const labels = computed(() => makeLabels(job.options));
 const laminate = computed(() => job.process?.code === 'LAMINATE');
 const source = computed(() => stageOf(job, job.sourceStage));
@@ -35,6 +38,10 @@ const sourceStages = computed(() => job.prepare?.sourceStages?.length ? job.prep
 const plannedOutput = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs);
 const outputSpec = computed(() => plannedOutput.value ? attrSummary(job.process?.outputStage ?? '', plannedOutput.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
 const planThicknessError = computed(() => slicePlanThicknessError(job, job.picks.map((pick) => ({ quantity: pick.qty, stock: pick.stock }))));
+const canPrepareStock = computed(() => !!job.task && !!job.process
+  && job.process.code !== 'MIX'
+  && ['BOARD', 'CUT', 'EMBOSSED', 'ENGRAVED', 'FOLDED', 'LAMINATED', 'PUNCHED', 'SHEET'].includes(job.sourceStage)
+  && !job.supplement && !job.order && !job.prepare?.inProgressOrderId);
 
 async function load() {
   const sequence = ++loadSequence;
@@ -53,11 +60,37 @@ async function load() {
   }
 }
 onMounted(load);
+onBeforeUnmount(() => { disposed = true; loadSequence++; });
 watch(() => job.sourceStage, () => {
   job.picks = [];
   stockKeyword.value = '';
+  prepareStockError.value = false;
   void load();
 });
+
+async function prepareStock() {
+  if (!canPrepareStock.value || prepareStockLoading.value || loading.value || !job.task) return;
+  const taskId = job.task.id;
+  const sourceStage = job.sourceStage;
+  prepareStockLoading.value = true;
+  prepareStockError.value = false;
+  try {
+    const prepared = await prepareWorkbenchTaskStock({
+      onBehalfOf: job.onBehalfOf?.id, sourceStage, taskId,
+    });
+    if (disposed || job.task?.id !== taskId || job.sourceStage !== sourceStage) return;
+    job.prepare = prepared;
+    // 同一批次可分别供正面和反面领用，必须保留两条带面别的数量。
+    job.picks = prepared.picks.map((pick) => ({ qty: toNumber(pick.quantity) ?? 0, side: pick.side, stock: pick.stock }));
+    stocks.value = [...new Map([...stocks.value, ...prepared.picks.map((pick) => pick.stock)].map((stock) => [stock.id, stock])).values()];
+    stockKeyword.value = '';
+    await load();
+  } catch {
+    if (!disposed && job.task?.id === taskId && job.sourceStage === sourceStage) prepareStockError.value = true;
+  } finally {
+    prepareStockLoading.value = false;
+  }
+}
 
 const nameOf = (stock: StockApi.Stock) => attrSummary(stock.stage, stock.item, labels.value, [], 'mm') || stock.itemCode;
 const normalizeSearch = (value: string) => value.toLocaleLowerCase().replaceAll(/[×*＊]/g, 'x').replaceAll(/\s/g, '');
@@ -207,6 +240,19 @@ function next() {
           <span v-else class="text-muted-foreground">没有算出建议领料，请在下面点实际领的料，填领了多少。</span>
           <span v-if="job.prepare.hint" class="text-warning">{{ job.prepare.hint }}</span>
         </section>
+        <section v-if="canPrepareStock" class="flex flex-col items-start gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+          <span>订单拆分下发时会自动建立缺少的半成品产品和零库存，可直接选择下方物料领料。账面不足允许负数，上道补报入库后冲抵。</span>
+          <button
+            :disabled="prepareStockLoading || loading || loadError"
+            class="h-9 rounded-md border border-border bg-card px-4 font-semibold disabled:opacity-50"
+            type="button"
+            @click="prepareStock"
+          >
+            {{ prepareStockLoading ? '正在准备领料…' : '按任务规格准备领料' }}
+          </button>
+          <span class="text-xs text-muted-foreground">仅在历史任务未出现所需物料时使用“按任务规格准备领料”补齐。实际数量可修改，点击“确认领料”后才扣库存。</span>
+          <span v-if="prepareStockError" role="alert" class="text-destructive">按任务规格准备领料失败，已选批次和填写数量已保留，请重试。</span>
+        </section>
         <section v-if="mixFromRaw && (!job.supplement || orderRecipe)" class="flex flex-col gap-2 rounded-lg border border-primary/40 bg-card p-3">
           <span class="text-sm font-bold">{{ job.supplement ? '按配方补齐' : '按配方领（一次领齐所有原料）' }}</span>
           <div v-if="!job.supplement" class="flex flex-wrap items-center gap-2">
@@ -278,6 +324,7 @@ function next() {
             v-for="code in sourceStages"
             :key="code"
             :class="code === job.sourceStage ? 'border-primary bg-primary/10 text-primary' : 'border-border'"
+            :disabled="prepareStockLoading"
             class="h-8 rounded-md border px-2.5"
             type="button"
             @click="job.sourceStage = code"
@@ -432,7 +479,7 @@ function next() {
           </div>
         </section>
         <IssueShortages />
-        <button :disabled="loading || loadError" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
+        <button :disabled="loading || loadError || prepareStockLoading" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
           下一步：确认领料
         </button>
       </aside>

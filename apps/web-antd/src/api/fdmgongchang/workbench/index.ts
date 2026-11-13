@@ -141,6 +141,49 @@ export namespace FdmgongchangWorkbenchApi {
     workshopProcess?: null | Process;
     workshopTasks?: FdmgongchangScheduleApi.Task[];
   }
+
+  export interface BatchReportRow {
+    taskId: number;
+    goodQuantity: Decimal;
+    defectQuantity: Decimal;
+    expectedActualQuantity: Decimal;
+    expectedDefectQuantity: Decimal;
+    boardItemCode?: string;
+    foldingType?: string;
+  }
+
+  export interface BatchReportReq {
+    requestId: string;
+    process: string;
+    rows: BatchReportRow[];
+  }
+
+  export interface BatchOptions {
+    boards: Array<{
+      attrs: FdmgongchangStageStockApi.ItemAttrs;
+      itemCode: string;
+      label: string;
+    }>;
+    defaultBoardItemCode?: string;
+  }
+}
+
+/** 车间直接批量报工：服务端按任务领料并登记产出，同一请求 ID 只处理一次。 */
+export function batchReportWorkbenchTasks(
+  data: FdmgongchangWorkbenchApi.BatchReportReq,
+) {
+  return requestClient.post<{
+    orderIds: number[];
+    reported: number;
+    warnings: string[];
+  }>(`${BASE}/task/batch-report`, data, headers());
+}
+
+export function getWorkbenchBatchOptions(process: string, taskId: number) {
+  return requestClient.get<FdmgongchangWorkbenchApi.BatchOptions>(
+    `${BASE}/task/batch-options`,
+    { ...headers(), params: { process, taskId } },
+  );
 }
 
 export function getWorkbench(process?: string) {
@@ -271,6 +314,19 @@ export function prepareWorkbenchTask(id: number) {
       ...headers(),
       params: { id },
     },
+  );
+}
+
+/** 上道未入库时按任务建立领料档案；仅准备批次，确认领料时才扣库存。 */
+export function prepareWorkbenchTaskStock(data: {
+  onBehalfOf?: number;
+  sourceStage: string;
+  taskId: number;
+}) {
+  return requestClient.post<FdmgongchangWorkbenchApi.TaskPrepare>(
+    `${BASE}/task/prepare-stock`,
+    data,
+    headers(),
   );
 }
 

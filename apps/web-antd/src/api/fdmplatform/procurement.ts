@@ -188,6 +188,8 @@ export interface ProcurementOrderView {
     signingEntityId?: string;
     signingEntitySnapshot?: ProcurementSetting;
     status: 'CONFIRMED' | 'DRAFT';
+    /** 采购员自行填写的采购主题，列表优先展示。 */
+    subject?: string;
     templateId?: string;
     templateSnapshot?: ProcurementSetting;
     version: number;

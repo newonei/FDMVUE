@@ -1,282 +1,230 @@
 <script setup lang="ts">
 import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue';
 
+import type { WorkshopOrder } from './order-model';
+
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as ScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
 
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
-import { Button, Input, Modal, Select, Table, Tag } from 'ant-design-vue';
+import { buildUUID } from '@vben/utils';
 
-import { getWorkbenchMates } from '#/api/fdmgongchang/workbench';
+import { Alert, AutoComplete, Button, Input, InputNumber, message, Select, Table, Tag } from 'ant-design-vue';
+
+import { batchReportWorkbenchTasks, getWorkbenchBatchOptions } from '#/api/fdmgongchang/workbench';
 
 import TaskMaterials from '../schedule/modules/task-materials.vue';
-import { dimensionTextInMm } from '../shared/dimensions';
+import { businessError } from '../shared/business-error';
 import FactorySwitch from '../shared/factory-switch.vue';
-import { dateText, PROCESS_LABELS, TASK_STATUS, taskMaterialText } from '../shared/schedule';
-import { upstreamBadge } from '../shared/upstream';
-import { formatQty } from '../stage-stock/model';
+import { dateText, PROCESS_LABELS } from '../shared/schedule';
+import { formatQty, sizeText } from '../stage-stock/model';
 import { useJob } from '../workbench/use-job';
-import { orderProductSpec, relatedProductSearch } from './order-details';
+import { groupWorkshopOrders, isTaskCompleted, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT } from './order-model';
 import OrdersTable from './orders-table.vue';
 import RelatedOrderTable from './related-order-table.vue';
 
-const props = defineProps<{
-  factories: FdmgongchangFactoryApi.Factory[];
-  factoryId: null | number;
-  process: string;
-}>();
+const props = defineProps<{ factories: FdmgongchangFactoryApi.Factory[]; factoryId: null | number; process: string }>();
 const emit = defineEmits<{
-  changeFactory: [id: number];
-  claimTask: [task: ScheduleApi.Task];
-  refresh: [];
-  reportOrder: [order: Api.Order];
-  startActual: [process: Api.Process];
-  startTask: [task: ScheduleApi.Task, process: Api.Process, onBehalfOf?: { id: number; name: string }];
-  supplementOrder: [order: Api.Order];
+  changeFactory: [id: number]; refresh: []; reportOrder: [order: Api.Order];
+  startActual: [process: Api.Process]; supplementOrder: [order: Api.Order];
 }>();
-
 const job = useJob();
 const my = computed(() => job.my!);
-const process = computed(() => my.value.workshopProcess
-  ?? my.value.processes.find((item) => item.code === props.process)
+const process = computed(() => my.value.workshopProcess ?? my.value.processes.find((item) => item.code === props.process)
   ?? my.value.teamProcesses?.find((item) => item.code === props.process));
-const title = computed(() => `${PROCESS_LABELS[props.process] ?? process.value?.label ?? props.process}车间`);
-// 列表可见范围与操作权限分开：看得到同车间任务，不代表可以替其他人领料报工。
-const tasks = computed(() => (my.value.workshopTasks ?? []).filter((task) => task.process === props.process));
-const mine = computed(() => new Set(my.value.tasks.map((task) => task.id)));
-const belongsToMe = (task: ScheduleApi.Task) => mine.value.has(task.id)
-  || String(task.workerIds ?? '').split(',').some((id) => id.trim() === String(my.value.userId));
-const hall = computed(() => new Set((my.value.hall ?? []).map((task) => task.id)));
-const team = computed(() => new Set((my.value.teamTasks ?? []).map((task) => task.id)));
-const completed = (task: ScheduleApi.Task) => task.status === 'DONE' || task.status === 'CLOSED';
-const canStart = (task: ScheduleApi.Task) => !!process.value && !completed(task) && mine.value.has(task.id);
-const canClaim = (task: ScheduleApi.Task) => !completed(task) && hall.value.has(task.id);
-const canBehalf = (task: ScheduleApi.Task) => !!process.value && !completed(task) && !mine.value.has(task.id) && team.value.has(task.id);
-const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
-const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
-const runningTask = (id: number) => inProgress.value.some((order) => order.scheduleTaskId === id);
-const independentSlice = computed(() => my.value.processes.find((item) => item.code === 'SLICE' && item.code === props.process));
-function orderNos(task: ScheduleApi.Task) {
-  if (task.relatedOrderNos?.length) return task.relatedOrderNos;
-  return task.contractCode ? [task.contractCode] : [];
-}
-const orderTitle = (task: ScheduleApi.Task) => orderNos(task).length > 1 || (task.covers?.length ?? 0) > 1
-  ? '合并订单任务' : orderNos(task)[0] || '备货任务';
-
+const title = computed(() => `${props.process === 'LAMINATE' ? '复合（贴合）' : PROCESS_LABELS[props.process] ?? process.value?.label ?? props.process}车间`);
+const tasks = computed(() => uniqueTasks((my.value.workshopTasks ?? []).filter((task) => task.process === props.process)));
+const orders = computed(() => groupWorkshopOrders(tasks.value));
 const keyword = ref('');
 const status = ref('ACTIVE');
-const ownership = ref('ALL');
-const statusOptions = [
-  { label: '未完成任务', value: 'ACTIVE' },
-  { label: '全部状态', value: 'ALL' },
-  ...Object.entries(TASK_STATUS).map(([value, item]) => ({ label: item.label, value })),
-];
-const visibleTasks = computed(() => {
-  const word = keyword.value.trim().toLocaleLowerCase();
-  return tasks.value.filter((task) => {
-    if (status.value === 'ACTIVE' && completed(task)) return false;
-    if (!['ACTIVE', 'ALL'].includes(status.value) && task.status !== status.value) return false;
-    if (ownership.value === 'MINE' && !belongsToMe(task)) return false;
-    if (ownership.value === 'CLAIMABLE' && !hall.value.has(task.id)) return false;
-    return !word || [...orderNos(task), ...(task.relatedOrderItems ?? []).flatMap((item) => relatedProductSearch(item)), task.contractCode, task.product, task.spec, task.workerNames, task.scheduleNo, task.id]
-      .some((value) => String(value ?? '').toLocaleLowerCase().includes(word));
-  });
-});
-const counts = computed(() => ({
-  claimed: tasks.value.filter((task) => task.status === 'CLAIMED').length,
-  done: tasks.value.filter((task) => task.status === 'DONE').length,
-  mine: tasks.value.filter((task) => canStart(task)).length,
-  open: tasks.value.filter((task) => task.status === 'OPEN').length,
-}));
-
-const columns: TableColumnsType<ScheduleApi.Task> = [
-  { key: 'order', title: '订单 / 任务', width: 180 },
-  { key: 'products', title: '关联订单产品', width: 280 },
-  { key: 'output', title: '本工序生产规格', width: 230 },
-  { key: 'quantity', title: '本工序计划 / 实绩', width: 150 },
-  { key: 'workers', title: '负责人', width: 100 },
-  { key: 'date', title: '日期 / 排序', width: 120 },
-  { key: 'status', title: '任务 / 上道状态', width: 210 },
-  { key: 'actions', title: '操作', width: 200, fixed: 'right' },
-];
-const pageNo = ref(1);
-const pageSize = ref(20);
-const expandedTaskIds = ref<(number | string)[]>([]);
-const pagination = computed<TablePaginationConfig>(() => ({
-  current: pageNo.value, pageSize: pageSize.value, total: visibleTasks.value.length,
-  showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'],
-  showTotal: (total) => `共 ${total} 项任务`,
-}));
-function changePage(value: TablePaginationConfig) {
-  pageNo.value = value.current ?? 1;
-  pageSize.value = value.pageSize ?? 20;
+const visibleOrders = computed(() => orders.value.filter((order) => orderMatches(order, keyword.value)
+  && (status.value === 'ALL' || order.tasks.some((task) => status.value === 'ACTIVE' ? !isTaskCompleted(task) : isTaskCompleted(task)))));
+const activeCount = computed(() => tasks.value.filter((task) => !isTaskCompleted(task)).length);
+const expandedOrderKeys = ref<string[]>([]);
+const selectedIds = ref<number[]>([]);
+const selectedTasks = computed(() => tasks.value.filter((task) => selectedIds.value.includes(task.id)));
+const busy = ref(false);
+const submittedIds = ref<number[]>([]);
+const warning = ref('');
+const reportWarnings = ref<string[]>([]);
+let contextVersion = 0;
+const request = ref<{ fingerprint: string; requestId: string }>();
+interface Draft { good?: number; defect?: number; boardItemCode?: string; foldingType: string }
+const drafts = reactive<Record<number, Draft>>({});
+const boardOptions = reactive<Record<number, Api.BatchOptions>>({});
+const boardLoading = reactive<Record<number, boolean>>({});
+const boardErrors = reactive<Record<number, string>>({});
+const foldingOptions = ['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map((value) => ({ value }));
+const canReport = (task: ScheduleApi.Task) => !!process.value && !isTaskCompleted(task) && !submittedIds.value.includes(task.id);
+const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
+const taskDraft = (task: ScheduleApi.Task) => drafts[task.id] ??= { good: undefined, defect: 0, foldingType: '' };
+async function loadBoards(task: ScheduleApi.Task) {
+  if (props.process !== 'MIX' || boardOptions[task.id] || boardLoading[task.id]) return;
+  const version = contextVersion;
+  boardLoading[task.id] = true; Reflect.deleteProperty(boardErrors, task.id);
+  try {
+    const result = await getWorkbenchBatchOptions(props.process, task.id);
+    if (version !== contextVersion) return;
+    boardOptions[task.id] = result; taskDraft(task).boardItemCode = result.defaultBoardItemCode;
+  } catch (error) { if (version === contextVersion) boardErrors[task.id] = businessError(error).msg; }
+  finally { if (version === contextVersion) boardLoading[task.id] = false; }
 }
-watch([keyword, status, ownership, () => props.factoryId], () => {
-  pageNo.value = 1;
-  expandedTaskIds.value = [];
-});
-watch(() => visibleTasks.value.length, (length) => {
-  pageNo.value = Math.min(pageNo.value, Math.max(1, Math.ceil(length / pageSize.value)));
-});
-const outputText = (task: ScheduleApi.Task) => task.output
-  ? taskMaterialText(task.output) : dimensionTextInMm(task.spec) || '按工序任务要求生产';
-const productSummary = (task: ScheduleApi.Task) => (task.relatedOrderItems ?? []).slice(0, 2);
-function toggleDetails(task: ScheduleApi.Task) {
-  expandedTaskIds.value = expandedTaskIds.value.includes(task.id)
-    ? expandedTaskIds.value.filter((id) => id !== task.id) : [...expandedTaskIds.value, task.id];
+function selectOrderTasks(order: WorkshopOrder, keys: (number | string)[]) {
+  const orderIds = new Set(order.tasks.map((task) => task.id));
+  selectedIds.value = [...new Set([...selectedIds.value.filter((id) => !orderIds.has(id)),
+    ...keys.map(Number).filter((id) => order.tasks.some((task) => task.id === id && canReport(task)))])];
+  for (const task of selectedTasks.value) { taskDraft(task); void loadBoards(task); }
 }
-
-const behalf = ref<{ options: { label: string; value: number }[]; task: ScheduleApi.Task; userId?: number }>();
-async function openBehalf(task: ScheduleApi.Task) {
-  const mates = await getWorkbenchMates(task.process);
-  const first = Number(String(task.workerIds ?? '').split(',').find(Boolean)) || undefined;
-  behalf.value = {
-    options: mates.map((mate) => ({ label: mate.team ? `${mate.nickname}（${mate.team}）` : mate.nickname, value: mate.userId })),
-    task,
-    userId: mates.some((mate) => mate.userId === first) ? first : undefined,
+function selection(order: WorkshopOrder) {
+  return { selectedRowKeys: selectedIds.value,
+    onChange: (keys: (number | string)[]) => selectOrderTasks(order, keys),
+    getCheckboxProps: (task: ScheduleApi.Task) => ({ disabled: busy.value || !canReport(task), name: `选择任务 ${task.id}` }),
   };
 }
-function confirmBehalf() {
-  const value = behalf.value;
-  if (!value?.userId || !process.value) return;
-  const name = value.options.find((item) => item.value === value.userId)?.label ?? '';
-  behalf.value = undefined;
-  emit('startTask', value.task, process.value, { id: value.userId, name });
+function toggleOrder(order: WorkshopOrder) {
+  expandedOrderKeys.value = expandedOrderKeys.value.includes(order.key)
+    ? expandedOrderKeys.value.filter((key) => key !== order.key) : [...expandedOrderKeys.value, order.key];
 }
+function clearSelection() { selectedIds.value = []; warning.value = ''; }
+async function batchReport() {
+  if (busy.value || selectedTasks.value.length === 0) return;
+  const rows: Api.BatchReportRow[] = [];
+  for (const task of selectedTasks.value) {
+    const draft = taskDraft(task);
+    const good = Number(draft.good ?? 0); const defect = Number(draft.defect ?? 0);
+    if (!Number.isFinite(good) || !Number.isFinite(defect) || good < 0 || defect < 0 || good + defect <= 0) {
+      warning.value = `任务 #${task.id} 请填写本次完成数量或残次品数量，合计必须大于 0。`; return;
+    }
+    if (props.process === 'MIX' && !draft.boardItemCode) { warning.value = `任务 #${task.id} 请先选择本次报工的板材。`; return; }
+    if (props.process === 'FOLD' && !draft.foldingType.trim()) { warning.value = `任务 #${task.id} 请填写本次折叠类型。`; return; }
+    rows.push({ taskId: task.id, goodQuantity: good, defectQuantity: defect,
+      expectedActualQuantity: task.actualQuantity ?? 0, expectedDefectQuantity: task.defectQuantity ?? 0,
+      ...(props.process === 'MIX' ? { boardItemCode: draft.boardItemCode } : {}),
+      ...(props.process === 'FOLD' ? { foldingType: draft.foldingType.trim() } : {}),
+    });
+  }
+  const fingerprint = JSON.stringify({ process: props.process, rows });
+  if (request.value?.fingerprint !== fingerprint) request.value = {
+    fingerprint,
+    requestId: buildUUID().replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5'),
+  };
+  const version = contextVersion;
+  busy.value = true; warning.value = '';
+  try {
+    const result = await batchReportWorkbenchTasks({ process: props.process, rows, requestId: request.value.requestId });
+    if (version !== contextVersion) return;
+    submittedIds.value.push(...rows.map((row) => row.taskId)); selectedIds.value = [];
+    for (const row of rows) Reflect.deleteProperty(drafts, row.taskId);
+    request.value = undefined; message.success(`已完成 ${result.reported} 个任务的本次报工`);
+    reportWarnings.value = result.warnings ?? [];
+    emit('refresh');
+  } catch (error) { if (version === contextVersion) warning.value = businessError(error).msg; }
+  finally { if (version === contextVersion) busy.value = false; }
+}
+watch(() => job.my, () => { submittedIds.value = []; selectedIds.value = []; });
+watch([keyword, status], () => { pageNo.value = 1; });
+watch([() => props.factoryId, () => props.process], () => {
+  contextVersion++; clearSelection(); expandedOrderKeys.value = []; request.value = undefined;
+  submittedIds.value = []; reportWarnings.value = []; busy.value = false; pageNo.value = 1;
+  for (const map of [drafts, boardOptions, boardLoading, boardErrors]) for (const key of Object.keys(map)) Reflect.deleteProperty(map, key);
+});
+const pageNo = ref(1); const pageSize = ref(20);
+const pagination = computed<TablePaginationConfig>(() => ({ current: pageNo.value, pageSize: pageSize.value, total: visibleOrders.value.length,
+  showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total) => `共 ${total} 个订单` }));
+const orderColumns: TableColumnsType<WorkshopOrder> = [
+  { key: 'order', title: '订单 / 客户', width: 210 }, { key: 'products', title: '订单产品', width: 220 },
+  { key: 'focus', title: '本车间重点', width: 400 }, { key: 'progress', title: '本车间任务', width: 150 },
+  { key: 'actions', title: '操作', width: 130, fixed: 'right' },
+];
+const reportOutputTitle = computed(() => {
+  if (props.process === 'MIX') return '报工选择板材';
+  if (props.process === 'FOLD') return '报工折叠类型';
+  return `报工产出 · ${WORKSHOP_OUTPUT[props.process] ?? '半成品'}`;
+});
+const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => [
+  { key: 'task', title: '任务 / 产品', width: 195 },
+  { key: 'focus', title: WORKSHOP_FOCUS[props.process] ?? '生产要求', width: props.process === 'EMBOSS' ? 340 : 290 },
+  { key: 'output', title: reportOutputTitle.value, width: 230 },
+  { key: 'progress', title: '计划 / 累计已报', width: 150 },
+  { key: 'good', title: '本次完成（良品）', width: 160 }, { key: 'defect', title: '本次残次品', width: 150 },
+]);
+const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
+const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
+const independentSlice = computed(() => my.value.processes.find((item) => item.code === 'SLICE' && item.code === props.process));
+function taskState(task: ScheduleApi.Task) {
+  if (task.status === 'CLOSED') return '已关闭'; if (task.status === 'DONE') return '已完成';
+  return Number(task.actualQuantity) + Number(task.defectQuantity ?? 0) > 0 ? '部分报工' : '待报工';
+}
+const summaryFields = (order: WorkshopOrder) => orderFocus(order, job.options);
+const outputSize = (task: ScheduleApi.Task) => sizeText(task.output?.attrs, 'mm') || '按任务规格';
 </script>
 
 <template>
   <div class="flex min-h-full min-w-0 flex-col gap-4 p-4 sm:p-5">
     <header class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex flex-col gap-1">
-        <h1 class="m-0 text-xl font-bold">{{ title }}</h1>
-        <p class="m-0 text-sm text-muted-foreground">查看本工序订单任务，领取后领料开工，再登记实际产出。</p>
-      </div>
-      <div class="flex items-center gap-3">
-        <FactorySwitch :factories="factories" :value="factoryId" @change="emit('changeFactory', $event)" />
-        <Button @click="emit('refresh')">刷新</Button>
-      </div>
+      <div><h1 class="m-0 text-xl font-bold">{{ title }}</h1><p class="mb-0 mt-1 text-sm text-muted-foreground">每个订单一行，展开查看任务。勾选后填写本次数量，直接批量报工。</p></div>
+      <div class="flex items-center gap-3"><FactorySwitch :factories="factories" :value="factoryId" :class="{ 'pointer-events-none opacity-60': busy }" :aria-disabled="busy" @change="!busy && emit('changeFactory', $event)" /><Button :disabled="busy" @click="emit('refresh')">刷新</Button></div>
     </header>
-
-    <dl class="m-0 flex flex-wrap gap-x-8 gap-y-2 border-y border-border py-3 text-sm">
-      <div class="flex items-center gap-2"><dt class="text-muted-foreground">车间待领取</dt><dd class="m-0 font-semibold tabular-nums">{{ counts.open }}</dd></div>
-      <div class="flex items-center gap-2"><dt class="text-muted-foreground">车间已接单</dt><dd class="m-0 font-semibold tabular-nums">{{ counts.claimed }}</dd></div>
-      <div class="flex items-center gap-2"><dt class="text-muted-foreground">我的未完成任务</dt><dd class="m-0 font-semibold tabular-nums text-primary">{{ counts.mine }}</dd></div>
-      <div class="flex items-center gap-2"><dt class="text-muted-foreground">车间已报工</dt><dd class="m-0 font-semibold tabular-nums">{{ counts.done }}</dd></div>
-    </dl>
-
-    <section v-if="inProgress.length" class="flex min-w-0 flex-col gap-2">
-      <h2 class="m-0 text-base font-semibold">我在本车间的在制工序单</h2>
-      <OrdersTable :orders="inProgress" :options="job.options" @report="emit('reportOrder', $event)" @supplement="emit('supplementOrder', $event)" />
-    </section>
-
-    <section class="flex min-w-0 flex-col gap-3">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="m-0 text-base font-semibold">车间订单任务 <span class="text-sm font-normal text-muted-foreground">{{ visibleTasks.length }} 项</span></h2>
-        <div class="flex flex-wrap gap-2">
-          <Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品编码、名称或人员" aria-label="搜索车间任务" />
-          <Select id="workshop-status" v-model:value="status" :options="statusOptions" class="w-36" aria-label="任务状态" />
-          <Select id="workshop-ownership" v-model:value="ownership" :options="[{ label: '车间全部任务', value: 'ALL' }, { label: '我的任务', value: 'MINE' }, { label: '我可领取', value: 'CLAIMABLE' }]" class="w-36" aria-label="任务归属" />
-        </div>
+    <Alert v-if="props.process === 'PACK'" type="info" show-icon message="包装工序不再排任务" description="订单拆分下发到最后一道生产工序。已存在的包装工序记录可在历史记录中查看。" />
+    <template v-else>
+      <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
+        <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待完成任务 <b class="text-base text-primary">{{ activeCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
+        <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="[{ label: '有待完成任务', value: 'ACTIVE' }, { label: '全部订单', value: 'ALL' }, { label: '有已完成任务', value: 'DONE' }]" class="w-40" aria-label="订单任务状态" /></div>
       </div>
-      <p class="m-0 text-xs text-muted-foreground">上道未完成的任务提前展示；已接单任务由负责人操作，班组长可按权限代报。展开行查看关联订单产品明细和领料计划。</p>
+      <div class="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded border border-primary/20 bg-background p-3 shadow-sm">
+        <div class="text-sm">已勾选 <strong class="text-base text-primary">{{ selectedIds.length }}</strong> 个任务<span class="ml-3 text-xs text-muted-foreground">本次完成填写良品，残次品单独填写。报工时按任务用料比例自动领料，库存不足可记为负数。</span></div>
+        <div class="flex gap-2"><Button :disabled="busy || !selectedIds.length" @click="clearSelection">取消勾选</Button><Button type="primary" :loading="busy" :disabled="!selectedIds.length" @click="batchReport">批量报工</Button></div>
+      </div>
+      <Alert v-if="warning" type="error" show-icon :message="warning" closable @close="warning = ''" />
+      <Alert v-if="reportWarnings.length" type="warning" show-icon message="报工已保存，以下事项需要补充处理" closable @close="reportWarnings = []"><template #description><ul class="mb-0 mt-2 list-disc pl-4"><li v-for="item in reportWarnings" :key="item">{{ item }}</li></ul></template></Alert>
       <Table
-        v-model:expanded-row-keys="expandedTaskIds"
-        class="workshop-task-table"
-        :columns="columns"
-        :data-source="visibleTasks"
-        :custom-row="(record: ScheduleApi.Task) => ({ class: 'workshop-task-row', 'data-task-id': record.id })"
-        row-key="id"
-        :pagination="pagination"
-        :scroll="{ x: 1520 }"
-        :locale="{ emptyText: tasks.length ? '没有符合筛选条件的任务' : '本车间暂无已下发任务，工厂订单下发后会自动分配到这里' }"
-        bordered
-        size="small"
-        @change="changePage"
-      >
-        <template #bodyCell="{ column, record: task }">
-          <template v-if="column.key === 'order'">
-            <div class="break-words font-medium">{{ orderTitle(task as ScheduleApi.Task) }}</div>
-            <div v-if="orderTitle(task as ScheduleApi.Task) === '合并订单任务' && orderNos(task as ScheduleApi.Task).length" class="break-words text-xs text-primary">关联订单：{{ orderNos(task as ScheduleApi.Task).join('、') }}</div>
-            <div class="mt-1 text-xs text-muted-foreground">任务 #{{ task.id }}</div>
-            <div v-if="task.scheduleNo" class="break-all text-xs text-muted-foreground">{{ task.scheduleNo }}</div>
-          </template>
-          <template v-else-if="column.key === 'products'">
-            <div v-for="item in productSummary(task as ScheduleApi.Task)" :key="`${item.orderId }:${ item.itemId}`" class="mb-1">
-              <div class="line-clamp-1 text-sm" :title="item.productName ?? ''">{{ item.productName || '未填写产品名称' }}</div>
-              <div v-if="item.productCode" class="break-all font-mono text-xs text-muted-foreground">{{ item.productCode }}</div>
-              <div class="line-clamp-1 text-xs text-muted-foreground" :title="orderProductSpec(item)">{{ orderProductSpec(item) || '未填写订单产品规格' }}</div>
-            </div>
-            <Button v-if="task.relatedOrderItems?.length" type="link" size="small" class="!h-auto !p-0 text-xs" :aria-expanded="expandedTaskIds.includes(task.id)" @click="toggleDetails(task as ScheduleApi.Task)">查看 {{ task.relatedOrderItems.length }} 条订单产品明细</Button>
-            <span v-else class="text-xs text-muted-foreground">未关联具体订单产品明细</span>
-          </template>
-          <template v-else-if="column.key === 'output'">
-            <div class="break-words">{{ outputText(task as ScheduleApi.Task) }}</div>
-            <div v-if="task.output?.code" class="mt-1 break-all font-mono text-xs text-muted-foreground">{{ task.output.code }}</div>
-          </template>
-          <template v-else-if="column.key === 'quantity'">
-            <div class="tabular-nums">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
-            <div class="tabular-nums">良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
-            <div v-if="Number(task.defectQuantity) > 0" class="text-xs text-muted-foreground">残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div>
-            <div v-if="Number(task.shortage) > 0" class="text-xs text-warning">差额 {{ formatQty(task.shortage) }} {{ task.unit }}</div>
-          </template>
-          <template v-else-if="column.key === 'workers'">
-            <div>{{ task.workerNames || '待领取' }}</div>
-            <Tag v-if="belongsToMe(task as ScheduleApi.Task)" color="blue" class="mt-1">我的任务</Tag>
-          </template>
-          <template v-else-if="column.key === 'date'">
-            <div>{{ task.undated ? (task.process === 'MIX' && task.sequence ? `发泡顺序 ${ task.sequence}` : '不定日期') : dateText(task.workDate) }}</div>
-            <div v-if="task.undated" class="mt-1 text-xs text-muted-foreground">下发 {{ dateText(task.workDate) }}</div>
-          </template>
-          <template v-else-if="column.key === 'status'">
-            <Tag :color="TASK_STATUS[(task.status ?? 'OPEN') as ScheduleApi.TaskStatus].color">{{ TASK_STATUS[(task.status ?? 'OPEN') as ScheduleApi.TaskStatus].label }}</Tag>
-            <div v-if="upstreamBadge(task.upstreamState)" class="mt-1 text-xs">
-              <span class="rounded px-1.5 py-0.5 font-semibold" :class="upstreamBadge(task.upstreamState)!.cls">{{ upstreamBadge(task.upstreamState)!.text }}</span>
-            </div>
-            <div v-if="task.upstreamNote" class="mt-1 line-clamp-2 text-xs text-muted-foreground" :title="task.upstreamNote">{{ task.upstreamNote }}</div>
-          </template>
-          <template v-else-if="column.key === 'actions'">
-            <div class="task-actions flex flex-wrap gap-2">
-              <Button v-if="canClaim(task as ScheduleApi.Task)" data-task-action="claim" size="small" type="primary" @click="emit('claimTask', task as ScheduleApi.Task)">领取任务</Button>
-              <Button v-if="canStart(task as ScheduleApi.Task)" data-task-action="start" size="small" type="primary" @click="emit('startTask', task as ScheduleApi.Task, process!)">{{ runningTask(task.id) ? '继续报本工序产出' : '领料开工' }}</Button>
-              <Button v-if="canBehalf(task as ScheduleApi.Task)" data-task-action="behalf" size="small" @click="openBehalf(task as ScheduleApi.Task)">组长代报</Button>
-              <span v-if="!completed(task as ScheduleApi.Task) && !canStart(task as ScheduleApi.Task) && !canClaim(task as ScheduleApi.Task) && !canBehalf(task as ScheduleApi.Task)" class="text-xs text-muted-foreground">{{ task.workerNames ? '由任务负责人领料、报工' : '待本工序人员领取' }}</span>
-              <span v-if="completed(task as ScheduleApi.Task)" class="text-muted-foreground">—</span>
-            </div>
-          </template>
+v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :columns="orderColumns" :data-source="visibleOrders"
+        row-key="key" :custom-row="(order: WorkshopOrder) => ({ class: 'workshop-order-row', 'data-order-key': order.key })" :pagination="pagination" :scroll="{ x: 1110 }"
+        :locale="{ emptyText: orders.length ? '没有符合条件的订单' : '本车间暂无已下发订单任务' }" bordered size="middle"
+        @change="(value: TablePaginationConfig) => { pageNo = value.current ?? 1; pageSize = value.pageSize ?? 20; }"
+>
+        <template #bodyCell="{ column, record: order }">
+          <template v-if="column.key === 'order'"><div class="break-words font-semibold">{{ order.orderNo }}</div><div class="mt-1 text-xs text-muted-foreground">{{ order.customer || '—' }}</div><div v-if="order.items[0]?.promisedDate || order.items[0]?.requiredDate" class="mt-1 text-xs text-muted-foreground">交期 {{ dateText(order.items[0].promisedDate || order.items[0].requiredDate) }}</div></template>
+          <template v-else-if="column.key === 'products'"><div v-for="item in order.items.slice(0, 2)" :key="item.itemId" class="line-clamp-1 text-sm" :title="item.productName">{{ item.productName || item.productCode || '未填写产品名称' }}</div><div v-if="order.items.length > 2" class="text-xs text-muted-foreground">等 {{ order.items.length }} 条产品明细，展开查看</div><div v-if="!order.items.length" class="text-xs text-muted-foreground">未关联具体订单产品明细</div></template>
+          <template v-else-if="column.key === 'focus'"><div v-for="field in summaryFields(order as WorkshopOrder)" :key="`${field.label}:${field.value}`" class="mb-1 flex gap-2 text-sm"><span class="shrink-0 text-xs text-muted-foreground">{{ field.label }}</span><strong class="break-words" :title="field.value">{{ field.value }}</strong></div></template>
+          <template v-else-if="column.key === 'progress'"><div>共 <b>{{ order.tasks.length }}</b> 项任务</div><div class="mt-1 text-xs text-muted-foreground">待完成 {{ order.tasks.filter((task: ScheduleApi.Task) => !isTaskCompleted(task)).length }} · 已完成 {{ order.tasks.filter(isTaskCompleted).length }}</div></template>
+          <template v-else-if="column.key === 'actions'"><Button type="link" :aria-expanded="expandedOrderKeys.includes(order.key)" @click="toggleOrder(order as WorkshopOrder)">{{ expandedOrderKeys.includes(order.key) ? '收起订单' : '展开订单' }}</Button></template>
         </template>
-        <template #expandedRowRender="{ record: task }">
-          <div class="flex min-w-0 flex-col gap-2 py-2">
-            <h3 class="m-0 text-sm font-semibold">关联订单产品明细（{{ task.relatedOrderItems?.length ?? 0 }} 条）</h3>
-            <p class="m-0 text-xs text-muted-foreground">下表数量是订单产品数量；本工序计划产出 {{ formatQty(task.quantity) }} {{ task.unit }}，已报良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}。</p>
-            <RelatedOrderTable :items="task.relatedOrderItems ?? []" :options="job.options" />
-            <h3 class="m-0 mt-2 text-sm font-semibold">本工序领料与产出要求</h3>
-            <TaskMaterials :task="task" />
-            <p v-if="!task.output && !task.inputs?.length" class="m-0 text-xs text-muted-foreground">{{ outputText(task as ScheduleApi.Task) }}</p>
-            <p v-if="task.reason" class="m-0 text-xs">任务说明：{{ task.reason }}</p>
-            <p v-if="task.upstreamNote" class="m-0 text-xs text-muted-foreground">{{ task.upstreamNote }}</p>
-            <p v-if="task.shortageNote" class="m-0 text-xs text-warning">差额说明：{{ task.shortageNote }}</p>
-            <p v-if="task.closedReason" class="m-0 text-xs text-muted-foreground">关闭原因：{{ task.closedReason }}</p>
+        <template #expandedRowRender="{ record: order }">
+          <div class="flex min-w-0 flex-col gap-3 py-2">
+            <div class="flex items-center justify-between"><strong>{{ order.orderNo }} · 本车间全部任务</strong><span class="text-xs text-muted-foreground">未完成任务可直接勾选，无需领取</span></div>
+            <p v-if="props.process === 'MIX' && summaryFields(order as WorkshopOrder).some((field) => field.label === '克重' && field.value === '未填写')" class="m-0 text-xs text-orange-600">克重未填写，请在采购单生产要求中补全。</p>
+            <Table
+class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
+              :custom-row="(task: ScheduleApi.Task) => ({ class: 'workshop-task-row', 'data-task-id': task.id })" row-key="id" :pagination="false" :scroll="{ x: 1260 }" bordered size="small"
+>
+              <template #bodyCell="{ column, record: task }">
+                <template v-if="column.key === 'task'">
+                  <div class="font-semibold">任务 #{{ task.id }} <Tag :color="isTaskCompleted(task as ScheduleApi.Task) ? 'default' : 'blue'">{{ taskState(task as ScheduleApi.Task) }}</Tag></div>
+                  <div class="mt-1 line-clamp-2 text-sm">{{ task.relatedOrderItems?.map((item: ScheduleApi.RelatedOrderItem) => item.productName || item.productCode).filter(Boolean).join('、') || task.product || '按任务要求生产' }}</div>
+                  <div v-if="task.output?.side" class="mt-1"><Tag :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '单色 / 整体' }}</Tag></div>
+                  <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
+                  <details class="mt-2 text-xs"><summary class="cursor-pointer text-muted-foreground">任务明细 / 用料要求</summary><div class="mt-2"><TaskMaterials :task="task as ScheduleApi.Task" /><p v-if="task.workerNames">负责人：{{ task.workerNames }}</p><p v-if="task.reason">{{ task.reason }}</p><p v-if="task.upstreamNote">{{ task.upstreamNote }}</p></div></details>
+                </template>
+                <template v-else-if="column.key === 'focus'"><div v-for="field in taskFocus(task as ScheduleApi.Task, job.options)" :key="field.label" class="focus-field my-1.5 flex items-start gap-2"><span class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs" :class="field.side === 'FRONT' ? 'bg-blue-50 text-blue-700' : field.side === 'BACK' ? 'bg-purple-50 text-purple-700' : 'bg-muted text-muted-foreground'">{{ field.label }}</span><strong class="break-words text-base leading-6" :class="field.value === '未填写' ? 'text-orange-600' : ''">{{ field.value }}</strong></div></template>
+                <template v-else-if="column.key === 'output'">
+                  <div class="mb-1 font-medium">{{ WORKSHOP_OUTPUT[props.process] }}</div><div class="mb-2 text-xs text-muted-foreground">本工序规格 {{ outputSize(task as ScheduleApi.Task) }}</div>
+                  <template v-if="props.process === 'MIX'"><Select :id="`board-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).boardItemCode" class="w-full" :disabled="!selected(task as ScheduleApi.Task) || busy" :loading="boardLoading[task.id]" :options="boardOptions[task.id]?.boards.map((item) => ({ label: item.label, value: item.itemCode })) ?? []" placeholder="勾选任务后选择板材" aria-label="选择报工板材" /><div v-if="boardErrors[task.id]" class="mt-1 text-xs text-red-600">{{ boardErrors[task.id] }} <Button type="link" size="small" @click="loadBoards(task as ScheduleApi.Task)">重试</Button></div></template>
+                  <AutoComplete v-else-if="props.process === 'FOLD'" :id="`fold-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).foldingType" class="w-full" :options="foldingOptions" :disabled="!selected(task as ScheduleApi.Task) || busy" :maxlength="50" placeholder="选择或输入，如八折" aria-label="本次折叠类型" />
+                </template>
+                <template v-else-if="column.key === 'progress'"><div>计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div><div class="mt-1 text-xs">已报良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div><div class="text-xs text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div></template>
+                <template v-else-if="column.key === 'good'"><InputNumber :id="`good-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).good" class="!w-full" :min="0" :precision="3" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="本次良品数" :aria-label="`任务 ${task.id} 本次完成良品数量`" /><span class="mt-1 block text-xs text-muted-foreground">单位：{{ task.unit }}</span></template>
+                <template v-else-if="column.key === 'defect'"><InputNumber :id="`defect-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).defect" class="!w-full" :min="0" :precision="3" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="残次品数" :aria-label="`任务 ${task.id} 本次残次品数量`" /><span class="mt-1 block text-xs text-muted-foreground">单位：{{ task.unit }}</span></template>
+              </template>
+            </Table>
+            <details class="text-sm"><summary class="cursor-pointer text-muted-foreground">订单产品明细 · {{ order.items.length }} 条</summary><div class="mt-2"><RelatedOrderTable :items="order.items" :options="job.options" /></div></details>
           </div>
         </template>
       </Table>
-    </section>
-
-    <details v-if="recentDone.length" class="border-t border-border pt-3">
-      <summary class="cursor-pointer text-sm font-semibold">我最近完工的工序单 · 补登领料</summary>
-      <p class="my-2 text-xs text-muted-foreground">完工 3 天内可补登漏记的实际领料，需要填写原因。</p>
-      <OrdersTable :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" />
-    </details>
-    <details v-if="independentSlice" class="border-t border-border pt-3">
-      <summary class="cursor-pointer text-sm font-semibold">独立开片生产</summary>
-      <p class="my-2 text-xs text-muted-foreground">一次领取多种板材，在同一张工序单逐批登记数量；用于独立生产，不计入已下发任务或订单进度。</p>
-      <Button @click="emit('startActual', independentSlice)">开片 · 选择板材</Button>
-    </details>
-    <Modal :open="!!behalf" title="替谁报工" ok-text="下一步" :ok-button-props="{ disabled: !behalf?.userId }" @ok="confirmBehalf" @cancel="behalf = undefined">
-      <p class="text-xs text-muted-foreground">工序单记在所选组员名下，计件也算他的；代报人会写在备注里。</p>
-      <Select v-if="behalf" v-model:value="behalf.userId" :options="behalf.options" class="w-full" placeholder="选择组员" show-search :filter-option="(input: string, option: any) => String(option?.label ?? '').includes(input)" />
-    </Modal>
+    </template>
+    <details v-if="inProgress.length || recentDone.length" class="border-t border-border pt-3"><summary class="cursor-pointer text-sm text-muted-foreground">历史工序单 / 补登领料（{{ inProgress.length + recentDone.length }}）</summary><OrdersTable v-if="inProgress.length" class="mt-2" :orders="inProgress" :options="job.options" @report="emit('reportOrder', $event)" @supplement="emit('supplementOrder', $event)" /><OrdersTable v-if="recentDone.length" class="mt-2" :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" /></details>
+    <details v-if="independentSlice" class="border-t border-border pt-3"><summary class="cursor-pointer text-sm text-muted-foreground">独立开片生产</summary><p class="my-2 text-xs text-muted-foreground">独立生产不计入已下发任务或订单进度。</p><Button @click="emit('startActual', independentSlice)">开片 · 选择板材</Button></details>
   </div>
 </template>

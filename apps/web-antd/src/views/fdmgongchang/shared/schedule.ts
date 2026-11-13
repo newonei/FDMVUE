@@ -92,13 +92,26 @@ export interface MaterialRow {
   text: string;
 }
 
+/** 仅替换旧任务快照中的系统提示，保留用户填写的备注。 */
+export function materialNote(note: null | string | undefined, stage: string) {
+  if (!['BOARD', 'CUT', 'EMBOSSED', 'ENGRAVED', 'FOLDED', 'LAMINATED', 'PUNCHED', 'SHEET'].includes(stage)) return note;
+  if (note === '库存里还没有这个规格，要等上道做出来'
+    || note === '库存里还没有这个规格，可按任务规格先领料，等待上道补报入库') {
+    return '账面不足可直接领料并记负库存，上道补报入库后冲抵。';
+  }
+  if (note === '新规格，第一次报工时自动建档') {
+    return '半成品产品和零库存由订单拆分下发时自动建立。';
+  }
+  return note;
+}
+
 export function materialRows(task: Parameters<typeof taskMaterials>[0]): MaterialRow[] {
   const ratio = task.plannedQuantity ? Number(task.quantity) / Number(task.plannedQuantity) : 1;
   const row = (kind: MaterialRow['kind'], m: Api.Material, text: string): MaterialRow => ({
     code: m.code,
     kind,
     newItem: m.newItem,
-    note: m.note,
+    note: materialNote(m.note, m.stage),
     productCode: m.productCode && m.productCode !== m.code ? m.productCode : null,
     text,
   });

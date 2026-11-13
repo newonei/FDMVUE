@@ -236,7 +236,7 @@ async function release() {
     open.value = false;
     Modal.success({
       title: `已下发 ${result.tasks} 个工序任务`,
-      content: `任务已分配到对应车间，按工艺上下游顺序领取和报工。${result.warnings.length > 0 ? `提醒：${result.warnings.join('；')}` : ''}`,
+      content: `任务已分配到对应车间，所需半成品产品和零库存已自动补齐，可直接领料。账面不足时允许领为负数，上道补报入库后冲抵。${result.warnings.length > 0 ? `提醒：${result.warnings.join('；')}` : ''}`,
       width: 560,
     });
     emit('released', result.scheduleId);
@@ -258,6 +258,9 @@ async function release() {
       </div>
       <p class="m-0 text-xs text-muted-foreground">
         按订单产品的实际工艺路线完整拆分。订单数量与每道工序的计划数量分别核算；库存不足只提醒，缺少工艺或生产配置时需补齐后再下发。
+      </p>
+      <p class="m-0 text-xs text-primary">
+        确认下发时自动建立缺少的半成品产品和零库存，车间可直接领料；账面不足允许领为负数，上道补报入库后冲抵。预览不会创建产品或变更库存。
       </p>
       <Alert v-if="refreshError" type="warning" show-icon message="参数已保存，订单刷新失败。旧预览已作废，请重新打开预览核对。" />
       <template v-if="!preview">

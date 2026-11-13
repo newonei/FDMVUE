@@ -15,10 +15,14 @@ export function purchaseRowLabels(row: BusinessRecord) {
     values.find((value) => typeof value === 'string' && value.trim()) as
       | string
       | undefined;
+  const order =
+    first(row.orderCode, record.code, row.code, record.name, row.name) ||
+    '查看采购单';
+  const details = (row.details ?? {}) as Record<string, unknown>;
+  const subject = first(details.subject, record.subject, row.subject);
   return {
-    order:
-      first(row.orderCode, record.code, row.code, record.name, row.name) ||
-      '查看采购单',
+    order,
+    title: subject?.trim() || order,
     supplier: first(record.supplierName, row.supplierName) || '供应商未注明',
     supplierId: first(record.supplierId, row.supplierId),
     contract: contractReferenceText(
