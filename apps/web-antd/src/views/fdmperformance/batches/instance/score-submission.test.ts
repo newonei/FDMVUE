@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InstanceDetail from './index.vue';
 
 const api = vi.hoisted(() => ({
+  acknowledgeResultAdjustment: vi.fn(),
   completeIndicatorAction: vi.fn(),
   confirmEmployeeResult: vi.fn(),
   confirmIndicatorTask: vi.fn(),
@@ -187,6 +188,43 @@ beforeEach(() => {
       ...payload,
       updateTime: '2026-09-18T10:00:00',
     }));
+});
+
+describe('已公示绩效结果确认', () => {
+  const result = { id: 10, userId: 7, publicStatus: 1, employeeConfirmed: false, finalScore: 97, grade: 'C+' };
+  const confirmationButton = (container: HTMLElement) => [...container.querySelectorAll('button')].find(
+    (button) => button.textContent?.trim() === '确认绩效结果',
+  );
+  it('本人可在已结束流程详情确认最新结果，并刷新确认状态', async () => {
+    const { container } = await mount('', { status: 2, currentTaskId: undefined, result }, 0);
+    expect(container.textContent).toContain('待本人确认');
+    confirmationButton(container)!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('97') }));
+    api.getInstance.mockResolvedValue({ id: 7, userId: 7, status: 2, result: { ...result, employeeConfirmed: true } });
+    await confirm.mock.calls.at(-1)![0].onOk();
+    await settle();
+    expect(api.acknowledgeResultAdjustment).toHaveBeenCalledWith(10);
+    expect(confirmationButton(container)).toBeUndefined();
+    expect(container.textContent).toContain('已确认');
+  });
+  it.each([
+    { ...result, userId: 8 },
+    { ...result, publicStatus: 0 },
+    { ...result, employeeConfirmed: true },
+  ])('非本人、未公示或已确认结果不显示确认按钮：%j', async (record) => {
+    const { container } = await mount('', { status: 2, currentTaskId: undefined, result: record }, 0);
+    expect(confirmationButton(container)).toBeUndefined();
+    expect(api.acknowledgeResultAdjustment).not.toHaveBeenCalled();
+  });
+  it('提前公示但仍在员工确认节点时保留原流程确认操作', async () => {
+    const { container } = await mount('JIXIAO_EMPLOYEE_CONFIRM', { userId: 7, result }, 0);
+    expect(confirmationButton(container)).toBeUndefined();
+    expect(container.textContent).toContain('确认考核结果');
+    expect(container.querySelector('[title="员工确认"]')?.getAttribute('status')).toBe('process');
+    expect(container.querySelector('[title="人事审核"]')?.getAttribute('status')).toBe('wait');
+    expect(container.querySelector('[title="结果公示"]')?.getAttribute('status')).toBe('finish');
+    expect(api.acknowledgeResultAdjustment).not.toHaveBeenCalled();
+  });
 });
 
 describe('HR 跳过当前节点', () => {

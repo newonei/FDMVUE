@@ -7,6 +7,7 @@ import {
   defaultManagementScope,
   hasAction,
   managementScopes,
+  resultConfirmationText,
 } from './workspace';
 
 describe('performance workspace access', () => {
@@ -26,25 +27,37 @@ describe('performance workspace access', () => {
     expect(
       canAcknowledgeAdjustment({
         id: 1,
+        userId: 7,
         publicStatus: 1,
         employeeConfirmed: false,
-      }),
+      }, 7),
     ).toBe(true);
     expect(
       canAcknowledgeAdjustment({
         id: 1,
+        userId: 7,
         publicStatus: 0,
         employeeConfirmed: false,
-      }),
+      }, 7),
     ).toBe(false);
     expect(
       canAcknowledgeAdjustment({
         id: 1,
+        userId: 7,
         publicStatus: 1,
         employeeConfirmed: true,
-      }),
+      }, 7),
     ).toBe(false);
-    expect(canAcknowledgeAdjustment({ id: 1, publicStatus: 1 })).toBe(false);
+    expect(canAcknowledgeAdjustment({ id: 1, publicStatus: 1 }, 7)).toBe(false);
+    const result = { id: 1, userId: 7, publicStatus: 1, employeeConfirmed: false };
+    expect(canAcknowledgeAdjustment(result, 8)).toBe(false);
+    expect(canAcknowledgeAdjustment(result, undefined)).toBe(false);
+    expect(canAcknowledgeAdjustment(result, '7')).toBe(true);
+  });
+  it('distinguishes unpublished acknowledgement from a pending published result', () => {
+    expect(resultConfirmationText({ publicStatus: 0, employeeConfirmed: false })).toBe('公示后确认');
+    expect(resultConfirmationText({ publicStatus: 1, employeeConfirmed: false })).toBe('待本人确认');
+    expect(resultConfirmationText({ publicStatus: 0, employeeConfirmed: true })).toBe('已确认');
   });
   it('treats visibility and task state as read-only unless server allows an action', () => {
     const record: JixiaoApi.Instance = {

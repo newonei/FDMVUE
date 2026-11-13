@@ -54,12 +54,23 @@ export function hasAction(
   return instance.allowedActions?.includes(action) === true;
 }
 
-export function canAcknowledgeAdjustment(result: JixiaoApi.Result) {
+export function canAcknowledgeAdjustment(
+  result: JixiaoApi.Result,
+  currentUserId: number | string | undefined,
+) {
   return (
     !!result.id &&
+    currentUserId !== undefined &&
+    result.userId !== undefined &&
+    String(result.userId) === String(currentUserId) &&
     result.publicStatus === 1 &&
     result.employeeConfirmed === false
   );
+}
+
+export function resultConfirmationText(result: JixiaoApi.Result) {
+  if (result.employeeConfirmed === true) return '已确认';
+  return result.publicStatus === 1 ? '待本人确认' : '公示后确认';
 }
 
 export function visibilityLabel(reason?: string) {

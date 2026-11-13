@@ -15,6 +15,7 @@ import {
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 
 import { Undo2 } from '@vben/icons';
+import { useUserStore } from '@vben/stores';
 import { useMediaQuery } from '@vueuse/core';
 
 import {
@@ -32,6 +33,7 @@ import {
 } from 'ant-design-vue';
 
 import {
+  acknowledgeResultAdjustment,
   completeIndicatorAction,
   confirmEmployeeResult,
   confirmIndicatorTask,
@@ -59,7 +61,11 @@ import {
   managerLevelLabel,
   personManagerNames,
 } from '../../shared/score-weights';
-import { hasAction } from '../../shared/workspace';
+import {
+  canAcknowledgeAdjustment,
+  hasAction,
+  resultConfirmationText,
+} from '../../shared/workspace';
 import {
   activeScoreStage,
   applyScoreDraft,
@@ -76,6 +82,8 @@ const props = defineProps<{
   id?: number | string;
 }>();
 const route = useRoute();
+const userStore = useUserStore();
+const acknowledgingResult = ref(false);
 const isNarrow = useMediaQuery('(max-width: 900px)');
 const loading = ref(false);
 const submitting = ref(false);
@@ -88,6 +96,12 @@ const returning = ref(false);
 const returnNodesLoading = ref(false);
 const returnVisible = ref(false);
 const instance = ref<JixiaoApi.Instance>();
+const canConfirmPublishedResult = computed(
+  () =>
+    !!instance.value?.result &&
+    !hasAction(instance.value, 'EMPLOYEE_CONFIRM') &&
+    canAcknowledgeAdjustment(instance.value.result, userStore.userInfo?.id),
+);
 const users = ref<SystemUserApi.User[]>([]);
 const returnableNodes = ref<JixiaoApi.TaskReturnNode[]>([]);
 const transferForm = reactive({
@@ -392,7 +406,10 @@ function processStepStatus(index: number): ProcessStepStatus {
     if (index === current) return 'error';
     return 'wait';
   }
-  if (detail.result?.publicStatus === 1 || detail.publicTime) {
+  if (
+    (detail.result?.publicStatus === 1 || detail.publicTime) &&
+    (detail.status === 2 || index === processSteps.value.length - 1)
+  ) {
     return 'finish';
   }
   if (index < current) return 'finish';
@@ -510,6 +527,26 @@ async function load(discardLocal = false) {
   } finally {
     if (requestId === latestLoadId) loading.value = false;
   }
+}
+
+function confirmPublishedResult() {
+  const result = instance.value?.result;
+  if (!result || !canConfirmPublishedResult.value) return;
+  Modal.confirm({
+    title: '确认最新绩效结果',
+    content: `当前已公布综合分为 ${result.finalScore ?? '—'}，等级为 ${result.grade || '—'}。确认后将记录你已知悉此结果。`,
+    okText: '确认绩效结果',
+    onOk: async () => {
+      acknowledgingResult.value = true;
+      try {
+        await acknowledgeResultAdjustment(result.id!);
+        message.success('已确认最新绩效结果');
+        await load();
+      } finally {
+        acknowledgingResult.value = false;
+      }
+    },
+  });
 }
 
 async function loadReturnableNodes(silent = false) {
@@ -940,6 +977,21 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="detail-panel">
+      <Alert
+        v-if="canConfirmPublishedResult"
+        class="action-alert"
+        message="绩效结果待本人确认"
+        description="请核对当前公布的综合分与等级，并确认最新结果。如有进行中的考核待办，请继续办理。"
+        show-icon
+        type="warning"
+      />
+      <Button
+        v-if="canConfirmPublishedResult"
+        class="mb-3"
+        type="primary"
+        :loading="acknowledgingResult"
+        @click="confirmPublishedResult"
+      >确认绩效结果</Button>
       <Descriptions
         v-if="instance"
         bordered
@@ -998,6 +1050,11 @@ onBeforeUnmount(() => {
         <Descriptions.Item v-if="instance.result?.grade" label="绩效等级">{{
           instance.result.grade
         }}</Descriptions.Item>
+        <Descriptions.Item v-if="instance.result" label="结果确认">
+          <Tag :color="instance.result.employeeConfirmed ? 'green' : 'orange'">
+            {{ resultConfirmationText(instance.result) }}
+          </Tag>
+        </Descriptions.Item>
       </Descriptions>
     </div>
 

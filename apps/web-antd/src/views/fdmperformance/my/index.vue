@@ -6,6 +6,8 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
+import { useUserStore } from '@vben/stores';
+
 import {
   Button,
   Descriptions,
@@ -29,6 +31,7 @@ import {
   getMyPendingReviews,
   getMyPendingSupervisorReviews,
   getMyResultPage,
+  getMyResults,
   submitReview,
 } from '#/api/fdmperformance';
 
@@ -45,6 +48,7 @@ import {
   actionLabel,
   canAcknowledgeAdjustment,
   canHandleReview,
+  resultConfirmationText,
 } from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceMy' });
@@ -53,6 +57,7 @@ type ReviewMode = 'confirm' | 'submit';
 
 const route = useRoute();
 const router = useRouter();
+const userStore = useUserStore();
 const activeTab = ref(
   ['current', 'history', 'reviews'].includes(String(route.query.tab))
     ? String(route.query.tab)
@@ -68,6 +73,7 @@ const supervisorReviews = ref<JixiaoApi.Review[]>([]);
 const employeeReviews = ref<JixiaoApi.Review[]>([]);
 const instances = ref<JixiaoApi.Instance[]>([]);
 const results = ref<JixiaoApi.Result[]>([]);
+const pendingResults = ref<JixiaoApi.Result[]>([]);
 const instanceTotal = ref(0);
 const resultTotal = ref(0);
 const instanceQuery = reactive({
@@ -150,26 +156,34 @@ async function loadInstances() {
 async function loadResults() {
   resultLoading.value = true;
   try {
-    const data = await getMyResultPage(resultQuery);
+    const [data, allResults] = await Promise.all([
+      getMyResultPage(resultQuery),
+      getMyResults(),
+    ]);
     results.value = data.list;
     resultTotal.value = data.total;
+    pendingResults.value = allResults.filter(canConfirmResult);
   } finally {
     resultLoading.value = false;
   }
 }
 
+function canConfirmResult(record: JixiaoApi.Result) {
+  return canAcknowledgeAdjustment(record, userStore.userInfo?.id);
+}
+
 async function acknowledgeAdjustment(record: JixiaoApi.Result) {
-  if (!canAcknowledgeAdjustment(record)) return;
+  if (!canConfirmResult(record)) return;
   Modal.confirm({
-    title: '知悉等级调整',
-    content: `当前已公布综合分为 ${record.finalScore ?? '—'}，等级为 ${record.grade || '—'}。确认后将记录你已知悉此结果。`,
-    okText: '确认知悉',
+    title: '确认最新绩效结果',
+    content: `当前已公布综合分为 ${record.finalScore ?? '—'}，等级为 ${record.grade || '—'}。确认后将记录你已知悉此结果；如考核正在等待本人确认，也会同时完成该确认。`,
+    okText: '确认绩效结果',
     onOk: async () => {
       acknowledgingResultId.value = record.id;
       try {
         await acknowledgeResultAdjustment(record.id!);
-        message.success('已记录知悉');
-        await loadResults();
+        message.success('已确认最新绩效结果');
+        await Promise.all([loadResults(), loadInstances()]);
       } finally {
         acknowledgingResultId.value = undefined;
       }
@@ -331,6 +345,27 @@ onMounted(load);
     title="我的绩效"
     description="这里仅展示你作为被考核人的考核与成绩；评分他人的任务请前往工作台。"
   >
+    <div
+      v-for="record in pendingResults"
+      :key="`result-${record.id}`"
+      class="review-banner employee-banner"
+    >
+      <div>
+        <strong>绩效结果待本人确认</strong>
+        <span>{{ periodLabel(record.periodKey) }}</span>
+        <span>已公布综合分：{{ record.finalScore ?? '—' }}</span>
+        <Tag :color="gradeColor(record.grade)">{{ record.grade || '-' }}</Tag>
+        <span>请核对并确认最新公布的综合分与等级。</span>
+      </div>
+      <Space>
+        <Button @click="openResult(record)">查看详情</Button>
+        <Button
+          type="primary"
+          :loading="acknowledgingResultId === record.id"
+          @click="acknowledgeAdjustment(record)"
+        >确认绩效结果</Button>
+      </Space>
+    </div>
     <Tabs v-model:active-key="activeTab">
       <Tabs.TabPane key="current" tab="进行中" />
       <Tabs.TabPane key="history" tab="历史成绩" />
@@ -465,15 +500,15 @@ onMounted(load);
           </template>
           <template v-else-if="column.dataIndex === 'employeeConfirmed'">
             <Tag :color="record.employeeConfirmed ? 'green' : 'orange'">
-              {{ record.employeeConfirmed ? '已确认' : '待确认' }}
+              {{ resultConfirmationText(record) }}
             </Tag>
             <Button
-              v-if="canAcknowledgeAdjustment(record)"
+              v-if="canConfirmResult(record)"
               type="link"
               size="small"
               :loading="acknowledgingResultId === record.id"
               @click="acknowledgeAdjustment(record)"
-              >知悉等级调整</Button
+              >确认绩效结果</Button
             >
           </template>
           <template v-else-if="column.dataIndex === 'action'"

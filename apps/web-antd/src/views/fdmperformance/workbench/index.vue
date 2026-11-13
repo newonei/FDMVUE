@@ -4,6 +4,8 @@ import type { JixiaoApi } from '#/api/fdmperformance';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
+import { useUserStore } from '@vben/stores';
+
 import { Alert, Button, Empty, Pagination, Spin, Tag } from 'ant-design-vue';
 
 import {
@@ -11,15 +13,22 @@ import {
   getMyPendingReviews,
   getMyPendingSupervisorReviews,
   getMyResultPage,
+  getMyResults,
 } from '#/api/fdmperformance';
 
 import { usePerformanceAccess } from '../shared/access';
 import { TASK_LABELS } from '../shared/constants';
 import PerformanceShell from '../shared/PerformanceShell.vue';
-import { actionLabel, canHandleReview } from '../shared/workspace';
+import {
+  actionLabel,
+  canAcknowledgeAdjustment,
+  canHandleReview,
+} from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceWorkbench' });
 const router = useRouter();
+const userStore = useUserStore();
+const pendingResultCount = ref(0);
 const { access, loadAccess } = usePerformanceAccess();
 const loading = ref(false);
 const failed = ref(false);
@@ -62,7 +71,7 @@ async function initialize() {
   summaryFailed.value = false;
   try {
     const permissions = await loadAccess();
-    const [results, personal, supervisor] = await Promise.all([
+    const [results, personal, supervisor, publishedResults] = await Promise.all([
       getMyResultPage({
         pageNo: 1,
         pageSize: 1,
@@ -71,9 +80,13 @@ async function initialize() {
       }),
       getMyPendingReviews(),
       getMyPendingSupervisorReviews(),
+      getMyResults(),
       loadPending(),
     ]);
     recent.value = results.list[0];
+    pendingResultCount.value = publishedResults.filter((result) =>
+      canAcknowledgeAdjustment(result, userStore.userInfo?.id),
+    ).length;
     employeeReviews.value = (personal || []).filter((review) =>
       canHandleReview(review, 'CONFIRM'),
     );
@@ -127,6 +140,15 @@ onMounted(initialize);
       ></Alert
     >
     <section class="summary-grid">
+      <button
+        v-if="pendingResultCount"
+        class="summary-card"
+        type="button"
+        @click="router.push({ path: '/fdmperformance/my', query: { tab: 'history' } })"
+      >
+        <span>绩效结果待确认</span><strong>{{ pendingResultCount }}</strong>
+        <small>查看并确认当前公布的最新结果</small>
+      </button>
       <button
         class="summary-card"
         type="button"

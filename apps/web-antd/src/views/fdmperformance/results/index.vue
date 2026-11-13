@@ -7,6 +7,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import {
+  Alert,
   Button,
   DatePicker,
   Drawer,
@@ -41,6 +42,7 @@ import {
 import { formatPerformanceDateTime } from '../shared/format';
 import PerformanceShell from '../shared/PerformanceShell.vue';
 import { usePerformanceAccess } from '../shared/access';
+import { resultConfirmationText } from '../shared/workspace';
 
 defineOptions({ name: 'FdmPerformanceResults' });
 
@@ -106,7 +108,7 @@ const resultColumns: TableColumnsType = [
   { dataIndex: 'grade', title: '等级', width: 90 },
   { dataIndex: 'publicStatus', title: '公示状态', width: 100 },
   { dataIndex: 'publicTime', title: '公示时间', width: 180 },
-  { dataIndex: 'employeeConfirmed', title: '确认', width: 90 },
+  { dataIndex: 'employeeConfirmed', title: '结果确认', width: 120 },
   { dataIndex: 'action', fixed: 'right', title: '操作', width: 180 },
 ];
 
@@ -325,6 +327,12 @@ onMounted(async () => {
     title="结果与复盘"
     description="仅统计当前授权范围内的考核。公布结果和调整等级由绩效管理员处理。"
   >
+    <Alert
+      class="mb-3"
+      message="评分完成后可先公示，员工未确认不影响公示。调整等级后，员工需在公示后确认最新结果，可从「我的绩效」或单人考核详情确认。"
+      show-icon
+      type="info"
+    />
     <div class="filter-bar">
       <DatePicker
         v-model:value="periodKey"
@@ -429,7 +437,7 @@ onMounted(async () => {
         </template>
         <template v-else-if="column.dataIndex === 'employeeConfirmed'">
           <Tag :color="record.employeeConfirmed ? 'green' : 'orange'">
-            {{ record.employeeConfirmed ? '已确认' : '待确认' }}
+            {{ resultConfirmationText(record) }}
           </Tag>
         </template>
         <template v-else-if="column.dataIndex === 'action'">
