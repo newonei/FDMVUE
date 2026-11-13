@@ -400,6 +400,58 @@ describe('批量发泡', () => {
     expect(released).toHaveBeenCalledWith(90);
     expect(opened.value).toBe(false);
   });
+  it('同配方同颜色同规格合并为一条发泡任务，取消部分勾选后按选中的合计重算整锅', async () => {
+    api.preview.mockResolvedValueOnce({
+      ...preview(),
+      rows: preview().rows.map((item) =>
+        item.status === 'READY' ? { ...item, groupKey: 'G1' } : item,
+      ),
+      groups: [
+        {
+          groupKey: 'G1',
+          recipeCode: 'R1',
+          color: 'P',
+          boardAttrs: preview().rows[0]!.boardAttrs,
+          rowKeys: ['front', 'back', 'other'],
+          orderCount: 2,
+          boards: 15,
+          recipeBatches: 3,
+          mixPlan: {
+            mouldName: '620×910×23 / 净板2100×1360×48',
+            chargeKg: 17.2,
+            kgPerBoard: 17.2,
+            batchKg: 122.06,
+            wholeBatchBoards: 21,
+            surplusBoards: 6,
+          },
+        },
+      ],
+    });
+    await mount({ initialOrderNo: 'GD-1' });
+    await check('发泡订单 GD-2');
+    await click('预览发泡任务');
+    const merged = () =>
+      document.querySelector('[data-testid="mix-batch-groups"] tbody')!;
+    expect(merged().querySelectorAll('tr')).toHaveLength(1);
+    expect(merged().textContent).toContain('2 张订单 · 3 条明细层');
+    expect(merged().textContent).toContain('15 张');
+    expect(merged().textContent).toContain('17.2 kg');
+    expect(merged().textContent).toContain('3 锅');
+    expect(merged().textContent).toContain('21 张');
+    expect(merged().textContent).toMatch(/多出 6\s*张入库/);
+    button('下发选中的 3 项，合并为 1 条发泡任务');
+    // 只留 front(6) + other(2) = 8 张：8 × 17.2 ÷ 122.06 = 1.13 → 2 锅，可出 floor(244.12 ÷ 17.2) = 14 张
+    await check('安排 back', false);
+    expect(merged().textContent).toContain('8 张');
+    expect(merged().textContent).toContain('2 锅');
+    expect(merged().textContent).toContain('14 张');
+    expect(merged().textContent).toMatch(/多出 6\s*张入库/);
+    await click('下发选中的 2 项，合并为 1 条发泡任务');
+    expect(api.release).toHaveBeenCalledWith(
+      expect.objectContaining({ rowKeys: ['front', 'other'] }),
+    );
+  });
+
   it('修改共同日期、人员、订单或备注会作废预览，必须重新核对', async () => {
     await mount({ initialOrderNo: 'GD-1' });
     await click('预览发泡任务');

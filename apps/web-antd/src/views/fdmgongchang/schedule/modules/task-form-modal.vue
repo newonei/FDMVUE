@@ -476,6 +476,7 @@ async function save() {
     const output: Api.Material = legacy ? { ...(props.initial?.output ?? { stage: outputStage.value }), quantity: quantity.value! }
       : { ...(sameOriginal.value && !outputEdited.value ? props.initial?.output : {}), attrs: taskOutputAttrs(outputStage.value, attrs), name: (`${outputLabel.value  } · ${  outputSummary.value}`).slice(0, 120), quantity: quantity.value!, stage: outputStage.value, unit: unit.value };
     output.recipeBatches = process.value === 'MIX' ? currentPreview.value?.recipeBatches ?? null : null;
+    output.mixPlan = process.value === 'MIX' ? currentPreview.value?.mixPlan ?? null : null;
     if (intermediate.value && selectedLayer.value) output.side = selectedLayer.value.side;
     else if (sameOriginal.value && props.initial?.output?.side) output.side = props.initial.output.side;
     const previewInputs = plannedInputs.value?.length ? plannedInputs.value : undefined;

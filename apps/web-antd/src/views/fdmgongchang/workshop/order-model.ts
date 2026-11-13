@@ -79,6 +79,24 @@ export function finishedSize(item: Api.RelatedOrderItem) {
   return dimensionTextInMm(item.size?.trim() || item.specification) || '未填写';
 }
 
+/** 发泡车间看的整锅密炼要求：几锅、哪个模具、每张入模多少、整锅能出几张；旧任务没有时为空。 */
+export function mixPlanLines(task: Api.Task): FocusField[] {
+  if (task.process !== 'MIX') return [];
+  const plan = task.output?.mixPlan;
+  const batches = Number(task.output?.recipeBatches);
+  const num = (value: unknown) => String(Number(Number(value).toFixed(3)));
+  const lines: FocusField[] = [];
+  if (batches > 0) lines.push({ label: '密炼锅数', value: `${num(batches)} 锅${Number(plan?.batchKg) > 0 ? `（每锅 ${num(plan!.batchKg)} kg）` : ''}` });
+  if (plan?.mouldName) lines.push({ label: '模具', value: plan.mouldName });
+  if (Number(plan?.chargeKg) > 0) lines.push({ label: '每张入模', value: `${num(plan!.chargeKg)} kg` });
+  else if (Number(plan?.kgPerBoard) > 0) lines.push({ label: '每张用料', value: `约 ${num(plan!.kgPerBoard)} kg（没有对应模具档案）` });
+  if (Number(plan?.wholeBatchBoards) > 0) {
+    const surplus = Number(plan!.surplusBoards ?? 0);
+    lines.push({ label: '整锅可出', value: `${num(plan!.wholeBatchBoards)} 张${surplus > 0 ? `，多出 ${num(surplus)} 张报工后入库` : ''}` });
+  }
+  return lines;
+}
+
 export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusField[] {
   const labels = makeLabels(options);
   const attrs = task.output?.attrs ?? {};

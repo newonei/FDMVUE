@@ -1,3 +1,4 @@
+import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { factoryHeaders } from '#/api/fdmgongchang/factory';
@@ -9,8 +10,23 @@ export interface MixBatchRequest {
   workerIds: number[];
   note?: string;
 }
+/** 同配方、同颜色、同板材规格合并成的发泡批次，下发时一个批次一条任务。 */
+export interface MixBatchGroup {
+  groupKey: string;
+  recipeCode?: null | string;
+  color?: null | string;
+  boardName?: null | string;
+  boardAttrs?: FdmgongchangStageStockApi.ItemAttrs | null;
+  rowKeys: string[];
+  orderCount: number;
+  boards: number;
+  recipeBatches?: null | number;
+  mixPlan?: FdmgongchangScheduleApi.MixPlan | null;
+  basis?: null | string;
+}
 export interface MixBatchRow {
   rowKey: string;
+  groupKey?: null | string;
   orderId: number;
   orderNo: string;
   itemId: number;
@@ -31,6 +47,7 @@ export interface MixBatchRow {
 export interface MixBatchPreview {
   previewKey: string;
   rows: MixBatchRow[];
+  groups?: MixBatchGroup[];
   totalBoards: number;
   readyCount: number;
   warnings: string[];
