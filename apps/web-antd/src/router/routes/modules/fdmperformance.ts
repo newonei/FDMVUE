@@ -69,7 +69,11 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'batches',
         name: 'FdmPerformanceBatches',
-        meta: { title: '考核管理', icon: 'lucide:calendar-check' },
+        meta: {
+          title: '考核管理',
+          icon: 'lucide:calendar-check',
+          keepAlive: true,
+        },
         component: () => import('#/views/fdmperformance/batches/index.vue'),
       },
       {

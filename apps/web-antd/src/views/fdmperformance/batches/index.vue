@@ -2,9 +2,23 @@
 import type { TableColumnsType } from 'ant-design-vue';
 import type { JixiaoApi } from '#/api/fdmperformance';
 import type { SystemDeptApi } from '#/api/system/dept';
-import { computed, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { downloadFileFromBlobPart, handleTree } from '@vben/utils';
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
+import { onBeforeRouteLeave, useRouter } from 'vue-router';
+import {
+  downloadFileFromBlobPart,
+  getLayoutScrollElement,
+  handleTree,
+} from '@vben/utils';
 import {
   Alert,
   Button,
@@ -27,9 +41,11 @@ import {
   deleteInstance,
   exportInstanceExcel,
   getInstancePage,
+  getPerformanceAccess,
   remindInstances,
 } from '#/api/fdmperformance';
 import { getSimpleDeptList } from '#/api/system/dept';
+import { usePerformanceManagementStore } from '#/store/performance-management';
 import { usePerformanceAccess } from '../shared/access';
 import {
   INSTANCE_STATUS_MAP,
@@ -47,10 +63,16 @@ import {
 } from '../shared/workspace';
 import TemplateManager from '../templates/components/TemplateManager.vue';
 import HrReviewQueue from './components/HrReviewQueue.vue';
+import {
+  defaultManagementQuery,
+  restoreManagementListState,
+} from './list-state';
 
 defineOptions({ name: 'FdmPerformanceBatches' });
 const router = useRouter();
-const { access, accessLoading, loadAccess } = usePerformanceAccess();
+const listState = usePerformanceManagementStore();
+const shell = ref<InstanceType<typeof PerformanceShell>>();
+const { access, accessLoading } = usePerformanceAccess();
 const loading = ref(false);
 const loadError = ref(false);
 const exporting = ref(false);
@@ -70,29 +92,34 @@ const deleteTarget = ref<JixiaoApi.Instance>();
 const deleteReason = ref('');
 const deleteLoading = ref(false);
 let requestId = 0;
-const query = reactive<JixiaoApi.InstancePageParams>({
-  pageNo: 1,
-  pageSize: 10,
-  scope: 'INITIATED',
-  periodKey: undefined,
-  status: undefined,
-  userName: undefined,
-  creatorUserId: undefined,
-  deptId: undefined,
-});
+let lifecycleId = 0;
+let initialized = false;
+let activatedOnce = false;
+let pageActive = false;
+let stateOwner = listState.identity;
+let scrollTop = 0;
+const query = reactive(defaultManagementQuery());
+const appliedQuery = reactive(defaultManagementQuery());
+const rememberedCreators = ref<{ label: string; value: number }[]>([]);
 const scopes = computed(() => managementScopes(access.value));
 const creatorOptions = computed(() => [
-  ...new Map(
-    rows.value
+  ...new Map([
+    ...rememberedCreators.value.map(
+      (option) => [option.value, option] as const,
+    ),
+    ...rows.value
       .filter((row) => row.creatorUserId)
-      .map((row) => [
-        row.creatorUserId,
-        {
-          label: row.creatorUserName || `用户 ${row.creatorUserId}`,
-          value: row.creatorUserId,
-        },
-      ]),
-  ).values(),
+      .map(
+        (row) =>
+          [
+            row.creatorUserId,
+            {
+              label: row.creatorUserName || `用户 ${row.creatorUserId}`,
+              value: row.creatorUserId!,
+            },
+          ] as const,
+      ),
+  ]).values(),
 ]);
 const selectedRows = computed(() =>
   rows.value.filter((row) => selectedIds.value.includes(row.id!)),
@@ -125,15 +152,27 @@ async function load() {
   loading.value = true;
   loadError.value = false;
   selectedIds.value = [];
-  rows.value = [];
+  const creatorIds = [query.creatorUserId, appliedQuery.creatorUserId];
+  rememberedCreators.value = creatorOptions.value.filter((option) =>
+    creatorIds.includes(option.value),
+  );
   try {
-    const result = await getInstancePage({ ...query });
+    const params = { ...appliedQuery };
+    let result = await getInstancePage(params);
     if (current !== requestId) return;
+    const lastPage = Math.max(1, Math.ceil(result.total / params.pageSize));
+    if (params.pageNo > lastPage) {
+      result = await getInstancePage({ ...params, pageNo: lastPage });
+      if (current !== requestId) return;
+      appliedQuery.pageNo = lastPage;
+      query.pageNo = lastPage;
+    }
     rows.value = result.list;
     total.value = result.total;
   } catch {
     if (current === requestId) {
       loadError.value = true;
+      rows.value = [];
       total.value = 0;
     }
   } finally {
@@ -142,14 +181,36 @@ async function load() {
 }
 function search() {
   query.pageNo = 1;
+  Object.assign(appliedQuery, query);
+  scrollTop = 0;
+  void load();
+}
+function resetSearch() {
+  const defaults = defaultManagementQuery(
+    defaultManagementScope(access.value!),
+  );
+  Object.assign(query, defaults);
+  Object.assign(appliedQuery, defaults);
+  rememberedCreators.value = [];
+  scrollTop = 0;
+  listState.clear();
+  void load();
+}
+function changePage(pagination: { current?: number; pageSize?: number }) {
+  if (accessLoading.value) return;
+  const pageSize = pagination.pageSize || 10;
+  appliedQuery.pageNo =
+    pageSize !== appliedQuery.pageSize ? 1 : pagination.current || 1;
+  appliedQuery.pageSize = pageSize;
+  query.pageNo = appliedQuery.pageNo;
+  query.pageSize = pageSize;
   void load();
 }
 function changeScope(scope: string | number) {
+  if (accessLoading.value) return;
   if (!scopes.value.includes(scope as JixiaoApi.Scope)) return;
   query.scope = scope as JixiaoApi.Scope;
   query.creatorUserId = undefined;
-  query.userName = undefined;
-  total.value = 0;
   search();
 }
 function openInstance(row: JixiaoApi.Instance) {
@@ -172,7 +233,7 @@ async function exportRows() {
   if (!access.value?.canExport) return;
   exporting.value = true;
   try {
-    const data = await exportInstanceExcel({ ...query });
+    const data = await exportInstanceExcel({ ...appliedQuery });
     downloadFileFromBlobPart({ fileName: '绩效考核结果.xlsx', source: data });
   } finally {
     exporting.value = false;
@@ -224,26 +285,154 @@ async function confirmDelete() {
   }
 }
 async function initialize() {
-  const capability = await loadAccess();
-  query.scope = defaultManagementScope(capability);
-  await Promise.all([load(), loadDepartments()]);
+  const current = ++lifecycleId;
+  const owner = listState.identity;
+  const saved = initialized ? snapshot() : listState.restore();
+  initialized = false;
+  accessLoading.value = true;
+  loading.value = true;
+  selectedIds.value = [];
+  try {
+    const capability = await getPerformanceAccess();
+    if (current !== lifecycleId || owner !== listState.identity) return;
+    stateOwner = owner;
+    access.value = capability;
+    if (!capability.canManage) {
+      rows.value = [];
+      total.value = 0;
+      listState.clear();
+      return;
+    }
+    const restored = restoreManagementListState(saved, capability);
+    Object.assign(query, defaultManagementQuery(), restored.draftQuery);
+    Object.assign(
+      appliedQuery,
+      defaultManagementQuery(),
+      restored.appliedQuery,
+    );
+    activeTab.value = restored.activeTab;
+    rememberedCreators.value = restored.creatorOptions;
+    scrollTop = restored.scrollTop;
+    initialized = true;
+    await Promise.all([load(), loadDepartments()]);
+    if (current !== lifecycleId || !pageActive) return;
+    persistState();
+    await nextTick();
+    // The layout resets scroll after navigation; restore after its next render.
+    requestAnimationFrame(() => {
+      if (current === lifecycleId && pageActive) {
+        getScrollElement()?.scrollTo({ top: restored.scrollTop });
+      }
+    });
+  } catch {
+    if (current === lifecycleId) {
+      loadError.value = true;
+      rows.value = [];
+      total.value = 0;
+    }
+  } finally {
+    if (current === lifecycleId) {
+      accessLoading.value = false;
+      loading.value = false;
+    }
+  }
 }
 async function loadDepartments() {
   if (!access.value?.canManage) return;
+  const current = lifecycleId;
   deptLoading.value = true;
   try {
-    deptTreeOptions.value = handleTree(await getSimpleDeptList());
+    const departments = await getSimpleDeptList();
+    if (current === lifecycleId)
+      deptTreeOptions.value = handleTree(departments);
   } catch {
-    message.warning('部门列表加载失败，请刷新后重试');
+    if (current === lifecycleId)
+      message.warning('部门列表加载失败，请刷新后重试');
   } finally {
-    deptLoading.value = false;
+    if (current === lifecycleId) deptLoading.value = false;
   }
 }
-onMounted(initialize);
+function snapshot() {
+  const creatorIds = [query.creatorUserId, appliedQuery.creatorUserId];
+  return {
+    activeTab: activeTab.value,
+    appliedQuery: { ...appliedQuery },
+    creatorOptions: creatorOptions.value.filter((option) =>
+      creatorIds.includes(option.value),
+    ),
+    draftQuery: { ...query },
+    scrollTop,
+  };
+}
+function persistState() {
+  if (initialized && pageActive && access.value?.canManage) {
+    listState.save(snapshot(), stateOwner);
+  }
+}
+function rememberScroll(event: Event) {
+  const element = getScrollElement();
+  if (!pageActive || loading.value || event.target !== element) return;
+  scrollTop = element?.scrollTop || 0;
+  persistState();
+}
+function getScrollElement() {
+  const root = shell.value?.$el as HTMLElement | undefined;
+  let element =
+    root?.querySelector<HTMLElement>('.performance-shell')?.parentElement;
+  while (element) {
+    if (['auto', 'scroll'].includes(getComputedStyle(element).overflowY))
+      return element;
+    element = element.parentElement;
+  }
+  return getLayoutScrollElement();
+}
+watch([query, appliedQuery, activeTab], persistState, { deep: true });
+watch(
+  () => listState.identity,
+  () => {
+    initialized = false;
+    ++requestId;
+    ++lifecycleId;
+    rows.value = [];
+    total.value = 0;
+    deptTreeOptions.value = [];
+    access.value = undefined;
+    if (pageActive && listState.identity) void initialize();
+  },
+  { flush: 'sync' },
+);
+onBeforeRouteLeave(persistState);
+onMounted(() => {
+  pageActive = true;
+  document.addEventListener('scroll', rememberScroll, true);
+  window.addEventListener('pagehide', persistState);
+  void initialize();
+});
+onActivated(() => {
+  pageActive = true;
+  if (activatedOnce) void initialize();
+  activatedOnce = true;
+});
+onDeactivated(() => {
+  pageActive = false;
+  ++requestId;
+  ++lifecycleId;
+  loading.value = false;
+  cancelOpen.value = false;
+  deleteOpen.value = false;
+});
+onBeforeUnmount(() => {
+  pageActive = false;
+  ++requestId;
+  ++lifecycleId;
+  document.removeEventListener('scroll', rememberScroll, true);
+  window.removeEventListener('pagehide', persistState);
+});
 </script>
 
 <template>
   <PerformanceShell
+    ref="shell"
     title="考核管理"
     description="管理自己发起的考核；分管主管发起的记录可监督查看。只有当前获准的任务和管理操作才会显示。"
   >
@@ -262,13 +451,23 @@ onMounted(initialize);
       ></template
     >
     <Alert
+      v-if="loadError && !access"
+      type="error"
+      message="考核管理加载失败，请重试。"
+      show-icon
+    >
+      <template #action>
+        <Button size="small" @click="initialize">重试</Button>
+      </template>
+    </Alert>
+    <Alert
       v-if="!accessLoading && access && !access.canManage"
       type="info"
       message="当前岗位仅能查看本人的绩效，请前往我的绩效。"
       show-icon
     />
     <Tabs v-if="access?.canManage" v-model:active-key="activeTab">
-      <Tabs.TabPane key="instances" tab="考核记录">
+      <Tabs.TabPane key="instances" tab="考核记录" :disabled="accessLoading">
         <div class="management-panel">
           <Alert
             v-if="loadError"
@@ -285,6 +484,7 @@ onMounted(initialize);
           <div class="filter-bar">
             <TreeSelect
               v-model:value="query.deptId"
+              :disabled="accessLoading"
               :tree-data="deptTreeOptions"
               :field-names="{ children: 'children', label: 'name', value: 'id' }"
               :loading="deptLoading"
@@ -295,6 +495,7 @@ onMounted(initialize);
             />
             <DatePicker
               v-model:value="query.periodKey"
+              :disabled="accessLoading"
               picker="month"
               value-format="YYYY-MM"
               placeholder="考核月份"
@@ -302,12 +503,14 @@ onMounted(initialize);
             />
             <Input
               v-model:value="query.userName"
+              :disabled="accessLoading"
               placeholder="搜索被考核人"
               allow-clear
               @press-enter="search"
             />
             <Select
               v-model:value="query.status"
+              :disabled="accessLoading"
               :options="[
                 { label: '进行中', value: 1 },
                 { label: '已完成', value: 2 },
@@ -319,18 +522,20 @@ onMounted(initialize);
             <Select
               v-if="query.scope !== 'INITIATED'"
               v-model:value="query.creatorUserId"
+              :disabled="accessLoading"
               :options="creatorOptions"
               placeholder="本页发起人"
               allow-clear
               show-search
               option-filter-prop="label"
             />
-            <Button type="primary" @click="search">查询</Button>
+            <Button type="primary" :disabled="accessLoading" @click="search">查询</Button>
+            <Button :disabled="accessLoading" @click="resetSearch">重置</Button>
           </div>
           <div class="table-toolbar">
             <span
               >共 {{ total }} 条 ·
-              {{ SCOPE_LABELS[query.scope || 'VISIBLE'] }}</span
+              {{ SCOPE_LABELS[appliedQuery.scope || 'VISIBLE'] }}</span
             ><Space
               ><Popconfirm
                 v-if="canRemindSelected"
@@ -354,22 +559,17 @@ onMounted(initialize);
             :loading="loading"
             :row-selection="rowSelection"
             :pagination="{
-              current: query.pageNo,
-              pageSize: query.pageSize,
+              current: appliedQuery.pageNo,
+              pageSize: appliedQuery.pageSize,
               total,
+              disabled: accessLoading,
               showSizeChanger: true,
               pageSizeOptions: PERFORMANCE_PAGE_SIZE_OPTIONS,
             }"
             :scroll="{ x: 1050 }"
             row-key="id"
             size="small"
-            @change="
-              (pagination) => {
-                query.pageNo = pagination.current || 1;
-                query.pageSize = pagination.pageSize || 10;
-                load();
-              }
-            "
+            @change="changePage"
           >
             <template #emptyText
               ><Empty
@@ -454,13 +654,14 @@ onMounted(initialize);
           </Table>
         </div>
       </Tabs.TabPane>
-      <Tabs.TabPane v-if="access.canConfigure" key="hr-review" tab="待人事审核"
-        ><HrReviewQueue
+      <Tabs.TabPane v-if="access.canConfigure" key="hr-review" tab="待人事审核" :disabled="accessLoading"
+        ><HrReviewQueue :active="activeTab === 'hr-review'"
       /></Tabs.TabPane>
       <Tabs.TabPane
         v-if="access.canManageTemplate"
         key="templates"
         tab="考评表"
+        :disabled="accessLoading"
         ><div class="management-panel"><TemplateManager /></div
       ></Tabs.TabPane>
     </Tabs>

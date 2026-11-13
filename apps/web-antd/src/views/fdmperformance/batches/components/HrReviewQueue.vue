@@ -3,7 +3,16 @@ import type { TableColumnsType } from 'ant-design-vue';
 
 import type { JixiaoApi } from '#/api/fdmperformance';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import {
+  computed,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Button, message, Popconfirm, Space, Table, Tag } from 'ant-design-vue';
@@ -14,12 +23,19 @@ import { PERFORMANCE_PAGE_SIZE_OPTIONS } from '../../shared/constants';
 
 defineOptions({ name: 'FdmPerformanceHrReviewQueue' });
 
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
+  active: true,
+});
+
 const router = useRouter();
 const loading = ref(false);
 const submitting = ref(false);
 const rows = ref<JixiaoApi.HrReviewPendingItem[]>([]);
 const total = ref(0);
 const selectedInstanceIds = ref<number[]>([]);
+let requestId = 0;
+let activatedOnce = false;
+let mounted = false;
 const query = reactive<JixiaoApi.HrReviewPendingPageParams>({
   pageNo: 1,
   pageSize: 10,
@@ -53,13 +69,31 @@ const rowSelection = computed(() => ({
 }));
 
 async function load() {
+  const current = ++requestId;
   loading.value = true;
+  selectedInstanceIds.value = [];
   try {
-    const data = await getHrReviewPendingPage(query);
+    let data = await getHrReviewPendingPage({ ...query });
+    if (current !== requestId) return;
+    const lastPage = Math.max(
+      1,
+      Math.ceil(data.total / (query.pageSize || 10)),
+    );
+    if ((query.pageNo || 1) > lastPage) {
+      query.pageNo = lastPage;
+      data = await getHrReviewPendingPage({ ...query });
+      if (current !== requestId) return;
+    }
     rows.value = data.list;
     total.value = data.total;
+  } catch {
+    if (current === requestId) {
+      rows.value = [];
+      total.value = 0;
+      message.warning('待审核列表加载失败，请刷新后重试');
+    }
   } finally {
-    loading.value = false;
+    if (current === requestId) loading.value = false;
   }
 }
 
@@ -97,7 +131,26 @@ function changePage(pagination: any) {
   void load();
 }
 
-onMounted(load);
+watch(
+  () => props.active,
+  (active) => {
+    if (active && mounted) void load();
+  },
+);
+onMounted(() => {
+  mounted = true;
+  if (props.active) void load();
+});
+onActivated(() => {
+  if (activatedOnce && props.active) void load();
+  activatedOnce = true;
+});
+onDeactivated(() => {
+  ++requestId;
+});
+onBeforeUnmount(() => {
+  ++requestId;
+});
 </script>
 
 <template>
