@@ -52,10 +52,36 @@ describe('采购下单资料', () => {
       }),
     ).toEqual({
       order: 'CG20251014224052',
+      title: 'CG20251014224052',
       supplier: '温州供应商',
       supplierId: 'supplier-1',
       contract: '真实合同标题',
     });
+  });
+  it('列表和详情优先显示手填主题，同时保留采购单号', () => {
+    const labels = purchaseRowLabels({
+      id: 'po',
+      orderCode: 'CG20261112001',
+      details: { subject: '  11月瑜伽垫备货  ' },
+      record: { code: 'CG20261112001', supplierName: '供应商' },
+    });
+    expect(labels.title).toBe('11月瑜伽垫备货');
+    expect(labels.order).toBe('CG20261112001');
+  });
+  it('兼容历史单主题位置，空主题时回退到单号', () => {
+    expect(
+      purchaseRowLabels({
+        id: 'old',
+        record: { code: 'CG-OLD', subject: '历史采购主题' },
+      }).title,
+    ).toBe('历史采购主题');
+    expect(
+      purchaseRowLabels({
+        id: 'old',
+        details: { subject: ' ' },
+        record: { code: 'CG-OLD' },
+      }).title,
+    ).toBe('CG-OLD');
   });
   it('空名称不会生成空蓝色合同链接，也不把采购单号当合同编号', () => {
     expect(

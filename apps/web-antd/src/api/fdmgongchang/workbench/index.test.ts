@@ -2,7 +2,13 @@ import type { FdmgongchangStageStockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { claimWorkbenchTask, getWorkbench, getWorkbenchStock } from './index';
+import {
+  batchReportWorkbenchTasks,
+  claimWorkbenchTask,
+  getWorkbench,
+  getWorkbenchBatchOptions,
+  getWorkbenchStock,
+} from './index';
 
 const requestMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('#/api/request', () => ({ requestClient: requestMocks }));
@@ -56,6 +62,40 @@ describe('workshop API contract', () => {
       {
         headers: { 'factory-id': '1' },
         params: { id: 32 },
+      },
+    );
+  });
+
+  it('sends batch rows, concurrency totals and request identity with the factory header', async () => {
+    const payload = {
+      process: 'FOLD',
+      requestId: 'd647f7da-75d1-4dd1-81c1-c71b388b5451',
+      rows: [
+        {
+          taskId: 31,
+          goodQuantity: 10,
+          defectQuantity: 2,
+          expectedActualQuantity: 5,
+          expectedDefectQuantity: 0,
+          foldingType: '八折',
+        },
+      ],
+    };
+    await batchReportWorkbenchTasks(payload);
+    expect(requestMocks.post).toHaveBeenCalledWith(
+      '/fdmgongchang/workbench/task/batch-report',
+      payload,
+      { headers: { 'factory-id': '1' } },
+    );
+  });
+
+  it('loads task-specific foaming output board choices without requesting stock balance', async () => {
+    await getWorkbenchBatchOptions('MIX', 31);
+    expect(requestMocks.get).toHaveBeenCalledWith(
+      '/fdmgongchang/workbench/task/batch-options',
+      {
+        headers: { 'factory-id': '1' },
+        params: { process: 'MIX', taskId: 31 },
       },
     );
   });

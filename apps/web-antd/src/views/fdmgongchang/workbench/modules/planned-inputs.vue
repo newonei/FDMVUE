@@ -4,7 +4,7 @@ import type { Labels } from '../../stage-stock/model';
 import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
-import { TASK_STAGE_LABELS } from '../../shared/schedule';
+import { materialNote, TASK_STAGE_LABELS } from '../../shared/schedule';
 import { attrSummary, formatQty, toNumber } from '../../stage-stock/model';
 
 defineProps<{
@@ -18,6 +18,8 @@ const nameOf = (material: FdmgongchangScheduleApi.Material, labels: Labels) => {
   return summary ? (material.name?.match(/^(正面|反面)\s/)?.[0] || '') + summary
     : dimensionTextInMm(material.name) || material.code || material.productCode || '待确认物料';
 };
+
+const noteOf = (material: FdmgongchangScheduleApi.Material) => dimensionTextInMm(materialNote(material.note, material.stage));
 </script>
 
 <template>
@@ -30,7 +32,7 @@ const nameOf = (material: FdmgongchangScheduleApi.Material, labels: Labels) => {
           <span>{{ TASK_STAGE_LABELS[material.stage] || material.stage }} · {{ nameOf(material, labels) }}</span>
           <b class="shrink-0 tabular-nums">{{ toNumber(material.quantity) === undefined ? '数量待确认' : `${formatQty(material.quantity)} ${material.unit || ''}` }}</b>
         </div>
-        <span v-if="material.note" class="text-xs text-muted-foreground">{{ dimensionTextInMm(material.note) }}</span>
+        <span v-if="material.note" class="text-xs text-muted-foreground">{{ noteOf(material) }}</span>
       </li>
     </ul>
     <span v-else class="text-xs text-muted-foreground">任务未单独填写预计领料，请参考下面的推荐批次，并按实际领取登记。</span>

@@ -12,7 +12,6 @@ import { buildUUID } from '@vben/utils';
 import { Button, message, Modal, Result, Spin } from 'ant-design-vue';
 
 import {
-  claimWorkbenchTask,
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
@@ -105,17 +104,6 @@ async function load() {
   }
 }
 onMounted(load);
-
-async function claimTask(task: FdmgongchangScheduleApi.Task) {
-  submitting.value = true;
-  try {
-    await claimWorkbenchTask(task.id);
-    message.success('任务已领取，可以领料开工');
-    await reloadAfterSave();
-  } finally {
-    submitting.value = false;
-  }
-}
 
 async function changeFactory(id: number) {
   factory.select(id);
@@ -505,8 +493,6 @@ function back() {
           :factory-id="factory.factoryId.value"
           @change-factory="changeFactory"
           @refresh="load"
-          @claim-task="claimTask"
-          @start-task="startTask"
           @start-actual="startActual"
           @report-order="continueOrder"
           @supplement-order="(order) => continueOrder(order, true)"

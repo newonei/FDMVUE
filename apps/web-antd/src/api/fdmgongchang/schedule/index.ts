@@ -162,6 +162,8 @@ export namespace FdmgongchangScheduleApi {
     >
   > {
     customerName?: null | string;
+    /** 订单采购资料的产品克重，保留原单位。 */
+    weight?: null | string;
     itemId: number;
     orderId: number;
     orderNo: string;

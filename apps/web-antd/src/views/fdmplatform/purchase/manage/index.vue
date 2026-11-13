@@ -1499,7 +1499,7 @@ watch(financeType, (value, previous) => {
           }"
           :columns="[
             { title: '操作/状态', key: 'flags', width: 130 },
-            { title: '采购单 / 供应商', key: 'supplier', width: 250 },
+            { title: '采购主题 / 供应商', key: 'supplier', width: 280 },
             { title: '关联合同 / 客户', key: 'contract', width: 200 },
             { title: '采购日期', key: 'date', width: 110 },
             { title: '采购金额', key: 'amount', width: 140, align: 'right' },
@@ -1592,7 +1592,7 @@ watch(financeType, (value, previous) => {
                   class="order-record-link"
                   @click="openRow(record as DocumentRow, 'details', $event)"
                 >
-                  {{ purchaseRowLabels(record as ProcurementOrderRow).order }}
+                  {{ purchaseRowLabels(record as ProcurementOrderRow).title }}
                 </button>
                 <ProcurementStatusBadge
                   :status="String(record.record.status ?? '')"
@@ -1600,6 +1600,17 @@ watch(financeType, (value, previous) => {
                 <AiRiskTag
                   :level="riskLevels[riskDocId(record as DocumentRow)]"
                 />
+              </span>
+              <span
+                v-if="
+                  purchaseRowLabels(record as ProcurementOrderRow).title !==
+                  purchaseRowLabels(record as ProcurementOrderRow).order
+                "
+                class="procurement-muted order-number"
+              >
+                单号：{{
+                  purchaseRowLabels(record as ProcurementOrderRow).order
+                }}
               </span>
               <RelatedLink
                 class="procurement-muted"
@@ -1779,8 +1790,8 @@ watch(financeType, (value, previous) => {
       <template #title>
         <div v-if="view" class="order-title">
           <Tag color="blue">采购单</Tag>
-          <span class="order-title-code">{{
-            purchaseRowLabels({ ...view, record: view.order }).order
+          <span class="order-title-text">{{
+            purchaseRowLabels({ ...view, record: view.order }).title
           }}</span>
           <ProcurementStatusBadge :status="String(view.order.status ?? '')" />
           <Button
@@ -1935,6 +1946,8 @@ watch(financeType, (value, previous) => {
           <div class="order-main">
             <section class="order-info">
               <dl>
+                <dt>采购主题</dt>
+                <dd>{{ view.details.subject || '未填写' }}</dd>
                 <dt>供应商</dt>
                 <dd>
                   {{
@@ -2382,9 +2395,11 @@ watch(financeType, (value, previous) => {
   align-items: center;
 }
 
-.order-title-code {
+.order-title-text {
+  min-width: 0;
   font-size: 16px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .order-layout {
@@ -2516,7 +2531,6 @@ watch(financeType, (value, previous) => {
 .order-record-link {
   max-width: 100%;
   padding: 0;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-weight: 600;
   color: hsl(var(--primary));
   text-align: left;
@@ -2531,6 +2545,12 @@ watch(financeType, (value, previous) => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.order-number {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .order-ellipsis {

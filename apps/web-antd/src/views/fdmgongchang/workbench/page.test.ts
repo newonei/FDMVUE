@@ -15,8 +15,11 @@ const mocks = vi.hoisted(() => ({
   mates: vi.fn(),
   create: vi.fn(),
   claim: vi.fn(),
+  batchReport: vi.fn(),
+  batchOptions: vi.fn(),
   issue: vi.fn(),
   prepare: vi.fn(),
+  prepareStock: vi.fn(),
   pickList: vi.fn(),
   report: vi.fn(),
   reportOrder: vi.fn(),
@@ -47,6 +50,8 @@ vi.mock('#/components/upload/image-upload.vue', async () => {
   };
 });
 vi.mock('#/api/fdmgongchang/workbench', () => ({
+  batchReportWorkbenchTasks: mocks.batchReport,
+  getWorkbenchBatchOptions: mocks.batchOptions,
   claimWorkbenchTask: mocks.claim,
   createWorkbenchOrder: mocks.create,
   issueWorkbenchTask: mocks.issue,
@@ -59,6 +64,7 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchPickList: mocks.pickList,
   matchWorkbenchWage: mocks.wage,
   prepareWorkbenchTask: mocks.prepare,
+  prepareWorkbenchTaskStock: mocks.prepareStock,
   reportWorkbenchOrder: mocks.reportOrder,
   reportWorkbenchTask: mocks.report,
   TASK_REPORTED_TODAY: 1_215_024_000,
@@ -225,10 +231,13 @@ describe('workbench page', () => {
     mocks.options.mockResolvedValue(options);
     mocks.create.mockResolvedValue(7);
     mocks.claim.mockResolvedValue(true);
+    mocks.batchReport.mockResolvedValue({ reported: 1, orderIds: [10], warnings: [] });
+    mocks.batchOptions.mockResolvedValue({ boards: [{ itemCode: 'BC-1', label: '紫色板材', attrs: board.item }], defaultBoardItemCode: 'BC-1' });
     mocks.issue.mockResolvedValue(5);
     mocks.report.mockResolvedValue(5);
     mocks.pickList.mockResolvedValue([prepare]);
     mocks.prepare.mockResolvedValue(prepare);
+    mocks.prepareStock.mockResolvedValue(prepare);
     mocks.stock.mockResolvedValue({ list: [board], total: 1 });
     mocks.order.mockResolvedValue(order);
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
@@ -249,212 +258,154 @@ describe('workbench page', () => {
     ],
   });
 
-  it('shows the fixed workshop queue including other workers and upstream waiting tasks without granting their actions', async () => {
-    mocks.my.mockResolvedValue(workshop());
+  const expandOrder = async (orderNo: string) => {
+    const row = [...document.querySelectorAll<HTMLElement>('[data-order-key]')].find((row) => row.dataset.orderKey === orderNo)!;
+    [...row.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('展开订单'))!.click();
+    await flush();
+  };
+  const selectTask = async (id: number) => {
+    document.querySelector<HTMLInputElement>(`[data-task-id="${id}"] input[type="checkbox"]`)!.click();
+    await flush();
+  };
+
+  it('groups all workshop tasks by order and expands tasks without a claim step', async () => {
+    const value = workshop();
+    value.workshopTasks!.push({ ...my.tasks[0]!, id: 39 });
+    mocks.my.mockResolvedValue(value);
     await mount('SLICE');
     expect(mocks.my).toHaveBeenCalledExactlyOnceWith('SLICE');
     expect(document.querySelector('h1')?.textContent).toBe('开片车间');
-    expect(document.querySelector('.workshop-task-table table')).not.toBeNull();
-    expect(document.querySelector('.workshop-task-table article')).toBeNull();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(4);
-    expect(document.querySelector('[data-task-id="33"]')?.textContent).toContain('上道「发泡」今天还没报工');
-    const other = document.querySelector('[data-task-id="34"]')!;
-    expect(other.textContent).toContain('李四');
-    expect(other.textContent).toContain('由任务负责人领料、报工');
-    expect(other.querySelectorAll('[data-task-action]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(4);
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(0);
+    expect(document.querySelector('.workshop-order-table article')).toBeNull();
+    await expandOrder('HT-001');
+    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(2);
+    expect(document.querySelector('[data-task-id="31"]')).not.toBeNull();
+    expect(document.querySelector('[data-task-id="39"]')).not.toBeNull();
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent?.includes('领取任务'))).toBe(false);
     expect(document.body.textContent).not.toContain('HT-PACK');
     expect(document.body.textContent).not.toContain('HT-DONE');
-    fill('workshop-keyword', 'HT-OTHER');
-    await flush();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
-    expect(document.querySelector('[data-task-id="34"]')).not.toBeNull();
+    await expandOrder('HT-OTHER');
+    expect(document.querySelector<HTMLInputElement>('[data-task-id="34"] input[type="checkbox"]')!.disabled).toBe(false);
+    fill('workshop-keyword', 'HT-OTHER'); await flush();
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(1);
   });
 
-  it('claims an upstream-waiting task and reloads the same workshop before offering material issue', async () => {
-    const value = workshop();
-    mocks.my.mockResolvedValue(value);
-    await mount('SLICE');
-    const claimed = { ...my.hall![1]!, status: 'CLAIMED' as const, workerIds: '2', workerNames: '张三' };
-    mocks.my.mockResolvedValue({
-      ...value, tasks: [...my.tasks, claimed], hall: [my.hall![0]!],
-      workshopTasks: value.workshopTasks!.map((task) => task.id === claimed.id ? claimed : task),
+  it('submits selected tasks and independent good/defect quantities in one call without claiming or issuing', async () => {
+    const task = { ...my.hall![1]!, actualQuantity: 10, defectQuantity: 2 };
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
+    await mount('SLICE'); await expandOrder('HT-003');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-003-33')!.disabled).toBe(true);
+    await selectTask(33);
+    fill('good-HT-003-33', 20); fill('defect-HT-003-33', 3); await flush();
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledExactlyOnceWith({
+      requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), process: 'SLICE', rows: [{
+        taskId: 33, goodQuantity: 20, defectQuantity: 3, expectedActualQuantity: 10, expectedDefectQuantity: 2,
+      }],
     });
-    document.querySelector<HTMLButtonElement>('[data-task-id="33"] [data-task-action="claim"]')!.click();
-    await flush();
-    expect(mocks.claim).toHaveBeenCalledExactlyOnceWith(33);
     expect(mocks.my).toHaveBeenLastCalledWith('SLICE');
-    expect(document.querySelector('[data-task-id="33"]')?.textContent).toContain('领料开工');
-    expect(mocks.issue).not.toHaveBeenCalled();
+    expect(mocks.claim).not.toHaveBeenCalled(); expect(mocks.issue).not.toHaveBeenCalled();
   });
 
-  it('shows and searches every related order in a merged foaming task', async () => {
-    const merged = { ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, relatedOrderNos: ['GC-101', 'GC-202'], covers: [{ assignmentId: 'GC:1', quantity: 100 }, { assignmentId: 'GC:2', quantity: 100 }] };
-    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
-    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], processes: [process], workshopProcess: process, workshopTasks: [merged] });
-    await mount('MIX');
-    expect(document.querySelector('h1')?.textContent).toBe('发泡车间');
-    expect(document.querySelector('[data-task-id="38"]')?.textContent).toContain('合并订单任务');
-    expect(document.querySelector('[data-task-id="38"]')?.textContent).toContain('关联订单：GC-101、GC-202');
-    fill('workshop-keyword', 'GC-202');
-    await flush();
-    expect(document.querySelector('[data-task-id="38"]')).not.toBeNull();
-    fill('workshop-keyword', 'GC-NONE');
-    await flush();
-    expect(document.querySelector('[data-task-id="38"]')).toBeNull();
+  it('refuses zero-quantity batches and allows a defect-only report', async () => {
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [my.tasks[0]!] });
+    await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('合计必须大于 0');
+    fill('defect-HT-001-31', 2); await flush(); clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ goodQuantity: 0, defectQuantity: 2 })] }));
   });
 
-  it('expands every exact related product and keeps order quantities separate from foaming quantities', async () => {
-    const first = {
-      orderId: 101, orderNo: 'GC-101', itemId: 1001, productCode: 'SKU-FIRST', productName: '紫色双色垫',
-      specification: '183×61×0.6cm TPE 紫色', size: '183×61×0.6cm', material: 'TPE', color: '紫色',
-      quantity: 800, completedQuantity: 120, unit: '条', customerName: '甲客户',
-      requiredDate: '2026-11-20', promisedDate: '2026-11-18', printing: '丝印品牌A', packaging: '纸盒', remark: '正面图案居中',
-      routeName: '双色工艺', routeSteps: 'MIX,SLICE,LAMINATE,PACK', recipeCode: 'REC-001',
-      targetMaterial: 'TPE', targetLength: 183, targetWidth: 61, targetThickness: 0.6,
-      targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetFrontColor: 'PU', targetBackColor: 'GY',
-      targetFrontThickness: 0.3, targetBackThickness: 0.3, targetConfirmedBy: '工厂主管', targetConfirmedAt: '2026-11-12 08:00:00',
-    };
-    const second = { ...first, itemId: 1002, productCode: 'SKU-SECOND', productName: '同订单另一产品', quantity: 600, completedQuantity: 50 };
-    const third = { orderId: 202, orderNo: 'GC-202', itemId: 2001, productCode: 'SKU-THIRD', productName: '另一订单产品', specification: '200×100×0.8cm', unit: '件' };
-    const merged = {
-      ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, quantity: 20, actualQuantity: 5, unit: '张',
-      output: { stage: 'BOARD', attrs: { length: 200, width: 100, thickness: 5, color: 'PU', material: 'TPE' } },
-      relatedOrderNos: ['GC-101', 'GC-202'], relatedOrderItems: [first, second, third],
-      covers: [{ assignmentId: 'GC:1001', quantity: 12 }, { assignmentId: 'GC:1002', quantity: 5 }, { assignmentId: 'GC:2001', quantity: 3 }],
-    };
-    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
-    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], processes: [process], workshopProcess: process, workshopTasks: [merged] });
-    await mount('MIX');
-    const row = document.querySelector('[data-task-id="38"]')!;
-    expect(row.textContent).toContain('SKU-FIRST');
-    expect(row.textContent).toContain('紫色双色垫');
-    expect(row.textContent).toContain('1830×610×6 mm');
-    expect(row.textContent).toContain('2000×1000×50 mm');
-    expect(row.textContent?.replaceAll(/\s/g, '')).toContain('计划20张良品5张');
-    clickButton('查看3条订单产品明细');
-    await flush();
-    const details = document.querySelector('.workshop-related-orders')!;
-    expect(details.querySelectorAll('tbody tr[data-row-key]')).toHaveLength(3);
-    const detailText = details.textContent!.replaceAll(/\s/g, '');
-    expect(detailText).toContain('订购800条已完成120条');
-    expect(detailText).toContain('订购600条已完成50条');
-    expect(detailText).toContain('SKU-THIRD');
-    expect(detailText).toContain('订购未填写件已完成未填写件');
-    expect(detailText).toContain('尚未填写生产参数');
-    expect(detailText).toContain('1830×610×6mm');
-    expect(detailText).toContain('正面层3mm');
-    expect(detailText).toContain('已确认·工厂主管');
-    expect(detailText).toContain('印刷：丝印品牌A');
-    expect(detailText).toContain('包装：纸盒');
-    expect(detailText).toContain('发泡→开片→贴合→包装');
-    const snapshotCell = details.querySelector('tbody tr[data-row-key="101:1001"] td:nth-child(3)')!;
-    expect(snapshotCell.textContent?.match(/1830/g)).toHaveLength(1);
-    fill('workshop-keyword', 'SKU-THIRD');
-    await flush();
-    expect(document.querySelector('[data-task-id="38"]')).not.toBeNull();
-    clickButton('查看3条订单产品明细');
-    await flush();
-    expect(document.querySelectorAll('.workshop-related-orders tbody tr[data-row-key]')).toHaveLength(3);
-  });
-
-  it('keeps the order number visible when multiple covered products belong to one order', async () => {
-    const task = { ...my.tasks[0]!, relatedOrderNos: ['GC-ONE'], covers: [{ assignmentId: 'GC:1', quantity: 3 }, { assignmentId: 'GC:2', quantity: 5 }] };
-    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
-    await mount('SLICE');
-    const row = document.querySelector('[data-task-id="31"]')!;
-    expect(row.textContent).toContain('合并订单任务');
-    expect(row.textContent).toContain('关联订单：GC-ONE');
-  });
-
-  it('does not turn a legacy order number or process product hint into invented order product details', async () => {
-    const task = { ...my.tasks[0]!, product: '旧任务的工序提示', relatedOrderNos: ['GC-LEGACY'], relatedOrderItems: [] };
-    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
-    await mount('SLICE');
-    const row = document.querySelector('[data-task-id="31"]')!;
-    expect(row.textContent).toContain('未关联具体订单产品明细');
-    row.querySelector<HTMLButtonElement>('.ant-table-row-expand-icon')!.click();
-    await flush();
-    expect(document.querySelector('.workshop-related-orders')?.textContent).toContain('没有关联的工厂订单产品明细');
-    expect(document.querySelector('.workshop-related-orders')?.textContent).not.toContain('旧任务的工序提示');
-  });
-
-  it('paginates the workshop task table and returns to page one after filtering', async () => {
-    const tasks = Array.from({ length: 25 }, (_, index) => ({ ...my.tasks[0]!, id: 100 + index, contractCode: `HT-BULK-${  index}` }));
-    mocks.my.mockResolvedValue({ ...workshop(), tasks: [], hall: [], workshopTasks: tasks });
-    await mount('SLICE');
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(20);
-    document.querySelector<HTMLButtonElement>('.workshop-task-table .ant-pagination-next button')!.click();
-    await flush();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(5);
-    expect(document.querySelector('[data-task-id="124"]')).not.toBeNull();
-    fill('workshop-keyword', 'HT-BULK-24');
-    await flush();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
-    expect(document.querySelector('[data-task-id="124"]')).not.toBeNull();
-    expect(document.querySelector('.workshop-task-table .ant-pagination-item-active')?.textContent).toBe('1');
-  });
-
-  it('uses the existing material workflow and returns to the same workshop after saving', async () => {
-    const value = workshop();
+  it('reports all selected rows once and retains wage warnings after refresh', async () => {
+    const first = { ...my.tasks[0]! };
+    const second = { ...first, id: 39 };
+    const value = { ...workshop(), workshopTasks: [first, second] };
     mocks.my.mockResolvedValue(value);
-    await mount('SLICE');
-    document.querySelector<HTMLButtonElement>('[data-task-id="31"] [data-task-action="start"]')!.click();
-    await flush();
-    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(31);
-    expect(document.body.textContent).toContain('选择实际领料批次');
-    clickButton('下一步：确认领料');
-    await flush();
-    mocks.my.mockResolvedValue({ ...value, inProgress: [inProgress] });
-    clickButton('确认领料');
-    await flush();
-    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ taskId: 31, sourceStage: 'BOARD' }));
-    clickButton('看下一个活');
-    await flush();
-    expect(mocks.my).toHaveBeenLastCalledWith('SLICE');
-    expect(document.querySelector('h1')?.textContent).toBe('开片车间');
-    expect(document.body.textContent).toContain('我在本车间的在制工序单');
+    mocks.batchReport.mockResolvedValue({ reported: 2, orderIds: [10, 11], warnings: ['任务 #39 未匹配计件单价，请补充计件'] });
+    await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31); await selectTask(39);
+    fill('good-HT-001-31', 12); fill('good-HT-001-39', 20); fill('defect-HT-001-39', 2); await flush();
+    mocks.my.mockResolvedValue({ ...value, workshopTasks: [{ ...first, actualQuantity: 12 }, { ...second, actualQuantity: 20, defectQuantity: 2 }] });
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport.mock.calls[0]![0].rows).toEqual([
+      expect.objectContaining({ taskId: 31, goodQuantity: 12, defectQuantity: 0 }),
+      expect.objectContaining({ taskId: 39, goodQuantity: 20, defectQuantity: 2 }),
+    ]);
+    expect(document.querySelector('.ant-alert-warning')?.textContent).toContain('任务 #39 未匹配计件单价，请补充计件');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.disabled).toBe(true);
   });
 
-  it('makes completed history discoverable without exposing task operation buttons', async () => {
-    mocks.my.mockResolvedValue(workshop());
-    await mount('SLICE');
-    document.querySelector('#workshop-status')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
-      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    await flush();
-    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === '已报工')!.click();
-    await flush();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(2);
-    document.querySelector('#workshop-ownership')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
-      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    await flush();
-    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === '我的任务')!.click();
-    await flush();
-    expect(document.querySelectorAll('[data-task-id]')).toHaveLength(1);
-    const done = document.querySelector('[data-task-id="35"]')!;
-    expect(done.textContent).toContain('HT-DONE');
-    expect(done.querySelectorAll('[data-task-action]')).toHaveLength(0);
+  it('shares merged task selection and draft across orders while reporting the task only once', async () => {
+    const merged = { ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, relatedOrderNos: ['GC-101', 'GC-202'], unit: '张',
+      covers: [{ assignmentId: 'GC:1', quantity: 100 }, { assignmentId: 'GC:2', quantity: 100 }] };
+    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [merged] });
+    await mount('MIX'); await expandOrder('GC-101'); await expandOrder('GC-202');
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(2);
+    await selectTask(38);
+    expect([...document.querySelectorAll<HTMLInputElement>('[data-task-id="38"] input[type="checkbox"]')].every((input) => input.checked)).toBe(true);
+    expect(mocks.batchOptions).toHaveBeenCalledExactlyOnceWith('MIX', 38);
+    fill('good-GC-101-38', 5); await flush();
+    expect(Number(document.querySelector<HTMLInputElement>('#good-GC-202-38')!.value)).toBe(5);
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ taskId: 38, goodQuantity: 5, boardItemCode: 'BC-1' })] }));
   });
 
-  it('keeps team reporting available for an authorized leader without a personal process post', async () => {
-    const value = workshop();
-    const other = value.workshopTasks!.find((task) => task.id === 34)!;
-    mocks.my.mockResolvedValue({ ...value, processes: [], tasks: [], hall: [], teamProcesses: my.processes, teamTasks: [other] });
-    mocks.mates.mockResolvedValue([{ userId: 3, nickname: '李四', team: '开片一组' }]);
-    mocks.prepare.mockResolvedValue({ ...prepare, task: other });
+  it('keeps the same request identity after a failed batch and preserves draft quantities', async () => {
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [my.tasks[0]!] });
+    mocks.batchReport.mockRejectedValueOnce({ msg: '连接中断，请重试' });
+    await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
+    fill('good-HT-001-31', 12); await flush(); clickButton('批量报工'); await flush();
+    expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(12);
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport.mock.calls[1]![0]).toEqual(mocks.batchReport.mock.calls[0]![0]);
+  });
+
+  it('shows finished dimensions separately from the task output and scopes order details', async () => {
+    const item = { orderId: 101, orderNo: 'GC-101', itemId: 1001, productCode: 'SKU-FIRST', productName: '双色垫',
+      size: '183×61×0.6cm', quantity: 800, unit: '条', targetColorMode: 'DUAL', targetFrontColor: 'PU', targetBackColor: 'GY' };
+    const second = { ...item, itemId: 1002, productCode: 'SKU-SECOND', quantity: 600 };
+    const task = { ...my.tasks[0]!, relatedOrderNos: ['GC-101'], relatedOrderItems: [item, second],
+      output: { stage: 'SHEET', attrs: { length: 192, width: 132, thickness: 0.3, color: 'PU' } } };
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
+    await mount('SLICE'); await expandOrder('GC-101');
+    const row = document.querySelector('[data-task-id="31"]')!;
+    expect(row.textContent).toContain('1830×610×6 mm');
+    expect(row.textContent).toContain('1920×1320×3 mm');
+    expect(row.textContent).toContain('双色');
+    expect(document.querySelectorAll('.workshop-related-orders tbody tr[data-row-key]')).toHaveLength(2);
+    expect(document.querySelector('.workshop-related-orders')?.textContent).toContain('SKU-SECOND');
+  });
+
+  it('requires and submits the explicit folding type without guessing from product names', async () => {
+    const task = { ...my.tasks[0]!, process: 'FOLD', product: '八折垫' };
+    const process = { code: 'FOLD', label: '折叠', outputLabel: '已折叠成品', outputStage: 'FOLDED', outputUnit: '件', sources: ['ENGRAVED'] };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
+    await mount('FOLD'); await expandOrder('HT-001'); await selectTask(31);
+    fill('good-HT-001-31', 10); await flush(); clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('请填写本次折叠类型');
+    fill('fold-HT-001-31', '八折'); await flush(); clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ foldingType: '八折' })] }));
+  });
+
+  it('paginates orders and resets to page one after filtering', async () => {
+    const tasks = Array.from({ length: 25 }, (_, index) => ({ ...my.tasks[0]!, id: 100 + index, contractCode: `HT-BULK-${index}` }));
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: tasks });
     await mount('SLICE');
-    expect(document.body.textContent).toContain('开片车间');
-    document.querySelector<HTMLButtonElement>('[data-task-id="34"] [data-task-action="behalf"]')!.click();
-    await flush();
-    expect(mocks.mates).toHaveBeenCalledExactlyOnceWith('SLICE');
-    clickButton('下一步');
-    await flush();
-    expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(34);
-    expect(document.body.textContent).toContain('选择实际领料批次');
-    clickButton('下一步：确认领料');
-    await flush();
-    clickButton('确认领料');
-    await flush();
-    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ taskId: 34, onBehalfOf: 3 }));
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(20);
+    document.querySelector<HTMLButtonElement>('.workshop-order-table .ant-pagination-next button')!.click(); await flush();
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(5);
+    fill('workshop-keyword', 'HT-BULK-24'); await flush();
+    expect(document.querySelectorAll('[data-order-key]')).toHaveLength(1);
+    expect(document.querySelector('.workshop-order-table .ant-pagination-item-active')?.textContent).toBe('1');
+  });
+
+  it('shows packaging as no longer scheduled', async () => {
+    mocks.my.mockResolvedValue(workshop()); await mount('PACK');
+    expect(document.body.textContent).toContain('包装工序不再排任务');
+    expect(document.querySelector('.workshop-order-table')).toBeNull();
   });
 
   it('explains an inaccessible workshop using the backend qualification message', async () => {
@@ -635,6 +586,93 @@ describe('workbench page', () => {
     expect(mocks.report).not.toHaveBeenCalled();
   });
 
+  it('prepares an absent semi-finished stock for 540 pieces and only issues it after confirmation', async () => {
+    const process = { code: 'EMBOSS', label: '压花', outputStage: 'EMBOSSED', outputLabel: '压花片材', outputUnit: '片', sources: ['LAMINATED'] };
+    const attrs = { material: 'TPE', color: 'PU', colorBack: 'BL', length: 192, width: 66, thickness: 0.6 };
+    const task = { ...my.tasks[0]!, process: 'EMBOSS', quantity: 540, unit: '片', inputs: [
+      { stage: 'LAMINATED', attrs, quantity: 540, unit: '片', note: '库存里还没有这个规格，要等上道做出来' },
+      { stage: 'AUX', quantity: 1, unit: '张', name: '标签', note: '操作说明：请先核对实物' },
+    ] };
+    const stock = { ...board, id: 61, stage: 'LAMINATED', item: attrs, itemCode: 'FH-61', quantity: 0, batchNo: 'CENTER-61' };
+    const prepared = { ...prepare, task, outputAttrs: attrs, outputStage: 'EMBOSSED', outputLabel: '压花片材', sourceStage: 'LAMINATED', sourceStages: ['LAMINATED'], required: 540, picks: [] };
+    mocks.my.mockResolvedValue({ ...my, tasks: [task], processes: [process], inProgress: [] });
+    mocks.options.mockResolvedValue({ ...options, stages: [...options.stages, { code: 'LAMINATED', label: '贴合片材', unit: '片' }] });
+    mocks.prepare.mockResolvedValue(prepared);
+    mocks.stock.mockResolvedValueOnce({ list: [], total: 0 }).mockResolvedValue({ list: [stock], total: 1 });
+    mocks.prepareStock.mockResolvedValue({ ...prepared, picks: [{ stock, quantity: 540 }] });
+    await mount();
+    clickButton('领料开工'); await flush();
+    expect(mocks.prepareStock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('暂无符合当前任务条件的领料批次');
+    expect(document.body.textContent).toContain('账面不足可直接领料并记负库存，上道补报入库后冲抵。');
+    expect(document.body.textContent).not.toContain('要等上道做出来');
+    expect(document.body.textContent).toContain('操作说明：请先核对实物');
+    clickButton('按任务规格准备领料'); await flush();
+    expect(mocks.prepareStock).toHaveBeenCalledExactlyOnceWith({ taskId: 31, sourceStage: 'LAMINATED', onBehalfOf: undefined });
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-61')!.value)).toBe(540);
+    expect(document.body.textContent).toContain('领料后欠账 540 片，需补录上工序产出');
+    expect(mocks.issue).not.toHaveBeenCalled();
+    expect(mocks.report).not.toHaveBeenCalled();
+    fill('actual-pick-61', 530); await flush();
+    clickButton('下一步：确认领料'); await flush();
+    expect(mocks.issue).not.toHaveBeenCalled();
+    clickButton('确认领料'); await flush();
+    expect(mocks.issue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      taskId: 31, sourceStage: 'LAMINATED', inputs: [{ stockId: 61, quantity: 530, laminationSide: undefined }],
+    }));
+  });
+
+  it('keeps separate front and back picks when preparation returns the same laminate input stock', async () => {
+    const process = { ...my.processes[0]!, code: 'LAMINATE', label: '贴合', outputStage: 'LAMINATED', sources: ['SHEET'] };
+    const task = { ...my.tasks[0]!, process: 'LAMINATE', unit: '片' };
+    const stock = { ...board, stage: 'SHEET', quantity: 0, item: { ...board.item, thickness: 0.3 } };
+    const prepared = { ...prepare, task, outputAttrs: { ...stock.item, thickness: 0.6 }, outputStage: 'LAMINATED', sourceStage: 'SHEET', sourceStages: ['SHEET'], picks: [] };
+    mocks.my.mockResolvedValue({ ...my, tasks: [task], processes: [process], inProgress: [] });
+    mocks.prepare.mockResolvedValue(prepared);
+    mocks.stock.mockResolvedValue({ list: [stock], total: 1 });
+    mocks.prepareStock.mockResolvedValue({ ...prepared, picks: [{ stock, quantity: 400, side: 'FRONT' }, { stock, quantity: 400, side: 'BACK' }] });
+    await mount(); clickButton('领料开工'); await flush();
+    clickButton('按任务规格准备领料'); await flush();
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11-FRONT')!.value)).toBe(400);
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11-BACK')!.value)).toBe(400);
+    expect(document.body.textContent).toContain('领料后欠账 800 片，需补录上工序产出');
+    fill('actual-pick-11-FRONT', 390); await flush();
+    clickButton('下一步：确认领料'); await flush(); clickButton('确认领料'); await flush();
+    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({ inputs: [
+      { stockId: 11, quantity: 390, laminationSide: 'FRONT' },
+      { stockId: 11, quantity: 400, laminationSide: 'BACK' },
+    ] }));
+  });
+
+  it('preserves selected quantities if task stock preparation fails and supports retry', async () => {
+    mocks.prepareStock.mockRejectedValueOnce(new Error('prepare unavailable')).mockResolvedValue(prepare);
+    await mount(); clickButton('领料开工'); await flush();
+    fill('actual-pick-11', 52); await flush();
+    clickButton('按任务规格准备领料'); await flush();
+    expect(document.body.textContent).toContain('按任务规格准备领料失败，已选批次和填写数量已保留，请重试。');
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11')!.value)).toBe(52);
+    expect(mocks.issue).not.toHaveBeenCalled();
+    clickButton('按任务规格准备领料'); await flush();
+    expect(document.body.textContent).not.toContain('按任务规格准备领料失败');
+    expect(Number(document.querySelector<HTMLInputElement>('#actual-pick-11')!.value)).toBe(50);
+    expect(mocks.prepareStock).toHaveBeenCalledTimes(2);
+  });
+
+  it('prevents repeated preparations and advancing while stock preparation is pending', async () => {
+    let resolvePrepare!: (value: typeof prepare) => void;
+    mocks.prepareStock.mockImplementationOnce(() => new Promise((resolve) => { resolvePrepare = resolve; }));
+    await mount(); clickButton('领料开工'); await flush();
+    clickButton('按任务规格准备领料'); await flush();
+    const pending = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('正在准备领料'))!;
+    expect(pending.disabled).toBe(true);
+    expect([...document.querySelectorAll('button')].find((button) => button.textContent?.includes('下一步：确认领料'))!.disabled).toBe(true);
+    pending.click(); await flush();
+    expect(mocks.prepareStock).toHaveBeenCalledTimes(1);
+    resolvePrepare(prepare); await flush();
+    expect(document.body.textContent).toContain('按任务规格准备领料');
+    expect(mocks.issue).not.toHaveBeenCalled();
+  });
+
   it('keeps selected batches and actual quantities while searching other batches', async () => {
     const second = { ...board, id: 12, batchNo: 'MB261007-02', itemCode: 'BC-2', location: '板材B区', item: { ...board.item, productName: '备用开片板材' } };
     mocks.prepare.mockResolvedValue({ ...prepare, picks: [] });
@@ -728,6 +766,7 @@ describe('workbench page', () => {
     clickButton('开片·选择板材');
     await flush();
     expect(document.body.textContent).toContain('独立开片 · 多种板材分别报工');
+    expect(document.body.textContent).not.toContain('按任务规格准备领料');
     expect(mocks.stock).toHaveBeenCalledWith('BOARD', undefined);
     for (const stock of [blue, green]) {
       [...document.querySelectorAll('button')].find((button) => button.textContent?.includes(`批次 ${stock.batchNo}`))!.click();
@@ -1085,11 +1124,15 @@ describe('workbench page', () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [], teamTasks: [task], teamProcesses: my.processes });
     mocks.mates.mockResolvedValue([{ userId: 7, nickname: '李四' }]);
     mocks.prepare.mockResolvedValue({ ...prepare, task });
+    mocks.prepareStock.mockResolvedValue({ ...prepare, task });
     await mount();
     clickButton('代报');
     await flush();
     clickButton('下一步');
     await flush();
+    clickButton('按任务规格准备领料');
+    await flush();
+    expect(mocks.prepareStock).toHaveBeenCalledWith({ taskId: 42, sourceStage: 'BOARD', onBehalfOf: 7 });
     clickButton('下一步：确认领料');
     await flush();
     clickButton('模拟拍照');
@@ -1182,6 +1225,7 @@ describe('workbench page', () => {
     await mount();
     clickButton('补领材料');
     await flush();
+    expect(document.body.textContent).not.toContain('按任务规格准备领料');
     const card = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('账面 180'))!;
     card.click();
     await flush();
@@ -1237,6 +1281,7 @@ describe('workbench page', () => {
     clickButton('领料开工');
     await flush();
     expect(document.body.textContent).toContain('本次领取：原材料 → 报工产出：板材');
+    expect(document.body.textContent).not.toContain('按任务规格准备领料');
     expect(document.body.textContent).toContain('原材料 · 热塑性弹性体');
     expect(document.body.textContent).toContain('1900×1300×48 mm');
     expect(document.body.textContent).toContain('本次实际锅数');

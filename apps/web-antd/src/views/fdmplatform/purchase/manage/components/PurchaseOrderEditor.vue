@@ -566,6 +566,15 @@ async function save(submit = true) {
     <div class="entry">
       <Alert v-if="error" type="error" :message="error" show-icon />
       <section class="entry-head" aria-label="基本信息">
+        <label class="field wide">
+          <span>采购主题</span>
+          <Input
+            v-model:value="header.subject"
+            :maxlength="200"
+            show-count
+            placeholder="自行填写采购主题，例如：11月瑜伽垫备货"
+          />
+        </label>
         <label class="field">
           <span>关联合同（选填）</span>
           <Select
@@ -578,13 +587,6 @@ async function save(submit = true) {
             placeholder="不关联则为独立采购单，如原材料"
             @search="searchContracts"
             @update:value="chooseContract"
-          />
-        </label>
-        <label class="field">
-          <span>采购主题</span>
-          <Input
-            v-model:value="header.subject"
-            placeholder="不填按「合同号 供应商 采购单」生成"
           />
         </label>
         <div class="field">
