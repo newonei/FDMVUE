@@ -50,8 +50,25 @@ export namespace FdmgongchangScheduleApi {
     quantity?: Decimal | null;
     /** 发泡任务预估锅数，仅供工作台实际领料预填，不参与物料规格编码。 */
     recipeBatches?: Decimal | null;
+    /** 发泡按整锅密炼的依据：模具、入模量、整锅可出张数；旧任务没有。 */
+    mixPlan?: MixPlan | null;
     stage: string;
     unit?: null | string;
+  }
+
+  /** 整锅密炼：不足一锅也做一整锅，多出的板报工后进自由库存。 */
+  export interface MixPlan {
+    mouldProfileId?: null | number;
+    mouldName?: null | string;
+    /** 每张板入模量 kg（模具档案或按模腔体积换算）。 */
+    chargeKg?: Decimal | null;
+    basis?: null | string;
+    /** 每张板用料 kg（入模量 ÷ 出材率）。 */
+    kgPerBoard?: Decimal | null;
+    batchKg?: Decimal | null;
+    boardsPerBatch?: Decimal | null;
+    wholeBatchBoards?: Decimal | null;
+    surplusBoards?: Decimal | null;
   }
 
   export interface PlanTask {
@@ -94,6 +111,7 @@ export namespace FdmgongchangScheduleApi {
       }
     >;
     recipeBatches?: Decimal | null;
+    mixPlan?: MixPlan | null;
     sourceStages: string[];
     warnings: string[];
   }

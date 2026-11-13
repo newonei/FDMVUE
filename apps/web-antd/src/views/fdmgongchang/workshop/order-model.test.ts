@@ -3,7 +3,7 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { describe, expect, it } from 'vitest';
 
-import { finishedSize, groupWorkshopOrders, orderFocus, orderMatches, taskFocus, uniqueTasks } from './order-model';
+import { finishedSize, groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus, uniqueTasks } from './order-model';
 
 const task: Api.Task = { id: 1, scheduleId: 2, process: 'CUT', actualQuantity: 0, quantity: 10, orderCount: 0, unit: '片', workDate: '2026-11-12', status: 'OPEN',
   output: { stage: 'CUT', side: 'FRONT', attrs: { length: 192, width: 66, thickness: 0.3, color: 'PU' } },
@@ -13,6 +13,19 @@ const second: Api.RelatedOrderItem = { ...first, orderId: 20, orderNo: 'GC-20', 
 const options: StockApi.Options = { colors: [{ value: 'PU', label: '紫色' }, { value: 'GY', label: '灰色' }], textures: [{ value: 'AD', label: '安达圆点纹' }, { value: 'BL', label: '波浪纹' }], patterns: [{ value: 'TTXL', label: '体态训练' }], materials: [], stages: [], recipes: [], processes: [], rawMaterials: [] };
 
 describe('workshop order grouping and process focus', () => {
+  it('shows the mould, charge weight and whole-batch output on mixing tasks only', () => {
+    const mix: Api.Task = { ...task, process: 'MIX', unit: '张', output: { stage: 'BOARD', recipeBatches: 3,
+      mixPlan: { mouldName: '620×910×23 / 净板2100×1360×48', chargeKg: 17.2, kgPerBoard: 17.2, batchKg: 122.06, wholeBatchBoards: 21, surplusBoards: 6 } } };
+    expect(mixPlanLines(mix)).toEqual([
+      { label: '密炼锅数', value: '3 锅（每锅 122.06 kg）' },
+      { label: '模具', value: '620×910×23 / 净板2100×1360×48' },
+      { label: '每张入模', value: '17.2 kg' },
+      { label: '整锅可出', value: '21 张，多出 6 张报工后入库' },
+    ]);
+    expect(mixPlanLines({ ...mix, output: { stage: 'BOARD', recipeBatches: 2 } })).toEqual([{ label: '密炼锅数', value: '2 锅' }]);
+    expect(mixPlanLines({ ...mix, output: { stage: 'BOARD' } })).toEqual([]);
+    expect(mixPlanLines(task)).toEqual([]);
+  });
   it('keeps each order in one row and deduplicates repeated task and order product IDs', () => {
     const merged = { ...task, relatedOrderItems: [first, second], relatedOrderNos: ['GC-10', 'GC-20'] };
     const other = { ...task, id: 2, relatedOrderItems: [first], relatedOrderNos: ['GC-10'], status: 'DONE' as const };

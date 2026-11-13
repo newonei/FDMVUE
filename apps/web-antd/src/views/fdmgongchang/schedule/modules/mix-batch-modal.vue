@@ -114,6 +114,44 @@ const selected = computed(() =>
 const selectedBoards = computed(() =>
   selected.value.reduce((sum, row) => sum + Number(row.quantity), 0),
 );
+/**
+ * 选中的行按发泡批次合并：整批都选时用后端结果，只选一部分时按同一公式重算锅数
+ * （合计板数 × 每张用料 ÷ 一锅重量，向上取整；整锅能出的张数向下取整）。
+ */
+const selectedGroups = computed(() =>
+  (preview.value?.groups ?? [])
+    .map((group) => {
+      const rows = selected.value.filter(
+        (row) => row.groupKey === group.groupKey,
+      );
+      const boards = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      const whole = rows.length === group.rowKeys.length;
+      const kg = Number(group.mixPlan?.kgPerBoard);
+      const batchKg = Number(group.mixPlan?.batchKg);
+      const known = kg > 0 && batchKg > 0;
+      let batches: number | undefined;
+      let output: number | undefined;
+      if (whole) {
+        batches = Number(group.recipeBatches);
+        output = Number(group.mixPlan?.wholeBatchBoards);
+      } else if (known) {
+        batches = Math.ceil(Number(((boards * kg) / batchKg).toFixed(6)));
+        output = Math.max(
+          Math.floor(Number(((batches * batchKg) / kg).toFixed(6))),
+          Math.ceil(boards),
+        );
+      }
+      return {
+        group,
+        rows,
+        boards,
+        orders: new Set(rows.map((row) => row.orderId)).size,
+        batches: Number.isFinite(batches) ? batches : undefined,
+        output: Number.isFinite(output) ? output : undefined,
+      };
+    })
+    .filter((item) => item.rows.length > 0),
+);
 const allRowsChecked = computed(
   () =>
     eligibleRows.value.length > 0 &&
@@ -287,6 +325,8 @@ function side(row: MixBatchRow) {
     ] || '—';
   return `${name}${(row.layerThickness === null || row.layerThickness === undefined) ? '' : ` · ${Number((Number(row.layerThickness) * 10).toFixed(2))} mm`}`;
 }
+const groupBoardText = (attrs: MixBatchRow['boardAttrs']) =>
+  attrSummary('BOARD', attrs, makeLabels(), [], 'mm') || '板材规格待确认';
 const boardText = (row: MixBatchRow) =>
   attrSummary('BOARD', row.boardAttrs, makeLabels(), [], 'mm') ||
   '板材规格待确认';
@@ -305,7 +345,7 @@ const boardText = (row: MixBatchRow) =>
   >
     <div class="batch-stack">
       <p class="m-0 text-sm text-muted-foreground">
-        选择一个或多个订单，预览全部产品明细和制造层，再一次下发选中的发泡任务。每项任务保留所属订单、明细及层面。
+        选择一个或多个订单，预览全部产品明细和制造层。配方、颜色、板材规格都相同的会合并成一条发泡任务，按合计板数算整锅；任务仍记录分给各订单明细的张数，整锅多出的板报工后进自由库存。
       </p>
       <Alert v-if="optionsError" show-icon type="error" :message="optionsError">
 <template #description>
@@ -439,6 +479,76 @@ const boardText = (row: MixBatchRow) =>
           <span>本次选中 <b>{{ selected.length }}</b> 项，共
             <b>{{ formatQty(selectedBoards) }}</b> 张板</span>
         </div>
+        <div v-if="selectedGroups.length" class="batch-table-wrap">
+          <table class="batch-table" data-testid="mix-batch-groups">
+            <thead>
+              <tr>
+                <th>合并后的发泡任务（{{ selectedGroups.length }} 条）</th>
+                <th>涉及订单 / 明细</th>
+                <th>合计板数</th>
+                <th>模具 / 每张入模</th>
+                <th>密炼锅数</th>
+                <th>整锅可出 / 多出入库</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in selectedGroups" :key="item.group.groupKey">
+                <td>
+                  <b>{{ groupBoardText(item.group.boardAttrs) }}</b>
+                  <div class="text-xs text-muted-foreground">
+                    配方 {{ item.group.recipeCode || '未确认' }}
+                  </div>
+                </td>
+                <td>
+                  {{ item.orders }} 张订单 · {{ item.rows.length }} 条明细层
+                </td>
+                <td class="text-right tabular-nums">
+                  <b>{{ formatQty(item.boards) }} 张</b>
+                </td>
+                <td>
+                  <template v-if="item.group.mixPlan?.mouldName">
+                    {{ item.group.mixPlan.mouldName }}
+                    <div class="tabular-nums">
+                      <b>{{ formatQty(item.group.mixPlan.chargeKg) }} kg</b> / 张
+                    </div>
+                  </template>
+                  <template v-else>
+                    没有对应的模具档案
+                    <div
+                      v-if="item.group.mixPlan?.kgPerBoard"
+                      class="tabular-nums"
+                    >
+                      按估算 {{ formatQty(item.group.mixPlan.kgPerBoard) }} kg / 张
+                    </div>
+                  </template>
+                </td>
+                <td class="text-right tabular-nums">
+                  <b>{{
+                    item.batches === undefined
+                      ? '—'
+                      : `${formatQty(item.batches)} 锅`
+                  }}</b>
+                  <div
+                    v-if="item.group.mixPlan?.batchKg"
+                    class="text-xs text-muted-foreground"
+                  >
+                    每锅 {{ formatQty(item.group.mixPlan.batchKg) }} kg
+                  </div>
+                </td>
+                <td class="text-right tabular-nums">
+                  <template v-if="item.output !== undefined">
+                    {{ formatQty(item.output) }} 张
+                    <div class="text-xs text-muted-foreground">
+                      多出 {{ formatQty(Math.max(item.output - item.boards, 0)) }}
+                      张入库
+                    </div>
+                  </template>
+                  <template v-else>—</template>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <Alert
           v-if="selected.length > MAX_TASKS"
           type="error"
@@ -544,7 +654,7 @@ const boardText = (row: MixBatchRow) =>
           </table>
         </div>
         <p class="m-0 text-xs text-muted-foreground">
-          本次待排由库存、在制及已有任务共同计算；已排覆盖仅表示已有发泡任务覆盖的板数。修改订单、日期、人员或说明后需重新预览。
+          锅数按合并后的合计板数、模具入模量和配方一锅重量计算，不足一锅做一整锅。本次待排由库存、在制及已有任务共同计算；已排覆盖仅表示已有发泡任务覆盖的板数。修改订单、日期、人员或说明后需重新预览。
         </p>
       </template>
       <p v-else class="m-0 text-sm text-muted-foreground">
@@ -561,7 +671,7 @@ const boardText = (row: MixBatchRow) =>
         :loading="submitting"
         @click="submit"
         >
-下发选中的 {{ selected.length }} 项发泡任务
+下发选中的 {{ selected.length }} 项，合并为 {{ selectedGroups.length }} 条发泡任务
 </Button>
     </template>
   </Modal>

@@ -21,7 +21,7 @@ import FactorySwitch from '../shared/factory-switch.vue';
 import { dateText, PROCESS_LABELS } from '../shared/schedule';
 import { formatQty, sizeText } from '../stage-stock/model';
 import { useJob } from '../workbench/use-job';
-import { groupWorkshopOrders, isTaskCompleted, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT } from './order-model';
+import { groupWorkshopOrders, isTaskCompleted, mixPlanLines, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT } from './order-model';
 import OrdersTable from './orders-table.vue';
 import RelatedOrderTable from './related-order-table.vue';
 
@@ -157,6 +157,13 @@ function taskState(task: ScheduleApi.Task) {
   if (task.status === 'CLOSED') return '已关闭'; if (task.status === 'DONE') return '已完成';
   return Number(task.actualQuantity) + Number(task.defectQuantity ?? 0) > 0 ? '部分报工' : '待报工';
 }
+/** 合并发泡任务分给各订单明细的张数。 */
+function coverLines(task: ScheduleApi.Task) {
+  return (task.covers ?? []).map((cover) => {
+    const item = task.relatedOrderItems?.find((related) => cover.assignmentId.endsWith(`:${related.itemId}`));
+    return `${item ? `${item.orderNo} ${item.productName || item.productCode || ''}`.trim() : cover.assignmentId}：${formatQty(cover.quantity)} ${task.unit ?? '张'}`;
+  });
+}
 const summaryFields = (order: WorkshopOrder) => orderFocus(order, job.options);
 const outputSize = (task: ScheduleApi.Task) => sizeText(task.output?.attrs, 'mm') || '按任务规格';
 </script>
@@ -206,9 +213,10 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
                   <div class="mt-1 line-clamp-2 text-sm">{{ task.relatedOrderItems?.map((item: ScheduleApi.RelatedOrderItem) => item.productName || item.productCode).filter(Boolean).join('、') || task.product || '按任务要求生产' }}</div>
                   <div v-if="task.output?.side" class="mt-1"><Tag :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '单色 / 整体' }}</Tag></div>
                   <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
+                  <ul v-if="coverLines(task as ScheduleApi.Task).length > 1" class="mb-0 mt-1 list-none p-0 text-xs text-muted-foreground"><li v-for="line in coverLines(task as ScheduleApi.Task)" :key="line">{{ line }}</li></ul>
                   <details class="mt-2 text-xs"><summary class="cursor-pointer text-muted-foreground">任务明细 / 用料要求</summary><div class="mt-2"><TaskMaterials :task="task as ScheduleApi.Task" /><p v-if="task.workerNames">负责人：{{ task.workerNames }}</p><p v-if="task.reason">{{ task.reason }}</p><p v-if="task.upstreamNote">{{ task.upstreamNote }}</p></div></details>
                 </template>
-                <template v-else-if="column.key === 'focus'"><div v-for="field in taskFocus(task as ScheduleApi.Task, job.options)" :key="field.label" class="focus-field my-1.5 flex items-start gap-2"><span class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs" :class="field.side === 'FRONT' ? 'bg-blue-50 text-blue-700' : field.side === 'BACK' ? 'bg-purple-50 text-purple-700' : 'bg-muted text-muted-foreground'">{{ field.label }}</span><strong class="break-words text-base leading-6" :class="field.value === '未填写' ? 'text-orange-600' : ''">{{ field.value }}</strong></div></template>
+                <template v-else-if="column.key === 'focus'"><div v-for="field in taskFocus(task as ScheduleApi.Task, job.options)" :key="field.label" class="focus-field my-1.5 flex items-start gap-2"><span class="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs" :class="field.side === 'FRONT' ? 'bg-blue-50 text-blue-700' : field.side === 'BACK' ? 'bg-purple-50 text-purple-700' : 'bg-muted text-muted-foreground'">{{ field.label }}</span><strong class="break-words text-base leading-6" :class="field.value === '未填写' ? 'text-orange-600' : ''">{{ field.value }}</strong></div><div v-if="mixPlanLines(task as ScheduleApi.Task).length" class="mix-plan mt-2 rounded border border-primary/30 bg-primary/5 px-2 py-1"><div v-for="line in mixPlanLines(task as ScheduleApi.Task)" :key="line.label" class="my-1 flex items-start gap-2"><span class="mt-0.5 shrink-0 text-xs text-muted-foreground">{{ line.label }}</span><strong class="break-words leading-6">{{ line.value }}</strong></div></div></template>
                 <template v-else-if="column.key === 'output'">
                   <div class="mb-1 font-medium">{{ WORKSHOP_OUTPUT[props.process] }}</div><div class="mb-2 text-xs text-muted-foreground">本工序规格 {{ outputSize(task as ScheduleApi.Task) }}</div>
                   <template v-if="props.process === 'MIX'"><Select :id="`board-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).boardItemCode" class="w-full" :disabled="!selected(task as ScheduleApi.Task) || busy" :loading="boardLoading[task.id]" :options="boardOptions[task.id]?.boards.map((item) => ({ label: item.label, value: item.itemCode })) ?? []" placeholder="勾选任务后选择板材" aria-label="选择报工板材" /><div v-if="boardErrors[task.id]" class="mt-1 text-xs text-red-600">{{ boardErrors[task.id] }} <Button type="link" size="small" @click="loadBoards(task as ScheduleApi.Task)">重试</Button></div></template>
