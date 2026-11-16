@@ -26,6 +26,7 @@ import {
 } from '#/api/fdmplatform/procurement';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 import InvoiceSourceTable from '../../../finance/procurement/components/InvoiceSourceTable.vue';
 import { invoicePaymentStates } from '../../../finance/procurement/invoice-model';
@@ -142,14 +143,17 @@ async function download() {
               {{ detail.createdByName ?? '—' }}
             </DescriptionsItem>
             <DescriptionsItem label="附件">
-              <Button
-                v-if="detail.file"
-                type="link"
-                size="small"
-                @click="download"
-              >
-                {{ detail.file.name }}
-              </Button>
+              <template v-if="detail.file">
+                <Button type="link" size="small" @click="download">
+                  {{ detail.file.name }}
+                </Button>
+                <FilePreviewButton
+                  :key="detail.id"
+                  :name="detail.file.name"
+                  size="small"
+                  :load="() => downloadPurchaseInvoiceFile(detail!.id)"
+                />
+              </template>
               <span v-else>无原件</span>
             </DescriptionsItem>
             <DescriptionsItem label="状态">

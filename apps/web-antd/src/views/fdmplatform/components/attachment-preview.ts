@@ -1,11 +1,13 @@
 import { formatDateTime } from '@vben/utils';
 
 const PREVIEW_TYPES: Record<string, string> = {
+  bmp: 'image/bmp',
   gif: 'image/gif',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
   pdf: 'application/pdf',
   png: 'image/png',
+  svg: 'image/svg+xml',
   txt: 'text/plain',
   webp: 'image/webp',
 };

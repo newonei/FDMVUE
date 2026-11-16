@@ -3,10 +3,13 @@ import { computed, onBeforeUnmount, ref } from 'vue';
 
 import { Button, message, Modal } from 'ant-design-vue';
 
+import { FilePreview } from '#/components/file-preview';
+
 import { errorText } from '../data';
+import { previewMimeType } from './attachment-preview';
 import { filePreviewKind } from './file-preview';
 
-/** PDF / 图片附件直接在弹窗里查看，不用先下载；其他格式不显示按钮。待上传的本地文件传 file。 */
+/** 单据附件在弹窗里查看，图片支持放大；待上传的本地文件传 file。 */
 const props = withDefaults(
   defineProps<{
     disabled?: boolean;
@@ -43,11 +46,10 @@ async function show() {
     if (!blob) return;
     if (run !== sequence) return;
     release();
-    // 下载接口常返回 octet-stream，PDF 需标明类型浏览器才会内嵌显示
+    // 下载接口常返回 octet-stream，补上文件类型供浏览器内嵌显示
+    const mimeType = previewMimeType(props.name);
     url.value = URL.createObjectURL(
-      kind.value === 'pdf'
-        ? new Blob([blob], { type: 'application/pdf' })
-        : blob,
+      blob.type === mimeType ? blob : new Blob([blob], { type: mimeType }),
     );
     open.value = true;
   } catch (error) {
@@ -85,33 +87,7 @@ onBeforeUnmount(() => {
       destroy-on-close
       @cancel="close"
     >
-      <img
-        v-if="kind === 'image' && url"
-        :src="url"
-        :alt="name"
-        class="file-preview-image"
-      />
-      <iframe
-        v-else-if="url"
-        :src="url"
-        :title="name"
-        class="file-preview-pdf"
-      ></iframe>
+      <FilePreview v-if="url" :url="url" :file-name="name" />
     </Modal>
   </template>
 </template>
-
-<style scoped>
-.file-preview-image {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 0 auto;
-}
-
-.file-preview-pdf {
-  width: 100%;
-  height: 75vh;
-  border: 0;
-}
-</style>

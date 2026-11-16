@@ -6,7 +6,7 @@ import type { FileUploadProps } from './typing';
 
 import type { AxiosProgressEvent } from '#/api/infra/file';
 
-import { computed, ref, toRefs, watch } from 'vue';
+import { computed, getCurrentInstance, onBeforeUnmount, ref, toRefs, watch } from 'vue';
 
 import { IconifyIcon } from '@vben/icons';
 import { $t } from '@vben/locales';
@@ -18,7 +18,9 @@ import {
   isString,
 } from '@vben/utils';
 
-import { Button, message, Upload } from 'ant-design-vue';
+import { Button, message, Modal, Upload } from 'ant-design-vue';
+
+import { FilePreview } from '#/components/file-preview';
 
 import { UploadResultStatus } from './typing';
 import { useUpload, useUploadType } from './use-upload';
@@ -132,9 +134,35 @@ async function handleRemove(file: UploadFile) {
   }
 }
 
-/** 处理文件预览 */
+const instance = getCurrentInstance();
+const previewOpen = ref(false);
+const previewUrl = ref('');
+const previewName = ref('');
+let localPreviewUrl = '';
+function releasePreview() {
+  if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+  localPreviewUrl = '';
+  previewUrl.value = '';
+}
+onBeforeUnmount(releasePreview);
+
+/** 文件名与预览按钮共用入口；已有自定义预览回调的页面沿用原行为。 */
 function handlePreview(file: UploadFile) {
   emit('preview', file);
+  if (instance?.vnode.props?.onPreview) return;
+  releasePreview();
+  const url = file.url;
+  if (url) {
+    previewUrl.value = props.previewUrlTransform?.(url, 'preview') ?? url;
+  } else if (file.originFileObj) {
+    localPreviewUrl = URL.createObjectURL(file.originFileObj);
+    previewUrl.value = localPreviewUrl;
+  } else {
+    message.warning('文件尚未准备好，请等待上传完成后预览');
+    return;
+  }
+  previewName.value = file.name;
+  previewOpen.value = true;
 }
 
 /** 处理文件数量超限 */
@@ -311,6 +339,19 @@ function getValue() {
       @preview="handlePreview"
       @reject="handleExceed"
     >
+      <template #itemRender="{ originNode, file }">
+        <div class="flex items-center gap-2">
+          <div class="min-w-0 flex-1"><component :is="originNode" /></div>
+          <Button
+            v-if="file.status === 'done' && file.url"
+            type="link"
+            size="small"
+            @click.stop="handlePreview(file)"
+          >
+            预览
+          </Button>
+        </div>
+      </template>
       <div v-if="drag" class="upload-drag-area">
         <p class="ant-upload-drag-icon">
           <IconifyIcon icon="lucide:cloud-upload" />
@@ -337,6 +378,21 @@ function getValue() {
         格式文件
       </div>
     </Upload>
+    <Modal
+      v-model:open="previewOpen"
+      :title="previewName"
+      :footer="null"
+      width="min(1000px, 95vw)"
+      destroy-on-close
+      @after-close="releasePreview"
+    >
+      <FilePreview
+        v-if="previewUrl"
+        :url="previewUrl"
+        :file-name="previewName"
+        :downloadable="showDownloadIcon"
+      />
+    </Modal>
   </div>
 </template>
 

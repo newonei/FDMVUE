@@ -31,6 +31,7 @@ import {
   markFdmNeixiaoPatternDesignItemDownloaded,
   notifyFdmNeixiaoPatternDesignItemOrder,
 } from '#/api/fdmneixiao/pattern/design-item';
+import { FilePreview } from '#/components/file-preview';
 import { $t } from '#/locales';
 
 import { useGridColumns, useGridFormSchema } from './data';
@@ -68,6 +69,12 @@ const checkedRows = shallowRef<
   FdmNeixiaoPatternDesignItemApi.PatternDesignItem[]
 >([]);
 const checkedCount = computed(() => checkedRows.value.length);
+const previewAttachment = shallowRef<
+  FdmNeixiaoPatternDesignItemApi.PatternDesignItem
+>();
+const previewAttachmentName = computed(() =>
+  previewAttachment.value ? getAttachmentName(previewAttachment.value) : '',
+);
 
 const FILENAME_INVALID_CHARS = /[<>:"/\\|?*]/g;
 
@@ -243,6 +250,23 @@ async function handleDownloadOriginal(
   }
 }
 
+function getAttachmentName(
+  row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
+) {
+  const url = String(row.attachmentUrl ?? '').trim();
+  const extractedName = getFileNameFromUrl(url);
+  const fallbackName = `附件-${row.orderNo || row.id || '内销定制订单'}`;
+  return sanitizeFileName(
+    extractedName && extractedName !== 'unknown' ? extractedName : fallbackName,
+  );
+}
+
+function handlePreviewAttachment(
+  row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
+) {
+  if (String(row.attachmentUrl ?? '').trim()) previewAttachment.value = row;
+}
+
 function handleDownloadAttachment(
   row: FdmNeixiaoPatternDesignItemApi.PatternDesignItem,
 ) {
@@ -252,12 +276,7 @@ function handleDownloadAttachment(
     return;
   }
 
-  const extractedName = getFileNameFromUrl(url);
-  const fallbackName = `附件-${row.orderNo || row.id || '内销定制订单'}`;
-  const fileName = sanitizeFileName(
-    extractedName && extractedName !== 'unknown' ? extractedName : fallbackName,
-  );
-  triggerFileDownload(url, fileName);
+  triggerFileDownload(url, getAttachmentName(row));
 }
 
 async function handleBatchDownloadOriginal() {
@@ -540,6 +559,13 @@ onBeforeUnmount(() => {
                 onClick: handleNotifyOrder.bind(null, row),
               },
               {
+                label: '预览附件',
+                icon: 'lucide:eye',
+                disabled: !String(row.attachmentUrl ?? '').trim(),
+                auth: ['fdmneixiao:pattern-design-item:query'],
+                onClick: handlePreviewAttachment.bind(null, row),
+              },
+              {
                 label: '下载附件',
                 icon: ACTION_ICON.DOWNLOAD,
                 disabled: !String(row.attachmentUrl ?? '').trim(),
@@ -561,5 +587,26 @@ onBeforeUnmount(() => {
         </template>
       </Grid>
     </div>
+    <Modal
+      :open="!!previewAttachment && pageActive"
+      :title="previewAttachmentName"
+      :footer="null"
+      width="min(1000px, 95vw)"
+      destroy-on-close
+      @cancel="previewAttachment = undefined"
+    >
+      <template v-if="previewAttachment">
+        <FilePreview
+          :url="String(previewAttachment.attachmentUrl ?? '').trim()"
+          :file-name="previewAttachmentName"
+          downloadable
+        />
+        <div class="mt-3 text-right">
+          <Button @click="handleDownloadAttachment(previewAttachment)">
+            下载附件
+          </Button>
+        </div>
+      </template>
+    </Modal>
   </Page>
 </template>

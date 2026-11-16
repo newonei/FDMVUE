@@ -25,6 +25,7 @@ import {
   setOrderNoInvoice,
 } from '#/api/fdmplatform/procurement';
 
+import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
 import InvoiceUpload from '../../../finance/procurement/components/InvoiceUpload.vue';
 import { confirmVoidInvoice } from '../../../finance/procurement/components/void-invoice';
@@ -181,14 +182,20 @@ watch(() => props.view.id, load, { immediate: true });
         <span v-if="column.key === 'invoiceNo'">{{
           record.invoiceNo ?? '—'
         }}</span>
-        <Button
-          v-else-if="column.key === 'file' && record.file"
-          type="link"
-          size="small"
-          @click="download(record as PurchaseInvoice)"
-        >
-          {{ record.file.name }}
-        </Button>
+        <template v-else-if="column.key === 'file' && record.file">
+          <Button
+            type="link"
+            size="small"
+            @click="download(record as PurchaseInvoice)"
+          >
+            {{ record.file.name }}
+          </Button>
+          <FilePreviewButton
+            :name="record.file.name"
+            size="small"
+            :load="() => downloadPurchaseInvoiceFile(record.id)"
+          />
+        </template>
         <span v-else-if="column.key === 'type'">{{
           TYPE_NAMES[record.invoiceType as PurchaseInvoice['invoiceType']]
         }}</span>

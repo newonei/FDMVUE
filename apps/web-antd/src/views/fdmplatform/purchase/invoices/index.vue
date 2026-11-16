@@ -35,6 +35,7 @@ import {
 } from '#/api/fdmplatform/procurement';
 import { getProcurementFinanceSummary } from '#/api/fdmplatform/procurement-finance';
 
+import FilePreviewButton from '../../components/FilePreviewButton.vue';
 import { errorText } from '../../data';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
@@ -459,15 +460,21 @@ watch(active, (value) => value && void load(), { immediate: true });
             <span v-else-if="column.key === 'payment'">{{
               record.paymentCode || '—'
             }}</span>
-            <Button
-              v-else-if="column.key === 'file' && record.file"
-              type="link"
-              size="small"
-              :title="record.file.name"
-              @click="download(record as PurchaseInvoice)"
-            >
-              {{ record.file.name }}
-            </Button>
+            <template v-else-if="column.key === 'file' && record.file">
+              <Button
+                type="link"
+                size="small"
+                :title="record.file.name"
+                @click="download(record as PurchaseInvoice)"
+              >
+                {{ record.file.name }}
+              </Button>
+              <FilePreviewButton
+                :name="record.file.name"
+                size="small"
+                :load="() => downloadPurchaseInvoiceFile(record.id)"
+              />
+            </template>
             <span v-else-if="column.key === 'file'" class="muted">无原件</span>
             <Tag
               v-else-if="column.key === 'status'"
