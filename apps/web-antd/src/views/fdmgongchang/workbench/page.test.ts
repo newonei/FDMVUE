@@ -336,6 +336,31 @@ describe('workbench page', () => {
     expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.disabled).toBe(true);
   });
 
+  it('prefills whole-batch output as good quantity and submits it for foaming', async () => {
+    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
+    const task = { ...my.tasks[0]!, process: 'MIX', quantity: 34, unit: '张', actualQuantity: 0,
+      output: { stage: 'BOARD', mixPlan: { wholeBatchBoards: '35' } } };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
+    await mount('MIX'); await expandOrder('HT-001'); await selectTask(31);
+    expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(35);
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ taskId: 31, goodQuantity: 35, defectQuantity: 0, boardItemCode: 'BC-1' })] }));
+  });
+
+  it('prefills only unreported whole-batch output and preserves manual edits when reselecting', async () => {
+    const process = { code: 'MIX', label: '发泡', outputLabel: '板材', outputStage: 'BOARD', outputUnit: '张', sources: ['RAW'] };
+    const task = { ...my.tasks[0]!, process: 'MIX', quantity: 34, unit: '张', actualQuantity: 10, defectQuantity: 2,
+      output: { stage: 'BOARD', mixPlan: { wholeBatchBoards: 35 } } };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
+    await mount('MIX'); await expandOrder('HT-001'); await selectTask(31);
+    expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(23);
+    fill('good-HT-001-31', 20); await flush();
+    await selectTask(31); await selectTask(31);
+    expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(20);
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ goodQuantity: 20, expectedActualQuantity: 10, expectedDefectQuantity: 2 })] }));
+  });
+
   it('shares merged task selection and draft across orders while reporting the task only once', async () => {
     const merged = { ...my.tasks[0]!, id: 38, process: 'MIX', contractCode: null, relatedOrderNos: ['GC-101', 'GC-202'], unit: '张',
       covers: [{ assignmentId: 'GC:1', quantity: 100 }, { assignmentId: 'GC:2', quantity: 100 }] };
@@ -344,6 +369,7 @@ describe('workbench page', () => {
     await mount('MIX'); await expandOrder('GC-101'); await expandOrder('GC-202');
     expect(document.querySelectorAll('[data-order-key]')).toHaveLength(2);
     await selectTask(38);
+    expect(document.querySelector<HTMLInputElement>('#good-GC-101-38')!.value).toBe('');
     expect([...document.querySelectorAll<HTMLInputElement>('[data-task-id="38"] input[type="checkbox"]')].every((input) => input.checked)).toBe(true);
     expect(mocks.batchOptions).toHaveBeenCalledExactlyOnceWith('MIX', 38);
     fill('good-GC-101-38', 5); await flush();

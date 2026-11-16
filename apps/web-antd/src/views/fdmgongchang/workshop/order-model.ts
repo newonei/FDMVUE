@@ -2,7 +2,7 @@ import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule
 import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { dimensionTextInMm } from '../shared/dimensions';
-import { makeLabels, sizeText } from '../stage-stock/model';
+import { formatQty, makeLabels, sizeText, sumQty, toNumber } from '../stage-stock/model';
 import { relatedProductSearch } from './order-details';
 
 export interface WorkshopOrder {
@@ -21,9 +21,9 @@ export const WORKSHOP_OUTPUT: Record<string, string> = {
 };
 
 export const WORKSHOP_FOCUS: Record<string, string> = {
-  MIX: '克重 · 成品规格 · 颜色', SLICE: '颜色 · 成品规格 · 单双色', CUT: '颜色 · 成品规格',
-  LAMINATE: '正反面颜色 · 成品规格', EMBOSS: '正反花纹 · 正反面颜色',
-  PUNCH: '成品规格', ENGRAVE: '雕刻图案 · 成品规格', FOLD: '成品规格 · 折叠类型',
+  MIX: '克重 · 成品规格 · 成品数量 · 颜色', SLICE: '颜色 · 成品规格 · 成品数量 · 单双色', CUT: '颜色 · 成品规格 · 成品数量',
+  LAMINATE: '正反面颜色 · 成品规格 · 成品数量', EMBOSS: '正反花纹 · 正反面颜色',
+  PUNCH: '成品规格 · 成品数量', ENGRAVE: '雕刻图案 · 成品规格 · 成品数量', FOLD: '成品规格 · 成品数量 · 折叠类型',
 };
 
 export function taskOrderNos(task: Api.Task) {
@@ -79,6 +79,31 @@ export function finishedSize(item: Api.RelatedOrderItem) {
   return dimensionTextInMm(item.size?.trim() || item.specification) || '未填写';
 }
 
+/** 订单成品需求按明细去重，再按规格和单位汇总，不能用工序板材/片材数量代替。 */
+export function finishedQuantity(items: Api.RelatedOrderItem[]) {
+  const groups = new Map<string, { missing: boolean; quantities: number[]; size: string; unit: string; }>();
+  const uniqueItems = new Map(items.map((item) => [`${item.orderId}:${item.itemId}`, item]));
+  for (const item of uniqueItems.values()) {
+    const size = finishedSize(item);
+    const unit = item.unit?.trim() || '单位未填写';
+    const key = JSON.stringify([size, unit]);
+    let group = groups.get(key);
+    if (!group) {
+      group = { size, unit, quantities: [], missing: false };
+      groups.set(key, group);
+    }
+    const quantity = toNumber(item.quantity);
+    if (quantity === undefined) group.missing = true;
+    else group.quantities.push(quantity);
+  }
+  return [...groups.values()].map((group) => {
+    const known = group.quantities.length > 0 ? `${formatQty(sumQty(group.quantities))} ${group.unit}` : '';
+    let value = known;
+    if (group.missing) value = known ? `${known}（另有数量未填写）` : '未填写';
+    return groups.size > 1 ? `${group.size}：${value}` : value;
+  }).join('；') || '未填写';
+}
+
 /** 发泡车间看的整锅密炼要求：几锅、哪个模具、每张入模多少、整锅能出几张；旧任务没有时为空。 */
 export function mixPlanLines(task: Api.Task): FocusField[] {
   if (task.process !== 'MIX') return [];
@@ -110,7 +135,10 @@ export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusFiel
     add('反面纹路', labels.texture(attrs.textureBack) || join(items.map((item) => labels.texture(item.targetTextureBack))), 'BACK');
   }
   if (task.process === 'ENGRAVE') add('雕刻图案', labels.pattern(attrs.pattern) || join(items.map((item) => labels.pattern(item.targetPattern))));
-  if (!['EMBOSS'].includes(task.process)) add('成品规格', join(items.map((item) => finishedSize(item))));
+  if (!['EMBOSS'].includes(task.process)) {
+    add('成品规格', join(items.map((item) => finishedSize(item))));
+    add('成品数量', finishedQuantity(items));
+  }
   if (['CUT', 'EMBOSS', 'LAMINATE', 'MIX', 'SLICE'].includes(task.process)) {
     if (['EMBOSS', 'LAMINATE'].includes(task.process)) {
       add('正面颜色', labels.color(attrs.frontColor || attrs.color) || join(items.map((item) => labels.color(item.targetFrontColor))), 'FRONT');
@@ -136,5 +164,10 @@ export function orderFocus(order: WorkshopOrder, options?: StockApi.Options) {
       else fields.set(field.label, { ...field, values: new Set([field.value]) });
     }
   }
-  return [...fields.values()].map(({ values, ...field }) => ({ ...field, value: [...values].join('、') }));
+  return [...fields.values()].map(({ values, ...field }) => {
+    let value = [...values].join('、');
+    if (field.label === '成品数量') value = finishedQuantity(order.items);
+    else if (field.label === '成品规格') value = [...new Set(order.items.map((item) => finishedSize(item)))].join('、') || '未填写';
+    return { ...field, value };
+  });
 }

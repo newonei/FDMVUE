@@ -112,6 +112,7 @@ defineExpose({ reload: load });
             <span class="font-medium">{{ item.productName }}</span>
             <span class="text-xs text-muted-foreground">
               <template v-if="item.targetSize">成品 {{ item.targetSize }}cm<template v-if="sameSize(item).length > 0">（同规格 {{ sameSize(item).length + 1 }} 个）</template> · </template>
+              成品数量 <b class="text-foreground tabular-nums">{{ item.quantity == null ? '未填写' : fmt(item.quantity) }}</b> {{ item.unit }} ·
               还要做 <b class="text-foreground tabular-nums">{{ fmt(item.remaining) }}</b> {{ item.unit }}
             </span>
           </div>

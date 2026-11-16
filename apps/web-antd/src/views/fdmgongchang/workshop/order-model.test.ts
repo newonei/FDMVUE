@@ -3,12 +3,12 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { describe, expect, it } from 'vitest';
 
-import { finishedSize, groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus, uniqueTasks } from './order-model';
+import { finishedQuantity, finishedSize, groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus, uniqueTasks } from './order-model';
 
 const task: Api.Task = { id: 1, scheduleId: 2, process: 'CUT', actualQuantity: 0, quantity: 10, orderCount: 0, unit: '片', workDate: '2026-11-12', status: 'OPEN',
   output: { stage: 'CUT', side: 'FRONT', attrs: { length: 192, width: 66, thickness: 0.3, color: 'PU' } },
 };
-const first: Api.RelatedOrderItem = { orderId: 10, orderNo: 'GC-10', itemId: 100, productCode: 'SKU-A', productName: '双色垫', targetColorMode: 'DUAL', targetLength: 183, targetWidth: 61, targetThickness: 0.6, targetFrontColor: 'PU', targetBackColor: 'GY' };
+const first: Api.RelatedOrderItem = { orderId: 10, orderNo: 'GC-10', itemId: 100, productCode: 'SKU-A', productName: '双色垫', quantity: '1000', unit: '张', targetColorMode: 'DUAL', targetLength: 183, targetWidth: 61, targetThickness: 0.6, targetFrontColor: 'PU', targetBackColor: 'GY' };
 const second: Api.RelatedOrderItem = { ...first, orderId: 20, orderNo: 'GC-20', itemId: 200, productCode: 'SKU-B', targetLength: 200 };
 const options: StockApi.Options = { colors: [{ value: 'PU', label: '紫色' }, { value: 'GY', label: '灰色' }], textures: [{ value: 'AD', label: '安达圆点纹' }, { value: 'BL', label: '波浪纹' }], patterns: [{ value: 'TTXL', label: '体态训练' }], materials: [], stages: [], recipes: [], processes: [], rawMaterials: [] };
 
@@ -48,6 +48,32 @@ describe('workshop order grouping and process focus', () => {
   it('does not show another order finished size in the merged order summary', () => {
     const group = groupWorkshopOrders([{ ...task, relatedOrderItems: [first, second] }])[0]!;
     expect(orderFocus(group, options).find((field) => field.label === '成品规格')?.value).toBe('1830×610×6 mm');
+    expect(orderFocus(group, options).find((field) => field.label === '成品数量')?.value).toBe('1,000 张');
+  });
+  it.each(['MIX', 'SLICE', 'CUT', 'LAMINATE', 'PUNCH', 'ENGRAVE', 'FOLD'])('shows order finished quantity next to finished size for %s', (process) => {
+    const fields = taskFocus({ ...task, process, relatedOrderItems: [first] }, options);
+    const sizeIndex = fields.findIndex((field) => field.label === '成品规格');
+    expect(fields[sizeIndex + 1]).toEqual({ label: '成品数量', value: '1,000 张', side: undefined });
+  });
+  it('sums distinct order lines of the same size without counting repeated sides or tasks twice', () => {
+    const extra = { ...first, itemId: 101, quantity: '200' };
+    const group = groupWorkshopOrders([
+      { ...task, relatedOrderItems: [first, extra] },
+      { ...task, id: 2, relatedOrderItems: [first] },
+    ])[0]!;
+    expect(finishedQuantity([first, first, extra])).toBe('1,200 张');
+    expect(orderFocus(group, options).find((field) => field.label === '成品数量')?.value).toBe('1,200 张');
+  });
+  it('keeps multiple finished sizes and units identifiable in merged tasks', () => {
+    expect(finishedQuantity([first, { ...second, quantity: 500 }])).toBe('1830×610×6 mm：1,000 张；2000×610×6 mm：500 张');
+    expect(finishedQuantity([first, { ...first, itemId: 101, quantity: 2, unit: '套' }])).toBe('1830×610×6 mm：1,000 张；1830×610×6 mm：2 套');
+  });
+  it('preserves zero and makes missing quantity explicit without substituting the task quantity', () => {
+    expect(finishedQuantity([{ ...first, quantity: 0 }])).toBe('0 张');
+    expect(finishedQuantity([{ ...first, quantity: undefined }])).toBe('未填写');
+    expect(finishedQuantity([first, { ...first, itemId: 101, quantity: undefined }])).toBe('1,000 张（另有数量未填写）');
+    expect(finishedQuantity([{ ...first, unit: undefined }])).toBe('1,000 单位未填写');
+    expect(taskFocus(task, options).find((field) => field.label === '成品数量')?.value).toBe('未填写');
   });
   it('aggregates all colors in the order focus without hiding the reverse texture or color', () => {
     const group = groupWorkshopOrders([
@@ -69,7 +95,7 @@ describe('workshop order grouping and process focus', () => {
     expect(taskFocus({ ...task, process: 'SLICE', relatedOrderItems: [first] }, options).map((field) => field.label)).not.toContain('克重');
   });
   it('shows only finished dimensions for punching and highlights pattern for engraving', () => {
-    expect(taskFocus({ ...task, process: 'PUNCH', relatedOrderItems: [first] }, options).map((field) => field.label)).toEqual(['成品规格']);
+    expect(taskFocus({ ...task, process: 'PUNCH', relatedOrderItems: [first] }, options).map((field) => field.label)).toEqual(['成品规格', '成品数量']);
     expect(taskFocus({ ...task, process: 'ENGRAVE', relatedOrderItems: [{ ...first, targetPattern: 'TTXL' }] }, options)[0]).toEqual({ label: '雕刻图案', value: '体态训练', side: undefined });
   });
 });

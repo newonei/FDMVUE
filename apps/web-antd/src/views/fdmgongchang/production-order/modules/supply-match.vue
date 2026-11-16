@@ -134,6 +134,7 @@ defineExpose({ reload: load });
             </template>
             <span v-else class="text-muted-foreground">按规格文本解析，只比对材质、颜色、长宽厚；确认后才比对压纹、图案，也不会用已雕刻的库存</span>
           </p>
+          <p class="m-0 text-sm">成品数量 <b class="tabular-nums">{{ item.quantity == null ? '未填写' : fmt(item.quantity) }}</b> {{ item.unit }}</p>
 
           <template v-if="matchByItem.get(item.id)">
             <Alert v-if="matchByItem.get(item.id)!.pending" type="warning" show-icon :message="`${matchByItem.get(item.id)!.pending}，确认前不能排单`" />
