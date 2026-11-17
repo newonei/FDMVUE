@@ -156,6 +156,7 @@ export function printExtrasPayload(value: PrintExtras) {
       if (!blank(row[key])) clean[key] = row[key]!.trim();
     if (row.packQty) clean.packQty = row.packQty;
     if (row.imageId) clean.imageId = row.imageId;
+    if (row.colorImageId) clean.colorImageId = row.colorImageId;
     if (row.imageIds?.length) clean.imageIds = [...row.imageIds];
     const cells = cleanCells(row.customCells);
     if (Object.keys(cells).length > 0) clean.customCells = cells;
@@ -199,7 +200,7 @@ export function printExtrasImageIds(value: PrintExtras) {
   return [
     ...new Set([
       ...Object.values(value.lineExtras)
-        .map((row) => row.imageId)
+        .flatMap((row) => [row.imageId, row.colorImageId])
         .filter((id): id is string => !!id),
       ...Object.values(value.lineExtras).flatMap((row) => row.imageIds ?? []),
       ...[...Object.values(value.lineExtras), ...value.additionalLines].flatMap(
@@ -273,8 +274,9 @@ export function copyPrintExtras(
     const extra = key ? bySource.get(key) : undefined;
     if (!extra) continue;
     matched++;
-    const { imageId, ...rest } = extra;
+    const { imageId, colorImageId, ...rest } = extra;
     const copied = imageId ? images[imageId] : undefined;
+    const copiedColor = colorImageId ? images[colorImageId] : undefined;
     lineExtras[String(line.id)] = {
       ...rest,
       ...(extra.imageIds?.length ? { imageIds: swap(extra.imageIds) } : {}),
@@ -282,6 +284,7 @@ export function copyPrintExtras(
         ? { customCells: swapCells(extra.customCells) }
         : {}),
       ...(copied ? { imageId: copied } : {}),
+      ...(copiedColor ? { colorImageId: copiedColor } : {}),
     };
   }
   return {

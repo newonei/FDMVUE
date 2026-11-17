@@ -285,7 +285,7 @@ describe('采购产品结构入口', () => {
     await nextTick();
     expect(host.textContent).toContain('正面颜色：旧蓝色');
     [...host.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === '保存')!
+      .find((button) => button.textContent?.trim() === '保存草稿并完善资料')!
       .click();
     await vi.waitFor(() => expect(mocks.create).toHaveBeenCalled());
     expect(mocks.create.mock.calls[0]![0]).toMatchObject({
@@ -332,7 +332,7 @@ describe('采购产品结构入口', () => {
     await nextTick();
     expect(host.textContent).toContain('正面颜色：粉色');
     [...host.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === '保存')!
+      .find((button) => button.textContent?.trim() === '保存草稿并完善资料')!
       .click();
     await vi.waitFor(() => expect(mocks.create).toHaveBeenCalled());
     expect(mocks.create.mock.calls[0]![0].lines[0]).toMatchObject({

@@ -258,7 +258,12 @@ watch(open, async (value) => {
                 v-for="(line, index) in stockOut.lines"
                 :key="line.contractItemId ?? line.stockId ?? index"
               >
-                <td>{{ line.productName }}</td>
+                <td>
+                  {{ line.productName }}
+                  <div v-if="line.productionOrderNo" class="hint">
+                    生产订单：{{ line.productionOrderNo }}
+                  </div>
+                </td>
                 <td class="mono">{{ line.productCode }}</td>
                 <td>{{ line.specification }}</td>
                 <td>{{ line.unit }}</td>

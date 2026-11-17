@@ -9,6 +9,20 @@ import {
 
 describe('business document attachment submission', () => {
   it.each([
+    'ai',
+    'plt',
+    'eps',
+    'cdr',
+    'psd',
+    'psb',
+    'dwg',
+    'dxf',
+    'svg',
+    'tif',
+    'tiff',
+    'zip',
+    'rar',
+    '7z',
     'doc',
     'docx',
     'xls',
@@ -25,6 +39,14 @@ describe('business document attachment submission', () => {
     expect(
       submissionFilesError([{ name: `附件.${extension}`, size: 128 }]),
     ).toBe('');
+  });
+  it('accepts uppercase design files but checks the final extension', () => {
+    expect(submissionFilesError([{ name: '供应商图稿.AI', size: 128 }])).toBe(
+      '',
+    );
+    expect(
+      submissionFilesError([{ name: '图稿.ai.exe', size: 128 }]),
+    ).toContain('文件格式');
   });
   it('accepts supported multiple files and rejects empty, oversized and unsafe names before submitting', () => {
     expect(

@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { OutRow } from './model';
 
-import type { InventoryWarehouse, StockOut } from '#/api/fdmplatform/warehouse';
+import type {
+  InventoryWarehouse,
+  ProductionOrderOutboundCandidate,
+  StockOut,
+} from '#/api/fdmplatform/warehouse';
 
 import { computed, ref, watch } from 'vue';
 
@@ -19,6 +23,7 @@ import {
   createStockOut,
   getInventoryWarehouses,
   getOutboundItems,
+  getProductionOrderOutboundCandidates,
 } from '#/api/fdmplatform/warehouse';
 
 import { errorText } from '../../data';
@@ -26,6 +31,7 @@ import {
   firstWarehouse,
   writableWarehouses,
 } from '../../inventory-center/components/model';
+import ProductionOrderSelect from '../../inventory-center/components/ProductionOrderSelect.vue';
 import { localDate } from '../quotes/comparison';
 import { outboundRows, qty, stockOutErrors, stockOutPayload } from './model';
 
@@ -40,6 +46,7 @@ const warehouses = ref<InventoryWarehouse[]>([]);
 const contracts = ref<{ label: string; value: string }[]>([]);
 const picked = ref<string>();
 const rows = ref<OutRow[]>([]);
+const orderCandidates = ref<ProductionOrderOutboundCandidate[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
@@ -71,12 +78,18 @@ async function loadContracts(keyword = '') {
 }
 async function loadItems() {
   rows.value = [];
+  orderCandidates.value = [];
   if (!contractId.value) return;
   loading.value = true;
   try {
-    rows.value = outboundRows(
-      await getOutboundItems(contractId.value, form.value.warehouseId),
-    );
+    const [items, candidates] = await Promise.all([
+      getOutboundItems(contractId.value, form.value.warehouseId),
+      form.value.warehouseId
+        ? getProductionOrderOutboundCandidates(form.value.warehouseId)
+        : Promise.resolve([]),
+    ]);
+    rows.value = outboundRows(items);
+    orderCandidates.value = candidates;
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -134,12 +147,17 @@ async function save() {
   <Modal
     :open="open"
     title="销售出库"
-    width="920px"
+    width="1180px"
     :mask-closable="false"
     @cancel="emit('close')"
   >
     <div class="stock-dialog">
       <Alert v-if="error" type="error" :message="error" show-icon />
+      <Alert
+        type="info"
+        message="自产货可选择关联生产订单，订单看板会同步出库进度。每行数量不能超过所选订单在本仓的可出数量。"
+        show-icon
+      />
       <div class="sheet">
         <label v-if="!props.contractId" class="field wide">
           <span>合同</span>
@@ -185,11 +203,12 @@ async function save() {
               <th class="num">合同未出</th>
               <th class="num">仓库现存</th>
               <th class="qty">本次出库</th>
+              <th>关联生产订单</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!rows.length">
-              <td colspan="4" class="empty">
+              <td colspan="5" class="empty">
                 {{
                   loading
                     ? '正在读取合同'
@@ -227,6 +246,14 @@ async function save() {
                   placeholder="不出留空"
                   style="width: 100%"
                   :aria-label="`${row.productName} 出库数量`"
+                />
+              </td>
+              <td>
+                <ProductionOrderSelect
+                  v-model:value="row.productionOrderItemId"
+                  :candidates="orderCandidates"
+                  :sku-id="row.skuId"
+                  :spec-version="row.specVersion"
                 />
               </td>
             </tr>

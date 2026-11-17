@@ -174,14 +174,24 @@ describe('采购单附加资料', () => {
       status: 'CONFIRMED',
       version: 3,
       lineExtras: {
-        s1: { customerColor: 'Ocean Blue', packQty: 10, imageId: 'old-a' },
+        s1: {
+          customerColor: 'Ocean Blue',
+          packQty: 10,
+          imageId: 'old-a',
+          colorImageId: 'old-color',
+        },
         s2: { weight: '1300g' },
       },
       sharedColumns: [{ title: '纹路', imageIds: ['old-b', 'gone'] }],
       accessories: [{ name: 'OPP透明膜', checked: true }],
       packagingSteps: [{ title: '1.包卡纸', imageIds: ['old-b'] }],
     });
-    expect(printExtrasImageIds(source)).toEqual(['old-a', 'old-b', 'gone']);
+    expect(printExtrasImageIds(source)).toEqual([
+      'old-a',
+      'old-color',
+      'old-b',
+      'gone',
+    ]);
     const current = printExtrasFrom({
       clauseIds: [],
       status: 'DRAFT',
@@ -200,17 +210,35 @@ describe('采购单附加资料', () => {
         { id: 't2', specificationSnapshot: { skuCode: 'DZ2' } },
         { id: 't9', skuId: 'other' },
       ],
-      { 'old-a': 'new-a', 'old-b': 'new-b' },
+      { 'old-a': 'new-a', 'old-b': 'new-b', 'old-color': 'new-color' },
       ['OPP透明膜', '吊牌'],
     );
     expect(result.matched).toBe(2);
     expect(result.value.lineExtras).toEqual({
-      t1: { customerColor: 'Ocean Blue', packQty: 10, imageId: 'new-a' },
+      t1: {
+        customerColor: 'Ocean Blue',
+        packQty: 10,
+        imageId: 'new-a',
+        colorImageId: 'new-color',
+      },
       t2: { weight: '1300g' },
       t9: { weight: '保留' },
     });
     expect(result.value.sharedColumns[0]!.imageIds).toEqual(['new-b']);
     expect(result.value.packagingSteps[0]!.imageIds).toEqual(['new-b']);
+    expect(printExtrasPayload(result.value).lineExtras.t1!.colorImageId).toBe(
+      'new-color',
+    );
+    const withoutImages = copyPrintExtras(
+      current,
+      source,
+      [{ id: 's1', skuId: 'sku-1' }],
+      [{ id: 't1', skuId: 'sku-1' }],
+      {},
+    );
+    expect(withoutImages.value.lineExtras.t1).not.toHaveProperty(
+      'colorImageId',
+    );
     expect(result.value.accessories).toEqual([
       { name: 'OPP透明膜', checked: true },
       { name: '吊牌', checked: false },

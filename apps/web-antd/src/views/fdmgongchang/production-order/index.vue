@@ -20,6 +20,7 @@ import MixBatchModal from '../schedule/modules/mix-batch-modal.vue';
 import OrderSplitModal from '../schedule/modules/order-split-modal.vue';
 import ScheduleBoard from '../schedule/modules/schedule-board.vue';
 import TaskManage from '../schedule/modules/task-manage.vue';
+import { factoryToday } from '../shared/factory-date';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { PROCESS_LABELS } from '../shared/schedule';
 import { useFactory } from '../shared/use-factory';
@@ -77,7 +78,18 @@ const total = ref(0);
 const loading = ref(false);
 const loadError = ref(false);
 const pendingCount = ref(0);
-const filters = reactive({ keyword: '', status: (tab.value === 'factory' ? 'ACCEPTED' : undefined) as Api.Status | undefined });
+const filters = reactive({ keyword: '', status: undefined as Api.Status | undefined });
+const overview = ref<(null | number)[]>([null, null, null, null]);
+const overviewOptions: { hint: string; label: string; status?: Api.Status; tone: string }[] = [
+  { label: '全部订单', hint: '查看全部状态', tone: 'all' },
+  { label: '待接单', hint: '确认交期与产品工艺', status: 'SUBMITTED', tone: 'pending' },
+  { label: '生产中', hint: '排单下发与交货跟进', status: 'ACCEPTED', tone: 'active' },
+  { label: '已完成', hint: '查看历史订单', status: 'COMPLETED', tone: 'done' },
+];
+const isOrderTab = computed(() => tab.value === 'factory' || tab.value === 'mine');
+const selectedItems = computed(() => [...selected.value.values()].reduce((sum, order) => sum + order.items.length, 0));
+let rowsVersion = 0;
+let overviewVersion = 0;
 const pageNo = ref(1);
 const pageSize = ref(20);
 
@@ -173,7 +185,9 @@ const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
 async function loadRows() {
+  const current = ++rowsVersion;
   if (!(await factory.whenActive())) return;
+  if (current !== rowsVersion) return;
   if (['exception', 'restock', 'schedule', 'tasks'].includes(tab.value)) return;
   if (tab.value === 'factory' && (!factoryReady.value || noFactory.value)) return;
   loading.value = true;
@@ -186,6 +200,7 @@ async function loadRows() {
       status: filters.status,
     };
     const page = tab.value === 'mine' ? await getMyProductionOrders(params) : await getFactoryProductionOrders(params);
+    if (current !== rowsVersion) return;
     rows.value = page.list;
     const refreshed = new Map(selected.value);
     for (const order of page.list) {
@@ -196,21 +211,39 @@ async function loadRows() {
     selected.value = refreshed;
     total.value = page.total;
   } catch {
-    loadError.value = true;
+    if (current === rowsVersion) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (current === rowsVersion) loading.value = false;
   }
 }
 
 async function loadPending() {
+  const current = ++overviewVersion;
   if (!(await factory.whenActive())) return;
-  if (!canHandle.value || !factoryReady.value || noFactory.value) return;
-  try {
-    const page = await getFactoryProductionOrders({ pageNo: 1, pageSize: 1, status: 'SUBMITTED' });
-    pendingCount.value = page.total;
-  } catch {
-    pendingCount.value = 0;
-  }
+  if (current !== overviewVersion || !isOrderTab.value) return;
+  if (tab.value === 'factory' && (!canHandle.value || !factoryReady.value || noFactory.value)) return;
+  const mine = tab.value === 'mine';
+  const request = mine ? getMyProductionOrders : getFactoryProductionOrders;
+  const counts = await Promise.all(overviewOptions.map(async ({ status }) => {
+    try {
+      const response = await request({ pageNo: 1, pageSize: 1, status });
+      return response.total;
+    } catch {
+      return null;
+    }
+  }));
+  if (current !== overviewVersion) return;
+  overview.value = counts;
+  if (!mine) pendingCount.value = counts[1] ?? 0;
+}
+
+function refreshOrders() {
+  return Promise.all([loadRows(), loadPending()]);
+}
+
+function resetFilters() {
+  filters.keyword = '';
+  filters.status = undefined;
 }
 
 async function initFactory() {
@@ -234,6 +267,11 @@ onMounted(async () => {
 
 async function switchFactory(id: number) {
   if (id === factory.factoryId.value) return;
+  ++rowsVersion;
+  ++overviewVersion;
+  rows.value = [];
+  overview.value = [null, null, null, null];
+  pendingCount.value = 0;
   selected.value = new Map();
   batchMixOpen.value = false;
   scheduleOpen.value = false;
@@ -247,16 +285,21 @@ async function switchFactory(id: number) {
 }
 
 watch(tab, (value) => {
+  ++rowsVersion;
+  ++overviewVersion;
+  rows.value = [];
+  overview.value = [null, null, null, null];
   pageNo.value = 1;
   selected.value = new Map();
-  filters.status = value === 'factory' ? 'ACCEPTED' : undefined;
-  if (value !== 'schedule') loadRows();
+  filters.status = undefined;
+  if (value !== 'schedule') void refreshOrders();
 });
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
   () => [filters.keyword, filters.status],
   () => {
+    ++rowsVersion;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
       if (!(await factory.whenActive())) return;
@@ -275,7 +318,7 @@ function openOrder(id: number) {
 async function onCreated(id: number) {
   message.success('已提交给工厂，等工厂接单');
   tab.value = 'mine';
-  await loadRows();
+  await refreshOrders();
   openOrder(id);
 }
 
@@ -288,17 +331,32 @@ async function onChanged() {
 
 const statusOptions = Object.entries(ORDER_STATUS).map(([value, s]) => ({ label: s.label, value }));
 const columns = computed(() => [
-  { key: 'orderNo', title: '订单号' },
-  tab.value === 'mine'
-    ? { dataIndex: 'factoryName', key: 'factoryName', title: '工厂' }
-    : { key: 'requester', title: '下单人' },
-  { key: 'items', title: '产品明细 / 订单数量', width: 340 },
-  { key: 'route', title: '实际工艺路线', width: 260 },
-  { key: 'progress', title: '完成', width: 160 },
-  { key: 'date', title: '交期' },
-  { key: 'status', title: '状态' },
-  { align: 'right' as const, key: 'actions', title: '操作', width: 175 },
+  { key: 'orderNo', title: '订单 / 状态', width: 215 },
+  { key: 'items', title: '产品 / 数量 / 工艺', width: 300 },
+  { key: 'progress', title: '交期 / 交货进度', width: 175 },
+  { fixed: 'right' as const, key: 'actions', title: '操作', width: 185 },
 ]);
+
+function deliveryHint(order: Api.Order) {
+  if (!['ACCEPTED', 'SUBMITTED'].includes(order.status)) return '';
+  const date = dateText(order.promisedDate) || dateText(order.requiredDate);
+  if (!date) return '';
+  const days = Math.round((new Date(`${date}T00:00:00+08:00`).getTime() - new Date(`${factoryToday().format('YYYY-MM-DD')}T00:00:00+08:00`).getTime()) / 86_400_000);
+  if (days < 0) return `已逾期 ${-days} 天`;
+  if (days === 0) return '今天交货';
+  if (days <= 3) return `${days} 天后交货`;
+  return '';
+}
+
+function statusHint(order: Api.Order) {
+  if (order.status === 'SUBMITTED') return tab.value === 'mine' ? '等待工厂确认接单' : '请确认交期后接单';
+  if (order.status === 'ACCEPTED') {
+    if (tab.value === 'mine') return '等待工厂交货';
+    return order.items.some((item) => (item.steps ?? []).some((step) => step.orderCount > 0)) ? '已下发工序任务' : '可勾选拆分下发';
+  }
+  if (order.status === 'REJECTED') return order.reply || '等待修改需求';
+  return '';
+}
 
 function progressPercent(o: Api.Order) {
   const t = num(o.totalQuantity);
@@ -309,7 +367,7 @@ function progressPercent(o: Api.Order) {
 <template>
   <Page>
     <div class="flex flex-col gap-4">
-      <header class="flex flex-wrap items-end justify-between gap-3">
+      <header class="order-header">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
             <h1 class="m-0 text-xl font-semibold tracking-tight">订单拆分与车间下发</h1>
@@ -321,17 +379,17 @@ function progressPercent(o: Api.Order) {
             />
           </div>
           <p class="m-0 mt-1 text-sm text-muted-foreground">
-            接单并确认产品工艺、生产参数后，勾选订单 → 预览各工序任务 → 确认下发。任务按每条产品明细的实际工艺分配到对应车间，工人在车间领取、领料和报工；订单数量与工序计划量分别显示。完成数量按交货数累加，发货在「库存中心 → 出库单」办理。
+            从接单到交货，集中处理工厂生产订单。
           </p>
         </div>
-        <Button v-if="canCreate" type="primary" @click="openCreate()">＋ 提生产需求</Button>
+        <Button v-if="canCreate" type="primary" size="large" @click="openCreate()">＋ 提生产需求</Button>
       </header>
 
       <Result v-if="!canCreate && !canHandle && !canViewSchedule" status="info" title="还没有工厂排单的权限">
         <template #subTitle>需要向工厂提生产需求的话，请联系管理员分配「工厂下单」角色。</template>
       </Result>
 
-      <section v-else class="rounded-lg border border-border bg-card px-4 pb-4">
+      <section v-else class="order-workspace rounded-xl border border-border bg-card">
         <Tabs v-model:active-key="tab">
           <Tabs.TabPane v-if="canHandle" key="factory">
             <template #tab>
@@ -364,40 +422,71 @@ function progressPercent(o: Api.Order) {
         <Result v-else-if="loadError" status="warning" title="订单没有加载出来">
           <template #extra><Button type="primary" @click="loadRows">重新加载</Button></template>
         </Result>
-        <div v-else class="flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-2">
-            <template v-if="selectable">
-              <Button v-if="canRelease" :disabled="selected.size === 0" size="small" type="primary" @click="releaseOpen = true">
-                拆分工序任务{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
-              </Button>
-              <details class="relative text-xs">
-                <summary class="cursor-pointer text-muted-foreground">辅助排单</summary>
-                <div class="absolute left-0 top-6 z-10 flex w-64 flex-col gap-2 rounded border border-border bg-background p-3 shadow-md">
-                  <span class="text-muted-foreground">特殊排产与旧流程，正常订单使用「拆分工序任务」。</span>
-                  <Button v-if="canSchedule" :disabled="selected.size === 0" size="small" @click="scheduleOpen = true">AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
-                  <Button v-if="canRelease" size="small" @click="batchMixOpen = true">批量安排发泡{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
-                </div>
-              </details>
-              <span v-if="selected.size === 0" class="text-xs text-muted-foreground">勾选已接单的订单，按实际工艺预览并下发各车间任务</span>
-              <button v-else class="text-xs text-primary hover:underline" type="button" @click="selected = new Map()">清空</button>
-            </template>
+        <div v-else class="flex flex-col gap-4">
+          <div class="text-xs text-muted-foreground">{{ tab === 'mine' ? '我的需求概览' : '本厂订单概览' }} · 点击状态筛选订单，概览数量不受搜索关键词影响</div>
+          <div class="order-overview" aria-label="订单状态快捷筛选">
+            <button
+              v-for="(option, index) in overviewOptions"
+              :key="option.label"
+              type="button"
+              class="overview-card"
+              :class="[`overview-card--${option.tone}`, { 'is-active': filters.status === option.status }]"
+              :aria-pressed="filters.status === option.status"
+              @click="filters.status = option.status"
+            >
+              <span class="overview-card__label">{{ option.label }} <span aria-hidden="true">↗</span></span>
+              <strong class="overview-card__value">{{ overview[index] === null ? '—' : overview[index] }}</strong>
+              <span class="overview-card__hint">{{ tab === 'mine' && option.status === 'SUBMITTED' ? '等待工厂确认接单' : tab === 'mine' && option.status === 'ACCEPTED' ? '查看工厂交货进度' : option.hint }}</span>
+            </button>
+          </div>
+          <div v-if="tab === 'factory'" class="order-workflow" aria-label="订单操作流程">
+            <span><b>1</b> 确认交期与工艺，接单</span><i aria-hidden="true">→</i>
+            <span><b>2</b> 勾选生产中订单，拆分下发</span><i aria-hidden="true">→</i>
+            <span><b>3</b> 跟进任务，交货 / 入库</span>
+          </div>
+          <div class="order-filters">
+            <Input
+              id="po-filter-keyword"
+              v-model:value="filters.keyword"
+              allow-clear
+              class="order-search"
+              aria-label="搜索订单"
+              placeholder="搜索订单号、采购单号、合同号、下单人"
+            >
+              <template #prefix><span class="text-muted-foreground" aria-hidden="true">⌕</span></template>
+            </Input>
             <Select
               id="po-filter-status"
               v-model:value="filters.status"
               :options="statusOptions"
               allow-clear
-              class="w-32"
+              class="w-36"
+              aria-label="订单状态"
               placeholder="全部状态"
-              size="small"
             />
-            <Input
-              id="po-filter-keyword"
-              v-model:value="filters.keyword"
-              allow-clear
-              :style="{ width: '14rem' }"
-              placeholder="订单号、采购单号、合同号、下单人"
-              size="small"
-            />
+            <Button v-if="filters.keyword || filters.status" @click="resetFilters">重置筛选</Button>
+            <span class="order-filters__total">筛选结果 <b>{{ total }}</b> 张</span>
+            <Button :loading="loading" @click="refreshOrders">刷新订单</Button>
+          </div>
+          <div v-if="selectable" class="order-batch" :class="{ 'has-selection': selected.size > 0 }">
+            <div class="flex flex-wrap items-center gap-2">
+              <b>{{ selected.size > 0 ? `已选 ${selected.size} 张订单` : '批量下发' }}</b>
+              <span class="text-xs text-muted-foreground">{{ selected.size > 0 ? `${selectedItems} 条产品明细 · 跨页保留选择` : '勾选生产中订单，核对产品参数后拆分工序任务' }}</span>
+              <Button v-if="selected.size > 0" size="small" type="link" @click="selected = new Map()">清空</Button>
+            </div>
+            <div class="flex items-center gap-3">
+              <details class="batch-extra relative text-xs">
+                <summary class="cursor-pointer text-muted-foreground">辅助排单</summary>
+                <div class="batch-extra__menu">
+                  <span class="text-muted-foreground">特殊排产与旧流程，正常订单使用「拆分工序任务」。</span>
+                  <Button v-if="canSchedule" :disabled="selected.size === 0" @click="scheduleOpen = true">AI 排单{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
+                  <Button v-if="canRelease" @click="batchMixOpen = true">批量安排发泡{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}</Button>
+                </div>
+              </details>
+              <Button v-if="canRelease" :disabled="selected.size === 0" type="primary" @click="releaseOpen = true">
+                拆分工序任务{{ selected.size > 0 ? `（已选 ${selected.size} 张）` : '' }}
+              </Button>
+            </div>
           </div>
           <Table
             v-model:expanded-row-keys="expandedOrderIds"
@@ -406,20 +495,31 @@ function progressPercent(o: Api.Order) {
             :loading="loading"
             :pagination="{ current: pageNo, pageSize, showSizeChanger: true, total, showTotal: (t: number) => `共 ${t} 张` }"
             :row-selection="rowSelection"
-            :scroll="{ x: 'max-content' }"
+            :scroll="{ x: 980 }"
+            :row-class-name="(record: Api.Order) => record.status === 'SUBMITTED' ? 'order-row--pending' : ''"
+            class="production-orders-table"
             row-key="id"
-            size="small"
+            size="middle"
             @change="(p) => ((pageNo = p.current ?? 1), (pageSize = p.pageSize ?? 20), loadRows())"
           >
             <template #emptyText>
-              <span class="text-muted-foreground">{{ tab === 'mine' ? '还没有提过需求，点右上角「提生产需求」' : '还没有收到订单' }}</span>
+              <div class="order-empty">
+                <b>{{ filters.keyword || filters.status ? '没有符合条件的订单' : tab === 'mine' ? '还没有提过生产需求' : '还没有收到订单' }}</b>
+                <span> {{ filters.keyword || filters.status ? '试试更换关键词或重置筛选' : tab === 'mine' ? '点击右上角「提生产需求」创建第一张订单' : '收到生产需求后，订单会显示在这里' }}</span>
+                <Button v-if="filters.keyword || filters.status" @click="resetFilters">查看全部订单</Button>
+              </div>
             </template>
             <template #expandedRowRender="{ record }"><OrderItemsTable :items="record.items" :editable="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" @edit="editItem(record.id, $event)" /></template>
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'orderNo'">
                 <div class="flex flex-col">
+                  <div class="mb-2 flex flex-wrap items-center gap-1">
+                    <Tag :color="ORDER_STATUS[record.status as Api.Status]?.color" class="m-0">{{ record.statusLabel }}</Tag>
+                    <span class="text-xs text-muted-foreground">{{ statusHint(record as Api.Order) }}</span>
+                  </div>
                   <button class="text-left text-primary hover:underline" type="button" @click="openOrder(record.id)">{{ record.orderNo }}</button>
                   <span class="text-xs text-muted-foreground">{{ timeText(record.createTime) }}<template v-if="record.purpose && record.sourceType !== 'PURCHASE_ORDER'"> · {{ record.purpose }}</template></span>
+                  <span class="my-1 text-xs text-muted-foreground">{{ tab === 'mine' ? record.factoryName : `${record.requesterName || '—'} · ${record.requesterDeptName || '未填写部门'}` }}</span>
                   <span v-if="record.sourceType === 'PURCHASE_ORDER'" class="flex flex-wrap items-center gap-1 text-xs">
                     <Tag class="m-0" color="blue">采购单 {{ record.sourceOrderCode }}</Tag>
                     <Tag v-if="record.sourceChanged" class="m-0" color="orange">有变更</Tag>
@@ -427,55 +527,40 @@ function progressPercent(o: Api.Order) {
                   </span>
                 </div>
               </template>
-              <template v-else-if="column.key === 'requester'">
-                <div class="flex flex-col">
-                  <span>{{ record.requesterName }}</span>
-                  <span class="text-xs text-muted-foreground">{{ record.requesterDeptName }}</span>
-                </div>
-              </template>
               <template v-else-if="column.key === 'items'">
                 <div v-for="item in record.items.slice(0, 2)" :key="item.id" class="mb-1 flex max-w-80 flex-col last:mb-0">
-                  <span>{{ item.productName }} · {{ num(item.quantity) }} {{ item.unit }}</span>
+                  <span class="font-medium">{{ item.productName }}</span>
+                  <span class="my-1"><b class="tabular-nums">{{ num(item.quantity).toLocaleString() }}</b> {{ item.unit }} <span class="text-xs text-muted-foreground">· 订单数量</span></span>
                   <span class="text-xs text-muted-foreground">{{ item.productCode }} · {{ specText(item) }}</span>
+                  <span class="mt-1 text-xs" :class="item.processes?.length ? 'text-muted-foreground' : 'text-orange-600'">{{ item.processes?.length ? item.processes.map((code: string) => PROCESS_LABELS[code] || code).join(' → ') : '待确认产品工艺' }}</span>
                 </div>
                 <div v-if="record.items.length > 2" class="text-xs text-primary">共 {{ record.items.length }} 个产品，展开查看完整明细</div>
               </template>
-              <template v-else-if="column.key === 'route'">
-                <div v-for="item in record.items.slice(0, 2)" :key="item.id" class="mb-1 text-xs last:mb-0">
-                  <div>{{ item.routeName || '自选工艺' }}</div>
-                  <span :class="item.processes?.length ? 'text-muted-foreground' : 'text-orange-600'">{{ item.processes?.length ? item.processes.map((code: string) => PROCESS_LABELS[code] || code).join(' → ') : '未配置工艺' }}</span>
-                </div>
-              </template>
               <template v-else-if="column.key === 'progress'">
-                <div class="flex flex-col">
-                  <span class="text-xs">{{ num(record.completedQuantity) }} / {{ num(record.totalQuantity) }}</span>
-                  <Progress :percent="progressPercent(record as Api.Order)" :show-info="false" size="small" />
-                </div>
-              </template>
-              <template v-else-if="column.key === 'date'">
-                <div class="flex flex-col">
-                  <span>{{ dateText(record.promisedDate) || dateText(record.requiredDate) || '没填' }}</span>
+                <div class="mb-3 flex flex-col">
+                  <span class="font-medium">{{ dateText(record.promisedDate) || dateText(record.requiredDate) || '未填写交期' }}</span>
                   <span class="text-xs text-muted-foreground">{{ record.promisedDate ? '工厂交期' : '希望交货' }}</span>
+                  <span v-if="deliveryHint(record as Api.Order)" class="mt-1 text-xs font-medium" :class="deliveryHint(record as Api.Order).startsWith('已逾期') ? 'text-destructive' : 'text-orange-600'">{{ deliveryHint(record as Api.Order) }}</span>
                 </div>
-              </template>
-              <template v-else-if="column.key === 'status'">
-                <Tag :color="ORDER_STATUS[record.status as Api.Status]?.color" class="m-0">{{ record.statusLabel }}</Tag>
+                <div v-if="record.status !== 'SUBMITTED'" class="flex flex-col">
+                  <span class="text-xs"><b class="text-primary">{{ progressPercent(record as Api.Order) }}%</b> · 已{{ record.sourceType === 'PURCHASE_ORDER' ? '入库' : '交货' }}</span>
+                  <Progress :percent="progressPercent(record as Api.Order)" :show-info="false" size="small" />
+                  <span class="text-xs text-muted-foreground">{{ num(record.completedQuantity).toLocaleString() }} / {{ num(record.totalQuantity).toLocaleString() }}</span>
+                </div>
               </template>
               <template v-else-if="column.key === 'actions'">
-                <span class="inline-flex gap-3 whitespace-nowrap text-xs">
-                  <button class="text-primary hover:underline" type="button" @click="openOrder(record.id)">
+                <div class="order-row-actions">
+                  <Button :type="tab === 'factory' && canHandle && record.status === 'SUBMITTED' ? 'primary' : 'default'" @click="openOrder(record.id)">
                     {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
-                  </button>
-                  <button v-if="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" class="text-primary hover:underline" type="button" @click="expandedOrderIds = [...new Set([...expandedOrderIds, record.id])]">产品参数</button>
-                  <button
+                  </Button>
+                  <Button v-if="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" @click="expandedOrderIds = expandedOrderIds.includes(record.id) ? expandedOrderIds.filter((id) => id !== record.id) : [...expandedOrderIds, record.id]">产品参数</Button>
+                  <Button
                     v-if="tab === 'mine' && record.sourceType !== 'PURCHASE_ORDER'"
-                    class="text-primary hover:underline"
-                    type="button"
                     @click="openCreate(record as Api.Order)"
                   >
                     {{ record.status === 'REJECTED' ? '改了重下' : '复制' }}
-                  </button>
-                </span>
+                  </Button>
+                </div>
               </template>
             </template>
           </Table>
@@ -491,3 +576,219 @@ function progressPercent(o: Api.Order) {
     </div>
   </Page>
 </template>
+
+<style scoped>
+.order-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.order-workspace {
+  padding: 0 20px 20px;
+}
+
+.order-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overview-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 14px 16px;
+  text-align: left;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.overview-card:hover,
+.overview-card.is-active {
+  background: hsl(var(--primary) / 5%);
+  border-color: hsl(var(--primary));
+}
+
+.overview-card:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 3px;
+}
+
+.overview-card__label {
+  display: flex;
+  grid-column: 1;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.overview-card__label > span {
+  color: hsl(var(--muted-foreground));
+}
+
+.overview-card__value {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.overview-card--pending .overview-card__value {
+  color: #b45309;
+}
+
+.overview-card--active .overview-card__value {
+  color: hsl(var(--primary));
+}
+
+.overview-card--done .overview-card__value {
+  color: #15803d;
+}
+
+.overview-card__hint {
+  grid-column: 1;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.order-workflow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 45%);
+  border-radius: 8px;
+}
+
+.order-workflow b {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 10%);
+  border-radius: 50%;
+}
+
+.order-workflow i {
+  font-style: normal;
+}
+
+.order-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.order-search {
+  width: min(100%, 360px);
+}
+
+.order-filters__total {
+  margin-left: auto;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+
+.order-filters__total b {
+  color: hsl(var(--foreground));
+}
+
+.order-batch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  font-size: 13px;
+  background: hsl(var(--muted) / 40%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.order-batch.has-selection {
+  background: hsl(var(--primary) / 5%);
+  border-color: hsl(var(--primary) / 35%);
+}
+
+.batch-extra__menu {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 260px;
+  padding: 14px;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  box-shadow: 0 6px 20px #00000014;
+}
+
+.order-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.order-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 40px 16px;
+  color: hsl(var(--muted-foreground));
+}
+
+.production-orders-table :deep(.ant-table-thead > tr > th) {
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+.production-orders-table :deep(.ant-table-cell) {
+  vertical-align: top;
+}
+
+.production-orders-table :deep(.order-row--pending > td) {
+  background: hsl(var(--warning) / 4%);
+}
+
+@media (max-width: 768px) {
+  .order-workspace {
+    padding: 0 12px 12px;
+  }
+
+  .order-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-card {
+    padding: 12px;
+  }
+
+  .order-search {
+    width: 100%;
+  }
+
+  .order-workflow i {
+    display: none;
+  }
+}
+</style>

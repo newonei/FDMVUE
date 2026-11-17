@@ -215,6 +215,7 @@ const columns = computed(() => [
   { title: '客户颜色名称', key: 'customerColor', width: 140 },
   { title: '产品克重', key: 'weight', width: 120 },
   { title: '型号（如正反面颜色）', key: 'model', width: 180 },
+  { title: '供应商实物色号图', key: 'colorImage', width: 150 },
   ...extras.detailColumns.map((column) => ({
     title: column.title || '未命名列',
     key: `custom:${column.id}`,
@@ -249,12 +250,16 @@ function priceAmount(line: Line) {
 function columnByKey(key: unknown) {
   return extras.detailColumns.find((column) => `custom:${column.id}` === key);
 }
-function lineImages(line: Line) {
-  const id = extra(line).imageId;
+function lineImages(line: Line, field: 'colorImageId' | 'imageId' = 'imageId') {
+  const id = extra(line)[field];
   return id ? [id] : [];
 }
-function setLineImages(line: Line, ids: string[]) {
-  extra(line).imageId = ids[0];
+function setLineImages(
+  line: Line,
+  ids: string[],
+  field: 'colorImageId' | 'imageId' = 'imageId',
+) {
+  extra(line)[field] = ids[0];
 }
 /** 把第一行的值填到下面空着的行（同一批货常常克重、装箱数一样）。 */
 function fillDown(key: 'customerColor' | 'model' | 'packQty' | 'weight') {
@@ -547,7 +552,7 @@ defineExpose({
           :pagination="false"
           size="small"
           :row-key="(line: Line) => String(line.id)"
-          :scroll="{ x: 1950 + extras.detailColumns.length * 180 }"
+          :scroll="{ x: 2100 + extras.detailColumns.length * 180 }"
           :columns="columns"
         >
           <template #headerCell="{ column }">
@@ -620,6 +625,20 @@ defineExpose({
               :disabled="disabled"
               :maxlength="500"
               :auto-size="{ minRows: 1, maxRows: 4 }"
+            />
+            <OrderImages
+              v-else-if="column.key === 'colorImage' && !record.additional"
+              :model-value="lineImages(record, 'colorImageId')"
+              :contract-id="contractId"
+              :order-id="orderId"
+              :max="1"
+              :size="64"
+              :disabled="disabled"
+              aria-label="供应商实物色号图"
+              @update:model-value="
+                (ids) => setLineImages(record, ids, 'colorImageId')
+              "
+              @busy="imageBusy"
             />
             <InputNumber
               v-else-if="column.key === 'quantity' && record.additional"

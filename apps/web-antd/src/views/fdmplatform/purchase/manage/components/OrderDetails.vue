@@ -30,6 +30,7 @@ import { errorText } from '../../../data';
 import {
   clauseGroupTitle,
   compatibleClauses,
+  deliveryDateError,
   detailsChecklist,
   onlyChoice,
   preferredContact,
@@ -111,8 +112,11 @@ const groups = computed(() => {
     .filter((group): group is string => !!group);
   return [...new Set([...required, ...all])];
 });
-const checklist = computed(() =>
-  detailsChecklist({
+const deliveryError = computed(() =>
+  deliveryDateError(props.view, form.deliveryDate),
+);
+const checklist = computed(() => [
+  ...detailsChecklist({
     clauseIds: canEdit.value
       ? form.clauseIds
       : (props.view.details.clauseSnapshots ?? []).map((item) => item.id),
@@ -121,7 +125,13 @@ const checklist = computed(() =>
     entity: entity.value,
     template: template.value,
   }),
-);
+  {
+    key: 'deliveryDate',
+    label: '采购交期',
+    ok: !deliveryError.value,
+    hint: deliveryError.value || undefined,
+  },
+]);
 const missing = computed(() => checklist.value.filter((item) => !item.ok));
 const settingsMissing = computed(() => {
   if (!settingsLoaded.value || !canEdit.value) return [];
@@ -246,11 +256,13 @@ function markSaved(action: string) {
 }
 defineExpose({ isDirty, markSaved, pendingSave });
 function confirm() {
-  pageError.value = compatibleClauses(
-    clauses.value,
-    form.clauseIds,
-    template.value?.requiredClauseGroups ?? [],
-  );
+  pageError.value =
+    deliveryError.value ||
+    compatibleClauses(
+      clauses.value,
+      form.clauseIds,
+      template.value?.requiredClauseGroups ?? [],
+    );
   if (!pageError.value) emit('confirm', payload());
 }
 </script>
@@ -313,7 +325,11 @@ function confirm() {
             placeholder="选联系人后自动带出"
           />
         </Form.Item>
-        <Form.Item label="交货日期">
+        <Form.Item
+          label="整单交货日期"
+          :required="!!deliveryError"
+          extra="确认资料前必填；若所有有效产品行已有到货日期或对应报价承诺日期，可留空。草稿可暂存。"
+        >
           <Input
             v-model:value="form.deliveryDate"
             type="date"

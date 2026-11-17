@@ -4,6 +4,7 @@
  */
 export const FACTORY_ROUTES = {
   dashboard: { name: 'FdmGongchangDashboard' },
+  orderBoard: { name: 'FdmGongchangOrderBoard' },
   productionOrder: { name: 'FdmGongchangProductionOrder' },
   /** 排单方案在「工厂排单」页的标签里（旧的 AI 排单菜单已隐藏）。 */
   schedule: { name: 'FdmGongchangProductionOrder', query: { tab: 'schedule' } },

@@ -145,6 +145,7 @@ async function settle() {
   }
 }
 async function mount() {
+  const disabled = ref(false);
   const view = ref(fixture());
   const extras = ref<InstanceType<typeof OrderPrintExtras>>();
   const saved = vi.fn();
@@ -157,7 +158,7 @@ async function mount() {
       h(OrderPrintExtras, {
         ref: extras,
         view: view.value,
-        disabled: false,
+        disabled: disabled.value,
         onSave: saved,
         onDirty: dirty,
         onBusy: busy,
@@ -169,7 +170,7 @@ async function mount() {
     host.remove();
   });
   await settle();
-  return { host, view, extras, saved, dirty, busy };
+  return { host, view, extras, saved, dirty, busy, disabled };
 }
 function buttons(host: HTMLElement, label: string) {
   return [...host.querySelectorAll('button')].filter(
@@ -192,7 +193,179 @@ async function fill(host: ParentNode, selector: string, value: string) {
   await settle();
 }
 
+function dragEvent(element: Element, type: string) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', {
+    value: { effectAllowed: '', dropEffect: '', setData: vi.fn() },
+  });
+  element.dispatchEvent(event);
+  return event;
+}
+
+async function withColorCards() {
+  const mounted = await mount();
+  mounted.view.value = {
+    ...mounted.view.value,
+    details: {
+      ...mounted.view.value.details,
+      version: 2,
+      detailColumns: [
+        { id: 'card', type: 'IMAGE', title: '色卡图片' },
+        { id: 'other', type: 'IMAGE', title: '其他图片' },
+      ],
+      lineExtras: {
+        'product-1': {
+          customCells: {
+            card: { imageIds: ['front', 'back', 'detail'] },
+            other: { imageIds: ['other-front', 'other-back'] },
+          },
+        },
+      },
+    },
+  };
+  await settle();
+  return mounted;
+}
+
+function thumbs(host: HTMLElement, column = 'card') {
+  return [
+    ...host.querySelectorAll<HTMLElement>(
+      `[data-key="custom:${column}"] .thumb`,
+    ),
+  ];
+}
+
 describe('actual purchase print extras editor', () => {
+  it('drags color cards in both directions and saves/reloads their new order', async () => {
+    const { host, extras, view, saved } = await withColorCards();
+    const [front, back, detail] = thumbs(host);
+    expect(front!.getAttribute('draggable')).toBe('true');
+    dragEvent(front!, 'dragstart');
+    expect(dragEvent(detail!, 'dragover').defaultPrevented).toBe(true);
+    await settle();
+    expect(detail!.classList.contains('drop-target')).toBe(true);
+    dragEvent(detail!, 'drop');
+    dragEvent(front!, 'dragend');
+    await settle();
+    expect(thumbs(host)).toEqual([back, detail, front]);
+    expect(
+      extras.value!.payload().lineExtras['product-1']!.customCells,
+    ).toEqual({
+      card: { imageIds: ['back', 'detail', 'front'] },
+      other: { imageIds: ['other-front', 'other-back'] },
+    });
+    expect(extras.value!.isDirty()).toBe(true);
+    // The reverse direction moves the last image into the first position.
+    dragEvent(front!, 'dragstart');
+    dragEvent(back!, 'dragover');
+    dragEvent(back!, 'drop');
+    await settle();
+    expect(thumbs(host)).toEqual([front, back, detail]);
+    expect(extras.value!.isDirty()).toBe(false);
+    dragEvent(back!, 'dragstart');
+    dragEvent(front!, 'drop');
+    await settle();
+    await click(host, '保存附加资料');
+    expect(saved).toHaveBeenCalledOnce();
+    const payload = extras.value!.payload();
+    expect(
+      payload.lineExtras['product-1']!.customCells!.card!.imageIds,
+    ).toEqual(['back', 'front', 'detail']);
+    view.value = {
+      ...view.value,
+      details: { ...view.value.details, ...payload, version: 3 },
+    };
+    await settle();
+    extras.value!.markSaved();
+    await settle();
+    expect(extras.value!.isDirty()).toBe(false);
+    expect(extras.value!.payload()).toEqual(payload);
+    // Switch away and back to force loading the persisted array afresh.
+    const savedView = view.value;
+    view.value = { ...fixture(), id: 'order-2' };
+    await settle();
+    view.value = savedView;
+    await settle();
+    expect(extras.value!.payload()).toEqual(payload);
+  });
+
+  it('rejects cross-group/external drops, cancels without changes and respects readonly', async () => {
+    const { host, extras, disabled } = await withColorCards();
+    const original = extras.value!.payload();
+    const [front, back] = thumbs(host);
+    const [other] = thumbs(host, 'other');
+    expect(dragEvent(back!, 'dragover').defaultPrevented).toBe(false);
+    dragEvent(back!, 'drop');
+    dragEvent(front!, 'dragstart');
+    expect(dragEvent(other!, 'dragover').defaultPrevented).toBe(false);
+    dragEvent(other!, 'drop');
+    dragEvent(front!, 'dragend');
+    await settle();
+    expect(extras.value!.payload()).toEqual(original);
+    expect(extras.value!.isDirty()).toBe(false);
+    dragEvent(front!, 'dragstart');
+    dragEvent(back!, 'dragover');
+    dragEvent(front!, 'dragend');
+    await settle();
+    expect(host.querySelector('.drop-target')).toBeNull();
+    disabled.value = true;
+    await settle();
+    expect(front!.getAttribute('draggable')).toBe('false');
+    expect(dragEvent(front!, 'dragstart').defaultPrevented).toBe(true);
+    dragEvent(back!, 'drop');
+    expect(extras.value!.payload()).toEqual(original);
+  });
+
+  it('uploads and removes the supplier color image after model without replacing the product image', async () => {
+    const { host, view, extras, busy } = await mount();
+    view.value = {
+      ...view.value,
+      details: {
+        ...view.value.details,
+        version: 2,
+        lineExtras: { 'product-1': { imageId: 'product-image' } },
+      },
+    };
+    await settle();
+    const product = host.querySelector('[data-row="product-1"]')!;
+    expect(
+      product.querySelector('[data-key="model"]')!.nextElementSibling,
+    ).toBe(product.querySelector('[data-key="colorImage"]'));
+    const file = product.querySelector<HTMLInputElement>(
+      '[data-key="colorImage"] input[type="file"]',
+    )!;
+    Object.defineProperty(file, 'files', {
+      configurable: true,
+      value: [new File(['png'], 'supplier-color.png', { type: 'image/png' })],
+    });
+    file.dispatchEvent(new Event('change'));
+    await settle();
+    expect(busy).toHaveBeenCalledWith(true);
+    expect(busy).toHaveBeenLastCalledWith(false);
+    const payload = extras.value!.payload();
+    expect(payload.lineExtras['product-1']).toMatchObject({
+      imageId: 'product-image',
+      colorImageId: 'color-image',
+    });
+    view.value = {
+      ...view.value,
+      details: { ...view.value.details, ...payload, version: 3 },
+    };
+    extras.value!.markSaved();
+    await settle();
+    expect(extras.value!.isDirty()).toBe(false);
+    product
+      .querySelector<HTMLButtonElement>(
+        '[data-key="colorImage"] button[aria-label="删除图片"]',
+      )!
+      .click();
+    await settle();
+    expect(extras.value!.payload().lineExtras['product-1']).toEqual({
+      imageId: 'product-image',
+    });
+    expect(extras.value!.isDirty()).toBe(true);
+  });
+
   it('edits free expense rows, text columns and color-card images and exposes both save buttons', async () => {
     const { host, extras, saved, busy } = await mount();
     expect(extras.value?.isDirty()).toBe(false);

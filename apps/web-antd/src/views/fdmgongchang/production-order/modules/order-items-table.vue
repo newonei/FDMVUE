@@ -11,7 +11,7 @@ import { getTargetOptions } from '#/api/fdmgongchang/production-order';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { PROCESS_LABELS } from '../../shared/schedule';
-import { colorModeText, parameterText, thicknessText } from '../manufacturing';
+import { colorModeText, parameterText, textureText, thicknessText } from '../manufacturing';
 import { num, specText } from '../shared';
 
 defineProps<{ editable?: boolean; items: Api.Item[] }>();
@@ -20,6 +20,10 @@ const options = ref<FdmgongchangSupplyMatchApi.TargetOptions>();
 onMounted(async () => { options.value = await getTargetOptions().catch(() => undefined); });
 function named(value: null | string | undefined, kind: 'colors' | 'textures') {
   return parameterText(value, options.value?.[kind].find((item) => item.value === value)?.label);
+}
+function texture(item: Api.Item, side: 'BACK' | 'FRONT') {
+  const value = side === 'FRONT' ? item.targetTextureFront : item.targetTextureBack;
+  return textureText(item, side, options.value?.textures.find((option) => option.value === value)?.label);
 }
 
 const columns: TableColumnsType<Api.Item> = [
@@ -59,12 +63,12 @@ const columns: TableColumnsType<Api.Item> = [
       <template v-else-if="column.key === 'front'">
         <div>颜色：{{ named(record.targetFrontColor, 'colors') }}</div>
         <div class="text-xs">层厚：{{ thicknessText(record.targetFrontThickness) }}</div>
-        <div class="text-xs">压花纹路：{{ named(record.targetTextureFront, 'textures') }}</div>
+        <div class="text-xs">压花纹路：{{ texture(record as Api.Item, 'FRONT') }}</div>
       </template>
       <template v-else-if="column.key === 'back'">
         <div>颜色：{{ named(record.targetBackColor, 'colors') }}</div>
-        <div class="text-xs">层厚：{{ thicknessText(record.targetBackThickness) }}</div>
-        <div class="text-xs">压花纹路：{{ named(record.targetTextureBack, 'textures') }}</div>
+        <div class="text-xs">层厚：{{ record.targetConstructionType === 'SINGLE_LAYER' ? '单层不适用' : thicknessText(record.targetBackThickness) }}</div>
+        <div class="text-xs">压花纹路：{{ texture(record as Api.Item, 'BACK') }}</div>
       </template>
       <template v-else-if="column.key === 'route'">
         <div>{{ record.routeName || '自选工艺' }}</div>

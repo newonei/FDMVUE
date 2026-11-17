@@ -17,6 +17,30 @@ import {
   setRowTotal,
 } from './entry-model';
 
+describe('正式采购交期', () => {
+  it('草稿可缺日期，提交时每行都须有真实日期', () => {
+    const rows = [
+      {
+        ...emptyRow('a'),
+        productId: 'sku',
+        quantity: '2',
+        unitPrice: '1',
+        arrivalDate: '2026-11-20',
+      },
+      { ...emptyRow('b'), productId: 'sku', quantity: '3', unitPrice: '1' },
+    ];
+    const header = { supplierId: 's', companyId: 1 };
+    expect(entryErrors(rows, header).lines).toEqual({});
+    expect(entryErrors(rows, header, true).lines).toEqual({
+      b: '提交下单前请填写到货日期',
+    });
+    rows[1]!.arrivalDate = '2026-02-30';
+    expect(entryErrors(rows, header, true).lines).toHaveProperty('b');
+    rows[1]!.arrivalDate = '2026-11-21';
+    expect(entryErrors(rows, header, true).lines).toEqual({});
+  });
+});
+
 function row(extra = {}) {
   return { ...emptyRow('r1'), productId: 'p1', name: '色料', ...extra };
 }

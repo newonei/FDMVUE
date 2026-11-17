@@ -3,6 +3,7 @@ import type { PickRow } from './model';
 
 import type {
   InventoryWarehouse,
+  ProductionOrderOutboundCandidate,
   StockOut,
   Transfer,
 } from '#/api/fdmplatform/warehouse';
@@ -23,6 +24,7 @@ import {
   createOtherOut,
   createTransfer,
   getInventoryWarehouses,
+  getProductionOrderOutboundCandidates,
   getStocks,
 } from '#/api/fdmplatform/warehouse';
 
@@ -36,6 +38,7 @@ import {
   pickRows,
   writableWarehouses,
 } from './model';
+import ProductionOrderSelect from './ProductionOrderSelect.vue';
 
 import '../../purchase/warehouse/stock-dialog.css';
 
@@ -50,6 +53,7 @@ const DESTINATIONS = ['电商仓', '平台仓', '样品', '报废', '工厂领�
 const today = localDate();
 const warehouses = ref<InventoryWarehouse[]>([]);
 const rows = ref<PickRow[]>([]);
+const orderCandidates = ref<ProductionOrderOutboundCandidate[]>([]);
 const keyword = ref('');
 const loading = ref(false);
 const saving = ref(false);
@@ -94,15 +98,21 @@ const count = computed(
 
 async function loadStocks() {
   rows.value = [];
+  orderCandidates.value = [];
   if (!form.value.warehouseId) return;
   loading.value = true;
   try {
-    rows.value = pickRows(
-      await getStocks({
+    const [stocks, candidates] = await Promise.all([
+      getStocks({
         warehouseId: form.value.warehouseId,
         inStockOnly: true,
       }),
-    );
+      transfer.value
+        ? Promise.resolve([])
+        : getProductionOrderOutboundCandidates(form.value.warehouseId),
+    ]);
+    rows.value = pickRows(stocks);
+    orderCandidates.value = candidates;
   } catch (error_) {
     error.value = errorText(error_);
   } finally {
@@ -172,7 +182,7 @@ async function save() {
   <Modal
     :open="open"
     :title="transfer ? '调拨单' : '其它出库'"
-    width="920px"
+    :width="transfer ? '920px' : '1180px'"
     :mask-closable="false"
     @cancel="emit('close')"
   >
@@ -252,11 +262,12 @@ async function save() {
               <th>产品 / 规格</th>
               <th class="num">现存</th>
               <th class="qty">本次{{ name }}</th>
+              <th v-if="!transfer">关联生产订单</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!visible.length">
-              <td colspan="3" class="empty">
+              <td :colspan="transfer ? 3 : 4" class="empty">
                 {{
                   loading
                     ? '正在读取库存'
@@ -289,6 +300,14 @@ async function save() {
                   placeholder="不出留空"
                   style="width: 100%"
                   :aria-label="`${row.productName} ${name}数量`"
+                />
+              </td>
+              <td v-if="!transfer">
+                <ProductionOrderSelect
+                  v-model:value="row.productionOrderItemId"
+                  :candidates="orderCandidates"
+                  :sku-id="row.skuId"
+                  :spec-version="row.specVersion"
                 />
               </td>
             </tr>

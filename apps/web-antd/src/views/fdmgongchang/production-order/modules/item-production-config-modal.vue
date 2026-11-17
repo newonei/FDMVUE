@@ -12,7 +12,7 @@ import { Alert, AutoComplete, Button, InputNumber, Modal, Select, Spin } from 'a
 import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig } from '#/api/fdmgongchang/production-order';
 
 import { routeLabel, routeProblem, sortSteps } from '../shared';
-import { productionConfigDraft, productionConfigProblems, productionConfigTarget, productionLayerThickness, unfinishedProductionParameters } from './item-production-config';
+import { productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, unfinishedProductionParameters } from './item-production-config';
 import RoutePicker from './route-picker.vue';
 
 const props = defineProps<{ itemId: number; orderId: number }>();
@@ -20,7 +20,7 @@ const emit = defineEmits<{ saved: [] }>();
 const open = defineModel<boolean>('open', { required: true });
 const order = ref<Api.Order>();
 const item = ref<Api.Item>();
-const form = ref<ProductionConfigDraft>({ colorMode: 'UNKNOWN' });
+const form = ref<ProductionConfigDraft>({ colorMode: 'UNKNOWN', constructionType: 'UNKNOWN' });
 const route = ref<RouteDraft>({ steps: [] });
 const targetOptions = ref<MatchApi.TargetOptions>();
 const routeOptions = ref<RouteApi.Options>();
@@ -69,7 +69,6 @@ async function load() {
 watch([open, () => props.orderId, () => props.itemId], load, { immediate: true });
 onBeforeUnmount(() => { version++; });
 
-const layerThickness = computed(() => productionLayerThickness(form.value));
 const processLabels = computed(() => new Map(routeOptions.value?.processes.map((p) => [p.code, p.label])));
 const actualRoute = computed(() => route.value.steps.map((code) => processLabels.value.get(code) ?? code).join(' → ') || '未选择工序');
 const unfinished = computed(() => unfinishedProductionParameters(form.value, route.value.steps));
@@ -81,8 +80,8 @@ const problems = computed(() => {
   if (unknown.length > 0) result.push(`本厂未启用工序：${unknown.join('、')}，请重新选择工艺`);
   const problem = routeProblem(steps, available);
   if (problem) result.push(problem);
-  if (form.value.colorMode === 'DUAL' && !steps.includes('LAMINATE')) result.push('双色双层产品需要贴合工序');
-  if (form.value.colorMode === 'SINGLE' && steps.includes('LAMINATE')) result.push('单色单层产品不需要贴合，请取消贴合工序');
+  const structureProblem = productionRouteProblems(form.value.constructionType, steps);
+  if (structureProblem) result.push(structureProblem);
   if (!steps.includes('EMBOSS') && (form.value.textureFront || form.value.textureBack)) result.push('未选择压花工序，请清空正反纹路，或加入压花工序');
   if (!steps.includes('ENGRAVE') && form.value.pattern) result.push('未选择雕刻工序，请清空雕刻图案，或加入雕刻工序');
   return result;
@@ -115,7 +114,8 @@ async function save() {
   }
 }
 
-const colorModes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单色 · 单层', value: 'SINGLE' }, { label: '双色 · 双层贴合', value: 'DUAL' }];
+const colorModes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单色', value: 'SINGLE' }, { label: '双色', value: 'DUAL' }];
+const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单层', value: 'SINGLE_LAYER' }, { label: '双层贴合', value: 'DOUBLE_LAYER' }];
 </script>
 
 <template>
@@ -138,6 +138,9 @@ const colorModes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单色 �
             <label for="config-color-mode">单色 / 双色 *
               <Select id="config-color-mode" v-model:value="form.colorMode" :options="colorModes" />
             </label>
+            <label for="config-construction">制造结构 *
+              <Select id="config-construction" v-model:value="form.constructionType" :options="constructionTypes" />
+            </label>
             <label for="config-front-color">正面颜色 *
               <Select id="config-front-color" v-model:value="form.frontColor" :options="targetOptions?.colors" allow-clear show-search option-filter-prop="label" placeholder="未填写" />
             </label>
@@ -157,22 +160,31 @@ const colorModes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单色 �
             <div class="flex flex-col gap-1">
               <span>保存后的制造层厚</span>
               <div class="config-layer rounded bg-muted px-3 py-1.5 text-sm">
-                <template v-if="form.colorMode === 'DUAL'">正面 {{ layerThickness ?? '未填写' }} mm + 反面 {{ layerThickness ?? '未填写' }} mm</template>
-                <template v-else-if="form.colorMode === 'SINGLE'">单层 {{ layerThickness ?? '未填写' }} mm</template>
-                <template v-else>请先核实单双色</template>
+                <template v-if="form.constructionType === 'DOUBLE_LAYER'">正面 {{ form.frontThicknessMm ?? '未填写' }} mm + 反面 {{ form.backThicknessMm ?? '未填写' }} mm</template>
+                <template v-else-if="form.constructionType === 'SINGLE_LAYER'">单层 {{ form.thicknessMm ?? '未填写' }} mm</template>
+                <template v-else>请先核实制造结构</template>
               </div>
             </div>
-            <label for="config-texture-front">正面压花纹路
-              <Select id="config-texture-front" v-model:value="form.textureFront" :options="targetOptions?.textures" allow-clear show-search option-filter-prop="label" placeholder="未填写" />
+            <template v-if="form.constructionType === 'DOUBLE_LAYER'">
+              <label for="config-front-thickness">正面层厚 mm *
+                <InputNumber id="config-front-thickness" v-model:value="form.frontThicknessMm" :min="0" :precision="3" :step="0.1" placeholder="按实际层厚填写" />
+              </label>
+              <label for="config-back-thickness">反面层厚 mm *
+                <InputNumber id="config-back-thickness" v-model:value="form.backThicknessMm" :min="0" :precision="3" :step="0.1" placeholder="按实际层厚填写" />
+              </label>
+            </template>
+            <label v-if="route.steps.includes('EMBOSS') || form.textureFront || form.textureBack" for="config-texture-front">正面压花纹路
+              <Select id="config-texture-front" v-model:value="form.textureFront" :options="targetOptions?.textures" allow-clear show-search option-filter-prop="label" placeholder="不压花 / 选择纹路" />
             </label>
-            <label for="config-texture-back">反面压花纹路
-              <Select id="config-texture-back" v-model:value="form.textureBack" :options="targetOptions?.textures" allow-clear show-search option-filter-prop="label" placeholder="未填写" />
+            <label v-if="route.steps.includes('EMBOSS') || form.textureFront || form.textureBack" for="config-texture-back">反面压花纹路
+              <Select id="config-texture-back" v-model:value="form.textureBack" :options="targetOptions?.textures" allow-clear show-search option-filter-prop="label" placeholder="不压花 / 选择纹路" />
             </label>
             <label for="config-pattern" class="sm:col-span-2">雕刻图案
               <Select id="config-pattern" v-model:value="form.pattern" :options="targetOptions?.patterns" allow-clear show-search option-filter-prop="label" placeholder="未填写" />
             </label>
+            <p v-if="route.steps.length > 0 && !route.steps.includes('EMBOSS')" class="text-sm text-muted-foreground">本产品不经过压花工序。</p>
           </div>
-          <p class="mt-3 text-xs text-muted-foreground">这里填写冲裁后的成品尺寸。立切、贴合的中间尺寸由板材与出片方式计算；双色正反面各用成品总厚的一半，单色采用整厚。</p>
+          <p class="mt-3 text-xs text-muted-foreground">这里填写冲裁后的成品尺寸。颜色方式与制造结构分别确认，单色也可双层贴合；双层正反面按实际层厚填写，两层之和必须等于成品总厚。压花至少选择一面纹路，另一面可不压花。</p>
           <div class="mt-4 border-t pt-3">
             <div class="mb-2 font-medium">实际生产工艺</div>
             <RoutePicker id="production-config" v-model="route" :options="routeOptions" />

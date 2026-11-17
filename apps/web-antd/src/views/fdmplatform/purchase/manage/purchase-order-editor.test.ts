@@ -276,6 +276,15 @@ describe('采购开单先保存草稿', () => {
       const { host, saved } = await mount({
         editOf: { contractId: '', orderId: 'source-order' },
       });
+      if (submit) {
+        // 第一项日期为采购日期，产品行到货日期是最后一项。
+        const arrival = [
+          ...host.querySelectorAll<HTMLInputElement>('input[type="date"]'),
+        ].at(-1)!;
+        arrival.value = '2026-11-20';
+        arrival.dispatchEvent(new Event('input'));
+        await settle();
+      }
       button(host, label).click();
       await settle();
       expect(mocks.create).not.toHaveBeenCalled();
@@ -288,4 +297,21 @@ describe('采购开单先保存草稿', () => {
       expect(saved).toHaveBeenCalledWith(result, mode);
     },
   );
+  it('提交前拦住缺交期，仍可保存草稿', async () => {
+    const { host } = await mount({
+      editOf: { contractId: '', orderId: 'source-order' },
+    });
+    button(host, '提交下单').click();
+    await settle();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('提交下单前请填写到货日期');
+    button(host, '保存草稿').click();
+    await settle();
+    expect(mocks.update).toHaveBeenCalledWith(
+      '',
+      'source-order',
+      expect.any(Object),
+      false,
+    );
+  });
 });

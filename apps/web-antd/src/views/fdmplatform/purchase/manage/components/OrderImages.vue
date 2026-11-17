@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Button, Image, message, Spin } from 'ant-design-vue';
 
@@ -11,7 +11,7 @@ import {
 import { errorText } from '../../../data';
 
 /**
- * 下单资料里的一组图片（产品图、共用说明配图、包装步骤图）：缩略图点开放大，可上传、粘贴截图、删除。
+ * 下单资料里的一组图片：缩略图点开放大，可上传、粘贴截图、删除和拖拽排序。
  * 图片按采购单存档，ids 只记引用，保存下单资料时一起提交。
  */
 const props = defineProps<{
@@ -27,6 +27,12 @@ const ids = defineModel<string[]>({ required: true });
 const urls = ref<Record<string, string>>({});
 const uploading = ref(false);
 const input = ref<HTMLInputElement>();
+const sortable = computed(
+  () => !props.disabled && !uploading.value && ids.value.length > 1,
+);
+const dragging = ref<string>();
+const dropTarget = ref<string>();
+let suppressClickUntil = 0;
 let disposed = false;
 
 watch(
@@ -102,6 +108,49 @@ function paste(event: ClipboardEvent) {
 function remove(id: string) {
   ids.value = ids.value.filter((value) => value !== id);
 }
+function startDrag(event: DragEvent, id: string) {
+  if (!sortable.value || (event.target as Element).closest('button')) {
+    event.preventDefault();
+    return;
+  }
+  dragging.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', id);
+  }
+}
+function dragOver(event: DragEvent, id: string) {
+  // 只接收本组件内开始的拖拽，避免不同产品行之间串图。
+  if (!sortable.value || !dragging.value || dragging.value === id) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  dropTarget.value = id;
+}
+function endDrag() {
+  if (dragging.value) suppressClickUntil = Date.now() + 250;
+  dragging.value = undefined;
+  dropTarget.value = undefined;
+}
+function drop(event: DragEvent, id: string) {
+  if (!sortable.value || !dragging.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const from = ids.value.indexOf(dragging.value);
+  const to = ids.value.indexOf(id);
+  if (from !== -1 && to !== -1 && from !== to) {
+    const reordered = [...ids.value];
+    reordered.splice(from, 1);
+    reordered.splice(to, 0, dragging.value);
+    ids.value = reordered;
+  }
+  endDrag();
+}
+function clickImage(event: MouseEvent) {
+  if (dragging.value || Date.now() < suppressClickUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
 </script>
 <template>
   <div
@@ -115,7 +164,20 @@ function remove(id: string) {
         v-for="id in ids"
         :key="id"
         class="thumb"
+        :class="{
+          sortable,
+          dragging: dragging === id,
+          'drop-target': dropTarget === id,
+        }"
+        :draggable="sortable"
+        :title="sortable ? '拖动图片可调整顺序，点击可预览' : undefined"
         :style="{ width: `${size ?? 64}px`, height: `${size ?? 64}px` }"
+        @dragstart="startDrag($event, id)"
+        @dragover="dragOver($event, id)"
+        @dragleave="dropTarget === id && (dropTarget = undefined)"
+        @drop="drop($event, id)"
+        @dragend="endDrag"
+        @click.capture="clickImage"
       >
         <Image
           v-if="urls[id]"
@@ -123,6 +185,7 @@ function remove(id: string) {
           :width="size ?? 64"
           :height="size ?? 64"
           class="thumb-image"
+          :draggable="false"
         />
         <Spin v-else size="small" />
         <button
@@ -130,6 +193,7 @@ function remove(id: string) {
           type="button"
           class="remove"
           aria-label="删除图片"
+          @mousedown.stop
           @click="remove(id)"
         >
           ×
@@ -153,6 +217,7 @@ function remove(id: string) {
       hidden
       @change="choose"
     />
+    <span v-if="sortable" class="sort-hint">拖动图片可调整顺序</span>
   </div>
 </template>
 <style scoped>
@@ -182,6 +247,26 @@ function remove(id: string) {
 
 .thumb :deep(.thumb-image) {
   object-fit: cover;
+}
+
+.thumb.sortable {
+  cursor: grab;
+}
+
+.thumb.dragging {
+  cursor: grabbing;
+  opacity: 0.45;
+}
+
+.thumb.drop-target {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
+.sort-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
 }
 
 .remove {

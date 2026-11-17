@@ -12,6 +12,7 @@ import { productStructure } from '../../products/structure';
 import { latestTaskQuotes } from '../quotes/comparison';
 import { orderableQuote } from '../quotes/quick-order';
 import { priceFromTotal, totalFromPrice } from '../tasks/request-batch';
+import { validDeliveryDate } from './model';
 
 /** 金智常用的采购分类；先固定选项，后续再做成可维护。 */
 export const PURCHASE_CATEGORIES = [
@@ -212,6 +213,7 @@ export function entrySuppliers(rows: EntryRow[], header: EntryHeader) {
 export function entryErrors(
   rows: EntryRow[],
   header: EntryHeader,
+  submit = false,
 ): { lines: Record<string, string>; sheet: string } {
   const lines: Record<string, string> = {};
   for (const row of rows) {
@@ -221,6 +223,8 @@ export function entryErrors(
       lines[row.key] = '请填单价或总价';
     else if (header.receiveFactoryId && !materialKind(row.category))
       lines[row.key] = '工厂只收原料、辅料，这一行请另开采购单';
+    else if (submit && !validDeliveryDate(row.arrivalDate))
+      lines[row.key] = '提交下单前请填写到货日期';
   }
   let sheet = '';
   if (rows.some((row) => !row.supplierId) && !header.supplierId)
@@ -366,7 +370,10 @@ export function copyEntry(
       };
       if (edit && line.id) {
         row.lineId = line.id;
-        row.arrivalDate = copiedText(dates[line.id]);
+        row.arrivalDate =
+          copiedText(dates[line.id]) ||
+          copiedText(view.lineDeliveryDates?.[line.id]) ||
+          copiedText(details.deliveryDate);
       }
       if (note?.gift === true) setRowGift(row, true);
       else setRowPrice(row, copiedNumber(line.unitPrice));

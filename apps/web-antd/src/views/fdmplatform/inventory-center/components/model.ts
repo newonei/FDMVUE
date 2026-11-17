@@ -61,6 +61,9 @@ export function firstWarehouse(warehouses: InventoryWarehouse[]) {
 }
 
 export interface PickRow {
+  skuId?: string;
+  specVersion?: string;
+  productionOrderItemId?: number;
   stockId: string;
   productName: string;
   productCode: string;
@@ -76,6 +79,8 @@ export function pickRows(stocks: StockBalance[]): PickRow[] {
     .filter((stock) => decimal(stock.onHand).gt(0))
     .map((stock) => ({
       stockId: stock.id,
+      skuId: stock.skuId,
+      specVersion: stock.specVersion,
       productName: stock.productName || '产品未注明',
       productCode: stock.productCode ?? '',
       specification: stock.specification ?? '',
@@ -107,7 +112,13 @@ export function pickErrors(
 export function pickLines(rows: PickRow[]): StockLineInput[] {
   return rows
     .filter((row) => decimal(row.quantity).gt(0))
-    .map((row) => ({ stockId: row.stockId, quantity: row.quantity ?? '0' }));
+    .map((row) => ({
+      stockId: row.stockId,
+      quantity: row.quantity ?? '0',
+      ...(row.productionOrderItemId
+        ? { productionOrderItemId: row.productionOrderItemId }
+        : {}),
+    }));
 }
 
 export interface CountRow {

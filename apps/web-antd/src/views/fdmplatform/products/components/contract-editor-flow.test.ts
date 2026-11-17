@@ -321,6 +321,65 @@ afterEach(() => {
 });
 
 describe('order entry without changing menus', () => {
+  it('blocks activation without customer delivery requirements while still allowing a draft', async () => {
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    const { host } = await mountEditor();
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector('[data-label="客户"] option[value="customer"]'),
+      ).toBeTruthy(),
+    );
+    await fill(host, '客户', 'customer', 'select');
+    await fill(host, '合同主体', '1', 'select');
+    await fill(host, '产品分类', 'YOGA', 'select');
+    await addProduct(host);
+    button(host, '保存并生效').click();
+    await nextTick();
+    expect(host.textContent).toContain('请填写客户交付要求');
+    expect(api.create).not.toHaveBeenCalled();
+    api.create.mockRejectedValueOnce(new Error('保留草稿表单用于测试'));
+    button(host, '保存草稿').click();
+    await vi.waitFor(() =>
+      expect(api.create).toHaveBeenCalledWith(
+        expect.objectContaining({ deliveryRequirement: '' }),
+        [],
+      ),
+    );
+  });
+
+  it('submits the agreed delivery condition when activating a foreign contract', async () => {
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    const { host } = await mountEditor();
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector('[data-label="客户"] option[value="customer"]'),
+      ).toBeTruthy(),
+    );
+    await fill(host, '客户', 'customer', 'select');
+    await fill(host, '合同主体', '1', 'select');
+    await fill(host, '产品分类', 'YOGA', 'select');
+    await fill(host, '交付要求', '收定金后30天交货');
+    await addProduct(host);
+    api.create.mockRejectedValueOnce(new Error('保留表单用于测试'));
+    button(host, '保存并生效').click();
+    await vi.waitFor(() =>
+      expect(api.create).toHaveBeenCalledWith(
+        expect.objectContaining({ deliveryRequirement: '收定金后30天交货' }),
+        [],
+      ),
+    );
+  });
+
   it('seeds an inline customer from the search, selects it after save and preserves order fields and product lines', async () => {
     const { host } = await mountEditor();
     await fill(host, '内部名称（可选）', '保留的订单备注');

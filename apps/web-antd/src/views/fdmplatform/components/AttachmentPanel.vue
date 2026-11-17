@@ -29,7 +29,12 @@ import {
   renameAttachment,
   uploadAttachment,
 } from '#/api/fdmplatform';
-import { attachmentSize } from '#/api/fdmplatform/submission-files';
+import {
+  ATTACHMENT_ACCEPT,
+  ATTACHMENT_FORMAT_TEXT,
+  attachmentSize,
+  submissionFilesError,
+} from '#/api/fdmplatform/submission-files';
 
 import { errorText } from '../data';
 import { personLabel } from '../directory';
@@ -58,18 +63,45 @@ const injectedDirectory = inject<Ref<Directory | undefined> | undefined>(
 const directory = computed(() => injectedDirectory?.value);
 const preview = ref<InstanceType<typeof AttachmentPreview>>();
 const previewing = ref<ContractAttachment>();
-const selectedFile = ref<File>();
+interface PendingFile {
+  file: File;
+  key: string;
+  error?: string;
+}
+const selectedFiles = ref<PendingFile[]>([]);
+const selectedBytes = computed(() =>
+  selectedFiles.value.reduce((total, item) => total + item.file.size, 0),
+);
 const fileInput = ref<HTMLInputElement>();
 const uploading = ref(false);
 const downloading = ref('');
 const operationError = ref('');
-const uploadKey = ref('');
+const progress = ref<{
+  done: number;
+  failed: number;
+  success: number;
+  total: number;
+}>();
+let contextSequence = 0;
 const userStore = useUserStore();
 const renaming = ref<ContractAttachment>();
 const renameOpen = ref(false);
 const renameKey = ref('');
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
-onBeforeUnmount(() => emit('busy', false));
+onBeforeUnmount(() => {
+  contextSequence++;
+  emit('busy', false);
+});
+watch(
+  () => [props.contractId, props.target?.targetKind, props.target?.targetId],
+  () => {
+    contextSequence++;
+    selectedFiles.value = [];
+    progress.value = undefined;
+    operationError.value = '';
+    uploading.value = false;
+  },
+);
 const categoryLabels = contractAttachmentCategories;
 watch(
   () => props.categories,
@@ -81,49 +113,108 @@ watch(
   },
   { immediate: true },
 );
+function addFiles(files: File[]) {
+  if (uploading.value || !props.view?.enabled || props.categories.length === 0)
+    return;
+  const existing = new Set(
+    selectedFiles.value.map(({ file }) =>
+      JSON.stringify([file.name, file.size, file.lastModified]),
+    ),
+  );
+  const added = files.filter((file) => {
+    const identity = JSON.stringify([file.name, file.size, file.lastModified]);
+    if (existing.has(identity)) return false;
+    existing.add(identity);
+    return true;
+  });
+  const error = submissionFilesError([
+    ...selectedFiles.value.map((item) => item.file),
+    ...added,
+  ]);
+  operationError.value = error;
+  if (error) return;
+  selectedFiles.value.push(
+    ...added.map((file) => ({ file, key: newIdempotencyKey() })),
+  );
+  progress.value = undefined;
+}
 function chooseFile(event: Event) {
-  selectedFile.value = (event.target as HTMLInputElement).files?.[0];
-  uploadKey.value = newIdempotencyKey();
+  const input = event.target as HTMLInputElement;
+  addFiles([...(input.files ?? [])]);
+  input.value = '';
+}
+function removeFile(key: string) {
+  if (!uploading.value) {
+    selectedFiles.value = selectedFiles.value.filter(
+      (item) => item.key !== key,
+    );
+    operationError.value = '';
+  }
+}
+function changeCategory() {
+  selectedFiles.value = selectedFiles.value.map((item) => ({
+    file: item.file,
+    key: newIdempotencyKey(),
+  }));
+  progress.value = undefined;
 }
 /** 也可把文件直接拖到上传区，效果同「选择文件」 */
 const dragging = ref(false);
 function dropFile(event: DragEvent) {
   dragging.value = false;
-  const file = event.dataTransfer?.files?.[0];
-  if (
-    !file ||
-    uploading.value ||
-    !props.view?.enabled ||
-    props.categories.length === 0
-  )
-    return;
-  selectedFile.value = file;
-  uploadKey.value = newIdempotencyKey();
+  addFiles([...(event.dataTransfer?.files ?? [])]);
 }
 async function upload() {
-  if (!selectedFile.value || !category.value || !props.view?.enabled) return;
+  if (
+    uploading.value ||
+    selectedFiles.value.length === 0 ||
+    !category.value ||
+    !props.view?.enabled
+  )
+    return;
+  const context = contextSequence;
+  const contractId = props.contractId;
+  const target = props.target ? { ...props.target } : undefined;
+  const selectedCategory = category.value;
+  const pending = [...selectedFiles.value];
   uploading.value = true;
   operationError.value = '';
+  progress.value = { done: 0, failed: 0, success: 0, total: pending.length };
   try {
-    await uploadAttachment(
-      props.contractId,
-      selectedFile.value,
-      category.value,
-      uploadKey.value || newIdempotencyKey(),
-      props.target,
-    );
-    selectedFile.value = undefined;
-    if (fileInput.value) fileInput.value.value = '';
-    message.success(
-      props.target
-        ? '附件已保存到当前单据'
-        : '附件已保存，可在业务表单选择引用',
-    );
-    emit('refresh');
-  } catch (error) {
-    operationError.value = errorText(error);
+    for (const item of pending) {
+      if (context !== contextSequence) return;
+      item.error = undefined;
+      try {
+        await uploadAttachment(
+          contractId,
+          item.file,
+          selectedCategory,
+          item.key,
+          target,
+        );
+        if (context !== contextSequence) return;
+        selectedFiles.value = selectedFiles.value.filter(
+          (entry) => entry.key !== item.key,
+        );
+        progress.value!.success++;
+      } catch (error) {
+        if (context !== contextSequence) return;
+        item.error = errorText(error);
+        progress.value!.failed++;
+      }
+      progress.value!.done++;
+    }
+    const result = progress.value!;
+    if (result.success > 0) {
+      message.success(
+        `已上传 ${result.success} 个附件${target ? '到当前单据' : ''}`,
+      );
+      emit('refresh');
+    }
+    if (result.failed > 0)
+      operationError.value = `${result.failed} 个附件上传失败，失败文件已保留，可重试。`;
   } finally {
-    uploading.value = false;
+    if (context === contextSequence) uploading.value = false;
   }
 }
 /** 上传人或可上传该分类资料的人可以改名，最终以服务端校验为准 */
@@ -196,6 +287,8 @@ async function download(item: ContractAttachment) {
       v-if="view?.enabled && categories.length"
       ref="fileInput"
       type="file"
+      multiple
+      :accept="ATTACHMENT_ACCEPT"
       hidden
       aria-label="选择合同附件"
       :disabled="uploading"
@@ -220,36 +313,88 @@ async function download(item: ContractAttachment) {
           placeholder="资料分类"
           style="width: 150px"
           :disabled="uploading"
-          @change="uploadKey = newIdempotencyKey()"
+          @change="changeCategory"
         />
         <Button :disabled="uploading" @click="fileInput?.click()">
           <template #icon>
             <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
           </template>
-          {{ selectedFile ? '重新选择' : '选择文件' }}
+          {{ selectedFiles.length ? '继续选择文件' : '选择文件' }}
         </Button>
         <span
-          class="inline-block max-w-60 truncate align-middle"
-          :class="{ 'text-muted-foreground': !selectedFile }"
-          :title="selectedFile?.name"
+          class="inline-block align-middle"
+          :class="{ 'text-muted-foreground': !selectedFiles.length }"
           role="status"
         >
-          {{ selectedFile?.name ?? '尚未选择文件，也可将文件拖到这里' }}
+          {{
+            selectedFiles.length
+              ? `待上传 ${selectedFiles.length} 个文件，共 ${attachmentSize(selectedBytes)}`
+              : '可多选文件，也可将文件拖到这里'
+          }}
         </span>
         <Button
           type="primary"
           :loading="uploading"
-          :disabled="!selectedFile || !category"
+          :disabled="!selectedFiles.length || !category"
           :title="!category ? '请先选择资料分类' : undefined"
           @click="upload"
         >
-          上传
+          {{
+            uploading
+              ? '上传中'
+              : `上传${selectedFiles.length ? `（${selectedFiles.length}）` : ''}`
+          }}
         </Button>
       </Space>
       <span v-else class="text-muted-foreground text-sm">
         {{ target ? '附件与当前单据关联保存' : '合同资料' }}
       </span>
-      <Button :loading="loading" @click="emit('refresh')">刷新</Button>
+      <Button :loading="loading" :disabled="uploading" @click="emit('refresh')">
+        刷新
+      </Button>
+    </div>
+    <div
+      v-if="view?.enabled && categories.length"
+      class="text-muted-foreground text-xs"
+    >
+      {{ ATTACHMENT_FORMAT_TEXT }}；每次最多 10 个，合计不超过 1 GB。
+    </div>
+    <ul
+      v-if="selectedFiles.length"
+      class="attachment-pending"
+      aria-label="待上传文件"
+    >
+      <li v-for="item in selectedFiles" :key="item.key">
+        <div class="pending-file-info">
+          <span class="pending-file-name" :title="item.file.name">{{
+            item.file.name
+          }}</span>
+          <span class="text-muted-foreground">{{
+            attachmentSize(item.file.size)
+          }}</span>
+          <span v-if="item.error" class="text-red-500" role="alert">{{
+            item.error
+          }}</span>
+        </div>
+        <Button
+          type="link"
+          size="small"
+          :disabled="uploading"
+          :aria-label="`移除 ${item.file.name}`"
+          @click="removeFile(item.key)"
+        >
+          移除
+        </Button>
+      </li>
+    </ul>
+    <div v-if="progress" role="status" class="text-muted-foreground text-sm">
+      {{ uploading ? '上传进度' : '本次上传结果' }}：{{ progress.done }}/{{
+        progress.total
+      }}
+      个，成功 {{ progress.success }} 个，失败 {{ progress.failed }} 个
+    </div>
+    <div class="text-sm font-medium" role="status">
+      已上传附件：{{ view?.items.length ?? 0 }} 个
     </div>
     <Table
       :data-source="view?.items ?? []"
@@ -348,5 +493,32 @@ async function download(item: ContractAttachment) {
   outline: 1px dashed #1677ff;
   outline-offset: 2px;
   background: #e6f4ff;
+}
+
+.attachment-pending {
+  padding: 8px 12px;
+  margin: 0;
+  list-style: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.attachment-pending > li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.pending-file-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.pending-file-name {
+  overflow-wrap: anywhere;
 }
 </style>

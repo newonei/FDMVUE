@@ -3,8 +3,10 @@ export const MAX_SUBMISSION_FILES = 10;
 export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 export const MAX_SUBMISSION_BYTES = 1024 * 1024 * 1024;
 export const ATTACHMENT_LIMIT_TEXT = '1 GB';
+export const ATTACHMENT_FORMAT_TEXT =
+  '支持 AI、PLT、PSD、CDR、EPS、CAD、压缩包及常用文档、图片';
 export const ATTACHMENT_ACCEPT =
-  '.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.doc,.docx,.docm,.dot,.dotx,.dotm,.xls,.xlsx,.xlsm,.xlt,.xltx,.xltm,.ppt,.pptx,.pptm,.pot,.potx,.potm,.pps,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.csv,.tsv,.txt';
+  '.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.doc,.docx,.docm,.dot,.dotx,.dotm,.xls,.xlsx,.xlsm,.xlt,.xltx,.xltm,.ppt,.pptx,.pptm,.pot,.potx,.potm,.pps,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.csv,.tsv,.txt,.ai,.plt,.eps,.cdr,.psd,.psb,.dwg,.dxf,.svg,.tif,.tiff,.zip,.rar,.7z';
 
 type FileInfo = Pick<File, 'name' | 'size'>;
 const extensions = new Set(
@@ -24,7 +26,7 @@ export function submissionFilesError(files: readonly FileInfo[]): string {
     )
       return `附件文件名不合法：${file.name}`;
     if (!extensions.has(file.name.split('.').at(-1)?.toLowerCase() ?? ''))
-      return `不支持 ${file.name} 的文件格式，请选择 PDF、图片、Word、Excel、PPT、开放文档、RTF、CSV 或 TXT`;
+      return `不支持 ${file.name} 的文件格式，${ATTACHMENT_FORMAT_TEXT}`;
     if (
       !Number.isFinite(file.size) ||
       file.size <= 0 ||

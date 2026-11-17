@@ -261,7 +261,7 @@ describe('order selection → process preview → release', () => {
   });
 
   it('shows saved order colours, total and layer thicknesses, and explicitly missing reverse texture', async () => {
-    await mount([{ ...orders[0]!, items: [{ ...orders[0]!.items[0]!, targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetFrontColor: 'ZI', targetBackColor: 'LAN', targetThickness: 0.6, targetFrontThickness: 0.2, targetBackThickness: 0.4, targetTextureFront: 'SH', targetTextureBack: null }] }]);
+    await mount([{ ...orders[0]!, items: [{ ...orders[0]!.items[0]!, processes: ['EMBOSS', 'PACK'], targetConfirmedAt: null, targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetFrontColor: 'ZI', targetBackColor: 'LAN', targetThickness: 0.6, targetFrontThickness: 0.2, targetBackThickness: 0.4, targetTextureFront: 'SH', targetTextureBack: null }] }]);
     document.querySelector<HTMLButtonElement>('.ant-table-row-expand-icon')!.click(); await flush();
     const details = document.querySelector('.ant-table-expanded-row')!.textContent!;
     expect(details).toContain('已保存：单双色 / 总厚');

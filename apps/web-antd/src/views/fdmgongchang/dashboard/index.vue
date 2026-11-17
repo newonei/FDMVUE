@@ -6,6 +6,7 @@ import type { FdmgongchangDashboardApi as Api } from '#/api/fdmgongchang/dashboa
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
+import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 
 import { useFullscreen } from '@vueuse/core';
@@ -38,6 +39,8 @@ const RANGES: Array<{ label: string; value: Api.Range }> = [
 ];
 
 const router = useRouter();
+const { hasAccessByCodes } = useAccess();
+const canViewOrderBoard = computed(() => hasAccessByCodes(['fdmgongchang:order-board:query']));
 const factory = useFactory();
 const range = ref<Api.Range>('7d');
 const data = ref<Api.Dashboard>();
@@ -195,6 +198,7 @@ const alerts = computed(() => {
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <Button v-if="canViewOrderBoard" @click="go(FACTORY_ROUTES.orderBoard)">订单看板</Button>
           <Segmented :options="RANGES" :value="range" @change="changeRange" />
           <Button :loading="loading" @click="load">刷新</Button>
           <Button @click="toggleFullscreen">{{ isFullscreen ? '退出大屏' : '大屏' }}</Button>

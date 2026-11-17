@@ -4,6 +4,7 @@ import { createApp, nextTick } from 'vue';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { textureText } from '../manufacturing';
 import SupplyMatch from './supply-match.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
@@ -21,9 +22,9 @@ afterEach(() => { unmount?.(); document.body.innerHTML = ''; });
 
 describe('saved manufacturing parameters', () => {
   it.each([
-    { processes: ['EMBOSS', 'ENGRAVE'], expected: ['压纹 正 贝壳纹 / 反 未填写', '图案 未填写'], absent: ['无需压花', '无需雕刻', '不雕刻'] },
+    { processes: ['EMBOSS', 'ENGRAVE'], expected: ['压纹 正 贝壳纹 (SH) / 反 不压花', '图案 未填写'], absent: ['无需压花', '无需雕刻', '不雕刻'] },
     { processes: ['SLICE', 'CUT'], expected: ['无需压花', '无需雕刻'], absent: ['图案 未填写', '压纹 正'] },
-    { processes: [], expected: ['压纹 正 贝壳纹 / 反 未填写', '图案 未填写'], absent: ['无需压花', '无需雕刻'] },
+    { processes: [], expected: ['压纹 正 贝壳纹 (SH) / 反 未填写', '图案 未填写'], absent: ['无需压花', '无需雕刻'] },
   ])('distinguishes missing values from processes that are not in route $processes', async ({ processes, expected, absent }) => {
     const item: Api.Item = { id: 1, productId: 'p1', productName: '测试订单产品', quantity: 10, completedQuantity: 0,
       targetConfirmedAt: '2026-11-12', targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER',
@@ -34,5 +35,12 @@ describe('saved manufacturing parameters', () => {
     app.mount(host); unmount = () => app.unmount(); await flush();
     for (const text of expected) expect(host.textContent).toContain(text);
     for (const text of absent) expect(host.textContent).not.toContain(text);
+  });
+  it('distinguishes an unknown route, missing required embossing, and a confirmed unembossed side', () => {
+    const item = { targetConfirmedAt: '2026-11-17', processes: ['EMBOSS'], targetTextureFront: null, targetTextureBack: null };
+    expect(textureText(item, 'FRONT')).toBe('未填写');
+    expect(textureText({ ...item, processes: [] }, 'FRONT')).toBe('未填写');
+    expect(textureText({ ...item, processes: ['PUNCH'] }, 'FRONT')).toBe('不压花');
+    expect(textureText({ ...item, targetTextureBack: 'SH' }, 'FRONT')).toBe('不压花');
   });
 });

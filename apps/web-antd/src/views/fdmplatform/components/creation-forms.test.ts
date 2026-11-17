@@ -773,6 +773,7 @@ describe('new contract form hides optional commercial fields', () => {
     );
     expect(mocks.create).not.toHaveBeenCalled();
     await fill(view.host, '内部单号', 'NX-001');
+    await fill(view.host, '交付要求', '收定金后30天交货');
     mocks.create.mockResolvedValueOnce({
       id: 'created',
       code: 'HT-1',
@@ -804,6 +805,7 @@ describe('new contract form hides optional commercial fields', () => {
 
   it('retains the saved contract when activation fails so retry does not create another order', async () => {
     const view = await newContract();
+    await fill(view.host, '交付要求', '收定金后30天交货');
     const saved = { id: 'created', code: 'HT-1', version: 3 };
     mocks.create.mockResolvedValueOnce(saved);
     mocks.activate.mockRejectedValueOnce(new Error('当前产品规格已变更'));
@@ -814,11 +816,11 @@ describe('new contract form hides optional commercial fields', () => {
     expect(mocks.getContract).not.toHaveBeenCalled();
   });
 
-  it('hides tax basis, payment terms and delivery requirement on create', async () => {
+  it('hides tax basis and payment terms but allows delivery requirement on create', async () => {
     const view = await newContract();
     expect(view.host.querySelector('[data-label="默认税费口径"]')).toBeNull();
     expect(view.host.querySelector('[data-label="付款条件"]')).toBeNull();
-    expect(view.host.querySelector('[data-label="交付要求"]')).toBeNull();
+    expect(view.host.querySelector('[data-label="交付要求"]')).not.toBeNull();
     mocks.create.mockResolvedValueOnce({ id: 'created', code: 'HT-1' });
     clickText(view.host, '保存草稿');
     await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());

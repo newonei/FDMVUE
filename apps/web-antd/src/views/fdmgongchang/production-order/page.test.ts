@@ -166,6 +166,11 @@ const order: Api.Order = {
   totalQuantity: 500,
 };
 
+const confirmedParameters: Partial<Api.Item> = {
+  targetConfirmedAt: '2026-11-17', targetMaterial: 'TPE', targetColorMode: 'SINGLE', targetConstructionType: 'SINGLE_LAYER',
+  targetFrontColor: 'PK', targetBackColor: 'PK', targetLength: 183, targetWidth: 61, targetThickness: 0.6, targetFrontThickness: 0.6,
+};
+
 const flush = async () => {
   for (let i = 0; i < 10; i++) {
     await Promise.resolve();
@@ -193,6 +198,39 @@ describe('production order page', () => {
     unmount?.();
     document.body.innerHTML = '';
     vi.clearAllMocks();
+  });
+
+  it('shows all orders initially and filters pending orders without changing the overview totals', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:create', 'fdmgongchang:production-order:handle');
+    mocks.factories.mockResolvedValue([]);
+    const statusTotals: Record<string, number> = { SUBMITTED: 3, ACCEPTED: 4, COMPLETED: 5 };
+    mocks.factoryPage.mockImplementation(async (params) => ({
+      list: params.pageSize === 1 || params.keyword ? [] : [order],
+      total: params.keyword ? 0 : (statusTotals[params.status] ?? 12),
+    }));
+    unmount = mount();
+    await flush();
+    expect(mocks.factoryPage).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 20, status: undefined }));
+    const pendingCard = document.querySelector<HTMLButtonElement>('.overview-card--pending')!;
+    expect(pendingCard.textContent).toContain('3');
+    pendingCard.click();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await flush();
+    expect(pendingCard.getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.factoryPage).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 20, status: 'SUBMITTED' }));
+    const input = document.querySelector<HTMLInputElement>('#po-filter-keyword')!;
+    input.value = '找不到的订单';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await flush();
+    expect(document.body.textContent).toContain('没有符合条件的订单');
+    expect(pendingCard.querySelector('.overview-card__value')?.textContent).toBe('3');
+    button('重置筛选').click();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await flush();
+    expect(input.value).toBe('');
+    expect(document.querySelector('.overview-card--all')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.body.textContent).toContain(order.orderNo);
   });
 
   it('searches the product catalog and submits an order to the factory', async () => {
@@ -320,7 +358,7 @@ describe('production order page', () => {
   it('lets the factory accept an order it received', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
     mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 });
-    mocks.get.mockResolvedValue(order);
+    mocks.get.mockResolvedValue({ ...order, items: order.items.map((item) => ({ ...item, ...confirmedParameters })) });
     mocks.accept.mockResolvedValue(true);
     const board = {
       boards: 32,
@@ -388,7 +426,7 @@ describe('production order page', () => {
 
   it('sets the same processes for several products at once when accepting a purchase order', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
-    const item = { ...order.items[0]!, processes: [], routeId: null, routeName: null, steps: [] };
+    const item = { ...order.items[0]!, ...confirmedParameters, processes: [], routeId: null, routeName: null, steps: [] };
     const purchase = {
       ...order,
       items: [item, { ...item, id: 92, productName: '双色TPE瑜伽垫' }, { ...item, id: 93, productName: '加厚瑜伽垫' }],
@@ -436,7 +474,7 @@ describe('production order page', () => {
   it('shows two-colour material coverage as separate layers and pairs the finished mats', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
     const accepted = { ...order, status: 'ACCEPTED', statusLabel: '生产中',
-      items: [{ ...order.items[0]!, targetFrontColor: 'PK', targetBackColor: 'GY', targetThickness: 0.6 }] };
+      items: [{ ...order.items[0]!, targetConstructionType: 'DOUBLE_LAYER', targetFrontColor: 'PK', targetBackColor: 'GY', targetThickness: 0.6 }] };
     mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 }); mocks.get.mockResolvedValue(accepted);
     const board = { boards: 10, boardsByColor: { PK: 4, GY: 6 }, layersPerProduct: 2,
       layers: 16, piecesPerLayer: 2, perBoard: 32, name: '发泡板', size: '210×136×4.8', source: 'SETTING' };
@@ -676,7 +714,7 @@ describe('production order page', () => {
     const otherChips = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-item-92 要走的工序"] .route-chip')];
     otherChips.find((chip) => chip.textContent?.trim() === '雕刻')!.click(); await flush();
     button('确认规格').click(); await flush();
-    const changed: Api.Order = { ...purchase, items: [{ ...purchase.items[0]!, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }, purchase.items[1]!] };
+    const changed: Api.Order = { ...purchase, items: [{ ...purchase.items[0]!, ...confirmedParameters, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }, { ...purchase.items[1]!, ...confirmedParameters }] };
     mocks.get.mockResolvedValue(changed);
     document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
     button('接单').click(); await flush();
@@ -701,12 +739,29 @@ describe('production order page', () => {
     expect(button('接单').disabled).toBe(true);
     button('接单').click(); await flush();
     expect(mocks.accept).not.toHaveBeenCalled();
-    mocks.get.mockResolvedValue({ ...purchase, items: [{ ...purchase.items[0]!, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }] });
+    mocks.get.mockResolvedValue({ ...purchase, items: [{ ...purchase.items[0]!, ...confirmedParameters, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }] });
     button('重新加载已保存参数').click(); await flush();
     expect(button('接单').disabled).toBe(false);
     button('接单').click(); await flush();
     expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ routes: [
       { itemId: 91, routeId: 3, steps: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] },
     ] }));
+  });
+
+  it('blocks acceptance with unconfirmed parameters and opens the editor, then accepts after saved parameters refresh', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
+    mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 }); mocks.get.mockResolvedValue(order);
+    mocks.supplyMatch.mockResolvedValue([]);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    unmount = mount(); await flush(); button('去接单').click(); await flush();
+    expect(document.body.textContent).toContain('1 个产品尚未完整确认生产参数');
+    button('接单').click(); await flush();
+    expect(mocks.accept).not.toHaveBeenCalled();
+    expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
+    mocks.get.mockResolvedValue({ ...order, items: order.items.map((item) => ({ ...item, ...confirmedParameters })) });
+    document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
+    expect(document.querySelector<HTMLInputElement>('#po-promised input')?.value || document.querySelector<HTMLInputElement>('#po-promised')?.value).toBe('2026-10-20');
+    button('接单').click(); await flush();
+    expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ id: 9, promisedDate: '2026-10-20' }));
   });
 });

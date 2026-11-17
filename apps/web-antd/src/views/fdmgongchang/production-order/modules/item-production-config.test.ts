@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig } from '#/api/fdmgongchang/production-order';
 
-import { productionConfigDraft, productionConfigProblems, productionConfigTarget, unfinishedProductionParameters } from './item-production-config';
+import { productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
 import ConfigModal from './item-production-config-modal.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
@@ -21,7 +21,7 @@ const options = {
 };
 function product(overrides: Partial<Api.Item> = {}): Api.Item {
   return { id: 10, productId: 'p10', productCode: 'P001', productName: '双色瑜伽垫', quantity: 80, completedQuantity: 0, unit: '条',
-    targetColorMode: 'DUAL', targetMaterial: 'TPE', targetFrontColor: 'ZI', targetBackColor: 'LAN', targetLength: 183, targetWidth: 61,
+    targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER', targetMaterial: 'TPE', targetFrontColor: 'ZI', targetBackColor: 'LAN', targetLength: 183, targetWidth: 61,
     targetThickness: 0.6, targetFrontThickness: 0.2, targetBackThickness: 0.4, targetTextureFront: null, targetTextureBack: null,
     targetPattern: null, processes: steps.filter((code) => code !== 'FOLD'), ...overrides };
 }
@@ -74,18 +74,40 @@ describe('production configuration values', () => {
     expect(draft).toMatchObject({ material: 'TPE', lengthMm: 1830, frontColor: 'ZI', textureFront: 'WAVE', thicknessMm: 6 });
     expect(productionConfigDraft(product({ targetConfirmedAt: '2026-11-12', targetTextureFront: null, targetSuggested: { textureFront: 'WAVE' } })).textureFront).toBeUndefined();
   });
-  it('converts complete mm input to cm and normalizes dual halves or single whole thickness', () => {
-    const draft = productionConfigDraft(product()); draft.thicknessMm = 8;
+  it('preserves unequal layer thickness and allows a single color on double layers', () => {
+    const draft = productionConfigDraft(product());
     expect(productionConfigTarget(10, draft)).toEqual({ itemId: 10, material: 'TPE', colorMode: 'DUAL', constructionType: 'DOUBLE_LAYER',
-      frontColor: 'ZI', backColor: 'LAN', length: 183, width: 61, thickness: 0.8, frontThickness: 0.4, backThickness: 0.4,
+      frontColor: 'ZI', backColor: 'LAN', length: 183, width: 61, thickness: 0.6, frontThickness: 0.2, backThickness: 0.4,
       textureFront: null, textureBack: null, pattern: null, foldingType: '' });
     draft.colorMode = 'SINGLE';
-    expect(productionConfigTarget(10, draft)).toMatchObject({ constructionType: 'SINGLE_LAYER', backColor: 'ZI', frontThickness: 0.8, backThickness: null });
+    expect(productionConfigProblems(draft)).toEqual([]);
+    expect(productionConfigTarget(10, draft)).toMatchObject({ constructionType: 'DOUBLE_LAYER', backColor: 'ZI', frontThickness: 0.2, backThickness: 0.4 });
+    draft.constructionType = 'SINGLE_LAYER';
+    expect(productionConfigTarget(10, draft)).toMatchObject({ constructionType: 'SINGLE_LAYER', frontThickness: 0.6, backThickness: null });
+  });
+  it('requires independently confirmed structure and balanced layer thickness', () => {
+    const draft = productionConfigDraft(product());
+    draft.constructionType = 'UNKNOWN';
+    expect(productionConfigProblems(draft)).toContain('请选择单层或双层贴合结构');
+    draft.constructionType = 'DOUBLE_LAYER'; draft.frontThicknessMm = 3;
+    expect(productionConfigProblems(draft)).toContain('正面层厚度与反面层厚度之和必须等于成品总厚');
+    draft.backThicknessMm = undefined;
+    expect(productionConfigProblems(draft)).toContain('请填写大于 0 的反面层厚度');
+    expect(productionRouteProblems('DOUBLE_LAYER', ['PUNCH'])).toBe('双层贴合产品需要贴合工序');
+    expect(productionRouteProblems('SINGLE_LAYER', ['LAMINATE', 'PUNCH'])).toBe('单层产品不需要贴合，请取消贴合工序');
+    expect(productionRouteProblems('DOUBLE_LAYER', ['LAMINATE', 'PUNCH'])).toBe('');
+  });
+  it('does not accept unconfirmed suggested values and requires complete saved values at acceptance', () => {
+    expect(savedProductionConfigProblems(product())).toContain('请先人工确认并保存生产参数');
+    expect(savedProductionConfigProblems(product({ targetConfirmedAt: '2026-11-17' }))).toEqual([]);
+    expect(savedProductionConfigProblems(product({ targetMaterial: null, targetConfirmedAt: '2026-11-17', targetSuggested: { material: 'TPE' } }))).toContain('请选择材质');
   });
   it('allows unfinished texture/pattern values while rejecting invalid basic dimensions and equal dual colors', () => {
     const draft = productionConfigDraft(product());
     expect(productionConfigProblems(draft)).toEqual([]);
-    expect(unfinishedProductionParameters(draft, ['EMBOSS', 'ENGRAVE'])).toEqual(['正面压花纹路未填写', '反面压花纹路未填写', '雕刻图案未填写']);
+    expect(unfinishedProductionParameters(draft, ['EMBOSS', 'ENGRAVE'])).toEqual(['请选择至少一面的压花纹路', '雕刻图案未填写']);
+    draft.textureFront = 'WAVE';
+    expect(unfinishedProductionParameters(draft, ['EMBOSS'])).toEqual([]);
     expect(unfinishedProductionParameters(draft, ['PUNCH'])).toEqual([]);
     draft.lengthMm = 0; draft.backColor = draft.frontColor;
     expect(productionConfigProblems(draft)).toEqual(expect.arrayContaining(['请填写大于 0 的长', '双色的正反面颜色必须不同；同色请选择单色']));
@@ -93,21 +115,22 @@ describe('production configuration values', () => {
 });
 
 describe('production configuration modal', () => {
-  it('loads current order and saves complete parameters with sorted folding route and live half thickness', async () => {
+  it('loads unequal saved layers and saves user-entered thickness with a sorted folding route', async () => {
     const { state, saved } = mountModal(); await flush();
     expect(getProductionOrder).toHaveBeenCalledWith(1); expect(getRouteOptions).toHaveBeenCalledWith(2);
     expect(document.body.textContent).toContain('GD-001 · P001 · 双色瑜伽垫');
     expect(document.body.textContent).toContain('成品长度 mm（冲裁后）');
     expect(Number(document.querySelector<HTMLInputElement>('#config-length')!.value)).toBe(1830);
-    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 3 mm + 反面 3 mm');
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 2 mm + 反面 4 mm');
     await input('config-thickness', '8');
-    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 4 mm + 反面 4 mm');
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 2 mm + 反面 4 mm');
+    await input('config-front-thickness', '3'); await input('config-back-thickness', '5');
     button('折叠').click(); await flush();
     expect(document.querySelector('.config-actual-route')!.textContent).toContain('雕刻 → 折叠 → 包装');
     expect(document.body.textContent).toContain('可以先保存');
     button('保存参数与工艺').click(); await flush();
     expect(saveItemProductionConfig).toHaveBeenCalledWith({ itemId: 10, routeId: null, processes: steps,
-      target: expect.objectContaining({ material: 'TPE', length: 183, width: 61, thickness: 0.8, frontThickness: 0.4, backThickness: 0.4, textureFront: null, textureBack: null, pattern: null }) });
+      target: expect.objectContaining({ material: 'TPE', length: 183, width: 61, thickness: 0.8, frontThickness: 0.3, backThickness: 0.5, textureFront: null, textureBack: null, pattern: null }) });
     expect(state.open).toBe(false); expect(saved).toHaveBeenCalledTimes(1);
   });
   it('re-fetches fresh item data on every opening', async () => {
@@ -116,7 +139,7 @@ describe('production configuration modal', () => {
     state.open = true; await flush();
     expect(getProductionOrder).toHaveBeenCalledTimes(2);
     expect(Number(document.querySelector<HTMLInputElement>('#config-length')!.value)).toBe(1850);
-    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 4 mm');
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 2 mm');
   });
   it('shows load failures with retry and never permits saving stale or missing items', async () => {
     vi.mocked(getProductionOrder).mockRejectedValueOnce(new Error('订单加载失败'));
@@ -127,11 +150,11 @@ describe('production configuration modal', () => {
   });
   it('prevents a dual route without lamination', async () => {
     mountModal(); await flush(); button('贴合').click(); await flush(); button('保存参数与工艺').click(); await flush();
-    expect(saveItemProductionConfig).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('双色双层产品需要贴合工序');
+    expect(saveItemProductionConfig).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('双层贴合产品需要贴合工序');
   });
   it('retains entered values on save error and retries atomically', async () => {
     vi.mocked(saveItemProductionConfig).mockRejectedValueOnce(new Error('已有下发任务，请刷新订单'));
-    const { state, saved } = mountModal(); await flush(); await input('config-thickness', '8');
+    const { state, saved } = mountModal(); await flush(); await input('config-thickness', '8'); await input('config-front-thickness', '4');
     button('保存参数与工艺').click(); await flush();
     expect(state.open).toBe(true); expect(saved).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('已有下发任务，请刷新订单');
@@ -157,12 +180,28 @@ describe('production configuration modal', () => {
     expect(Number(document.querySelector<HTMLInputElement>('#config-length')!.value)).toBe(1920);
   });
   it('saves a single product with one full-thickness layer and matching back color', async () => {
-    vi.mocked(getProductionOrder).mockResolvedValue(order(product({ targetColorMode: 'SINGLE', processes: ['CUT', 'PUNCH', 'PACK'] })));
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({ targetColorMode: 'SINGLE', targetConstructionType: 'SINGLE_LAYER', processes: ['CUT', 'PUNCH', 'PACK'] })));
     mountModal(); await flush();
     expect(document.querySelector('.config-layer')!.textContent).toContain('单层 6 mm');
     button('保存参数与工艺').click(); await flush();
     expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({ processes: ['CUT', 'PUNCH', 'PACK'],
       target: expect.objectContaining({ colorMode: 'SINGLE', constructionType: 'SINGLE_LAYER', backColor: 'ZI', frontThickness: 0.6, backThickness: null }) }));
+  });
+  it('saves single-color double-layer products without changing their unequal layer thickness', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({ targetColorMode: 'SINGLE' })));
+    mountModal(); await flush();
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 2 mm + 反面 4 mm');
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({
+      target: expect.objectContaining({ colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontColor: 'ZI', backColor: 'ZI', frontThickness: 0.2, backThickness: 0.4 }),
+      processes: expect.arrayContaining(['LAMINATE']),
+    }));
+  });
+  it('blocks saving when manually entered layer thickness does not add up', async () => {
+    mountModal(); await flush(); await input('config-front-thickness', '3');
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('正面层厚度与反面层厚度之和必须等于成品总厚');
   });
   it('requires explicit cleanup of saved textures when the embossing process is removed', async () => {
     vi.mocked(getProductionOrder).mockResolvedValue(order(product({ targetTextureFront: 'WAVE' })));

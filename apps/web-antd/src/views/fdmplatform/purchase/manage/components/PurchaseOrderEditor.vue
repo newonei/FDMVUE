@@ -95,10 +95,13 @@ const factories = ref<{ label: string; value: number }[]>([]);
 const saving = ref(false);
 const error = ref('');
 const submitted = ref(false);
+const submitRequested = ref(false);
 let idempotencyKey = '';
 let sequence = 0;
 
-const errors = computed(() => entryErrors(rows.value, header.value));
+const errors = computed(() =>
+  entryErrors(rows.value, header.value, submitRequested.value),
+);
 const totals = computed(() => entryTotals(rows.value, header.value));
 /** 供应商名称：下拉选中或报价带出时记下，用来提示拆单结果。 */
 const supplierNames = ref<Record<string, string>>({});
@@ -465,6 +468,7 @@ watch(
     if (!open) return;
     idempotencyKey = crypto.randomUUID();
     submitted.value = false;
+    submitRequested.value = false;
     error.value = '';
     contract.value = undefined;
     header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
@@ -518,6 +522,7 @@ function close() {
 /** 新建先保存草稿；编辑草稿时可以明确提交下单。 */
 async function save(submit = false) {
   if (saving.value) return;
+  submitRequested.value = submit;
   submitted.value = true;
   if (errors.value.sheet || Object.keys(errors.value.lines).length > 0) return;
   if (props.editOf && splits.value.length > 1) {
@@ -677,7 +682,7 @@ async function save(submit = false) {
               <th class="money"><em>*</em>单价</th>
               <th class="money"><em>*</em>数量</th>
               <th class="money"><em>*</em>总价</th>
-              <th class="date">到货日期</th>
+              <th class="date">到货日期（提交必填）</th>
               <th class="gift">赠品</th>
               <th class="remark">备注</th>
               <th class="ops"></th>

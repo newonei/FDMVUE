@@ -101,6 +101,9 @@ export interface OtherInCreate {
 }
 
 export interface StockOutLine extends StockProduct {
+  productionOrderItemId?: number;
+  productionOrderId?: number;
+  productionOrderNo?: string;
   /** 销售出库按合同明细；其它出库按库存行 */
   contractItemId?: string;
   stockId?: string;
@@ -216,6 +219,8 @@ export interface InboundLine {
 }
 
 export interface OutboundItem {
+  skuId?: string;
+  specVersion?: string;
   contractItemId: string;
   productName?: string;
   productCode?: string;
@@ -252,7 +257,11 @@ export interface StockOutCreate {
   warehouseId: string;
   shippedDate?: string;
   remark?: string;
-  lines: { contractItemId: string; quantity: Decimal }[];
+  lines: {
+    contractItemId: string;
+    productionOrderItemId?: number;
+    quantity: Decimal;
+  }[];
 }
 
 /** 库存中心的仓库；writable 表示当前登录人能在这个仓库出库、调出、盘点（工厂库管只能操作本厂仓库） */
@@ -269,6 +278,25 @@ export interface InventoryWarehouse {
 export interface StockLineInput {
   stockId: string;
   quantity: Decimal;
+  productionOrderItemId?: number;
+}
+
+export interface ProductionOrderOutboundCandidate extends StockProduct {
+  productionOrderItemId: number;
+  productionOrderId: number;
+  orderNo: string;
+  receivedQuantity: Decimal;
+  outboundQuantity: Decimal;
+  availableQuantity: Decimal;
+}
+
+export function getProductionOrderOutboundCandidates(warehouseId: string) {
+  return requestClient.get<ProductionOrderOutboundCandidate[]>(
+    `${base}/production-order-items`,
+    {
+      params: { warehouseId },
+    },
+  );
 }
 
 export interface OtherOutCreate {

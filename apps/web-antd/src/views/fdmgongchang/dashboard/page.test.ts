@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   setFactory: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/dashboard', () => ({ getFactoryDashboard: mocks.get }));
+vi.mock('@vben/access', () => ({ useAccess: () => ({ hasAccessByCodes: () => true }) }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
   getMyFactories: mocks.myFactories,
   setCurrentFactoryId: mocks.setFactory,

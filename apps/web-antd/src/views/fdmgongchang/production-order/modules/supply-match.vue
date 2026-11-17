@@ -11,6 +11,7 @@ import { Alert, Button, Spin, Tag } from 'ant-design-vue';
 import { getSupplyMatch, getTargetOptions } from '#/api/fdmgongchang/production-order';
 import { colorModeText, constructionText } from '#/views/fdmplatform/products/manufacturing';
 
+import { textureText } from '../manufacturing';
 import { num } from '../shared';
 import ItemProductionConfigModal from './item-production-config-modal.vue';
 
@@ -52,11 +53,8 @@ function label(list: MatchApi.DictOption[] | undefined, value: null | string | u
   return list?.find((o) => o.value === value)?.label ?? value;
 }
 
-function dualColor(item: Api.Item) {
-  if ((item.targetConstructionType ?? item.targetSuggested?.constructionType) === 'DOUBLE_LAYER') return true;
-  const front = item.targetFrontColor ?? item.targetSuggested?.frontColor;
-  const back = item.targetBackColor ?? item.targetSuggested?.backColor;
-  return !!(front && back && front !== back) || Object.keys(matchByItem.value.get(item.id)?.newProductionByColor ?? {}).length > 1;
+function doubleLayer(item: Api.Item) {
+  return (item.targetConstructionType ?? (item.targetConfirmedAt ? undefined : item.targetSuggested?.constructionType)) === 'DOUBLE_LAYER';
 }
 const sideText = (side?: null | string) => ({ FRONT: '正面', BACK: '反面', BOTH: '正反同规格' })[side as 'FRONT'] || '';
 function layerGapText(item: Api.Item) {
@@ -89,7 +87,7 @@ function targetText(item: Api.Item) {
   if (item.targetConstructionType === 'DOUBLE_LAYER') parts.push(`正面层 ${item.targetFrontThickness ?? '未维护'}cm + 反面层 ${item.targetBackThickness ?? '未维护'}cm`);
   parts.push(needs(item, 'EMBOSS') === false
     ? '无需压花'
-    : `压纹 正 ${label(o?.textures, item.targetTextureFront) || '未填写'} / 反 ${label(o?.textures, item.targetTextureBack) || '未填写'}`, needs(item, 'ENGRAVE') === false
+    : `压纹 正 ${textureText(item, 'FRONT', label(o?.textures, item.targetTextureFront))} / 反 ${textureText(item, 'BACK', label(o?.textures, item.targetTextureBack))}`, needs(item, 'ENGRAVE') === false
     ? '无需雕刻'
     : `图案 ${label(o?.patterns, item.targetPattern) || '未填写'}`);
   return parts.filter(Boolean).join(' · ');
@@ -145,7 +143,7 @@ defineExpose({ reload: load });
                 {{ item.processes?.[0] === 'MIX' || !item.processes?.length ? '新做' : '缺料' }}
                 <b class="tabular-nums">{{ fmt(matchByItem.get(item.id)!.newProduction) }}</b>
               </p>
-              <p v-if="dualColor(item)" class="m-0 text-xs text-muted-foreground">
+              <p v-if="doubleLayer(item)" class="m-0 text-xs text-muted-foreground">
                 正反两层配齐后才计入整垫覆盖；单层缺口：{{ layerGapText(item) }}
               </p>
               <table v-if="matchByItem.get(item.id)!.lines.length > 0" class="w-full text-xs">
@@ -172,11 +170,11 @@ defineExpose({ reload: load });
                 </tbody>
               </table>
               <p class="m-0 text-xs text-muted-foreground">
-                各工序剩余折算需求{{ dualColor(item) ? '（贴合前折算为成品尺寸的单层片数，贴合后按成品）' : '（折成品）' }}：
+                各工序剩余折算需求{{ doubleLayer(item) ? '（贴合前折算为成品尺寸的单层片数，贴合后按成品）' : '（折成品）' }}：
                 <template v-for="(p, index) in matchByItem.get(item.id)!.processes" :key="p.process">
-                  <template v-if="index > 0"> · </template>{{ p.label }} {{ fmt(p.quantity) }}<template v-if="dualColor(item)">{{ ['MIX', 'SLICE', 'CUT'].includes(p.process) ? ' 片单层' : ' 条成品' }}</template>
+                  <template v-if="index > 0"> · </template>{{ p.label }} {{ fmt(p.quantity) }}<template v-if="doubleLayer(item)">{{ ['MIX', 'SLICE', 'CUT'].includes(p.process) ? ' 片单层' : ' 条成品' }}</template>
                 </template>
-                <span v-if="dualColor(item)" class="mt-1 block">实际任务数量按板材规格换算。</span>
+                <span v-if="doubleLayer(item)" class="mt-1 block">实际任务数量按板材规格换算。</span>
               </p>
               <details v-if="matchByItem.get(item.id)!.notes.length > 0" class="text-xs text-muted-foreground">
                 <summary class="cursor-pointer">没用上的库存</summary>

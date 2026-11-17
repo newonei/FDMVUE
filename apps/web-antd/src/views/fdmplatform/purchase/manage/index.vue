@@ -7,6 +7,7 @@ import type { AttachmentView, Contract, DocumentRow } from '#/api/fdmplatform';
 import type { MigrationInfo } from '#/api/fdmplatform/business-documents';
 import type {
   CreatedProcurementOrders,
+  ProcurementFile,
   ProcurementOrderRow,
   ProcurementOrdersOverview,
   ProcurementOrderView,
@@ -56,6 +57,7 @@ import {
 } from '#/api/fdmplatform';
 import {
   createdOrdersText,
+  deleteProcurementFile,
   deleteProcurementOrder,
   downloadProcurementFile,
   endProcurementOrder,
@@ -331,6 +333,7 @@ const attachmentsLoading = ref(false);
 const attachmentsError = ref('');
 const commandKeys = new Map<string, string>();
 const historyActionNames: Record<string, string> = {
+  DELETE_FILE: '删除附件',
   SAVE_DETAILS: '保存采购资料',
   SAVE_EXTRAS: '保存采购单附加资料',
   CONFIRM_DETAILS: '确认采购资料',
@@ -1389,6 +1392,43 @@ async function upload(file: File, exportId: string) {
     saving.value = false;
   }
 }
+function confirmDeleteFile(file: ProcurementFile) {
+  if (!view.value || saving.value) return;
+  const current = view.value;
+  Modal.confirm({
+    title: '删除采购单附件',
+    content: `确定删除「${file.name}」吗？删除后该文件将从附件列表移除。`,
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      if (saving.value || view.value?.id !== current.id) return;
+      saving.value = true;
+      pageError.value = '';
+      const actionKey = `DELETE_FILE:${file.id}`;
+      try {
+        view.value = await deleteProcurementFile(
+          current.contractId,
+          current.id,
+          file.id,
+          {
+            expectedVersion: current.details.version,
+            contractVersion: current.version,
+            idempotencyKey: key(actionKey),
+          },
+        );
+        commandKeys.delete(actionKey);
+        message.success('附件已删除');
+        void loadList();
+      } catch (error) {
+        pageError.value = errorText(error);
+        throw error;
+      } finally {
+        saving.value = false;
+      }
+    },
+  });
+}
 let detailContext: string | undefined;
 let listContext: string | undefined;
 let listNeedsResume = false;
@@ -2347,6 +2387,7 @@ watch(financeType, (value, previous) => {
                   :saving="saving"
                   style="margin-bottom: 12px"
                   @signed="upload"
+                  @delete="confirmDeleteFile"
                 />
                 <StandaloneOrderFiles
                   v-if="standaloneOrder(view.contractId)"

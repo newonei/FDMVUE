@@ -129,6 +129,8 @@ export interface OrderLineExtra {
   weight?: string;
   /** 型号（如正反面颜色） */
   model?: string;
+  /** 供应商实物色号图，与产品图片独立保存。 */
+  colorImageId?: string;
   /** 装箱数：每箱几件，箱数按数量自动算 */
   packQty?: number;
   imageId?: string;
@@ -182,6 +184,8 @@ export interface ProcurementOrderImage {
   height: number;
 }
 export interface ProcurementOrderView {
+  /** 有效产品行的到货日期：逐行录入优先，其次沿用对应报价承诺；整单日期另存于 details。 */
+  lineDeliveryDates?: Record<string, string>;
   /** 已终止采购单不能删除的业务原因。 */
   deleteOrderBlockReasons?: string[];
   id: string;
@@ -399,6 +403,18 @@ export function downloadProcurementFile(
   return requestClient.download<Blob>(
     `${orderPath(contractId, orderId)}/files/${encodeURIComponent(fileId)}/download`,
     { timeout: FILE_TIMEOUT },
+  );
+}
+/** 删除采购单导出稿或盖章件；服务端保留审计并校验版本与文件引用。 */
+export function deleteProcurementFile(
+  contractId: string,
+  orderId: string,
+  fileId: string,
+  data: OrderCommand,
+) {
+  return requestClient.post<ProcurementOrderView>(
+    `${orderPath(contractId, orderId)}/files/${encodeURIComponent(fileId)}/delete`,
+    data,
   );
 }
 /** 下单资料图片：上传后由后端压缩存档，保存资料时引用返回的 id。 */

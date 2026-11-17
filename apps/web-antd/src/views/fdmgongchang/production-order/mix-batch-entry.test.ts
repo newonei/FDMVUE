@@ -234,7 +234,7 @@ describe('批量发泡订单入口', () => {
     expect(document.querySelector('#select-order-21')).not.toBeNull();
   });
 
-  it('主入口默认展示有效订单，拆分下发后进入任务管理', async () => {
+  it('主入口默认展示全部订单，拆分下发后进入任务管理', async () => {
     api.page.mockResolvedValue({ total: 1, list: [{ id: 31, orderNo: 'GD-31', status: 'ACCEPTED', items: [] }] });
     const host = document.createElement('div');
     document.body.append(host);
@@ -242,7 +242,7 @@ describe('批量发泡订单入口', () => {
     app.mount(host);
     unmount = () => app.unmount();
     await flush();
-    expect(api.page).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 20, status: 'ACCEPTED' }));
+    expect(api.page).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 20, status: undefined }));
     const split = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.includes('拆分工序任务'))!;
     expect(split().disabled).toBe(true);
     document.querySelector<HTMLInputElement>('#select-order-31')!.click(); await flush();

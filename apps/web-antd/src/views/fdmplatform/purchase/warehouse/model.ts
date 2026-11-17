@@ -191,6 +191,9 @@ export function stockInPayload(
 }
 
 export interface OutRow {
+  skuId?: string;
+  specVersion?: string;
+  productionOrderItemId?: number;
   contractItemId: string;
   productName: string;
   specification: string;
@@ -208,6 +211,8 @@ export function outboundRows(items: OutboundItem[]): OutRow[] {
     const suggested = BigNumber.minimum(onHand, remaining);
     return {
       contractItemId: item.contractItemId,
+      skuId: item.skuId,
+      specVersion: item.specVersion,
       productName: item.productName || '产品未注明',
       specification: item.specification ?? '',
       unit: item.unit ?? '',
@@ -254,6 +259,9 @@ export function stockOutPayload(
       .map((row) => ({
         contractItemId: row.contractItemId,
         quantity: row.quantity ?? '0',
+        ...(row.productionOrderItemId
+          ? { productionOrderItemId: row.productionOrderItemId }
+          : {}),
       })),
   };
 }

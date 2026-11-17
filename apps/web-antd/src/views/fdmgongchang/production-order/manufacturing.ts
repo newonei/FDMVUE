@@ -16,3 +16,18 @@ export function parameterText(value?: null | string, name?: null | string) {
   if (!value?.trim()) return '未填写';
   return name?.trim() && name !== value ? `${name} (${value})` : value;
 }
+
+/** 工艺未确认或两面都缺纹路时仍提示缺失；已确认单面压花允许另一面不压花。 */
+export function textureText(item: {
+  processes?: string[];
+  targetConfirmedAt?: null | string;
+  targetTextureBack?: null | string;
+  targetTextureFront?: null | string;
+}, side: 'BACK' | 'FRONT', name?: null | string) {
+  if (item.processes?.length && !item.processes.includes('EMBOSS')) return '不压花';
+  const value = side === 'FRONT' ? item.targetTextureFront : item.targetTextureBack;
+  if (value?.trim()) return parameterText(value, name);
+  if (item.processes?.includes('EMBOSS') && item.targetConfirmedAt &&
+      (item.targetTextureFront?.trim() || item.targetTextureBack?.trim())) return '不压花';
+  return '未填写';
+}

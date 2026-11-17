@@ -816,6 +816,15 @@ async function save(activate = false) {
   }
   if (
     activate &&
+    !form.deliveryRequirement.trim() &&
+    lines.value.some((line) => !line.requiredDate)
+  ) {
+    panelError.value =
+      '请填写客户交付要求（如收定金后30天交货），或补齐每条产品的需求交期后生效；未确定时可保存草稿';
+    return;
+  }
+  if (
+    activate &&
     form.useTradeAssurance &&
     !form.alibabaTradeAssuranceNo.trim()
   ) {
@@ -1102,11 +1111,13 @@ async function save(activate = false) {
               v-model:value="form.paymentTerms"
               :rows="2"
             />
-</Form.Item><Form.Item v-if="contract" label="交付要求">
+</Form.Item><Form.Item label="交付要求">
             <Input.TextArea
               v-model:value="form.deliveryRequirement"
               :rows="2"
+              placeholder="生效前填写客户约定，如收定金后30天交货；也可补齐每条产品的需求交期"
             />
+            <span class="muted">客户交付要求或全部产品的需求交期，生效前至少明确一种；草稿可暂不填写。</span>
           </Form.Item>
         </Form>
       </Card>

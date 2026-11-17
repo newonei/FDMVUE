@@ -22,7 +22,10 @@ import { downloadBlob } from '../model';
  * 每次导出（PDF / Excel）都存一版；盖章件上传时对应其中一版。
  */
 const props = defineProps<{ saving: boolean; view: ProcurementOrderView }>();
-const emit = defineEmits<{ signed: [file: File, exportId: string] }>();
+const emit = defineEmits<{
+  delete: [file: ProcurementFile];
+  signed: [file: File, exportId: string];
+}>();
 const pageError = ref('');
 const exportId = ref<string>();
 const fileInput = ref<HTMLInputElement>();
@@ -38,6 +41,11 @@ function kindLabel(file: ProcurementFile) {
   if (file.kind === 'SIGNED') return '供应商盖章件';
   const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
   return kindLabels[ext] ?? '采购单';
+}
+function deleteBlocked(file: ProcurementFile) {
+  return props.view.files.some(
+    (item) => item.kind === 'SIGNED' && item.exportId === file.id,
+  );
 }
 // 盖章件几乎总是对应最新导出的那一版
 watch(
@@ -111,8 +119,9 @@ function upload(event: Event) {
         { title: '版本', dataIndex: 'revision' },
         { title: '资料修订版', dataIndex: 'detailsRevision' },
         { title: '时间', key: 'createdAt', dataIndex: 'createdAt' },
-        { title: '操作', key: 'action' },
+        { title: '操作', key: 'action', width: 190, fixed: 'right' as const },
       ]"
+      :scroll="{ x: 900 }"
     >
       <template #emptyText>
         还没有导出过。确认下单资料后，在右上角「导出」选择 PDF 或 Excel。
@@ -122,17 +131,39 @@ function upload(event: Event) {
           kindLabel(record as ProcurementFile)
         }}</span><span v-else-if="column.key === 'createdAt'">{{
           formatDateTime(record.createdAt) || '—'
-        }}</span><template v-else-if="column.key === 'action'">
+        }}</span><Space v-else-if="column.key === 'action'" :size="0">
           <FilePreviewButton
             :name="record.name"
+            size="small"
+            :disabled="saving"
             :load="
               () => downloadProcurementFile(view.contractId, view.id, record.id)
             "
           />
-          <Button type="link" @click="download(record as ProcurementFile)">
+          <Button
+            type="link"
+            size="small"
+            :disabled="saving"
+            @click="download(record as ProcurementFile)"
+          >
             下载
           </Button>
-        </template>
+          <Button
+            v-if="view.allowedActions.includes('DELETE_FILE')"
+            type="link"
+            size="small"
+            danger
+            :disabled="saving || deleteBlocked(record as ProcurementFile)"
+            :title="
+              deleteBlocked(record as ProcurementFile)
+                ? '请先删除对应的供应商盖章件'
+                : undefined
+            "
+            @click="emit('delete', record as ProcurementFile)"
+          >
+            删除
+          </Button>
+        </Space>
       </template>
     </Table>
   </Card>
