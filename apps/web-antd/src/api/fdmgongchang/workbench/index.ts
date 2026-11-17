@@ -144,6 +144,8 @@ export namespace FdmgongchangWorkbenchApi {
 
   export interface BatchReportRow {
     taskId: number;
+    /** 实际生产 / 计件人员；当前登录人仍为录入人。 */
+    operatorUserId?: number;
     goodQuantity: Decimal;
     defectQuantity: Decimal;
     expectedActualQuantity: Decimal;

@@ -40,7 +40,9 @@ export function createJob() {
   return reactive({
     /** 领料同时报数量（新建工序单时直接报完）。 */
     createFinish: false,
-    finish: true,
+    finish: false,
+    /** 返回列表时保留工人正在查看的分类、搜索词和页码。 */
+    homeView: { section: undefined as 'pending' | 'recent' | 'running' | undefined, keyword: '', page: 1 },
     inputs: [] as InputLine[],
     my: undefined as Api.My | undefined,
     options: undefined as StockApi.Options | undefined,

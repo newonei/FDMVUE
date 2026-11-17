@@ -61,6 +61,14 @@ beforeEach(() => {
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; });
 
 describe('production configuration values', () => {
+  it('preserves confirmed folding requirements and flags missing folding instructions before release', () => {
+    const draft = productionConfigDraft(product({ targetFoldingType: '八折' }));
+    expect(productionConfigTarget(10, draft).foldingType).toBe('八折');
+    expect(unfinishedProductionParameters(draft, ['FOLD'])).toEqual([]);
+    draft.foldingType = '';
+    expect(unfinishedProductionParameters(draft, ['FOLD'])).toEqual(['折叠要求未填写，确认后才能下发折叠任务']);
+    expect(unfinishedProductionParameters(draft, ['PUNCH'])).toEqual([]);
+  });
   it('keeps saved unconfirmed values ahead of suggestions and keeps confirmed empty values empty', () => {
     const draft = productionConfigDraft(product({ targetSuggested: { material: 'PVC', length: 190, frontColor: 'RED', textureFront: 'WAVE' } }));
     expect(draft).toMatchObject({ material: 'TPE', lengthMm: 1830, frontColor: 'ZI', textureFront: 'WAVE', thicknessMm: 6 });
@@ -70,7 +78,7 @@ describe('production configuration values', () => {
     const draft = productionConfigDraft(product()); draft.thicknessMm = 8;
     expect(productionConfigTarget(10, draft)).toEqual({ itemId: 10, material: 'TPE', colorMode: 'DUAL', constructionType: 'DOUBLE_LAYER',
       frontColor: 'ZI', backColor: 'LAN', length: 183, width: 61, thickness: 0.8, frontThickness: 0.4, backThickness: 0.4,
-      textureFront: null, textureBack: null, pattern: null });
+      textureFront: null, textureBack: null, pattern: null, foldingType: '' });
     draft.colorMode = 'SINGLE';
     expect(productionConfigTarget(10, draft)).toMatchObject({ constructionType: 'SINGLE_LAYER', backColor: 'ZI', frontThickness: 0.8, backThickness: null });
   });

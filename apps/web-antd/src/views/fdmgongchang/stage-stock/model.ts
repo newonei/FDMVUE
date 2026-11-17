@@ -269,6 +269,8 @@ export interface OutputDraft {
   attrs: Api.ItemAttrs;
   /** 开片时按板材规格自动带入的良品数；良品还等于它时说明没手动改过，规格变了会跟着重算。 */
   autoGood?: number;
+  /** 工作台本次产出总量：修改不良品时用于同步扣减良品，不提交给接口。 */
+  reportTotal?: number;
   batchNo: string;
   defectQuantity?: number;
   goodQuantity?: number;

@@ -4,7 +4,7 @@ import type { FdmgongchangWageApi } from '#/api/fdmgongchang/wage';
 
 import { computed, onMounted, ref } from 'vue';
 
-import { message, Select, Spin } from 'ant-design-vue';
+import { Checkbox, message, Select, Spin } from 'ant-design-vue';
 
 import { getWorkbenchMates, matchWorkbenchWage } from '#/api/fdmgongchang/workbench';
 import ImageUpload from '#/components/upload/image-upload.vue';
@@ -25,6 +25,7 @@ const job = useJob();
 const matches = ref<FdmgongchangWageApi.Match[]>([]);
 const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
 const loading = ref(true);
+const finishConfirmed = ref(false);
 let seed = Math.max(0, ...job.pieces.map((line) => line.key));
 const unit = computed(() => stageOf(job, job.process?.outputStage)?.unit ?? '');
 const primaryWorkerId = computed(() => job.onBehalfOf?.id ?? job.my?.userId);
@@ -88,6 +89,10 @@ const total = computed(() => isSlice.value ? allocation.value.amount : job.piece
 const sliceShare = (userId?: number) => allocation.value.shares.find((share) => share.userId === userId)?.amount ?? 0;
 
 function submit() {
+  if ((job.finish || job.createFinish) && !finishConfirmed.value) {
+    message.warning('请核对本批已经全部做完，并确认结束生产');
+    return;
+  }
   if (isSlice.value && goodTotal(job) > 0) {
     const error = sliceItem.value ? sliceParticipantError(job.pieces.map((line) => line.userId))
       : '开片计价未配置，请联系管理员设置「开片」的 m³ 单价后再报工。';
@@ -120,6 +125,12 @@ function addMate() {
     />
     <Spin :spinning="loading">
       <main class="flex flex-1 flex-col gap-3 p-4">
+        <section class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <b>本次良品 {{ formatQty(goodTotal(job)) }} {{ unit }} · 不良品 {{ formatQty(defectTotal(job)) }} {{ unit }}</b>
+          <span class="text-sm">{{ job.task?.contractCode || job.order?.orderNo || '本批生产' }}<template v-if="job.task"> · 任务 #{{ job.task.id }}</template></span>
+          <Checkbox v-if="job.finish || job.createFinish" v-model:checked="finishConfirmed" aria-label="确认本批全部做完">我已核对：本批全部做完，提交后结束生产</Checkbox>
+          <span v-else class="text-sm">只登记本次产出，工序单继续在制，下次接着报。</span>
+        </section>
         <section v-if="isSlice && sliceItem" class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-card p-3">
           <span class="text-sm font-bold">本次开片工资</span>
           <div class="flex flex-wrap items-baseline justify-between gap-2">

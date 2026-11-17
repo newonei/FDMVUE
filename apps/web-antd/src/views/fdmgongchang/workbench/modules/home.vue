@@ -4,7 +4,7 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { computed, ref, watch } from 'vue';
 
-import { Empty, Modal, Select, Spin } from 'ant-design-vue';
+import { Empty, Input, Modal, Select, Spin } from 'ant-design-vue';
 
 import { getWorkbenchMates, getWorkbenchPickList } from '#/api/fdmgongchang/workbench';
 
@@ -109,6 +109,41 @@ const outputSpec = (task: FdmgongchangScheduleApi.Task) =>
   task.output?.attrs ? attrSummary(task.output.stage ?? processOf(task.process)?.outputStage ?? '', task.output.attrs, labels.value, [], 'mm') : dimensionTextInMm(task.spec);
 const inProgress = computed(() => my.value.inProgress.filter((o) => processOf(o.process)));
 const runningTask = (id: number) => inProgress.value.some((o) => o.scheduleTaskId === id);
+const pendingTasks = computed(() => myTasks.value.filter((task) => !runningTask(task.id) && task.status !== 'DONE' && task.status !== 'CLOSED'));
+const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => processOf(order.process)));
+const section = ref<'pending' | 'recent' | 'running'>(job.homeView.section ?? (inProgress.value.length > 0 ? 'running' : 'pending'));
+const keyword = ref(job.homeView.keyword);
+const page = ref(job.homeView.page);
+const pageSize = 10;
+const normalized = (value: string) => value.toLocaleLowerCase().replaceAll(/[×*＊]/g, 'x').replaceAll(/\s/g, '');
+const searchMatches = (value: unknown, text: string) => normalized(JSON.stringify(value)).includes(normalized(text));
+const matches = (value: unknown) => searchMatches(value, keyword.value);
+const teamExpanded = ref(false);
+const teamKeyword = ref('');
+const teamPage = ref(1);
+const matchingTeam = computed(() => teamTasks.value.filter((task) => searchMatches([task, `任务 #${task.id}`, outputSpec(task)], teamKeyword.value)));
+const teamPageCount = computed(() => Math.max(1, Math.ceil(matchingTeam.value.length / pageSize)));
+const visibleTeam = computed(() => matchingTeam.value.slice((teamPage.value - 1) * pageSize, teamPage.value * pageSize));
+watch(teamKeyword, () => { teamPage.value = 1; });
+watch(teamPageCount, (count) => { teamPage.value = Math.min(teamPage.value, count); });
+const taskOf = (order: Api.Order) => myTasks.value.find((task) => task.id === order.scheduleTaskId);
+const matchingPending = computed(() => pendingTasks.value.filter((task) => matches([task, titleOf(task), outputSpec(task)])));
+const matchingRunning = computed(() => inProgress.value.filter((order) => matches([order, taskOf(order), taskOf(order) ? outputSpec(taskOf(order)!) : ''])));
+const matchingRecent = computed(() => recentDone.value.filter(matches));
+const total = computed(() => {
+  if (section.value === 'running') return matchingRunning.value.length;
+  if (section.value === 'pending') return matchingPending.value.length;
+  return matchingRecent.value.length;
+});
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)));
+const paged = <T,>(rows: T[]) => rows.slice((page.value - 1) * pageSize, page.value * pageSize);
+const visiblePending = computed(() => section.value === 'pending' ? paged(matchingPending.value) : []);
+const visibleRunning = computed(() => section.value === 'running' ? paged(matchingRunning.value) : []);
+const visibleRecent = computed(() => section.value === 'recent' ? paged(matchingRecent.value) : []);
+const remaining = (task: FdmgongchangScheduleApi.Task) => Math.max(0, (toNumber(task.quantity) ?? 0) - (toNumber(task.actualQuantity) ?? 0));
+watch([section, keyword], () => { page.value = 1; });
+watch(pageCount, (count) => { page.value = Math.min(page.value, count); }, { immediate: true });
+watch([section, keyword, page], () => { job.homeView = { section: section.value, keyword: keyword.value, page: page.value }; }, { immediate: true });
 const pickLoading = ref(false);
 /** 按任务编号：这个任务要领的料。 */
 const picksByTask = ref<Map<number, TaskPicks>>(new Map());
@@ -198,26 +233,34 @@ watch(
       </section>
       <!-- 我的任务：派给我的；卡片写清楚做什么、领什么料，做完了报工 -->
       <h2 class="m-0 text-sm font-semibold">我的任务</h2>
-        <section v-if="inProgress.length > 0" class="flex flex-col gap-2">
+      <nav aria-label="我的任务分类" class="flex flex-wrap gap-2">
+        <button v-for="tab in ([{ key: 'running', label: '正在做', count: inProgress.length }, { key: 'pending', label: '待开工', count: pendingTasks.length }, { key: 'recent', label: '最近完工', count: recentDone.length }] as const)" :key="tab.key" :aria-pressed="section === tab.key" class="min-h-11 rounded-md border px-3 text-sm" :class="section === tab.key ? 'border-primary bg-primary/10 text-primary' : 'border-border'" type="button" @click="section = tab.key">{{ tab.label }} {{ tab.count }}</button>
+      </nav>
+      <Input v-model:value="keyword" allow-clear aria-label="搜索我的任务" placeholder="搜索订单号、任务编号、颜色或规格" />
+      <p v-if="section === 'recent'" class="m-0 text-xs text-muted-foreground">这里显示最近 3 天完工的工序单；正在分批报工的单仍在「正在做」。</p>
+      <p v-if="total === 0" class="m-0 rounded-lg bg-card p-4 text-sm text-muted-foreground">{{ keyword ? '没有匹配的任务，请换个订单号、颜色或规格试试。' : section === 'running' ? '还没有开工的单，去「待开工」选择任务。' : section === 'recent' ? '最近还没有完工记录。' : '手上没有待开工任务，等班组长派单。' }}</p>
+        <section v-if="visibleRunning.length > 0" class="flex flex-col gap-2">
           <h2 class="m-0 text-sm font-bold">在制工序单 · 已领料</h2>
-          <article v-for="order in inProgress" :key="order.id" class="flex flex-col gap-3 rounded-lg border border-primary/40 bg-card p-4">
+          <article v-for="order in visibleRunning" :key="order.id" class="flex flex-col gap-3 rounded-lg border border-primary/40 bg-card p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <b>{{ labelOf(order.process) }} → {{ stageLabel(order.outputStage) }}</b>
               <span class="font-mono text-xs text-muted-foreground">{{ order.orderNo }}</span>
             </div>
             <p class="m-0 text-sm text-muted-foreground">{{ order.contractCode ? `关联订单 ${order.contractCode} · ` : '' }}已领 {{ formatQty(order.inputQuantity) }} {{ order.inputUnit }}{{ stageLabel(order.sourceStage) }}，累计良品 {{ formatQty(order.goodQuantity) }} {{ stageUnit(order.outputStage) }}</p>
             <p v-if="order.inputSummary" class="m-0 break-all text-xs text-muted-foreground">已领物料：{{ order.inputSummary }}</p>
+            <template v-if="taskOf(order)">
+              <b class="text-sm">{{ outputSpec(taskOf(order)!) || titleOf(taskOf(order)!) }}</b>
+              <span v-if="order.process === 'FOLD'" class="text-sm" :class="taskOf(order)!.output?.foldingType ? '' : 'text-warning'">{{ taskOf(order)!.output?.foldingType ? `折叠要求：${taskOf(order)!.output!.foldingType}` : '折叠要求未确认，请联系主任' }}</span>
+              <span class="text-xs text-muted-foreground">任务 #{{ order.scheduleTaskId }} · 任务已报 {{ formatQty(taskOf(order)!.actualQuantity) }} / {{ formatQty(taskOf(order)!.quantity) }} {{ taskOf(order)!.unit }} · 剩余 {{ formatQty(remaining(taskOf(order)!)) }} {{ taskOf(order)!.unit }}</span>
+            </template>
             <div class="flex gap-2">
               <button class="h-11 flex-1 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('reportOrder', order)">报本工序产出</button>
               <button class="h-11 rounded-md border border-border px-4 text-sm" type="button" @click="emit('supplementOrder', order)">补领材料</button>
             </div>
           </article>
         </section>
-        <p v-if="myTasks.length === 0" class="m-0 rounded-lg bg-card p-4 text-sm text-muted-foreground">
-          手上没有任务，等班组长派单。
-        </p>
         <article
-          v-for="task in myTasks"
+          v-for="task in visiblePending"
           :key="task.id"
           class="flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
         >
@@ -227,6 +270,8 @@ watch(
               <span class="min-w-0 break-words">{{ titleOf(task) }}</span>
             </span>
             <span v-if="outputSpec(task)" class="text-sm text-muted-foreground">计划产出规格：{{ outputSpec(task) }}</span>
+            <span v-if="task.process === 'FOLD'" class="text-sm" :class="task.output?.foldingType ? '' : 'text-warning'">{{ task.output?.foldingType ? `折叠要求：${task.output.foldingType}` : '折叠要求未确认，请联系主任' }}</span>
+            <span class="text-xs text-muted-foreground">任务 #{{ task.id }} · 已报 {{ formatQty(task.actualQuantity) }} · 剩余 {{ formatQty(remaining(task)) }} {{ task.unit }}</span>
             <span v-if="task.product" class="text-xs text-muted-foreground">关联订单产品：{{ task.product }}</span>
             <span class="text-xs text-primary">领料来源：{{ processOf(task.process)?.sources.map(stageLabel).join(' / ') }} → 本工序产出：{{ processOf(task.process)?.outputLabel }}</span>
             <TaskMaterials :task="task" class="text-sm" />
@@ -263,6 +308,8 @@ watch(
             <span v-if="task.upstreamNote">{{ task.upstreamNote }}</span>
           </p>
 
+          <details class="rounded-md border border-border p-2">
+          <summary class="cursor-pointer text-sm text-primary">查看预计领料与推荐批次（开工时可修改）</summary>
           <PlannedInputs :inputs="task.inputs" :labels="labels" />
           <div class="flex flex-col gap-1">
             <span class="text-xs font-semibold text-muted-foreground">建议领料批次（开工前按实际领取确认）</span>
@@ -284,6 +331,7 @@ watch(
             </Spin>
             <p v-if="picksByTask.get(task.id)?.hint" class="m-0 text-xs text-warning">{{ picksByTask.get(task.id)!.hint }}</p>
           </div>
+          </details>
 
           <button
             class="h-11 rounded-md bg-primary text-base font-semibold text-primary-foreground"
@@ -293,15 +341,36 @@ watch(
             {{ runningTask(task.id) ? '继续报本工序产出' : '领料开工' }}
           </button>
         </article>
+      <article v-for="order in visibleRecent" :key="`done-${order.id}`" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+        <b>{{ labelOf(order.process) }} · {{ order.orderNo }}</b>
+        <span class="text-sm">{{ order.contractCode || '备货' }} · 累计良品 {{ formatQty(order.goodQuantity) }} {{ stageUnit(order.outputStage) }}</span>
+        <span v-if="order.inputSummary" class="text-xs text-muted-foreground">{{ order.inputSummary }}</span>
+        <span class="text-xs text-muted-foreground">已完工，不能重复报本批产出。</span>
+      </article>
+      <nav v-if="pageCount > 1" aria-label="我的任务分页" class="flex items-center justify-between gap-3">
+        <button type="button" :disabled="page <= 1" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="page--">上一页</button>
+        <span class="text-xs">第 {{ page }} / {{ pageCount }} 页 · {{ total }} 条</span>
+        <button type="button" :disabled="page >= pageCount" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="page++">下一页</button>
+      </nav>
       <section v-if="teamTasks.length > 0" class="flex flex-col gap-2">
-        <h2 class="m-0 text-sm font-bold">组员的任务（组长代报）<span class="ml-1 text-xs font-normal text-muted-foreground">{{ teamTasks.length }} 个，组员忘了报可以替他报</span></h2>
+        <h2 class="m-0 text-sm font-bold">
+          <button type="button" :aria-expanded="teamExpanded" :aria-label="teamExpanded ? '收起组员任务' : '展开组员任务'" aria-controls="team-tasks-panel" class="flex min-h-11 w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-left" @click="teamExpanded = !teamExpanded">
+            <span>组员的任务（组长代报）</span><span class="text-xs font-normal text-muted-foreground">共 {{ teamTasks.length }} 个</span><span class="ml-auto text-xs text-primary">{{ teamExpanded ? '收起' : '展开' }}</span>
+          </button>
+        </h2>
+        <div v-if="teamExpanded" id="team-tasks-panel" class="flex flex-col gap-2">
+        <p class="m-0 text-xs text-muted-foreground">组员忘了报可以替他报，工序单和计件仍记在实际生产人员名下。</p>
+        <Input v-model:value="teamKeyword" allow-clear aria-label="搜索组员任务" placeholder="搜索订单、任务编号、颜色、规格或折法" />
+        <span class="text-xs text-muted-foreground">共 {{ teamTasks.length }} 个任务<template v-if="teamKeyword"> · 匹配 {{ matchingTeam.length }} 个</template></span>
+        <p v-if="matchingTeam.length === 0" class="m-0 rounded-md bg-card p-3 text-sm text-muted-foreground">没有匹配的组员任务，请换个关键词。</p>
         <ul class="m-0 flex list-none flex-col divide-y divide-border rounded-lg border border-border bg-card p-0">
-          <li v-for="t in teamTasks" :key="t.id" class="flex flex-wrap items-center gap-2 px-3 py-2">
+          <li v-for="t in visibleTeam" :key="t.id" :data-team-task-id="t.id" class="flex flex-wrap items-center gap-2 px-3 py-2">
             <span class="flex min-w-0 flex-1 flex-col">
               <span class="truncate text-sm font-semibold">{{ teamProcessOf(t.process)?.label }} · {{ t.product || '备货' }}</span>
               <span class="truncate text-xs text-muted-foreground">
                 {{ t.contractCode || '备货' }} · {{ formatQty(t.quantity) }} {{ t.unit }} · {{ t.workerNames || '还没人接' }}
               </span>
+              <span class="text-xs text-muted-foreground">任务 #{{ t.id }}<template v-if="outputSpec(t)"> · {{ outputSpec(t) }}</template><template v-if="t.output?.foldingType"> · {{ t.output.foldingType }}</template></span>
             </span>
             <span
               v-if="upstreamBadge(t.upstreamState)"
@@ -311,6 +380,12 @@ watch(
             <button class="rounded-md border border-primary px-3 py-1 text-sm text-primary" type="button" @click="openBehalf(t)">代报</button>
           </li>
         </ul>
+        <nav v-if="teamPageCount > 1" aria-label="组员任务分页" class="flex items-center justify-between gap-3">
+          <button type="button" :disabled="teamPage <= 1" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage--">上一页</button>
+          <span class="text-xs">第 {{ teamPage }} / {{ teamPageCount }} 页 · {{ matchingTeam.length }} 条</span>
+          <button type="button" :disabled="teamPage >= teamPageCount" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="teamPage++">下一页</button>
+        </nav>
+        </div>
       </section>
       <Modal
         :open="!!behalf"

@@ -235,7 +235,7 @@ function next() {
           <span v-if="outputSpec">产出规格：{{ outputSpec }}</span>
           <span>本次领取：{{ source?.label }} → 报工产出：{{ job.prepare.outputLabel || job.process?.outputLabel }}</span>
           <span v-if="job.prepare.picks.length > 0" class="text-muted-foreground">
-            系统按任务推荐领取 {{ formatQty(job.prepare.required) }} {{ unit }}，已预选批次。请按实际领取修改数量，确认后才扣库存。
+            系统推荐 {{ formatQty(job.prepare.required) }} {{ unit }}，仅作预填。可取消推荐、另选符合任务的材料，再填写实际领到的数量；下一步确认后才扣库存。
           </span>
           <span v-else class="text-muted-foreground">没有算出建议领料，请在下面点实际领的料，填领了多少。</span>
           <span v-if="job.prepare.hint" class="text-warning">{{ job.prepare.hint }}</span>

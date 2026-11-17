@@ -49,7 +49,7 @@ const percent = computed(() => {
       </section>
     </main>
     <footer class="grid grid-cols-1 gap-2 px-4 pb-4 pt-3 sm:grid-cols-2">
-      <button class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('home')">看下一个活</button>
+      <button class="h-11 rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="emit('home')">回任务列表，继续下一项</button>
       <button v-if="!job.task && !job.order" class="h-10 rounded-md border border-border bg-card text-sm font-semibold text-foreground" type="button" @click="emit('again')">再领一批料</button>
     </footer>
   </div>

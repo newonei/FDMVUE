@@ -37,6 +37,7 @@ import Home from './modules/home.vue';
 import PickStep from './modules/pick-step.vue';
 import PieceStep from './modules/piece-step.vue';
 import ReportStep from './modules/report-step.vue';
+import { prefillReportQuantity } from './report-quantity';
 import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
@@ -139,7 +140,7 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.pieces = [];
   job.order = undefined;
   job.returns = {};
-  job.finish = true;
+  job.finish = false;
   job.createFinish = false;
   job.result = { action: 'issue', amount: 0, good: 0, unit: '' };
   job.prepare = undefined;
@@ -276,6 +277,7 @@ function reportNow() {
   job.inputs = pickInputs();
   job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
   applyTarget();
+  prefillReportQuantity(job);
   job.step = 'report';
 }
 
@@ -337,6 +339,7 @@ async function openOrder(id: number, supplement: boolean) {
   }));
   job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.recipe?.code);
   applyTarget();
+  prefillReportQuantity(job);
   job.step = 'report';
 }
 
@@ -356,7 +359,7 @@ function afterReport() {
   // 返回修改实际良品后，计件数量同步到这次实际产出。
   for (const piece of job.pieces) piece.quantity = job.process?.code === 'SLICE' ? sliceVolume(job.outputs) : goodTotal(job);
   // 任务报工进入最终确认，即使本次全部为不良品。
-  if (job.prepare || goodTotal(job) > 0) job.step = 'piece';
+  if (job.prepare || job.finish || job.createFinish || goodTotal(job) > 0) job.step = 'piece';
   else void submit();
 }
 

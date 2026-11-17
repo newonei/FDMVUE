@@ -7,7 +7,7 @@ import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi 
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Alert, Button, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
+import { Alert, AutoComplete, Button, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
 
 import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig } from '#/api/fdmgongchang/production-order';
 
@@ -98,7 +98,7 @@ async function save() {
   const current = version;
   const payload: Api.ItemProductionConfigReq = {
     itemId: item.value.id,
-    target: productionConfigTarget(item.value.id, form.value),
+    target: productionConfigTarget(item.value.id, { ...form.value, foldingType: route.value.steps.includes('FOLD') ? form.value.foldingType : '' }),
     routeId: route.value.routeId ?? null,
     processes: sortSteps([...route.value.steps], routeOptions.value?.processes ?? []),
   };
@@ -176,6 +176,11 @@ const colorModes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '单色 �
           <div class="mt-4 border-t pt-3">
             <div class="mb-2 font-medium">实际生产工艺</div>
             <RoutePicker id="production-config" v-model="route" :options="routeOptions" />
+            <label v-if="route.steps.includes('FOLD')" for="config-folding" class="mt-3 flex flex-col gap-1 text-sm">
+              折叠要求（下发前必须确认）
+              <AutoComplete id="config-folding" v-model:value="form.foldingType" :maxlength="50" :options="['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map(value => ({ value }))" placeholder="选择或填写，如八折；员工按此要求生产" />
+            </label>
+            <p v-else class="mt-2 text-sm text-muted-foreground">本产品不经过折叠工序。</p>
             <p class="config-actual-route mb-0 mt-2 text-sm">{{ routeLabel(route, routeOptions) }}：{{ actualRoute }}</p>
           </div>
         </fieldset>

@@ -13,6 +13,7 @@ export interface ProductionConfigDraft {
   textureFront?: string;
   textureBack?: string;
   pattern?: string;
+  foldingType?: string;
 }
 
 /** 已保存的值优先；已确认明细的空值也是保存结果，不能用建议重新填回。 */
@@ -32,6 +33,7 @@ export function productionConfigDraft(item: Api.Item): ProductionConfigDraft {
     textureFront: text(pick(item.targetTextureFront, suggested?.textureFront)),
     textureBack: text(pick(item.targetTextureBack, suggested?.textureBack)),
     pattern: text(pick(item.targetPattern, suggested?.pattern)),
+    foldingType: text(item.targetFoldingType),
   };
 }
 
@@ -57,6 +59,7 @@ export function productionConfigTarget(itemId: number, form: ProductionConfigDra
     textureFront: form.textureFront?.trim() || null,
     textureBack: form.textureBack?.trim() || null,
     pattern: form.pattern?.trim() || null,
+    foldingType: form.foldingType?.trim() || '',
   };
 }
 
@@ -80,5 +83,6 @@ export function unfinishedProductionParameters(form: ProductionConfigDraft, step
     if (!form.textureBack) missing.push('反面压花纹路未填写');
   }
   if (steps.includes('ENGRAVE') && !form.pattern) missing.push('雕刻图案未填写');
+  if (steps.includes('FOLD') && !form.foldingType?.trim()) missing.push('折叠要求未填写，确认后才能下发折叠任务');
   return missing;
 }

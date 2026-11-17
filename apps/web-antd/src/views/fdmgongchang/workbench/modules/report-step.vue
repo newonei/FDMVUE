@@ -14,6 +14,7 @@ import {
   validateOutputs,
 } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
+import { changeReportDefect, changeReportGood } from '../report-quantity';
 import { goodTotal, outputPayload, slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import BigCounter from './big-counter.vue';
 import StepHeader from './step-header.vue';
@@ -42,7 +43,7 @@ const editing = ref(false);
 const showEditor = computed(() => editing.value || specErrors.value.length > 0);
 const errors = ref<string[]>([]);
 
-/** 理论开片量只作参考，实际良品和不良品必须由工人填写。 */
+/** 计划量自动带入；理论开片量仍作领料与规格的核对参考。 */
 const slicing = computed(() => job.process?.code === 'SLICE');
 const planThicknessError = computed(() => slicePlanThicknessError(job));
 
@@ -74,6 +75,7 @@ function next() {
         正在替 {{ job.onBehalfOf.name }} 报工：工序单和计件记在他名下，备注写你代报。
       </p>
       <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
+      <p v-if="job.process?.code === 'FOLD'" class="m-0 rounded-md border border-border p-3 text-sm" :class="job.task?.output?.foldingType ? '' : 'text-warning'">{{ job.task?.output?.foldingType ? `折叠要求：${job.task.output.foldingType}。请按任务要求核对实物。` : '折叠要求未确认，请联系主任' }}</p>
       <section v-if="job.task" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
         <b>计划产出：{{ job.prepare?.outputLabel || output?.label }} {{ formatQty(job.task.quantity) }} {{ job.prepare?.outputUnit || job.task.unit }}</b>
         <span v-if="plannedSpec">计划规格：{{ plannedSpec }}</span>
@@ -88,15 +90,16 @@ function next() {
           <span class="text-sm font-bold">
             本次良品（{{ output?.unit }}）<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
           </span>
-          <BigCounter :id="`good-${line.key}`" v-model="line.goodQuantity" label="好的数量" :precision="3" />
+          <BigCounter :id="`good-${line.key}`" :model-value="line.goodQuantity" label="好的数量" :precision="3" @update:model-value="changeReportGood(line, $event)" />
           <span v-if="slicing" class="text-center text-xs text-primary">{{ sliceHint(job.inputs, job.outputs, line) }}</span>
           <span v-else class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
         </section>
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">本次不良品（{{ output?.unit }}）</span>
-          <BigCounter :id="`bad-${line.key}`" v-model="line.defectQuantity" label="坏的数量" :precision="3" size="medium" tone="danger" />
+          <BigCounter :id="`bad-${line.key}`" :model-value="line.defectQuantity" label="坏的数量" :precision="3" size="medium" tone="danger" @update:model-value="changeReportDefect(line, $event)" />
         </section>
         </div>
+        <p v-if="line.reportTotal !== undefined" class="m-0 text-xs text-muted-foreground">填写不良品会自动扣减良品；只完成一部分时，可直接修改良品数量。</p>
         <!-- 开片先核对板材规格，放在数量上面 -->
         <section :class="slicing ? 'order-first border-primary/40' : 'border-border'" class="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
           <div class="flex items-center justify-between">
@@ -123,13 +126,14 @@ function next() {
       </div>
 
       <section v-if="!job.createFinish" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <p class="col-span-full m-0 text-xs text-muted-foreground">默认只报本次产出，之后还能继续报。确定这批全部做完时，再选择结束。</p>
         <button
           :class="job.finish ? 'border-2 border-primary' : 'border border-border'"
           class="flex flex-col gap-0.5 rounded-md bg-card px-3 py-2 text-left"
           type="button"
           @click="job.finish = true"
         >
-          <b class="text-sm">{{ job.prepare ? '这个任务做完了' : '这批都做完了' }}</b>
+          <b class="text-sm">{{ job.prepare ? '全部做完，结束这个任务' : '全部做完，结束这批生产' }}</b>
           <span class="text-xs text-muted-foreground">{{ job.prepare ? '任务算报完' : '结束这张单' }}</span>
         </button>
         <button
@@ -181,7 +185,7 @@ function next() {
     </main>
     <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-4 pt-3">
       <button class="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="next">
-        {{ goodTotal(job) > 0 ? '下一步：确认计件' : '提交' }}
+        {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
       </button>
     </footer>
   </div>

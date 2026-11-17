@@ -111,6 +111,7 @@ export namespace FdmgongchangProductionOrderApi {
     targetTextureFront?: null | string;
     targetTextureBack?: null | string;
     targetPattern?: null | string;
+    targetFoldingType?: null | string;
     targetConfirmedBy?: null | string;
     targetConfirmedAt?: null | string;
     /** 没确认时从规格文本解析出的建议值。 */
@@ -786,6 +787,7 @@ export namespace FdmgongchangSupplyMatchApi {
     length?: null | number | string;
     material?: null | string;
     pattern?: null | string;
+    foldingType?: null | string;
     textureBack?: null | string;
     textureFront?: null | string;
     thickness?: null | number | string;

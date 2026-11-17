@@ -37,6 +37,8 @@ export namespace FdmgongchangScheduleApi {
 
   /** 任务约定的领料或产出，attrs 用于精确匹配规格、颜色及配方。 */
   export interface Material {
+    /** 订单确认并下发的折叠要求，报工不得自行改变。 */
+    foldingType?: null | string;
     /** 工序任务所对应的面；同色双层也须保留。 */
     side?: 'BACK' | 'BOTH' | 'FRONT' | null;
     attrs?: FdmgongchangStageStockApi.ItemAttrs | null;
@@ -191,6 +193,9 @@ export namespace FdmgongchangScheduleApi {
   }
 
   export interface Task {
+    activeOrderId?: null | number;
+    activeOperatorUserId?: null | number;
+    activeOperatorName?: null | string;
     actualQuantity: Decimal;
     assignmentId?: null | string;
     contractCode?: null | string;
