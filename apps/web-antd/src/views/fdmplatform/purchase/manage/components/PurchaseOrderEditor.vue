@@ -67,7 +67,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  /** mode：修改草稿时为 draft（保存草稿）或 submitted（已提交），新建、复制时为空 */
+  /** 新建、复制先保存为 draft；编辑时可以保存草稿或提交下单。 */
   saved: [value: CreatedProcurementOrders, mode?: 'draft' | 'submitted'];
 }>();
 
@@ -512,8 +512,12 @@ watch(
   { immediate: true },
 );
 
-/** 修改草稿：submit=false 只保存草稿，true 时提交恢复为已下单。 */
-async function save(submit = true) {
+function close() {
+  if (!saving.value) emit('close');
+}
+/** 新建先保存草稿；编辑草稿时可以明确提交下单。 */
+async function save(submit = false) {
+  if (saving.value) return;
   submitted.value = true;
   if (errors.value.sheet || Object.keys(errors.value.lines).length > 0) return;
   if (props.editOf && splits.value.length > 1) {
@@ -539,7 +543,12 @@ async function save(submit = true) {
     }
     emit(
       'saved',
-      await createProcurementOrder({ ...payload, requestId: props.requestId }),
+      await createProcurementOrder({
+        ...payload,
+        requestId: props.requestId,
+        submit: false,
+      }),
+      'draft',
     );
   } catch (error_) {
     error.value = errorText(error_);
@@ -561,10 +570,18 @@ async function save(submit = true) {
     "
     width="min(1320px, 96vw)"
     :mask-closable="false"
-    @cancel="emit('close')"
+    :closable="!saving"
+    :keyboard="!saving"
+    @cancel="close"
   >
     <div class="entry">
       <Alert v-if="error" type="error" :message="error" show-icon />
+      <Alert
+        v-if="!editOf"
+        type="info"
+        message="先保存采购草稿，再完善下单资料和上传附件；确认后提交下单。"
+        show-icon
+      />
       <section class="entry-head" aria-label="基本信息">
         <label class="field wide">
           <span>采购主题</span>
@@ -889,15 +906,15 @@ async function save(submit = true) {
       </section>
     </div>
     <template #footer>
-      <Button @click="emit('close')">取消</Button>
+      <Button :disabled="saving" @click="close">取消</Button>
       <template v-if="editOf">
         <Button :loading="saving" @click="save(false)">保存草稿</Button>
         <Button type="primary" :loading="saving" @click="save(true)">
-          提交采购单
+          提交下单
         </Button>
       </template>
       <Button v-else type="primary" :loading="saving" @click="save()">
-        保存
+        保存草稿并完善资料
       </Button>
     </template>
   </Modal>

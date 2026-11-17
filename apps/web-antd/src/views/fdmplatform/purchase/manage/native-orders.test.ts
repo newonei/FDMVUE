@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   action: vi.fn(),
   confirm: vi.fn(),
   finance: vi.fn(),
+  deleteOrder: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
   getAttachments: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   exportProcurementOrder: vi.fn(),
   procurementOrderAction: mocks.action,
   uploadProcurementSigned: vi.fn(),
+  deleteProcurementOrder: mocks.deleteOrder,
 }));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinanceSummary: mocks.finance,
@@ -418,7 +420,7 @@ vi.mock('ant-design-vue', () => {
     Tabs: block,
     Tag: block,
     Modal: { confirm: mocks.confirm, warning: vi.fn() },
-    message: { success: vi.fn(), warning: vi.fn() },
+    message: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
   };
 });
 function nativeRows() {
@@ -720,6 +722,86 @@ describe('related creation inside the purchase workspace', () => {
 describe('purchase extras persistence and unsaved navigation', () => {
   const location =
     '/fdmprocurement/platform-orders?contractId=contract-1&documentId=order-1';
+
+  it('saves draft extras from the visible header without submitting the order', async () => {
+    mocks.detail.mockImplementation(async (_contractId, id) => ({
+      ...orderFixture(id),
+      order: { ...orderFixture(id).order, status: 'DRAFT' },
+      allowedActions: ['SAVE_DETAILS', 'SAVE_EXTRAS', 'EDIT_ORDER'],
+    }));
+    const { host } = await mount(location);
+    expect(host.textContent).toContain('采购单尚未下单');
+    click(host, '修改附加资料');
+    await settle();
+    click(host, '保存资料');
+    await settle();
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    expect(mocks.action.mock.calls[0]![2].action).toBe('SAVE_EXTRAS');
+  });
+
+  it('prompts to save unfinished extras before opening the submit editor', async () => {
+    mocks.detail.mockImplementation(async (_contractId, id) => ({
+      ...orderFixture(id),
+      order: { ...orderFixture(id).order, status: 'DRAFT' },
+      allowedActions: ['SAVE_DETAILS', 'SAVE_EXTRAS', 'EDIT_ORDER'],
+    }));
+    const { host } = await mount(location);
+    click(host, '修改附加资料');
+    await settle();
+    click(host, '编辑 / 提交下单');
+    await settle();
+    expect(mocks.confirm.mock.calls.at(-1)![0].title).toBe('采购资料尚未保存');
+    mocks.confirm.mock.calls.at(-1)![0].onCancel();
+    await settle();
+    expect(mocks.action).not.toHaveBeenCalled();
+  });
+
+  it('deletes an allowed terminated order only after a reason is entered', async () => {
+    mocks.detail.mockImplementation(async (_contractId, id) => ({
+      ...orderFixture(id),
+      order: { ...orderFixture(id).order, status: 'CLOSED' },
+      allowedActions: ['DELETE_ORDER'],
+    }));
+    mocks.deleteOrder.mockResolvedValue(true);
+    const { host, router } = await mount(location);
+    expect(
+      [...host.querySelectorAll('button')].some(
+        (button) => button.textContent?.trim() === '采购终止',
+      ),
+    ).toBe(false);
+    click(host, '删除采购单');
+    const dialog = mocks.confirm.mock.calls.at(-1)![0];
+    await expect(dialog.onOk()).rejects.toThrow('missing reason');
+    expect(mocks.deleteOrder).not.toHaveBeenCalled();
+    dialog.content().children[1].props['onUpdate:value']('误转采购单');
+    await dialog.onOk();
+    await settle();
+    expect(mocks.deleteOrder).toHaveBeenCalledWith(
+      'contract-1',
+      'order-1',
+      expect.objectContaining({ reason: '误转采购单' }),
+    );
+    expect(router.currentRoute.value.query.documentId).toBeUndefined();
+  });
+
+  it('hides deletion when the server does not allow it', async () => {
+    const { host } = await mount(location);
+    expect(host.textContent).not.toContain('删除采购单');
+  });
+
+  it('explains why a terminated order with business records cannot be deleted', async () => {
+    mocks.detail.mockImplementation(async (_contractId, id) => ({
+      ...orderFixture(id),
+      order: { ...orderFixture(id).order, status: 'CLOSED' },
+      deleteOrderBlockReasons: ['已有到货或退货记录，不能删除采购单'],
+    }));
+    const { host } = await mount(location);
+    const button = [...host.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === '删除采购单',
+    );
+    expect(button?.disabled).toBe(true);
+    expect(button?.title).toBe('已有到货或退货记录，不能删除采购单');
+  });
 
   it('saves extras with their own action and preserves the server confirmation state', async () => {
     const { host } = await mount(location);

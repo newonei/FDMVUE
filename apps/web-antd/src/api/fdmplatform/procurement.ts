@@ -182,6 +182,8 @@ export interface ProcurementOrderImage {
   height: number;
 }
 export interface ProcurementOrderView {
+  /** 已终止采购单不能删除的业务原因。 */
+  deleteOrderBlockReasons?: string[];
   id: string;
   contractId: string;
   version: number;
@@ -266,6 +268,8 @@ export interface PurchaseOrderEntry {
   idempotencyKey: string;
   contractId?: string;
   requestId?: string;
+  /** 新建时 false 只保存草稿；省略时兼容已有直接下单调用。 */
+  submit?: boolean;
   supplierId: string;
   subject?: string;
   category?: string;
@@ -770,6 +774,17 @@ export function endProcurementOrder(
 ) {
   return requestClient.post<number>(
     `${orderPath(contractId, orderId)}/end`,
+    data,
+  );
+}
+/** 删除误转的已终止采购单；后端校验是否有关联业务。 */
+export function deleteProcurementOrder(
+  contractId: string,
+  orderId: string,
+  data: { idempotencyKey: string; reason: string },
+) {
+  return requestClient.post<boolean>(
+    `${orderPath(contractId, orderId)}/delete`,
     data,
   );
 }

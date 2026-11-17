@@ -142,9 +142,16 @@ const canConvert = computed(
     !!contract.value &&
     !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
 );
-function converted(value: CreatedProcurementOrders) {
+function converted(
+  value: CreatedProcurementOrders,
+  mode?: 'draft' | 'submitted',
+) {
   convertTo.value = undefined;
-  message.success(createdOrdersText(value, '已转成采购单'));
+  message.success(
+    mode === 'draft'
+      ? `${createdOrdersText(value, '已生成采购草稿')}，请完善并保存资料后提交下单`
+      : createdOrdersText(value, '已转成采购单'),
+  );
   emit('updated');
   convertedOrder.value = {
     contractId: value.contractId,

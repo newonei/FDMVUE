@@ -60,6 +60,7 @@ import {
 } from '#/api/fdmplatform';
 import {
   createdOrdersText,
+  deleteProcurementOrder,
   downloadProcurementFile,
   endProcurementOrder,
   exportProcurementOrder,
@@ -472,9 +473,10 @@ function openEditor(source?: { contractId: string; orderId: string }) {
   editSource.value = undefined;
   editorOpen.value = true;
 }
-function editCurrentOrder() {
+async function editCurrentOrder() {
   const current = view.value;
   if (!current || childOpen.value) return;
+  if (!(await allowLeaveDetails())) return;
   copySource.value = undefined;
   editSource.value = {
     code: String(current.order.code ?? ''),
@@ -740,27 +742,85 @@ async function invoicesChanged() {
   await refreshFacts();
   void loadList();
 }
+async function saveCurrentDetails() {
+  if (childOpen.value) return;
+  const pending = orderDetails.value?.pendingSave();
+  if (pending) await command(pending.action, pending.payload);
+}
+function deleteCurrentOrder() {
+  const current = view.value;
+  if (
+    !current ||
+    childOpen.value ||
+    !current.allowedActions.includes('DELETE_ORDER')
+  )
+    return;
+  let reason = '';
+  Modal.confirm({
+    title: `删除已终止采购单 ${String(current.order.code ?? '')}？`,
+    content: () =>
+      h('div', [
+        h(
+          'p',
+          '删除后不再显示在采购单列表。有到货、入库、付款等业务记录的采购单不能删除。',
+        ),
+        h(Input, {
+          placeholder: '删除原因（必填），如：误转采购单',
+          'onUpdate:value': (value: string) => {
+            reason = value;
+          },
+        }),
+      ]),
+    okText: '确认删除',
+    okButtonProps: { danger: true },
+    onOk: async () => {
+      if (!reason.trim()) {
+        message.error('请填写删除原因');
+        throw new Error('missing reason');
+      }
+      saving.value = true;
+      try {
+        await deleteProcurementOrder(current.contractId, current.id, {
+          reason: reason.trim(),
+          idempotencyKey: key('DELETE_ORDER'),
+        });
+        commandKeys.delete('DELETE_ORDER');
+        detailsDirty.value = false;
+        saving.value = false;
+        await back();
+        message.success('采购单已删除');
+        await loadList();
+      } catch (error) {
+        message.error(errorText(error));
+        throw error;
+      } finally {
+        saving.value = false;
+      }
+    },
+  });
+}
 function editorSaved(
   value: CreatedProcurementOrders,
   mode?: 'draft' | 'submitted',
 ) {
   editorOpen.value = false;
-  if (mode) {
+  if (mode && editSource.value) {
     let text = `已保存草稿 ${value.code}，记得提交`;
     if (mode === 'submitted')
       text = value.pendingApproval
         ? `采购单 ${value.code} 已提交钉钉审批，通过后变成已下单`
-        : `采购单 ${value.code} 已重新提交`;
+        : `采购单 ${value.code} 已提交下单`;
     message.success(text);
     void loadList();
     void Promise.all([loadDetail(), refreshFacts()]);
     return;
   }
-  message.success(
-    value.pendingApproval
-      ? `${createdOrdersText(value)}，已提交钉钉审批，通过后变成已下单`
-      : createdOrdersText(value),
-  );
+  let successText = createdOrdersText(value);
+  if (mode === 'draft')
+    successText = `${createdOrdersText(value, '已保存采购草稿')}，请完善并保存资料后提交下单`;
+  else if (value.pendingApproval)
+    successText = `${successText}，已提交钉钉审批，通过后变成已下单`;
+  message.success(successText);
   void loadList();
   localTab.value = 'details';
   selection.value = {
@@ -1914,6 +1974,18 @@ watch(financeType, (value, previous) => {
       </template>
       <template #extra>
         <Space v-if="view && active">
+          <Button
+            v-if="
+              tab === 'details' &&
+              (view.allowedActions.includes('SAVE_DETAILS') ||
+                view.allowedActions.includes('SAVE_EXTRAS'))
+            "
+            :loading="saving"
+            :disabled="childOpen || !detailsDirty"
+            @click="saveCurrentDetails"
+          >
+            保存资料
+          </Button>
           <OrderSubDocMenu
             :items="subDocItems"
             :disabled="childOpen"
@@ -1949,7 +2021,7 @@ watch(financeType, (value, previous) => {
             :disabled="childOpen"
             @click="editCurrentOrder"
           >
-            修改并提交
+            编辑 / 提交下单
           </Button>
           <Button
             v-else-if="
@@ -1963,7 +2035,7 @@ watch(financeType, (value, previous) => {
           </Button>
           <Button
             v-if="
-              !['CANCELLED', 'RECEIVED', 'ENDED'].includes(
+              !['CANCELLED', 'CLOSED', 'RECEIVED', 'ENDED'].includes(
                 String(view.order.status ?? ''),
               )
             "
@@ -1971,6 +2043,22 @@ watch(financeType, (value, previous) => {
             @click="endCurrentOrder"
           >
             采购终止
+          </Button>
+          <Button
+            v-if="
+              view.allowedActions.includes('DELETE_ORDER') ||
+              (view.deleteOrderBlockReasons ?? []).length > 0
+            "
+            danger
+            :disabled="
+              childOpen || !view.allowedActions.includes('DELETE_ORDER')
+            "
+            :title="
+              (view.deleteOrderBlockReasons ?? []).join('；') || undefined
+            "
+            @click="deleteCurrentOrder"
+          >
+            删除采购单
           </Button>
           <Dropdown :trigger="['click']" :disabled="childOpen">
             <Button>更多</Button>
@@ -2030,7 +2118,7 @@ watch(financeType, (value, previous) => {
           v-else-if="view && active && String(view.order.status) === 'DRAFT'"
           type="warning"
           show-icon
-          message="采购单已撤回为草稿：不能收货入库、请款付款、收票。点「修改并提交」改好后提交，恢复为已下单。"
+          message="采购单尚未下单。可先完善附加资料、上传附件并保存，稍后继续编辑；核对完成后点「编辑 / 提交下单」。草稿不能收货入库、请款付款或收票。"
         />
         <Alert
           v-if="detailLoading && !view"
