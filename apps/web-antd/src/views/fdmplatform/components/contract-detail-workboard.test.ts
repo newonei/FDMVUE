@@ -14,6 +14,7 @@ import {
   nextTick,
   reactive,
 } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -412,6 +413,17 @@ function button(host: ParentNode, title: string) {
   return result!;
 }
 async function mountDetail() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: '/fdmwaimao/platform-contracts',
+        component: { render: () => null },
+      },
+    ],
+  });
+  await router.push('/fdmwaimao/platform-contracts');
+  await router.isReady();
   const host = document.createElement('div');
   document.body.append(host);
   const updated = vi.fn();
@@ -435,11 +447,12 @@ async function mountDetail() {
         onRefresh: refresh,
       }),
   });
-  app.mount(host);
+  app.use(router);
   disposals.push(() => {
     app.unmount();
     host.remove();
   });
+  app.mount(host);
   await nextTick();
   await nextTick();
   return { host, props, updated, close, refresh };
