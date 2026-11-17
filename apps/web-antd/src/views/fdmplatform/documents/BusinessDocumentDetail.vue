@@ -10,7 +10,7 @@ import type {
 } from '#/api/fdmplatform/business-documents';
 
 import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import {
   Alert,
@@ -64,6 +64,7 @@ import { contractReferenceText, nativeMoney } from './migration-display';
 import MigrationSource from './MigrationSource.vue';
 import { contractTarget, entityTarget, withoutDetailQuery } from './navigation';
 import RelatedLink from './RelatedLink.vue';
+import { useOwnedRoute } from './useOwnedRoute';
 
 const props = defineProps<{
   contractId?: string;
@@ -73,7 +74,7 @@ const props = defineProps<{
   open: boolean;
 }>();
 const emit = defineEmits<{ close: []; updated: [BusinessDocument] }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const view = ref<BusinessDocument>();
 const directory = ref<Directory>();

@@ -65,6 +65,7 @@ const unassignedCount = computed(() => rows.value.filter((r) => !r.assigned).len
 const STATE_STATUS: Record<string, number | undefined> = { disabled: 1, enabled: 0 };
 
 async function loadRows() {
+  if (!(await factory.whenActive())) return;
   loading.value = true;
   try {
     rows.value = await getWorkerList({
@@ -92,6 +93,7 @@ async function loadAll() {
       return;
     }
     options.value = await getWorkerOptions();
+    if (!(await factory.whenActive())) return;
     await loadRows();
   } catch {
     loadError.value = true;
@@ -115,7 +117,8 @@ watch(
   () => {
     if (!options.value) return;
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
+    searchTimer = setTimeout(async () => {
+      if (!(await factory.whenActive())) return;
       pageNo.value = 1;
       loadRows();
     }, 300);

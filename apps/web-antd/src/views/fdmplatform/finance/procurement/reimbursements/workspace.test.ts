@@ -226,6 +226,28 @@ afterEach(() => {
 });
 
 describe('费用报销真实列表和付款事实', () => {
+  it('切换其他菜单保留当前分页和新建状态，返回后无需重新查询', async () => {
+    const { host } = await mount();
+    button(host, '第二页').click();
+    await settle();
+    button(host, '新建报销').click();
+    await settle();
+    const calls = mocks.page.mock.calls.length;
+    mocks.route.path = '/other';
+    mocks.route.query = { contractId: 'unrelated', financeId: 'other' };
+    await settle();
+    expect(host.querySelector('[data-document]')).toBeNull();
+    mocks.route.path = '/expenses';
+    mocks.route.query = {};
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-document]')?.dataset.document,
+    ).toBe('new');
+    expect(mocks.page).toHaveBeenCalledTimes(calls);
+    expect(mocks.page).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageNo: 2 }),
+    );
+  });
   it('缺金额或未核实不能变成零和已付清；生效前不显示付款已完成', () => {
     expect(expenseMoney(undefined, 'CNY')).toBe('—');
     expect(expenseMoney('0', 'CNY')).toBe('CNY 0.00');

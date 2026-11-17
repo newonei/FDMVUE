@@ -23,15 +23,11 @@ import {
   ref,
   watch,
 } from 'vue';
-import {
-  onBeforeRouteLeave,
-  onBeforeRouteUpdate,
-  useRoute,
-  useRouter,
-} from 'vue-router';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { usePreferences } from '@vben/preferences';
 
 import {
   Alert,
@@ -107,6 +103,7 @@ import {
 } from '../../documents/navigation';
 import RecordDetail from '../../documents/RecordDetail.vue';
 import RelatedLink from '../../documents/RelatedLink.vue';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import FinanceDocument from '../../finance/procurement/components/FinanceDocument.vue';
 import OrderFinance from '../../finance/procurement/components/OrderFinance.vue';
@@ -160,8 +157,9 @@ const props = defineProps<{
   embeddedOrder?: { contractId: string; orderId: string };
 }>();
 const emit = defineEmits<{ close: []; updated: [] }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
+const { keepAlive } = usePreferences();
 const embedded = computed(() => !!props.embeddedOrder);
 const active = useRouteOwner();
 const records = ref<ProcurementOrderRow[]>([]);
@@ -1066,6 +1064,7 @@ async function loadList() {
   listError.value = '';
   try {
     const result = await getProcurementOrders(params);
+    if (run === listSequence && !active.value) listNeedsResume = true;
     if (run === listSequence && active.value) {
       records.value = result.list;
       total.value = result.total;
@@ -1104,7 +1103,11 @@ async function loadDetail() {
         ? Promise.resolve(undefined)
         : getContract(target.contractId),
     ]);
-    if (run !== sequence || !active.value) return;
+    if (run !== sequence) return;
+    if (!active.value) {
+      detailContext = undefined;
+      return;
+    }
     view.value = value;
     contract.value = parent;
     commandKeys.clear();
@@ -1336,7 +1339,9 @@ function beforeUnload(event: BeforeUnloadEvent) {
 }
 onMounted(() => window.addEventListener('beforeunload', beforeUnload));
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload));
-onBeforeRouteLeave(() => allowLeaveDetails());
+onBeforeRouteLeave(() =>
+  route.meta.keepAlive && keepAlive.value ? true : allowLeaveDetails(),
+);
 onBeforeRouteUpdate((to, from) => {
   if (
     to.query.documentId !== from.query.documentId ||
@@ -1384,6 +1389,9 @@ async function upload(file: File, exportId: string) {
     saving.value = false;
   }
 }
+let detailContext: string | undefined;
+let listContext: string | undefined;
+let listNeedsResume = false;
 watch(
   () => [
     active.value,
@@ -1392,6 +1400,14 @@ watch(
     route.query.contractId,
   ],
   () => {
+    if (!active.value) return;
+    const context = JSON.stringify([
+      detailId.value,
+      selection.value?.contractId,
+      route.query.contractId,
+    ]);
+    if (context === detailContext) return;
+    detailContext = context;
     createAction.value = undefined;
     plansOpen.value = false;
     actionOpen.value = false;
@@ -1414,6 +1430,16 @@ watch(
 watch(
   () => [active.value, route.query.contractId],
   (next, previous) => {
+    if (!active.value) return;
+    const context = JSON.stringify([route.query.contractId]);
+    if (context === listContext) {
+      if (listNeedsResume) {
+        listNeedsResume = false;
+        void loadList();
+      }
+      return;
+    }
+    listContext = context;
     if (previous && next[1] !== previous[1]) {
       scope.value = defaultCompletionScope(contractId.value);
       pendingTotal.value = 0;
@@ -1430,7 +1456,7 @@ watch(
     route.query.contractId,
   ],
   () => {
-    if (embedded.value) return;
+    if (embedded.value || !active.value) return;
     selection.value = undefined;
     localStandaloneId.value = undefined;
   },
@@ -1939,7 +1965,7 @@ watch(financeType, (value, previous) => {
       :closable="!childOpen"
       :mask-closable="!childOpen"
       :keyboard="!childOpen"
-      :destroy-on-close="true"
+      :destroy-on-close="false"
       @close="back"
     >
       <template #title>
@@ -2125,7 +2151,7 @@ watch(financeType, (value, previous) => {
           type="info"
           message="正在读取采购单…"
         />
-        <div v-if="view && active" class="order-layout">
+        <div v-if="view" class="order-layout">
           <div class="order-main">
             <section class="order-info">
               <dl>

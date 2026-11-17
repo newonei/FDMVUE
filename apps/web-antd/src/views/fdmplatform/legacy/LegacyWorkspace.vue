@@ -2,19 +2,20 @@
 import type { LegacyKind, LegacySummary } from '#/api/fdmplatform/legacy';
 
 import { computed, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Alert, Button, Space, Spin } from 'ant-design-vue';
 
 import { getLegacySummary } from '#/api/fdmplatform/legacy';
 
 import { errorText } from '../data';
+import { useOwnedRoute } from '../documents/useOwnedRoute';
 import { useRouteOwner } from '../documents/useRouteOwner';
 import LegacyPanel from './LegacyPanel.vue';
 import { legacyCount, legacyDefaultMode, legacyModeQuery } from './model';
 
 const props = defineProps<{ kinds: LegacyKind[] }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const summary = ref<LegacySummary>();
@@ -105,7 +106,8 @@ function changeMode(value: 'current' | 'legacy') {
       <slot></slot>
     </div>
     <LegacyPanel
-      v-if="ready && mode === 'legacy' && active"
+      v-if="ready && mode === 'legacy'"
+      v-show="active"
       :kinds="kinds"
       :summary="summary"
       class="legacy-page"

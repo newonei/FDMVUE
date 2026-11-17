@@ -173,6 +173,7 @@ const drawerOpen = ref(false);
 const drawerId = ref<number>();
 
 async function loadRows() {
+  if (!(await factory.whenActive())) return;
   if (['exception', 'restock', 'schedule', 'tasks'].includes(tab.value)) return;
   if (tab.value === 'factory' && (!factoryReady.value || noFactory.value)) return;
   loading.value = true;
@@ -202,6 +203,7 @@ async function loadRows() {
 }
 
 async function loadPending() {
+  if (!(await factory.whenActive())) return;
   if (!canHandle.value || !factoryReady.value || noFactory.value) return;
   try {
     const page = await getFactoryProductionOrders({ pageNo: 1, pageSize: 1, status: 'SUBMITTED' });
@@ -256,7 +258,8 @@ watch(
   () => [filters.keyword, filters.status],
   () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
+    searchTimer = setTimeout(async () => {
+      if (!(await factory.whenActive())) return;
       pageNo.value = 1;
       loadRows();
     }, 300);

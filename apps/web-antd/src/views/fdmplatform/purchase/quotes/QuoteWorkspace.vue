@@ -5,7 +5,7 @@ import type { RelatedDocumentSource } from '../../documents/related-creation';
 import type { BusinessRecord, Contract, DocumentRow } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -24,6 +24,7 @@ import {
   withoutDetailQuery,
 } from '../../documents/navigation';
 import RecordDetail from '../../documents/RecordDetail.vue';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
@@ -35,7 +36,7 @@ import QuoteEntryDialog from './QuoteEntryDialog.vue';
 import '../components/procurement.css';
 
 defineOptions({ name: 'FdmPlatformPurchaseQuoteWorkspace' });
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const routeActive = useRouteOwner();
 const contractId = computed(() => queryContractId(route.query.contractId));
@@ -123,7 +124,11 @@ async function load(autoSelect = false) {
       keyword: keyword.value.trim() || undefined,
       contractId: contractId.value,
     });
-    if (run !== listSequence || !routeActive.value) return;
+    if (run !== listSequence) return;
+    if (!routeActive.value) {
+      listNeedsResume = true;
+      return;
+    }
     records.value = result.list;
     total.value = result.total;
     if (
@@ -237,11 +242,18 @@ function ordered(updated: Contract, orders: BusinessRecord[]) {
     });
 }
 async function locate() {
+  if (!routeActive.value) return;
+  const key = JSON.stringify([
+    route.query.documentId,
+    route.query.standaloneId,
+    contractId.value,
+  ]);
+  if (key === locatedQuery) return;
+  locatedQuery = key;
   const run = ++locateSequence;
   locateError.value = '';
   detailOpen.value = false;
   standaloneId.value = undefined;
-  if (!routeActive.value) return;
   try {
     const standalone = standaloneLocation(route.query);
     if (standalone) {
@@ -251,7 +263,11 @@ async function locate() {
     const location = detailLocation(route.query);
     if (!location) return;
     const contract = await getContract(location.contractId);
-    if (run !== locateSequence || !routeActive.value) return;
+    if (run !== locateSequence) return;
+    if (!routeActive.value) {
+      locatedQuery = undefined;
+      return;
+    }
     if (contract.id !== location.contractId)
       throw new Error('返回资料不属于当前订单');
     const row = resolveDocumentRow(contract, 'quotes', location.documentId);
@@ -267,9 +283,23 @@ async function locate() {
   }
 }
 
+let locatedQuery: string | undefined;
+let listContract: string | undefined;
+let initializedList = false;
+let listNeedsResume = false;
 watch(
   () => [contractId.value, routeActive.value] as const,
   () => {
+    if (!routeActive.value) return;
+    if (initializedList && listContract === contractId.value) {
+      if (listNeedsResume) {
+        listNeedsResume = false;
+        void load();
+      }
+      return;
+    }
+    initializedList = true;
+    listContract = contractId.value;
     ++listSequence;
     ++comparisonSequence;
     pageNo.value = 1;

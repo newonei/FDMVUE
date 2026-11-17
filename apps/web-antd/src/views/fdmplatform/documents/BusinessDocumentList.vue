@@ -2,7 +2,7 @@
 import type { DocumentRow, PageResource } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Alert, Button, Input, Space, Table, Tag } from 'ant-design-vue';
 
@@ -11,9 +11,10 @@ import { getBusinessPage } from '#/api/fdmplatform';
 import { errorText, label } from '../data';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from './navigation';
+import { useOwnedRoute } from './useOwnedRoute';
 import { useRouteOwner } from './useRouteOwner';
 const props = defineProps<{ resource: PageResource; title: string }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const records = ref<DocumentRow[]>([]);
@@ -51,11 +52,14 @@ async function load() {
     if (run === sequence) loading.value = false;
   }
 }
+let listResource: PageResource | undefined;
 watch(
   () => [props.resource, active.value],
   () => {
+    if (!active.value || listResource === props.resource) return;
+    listResource = props.resource;
     page.value = 1;
-    if (active.value) void load();
+    void load();
   },
   { immediate: true },
 );

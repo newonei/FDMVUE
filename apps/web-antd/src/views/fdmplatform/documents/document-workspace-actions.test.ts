@@ -183,7 +183,10 @@ async function mountWorkspace(
 ) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/documents', component: { render: () => null } }],
+    routes: [
+      { path: '/documents', component: { render: () => null } },
+      { path: '/other', component: { render: () => null } },
+    ],
   });
   await router.push(`/documents${query}`);
   await router.isReady();
@@ -235,6 +238,35 @@ afterEach(() => {
 });
 
 describe('document list shortcuts and retained context', () => {
+  it('retains pagination, search and the current action when another menu has unrelated query values', async () => {
+    const view = await mountWorkspace();
+    await search(view.host, '客户甲');
+    button(view.host, '第2页').click();
+    await settle();
+    button(view.host, '新增供应商报价').click();
+    await settle();
+    const calls = mocks.page.mock.calls.length;
+    await view.router.push('/other?contractId=unrelated&documentId=other');
+    await settle();
+    expect(view.host.querySelector('[data-action]')).toBeNull();
+    expect(mocks.page).toHaveBeenCalledTimes(calls);
+    await view.router.push('/documents?queue=tasks');
+    await settle();
+    expect(
+      view.host.querySelector<HTMLInputElement>('input[data-search]')?.value,
+    ).toBe('客户甲');
+    expect(
+      view.host.querySelector<HTMLElement>('[data-action]')?.dataset.source,
+    ).toBe(JSON.stringify({ kind: 'tasks', id: 'task-a' }));
+    expect(mocks.page).toHaveBeenCalledTimes(calls);
+    button(view.host, '取消办理').click();
+    button(view.host, '刷新').click();
+    await settle();
+    expect(mocks.page).toHaveBeenLastCalledWith(
+      'assignments',
+      expect.objectContaining({ pageNo: 2, keyword: '客户甲' }),
+    );
+  });
   it('opens a source-bound quote form directly without navigating or opening detail', async () => {
     const view = await mountWorkspace();
     button(view.host, '新增供应商报价').click();

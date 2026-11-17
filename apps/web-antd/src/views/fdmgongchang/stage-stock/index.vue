@@ -47,6 +47,7 @@ const noFactory = ref(false);
 type TabKey = 'holds' | 'orders' | 'receiving' | 'settings' | 'stock';
 const TAB_KEYS = new Set<TabKey>(['holds', 'orders', 'receiving', 'settings', 'stock']);
 const route = useRoute();
+const pagePath = route.path;
 const router = useRouter();
 const activeTab = ref<TabKey>('orders');
 /** 手机上打开时提示去工人端。 */
@@ -107,6 +108,7 @@ async function switchFactory(id: number) {
 watch(
   () => route.query.tab,
   (tab) => {
+    if (route.path !== pagePath) return;
     if (typeof tab === 'string' && TAB_KEYS.has(tab as TabKey))
       activeTab.value = tab as TabKey;
   },

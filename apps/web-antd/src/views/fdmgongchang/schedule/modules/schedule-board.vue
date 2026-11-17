@@ -4,7 +4,7 @@ import type { Dayjs } from 'dayjs';
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule';
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 
 import { useAccess } from '@vben/access';
 
@@ -49,21 +49,23 @@ const creatingManual = ref(false);
 const form = ref({ days: 3, note: '', startDate: factoryToday() as Dayjs });
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let active = true;
 
 async function loadList() {
   schedules.value = await getSchedules();
 }
 
 async function loadDetail(id: number, quiet = false) {
+  if (!active) return;
   if (!quiet) detailLoading.value = true;
   try {
     const data = await getSchedule(id);
     if (selectedId.value !== id) return;
     detail.value = data;
     clearTimeout(pollTimer);
-    if (data.status === 'GENERATING') {
+    if (data.status === 'GENERATING' && active) {
       pollTimer = setTimeout(() => loadDetail(id, true), 3000);
-    } else if (quiet) {
+    } else if (data.status !== 'GENERATING' && quiet && active) {
       await loadList();
     }
   } finally {
@@ -90,7 +92,20 @@ onMounted(() => {
   void load();
   void loadMixQueue();
 });
-onBeforeUnmount(() => clearTimeout(pollTimer));
+onActivated(async () => {
+  active = true;
+  // 子组件激活早于父页面，先等父页面恢复 factory-id。
+  await nextTick();
+  if (active && selectedId.value && (!detail.value || detail.value.status === 'GENERATING')) {
+    void loadDetail(selectedId.value, true);
+  }
+});
+function stopPolling() {
+  active = false;
+  clearTimeout(pollTimer);
+}
+onDeactivated(stopPolling);
+onBeforeUnmount(stopPolling);
 watch(() => props.factoryId, () => {
   batchMixOpen.value = false;
   releaseOpen.value = false;

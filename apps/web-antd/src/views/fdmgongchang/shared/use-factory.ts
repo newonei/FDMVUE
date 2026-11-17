@@ -1,6 +1,6 @@
 import type { FdmgongchangFactoryApi } from '#/api/fdmgongchang/factory';
 
-import { computed, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, ref } from 'vue';
 
 import {
   getMyFactories,
@@ -32,6 +32,9 @@ function save(id: null | number) {
  * 上次选的工厂记在浏览器里。选中后工厂相关接口都会带上 factory-id。
  */
 export function useFactory() {
+  let active = true;
+  let disposed = false;
+  const activationWaiters = new Set<() => void>();
   const factories = ref<FdmgongchangFactoryApi.Factory[]>([]);
   const factoryId = ref<null | number>(null);
   const canSeeAll = ref(false);
@@ -40,14 +43,39 @@ export function useFactory() {
     factories.value.find((f) => f.id === factoryId.value),
   );
 
+  // 缓存页面保留各自选中的工厂，返回时同步请求头，避免沿用其他菜单的工厂。
+  onActivated(() => {
+    active = true;
+    if (loaded.value) setCurrentFactoryId(factoryId.value);
+    for (const resolve of activationWaiters) resolve();
+    activationWaiters.clear();
+  });
+  onDeactivated(() => {
+    active = false;
+  });
+  onBeforeUnmount(() => {
+    disposed = true;
+    for (const resolve of activationWaiters) resolve();
+    activationWaiters.clear();
+  });
+
+  /** 隐藏页的异步初始化或延迟搜索，等本页恢复工厂上下文后继续。 */
+  async function whenActive() {
+    if (!active && !disposed) {
+      await new Promise<void>((resolve) => activationWaiters.add(resolve));
+    }
+    return !disposed;
+  }
+
   function select(id: null | number) {
     factoryId.value = id;
-    setCurrentFactoryId(id);
+    if (active && !disposed) setCurrentFactoryId(id);
     if (canSeeAll.value) save(id);
   }
 
   async function load() {
     const my = await getMyFactories();
+    if (!(await whenActive())) throw new Error('工厂页面已关闭');
     factories.value = my.factories ?? [];
     canSeeAll.value = !!my.canSeeAll;
     const saved = canSeeAll.value ? readSaved() : null;
@@ -60,5 +88,5 @@ export function useFactory() {
     loaded.value = true;
   }
 
-  return { canSeeAll, current, factories, factoryId, load, loaded, select };
+  return { canSeeAll, current, factories, factoryId, load, loaded, select, whenActive };
 }

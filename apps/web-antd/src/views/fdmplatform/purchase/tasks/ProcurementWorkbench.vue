@@ -10,7 +10,7 @@ import type {
 } from '#/api/fdmplatform/procurement-workbench';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -49,6 +49,7 @@ import {
 } from '../../documents/navigation';
 import RecordDetail from '../../documents/RecordDetail.vue';
 import RelatedLink from '../../documents/RelatedLink.vue';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ProcurementPageHeader from '../components/ProcurementPageHeader.vue';
 import ProcurementStatusBadge from '../components/ProcurementStatusBadge.vue';
@@ -69,7 +70,7 @@ import RequestQuoteDialog from './RequestQuoteDialog.vue';
 
 import '../components/procurement.css';
 
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const archive = ref(false);
@@ -366,7 +367,11 @@ async function load() {
   loadError.value = '';
   try {
     const response = await getProcurementWorkbench(params);
-    if (run !== sequence || disposed || !active.value || archive.value) return;
+    if (run !== sequence || disposed) return;
+    if (!active.value || archive.value) {
+      listNeedsResume = true;
+      return;
+    }
     const lastPage = Math.max(1, Math.ceil(response.total / pageSize));
     if (page.value > lastPage) {
       page.value = lastPage;
@@ -401,11 +406,19 @@ async function closeDetail() {
     await router.replace({ query: withoutDetailQuery(route.query) });
 }
 async function locate() {
+  if (!active.value || archive.value || disposed) return;
+  const key = JSON.stringify([
+    route.query.contractId,
+    route.query.documentId,
+    route.query.standaloneId,
+    route.query.queue,
+  ]);
+  if (key === locatedQuery) return;
+  locatedQuery = key;
   const run = ++locateSequence;
   detail.value = undefined;
   standalone.value = undefined;
   locateError.value = '';
-  if (!active.value || archive.value || disposed) return;
   try {
     const kind = route.query.queue === 'tasks' ? 'tasks' : 'requests';
     const native = standaloneLocation(route.query);
@@ -416,6 +429,14 @@ async function locate() {
     const target = detailLocation(route.query);
     if (!target) return;
     const parent = await getContract(target.contractId);
+    if (
+      run === locateSequence &&
+      !disposed &&
+      (!active.value || archive.value)
+    ) {
+      locatedQuery = undefined;
+      return;
+    }
     if (run === locateSequence && !disposed && active.value && !archive.value)
       detail.value = {
         kind,
@@ -426,9 +447,22 @@ async function locate() {
       locateError.value = errorText(error);
   }
 }
+let locatedQuery: string | undefined;
+let listContext: string | undefined;
+let listNeedsResume = false;
 watch(
   () => [active.value, archive.value, contractId.value],
   (current, previous) => {
+    if (!active.value || archive.value) return;
+    const context = JSON.stringify([archive.value, contractId.value]);
+    if (context === listContext) {
+      if (listNeedsResume) {
+        listNeedsResume = false;
+        void load();
+      }
+      return;
+    }
+    listContext = context;
     if (previous && current[2] !== previous[2]) page.value = 1;
     actionEntry.value = undefined;
     compareEntry.value = undefined;
@@ -1022,7 +1056,7 @@ onBeforeUnmount(() => {
       @ordered="compareEntry = undefined"
     />
     <PurchaseOrderEditor
-      :open="!!orderEntry"
+      :open="!!orderEntry && active"
       :contract-id="orderEntry?.contractId"
       :request-id="orderEntry?.requestId"
       @close="orderEntry = undefined"

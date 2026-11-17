@@ -13,7 +13,7 @@ import type {
 } from '#/api/fdmplatform/contract-board';
 
 import { computed, onMounted, provide, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { useAccessStore } from '@vben/stores';
@@ -54,6 +54,7 @@ import {
   withoutDetailQuery,
 } from '../../documents/navigation';
 import RelatedLink from '../../documents/RelatedLink.vue';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ContractEditor from '../../products/components/ContractEditor.vue';
 import ContractFilterPanel from './ContractFilterPanel.vue';
@@ -97,7 +98,7 @@ const tabKeys = computed<Tab[]>(() =>
 
 type Tab = 'ACTIVE' | 'ENDED' | 'JINZHI';
 const SCOPE_KEY = 'fdm.contracts.scope';
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const routeActive = useRouteOwner();
 const accessStore = useAccessStore();

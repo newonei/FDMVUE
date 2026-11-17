@@ -15,6 +15,8 @@ import {
 import { BasicLayout, IFrameView } from '#/layouts';
 
 import { filterDisabledOfficialBusinessMenus } from './disabled-official-business-menus';
+import { enableDepartmentPageCache } from './fdm-department-cache';
+import { enableFactoryPageCache } from './fdm-factory-cache';
 import { enablePerformanceManagementCache } from './fdm-performance-cache';
 import { hideLegacyBatchQuotationMenu } from './legacy-batch-quotation-menu';
 
@@ -53,9 +55,13 @@ async function generateAccess(options: GenerateMenuAndRoutesOptions) {
       // 补充说明：accessStore.accessMenus 一开始是 AppRouteRecordRaw 类型（后端加载），后面被赋值成 MenuRecordRaw 类型（前端转换）
       const accessMenus = accessStore.accessMenus as AppRouteRecordRaw[];
       return convertServerMenuToRouteRecordStringComponent(
-        enablePerformanceManagementCache(
-          hideLegacyBatchQuotationMenu(
-            filterDisabledOfficialBusinessMenus(accessMenus),
+        enableDepartmentPageCache(
+          enableFactoryPageCache(
+            enablePerformanceManagementCache(
+              hideLegacyBatchQuotationMenu(
+                filterDisabledOfficialBusinessMenus(accessMenus),
+              ),
+            ),
           ),
         ),
       );

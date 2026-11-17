@@ -13,7 +13,7 @@ import type {
 } from '#/api/fdmplatform/customs';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import {
   Alert,
@@ -70,6 +70,7 @@ import {
   withoutDetailQuery,
 } from '../documents/navigation';
 import RelatedLink from '../documents/RelatedLink.vue';
+import { useOwnedRoute } from '../documents/useOwnedRoute';
 import { useRouteOwner } from '../documents/useRouteOwner';
 import { currencyOptions } from '../products/model';
 import CreationAttachments from './CreationAttachments.vue';
@@ -81,7 +82,7 @@ const props = defineProps<{
   embedded?: boolean;
 }>();
 const emit = defineEmits<{ busy: [value: boolean]; changed: [] }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const routeActive = useRouteOwner();
 const detailContract = ref<Contract>();
@@ -678,16 +679,22 @@ watch(
   },
   { immediate: true },
 );
+let locatedQuery: string | undefined;
 watch(
   () => [route.query.documentId, route.query.contractId, routeActive.value],
   async () => {
-    if (props.embedded) return;
+    if (props.embedded || !routeActive.value) return;
+    const key = JSON.stringify([
+      route.query.documentId,
+      route.query.contractId,
+    ]);
+    if (key === locatedQuery) return;
+    locatedQuery = key;
     detailSequence++;
     detailOpen.value = false;
     actionOpen.value = false;
     selected.value = undefined;
     detailContract.value = undefined;
-    if (!routeActive.value) return;
     try {
       const location = detailLocation(route.query);
       if (!location) return;

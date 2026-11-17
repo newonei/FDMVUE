@@ -5,7 +5,7 @@ import type { ExpenseContext } from '#/api/fdmplatform/expense';
 import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-finance';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { formatDate } from '@vben/utils';
@@ -27,6 +27,7 @@ import { useInMergedView } from '../../../components/merged-view';
 import { errorText, expenseCategories } from '../../../data';
 import BusinessDocumentDetail from '../../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../../documents/navigation';
+import { useOwnedRoute } from '../../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../../documents/useRouteOwner';
 import FinanceDocument from '../components/FinanceDocument.vue';
 import { expenseStatus } from '../model';
@@ -49,7 +50,7 @@ const props = withDefaults(
   { department: '财务管理', payable: true },
 );
 const inMergedView = useInMergedView();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const view = ref<ReimbursementView>('all');
@@ -115,7 +116,11 @@ async function load() {
   pageError.value = '';
   try {
     const value = await getExpensePage(params);
-    if (disposed || run !== sequence || !active.value) return;
+    if (disposed || run !== sequence) return;
+    if (!active.value) {
+      listNeedsResume = true;
+      return;
+    }
     const lastPage = Math.max(1, Math.ceil(value.total / pageSize.value));
     if (page.value > lastPage) {
       page.value = lastPage;
@@ -182,9 +187,22 @@ function clearSource() {
   delete query.orderId;
   void router.replace({ query });
 }
+let listContext: string | undefined;
+let listNeedsResume = false;
+let locatedQuery: string | undefined;
 watch(
   () => [active.value, contractId.value, orderId.value],
   () => {
+    if (!active.value) return;
+    const context = JSON.stringify([contractId.value, orderId.value]);
+    if (context === listContext) {
+      if (listNeedsResume) {
+        listNeedsResume = false;
+        void load();
+      }
+      return;
+    }
+    listContext = context;
     ++sequence;
     open.value = false;
     page.value = 1;
@@ -201,6 +219,15 @@ watch(
     orderId.value,
   ],
   () => {
+    if (!active.value) return;
+    const key = JSON.stringify([
+      route.query.financeId,
+      standaloneId.value,
+      contractId.value,
+      orderId.value,
+    ]);
+    if (key === locatedQuery) return;
+    locatedQuery = key;
     if (
       active.value &&
       !standaloneId.value &&

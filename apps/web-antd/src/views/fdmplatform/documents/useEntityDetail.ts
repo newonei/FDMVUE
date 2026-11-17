@@ -1,8 +1,9 @@
 import { onBeforeUnmount, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { errorText } from '../data';
 import { referenceId, withoutDetailQuery } from './navigation';
+import { useOwnedRoute } from './useOwnedRoute';
 import { useRouteOwner } from './useRouteOwner';
 
 export function useEntityDetail<T>(
@@ -12,7 +13,7 @@ export function useEntityDetail<T>(
   close: () => void,
   fail: (message: string) => void,
 ) {
-  const route = useRoute();
+  const route = useOwnedRoute();
   const router = useRouter();
   const active = useRouteOwner();
   let sequence = 0;

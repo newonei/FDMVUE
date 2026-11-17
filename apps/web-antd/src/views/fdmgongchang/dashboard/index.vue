@@ -3,7 +3,7 @@ import type { FactoryRoute } from '../shared/routes';
 
 import type { FdmgongchangDashboardApi as Api } from '#/api/fdmgongchang/dashboard';
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -65,12 +65,18 @@ async function load() {
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  load();
+function startAutoRefresh() {
+  clearInterval(timer);
   timer = setInterval(() => {
     if (!loading.value) load();
   }, AUTO_REFRESH_MS);
+}
+onMounted(() => {
+  load();
+  startAutoRefresh();
 });
+onActivated(startAutoRefresh);
+onDeactivated(() => clearInterval(timer));
 onBeforeUnmount(() => clearInterval(timer));
 
 async function switchFactory(id: number) {

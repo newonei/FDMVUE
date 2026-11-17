@@ -2,11 +2,12 @@
 import type { Component } from 'vue';
 
 import { computed, provide } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { TabPane, Tabs } from 'ant-design-vue';
 
 import { referenceId } from '../documents/navigation';
+import { useOwnedRoute } from '../documents/useOwnedRoute';
 import { mergedViewKey } from './merged-view';
 
 export interface MergedView {
@@ -20,7 +21,7 @@ export interface MergedView {
 
 const props = defineProps<{ views: MergedView[] }>();
 provide(mergedViewKey, true);
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const current = computed(
   () =>

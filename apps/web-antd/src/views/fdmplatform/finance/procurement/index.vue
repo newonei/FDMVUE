@@ -6,7 +6,7 @@ import type {
 } from '#/api/fdmplatform/procurement-finance';
 
 import { computed, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
@@ -35,6 +35,7 @@ import { useInMergedView } from '../../components/merged-view';
 import { rows as businessRows, errorText } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import { withoutDetailQuery } from '../../documents/navigation';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import OrderPicker from '../../purchase/manage/components/OrderPicker.vue';
 import FinanceDocument from './components/FinanceDocument.vue';
@@ -54,7 +55,7 @@ import '../../components/compact-tables.css';
 
 const props = defineProps<{ type: ProcurementFinanceType }>();
 const inMergedView = useInMergedView();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const active = useRouteOwner();
 const effectiveType = computed(() =>
@@ -345,9 +346,19 @@ function clear() {
   delete query.financeId;
   void router.replace({ query });
 }
+let listContext: string | undefined;
+let locatedQuery: string | undefined;
 watch(
   () => [active.value, effectiveType.value, contractId.value, orderId.value],
   () => {
+    if (!active.value) return;
+    const context = JSON.stringify([
+      effectiveType.value,
+      contractId.value,
+      orderId.value,
+    ]);
+    if (context === listContext) return;
+    listContext = context;
     open.value = false;
     if (active.value) {
       page.value = 1;
@@ -359,6 +370,10 @@ watch(
 watch(
   () => [active.value, route.query.financeId],
   () => {
+    if (!active.value) return;
+    const key = JSON.stringify([route.query.financeId]);
+    if (key === locatedQuery) return;
+    locatedQuery = key;
     open.value = false;
     if (active.value && typeof route.query.financeId === 'string') {
       selectedId.value = route.query.financeId;

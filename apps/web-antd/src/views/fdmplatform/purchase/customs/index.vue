@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -10,9 +10,10 @@ import { getCustomsPage } from '#/api/fdmplatform/customs';
 
 import CustomsPanel from '../../components/CustomsPanel.vue';
 import { queryContractId } from '../../documents/model';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 
 defineOptions({ name: 'FdmPlatformPurchaseCustoms' });
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const contractId = computed(() => queryContractId(route.query.contractId));
 /** Statuses a buyer still has to act on, in the order the work happens. */

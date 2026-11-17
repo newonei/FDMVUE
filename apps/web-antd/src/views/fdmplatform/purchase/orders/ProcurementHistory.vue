@@ -2,9 +2,10 @@
 import type { DocumentKind } from '../../documents/model';
 
 import { computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import DocumentWorkspace from '../../documents/DocumentWorkspace.vue';
+import { useOwnedRoute } from '../../documents/useOwnedRoute';
 
 defineOptions({ name: 'FdmPlatformProcurementHistory' });
 const kinds: { key: DocumentKind; title: string }[] = [
@@ -12,7 +13,7 @@ const kinds: { key: DocumentKind; title: string }[] = [
   { key: 'purchaseReturns', title: '采购退货单' },
   { key: 'production', title: '自产进度单' },
 ];
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const current = computed<DocumentKind>(
   () => kinds.find((kind) => kind.key === route.query.view)?.key ?? 'arrivals',

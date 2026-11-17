@@ -7,7 +7,7 @@ import type { RelatedDocumentSource } from './related-creation';
 import type { Directory, DocumentRow } from '#/api/fdmplatform';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 
@@ -66,6 +66,7 @@ import {
 } from './navigation';
 import RecordDetail from './RecordDetail.vue';
 import RelatedLink from './RelatedLink.vue';
+import { useOwnedRoute } from './useOwnedRoute';
 import { useRouteOwner } from './useRouteOwner';
 
 import '../components/compact-tables.css';
@@ -75,7 +76,7 @@ const props = defineProps<{
   /** 外贸 / 内销部门的列表只看本业务线；不传不分业务线 */
   salesChannel?: SalesChannel;
 }>();
-const route = useRoute();
+const route = useOwnedRoute();
 const router = useRouter();
 const inMergedView = useInMergedView();
 const routeActive = useRouteOwner();
@@ -178,13 +179,22 @@ function closeDetail() {
     void router.replace({ query: withoutDetailQuery(route.query) });
 }
 async function locateDocument() {
+  if (!routeActive.value) return;
+  const key = JSON.stringify([
+    route.query.documentId,
+    route.query.standaloneId,
+    route.query.contractId,
+    effectiveKind.value,
+    purchaseInvoice.value,
+  ]);
+  if (key === locatedQuery) return;
+  locatedQuery = key;
   const run = ++locateSequence;
   locateError.value = '';
   detailOpen.value = false;
   selectedRow.value = undefined;
   selectedStandaloneId.value = undefined;
   actionOpen.value = false;
-  if (!routeActive.value) return;
   try {
     const standaloneId = standaloneLocation(route.query);
     if (standaloneId) {
@@ -194,7 +204,11 @@ async function locateDocument() {
     const location = detailLocation(route.query);
     if (!location) return;
     const contract = await getContract(location.contractId);
-    if (run !== locateSequence || !routeActive.value) return;
+    if (run !== locateSequence) return;
+    if (!routeActive.value) {
+      locatedQuery = undefined;
+      return;
+    }
     selectedRow.value = resolveDocumentRow(
       contract,
       effectiveKind.value,
@@ -206,6 +220,7 @@ async function locateDocument() {
       locateError.value = `无法打开关联单据：${errorText(error)}。可关闭定位并返回列表。`;
   }
 }
+let locatedQuery: string | undefined;
 watch(
   () => [
     route.query.documentId,
@@ -484,6 +499,12 @@ function actionSaved() {
   actionOpen.value = false;
   void load();
 }
+let workspaceContext = JSON.stringify([
+  props.kind,
+  procurementQueue.value,
+  purchaseInvoice.value,
+  contractId.value,
+]);
 watch(
   () => [
     props.kind,
@@ -493,6 +514,15 @@ watch(
     routeActive.value,
   ],
   () => {
+    if (!routeActive.value) return;
+    const context = JSON.stringify([
+      props.kind,
+      procurementQueue.value,
+      purchaseInvoice.value,
+      contractId.value,
+    ]);
+    if (context === workspaceContext) return;
+    workspaceContext = context;
     pageNo.value = 1;
     detailOpen.value = false;
     actionOpen.value = false;
