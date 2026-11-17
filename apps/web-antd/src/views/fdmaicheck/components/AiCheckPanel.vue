@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { DrawerFilter } from './checklist';
+
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -38,6 +40,7 @@ const result = ref<FdmAiCheckApi.Result>();
 const loading = ref(false);
 const error = ref('');
 const drawerOpen = ref(false);
+const filter = ref<DrawerFilter>('ALL');
 /** 默认收起模式只保留当前单据内的选择；其他模式按单据类型记住。 */
 const expandChoice = ref<null | string>(null);
 const rechecking = ref(false);
@@ -193,6 +196,7 @@ watch(
   () => [props.docType, props.docId, props.defaultCollapsed],
   () => {
     polls = 0;
+    filter.value = 'ALL';
     drawerOpen.value = false;
     readChoice();
     void load();
@@ -206,7 +210,12 @@ defineExpose({ reload: () => load(true) });
 
 <template>
   <section v-if="docId" class="ai-check" aria-label="AI 检查">
-    <AiCheckBar :list="list" :summary="result?.latest?.summary">
+    <AiCheckBar
+      v-model:filter="filter"
+      :list="list"
+      :summary="result?.latest?.summary"
+      @select="expandChoice = '1'"
+    >
       <span v-if="result?.running" class="ai-check-running">检查中…</span>
       <span v-else-if="!result?.latest && !loading" class="ai-check-muted">单据保存后会自动检查</span>
       <span v-if="checkedAt">{{ checkedAt }}</span>
@@ -283,6 +292,7 @@ defineExpose({ reload: () => load(true) });
         v-if="list.total > 0"
         class="ai-check-list"
         :list="list"
+        :filter="filter"
         :handling="handling"
         :pending-hint="pendingHint"
         actions
