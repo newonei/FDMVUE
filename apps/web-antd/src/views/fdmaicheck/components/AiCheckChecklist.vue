@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Checklist, CheckRow } from './checklist';
+import type { Checklist, CheckRow, DrawerFilter } from './checklist';
 
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
@@ -18,6 +18,7 @@ import { SEVERITY_LABELS, STATUS_LABELS } from './risk';
 const props = defineProps<{
   /** 显示已处理/误报/忽略按钮 */
   actions?: boolean;
+  filter?: DrawerFilter;
   handling?: number;
   list: Checklist;
   /** 未检查那组的说明 */
@@ -35,7 +36,12 @@ const columns = [
   { title: '问题', key: 'issues', width: 96, align: 'right' as const },
 ];
 
-const rows = computed(() => tableRows(props.list));
+const rows = computed(() =>
+  tableRows(props.list).filter(
+    (row) =>
+      !props.filter || props.filter === 'ALL' || row.result === props.filter,
+  ),
+);
 const expandedKeys = ref<string[]>([]);
 const allExpanded = computed(
   () =>
@@ -69,8 +75,12 @@ function rowClass(record: unknown) {
   <div class="ck">
     <div class="ck-toolbar">
       <span class="ck-hint">
-        共 {{ rows.length }} 项，点一行查看详情<template
-          v-if="list.pending.length && pendingHint"
+        <template v-if="filter && filter !== 'ALL'">
+          {{ RESULT_META[filter].label }} {{ rows.length }} 项 / 共
+          {{ list.total }} 项，点一行查看详情
+        </template>
+        <template v-else>共 {{ rows.length }} 项，点一行查看详情</template><template
+          v-if="rows.some((row) => row.result === 'PENDING') && pendingHint"
           >；{{ list.pending.length }} 项未检查：{{ pendingHint }}</template>
       </span>
       <Button size="small" type="link" class="ck-toggle" @click="toggleAll">

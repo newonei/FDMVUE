@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Checklist } from './checklist';
+import type { Checklist, DrawerFilter } from './checklist';
 
 import { computed } from 'vue';
 
@@ -7,6 +7,13 @@ import { headline, RESULT_META, RESULT_ORDER, segments } from './checklist';
 
 /** 一行结果条：比例条、各结论数量、最要紧的问题。右侧按钮由使用方放进 default 插槽。 */
 const props = defineProps<{ list: Checklist; summary?: string }>();
+const emit = defineEmits<{ select: [] }>();
+const filter = defineModel<DrawerFilter>('filter', { default: 'ALL' });
+
+function select(value: DrawerFilter) {
+  filter.value = value === filter.value ? 'ALL' : value;
+  emit('select');
+}
 
 const seg = computed(() => segments(props.list));
 const title = computed(() => headline(props.list));
@@ -29,17 +36,44 @@ const allPass = computed(
         <i class="p" :style="{ width: seg.pass }"></i>
       </span>
       <span v-if="allPass" class="bar-counts">
-        <span class="p">✓ {{ list.total }} 项全部通过</span>
+        <button
+          type="button"
+          class="bar-filter p"
+          :class="{ 'is-active': filter === 'PASS' }"
+          :aria-pressed="filter === 'PASS'"
+          title="筛选通过的检查点，再次点击恢复全部"
+          @click="select('PASS')"
+        >
+          ✓ {{ list.total }} 项全部通过
+        </button>
       </span>
       <span v-else class="bar-counts">
-        <span class="bar-total">共 {{ list.total }} 项</span>
+        <button
+          type="button"
+          class="bar-filter bar-total"
+          :class="{ 'is-active': filter === 'ALL' }"
+          :aria-pressed="filter === 'ALL'"
+          title="查看全部检查点"
+          @click="select('ALL')"
+        >
+          共 {{ list.total }} 项
+        </button>
         <template v-for="r in RESULT_ORDER" :key="r">
-          <span
+          <button
             v-if="list.tally[r]"
-            :class="`is-${RESULT_META[r].tone}`"
-            :title="RESULT_META[r].label"
-            >{{ RESULT_META[r].mark }} {{ RESULT_META[r].label }}
-            {{ list.tally[r] }}</span>
+            type="button"
+            class="bar-filter"
+            :class="[
+              `is-${RESULT_META[r].tone}`,
+              { 'is-active': filter === r },
+            ]"
+            :aria-pressed="filter === r"
+            :title="`筛选${RESULT_META[r].label}的检查点，再次点击恢复全部`"
+            @click="select(r)"
+          >
+            {{ RESULT_META[r].mark }} {{ RESULT_META[r].label }}
+            {{ list.tally[r] }}
+          </button>
         </template>
       </span>
     </template>
@@ -103,6 +137,29 @@ const allPass = computed(
 
 .bar-total {
   color: var(--ant-color-text-secondary, #595959);
+}
+
+.bar-filter {
+  padding: 0 3px;
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+}
+
+.bar-filter:hover,
+.bar-filter.is-active {
+  background: var(--ant-color-fill-secondary, rgb(0 0 0 / 6%));
+}
+
+.bar-filter.is-active {
+  box-shadow: inset 0 -2px currentcolor;
+}
+
+.bar-filter:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1677ff);
+  outline-offset: 2px;
 }
 
 .bar-counts .is-fail {

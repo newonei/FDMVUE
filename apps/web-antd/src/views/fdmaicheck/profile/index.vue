@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { DrawerFilter } from '../components/checklist';
+
 import type { FdmAiCheckApi } from '#/api/fdmaicheck';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
@@ -72,6 +74,7 @@ const dryDocs = ref<FdmAiCheckApi.DocOption[]>([]);
 const dryDocId = ref<string>();
 const dryLoading = ref(false);
 const dryResult = ref<FdmAiCheckApi.DryRun>();
+const dryFilter = ref<DrawerFilter>('ALL');
 const dryList = computed(() =>
   buildChecklist(dryResult.value?.task.checks, dryResult.value?.findings ?? []),
 );
@@ -146,6 +149,7 @@ async function select(docType: string) {
   }
   current.value = docType;
   dryResult.value = undefined;
+  dryFilter.value = 'ALL';
   dryDocId.value = undefined;
   dryDocs.value = [];
   await loadDetail();
@@ -271,6 +275,7 @@ async function dryRun() {
   if (editing.value && !(await saveDraft())) return;
   dryLoading.value = true;
   dryResult.value = undefined;
+  dryFilter.value = 'ALL';
   try {
     const id = await startAiCheckDryRun(current.value, dryDocId.value);
     await pollDry(id);
@@ -534,7 +539,11 @@ onBeforeUnmount(stopDry);
               </Button>
             </Space>
             <div v-if="dryResult" class="aicheck-dry">
-              <AiCheckBar :list="dryList" :summary="dryResult.task.summary">
+              <AiCheckBar
+                v-model:filter="dryFilter"
+                :list="dryList"
+                :summary="dryResult.task.summary"
+              >
                 <span
                   v-if="
                     ['PREPARING', 'QUEUED', 'WAITING_AI'].includes(
@@ -565,7 +574,11 @@ onBeforeUnmount(stopDry);
               <p v-if="dryResult.task.errorMessage" class="aicheck-muted">
                 {{ dryResult.task.errorMessage }}
               </p>
-              <AiCheckChecklist v-if="dryList.total > 0" :list="dryList" />
+              <AiCheckChecklist
+                v-if="dryList.total > 0"
+                :list="dryList"
+                :filter="dryFilter"
+              />
             </div>
           </section>
 
