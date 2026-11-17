@@ -1,12 +1,11 @@
-import { previewMimeType } from './attachment-preview';
+import { resolvePreview } from '#/components/file-preview/formats';
 
-export type FilePreviewKind = 'image' | 'pdf' | 'text';
+export type FilePreviewKind = Exclude<
+  ReturnType<typeof resolvePreview>['kind'],
+  'unsupported'
+>;
 
-/** 与合同附件共用格式识别；其他格式仍只提供下载。 */
 export function filePreviewKind(name?: string): FilePreviewKind | undefined {
-  const type = previewMimeType(name ?? '');
-  if (type === 'application/pdf') return 'pdf';
-  if (type?.startsWith('image/')) return 'image';
-  if (type === 'text/plain') return 'text';
-  return undefined;
+  const { kind } = resolvePreview(name ?? '');
+  return kind === 'unsupported' ? undefined : kind;
 }

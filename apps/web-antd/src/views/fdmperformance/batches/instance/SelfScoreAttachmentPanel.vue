@@ -8,14 +8,16 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { IconifyIcon } from '@vben/icons';
 import { formatFileSize } from '@vben/utils';
 
-import { Button, Image, message, Progress, Tag, Upload } from 'ant-design-vue';
+import { Button, message, Modal, Progress, Tag, Upload } from 'ant-design-vue';
 
 import {
   deleteSelfScoreAttachment,
+  downloadSelfScoreAttachment,
   getSelfScoreAttachmentDownloadUrl,
   getSelfScoreAttachmentList,
   uploadSelfScoreAttachment,
 } from '#/api/fdmperformance';
+import { FilePreview } from '#/components/file-preview';
 
 type UploadTaskStatus = 'error' | 'uploading';
 
@@ -63,7 +65,6 @@ const ALLOWED_EXTENSIONS = [
   'zip',
 ] as const;
 const ACCEPT = ALLOWED_EXTENSIONS.map((extension) => `.${extension}`).join(',');
-const PREVIEW_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 
 const attachments = ref<JixiaoApi.SelfScoreAttachment[]>([]);
 const attachmentLoading = ref(false);
@@ -73,6 +74,7 @@ const previewingId = ref('');
 const previewVisible = ref(false);
 const previewUrl = ref('');
 const previewFileName = ref('');
+const previewFileType = ref<string>();
 const uploadTasks = ref<UploadTask[]>([]);
 let previewRequestId = 0;
 let reservedUploadCount = 0;
@@ -334,38 +336,31 @@ function safeDownloadUrl(value: string) {
   return parsed.href;
 }
 
-function canPreviewAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
-  return PREVIEW_IMAGE_EXTENSIONS.has(fileExtension(attachment.fileName));
-}
-
 function resetPreview() {
   previewRequestId += 1;
   previewingId.value = '';
   previewVisible.value = false;
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
   previewUrl.value = '';
   previewFileName.value = '';
-}
-
-function handlePreviewError() {
-  if (!previewVisible.value) return;
-  resetPreview();
-  message.error('图片加载失败，请重试或下载后查看');
+  previewFileType.value = undefined;
 }
 
 async function previewAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
-  if (!canPreviewAttachment(attachment) || previewingId.value) return;
+  if (previewingId.value) return;
   resetPreview();
   const requestId = previewRequestId;
   previewingId.value = attachment.id;
   try {
-    const downloadUrl = await getSelfScoreAttachmentDownloadUrl(attachment.id);
+    const blob = await downloadSelfScoreAttachment(attachment.id);
     if (requestId !== previewRequestId) return;
-    previewUrl.value = safeDownloadUrl(downloadUrl);
+    previewUrl.value = URL.createObjectURL(blob);
     previewFileName.value = attachment.fileName;
+    previewFileType.value = attachment.mimeType;
     previewVisible.value = true;
   } catch {
     if (requestId === previewRequestId) {
-      message.error('附件预览地址获取失败，请稍后重试');
+      message.error('附件预览内容加载失败，请稍后重试');
     }
   } finally {
     if (requestId === previewRequestId) previewingId.value = '';
@@ -394,7 +389,10 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
     <div class="self-score-attachments__header">
       <div>
         <h3>员工自评附件</h3>
-        <p>自评佐证资料会保留在本考核实例中，图片支持预览，附件可下载。</p>
+        <p>
+          自评佐证资料会保留在本考核实例中，支持在线预览图片、PDF、Word、Excel、PPT
+          等附件。
+        </p>
       </div>
       <Tag v-if="attachments.length" color="blue">
         {{ attachments.length }} 个附件
@@ -479,7 +477,6 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
         </div>
         <div class="self-score-attachments__actions">
           <Button
-            v-if="canPreviewAttachment(attachment)"
             :disabled="!!previewingId && previewingId !== attachment.id"
             :loading="previewingId === attachment.id"
             size="small"
@@ -517,20 +514,24 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
       暂无员工自评附件
     </div>
 
-    <div v-if="previewUrl" style="display: none">
-      <Image
+    <Modal
+      :open="previewVisible"
+      :title="previewFileName || '附件预览'"
+      :footer="null"
+      width="96vw"
+      :style="{ top: '20px' }"
+      destroy-on-close
+      @cancel="resetPreview"
+    >
+      <FilePreview
+        v-if="previewVisible && previewUrl"
         :key="previewUrl"
-        :alt="previewFileName"
-        :preview="{
-          visible: previewVisible,
-          onVisibleChange: (visible: boolean) => {
-            previewVisible = visible;
-          },
-        }"
-        :src="previewUrl"
-        @error="handlePreviewError"
+        :url="previewUrl"
+        :file-name="previewFileName"
+        :file-type="previewFileType"
+        downloadable
       />
-    </div>
+    </Modal>
   </section>
 </template>
 

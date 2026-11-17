@@ -827,6 +827,13 @@ export function getSelfScoreAttachmentDownloadUrl(id: string) {
   );
 }
 
+export function downloadSelfScoreAttachment(id: string) {
+  return requestClient.download(
+    '/fdmperformance/assessment/self-score-attachment/content',
+    { params: { id } },
+  );
+}
+
 export function confirmIndicatorTask(data: JixiaoApi.TaskReq) {
   return requestClient.post<boolean>(
     '/fdmperformance/assessment/task/indicator-confirm',

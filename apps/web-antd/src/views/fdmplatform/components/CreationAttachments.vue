@@ -110,7 +110,8 @@ function remove(index: number) {
       <span>支持多选，也可将文件拖到这里</span>
     </div>
     <p class="attachment-hint">
-      支持 PDF、图片、Word、Excel、CSV、TXT。最多 10 个，单个和总计都不超过
+      支持 PDF、图片、Word、Excel、PPT、开放文档、RTF、CSV、TXT。最多 10
+      个，单个和总计都不超过
       {{ ATTACHMENT_LIMIT_TEXT }}。附件将随单据保存上传，大文件会显示上传进度。
     </p>
     <Alert

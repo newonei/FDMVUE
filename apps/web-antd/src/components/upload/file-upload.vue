@@ -382,7 +382,8 @@ function getValue() {
       v-model:open="previewOpen"
       :title="previewName"
       :footer="null"
-      width="min(1000px, 95vw)"
+      width="96vw"
+      :style="{ top: '20px' }"
       destroy-on-close
       @after-close="releasePreview"
     >

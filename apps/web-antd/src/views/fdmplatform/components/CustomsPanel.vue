@@ -48,6 +48,7 @@ import {
   uploadCustomsFile,
 } from '#/api/fdmplatform/customs';
 import {
+  ATTACHMENT_ACCEPT,
   ATTACHMENT_LIMIT_TEXT,
   MAX_ATTACHMENT_BYTES,
 } from '#/api/fdmplatform/submission-files';
@@ -996,7 +997,7 @@ onBeforeUnmount(() => {
                 type="file"
                 multiple
                 :disabled="!storageEnabled || uploading"
-                accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                :accept="ATTACHMENT_ACCEPT"
                 aria-label="选择报关资料文件"
                 @change="chooseFiles"
               />

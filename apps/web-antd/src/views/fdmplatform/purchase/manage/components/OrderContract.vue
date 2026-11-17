@@ -11,6 +11,7 @@ import { formatDateTime } from '@vben/utils';
 import { Alert, Button, Card, Select, Space, Table } from 'ant-design-vue';
 
 import { downloadProcurementFile } from '#/api/fdmplatform/procurement';
+import { ATTACHMENT_ACCEPT } from '#/api/fdmplatform/submission-files';
 
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import { errorText } from '../../../data';
@@ -94,7 +95,7 @@ function upload(event: Event) {
         ref="fileInput"
         type="file"
         hidden
-        accept=".pdf,.docx,.jpg,.jpeg,.png"
+        :accept="ATTACHMENT_ACCEPT"
         @change="upload"
       />
     </template>

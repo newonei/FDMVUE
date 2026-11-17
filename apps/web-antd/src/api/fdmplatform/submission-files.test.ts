@@ -8,6 +8,24 @@ import {
 } from './submission-files';
 
 describe('business document attachment submission', () => {
+  it.each([
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'ppt',
+    'pptx',
+    'pptm',
+    'ppsx',
+    'odt',
+    'ods',
+    'odp',
+    'rtf',
+  ])('accepts %s attachments for the shared preview', (extension) => {
+    expect(
+      submissionFilesError([{ name: `附件.${extension}`, size: 128 }]),
+    ).toBe('');
+  });
   it('accepts supported multiple files and rejects empty, oversized and unsafe names before submitting', () => {
     expect(
       submissionFilesError([

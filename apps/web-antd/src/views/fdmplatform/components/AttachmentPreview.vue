@@ -7,7 +7,7 @@ import { FilePreview } from '#/components/file-preview';
 
 import { previewMimeType } from './attachment-preview';
 
-/** 单据附件在线预览：PDF 用浏览器内置阅读器，图片直接显示 */
+/** 单据附件复用全局预览：表格直接阅读，文档/演示文稿使用缓存版式预览。 */
 const emit = defineEmits<{ download: [] }>();
 const open = ref(false);
 const url = ref('');
@@ -36,7 +36,8 @@ defineExpose({ show });
     v-model:open="open"
     :title="name"
     :footer="null"
-    width="min(1000px, 95vw)"
+    width="96vw"
+    :style="{ top: '20px' }"
     destroy-on-close
     @after-close="revoke"
   >
