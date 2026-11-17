@@ -1,4 +1,5 @@
 import { uploadFdmObject } from '#/api/fdmstorage/object';
+import { normalizePrintPrepError } from './error';
 
 const DEFAULT_PRINT_PREP_API_BASE = '/print-prep-api';
 const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
@@ -303,12 +304,16 @@ export async function uploadPrintPrepReferenceBlob({
 
 async function readErrorMessage(response: Response) {
   const text = await response.text().catch(() => '');
-  if (!text) return response.statusText || `HTTP ${response.status}`;
+  if (!text) return normalizePrintPrepError('', response.status);
   try {
     const data = JSON.parse(text);
-    return data.detail || data.message || data.msg || text;
+    const detail = data.detail || data.message || data.msg || text;
+    return normalizePrintPrepError(
+      typeof detail === 'string' ? detail : JSON.stringify(detail),
+      response.status,
+    );
   } catch {
-    return text;
+    return normalizePrintPrepError(text, response.status);
   }
 }
 

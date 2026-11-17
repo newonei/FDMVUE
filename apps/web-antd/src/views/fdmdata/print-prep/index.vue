@@ -2,6 +2,7 @@
 import type {
   PrintPrepApi,
 } from '#/api/fdmdata/print-prep';
+import { normalizePrintPrepError } from '#/api/fdmdata/print-prep/error';
 import type { PrintPrepPromptApi } from '#/api/fdmdata/print-prep-prompt';
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
@@ -844,7 +845,9 @@ function safeJson(value: unknown) {
 }
 
 function compactPrintPrepError(error: unknown) {
-  const text = error instanceof Error ? error.message : String(error);
+  const text = normalizePrintPrepError(
+    error instanceof Error ? error.message : String(error),
+  );
   if (text.includes('Wuyin generation timed out')) {
     const details = [
       text.match(/task_id=([^,\s]+)/)?.[0],
