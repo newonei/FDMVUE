@@ -41,7 +41,9 @@ const emit = defineEmits<{
   action: [name: string];
   busy: [value: boolean];
   confirm: [payload: Record<string, unknown>];
+  dirty: [value: boolean];
   save: [payload: Record<string, unknown>];
+  saveExtras: [payload: Record<string, unknown>];
 }>();
 const router = useRouter();
 const entities = ref<ProcurementSetting[]>([]);
@@ -52,7 +54,11 @@ const contacts = ref<SupplierContact[]>([]);
 const pageError = ref('');
 const contactsOpen = ref(false);
 const printExtras = ref<InstanceType<typeof OrderPrintExtras>>();
-watch(contactsOpen, (value) => emit('busy', value));
+const extrasBusy = ref(false);
+const extrasDirty = ref(false);
+watch([contactsOpen, extrasBusy], ([contacts, extras]) =>
+  emit('busy', contacts || extras),
+);
 onBeforeUnmount(() => emit('busy', false));
 const form = reactive({
   contactId: undefined as string | undefined,
@@ -66,6 +72,16 @@ const form = reactive({
 });
 const canEdit = computed(() =>
   props.view.allowedActions.includes('SAVE_DETAILS'),
+);
+const canEditExtras = computed(() =>
+  props.view.allowedActions.includes('SAVE_EXTRAS'),
+);
+const formBaseline = ref('');
+const formDirty = computed(
+  () => canEdit.value && JSON.stringify(form) !== formBaseline.value,
+);
+watch([formDirty, extrasDirty], ([details, extras]) =>
+  emit('dirty', details || extras),
 );
 const contact = computed(
   () =>
@@ -176,17 +192,21 @@ async function loadContacts() {
 }
 watch(
   () => [props.view.id, props.view.details.version],
-  () => {
-    Object.assign(form, {
-      contactId: props.view.details.contactId,
-      deliveryDate: props.view.details.deliveryDate ?? '',
-      deliveryAddress: props.view.details.deliveryAddress ?? '',
-      remark: props.view.details.remark ?? '',
-      accessoryNote: props.view.details.accessoryNote ?? '',
-      signingEntityId: props.view.details.signingEntityId,
-      templateId: props.view.details.templateId,
-      clauseIds: [...(props.view.details.clauseIds ?? [])],
-    });
+  (_value, previous) => {
+    // Saving only print extras must preserve any unfinished contact/terms edits.
+    if (previous?.[0] !== props.view.id || !formDirty.value) {
+      Object.assign(form, {
+        contactId: props.view.details.contactId,
+        deliveryDate: props.view.details.deliveryDate ?? '',
+        deliveryAddress: props.view.details.deliveryAddress ?? '',
+        remark: props.view.details.remark ?? '',
+        accessoryNote: props.view.details.accessoryNote ?? '',
+        signingEntityId: props.view.details.signingEntityId,
+        templateId: props.view.details.templateId,
+        clauseIds: [...(props.view.details.clauseIds ?? [])],
+      });
+      formBaseline.value = JSON.stringify(form);
+    }
     void loadContacts();
     void loadSettings();
   },
@@ -201,12 +221,30 @@ function payload() {
   return {
     ...props.view.details,
     ...form,
-    ...(canEdit.value ? printExtras.value?.payload() : {}),
+    ...(canEditExtras.value ? printExtras.value?.payload() : {}),
   };
 }
 function save() {
   emit('save', payload());
 }
+function saveExtras() {
+  if (!canEditExtras.value || props.saving || extrasBusy.value) return;
+  emit('saveExtras', printExtras.value?.payload() ?? {});
+}
+function isDirty() {
+  return formDirty.value || extrasDirty.value;
+}
+function pendingSave() {
+  return formDirty.value && canEdit.value
+    ? { action: 'SAVE_DETAILS', payload: payload() }
+    : { action: 'SAVE_EXTRAS', payload: printExtras.value?.payload() ?? {} };
+}
+function markSaved(action: string) {
+  if (action !== 'SAVE_EXTRAS') formBaseline.value = JSON.stringify(form);
+  printExtras.value?.markSaved();
+  extrasDirty.value = false;
+}
+defineExpose({ isDirty, markSaved, pendingSave });
 function confirm() {
   pageError.value = compatibleClauses(
     clauses.value,
@@ -312,7 +350,11 @@ function confirm() {
       <OrderPrintExtras
         ref="printExtras"
         :view="view"
-        :disabled="!canEdit || saving"
+        :disabled="!canEditExtras"
+        :saving="saving"
+        @busy="extrasBusy = $event"
+        @dirty="extrasDirty = $event"
+        @save="saveExtras"
       />
       <h4 class="section-title">签约与条款</h4>
       <Form layout="vertical" class="order-fields">

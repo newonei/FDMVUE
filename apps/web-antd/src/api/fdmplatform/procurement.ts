@@ -132,6 +132,31 @@ export interface OrderLineExtra {
   /** 装箱数：每箱几件，箱数按数量自动算 */
   packQty?: number;
   imageId?: string;
+  remark?: string;
+  /** 特殊要求、色卡等图片附件 */
+  imageIds?: string[];
+  customCells?: Record<string, OrderDetailCell>;
+}
+export interface OrderDetailCell {
+  text?: string;
+  imageIds: string[];
+}
+export interface OrderDetailColumn {
+  id: string;
+  title: string;
+  type: 'IMAGE' | 'TEXT';
+}
+export interface OrderAdditionalLine {
+  id: string;
+  name: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  /** 服务端计算的数量 × 单价 */
+  amount?: Decimal;
+  remark?: string;
+  imageIds: string[];
+  customCells?: Record<string, OrderDetailCell>;
 }
 /** 整单共用说明列（如纹路、定制）：明细各行合并成一格，文字加配图 */
 export interface OrderSharedColumn {
@@ -170,12 +195,14 @@ export interface ProcurementOrderView {
     accessories?: OrderAccessory[];
     /** 辅料情况说明，导出到采购单（金智「采购概要」） */
     accessoryNote?: string;
+    additionalLines?: OrderAdditionalLine[];
     clauseIds: string[];
     clauseSnapshots?: ProcurementSetting[];
     contactId?: string;
     contactSnapshot?: SupplierContact;
     deliveryAddress?: string;
     deliveryDate?: string;
+    detailColumns?: OrderDetailColumn[];
     /** 明细行 id → 补充资料 */
     lineExtras?: Record<string, OrderLineExtra>;
     /** 这张单不需要收票（淘宝、个体等） */

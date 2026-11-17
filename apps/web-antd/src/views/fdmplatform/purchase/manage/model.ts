@@ -285,6 +285,8 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'accessoryNote',
       'reason',
       'lineExtras',
+      'detailColumns',
+      'additionalLines',
       'sharedColumns',
       'accessories',
       'packagingSteps',

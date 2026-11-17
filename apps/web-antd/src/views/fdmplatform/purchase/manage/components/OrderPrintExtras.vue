@@ -3,12 +3,13 @@ import type { PrintExtras } from '../print-extras';
 
 import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
+  OrderDetailColumn,
   OrderLineExtra,
   ProcurementOrderRow,
   ProcurementOrderView,
 } from '#/api/fdmplatform/procurement';
 
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -20,11 +21,13 @@ import {
   InputNumber,
   message,
   Modal,
+  Select,
   Space,
   Table,
   Tag,
   Textarea,
 } from 'ant-design-vue';
+import BigNumber from 'bignumber.js';
 
 import {
   copyProcurementImages,
@@ -35,8 +38,13 @@ import {
 import { errorText } from '../../../data';
 import { purchaseRowLabels } from '../model';
 import {
+  additionalLineAmount,
   boxCount,
   copyPrintExtras,
+  currencyDigits,
+  MAX_ADDITIONAL_LINES,
+  MAX_DETAIL_COLUMNS,
+  MAX_DETAIL_IMAGES,
   MAX_SHARED_COLUMNS,
   MAX_SHARED_IMAGES,
   MAX_STEP_IMAGES,
@@ -52,10 +60,40 @@ import OrderImages from './OrderImages.vue';
  * 印到采购单上的附加资料（#88）：明细补充（产品图、客户颜色、克重、型号、装箱数）、整单共用说明列、
  * 辅料明细勾选、包装步骤。随下单资料一起保存、确认，导出 PDF / Excel 时带出。
  */
-const props = defineProps<{ disabled: boolean; view: ProcurementOrderView }>();
+const props = defineProps<{
+  disabled: boolean;
+  saving?: boolean;
+  view: ProcurementOrderView;
+}>();
+const emit = defineEmits<{
+  busy: [value: boolean];
+  dirty: [value: boolean];
+  save: [];
+}>();
+const uploadCount = ref(0);
+const copyOpen = ref(false);
+const copying = ref(false);
+let disposed = false;
+const disabled = computed(
+  () =>
+    props.disabled || props.saving || uploadCount.value > 0 || copying.value,
+);
+watch(
+  () => uploadCount.value > 0 || copyOpen.value || copying.value,
+  (value) => emit('busy', value),
+);
+function imageBusy(value: boolean) {
+  uploadCount.value = Math.max(0, uploadCount.value + (value ? 1 : -1));
+}
+onBeforeUnmount(() => {
+  disposed = true;
+  emit('busy', false);
+});
 /** 采购单明细行（表格单元格里拿到的是宽松类型）。 */
 type Line = Record<string, any>;
 const extras = reactive<PrintExtras>({
+  detailColumns: [],
+  additionalLines: [],
   lineExtras: {},
   sharedColumns: [],
   accessories: [],
@@ -65,18 +103,40 @@ const active = ref<string[]>([]);
 const contractId = computed(() => props.view.contractId);
 const orderId = computed(() => props.view.id);
 const lines = computed(() => (props.view.order.lines ?? []) as Line[]);
+const displayLines = computed(() => [
+  ...lines.value,
+  ...extras.additionalLines.map((additional) => ({
+    id: additional.id,
+    additional,
+  })),
+]);
+const baseline = ref('');
+let loadedId: string | undefined;
+const fingerprint = () => JSON.stringify(printExtrasPayload(extras));
+const dirty = computed(() => baseline.value !== fingerprint());
+watch(dirty, (value) => emit('dirty', value), { immediate: true });
+
+function loadSaved() {
+  Object.assign(
+    extras,
+    printExtrasFrom(props.view.details, props.view.accessoryCatalog),
+  );
+  for (const line of lines.value) extras.lineExtras[String(line.id)] ??= {};
+  loadedId = `${props.view.contractId}/${props.view.id}`;
+  baseline.value = fingerprint();
+}
 
 watch(
   () => [props.view.id, props.view.details.version],
   () => {
-    Object.assign(
-      extras,
-      printExtrasFrom(props.view.details, props.view.accessoryCatalog),
-    );
-    for (const line of lines.value) extras.lineExtras[String(line.id)] ??= {};
+    if (loadedId === `${props.view.contractId}/${props.view.id}` && dirty.value)
+      return;
+    loadSaved();
     // 有内容的分组默认展开
     active.value = [
-      Object.values(props.view.details.lineExtras ?? {}).length > 0
+      Object.values(props.view.details.lineExtras ?? {}).length > 0 ||
+      extras.additionalLines.length > 0 ||
+      extras.detailColumns.length > 0
         ? 'lines'
         : '',
       props.view.details.sharedColumns?.length ? 'shared' : '',
@@ -93,10 +153,101 @@ function spec(line: Line) {
   return (line.specificationSnapshot ?? {}) as Line;
 }
 function quantity(line: Line) {
+  if (line.additional) return line.additional.quantity;
   return Number(line.quantity ?? 0) - Number(line.cancelledQuantity ?? 0);
 }
 function extra(line: Line): OrderLineExtra {
+  if (line.additional) return line.additional;
   return (extras.lineExtras[String(line.id)] ??= {});
+}
+function customCell(line: Line, id: string) {
+  const row = extra(line);
+  row.customCells ??= {};
+  return (row.customCells[id] ??= { imageIds: [] });
+}
+function attachments(line: Line) {
+  return extra(line).imageIds ?? [];
+}
+function addLine() {
+  extras.additionalLines.push({
+    id: crypto.randomUUID(),
+    name: '',
+    quantity: 1,
+    unit: '项',
+    unitPrice: 0,
+    imageIds: [],
+    customCells: {},
+  });
+}
+function addColumn(type: OrderDetailColumn['type']) {
+  extras.detailColumns.push({
+    id: crypto.randomUUID(),
+    title: type === 'IMAGE' ? '色卡图片' : '',
+    type,
+  });
+}
+function deleteColumn(id: string) {
+  Modal.confirm({
+    title: '删除自定义列？',
+    content: '这一列在所有明细中的文字和图片引用将一起移除，保存后生效。',
+    okText: '删除',
+    cancelText: '取消',
+    onOk: () => {
+      extras.detailColumns = extras.detailColumns.filter(
+        (column) => column.id !== id,
+      );
+      for (const row of [
+        ...Object.values(extras.lineExtras),
+        ...extras.additionalLines,
+      ])
+        delete row.customCells?.[id];
+    },
+  });
+}
+const columns = computed(() => [
+  {
+    title: '产品 / 费用项目',
+    key: 'product',
+    width: 180,
+    fixed: 'left' as const,
+  },
+  { title: '产品图片', key: 'image', width: 90 },
+  { title: '客户颜色名称', key: 'customerColor', width: 140 },
+  { title: '产品克重', key: 'weight', width: 120 },
+  { title: '型号（如正反面颜色）', key: 'model', width: 180 },
+  ...extras.detailColumns.map((column) => ({
+    title: column.title || '未命名列',
+    key: `custom:${column.id}`,
+    width: 180,
+  })),
+  { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
+  { title: '单位', key: 'unit', width: 90 },
+  { title: '单价', key: 'unitPrice', width: 110, align: 'right' as const },
+  { title: '金额', key: 'amount', width: 110, align: 'right' as const },
+  { title: '装箱数', key: 'packQty', width: 110 },
+  { title: '箱数', key: 'boxes', width: 70, align: 'right' as const },
+  { title: '备注', key: 'remark', width: 200 },
+  { title: '附件图片', key: 'attachments', width: 180 },
+  { title: '操作', key: 'action', width: 70 },
+]);
+const additionalTotal = computed(() => {
+  let total = new BigNumber(0);
+  for (const row of extras.additionalLines)
+    total = total.plus(
+      additionalLineAmount(row, String(props.view.order.currency ?? 'CNY')),
+    );
+  return total.toFixed(
+    currencyDigits(String(props.view.order.currency ?? 'CNY')),
+  );
+});
+function priceAmount(line: Line) {
+  return additionalLineAmount(
+    { quantity: quantity(line), unitPrice: Number(line.unitPrice ?? 0) },
+    String(props.view.order.currency ?? 'CNY'),
+  );
+}
+function columnByKey(key: unknown) {
+  return extras.detailColumns.find((column) => `custom:${column.id}` === key);
 }
 function lineImages(line: Line) {
   const id = extra(line).imageId;
@@ -152,13 +303,11 @@ const checkedCount = computed(
 );
 
 // ========== 从历史采购单复制 ==========
-const copyOpen = ref(false);
 const copyRows = ref<ProcurementOrderRow[]>([]);
 const copyKeyword = ref('');
 const copyPage = ref(1);
 const copyTotal = ref(0);
 const copyLoading = ref(false);
-const copying = ref(false);
 const copyError = ref('');
 let copySequence = 0;
 async function loadCopyRows(reset = false) {
@@ -182,6 +331,7 @@ async function loadCopyRows(reset = false) {
   }
 }
 function openCopy() {
+  if (disabled.value) return;
   copyOpen.value = true;
   void loadCopyRows(true);
 }
@@ -197,6 +347,8 @@ function hasExtras(row: ProcurementOrderRow) {
   const details = row.details;
   return !!(
     details?.packagingSteps?.length ||
+    details?.additionalLines?.length ||
+    details?.detailColumns?.length ||
     details?.sharedColumns?.length ||
     details?.accessories?.some((entry) => entry.checked) ||
     Object.keys(details?.lineExtras ?? {}).length > 0
@@ -206,6 +358,8 @@ function hasContent() {
   const value = printExtrasPayload(extras);
   return (
     value.sharedColumns.length > 0 ||
+    value.additionalLines.length > 0 ||
+    value.detailColumns.length > 0 ||
     value.packagingSteps.length > 0 ||
     value.accessories.length > 0 ||
     Object.keys(value.lineExtras).length > 0
@@ -221,13 +375,19 @@ function pick(row: ProcurementOrderRow) {
   Modal.confirm({
     title: '用这张采购单的附加资料替换当前内容？',
     content:
-      '共用说明列、辅料勾选、包装步骤整份替换；明细补充按产品对上的行替换，对不上的行保留。保存草稿后才生效。',
+      '自定义列、额外费用行、共用说明列、辅料勾选、包装步骤整份替换；产品补充按产品匹配。费用行会在保存后计入本单总额和应付款，请核对。',
     okText: '替换',
     cancelText: '取消',
     onOk: () => copyFrom(target),
   });
 }
 async function copyFrom(target: { contractId: string; orderId: string }) {
+  if (copying.value || disposed) return;
+  const destination = { contractId: contractId.value, orderId: orderId.value };
+  const stillHere = () =>
+    !disposed &&
+    destination.contractId === contractId.value &&
+    destination.orderId === orderId.value;
   copying.value = true;
   copyError.value = '';
   try {
@@ -235,16 +395,22 @@ async function copyFrom(target: { contractId: string; orderId: string }) {
       target.contractId,
       target.orderId,
     );
+    if (!stillHere()) return;
     const sourceExtras = printExtrasFrom(sourceView.details);
     const ids = printExtrasImageIds(sourceExtras);
     const images =
       ids.length > 0
-        ? await copyProcurementImages(contractId.value, orderId.value, {
-            sourceContractId: target.contractId,
-            sourceOrderId: target.orderId,
-            imageIds: ids,
-          })
+        ? await copyProcurementImages(
+            destination.contractId,
+            destination.orderId,
+            {
+              sourceContractId: target.contractId,
+              sourceOrderId: target.orderId,
+              imageIds: ids,
+            },
+          )
         : {};
+    if (!stillHere()) return;
     const result = copyPrintExtras(
       extras,
       sourceExtras,
@@ -258,51 +424,131 @@ async function copyFrom(target: { contractId: string; orderId: string }) {
     active.value = ['lines', 'shared', 'accessories', 'steps'];
     copyOpen.value = false;
     message.success(
-      `已带入附加资料，明细按产品对上 ${result.matched} 行；确认无误后请保存草稿`,
+      `已带入附加资料，明细按产品对上 ${result.matched} 行；请核对费用后点击「保存附加资料」`,
     );
   } catch (error) {
-    copyError.value = errorText(error);
+    if (stillHere()) copyError.value = errorText(error);
   } finally {
     copying.value = false;
   }
 }
 
-defineExpose({ payload: () => printExtrasPayload(extras) });
+defineExpose({
+  payload: () => printExtrasPayload(extras),
+  isDirty: () => dirty.value,
+  markSaved: loadSaved,
+});
 </script>
 <template>
   <div class="print-extras">
     <div class="extras-head">
       <h4 class="section-title">采购单附加资料（印在导出的采购单上）</h4>
-      <Button v-if="!disabled" size="small" @click="openCopy">
-        从历史采购单复制
-      </Button>
+      <Space wrap>
+        <Tag v-if="dirty" color="warning">有未保存的修改</Tag>
+        <span v-else class="muted">已保存</span>
+        <Button
+          v-if="!props.disabled"
+          size="small"
+          :disabled="disabled"
+          @click="openCopy"
+        >
+          从历史采购单复制
+        </Button>
+        <Button
+          v-if="!props.disabled"
+          type="primary"
+          :loading="saving"
+          :disabled="disabled || !dirty"
+          @click="emit('save')"
+        >
+          保存附加资料
+        </Button>
+      </Space>
     </div>
     <p class="muted">
       不填的部分不出现在采购单上。填了产品图片、客户颜色等补充列时，导出改为横向；辅料明细和包装步骤分别输出（Excel
-      为单独的工作表）。
+      为单独的工作表）。支持 JPG / PNG
+      图片或粘贴截图；修改后请点击「保存附加资料」。
     </p>
     <Collapse v-model:active-key="active" class="extras-collapse">
       <Collapse.Panel key="lines">
         <template #header>
           明细补充
-          <span class="muted">产品图片、客户颜色名称、克重、型号、装箱数</span>
+          <span class="muted">支持新增费用行、自定义文字 / 图片列、备注及图片附件</span>
         </template>
+        <Space v-if="!props.disabled" wrap class="detail-toolbar">
+          <Button
+            :disabled="
+              disabled || extras.additionalLines.length >= MAX_ADDITIONAL_LINES
+            "
+            @click="addLine"
+          >
+            + 新增费用 / 免费项目行
+          </Button>
+          <Button
+            :disabled="
+              disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
+            "
+            @click="addColumn('TEXT')"
+          >
+            + 新增文字列
+          </Button>
+          <Button
+            :disabled="
+              disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
+            "
+            @click="addColumn('IMAGE')"
+          >
+            + 新增图片列（色卡等）
+          </Button>
+        </Space>
+        <div v-if="extras.detailColumns.length" class="column-settings">
+          <div
+            v-for="column in extras.detailColumns"
+            :key="column.id"
+            class="column-setting"
+          >
+            <Tag>{{ column.type === 'IMAGE' ? '图片列' : '文字列' }}</Tag>
+            <Input
+              v-model:value="column.title"
+              :disabled="disabled"
+              :maxlength="20"
+              placeholder="填写列名"
+              :aria-label="`自定义列名称 ${column.id}`"
+            />
+            <Select
+              v-model:value="column.type"
+              :disabled="disabled"
+              :options="[
+                { label: '文字', value: 'TEXT' },
+                { label: '图片', value: 'IMAGE' },
+              ]"
+              style="width: 90px"
+            />
+            <Button
+              v-if="!props.disabled"
+              :disabled="disabled"
+              type="link"
+              danger
+              @click="deleteColumn(column.id)"
+            >
+              删除列
+            </Button>
+          </div>
+        </div>
+        <p class="muted">
+          额外费用行会计入采购总额和应付款；单价可填 0
+          表示免费。产品数量和价格请在采购单明细中修改。最多
+          {{ MAX_ADDITIONAL_LINES }} 行额外项目、{{ MAX_DETAIL_COLUMNS }}
+          个自定义列。
+        </p>
         <Table
-          :data-source="lines"
+          :data-source="displayLines"
           :pagination="false"
           size="small"
           :row-key="(line: Line) => String(line.id)"
-          :scroll="{ x: 980 }"
-          :columns="[
-            { title: '产品', key: 'product', width: 180, fixed: 'left' },
-            { title: '产品图片', key: 'image', width: 90 },
-            { title: '客户颜色名称', key: 'customerColor', width: 140 },
-            { title: '产品克重', key: 'weight', width: 120 },
-            { title: '型号（如正反面颜色）', key: 'model', width: 180 },
-            { title: '数量', key: 'quantity', width: 70, align: 'right' },
-            { title: '装箱数', key: 'packQty', width: 110 },
-            { title: '箱数', key: 'boxes', width: 70, align: 'right' },
-          ]"
+          :scroll="{ x: 1950 + extras.detailColumns.length * 180 }"
+          :columns="columns"
         >
           <template #headerCell="{ column }">
             <span>{{ column.title }}</span>
@@ -329,11 +575,23 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
           </template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'product'">
-              <div>{{ spec(record).skuCode ?? '' }}</div>
-              <div class="muted">{{ spec(record).skuName ?? '' }}</div>
+              <template v-if="record.additional">
+                <Tag color="blue">额外项目</Tag>
+                <Input
+                  v-model:value="record.additional.name"
+                  :disabled="disabled"
+                  :maxlength="200"
+                  placeholder="如加工费、免费打样"
+                  aria-label="费用项目名称"
+                />
+              </template>
+              <template v-else>
+                <div>{{ spec(record).skuCode ?? '' }}</div>
+                <div class="muted">{{ spec(record).skuName ?? '' }}</div>
+              </template>
             </template>
             <OrderImages
-              v-else-if="column.key === 'image'"
+              v-else-if="column.key === 'image' && !record.additional"
               :model-value="lineImages(record)"
               :contract-id="contractId"
               :order-id="orderId"
@@ -341,32 +599,74 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
               :size="56"
               :disabled="disabled"
               @update:model-value="(ids) => setLineImages(record, ids)"
+              @busy="imageBusy"
             />
             <Input
-              v-else-if="column.key === 'customerColor'"
+              v-else-if="column.key === 'customerColor' && !record.additional"
               v-model:value="extra(record).customerColor"
               :disabled="disabled"
               :maxlength="200"
             />
             <Input
-              v-else-if="column.key === 'weight'"
+              v-else-if="column.key === 'weight' && !record.additional"
               v-model:value="extra(record).weight"
               :disabled="disabled"
               :maxlength="100"
               placeholder="如 1000g±100g"
             />
             <Textarea
-              v-else-if="column.key === 'model'"
+              v-else-if="column.key === 'model' && !record.additional"
               v-model:value="extra(record).model"
               :disabled="disabled"
               :maxlength="500"
               :auto-size="{ minRows: 1, maxRows: 4 }"
             />
+            <InputNumber
+              v-else-if="column.key === 'quantity' && record.additional"
+              v-model:value="record.additional.quantity"
+              :disabled="disabled"
+              :min="0.000001"
+              :max="1000000000"
+              :precision="6"
+              aria-label="费用数量"
+              style="width: 100%"
+            />
             <span v-else-if="column.key === 'quantity'">
               {{ quantity(record) }}
             </span>
+            <template v-else-if="column.key === 'unit'">
+              <Input
+                v-if="record.additional"
+                v-model:value="record.additional.unit"
+                :disabled="disabled"
+                :maxlength="20"
+                aria-label="费用单位"
+              />
+              <span v-else>{{ spec(record).unit ?? record.unit ?? '—' }}</span>
+            </template>
+            <template v-else-if="column.key === 'unitPrice'">
+              <InputNumber
+                v-if="record.additional"
+                v-model:value="record.additional.unitPrice"
+                :disabled="disabled"
+                :min="0"
+                :max="1000000000"
+                :precision="6"
+                aria-label="费用单价（可填0）"
+                style="width: 100%"
+              />
+              <span v-else>{{ record.unitPrice ?? '—' }}</span>
+            </template>
+            <span v-else-if="column.key === 'amount'">{{
+              record.additional
+                ? additionalLineAmount(
+                    record.additional,
+                    String(view.order.currency ?? 'CNY'),
+                  )
+                : priceAmount(record)
+            }}</span>
             <InputNumber
-              v-else-if="column.key === 'packQty'"
+              v-else-if="column.key === 'packQty' && !record.additional"
               v-model:value="extra(record).packQty"
               :disabled="disabled"
               :min="1"
@@ -375,21 +675,72 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
               placeholder="每箱几件"
               style="width: 100%"
             />
-            <span v-else-if="column.key === 'boxes'">
+            <span v-else-if="column.key === 'boxes' && !record.additional">
               {{ boxCount(quantity(record), extra(record).packQty) || '—' }}
             </span>
-          </template>
-          <template #summary>
-            <Table.Summary.Row v-if="totals.boxes > 0">
-              <Table.Summary.Cell :index="0" :col-span="7" align="right">
-                合计箱数{{ totals.complete ? '' : '（部分行未填装箱数）' }}
-              </Table.Summary.Cell>
-              <Table.Summary.Cell :index="7" align="right">
-                {{ totals.boxes }}
-              </Table.Summary.Cell>
-            </Table.Summary.Row>
+            <Textarea
+              v-else-if="column.key === 'remark'"
+              v-model:value="extra(record).remark"
+              :disabled="disabled"
+              :maxlength="2000"
+              :auto-size="{ minRows: 1, maxRows: 5 }"
+              placeholder="特殊要求或备注"
+            />
+            <OrderImages
+              v-else-if="column.key === 'attachments'"
+              :model-value="attachments(record)"
+              :contract-id="contractId"
+              :order-id="orderId"
+              :max="MAX_DETAIL_IMAGES"
+              :disabled="disabled"
+              @update:model-value="(ids) => (extra(record).imageIds = ids)"
+              @busy="imageBusy"
+            />
+            <template v-else-if="columnByKey(column.key)">
+              <Textarea
+                v-if="columnByKey(column.key)!.type === 'TEXT'"
+                v-model:value="
+                  customCell(record, columnByKey(column.key)!.id).text
+                "
+                :disabled="disabled"
+                :maxlength="2000"
+                :auto-size="{ minRows: 1, maxRows: 5 }"
+              />
+              <OrderImages
+                v-else
+                v-model="
+                  customCell(record, columnByKey(column.key)!.id).imageIds
+                "
+                :contract-id="contractId"
+                :order-id="orderId"
+                :max="MAX_DETAIL_IMAGES"
+                :disabled="disabled"
+                @busy="imageBusy"
+              />
+            </template>
+            <Button
+              v-else-if="
+                column.key === 'action' && record.additional && !props.disabled
+              "
+              type="link"
+              danger
+              :disabled="disabled"
+              @click="
+                extras.additionalLines = extras.additionalLines.filter(
+                  (row) => row.id !== record.id,
+                )
+              "
+            >
+              删除
+            </Button>
           </template>
         </Table>
+        <div class="detail-totals">
+          <span v-if="totals.boxes > 0">产品合计箱数：{{ totals.boxes
+            }}{{ totals.complete ? '' : '（部分行未填装箱数）' }}</span>
+          <strong>额外项目合计：{{ view.order.currency ?? 'CNY' }}
+            {{ additionalTotal }}（保存后更新账款）</strong>
+        </div>
       </Collapse.Panel>
 
       <Collapse.Panel key="shared">
@@ -437,6 +788,7 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
             :order-id="orderId"
             :max="MAX_SHARED_IMAGES"
             :disabled="disabled"
+            @busy="imageBusy"
           />
         </div>
         <Button
@@ -539,6 +891,7 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
             :order-id="orderId"
             :max="MAX_STEP_IMAGES"
             :disabled="disabled"
+            @busy="imageBusy"
           />
         </div>
         <Button
@@ -552,13 +905,33 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
         </span>
       </Collapse.Panel>
     </Collapse>
+    <div v-if="!props.disabled" class="save-bar">
+      <span class="muted">{{
+        uploadCount > 0
+          ? '图片上传中，请稍候再保存或关闭'
+          : dirty
+            ? '修改尚未保存，保存后重新打开可继续查看'
+            : '附加资料已保存'
+      }}</span>
+      <Button
+        type="primary"
+        :loading="saving"
+        :disabled="disabled || !dirty"
+        @click="emit('save')"
+      >
+        保存附加资料
+      </Button>
+    </div>
 
     <Modal
       :open="copyOpen"
       title="从历史采购单复制附加资料"
       :footer="null"
       width="900px"
-      @cancel="copyOpen = false"
+      :closable="!copying"
+      :mask-closable="!copying"
+      :keyboard="!copying"
+      @cancel="!copying && (copyOpen = false)"
     >
       <Space direction="vertical" style="width: 100%">
         <Input.Search
@@ -605,6 +978,7 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
               v-else-if="column.key === 'action'"
               type="link"
               :disabled="
+                copying ||
                 !source(record as ProcurementOrderRow) ||
                 (record as ProcurementOrderRow).id === orderId ||
                 (record as ProcurementOrderRow).standaloneId === orderId
@@ -626,9 +1000,49 @@ defineExpose({ payload: () => printExtrasPayload(extras) });
 
 .extras-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.detail-toolbar,
+.column-settings {
+  margin-bottom: 12px;
+}
+
+.column-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.column-setting {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 420px;
+}
+
+.column-setting > .ant-input {
+  width: 150px;
+}
+
+.detail-totals,
+.save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.save-bar {
+  padding: 10px 12px;
+  background: hsl(var(--accent));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
 }
 
 .section-title {

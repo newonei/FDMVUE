@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   accessoryRows,
+  additionalLineAmount,
   boxCount,
   copyPrintExtras,
   printExtrasFrom,
@@ -52,6 +53,8 @@ describe('采购单附加资料', () => {
       ['吊牌'],
     );
     expect(printExtrasPayload(value)).toEqual({
+      detailColumns: [],
+      additionalLines: [],
       lineExtras: { l1: { customerColor: 'Ocean Blue', packQty: 10 } },
       sharedColumns: [{ title: '纹路', text: '贝壳纹', imageIds: [] }],
       accessories: [],
@@ -63,6 +66,106 @@ describe('采购单附加资料', () => {
     expect(printExtrasPayload(value).accessories).toEqual([
       { name: '吊牌', checked: true, remark: '每条一个' },
     ]);
+  });
+
+  it('额外费用保留零单价并使用十进制计算金额，提交时不信任旧金额', () => {
+    const value = printExtrasFrom({
+      clauseIds: [],
+      status: 'DRAFT',
+      version: 1,
+      additionalLines: [
+        {
+          id: 'fee',
+          name: ' 加工费 ',
+          quantity: 3,
+          unitPrice: 0.1,
+          unit: ' 次 ',
+          amount: '999',
+          imageIds: [],
+        },
+        {
+          id: 'free',
+          name: '免费打样',
+          quantity: 1,
+          unitPrice: 0,
+          imageIds: [],
+        },
+      ],
+    });
+    expect(additionalLineAmount(value.additionalLines[0]!)).toBe('0.30');
+    expect(additionalLineAmount(value.additionalLines[1]!)).toBe('0.00');
+    expect(
+      additionalLineAmount({ quantity: 1, unitPrice: 1.2345 }, 'BHD'),
+    ).toBe('1.235');
+    expect(additionalLineAmount({ quantity: 1, unitPrice: 1.5 }, 'JPY')).toBe(
+      '2',
+    );
+    expect(printExtrasPayload(value).additionalLines).toMatchObject([
+      { name: '加工费', quantity: 3, unitPrice: 0.1, unit: '次' },
+      { name: '免费打样', quantity: 1, unitPrice: 0 },
+    ]);
+    expect(printExtrasPayload(value).additionalLines[0]).not.toHaveProperty(
+      'amount',
+    );
+  });
+
+  it('完整复制自定义列、色卡、附件及费用并替换所有图片，编辑副本不污染来源', () => {
+    const details = {
+      clauseIds: [],
+      status: 'DRAFT' as const,
+      version: 1,
+      detailColumns: [{ id: 'color', title: '色卡', type: 'IMAGE' as const }],
+      lineExtras: {
+        s1: {
+          remark: ' 印花对位 ',
+          imageIds: ['attach'],
+          customCells: { color: { imageIds: ['card'] } },
+        },
+      },
+      additionalLines: [
+        {
+          id: 'free',
+          name: '免费样品',
+          quantity: 1,
+          unitPrice: 0,
+          imageIds: ['sample'],
+          customCells: { color: { imageIds: ['card'] } },
+        },
+      ],
+    };
+    const source = printExtrasFrom(details);
+    expect(new Set(printExtrasImageIds(source))).toEqual(
+      new Set(['attach', 'card', 'sample']),
+    );
+    const result = copyPrintExtras(
+      printExtrasFrom({ clauseIds: [], status: 'DRAFT', version: 1 }),
+      source,
+      [{ id: 's1', skuId: 'sku' }],
+      [{ id: 't1', skuId: 'sku' }],
+      { attach: 'new-attach', card: 'new-card', sample: 'new-sample' },
+    );
+    expect(result.value.lineExtras.t1).toMatchObject({
+      remark: ' 印花对位 ',
+      imageIds: ['new-attach'],
+      customCells: { color: { imageIds: ['new-card'] } },
+    });
+    expect(result.value.additionalLines[0]).toMatchObject({
+      unitPrice: 0,
+      imageIds: ['new-sample'],
+      customCells: { color: { imageIds: ['new-card'] } },
+    });
+    result.value.additionalLines[0]!.customCells!.color!.imageIds.push(
+      'another',
+    );
+    expect(details.additionalLines[0]!.customCells.color.imageIds).toEqual([
+      'card',
+    ]);
+    const payload = printExtrasPayload(result.value);
+    expect(payload.lineExtras.t1!.remark).toBe('印花对位');
+    result.value.detailColumns = [];
+    expect(printExtrasPayload(result.value).lineExtras.t1).not.toHaveProperty(
+      'customCells',
+    );
   });
 
   it('从历史单复制：明细按产品对上，图片换成本单的新编号，对不上的行保留', () => {

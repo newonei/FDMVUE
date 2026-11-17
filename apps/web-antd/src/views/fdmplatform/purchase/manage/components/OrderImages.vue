@@ -22,6 +22,7 @@ const props = defineProps<{
   /** 缩略图边长（像素） */
   size?: number;
 }>();
+const emit = defineEmits<{ busy: [value: boolean] }>();
 const ids = defineModel<string[]>({ required: true });
 const urls = ref<Record<string, string>>({});
 const uploading = ref(false);
@@ -37,6 +38,7 @@ watch(
 );
 onBeforeUnmount(() => {
   disposed = true;
+  if (uploading.value) emit('busy', false);
   Object.values(urls.value).forEach((url) => URL.revokeObjectURL(url));
 });
 
@@ -51,6 +53,7 @@ async function load(id: string) {
   }
 }
 async function upload(files: File[]) {
+  if (props.disabled || uploading.value) return;
   const room = props.max - ids.value.length;
   if (room <= 0) {
     message.warning(`最多 ${props.max} 张图片`);
@@ -65,6 +68,7 @@ async function upload(files: File[]) {
     );
   if (picked.length === 0) return;
   uploading.value = true;
+  emit('busy', true);
   try {
     for (const file of picked) {
       const image = await uploadProcurementImage(
@@ -72,12 +76,14 @@ async function upload(files: File[]) {
         props.orderId,
         file,
       );
+      if (disposed) return;
       ids.value = [...ids.value, image.id];
     }
   } catch (error) {
     message.error(errorText(error));
   } finally {
     uploading.value = false;
+    if (!disposed) emit('busy', false);
   }
 }
 function choose(event: Event) {

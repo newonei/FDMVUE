@@ -1,7 +1,7 @@
 /* eslint-disable vue/one-component-per-file -- Small UI adapters exercise the actual purchase workspace and its router. */
 import type { PropType } from 'vue';
 
-import { createApp, defineComponent, h, nextTick } from 'vue';
+import { createApp, defineComponent, h, nextTick, ref } from 'vue';
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   detail: vi.fn(),
   contract: vi.fn(),
+  action: vi.fn(),
+  confirm: vi.fn(),
+  finance: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
   getAttachments: vi.fn(),
@@ -25,14 +28,25 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrder: mocks.detail,
   downloadProcurementFile: vi.fn(),
   exportProcurementOrder: vi.fn(),
-  procurementOrderAction: vi.fn(),
+  procurementOrderAction: mocks.action,
   uploadProcurementSigned: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
-  getProcurementFinanceSummary: vi.fn().mockResolvedValue({}),
+  getProcurementFinanceSummary: mocks.finance,
 }));
 vi.mock('../../finance/procurement/components/FinanceDocument.vue', () => ({
   default: defineComponent({ render: () => null }),
+}));
+vi.mock('../../finance/procurement/components/PaymentRecordDialog.vue', () => ({
+  default: defineComponent({
+    props: ['available'],
+    setup: (props) => () =>
+      h(
+        'span',
+        { 'data-payment-available': true },
+        String(props.available ?? ''),
+      ),
+  }),
 }));
 vi.mock('../../documents/RecordDetail.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -140,7 +154,48 @@ vi.mock('./components/StandaloneOrderFiles.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderDetails.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    emits: ['dirty', 'saveExtras'],
+    setup: (_, ctx) => {
+      const dirty = ref(false);
+      const payload = {
+        lineExtras: [],
+        detailColumns: [{ id: 'note', title: '特殊备注', type: 'TEXT' }],
+        additionalLines: [
+          { id: 'fee', name: '加工费', quantity: 1, unitPrice: 25 },
+        ],
+        sharedColumns: [],
+        accessories: [],
+        packagingSteps: [],
+      };
+      ctx.expose({
+        isDirty: () => dirty.value,
+        markSaved: () => {
+          dirty.value = false;
+          ctx.emit('dirty', false);
+        },
+        pendingSave: () => ({ action: 'SAVE_EXTRAS', payload }),
+      });
+      return () =>
+        h('div', [
+          h(
+            'button',
+            {
+              onClick: () => {
+                dirty.value = true;
+                ctx.emit('dirty', true);
+              },
+            },
+            '修改附加资料',
+          ),
+          h(
+            'button',
+            { onClick: () => ctx.emit('saveExtras', payload) },
+            '保存附加资料',
+          ),
+        ]);
+    },
+  }),
 }));
 vi.mock('./components/OrderLines.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -191,7 +246,19 @@ vi.mock('./components/OrderTimeline.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('./components/OrderSummaryCards.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    props: ['orderAmount', 'unpaid', 'paid'],
+    setup: (props) => () =>
+      h('section', { 'data-order-summary': true }, [
+        h(
+          'span',
+          { 'data-order-total': true },
+          String(props.orderAmount ?? ''),
+        ),
+        h('span', { 'data-order-unpaid': true }, String(props.unpaid ?? '')),
+        h('span', { 'data-order-paid': true }, String(props.paid ?? '')),
+      ]),
+  }),
 }));
 vi.mock('./components/OrderStockDocs.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -350,8 +417,8 @@ vi.mock('ant-design-vue', () => {
     TabPane: block,
     Tabs: block,
     Tag: block,
-    Modal: { confirm: vi.fn(), warning: vi.fn() },
-    message: { success: vi.fn() },
+    Modal: { confirm: mocks.confirm, warning: vi.fn() },
+    message: { success: vi.fn(), warning: vi.fn() },
   };
 });
 function nativeRows() {
@@ -434,6 +501,12 @@ beforeEach(() => {
   mocks.page.mockResolvedValue({ list: nativeRows(), total: 6 });
   mocks.contract.mockImplementation(async () => contractFixture());
   mocks.detail.mockImplementation(async (_contractId, id) => orderFixture(id));
+  mocks.action.mockImplementation(async (_contractId, id) => ({
+    ...orderFixture(id),
+    details: { version: 2, status: 'CONFIRMED' },
+  }));
+  mocks.confirm.mockReturnValue({ destroy: vi.fn() });
+  mocks.finance.mockResolvedValue({});
 });
 afterEach(() => {
   for (const close of dispose.splice(0)) close();
@@ -641,5 +714,126 @@ describe('related creation inside the purchase workspace', () => {
     const generation = host.querySelector<HTMLElement>('[data-related-action]');
     expect(generation).not.toBeNull();
     expect(generation?.dataset.source).toBeUndefined();
+  });
+});
+
+describe('purchase extras persistence and unsaved navigation', () => {
+  const location =
+    '/fdmprocurement/platform-orders?contractId=contract-1&documentId=order-1';
+
+  it('saves extras with their own action and preserves the server confirmation state', async () => {
+    const { host } = await mount(location);
+    click(host, '修改附加资料');
+    await settle();
+    click(host, '保存附加资料');
+    await settle();
+    expect(mocks.action).toHaveBeenCalledWith(
+      'contract-1',
+      'order-1',
+      expect.objectContaining({
+        action: 'SAVE_EXTRAS',
+        expectedVersion: 1,
+        payload: expect.objectContaining({
+          detailColumns: [{ id: 'note', title: '特殊备注', type: 'TEXT' }],
+          additionalLines: [
+            { id: 'fee', name: '加工费', quantity: 1, unitPrice: 25 },
+          ],
+        }),
+      }),
+    );
+    const request = mocks.action.mock.calls[0]![2];
+    expect(request.payload).not.toHaveProperty('status');
+    expect(request.payload).not.toHaveProperty('signingEntityId');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+
+  it('keeps edits when navigation is cancelled and saves before continuing', async () => {
+    const { host, router } = await mount(location);
+    click(host, '修改附加资料');
+    await settle();
+    const cancelledNavigation = router.push('/elsewhere');
+    await settle();
+    expect(router.currentRoute.value.path).toBe(
+      '/fdmprocurement/platform-orders',
+    );
+    mocks.confirm.mock.calls.at(-1)![0].onCancel();
+    await cancelledNavigation;
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    const savedNavigation = router.push('/elsewhere');
+    await settle();
+    await mocks.confirm.mock.calls.at(-1)![0].onOk();
+    await savedNavigation;
+    expect(mocks.action).toHaveBeenCalledWith(
+      'contract-1',
+      'order-1',
+      expect.objectContaining({ action: 'SAVE_EXTRAS' }),
+    );
+    expect(router.currentRoute.value.path).toBe('/elsewhere');
+  });
+
+  it('reloads the financial summary immediately after expense rows are saved', async () => {
+    mocks.finance
+      .mockResolvedValueOnce({
+        orderAmount: '100.00',
+        unpaidAmount: '80.00',
+        paidAmount: '20.00',
+        availablePaymentAmount: '80.00',
+      })
+      .mockResolvedValueOnce({
+        orderAmount: '125.00',
+        unpaidAmount: '105.00',
+        paidAmount: '20.00',
+        availablePaymentAmount: '105.00',
+      });
+    const { host } = await mount(location);
+    expect(mocks.finance).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[data-order-total]')?.textContent).toBe(
+      '100.00',
+    );
+    expect(host.querySelector('[data-order-unpaid]')?.textContent).toBe(
+      '80.00',
+    );
+    expect(host.querySelector('[data-payment-available]')?.textContent).toBe(
+      '80.00',
+    );
+    click(host, '修改附加资料');
+    await settle();
+    click(host, '保存附加资料');
+    await settle();
+    expect(mocks.finance).toHaveBeenCalledTimes(2);
+    expect(mocks.finance).toHaveBeenLastCalledWith('contract-1', 'order-1');
+    expect(host.querySelector('[data-order-total]')?.textContent).toBe(
+      '125.00',
+    );
+    expect(host.querySelector('[data-order-unpaid]')?.textContent).toBe(
+      '105.00',
+    );
+    expect(host.querySelector('[data-order-paid]')?.textContent).toBe('20.00');
+    expect(host.querySelector('[data-payment-available]')?.textContent).toBe(
+      '105.00',
+    );
+  });
+
+  it('keeps the detail drawer and unsaved edits after save failure', async () => {
+    const { host, router } = await mount(location);
+    click(host, '修改附加资料');
+    await settle();
+    mocks.action.mockRejectedValueOnce(new Error('附加资料保存失败'));
+    const navigation = router.push('/elsewhere');
+    await settle();
+    const prompt = mocks.confirm.mock.calls.at(-1)![0];
+    await expect(prompt.onOk()).rejects.toThrow('采购资料未保存');
+    expect(router.currentRoute.value.query.documentId).toBe('order-1');
+    expect(host.textContent).toContain('附加资料保存失败');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    prompt.onCancel();
+    await navigation;
   });
 });

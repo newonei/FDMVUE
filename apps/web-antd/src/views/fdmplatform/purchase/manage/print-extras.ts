@@ -1,6 +1,9 @@
 import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
   OrderAccessory,
+  OrderAdditionalLine,
+  OrderDetailCell,
+  OrderDetailColumn,
   OrderLineExtra,
   OrderPackagingStep,
   OrderSharedColumn,
@@ -11,6 +14,8 @@ import BigNumber from 'bignumber.js';
 
 /** 下单资料里印到采购单上的补充内容（#88），与后端 PlatformPurchaseExtras 字段一致。 */
 export interface PrintExtras {
+  additionalLines: OrderAdditionalLine[];
+  detailColumns: OrderDetailColumn[];
   accessories: OrderAccessory[];
   lineExtras: Record<string, OrderLineExtra>;
   packagingSteps: OrderPackagingStep[];
@@ -23,6 +28,44 @@ export const MAX_SHARED_COLUMNS = 4;
 export const MAX_SHARED_IMAGES = 6;
 export const MAX_STEPS = 12;
 export const MAX_STEP_IMAGES = 8;
+export const MAX_DETAIL_COLUMNS = 8;
+export const MAX_ADDITIONAL_LINES = 50;
+export const MAX_DETAIL_IMAGES = 6;
+
+function cloneCells(cells?: Record<string, OrderDetailCell>) {
+  return Object.fromEntries(
+    Object.entries(cells ?? {}).map(([id, cell]) => [
+      id,
+      { ...cell, imageIds: [...(cell.imageIds ?? [])] },
+    ]),
+  );
+}
+
+export function currencyDigits(currency: string) {
+  try {
+    return (
+      new Intl.NumberFormat('zh-CN', {
+        style: 'currency',
+        currency,
+      }).resolvedOptions().maximumFractionDigits ?? 2
+    );
+  } catch {
+    return 2;
+  }
+}
+
+/** 金额预览使用十进制计算；最终金额由服务端按采购币种重算。 */
+export function additionalLineAmount(
+  row: Pick<OrderAdditionalLine, 'quantity' | 'unitPrice'>,
+  currency = 'CNY',
+) {
+  const quantity = new BigNumber(String(row.quantity ?? 0));
+  const price = new BigNumber(String(row.unitPrice ?? 0));
+  const digits = currencyDigits(currency);
+  return quantity.isFinite() && price.isFinite()
+    ? quantity.times(price).toFixed(digits, BigNumber.ROUND_HALF_UP)
+    : new BigNumber(0).toFixed(digits);
+}
 
 /** 勾选清单：已存的在前（保留顺序、勾选与备注），清单里新增的补在后面、默认不勾。 */
 export function accessoryRows(
@@ -41,10 +84,24 @@ export function printExtrasFrom(
   catalog?: string[],
 ): PrintExtras {
   return {
+    detailColumns: (details.detailColumns ?? []).map((column) => ({
+      ...column,
+    })),
+    additionalLines: (details.additionalLines ?? []).map((row) => ({
+      ...row,
+      imageIds: [...(row.imageIds ?? [])],
+      customCells: cloneCells(row.customCells),
+    })),
     lineExtras: Object.fromEntries(
       Object.entries(details.lineExtras ?? {}).map(([id, row]) => [
         id,
-        { ...row },
+        {
+          ...row,
+          ...(row.imageIds ? { imageIds: [...row.imageIds] } : {}),
+          ...(row.customCells
+            ? { customCells: cloneCells(row.customCells) }
+            : {}),
+        },
       ]),
     ),
     sharedColumns: (details.sharedColumns ?? []).map((row) => ({
@@ -76,13 +133,32 @@ function blank(value?: string) {
  * 有内容却没填名称的也保留，交给后端提示补名称。辅料一项没勾时不提交清单。
  */
 export function printExtrasPayload(value: PrintExtras) {
+  const columnIds = new Set(value.detailColumns.map((column) => column.id));
+  const cleanCells = (cells?: Record<string, OrderDetailCell>) =>
+    Object.fromEntries(
+      Object.entries(cells ?? {})
+        .filter(
+          ([id, cell]) =>
+            columnIds.has(id) && (!blank(cell.text) || cell.imageIds?.length),
+        )
+        .map(([id, cell]) => [
+          id,
+          {
+            ...(blank(cell.text) ? {} : { text: cell.text!.trim() }),
+            imageIds: [...(cell.imageIds ?? [])],
+          },
+        ]),
+    );
   const lineExtras: Record<string, OrderLineExtra> = {};
   for (const [id, row] of Object.entries(value.lineExtras)) {
     const clean: OrderLineExtra = {};
-    for (const key of ['customerColor', 'weight', 'model'] as const)
+    for (const key of ['customerColor', 'weight', 'model', 'remark'] as const)
       if (!blank(row[key])) clean[key] = row[key]!.trim();
     if (row.packQty) clean.packQty = row.packQty;
     if (row.imageId) clean.imageId = row.imageId;
+    if (row.imageIds?.length) clean.imageIds = [...row.imageIds];
+    const cells = cleanCells(row.customCells);
+    if (Object.keys(cells).length > 0) clean.customCells = cells;
     if (Object.keys(clean).length > 0) lineExtras[id] = clean;
   }
   const filled = (row: { imageIds: string[]; text?: string; title: string }) =>
@@ -97,6 +173,20 @@ export function printExtrasPayload(value: PrintExtras) {
       }))
     : [];
   return {
+    detailColumns: value.detailColumns.map((column) => ({
+      ...column,
+      title: column.title.trim(),
+    })),
+    additionalLines: value.additionalLines.map(
+      ({ amount: _amount, ...row }) => ({
+        ...row,
+        name: row.name.trim(),
+        unit: row.unit?.trim(),
+        remark: row.remark?.trim(),
+        imageIds: [...row.imageIds],
+        customCells: cleanCells(row.customCells),
+      }),
+    ),
     lineExtras,
     sharedColumns: value.sharedColumns.filter(filled),
     accessories,
@@ -111,6 +201,14 @@ export function printExtrasImageIds(value: PrintExtras) {
       ...Object.values(value.lineExtras)
         .map((row) => row.imageId)
         .filter((id): id is string => !!id),
+      ...Object.values(value.lineExtras).flatMap((row) => row.imageIds ?? []),
+      ...[...Object.values(value.lineExtras), ...value.additionalLines].flatMap(
+        (row) =>
+          Object.values(row.customCells ?? {}).flatMap(
+            (cell) => cell.imageIds ?? [],
+          ),
+      ),
+      ...value.additionalLines.flatMap((row) => row.imageIds),
       ...value.sharedColumns.flatMap((row) => row.imageIds),
       ...value.packagingSteps.flatMap((row) => row.imageIds),
     ]),
@@ -139,13 +237,36 @@ export function copyPrintExtras(
 ): { matched: number; value: PrintExtras } {
   const swap = (ids: string[]) =>
     ids.map((id) => images[id]).filter((id): id is string => !!id);
+  const swapCells = (cells?: Record<string, OrderDetailCell>) =>
+    Object.fromEntries(
+      Object.entries(cells ?? {}).map(([id, cell]) => [
+        id,
+        { ...cell, imageIds: swap(cell.imageIds ?? []) },
+      ]),
+    );
   const bySource = new Map<string, OrderLineExtra>();
   for (const line of sourceLines) {
     const key = lineKey(line);
     const extra = source.lineExtras[String(line.id)];
     if (key && extra && !bySource.has(key)) bySource.set(key, extra);
   }
-  const lineExtras = { ...current.lineExtras };
+  const lineExtras = Object.fromEntries(
+    Object.entries(current.lineExtras).map(([id, row]) => {
+      const { customCells, ...rest } = row;
+      const kept = Object.fromEntries(
+        Object.entries(cloneCells(customCells)).filter(([columnId]) =>
+          source.detailColumns.some((column) => column.id === columnId),
+        ),
+      );
+      return [
+        id,
+        {
+          ...rest,
+          ...(Object.keys(kept).length > 0 ? { customCells: kept } : {}),
+        },
+      ];
+    }),
+  );
   let matched = 0;
   for (const line of targetLines) {
     const key = lineKey(line);
@@ -156,12 +277,22 @@ export function copyPrintExtras(
     const copied = imageId ? images[imageId] : undefined;
     lineExtras[String(line.id)] = {
       ...rest,
+      ...(extra.imageIds?.length ? { imageIds: swap(extra.imageIds) } : {}),
+      ...(extra.customCells && Object.keys(extra.customCells).length > 0
+        ? { customCells: swapCells(extra.customCells) }
+        : {}),
       ...(copied ? { imageId: copied } : {}),
     };
   }
   return {
     matched,
     value: {
+      detailColumns: source.detailColumns.map((column) => ({ ...column })),
+      additionalLines: source.additionalLines.map((row) => ({
+        ...row,
+        imageIds: swap(row.imageIds),
+        customCells: swapCells(row.customCells),
+      })),
       lineExtras,
       sharedColumns: source.sharedColumns.map((row) => ({
         ...row,

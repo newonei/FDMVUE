@@ -14,8 +14,21 @@ import type {
 } from '#/api/fdmplatform/procurement';
 import type { PurchaseReturn, StockIn } from '#/api/fdmplatform/warehouse';
 
-import { computed, h, nextTick, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import {
+  computed,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+} from 'vue-router';
 
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
@@ -276,6 +289,8 @@ const saving = ref(false);
 const pageError = ref('');
 const listError = ref('');
 const view = ref<ProcurementOrderView>();
+const orderDetails = ref<InstanceType<typeof OrderDetails>>();
+const detailsDirty = ref(false);
 const contract = ref<Contract>();
 const migration = computed(
   () => view.value?.order.migration as MigrationInfo | undefined,
@@ -318,6 +333,7 @@ const attachmentsError = ref('');
 const commandKeys = new Map<string, string>();
 const historyActionNames: Record<string, string> = {
   SAVE_DETAILS: '保存采购资料',
+  SAVE_EXTRAS: '保存采购单附加资料',
   CONFIRM_DETAILS: '确认采购资料',
   WITHDRAW_DETAILS: '撤回并编辑',
   REVISE_DETAILS: '新建资料变更版本',
@@ -1002,6 +1018,7 @@ async function loadList() {
 }
 async function loadDetail() {
   const run = ++sequence;
+  detailsDirty.value = false;
   view.value = undefined;
   contract.value = undefined;
   actionOpen.value = false;
@@ -1081,8 +1098,13 @@ async function plansChanged(value: Contract) {
   if (!active.value || value.id !== view.value?.contractId) return;
   await refreshFacts();
 }
-function openRow(row: DocumentRow, selectedTab = 'details', event?: Event) {
+async function openRow(
+  row: DocumentRow,
+  selectedTab = 'details',
+  event?: Event,
+) {
   if (childOpen.value) return;
+  if (!(await allowLeaveDetails())) return;
   selectionTrigger =
     event?.currentTarget instanceof HTMLElement
       ? event.currentTarget
@@ -1112,6 +1134,7 @@ function selectAdjacent(offset: number) {
 }
 async function back() {
   if (childOpen.value) return;
+  if (!(await allowLeaveDetails())) return;
   if (embedded.value) {
     emit('close');
     return;
@@ -1128,6 +1151,7 @@ async function back() {
   selectionTrigger?.focus();
 }
 async function clear() {
+  if (!(await allowLeaveDetails())) return;
   page.value = 1;
   keyword.value = '';
   status.value = undefined;
@@ -1141,7 +1165,7 @@ async function command(
   payload: Record<string, unknown> = {},
   operationKey = key(action),
 ) {
-  if (!view.value) return;
+  if (!view.value || saving.value) return false;
   saving.value = true;
   pageError.value = '';
   try {
@@ -1160,9 +1184,16 @@ async function command(
         : await procurementOrderAction(view.value.contractId, view.value.id, {
             ...args,
             action,
-            payload: orderDetailsPayload(payload),
+            payload:
+              action === 'SAVE_EXTRAS' ? payload : orderDetailsPayload(payload),
           });
     view.value = value;
+    if (['CONFIRM_DETAILS', 'SAVE_DETAILS', 'SAVE_EXTRAS'].includes(action)) {
+      await nextTick();
+      orderDetails.value?.markSaved(action);
+      detailsDirty.value = orderDetails.value?.isDirty() ?? false;
+      if (payload.additionalLines !== undefined) await loadFinanceSummary();
+    }
     if (action === 'EXPORT_CONTRACT') {
       const file =
         value.exports.find((entry) => !previousExports.has(entry.id)) ??
@@ -1181,16 +1212,80 @@ async function command(
     else if (action === 'CONFIRM_DETAILS')
       successMessage = '下单资料已确认，可在右上角「导出」生成采购单';
     else if (action === 'SAVE_DETAILS') successMessage = '草稿已保存';
+    else if (action === 'SAVE_EXTRAS') successMessage = '采购单附加资料已保存';
     else if (action === 'EXPORT_CONTRACT')
       successMessage = '采购单已导出，导出记录在「附件」页签';
     message.success(successMessage);
     void loadList();
+    return true;
   } catch (error) {
     pageError.value = errorText(error);
+    return false;
   } finally {
     saving.value = false;
   }
 }
+let leaveDetailsPrompt: Promise<boolean> | undefined;
+function allowLeaveDetails(): Promise<boolean> {
+  if (saving.value || contactEditorBusy.value) {
+    message.warning('正在保存或上传资料，请完成后再离开');
+    return Promise.resolve(false);
+  }
+  if (!detailsDirty.value) return Promise.resolve(true);
+  if (leaveDetailsPrompt) return leaveDetailsPrompt;
+  leaveDetailsPrompt = new Promise<boolean>((resolve) => {
+    const dialog = Modal.confirm({
+      title: '采购资料尚未保存',
+      content: () =>
+        h('div', [
+          h('p', '保存后再离开，新增的明细、图片和说明才会保留。'),
+          h(
+            Button,
+            {
+              danger: true,
+              type: 'link',
+              onClick: () => {
+                detailsDirty.value = false;
+                dialog.destroy();
+                resolve(true);
+              },
+            },
+            () => '放弃本次修改并离开',
+          ),
+        ]),
+      okText: '保存并继续',
+      cancelText: '继续编辑',
+      onOk: async () => {
+        const pending = orderDetails.value?.pendingSave();
+        if (!pending || !(await command(pending.action, pending.payload))) {
+          throw new Error('采购资料未保存，请重试或继续编辑');
+        }
+        resolve(true);
+      },
+      onCancel: () => resolve(false),
+    });
+  }).finally(() => {
+    leaveDetailsPrompt = undefined;
+  });
+  return leaveDetailsPrompt;
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (!detailsDirty.value && !saving.value && !contactEditorBusy.value) return;
+  event.preventDefault();
+  event.returnValue = '';
+}
+onMounted(() => window.addEventListener('beforeunload', beforeUnload));
+onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload));
+onBeforeRouteLeave(() => allowLeaveDetails());
+onBeforeRouteUpdate((to, from) => {
+  if (
+    to.query.documentId !== from.query.documentId ||
+    to.query.standaloneId !== from.query.standaloneId ||
+    to.query.contractId !== from.query.contractId
+  )
+    return allowLeaveDetails();
+  return true;
+});
 function action(name: string) {
   if (['REVISE_DETAILS', 'WITHDRAW_DETAILS'].includes(name)) {
     reasonDefinition.value = {
@@ -2028,10 +2123,13 @@ watch(financeType, (value, previous) => {
               </TabPane>
               <TabPane key="details" tab="详情">
                 <OrderDetails
+                  ref="orderDetails"
                   :view="view"
                   :saving="saving"
                   @busy="contactEditorBusy = $event"
+                  @dirty="detailsDirty = $event"
                   @save="(payload) => command('SAVE_DETAILS', payload)"
+                  @save-extras="(payload) => command('SAVE_EXTRAS', payload)"
                   @confirm="(payload) => command('CONFIRM_DETAILS', payload)"
                   @action="action"
                 />
