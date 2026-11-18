@@ -44,6 +44,7 @@ import {
   quantityText,
 } from '../activity-model';
 import { productAttributeDetails, productProcessText } from '../attributes';
+import { productDimensionsText, productPatternText } from '../manufacturing';
 import { missingProductFields } from '../model';
 import ProductColorSummary from './ProductColorSummary.vue';
 import ProductFiles from './ProductFiles.vue';
@@ -331,8 +332,12 @@ function refresh() {
             </Descriptions.Item>
             <Descriptions.Item label="材质 / 尺寸">
               {{
-                [product.material, product.size].filter(Boolean).join(' / ') ||
-                '—'
+                [
+                  product.material,
+                  productDimensionsText(product) || product.size,
+                ]
+                  .filter(Boolean)
+                  .join(' / ') || '—'
               }}
             </Descriptions.Item>
             <Descriptions.Item label="形状">
@@ -343,6 +348,9 @@ function refresh() {
             </Descriptions.Item>
             <Descriptions.Item label="颜色 / 制造结构" :span="2">
               <ProductColorSummary :value="product" construction />
+            </Descriptions.Item>
+            <Descriptions.Item label="雕刻 / 图案版本" :span="2">
+              {{ productPatternText(product) }}
             </Descriptions.Item>
             <Descriptions.Item label="可用状态">
               <Tag :color="product.selectable ? 'green' : 'orange'">
@@ -383,7 +391,7 @@ function refresh() {
                 {{ product.material || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="尺寸">
-                {{ product.size || '—' }}
+                {{ productDimensionsText(product) || product.size || '—' }}
               </Descriptions.Item>
               <Descriptions.Item label="颜色原文">
                 {{ product.color || '—' }}
@@ -394,7 +402,9 @@ function refresh() {
               <Descriptions.Item
                 v-for="item in productAttributeDetails(product).filter(
                   (entry) =>
-                    !['单色', '正面颜色', '反面颜色'].includes(entry.label),
+                    !['单色', '正面颜色', '反面颜色', '成品长宽厚'].includes(
+                      entry.label,
+                    ),
                 )"
                 :key="item.label"
                 :label="item.label"

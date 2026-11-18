@@ -9,7 +9,7 @@ import { inject, provide, reactive } from 'vue';
 
 import { dimensionToDisplay } from '../shared/dimensions';
 import { laminationDefects } from '../shared/lamination-report';
-import { normalizeForStage, toNumber } from '../stage-stock/model';
+import { applyShrinkThickness, applyTaskTarget, normalizeForStage, toNumber } from '../stage-stock/model';
 
 export type Step = 'confirm' | 'done' | 'home' | 'pick' | 'piece' | 'report';
 
@@ -53,7 +53,7 @@ export function createJob() {
     pieces: [] as PieceLine[],
     process: undefined as Api.Process | undefined,
     /** 不按排单开工时，这批是做哪张工厂订单（明细编号），记进订单的工序进度。 */
-    productionItem: undefined as undefined | { id: number; label: string; orderNo: string },
+    productionItem: undefined as undefined | { allowPlainEmboss?: boolean; id: number; label: string; layerRule?: string; orderNo: string; targetThickness?: null | number | string },
     /** 发泡按配方领料时选的配方和锅数，开单时一起提交。 */
     recipe: undefined as undefined | { batches: number; code: string },
     result: { action: 'issue' as 'issue' | 'report' | 'supplement', amount: 0, good: 0, unit: '' },
@@ -84,6 +84,37 @@ export function createJob() {
 }
 
 export type Job = ReturnType<typeof createJob>;
+
+/** 在制单详情优先于任务预览；缺省 false，不能用旧预览覆盖服务端的拒绝。 */
+export function jobAllowsPlainEmboss(job: Job) {
+  if (job.process?.code !== 'EMBOSS') return false;
+  if (job.order) return job.order.allowPlainEmboss === true;
+  if (job.prepare) return job.prepare.allowPlainEmboss === true;
+  return job.productionItem?.allowPlainEmboss === true;
+}
+
+/** 每次按领料重新生成产出后套用同一份工序目标，避免余量被当成成品厚度。 */
+export function applyJobTarget(job: Job) {
+  const process = job.process?.code ?? '';
+  const planned = job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.order?.outputAttrs;
+  const target = planned ?? job.prepare?.targetAttrs;
+  let rule: null | string | undefined = job.productionItem?.layerRule;
+  let thickness = job.productionItem?.targetThickness;
+  if (job.order) {
+    rule = job.order.layerRule;
+    thickness = job.order.outputAttrs?.thickness;
+  } else if (job.prepare) {
+    rule = job.prepare.layerRule;
+    thickness = job.prepare.outputAttrs?.thickness ?? job.prepare.targetAttrs?.thickness;
+  }
+  if (target) {
+    if (process === 'SLICE' || process === 'CUT') applyTaskTarget(process, target, job.inputs, job.outputs);
+    else for (const output of job.outputs) output.attrs = { ...output.attrs, ...Object.fromEntries(Object.entries(target)
+      .filter(([field, value]) => (process !== 'LAMINATE' || field !== 'thickness') && value !== null && value !== undefined && value !== ''
+        && (planned || !['length', 'width'].includes(field) || !toNumber(output.attrs[field as 'length' | 'width'])))) };
+  }
+  applyShrinkThickness(process, job.outputs, rule, thickness);
+}
 
 const KEY: InjectionKey<Job> = Symbol('fdmgongchang-workbench-job');
 

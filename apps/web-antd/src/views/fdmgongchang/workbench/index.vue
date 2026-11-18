@@ -29,7 +29,7 @@ import { businessError } from '../shared/business-error';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { sliceVolume } from '../shared/slice-wage';
 import { useFactory } from '../shared/use-factory';
-import { applyTaskTarget, deriveOutputs, toNumber } from '../stage-stock/model';
+import { deriveOutputs, toNumber } from '../stage-stock/model';
 import WorkshopHome from '../workshop/home.vue';
 import ConfirmStep from './modules/confirm-step.vue';
 import DoneStep from './modules/done-step.vue';
@@ -38,7 +38,7 @@ import PickStep from './modules/pick-step.vue';
 import PieceStep from './modules/piece-step.vue';
 import ReportStep from './modules/report-step.vue';
 import { prefillReportQuantity } from './report-quantity';
-import { createJob, goodTotal, outputPayload, provideJob } from './use-job';
+import { applyJobTarget, createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
  * 工厂部门 · 我的工作台（工人手机端）：活都从派单来——我的任务里看清楚做什么、领什么料，
@@ -285,17 +285,7 @@ function reportNow() {
  * 本工序计划属性用于报工预填；订单成品规格只作需求参考，不能覆盖半成品规格。
  */
 function applyTarget() {
-  const target = job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.prepare?.targetAttrs ?? job.order?.outputAttrs;
-  if (!target) return;
-  if (job.process?.code === 'SLICE' || job.process?.code === 'CUT') {
-    applyTaskTarget(job.process.code, target, job.inputs, job.outputs);
-    return;
-  }
-  for (const out of job.outputs) {
-    out.attrs = { ...out.attrs, ...Object.fromEntries(Object.entries(target).filter(([field, value]) =>
-      (job.process?.code !== 'LAMINATE' || field !== 'thickness')
-      && value !== null && value !== undefined && value !== '')) };
-  }
+  applyJobTarget(job);
 }
 
 /** 复用已领料的工序单，报工只登记本次新增产出。 */

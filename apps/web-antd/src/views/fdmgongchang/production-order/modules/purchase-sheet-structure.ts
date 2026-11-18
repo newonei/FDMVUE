@@ -2,7 +2,7 @@ import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi 
 import type { OrderLineExtra } from '#/api/fdmplatform/procurement';
 import type { ProductStructure } from '#/api/fdmplatform/products';
 
-/** 采购补充资料逐字段覆盖下单快照，未维护字段继续使用该行快照。 */
+/** 正式 SKU 使用合同配置快照；旧单允许采购资料逐字段补齐，克重均可补充。 */
 export function purchaseSheetStructure(
   line: Api.PurchaseSheet['order']['lines'][number],
   extra?: OrderLineExtra,
@@ -10,6 +10,10 @@ export function purchaseSheetStructure(
 ): ProductStructure {
   const value: ProductStructure = { ...line };
   if (!extra) return value;
+  if (line.finishedSignature?.trim()) {
+    if (extra.weight !== undefined) value.weight = extra.weight;
+    return value;
+  }
   if (extra.colorMode) value.colorMode = extra.colorMode;
   for (const [field, labelField, dictionary] of [
     ['frontColor', 'frontColorLabel', options?.colors],

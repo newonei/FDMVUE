@@ -213,6 +213,51 @@ beforeEach(() => {
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
 describe('产品 Excel 导入交互', () => {
+  it('完整配置命中已有 SKU 时允许仅复用批次提交，不把复用统计为新增', async () => {
+    const reused = {
+      ...previewResult(),
+      totalCount: 1,
+      readyCount: 0,
+      skippedCount: 0,
+      errorCount: 0,
+      rows: [
+        {
+          rowNumber: 3,
+          code: 'OLD',
+          name: '完整产品',
+          status: 'REUSE' as const,
+          productId: 'existing',
+          message: '配置相同，复用已有SKU',
+          values: {
+            lengthMm: 1830,
+            widthMm: 610,
+            finishedThicknessMm: 6,
+            colorMode: 'SINGLE' as const,
+            frontColor: 'P',
+            backColor: 'P',
+            textureFront: 'NONE',
+            textureBack: 'NONE',
+            patternMode: 'NONE' as const,
+          },
+        },
+      ],
+    };
+    api.preview.mockResolvedValue(reused);
+    api.submit.mockResolvedValue({
+      ...reused,
+      reusedCount: 1,
+      createdCount: 0,
+      rows: reused.rows.map((row) => ({ ...row, status: 'REUSED' })),
+    });
+    const { button, choose, imported, host } = await mountDialog();
+    await choose(new File(['same-sku'], 'same.xlsx'));
+    button('校验并预览').click();
+    await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
+    expect(button('导入 1 个有效产品').disabled).toBe(false);
+    button('导入 1 个有效产品').click();
+    await vi.waitFor(() => expect(imported).toHaveBeenCalledOnce());
+    expect(host.textContent).toContain('新增 0 个产品，复用 1 个 SKU');
+  });
   it('校验当前文件并保留原始 Excel 行号，问题筛选不改变提交文件', async () => {
     const { host, button, choose, imported } = await mountDialog();
     const file = new File(['xlsx'], 'products.xlsx');

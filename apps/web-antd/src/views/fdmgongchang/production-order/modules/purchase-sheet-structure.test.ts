@@ -13,6 +13,13 @@ const line: Api.PurchaseSheet['order']['lines'][number] = {
 const options = { colors: [{ label: '紫色', value: 'ZI' }, { label: '蓝色', value: 'LAN' }], textures: [{ label: '波浪纹', value: 'WAVE' }], materials: [], patterns: [] };
 
 describe('factory purchase requirements', () => {
+  it('keeps signed contract identity and laser revision frozen while accepting purchasing weight updates', () => {
+    const signed = { ...line, finishedSignature: 'SIGNED', lengthMm: 1830, widthMm: 610, finishedThicknessMm: 6, patternMode: 'LASER' as const, patternCode: 'FLOWER', patternVersion: 'V3' };
+    expect(purchaseSheetStructure(signed, { colorMode: 'DUAL', frontColor: 'ZI', backColor: 'LAN', textureFront: 'WAVE', weight: '' }, options)).toMatchObject({
+      colorMode: 'SINGLE', frontColor: 'OLD', backColor: 'OLD', textureFront: 'OLD-TEXTURE', weight: '', lengthMm: 1830, patternCode: 'FLOWER', patternVersion: 'V3',
+    });
+    expect(signed.weight).toBe('800g±50g');
+  });
   it('uses per-line purchasing colors, textures and weight ahead of snapshot values without changing dimensions or structure', () => {
     expect(purchaseSheetStructure(line, { colorMode: 'DUAL', frontColor: 'ZI', backColor: 'LAN', textureFront: '', textureBack: 'WAVE', weight: '900g±100g' }, options)).toMatchObject({
       colorMode: 'DUAL', frontColor: 'ZI', frontColorLabel: '紫色', backColor: 'LAN', backColorLabel: '蓝色',

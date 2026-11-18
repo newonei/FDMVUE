@@ -366,6 +366,51 @@ describe('order drawer', () => {
     );
   });
 
+  it.each(['LAMINATE', 'EMBOSS'])('defaults frozen new-rule %s to 6 mm and preserves 190×65 blanks after quantities change', async (process) => {
+    const sources = process === 'LAMINATE' ? [stock(1, 'SHEET', 'PU', 'F', 100), stock(2, 'SHEET', 'GY', 'B', 100)] : [stock(1, 'LAMINATED', 'PU', 'S', 100)];
+    mocks.page.mockResolvedValue({ list: sources.map((row) => ({ ...row, item: { ...row.item, length: 190, width: 65, thickness: process === 'LAMINATE' ? 0.32 : 0.62 } })), total: sources.length });
+    mocks.productionOrders.mockResolvedValue([{ id: 9, orderNo: 'NEW-LAYER', items: [{ id: 90, productName: '新规则瑜伽垫', productId: 'MAT', quantity: 100, completedQuantity: 0,
+      processes: [process], targetConfirmedAt: '2026-11-18', targetLayerRule: 'COLOR_DERIVED_V1', targetThickness: 0.6,
+      targetColorMode: process === 'LAMINATE' ? 'DUAL' : 'SINGLE', targetConstructionType: process === 'LAMINATE' ? 'DOUBLE_LAYER' : 'SINGLE_LAYER' }] }]);
+    state.open = true; await flush();
+    document.querySelector<HTMLInputElement>(`input[value="${process}"]`)!.click(); await flush();
+    const selector = document.querySelector('#order-production-item')!.closest('.ant-select')!.querySelector('.ant-select-selector')!;
+    selector.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await flush();
+    [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((element) => element.getAttribute('title')?.includes('NEW-LAYER'))!.click(); await flush();
+    typeInto('order-take-1', '10');
+    if (process === 'LAMINATE') typeInto('order-take-2', '10');
+    await flush();
+    expect(document.body.textContent).toContain('6');
+    typeInto('order-take-1', '12'); await flush();
+    const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    if (process === 'LAMINATE') {
+      typeInto(`laminate-${key}-good-FRONT`, '10'); typeInto(`laminate-${key}-good-BACK`, '10');
+    } else typeInto(`out-good-${key}`, '10');
+    await flush();
+    await submitCreate('提交领料并入库'); await flush();
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ productionOrderItemId: 90, process,
+      outputs: [expect.objectContaining({ attrs: expect.objectContaining({ length: 190, width: 65, thickness: 0.6 }) })] }));
+  });
+
+  it.each([true, false])('allows plain heating reports only when detail flag is %s', async (allowed) => {
+    mocks.getOrder.mockResolvedValue({ id: 5, orderNo: 'HEAT-5', process: 'EMBOSS', sourceStage: 'SHEET', outputStage: 'EMBOSSED', status: 'IN_PROGRESS', operatorUserId: 7,
+      allowPlainEmboss: allowed, layerRule: allowed ? 'COLOR_DERIVED_V1' : null, outputAttrs: allowed ? { thickness: 0.6 } : null,
+      inputs: [{ id: 51, stockId: 1, itemCode: 'SINGLE', batchNo: 'B', quantity: 10, stage: 'SHEET', item: { material: 'TPE', color: 'PU', length: 190, width: 65, thickness: 0.62 } }],
+      goodQuantity: 0, defectQuantity: 0, inputQuantity: 10, reportCount: 0 });
+    state.mode = 'report'; state.orderId = 5; await nextTick(); state.open = true; await flush();
+    const key = document.querySelector('[id^="out-batch-"]')!.id.replace('out-batch-', '');
+    typeInto(`out-good-${key}`, '10'); await flush();
+    clickButton('确认报完并关单'); await flush();
+    expect(mocks.report).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    const reportedAttrs = mocks.report.mock.calls[0]?.[0]?.outputs?.[0]?.attrs;
+    expect(reportedAttrs?.length).toBe(allowed ? 190 : undefined);
+    expect(reportedAttrs?.width).toBe(allowed ? 65 : undefined);
+    expect(reportedAttrs?.thickness).toBe(allowed ? 0.6 : undefined);
+    expect(reportedAttrs?.textureFront).toBe(allowed ? null : undefined);
+    expect(reportedAttrs?.textureBack).toBe(allowed ? null : undefined);
+    expect(document.body.textContent?.includes('请选择正面或反面纹路')).toBe(!allowed);
+  });
+
   it('can issue only, leaving the order in progress without outputs', async () => {
     state.open = true;
     await flush();

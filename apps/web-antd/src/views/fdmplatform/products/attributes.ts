@@ -1,5 +1,7 @@
 import type { ProductAttributes } from '#/api/fdmplatform/products';
 
+import { productDimensionsText, productPatternText } from './manufacturing';
+
 /** 产品档案与工厂 DTO 共用，仅依赖可选属性，不要求价格、权限等字段。 */
 export type ProductAttributeSource = ProductAttributes & {
   color?: null | string;
@@ -22,6 +24,14 @@ export function productStageText(product: ProductAttributeSource) {
 
 export function productAttributeDetails(product: ProductAttributeSource) {
   return [
+    { label: '成品长宽厚', value: productDimensionsText(product) },
+    {
+      label: '雕刻 / 图案版本',
+      value:
+        product.patternMode || product.patternCode || product.patternVersion
+          ? productPatternText(product)
+          : '',
+    },
     {
       label: '生产分类',
       value: productStageText(product),

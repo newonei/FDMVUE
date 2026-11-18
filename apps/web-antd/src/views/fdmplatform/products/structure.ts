@@ -1,8 +1,16 @@
 import type { ProductStructure } from '#/api/fdmplatform/products';
 
+import { productDimensionsText, productPatternText } from './manufacturing';
+
 const fields = [
   'colorMode',
   'constructionType',
+  'layerRule',
+  'patternMode',
+  'patternCode',
+  'patternVersion',
+  'baseSkuKey',
+  'finishedSignature',
   'productStage',
   'productStageLabel',
   'colorCode',
@@ -39,13 +47,20 @@ export function productStructure(
       ]),
     ),
     ...Object.fromEntries(
-      ['finishedThicknessMm', 'frontThicknessMm', 'backThicknessMm'].map(
-        (field) => [
-          field,
-          typeof record[field] === 'number' ? record[field] : undefined,
-        ],
-      ),
+      [
+        'lengthMm',
+        'widthMm',
+        'finishedThicknessMm',
+        'frontThicknessMm',
+        'backThicknessMm',
+      ].map((field) => [
+        field,
+        typeof record[field] === 'number' ? record[field] : undefined,
+      ]),
     ),
+    ...(typeof record.configurationReady === 'boolean'
+      ? { configurationReady: record.configurationReady }
+      : {}),
   };
 }
 
@@ -63,7 +78,11 @@ export function structureValue(
 export function structureDetails(value: ProductStructure) {
   return [
     { label: '材质', value: structureValue(value, 'material') },
-    { label: '尺寸', value: structureValue(value, 'size') },
+    {
+      label: '尺寸',
+      value: productDimensionsText(value) || structureValue(value, 'size'),
+    },
+    { label: '雕刻 / 图案版本', value: productPatternText(value) },
     {
       label: '生产分类',
       value: structureValue(value, 'productStage', 'productStageLabel'),

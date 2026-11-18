@@ -30,6 +30,15 @@ export namespace FdmgongchangProductionOrderApi {
 
   /** 产品中心的 SKU。 */
   export interface Product {
+    lengthMm?: null | number;
+    widthMm?: null | number;
+    patternMode?: 'LASER' | 'NONE' | 'UNKNOWN' | null;
+    patternCode?: null | string;
+    patternCodeLabel?: null | string;
+    patternVersion?: null | string;
+    baseSkuKey?: null | string;
+    finishedSignature?: null | string;
+    configurationReady?: boolean;
     colorMode?: null | ProductColorMode;
     constructionType?: null | ProductConstructionType;
     finishedThicknessMm?: null | number;
@@ -115,6 +124,10 @@ export namespace FdmgongchangProductionOrderApi {
     targetFoldingType?: null | string;
     targetConfirmedBy?: null | string;
     targetConfirmedAt?: null | string;
+    /** 采购来源的新规则；仅供未确认参数预填。 */
+    sourceLayerRule?: null | string;
+    /** 工厂确认时冻结的规则；确认后不随采购来源切换。 */
+    targetLayerRule?: null | string;
     /** 没确认时从规格文本解析出的建议值。 */
     targetSuggested?: FdmgongchangSupplyMatchApi.TargetReq | null;
     size?: null | string;

@@ -2,9 +2,10 @@ import { createApp, defineComponent, h, nextTick } from 'vue';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { deriveOutputs } from '../stage-stock/model';
 import ReportStep from './modules/report-step.vue';
 import { changeReportDefect, changeReportGood, prefillReportQuantity } from './report-quantity';
-import { createJob, outputPayload, provideJob } from './use-job';
+import { applyJobTarget, createJob, jobAllowsPlainEmboss, outputPayload, provideJob } from './use-job';
 
 vi.mock('#/components/upload/image-upload.vue', () => ({ default: { render: () => null } }));
 
@@ -20,6 +21,46 @@ function jobFor(process = 'SLICE') {
 describe('planned workbench report quantities', () => {
   let unmount: (() => void) | undefined;
   afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; });
+
+  it('uses frozen rule targets for laminate shrinkage while preserving blanks and legacy layer sums', () => {
+    const job = jobFor('LAMINATE');
+    job.process!.outputStage = 'LAMINATED';
+    job.inputs = ['PU', 'GY'].map((color, i) => ({ quantity: 10, side: i === 0 ? 'FRONT' : 'BACK', stock: { id: i + 1, itemCode: `M${i}`, batchNo: `B${i}`, stage: 'CUT', location: 'A', quantity: 10,
+      item: { material: 'TPE', color, length: 190, width: 65, thickness: 0.32 } } }));
+    job.prepare = { task: job.task!, aux: [], picks: [], layerRule: 'COLOR_DERIVED_V1', targetAttrs: { length: 183, width: 61, thickness: 0.6 } };
+    job.outputs = deriveOutputs('LAMINATE', job.inputs);
+    applyJobTarget(job);
+    expect(job.outputs[0]!.attrs).toMatchObject({ length: 190, width: 65, thickness: 0.6 });
+    job.prepare.outputAttrs = { length: 188, width: 64, thickness: 0.6 };
+    job.outputs = deriveOutputs('LAMINATE', job.inputs); applyJobTarget(job);
+    expect(job.outputs[0]!.attrs).toMatchObject({ length: 188, width: 64, thickness: 0.6 });
+    job.prepare.layerRule = null;
+    job.outputs = deriveOutputs('LAMINATE', job.inputs); applyJobTarget(job);
+    expect(job.outputs[0]!.attrs.thickness).toBe(0.64);
+    job.prepare = undefined; job.task = undefined;
+    job.productionItem = { id: 3, label: '新单', orderNo: 'PO3', layerRule: 'COLOR_DERIVED_V1', targetThickness: 0.6 };
+    job.outputs = deriveOutputs('LAMINATE', job.inputs); applyJobTarget(job);
+    expect(job.outputs[0]!.attrs).toMatchObject({ length: 190, width: 65, thickness: 0.6 });
+  });
+
+  it.each(['prepare', 'order', 'legacy', 'order-denies'] as const)('only accepts plain EMBOSS using the trusted %s context', async (context) => {
+    const job = jobFor('EMBOSS');
+    job.process!.outputStage = 'EMBOSSED';
+    job.outputs[0]!.attrs = { material: 'TPE', frontColor: 'PU', backColor: 'PU', length: 190, width: 65, thickness: 0.6 };
+    job.outputs[0]!.goodQuantity = 10;
+    job.prepare = { task: job.task!, aux: [], picks: [], allowPlainEmboss: context !== 'legacy', layerRule: 'COLOR_DERIVED_V1', outputAttrs: { thickness: 0.6 } };
+    if (context === 'order' || context === 'order-denies') job.order = { allowPlainEmboss: context === 'order', layerRule: context === 'order' ? 'COLOR_DERIVED_V1' : null } as typeof job.order;
+    const next = vi.fn();
+    const host = document.createElement('div'); document.body.append(host);
+    const app = createApp(defineComponent({ setup() { provideJob(job); return () => h(ReportStep, { onNext: next }); } }));
+    app.mount(host); unmount = () => app.unmount(); await nextTick();
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('下一步：核对本次报工'))!.click();
+    await nextTick();
+    const allowed = context === 'prepare' || context === 'order';
+    expect(jobAllowsPlainEmboss(job)).toBe(allowed);
+    expect(next).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    expect(document.body.textContent?.includes('请选择正面或反面纹路')).toBe(!allowed);
+  });
 
   it.each(['MIX', 'SLICE', 'CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD', 'PACK'])('prefills %s and deducts defects without accumulating deductions', (process) => {
     const job = jobFor(process);

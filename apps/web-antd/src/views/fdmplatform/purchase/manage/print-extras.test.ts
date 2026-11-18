@@ -11,9 +11,56 @@ import {
   printExtrasImageIds,
   printExtrasPayload,
   productionExtrasFrom,
+  productionIdentityLocked,
 } from './print-extras';
 
 describe('采购单附加资料', () => {
+  it('正式 SKU 生产身份来自合同快照，采购只可补克重且批量明确报告跳过数量', () => {
+    const snapshot = {
+      finishedSignature: 'SKU-v1',
+      colorMode: 'DUAL',
+      frontColor: 'RED',
+      backColor: 'BLUE',
+      textureFront: 'NONE',
+      textureBack: 'WAVE',
+      weight: '800g',
+    };
+    expect(productionIdentityLocked(snapshot)).toBe(true);
+    expect(productionIdentityLocked({ finishedSignature: ' ' })).toBe(false);
+    const signed = productionExtrasFrom(
+      { frontColor: 'OLD', textureFront: 'OLD', weight: '900g' },
+      snapshot,
+    );
+    expect(signed).toMatchObject({
+      frontColor: 'RED',
+      textureFront: 'NONE',
+      weight: '900g',
+    });
+    const rows = {
+      signed,
+      legacy: { frontColor: 'RED', textureFront: 'NONE', weight: '800g' },
+    };
+    expect(
+      applyProductionExtras(
+        rows,
+        ['signed', 'legacy'],
+        { frontColor: 'BLUE', textureFront: 'WAVE', weight: '1000g' },
+        ['frontColor', 'textureFront', 'weight'],
+        false,
+        ['signed'],
+      ),
+    ).toEqual({ updatedRows: 2, protectedRows: 1, skippedFields: 2 });
+    expect(rows.signed).toMatchObject({
+      frontColor: 'RED',
+      textureFront: 'NONE',
+      weight: '1000g',
+    });
+    expect(rows.legacy).toMatchObject({
+      frontColor: 'BLUE',
+      textureFront: 'WAVE',
+      weight: '1000g',
+    });
+  });
   it('订单备注兼容旧单、独立于内部备注，并在提交和历史复制时保留清空意图', () => {
     const details = {
       clauseIds: [],

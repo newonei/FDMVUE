@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   orders: vi.fn(),
   copyImages: vi.fn(),
   confirm: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
   uploadProcurementImage: mocks.upload,
@@ -180,7 +182,7 @@ vi.mock('ant-design-vue', () => {
             ),
         }),
     }),
-    message: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+    message: { success: mocks.success, warning: mocks.warning, error: vi.fn() },
   };
 });
 
@@ -311,6 +313,88 @@ function thumbs(host: HTMLElement, column = 'card') {
 }
 
 describe('actual purchase print extras editor', () => {
+  it('locks signed SKU colors and textures while keeping weight, supplier images and legacy batch updates editable', async () => {
+    const { host, view, extras } = await mount();
+    view.value = {
+      ...view.value,
+      order: {
+        ...view.value.order,
+        lines: [
+          {
+            id: 'product-1',
+            specificationSnapshot: {
+              skuCode: 'SIGNED',
+              finishedSignature: 'SKU-v1',
+              colorMode: 'DUAL',
+              frontColor: 'RED',
+              backColor: 'BLUE',
+              textureFront: 'NONE',
+              textureBack: 'WAVE',
+              weight: '800g',
+            },
+          },
+          {
+            id: 'product-2',
+            specificationSnapshot: {
+              skuCode: 'LEGACY',
+              frontColor: 'RED',
+              weight: '800g',
+            },
+          },
+        ],
+      },
+      details: {
+        ...view.value.details,
+        version: 2,
+        lineExtras: { 'product-1': { frontColor: 'OLD' } },
+      },
+    };
+    await settle();
+    for (const field of [
+      'colorMode',
+      'frontColor',
+      'backColor',
+      'textureFront',
+      'textureBack',
+    ])
+      expect(
+        host.querySelector<HTMLInputElement>(`input[id="${field}-product-1"]`)!
+          .disabled,
+      ).toBe(true);
+    expect(
+      host.querySelector<HTMLInputElement>('input[id="weight-product-1"]')!
+        .disabled,
+    ).toBe(false);
+    expect(
+      host.querySelector<HTMLButtonElement>(
+        '[data-row="product-1"] [data-key="colorImage"] button',
+      )!.disabled,
+    ).toBe(false);
+    expect(host.textContent).toContain('请回到合同明细修改配置');
+    expect(extras.value!.payload().lineExtras['product-1']!.frontColor).toBe(
+      'RED',
+    );
+    host.querySelector<HTMLInputElement>('.batch-toolbar input')!.click();
+    await settle();
+    await click(host, '批量设置生产属性');
+    await fill(host, 'input[aria-label="批量正面颜色"]', 'BLUE');
+    await fill(host, 'input[aria-label="批量正面纹路"]', 'WAVE');
+    await fill(host, 'input[aria-label="批量产品克重"]', '1000g');
+    await click(host, '应用到所选明细');
+    expect(extras.value!.payload().lineExtras['product-1']).toMatchObject({
+      frontColor: 'RED',
+      textureFront: 'NONE',
+      weight: '1000g',
+    });
+    expect(extras.value!.payload().lineExtras['product-2']).toMatchObject({
+      frontColor: 'BLUE',
+      textureFront: 'WAVE',
+      weight: '1000g',
+    });
+    expect(mocks.success).toHaveBeenLastCalledWith(
+      expect.stringContaining('1 条正式 SKU 的 2 项颜色或纹路要求已跳过'),
+    );
+  });
   it('places order remarks after the four groups and saves edits and clearing through the existing payload', async () => {
     const { host, view, extras, saved, dirty } = await mount();
     const groups = [...host.querySelectorAll('.extras-collapse > section')];

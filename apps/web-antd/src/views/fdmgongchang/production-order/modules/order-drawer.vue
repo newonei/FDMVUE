@@ -31,7 +31,7 @@ import { factoryToday } from '../../shared/factory-date';
 import { dateText, num, ORDER_STATUS, routeProblem, specText, timeText } from '../shared';
 import AuxPanel from './aux-panel.vue';
 import DeliveryModal from './delivery-modal.vue';
-import { productionRouteProblems, savedProductionConfigProblems } from './item-production-config';
+import { productionConfigDraft, productionRouteProblems, savedProductionConfigProblems } from './item-production-config';
 import ItemProductionConfigModal from './item-production-config-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
@@ -162,7 +162,7 @@ function draftProblem(item: Api.Item) {
   const processes = routeOptions.value?.processes ?? [];
   const draft = drafts.value[item.id];
   if (!draft || processes.length === 0) return '请选择要走的工序';
-  return routeProblem(draft.steps, processes) || productionRouteProblems(item.targetConstructionType ?? 'UNKNOWN', draft.steps);
+  return routeProblem(draft.steps, processes) || productionRouteProblems(productionConfigDraft(item), draft.steps);
 }
 
 /** 开过工序单的产品不能再改工艺。 */

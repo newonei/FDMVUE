@@ -5,11 +5,14 @@ import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyShrinkThickness,
   applySliceYield,
   applyTaskTarget,
   attrSummary,
   deriveOutputs,
   EDITABLE_FIELDS,
+  frozenLayerRule,
+  frozenPlainEmboss,
   groupStages,
   guessPackedAttrs,
   isLayered,
@@ -308,6 +311,37 @@ describe('batches and labels', () => {
 });
 
 describe('validateOutputs', () => {
+  it('only permits plain heating for an explicit EMBOSS allowance and keeps all other output checks', () => {
+    const [out] = deriveOutputs('EMBOSS', [line(1, 'CUT', { color: 'PU', material: 'TPE', length: 190, width: 65, thickness: 0.62 }, 'B', 1)]);
+    out!.goodQuantity = 1;
+    expect(validateOutputs('EMBOSS', 'EMBOSSED', [out!], { allowPlainEmboss: true })).toEqual([]);
+    expect(validateOutputs('EMBOSS', 'EMBOSSED', [out!])).toContain('第 1 行请选择正面或反面纹路。');
+    expect(validateOutputs('PACK', 'EMBOSSED', [out!], { allowPlainEmboss: true })).toContain('第 1 行请选择正面或反面纹路。');
+    out!.attrs.width = null;
+    expect(validateOutputs('EMBOSS', 'EMBOSSED', [out!], { allowPlainEmboss: true })).toContain('第 1 行请填完整的长、宽、厚。');
+  });
+  it('uses only confirmed frozen target rules, never an unconfirmed source marker', () => {
+    const item = { targetConfirmedAt: '2026-11-18', targetLayerRule: 'COLOR_DERIVED_V1', targetColorMode: 'SINGLE', targetConstructionType: 'SINGLE_LAYER' };
+    expect(frozenPlainEmboss(item)).toBe(true);
+    expect(frozenLayerRule(item)).toBe('COLOR_DERIVED_V1');
+    expect(frozenPlainEmboss({ ...item, targetConfirmedAt: undefined })).toBe(false);
+    expect(frozenPlainEmboss({ ...item, targetLayerRule: null })).toBe(false);
+    expect(frozenPlainEmboss({ ...item, targetColorMode: 'DUAL' })).toBe(false);
+    expect(frozenPlainEmboss({ ...item, targetConstructionType: 'DOUBLE_LAYER' })).toBe(false);
+  });
+  it('shrinks 3.2+3.2 or 6.2 to 6 mm only for a frozen rule and preserves actual blank dimensions', () => {
+    const inputs = [line(1, 'CUT', { color: 'PU', material: 'TPE', length: 190, width: 65, thickness: 0.32 }, 'F', 10),
+      line(2, 'CUT', { color: 'GY', material: 'TPE', length: 190, width: 65, thickness: 0.32 }, 'B', 10)];
+    const outputs = deriveOutputs('LAMINATE', inputs);
+    expect(outputs[0]!.attrs.thickness).toBe(0.64);
+    applyShrinkThickness('LAMINATE', outputs, null, 0.6);
+    expect(outputs[0]!.attrs.thickness).toBe(0.64);
+    applyShrinkThickness('LAMINATE', outputs, 'COLOR_DERIVED_V1', 0.6);
+    expect(outputs[0]!.attrs).toMatchObject({ length: 190, width: 65, thickness: 0.6 });
+    const single = deriveOutputs('EMBOSS', [line(1, 'CUT', { color: 'PU', material: 'TPE', length: 190, width: 65, thickness: 0.62 }, 'S', 10)]);
+    applyShrinkThickness('EMBOSS', single, 'COLOR_DERIVED_V1', 0.6);
+    expect(single[0]!.attrs).toMatchObject({ length: 190, width: 65, thickness: 0.6 });
+  });
   it('asks for missing quantities, sizes, colours and textures', () => {
     const [out] = deriveOutputs('EMBOSS', [
       line(

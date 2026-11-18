@@ -55,6 +55,8 @@ export interface ContractItem extends BusinessRecord, ProductAttributes {
   skuId: string;
   skuCode?: string;
   skuName: string;
+  /** 用于生产配置判重的真实产品名称，与销售展示名 skuName 独立。 */
+  configurationName?: null | string;
   productVersion?: null | number;
   productImageUrl?: string;
   specVersion: string;

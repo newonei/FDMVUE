@@ -7,7 +7,7 @@ import { getWorkbenchProductionOrders } from '#/api/fdmgongchang/workbench';
 import ImageUpload from '#/components/upload/image-upload.vue';
 
 import { finalProcess } from '../../production-order/shared';
-import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
+import { attrSummary, formatQty, frozenLayerRule, frozenPlainEmboss, makeLabels, toNumber } from '../../stage-stock/model';
 import { stageOf, useJob } from '../use-job';
 import IssueShortages from './issue-shortages.vue';
 import StepHeader from './step-header.vue';
@@ -31,6 +31,9 @@ const orderChoices = computed(() =>
     o.items
       .filter((i) => Number(i.quantity) > Number(i.completedQuantity) && finalProcess(i) === job.process?.code)
       .map((i) => ({
+        allowPlainEmboss: frozenPlainEmboss(i),
+        layerRule: frozenLayerRule(i),
+        targetThickness: i.targetThickness,
         id: i.id,
         label: i.productName,
         left: `还差 ${formatQty(Number(i.quantity) - Number(i.completedQuantity))} ${i.unit ?? ''}`,
@@ -48,8 +51,8 @@ onMounted(async () => {
     openOrders.value = [];
   }
 });
-function choose(c?: { id: number; label: string; orderNo: string }) {
-  job.productionItem = c ? { id: c.id, label: c.label, orderNo: c.orderNo } : undefined;
+function choose(c?: { allowPlainEmboss?: boolean; id: number; label: string; layerRule?: string; orderNo: string; targetThickness?: null | number | string }) {
+  job.productionItem = c ? { allowPlainEmboss: c.allowPlainEmboss, id: c.id, label: c.label, layerRule: c.layerRule, orderNo: c.orderNo, targetThickness: c.targetThickness } : undefined;
 }
 /** 已完工的单补登领料：要写原因。 */
 const late = computed(() => job.supplement && job.order?.status === 'COMPLETED');

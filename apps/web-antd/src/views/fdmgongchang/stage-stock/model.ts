@@ -527,10 +527,36 @@ export function attrSummary(
 }
 
 /** 报完工前的本地校验，只覆盖最常见的漏填；字典和主数据的校验以后端为准。 */
+/** 仅使用已确认且冻结在目标上的规则，不能从后来变化的来源快照升级旧单。 */
+export function frozenLayerRule(item: null | undefined | {
+  targetConfirmedAt?: unknown;
+  targetLayerRule?: null | string;
+}) {
+  return item?.targetConfirmedAt && item.targetLayerRule === 'COLOR_DERIVED_V1' ? item.targetLayerRule : undefined;
+}
+
+export function frozenPlainEmboss(item: null | undefined | {
+  targetColorMode?: null | string;
+  targetConfirmedAt?: unknown;
+  targetConstructionType?: null | string;
+  targetLayerRule?: null | string;
+}) {
+  return frozenLayerRule(item) === 'COLOR_DERIVED_V1'
+    && item?.targetColorMode === 'SINGLE' && item.targetConstructionType === 'SINGLE_LAYER';
+}
+
+/** 仅冻结新规则的缩厚工序采用成品目标，历史贴合继续按两片实物相加。 */
+export function applyShrinkThickness(process: string, outputs: OutputDraft[], layerRule: null | string | undefined, thickness: unknown) {
+  const value = toNumber(thickness);
+  if (layerRule !== 'COLOR_DERIVED_V1' || !['EMBOSS', 'LAMINATE'].includes(process) || !value || value <= 0) return;
+  for (const output of outputs) output.attrs.thickness = value;
+}
+
 export function validateOutputs(
   process: string,
   outputStage: string,
   outputs: OutputDraft[],
+  options: { allowPlainEmboss?: boolean } = {},
 ): string[] {
   const errors: string[] = [];
   const filled = outputs.filter(
@@ -566,7 +592,8 @@ export function validateOutputs(
     if (isLayered(outputStage) ? !a.frontColor || !a.backColor : !a.color) {
       errors.push(`${row}请选择颜色。`);
     }
-    if (outputStage === 'EMBOSSED' && !a.textureFront && !a.textureBack) {
+    if (outputStage === 'EMBOSSED' && !a.textureFront && !a.textureBack
+      && !(process === 'EMBOSS' && options.allowPlainEmboss === true)) {
       errors.push(`${row}请选择正面或反面纹路。`);
     }
     if (outputStage === 'ENGRAVED' && !a.pattern)

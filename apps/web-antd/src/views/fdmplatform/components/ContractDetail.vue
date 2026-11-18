@@ -10,6 +10,7 @@ import type { LineColumn } from './line-table-model';
 import type {
   BusinessRecord,
   Contract,
+  ContractItem,
   Directory,
   DocumentRow,
   MasterRecord,
@@ -67,6 +68,7 @@ import { entityTarget } from '../documents/navigation';
 import RecordDetail from '../documents/RecordDetail.vue';
 import RelatedLink from '../documents/RelatedLink.vue';
 import FinanceDocument from '../finance/procurement/components/FinanceDocument.vue';
+import { contractConfigurationSummary } from '../products/components/contract-product-configuration';
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
 import { linesTitle } from '../purchase/warehouse/model';
@@ -1045,9 +1047,12 @@ async function download(file: { id: string; name: string }) {
                   item.skuName
                 }}</span>
               </div>
-              <span v-else-if="column.key === 'specification'">{{
-                item.specification || item.size || '—'
-              }}</span>
+              <div v-else-if="column.key === 'specification'">
+                <span>{{ item.specification || item.size || '—' }}</span>
+                <div class="sub mt-1">
+                  {{ contractConfigurationSummary(item as ContractItem) }}
+                </div>
+              </div>
               <span v-else-if="column.key === 'quantity'">{{
                 Number(item.quantity).toLocaleString('en-US')
               }}</span>

@@ -19,6 +19,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Empty,
   Form,
   Input,
@@ -84,6 +85,13 @@ import {
   taxOptions,
   unitPriceFromAmount,
 } from '../model';
+import {
+  applyConfiguredContractItem,
+  contractConfigurationLockReason,
+  contractConfigurationSummary,
+  requestedContractLineIds,
+} from './contract-product-configuration';
+import ContractProductConfigurationModal from './ContractProductConfigurationModal.vue';
 import ProductPicker from './ProductPicker.vue';
 
 const props = defineProps<{
@@ -151,8 +159,14 @@ const panelError = ref('');
 const priceNotice = ref('');
 const pickerOpen = ref(false);
 const customerEditorOpen = ref(false);
+const configurationOpen = ref(false);
+const configurationBulk = ref(false);
+const configurationItems = ref<ContractItem[]>([]);
+const selectedConfigurationIds = ref<string[]>([]);
 const newCustomerName = ref('');
-const childOpen = computed(() => pickerOpen.value || customerEditorOpen.value);
+const childOpen = computed(
+  () => pickerOpen.value || customerEditorOpen.value || configurationOpen.value,
+);
 const replacementId = ref<string>();
 const key = ref('');
 const expectedVersion = ref(0);
@@ -398,23 +412,62 @@ const missingPrices = computed(
   () =>
     lines.value.filter((line) => contractLineAmount(line) === undefined).length,
 );
-const lockedIds = computed(
-  () =>
-    new Set(
-      (props.contract?.requests ?? [])
-        .filter((request) => request.status !== 'CANCELLED')
-        .flatMap((request) =>
-          Array.isArray(request.items)
-            ? request.items.map((item) =>
-                String((item as Record<string, unknown>).contractItemId),
-              )
-            : [],
-        ),
-    ),
+const lockedIds = computed(() => requestedContractLineIds(props.contract));
+function configurationLock(item: ContractItem) {
+  return contractConfigurationLockReason(item, lockedIds.value.has(item.id));
+}
+const configurableItems = computed(() =>
+  lines.value.filter((item) => !configurationLock(item)),
 );
+const selectedConfigurationItems = computed(() =>
+  configurableItems.value.filter((item) =>
+    selectedConfigurationIds.value.includes(item.id),
+  ),
+);
+function selectConfiguration(item: ContractItem, selected: boolean) {
+  if (configurationLock(item)) return;
+  selectedConfigurationIds.value = selected
+    ? [...new Set([...selectedConfigurationIds.value, item.id])]
+    : selectedConfigurationIds.value.filter((id) => id !== item.id);
+}
+function openConfiguration(item?: ContractItem) {
+  const targets = item ? [item] : selectedConfigurationItems.value;
+  if (targets.length === 0 || targets.some((row) => configurationLock(row)))
+    return;
+  configurationItems.value = targets;
+  configurationBulk.value = !item;
+  configurationOpen.value = true;
+}
+function onConfigured(
+  results: Array<{ lineId: string; snapshot: ContractItem }>,
+) {
+  if (
+    results.length !== configurationItems.value.length ||
+    results.some(
+      (result) =>
+        !lines.value.some(
+          (item) => item.id === result.lineId && !configurationLock(item),
+        ),
+    )
+  ) {
+    message.warning('合同明细已变化，请重新选择产品配置');
+    return;
+  }
+  const snapshots = new Map(
+    results.map((result) => [result.lineId, result.snapshot]),
+  );
+  lines.value = lines.value.map((item) =>
+    snapshots.has(item.id)
+      ? applyConfiguredContractItem(item, snapshots.get(item.id)!)
+      : item,
+  );
+  configurationOpen.value = false;
+  priceNotice.value = `已采用 ${results.length} 行对应的成品 SKU；原数量、成交单价、交期和合同图稿已保留，旧参考价来源已清除，请核对成交价或重新匹配参考价。`;
+}
 /** 外贸建合同不填交期；内销保留，按内销习惯叫销售数量、单价、总价 */
 const columns = computed(() =>
   [
+    { title: '选择', key: 'configurationSelection', width: 45 },
     { title: '产品与规格', key: 'product', width: 300 },
     { title: '单位', dataIndex: 'unit', width: 60 },
     {
@@ -486,6 +539,9 @@ watch(
       ...charge,
     }));
     expanded.value = [];
+    configurationOpen.value = false;
+    configurationItems.value = [];
+    selectedConfigurationIds.value = [];
     batchDate.value = '';
     key.value = newIdempotencyKey();
     expectedVersion.value = contract?.version ?? 0;
@@ -1128,7 +1184,33 @@ async function save(activate = false) {
           <Space wrap>
             <Button type="primary" :loading="resolving" @click="showPicker()">
               从产品中心选择
-</Button><template v-if="domestic">
+            </Button>
+            <Checkbox
+              :checked="
+                configurableItems.length > 0 &&
+                selectedConfigurationItems.length === configurableItems.length
+              "
+              :indeterminate="
+                selectedConfigurationItems.length > 0 &&
+                selectedConfigurationItems.length < configurableItems.length
+              "
+              :disabled="!configurableItems.length || childOpen"
+              @update:checked="
+                (checked) =>
+                  (selectedConfigurationIds = checked
+                    ? configurableItems.map((item) => item.id)
+                    : [])
+              "
+            >
+              全选可配置明细
+            </Checkbox>
+            <Button
+              :disabled="!selectedConfigurationItems.length || childOpen"
+              @click="openConfiguration()"
+            >
+              批量配置（{{ selectedConfigurationItems.length }} 行）
+            </Button>
+            <template v-if="domestic">
               <Input
                 v-model:value="batchDate"
                 type="date"
@@ -1173,7 +1255,19 @@ async function save(activate = false) {
               />
             </template>
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'product'">
+              <Checkbox
+                v-if="column.key === 'configurationSelection'"
+                :checked="selectedConfigurationIds.includes(record.id)"
+                :disabled="
+                  !!configurationLock(record as ContractItem) || childOpen
+                "
+                :aria-label="`选择配置 ${record.skuName}`"
+                @update:checked="
+                  (checked) =>
+                    selectConfiguration(record as ContractItem, checked)
+                "
+              />
+              <template v-else-if="column.key === 'product'">
                 <strong>{{ record.skuName }}</strong>
                 <div class="muted">{{ record.skuCode || record.skuId }}</div>
                 <div>
@@ -1188,6 +1282,15 @@ async function save(activate = false) {
                       .filter(Boolean)
                       .join(' · ')
                   }}
+                </div>
+                <div class="muted mt-1">
+                  {{ contractConfigurationSummary(record as ContractItem) }}
+                </div>
+                <div
+                  v-if="configurationLock(record as ContractItem)"
+                  class="muted"
+                >
+                  {{ configurationLock(record as ContractItem) }}
                 </div>
                 <Tag v-if="lockedIds.has(record.id)">
                   已有采购申请，规格已锁定
@@ -1262,6 +1365,16 @@ async function save(activate = false) {
                 placeholder="本行补充说明"
               />
               <Space v-else-if="column.key === 'action'" :size="0" wrap>
+                <Button
+                  type="link"
+                  size="small"
+                  :disabled="
+                    !!configurationLock(record as ContractItem) || childOpen
+                  "
+                  @click="openConfiguration(record as ContractItem)"
+                >
+                  本单配置
+                </Button>
                 <Button
                   type="link"
                   size="small"
@@ -1479,6 +1592,17 @@ async function save(activate = false) {
       </Space>
     </template>
   </FdmResizableDrawer>
+  <ContractProductConfigurationModal
+    v-if="configurationOpen"
+    :open="configurationOpen"
+    :items="configurationItems"
+    :company-id="0"
+    :currency="form.currency"
+    :tax-basis="form.taxBasis"
+    :bulk="configurationBulk"
+    @close="configurationOpen = false"
+    @resolved="onConfigured"
+  />
   <ProductPicker
     :single="Boolean(replacementId)"
     :busy="resolving"

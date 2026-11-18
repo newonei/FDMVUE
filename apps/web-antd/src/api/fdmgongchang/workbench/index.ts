@@ -45,6 +45,10 @@ export namespace FdmgongchangWorkbenchApi {
 
   /** 任务的建议领料：按订单规格从上道库存先进先出带出要领哪些料、各领多少。 */
   export interface TaskPrepare {
+    /** 服务端冻结规则允许本次压花仅加热缩厚。 */
+    allowPlainEmboss?: boolean;
+    /** 关联订单已确认并冻结的制造规则；旧单为空。 */
+    layerRule?: null | string;
     aux: FdmgongchangStageStockApi.AuxPlan[];
     hint?: null | string;
     picks: Array<{

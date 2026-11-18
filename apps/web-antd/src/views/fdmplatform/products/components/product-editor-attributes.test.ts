@@ -194,10 +194,12 @@ const options: ProductAttributeOptions = {
     { value: 'G', label: '灰色' },
   ],
   textures: [
+    { value: 'NONE', label: '无纹路' },
     { value: 'BK', label: '贝壳纹' },
     { value: 'FH', label: '防滑纹' },
   ],
   matTypes: [{ value: 'FLAT', label: '平铺垫' }],
+  patterns: [{ value: 'FLOWER', label: '花朵' }],
 };
 const product: Product = {
   id: 'p1',
@@ -301,6 +303,54 @@ async function save() {
 }
 
 describe('产品档案编辑与查看', () => {
+  it('保存同一档案的独立长宽厚、明确无纹路与激光生产版本，并在详情中读回', async () => {
+    await mount();
+    for (const [label, value] of [
+      ['成品长度（mm）', '1830.5'],
+      ['成品宽度（mm）', '610'],
+      ['成品厚度（mm）', '6'],
+    ]) {
+      const input = document.querySelector<HTMLInputElement>(
+        `input[aria-label="${label}"]`,
+      )!;
+      input.value = value!;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+    }
+    await choose('颜色方式', 'SINGLE');
+    await choose('单色颜色', 'P');
+    await choose('正面压花', 'NONE');
+    await choose('反面压花', 'NONE');
+    await choose('雕刻方式', 'LASER');
+    await choose('激光图案', 'FLOWER');
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('请填写激光图案生产版本');
+    const version = document.querySelector<HTMLInputElement>(
+      'input[aria-label="图案生产版本"]',
+    )!;
+    version.value = '生产版B';
+    version.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lengthMm: 1830.5,
+        widthMm: 610,
+        finishedThicknessMm: 6,
+        colorMode: 'SINGLE',
+        frontColor: 'P',
+        backColor: 'P',
+        textureFront: 'NONE',
+        textureBack: 'NONE',
+        patternMode: 'LASER',
+        patternCode: 'FLOWER',
+        patternVersion: '生产版B',
+      }),
+    );
+    expect(document.body.textContent).toContain('1830.5 × 610 × 6 mm');
+    expect(document.body.textContent).toContain('激光雕刻 · FLOWER · 生产版B');
+  });
   it('旧记录默认待核实，不能按颜色原文默认单色；可保存未核实草稿', async () => {
     await mount({ ...product, frontColor: 'P', backColor: 'P' });
     expect(
@@ -311,31 +361,110 @@ describe('产品档案编辑与查看', () => {
     await save();
     expect(api.save.mock.calls[0]![0]).toMatchObject({
       colorMode: 'UNKNOWN',
-      constructionType: 'UNKNOWN',
       frontColor: 'P',
       backColor: 'P',
     });
+    expect(api.save.mock.calls[0]![0]).not.toHaveProperty('constructionType');
   });
-  it('单色一个选择器，同色双层可独立保存 2+4mm，结构不按颜色推断', async () => {
-    await mount();
-    await choose('颜色方式', 'SINGLE');
-    await choose('单色颜色', 'P');
+  it('重新打开无规则无结构草稿，补齐颜色和厚度即可预览，不回传旧制造层字段', async () => {
+    await mount({
+      ...product,
+      constructionType: 'UNKNOWN',
+      frontColor: 'P',
+      backColor: 'G',
+      frontThicknessMm: null,
+      backThicknessMm: null,
+    });
+    await choose('颜色方式', 'DUAL');
+    const thickness = document.querySelector<HTMLInputElement>(
+      'input[aria-label="成品厚度（mm）"]',
+    )!;
+    thickness.value = '6';
+    thickness.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    expect(document.body.textContent).toContain(
+      '成品名义层厚：正面 3 mm + 反面 3 mm',
+    );
+    expect(document.body.textContent).toContain(
+      '开片厚度：正面 3.2 mm + 反面 3.2 mm',
+    );
+    await save();
+    for (const field of [
+      'constructionType',
+      'frontThicknessMm',
+      'backThicknessMm',
+      'layerRule',
+    ])
+      expect(api.save.mock.calls[0]![0]).not.toHaveProperty(field);
+  });
+  it('明确中间物料不套成品层厚开片规则，保留未知结构payload', async () => {
+    await mount({
+      ...product,
+      productStage: 'BOARD',
+      constructionType: 'UNKNOWN',
+      colorMode: 'DUAL',
+      frontColor: 'P',
+      backColor: 'G',
+      finishedThicknessMm: 6,
+    });
+    expect(document.body.textContent).not.toContain('开片厚度：');
+    expect(document.body.textContent).toContain('不自动套用成品开片规则');
+    expect(document.body.textContent).toContain('成品名义层厚：制造结构待核实');
+    await save();
+    expect(api.save.mock.calls[0]![0]).toMatchObject({
+      productStage: 'BOARD',
+      constructionType: 'UNKNOWN',
+      finishedThicknessMm: 6,
+      frontThicknessMm: null,
+      backThicknessMm: null,
+    });
+  });
+  it('已有自动成品规则改成中间物料时解释并阻止保存', async () => {
+    await mount({
+      ...product,
+      productStage: 'FINISHED',
+      layerRule: 'COLOR_DERIVED_V1',
+      colorMode: 'SINGLE',
+      colorCode: 'P',
+      constructionType: 'SINGLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 6,
+    });
+    await choose('生产分类', 'BOARD');
+    expect(document.body.textContent).toContain(
+      '中间物料需使用对应的独立物料档案',
+    );
+    expect(document.body.textContent).not.toContain('开片厚度：');
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+  });
+  it('历史同色双层2+4mm只读保留，不静默按颜色改成单层', async () => {
+    await mount({
+      ...product,
+      colorMode: 'SINGLE',
+      colorCode: 'P',
+      frontColor: 'P',
+      backColor: 'P',
+      constructionType: 'DOUBLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 2,
+      backThicknessMm: 4,
+    });
     expect(document.querySelector('select[aria-label="正面颜色"]')).toBeNull();
     expect(document.querySelector('select[aria-label="反面颜色"]')).toBeNull();
-    await choose('制造结构', 'DOUBLE_LAYER');
-    for (const [label, value] of [
-      ['成品厚度（mm）', '6'],
-      ['正面层厚度（mm）', '2'],
-      ['反面层厚度（mm）', '4'],
-    ]) {
-      const input = document.querySelector<HTMLInputElement>(
-        `input[aria-label="${label}"]`,
-      )!;
-      input.value = value!;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await flush();
-    }
-    await flush();
+    expect(document.querySelector('select[aria-label="制造结构"]')).toBeNull();
+    expect(
+      document.querySelector('input[aria-label="正面层厚度（mm）"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="成品厚度（mm）"]',
+      )!.disabled,
+    ).toBe(true);
+    expect(document.body.textContent).toContain(
+      '历史制造结构与名义层厚按原档案保留',
+    );
+    expect(document.body.textContent).toContain('正面 2 mm + 反面 4 mm');
     await save();
     expect(api.save.mock.calls[0]![0]).toMatchObject({
       colorMode: 'SINGLE',
@@ -355,28 +484,69 @@ describe('产品档案编辑与查看', () => {
       colorMode: 'DUAL',
       frontColor: 'P',
       backColor: 'P',
+      constructionType: 'DOUBLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 2,
+      backThicknessMm: 3,
     });
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('必须不同');
     await choose('反面颜色', 'G');
-    await choose('制造结构', 'DOUBLE_LAYER');
-    for (const [label, value] of [
-      ['成品厚度（mm）', '6'],
-      ['正面层厚度（mm）', '2'],
-      ['反面层厚度（mm）', '3'],
-    ]) {
-      const input = document.querySelector<HTMLInputElement>(
-        `input[aria-label="${label}"]`,
-      )!;
-      input.value = value!;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await flush();
-    }
     await flush();
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('之和必须等于成品厚度');
+  });
+  it('带新规则的产品按颜色和成品厚度只读计算，保存不发送手填名义层字段', async () => {
+    await mount({
+      ...product,
+      layerRule: 'COLOR_DERIVED_V1',
+      colorMode: 'SINGLE',
+      colorCode: 'P',
+      frontColor: 'P',
+      backColor: 'P',
+      constructionType: 'SINGLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 6,
+      backThicknessMm: null,
+    });
+    expect(document.body.textContent).toContain('开片厚度：单层 6.2 mm');
+    expect(
+      document.querySelector('input[aria-label="正面层厚度（mm）"]'),
+    ).toBeNull();
+    await choose('颜色方式', 'DUAL');
+    await choose('反面颜色', 'G');
+    expect(document.body.textContent).toContain(
+      '成品名义层厚：正面 3 mm + 反面 3 mm',
+    );
+    expect(document.body.textContent).toContain(
+      '开片厚度：正面 3.2 mm + 反面 3.2 mm',
+    );
+    const thickness = document.querySelector<HTMLInputElement>(
+      'input[aria-label="成品厚度（mm）"]',
+    )!;
+    thickness.value = '8';
+    thickness.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    expect(document.body.textContent).toContain(
+      '开片厚度：正面 4.2 mm + 反面 4.2 mm',
+    );
+    await save();
+    const payload = api.save.mock.calls[0]![0];
+    expect(payload).toMatchObject({
+      colorMode: 'DUAL',
+      finishedThicknessMm: 8,
+      frontColor: 'P',
+      backColor: 'G',
+    });
+    for (const field of [
+      'constructionType',
+      'frontThicknessMm',
+      'backThicknessMm',
+      'layerRule',
+    ])
+      expect(payload).not.toHaveProperty(field);
   });
   it('允许修改已有产品的 SKU 编号，并携带原产品 ID 和版本保存', async () => {
     await mount();

@@ -42,6 +42,20 @@ export const PRODUCTION_EXTRA_FIELDS = [
   'weight',
 ] as const satisfies readonly (keyof OrderLineExtra)[];
 export type ProductionExtraField = (typeof PRODUCTION_EXTRA_FIELDS)[number];
+export const PRODUCTION_IDENTITY_FIELDS = [
+  'colorMode',
+  'frontColor',
+  'backColor',
+  'textureFront',
+  'textureBack',
+] as const satisfies readonly ProductionExtraField[];
+
+export function productionIdentityLocked(snapshot: Record<string, unknown>) {
+  return (
+    typeof snapshot.finishedSignature === 'string' &&
+    snapshot.finishedSignature.trim().length > 0
+  );
+}
 
 /** 已保存采购要求优先；未设置时只读取本单产品快照。空串保留清空意图。 */
 export function productionExtrasFrom(
@@ -49,6 +63,14 @@ export function productionExtrasFrom(
   snapshot: Record<string, unknown>,
 ): OrderLineExtra {
   const result = { ...saved };
+  if (productionIdentityLocked(snapshot)) {
+    for (const field of PRODUCTION_IDENTITY_FIELDS) {
+      const value = snapshot[field];
+      if (typeof value === 'string')
+        (result as Record<string, unknown>)[field] = value.trim();
+      else Reflect.deleteProperty(result, field);
+    }
+  }
   for (const field of PRODUCTION_EXTRA_FIELDS) {
     if (Object.hasOwn(result, field)) continue;
     const value = snapshot[field];
@@ -76,15 +98,41 @@ export function applyProductionExtras(
   values: OrderLineExtra,
   fields: ProductionExtraField[],
   onlyEmpty = false,
+  identityLockedIds: readonly string[] = [],
 ) {
+  const lockedIds = new Set(identityLockedIds);
+  let protectedRows = 0;
+  let skippedFields = 0;
+  let updatedRows = 0;
   for (const id of selectedIds) {
     const row = (rows[id] ??= {});
+    let changed = false;
+    let protectedRow = false;
     for (const field of fields) {
+      if (lockedIds.has(id) && field !== 'weight') {
+        protectedRow = true;
+        skippedFields++;
+        continue;
+      }
       if (onlyEmpty && row[field]?.trim() && row[field] !== 'UNKNOWN') continue;
-      (row as Record<string, unknown>)[field] = values[field]?.trim() ?? '';
+      const value = values[field]?.trim() ?? '';
+      if (row[field] !== value) {
+        (row as Record<string, unknown>)[field] = value;
+        changed = true;
+      }
     }
-    if (row.colorMode === 'SINGLE') row.backColor = row.frontColor ?? '';
+    if (
+      !lockedIds.has(id) &&
+      row.colorMode === 'SINGLE' &&
+      row.backColor !== (row.frontColor ?? '')
+    ) {
+      row.backColor = row.frontColor ?? '';
+      changed = true;
+    }
+    if (changed) updatedRows++;
+    if (protectedRow) protectedRows++;
   }
+  return { updatedRows, protectedRows, skippedFields };
 }
 
 function cloneCells(cells?: Record<string, OrderDetailCell>) {

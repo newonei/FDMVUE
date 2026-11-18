@@ -76,6 +76,47 @@ vi.mock('./ProductPicker.vue', () => ({
     },
   }),
 }));
+vi.mock('./ContractProductConfigurationModal.vue', () => ({
+  default: defineComponent({
+    props: {
+      items: {
+        type: Array as PropType<Record<string, unknown>[]>,
+        default: () => [],
+      },
+    },
+    emits: ['resolved', 'close'],
+    setup:
+      (props, { emit }) =>
+      () =>
+        h(
+          'button',
+          {
+            onClick: () =>
+              emit(
+                'resolved',
+                props.items.map((item) => ({
+                  lineId: item.id,
+                  snapshot: {
+                    ...item,
+                    skuId: 'configured-sku',
+                    skuCode: 'NEW-SKU',
+                    skuName: '新配置产品',
+                    productVersion: 4,
+                    specVersion: 'new-spec',
+                    quantity: 1,
+                    unitPrice: 99,
+                    priceSourceId: 'different-price',
+                    frontColor: 'PU',
+                    backColor: 'PU',
+                    colorMode: 'SINGLE',
+                  },
+                })),
+              ),
+          },
+          '采用测试配置',
+        ),
+  }),
+}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     setup: (_, ctx) => () => h('div', ctx.attrs, ctx.slots.default?.()),
@@ -321,6 +362,66 @@ afterEach(() => {
 });
 
 describe('order entry without changing menus', () => {
+  it('saves the adopted SKU identity while retaining the contract quantity, price and note and clearing price provenance', async () => {
+    api.customers.mockResolvedValue({
+      list: [
+        { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
+      ],
+      total: 1,
+    });
+    api.resolve.mockResolvedValue([
+      {
+        skuId: 'sku',
+        skuName: '测试规格',
+        productVersion: 0,
+        specVersion: 'old-spec',
+        quantity: '8',
+        unitPrice: '10',
+        remark: '保留备注',
+        unit: '件',
+        priceSourceId: 'old-price',
+      },
+    ]);
+    const { host } = await mountEditor();
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector('[data-label="客户"] option[value="customer"]'),
+      ).toBeTruthy(),
+    );
+    await fill(host, '客户', 'customer', 'select');
+    await fill(host, '合同主体', '1', 'select');
+    await fill(host, '产品分类', 'YOGA', 'select');
+    await addProduct(host);
+    const id = host.querySelector<HTMLElement>('[data-row]')!.dataset.row;
+    button(host, '本单配置').click();
+    await nextTick();
+    expect(button(host, '保存草稿').disabled).toBe(true);
+    button(host, '采用测试配置').click();
+    await nextTick();
+    expect(host.textContent).toContain('NEW-SKU');
+    api.create.mockRejectedValueOnce(new Error('保留草稿用于测试'));
+    button(host, '保存草稿').click();
+    await vi.waitFor(() =>
+      expect(api.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          items: [
+            expect.objectContaining({
+              id,
+              skuId: 'configured-sku',
+              productVersion: 4,
+              specVersion: 'new-spec',
+              quantity: '8',
+              unitPrice: '10',
+              remark: '保留备注',
+              priceSourceId: undefined,
+              priceSourceVersion: undefined,
+            }),
+          ],
+        }),
+        [],
+      ),
+    );
+  });
   it('blocks activation without customer delivery requirements while still allowing a draft', async () => {
     api.customers.mockResolvedValue({
       list: [

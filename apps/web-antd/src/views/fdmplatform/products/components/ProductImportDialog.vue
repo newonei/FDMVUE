@@ -28,6 +28,13 @@ import {
 
 import { errorText } from '../../data';
 import { productProcessText } from '../attributes';
+import {
+  configurationMissingFields,
+  productDimensionsText,
+  productPatternText,
+  productSliceThicknessText,
+  productThicknessProcessText,
+} from '../manufacturing';
 import ProductColorSummary from './ProductColorSummary.vue';
 
 const props = defineProps<{ companyId: number; open: boolean }>();
@@ -43,6 +50,30 @@ const panelError = ref('');
 const onlyIssues = ref(false);
 const idempotencyKey = ref('');
 const busy = computed(() => previewing.value || importing.value);
+const reusableCount = computed(
+  () =>
+    result.value?.rows.filter(
+      (row) => row.status === 'REUSE' || row.status === 'REUSED',
+    ).length ?? 0,
+);
+const reuseDisplayCount = computed(() =>
+  completed.value
+    ? (result.value?.reusedCount ?? reusableCount.value)
+    : reusableCount.value,
+);
+const importableCount = computed(
+  () =>
+    (result.value?.readyCount ?? 0) +
+    (completed.value ? 0 : reusableCount.value),
+);
+const incompleteCount = computed(
+  () =>
+    result.value?.rows.filter(
+      (row) =>
+        row.status !== 'ERROR' &&
+        configurationMissingFields(row.values).length > 0,
+    ).length ?? 0,
+);
 const rows = computed(() =>
   (result.value?.rows ?? []).filter(
     (row) =>
@@ -53,6 +84,7 @@ const columns = [
   { title: 'Excel 行', dataIndex: 'rowNumber', width: 80 },
   { title: '产品编号 / 名称', key: 'product', width: 215 },
   { title: '型号 / 规格 / 单位', key: 'specification', width: 180 },
+  { title: '成品尺寸 / 雕刻版本', key: 'configuration', width: 230 },
   { title: '颜色 / 制造结构', key: 'colors', width: 220 },
   { title: '生产分类 / 工艺属性', key: 'production', width: 260 },
   { title: '分类 / 状态', key: 'category', width: 125 },
@@ -62,13 +94,17 @@ const columns = [
 const statusText: Record<ProductImportRow['status'], string> = {
   ERROR: '导入失败',
   IMPORTED: '已导入',
-  READY: '可导入',
+  READY: '可新增',
+  REUSE: '复用已有 SKU',
+  REUSED: '已复用 SKU',
   SKIPPED: '已跳过',
 };
 const statusColor: Record<ProductImportRow['status'], string> = {
   ERROR: 'red',
   IMPORTED: 'green',
   READY: 'blue',
+  REUSE: 'cyan',
+  REUSED: 'green',
   SKIPPED: 'default',
 };
 
@@ -138,7 +174,7 @@ async function submit() {
   if (
     !file.value ||
     !result.value?.previewHash ||
-    result.value.readyCount < 1 ||
+    importableCount.value < 1 ||
     busy.value ||
     completed.value
   )
@@ -198,7 +234,7 @@ async function downloadTemplate() {
           <strong>2. 校验预览</strong><span>核对有效行与问题行</span>
         </div>
         <div :class="{ 'step-active': completed }">
-          <strong>3. 导入产品</strong><span>仅新增有效产品</span>
+          <strong>3. 导入产品</strong><span>新增或复用已核实 SKU</span>
         </div>
       </div>
       <div v-if="!result" class="import-template-row">
@@ -236,7 +272,7 @@ async function downloadTemplate() {
         <span class="import-muted">{{
           completed
             ? '本次导入已完成，选择新文件可继续导入。'
-            : '必填：产品编号、产品名称；启用产品还需规格和单位。'
+            : '长宽厚填写成品毫米数；单色只填正面颜色，反面自动同色；正反纹路分别填写，开片厚度自动计算。'
         }}</span>
         <Space>
           <Button
@@ -258,15 +294,15 @@ async function downloadTemplate() {
         v-if="!result"
         type="info"
         show-icon
-        message="产品编号必须唯一，名称 + 型号 + 规格三项不能同时和已有产品或文件里其他行相同；不符合的行导入失败并写明原因，其余行新增为产品档案。"
-        description="产品状态为空或正常时启用，停售或下架时停用。生产分类、垫子类型、单色、正反颜色和正反压花分别保存；旧模板仍可导入，未填写的新属性可后续补齐。请先删除模板中的示例行。"
+        message="使用一张产品档案表，每行填写一个具体 SKU 的名称、长宽厚、单双色、正反颜色、正反纹路和雕刻图案生产版本。完整配置相同会复用已有 SKU，配置不同则新增。"
+        description="只填写成品厚度，无需填写两面层厚。单色正面选一种颜色，反面可空并自动同色；双色填写两种不同颜色。正反纹路独立填写，无纹路明确选择无纹路；不雕刻明确选择无雕刻。旧表缺失配置保持待核实。"
       />
       <template v-if="result">
         <Alert
           v-if="completed"
           type="success"
           show-icon
-          :message="`导入完成：新增 ${result.createdCount} 个产品，导入失败 ${result.errorCount} 行。`"
+          :message="`导入完成：新增 ${result.createdCount} 个产品，复用 ${result.reusedCount ?? reusableCount} 个 SKU，导入失败 ${result.errorCount} 行。`"
         />
         <Alert
           v-for="(warning, index) in result.warnings"
@@ -287,6 +323,12 @@ async function downloadTemplate() {
           <div class="result-error">
             <span>导入失败</span><strong>{{ result.errorCount }}</strong>
           </div>
+          <div>
+            <span>复用已有 SKU</span><strong>{{ reuseDisplayCount }}</strong>
+          </div>
+          <div>
+            <span>资料待补齐</span><strong>{{ incompleteCount }}</strong>
+          </div>
         </div>
         <div class="import-preview-heading">
           <strong>{{ completed ? '导入结果' : '数据预览' }}</strong>
@@ -306,7 +348,7 @@ async function downloadTemplate() {
           :columns="columns"
           row-key="rowNumber"
           size="small"
-          :scroll="{ x: 1180, y: 310 }"
+          :scroll="{ x: 1450, y: 310 }"
           :pagination="{
             pageSize: 10,
             showSizeChanger: false,
@@ -334,6 +376,38 @@ async function downloadTemplate() {
               :value="record.values ?? {}"
               construction
             />
+            <div v-else-if="column.key === 'configuration'">
+              <div>
+                {{
+                  productDimensionsText(record.values ?? {}) || '长宽厚待补齐'
+                }}
+              </div>
+              <div>{{ productPatternText(record.values ?? {}) }}</div>
+              <div
+                v-if="productSliceThicknessText(record.values ?? {})"
+                class="import-muted"
+              >
+                开片厚度：{{ productSliceThicknessText(record.values ?? {}) }}
+              </div>
+              <div
+                v-if="productThicknessProcessText(record.values ?? {})"
+                class="import-muted"
+              >
+                {{ productThicknessProcessText(record.values ?? {}) }}
+              </div>
+              <Tag
+                v-if="configurationMissingFields(record.values ?? {}).length"
+                color="orange"
+              >
+                资料待补齐
+              </Tag>
+              <div
+                v-if="configurationMissingFields(record.values ?? {}).length"
+                class="import-muted"
+              >
+                {{ configurationMissingFields(record.values ?? {}).join('、') }}
+              </div>
+            </div>
             <div v-else-if="column.key === 'category'">
               {{ record.values?.category || '未分类' }}
               <div class="import-muted">
@@ -353,8 +427,8 @@ async function downloadTemplate() {
           </template>
         </Table>
         <p class="import-muted">
-          行号对应原
-          Excel，按失败原因修改后可再次上传；已导入的产品再次上传会因编号已存在而失败，不会重复新增。
+          行号对应原 Excel，按失败原因修改后可再次上传；完整配置命中已有 SKU
+          时会复用，不会重复新增。历史资料缺少新配置时需先核对补齐。
         </p>
       </template>
     </div>
@@ -375,11 +449,11 @@ async function downloadTemplate() {
         <Button
           v-if="result && !completed"
           type="primary"
-          :disabled="result.readyCount < 1 || busy"
+          :disabled="importableCount < 1 || busy"
           :loading="importing"
           @click="submit"
         >
-          导入 {{ result.readyCount }} 个有效产品
+          导入 {{ importableCount }} 个有效产品
         </Button>
       </Space>
     </template>

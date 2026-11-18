@@ -17,7 +17,7 @@ import {
 } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
 import { changeReportDefect, changeReportGood } from '../report-quantity';
-import { goodTotal, outputPayload, slicePlanThicknessError, stageOf, useJob } from '../use-job';
+import { goodTotal, jobAllowsPlainEmboss, outputPayload, slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import BigCounter from './big-counter.vue';
 import StepHeader from './step-header.vue';
 
@@ -35,10 +35,11 @@ const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
 const reportedBefore = computed(() => job.order?.reportCount ?? 0);
 const plannedAttrs = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.prepare?.targetAttrs);
 const plannedSpec = computed(() => plannedAttrs.value ? attrSummary(job.process?.outputStage ?? '', plannedAttrs.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
+const allowPlainEmboss = computed(() => jobAllowsPlainEmboss(job));
 
 /** 目标规格不全时展开填写；开片仅填写单层厚度。 */
 const specErrors = computed(() =>
-  validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs).filter(
+  validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs, { allowPlainEmboss: allowPlainEmboss.value }).filter(
     (e) => !e.includes('数量'),
   ),
 );
@@ -57,7 +58,7 @@ const inputColors = computed(
 
 function next() {
   const closingOnly = !job.createFinish && job.finish && reportedBefore.value > 0 && outputPayload(job).length === 0;
-  errors.value = closingOnly ? [] : validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs);
+  errors.value = closingOnly ? [] : validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs, { allowPlainEmboss: allowPlainEmboss.value });
   if (!closingOnly && planThicknessError.value) errors.value.push(planThicknessError.value);
   if (errors.value.length > 0) return;
   emit('next');

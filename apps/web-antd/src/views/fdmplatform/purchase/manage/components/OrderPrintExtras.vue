@@ -64,6 +64,7 @@ import {
   printExtrasImageIds,
   printExtrasPayload,
   productionExtrasFrom,
+  productionIdentityLocked,
   SHARED_COLUMN_SUGGESTIONS,
 } from '../print-extras';
 import OrderImages from './OrderImages.vue';
@@ -254,6 +255,7 @@ function setProduction(
   field: ProductionExtraField,
   value: unknown,
 ) {
+  if (productionIdentityLocked(spec(line)) && field !== 'weight') return;
   const row = extra(line);
   (row as Record<string, unknown>)[field] =
     typeof value === 'string' ? value : '';
@@ -293,17 +295,24 @@ function applyBatch() {
     batchEnabled.value.length === 0
   )
     return;
-  applyProductionExtras(
+  const result = applyProductionExtras(
     extras.lineExtras,
     selectedLineIds.value,
     batchValues.value,
     batchEnabled.value,
     batchOnlyEmpty.value,
+    lines.value
+      .filter((line) => productionIdentityLocked(spec(line)))
+      .map((line) => String(line.id)),
   );
   batchOpen.value = false;
-  message.success(
-    `已设置 ${selectedLineIds.value.length} 条产品明细，请保存附加资料`,
-  );
+  const protectedText =
+    result.protectedRows > 0
+      ? `；${result.protectedRows} 条正式 SKU 的 ${result.skippedFields} 项颜色或纹路要求已跳过，需回合同明细修改配置`
+      : '';
+  const feedback = `已更新 ${result.updatedRows} 条产品明细${protectedText}${result.updatedRows > 0 ? '，请保存附加资料' : ''}`;
+  if (result.updatedRows > 0) message.success(feedback);
+  else message.warning(feedback);
 }
 function customCell(line: Line, id: string) {
   const row = extra(line);
@@ -903,6 +912,13 @@ defineExpose({
                 </div>
                 <div class="production-fields">
                   <span class="group-label">生产属性</span>
+                  <p
+                    v-if="productionIdentityLocked(spec(record))"
+                    class="muted"
+                  >
+                    颜色和纹路属于本合同 SKU
+                    配置，已锁定。需要调整时请回到合同明细修改配置；克重和供应商实物色号图可继续补充。
+                  </p>
                   <div class="field-grid">
                     <div
                       v-for="field in batchFields.filter(
@@ -923,6 +939,7 @@ defineExpose({
                         "
                         :disabled="
                           disabled ||
+                          productionIdentityLocked(spec(record)) ||
                           (field.key === 'backColor' &&
                             extra(record).colorMode === 'SINGLE')
                         "
@@ -1248,6 +1265,10 @@ defineExpose({
         将设置已选择的
         {{ selectedLineIds.length }}
         条产品明细。仅勾选需要统一设置的字段，其他字段保留原值；勾选后留空会清空该项。
+      </p>
+      <p class="muted">
+        已有正式 SKU
+        配置的产品会跳过颜色与纹路字段，保留合同要求；产品克重仍可批量设置。
       </p>
       <div class="batch-production-fields">
         <div

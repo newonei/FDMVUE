@@ -114,7 +114,7 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">生产要求</h3>
-      <span class="text-xs text-muted-foreground">颜色、纹路和克重随每条采购资料更新；工厂生产参数请在明细中确认保存</span>
+      <span class="text-xs text-muted-foreground">正式 SKU 的颜色、纹路、尺寸和雕刻以合同规格为准，旧单按采购资料补齐；克重可随采购资料更新，工厂生产参数请在明细中确认保存</span>
       <Tag v-if="details.status" class="m-0" :color="details.status === 'CONFIRMED' ? 'green' : 'default'">
         {{ details.status === 'CONFIRMED' ? '已确认' : '采购员还在编辑' }}<template v-if="(details.revision ?? 1) > 1"> · 第 {{ details.revision }} 版</template>
       </Tag>

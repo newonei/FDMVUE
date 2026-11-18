@@ -46,6 +46,7 @@ import { laminationDefects } from '../../shared/lamination-report';
 import { quantityPrecision } from '../../shared/quantity';
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import {
+  applyShrinkThickness,
   applyTaskTarget,
   attrSummary,
   defectRate,
@@ -53,6 +54,8 @@ import {
   EDITABLE_FIELDS,
   formatQty,
   formatRate,
+  frozenLayerRule,
+  frozenPlainEmboss,
   lineBatch,
   makeLabels,
   nextKey,
@@ -324,14 +327,16 @@ const sliceTargetThickness = computed(() => {
   const item = linkedProductionItem.value;
   const thickness = toNumber(item?.targetThickness ?? item?.targetSuggested?.thickness);
   if (!thickness || thickness <= 0) return undefined;
+  const actual = (nominal?: number) => nominal === undefined ? undefined
+    : Number((nominal + (frozenLayerRule(item) ? 0.02 : 0)).toFixed(6));
   const construction = item?.targetConstructionType ?? item?.targetSuggested?.constructionType;
-  if (construction === 'SINGLE_LAYER') return thickness;
+  if (construction === 'SINGLE_LAYER') return actual(thickness);
   if (construction !== 'DOUBLE_LAYER') return undefined;
   const front = toNumber(item?.targetFrontThickness ?? item?.targetSuggested?.frontThickness);
   const back = toNumber(item?.targetBackThickness ?? item?.targetSuggested?.backThickness);
-  if (sliceLayerSide.value === 'FRONT') return front;
-  if (sliceLayerSide.value === 'BACK') return back;
-  return front && front === back ? front : undefined;
+  if (sliceLayerSide.value === 'FRONT') return actual(front);
+  if (sliceLayerSide.value === 'BACK') return actual(back);
+  return front && front === back ? actual(front) : undefined;
 });
 const autoSliceThickness = new Map<string, number>();
 watch([sliceTargetThickness, () => outputs.value.map((line) => line.key).join(',')], () => {
@@ -348,6 +353,18 @@ const reportedBefore = computed(() => order.value?.reportCount ?? 0);
 const errors = ref<string[]>([]);
 const submitting = ref(false);
 const order = ref<Api.Order>();
+const allowPlainEmboss = computed(() => processCode.value === 'EMBOSS' && (props.mode === 'report'
+  ? order.value?.allowPlainEmboss === true : frozenPlainEmboss(linkedProductionItem.value)));
+const shrinkLayerRule = computed(() => props.mode === 'report' ? order.value?.layerRule : frozenLayerRule(linkedProductionItem.value));
+const shrinkThickness = computed(() => props.mode === 'report' ? order.value?.outputAttrs?.thickness : linkedProductionItem.value?.targetThickness);
+function applyOutputTarget() {
+  if (props.mode === 'report') applyTaskTarget(processCode.value, order.value?.outputAttrs, inputs.value, outputs.value);
+  applyShrinkThickness(processCode.value, outputs.value, shrinkLayerRule.value, shrinkThickness.value);
+}
+watch([shrinkLayerRule, shrinkThickness, processCode], () => {
+  if (props.mode === 'create' && !touched.value && inputs.value.length > 0) regenerate();
+  else applyOutputTarget();
+});
 const orderLoading = ref(false);
 
 const labels = computed(() => makeLabels(props.options));
@@ -534,7 +551,7 @@ watch(open, async (value) => {
         defaultMaterial.value,
         order.value.recipeCode,
       );
-      applyTaskTarget(order.value.process, order.value.outputAttrs, inputs.value, outputs.value);
+      applyOutputTarget();
       void loadOperators();
     } finally {
       orderLoading.value = false;
@@ -702,6 +719,7 @@ watch(inputSignature, () => {
       defaultMaterial.value,
       recipeCode.value,
     );
+    applyOutputTarget();
   }
 });
 
@@ -734,6 +752,7 @@ function addLine() {
     key: nextKey(),
     sourceItemIds: base.sourceItemIds ? [...base.sourceItemIds] : undefined,
   });
+  applyOutputTarget();
   touched.value = true;
 }
 
@@ -750,6 +769,7 @@ function regenerate() {
     defaultMaterial.value,
     recipeCode.value,
   );
+  applyOutputTarget();
 }
 
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -819,6 +839,7 @@ function outputStepErrors() {
       processCode.value,
       outputStage.value,
       outputs.value,
+      { allowPlainEmboss: allowPlainEmboss.value },
     );
     // 已经报过产出的单，报完关单时可以不再填产出
     const closingOnly =

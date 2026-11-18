@@ -4,16 +4,52 @@ import type {
   ProductAttributes,
 } from '#/api/fdmplatform/products';
 
-import { Form, InputNumber, Select } from 'ant-design-vue';
+import { computed } from 'vue';
 
-import { colorModeOptions, constructionOptions } from '../manufacturing';
+import { Form, Input, InputNumber, Select } from 'ant-design-vue';
+
+import {
+  COLOR_DERIVED_LAYER_RULE,
+  colorDerivedLayers,
+  colorModeOptions,
+  constructionText,
+  patternModeOptions,
+  productNominalLayersText,
+  productSliceThicknessText,
+  productThicknessProcessText,
+  usesColorDerivedLayers,
+} from '../manufacturing';
 import ProductColorSummary from './ProductColorSummary.vue';
 
-const props = defineProps<{
-  colors: ProductAttributeOption[];
-  value: ProductAttributes;
-}>();
+const props = withDefaults(
+  defineProps<{
+    colors: ProductAttributeOption[];
+    deriveLayers?: boolean;
+    patterns?: ProductAttributeOption[];
+    value: ProductAttributes;
+  }>(),
+  { deriveLayers: undefined, patterns: () => [] },
+);
 const emit = defineEmits<{ 'update:value': [value: ProductAttributes] }>();
+const automaticLayers = computed(
+  () => props.deriveLayers ?? usesColorDerivedLayers(props.value),
+);
+const historicalStructure = computed(
+  () =>
+    !automaticLayers.value &&
+    ['DOUBLE_LAYER', 'SINGLE_LAYER'].includes(
+      props.value.constructionType ?? '',
+    ),
+);
+const layers = computed(() =>
+  automaticLayers.value
+    ? {
+        ...props.value,
+        ...colorDerivedLayers(props.value),
+        layerRule: COLOR_DERIVED_LAYER_RULE,
+      }
+    : { ...props.value, layerRule: undefined },
+);
 function update(field: keyof ProductAttributes, value: unknown) {
   emit('update:value', { ...props.value, [field]: value });
 }
@@ -40,15 +76,45 @@ function changeMode(mode: unknown) {
     colorCode,
   });
 }
+function patternOptionsFor() {
+  const value = props.value.patternCode;
+  return !value || props.patterns.some((item) => item.value === value)
+    ? props.patterns
+    : [...props.patterns, { value, label: value }];
+}
 </script>
 
 <template>
   <section class="manufacturing-fields">
-    <h3>颜色与制造结构</h3>
+    <h3>成品尺寸、颜色与雕刻</h3>
     <p class="hint">
-      颜色与层数分别确认。单色只选一次颜色；双层同色仍选择“双层贴合”。待核实可保存档案，核实后再用于生产。
+      长宽厚统一填写毫米。{{
+        automaticLayers
+          ? '新成品配置单色为单层，双色为双层均分；每片开片厚度在名义层厚基础上增加 0.2 mm。'
+          : '当前物料沿用档案制造结构与厚度，不自动套用成品开片规则。'
+      }}雕刻须明确选择无雕刻或激光雕刻。
     </p>
     <div class="fields">
+      <Form.Item
+        v-for="[field, label] in [
+          ['lengthMm', '成品长度（mm）'],
+          ['widthMm', '成品宽度（mm）'],
+          ['finishedThicknessMm', '成品厚度（mm）'],
+        ] as const"
+        :key="field"
+        :label="label"
+      >
+        <InputNumber
+          :value="value[field] ?? undefined"
+          :precision="3"
+          :min="0"
+          :step="field === 'finishedThicknessMm' ? 0.1 : 1"
+          :disabled="field === 'finishedThicknessMm' && historicalStructure"
+          :aria-label="label"
+          placeholder="待核实"
+          @update:value="(v) => update(field, v)"
+        />
+      </Form.Item>
       <Form.Item label="颜色方式">
         <Select
           :value="value.colorMode ?? 'UNKNOWN'"
@@ -93,51 +159,52 @@ function changeMode(mode: unknown) {
         v-if="!value.colorMode || value.colorMode === 'UNKNOWN'"
         :value="value"
       />
-      <Form.Item label="制造结构">
+      <div class="layer-summary" aria-label="制造结构与厚度">
+        <div>制造结构：{{ constructionText(layers) }}</div>
+        <div>成品名义层厚：{{ productNominalLayersText(layers) }}</div>
+        <div v-if="productSliceThicknessText(layers)">
+          开片厚度：{{ productSliceThicknessText(layers) }}
+        </div>
+        <div v-if="productThicknessProcessText(layers)">
+          {{ productThicknessProcessText(layers) }}
+        </div>
+        <p v-if="historicalStructure" class="hint">
+          历史制造结构与名义层厚按原档案保留，调整厚度请通过本单配置生成新 SKU。
+        </p>
+        <p v-else-if="automaticLayers" class="hint">
+          层厚自动计算，无需手填。开片厚度单独显示，不写入成品名义层厚。
+        </p>
+      </div>
+      <Form.Item label="雕刻方式">
         <Select
-          :value="value.constructionType ?? 'UNKNOWN'"
-          :options="constructionOptions"
-          aria-label="制造结构"
-          @update:value="(v) => update('constructionType', v)"
+          :value="value.patternMode ?? 'UNKNOWN'"
+          :options="patternModeOptions"
+          aria-label="雕刻方式"
+          @update:value="(v) => update('patternMode', v)"
         />
       </Form.Item>
-      <Form.Item
-        label="成品厚度（mm）"
-        :required="
-          value.constructionType !== 'UNKNOWN' && !!value.constructionType
-        "
-      >
-        <InputNumber
-          :value="value.finishedThicknessMm ?? undefined"
-          :precision="2"
-          :min="0"
-          :step="0.1"
-          aria-label="成品厚度（mm）"
-          @update:value="(v) => update('finishedThicknessMm', v)"
-        />
-      </Form.Item>
-      <template v-if="value.constructionType === 'DOUBLE_LAYER'">
-        <Form.Item
-          v-for="[field, label] in [
-            ['frontThicknessMm', '正面层厚度（mm）'],
-            ['backThicknessMm', '反面层厚度（mm）'],
-          ] as const"
-          :key="field"
-          :label="label"
-          required
-        >
-          <InputNumber
-            :value="value[field] ?? undefined"
-            :precision="2"
-            :min="0"
-            :step="0.1"
-            :aria-label="label"
-            @update:value="(v) => update(field, v)"
+      <template v-if="value.patternMode === 'LASER'">
+        <Form.Item label="激光图案" required>
+          <Select
+            :value="value.patternCode || undefined"
+            :options="patternOptionsFor()"
+            show-search
+            option-filter-prop="label"
+            allow-clear
+            aria-label="激光图案"
+            placeholder="选择已维护图案"
+            @update:value="(v) => update('patternCode', v ?? '')"
           />
         </Form.Item>
-        <p class="hint">
-          正面层厚度 + 反面层厚度 = 成品厚度。按实际工艺填写，不按颜色自动均分。
-        </p>
+        <Form.Item label="图案生产版本" required>
+          <Input
+            :value="value.patternVersion ?? ''"
+            :maxlength="100"
+            aria-label="图案生产版本"
+            placeholder="按确认图稿填写，如 V2"
+            @update:value="(v) => update('patternVersion', v)"
+          />
+        </Form.Item>
       </template>
     </div>
   </section>

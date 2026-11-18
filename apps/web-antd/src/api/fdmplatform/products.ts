@@ -4,6 +4,7 @@ import { requestClient } from '#/api/request';
 
 export type TaxBasis = 'TAX_EXCLUDED' | 'TAX_INCLUDED';
 export type ProductColorMode = 'DUAL' | 'SINGLE' | 'UNKNOWN';
+export type ProductPatternMode = 'LASER' | 'NONE' | 'UNKNOWN';
 export type ProductConstructionType =
   | 'DOUBLE_LAYER'
   | 'SINGLE_LAYER'
@@ -17,13 +18,26 @@ export interface ProductAttributeOptions {
   colors: ProductAttributeOption[];
   textures: ProductAttributeOption[];
   matTypes: ProductAttributeOption[];
+  patterns?: ProductAttributeOption[];
+  patternModes?: ProductAttributeOption[];
 }
 export interface ProductAttributes {
+  lengthMm?: null | number;
+  widthMm?: null | number;
   colorMode?: null | ProductColorMode;
   constructionType?: null | ProductConstructionType;
+  /** 新档案按颜色方式推导名义层厚；历史显式结构没有此标记。 */
+  layerRule?: null | string;
   finishedThicknessMm?: null | number;
   frontThicknessMm?: null | number;
   backThicknessMm?: null | number;
+  patternMode?: null | ProductPatternMode;
+  patternCode?: null | string;
+  /** 激光图案的生产版本；历史未确认的版本不自动补值。 */
+  patternVersion?: null | string;
+  baseSkuKey?: null | string;
+  finishedSignature?: null | string;
+  configurationReady?: boolean;
   productStage?: null | string;
   productStageLabel?: null | string;
   /** 查询时从已关联工序物料解析的有效阶段；不作为档案编辑保存值。 */
@@ -171,9 +185,12 @@ export interface ProductImportRow {
   rowNumber: number;
   code: string;
   name: string;
-  status: 'ERROR' | 'IMPORTED' | 'READY' | 'SKIPPED';
+  status: 'ERROR' | 'IMPORTED' | 'READY' | 'REUSE' | 'REUSED' | 'SKIPPED';
   message: string;
   productId?: string;
+  baseSkuKey?: string;
+  finishedSignature?: string;
+  configurationReady?: boolean;
   values: Partial<
     Pick<
       Product,
@@ -191,6 +208,7 @@ export interface ProductImportRow {
       | 'size'
       | 'specification'
       | 'unit'
+      | 'weight'
     >
   > &
     ProductAttributes;
@@ -203,8 +221,61 @@ export interface ProductImportResult {
   createdCount: number;
   skippedCount: number;
   errorCount: number;
+  reusedCount?: number;
   warnings: string[];
   rows: ProductImportRow[];
+}
+
+/** 合同逐行配置与档案导入共用的完整生产配置，不使用颜色/纹路展示名判重。 */
+export interface ProductConfiguration {
+  name: string;
+  lengthMm?: null | number;
+  widthMm?: null | number;
+  finishedThicknessMm?: null | number;
+  colorMode?: null | ProductColorMode;
+  frontColor?: null | string;
+  backColor?: null | string;
+  textureFront?: null | string;
+  textureBack?: null | string;
+  patternMode?: null | ProductPatternMode;
+  patternCode?: null | string;
+  patternVersion?: null | string;
+}
+export interface ProductConfigurationItem {
+  lineId: string;
+  sourceProductId: string;
+  expectedVersion: number;
+  configuration: ProductConfiguration;
+}
+export interface ProductConfigurationReq {
+  companyId: number;
+  idempotencyKey?: string;
+  items: ProductConfigurationItem[];
+}
+export interface ProductConfigurationResult {
+  items: {
+    baseSkuKey?: string;
+    configuration: null | ProductConfiguration;
+    errors: string[];
+    finishedSignature?: string;
+    lineId: string;
+    outcome: 'CREATE' | 'INVALID' | 'REUSE';
+    product?: Product;
+  }[];
+}
+export function previewProductConfigurations(data: ProductConfigurationReq) {
+  return requestClient.post<ProductConfigurationResult>(
+    `${base}/configurations/preview`,
+    data,
+  );
+}
+export function resolveProductConfigurations(
+  data: ProductConfigurationReq & { idempotencyKey: string },
+) {
+  return requestClient.post<ProductConfigurationResult>(
+    `${base}/configurations/resolve`,
+    data,
+  );
 }
 export function downloadProductImportTemplate(companyId = 0) {
   return requestClient.download<Blob>(`${base}/import-template`, {

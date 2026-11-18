@@ -393,6 +393,10 @@ export namespace FdmgongchangStageStockApi {
   }
 
   export interface Order {
+    /** 服务端冻结的单色自动规则允许压花仅加热缩厚。 */
+    allowPlainEmboss?: boolean;
+    /** 当前工序关联订单已确认并冻结的制造规则；旧单为空。 */
+    layerRule?: null | string;
     /** 本工序计划产出；开片厚度已经换算为单层厚度。 */
     outputAttrs?: ItemAttrs | null;
     scheduleTaskId?: null | number;

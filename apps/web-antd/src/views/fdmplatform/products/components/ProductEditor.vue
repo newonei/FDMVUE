@@ -31,7 +31,13 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { errorText } from '../../data';
 import { categoryOptions } from '../category-model';
-import { manufacturingError, manufacturingPayload } from '../manufacturing';
+import {
+  COLOR_DERIVED_LAYER_RULE,
+  colorDerivedStage,
+  manufacturingError,
+  manufacturingPayload,
+  usesColorDerivedLayers,
+} from '../manufacturing';
 import { missingProductFields } from '../model';
 import ProductManufacturingFields from './ProductManufacturingFields.vue';
 import ProductStageSelect from './ProductStageSelect.vue';
@@ -44,6 +50,18 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; saved: [product: Product] }>();
 const form = reactive<Record<string, string>>({});
 const manufacturing = ref<ProductAttributes>({});
+const deriveLayers = computed(() =>
+  usesColorDerivedLayers({
+    ...manufacturing.value,
+    productStage: form.productStage,
+  }),
+);
+const layerStageError = computed(() =>
+  manufacturing.value.layerRule === COLOR_DERIVED_LAYER_RULE &&
+  !colorDerivedStage({ productStage: form.productStage })
+    ? '当前档案采用成品自动层厚规则，请保留成品阶段；中间物料需使用对应的独立物料档案。'
+    : '',
+);
 const active = ref(false);
 const loading = ref(false);
 const panelError = ref('');
@@ -91,7 +109,7 @@ const fields = [
   ['categoryId', '产品类别'],
   ['unit', '单位'],
   ['displayName', '销售展示名称'],
-  ['size', '尺寸'],
+  ['size', '尺寸原文（补充）'],
   ['shape', '形状'],
   ['packaging', '标准包装'],
   ['imageUrl', '产品图片地址'],
@@ -143,8 +161,11 @@ watch(
       );
     active.value = props.product?.active ?? false;
     manufacturing.value = {
+      lengthMm: props.product?.lengthMm,
+      widthMm: props.product?.widthMm,
       colorMode: props.product?.colorMode ?? 'UNKNOWN',
       constructionType: props.product?.constructionType ?? 'UNKNOWN',
+      layerRule: props.product?.layerRule,
       colorCode: props.product?.colorCode,
       colorCodeLabel: props.product?.colorCodeLabel,
       frontColor: props.product?.frontColor,
@@ -154,6 +175,9 @@ watch(
       finishedThicknessMm: props.product?.finishedThicknessMm,
       frontThicknessMm: props.product?.frontThicknessMm,
       backThicknessMm: props.product?.backThicknessMm,
+      patternMode: props.product?.patternMode ?? 'UNKNOWN',
+      patternCode: props.product?.patternCode,
+      patternVersion: props.product?.patternVersion,
     };
     key.value = newIdempotencyKey();
     panelError.value = '';
@@ -173,7 +197,11 @@ async function save() {
     panelError.value = '请选择产品分类；没有合适的分类可先在“产品分类”中新增';
     return;
   }
-  const structureError = manufacturingError(manufacturing.value);
+  const structureError =
+    layerStageError.value ||
+    manufacturingError(manufacturing.value, {
+      deriveLayers: deriveLayers.value,
+    });
   if (structureError) {
     panelError.value = structureError;
     return;
@@ -184,7 +212,9 @@ async function save() {
     const { spec, ...fieldsWithoutSpec } = form;
     const result = await saveProduct({
       ...fieldsWithoutSpec,
-      ...manufacturingPayload(manufacturing.value),
+      ...manufacturingPayload(manufacturing.value, {
+        deriveLayers: deriveLayers.value,
+      }),
       specification: spec,
       active: active.value,
       companyId: props.companyId,
@@ -221,7 +251,7 @@ async function save() {
       <Alert
         type="info"
         show-icon
-        message="在产品中心建立和维护本业务产品。规格、单位、包装等填写一次，创建合同时直接选择带入；资料未齐可先保存，启用后供业务选用。"
+        message="每行产品档案对应一个具体 SKU。名称、长宽厚、单双色、正反颜色或纹路、雕刻图案和生产版本不同，需要独立核对配置；资料未齐可先保存，补齐后用于合同选品。"
       />
       <h3 class="section-title">基本资料</h3>
       <Form layout="vertical" class="product-fields">
@@ -266,12 +296,20 @@ async function save() {
       </Form>
       <ProductManufacturingFields
         v-model:value="manufacturing"
+        :derive-layers="deriveLayers"
         :colors="attributeOptions.colors"
+        :patterns="attributeOptions.patterns ?? []"
+      />
+      <Alert
+        v-if="layerStageError"
+        type="warning"
+        show-icon
+        :message="layerStageError"
       />
       <section class="production-section">
         <h3 class="section-title">生产分类与工艺属性</h3>
         <p class="section-hint">
-          先选大类，再选板材、开片板材、片材等具体类型。正反压花分别维护，未压花的一面可留空。
+          正反纹路分别维护，明确不压花请选择“无纹路”；留空表示尚未核实。先选生产大类，再选具体阶段和垫子类型。
         </p>
         <Form layout="vertical" class="product-fields">
           <Form.Item
@@ -294,7 +332,7 @@ async function save() {
               :aria-label="title"
               :placeholder="
                 field.startsWith('texture')
-                  ? '不压花 / 选择压花纹路'
+                  ? '未核实 / 选择纹路或无纹路'
                   : '请选择（选填）'
               "
               show-search

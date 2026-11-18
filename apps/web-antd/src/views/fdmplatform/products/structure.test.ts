@@ -10,6 +10,75 @@ import {
 } from './structure';
 
 describe('单据产品结构', () => {
+  it('新规则区分成品名义层与开片建议，历史显式层厚不套用余量', () => {
+    for (const [value, nominal, slice] of [
+      [
+        {
+          colorMode: 'DUAL',
+          constructionType: 'DOUBLE_LAYER',
+          finishedThicknessMm: 6,
+          frontThicknessMm: 3,
+          backThicknessMm: 3,
+          layerRule: 'COLOR_DERIVED_V1',
+        },
+        '正面 3 mm + 反面 3 mm',
+        '正面 3.2 mm + 反面 3.2 mm',
+      ],
+      [
+        {
+          colorMode: 'SINGLE',
+          constructionType: 'DOUBLE_LAYER',
+          finishedThicknessMm: 6,
+          frontThicknessMm: 2,
+          backThicknessMm: 4,
+        },
+        '正面 2 mm + 反面 4 mm',
+        '',
+      ],
+    ] as const) {
+      const host = document.createElement('div');
+      const app = createApp({
+        render: () =>
+          h(ProductStructureDetails, {
+            expanded: true,
+            value: productStructure(value),
+          }),
+      });
+      app.mount(host);
+      expect(host.textContent).toContain(nominal);
+      expect(host.textContent?.includes('开片厚度')).toBe(slice.length > 0);
+      expect(host.textContent).toContain(slice);
+      app.unmount();
+    }
+  });
+  it('只保留来源中冻结的毫米尺寸和图案版本，忽略字符串伪数字', () => {
+    const value = productStructure({
+      lengthMm: 1830.5,
+      widthMm: 610,
+      finishedThicknessMm: 6,
+      patternMode: 'LASER',
+      patternCode: 'FLOWER',
+      patternVersion: 'V3',
+      configurationReady: true,
+    });
+    expect(value).toMatchObject({
+      lengthMm: 1830.5,
+      widthMm: 610,
+      finishedThicknessMm: 6,
+      patternCode: 'FLOWER',
+      patternVersion: 'V3',
+      configurationReady: true,
+    });
+    expect(structureDetails(value)).toContainEqual({
+      label: '尺寸',
+      value: '1830.5 × 610 × 6 mm',
+    });
+    expect(structureDetails(value)).toContainEqual({
+      label: '雕刻 / 图案版本',
+      value: '激光雕刻 · FLOWER · V3',
+    });
+    expect(productStructure({ lengthMm: '1830' }).lengthMm).toBeUndefined();
+  });
   it('保留方向编码及标签，非结构化颜色不推测为正反面', () => {
     const structure = productStructure({
       color: '粉色/灰色',

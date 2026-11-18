@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { ProductAttributes } from '#/api/fdmplatform/products';
 
-import { colorModeText, constructionText } from '../manufacturing';
+import {
+  colorModeText,
+  constructionText,
+  productSliceThicknessText,
+} from '../manufacturing';
 
 defineProps<{ construction?: boolean; value: ProductAttributes }>();
 </script>
@@ -39,6 +43,9 @@ defineProps<{ construction?: boolean; value: ProductAttributes }>();
       <div v-if="value.constructionType === 'DOUBLE_LAYER'">
         正面层 {{ value.frontThicknessMm ?? '未维护' }} mm + 反面层
         {{ value.backThicknessMm ?? '未维护' }} mm
+      </div>
+      <div v-if="productSliceThicknessText(value)">
+        开片厚度：{{ productSliceThicknessText(value) }}
       </div>
     </template>
   </div>

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig, saveItemProductionConfigBatch } from '#/api/fdmgongchang/production-order';
 
-import { productionBatchConfig, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
+import { productionBatchConfig, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, productionThicknessRouteNotice, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
 import ConfigModal from './item-production-config-modal.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
@@ -62,6 +62,43 @@ beforeEach(() => {
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; });
 
 describe('production configuration values', () => {
+  it('derives nominal layers only from the applicable frozen rule and never saves cutting allowance as nominal thickness', () => {
+    const source = product({ sourceLayerRule: 'COLOR_DERIVED_V1' });
+    const draft = productionConfigDraft(source);
+    expect(draft).toMatchObject({ constructionType: 'DOUBLE_LAYER', frontThicknessMm: 3, backThicknessMm: 3 });
+    expect(productionConfigTarget(10, draft)).toMatchObject({ thickness: 0.6, frontThickness: 0.3, backThickness: 0.3 });
+    draft.colorMode = 'SINGLE';
+    expect(productionConfigTarget(10, draft)).toMatchObject({ constructionType: 'SINGLE_LAYER', frontThickness: 0.6, backThickness: null });
+    expect(productionConfigTarget(10, draft)).not.toHaveProperty('layerRule');
+    expect(productionConfigDraft({ ...source, targetConfirmedAt: '2026-11-18', targetLayerRule: null })).toMatchObject({ frontThicknessMm: 2, backThicknessMm: 4 });
+    expect(productionConfigDraft(product({ targetConfirmedAt: '2026-11-18', targetLayerRule: 'COLOR_DERIVED_V1' }))).toMatchObject({ frontThicknessMm: 3, backThicknessMm: 3 });
+  });
+  it('applies batch colors using each destination rule while preserving its final thickness', () => {
+    const source = { ...productionConfigDraft(product()), colorMode: 'SINGLE' as const };
+    expect(productionBatchConfig(product({ sourceLayerRule: 'COLOR_DERIVED_V1', targetThickness: 0.8 }), source, ['colorMode']).target)
+      .toMatchObject({ colorMode: 'SINGLE', constructionType: 'SINGLE_LAYER', thickness: 0.8, frontThickness: 0.8, backThickness: null });
+    expect(productionBatchConfig(product({ targetConfirmedAt: '2026-11-18', sourceLayerRule: 'COLOR_DERIVED_V1' }), source, ['colorMode']).target)
+      .toMatchObject({ colorMode: 'SINGLE', constructionType: 'DOUBLE_LAYER', frontThickness: 0.2, backThickness: 0.4 });
+  });
+  it('requires shrinkage only for selected preceding processes and accepts final-thickness stock at later stages', () => {
+    const single = productionConfigDraft(product({ sourceLayerRule: 'COLOR_DERIVED_V1', targetColorMode: 'SINGLE' }));
+    for (const step of ['MIX', 'SLICE', 'CUT']) {
+      expect(productionRouteProblems(single, [step, 'PACK'])).toContain('需要压花工序');
+      expect(productionRouteProblems(single, [step, 'EMBOSS', 'PACK'])).toBe('');
+    }
+    expect(productionRouteProblems(single, ['LAMINATE', 'EMBOSS'])).toContain('单层产品不需要贴合');
+    expect(productionRouteProblems(single, ['PUNCH', 'ENGRAVE', 'PACK'])).toBe('');
+    expect(productionThicknessRouteNotice(single, ['PUNCH', 'PACK'])).toContain('实际领料厚度必须已达到成品厚度');
+    expect(productionThicknessRouteNotice(single, ['EMBOSS', 'PACK'])).toBe('');
+    const dual = { ...single, colorMode: 'DUAL' as const };
+    for (const step of ['MIX', 'SLICE', 'CUT']) {
+      expect(productionRouteProblems(dual, [step, 'EMBOSS'])).toContain('需要贴合工序');
+      expect(productionRouteProblems(dual, [step, 'LAMINATE'])).toBe('');
+    }
+    expect(productionRouteProblems(dual, ['EMBOSS', 'PUNCH', 'PACK'])).toBe('');
+    expect(productionThicknessRouteNotice(dual, ['EMBOSS', 'PACK'])).toContain('实际领料厚度必须已达到成品厚度');
+    expect(productionRouteProblems('DOUBLE_LAYER', ['PUNCH', 'PACK'])).toContain('需要贴合工序');
+  });
   it('copies only selected fields and keeps each target product dimensions, structure and route', () => {
     const source = productionConfigDraft(product({ targetFrontColor: 'RED', targetBackColor: 'GREEN', targetTextureFront: 'WAVE' }));
     const target = product({ id: 11, routeId: 6, targetLength: 190, targetWidth: 80, targetColorMode: 'SINGLE', targetConstructionType: 'SINGLE_LAYER', processes: ['SLICE', 'PUNCH', 'PACK'] });
@@ -124,6 +161,27 @@ describe('production configuration values', () => {
 });
 
 describe('production configuration modal', () => {
+  it('shows automatic layers and cutting thickness without editable layer inputs for a new-rule item', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({ sourceLayerRule: 'COLOR_DERIVED_V1' })));
+    mountModal(); await flush();
+    expect(document.querySelector('#config-construction')).toBeNull();
+    expect(document.querySelector('#config-front-thickness')).toBeNull();
+    expect(document.querySelector('#config-back-thickness')).toBeNull();
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 3 mm + 反面 3 mm');
+    expect(document.querySelector('.config-slice-thickness')!.textContent).toContain('正面 3.2 mm + 反面 3.2 mm');
+    await input('config-thickness', '8');
+    expect(document.querySelector('.config-layer')!.textContent).toContain('正面 4 mm + 反面 4 mm');
+    expect(document.querySelector('.config-slice-thickness')!.textContent).toContain('正面 4.2 mm + 反面 4.2 mm');
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ thickness: 0.8, frontThickness: 0.4, backThickness: 0.4 }) }));
+  });
+  it('accepts post-shrink routes with final-thickness stock and explains that requirement', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({ targetConfirmedAt: '2026-11-18', targetLayerRule: 'COLOR_DERIVED_V1', processes: ['ENGRAVE', 'PACK'] })));
+    mountModal(); await flush();
+    expect(document.body.textContent).toContain('实际领料厚度必须已达到成品厚度');
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({ processes: ['ENGRAVE', 'PACK'] }));
+  });
   it('saves the source and selected parameter copies atomically while preserving target route and dimensions', async () => {
     vi.mocked(getProductionOrder).mockResolvedValue({ ...order(), items: [product(), product({ id: 11, productCode: 'P002', routeId: 6, targetLength: 190, targetWidth: 80, targetFrontColor: 'LAN' })] });
     const { saved } = mountModal(); await flush();
