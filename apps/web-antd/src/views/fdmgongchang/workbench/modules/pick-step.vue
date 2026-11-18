@@ -3,7 +3,7 @@ import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/s
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-import { Alert, Checkbox, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
+import { Alert, Empty, Input, InputNumber, message, Select, Spin } from 'ant-design-vue';
 
 import { getWorkbenchRecipePlan, getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang/workbench';
 
@@ -190,10 +190,6 @@ watch([recipeCode, batches], () => {
 });
 
 function next() {
-  if (job.urgent && job.sourceStage === 'BOARD' && !job.urgentReason.trim()) {
-    message.warning('勾了加急要写原因');
-    return;
-  }
   if (planThicknessError.value) {
     message.warning(planThicknessError.value);
     return;
@@ -449,17 +445,6 @@ function next() {
               </tr>
             </tbody>
           </table>
-        </section>
-        <section v-if="job.sourceStage === 'BOARD' && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
-          <Checkbox v-model:checked="job.urgent">加急：要用刚发泡、还在静置的板材</Checkbox>
-          <Input
-            v-if="job.urgent"
-            id="urgent-reason"
-            v-model:value="job.urgentReason"
-            :maxlength="200"
-            placeholder="写原因，例如：客户加急，下午要出货"
-          />
-          <p class="m-0 text-xs text-muted-foreground">板材一般发泡第二天才用；领了还在静置的板，提交时会提示，勾加急写原因后就能领，原因会记进异常台账。</p>
         </section>
         <section v-if="job.prepare && job.auxPicks.length > 0" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           <h3 class="m-0 text-sm font-bold">辅料（按订单用量带出，改成实际领的）</h3>

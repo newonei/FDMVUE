@@ -70,6 +70,7 @@ describe('factory setting page', () => {
     expect(mocks.setFactory).toHaveBeenCalledWith(1);
     expect(document.body.textContent).toContain('黄石工厂');
     expect(document.body.textContent).toContain('产出已雕刻成品');
+    expect(document.body.textContent).not.toContain('板材静置');
     const engrave = [
       ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
     ].find((c) => c.value === 'ENGRAVE');
@@ -82,7 +83,6 @@ describe('factory setting page', () => {
     expect(mocks.save).toHaveBeenCalledWith({
       capacities: { ENGRAVE: null, MIX: null, PACK: null, SLICE: null },
       enabledProcesses: ['MIX', 'SLICE', 'PACK'],
-      boardRestDays: 1,
       reportCloseTime: '',
       reportTolerance: 5,
       rules: {},

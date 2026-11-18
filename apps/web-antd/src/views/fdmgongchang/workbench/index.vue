@@ -146,8 +146,6 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   job.prepare = undefined;
   job.auxPicks = [];
   job.sheets = [];
-  job.urgent = false;
-  job.urgentReason = '';
   job.onBehalfOf = undefined;
   job.requestKey = buildUUID();
 }
@@ -216,15 +214,7 @@ function createPayload(finish: boolean) {
     productionOrderItemId: job.task ? undefined : job.productionItem?.id,
     scheduleTaskId: job.task?.id,
     sourceStage: job.sourceStage,
-    ...urgentPayload(),
   };
-}
-
-/** 领板材时勾了加急才带上。 */
-function urgentPayload() {
-  return job.urgent && job.sourceStage === 'BOARD'
-    ? { urgent: true, urgentReason: job.urgentReason.trim() }
-    : {};
 }
 
 function piecePayload() {
@@ -258,7 +248,6 @@ async function issueOnly() {
             requestKey: job.requestKey,
             sourceStage: job.sourceStage,
             taskId: job.task.id,
-            ...urgentPayload(),
           });
     } else {
       await createWorkbenchOrder(createPayload(false));
@@ -415,7 +404,6 @@ async function reportTask(duplicateAction?: 'APPEND'): Promise<void> {
       recipeBatches: job.process?.code === 'MIX' ? job.recipe?.batches : undefined,
       recipeCode: job.process?.code === 'MIX' ? job.recipe?.code : undefined,
       sourceStage: job.sourceStage,
-      ...urgentPayload(),
     }),
   };
   try {

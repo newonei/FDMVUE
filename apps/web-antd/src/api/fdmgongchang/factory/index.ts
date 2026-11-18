@@ -239,8 +239,6 @@ export namespace FdmgongchangFactorySettingApi {
   }
 
   export interface Setting {
-    /** 板材静置天数：发泡后几天才能开片，0 表示不限制。 */
-    boardRestDays?: number;
     /** 收工时间 HH:mm，空表示不提醒。 */
     reportCloseTime?: string;
     /** 多报容差（%）。 */
@@ -267,8 +265,6 @@ export namespace FdmgongchangFactorySettingApi {
     capacities?: Record<string, Capacity | null>;
     /** 发泡出板规格；长宽厚都空表示清掉。 */
     mixBoard?: MixBoard;
-    /** 板材静置天数（0-30）。 */
-    boardRestDays?: number;
     reportCloseTime?: string;
     reportTolerance?: number;
     /** 检查规则级别（规则编码 → 级别）。 */

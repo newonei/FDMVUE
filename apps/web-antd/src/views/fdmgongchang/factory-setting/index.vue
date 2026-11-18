@@ -104,8 +104,6 @@ function crewText(code: string) {
 const MIX_FIELDS = ['length', 'width', 'thickness', 'boardsPerBatch'] as const;
 type MixField = (typeof MIX_FIELDS)[number];
 const mixBoard = ref<Record<MixField, null | number>>({ boardsPerBatch: null, length: null, thickness: null, width: null });
-/** 板材静置天数：发泡后几天才能开片。 */
-const restDays = ref<number>(1);
 /** 收工时间（HH:mm，空为不提醒）、多报容差（%）。 */
 const closeTime = ref('');
 /** 检查规则级别（规则编码 → 级别）。 */
@@ -176,7 +174,6 @@ const dirty = computed(() => {
     modelId.value !== savedModelId.value ||
     fillPrompt.value.trim() !== savedFillPrompt.value.trim() ||
     MIX_FIELDS.some((k) => mixBoard.value[k] !== savedMix(k)) ||
-    restDays.value !== (setting.value?.boardRestDays ?? 1) ||
     closeTime.value.trim() !== (setting.value?.reportCloseTime ?? '') ||
     tolerance.value !== (setting.value?.reportTolerance ?? 5) ||
     Object.entries(savedRules.value).some(([code, level]) => rules.value[code] !== level)
@@ -203,7 +200,6 @@ async function load() {
     modelId.value = savedModelId.value;
     fillPrompt.value = savedFillPrompt.value;
     mixBoard.value = Object.fromEntries(MIX_FIELDS.map((k) => [k, savedMix(k)])) as Record<MixField, null | number>;
-    restDays.value = setting.value.boardRestDays ?? 1;
     closeTime.value = setting.value.reportCloseTime ?? '';
     tolerance.value = setting.value.reportTolerance ?? 5;
     rules.value = { ...savedRules.value };
@@ -262,7 +258,6 @@ async function save() {
       ),
       enabledProcesses: order.filter((code) => enabled.value.includes(code)),
       mixBoard: { ...mixBoard.value },
-      boardRestDays: restDays.value,
       reportCloseTime: closeTime.value.trim(),
       reportTolerance: tolerance.value,
       rules: { ...rules.value },
@@ -468,21 +463,6 @@ async function save() {
           <p class="m-0 text-xs text-muted-foreground">
             每锅出几张不填时，按配方一锅的重量 × 出材率 ÷（板材体积 × 配方密度）估算。
           </p>
-          <label for="board-rest-days" class="flex flex-wrap items-center gap-1 text-sm">
-            板材静置
-            <InputNumber
-              id="board-rest-days"
-              v-model:value="restDays"
-              :disabled="!canEdit"
-              :min="0"
-              :max="30"
-              :precision="0"
-              :style="{ width: '5rem' }"
-              size="small"
-            />
-            天后才能开片
-            <span class="text-xs text-muted-foreground">（1 = 第二天用；0 = 不限制。领了还在静置的板要选加急写原因）</span>
-          </label>
           <label for="report-close-time" class="flex flex-wrap items-center gap-1 text-sm">
             收工时间
             <Input

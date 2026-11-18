@@ -87,8 +87,6 @@ export namespace FdmgongchangWorkbenchApi {
     remark?: string;
     requestKey?: string;
     onBehalfOf?: number;
-    urgent?: boolean;
-    urgentReason?: string;
     sourceStage: string;
     taskId: number;
   }
@@ -109,9 +107,6 @@ export namespace FdmgongchangWorkbenchApi {
     remark?: string;
     sourceStage?: string;
     taskId: number;
-    /** 加急：领用还在静置期的板材（一般发泡第二天才用），要写原因。 */
-    urgent?: boolean;
-    urgentReason?: string;
     /** 防重复提交的键：同一个键只报一次（页面重发、点两次）。 */
     requestKey?: string;
     /** 组长代报：替谁报（用户编号）。 */

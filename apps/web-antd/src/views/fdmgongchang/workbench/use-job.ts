@@ -77,9 +77,6 @@ export function createJob() {
     requestKey: '',
     /** 组长代报：替谁报。 */
     onBehalfOf: undefined as undefined | { id: number; name: string },
-    /** 加急：领用还在静置期的板材（一般发泡第二天才用）。 */
-    urgent: false,
-    urgentReason: '',
   });
 }
 

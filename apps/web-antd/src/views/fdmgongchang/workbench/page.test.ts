@@ -650,6 +650,7 @@ describe('workbench page', () => {
     expect(document.body.textContent).toContain('选择实际领料批次');
     expect(document.body.textContent).toContain('1900×1300×48 mm');
     expect(document.body.textContent).toContain('账面 180');
+    expect(document.body.textContent).not.toContain('加急');
     fill('pick-11', 52);
     await flush();
     clickButton('下一步：确认领料');
@@ -662,6 +663,8 @@ describe('workbench page', () => {
       taskId: 31, sourceStage: 'BOARD', inputs: [{ laminationSide: undefined, quantity: 52, stockId: 11 }],
       issueSheetUrls: [], requestKey: expect.any(String),
     }));
+    expect(mocks.issue.mock.calls[0]?.[0]).not.toHaveProperty('urgent');
+    expect(mocks.issue.mock.calls[0]?.[0]).not.toHaveProperty('urgentReason');
     expect(mocks.report).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('领料开工完成');
     clickButton('回任务列表');
@@ -1255,30 +1258,6 @@ describe('workbench page', () => {
     const labels = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim());
     expect(labels).not.toContain('接单');
     expect(labels).not.toContain('退单');
-  });
-
-  it('requires an urgent reason and sends it when issuing resting boards', async () => {
-    await mount();
-    clickButton('领料开工');
-    await flush();
-    document.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
-    await flush();
-    clickButton('下一步：确认领料');
-    await flush();
-    expect(document.querySelector('#urgent-reason')).not.toBeNull();
-    expect(document.body.textContent).not.toContain('第 2 步 确认领料');
-    fill('urgent-reason', '客户加急，下午出货');
-    await flush();
-    clickButton('下一步：确认领料');
-    await flush();
-    clickButton('模拟拍照');
-    await flush();
-    clickButton('确认领料');
-    await flush();
-    expect(mocks.issue).toHaveBeenCalledWith(expect.objectContaining({
-      urgent: true, urgentReason: '客户加急，下午出货', taskId: 31,
-    }));
-    expect(mocks.report).not.toHaveBeenCalled();
   });
 
   it('issues a team task for the selected worker instead of the supervisor', async () => {
