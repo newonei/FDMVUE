@@ -10,7 +10,7 @@ import { getWorkbenchMates, matchWorkbenchWage } from '#/api/fdmgongchang/workbe
 import ImageUpload from '#/components/upload/image-upload.vue';
 
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
-import { formatQty, makeLabels, toNumber } from '../../stage-stock/model';
+import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { defectTotal, goodTotal, stageOf, useJob } from '../use-job';
 import StepHeader from './step-header.vue';
 
@@ -18,10 +18,16 @@ import StepHeader from './step-header.vue';
  * 开片按本次良品体积统一计价并由参与人员均分；其他工序按各自计价项目登记。
  * 按任务报工时还要拍纸质领料单。
  */
+import '../../shared/report-spec.css';
+
 const props = defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{ back: []; submit: [] }>();
 const job = useJob();
 const labels = computed(() => makeLabels(job.options));
+const outputSpecs = computed(() => [...new Set(job.outputs
+  .filter((line) => (toNumber(line.goodQuantity) ?? 0) + (toNumber(line.defectQuantity) ?? 0) > 0)
+  .map((line) => attrSummary(job.process?.outputStage ?? '', line.attrs, labels.value, [], 'mm'))
+  .filter(Boolean))]);
 
 const matches = ref<FdmgongchangWageApi.Match[]>([]);
 const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
@@ -127,10 +133,11 @@ function addMate() {
     <Spin :spinning="loading">
       <main class="flex flex-1 flex-col gap-3 p-4">
         <section class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <b v-for="spec in outputSpecs" :key="spec" class="text-lg factory-report-spec">{{ spec }}</b>
           <b>本次良品 {{ formatQty(goodTotal(job)) }} {{ unit }} · 不良品 {{ formatQty(defectTotal(job)) }} {{ unit }}</b>
           <template v-if="job.process?.code === 'LAMINATE'">
             <div v-for="line in job.outputs.filter((output) => output.laminateLayers)" :key="line.key" class="text-sm">
-              <div v-for="layer in line.laminateLayers" :key="layer.side">{{ layer.side === 'FRONT' ? '正面' : '反面' }} {{ labels.color(layer.color) }}：片材残次 {{ formatQty(layer.defectQuantity) }} 片</div>
+              <div v-for="layer in line.laminateLayers" :key="layer.side"><b class="factory-report-spec">{{ layer.side === 'FRONT' ? '正面' : '反面' }} {{ labels.color(layer.color) }}</b> · 片材残次 {{ formatQty(layer.defectQuantity) }} 片</div>
             </div>
           </template>
           <span class="text-sm">{{ job.task?.contractCode || job.order?.orderNo || '本批生产' }}<template v-if="job.task"> · 任务 #{{ job.task.id }}</template></span>

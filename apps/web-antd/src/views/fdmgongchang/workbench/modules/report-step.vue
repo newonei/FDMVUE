@@ -3,7 +3,6 @@ import { computed, ref } from 'vue';
 
 import { Alert, InputNumber } from 'ant-design-vue';
 
-import { dimensionTextInMm } from '../../shared/dimensions';
 import LaminationCounters from '../../shared/lamination-counters.vue';
 import { quantityPrecision } from '../../shared/quantity';
 import {
@@ -16,25 +15,26 @@ import {
   validateOutputs,
 } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
-import { changeReportDefect, changeReportGood } from '../report-quantity';
-import { goodTotal, jobAllowsPlainEmboss, outputPayload, slicePlanThicknessError, stageOf, useJob } from '../use-job';
-import BigCounter from './big-counter.vue';
+import { reportErrors } from '../report-quantity';
+import { goodTotal, jobAllowsPlainEmboss, slicePlanThicknessError, stageOf, useJob } from '../use-job';
+import ReportQuantityFields from './report-quantity-fields.vue';
 import StepHeader from './step-header.vue';
+
+import '../../shared/report-spec.css';
 
 /**
  * 报实际产出：良品与不良品分别登记，规格按本工序计划和已领材料带出；
  * 这批做完了还是先报一部分；做完时可以把没用完的料退回去。
  */
-const emit = defineEmits<{ back: []; next: [] }>();
+defineProps<{ orderActions?: boolean }>();
+const emit = defineEmits<{ back: []; next: []; supplement: [] }>();
+
 const job = useJob();
 const labels = computed(() => makeLabels(job.options));
 const output = computed(() => stageOf(job, job.process?.outputStage));
 const outputUnit = computed(() => output.value?.unit ?? job.process?.outputUnit ?? job.task?.unit);
 const source = computed(() => stageOf(job, job.sourceStage));
 const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
-const reportedBefore = computed(() => job.order?.reportCount ?? 0);
-const plannedAttrs = computed(() => job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.prepare?.targetAttrs);
-const plannedSpec = computed(() => plannedAttrs.value ? attrSummary(job.process?.outputStage ?? '', plannedAttrs.value, labels.value, [], 'mm') : dimensionTextInMm(job.task?.spec));
 const allowPlainEmboss = computed(() => jobAllowsPlainEmboss(job));
 
 /** 目标规格不全时展开填写；开片仅填写单层厚度。 */
@@ -57,9 +57,7 @@ const inputColors = computed(
 );
 
 function next() {
-  const closingOnly = !job.createFinish && job.finish && reportedBefore.value > 0 && outputPayload(job).length === 0;
-  errors.value = closingOnly ? [] : validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs, { allowPlainEmboss: allowPlainEmboss.value });
-  if (!closingOnly && planThicknessError.value) errors.value.push(planThicknessError.value);
+  errors.value = reportErrors(job);
   if (errors.value.length > 0) return;
   emit('next');
 }
@@ -68,130 +66,100 @@ function next() {
 <template>
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
-      :current="1"
-      :subtitle="`领了 ${job.inputs.map((l) => `${attrSummary(l.stock.stage, l.stock.item, labels, [], 'mm') || l.stock.itemCode} ${formatQty(l.quantity)}`).join(' · ')} ${source?.unit ?? ''}`"
       :title="`${job.process?.label} · 报本工序实际产出`"
-      :total="2"
       @back="emit('back')"
     />
-    <main class="flex flex-1 flex-col gap-3 p-4">
-      <p v-if="job.onBehalfOf" class="m-0 rounded-md bg-warning/10 p-2.5 text-xs text-warning">
-        正在替 {{ job.onBehalfOf.name }} 报工：工序单和计件记在他名下，备注写你代报。
-      </p>
-      <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
-      <p v-if="job.process?.code === 'FOLD'" class="m-0 rounded-md border border-border p-3 text-sm" :class="job.task?.output?.foldingType ? '' : 'text-warning'">{{ job.task?.output?.foldingType ? `折叠要求：${job.task.output.foldingType}。请按任务要求核对实物。` : '折叠要求未确认，请联系主任' }}</p>
-      <section v-if="job.task" class="flex flex-col gap-1 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
-        <b>计划产出：{{ job.prepare?.outputLabel || output?.label }} {{ formatQty(job.task.quantity) }} {{ job.prepare?.outputUnit || job.task.unit }}</b>
-        <span v-if="plannedSpec">计划规格：{{ plannedSpec }}</span>
-        <span class="text-xs text-muted-foreground">关联订单产品：{{ job.task.product || '备货' }}。以下仅登记本次新产出的良品和不良品，领料已在开工时扣减。</span>
-      </section>
-      <p v-if="reportedBefore > 0" class="m-0 rounded-md bg-primary/10 p-2.5 text-xs text-primary">
-        这张单已经报过 {{ reportedBefore }} 次，共 {{ formatQty(job.order?.goodQuantity) }} {{ output?.unit }}，这次只报新做的。
-      </p>
-      <div v-for="(line, index) in job.outputs" :key="line.key" class="flex flex-col gap-3">
-        <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
-        <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
-          <span class="text-sm font-bold">
-            本次良品（{{ output?.unit }}）<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
-          </span>
-          <BigCounter :id="`good-${line.key}`" :model-value="line.goodQuantity" label="好的数量" :precision="quantityPrecision(outputUnit)" @update:model-value="changeReportGood(line, $event)" />
-          <span v-if="slicing" class="text-center text-xs text-primary">{{ sliceHint(job.inputs, job.outputs, line) }}</span>
-          <span v-else class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
-        </section>
-        <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
-          <span class="text-sm font-bold">本次不良品（{{ output?.unit }}）</span>
-          <BigCounter :id="`bad-${line.key}`" :model-value="line.defectQuantity" label="坏的数量" :precision="quantityPrecision(outputUnit)" size="medium" tone="danger" @update:model-value="changeReportDefect(line, $event)" />
-        </section>
-        </div>
-        <p v-if="!line.laminateLayers && line.reportTotal !== undefined" class="m-0 text-xs text-muted-foreground">填写不良品会自动扣减良品；只完成一部分时，可直接修改良品数量。</p>
-        <!-- 开片先核对板材规格，放在数量上面 -->
-        <section :class="slicing ? 'order-first border-primary/40' : 'border-border'" class="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-sm font-bold">实际产出：{{ output?.label }}</span>
-            <button v-if="editable.length > 0 && specErrors.length === 0 && !slicing" class="h-8 px-2 text-xs font-semibold text-primary" type="button" @click="editing = !editing">
-              {{ editing ? '收起' : '不对？改一下' }}
-            </button>
+    <form aria-label="报本工序实际产出" @submit.prevent="next">
+      <div class="flex flex-col gap-3 px-3 py-4 sm:px-4">
+        <p v-if="job.onBehalfOf" class="m-0 rounded-md bg-warning/10 p-2.5 text-sm">正在替 {{ job.onBehalfOf.name }} 报工</p>
+        <Alert v-if="planThicknessError" :message="planThicknessError" show-icon type="warning" />
+        <p v-if="job.process?.code === 'FOLD' && job.task" class="m-0 text-base font-bold factory-report-spec">
+          {{ job.task?.output?.foldingType ? `折叠要求：${job.task.output.foldingType}` : '折叠要求未确认，请联系主任' }}
+        </p>
+
+        <section v-for="line in job.outputs" :key="line.key" class="flex flex-col gap-3 border-b border-border pb-3">
+          <div class="flex flex-col gap-1">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <b class="text-base">实际产出：{{ output?.label || job.process?.outputLabel }}</b>
+              <button v-if="editable.length > 0 && specErrors.length === 0 && !slicing" class="min-h-11 rounded-md px-2 text-sm font-semibold text-primary hover:bg-muted" type="button" @click="editing = !editing">
+                {{ editing ? '收起规格' : '修改规格' }}
+              </button>
+            </div>
+            <span v-if="attrSummary(job.process?.outputStage ?? '', line.attrs, labels, [], 'mm')" class="text-lg font-bold factory-report-spec">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels, [], 'mm') }}</span>
+            <AttrFields
+              v-if="(slicing || showEditor) && editable.length > 0"
+              v-model="line.attrs"
+              :color-choices="job.process?.code === 'LAMINATE' ? inputColors : undefined"
+              :fields="editable"
+              :id-prefix="`wb-${line.key}`"
+              :options="job.options!"
+              dimension-unit="mm"
+            />
           </div>
-          <span class="text-sm">{{ attrSummary(job.process?.outputStage ?? '', line.attrs, labels, [], 'mm') || '—' }}</span>
-          <span v-if="slicing" class="text-xs text-muted-foreground">开片不会改变颜色，颜色固定沿用对应领料，不可修改。材质、配方和长宽沿用实际领料；厚度填写单层厚度，双色 6 mm 瑜伽垫开为两层各 3 mm，贴合后为 6 mm。</span>
-          <span v-else-if="job.process?.code === 'CUT'" class="text-xs text-muted-foreground">材质、配方、颜色和厚度沿用实际领料；仅填写本次立切产出的长、宽，单位 mm。</span>
-          <span v-if="specErrors.length > 0" class="text-xs text-warning">还差几个规格，请补上：</span>
-          <AttrFields
-            v-if="(slicing || showEditor) && editable.length > 0"
-            v-model="line.attrs"
-            :color-choices="job.process?.code === 'LAMINATE' ? inputColors : undefined"
-            :fields="editable"
-            :id-prefix="`wb-${line.key}`"
-            :options="job.options!"
-            dimension-unit="mm"
-          />
-          <span v-else class="text-xs text-muted-foreground">规格按本工序计划和已领物料带出，请核对实物</span>
+
+          <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
+          <template v-else>
+            <ReportQuantityFields :line="line" :unit="outputUnit" />
+            <p class="m-0 text-base tabular-nums" aria-live="polite">良品 <b>{{ formatQty(line.goodQuantity) }} {{ outputUnit }}</b></p>
+            <p v-if="slicing" class="m-0 text-sm text-muted-foreground">{{ sliceHint(job.inputs, job.outputs, line) }}</p>
+          </template>
         </section>
-      </div>
 
-      <section v-if="!job.createFinish" class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <p class="col-span-full m-0 text-xs text-muted-foreground">默认只报本次产出，之后还能继续报。确定这批全部做完时，再选择结束。</p>
-        <button
-          :class="job.finish ? 'border-2 border-primary' : 'border border-border'"
-          class="flex flex-col gap-0.5 rounded-md bg-card px-3 py-2 text-left"
-          type="button"
-          @click="job.finish = true"
-        >
-          <b class="text-sm">{{ job.prepare ? '全部做完，结束这个任务' : '全部做完，结束这批生产' }}</b>
-          <span class="text-xs text-muted-foreground">{{ job.prepare ? '任务算报完' : '结束这张单' }}</span>
-        </button>
-        <button
-          :class="!job.finish ? 'border-2 border-primary' : 'border border-border'"
-          class="flex flex-col gap-0.5 rounded-md bg-card px-3 py-2 text-left"
-          type="button"
-          @click="job.finish = false"
-        >
-          <b class="text-sm">先报这些，还没做完</b>
-          <span class="text-xs text-muted-foreground">{{ job.prepare ? '任务留着，明天接着报' : '单子留着，下次接着报' }}</span>
-        </button>
-      </section>
+        <details v-if="slicing && job.inputs.length > 0" class="text-sm text-muted-foreground">
+          <summary class="min-h-11 cursor-pointer content-center">查看板材规格</summary>
+          <p v-for="line in job.inputs" :key="line.stock.id" class="mb-1">
+            {{ attrSummary(line.stock.stage, line.stock.item, labels, [], 'mm') || line.stock.itemCode }} · {{ formatQty(line.quantity) }} {{ source?.unit }}
+          </p>
+          <p class="m-0">颜色沿用板材，厚度填写单层厚度。</p>
+        </details>
 
-      <section v-if="!job.createFinish && job.finish && job.order" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
-        <span class="text-sm font-bold">有没用完的料？填退回多少（没有就不用填）</span>
-        <div
-          v-for="input in (job.order.inputs ?? []).filter((i) => i.stage !== 'AUX')"
-          :key="input.id"
-          class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5"
-        >
-          <span class="flex min-w-0 flex-col">
-            <span class="text-sm font-semibold">{{ attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode }}</span>
-            <span class="text-xs text-muted-foreground">
-              批次 {{ input.batchNo }} · 最多退 {{ formatQty((toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)) }} {{ source?.unit }}
+        <label v-if="!job.createFinish" class="flex min-h-11 cursor-pointer items-center gap-3 text-base font-semibold">
+          <input v-model="job.finish" class="size-5 shrink-0 accent-primary" type="checkbox" />
+          全部做完，结束本次任务
+        </label>
+
+        <section v-if="!job.createFinish && job.finish && job.order" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
+          <span class="text-sm font-bold">有没用完的料？填退回多少（没有就不用填）</span>
+          <div
+            v-for="input in (job.order.inputs ?? []).filter((i) => i.stage !== 'AUX')"
+            :key="input.id"
+            class="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-1.5"
+          >
+            <span class="flex min-w-0 flex-col">
+              <span class="text-sm font-semibold">{{ attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode }}</span>
+              <span class="text-xs text-muted-foreground">
+                批次 {{ input.batchNo }} · 最多退 {{ formatQty((toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)) }} {{ source?.unit }}
+              </span>
             </span>
-          </span>
-          <InputNumber
-            :id="`return-${input.id}`"
-            :aria-label="`${attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode} 退回数量`"
-            :addon-after="source?.unit"
-            :max="(toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)"
-            :min="0"
-            :precision="quantityPrecision(source?.unit)"
-            :value="job.returns[input.id] ?? undefined"
-            class="w-40"
-            placeholder="退回数量"
-            @change="(v) => (job.returns[input.id] = v === null || v === undefined || v === '' ? null : Number(v))"
-          />
-        </div>
-      </section>
+            <InputNumber
+              :id="`return-${input.id}`"
+              :aria-label="`${attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode} 退回数量`"
+              :addon-after="source?.unit"
+              :max="(toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)"
+              :min="0"
+              :precision="quantityPrecision(source?.unit)"
+              :value="job.returns[input.id] ?? undefined"
+              class="w-40"
+              placeholder="退回数量"
+              @change="(v) => (job.returns[input.id] = v === null || v === undefined || v === '' ? null : Number(v))"
+            />
+          </div>
+        </section>
 
-      <Alert v-if="errors.length > 0" show-icon type="error">
-        <template #message>
-          <ul class="m-0 list-disc pl-4">
-            <li v-for="e in errors" :key="e">{{ e }}</li>
-          </ul>
-        </template>
-      </Alert>
-    </main>
-    <footer class="sticky bottom-0 border-t border-border bg-card px-4 pb-4 pt-3">
-      <button class="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground" type="button" @click="next">
-        {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
-      </button>
-    </footer>
+        <Alert v-if="errors.length > 0" show-icon type="error">
+          <template #message>
+            <ul class="m-0 list-disc pl-4">
+              <li v-for="e in errors" :key="e">{{ e }}</li>
+            </ul>
+          </template>
+        </Alert>
+      </div>
+      <footer class="flex flex-col gap-2 px-3 pb-4 sm:px-4">
+        <button class="min-h-12 w-full rounded-md bg-primary text-base font-semibold text-primary-foreground" type="submit">
+          {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
+        </button>
+        <button v-if="orderActions" class="min-h-11 rounded-md border border-border text-base font-semibold" type="button" @click="emit('supplement')">补领材料</button>
+      </footer>
+    </form>
   </div>
 </template>

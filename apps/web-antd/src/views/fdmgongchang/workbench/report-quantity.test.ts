@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveOutputs } from '../stage-stock/model';
 import ReportStep from './modules/report-step.vue';
-import { changeReportDefect, changeReportGood, prefillReportQuantity } from './report-quantity';
+import { changeReportDefect, changeReportTotal, prefillReportQuantity } from './report-quantity';
 import { applyJobTarget, createJob, jobAllowsPlainEmboss, outputPayload, provideJob } from './use-job';
 
 vi.mock('#/components/upload/image-upload.vue', () => ({ default: { render: () => null } }));
@@ -96,7 +96,7 @@ describe('planned workbench report quantities', () => {
     prefillReportQuantity(job);
     const line = job.outputs[0]!;
     expect(line.goodQuantity).toBe(300);
-    changeReportGood(line, 100);
+    changeReportTotal(line, 100);
     changeReportDefect(line, 3);
     expect(line.goodQuantity).toBe(97);
     changeReportDefect(line, 110);
@@ -116,25 +116,42 @@ describe('planned workbench report quantities', () => {
     expect(job.outputs[0]!.goodQuantity).toBeUndefined();
   });
 
-  it('updates the visible counters when the worker types or clicks defects, and keeps edits when revisiting', async () => {
+  it('shows total and defects separately, rejects excess defects and keeps edits when revisiting', async () => {
     const job = jobFor('PACK');
     prefillReportQuantity(job);
+    const next = vi.fn();
     const mount = () => {
       const host = document.createElement('div'); document.body.append(host);
-      const app = createApp(defineComponent({ setup() { provideJob(job); return () => h(ReportStep); } }));
+      const app = createApp(defineComponent({ setup() { provideJob(job); return () => h(ReportStep, { onNext: next }); } }));
       app.mount(host); unmount = () => { app.unmount(); host.remove(); };
     };
     const flush = async () => { for (let i = 0; i < 5; i++) await nextTick(); };
     mount(); await flush();
-    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('270');
-    const bad = document.querySelector<HTMLInputElement>('#bad-test')!;
-    bad.value = '3'; bad.dispatchEvent(new Event('input', { bubbles: true }));
+    const fill = (id: string, value: string) => {
+      const input = document.querySelector<HTMLInputElement>(id)!;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const submit = () => document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(document.querySelector<HTMLInputElement>('#total-test')!.value).toBe('270');
+    fill('#bad-test', '3');
     await flush();
     expect(job.outputs[0]!.goodQuantity).toBe(267);
-    document.querySelector<HTMLButtonElement>('[aria-label="坏的数量加 1"]')!.click();
+    fill('#total-test', '4');
+    fill('#bad-test', '5');
     await flush();
-    expect(job.outputs[0]!.goodQuantity).toBe(266);
+    submit();
+    await flush();
+    expect(next).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('瑕疵数量不能超过本次产量');
+    fill('#bad-test', '4');
+    await flush();
     unmount?.(); mount(); await flush();
-    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('266');
+    expect(document.querySelector<HTMLInputElement>('#total-test')!.value).toBe('4');
+    expect(document.querySelector<HTMLInputElement>('#bad-test')!.value).toBe('4');
+    submit();
+    await flush();
+    expect(next).toHaveBeenCalledOnce();
+    expect(outputPayload(job)[0]).toMatchObject({ goodQuantity: 0, defectQuantity: 4 });
   });
 });

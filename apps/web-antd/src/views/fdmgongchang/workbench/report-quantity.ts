@@ -2,13 +2,14 @@ import type { OutputDraft } from '../stage-stock/model';
 import type { Job } from './use-job';
 
 import { quantityPrecision } from '../shared/quantity';
-import { toNumber } from '../stage-stock/model';
+import { toNumber, validateOutputs } from '../stage-stock/model';
+import { jobAllowsPlainEmboss, outputPayload, slicePlanThicknessError } from './use-job';
 
 const quantity = (value: unknown) => Math.max(0, toNumber(value) ?? 0);
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
 /** 只预填本次尚未报出的计划量；不能把同一计划总量重复分给多种产出。 */
-export function prefillReportQuantity(job: Job) {
+export function prefillReportQuantity(job: Pick<Job, 'order' | 'outputs' | 'prepare' | 'process' | 'task'>) {
   if (!job.task || job.outputs.length !== 1) return;
   const planned = job.process?.code === 'MIX'
     ? job.task.output?.mixPlan?.wholeBatchBoards ?? job.task.quantity
@@ -24,10 +25,29 @@ export function prefillReportQuantity(job: Job) {
   line.defectQuantity = 0;
 }
 
-/** 手改良品表示调整本次实际产量，后续瑕疵在这次实际总量内增减。 */
-export function changeReportGood(line: OutputDraft, value: null | number | undefined) {
-  line.goodQuantity = value === null || value === undefined ? undefined : quantity(value);
-  line.reportTotal = round(quantity(value) + quantity(line.defectQuantity));
+export function hasExcessDefects(line: OutputDraft) {
+  return !line.laminateLayers && quantity(line.defectQuantity) > (line.reportTotal ?? line.goodQuantity ?? 0);
+}
+
+export function reportErrors(job: Job) {
+  if (job.outputs.some((line) => hasExcessDefects(line))) return ['瑕疵数量不能超过本次产量。'];
+  if (!job.createFinish && job.finish && (job.order?.reportCount ?? 0) > 0 && outputPayload(job).length === 0) return [];
+  const errors = validateOutputs(job.process?.code ?? '', job.process?.outputStage ?? '', job.outputs, { allowPlainEmboss: jobAllowsPlainEmboss(job) });
+  const thicknessError = slicePlanThicknessError(job);
+  if (thicknessError) errors.push(thicknessError);
+  return errors;
+}
+
+/** 工人填本次总产量，实际入库数量扣除瑕疵。 */
+export function changeReportTotal(line: OutputDraft, value: null | number | undefined) {
+  if (value === null || value === undefined) {
+    line.reportTotal = undefined;
+    line.goodQuantity = undefined;
+    return;
+  }
+  const total = quantity(value);
+  line.reportTotal = round(total);
+  line.goodQuantity = round(Math.max(0, total - quantity(line.defectQuantity)));
 }
 
 export function changeReportDefect(line: OutputDraft, value: null | number | undefined) {

@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { InputLine } from '../stage-stock/model';
+import type { OrderDraft } from './order-report';
 
 import type { FdmgongchangScheduleApi } from '#/api/fdmgongchang/schedule';
 import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workbench';
@@ -15,7 +16,6 @@ import {
   createWorkbenchOrder,
   getWorkbench,
   getWorkbenchOptions,
-  getWorkbenchOrder,
   issueWorkbenchTask,
   prepareWorkbenchTask,
   reportWorkbenchOrder,
@@ -37,7 +37,8 @@ import Home from './modules/home.vue';
 import PickStep from './modules/pick-step.vue';
 import PieceStep from './modules/piece-step.vue';
 import ReportStep from './modules/report-step.vue';
-import { prefillReportQuantity } from './report-quantity';
+import { defaultReportMaterial, loadOrderDraft } from './order-report';
+import { prefillReportQuantity, reportErrors } from './report-quantity';
 import { applyJobTarget, createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
@@ -56,6 +57,7 @@ const loadError = ref(false);
 const loadErrorMessage = ref('');
 const noFactory = ref(false);
 const submitting = ref(false);
+const listReportMode = ref<'details' | 'quick'>();
 
 async function reload() {
   job.my = await getWorkbench(props.process);
@@ -123,10 +125,8 @@ function linkedTaskQuery() {
   return { factoryId: Number(factoryId), taskId: Number(taskId) };
 }
 
-const defaultMaterial = () =>
-  job.options?.materials.find((m) => m.value.toUpperCase() === 'TPE')?.value ?? job.options?.materials[0]?.value;
-
 function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
+  listReportMode.value = undefined;
   job.process = process;
   job.task = task;
   job.productionItem = undefined;
@@ -264,7 +264,7 @@ async function issueOnly() {
 function reportNow() {
   job.createFinish = true;
   job.inputs = pickInputs();
-  job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultMaterial(), job.recipe?.code);
+  job.outputs = deriveOutputs(job.process!.code, job.inputs, defaultReportMaterial(job.options), job.recipe?.code);
   applyTarget();
   prefillReportQuantity(job);
   job.step = 'report';
@@ -279,50 +279,15 @@ function applyTarget() {
 
 /** 复用已领料的工序单，报工只登记本次新增产出。 */
 async function openOrder(id: number, supplement: boolean) {
-  const order = await getWorkbenchOrder(id);
-  const process = job.my?.processes.find((p) => p.code === order.process)
-    ?? job.my?.teamProcesses?.find((p) => p.code === order.process);
-  if (!process) throw new Error('当前账号没有这道工序岗位');
-  const existing = job.my?.inProgress.find((o) => o.id === id) ?? job.my?.recentDone?.find((o) => o.id === id);
-  const taskId = order.scheduleTaskId ?? existing?.scheduleTaskId ?? job.task?.id;
-  let task = job.my?.tasks.find((t) => t.id === taskId) ?? (job.task?.id === taskId ? job.task : undefined);
-  let prepare = job.prepare?.task.id === taskId ? job.prepare : undefined;
-  // 在制单不限日期，任务列表只显示近期任务；缺失时按关联 ID 恢复任务契约。
-  if (taskId && !prepare && (!supplement || !task)) prepare = await prepareWorkbenchTask(taskId);
-  task ??= prepare?.task;
+  const draft = await loadOrderDraft(job, id, supplement, job);
   const onBehalfOf = job.onBehalfOf;
-  reset(process, task);
-  job.onBehalfOf = onBehalfOf;
-  job.prepare = prepare;
-  job.order = order;
-  job.sourceStage = order.sourceStage;
-  job.supplement = supplement;
-  job.recipe = process.code === 'MIX' && order.recipeCode ? { code: order.recipeCode, batches: toNumber(order.recipeBatches) ?? 1 } : undefined;
-  if (supplement) {
-    job.step = 'pick';
-    return;
-  }
-  job.inputs = (order.inputs ?? []).filter((line) => line.stage !== 'AUX').map((line) => ({
-    quantity: Math.max(0, (toNumber(line.quantity) ?? 0) - (toNumber(line.returnedQuantity) ?? 0)),
-    side: line.laminationSide ?? undefined,
-    stock: {
-      batchNo: line.batchNo,
-      id: line.stockId ?? line.id,
-      item: line.item,
-      itemCode: line.itemCode,
-      itemId: line.itemId ?? 0,
-      location: line.location,
-      quantity: line.quantity ?? 0,
-      stage: line.stage,
-    },
-  }));
-  job.outputs = deriveOutputs(process.code, job.inputs, defaultMaterial(), job.recipe?.code);
-  applyTarget();
-  prefillReportQuantity(job);
-  job.step = 'report';
+  reset(draft.process, draft.task);
+  Object.assign(job, draft, { onBehalfOf, supplement });
+  job.step = supplement ? 'pick' : 'report';
 }
 
 async function continueOrder(order: Api.Order, supplement = false) {
+  if (loading.value) return;
   loading.value = true;
   try {
     job.task = undefined;
@@ -332,6 +297,27 @@ async function continueOrder(order: Api.Order, supplement = false) {
   } finally {
     loading.value = false;
   }
+}
+
+function reportFromList(draft: OrderDraft, details = false) {
+  if (loading.value || submitting.value) return;
+  reset(draft.process, draft.task);
+  Object.assign(job, draft);
+  if (details || reportErrors(job).length > 0) {
+    listReportMode.value = 'details';
+    job.step = 'report';
+    return;
+  }
+  listReportMode.value = 'quick';
+  afterReport();
+}
+
+function supplementFromReport() {
+  if (!job.order) return;
+  const { order, prepare, process, recipe, task } = job;
+  reset(process!, task);
+  Object.assign(job, { order, prepare, recipe, sourceStage: order.sourceStage, supplement: true });
+  job.step = 'pick';
 }
 
 function afterReport() {
@@ -348,6 +334,7 @@ function afterPick() {
 }
 
 async function submit() {
+  if (submitting.value) return;
   submitting.value = true;
   const before = toNumber(job.my?.todayAmount) ?? 0;
   const good = goodTotal(job);
@@ -372,6 +359,12 @@ async function submit() {
       });
     }
     job.result = { action: 'report', amount: 0, good, unit: '' };
+    if (listReportMode.value) {
+      for (const line of job.outputs) {
+        line.goodQuantity = line.defectQuantity = line.reportTotal = undefined;
+        line.laminateLayers = undefined;
+      }
+    }
     job.step = 'done';
     if (await reloadAfterSave()) {
       job.result.amount = Math.max(0, (toNumber(job.my?.todayAmount) ?? 0) - before);
@@ -436,6 +429,10 @@ function again() {
 }
 
 async function goHome() {
+  listReportMode.value = undefined;
+  if (job.result.action === 'issue' && !props.process) {
+    job.homeView = { section: 'running', keyword: '', page: 1 };
+  }
   job.step = 'home';
   await reload();
 }
@@ -446,7 +443,7 @@ function back() {
   else if (job.step === 'report') {
     job.step = job.createFinish ? 'confirm' : 'home';
   }
-  else if (job.step === 'piece') job.step = 'report';
+  else if (job.step === 'piece') job.step = listReportMode.value === 'quick' ? 'home' : 'report';
 }
 </script>
 
@@ -467,6 +464,15 @@ function back() {
     </Result>
     <Spin v-else :spinning="loading || submitting">
       <template v-if="job.my && job.options">
+        <KeepAlive v-if="!props.process">
+          <Home
+            v-if="job.step === 'home'"
+            @start-task="startTask"
+            @start-actual="startActual"
+            @report-order="reportFromList"
+            @order-details="(draft) => reportFromList(draft, true)"
+          />
+        </KeepAlive>
         <WorkshopHome
           v-if="job.step === 'home' && props.process"
           :process="props.process"
@@ -478,16 +484,15 @@ function back() {
           @report-order="continueOrder"
           @supplement-order="(order) => continueOrder(order, true)"
         />
-        <Home
-          v-else-if="job.step === 'home'"
-          @start-task="startTask"
-          @start-actual="startActual"
-          @report-order="continueOrder"
-          @supplement-order="(order) => continueOrder(order, true)"
-        />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
         <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
-        <ReportStep v-else-if="job.step === 'report'" @back="back" @next="afterReport" />
+        <ReportStep
+          v-else-if="job.step === 'report'"
+          :order-actions="listReportMode === 'details'"
+          @back="back"
+          @next="afterReport"
+          @supplement="supplementFromReport"
+        />
         <PieceStep v-else-if="job.step === 'piece'" :submitting="submitting" @back="back" @submit="submit" />
         <DoneStep v-else-if="job.step === 'done'" @again="again" @home="goHome" />
       </template>
