@@ -2,7 +2,7 @@
 import type { PropType, VNode } from 'vue';
 
 import type { ProductActivityView } from '#/api/fdmplatform/product-activity';
-import type { Product } from '#/api/fdmplatform/products';
+import type { Product, ProductCategoryView } from '#/api/fdmplatform/products';
 
 import { createApp, defineComponent, h, KeepAlive, nextTick } from 'vue';
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
@@ -15,10 +15,15 @@ const mocks = vi.hoisted(() => ({
   getProduct: vi.fn(),
   getProducts: vi.fn(),
   getProductActivity: vi.fn(),
-  getProductCategories: vi.fn(async (_params: { productStage?: string }) => ({
-    total: 0,
-    items: [],
-  })),
+  getProductCategories: vi.fn(
+    async (_params: {
+      productStage?: string;
+    }): Promise<ProductCategoryView> => ({
+      total: 0,
+      items: [],
+      categories: [],
+    }),
+  ),
 }));
 vi.mock('@vben/icons', () => ({ IconifyIcon: () => h('span') }));
 vi.mock('#/api/fdmplatform', () => ({
@@ -406,6 +411,11 @@ function deferred<T>() {
 const dispose: (() => void)[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getProductCategories.mockResolvedValue({
+    total: 0,
+    items: [],
+    categories: [],
+  });
   mocks.getProduct.mockImplementation(async (id: string) => product(id));
   mocks.getProducts.mockResolvedValue({
     list: [product('A'), product('B')],
@@ -479,6 +489,134 @@ function clickText(host: ParentNode, text: string) {
 }
 
 describe('actual product detail and edit route integration', () => {
+  it('filters by each catalog level and preserves the selected group when navigating to a product', async () => {
+    mocks.getProductCategories.mockResolvedValue({
+      total: 11,
+      items: [
+        { categoryId: 'regular', count: 6 },
+        { categoryId: 'legacy', count: 3 },
+        { categoryId: '', count: 1 },
+        { categoryId: 'missing-id', count: 1 },
+      ],
+      categories: [
+        {
+          id: 'regular',
+          name: '常规款',
+          sort: 10,
+          version: 0,
+          active: true,
+          categoryGroup: 'SELF_PRODUCED',
+        },
+        {
+          id: 'folding',
+          name: '折叠款',
+          sort: 20,
+          version: 0,
+          active: true,
+          categoryGroup: 'SELF_PRODUCED',
+        },
+        { id: 'legacy', name: '旧分类', sort: 30, version: 0, active: true },
+      ],
+    });
+    const { host, router } = await mountCenter(
+      '/fdmproducts/catalog?catalogCategoryGroup=SELF_PRODUCED&catalogPage=2',
+      true,
+    );
+    await vi.waitFor(() => {
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          categoryGroup: 'SELF_PRODUCED',
+          categoryId: undefined,
+          pageNo: 2,
+        }),
+      );
+      expect(
+        [...host.querySelectorAll('.group-node')].map((button) =>
+          button.textContent?.trim(),
+        ),
+      ).toEqual(['自主生产6', '外采产品0', '原材料0', '设备耗材0', '待归类5']);
+    });
+    clickText(host, '折叠款0');
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          categoryGroup: undefined,
+          categoryId: 'folding',
+          pageNo: 1,
+        }),
+      ),
+    );
+    clickText(host, '待归类5');
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          categoryGroup: 'UNASSIGNED',
+          categoryId: undefined,
+          pageNo: 1,
+        }),
+      ),
+    );
+    expect(host.querySelector('.category-list')?.textContent).toContain(
+      '旧分类',
+    );
+    expect(host.querySelector('.category-list')?.textContent).toContain(
+      '未分类',
+    );
+    host.querySelector<HTMLButtonElement>('.product-detail-link')!.click();
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.catalogCategoryGroup).toBe(
+        'UNASSIGNED',
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(detail(host)?.textContent).toContain('产品A'),
+    );
+    detail(host)!
+      .querySelector<HTMLButtonElement>('[data-drawer-close]')!
+      .click();
+    await vi.waitFor(() => expect(detail(host)).toBeNull());
+    expect(host.querySelector('.catalog-list-title h2')?.textContent).toBe(
+      '待归类',
+    );
+
+    await router.push('/fdmwaimao/platform-contracts');
+    const callsBeforeReturn = mocks.getProductCategories.mock.calls.length;
+    mocks.getProductCategories.mockResolvedValue({
+      total: 2,
+      items: [{ categoryId: 'legacy', count: 2 }],
+      categories: [
+        {
+          id: 'legacy',
+          name: '旧分类',
+          sort: 30,
+          version: 1,
+          active: true,
+          categoryGroup: 'RAW_MATERIAL',
+        },
+      ],
+    });
+    router.back();
+    await vi.waitFor(() => {
+      expect(mocks.getProductCategories.mock.calls.length).toBeGreaterThan(
+        callsBeforeReturn,
+      );
+      expect(host.querySelector('.category-list')?.textContent).toContain(
+        '原材料2',
+      );
+    });
+
+    clickText(host, '重置');
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          categoryGroup: undefined,
+          categoryId: undefined,
+          pageNo: 1,
+        }),
+      ),
+    );
+  });
+
   it('shows product codes in a separate sortable column and requests sorting before pagination', async () => {
     const { host, router } = await mountCenter(
       '/fdmproducts/catalog?catalogPage=3&catalogKeyword=MAT',

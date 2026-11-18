@@ -139,14 +139,22 @@ export interface ProductQuery {
   exactCategory?: boolean;
   /** 按维护的分类筛选，空字符串为未分类 */
   categoryId?: string;
+  categoryGroup?: 'UNASSIGNED' | ProductCategoryGroup;
 }
-/** 产品分类（一层） */
+export type ProductCategoryGroup =
+  | 'EQUIPMENT_CONSUMABLE'
+  | 'OUTSOURCED'
+  | 'RAW_MATERIAL'
+  | 'SELF_PRODUCED';
+
+/** 产品子类及其所属大类 */
 export interface ProductCategory {
   id: string;
   name: string;
   sort: number;
   active: boolean;
   version: number;
+  categoryGroup?: null | ProductCategoryGroup;
 }
 export interface ProductCategoryCount {
   /** 空字符串为未分类 */
@@ -329,6 +337,7 @@ export function getProductCategoryList(companyId = 0) {
 }
 export function saveProductCategory(data: {
   active: boolean;
+  categoryGroup?: ProductCategoryGroup;
   companyId: number;
   expectedVersion?: number;
   id?: string;

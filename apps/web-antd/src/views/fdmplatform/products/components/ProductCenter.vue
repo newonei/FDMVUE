@@ -7,7 +7,14 @@ import type {
   TaxBasis,
 } from '#/api/fdmplatform/products';
 
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+import {
+  computed,
+  defineAsyncComponent,
+  onActivated,
+  onMounted,
+  reactive,
+  ref,
+} from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -44,6 +51,10 @@ import { errorText, money } from '../../data';
 import { formatTemporalField } from '../../date-display';
 import { useEntityDetail } from '../../documents/useEntityDetail';
 import { productProcessText } from '../attributes';
+import {
+  productCategoryGroupName,
+  productCategoryGroups,
+} from '../category-model';
 import { currencyOptions, missingProductFields, taxOptions } from '../model';
 import ProductCategoryPanel from './ProductCategoryPanel.vue';
 import ProductColorSummary from './ProductColorSummary.vue';
@@ -99,10 +110,27 @@ const category = ref<string | undefined>(
     ? route.query.catalogCategory
     : undefined,
 );
+const initialCategoryGroup = catalogQuery('catalogCategoryGroup');
+const categoryGroup = ref<ProductQuery['categoryGroup']>();
+if (category.value === undefined) {
+  categoryGroup.value =
+    initialCategoryGroup === 'UNASSIGNED'
+      ? initialCategoryGroup
+      : productCategoryGroups.find(
+          ({ value }) => value === initialCategoryGroup,
+        )?.value;
+}
 /** 列表标题显示的分类名称 */
 const categoryLabel = ref<string | undefined>(
   catalogQuery('catalogCategoryLabel') || undefined,
 );
+const categoryTitle = computed(() => {
+  if (categoryGroup.value === 'UNASSIGNED') return '待归类';
+  const group = productCategoryGroupName(categoryGroup.value);
+  if (group) return group;
+  if (category.value === undefined) return '产品档案';
+  return categoryLabel.value || (category.value ? '所选分类' : '未分类');
+});
 /** 分类计数跟随已提交的搜索条件，输入过程中不重算 */
 const appliedKeyword = ref(keyword.value);
 const categoryRefresh = ref(0);
@@ -147,6 +175,7 @@ const priceForm = reactive({
 });
 let sequence = 0;
 let detailRefreshSequence = 0;
+let activatedOnce = false;
 const list = computed(() =>
   props.mode === 'catalog' ? products.value : prices.value,
 );
@@ -155,6 +184,7 @@ const hasFilters = computed(() =>
     keyword.value ||
     productStage.value ||
     category.value !== undefined ||
+    categoryGroup.value !== undefined ||
     active.value !== undefined,
   ),
 );
@@ -223,21 +253,39 @@ onMounted(() => {
       });
   }
 });
+onActivated(() => {
+  if (activatedOnce && props.mode === 'catalog') refreshCatalog();
+  activatedOnce = true;
+});
 function resetFilters() {
   keyword.value = '';
   productStage.value = undefined;
   category.value = undefined;
+  categoryGroup.value = undefined;
   categoryLabel.value = undefined;
   active.value = undefined;
   void load(true);
 }
 function chooseCategory(value: string | undefined, label?: string) {
   category.value = value;
+  categoryGroup.value = undefined;
   categoryLabel.value = label;
+  void load(true);
+}
+function chooseCategoryGroup(
+  value: NonNullable<ProductQuery['categoryGroup']>,
+) {
+  category.value = undefined;
+  categoryGroup.value = value;
+  categoryLabel.value = undefined;
   void load(true);
 }
 function refreshCategories() {
   categoryRefresh.value++;
+}
+function refreshCatalog() {
+  refreshCategories();
+  void load();
 }
 function productsImported() {
   refreshCategories();
@@ -267,6 +315,7 @@ async function load(reset = false) {
         keyword: keyword.value,
         productStage: productStage.value,
         categoryId: category.value,
+        categoryGroup: categoryGroup.value,
         active:
           active.value === undefined ? undefined : active.value === 'true',
       });
@@ -341,6 +390,7 @@ function openProductDetail(id: string) {
       catalogKeyword: keyword.value || undefined,
       catalogProductStage: productStage.value,
       catalogCategory: category.value,
+      catalogCategoryGroup: categoryGroup.value,
       catalogCategoryLabel: categoryLabel.value,
       catalogActive: active.value,
       catalogPage: String(pageNo.value),
@@ -492,7 +542,7 @@ async function savePrice() {
           <p>维护产品规格、包装及标准资料，供合同选品使用。</p>
         </div>
         <Space wrap class="catalog-header-actions">
-          <Button :loading="loading" @click="load()">刷新</Button>
+          <Button :loading="loading" @click="refreshCatalog">刷新</Button>
           <Button @click="openImport">Excel 导入</Button>
           <Button
             @click="
@@ -508,13 +558,16 @@ async function savePrice() {
       <div :class="{ 'catalog-layout': mode === 'catalog' }">
         <aside v-if="mode === 'catalog'" class="catalog-side">
           <ProductCategoryPanel
+            grouped
             :company-id="companyId"
             :value="category"
+            :category-group="categoryGroup"
             :keyword="appliedKeyword"
             :filters="{ productStage: appliedProductStage }"
             :active="active === undefined ? undefined : active === 'true'"
             :refresh-key="categoryRefresh"
             @update:value="chooseCategory"
+            @select-group="chooseCategoryGroup"
           />
         </aside>
         <Card
@@ -600,13 +653,7 @@ async function savePrice() {
             </Space>
             <div v-if="mode === 'catalog'" class="catalog-list-heading">
               <div class="catalog-list-title">
-                <h2 :title="categoryLabel">
-                  {{
-                    category === undefined
-                      ? '产品档案'
-                      : categoryLabel || (category ? '所选分类' : '未分类')
-                  }}
-                </h2>
+                <h2 :title="categoryTitle">{{ categoryTitle }}</h2>
                 <span class="catalog-count">{{ total }} 个</span>
                 <span v-if="hasFilters" class="muted">筛选结果</span>
               </div>

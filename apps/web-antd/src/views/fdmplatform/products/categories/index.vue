@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { CategoryNode } from '../category-model';
 
-import type { ProductCategory } from '#/api/fdmplatform/products';
+import type {
+  ProductCategory,
+  ProductCategoryGroup,
+} from '#/api/fdmplatform/products';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onActivated, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { Page } from '@vben/common-ui';
@@ -38,12 +41,13 @@ import {
   categoryList,
   categoryName,
   categoryOptions,
+  productCategoryGroupName,
+  productCategoryGroups,
   searchCategories,
 } from '../category-model';
 
 defineOptions({ name: 'FdmPlatformProductCategories' });
 
-/** 产品分类维护：一层分类。改名、合并会同步改写产品上的分类名称。 */
 const companyId = 0;
 const router = useRouter();
 const categories = ref<ProductCategory[]>([]);
@@ -52,7 +56,21 @@ const uncategorized = ref(0);
 const loading = ref(false);
 const panelError = ref('');
 const search = ref('');
-const rows = computed(() => searchCategories(list.value, search.value));
+const group = ref<'UNASSIGNED' | ProductCategoryGroup>();
+const groupOptions = [
+  ...productCategoryGroups,
+  { label: '待归类', value: 'UNASSIGNED' },
+];
+const byId = computed(
+  () => new Map(categories.value.map((item) => [item.id, item])),
+);
+const rows = computed(() =>
+  searchCategories(list.value, search.value).filter(
+    (item) =>
+      !group.value ||
+      (byId.value.get(item.id)?.categoryGroup ?? 'UNASSIGNED') === group.value,
+  ),
+);
 
 async function load() {
   loading.value = true;
@@ -70,10 +88,9 @@ async function load() {
   }
 }
 onMounted(() => void load());
-
-function byId(id: string) {
-  return categories.value.find((item) => item.id === id);
-}
+onActivated(() => {
+  if (!loading.value) void load();
+});
 function openProducts(node: CategoryNode) {
   void router.push({
     path: '/fdmproducts/catalog',
@@ -92,6 +109,7 @@ const editor = reactive({
   key: '',
   id: undefined as string | undefined,
   version: undefined as number | undefined,
+  categoryGroup: undefined as ProductCategoryGroup | undefined,
   name: '',
   sort: undefined as number | undefined,
   active: true,
@@ -104,12 +122,19 @@ function openEditor(category?: ProductCategory) {
     key: newIdempotencyKey(),
     id: category?.id,
     version: category?.version,
+    categoryGroup:
+      category?.categoryGroup ??
+      (category || group.value === 'UNASSIGNED' ? undefined : group.value),
     name: category?.name ?? '',
     sort: category?.sort,
     active: category?.active ?? true,
   });
 }
 async function saveEditor() {
+  if (!editor.categoryGroup) {
+    editor.error = '请选择所属大类';
+    return;
+  }
   if (!editor.name.trim()) {
     editor.error = '请填写分类名称';
     return;
@@ -121,6 +146,7 @@ async function saveEditor() {
       companyId,
       id: editor.id,
       expectedVersion: editor.version,
+      categoryGroup: editor.categoryGroup,
       name: editor.name.trim(),
       sort: editor.sort ?? undefined,
       active: editor.active,
@@ -199,7 +225,8 @@ async function remove(node: CategoryNode) {
 }
 
 const columns = [
-  { title: '分类名称', key: 'name', dataIndex: 'name' },
+  { title: '子类名称', key: 'name', dataIndex: 'name' },
+  { title: '所属大类', key: 'categoryGroup', width: 120 },
   {
     title: '产品数',
     key: 'count',
@@ -221,26 +248,36 @@ const columns = [
           <div class="category-eyebrow">产品中心</div>
           <h1>产品分类</h1>
           <p>
-            新建、编辑和导入产品时只能选这里的分类。改名或合并后，产品档案中的分类会同步更新。
+            在四个大类下维护子类。更改所属大类后，该子类下的产品会一并移动。
           </p>
         </div>
-        <Button type="primary" @click="openEditor()">新增分类</Button>
+        <Button type="primary" @click="openEditor()">新增子类</Button>
       </header>
       <Alert v-if="panelError" type="error" show-icon :message="panelError" />
       <Alert
         v-if="uncategorized > 0"
         type="warning"
         show-icon
-        :message="`还有 ${uncategorized} 个产品未分类，可在产品档案左侧“未分类”中逐个编辑选择分类。`"
+        :message="`还有 ${uncategorized} 个产品未选子类，可在产品档案的“待归类”中维护。`"
       />
       <Card :body-style="{ padding: '12px 16px' }">
         <Space direction="vertical" :size="12" style="width: 100%">
-          <Input
-            v-model:value="search"
-            class="category-search"
-            placeholder="搜索分类名称"
-            allow-clear
-          />
+          <Space wrap>
+            <Select
+              v-model:value="group"
+              :options="groupOptions"
+              aria-label="按大类筛选"
+              placeholder="全部大类"
+              style="width: 160px"
+              allow-clear
+            />
+            <Input
+              v-model:value="search"
+              class="category-search"
+              placeholder="搜索子类名称"
+              allow-clear
+            />
+          </Space>
           <Table
             :columns="columns"
             :data-source="rows"
@@ -261,19 +298,26 @@ const columns = [
                 </Button>
                 <span v-else class="muted">0</span>
               </template>
+              <template v-else-if="column.key === 'categoryGroup'">
+                {{
+                  productCategoryGroupName(
+                    byId.get(record.id)?.categoryGroup,
+                  ) ?? '待归类'
+                }}
+              </template>
               <template v-else-if="column.key === 'active'">
                 <Tag v-if="record.active" color="green">启用</Tag>
                 <Tag v-else>停用</Tag>
               </template>
               <template v-else-if="column.key === 'sort'">
-                {{ byId(record.id)?.sort }}
+                {{ byId.get(record.id)?.sort }}
               </template>
               <template v-else-if="column.key === 'actions'">
                 <Space :size="2" wrap>
                   <Button
                     type="link"
                     size="small"
-                    @click="openEditor(byId(record.id))"
+                    @click="openEditor(byId.get(record.id))"
                   >
                     编辑
                   </Button>
@@ -302,7 +346,7 @@ const columns = [
 
     <Modal
       v-model:open="editor.open"
-      :title="editor.id ? '编辑分类' : '新增分类'"
+      :title="editor.id ? '编辑子类' : '新增子类'"
       :confirm-loading="editor.saving"
       ok-text="保存"
       cancel-text="取消"
@@ -317,11 +361,19 @@ const columns = [
           :message="editor.error"
         />
         <Form layout="vertical">
-          <Form.Item label="名称" required>
+          <Form.Item label="所属大类" required>
+            <Select
+              v-model:value="editor.categoryGroup"
+              :options="productCategoryGroups"
+              aria-label="所属大类"
+              placeholder="选择所属大类"
+            />
+          </Form.Item>
+          <Form.Item label="子类名称" required>
             <Input
               v-model:value="editor.name"
               :maxlength="50"
-              placeholder="例如：TPE瑜伽垫"
+              placeholder="例如：常规款、折叠款、客户定制款"
             />
           </Form.Item>
           <Form.Item label="排序" extra="数字小的排前面；不填则排在最后">

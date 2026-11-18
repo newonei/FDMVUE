@@ -266,7 +266,7 @@ async function save() {
             v-model:value="form[field]"
             :aria-label="title"
             :options="categorySelectOptions"
-            placeholder="选择产品分类"
+            placeholder="选择大类下的子类"
             show-search
             option-filter-prop="label"
             :list-height="360"
@@ -363,7 +363,8 @@ async function save() {
     </Space>
     <template #footer>
       <Space>
-        <Button @click="emit('close')">取消</Button><Button type="primary" :loading="loading" @click="save">
+        <Button @click="emit('close')">取消</Button>
+        <Button type="primary" :loading="loading" @click="save">
           保存产品档案
         </Button>
       </Space>

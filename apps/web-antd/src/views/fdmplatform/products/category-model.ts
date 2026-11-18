@@ -1,7 +1,22 @@
 import type {
   ProductCategory,
   ProductCategoryCount,
+  ProductCategoryGroup,
 } from '#/api/fdmplatform/products';
+
+export const productCategoryGroups: {
+  label: string;
+  value: ProductCategoryGroup;
+}[] = [
+  { label: '自主生产', value: 'SELF_PRODUCED' },
+  { label: '外采产品', value: 'OUTSOURCED' },
+  { label: '原材料', value: 'RAW_MATERIAL' },
+  { label: '设备耗材', value: 'EQUIPMENT_CONSUMABLE' },
+];
+
+export function productCategoryGroupName(group?: null | ProductCategoryGroup) {
+  return productCategoryGroups.find((item) => item.value === group)?.label;
+}
 
 /** 一个分类及其产品数 */
 export interface CategoryNode {
@@ -48,10 +63,17 @@ export function categoryOptions(
   categories: ProductCategory[],
   currentId?: string,
 ) {
+  const groupById = new Map(
+    categories.map((item) => [item.id, item.categoryGroup]),
+  );
   return categoryList(categories)
     .filter((item) => item.active || item.id === currentId)
-    .map((item) => ({
-      label: item.active ? item.name : `${item.name}（停用）`,
-      value: item.id,
-    }));
+    .map((item) => {
+      const group = productCategoryGroupName(groupById.get(item.id));
+      const name = item.active ? item.name : `${item.name}（停用）`;
+      return {
+        label: group ? `${group} / ${name}` : name,
+        value: item.id,
+      };
+    });
 }
