@@ -93,14 +93,21 @@ async function settle() {
     await nextTick();
   }
 }
-async function mount() {
+async function mount(
+  options: {
+    categories?: string[];
+    defaultCategory?: string;
+    variant?: 'purchase';
+  } = {},
+) {
+  const categories = options.categories ?? ['PROCUREMENT'];
   const state = ref({
     contractId: 'contract-1',
     target: { targetKind: 'purchaseOrders', targetId: 'order-1' },
   });
   const view = ref({
     enabled: true,
-    uploadCategories: ['PROCUREMENT'],
+    uploadCategories: categories,
     items: [{ id: 'existing-file' }],
   });
   const refresh = vi.fn();
@@ -112,7 +119,9 @@ async function mount() {
       h(AttachmentPanel, {
         ...state.value,
         view: view.value as any,
-        categories: ['PROCUREMENT'],
+        categories,
+        defaultCategory: options.defaultCategory,
+        variant: options.variant,
         error: '',
         loading: false,
         onRefresh: refresh,
@@ -238,5 +247,159 @@ describe('contract purchase attachment queue', () => {
     expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
     expect(host.querySelector('.attachment-pending')).toBeNull();
+  });
+});
+
+describe('purchase attachment panel', () => {
+  const purchaseOptions = {
+    categories: ['SALES', 'PROCUREMENT', 'SPECIFICATION'],
+    defaultCategory: 'PROCUREMENT',
+    variant: 'purchase' as const,
+  };
+
+  it('preserves selected files when the parent supplies a new target object for the same order', async () => {
+    const { host, state } = await mount(purchaseOptions);
+    await choose(host, ['供应商报价.pdf', '生产图纸.ai']);
+    const previousTarget = state.value.target;
+    state.value.target = { ...previousTarget };
+    expect(state.value.target).not.toBe(previousTarget);
+    await settle();
+    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(2);
+    expect(host.textContent).toContain('供应商报价.pdf');
+    expect(host.textContent).toContain('生产图纸.ai');
+    expect(uploadButton(host).disabled).toBe(false);
+    expect(mocks.key).toBe(2);
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
+  it('continues the batch and retains retry keys when busy updates rerender the same order target', async () => {
+    let rejectFirst!: (error: Error) => void;
+    mocks.upload.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectFirst = reject;
+      }),
+    );
+    const { busy, host, refresh, state } = await mount(purchaseOptions);
+    busy.mockImplementation(() => {
+      // The parent constructs an inline target object during ordinary renders.
+      state.value.target = { ...state.value.target };
+    });
+    await choose(host, ['供应商报价.pdf', '生产图纸.ai']);
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    const originalRequest = mocks.upload.mock.calls[0]!;
+    expect(busy.mock.calls.map(([value]) => value)).toEqual([true]);
+    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(2);
+    expect(
+      host.querySelector<HTMLButtonElement>('.purchase-dropzone')!.disabled,
+    ).toBe(true);
+    expect(refresh).not.toHaveBeenCalled();
+    rejectFirst(new Error('网络中断'));
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledTimes(2);
+    expect(mocks.upload.mock.calls[1]![1].name).toBe('生产图纸.ai');
+    expect(mocks.upload.mock.calls[1]![3]).toBe('upload-key-2');
+    expect(mocks.upload.mock.calls[1]![4]).toEqual(originalRequest[4]);
+    expect(host.textContent).toContain('成功 1 个，失败 1 个');
+    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(1);
+    expect(host.textContent).toContain('供应商报价.pdf');
+    expect(busy.mock.calls.map(([value]) => value)).toEqual([true, false]);
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledTimes(3);
+    expect(mocks.upload.mock.calls[2]).toEqual(originalRequest);
+    expect(mocks.key).toBe(2);
+    expect(host.querySelector('.attachment-pending')).toBeNull();
+    expect(busy.mock.calls.map(([value]) => value)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('defaults to procurement among permitted categories and shows the upload action after choosing files', async () => {
+    const { host } = await mount(purchaseOptions);
+    expect(host.textContent).toContain('补充附件');
+    expect(host.textContent).toContain(
+      '报价、图纸、沟通资料等，统一保存在本采购单下。',
+    );
+    expect(host.querySelector<HTMLSelectElement>('select')!.value).toBe(
+      'PROCUREMENT',
+    );
+    expect(uploadButton(host)).toBeUndefined();
+    const input = host.querySelector<HTMLInputElement>('input[type=file]')!;
+    expect(input.getAttribute('aria-label')).toBe('选择采购单补充附件');
+    expect(input.multiple).toBe(true);
+    const click = vi.spyOn(input, 'click');
+    host.querySelector<HTMLButtonElement>('.purchase-dropzone')!.click();
+    expect(click).toHaveBeenCalledOnce();
+    await choose(host, ['供应商报价.pdf', '生产图纸.ai']);
+    expect(host.textContent).toContain('待上传 2 个文件');
+    expect(uploadButton(host).disabled).toBe(false);
+    expect(mocks.upload).not.toHaveBeenCalled();
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledTimes(2);
+    for (const call of mocks.upload.mock.calls) {
+      expect(call[2]).toBe('PROCUREMENT');
+      expect(call[4]).toEqual({
+        targetKind: 'purchaseOrders',
+        targetId: 'order-1',
+      });
+    }
+    expect(host.querySelector('.attachment-pending')).toBeNull();
+    expect(uploadButton(host)).toBeUndefined();
+  });
+
+  it('accepts multiple dropped files and uploads each selected file only once', async () => {
+    const { host } = await mount(purchaseOptions);
+    await choose(host, ['供应商报价.pdf']);
+    const duplicate = new File(['data'], '供应商报价.pdf', {
+      lastModified: 100,
+    });
+    const drawing = new File(['drawing'], '生产图纸.ai', { lastModified: 100 });
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', {
+      value: { files: [duplicate, drawing, drawing] },
+    });
+    host.querySelector('.purchase-dropzone')!.dispatchEvent(drop);
+    await settle();
+    expect(drop.defaultPrevented).toBe(true);
+    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(2);
+    expect(host.textContent).toContain('待上传 2 个文件');
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload.mock.calls.map((call) => call[1].name)).toEqual([
+      '供应商报价.pdf',
+      '生产图纸.ai',
+    ]);
+  });
+
+  it('keeps only failed purchase files and retries with the same category, target and idempotency key', async () => {
+    mocks.upload
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('响应丢失'))
+      .mockResolvedValueOnce({});
+    const { busy, host, refresh } = await mount(purchaseOptions);
+    await choose(host, ['供应商报价.pdf', '生产图纸.ai']);
+    uploadButton(host).click();
+    expect(busy).toHaveBeenLastCalledWith(true);
+    await settle();
+    const originalRequest = mocks.upload.mock.calls[1]!;
+    expect(mocks.upload).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain('成功 1 个，失败 1 个');
+    expect(host.textContent).toContain('响应丢失');
+    expect(host.querySelectorAll('.attachment-pending > li')).toHaveLength(1);
+    expect(busy).toHaveBeenLastCalledWith(false);
+    uploadButton(host).click();
+    await settle();
+    expect(mocks.upload).toHaveBeenCalledTimes(3);
+    expect(mocks.upload.mock.calls[2]).toEqual(originalRequest);
+    expect(originalRequest[2]).toBe('PROCUREMENT');
+    expect(host.querySelector('.attachment-pending')).toBeNull();
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 });

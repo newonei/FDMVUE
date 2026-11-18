@@ -5,6 +5,8 @@ import { computed } from 'vue';
 
 import { Button, Table, Tag } from 'ant-design-vue';
 
+import { canCancelReceipt } from '../documents/model';
+
 import './compact-tables.css';
 
 /** 合同详情下属单据页签的内容：一类单据一张表，点单号打开原来的详情 */
@@ -12,7 +14,11 @@ const props = defineProps<{
   disabled?: boolean;
   group: RelatedDocGroup;
 }>();
-const emit = defineEmits<{ more: []; open: [row: RelatedDocRow] }>();
+const emit = defineEmits<{
+  cancelReceipt: [row: RelatedDocRow];
+  more: [];
+  open: [row: RelatedDocRow];
+}>();
 
 const columns = computed(() => [
   { key: 'code', title: '单号', width: 180 },
@@ -23,7 +29,19 @@ const columns = computed(() => [
     ellipsis: true,
   })),
   { key: 'status', title: '状态', width: 110 },
+  ...(props.group.kind === 'receipts'
+    ? [{ key: 'action', title: '操作', width: 110, fixed: 'right' as const }]
+    : []),
 ]);
+function cancellable(row: RelatedDocRow) {
+  return (
+    row.ref.source === 'business' &&
+    row.ref.kind === 'receipts' &&
+    !row.ref.row.standaloneId &&
+    !row.ref.row.blockReasons?.length &&
+    canCancelReceipt(row.ref.row.record, row.ref.row.allowedActions)
+  );
+}
 const cell = (row: RelatedDocRow, key: string) =>
   row.cells[Number(key.slice(1))] ?? '';
 </script>
@@ -75,6 +93,17 @@ const cell = (row: RelatedDocRow, key: string) =>
         >
           {{ (record as RelatedDocRow).status }}
         </Tag>
+        <Button
+          v-else-if="
+            column.key === 'action' && cancellable(record as RelatedDocRow)
+          "
+          type="link"
+          danger
+          :disabled="disabled"
+          @click="emit('cancelReceipt', record as RelatedDocRow)"
+        >
+          撤销登记
+        </Button>
         <span
           v-else
           class="fdm-cell-line"

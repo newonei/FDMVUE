@@ -13,6 +13,10 @@ export interface Customer extends MasterRecord {
   country?: string;
   countryName?: string;
   customerSource?: string;
+  /** 内销客户类型，可维护选项 */
+  customerType?: string;
+  /** 内销客户所在行业，可维护选项 */
+  industry?: string;
   companyName?: string;
   sourceCountry?: string;
   sourceCustomerSource?: string;
@@ -155,6 +159,10 @@ export interface CustomerOptions {
   productCategories: { label: string; value: string }[];
   customerSources: string[];
   sourceVersion: number;
+  customerTypes?: string[];
+  typeVersion?: number;
+  industries?: string[];
+  industryVersion?: number;
 }
 const base = '/fdmplatform/v1/customers';
 export interface CountryOption {
@@ -173,6 +181,20 @@ export function saveCustomerSources(data: {
   values: string[];
 }) {
   return requestClient.post<CustomerOptions>(`${base}/source-options`, data);
+}
+export function saveCustomerTypes(data: {
+  expectedVersion: number;
+  idempotencyKey: string;
+  values: string[];
+}) {
+  return requestClient.post<CustomerOptions>(`${base}/type-options`, data);
+}
+export function saveCustomerIndustries(data: {
+  expectedVersion: number;
+  idempotencyKey: string;
+  values: string[];
+}) {
+  return requestClient.post<CustomerOptions>(`${base}/industry-options`, data);
 }
 export function getOkkiDirectoryStatus() {
   return requestClient.get<OkkiDirectoryStatus>(

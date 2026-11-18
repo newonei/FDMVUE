@@ -44,6 +44,10 @@ export interface EntryRow {
   /** 产品档案 id；选合同产品时为空 */
   productId?: string;
   contractItemId?: string;
+  requestItemId?: string;
+  assignmentId?: string;
+  /** 当前申请明细可转上限；编辑草稿时包含本行已占用数量。 */
+  availableQuantity?: string;
   name: string;
   code?: string;
   specification?: string;
@@ -210,6 +214,20 @@ export function entrySuppliers(rows: EntryRow[], header: EntryHeader) {
   }));
 }
 
+function requestQuantity(rows: EntryRow[], row: EntryRow) {
+  if (!row.requestItemId) return decimal(row.quantity);
+  let quantity = new BigNumber(0);
+  for (const entry of rows) {
+    if (
+      entry.requestItemId === row.requestItemId &&
+      entry.assignmentId === row.assignmentId
+    ) {
+      quantity = quantity.plus(decimal(entry.quantity));
+    }
+  }
+  return quantity;
+}
+
 export function entryErrors(
   rows: EntryRow[],
   header: EntryHeader,
@@ -219,6 +237,11 @@ export function entryErrors(
   for (const row of rows) {
     if (!row.productId && !row.contractItemId) lines[row.key] = '请选择产品';
     else if (!decimal(row.quantity).gt(0)) lines[row.key] = '数量须大于 0';
+    else if (
+      row.availableQuantity !== undefined &&
+      requestQuantity(rows, row).gt(row.availableQuantity)
+    )
+      lines[row.key] = `本次最多可转 ${row.availableQuantity}`;
     else if (!row.gift && !decimal(row.unitPrice).gte(0))
       lines[row.key] = '请填单价或总价';
     else if (header.receiveFactoryId && !materialKind(row.category))
@@ -278,6 +301,8 @@ export function entryPayload(
     lines: rows.map((row) => ({
       productId: row.contractItemId ? undefined : row.productId,
       contractItemId: row.contractItemId,
+      requestItemId: row.requestItemId,
+      assignmentId: row.assignmentId,
       quantity: row.quantity ?? '0',
       unitPrice: row.gift ? '0' : row.unitPrice,
       arrivalDate: row.arrivalDate || undefined,
@@ -295,6 +320,8 @@ export function entryPayload(
 
 interface CopiedLine {
   id?: string;
+  requestItemId?: null | string;
+  assignmentId?: null | string;
   contractItemId?: null | string;
   skuId?: null | string;
   quantity?: unknown;
@@ -364,6 +391,8 @@ export function copyEntry(
         ...entryProductFields(snapshot),
         productId: line.contractItemId ? undefined : (line.skuId ?? undefined),
         contractItemId: line.contractItemId ?? undefined,
+        requestItemId: edit ? (line.requestItemId ?? undefined) : undefined,
+        assignmentId: edit ? (line.assignmentId ?? undefined) : undefined,
         sourceLineId: edit ? undefined : line.id,
         quantity: copiedNumber(line.quantity),
         remark: copiedText(note?.remark),

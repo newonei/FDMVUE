@@ -19,6 +19,43 @@ export interface ProductionConfigDraft {
   foldingType?: string;
 }
 
+export const productionBatchFields = [
+  { value: 'colorMode', label: '单色 / 双色' },
+  { value: 'frontColor', label: '正面颜色' },
+  { value: 'backColor', label: '反面颜色' },
+  { value: 'textureFront', label: '正面纹路' },
+  { value: 'textureBack', label: '反面纹路' },
+] as const;
+export type ProductionBatchField = (typeof productionBatchFields)[number]['value'];
+
+/** 只替换被勾选的字段，每个目标明细的尺寸、制造结构和工艺继续按原行保存。 */
+export function productionBatchDraft(
+  item: Api.Item,
+  source: ProductionConfigDraft,
+  fields: ProductionBatchField[],
+): ProductionConfigDraft {
+  const form = productionConfigDraft(item);
+  for (const field of fields) {
+    // colorMode 的联合类型比其它文字参数更窄。
+    if (field === 'colorMode') form.colorMode = source.colorMode;
+    else form[field] = field === 'backColor' && source.colorMode === 'SINGLE' ? source.frontColor : source[field];
+  }
+  return form;
+}
+
+export function productionBatchConfig(
+  item: Api.Item,
+  source: ProductionConfigDraft,
+  fields: ProductionBatchField[],
+): Api.ItemProductionConfigReq {
+  return {
+    itemId: item.id,
+    target: productionConfigTarget(item.id, productionBatchDraft(item, source, fields)),
+    routeId: item.routeId ?? null,
+    processes: [...(item.processes ?? [])],
+  };
+}
+
 /** 已保存的值优先；已确认明细的空值也是保存结果，不能用建议重新填回。 */
 export function productionConfigDraft(item: Api.Item): ProductionConfigDraft {
   const suggested = item.targetSuggested;

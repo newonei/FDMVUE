@@ -149,6 +149,8 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'requiredDate|需求日期',
       'ownerUserId|采购经办',
       'assignmentStatus|分派进度',
+      'transferStatus|转采购进度',
+      'availableQuantity|可转数量',
       'remark|说明',
     ],
     create: ['CREATE_REQUEST'],
@@ -296,7 +298,7 @@ export const documentDefinitions: Record<DocumentKind, DocumentDefinition> = {
       'confirmedAt|确认时间',
     ],
     create: ['CREATE_RECEIPT'],
-    actions: ['CONFIRM_RECEIPT', 'REFRESH_RECEIPT_FX'],
+    actions: ['CONFIRM_RECEIPT', 'CANCEL_RECEIPT', 'REFRESH_RECEIPT_FX'],
   },
   refunds: {
     title: '退款与冲销',
@@ -414,9 +416,10 @@ export function pendingRequestItems(
             assigned = assigned.plus(String(assignment.quantity ?? 0));
           }
         }
-        const remaining = new BigNumber(String(item.quantity ?? 0)).minus(
-          assigned,
-        );
+        const remaining =
+          item.unassignedQuantity === undefined
+            ? new BigNumber(String(item.quantity ?? 0)).minus(assigned)
+            : new BigNumber(String(item.unassignedQuantity));
         return remaining.isFinite() && remaining.isGreaterThan(0)
           ? [
               {
@@ -449,7 +452,7 @@ export function documentStatuses(kind: DocumentKind): string[] {
     plans: ['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_APPROVED', 'RETURNED'],
     orders: ['ORDERED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'],
     production: ['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'],
-    receipts: ['PENDING', 'CONFIRMED'],
+    receipts: ['PENDING', 'CONFIRMED', 'CANCELLED'],
     invoices: ['VALID', 'VOID'],
     costs: ['ESTIMATED', 'COMMITTED', 'COLLECTED'],
   };
@@ -457,6 +460,16 @@ export function documentStatuses(kind: DocumentKind): string[] {
 }
 export function allocationKind(record: BusinessRecord) {
   return record.originalAllocationId ? '解除核销' : '回款核销';
+}
+export function canCancelReceipt(
+  record: BusinessRecord,
+  allowedActions: readonly string[] = [],
+): boolean {
+  return (
+    allowedActions.includes('CANCEL_RECEIPT') &&
+    receiptKind(record) === 'PAYMENT' &&
+    record.status === 'PENDING'
+  );
 }
 export function documentRecords(
   contract: Contract,
@@ -624,6 +637,18 @@ export function documentActionUnavailableReason(
   action: string,
   record: BusinessRecord,
 ): string | undefined {
+  if (
+    action === 'CANCEL_RECEIPT' &&
+    !canCancelReceipt(record, ['CANCEL_RECEIPT'])
+  )
+    return '仅可撤销尚未经财务确认的回款登记，请刷新记录';
+  if (
+    ['CONFIRM_RECEIPT', 'REFRESH_RECEIPT_FX', 'REVERSE_RECEIPT'].includes(
+      action,
+    ) &&
+    record.status === 'CANCELLED'
+  )
+    return '回款登记已撤销，仅可查看历史记录';
   if (action === 'CANCEL_REQUEST') {
     if (record.status === 'CANCELLED') return '采购申请已取消';
     if (contract.purchaseOrders?.some((order) => order.requestId === record.id))
@@ -706,6 +731,23 @@ export function documentActionDefinition(
     ...executionActions(contract, pools, master),
   };
   const definition = definitions[action];
+  if (record) {
+    const unavailable = documentActionUnavailableReason(
+      contract,
+      action,
+      record,
+    );
+    if (
+      unavailable &&
+      [
+        'CANCEL_RECEIPT',
+        'CONFIRM_RECEIPT',
+        'REFRESH_RECEIPT_FX',
+        'REVERSE_RECEIPT',
+      ].includes(action)
+    )
+      throw new Error(unavailable);
+  }
   if (
     !definition ||
     ![
@@ -887,7 +929,7 @@ export function documentActionDefinition(
     }));
   const receiptCandidates = (contract.finance?.receipts ?? []).filter(
     (receipt) => {
-      if (action === 'CONFIRM_RECEIPT')
+      if (['CANCEL_RECEIPT', 'CONFIRM_RECEIPT'].includes(action))
         return (
           receiptKind(receipt) === 'PAYMENT' && receipt.status === 'PENDING'
         );
@@ -895,7 +937,7 @@ export function documentActionDefinition(
         return (
           receiptKind(receipt) === 'PAYMENT' && receipt.status === 'CONFIRMED'
         );
-      return true;
+      return receipt.status !== 'CANCELLED';
     },
   );
   if (action !== 'REFRESH_RECEIPT_FX')

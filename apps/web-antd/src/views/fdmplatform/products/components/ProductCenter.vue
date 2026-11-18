@@ -3,6 +3,7 @@ import type {
   Product,
   ProductAttributeOptions,
   ProductPrice,
+  ProductQuery,
   TaxBasis,
 } from '#/api/fdmplatform/products';
 
@@ -81,6 +82,12 @@ const panelError = ref('');
 const loading = ref(false);
 const pageNo = ref(catalogPage('catalogPage', 1));
 const pageSize = ref(Math.min(catalogPage('catalogSize', 10), 100));
+const initialCodeOrder = catalogQuery('catalogCodeOrder');
+const codeOrder = ref<ProductQuery['codeOrder']>(
+  initialCodeOrder === 'asc' || initialCodeOrder === 'desc'
+    ? initialCodeOrder
+    : undefined,
+);
 const total = ref(0);
 const keyword = ref(catalogQuery('catalogKeyword'));
 const productStage = ref(catalogQuery('catalogProductStage') || undefined);
@@ -159,11 +166,24 @@ const pageIncompleteCount = computed(
     products.value.filter((product) => product.active && !product.selectable)
       .length,
 );
+const codeSortOrder = computed(() => {
+  if (codeOrder.value === undefined) return null;
+  return codeOrder.value === 'asc' ? ('ascend' as const) : ('descend' as const);
+});
 const columns = computed(() =>
   props.mode === 'catalog'
     ? [
-        // 列顺序参考金智产品档案：名称、型号、克重、材质、规格、定制说明、类别、单位
+        // 产品编号独立展示，支持对全部匹配产品排序后分页。
         { title: '产品名称', key: 'product', width: 240 },
+        {
+          title: '产品编号',
+          key: 'code',
+          dataIndex: 'code',
+          width: 150,
+          sorter: true,
+          sortOrder: codeSortOrder.value,
+          sortDirections: ['descend', 'ascend'] as ('ascend' | 'descend')[],
+        },
         { title: '颜色 / 制造结构', key: 'colors', width: 230 },
         { title: '生产分类 / 工艺属性', key: 'production', width: 270 },
         { title: '产品型号', key: 'text', dataIndex: 'model', width: 120 },
@@ -243,6 +263,7 @@ async function load(reset = false) {
     if (props.mode === 'catalog') {
       const result = await getProducts({
         ...scope,
+        codeOrder: codeOrder.value,
         keyword: keyword.value,
         productStage: productStage.value,
         categoryId: category.value,
@@ -269,8 +290,24 @@ async function load(reset = false) {
     if (run === sequence) loading.value = false;
   }
 }
-function changePage(page: { current?: number; pageSize?: number }) {
-  pageNo.value = page.current ?? 1;
+function changeTable(
+  page: { current?: number; pageSize?: number },
+  _filters: unknown,
+  sorter: unknown,
+  extra?: { action?: string },
+) {
+  if (props.mode === 'catalog' && extra?.action === 'sort') {
+    const current = (Array.isArray(sorter) ? sorter[0] : sorter) as
+      | undefined
+      | { columnKey?: string; order?: 'ascend' | 'descend' | null };
+    codeOrder.value = undefined;
+    if (current?.columnKey === 'code' && current.order) {
+      codeOrder.value = current.order === 'ascend' ? 'asc' : 'desc';
+    }
+    pageNo.value = 1;
+  } else {
+    pageNo.value = page.current ?? 1;
+  }
   pageSize.value = page.pageSize ?? 10;
   void load();
 }
@@ -308,6 +345,7 @@ function openProductDetail(id: string) {
       catalogActive: active.value,
       catalogPage: String(pageNo.value),
       catalogSize: String(pageSize.value),
+      catalogCodeOrder: codeOrder.value,
     },
   });
 }
@@ -587,7 +625,7 @@ async function savePrice() {
               :columns="columns"
               row-key="id"
               :loading="loading"
-              :scroll="{ x: mode === 'catalog' ? 1880 : 1050 }"
+              :scroll="{ x: mode === 'catalog' ? 2030 : 1050 }"
               :pagination="{
                 current: pageNo,
                 pageSize,
@@ -595,7 +633,7 @@ async function savePrice() {
                 showSizeChanger: true,
                 showTotal: (count: number) => `共 ${count} 条`,
               }"
-              @change="changePage"
+              @change="changeTable"
             >
               <template v-if="mode === 'catalog'" #emptyText>
                 <Empty
@@ -645,12 +683,14 @@ async function savePrice() {
                       >
                         {{ record.name }}
                       </button>
-                      <div class="muted cell-line" :title="record.code">
-                        {{ record.code }}
-                      </div>
                     </div>
                   </div>
                 </template>
+                <span
+                  v-else-if="column.key === 'code'"
+                  class="cell-line"
+                  :title="record.code"
+                  >{{ record.code || '—' }}</span>
                 <ProductColorSummary
                   v-else-if="column.key === 'colors'"
                   :value="record as Product"

@@ -67,6 +67,7 @@ export function relatedCreations(
       return [{ kind: 'plans', action: 'SAVE_PLAN', title: '编制采购方案' }];
     }
     case 'receipts': {
+      if (record.status !== 'CONFIRMED') return [];
       return [
         {
           kind: 'allocations',

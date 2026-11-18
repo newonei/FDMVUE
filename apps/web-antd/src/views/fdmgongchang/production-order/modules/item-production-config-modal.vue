@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import type { RouteDraft } from '../shared';
-import type { ProductionConfigDraft } from './item-production-config';
+import type { ProductionBatchField, ProductionConfigDraft } from './item-production-config';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi as MatchApi } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
-import { Alert, AutoComplete, Button, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
+import { Alert, AutoComplete, Button, Checkbox, InputNumber, Modal, Select, Spin } from 'ant-design-vue';
 
-import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig } from '#/api/fdmgongchang/production-order';
+import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig, saveItemProductionConfigBatch } from '#/api/fdmgongchang/production-order';
 
-import { routeLabel, routeProblem, sortSteps } from '../shared';
-import { productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, unfinishedProductionParameters } from './item-production-config';
+import { num, routeLabel, routeProblem, sortSteps } from '../shared';
+import { productionBatchConfig, productionBatchDraft, productionBatchFields, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, unfinishedProductionParameters } from './item-production-config';
 import RoutePicker from './route-picker.vue';
 
 const props = defineProps<{ itemId: number; orderId: number }>();
@@ -29,6 +29,9 @@ const saving = ref(false);
 const loadError = ref('');
 const saveError = ref('');
 const attemptedSave = ref(false);
+const batchFields = ref<ProductionBatchField[]>([]);
+const batchItemIds = ref<number[]>([]);
+const otherItems = computed(() => (order.value?.items ?? []).filter((row) => row.id !== props.itemId && num(row.quantity) > 0));
 let version = 0;
 
 function errorText(error: unknown) {
@@ -43,6 +46,8 @@ async function load() {
   loadError.value = '';
   saveError.value = '';
   attemptedSave.value = false;
+  batchFields.value = [];
+  batchItemIds.value = [];
   item.value = undefined;
   order.value = undefined;
   routeOptions.value = undefined;
@@ -86,6 +91,23 @@ const problems = computed(() => {
   if (!steps.includes('ENGRAVE') && form.value.pattern) result.push('未选择雕刻工序，请清空雕刻图案，或加入雕刻工序');
   return result;
 });
+const batchProblems = computed(() => {
+  if (batchFields.value.length === 0 && batchItemIds.value.length === 0) return [];
+  if (batchFields.value.length === 0) return ['请勾选要同步的参数字段'];
+  if (batchItemIds.value.length === 0) return ['请勾选要同步参数的产品'];
+  return otherItems.value.filter((row) => batchItemIds.value.includes(row.id)).flatMap((row) => {
+    const request = productionBatchConfig(row, form.value, batchFields.value);
+    const merged = productionBatchDraft(row, form.value, batchFields.value);
+    const errors = productionConfigProblems(merged);
+    const routeError = routeProblem(request.processes, routeOptions.value?.processes ?? []);
+    if (routeError) errors.push(routeError);
+    const structureError = productionRouteProblems(merged.constructionType, request.processes);
+    if (structureError) errors.push(structureError);
+    if (!request.processes.includes('EMBOSS') && (request.target.textureFront || request.target.textureBack)) errors.push('保留的工艺没有压花工序，请先单独调整工艺或清空纹路');
+    if ((row.steps ?? []).some((step) => step.orderCount > 0)) errors.push('已开工序单，不能批量修改参数');
+    return errors.map((error) => `${row.productCode || row.productName}：${error}`);
+  });
+});
 
 function close() { if (!saving.value) open.value = false; }
 
@@ -93,7 +115,7 @@ async function save() {
   if (saving.value || loading.value || !item.value) return;
   attemptedSave.value = true;
   saveError.value = '';
-  if (problems.value.length > 0) return;
+  if (problems.value.length > 0 || batchProblems.value.length > 0) return;
   const current = version;
   const payload: Api.ItemProductionConfigReq = {
     itemId: item.value.id,
@@ -103,7 +125,9 @@ async function save() {
   };
   saving.value = true;
   try {
-    await saveItemProductionConfig(payload);
+    await (batchItemIds.value.length > 0
+      ? saveItemProductionConfigBatch({ items: [payload, ...otherItems.value.filter((row) => batchItemIds.value.includes(row.id)).map((row) => productionBatchConfig(row, form.value, batchFields.value))] })
+      : saveItemProductionConfig(payload));
     if (current !== version || !open.value) return;
     open.value = false;
     emit('saved');
@@ -128,7 +152,7 @@ const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '�
       <div v-else-if="item && order" class="production-config-editor flex flex-col gap-4">
         <div class="border-b pb-3">
           <div class="font-medium">{{ order.orderNo }} · {{ item.productCode || '未填产品编码' }} · {{ item.productName }}</div>
-          <div class="mt-1 text-xs text-muted-foreground">订单数量 {{ item.quantity }} {{ item.unit || '件' }} · {{ item.targetConfirmedAt ? '从已保存生产参数继续修改' : '请核对已有参数；空缺项使用系统建议值' }}</div>
+          <div class="mt-1 text-xs text-muted-foreground">订单数量 {{ num(item.quantity) }} {{ item.unit || '件' }} · {{ item.targetConfirmedAt ? '从已保存生产参数继续修改' : '请核对已有参数；空缺项使用系统建议值' }}</div>
         </div>
         <fieldset :disabled="saving" :inert="saving || undefined" class="m-0 min-w-0 border-0 p-0">
           <div class="config-fields">
@@ -195,9 +219,22 @@ const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '�
             <p v-else class="mt-2 text-sm text-muted-foreground">本产品不经过折叠工序。</p>
             <p class="config-actual-route mb-0 mt-2 text-sm">{{ routeLabel(route, routeOptions) }}：{{ actualRoute }}</p>
           </div>
+          <div v-if="otherItems.length > 0" class="mt-4 flex flex-col gap-2 border-t pt-3">
+            <div class="font-medium">同步参数到其他产品</div>
+            <p class="m-0 text-xs text-muted-foreground">先勾选需要共用的字段，再勾选产品；其他产品的尺寸、制造结构和工艺沿用各自原值。空白纹路也会按勾选字段同步，单色产品反面始终随正面同色。</p>
+            <Checkbox.Group v-model:value="batchFields" class="flex flex-wrap gap-2" aria-label="同步哪些生产参数">
+              <Checkbox v-for="field in productionBatchFields" :key="field.value" :value="field.value">{{ field.label }}</Checkbox>
+            </Checkbox.Group>
+            <Checkbox :checked="batchItemIds.length === otherItems.length" :indeterminate="batchItemIds.length > 0 && batchItemIds.length < otherItems.length" @change="(event) => batchItemIds = event.target.checked ? otherItems.map(row => row.id) : []">其他产品全选</Checkbox>
+            <Checkbox.Group v-model:value="batchItemIds" class="flex flex-col gap-1" aria-label="同步到哪些产品">
+              <Checkbox v-for="row in otherItems" :key="row.id" :value="row.id">{{ row.productCode }} · {{ row.productName }} · {{ num(row.quantity) }} {{ row.unit || '件' }}</Checkbox>
+            </Checkbox.Group>
+            <p v-if="batchItemIds.length > 0" class="m-0 text-xs text-muted-foreground">将本产品及勾选的 {{ batchItemIds.length }} 个产品一起保存，任一产品不符合生产要求时整批不保存。</p>
+          </div>
         </fieldset>
         <Alert v-if="unfinished.length > 0" type="warning" show-icon :message="unfinished.join('；')" description="可以先保存，后续继续补齐；拆分下发前仍需完整配置。" />
         <Alert v-if="attemptedSave && problems.length > 0" class="config-validation" type="error" show-icon :message="problems.join('；')" />
+        <Alert v-if="attemptedSave && batchProblems.length > 0" type="error" show-icon :message="batchProblems.join('；')" />
         <Alert v-if="saveError" type="error" :message="saveError" show-icon />
       </div>
       <div v-else class="min-h-24"></div>

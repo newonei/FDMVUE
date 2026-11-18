@@ -4,7 +4,7 @@ export const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 export const MAX_SUBMISSION_BYTES = 1024 * 1024 * 1024;
 export const ATTACHMENT_LIMIT_TEXT = '1 GB';
 export const ATTACHMENT_FORMAT_TEXT =
-  '支持 AI、PLT、PSD、CDR、EPS、CAD、压缩包及常用文档、图片';
+  '支持 AI、PLT、PSD/PSB、CDR、EPS、CAD、SVG 等设计文件，ZIP、RAR、7Z 压缩包，以及 PDF、图片、Office、开放文档和文本';
 export const ATTACHMENT_ACCEPT =
   '.pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.doc,.docx,.docm,.dot,.dotx,.dotm,.xls,.xlsx,.xlsm,.xlt,.xltx,.xltm,.ppt,.pptx,.pptm,.pot,.potx,.potm,.pps,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.csv,.tsv,.txt,.ai,.plt,.eps,.cdr,.psd,.psb,.dwg,.dxf,.svg,.tif,.tiff,.zip,.rar,.7z';
 

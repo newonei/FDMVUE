@@ -5,6 +5,40 @@ import { requestClient } from '#/api/request';
 export namespace FdmMcpApi {
   export type DateTime = number | number[] | string;
   export type ToolRisk = 'DESTRUCTIVE' | 'READ' | 'WRITE';
+  export type ApiOperationStatus = 'ADAPTER_REQUIRED' | 'EXCLUDED' | 'READY';
+
+  export interface ApiOperation {
+    operationId: string;
+    module: string;
+    title: string;
+    description: string;
+    method: string;
+    path: string;
+    risk: ToolRisk;
+    status: ApiOperationStatus;
+    reason?: string;
+    permissions: string[];
+    conditionalAuthorization: boolean;
+    consumes: string[];
+    produces: string[];
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+  }
+
+  export interface ApiCatalogCoverage {
+    catalogVersion: string;
+    total: number;
+    ready: number;
+    adapterRequired: number;
+    excluded: number;
+  }
+
+  export interface ApiCatalogPageParams extends PageParam {
+    keyword?: string;
+    module?: string;
+    status?: ApiOperationStatus;
+    risk?: ToolRisk;
+  }
 
   export interface Connection {
     id: number;
@@ -110,6 +144,29 @@ export function updateMcpClientStatus(id: number, enabled: boolean) {
 
 export function getMcpToolList() {
   return requestClient.get<FdmMcpApi.Tool[]>('/fdmmcp/tool/list');
+}
+
+/** 当前服务已加载接口的管理目录，实际执行时仍校验原接口权限。 */
+export function getMcpApiCatalogPage(params: FdmMcpApi.ApiCatalogPageParams) {
+  return requestClient.get<PageResult<FdmMcpApi.ApiOperation>>(
+    '/fdmmcp/api-catalog/page',
+    { params },
+  );
+}
+
+export function getMcpApiCatalogCoverage() {
+  return requestClient.get<FdmMcpApi.ApiCatalogCoverage>(
+    '/fdmmcp/api-catalog/coverage',
+  );
+}
+
+export function getMcpApiCatalogDetail(operationId: string) {
+  return requestClient.get<FdmMcpApi.ApiOperation>(
+    '/fdmmcp/api-catalog/detail',
+    {
+      params: { operationId },
+    },
+  );
 }
 
 export function getMcpAuditLogPage(params: PageParam) {

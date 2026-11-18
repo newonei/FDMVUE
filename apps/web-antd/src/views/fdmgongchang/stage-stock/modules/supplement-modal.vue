@@ -24,12 +24,14 @@ import {
   supplementOrder,
 } from '#/api/fdmgongchang/stage-stock';
 
+import { quantityPrecision } from '../../shared/quantity';
 import {
   attrSummary,
   formatQty,
   makeLabels,
   recipeCheck,
   recipePicks,
+  stockUnit,
   sumQty,
 } from '../model';
 
@@ -320,7 +322,7 @@ async function submit() {
                 :value="quantities[record.id] ?? undefined"
                 :aria-label="`${record.itemCode} 补领数量`"
                 :min="0"
-                :precision="3"
+                :precision="quantityPrecision(stockUnit(record.stage, record.item, stageOf(record.stage)?.unit))"
                 :style="{ width: '7rem' }"
                 size="small"
                 @change="

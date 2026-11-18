@@ -36,7 +36,7 @@ vi.mock('ant-design-vue', () => {
   });
   return {
     Alert: defineComponent({
-      props: ['message'],
+      props: { message: { default: '', type: String } },
       setup: (props) => () => h('div', { role: 'alert' }, props.message),
     }),
     Button: defineComponent({
@@ -75,10 +75,15 @@ async function settle() {
 }
 async function mount() {
   const orderId = ref('order-1');
+  const busy: boolean[] = [];
   const host = document.createElement('div');
   document.body.append(host);
   const app = createApp({
-    render: () => h(StandaloneOrderFiles, { orderId: orderId.value }),
+    render: () =>
+      h(StandaloneOrderFiles, {
+        orderId: orderId.value,
+        onBusy: (value: boolean) => busy.push(value),
+      }),
   });
   app.mount(host);
   let mounted = true;
@@ -90,12 +95,21 @@ async function mount() {
   };
   cleanup.push(unmount);
   await settle();
-  return { host, orderId, unmount };
+  return { busy, host, orderId, unmount };
 }
 async function pick(host: HTMLElement, files: File[]) {
   const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
   Object.defineProperty(input, 'files', { configurable: true, value: files });
   input.dispatchEvent(new Event('change'));
+  await settle();
+}
+async function drop(host: HTMLElement, files: File[]) {
+  const event = new Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', {
+    value: { files },
+  });
+  host.querySelector('.dropzone')!.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
   await settle();
 }
 function button(host: HTMLElement, label: string) {
@@ -114,6 +128,51 @@ async function upload(host: HTMLElement) {
 const file = (name: string) => new File(['sample'], name);
 
 describe('独立采购单附件上传队列', () => {
+  it('空队列显示补充附件拖放入口，选择文件前不展示主要上传操作', async () => {
+    const { host } = await mount();
+    expect(host.textContent).toContain('补充附件');
+    expect(host.textContent).toContain(
+      '报价、图纸、沟通资料等，统一保存在本采购单下。',
+    );
+    expect(host.textContent).toContain('选择文件，或将文件拖到这里');
+    expect(
+      [...host.querySelectorAll('button')].some((item) =>
+        item.textContent?.trim().startsWith('上传'),
+      ),
+    ).toBe(false);
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const click = vi.spyOn(input, 'click');
+    button(host, '选择文件').click();
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('拖放追加文件并跳过与待上传队列或同批重复的文件', async () => {
+    const { host } = await mount();
+    const first = file('报价.pdf');
+    const second = file('图纸.ai');
+    await pick(host, [first]);
+    await drop(host, [first, second, second]);
+    expect(host.textContent).toContain('待上传 2 个文件');
+    expect(host.textContent).toContain('已跳过 2 个重复文件');
+    expect(host.querySelectorAll('.queued-file')).toHaveLength(2);
+    expect(mocks.upload).not.toHaveBeenCalled();
+    await upload(host);
+    expect(mocks.upload).toHaveBeenCalledTimes(2);
+  });
+
+  it('无上传权限时拖放不添加文件', async () => {
+    mocks.files.mockResolvedValue({
+      enabled: true,
+      canUpload: false,
+      items: [],
+    });
+    const { host } = await mount();
+    await drop(host, [file('图纸.ai')]);
+    expect(host.querySelector('.queue')).toBeNull();
+    expect(button(host, '选择文件').disabled).toBe(true);
+    expect(mocks.upload).not.toHaveBeenCalled();
+  });
+
   it('允许多选 AI、PLT，明确显示数量、名称、大小和已上传数量，上传前可移除', async () => {
     const { host } = await mount();
     const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -306,14 +365,28 @@ describe('独立采购单附件上传队列', () => {
           finishFirst = resolve;
         }),
     );
-    const { host, unmount } = await mount();
+    const { busy, host, unmount } = await mount();
+    expect(busy).toEqual([false]);
     await pick(host, [file('第一.ai'), file('第二.plt')]);
-    await upload(host);
+    button(host, '上传').click();
+    // Parent navigation protection must observe the change in the same turn.
+    expect(busy.at(-1)).toBe(true);
+    await settle();
+    await drop(host, [file('第三.ai')]);
+    expect(host.querySelectorAll('.queued-file')).toHaveLength(2);
     unmount();
+    expect(busy.at(-1)).toBe(false);
     finishFirst();
     await settle();
     expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(mocks.document).toHaveBeenCalledTimes(1);
     expect(mocks.files).toHaveBeenCalledTimes(1);
+  });
+
+  it('上传完成后同步释放忙碌状态', async () => {
+    const { busy, host } = await mount();
+    await pick(host, [file('报价.pdf')]);
+    await upload(host);
+    expect(busy).toEqual([false, true, false]);
   });
 });

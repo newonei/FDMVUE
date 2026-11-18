@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PrintExtras } from '../print-extras';
+import type { PrintExtras, ProductionExtraField } from '../print-extras';
 
 import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
@@ -8,8 +8,16 @@ import type {
   ProcurementOrderRow,
   ProcurementOrderView,
 } from '#/api/fdmplatform/procurement';
+import type { ProductAttributeOptions } from '#/api/fdmplatform/products';
 
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue';
 
 import {
   Alert,
@@ -34,11 +42,14 @@ import {
   getProcurementOrder,
   getProcurementOrders,
 } from '#/api/fdmplatform/procurement';
+import { getProductAttributeOptions } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../../data';
+import { colorModeOptions } from '../../../products/manufacturing';
 import { purchaseRowLabels } from '../model';
 import {
   additionalLineAmount,
+  applyProductionExtras,
   boxCount,
   copyPrintExtras,
   currencyDigits,
@@ -52,13 +63,14 @@ import {
   printExtrasFrom,
   printExtrasImageIds,
   printExtrasPayload,
+  productionExtrasFrom,
   SHARED_COLUMN_SUGGESTIONS,
 } from '../print-extras';
 import OrderImages from './OrderImages.vue';
 
 /**
  * 印到采购单上的附加资料（#88）：明细补充（产品图、客户颜色、克重、型号、装箱数）、整单共用说明列、
- * 辅料明细勾选、包装步骤。随下单资料一起保存、确认，导出 PDF / Excel 时带出。
+ * 辅料明细勾选、包装步骤、订单备注。随下单资料一起保存、确认，导出时带出。
  */
 const props = defineProps<{
   disabled: boolean;
@@ -71,7 +83,10 @@ const emit = defineEmits<{
   save: [];
 }>();
 const uploadCount = ref(0);
+const columnsOpen = ref(false);
+const expandedLines = ref<string[]>([]);
 const copyOpen = ref(false);
+const batchOpen = ref(false);
 const copying = ref(false);
 let disposed = false;
 const disabled = computed(
@@ -79,7 +94,12 @@ const disabled = computed(
     props.disabled || props.saving || uploadCount.value > 0 || copying.value,
 );
 watch(
-  () => uploadCount.value > 0 || copyOpen.value || copying.value,
+  () =>
+    uploadCount.value > 0 ||
+    copyOpen.value ||
+    copying.value ||
+    batchOpen.value ||
+    columnsOpen.value,
   (value) => emit('busy', value),
 );
 function imageBusy(value: boolean) {
@@ -98,12 +118,31 @@ const extras = reactive<PrintExtras>({
   sharedColumns: [],
   accessories: [],
   packagingSteps: [],
+  orderRemark: '',
 });
 const active = ref<string[]>([]);
 const contractId = computed(() => props.view.contractId);
 const orderId = computed(() => props.view.id);
 const lines = computed(() => (props.view.order.lines ?? []) as Line[]);
-const displayLines = computed(() => [
+const selectedLineIds = ref<string[]>([]);
+const allSelected = computed(
+  () =>
+    lines.value.length > 0 &&
+    selectedLineIds.value.length === lines.value.length,
+);
+const attributeOptions = ref<ProductAttributeOptions>();
+const optionsError = ref('');
+async function loadAttributeOptions() {
+  optionsError.value = '';
+  try {
+    const value = await getProductAttributeOptions();
+    if (!disposed) attributeOptions.value = value;
+  } catch (error) {
+    if (!disposed) optionsError.value = errorText(error);
+  }
+}
+onMounted(loadAttributeOptions);
+const displayLines = computed<Line[]>(() => [
   ...lines.value,
   ...extras.additionalLines.map((additional) => ({
     id: additional.id,
@@ -114,6 +153,21 @@ const baseline = ref('');
 let loadedId: string | undefined;
 const fingerprint = () => JSON.stringify(printExtrasPayload(extras));
 const dirty = computed(() => baseline.value !== fingerprint());
+const productionProblems = computed(() =>
+  lines.value.flatMap((line) => {
+    const row = extras.lineExtras[String(line.id)] ?? {};
+    const product = String(spec(line).skuCode ?? spec(line).skuName ?? line.id);
+    if (row.colorMode === 'SINGLE' && !row.frontColor?.trim())
+      return [`${product}：单色请填写正面颜色`];
+    if (row.colorMode === 'DUAL') {
+      if (!row.frontColor?.trim() || !row.backColor?.trim())
+        return [`${product}：双色请分别填写正反面颜色`];
+      if (row.frontColor === row.backColor)
+        return [`${product}：双色的正反面颜色必须不同，同色请选单色`];
+    }
+    return [];
+  }),
+);
 watch(dirty, (value) => emit('dirty', value), { immediate: true });
 
 function loadSaved() {
@@ -121,8 +175,23 @@ function loadSaved() {
     extras,
     printExtrasFrom(props.view.details, props.view.accessoryCatalog),
   );
-  for (const line of lines.value) extras.lineExtras[String(line.id)] ??= {};
-  loadedId = `${props.view.contractId}/${props.view.id}`;
+  for (const line of lines.value) {
+    const id = String(line.id);
+    extras.lineExtras[id] = productionExtrasFrom(
+      extras.lineExtras[id] ?? {},
+      spec(line),
+    );
+  }
+  selectedLineIds.value = [];
+  batchOpen.value = false;
+  const nextId = `${props.view.contractId}/${props.view.id}`;
+  if (loadedId !== nextId) {
+    columnsOpen.value = false;
+    expandedLines.value = displayLines.value
+      .slice(0, 1)
+      .map((line) => String(line.id));
+  }
+  loadedId = nextId;
   baseline.value = fingerprint();
 }
 
@@ -144,6 +213,7 @@ watch(
         ? 'accessories'
         : '',
       props.view.details.packagingSteps?.length ? 'steps' : '',
+      extras.orderRemark?.trim() ? 'remark' : '',
     ].filter(Boolean);
   },
   { immediate: true },
@@ -160,6 +230,81 @@ function extra(line: Line): OrderLineExtra {
   if (line.additional) return line.additional;
   return (extras.lineExtras[String(line.id)] ??= {});
 }
+function selectLine(id: string, checked: boolean) {
+  selectedLineIds.value = checked
+    ? [...new Set([...selectedLineIds.value, id])]
+    : selectedLineIds.value.filter((value) => value !== id);
+}
+function selectAllLines(checked: boolean) {
+  selectedLineIds.value = checked
+    ? lines.value.map((line) => String(line.id))
+    : [];
+}
+function productionOptions(field: ProductionExtraField, value?: string) {
+  const materialOptions = field.startsWith('texture')
+    ? (attributeOptions.value?.textures ?? [])
+    : (attributeOptions.value?.colors ?? []);
+  const options = field === 'colorMode' ? colorModeOptions : materialOptions;
+  return value && !options.some((option) => option.value === value)
+    ? [...options, { value, label: value }]
+    : options;
+}
+function setProduction(
+  line: Line,
+  field: ProductionExtraField,
+  value: unknown,
+) {
+  const row = extra(line);
+  (row as Record<string, unknown>)[field] =
+    typeof value === 'string' ? value : '';
+  if (row.colorMode === 'SINGLE') row.backColor = row.frontColor ?? '';
+}
+const batchFields: { key: ProductionExtraField; label: string }[] = [
+  { key: 'colorMode', label: '单色 / 双色' },
+  { key: 'frontColor', label: '正面颜色' },
+  { key: 'backColor', label: '反面颜色' },
+  { key: 'textureFront', label: '正面纹路' },
+  { key: 'textureBack', label: '反面纹路' },
+  { key: 'weight', label: '产品克重' },
+];
+const batchValues = ref<OrderLineExtra>({});
+const batchEnabled = ref<ProductionExtraField[]>([]);
+const batchOnlyEmpty = ref(false);
+function setBatchField(field: ProductionExtraField, checked: boolean) {
+  batchEnabled.value = checked
+    ? [...new Set([...batchEnabled.value, field])]
+    : batchEnabled.value.filter((value) => value !== field);
+}
+function setBatchValue(field: ProductionExtraField, value: unknown) {
+  (batchValues.value as Record<string, unknown>)[field] =
+    typeof value === 'string' ? value : '';
+  setBatchField(field, true);
+}
+function openBatch() {
+  batchValues.value = { colorMode: 'UNKNOWN' };
+  batchEnabled.value = [];
+  batchOnlyEmpty.value = false;
+  batchOpen.value = true;
+}
+function applyBatch() {
+  if (
+    disabled.value ||
+    selectedLineIds.value.length === 0 ||
+    batchEnabled.value.length === 0
+  )
+    return;
+  applyProductionExtras(
+    extras.lineExtras,
+    selectedLineIds.value,
+    batchValues.value,
+    batchEnabled.value,
+    batchOnlyEmpty.value,
+  );
+  batchOpen.value = false;
+  message.success(
+    `已设置 ${selectedLineIds.value.length} 条产品明细，请保存附加资料`,
+  );
+}
 function customCell(line: Line, id: string) {
   const row = extra(line);
   row.customCells ??= {};
@@ -169,8 +314,9 @@ function attachments(line: Line) {
   return extra(line).imageIds ?? [];
 }
 function addLine() {
+  const id = crypto.randomUUID();
   extras.additionalLines.push({
-    id: crypto.randomUUID(),
+    id,
     name: '',
     quantity: 1,
     unit: '项',
@@ -178,6 +324,7 @@ function addLine() {
     imageIds: [],
     customCells: {},
   });
+  expandedLines.value.push(id);
 }
 function addColumn(type: OrderDetailColumn['type']) {
   extras.detailColumns.push({
@@ -204,33 +351,6 @@ function deleteColumn(id: string) {
     },
   });
 }
-const columns = computed(() => [
-  {
-    title: '产品 / 费用项目',
-    key: 'product',
-    width: 180,
-    fixed: 'left' as const,
-  },
-  { title: '产品图片', key: 'image', width: 90 },
-  { title: '客户颜色名称', key: 'customerColor', width: 140 },
-  { title: '产品克重', key: 'weight', width: 120 },
-  { title: '型号（如正反面颜色）', key: 'model', width: 180 },
-  { title: '供应商实物色号图', key: 'colorImage', width: 150 },
-  ...extras.detailColumns.map((column) => ({
-    title: column.title || '未命名列',
-    key: `custom:${column.id}`,
-    width: 180,
-  })),
-  { title: '数量', key: 'quantity', width: 100, align: 'right' as const },
-  { title: '单位', key: 'unit', width: 90 },
-  { title: '单价', key: 'unitPrice', width: 110, align: 'right' as const },
-  { title: '金额', key: 'amount', width: 110, align: 'right' as const },
-  { title: '装箱数', key: 'packQty', width: 110 },
-  { title: '箱数', key: 'boxes', width: 70, align: 'right' as const },
-  { title: '备注', key: 'remark', width: 200 },
-  { title: '附件图片', key: 'attachments', width: 180 },
-  { title: '操作', key: 'action', width: 70 },
-]);
 const additionalTotal = computed(() => {
   let total = new BigNumber(0);
   for (const row of extras.additionalLines)
@@ -246,9 +366,6 @@ function priceAmount(line: Line) {
     { quantity: quantity(line), unitPrice: Number(line.unitPrice ?? 0) },
     String(props.view.order.currency ?? 'CNY'),
   );
-}
-function columnByKey(key: unknown) {
-  return extras.detailColumns.find((column) => `custom:${column.id}` === key);
 }
 function lineImages(line: Line, field: 'colorImageId' | 'imageId' = 'imageId') {
   const id = extra(line)[field];
@@ -356,6 +473,7 @@ function hasExtras(row: ProcurementOrderRow) {
     details?.detailColumns?.length ||
     details?.sharedColumns?.length ||
     details?.accessories?.some((entry) => entry.checked) ||
+    details?.orderRemark?.trim() ||
     Object.keys(details?.lineExtras ?? {}).length > 0
   );
 }
@@ -367,6 +485,7 @@ function hasContent() {
     value.detailColumns.length > 0 ||
     value.packagingSteps.length > 0 ||
     value.accessories.length > 0 ||
+    !!value.orderRemark ||
     Object.keys(value.lineExtras).length > 0
   );
 }
@@ -380,7 +499,7 @@ function pick(row: ProcurementOrderRow) {
   Modal.confirm({
     title: '用这张采购单的附加资料替换当前内容？',
     content:
-      '自定义列、额外费用行、共用说明列、辅料勾选、包装步骤整份替换；产品补充按产品匹配。费用行会在保存后计入本单总额和应付款，请核对。',
+      '自定义列、额外费用行、共用说明列、辅料勾选、包装步骤、订单备注整份替换；产品补充按产品匹配。费用行会在保存后计入本单总额和应付款，请核对。',
     okText: '替换',
     cancelText: '取消',
     onOk: () => copyFrom(target),
@@ -425,8 +544,18 @@ async function copyFrom(target: { contractId: string; orderId: string }) {
       props.view.accessoryCatalog,
     );
     Object.assign(extras, result.value);
-    for (const line of lines.value) extras.lineExtras[String(line.id)] ??= {};
+    for (const line of lines.value) {
+      const id = String(line.id);
+      extras.lineExtras[id] = productionExtrasFrom(
+        extras.lineExtras[id] ?? {},
+        spec(line),
+      );
+    }
+    expandedLines.value = displayLines.value
+      .slice(0, 1)
+      .map((line) => String(line.id));
     active.value = ['lines', 'shared', 'accessories', 'steps'];
+    if (extras.orderRemark?.trim()) active.value.push('remark');
     copyOpen.value = false;
     message.success(
       `已带入附加资料，明细按产品对上 ${result.matched} 行；请核对费用后点击「保存附加资料」`,
@@ -447,7 +576,12 @@ defineExpose({
 <template>
   <div class="print-extras">
     <div class="extras-head">
-      <h4 class="section-title">采购单附加资料（印在导出的采购单上）</h4>
+      <div>
+        <h4 class="section-title">采购单附加资料</h4>
+        <p class="extras-subtitle">
+          补充产品规格、配图、包装要求和订单备注，保存后随采购单导出。
+        </p>
+      </div>
       <Space wrap>
         <Tag v-if="dirty" color="warning">有未保存的修改</Tag>
         <span v-else class="muted">已保存</span>
@@ -463,297 +597,437 @@ defineExpose({
           v-if="!props.disabled"
           type="primary"
           :loading="saving"
-          :disabled="disabled || !dirty"
+          :disabled="disabled || !dirty || productionProblems.length > 0"
           @click="emit('save')"
         >
           保存附加资料
         </Button>
       </Space>
     </div>
-    <p class="muted">
-      不填的部分不出现在采购单上。填了产品图片、客户颜色等补充列时，导出改为横向；辅料明细和包装步骤分别输出（Excel
-      为单独的工作表）。支持 JPG / PNG
-      图片或粘贴截图；修改后请点击「保存附加资料」。
-    </p>
+    <details class="extras-guide">
+      <summary>填写与导出说明</summary>
+      <p class="muted">
+        不填的部分不出现在采购单上。填了产品图片、客户颜色等补充列时，导出改为横向；辅料明细和包装步骤分别输出（Excel
+        为单独的工作表）。支持 JPG / PNG
+        图片或粘贴截图；修改后请点击「保存附加资料」。
+      </p>
+    </details>
     <Collapse v-model:active-key="active" class="extras-collapse">
       <Collapse.Panel key="lines">
         <template #header>
           明细补充
           <span class="muted">支持新增费用行、自定义文字 / 图片列、备注及图片附件</span>
         </template>
-        <Space v-if="!props.disabled" wrap class="detail-toolbar">
-          <Button
-            :disabled="
-              disabled || extras.additionalLines.length >= MAX_ADDITIONAL_LINES
-            "
-            @click="addLine"
-          >
-            + 新增费用 / 免费项目行
-          </Button>
-          <Button
-            :disabled="
-              disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
-            "
-            @click="addColumn('TEXT')"
-          >
-            + 新增文字列
-          </Button>
-          <Button
-            :disabled="
-              disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
-            "
-            @click="addColumn('IMAGE')"
-          >
-            + 新增图片列（色卡等）
-          </Button>
-        </Space>
-        <div v-if="extras.detailColumns.length" class="column-settings">
-          <div
-            v-for="column in extras.detailColumns"
-            :key="column.id"
-            class="column-setting"
-          >
-            <Tag>{{ column.type === 'IMAGE' ? '图片列' : '文字列' }}</Tag>
-            <Input
-              v-model:value="column.title"
-              :disabled="disabled"
-              :maxlength="20"
-              placeholder="填写列名"
-              :aria-label="`自定义列名称 ${column.id}`"
-            />
-            <Select
-              v-model:value="column.type"
-              :disabled="disabled"
-              :options="[
-                { label: '文字', value: 'TEXT' },
-                { label: '图片', value: 'IMAGE' },
-              ]"
-              style="width: 90px"
-            />
+        <div class="detail-toolbar">
+          <div>
+            <strong>产品补充资料</strong>
+            <span class="toolbar-count">{{ lines.length }} 项产品 ·
+              {{ extras.additionalLines.length }} 项费用 / 免费项目</span>
+          </div>
+          <Space wrap>
             <Button
               v-if="!props.disabled"
-              :disabled="disabled"
-              type="link"
-              danger
-              @click="deleteColumn(column.id)"
+              :disabled="
+                disabled ||
+                extras.additionalLines.length >= MAX_ADDITIONAL_LINES
+              "
+              @click="addLine"
             >
-              删除列
+              + 新增费用 / 免费项目行
             </Button>
-          </div>
+            <Button :disabled="disabled" @click="columnsOpen = true">
+              自定义列设置（{{ extras.detailColumns.length }}/{{
+                MAX_DETAIL_COLUMNS
+              }}）
+            </Button>
+          </Space>
         </div>
-        <p class="muted">
-          额外费用行会计入采购总额和应付款；单价可填 0
-          表示免费。产品数量和价格请在采购单明细中修改。最多
-          {{ MAX_ADDITIONAL_LINES }} 行额外项目、{{ MAX_DETAIL_COLUMNS }}
-          个自定义列。
+        <p class="muted detail-help">
+          按产品展开填写，数量和单价在采购单明细中修改。图片支持 JPG /
+          PNG，也可点击图片区域后粘贴截图。
         </p>
-        <Table
-          :data-source="displayLines"
-          :pagination="false"
-          size="small"
-          :row-key="(line: Line) => String(line.id)"
-          :scroll="{ x: 2100 + extras.detailColumns.length * 180 }"
-          :columns="columns"
+        <Alert
+          v-if="productionProblems.length > 0"
+          type="warning"
+          :message="productionProblems.join('；')"
+          class="attribute-error"
+        />
+        <Alert
+          v-if="optionsError"
+          type="warning"
+          :message="`生产属性选项加载失败：${optionsError}`"
+          class="attribute-error"
         >
-          <template #headerCell="{ column }">
-            <span>{{ column.title }}</span>
-            <Button
-              v-if="
-                !disabled &&
-                lines.length > 1 &&
-                ['customerColor', 'weight', 'model', 'packQty'].includes(
-                  String(column.key),
-                )
-              "
-              type="link"
-              size="small"
-              title="把第一行的值填到下面空着的行"
-              @click="
-                fillDown(
-                  column.key as
-                    'customerColor' | 'model' | 'packQty' | 'weight',
-                )
-              "
-            >
-              向下填充
-            </Button>
+          <template #action>
+            <Button size="small" @click="loadAttributeOptions"> 重试 </Button>
           </template>
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'product'">
-              <template v-if="record.additional">
-                <Tag color="blue">额外项目</Tag>
+        </Alert>
+        <div v-if="!props.disabled && lines.length > 1" class="batch-toolbar">
+          <Checkbox
+            :checked="allSelected"
+            :indeterminate="selectedLineIds.length > 0 && !allSelected"
+            :disabled="disabled"
+            @change="(event) => selectAllLines(event.target.checked)"
+          >
+            全选产品
+          </Checkbox>
+          <span class="muted">已选 {{ selectedLineIds.length }} 项</span>
+          <Button
+            :disabled="disabled || !selectedLineIds.length"
+            @click="openBatch"
+          >
+            批量设置生产属性
+          </Button>
+        </div>
+        <Collapse v-model:active-key="expandedLines" class="line-cards">
+          <Collapse.Panel
+            v-for="(record, index) in displayLines"
+            :key="String(record.id)"
+            :data-row="String(record.id)"
+            :force-render="true"
+          >
+            <template #header>
+              <div class="line-heading">
+                <div class="line-identity">
+                  <span
+                    v-if="
+                      !props.disabled && !record.additional && lines.length > 1
+                    "
+                    @click.stop
+                  >
+                    <Checkbox
+                      :checked="selectedLineIds.includes(String(record.id))"
+                      :disabled="disabled"
+                      :aria-label="`选择产品 ${spec(record).skuCode ?? record.id}`"
+                      @change="
+                        (event) =>
+                          selectLine(String(record.id), event.target.checked)
+                      "
+                    />
+                  </span>
+                  <Tag v-if="record.additional" color="blue">
+                    费用 / 免费项目
+                  </Tag>
+                  <span v-else class="line-number">{{ index + 1 }}</span>
+                  <div class="line-name">
+                    <strong>{{
+                      record.additional
+                        ? record.additional.name || '未命名项目'
+                        : spec(record).skuCode || '未命名产品'
+                    }}</strong>
+                    <span v-if="!record.additional" class="muted">{{
+                      spec(record).skuName ?? ''
+                    }}</span>
+                  </div>
+                </div>
+                <div class="line-summary">
+                  <span>{{ quantity(record) }}
+                    {{
+                      record.additional
+                        ? record.additional.unit
+                        : (spec(record).unit ?? record.unit ?? '件')
+                    }}</span>
+                  <span>单价
+                    {{
+                      record.additional
+                        ? record.additional.unitPrice
+                        : (record.unitPrice ?? '—')
+                    }}</span>
+                  <strong>{{ view.order.currency ?? 'CNY' }}
+                    {{
+                      record.additional
+                        ? additionalLineAmount(
+                            record.additional,
+                            String(view.order.currency ?? 'CNY'),
+                          )
+                        : priceAmount(record)
+                    }}</strong>
+                </div>
+              </div>
+            </template>
+            <div v-if="record.additional" class="fee-grid">
+              <div class="field field-wide" data-key="product">
+                <label :for="`fee-name-${record.id}`">费用 / 免费项目名称</label>
                 <Input
+                  :id="`fee-name-${record.id}`"
                   v-model:value="record.additional.name"
                   :disabled="disabled"
                   :maxlength="200"
                   placeholder="如加工费、免费打样"
                   aria-label="费用项目名称"
                 />
-              </template>
-              <template v-else>
-                <div>{{ spec(record).skuCode ?? '' }}</div>
-                <div class="muted">{{ spec(record).skuName ?? '' }}</div>
-              </template>
-            </template>
-            <OrderImages
-              v-else-if="column.key === 'image' && !record.additional"
-              :model-value="lineImages(record)"
-              :contract-id="contractId"
-              :order-id="orderId"
-              :max="1"
-              :size="56"
-              :disabled="disabled"
-              @update:model-value="(ids) => setLineImages(record, ids)"
-              @busy="imageBusy"
-            />
-            <Input
-              v-else-if="column.key === 'customerColor' && !record.additional"
-              v-model:value="extra(record).customerColor"
-              :disabled="disabled"
-              :maxlength="200"
-            />
-            <Input
-              v-else-if="column.key === 'weight' && !record.additional"
-              v-model:value="extra(record).weight"
-              :disabled="disabled"
-              :maxlength="100"
-              placeholder="如 1000g±100g"
-            />
-            <Textarea
-              v-else-if="column.key === 'model' && !record.additional"
-              v-model:value="extra(record).model"
-              :disabled="disabled"
-              :maxlength="500"
-              :auto-size="{ minRows: 1, maxRows: 4 }"
-            />
-            <OrderImages
-              v-else-if="column.key === 'colorImage' && !record.additional"
-              :model-value="lineImages(record, 'colorImageId')"
-              :contract-id="contractId"
-              :order-id="orderId"
-              :max="1"
-              :size="64"
-              :disabled="disabled"
-              aria-label="供应商实物色号图"
-              @update:model-value="
-                (ids) => setLineImages(record, ids, 'colorImageId')
-              "
-              @busy="imageBusy"
-            />
-            <InputNumber
-              v-else-if="column.key === 'quantity' && record.additional"
-              v-model:value="record.additional.quantity"
-              :disabled="disabled"
-              :min="0.000001"
-              :max="1000000000"
-              :precision="6"
-              aria-label="费用数量"
-              style="width: 100%"
-            />
-            <span v-else-if="column.key === 'quantity'">
-              {{ quantity(record) }}
-            </span>
-            <template v-else-if="column.key === 'unit'">
-              <Input
-                v-if="record.additional"
-                v-model:value="record.additional.unit"
+              </div>
+              <div class="field" data-key="quantity">
+                <label :for="`fee-quantity-${record.id}`">数量</label>
+                <InputNumber
+                  :id="`fee-quantity-${record.id}`"
+                  v-model:value="record.additional.quantity"
+                  :disabled="disabled"
+                  :min="0.000001"
+                  :max="1000000000"
+                  :precision="6"
+                  aria-label="费用数量"
+                />
+              </div>
+              <div class="field" data-key="unit">
+                <label :for="`fee-unit-${record.id}`">单位</label>
+                <Input
+                  :id="`fee-unit-${record.id}`"
+                  v-model:value="record.additional.unit"
+                  :disabled="disabled"
+                  :maxlength="20"
+                  aria-label="费用单位"
+                />
+              </div>
+              <div class="field" data-key="unitPrice">
+                <label :for="`fee-price-${record.id}`">单价（0 表示免费）</label>
+                <InputNumber
+                  :id="`fee-price-${record.id}`"
+                  v-model:value="record.additional.unitPrice"
+                  :disabled="disabled"
+                  :min="0"
+                  :max="1000000000"
+                  :precision="6"
+                  aria-label="费用单价（可填0）"
+                />
+              </div>
+            </div>
+            <div v-else class="product-editor">
+              <div class="product-fields">
+                <div class="field-grid">
+                  <div class="field" data-key="customerColor">
+                    <div class="field-label">
+                      <label :for="`color-${record.id}`">客户颜色名称</label><Button
+                        v-if="!disabled && index === 0 && lines.length > 1"
+                        type="link"
+                        size="small"
+                        title="将本项填入其他产品的空白字段"
+                        @click="fillDown('customerColor')"
+                      >
+                        填充空白行
+                      </Button>
+                    </div>
+                    <Input
+                      :id="`color-${record.id}`"
+                      v-model:value="extra(record).customerColor"
+                      :disabled="disabled"
+                      :maxlength="200"
+                      placeholder="填写客户使用的颜色名称"
+                    />
+                  </div>
+                  <div class="field" data-key="weight">
+                    <div class="field-label">
+                      <label :for="`weight-${record.id}`">产品克重</label><Button
+                        v-if="!disabled && index === 0 && lines.length > 1"
+                        type="link"
+                        size="small"
+                        title="将本项填入其他产品的空白字段"
+                        @click="fillDown('weight')"
+                      >
+                        填充空白行
+                      </Button>
+                    </div>
+                    <Input
+                      :id="`weight-${record.id}`"
+                      v-model:value="extra(record).weight"
+                      :disabled="disabled"
+                      :maxlength="100"
+                      placeholder="如 1000g±100g"
+                    />
+                  </div>
+                  <div class="field" data-key="packQty">
+                    <div class="field-label">
+                      <label :for="`pack-${record.id}`">装箱数（件 / 箱）</label><Button
+                        v-if="!disabled && index === 0 && lines.length > 1"
+                        type="link"
+                        size="small"
+                        title="将本项填入其他产品的空白字段"
+                        @click="fillDown('packQty')"
+                      >
+                        填充空白行
+                      </Button>
+                    </div>
+                    <InputNumber
+                      :id="`pack-${record.id}`"
+                      v-model:value="extra(record).packQty"
+                      :disabled="disabled"
+                      :min="1"
+                      :max="1000000"
+                      :precision="0"
+                      placeholder="每箱几件"
+                    />
+                    <span class="field-hint">箱数：{{
+                        boxCount(quantity(record), extra(record).packQty) ||
+                        '待填写装箱数'
+                      }}</span>
+                  </div>
+                  <div class="model-media-row field-full">
+                    <div class="field" data-key="model">
+                      <div class="field-label">
+                        <label :for="`model-${record.id}`">型号 / 补充规格</label><Button
+                          v-if="!disabled && index === 0 && lines.length > 1"
+                          type="link"
+                          size="small"
+                          title="将本项填入其他产品的空白字段"
+                          @click="fillDown('model')"
+                        >
+                          填充空白行
+                        </Button>
+                      </div>
+                      <Textarea
+                        :id="`model-${record.id}`"
+                        v-model:value="extra(record).model"
+                        :disabled="disabled"
+                        :maxlength="500"
+                        :auto-size="{ minRows: 2, maxRows: 4 }"
+                        placeholder="填写型号、正反面要求等补充信息"
+                      />
+                    </div>
+                    <div class="field" data-key="colorImage">
+                      <span class="group-label">供应商实物色号图</span>
+                      <OrderImages
+                        :model-value="lineImages(record, 'colorImageId')"
+                        :contract-id="contractId"
+                        :order-id="orderId"
+                        :max="1"
+                        :size="80"
+                        :disabled="disabled"
+                        aria-label="供应商实物色号图"
+                        @update:model-value="
+                          (ids) => setLineImages(record, ids, 'colorImageId')
+                        "
+                        @busy="imageBusy"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div class="production-fields">
+                  <span class="group-label">生产属性</span>
+                  <div class="field-grid">
+                    <div
+                      v-for="field in batchFields.filter(
+                        (item) => item.key !== 'weight',
+                      )"
+                      :key="field.key"
+                      class="field"
+                      :data-key="field.key"
+                    >
+                      <label :for="`${field.key}-${record.id}`">{{
+                        field.label
+                      }}</label>
+                      <Select
+                        :id="`${field.key}-${record.id}`"
+                        :value="extra(record)[field.key]"
+                        :options="
+                          productionOptions(field.key, extra(record)[field.key])
+                        "
+                        :disabled="
+                          disabled ||
+                          (field.key === 'backColor' &&
+                            extra(record).colorMode === 'SINGLE')
+                        "
+                        :allow-clear="field.key !== 'colorMode'"
+                        show-search
+                        option-filter-prop="label"
+                        :placeholder="`选择${field.label}`"
+                        @update:value="
+                          (value) => setProduction(record, field.key, value)
+                        "
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="product-media">
+                <div class="field" data-key="image">
+                  <span class="group-label">产品图片</span>
+                  <OrderImages
+                    :model-value="lineImages(record)"
+                    :contract-id="contractId"
+                    :order-id="orderId"
+                    :max="1"
+                    :size="80"
+                    :disabled="disabled"
+                    @update:model-value="(ids) => setLineImages(record, ids)"
+                    @busy="imageBusy"
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="supplement-grid">
+              <div
+                v-for="column in extras.detailColumns"
+                :key="column.id"
+                class="field"
+                :data-key="`custom:${column.id}`"
+              >
+                <label :for="`custom-${record.id}-${column.id}`">{{
+                  column.title || '未命名列'
+                }}</label>
+                <Textarea
+                  v-if="column.type === 'TEXT'"
+                  :id="`custom-${record.id}-${column.id}`"
+                  v-model:value="customCell(record, column.id).text"
+                  :disabled="disabled"
+                  :maxlength="2000"
+                  :auto-size="{ minRows: 2, maxRows: 5 }"
+                  :placeholder="`填写${column.title || '自定义内容'}`"
+                />
+                <OrderImages
+                  v-else
+                  v-model="customCell(record, column.id).imageIds"
+                  :contract-id="contractId"
+                  :order-id="orderId"
+                  :max="MAX_DETAIL_IMAGES"
+                  :disabled="disabled"
+                  @busy="imageBusy"
+                />
+              </div>
+              <div class="field" data-key="remark">
+                <label :for="`remark-${record.id}`">备注</label>
+                <Textarea
+                  :id="`remark-${record.id}`"
+                  v-model:value="extra(record).remark"
+                  :disabled="disabled"
+                  :maxlength="2000"
+                  :auto-size="{ minRows: 2, maxRows: 5 }"
+                  placeholder="特殊要求或备注"
+                />
+              </div>
+              <div class="field" data-key="attachments">
+                <span class="group-label">附件图片</span>
+                <OrderImages
+                  :model-value="attachments(record)"
+                  :contract-id="contractId"
+                  :order-id="orderId"
+                  :max="MAX_DETAIL_IMAGES"
+                  :disabled="disabled"
+                  @update:model-value="(ids) => (extra(record).imageIds = ids)"
+                  @busy="imageBusy"
+                />
+              </div>
+            </div>
+            <div v-if="record.additional" class="fee-footer">
+              <span class="muted">费用计入采购总额和应付款；单价为 0 时作为免费项目导出。</span>
+              <Button
+                v-if="!props.disabled"
+                type="link"
+                danger
                 :disabled="disabled"
-                :maxlength="20"
-                aria-label="费用单位"
-              />
-              <span v-else>{{ spec(record).unit ?? record.unit ?? '—' }}</span>
-            </template>
-            <template v-else-if="column.key === 'unitPrice'">
-              <InputNumber
-                v-if="record.additional"
-                v-model:value="record.additional.unitPrice"
-                :disabled="disabled"
-                :min="0"
-                :max="1000000000"
-                :precision="6"
-                aria-label="费用单价（可填0）"
-                style="width: 100%"
-              />
-              <span v-else>{{ record.unitPrice ?? '—' }}</span>
-            </template>
-            <span v-else-if="column.key === 'amount'">{{
-              record.additional
-                ? additionalLineAmount(
-                    record.additional,
-                    String(view.order.currency ?? 'CNY'),
+                @click="
+                  extras.additionalLines = extras.additionalLines.filter(
+                    (row) => row.id !== record.id,
                   )
-                : priceAmount(record)
-            }}</span>
-            <InputNumber
-              v-else-if="column.key === 'packQty' && !record.additional"
-              v-model:value="extra(record).packQty"
-              :disabled="disabled"
-              :min="1"
-              :max="1000000"
-              :precision="0"
-              placeholder="每箱几件"
-              style="width: 100%"
-            />
-            <span v-else-if="column.key === 'boxes' && !record.additional">
-              {{ boxCount(quantity(record), extra(record).packQty) || '—' }}
-            </span>
-            <Textarea
-              v-else-if="column.key === 'remark'"
-              v-model:value="extra(record).remark"
-              :disabled="disabled"
-              :maxlength="2000"
-              :auto-size="{ minRows: 1, maxRows: 5 }"
-              placeholder="特殊要求或备注"
-            />
-            <OrderImages
-              v-else-if="column.key === 'attachments'"
-              :model-value="attachments(record)"
-              :contract-id="contractId"
-              :order-id="orderId"
-              :max="MAX_DETAIL_IMAGES"
-              :disabled="disabled"
-              @update:model-value="(ids) => (extra(record).imageIds = ids)"
-              @busy="imageBusy"
-            />
-            <template v-else-if="columnByKey(column.key)">
-              <Textarea
-                v-if="columnByKey(column.key)!.type === 'TEXT'"
-                v-model:value="
-                  customCell(record, columnByKey(column.key)!.id).text
                 "
-                :disabled="disabled"
-                :maxlength="2000"
-                :auto-size="{ minRows: 1, maxRows: 5 }"
-              />
-              <OrderImages
-                v-else
-                v-model="
-                  customCell(record, columnByKey(column.key)!.id).imageIds
-                "
-                :contract-id="contractId"
-                :order-id="orderId"
-                :max="MAX_DETAIL_IMAGES"
-                :disabled="disabled"
-                @busy="imageBusy"
-              />
-            </template>
-            <Button
-              v-else-if="
-                column.key === 'action' && record.additional && !props.disabled
-              "
-              type="link"
-              danger
-              :disabled="disabled"
-              @click="
-                extras.additionalLines = extras.additionalLines.filter(
-                  (row) => row.id !== record.id,
-                )
-              "
-            >
-              删除
-            </Button>
-          </template>
-        </Table>
+              >
+                删除项目
+              </Button>
+            </div>
+          </Collapse.Panel>
+        </Collapse>
+        <p v-if="!displayLines.length" class="empty-hint">
+          暂无产品明细，可新增费用或免费项目。
+        </p>
         <div class="detail-totals">
           <span v-if="totals.boxes > 0">产品合计箱数：{{ totals.boxes
             }}{{ totals.complete ? '' : '（部分行未填装箱数）' }}</span>
@@ -771,44 +1045,46 @@ defineExpose({
             }}/{{ MAX_SHARED_COLUMNS }}）
           </span>
         </template>
-        <div
-          v-for="(column, index) in extras.sharedColumns"
-          :key="index"
-          class="block"
-        >
-          <div class="block-head">
-            <AutoComplete
-              v-model:value="column.title"
-              :options="SHARED_COLUMN_SUGGESTIONS.map((value) => ({ value }))"
+        <div class="shared-grid">
+          <div
+            v-for="(column, index) in extras.sharedColumns"
+            :key="index"
+            class="block"
+          >
+            <div class="block-head">
+              <AutoComplete
+                v-model:value="column.title"
+                :options="SHARED_COLUMN_SUGGESTIONS.map((value) => ({ value }))"
+                :disabled="disabled"
+                :maxlength="20"
+                placeholder="列名，如纹路、定制"
+                style="width: 200px"
+              />
+              <Button
+                v-if="!disabled"
+                type="link"
+                danger
+                @click="extras.sharedColumns.splice(index, 1)"
+              >
+                删除
+              </Button>
+            </div>
+            <Textarea
+              v-model:value="column.text"
               :disabled="disabled"
-              :maxlength="20"
-              placeholder="列名，如纹路、定制"
-              style="width: 200px"
+              :maxlength="4000"
+              :auto-size="{ minRows: 2, maxRows: 8 }"
+              placeholder="说明文字，如：正面贝壳纹，纹路需跟打色样品深度一致"
             />
-            <Button
-              v-if="!disabled"
-              type="link"
-              danger
-              @click="extras.sharedColumns.splice(index, 1)"
-            >
-              删除
-            </Button>
+            <OrderImages
+              v-model="column.imageIds"
+              :contract-id="contractId"
+              :order-id="orderId"
+              :max="MAX_SHARED_IMAGES"
+              :disabled="disabled"
+              @busy="imageBusy"
+            />
           </div>
-          <Textarea
-            v-model:value="column.text"
-            :disabled="disabled"
-            :maxlength="4000"
-            :auto-size="{ minRows: 2, maxRows: 8 }"
-            placeholder="说明文字，如：正面贝壳纹，纹路需跟打色样品深度一致"
-          />
-          <OrderImages
-            v-model="column.imageIds"
-            :contract-id="contractId"
-            :order-id="orderId"
-            :max="MAX_SHARED_IMAGES"
-            :disabled="disabled"
-            @busy="imageBusy"
-          />
         </div>
         <Button
           v-if="!disabled && extras.sharedColumns.length < MAX_SHARED_COLUMNS"
@@ -923,6 +1199,21 @@ defineExpose({
           未填写
         </span>
       </Collapse.Panel>
+      <Collapse.Panel key="remark">
+        <template #header>
+          订单备注
+          <span class="muted">整单补充说明，保存后随采购单导出</span>
+        </template>
+        <Textarea
+          v-model:value="extras.orderRemark"
+          :disabled="disabled"
+          :maxlength="2000"
+          :auto-size="{ minRows: 3, maxRows: 10 }"
+          show-count
+          aria-label="订单备注"
+          placeholder="填写需要在采购单上展示的订单备注"
+        />
+      </Collapse.Panel>
     </Collapse>
     <div v-if="!props.disabled" class="save-bar">
       <span class="muted">{{
@@ -935,12 +1226,154 @@ defineExpose({
       <Button
         type="primary"
         :loading="saving"
-        :disabled="disabled || !dirty"
+        :disabled="disabled || !dirty || productionProblems.length > 0"
         @click="emit('save')"
       >
         保存附加资料
       </Button>
     </div>
+
+    <Modal
+      :open="batchOpen"
+      title="批量设置产品生产要求"
+      :width="760"
+      ok-text="应用到所选明细"
+      :ok-button-props="{ disabled: disabled || batchEnabled.length === 0 }"
+      :cancel-button-props="{ disabled }"
+      :mask-closable="!disabled"
+      @ok="applyBatch"
+      @cancel="!disabled && (batchOpen = false)"
+    >
+      <p>
+        将设置已选择的
+        {{ selectedLineIds.length }}
+        条产品明细。仅勾选需要统一设置的字段，其他字段保留原值；勾选后留空会清空该项。
+      </p>
+      <div class="batch-production-fields">
+        <div
+          v-for="field in batchFields"
+          :key="field.key"
+          class="batch-production-field"
+        >
+          <Checkbox
+            :checked="batchEnabled.includes(field.key)"
+            :disabled="disabled"
+            :aria-label="`批量设置${field.label}`"
+            @update:checked="(checked) => setBatchField(field.key, checked)"
+          >
+            {{ field.label }}
+          </Checkbox>
+          <Input
+            v-if="field.key === 'weight'"
+            :value="batchValues.weight"
+            :disabled="disabled"
+            :maxlength="100"
+            placeholder="如 1000g±100g"
+            aria-label="批量产品克重"
+            @update:value="(value) => setBatchValue('weight', value)"
+          />
+          <Select
+            v-else
+            :value="batchValues[field.key]"
+            :options="productionOptions(field.key, batchValues[field.key])"
+            :disabled="disabled"
+            :allow-clear="field.key !== 'colorMode'"
+            show-search
+            option-filter-prop="label"
+            placeholder="未填写 / 清空"
+            :aria-label="`批量${field.label}`"
+            @update:value="(value) => setBatchValue(field.key, value)"
+          />
+        </div>
+      </div>
+      <Checkbox
+        :checked="batchOnlyEmpty"
+        :disabled="disabled"
+        @update:checked="(checked) => (batchOnlyEmpty = checked)"
+      >
+        仅填充所选明细中的空值（待核实的单双色也视为空值）
+      </Checkbox>
+      <p class="muted">
+        单色自动同步正反面颜色；双色请分别填写不同的正反颜色。应用后请点击「保存附加资料」。
+      </p>
+    </Modal>
+    <Modal
+      v-model:open="columnsOpen"
+      title="自定义列设置"
+      :footer="null"
+      width="640px"
+    >
+      <p class="muted">
+        为所有产品和费用项目添加文字或图片字段，保存附加资料后会带入导出的采购单。最多
+        {{ MAX_DETAIL_COLUMNS }} 列。
+      </p>
+      <div class="column-settings">
+        <div
+          v-for="(column, index) in extras.detailColumns"
+          :key="column.id"
+          class="column-setting"
+        >
+          <span class="line-number">{{ index + 1 }}</span>
+          <div class="field">
+            <label :for="`column-title-${column.id}`">列名称</label>
+            <Input
+              :id="`column-title-${column.id}`"
+              v-model:value="column.title"
+              :disabled="disabled"
+              :maxlength="20"
+              placeholder="如形状、色卡图片"
+              :aria-label="`自定义列名称 ${column.id}`"
+            />
+          </div>
+          <div class="field">
+            <label :for="`column-type-${column.id}`">内容类型</label>
+            <Select
+              :id="`column-type-${column.id}`"
+              v-model:value="column.type"
+              :disabled="disabled"
+              :options="[
+                { label: '文字', value: 'TEXT' },
+                { label: '图片', value: 'IMAGE' },
+              ]"
+              :aria-label="`自定义列类型 ${column.id}`"
+            />
+          </div>
+          <Button
+            v-if="!props.disabled"
+            :disabled="disabled"
+            type="link"
+            danger
+            @click="deleteColumn(column.id)"
+          >
+            删除列
+          </Button>
+        </div>
+        <p v-if="!extras.detailColumns.length" class="empty-hint">
+          还没有自定义列，可添加文字说明或色卡等图片。
+        </p>
+      </div>
+      <Space v-if="!props.disabled" wrap>
+        <Button
+          :disabled="
+            disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
+          "
+          @click="addColumn('TEXT')"
+        >
+          + 新增文字列
+        </Button>
+        <Button
+          :disabled="
+            disabled || extras.detailColumns.length >= MAX_DETAIL_COLUMNS
+          "
+          @click="addColumn('IMAGE')"
+        >
+          + 新增图片列（色卡等）
+        </Button>
+      </Space>
+      <div class="settings-footer">
+        <Button type="primary" @click="columnsOpen = false">完成设置</Button>
+      </div>
+    </Modal>
 
     <Modal
       :open="copyOpen"
@@ -1014,61 +1447,297 @@ defineExpose({
 </template>
 <style scoped>
 .print-extras {
+  min-width: 0;
   margin-bottom: 16px;
+  container-type: inline-size;
+}
+
+.extras-head,
+.detail-toolbar,
+.line-heading,
+.line-identity,
+.line-summary,
+.detail-totals,
+.save-bar,
+.block-head,
+.fee-footer,
+.batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .extras-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-.detail-toolbar,
-.column-settings {
-  margin-bottom: 12px;
+.extras-subtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
-.column-settings {
+.extras-guide {
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.extras-guide summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.extras-guide p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.batch-production-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.batch-production-field {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
-.column-setting {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  max-width: 420px;
+.extras-head .muted,
+.batch-toolbar .muted,
+.fee-footer .muted {
+  margin: 0;
 }
 
-.column-setting > .ant-input {
-  width: 150px;
+.detail-toolbar {
+  margin-bottom: 10px;
 }
 
-.detail-totals,
-.save-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 12px;
+.toolbar-count {
+  margin-left: 12px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
-.save-bar {
+.detail-help {
+  margin-bottom: 16px;
+}
+
+.batch-toolbar {
+  justify-content: flex-start;
   padding: 10px 12px;
-  background: hsl(var(--accent));
-  border: 1px solid hsl(var(--border));
+  margin-bottom: 12px;
+  background: hsl(var(--accent) / 50%);
   border-radius: 6px;
 }
 
-.section-title {
-  margin: 4px 0 8px;
-  font-size: 13px;
+.attribute-error {
+  margin-bottom: 12px;
+}
+
+.line-cards {
+  background: transparent;
+  border: 0;
+}
+
+.line-cards :deep(.ant-collapse-item) {
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px !important;
+}
+
+.line-cards :deep(.ant-collapse-header) {
+  align-items: center !important;
+  padding: 14px 16px !important;
+  background: hsl(var(--accent) / 35%);
+}
+
+.line-cards :deep(.ant-collapse-content-box) {
+  padding: 20px !important;
+}
+
+.line-heading {
+  gap: 12px 20px;
+  width: 100%;
+}
+
+.line-identity {
+  flex: 1;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  min-width: 180px;
+}
+
+.line-number {
+  display: inline-flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
   font-weight: 600;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 8%);
+  border-radius: 6px;
+}
+
+.line-name {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.line-name .muted {
+  margin: 0 !important;
+}
+
+.line-summary {
+  gap: 8px 20px;
+  justify-content: flex-start;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
+}
+
+.line-summary strong {
+  font-size: 14px;
+  color: hsl(var(--foreground));
+}
+
+.product-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 24px;
+}
+
+.product-fields,
+.product-media {
+  min-width: 0;
+}
+
+.product-media {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-left: 24px;
+  border-left: 1px solid hsl(var(--border));
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field label,
+.group-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--foreground) / 80%);
+  overflow-wrap: anywhere;
+}
+
+.field :deep(.ant-input-number),
+.field :deep(.ant-select) {
+  width: 100%;
+  min-width: 0;
+}
+
+.field-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+}
+
+.field-label :deep(.ant-btn) {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+}
+
+.field-full {
+  grid-column: 1 / -1;
+}
+
+.model-media-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 20px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.production-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.supplement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 24px;
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.fee-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.fee-footer {
+  margin-top: 16px;
+}
+
+.detail-totals {
+  padding: 12px 16px;
+  margin-top: 16px;
+  font-size: 12px;
+  background: hsl(var(--accent) / 50%);
+  border-radius: 6px;
+}
+
+.save-bar {
+  padding: 12px 16px;
+  margin-top: 16px;
+  background: hsl(var(--accent));
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
 .muted {
@@ -1081,33 +1750,160 @@ defineExpose({
   margin-left: 8px;
 }
 
+.extras-collapse :deep(.ant-collapse-content-box) {
+  padding: 16px;
+}
+
+.shared-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  margin-bottom: 12px;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
+  border-radius: 8px;
+}
+
+.shared-grid .block {
+  margin-bottom: 0;
 }
 
 .block-head {
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+
+.block-head :deep(.ant-select),
+.block-head :deep(.ant-input) {
+  min-width: 0;
+}
+
+.column-settings {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.column-setting {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 100px auto;
+  gap: 12px;
   align-items: center;
-  justify-content: space-between;
+  padding: 12px;
+  background: hsl(var(--accent) / 50%);
+  border-radius: 8px;
+}
+
+.column-setting > :deep(.ant-btn) {
+  align-self: end;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.empty-hint {
+  padding: 24px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
 }
 
 .accessories {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 16px;
-  margin-bottom: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+  gap: 12px 20px;
+  margin-bottom: 12px;
 }
 
 .accessory {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+}
+
+@container (max-width: 900px) {
+  .product-editor {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .product-media {
+    flex-flow: row wrap;
+    gap: 24px;
+    padding: 16px 0 0;
+    border-top: 1px solid hsl(var(--border));
+    border-left: 0;
+  }
+
+  .product-media > .field {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .fee-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .field-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 600px) {
+  .field-grid,
+  .model-media-row,
+  .supplement-grid,
+  .fee-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .line-cards :deep(.ant-collapse-content-box) {
+    padding: 16px !important;
+  }
+
+  .toolbar-count {
+    display: block;
+    margin: 4px 0 0;
+  }
+
+  .line-summary {
+    gap: 8px 12px;
+  }
+
+  .extras-collapse :deep(.ant-collapse-header) .muted {
+    display: block;
+    margin: 4px 0 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .column-setting {
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .column-setting > .field,
+  .column-setting > :deep(.ant-btn) {
+    grid-column: 2;
+  }
+
+  .column-setting > :deep(.ant-btn) {
+    justify-self: end;
+  }
 }
 </style>

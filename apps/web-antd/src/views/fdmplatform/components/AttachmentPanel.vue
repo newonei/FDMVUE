@@ -51,6 +51,7 @@ const props = defineProps<{
   error: string;
   loading: boolean;
   target?: AttachmentTarget;
+  variant?: 'purchase';
   view?: AttachmentView;
 }>();
 const emit = defineEmits<{ busy: [value: boolean]; refresh: [] }>();
@@ -93,7 +94,11 @@ onBeforeUnmount(() => {
   emit('busy', false);
 });
 watch(
-  () => [props.contractId, props.target?.targetKind, props.target?.targetId],
+  [
+    () => props.contractId,
+    () => props.target?.targetKind,
+    () => props.target?.targetId,
+  ],
   () => {
     contextSequence++;
     selectedFiles.value = [];
@@ -270,7 +275,14 @@ async function download(item: ContractAttachment) {
 </script>
 
 <template>
-  <div class="attachment-stack">
+  <div
+    class="attachment-stack"
+    :class="{ 'purchase-attachments': variant === 'purchase' }"
+  >
+    <div v-if="variant === 'purchase'" class="purchase-heading">
+      <h3>补充附件</h3>
+      <p>报价、图纸、沟通资料等，统一保存在本采购单下。</p>
+    </div>
     <Alert
       v-if="error || operationError"
       type="error"
@@ -290,11 +302,71 @@ async function download(item: ContractAttachment) {
       multiple
       :accept="ATTACHMENT_ACCEPT"
       hidden
-      aria-label="选择合同附件"
+      :aria-label="
+        variant === 'purchase' ? '选择采购单补充附件' : '选择合同附件'
+      "
       :disabled="uploading"
       @change="chooseFile"
     />
     <div
+      v-if="variant === 'purchase' && view?.enabled && categories.length"
+      class="purchase-upload"
+    >
+      <button
+        type="button"
+        class="purchase-dropzone"
+        :class="{ dragging: dragging && !uploading }"
+        :disabled="uploading"
+        @click="fileInput?.click()"
+        @dragover.prevent="dragging = !uploading"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="dropFile"
+      >
+        <Upload class="size-6" aria-hidden="true" />
+        <strong>{{
+          selectedFiles.length ? '继续添加文件' : '点击选择文件，或拖拽到这里'
+        }}</strong>
+        <span>
+          {{ ATTACHMENT_FORMAT_TEXT }}，支持多选；每次最多 10 个，合计不超过 1
+          GB
+        </span>
+      </button>
+      <div class="purchase-upload-actions">
+        <label class="purchase-category">
+          <span>资料分类</span>
+          <Select
+            v-model:value="category"
+            aria-label="补充附件资料分类"
+            :options="
+              categories.map((value) => ({
+                value,
+                label: categoryLabels[value] ?? value,
+              }))
+            "
+            placeholder="选择资料分类"
+            :disabled="uploading"
+            @change="changeCategory"
+          />
+        </label>
+        <Space v-if="selectedFiles.length" wrap>
+          <span role="status" class="text-muted-foreground text-xs">
+            待上传 {{ selectedFiles.length }} 个文件，共
+            {{ attachmentSize(selectedBytes) }}
+          </span>
+          <Button
+            type="primary"
+            :loading="uploading"
+            :disabled="!category"
+            :title="!category ? '请先选择资料分类' : undefined"
+            @click="upload"
+          >
+            {{ uploading ? '上传中' : `上传（${selectedFiles.length}）` }}
+          </Button>
+        </Space>
+      </div>
+    </div>
+    <div
+      v-if="variant !== 'purchase'"
       class="attachment-toolbar"
       :class="{ dragging: dragging && !uploading }"
       @dragover.prevent="dragging = Boolean(view?.enabled && categories.length)"
@@ -354,7 +426,7 @@ async function download(item: ContractAttachment) {
       </Button>
     </div>
     <div
-      v-if="view?.enabled && categories.length"
+      v-if="variant !== 'purchase' && view?.enabled && categories.length"
       class="text-muted-foreground text-xs"
     >
       {{ ATTACHMENT_FORMAT_TEXT }}；每次最多 10 个，合计不超过 1 GB。
@@ -393,8 +465,19 @@ async function download(item: ContractAttachment) {
       }}
       个，成功 {{ progress.success }} 个，失败 {{ progress.failed }} 个
     </div>
-    <div class="text-sm font-medium" role="status">
-      已上传附件：{{ view?.items.length ?? 0 }} 个
+    <div class="attachment-list-heading">
+      <span class="text-sm font-medium" role="status">
+        已上传附件：{{ view?.items.length ?? 0 }} 个
+      </span>
+      <Button
+        v-if="variant === 'purchase'"
+        size="small"
+        :loading="loading"
+        :disabled="uploading"
+        @click="emit('refresh')"
+      >
+        刷新
+      </Button>
     </div>
     <Table
       :data-source="view?.items ?? []"
@@ -402,25 +485,61 @@ async function download(item: ContractAttachment) {
       size="small"
       :loading="loading"
       :pagination="{ pageSize: 10, hideOnSinglePage: true, size: 'small' }"
-      :columns="[
-        { title: '附件名称', key: 'name', ellipsis: true },
-        { title: '分类', key: 'category', width: 110 },
-        { title: '大小', key: 'size', width: 90 },
-        ...(directory
-          ? [{ title: '上传人', key: 'uploadedBy', width: 110 }]
-          : []),
-        { title: '上传时间', key: 'createdAt', width: 140 },
-        { title: '操作', key: 'action', width: 160, fixed: 'right' as const },
-      ]"
-      :scroll="{ x: 720 }"
+      :columns="
+        variant === 'purchase'
+          ? [
+              { title: '附件名称', key: 'name' },
+              { title: '文件信息', key: 'info', width: 210 },
+              { title: '操作', key: 'action', width: 160 },
+            ]
+          : [
+              { title: '附件名称', key: 'name', ellipsis: true },
+              { title: '分类', key: 'category', width: 110 },
+              { title: '大小', key: 'size', width: 90 },
+              ...(directory
+                ? [{ title: '上传人', key: 'uploadedBy', width: 110 }]
+                : []),
+              { title: '上传时间', key: 'createdAt', width: 140 },
+              {
+                title: '操作',
+                key: 'action',
+                width: 160,
+                fixed: 'right' as const,
+              },
+            ]
+      "
+      :scroll="variant === 'purchase' ? undefined : { x: 720 }"
     >
       <template #emptyText>
-        <Empty description="暂无当前身份可读取的附件" />
+        <Empty
+          :description="
+            variant === 'purchase'
+              ? view?.enabled && categories.length
+                ? '暂无补充附件，可在上方选择或拖入文件'
+                : '暂无当前身份可读取的补充附件'
+              : '暂无当前身份可读取的附件'
+          "
+        />
       </template>
       <template #bodyCell="{ column, record }">
-        <span v-if="column.key === 'name'" :title="record.name">
+        <span
+          v-if="column.key === 'name'"
+          class="attachment-file-name"
+          :title="record.name"
+        >
           {{ record.name }}
         </span>
+        <div v-else-if="column.key === 'info'" class="attachment-file-meta">
+          <span>
+            {{ categoryLabels[record.category] ?? record.category }} ·
+            {{ attachmentSize(Number(record.size)) }}
+          </span>
+          <span>
+            {{ attachmentTime(record.createdAt) }}
+            <template v-if="directory">
+              · {{ personLabel(directory, record.uploadedBy) }}</template>
+          </span>
+        </div>
         <span v-else-if="column.key === 'category'">{{
           categoryLabels[record.category] ?? record.category
         }}</span>
@@ -479,6 +598,103 @@ async function download(item: ContractAttachment) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.purchase-attachments {
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+}
+
+.purchase-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.purchase-heading p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.purchase-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.purchase-dropzone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 20px 16px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  background: hsl(var(--muted) / 35%);
+  border: 1px dashed hsl(var(--border));
+  border-radius: 8px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.purchase-dropzone strong {
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+}
+
+.purchase-dropzone > span {
+  font-size: 12px;
+}
+
+.purchase-dropzone:not(:disabled):hover,
+.purchase-dropzone.dragging,
+.purchase-dropzone:focus-visible {
+  background: hsl(var(--primary) / 5%);
+  border-color: hsl(var(--primary));
+}
+
+.purchase-dropzone:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.purchase-upload-actions,
+.attachment-list-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.purchase-category {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.purchase-category :deep(.ant-select) {
+  width: 150px;
+}
+
+.attachment-file-name {
+  overflow-wrap: anywhere;
+}
+
+.attachment-file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 .attachment-toolbar {

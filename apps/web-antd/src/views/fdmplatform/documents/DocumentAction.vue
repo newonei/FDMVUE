@@ -407,6 +407,12 @@ async function execute(input: Record<string, unknown>, key: string) {
   pageError.value = '';
   try {
     let payload = { ...input };
+    if (action === 'CANCEL_RECEIPT') {
+      const reason = String(payload.reason ?? '').trim();
+      if (!reason || reason.length > 1000)
+        throw new Error('请填写 1–1000 字的撤销原因');
+      payload.reason = reason;
+    }
     if (action === 'CREATE_RECEIPT') {
       payload.currency = String(payload.currency ?? '')
         .trim()

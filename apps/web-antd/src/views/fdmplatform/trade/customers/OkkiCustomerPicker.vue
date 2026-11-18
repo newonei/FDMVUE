@@ -45,7 +45,7 @@ import { errorText } from '../../data';
 import {
   countryMatches,
   countrySelectOptions,
-  customerFields,
+  foreignCustomerFields,
   mergeOkkiCustomers,
 } from './model';
 
@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
                 bordered
               >
                 <Descriptions.Item
-                  v-for="[field, label] in customerFields"
+                  v-for="[field, label] in foreignCustomerFields"
                   :key="field"
                   :label="label"
                 >
@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
                 bordered
               >
                 <Descriptions.Item
-                  v-for="[field, label] in customerFields"
+                  v-for="[field, label] in foreignCustomerFields"
                   :key="field"
                   :label="label"
                 >

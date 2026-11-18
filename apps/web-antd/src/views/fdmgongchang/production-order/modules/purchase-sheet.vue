@@ -1,26 +1,29 @@
 <script setup lang="ts">
-import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
+import type { FdmgongchangProductionOrderApi as Api, FdmgongchangSupplyMatchApi as MatchApi } from '#/api/fdmgongchang/production-order';
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { Image, Spin, Tag } from 'ant-design-vue';
 
-import { getPurchaseImage, getPurchaseSheet } from '#/api/fdmgongchang/production-order';
+import { getPurchaseImage, getPurchaseSheet, getTargetOptions } from '#/api/fdmgongchang/production-order';
 import ProductStructureDetails from '#/views/fdmplatform/products/components/ProductStructureDetails.vue';
 
 import { num } from '../shared';
+import { purchaseSheetImageIds, purchaseSheetStructure } from './purchase-sheet-structure';
 
 /**
- * 采购单生成的工厂订单的生产要求：产品结构读取下单时快照，补充说明实时读取采购资料，
+ * 采购单生成的工厂订单的生产要求：产品结构读取该行采购资料与下单快照，补充说明实时读取采购资料，
  * 按采购单打印出来的顺序列出每行的定制说明、包装要求、明细备注，整单的共用说明、辅料和包装步骤。
  */
 const props = defineProps<{ orderId: number }>();
 
 const sheet = ref<Api.PurchaseSheet>();
+const targetOptions = ref<MatchApi.TargetOptions>();
 const loading = ref(false);
 const failed = ref(false);
 /** 配图要带登录信息下载，转成本地地址再显示。 */
 const images = ref<Record<string, string>>({});
+let version = 0;
 
 const details = computed(() => sheet.value?.details ?? {});
 const checkedAccessories = computed(() => (details.value.accessories ?? []).filter((a) => a.checked));
@@ -36,28 +39,32 @@ const empty = computed(
 );
 
 async function load() {
+  const current = ++version;
+  const orderId = props.orderId;
   loading.value = true;
   failed.value = false;
   try {
-    sheet.value = await getPurchaseSheet(props.orderId);
-    await loadImages();
+    const [freshSheet, options] = await Promise.all([getPurchaseSheet(orderId), getTargetOptions().catch(() => undefined)]);
+    if (current !== version) return;
+    sheet.value = freshSheet;
+    targetOptions.value = options;
+    await loadImages(orderId, current);
   } catch {
-    failed.value = true;
+    if (current === version) failed.value = true;
   } finally {
-    loading.value = false;
+    if (current === version) loading.value = false;
   }
 }
 
-async function loadImages() {
+async function loadImages(orderId: number, current: number) {
   const d = sheet.value?.details;
   if (!d) return;
-  const ids = new Set<string>();
-  for (const s of [...(d.packagingSteps ?? []), ...(d.sharedColumns ?? [])]) for (const id of s.imageIds ?? []) ids.add(id);
-  for (const e of Object.values(d.lineExtras ?? {})) if (e.imageId) ids.add(e.imageId);
+  const ids = purchaseSheetImageIds(d);
   await Promise.all(
-    [...ids].filter((id) => !images.value[id]).map(async (id) => {
+    ids.filter((id) => !images.value[id]).map(async (id) => {
       try {
-        const blob = await getPurchaseImage(props.orderId, id);
+        const blob = await getPurchaseImage(orderId, id);
+        if (current !== version) return;
         images.value = { ...images.value, [id]: URL.createObjectURL(blob) };
       } catch {
         // 图片读不到就不显示，不影响文字要求
@@ -79,7 +86,7 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(revoke);
+onBeforeUnmount(() => { ++version; revoke(); });
 
 function lineNote(lineId: string) {
   return details.value.lineNotes?.[lineId]?.remark ?? '';
@@ -107,7 +114,7 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">生产要求</h3>
-      <span class="text-xs text-muted-foreground">产品结构以下单时资料为准，补充说明随采购资料更新</span>
+      <span class="text-xs text-muted-foreground">颜色、纹路和克重随每条采购资料更新；工厂生产参数请在明细中确认保存</span>
       <Tag v-if="details.status" class="m-0" :color="details.status === 'CONFIRMED' ? 'green' : 'default'">
         {{ details.status === 'CONFIRMED' ? '已确认' : '采购员还在编辑' }}<template v-if="(details.revision ?? 1) > 1"> · 第 {{ details.revision }} 版</template>
       </Tag>
@@ -126,7 +133,7 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
               <span class="tabular-nums">{{ openQty(line) }} {{ line.unit }}</span>
             </span>
             <span class="text-xs"><span class="text-muted-foreground">规格：</span>{{ line.specification || '未维护' }}</span>
-            <ProductStructureDetails :value="line" expanded />
+            <ProductStructureDetails :value="purchaseSheetStructure(line, details.lineExtras?.[line.id], targetOptions)" expanded />
             <span v-if="extraText(line.id)" class="text-xs text-muted-foreground">{{ extraText(line.id) }}</span>
             <span v-if="lineNote(line.id)" class="text-xs text-warning">备注：{{ lineNote(line.id) }}</span>
             <Image
@@ -135,6 +142,11 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
               :width="72"
               class="rounded"
             />
+            <div v-if="details.lineExtras?.[line.id]?.colorImageId" class="mt-1 flex flex-col items-start gap-1">
+              <span class="text-xs text-muted-foreground">供应商实物色号图</span>
+              <Image v-if="images[details.lineExtras[line.id]!.colorImageId!]" :src="images[details.lineExtras[line.id]!.colorImageId!]" :width="96" class="rounded" />
+              <span v-else class="text-xs text-muted-foreground">色号图暂时无法读取</span>
+            </div>
           </div>
         </div>
 

@@ -8,6 +8,7 @@ import { Alert, Button, Input, InputNumber, Select } from 'ant-design-vue';
 import { receivePurchase } from '#/api/fdmgongchang/stage-stock';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
+import { quantityPrecision } from '../../shared/quantity';
 import {
   formatDate,
   formatQty,
@@ -183,7 +184,7 @@ async function submit() {
       <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label for="receipt-qty" class="flex flex-col gap-1 text-xs text-muted-foreground">
           实收数量（{{ unit }}）
-          <InputNumber id="receipt-qty" v-model:value="quantity" :min="0" :precision="3" class="w-full" />
+          <InputNumber id="receipt-qty" v-model:value="quantity" :min="0" :precision="quantityPrecision(unit)" class="w-full" />
         </label>
         <label for="receipt-accepted" class="flex flex-col gap-1 text-xs text-muted-foreground">
           合格数量（进库存，{{ unit }}）
@@ -191,7 +192,7 @@ async function submit() {
             id="receipt-accepted"
             :value="accepted"
             :min="0"
-            :precision="3"
+            :precision="quantityPrecision(unit)"
             class="w-full"
             @change="onAccepted"
           />

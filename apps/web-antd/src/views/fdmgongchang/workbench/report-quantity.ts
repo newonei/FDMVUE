@@ -1,6 +1,7 @@
 import type { OutputDraft } from '../stage-stock/model';
 import type { Job } from './use-job';
 
+import { quantityPrecision } from '../shared/quantity';
 import { toNumber } from '../stage-stock/model';
 
 const quantity = (value: unknown) => Math.max(0, toNumber(value) ?? 0);
@@ -14,7 +15,9 @@ export function prefillReportQuantity(job: Job) {
     : job.task.quantity;
   const good = Math.max(quantity(job.task.actualQuantity), quantity(job.order?.goodQuantity));
   const defect = Math.max(quantity(job.task.defectQuantity), quantity(job.order?.defectQuantity));
-  const remaining = round(Math.max(0, quantity(planned) - good - defect));
+  const remainder = round(Math.max(0, quantity(planned) - good - defect));
+  const remaining = quantityPrecision(job.prepare?.outputUnit ?? job.process?.outputUnit ?? job.task.unit) === 0
+    ? Math.floor(remainder) : remainder;
   const line = job.outputs[0]!;
   line.reportTotal = remaining;
   line.goodQuantity = remaining;

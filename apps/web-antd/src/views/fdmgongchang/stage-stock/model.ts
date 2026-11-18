@@ -1,4 +1,5 @@
 import type { DimensionUnit } from '../shared/dimensions';
+import type { LaminationLayerDraft } from '../shared/lamination-report';
 
 import type { FdmgongchangStageStockApi as Api } from '#/api/fdmgongchang/stage-stock';
 
@@ -266,6 +267,7 @@ export interface InputLine {
 }
 
 export interface OutputDraft {
+  laminateLayers?: LaminationLayerDraft[];
   attrs: Api.ItemAttrs;
   /** 开片时按板材规格自动带入的良品数；良品还等于它时说明没手动改过，规格变了会跟着重算。 */
   autoGood?: number;

@@ -7,6 +7,7 @@ import { Alert, Input, InputNumber, Modal, Spin } from 'ant-design-vue';
 
 import { getOrder, returnOrderMaterial } from '#/api/fdmgongchang/stage-stock';
 
+import { quantityPrecision } from '../../shared/quantity';
 import {
   attrSummary,
   formatQty,
@@ -118,7 +119,7 @@ async function submit() {
             :disabled="remaining(line) <= 0"
             :max="remaining(line)"
             :min="0"
-            :precision="3"
+            :precision="quantityPrecision(stockUnit(line.stage, line.item, stageOf(line.stage)?.unit))"
             :style="{ width: '8rem' }"
             size="small"
             @change="

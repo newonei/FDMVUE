@@ -140,29 +140,94 @@ vi.mock('ant-design-vue', () => {
         default: () => [],
       },
       columns: {
-        type: Array as PropType<{ dataIndex?: string; key?: string }[]>,
+        type: Array as PropType<
+          {
+            dataIndex?: string;
+            key?: string;
+            sorter?: boolean;
+            sortOrder?: 'ascend' | 'descend' | null;
+            title?: string;
+          }[]
+        >,
         default: () => [],
       },
+      pagination: {
+        type: Object as PropType<{ current: number; pageSize: number }>,
+        default: () => ({ current: 1, pageSize: 10 }),
+      },
     },
+    emits: ['change'],
     setup(props, ctx) {
       return () =>
-        h(
-          'div',
-          ctx.attrs,
-          props.dataSource.map((record) =>
+        h('div', ctx.attrs, [
+          h(
+            'header',
+            props.columns.map((column) =>
+              column.sorter
+                ? h(
+                    'button',
+                    {
+                      'data-sort-column': column.key,
+                      'data-sort-order': column.sortOrder,
+                      onClick: () => {
+                        const nextOrder =
+                          column.sortOrder === 'descend' ? 'ascend' : 'descend';
+                        ctx.emit(
+                          'change',
+                          props.pagination,
+                          {},
+                          {
+                            columnKey: column.key,
+                            order:
+                              column.sortOrder === 'ascend' ? null : nextOrder,
+                          },
+                          { action: 'sort' },
+                        );
+                      },
+                    },
+                    column.title,
+                  )
+                : h('span', column.title),
+            ),
+          ),
+          ...props.dataSource.map((record) =>
             h(
               'div',
               { 'data-table-row': record.id },
               props.columns.map((column) =>
-                ctx.slots.bodyCell?.({
-                  record,
-                  column,
-                  text: column.dataIndex ? record[column.dataIndex] : undefined,
-                }),
+                h(
+                  'div',
+                  { 'data-table-column': column.key },
+                  ctx.slots.bodyCell?.({
+                    record,
+                    column,
+                    text: column.dataIndex
+                      ? record[column.dataIndex]
+                      : undefined,
+                  }),
+                ),
               ),
             ),
           ),
-        );
+          h(
+            'button',
+            {
+              'data-next-page': true,
+              onClick: () =>
+                ctx.emit(
+                  'change',
+                  {
+                    ...props.pagination,
+                    current: props.pagination.current + 1,
+                  },
+                  {},
+                  {},
+                  { action: 'paginate' },
+                ),
+            },
+            '下一页',
+          ),
+        ]);
     },
   });
   const input = defineComponent({
@@ -414,6 +479,72 @@ function clickText(host: ParentNode, text: string) {
 }
 
 describe('actual product detail and edit route integration', () => {
+  it('shows product codes in a separate sortable column and requests sorting before pagination', async () => {
+    const { host, router } = await mountCenter(
+      '/fdmproducts/catalog?catalogPage=3&catalogKeyword=MAT',
+    );
+    await vi.waitFor(() =>
+      expect(host.querySelectorAll('.product-detail-link')).toHaveLength(2),
+    );
+    const row = host.querySelector('[data-table-row="A"]')!;
+    expect(
+      row.querySelector('[data-table-column="product"]')?.textContent,
+    ).not.toContain(product('A').code);
+    expect(row.querySelector('[data-table-column="code"]')?.textContent).toBe(
+      product('A').code,
+    );
+    const sort = host.querySelector<HTMLButtonElement>(
+      '[data-sort-column="code"]',
+    )!;
+    expect(sort.textContent).toBe('产品编号');
+    sort.click();
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          codeOrder: 'desc',
+          pageNo: 1,
+          keyword: 'MAT',
+        }),
+      ),
+    );
+    expect(sort.dataset.sortOrder).toBe('descend');
+    host.querySelector<HTMLButtonElement>('[data-next-page]')!.click();
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codeOrder: 'desc', pageNo: 2 }),
+      ),
+    );
+    host.querySelector<HTMLButtonElement>('.product-detail-link')!.click();
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.catalogCodeOrder).toBe('desc'),
+    );
+    sort.click();
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codeOrder: 'asc', pageNo: 1 }),
+      ),
+    );
+    sort.click();
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codeOrder: undefined, pageNo: 1 }),
+      ),
+    );
+  });
+  it('restores product code sorting with the catalog page from a detail URL', async () => {
+    const { host } = await mountCenter(
+      '/fdmproducts/catalog?catalogCodeOrder=asc&catalogPage=2&productId=A',
+    );
+    await vi.waitFor(() =>
+      expect(mocks.getProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ codeOrder: 'asc', pageNo: 2 }),
+      ),
+    );
+    expect(
+      host.querySelector<HTMLElement>('[data-sort-column="code"]')?.dataset
+        .sortOrder,
+    ).toBe('ascend');
+  });
   it.each(['BOARD', 'group:半成品'])(
     'filters by production stage %s, keeps the same category-count scope and preserves it in detail navigation',
     async (stage) => {

@@ -4,6 +4,8 @@ import { computed, ref } from 'vue';
 import { Alert, InputNumber } from 'ant-design-vue';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
+import LaminationCounters from '../../shared/lamination-counters.vue';
+import { quantityPrecision } from '../../shared/quantity';
 import {
   attrSummary,
   EDITABLE_FIELDS,
@@ -27,6 +29,7 @@ const emit = defineEmits<{ back: []; next: [] }>();
 const job = useJob();
 const labels = computed(() => makeLabels(job.options));
 const output = computed(() => stageOf(job, job.process?.outputStage));
+const outputUnit = computed(() => output.value?.unit ?? job.process?.outputUnit ?? job.task?.unit);
 const source = computed(() => stageOf(job, job.sourceStage));
 const editable = computed(() => EDITABLE_FIELDS[job.process?.code ?? ''] ?? []);
 const reportedBefore = computed(() => job.order?.reportCount ?? 0);
@@ -85,21 +88,22 @@ function next() {
         这张单已经报过 {{ reportedBefore }} 次，共 {{ formatQty(job.order?.goodQuantity) }} {{ output?.unit }}，这次只报新做的。
       </p>
       <div v-for="(line, index) in job.outputs" :key="line.key" class="flex flex-col gap-3">
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
+        <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">
             本次良品（{{ output?.unit }}）<template v-if="job.outputs.length > 1">（第 {{ index + 1 }} 种）</template>
           </span>
-          <BigCounter :id="`good-${line.key}`" :model-value="line.goodQuantity" label="好的数量" :precision="3" @update:model-value="changeReportGood(line, $event)" />
+          <BigCounter :id="`good-${line.key}`" :model-value="line.goodQuantity" label="好的数量" :precision="quantityPrecision(outputUnit)" @update:model-value="changeReportGood(line, $event)" />
           <span v-if="slicing" class="text-center text-xs text-primary">{{ sliceHint(job.inputs, job.outputs, line) }}</span>
           <span v-else class="text-center text-xs text-muted-foreground">点中间的数字可以直接输入</span>
         </section>
         <section class="flex flex-col gap-2 rounded-lg bg-card p-3 border border-border">
           <span class="text-sm font-bold">本次不良品（{{ output?.unit }}）</span>
-          <BigCounter :id="`bad-${line.key}`" :model-value="line.defectQuantity" label="坏的数量" :precision="3" size="medium" tone="danger" @update:model-value="changeReportDefect(line, $event)" />
+          <BigCounter :id="`bad-${line.key}`" :model-value="line.defectQuantity" label="坏的数量" :precision="quantityPrecision(outputUnit)" size="medium" tone="danger" @update:model-value="changeReportDefect(line, $event)" />
         </section>
         </div>
-        <p v-if="line.reportTotal !== undefined" class="m-0 text-xs text-muted-foreground">填写不良品会自动扣减良品；只完成一部分时，可直接修改良品数量。</p>
+        <p v-if="!line.laminateLayers && line.reportTotal !== undefined" class="m-0 text-xs text-muted-foreground">填写不良品会自动扣减良品；只完成一部分时，可直接修改良品数量。</p>
         <!-- 开片先核对板材规格，放在数量上面 -->
         <section :class="slicing ? 'order-first border-primary/40' : 'border-border'" class="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
           <div class="flex items-center justify-between">
@@ -166,7 +170,7 @@ function next() {
             :addon-after="source?.unit"
             :max="(toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)"
             :min="0"
-            :precision="3"
+            :precision="quantityPrecision(source?.unit)"
             :value="job.returns[input.id] ?? undefined"
             class="w-40"
             placeholder="退回数量"

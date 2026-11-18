@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import type { EntryHeader, EntryRow } from '../entry-model';
 
-import type { Contract, Directory, MasterRecord } from '#/api/fdmplatform';
+import type {
+  BusinessRecord,
+  Contract,
+  Directory,
+  MasterRecord,
+} from '#/api/fdmplatform';
 import type {
   CreatedProcurementOrders,
   ProcurementProductSnapshot,
@@ -20,6 +25,7 @@ import {
   Select,
   Textarea,
 } from 'ant-design-vue';
+import BigNumber from 'bignumber.js';
 
 import { getContract, getDirectory } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
@@ -38,6 +44,10 @@ import { errorText } from '../../../data';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
 import { localDate } from '../../quotes/comparison';
+import {
+  requestAvailableQuantity,
+  transferableRequestLines,
+} from '../../request-transfer';
 import {
   copyEntry,
   emptyRow,
@@ -95,6 +105,7 @@ const factories = ref<{ label: string; value: number }[]>([]);
 const saving = ref(false);
 const error = ref('');
 const submitted = ref(false);
+const sourceRequestId = ref<string>();
 const submitRequested = ref(false);
 let idempotencyKey = '';
 let sequence = 0;
@@ -161,6 +172,7 @@ const pickerMounted = ref(false);
 const pickerOpen = ref(false);
 const pickerRow = ref<EntryRow>();
 function openPicker(row?: EntryRow) {
+  if (row?.requestItemId) return;
   pickerRow.value = row;
   pickerMounted.value = true;
   pickerOpen.value = true;
@@ -319,6 +331,8 @@ async function chooseContract(value: unknown) {
 }
 function chooseProduct(row: EntryRow, value: unknown) {
   if (typeof value !== 'string') return;
+  if (row.requestItemId) return;
+  if (sourceRequestId.value && value.startsWith('item:')) return;
   // 复制行再次选中原产品仍沿用原单快照；真正换产品时解除来源绑定。
   if (
     row.sourceLineId &&
@@ -355,6 +369,7 @@ function chooseProduct(row: EntryRow, value: unknown) {
 }
 /** 关联合同后一键带出合同产品（数量按合同数量预填，可改可删）。 */
 function addContractItems() {
+  if (sourceRequestId.value) return;
   const items = contract.value?.items ?? [];
   const existing = new Set(rows.value.map((row) => row.contractItemId));
   rows.value = [
@@ -372,7 +387,7 @@ function addContractItems() {
       })),
   ];
 }
-/** 申请里的每个合同产品一行，数量按申请数量预填（可改可删，可再加外箱等非合同产品）。 */
+/** 只带出当前可转的申请明细，保留独立来源身份；完整申请保留在详情里。 */
 function fillFromRequest(requestId: string) {
   // 传进来的可能是申请 id，也可能是采购任务（分派）id，后者顺着任务找到申请
   const requests = contract.value?.requests ?? [];
@@ -382,30 +397,34 @@ function fillFromRequest(requestId: string) {
   const request =
     requests.find((entry) => entry.id === requestId) ??
     requests.find((entry) => entry.id === assignment?.requestId);
+  sourceRequestId.value = request ? String(request.id) : requestId;
   const items = new Map(
     (contract.value?.items ?? []).map((item) => [item.id, item]),
   );
-  const lines = (
-    (request?.items ?? []) as {
-      contractItemId?: string;
-      id?: string;
-      quantity?: unknown;
-      specificationSnapshot?: null | ProcurementProductSnapshot;
-    }[]
-  )
-    .map((line) => ({ line, item: items.get(String(line.contractItemId)) }))
+  const lines = transferableRequestLines(contract.value!, requestId)
+    .map((entry) => ({
+      ...entry,
+      item: items.get(String(entry.line.contractItemId)),
+    }))
     .filter((entry) => entry.item);
-  if (lines.length === 0) return;
+  if (lines.length === 0) {
+    rows.value = [];
+    error.value =
+      '当前没有可转采购明细；请刷新申请，或查看已生成的采购单及占用情况。';
+    return;
+  }
   // 采购主题留空：后端按「合同号 供应商 采购单」生成，拆单时每张带各自的供应商
-  rows.value = lines.map(({ line, item }) => {
+  rows.value = lines.map(({ line, item, assignmentId, remaining }) => {
     const row: EntryRow = {
       ...emptyRow(key()),
-      ...entryProductFields(line.specificationSnapshot ?? item!),
+      ...entryProductFields(
+        (line.specificationSnapshot ?? item!) as ProcurementProductSnapshot,
+      ),
       contractItemId: item!.id,
-      quantity:
-        line.quantity === null || line.quantity === undefined
-          ? undefined
-          : String(line.quantity),
+      requestItemId: String(line.id),
+      assignmentId,
+      availableQuantity: remaining,
+      quantity: remaining,
     };
     // 已登记供应商报价的明细直接带出供应商和单价；不同供应商保存时自动拆单
     const quoted = line.id
@@ -461,6 +480,35 @@ async function copyOrder(
     ),
   ];
   rows.value = copied.rows.length > 0 ? copied.rows : [emptyRow(key())];
+  if (edit && typeof view.order.requestId === 'string')
+    sourceRequestId.value = view.order.requestId;
+  if (edit && contract.value) {
+    for (const row of rows.value) {
+      if (!row.requestItemId) continue;
+      const line = (contract.value.requests ?? [])
+        .flatMap((entry) => (entry.items ?? []) as Record<string, unknown>[])
+        .find((entry) => entry.id === row.requestItemId);
+      const source = row.assignmentId
+        ? contract.value.assignments?.find(
+            (entry) => entry.id === row.assignmentId,
+          )
+        : line;
+      let restoredQuantity = new BigNumber(0);
+      for (const entry of rows.value) {
+        if (
+          entry.requestItemId === row.requestItemId &&
+          entry.assignmentId === row.assignmentId
+        ) {
+          restoredQuantity = restoredQuantity.plus(entry.quantity ?? 0);
+        }
+      }
+      row.availableQuantity = new BigNumber(
+        source ? requestAvailableQuantity(source as BusinessRecord) : '0',
+      )
+        .plus(restoredQuantity)
+        .toFixed(0);
+    }
+  }
 }
 watch(
   () => props.open,
@@ -471,6 +519,7 @@ watch(
     submitRequested.value = false;
     error.value = '';
     contract.value = undefined;
+    sourceRequestId.value = undefined;
     header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
     rows.value = [emptyRow(key())];
     supplierNames.value = {};
@@ -550,7 +599,7 @@ async function save(submit = false) {
       'saved',
       await createProcurementOrder({
         ...payload,
-        requestId: props.requestId,
+        requestId: sourceRequestId.value,
         submit: false,
       }),
       'draft',
@@ -666,7 +715,11 @@ async function save(submit = false) {
         </Button>
         <Button size="small" @click="addRow">添加一行</Button>
         <Button size="small" @click="openBulk">粘贴导入</Button>
-        <Button v-if="contract" size="small" @click="addContractItems">
+        <Button
+          v-if="contract && !sourceRequestId"
+          size="small"
+          @click="addContractItems"
+        >
           带出合同产品
         </Button>
       </div>
@@ -705,7 +758,12 @@ async function save(submit = false) {
                     "
                     show-search
                     :filter-option="false"
-                    :options="[...contractItems, ...productOptions]"
+                    :options="
+                      sourceRequestId && !row.requestItemId
+                        ? productOptions
+                        : [...contractItems, ...productOptions]
+                    "
+                    :disabled="!!row.requestItemId"
                     :placeholder="row.name || '搜索产品编号、名称'"
                     :dropdown-match-select-width="460"
                     style="width: 100%"
@@ -713,6 +771,7 @@ async function save(submit = false) {
                     @update:value="(value) => chooseProduct(row, value)"
                   />
                   <Button
+                    v-if="!row.requestItemId"
                     size="small"
                     type="link"
                     title="从产品中心按分类选择"
@@ -726,6 +785,9 @@ async function save(submit = false) {
                   class="hint clamp"
                   :title="`${row.code ?? ''} ${row.name}`"
                   >{{ row.code }} {{ row.name }}</span>
+                <span v-if="row.requestItemId" class="hint">申请明细 · 本次最多可转
+                  {{ row.availableQuantity ?? row.quantity }}
+                  {{ row.unit }}</span>
                 <span
                   v-if="submitted && errors.lines[row.key]"
                   class="field-error"
@@ -778,6 +840,7 @@ async function save(submit = false) {
                   :value="row.quantity"
                   string-mode
                   :min="0"
+                  :max="row.availableQuantity"
                   :controls="false"
                   style="width: 100%"
                   :aria-label="`第${index + 1}行数量`"

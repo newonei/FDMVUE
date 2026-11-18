@@ -10,7 +10,7 @@ import { getWorkbenchMates, matchWorkbenchWage } from '#/api/fdmgongchang/workbe
 import ImageUpload from '#/components/upload/image-upload.vue';
 
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
-import { formatQty, toNumber } from '../../stage-stock/model';
+import { formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { defectTotal, goodTotal, stageOf, useJob } from '../use-job';
 import StepHeader from './step-header.vue';
 
@@ -21,6 +21,7 @@ import StepHeader from './step-header.vue';
 const props = defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{ back: []; submit: [] }>();
 const job = useJob();
+const labels = computed(() => makeLabels(job.options));
 
 const matches = ref<FdmgongchangWageApi.Match[]>([]);
 const mates = ref<FdmgongchangFactoryApi.Operator[]>([]);
@@ -127,6 +128,11 @@ function addMate() {
       <main class="flex flex-1 flex-col gap-3 p-4">
         <section class="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
           <b>本次良品 {{ formatQty(goodTotal(job)) }} {{ unit }} · 不良品 {{ formatQty(defectTotal(job)) }} {{ unit }}</b>
+          <template v-if="job.process?.code === 'LAMINATE'">
+            <div v-for="line in job.outputs.filter((output) => output.laminateLayers)" :key="line.key" class="text-sm">
+              <div v-for="layer in line.laminateLayers" :key="layer.side">{{ layer.side === 'FRONT' ? '正面' : '反面' }} {{ labels.color(layer.color) }}：片材残次 {{ formatQty(layer.defectQuantity) }} 片</div>
+            </div>
+          </template>
           <span class="text-sm">{{ job.task?.contractCode || job.order?.orderNo || '本批生产' }}<template v-if="job.task"> · 任务 #{{ job.task.id }}</template></span>
           <Checkbox v-if="job.finish || job.createFinish" v-model:checked="finishConfirmed" aria-label="确认本批全部做完">我已核对：本批全部做完，提交后结束生产</Checkbox>
           <span v-else class="text-sm">只登记本次产出，工序单继续在制，下次接着报。</span>

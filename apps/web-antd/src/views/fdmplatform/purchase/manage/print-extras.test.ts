@@ -1,16 +1,52 @@
 import { describe, expect, it } from 'vitest';
 
+import { orderDetailsPayload } from './model';
 import {
   accessoryRows,
   additionalLineAmount,
+  applyProductionExtras,
   boxCount,
   copyPrintExtras,
   printExtrasFrom,
   printExtrasImageIds,
   printExtrasPayload,
+  productionExtrasFrom,
 } from './print-extras';
 
 describe('采购单附加资料', () => {
+  it('订单备注兼容旧单、独立于内部备注，并在提交和历史复制时保留清空意图', () => {
+    const details = {
+      clauseIds: [],
+      status: 'DRAFT' as const,
+      version: 1,
+      remark: '仅内部可见',
+    };
+    const old = printExtrasFrom(details);
+    expect(old.orderRemark).toBe('');
+    expect(printExtrasPayload(old).orderRemark).toBe('');
+    expect(orderDetailsPayload(printExtrasPayload(old)).orderRemark).toBe('');
+    const source = printExtrasFrom({
+      ...details,
+      orderRemark: '  第一批优先发货\n第二批另行通知  ',
+    });
+    expect(printExtrasPayload(source).orderRemark).toBe(
+      '第一批优先发货\n第二批另行通知',
+    );
+    expect(orderDetailsPayload(printExtrasPayload(source)).orderRemark).toBe(
+      '第一批优先发货\n第二批另行通知',
+    );
+    expect(details.remark).toBe('仅内部可见');
+    expect(copyPrintExtras(old, source, [], [], {}).value.orderRemark).toBe(
+      source.orderRemark,
+    );
+    expect(
+      printExtrasPayload(copyPrintExtras(source, old, [], [], {}).value)
+        .orderRemark,
+    ).toBe('');
+    source.orderRemark = '  \n  ';
+    expect(printExtrasPayload(source).orderRemark).toBe('');
+  });
+
   it('辅料清单保留已存的勾选与备注，清单新增项补在后面', () => {
     expect(
       accessoryRows(
@@ -53,9 +89,13 @@ describe('采购单附加资料', () => {
       ['吊牌'],
     );
     expect(printExtrasPayload(value)).toEqual({
+      orderRemark: '',
       detailColumns: [],
       additionalLines: [],
-      lineExtras: { l1: { customerColor: 'Ocean Blue', packQty: 10 } },
+      lineExtras: {
+        l1: { customerColor: 'Ocean Blue', weight: '', packQty: 10 },
+        l2: { weight: '' },
+      },
       sharedColumns: [{ title: '纹路', text: '贝壳纹', imageIds: [] }],
       accessories: [],
       // 有内容没标题的步骤留给后端提示补标题
@@ -66,6 +106,98 @@ describe('采购单附加资料', () => {
     expect(printExtrasPayload(value).accessories).toEqual([
       { name: '吊牌', checked: true, remark: '每条一个' },
     ]);
+  });
+
+  it('每行优先沿用已保存生产要求，缺项从本单快照回填，清空不回落旧值', () => {
+    const snapshot = {
+      colorMode: 'SINGLE',
+      colorCode: 'BLUE',
+      textureFront: 'WAVE',
+      weight: '800g',
+      model: '正反面都是红色',
+    };
+    expect(productionExtrasFrom({}, snapshot)).toEqual({
+      colorMode: 'SINGLE',
+      frontColor: 'BLUE',
+      backColor: 'BLUE',
+      textureFront: 'WAVE',
+      weight: '800g',
+    });
+    const value = productionExtrasFrom(
+      { textureFront: '', weight: '' },
+      snapshot,
+    );
+    expect(value).toMatchObject({
+      textureFront: '',
+      weight: '',
+      frontColor: 'BLUE',
+    });
+    const extras = printExtrasFrom({
+      clauseIds: [],
+      status: 'DRAFT',
+      version: 1,
+      lineExtras: { row: value },
+    });
+    expect(printExtrasPayload(extras).lineExtras.row).toEqual(value);
+    expect(productionExtrasFrom({}, { model: '正面红反面蓝' })).toEqual({});
+    expect(
+      productionExtrasFrom({}, { colorMode: 'UNKNOWN', colorCode: 'BLUE' }),
+    ).toEqual({ colorMode: 'UNKNOWN', frontColor: 'BLUE', backColor: 'BLUE' });
+    expect(
+      productionExtrasFrom({ frontColor: '' }, { colorCode: 'BLUE' }),
+    ).toEqual({
+      frontColor: '',
+      backColor: 'BLUE',
+    });
+  });
+
+  it('批量只修改选中的行和字段，可仅填空值，单色正反面始终同色', () => {
+    const rows = {
+      a: {
+        colorMode: 'DUAL' as const,
+        frontColor: 'RED',
+        backColor: 'BLUE',
+        textureFront: 'WAVE',
+        weight: '',
+      },
+      b: { colorMode: 'UNKNOWN' as const, frontColor: '', model: '原型号' },
+      c: { weight: '900g' },
+    };
+    applyProductionExtras(
+      rows,
+      ['a', 'b'],
+      { colorMode: 'SINGLE', frontColor: 'GREEN', weight: '800g' },
+      ['colorMode', 'frontColor', 'weight'],
+      true,
+    );
+    expect(rows.a).toMatchObject({
+      colorMode: 'DUAL',
+      frontColor: 'RED',
+      backColor: 'BLUE',
+      textureFront: 'WAVE',
+      weight: '800g',
+    });
+    expect(rows.b).toEqual({
+      colorMode: 'SINGLE',
+      frontColor: 'GREEN',
+      backColor: 'GREEN',
+      weight: '800g',
+      model: '原型号',
+    });
+    expect(rows.c).toEqual({ weight: '900g' });
+    applyProductionExtras(
+      rows,
+      ['a'],
+      { colorMode: 'SINGLE', frontColor: 'GREEN', textureFront: '' },
+      ['colorMode', 'frontColor', 'textureFront'],
+    );
+    expect(rows.a).toMatchObject({
+      colorMode: 'SINGLE',
+      frontColor: 'GREEN',
+      backColor: 'GREEN',
+      textureFront: '',
+      weight: '800g',
+    });
   });
 
   it('额外费用保留零单价并使用十进制计算金额，提交时不信任旧金额', () => {

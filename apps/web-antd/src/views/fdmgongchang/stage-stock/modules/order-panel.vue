@@ -596,7 +596,11 @@ const statCards = computed(() =>
                       <b class="tabular-nums">{{
                         formatQty(line.goodQuantity)
                       }}</b></span>
-                    <span class="ml-2">残次
+                    <span v-if="line.frontDefectQuantity !== null && line.frontDefectQuantity !== undefined && line.backDefectQuantity !== null && line.backDefectQuantity !== undefined" class="ml-2">
+                      正面 {{ labels.color(line.item?.frontColor) }} 残次 <b class="tabular-nums">{{ formatQty(line.frontDefectQuantity) }}</b> 片；
+                      反面 {{ labels.color(line.item?.backColor) }} 残次 <b class="tabular-nums">{{ formatQty(line.backDefectQuantity) }}</b> 片
+                    </span>
+                    <span v-else class="ml-2">残次
                       <b class="tabular-nums">{{
                         formatQty(line.defectQuantity)
                       }}</b>

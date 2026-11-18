@@ -7,6 +7,7 @@ import { Input, InputNumber, message, Modal } from 'ant-design-vue';
 
 import { stocktake } from '#/api/fdmgongchang/stage-stock';
 
+import { quantityPrecision } from '../../shared/quantity';
 import { formatQty, roundQty, toNumber } from '../model';
 
 /** 盘点：填实盘数，账面数被别人改过时后端会拒绝，需要刷新后重盘。 */
@@ -86,7 +87,7 @@ async function submit() {
           id="stocktake-qty"
           v-model:value="actual"
           :min="0"
-          :precision="3"
+          :precision="quantityPrecision(unit)"
           class="w-full"
         />
       </label>

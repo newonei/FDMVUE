@@ -5,20 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import PurchaseOrderEditor from './components/PurchaseOrderEditor.vue';
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), update: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  update: vi.fn(),
+  contract: vi.fn(),
+  order: vi.fn(),
+}));
 vi.mock('#/api/fdmplatform', () => ({
   getDirectory: async () => ({
     companies: [{ companyId: 1, companyName: '公司' }],
   }),
-  getContract: async () => ({
-    id: 'contract-1',
-    companyId: 1,
-    code: 'HT001',
-    items: [{ id: 'item-1', skuName: '瑜伽垫', quantity: 10 }],
-    requests: [
-      { id: 'request-1', items: [{ contractItemId: 'item-1', quantity: 10 }] },
-    ],
-  }),
+  getContract: mocks.contract,
 }));
 vi.mock('#/api/fdmplatform/contract-board', () => ({
   getContractBoard: async () => ({ list: [] }),
@@ -34,24 +31,7 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   updateProcurementOrder: mocks.update,
   getProcurementSettings: async () => [],
   getReceiveFactories: async () => [],
-  getProcurementOrder: async () => ({
-    contractId: '',
-    companyId: 1,
-    details: { subject: '待完善采购', status: 'DRAFT' },
-    order: {
-      id: 'source-order',
-      supplierId: 'supplier-1',
-      lines: [
-        {
-          id: 'line-1',
-          skuId: 'product-1',
-          quantity: 10,
-          unitPrice: 2,
-          specificationSnapshot: { skuName: '瑜伽垫' },
-        },
-      ],
-    },
-  }),
+  getProcurementOrder: mocks.order,
 }));
 vi.mock('../../components/RemoteMasterSelect.vue', () => ({
   default: defineComponent({
@@ -141,6 +121,43 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.create.mockResolvedValue(result);
   mocks.update.mockResolvedValue(result);
+  mocks.order.mockResolvedValue({
+    contractId: '',
+    companyId: 1,
+    details: { subject: '待完善采购', status: 'DRAFT' },
+    order: {
+      id: 'source-order',
+      supplierId: 'supplier-1',
+      lines: [
+        {
+          id: 'line-1',
+          skuId: 'product-1',
+          quantity: 10,
+          unitPrice: 2,
+          specificationSnapshot: { skuName: '瑜伽垫' },
+        },
+      ],
+    },
+  });
+  mocks.contract.mockResolvedValue({
+    id: 'contract-1',
+    companyId: 1,
+    code: 'HT001',
+    items: [{ id: 'item-1', skuName: '瑜伽垫', quantity: 10 }],
+    requests: [
+      {
+        id: 'request-1',
+        items: [
+          {
+            id: 'request-line-1',
+            contractItemId: 'item-1',
+            quantity: 10,
+            availableQuantity: '10',
+          },
+        ],
+      },
+    ],
+  });
 });
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 async function settle() {
@@ -188,6 +205,86 @@ async function fill(input: HTMLInputElement, value: string) {
 }
 
 describe('采购开单先保存草稿', () => {
+  it('编辑同一申请明细的多个任务来源时，各任务只加回本单自己的占用', async () => {
+    mocks.contract.mockResolvedValue({
+      id: 'contract-1',
+      companyId: 1,
+      code: 'HT001',
+      items: [{ id: 'item-1', skuName: '瑜伽垫', quantity: 60 }],
+      requests: [
+        {
+          id: 'request-1',
+          items: [
+            {
+              id: 'ri',
+              contractItemId: 'item-1',
+              quantity: 60,
+              availableQuantity: 40,
+            },
+          ],
+        },
+      ],
+      assignments: ['a', 'b'].map((id) => ({
+        id,
+        requestId: 'request-1',
+        requestItemId: 'ri',
+        method: 'BUY',
+        availableQuantity: 20,
+      })),
+    });
+    mocks.order.mockResolvedValue({
+      contractId: 'contract-1',
+      companyId: 1,
+      details: { status: 'DRAFT' },
+      order: {
+        id: 'source-order',
+        requestId: 'request-1',
+        supplierId: 'supplier-1',
+        lines: ['a', 'b'].map((assignmentId) => ({
+          id: assignmentId,
+          requestItemId: 'ri',
+          assignmentId,
+          contractItemId: 'item-1',
+          quantity: 10,
+          unitPrice: 2,
+          specificationSnapshot: { skuName: '瑜伽垫' },
+        })),
+      },
+    });
+    const { host } = await mount({
+      editOf: { contractId: 'contract-1', orderId: 'source-order' },
+    });
+    expect(host.textContent).toContain('本次最多可转 30');
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行数量"]')!,
+      '30',
+    );
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第2行数量"]')!,
+      '30',
+    );
+    button(host, '保存草稿').click();
+    await settle();
+    expect(mocks.update).toHaveBeenCalledWith(
+      'contract-1',
+      'source-order',
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            requestItemId: 'ri',
+            assignmentId: 'a',
+            quantity: '30',
+          }),
+          expect.objectContaining({
+            requestItemId: 'ri',
+            assignmentId: 'b',
+            quantity: '30',
+          }),
+        ],
+      }),
+      false,
+    );
+  });
   it('复制采购单只保存为草稿，留到资料完善后下单', async () => {
     const { host, saved } = await mount();
     expect(
@@ -227,11 +324,78 @@ describe('采购开单先保存草稿', () => {
         requestId: 'request-1',
         contractId: 'contract-1',
         lines: [
-          expect.objectContaining({ contractItemId: 'item-1', quantity: '10' }),
+          expect.objectContaining({
+            contractItemId: 'item-1',
+            requestItemId: 'request-line-1',
+            quantity: '10',
+          }),
         ],
       }),
     );
     expect(saved).toHaveBeenCalledWith(result, 'draft');
+  });
+  it('只带出可转明细，数量按草稿占用后的余额，超量时不能保存', async () => {
+    mocks.contract.mockResolvedValue({
+      id: 'contract-1',
+      companyId: 1,
+      code: 'HT001',
+      items: [{ id: 'item-1', skuName: '瑜伽垫', quantity: 100 }],
+      requests: [
+        {
+          id: 'request-1',
+          items: [
+            {
+              id: 'done',
+              contractItemId: 'item-1',
+              quantity: 100,
+              orderedQuantity: 100,
+              availableQuantity: 0,
+            },
+            {
+              id: 'partial',
+              contractItemId: 'item-1',
+              quantity: 100,
+              draftReservedQuantity: 40,
+              availableQuantity: 60,
+            },
+          ],
+        },
+      ],
+    });
+    const { host } = await mount({
+      contractId: 'contract-1',
+      requestId: 'request-1',
+    });
+    expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
+    const quantity = host.querySelector<HTMLInputElement>(
+      '[aria-label="第1行数量"]',
+    )!;
+    expect(quantity.value).toBe('60');
+    expect(host.textContent).toContain('本次最多可转 60');
+    await fill(
+      host.querySelector<HTMLInputElement>('[data-supplier]')!,
+      'supplier-1',
+    );
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行单价"]')!,
+      '2',
+    );
+    await fill(quantity, '61');
+    button(host, '保存草稿并完善资料').click();
+    await settle();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('本次最多可转 60');
+    await fill(quantity, '60');
+    button(host, '保存草稿并完善资料').click();
+    await settle();
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'request-1',
+        lines: [
+          expect.objectContaining({ requestItemId: 'partial', quantity: '60' }),
+        ],
+      }),
+    );
   });
   it('保存期间阻止重复操作和关闭，失败后保留输入及幂等键供重试', async () => {
     let reject!: (error: Error) => void;

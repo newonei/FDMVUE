@@ -22,6 +22,17 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrders: mocks.orders,
   copyProcurementImages: mocks.copyImages,
 }));
+vi.mock('#/api/fdmplatform/products', () => ({
+  getProductAttributeOptions: vi.fn().mockResolvedValue({
+    colors: [
+      { value: 'RED', label: '红色' },
+      { value: 'BLUE', label: '蓝色' },
+    ],
+    textures: [{ value: 'WAVE', label: '波浪纹' }],
+    stages: [],
+    matTypes: [],
+  }),
+}));
 vi.mock('ant-design-vue', () => {
   const Wrap = defineComponent({
     setup: (_, ctx) => () => h('div', ctx.slots.default?.()),
@@ -69,16 +80,64 @@ vi.mock('ant-design-vue', () => {
           ctx.slots.default?.(),
         ),
     }),
-    Checkbox: Wrap,
-    Collapse: Object.assign(Wrap, { Panel: Wrap }),
+    Checkbox: defineComponent({
+      props: ['checked', 'disabled'],
+      emits: ['update:checked', 'change'],
+      setup: (props, ctx) => () =>
+        h('label', [
+          h('input', {
+            ...ctx.attrs,
+            type: 'checkbox',
+            checked: props.checked,
+            disabled: props.disabled,
+            onChange: (event: Event) => {
+              ctx.emit(
+                'update:checked',
+                (event.target as HTMLInputElement).checked,
+              );
+              ctx.emit('change', event);
+            },
+          }),
+          ctx.slots.default?.(),
+        ]),
+    }),
+    Collapse: Object.assign(
+      defineComponent({
+        props: ['activeKey'],
+        setup: (props, ctx) => () =>
+          h(
+            'div',
+            { 'data-active-keys': JSON.stringify(props.activeKey) },
+            ctx.slots.default?.(),
+          ),
+      }),
+      {
+        Panel: defineComponent({
+          setup: (_, ctx) => () =>
+            h('section', [ctx.slots.header?.(), ctx.slots.default?.()]),
+        }),
+      },
+    ),
     Image: Object.assign(Wrap, { PreviewGroup: Wrap }),
     Input,
     InputNumber,
     Modal: Object.assign(
       defineComponent({
-        props: { open: Boolean },
+        props: { open: Boolean, title: String },
+        emits: ['ok'],
         setup: (props, ctx) => () =>
-          props.open ? h('section', ctx.slots.default?.()) : null,
+          props.open
+            ? h('section', { role: 'dialog', 'aria-label': props.title }, [
+                ctx.slots.default?.(),
+                ctx.attrs['ok-text']
+                  ? h(
+                      'button',
+                      { onClick: () => ctx.emit('ok') },
+                      ctx.attrs['ok-text'] as string,
+                    )
+                  : null,
+              ])
+            : null,
       }),
       { confirm: mocks.confirm },
     ),
@@ -106,7 +165,21 @@ vi.mock('ant-design-vue', () => {
         ),
     }),
     Tag: Wrap,
-    Textarea: Input,
+    Textarea: defineComponent({
+      props: ['value', 'disabled'],
+      emits: ['update:value'],
+      setup: (props, ctx) => () =>
+        h('textarea', {
+          ...ctx.attrs,
+          value: props.value ?? '',
+          disabled: props.disabled,
+          onInput: (event: Event) =>
+            ctx.emit(
+              'update:value',
+              (event.target as HTMLTextAreaElement).value,
+            ),
+        }),
+    }),
     message: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
   };
 });
@@ -146,6 +219,7 @@ async function settle() {
 }
 async function mount() {
   const disabled = ref(false);
+  const saving = ref(false);
   const view = ref(fixture());
   const extras = ref<InstanceType<typeof OrderPrintExtras>>();
   const saved = vi.fn();
@@ -159,6 +233,7 @@ async function mount() {
         ref: extras,
         view: view.value,
         disabled: disabled.value,
+        saving: saving.value,
         onSave: saved,
         onDirty: dirty,
         onBusy: busy,
@@ -170,7 +245,7 @@ async function mount() {
     host.remove();
   });
   await settle();
-  return { host, view, extras, saved, dirty, busy, disabled };
+  return { host, view, extras, saved, dirty, busy, disabled, saving };
 }
 function buttons(host: HTMLElement, label: string) {
   return [...host.querySelectorAll('button')].filter(
@@ -236,6 +311,271 @@ function thumbs(host: HTMLElement, column = 'card') {
 }
 
 describe('actual purchase print extras editor', () => {
+  it('places order remarks after the four groups and saves edits and clearing through the existing payload', async () => {
+    const { host, view, extras, saved, dirty } = await mount();
+    const groups = [...host.querySelectorAll('.extras-collapse > section')];
+    expect(groups).toHaveLength(5);
+    expect(groups[4]!.textContent).toContain('订单备注');
+    expect(
+      JSON.parse(
+        host.querySelector<HTMLElement>('.extras-collapse')!.dataset
+          .activeKeys!,
+      ),
+    ).not.toContain('remark');
+    const input = host.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="订单备注"]',
+    )!;
+    expect(input.value).toBe('');
+    expect(input.maxLength).toBe(2000);
+    expect(extras.value!.isDirty()).toBe(false);
+    await fill(
+      host,
+      'textarea[aria-label="订单备注"]',
+      '  第一批优先发货\n第二批另行通知  ',
+    );
+    expect(extras.value!.isDirty()).toBe(true);
+    expect(dirty).toHaveBeenLastCalledWith(true);
+    saved.mockImplementation(() => extras.value!.payload());
+    await click(host, '保存附加资料');
+    expect(saved.mock.results[0]!.value.orderRemark).toBe(
+      '第一批优先发货\n第二批另行通知',
+    );
+    view.value = {
+      ...view.value,
+      details: {
+        ...view.value.details,
+        ...extras.value!.payload(),
+        remark: '内部备注独立保留',
+        version: 2,
+      },
+    };
+    await settle();
+    extras.value!.markSaved();
+    await settle();
+    expect(extras.value!.isDirty()).toBe(false);
+    expect(input.value).toBe('第一批优先发货\n第二批另行通知');
+    await fill(host, 'textarea[aria-label="订单备注"]', '');
+    await click(host, '保存附加资料');
+    expect(saved.mock.results[1]!.value.orderRemark).toBe('');
+    expect(view.value.details.remark).toBe('内部备注独立保留');
+  });
+
+  it('expands saved remarks and disables editing while read-only or saving', async () => {
+    const { host, view, extras, disabled, saving } = await mount();
+    view.value = {
+      ...view.value,
+      details: { ...view.value.details, orderRemark: '按合同交付', version: 2 },
+    };
+    await settle();
+    expect(
+      JSON.parse(
+        host.querySelector<HTMLElement>('.extras-collapse')!.dataset
+          .activeKeys!,
+      ),
+    ).toContain('remark');
+    const input = host.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="订单备注"]',
+    )!;
+    expect(input.value).toBe('按合同交付');
+    expect(extras.value!.isDirty()).toBe(false);
+    disabled.value = true;
+    await settle();
+    expect(input.disabled).toBe(true);
+    disabled.value = false;
+    saving.value = true;
+    await settle();
+    expect(input.disabled).toBe(true);
+    saving.value = false;
+    await settle();
+    expect(input.disabled).toBe(false);
+  });
+
+  it('recognizes remark-only historical orders and confirms replacing a current remark', async () => {
+    const sourceView = {
+      ...fixture(),
+      id: 'source-order',
+      contractId: 'source-contract',
+      details: { ...fixture().details, orderRemark: '历史订单备注' },
+    };
+    mocks.orders.mockResolvedValue({
+      list: [
+        {
+          id: sourceView.id,
+          contractId: sourceView.contractId,
+          details: sourceView.details,
+          record: { code: 'CG-REMARK' },
+        },
+      ],
+      total: 1,
+    });
+    mocks.order.mockResolvedValue(sourceView);
+    const { host, extras } = await mount();
+    await fill(host, 'textarea[aria-label="订单备注"]', '本单备注');
+    await click(host, '从历史采购单复制');
+    expect(host.querySelector('table [data-key="extras"]')!.textContent).toBe(
+      '有',
+    );
+    await click(host, '复制');
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    expect(mocks.order).not.toHaveBeenCalled();
+    expect(mocks.confirm.mock.calls[0]![0].content).toContain('订单备注');
+    await mocks.confirm.mock.calls[0]![0].onOk();
+    await settle();
+    expect(extras.value!.payload().orderRemark).toBe('历史订单备注');
+    expect(extras.value!.isDirty()).toBe(true);
+    expect(
+      JSON.parse(
+        host.querySelector<HTMLElement>('.extras-collapse')!.dataset
+          .activeKeys!,
+      ),
+    ).toContain('remark');
+    expect(mocks.copyImages).not.toHaveBeenCalled();
+  });
+
+  it('opens and closes custom column settings without changing saved data', async () => {
+    const { host, extras, dirty } = await mount();
+    const original = extras.value!.payload();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(buttons(host, '+ 新增文字列')).toHaveLength(0);
+    await click(host, '自定义列设置（0/8）');
+    expect(
+      host.querySelector('[role="dialog"][aria-label="自定义列设置"]'),
+    ).not.toBeNull();
+    expect(extras.value!.payload()).toEqual(original);
+    expect(extras.value!.isDirty()).toBe(false);
+    await click(host, '完成设置');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(extras.value!.payload()).toEqual(original);
+    expect(dirty).toHaveBeenLastCalledWith(false);
+    expect(
+      buttons(host, '保存附加资料').every((button) => button.disabled),
+    ).toBe(true);
+  });
+
+  it('loads each product snapshot, edits structured requirements and keeps single-color sides in sync', async () => {
+    const { host, view, extras } = await mount();
+    view.value = {
+      ...view.value,
+      order: {
+        ...view.value.order,
+        lines: [
+          {
+            id: 'product-1',
+            quantity: 10,
+            specificationSnapshot: {
+              skuCode: 'SKU-1',
+              colorMode: 'DUAL',
+              frontColor: 'RED',
+              backColor: 'BLUE',
+              textureFront: 'WAVE',
+              weight: '800g',
+            },
+          },
+        ],
+      },
+      details: {
+        ...view.value.details,
+        version: 2,
+        lineExtras: { 'product-1': { textureFront: '' } },
+      },
+    };
+    await settle();
+    expect(extras.value!.isDirty()).toBe(false);
+    expect(extras.value!.payload().lineExtras['product-1']).toMatchObject({
+      colorMode: 'DUAL',
+      frontColor: 'RED',
+      backColor: 'BLUE',
+      textureFront: '',
+      weight: '800g',
+    });
+    await fill(host, 'input[id="colorMode-product-1"]', 'SINGLE');
+    expect(extras.value!.payload().lineExtras['product-1']!.backColor).toBe(
+      'RED',
+    );
+    await fill(host, 'input[id="frontColor-product-1"]', 'BLUE');
+    expect(extras.value!.payload().lineExtras['product-1']!.backColor).toBe(
+      'BLUE',
+    );
+    expect(
+      host.querySelector<HTMLInputElement>('input[id="backColor-product-1"]')!
+        .disabled,
+    ).toBe(true);
+    await fill(host, 'input[id="weight-product-1"]', '');
+    expect(extras.value!.payload().lineExtras['product-1']!.weight).toBe('');
+    await fill(host, 'input[id="colorMode-product-1"]', 'DUAL');
+    expect(
+      buttons(host, '保存附加资料').every((button) => button.disabled),
+    ).toBe(true);
+    await fill(host, 'input[id="backColor-product-1"]', 'RED');
+    expect(
+      buttons(host, '保存附加资料').every((button) => !button.disabled),
+    ).toBe(true);
+  });
+
+  it('batch applies only chosen fields to selected product lines and excludes fee rows', async () => {
+    const { host, view, extras } = await mount();
+    view.value = {
+      ...view.value,
+      order: {
+        ...view.value.order,
+        lines: [
+          {
+            id: 'product-1',
+            specificationSnapshot: {
+              skuCode: 'SKU-1',
+              frontColor: 'RED',
+              weight: '800g',
+            },
+          },
+          {
+            id: 'product-2',
+            specificationSnapshot: {
+              skuCode: 'SKU-2',
+              frontColor: 'BLUE',
+              weight: '900g',
+            },
+          },
+        ],
+      },
+      details: { ...view.value.details, version: 2 },
+    };
+    await settle();
+    await click(host, '+ 新增费用 / 免费项目行');
+    expect(
+      host.querySelectorAll('input[aria-label^="选择产品 "]'),
+    ).toHaveLength(2);
+    host
+      .querySelector<HTMLInputElement>('input[aria-label="选择产品 SKU-1"]')!
+      .click();
+    await settle();
+    await click(host, '批量设置生产属性');
+    await fill(host, 'input[aria-label="批量产品克重"]', '1000g±50g');
+    await fill(host, 'input[aria-label="批量正面纹路"]', 'WAVE');
+    await click(host, '应用到所选明细');
+    expect(extras.value!.payload().lineExtras).toEqual({
+      'product-1': {
+        frontColor: 'RED',
+        weight: '1000g±50g',
+        textureFront: 'WAVE',
+      },
+      'product-2': { frontColor: 'BLUE', weight: '900g' },
+    });
+    expect(extras.value!.payload().additionalLines[0]).not.toHaveProperty(
+      'weight',
+    );
+    host.querySelector<HTMLInputElement>('.batch-toolbar input')!.click();
+    await settle();
+    await click(host, '批量设置生产属性');
+    await fill(host, 'input[aria-label="批量正面纹路"]', '');
+    await click(host, '应用到所选明细');
+    expect(extras.value!.payload().lineExtras['product-1']!.textureFront).toBe(
+      '',
+    );
+    expect(extras.value!.payload().lineExtras['product-2']!.textureFront).toBe(
+      '',
+    );
+  });
+
   it('drags color cards in both directions and saves/reloads their new order', async () => {
     const { host, extras, view, saved } = await withColorCards();
     const [front, back, detail] = thumbs(host);
@@ -316,7 +656,7 @@ describe('actual purchase print extras editor', () => {
     expect(extras.value!.payload()).toEqual(original);
   });
 
-  it('uploads and removes the supplier color image after model without replacing the product image', async () => {
+  it('uploads and removes the labelled supplier color image without replacing the product image', async () => {
     const { host, view, extras, busy } = await mount();
     view.value = {
       ...view.value,
@@ -328,12 +668,15 @@ describe('actual purchase print extras editor', () => {
     };
     await settle();
     const product = host.querySelector('[data-row="product-1"]')!;
+    const supplierImage = product.querySelector(
+      '[data-key="colorImage"] [aria-label="供应商实物色号图"]',
+    );
+    expect(supplierImage).not.toBeNull();
     expect(
-      product.querySelector('[data-key="model"]')!.nextElementSibling,
+      product.querySelector('[data-key="model"]')?.nextElementSibling,
     ).toBe(product.querySelector('[data-key="colorImage"]'));
-    const file = product.querySelector<HTMLInputElement>(
-      '[data-key="colorImage"] input[type="file"]',
-    )!;
+    const file =
+      supplierImage!.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(file, 'files', {
       configurable: true,
       value: [new File(['png'], 'supplier-color.png', { type: 'image/png' })],
@@ -377,6 +720,7 @@ describe('actual purchase print extras editor', () => {
     await fill(host, 'input[aria-label="费用项目名称"]', '免费打样');
     await fill(host, 'input[aria-label="费用数量"]', '3');
     await fill(host, 'input[aria-label="费用单价（可填0）"]', '0');
+    await click(host, '自定义列设置（0/8）');
     await click(host, '+ 新增文字列');
     await click(host, '+ 新增图片列（色卡等）');
     const columns = extras.value!.payload().detailColumns;
@@ -387,12 +731,11 @@ describe('actual purchase print extras editor', () => {
       `input[aria-label="自定义列名称 ${textColumn.id}"]`,
       '特殊备注',
     );
-    const product = host.querySelector<HTMLTableRowElement>(
-      '[data-row="product-1"]',
-    )!;
+    await click(host, '完成设置');
+    const product = host.querySelector<HTMLElement>('[data-row="product-1"]')!;
     await fill(
       product,
-      `[data-key="custom:${textColumn.id}"] input`,
+      `[data-key="custom:${textColumn.id}"] textarea`,
       '正面按色卡印刷',
     );
     const imageCell = product.querySelector(
@@ -468,6 +811,7 @@ describe('actual purchase print extras editor', () => {
 
   it('loads a different order even while the previous order contains dirty edits', async () => {
     const { host, view, extras } = await mount();
+    await click(host, '自定义列设置（0/8）');
     await click(host, '+ 新增文字列');
     expect(extras.value?.isDirty()).toBe(true);
     view.value = { ...fixture(), id: 'order-2' };

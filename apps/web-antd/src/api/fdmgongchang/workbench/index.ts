@@ -152,6 +152,7 @@ export namespace FdmgongchangWorkbenchApi {
     expectedDefectQuantity: Decimal;
     boardItemCode?: string;
     foldingType?: string;
+    laminateDefects?: FdmgongchangStageStockApi.LaminationDefect[];
   }
 
   export interface BatchReportReq {

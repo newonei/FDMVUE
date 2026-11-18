@@ -5,7 +5,7 @@ import { computed } from 'vue';
 
 import { Tag } from 'ant-design-vue';
 
-import { label, money } from '../data';
+import { money, receiptStatusLabel } from '../data';
 import { receiptSettlement } from './model';
 import { contractTarget, entityTarget } from './navigation';
 import RelatedLink from './RelatedLink.vue';
@@ -40,8 +40,16 @@ const facts = computed(() =>
     <div class="receipt-summary__head">
       <div class="receipt-summary__title">
         <Tag color="blue">回款记录</Tag>
-        <Tag :color="confirmed ? 'success' : 'warning'">
-          {{ label(record.status) }}
+        <Tag
+          :color="
+            record.status === 'CANCELLED'
+              ? 'default'
+              : confirmed
+                ? 'success'
+                : 'warning'
+          "
+        >
+          {{ receiptStatusLabel(record.status) }}
         </Tag>
       </div>
       <div class="receipt-summary__amount">

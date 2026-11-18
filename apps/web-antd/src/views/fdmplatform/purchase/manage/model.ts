@@ -325,6 +325,7 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'sharedColumns',
       'accessories',
       'packagingSteps',
+      'orderRemark',
     ]
       .filter((key) => value[key] !== undefined)
       .map((key) => [

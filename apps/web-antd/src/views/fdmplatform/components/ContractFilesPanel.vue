@@ -31,7 +31,12 @@ import {
   downloadContractFile,
   renameContractFile,
 } from '#/api/fdmplatform/contract-files';
-import { attachmentSize } from '#/api/fdmplatform/submission-files';
+import {
+  ATTACHMENT_ACCEPT,
+  ATTACHMENT_FORMAT_TEXT,
+  attachmentSize,
+  submissionFilesError,
+} from '#/api/fdmplatform/submission-files';
 
 import { errorText } from '../data';
 import { attachmentTime, previewMimeType } from './attachment-preview';
@@ -96,47 +101,154 @@ const categories = computed(() =>
 );
 
 const category = ref<string>();
-const selectedFile = ref<File>();
+interface PendingFile {
+  file: File;
+  key: string;
+  error?: string;
+}
+const selectedFiles = ref<PendingFile[]>([]);
+const selectedBytes = computed(() =>
+  selectedFiles.value.reduce((total, item) => total + item.file.size, 0),
+);
 const fileInput = ref<HTMLInputElement>();
 const uploading = ref(false);
-const uploadKey = ref('');
 const downloading = ref('');
 const operationError = ref('');
+const progress = ref<{
+  done: number;
+  failed: number;
+  success: number;
+  total: number;
+}>();
+let contextSequence = 0;
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
-onBeforeUnmount(() => emit('busy', false));
+onBeforeUnmount(() => {
+  contextSequence++;
+  emit('busy', false);
+});
+watch(
+  () => props.contractId,
+  () => {
+    contextSequence++;
+    selectedFiles.value = [];
+    progress.value = undefined;
+    operationError.value = '';
+    uploading.value = false;
+    dragging.value = false;
+  },
+);
+watch(categories, selectDefaultCategory, { immediate: true });
 
+function selectDefaultCategory(values: string[]) {
+  if (
+    uploading.value ||
+    values.length === 0 ||
+    (category.value && values.includes(category.value))
+  )
+    return;
+  category.value = values.includes('SALES') ? 'SALES' : values[0];
+  changeCategory();
+}
+function addFiles(files: File[]) {
+  if (uploading.value || categories.value.length === 0) return;
+  const existing = new Set(
+    selectedFiles.value.map(({ file }) =>
+      JSON.stringify([file.name, file.size, file.lastModified]),
+    ),
+  );
+  const added = files.filter((file) => {
+    const identity = JSON.stringify([file.name, file.size, file.lastModified]);
+    if (existing.has(identity)) return false;
+    existing.add(identity);
+    return true;
+  });
+  operationError.value = submissionFilesError([
+    ...selectedFiles.value.map((item) => item.file),
+    ...added,
+  ]);
+  if (operationError.value) return;
+  selectedFiles.value.push(
+    ...added.map((file) => ({ file, key: newIdempotencyKey() })),
+  );
+  progress.value = undefined;
+}
 function chooseFile(event: Event) {
-  selectedFile.value = (event.target as HTMLInputElement).files?.[0];
-  uploadKey.value = newIdempotencyKey();
+  const input = event.target as HTMLInputElement;
+  addFiles([...(input.files ?? [])]);
+  input.value = '';
+}
+function removeFile(key: string) {
+  if (uploading.value) return;
+  selectedFiles.value = selectedFiles.value.filter((item) => item.key !== key);
+  operationError.value = '';
+}
+function changeCategory() {
+  selectedFiles.value = selectedFiles.value.map((item) => ({
+    file: item.file,
+    key: newIdempotencyKey(),
+  }));
+  progress.value = undefined;
 }
 /** 也可把文件直接拖到上传区，效果同「选择文件」 */
 const dragging = ref(false);
 function dropFile(event: DragEvent) {
   dragging.value = false;
-  const file = event.dataTransfer?.files?.[0];
-  if (!file || uploading.value) return;
-  selectedFile.value = file;
-  uploadKey.value = newIdempotencyKey();
+  addFiles([...(event.dataTransfer?.files ?? [])]);
 }
 async function upload() {
-  if (!selectedFile.value || !category.value) return;
+  if (
+    uploading.value ||
+    selectedFiles.value.length === 0 ||
+    !category.value ||
+    !categories.value.includes(category.value)
+  )
+    return;
+  const context = contextSequence;
+  const contractId = props.contractId;
+  const selectedCategory = category.value;
+  const pending = [...selectedFiles.value];
   uploading.value = true;
   operationError.value = '';
+  progress.value = { done: 0, failed: 0, success: 0, total: pending.length };
   try {
-    await uploadAttachment(
-      props.contractId,
-      selectedFile.value,
-      category.value,
-      uploadKey.value || newIdempotencyKey(),
-    );
-    selectedFile.value = undefined;
-    if (fileInput.value) fileInput.value.value = '';
-    message.success('合同资料已上传');
-    emit('refresh');
-  } catch (error) {
-    operationError.value = errorText(error);
+    for (const item of pending) {
+      if (context !== contextSequence) return;
+      if (!categories.value.includes(selectedCategory)) {
+        operationError.value =
+          '上传权限或文件存储配置已变化，剩余附件已保留，请刷新后重试。';
+        break;
+      }
+      item.error = undefined;
+      try {
+        await uploadAttachment(
+          contractId,
+          item.file,
+          selectedCategory,
+          item.key,
+        );
+        if (context !== contextSequence) return;
+        selectedFiles.value = selectedFiles.value.filter(
+          (entry) => entry.key !== item.key,
+        );
+        progress.value!.success++;
+      } catch (error) {
+        if (context !== contextSequence) return;
+        item.error = errorText(error);
+        progress.value!.failed++;
+      }
+      progress.value!.done++;
+    }
+    if (progress.value!.success > 0) {
+      message.success(`已新增 ${progress.value!.success} 个合同附件`);
+      emit('refresh');
+    }
+    if (progress.value!.failed > 0)
+      operationError.value = `${progress.value!.failed} 个附件上传失败，失败文件已保留，可重试。`;
   } finally {
-    uploading.value = false;
+    if (context === contextSequence) {
+      uploading.value = false;
+      selectDefaultCategory(categories.value);
+    }
   }
 }
 const preview = ref<InstanceType<typeof AttachmentPreview>>();
@@ -217,20 +329,22 @@ const columns = [
       v-if="uploadable && categories.length"
       class="upload-row"
       :class="{ dragging: dragging && !uploading }"
-      @dragover.prevent="dragging = true"
+      @dragover.prevent="dragging = !uploading"
       @dragleave.prevent="dragging = false"
       @drop.prevent="dropFile"
     >
       <input
         ref="fileInput"
         type="file"
+        multiple
+        :accept="ATTACHMENT_ACCEPT"
         hidden
-        aria-label="选择合同资料"
+        aria-label="选择新增合同附件"
         :disabled="uploading"
         @change="chooseFile"
       />
       <Space wrap>
-        <strong>上传合同资料</strong>
+        <strong>补充合同附件</strong>
         <Select
           v-model:value="category"
           :options="
@@ -239,36 +353,47 @@ const columns = [
               label: contractAttachmentCategories[value] ?? value,
             }))
           "
+          aria-label="合同附件资料分类"
           placeholder="资料分类"
           style="width: 150px"
           :disabled="uploading"
-          @change="uploadKey = newIdempotencyKey()"
+          @change="changeCategory"
         />
         <Button :disabled="uploading" @click="fileInput?.click()">
           <template #icon>
             <Upload class="mr-1 inline-block size-4" aria-hidden="true" />
           </template>
-          {{ selectedFile ? '重新选择' : '选择文件' }}
+          {{ selectedFiles.length ? '继续添加附件' : '新增附件' }}
         </Button>
         <span
-          class="inline-block max-w-60 truncate align-middle"
-          :class="{ 'text-muted-foreground': !selectedFile }"
-          :title="selectedFile?.name"
+          class="inline-block align-middle"
+          :class="{ 'text-muted-foreground': !selectedFiles.length }"
           role="status"
         >
-          {{ selectedFile?.name ?? '尚未选择文件，也可将文件拖到这里' }}
+          {{
+            selectedFiles.length
+              ? `待上传 ${selectedFiles.length} 个文件，共 ${attachmentSize(selectedBytes)}`
+              : '可多选文件，也可将文件拖到这里'
+          }}
         </span>
         <Button
           type="primary"
           :loading="uploading"
-          :disabled="!selectedFile || !category"
+          :disabled="!selectedFiles.length || !category"
           @click="upload"
         >
-          上传
+          {{
+            uploading
+              ? '上传中'
+              : `上传${selectedFiles.length ? `（${selectedFiles.length}）` : ''}`
+          }}
         </Button>
       </Space>
       <p class="text-muted-foreground text-sm">
-        这里上传的资料归属合同本身。报关、采购单、请款付款、报销等单据的附件在对应单据中上传，会自动汇总到下方列表。
+        可随时新增附件，已上传的文件会保留。这里新增的资料归属合同本身，关联单据的附件也会汇总到下方列表。
+      </p>
+      <p class="text-muted-foreground text-xs">
+        {{ ATTACHMENT_FORMAT_TEXT }}；每次最多 10 个，合计不超过 1 GB。
       </p>
     </div>
     <Alert
@@ -277,6 +402,40 @@ const columns = [
       show-icon
       message="系统文件存储暂不可用，请检查基础设施中的文件配置。"
     />
+    <ul
+      v-if="selectedFiles.length"
+      class="attachment-pending"
+      aria-label="待上传合同附件"
+    >
+      <li v-for="item in selectedFiles" :key="item.key">
+        <div class="pending-file-info">
+          <span class="pending-file-name" :title="item.file.name">{{
+            item.file.name
+          }}</span>
+          <span class="text-muted-foreground">{{
+            attachmentSize(item.file.size)
+          }}</span>
+          <span v-if="item.error" class="text-red-500" role="alert">{{
+            item.error
+          }}</span>
+        </div>
+        <Button
+          type="link"
+          size="small"
+          :disabled="uploading"
+          :aria-label="`移除 ${item.file.name}`"
+          @click="removeFile(item.key)"
+        >
+          移除
+        </Button>
+      </li>
+    </ul>
+    <div v-if="progress" role="status" class="text-muted-foreground text-sm">
+      {{ uploading ? '上传进度' : '本次上传结果' }}：{{ progress.done }}/{{
+        progress.total
+      }}
+      个，成功 {{ progress.success }} 个，失败 {{ progress.failed }} 个
+    </div>
     <div class="toolbar">
       <Radio.Group
         v-model:value="filter.group"
@@ -302,7 +461,13 @@ const columns = [
           allow-clear
           style="width: 200px"
         />
-        <Button :loading="loading" @click="emit('refresh')">刷新</Button>
+        <Button
+          :loading="loading"
+          :disabled="uploading"
+          @click="emit('refresh')"
+        >
+          刷新
+        </Button>
       </Space>
     </div>
     <Table
@@ -409,6 +574,40 @@ const columns = [
 
 .source-cell {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-pending {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.attachment-pending li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.attachment-pending li + li {
+  border-top: 1px solid hsl(var(--border));
+}
+
+.pending-file-info {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pending-file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

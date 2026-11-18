@@ -48,7 +48,7 @@ function change(delta: number) {
       :precision="precision"
       class="min-w-0 flex-1"
       placeholder="0"
-      inputmode="decimal"
+      :inputmode="precision === 0 ? 'numeric' : 'decimal'"
       @change="(v) => (value = (v as null | number | undefined) ?? null)"
     />
     <button

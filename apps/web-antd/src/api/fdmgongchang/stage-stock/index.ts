@@ -239,10 +239,18 @@ export namespace FdmgongchangStageStockApi {
     stockId: number;
   }
 
+  export interface LaminationDefect {
+    side: 'BACK' | 'FRONT';
+    color: string;
+    quantity: Decimal;
+  }
+
   export interface OrderOutput {
     attrs: ItemAttrs;
     batchNo?: string;
     defectQuantity?: Decimal | null;
+    /** 贴合前片材按正反面分别登记的损耗。 */
+    laminateDefects?: LaminationDefect[];
     goodQuantity?: Decimal | null;
     location?: string;
     /** 开片产出对应的实际领料物料 ID，用于固定该行颜色。 */
@@ -359,6 +367,8 @@ export namespace FdmgongchangStageStockApi {
   export interface OrderLine {
     batchNo: string;
     defectQuantity?: Decimal | null;
+    frontDefectQuantity?: Decimal | null;
+    backDefectQuantity?: Decimal | null;
     goodQuantity?: Decimal | null;
     id: number;
     /** 领料行：这一行的领料时间；第几次领料（0 开单领料，1 起为第几次补领）。 */

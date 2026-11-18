@@ -25,13 +25,14 @@ import {
 import { getBusinessPage, getContract } from '#/api/fdmplatform';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
-import { errorText, label } from '../data';
+import { errorText, label, receiptStatusLabel } from '../data';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
 import DocumentAction from '../documents/DocumentAction.vue';
 import { migrationCell, nativeMoney } from '../documents/migration-display';
 import {
   actionTitle,
   allocationKind,
+  canCancelReceipt,
   documentDefinitions,
   procurementDocumentDefinition,
   procurementDocumentKind,
@@ -203,6 +204,18 @@ function dispatch(row: DocumentRow) {
     pageError.value = errorText(error);
   }
 }
+function cancelReceipt(row: DocumentRow) {
+  if (
+    nestedOpen.value ||
+    row.standaloneId ||
+    row.blockReasons?.length ||
+    !canCancelReceipt(row.record, row.allowedActions)
+  )
+    return;
+  actionRow.value = row;
+  selectedAction.value = 'CANCEL_RECEIPT';
+  actionOpen.value = true;
+}
 function show(row: DocumentRow) {
   if (nestedOpen.value || !props.contract) return;
   try {
@@ -247,6 +260,8 @@ async function switchKind(kind: DocumentKind) {
   if (launch.action) create(launch.action);
 }
 function cell(row: DocumentRow, key: string) {
+  if (currentKind.value === 'receipts' && key === 'status')
+    return receiptStatusLabel(row.record.status);
   if (key === 'allocationType') return allocationKind(row.record);
   return (
     migrationCell(row.record, key) ??
@@ -488,6 +503,20 @@ onBeforeUnmount(() => {
                 @click="show(record as DocumentRow)"
               >
                 查看 / 办理
+              </Button>
+              <Button
+                v-if="
+                  currentKind === 'receipts' &&
+                  !record.standaloneId &&
+                  !record.blockReasons?.length &&
+                  canCancelReceipt(record.record, record.allowedActions)
+                "
+                type="link"
+                danger
+                :disabled="nestedOpen"
+                @click="cancelReceipt(record as DocumentRow)"
+              >
+                撤销登记
               </Button>
             </Space>
             <Tag v-else-if="column.key === 'status'">

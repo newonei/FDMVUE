@@ -7,6 +7,7 @@ import { Alert, Input, InputNumber, message, Modal } from 'ant-design-vue';
 
 import { createHold } from '#/api/fdmgongchang/quality';
 
+import { quantityPrecision } from '../../shared/quantity';
 import { formatQty } from '../model';
 
 /**
@@ -66,7 +67,7 @@ async function submit() {
       <Alert show-icon type="info" message="冻结的数量不会被排单和订单匹配用到；库存不分批次，冻结只记数量，现场请把这批货隔开放。" />
       <label class="flex items-center gap-2 text-sm" for="hold-quantity">
         冻结数量
-        <InputNumber id="hold-quantity" v-model:value="quantity" :max="left" :min="0" :precision="3" class="w-40" />
+        <InputNumber id="hold-quantity" v-model:value="quantity" :max="left" :min="0" :precision="quantityPrecision(unit)" class="w-40" />
         <span class="text-muted-foreground">最多 {{ formatQty(left) }} {{ unit }}</span>
       </label>
       <Input.TextArea id="hold-reason" v-model:value="reason" :maxlength="400" :rows="3" placeholder="冻结原因，例如：雕刻偏位、颜色不对、尺寸超差" />

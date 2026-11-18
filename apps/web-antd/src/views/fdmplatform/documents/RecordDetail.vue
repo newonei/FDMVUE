@@ -47,11 +47,15 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AttachmentPanel from '../components/AttachmentPanel.vue';
 import ContractFilesPanel from '../components/ContractFilesPanel.vue';
 import LineTable from '../components/LineTable.vue';
-import { errorText, label, money, rows } from '../data';
+import { errorText, label, money, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
 import ProcurementStatusBadge from '../purchase/components/ProcurementStatusBadge.vue';
+import {
+  hasTransferableRequestItems,
+  transferStatusLabel,
+} from '../purchase/request-transfer';
 import { salesChannelOf } from '../sales-channel';
 import { documentAttachmentTarget } from './attachment-target';
 import DocumentAction from './DocumentAction.vue';
@@ -60,6 +64,7 @@ import MigrationSource from './MigrationSource.vue';
 import {
   actionTitle,
   allocationKind,
+  canCancelReceipt,
   currentDocument,
   documentActionUnavailableReason,
   documentDefinitions,
@@ -142,6 +147,13 @@ const canConvert = computed(
     !!contract.value &&
     !['CANCELLED', 'CLOSED'].includes(String(contract.value.status)),
 );
+const canConvertOrder = computed(
+  () =>
+    canConvert.value &&
+    !!contract.value &&
+    !!record.value &&
+    hasTransferableRequestItems(contract.value, record.value),
+);
 function converted(
   value: CreatedProcurementOrders,
   mode?: 'draft' | 'submitted',
@@ -157,6 +169,12 @@ function converted(
     contractId: value.contractId,
     orderId: value.orderId,
   };
+  void load(true);
+}
+function closeConvertedOrder() {
+  convertedOrder.value = undefined;
+  emit('updated');
+  void load();
 }
 function quoted() {
   convertTo.value = undefined;
@@ -221,6 +239,13 @@ const actions = computed(() =>
   config.value.actions
     .filter((action) => contract.value?.allowedActions.includes(action))
     .filter((action) => {
+      if (props.kind === 'receipts' && record.value?.status === 'CANCELLED')
+        return false;
+      if (action === 'CANCEL_RECEIPT')
+        return (
+          !!record.value &&
+          canCancelReceipt(record.value, contract.value?.allowedActions ?? [])
+        );
       if (action === 'ASSIGN_FULFILLMENT')
         return (
           !!contract.value &&
@@ -341,8 +366,12 @@ function timeText(text: string) {
     : text;
 }
 function display(key: string) {
+  if (key === 'transferStatus')
+    return transferStatusLabel(record.value?.transferStatus);
   if (key === 'allocationType') return allocationKind(record.value!);
   const value = record.value?.[key];
+  if (props.kind === 'receipts' && key === 'status')
+    return receiptStatusLabel(value);
   const formatted =
     migrationCell(record.value ?? {}, key) ??
     receiptFxDisplay(record.value ?? {}, key) ??
@@ -359,7 +388,7 @@ function display(key: string) {
     return money(value, contract.value?.currency);
   if (
     /UserId$/i.test(key) ||
-    ['actorId', 'confirmedBy', 'createdBy'].includes(key)
+    ['actorId', 'cancelledBy', 'confirmedBy', 'createdBy'].includes(key)
   )
     return personLabel(directory.value, value);
   if (Array.isArray(value))
@@ -418,7 +447,47 @@ const lineColumns = computed<LineColumn[]>(() =>
       { key: 'productName', title: '产品名称', width: 220, locked: true },
       { key: 'shape', title: '形状', width: 110 },
       { key: 'suggestedSupplier', title: '建议采购工厂', width: 180 },
-      { key: 'quantity', title: '数量', width: 110, align: 'right' },
+      {
+        key: 'quantity',
+        title: props.kind === 'requests' ? '申请数量' : '数量',
+        width: 110,
+        align: 'right',
+      },
+      ...(props.kind === 'requests'
+        ? [
+            {
+              key: 'orderedQuantity',
+              title: '已下单数量',
+              width: 120,
+              align: 'right',
+            },
+            {
+              key: 'draftReservedQuantity',
+              title: '草稿占用',
+              width: 110,
+              align: 'right',
+            },
+            {
+              key: 'remainingQuantity',
+              title: '未采购数量',
+              width: 120,
+              align: 'right',
+            },
+            {
+              key: 'reservedQuantity',
+              title: '任务及方案占用',
+              width: 140,
+              align: 'right',
+            },
+            {
+              key: 'availableQuantity',
+              title: '本次可转',
+              width: 110,
+              align: 'right',
+            },
+            { key: 'transferStatus', title: '转采购进度', width: 140 },
+          ]
+        : []),
       { key: 'requiredDate', title: '需求日期', width: 120 },
       { key: 'assignmentName', title: '采购方式', width: 120 },
       { key: 'supplierName', title: '供应商', width: 180 },
@@ -447,8 +516,8 @@ const lineColumns = computed<LineColumn[]>(() =>
       ),
   })),
 );
-async function load() {
-  if (!props.open || !props.row || childOpen.value) return;
+async function load(force = false) {
+  if (!props.open || !props.row || (childOpen.value && !force)) return;
   const current = ++sequence;
   loading.value = true;
   pageError.value = '';
@@ -613,6 +682,7 @@ const mainAction = computed(() => {
             转成供应商报价
           </Button>
           <Button
+            v-if="canConvertOrder"
             type="primary"
             :disabled="childOpen"
             @click="convertTo = 'order'"
@@ -620,7 +690,7 @@ const mainAction = computed(() => {
             转成采购单
           </Button>
         </template>
-        <Button :loading="loading" :disabled="childOpen" @click="load">
+        <Button :loading="loading" :disabled="childOpen" @click="load()">
           刷新当前单据
         </Button>
       </Space>
@@ -693,7 +763,10 @@ const mainAction = computed(() => {
           v-for="action in actions"
           :key="action"
           :type="!procurement || action === mainAction ? 'primary' : 'default'"
-          :danger="procurement && /^(CANCEL|VOID|REVERSE|UNBIND)/.test(action)"
+          :danger="
+            action === 'CANCEL_RECEIPT' ||
+            (procurement && /^(CANCEL|VOID|REVERSE|UNBIND)/.test(action))
+          "
           :disabled="
             !!documentActionUnavailableReason(contract, action, record!)
           "
@@ -732,7 +805,12 @@ const mainAction = computed(() => {
             :style="item.key === 'buyerInfo' ? 'white-space: pre-line' : ''"
             >{{ display(item.key) }}</span>
         </Descriptions.Item>
-</Descriptions><MigrationSource
+</Descriptions><Alert
+        v-if="kind === 'requests' && record?.reconciliationRequired"
+        type="warning"
+        message="这张申请存在待核实的历史转单来源，请核对关联采购单后继续转采购。"
+        show-icon
+      /><MigrationSource
         v-if="contract && record"
         :migration="migration"
         :native-source="{
@@ -742,7 +820,9 @@ const mainAction = computed(() => {
         }"
       /><Card v-if="lines.length" size="small">
         <LineTable
-          :table="`record-${kind}`"
+          :table="
+            kind === 'requests' ? 'record-requests-transfer' : `record-${kind}`
+          "
           title="当前单据明细"
           :columns="lineColumns"
           :data-source="lines"
@@ -753,7 +833,11 @@ const mainAction = computed(() => {
               :target="lineTarget(contract, String(column.key), line)"
               :title="label(line[String(column.key)])"
             >
-              {{ label(line[String(column.key)]) }}
+              {{
+                column.key === 'transferStatus'
+                  ? transferStatusLabel(line.transferStatus)
+                  : label(line[String(column.key)])
+              }}
             </RelatedLink>
           </template>
         </LineTable>
@@ -857,7 +941,10 @@ const mainAction = computed(() => {
   <PurchaseOrderExecution
     v-if="convertedOrder && open"
     :embedded-order="convertedOrder"
-    @close="convertedOrder = undefined"
-    @updated="emit('updated')"
+    @close="closeConvertedOrder"
+    @updated="
+      emit('updated');
+      load(true);
+    "
   />
 </template>

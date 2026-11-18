@@ -11,7 +11,7 @@ import { getBusinessPage } from '#/api/fdmplatform';
 import { getProcurementFinancePage } from '#/api/fdmplatform/procurement-finance';
 import { getStockIns, getStockOuts } from '#/api/fdmplatform/warehouse';
 
-import { label } from '../data';
+import { label, receiptStatusLabel } from '../data';
 import { migrationCell, nativeMoney } from '../documents/migration-display';
 import { allocationKind, documentDefinitions } from '../documents/model';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
@@ -110,6 +110,8 @@ export function businessGroup(
     columns: fields.map(([, title]) => title),
     rows: list.map((row) => {
       const status = text(row.record.status ?? row.status);
+      const statusLabel =
+        kind === 'receipts' ? receiptStatusLabel(status) : label(status);
       return {
         id: String(row.id),
         code: text(
@@ -121,7 +123,7 @@ export function businessGroup(
             definition.title,
         ),
         cells: fields.map(([key]) => businessCell(row, key)),
-        status: status ? label(status) : '',
+        status: status ? statusLabel : '',
         voided: VOID_STATUSES.has(status),
         ref: { source: 'business', kind, row },
       };

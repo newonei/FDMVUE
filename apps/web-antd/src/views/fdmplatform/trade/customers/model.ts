@@ -17,6 +17,8 @@ export const customerFields = [
   ['shortName', '简称'],
   ['companyName', '公司名称'],
   ['customerSource', '客户来源'],
+  ['customerType', '客户类型'],
+  ['industry', '所在行业'],
   ['country', '国家 / 地区'],
   ['province', '省 / 州'],
   ['city', '城市'],
@@ -26,6 +28,17 @@ export const customerFields = [
   ['email', '邮箱'],
   ['phone', '联系电话'],
 ] as const;
+
+export const domesticCustomerFields = ['customerType', 'industry'] as const;
+export const foreignCustomerFields = customerFields.filter(
+  ([field]) => !(domesticCustomerFields as readonly string[]).includes(field),
+);
+export const defaultCustomerTypes = [
+  '国内电商',
+  '贸易公司',
+  '品牌客户',
+  '瑜伽馆',
+];
 
 /** 内销客户开票信息，按增值税发票票面内容 */
 export const invoiceFields = [
@@ -346,6 +359,7 @@ export function customerCsv(
     '资料来源',
     '国家 / 地区',
     '客户来源',
+    ...(options.invoice ? ['客户类型', '所在行业'] : []),
     '公司名称',
     '联系人',
     '邮箱',
@@ -381,6 +395,7 @@ export function customerCsv(
       customerSourceLabel(row.sourceSystem),
       customerRegion(row),
       row.customerSource,
+      ...(options.invoice ? [row.customerType, row.industry] : []),
       row.companyName,
       row.contactName,
       row.email,

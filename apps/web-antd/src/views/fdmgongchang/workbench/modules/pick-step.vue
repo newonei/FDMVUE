@@ -8,6 +8,7 @@ import { Alert, Checkbox, Empty, Input, InputNumber, message, Select, Spin } fro
 import { getWorkbenchRecipePlan, getWorkbenchStock, prepareWorkbenchTaskStock } from '#/api/fdmgongchang/workbench';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
+import { quantityPrecision } from '../../shared/quantity';
 import { attrSummary, formatQty, makeLabels, recipePicks, toNumber } from '../../stage-stock/model';
 import { slicePlanThicknessError, stageOf, useJob } from '../use-job';
 import IssueShortages from './issue-shortages.vue';
@@ -386,7 +387,7 @@ function next() {
                     :id="`pick-${s.id}`"
                     :aria-label="`${nameOf(s)} 领用数量`"
                     :min="0"
-                    :precision="3"
+                    :precision="quantityPrecision(unit)"
                     :addon-after="unit"
                     :value="pickOf(s)!.qty || undefined"
                     class="w-36"
@@ -398,7 +399,7 @@ function next() {
                 <div v-if="laminate" class="flex w-full flex-wrap gap-3">
                   <span v-for="side in (['FRONT', 'BACK'] as const)" :key="side" class="flex items-center gap-2">
                     <button type="button" class="text-xs text-primary" :aria-pressed="!!pickOf(s, side)" @click="toggleSide(s, side)">{{ pickOf(s, side) ? '已选' : '选择' }}{{ sideText(side) }}</button>
-                    <InputNumber v-if="pickOf(s, side)" :id="`pick-${s.id}-${side}`" :aria-label="`${nameOf(s)} ${sideText(side)}领用数量`" :min="0" :precision="3" :addon-after="unit" :value="pickOf(s, side)!.qty || undefined" class="w-32" @change="(v) => setQty(s, v, side)" />
+                    <InputNumber v-if="pickOf(s, side)" :id="`pick-${s.id}-${side}`" :aria-label="`${nameOf(s)} ${sideText(side)}领用数量`" :min="0" :precision="quantityPrecision(unit)" :addon-after="unit" :value="pickOf(s, side)!.qty || undefined" class="w-32" @change="(v) => setQty(s, v, side)" />
                   </span>
                 </div>
               </div>
@@ -434,7 +435,7 @@ function next() {
                     :id="`actual-pick-${p.stock.id}${p.side ? `-${p.side}` : ''}`"
                     :aria-label="`${nameOf(p.stock)} 批次 ${p.stock.batchNo} 实际领用数量`"
                     :min="0"
-                    :precision="3"
+                    :precision="quantityPrecision(unit)"
                     :addon-after="unit"
                     :value="p.qty || undefined"
                     class="w-32"
@@ -473,7 +474,7 @@ function next() {
               :aria-label="`${a.name} 实际领用数量`"
               :addon-after="a.unit"
               :min="0"
-              :precision="3"
+              :precision="quantityPrecision(a.unit)"
               class="w-36"
             />
           </div>

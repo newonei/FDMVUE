@@ -88,6 +88,36 @@ const contract = {
   },
 } as unknown as Contract;
 describe('stable related-document navigation', () => {
+  it('申请详情可打开分批生成的多张采购单，并保留各自单号', () => {
+    const current = {
+      ...contract,
+      purchaseOrders: [
+        {
+          id: 'first',
+          requestId: 'request-a',
+          code: 'CG001',
+          supplierName: '同一供应商',
+        },
+        {
+          id: 'second',
+          requestId: 'request-a',
+          code: 'CG002',
+          supplierName: '同一供应商',
+        },
+        { id: 'other', requestId: 'request-b', code: 'CG003' },
+      ],
+    } as unknown as Contract;
+    const links = relatedDocumentLinks(
+      current,
+      'requests',
+      current.requests![0]!,
+    );
+    expect(
+      links
+        .filter((link) => link.label === '来源采购单')
+        .map((link) => link.value),
+    ).toEqual(['CG001 · 同一供应商', 'CG002 · 同一供应商']);
+  });
   it('routes independent native invoice and stock records to their actual business type and clears stale identities', () => {
     expect(
       navigationRoute(businessRecordTarget('PURCHASE_INVOICE', 'invoice/a')!),

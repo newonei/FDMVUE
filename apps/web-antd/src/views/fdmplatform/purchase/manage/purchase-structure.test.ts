@@ -149,6 +149,7 @@ beforeEach(() => {
             id: 'ri',
             contractItemId: 'ci',
             quantity: 20,
+            availableQuantity: 20,
             specificationSnapshot: {
               skuName: '请购时的垫子',
               unit: '条',

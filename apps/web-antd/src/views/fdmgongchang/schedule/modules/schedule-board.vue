@@ -23,6 +23,7 @@ import {
 
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, SCHEDULE_STATUS } from '../../shared/schedule';
+import { formatQty } from '../../stage-stock/model';
 import MixBatchModal from './mix-batch-modal.vue';
 import PackageReleaseModal from './package-release-modal.vue';
 import ScheduleDetail from './schedule-detail.vue';
@@ -262,8 +263,8 @@ const dayOptions = [1, 2, 3, 4, 5, 6, 7].map((d) => ({ label: `${d} 天`, value:
         <ol class="m-0 flex list-none flex-col gap-1 p-0">
           <li v-for="(t, i) in mixQueue" :key="t.id" class="flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/50">
             <b class="w-5 shrink-0 text-right tabular-nums">{{ i + 1 }}</b>
-            <span class="min-w-0 flex-1 truncate" :title="`${t.contractCode ?? '备货'} · ${t.product} · ${t.quantity} ${t.unit}`">
-              {{ t.contractCode || '备货' }} · {{ t.product }} · {{ t.quantity }} {{ t.unit }}<template v-if="t.workerNames"> · {{ t.workerNames }}</template>
+            <span class="min-w-0 flex-1 truncate" :title="`${t.contractCode ?? '备货'} · ${t.product} · ${formatQty(t.quantity)} ${t.unit}`">
+              {{ t.contractCode || '备货' }} · {{ t.product }} · {{ formatQty(t.quantity) }} {{ t.unit }}<template v-if="t.workerNames"> · {{ t.workerNames }}</template>
             </span>
             <template v-if="canConfirm">
               <button :disabled="i === 0" class="px-1 text-muted-foreground disabled:opacity-30" type="button" :aria-label="`${t.product} 往前`" @click="moveMix(t, i)">↑</button>

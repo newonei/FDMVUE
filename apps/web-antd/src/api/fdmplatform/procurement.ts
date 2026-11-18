@@ -126,6 +126,12 @@ export interface ProcurementFile {
 /** 采购单明细行的补充资料，印在导出的采购单上（#88） */
 export interface OrderLineExtra {
   customerColor?: string;
+  /** 本条采购明细的生产要求，保存后同步给关联工厂；显式空串表示清空。 */
+  colorMode?: 'DUAL' | 'SINGLE' | 'UNKNOWN';
+  frontColor?: string;
+  backColor?: string;
+  textureFront?: string;
+  textureBack?: string;
   weight?: string;
   /** 型号（如正反面颜色） */
   model?: string;
@@ -213,6 +219,8 @@ export interface ProcurementOrderView {
     lineExtras?: Record<string, OrderLineExtra>;
     /** 这张单不需要收票（淘宝、个体等） */
     noInvoice?: boolean;
+    /** 随采购单导出给供应商的订单备注，最多 2000 字。 */
+    orderRemark?: string;
     packagingSteps?: OrderPackagingStep[];
     /** 内部下单备注，不导出给供应商 */
     remark?: string;
@@ -252,6 +260,9 @@ function orderPath(contractId: string, orderId: string) {
 }
 
 export interface PurchaseOrderEntryLine {
+  /** 精确绑定采购申请明细，分批转单按该明细剩余数量校验。 */
+  requestItemId?: string;
+  assignmentId?: string;
   /** 复制订单时的原明细 ID；服务端核验来源并沿用该行快照。 */
   sourceLineId?: string;
   productId?: string;

@@ -41,6 +41,9 @@ import { matchWageItems } from '#/api/fdmgongchang/wage';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import { routeIncludes } from '../../production-order/shared';
+import LaminationCounters from '../../shared/lamination-counters.vue';
+import { laminationDefects } from '../../shared/lamination-report';
+import { quantityPrecision } from '../../shared/quantity';
 import { formatVolume, sliceParticipantError, sliceVolume, sliceWageAllocation, sliceWageItem } from '../../shared/slice-wage';
 import {
   applyTaskTarget,
@@ -891,6 +894,7 @@ function outputPayload(): Api.OrderOutput[] {
       defectQuantity: toNumber(o.defectQuantity) ?? 0,
       goodQuantity: toNumber(o.goodQuantity) ?? 0,
       ...(processCode.value === 'SLICE' ? { sourceItemIds: o.sourceItemIds } : {}),
+      ...(processCode.value === 'LAMINATE' && o.laminateLayers ? { laminateDefects: laminationDefects(o) } : {}),
     }));
 }
 
@@ -1229,7 +1233,7 @@ watch(processCode, warnNoPatterns);
                     :id="`order-take-${record.id}`"
                     :value="quantities[record.id] ?? undefined"
                     :min="0"
-                    :precision="3"
+                    :precision="quantityPrecision(stockUnit(record.stage, record.item, stageOf(record.stage)?.unit))"
                     :style="{ width: '7rem' }"
                     size="small"
                     :aria-label="`${record.itemCode} 领用数量`"
@@ -1262,7 +1266,7 @@ watch(processCode, warnNoPatterns);
                 </template>
                 <template v-else-if="column.key === 'opposite'">
                   <span class="text-xs">{{ sides[record.id] === 'BACK' ? '正面' : '反面' }}</span>
-                  <InputNumber :id="`order-take-opposite-${record.id}`" :value="oppositeQuantities[record.id] ?? undefined" :min="0" :precision="3" size="small" :aria-label="`${record.itemCode} 同批次另一面领用数量`" @change="(v) => setOppositeQuantity(record as Api.Stock, (v as null | number | undefined) ?? null)" />
+                  <InputNumber :id="`order-take-opposite-${record.id}`" :value="oppositeQuantities[record.id] ?? undefined" :min="0" :precision="quantityPrecision(stockUnit(record.stage, record.item, stageOf(record.stage)?.unit))" size="small" :aria-label="`${record.itemCode} 同批次另一面领用数量`" @change="(v) => setOppositeQuantity(record as Api.Stock, (v as null | number | undefined) ?? null)" />
                 </template>
               </template>
               <template #emptyText>
@@ -1410,7 +1414,8 @@ watch(processCode, warnNoPatterns);
             >
               {{ sliceHint(inputs, outputs, line) }}
             </div>
-            <div class="flex flex-wrap items-center gap-4">
+            <LaminationCounters v-if="processCode === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`laminate-${line.key}`" :options="options" :unit="outputStageOption?.unit" />
+            <div v-else class="flex flex-wrap items-center gap-4">
               <label
                 :for="`out-good-${line.key}`"
                 class="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -1420,7 +1425,7 @@ watch(processCode, warnNoPatterns);
                   :id="`out-good-${line.key}`"
                   v-model:value="line.goodQuantity"
                   :min="0"
-                  :precision="3"
+                  :precision="quantityPrecision(outputStageOption?.unit)"
                   :style="{ width: '7rem' }"
                   size="small"
                 />
@@ -1435,7 +1440,7 @@ watch(processCode, warnNoPatterns);
                   :id="`out-defect-${line.key}`"
                   v-model:value="line.defectQuantity"
                   :min="0"
-                  :precision="3"
+                  :precision="quantityPrecision(outputStageOption?.unit)"
                   :style="{ width: '7rem' }"
                   size="small"
                 />
@@ -1517,7 +1522,7 @@ watch(processCode, warnNoPatterns);
                 :id="`piece-qty-${line.key}`"
                 :aria-label="`计件第 ${index + 1} 行数量`"
                 :min="0"
-                :precision="3"
+                :precision="quantityPrecision(pieceMatches.find((item) => item.itemId === line.itemId)?.unit ?? outputStageOption?.unit)"
                 :value="line.quantity ?? undefined"
                 :style="{ width: '7rem' }"
                 size="small"
@@ -1628,7 +1633,7 @@ watch(processCode, warnNoPatterns);
               <InputNumber
                 :id="`order-aux-${stock.id}`"
                 :min="0"
-                :precision="3"
+                :precision="quantityPrecision(stockUnit('AUX', stock.item))"
                 :value="auxQty[stock.id] ?? undefined"
                 size="small"
                 :style="{ width: '7rem' }"

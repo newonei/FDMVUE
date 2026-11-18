@@ -54,7 +54,7 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import AiCheckPanel from '#/views/fdmaicheck/components/AiCheckPanel.vue';
 
 import { productCategoryLabel } from '../contract-categories';
-import { errorText, label, rows } from '../data';
+import { errorText, label, receiptStatusLabel, rows } from '../data';
 import { formatTemporalField } from '../date-display';
 import { departmentLabel, personLabel, personName } from '../directory';
 import BusinessDocumentDetail from '../documents/BusinessDocumentDetail.vue';
@@ -203,6 +203,14 @@ function openRelatedDoc(row: RelatedDocRow) {
 function relatedDocChanged() {
   void loadRelatedDocs();
   emit('refresh');
+}
+function cancelRelatedReceipt(row: RelatedDocRow) {
+  if (row.ref.source !== 'business' || row.ref.kind !== 'receipts') return;
+  startWork({
+    kind: 'receipts',
+    action: 'CANCEL_RECEIPT',
+    recordId: row.ref.row.id,
+  });
 }
 
 /** 采购单执行抽屉：和采购订单页同一个组件，在合同订单里直接弹出 */
@@ -584,6 +592,7 @@ function documentUpdated(value: Contract) {
   emit('updated', value);
   void loadSummary();
   void loadFiles();
+  void loadRelatedDocs();
   if (activeTab.value === 'audit') void loadAudit();
 }
 async function activateContract() {
@@ -1424,9 +1433,13 @@ async function download(file: { id: string; name: string }) {
                     }}</span>
                   <span><Tag
                       :color="
-                        receipt.status === 'CONFIRMED' ? 'green' : 'orange'
+                        receipt.status === 'CANCELLED'
+                          ? 'default'
+                          : receipt.status === 'CONFIRMED'
+                            ? 'green'
+                            : 'orange'
                       "
-                      >{{ label(receipt.status) }}</Tag></span>
+                      >{{ receiptStatusLabel(receipt.status) }}</Tag></span>
                 </div>
               </div>
               <p v-else class="muted">还没有登记回款</p>
@@ -1472,6 +1485,7 @@ async function download(file: { id: string; name: string }) {
               :group="group"
               :disabled="childOpen"
               @open="openRelatedDoc"
+              @cancel-receipt="cancelRelatedReceipt"
               @more="group.kind && openDocuments(group.kind, 'list')"
             />
           </TabPane>
@@ -1580,7 +1594,7 @@ async function download(file: { id: string; name: string }) {
     <p class="terminate-note">
       {{
         terminateAction === 'CANCEL_CONTRACT'
-          ? '取消后合同只能查看，不能再办理采购、发货和收款。还有采购单、到货或回款时系统会拒绝取消。'
+          ? '取消后合同只能查看，不能再办理采购、发货和收款。待确认的误登记回款请先撤销；仍有采购、库存或有效回款等关联业务时，系统会拒绝取消。'
           : '结案前系统会核对发货、采购和收款都已办完。'
       }}
       系统要核对库存和财务单据，可能需要等一会儿。

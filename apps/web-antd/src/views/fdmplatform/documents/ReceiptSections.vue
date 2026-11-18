@@ -56,6 +56,14 @@ const groups = [
       'confirmedAt|确认时间',
     ],
   },
+  {
+    title: '撤销登记',
+    fields: [
+      'cancelReason|撤销原因',
+      'cancelledBy|撤销人',
+      'cancelledAt|撤销时间',
+    ],
+  },
 ];
 /** 内销回款都是人民币，不显示汇率折算 */
 const domestic = computed(

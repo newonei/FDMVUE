@@ -82,5 +82,5 @@ export function receiptStatusDescription(
   const confirmed = counts.confirmed!;
   const other = counts.other!;
   if (pending + confirmed + other !== counts.total) return '状态统计待核对';
-  return `待确认 ${pending} 笔 / 已确认 ${confirmed} 笔 / 其他待核对 ${other} 笔`;
+  return `待确认 ${pending} 笔 / 已确认 ${confirmed} 笔 / 其他记录 ${other} 笔`;
 }

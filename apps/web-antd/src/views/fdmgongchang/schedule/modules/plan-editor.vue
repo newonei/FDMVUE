@@ -6,7 +6,9 @@ import { computed } from 'vue';
 
 import { Button, Empty, InputNumber, Select, Tag } from 'ant-design-vue';
 
+import { quantityPrecision } from '../../shared/quantity';
 import { dayLabel, groupByDate, PROCESS_LABELS, rescaleMaterials, taskMaterialText } from '../../shared/schedule';
+import { formatQty } from '../../stage-stock/model';
 import TaskMaterials from './task-materials.vue';
 
 /** 待确认方案的任务表：按天分组，可以改数量、换人、删任务，或打开表单整条修改。 */
@@ -77,13 +79,13 @@ function remove(task: Api.PlanTask) {
                   v-if="editable && !task.output?.attrs && (task.covers?.length ?? 0) <= 1"
                   :aria-label="`${dayLabel(date)} ${PROCESS_LABELS[task.process]} 数量`"
                   :min="0"
-                  :precision="3"
+                  :precision="quantityPrecision(task.unit)"
                   :value="Number(task.quantity)"
                   :style="{ width: '6rem' }"
                   size="small"
                   @change="(v) => setQuantity(task, (v as number | null) ?? 0)"
                 />
-                <b v-else class="tabular-nums">{{ task.quantity }}</b>
+                <b v-else class="tabular-nums">{{ formatQty(task.quantity) }}</b>
                 <span class="ml-1 text-xs text-muted-foreground">{{ task.unit }}</span>
               </td>
               <td class="px-2 py-1.5">

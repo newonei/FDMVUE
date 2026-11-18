@@ -78,6 +78,21 @@ const canEditExtras = computed(() =>
   props.view.allowedActions.includes('SAVE_EXTRAS'),
 );
 const formBaseline = ref('');
+// Automatic defaults belong to the initial form, while edits made during loading
+// must still compare against their original values.
+function applyDefaults(update: () => void) {
+  const before = JSON.parse(JSON.stringify(form));
+  const baseline = JSON.parse(formBaseline.value);
+  update();
+  for (const key of Object.keys(form)) {
+    if (JSON.stringify(before[key]) === JSON.stringify(baseline[key])) {
+      baseline[key] = form[key as keyof typeof form];
+    }
+  }
+  formBaseline.value = JSON.stringify(
+    Object.fromEntries(Object.keys(form).map((key) => [key, baseline[key]])),
+  );
+}
 const formDirty = computed(
   () => canEdit.value && JSON.stringify(form) !== formBaseline.value,
 );
@@ -149,9 +164,11 @@ async function loadSettings() {
       getProcurementSettings('clauses'),
     ]);
     settingsLoaded.value = true;
-    form.signingEntityId ??= onlyChoice(entities.value);
-    form.templateId ??= onlyChoice(templates.value);
-    pickOnlyClauses();
+    applyDefaults(() => {
+      form.signingEntityId ??= onlyChoice(entities.value);
+      form.templateId ??= onlyChoice(templates.value);
+      pickOnlyClauses();
+    });
   } catch (error) {
     pageError.value = errorText(error);
   }
@@ -195,7 +212,10 @@ async function loadContacts() {
     contacts.value = await getSupplierContacts(
       String(props.view.order.supplierId),
     );
-    if (!form.contactId) form.contactId = preferredContact(contacts.value)?.id;
+    applyDefaults(() => {
+      if (!form.contactId)
+        form.contactId = preferredContact(contacts.value)?.id;
+    });
   } catch (error) {
     pageError.value = errorText(error);
   }

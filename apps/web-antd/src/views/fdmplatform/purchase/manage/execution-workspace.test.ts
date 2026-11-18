@@ -1,7 +1,7 @@
 /* eslint-disable vue/one-component-per-file -- Small UI adapters verify actual workspace state and routing. */
 import type { PropType } from 'vue';
 
-import { createApp, defineComponent, h, nextTick } from 'vue';
+import { createApp, defineComponent, h, nextTick, ref, watch } from 'vue';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,10 +14,11 @@ const mocks = vi.hoisted(() => ({
   detail: vi.fn(),
   contract: vi.fn(),
   finance: vi.fn(),
+  attachments: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
   getContract: mocks.contract,
-  getAttachments: vi.fn(),
+  getAttachments: mocks.attachments,
   newIdempotencyKey: vi.fn(() => 'key'),
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
@@ -52,7 +53,57 @@ vi.mock('../../components/ActionDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('../../components/AttachmentPanel.vue', () => ({
-  default: defineComponent({ render: () => null }),
+  default: defineComponent({
+    props: {
+      categories: { type: Array as PropType<string[]>, default: () => [] },
+      defaultCategory: { type: String, default: undefined },
+      view: { type: Object, default: undefined },
+    },
+    emits: ['busy'],
+    setup(props, { emit }) {
+      const category = ref<string>();
+      const queued = ref(0);
+      watch(
+        () => props.categories,
+        (categories) => {
+          if (category.value && categories.includes(category.value)) return;
+          category.value =
+            props.defaultCategory && categories.includes(props.defaultCategory)
+              ? props.defaultCategory
+              : undefined;
+        },
+        { immediate: true },
+      );
+      return () =>
+        h(
+          'section',
+          {
+            'data-attachment-categories': JSON.stringify(props.categories),
+            'data-attachment-view': props.view
+              ? JSON.stringify(props.view)
+              : '',
+            'data-attachment-category': category.value,
+            'data-attachment-queue': queued.value,
+          },
+          [
+            h(
+              'select',
+              {
+                'aria-label': '测试补充附件分类',
+                value: category.value,
+                onChange: (event: Event) => {
+                  category.value = (event.target as HTMLSelectElement).value;
+                },
+              },
+              props.categories.map((value) => h('option', { value }, value)),
+            ),
+            h('button', { onClick: () => queued.value++ }, '选择待上传图纸'),
+            h('button', { onClick: () => emit('busy', true) }, '开始附件上传'),
+            h('button', { onClick: () => emit('busy', false) }, '结束附件上传'),
+          ],
+        );
+    },
+  }),
 }));
 vi.mock('../../components/ContractDocumentDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
@@ -309,6 +360,7 @@ vi.mock('ant-design-vue', () => {
       setup: (props, ctx) => () =>
         props.open
           ? h('section', { 'data-drawer': true }, [
+              ctx.slots.title?.(),
               ctx.slots.extra?.(),
               ctx.slots.default?.(),
               h(
@@ -375,10 +427,27 @@ vi.mock('ant-design-vue', () => {
         ),
     }),
     TabPane: block,
-    Tabs: block,
+    Tabs: defineComponent({
+      props: { activeKey: { type: String, default: undefined } },
+      emits: ['update:activeKey'],
+      setup: (props, ctx) => () =>
+        h('div', { 'data-order-tab': props.activeKey }, [
+          h(
+            'button',
+            { onClick: () => ctx.emit('update:activeKey', 'attachments') },
+            '切换附件页签',
+          ),
+          h(
+            'button',
+            { onClick: () => ctx.emit('update:activeKey', 'details') },
+            '切换详情页签',
+          ),
+          ctx.slots.default?.(),
+        ]),
+    }),
     Tag: block,
     Modal: { confirm: vi.fn(), warning: vi.fn() },
-    message: { success: vi.fn() },
+    message: { success: vi.fn(), warning: vi.fn() },
     Table: defineComponent({
       props: {
         dataSource: {
@@ -545,6 +614,11 @@ beforeEach(() => {
   mocks.list.mockResolvedValue({ list: [row()], total: 21 });
   mocks.contract.mockResolvedValue(contract());
   mocks.detail.mockResolvedValue(detail());
+  mocks.attachments.mockResolvedValue({
+    enabled: true,
+    uploadCategories: ['SALES', 'PROCUREMENT'],
+    items: [],
+  });
   mocks.finance.mockResolvedValue({
     currency: 'CNY',
     orderAmount: '100',
@@ -756,5 +830,102 @@ describe('采购订单原页执行', () => {
     attention.click();
     await settle();
     expect(mocks.detail).toHaveBeenLastCalledWith('contract-a', 'po-a');
+  });
+
+  it('附件上传忙碌时不能切走页签、关闭抽屉或换单，完成后恢复操作', async () => {
+    const secondOrder = { ...order(), id: 'po-b', code: 'CG-002' };
+    mocks.list.mockResolvedValue({
+      list: [row(), { ...row(), id: 'po-b', record: secondOrder }],
+      total: 2,
+    });
+    mocks.contract.mockResolvedValue({
+      ...contract(),
+      purchaseOrders: [order(), secondOrder],
+    });
+    mocks.detail.mockImplementation(
+      async (_contractId: string, orderId: string) => detail(orderId),
+    );
+    const { host } = await mount();
+    button(host, 'CG-001').click();
+    await settle();
+    button(host, '切换附件页签').click();
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-order-tab]')!.dataset.orderTab,
+    ).toBe('attachments');
+    button(host, '开始附件上传').click();
+    await settle();
+    expect(button(host, '关闭执行详情').disabled).toBe(true);
+    expect(button(host, '下一单').disabled).toBe(true);
+    const detailRequests = mocks.detail.mock.calls.length;
+    button(host, '切换详情页签').click();
+    button(host, '关闭执行详情').click();
+    button(host, 'CG-002').click();
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-order-tab]')!.dataset.orderTab,
+    ).toBe('attachments');
+    expect(host.querySelector('[data-drawer]')).not.toBeNull();
+    expect(mocks.detail).toHaveBeenCalledTimes(detailRequests);
+    button(host, '结束附件上传').click();
+    await settle();
+    expect(button(host, '关闭执行详情').disabled).toBe(false);
+    expect(button(host, '下一单').disabled).toBe(false);
+    button(host, '切换详情页签').click();
+    await settle();
+    expect(
+      host.querySelector<HTMLElement>('[data-order-tab]')!.dataset.orderTab,
+    ).toBe('details');
+    button(host, '下一单').click();
+    await settle();
+    expect(mocks.detail).toHaveBeenLastCalledWith('contract-a', 'po-b');
+  });
+
+  it('非默认分类和待上传队列在页签切换及附件刷新期间保留原列表上下文', async () => {
+    const attachments = {
+      enabled: true,
+      uploadCategories: ['SALES', 'PROCUREMENT'],
+      items: [
+        { id: 'existing-file', name: '已上传报价.pdf', category: 'SALES' },
+      ],
+    };
+    mocks.attachments.mockResolvedValue(attachments);
+    const { host } = await mount();
+    button(host, 'CG-001').click();
+    await settle();
+    button(host, '切换附件页签').click();
+    await settle();
+    expect(mocks.attachments).toHaveBeenCalledWith('contract-a', {
+      targetKind: 'purchaseOrders',
+      targetId: 'po-a',
+    });
+    const category = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="测试补充附件分类"]',
+    )!;
+    category.value = 'SALES';
+    category.dispatchEvent(new Event('change'));
+    button(host, '选择待上传图纸').click();
+    await settle();
+    const assertContext = () => {
+      const panel = host.querySelector<HTMLElement>(
+        '[data-attachment-categories]',
+      )!;
+      expect(JSON.parse(panel.dataset.attachmentCategories!)).toEqual(
+        attachments.uploadCategories,
+      );
+      expect(JSON.parse(panel.dataset.attachmentView!)).toEqual(attachments);
+      expect(panel.dataset.attachmentCategory).toBe('SALES');
+      expect(panel.dataset.attachmentQueue).toBe('1');
+    };
+    assertContext();
+    button(host, '切换详情页签').click();
+    await settle();
+    assertContext();
+    // An in-flight reload must preserve the existing view until its replacement arrives.
+    mocks.attachments.mockImplementationOnce(() => new Promise(() => {}));
+    button(host, '切换附件页签').click();
+    await settle();
+    expect(mocks.attachments).toHaveBeenCalledTimes(2);
+    assertContext();
   });
 });

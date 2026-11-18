@@ -302,6 +302,7 @@ const createKind = ref<DocumentKind>('orders');
 const plansOpen = ref(false);
 const nestedFinanceBusy = ref(false);
 const contactEditorBusy = ref(false);
+const attachmentBusy = ref(false);
 const arrivalId = ref<string>();
 const financeType = ref<'REIMBURSEMENT'>();
 /** 登记付款记录（每付一笔一张，分期就是多张） */
@@ -324,6 +325,7 @@ const childOpen = computed(
     editorOpen.value ||
     nestedFinanceBusy.value ||
     contactEditorBusy.value ||
+    attachmentBusy.value ||
     saving.value,
 );
 const reasonOpen = ref(false);
@@ -410,6 +412,10 @@ const tab = computed({
     return value === 'contract' ? 'attachments' : value;
   },
   set: (tab: string) => {
+    if (attachmentBusy.value && tab !== 'attachments') {
+      message.warning('附件正在上传，请完成后再切换页签');
+      return;
+    }
     if (selection.value) localTab.value = tab;
     else void router.replace({ query: { ...route.query, tab } });
   },
@@ -943,10 +949,13 @@ async function loadOrderAttachments() {
     if (view.value?.id === current.id) attachmentsLoading.value = false;
   }
 }
+watch([() => view.value?.contractId, () => view.value?.id], () => {
+  orderAttachments.value = undefined;
+  attachmentsError.value = '';
+});
 watch(
   () => [view.value?.id, tab.value, active.value],
   () => {
-    orderAttachments.value = undefined;
     if (tab.value === 'attachments') void loadOrderAttachments();
   },
 );
@@ -1293,7 +1302,7 @@ async function command(
 }
 let leaveDetailsPrompt: Promise<boolean> | undefined;
 function allowLeaveDetails(): Promise<boolean> {
-  if (saving.value || contactEditorBusy.value) {
+  if (saving.value || contactEditorBusy.value || attachmentBusy.value) {
     message.warning('正在保存或上传资料，请完成后再离开');
     return Promise.resolve(false);
   }
@@ -1336,7 +1345,13 @@ function allowLeaveDetails(): Promise<boolean> {
   return leaveDetailsPrompt;
 }
 function beforeUnload(event: BeforeUnloadEvent) {
-  if (!detailsDirty.value && !saving.value && !contactEditorBusy.value) return;
+  if (
+    !detailsDirty.value &&
+    !saving.value &&
+    !contactEditorBusy.value &&
+    !attachmentBusy.value
+  )
+    return;
   event.preventDefault();
   event.returnValue = '';
 }
@@ -2392,6 +2407,7 @@ watch(financeType, (value, previous) => {
                 <StandaloneOrderFiles
                   v-if="standaloneOrder(view.contractId)"
                   :order-id="view.id"
+                  @busy="attachmentBusy = $event"
                 />
                 <AttachmentPanel
                   v-else
@@ -2401,6 +2417,9 @@ watch(financeType, (value, previous) => {
                   :categories="orderAttachments?.uploadCategories ?? []"
                   :loading="attachmentsLoading"
                   :error="attachmentsError"
+                  variant="purchase"
+                  default-category="PROCUREMENT"
+                  @busy="attachmentBusy = $event"
                   @refresh="loadOrderAttachments"
                 />
               </TabPane>

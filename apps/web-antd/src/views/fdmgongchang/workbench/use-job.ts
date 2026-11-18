@@ -8,6 +8,7 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 import { inject, provide, reactive } from 'vue';
 
 import { dimensionToDisplay } from '../shared/dimensions';
+import { laminationDefects } from '../shared/lamination-report';
 import { normalizeForStage, toNumber } from '../stage-stock/model';
 
 export type Step = 'confirm' | 'done' | 'home' | 'pick' | 'piece' | 'report';
@@ -126,6 +127,7 @@ export function outputPayload(job: Job): StockApi.OrderOutput[] {
       defectQuantity: toNumber(o.defectQuantity) ?? 0,
       goodQuantity: toNumber(o.goodQuantity) ?? 0,
       ...(job.process?.code === 'SLICE' ? { sourceItemIds: o.sourceItemIds } : {}),
+      ...(job.process?.code === 'LAMINATE' && o.laminateLayers ? { laminateDefects: laminationDefects(o) } : {}),
     }));
 }
 

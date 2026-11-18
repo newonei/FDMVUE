@@ -2,7 +2,11 @@
 import type { SalesChannel } from '../../sales-channel';
 import type { AreaNode } from './model';
 
-import type { CountryOption, Customer } from '#/api/fdmplatform/customers';
+import type {
+  CountryOption,
+  Customer,
+  CustomerOptions,
+} from '#/api/fdmplatform/customers';
 
 import { computed, reactive, ref, watch } from 'vue';
 
@@ -35,6 +39,8 @@ import {
   customerForm,
   customerMissingFields,
   customerSourceOptions,
+  defaultCustomerTypes,
+  domesticCustomerFields,
   domesticMissingFields,
   domesticRequiredFields,
   invoiceFields,
@@ -62,6 +68,9 @@ const requestKey = ref('');
 const countries = ref<CountryOption[]>([]);
 const sources = ref<string[]>([]);
 const sourcesOpen = ref(false);
+const optionKind = ref<'industry' | 'source' | 'type'>('source');
+const types = ref<string[]>([...defaultCustomerTypes]);
+const industries = ref<string[]>([]);
 const sourceDetail = ref('');
 /** 内销客户经营的产品种类，选项取合同产品类别 */
 const productCategories = ref<string[]>([]);
@@ -86,6 +95,21 @@ function requiredField(key: string) {
 const sourceOptions = computed(() =>
   customerSourceOptions(sources.value, form.customerSource),
 );
+const typeOptions = computed(() =>
+  customerSourceOptions(types.value, form.customerType),
+);
+const industryOptions = computed(() =>
+  customerSourceOptions(industries.value, form.industry),
+);
+function maintainOptions(kind: 'industry' | 'source' | 'type') {
+  optionKind.value = kind;
+  sourcesOpen.value = true;
+}
+function updateOptions(options: CustomerOptions) {
+  sources.value = options.customerSources ?? [];
+  types.value = options.customerTypes ?? [...defaultCustomerTypes];
+  industries.value = options.industries ?? [];
+}
 const channel = computed<SalesChannel>(() =>
   props.customer
     ? salesChannelOf(props.customer.salesChannel)
@@ -98,6 +122,10 @@ const visibleFields = computed(() =>
     ([field]) =>
       field !== 'shortName' &&
       !(domestic.value && field === 'country') &&
+      !(
+        !domestic.value &&
+        (domesticCustomerFields as readonly string[]).includes(field)
+      ) &&
       !(!domestic.value && (field === 'province' || field === 'city')),
   ),
 );
@@ -126,7 +154,7 @@ async function loadOptions() {
     ]);
     if (run === optionsSequence && props.open) {
       countries.value = result.countries;
-      sources.value = result.customerSources ?? [];
+      updateOptions(result);
       categoryOptions.value = result.productCategories ?? [];
       areas.value = tree;
     }
@@ -190,8 +218,14 @@ async function save() {
   try {
     const customer = await saveCustomer({
       ...Object.fromEntries(
-        Object.entries(form).filter(([field]) => field !== 'code'),
+        Object.entries(form).filter(
+          ([field]) =>
+            field !== 'code' &&
+            !(domesticCustomerFields as readonly string[]).includes(field),
+        ),
       ),
+      customerType: domestic.value ? (form.customerType ?? '') : undefined,
+      industry: domestic.value ? (form.industry ?? '') : undefined,
       customerSource:
         form.customerSource === '其他' && sourceDetail.value.trim()
           ? `其他：${sourceDetail.value.trim()}`
@@ -237,7 +271,7 @@ async function save() {
       <Alert v-if="optionsError" type="error" show-icon :message="optionsError">
         <template #action>
           <Button size="small" :loading="optionsLoading" @click="loadOptions">
-            重新加载国家
+            重新加载选项
           </Button>
         </template>
       </Alert>
@@ -284,9 +318,35 @@ async function save() {
               type="link"
               size="small"
               :disabled="saving"
-              @click="sourcesOpen = true"
+              @click="maintainOptions('source')"
             >
               维护来源选项
+            </Button>
+          </template>
+          <template v-else-if="key === 'customerType' || key === 'industry'">
+            <Select
+              v-model:value="form[key]"
+              :options="key === 'customerType' ? typeOptions : industryOptions"
+              show-search
+              option-filter-prop="label"
+              allow-clear
+              :disabled="saving"
+              :placeholder="
+                key === 'customerType'
+                  ? '选择客户类型（可选）'
+                  : '选择所在行业（可选）'
+              "
+              :aria-label="title"
+            />
+            <Button
+              type="link"
+              size="small"
+              :disabled="saving"
+              @click="
+                maintainOptions(key === 'customerType' ? 'type' : 'industry')
+              "
+            >
+              {{ key === 'customerType' ? '维护客户类型选项' : '维护行业选项' }}
             </Button>
           </template>
           <template v-else-if="key === 'country'">
@@ -449,12 +509,9 @@ async function save() {
   </FdmResizableDrawer>
   <CustomerSourceOptions
     :open="sourcesOpen"
+    :kind="optionKind"
     @close="sourcesOpen = false"
-    @saved="
-      (options) => {
-        sources = options.customerSources;
-      }
-    "
+    @saved="updateOptions"
   />
 </template>
 

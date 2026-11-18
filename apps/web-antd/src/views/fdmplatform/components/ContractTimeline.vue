@@ -5,7 +5,7 @@ import { computed } from 'vue';
 
 import { Empty } from 'ant-design-vue';
 
-import { label } from '../data';
+import { label, receiptStatusLabel } from '../data';
 import { nativeMoney } from '../documents/migration-display';
 
 /**
@@ -82,7 +82,7 @@ const entries = computed<Entry[]>(() => {
       title: `${time(row, 'receivedAt') || '日期未填'} · ${label(row.kind)}`,
       time: time(row, 'createdAt', 'receivedAt'),
       amount: nativeMoney(row.amount, row.currency),
-      status: label(row.status),
+      status: receiptStatusLabel(row.status),
       tab: 'finance',
     });
   for (const row of props.invoices)

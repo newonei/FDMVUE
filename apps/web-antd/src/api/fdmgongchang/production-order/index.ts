@@ -2,6 +2,7 @@ import type { PageParam, PageResult } from '@vben/request';
 
 import type { FdmgongchangRouteApi } from '../factory';
 
+import type { OrderLineExtra } from '#/api/fdmplatform/procurement';
 import type {
   ProductColorMode,
   ProductConstructionType,
@@ -305,16 +306,7 @@ export namespace FdmgongchangProductionOrderApi {
       accessoryNote?: null | string;
       deliveryAddress?: null | string;
       deliveryDate?: null | string;
-      lineExtras?: Record<
-        string,
-        {
-          customerColor?: string;
-          imageId?: string;
-          model?: string;
-          packQty?: number;
-          weight?: string;
-        }
-      >;
+      lineExtras?: Record<string, OrderLineExtra>;
       lineNotes?: Record<string, { gift?: boolean; remark?: null | string }>;
       packagingSteps?: Array<{
         imageIds?: string[];
@@ -626,6 +618,19 @@ export function saveItemProductionConfig(
   return requestClient.post<boolean>(`${BASE}/item-production-config`, data, {
     headers: factoryHeaders(),
   });
+}
+
+/** 同一订单的多条生产参数一次保存；任一明细不满足条件时整批回滚。 */
+export function saveItemProductionConfigBatch(data: {
+  items: FdmgongchangProductionOrderApi.ItemProductionConfigReq[];
+}) {
+  return requestClient.post<boolean>(
+    `${BASE}/item-production-config/batch`,
+    data,
+    {
+      headers: factoryHeaders(),
+    },
+  );
 }
 
 export function getFactoryProductionOrders(

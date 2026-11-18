@@ -41,6 +41,7 @@ export interface Field {
   hint?: string;
   default?: boolean | number | string;
   min?: number;
+  maxLength?: number;
   /** 留空时后端按其他字段自动计算，输入框里显示预计结果 */
   placeholderOf?: (values: Record<string, unknown>) => string | undefined;
 }
@@ -199,6 +200,7 @@ export const statusLabels: Record<string, string> = {
   UPDATE_PRODUCTION: '更新自产进度',
   CREATE_RECEIPT: '登记回款',
   CONFIRM_RECEIPT: '财务确认到账',
+  CANCEL_RECEIPT: '撤销登记',
   REVERSE_RECEIPT: '退款 / 回款冲销',
   REFRESH_RECEIPT_FX: '补齐回款汇率',
   CREATE_INVOICE: '登记发票',
@@ -219,6 +221,10 @@ export function label(value: unknown) {
   if (value === undefined || value === null || value === '') return '—';
   if (typeof value === 'boolean') return value ? '是' : '否';
   return statusLabels[String(value)] ?? String(value);
+}
+/** 回款的取消表示撤销误登记，与合同取消分开表述。 */
+export function receiptStatusLabel(value: unknown): string {
+  return value === 'CANCELLED' ? '已撤销' : label(value);
 }
 export function rows(value: unknown): BusinessRecord[] {
   return Array.isArray(value) ? (value as BusinessRecord[]) : [];
@@ -851,7 +857,10 @@ export function financeActions(
           'receiptId',
           '缺少汇率的回款',
           options(
-            (ledger.receipts ?? []).filter((receipt) => !hasReceiptFx(receipt)),
+            (ledger.receipts ?? []).filter(
+              (receipt) =>
+                receipt.status !== 'CANCELLED' && !hasReceiptFx(receipt),
+            ),
             ['receivedAt', 'amount', 'id'],
           ),
         ),
@@ -863,6 +872,17 @@ export function financeActions(
       description:
         '核对真实到账金额、币种与到账日期，确认后不可直接删除，只能记录退款或冲销。',
       fields: [selectField('receiptId', '待确认回款', receiptOptions)],
+    },
+    CANCEL_RECEIPT: {
+      action: 'CANCEL_RECEIPT',
+      title: '撤销回款登记',
+      submitLabel: '确认撤销',
+      description:
+        '仅撤销尚未经财务确认的误登记。撤销后保留原记录及原因，不计入待确认回款；如需更正，请重新登记真实到账。',
+      fields: [
+        selectField('receiptId', '待确认回款', receiptOptions),
+        field('reason', '撤销原因', 'textarea', { maxLength: 1000 }),
+      ],
     },
     REVERSE_RECEIPT: {
       action: 'REVERSE_RECEIPT',

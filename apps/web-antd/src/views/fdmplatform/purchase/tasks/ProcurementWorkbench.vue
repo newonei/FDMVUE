@@ -138,9 +138,11 @@ const stageTabs = computed(() => visibleStages(result.value?.counts));
  */
 const orderEntry = ref<{ contractId: string; requestId?: string }>();
 function canEnterOrder(entry: ProcurementWorkItem) {
+  const available = entry.row.record?.availableQuantity;
   return (
     ['intake', 'order', 'plan', 'quote'].includes(entry.stage) &&
-    !!entry.row.contractId
+    !!entry.row.contractId &&
+    (available === undefined || Number(available) > 0)
   );
 }
 function openOrderEntry(entry: ProcurementWorkItem) {
@@ -148,9 +150,9 @@ function openOrderEntry(entry: ProcurementWorkItem) {
   // 申请行直接用申请 id；任务 / 报价行给出申请或任务 id，开单表单会顺着任务找到申请
   const record = entry.row.record ?? {};
   const requestId =
-    entry.kind === 'requests'
+    entry.kind === 'requests' || entry.kind === 'tasks'
       ? String(entry.row.id)
-      : String(record.requestId ?? record.assignmentId ?? entry.row.id);
+      : String(record.assignmentId ?? record.requestId ?? entry.row.id);
   orderEntry.value = { contractId: String(entry.row.contractId), requestId };
 }
 function orderEntered(value: CreatedProcurementOrders) {

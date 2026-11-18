@@ -17,6 +17,7 @@ import {
 import { newIdempotencyKey } from '#/api/fdmplatform/idempotency';
 import {
   ATTACHMENT_ACCEPT,
+  ATTACHMENT_FORMAT_TEXT,
   attachmentSize,
   submissionFilesError,
 } from '#/api/fdmplatform/submission-files';
@@ -31,6 +32,7 @@ import { errorText } from '../../../data';
  * （合同附件按合同编号存取，独立采购单没有合同）。
  */
 const props = defineProps<{ orderId: string }>();
+const emit = defineEmits<{ busy: [value: boolean] }>();
 
 const items = ref<BusinessDocumentFile[]>([]);
 const canUpload = ref(false);
@@ -38,6 +40,8 @@ const loading = ref(false);
 const uploading = ref(false);
 const error = ref('');
 const input = ref<HTMLInputElement>();
+const dragDepth = ref(0);
+const selectionNotice = ref('');
 type QueuedFile = {
   error: string;
   expectedVersion?: number;
@@ -75,17 +79,30 @@ function pick(event: Event) {
   const target = event.target as HTMLInputElement;
   const files = [...(target.files ?? [])];
   target.value = '';
+  addFiles(files);
+}
+function addFiles(files: File[]) {
   if (uploading.value || !canUpload.value || files.length === 0) return;
+  const fingerprint = (file: File) =>
+    `${file.name}\0${file.size}\0${file.lastModified}`;
+  const known = new Set(queue.value.map((item) => fingerprint(item.file)));
+  const added = files.filter((file) => {
+    const key = fingerprint(file);
+    if (known.has(key)) return false;
+    known.add(key);
+    return true;
+  });
+  selectionNotice.value = '';
   const validation = submissionFilesError([
     ...queue.value.map((item) => item.file),
-    ...files,
+    ...added,
   ]);
   if (validation) {
     error.value = validation;
     return;
   }
   queue.value.push(
-    ...files.map((file) => ({
+    ...added.map((file) => ({
       error: '',
       file,
       key: newIdempotencyKey(),
@@ -93,11 +110,30 @@ function pick(event: Event) {
     })),
   );
   error.value = '';
+  const duplicates = files.length - added.length;
+  if (duplicates) selectionNotice.value = `已跳过 ${duplicates} 个重复文件`;
+}
+function dragEnter() {
+  if (!uploading.value && canUpload.value) dragDepth.value++;
+}
+function dragLeave() {
+  dragDepth.value = Math.max(0, dragDepth.value - 1);
+}
+function dragOver(event: DragEvent) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect =
+      !uploading.value && canUpload.value ? 'copy' : 'none';
+  }
+}
+function drop(event: DragEvent) {
+  dragDepth.value = 0;
+  addFiles([...(event.dataTransfer?.files ?? [])]);
 }
 function removeQueuedFile(key: string) {
   if (uploading.value) return;
   queue.value = queue.value.filter((item) => item.key !== key);
   error.value = '';
+  selectionNotice.value = '';
 }
 async function uploadQueuedFile(
   item: QueuedFile,
@@ -148,6 +184,7 @@ async function upload() {
   const batch = [...queue.value];
   uploading.value = true;
   error.value = '';
+  selectionNotice.value = '';
   progress.value = { completed: 0, failed: 0, total: batch.length };
   try {
     for (const item of batch) {
@@ -200,12 +237,18 @@ async function saveRename(name: string) {
   message.success('文件名称已修改');
   await load();
 }
+watch(uploading, (value) => emit('busy', value), {
+  flush: 'sync',
+  immediate: true,
+});
 watch(
   () => props.orderId,
   () => {
     contextVersion++;
     items.value = [];
     queue.value = [];
+    dragDepth.value = 0;
+    selectionNotice.value = '';
     progress.value = { completed: 0, failed: 0, total: 0 };
     uploading.value = false;
     canUpload.value = false;
@@ -215,44 +258,90 @@ watch(
 );
 onBeforeUnmount(() => {
   contextVersion++;
+  emit('busy', false);
 });
 </script>
 
 <template>
-  <div class="files">
-    <Alert v-if="error" type="error" :message="error" show-icon />
-    <div class="bar">
-      <input
-        ref="input"
-        type="file"
-        :accept="ATTACHMENT_ACCEPT"
-        multiple
-        hidden
-        :disabled="uploading || !canUpload"
-        @change="pick"
-      />
-      <Button :disabled="!canUpload || uploading" @click="input?.click()">
-        {{ queue.length ? '继续选择' : '选择文件' }}
-      </Button>
+  <section class="files" aria-label="补充附件">
+    <div class="section-head">
+      <div>
+        <h3>补充附件</h3>
+        <p class="muted">报价、图纸、沟通资料等，统一保存在本采购单下。</p>
+      </div>
       <Button
-        type="primary"
-        :disabled="!canUpload || queue.length === 0"
-        :loading="uploading"
-        @click="upload"
+        size="small"
+        :disabled="uploading"
+        :loading="loading"
+        @click="load"
       >
-        上传<span v-if="queue.length">（{{ queue.length }} 个）</span>
-      </Button>
-      <Button :disabled="uploading" :loading="loading" @click="load">
         刷新
       </Button>
-      <span>已上传附件共 {{ items.length }} 个</span>
     </div>
-    <span class="muted">
-      不关联合同的采购单，附件保存在本采购单下。支持 AI、PLT
-      等设计文件，每次最多 10 个，单个及单次总大小不超过 1 GB。
-    </span>
+    <Alert v-if="error" type="error" :message="error" show-icon />
+    <input
+      ref="input"
+      type="file"
+      aria-label="选择采购单补充附件"
+      :accept="ATTACHMENT_ACCEPT"
+      multiple
+      hidden
+      :disabled="uploading || !canUpload"
+      @change="pick"
+    />
+    <button
+      type="button"
+      class="dropzone"
+      :class="{ 'is-dragging': dragDepth > 0 }"
+      :disabled="!canUpload || uploading"
+      @click="input?.click()"
+      @dragenter.prevent="dragEnter"
+      @dragleave.prevent="dragLeave"
+      @dragover.prevent="dragOver"
+      @drop.prevent="drop"
+    >
+      <svg
+        class="upload-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path
+          d="M12 16V4m-4 4 4-4 4 4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"
+        />
+      </svg>
+      <span class="dropzone-copy">
+        <span class="dropzone-title">
+          <span class="select-link">{{
+            queue.length ? '继续选择' : '选择文件'
+          }}</span>
+          <span>，或将文件拖到这里</span>
+        </span>
+        <span class="muted">
+          {{ ATTACHMENT_FORMAT_TEXT }}；每次最多 10 个，单个及合计不超过 1 GB。
+        </span>
+      </span>
+    </button>
+    <span v-if="selectionNotice" role="status" class="muted">{{
+      selectionNotice
+    }}</span>
     <div v-if="queue.length" class="queue">
-      <span>待上传 {{ queue.length }} 个文件，共 {{ queueSize }}</span>
+      <div class="queue-head">
+        <div class="queue-summary">
+          <span>待上传 {{ queue.length }} 个文件</span>
+          <span class="muted">· 共 {{ queueSize }}</span>
+        </div>
+        <Button
+          type="primary"
+          :disabled="!canUpload"
+          :loading="uploading"
+          @click="upload"
+        >
+          上传（{{ queue.length }} 个）
+        </Button>
+      </div>
       <div v-for="item in queue" :key="item.key" class="queued-file">
         <span class="file-name" :title="item.file.name">{{
           item.file.name
@@ -273,7 +362,7 @@ onBeforeUnmount(() => {
         </Button>
       </div>
     </div>
-    <div v-if="progress.total" role="status">
+    <div v-if="progress.total" role="status" class="upload-result">
       {{ uploading ? '上传进度' : '本次上传结果' }}：{{
         progress.completed + progress.failed
       }}/{{ progress.total }}，成功 {{ progress.completed }} 个，失败
@@ -281,31 +370,41 @@ onBeforeUnmount(() => {
         ；失败文件已保留，可点击上传重试。
       </span>
     </div>
+    <div class="uploaded-head">已上传附件共 {{ items.length }} 个</div>
     <Table
+      class="attachment-table"
       size="small"
+      table-layout="fixed"
       row-key="id"
       :data-source="items"
       :loading="loading"
       :pagination="false"
       :columns="[
-        { title: '文件', key: 'name', ellipsis: true },
-        { title: '大小', key: 'size', width: 90 },
-        { title: '上传时间', key: 'createdAt', width: 140 },
-        { title: '操作', key: 'action', width: 160 },
+        { title: '附件名称', key: 'name' },
+        { title: '文件信息', key: 'info', width: 155 },
+        { title: '操作', key: 'action', width: 145 },
       ]"
     >
-      <template #emptyText>还没有附件</template>
+      <template #emptyText>
+        {{
+          canUpload
+            ? '暂无补充附件，可在上方添加报价、图纸等资料'
+            : '暂无补充附件'
+        }}
+      </template>
       <template #bodyCell="{ column, record }">
-        <span v-if="column.key === 'name'" :title="record.name">
+        <span
+          v-if="column.key === 'name'"
+          class="file-name"
+          :title="record.name"
+        >
           {{ record.name }}
         </span>
-        <span v-else-if="column.key === 'size'">
-          {{ attachmentSize(Number(record.size)) }}
-        </span>
-        <span v-else-if="column.key === 'createdAt'">
-          {{ attachmentTime(record.createdAt) }}
-        </span>
-        <Space v-else-if="column.key === 'action'" :size="0">
+        <div v-else-if="column.key === 'info'" class="file-info">
+          <span>{{ attachmentSize(Number(record.size)) }}</span>
+          <span class="muted">{{ attachmentTime(record.createdAt) }}</span>
+        </div>
+        <Space v-else-if="column.key === 'action'" :size="0" :wrap="true">
           <FilePreviewButton
             :name="record.name"
             size="small"
@@ -334,7 +433,7 @@ onBeforeUnmount(() => {
       :name="renaming?.name"
       :save="saveRename"
     />
-  </div>
+  </section>
 </template>
 
 <style scoped>
@@ -342,19 +441,94 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
 }
 
-.bar {
+.section-head,
+.queue-head,
+.queue-summary {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: space-between;
+}
+
+.section-head h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section-head p {
+  margin: 0;
+}
+
+.dropzone {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  padding: 20px;
+  text-align: left;
+  cursor: pointer;
+  background: hsl(var(--primary) / 3%);
+  border: 1px dashed hsl(var(--primary) / 35%);
+  border-radius: 8px;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.dropzone:hover:not(:disabled),
+.dropzone.is-dragging,
+.dropzone:focus-visible {
+  background: hsl(var(--primary) / 8%);
+  border-color: hsl(var(--primary));
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 30%);
+  outline-offset: 2px;
+}
+
+.dropzone:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.upload-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  color: hsl(var(--primary));
+}
+
+.dropzone-copy,
+.file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropzone-title {
+  font-size: 14px;
+}
+
+.select-link {
+  font-weight: 500;
+  color: hsl(var(--primary));
 }
 
 .queue {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding: 12px;
+  background: hsl(var(--muted) / 40%);
+  border-radius: 8px;
 }
 
 .queued-file {
@@ -365,7 +539,29 @@ onBeforeUnmount(() => {
 }
 
 .file-name {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.queued-file > .file-name {
+  flex: 1;
+}
+
+.upload-result {
+  font-size: 12px;
+}
+
+.uploaded-head {
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.attachment-table :deep(.ant-table-cell) {
+  vertical-align: middle;
+}
+
+.attachment-table :deep(.ant-btn-link) {
+  padding-inline: 5px;
 }
 
 .failed {

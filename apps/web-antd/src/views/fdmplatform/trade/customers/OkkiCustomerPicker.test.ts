@@ -87,7 +87,17 @@ vi.mock('ant-design-vue', () => {
     Tag: block,
     Card: block,
     Select: block,
-    Descriptions: Object.assign(block, { Item: block }),
+    Descriptions: Object.assign(block, {
+      Item: defineComponent({
+        props: { label: String },
+        setup: (props, context) => () =>
+          h(
+            'div',
+            { 'data-preview-field': props.label },
+            context.slots.default?.(),
+          ),
+      }),
+    }),
     message: { success: vi.fn() },
   };
 });
@@ -267,6 +277,8 @@ describe('persistent OKKI directory workflow', () => {
     await nextTick();
     expect(host.textContent).toContain('Live name');
     expect(host.textContent).toContain('最新获客来源');
+    expect(host.querySelector('[data-preview-field="客户类型"]')).toBeNull();
+    expect(host.querySelector('[data-preview-field="所在行业"]')).toBeNull();
     expect(api.sync).not.toHaveBeenCalled();
     click(host, '确认同步到客户档案');
     await vi.waitFor(() =>

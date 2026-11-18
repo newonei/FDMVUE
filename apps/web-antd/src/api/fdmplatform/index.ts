@@ -170,6 +170,8 @@ export interface PageQuery {
   keyword?: string;
   status?: string;
   assignmentStatus?: string;
+  transferStatus?: string;
+  pendingTransfer?: boolean;
   contractId?: string;
   ownerUserId?: number;
   /** true: imported records awaiting completion; false: current business; absent: both. */

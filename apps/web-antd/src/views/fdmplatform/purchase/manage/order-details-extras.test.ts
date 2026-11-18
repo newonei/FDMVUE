@@ -3,7 +3,12 @@ import type { ProcurementOrderView } from '#/api/fdmplatform/procurement';
 
 import { createApp, defineComponent, h, nextTick, ref } from 'vue';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  getProcurementSettings,
+  getSupplierContacts,
+} from '#/api/fdmplatform/procurement';
 
 import OrderDetails from './components/OrderDetails.vue';
 
@@ -90,6 +95,10 @@ function fixture(actions: string[]): ProcurementOrderView {
   } as unknown as ProcurementOrderView;
 }
 const cleanup: (() => void)[] = [];
+beforeEach(() => {
+  vi.mocked(getProcurementSettings).mockReset().mockResolvedValue([]);
+  vi.mocked(getSupplierContacts).mockReset().mockResolvedValue([]);
+});
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 async function mount(actions: string[]) {
   const view = ref(fixture(actions));
@@ -117,6 +126,68 @@ async function mount(actions: string[]) {
 }
 
 describe('independent procurement extras saving', () => {
+  function defaultSettings() {
+    vi.mocked(getProcurementSettings).mockImplementation(async (kind) => {
+      const item = {
+        id: kind,
+        active: true,
+        ...(kind === 'templates' ? { requiredClauseGroups: ['payment'] } : {}),
+        ...(kind === 'clauses' ? { groupCode: 'payment' } : {}),
+      };
+      return [item] as Awaited<ReturnType<typeof getProcurementSettings>>;
+    });
+  }
+
+  it('does not count automatically selected settings and contacts as edits', async () => {
+    defaultSettings();
+    vi.mocked(getSupplierContacts).mockResolvedValue([
+      { id: 'contact-1', active: true, defaultContact: true },
+    ] as Awaited<ReturnType<typeof getSupplierContacts>>);
+    const { host, details } = await mount(['SAVE_DETAILS']);
+    await nextTick();
+    expect(details.value?.isDirty()).toBe(false);
+    const address = host.querySelector<HTMLInputElement>(
+      'input[placeholder="不填则按合同约定"]',
+    )!;
+    address.value = '新地址';
+    address.dispatchEvent(new Event('input'));
+    await nextTick();
+    expect(details.value?.pendingSave().payload).toMatchObject({
+      contactId: 'contact-1',
+      signingEntityId: 'entities',
+      templateId: 'templates',
+      clauseIds: ['clauses'],
+    });
+    expect(details.value?.isDirty()).toBe(true);
+  });
+
+  it('keeps a user edit dirty when defaults finish loading and clears it on revert', async () => {
+    let resolveContacts!: (
+      value: Awaited<ReturnType<typeof getSupplierContacts>>,
+    ) => void;
+    vi.mocked(getSupplierContacts).mockReturnValue(
+      new Promise((resolve) => {
+        resolveContacts = resolve;
+      }),
+    );
+    const { host, details } = await mount(['SAVE_DETAILS']);
+    const address = host.querySelector<HTMLInputElement>(
+      'input[placeholder="不填则按合同约定"]',
+    )!;
+    address.value = '修改后的地址';
+    address.dispatchEvent(new Event('input'));
+    resolveContacts([
+      { id: 'contact-1', active: true, defaultContact: true },
+    ] as Awaited<ReturnType<typeof getSupplierContacts>>);
+    await Promise.resolve();
+    await nextTick();
+    expect(details.value?.isDirty()).toBe(true);
+    address.value = '原交货地址';
+    address.dispatchEvent(new Event('input'));
+    await nextTick();
+    expect(details.value?.isDirty()).toBe(false);
+  });
+
   it('allows confirmed details to save only the six extras fields', async () => {
     const { host, saved } = await mount(['SAVE_EXTRAS']);
     const button = host.querySelector<HTMLButtonElement>('[data-extras]')!;

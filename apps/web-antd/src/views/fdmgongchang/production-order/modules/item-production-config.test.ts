@@ -4,13 +4,13 @@ import { createApp, defineComponent, h, nextTick, reactive } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig } from '#/api/fdmgongchang/production-order';
+import { getProductionOrder, getRouteOptions, getTargetOptions, saveItemProductionConfig, saveItemProductionConfigBatch } from '#/api/fdmgongchang/production-order';
 
-import { productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
+import { productionBatchConfig, productionConfigDraft, productionConfigProblems, productionConfigTarget, productionRouteProblems, savedProductionConfigProblems, unfinishedProductionParameters } from './item-production-config';
 import ConfigModal from './item-production-config-modal.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
-  getProductionOrder: vi.fn(), getRouteOptions: vi.fn(), getTargetOptions: vi.fn(), saveItemProductionConfig: vi.fn(),
+  getProductionOrder: vi.fn(), getRouteOptions: vi.fn(), getTargetOptions: vi.fn(), saveItemProductionConfig: vi.fn(), saveItemProductionConfigBatch: vi.fn(),
 }));
 
 const steps = ['MIX', 'SLICE', 'CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD', 'PACK'];
@@ -57,10 +57,19 @@ beforeEach(() => {
   vi.mocked(getTargetOptions).mockReset().mockResolvedValue({ materials: [{ label: 'TPE', value: 'TPE' }],
     colors: [{ label: '紫色', value: 'ZI' }, { label: '蓝色', value: 'LAN' }], textures: [], patterns: [] });
   vi.mocked(saveItemProductionConfig).mockReset().mockResolvedValue(true);
+  vi.mocked(saveItemProductionConfigBatch).mockReset().mockResolvedValue(true);
 });
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; });
 
 describe('production configuration values', () => {
+  it('copies only selected fields and keeps each target product dimensions, structure and route', () => {
+    const source = productionConfigDraft(product({ targetFrontColor: 'RED', targetBackColor: 'GREEN', targetTextureFront: 'WAVE' }));
+    const target = product({ id: 11, routeId: 6, targetLength: 190, targetWidth: 80, targetColorMode: 'SINGLE', targetConstructionType: 'SINGLE_LAYER', processes: ['SLICE', 'PUNCH', 'PACK'] });
+    expect(productionBatchConfig(target, source, ['frontColor'])).toEqual({ itemId: 11, routeId: 6, processes: ['SLICE', 'PUNCH', 'PACK'],
+      target: expect.objectContaining({ itemId: 11, colorMode: 'SINGLE', constructionType: 'SINGLE_LAYER', length: 190, width: 80, frontColor: 'RED', backColor: 'RED', textureFront: null }) });
+    expect(productionBatchConfig(target, source, ['colorMode', 'frontColor', 'backColor', 'textureFront']).target).toMatchObject({ colorMode: 'DUAL', frontColor: 'RED', backColor: 'GREEN', textureFront: 'WAVE', length: 190 });
+    expect(productionBatchConfig(product(), { ...source, colorMode: 'SINGLE' }, ['backColor']).target).toMatchObject({ colorMode: 'DUAL', backColor: 'RED' });
+  });
   it('preserves confirmed folding requirements and flags missing folding instructions before release', () => {
     const draft = productionConfigDraft(product({ targetFoldingType: '八折' }));
     expect(productionConfigTarget(10, draft).foldingType).toBe('八折');
@@ -115,6 +124,34 @@ describe('production configuration values', () => {
 });
 
 describe('production configuration modal', () => {
+  it('saves the source and selected parameter copies atomically while preserving target route and dimensions', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue({ ...order(), items: [product(), product({ id: 11, productCode: 'P002', routeId: 6, targetLength: 190, targetWidth: 80, targetFrontColor: 'LAN' })] });
+    const { saved } = mountModal(); await flush();
+    const clickCheckbox = async (text: string) => {
+      const label = [...document.querySelectorAll<HTMLLabelElement>('.ant-checkbox-wrapper')].find((node) => node.textContent?.trim() === text);
+      expect(label?.textContent?.trim()).toBe(text); label!.querySelector<HTMLInputElement>('input')!.click(); await flush();
+    };
+    await clickCheckbox('正面颜色');
+    await clickCheckbox('其他产品全选');
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).not.toHaveBeenCalled();
+    expect(saveItemProductionConfigBatch).toHaveBeenCalledWith({ items: [
+      expect.objectContaining({ itemId: 10, target: expect.objectContaining({ frontColor: 'ZI', length: 183 }) }),
+      expect.objectContaining({ itemId: 11, routeId: 6, processes: product().processes, target: expect.objectContaining({ frontColor: 'ZI', backColor: 'LAN', length: 190, width: 80 }) }),
+    ] });
+    expect(saved).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the entire batch unsaved when a selected product has incomplete dimensions', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue({ ...order(), items: [product(), product({ id: 11, productCode: 'P002', targetLength: null })] });
+    mountModal(); await flush();
+    for (const text of ['正面颜色', '其他产品全选']) {
+      [...document.querySelectorAll<HTMLLabelElement>('.ant-checkbox-wrapper')].find((node) => node.textContent?.trim() === text)!.querySelector<HTMLInputElement>('input')!.click(); await flush();
+    }
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfigBatch).not.toHaveBeenCalled();
+    expect(saveItemProductionConfig).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('P002：请填写大于 0 的长');
+  });
   it('loads unequal saved layers and saves user-entered thickness with a sorted folding route', async () => {
     const { state, saved } = mountModal(); await flush();
     expect(getProductionOrder).toHaveBeenCalledWith(1); expect(getRouteOptions).toHaveBeenCalledWith(2);

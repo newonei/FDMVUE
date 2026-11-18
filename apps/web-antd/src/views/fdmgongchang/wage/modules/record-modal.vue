@@ -11,6 +11,7 @@ import { Alert, DatePicker, Input, InputNumber, Modal, Radio, Select } from 'ant
 import { createWorkRecords } from '#/api/fdmgongchang/wage';
 
 import { factoryToday } from '../../shared/factory-date';
+import { quantityPrecision } from '../../shared/quantity';
 import { sliceWageAllocation } from '../../shared/slice-wage';
 import { CATEGORY_LABELS, formatMoney, toNum } from '../../shared/wage';
 
@@ -197,7 +198,7 @@ async function submit() {
             <InputNumber
               id="record-fill-all"
               :min="0"
-              :precision="byHours ? 2 : 3"
+              :precision="byHours ? 2 : quantityPrecision(item.unit)"
               :style="{ width: '6rem' }"
               size="small"
               @change="(v) => fillAll((v as null | number) ?? null)"
@@ -211,7 +212,7 @@ async function submit() {
             :aria-label="`${nameOf(id)} ${valueLabel}`"
             :max="byHours ? 24 : undefined"
             :min="0"
-            :precision="byHours ? 2 : 3"
+            :precision="byHours ? 2 : quantityPrecision(item.unit)"
             :value="values[id] ?? undefined"
             :style="{ width: '8rem' }"
             size="small"

@@ -69,6 +69,16 @@ vi.mock('../components/AttachmentPanel.vue', () => ({
 vi.mock('../components/RecordTable.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
+vi.mock('../components/LineTable.vue', () => ({
+  default: defineComponent({
+    props: ['dataSource', 'columns'],
+    setup: (props) => () =>
+      h('section', {
+        'data-request-lines': JSON.stringify(props.dataSource),
+        'data-line-columns': JSON.stringify(props.columns),
+      }),
+  }),
+}));
 vi.mock('./LinkedRecordTable.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
@@ -102,6 +112,7 @@ vi.mock('ant-design-vue', () => {
     setup: (props, ctx) => () =>
       props.open
         ? h('section', { 'data-parent-detail': true }, [
+            ctx.slots.extra?.(),
             ctx.slots.default?.(),
             h(
               'button',
@@ -255,6 +266,25 @@ afterEach(() => {
 });
 
 describe('related document creation inside the source detail', () => {
+  it('已全部占用的采购申请不再提供转单按钮，刷新后按最新余额恢复', async () => {
+    const contract = contractFixture();
+    const request = contract.requests![0]!;
+    (request.items as BusinessRecord[])[0]!.availableQuantity = 0;
+    mocks.contract.mockResolvedValue(contract);
+    const view = await mount();
+    view.props.kind = 'requests';
+    view.props.row = {
+      ...view.props.row,
+      id: String(request.id),
+      record: request,
+    };
+    await settle();
+    expect(view.host.textContent).not.toContain('转成采购单');
+    (request.items as BusinessRecord[])[0]!.availableQuantity = 60;
+    button(view.host, '刷新当前单据').click();
+    await settle();
+    expect(button(view.host, '转成采购单')).toBeDefined();
+  });
   it('opens a new quote on the current page with the source task and contract fixed', async () => {
     const view = await mount();
     button(view.host, '新增供应商报价').click();

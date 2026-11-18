@@ -16,6 +16,7 @@ import { productStageValue } from '#/views/fdmplatform/products/attributes';
 import { specText } from '../../production-order/shared';
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { factoryToday } from '../../shared/factory-date';
+import { quantityPrecision } from '../../shared/quantity';
 import { dateText, dayLabel, rescaleMaterials, stageTaskPlan, TASK_OUTPUT_STAGES, TASK_STAGE_LABELS, taskOutputAttrs } from '../../shared/schedule';
 import { attrSummary, isLayered, makeLabels, parseSizeText, stageFields, toNumber } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
@@ -583,7 +584,7 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
       <label for="task-form-quantity" class="flex flex-col gap-1 sm:col-span-2">
         计划产出数量
         <span class="flex max-w-sm items-center gap-2">
-          <InputNumber id="task-form-quantity" :min="0" :value="quantity ?? undefined" class="flex-1" @update:value="(v) => inputQuantity(v as null | number | undefined)" />
+          <InputNumber id="task-form-quantity" :min="0" :precision="quantityPrecision(unit)" :value="quantity ?? undefined" class="flex-1" @update:value="(v) => inputQuantity(v as null | number | undefined)" />
           <span class="w-6 shrink-0 text-foreground">{{ unit }}</span>
         </span>
         <span v-if="stagePlan?.hint">{{ stagePlan.hint }}</span>

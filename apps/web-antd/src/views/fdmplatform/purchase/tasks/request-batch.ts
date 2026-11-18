@@ -70,6 +70,12 @@ function itemTitle(contract: Contract, item: BusinessRecord) {
 
 /** Same rule as the server: request quantity minus active tasks and migrated opening assignments. */
 export function unassignedQuantity(contract: Contract, item: BusinessRecord) {
+  if (item.unassignedQuantity !== undefined) {
+    const remaining = decimal(item.unassignedQuantity);
+    return remaining.isFinite()
+      ? BigNumber.maximum(0, remaining)
+      : new BigNumber(0);
+  }
   let allocated = decimal(item.openingAssignedQuantity ?? 0);
   if (!allocated.isFinite()) allocated = new BigNumber(0);
   for (const assignment of contract.assignments ?? [])

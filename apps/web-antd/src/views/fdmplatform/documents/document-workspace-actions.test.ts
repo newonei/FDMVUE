@@ -148,7 +148,31 @@ vi.mock('ant-design-vue', () => {
     Card: block,
     Input: { Search: search },
     Modal: block,
-    Select: block,
+    Select: defineComponent({
+      props: ['value', 'options', 'placeholder'],
+      emits: ['update:value', 'change'],
+      setup: (props, ctx) => () =>
+        h(
+          'select',
+          {
+            value: props.value ?? '',
+            'aria-label': props.placeholder,
+            onChange: (event: Event) => {
+              const value =
+                (event.target as HTMLSelectElement).value || undefined;
+              ctx.emit('update:value', value);
+              ctx.emit('change', value);
+            },
+          },
+          [
+            h('option', { value: '' }, '全部'),
+            ...(props.options ?? []).map(
+              (entry: { label: string; value: string }) =>
+                h('option', { value: entry.value }, entry.label),
+            ),
+          ],
+        ),
+    }),
     Space: block,
     Table: table,
     TabPane: block,
@@ -238,6 +262,90 @@ afterEach(() => {
 });
 
 describe('document list shortcuts and retained context', () => {
+  it('日常申请默认只查待转余额，可切换全部历史和独立转单进度', async () => {
+    mocks.page.mockResolvedValue({ list: [], total: 0 });
+    const view = await mountWorkspace('requests', '?scope=current');
+    expect(mocks.page).toHaveBeenCalledWith(
+      'purchase-requests',
+      expect.objectContaining({
+        pendingTransfer: true,
+        transferStatus: undefined,
+        contractId: undefined,
+      }),
+    );
+    const progress = view.host.querySelector<HTMLSelectElement>(
+      '[aria-label="全部转采购进度"]',
+    )!;
+    progress.value = 'TRANSFERRED';
+    progress.dispatchEvent(new Event('change'));
+    await settle();
+    expect(mocks.page).toHaveBeenCalledWith(
+      'purchase-requests',
+      expect.objectContaining({
+        pendingTransfer: undefined,
+        transferStatus: 'TRANSFERRED',
+        contractId: undefined,
+      }),
+    );
+    progress.value = '';
+    progress.dispatchEvent(new Event('change'));
+    await settle();
+    expect(mocks.page).toHaveBeenCalledWith(
+      'purchase-requests',
+      expect.objectContaining({
+        pendingTransfer: undefined,
+        transferStatus: undefined,
+        contractId: undefined,
+      }),
+    );
+  });
+  it('待补齐和全部范围默认不限制转单进度，路由切换后重新采用对应范围默认值', async () => {
+    mocks.page.mockResolvedValue({ list: [], total: 0 });
+    const view = await mountWorkspace('requests', '?scope=pending');
+    const latestList = () =>
+      mocks.page.mock.calls.findLast(([, query]) => query.pageSize === 10)?.[1];
+    expect(latestList()).toMatchObject({
+      pendingCompletion: true,
+      pendingTransfer: undefined,
+      transferStatus: undefined,
+    });
+    await view.router.push('/documents?scope=current');
+    await settle();
+    expect(latestList()).toMatchObject({
+      pendingCompletion: false,
+      pendingTransfer: true,
+    });
+    await view.router.push('/documents?scope=all');
+    await settle();
+    expect(latestList()).toMatchObject({
+      pendingCompletion: undefined,
+      pendingTransfer: undefined,
+      transferStatus: undefined,
+    });
+  });
+  it('合同上下文默认显示全部转单进度，显式筛选仍保持合同范围', async () => {
+    mocks.page.mockResolvedValue({ list: [], total: 0 });
+    const view = await mountWorkspace('requests', '?contractId=contract-a');
+    const latestList = () =>
+      mocks.page.mock.calls.findLast(([, query]) => query.pageSize === 10)?.[1];
+    expect(latestList()).toMatchObject({
+      contractId: 'contract-a',
+      pendingCompletion: undefined,
+      pendingTransfer: undefined,
+      transferStatus: undefined,
+    });
+    const progress = view.host.querySelector<HTMLSelectElement>(
+      '[aria-label="全部转采购进度"]',
+    )!;
+    progress.value = 'TRANSFERRED';
+    progress.dispatchEvent(new Event('change'));
+    await settle();
+    expect(latestList()).toMatchObject({
+      contractId: 'contract-a',
+      pendingTransfer: undefined,
+      transferStatus: 'TRANSFERRED',
+    });
+  });
   it('retains pagination, search and the current action when another menu has unrelated query values', async () => {
     const view = await mountWorkspace();
     await search(view.host, '客户甲');

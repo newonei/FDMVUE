@@ -81,7 +81,7 @@ describe('contract finance display semantics', () => {
         other: 1,
         statusBreakdownAvailable: true,
       }),
-    ).toContain('其他待核对 1 笔');
+    ).toContain('其他记录 1 笔');
   });
   it('supports rolling deployment without inventing zero categories', () => {
     expect(receiptStatusDescription({ total: 3 })).toContain('未读取');

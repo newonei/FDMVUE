@@ -18,6 +18,7 @@ export interface PrintExtras {
   detailColumns: OrderDetailColumn[];
   accessories: OrderAccessory[];
   lineExtras: Record<string, OrderLineExtra>;
+  orderRemark?: string;
   packagingSteps: OrderPackagingStep[];
   sharedColumns: OrderSharedColumn[];
 }
@@ -31,6 +32,60 @@ export const MAX_STEP_IMAGES = 8;
 export const MAX_DETAIL_COLUMNS = 8;
 export const MAX_ADDITIONAL_LINES = 50;
 export const MAX_DETAIL_IMAGES = 6;
+
+export const PRODUCTION_EXTRA_FIELDS = [
+  'colorMode',
+  'frontColor',
+  'backColor',
+  'textureFront',
+  'textureBack',
+  'weight',
+] as const satisfies readonly (keyof OrderLineExtra)[];
+export type ProductionExtraField = (typeof PRODUCTION_EXTRA_FIELDS)[number];
+
+/** 已保存采购要求优先；未设置时只读取本单产品快照。空串保留清空意图。 */
+export function productionExtrasFrom(
+  saved: OrderLineExtra,
+  snapshot: Record<string, unknown>,
+): OrderLineExtra {
+  const result = { ...saved };
+  for (const field of PRODUCTION_EXTRA_FIELDS) {
+    if (Object.hasOwn(result, field)) continue;
+    const value = snapshot[field];
+    if (typeof value === 'string' && value.trim())
+      (result as Record<string, unknown>)[field] = value.trim();
+  }
+  // 历史色号也供逐面编辑回显，颜色方式保留待核实，不据此推断单色。
+  for (const field of ['frontColor', 'backColor'] as const)
+    if (
+      !Object.hasOwn(result, field) &&
+      typeof snapshot.colorCode === 'string' &&
+      snapshot.colorCode.trim()
+    )
+      result[field] = snapshot.colorCode.trim();
+  if (result.colorMode === 'SINGLE') {
+    result.backColor = result.frontColor ?? '';
+  }
+  return result;
+}
+
+/** 所选字段之外的值保持；只填空项也按每行现有值分别处理。 */
+export function applyProductionExtras(
+  rows: Record<string, OrderLineExtra>,
+  selectedIds: string[],
+  values: OrderLineExtra,
+  fields: ProductionExtraField[],
+  onlyEmpty = false,
+) {
+  for (const id of selectedIds) {
+    const row = (rows[id] ??= {});
+    for (const field of fields) {
+      if (onlyEmpty && row[field]?.trim() && row[field] !== 'UNKNOWN') continue;
+      (row as Record<string, unknown>)[field] = values[field]?.trim() ?? '';
+    }
+    if (row.colorMode === 'SINGLE') row.backColor = row.frontColor ?? '';
+  }
+}
 
 function cloneCells(cells?: Record<string, OrderDetailCell>) {
   return Object.fromEntries(
@@ -84,6 +139,7 @@ export function printExtrasFrom(
   catalog?: string[],
 ): PrintExtras {
   return {
+    orderRemark: details.orderRemark ?? '',
     detailColumns: (details.detailColumns ?? []).map((column) => ({
       ...column,
     })),
@@ -152,8 +208,13 @@ export function printExtrasPayload(value: PrintExtras) {
   const lineExtras: Record<string, OrderLineExtra> = {};
   for (const [id, row] of Object.entries(value.lineExtras)) {
     const clean: OrderLineExtra = {};
-    for (const key of ['customerColor', 'weight', 'model', 'remark'] as const)
+    for (const key of ['customerColor', 'model', 'remark'] as const)
       if (!blank(row[key])) clean[key] = row[key]!.trim();
+    // 生产字段的空串需要送到工厂，明确清空时不能又回落产品快照。
+    for (const key of PRODUCTION_EXTRA_FIELDS)
+      if (Object.hasOwn(row, key))
+        (clean as Record<string, unknown>)[key] = row[key]?.trim() ?? '';
+    if (clean.colorMode === 'SINGLE') clean.backColor = clean.frontColor ?? '';
     if (row.packQty) clean.packQty = row.packQty;
     if (row.imageId) clean.imageId = row.imageId;
     if (row.colorImageId) clean.colorImageId = row.colorImageId;
@@ -174,6 +235,7 @@ export function printExtrasPayload(value: PrintExtras) {
       }))
     : [];
   return {
+    orderRemark: value.orderRemark?.trim() ?? '',
     detailColumns: value.detailColumns.map((column) => ({
       ...column,
       title: column.title.trim(),
@@ -225,7 +287,7 @@ function lineKey(line: BusinessRecord) {
 }
 
 /**
- * 从历史采购单带过来：共用说明列、辅料勾选、包装步骤整份替换；明细补充按产品对上本单的行，对不上的行保持不变。
+ * 从历史采购单带过来：共用说明列、辅料勾选、包装步骤和订单备注整份替换；明细补充按产品对上本单的行，对不上的行保持不变。
  * images 为 历史单图片 id → 复制到本单后的新 id，没有对应的图片丢掉。
  */
 export function copyPrintExtras(
@@ -290,6 +352,7 @@ export function copyPrintExtras(
   return {
     matched,
     value: {
+      orderRemark: source.orderRemark ?? '',
       detailColumns: source.detailColumns.map((column) => ({ ...column })),
       additionalLines: source.additionalLines.map((row) => ({
         ...row,

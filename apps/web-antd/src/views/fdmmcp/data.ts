@@ -13,6 +13,15 @@ export const TOOL_RISK_META: Record<
   DESTRUCTIVE: { color: 'red', label: '修改/删除' },
 };
 
+export const API_OPERATION_STATUS_META: Record<
+  FdmMcpApi.ApiOperationStatus,
+  { color: string; label: string }
+> = {
+  READY: { color: 'green', label: '已支持' },
+  ADAPTER_REQUIRED: { color: 'orange', label: '需要适配' },
+  EXCLUDED: { color: 'default', label: '已排除' },
+};
+
 export const SCOPE_LABELS: Record<string, string> = {
   'fdm.read': '读取',
   'fdm.write': '修改',

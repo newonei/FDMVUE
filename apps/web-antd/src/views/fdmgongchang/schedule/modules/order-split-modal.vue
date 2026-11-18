@@ -362,7 +362,7 @@ async function release() {
             </template>
             <template v-else-if="column.key === 'spec'">{{ record.output ? materialText({ ...record.output, quantity: undefined }) : '待补生产规格' }}</template>
             <template v-else-if="column.key === 'quantity'">
-              <span v-if="record.quantity !== null && record.quantity !== undefined" class="font-medium">{{ record.quantity }} {{ record.unit }}</span><span v-else class="text-orange-600">待核算</span>
+              <span v-if="record.quantity !== null && record.quantity !== undefined" class="font-medium">{{ num(record.quantity) }} {{ record.unit }}</span><span v-else class="text-orange-600">待核算</span>
             </template>
             <template v-else-if="column.key === 'inputs'">
               <div v-for="(input, index) in record.inputs" :key="index" class="text-xs">{{ materialText(input) }}</div>

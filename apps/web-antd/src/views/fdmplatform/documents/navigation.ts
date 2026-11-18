@@ -305,7 +305,11 @@ export function relatedDocumentLinks(
       '来源采购单',
       'orders',
       id,
-      current?.supplierName ? `${current.supplierName} · 采购单` : undefined,
+      current
+        ? [current.code || current.name, current.supplierName]
+            .filter(Boolean)
+            .join(' · ') || '采购单'
+        : undefined,
     );
     if (current) {
       plan(current.planId);
@@ -328,6 +332,11 @@ export function relatedDocumentLinks(
     entityTarget('customer', contract.customerId),
   );
   request(record.requestId);
+  if (kind === 'requests') {
+    for (const linked of contract.purchaseOrders ?? []) {
+      if (linked.requestId === record.id) order(linked.id);
+    }
+  }
   assignment(record.assignmentId);
   quote(record.quoteId);
   plan(record.planId);

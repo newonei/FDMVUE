@@ -6,6 +6,7 @@ import { Page } from '@vben/common-ui';
 
 import { Card, Tabs } from 'ant-design-vue';
 
+import ApiCatalog from './modules/api-catalog.vue';
 import AuditGrid from './modules/audit-grid.vue';
 import ClientGrid from './modules/client-grid.vue';
 import ConnectionGrid from './modules/connection-grid.vue';
@@ -54,6 +55,15 @@ const activeKey = ref('connection');
           tab="工具目录"
         >
           <ToolCatalog />
+        </Tabs.TabPane>
+        <Tabs.TabPane
+          v-if="hasAccessByCodes(['fdmmcp:tool:query'])"
+          key="api"
+          tab="接口目录"
+        >
+          <div class="h-[calc(100vh-260px)] overflow-y-auto">
+            <ApiCatalog />
+          </div>
         </Tabs.TabPane>
       </Tabs>
     </Card>

@@ -217,6 +217,11 @@ function fieldError(item: Field, data: FormValues): string {
   )
     return `请填写${item.label}`;
   if (
+    item.maxLength !== undefined &&
+    String(value ?? '').length > item.maxLength
+  )
+    return `${item.label}不能超过 ${item.maxLength} 字`;
+  if (
     value !== undefined &&
     value !== '' &&
     (item.type === 'number' || item.type === 'decimal')
@@ -377,6 +382,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
     :width="definition?.lineFields ? 'min(1320px, calc(100vw - 40px))' : 920"
     :confirm-loading="saving"
     :ok-text="definition?.submitLabel || '提交'"
+    :ok-button-props="{ danger: definition?.action === 'CANCEL_RECEIPT' }"
     cancel-text="取消"
     :mask-closable="!saving"
     :closable="!saving"
@@ -494,6 +500,8 @@ function setValue(target: FormValues, key: string, value: unknown) {
             v-else-if="item.type === 'textarea'"
             :value="textValue(values[item.key])"
             :rows="3"
+            :maxlength="item.maxLength"
+            :show-count="item.maxLength !== undefined"
             @update:value="(value) => setValue(values, item.key, value)"
           />
           <Input
@@ -646,6 +654,7 @@ function setValue(target: FormValues, key: string, value: unknown) {
                         :aria-label="`第 ${index + 1} 行 ${item.label}`"
                         :value="textValue(line[item.key])"
                         :auto-size="{ minRows: 1, maxRows: 3 }"
+                        :maxlength="item.maxLength"
                         @update:value="
                           (value) => setValue(line, item.key, value)
                         "

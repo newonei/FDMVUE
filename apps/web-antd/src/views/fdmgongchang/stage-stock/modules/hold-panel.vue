@@ -11,6 +11,7 @@ import { Alert, Button, Input, InputNumber, message, Modal, Select, Spin, Table,
 
 import { getHolds, getHoldTrace, releaseHold, scrapHold } from '#/api/fdmgongchang/quality';
 
+import { quantityPrecision } from '../../shared/quantity';
 import { formatQty, processLabel as processLabelOf } from '../model';
 
 /**
@@ -178,7 +179,7 @@ const columns = [
           <Alert show-icon type="warning" message="报废的数量从库存扣掉；冻结前已经被领走一部分的话账面会变成负数，请盘点核对。" />
           <label class="flex items-center gap-2 text-sm" for="hold-scrap">
             报废数量
-            <InputNumber id="hold-scrap" v-model:value="scrapQty" :max="Number(acting.hold.quantity)" :min="0" :precision="3" class="w-40" />
+            <InputNumber id="hold-scrap" v-model:value="scrapQty" :max="Number(acting.hold.quantity)" :min="0" :precision="quantityPrecision(unitOf(acting.hold.stage))" class="w-40" />
             <span class="text-muted-foreground">少于冻结数量时其余解冻</span>
           </label>
         </template>

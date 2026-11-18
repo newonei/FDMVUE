@@ -107,6 +107,8 @@ export interface ProductQuery {
   companyId: number;
   pageNo: number;
   pageSize: number;
+  /** 按完整产品编号排序；省略时按最近修改时间排列。 */
+  codeOrder?: 'asc' | 'desc';
   keyword?: string;
   category?: string;
   material?: string;

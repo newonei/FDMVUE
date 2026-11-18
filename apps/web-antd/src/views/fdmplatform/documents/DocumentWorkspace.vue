@@ -29,10 +29,20 @@ import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
 import CompletionScopeFilter from '../components/CompletionScope.vue';
 import { useInMergedView } from '../components/merged-view';
-import { errorText, label, money, statusLabels } from '../data';
+import {
+  errorText,
+  label,
+  money,
+  receiptStatusLabel,
+  statusLabels,
+} from '../data';
 import { formatTemporalField } from '../date-display';
 import { personLabel } from '../directory';
 import { receiptFxDisplay } from '../finance/exchange-rates/model';
+import {
+  transferStatusLabel,
+  transferStatusOptions,
+} from '../purchase/request-transfer';
 import { channelFilter } from '../sales-channel';
 import BusinessDocumentDetail from './BusinessDocumentDetail.vue';
 import {
@@ -46,6 +56,7 @@ import { contractReferenceText, migrationCell } from './migration-display';
 import {
   actionTitle,
   allocationKind,
+  canCancelReceipt,
   documentDefinitions,
   documentStatuses,
   factoryHandoff,
@@ -141,6 +152,20 @@ const assignmentStatus = ref<string>();
 const scope = ref<CompletionScope>(
   scopeFromQuery(route.query.scope) ?? defaultCompletionScope(contractId.value),
 );
+const defaultTransferStatus = () =>
+  props.kind === 'requests' && !contractId.value && scope.value === 'current'
+    ? 'PENDING'
+    : undefined;
+const transferStatus = ref<string | undefined>(defaultTransferStatus());
+let transferStatusExplicit = false;
+function changeTransferStatus() {
+  transferStatusExplicit = true;
+  search();
+}
+function changeScope() {
+  if (!transferStatusExplicit) transferStatus.value = defaultTransferStatus();
+  search();
+}
 const pendingTotal = ref(0);
 const pageNo = ref(1);
 const pageSize = ref(10);
@@ -259,7 +284,13 @@ const handoff = computed(() =>
 );
 const statusOptions = computed(() =>
   (isIntake.value ? [] : documentStatuses(effectiveKind.value)).map(
-    (value) => ({ value, label: statusLabels[value] }),
+    (value) => ({
+      value,
+      label:
+        effectiveKind.value === 'receipts'
+          ? receiptStatusLabel(value)
+          : statusLabels[value],
+    }),
   ),
 );
 const assignmentOptions = computed(() =>
@@ -351,6 +382,10 @@ function lineCell(row: DocumentRow, key: string) {
   return undefined;
 }
 function cell(row: DocumentRow, key: string) {
+  if (key === 'transferStatus')
+    return transferStatusLabel(row.record.transferStatus);
+  if (effectiveKind.value === 'receipts' && key === 'status')
+    return receiptStatusLabel(row.record.status);
   if (key === 'allocationType') return allocationKind(row.record);
   if (key === 'issuerName') return invoiceIssuer(row.record) ?? '未填写';
   if (key === 'buyerInfo')
@@ -396,6 +431,14 @@ async function load() {
       status: status.value,
       assignmentStatus:
         effectiveKind.value === 'requests' ? assignmentStatus.value : undefined,
+      transferStatus:
+        effectiveKind.value === 'requests' && transferStatus.value !== 'PENDING'
+          ? transferStatus.value
+          : undefined,
+      pendingTransfer:
+        effectiveKind.value === 'requests' && transferStatus.value === 'PENDING'
+          ? true
+          : undefined,
       contractId: contractId.value,
       pendingCompletion: completionFilter(scope.value),
       salesChannel: channelFilter(props.salesChannel, contractId.value),
@@ -474,13 +517,16 @@ const hasSearch = computed(() =>
   Boolean(
     keyword.value.trim() ||
     (status.value && status.value !== defaultStatus()) ||
-    assignmentStatus.value,
+    assignmentStatus.value ||
+    transferStatus.value !== defaultTransferStatus(),
   ),
 );
 const emptyMessage = computed(() =>
   hasSearch.value ? '没有符合当前查询条件的单据' : kindEmptyMessage(),
 );
 function kindEmptyMessage() {
+  if (effectiveKind.value === 'requests' && transferStatus.value === 'PENDING')
+    return '当前没有可转采购的申请，可切换转采购进度查看历史申请';
   if (props.kind === 'tasks')
     return isIntake.value
       ? '当前没有未分派或部分分派的采购申请'
@@ -493,17 +539,33 @@ function clearSearch() {
   keyword.value = '';
   status.value = defaultStatus();
   assignmentStatus.value = undefined;
+  transferStatusExplicit = false;
+  transferStatus.value = defaultTransferStatus();
   search();
 }
 function actionSaved() {
   actionOpen.value = false;
   void load();
 }
+function cancelReceipt(row: DocumentRow) {
+  if (
+    row.standaloneId ||
+    row.blockReasons?.length ||
+    !canCancelReceipt(row.record, row.allowedActions)
+  )
+    return;
+  actionRow.value = row;
+  actionSource.value = undefined;
+  actionContractId.value = row.contractId;
+  selectedAction.value = 'CANCEL_RECEIPT';
+  actionOpen.value = true;
+}
 let workspaceContext = JSON.stringify([
   props.kind,
   procurementQueue.value,
   purchaseInvoice.value,
   contractId.value,
+  scopeFromQuery(route.query.scope),
 ]);
 watch(
   () => [
@@ -511,6 +573,7 @@ watch(
     procurementQueue.value,
     purchaseInvoice.value,
     contractId.value,
+    scopeFromQuery(route.query.scope),
     routeActive.value,
   ],
   () => {
@@ -520,6 +583,7 @@ watch(
       procurementQueue.value,
       purchaseInvoice.value,
       contractId.value,
+      scopeFromQuery(route.query.scope),
     ]);
     if (context === workspaceContext) return;
     workspaceContext = context;
@@ -536,6 +600,8 @@ watch(
     scope.value =
       scopeFromQuery(route.query.scope) ??
       defaultCompletionScope(contractId.value);
+    transferStatusExplicit = false;
+    transferStatus.value = defaultTransferStatus();
     pendingTotal.value = 0;
     if (!routeActive.value) return;
     void loadContext();
@@ -617,7 +683,7 @@ onMounted(async () => {
           <CompletionScopeFilter
             v-model="scope"
             :pending-total="pendingTotal"
-            @change="search"
+            @change="changeScope"
           />
           <Input.Search
             v-model:value="keyword"
@@ -642,6 +708,15 @@ onMounted(async () => {
             placeholder="全部分派进度"
             style="width: 180px"
             @change="search"
+          />
+          <Select
+            v-if="effectiveKind === 'requests'"
+            v-model:value="transferStatus"
+            :options="transferStatusOptions"
+            allow-clear
+            placeholder="全部转采购进度"
+            style="width: 180px"
+            @change="changeTransferStatus"
           />
           <Button v-if="hasSearch" @click="clearSearch">
             清除查询
@@ -799,6 +874,19 @@ onMounted(async () => {
                 </Button>
                 <Button type="link" @click="openRow(record as DocumentRow)">
                   {{ isIntake ? '查看申请' : '查看详情' }}
+                </Button>
+                <Button
+                  v-if="
+                    effectiveKind === 'receipts' &&
+                    !record.standaloneId &&
+                    !record.blockReasons?.length &&
+                    canCancelReceipt(record.record, record.allowedActions)
+                  "
+                  type="link"
+                  danger
+                  @click="cancelReceipt(record as DocumentRow)"
+                >
+                  撤销登记
                 </Button>
               </Space>
               <div

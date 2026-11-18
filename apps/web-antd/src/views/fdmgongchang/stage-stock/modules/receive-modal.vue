@@ -19,7 +19,8 @@ import {
 } from '#/api/fdmgongchang/stage-stock';
 
 import { factoryToday } from '../../shared/factory-date';
-import { normalizeForStage, RAW_CATEGORY_LABELS, stageFields } from '../model';
+import { quantityPrecision } from '../../shared/quantity';
+import { normalizeForStage, RAW_CATEGORY_LABELS, stageFields, stockUnit } from '../model';
 import AttrFields from './attr-fields.vue';
 
 /** 无采购单的原料、辅料入库（样品、客供、退料）与期初入库（上线时录入各阶段现有库存）。 */
@@ -240,7 +241,7 @@ async function submit() {
             id="receive-qty"
             v-model:value="quantity"
             :min="0"
-            :precision="3"
+            :precision="quantityPrecision(stockUnit(stage, attrs, stageOption?.unit))"
             class="w-full"
           />
         </label>

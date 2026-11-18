@@ -85,7 +85,7 @@ describe('planned workbench report quantities', () => {
     };
     const flush = async () => { for (let i = 0; i < 5; i++) await nextTick(); };
     mount(); await flush();
-    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('270.000');
+    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('270');
     const bad = document.querySelector<HTMLInputElement>('#bad-test')!;
     bad.value = '3'; bad.dispatchEvent(new Event('input', { bubbles: true }));
     await flush();
@@ -94,6 +94,6 @@ describe('planned workbench report quantities', () => {
     await flush();
     expect(job.outputs[0]!.goodQuantity).toBe(266);
     unmount?.(); mount(); await flush();
-    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('266.000');
+    expect(document.querySelector<HTMLInputElement>('#good-test')!.value).toBe('266');
   });
 });

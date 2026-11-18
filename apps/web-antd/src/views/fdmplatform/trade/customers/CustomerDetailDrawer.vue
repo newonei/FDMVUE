@@ -48,6 +48,7 @@ import {
   customerMissingFields,
   customerRegion,
   customerSourceLabel,
+  domesticCustomerFields,
   invoiceFields,
   invoiceTypeOptions,
 } from './model';
@@ -106,6 +107,13 @@ const tabs = computed(() => [
 ]);
 const missing = computed(() =>
   props.customer ? customerMissingFields(props.customer) : [],
+);
+const visibleFields = computed(() =>
+  customerFields.filter(
+    ([field]) =>
+      props.customer?.salesChannel === 'DOMESTIC' ||
+      !(domesticCustomerFields as readonly string[]).includes(field),
+  ),
 );
 const columns = [
   { title: '日期', key: 'date', width: 150 },
@@ -288,6 +296,14 @@ function close() {
             <Descriptions.Item label="客户来源">
               {{ customer.customerSource || '—' }}
             </Descriptions.Item>
+            <template v-if="customer.salesChannel === 'DOMESTIC'">
+              <Descriptions.Item label="客户类型">
+                {{ customer.customerType || '—' }}
+              </Descriptions.Item>
+              <Descriptions.Item label="所在行业">
+                {{ customer.industry || '—' }}
+              </Descriptions.Item>
+            </template>
             <Descriptions.Item label="联系人">
               {{ customer.contactName || '—' }}
             </Descriptions.Item>
@@ -340,7 +356,7 @@ function close() {
             :column="1"
           >
             <Descriptions.Item
-              v-for="[key, title] in customerFields"
+              v-for="[key, title] in visibleFields"
               :key="key"
               :label="title"
             >

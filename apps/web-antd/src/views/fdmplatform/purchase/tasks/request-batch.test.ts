@@ -14,9 +14,33 @@ import {
   requestQuoteRows,
   splitRow,
   totalFromPrice,
+  unassignedQuantity,
 } from './request-batch';
 
 const today = '2026-10-11';
+
+it('直接采购占用后按服务端待分派投影分派，不再用原申请量恢复额度', () => {
+  const current = {
+    items: [],
+    assignments: [],
+    requests: [
+      {
+        id: 'request',
+        items: [{ id: 'line', quantity: 100, unassignedQuantity: 50 }],
+      },
+    ],
+  } as unknown as Contract;
+  expect(
+    unassignedQuantity(current, {
+      id: 'line',
+      quantity: 100,
+      unassignedQuantity: 50,
+    }).toFixed(0),
+  ).toBe('50');
+  expect(assignRows(current, 'request')).toMatchObject([
+    { requestItemId: 'line', quantity: '50' },
+  ]);
+});
 
 function contract(): Contract {
   return {

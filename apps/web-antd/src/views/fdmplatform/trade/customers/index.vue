@@ -744,6 +744,24 @@ onBeforeUnmount(() => {
                   class="muted fdm-cell-line"
                   :title="record.customerSource"
                   >{{ record.customerSource || '客户来源未填写' }}</span>
+                <span
+                  v-if="
+                    record.salesChannel === 'DOMESTIC' &&
+                    (record.customerType || record.industry)
+                  "
+                  class="muted fdm-cell-line"
+                  :title="
+                    [record.customerType, record.industry]
+                      .filter(Boolean)
+                      .join(' · ')
+                  "
+                >
+                  {{
+                    [record.customerType, record.industry]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }}
+                </span>
               </div>
               <div v-else-if="column.key === 'source'" class="stack-cell">
                 <Tag

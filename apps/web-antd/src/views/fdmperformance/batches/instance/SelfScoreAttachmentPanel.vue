@@ -48,21 +48,57 @@ const emit = defineEmits<{
 const MAX_ATTACHMENT_COUNT = 20;
 const MAX_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024;
 const MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024;
+const ATTACHMENT_FORMAT_TEXT =
+  '支持 AI、PLT、PSD、CDR、EPS、CAD、ZIP / RAR / 7Z 压缩包及常用文档、图片';
 const ALLOWED_EXTENSIONS = [
   'pdf',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-  'txt',
-  'csv',
+  'png',
   'jpg',
   'jpeg',
-  'png',
   'webp',
+  'gif',
+  'bmp',
+  'doc',
+  'docx',
+  'docm',
+  'dot',
+  'dotx',
+  'dotm',
+  'xls',
+  'xlsx',
+  'xlsm',
+  'xlt',
+  'xltx',
+  'xltm',
+  'ppt',
+  'pptx',
+  'pptm',
+  'pot',
+  'potx',
+  'potm',
+  'pps',
+  'ppsx',
+  'ppsm',
+  'odt',
+  'ods',
+  'odp',
+  'rtf',
+  'csv',
+  'tsv',
+  'txt',
+  'ai',
+  'plt',
+  'eps',
+  'cdr',
+  'psd',
+  'psb',
+  'dwg',
+  'dxf',
+  'tif',
+  'tiff',
   'zip',
+  'rar',
+  '7z',
 ] as const;
 const ACCEPT = ALLOWED_EXTENSIONS.map((extension) => `.${extension}`).join(',');
 
@@ -172,7 +208,7 @@ function beforeUpload(file: File) {
       fileExtension(file.name) as (typeof ALLOWED_EXTENSIONS)[number],
     )
   ) {
-    message.error(`不支持 ${file.name} 的文件格式`);
+    message.error(`不支持 ${file.name} 的文件格式，${ATTACHMENT_FORMAT_TEXT}`);
     return Upload.LIST_IGNORE;
   }
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
@@ -413,8 +449,7 @@ async function downloadAttachment(attachment: JixiaoApi.SelfScoreAttachment) {
       </p>
       <p class="ant-upload-text">点击或拖拽上传自评佐证材料</p>
       <p class="ant-upload-hint">
-        最多 20 个，单个不超过 20 MB、合计不超过 100 MB；支持常用文档、图片和
-        ZIP 压缩包
+        最多 20 个，单个不超过 20 MB、合计不超过 100 MB；{{ ATTACHMENT_FORMAT_TEXT }}
       </p>
     </Upload.Dragger>
 

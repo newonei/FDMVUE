@@ -46,6 +46,26 @@ function row(extra = {}) {
 }
 
 describe('新建采购单表单', () => {
+  it('保留申请及任务来源，同一申请明细多行合计不得超过可转余额', () => {
+    const first = row({
+      contractItemId: 'ci',
+      requestItemId: 'ri',
+      assignmentId: 'task',
+      quantity: '40',
+      unitPrice: '1',
+      availableQuantity: '60',
+    });
+    const second = { ...first, key: 'r2', quantity: '30' };
+    expect(
+      entryErrors([first, second], { supplierId: 's', companyId: 1 }).lines,
+    ).toEqual({
+      r1: '本次最多可转 60',
+      r2: '本次最多可转 60',
+    });
+    expect(
+      entryPayload([first], { companyId: 1, supplierId: 's' }, 'key').lines[0],
+    ).toMatchObject({ requestItemId: 'ri', assignmentId: 'task' });
+  });
   it('完整保留来源的结构资料，提交只传可信来源 ID', () => {
     const line = {
       ...row({ quantity: '10', unitPrice: '12' }),
