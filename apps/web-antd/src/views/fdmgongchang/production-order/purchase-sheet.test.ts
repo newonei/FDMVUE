@@ -6,6 +6,7 @@ import PurchaseSheet from './modules/purchase-sheet.vue';
 
 vi.mock('#/api/fdmgongchang/production-order', () => ({
   getPurchaseImage: vi.fn(),
+  getTargetOptions: vi.fn().mockRejectedValue(new Error('字典暂不可用')),
   getPurchaseSheet: vi.fn().mockResolvedValue({
     details: {}, order: { lines: [{ id: 'line', skuName: '双色垫', quantity: 20, unit: '条',
       specification: '6mm', material: 'TPE', size: '183*61*0.6cm',
