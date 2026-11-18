@@ -118,6 +118,10 @@ vi.mock('ant-design-vue', () => {
             props.dataSource.map((row) =>
               h('div', { 'data-row': row.rowNumber }, [
                 `${row.code} ${row.message}`,
+                slots.bodyCell?.({
+                  column: { key: 'configuration' },
+                  record: row,
+                }),
                 slots.bodyCell?.({ column: { key: 'action' }, record: row }),
               ]),
             ),
@@ -237,6 +241,37 @@ beforeEach(() => {
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
 describe('产品 Excel 导入交互', () => {
+  it('外采行允许生产参数为空，预览和导入结果都不标为待补齐', async () => {
+    const original = previewResult();
+    const row = { ...original.rows[0]!, productSource: '外采' };
+    const preview: ProductImportResult = {
+      ...original,
+      totalCount: 1,
+      errorCount: 0,
+      skippedCount: 0,
+      rows: [row],
+    };
+    api.preview.mockResolvedValue(preview);
+    api.submit.mockResolvedValue({
+      ...preview,
+      readyCount: 0,
+      createdCount: 1,
+      rows: [{ ...row, status: 'IMPORTED' }],
+    });
+    const { button, choose, host, imported } = await mountDialog();
+    await choose(new File(['external'], 'external.xlsx'));
+    await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
+    expect(host.textContent).toContain('长宽厚按需维护');
+    expect(
+      host.querySelector('.import-results div:last-child strong')?.textContent,
+    ).toBe('0');
+    button('导入 1 个有效产品').click();
+    await vi.waitFor(() => expect(imported).toHaveBeenCalledOnce());
+    expect(
+      host.querySelector('.import-results div:last-child strong')?.textContent,
+    ).toBe('0');
+  });
+
   it('完整配置命中已有 SKU 时允许仅复用批次提交，不把复用统计为新增', async () => {
     const reused = {
       ...previewResult(),

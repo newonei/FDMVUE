@@ -46,6 +46,7 @@ type Choices =
   | 'matTypes'
   | 'patternModes'
   | 'patterns'
+  | 'sources'
   | 'stages'
   | 'states'
   | 'textures';
@@ -55,7 +56,6 @@ interface Field {
   choices?: Choices;
   max?: number;
   multiline?: boolean;
-  existingOnly?: boolean;
 }
 const sections: { fields: Field[]; key: string; label: string }[] = [
   {
@@ -64,6 +64,7 @@ const sections: { fields: Field[]; key: string; label: string }[] = [
     fields: [
       { key: '产品编号', max: 128 },
       { key: '产品名称', max: 200 },
+      { key: '产品来源', choices: 'sources' },
       { key: '产品类别', choices: 'categories' },
       { key: '产品状态', choices: 'states' },
       { key: '单位', max: 64 },
@@ -80,18 +81,18 @@ const sections: { fields: Field[]; key: string; label: string }[] = [
       { key: '长度(mm)', label: '长度（mm）', max: 40 },
       { key: '宽度(mm)', label: '宽度（mm）', max: 40 },
       { key: '成品厚度(mm)', label: '成品厚度（mm）', max: 40 },
+      { key: '制造结构', choices: 'construction' },
+      { key: '正面层厚度(mm)', max: 40 },
+      { key: '反面层厚度(mm)', max: 40 },
       { key: '颜色模式', choices: 'colorModes' },
       { key: '正面颜色', choices: 'colors' },
       { key: '反面颜色', choices: 'colors' },
+      { key: '颜色编码', choices: 'colors' },
       { key: '正面压花', label: '正面纹路', choices: 'textures' },
       { key: '反面压花', label: '反面纹路', choices: 'textures' },
       { key: '雕刻状态', choices: 'patternModes' },
       { key: '激光图案', choices: 'patterns' },
       { key: '图案生产版本', max: 100 },
-      { key: '颜色编码', choices: 'colors', existingOnly: true },
-      { key: '制造结构', choices: 'construction', existingOnly: true },
-      { key: '正面层厚度(mm)', max: 40, existingOnly: true },
-      { key: '反面层厚度(mm)', max: 40, existingOnly: true },
     ],
   },
   {
@@ -126,6 +127,10 @@ const staticChoices = {
     { value: 'NONE', label: '不雕刻' },
     { value: 'LASER', label: '激光雕刻' },
     { value: 'UNKNOWN', label: '待确认' },
+  ],
+  sources: [
+    { value: '自产', label: '自产' },
+    { value: '外采', label: '外采' },
   ],
   states: [
     { value: '启用', label: '启用' },
@@ -191,15 +196,6 @@ const changes = computed(() =>
   ),
 );
 const changedCount = computed(() => Object.keys(changes.value).length);
-const visibleSections = computed(() =>
-  sections.map((section) => ({
-    ...section,
-    fields: section.fields.filter(
-      (field) =>
-        !field.existingOnly || Object.hasOwn(original.value, field.key),
-    ),
-  })),
-);
 
 async function loadOptions() {
   const run = ++sequence;
@@ -226,7 +222,7 @@ function initialSection() {
   const issue = problems.value.join('；');
   if (/颜色|压花|纹路|成品厚度|长度|宽度|层厚|雕刻|图案|制造结构/.test(issue))
     return 'manufacturing';
-  if (visibleSections.value[2]?.fields.some(({ key }) => issue.includes(key)))
+  if (sections[2]?.fields.some(({ key }) => issue.includes(key)))
     return 'other';
   return 'product';
 }
@@ -268,7 +264,9 @@ function readChoice(source: Choices, input: string) {
     source === 'stages' ? (stageAliases.get(value) ?? value) : value;
   const byCode = options.value[source].find(
     (option) =>
-      option.value === (source === 'stages' ? lookup.toUpperCase() : lookup),
+      option.value === (source === 'stages' ? lookup.toUpperCase() : lookup) ||
+      (['colors', 'matTypes', 'patterns', 'textures'].includes(source) &&
+        value === `${option.label}（${option.value}）`),
   );
   if (byCode) return byCode.value;
   const byLabel = options.value[source].filter(
@@ -278,7 +276,7 @@ function readChoice(source: Choices, input: string) {
 }
 
 const rows = computed(() =>
-  visibleSections.value.map((section) => ({
+  sections.map((section) => ({
     ...section,
     fields: section.fields.map((field) => {
       const raw = draft.value[field.key] ?? '';

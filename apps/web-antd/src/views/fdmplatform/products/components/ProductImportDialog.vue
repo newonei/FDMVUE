@@ -90,12 +90,19 @@ const importableCount = computed(
     (result.value?.readyCount ?? 0) +
     (completed.value ? 0 : reusableCount.value),
 );
+function missingConfiguration(
+  source: ProductImportRow['productSource'],
+  values: ProductImportRow['values'] = {},
+) {
+  return source === '外采' ? [] : configurationMissingFields(values);
+}
+
 const incompleteCount = computed(
   () =>
     result.value?.rows.filter(
       (row) =>
         row.status !== 'ERROR' &&
-        configurationMissingFields(row.values).length > 0,
+        missingConfiguration(row.productSource, row.values).length > 0,
     ).length ?? 0,
 );
 const rows = computed(() =>
@@ -309,7 +316,7 @@ async function downloadTemplate() {
       <div v-if="!result" class="import-template-row">
         <div>
           <strong>产品信息导入模板</strong>
-          <p>兼容「产品信息导入模版0226.xlsx」，每次最多 200 行、10 MB。</p>
+          <p>新版模板带系统下拉选项。兼容旧表，每次最多 200 行、10 MB。</p>
         </div>
         <Button :loading="downloading" @click="downloadTemplate">
           下载 Excel 模板
@@ -341,7 +348,7 @@ async function downloadTemplate() {
         <span class="import-muted">{{
           completed
             ? '本次导入已完成，选择新文件可继续导入。'
-            : '长宽厚填写成品毫米数；单色只填正面颜色，反面自动同色；正反纹路分别填写，开片厚度自动计算。'
+            : '旧表可以在预览中逐行选择产品来源，然后重新校验。'
         }}</span>
         <Space>
           <Button
@@ -369,8 +376,8 @@ async function downloadTemplate() {
         v-if="!result"
         type="info"
         show-icon
-        message="使用一张产品档案表，每行填写一个具体 SKU 的名称、长宽厚、单双色、正反颜色、正反纹路和雕刻图案生产版本。完整配置相同会复用已有 SKU，配置不同则新增。"
-        description="只填写成品厚度，无需填写两面层厚。单色正面选一种颜色，反面可空并自动同色；双色填写两种不同颜色。正反纹路独立填写，无纹路明确选择无纹路；不雕刻明确选择无雕刻。旧表缺失配置保持待核实。"
+        message="先选择产品来源。外采填写编号、名称等基础资料，启用时补齐规格和单位。"
+        description="自产需填成品长宽厚、颜色、纹路和雕刻状态。尺寸用 mm。制造结构可留空并按单双色计算，选双层时填写两面层厚。激光雕刻需选图案并填生产版本。"
       />
       <template v-if="result">
         <Alert
@@ -462,10 +469,19 @@ async function downloadTemplate() {
             <div v-else-if="column.key === 'configuration'">
               <div>
                 {{
-                  productDimensionsText(record.values ?? {}) || '长宽厚待补齐'
+                  productDimensionsText(record.values ?? {}) ||
+                  (record.productSource === '外采'
+                    ? '长宽厚按需维护'
+                    : '长宽厚待补齐')
                 }}
               </div>
-              <div>{{ productPatternText(record.values ?? {}) }}</div>
+              <div
+                v-if="
+                  record.productSource !== '外采' || record.values?.patternMode
+                "
+              >
+                {{ productPatternText(record.values ?? {}) }}
+              </div>
               <div
                 v-if="productSliceThicknessText(record.values ?? {})"
                 class="import-muted"
@@ -479,20 +495,34 @@ async function downloadTemplate() {
                 {{ productThicknessProcessText(record.values ?? {}) }}
               </div>
               <Tag
-                v-if="configurationMissingFields(record.values ?? {}).length"
+                v-if="
+                  missingConfiguration(record.productSource, record.values)
+                    .length
+                "
                 color="orange"
               >
                 资料待补齐
               </Tag>
               <div
-                v-if="configurationMissingFields(record.values ?? {}).length"
+                v-if="
+                  missingConfiguration(record.productSource, record.values)
+                    .length
+                "
                 class="import-muted"
               >
-                {{ configurationMissingFields(record.values ?? {}).join('、') }}
+                {{
+                  missingConfiguration(
+                    record.productSource,
+                    record.values,
+                  ).join('、')
+                }}
               </div>
             </div>
             <div v-else-if="column.key === 'category'">
               {{ record.values?.category || '未分类' }}
+              <div v-if="record.productSource" class="import-muted">
+                {{ record.productSource }}
+              </div>
               <div class="import-muted">
                 {{ record.values?.active === false ? '未启用' : '已启用' }}
               </div>

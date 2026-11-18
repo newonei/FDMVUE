@@ -193,6 +193,7 @@ export interface ProductImportRow {
   rowNumber: number;
   code: string;
   name: string;
+  productSource?: string;
   status: 'ERROR' | 'IMPORTED' | 'READY' | 'REUSE' | 'REUSED' | 'SKIPPED';
   message: string;
   productId?: string;
