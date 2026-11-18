@@ -24,7 +24,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Empty,
   Form,
   Input,
   InputNumber,
@@ -50,19 +49,16 @@ import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 import { errorText, money } from '../../data';
 import { formatTemporalField } from '../../date-display';
 import { useEntityDetail } from '../../documents/useEntityDetail';
-import { productProcessText } from '../attributes';
 import {
   productCategoryGroupName,
   productCategoryGroups,
 } from '../category-model';
-import { currencyOptions, missingProductFields, taxOptions } from '../model';
-import ProductCategoryPanel from './ProductCategoryPanel.vue';
-import ProductColorSummary from './ProductColorSummary.vue';
+import { currencyOptions, taxOptions } from '../model';
+import ProductCatalog from './ProductCatalog.vue';
 import ProductDetailDrawer from './ProductDetailDrawer.vue';
 import ProductEditor from './ProductEditor.vue';
 import ProductFiles from './ProductFiles.vue';
 import ProductPicker from './ProductPicker.vue';
-import ProductStageSelect from './ProductStageSelect.vue';
 
 import '../../components/compact-tables.css';
 
@@ -86,9 +82,6 @@ function catalogPage(key: string, fallback: number) {
     : fallback;
 }
 const companyId = 0;
-const title = computed(() =>
-  props.mode === 'catalog' ? '产品档案' : '销售价格',
-);
 const panelError = ref('');
 const loading = ref(false);
 const pageNo = ref(catalogPage('catalogPage', 1));
@@ -128,7 +121,7 @@ const categoryTitle = computed(() => {
   if (categoryGroup.value === 'UNASSIGNED') return '待归类';
   const group = productCategoryGroupName(categoryGroup.value);
   if (group) return group;
-  if (category.value === undefined) return '产品档案';
+  if (category.value === undefined) return '全部产品';
   return categoryLabel.value || (category.value ? '所选分类' : '未分类');
 });
 /** 分类计数跟随已提交的搜索条件，输入过程中不重算 */
@@ -148,7 +141,7 @@ const importOpen = ref(false);
 const importMounted = ref(false);
 const colorRepairOpen = ref(false);
 const colorRepairMounted = ref(false);
-const imageErrors = ref(new Set<string>());
+
 const detailOpen = ref(false);
 const selectedProduct = ref<Product>();
 const filesProduct = ref<Product>();
@@ -176,9 +169,6 @@ const priceForm = reactive({
 let sequence = 0;
 let detailRefreshSequence = 0;
 let activatedOnce = false;
-const list = computed(() =>
-  props.mode === 'catalog' ? products.value : prices.value,
-);
 const hasFilters = computed(() =>
   Boolean(
     keyword.value ||
@@ -188,59 +178,19 @@ const hasFilters = computed(() =>
     active.value !== undefined,
   ),
 );
-const pageSelectableCount = computed(
-  () => products.value.filter((product) => product.selectable).length,
-);
-const pageIncompleteCount = computed(
-  () =>
-    products.value.filter((product) => product.active && !product.selectable)
-      .length,
-);
 const codeSortOrder = computed(() => {
   if (codeOrder.value === undefined) return null;
   return codeOrder.value === 'asc' ? ('ascend' as const) : ('descend' as const);
 });
-const columns = computed(() =>
-  props.mode === 'catalog'
-    ? [
-        // 产品编号独立展示，支持对全部匹配产品排序后分页。
-        { title: '产品名称', key: 'product', width: 240 },
-        {
-          title: '产品编号',
-          key: 'code',
-          dataIndex: 'code',
-          width: 150,
-          sorter: true,
-          sortOrder: codeSortOrder.value,
-          sortDirections: ['descend', 'ascend'] as ('ascend' | 'descend')[],
-        },
-        { title: '颜色 / 制造结构', key: 'colors', width: 230 },
-        { title: '生产分类 / 工艺属性', key: 'production', width: 270 },
-        { title: '产品型号', key: 'text', dataIndex: 'model', width: 120 },
-        { title: '产品克重', key: 'text', dataIndex: 'weight', width: 90 },
-        { title: '材质', key: 'text', dataIndex: 'material', width: 110 },
-        { title: '产品规格', key: 'text', dataIndex: 'spec', width: 170 },
-        { title: '定制说明', key: 'text', dataIndex: 'printing', width: 160 },
-        {
-          title: '产品类别',
-          key: 'category',
-          dataIndex: 'category',
-          width: 110,
-        },
-        { title: '单位', dataIndex: 'unit', width: 60 },
-        { title: '可用状态', key: 'state', width: 130 },
-        { title: '操作', key: 'action', width: 210, fixed: 'right' as const },
-      ]
-    : [
-        { title: '产品', key: 'priceProduct', width: 240 },
-        { title: '销售参考价', key: 'price' },
-        { title: '单位', dataIndex: 'unit' },
-        { title: '税费口径', key: 'tax' },
-        { title: '有效期', key: 'valid' },
-        { title: '启用', key: 'active' },
-        { title: '操作', key: 'action' },
-      ],
-);
+const priceColumns = [
+  { title: '产品', key: 'priceProduct', width: 240 },
+  { title: '销售参考价', key: 'price' },
+  { title: '单位', dataIndex: 'unit' },
+  { title: '税费口径', key: 'tax' },
+  { title: '有效期', key: 'valid' },
+  { title: '启用', key: 'active' },
+  { title: '操作', key: 'action' },
+];
 onMounted(() => {
   void load();
   if (props.mode === 'catalog') {
@@ -294,6 +244,10 @@ function productsImported() {
 function openImport() {
   importMounted.value = true;
   importOpen.value = true;
+}
+function openColorRepair() {
+  colorRepairMounted.value = true;
+  colorRepairOpen.value = true;
 }
 async function load(reset = false) {
   if (reset) pageNo.value = 1;
@@ -535,318 +489,119 @@ async function savePrice() {
   <Page auto-content-height>
     <div class="center-stack">
       <Alert v-if="panelError" type="error" show-icon :message="panelError" />
-      <header v-if="mode === 'catalog'" class="catalog-header">
-        <div>
-          <div class="catalog-eyebrow">产品中心</div>
-          <h1>产品目录</h1>
-          <p>维护产品规格、包装及标准资料，供合同选品使用。</p>
-        </div>
-        <Space wrap class="catalog-header-actions">
-          <Button :loading="loading" @click="refreshCatalog">刷新</Button>
-          <Button @click="openImport">Excel 导入</Button>
-          <Button
-            @click="
-              colorRepairMounted = true;
-              colorRepairOpen = true;
-            "
-          >
-            历史颜色补录
+      <ProductCatalog
+        v-if="mode === 'catalog'"
+        v-model:keyword="keyword"
+        v-model:active="active"
+        v-model:product-stage="productStage"
+        :applied-keyword="appliedKeyword"
+        :applied-product-stage="appliedProductStage"
+        :category="category"
+        :category-group="categoryGroup"
+        :category-refresh="categoryRefresh"
+        :category-title="categoryTitle"
+        :code-sort-order="codeSortOrder"
+        :company-id="companyId"
+        :has-filters="hasFilters"
+        :loading="loading"
+        :page-no="pageNo"
+        :page-size="pageSize"
+        :products="products"
+        :stage-options="stageOptions"
+        :total="total"
+        @category="chooseCategory"
+        @category-group="chooseCategoryGroup"
+        @change-table="changeTable"
+        @color-repair="openColorRepair"
+        @create="openProduct()"
+        @detail="openProductDetail"
+        @edit="openProduct"
+        @files="filesProduct = $event"
+        @import="openImport"
+        @refresh="refreshCatalog"
+        @remove="confirmDelete"
+        @reset="resetFilters"
+        @search="load(true)"
+      />
+      <Card v-else title="产品中心 · 销售价格" size="small">
+        <template #extra>
+          <Button size="small" :loading="loading" @click="load()">
+            刷新资料
           </Button>
-          <Button type="primary" @click="openProduct()">＋ 新建产品</Button>
-        </Space>
-      </header>
-      <div :class="{ 'catalog-layout': mode === 'catalog' }">
-        <aside v-if="mode === 'catalog'" class="catalog-side">
-          <ProductCategoryPanel
-            grouped
-            :company-id="companyId"
-            :value="category"
-            :category-group="categoryGroup"
-            :keyword="appliedKeyword"
-            :filters="{ productStage: appliedProductStage }"
-            :active="active === undefined ? undefined : active === 'true'"
-            :refresh-key="categoryRefresh"
-            @update:value="chooseCategory"
-            @select-group="chooseCategoryGroup"
+        </template>
+        <div class="center-stack">
+          <Alert
+            type="info"
+            show-icon
+            message="为本业务产品维护销售参考价，按币种、单位、税费口径和有效期匹配，共用产品及销售价格。"
           />
-        </aside>
-        <Card
-          :title="mode === 'catalog' ? undefined : `产品中心 · ${title}`"
-          size="small"
-          :class="{ 'catalog-card': mode === 'catalog' }"
-        >
-          <template #extra>
-            <Button
-              v-if="mode === 'prices'"
-              size="small"
-              :loading="loading"
-              @click="load()"
-            >
-              刷新资料
-            </Button>
-          </template>
-          <div class="center-stack">
-            <Alert
-              v-if="mode === 'prices'"
-              type="info"
-              show-icon
-              message="为本业务产品维护销售参考价，按币种、单位、税费口径和有效期匹配，共用产品及销售价格。"
+          <Space wrap>
+            <Select
+              v-model:value="currency"
+              :options="currencyOptions"
+              allow-clear
+              placeholder="全部币种"
+              style="width: 140px"
+              @change="load(true)"
             />
-            <form
-              v-if="mode === 'catalog'"
-              class="catalog-filters"
-              @submit.prevent="load(true)"
-            >
-              <label class="catalog-filter catalog-search">
-                <span>搜索产品</span>
-                <Input
-                  v-model:value="keyword"
-                  placeholder="名称 / SKU 编号"
-                  aria-label="搜索产品名称或 SKU 编号"
-                  allow-clear
-                />
-              </label>
-              <label class="catalog-filter">
-                <span>生产分类</span>
-                <ProductStageSelect
-                  allow-groups
-                  v-model:value="productStage"
-                  :options="stageOptions"
-                  aria-label="筛选生产分类"
-                  @update:value="load(true)"
-                />
-              </label>
-              <label class="catalog-filter">
-                <span>启用状态</span>
-                <Select
-                  v-model:value="active"
-                  :options="[
-                    { value: 'true', label: '已启用' },
-                    { value: 'false', label: '未启用' },
-                  ]"
-                  placeholder="全部状态"
-                  aria-label="启用状态"
-                  allow-clear
-                  @change="load(true)"
-                />
-              </label>
-              <div class="catalog-filter-actions">
-                <Button type="primary" html-type="submit" :loading="loading">
-                  查询
-                </Button>
-                <Button :disabled="!hasFilters" @click="resetFilters">
-                  重置
-                </Button>
-              </div>
-            </form>
-            <Space v-else wrap>
-              <Select
-                v-model:value="currency"
-                :options="currencyOptions"
-                allow-clear
-                placeholder="全部币种"
-                style="width: 140px"
-                @change="load(true)"
-              />
-              <Button type="primary" @click="load(true)">查询</Button>
-              <Button @click="openPrice()"> 新增销售价格 </Button>
-            </Space>
-            <div v-if="mode === 'catalog'" class="catalog-list-heading">
-              <div class="catalog-list-title">
-                <h2 :title="categoryTitle">{{ categoryTitle }}</h2>
-                <span class="catalog-count">{{ total }} 个</span>
-                <span v-if="hasFilters" class="muted">筛选结果</span>
-              </div>
-              <div class="catalog-page-summary">
-                <span>本页 <b>{{ products.length }}</b> 个</span>
-                <span class="catalog-ready">可选用 <b>{{ pageSelectableCount }}</b></span>
-                <span v-if="pageIncompleteCount" class="catalog-pending">待补资料 <b>{{ pageIncompleteCount }}</b></span>
-              </div>
-            </div>
-            <Table
-              class="fdm-business-table"
-              :class="{ 'catalog-table': mode === 'catalog' }"
-              size="small"
-              table-layout="fixed"
-              :data-source="list"
-              :columns="columns"
-              row-key="id"
-              :loading="loading"
-              :scroll="{ x: mode === 'catalog' ? 2030 : 1050 }"
-              :pagination="{
-                current: pageNo,
-                pageSize,
-                total,
-                showSizeChanger: true,
-                showTotal: (count: number) => `共 ${count} 条`,
-              }"
-              @change="changeTable"
-            >
-              <template v-if="mode === 'catalog'" #emptyText>
-                <Empty
-                  class="catalog-empty"
-                  :description="
-                    hasFilters ? '没有找到符合条件的产品' : '还没有产品档案'
-                  "
-                >
-                  <p>
-                    {{
-                      hasFilters
-                        ? '试试其他关键词，或重置筛选查看全部产品。'
-                        : '先建立产品资料，之后可在合同中直接选择使用。'
-                    }}
-                  </p>
-                  <Button v-if="hasFilters" @click="resetFilters">
-                    重置筛选
-                  </Button>
-                  <Space v-else>
-                    <Button @click="openImport">Excel 批量导入</Button>
-                    <Button type="primary" @click="openProduct()">
-                      新建产品
-                    </Button>
-                  </Space>
-                </Empty>
-              </template>
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'product'">
-                  <div class="catalog-product-cell">
-                    <div class="catalog-thumbnail" aria-hidden="true">
-                      <img
-                        v-if="
-                          record.imageUrl && !imageErrors.has(record.imageUrl)
-                        "
-                        :src="record.imageUrl"
-                        alt=""
-                        loading="lazy"
-                        @error="imageErrors.add(record.imageUrl)"
-                      />
-                      <span v-else>暂无图片</span>
-                    </div>
-                    <div class="catalog-product-copy">
-                      <button
-                        class="cell-line product-detail-link"
-                        :title="record.name"
-                        @click="openProductDetail(record.id)"
-                      >
-                        {{ record.name }}
-                      </button>
-                    </div>
-                  </div>
-                </template>
-                <span
-                  v-else-if="column.key === 'code'"
-                  class="cell-line"
-                  :title="record.code"
-                  >{{ record.code || '—' }}</span>
-                <ProductColorSummary
-                  v-else-if="column.key === 'colors'"
-                  :value="record as Product"
-                  construction
-                />
-                <span
-                  v-else-if="column.key === 'production'"
-                  :title="productProcessText(record as Product)"
-                  >{{ productProcessText(record as Product) || '未维护' }}</span>
-                <span
-                  v-else-if="column.key === 'category'"
-                  class="catalog-category"
-                  :title="record.category"
-                  >{{ record.category || '未分类' }}</span>
-                <span
-                  v-else-if="column.key === 'text'"
-                  class="cell-line"
-                  :title="record[column.dataIndex as string]"
-                  >{{ record[column.dataIndex as string] || '—' }}</span>
-                <template v-else-if="column.key === 'state'">
-                  <Tag
-                    :color="
-                      record.selectable
-                        ? 'green'
-                        : record.active
-                          ? 'orange'
-                          : 'default'
-                    "
-                  >
-                    {{
-                      record.selectable
-                        ? '可选用'
-                        : record.active
-                          ? '待补资料'
-                          : '未启用'
-                    }}
-                  </Tag>
-                  <div
-                    v-if="record.missingFields?.length"
-                    class="muted cell-line"
-                    :title="missingProductFields(record.missingFields || [])"
-                  >
-                    {{ missingProductFields(record.missingFields || []) }}
-                  </div>
-                </template>
-                <span
-                  v-else-if="column.key === 'priceProduct'"
-                  class="fdm-cell-line"
-                  :title="record.productName || record.productId"
-                  >{{ record.productName || record.productId }}</span>
-                <span v-else-if="column.key === 'price'">{{
-                  money(record.unitPrice, record.currency)
-                }}</span>
-                <span v-else-if="column.key === 'tax'">{{
-                  record.taxBasis === 'TAX_INCLUDED' ? '含税' : '未税'
-                }}</span>
-                <span v-else-if="column.key === 'valid'">{{ formatTemporalField('validFrom', record.validFrom) }} ～
-                  {{
-                    record.validUntil
-                      ? formatTemporalField('validUntil', record.validUntil)
-                      : '长期'
-                  }}</span>
-                <Tag
-                  v-else-if="column.key === 'active'"
-                  :color="record.active ? 'green' : 'default'"
-                >
-                  {{ record.active ? '启用' : '停用' }}
-                </Tag>
-                <template v-else-if="column.key === 'action'">
-                  <Space class="catalog-actions" :size="4">
-                    <Button
-                      v-if="mode === 'catalog'"
-                      type="link"
-                      size="small"
-                      @click="openProduct(record as Product)"
-                    >
-                      维护档案
-</Button><Button
-                      v-if="mode === 'catalog'"
-                      type="link"
-                      size="small"
-                      @click="filesProduct = record as Product"
-                    >
-                      标准资料
-</Button><Button
-                      v-if="mode === 'catalog'"
-                      type="link"
-                      size="small"
-                      danger
-                      @click="confirmDelete(record as Product)"
-                    >
-                      删除
-</Button><Button
-                      v-if="mode === 'prices'"
-                      type="link"
-                      @click="openPrice(record as ProductPrice)"
-                    >
-                      调整 / 停用
-                    </Button>
-                  </Space>
-                </template>
-              </template>
-            </Table>
-          </div>
-        </Card>
-      </div>
-      <p v-if="mode === 'catalog'" class="catalog-footnote">
-        完善规格、单位等资料后即可选入合同；历史合同保留保存时的产品信息。
-      </p>
+            <Button type="primary" @click="load(true)">查询</Button>
+            <Button @click="openPrice()">新增销售价格</Button>
+          </Space>
+          <Table
+            class="fdm-business-table"
+            size="small"
+            table-layout="fixed"
+            :data-source="prices"
+            :columns="priceColumns"
+            row-key="id"
+            :loading="loading"
+            :scroll="{ x: 1050 }"
+            :pagination="{
+              current: pageNo,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              showTotal: (count: number) => `共 ${count} 条`,
+            }"
+            @change="changeTable"
+          >
+            <template #bodyCell="{ column, record }">
+              <span
+                v-if="column.key === 'priceProduct'"
+                class="fdm-cell-line"
+                :title="record.productName || record.productId"
+                >{{ record.productName || record.productId }}</span>
+              <span v-else-if="column.key === 'price'">{{
+                money(record.unitPrice, record.currency)
+              }}</span>
+              <span v-else-if="column.key === 'tax'">{{
+                record.taxBasis === 'TAX_INCLUDED' ? '含税' : '未税'
+              }}</span>
+              <span v-else-if="column.key === 'valid'">
+                {{ formatTemporalField('validFrom', record.validFrom) }} ～
+                {{
+                  record.validUntil
+                    ? formatTemporalField('validUntil', record.validUntil)
+                    : '长期'
+                }}
+              </span>
+              <Tag
+                v-else-if="column.key === 'active'"
+                :color="record.active ? 'green' : 'default'"
+              >
+                {{ record.active ? '启用' : '停用' }}
+              </Tag>
+              <Button
+                v-else-if="column.key === 'action'"
+                type="link"
+                @click="openPrice(record as ProductPrice)"
+              >
+                调整 / 停用
+              </Button>
+            </template>
+          </Table>
+        </div>
+      </Card>
       <ProductImportDialog
         v-if="importMounted"
         :open="importOpen"
@@ -998,277 +753,5 @@ async function savePrice() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.catalog-header {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 4px 8px;
-}
-
-.catalog-eyebrow {
-  margin-bottom: 4px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.catalog-header h1 {
-  margin: 0;
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -0.5px;
-}
-
-.catalog-header p {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: hsl(var(--muted-foreground));
-}
-
-.catalog-filters {
-  display: grid;
-  grid-template-columns:
-    minmax(180px, 1.4fr) minmax(180px, 1.4fr) minmax(110px, 1fr)
-    auto;
-  gap: 16px;
-  align-items: end;
-  padding: 6px 4px 20px;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.catalog-layout {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.catalog-side {
-  position: sticky;
-  top: 12px;
-  height: calc(100vh - 180px);
-  min-height: 360px;
-  padding: 12px 10px;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-}
-
-.catalog-filter {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.catalog-filter :deep(.ant-cascader) {
-  width: 100%;
-}
-
-@media (max-width: 1280px) {
-  .catalog-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.catalog-filter-actions,
-.catalog-list-heading,
-.catalog-list-title,
-.catalog-page-summary {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.catalog-list-heading {
-  flex-wrap: wrap;
-  justify-content: space-between;
-  padding: 9px 4px 3px;
-}
-
-.catalog-list-title h2 {
-  max-width: 420px;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 15px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.catalog-count {
-  padding: 1px 8px;
-  font-size: 12px;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 8%);
-  border-radius: 6px;
-}
-
-.catalog-page-summary {
-  gap: 18px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-.catalog-ready {
-  color: #16a34a;
-}
-
-.catalog-pending {
-  color: #d97706;
-}
-
-.catalog-product-cell {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.catalog-thumbnail {
-  display: flex;
-  flex: 0 0 48px;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  overflow: hidden;
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-}
-
-.catalog-thumbnail img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.catalog-product-copy {
-  flex: 1;
-  min-width: 0;
-}
-
-.catalog-category {
-  font-size: 12px;
-}
-
-.catalog-empty {
-  padding: 30px 0;
-}
-
-.catalog-empty p {
-  margin: 8px 0 18px;
-  color: hsl(var(--muted-foreground));
-}
-
-.catalog-footnote {
-  margin: 0 4px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-
-@media (max-width: 900px) {
-  .catalog-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .catalog-side {
-    --category-list-max-height: 220px;
-
-    position: static;
-    height: auto;
-    min-height: 0;
-  }
-
-  .catalog-header {
-    flex-direction: column;
-    gap: 14px;
-    align-items: flex-start;
-  }
-
-  .catalog-filters {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .catalog-search {
-    grid-column: 1 / -1;
-  }
-
-  .catalog-filter-actions {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 480px) {
-  .catalog-filters {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  .catalog-page-summary {
-    gap: 10px;
-  }
-}
-
-.muted {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.catalog-table .cell-line {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 20px;
-  white-space: nowrap;
-}
-
-.catalog-table .muted {
-  margin-top: 0;
-  line-height: 18px;
-}
-
-.product-detail-link {
-  width: 100%;
-  padding: 0;
-  font-weight: 600;
-  color: #1677ff;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-}
-
-.product-detail-link:hover {
-  text-decoration: underline;
-}
-
-.product-detail-link:focus-visible {
-  outline: 2px solid #1677ff;
-  outline-offset: 2px;
-}
-
-.catalog-table :deep(.ant-table.ant-table-small .ant-table-thead > tr > th) {
-  padding: 8px 12px;
-}
-
-.catalog-table :deep(.ant-table.ant-table-small .ant-table-tbody > tr > td) {
-  padding: 8px 12px;
-  vertical-align: middle;
-}
-
-.catalog-table :deep(.catalog-actions) {
-  white-space: nowrap;
-}
-
-.catalog-table :deep(.catalog-actions .ant-btn) {
-  padding-inline: 4px;
 }
 </style>

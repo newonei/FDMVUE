@@ -333,10 +333,16 @@ vi.mock('ant-design-vue', () => {
     Checkbox: input,
     Descriptions: Object.assign(block, { Item: block }),
     Drawer: drawer,
+    Dropdown: defineComponent({
+      setup(_, { slots }) {
+        return () => h('div', [slots.default?.(), slots.overlay?.()]);
+      },
+    }),
     Empty: block,
     Form: Object.assign(block, { Item: block }),
     Input: input,
     InputNumber: input,
+    Menu: Object.assign(block, { Divider: block, Item: button }),
     Modal: defineComponent({
       props: { open: Boolean },
       setup(props, ctx) {
@@ -489,6 +495,35 @@ function clickText(host: ParentNode, text: string) {
 }
 
 describe('actual product detail and edit route integration', () => {
+  it('keeps expanded fields on demand and makes destructive actions available only for manageable products', async () => {
+    mocks.getProducts.mockResolvedValue({
+      list: [
+        { ...product('A'), model: '对照型号', printing: '定制说明样例' },
+        { ...product('B'), canManage: false },
+      ],
+      total: 2,
+    });
+    const { host } = await mountCenter();
+    await vi.waitFor(() =>
+      expect(host.querySelectorAll('.product-detail-link')).toHaveLength(2),
+    );
+    const row = host.querySelector('[data-table-row="A"]')!;
+    expect(row.textContent).not.toContain('对照型号');
+    const requestCount = mocks.getProducts.mock.calls.length;
+    clickText(host, '展开扩展列');
+    await nextTick();
+    expect(row.textContent).toContain('对照型号');
+    expect(row.textContent).toContain('定制说明样例');
+    expect(mocks.getProducts).toHaveBeenCalledTimes(requestCount);
+    const readOnly = host.querySelector('[data-table-row="B"]')!;
+    expect(readOnly.textContent).toContain('标准资料');
+    expect(readOnly.textContent).not.toContain('删除档案');
+    clickText(row, '删除档案');
+    await nextTick();
+    expect(host.textContent).toContain('产品A');
+    expect(host.textContent).toContain('删除后');
+  });
+
   it('filters by each catalog level and preserves the selected group when navigating to a product', async () => {
     mocks.getProductCategories.mockResolvedValue({
       total: 11,
@@ -536,6 +571,7 @@ describe('actual product detail and edit route integration', () => {
         ),
       ).toEqual(['自主生产6', '外采产品0', '原材料0', '设备耗材0', '待归类5']);
     });
+    const categoryRequests = mocks.getProductCategories.mock.calls.length;
     clickText(host, '折叠款0');
     await vi.waitFor(() =>
       expect(mocks.getProducts).toHaveBeenLastCalledWith(
@@ -556,6 +592,7 @@ describe('actual product detail and edit route integration', () => {
         }),
       ),
     );
+    expect(mocks.getProductCategories).toHaveBeenCalledTimes(categoryRequests);
     expect(host.querySelector('.category-list')?.textContent).toContain(
       '旧分类',
     );

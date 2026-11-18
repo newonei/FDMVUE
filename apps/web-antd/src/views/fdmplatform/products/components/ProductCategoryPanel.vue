@@ -82,6 +82,7 @@ const loadError = ref('');
 const search = ref('');
 const expanded = ref(true);
 const expandedGroups = ref(new Set<GroupFilter>());
+const countFormatter = new Intl.NumberFormat('zh-CN');
 let sequence = 0;
 
 /** 没有产品的分类不列出，当前选中的除外，便于看到并取消 */
@@ -236,21 +237,32 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <nav class="category-panel" aria-label="产品分类">
+  <nav
+    class="category-panel"
+    :class="{ 'category-panel--grouped': grouped }"
+    aria-label="产品分类"
+  >
+    <h2 v-if="grouped" class="category-heading">产品分类</h2>
     <Input
       v-model:value="search"
-      placeholder="输入关键字搜索分类"
+      :placeholder="grouped ? '搜索分类' : '输入关键字搜索分类'"
       aria-label="搜索分类"
       allow-clear
     >
-      <template #suffix>
+      <template v-if="grouped" #prefix>
+        <IconifyIcon icon="lucide:search" class="muted" />
+      </template>
+      <template v-else #suffix>
         <IconifyIcon icon="lucide:search" class="muted" />
       </template>
     </Input>
     <Alert v-if="loadError" type="error" show-icon :message="loadError" />
     <Spin :spinning="loading" wrapper-class-name="category-spin">
-      <ul class="category-list" role="tree">
-        <li role="treeitem" :aria-expanded="grouped ? undefined : showChildren">
+      <ul class="category-list" :role="grouped ? 'list' : 'tree'">
+        <li
+          :role="grouped ? undefined : 'treeitem'"
+          :aria-expanded="grouped ? undefined : showChildren"
+        >
           <div class="tree-row root">
             <button
               v-if="!grouped"
@@ -268,9 +280,16 @@ onBeforeUnmount(() => {
               :class="{
                 current: value === undefined && categoryGroup === undefined,
               }"
+              :aria-pressed="
+                grouped
+                  ? value === undefined && categoryGroup === undefined
+                  : undefined
+              "
               @click="choose(undefined)"
             >
-              <span class="name">全部类别</span><span class="count">{{ total }}</span>
+              <span class="name">全部类别</span><span class="count">{{
+                grouped ? countFormatter.format(total) : total
+              }}</span>
             </button>
           </div>
           <ul
@@ -309,18 +328,15 @@ onBeforeUnmount(() => {
           v-for="group in groupedTree"
           :key="group.value"
           :class="{ 'unassigned-group': group.value === 'UNASSIGNED' }"
-          role="treeitem"
-          :aria-expanded="
-            group.children.length > 0 ? groupIsExpanded(group.value) : undefined
-          "
         >
           <div class="tree-row">
             <button
-              v-if="group.children.length > 0"
+              v-if="group.children.length > 0 && !search.trim()"
               type="button"
               class="caret"
               :class="{ open: groupIsExpanded(group.value) }"
               :aria-label="`${groupIsExpanded(group.value) ? '收起' : '展开'}${group.label}`"
+              :aria-expanded="groupIsExpanded(group.value)"
               @click="toggleGroup(group.value)"
             >
               <IconifyIcon icon="lucide:chevron-right" />
@@ -332,25 +348,33 @@ onBeforeUnmount(() => {
               :class="{
                 current: value === undefined && categoryGroup === group.value,
               }"
+              :aria-pressed="
+                value === undefined && categoryGroup === group.value
+              "
               @click="chooseGroup(group.value)"
             >
-              <span class="name">{{ group.label }}</span><span class="count">{{ group.count }}</span>
+              <span class="name">{{ group.label }}</span><span class="count">{{
+                countFormatter.format(group.count)
+              }}</span>
             </button>
           </div>
           <ul
             v-if="groupIsExpanded(group.value) && group.children.length > 0"
             class="children"
-            role="group"
+            role="list"
           >
-            <li v-for="item in group.children" :key="item.id" role="treeitem">
+            <li v-for="item in group.children" :key="item.id">
               <button
                 type="button"
                 class="node"
                 :class="{ current: value === item.id }"
                 :title="item.name"
+                :aria-pressed="value === item.id"
                 @click="choose(item.id)"
               >
-                <span class="name">{{ item.name }}</span><span class="count">{{ item.count }}</span>
+                <span class="name">{{ item.name }}</span><span class="count">{{
+                  countFormatter.format(item.count)
+                }}</span>
               </button>
             </li>
           </ul>
@@ -495,5 +519,119 @@ onBeforeUnmount(() => {
 
 .muted {
   color: hsl(var(--muted-foreground));
+}
+
+.category-panel--grouped {
+  gap: 10px;
+}
+
+.category-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+  color: hsl(var(--foreground));
+}
+
+.category-panel--grouped .category-spin :deep(.ant-spin-container) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.category-panel--grouped .category-list {
+  height: auto;
+  min-height: 0;
+  scrollbar-gutter: stable;
+}
+
+.category-panel--grouped .category-list > li + li {
+  margin-top: 2px;
+}
+
+.category-panel--grouped .root {
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.category-panel--grouped .children {
+  padding-inline-start: 32px;
+}
+
+.category-panel--grouped .children .node {
+  min-height: 30px;
+}
+
+.category-panel--grouped .node {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.category-panel--grouped .root .node {
+  padding-inline-start: 28px;
+  font-weight: 600;
+}
+
+.category-panel--grouped .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-panel--grouped .count {
+  flex: none;
+  min-width: 24px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  white-space: nowrap;
+  background: hsl(var(--muted) / 70%);
+  border-radius: 4px;
+}
+
+.category-panel--grouped .count::before,
+.category-panel--grouped .count::after {
+  content: none;
+}
+
+.category-panel--grouped .node.current {
+  font-weight: 600;
+  background: hsl(var(--primary) / 13%);
+  box-shadow: inset 2px 0 hsl(var(--primary));
+}
+
+.category-panel--grouped .node.current .count {
+  color: inherit;
+  background: hsl(var(--primary) / 13%);
+}
+
+.category-panel--grouped .caret,
+.category-panel--grouped .caret-spacer {
+  flex: 0 0 20px;
+  margin-inline-end: 2px;
+}
+
+.category-panel--grouped .caret {
+  height: 30px;
+  border-radius: 5px;
+}
+
+.category-panel--grouped .caret:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+
+.category-panel--grouped .unassigned-group {
+  margin-top: 8px;
 }
 </style>

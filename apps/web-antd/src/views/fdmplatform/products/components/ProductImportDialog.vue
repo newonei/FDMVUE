@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type {
+  ProductImportCorrections,
   ProductImportResult,
   ProductImportRow,
 } from '#/api/fdmplatform/products';
@@ -36,6 +37,7 @@ import {
   productThicknessProcessText,
 } from '../manufacturing';
 import ProductColorSummary from './ProductColorSummary.vue';
+import ProductImportRowEditor from './ProductImportRowEditor.vue';
 
 const props = defineProps<{ companyId: number; open: boolean }>();
 const emit = defineEmits<{ close: []; imported: [] }>();
@@ -49,7 +51,29 @@ const completed = ref(false);
 const panelError = ref('');
 const onlyIssues = ref(false);
 const idempotencyKey = ref('');
+const corrections = shallowRef<ProductImportCorrections>({});
+const validatedCorrections = shallowRef(corrections.value);
+const editing = ref<ProductImportRow>();
 const busy = computed(() => previewing.value || importing.value);
+const needsValidation = computed(
+  () => corrections.value !== validatedCorrections.value,
+);
+const editingCells = computed(() => {
+  const row = editing.value;
+  return row ? { ...row.rawCells, ...corrections.value[row.rowNumber] } : {};
+});
+const dirtyRows = computed(
+  () =>
+    new Set(
+      Object.keys(corrections.value)
+        .map(Number)
+        .filter(
+          (rowNumber) =>
+            validatedCorrections.value[rowNumber] !==
+            corrections.value[rowNumber],
+        ),
+    ),
+);
 const reusableCount = computed(
   () =>
     result.value?.rows.filter(
@@ -75,24 +99,39 @@ const incompleteCount = computed(
     ).length ?? 0,
 );
 const rows = computed(() =>
-  (result.value?.rows ?? []).filter(
-    (row) =>
-      !onlyIssues.value || row.status === 'ERROR' || row.status === 'SKIPPED',
-  ),
+  (result.value?.rows ?? [])
+    .filter(
+      (row) =>
+        !onlyIssues.value ||
+        row.status === 'ERROR' ||
+        row.status === 'SKIPPED' ||
+        dirtyRows.value.has(row.rowNumber),
+    )
+    .map((row) => {
+      if (!dirtyRows.value.has(row.rowNumber)) return row;
+      const changes = corrections.value[row.rowNumber];
+      return {
+        ...row,
+        code: changes?.['产品编号'] ?? row.code,
+        name: changes?.['产品名称'] ?? row.name,
+      };
+    }),
 );
-const columns = [
+const columns = computed(() => [
   { title: 'Excel 行', dataIndex: 'rowNumber', width: 80 },
-  { title: '产品编号 / 名称', key: 'product', width: 215 },
+  { title: '产品编号 / 名称', key: 'product', width: 195 },
+  { title: '校验结果', key: 'status', width: 270 },
   { title: '型号 / 规格 / 单位', key: 'specification', width: 180 },
-  { title: '成品尺寸 / 雕刻版本', key: 'configuration', width: 230 },
-  { title: '颜色 / 制造结构', key: 'colors', width: 220 },
-  { title: '生产分类 / 工艺属性', key: 'production', width: 260 },
+  { title: '成品尺寸 / 雕刻版本', key: 'configuration', width: 190 },
+  { title: '颜色 / 制造结构', key: 'colors', width: 175 },
+  { title: '生产分类 / 工艺属性', key: 'production', width: 180 },
   { title: '分类 / 状态', key: 'category', width: 125 },
-  { title: '处理结果', key: 'status', width: 105 },
-  { title: '说明', dataIndex: 'message', key: 'message', width: 235 },
-];
+  ...(completed.value
+    ? []
+    : [{ title: '操作', key: 'action', width: 76, fixed: 'right' as const }]),
+]);
 const statusText: Record<ProductImportRow['status'], string> = {
-  ERROR: '导入失败',
+  ERROR: '待修正',
   IMPORTED: '已导入',
   READY: '可新增',
   REUSE: '复用已有 SKU',
@@ -141,6 +180,9 @@ function clearFile() {
   panelError.value = '';
   onlyIssues.value = false;
   idempotencyKey.value = '';
+  corrections.value = {};
+  validatedCorrections.value = corrections.value;
+  editing.value = undefined;
 }
 function chooseFile(selected: File) {
   if (busy.value) return false;
@@ -155,28 +197,52 @@ function chooseFile(selected: File) {
   }
   file.value = selected;
   idempotencyKey.value = newIdempotencyKey();
+  void preview();
   return false;
 }
 async function preview() {
-  if (!file.value || busy.value || completed.value) return;
+  if (!file.value || busy.value || completed.value || editing.value) return;
   previewing.value = true;
   panelError.value = '';
-  result.value = undefined;
+  const changes = corrections.value;
+  const hadResult = Boolean(result.value);
   try {
-    result.value = await previewProductImport(file.value, props.companyId);
+    const next =
+      Object.keys(changes).length > 0
+        ? await previewProductImport(file.value, props.companyId, changes)
+        : await previewProductImport(file.value, props.companyId);
+    result.value = next;
+    validatedCorrections.value = changes;
+    const issues = next.errorCount + next.skippedCount;
+    if (!hadResult || issues === 0) onlyIssues.value = issues > 0;
   } catch (error) {
     panelError.value = errorText(error);
   } finally {
     previewing.value = false;
   }
 }
+function saveRowChanges(changes: Record<string, string>) {
+  const row = editing.value;
+  if (!row || busy.value || completed.value) return;
+  if (Object.keys(changes).length > 0) {
+    corrections.value = {
+      ...corrections.value,
+      [row.rowNumber]: { ...corrections.value[row.rowNumber], ...changes },
+    };
+    idempotencyKey.value = newIdempotencyKey();
+    panelError.value = '';
+  }
+  editing.value = undefined;
+}
 async function submit() {
   if (
     !file.value ||
     !result.value?.previewHash ||
     importableCount.value < 1 ||
+    needsValidation.value ||
     busy.value ||
-    completed.value
+    completed.value ||
+    editing.value
   )
     return;
   importing.value = true;
@@ -185,6 +251,9 @@ async function submit() {
     result.value = await importProducts({
       file: file.value,
       companyId: props.companyId,
+      ...(Object.keys(corrections.value).length > 0
+        ? { corrections: corrections.value }
+        : {}),
       previewHash: result.value.previewHash,
       idempotencyKey: idempotencyKey.value,
     });
@@ -215,23 +284,23 @@ async function downloadTemplate() {
   <Modal
     :open="open"
     title="Excel 导入产品"
-    width="min(1060px, 96vw)"
+    width="min(1180px, 96vw)"
     :style="{ top: '24px' }"
     :body-style="{
       maxHeight: 'calc(100dvh - 200px)',
       overflowY: 'auto',
       paddingRight: '4px',
     }"
-    :closable="!busy"
+    :closable="!busy && !editing"
     :mask-closable="false"
-    :keyboard="!busy"
-    @cancel="!busy && emit('close')"
+    :keyboard="!busy && !editing"
+    @cancel="!busy && !editing && emit('close')"
   >
     <div class="import-stack">
       <div v-if="!result" class="import-guide">
         <div><strong>1. 准备文件</strong><span>按模板填写产品资料</span></div>
         <div :class="{ 'step-active': file && !completed }">
-          <strong>2. 校验预览</strong><span>核对有效行与问题行</span>
+          <strong>2. 校验预览</strong><span>核对并在线修正问题行</span>
         </div>
         <div :class="{ 'step-active': completed }">
           <strong>3. 导入产品</strong><span>新增或复用已核实 SKU</span>
@@ -263,8 +332,8 @@ async function downloadTemplate() {
         <p class="import-muted">
           {{
             file
-              ? `${(file.size / 1024).toFixed(1)} KB · 点击此处更换文件并重新校验`
-              : '支持 .xlsx / .xls，上传后先校验，再确认导入'
+              ? `${(file.size / 1024).toFixed(1)} KB · 更换文件将清除本次在线修正`
+              : '支持 .xlsx / .xls，选择文件后自动校验并显示预览'
           }}
         </p>
       </Dragger>
@@ -290,6 +359,12 @@ async function downloadTemplate() {
         </Space>
       </div>
       <Alert v-if="panelError" type="error" show-icon :message="panelError" />
+      <Alert
+        v-if="previewing && !result"
+        type="info"
+        show-icon
+        message="正在读取并校验产品数据…"
+      />
       <Alert
         v-if="!result"
         type="info"
@@ -321,7 +396,7 @@ async function downloadTemplate() {
             }}</strong>
           </div>
           <div class="result-error">
-            <span>导入失败</span><strong>{{ result.errorCount }}</strong>
+            <span>{{ completed ? '导入失败' : '待修正' }}</span><strong>{{ result.errorCount }}</strong>
           </div>
           <div>
             <span>复用已有 SKU</span><strong>{{ reuseDisplayCount }}</strong>
@@ -333,22 +408,30 @@ async function downloadTemplate() {
         <div class="import-preview-heading">
           <strong>{{ completed ? '导入结果' : '数据预览' }}</strong>
           <span>
-            <Checkbox v-model:checked="onlyIssues">仅看失败行</Checkbox>
+            <Checkbox v-model:checked="onlyIssues">仅看问题行</Checkbox>
             <Button
               v-if="failedRows.length > 0"
               size="small"
+              :disabled="busy || needsValidation"
               @click="downloadFailures"
             >
               下载失败清单（{{ failedRows.length }} 行）
             </Button>
           </span>
         </div>
+        <Alert
+          v-if="needsValidation"
+          type="warning"
+          show-icon
+          :message="`已修改 ${dirtyRows.size} 行，请重新校验后再确认导入。`"
+        />
         <Table
           :data-source="rows"
           :columns="columns"
           row-key="rowNumber"
           size="small"
-          :scroll="{ x: 1450, y: 310 }"
+          :loading="previewing"
+          :scroll="{ x: completed ? 1395 : 1471, y: 310 }"
           :pagination="{
             pageSize: 10,
             showSizeChanger: false,
@@ -414,34 +497,54 @@ async function downloadTemplate() {
                 {{ record.values?.active === false ? '未启用' : '已启用' }}
               </div>
             </div>
-            <Tag
-              v-else-if="column.key === 'status'"
-              :color="statusColor[record.status as ProductImportRow['status']]"
+            <template v-else-if="column.key === 'status'">
+              <Tag v-if="dirtyRows.has(record.rowNumber)" color="orange">
+                待重新校验
+              </Tag>
+              <template v-else>
+                <Tag
+                  :color="
+                    statusColor[record.status as ProductImportRow['status']]
+                  "
+                >
+                  {{
+                    completed && record.status === 'ERROR'
+                      ? '导入失败'
+                      : statusText[record.status as ProductImportRow['status']]
+                  }}
+                </Tag>
+                <div v-if="record.message" class="import-row-message">
+                  {{ record.message }}
+                </div>
+              </template>
+            </template>
+            <Button
+              v-else-if="column.key === 'action' && record.rawCells"
+              type="link"
+              size="small"
+              :aria-label="`修改 Excel 第 ${record.rowNumber} 行`"
+              :disabled="busy"
+              @click="editing = record as ProductImportRow"
             >
-              {{ statusText[record.status as ProductImportRow['status']] }}
-            </Tag>
-            <span
-              v-else-if="column.key === 'message'"
-              class="import-row-message"
-              >{{ record.message || '—' }}</span>
+              修改
+            </Button>
           </template>
         </Table>
-        <p class="import-muted">
-          行号对应原 Excel，按失败原因修改后可再次上传；完整配置命中已有 SKU
-          时会复用，不会重复新增。历史资料缺少新配置时需先核对补齐。
+        <p v-if="!completed" class="import-muted">
+          点击对应行的「修改」可直接修正原表字段。重新校验后可确认导入，仍有问题的行会跳过。
         </p>
       </template>
     </div>
     <template #footer>
       <Space wrap>
-        <Button :disabled="busy" @click="emit('close')">
+        <Button :disabled="busy || Boolean(editing)" @click="emit('close')">
           {{ completed ? '完成' : '关闭' }}
         </Button>
         <Button
           v-if="!completed"
-          :disabled="!file || busy"
+          :disabled="!file || busy || Boolean(editing)"
           :loading="previewing"
-          :type="result ? 'default' : 'primary'"
+          :type="needsValidation || !result ? 'primary' : 'default'"
           @click="preview"
         >
           {{ result ? '重新校验' : '校验并预览' }}
@@ -449,7 +552,9 @@ async function downloadTemplate() {
         <Button
           v-if="result && !completed"
           type="primary"
-          :disabled="importableCount < 1 || busy"
+          :disabled="
+            importableCount < 1 || busy || needsValidation || Boolean(editing)
+          "
           :loading="importing"
           @click="submit"
         >
@@ -458,6 +563,15 @@ async function downloadTemplate() {
       </Space>
     </template>
   </Modal>
+  <ProductImportRowEditor
+    :open="open && Boolean(editing)"
+    :company-id="companyId"
+    :row-number="editing?.rowNumber"
+    :cells="editingCells"
+    :row-message="editing?.status === 'ERROR' ? editing.message : undefined"
+    @close="editing = undefined"
+    @save="saveRowChanges"
+  />
 </template>
 
 <style scoped>
@@ -595,6 +709,7 @@ async function downloadTemplate() {
 }
 
 .import-row-message {
+  margin-top: 5px;
   font-size: 12px;
   overflow-wrap: anywhere;
 }

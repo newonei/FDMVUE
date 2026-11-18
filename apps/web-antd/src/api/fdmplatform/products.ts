@@ -199,6 +199,8 @@ export interface ProductImportRow {
   baseSkuKey?: string;
   finishedSignature?: string;
   configurationReady?: boolean;
+  /** 编辑预览所用的单元格文本，保留未被字典识别的原值。 */
+  rawCells?: Record<string, string>;
   values: Partial<
     Pick<
       Product,
@@ -233,6 +235,8 @@ export interface ProductImportResult {
   warnings: string[];
   rows: ProductImportRow[];
 }
+/** 按原 Excel 行号和规范列标题记录在线修正，空串代表清空。 */
+export type ProductImportCorrections = Record<number, Record<string, string>>;
 
 /** 合同逐行配置与档案导入共用的完整生产配置，不使用颜色/纹路展示名判重。 */
 export interface ProductConfiguration {
@@ -290,22 +294,34 @@ export function downloadProductImportTemplate(companyId = 0) {
     params: { companyId },
   });
 }
-export function previewProductImport(file: File, companyId = 0) {
+export function previewProductImport(
+  file: File,
+  companyId = 0,
+  corrections?: ProductImportCorrections,
+) {
   return requestClient.upload<ProductImportResult>(
     `${base}/import-preview`,
-    { file, companyId },
+    {
+      file,
+      companyId,
+      corrections: corrections && JSON.stringify(corrections),
+    },
     { timeout: 300_000 },
   );
 }
 export function importProducts(data: {
   companyId: number;
+  corrections?: ProductImportCorrections;
   file: File;
   idempotencyKey: string;
   previewHash: string;
 }) {
-  return requestClient.upload<ProductImportResult>(`${base}/import`, data, {
-    timeout: 300_000,
-  });
+  const { corrections, ...request } = data;
+  return requestClient.upload<ProductImportResult>(
+    `${base}/import`,
+    { ...request, corrections: corrections && JSON.stringify(corrections) },
+    { timeout: 300_000 },
+  );
 }
 export function getProducts(params: ProductQuery) {
   return requestClient.get<PageResult<Product>>(base, { params });

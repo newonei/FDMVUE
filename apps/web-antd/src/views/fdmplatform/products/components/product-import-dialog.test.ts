@@ -23,6 +23,30 @@ vi.mock('#/api/fdmplatform/products', () => ({
   downloadProductImportTemplate: api.template,
 }));
 vi.mock('@vben/utils', () => ({ downloadFileFromBlobPart: api.download }));
+vi.mock('./ProductImportRowEditor.vue', () => ({
+  default: defineComponent({
+    props: {
+      cells: {
+        type: Object as PropType<Record<string, string>>,
+        default: () => ({}),
+      },
+      open: Boolean,
+    },
+    emits: ['save'],
+    setup(props, { emit }) {
+      return () =>
+        props.open &&
+        h('div', { 'data-row-editor': '' }, [
+          h('p', props.cells?.['正面颜色']),
+          h(
+            'button',
+            { onClick: () => emit('save', { 正面颜色: 'MG', 单位: '件' }) },
+            '保存修改',
+          ),
+        ]);
+    },
+  }),
+}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     setup(_, { slots }) {
@@ -87,16 +111,15 @@ vi.mock('ant-design-vue', () => {
           default: () => [],
         },
       },
-      setup(props) {
+      setup(props, { slots }) {
         return () =>
           h(
             'div',
             props.dataSource.map((row) =>
-              h(
-                'div',
-                { 'data-row': row.rowNumber },
+              h('div', { 'data-row': row.rowNumber }, [
                 `${row.code} ${row.message}`,
-              ),
+                slots.bodyCell?.({ column: { key: 'action' }, record: row }),
+              ]),
             ),
           );
       },
@@ -160,6 +183,7 @@ function previewResult(): ProductImportResult {
         name: '产品 C',
         status: 'ERROR',
         message: '请填写产品单位',
+        rawCells: { 正面颜色: 'Excel 原来写错的颜色', 产品编号: 'C' },
         values: {},
       },
     ],
@@ -251,7 +275,6 @@ describe('产品 Excel 导入交互', () => {
     });
     const { button, choose, imported, host } = await mountDialog();
     await choose(new File(['same-sku'], 'same.xlsx'));
-    button('校验并预览').click();
     await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     expect(button('导入 1 个有效产品').disabled).toBe(false);
     button('导入 1 个有效产品').click();
@@ -263,7 +286,6 @@ describe('产品 Excel 导入交互', () => {
     const file = new File(['xlsx'], 'products.xlsx');
     expect(button('校验并预览').disabled).toBe(true);
     await choose(file);
-    button('校验并预览').click();
     await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     expect(api.preview).toHaveBeenCalledWith(file, 0);
     const checkbox = host.querySelector<HTMLInputElement>(
@@ -292,17 +314,23 @@ describe('产品 Excel 导入交互', () => {
   it('替换或移除文件后必须重新校验，不能提交旧预览', async () => {
     const { button, choose, host } = await mountDialog();
     await choose(new File(['old'], 'old.xlsx'));
-    button('校验并预览').click();
     await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     const newest = new File(['latest'], 'latest.xlsx');
+    let resolvePreview!: (result: ProductImportResult) => void;
+    api.preview.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve;
+        }),
+    );
     await choose(newest);
     expect(button('导入 1 个有效产品')).toBeUndefined();
     expect(host.querySelector('[data-row]')).toBeNull();
-    button('校验并预览').click();
     await vi.waitFor(() =>
       expect(api.preview).toHaveBeenLastCalledWith(newest, 0),
     );
-    await nextTick();
+    resolvePreview(previewResult());
+    await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     button('移除文件').click();
     await nextTick();
     expect(button('校验并预览').disabled).toBe(true);
@@ -314,7 +342,6 @@ describe('产品 Excel 导入交互', () => {
     const { button, choose, host, open } = await mountDialog();
     const file = new File(['same'], 'same.xlsx');
     await choose(file);
-    button('校验并预览').click();
     await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     let reject!: (error: Error) => void;
     api.submit.mockImplementationOnce(
@@ -348,6 +375,7 @@ describe('产品 Excel 导入交互', () => {
   it('拒绝非 Excel 与超大文件，清除旧文件避免误导入', async () => {
     const { button, choose, host } = await mountDialog();
     await choose(new File(['valid'], 'valid.xlsx'));
+    await vi.waitFor(() => expect(button('导入 1 个有效产品')).toBeTruthy());
     await choose(new File(['invalid'], 'invalid.csv'));
     expect(button('校验并预览').disabled).toBe(true);
     expect(host.textContent).toContain('请选择 .xls 或 .xlsx');
@@ -356,7 +384,7 @@ describe('产品 Excel 导入交互', () => {
     await choose(large);
     expect(button('校验并预览').disabled).toBe(true);
     expect(host.textContent).toContain('不能超过 10 MB');
-    expect(api.preview).not.toHaveBeenCalled();
+    expect(api.preview).toHaveBeenCalledTimes(1);
   });
 
   it('没有可导入行时禁用提交，并下载后端模板', async () => {
@@ -373,10 +401,52 @@ describe('产品 Excel 导入交互', () => {
     );
     expect(api.template).toHaveBeenCalledWith(0);
     await choose(new File(['empty'], 'empty.xlsx'));
-    button('校验并预览').click();
     await vi.waitFor(() => expect(button('导入 0 个有效产品')).toBeTruthy());
     expect(button('导入 0 个有效产品').disabled).toBe(true);
     button('导入 0 个有效产品').click();
     expect(api.submit).not.toHaveBeenCalled();
+  });
+
+  it('保留无效颜色原值并在线改正，重新校验前禁止用旧预览导入', async () => {
+    const { button, choose, host } = await mountDialog();
+    const file = new File(['wrong-color'], 'products.xlsx');
+    await choose(file);
+    await vi.waitFor(() => expect(button('修改')).toBeTruthy());
+    button('修改').click();
+    await nextTick();
+    expect(host.querySelector('[data-row-editor]')?.textContent).toContain(
+      'Excel 原来写错的颜色',
+    );
+    button('保存修改').click();
+    await nextTick();
+    expect(button('导入 1 个有效产品').disabled).toBe(true);
+    expect(host.textContent).toContain('已修改 1 行');
+    expect(api.submit).not.toHaveBeenCalled();
+
+    api.preview.mockRejectedValueOnce(new Error('网络中断'));
+    button('重新校验').click();
+    await vi.waitFor(() => expect(host.textContent).toContain('网络中断'));
+    expect(button('导入 1 个有效产品').disabled).toBe(true);
+
+    api.preview.mockResolvedValueOnce({
+      ...previewResult(),
+      previewHash: 'verified-corrections',
+      readyCount: 2,
+      errorCount: 0,
+    });
+    button('重新校验').click();
+    const corrections = { 7: { 正面颜色: 'MG', 单位: '件' } };
+    await vi.waitFor(() => expect(button('导入 2 个有效产品')).toBeTruthy());
+    expect(api.preview).toHaveBeenLastCalledWith(file, 0, corrections);
+    button('导入 2 个有效产品').click();
+    await vi.waitFor(() =>
+      expect(api.submit).toHaveBeenCalledWith({
+        file,
+        companyId: 0,
+        corrections,
+        previewHash: 'verified-corrections',
+        idempotencyKey: 'import-key-2',
+      }),
+    );
   });
 });
