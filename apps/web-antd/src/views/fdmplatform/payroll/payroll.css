@@ -773,6 +773,26 @@ tr:hover td {
   border-top: 1px solid var(--line);
 }
 
+.setting-fields {
+  display: grid;
+  gap: 8px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.setting-fields h3 {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.setting-fields p,
+.setting-fields .field-heading span,
+.send-fields-summary {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
 .setting-row {
   display: flex;
   gap: 12px;
@@ -1027,6 +1047,31 @@ tr:hover td {
   gap: 4px;
 }
 
+.send-fields {
+  padding: 8px 10px;
+  margin-top: 10px;
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.send-fields summary {
+  width: fit-content;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.send-fields[open] summary {
+  margin-bottom: 10px;
+}
+
+.send-fields-summary {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .send-info small,
 .recipient-head,
 .recipient-row small {
@@ -1035,11 +1080,18 @@ tr:hover td {
 
 .recipient-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
   padding: 12px 4px 7px;
   font-size: 12px;
+}
+
+.recipient-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
 }
 
 .recipients {
@@ -1066,6 +1118,24 @@ tr:hover td {
   display: block;
   margin-top: 3px;
   font-size: 11px;
+}
+
+.recipient-checkbox {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.recipient-checkbox input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.candidate-account {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .candidate-field select {

@@ -106,14 +106,20 @@ function renderSlip(slip: PayrollSlip, remainingMs: number) {
   if (slip.company) heading.append(element('p', 'slip-company', slip.company));
 
   const clock = element('span', 'clock');
-  const caption = element('div', 'slip-caption');
-  caption.append(element('span', undefined, '实发工资'), clock);
-  const total = element('section', 'slip-total');
-  total.append(
-    caption,
-    element('strong', undefined, formatAmount(slip.net)),
-    element('small', undefined, '人民币'),
-  );
+  const cards = [heading];
+  if (typeof slip.net === 'number') {
+    const caption = element('div', 'slip-caption');
+    caption.append(element('span', undefined, '实发工资'), clock);
+    const total = element('section', 'slip-total');
+    total.append(
+      caption,
+      element('strong', undefined, formatAmount(slip.net)),
+      element('small', undefined, '人民币'),
+    );
+    cards.push(total);
+  } else {
+    heading.append(clock);
+  }
 
   const sections = slip.sections.map((section) => {
     const group = element('section', 'slip-section');
@@ -129,7 +135,9 @@ function renderSlip(slip: PayrollSlip, remainingMs: number) {
         const row = element('div', 'slip-row');
         const label = element('dt', undefined, item.label);
         if (item.note) label.append(element('small', undefined, item.note));
-        row.append(label, element('dd', undefined, formatAmount(item.value)));
+        const value =
+          typeof item.value === 'number' ? formatAmount(item.value) : item.text;
+        row.append(label, element('dd', undefined, value));
         items.append(row);
       }
       group.append(items);
@@ -138,8 +146,7 @@ function renderSlip(slip: PayrollSlip, remainingMs: number) {
   });
 
   content.replaceChildren(
-    heading,
-    total,
+    ...cards,
     ...sections,
     element('footer', undefined, '对工资明细有疑问，请联系人事部门。'),
   );

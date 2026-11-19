@@ -70,6 +70,89 @@ export interface PayrollMonthlyTotals {
   people: number;
 }
 
+export interface PayrollOrganization {
+  company: string;
+  department: string;
+}
+
+export interface PayrollAnalyticsOptions {
+  months: string[];
+  organizations: PayrollOrganization[];
+}
+
+export interface PayrollEmployeeMatch extends PayrollOrganization {
+  employeeKey: string;
+  firstMonth: string;
+  lastMonth: string;
+  name: string;
+}
+
+export interface PayrollEmployeeMonth {
+  month: string;
+  row: PayrollRow;
+}
+
+export type PayrollIncome = Partial<Record<PayrollAmountField, number>>;
+
+export interface PayrollMonthlyAnalytics extends PayrollMonthlyTotals {
+  income: PayrollIncome;
+}
+
+export interface PayrollDepartmentMonth
+  extends PayrollMonthlyTotals, PayrollOrganization {}
+
+interface PayrollYearRange {
+  endYear: number;
+  startYear: number;
+}
+
+interface PayrollAnalyticsScope {
+  company?: string;
+  department?: string;
+}
+
+export function getPayrollAnalyticsOptions() {
+  return requestClient.get<PayrollAnalyticsOptions>(
+    `${base}/analytics/options`,
+  );
+}
+
+export function searchPayrollEmployees(
+  params: PayrollAnalyticsScope & { keyword: string; page: number },
+) {
+  return requestClient.get<{ hasMore: boolean; items: PayrollEmployeeMatch[] }>(
+    `${base}/analytics/employees`,
+    { params },
+  );
+}
+
+export function getPayrollEmployeeMonths(
+  params: PayrollYearRange & { employeeKey: string },
+) {
+  return requestClient.get<PayrollEmployeeMonth[]>(
+    `${base}/analytics/employee-months`,
+    { params },
+  );
+}
+
+export function getPayrollMonthlyAnalytics(
+  params: PayrollAnalyticsScope & PayrollYearRange,
+) {
+  return requestClient.get<PayrollMonthlyAnalytics[]>(
+    `${base}/analytics/monthly`,
+    { params },
+  );
+}
+
+export function getPayrollDepartmentMonths(
+  params: PayrollAnalyticsScope & { year: number },
+) {
+  return requestClient.get<PayrollDepartmentMonth[]>(
+    `${base}/analytics/departments`,
+    { params },
+  );
+}
+
 export type PayrollDeliveryStatus =
   | 'ACCEPTED'
   | 'DELIVERED'
@@ -107,7 +190,15 @@ export interface PayrollRecipient {
   userId: PayrollCandidate['userId'];
 }
 
-interface PayrollSettings {
+export interface PayrollSlipField {
+  group: string;
+  key: string;
+  label: string;
+}
+
+export interface PayrollSettings {
+  availableFields: PayrollSlipField[];
+  fields: string[];
   minutes: number;
 }
 
@@ -161,8 +252,11 @@ export function getPayrollSettings() {
   return requestClient.get<PayrollSettings>(`${base}/settings`);
 }
 
-export function updatePayrollSettings(minutes: number) {
-  return requestClient.put<PayrollSettings>(`${base}/settings`, { minutes });
+export function updatePayrollSettings(minutes: number, fields: string[]) {
+  return requestClient.put<PayrollSettings>(`${base}/settings`, {
+    fields,
+    minutes,
+  });
 }
 
 export function getPayrollDeliveries(month: string) {
@@ -178,6 +272,12 @@ export function getPayrollCandidates(rowIds: string[]) {
   );
 }
 
-export function sendPayrollSlips(recipients: PayrollRecipient[]) {
-  return requestClient.post<PayrollDelivery[]>(`${base}/send`, { recipients });
+export function sendPayrollSlips(
+  recipients: PayrollRecipient[],
+  fields: string[],
+) {
+  return requestClient.post<PayrollDelivery[]>(`${base}/send`, {
+    fields,
+    recipients,
+  });
 }

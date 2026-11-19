@@ -84,4 +84,49 @@ describe('payroll DingTalk detail contract', () => {
     await expect(load()).resolves.toEqual({ status: 'EXPIRED' });
     await expect(load()).rejects.toMatchObject({ code: 403 });
   });
+
+  it('accepts omitted amounts and rejects ambiguous item values', async () => {
+    const selected = {
+      month: slip.month,
+      name: slip.name,
+      company: '',
+      department: '',
+      sections: [
+        {
+          title: '出勤信息',
+          items: [{ label: '入职时间', text: '2026-01-01' }],
+        },
+      ],
+    };
+    const envelope = {
+      status: 'AVAILABLE',
+      serverNow,
+      expiresAt: serverNow + 60_000,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response({ ...envelope, slip: selected }))
+      .mockResolvedValueOnce(
+        response({
+          ...envelope,
+          slip: {
+            ...selected,
+            sections: [
+              {
+                title: '出勤信息',
+                items: [{ label: '入职时间', text: '2026-01-01', value: 500 }],
+              },
+            ],
+          },
+        }),
+      );
+    const api = createPayrollApi('/admin-api', fetcher);
+    const load = () => api.detail(8, 'token', id, new AbortController().signal);
+    await expect(load()).resolves.toEqual({
+      status: 'AVAILABLE',
+      remainingMs: 60_000,
+      slip: selected,
+    });
+    await expect(load()).rejects.toThrow('工资条响应格式不正确');
+  });
 });

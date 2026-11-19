@@ -1,12 +1,11 @@
-export interface SlipItem {
+export type SlipItem = {
   label: string;
-  value: number;
-  note?: string;
-}
+  note?: null | string;
+} & ({ text: string; value?: null } | { text?: null; value: number });
 
 export interface SlipSection {
   title: string;
-  total?: number;
+  total?: null | number;
   items: SlipItem[];
 }
 
@@ -15,7 +14,7 @@ export interface PayrollSlip {
   name: string;
   department: string;
   company: string;
-  net: number;
+  net?: null | number;
   sections: SlipSection[];
 }
 
@@ -86,21 +85,22 @@ export function parseSlipResult(
     typeof slip.name !== 'string' ||
     typeof slip.department !== 'string' ||
     typeof slip.company !== 'string' ||
-    !Number.isSafeInteger(slip.net) ||
+    !isOptionalAmount(slip.net) ||
     !Array.isArray(slip.sections) ||
     !slip.sections.every(
       (section) =>
         section &&
         typeof section.title === 'string' &&
-        (section.total === null ||
-          section.total === undefined ||
-          Number.isSafeInteger(section.total)) &&
+        isOptionalAmount(section.total) &&
         Array.isArray(section.items) &&
         section.items.every(
           (item) =>
             item &&
             typeof item.label === 'string' &&
-            Number.isSafeInteger(item.value) &&
+            (typeof item.text === 'string'
+              ? item.value === null || item.value === undefined
+              : (item.text === null || item.text === undefined) &&
+                isInteger(item.value)) &&
             (item.note === null ||
               item.note === undefined ||
               typeof item.note === 'string'),
@@ -113,4 +113,8 @@ export function parseSlipResult(
 
 function isInteger(value: unknown): value is number {
   return Number.isSafeInteger(value);
+}
+
+function isOptionalAmount(value: unknown) {
+  return value === null || value === undefined || isInteger(value);
 }

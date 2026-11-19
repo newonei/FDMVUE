@@ -117,6 +117,13 @@ dl {
   border-radius: 4px;
 }
 
+.slip-heading .clock {
+  display: inline-block;
+  margin-top: 7px;
+  color: #52384d;
+  background: #efe6ed;
+}
+
 .slip-total > strong {
   display: block;
   margin-top: 2px;
@@ -185,7 +192,9 @@ dl {
 }
 
 .slip-row dd {
+  max-width: 65%;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 footer {

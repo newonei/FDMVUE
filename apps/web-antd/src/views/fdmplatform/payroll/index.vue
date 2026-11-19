@@ -7,6 +7,8 @@ import type {
   PayrollMonthlyTotals,
   PayrollRecipient,
   PayrollRow,
+  PayrollSettings,
+  PayrollSlipField,
 } from '#/api/fdmplatform/payroll';
 
 import {
@@ -32,7 +34,9 @@ import {
   CircleAlert,
   CloudUpload,
   Download,
+  Grid,
   History,
+  InspectionPanel,
   LayoutGrid,
   List,
   LockKeyhole,
@@ -40,6 +44,7 @@ import {
   Search,
   Settings,
   Upload,
+  UserRoundPen,
   X,
 } from '@vben/icons';
 
@@ -75,15 +80,41 @@ import {
   total,
   validMonth,
 } from './model';
+import PayrollAnalytics from './PayrollAnalytics.vue';
+import PayrollSlipFields from './PayrollSlipFields.vue';
 import PayrollTrend from './PayrollTrend.vue';
 
 defineOptions({ name: 'FdmPlatformPayroll' });
 
 const tabs = [
   {
-    id: 'overview',
+    id: 'overall',
     label: '薪酬总览',
     icon: LayoutGrid,
+    description: '查看月度与年度薪资总额，比较各年同月变化。',
+  },
+  {
+    id: 'employee',
+    label: '员工薪资',
+    icon: UserRoundPen,
+    description: '按姓名查找员工，查看历史明细、薪资趋势及构成。',
+  },
+  {
+    id: 'cost',
+    label: '人力成本',
+    icon: InspectionPanel,
+    description: '按公司和部门分析工资趋势、单位缴费及人均薪资。',
+  },
+  {
+    id: 'departments',
+    label: '部门统计',
+    icon: Grid,
+    description: '查询各部门月度和年度薪资，按金额比较部门分布。',
+  },
+  {
+    id: 'overview',
+    label: '当月核算',
+    icon: History,
     description: '按月核对工资成本、人员分布与发放进度。',
   },
   {
@@ -102,7 +133,7 @@ const tabs = [
     id: 'settings',
     label: '薪酬设置',
     icon: Settings,
-    description: '管理员工工资条的查看规则。',
+    description: '配置工资条的默认显示字段和查看时长。',
   },
 ] as const;
 
@@ -121,7 +152,21 @@ const canConfigure = computed(() =>
   hasAccessByCodes(['fdmplatform:payroll:settings']),
 );
 
-const tab = ref<Tab>('overview');
+const tab = ref<Tab>('overall');
+const analyticsView = computed(() => {
+  const value = tab.value;
+  if (
+    value === 'overall' ||
+    value === 'employee' ||
+    value === 'cost' ||
+    value === 'departments'
+  )
+    return value;
+  return undefined;
+});
+const monthlyWork = computed(
+  () => !analyticsView.value && tab.value !== 'settings',
+);
 const month = ref(monthOffset(currentMonth(), -1));
 const company = ref('');
 const department = ref('');
@@ -394,10 +439,10 @@ function resetPeriod() {
 }
 
 watch(
-  [month, active, canQuery],
-  ([, isActive, allowed]) => {
+  [month, active, canQuery, monthlyWork],
+  ([, isActive, allowed, showMonthlyWork]) => {
     resetPeriod();
-    if (isActive && allowed) {
+    if (isActive && allowed && showMonthlyWork) {
       void loadMonth();
       void loadDeliveries();
     }
@@ -476,17 +521,37 @@ onBeforeUnmount(() => {
 
 const minutes = ref<number>();
 const draftMinutes = ref<number>();
+const availableSlipFields = ref<PayrollSlipField[]>([]);
+const defaultSlipFields = ref<string[]>([]);
+const draftSlipFields = ref<string[]>([]);
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsError = ref('');
+const settingsDirty = computed(
+  () =>
+    draftMinutes.value !== minutes.value ||
+    draftSlipFields.value.length !== defaultSlipFields.value.length ||
+    draftSlipFields.value.some((key) => !defaultSlipFields.value.includes(key)),
+);
+
+function applySettings(settings: PayrollSettings) {
+  availableSlipFields.value = settings.availableFields;
+  minutes.value = draftMinutes.value = Number(settings.minutes);
+  defaultSlipFields.value = settings.fields;
+  draftSlipFields.value = [...settings.fields];
+}
+
 async function loadSettings() {
   if (settingsLoading.value) return;
   settingsLoading.value = true;
   settingsError.value = '';
   try {
     const settings = await getPayrollSettings();
-    minutes.value = draftMinutes.value = Number(settings.minutes);
+    applySettings(settings);
+    if (mode.value === 'send') sendSlipFields.value = [...settings.fields];
   } catch (error) {
+    availableSlipFields.value = [];
+    minutes.value = undefined;
     settingsError.value = errorText(error);
   } finally {
     settingsLoading.value = false;
@@ -497,7 +562,11 @@ async function saveSettings() {
   const next = Number(draftMinutes.value);
   if (
     !canConfigure.value ||
+    settingsLoading.value ||
     settingsSaving.value ||
+    minutes.value === undefined ||
+    !settingsDirty.value ||
+    draftSlipFields.value.length === 0 ||
     !Number.isInteger(next) ||
     next < 1 ||
     next > 1440
@@ -506,9 +575,9 @@ async function saveSettings() {
   settingsSaving.value = true;
   settingsError.value = '';
   try {
-    const settings = await updatePayrollSettings(next);
-    minutes.value = draftMinutes.value = Number(settings.minutes);
-    message.success('查看时长已保存');
+    const settings = await updatePayrollSettings(next, draftSlipFields.value);
+    applySettings(settings);
+    message.success('工资条设置已保存');
   } catch (error) {
     settingsError.value = errorText(error);
   } finally {
@@ -532,7 +601,7 @@ const dialogTitle = computed(
   () =>
     ({
       import: '导入工资表',
-      send: '发送工资条',
+      send: '批量发送工资条',
       employee: '员工工资明细',
       notice: '钉钉工作通知预览',
     })[mode.value ?? 'import'],
@@ -562,13 +631,15 @@ function releaseDialog() {
   notice.value = undefined;
   candidateRows.value = [];
   selectedCandidates.value = {};
+  selectedRecipientRows.value = [];
+  sendSlipFields.value = [];
   candidates.value = {};
   mode.value = undefined;
 }
 
-function showEmployee(row: PayrollRow) {
+function showEmployee(row: PayrollRow, period = month.value) {
   employee.value = row;
-  employeeMonth.value = month.value;
+  employeeMonth.value = period;
   employeePane.value = 'items';
   showAllFields.value = false;
   employeeHistory.value = undefined;
@@ -708,6 +779,7 @@ async function confirmImport() {
     department.value = '';
     query.value = '';
     month.value = period;
+    navigate('overview');
     monthRequest++;
     batch.value = result;
     batchLoading.value = false;
@@ -716,7 +788,6 @@ async function confirmImport() {
     deliveryLoading.value = false;
     deliveryReady.value = false;
     dialog.value?.close();
-    navigate('overview');
     void loadTrend();
     void loadDeliveries();
     message.success(`已导入 ${result.rows.length} 条工资明细`);
@@ -735,6 +806,8 @@ const candidates = ref<Record<string, PayrollCandidate[]>>({});
 const selectedCandidates = ref<
   Partial<Record<string, PayrollCandidate['userId']>>
 >({});
+const selectedRecipientRows = ref<string[]>([]);
+const sendSlipFields = ref<string[]>([]);
 const candidateLoading = ref(false);
 const candidateError = ref('');
 const sending = ref(false);
@@ -753,7 +826,8 @@ const groupRows = computed(() =>
 const recipientSelection = computed<PayrollRecipient[]>(() =>
   groupRows.value.flatMap((row) => {
     const userId = selectedCandidates.value[row.id];
-    return userId === undefined ||
+    return !selectedRecipientRows.value.includes(row.id) ||
+      userId === undefined ||
       !candidates.value[row.id]?.some((item) => item.userId === userId)
       ? []
       : [{ rowId: row.id, userId }];
@@ -764,6 +838,24 @@ const matched = computed(
     groupRows.value.filter((row) => candidates.value[row.id]?.length === 1)
       .length,
 );
+const sendFieldLabels = computed(() =>
+  availableSlipFields.value
+    .filter(({ key }) => sendSlipFields.value.includes(key))
+    .map(({ label }) => label),
+);
+const canSubmitSend = computed(
+  () =>
+    canSend.value &&
+    recipientSelection.value.length > 0 &&
+    sendFieldLabels.value.length > 0 &&
+    sendFieldLabels.value.length === sendSlipFields.value.length &&
+    !candidateLoading.value &&
+    !candidateError.value &&
+    !sending.value &&
+    minutes.value !== undefined &&
+    !settingsLoading.value &&
+    !settingsError.value,
+);
 
 async function loadCandidates(group = 1) {
   const request = ++candidateRequest;
@@ -772,11 +864,19 @@ async function loadCandidates(group = 1) {
   candidateError.value = '';
   candidates.value = {};
   selectedCandidates.value = {};
+  selectedRecipientRows.value = [];
   try {
     const result = await getPayrollCandidates(
       groupRows.value.map((row) => row.id),
     );
-    if (request === candidateRequest) candidates.value = result;
+    if (request !== candidateRequest) return;
+    candidates.value = result;
+    for (const row of groupRows.value) {
+      const options = result[row.id];
+      if (options?.length === 1) {
+        selectedCandidates.value[row.id] = options[0]!.userId;
+      }
+    }
   } catch (error) {
     if (request === candidateRequest) candidateError.value = errorText(error);
   } finally {
@@ -784,40 +884,35 @@ async function loadCandidates(group = 1) {
   }
 }
 function chooseMatchingCandidates() {
+  const selected = new Set(selectedRecipientRows.value);
   for (const row of groupRows.value) {
-    const options = candidates.value[row.id];
-    if (
-      options?.length === 1 &&
-      selectedCandidates.value[row.id] === undefined
-    ) {
-      selectedCandidates.value[row.id] = options[0]!.userId;
-    }
+    if (candidates.value[row.id]?.length === 1) selected.add(row.id);
   }
+  selectedRecipientRows.value = [...selected];
+}
+function unselectRecipient(rowId: string) {
+  selectedRecipientRows.value = selectedRecipientRows.value.filter(
+    (selected) => selected !== rowId,
+  );
 }
 function startSend() {
   if (!canSend.value || eligibleRows.value.length === 0) return;
   candidateRows.value = eligibleRows.value;
+  sendSlipFields.value = [];
   showNoticeInSend.value = false;
   showDialog('send');
   void loadSettings();
   void loadCandidates();
 }
 async function confirmSend() {
-  if (
-    !canSend.value ||
-    recipientSelection.value.length === 0 ||
-    candidateLoading.value ||
-    candidateError.value ||
-    sending.value ||
-    minutes.value === undefined ||
-    settingsLoading.value ||
-    settingsError.value
-  )
-    return;
+  if (!canSubmitSend.value) return;
   sending.value = true;
   candidateError.value = '';
   try {
-    const records = await sendPayrollSlips(recipientSelection.value);
+    const records = await sendPayrollSlips(
+      recipientSelection.value,
+      sendSlipFields.value,
+    );
     if (!active.value) return;
     deliveryRequest++;
     deliveryLoading.value = false;
@@ -826,9 +921,16 @@ async function confirmSend() {
       ...records,
       ...deliveries.value.filter(({ id }) => !currentIds.has(id)),
     ];
-    dialog.value?.close();
-    navigate('delivery');
-    deliveryPage.value = 1;
+    const sentRows = new Set(records.map(({ rowId }) => rowId));
+    const remaining = candidateRows.value.filter(({ id }) => !sentRows.has(id));
+    if (groups.value > 1 && remaining.length > 0) {
+      candidateRows.value = remaining;
+      void loadCandidates(Math.min(sendGroup.value, groups.value));
+    } else {
+      dialog.value?.close();
+      navigate('delivery');
+      deliveryPage.value = 1;
+    }
     message.success(
       `已提交 ${records.length} 条工资条，发放状态将在记录中更新`,
     );
@@ -863,13 +965,13 @@ function showNotice(item: PayrollDelivery) {
             <Upload :size="16" /> 导入工资表
           </button>
           <button
-            v-if="canSend"
+            v-if="canSend && monthlyWork"
             class="button primary"
             type="button"
             :disabled="!eligibleRows.length"
             @click="startSend"
           >
-            <Bell :size="16" /> 发送工资条
+            <Bell :size="16" /> 批量发送工资条
           </button>
         </div>
       </div>
@@ -893,7 +995,14 @@ function showNotice(item: PayrollDelivery) {
           </template>
         </nav>
 
-        <div v-if="tab !== 'settings'" class="filters">
+        <PayrollAnalytics
+          v-if="analyticsView"
+          :view="analyticsView"
+          :report-month="month"
+          @detail="showEmployee"
+        />
+
+        <div v-if="monthlyWork" class="filters">
           <label class="filter"><span>工资月份</span><input
               :value="month"
               type="month"
@@ -922,18 +1031,14 @@ function showNotice(item: PayrollDelivery) {
           </span>
         </div>
 
-        <div
-          v-if="tab !== 'settings' && batchError"
-          class="panel empty"
-          role="alert"
-        >
+        <div v-if="monthlyWork && batchError" class="panel empty" role="alert">
           <p>{{ batchError }}</p>
           <button type="button" class="button" @click="loadMonth">
             重新加载
           </button>
         </div>
         <div
-          v-else-if="tab !== 'settings' && batchLoading"
+          v-else-if="monthlyWork && batchLoading"
           class="panel empty"
           role="status"
         >
@@ -1315,16 +1420,19 @@ function showNotice(item: PayrollDelivery) {
           </section>
         </template>
 
-        <section v-else-if="canConfigure" class="panel settings-panel">
+        <section
+          v-else-if="tab === 'settings' && canConfigure"
+          class="panel settings-panel"
+        >
           <div class="panel-head">
             <div>
-              <h2>工资条查看规则</h2>
-              <p>面向钉钉工作通知中的员工详情页</p>
+              <h2>工资条默认设置</h2>
+              <p>适用于钉钉里的员工工资条。发送时可调整本批字段。</p>
             </div>
             <span class="settings-icon"><LockKeyhole :size="20" /></span>
           </div>
           <div v-if="settingsLoading" class="empty" role="status">
-            正在读取查看时长…
+            正在读取工资条设置…
           </div>
           <form v-else class="settings-body" @submit.prevent="saveSettings">
             <div v-if="settingsError" class="callout error" role="alert">
@@ -1347,7 +1455,7 @@ function showNotice(item: PayrollDelivery) {
                   min="1"
                   max="1440"
                   step="1"
-                  :disabled="minutes === undefined"
+                  :disabled="minutes === undefined || settingsSaving"
                   required
                 /><span>分钟</span></label>
             </div>
@@ -1358,6 +1466,19 @@ function showNotice(item: PayrollDelivery) {
               </div>
               <span class="settings-method"><LockKeyhole :size="15" /> 钉钉免登</span>
             </div>
+            <section v-if="availableSlipFields.length" class="setting-fields">
+              <div class="field-heading">
+                <h3>默认显示字段</h3>
+                <span>已选 {{ draftSlipFields.length }} 项</span>
+              </div>
+              <p>姓名和工资月份固定显示。请选择其余显示字段。</p>
+              <PayrollSlipFields
+                v-model="draftSlipFields"
+                :disabled="settingsSaving"
+                :options="availableSlipFields"
+              />
+              <p v-if="!draftSlipFields.length">请至少勾选一个字段。</p>
+            </section>
             <div class="setting-note">
               <CircleAlert :size="16" /> 设置从下次发送起生效。
             </div>
@@ -1367,7 +1488,8 @@ function showNotice(item: PayrollDelivery) {
               :disabled="
                 minutes === undefined ||
                 settingsSaving ||
-                draftMinutes === minutes
+                !settingsDirty ||
+                !draftSlipFields.length
               "
             >
               <Check :size="16" /> 保存设置
@@ -1553,19 +1675,45 @@ function showNotice(item: PayrollDelivery) {
               <p>本月工资条已生成，请点击下方按钮查阅。</p>
               <div class="notice-button">查看明细</div>
             </div>
+            <details
+              v-if="
+                availableSlipFields.length && !settingsLoading && !settingsError
+              "
+              class="send-fields"
+            >
+              <summary>
+                调整本批显示字段 · 已选 {{ sendFieldLabels.length }} 项
+              </summary>
+              <PayrollSlipFields
+                v-model="sendSlipFields"
+                :disabled="sending"
+                :options="availableSlipFields"
+              />
+            </details>
+            <p
+              v-if="
+                availableSlipFields.length && !settingsLoading && !settingsError
+              "
+              class="send-fields-summary"
+            >
+              {{
+                sendFieldLabels.length
+                  ? `员工可见字段：姓名、工资月份、${sendFieldLabels.join('、')}`
+                  : '请至少勾选一个字段。'
+              }}
+            </p>
             <div class="callout">
-              <CircleAlert :size="16" /><span>请选择并核对每行对应的钉钉账号，只有选定账号的工资条会提交发送。</span>
+              <CircleAlert :size="16" /><span>核对钉钉账号后勾选收件人，本批选中的员工使用同一组显示字段。</span>
             </div>
             <div v-if="settingsError" class="callout error" role="alert">
               {{ settingsError }}
               <button type="button" class="text-button" @click="loadSettings">
-                重新读取时长
+                重新读取设置
               </button>
             </div>
             <div v-if="candidateError" class="callout error" role="alert">
               <CircleAlert :size="16" /> {{ candidateError }}
               <button
-                v-if="!Object.keys(candidates).length"
                 type="button"
                 class="text-button"
                 @click="loadCandidates(sendGroup)"
@@ -1578,14 +1726,24 @@ function showNotice(item: PayrollDelivery) {
             </div>
             <template v-else>
               <div class="recipient-head">
-                <button
-                  class="text-button"
-                  type="button"
-                  :disabled="!matched || sending"
-                  @click="chooseMatchingCandidates"
-                >
-                  选择唯一匹配项
-                </button>
+                <div class="recipient-actions">
+                  <button
+                    class="text-button"
+                    type="button"
+                    :disabled="!matched || sending"
+                    @click="chooseMatchingCandidates"
+                  >
+                    勾选唯一匹配项
+                  </button>
+                  <button
+                    class="text-button"
+                    type="button"
+                    :disabled="!selectedRecipientRows.length || sending"
+                    @click="selectedRecipientRows = []"
+                  >
+                    清空勾选
+                  </button>
+                </div>
                 <span>本批已选 {{ recipientSelection.length }} /
                   {{ groupRows.length }} 人</span>
               </div>
@@ -1595,17 +1753,36 @@ function showNotice(item: PayrollDelivery) {
                   :key="row.id"
                   class="recipient-row"
                 >
-                  <div>
-                    <strong>{{ row.name }}</strong><small>{{ row.company }} · {{ row.department }}</small>
-                  </div>
+                  <label class="recipient-checkbox">
+                    <input
+                      v-model="selectedRecipientRows"
+                      :value="row.id"
+                      type="checkbox"
+                      :disabled="
+                        selectedCandidates[row.id] === undefined || sending
+                      "
+                    />
+                    <span>
+                      <strong>{{ row.name }}</strong><small>{{ row.company }} · {{ row.department }}</small>
+                    </span>
+                  </label>
+                  <span
+                    v-if="candidates[row.id]?.length === 1"
+                    class="candidate-account"
+                  >
+                    {{ candidates[row.id]![0]!.nickname }}（{{
+                      candidates[row.id]![0]!.userId
+                    }}）
+                  </span>
                   <label
-                    v-if="candidates[row.id]?.length"
+                    v-else-if="candidates[row.id]?.length"
                     class="candidate-field"
                   >
                     <span class="sr-only">{{ row.name }}的钉钉账号</span>
                     <select
                       v-model="selectedCandidates[row.id]"
                       :disabled="sending"
+                      @change="unselectRecipient(row.id)"
                     >
                       <option :value="undefined">请选择钉钉账号</option>
                       <option
@@ -1656,15 +1833,7 @@ function showNotice(item: PayrollDelivery) {
             <button
               class="button primary"
               type="button"
-              :disabled="
-                !recipientSelection.length ||
-                candidateLoading ||
-                !!candidateError ||
-                settingsLoading ||
-                !!settingsError ||
-                minutes === undefined ||
-                sending
-              "
+              :disabled="!canSubmitSend"
               @click="confirmSend"
             >
               <Bell :size="16" />{{

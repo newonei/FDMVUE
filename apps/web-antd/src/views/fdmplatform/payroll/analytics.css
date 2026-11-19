@@ -1,0 +1,242 @@
+.analytics {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.analysis-panel {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.analysis-toolbar,
+.employee-search,
+.switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.analysis-toolbar label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 38px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.analysis-toolbar select,
+.analysis-toolbar input {
+  min-width: 0;
+  max-width: min(230px, 53vw);
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.analysis-toolbar input {
+  width: 190px;
+}
+
+.control {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.control.primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.refresh {
+  margin-left: auto;
+}
+
+.switch {
+  width: fit-content;
+  padding: 3px;
+  background: var(--subtle);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.switch button {
+  min-height: 31px;
+  padding: 4px 11px;
+  font-size: 13px;
+  color: var(--muted);
+  border-radius: 5px;
+}
+
+.switch button[aria-pressed='true'] {
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--tint);
+}
+
+.analytics :is(button, select, input, summary):focus-visible {
+  outline: 2px solid #94728c;
+  outline-offset: 2px;
+}
+
+.analytics button:not(:disabled),
+.search-results summary {
+  cursor: pointer;
+}
+
+.analytics button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.state {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 33px 16px;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.state p {
+  margin: 0;
+}
+
+.state strong {
+  color: var(--ink);
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.section-head h2,
+.table-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.table-title {
+  padding: 14px 16px;
+}
+
+.section-head p,
+.analysis-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search-results {
+  padding: 12px 15px;
+}
+
+.search-results summary {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.matches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  gap: 8px;
+  max-height: 260px;
+  padding: 5px 2px;
+  margin-top: 6px;
+  overflow: auto;
+}
+
+.matches button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 11px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.matches button[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: var(--tint);
+  border-color: #b58ba9;
+}
+
+.matches span,
+.matches small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search-results .switch {
+  margin-top: 8px;
+}
+
+.analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  padding: 15px 16px;
+  border-top: 3px solid #ab829f;
+}
+
+.metric-card:nth-child(even) {
+  border-top-color: #6e9694;
+}
+
+.metric-card h2,
+.metric-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.metric-card strong {
+  display: block;
+  margin: 5px 0;
+  font-size: clamp(17px, 1.75vw, 25px);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.overview-charts {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .overview-charts {
+    grid-template-columns: 1fr;
+  }
+}
