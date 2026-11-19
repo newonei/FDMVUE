@@ -177,6 +177,8 @@ export namespace FdmgongchangProductionOrderApi {
   }
 
   export interface Order {
+    /** 已接单且整单无有效下发任务或开工记录，可批量补雕刻。 */
+    batchRouteEditable?: boolean;
     completedAt?: null | number | string;
     completedQuantity: number | string;
     createTime?: number | string;
@@ -644,6 +646,14 @@ export function saveItemProductionConfigBatch(data: {
     {
       headers: factoryHeaders(),
     },
+  );
+}
+
+export function batchAddEngrave(data: { itemIds: number[]; orderId: number }) {
+  return requestClient.post<FdmgongchangProductionOrderApi.Order>(
+    `${BASE}/batch-add-engrave`,
+    data,
+    { headers: factoryHeaders() },
   );
 }
 
