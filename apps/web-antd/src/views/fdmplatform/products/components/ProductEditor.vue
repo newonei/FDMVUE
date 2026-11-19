@@ -297,8 +297,6 @@ async function save() {
       <ProductManufacturingFields
         v-model:value="manufacturing"
         :derive-layers="deriveLayers"
-        :colors="attributeOptions.colors"
-        :patterns="attributeOptions.patterns ?? []"
       />
       <Alert
         v-if="layerStageError"
@@ -350,7 +348,7 @@ async function save() {
           </Form.Item>
         </Form>
         <p class="section-hint">
-          旧产品可保留颜色原文，新增属性可逐步补齐。颜色与压花从已维护选项中选择，保存后在订单和任务选品中展示。
+          旧产品可保留颜色原文。生产用色请填写色号，压花从已维护选项中选择。
         </p>
       </section>
       <Checkbox v-model:checked="active">

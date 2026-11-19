@@ -3,6 +3,7 @@ import type {
   ProductImportCorrections,
   ProductImportResult,
   ProductImportRow,
+  ProductImportSource,
 } from '#/api/fdmplatform/products';
 
 import { computed, ref, shallowRef } from 'vue';
@@ -42,11 +43,12 @@ import ProductImportRowEditor from './ProductImportRowEditor.vue';
 const props = defineProps<{ companyId: number; open: boolean }>();
 const emit = defineEmits<{ close: []; imported: [] }>();
 const { Dragger } = Upload;
+const templateSources = ['自产', '外采'] as const;
 const file = shallowRef<File>();
 const result = ref<ProductImportResult>();
 const previewing = ref(false);
 const importing = ref(false);
-const downloading = ref(false);
+const downloading = ref<ProductImportSource>();
 const completed = ref(false);
 const panelError = ref('');
 const onlyIssues = ref(false);
@@ -272,17 +274,23 @@ async function submit() {
     importing.value = false;
   }
 }
-async function downloadTemplate() {
+async function downloadTemplate(productSource: ProductImportSource) {
   if (downloading.value) return;
-  downloading.value = true;
+  downloading.value = productSource;
   panelError.value = '';
   try {
-    const source = await downloadProductImportTemplate(props.companyId);
-    downloadFileFromBlobPart({ source, fileName: '产品信息导入模板.xlsx' });
+    const source = await downloadProductImportTemplate(
+      props.companyId,
+      productSource,
+    );
+    downloadFileFromBlobPart({
+      source,
+      fileName: `${productSource}产品导入模板.xlsx`,
+    });
   } catch (error) {
     panelError.value = errorText(error);
   } finally {
-    downloading.value = false;
+    downloading.value = undefined;
   }
 }
 </script>
@@ -316,11 +324,21 @@ async function downloadTemplate() {
       <div v-if="!result" class="import-template-row">
         <div>
           <strong>产品信息导入模板</strong>
-          <p>新版模板带系统下拉选项。兼容旧表，每次最多 200 行、10 MB。</p>
+          <p>
+            按来源下载，表头标明必填和选填。兼容旧表，每次最多 200 行、10 MB。
+          </p>
         </div>
-        <Button :loading="downloading" @click="downloadTemplate">
-          下载 Excel 模板
-        </Button>
+        <Space wrap>
+          <Button
+            v-for="source in templateSources"
+            :key="source"
+            :loading="downloading === source"
+            :disabled="Boolean(downloading && downloading !== source)"
+            @click="downloadTemplate(source)"
+          >
+            下载{{ source }}模板
+          </Button>
+        </Space>
       </div>
       <Dragger
         :class="{ 'import-upload-compact': result }"
@@ -350,16 +368,20 @@ async function downloadTemplate() {
             ? '本次导入已完成，选择新文件可继续导入。'
             : '旧表可以在预览中逐行选择产品来源，然后重新校验。'
         }}</span>
-        <Space>
-          <Button
-            v-if="result"
-            size="small"
-            type="link"
-            :loading="downloading"
-            @click="downloadTemplate"
-          >
-            下载模板
-          </Button>
+        <Space wrap>
+          <template v-if="result">
+            <Button
+              v-for="source in templateSources"
+              :key="source"
+              size="small"
+              type="link"
+              :loading="downloading === source"
+              :disabled="Boolean(downloading && downloading !== source)"
+              @click="downloadTemplate(source)"
+            >
+              下载{{ source }}模板
+            </Button>
+          </template>
           <Button size="small" type="link" :disabled="busy" @click="clearFile">
             移除文件
           </Button>
@@ -376,8 +398,8 @@ async function downloadTemplate() {
         v-if="!result"
         type="info"
         show-icon
-        message="先选择产品来源。外采填写编号、名称等基础资料，启用时补齐规格和单位。"
-        description="自产需填成品长宽厚、颜色、纹路和雕刻状态。尺寸用 mm。制造结构可留空并按单双色计算，选双层时填写两面层厚。激光雕刻需选图案并填生产版本。"
+        message="外采必填产品名称、产品型号、产品规格、产品类别和单位，产品编号留空时自动生成。"
+        description="自产请按模板中工厂拆单所需的项目填写。色号和激光雕刻图案可直接填写，尺寸统一用 mm。"
       />
       <template v-if="result">
         <Alert

@@ -295,6 +295,15 @@ async function choose(label: string, value: string) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await flush();
 }
+async function fill(label: string, value: string) {
+  const input = document.querySelector<HTMLInputElement>(
+    `input[aria-label="${label}"]`,
+  )!;
+  expect(input).toBeTruthy();
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+}
 async function save() {
   [...document.querySelectorAll('button')]
     .find((button) => button.textContent?.trim() === '保存产品档案')!
@@ -318,11 +327,11 @@ describe('产品档案编辑与查看', () => {
       await flush();
     }
     await choose('颜色方式', 'SINGLE');
-    await choose('单色颜色', 'P');
+    await fill('色号', ' 502C ');
     await choose('正面压花', 'NONE');
     await choose('反面压花', 'NONE');
     await choose('雕刻方式', 'LASER');
-    await choose('激光图案', 'FLOWER');
+    await fill('激光图案', ' 客户山水-A ');
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('请填写激光图案生产版本');
@@ -339,17 +348,21 @@ describe('产品档案编辑与查看', () => {
         widthMm: 610,
         finishedThicknessMm: 6,
         colorMode: 'SINGLE',
-        frontColor: 'P',
-        backColor: 'P',
+        colorCode: '502C',
+        frontColor: '502C',
+        backColor: '502C',
         textureFront: 'NONE',
         textureBack: 'NONE',
         patternMode: 'LASER',
-        patternCode: 'FLOWER',
+        patternCode: '客户山水-A',
         patternVersion: '生产版B',
       }),
     );
     expect(document.body.textContent).toContain('1830.5 × 610 × 6 mm');
-    expect(document.body.textContent).toContain('激光雕刻 · FLOWER · 生产版B');
+    expect(document.body.textContent).toContain('502C');
+    expect(document.body.textContent).toContain(
+      '激光雕刻 · 客户山水-A · 生产版B',
+    );
   });
   it('旧记录默认待核实，不能按颜色原文默认单色；可保存未核实草稿', async () => {
     await mount({ ...product, frontColor: 'P', backColor: 'P' });
@@ -357,7 +370,7 @@ describe('产品档案编辑与查看', () => {
       document.querySelector<HTMLSelectElement>('select[aria-label="颜色方式"]')
         ?.value,
     ).toBe('UNKNOWN');
-    expect(document.querySelector('select[aria-label="单色颜色"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="色号"]')).toBeNull();
     await save();
     expect(api.save.mock.calls[0]![0]).toMatchObject({
       colorMode: 'UNKNOWN',
@@ -450,8 +463,8 @@ describe('产品档案编辑与查看', () => {
       frontThicknessMm: 2,
       backThicknessMm: 4,
     });
-    expect(document.querySelector('select[aria-label="正面颜色"]')).toBeNull();
-    expect(document.querySelector('select[aria-label="反面颜色"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="正面色号"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="反面色号"]')).toBeNull();
     expect(document.querySelector('select[aria-label="制造结构"]')).toBeNull();
     expect(
       document.querySelector('input[aria-label="正面层厚度（mm）"]'),
@@ -492,7 +505,7 @@ describe('产品档案编辑与查看', () => {
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('必须不同');
-    await choose('反面颜色', 'G');
+    await fill('反面色号', 'G');
     await flush();
     await save();
     expect(api.save).not.toHaveBeenCalled();
@@ -516,7 +529,7 @@ describe('产品档案编辑与查看', () => {
       document.querySelector('input[aria-label="正面层厚度（mm）"]'),
     ).toBeNull();
     await choose('颜色方式', 'DUAL');
-    await choose('反面颜色', 'G');
+    await fill('反面色号', 'G');
     expect(document.body.textContent).toContain(
       '成品名义层厚：正面 3 mm + 反面 3 mm',
     );
@@ -638,8 +651,8 @@ describe('产品档案编辑与查看', () => {
     await choose('生产分类', 'LAMINATED');
     await choose('垫子类型', 'FLAT');
     await choose('颜色方式', 'DUAL');
-    await choose('正面颜色', 'P');
-    await choose('反面颜色', 'G');
+    await fill('正面色号', 'P');
+    await fill('反面色号', 'G');
     await choose('正面压花', 'BK');
     await choose('反面压花', 'FH');
     await save();
@@ -671,22 +684,30 @@ describe('产品档案编辑与查看', () => {
   });
 
   it('保留字典外的已存属性，并允许明确清空而不丢失旧颜色原文', async () => {
+    const historicPattern = '客户定制老图案名称'.repeat(5);
     await mount({
       ...product,
       productStage: 'BOARD',
       colorMode: 'SINGLE',
       colorCode: 'OLD',
       colorCodeLabel: '旧单色',
+      patternMode: 'LASER',
+      patternCode: historicPattern,
+      patternVersion: 'V1',
       textureFront: 'OLD-TEXTURE',
       textureFrontLabel: '旧纹路',
     });
-    const color = document.querySelector<HTMLSelectElement>(
-      'select[aria-label="单色颜色"]',
+    const color = document.querySelector<HTMLInputElement>(
+      'input[aria-label="色号"]',
     )!;
     expect(color.value).toBe('OLD');
-    expect(color.textContent).toContain('旧单色');
+    const pattern = document.querySelector<HTMLInputElement>(
+      'input[aria-label="激光图案"]',
+    )!;
+    expect(pattern.maxLength).toBe(32);
+    expect(pattern.value).toBe(historicPattern);
     await choose('生产分类', '');
-    await choose('单色颜色', '');
+    await fill('色号', '');
     await choose('颜色方式', 'UNKNOWN');
     await choose('正面压花', '');
     await save();
@@ -694,6 +715,7 @@ describe('产品档案编辑与查看', () => {
       expect.objectContaining({
         productStage: '',
         colorCode: '',
+        patternCode: historicPattern,
         textureFront: '',
         color: '旧颜色原文',
       }),

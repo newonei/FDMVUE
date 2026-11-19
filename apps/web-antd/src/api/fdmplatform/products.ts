@@ -189,6 +189,8 @@ export interface ProductAttachmentView {
 }
 const base = '/fdmplatform/v1/products';
 
+export type ProductImportSource = '外采' | '自产';
+
 export interface ProductImportRow {
   rowNumber: number;
   code: string;
@@ -290,9 +292,12 @@ export function resolveProductConfigurations(
     data,
   );
 }
-export function downloadProductImportTemplate(companyId = 0) {
+export function downloadProductImportTemplate(
+  companyId = 0,
+  productSource?: ProductImportSource,
+) {
   return requestClient.download<Blob>(`${base}/import-template`, {
-    params: { companyId },
+    params: { companyId, productSource },
   });
 }
 export function previewProductImport(

@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import type {
-  ProductAttributeOption,
-  ProductAttributes,
-} from '#/api/fdmplatform/products';
+import type { ProductAttributes } from '#/api/fdmplatform/products';
 
 import { computed } from 'vue';
 
@@ -23,12 +20,10 @@ import ProductColorSummary from './ProductColorSummary.vue';
 
 const props = withDefaults(
   defineProps<{
-    colors: ProductAttributeOption[];
     deriveLayers?: boolean;
-    patterns?: ProductAttributeOption[];
     value: ProductAttributes;
   }>(),
-  { deriveLayers: undefined, patterns: () => [] },
+  { deriveLayers: undefined },
 );
 const emit = defineEmits<{ 'update:value': [value: ProductAttributes] }>();
 const automaticLayers = computed(
@@ -53,15 +48,6 @@ const layers = computed(() =>
 function update(field: keyof ProductAttributes, value: unknown) {
   emit('update:value', { ...props.value, [field]: value });
 }
-function colorOptionsFor(field: 'backColor' | 'colorCode' | 'frontColor') {
-  const value = props.value[field];
-  return !value || props.colors.some((item) => item.value === value)
-    ? props.colors
-    : [
-        ...props.colors,
-        { value, label: props.value[`${field}Label`] || value },
-      ];
-}
 function changeMode(mode: unknown) {
   const colorCode =
     mode === 'SINGLE'
@@ -75,12 +61,6 @@ function changeMode(mode: unknown) {
     colorMode: mode as ProductAttributes['colorMode'],
     colorCode,
   });
-}
-function patternOptionsFor() {
-  const value = props.value.patternCode;
-  return !value || props.patterns.some((item) => item.value === value)
-    ? props.patterns
-    : [...props.patterns, { value, label: value }];
 }
 </script>
 
@@ -123,35 +103,33 @@ function patternOptionsFor() {
           @update:value="changeMode"
         />
       </Form.Item>
-      <Form.Item v-if="value.colorMode === 'SINGLE'" label="颜色" required>
-        <Select
-          :value="value.colorCode || undefined"
-          :options="colorOptionsFor('colorCode')"
-          show-search
-          option-filter-prop="label"
+      <Form.Item v-if="value.colorMode === 'SINGLE'" label="色号" required>
+        <Input
+          :value="value.colorCode ?? ''"
+          :maxlength="100"
           allow-clear
-          aria-label="单色颜色"
-          @update:value="(v) => update('colorCode', v ?? '')"
+          aria-label="色号"
+          placeholder="如 502C"
+          @update:value="(v) => update('colorCode', v)"
         />
       </Form.Item>
       <template v-if="value.colorMode === 'DUAL'">
         <Form.Item
           v-for="[field, label] in [
-            ['frontColor', '正面颜色'],
-            ['backColor', '反面颜色'],
+            ['frontColor', '正面色号'],
+            ['backColor', '反面色号'],
           ] as const"
           :key="field"
           :label="label"
           required
         >
-          <Select
-            :value="value[field] || undefined"
-            :options="colorOptionsFor(field)"
-            show-search
-            option-filter-prop="label"
+          <Input
+            :value="value[field] ?? ''"
+            :maxlength="100"
             allow-clear
             :aria-label="label"
-            @update:value="(v) => update(field, v ?? '')"
+            placeholder="如 502C"
+            @update:value="(v) => update(field, v)"
           />
         </Form.Item>
       </template>
@@ -185,15 +163,13 @@ function patternOptionsFor() {
       </Form.Item>
       <template v-if="value.patternMode === 'LASER'">
         <Form.Item label="激光图案" required>
-          <Select
-            :value="value.patternCode || undefined"
-            :options="patternOptionsFor()"
-            show-search
-            option-filter-prop="label"
+          <Input
+            :value="value.patternCode ?? ''"
+            :maxlength="32"
             allow-clear
             aria-label="激光图案"
-            placeholder="选择已维护图案"
-            @update:value="(v) => update('patternCode', v ?? '')"
+            placeholder="填写图案名称或编号"
+            @update:value="(v) => update('patternCode', v)"
           />
         </Form.Item>
         <Form.Item label="图案生产版本" required>

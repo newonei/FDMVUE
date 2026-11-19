@@ -158,8 +158,8 @@ describe('颜色与独立制造结构', () => {
       '宽度',
       '厚度',
       '单双色',
-      '正面颜色',
-      '反面颜色',
+      '正面色号',
+      '反面色号',
       '正面纹路',
       '反面纹路',
       '雕刻方式',
@@ -219,10 +219,10 @@ describe('颜色与独立制造结构', () => {
       manufacturingPayload({ frontColor: 'P', backColor: 'G' }),
     ).not.toHaveProperty('constructionType');
   });
-  it('单色一次选择规范化三颜色，同色双层保留不等厚两层', () => {
+  it('单色填写一次色号并去除首尾空白，同色双层保留不等厚两层', () => {
     const source = {
       colorMode: 'SINGLE' as const,
-      colorCode: 'P',
+      colorCode: ' 502C ',
       constructionType: 'DOUBLE_LAYER' as const,
       finishedThicknessMm: 6,
       frontThicknessMm: 2,
@@ -230,19 +230,23 @@ describe('颜色与独立制造结构', () => {
     };
     expect(manufacturingError(source)).toBe('');
     expect(manufacturingPayload(source)).toMatchObject({
-      colorCode: 'P',
-      frontColor: 'P',
-      backColor: 'P',
+      colorCode: '502C',
+      frontColor: '502C',
+      backColor: '502C',
       frontThicknessMm: 2,
       backThicknessMm: 4,
     });
   });
   it('双色要求两种颜色，双层厚度必须相加匹配，单层规范单面厚度', () => {
+    expect(manufacturingError({ colorMode: 'SINGLE' })).toBe('请填写单色色号');
+    expect(manufacturingError({ colorMode: 'DUAL', frontColor: '502C' })).toBe(
+      '请分别填写正面色号和反面色号',
+    );
     expect(
       manufacturingError({
         colorMode: 'DUAL',
-        frontColor: 'P',
-        backColor: 'P',
+        frontColor: ' 502c ',
+        backColor: '502C',
       }),
     ).toContain('必须不同');
     expect(
@@ -257,14 +261,16 @@ describe('颜色与独立制造结构', () => {
       manufacturingPayload({
         colorMode: 'DUAL',
         colorCode: 'OLD',
-        frontColor: 'P',
-        backColor: 'G',
+        frontColor: ' 502C ',
+        backColor: ' 503C ',
         constructionType: 'SINGLE_LAYER',
         finishedThicknessMm: 6.5,
         backThicknessMm: 3,
       }),
     ).toMatchObject({
       colorCode: '',
+      frontColor: '502C',
+      backColor: '503C',
       frontThicknessMm: 6.5,
       backThicknessMm: null,
     });

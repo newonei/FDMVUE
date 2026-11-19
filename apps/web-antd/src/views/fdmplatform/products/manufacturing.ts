@@ -123,7 +123,7 @@ export function configurationMissingFields(value: ProductAttributes) {
     !value.frontColor?.trim() &&
     !(value.colorMode === 'SINGLE' && value.colorCode?.trim())
   )
-    missing.push('正面颜色');
+    missing.push('正面色号');
   if (
     !value.backColor?.trim() &&
     !(
@@ -131,7 +131,7 @@ export function configurationMissingFields(value: ProductAttributes) {
       (value.colorCode?.trim() || value.frontColor?.trim())
     )
   )
-    missing.push('反面颜色');
+    missing.push('反面色号');
   if (!value.textureFront?.trim()) missing.push('正面纹路');
   if (!value.textureBack?.trim()) missing.push('反面纹路');
   if (!['LASER', 'NONE'].includes(value.patternMode ?? ''))
@@ -175,12 +175,13 @@ export function manufacturingError(
       return `请填写大于 0 的${title}`;
   }
   if (value.colorMode === 'SINGLE' && !value.colorCode?.trim())
-    return '请选择单色颜色';
+    return '请填写单色色号';
   if (value.colorMode === 'DUAL') {
-    if (!value.frontColor?.trim() || !value.backColor?.trim())
-      return '双色产品请分别选择正面和反面颜色';
-    if (value.frontColor === value.backColor)
-      return '双色产品的正反颜色必须不同；同色请选择单色';
+    const frontColor = value.frontColor?.trim();
+    const backColor = value.backColor?.trim();
+    if (!frontColor || !backColor) return '请分别填写正面色号和反面色号';
+    if (frontColor.toUpperCase() === backColor.toUpperCase())
+      return '双色产品的正反面色号必须不同，同色请选择单色';
   }
   if (
     (value.constructionType === 'SINGLE_LAYER' ||
@@ -208,7 +209,7 @@ export function manufacturingError(
       return '正面层厚度与反面层厚度之和必须等于成品厚度';
   }
   if (value.patternMode === 'LASER') {
-    if (!value.patternCode?.trim()) return '请选择激光图案';
+    if (!value.patternCode?.trim()) return '请填写激光图案';
     if (!value.patternVersion?.trim()) return '请填写激光图案生产版本';
   }
   return '';
@@ -218,6 +219,7 @@ export function manufacturingPayload(
   options: { deriveLayers?: boolean } = {},
 ) {
   const colorMode = value.colorMode ?? 'UNKNOWN';
+  const colorCode = value.colorCode?.trim() ?? '';
   const constructionType = value.constructionType ?? 'UNKNOWN';
   const derive = options.deriveLayers ?? usesColorDerivedLayers(value);
   return {
@@ -230,15 +232,11 @@ export function manufacturingPayload(
       value.patternMode === 'NONE' ? '' : (value.patternCode?.trim() ?? ''),
     patternVersion:
       value.patternMode === 'NONE' ? '' : (value.patternVersion?.trim() ?? ''),
-    colorCode: colorMode === 'DUAL' ? '' : (value.colorCode ?? ''),
+    colorCode: colorMode === 'DUAL' ? '' : colorCode,
     frontColor:
-      colorMode === 'SINGLE'
-        ? (value.colorCode ?? '')
-        : (value.frontColor ?? ''),
+      colorMode === 'SINGLE' ? colorCode : (value.frontColor?.trim() ?? ''),
     backColor:
-      colorMode === 'SINGLE'
-        ? (value.colorCode ?? '')
-        : (value.backColor ?? ''),
+      colorMode === 'SINGLE' ? colorCode : (value.backColor?.trim() ?? ''),
     finishedThicknessMm: value.finishedThicknessMm ?? null,
     ...(derive
       ? {}

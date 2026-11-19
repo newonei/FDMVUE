@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   submit: vi.fn(),
   template: vi.fn(),
   download: vi.fn(),
+  options: vi.fn(),
+  categories: vi.fn(),
   key: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({ newIdempotencyKey: api.key }));
@@ -21,36 +23,27 @@ vi.mock('#/api/fdmplatform/products', () => ({
   previewProductImport: api.preview,
   importProducts: api.submit,
   downloadProductImportTemplate: api.template,
+  getProductAttributeOptions: api.options,
+  getProductCategoryList: api.categories,
 }));
 vi.mock('@vben/utils', () => ({ downloadFileFromBlobPart: api.download }));
-vi.mock('./ProductImportRowEditor.vue', () => ({
-  default: defineComponent({
-    props: {
-      cells: {
-        type: Object as PropType<Record<string, string>>,
-        default: () => ({}),
-      },
-      open: Boolean,
-    },
-    emits: ['save'],
-    setup(props, { emit }) {
-      return () =>
-        props.open &&
-        h('div', { 'data-row-editor': '' }, [
-          h('p', props.cells?.['正面颜色']),
-          h(
-            'button',
-            { onClick: () => emit('save', { 正面颜色: 'MG', 单位: '件' }) },
-            '保存修改',
-          ),
-        ]);
-    },
-  }),
-}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     setup(_, { slots }) {
       return () => h('div', slots.default?.());
+    },
+  });
+  const input = defineComponent({
+    props: { value: String },
+    emits: ['update:value'],
+    setup(props, { attrs, emit }) {
+      return () =>
+        h('input', {
+          ...attrs,
+          value: props.value ?? '',
+          onInput: (event: Event) =>
+            emit('update:value', (event.target as HTMLInputElement).value),
+        });
     },
   });
   return {
@@ -94,15 +87,28 @@ vi.mock('ant-design-vue', () => {
           ]);
       },
     }),
+    Form: Object.assign(block, { Item: block }),
+    Input: Object.assign(input, { TextArea: input }),
     Modal: defineComponent({
-      props: { open: Boolean },
-      setup(props, { slots }) {
+      props: { open: Boolean, okText: String },
+      emits: ['ok'],
+      setup(props, { emit, slots }) {
         return () =>
           props.open
-            ? h('section', [slots.default?.(), slots.footer?.()])
+            ? h(
+                'section',
+                { 'data-row-editor': props.okText ? '' : undefined },
+                [
+                  slots.default?.(),
+                  slots.footer?.(),
+                  props.okText &&
+                    h('button', { onClick: () => emit('ok') }, props.okText),
+                ],
+              )
             : null;
       },
     }),
+    Select: block,
     Space: block,
     Table: defineComponent({
       props: {
@@ -128,6 +134,7 @@ vi.mock('ant-design-vue', () => {
           );
       },
     }),
+    Tabs: Object.assign(block, { TabPane: block }),
     Tag: block,
     Upload: {
       Dragger: defineComponent({
@@ -231,6 +238,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   let key = 0;
   api.key.mockImplementation(() => `import-key-${++key}`);
+  api.options.mockResolvedValue({
+    colors: [],
+    matTypes: [],
+    stages: [],
+    textures: [],
+  });
+  api.categories.mockResolvedValue([]);
   api.preview.mockResolvedValue(previewResult());
   api.submit.mockResolvedValue({
     ...previewResult(),
@@ -422,19 +436,29 @@ describe('产品 Excel 导入交互', () => {
     expect(api.preview).toHaveBeenCalledTimes(1);
   });
 
-  it('没有可导入行时禁用提交，并下载后端模板', async () => {
+  it('没有可导入行时禁用提交，自产和外采下载各自的后端模板', async () => {
     api.preview.mockResolvedValue({ ...previewResult(), readyCount: 0 });
     const blob = new Blob(['template']);
     api.template.mockResolvedValue(blob);
     const { button, choose } = await mountDialog();
-    button('下载 Excel 模板').click();
+    button('下载自产模板').click();
     await vi.waitFor(() =>
-      expect(api.download).toHaveBeenCalledWith({
+      expect(api.download).toHaveBeenNthCalledWith(1, {
         source: blob,
-        fileName: '产品信息导入模板.xlsx',
+        fileName: '自产产品导入模板.xlsx',
       }),
     );
-    expect(api.template).toHaveBeenCalledWith(0);
+    button('下载外采模板').click();
+    await vi.waitFor(() =>
+      expect(api.download).toHaveBeenNthCalledWith(2, {
+        source: blob,
+        fileName: '外采产品导入模板.xlsx',
+      }),
+    );
+    expect(api.template.mock.calls).toEqual([
+      [0, '自产'],
+      [0, '外采'],
+    ]);
     await choose(new File(['empty'], 'empty.xlsx'));
     await vi.waitFor(() => expect(button('导入 0 个有效产品')).toBeTruthy());
     expect(button('导入 0 个有效产品').disabled).toBe(true);
@@ -442,16 +466,34 @@ describe('产品 Excel 导入交互', () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
-  it('保留无效颜色原值并在线改正，重新校验前禁止用旧预览导入', async () => {
+  it('直接填写新色号和雕刻图案，重新校验前禁止用旧预览导入', async () => {
     const { button, choose, host } = await mountDialog();
     const file = new File(['wrong-color'], 'products.xlsx');
     await choose(file);
     await vi.waitFor(() => expect(button('修改')).toBeTruthy());
     button('修改').click();
     await nextTick();
-    expect(host.querySelector('[data-row-editor]')?.textContent).toContain(
-      'Excel 原来写错的颜色',
-    );
+    const editor = host.querySelector('[data-row-editor]')!;
+    const frontColor = editor.querySelector<HTMLInputElement>(
+      'input[aria-label="正面色号"]',
+    )!;
+    expect(frontColor.value).toBe('Excel 原来写错的颜色');
+    expect(editor.querySelector('input[aria-label="反面色号"]')).toBeTruthy();
+    expect(editor.querySelector('input[aria-label="色号"]')).toBeTruthy();
+    frontColor.value = '502C';
+    frontColor.dispatchEvent(new Event('input', { bubbles: true }));
+    const pattern = editor.querySelector<HTMLInputElement>(
+      'input[aria-label="激光图案"]',
+    )!;
+    expect(pattern.maxLength).toBe(32);
+    pattern.value = '客户山水-A';
+    pattern.dispatchEvent(new Event('input', { bubbles: true }));
+    const unit = editor.querySelector<HTMLInputElement>(
+      'input[aria-label="单位"]',
+    )!;
+    unit.value = '件';
+    unit.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
     button('保存修改').click();
     await nextTick();
     expect(button('导入 1 个有效产品').disabled).toBe(true);
@@ -470,7 +512,9 @@ describe('产品 Excel 导入交互', () => {
       errorCount: 0,
     });
     button('重新校验').click();
-    const corrections = { 7: { 正面颜色: 'MG', 单位: '件' } };
+    const corrections = {
+      7: { 正面颜色: '502C', 激光图案: '客户山水-A', 单位: '件' },
+    };
     await vi.waitFor(() => expect(button('导入 2 个有效产品')).toBeTruthy());
     expect(api.preview).toHaveBeenLastCalledWith(file, 0, corrections);
     button('导入 2 个有效产品').click();

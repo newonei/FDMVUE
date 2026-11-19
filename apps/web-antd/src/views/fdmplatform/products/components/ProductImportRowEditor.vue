@@ -41,11 +41,9 @@ const { TabPane } = Tabs;
 type Choices =
   | 'categories'
   | 'colorModes'
-  | 'colors'
   | 'construction'
   | 'matTypes'
   | 'patternModes'
-  | 'patterns'
   | 'sources'
   | 'stages'
   | 'states'
@@ -56,6 +54,7 @@ interface Field {
   choices?: Choices;
   max?: number;
   multiline?: boolean;
+  placeholder?: string;
 }
 const sections: { fields: Field[]; key: string; label: string }[] = [
   {
@@ -85,13 +84,13 @@ const sections: { fields: Field[]; key: string; label: string }[] = [
       { key: '正面层厚度(mm)', max: 40 },
       { key: '反面层厚度(mm)', max: 40 },
       { key: '颜色模式', choices: 'colorModes' },
-      { key: '正面颜色', choices: 'colors' },
-      { key: '反面颜色', choices: 'colors' },
-      { key: '颜色编码', choices: 'colors' },
+      { key: '正面颜色', label: '正面色号', max: 100, placeholder: '如 502C' },
+      { key: '反面颜色', label: '反面色号', max: 100, placeholder: '如 502C' },
+      { key: '颜色编码', label: '色号', max: 100, placeholder: '如 502C' },
       { key: '正面压花', label: '正面纹路', choices: 'textures' },
       { key: '反面压花', label: '反面纹路', choices: 'textures' },
       { key: '雕刻状态', choices: 'patternModes' },
-      { key: '激光图案', choices: 'patterns' },
+      { key: '激光图案', max: 32, placeholder: '填写图案名称或编号' },
       { key: '图案生产版本', max: 100 },
     ],
   },
@@ -169,9 +168,7 @@ const options = computed<Record<Choices, ProductAttributeOption[]>>(() => ({
         label: group ? `${group} / ${category.name}` : category.name,
       };
     }),
-  colors: attributes.value?.colors ?? [],
   matTypes: attributes.value?.matTypes ?? [],
-  patterns: attributes.value?.patterns ?? [],
   stages: attributes.value?.stages ?? [],
   textures: [
     { value: 'NONE', label: '无纹路' },
@@ -220,7 +217,9 @@ async function loadOptions() {
 
 function initialSection() {
   const issue = problems.value.join('；');
-  if (/颜色|压花|纹路|成品厚度|长度|宽度|层厚|雕刻|图案|制造结构/.test(issue))
+  if (
+    /颜色|色号|压花|纹路|成品厚度|长度|宽度|层厚|雕刻|图案|制造结构/.test(issue)
+  )
     return 'manufacturing';
   if (sections[2]?.fields.some(({ key }) => issue.includes(key)))
     return 'other';
@@ -265,7 +264,7 @@ function readChoice(source: Choices, input: string) {
   const byCode = options.value[source].find(
     (option) =>
       option.value === (source === 'stages' ? lookup.toUpperCase() : lookup) ||
-      (['colors', 'matTypes', 'patterns', 'textures'].includes(source) &&
+      (['matTypes', 'textures'].includes(source) &&
         value === `${option.label}（${option.value}）`),
   );
   if (byCode) return byCode.value;
@@ -296,7 +295,7 @@ const rows = computed(() =>
         ? options.value[source].map((option) => ({
             ...option,
             label:
-              ['colors', 'matTypes', 'patterns', 'textures'].includes(source) &&
+              ['matTypes', 'textures'].includes(source) &&
               option.label !== option.value
                 ? `${option.label} · ${option.value}`
                 : option.label,
@@ -367,7 +366,7 @@ function save() {
         :description="lookupError"
       />
       <div class="import-row-toolbar">
-        <span>下拉字段可按名称或编码搜索。保存后返回预览重新校验。</span>
+        <span>色号可直接填写。保存后返回预览重新校验。</span>
         <Button size="small" :loading="loading" @click="loadOptions">
           刷新选项
         </Button>
@@ -386,11 +385,6 @@ function save() {
               :label="field.label ?? field.key"
               :required="['产品编号', '产品名称'].includes(field.key)"
               :validate-status="field.unmatched ? 'warning' : undefined"
-              :extra="
-                field.unmatched && field.choices === 'colors'
-                  ? '请选择现有颜色。确认为新色号时，维护字典后可刷新选项。'
-                  : undefined
-              "
             >
               <Select
                 v-if="field.choices"
@@ -415,6 +409,7 @@ function save() {
                 v-model:value="draft[field.key]"
                 :aria-label="field.label ?? field.key"
                 :maxlength="field.max"
+                :placeholder="field.placeholder"
               />
             </Form.Item>
           </Form>
