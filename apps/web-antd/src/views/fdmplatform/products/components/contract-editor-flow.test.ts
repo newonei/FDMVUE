@@ -9,6 +9,7 @@ import ContractEditor from './ContractEditor.vue';
 
 const api = vi.hoisted(() => ({
   access: vi.fn(),
+  confirm: vi.fn(),
   customers: vi.fn(),
   saveCustomer: vi.fn(),
   resolve: vi.fn(),
@@ -16,7 +17,7 @@ const api = vi.hoisted(() => ({
   counter: 0,
 }));
 vi.mock('#/api/fdmplatform', () => ({
-  contractAction: vi.fn(),
+  contractAction: api.confirm,
   getAccess: api.access,
   getAttachments: vi.fn().mockResolvedValue({ items: [] }),
   getContract: vi.fn(),
@@ -359,6 +360,7 @@ beforeEach(() => {
     companies: [{ companyId: 1, companyName: '测试公司' }],
   });
   api.customers.mockReset().mockResolvedValue({ list: [], total: 0 });
+  api.confirm.mockReset();
   api.create.mockReset();
   api.saveCustomer.mockReset();
   api.resolve.mockReset().mockResolvedValue([
@@ -437,7 +439,7 @@ describe('order entry without changing menus', () => {
       ),
     );
   });
-  it('blocks activation without customer delivery requirements while still allowing a draft', async () => {
+  it('saves and activates a contract without delivery requirements or product dates', async () => {
     api.customers.mockResolvedValue({
       list: [
         { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
@@ -454,17 +456,24 @@ describe('order entry without changing menus', () => {
     await fill(host, '合同主体', '1', 'select');
     await fill(host, '产品分类', 'YOGA', 'select');
     await addProduct(host);
+    api.create.mockResolvedValueOnce({ id: 'contract-1', version: 1 });
+    api.confirm.mockResolvedValueOnce({ id: 'contract-1', version: 2 });
     button(host, '保存并生效').click();
-    await nextTick();
-    expect(host.textContent).toContain('请填写客户交付要求');
-    expect(api.create).not.toHaveBeenCalled();
-    api.create.mockRejectedValueOnce(new Error('保留草稿表单用于测试'));
-    button(host, '保存草稿').click();
     await vi.waitFor(() =>
-      expect(api.create).toHaveBeenCalledWith(
-        expect.objectContaining({ deliveryRequirement: '' }),
-        [],
+      expect(api.confirm).toHaveBeenCalledWith(
+        'contract-1',
+        'CONFIRM_CONTRACT',
+        1,
+        expect.any(String),
+        {},
       ),
+    );
+    expect(api.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryRequirement: '',
+        items: [expect.objectContaining({ requiredDate: null })],
+      }),
+      [],
     );
   });
 
@@ -685,6 +694,65 @@ describe('order entry without changing menus', () => {
     expect(document.activeElement).toBe(
       rows[2]!.querySelector('[data-column="quantity"] input'),
     );
+  });
+
+  it('updates product quantity totals by unit independently of pricing', async () => {
+    const { host } = await mountEditor();
+    const footer = host.querySelector('.total-line')!;
+    expect(footer.textContent).toContain('产品数量合计 0');
+
+    api.resolve.mockResolvedValueOnce([
+      {
+        skuId: 'a',
+        skuName: '规格 A',
+        productVersion: 0,
+        quantity: '0.1',
+        unit: '条',
+        unitPrice: '10',
+      },
+      {
+        skuId: 'b',
+        skuName: '规格 B',
+        productVersion: 0,
+        quantity: '0.2',
+        unit: '条',
+      },
+      {
+        skuId: 'c',
+        skuName: '规格 C',
+        productVersion: 0,
+        quantity: 1500,
+        unit: '个',
+      },
+    ]);
+    await addProduct(host);
+    expect(footer.textContent).toContain('产品数量合计 0.3 条 / 1,500 个');
+    expect(footer.textContent).toContain('已定价小计 CNY 1.00');
+
+    const unpricedRow = host.querySelectorAll<HTMLElement>('[data-row]')[1]!;
+    const quantity = unpricedRow.querySelector<HTMLInputElement>(
+      '[data-column="quantity"] input',
+    )!;
+    quantity.value = '0.4';
+    quantity.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    expect(footer.textContent).toContain('产品数量合计 0.5 条 / 1,500 个');
+    expect(footer.textContent).toContain('已定价小计 CNY 1.00');
+
+    button(unpricedRow, '复制行').click();
+    await nextTick();
+    expect(footer.textContent).toContain('产品数量合计 0.9 条 / 1,500 个');
+
+    quantity.value = '';
+    quantity.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    expect(footer.textContent).toContain('产品数量合计 0.5 条 / 1,500 个');
+
+    const otherUnitRow = host.querySelectorAll<HTMLElement>('[data-row]')[2]!;
+    button(otherUnitRow, '移除').click();
+    await nextTick();
+    expect(footer.textContent).toContain('产品数量合计 0.5 条');
+    expect(footer.textContent).not.toContain('1,500 个');
   });
 
   it('links domestic unit price and line total, and hides the contract number', async () => {

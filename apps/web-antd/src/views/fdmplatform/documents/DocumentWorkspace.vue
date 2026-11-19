@@ -28,7 +28,9 @@ import dayjs from 'dayjs';
 import { getBusinessPage, getContract, getDirectory } from '#/api/fdmplatform';
 
 import CompletionScopeFilter from '../components/CompletionScope.vue';
+import LineColumnSettings from '../components/LineColumnSettings.vue';
 import { useInMergedView } from '../components/merged-view';
+import { useListColumns } from '../components/useListColumns';
 import {
   errorText,
   label,
@@ -260,8 +262,9 @@ watch(
   },
   { immediate: true, flush: 'post' },
 );
-const columns = computed(() => [
-  { title: '单据 / 关联合同', key: 'contract', width: 280 },
+const updateOrder = ref<'ASC' | 'DESC'>('DESC');
+const documentColumns = computed(() => [
+  { title: '单据 / 关联合同', key: 'contract', width: 280, locked: true },
   { title: '客户', key: 'customer', width: 190, ellipsis: true },
   { title: '订单所属公司', key: 'company', width: 180 },
   ...config.value.fields.map((pair) => {
@@ -275,6 +278,18 @@ const columns = computed(() => [
     fixed: 'right' as const,
   },
 ]);
+const {
+  columns,
+  listWidth,
+  settingsColumns,
+  setting,
+  settingsOpen,
+  saveColumns,
+  resizeColumn,
+} = useListColumns(
+  () => `documents:${config.value.resource}:${props.salesChannel ?? 'all'}`,
+  documentColumns,
+);
 /** 已改到工序库存的动作不再在列表上新建 */
 const createActions = computed(() =>
   config.value.create.filter((action) => !RETIRED_STOCK_ACTIONS.has(action)),
@@ -442,6 +457,7 @@ async function load() {
       contractId: contractId.value,
       pendingCompletion: completionFilter(scope.value),
       salesChannel: channelFilter(props.salesChannel, contractId.value),
+      oldestFirst: updateOrder.value === 'ASC' || undefined,
     });
     if (current === sequence) {
       records.value = result.list;
@@ -718,10 +734,28 @@ onMounted(async () => {
             style="width: 180px"
             @change="changeTransferStatus"
           />
-          <Button v-if="hasSearch" @click="clearSearch">
-            清除查询
-          </Button>
-</Space><Alert
+          <Button v-if="hasSearch" @click="clearSearch"> 清除查询 </Button>
+          <Select
+            v-model:value="updateOrder"
+            aria-label="按更新时间排序"
+            :options="[
+              { value: 'DESC', label: '最近更新优先' },
+              { value: 'ASC', label: '最早更新优先' },
+            ]"
+            style="width: 140px"
+            @change="search"
+          />
+          <Button @click="settingsOpen = true">列设置</Button>
+        </Space>
+        <LineColumnSettings
+          v-if="settingsOpen"
+          v-model:open="settingsOpen"
+          :columns="settingsColumns"
+          :setting="setting"
+          :title="`${config.title}列`"
+          @save="saveColumns"
+        />
+        <Alert
           v-if="locateError"
           :message="locateError"
           type="warning"
@@ -743,7 +777,7 @@ onMounted(async () => {
           :data-source="records"
           :loading="loading"
           row-key="id"
-          :scroll="{ x: Math.max(1300, columns.length * 150 + 170) }"
+          :scroll="{ x: listWidth }"
           :pagination="{
             current: pageNo,
             pageSize,
@@ -758,6 +792,7 @@ onMounted(async () => {
               load();
             }
           "
+          @resize-column="resizeColumn"
         >
           <template #emptyText>
             <Space direction="vertical" class="py-6">

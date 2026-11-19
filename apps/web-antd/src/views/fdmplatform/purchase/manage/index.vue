@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableProps } from 'ant-design-vue';
+
 import type { ActionDefinition } from '../../data';
 import type { CompletionScope } from '../../documents/completion-scope';
 import type { DocumentKind } from '../../documents/model';
@@ -83,7 +85,9 @@ import AttachmentPanel from '../../components/AttachmentPanel.vue';
 import CompletionScopeFilter from '../../components/CompletionScope.vue';
 import ContractDocumentDialog from '../../components/ContractDocumentDialog.vue';
 import DocumentApprovalPanel from '../../components/DocumentApprovalPanel.vue';
+import LineColumnSettings from '../../components/LineColumnSettings.vue';
 import RecordTable from '../../components/RecordTable.vue';
+import { useListColumns } from '../../components/useListColumns';
 import { errorText, field, rows } from '../../data';
 import BusinessDocumentDetail from '../../documents/BusinessDocumentDetail.vue';
 import {
@@ -165,6 +169,57 @@ const { keepAlive } = usePreferences();
 const embedded = computed(() => !!props.embeddedOrder);
 const active = useRouteOwner();
 const records = ref<ProcurementOrderRow[]>([]);
+const purchaseDateOrder = ref<'ASC' | 'DESC'>();
+const purchaseDateSortOrder = computed<'ascend' | 'descend' | null>(() => {
+  const order = purchaseDateOrder.value;
+  if (order === undefined) return null;
+  return order === 'ASC' ? 'ascend' : 'descend';
+});
+const orderColumns = computed(() => [
+  { title: '操作/状态', key: 'flags', width: 130, locked: true },
+  { title: '采购主题 / 供应商', key: 'supplier', width: 280, locked: true },
+  { title: '关联合同 / 客户', key: 'contract', width: 200 },
+  {
+    title: '采购日期',
+    key: 'date',
+    width: 110,
+    sorter: true,
+    sortDirections: ['descend', 'ascend'] as ('ascend' | 'descend')[],
+    sortOrder: purchaseDateSortOrder.value,
+  },
+  { title: '采购金额', key: 'amount', width: 140, align: 'right' as const },
+  { title: '入库', key: 'received', width: 140 },
+  { title: '付款', key: 'payment', width: 170 },
+  { title: '操作状态', key: 'operation', width: 100 },
+  { title: '', key: 'action', width: 80, fixed: 'right' as const },
+]);
+const {
+  columns,
+  listWidth,
+  settingsColumns,
+  setting,
+  settingsOpen,
+  saveColumns,
+  resizeColumn,
+} = useListColumns('procurement-orders', orderColumns);
+const tableChange: NonNullable<TableProps<ProcurementOrderRow>['onChange']> = (
+  pagination,
+  _filters,
+  sorter,
+  extra,
+) => {
+  if (extra.action === 'sort') {
+    const current = Array.isArray(sorter) ? sorter[0] : sorter;
+    const direction = current?.order;
+    const dateOrder = direction === 'ascend' ? 'ASC' : 'DESC';
+    purchaseDateOrder.value = direction ? dateOrder : undefined;
+    page.value = 1;
+    selectedKeys.value = [];
+  } else {
+    page.value = pagination.current ?? 1;
+  }
+  void loadList();
+};
 /** AI 风险检查的单据编号：关联合同的采购单是行编号，新建的独立采购单是 standaloneId；金智迁入的历史单不检查。 */
 function riskDocId(row: DocumentRow) {
   if (row.standaloneId)
@@ -1065,6 +1120,7 @@ async function loadList() {
     operation: operation.value,
     mine: mine.value || undefined,
     pendingCompletion: completionFilter(scope.value),
+    purchaseDateOrder: purchaseDateOrder.value,
   };
   const queryKey = JSON.stringify(params);
   if (queryKey !== listQueryKey) {
@@ -1691,6 +1747,7 @@ watch(financeType, (value, previous) => {
               {{ mine ? '✓ ' : '' }}只看我负责的
             </button>
             <span class="procurement-muted">当前筛选共 {{ total }} 单</span>
+            <Button @click="settingsOpen = true">列设置</Button>
             <Button
               v-if="keyword || status || operation || contractId || mine"
               type="text"
@@ -1700,6 +1757,14 @@ watch(financeType, (value, previous) => {
             </Button>
           </div>
         </div>
+        <LineColumnSettings
+          v-if="settingsOpen"
+          v-model:open="settingsOpen"
+          :columns="settingsColumns"
+          :setting="setting"
+          title="采购单列"
+          @save="saveColumns"
+        />
         <Alert
           v-if="contractId"
           type="info"
@@ -1718,7 +1783,7 @@ watch(financeType, (value, previous) => {
           class="fdm-business-table order-table"
           size="middle"
           table-layout="fixed"
-          :scroll="{ x: 1300 }"
+          :scroll="{ x: listWidth + 32 }"
           :data-source="records"
           :loading="loading"
           :row-key="(row: ProcurementOrderRow) => row.standaloneId ?? row.id"
@@ -1733,23 +1798,9 @@ watch(financeType, (value, previous) => {
             showSizeChanger: false,
             showTotal: (value: number) => `共 ${value} 单`,
           }"
-          :columns="[
-            { title: '操作/状态', key: 'flags', width: 130 },
-            { title: '采购主题 / 供应商', key: 'supplier', width: 280 },
-            { title: '关联合同 / 客户', key: 'contract', width: 200 },
-            { title: '采购日期', key: 'date', width: 110 },
-            { title: '采购金额', key: 'amount', width: 140, align: 'right' },
-            { title: '入库', key: 'received', width: 140 },
-            { title: '付款', key: 'payment', width: 170 },
-            { title: '操作状态', key: 'operation', width: 100 },
-            { title: '', key: 'action', width: 80, fixed: 'right' },
-          ]"
-          @change="
-            (value) => {
-              page = value.current ?? 1;
-              loadList();
-            }
-          "
+          :columns="columns"
+          @change="tableChange"
+          @resize-column="resizeColumn"
         >
           <template #emptyText>
             <Empty description="没有符合条件的采购订单">
@@ -1772,21 +1823,26 @@ watch(financeType, (value, previous) => {
             <TableSummary v-if="records.length > 0">
               <TableSummaryRow class="order-summary-row">
                 <TableSummaryCell :index="0" />
-                <TableSummaryCell :index="1" />
-                <TableSummaryCell :index="2">本页合计</TableSummaryCell>
-                <TableSummaryCell :index="3" />
-                <TableSummaryCell :index="4" />
-                <TableSummaryCell :index="5" align="right">
-                  <span class="procurement-number">{{
-                    pageTotals.amount
-                  }}</span>
+                <TableSummaryCell
+                  v-for="(column, index) in columns"
+                  :key="column.key"
+                  :index="index + 1"
+                  :align="column.align"
+                >
+                  <template v-if="column.key === 'supplier'">本页合计</template>
+                  <span
+                    v-else-if="column.key === 'amount'"
+                    class="procurement-number"
+                  >
+                    {{ pageTotals.amount }}
+                  </span>
+                  <span
+                    v-else-if="column.key === 'payment'"
+                    class="procurement-muted"
+                  >
+                    未付 {{ pageTotals.unpaid }}
+                  </span>
                 </TableSummaryCell>
-                <TableSummaryCell :index="6" />
-                <TableSummaryCell :index="7">
-                  <span class="procurement-muted">未付 {{ pageTotals.unpaid }}</span>
-                </TableSummaryCell>
-                <TableSummaryCell :index="8" />
-                <TableSummaryCell :index="9" />
               </TableSummaryRow>
             </TableSummary>
           </template>

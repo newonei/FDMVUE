@@ -33,6 +33,8 @@ import {
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../components/ActionDialog.vue';
+import LineColumnSettings from '../../components/LineColumnSettings.vue';
+import { useListColumns } from '../../components/useListColumns';
 import { errorText, field } from '../../data';
 import { useEntityDetail } from '../../documents/useEntityDetail';
 import { useRouteOwner } from '../../documents/useRouteOwner';
@@ -112,14 +114,14 @@ function sortOrder(key: string) {
   if (sortKeys[key] !== sort.value) return null;
   return order.value === 'ASC' ? ('ascend' as const) : ('descend' as const);
 }
-const columns = computed(() => {
+const supplierColumns = computed(() => {
   const sortable = (key: string) => ({
     sorter: true,
     sortOrder: sortOrder(key),
     sortDirections: ['descend', 'ascend'] as ('ascend' | 'descend')[],
   });
   return [
-    { title: '供应商', key: 'name', width: 220 },
+    { title: '供应商', key: 'name', width: 220, locked: true },
     {
       title: '分层 / 最近下单',
       key: 'lastOrder',
@@ -145,6 +147,15 @@ const columns = computed(() => {
     { title: '操作', key: 'action', width: 120, fixed: 'right' as const },
   ];
 });
+const {
+  columns,
+  listWidth,
+  settingsColumns,
+  setting,
+  settingsOpen,
+  saveColumns,
+  resizeColumn,
+} = useListColumns('suppliers', supplierColumns);
 const share = computed(() => {
   const value = overview.value?.top10Share;
   return value === null || value === undefined ? '—' : `${value}%`;
@@ -395,11 +406,20 @@ onMounted(refresh);
           <div class="toolbar-actions">
             <Button :loading="loading" @click="refresh">刷新</Button>
             <Button :loading="exporting" @click="exportCsv">导出</Button>
+            <Button @click="settingsOpen = true">列设置</Button>
             <Button type="primary" @click="entityDetail.open()">
               新增供应商
             </Button>
           </div>
         </div>
+        <LineColumnSettings
+          v-if="settingsOpen"
+          v-model:open="settingsOpen"
+          :columns="settingsColumns"
+          :setting="setting"
+          title="供应商列"
+          @save="saveColumns"
+        />
         <Table
           class="fdm-business-table supplier-table"
           size="small"
@@ -408,7 +428,7 @@ onMounted(refresh);
           :data-source="records"
           row-key="id"
           :loading="loading"
-          :scroll="{ x: 1090 }"
+          :scroll="{ x: listWidth + 44 }"
           :expanded-row-keys="expandedKeys"
           :pagination="{
             current: pageNo,
@@ -420,6 +440,7 @@ onMounted(refresh);
           }"
           @expand="expand"
           @change="tableChange"
+          @resize-column="resizeColumn"
         >
           <template #expandedRowRender="{ record }">
             <SupplierSnapshotPanel

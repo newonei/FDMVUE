@@ -1,17 +1,19 @@
 <script lang="ts" setup>
-import type { FormInstance, TableColumnsType } from 'ant-design-vue';
+import type { TableColumnsType, UploadProps } from 'ant-design-vue';
 
 import type { FdmcaiwuMouldProfileApi } from '#/api/fdmcaiwu/mould-profile';
 
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
+import { useAccess } from '@vben/access';
 import { Page } from '@vben/common-ui';
 import { IconifyIcon } from '@vben/icons';
+import { downloadFileFromBlobPart } from '@vben/utils';
 
 import {
-  Alert,
   Button,
   Card,
+  Checkbox,
   Form,
   FormItem,
   Input,
@@ -23,554 +25,539 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
+  Upload,
 } from 'ant-design-vue';
 
 import {
   createMouldProfile,
   deleteMouldProfile,
-  getMouldProfile,
+  downloadMouldImportTemplate,
   getMouldProfilePage,
+  importMouldProfiles,
   updateMouldProfile,
+  updateMouldRecipeCharge,
 } from '#/api/fdmcaiwu/mould-profile';
 
 defineOptions({ name: 'FdmcaiwuMouldProfile' });
 
-type ProfileModel = FdmcaiwuMouldProfileApi.SaveReq;
+type Profile = FdmcaiwuMouldProfileApi.Profile;
+type ProfileForm = FdmcaiwuMouldProfileApi.SaveReq;
+type Reference = FdmcaiwuMouldProfileApi.Reference;
+type Recipe = FdmcaiwuMouldProfileApi.RecipeColumn;
 
-const ENABLED_OPTIONS = [
+const DIMENSIONS = [
+  { field: 'mouldLengthMm', label: '模腔长度' },
+  { field: 'mouldWidthMm', label: '模腔宽度' },
+  { field: 'mouldThicknessMm', label: '模腔厚度' },
+  { field: 'boardLengthMm', label: '净板长度' },
+  { field: 'boardWidthMm', label: '净板宽度' },
+  { field: 'boardThicknessMm', label: '净板厚度' },
+] as const;
+
+const REFERENCE_FIELDS = [
+  { field: 'lengthMm', label: '基准模腔长度 (mm)', precision: 3 },
+  { field: 'widthMm', label: '基准模腔宽度 (mm)', precision: 3 },
+  { field: 'thicknessMm', label: '基准模腔厚度 (mm)', precision: 3 },
+  { field: 'weightKg', label: '基准装模量 (kg)', precision: 6 },
+] as const;
+
+const STATUS_OPTIONS = [
   { label: '启用', value: 1 },
   { label: '停用', value: 0 },
 ];
 
-const DIMENSION_FIELDS: Array<{
-  field:
-    | 'boardLengthMm'
-    | 'boardThicknessMm'
-    | 'boardWidthMm'
-    | 'mouldLengthMm'
-    | 'mouldThicknessMm'
-    | 'mouldWidthMm';
-  label: string;
-}> = [
-  { field: 'mouldLengthMm', label: '模具长度' },
-  { field: 'mouldWidthMm', label: '模具宽度' },
-  { field: 'mouldThicknessMm', label: '模具厚度' },
-  { field: 'boardLengthMm', label: '净板长度' },
-  { field: 'boardWidthMm', label: '净板宽度' },
-  { field: 'boardThicknessMm', label: '净板厚度' },
-];
-
-const CHARGE_FIELDS: Array<{
-  field:
-    | 'elasticChargeWeightKg'
-    | 'lightChargeWeightKg'
-    | 'regularChargeWeightKg'
-    | 'superElasticChargeWeightKg';
-  label: string;
-}> = [
-  { field: 'regularChargeWeightKg', label: '常规投料量' },
-  { field: 'lightChargeWeightKg', label: '轻羽投料量' },
-  { field: 'elasticChargeWeightKg', label: '高弹投料量' },
-  { field: 'superElasticChargeWeightKg', label: '超弹投料量' },
-];
-
-function createForm(): ProfileModel {
-  return {
-    blockedReason: '',
-    boardLengthMm: 0,
-    boardThicknessMm: 0,
-    boardWidthMm: 0,
-    elasticChargeWeightKg: undefined,
-    enabled: true,
-    lightChargeWeightKg: undefined,
-    mouldLengthMm: 0,
-    mouldThicknessMm: 0,
-    mouldWidthMm: 0,
-    profileCode: '',
-    profileName: '',
-    regularChargeWeightKg: undefined,
-    superElasticChargeWeightKg: undefined,
-  };
-}
+const numberFormat = new Intl.NumberFormat('zh-CN', {
+  maximumFractionDigits: 6,
+  useGrouping: false,
+});
+const { hasAccessByCodes } = useAccess();
+const canImport = computed(
+  () =>
+    hasAccessByCodes(['fdmcaiwu:mould-profile:create']) &&
+    hasAccessByCodes(['fdmcaiwu:mould-profile:update']),
+);
 
 const loading = ref(false);
-const saving = ref(false);
-const editLoading = ref(false);
-const editOpen = ref(false);
-const formRef = ref<FormInstance>();
-const rows = ref<FdmcaiwuMouldProfileApi.Profile[]>([]);
+const rows = ref<Profile[]>([]);
+const recipes = ref<Recipe[]>([]);
 const total = ref(0);
-const query = reactive({
+const filters = reactive({
   enabled: undefined as number | undefined,
   keyword: '',
   pageNo: 1,
   pageSize: 20,
 });
-const form = reactive<ProfileModel>(createForm());
+const recipeFilter = ref<number[]>([]);
+const recipeOptions = computed(() =>
+  recipes.value.map((recipe) => ({
+    label: `${recipe.recipeName} · ${recipe.recipeCode}`,
+    value: recipe.id,
+  })),
+);
+const visibleRecipes = computed(() =>
+  recipeFilter.value.length
+    ? recipes.value.filter((recipe) => recipeFilter.value.includes(recipe.id))
+    : recipes.value,
+);
 
-function formatNumber(value: unknown, digits = 3) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return '—';
-  return numberValue.toLocaleString('zh-CN', {
-    maximumFractionDigits: digits,
-    useGrouping: false,
-  });
-}
-
-function specification(length: unknown, width: unknown, thickness: unknown) {
-  return `${formatNumber(length)} × ${formatNumber(width)} × ${formatNumber(thickness)} mm`;
-}
-
-const columns: TableColumnsType<FdmcaiwuMouldProfileApi.Profile> = [
+const columns = computed<TableColumnsType<Profile>>(() => [
   {
     dataIndex: 'profileCode',
     fixed: 'left',
     key: 'profileCode',
     title: '模具编码',
-    width: 165,
+    width: 155,
   },
   {
     dataIndex: 'profileName',
-    fixed: 'left',
+    ellipsis: true,
     key: 'profileName',
     title: '模具名称',
-    width: 190,
+    width: 175,
   },
-  { key: 'mouldSpecification', title: '模具尺寸', width: 220 },
-  { key: 'boardSpecification', title: '净板尺寸', width: 220 },
-  {
-    dataIndex: 'regularChargeWeightKg',
-    key: 'regularChargeWeightKg',
-    title: '常规投料(kg)',
-    width: 120,
-  },
-  {
-    dataIndex: 'lightChargeWeightKg',
-    key: 'lightChargeWeightKg',
-    title: '轻羽投料(kg)',
-    width: 120,
-  },
-  {
-    dataIndex: 'elasticChargeWeightKg',
-    key: 'elasticChargeWeightKg',
-    title: '高弹投料(kg)',
-    width: 120,
-  },
-  {
-    dataIndex: 'superElasticChargeWeightKg',
-    key: 'superElasticChargeWeightKg',
-    title: '超弹投料(kg)',
-    width: 120,
-  },
-  { dataIndex: 'enabled', key: 'enabled', title: '状态', width: 85 },
-  {
-    dataIndex: 'blockedReason',
-    key: 'blockedReason',
-    title: '阻断原因',
-    width: 240,
-  },
-  { fixed: 'right', key: 'action', title: '操作', width: 130 },
-];
+  { key: 'mouldSpecification', title: '模腔尺寸 (mm)', width: 175 },
+  { key: 'boardSpecification', title: '净板尺寸 (mm)', width: 175 },
+  ...(visibleRecipes.value.length
+    ? [
+        {
+          children: visibleRecipes.value.map((recipe) => ({
+            align: 'right' as const,
+            dataIndex: ['recipeChargeWeightsKg', String(recipe.id)],
+            key: `recipe-${recipe.id}`,
+            title: recipe.recipeCode,
+            width: 170,
+          })),
+          key: 'recipeCharges',
+          title: '配方装模量 (kg / 模)',
+        },
+      ]
+    : []),
+  { key: 'enabled', title: '状态', width: 90 },
+  { fixed: 'right', key: 'action', title: '操作', width: 120 },
+]);
+const scrollWidth = computed(() => 890 + visibleRecipes.value.length * 170);
+const recipesByColumn = computed(
+  () => new Map(recipes.value.map((recipe) => [`recipe-${recipe.id}`, recipe])),
+);
 
+function specification(values: (number | string)[]) {
+  return values.map((value) => numberFormat.format(Number(value))).join(' × ');
+}
+
+let latestRequest = 0;
 async function loadData() {
+  const request = ++latestRequest;
   loading.value = true;
   try {
     const result = await getMouldProfilePage({
-      enabled: query.enabled === undefined ? undefined : query.enabled === 1,
-      keyword: query.keyword.trim() || undefined,
-      pageNo: query.pageNo,
-      pageSize: query.pageSize,
+      enabled: filters.enabled === undefined ? undefined : filters.enabled === 1,
+      keyword: filters.keyword.trim() || undefined,
+      pageNo: filters.pageNo,
+      pageSize: filters.pageSize,
     });
-    rows.value = result.list ?? [];
-    total.value = result.total ?? 0;
+    if (request !== latestRequest) return;
+    rows.value = result.list;
+    recipes.value = result.recipes;
+    const activeIds = new Set(result.recipes.map((recipe) => recipe.id));
+    recipeFilter.value = recipeFilter.value.filter((id) => activeIds.has(id));
+    total.value = result.total;
   } finally {
-    loading.value = false;
+    if (request === latestRequest) loading.value = false;
   }
 }
 
-function resetForm(profile?: FdmcaiwuMouldProfileApi.Profile) {
-  Object.assign(form, createForm(), profile ?? {});
+function search() {
+  filters.pageNo = 1;
+  return loadData();
 }
 
-function handleCreate() {
-  resetForm();
-  editOpen.value = true;
-  formRef.value?.clearValidate();
+function changePage(pagination: { current?: number; pageSize?: number }) {
+  filters.pageNo = pagination.current ?? 1;
+  filters.pageSize = pagination.pageSize ?? 20;
+  return loadData();
 }
 
-async function handleEdit(
-  record: FdmcaiwuMouldProfileApi.Profile | Record<string, any>,
-) {
-  editOpen.value = true;
-  editLoading.value = true;
-  try {
-    resetForm(await getMouldProfile(record.id));
-    formRef.value?.clearValidate();
-  } catch {
-    editOpen.value = false;
-  } finally {
-    editLoading.value = false;
-  }
+const profileOpen = ref(false);
+const profileSaving = ref(false);
+const profileForm = ref<ProfileForm>(emptyProfile());
+
+function emptyProfile(): ProfileForm {
+  return {
+    blockedReason: '',
+    boardLengthMm: '',
+    boardThicknessMm: '',
+    boardWidthMm: '',
+    enabled: true,
+    mouldLengthMm: '',
+    mouldThicknessMm: '',
+    mouldWidthMm: '',
+    profileCode: '',
+    profileName: '',
+  };
 }
 
-function validateNumbers() {
-  for (const item of DIMENSION_FIELDS) {
-    const value = Number(form[item.field]);
-    if (!Number.isFinite(value) || value <= 0) {
-      message.warning(`${item.label}必须大于 0`);
-      return false;
-    }
-  }
-  for (const item of CHARGE_FIELDS) {
-    const original = form[item.field];
-    if (original === undefined || original === null || original === '')
-      continue;
-    const value = Number(original);
-    if (!Number.isFinite(value) || value <= 0) {
-      message.warning(`${item.label}留空或填写大于 0 的数值`);
-      return false;
-    }
-  }
-  if (!CHARGE_FIELDS.some((item) => Number(form[item.field]) > 0)) {
-    message.warning('至少需要维护一种产品类型的装模量');
-    return false;
-  }
-  return true;
+function editProfile(profile?: Profile) {
+  profileForm.value = profile
+    ? {
+        blockedReason: profile.blockedReason ?? '',
+        boardLengthMm: profile.boardLengthMm,
+        boardThicknessMm: profile.boardThicknessMm,
+        boardWidthMm: profile.boardWidthMm,
+        enabled: profile.enabled,
+        id: profile.id,
+        mouldLengthMm: profile.mouldLengthMm,
+        mouldThicknessMm: profile.mouldThicknessMm,
+        mouldWidthMm: profile.mouldWidthMm,
+        profileCode: profile.profileCode,
+        profileName: profile.profileName,
+      }
+    : emptyProfile();
+  profileOpen.value = true;
 }
 
-async function handleSave() {
-  try {
-    await formRef.value?.validate();
-  } catch {
+async function saveProfile() {
+  const form = profileForm.value;
+  if (!form.profileCode.trim() || !form.profileName.trim()) {
+    message.warning('请填写模具编码和名称');
     return;
   }
-  if (!validateNumbers()) return;
-  saving.value = true;
+  if (DIMENSIONS.some(({ field }) => !(Number(form[field]) > 0))) {
+    message.warning('请填写大于 0 的模腔和净板尺寸');
+    return;
+  }
+  profileSaving.value = true;
   try {
-    const payload: ProfileModel = {
-      ...form,
-      blockedReason: form.blockedReason?.trim() || undefined,
-      profileCode: form.profileCode.trim().toUpperCase(),
-      profileName: form.profileName.trim(),
-    };
     if (form.id) {
-      await updateMouldProfile(payload);
-      message.success('模具档案已更新');
+      await updateMouldProfile(form);
     } else {
-      await createMouldProfile(payload);
-      message.success('模具档案已创建');
+      await createMouldProfile(form);
     }
-    editOpen.value = false;
-    await loadData();
+    profileOpen.value = false;
+    message.success('模具已保存');
+    await (form.id ? loadData() : search());
   } finally {
-    saving.value = false;
+    profileSaving.value = false;
   }
 }
 
-function handleDelete(
-  record: FdmcaiwuMouldProfileApi.Profile | Record<string, any>,
-) {
+function removeProfile(profile: Profile) {
   Modal.confirm({
-    content: `删除“${record.profileName}”后，该模具不再参与新报价候选比较。`,
-    okText: '确认删除',
+    content: `删除「${profile.profileName}」后，该模具将从可选模具中移除。`,
+    okText: '删除',
     okType: 'danger',
-    title: '确认删除模具档案？',
+    title: '删除模具',
     async onOk() {
-      await deleteMouldProfile(record.id);
-      message.success('模具档案已删除');
+      await deleteMouldProfile(profile.id);
+      message.success('模具已删除');
+      if (rows.value.length === 1 && filters.pageNo > 1) filters.pageNo--;
       await loadData();
     },
   });
 }
 
-function handleSearch() {
-  query.pageNo = 1;
-  loadData();
+const importOpen = ref(false);
+const importing = ref(false);
+const downloading = ref(false);
+const importFile = ref<File>();
+const disableMissing = ref(false);
+
+function openImport() {
+  importFile.value = undefined;
+  disableMissing.value = false;
+  importOpen.value = true;
 }
 
-function handleTableChange(pagination: {
-  current?: number;
-  pageSize?: number;
-}) {
-  query.pageNo = pagination.current ?? 1;
-  query.pageSize = pagination.pageSize ?? 20;
-  loadData();
+const chooseFile: UploadProps['beforeUpload'] = (file) => {
+  importFile.value = file;
+  return false;
+};
+
+async function downloadTemplate() {
+  downloading.value = true;
+  try {
+    downloadFileFromBlobPart({
+      fileName: '模具导入模板.xlsx',
+      source: await downloadMouldImportTemplate(),
+    });
+  } finally {
+    downloading.value = false;
+  }
+}
+
+async function applyImport() {
+  if (!importFile.value) return;
+  importing.value = true;
+  try {
+    const result = await importMouldProfiles(importFile.value, disableMissing.value);
+    importOpen.value = false;
+    message.success(
+      `导入完成，新增 ${result.created} 个、更新 ${result.updated} 个、停用 ${result.disabled} 个。`,
+    );
+    await search();
+  } finally {
+    importing.value = false;
+  }
+}
+
+const referenceOpen = ref(false);
+const referenceSaving = ref(false);
+const referenceRecipeId = ref<number>();
+const referenceForm = ref<Reference>({});
+
+function changeReferenceRecipe(id?: number) {
+  referenceRecipeId.value = id;
+  referenceForm.value = { ...recipes.value.find((recipe) => recipe.id === id)?.reference };
+}
+
+function openReference() {
+  changeReferenceRecipe(recipes.value[0]?.id);
+  referenceOpen.value = true;
+}
+
+async function saveReference() {
+  const id = referenceRecipeId.value;
+  if (id === undefined || REFERENCE_FIELDS.some(({ field }) => !(Number(referenceForm.value[field]) > 0))) {
+    message.warning('请选择配方并填写完整的基准模腔尺寸和装模量');
+    return;
+  }
+  referenceSaving.value = true;
+  try {
+    await updateMouldRecipeCharge(id, referenceForm.value);
+    referenceOpen.value = false;
+    message.success('配方装模基准已更新');
+    await loadData();
+  } finally {
+    referenceSaving.value = false;
+  }
 }
 
 onMounted(loadData);
 </script>
 
 <template>
-  <Page
-    title="模具管理"
-    description="维护模具尺寸、可用净板尺寸和不同产品类型的装模量；自动报价只比较启用且参数完整的模具。"
-  >
-    <Modal
-      v-model:open="editOpen"
-      :confirm-loading="saving"
-      :mask-closable="!saving"
-      :title="form.id ? '编辑模具' : '新增模具'"
-      width="980px"
-      ok-text="保存"
-      @ok="handleSave"
-    >
-      <Form
-        ref="formRef"
-        :disabled="editLoading"
-        layout="vertical"
-        :model="form"
-      >
-        <div class="form-grid">
-          <FormItem
-            label="模具编码"
-            name="profileCode"
-            :rules="[{ required: true, message: '请输入模具编码' }]"
-          >
-            <Input
-              v-model:value="form.profileCode"
-              placeholder="MP-620-910-20"
-            />
-          </FormItem>
-          <FormItem
-            label="模具名称"
-            name="profileName"
-            :rules="[{ required: true, message: '请输入模具名称' }]"
-          >
-            <Input
-              v-model:value="form.profileName"
-              placeholder="请输入便于识别的名称"
-            />
-          </FormItem>
-        </div>
-
-        <section class="form-section">
-          <h3>模具与净板尺寸</h3>
-          <div class="dimension-grid">
-            <FormItem
-              v-for="item in DIMENSION_FIELDS"
-              :key="item.field"
-              :label="item.label"
-            >
-              <InputNumber
-                :value="form[item.field]"
-                class="w-full"
-                string-mode
-                :min="0.001"
-                :precision="3"
-                addon-after="mm"
-                @update:value="(value) => (form[item.field] = value ?? 0)"
-              />
-            </FormItem>
-          </div>
-        </section>
-
-        <section class="form-section">
-          <h3>不同产品装模量</h3>
-          <Alert
-            class="mb-3"
-            show-icon
-            type="info"
-            message="某产品类型留空时，该模具不会参与该类型配方的自动报价。"
-          />
-          <div class="form-grid">
-            <FormItem
-              v-for="item in CHARGE_FIELDS"
-              :key="item.field"
-              :label="item.label"
-            >
-              <InputNumber
-                :value="form[item.field]"
-                allow-clear
-                class="w-full"
-                string-mode
-                :min="0.000001"
-                :precision="6"
-                addon-after="kg"
-                @update:value="
-                  (value) => (form[item.field] = value ?? undefined)
-                "
-              />
-            </FormItem>
-          </div>
-        </section>
-
-        <div class="form-grid">
-          <FormItem label="启用状态">
-            <Space>
-<Switch v-model:checked="form.enabled" /><span>{{
-                form.enabled ? '启用' : '停用'
-              }}</span>
-</Space>
-          </FormItem>
-          <FormItem
-            label="阻断原因"
-            extra="填写后用于说明该模具当前不可参与报价的原因"
-          >
-            <Input
-              v-model:value="form.blockedReason"
-              :maxlength="512"
-              placeholder="可选"
-            />
-          </FormItem>
-        </div>
-      </Form>
-    </Modal>
-
+  <Page title="模具管理">
     <Card :bordered="false">
-      <div class="toolbar">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Space wrap>
           <Input
-            v-model:value="query.keyword"
+            v-model:value="filters.keyword"
             allow-clear
             placeholder="模具编码或名称"
-            @press-enter="handleSearch"
+            @press-enter="search"
           />
           <Select
-            v-model:value="query.enabled"
+            v-model:value="filters.enabled"
             allow-clear
-            class="status-select"
-            :options="ENABLED_OPTIONS"
+            class="w-28"
+            :options="STATUS_OPTIONS"
             placeholder="全部状态"
+            @change="search"
           />
-          <Button :loading="loading" @click="handleSearch">
+          <Button :loading="loading" @click="search">
             <template #icon><IconifyIcon icon="lucide:search" /></template>
             查询
           </Button>
         </Space>
-        <Button
-          v-access:code="['fdmcaiwu:mould-profile:create']"
-          type="primary"
-          @click="handleCreate"
-        >
-          <template #icon><IconifyIcon icon="lucide:plus" /></template>
-          新增模具
-        </Button>
+        <Space wrap>
+          <Button
+            v-access:code="['fdmcaiwu:recipe:update']"
+            :disabled="recipes.length === 0"
+            @click="openReference"
+          >
+            配方装模基准
+          </Button>
+          <Button v-if="canImport" @click="openImport">
+            <template #icon><IconifyIcon icon="lucide:upload" /></template>
+            导入模具
+          </Button>
+          <Button
+            v-access:code="['fdmcaiwu:mould-profile:create']"
+            type="primary"
+            @click="editProfile()"
+          >
+            <template #icon><IconifyIcon icon="lucide:plus" /></template>
+            新增模具
+          </Button>
+        </Space>
       </div>
-
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <Select
+          v-model:value="recipeFilter"
+          allow-clear
+          class="w-full sm:w-80"
+          :disabled="recipes.length === 0"
+          :max-tag-count="2"
+          mode="multiple"
+          option-filter-prop="label"
+          :options="recipeOptions"
+          placeholder="显示全部配方"
+        />
+        <span class="text-muted-foreground text-sm">
+          {{ recipes.length ? '装模量按配方基准及模腔体积换算' : '暂无启用的配方' }}
+        </span>
+      </div>
       <Table
         bordered
         :columns="columns"
         :data-source="rows"
         :loading="loading"
         :pagination="{
-          current: query.pageNo,
-          pageSize: query.pageSize,
+          current: filters.pageNo,
+          pageSize: filters.pageSize,
           showSizeChanger: true,
           total,
         }"
         row-key="id"
-        :scroll="{ x: 1650 }"
-        size="small"
-        @change="handleTableChange"
+        :scroll="{ x: scrollWidth }"
+        size="middle"
+        @change="changePage"
       >
-        <template #bodyCell="{ column, record }">
+        <template #headerCell="{ column }">
+          <template v-if="recipesByColumn.has(String(column.key))">
+            <div class="font-medium">
+              {{ recipesByColumn.get(String(column.key))?.recipeName }}
+            </div>
+            <div class="text-muted-foreground text-xs font-normal">{{ column.title }}</div>
+          </template>
+        </template>
+        <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'mouldSpecification'">
-            {{
-              specification(
-                record.mouldLengthMm,
-                record.mouldWidthMm,
-                record.mouldThicknessMm,
-              )
-            }}
+            {{ specification([record.mouldLengthMm, record.mouldWidthMm, record.mouldThicknessMm]) }}
           </template>
           <template v-else-if="column.key === 'boardSpecification'">
-            {{
-              specification(
-                record.boardLengthMm,
-                record.boardWidthMm,
-                record.boardThicknessMm,
-              )
-            }}
+            {{ specification([record.boardLengthMm, record.boardWidthMm, record.boardThicknessMm]) }}
+          </template>
+          <template v-else-if="recipesByColumn.has(String(column.key))">
+            <span v-if="text != null" class="tabular-nums">{{ numberFormat.format(Number(text)) }}</span>
+            <span v-else class="text-muted-foreground text-xs">
+              {{ recipesByColumn.get(String(column.key))?.reference.weightKg ? '无法计算' : '待设基准' }}
+            </span>
           </template>
           <template v-else-if="column.key === 'enabled'">
-            <Tag :color="record.enabled ? 'success' : 'default'">
-{{
-              record.enabled ? '启用' : '停用'
-            }}
-</Tag>
-          </template>
-          <template v-else-if="column.key === 'blockedReason'">
-            <span :class="{ 'blocked-text': record.blockedReason }">{{
-              record.blockedReason || '—'
-            }}</span>
+            <Tooltip :title="record.blockedReason">
+              <Tag :color="record.enabled ? 'success' : 'default'">
+                {{ record.enabled ? '启用' : '停用' }}
+              </Tag>
+            </Tooltip>
           </template>
           <template v-else-if="column.key === 'action'">
             <Space :size="0">
-              <Button
-                v-access:code="['fdmcaiwu:mould-profile:update']"
-                size="small"
-                type="link"
-                @click="handleEdit(record)"
-                >
-编辑
-</Button>
-              <Button
-                v-access:code="['fdmcaiwu:mould-profile:delete']"
-                danger
-                size="small"
-                type="link"
-                @click="handleDelete(record)"
-                >
-删除
-</Button>
+              <Button v-access:code="['fdmcaiwu:mould-profile:update']" size="small" type="link" @click="editProfile(record as Profile)">
+                编辑
+              </Button>
+              <Button v-access:code="['fdmcaiwu:mould-profile:delete']" danger size="small" type="link" @click="removeProfile(record as Profile)">
+                删除
+              </Button>
             </Space>
           </template>
         </template>
       </Table>
     </Card>
+
+    <Modal
+      v-model:open="profileOpen"
+      :confirm-loading="profileSaving"
+      :title="profileForm.id ? '编辑模具' : '新增模具'"
+      ok-text="保存"
+      width="720px"
+      @ok="saveProfile"
+    >
+      <Form :disabled="profileSaving" layout="vertical">
+        <div class="grid gap-x-4 sm:grid-cols-2">
+          <FormItem label="模具编码" required>
+            <Input v-model:value="profileForm.profileCode" :maxlength="96" />
+          </FormItem>
+          <FormItem label="模具名称" required>
+            <Input v-model:value="profileForm.profileName" :maxlength="192" />
+          </FormItem>
+        </div>
+        <div class="grid gap-x-4 sm:grid-cols-3">
+          <FormItem v-for="{ field, label } in DIMENSIONS" :key="field" :label="label" required>
+            <InputNumber
+              :value="profileForm[field] === '' ? undefined : profileForm[field]"
+              addon-after="mm"
+              class="w-full"
+              :min="0.001"
+              :precision="3"
+              string-mode
+              @update:value="(value) => (profileForm[field] = value ?? '')"
+            />
+          </FormItem>
+        </div>
+        <div class="grid gap-x-4 sm:grid-cols-2">
+          <FormItem label="启用">
+            <Switch v-model:checked="profileForm.enabled" />
+          </FormItem>
+          <FormItem label="阻断原因">
+            <Input v-model:value="profileForm.blockedReason" :maxlength="512" />
+          </FormItem>
+        </div>
+      </Form>
+    </Modal>
+
+    <Modal
+      v-model:open="importOpen"
+      :confirm-loading="importing"
+      :mask-closable="!importing"
+      :ok-button-props="{ disabled: !importFile }"
+      ok-text="导入"
+      title="导入模具"
+      @ok="applyImport"
+    >
+      <p class="mb-4 text-sm">按模具编码匹配。已有编码更新档案，新编码新增档案。</p>
+      <Space class="mb-4" wrap>
+        <Button :loading="downloading" @click="downloadTemplate">下载 Excel 模板</Button>
+        <Upload
+          accept=".xlsx,.xls"
+          :before-upload="chooseFile"
+          :disabled="importing"
+          :show-upload-list="false"
+        >
+          <Button :disabled="importing">选择 Excel 文件</Button>
+        </Upload>
+        <span v-if="importFile">{{ importFile.name }}</span>
+      </Space>
+      <div>
+        <Checkbox v-model:checked="disableMissing" :disabled="importing">
+          停用本次文件中未列出的模具
+        </Checkbox>
+      </div>
+    </Modal>
+
+    <Modal
+      v-model:open="referenceOpen"
+      :confirm-loading="referenceSaving"
+      ok-text="保存"
+      title="配方装模基准"
+      @ok="saveReference"
+    >
+      <Form :disabled="referenceSaving" layout="vertical">
+        <FormItem label="配方" required>
+          <Select
+            :value="referenceRecipeId"
+            option-filter-prop="label"
+            :options="recipeOptions"
+            show-search
+            @change="(value) => changeReferenceRecipe(value as number)"
+          />
+        </FormItem>
+        <div class="grid gap-x-4 sm:grid-cols-2">
+          <FormItem v-for="{ field, label, precision } in REFERENCE_FIELDS" :key="field" :label="label" required>
+            <InputNumber
+              :value="referenceForm[field] ?? undefined"
+              class="w-full"
+              :min="10 ** -precision"
+              :precision="precision"
+              string-mode
+              @update:value="(value) => (referenceForm[field] = value)"
+            />
+          </FormItem>
+        </div>
+        <p class="text-muted-foreground mb-1 text-sm">
+          装模量 = 基准装模量 × 当前模腔体积 ÷ 基准模腔体积
+        </p>
+      </Form>
+    </Modal>
   </Page>
 </template>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.status-select {
-  width: 120px;
-}
-
-.form-grid,
-.dimension-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
-}
-
-.dimension-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.form-section {
-  padding: 14px 16px 0;
-  margin-bottom: 16px;
-  background: var(--ant-color-fill-quaternary, #fafafa);
-  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
-  border-radius: 8px;
-}
-
-.form-section h3 {
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.blocked-text {
-  color: var(--ant-color-error, #ff4d4f);
-}
-
-@media (max-width: 800px) {
-  .form-grid,
-  .dimension-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-</style>

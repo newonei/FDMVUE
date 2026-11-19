@@ -399,7 +399,7 @@ describe('workbench page', () => {
     expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.disabled).toBe(true);
   });
 
-  it.each(['SLICE', 'CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD'])('prefills unreported planned output as integers for the %s workshop', async (code) => {
+  it.each(['CUT', 'LAMINATE', 'EMBOSS', 'PUNCH', 'ENGRAVE', 'FOLD'])('prefills unreported planned output as integers for the %s workshop', async (code) => {
     const process = { code, label: code, outputLabel: '片材', outputStage: 'CUT', outputUnit: '片', sources: ['CUT'] };
     const task = { ...my.tasks[0]!, process: code, actualQuantity: '10.000', defectQuantity: '2.000' };
     mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
@@ -412,6 +412,21 @@ describe('workbench page', () => {
     const headers = [...document.querySelectorAll('.workshop-task-table thead th')].map((element) => element.textContent);
     expect(headers.indexOf('实际生产 / 计件人员')).toBeLessThan(headers.indexOf('成品要求'));
     expect(headers.indexOf('本次良品')).toBeLessThan(headers.findIndex((value) => value?.startsWith('报工')));
+  });
+
+  it('prefills slicing from board yield minus reported output while displaying order demand', async () => {
+    const task = { ...my.tasks[0]!, quantity: 250, sliceBoardYield: '252', actualQuantity: 10, defectQuantity: 2 };
+    const withoutBoardYield = { ...task, id: 39, sliceBoardYield: null };
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task, withoutBoardYield] });
+    await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
+    expect(document.querySelector('[data-task-id="31"]')?.textContent).toContain('计划 250');
+    expect(document.querySelector('[data-task-id="31"]')?.textContent).toContain('计划用板可开 252');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value).toBe('240');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-001-39')!.value).toBe('');
+    clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({
+      taskId: 31, goodQuantity: 240, defectQuantity: 0, expectedActualQuantity: 10, expectedDefectQuantity: 2,
+    })] }));
   });
 
   it('reports laminated sheets by color and keeps the undamaged opposite sheets in stock', async () => {
@@ -437,15 +452,15 @@ describe('workbench page', () => {
   });
 
   it('recalculates the estimate after another report changes the refreshed task progress', async () => {
-    const task = { ...my.tasks[0]!, quantity: 100 };
+    const task = { ...my.tasks[0]!, quantity: 100, sliceBoardYield: 108 };
     mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });
     await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
-    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value).toBe('100');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value).toBe('108');
     mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [{ ...task, actualQuantity: 60 }] });
     clickButton('刷新'); await flush(); await selectTask(31);
-    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value).toBe('40');
+    expect(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value).toBe('48');
     clickButton('批量报工'); await flush();
-    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ goodQuantity: 40, expectedActualQuantity: 60 })] }));
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ rows: [expect.objectContaining({ goodQuantity: 48, expectedActualQuantity: 60 })] }));
   });
 
   it('prefills whole-batch output as good quantity and submits it for foaming', async () => {

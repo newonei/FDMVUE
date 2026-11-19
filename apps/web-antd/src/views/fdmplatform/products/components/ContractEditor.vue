@@ -408,6 +408,20 @@ function focusNextLine(id: string) {
   if (index !== -1) void focusQuantity(lines.value[index + 1]?.id);
 }
 const total = computed(() => contractItemsTotal(lines.value));
+const totalQuantity = computed(() => {
+  const totalsByUnit = new Map<string, BigNumber>();
+  for (const line of lines.value) {
+    const quantity = new BigNumber(line.quantity ?? Number.NaN);
+    if (!quantity.isFinite()) continue;
+    const unit = line.unit?.trim() || '（单位未填）';
+    totalsByUnit.set(unit, quantity.plus(totalsByUnit.get(unit) ?? 0));
+  }
+  return (
+    [...totalsByUnit]
+      .map(([unit, quantity]) => `${quantity.toFormat()} ${unit}`)
+      .join(' / ') || '0'
+  );
+});
 const missingPrices = computed(
   () =>
     lines.value.filter((line) => contractLineAmount(line) === undefined).length,
@@ -872,15 +886,6 @@ async function save(activate = false) {
   }
   if (
     activate &&
-    !form.deliveryRequirement.trim() &&
-    lines.value.some((line) => !line.requiredDate)
-  ) {
-    panelError.value =
-      '请填写客户交付要求（如收定金后30天交货），或补齐每条产品的需求交期后生效；未确定时可保存草稿';
-    return;
-  }
-  if (
-    activate &&
     form.useTradeAssurance &&
     !form.alibabaTradeAssuranceNo.trim()
   ) {
@@ -1171,9 +1176,8 @@ async function save(activate = false) {
             <Input.TextArea
               v-model:value="form.deliveryRequirement"
               :rows="2"
-              placeholder="生效前填写客户约定，如收定金后30天交货；也可补齐每条产品的需求交期"
+              placeholder="选填，如收定金后30天交货"
             />
-            <span class="muted">客户交付要求或全部产品的需求交期，生效前至少明确一种；草稿可暂不填写。</span>
           </Form.Item>
         </Form>
       </Card>
@@ -1517,7 +1521,9 @@ async function save(activate = false) {
             :message="`${missingPrices} 条产品明细待定价，可先保存草稿；确认合同前需补齐。明确的免费样品可填写 0。`"
           />
           <div class="total-line">
-            <span>共 {{ lines.length }} 条产品明细</span><strong>已定价小计 {{ money(total, form.currency) }}</strong>
+            <span>共 {{ lines.length }} 条产品明细</span>
+            <strong>产品数量合计 {{ totalQuantity }}</strong>
+            <strong>已定价小计 {{ money(total, form.currency) }}</strong>
           </div>
         </div>
       </Card>
@@ -1665,6 +1671,8 @@ async function save(activate = false) {
 
 .total-line {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   align-items: center;
   justify-content: space-between;
 }

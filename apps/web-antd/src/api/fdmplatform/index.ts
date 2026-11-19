@@ -166,6 +166,7 @@ export type PageResource =
   | 'stock-outs'
   | 'stocktakes';
 export interface PageQuery {
+  oldestFirst?: boolean;
   companyId: number;
   pageNo: number;
   pageSize: number;

@@ -105,15 +105,20 @@ async function dispatch() {
 const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
 function taskDraft(task: ScheduleApi.Task): Draft {
   const taskVersion = JSON.stringify([task.quantity, task.actualQuantity, task.defectQuantity ?? 0,
-    task.output, task.inputs, task.workerIds, task.activeOrderId, task.status]);
+    task.sliceBoardYield, task.output, task.inputs, task.workerIds, task.activeOrderId, task.status]);
   const existing = drafts[task.id];
   if (existing?.taskVersion === taskVersion) return existing;
-  const planned = task.process === 'MIX'
-    ? toNumber(task.output?.mixPlan?.wholeBatchBoards) ?? toNumber(task.quantity)
-    : toNumber(task.quantity);
-  const remainder = roundQty(Math.max(0,
-    (planned ?? 0) - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0)));
-  const remaining = quantityPrecision(task.unit ?? process.value?.outputUnit) === 0 ? Math.floor(remainder) : remainder;
+  const quantity = toNumber(task.quantity) ?? 0;
+  let planned: number | undefined = quantity;
+  if (task.process === 'MIX') {
+    planned = toNumber(task.output?.mixPlan?.wholeBatchBoards) ?? quantity;
+  } else if (task.process === 'SLICE') {
+    planned = toNumber(task.sliceBoardYield);
+  }
+  const remainder = planned === undefined ? undefined : roundQty(Math.max(0,
+    planned - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0)));
+  const remaining = remainder !== undefined && quantityPrecision(task.unit ?? process.value?.outputUnit) === 0
+    ? Math.floor(remainder) : remainder;
   const draft: Draft = {
     taskVersion,
     attrs: task.output?.attrs ?? {},
@@ -324,6 +329,7 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
                 </template>
                 <template v-else-if="column.key === 'output'">
                   <div class="mb-1 flex flex-wrap items-baseline gap-x-2"><span class="text-sm font-medium">{{ WORKSHOP_OUTPUT[props.process] }}</span><span class="text-xs text-muted-foreground">本工序规格 {{ outputSize(task as ScheduleApi.Task) }}</span></div>
+                  <div v-if="props.process === 'SLICE' && task.sliceBoardYield != null" class="text-xs text-muted-foreground">计划用板可开 {{ formatQty(task.sliceBoardYield) }} {{ task.unit }}</div>
                   <template v-if="props.process === 'LAMINATE' && taskDraft(task as ScheduleApi.Task).laminateLayers">
                     <div class="mb-1 font-semibold text-primary">本次贴合良品 {{ formatQty(taskDraft(task as ScheduleApi.Task).goodQuantity) }} {{ task.unit }}</div>
                     <p class="mb-1 text-xs text-muted-foreground">两色好片配对贴合，残次只扣对应颜色，多出的好片保留库存。</p>

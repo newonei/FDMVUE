@@ -24,6 +24,7 @@ import { factoryToday } from '../shared/factory-date';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { PROCESS_LABELS } from '../shared/schedule';
 import { useFactory } from '../shared/use-factory';
+import BatchRouteModal from './modules/batch-route-modal.vue';
 import CreateModal from './modules/create-modal.vue';
 import ExceptionLedger from './modules/exception-ledger.vue';
 import ItemProductionConfigModal from './modules/item-production-config-modal.vue';
@@ -103,6 +104,7 @@ const expandedOrderIds = ref<number[]>([]);
 const configOpen = ref(false);
 const configOrderId = ref<number>();
 const configItemId = ref<number>();
+const batchRouteOrder = ref<Api.Order>();
 let configRefreshVersion = 0;
 
 function editItem(orderId: number, item: Api.Item) {
@@ -120,6 +122,12 @@ function applyFreshOrder(order: Api.Order) {
     else next.delete(order.id);
     selected.value = next;
   }
+}
+
+function onBatchRouteSaved(order: Api.Order) {
+  if (tab.value !== 'factory' || order.factoryId !== factory.factoryId.value || order.id !== batchRouteOrder.value?.id) return;
+  applyFreshOrder(order);
+  batchRouteOrder.value = undefined;
 }
 
 async function onConfigSaved() {
@@ -282,6 +290,7 @@ async function switchFactory(id: number) {
   pendingCount.value = 0;
   selected.value = new Map();
   batchMixOpen.value = false;
+  batchRouteOrder.value = undefined;
   scheduleOpen.value = false;
   releaseOpen.value = false;
   configOpen.value = false;
@@ -297,6 +306,7 @@ watch(tab, (value) => {
   ++overviewVersion;
   rows.value = [];
   overview.value = [null, null, null, null];
+  batchRouteOrder.value = undefined;
   pageNo.value = 1;
   selected.value = new Map();
   filters.status = undefined;
@@ -562,6 +572,7 @@ function progressPercent(o: Api.Order) {
                     {{ tab === 'factory' && record.status === 'SUBMITTED' ? '去接单' : '查看' }}
                   </Button>
                   <Button v-if="tab === 'factory' && canHandle && ['SUBMITTED', 'ACCEPTED'].includes(record.status)" @click="expandedOrderIds = expandedOrderIds.includes(record.id) ? expandedOrderIds.filter((id) => id !== record.id) : [...expandedOrderIds, record.id]">产品参数</Button>
+                  <Button v-if="tab === 'factory' && canHandle && record.status === 'ACCEPTED' && record.batchRouteEditable" @click="batchRouteOrder = record as Api.Order">批量修改工艺</Button>
                   <Button
                     v-if="tab === 'mine' && record.sourceType !== 'PURCHASE_ORDER'"
                     @click="openCreate(record as Api.Order)"
@@ -579,6 +590,13 @@ function progressPercent(o: Api.Order) {
       <ScheduleModal v-model:open="scheduleOpen" :orders="[...selected.values()]" @generated="onScheduled" />
       <OrderSplitModal :key="`split-${factory.factoryId.value ?? 'none'}`" v-model:open="releaseOpen" :orders="[...selected.values()]" @released="onSplitReleased" @changed="applyFreshOrder" />
       <ItemProductionConfigModal v-if="configOrderId && configItemId" :key="factory.factoryId.value ?? 'none'" v-model:open="configOpen" :order-id="configOrderId" :item-id="configItemId" @saved="onConfigSaved" />
+      <BatchRouteModal
+        v-if="batchRouteOrder"
+        :key="`batch-route-${batchRouteOrder.factoryId}-${batchRouteOrder.id}`"
+        :order="batchRouteOrder"
+        @cancel="batchRouteOrder = undefined"
+        @saved="onBatchRouteSaved"
+      />
       <MixBatchModal :key="factory.factoryId.value ?? 'none'" v-model:open="batchMixOpen" :orders="[...selected.values()]" @released="onScheduled" />
       <OrderDrawer v-model:open="drawerOpen" :mode="tab === 'mine' ? 'mine' : 'factory'" :order-id="drawerId" @changed="onChanged" @copy="copyOrder" />
     </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableProps } from 'ant-design-vue';
+
 import type { SalesChannel } from '../../sales-channel';
 import type { ContractFilters } from './filters';
 import type { FlowStage } from './model';
@@ -42,6 +44,8 @@ import AiRiskTag from '#/views/fdmaicheck/components/AiRiskTag.vue';
 import { useAiRiskLevels } from '#/views/fdmaicheck/components/useAiRiskLevels';
 
 import ContractDetail from '../../components/ContractDetail.vue';
+import LineColumnSettings from '../../components/LineColumnSettings.vue';
+import { useListColumns } from '../../components/useListColumns';
 import {
   productCategoryLabel,
   productCategoryOptions,
@@ -128,6 +132,7 @@ const keyword = ref('');
 const filters = ref<ContractFilters>(emptyFilters());
 const filterPanelOpen = ref(false);
 const sort = ref<ContractBoardSort>('SIGNED');
+const order = ref<'ASC' | 'DESC'>('DESC');
 const year = ref<'ALL' | 'EARLIER' | number>(new Date().getFullYear());
 const shipState = ref<'ALL' | 'OPEN'>('OPEN');
 /** 门户“金智合同未发齐”和提示条的入口：近半年签订、迁移时未发齐 */
@@ -226,14 +231,32 @@ const ownerName = (id?: null | number) => personName(directory.value, id);
 const ownerDepartment = (id?: null | number) =>
   directory.value?.users.find((user) => user.id === id)?.departmentName ?? '';
 
-const columns = computed(() =>
+function sortable(field: ContractBoardSort) {
+  const first = field === 'DUE' ? 'ascend' : 'descend';
+  const direction = order.value === 'ASC' ? 'ascend' : 'descend';
+  return {
+    sorter: true,
+    sortOrder: sort.value === field ? direction : null,
+    sortDirections: [first, first === 'ascend' ? 'descend' : 'ascend'],
+  } as const satisfies Pick<
+    NonNullable<TableProps<ContractBoardRow>['columns']>[number],
+    'sortDirections' | 'sorter' | 'sortOrder'
+  >;
+}
+const boardColumns = computed(() =>
   tab.value === 'JINZHI'
     ? [
-        { title: '金智单号', key: 'contract', width: 190 },
+        { title: '金智单号', key: 'contract', width: 190, locked: true },
         { title: '客户', key: 'customer', width: 190 },
-        { title: '签订', key: 'signed', width: 96 },
+        { title: '签订日期', key: 'signed', width: 110, ...sortable('SIGNED') },
         { title: '产品', key: 'product', width: 230 },
-        { title: '金额', key: 'jzAmount', width: 130, align: 'right' as const },
+        {
+          title: '金额',
+          key: 'jzAmount',
+          width: 130,
+          align: 'right' as const,
+          ...sortable('AMOUNT'),
+        },
         { title: '发货', key: 'ship', width: 86 },
         { title: '采购单', key: 'orders', width: 70, align: 'right' as const },
         { title: '操作', key: 'action', width: 100, fixed: 'right' as const },
@@ -243,12 +266,19 @@ const columns = computed(() =>
           title: domestic.value ? '内部单号' : '合同',
           key: 'contract',
           width: 196,
+          locked: true,
         },
         { title: '客户', key: 'customer', width: 150 },
         { title: '产品', key: 'product', width: 210 },
         { title: '进度', key: 'progress', width: 186 },
-        { title: '交期', key: 'due', width: 92 },
-        { title: '金额 / 收款', key: 'money', width: 178 },
+        { title: '签订日期', key: 'signed', width: 110, ...sortable('SIGNED') },
+        { title: '交期', key: 'due', width: 92, ...sortable('DUE') },
+        {
+          title: '金额 / 收款',
+          key: 'money',
+          width: 178,
+          ...sortable('AMOUNT'),
+        },
         { title: '负责人', key: 'owner', width: 110 },
         {
           title: tab.value === 'ACTIVE' ? '下一步' : '操作',
@@ -258,6 +288,25 @@ const columns = computed(() =>
         },
       ],
 );
+const {
+  columns,
+  listWidth,
+  settingsColumns,
+  setting,
+  settingsOpen,
+  saveColumns,
+  resizeColumn,
+} = useListColumns(
+  () =>
+    `contracts:${props.salesChannel}:${tab.value === 'JINZHI' ? 'history' : 'current'}`,
+  boardColumns,
+);
+const columnSort: Record<string, ContractBoardSort> = {
+  signed: 'SIGNED',
+  due: 'DUE',
+  money: 'AMOUNT',
+  jzAmount: 'AMOUNT',
+};
 
 function signedFilter() {
   if (tab.value === 'JINZHI')
@@ -282,7 +331,7 @@ function query(page = pageNo.value, size = pageSize.value): ContractBoardQuery {
     salesChannel: props.salesChannel,
     ...signedFilter(),
     sort: sort.value,
-    order: sort.value === 'DUE' ? 'ASC' : 'DESC',
+    order: order.value,
   };
 }
 
@@ -368,8 +417,7 @@ function selectDue(value?: ContractDueBucket) {
 }
 function showUnpaid() {
   tab.value = 'ACTIVE';
-  sort.value = 'UNPAID';
-  void load(true);
+  selectSort('UNPAID');
 }
 function showThisMonth() {
   tab.value = 'ACTIVE';
@@ -412,11 +460,33 @@ function clearAdvanced(key: keyof ContractFilters) {
   }
   applyFilters(next);
 }
-function tableChange(pagination: { current?: number; pageSize?: number }) {
+function selectSort(value: ContractBoardSort) {
+  sort.value = value;
+  order.value = value === 'DUE' ? 'ASC' : 'DESC';
+  void load(true);
+}
+const tableChange: NonNullable<TableProps<ContractBoardRow>['onChange']> = (
+  pagination,
+  _filters,
+  sorter,
+  extra,
+) => {
+  if (extra.action === 'sort') {
+    const current = Array.isArray(sorter) ? sorter[0] : sorter;
+    const field = columnSort[String(current?.columnKey)];
+    if (field && current?.order) {
+      sort.value = field;
+      order.value = current.order === 'ascend' ? 'ASC' : 'DESC';
+      void load(true);
+    } else {
+      selectSort('SIGNED');
+    }
+    return;
+  }
   pageNo.value = pagination.current ?? 1;
   pageSize.value = pagination.pageSize ?? 20;
   void load();
-}
+};
 function expand(expanded: boolean, row: ContractBoardRow) {
   expandedKeys.value = expanded
     ? [...expandedKeys.value, row.id]
@@ -850,7 +920,7 @@ onMounted(async () => {
             </button>
           </span>
           <Select
-            v-model:value="sort"
+            :value="sort"
             :options="
               sortOptions.map((option) => ({
                 ...option,
@@ -858,9 +928,18 @@ onMounted(async () => {
               }))
             "
             style="width: 140px"
-            @change="load(true)"
+            @change="selectSort($event as ContractBoardSort)"
           />
+          <Button @click="settingsOpen = true">列设置</Button>
         </div>
+        <LineColumnSettings
+          v-if="settingsOpen"
+          v-model:open="settingsOpen"
+          :columns="settingsColumns"
+          :setting="setting"
+          :title="domestic ? '内销合同列' : '外贸合同列'"
+          @save="saveColumns"
+        />
         <div
           v-if="tab !== 'JINZHI' && advancedTags.length"
           class="advanced-tags"
@@ -885,7 +964,7 @@ onMounted(async () => {
           :data-source="rows"
           row-key="id"
           :loading="loading"
-          :scroll="{ x: tab === 'JINZHI' ? 1090 : 1230 }"
+          :scroll="{ x: listWidth + 48 }"
           :expanded-row-keys="expandedKeys"
           :pagination="{
             current: pageNo,
@@ -898,6 +977,7 @@ onMounted(async () => {
           }"
           @expand="expand"
           @change="tableChange"
+          @resize-column="resizeColumn"
         >
           <template #emptyText>
             <Empty
@@ -938,16 +1018,12 @@ onMounted(async () => {
                     : record.code || '订单号待补齐'
                 }}
               </button>
-              <span v-if="domestic" class="sub">{{
-                record.signedDate ? String(record.signedDate).slice(5) : '—'
-              }}</span>
-              <span v-else class="sub" :title="record.name"><span v-if="record.name" class="internal-name">{{
+              <span v-if="!domestic" class="sub" :title="record.name">
+                <span v-if="record.name" class="internal-name">{{
                   record.name
-                }}</span><template v-else>—</template>{{
-                  tab !== 'JINZHI' && record.signedDate
-                    ? ` · ${String(record.signedDate).slice(5)}`
-                    : ''
                 }}</span>
+                <template v-else>—</template>
+              </span>
               <span
                 v-if="
                   tab !== 'JINZHI' &&

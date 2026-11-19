@@ -516,6 +516,7 @@ export function getProcurementOrders(params: {
   pageNo: number;
   pageSize: number;
   pendingCompletion?: boolean;
+  purchaseDateOrder?: 'ASC' | 'DESC';
   status?: string;
 }) {
   return requestClient.get<PageResult<ProcurementOrderRow>>(

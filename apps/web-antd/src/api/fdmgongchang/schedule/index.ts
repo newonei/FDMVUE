@@ -216,6 +216,8 @@ export namespace FdmgongchangScheduleApi {
     reason?: null | string;
     scheduleId: number;
     sequence?: null | number;
+    /** 开片车间按下发板材换算的整片产量。 */
+    sliceBoardYield?: Decimal | null;
     spec?: null | string;
     unit?: null | string;
     workDate: DateValue;
