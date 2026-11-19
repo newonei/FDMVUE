@@ -39,6 +39,8 @@ async function viteInjectAppLoadingPlugin(
     name: 'vite:inject-app-loading',
     transformIndexHtml: {
       handler(html) {
+        if (html.includes('<!-- vben-app-loading: off -->')) return html;
+
         const re = /<body\s*>/;
         html = html.replace(re, `<body>${injectScript}${loadingHtml}`);
         return html;
