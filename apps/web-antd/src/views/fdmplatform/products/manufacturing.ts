@@ -106,7 +106,9 @@ export function productDimensionsText(value: ProductAttributes) {
 export function productPatternText(value: ProductAttributes) {
   if (value.patternMode === 'NONE') return '无雕刻';
   if (value.patternMode !== 'LASER') return '雕刻待核实';
-  return `激光雕刻 · ${value.patternCode || '图案待补齐'} · ${value.patternVersion || '生产版本待补齐'}`;
+  return ['激光雕刻', value.patternCode, value.patternVersion]
+    .filter(Boolean)
+    .join(' · ');
 }
 /** 只用于展示待补项；正式可复用/可选用结论以服务端返回为准。 */
 export function configurationMissingFields(value: ProductAttributes) {
@@ -136,10 +138,6 @@ export function configurationMissingFields(value: ProductAttributes) {
   if (!value.textureBack?.trim()) missing.push('反面纹路');
   if (!['LASER', 'NONE'].includes(value.patternMode ?? ''))
     missing.push('雕刻方式');
-  if (value.patternMode === 'LASER') {
-    if (!value.patternCode?.trim()) missing.push('激光图案');
-    if (!value.patternVersion?.trim()) missing.push('图案生产版本');
-  }
   return missing;
 }
 export function colorModeText(value: ProductAttributes) {
@@ -207,10 +205,6 @@ export function manufacturingError(
       ) > 0.000001
     )
       return '正面层厚度与反面层厚度之和必须等于成品厚度';
-  }
-  if (value.patternMode === 'LASER') {
-    if (!value.patternCode?.trim()) return '请填写激光图案';
-    if (!value.patternVersion?.trim()) return '请填写激光图案生产版本';
   }
   return '';
 }

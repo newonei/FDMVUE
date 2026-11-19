@@ -33,6 +33,7 @@ import {
   resolveProducts,
 } from '#/api/fdmplatform/products';
 
+import { productPatternText } from '../manufacturing';
 import {
   contractConfigurationFields,
   contractConfigurationFrom,
@@ -369,7 +370,7 @@ async function adopt() {
               :maxlength="field.key === 'name' ? 200 : 100"
               :placeholder="
                 field.key === 'patternVersion'
-                  ? '填写实际图稿版本，不自动补值'
+                  ? '选填，按实际图稿填写'
                   : undefined
               "
               @update:value="(value) => set(field.key, value)"
@@ -437,13 +438,7 @@ async function adopt() {
           {{ row.configuration.name }} · {{ row.configuration.lengthMm }} ×
           {{ row.configuration.widthMm }} ×
           {{ row.configuration.finishedThicknessMm }} mm ·
-          {{
-            row.configuration.patternMode === 'LASER'
-              ? `${row.configuration.patternCode} / ${row.configuration.patternVersion}`
-              : row.configuration.patternMode === 'NONE'
-                ? '不雕刻'
-                : '雕刻待确认'
-          }}
+          {{ productPatternText(row.configuration) }}
         </p>
         <p v-if="row.errors.length" class="mb-0 mt-1 text-sm text-destructive">
           {{ row.errors.join('；') }}

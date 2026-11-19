@@ -162,22 +162,23 @@ function changeMode(mode: unknown) {
         />
       </Form.Item>
       <template v-if="value.patternMode === 'LASER'">
-        <Form.Item label="激光图案" required>
+        <Form.Item label="激光图案">
           <Input
             :value="value.patternCode ?? ''"
             :maxlength="32"
             allow-clear
             aria-label="激光图案"
-            placeholder="填写图案名称或编号"
+            placeholder="选填，图案名称或编号"
             @update:value="(v) => update('patternCode', v)"
           />
         </Form.Item>
-        <Form.Item label="图案生产版本" required>
+        <Form.Item label="图案生产版本">
           <Input
             :value="value.patternVersion ?? ''"
             :maxlength="100"
+            allow-clear
             aria-label="图案生产版本"
-            placeholder="按确认图稿填写，如 V2"
+            placeholder="选填，如 V2"
             @update:value="(v) => update('patternVersion', v)"
           />
         </Form.Item>

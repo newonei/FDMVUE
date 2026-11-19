@@ -312,6 +312,19 @@ async function save() {
 }
 
 describe('产品档案编辑与查看', () => {
+  it('选择激光雕刻时可以将图案与生产版本留空并保存', async () => {
+    await mount();
+    await choose('雕刻方式', 'LASER');
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patternMode: 'LASER',
+        patternCode: '',
+        patternVersion: '',
+      }),
+    );
+  });
+
   it('保存同一档案的独立长宽厚、明确无纹路与激光生产版本，并在详情中读回', async () => {
     await mount();
     for (const [label, value] of [
@@ -332,15 +345,7 @@ describe('产品档案编辑与查看', () => {
     await choose('反面压花', 'NONE');
     await choose('雕刻方式', 'LASER');
     await fill('激光图案', ' 客户山水-A ');
-    await save();
-    expect(api.save).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('请填写激光图案生产版本');
-    const version = document.querySelector<HTMLInputElement>(
-      'input[aria-label="图案生产版本"]',
-    )!;
-    version.value = '生产版B';
-    version.dispatchEvent(new Event('input', { bubbles: true }));
-    await flush();
+    await fill('图案生产版本', '生产版B');
     await save();
     expect(api.save).toHaveBeenCalledWith(
       expect.objectContaining({

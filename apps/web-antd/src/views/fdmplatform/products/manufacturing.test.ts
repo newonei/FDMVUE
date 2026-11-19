@@ -174,7 +174,7 @@ describe('颜色与独立制造结构', () => {
     expect(manufacturingError({ lengthMm: 0 })).toContain('成品长度');
     expect(
       manufacturingError({ patternMode: 'LASER', patternCode: 'FLOWER' }),
-    ).toBe('请填写激光图案生产版本');
+    ).toBe('');
     expect(
       manufacturingPayload({
         patternMode: 'NONE',
@@ -201,8 +201,16 @@ describe('颜色与独立制造结构', () => {
       patternVersion: '生产版B',
     };
     expect(configurationMissingFields(value)).toEqual([]);
+    expect(
+      configurationMissingFields({
+        ...value,
+        patternCode: '',
+        patternVersion: '',
+      }),
+    ).toEqual([]);
     expect(manufacturingError(value)).toBe('');
     expect(productPatternText(value)).toBe('激光雕刻 · FLOWER · 生产版B');
+    expect(productPatternText({ patternMode: 'LASER' })).toBe('激光雕刻');
     expect(productPatternText({})).toBe('雕刻待核实');
     expect(productPatternText({ patternMode: 'NONE' })).toBe('无雕刻');
   });
