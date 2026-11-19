@@ -381,7 +381,7 @@ onBeforeUnmount(() => {
             <Input.Search
               v-model:value="keyword"
               allow-clear
-              placeholder="搜索供应商、订单或客户"
+              placeholder="搜索内部单号、合同号、客户或供应商"
               @search="search"
             />
             <Button

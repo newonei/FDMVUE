@@ -1,0 +1,231 @@
+:root {
+  font:
+    14px/1.55 Inter,
+    'Segoe UI',
+    'Microsoft YaHei UI',
+    'PingFang SC',
+    sans-serif;
+  color: #312b34;
+  background: #f7f5f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body,
+h1,
+h2,
+p,
+dl {
+  margin: 0;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.slip-top {
+  background: #fff;
+  border-bottom: 1px solid #ece7ed;
+}
+
+.slip-top > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 554px;
+  height: 51px;
+  padding: 0 15px;
+  margin: 0 auto;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  font-weight: 750;
+  color: #fff;
+  background: #a83642;
+  border-radius: 6px;
+}
+
+.slip-top strong {
+  font-size: 15px;
+}
+
+.slip-brand-label {
+  margin-left: auto;
+  font-size: 12px;
+  color: #766d77;
+}
+
+.slip-shell {
+  max-width: 554px;
+  padding: 23px 15px 25px;
+  margin: 0 auto;
+}
+
+.slip-heading {
+  margin-bottom: 15px;
+  overflow-wrap: anywhere;
+}
+
+.slip-heading h1 {
+  margin-bottom: 8px;
+  font-size: clamp(23px, 6vw, 29px);
+  line-height: 1.24;
+  letter-spacing: -0.025em;
+}
+
+.slip-heading p {
+  color: #514753;
+}
+
+.slip-heading .slip-company {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #766d77;
+}
+
+.slip-total {
+  padding: 17px 18px 16px;
+  margin-bottom: 15px;
+  color: #fff;
+  background: #603b56;
+  border-radius: 10px;
+}
+
+.slip-caption {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #faf1f7;
+}
+
+.clock {
+  min-width: 74px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-align: center;
+  background: #fff2;
+  border-radius: 4px;
+}
+
+.slip-total > strong {
+  display: block;
+  margin-top: 2px;
+  font-size: clamp(27px, 7.9vw, 40px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+
+.slip-total > small {
+  display: block;
+  font-size: 11px;
+  color: #f3e8ef;
+}
+
+.slip-section {
+  padding: 13px 15px 6px;
+  margin-bottom: 11px;
+  background: #fff;
+  border: 1px solid #ebe5ec;
+  border-radius: 8px;
+}
+
+.slip-section-title,
+.slip-row {
+  display: flex;
+  gap: 9px;
+  justify-content: space-between;
+}
+
+.slip-section-title {
+  align-items: center;
+  padding-bottom: 8px;
+  color: #52384d;
+}
+
+.slip-section-title h2 {
+  font-size: 14px;
+}
+
+.slip-section-title strong,
+.slip-row dd {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.slip-row {
+  align-items: start;
+  padding: 7px 0;
+  font-size: 12px;
+  border-top: 1px solid #f0edf1;
+}
+
+.slip-row dt {
+  min-width: 0;
+  color: #5d5460;
+  overflow-wrap: anywhere;
+}
+
+.slip-row dt small {
+  display: block;
+  font-size: 10px;
+  color: #766d77;
+}
+
+.slip-row dd {
+  margin: 0;
+}
+
+footer {
+  padding-top: 6px;
+  font-size: 11px;
+  color: #766d77;
+  text-align: center;
+}
+
+#slip-state {
+  display: grid;
+  gap: 7px;
+  padding: 35px 15px;
+  color: #766d77;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #ebe5ec;
+  border-radius: 8px;
+}
+
+#slip-state h1 {
+  font-size: 18px;
+  color: #52384d;
+}
+
+#slip-state button {
+  justify-self: center;
+  min-height: 38px;
+  padding: 0 16px;
+  margin-top: 8px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  background: #603b56;
+  border: 0;
+  border-radius: 6px;
+}
+
+#slip-state button:focus-visible {
+  outline: 2px solid #603b56;
+  outline-offset: 3px;
+}

@@ -16,20 +16,23 @@ const PROCESS_CHAIN = [
   ['EMBOSS', '压花'], ['PUNCH', '冲裁'], ['ENGRAVE', '雕刻'], ['FOLD', '折叠'], ['PACK', '包装'],
 ] as const;
 
+function includesStage(item: Api.Item, code: string) {
+  return item.processes?.includes(code) || item.steps?.some((step) => step.process === code);
+}
+
 function summarizeStep(code: string, label: string, items: Api.Item[]): Stage {
   const steps = items.flatMap((item) => (item.steps ?? []).filter((step) => step.process === code));
-  const required = items.some((item) => (item.processes ?? []).includes(code)) || steps.length > 0;
+  const requiredItems = items.filter((item) => includesStage(item, code));
   const detail = steps.map((step) => [
     `${step.label}：${num(step.goodQuantity)}${step.unit || ''}良品`,
     `${step.orderCount}张工序单`,
     step.taskCount ? `${step.completedTaskCount || 0}/${step.taskCount}个任务达标` : '',
     step.sharedTaskCount ? `${step.sharedTaskCount}个合并生产任务，产量不重复分摊` : '',
   ].filter(Boolean).join('，')).join('；');
-  if (!required) return { code, label, state: 'skipped', text: '未关联', detail: '当前工艺和任务没有关联此环节；可能使用现有库存。' };
+  if (requiredItems.length === 0) return { code, label, state: 'skipped', text: '未关联', detail: '当前工艺和任务没有关联此环节；可能使用现有库存。' };
   if (steps.some((step) => step.state === 'IN_PROGRESS' || num(step.inProgressCount) > 0 || num(step.claimedTaskCount) > 0)) {
     return { code, label, detail, state: 'running', text: '生产中' };
   }
-  const requiredItems = items.filter((item) => (item.processes ?? []).includes(code) || item.steps?.some((step) => step.process === code));
   const allCompleted = requiredItems.length > 0 && requiredItems.every((item) => item.steps?.some((step) => step.process === code && step.state === 'COMPLETED'));
   if (allCompleted) return { code, label, detail, state: 'done', text: '已达标' };
   if (steps.some((step) => ['COMPLETED', 'PARTIAL', 'REPORTED'].includes(step.state || '') || num(step.goodQuantity) > 0)) {
@@ -42,9 +45,15 @@ function summarizeStep(code: string, label: string, items: Api.Item[]): Stage {
   return { code, label, detail: detail || '尚无关联的排单任务或工序单', state: 'idle', text: '未下发' };
 }
 
+export function deliveryProgress(item: Api.Item, outbound: boolean) {
+  const actual = num(outbound ? item.shippedQuantity : item.completedQuantity);
+  const target = num(item.quantity);
+  return { actual, remaining: Math.max(0, target - actual), target };
+}
+
 function deliveryStage(items: Api.Item[], outbound: boolean): Stage {
   const active = items.filter((item) => num(item.quantity) > 0);
-  const quantity = (item: Api.Item) => num(outbound ? item.shippedQuantity : item.completedQuantity);
+  const quantity = (item: Api.Item) => deliveryProgress(item, outbound).actual;
   const all = active.length > 0 && active.every((item) => quantity(item) >= num(item.quantity));
   const any = active.some((item) => quantity(item) > 0);
   let state: Stage['state'] = 'idle';
@@ -63,6 +72,28 @@ function deliveryStage(items: Api.Item[], outbound: boolean): Stage {
     text,
     detail: active.map((item) => `${item.productName}：${quantity(item)}/${num(item.quantity)}${item.unit || ''}`).join('；')
       + (outbound ? '。仅统计明确关联本单的有效出库，历史未关联出库不推算归属。' : '。按净交货 / 入库记录统计。'),
+  };
+}
+
+export function stageDetails(order: Api.Order, selected: Stage, itemId?: number) {
+  const { code, label } = selected;
+  const outbound = code === 'OUTBOUND';
+  const stockIn = code === 'STOCK_IN';
+  const logistics = outbound || stockIn;
+  const scope = itemId === undefined ? order.items : order.items.filter((item) => item.id === itemId);
+  const items = scope.filter((item) => num(item.quantity) > 0 && (logistics || includesStage(item, code)));
+  const summarize = (lines: Api.Item[]) => logistics ? deliveryStage(lines, outbound) : summarizeStep(code, label, lines);
+  const itemIds = new Set(items.map((item) => item.id));
+
+  return {
+    deliveries: stockIn ? (order.deliveries ?? []).filter((delivery) => itemIds.has(delivery.productionOrderItemId)) : [],
+    itemMissing: itemId !== undefined && scope.length === 0,
+    rows: items.map((item) => ({
+      item,
+      stage: summarize([item]),
+      step: item.steps?.find((step) => step.process === code),
+    })),
+    stage: summarize(items),
   };
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PrintExtras, ProductionExtraField } from '../print-extras';
+import type { PrintExtras } from '../print-extras';
 
 import type { BusinessRecord } from '#/api/fdmplatform';
 import type {
@@ -8,16 +8,8 @@ import type {
   ProcurementOrderRow,
   ProcurementOrderView,
 } from '#/api/fdmplatform/procurement';
-import type { ProductAttributeOptions } from '#/api/fdmplatform/products';
 
-import {
-  computed,
-  onBeforeUnmount,
-  onMounted,
-  reactive,
-  ref,
-  watch,
-} from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
@@ -42,14 +34,11 @@ import {
   getProcurementOrder,
   getProcurementOrders,
 } from '#/api/fdmplatform/procurement';
-import { getProductAttributeOptions } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../../data';
-import { colorModeOptions } from '../../../products/manufacturing';
 import { purchaseRowLabels } from '../model';
 import {
   additionalLineAmount,
-  applyProductionExtras,
   boxCount,
   copyPrintExtras,
   currencyDigits,
@@ -63,8 +52,6 @@ import {
   printExtrasFrom,
   printExtrasImageIds,
   printExtrasPayload,
-  productionExtrasFrom,
-  productionIdentityLocked,
   SHARED_COLUMN_SUGGESTIONS,
 } from '../print-extras';
 import OrderImages from './OrderImages.vue';
@@ -131,18 +118,6 @@ const allSelected = computed(
     lines.value.length > 0 &&
     selectedLineIds.value.length === lines.value.length,
 );
-const attributeOptions = ref<ProductAttributeOptions>();
-const optionsError = ref('');
-async function loadAttributeOptions() {
-  optionsError.value = '';
-  try {
-    const value = await getProductAttributeOptions();
-    if (!disposed) attributeOptions.value = value;
-  } catch (error) {
-    if (!disposed) optionsError.value = errorText(error);
-  }
-}
-onMounted(loadAttributeOptions);
 const displayLines = computed<Line[]>(() => [
   ...lines.value,
   ...extras.additionalLines.map((additional) => ({
@@ -154,35 +129,22 @@ const baseline = ref('');
 let loadedId: string | undefined;
 const fingerprint = () => JSON.stringify(printExtrasPayload(extras));
 const dirty = computed(() => baseline.value !== fingerprint());
-const productionProblems = computed(() =>
-  lines.value.flatMap((line) => {
-    const row = extras.lineExtras[String(line.id)] ?? {};
-    const product = String(spec(line).skuCode ?? spec(line).skuName ?? line.id);
-    if (row.colorMode === 'SINGLE' && !row.frontColor?.trim())
-      return [`${product}：单色请填写正面颜色`];
-    if (row.colorMode === 'DUAL') {
-      if (!row.frontColor?.trim() || !row.backColor?.trim())
-        return [`${product}：双色请分别填写正反面颜色`];
-      if (row.frontColor === row.backColor)
-        return [`${product}：双色的正反面颜色必须不同，同色请选单色`];
-    }
-    return [];
-  }),
-);
 watch(dirty, (value) => emit('dirty', value), { immediate: true });
+
+function fillSnapshotWeights() {
+  for (const line of lines.value) {
+    const weight = spec(line).weight;
+    if (typeof weight === 'string' && weight.trim())
+      extra(line).weight ??= weight.trim();
+  }
+}
 
 function loadSaved() {
   Object.assign(
     extras,
     printExtrasFrom(props.view.details, props.view.accessoryCatalog),
   );
-  for (const line of lines.value) {
-    const id = String(line.id);
-    extras.lineExtras[id] = productionExtrasFrom(
-      extras.lineExtras[id] ?? {},
-      spec(line),
-    );
-  }
+  fillSnapshotWeights();
   selectedLineIds.value = [];
   batchOpen.value = false;
   const nextId = `${props.view.contractId}/${props.view.id}`;
@@ -241,78 +203,28 @@ function selectAllLines(checked: boolean) {
     ? lines.value.map((line) => String(line.id))
     : [];
 }
-function productionOptions(field: ProductionExtraField, value?: string) {
-  const materialOptions = field.startsWith('texture')
-    ? (attributeOptions.value?.textures ?? [])
-    : (attributeOptions.value?.colors ?? []);
-  const options = field === 'colorMode' ? colorModeOptions : materialOptions;
-  return value && !options.some((option) => option.value === value)
-    ? [...options, { value, label: value }]
-    : options;
-}
-function setProduction(
-  line: Line,
-  field: ProductionExtraField,
-  value: unknown,
-) {
-  if (productionIdentityLocked(spec(line)) && field !== 'weight') return;
-  const row = extra(line);
-  (row as Record<string, unknown>)[field] =
-    typeof value === 'string' ? value : '';
-  if (row.colorMode === 'SINGLE') row.backColor = row.frontColor ?? '';
-}
-const batchFields: { key: ProductionExtraField; label: string }[] = [
-  { key: 'colorMode', label: '单色 / 双色' },
-  { key: 'frontColor', label: '正面颜色' },
-  { key: 'backColor', label: '反面颜色' },
-  { key: 'textureFront', label: '正面纹路' },
-  { key: 'textureBack', label: '反面纹路' },
-  { key: 'weight', label: '产品克重' },
-];
-const batchValues = ref<OrderLineExtra>({});
-const batchEnabled = ref<ProductionExtraField[]>([]);
+const batchWeight = ref('');
 const batchOnlyEmpty = ref(false);
-function setBatchField(field: ProductionExtraField, checked: boolean) {
-  batchEnabled.value = checked
-    ? [...new Set([...batchEnabled.value, field])]
-    : batchEnabled.value.filter((value) => value !== field);
-}
-function setBatchValue(field: ProductionExtraField, value: unknown) {
-  (batchValues.value as Record<string, unknown>)[field] =
-    typeof value === 'string' ? value : '';
-  setBatchField(field, true);
-}
 function openBatch() {
-  batchValues.value = { colorMode: 'UNKNOWN' };
-  batchEnabled.value = [];
+  batchWeight.value = '';
   batchOnlyEmpty.value = false;
   batchOpen.value = true;
 }
 function applyBatch() {
-  if (
-    disabled.value ||
-    selectedLineIds.value.length === 0 ||
-    batchEnabled.value.length === 0
-  )
-    return;
-  const result = applyProductionExtras(
-    extras.lineExtras,
-    selectedLineIds.value,
-    batchValues.value,
-    batchEnabled.value,
-    batchOnlyEmpty.value,
-    lines.value
-      .filter((line) => productionIdentityLocked(spec(line)))
-      .map((line) => String(line.id)),
-  );
+  if (disabled.value || selectedLineIds.value.length === 0) return;
+  const weight = batchWeight.value.trim();
+  let updatedRows = 0;
+  for (const id of selectedLineIds.value) {
+    const current = extras.lineExtras[id]?.weight;
+    if (current === weight || (batchOnlyEmpty.value && current?.trim()))
+      continue;
+    (extras.lineExtras[id] ??= {}).weight = weight;
+    updatedRows++;
+  }
   batchOpen.value = false;
-  const protectedText =
-    result.protectedRows > 0
-      ? `；${result.protectedRows} 条正式 SKU 的 ${result.skippedFields} 项颜色或纹路要求已跳过，需回合同明细修改配置`
-      : '';
-  const feedback = `已更新 ${result.updatedRows} 条产品明细${protectedText}${result.updatedRows > 0 ? '，请保存附加资料' : ''}`;
-  if (result.updatedRows > 0) message.success(feedback);
-  else message.warning(feedback);
+  if (updatedRows > 0)
+    message.success(`已更新 ${updatedRows} 条产品明细，请保存附加资料`);
+  else message.warning('产品克重未变更');
 }
 function customCell(line: Line, id: string) {
   const row = extra(line);
@@ -553,13 +465,7 @@ async function copyFrom(target: { contractId: string; orderId: string }) {
       props.view.accessoryCatalog,
     );
     Object.assign(extras, result.value);
-    for (const line of lines.value) {
-      const id = String(line.id);
-      extras.lineExtras[id] = productionExtrasFrom(
-        extras.lineExtras[id] ?? {},
-        spec(line),
-      );
-    }
+    fillSnapshotWeights();
     expandedLines.value = displayLines.value
       .slice(0, 1)
       .map((line) => String(line.id));
@@ -606,7 +512,7 @@ defineExpose({
           v-if="!props.disabled"
           type="primary"
           :loading="saving"
-          :disabled="disabled || !dirty || productionProblems.length > 0"
+          :disabled="disabled || !dirty"
           @click="emit('save')"
         >
           保存附加资料
@@ -655,22 +561,6 @@ defineExpose({
           按产品展开填写，数量和单价在采购单明细中修改。图片支持 JPG /
           PNG，也可点击图片区域后粘贴截图。
         </p>
-        <Alert
-          v-if="productionProblems.length > 0"
-          type="warning"
-          :message="productionProblems.join('；')"
-          class="attribute-error"
-        />
-        <Alert
-          v-if="optionsError"
-          type="warning"
-          :message="`生产属性选项加载失败：${optionsError}`"
-          class="attribute-error"
-        >
-          <template #action>
-            <Button size="small" @click="loadAttributeOptions"> 重试 </Button>
-          </template>
-        </Alert>
         <div v-if="!props.disabled && lines.length > 1" class="batch-toolbar">
           <Checkbox
             :checked="allSelected"
@@ -685,7 +575,7 @@ defineExpose({
             :disabled="disabled || !selectedLineIds.length"
             @click="openBatch"
           >
-            批量设置生产属性
+            批量设置产品克重
           </Button>
         </div>
         <Collapse v-model:active-key="expandedLines" class="line-cards">
@@ -906,50 +796,6 @@ defineExpose({
                           (ids) => setLineImages(record, ids, 'colorImageId')
                         "
                         @busy="imageBusy"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div class="production-fields">
-                  <span class="group-label">生产属性</span>
-                  <p
-                    v-if="productionIdentityLocked(spec(record))"
-                    class="muted"
-                  >
-                    颜色和纹路属于本合同 SKU
-                    配置，已锁定。需要调整时请回到合同明细修改配置；克重和供应商实物色号图可继续补充。
-                  </p>
-                  <div class="field-grid">
-                    <div
-                      v-for="field in batchFields.filter(
-                        (item) => item.key !== 'weight',
-                      )"
-                      :key="field.key"
-                      class="field"
-                      :data-key="field.key"
-                    >
-                      <label :for="`${field.key}-${record.id}`">{{
-                        field.label
-                      }}</label>
-                      <Select
-                        :id="`${field.key}-${record.id}`"
-                        :value="extra(record)[field.key]"
-                        :options="
-                          productionOptions(field.key, extra(record)[field.key])
-                        "
-                        :disabled="
-                          disabled ||
-                          productionIdentityLocked(spec(record)) ||
-                          (field.key === 'backColor' &&
-                            extra(record).colorMode === 'SINGLE')
-                        "
-                        :allow-clear="field.key !== 'colorMode'"
-                        show-search
-                        option-filter-prop="label"
-                        :placeholder="`选择${field.label}`"
-                        @update:value="
-                          (value) => setProduction(record, field.key, value)
-                        "
                       />
                     </div>
                   </div>
@@ -1243,7 +1089,7 @@ defineExpose({
       <Button
         type="primary"
         :loading="saving"
-        :disabled="disabled || !dirty || productionProblems.length > 0"
+        :disabled="disabled || !dirty"
         @click="emit('save')"
       >
         保存附加资料
@@ -1252,71 +1098,33 @@ defineExpose({
 
     <Modal
       :open="batchOpen"
-      title="批量设置产品生产要求"
-      :width="760"
-      ok-text="应用到所选明细"
-      :ok-button-props="{ disabled: disabled || batchEnabled.length === 0 }"
+      title="批量设置产品克重"
+      :ok-text="batchWeight.trim() ? '应用到所选明细' : '清空所选克重'"
+      :ok-button-props="{
+        disabled: disabled || (batchOnlyEmpty && !batchWeight.trim()),
+      }"
       :cancel-button-props="{ disabled }"
       :mask-closable="!disabled"
       @ok="applyBatch"
       @cancel="!disabled && (batchOpen = false)"
     >
       <p>
-        将设置已选择的
-        {{ selectedLineIds.length }}
-        条产品明细。仅勾选需要统一设置的字段，其他字段保留原值；勾选后留空会清空该项。
+        为选中的 {{ selectedLineIds.length }} 条产品明细设置克重，留空可清空。
       </p>
-      <p class="muted">
-        已有正式 SKU
-        配置的产品会跳过颜色与纹路字段，保留合同要求；产品克重仍可批量设置。
-      </p>
-      <div class="batch-production-fields">
-        <div
-          v-for="field in batchFields"
-          :key="field.key"
-          class="batch-production-field"
-        >
-          <Checkbox
-            :checked="batchEnabled.includes(field.key)"
-            :disabled="disabled"
-            :aria-label="`批量设置${field.label}`"
-            @update:checked="(checked) => setBatchField(field.key, checked)"
-          >
-            {{ field.label }}
-          </Checkbox>
-          <Input
-            v-if="field.key === 'weight'"
-            :value="batchValues.weight"
-            :disabled="disabled"
-            :maxlength="100"
-            placeholder="如 1000g±100g"
-            aria-label="批量产品克重"
-            @update:value="(value) => setBatchValue('weight', value)"
-          />
-          <Select
-            v-else
-            :value="batchValues[field.key]"
-            :options="productionOptions(field.key, batchValues[field.key])"
-            :disabled="disabled"
-            :allow-clear="field.key !== 'colorMode'"
-            show-search
-            option-filter-prop="label"
-            placeholder="未填写 / 清空"
-            :aria-label="`批量${field.label}`"
-            @update:value="(value) => setBatchValue(field.key, value)"
-          />
-        </div>
-      </div>
-      <Checkbox
-        :checked="batchOnlyEmpty"
+      <Input
+        v-model:value="batchWeight"
         :disabled="disabled"
-        @update:checked="(checked) => (batchOnlyEmpty = checked)"
+        :maxlength="100"
+        placeholder="如 1000g±100g"
+        aria-label="批量产品克重"
+      />
+      <Checkbox
+        v-model:checked="batchOnlyEmpty"
+        :disabled="disabled"
+        class="batch-only-empty"
       >
-        仅填充所选明细中的空值（待核实的单双色也视为空值）
+        仅填充所选明细中的空值
       </Checkbox>
-      <p class="muted">
-        单色自动同步正反面颜色；双色请分别填写不同的正反颜色。应用后请点击「保存附加资料」。
-      </p>
     </Modal>
     <Modal
       v-model:open="columnsOpen"
@@ -1409,7 +1217,7 @@ defineExpose({
       <Space direction="vertical" style="width: 100%">
         <Input.Search
           v-model:value="copyKeyword"
-          placeholder="搜索采购单号、供应商或合同"
+          placeholder="搜索采购单号、内部单号、合同号或供应商"
           @search="loadCopyRows(true)"
         />
         <Alert v-if="copyError" type="error" :message="copyError" />
@@ -1516,18 +1324,8 @@ defineExpose({
   line-height: 1.7;
 }
 
-.batch-production-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin: 20px 0;
-}
-
-.batch-production-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
+.batch-only-empty {
+  margin-top: 12px;
 }
 
 .extras-head .muted,
@@ -1556,10 +1354,6 @@ defineExpose({
   margin-bottom: 12px;
   background: hsl(var(--accent) / 50%);
   border-radius: 6px;
-}
-
-.attribute-error {
-  margin-bottom: 12px;
 }
 
 .line-cards {
@@ -1708,15 +1502,6 @@ defineExpose({
 .field-hint {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
-}
-
-.production-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 20px;
-  margin-top: 20px;
-  border-top: 1px solid hsl(var(--border));
 }
 
 .supplement-grid {

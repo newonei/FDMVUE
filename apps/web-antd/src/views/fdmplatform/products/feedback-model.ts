@@ -23,7 +23,7 @@ export function historicalAdditionalAmount(contract?: Contract) {
 }
 
 /** Only known active requests consume the suggested quantity. Unknown history requires manual input. */
-export function requestLineDefaults(contract: Contract, item: ContractItem) {
+function remainingRequestQuantity(contract: Contract, item: ContractItem) {
   let remaining = new BigNumber(item.quantity);
   let known =
     remaining.isFinite() &&
@@ -42,13 +42,44 @@ export function requestLineDefaults(contract: Contract, item: ContractItem) {
       else remaining = remaining.minus(quantity);
     }
   }
+  return known ? remaining : undefined;
+}
+
+export function requestLineDefaults(contract: Contract, item: ContractItem) {
+  const remaining = remainingRequestQuantity(contract, item);
   return {
-    quantity:
-      known && remaining.isGreaterThan(0)
-        ? remaining.toFixed(remaining.decimalPlaces() ?? 0)
-        : '',
+    quantity: remaining?.isGreaterThan(0)
+      ? remaining.toFixed(remaining.decimalPlaces() ?? 0)
+      : '',
     requiredDate: item.requiredDate ?? '',
   };
+}
+
+export function requestExcessHint(
+  contract: Contract,
+  lines: Record<string, unknown>[],
+) {
+  const messages: string[] = [];
+  for (const [index, line] of lines.entries()) {
+    const item = contract.items.find(
+      (entry) => entry.id === line.contractItemId,
+    );
+    if (!item) continue;
+    const remaining = remainingRequestQuantity(contract, item);
+    const quantity = new BigNumber(String(line.quantity ?? ''));
+    if (!remaining || !quantity.isFinite() || !quantity.isGreaterThan(0))
+      continue;
+    const excess = quantity.minus(remaining);
+    if (excess.isGreaterThan(0)) {
+      const percent = excess.times(100).div(item.quantity).decimalPlaces(2);
+      const excessText = excess.toFixed(excess.decimalPlaces() ?? 0);
+      const percentText = percent.toFixed(percent.decimalPlaces() ?? 0);
+      messages.push(
+        `第 ${index + 1} 行累计超出合同 ${excessText} ${item.unit ?? ''}（${percentText}%）`,
+      );
+    }
+  }
+  return messages.join('；');
 }
 
 /** 新建采购申请默认带入合同里还有未申请数量的产品明细；全部已申请时返回空，弹窗保留一行空白 */

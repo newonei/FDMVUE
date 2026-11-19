@@ -120,6 +120,8 @@ vi.mock('ant-design-vue', () => {
       props: {
         open: Boolean,
         title: String,
+        okText: String,
+        cancelText: String,
         okButtonProps: Object as PropType<{ disabled?: boolean }>,
       },
       emits: ['ok', 'cancel'],
@@ -134,12 +136,12 @@ vi.mock('ant-design-vue', () => {
                   disabled: props.okButtonProps?.disabled,
                   onClick: () => context.emit('ok'),
                 },
-                '保存选项',
+                props.okText || '保存选项',
               ),
               h(
                 'button',
                 { onClick: () => context.emit('cancel') },
-                '关闭选项',
+                props.cancelText || '关闭选项',
               ),
             ])
           : null,
@@ -180,7 +182,10 @@ async function mount(
   const props = reactive({ open: false, customer: existing, salesChannel });
   const host = document.createElement('div');
   document.body.append(host);
-  const app = createApp({ render: () => h(CustomerEditor, props) });
+  const onClose = vi.fn();
+  const app = createApp({
+    render: () => h(CustomerEditor, { ...props, onClose }),
+  });
   app.mount(host);
   disposals.push(() => {
     app.unmount();
@@ -192,7 +197,7 @@ async function mount(
     expect(api.options.mock.calls.length).toBeGreaterThan(previousLoads),
   );
   await nextTick();
-  return { host, props };
+  return { host, onClose, props };
 }
 function click(host: HTMLElement, text: string) {
   const button = [...host.querySelectorAll('button')].find(
@@ -270,6 +275,40 @@ beforeEach(() => {
 afterEach(() => disposals.splice(0).forEach((dispose) => dispose()));
 
 describe('内销客户类型与所在行业', () => {
+  it('填写中的资料可继续编辑，明确放弃才关闭，未改动的档案直接关闭', async () => {
+    const { host, onClose, props } = await mount(customer);
+    await fill(host, '客户全称', '新的客户名称');
+    click(host, '取消');
+    await nextTick();
+    expect(host.querySelector('dialog')?.textContent).toContain(
+      '放弃未保存的客户资料',
+    );
+    click(host, '继续填写');
+    await nextTick();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      host.querySelector<HTMLInputElement>('[data-field="客户全称"] input')
+        ?.value,
+    ).toBe('新的客户名称');
+    click(host, '取消');
+    await nextTick();
+    click(host, '放弃修改');
+    await nextTick();
+    expect(onClose).toHaveBeenCalledOnce();
+    props.open = false;
+    await nextTick();
+    props.open = true;
+    await nextTick();
+    expect(
+      host.querySelector<HTMLInputElement>('[data-field="客户全称"] input')
+        ?.value,
+    ).toBe(customer.name);
+    click(host, '取消');
+    await nextTick();
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
   it('新增自定义选项后可选择并保存客户，再次打开仍能读取已维护选项', async () => {
     const { host } = await mount();
     expect(

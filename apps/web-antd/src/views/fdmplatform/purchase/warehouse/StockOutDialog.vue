@@ -166,7 +166,7 @@ async function save() {
             show-search
             :filter-option="false"
             :options="contracts"
-            placeholder="搜索合同号、客户或产品"
+            placeholder="搜索内部单号、合同号、客户或产品"
             @search="loadContracts"
           />
         </label>

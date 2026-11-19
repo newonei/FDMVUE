@@ -9,13 +9,14 @@ import { getPurchaseImage, getPurchaseSheet, getTargetOptions } from '#/api/fdmg
 import ProductStructureDetails from '#/views/fdmplatform/products/components/ProductStructureDetails.vue';
 
 import { num } from '../shared';
+import ProductionSpecComparison from './production-spec-comparison.vue';
 import { purchaseSheetImageIds, purchaseSheetStructure } from './purchase-sheet-structure';
 
 /**
  * 采购单生成的工厂订单的生产要求：产品结构读取该行采购资料与下单快照，补充说明实时读取采购资料，
  * 按采购单打印出来的顺序列出每行的定制说明、包装要求、明细备注，整单的共用说明、辅料和包装步骤。
  */
-const props = defineProps<{ orderId: number }>();
+const props = defineProps<{ items?: Api.Item[]; orderId: number; }>();
 
 const sheet = ref<Api.PurchaseSheet>();
 const targetOptions = ref<MatchApi.TargetOptions>();
@@ -26,6 +27,13 @@ const images = ref<Record<string, string>>({});
 let version = 0;
 
 const details = computed(() => sheet.value?.details ?? {});
+const rows = computed(() => {
+  const bySource = new Map(props.items?.filter((item) => item.sourceLineId).map((item) => [item.sourceLineId, item]));
+  return (sheet.value?.order.lines ?? []).map((line) => ({
+    line, item: bySource.get(line.id),
+    purchase: purchaseSheetStructure(line, details.value.lineExtras?.[line.id], targetOptions.value),
+  }));
+});
 const checkedAccessories = computed(() => (details.value.accessories ?? []).filter((a) => a.checked));
 const steps = computed(() => details.value.packagingSteps ?? []);
 const shared = computed(() => details.value.sharedColumns ?? []);
@@ -114,7 +122,6 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">生产要求</h3>
-      <span class="text-xs text-muted-foreground">正式 SKU 的颜色、纹路、尺寸和雕刻以合同规格为准，旧单按采购资料补齐；克重可随采购资料更新，工厂生产参数请在明细中确认保存</span>
       <Tag v-if="details.status" class="m-0" :color="details.status === 'CONFIRMED' ? 'green' : 'default'">
         {{ details.status === 'CONFIRMED' ? '已确认' : '采购员还在编辑' }}<template v-if="(details.revision ?? 1) > 1"> · 第 {{ details.revision }} 版</template>
       </Tag>
@@ -127,13 +134,17 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
         </p>
 
         <div class="flex flex-col gap-2">
-          <div v-for="line in sheet.order.lines" :key="line.id" class="flex flex-col gap-0.5 rounded bg-muted/40 px-2.5 py-1.5">
+          <div v-for="{ line, item, purchase } in rows" :key="line.id" class="flex flex-col gap-0.5 rounded bg-muted/40 px-2.5 py-1.5">
             <span class="flex flex-wrap items-baseline justify-between gap-2">
               <span>{{ line.skuName }} <span class="text-xs text-muted-foreground">{{ line.skuCode }}</span></span>
               <span class="tabular-nums">{{ openQty(line) }} {{ line.unit }}</span>
             </span>
-            <span class="text-xs"><span class="text-muted-foreground">规格：</span>{{ line.specification || '未维护' }}</span>
-            <ProductStructureDetails :value="purchaseSheetStructure(line, details.lineExtras?.[line.id], targetOptions)" expanded />
+            <span class="text-xs"><span class="text-muted-foreground">采购规格原文：</span>{{ line.specification || '未记录' }}</span>
+            <ProductionSpecComparison v-if="item?.targetConfirmedAt" :item="item" :purchase="purchase" :options="targetOptions" />
+            <p v-else-if="item" class="m-0 text-xs text-orange-700">工厂执行规格待确认</p>
+            <p v-else-if="items?.length && openQty(line) > 0" class="m-0 text-xs text-orange-700">此采购行缺少对应的工厂明细</p>
+            <span class="mt-1 text-xs font-medium">采购来源规格</span>
+            <ProductStructureDetails :value="purchase" :expanded="!item?.targetConfirmedAt" />
             <span v-if="extraText(line.id)" class="text-xs text-muted-foreground">{{ extraText(line.id) }}</span>
             <span v-if="lineNote(line.id)" class="text-xs text-warning">备注：{{ lineNote(line.id) }}</span>
             <Image

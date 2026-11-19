@@ -1,0 +1,5 @@
+/* Keep important output attributes legible in both theme modes. */
+.factory-report-spec {
+  color: hsl(var(--destructive));
+  color: color-mix(in srgb, hsl(var(--destructive)) 70%, hsl(var(--foreground)));
+}

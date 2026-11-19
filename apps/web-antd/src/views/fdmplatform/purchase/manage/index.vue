@@ -1664,7 +1664,7 @@ watch(financeType, (value, previous) => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索订单、客户、供应商"
+            placeholder="搜索采购单号、内部单号、合同号、客户或供应商"
             class="order-search"
             @search="
               page = 1;
@@ -1877,7 +1877,9 @@ watch(financeType, (value, previous) => {
               v-else-if="column.key === 'date'"
               class="procurement-number"
               >{{
-                String(record.record.createdAt ?? '').slice(0, 10) || '—'
+                record.purchaseDate ||
+                String(record.record.createdAt ?? '').slice(0, 10) ||
+                '—'
               }}</span>
             <span
               v-else-if="column.key === 'amount'"
@@ -2231,7 +2233,11 @@ watch(financeType, (value, previous) => {
                 </dd>
                 <dt>所属公司</dt>
                 <dd>{{ view.companyName || '待补齐' }}</dd>
-                <dt>交期</dt>
+                <dt>采购日期</dt>
+                <dd>{{ view.details.purchaseDate || '—' }}</dd>
+                <dt>单据日期</dt>
+                <dd>{{ view.details.documentDate || '—' }}</dd>
+                <dt>交付日期</dt>
                 <dd>{{ view.details.deliveryDate || '未定' }}</dd>
                 <dt>收票</dt>
                 <dd>{{ view.details.noInvoice ? '无需收票' : '需要收票' }}</dd>

@@ -69,8 +69,15 @@ vi.mock('ant-design-vue', () => {
       }),
   });
   return {
-    Alert: Wrap,
-    Button: Wrap,
+    Alert: defineComponent({
+      props: { message: String },
+      setup: (props) => () => h('p', props.message),
+    }),
+    Button: defineComponent({
+      props: { disabled: Boolean },
+      setup: (props, ctx) => () =>
+        h('button', { disabled: props.disabled }, ctx.slots.default?.()),
+    }),
     Card: Wrap,
     Form: Object.assign(Wrap, { Item: Wrap }),
     Input,
@@ -88,6 +95,9 @@ function fixture(actions: string[]): ProcurementOrderView {
       version: 1,
       status: 'CONFIRMED',
       deliveryAddress: '原交货地址',
+      deliveryDate: '2026-11-28',
+      documentDate: '2026-11-18',
+      purchaseDate: '2026-11-17',
       clauseIds: [],
     },
     allowedActions: actions,
@@ -103,6 +113,8 @@ afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 async function mount(actions: string[]) {
   const view = ref(fixture(actions));
   const saved = vi.fn();
+  const savedDetails = vi.fn();
+  const confirmed = vi.fn();
   const details = ref<InstanceType<typeof OrderDetails>>();
   const host = document.createElement('div');
   document.body.append(host);
@@ -112,6 +124,8 @@ async function mount(actions: string[]) {
         ref: details,
         view: view.value,
         saving: false,
+        onConfirm: confirmed,
+        onSave: savedDetails,
         onSaveExtras: saved,
       }),
   });
@@ -122,7 +136,7 @@ async function mount(actions: string[]) {
   });
   await Promise.resolve();
   await nextTick();
-  return { host, view, saved, details };
+  return { host, view, saved, savedDetails, confirmed, details };
 }
 
 describe('independent procurement extras saving', () => {
@@ -131,12 +145,57 @@ describe('independent procurement extras saving', () => {
       const item = {
         id: kind,
         active: true,
+        ...(kind === 'entities'
+          ? { legalName: '签约公司', address: '签约地址' }
+          : {}),
         ...(kind === 'templates' ? { requiredClauseGroups: ['payment'] } : {}),
         ...(kind === 'clauses' ? { groupCode: 'payment' } : {}),
       };
       return [item] as Awaited<ReturnType<typeof getProcurementSettings>>;
     });
   }
+
+  it('下单资料要求采购日期，允许清空交付日期后保存和确认', async () => {
+    defaultSettings();
+    vi.mocked(getSupplierContacts).mockResolvedValue([
+      { id: 'contact-1', active: true, defaultContact: true, phone: '12345' },
+    ] as Awaited<ReturnType<typeof getSupplierContacts>>);
+    const { host, savedDetails, confirmed } = await mount([
+      'SAVE_DETAILS',
+      'CONFIRM_DETAILS',
+    ]);
+    const button = (label: string) =>
+      [...host.querySelectorAll('button')].find(
+        (item) => item.textContent?.trim() === label,
+      )!;
+    const fillDate = (field: string, value: string) => {
+      const input = host.querySelector<HTMLInputElement>(
+        `#order-details-${field}-date`,
+      )!;
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    };
+    expect(host.querySelector('#order-details-document-date')).toBeNull();
+    fillDate('purchase', '');
+    await nextTick();
+    button('先存草稿').click();
+    expect(savedDetails).not.toHaveBeenCalled();
+    expect(button('确认下单资料').disabled).toBe(true);
+
+    fillDate('purchase', '2026-11-17');
+    fillDate('delivery', '');
+    await nextTick();
+    button('先存草稿').click();
+    button('确认下单资料').click();
+    const dates = {
+      deliveryDate: '',
+      purchaseDate: '2026-11-17',
+    };
+    expect(savedDetails).toHaveBeenCalledWith(expect.objectContaining(dates));
+    expect(confirmed).toHaveBeenCalledWith(expect.objectContaining(dates));
+    expect(savedDetails.mock.calls[0]![0]).not.toHaveProperty('documentDate');
+    expect(confirmed.mock.calls[0]![0]).not.toHaveProperty('documentDate');
+  });
 
   it('does not count automatically selected settings and contacts as edits', async () => {
     defaultSettings();

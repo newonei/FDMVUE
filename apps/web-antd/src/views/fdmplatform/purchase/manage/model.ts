@@ -81,13 +81,13 @@ export function onlyChoice<T extends { active?: boolean; id: string }>(
   return active.length === 1 ? active[0]?.id : undefined;
 }
 export interface DetailsCheck {
-  key: 'clauses' | 'contact' | 'entity' | 'phone' | 'template';
+  key: 'clauses' | 'contact' | 'entity' | 'phone' | 'purchaseDate' | 'template';
   label: string;
   ok: boolean;
   hint?: string;
 }
-/** 日期须真实存在，避免逐行只填写一行就误认为整单已明确交期。 */
-export function validDeliveryDate(value: unknown): value is string {
+/** 校验 YYYY-MM-DD 表示的日期是否实际存在。 */
+export function validOrderDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value))
     return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -95,31 +95,14 @@ export function validDeliveryDate(value: unknown): value is string {
     !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
   );
 }
-export function deliveryDateError(
-  view: {
-    details: Record<string, unknown>;
-    lineDeliveryDates?: Record<string, string>;
-    order: BusinessRecord;
-  },
-  deliveryDate: unknown = view.details.deliveryDate,
-) {
-  if (validDeliveryDate(deliveryDate)) return '';
-  const dates = (view.details.lineDates ?? {}) as Record<string, unknown>;
-  const missing = ((view.order.lines ?? []) as Record<string, unknown>[])
-    .map((line, index) => ({ line, index }))
-    .filter(
-      ({ line }) =>
-        Number(line.quantity ?? 0) > Number(line.cancelledQuantity ?? 0),
-    )
-    .filter(
-      ({ line }) =>
-        !validDeliveryDate(dates[String(line.id)]) &&
-        !validDeliveryDate(view.lineDeliveryDates?.[String(line.id)]),
-    )
-    .map(({ index }) => index + 1);
-  return missing.length > 0
-    ? `采购交期未填写：请填写整单交货日期，或补齐第${missing.join('、')}行到货日期（可沿用该行报价承诺日期）`
-    : '';
+export function orderDateError(dates: {
+  deliveryDate?: null | string;
+  purchaseDate?: string;
+}) {
+  if (!validOrderDate(dates.purchaseDate)) return '请填写有效的采购日期';
+  if (dates.deliveryDate && !validOrderDate(dates.deliveryDate))
+    return '请填写有效的交付日期';
+  return '';
 }
 /** What the backend requires before 下单资料 can be confirmed, in the order the form shows it. */
 export function detailsChecklist(input: {
@@ -316,6 +299,7 @@ export function orderDetailsPayload(value: Record<string, unknown>) {
       'clauseIds',
       'deliveryAddress',
       'deliveryDate',
+      'purchaseDate',
       'remark',
       'accessoryNote',
       'reason',

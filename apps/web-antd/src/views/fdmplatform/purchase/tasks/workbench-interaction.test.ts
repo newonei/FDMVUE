@@ -399,6 +399,43 @@ afterEach(() => {
 });
 
 describe('采购工作台交互与全量查询', () => {
+  it('列表、看板和摘要优先显示内部单号，旧单回退合同号', async () => {
+    const internal = entry('internal');
+    internal.row.contractName = 'FDMF10020261027-1Y';
+    const legacy = entry('legacy');
+    legacy.row.contractName = ' ';
+    legacy.row.contractCode = 'HT-LEGACY';
+    mocks.page.mockResolvedValue(response([internal, legacy]));
+    const { host } = await mount();
+
+    const internalRow = host.querySelector('[data-entry="internal"]');
+    expect(internalRow?.textContent).toContain('FDMF10020261027-1Y');
+    expect(internalRow?.textContent).not.toContain('HT-001');
+    expect(host.querySelector('[data-entry="legacy"]')?.textContent).toContain(
+      'HT-LEGACY',
+    );
+
+    button(host, '需求internal').click();
+    await settle();
+    expect(host.querySelector('aside')?.textContent).toContain(
+      'FDMF10020261027-1Y',
+    );
+    button(host, '关闭').click();
+    await settle();
+    button(host, '看板').click();
+    await settle();
+    expect(host.textContent).toContain('FDMF10020261027-1Y');
+    expect(host.textContent).not.toContain('HT-001');
+
+    const search = host.querySelector<HTMLInputElement>('.workbench-search')!;
+    search.value = ' FDMF10020261027-1Y ';
+    search.dispatchEvent(new Event('input'));
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle();
+    expect(mocks.page).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'FDMF10020261027-1Y', pageNo: 1 }),
+    );
+  });
   it('阶段数字来自服务端，不以当前页条数代替；我负责和分页发送真实查询条件', async () => {
     const { host } = await mount('?contractId=contract-a');
     expect(mocks.directory).toHaveBeenCalledWith(0);

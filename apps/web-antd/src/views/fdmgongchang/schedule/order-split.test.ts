@@ -28,7 +28,7 @@ const orders: OrderApi.Order[] = [
     id: 11, orderNo: 'GD-11', factoryId: 1, requesterUserId: 1, status: 'ACCEPTED', statusLabel: '生产中', totalQuantity: 200, completedQuantity: 0,
     customerName: '客户甲', requiredDate: '2026-12-10',
     items: [
-      { id: 101, productId: 'p1', productCode: 'SKU-PURPLE', productName: '紫色瑜伽垫', specification: '183×61×0.6cm', quantity: 120, completedQuantity: 20, unit: '条', processes: ['SLICE', 'PACK'], routeName: '开片包装', targetConfirmedAt: '2026-11-12', recipeCode: 'REC-1' },
+      { id: 101, productId: 'p1', productCode: 'SKU-PURPLE', productName: '紫色瑜伽垫', specification: '183×61×0.6cm', quantity: 120, completedQuantity: 20, unit: '条', processes: ['SLICE', 'PUNCH', 'PACK'], routeName: '开片冲裁包装', targetConfirmedAt: '2026-11-12', recipeCode: 'REC-1' },
       { id: 102, productId: 'p2', productCode: 'SKU-BLUE', productName: '蓝色瑜伽垫', quantity: 80, completedQuantity: 0, unit: '条', processes: ['CUT'], routeName: '仅立切' },
     ],
   },
@@ -48,7 +48,7 @@ function row(overrides: Partial<SplitApi.Row> = {}): SplitApi.Row {
 function preview(overrides: Partial<SplitApi.Preview> = {}): SplitApi.Preview {
   return { previewKey: 'preview-1', canRelease: true, orderCount: 2, itemCount: 3, taskCount: 2, errors: [],
     warnings: ['板材库存不足，任务仍完整下发；请安排备料'],
-    rows: [row(), row({ rowKey: '101-PACK', process: 'PACK', processLabel: '包装', sequence: 2, quantity: 100, unit: '件', upstreamProcesses: ['SLICE'] })], ...overrides };
+    rows: [row(), row({ rowKey: '101-PUNCH', process: 'PUNCH', processLabel: '冲裁', sequence: 2, quantity: 100, unit: '件', upstreamProcesses: ['SLICE'] })], ...overrides };
 }
 
 async function flush() {
@@ -105,7 +105,7 @@ describe('order selection → process preview → release', () => {
     expect(document.body.textContent).toContain('蓝色瑜伽垫');
     expect(document.body.textContent).toContain('绿色瑜伽垫');
     expect(document.body.textContent).toContain('120 条');
-    expect(document.body.textContent).toContain('开片 → 包装');
+    expect(document.body.textContent).toContain('开片 → 冲裁 → 包装');
     expect(document.body.textContent).toContain('仅立切');
     document.querySelector<HTMLButtonElement>('.ant-table-row-expand-icon')!.click();
     await flush();
@@ -118,7 +118,9 @@ describe('order selection → process preview → release', () => {
     expect(api.preview).toHaveBeenCalledWith([11, 12]);
     expect(api.release).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('开片车间');
-    expect(document.body.textContent).toContain('包装车间');
+    expect(document.body.textContent).toContain('冲裁车间');
+    expect(document.body.textContent).not.toContain('包装车间');
+    expect(document.body.textContent).toContain('包装要求随订单传递');
     expect(document.body.textContent).not.toContain('发泡车间');
     expect(document.body.textContent).toContain('40 片');
     expect(document.body.textContent).toContain('100 件');

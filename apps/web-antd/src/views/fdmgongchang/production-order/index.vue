@@ -31,6 +31,7 @@ import OrderDrawer from './modules/order-drawer.vue';
 import OrderItemsTable from './modules/order-items-table.vue';
 import RestockLedger from './modules/restock-ledger.vue';
 import ScheduleModal from './modules/schedule-modal.vue';
+import SourcePurchaseLink from './modules/source-purchase-link.vue';
 import { dateText, num, ORDER_STATUS, specText, timeText } from './shared';
 
 /**
@@ -134,6 +135,13 @@ async function onConfigSaved() {
   }
 }
 const selectable = computed(() => tab.value === 'factory' && (canSchedule.value || canRelease.value));
+
+function orderRowClass(order: Api.Order) {
+  if (order.status === 'SUBMITTED') return 'order-row--pending';
+  if (order.status === 'COMPLETED') return 'order-row--completed';
+  return '';
+}
+
 const rowSelection = computed(() =>
   selectable.value
     ? {
@@ -496,7 +504,7 @@ function progressPercent(o: Api.Order) {
             :pagination="{ current: pageNo, pageSize, showSizeChanger: true, total, showTotal: (t: number) => `共 ${t} 张` }"
             :row-selection="rowSelection"
             :scroll="{ x: 980 }"
-            :row-class-name="(record: Api.Order) => record.status === 'SUBMITTED' ? 'order-row--pending' : ''"
+            :row-class-name="orderRowClass"
             class="production-orders-table"
             row-key="id"
             size="middle"
@@ -521,7 +529,7 @@ function progressPercent(o: Api.Order) {
                   <span class="text-xs text-muted-foreground">{{ timeText(record.createTime) }}<template v-if="record.purpose && record.sourceType !== 'PURCHASE_ORDER'"> · {{ record.purpose }}</template></span>
                   <span class="my-1 text-xs text-muted-foreground">{{ tab === 'mine' ? record.factoryName : `${record.requesterName || '—'} · ${record.requesterDeptName || '未填写部门'}` }}</span>
                   <span v-if="record.sourceType === 'PURCHASE_ORDER'" class="flex flex-wrap items-center gap-1 text-xs">
-                    <Tag class="m-0" color="blue">采购单 {{ record.sourceOrderCode }}</Tag>
+                    <Tag class="m-0" color="blue"><SourcePurchaseLink :order="record" /></Tag>
                     <Tag v-if="record.sourceChanged" class="m-0" color="orange">有变更</Tag>
                     <span v-if="record.sourceContractCode" class="text-muted-foreground">{{ record.sourceContractCode }}</span>
                   </span>
@@ -768,6 +776,15 @@ function progressPercent(o: Api.Order) {
 
 .production-orders-table :deep(.order-row--pending > td) {
   background: hsl(var(--warning) / 4%);
+}
+
+.production-orders-table :deep(.ant-table-tbody > .order-row--completed > td) {
+  background: color-mix(in srgb, hsl(var(--success)) 12%, hsl(var(--background)));
+}
+
+.production-orders-table :deep(.ant-table-tbody > .order-row--completed:hover > td),
+.production-orders-table :deep(.ant-table-tbody > .order-row--completed > .ant-table-cell-row-hover) {
+  background: color-mix(in srgb, hsl(var(--success)) 18%, hsl(var(--background)));
 }
 
 @media (max-width: 768px) {

@@ -5,7 +5,7 @@ import type {
   ProductCategoryView,
 } from '#/api/fdmplatform/products';
 
-import { factoryHeaders } from '#/api/fdmgongchang/factory';
+import { FACTORY_HEADER, factoryHeaders } from '#/api/fdmgongchang/factory';
 import { requestClient } from '#/api/request';
 
 export namespace FdmgongchangScheduleApi {
@@ -546,6 +546,18 @@ export function listScheduleTasks(params: {
   );
 }
 
+export function getDispatchWageWarning(params: {
+  length?: FdmgongchangScheduleApi.Decimal | null;
+  process: string;
+  thickness?: FdmgongchangScheduleApi.Decimal | null;
+  width?: FdmgongchangScheduleApi.Decimal | null;
+}) {
+  return requestClient.get<null | string>(
+    '/fdmgongchang/schedule/task/wage-warning',
+    { ...headers(), params },
+  );
+}
+
 /** 改派待领取、已接单的任务（改派即派单）：传 fromWorkerId 只换这个人，不传把人员整个换成 toWorkerIds；返回改了几个。 */
 export function reassignScheduleTasks(data: {
   fromWorkerId?: number;
@@ -653,6 +665,68 @@ export function releaseOrderSplit(
     '/fdmgongchang/schedule/order-split/release',
     data,
     headers(),
+  );
+}
+
+export namespace FdmgongchangRouteSupplementApi {
+  export interface Request {
+    foldingType?: string;
+    itemId: number;
+    pattern?: string;
+    process: string;
+    quantity: number;
+    reason: string;
+    textureBack?: string;
+    textureFront?: string;
+  }
+
+  export interface Preview {
+    adjustedTaskIds: number[];
+    canRelease: boolean;
+    errors: string[];
+    existingRoute: string[];
+    nextProcess?: null | string;
+    outputStage?: null | string;
+    previewKey: string;
+    previousProcess?: null | string;
+    proposedRoute: string[];
+    quantity: FdmgongchangScheduleApi.Decimal;
+    sourceStage?: null | string;
+    tasks?: Array<{
+      process: string;
+      quantity: FdmgongchangScheduleApi.Decimal;
+      side?: null | string;
+      unit?: null | string;
+    }>;
+    warnings?: string[];
+  }
+
+  export interface Result {
+    scheduleId: number;
+    taskId: number;
+    taskIds?: number[];
+  }
+}
+
+export function previewRouteSupplement(
+  factoryId: number,
+  data: FdmgongchangRouteSupplementApi.Request,
+) {
+  return requestClient.post<FdmgongchangRouteSupplementApi.Preview>(
+    '/fdmgongchang/schedule/production-route-supplement-preview',
+    data,
+    { headers: { [FACTORY_HEADER]: String(factoryId) } },
+  );
+}
+
+export function releaseRouteSupplement(
+  factoryId: number,
+  data: FdmgongchangRouteSupplementApi.Request & { previewKey: string },
+) {
+  return requestClient.post<FdmgongchangRouteSupplementApi.Result>(
+    '/fdmgongchang/schedule/production-route-supplement',
+    data,
+    { headers: { [FACTORY_HEADER]: String(factoryId) } },
   );
 }
 

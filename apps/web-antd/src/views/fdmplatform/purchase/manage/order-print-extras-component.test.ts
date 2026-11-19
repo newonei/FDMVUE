@@ -24,17 +24,6 @@ vi.mock('#/api/fdmplatform/procurement', () => ({
   getProcurementOrders: mocks.orders,
   copyProcurementImages: mocks.copyImages,
 }));
-vi.mock('#/api/fdmplatform/products', () => ({
-  getProductAttributeOptions: vi.fn().mockResolvedValue({
-    colors: [
-      { value: 'RED', label: '红色' },
-      { value: 'BLUE', label: '蓝色' },
-    ],
-    textures: [{ value: 'WAVE', label: '波浪纹' }],
-    stages: [],
-    matTypes: [],
-  }),
-}));
 vi.mock('ant-design-vue', () => {
   const Wrap = defineComponent({
     setup: (_, ctx) => () => h('div', ctx.slots.default?.()),
@@ -313,7 +302,7 @@ function thumbs(host: HTMLElement, column = 'card') {
 }
 
 describe('actual purchase print extras editor', () => {
-  it('locks signed SKU colors and textures while keeping weight, supplier images and legacy batch updates editable', async () => {
+  it('hides production fields for signed and legacy SKUs and keeps supplier fields editable', async () => {
     const { host, view, extras } = await mount();
     view.value = {
       ...view.value,
@@ -337,17 +326,13 @@ describe('actual purchase print extras editor', () => {
             id: 'product-2',
             specificationSnapshot: {
               skuCode: 'LEGACY',
-              frontColor: 'RED',
-              weight: '800g',
+              colorMode: 'DUAL',
+              colorCode: 'RED',
             },
           },
         ],
       },
-      details: {
-        ...view.value.details,
-        version: 2,
-        lineExtras: { 'product-1': { frontColor: 'OLD' } },
-      },
+      details: { ...view.value.details, version: 2 },
     };
     await settle();
     for (const field of [
@@ -357,44 +342,26 @@ describe('actual purchase print extras editor', () => {
       'textureFront',
       'textureBack',
     ])
-      expect(
-        host.querySelector<HTMLInputElement>(`input[id="${field}-product-1"]`)!
-          .disabled,
-      ).toBe(true);
-    expect(
-      host.querySelector<HTMLInputElement>('input[id="weight-product-1"]')!
-        .disabled,
-    ).toBe(false);
+      expect(host.querySelector(`[data-key="${field}"]`)).toBeNull();
+    expect(host.textContent).not.toContain('生产属性');
+    expect(extras.value!.payload().lineExtras).toEqual({
+      'product-1': { weight: '800g' },
+    });
     expect(
       host.querySelector<HTMLButtonElement>(
         '[data-row="product-1"] [data-key="colorImage"] button',
       )!.disabled,
     ).toBe(false);
-    expect(host.textContent).toContain('请回到合同明细修改配置');
-    expect(extras.value!.payload().lineExtras['product-1']!.frontColor).toBe(
-      'RED',
-    );
-    host.querySelector<HTMLInputElement>('.batch-toolbar input')!.click();
-    await settle();
-    await click(host, '批量设置生产属性');
-    await fill(host, 'input[aria-label="批量正面颜色"]', 'BLUE');
-    await fill(host, 'input[aria-label="批量正面纹路"]', 'WAVE');
-    await fill(host, 'input[aria-label="批量产品克重"]', '1000g');
-    await click(host, '应用到所选明细');
-    expect(extras.value!.payload().lineExtras['product-1']).toMatchObject({
-      frontColor: 'RED',
-      textureFront: 'NONE',
-      weight: '1000g',
+    await fill(host, '#model-product-1', '打样后确认');
+    expect(extras.value!.payload().lineExtras['product-1']).toEqual({
+      model: '打样后确认',
+      weight: '800g',
     });
-    expect(extras.value!.payload().lineExtras['product-2']).toMatchObject({
-      frontColor: 'BLUE',
-      textureFront: 'WAVE',
-      weight: '1000g',
-    });
-    expect(mocks.success).toHaveBeenLastCalledWith(
-      expect.stringContaining('1 条正式 SKU 的 2 项颜色或纹路要求已跳过'),
-    );
+    expect(
+      buttons(host, '保存附加资料').every((button) => !button.disabled),
+    ).toBe(true);
   });
+
   it('places order remarks after the four groups and saves edits and clearing through the existing payload', async () => {
     const { host, view, extras, saved, dirty } = await mount();
     const groups = [...host.querySelectorAll('.extras-collapse > section')];
@@ -536,8 +503,16 @@ describe('actual purchase print extras editor', () => {
     ).toBe(true);
   });
 
-  it('loads each product snapshot, edits structured requirements and keeps single-color sides in sync', async () => {
+  it('preserves saved legacy requirements when editing other supplemental fields', async () => {
     const { host, view, extras } = await mount();
+    const previous = {
+      colorMode: 'DUAL' as const,
+      frontColor: 'RED',
+      backColor: 'BLUE',
+      textureFront: '',
+      textureBack: 'WAVE',
+      weight: '',
+    };
     view.value = {
       ...view.value,
       order: {
@@ -548,10 +523,8 @@ describe('actual purchase print extras editor', () => {
             quantity: 10,
             specificationSnapshot: {
               skuCode: 'SKU-1',
-              colorMode: 'DUAL',
-              frontColor: 'RED',
-              backColor: 'BLUE',
-              textureFront: 'WAVE',
+              colorMode: 'SINGLE',
+              frontColor: 'GREEN',
               weight: '800g',
             },
           },
@@ -560,43 +533,20 @@ describe('actual purchase print extras editor', () => {
       details: {
         ...view.value.details,
         version: 2,
-        lineExtras: { 'product-1': { textureFront: '' } },
+        lineExtras: { 'product-1': previous },
       },
     };
     await settle();
     expect(extras.value!.isDirty()).toBe(false);
-    expect(extras.value!.payload().lineExtras['product-1']).toMatchObject({
-      colorMode: 'DUAL',
-      frontColor: 'RED',
-      backColor: 'BLUE',
-      textureFront: '',
-      weight: '800g',
+    expect(extras.value!.payload().lineExtras['product-1']).toEqual(previous);
+    await fill(host, '#color-product-1', '客户蓝');
+    expect(extras.value!.payload().lineExtras['product-1']).toEqual({
+      ...previous,
+      customerColor: '客户蓝',
     });
-    await fill(host, 'input[id="colorMode-product-1"]', 'SINGLE');
-    expect(extras.value!.payload().lineExtras['product-1']!.backColor).toBe(
-      'RED',
-    );
-    await fill(host, 'input[id="frontColor-product-1"]', 'BLUE');
-    expect(extras.value!.payload().lineExtras['product-1']!.backColor).toBe(
-      'BLUE',
-    );
-    expect(
-      host.querySelector<HTMLInputElement>('input[id="backColor-product-1"]')!
-        .disabled,
-    ).toBe(true);
-    await fill(host, 'input[id="weight-product-1"]', '');
-    expect(extras.value!.payload().lineExtras['product-1']!.weight).toBe('');
-    await fill(host, 'input[id="colorMode-product-1"]', 'DUAL');
-    expect(
-      buttons(host, '保存附加资料').every((button) => button.disabled),
-    ).toBe(true);
-    await fill(host, 'input[id="backColor-product-1"]', 'RED');
-    expect(
-      buttons(host, '保存附加资料').every((button) => !button.disabled),
-    ).toBe(true);
   });
 
-  it('batch applies only chosen fields to selected product lines and excludes fee rows', async () => {
+  it('batch edits weight for selected product lines and excludes fee rows', async () => {
     const { host, view, extras } = await mount();
     view.value = {
       ...view.value,
@@ -632,32 +582,36 @@ describe('actual purchase print extras editor', () => {
       .querySelector<HTMLInputElement>('input[aria-label="选择产品 SKU-1"]')!
       .click();
     await settle();
-    await click(host, '批量设置生产属性');
+    await click(host, '批量设置产品克重');
     await fill(host, 'input[aria-label="批量产品克重"]', '1000g±50g');
-    await fill(host, 'input[aria-label="批量正面纹路"]', 'WAVE');
     await click(host, '应用到所选明细');
     expect(extras.value!.payload().lineExtras).toEqual({
-      'product-1': {
-        frontColor: 'RED',
-        weight: '1000g±50g',
-        textureFront: 'WAVE',
-      },
-      'product-2': { frontColor: 'BLUE', weight: '900g' },
+      'product-1': { weight: '1000g±50g' },
+      'product-2': { weight: '900g' },
     });
     expect(extras.value!.payload().additionalLines[0]).not.toHaveProperty(
       'weight',
     );
+
     host.querySelector<HTMLInputElement>('.batch-toolbar input')!.click();
     await settle();
-    await click(host, '批量设置生产属性');
-    await fill(host, 'input[aria-label="批量正面纹路"]', '');
+    await click(host, '批量设置产品克重');
+    await click(host, '清空所选克重');
+    expect(extras.value!.payload().lineExtras).toEqual({
+      'product-1': { weight: '' },
+      'product-2': { weight: '' },
+    });
+
+    await fill(host, '#weight-product-2', '900g');
+    await click(host, '批量设置产品克重');
+    host.querySelector<HTMLInputElement>('.batch-only-empty')!.click();
+    await settle();
+    await fill(host, 'input[aria-label="批量产品克重"]', '1000g');
     await click(host, '应用到所选明细');
-    expect(extras.value!.payload().lineExtras['product-1']!.textureFront).toBe(
-      '',
-    );
-    expect(extras.value!.payload().lineExtras['product-2']!.textureFront).toBe(
-      '',
-    );
+    expect(extras.value!.payload().lineExtras).toEqual({
+      'product-1': { weight: '1000g' },
+      'product-2': { weight: '900g' },
+    });
   });
 
   it('drags color cards in both directions and saves/reloads their new order', async () => {

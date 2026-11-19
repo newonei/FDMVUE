@@ -3,12 +3,13 @@ import type { OrderLine } from './quick-order';
 
 import type { BusinessRecord, Contract } from '#/api/fdmplatform';
 
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 
 import {
   Alert,
   Button,
   Checkbox,
+  Input,
   InputNumber,
   message,
   Modal,
@@ -25,6 +26,7 @@ import {
 
 import { errorText } from '../../data';
 import ProductStructureDetails from '../../products/components/ProductStructureDetails.vue';
+import { orderDateError } from '../manage/model';
 import { localDate } from './comparison';
 import {
   cheaperQuote,
@@ -53,6 +55,7 @@ const quantity = ref<string>();
 const picked = ref<string[]>([]);
 const rationale = ref('');
 const idempotencyKey = ref('');
+const dates = reactive({ purchaseDate: '', deliveryDate: '' });
 let sequence = 0;
 
 const plan = computed(() =>
@@ -99,6 +102,7 @@ const quantityError = computed(() => {
     return `最多 ${primary.value.context.plannable} ${primary.value.context.unit}`;
   return '';
 });
+const dateError = computed(() => orderDateError(dates));
 const late = computed(() => {
   const line = primary.value;
   if (
@@ -113,6 +117,7 @@ const canSubmit = computed(
   () =>
     !!primary.value &&
     !quantityError.value &&
+    !dateError.value &&
     !saving.value &&
     (cheaper.value.length === 0 || rationale.value.trim().length > 0) &&
     !!contract.value?.allowedActions?.includes('ORDER_FROM_QUOTE'),
@@ -159,6 +164,8 @@ async function submit() {
           : { quoteId: line.quote.id },
       ),
       rationale: rationale.value.trim() || undefined,
+      purchaseDate: dates.purchaseDate,
+      deliveryDate: dates.deliveryDate || null,
     };
     const updated = await contractAction(
       current.id,
@@ -191,6 +198,10 @@ watch(
     rationale.value = '';
     pageError.value = '';
     if (!props.open) return;
+    Object.assign(dates, {
+      purchaseDate: localDate(),
+      deliveryDate: '',
+    });
     idempotencyKey.value = newIdempotencyKey();
     void load();
   },
@@ -258,6 +269,26 @@ watch(
                 需求交期 {{ primary.context.requiredDate }}</span>
             </dd>
           </dl>
+          <div class="order-dates">
+            <label>
+              <span>采购日期</span>
+              <Input
+                v-model:value="dates.purchaseDate"
+                aria-required="true"
+                type="date"
+                :disabled="saving"
+              />
+            </label>
+            <label>
+              <span>交付日期（选填）</span>
+              <Input
+                v-model:value="dates.deliveryDate"
+                type="date"
+                :disabled="saving"
+              />
+            </label>
+          </div>
+          <p v-if="dateError" class="field-error">{{ dateError }}</p>
 
           <section v-if="plan.companions.length" class="companions">
             <h4>同一申请里这家供应商还报了价，可以一起下单</h4>
@@ -357,6 +388,17 @@ watch(
   align-items: center;
   min-width: 0;
   margin: 0;
+}
+
+.order-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 10px 12px;
+}
+
+.order-dates label {
+  display: grid;
+  gap: 4px;
 }
 
 .muted {

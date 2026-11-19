@@ -9,10 +9,10 @@ import { describe, expect, it } from 'vitest';
 import {
   activeContacts,
   compatibleClauses,
-  deliveryDateError,
   detailsChecklist,
   onlyChoice,
   orderCopySource,
+  orderDateError,
   orderDetailsPayload,
   orderRowDue,
   orderRowFlags,
@@ -42,29 +42,16 @@ const clause = (id: string, groupCode: string): ProcurementSetting => ({
   groupCode,
 });
 describe('采购下单资料', () => {
-  it('确认交期须覆盖每条有效产品，不能把一行日期当成整单日期', () => {
-    const view = {
-      order: {
-        id: 'purchase-1',
-        lines: [
-          { id: 'a', quantity: 5 },
-          { id: 'b', quantity: 4 },
-          { id: 'cancelled', quantity: 3, cancelledQuantity: 3 },
-        ],
-      } as BusinessRecord,
-      details: { lineDates: { a: '2026-11-30', unrelated: '2026-11-01' } },
-      lineDeliveryDates: { b: '2026-11-20' },
-    };
-    expect(deliveryDateError(view)).toBe('');
-    expect(deliveryDateError({ ...view, lineDeliveryDates: {} })).toContain(
-      '第2行',
-    );
+  it('采购日期必填，交付日期选填且必须是真实日期', () => {
+    const purchaseDate = '2026-11-20';
+    expect(orderDateError({})).toContain('采购日期');
+    expect(orderDateError({ purchaseDate })).toBe('');
     expect(
-      deliveryDateError({ ...view, lineDeliveryDates: {} }, '2026-12-01'),
-    ).toBe('');
-    expect(
-      deliveryDateError({ ...view, lineDeliveryDates: {} }, '2026-02-30'),
-    ).toContain('第2行');
+      orderDateError({
+        purchaseDate,
+        deliveryDate: '2026-02-30',
+      }),
+    ).toContain('交付日期');
   });
   it('编号与供应商分别保留，兼容独立原生行的顶层名称', () => {
     expect(
@@ -183,9 +170,16 @@ describe('采购下单资料', () => {
       }),
     ).toEqual({ contactId: 'person', clauseIds: ['term'] });
   });
-  it('清空交期发送null而不是无效日期字符串', () => {
-    expect(orderDetailsPayload({ deliveryDate: '' })).toEqual({
+  it('提交采购日期和空交付日期，自动生成的单据日期不随请求发送', () => {
+    expect(
+      orderDetailsPayload({
+        deliveryDate: '',
+        documentDate: '2026-11-18',
+        purchaseDate: '2026-11-17',
+      }),
+    ).toEqual({
       deliveryDate: null,
+      purchaseDate: '2026-11-17',
     });
   });
   it('多行十进制合计不引入浮点残差', () => {

@@ -4,63 +4,14 @@ import { orderDetailsPayload } from './model';
 import {
   accessoryRows,
   additionalLineAmount,
-  applyProductionExtras,
   boxCount,
   copyPrintExtras,
   printExtrasFrom,
   printExtrasImageIds,
   printExtrasPayload,
-  productionExtrasFrom,
-  productionIdentityLocked,
 } from './print-extras';
 
 describe('采购单附加资料', () => {
-  it('正式 SKU 生产身份来自合同快照，采购只可补克重且批量明确报告跳过数量', () => {
-    const snapshot = {
-      finishedSignature: 'SKU-v1',
-      colorMode: 'DUAL',
-      frontColor: 'RED',
-      backColor: 'BLUE',
-      textureFront: 'NONE',
-      textureBack: 'WAVE',
-      weight: '800g',
-    };
-    expect(productionIdentityLocked(snapshot)).toBe(true);
-    expect(productionIdentityLocked({ finishedSignature: ' ' })).toBe(false);
-    const signed = productionExtrasFrom(
-      { frontColor: 'OLD', textureFront: 'OLD', weight: '900g' },
-      snapshot,
-    );
-    expect(signed).toMatchObject({
-      frontColor: 'RED',
-      textureFront: 'NONE',
-      weight: '900g',
-    });
-    const rows = {
-      signed,
-      legacy: { frontColor: 'RED', textureFront: 'NONE', weight: '800g' },
-    };
-    expect(
-      applyProductionExtras(
-        rows,
-        ['signed', 'legacy'],
-        { frontColor: 'BLUE', textureFront: 'WAVE', weight: '1000g' },
-        ['frontColor', 'textureFront', 'weight'],
-        false,
-        ['signed'],
-      ),
-    ).toEqual({ updatedRows: 2, protectedRows: 1, skippedFields: 2 });
-    expect(rows.signed).toMatchObject({
-      frontColor: 'RED',
-      textureFront: 'NONE',
-      weight: '1000g',
-    });
-    expect(rows.legacy).toMatchObject({
-      frontColor: 'BLUE',
-      textureFront: 'WAVE',
-      weight: '1000g',
-    });
-  });
   it('订单备注兼容旧单、独立于内部备注，并在提交和历史复制时保留清空意图', () => {
     const details = {
       clauseIds: [],
@@ -153,98 +104,6 @@ describe('采购单附加资料', () => {
     expect(printExtrasPayload(value).accessories).toEqual([
       { name: '吊牌', checked: true, remark: '每条一个' },
     ]);
-  });
-
-  it('每行优先沿用已保存生产要求，缺项从本单快照回填，清空不回落旧值', () => {
-    const snapshot = {
-      colorMode: 'SINGLE',
-      colorCode: 'BLUE',
-      textureFront: 'WAVE',
-      weight: '800g',
-      model: '正反面都是红色',
-    };
-    expect(productionExtrasFrom({}, snapshot)).toEqual({
-      colorMode: 'SINGLE',
-      frontColor: 'BLUE',
-      backColor: 'BLUE',
-      textureFront: 'WAVE',
-      weight: '800g',
-    });
-    const value = productionExtrasFrom(
-      { textureFront: '', weight: '' },
-      snapshot,
-    );
-    expect(value).toMatchObject({
-      textureFront: '',
-      weight: '',
-      frontColor: 'BLUE',
-    });
-    const extras = printExtrasFrom({
-      clauseIds: [],
-      status: 'DRAFT',
-      version: 1,
-      lineExtras: { row: value },
-    });
-    expect(printExtrasPayload(extras).lineExtras.row).toEqual(value);
-    expect(productionExtrasFrom({}, { model: '正面红反面蓝' })).toEqual({});
-    expect(
-      productionExtrasFrom({}, { colorMode: 'UNKNOWN', colorCode: 'BLUE' }),
-    ).toEqual({ colorMode: 'UNKNOWN', frontColor: 'BLUE', backColor: 'BLUE' });
-    expect(
-      productionExtrasFrom({ frontColor: '' }, { colorCode: 'BLUE' }),
-    ).toEqual({
-      frontColor: '',
-      backColor: 'BLUE',
-    });
-  });
-
-  it('批量只修改选中的行和字段，可仅填空值，单色正反面始终同色', () => {
-    const rows = {
-      a: {
-        colorMode: 'DUAL' as const,
-        frontColor: 'RED',
-        backColor: 'BLUE',
-        textureFront: 'WAVE',
-        weight: '',
-      },
-      b: { colorMode: 'UNKNOWN' as const, frontColor: '', model: '原型号' },
-      c: { weight: '900g' },
-    };
-    applyProductionExtras(
-      rows,
-      ['a', 'b'],
-      { colorMode: 'SINGLE', frontColor: 'GREEN', weight: '800g' },
-      ['colorMode', 'frontColor', 'weight'],
-      true,
-    );
-    expect(rows.a).toMatchObject({
-      colorMode: 'DUAL',
-      frontColor: 'RED',
-      backColor: 'BLUE',
-      textureFront: 'WAVE',
-      weight: '800g',
-    });
-    expect(rows.b).toEqual({
-      colorMode: 'SINGLE',
-      frontColor: 'GREEN',
-      backColor: 'GREEN',
-      weight: '800g',
-      model: '原型号',
-    });
-    expect(rows.c).toEqual({ weight: '900g' });
-    applyProductionExtras(
-      rows,
-      ['a'],
-      { colorMode: 'SINGLE', frontColor: 'GREEN', textureFront: '' },
-      ['colorMode', 'frontColor', 'textureFront'],
-    );
-    expect(rows.a).toMatchObject({
-      colorMode: 'SINGLE',
-      frontColor: 'GREEN',
-      backColor: 'GREEN',
-      textureFront: '',
-      weight: '800g',
-    });
   });
 
   it('额外费用保留零单价并使用十进制计算金额，提交时不信任旧金额', () => {
@@ -347,7 +206,7 @@ describe('采购单附加资料', () => {
     );
   });
 
-  it('从历史单复制：明细按产品对上，图片换成本单的新编号，对不上的行保留', () => {
+  it('从历史单复制补充资料和图片时保留本单生产要求', () => {
     const source = printExtrasFrom({
       clauseIds: [],
       status: 'CONFIRMED',
@@ -358,8 +217,14 @@ describe('采购单附加资料', () => {
           packQty: 10,
           imageId: 'old-a',
           colorImageId: 'old-color',
+          colorMode: 'DUAL',
+          frontColor: 'RED',
+          backColor: 'BLUE',
+          textureFront: 'WAVE',
+          textureBack: 'WAVE',
         },
-        s2: { weight: '1300g' },
+        s2: { weight: '1300g', frontColor: 'RED' },
+        s3: { textureFront: 'WAVE' },
       },
       sharedColumns: [{ title: '纹路', imageIds: ['old-b', 'gone'] }],
       accessories: [{ name: 'OPP透明膜', checked: true }],
@@ -375,7 +240,16 @@ describe('采购单附加资料', () => {
       clauseIds: [],
       status: 'DRAFT',
       version: 1,
-      lineExtras: { t9: { weight: '保留' } },
+      lineExtras: {
+        t1: {
+          colorMode: 'SINGLE',
+          frontColor: 'GREEN',
+          backColor: 'GREEN',
+          textureFront: '',
+        },
+        t3: { model: '保留原型号' },
+        t9: { weight: '保留' },
+      },
     });
     const result = copyPrintExtras(
       current,
@@ -383,10 +257,12 @@ describe('采购单附加资料', () => {
       [
         { id: 's1', skuId: 'sku-1' },
         { id: 's2', specificationSnapshot: { skuCode: 'DZ2' } },
+        { id: 's3', skuId: 'sku-3' },
       ],
       [
         { id: 't1', skuId: 'sku-1' },
         { id: 't2', specificationSnapshot: { skuCode: 'DZ2' } },
+        { id: 't3', skuId: 'sku-3' },
         { id: 't9', skuId: 'other' },
       ],
       { 'old-a': 'new-a', 'old-b': 'new-b', 'old-color': 'new-color' },
@@ -399,14 +275,19 @@ describe('采购单附加资料', () => {
         packQty: 10,
         imageId: 'new-a',
         colorImageId: 'new-color',
+        colorMode: 'SINGLE',
+        frontColor: 'GREEN',
+        backColor: 'GREEN',
+        textureFront: '',
       },
       t2: { weight: '1300g' },
+      t3: { model: '保留原型号' },
       t9: { weight: '保留' },
     });
     expect(result.value.sharedColumns[0]!.imageIds).toEqual(['new-b']);
     expect(result.value.packagingSteps[0]!.imageIds).toEqual(['new-b']);
-    expect(printExtrasPayload(result.value).lineExtras.t1!.colorImageId).toBe(
-      'new-color',
+    expect(printExtrasPayload(result.value).lineExtras.t1).toEqual(
+      result.value.lineExtras.t1,
     );
     const withoutImages = copyPrintExtras(
       current,

@@ -18,6 +18,7 @@ import {
   Form,
   Input,
   message,
+  Modal,
   Select,
   Space,
 } from 'ant-design-vue';
@@ -75,6 +76,22 @@ const sourceDetail = ref('');
 /** 内销客户经营的产品种类，选项取合同产品类别 */
 const productCategories = ref<string[]>([]);
 const categoryOptions = ref<{ label: string; value: string }[]>([]);
+const selectOpen = ref(false);
+const discardOpen = ref(false);
+let initialDraft = '';
+function draftSnapshot() {
+  return JSON.stringify(
+    [
+      form,
+      invoice,
+      productCategories.value,
+      sourceDetail.value,
+      remark.value,
+      active.value,
+    ],
+    (_, value) => value ?? '',
+  );
+}
 /** 内销客户的省、市从系统地区树选择；地区树读取失败时退回手填 */
 const areas = ref<AreaNode[]>([]);
 const provinceOptions = computed(() => areaOptions(areas.value, form.province));
@@ -166,13 +183,17 @@ async function loadOptions() {
   }
 }
 function close() {
-  if (!saving.value && !sourcesOpen.value) emit('close');
+  if (saving.value || sourcesOpen.value || discardOpen.value) return;
+  if (draftSnapshot() === initialDraft) emit('close');
+  else discardOpen.value = true;
 }
 watch(
   () => props.open,
   (open) => {
     ++optionsSequence;
     sourcesOpen.value = false;
+    selectOpen.value = false;
+    discardOpen.value = false;
     if (!open) return;
     Object.assign(form, customerForm(props.customer));
     Object.assign(invoice, invoiceForm(props.customer));
@@ -186,6 +207,7 @@ watch(
     }
     active.value = props.customer?.active ?? true;
     remark.value = props.customer?.remark ?? '';
+    initialDraft = draftSnapshot();
     panelError.value = '';
     requestKey.value = newIdempotencyKey();
     void loadOptions();
@@ -263,7 +285,7 @@ async function save() {
     width="min(820px, 96vw)"
     :mask-closable="false"
     :closable="!saving && !sourcesOpen"
-    :keyboard="!saving && !sourcesOpen"
+    :keyboard="!saving && !sourcesOpen && !selectOpen && !discardOpen"
     @close="close"
   >
     <div class="customer-editor" :inert="sourcesOpen">
@@ -305,6 +327,7 @@ async function save() {
               allow-clear
               :disabled="saving"
               placeholder="选择客户来源"
+              @dropdown-visible-change="selectOpen = $event"
             />
             <Input
               v-if="form.customerSource === '其他'"
@@ -337,6 +360,7 @@ async function save() {
                   : '选择所在行业（可选）'
               "
               :aria-label="title"
+              @dropdown-visible-change="selectOpen = $event"
             />
             <Button
               type="link"
@@ -358,6 +382,7 @@ async function save() {
               :loading="optionsLoading"
               :disabled="saving || optionsLoading"
               placeholder="搜索中文、英文或国家代码"
+              @dropdown-visible-change="selectOpen = $event"
             />
             <p
               v-if="form.country && !currentCountryKnown && !optionsLoading"
@@ -384,6 +409,7 @@ async function save() {
               :disabled="saving"
               placeholder="输入关键字搜索省份"
               @change="changeProvince"
+              @dropdown-visible-change="selectOpen = $event"
             />
             <Select
               v-else
@@ -396,6 +422,7 @@ async function save() {
               :placeholder="
                 form.province ? '输入关键字搜索城市' : '请先选择省份'
               "
+              @dropdown-visible-change="selectOpen = $event"
             />
           </template>
           <Input
@@ -421,6 +448,7 @@ async function save() {
             option-filter-prop="label"
             :disabled="saving"
             placeholder="选择客户采购的产品种类，可多选"
+            @dropdown-visible-change="selectOpen = $event"
           />
         </Form.Item>
         <Form.Item label="本地备注" class="wide">
@@ -440,6 +468,7 @@ async function save() {
               allow-clear
               :disabled="saving"
               placeholder="选择发票类型"
+              @dropdown-visible-change="selectOpen = $event"
             />
           </Form.Item>
           <Form.Item
@@ -507,6 +536,17 @@ async function save() {
       </Space>
     </template>
   </FdmResizableDrawer>
+  <Modal
+    :open="discardOpen"
+    title="放弃未保存的客户资料？"
+    ok-text="放弃修改"
+    cancel-text="继续填写"
+    :ok-button-props="{ danger: true }"
+    @cancel="discardOpen = false"
+    @ok="emit('close')"
+  >
+    关闭后，本次填写的客户资料将丢失。
+  </Modal>
   <CustomerSourceOptions
     :open="sourcesOpen"
     :kind="optionKind"

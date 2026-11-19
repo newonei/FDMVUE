@@ -233,7 +233,7 @@ async function save() {
             show-search
             :filter-option="false"
             :options="orders"
-            placeholder="搜索采购单号、供应商或合同号"
+            placeholder="搜索采购单号、内部单号、合同号或供应商"
             @search="loadOrders"
           />
         </label>

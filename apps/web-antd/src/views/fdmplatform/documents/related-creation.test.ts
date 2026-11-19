@@ -354,6 +354,19 @@ describe('creation from an authoritative related document', () => {
       planId: 'plan',
       planVersion: 2,
     });
+    expect(definition.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'purchaseDate',
+          required: true,
+          default: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/u),
+        }),
+        expect.objectContaining({ key: 'deliveryDate', required: false }),
+      ]),
+    );
+    expect(definition.fields.map((field) => field.key)).not.toContain(
+      'documentDate',
+    );
     contract.purchaseOrders![0]!.lines = [
       { id: 'line', planLineId: 'plan-line', quantity: 50 },
     ];

@@ -36,6 +36,8 @@ import ItemProductionConfigModal from './item-production-config-modal.vue';
 import MaterialPlan from './material-plan.vue';
 import PurchaseSheet from './purchase-sheet.vue';
 import RoutePicker from './route-picker.vue';
+import RouteSupplementModal from './route-supplement-modal.vue';
+import SourcePurchaseLink from './source-purchase-link.vue';
 import SupplyMatch from './supply-match.vue';
 
 /**
@@ -67,9 +69,16 @@ const voidReason = ref('');
 const materialPlan = ref<InstanceType<typeof MaterialPlan>>();
 const configItemId = ref<number>();
 const configOpen = ref(false);
+const supplementItem = ref<Api.Item>();
+const supplementOpen = ref(false);
 function editProductionConfig(item: Api.Item) {
   configItemId.value = item.id;
   configOpen.value = true;
+}
+
+function supplementRoute(item: Api.Item) {
+  supplementItem.value = item;
+  supplementOpen.value = true;
 }
 
 const status = computed(() => (order.value ? ORDER_STATUS[order.value.status] : undefined));
@@ -90,6 +99,8 @@ const incompleteItems = computed(() => activeItems.value.filter((item) => savedP
 const canCancel = computed(() => props.mode === 'mine' && order.value?.status === 'SUBMITTED' && !fromPurchase.value);
 const canHandle = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'SUBMITTED');
 const canProgress = computed(() => props.mode === 'factory' && canHandleOrder.value && order.value?.status === 'ACCEPTED');
+const canSupplementRoute = computed(() => props.mode === 'factory' && order.value?.status === 'ACCEPTED'
+  && hasAccessByCodes(['fdmgongchang:schedule:confirm']));
 /** 工厂看用料逆推：接单前就能看要多少板材和原料，生产中可以换配方、板材规格。 */
 /** 多个产品待定工艺时才显示批量设置。 */
 const canBatchRoute = computed(() => factoryRoute.value && canHandle.value && activeItems.value.length > 1);
@@ -200,7 +211,7 @@ async function onTargetChanged() {
       }
     }
     drafts.value = nextDrafts;
-    order.value = { ...order.value, items: fresh.items };
+    order.value = { ...order.value, items: [...fresh.items] };
     emit('changed');
     await materialPlan.value?.reload();
   } catch {
@@ -220,6 +231,8 @@ watch(open, (value) => {
   ++targetRefreshVersion;
   targetRefreshing.value = false;
   targetRefreshError.value = false;
+  supplementOpen.value = false;
+  supplementItem.value = undefined;
   if (value) load();
   else order.value = undefined;
 });
@@ -380,7 +393,7 @@ function producedQty(item: Api.Item) {
         </p>
         <Descriptions :column="{ xs: 1, sm: 2 }" size="small" bordered>
           <Descriptions.Item v-if="fromPurchase" :span="2" label="来源">
-            采购单 {{ order.sourceOrderCode }}
+            <SourcePurchaseLink :order="order" />
             <template v-if="order.sourceContractCode"> · 合同 {{ order.sourceContractCode }}</template>
             <span v-if="order.customerName" class="text-muted-foreground">（{{ order.customerName }}）</span>
           </Descriptions.Item>
@@ -438,7 +451,14 @@ function producedQty(item: Api.Item) {
             <span class="flex min-w-0 flex-1 flex-col">
               <span>{{ i.productName }}</span>
               <span class="text-xs text-muted-foreground">{{ i.productCode }} · {{ specText(i) }}</span>
-              <Button v-if="canPlan" class="self-start !px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError" @click="editProductionConfig(i)">修改参数与工艺</Button>
+              <span class="flex flex-wrap gap-x-3">
+                <Button v-if="canPlan" class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError" @click="editProductionConfig(i)">修改参数与工艺</Button>
+                <Button
+                  v-if="canSupplementRoute && i.processes?.length && num(i.completedQuantity) < num(i.quantity)"
+                  class="!px-0" type="link" size="small" :disabled="targetRefreshing || targetRefreshError"
+                  @click="supplementRoute(i)"
+                >补工序</Button>
+              </span>
               <span v-if="canHandle && savedProductionConfigProblems(i).length > 0" class="text-xs text-orange-600">{{ savedProductionConfigProblems(i).join('；') }}</span>
               <span v-if="i.printing" class="text-xs text-muted-foreground">{{ i.printing }}</span>
               <span v-if="(i.auxUsages ?? []).length > 0" class="text-xs text-muted-foreground">
@@ -516,7 +536,7 @@ function producedQty(item: Api.Item) {
           </div>
         </section>
 
-        <PurchaseSheet v-if="fromPurchase" :order-id="order.id" />
+        <PurchaseSheet v-if="fromPurchase" :order-id="order.id" :items="order.items" />
 
         <AuxPanel
           v-if="fromPurchase && mode === 'factory'"
@@ -530,7 +550,7 @@ function producedQty(item: Api.Item) {
         <Alert v-if="targetRefreshError" type="warning" show-icon message="参数已保存，订单刷新失败。请重新加载后再接单或保存工艺，以免覆盖新参数。">
           <template #action><Button size="small" :loading="targetRefreshing" @click="onTargetChanged">重新加载已保存参数</Button></template>
         </Alert>
-        <SupplyMatch v-if="canPlan" :editable="canPlan && !targetRefreshing && !targetRefreshError" :items="order.items" :order-id="order.id" @changed="onTargetChanged" />
+        <SupplyMatch v-if="canPlan" :items="order.items" :order-id="order.id" />
         <MaterialPlan v-if="canPlan" ref="materialPlan" :editable="canPlan" :order-id="order.id" />
 
         <p v-if="order.status === 'ACCEPTED' && fromPurchase" class="m-0 text-xs text-muted-foreground">
@@ -646,6 +666,11 @@ function producedQty(item: Api.Item) {
     </template>
   </FdmResizableDrawer>
   <ItemProductionConfigModal v-if="order && configItemId" v-model:open="configOpen" :order-id="order.id" :item-id="configItemId" @saved="onTargetChanged" />
+  <RouteSupplementModal
+    v-if="order && supplementItem"
+    v-model:open="supplementOpen" :factory-id="order.factoryId" :item="supplementItem" :order-no="order.orderNo"
+    @released="onTargetChanged"
+  />
 </template>
 
 <style scoped>

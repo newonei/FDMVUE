@@ -18,7 +18,7 @@ import { num } from '../shared';
  * 采购单生成的单的辅料（只有包装辅料，在包装那道工序领）：
  * - 采购单勾选了哪些辅料，按名称对应到产品中心的辅料（第一次选了以后记住），纸箱按装箱数算每件用量，其余每件 1 个；
  * - 工厂确认、可改后保存成明细的辅料用量，开包装工序单时按用量带出建议领用数；
- * - 齐套：还要领多少、能用的库存（通用 + 这个合同的定制辅料）、送本厂还没收齐的采购；缺辅料时 AI 排单不排包装。
+ * - 齐套按采购要求、已定用量、可用库存及在途采购展示。
  */
 const props = defineProps<{ editable: boolean; items: Api.Item[]; orderId: number; routeOptions?: RouteApi.Options }>();
 const emit = defineEmits<{ changed: [] }>();
@@ -122,14 +122,19 @@ async function save(itemId: number) {
 }
 
 const anySuggestion = computed(() => (aux.value?.items ?? []).some((i) => i.suggestions.length > 0 || i.usages.length > 0));
+function pendingNames(row: Api.OrderAux['items'][number]) {
+  return row.pendingUsageNames ?? row.suggestions.filter((s) => !row.usages.some((usage) => usage.productId === s.productId)).map((s) => s.name);
+}
+const pendingUsage = computed(() => aux.value?.items.some((row) => pendingNames(row).length > 0));
 </script>
 
 <template>
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">辅料</h3>
-      <span class="text-xs text-muted-foreground">包装时用；缺辅料时 AI 排单不排包装，前面的工序照排</span>
-      <Tag v-if="aux && anySuggestion" class="m-0" :color="aux.ready ? 'green' : 'orange'">{{ aux.ready ? '齐了' : '还缺' }}</Tag>
+      <span class="text-xs text-muted-foreground">包装前核对辅料用量和库存。包装随订单执行，不单独生成工序任务。</span>
+      <Tag v-if="pendingUsage" class="m-0" color="orange">用量待确认</Tag>
+      <Tag v-else-if="aux && anySuggestion" class="m-0" :color="aux.ready ? 'green' : 'orange'">{{ aux.ready ? '齐了' : '还缺' }}</Tag>
     </div>
     <Spin :spinning="loading">
       <div v-if="aux" class="flex flex-col gap-3 text-sm">
@@ -179,8 +184,8 @@ const anySuggestion = computed(() => (aux.value?.items ?? []).some((i) => i.sugg
               </tr>
             </tbody>
           </table>
-          <p v-else-if="editing !== row.itemId && row.suggestions.length > 0" class="m-0 text-xs text-warning">
-            采购单要 {{ row.suggestions.map((s) => s.name).join('、') }}，还没定用量
+          <p v-if="editing !== row.itemId && pendingNames(row).length" class="m-0 text-xs text-warning">
+            {{ pendingNames(row).join('、') }}的用量待确认
           </p>
 
           <div v-if="editing === row.itemId" class="flex flex-col gap-2">

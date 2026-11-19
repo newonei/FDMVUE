@@ -48,6 +48,9 @@ const emit = defineEmits<{
 const automatic = new WeakMap<FormValues, FormValues>();
 const values = ref<FormValues>({});
 const lines = ref<FormValues[]>([]);
+const excessHint = computed(
+  () => props.definition?.requestExcessHint?.(lines.value) ?? '',
+);
 const rowKeys = new WeakMap<FormValues, string>();
 let rowSequence = 0;
 const lineErrors = ref<Record<string, Record<string, string>>>({});
@@ -210,6 +213,13 @@ function uploadedEvidence(item: Field) {
 function fieldError(item: Field, data: FormValues): string {
   if (!fieldVisible(item, { ...values.value, ...data })) return '';
   const value = data[item.key];
+  if (
+    item.key === 'remark' &&
+    data === values.value &&
+    excessHint.value &&
+    !String(value ?? '').trim()
+  )
+    return '请填写超量原因，如留样、备品或生产损耗。';
   if (
     item.required &&
     !uploadedEvidence(item) &&
@@ -424,7 +434,10 @@ function setValue(target: FormValues, key: string, value: unknown) {
           )"
           :key="item.key"
           :label="item.label"
-          :required="item.required && !uploadedEvidence(item)"
+          :required="
+            (item.required && !uploadedEvidence(item)) ||
+            (item.key === 'remark' && Boolean(excessHint))
+          "
           :class="{
             wide: item.type === 'textarea',
             'action-field-error': fieldErrors[item.key],
@@ -434,7 +447,9 @@ function setValue(target: FormValues, key: string, value: unknown) {
           :extra="
             uploadedEvidence(item)
               ? '已选择待上传附件，保存时自动关联；也可保留现有凭据选择。'
-              : item.hint
+              : item.key === 'remark' && excessHint
+                ? excessHint
+                : item.hint
           "
         >
           <RemoteMasterSelect

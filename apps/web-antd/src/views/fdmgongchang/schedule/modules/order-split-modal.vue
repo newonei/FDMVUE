@@ -72,6 +72,8 @@ const canRelease = computed(() => !configOpen.value && !previewing.value && !!pr
   && preview.value.errors.length === 0 && !preview.value.rows.some((row) => row.status === 'BLOCKED'));
 const productSpecs = computed(() => [...new Map((preview.value?.rows ?? [])
   .map((row) => [`${row.orderId}-${row.itemId}`, row])).values()]);
+const includesPackaging = computed(() => loadedOrders.value.some((order) =>
+  previewIds.value.includes(order.id) && order.items.some((item) => item.processes?.includes('PACK'))));
 
 function editItem(orderId: number, itemId: number) {
   if (!canEdit.value || submitting.value || previewing.value) return;
@@ -312,6 +314,7 @@ async function release() {
           <div class="mt-2"><OrderSplitSpecsTable :rows="productSpecs" :editable="canEdit && !submitting" @edit="editItem($event.orderId, $event.itemId)" /></div>
           <p class="m-0 mt-1 text-muted-foreground">点击「修改参数与工艺」调整订单明细。保存后自动重新预览，核对无误后再下发。</p>
         </details>
+        <p v-if="includesPackaging" class="m-0 text-xs text-muted-foreground">所选路线含包装。包装要求随订单传递，表中仅列下发到车间的生产工序。最后一道生产工序完工后回写订单。</p>
         <details class="rounded border border-border px-3 py-2 text-xs">
           <summary class="cursor-pointer">单双色拆分规则</summary>
           <table class="mt-2 w-full border-collapse text-left">

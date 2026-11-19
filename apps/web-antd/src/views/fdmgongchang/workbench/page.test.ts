@@ -416,6 +416,10 @@ describe('workbench page', () => {
     const task = { ...my.tasks[0]!, process: 'LAMINATE', quantity: 540, output: { stage: 'LAMINATED', attrs: { frontColor: 'PU', backColor: 'RD' } } };
     mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
     await mount('LAMINATE'); await expandOrder('HT-001'); await selectTask(31);
+    const headers = [...document.querySelectorAll('.workshop-task-table thead th')].map((element) => element.textContent);
+    const outputIndex = headers.findIndex((title) => title?.startsWith('报工产出'));
+    expect(outputIndex).toBe(headers.indexOf('本次片材残次') + 1);
+    expect(headers[outputIndex + 1]).toBe('计划 / 累计已报');
     expect(document.querySelector<HTMLInputElement>('#good-HT-001-31-FRONT')!.value).toBe('540');
     expect(document.querySelector<HTMLInputElement>('#good-HT-001-31-BACK')!.value).toBe('540');
     fill('defect-HT-001-31-FRONT', 40); await flush();
@@ -501,9 +505,20 @@ describe('workbench page', () => {
     mocks.batchReport.mockRejectedValueOnce({ msg: '连接中断，请重试' });
     await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
     fill('good-HT-001-31', 12); await flush(); clickButton('批量报工'); await flush();
+    expect(document.body.textContent).toContain('报工结果待核实');
+    expect(document.body.textContent).toContain('沿用同一次报工标识');
     expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(12);
     clickButton('批量报工'); await flush();
     expect(mocks.batchReport.mock.calls[1]![0]).toEqual(mocks.batchReport.mock.calls[0]![0]);
+  });
+
+  it('explains a confirmed business rejection and preserves the batch for correction', async () => {
+    mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [my.tasks[0]!] });
+    mocks.batchReport.mockRejectedValueOnce({ code: 1_215_024_008, msg: '计价项目未设置单价' });
+    await mount('SLICE'); await expandOrder('HT-001'); await selectTask(31);
+    fill('good-HT-001-31', 12); await flush(); clickButton('批量报工'); await flush();
+    expect(document.body.textContent).toContain('本次提交未新增报工。计价项目未设置单价');
+    expect(Number(document.querySelector<HTMLInputElement>('#good-HT-001-31')!.value)).toBe(12);
   });
 
   it('shows finished dimensions separately from the task output and scopes order details', async () => {
@@ -640,11 +655,12 @@ describe('workbench page', () => {
 
   it('issues material without an optional voucher and reports the planned intermediate output without issuing twice', async () => {
     await mount();
-    expect(document.body.textContent).toContain('计划产出');
-    expect(document.body.textContent).toContain('预计领料');
-    expect(document.body.textContent).toContain('预计领料不扣库存');
-    expect(document.body.textContent).toContain('1900×1300×48 mm');
-    expect(document.body.textContent).toContain('关联订单产品：紫色瑜伽垫');
+    const taskList = document.querySelector('[aria-label="任务列表"]')!;
+    expect(taskList.querySelector('li')?.textContent).toContain('计划 400 片');
+    expect(taskList.textContent).not.toContain('预计领料');
+    expect(taskList.textContent).not.toContain('1900×1300×48 mm');
+    expect(taskList.textContent).not.toContain('关联订单产品');
+    expect(mocks.pickList).not.toHaveBeenCalled();
     clickButton('领料开工');
     await flush();
     expect(document.body.textContent).toContain('选择实际领料批次');
@@ -671,17 +687,20 @@ describe('workbench page', () => {
     await flush();
     clickButton('正在做');
     await flush();
-    expect(document.body.textContent).toContain('在制工序单 · 已领料');
-    clickButton('报本工序产出');
-    await flush();
+    const row = document.querySelector('[data-order-id="5"]')!;
+    expect(row.querySelectorAll('input')).toHaveLength(2);
+    expect(row.querySelector('button[type="submit"]')?.textContent).toContain('提交');
+    expect(row.querySelector('[data-output-spec]')?.textContent).toContain('紫色');
+    expect(row.querySelector('[data-output-spec]')?.classList.contains('factory-report-spec')).toBe(true);
     expect(mocks.order).toHaveBeenCalledWith(5);
-    expect(document.body.textContent).toContain('报本工序实际产出');
+    row.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
+    await flush();
     expect(document.querySelector('[id^="wb-"][id$="-width"]')).toBeNull();
     expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     expect(document.body.textContent).toContain('1900×1300×48 mm');
     expect(document.body.textContent).toContain('厚度填写单层厚度');
     expect(document.body.textContent).toContain('每张开 1 片 × 52 张 = 52 片');
-    const goodInput = document.querySelector<HTMLInputElement>('[id^="good-"]')!;
+    const goodInput = document.querySelector<HTMLInputElement>('[id^="total-"]')!;
     expect(Number(goodInput.value)).toBe(400);
     fill(goodInput.id, 380);
     fill(document.querySelector('[id^="bad-"]')!.id, 6);
@@ -952,21 +971,21 @@ describe('workbench page', () => {
     await flush();
     clickButton('正在做');
     await flush();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
     expect(mocks.order).toHaveBeenCalledWith(7);
     expect(document.body.textContent).toContain('蓝色');
     expect(document.body.textContent).toContain('绿色');
     expect(document.body.textContent).toContain('1900×1320×45 mm');
     expect(document.body.textContent).toContain('2000×1400×30 mm');
-    expect(document.body.textContent).toContain('开片不会改变颜色，颜色固定沿用对应领料，不可修改。');
+    expect(document.body.textContent).toContain('颜色沿用板材，厚度填写单层厚度。');
     expect(document.querySelector('[id^="wb-"][id$="-color"]')).toBeNull();
     expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     for (const thickness of document.querySelectorAll<HTMLInputElement>('[id^="wb-"][id$="-thickness"]')) fill(thickness.id, 3);
     await flush();
     expect(document.body.textContent).toContain('每张开 15 片 × 3 张 = 45 片');
     expect(document.body.textContent).toContain('每张开 10 片 × 5 张 = 50 片');
-    const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="good-"]')];
+    const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="total-"]')];
     expect(goods).toHaveLength(2);
     expect(goods.map((input) => Number(input.value))).toEqual([0, 0]);
     fill(goods[0]!.id, 2);
@@ -1023,10 +1042,10 @@ describe('workbench page', () => {
     mocks.my.mockResolvedValue({ ...my, tasks: [], inProgress: [my.inProgress[0]] });
     mocks.reportOrder.mockResolvedValue(true);
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
     fill(document.querySelector('[id^="wb-"][id$="-thickness"]')!.id, 3);
-    fill(document.querySelector('[id^="good-"]')!.id, 40);
+    fill(document.querySelector('[id^="total-"]')!.id, 40);
     await flush();
     clickButton('下一步');
     await flush();
@@ -1073,11 +1092,11 @@ describe('workbench page', () => {
     mocks.my.mockResolvedValue({ ...my, tasks: [], inProgress: [my.inProgress[0]] });
     mocks.order.mockResolvedValue({ ...order, scheduleTaskId: 31, reportCount: 2 });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
     expect(mocks.prepare).toHaveBeenCalledWith(31);
-    fill(document.querySelector('[id^="good-"]')!.id, 3);
-    clickButton('全部做完');
+    fill(document.querySelector('[id^="total-"]')!.id, 3);
+    document.querySelector<HTMLInputElement>('[aria-label="报本工序实际产出"] input[type="checkbox"]')!.click();
     await flush();
     fill('return-101', 2);
     await flush();
@@ -1096,33 +1115,62 @@ describe('workbench page', () => {
     expect(mocks.issue).not.toHaveBeenCalled();
   });
 
-  it('supports partial reports of an issued order with the current report count', async () => {
-    mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
-    mocks.order.mockResolvedValue({ ...order, reportCount: 2, goodQuantity: 100 });
+  it('accepts row quantities directly, checks defects against the total and submits the selected order', async () => {
+    const second = { ...inProgress, id: 6, scheduleTaskId: undefined, orderNo: 'GX-6' };
+    mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress, second] });
+    mocks.order.mockImplementation(async (id: number) => id === 5
+      ? { ...order, reportCount: 2, goodQuantity: 100 }
+      : { ...order, id: 6, orderNo: second.orderNo });
     await mount();
-    clickButton('报本工序产出');
+    const row = document.querySelector('[data-order-id="5"]')!;
+    const other = document.querySelector('[data-order-id="6"]')!;
+    const total = row.querySelector<HTMLInputElement>('[id^="total-"]')!;
+    const bad = row.querySelector<HTMLInputElement>('[id^="bad-"]')!;
+    const otherTotal = other.querySelector<HTMLInputElement>('[id^="total-"]')!;
+    expect(total.value).toBe('300');
+    fill(otherTotal.id, 42);
+    fill(total.id, 80);
+    fill(bad.id, 81);
     await flush();
-    expect(document.body.textContent).toContain('已经报过 2 次');
-    expect(Number(document.querySelector<HTMLInputElement>('[id^="good-"]')!.value)).toBe(300);
-    fill(document.querySelector('[id^="good-"]')!.id, 80);
-    clickButton('先报这些，还没做完');
+    row.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
     await flush();
-    clickButton('下一步');
+    expect(row.textContent).toContain('瑕疵数量不能超过本次产量');
+    expect(mocks.report).not.toHaveBeenCalled();
+    fill(bad.id, 3);
+    row.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
     await flush();
+    expect(document.body.textContent).toContain('本次良品 77 片');
+    document.querySelector<HTMLButtonElement>('button[aria-label="返回"]')!.click();
+    await flush();
+    expect(total.value).toBe('80');
+    expect(otherTotal.value).toBe('42');
+    row.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await flush();
+    mocks.my.mockImplementation(async () => ({ ...my, inProgress: [{ ...inProgress, reportCount: 3 }, { ...second }] }));
+    mocks.order.mockImplementation(async (id: number) => id === 5
+      ? { ...order, reportCount: 3, goodQuantity: 177, defectQuantity: 3 }
+      : { ...order, id: 6, orderNo: second.orderNo });
     clickButton('报工');
     await flush();
-    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ orderId: 5, expectedReportCount: 2, finish: false }));
+    expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({
+      orderId: 5, expectedReportCount: 2, finish: false,
+      outputs: [expect.objectContaining({ goodQuantity: 77, defectQuantity: 3 })],
+    }));
     expect(document.body.textContent).toContain('工序单继续在制');
     expect(mocks.issue).not.toHaveBeenCalled();
+    clickButton('回任务列表');
+    await flush();
+    expect(row.querySelector<HTMLInputElement>('[id^="total-"]')?.value).toBe('220');
+    expect(other.querySelector<HTMLInputElement>('[id^="total-"]')?.value).toBe('42');
   });
 
   it('closes an order with earlier reports without requiring another output batch', async () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     mocks.order.mockResolvedValue({ ...order, reportCount: 3, goodQuantity: 400 });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
-    clickButton('全部做完');
+    document.querySelector<HTMLInputElement>('[aria-label="报本工序实际产出"] input[type="checkbox"]')!.click();
     await flush();
     clickButton('下一步');
     await flush();
@@ -1137,10 +1185,10 @@ describe('workbench page', () => {
   it('submits leftover material returns atomically with task output instead of a separate inventory mutation', async () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
-    fill(document.querySelector('[id^="good-"]')!.id, 100);
-    clickButton('全部做完');
+    fill(document.querySelector('[id^="total-"]')!.id, 100);
+    document.querySelector<HTMLInputElement>('[aria-label="报本工序实际产出"] input[type="checkbox"]')!.click();
     await flush();
     fill('return-101', 2);
     await flush();
@@ -1158,15 +1206,15 @@ describe('workbench page', () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, unit: 'm³' }]);
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
-    fill(document.querySelector('[id^="good-"]')!.id, 80);
+    fill(document.querySelector('[id^="total-"]')!.id, 80);
     await flush();
     clickButton('下一步');
     await flush();
     document.querySelector<HTMLButtonElement>('button[aria-label="返回"]')!.click();
     await flush();
-    fill(document.querySelector('[id^="good-"]')!.id, 100);
+    fill(document.querySelector('[id^="total-"]')!.id, 100);
     await flush();
     clickButton('下一步');
     await flush();
@@ -1197,9 +1245,9 @@ describe('workbench page', () => {
       { ...order.inputs[0], id: 103, stockId: 13, batchNo: 'RETURNED', quantity: 5, returnedQuantity: 5, item: { ...board.item, thickness: 1 } },
     ] });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
-    expect(document.querySelectorAll('[id^="good-"]')).toHaveLength(2);
+    expect(document.querySelectorAll('[id^="total-"]')).toHaveLength(2);
     expect(document.querySelector('[id^="wb-"][id$="-thickness"]')).toBeTruthy();
     expect(document.body.textContent).toContain('1900×1300×48 mm');
     expect(document.body.textContent).toContain('1900×1300×30 mm');
@@ -1207,7 +1255,7 @@ describe('workbench page', () => {
     await flush();
     expect(document.body.textContent).toContain('每张开 16 片 × 52 张 = 832 片');
     expect(document.body.textContent).toContain('每张开 10 片 × 7 张 = 70 片');
-    const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="good-"]')];
+    const goods = [...document.querySelectorAll<HTMLInputElement>('[id^="total-"]')];
     fill(goods[0]!.id, 40);
     fill(goods[1]!.id, 6);
     await flush();
@@ -1224,11 +1272,11 @@ describe('workbench page', () => {
   it('reports the planned 3 mm layers from a 48 mm board without a false thickness mismatch', async () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     mocks.prepare.mockResolvedValue({ ...prepare, outputAttrs: { ...plannedAttrs, thickness: 0.3 } });
-    await mount(); clickButton('报本工序产出'); await flush();
+    await mount(); document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click(); await flush();
     expect(document.body.textContent).not.toContain('超过实际领料厚度');
     expect(document.body.textContent).toContain('1900×1300×3 mm');
     expect(document.body.textContent).toContain('每张开 16 片 × 52 张 = 832 片');
-    fill(document.querySelector('[id^="good-"]')!.id, 40);
+    fill(document.querySelector('[id^="total-"]')!.id, 40);
     await flush(); clickButton('下一步'); await flush(); clickButton('报工'); await flush();
     expect(mocks.report).toHaveBeenCalledWith(expect.objectContaining({ outputs: [expect.objectContaining({
       attrs: expect.objectContaining({ thickness: 0.3 }), goodQuantity: 40,
@@ -1299,7 +1347,7 @@ describe('workbench page', () => {
     clickButton('下一步');
     await flush();
     expect(document.body.textContent).toContain('正在替 李四 报工');
-    fill(document.querySelector('[id^="good-"]')!.id, 40);
+    fill(document.querySelector('[id^="total-"]')!.id, 40);
     await flush();
     clickButton('下一步');
     await flush();
@@ -1321,10 +1369,10 @@ describe('workbench page', () => {
       return { destroy: () => {}, update: () => {} };
     });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
-    fill(document.querySelector('[id^="good-"]')!.id, 40);
-    clickButton('全部做完');
+    fill(document.querySelector('[id^="total-"]')!.id, 40);
+    document.querySelector<HTMLInputElement>('[aria-label="报本工序实际产出"] input[type="checkbox"]')!.click();
     await flush();
     fill('return-101', 2);
     await flush();
@@ -1372,6 +1420,8 @@ describe('workbench page', () => {
   it('supplements the same issued order without creating or reporting another order', async () => {
     mocks.my.mockResolvedValue({ ...my, inProgress: [inProgress] });
     await mount();
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
+    await flush();
     clickButton('补领材料');
     await flush();
     expect(document.body.textContent).not.toContain('按任务规格准备领料');
@@ -1458,16 +1508,15 @@ describe('workbench page', () => {
     mocks.prepare.mockResolvedValue({ ...prepare, task, outputStage: 'CUT', outputLabel: '片材', outputAttrs: attrs });
     mocks.order.mockResolvedValue({ ...order, process: 'CUT', sourceStage: 'SHEET', outputStage: 'CUT', inputs: [{ ...order.inputs[0], stage: 'SHEET', item: { ...plannedAttrs, thickness: 0.3, recipeCode: 'REC-001', recipeName: '常规款' } }] });
     await mount();
-    clickButton('报本工序产出');
+    document.querySelector<HTMLButtonElement>('[data-output-spec]')!.click();
     await flush();
     expect(document.body.textContent).toContain('实际产出：片材');
-    expect(document.body.textContent).toContain('1830×610×6 mm');
-    expect(document.body.textContent).toContain('1900×1300×3 mm');
+    expect(document.body.textContent).not.toContain('1830×610×6 mm');
     expect(document.body.textContent).toContain('1830×610×3 mm');
-    clickButton('不对？改一下'); await flush();
+    clickButton('修改规格'); await flush();
     const thickness = document.querySelector<HTMLInputElement>('[id^="wb-"][id$="-thickness"]');
     expect(thickness).toBeNull();
-    fill(document.querySelector('[id^="good-"]')!.id, 40);
+    fill(document.querySelector('[id^="total-"]')!.id, 40);
     await flush();
     clickButton('下一步');
     await flush();

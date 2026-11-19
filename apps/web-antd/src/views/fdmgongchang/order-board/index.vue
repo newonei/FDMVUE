@@ -1,4 +1,6 @@
 <script lang="ts" setup>
+import type { Stage } from './model';
+
 import type { FactoryOrderBoardApi as Api } from '#/api/fdmgongchang/order-board';
 
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue';
@@ -14,6 +16,7 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from '../production-o
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import { currentStage, dueHint, orderStages } from './model';
+import StageDetailModal from './stage-detail-modal.vue';
 
 defineOptions({ name: 'FdmGongchangOrderBoard' });
 
@@ -37,6 +40,7 @@ const autoRefresh = ref(true);
 let requestVersion = 0;
 let ownersVersion = 0;
 let detailVersion = 0;
+let stageVersion = 0;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -44,6 +48,9 @@ const detailOpen = ref(false);
 const detail = ref<Api.Order>();
 const detailLoading = ref(false);
 const detailError = ref(false);
+const stageSelection = ref<{ itemId?: number; order: Api.Order; stage: Stage }>();
+const stageLoading = ref(false);
+const stageError = ref(false);
 const ownerOrder = ref<Api.Order>();
 const ownerId = ref<number>();
 const ownerSaving = ref(false);
@@ -102,6 +109,7 @@ async function switchFactory(id: number) {
   ++ownersVersion;
   ++detailVersion;
   detailOpen.value = false;
+  closeStage();
   ownerOrder.value = undefined;
   rows.value = [];
   owners.value = [];
@@ -115,14 +123,14 @@ async function switchFactory(id: number) {
 function startRefresh() {
   clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
-    if (autoRefresh.value && !loading.value && !detailOpen.value && !ownerOrder.value && initialized.value) void load();
+    if (autoRefresh.value && !loading.value && !detailOpen.value && !stageSelection.value && !ownerOrder.value && initialized.value) void load();
   }, 60_000);
 }
 
 onMounted(() => { void initialize(); startRefresh(); });
 onActivated(() => { startRefresh(); if (initialized.value) void load(); });
-onDeactivated(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; loading.value = false; detailLoading.value = false; });
-onBeforeUnmount(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; });
+onDeactivated(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; closeStage(); loading.value = false; detailLoading.value = false; });
+onBeforeUnmount(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; closeStage(); });
 
 watch(() => [filters.keyword, filters.status, filters.ownerUserId], () => {
   ++requestVersion;
@@ -150,6 +158,34 @@ async function openDetail(order: Api.Order) {
   } finally {
     if (version === detailVersion) detailLoading.value = false;
   }
+}
+
+function openStage(order: Api.Order, stage: Stage, itemId?: number) {
+  stageSelection.value = { itemId, order, stage };
+  void refreshStage();
+}
+
+async function refreshStage() {
+  const selection = stageSelection.value;
+  if (!selection) return;
+  const version = ++stageVersion;
+  stageLoading.value = true;
+  stageError.value = false;
+  try {
+    const order = await getOrderBoardOrder(selection.order.id);
+    if (version === stageVersion) stageSelection.value = { ...selection, order };
+  } catch {
+    if (version === stageVersion) stageError.value = true;
+  } finally {
+    if (version === stageVersion) stageLoading.value = false;
+  }
+}
+
+function closeStage() {
+  ++stageVersion;
+  stageSelection.value = undefined;
+  stageLoading.value = false;
+  stageError.value = false;
 }
 
 function assignOwner(order: Api.Order) {
@@ -240,10 +276,10 @@ async function saveOwner() {
               </div>
               <div class="stage-grid">
                 <Tooltip v-for="stage in orderStages(record as Api.Order)" :key="stage.code" :title="stage.detail" placement="top">
-                  <div class="stage-tile" :class="`stage-tile--${stage.state}`" tabindex="0" :aria-label="`${stage.label}：${stage.text}`">
+                  <button type="button" class="stage-tile" :class="`stage-tile--${stage.state}`" aria-haspopup="dialog" :aria-label="`${stage.label}：${stage.text}，查看详情`" @click="openStage(record as Api.Order, stage)">
                     <span class="stage-tile__name">{{ stage.label }}</span>
                     <b>{{ stage.text }}</b>
-                  </div>
+                  </button>
                 </Tooltip>
               </div>
             </template>
@@ -276,13 +312,28 @@ async function saveOwner() {
               <div class="text-right text-sm"><b>{{ num(item.quantity) }} {{ item.unit }}</b><div class="mt-1 text-xs text-muted-foreground">已交货 / 入库 {{ num(item.completedQuantity) }} · 已出库 {{ num(item.shippedQuantity) }}</div></div>
             </div>
             <div class="stage-grid">
-              <Tooltip v-for="stage in orderStages({ ...detail, items: [item] })" :key="stage.code" :title="stage.detail"><div class="stage-tile" :class="`stage-tile--${stage.state}`" tabindex="0"><span class="stage-tile__name">{{ stage.label }}</span><b>{{ stage.text }}</b></div></Tooltip>
+              <Tooltip v-for="stage in orderStages({ ...detail, items: [item] })" :key="stage.code" :title="stage.detail">
+                <button type="button" class="stage-tile" :class="`stage-tile--${stage.state}`" aria-haspopup="dialog" :aria-label="`${stage.label}：${stage.text}，查看详情`" @click="openStage(detail, stage, item.id)">
+                  <span class="stage-tile__name">{{ stage.label }}</span>
+                  <b>{{ stage.text }}</b>
+                </button>
+              </Tooltip>
             </div>
             <div class="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"><span v-for="step in item.steps" :key="step.process">{{ step.label }}：良品 {{ num(step.goodQuantity) }}{{ step.unit }} · {{ step.orderCount }} 张工序单 · {{ step.inProgressCount }} 张在制<template v-if="step.sharedTaskCount"> · {{ step.sharedTaskCount }} 个合并生产任务</template></span></div>
           </section>
         </div>
       </Spin>
     </Drawer>
+
+    <StageDetailModal
+      :order="stageSelection?.order"
+      :stage="stageSelection?.stage"
+      :item-id="stageSelection?.itemId"
+      :loading="stageLoading"
+      :failed="stageError"
+      @close="closeStage"
+      @retry="refreshStage"
+    />
 
     <Modal :open="!!ownerOrder" title="分配订单负责人" :confirm-loading="ownerSaving" ok-text="保存负责人" @ok="saveOwner" @cancel="ownerOrder = undefined">
       <p class="text-sm text-muted-foreground">{{ ownerOrder?.orderNo }} · 指定本厂人员跟进订单，清空选择可取消分配。</p>
@@ -367,6 +418,8 @@ async function saveOwner() {
   padding: 8px;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
+  text-align: left;
+  cursor: pointer;
   background: hsl(var(--muted) / 45%);
   border: 1px solid hsl(var(--border));
   border-radius: 7px;
@@ -416,6 +469,11 @@ async function saveOwner() {
   border-style: dashed;
   opacity: 0.65;
 
+}
+
+.stage-tile:hover {
+  border-color: hsl(var(--primary));
+  opacity: 1;
 }
 
 .stage-tile:focus-visible {

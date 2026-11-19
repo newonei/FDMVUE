@@ -687,7 +687,7 @@ onMounted(async () => {
           />
           <Input.Search
             v-model:value="keyword"
-            placeholder="搜索合同、客户或单据内容"
+            placeholder="搜索内部单号、合同号、客户或单据内容"
             style="width: 310px"
             allow-clear
             @search="search"

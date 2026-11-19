@@ -10,9 +10,11 @@ import Home from './modules/home.vue';
 import PieceStep from './modules/piece-step.vue';
 import { createJob, provideJob } from './use-job';
 
-const mocks = vi.hoisted(() => ({ picks: vi.fn(), mates: vi.fn(), wages: vi.fn() }));
+const mocks = vi.hoisted(() => ({ picks: vi.fn(), order: vi.fn(), prepare: vi.fn(), mates: vi.fn(), wages: vi.fn() }));
 vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchPickList: mocks.picks,
+  getWorkbenchOrder: mocks.order,
+  prepareWorkbenchTask: mocks.prepare,
   getWorkbenchMates: mocks.mates,
   matchWorkbenchWage: mocks.wages,
 }));
@@ -41,6 +43,8 @@ describe('employee workbench navigation and explicit finishing', () => {
     job.my = { factoryName: '测试工厂', userId: 7, userName: '小王', today: '2026-11-16', todayAmount: 0, processes: [process], tasks: Array.from({ length: 23 }, (_, i) => task(i + 1)), inProgress: [], recentDone: [] };
     job.options = { stages: [{ code: 'CUT', label: '已立切片材', unit: '片' }], colors: [{ value: 'PU', label: '紫色' }, { value: 'BL', label: '蓝色' }], materials: [], patterns: [], textures: [], recipes: [], rawMaterials: [], processes: [] } as unknown as StockApi.Options;
     mocks.picks.mockResolvedValue([]);
+    mocks.order.mockResolvedValue({ id: 88, process: 'CUT', sourceStage: 'SHEET', scheduleTaskId: 1, inputs: [] });
+    mocks.prepare.mockResolvedValue({ task: task(1), picks: [], aux: [] });
     mocks.mates.mockResolvedValue([]);
     mocks.wages.mockResolvedValue([]);
   });
@@ -66,13 +70,13 @@ describe('employee workbench navigation and explicit finishing', () => {
 
   it('pages long task lists and searches displayed color names across all pages', async () => {
     await mount(Home);
-    expect(document.querySelectorAll('article')).toHaveLength(10);
+    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(10);
     expect(document.body.textContent).toContain('第 1 / 3 页');
     click('下一页'); await flush();
     expect(document.body.textContent).toContain('任务 #11');
     expect(document.body.textContent).not.toContain('任务 #1 ·');
     await search('紫色');
-    expect(document.querySelectorAll('article')).toHaveLength(1);
+    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
     expect(document.body.textContent).toContain('任务 #23');
     expect(document.body.textContent).toContain('剩余 80 片');
     await search('SO-7');
@@ -81,14 +85,14 @@ describe('employee workbench navigation and explicit finishing', () => {
     unmount?.();
     await mount(Home);
     expect(document.querySelector<HTMLInputElement>('[aria-label="搜索我的任务"]')?.value).toBe('SO-7');
-    expect(document.querySelectorAll('article')).toHaveLength(1);
+    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
   });
 
   it('separates an already issued task from pending tasks and keeps recent completion distinct', async () => {
     job.my!.inProgress = [{ id: 88, orderNo: 'GX-88', process: 'CUT', scheduleTaskId: 1, outputStage: 'CUT', goodQuantity: 20, inputQuantity: 100, inputUnit: '片' } as Api.Order];
     job.my!.recentDone = [{ id: 89, orderNo: 'GX-DONE', process: 'CUT', outputStage: 'CUT', goodQuantity: 100 } as Api.Order];
     await mount(Home);
-    expect(document.body.textContent).toContain('GX-88');
+    expect(document.querySelector('[data-order-id="88"]')?.textContent).toContain('任务 #1');
     expect(document.body.textContent).not.toContain('GX-DONE');
     click('待开工'); await flush();
     expect(document.body.textContent).not.toContain('任务 #1 ·');
@@ -124,7 +128,7 @@ describe('employee workbench navigation and explicit finishing', () => {
     expect(document.body.textContent).toContain('折叠要求：八折');
     expect(document.body.textContent).toContain('折叠要求未确认，请联系主任');
     await search('八折');
-    expect(document.querySelectorAll('article')).toHaveLength(1);
+    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
     expect(document.body.textContent).toContain('任务 #1');
   });
 
@@ -159,8 +163,8 @@ describe('employee workbench navigation and explicit finishing', () => {
       expect(document.querySelector('[data-team-task-id="1179"]')).not.toBeNull();
       expect(document.querySelector('#team-tasks-panel')?.textContent).toContain('匹配 1 个');
     }
-    expect(document.querySelectorAll('article')).toHaveLength(1);
-    expect(document.querySelector('article')?.textContent).toContain('任务 #7');
+    expect(document.querySelectorAll('[aria-label="任务列表"] > li')).toHaveLength(1);
+    expect(document.querySelector('[aria-label="任务列表"] > li')?.textContent).toContain('任务 #7');
     document.querySelector<HTMLButtonElement>('[data-team-task-id="1179"] button')!.click();
     await flush();
     click('下一步');

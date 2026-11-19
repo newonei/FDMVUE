@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   lastRoute: vi.fn().mockResolvedValue(null),
   materialPlan: vi.fn(),
+  previewSupplement: vi.fn(),
+  releaseSupplement: vi.fn(),
   saveMaterial: vi.fn(),
   saveTarget: vi.fn(),
   supplyMatch: vi.fn().mockResolvedValue([]),
@@ -104,6 +106,8 @@ vi.mock('#/api/fdmgongchang/schedule', () => ({
   releaseTaskPackages: vi.fn(),
   previewOrderSplit: vi.fn(),
   releaseOrderSplit: vi.fn(),
+  previewRouteSupplement: mocks.previewSupplement,
+  releaseRouteSupplement: mocks.releaseSupplement,
 }));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
@@ -355,6 +359,22 @@ describe('production order page', () => {
     expect(req.items[1]!.steps).toEqual(['SLICE', 'PUNCH']);
   });
 
+  it.each([
+    ['contract-id', 'contract-id'],
+    [null, 'standalone'],
+  ])('opens the exact source purchase order with its contract context %s', async (sourceContractId, contractId) => {
+    const purchase = { ...order, sourceContractId, sourceOrderId: 'po-id', sourceOrderCode: 'CG-20261118-1F17C9', sourceType: 'PURCHASE_ORDER' };
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmplatform:orders:query');
+    mocks.factoryPage.mockResolvedValue({ list: [purchase], total: 1 });
+    unmount = mount();
+    await flush();
+    button('采购单CG-20261118-1F17C9').click();
+    expect(mocks.push).toHaveBeenCalledWith({
+      path: '/fdmprocurement/platform-orders',
+      query: { contractId, documentId: 'po-id' },
+    });
+  });
+
   it('lets the factory accept an order it received', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle');
     mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 });
@@ -544,7 +564,8 @@ describe('production order page', () => {
     expect(text).toContain('开片300·冲裁300');
     expect(text).toContain('CC-2：颜色不同');
 
-    button('确认规格').click();
+    expect([...document.querySelectorAll('button')].some((el) => el.textContent === '确认规格')).toBe(false);
+    button('修改参数与工艺').click();
     await flush();
     expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
     const previousReads = mocks.get.mock.calls.length;
@@ -565,7 +586,7 @@ describe('production order page', () => {
     mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
     mocks.saveTarget.mockResolvedValue(true);
     unmount = mount(); await flush(); button('查看').click(); await flush();
-    button('确认规格').click(); await flush();
+    button('修改参数与工艺').click(); await flush();
     expect(document.querySelector('#save-order-config-test')?.textContent).toContain('9/91');
     expect(document.querySelector('#target-front-thickness')).toBeNull();
     expect(mocks.saveTarget).not.toHaveBeenCalled();
@@ -660,7 +681,8 @@ describe('production order page', () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:generate',
       'fdmgongchang:schedule:query');
     const accepted: Api.Order = { ...order, id: 11, orderNo: 'GD20261011-002', status: 'ACCEPTED', statusLabel: '生产中' };
-    mocks.factoryPage.mockResolvedValue({ list: [order, accepted], total: 2 });
+    const completed: Api.Order = { ...order, id: 12, orderNo: 'GD20261011-003', status: 'COMPLETED', statusLabel: '已完成' };
+    mocks.factoryPage.mockResolvedValue({ list: [order, accepted, completed], total: 3 });
     mocks.generate.mockResolvedValue(77);
     mocks.getSchedules.mockResolvedValue([
       { days: 3, id: 77, revision: 1, scheduleNo: 'PB20261011-001', scopeOrderNos: ['GD20261011-002'], startDate: '2026-10-11', status: 'GENERATING' },
@@ -670,8 +692,11 @@ describe('production order page', () => {
     await flush();
 
     const boxes = [...document.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
-    expect(boxes).toHaveLength(2);
+    expect(boxes).toHaveLength(3);
     expect(boxes[0]!.disabled).toBe(true);
+    expect(boxes[2]!.disabled).toBe(true);
+    expect(document.querySelector('tr.order-row--pending')?.textContent).toContain(order.orderNo);
+    expect([...document.querySelectorAll<HTMLTableRowElement>('tr.order-row--completed')].map((row) => row.dataset.rowKey)).toEqual(['12']);
     boxes[1]!.click();
     await flush();
     button('AI排单（已选1张）').click();
@@ -713,7 +738,7 @@ describe('production order page', () => {
     unmount = mount(); await flush(); button('去接单').click(); await flush();
     const otherChips = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-item-92 要走的工序"] .route-chip')];
     otherChips.find((chip) => chip.textContent?.trim() === '雕刻')!.click(); await flush();
-    button('确认规格').click(); await flush();
+    button('修改参数与工艺').click(); await flush();
     const changed: Api.Order = { ...purchase, items: [{ ...purchase.items[0]!, ...confirmedParameters, processes: ['SLICE', 'PUNCH', 'FOLD', 'PACK'] }, { ...purchase.items[1]!, ...confirmedParameters }] };
     mocks.get.mockResolvedValue(changed);
     document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
@@ -732,7 +757,7 @@ describe('production order page', () => {
     mocks.supplyMatch.mockResolvedValue([]);
     mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
     unmount = mount(); await flush(); button('去接单').click(); await flush();
-    button('确认规格').click(); await flush();
+    button('修改参数与工艺').click(); await flush();
     mocks.get.mockRejectedValueOnce(new Error('网络暂不可用'));
     document.querySelector<HTMLButtonElement>('#save-order-config-test')!.click(); await flush();
     expect(document.body.textContent).toContain('参数已保存，订单刷新失败');
@@ -763,5 +788,69 @@ describe('production order page', () => {
     expect(document.querySelector<HTMLInputElement>('#po-promised input')?.value || document.querySelector<HTMLInputElement>('#po-promised')?.value).toBe('2026-10-20');
     button('接单').click(); await flush();
     expect(mocks.accept).toHaveBeenCalledWith(expect.objectContaining({ id: 9, promisedDate: '2026-10-20' }));
+  });
+
+  it('checks the impact of a missed process before release and refreshes the order route', async () => {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:handle', 'fdmgongchang:schedule:confirm');
+    const existingRoute = ['SLICE', 'PUNCH', 'FOLD'];
+    const proposedRoute = ['SLICE', 'PUNCH', 'ENGRAVE', 'FOLD'];
+    const accepted: Api.Order = { ...order, status: 'ACCEPTED', statusLabel: '生产中', items: [
+      { ...order.items[0]!, ...confirmedParameters, processes: existingRoute },
+    ] };
+    mocks.factoryPage.mockResolvedValue({ list: [accepted], total: 1 });
+    mocks.get.mockResolvedValue(accepted);
+    mocks.materialPlan.mockResolvedValue({ items: [], orderId: 9, orderNo: order.orderNo, shortage: false, totals: [] });
+    const preview = { adjustedTaskIds: [61], canRelease: true, errors: [], existingRoute, previewKey: 'current', proposedRoute, quantity: 500 };
+    mocks.previewSupplement.mockResolvedValueOnce({ ...preview, canRelease: false, errors: ['后道任务 #61 已领料开工，请先核对'] }).mockResolvedValue(preview);
+    mocks.releaseSupplement.mockRejectedValueOnce(new Error('网络暂不可用')).mockResolvedValue({ scheduleId: 18, taskId: 72, taskIds: [72] });
+    unmount = mount(); await flush(); button('查看').click(); await flush(); button('补工序').click(); await flush();
+
+    const select = async (id: string, label: string) => {
+      document.querySelector(`#${id}`)!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flush();
+      [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((option) => option.getAttribute('title') === label)!.click();
+      await flush();
+    };
+    await select('route-supplement-process', '雕刻');
+    const fill = (selector: string, value: string) => {
+      const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    fill('#route-supplement-reason', '拆分时漏选雕刻'); await flush();
+    expect(button('预览影响').disabled).toBe(true);
+    fill('#route-supplement-folding', '八折'); await flush();
+    expect(button('预览影响').disabled).toBe(true);
+    await select('route-supplement-pattern', '哆啦A梦');
+    button('预览影响').click(); await flush();
+    expect(document.body.textContent).toContain('后道任务 #61 已领料开工');
+    expect(button('确认补发').disabled).toBe(true);
+    expect(mocks.releaseSupplement).not.toHaveBeenCalled();
+
+    button('预览影响').click(); await flush();
+    expect(document.body.textContent).toContain('开片 → 冲裁 → 雕刻 → 折叠');
+    expect(document.body.textContent).toContain('会更新的原任务 #61');
+    expect(button('确认补发').disabled).toBe(false);
+    fill('#route-supplement-reason', '车间核对后道尚未加工'); await flush();
+    expect(button('确认补发').disabled).toBe(true);
+    button('预览影响').click(); await flush();
+    const item = accepted.items[0]!;
+    mocks.get.mockResolvedValue({ ...accepted, items: [{
+      ...item, processes: proposedRoute, targetFoldingType: '八折', targetPattern: 'DM', steps: [
+        ...item.steps!,
+        { defectQuantity: 0, goodQuantity: 0, inProgressCount: 0, label: '雕刻', orderCount: 0, outputStage: 'ENGRAVED', planned: true, process: 'ENGRAVE', unit: '件' },
+      ],
+    }] });
+    button('确认补发').click(); await flush();
+    expect(document.body.textContent).toContain('可再次点「确认补发」核对本次提交结果');
+    button('确认补发').click(); await flush();
+    expect(mocks.releaseSupplement).toHaveBeenCalledTimes(2);
+    expect(mocks.releaseSupplement.mock.calls[0]).toEqual(mocks.releaseSupplement.mock.calls[1]);
+    expect(mocks.releaseSupplement).toHaveBeenLastCalledWith(1, {
+      foldingType: '八折', itemId: 91, pattern: 'DM', previewKey: 'current', process: 'ENGRAVE', quantity: 500, reason: '车间核对后道尚未加工',
+    });
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('.ant-drawer-body')?.textContent).toContain('雕刻');
   });
 });

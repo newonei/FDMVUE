@@ -213,8 +213,9 @@ export interface ProcurementOrderView {
     contactId?: string;
     contactSnapshot?: SupplierContact;
     deliveryAddress?: string;
-    deliveryDate?: string;
+    deliveryDate?: null | string;
     detailColumns?: OrderDetailColumn[];
+    documentDate?: string;
     /** 明细行 id → 补充资料 */
     lineExtras?: Record<string, OrderLineExtra>;
     /** 这张单不需要收票（淘宝、个体等） */
@@ -222,6 +223,7 @@ export interface ProcurementOrderView {
     /** 随采购单导出给供应商的订单备注，最多 2000 字。 */
     orderRemark?: string;
     packagingSteps?: OrderPackagingStep[];
+    purchaseDate?: string;
     /** 内部下单备注，不导出给供应商 */
     remark?: string;
     revision?: number;
@@ -289,6 +291,7 @@ export interface PurchaseOrderEntry {
   subject?: string;
   category?: string;
   purchaseDate?: string;
+  deliveryDate?: null | string;
   companyId?: number;
   ownerUserId?: number;
   currency?: string;
@@ -487,6 +490,8 @@ export interface ProcurementOrderRow extends DocumentRow {
   attached?: boolean;
   /** 下单资料交货日期，没填时取报价承诺到货日。 */
   dueDate?: string;
+  purchaseDate?: string;
+  documentDate?: string;
   /** NONE 未入库 / PARTIAL 部分入库 / ALL 已入齐 */
   receivedState?: 'ALL' | 'NONE' | 'PARTIAL';
   invoicedAmount?: Decimal;

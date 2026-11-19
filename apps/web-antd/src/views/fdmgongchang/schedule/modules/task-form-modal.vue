@@ -20,6 +20,7 @@ import { quantityPrecision } from '../../shared/quantity';
 import { dateText, dayLabel, rescaleMaterials, stageTaskPlan, TASK_OUTPUT_STAGES, TASK_STAGE_LABELS, taskOutputAttrs } from '../../shared/schedule';
 import { attrSummary, isLayered, makeLabels, parseSizeText, stageFields, toNumber } from '../../stage-stock/model';
 import AttrFields from '../../stage-stock/modules/attr-fields.vue';
+import DispatchWageCheck from './dispatch-wage-check.vue';
 import ProductPickerModal from './product-picker-modal.vue';
 
 /** 订单明细表达用途，工序产出表达本次真正要做的物料，两者独立保存。 */
@@ -620,6 +621,7 @@ v-else id="task-form-product" v-model:value="productKey" not-found-content="这�
         指派人员
         <Select id="task-form-workers" v-model:value="workerIds" :options="workerOptions" mode="multiple" option-filter-prop="label" :placeholder="process ? '留空则进入任务大厅' : '先选工序'" />
       </label>
+      <DispatchWageCheck v-if="open && process && workerIds.length" :tasks="[{ process, output: { stage: outputStage, attrs: outputAttrs } }]" />
       <label for="task-form-reason" class="flex flex-col gap-1 sm:col-span-2">
         生产说明（选填）
         <Input id="task-form-reason" v-model:value="reason" :maxlength="300" placeholder="例如 先做正面紫色板材，下午换反面灰色" />

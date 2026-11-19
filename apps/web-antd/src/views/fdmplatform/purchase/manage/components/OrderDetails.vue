@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { DetailsCheck } from '../model';
+
 import type {
   ProcurementOrderView,
   ProcurementSetting,
@@ -30,10 +32,11 @@ import { errorText } from '../../../data';
 import {
   clauseGroupTitle,
   compatibleClauses,
-  deliveryDateError,
   detailsChecklist,
   onlyChoice,
+  orderDateError,
   preferredContact,
+  validOrderDate,
 } from '../model';
 import OrderPrintExtras from './OrderPrintExtras.vue';
 import SupplierContacts from './SupplierContacts.vue';
@@ -65,6 +68,7 @@ const form = reactive({
   contactId: undefined as string | undefined,
   deliveryDate: '',
   deliveryAddress: '',
+  purchaseDate: '',
   remark: '',
   accessoryNote: '',
   signingEntityId: undefined as string | undefined,
@@ -127,10 +131,7 @@ const groups = computed(() => {
     .filter((group): group is string => !!group);
   return [...new Set([...required, ...all])];
 });
-const deliveryError = computed(() =>
-  deliveryDateError(props.view, form.deliveryDate),
-);
-const checklist = computed(() => [
+const checklist = computed<DetailsCheck[]>(() => [
   ...detailsChecklist({
     clauseIds: canEdit.value
       ? form.clauseIds
@@ -141,10 +142,9 @@ const checklist = computed(() => [
     template: template.value,
   }),
   {
-    key: 'deliveryDate',
-    label: '采购交期',
-    ok: !deliveryError.value,
-    hint: deliveryError.value || undefined,
+    key: 'purchaseDate',
+    label: '采购日期',
+    ok: validOrderDate(form.purchaseDate),
   },
 ]);
 const missing = computed(() => checklist.value.filter((item) => !item.ok));
@@ -229,6 +229,7 @@ watch(
         contactId: props.view.details.contactId,
         deliveryDate: props.view.details.deliveryDate ?? '',
         deliveryAddress: props.view.details.deliveryAddress ?? '',
+        purchaseDate: props.view.details.purchaseDate ?? '',
         remark: props.view.details.remark ?? '',
         accessoryNote: props.view.details.accessoryNote ?? '',
         signingEntityId: props.view.details.signingEntityId,
@@ -248,14 +249,16 @@ function changed(entry: SupplierContact) {
   form.contactId = entry.id;
 }
 function payload() {
+  const { documentDate: _documentDate, ...details } = props.view.details;
   return {
-    ...props.view.details,
+    ...details,
     ...form,
     ...(canEditExtras.value ? printExtras.value?.payload() : {}),
   };
 }
 function save() {
-  emit('save', payload());
+  pageError.value = orderDateError(form);
+  if (!pageError.value) emit('save', payload());
 }
 function saveExtras() {
   if (!canEditExtras.value || props.saving || extrasBusy.value) return;
@@ -277,7 +280,7 @@ function markSaved(action: string) {
 defineExpose({ isDirty, markSaved, pendingSave });
 function confirm() {
   pageError.value =
-    deliveryError.value ||
+    orderDateError(form) ||
     compatibleClauses(
       clauses.value,
       form.clauseIds,
@@ -313,6 +316,19 @@ function confirm() {
       </template>
       <h4 class="section-title">工厂与交货</h4>
       <Form layout="vertical" class="order-fields">
+        <Form.Item
+          label="采购日期"
+          html-for="order-details-purchase-date"
+          required
+        >
+          <Input
+            id="order-details-purchase-date"
+            v-model:value="form.purchaseDate"
+            aria-required="true"
+            type="date"
+            :disabled="!canEdit || saving"
+          />
+        </Form.Item>
         <Form.Item label="工厂联系人" required>
           <div class="contact-row">
             <Select
@@ -346,11 +362,11 @@ function confirm() {
           />
         </Form.Item>
         <Form.Item
-          label="整单交货日期"
-          :required="!!deliveryError"
-          extra="确认资料前必填；若所有有效产品行已有到货日期或对应报价承诺日期，可留空。草稿可暂存。"
+          label="交付日期（选填）"
+          html-for="order-details-delivery-date"
         >
           <Input
+            id="order-details-delivery-date"
             v-model:value="form.deliveryDate"
             type="date"
             :disabled="!canEdit || saving"

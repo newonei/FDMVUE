@@ -2,9 +2,11 @@ import type { BusinessRecord, Contract, MasterRecord } from '#/api/fdmplatform';
 import type { MasterType } from '#/api/fdmplatform/masters';
 
 import BigNumber from 'bignumber.js';
+import dayjs from 'dayjs';
 
 import { hasReceiptFx } from './finance/exchange-rates/model';
 import {
+  requestExcessHint,
   requestLineDefaults,
   requestPrefillLines,
 } from './products/feedback-model';
@@ -46,6 +48,7 @@ export interface Field {
   placeholderOf?: (values: Record<string, unknown>) => string | undefined;
 }
 export interface ActionDefinition {
+  requestExcessHint?: (lines: Record<string, unknown>[]) => string;
   action: string;
   title: string;
   description: string;
@@ -437,6 +440,7 @@ export function contractActions(
       hidden: true,
     }),
   ];
+  const today = dayjs().format('YYYY-MM-DD');
   return {
     UPDATE_CONTRACT: contractDraftAction(
       master,
@@ -465,6 +469,7 @@ export function contractActions(
     },
     CREATE_REQUEST: {
       action: 'CREATE_REQUEST',
+      requestExcessHint: (lines) => requestExcessHint(contract, lines),
       title: '新建采购申请',
       description:
         '已带入合同中尚未申请的产品明细，可删减或调整数量；同一明细允许超量申请。申请不会自动扩大合同数量。',
@@ -598,6 +603,8 @@ export function contractActions(
         '只生成已确认方案中尚未下单的数量。同供应商、币种、交期、税费与包装条件一致的产品可合并到一张采购单。',
       fields: [
         ...planFields,
+        field('purchaseDate', '采购日期', 'date', { default: today }),
+        field('deliveryDate', '交付日期', 'date', { required: false }),
         field(
           'groupCompatibleLines',
           '合并同供应商且商务条件一致的产品',

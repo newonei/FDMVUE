@@ -107,7 +107,7 @@ const columns = [
       <p>选择本次「{{ operation }}」对应的合同，自动带入客户和订单所属公司。</p>
       <Input.Search
         v-model:value="keyword"
-        placeholder="合同编号 / 名称 / 客户"
+        placeholder="内部单号 / 合同号 / 名称 / 客户"
         allow-clear
         autofocus
         @search="search"

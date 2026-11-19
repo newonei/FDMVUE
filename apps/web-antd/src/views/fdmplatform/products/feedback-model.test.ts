@@ -43,6 +43,22 @@ function contract(): Contract {
 }
 
 describe('feedback business defaults', () => {
+  it('两处申请入口只在累计超量时提示超出的数量与比例', () => {
+    const order = contract();
+    order.items[0]!.unit = '张';
+    for (const action of [
+      contractActions(order, []).CREATE_REQUEST!,
+      documentActionDefinition(order, 'requests', 'CREATE_REQUEST', [], []),
+    ]) {
+      expect(
+        action.requestExcessHint?.([{ contractItemId: 'a', quantity: 65 }]),
+      ).toBe('');
+      expect(
+        action.requestExcessHint?.([{ contractItemId: 'a', quantity: 66.5 }]),
+      ).toContain('1.5 张（1.5%）');
+    }
+  });
+
   it('rounds each sales line before summing the same receivable as the server', () => {
     const lines = [
       { id: 'a', quantity: '1', unitPrice: '0.005' },

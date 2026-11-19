@@ -176,7 +176,7 @@ onMounted(async () => {
       <Input.Search
         v-model:value="keyword"
         allow-clear
-        placeholder="出库单号、合同、客户、去向、产品"
+        placeholder="出库单号、内部单号、合同号、客户、去向、产品"
         style="width: 320px"
         @search="load(true)"
       />

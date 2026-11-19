@@ -12,7 +12,7 @@ import { productStructure } from '../../products/structure';
 import { latestTaskQuotes } from '../quotes/comparison';
 import { orderableQuote } from '../quotes/quick-order';
 import { priceFromTotal, totalFromPrice } from '../tasks/request-batch';
-import { validDeliveryDate } from './model';
+import { orderDateError, validOrderDate } from './model';
 
 /** 金智常用的采购分类；先固定选项，后续再做成可维护。 */
 export const PURCHASE_CATEGORIES = [
@@ -78,6 +78,7 @@ export interface EntryHeader {
   contractId?: string;
   /** 整单折扣 %，空或 100 表示不打折 */
   discountRate?: string;
+  deliveryDate?: string;
   purchaseDate?: string;
   /** 收货工厂：由工厂确认收货，不进采购仓库 */
   receiveFactoryId?: number;
@@ -231,7 +232,6 @@ function requestQuantity(rows: EntryRow[], row: EntryRow) {
 export function entryErrors(
   rows: EntryRow[],
   header: EntryHeader,
-  submit = false,
 ): { lines: Record<string, string>; sheet: string } {
   const lines: Record<string, string> = {};
   for (const row of rows) {
@@ -246,8 +246,8 @@ export function entryErrors(
       lines[row.key] = '请填单价或总价';
     else if (header.receiveFactoryId && !materialKind(row.category))
       lines[row.key] = '工厂只收原料、辅料，这一行请另开采购单';
-    else if (submit && !validDeliveryDate(row.arrivalDate))
-      lines[row.key] = '提交下单前请填写到货日期';
+    else if (row.arrivalDate && !validOrderDate(row.arrivalDate))
+      lines[row.key] = '请填写有效的到货日期';
   }
   let sheet = '';
   if (rows.some((row) => !row.supplierId) && !header.supplierId)
@@ -270,7 +270,7 @@ export function entryErrors(
       '明细分属多个供应商、会拆成多张采购单，附加费用和优惠抹零无法分摊，请清空或按供应商分别开单';
   else if (new BigNumber(entryTotals(rows, header).total).lt(0))
     sheet = '优惠抹零不能超过采购金额';
-  return { lines, sheet };
+  return { lines, sheet: sheet || orderDateError(header) };
 }
 
 export function entryPayload(
@@ -289,6 +289,7 @@ export function entryPayload(
     subject: header.subject?.trim() || undefined,
     category: header.category || undefined,
     purchaseDate: header.purchaseDate || undefined,
+    deliveryDate: header.deliveryDate || null,
     companyId: header.companyId,
     additionalCategory: header.additionalCategory?.trim() || undefined,
     additionalAmount: blank(header.additionalAmount)
@@ -339,8 +340,8 @@ const copiedNumber = (value: unknown) => {
 };
 /**
  * 复制采购单：带出合同、供应商、表头和明细（数量、单价、赠品、备注），
- * 采购日期改为今天，到货日期不带；附加费用为 0、折扣 100 时留空，和新建一样。
- * edit=true 时是修改撤回为草稿的这张单：采购日期、到货日期照原单带出，明细保留原行 id。
+ * 采购日期改为今天，交付和到货日期留空；附加费用为 0、折扣 100 时留空。
+ * edit=true 时修改当前草稿，保留原单日期和明细 id。
  */
 export function copyEntry(
   view: ProcurementOrderView,
@@ -369,6 +370,7 @@ export function copyEntry(
     subject: copiedText(details.subject),
     category: copiedText(details.category),
     purchaseDate: (edit && copiedText(details.purchaseDate)) || today,
+    deliveryDate: edit ? copiedText(details.deliveryDate) : undefined,
     companyId:
       typeof order.companyId === 'number' ? order.companyId : view.companyId,
     additionalCategory: copiedText(details.additionalCategory),
@@ -401,8 +403,7 @@ export function copyEntry(
         row.lineId = line.id;
         row.arrivalDate =
           copiedText(dates[line.id]) ||
-          copiedText(view.lineDeliveryDates?.[line.id]) ||
-          copiedText(details.deliveryDate);
+          copiedText(view.lineDeliveryDates?.[line.id]);
       }
       if (note?.gift === true) setRowGift(row, true);
       else setRowPrice(row, copiedNumber(line.unitPrice));

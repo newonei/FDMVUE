@@ -27,6 +27,7 @@ export namespace FactoryOrderBoardApi {
 
   export interface Item extends OrderApi.Item {
     steps?: Step[];
+    warehouseShippedQuantity?: number | string;
   }
 
   export interface Order extends OrderApi.Order {

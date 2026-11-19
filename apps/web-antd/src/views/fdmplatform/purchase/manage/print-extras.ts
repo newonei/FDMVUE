@@ -33,107 +33,13 @@ export const MAX_DETAIL_COLUMNS = 8;
 export const MAX_ADDITIONAL_LINES = 50;
 export const MAX_DETAIL_IMAGES = 6;
 
-export const PRODUCTION_EXTRA_FIELDS = [
+const PRODUCTION_IDENTITY_FIELDS = [
   'colorMode',
   'frontColor',
   'backColor',
   'textureFront',
   'textureBack',
-  'weight',
-] as const satisfies readonly (keyof OrderLineExtra)[];
-export type ProductionExtraField = (typeof PRODUCTION_EXTRA_FIELDS)[number];
-export const PRODUCTION_IDENTITY_FIELDS = [
-  'colorMode',
-  'frontColor',
-  'backColor',
-  'textureFront',
-  'textureBack',
-] as const satisfies readonly ProductionExtraField[];
-
-export function productionIdentityLocked(snapshot: Record<string, unknown>) {
-  return (
-    typeof snapshot.finishedSignature === 'string' &&
-    snapshot.finishedSignature.trim().length > 0
-  );
-}
-
-/** 已保存采购要求优先；未设置时只读取本单产品快照。空串保留清空意图。 */
-export function productionExtrasFrom(
-  saved: OrderLineExtra,
-  snapshot: Record<string, unknown>,
-): OrderLineExtra {
-  const result = { ...saved };
-  if (productionIdentityLocked(snapshot)) {
-    for (const field of PRODUCTION_IDENTITY_FIELDS) {
-      const value = snapshot[field];
-      if (typeof value === 'string')
-        (result as Record<string, unknown>)[field] = value.trim();
-      else Reflect.deleteProperty(result, field);
-    }
-  }
-  for (const field of PRODUCTION_EXTRA_FIELDS) {
-    if (Object.hasOwn(result, field)) continue;
-    const value = snapshot[field];
-    if (typeof value === 'string' && value.trim())
-      (result as Record<string, unknown>)[field] = value.trim();
-  }
-  // 历史色号也供逐面编辑回显，颜色方式保留待核实，不据此推断单色。
-  for (const field of ['frontColor', 'backColor'] as const)
-    if (
-      !Object.hasOwn(result, field) &&
-      typeof snapshot.colorCode === 'string' &&
-      snapshot.colorCode.trim()
-    )
-      result[field] = snapshot.colorCode.trim();
-  if (result.colorMode === 'SINGLE') {
-    result.backColor = result.frontColor ?? '';
-  }
-  return result;
-}
-
-/** 所选字段之外的值保持；只填空项也按每行现有值分别处理。 */
-export function applyProductionExtras(
-  rows: Record<string, OrderLineExtra>,
-  selectedIds: string[],
-  values: OrderLineExtra,
-  fields: ProductionExtraField[],
-  onlyEmpty = false,
-  identityLockedIds: readonly string[] = [],
-) {
-  const lockedIds = new Set(identityLockedIds);
-  let protectedRows = 0;
-  let skippedFields = 0;
-  let updatedRows = 0;
-  for (const id of selectedIds) {
-    const row = (rows[id] ??= {});
-    let changed = false;
-    let protectedRow = false;
-    for (const field of fields) {
-      if (lockedIds.has(id) && field !== 'weight') {
-        protectedRow = true;
-        skippedFields++;
-        continue;
-      }
-      if (onlyEmpty && row[field]?.trim() && row[field] !== 'UNKNOWN') continue;
-      const value = values[field]?.trim() ?? '';
-      if (row[field] !== value) {
-        (row as Record<string, unknown>)[field] = value;
-        changed = true;
-      }
-    }
-    if (
-      !lockedIds.has(id) &&
-      row.colorMode === 'SINGLE' &&
-      row.backColor !== (row.frontColor ?? '')
-    ) {
-      row.backColor = row.frontColor ?? '';
-      changed = true;
-    }
-    if (changed) updatedRows++;
-    if (protectedRow) protectedRows++;
-  }
-  return { updatedRows, protectedRows, skippedFields };
-}
+] as const;
 
 function cloneCells(cells?: Record<string, OrderDetailCell>) {
   return Object.fromEntries(
@@ -258,11 +164,10 @@ export function printExtrasPayload(value: PrintExtras) {
     const clean: OrderLineExtra = {};
     for (const key of ['customerColor', 'model', 'remark'] as const)
       if (!blank(row[key])) clean[key] = row[key]!.trim();
-    // 生产字段的空串需要送到工厂，明确清空时不能又回落产品快照。
-    for (const key of PRODUCTION_EXTRA_FIELDS)
+    // 保留本单已存的生产要求，包括历史单明确清空的字段。
+    for (const key of [...PRODUCTION_IDENTITY_FIELDS, 'weight'] as const)
       if (Object.hasOwn(row, key))
-        (clean as Record<string, unknown>)[key] = row[key]?.trim() ?? '';
-    if (clean.colorMode === 'SINGLE') clean.backColor = clean.frontColor ?? '';
+        Object.assign(clean, { [key]: row[key]?.trim() ?? '' });
     if (row.packQty) clean.packQty = row.packQty;
     if (row.imageId) clean.imageId = row.imageId;
     if (row.colorImageId) clean.colorImageId = row.colorImageId;
@@ -335,7 +240,7 @@ function lineKey(line: BusinessRecord) {
 }
 
 /**
- * 从历史采购单带过来：共用说明列、辅料勾选、包装步骤和订单备注整份替换；明细补充按产品对上本单的行，对不上的行保持不变。
+ * 从历史采购单带过来：共用说明列、辅料勾选、包装步骤和订单备注整份替换；明细补充按产品匹配，颜色和纹路沿用本单。
  * images 为 历史单图片 id → 复制到本单后的新 id，没有对应的图片丢掉。
  */
 export function copyPrintExtras(
@@ -355,11 +260,16 @@ export function copyPrintExtras(
         { ...cell, imageIds: swap(cell.imageIds ?? []) },
       ]),
     );
+  const productionFields = new Set<string>(PRODUCTION_IDENTITY_FIELDS);
   const bySource = new Map<string, OrderLineExtra>();
   for (const line of sourceLines) {
     const key = lineKey(line);
     const extra = source.lineExtras[String(line.id)];
-    if (key && extra && !bySource.has(key)) bySource.set(key, extra);
+    if (!key || !extra || bySource.has(key)) continue;
+    const copy = Object.fromEntries(
+      Object.entries(extra).filter(([field]) => !productionFields.has(field)),
+    );
+    if (Object.keys(copy).length > 0) bySource.set(key, copy);
   }
   const lineExtras = Object.fromEntries(
     Object.entries(current.lineExtras).map(([id, row]) => {
@@ -387,7 +297,13 @@ export function copyPrintExtras(
     const { imageId, colorImageId, ...rest } = extra;
     const copied = imageId ? images[imageId] : undefined;
     const copiedColor = colorImageId ? images[colorImageId] : undefined;
-    lineExtras[String(line.id)] = {
+    const id = String(line.id);
+    const existing = current.lineExtras[id];
+    for (const field of PRODUCTION_IDENTITY_FIELDS) {
+      if (existing && Object.hasOwn(existing, field))
+        Object.assign(rest, { [field]: existing[field] });
+    }
+    lineExtras[id] = {
       ...rest,
       ...(extra.imageIds?.length ? { imageIds: swap(extra.imageIds) } : {}),
       ...(extra.customCells && Object.keys(extra.customCells).length > 0

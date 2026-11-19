@@ -13,7 +13,7 @@ import { applyShrinkThickness, applyTaskTarget, normalizeForStage, toNumber } fr
 
 export type Step = 'confirm' | 'done' | 'home' | 'pick' | 'piece' | 'report';
 
-export interface Pick {
+interface MaterialPick {
   qty: number;
   side?: StockApi.LaminationSide;
   stock: StockApi.Stock;
@@ -49,7 +49,7 @@ export function createJob() {
     options: undefined as StockApi.Options | undefined,
     order: undefined as StockApi.Order | undefined,
     outputs: [] as OutputDraft[],
-    picks: [] as Pick[],
+    picks: [] as MaterialPick[],
     pieces: [] as PieceLine[],
     process: undefined as Api.Process | undefined,
     /** 不按排单开工时，这批是做哪张工厂订单（明细编号），记进订单的工序进度。 */
@@ -91,7 +91,7 @@ export function jobAllowsPlainEmboss(job: Job) {
 }
 
 /** 每次按领料重新生成产出后套用同一份工序目标，避免余量被当成成品厚度。 */
-export function applyJobTarget(job: Job) {
+export function applyJobTarget(job: Partial<Pick<Job, 'productionItem'>> & Pick<Job, 'inputs' | 'order' | 'outputs' | 'prepare' | 'process' | 'task'>) {
   const process = job.process?.code ?? '';
   const planned = job.prepare?.outputAttrs ?? job.task?.output?.attrs ?? job.order?.outputAttrs;
   const target = planned ?? job.prepare?.targetAttrs;

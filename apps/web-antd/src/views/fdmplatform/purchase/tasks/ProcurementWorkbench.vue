@@ -587,7 +587,7 @@ onBeforeUnmount(() => {
           <Input.Search
             v-model:value="keyword"
             allow-clear
-            placeholder="搜索产品、订单、客户"
+            placeholder="搜索产品、内部单号、合同号或客户"
             class="workbench-search"
             :disabled="childOpen"
             @search="applyFilters"
@@ -733,8 +733,8 @@ onBeforeUnmount(() => {
                 <RelatedLink :target="contractTarget(record.row.contractId)">
                   {{
                     contractReferenceText(
-                      record.row.contractCode,
                       record.row.contractName,
+                      record.row.contractCode,
                       record.row.contractId,
                     )
                   }}
@@ -845,8 +845,8 @@ onBeforeUnmount(() => {
                 <p class="procurement-muted">
                   {{
                     contractReferenceText(
-                      entry.row.contractCode,
                       entry.row.contractName,
+                      entry.row.contractCode,
                       entry.row.contractId,
                     )
                   }}
@@ -933,8 +933,8 @@ onBeforeUnmount(() => {
               <RelatedLink :target="contractTarget(selected.row.contractId)">
                 {{
                   contractReferenceText(
-                    selected.row.contractCode,
                     selected.row.contractName,
+                    selected.row.contractCode,
                     selected.row.contractId,
                   )
                 }}

@@ -405,6 +405,7 @@ export namespace FdmgongchangProductionOrderApi {
     accessoryNote?: null | string;
     items: Array<{
       itemId: number;
+      pendingUsageNames?: string[];
       process?: null | string;
       processLabel?: null | string;
       productName: string;

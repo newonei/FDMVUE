@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <!-- vben-app-loading: off -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>员工工资条 · 飞德慕</title>
+  </head>
+  <body>
+    <header class="slip-top">
+      <div>
+        <span class="brand-mark" aria-hidden="true">F</span>
+        <strong>飞德慕</strong>
+        <span class="slip-brand-label">员工工资条</span>
+      </div>
+    </header>
+    <main class="slip-shell">
+      <section id="slip-state" aria-live="polite">
+        <h1>正在载入工资条…</h1>
+      </section>
+      <div id="slip-content" hidden></div>
+    </main>
+    <script
+      type="module"
+      src="/src/standalone/dingtalk-payroll/main.ts"
+    ></script>
+  </body>
+</html>

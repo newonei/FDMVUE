@@ -6,28 +6,24 @@ import type {
 
 import { computed, ref, watch } from 'vue';
 
-import { Alert, Button, Spin, Tag } from 'ant-design-vue';
+import { Alert, Spin, Tag } from 'ant-design-vue';
 
 import { getSupplyMatch, getTargetOptions } from '#/api/fdmgongchang/production-order';
 import { colorModeText, constructionText } from '#/views/fdmplatform/products/manufacturing';
 
 import { textureText } from '../manufacturing';
 import { num } from '../shared';
-import ItemProductionConfigModal from './item-production-config-modal.vue';
 
 /**
  * 规格确认与库存匹配（#154）。工厂给每条明细确认结构化规格（材质、正反面色、长宽厚、压纹、图案），
  * 确认后系统按它从「已包装 → … → 板材」逆向找现成库存和已排任务，多张单按交期先后分，
  * 算出还要新做多少、每道工序要做多少；AI 排单直接用这个结果。规格缺长宽厚的明细不能排单。
  */
-const props = defineProps<{ editable: boolean; items: Api.Item[]; orderId: number }>();
-const emit = defineEmits<{ changed: [] }>();
+const props = defineProps<{ items: Api.Item[]; orderId: number }>();
 
 const matches = ref<MatchApi.Match[]>([]);
 const options = ref<MatchApi.TargetOptions>();
 const loading = ref(false);
-const editing = ref<Api.Item>();
-const configOpen = ref(false);
 
 const matchByItem = computed(() => new Map(matches.value.map((m) => [m.itemId, m])));
 
@@ -97,15 +93,6 @@ function needs(item: Api.Item, process: string) {
   return !item.processes || item.processes.length === 0 ? undefined : item.processes.includes(process);
 }
 
-function openEdit(item: Api.Item) {
-  editing.value = item;
-  configOpen.value = true;
-}
-
-function onConfigSaved() {
-  emit('changed');
-  void load();
-}
 function fmt(v: null | number | string | undefined) {
   return num(v).toLocaleString('zh-CN', { maximumFractionDigits: 3 });
 }
@@ -121,14 +108,13 @@ defineExpose({ reload: load });
         <div v-for="item in items" :key="item.id" class="flex flex-col gap-2 rounded-md border border-border p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="font-medium">{{ item.productName }}</span>
-            <Button v-if="editable" size="small" @click="openEdit(item)">{{ confirmed(item) ? '改规格' : '确认规格' }}</Button>
           </div>
           <p class="m-0 text-xs">
             <Tag v-if="confirmed(item)" color="green">已确认</Tag>
             <Tag v-else color="orange">未确认</Tag>
             <template v-if="confirmed(item)">
               {{ targetText(item) }}
-              <span class="text-muted-foreground">（{{ item.targetConfirmedBy }}）</span>
+              <span v-if="item.targetConfirmedBy" class="text-muted-foreground">（{{ item.targetConfirmedBy }}）</span>
             </template>
             <span v-else class="text-muted-foreground">按规格文本解析，只比对材质、颜色、长宽厚；确认后才比对压纹、图案，也不会用已雕刻的库存</span>
           </p>
@@ -188,13 +174,5 @@ defineExpose({ reload: load });
         </div>
       </div>
     </Spin>
-
-    <ItemProductionConfigModal
-      v-if="editing"
-      v-model:open="configOpen"
-      :order-id="orderId"
-      :item-id="editing.id"
-      @saved="onConfigSaved"
-    />
-  </section>
+</section>
 </template>

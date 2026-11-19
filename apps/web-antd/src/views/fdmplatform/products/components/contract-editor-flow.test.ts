@@ -270,7 +270,22 @@ vi.mock('ant-design-vue', () => {
     Switch: input,
     Table: table,
     Tag: block,
-    Modal: { confirm: vi.fn() },
+    Modal: Object.assign(
+      defineComponent({
+        props: { open: Boolean, okText: String, title: String },
+        emits: ['ok'],
+        setup:
+          (props, { emit }) =>
+          () =>
+            props.open
+              ? h('dialog', { open: true }, [
+                  props.title,
+                  h('button', { onClick: () => emit('ok') }, props.okText),
+                ])
+              : null,
+      }),
+      { confirm: vi.fn() },
+    ),
     message: { success: vi.fn(), warning: vi.fn(), info: vi.fn() },
   };
 });
@@ -548,6 +563,11 @@ describe('order entry without changing menus', () => {
         ?.value,
     ).toBe('客户甲');
     button(customer, '取消').click();
+    await nextTick();
+    expect(host.querySelector('dialog')?.textContent).toContain(
+      '放弃未保存的客户资料',
+    );
+    button(host, '放弃修改').click();
     await nextTick();
     expect(
       host.querySelector<HTMLInputElement>(

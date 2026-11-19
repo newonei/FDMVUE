@@ -17,8 +17,12 @@ import {
   setRowTotal,
 } from './entry-model';
 
-describe('正式采购交期', () => {
-  it('草稿可缺日期，提交时每行都须有真实日期', () => {
+const orderDates = {
+  purchaseDate: '2026-11-17',
+};
+
+describe('采购单日期', () => {
+  it('可留空交付日期和逐行到货日期，填写的到货日期必须真实存在', () => {
     const rows = [
       {
         ...emptyRow('a'),
@@ -29,15 +33,13 @@ describe('正式采购交期', () => {
       },
       { ...emptyRow('b'), productId: 'sku', quantity: '3', unitPrice: '1' },
     ];
-    const header = { supplierId: 's', companyId: 1 };
+    const header = { supplierId: 's', companyId: 1, ...orderDates };
     expect(entryErrors(rows, header).lines).toEqual({});
-    expect(entryErrors(rows, header, true).lines).toEqual({
-      b: '提交下单前请填写到货日期',
-    });
+    expect(entryErrors(rows, header).sheet).toBe('');
     rows[1]!.arrivalDate = '2026-02-30';
-    expect(entryErrors(rows, header, true).lines).toHaveProperty('b');
+    expect(entryErrors(rows, header).lines).toHaveProperty('b');
     rows[1]!.arrivalDate = '2026-11-21';
-    expect(entryErrors(rows, header, true).lines).toEqual({});
+    expect(entryErrors(rows, header).lines).toEqual({});
   });
 });
 
@@ -147,9 +149,10 @@ describe('新建采购单表单', () => {
     expect(errors.sheet).toBe('请选择供应商');
     expect(errors.lines).toEqual({ r1: '请选择产品', r2: '数量须大于 0' });
     expect(entryErrors(rows, { supplierId: 's' }).sheet).toBe('请选择所属公司');
-    expect(entryErrors(rows, { supplierId: 's', contractId: 'c' }).sheet).toBe(
-      '',
-    );
+    expect(
+      entryErrors(rows, { supplierId: 's', contractId: 'c', ...orderDates })
+        .sheet,
+    ).toBe('');
   });
 
   it('sends contract products by item and others by product', () => {
@@ -211,7 +214,7 @@ describe('申请转采购单按供应商拆单', () => {
 
   it('only needs a header supplier when some row has none', () => {
     const all = lines().slice(0, 2);
-    expect(entryErrors(all, { contractId: 'c' }).sheet).toBe('');
+    expect(entryErrors(all, { contractId: 'c', ...orderDates }).sheet).toBe('');
     expect(entryErrors(lines(), { contractId: 'c' }).sheet).toBe(
       '请选择供应商',
     );
@@ -223,6 +226,7 @@ describe('申请转采购单按供应商拆单', () => {
         contractId: 'c',
         supplierId: 'yoga-mat',
         additionalAmount: '30',
+        ...orderDates,
       }).sheet,
     ).toContain('附加费用和优惠抹零无法分摊');
     expect(
@@ -230,6 +234,7 @@ describe('申请转采购单按供应商拆单', () => {
         contractId: 'c',
         supplierId: 'yoga-mat',
         additionalAmount: '30',
+        ...orderDates,
       }).sheet,
     ).toBe('');
   });
@@ -333,7 +338,7 @@ describe('粘贴导入产品明细', () => {
 });
 
 describe('复制采购单', () => {
-  it('带出合同、供应商、表头与明细，采购日期改为今天，到货日期不带', () => {
+  it('复制合同、供应商、表头和明细，采购日期改为今天，交付和到货日期留空', () => {
     let next = 0;
     const { header, rows } = copyEntry(
       {
@@ -369,6 +374,8 @@ describe('复制采购单', () => {
           subject: '原材料1',
           category: '原材料',
           purchaseDate: '2026-01-02',
+          documentDate: '2026-01-03',
+          deliveryDate: '2026-01-08',
           additionalAmount: 0,
           roundOff: 2,
           discountRate: 100,
@@ -391,6 +398,7 @@ describe('复制采购单', () => {
       remark: '急单',
     });
     expect(header.contractId).toBeUndefined();
+    expect(header.deliveryDate).toBeUndefined();
     expect(header.additionalAmount).toBeUndefined();
     expect(header.discountRate).toBeUndefined();
     // 没有产品的行不带；到货日期不带
@@ -419,7 +427,7 @@ describe('复制采购单', () => {
     });
   });
 
-  it('修改草稿时照原单带出采购日期、到货日期，明细保留原行 id 并随保存提交', () => {
+  it('修改草稿时带出原单日期，明细保留原行 id 并随保存提交', () => {
     const { header, rows } = copyEntry(
       {
         contractId: '',
@@ -431,6 +439,8 @@ describe('复制采购单', () => {
         },
         details: {
           purchaseDate: '2026-01-02',
+          documentDate: '2026-01-03',
+          deliveryDate: '2026-01-08',
           lineDates: { l1: '2026-01-10' },
         },
       } as never,
@@ -439,8 +449,15 @@ describe('复制采购单', () => {
       true,
     );
     expect(header.purchaseDate).toBe('2026-01-02');
+    expect(header.deliveryDate).toBe('2026-01-08');
     expect(rows[0]).toMatchObject({ lineId: 'l1', arrivalDate: '2026-01-10' });
-    expect(entryPayload(rows, header, 'key').lines[0]!.id).toBe('l1');
+    const payload = entryPayload(rows, header, 'key');
+    expect(payload).toMatchObject({
+      purchaseDate: '2026-01-02',
+      deliveryDate: '2026-01-08',
+      lines: [{ id: 'l1' }],
+    });
+    expect(payload).not.toHaveProperty('documentDate');
     expect(header.sourceOrderId).toBeUndefined();
     expect(rows[0]!.sourceLineId).toBeUndefined();
   });

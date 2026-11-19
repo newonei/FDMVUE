@@ -18,8 +18,9 @@ import { Alert, AutoComplete, Button, Input, InputNumber, message, Modal, Select
 import { reassignScheduleTasks } from '#/api/fdmgongchang/schedule';
 import { batchReportWorkbenchTasks, getWorkbenchBatchOptions, getWorkbenchMates } from '#/api/fdmgongchang/workbench';
 
+import DispatchWageCheck from '../schedule/modules/dispatch-wage-check.vue';
 import TaskMaterials from '../schedule/modules/task-materials.vue';
-import { businessError } from '../shared/business-error';
+import { businessError, reportFailureText } from '../shared/business-error';
 import FactorySwitch from '../shared/factory-switch.vue';
 import { changeLaminationDefect, changeLaminationGood, laminationDefects, laminationLayers } from '../shared/lamination-report';
 import { quantityPrecision } from '../shared/quantity';
@@ -190,8 +191,9 @@ async function batchReport() {
     request.value = undefined; message.success(`已完成 ${result.reported} 个任务的本次报工`);
     reportWarnings.value = result.warnings ?? [];
     emit('refresh');
-  } catch (error) { if (version === contextVersion) warning.value = businessError(error).msg; }
-  finally { if (version === contextVersion) busy.value = false; }
+  } catch (error) {
+    if (version === contextVersion) warning.value = reportFailureText(error, true);
+  } finally { if (version === contextVersion) busy.value = false; }
 }
 watch(() => job.my, () => {
   submittedIds.value = []; selectedIds.value = [];
@@ -218,16 +220,21 @@ const reportOutputTitle = computed(() => {
   if (props.process === 'FOLD') return '报工折叠类型';
   return `报工产出 · ${WORKSHOP_OUTPUT[props.process] ?? '半成品'}`;
 });
-const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => [
-  { key: 'task', title: '任务 / 产品', width: 190 },
-  { key: 'operator', title: '实际生产 / 计件人员', width: 180 },
-  ...(props.process === 'LAMINATE' ? [{ key: 'color', title: '片材颜色', width: 165 }] : []),
-  { key: 'good', title: props.process === 'LAMINATE' ? '本次片材良品' : '本次良品', width: 120 },
-  { key: 'defect', title: props.process === 'LAMINATE' ? '本次片材残次' : '本次残次品', width: 120 },
-  { key: 'progress', title: '计划 / 累计已报', width: 125 },
-  { key: 'focus', title: '成品要求', width: 320 },
-  { key: 'output', title: reportOutputTitle.value, width: 250 },
-]);
+const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
+  const isLamination = props.process === 'LAMINATE';
+  const output = { key: 'output', title: reportOutputTitle.value, width: 250 };
+  return [
+    { key: 'task', title: '任务 / 产品', width: 190 },
+    { key: 'operator', title: '实际生产 / 计件人员', width: 180 },
+    ...(isLamination ? [{ key: 'color', title: '片材颜色', width: 165 }] : []),
+    { key: 'good', title: isLamination ? '本次片材良品' : '本次良品', width: 120 },
+    { key: 'defect', title: isLamination ? '本次片材残次' : '本次残次品', width: 120 },
+    ...(isLamination ? [output] : []),
+    { key: 'progress', title: '计划 / 累计已报', width: 125 },
+    { key: 'focus', title: '成品要求', width: 320 },
+    ...(isLamination ? [] : [output]),
+  ];
+});
 const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
 const independentSlice = computed(() => my.value.processes.find((item) => item.code === 'SLICE' && item.code === props.process));
@@ -352,6 +359,7 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
     <Modal v-model:open="dispatchOpen" title="派给员工" ok-text="确认派工" :confirm-loading="busy" :closable="!busy" :mask-closable="!busy" :keyboard="!busy" :cancel-button-props="{ disabled: busy }" @ok="dispatch">
       <div class="flex flex-col gap-3">
         <p class="m-0">将选中的 {{ selectedIds.length }} 个任务安排到员工的「我的工作台」，员工可核对规格、手选材料并填写实际领取数量。</p>
+        <DispatchWageCheck v-if="dispatchOpen && selectedTasks.length" :key="factoryId ?? 0" :tasks="selectedTasks" />
         <Select id="workshop-dispatch-workers" v-model:value="dispatchWorkers" :options="operatorOptions" :loading="operatorsLoading" :disabled="busy" mode="multiple" show-search option-filter-prop="label" placeholder="选择本工序在岗员工" aria-label="派给员工" />
         <Alert type="info" show-icon message="选择多人表示共同负责同一任务" description="由一位负责人领料并在原工序单分批报工；不会拆成多人独立领料的任务。需要各自领料时，请先按分工拆成不同任务。" />
         <p class="m-0 text-xs text-muted-foreground">已经派过人的任务将改为本次所选人员；已开过工序单的任务不能改派。</p>

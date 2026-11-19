@@ -58,7 +58,7 @@ watch(
     <Space direction="vertical" style="width: 100%">
       <Input.Search
         v-model:value="keyword"
-        placeholder="搜索合同编号、客户或采购单供应商"
+        placeholder="搜索内部单号、合同号、客户或供应商"
         @search="load(true)"
       /><Alert v-if="pageError" type="error" :message="pageError" /><Table
         :data-source="records"

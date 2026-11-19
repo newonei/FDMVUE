@@ -1,10 +1,10 @@
 import { money } from '../data';
 export function contractReferenceText(
-  code: unknown,
-  name: unknown,
+  primary: unknown,
+  fallback: unknown,
   id: unknown,
 ) {
-  for (const value of [code, name])
+  for (const value of [primary, fallback])
     if (typeof value === 'string' && value.trim()) return value.trim();
   return typeof id === 'string' && id.trim() ? '查看关联合同' : '尚未关联合同';
 }

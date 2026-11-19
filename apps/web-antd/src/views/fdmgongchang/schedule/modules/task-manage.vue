@@ -16,6 +16,7 @@ import { listScheduleTasks, reassignScheduleTasks, returnScheduleTasksToHall } f
 import { factoryToday } from '../../shared/factory-date';
 import { dateText, dayLabel, PROCESS_LABELS, TASK_STATUS, taskMaterialText } from '../../shared/schedule';
 import { formatQty } from '../../stage-stock/model';
+import DispatchWageCheck from './dispatch-wage-check.vue';
 import TaskMaterials from './task-materials.vue';
 
 /**
@@ -360,6 +361,7 @@ function returnToHall() {
           />
         </label>
         <p class="m-0">改派即派单：任务直接进新人员的「我的任务」，不经过任务大厅；已经开的工序单不受影响。</p>
+        <DispatchWageCheck v-if="reassignOpen && selectedTasks.length" :key="factoryId" :tasks="selectedTasks" />
       </div>
     </Modal>
   </div>

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TaskManage from './modules/task-manage.vue';
 
 const mocks = vi.hoisted(() => ({
+  wageWarning: vi.fn(),
   list: vi.fn(),
   reassign: vi.fn(),
   returnToHall: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('#/api/fdmgongchang/factory', () => ({
   ]),
 }));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
+  getDispatchWageWarning: mocks.wageWarning,
   listScheduleTasks: mocks.list,
   reassignScheduleTasks: mocks.reassign,
   returnScheduleTasksToHall: mocks.returnToHall,
@@ -130,6 +132,21 @@ describe('schedule task management', () => {
 
     buttons('PB20261020-001')[0]!.click();
     expect(opened).toEqual([9]);
+  });
+
+  it('checks shared output dimensions once and keeps dispatch available when prices are ambiguous', async () => {
+    const output = { stage: 'SHEET', attrs: { width: 61, length: 183, thickness: 0.6 } };
+    mocks.list.mockResolvedValue([task({ id: 1, output }), task({ id: 2, output })]);
+    mocks.wageWarning.mockResolvedValue('命中多个同等优先的计价项目');
+    await mount();
+    orderCards()[0]!.querySelector<HTMLInputElement>('header input[type="checkbox"]')!.click();
+    await flush();
+    buttons('改派')[0]!.click();
+    await flush();
+    expect(mocks.wageWarning).toHaveBeenCalledExactlyOnceWith({ process: 'SLICE', ...output.attrs });
+    expect(document.body.textContent).toContain('计件需核对，可继续派工');
+    expect(document.body.textContent).toContain('#1、#2：命中多个同等优先的计价项目');
+    expect(buttons('改派').at(-1)?.disabled).toBe(false);
   });
 
   it('merges the same order across dates and schedules without adding the repeated order summary twice', async () => {

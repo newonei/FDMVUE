@@ -440,42 +440,53 @@ describe('采购开单先保存草稿', () => {
       const { host, saved } = await mount({
         editOf: { contractId: '', orderId: 'source-order' },
       });
-      if (submit) {
-        // 第一项日期为采购日期，产品行到货日期是最后一项。
-        const arrival = [
-          ...host.querySelectorAll<HTMLInputElement>('input[type="date"]'),
-        ].at(-1)!;
-        arrival.value = '2026-11-20';
-        arrival.dispatchEvent(new Event('input'));
-        await settle();
-      }
       button(host, label).click();
       await settle();
       expect(mocks.create).not.toHaveBeenCalled();
       expect(mocks.update).toHaveBeenCalledWith(
         '',
         'source-order',
-        expect.any(Object),
+        expect.objectContaining({
+          purchaseDate: expect.any(String),
+          deliveryDate: null,
+          lines: [expect.objectContaining({ arrivalDate: undefined })],
+        }),
         submit,
       );
+      expect(mocks.update.mock.calls[0]![2]).not.toHaveProperty('documentDate');
       expect(saved).toHaveBeenCalledWith(result, mode);
     },
   );
-  it('提交前拦住缺交期，仍可保存草稿', async () => {
+  it('清空采购日期后无法保存草稿或提交，补齐日期后可提交', async () => {
     const { host } = await mount({
       editOf: { contractId: '', orderId: 'source-order' },
     });
+    const requiredDates = host.querySelectorAll<HTMLInputElement>(
+      'input[type="date"][aria-required="true"]',
+    );
+    expect(requiredDates).toHaveLength(1);
+    const [purchaseDate] = requiredDates;
+    await fill(purchaseDate!, '');
+    button(host, '保存草稿').click();
+    await settle();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('请填写有效的采购日期');
+
     button(host, '提交下单').click();
     await settle();
     expect(mocks.update).not.toHaveBeenCalled();
-    expect(host.textContent).toContain('提交下单前请填写到货日期');
-    button(host, '保存草稿').click();
+
+    await fill(purchaseDate!, '2026-11-15');
+    button(host, '提交下单').click();
     await settle();
     expect(mocks.update).toHaveBeenCalledWith(
       '',
       'source-order',
-      expect.any(Object),
-      false,
+      expect.objectContaining({
+        purchaseDate: '2026-11-15',
+        deliveryDate: null,
+      }),
+      true,
     );
   });
 });
