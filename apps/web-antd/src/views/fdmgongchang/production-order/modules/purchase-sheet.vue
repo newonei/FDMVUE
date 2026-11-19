@@ -29,10 +29,17 @@ let version = 0;
 const details = computed(() => sheet.value?.details ?? {});
 const rows = computed(() => {
   const bySource = new Map(props.items?.filter((item) => item.sourceLineId).map((item) => [item.sourceLineId, item]));
-  return (sheet.value?.order.lines ?? []).map((line) => ({
-    line, item: bySource.get(line.id),
-    purchase: purchaseSheetStructure(line, details.value.lineExtras?.[line.id], targetOptions.value),
-  }));
+  return (sheet.value?.order.lines ?? []).map((line) => {
+    const extra = details.value.lineExtras?.[line.id];
+    return {
+      line, item: bySource.get(line.id),
+      purchase: purchaseSheetStructure(line, extra, targetOptions.value),
+      colorCards: [
+        { label: '正面', id: extra?.colorImageId },
+        { label: '反面', id: extra?.backColorImageId },
+      ].filter((card) => card.id),
+    };
+  });
 });
 const checkedAccessories = computed(() => (details.value.accessories ?? []).filter((a) => a.checked));
 const steps = computed(() => details.value.packagingSteps ?? []);
@@ -43,7 +50,7 @@ const empty = computed(
     checkedAccessories.value.length === 0 &&
     steps.value.length === 0 &&
     shared.value.length === 0 &&
-    (sheet.value?.order.lines ?? []).every((l) => !l.printing && !l.packaging && !lineNote(l.id) && !extraText(l.id)),
+    rows.value.every(({ line, colorCards }) => !line.printing && !line.packaging && !lineNote(line.id) && !extraText(line.id) && colorCards.length === 0),
 );
 
 async function load() {
@@ -134,7 +141,7 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
         </p>
 
         <div class="flex flex-col gap-2">
-          <div v-for="{ line, item, purchase } in rows" :key="line.id" class="flex flex-col gap-0.5 rounded bg-muted/40 px-2.5 py-1.5">
+          <div v-for="{ line, item, purchase, colorCards } in rows" :key="line.id" class="flex flex-col gap-0.5 rounded bg-muted/40 px-2.5 py-1.5">
             <span class="flex flex-wrap items-baseline justify-between gap-2">
               <span>{{ line.skuName }} <span class="text-xs text-muted-foreground">{{ line.skuCode }}</span></span>
               <span class="tabular-nums">{{ openQty(line) }} {{ line.unit }}</span>
@@ -153,10 +160,12 @@ function openQty(line: Api.PurchaseSheet['order']['lines'][number]) {
               :width="72"
               class="rounded"
             />
-            <div v-if="details.lineExtras?.[line.id]?.colorImageId" class="mt-1 flex flex-col items-start gap-1">
-              <span class="text-xs text-muted-foreground">供应商实物色号图</span>
-              <Image v-if="images[details.lineExtras[line.id]!.colorImageId!]" :src="images[details.lineExtras[line.id]!.colorImageId!]" :width="96" class="rounded" />
-              <span v-else class="text-xs text-muted-foreground">色号图暂时无法读取</span>
+            <div v-if="colorCards.length" class="mt-1 flex flex-wrap gap-3">
+              <div v-for="{ id, label } in colorCards" :key="label" class="flex flex-col items-start gap-1">
+                <span class="text-xs text-muted-foreground">供应商实物色号图（{{ label }}）</span>
+                <Image v-if="id && images[id]" :src="images[id]" :width="96" class="rounded" />
+                <span v-else class="text-xs text-muted-foreground">色号图暂时无法读取</span>
+              </div>
             </div>
           </div>
         </div>

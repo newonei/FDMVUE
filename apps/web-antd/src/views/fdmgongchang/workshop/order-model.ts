@@ -17,13 +17,14 @@ export interface FocusField { label: string; value: string; side?: 'BACK' | 'FRO
 
 export const WORKSHOP_OUTPUT: Record<string, string> = {
   MIX: '板材', SLICE: '已开片板材', CUT: '已开片片材', LAMINATE: '已复合片材',
-  EMBOSS: '已压花片材', PUNCH: '成品', ENGRAVE: '已雕刻成品', FOLD: '已折叠成品',
+  EMBOSS: '已压花片材', PUNCH: '成品', ENGRAVE: '已雕刻成品', FOLD: '已折叠成品', PACK: '已包装成品',
 };
 
 export const WORKSHOP_FOCUS: Record<string, string> = {
   MIX: '克重 · 成品规格 · 成品数量 · 颜色', SLICE: '颜色 · 成品规格 · 成品数量 · 单双色', CUT: '颜色 · 成品规格 · 成品数量',
   LAMINATE: '正反面颜色 · 成品规格 · 成品数量', EMBOSS: '正反花纹 · 正反面颜色',
   PUNCH: '成品规格 · 成品数量', ENGRAVE: '雕刻图案 · 成品规格 · 成品数量', FOLD: '成品规格 · 成品数量 · 折叠类型',
+  PACK: '包装要求 · 成品规格 · 成品数量',
 };
 
 export function taskOrderNos(task: Api.Task) {
@@ -130,6 +131,7 @@ export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusFiel
   const fields: FocusField[] = [];
   const add = (label: string, value: string, side?: FocusField['side']) => fields.push({ label, value, side });
   if (task.process === 'MIX') add('克重', join(items.map((item) => item.weight)));
+  if (task.process === 'PACK') add('包装要求', join(items.map((item) => item.packaging)));
   if (task.process === 'EMBOSS') {
     add('正面纹路', labels.texture(attrs.textureFront) || join(items.map((item) => labels.texture(item.targetTextureFront))), 'FRONT');
     add('反面纹路', labels.texture(attrs.textureBack) || join(items.map((item) => labels.texture(item.targetTextureBack))), 'BACK');

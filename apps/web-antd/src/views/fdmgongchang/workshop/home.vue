@@ -237,7 +237,7 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
 });
 const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
-const independentSlice = computed(() => my.value.processes.find((item) => item.code === 'SLICE' && item.code === props.process));
+const independentProcess = computed(() => my.value.processes.find((item) => item.code === props.process));
 function taskState(task: ScheduleApi.Task) {
   if (task.status === 'CLOSED') return '已关闭'; if (task.status === 'DONE') return '已完成';
   if (task.activeOrderId) return '已领料 · 在做';
@@ -261,10 +261,14 @@ const mixOutputLines = (task: ScheduleApi.Task) => mixPlanLines(task).filter((li
   <div class="flex min-h-full min-w-0 flex-col gap-3 p-3 sm:p-4">
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div><h1 class="m-0 text-xl font-bold">{{ title }}</h1><p class="mb-0 mt-1 text-sm text-muted-foreground">展开订单后勾选任务，可派给员工在「我的工作台」手动领料、分批报工，也可指定实际人员代报。</p></div>
-      <div class="flex items-center gap-3"><FactorySwitch :factories="factories" :value="factoryId" :class="{ 'pointer-events-none opacity-60': busy }" :aria-disabled="busy" @change="!busy && emit('changeFactory', $event)" /><Button :disabled="busy" @click="emit('refresh')">刷新</Button></div>
+      <div class="flex flex-wrap items-center gap-3">
+        <FactorySwitch :factories="factories" :value="factoryId" :class="{ 'pointer-events-none opacity-60': busy }" :aria-disabled="busy" @change="!busy && emit('changeFactory', $event)" />
+        <Button v-if="independentProcess" :disabled="busy" @click="emit('startActual', independentProcess)">
+          {{ props.process === 'SLICE' ? '开片 · 选择板材' : `${independentProcess.label} · 独立开单` }}
+        </Button>
+        <Button :disabled="busy" @click="emit('refresh')">刷新</Button>
+      </div>
     </header>
-    <Alert v-if="props.process === 'PACK'" type="info" show-icon message="包装工序不再排任务" description="订单拆分下发到最后一道生产工序。已存在的包装工序记录可在历史记录中查看。" />
-    <template v-else>
       <div class="flex flex-wrap items-center justify-between gap-3 border-y border-border py-2">
         <div class="flex flex-wrap gap-6 text-sm"><span>订单 <b class="text-base">{{ orders.length }}</b></span><span>待完成任务 <b class="text-base text-primary">{{ activeCount }}</b></span><span class="text-muted-foreground">重点：{{ WORKSHOP_FOCUS[props.process] }}</span></div>
         <div class="flex flex-wrap gap-2"><Input id="workshop-keyword" v-model:value="keyword" allow-clear class="w-64 max-w-full" placeholder="搜索订单、产品或任务编号" aria-label="搜索车间订单" /><Select id="workshop-status" v-model:value="status" :options="[{ label: '有待完成任务', value: 'ACTIVE' }, { label: '全部订单', value: 'ALL' }, { label: '有已完成任务', value: 'DONE' }]" class="w-40" aria-label="订单任务状态" /></div>
@@ -355,7 +359,6 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
           </div>
         </template>
       </Table>
-    </template>
     <Modal v-model:open="dispatchOpen" title="派给员工" ok-text="确认派工" :confirm-loading="busy" :closable="!busy" :mask-closable="!busy" :keyboard="!busy" :cancel-button-props="{ disabled: busy }" @ok="dispatch">
       <div class="flex flex-col gap-3">
         <p class="m-0">将选中的 {{ selectedIds.length }} 个任务安排到员工的「我的工作台」，员工可核对规格、手选材料并填写实际领取数量。</p>
@@ -367,7 +370,6 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
       </div>
     </Modal>
     <details v-if="inProgress.length || recentDone.length" class="border-t border-border pt-3"><summary class="cursor-pointer text-sm text-muted-foreground">历史工序单 / 补登领料（{{ inProgress.length + recentDone.length }}）</summary><OrdersTable v-if="inProgress.length" class="mt-2" :orders="inProgress" :options="job.options" @report="emit('reportOrder', $event)" @supplement="emit('supplementOrder', $event)" /><OrdersTable v-if="recentDone.length" class="mt-2" :orders="recentDone" :options="job.options" completed @supplement="emit('supplementOrder', $event)" /></details>
-    <details v-if="independentSlice" class="border-t border-border pt-3"><summary class="cursor-pointer text-sm text-muted-foreground">独立开片生产</summary><p class="my-2 text-xs text-muted-foreground">独立生产不计入已下发任务或订单进度。</p><Button @click="emit('startActual', independentSlice)">开片 · 选择板材</Button></details>
   </div>
 </template>
 

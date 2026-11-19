@@ -77,8 +77,8 @@ watch(open, async (value, _, onCleanup) => {
   try {
     const routes = await getRouteOptions(props.factoryId);
     if (!active) return;
-    options.value = routes.processes.filter(({ code }) => code !== 'PACK' && Object.hasOwn(PROCESS_LABELS, code)
-      && !props.item.processes?.includes(code)).map(({ code, label }) => ({ label, value: code }));
+    options.value = routes.processes.filter(({ code }) => Object.hasOwn(PROCESS_LABELS, code)
+      && (code === 'PACK' || !props.item.processes?.includes(code))).map(({ code, label }) => ({ label, value: code }));
   } catch (error) {
     if (active) operationError.value = `工序选项加载失败。${businessError(error).msg}`;
   } finally {

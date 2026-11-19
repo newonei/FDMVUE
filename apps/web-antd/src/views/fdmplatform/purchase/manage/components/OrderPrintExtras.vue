@@ -45,7 +45,6 @@ import {
   MAX_ADDITIONAL_LINES,
   MAX_DETAIL_COLUMNS,
   MAX_DETAIL_IMAGES,
-  MAX_SHARED_COLUMNS,
   MAX_SHARED_IMAGES,
   MAX_STEP_IMAGES,
   MAX_STEPS,
@@ -99,6 +98,11 @@ onBeforeUnmount(() => {
 });
 /** 采购单明细行（表格单元格里拿到的是宽松类型）。 */
 type Line = Record<string, any>;
+const colorCardSlots = [
+  { field: 'colorImageId', label: '正面' },
+  { field: 'backColorImageId', label: '反面' },
+] as const;
+type LineImageField = 'imageId' | (typeof colorCardSlots)[number]['field'];
 const extras = reactive<PrintExtras>({
   detailColumns: [],
   additionalLines: [],
@@ -288,14 +292,14 @@ function priceAmount(line: Line) {
     String(props.view.order.currency ?? 'CNY'),
   );
 }
-function lineImages(line: Line, field: 'colorImageId' | 'imageId' = 'imageId') {
+function lineImages(line: Line, field: LineImageField = 'imageId') {
   const id = extra(line)[field];
   return id ? [id] : [];
 }
 function setLineImages(
   line: Line,
   ids: string[],
-  field: 'colorImageId' | 'imageId' = 'imageId',
+  field: LineImageField = 'imageId',
 ) {
   extra(line)[field] = ids[0];
 }
@@ -784,19 +788,28 @@ defineExpose({
                     </div>
                     <div class="field" data-key="colorImage">
                       <span class="group-label">供应商实物色号图</span>
-                      <OrderImages
-                        :model-value="lineImages(record, 'colorImageId')"
-                        :contract-id="contractId"
-                        :order-id="orderId"
-                        :max="1"
-                        :size="80"
-                        :disabled="disabled"
-                        aria-label="供应商实物色号图"
-                        @update:model-value="
-                          (ids) => setLineImages(record, ids, 'colorImageId')
-                        "
-                        @busy="imageBusy"
-                      />
+                      <div class="color-card-slots">
+                        <div
+                          v-for="slot in colorCardSlots"
+                          :key="slot.field"
+                          class="field"
+                        >
+                          <span class="group-label">{{ slot.label }}</span>
+                          <OrderImages
+                            :model-value="lineImages(record, slot.field)"
+                            :contract-id="contractId"
+                            :order-id="orderId"
+                            :max="1"
+                            :size="80"
+                            :disabled="disabled"
+                            :aria-label="`供应商实物色号图（${slot.label}）`"
+                            @update:model-value="
+                              (ids) => setLineImages(record, ids, slot.field)
+                            "
+                            @busy="imageBusy"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -905,7 +918,8 @@ defineExpose({
           <span class="muted">
             如纹路、定制：明细各行合并成一格，文字加配图（{{
               extras.sharedColumns.length
-            }}/{{ MAX_SHARED_COLUMNS }}）
+            }}
+            项）
           </span>
         </template>
         <div class="shared-grid">
@@ -949,12 +963,7 @@ defineExpose({
             />
           </div>
         </div>
-        <Button
-          v-if="!disabled && extras.sharedColumns.length < MAX_SHARED_COLUMNS"
-          @click="addShared"
-        >
-          + 添加共用说明列
-        </Button>
+        <Button v-if="!disabled" @click="addShared"> + 添加共用说明列 </Button>
         <span v-else-if="extras.sharedColumns.length === 0" class="muted">
           未填写
         </span>
@@ -1495,8 +1504,14 @@ defineExpose({
 
 .model-media-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) max-content;
   gap: 20px;
+}
+
+.color-card-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .field-hint {

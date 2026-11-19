@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   options: vi.fn(),
   order: vi.fn(),
   plan: vi.fn(),
+  productionOrders: vi.fn(),
   stock: vi.fn(),
   supplement: vi.fn(),
   wage: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('#/api/fdmgongchang/workbench', () => ({
   getWorkbenchRecipePlan: mocks.plan,
   getWorkbenchStock: mocks.stock,
   getWorkbenchPickList: mocks.pickList,
+  getWorkbenchProductionOrders: mocks.productionOrders,
   matchWorkbenchWage: mocks.wage,
   prepareWorkbenchTask: mocks.prepare,
   prepareWorkbenchTaskStock: mocks.prepareStock,
@@ -246,6 +248,7 @@ describe('workbench page', () => {
     mocks.pickList.mockResolvedValue([prepare]);
     mocks.prepare.mockResolvedValue(prepare);
     mocks.prepareStock.mockResolvedValue(prepare);
+    mocks.productionOrders.mockResolvedValue([]);
     mocks.stock.mockResolvedValue({ list: [board], total: 1 });
     mocks.order.mockResolvedValue(order);
     mocks.wage.mockResolvedValue([{ itemId: 1, matched: true, name: '开片', price: 27, score: 0, unit: 'm³' }]);
@@ -561,10 +564,14 @@ describe('workbench page', () => {
     expect(document.querySelector('.workshop-order-table .ant-pagination-item-active')?.textContent).toBe('1');
   });
 
-  it('shows packaging as no longer scheduled', async () => {
-    mocks.my.mockResolvedValue(workshop()); await mount('PACK');
-    expect(document.body.textContent).toContain('包装工序不再排任务');
-    expect(document.querySelector('.workshop-order-table')).toBeNull();
+  it('shows packaging tasks and submits their reports from the packaging workshop', async () => {
+    const task = { ...my.tasks[0]!, process: 'PACK' };
+    const process = { code: 'PACK', label: '包装', outputLabel: '已包装成品', outputStage: 'PACKED', outputUnit: '件', sources: ['PUNCHED'] };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [task] });
+    await mount('PACK'); await expandOrder('HT-001'); await selectTask(31);
+    expect(document.body.textContent).toContain('包装要求');
+    fill('good-HT-001-31', 10); await flush(); clickButton('批量报工'); await flush();
+    expect(mocks.batchReport).toHaveBeenCalledWith(expect.objectContaining({ process: 'PACK', rows: [expect.objectContaining({ taskId: 31, goodQuantity: 10 })] }));
   });
 
   it('explains an inaccessible workshop using the backend qualification message', async () => {
@@ -1014,6 +1021,73 @@ describe('workbench page', () => {
     expect(mocks.issue).not.toHaveBeenCalled();
     expect(mocks.report).not.toHaveBeenCalled();
     expect(mocks.returnMaterial).not.toHaveBeenCalled();
+  });
+
+  it('opens an independent cutting order with no dispatched task or production order', async () => {
+    const cut = { code: 'CUT', label: '立切', outputLabel: '片材', outputStage: 'CUT', outputUnit: '片', sources: ['SHEET'] };
+    const sheet = { ...board, stage: 'SHEET', item: { ...board.item, thickness: 0.6 } };
+    mocks.my.mockResolvedValue({ ...my, processes: [cut], tasks: [], hall: [], inProgress: [] });
+    mocks.stock.mockResolvedValue({ list: [sheet], total: 1 });
+
+    await mount();
+    expect(document.querySelector('[aria-label="独立开单"]')?.textContent).toContain('立切 · 独立开单');
+    expect(document.body.textContent).not.toContain('开片 · 选择板材');
+    clickButton('立切·独立开单');
+    await flush();
+    expect(mocks.stock).toHaveBeenCalledWith('SHEET', undefined);
+    clickButton(`批次${sheet.batchNo}`);
+    await flush();
+    fill('actual-pick-11', 3);
+    await flush();
+    clickButton('下一步：确认领料');
+    await flush();
+    expect(document.body.textContent).toContain('本次为独立立切');
+    clickButton('确认领料');
+    await flush();
+
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      finish: false, inputs: [{ laminationSide: undefined, quantity: 3, stockId: 11 }],
+      process: 'CUT', productionOrderItemId: undefined, scheduleTaskId: undefined, sourceStage: 'SHEET',
+    }));
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.productionOrders).not.toHaveBeenCalled();
+  });
+
+  it('requires an eligible factory order item when manually opening a packaging order from the workshop', async () => {
+    const pack = { code: 'PACK', label: '包装', outputLabel: '已包装成品', outputStage: 'PACKED', outputUnit: '件', sources: ['PUNCHED'] };
+    const punched = { ...board, stage: 'PUNCHED' };
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [pack], workshopProcess: pack, workshopTasks: [] });
+    mocks.stock.mockResolvedValue({ list: [punched], total: 1 });
+    mocks.productionOrders.mockResolvedValue([{ orderNo: 'FO-001', items: [
+      { id: 13, completedQuantity: 0, processes: ['PUNCH'], productName: '散装垫', quantity: 5 },
+      { id: 14, completedQuantity: 0, processes: ['PUNCH', 'PACK'], productName: '袋装垫', quantity: 5 },
+    ] }]);
+
+    await mount('PACK');
+    clickButton('包装·独立开单');
+    await flush();
+    expect(mocks.stock).toHaveBeenCalledWith('PUNCHED', undefined);
+    clickButton(`批次${punched.batchNo}`);
+    await flush();
+    fill('actual-pick-11', 3);
+    await flush();
+    clickButton('下一步：确认领料');
+    await flush();
+    expect(document.body.textContent).toContain('选择包装对应的工厂订单');
+    expect(document.body.textContent).not.toContain('散装垫');
+    clickButton('确认领料，去干活');
+    clickButton('已经做完了，领料同时报数量');
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('第 2 步 确认领料');
+    clickButton('袋装垫');
+    await flush();
+    clickButton('确认领料，去干活');
+    await flush();
+
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      finish: false, process: 'PACK', productionOrderItemId: 14, scheduleTaskId: undefined, sourceStage: 'PUNCHED',
+    }));
+    expect(mocks.issue).not.toHaveBeenCalled();
   });
 
   it('stays on the completed page when independent issuing succeeds but refreshing the workbench fails', async () => {

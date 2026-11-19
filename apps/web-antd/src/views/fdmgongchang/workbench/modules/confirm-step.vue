@@ -13,19 +13,19 @@ import IssueShortages from './issue-shortages.vue';
 import StepHeader from './step-header.vue';
 
 /** 第 2 步 确认领料：只显示领多少、领什么、领完还剩多少。 */
+const props = defineProps<{ submitting: boolean }>();
 const emit = defineEmits<{ back: []; issueOnly: []; reportNow: [] }>();
 const job = useJob();
-const submitting = ref(false);
 const labels = computed(() => makeLabels(job.options));
 const source = computed(() => stageOf(job, job.sourceStage));
 const total = computed(() => job.picks.reduce((t, p) => t + (p.qty || 0), 0));
 
-/**
- * 不按排单开工时，如果这道工序是某张工厂订单工艺的最后一道，选这批是做哪张单（记进订单的工序进度；完成数量按交货算）；
- * 按排单开工的由排单任务自动关联。补领沿用原来的单。
- */
-const mayAskOrder = computed(() => !job.supplement && !job.task && !!job.process && job.process.code !== 'SLICE');
+const independent = computed(() => !job.supplement && !job.task);
+// 手动开包装单时，成品入库需要订单明细来确定商品。
+const packaging = computed(() => independent.value && job.process?.code === 'PACK');
 const openOrders = ref<OrderApi.Order[]>([]);
+const ordersLoading = ref(false);
+const ordersFailed = ref(false);
 const orderChoices = computed(() =>
   openOrders.value.flatMap((o) =>
     o.items
@@ -42,33 +42,35 @@ const orderChoices = computed(() =>
       })),
   ),
 );
-const askOrder = computed(() => mayAskOrder.value && orderChoices.value.length > 0);
-onMounted(async () => {
-  if (!mayAskOrder.value) return;
+async function loadOrders() {
+  ordersLoading.value = true;
+  ordersFailed.value = false;
   try {
     openOrders.value = await getWorkbenchProductionOrders();
   } catch {
-    openOrders.value = [];
+    ordersFailed.value = true;
+  } finally {
+    ordersLoading.value = false;
   }
-});
-function choose(c?: { allowPlainEmboss?: boolean; id: number; label: string; layerRule?: string; orderNo: string; targetThickness?: null | number | string }) {
-  job.productionItem = c ? { allowPlainEmboss: c.allowPlainEmboss, id: c.id, label: c.label, layerRule: c.layerRule, orderNo: c.orderNo, targetThickness: c.targetThickness } : undefined;
 }
+onMounted(() => {
+  if (packaging.value) void loadOrders();
+});
 /** 已完工的单补登领料：要写原因。 */
 const late = computed(() => job.supplement && job.order?.status === 'COMPLETED');
 const reasons = ['实际多拿了料没登记', '损耗比预计多'];
-const orderText = computed(() =>
-  job.supplement ? `${late.value ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}` : job.task?.contractCode || job.productionItem?.orderNo || '备货',
-);
-
-async function issue() {
-  submitting.value = true;
-  try {
-    emit('issueOnly');
-  } finally {
-    submitting.value = false;
+const orderText = computed(() => {
+  if (job.supplement) {
+    return `${late.value ? '补登到' : '补到'} ${job.order?.orderNo ?? ''}`;
   }
-}
+  const orderNo = job.task?.contractCode || job.productionItem?.orderNo;
+  if (orderNo) return orderNo;
+  if (packaging.value) return '待选择';
+  return independent.value ? '独立生产' : '备货';
+});
+const cannotIssue = computed(() => props.submitting
+  || (late.value && !job.supplementRemark.trim())
+  || (packaging.value && !orderChoices.value.some((choice) => choice.id === job.productionItem?.id)));
 </script>
 
 <template>
@@ -115,32 +117,33 @@ async function issue() {
         </div>
       </section>
       <IssueShortages />
-      <p v-if="!job.task && !job.supplement && job.process?.code === 'SLICE'" class="m-0 rounded-md bg-primary/5 p-3 text-sm">
-        本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色、长宽和填写的单层厚度分别入库，不计入已下发任务或订单进度。
+      <p v-if="independent && !packaging" class="m-0 rounded-md bg-primary/5 p-3 text-sm">
+        <template v-if="job.process?.code === 'SLICE'">本次为独立开片，所有板材登记在同一张工序单。产出按实际领料的颜色、长宽和填写的单层厚度分别入库，不计入已下发任务或订单进度。</template>
+        <template v-else>本次为独立{{ job.process?.label }}，产出入库，不计入已下发任务或订单进度。</template>
       </p>
       <section v-if="job.task && !job.supplement" class="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
         <span class="text-sm font-bold">本次领料凭证<span class="ml-1 font-normal text-muted-foreground">（选填）</span></span>
         <ImageUpload v-model:value="job.sheets" :max-number="9" :max-size="10" :show-description="false" directory="fdmgongchang/issue-sheet" multiple />
         <span class="text-xs text-muted-foreground">可拍照留存实际领取批次和数量，后续报工沿用已上传的凭证。</span>
       </section>
-      <section v-if="askOrder && orderChoices.length > 0" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
-        <span class="text-sm font-bold">这批是做哪张工厂订单？</span>
-        <span class="text-xs text-muted-foreground">选了以后，报的好的数量会自动算进这张单的完成数量</span>
-        <button
-          :class="!job.productionItem ? 'border-primary bg-primary/10' : 'border-border'"
-          class="flex min-h-9 items-center rounded-md border px-3 text-left text-sm"
-          type="button"
-          @click="choose()"
-        >
-          备货，不算哪张单
-        </button>
+      <section v-if="packaging" class="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3">
+        <span class="text-sm font-bold">选择包装对应的工厂订单</span>
+        <span class="text-xs text-muted-foreground">包装良品按所选订单明细入成品仓，并计入对应订单的完成数量。</span>
+        <span v-if="ordersLoading" class="text-sm text-muted-foreground">正在加载工厂订单…</span>
+        <div v-else-if="ordersFailed" class="text-sm text-destructive">
+          工厂订单加载失败
+          <button type="button" class="px-2 text-primary" @click="loadOrders">重试</button>
+        </div>
+        <span v-else-if="orderChoices.length === 0" class="text-sm text-muted-foreground">当前没有待完成且以包装为最后一道工序的订单明细。</span>
         <button
           v-for="c in orderChoices"
           :key="c.id"
           :class="job.productionItem?.id === c.id ? 'border-primary bg-primary/10' : 'border-border'"
           class="flex flex-col items-start justify-center rounded-md border px-3 py-1.5 text-left"
           type="button"
-          @click="choose(c)"
+          :aria-pressed="job.productionItem?.id === c.id"
+          :disabled="props.submitting"
+          @click="job.productionItem = c"
         >
           <span class="text-sm font-semibold">{{ c.label }}</span>
           <span class="text-xs text-muted-foreground">{{ c.orderNo }} · {{ c.party }} · {{ c.left }}</span>
@@ -180,14 +183,14 @@ async function issue() {
     </main>
     <footer class="sticky bottom-0 grid grid-cols-1 gap-2 border-t border-border bg-card px-4 pb-4 pt-3 sm:grid-cols-2">
       <button
-        :disabled="submitting || (late && !job.supplementRemark.trim())"
+        :disabled="cannotIssue"
         class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
         type="button"
-        @click="issue"
+        @click="emit('issueOnly')"
       >
         {{ late ? '确认补登' : job.supplement ? '确认补领，接着干活' : '确认领料，去干活' }}
       </button>
-      <button v-if="!job.supplement && !job.task" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary" type="button" @click="emit('reportNow')">
+      <button v-if="independent" :disabled="cannotIssue" class="h-10 rounded-md bg-primary/10 text-sm font-semibold text-primary disabled:opacity-50" type="button" @click="emit('reportNow')">
         已经做完了，领料同时报数量
       </button>
     </footer>

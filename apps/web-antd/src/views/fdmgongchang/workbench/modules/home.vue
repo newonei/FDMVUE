@@ -29,7 +29,6 @@ const job = useJob();
 
 const my = computed(() => job.my!);
 const processOf = (code: string) => my.value.processes.find((p) => p.code === code);
-const actualSliceProcess = computed(() => processOf('SLICE'));
 const processTitle = (code: string) => {
   const process = processOf(code) ?? teamProcessOf(code);
   return process ? `${process.label} · ${process.outputLabel}` : code;
@@ -200,9 +199,11 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         <span class="text-xs">第 {{ page }} / {{ pageCount }} 页 · {{ total }} 条</span>
         <button type="button" :disabled="page >= pageCount" class="h-11 rounded-md border border-border px-4 disabled:opacity-40" @click="page++">下一页</button>
       </nav>
-      <button v-if="actualSliceProcess" class="min-h-11 self-start rounded-md border border-border bg-card px-3 text-sm font-semibold" type="button" @click="emit('startActual', actualSliceProcess)">
-        开片 · 选择板材
-      </button>
+      <section aria-label="独立开单" class="flex flex-wrap gap-2">
+        <button v-for="process in my.processes" :key="process.code" class="min-h-11 rounded-md border border-border bg-card px-3 text-sm font-semibold" type="button" @click="emit('startActual', process)">
+          {{ process.code === 'SLICE' ? '开片 · 选择板材' : `${process.label} · 独立开单` }}
+        </button>
+      </section>
       <section v-if="teamTasks.length > 0" class="flex flex-col gap-2">
         <h2 class="m-0 text-sm font-bold">
           <button type="button" :aria-expanded="teamExpanded" :aria-label="teamExpanded ? '收起组员任务' : '展开组员任务'" aria-controls="team-tasks-panel" class="flex min-h-11 w-full flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-left" @click="teamExpanded = !teamExpanded">

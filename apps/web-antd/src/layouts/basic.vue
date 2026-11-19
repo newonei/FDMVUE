@@ -34,6 +34,7 @@ import { $t } from '#/locales';
 import { router } from '#/router';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
+import { useOrderBoardShortageBadge } from '#/views/fdmgongchang/order-board/shortage-badge';
 import FmsAccountSetSwitch from '#/views/fms/components/account-set/account-set-switch.vue';
 
 const userStore = useUserStore();
@@ -42,6 +43,8 @@ const accessStore = useAccessStore();
 const { hasAccessByCodes } = useAccess();
 const { destroyWatermark, updateWatermark } = useWatermark();
 const { closeOtherTabs, refreshTab } = useTabs();
+
+useOrderBoardShortageBadge();
 
 const notifications = ref<NotificationItem[]>([]);
 const unreadCount = ref(0);

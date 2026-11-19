@@ -49,7 +49,7 @@ export function purchaseSheetImageIds(details: Api.PurchaseSheet['details']) {
     for (const id of section.imageIds ?? []) if (id) ids.add(id);
   }
   for (const extra of Object.values(details.lineExtras ?? {})) {
-    for (const id of [extra.imageId, extra.colorImageId]) if (id) ids.add(id);
+    for (const id of [extra.imageId, extra.colorImageId, extra.backColorImageId]) if (id) ids.add(id);
   }
   return [...ids];
 }

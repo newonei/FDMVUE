@@ -694,7 +694,36 @@ describe('actual purchase print extras editor', () => {
     expect(extras.value!.payload()).toEqual(original);
   });
 
-  it('uploads and removes the labelled supplier color image without replacing the product image', async () => {
+  it('adds and saves shared columns beyond the previous four-column limit', async () => {
+    const { host, view, extras, saved } = await mount();
+    view.value = {
+      ...view.value,
+      details: {
+        ...view.value.details,
+        version: 2,
+        sharedColumns: ['纹路', '定制', '材质', '形状'].map((title) => ({
+          title,
+          imageIds: [],
+        })),
+      },
+    };
+    await settle();
+    for (const [offset, title] of ['印刷', '成品检查'].entries()) {
+      await click(host, '+ 添加共用说明列');
+      await fill(
+        host,
+        `.shared-grid .block:nth-child(${5 + offset}) input`,
+        title,
+      );
+    }
+    await click(host, '保存附加资料');
+    expect(saved).toHaveBeenCalledOnce();
+    expect(
+      extras.value!.payload().sharedColumns.map((column) => column.title),
+    ).toEqual(['纹路', '定制', '材质', '形状', '印刷', '成品检查']);
+  });
+
+  it('uploads and removes front and back supplier color cards independently of the product image', async () => {
     const { host, view, extras, busy } = await mount();
     view.value = {
       ...view.value,
@@ -706,27 +735,32 @@ describe('actual purchase print extras editor', () => {
     };
     await settle();
     const product = host.querySelector('[data-row="product-1"]')!;
-    const supplierImage = product.querySelector(
-      '[data-key="colorImage"] [aria-label="供应商实物色号图"]',
-    );
-    expect(supplierImage).not.toBeNull();
     expect(
       product.querySelector('[data-key="model"]')?.nextElementSibling,
     ).toBe(product.querySelector('[data-key="colorImage"]'));
-    const file =
-      supplierImage!.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(file, 'files', {
-      configurable: true,
-      value: [new File(['png'], 'supplier-color.png', { type: 'image/png' })],
-    });
-    file.dispatchEvent(new Event('change'));
-    await settle();
+    for (const [side, filename, id] of [
+      ['正面', 'front.png', 'front-color-image'],
+      ['反面', 'back.png', 'back-color-image'],
+    ] as const) {
+      const file = product.querySelector<HTMLInputElement>(
+        `[aria-label="供应商实物色号图（${side}）"] input[type="file"]`,
+      )!;
+      expect(file.multiple).toBe(false);
+      mocks.upload.mockResolvedValueOnce({ id });
+      Object.defineProperty(file, 'files', {
+        configurable: true,
+        value: [new File(['png'], filename, { type: 'image/png' })],
+      });
+      file.dispatchEvent(new Event('change'));
+      await settle();
+    }
     expect(busy).toHaveBeenCalledWith(true);
     expect(busy).toHaveBeenLastCalledWith(false);
     const payload = extras.value!.payload();
-    expect(payload.lineExtras['product-1']).toMatchObject({
+    expect(payload.lineExtras['product-1']).toEqual({
       imageId: 'product-image',
-      colorImageId: 'color-image',
+      colorImageId: 'front-color-image',
+      backColorImageId: 'back-color-image',
     });
     view.value = {
       ...view.value,
@@ -737,12 +771,13 @@ describe('actual purchase print extras editor', () => {
     expect(extras.value!.isDirty()).toBe(false);
     product
       .querySelector<HTMLButtonElement>(
-        '[data-key="colorImage"] button[aria-label="删除图片"]',
+        '[aria-label="供应商实物色号图（正面）"] button[aria-label="删除图片"]',
       )!
       .click();
     await settle();
     expect(extras.value!.payload().lineExtras['product-1']).toEqual({
       imageId: 'product-image',
+      backColorImageId: 'back-color-image',
     });
     expect(extras.value!.isDirty()).toBe(true);
   });

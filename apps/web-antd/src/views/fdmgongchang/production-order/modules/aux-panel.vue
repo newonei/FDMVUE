@@ -132,7 +132,7 @@ const pendingUsage = computed(() => aux.value?.items.some((row) => pendingNames(
   <section class="flex flex-col gap-3 rounded-md border border-border p-3">
     <div class="flex flex-wrap items-center gap-2">
       <h3 class="m-0 text-sm font-semibold">辅料</h3>
-      <span class="text-xs text-muted-foreground">包装前核对辅料用量和库存。包装随订单执行，不单独生成工序任务。</span>
+      <span class="text-xs text-muted-foreground">包装前请核对辅料用量和库存，报工时按已确认的用量领用。</span>
       <Tag v-if="pendingUsage" class="m-0" color="orange">用量待确认</Tag>
       <Tag v-else-if="aux && anySuggestion" class="m-0" :color="aux.ready ? 'green' : 'orange'">{{ aux.ready ? '齐了' : '还缺' }}</Tag>
     </div>

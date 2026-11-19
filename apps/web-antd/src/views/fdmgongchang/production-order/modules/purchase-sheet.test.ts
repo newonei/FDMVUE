@@ -12,7 +12,7 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({ getPurchaseImage: vi.fn(
 
 const fixture: Api.PurchaseSheet = {
   order: { id: 'po-1', code: 'PO001', lines: [{ id: 'line-1', skuName: '瑜伽垫', quantity: 100, unit: '条', colorMode: 'UNKNOWN', weight: '800g' }] },
-  details: { lineExtras: { 'line-1': { colorMode: 'DUAL', frontColor: 'ZI', backColor: 'LAN', textureBack: 'WAVE', weight: '900g±100g', imageId: 'product', colorImageId: 'supplier' } } },
+  details: { lineExtras: { 'line-1': { colorMode: 'DUAL', frontColor: 'ZI', backColor: 'LAN', textureBack: 'WAVE', weight: '900g±100g', imageId: 'product', colorImageId: 'supplier-front', backColorImageId: 'supplier-back' } } },
 };
 async function flush() { for (let i = 0; i < 15; i++) { await Promise.resolve(); await nextTick(); } }
 let unmount: (() => void) | undefined;
@@ -34,17 +34,19 @@ beforeEach(() => {
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; vi.restoreAllMocks(); });
 
 describe('factory purchase sheet display', () => {
-  it('renders per-line manufacturing requirements and downloads the supplier color image independently', async () => {
+  it('renders per-line manufacturing requirements and downloads both supplier color images independently', async () => {
     mountSheet(); await flush();
     expect(document.body.textContent).toContain('颜色方式：双色');
     expect(document.body.textContent).toContain('正面颜色：紫色');
     expect(document.body.textContent).toContain('反面颜色：蓝色');
     expect(document.body.textContent).toContain('波浪纹');
     expect(document.body.textContent).toContain('900g±100g');
-    expect(document.body.textContent).toContain('供应商实物色号图');
+    expect(document.body.textContent).toContain('供应商实物色号图（正面）');
+    expect(document.body.textContent).toContain('供应商实物色号图（反面）');
     expect(getPurchaseImage).toHaveBeenCalledWith(1, 'product');
-    expect(getPurchaseImage).toHaveBeenCalledWith(1, 'supplier');
-    expect(document.querySelectorAll('img')).toHaveLength(2);
+    expect(getPurchaseImage).toHaveBeenCalledWith(1, 'supplier-front');
+    expect(getPurchaseImage).toHaveBeenCalledWith(1, 'supplier-back');
+    expect(document.querySelectorAll('img')).toHaveLength(3);
   });
   it('does not replace the new order with a stale purchase-sheet response', async () => {
     let resolveOld!: (value: Api.PurchaseSheet) => void;

@@ -162,7 +162,7 @@ export function entryTotals(rows: EntryRow[], header: EntryHeader) {
 }
 
 /**
- * 申请明细已有供应商报价时带出供应商和单价：取该明细外采任务里仍有效、单位一致的最低价。
+ * 带出申请明细有效且单位一致的最低供应商报价。有任务或币种时按对应条件筛选。
  * 没有报价返回 undefined，由采购员自己选。
  */
 export function quotedSupplier(
@@ -170,11 +170,13 @@ export function quotedSupplier(
   requestItemId: string,
   unit: string | undefined,
   today: string,
+  { assignmentId, currency }: { assignmentId?: string; currency?: string } = {},
 ) {
   let best: Record<string, unknown> | undefined;
   for (const assignment of contract.assignments ?? []) {
     if (
       assignment.requestItemId !== requestItemId ||
+      (assignmentId && assignment.id !== assignmentId) ||
       assignment.method !== 'BUY' ||
       assignment.status === 'CANCELLED'
     )
@@ -183,20 +185,19 @@ export function quotedSupplier(
       if (!orderableQuote(contract, quote, today) || !quote.supplierId)
         continue;
       if (unit && quote.unit !== unit) continue;
+      if (currency && quote.currency !== currency) continue;
+      if (entryPrice(quote.unitPrice) === undefined) continue;
       if (!best || decimal(quote.unitPrice).isLessThan(decimal(best.unitPrice)))
         best = quote;
     }
   }
   if (!best) return undefined;
   // 保留报价原有小数位，不能按整数取整
-  const price = decimal(best.unitPrice);
   return {
     supplierId: String(best.supplierId),
     supplierName:
       typeof best.supplierName === 'string' ? best.supplierName : undefined,
-    unitPrice: price.isFinite()
-      ? price.toFixed(price.decimalPlaces() ?? 0)
-      : undefined,
+    unitPrice: entryPrice(best.unitPrice),
   };
 }
 
@@ -338,6 +339,13 @@ const copiedNumber = (value: unknown) => {
     ? number.toFixed(number.decimalPlaces() ?? 0)
     : undefined;
 };
+
+export function entryPrice(value: unknown): string | undefined {
+  const price = decimal(value);
+  return price.isFinite() && price.gte(0)
+    ? price.toFixed(price.decimalPlaces() ?? 0)
+    : undefined;
+}
 /**
  * 复制采购单：带出合同、供应商、表头和明细（数量、单价、赠品、备注），
  * 采购日期改为今天，交付和到货日期留空；附加费用为 0、折扣 100 时留空。

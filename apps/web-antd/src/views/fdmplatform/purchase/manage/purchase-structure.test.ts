@@ -1,4 +1,5 @@
 import { createApp, defineComponent, h, nextTick } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -101,6 +102,12 @@ function mount(
   const host = document.createElement('div');
   document.body.append(host);
   const app = createApp({ render: () => h(component as never, props) });
+  app.use(
+    createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }],
+    }),
+  );
   app.mount(host);
   cleanup.push(() => {
     app.unmount();

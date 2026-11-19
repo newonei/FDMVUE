@@ -217,6 +217,7 @@ describe('采购单附加资料', () => {
           packQty: 10,
           imageId: 'old-a',
           colorImageId: 'old-color',
+          backColorImageId: 'old-back-color',
           colorMode: 'DUAL',
           frontColor: 'RED',
           backColor: 'BLUE',
@@ -233,6 +234,7 @@ describe('采购单附加资料', () => {
     expect(printExtrasImageIds(source)).toEqual([
       'old-a',
       'old-color',
+      'old-back-color',
       'old-b',
       'gone',
     ]);
@@ -265,7 +267,12 @@ describe('采购单附加资料', () => {
         { id: 't3', skuId: 'sku-3' },
         { id: 't9', skuId: 'other' },
       ],
-      { 'old-a': 'new-a', 'old-b': 'new-b', 'old-color': 'new-color' },
+      {
+        'old-a': 'new-a',
+        'old-b': 'new-b',
+        'old-color': 'new-color',
+        'old-back-color': 'new-back-color',
+      },
       ['OPP透明膜', '吊牌'],
     );
     expect(result.matched).toBe(2);
@@ -275,6 +282,7 @@ describe('采购单附加资料', () => {
         packQty: 10,
         imageId: 'new-a',
         colorImageId: 'new-color',
+        backColorImageId: 'new-back-color',
         colorMode: 'SINGLE',
         frontColor: 'GREEN',
         backColor: 'GREEN',
@@ -298,6 +306,9 @@ describe('采购单附加资料', () => {
     );
     expect(withoutImages.value.lineExtras.t1).not.toHaveProperty(
       'colorImageId',
+    );
+    expect(withoutImages.value.lineExtras.t1).not.toHaveProperty(
+      'backColorImageId',
     );
     expect(result.value.accessories).toEqual([
       { name: 'OPP透明膜', checked: true },

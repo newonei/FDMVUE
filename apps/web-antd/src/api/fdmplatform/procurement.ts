@@ -135,8 +135,10 @@ export interface OrderLineExtra {
   weight?: string;
   /** 型号（如正反面颜色） */
   model?: string;
-  /** 供应商实物色号图，与产品图片独立保存。 */
+  /** 供应商正面实物色号图，沿用旧单的单张色号图字段。 */
   colorImageId?: string;
+  /** 供应商反面实物色号图。 */
+  backColorImageId?: string;
   /** 装箱数：每箱几件，箱数按数量自动算 */
   packQty?: number;
   imageId?: string;

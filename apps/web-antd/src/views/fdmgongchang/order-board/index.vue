@@ -16,6 +16,7 @@ import { dateText, num, ORDER_STATUS, specText, timeText } from '../production-o
 import FactorySwitch from '../shared/factory-switch.vue';
 import { useFactory } from '../shared/use-factory';
 import { currentStage, dueHint, orderStages } from './model';
+import { refreshOrderBoardShortageBadge } from './shortage-badge';
 import StageDetailModal from './stage-detail-modal.vue';
 
 defineOptions({ name: 'FdmGongchangOrderBoard' });
@@ -127,6 +128,11 @@ function startRefresh() {
   }, 60_000);
 }
 
+async function refreshBoard() {
+  await (initialized.value ? load() : initialize());
+  refreshOrderBoardShortageBadge();
+}
+
 onMounted(() => { void initialize(); startRefresh(); });
 onActivated(() => { startRefresh(); if (initialized.value) void load(); });
 onDeactivated(() => { clearInterval(refreshTimer); clearTimeout(searchTimer); ++requestVersion; ++ownersVersion; ++detailVersion; closeStage(); loading.value = false; detailLoading.value = false; });
@@ -227,7 +233,7 @@ async function saveOwner() {
         <div class="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span v-if="updatedAt">{{ updatedAt }} 更新</span>
           <label class="flex items-center gap-2"><Switch v-model:checked="autoRefresh" size="small" />每分钟刷新</label>
-          <Button :loading="loading" @click="initialized ? load() : initialize()">刷新看板</Button>
+          <Button :loading="loading" @click="refreshBoard">刷新看板</Button>
         </div>
       </header>
 

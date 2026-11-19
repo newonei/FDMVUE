@@ -1,5 +1,6 @@
 /* eslint-disable vue/one-component-per-file -- UI adapters exercise the real purchase editor. */
 import { createApp, defineComponent, h, nextTick } from 'vue';
+import { createMemoryHistory, createRouter } from 'vue-router';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -112,6 +113,10 @@ vi.mock('ant-design-vue', () => {
     Input,
     InputNumber: Input,
     Select: Input,
+    Table: defineComponent({
+      props: { dataSource: { type: Array, default: () => [] } },
+      setup: (props) => () => h('div', JSON.stringify(props.dataSource)),
+    }),
     Textarea: Input,
   };
 });
@@ -166,7 +171,7 @@ async function settle() {
     await nextTick();
   }
 }
-async function mount(props?: Record<string, unknown>) {
+async function mount(props?: Record<string, unknown>, contractRoute = false) {
   const editorProps = props ?? {
     copyFrom: { contractId: '', orderId: 'source-order' },
   };
@@ -183,13 +188,27 @@ async function mount(props?: Record<string, unknown>) {
         onClose: close,
       }),
   });
+  const page = { render: () => null };
+  const routePath = '/fdmprocurement/platform-orders';
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: routePath, component: page },
+      ...(contractRoute
+        ? [{ path: '/neixiao/platform-contracts', component: page }]
+        : []),
+      { path: '/:pathMatch(.*)*', component: page },
+    ],
+  });
+  await router.push(routePath);
+  app.use(router);
   app.mount(host);
   cleanup.push(() => {
     app.unmount();
     host.remove();
   });
   await settle();
-  return { host, saved, close };
+  return { host, saved, close, router };
 }
 function button(host: HTMLElement, text: string) {
   const result = [...host.querySelectorAll('button')].find(
@@ -333,6 +352,93 @@ describe('采购开单先保存草稿', () => {
       }),
     );
     expect(saved).toHaveBeenCalledWith(result, 'draft');
+  });
+  it('内贸转单带出申请主题和预计采购价，新标签打开同一内贸合同', async () => {
+    mocks.contract.mockResolvedValue({
+      id: 'contract-1',
+      companyId: 1,
+      businessType: 'DOMESTIC',
+      code: 'HT001',
+      items: [{ id: 'item-1', skuName: '瑜伽垫', unitPrice: '999' }],
+      requests: [
+        {
+          id: 'request-1',
+          name: '内贸瑜伽垫采购',
+          items: [
+            {
+              id: 'ri-1',
+              contractItemId: 'item-1',
+              availableQuantity: 5,
+              unitPrice: '12.345678',
+            },
+            {
+              id: 'ri-2',
+              contractItemId: 'item-1',
+              availableQuantity: 2,
+              unitPrice: 0,
+            },
+            { id: 'ri-3', contractItemId: 'item-1', availableQuantity: 1 },
+          ],
+        },
+      ],
+    });
+    const { host, router } = await mount(
+      { contractId: 'contract-1', requestId: 'request-1' },
+      true,
+    );
+    const link = host.querySelector<HTMLAnchorElement>('a[target="_blank"]')!;
+    expect(link.getAttribute('href')).toBe(
+      '/neixiao/platform-contracts?contractId=contract-1',
+    );
+    expect(router.currentRoute.value.path).toBe(
+      '/fdmprocurement/platform-orders',
+    );
+    expect(
+      host.querySelector<HTMLInputElement>('.entry-head input')!.value,
+    ).toBe('内贸瑜伽垫采购');
+    const prices = [
+      ...host.querySelectorAll<HTMLInputElement>('input[aria-label$="行单价"]'),
+    ];
+    expect(prices.map((input) => input.value)).toEqual(['12.345678', '0', '']);
+    expect(host.textContent).toContain('1 行采购单价待核对填写');
+    expect(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行总价"]')!.value,
+    ).toBe('61.73');
+    await fill(
+      host.querySelector<HTMLInputElement>('[data-supplier]')!,
+      'supplier-1',
+    );
+    await fill(prices[2]!, '3');
+    expect(host.textContent).not.toContain('采购单价待核对填写');
+    button(host, '保存草稿并完善资料').click();
+    await settle();
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: '内贸瑜伽垫采购',
+        lines: ['12.345678', '0', '3'].map((unitPrice) =>
+          expect.objectContaining({ unitPrice }),
+        ),
+      }),
+    );
+  });
+  it('没有合同菜单时可就地核对合同，关闭核对窗口保留表单输入', async () => {
+    const { host } = await mount({
+      contractId: 'contract-1',
+      requestId: 'request-1',
+    });
+    const subject = host.querySelector<HTMLInputElement>('.entry-head input')!;
+    await fill(subject, '核对前填写的采购主题');
+    button(host, '查看合同订单').click();
+    await settle();
+    expect(host.textContent).toContain('"skuName":"瑜伽垫"');
+    const cancels = host.querySelectorAll<HTMLButtonElement>(
+      '[data-modal-cancel]',
+    );
+    expect(cancels).toHaveLength(2);
+    cancels[1]!.click();
+    await settle();
+    expect(subject.value).toBe('核对前填写的采购主题');
+    expect(host.querySelectorAll('[data-modal-cancel]')).toHaveLength(1);
   });
   it('只带出可转明细，数量按草稿占用后的余额，超量时不能保存', async () => {
     mocks.contract.mockResolvedValue({

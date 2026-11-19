@@ -1,3 +1,5 @@
+import { shallowRef } from 'vue';
+
 import { requestClient } from '#/api/request';
 
 export namespace FdmgongchangFactoryApi {
@@ -83,20 +85,20 @@ export namespace FdmgongchangFactoryApi {
 
 /** 后端按请求头 factory-id 区分工厂；页面切换工厂时更新这里，工厂相关接口都会带上。 */
 export const FACTORY_HEADER = 'factory-id';
-let currentFactoryId: null | number = null;
+const currentFactoryId = shallowRef<null | number>(null);
 
 export function setCurrentFactoryId(id: null | number | undefined) {
-  currentFactoryId = id ?? null;
+  currentFactoryId.value = id ?? null;
 }
 
 export function getCurrentFactoryId() {
-  return currentFactoryId;
+  return currentFactoryId.value;
 }
 
-export function factoryHeaders(): Record<string, string> {
-  return currentFactoryId === null
-    ? {}
-    : { [FACTORY_HEADER]: String(currentFactoryId) };
+export function factoryHeaders(
+  id = getCurrentFactoryId(),
+): Record<string, string> {
+  return id === null ? {} : { [FACTORY_HEADER]: String(id) };
 }
 
 export function getMyFactories() {

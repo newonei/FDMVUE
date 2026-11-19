@@ -213,7 +213,7 @@ function clickImage(event: MouseEvent) {
       ref="input"
       type="file"
       accept="image/png,image/jpeg"
-      multiple
+      :multiple="max > 1"
       hidden
       @change="choose"
     />

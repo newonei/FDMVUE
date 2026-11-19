@@ -48,6 +48,17 @@ export namespace FactoryOrderBoardApi {
 
 const base = '/fdmgongchang/order-board';
 
+export function getOrderBoardShortageCount(
+  factoryId: null | number,
+  signal: AbortSignal,
+) {
+  return requestClient.get<number>(`${base}/shortage-count`, {
+    headers: factoryHeaders(factoryId),
+    signal,
+    silent: true,
+  });
+}
+
 export function getOrderBoardPage(params: FactoryOrderBoardApi.PageReq) {
   return requestClient.get<PageResult<FactoryOrderBoardApi.Order>>(
     `${base}/page`,

@@ -69,7 +69,7 @@ function toggle(code: string) {
       </template>
     </div>
     <p v-if="problem" class="m-0 text-xs text-destructive">{{ problem }}</p>
-    <p v-if="draft.steps.includes('PACK')" class="m-0 text-xs text-muted-foreground">包装要求随订单传递。车间排单到最后一道实际生产工序，包装不单独派工。</p>
+    <p v-if="draft.steps.includes('PACK')" class="m-0 text-xs text-muted-foreground">包装会下发到包装车间，报工良品按成品入库。</p>
   </div>
 </template>
 

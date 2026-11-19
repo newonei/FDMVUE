@@ -46,9 +46,12 @@ function row(overrides: Partial<SplitApi.Row> = {}): SplitApi.Row {
 }
 
 function preview(overrides: Partial<SplitApi.Preview> = {}): SplitApi.Preview {
-  return { previewKey: 'preview-1', canRelease: true, orderCount: 2, itemCount: 3, taskCount: 2, errors: [],
+  return { previewKey: 'preview-1', canRelease: true, orderCount: 2, itemCount: 3, taskCount: 3, errors: [],
     warnings: ['板材库存不足，任务仍完整下发；请安排备料'],
-    rows: [row(), row({ rowKey: '101-PUNCH', process: 'PUNCH', processLabel: '冲裁', sequence: 2, quantity: 100, unit: '件', upstreamProcesses: ['SLICE'] })], ...overrides };
+    rows: [row(), row({ rowKey: '101-PUNCH', process: 'PUNCH', processLabel: '冲裁', sequence: 2, quantity: 100, unit: '件', upstreamProcesses: ['SLICE'] }),
+      row({ rowKey: '101-PACK', process: 'PACK', processLabel: '包装', sequence: 3, quantity: 100, unit: '件', upstreamProcesses: ['PUNCH'],
+        inputs: [{ stage: 'PUNCHED', name: '已冲裁垫', quantity: 100, unit: '件' }],
+        output: { stage: 'PACKED', name: '已包装成品', quantity: 100, unit: '件' } })], ...overrides };
 }
 
 async function flush() {
@@ -89,7 +92,7 @@ describe('order selection → process preview → release', () => {
     api.get.mockResolvedValue(orders[0]);
     api.canEdit = true;
     api.preview.mockResolvedValue(preview());
-    api.release.mockResolvedValue({ scheduleId: 7, scheduleNo: 'PB-7', tasks: 2, mixTasks: 0, warnings: [], reused: false });
+    api.release.mockResolvedValue({ scheduleId: 7, scheduleNo: 'PB-7', tasks: 3, mixTasks: 0, warnings: [], reused: false });
   });
   afterEach(() => {
     unmount?.();
@@ -119,15 +122,15 @@ describe('order selection → process preview → release', () => {
     expect(api.release).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('开片车间');
     expect(document.body.textContent).toContain('冲裁车间');
-    expect(document.body.textContent).not.toContain('包装车间');
-    expect(document.body.textContent).toContain('包装要求随订单传递');
+    expect(document.body.textContent).toContain('包装车间');
+    expect(document.body.textContent).toContain('已冲裁垫');
     expect(document.body.textContent).not.toContain('发泡车间');
     expect(document.body.textContent).toContain('40 片');
     expect(document.body.textContent).toContain('100 件');
     expect(document.body.textContent).toContain('板材库存不足');
-    expect(button('确认下发 2 个任务').disabled).toBe(false);
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
     await input('#split-release-note', '  尽快备料  ');
-    button('确认下发 2 个任务').click();
+    button('确认下发 3 个任务').click();
     await flush();
     expect(api.release).toHaveBeenCalledWith({ productionOrderIds: [11, 12], previewKey: 'preview-1', requestId: expect.any(String), note: '尽快备料' });
     expect(api.release.mock.calls[0]![0].requestId).toMatch(/^[\da-f-]{36}$/i);
@@ -151,13 +154,13 @@ describe('order selection → process preview → release', () => {
     await mount();
     button('预览工序任务').click(); await flush();
     button('修改参数与工艺').click(); await flush();
-    expect(button('确认下发 2 个任务').disabled).toBe(true);
+    expect(button('确认下发 3 个任务').disabled).toBe(true);
     expect(document.querySelector('#save-config-test')?.textContent).toContain('11/101');
     api.preview.mockResolvedValue(preview({ previewKey: 'after-user-edit' }));
     document.querySelector<HTMLButtonElement>('#save-config-test')!.click(); await flush();
     expect(api.get).toHaveBeenCalledWith(11);
     expect(api.preview).toHaveBeenCalledTimes(2);
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     expect(api.release).toHaveBeenCalledWith(expect.objectContaining({ previewKey: 'after-user-edit' }));
   });
 
@@ -183,10 +186,10 @@ describe('order selection → process preview → release', () => {
     button('返回选择订单').click(); await flush();
     document.querySelector<HTMLInputElement>('input[aria-label="选择订单 GD-11"]')!.click(); await flush();
     api.preview.mockResolvedValue(preview({ previewKey: 'preview-12', orderCount: 1 }));
-    expect([...document.querySelectorAll('button')].some((el) => el.textContent?.includes('确认下发 2'))).toBe(false);
+    expect([...document.querySelectorAll('button')].some((el) => el.textContent?.includes('确认下发 3'))).toBe(false);
     button('预览工序任务').click(); await flush();
     expect(api.preview).toHaveBeenLastCalledWith([12]);
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     expect(api.release).toHaveBeenCalledWith(expect.objectContaining({ productionOrderIds: [12], previewKey: 'preview-12' }));
   });
 
@@ -194,12 +197,12 @@ describe('order selection → process preview → release', () => {
     api.release.mockRejectedValueOnce(new Error('网络中断'));
     await mount();
     button('预览工序任务').click(); await flush();
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     const first = api.release.mock.calls[0]![0];
     expect(document.querySelector<HTMLTextAreaElement>('#split-release-note')!.disabled).toBe(true);
     // 即使外部状态发生变化，重试仍复用第一次提交的完整内容。
     await input('#split-release-note', '这次修改不能影响重试');
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     expect(api.release).toHaveBeenNthCalledWith(2, first);
   });
 
@@ -207,11 +210,11 @@ describe('order selection → process preview → release', () => {
     api.release.mockRejectedValueOnce(new Error('预览过期'));
     await mount();
     button('预览工序任务').click(); await flush();
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     const first = api.release.mock.calls[0]![0];
     api.preview.mockResolvedValue(preview({ previewKey: 'preview-current' }));
     button('重新预览').click(); await flush();
-    button('确认下发 2 个任务').click(); await flush();
+    button('确认下发 3 个任务').click(); await flush();
     const second = api.release.mock.calls[1]![0];
     expect(second.previewKey).toBe('preview-current');
     expect(second.requestId).not.toBe(first.requestId);

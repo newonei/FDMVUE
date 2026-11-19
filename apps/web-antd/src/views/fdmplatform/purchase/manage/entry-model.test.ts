@@ -266,6 +266,7 @@ describe('申请转采购单按供应商拆单', () => {
       supplierId,
       supplierName: supplierId,
       unitPrice,
+      currency: 'CNY',
       unit: '条',
       confirmed: true,
       validUntil: '2026-12-31',
@@ -274,15 +275,23 @@ describe('申请转采购单按供应商拆单', () => {
     const contract = {
       assignments: [
         { id: 'a1', requestItemId: 'ri-1', method: 'BUY', status: 'ASSIGNED' },
+        { id: 'a2', requestItemId: 'ri-1', method: 'BUY', status: 'ASSIGNED' },
       ],
       quotes: [
         quote('q1', 'mat-a', '30'),
         quote('q2', 'mat-b', '25.125'),
         quote('q3', 'mat-c', '10', { validUntil: '2026-01-01' }),
         quote('q4', 'mat-d', '5', { unit: '箱' }),
+        quote('q5', 'mat-e', '2', { assignmentId: 'a2' }),
+        quote('q6', 'mat-f', '1', { currency: 'USD' }),
       ],
     } as never;
-    expect(quotedSupplier(contract, 'ri-1', '条', '2026-10-22')).toEqual({
+    expect(
+      quotedSupplier(contract, 'ri-1', '条', '2026-10-22', {
+        assignmentId: 'a1',
+        currency: 'CNY',
+      }),
+    ).toEqual({
       supplierId: 'mat-b',
       supplierName: 'mat-b',
       unitPrice: '25.125',

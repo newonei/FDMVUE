@@ -14,6 +14,7 @@ import type {
 import type { Product, ProductStructure } from '#/api/fdmplatform/products';
 
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import {
   Alert,
@@ -23,6 +24,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  Table,
   Textarea,
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
@@ -41,8 +43,10 @@ import { getProducts } from '#/api/fdmplatform/products';
 
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
 import { errorText } from '../../../data';
+import { navigationRoute } from '../../../documents/navigation';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
+import { DOMESTIC_CURRENCY, salesChannelOf } from '../../../sales-channel';
 import { localDate } from '../../quotes/comparison';
 import {
   requestAvailableQuantity,
@@ -53,6 +57,7 @@ import {
   emptyRow,
   entryErrors,
   entryPayload,
+  entryPrice,
   entryProductFields,
   entrySuppliers,
   entryTotals,
@@ -72,7 +77,7 @@ const props = defineProps<{
   /** 修改撤回为草稿的这张采购单：带出原单，保存草稿或提交，不拆单、不换合同和公司 */
   editOf?: { code?: string; contractId: string; orderId: string };
   open: boolean;
-  /** 从采购申请开单：带出申请里的合同产品与数量 */
+  /** 从采购申请开单时带出申请明细与可转数量。 */
   requestId?: string;
 }>();
 const emit = defineEmits<{
@@ -87,6 +92,31 @@ const rows = ref<EntryRow[]>([]);
 const directory = ref<Directory>();
 const contract = ref<Contract>();
 const contracts = ref<{ label: string; value: string }[]>([]);
+const router = useRouter();
+const contractReviewOpen = ref(false);
+const contractReviewHref = computed(() => {
+  const source = contract.value;
+  if (!props.requestId || !source) return undefined;
+  const location = navigationRoute(
+    { type: 'contract', contractId: source.id },
+    salesChannelOf(source.businessType) === 'DOMESTIC'
+      ? '/neixiao/'
+      : undefined,
+  );
+  const resolved = router.resolve(location);
+  return resolved.matched.some((record) => record.path === location.path)
+    ? resolved.href
+    : undefined;
+});
+const contractReviewColumns = [
+  { dataIndex: 'skuCode', title: '产品编号' },
+  { dataIndex: 'skuName', title: '产品名称' },
+  { dataIndex: 'specification', title: '规格' },
+  { dataIndex: 'quantity', title: '合同数量' },
+  { dataIndex: 'unit', title: '单位' },
+  { dataIndex: 'requiredDate', title: '交期' },
+  { dataIndex: 'remark', title: '备注' },
+];
 const productOptions = ref<
   {
     category?: string;
@@ -111,6 +141,14 @@ let sequence = 0;
 
 const errors = computed(() => entryErrors(rows.value, header.value));
 const totals = computed(() => entryTotals(rows.value, header.value));
+const missingRequestPrices = computed(() => {
+  if (
+    !props.requestId ||
+    salesChannelOf(contract.value?.businessType) !== 'DOMESTIC'
+  )
+    return 0;
+  return rows.value.filter((row) => row.requestItemId && !row.unitPrice).length;
+});
 /** 供应商名称：下拉选中或报价带出时记下，用来提示拆单结果。 */
 const supplierNames = ref<Record<string, string>>({});
 function rememberSupplier(record: MasterRecord | undefined) {
@@ -386,58 +424,65 @@ function addContractItems() {
 }
 /** 只带出当前可转的申请明细，保留独立来源身份；完整申请保留在详情里。 */
 function fillFromRequest(requestId: string) {
+  const source = contract.value;
+  if (!source) return;
   // 传进来的可能是申请 id，也可能是采购任务（分派）id，后者顺着任务找到申请
-  const requests = contract.value?.requests ?? [];
-  const assignment = (contract.value?.assignments ?? []).find(
+  const requests = source.requests ?? [];
+  const assignment = (source.assignments ?? []).find(
     (entry) => entry.id === requestId,
   );
   const request =
     requests.find((entry) => entry.id === requestId) ??
     requests.find((entry) => entry.id === assignment?.requestId);
   sourceRequestId.value = request ? String(request.id) : requestId;
-  const items = new Map(
-    (contract.value?.items ?? []).map((item) => [item.id, item]),
-  );
-  const lines = transferableRequestLines(contract.value!, requestId)
-    .map((entry) => ({
-      ...entry,
-      item: items.get(String(entry.line.contractItemId)),
-    }))
-    .filter((entry) => entry.item);
-  if (lines.length === 0) {
-    rows.value = [];
-    error.value =
-      '当前没有可转采购明细；请刷新申请，或查看已生成的采购单及占用情况。';
-    return;
+  const domestic = salesChannelOf(source.businessType) === 'DOMESTIC';
+  if (domestic) {
+    header.value.subject = (
+      request?.name?.trim() ||
+      source.name?.trim() ||
+      source.code
+    )?.slice(0, 200);
   }
-  // 采购主题留空：后端按「合同号 供应商 采购单」生成，拆单时每张带各自的供应商
-  rows.value = lines.map(({ line, item, assignmentId, remaining }) => {
-    const row: EntryRow = {
-      ...emptyRow(key()),
-      ...entryProductFields(
-        (line.specificationSnapshot ?? item!) as ProcurementProductSnapshot,
-      ),
-      contractItemId: item!.id,
-      requestItemId: String(line.id),
-      assignmentId,
-      availableQuantity: remaining,
-      quantity: remaining,
-    };
-    // 已登记供应商报价的明细直接带出供应商和单价；不同供应商保存时自动拆单
-    const quoted = line.id
-      ? quotedSupplier(contract.value!, String(line.id), row.unit, today)
-      : undefined;
-    if (quoted) {
-      row.supplierId = quoted.supplierId;
-      if (quoted.supplierName)
-        supplierNames.value = {
-          ...supplierNames.value,
-          [quoted.supplierId]: quoted.supplierName,
-        };
-      if (quoted.unitPrice) setRowPrice(row, quoted.unitPrice);
-    }
-    return row;
-  });
+  const items = new Map(source.items.map((item) => [item.id, item]));
+  rows.value = transferableRequestLines(source, requestId).flatMap(
+    ({ line, assignmentId, remaining }) => {
+      const item = items.get(String(line.contractItemId));
+      if (!item) return [];
+      const row: EntryRow = {
+        ...emptyRow(key()),
+        ...entryProductFields(
+          (line.specificationSnapshot ?? item) as ProcurementProductSnapshot,
+        ),
+        contractItemId: item.id,
+        requestItemId: String(line.id),
+        assignmentId,
+        availableQuantity: remaining,
+        quantity: remaining,
+      };
+      // 已登记供应商报价的明细直接带出供应商和单价；不同供应商保存时自动拆单
+      const quoted = quotedSupplier(source, String(line.id), row.unit, today, {
+        assignmentId,
+        currency: domestic ? DOMESTIC_CURRENCY : undefined,
+      });
+      if (quoted) {
+        row.supplierId = quoted.supplierId;
+        if (quoted.supplierName)
+          supplierNames.value = {
+            ...supplierNames.value,
+            [quoted.supplierId]: quoted.supplierName,
+          };
+      }
+      // 内贸申请的预计采购价以人民币记录。有效报价优先。
+      const price =
+        quoted?.unitPrice ??
+        (domestic ? entryPrice(line.unitPrice) : undefined);
+      if (price !== undefined) setRowPrice(row, price);
+      return [row];
+    },
+  );
+  if (rows.value.length === 0)
+    error.value =
+      '当前没有可转采购明细，请刷新申请或查看已生成的采购单及占用情况。';
 }
 /** 复制采购单：先关联原合同（合同产品行要用），再带出表头和明细；edit 时是修改这张草稿。 */
 async function copyOrder(
@@ -515,6 +560,7 @@ watch(
     submitted.value = false;
     error.value = '';
     contract.value = undefined;
+    contractReviewOpen.value = false;
     sourceRequestId.value = undefined;
     header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
     rows.value = [emptyRow(key())];
@@ -641,9 +687,25 @@ async function save(submit = false) {
             placeholder="自行填写采购主题，例如：11月瑜伽垫备货"
           />
         </label>
-        <label class="field">
-          <span>关联合同（选填）</span>
+        <div class="field">
+          <div class="contract-field-label">
+            <label for="purchase-order-entry-contract">关联合同（选填）</label>
+            <a
+              v-if="contractReviewHref"
+              :href="contractReviewHref"
+              target="_blank"
+              rel="noopener noreferrer"
+              >查看合同订单</a>
+            <button
+              v-else-if="requestId && contract"
+              type="button"
+              @click="contractReviewOpen = true"
+            >
+              查看合同订单
+            </button>
+          </div>
           <Select
+            id="purchase-order-entry-contract"
             :value="header.contractId"
             show-search
             allow-clear
@@ -654,7 +716,7 @@ async function save(submit = false) {
             @search="searchContracts"
             @update:value="chooseContract"
           />
-        </label>
+        </div>
         <div class="field">
           <span><em v-if="rows.some((row) => !row.supplierId)">*</em>供应商</span>
           <RemoteMasterSelect
@@ -727,6 +789,9 @@ async function save(submit = false) {
           带出合同产品
         </Button>
       </div>
+      <p v-if="missingRequestPrices" class="muted" role="status">
+        {{ missingRequestPrices }} 行采购单价待核对填写
+      </p>
       <!-- 固定列宽：长产品名在列内换行，列放不下时横向滚动，序号/产品/删除列冻结 -->
       <div class="table-wrap">
         <table class="entry-grid">
@@ -991,6 +1056,26 @@ async function save(submit = false) {
     </template>
   </Modal>
   <Modal
+    v-if="contract && contractReviewOpen"
+    :open="open"
+    :title="`合同订单 ${contract.code}`"
+    width="min(1080px, 92vw)"
+    :footer="null"
+    @cancel="contractReviewOpen = false"
+  >
+    <p>
+      {{ [contract.name, contract.customerName].filter(Boolean).join(' · ') }}
+    </p>
+    <Table
+      :columns="contractReviewColumns"
+      :data-source="contract.items"
+      :pagination="false"
+      :scroll="{ x: 740, y: '55vh' }"
+      row-key="id"
+      size="small"
+    />
+  </Modal>
+  <Modal
     :open="bulkOpen"
     title="批量添加产品"
     width="720px"
@@ -1067,6 +1152,24 @@ async function save(submit = false) {
 
 .field > span:first-child {
   color: hsl(var(--muted-foreground));
+}
+
+.contract-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  justify-content: space-between;
+  color: hsl(var(--muted-foreground));
+}
+
+.contract-field-label :is(a, button) {
+  padding: 0;
+  color: hsl(var(--primary));
+  cursor: pointer;
+}
+
+.contract-field-label :is(a, button):hover {
+  text-decoration: underline;
 }
 
 .field.wide {

@@ -25,7 +25,6 @@ export interface PrintExtras {
 
 /** 共用说明列常用名称：金智瑜伽垫采购单里的两列。 */
 export const SHARED_COLUMN_SUGGESTIONS = ['纹路', '定制'];
-export const MAX_SHARED_COLUMNS = 4;
 export const MAX_SHARED_IMAGES = 6;
 export const MAX_STEPS = 12;
 export const MAX_STEP_IMAGES = 8;
@@ -171,6 +170,7 @@ export function printExtrasPayload(value: PrintExtras) {
     if (row.packQty) clean.packQty = row.packQty;
     if (row.imageId) clean.imageId = row.imageId;
     if (row.colorImageId) clean.colorImageId = row.colorImageId;
+    if (row.backColorImageId) clean.backColorImageId = row.backColorImageId;
     if (row.imageIds?.length) clean.imageIds = [...row.imageIds];
     const cells = cleanCells(row.customCells);
     if (Object.keys(cells).length > 0) clean.customCells = cells;
@@ -215,7 +215,7 @@ export function printExtrasImageIds(value: PrintExtras) {
   return [
     ...new Set([
       ...Object.values(value.lineExtras)
-        .flatMap((row) => [row.imageId, row.colorImageId])
+        .flatMap((row) => [row.imageId, row.colorImageId, row.backColorImageId])
         .filter((id): id is string => !!id),
       ...Object.values(value.lineExtras).flatMap((row) => row.imageIds ?? []),
       ...[...Object.values(value.lineExtras), ...value.additionalLines].flatMap(
@@ -294,9 +294,12 @@ export function copyPrintExtras(
     const extra = key ? bySource.get(key) : undefined;
     if (!extra) continue;
     matched++;
-    const { imageId, colorImageId, ...rest } = extra;
+    const { backColorImageId, colorImageId, imageId, ...rest } = extra;
     const copied = imageId ? images[imageId] : undefined;
     const copiedColor = colorImageId ? images[colorImageId] : undefined;
+    const copiedBackColor = backColorImageId
+      ? images[backColorImageId]
+      : undefined;
     const id = String(line.id);
     const existing = current.lineExtras[id];
     for (const field of PRODUCTION_IDENTITY_FIELDS) {
@@ -311,6 +314,7 @@ export function copyPrintExtras(
         : {}),
       ...(copied ? { imageId: copied } : {}),
       ...(copiedColor ? { colorImageId: copiedColor } : {}),
+      ...(copiedBackColor ? { backColorImageId: copiedBackColor } : {}),
     };
   }
   return {

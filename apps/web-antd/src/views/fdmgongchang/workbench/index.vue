@@ -42,8 +42,8 @@ import { prefillReportQuantity, reportErrors } from './report-quantity';
 import { applyJobTarget, createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
- * 工厂部门 · 我的工作台（工人手机端）：活都从派单来——我的任务里看清楚做什么、领什么料，
- * 先按实际批次领料开工，再对本工序的实际产出报工，支持分批、补领和余料退回。
+ * 工厂部门 · 我的工作台（工人手机端）：员工按下发任务或独立开单领料，
+ * 再对本工序的实际产出报工，支持分批、补领和余料退回。
  */
 defineOptions({ name: 'FdmGongchangWorkbench' });
 
@@ -152,7 +152,6 @@ function reset(process: Api.Process, task?: FdmgongchangScheduleApi.Task) {
   reportError.value = '';
 }
 
-/** 独立开片：一单可领多种板材，各规格实际产出分别入库。 */
 function startActual(process: Api.Process) {
   reset(process);
   job.step = 'pick';
@@ -227,10 +226,12 @@ function piecePayload() {
 
 /** 只领料：单子进「我手上在做的」；补领时把料加到原来那张单上。 */
 async function issueOnly() {
+  if (submitting.value) return;
   if (job.supplement && job.order?.status === 'COMPLETED' && !job.supplementRemark.trim()) {
     message.warning('已完工的单补登领料要写原因');
     return;
   }
+  reportError.value = '';
   submitting.value = true;
   try {
     if (job.supplement && job.order) {
@@ -257,6 +258,8 @@ async function issueOnly() {
     job.result = { action: job.supplement ? 'supplement' : 'issue', amount: 0, good: 0, unit: '' };
     job.step = 'done';
     await reloadAfterSave();
+  } catch (error) {
+    reportError.value = businessError(error).msg;
   } finally {
     submitting.value = false;
   }
@@ -491,7 +494,7 @@ function back() {
           @supplement-order="(order) => continueOrder(order, true)"
         />
         <PickStep v-else-if="job.step === 'pick'" @back="back" @next="afterPick" />
-        <ConfirmStep v-else-if="job.step === 'confirm'" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
+        <ConfirmStep v-else-if="job.step === 'confirm'" :submitting="submitting" @back="back" @issue-only="issueOnly" @report-now="reportNow" />
         <ReportStep
           v-else-if="job.step === 'report'"
           :order-actions="listReportMode === 'details'"
