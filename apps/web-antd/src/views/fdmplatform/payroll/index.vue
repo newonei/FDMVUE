@@ -170,6 +170,7 @@ const monthlyWork = computed(
 const month = ref(monthOffset(currentMonth(), -1));
 const company = ref('');
 const department = ref('');
+const region = ref('');
 const query = ref('');
 const rankBy = ref<'company' | 'department'>('department');
 const detailPage = ref(1);
@@ -210,8 +211,19 @@ function inScope(row: { company: string; department: string }) {
 }
 
 const visibleRows = computed(() => batch.value?.rows.filter(inScope) ?? []);
+const regions = computed(() =>
+  [
+    ...new Set(
+      visibleRows.value.flatMap(({ region }) => (region ? [region] : [])),
+    ),
+  ].toSorted((a, b) => a.localeCompare(b, 'zh-CN')),
+);
 const filteredRows = computed(() =>
-  visibleRows.value.filter((row) => row.name.includes(query.value.trim())),
+  visibleRows.value.filter(
+    (row) =>
+      (!region.value || row.region === region.value) &&
+      row.name.includes(query.value.trim()),
+  ),
 );
 const detailPageSize = 12;
 const detailPages = computed(() =>
@@ -279,7 +291,10 @@ const stateCounts = computed(() => {
     },
   ];
 });
-watch([company, department, query], () => {
+watch(regions, (choices) => {
+  if (region.value && !choices.includes(region.value)) region.value = '';
+});
+watch([company, department, region, query], () => {
   detailPage.value = 1;
   deliveryPage.value = 1;
 });
@@ -468,12 +483,13 @@ function navigate(next: Tab) {
 
 function changeMonth(event: Event) {
   const input = event.target as HTMLInputElement;
-  if (!validMonth(input.value)) {
+  if (!validMonth(input.value) || input.value > currentMonth()) {
     input.value = month.value;
     return;
   }
   company.value = '';
   department.value = '';
+  region.value = '';
   query.value = '';
   month.value = input.value;
 }
@@ -681,6 +697,7 @@ const primaryFields = new Set([
   'personalFund',
   'personalSocial',
   'priorPaid',
+  'region',
   'tax',
 ]);
 const displayedFields = computed(() =>
@@ -712,6 +729,10 @@ async function processFile(file?: File) {
   importLoading.value = false;
   if (!validMonth(importMonth.value)) {
     importError.value = '请先选择工资月份。';
+    return;
+  }
+  if (importMonth.value > currentMonth()) {
+    importError.value = '导入月份不能晚于当前月份。';
     return;
   }
   if (
@@ -777,6 +798,7 @@ async function confirmImport() {
     if (!active.value) return;
     company.value = '';
     department.value = '';
+    region.value = '';
     query.value = '';
     month.value = period;
     navigate('overview');
@@ -1007,7 +1029,7 @@ function showNotice(item: PayrollDelivery) {
               :value="month"
               type="month"
               min="2000-01"
-              max="2099-12"
+              :max="currentMonth()"
               aria-label="工资月份"
               @change="changeMonth"
           /></label>
@@ -1025,6 +1047,16 @@ function showNotice(item: PayrollDelivery) {
               <option v-for="item in departments" :key="item">
                 {{ item }}
               </option></select><ChevronDown :size="13" /></label>
+          <label v-if="tab === 'detail'" class="filter">
+            <span>所属区域</span>
+            <select v-model="region" aria-label="所属区域">
+              <option value="">全部区域</option>
+              <option v-for="item in regions" :key="item" :value="item">
+                {{ item }}
+              </option>
+            </select>
+            <ChevronDown :size="13" />
+          </label>
           <span v-if="batch?.importedAt" class="source" :title="batch.source">
             <span class="source-dot"></span>更新于
             {{ dateTime(batch.importedAt) }}
@@ -1239,6 +1271,7 @@ function showNotice(item: PayrollDelivery) {
               <thead>
                 <tr>
                   <th>员工</th>
+                  <th>所属区域</th>
                   <th>所属公司</th>
                   <th>部门</th>
                   <th class="numeric">应发合计</th>
@@ -1260,6 +1293,7 @@ function showNotice(item: PayrollDelivery) {
                       }}</span>{{ row.name }}
                     </button>
                   </td>
+                  <td>{{ row.region || '—' }}</td>
                   <td>{{ row.company }}</td>
                   <td>{{ row.department }}</td>
                   <td class="numeric">{{ currency(row.gross) }}</td>
@@ -1529,7 +1563,7 @@ function showNotice(item: PayrollDelivery) {
                   v-model="importMonth"
                   type="month"
                   min="2000-01"
-                  max="2099-12"
+                  :max="currentMonth()"
                   aria-label="导入月份"
                   :disabled="importSaving"
               /></label>
@@ -1606,6 +1640,7 @@ function showNotice(item: PayrollDelivery) {
                   <thead>
                     <tr>
                       <th>姓名</th>
+                      <th>所属区域</th>
                       <th>部门</th>
                       <th class="numeric">应发合计</th>
                       <th class="numeric">实发数</th>
@@ -1617,6 +1652,7 @@ function showNotice(item: PayrollDelivery) {
                       :key="index"
                     >
                       <td>{{ row.name }}</td>
+                      <td>{{ row.region || '—' }}</td>
                       <td>{{ row.department }}</td>
                       <td class="numeric">{{ currency(row.gross) }}</td>
                       <td class="numeric">{{ currency(row.net) }}</td>

@@ -125,7 +125,7 @@ const compositionTotal = computed(() =>
 </script>
 
 <template>
-  <div v-if="mode === 'trends'" class="analysis-charts">
+  <div v-if="mode === 'trends'" class="analysis-charts analysis-trends">
     <PayrollChartCard
       :columns="yearLabels"
       :description="
@@ -189,5 +189,15 @@ const compositionTotal = computed(() =>
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr));
   gap: 14px;
+}
+
+.analysis-trends {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (width <= 1100px) {
+  .analysis-trends {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

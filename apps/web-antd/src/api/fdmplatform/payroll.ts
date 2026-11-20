@@ -44,7 +44,7 @@ export type PayrollTextField =
 
 export type PayrollValues = Record<PayrollAmountField, number> &
   Record<PayrollStatisticField, null | number> &
-  Record<PayrollTextField, string>;
+  Record<PayrollTextField, string> & { region?: string };
 
 export type PayrollRow = PayrollValues & { employeeKey: string; id: string };
 

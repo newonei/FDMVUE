@@ -9,6 +9,7 @@ import type {
 
 export const fields = [
   ['seq', '序号'],
+  ['region', '所属区域'],
   ['company', '所属公司'],
   ['department', '部门'],
   ['name', '姓名'],
@@ -170,7 +171,8 @@ export function fieldValue(row: PayrollValues, key: keyof PayrollValues) {
     return `${(Number(row[key]) * 100).toLocaleString('zh-CN', {
       maximumFractionDigits: 2,
     })}%`;
-  if (textFields.has(key) || statisticFields.has(key)) return String(value);
+  if (key === 'region' || textFields.has(key) || statisticFields.has(key))
+    return String(value);
   return currency(Number(value));
 }
 
@@ -190,7 +192,7 @@ export async function downloadBlankTemplate(month: string) {
     [],
     fields.map(([, label]) => label),
   ]);
-  sheet['!merges'] = [utils.decode_range('A1:AH2')];
+  sheet['!merges'] = [{ s: { c: 0, r: 0 }, e: { c: fields.length - 1, r: 1 } }];
   sheet['!cols'] = fields.map(([, label]) => ({
     wch: Math.max(13, label.length * 2 + 2),
   }));
