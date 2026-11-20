@@ -22,6 +22,8 @@ type DownloadAttachment = (
 
 const mocks = vi.hoisted(() => ({
   closePreview: vi.fn(),
+  confirm: vi.fn<(options: { onOk: () => Promise<void> }) => void>(),
+  deleteAttachment: vi.fn(),
   downloadAttachment: vi.fn<DownloadAttachment>(),
   key: 0,
   saveBlob: vi.fn<(options: { fileName: string; source: Blob }) => void>(),
@@ -31,6 +33,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('#/api/fdmplatform', () => ({
   uploadAttachment: mocks.upload,
+  deleteAttachment: mocks.deleteAttachment,
   downloadAttachment: mocks.downloadAttachment,
   renameAttachment: vi.fn(),
   newIdempotencyKey: () => `upload-key-${++mocks.key}`,
@@ -82,6 +85,18 @@ vi.mock('ant-design-vue', () => {
           ctx.slots.default?.(),
         ),
     }),
+    Dropdown: defineComponent({
+      setup: (_, ctx) => () =>
+        h('div', [ctx.slots.default?.(), ctx.slots.overlay?.()]),
+    }),
+    Menu: Object.assign(Wrap, {
+      Item: defineComponent({
+        props: ['disabled'],
+        setup: (props, ctx) => () =>
+          h('button', { disabled: props.disabled }, ctx.slots.default?.()),
+      }),
+    }),
+    Modal: { confirm: mocks.confirm },
     Empty: Wrap,
     Space: Wrap,
     Table: defineComponent({
@@ -257,6 +272,25 @@ function mockStalledDownload() {
       }),
   );
 }
+
+it('confirms deletion of the permitted file and refreshes its attachment list', async () => {
+  const removable = { ...quote, id: 'removable', canDelete: true };
+  const { host, refresh } = await mount({ items: [quote, removable] });
+
+  expect(rowAction(attachmentRow(host, quote), '删除')).toBeUndefined();
+  const row = attachmentRow(host, removable);
+  expect(row.querySelector('[aria-haspopup="menu"]')).toBeTruthy();
+  clickRowAction(row, '删除');
+  expect(mocks.deleteAttachment).not.toHaveBeenCalled();
+
+  await mocks.confirm.mock.calls[0]![0].onOk();
+  expect(mocks.deleteAttachment).toHaveBeenCalledExactlyOnceWith(
+    'contract-1',
+    'removable',
+  );
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(mocks.success).toHaveBeenCalledWith('附件已删除');
+});
 
 describe('attachment transfers', () => {
   it('shows preview progress and passes the original blob and file name to the preview', async () => {

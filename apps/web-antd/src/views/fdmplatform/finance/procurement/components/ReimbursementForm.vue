@@ -168,7 +168,7 @@ async function loadOptions() {
   loadingOptions.value = false;
 }
 watch(
-  () => [props.record?.id, props.record?.version, props.context],
+  () => [props.record, props.context],
   () => {
     Object.assign(
       form,

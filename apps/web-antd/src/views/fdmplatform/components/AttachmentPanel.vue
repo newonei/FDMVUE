@@ -25,6 +25,7 @@ import {
 } from 'ant-design-vue';
 
 import {
+  deleteAttachment,
   downloadAttachment,
   newIdempotencyKey,
   renameAttachment,
@@ -40,6 +41,7 @@ import {
 import { errorText } from '../data';
 import { personLabel } from '../directory';
 import { attachmentTime, previewMimeType } from './attachment-preview';
+import AttachmentActions from './AttachmentActions.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import { contractAttachmentCategories } from './contract-files';
 import RenameFileDialog from './RenameFileDialog.vue';
@@ -49,13 +51,18 @@ const props = defineProps<{
   contractId: string;
   /** 打开时默认选中的资料分类（如回款单据默认「回款凭证」） */
   defaultCategory?: string;
+  deletionDisabled?: boolean;
   error: string;
   loading: boolean;
   target?: AttachmentTarget;
   variant?: 'purchase';
   view?: AttachmentView;
 }>();
-const emit = defineEmits<{ busy: [value: boolean]; refresh: [] }>();
+const emit = defineEmits<{
+  busy: [value: boolean];
+  refresh: [];
+  removed: [];
+}>();
 const category = ref<string>();
 /** 单据详情提供的人员目录，用于显示上传人；其它入口没有时不显示该列 */
 const injectedDirectory = inject<Ref<Directory | undefined> | undefined>(
@@ -258,6 +265,14 @@ async function saveRename(name: string) {
   );
   message.success('文件名称已修改');
   emit('refresh');
+}
+async function removeAttachment(item: ContractAttachment) {
+  const context = contextSequence;
+  await deleteAttachment(props.contractId, item.id);
+  if (context === contextSequence) {
+    emit('refresh');
+    emit('removed');
+  }
 }
 function cancelTransfer(id: string) {
   const transfer = transfers.get(id);
@@ -545,7 +560,7 @@ function transferLabel(item: ContractAttachment) {
           ? [
               { title: '附件名称', key: 'name' },
               { title: '文件信息', key: 'info', width: 210 },
-              { title: '操作', key: 'action', width: 160 },
+              { title: '操作', key: 'action', width: 100 },
             ]
           : [
               { title: '附件名称', key: 'name', ellipsis: true },
@@ -558,7 +573,7 @@ function transferLabel(item: ContractAttachment) {
               {
                 title: '操作',
                 key: 'action',
-                width: 160,
+                width: 100,
                 fixed: 'right' as const,
               },
             ]
@@ -608,33 +623,30 @@ function transferLabel(item: ContractAttachment) {
           {{ attachmentTime(record.createdAt) }}
         </span>
         <Space v-else-if="column.key === 'action'" :size="0" wrap>
-          <Button
-            v-if="previewMimeType(record.name)"
-            type="link"
-            size="small"
-            :disabled="transfers.has(record.id)"
-            :loading="transfers.get(record.id)?.action === 'preview'"
-            @click="fetchFile(record as ContractAttachment, 'preview')"
-          >
-            预览
-          </Button>
-          <Button
-            v-if="canRename(record as ContractAttachment)"
-            type="link"
-            size="small"
-            @click="startRename(record as ContractAttachment)"
-          >
-            改名
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            :disabled="transfers.has(record.id)"
-            :loading="transfers.get(record.id)?.action === 'download'"
-            @click="fetchFile(record as ContractAttachment, 'download')"
-          >
-            下载
-          </Button>
+          <AttachmentActions
+            :name="record.name"
+            :context-key="`${contractId}/${target?.targetKind ?? ''}/${target?.targetId ?? ''}/${record.id}`"
+            :disabled="uploading || transfers.has(record.id)"
+            :loading="transfers.has(record.id)"
+            :download="
+              () => fetchFile(record as ContractAttachment, 'download')
+            "
+            :preview="
+              previewMimeType(record.name)
+                ? () => fetchFile(record as ContractAttachment, 'preview')
+                : undefined
+            "
+            :rename="
+              canRename(record as ContractAttachment)
+                ? () => startRename(record as ContractAttachment)
+                : undefined
+            "
+            :remove="
+              !deletionDisabled && record.canDelete
+                ? () => removeAttachment(record as ContractAttachment)
+                : undefined
+            "
+          />
           <template v-if="transfers.has(record.id)">
             <span class="text-muted-foreground text-xs" role="status">{{
               transferLabel(record as ContractAttachment)

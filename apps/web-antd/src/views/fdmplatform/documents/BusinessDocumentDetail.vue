@@ -32,6 +32,7 @@ import {
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import {
+  deleteBusinessDocumentFile,
   downloadBusinessDocumentFile,
   getBusinessDocument,
   getBusinessDocumentFiles,
@@ -44,8 +45,10 @@ import { businessDocumentActionWithAttachments } from '#/api/fdmplatform/submiss
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../components/ActionDialog.vue';
+import AttachmentActions from '../components/AttachmentActions.vue';
+import AttachmentPreview from '../components/AttachmentPreview.vue';
 import CreationAttachments from '../components/CreationAttachments.vue';
-import FilePreviewButton from '../components/FilePreviewButton.vue';
+import { filePreviewKind } from '../components/file-preview';
 import LineTable from '../components/LineTable.vue';
 import RecordTable from '../components/RecordTable.vue';
 import RenameFileDialog from '../components/RenameFileDialog.vue';
@@ -94,6 +97,7 @@ const draftFiles = ref<File[]>([]);
 const fileInput = ref<HTMLInputElement>();
 const attachments = ref<Awaited<ReturnType<typeof getBusinessDocumentFiles>>>();
 const fileError = ref('');
+const preview = ref<InstanceType<typeof AttachmentPreview>>();
 const uploadKeys = new WeakMap<File, string>();
 const supportsAttachments = computed(() =>
   [
@@ -147,6 +151,7 @@ async function load() {
   const run = ++sequence;
   view.value = undefined;
   attachments.value = undefined;
+  preview.value?.close();
   fileError.value = '';
   draftFiles.value = [];
   pageError.value = '';
@@ -187,15 +192,43 @@ async function loadFiles() {
     if (view.value?.id === id) fileError.value = errorText(error);
   }
 }
-async function download(file: BusinessDocumentFile) {
-  if (!view.value) return;
+async function transfer(
+  file: BusinessDocumentFile,
+  mode: 'download' | 'preview',
+) {
+  const run = sequence;
   try {
-    downloadBlob(
-      await downloadBusinessDocumentFile(view.value.id, file.id),
-      file.name,
-    );
+    const blob = await downloadBusinessDocumentFile(file.documentId, file.id);
+    if (run !== sequence) return;
+    if (mode === 'preview') preview.value?.show(blob, file.name);
+    else downloadBlob(blob, file.name);
   } catch (error) {
-    fileError.value = errorText(error);
+    if (run === sequence) fileError.value = errorText(error);
+  }
+}
+async function removeUploadedFile(file: BusinessDocumentFile) {
+  if (saving.value) throw new Error('请等待当前单据操作完成');
+  const run = sequence;
+  saving.value = true;
+  try {
+    await deleteBusinessDocumentFile(file.documentId, file.id);
+    if (run !== sequence || !view.value) return;
+    if (attachments.value) {
+      attachments.value.items = attachments.value.items.filter(
+        ({ id }) => id !== file.id,
+      );
+    }
+    try {
+      const value = await getBusinessDocument(file.documentId);
+      if (run !== sequence) return;
+      view.value = requireBusinessDocumentKind(value, props.kind);
+      emit('updated', view.value);
+      await loadFiles();
+    } catch (error) {
+      if (run === sequence) fileError.value = errorText(error);
+    }
+  } finally {
+    saving.value = false;
   }
 }
 const renaming = ref<BusinessDocumentFile>();
@@ -652,35 +685,37 @@ async function submit(
               :columns="[
                 { title: '文件', dataIndex: 'name', ellipsis: true },
                 { title: '大小', key: 'size', width: 90 },
-                { title: '操作', key: 'action', width: 200 },
+                { title: '操作', key: 'action', width: 74 },
               ]"
             >
               <template #bodyCell="{ column, record: file }">
                 <span v-if="column.key === 'size'">
                   {{ attachmentSize(Number(file.size)) }}
                 </span>
-                <template v-if="column.key === 'action' && view">
-                  <FilePreviewButton
-                    :name="file.name"
-                    :load="
-                      () => downloadBusinessDocumentFile(view!.id, file.id)
-                    "
-                  />
-                  <Button
-                    v-if="attachments?.canUpload"
-                    type="link"
-                    :disabled="saving"
-                    @click="startRename(file as BusinessDocumentFile)"
-                  >
-                    改名
-                  </Button>
-                  <Button
-                    type="link"
-                    @click="download(file as BusinessDocumentFile)"
-                  >
-                    下载
-                  </Button>
-                </template>
+                <AttachmentActions
+                  v-else-if="column.key === 'action' && view"
+                  :name="file.name"
+                  :context-key="view.id"
+                  :disabled="saving"
+                  :download="
+                    () => transfer(file as BusinessDocumentFile, 'download')
+                  "
+                  :preview="
+                    filePreviewKind(file.name)
+                      ? () => transfer(file as BusinessDocumentFile, 'preview')
+                      : undefined
+                  "
+                  :rename="
+                    attachments?.canUpload
+                      ? () => startRename(file as BusinessDocumentFile)
+                      : undefined
+                  "
+                  :remove="
+                    file.canDelete
+                      ? () => removeUploadedFile(file as BusinessDocumentFile)
+                      : undefined
+                  "
+                />
               </template>
             </Table>
           </Card>
@@ -688,6 +723,7 @@ async function submit(
       </Space>
     </Spin>
   </FdmResizableDrawer>
+  <AttachmentPreview ref="preview" @download="downloadBlob" />
   <RenameFileDialog
     v-model:open="renameOpen"
     :name="renaming?.name"

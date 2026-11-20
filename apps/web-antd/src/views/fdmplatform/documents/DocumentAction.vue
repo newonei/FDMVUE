@@ -595,6 +595,7 @@ async function execute(input: Record<string, unknown>, key: string) {
         <Collapse.Panel key="files" header="已上传凭据：可继续选择已有文件">
           <AttachmentPanel
             :contract-id="contract.id"
+            deletion-disabled
             :view="attachments"
             :categories="attachments?.uploadCategories ?? []"
             :loading="attachmentLoading"

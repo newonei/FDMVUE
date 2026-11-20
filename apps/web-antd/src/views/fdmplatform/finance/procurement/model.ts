@@ -19,6 +19,7 @@ export const financeRoutes: Record<ProcurementFinanceType, string> = {
   COST_ALLOCATION: '/caiwu/platform-procurement-costs',
 };
 export const actionNames: Record<string, string> = {
+  ATTACHMENT_DELETE: '删除凭证',
   COMPLETE_MIGRATED_PAYMENT: '补齐原付款资料',
   UPDATE: '保存草稿',
   SUBMIT: '提交生效',

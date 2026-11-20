@@ -5,9 +5,10 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import { downloadFileFromBlobPart } from '@vben/utils';
 
-import { Alert, Button, message, Space, Table } from 'ant-design-vue';
+import { Alert, Button, message, Table } from 'ant-design-vue';
 
 import {
+  deleteBusinessDocumentFile,
   downloadBusinessDocumentFile,
   getBusinessDocument,
   getBusinessDocumentFiles,
@@ -23,7 +24,9 @@ import {
 } from '#/api/fdmplatform/submission-files';
 
 import { attachmentTime } from '../../../components/attachment-preview';
-import FilePreviewButton from '../../../components/FilePreviewButton.vue';
+import AttachmentActions from '../../../components/AttachmentActions.vue';
+import AttachmentPreview from '../../../components/AttachmentPreview.vue';
+import { filePreviewKind } from '../../../components/file-preview';
 import RenameFileDialog from '../../../components/RenameFileDialog.vue';
 import { errorText } from '../../../data';
 
@@ -31,15 +34,21 @@ import { errorText } from '../../../data';
  * 不关联合同的采购单附件：存在独立采购单自己的单据附件里，不走合同附件
  * （合同附件按合同编号存取，独立采购单没有合同）。
  */
-const props = defineProps<{ orderId: string }>();
+const props = defineProps<{
+  orderId: string;
+  refreshOrder?: () => Promise<void>;
+}>();
 const emit = defineEmits<{ busy: [value: boolean] }>();
 
 const items = ref<BusinessDocumentFile[]>([]);
 const canUpload = ref(false);
 const loading = ref(false);
 const uploading = ref(false);
+const removing = ref(false);
+const busy = computed(() => uploading.value || removing.value);
 const error = ref('');
 const input = ref<HTMLInputElement>();
+const preview = ref<InstanceType<typeof AttachmentPreview>>();
 const dragDepth = ref(0);
 const selectionNotice = ref('');
 type QueuedFile = {
@@ -82,7 +91,7 @@ function pick(event: Event) {
   addFiles(files);
 }
 function addFiles(files: File[]) {
-  if (uploading.value || !canUpload.value || files.length === 0) return;
+  if (busy.value || !canUpload.value || files.length === 0) return;
   const fingerprint = (file: File) =>
     `${file.name}\0${file.size}\0${file.lastModified}`;
   const known = new Set(queue.value.map((item) => fingerprint(item.file)));
@@ -114,7 +123,7 @@ function addFiles(files: File[]) {
   if (duplicates) selectionNotice.value = `已跳过 ${duplicates} 个重复文件`;
 }
 function dragEnter() {
-  if (!uploading.value && canUpload.value) dragDepth.value++;
+  if (!busy.value && canUpload.value) dragDepth.value++;
 }
 function dragLeave() {
   dragDepth.value = Math.max(0, dragDepth.value - 1);
@@ -122,7 +131,7 @@ function dragLeave() {
 function dragOver(event: DragEvent) {
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect =
-      !uploading.value && canUpload.value ? 'copy' : 'none';
+      !busy.value && canUpload.value ? 'copy' : 'none';
   }
 }
 function drop(event: DragEvent) {
@@ -130,7 +139,7 @@ function drop(event: DragEvent) {
   addFiles([...(event.dataTransfer?.files ?? [])]);
 }
 function removeQueuedFile(key: string) {
-  if (uploading.value) return;
+  if (busy.value) return;
   queue.value = queue.value.filter((item) => item.key !== key);
   error.value = '';
   selectionNotice.value = '';
@@ -173,7 +182,7 @@ async function uploadQueuedFile(
   return false;
 }
 async function upload() {
-  if (uploading.value || !canUpload.value || queue.value.length === 0) return;
+  if (busy.value || !canUpload.value || queue.value.length === 0) return;
   const validation = submissionFilesError(queue.value.map((item) => item.file));
   if (validation) {
     error.value = validation;
@@ -210,12 +219,34 @@ async function upload() {
     if (version === contextVersion) uploading.value = false;
   }
 }
-async function download(file: BusinessDocumentFile) {
+function saveFile(blob: Blob, fileName: string) {
+  downloadFileFromBlobPart({ source: blob, fileName });
+}
+async function transfer(
+  file: BusinessDocumentFile,
+  mode: 'download' | 'preview',
+) {
+  const context = contextVersion;
   try {
     const blob = await downloadBusinessDocumentFile(props.orderId, file.id);
-    downloadFileFromBlobPart({ source: blob, fileName: file.name });
+    if (context !== contextVersion) return;
+    if (mode === 'preview') preview.value?.show(blob, file.name);
+    else saveFile(blob, file.name);
   } catch (error_) {
-    error.value = errorText(error_);
+    if (context === contextVersion) error.value = errorText(error_);
+  }
+}
+async function removeUploadedFile(file: BusinessDocumentFile) {
+  if (busy.value) throw new Error('请等待当前附件操作完成');
+  const context = contextVersion;
+  removing.value = true;
+  try {
+    await deleteBusinessDocumentFile(file.documentId, file.id);
+    if (context !== contextVersion) return;
+    items.value = items.value.filter(({ id }) => id !== file.id);
+    await Promise.all([load(), props.refreshOrder?.()]);
+  } finally {
+    if (context === contextVersion) removing.value = false;
   }
 }
 const renaming = ref<BusinessDocumentFile>();
@@ -237,7 +268,7 @@ async function saveRename(name: string) {
   message.success('文件名称已修改');
   await load();
 }
-watch(uploading, (value) => emit('busy', value), {
+watch(busy, (value) => emit('busy', value), {
   flush: 'sync',
   immediate: true,
 });
@@ -251,7 +282,9 @@ watch(
     selectionNotice.value = '';
     progress.value = { completed: 0, failed: 0, total: 0 };
     uploading.value = false;
+    removing.value = false;
     canUpload.value = false;
+    preview.value?.close();
     void load();
   },
   { immediate: true },
@@ -269,12 +302,7 @@ onBeforeUnmount(() => {
         <h3>补充附件</h3>
         <p class="muted">报价、图纸、沟通资料等，统一保存在本采购单下。</p>
       </div>
-      <Button
-        size="small"
-        :disabled="uploading"
-        :loading="loading"
-        @click="load"
-      >
+      <Button size="small" :disabled="busy" :loading="loading" @click="load">
         刷新
       </Button>
     </div>
@@ -286,14 +314,14 @@ onBeforeUnmount(() => {
       :accept="ATTACHMENT_ACCEPT"
       multiple
       hidden
-      :disabled="uploading || !canUpload"
+      :disabled="busy || !canUpload"
       @change="pick"
     />
     <button
       type="button"
       class="dropzone"
       :class="{ 'is-dragging': dragDepth > 0 }"
-      :disabled="!canUpload || uploading"
+      :disabled="!canUpload || busy"
       @click="input?.click()"
       @dragenter.prevent="dragEnter"
       @dragleave.prevent="dragLeave"
@@ -335,7 +363,7 @@ onBeforeUnmount(() => {
         </div>
         <Button
           type="primary"
-          :disabled="!canUpload"
+          :disabled="!canUpload || removing"
           :loading="uploading"
           @click="upload"
         >
@@ -355,7 +383,7 @@ onBeforeUnmount(() => {
         <Button
           type="link"
           size="small"
-          :disabled="uploading"
+          :disabled="busy"
           @click="removeQueuedFile(item.key)"
         >
           移除
@@ -382,7 +410,7 @@ onBeforeUnmount(() => {
       :columns="[
         { title: '附件名称', key: 'name' },
         { title: '文件信息', key: 'info', width: 155 },
-        { title: '操作', key: 'action', width: 145 },
+        { title: '操作', key: 'action', width: 74 },
       ]"
     >
       <template #emptyText>
@@ -404,30 +432,31 @@ onBeforeUnmount(() => {
           <span>{{ attachmentSize(Number(record.size)) }}</span>
           <span class="muted">{{ attachmentTime(record.createdAt) }}</span>
         </div>
-        <Space v-else-if="column.key === 'action'" :size="0" :wrap="true">
-          <FilePreviewButton
-            :name="record.name"
-            size="small"
-            :load="() => downloadBusinessDocumentFile(orderId, record.id)"
-          />
-          <Button
-            v-if="canUpload"
-            type="link"
-            size="small"
-            @click="startRename(record as BusinessDocumentFile)"
-          >
-            改名
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            @click="download(record as BusinessDocumentFile)"
-          >
-            下载
-          </Button>
-        </Space>
+        <AttachmentActions
+          v-else-if="column.key === 'action'"
+          :name="record.name"
+          :context-key="orderId"
+          :disabled="busy || loading"
+          :download="() => transfer(record as BusinessDocumentFile, 'download')"
+          :preview="
+            filePreviewKind(record.name)
+              ? () => transfer(record as BusinessDocumentFile, 'preview')
+              : undefined
+          "
+          :rename="
+            canUpload
+              ? () => startRename(record as BusinessDocumentFile)
+              : undefined
+          "
+          :remove="
+            record.canDelete
+              ? () => removeUploadedFile(record as BusinessDocumentFile)
+              : undefined
+          "
+        />
       </template>
     </Table>
+    <AttachmentPreview ref="preview" @download="saveFile" />
     <RenameFileDialog
       v-model:open="renameOpen"
       :name="renaming?.name"

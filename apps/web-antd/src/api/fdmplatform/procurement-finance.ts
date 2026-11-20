@@ -244,6 +244,7 @@ export function getProcurementFinanceSummary(
 }
 
 export interface ProcurementFinanceFile {
+  canDelete?: boolean;
   id: string;
   name: string;
   type?: string;
@@ -278,6 +279,11 @@ export function downloadProcurementFinanceFile(id: string, fileId: string) {
   return requestClient.download<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
     { timeout: LARGE_FILE_TIMEOUT },
+  );
+}
+export function deleteProcurementFinanceFile(id: string, fileId: string) {
+  return requestClient.delete<boolean>(
+    `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}`,
   );
 }
 

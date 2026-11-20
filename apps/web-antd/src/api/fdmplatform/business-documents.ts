@@ -56,6 +56,7 @@ export interface BusinessDocumentFile {
   sha256: string;
   uploadedBy: number;
   createdAt: number | string;
+  canDelete?: boolean;
 }
 export function getBusinessDocumentFiles(id: string) {
   return requestClient.get<{
@@ -92,6 +93,11 @@ export function downloadBusinessDocumentFile(id: string, fileId: string) {
   return requestClient.get<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
     { responseType: 'blob', timeout: LARGE_FILE_TIMEOUT },
+  );
+}
+export function deleteBusinessDocumentFile(id: string, fileId: string) {
+  return requestClient.delete<boolean>(
+    `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}`,
   );
 }
 export function getBusinessDocument(id: string) {

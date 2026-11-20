@@ -2469,6 +2469,7 @@ watch(financeType, (value, previous) => {
                 <StandaloneOrderFiles
                   v-if="standaloneOrder(view.contractId)"
                   :order-id="view.id"
+                  :refresh-order="financeChanged"
                   @busy="attachmentBusy = $event"
                 />
                 <AttachmentPanel
@@ -2483,6 +2484,7 @@ watch(financeType, (value, previous) => {
                   default-category="PROCUREMENT"
                   @busy="attachmentBusy = $event"
                   @refresh="loadOrderAttachments"
+                  @removed="financeChanged"
                 />
               </TabPane>
               <TabPane key="history" tab="操作记录">

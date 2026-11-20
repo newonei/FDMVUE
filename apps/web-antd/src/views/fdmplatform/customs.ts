@@ -37,6 +37,7 @@ export function customsLabel(value: unknown) {
     RESOLVE_FEEDBACK: '完成反馈',
     CANCEL: '取消批次',
     ATTACHMENT_UPLOAD: '上传资料',
+    ATTACHMENT_DELETE: '删除资料',
     COST_REFERENCE: '关联费用凭据',
     CREATE: '建立批次',
     SUBMIT_COST: '提交报关 / 运输费用',

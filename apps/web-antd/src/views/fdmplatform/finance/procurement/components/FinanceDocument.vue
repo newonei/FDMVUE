@@ -27,6 +27,7 @@ import { downloadBusinessDocumentFile } from '#/api/fdmplatform/business-documen
 import { getExpenseContext } from '#/api/fdmplatform/expense';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
+  deleteProcurementFinanceFile,
   downloadProcurementFinanceFile,
   getProcurementFinance,
   getProcurementFinanceFiles,
@@ -40,8 +41,11 @@ import {
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
 
 import ActionDialog from '../../../components/ActionDialog.vue';
+import AttachmentActions from '../../../components/AttachmentActions.vue';
+import AttachmentPreview from '../../../components/AttachmentPreview.vue';
 import CreationAttachments from '../../../components/CreationAttachments.vue';
 import DocumentApprovalPanel from '../../../components/DocumentApprovalPanel.vue';
+import { filePreviewKind } from '../../../components/file-preview';
 import FilePreviewButton from '../../../components/FilePreviewButton.vue';
 import RecordTable from '../../../components/RecordTable.vue';
 import { errorText, field, rows, selectField } from '../../../data';
@@ -98,6 +102,8 @@ const formRef = ref<InstanceType<typeof FinanceForm>>();
 const reimbursementRef = ref<InstanceType<typeof ReimbursementForm>>();
 const userNames = ref<Record<string, string>>({});
 const fileInput = ref<HTMLInputElement>();
+const attachmentPreview = ref<InstanceType<typeof AttachmentPreview>>();
+const previewingFile = ref('');
 const actionDefinition = ref<ActionDefinition>();
 const actionOpen = ref(false);
 const related = ref<{
@@ -193,6 +199,7 @@ async function loadFiles() {
   files.value = listing.items;
   canUpload.value = listing.canUpload;
   enabled.value = listing.enabled;
+  return listing.version;
 }
 function close() {
   if (busy.value || childOpen.value) return;
@@ -650,6 +657,48 @@ async function download(file: ProcurementFinanceFile) {
     pageError.value = errorText(error);
   }
 }
+async function previewAttachment(file: ProcurementFinanceFile) {
+  const id = record.value?.id;
+  if (!id || previewingFile.value) return;
+  const run = sequence;
+  previewingFile.value = file.id;
+  try {
+    const blob = await downloadProcurementFinanceFile(id, file.id);
+    if (run === sequence && record.value?.id === id && props.open)
+      attachmentPreview.value?.show(blob, file.name);
+  } catch (error) {
+    if (run === sequence) pageError.value = errorText(error);
+  } finally {
+    previewingFile.value = '';
+  }
+}
+async function removeAttachment(file: ProcurementFinanceFile) {
+  const current = record.value;
+  if (!current || busy.value || childOpen.value) {
+    throw new Error('请等待当前单据操作完成后再删除附件。');
+  }
+  const run = sequence;
+  const previousVersion = current.version;
+  saving.value = true;
+  try {
+    await deleteProcurementFinanceFile(current.id, file.id);
+    if (run !== sequence || record.value !== current || !props.open) return;
+    files.value = files.value.filter((item) => item.id !== file.id);
+    try {
+      const version = await loadFiles();
+      if (run === sequence && record.value === current && props.open) {
+        // Retain the draft inputs and advance only after this attachment mutation.
+        if (version === previousVersion + 1) current.version = version;
+        else
+          pageError.value = '凭证已删除，单据同时有其他变更，请刷新后再办理。';
+      }
+    } catch (error) {
+      if (run === sequence) pageError.value = errorText(error);
+    }
+  } finally {
+    saving.value = false;
+  }
+}
 async function downloadSource(file: BusinessDocumentFile) {
   const id = record.value?.sourceAttachmentDocumentId;
   if (!id) return;
@@ -1032,21 +1081,30 @@ async function relatedUpdated() {
           >
             <template #bodyCell="{ column, record: file }">
               <template v-if="column.key === 'action' && record">
-                <FilePreviewButton
+                <AttachmentActions
                   :name="file.name"
-                  :load="
-                    () => downloadProcurementFinanceFile(record!.id, file.id)
+                  :context-key="record.id"
+                  :disabled="busy || childOpen"
+                  :loading="previewingFile === file.id"
+                  :download="() => download(file as ProcurementFinanceFile)"
+                  :preview="
+                    filePreviewKind(file.name)
+                      ? () => previewAttachment(file as ProcurementFinanceFile)
+                      : undefined
+                  "
+                  :remove="
+                    file.canDelete
+                      ? () => removeAttachment(file as ProcurementFinanceFile)
+                      : undefined
                   "
                 />
-                <Button
-                  type="link"
-                  @click="download(file as ProcurementFinanceFile)"
-                >
-                  下载
-                </Button>
               </template>
             </template>
           </Table>
+          <AttachmentPreview
+            ref="attachmentPreview"
+            @download="downloadBlob"
+          />
 </Card><Card
           v-if="record?.sourceAttachments?.length"
           title="原付款来源凭据"

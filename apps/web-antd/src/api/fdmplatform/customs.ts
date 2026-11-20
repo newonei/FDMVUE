@@ -87,6 +87,7 @@ export interface CustomsFile extends BusinessRecord {
   id: string;
   name: string;
   category: string;
+  canDelete?: boolean;
   type?: string;
   size: number;
   uploadedBy?: number;
@@ -167,6 +168,11 @@ export function downloadCustomsFile(id: string, fileId: string) {
   return requestClient.download<Blob>(
     `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}/download`,
     { timeout: LARGE_FILE_TIMEOUT },
+  );
+}
+export function deleteCustomsFile(id: string, fileId: string) {
+  return requestClient.delete<boolean>(
+    `${base}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(fileId)}`,
   );
 }
 export function getCustomsSummary(contractId: string) {

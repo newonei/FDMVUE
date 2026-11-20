@@ -41,6 +41,7 @@ import {
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import {
+  deleteCustomsFile,
   downloadCustomsFile,
   getCustoms,
   getCustomsFiles,
@@ -73,6 +74,7 @@ import RelatedLink from '../documents/RelatedLink.vue';
 import { useOwnedRoute } from '../documents/useOwnedRoute';
 import { useRouteOwner } from '../documents/useRouteOwner';
 import { currencyOptions } from '../products/model';
+import AttachmentActions from './AttachmentActions.vue';
 import CreationAttachments from './CreationAttachments.vue';
 import CustomsEditor from './CustomsEditor.vue';
 
@@ -560,7 +562,8 @@ function chooseFiles(event: Event) {
   uploadError.value = '';
 }
 async function upload() {
-  if (!selected.value || pendingFiles.value.length === 0) return;
+  if (saving.value || !selected.value || pendingFiles.value.length === 0)
+    return;
   if (replacesId.value && pendingFiles.value.length !== 1) {
     uploadError.value = '替换版本时请只选择一个文件。';
     return;
@@ -622,6 +625,24 @@ async function download(file: CustomsFile) {
     detailError.value = errorText(error);
   } finally {
     downloading.value = '';
+  }
+}
+async function removeAttachment(file: CustomsFile) {
+  if (!selected.value || saving.value || uploading.value) {
+    throw new Error('请等待当前单据操作完成后再删除附件。');
+  }
+  const id = selected.value.id;
+  saving.value = true;
+  try {
+    await deleteCustomsFile(id, file.id);
+    if (selected.value?.id === id && detailOpen.value) {
+      files.value = files.value.filter((current) => current.id !== file.id);
+      await refreshDetail(id);
+    }
+    await load();
+    emit('changed');
+  } finally {
+    saving.value = false;
   }
 }
 function replace(file: CustomsFile) {
@@ -1013,7 +1034,7 @@ onBeforeUnmount(() => {
                   MB</span><Button
                   type="primary"
                   :loading="uploading"
-                  :disabled="!storageEnabled || !pendingFiles.length"
+                  :disabled="!storageEnabled || !pendingFiles.length || saving"
                   @click="upload"
                 >
                   上传资料
@@ -1052,26 +1073,30 @@ onBeforeUnmount(() => {
                   personLabel(directory, record.uploadedBy)
                 }}</span>
                 <Space v-else-if="column.key === 'action'" wrap>
+                  <AttachmentActions
+                    :name="record.name"
+                    :context-key="selected.id"
+                    :loading="downloading === record.id"
+                    :disabled="saving || uploading"
+                    :download="() => download(record as CustomsFile)"
+                    :preview="
+                      previewable(record as CustomsFile)
+                        ? () => preview(record as CustomsFile)
+                        : undefined
+                    "
+                    :remove="
+                      record.canDelete && replacesId !== record.id
+                        ? () => removeAttachment(record as CustomsFile)
+                        : undefined
+                    "
+                  />
                   <Button
-                    v-if="previewable(record as CustomsFile)"
-                    type="link"
-                    :loading="downloading === record.id"
-                    @click="preview(record as CustomsFile)"
-                  >
-                    预览
-</Button><Button
-                    type="link"
-                    :loading="downloading === record.id"
-                    @click="download(record as CustomsFile)"
-                  >
-                    下载
-</Button><Button
                     v-if="
                       (hasAction('UPLOAD') || hasAction('ATTACHMENT_UPLOAD')) &&
                       currentFiles.some((file) => file.id === record.id)
                     "
                     type="link"
-                    :disabled="uploading"
+                    :disabled="uploading || saving"
                     @click="replace(record as CustomsFile)"
                   >
                     替换

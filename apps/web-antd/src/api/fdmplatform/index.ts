@@ -215,6 +215,7 @@ export interface Directory {
   companies: { companyId: number; companyName: string }[];
 }
 export interface ContractAttachment extends BusinessRecord {
+  canDelete?: boolean;
   name: string;
   type: string;
   size: number;
@@ -277,6 +278,11 @@ export function renameAttachment(
   return requestClient.post<ContractAttachment>(
     `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/rename`,
     { idempotencyKey, name },
+  );
+}
+export function deleteAttachment(contractId: string, attachmentId: string) {
+  return requestClient.delete<boolean>(
+    `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}`,
   );
 }
 export function downloadAttachment(

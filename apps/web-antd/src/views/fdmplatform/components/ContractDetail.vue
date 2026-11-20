@@ -1504,6 +1504,7 @@ async function download(file: { id: string; name: string }) {
               :loading="attachmentLoading"
               uploadable
               @refresh="loadFiles"
+              @removed="emit('refresh')"
               @busy="(value) => (attachmentBusy = value)"
             />
           </TabPane>

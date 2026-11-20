@@ -887,6 +887,7 @@ const mainAction = computed(() => {
           :error="attachmentError"
           :loading="contractFilesLoading"
           @refresh="loadFiles"
+          @removed="load"
         />
         <AttachmentPanel
           v-else

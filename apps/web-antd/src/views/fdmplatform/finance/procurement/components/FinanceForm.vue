@@ -163,7 +163,7 @@ async function loadOrder() {
   }
 }
 watch(
-  () => [props.record?.id, props.record?.version, props.type, props.context],
+  () => [props.record, props.type, props.context],
   () => {
     orderLabel.value = '';
     sourceLabel.value = '';

@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import StandaloneOrderFiles from './StandaloneOrderFiles.vue';
 
 const mocks = vi.hoisted(() => ({
+  deleteFile: vi.fn(),
   document: vi.fn(),
   files: vi.fn(),
   upload: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform/business-documents', () => ({
+  deleteBusinessDocumentFile: mocks.deleteFile,
   getBusinessDocument: mocks.document,
   getBusinessDocumentFiles: mocks.files,
   uploadBusinessDocumentFile: mocks.upload,
@@ -24,16 +26,28 @@ vi.mock('../../../data', () => ({
 vi.mock('../../../components/attachment-preview', () => ({
   attachmentTime: String,
 }));
-vi.mock('../../../components/FilePreviewButton.vue', () => ({
-  default: defineComponent({ render: () => null }),
+vi.mock('../../../components/AttachmentPreview.vue', () => ({
+  default: defineComponent({
+    setup: (_, { expose }) => {
+      expose({ close: vi.fn() });
+      return () => null;
+    },
+  }),
+}));
+vi.mock('../../../components/AttachmentActions.vue', () => ({
+  default: defineComponent({
+    inheritAttrs: false,
+    props: { name: String, remove: Function },
+    setup: (props) => () =>
+      props.remove
+        ? h('button', { onClick: () => props.remove?.() }, `删除 ${props.name}`)
+        : null,
+  }),
 }));
 vi.mock('../../../components/RenameFileDialog.vue', () => ({
   default: defineComponent({ render: () => null }),
 }));
 vi.mock('ant-design-vue', () => {
-  const Wrap = defineComponent({
-    setup: (_, ctx) => () => h('div', ctx.slots.default?.()),
-  });
   return {
     Alert: defineComponent({
       props: { message: { default: '', type: String } },
@@ -48,8 +62,16 @@ vi.mock('ant-design-vue', () => {
           ctx.slots.default?.(),
         ),
     }),
-    Space: Wrap,
-    Table: Wrap,
+    Table: defineComponent({
+      props: { dataSource: { default: () => [], type: Array } },
+      setup: (props, ctx) => () =>
+        h(
+          'div',
+          props.dataSource.map((record) =>
+            ctx.slots.bodyCell?.({ column: { key: 'action' }, record }),
+          ),
+        ),
+    }),
     message: { success: vi.fn() },
   };
 });
@@ -60,7 +82,10 @@ beforeEach(() => {
   mocks.files.mockResolvedValue({
     enabled: true,
     canUpload: true,
-    items: [{ id: 'existing-1' }, { id: 'existing-2' }],
+    items: [
+      { id: 'existing-1', name: '附件一.pdf' },
+      { id: 'existing-2', name: '附件二.pdf' },
+    ],
   });
   mocks.document.mockResolvedValue({ version: 1 });
   mocks.upload.mockResolvedValue({ version: 2 });
@@ -73,7 +98,7 @@ async function settle() {
     await nextTick();
   }
 }
-async function mount() {
+async function mount(refreshOrder?: () => Promise<void>) {
   const orderId = ref('order-1');
   const busy: boolean[] = [];
   const host = document.createElement('div');
@@ -82,6 +107,7 @@ async function mount() {
     render: () =>
       h(StandaloneOrderFiles, {
         orderId: orderId.value,
+        refreshOrder,
         onBusy: (value: boolean) => busy.push(value),
       }),
   });
@@ -126,6 +152,37 @@ async function upload(host: HTMLElement) {
   await settle();
 }
 const file = (name: string) => new File(['sample'], name);
+
+it('删除允许修改的附件后刷新附件与采购单，并保留已引用的凭据', async () => {
+  const proof = { id: 'proof', name: '到货凭据.pdf', canDelete: false };
+  const removable = {
+    id: 'quote',
+    name: '旧报价单.pdf',
+    documentId: 'order-1',
+    canDelete: true,
+  };
+  mocks.files
+    .mockResolvedValueOnce({
+      enabled: true,
+      canUpload: true,
+      items: [proof, removable],
+    })
+    .mockResolvedValue({ enabled: true, canUpload: true, items: [proof] });
+  mocks.deleteFile.mockResolvedValue(true);
+  const refreshOrder = vi.fn().mockResolvedValue(undefined);
+  const { host, busy } = await mount(refreshOrder);
+
+  expect(host.textContent).not.toContain('删除 到货凭据.pdf');
+  button(host, '删除 旧报价单.pdf').click();
+  await settle();
+
+  expect(mocks.deleteFile).toHaveBeenCalledOnce();
+  expect(mocks.deleteFile).toHaveBeenCalledWith('order-1', 'quote');
+  expect(refreshOrder).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain('已上传附件共 1 个');
+  expect(host.textContent).not.toContain('删除 旧报价单.pdf');
+  expect(busy).toEqual([false, true, false]);
+});
 
 describe('独立采购单附件上传队列', () => {
   it('空队列显示补充附件拖放入口，选择文件前不展示主要上传操作', async () => {

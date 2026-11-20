@@ -1,13 +1,25 @@
 import { requestClient } from '#/api/request';
 
 import {
+  deleteBusinessDocumentFile,
   downloadBusinessDocumentFile,
   renameBusinessDocumentFile,
 } from './business-documents';
-import { downloadCustomsFile } from './customs';
-import { downloadAttachment, renameAttachment } from './index';
-import { downloadProcurementFile } from './procurement';
-import { downloadProcurementFinanceFile } from './procurement-finance';
+import { deleteCustomsFile, downloadCustomsFile } from './customs';
+import {
+  deleteAttachment,
+  downloadAttachment,
+  renameAttachment,
+} from './index';
+import {
+  deleteProcurementFile,
+  downloadProcurementFile,
+  getProcurementOrder,
+} from './procurement';
+import {
+  deleteProcurementFinanceFile,
+  downloadProcurementFinanceFile,
+} from './procurement-finance';
 import { downloadContractProductAttachment } from './products';
 
 /** 下载来源：决定走哪个既有下载接口 */
@@ -46,6 +58,7 @@ export interface ContractFile {
   revision?: null | number;
   /** 报关资料已被新版本替换 */
   superseded: boolean;
+  canDelete?: boolean;
 }
 export interface ContractFileListing {
   enabled: boolean;
@@ -106,4 +119,37 @@ export function renameContractFile(
         idempotencyKey,
       )
     : renameAttachment(contractId, file.id, name, idempotencyKey);
+}
+
+export async function deleteContractFile(
+  contractId: string,
+  file: ContractFile,
+  idempotencyKey: string,
+) {
+  const parent = file.parentId ?? '';
+  switch (file.source) {
+    case 'BUSINESS': {
+      return deleteBusinessDocumentFile(parent, file.id);
+    }
+    case 'CONTRACT': {
+      return deleteAttachment(contractId, file.id);
+    }
+    case 'CUSTOMS': {
+      return deleteCustomsFile(parent, file.id);
+    }
+    case 'PROC_CONTRACT': {
+      const order = await getProcurementOrder(contractId, parent);
+      return deleteProcurementFile(contractId, parent, file.id, {
+        contractVersion: order.version,
+        expectedVersion: order.details.version,
+        idempotencyKey,
+      });
+    }
+    case 'PROC_FINANCE': {
+      return deleteProcurementFinanceFile(parent, file.id);
+    }
+    default: {
+      throw new Error('当前资料由产品档案维护');
+    }
+  }
 }

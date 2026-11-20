@@ -28,6 +28,7 @@ import {
 import { newIdempotencyKey, uploadAttachment } from '#/api/fdmplatform';
 import {
   contractFileRenamable,
+  deleteContractFile,
   downloadContractFile,
   renameContractFile,
 } from '#/api/fdmplatform/contract-files';
@@ -40,6 +41,7 @@ import {
 
 import { errorText } from '../data';
 import { attachmentTime, previewMimeType } from './attachment-preview';
+import AttachmentActions from './AttachmentActions.vue';
 import AttachmentPreview from './AttachmentPreview.vue';
 import {
   contractAttachmentCategories,
@@ -58,7 +60,11 @@ const props = defineProps<{
   /** 合同详情可上传合同资料；单据详情里仅查看 */
   uploadable?: boolean;
 }>();
-const emit = defineEmits<{ busy: [value: boolean]; refresh: [] }>();
+const emit = defineEmits<{
+  busy: [value: boolean];
+  refresh: [];
+  removed: [];
+}>();
 
 const filter = reactive<ContractFileFilter>({
   group: 'ALL',
@@ -299,6 +305,14 @@ async function saveRename(name: string) {
   message.success('文件名称已修改');
   emit('refresh');
 }
+async function removeFileRecord(file: ContractFile) {
+  const context = contextSequence;
+  await deleteContractFile(props.contractId, file, newIdempotencyKey());
+  if (context === contextSequence) {
+    emit('refresh');
+    emit('removed');
+  }
+}
 function uploader(id?: null | number) {
   if (!id) return '—';
   return (
@@ -313,7 +327,7 @@ const columns = [
   { title: '大小', key: 'size', width: 90 },
   { title: '上传人', key: 'uploadedBy', width: 100 },
   { title: '上传时间', key: 'createdAt', width: 140 },
-  { title: '操作', key: 'action', width: 160, fixed: 'right' as const },
+  { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
 ];
 </script>
 
@@ -511,33 +525,31 @@ const columns = [
         <span v-else-if="column.key === 'createdAt'">
           {{ attachmentTime(record.createdAt) }}
         </span>
-        <Space v-else-if="column.key === 'action'" :size="0">
-          <Button
-            v-if="previewMimeType(record.name)"
-            type="link"
-            size="small"
-            :disabled="downloading === `${record.source}:${record.id}`"
-            @click="show(record as ContractFile)"
-          >
-            预览
-          </Button>
-          <Button
-            v-if="contractFileRenamable(record as ContractFile)"
-            type="link"
-            size="small"
-            @click="startRename(record as ContractFile)"
-          >
-            改名
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            :disabled="downloading === `${record.source}:${record.id}`"
-            @click="download(record as ContractFile)"
-          >
-            下载
-          </Button>
-        </Space>
+        <AttachmentActions
+          v-else-if="column.key === 'action'"
+          :name="record.name"
+          :context-key="`${contractId}/${record.source}/${record.id}`"
+          :loading="downloading === `${record.source}:${record.id}`"
+          :disabled="
+            uploading || downloading === `${record.source}:${record.id}`
+          "
+          :download="() => download(record as ContractFile)"
+          :preview="
+            previewMimeType(record.name)
+              ? () => show(record as ContractFile)
+              : undefined
+          "
+          :rename="
+            contractFileRenamable(record as ContractFile)
+              ? () => startRename(record as ContractFile)
+              : undefined
+          "
+          :remove="
+            record.canDelete
+              ? () => removeFileRecord(record as ContractFile)
+              : undefined
+          "
+        />
       </template>
     </Table>
     <AttachmentPreview
