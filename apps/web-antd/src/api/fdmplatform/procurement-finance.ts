@@ -7,6 +7,9 @@ import {
   LARGE_FILE_TIMEOUT,
   withUploadProgress,
 } from '#/components/upload-task';
+
+import { submitWithAttachments } from './submission-request';
+
 export type ProcurementFinanceType =
   | 'COST_ALLOCATION'
   | 'PAYMENT'
@@ -102,7 +105,8 @@ export interface OrderPaymentInput {
   batchNo?: string;
   name?: string;
 }
-const base = '/fdmplatform/v1/procurement-finance';
+const financePath = '/procurement-finance';
+const base = `/fdmplatform/v1${financePath}`;
 export function getProcurementFinancePage(params: {
   contractId?: string;
   keyword?: string;
@@ -125,12 +129,17 @@ export function getProcurementFinance(id: string) {
     `${base}/${encodeURIComponent(id)}`,
   );
 }
-export function createProcurementFinance(data: {
-  idempotencyKey: string;
-  payload: Record<string, unknown>;
-  type: ProcurementFinanceType;
-}) {
-  return requestClient.post<ProcurementFinanceRecord>(base, data);
+export function createProcurementFinance(
+  data: {
+    idempotencyKey: string;
+    payload: Record<string, unknown>;
+    type: ProcurementFinanceType;
+  },
+  files: File[] = [],
+) {
+  return files.length > 0
+    ? submitWithAttachments<ProcurementFinanceRecord>(financePath, data, files)
+    : requestClient.post<ProcurementFinanceRecord>(base, data);
 }
 export function procurementFinanceAction(
   id: string,
@@ -140,17 +149,25 @@ export function procurementFinanceAction(
     idempotencyKey: string;
     payload: Record<string, unknown>;
   },
+  files: File[] = [],
 ) {
-  return requestClient.post<ProcurementFinanceRecord>(
-    `${base}/${encodeURIComponent(id)}/actions`,
-    data,
-  );
+  const path = `/${encodeURIComponent(id)}/actions`;
+  return files.length > 0
+    ? submitWithAttachments<ProcurementFinanceRecord>(
+        `${financePath}${path}`,
+        data,
+        files,
+      )
+    : requestClient.post<ProcurementFinanceRecord>(`${base}${path}`, data);
 }
 /**
  * 付款登记后怎么办：SUBMIT 提交财务审核（采购登记，财务确认付款后才计入已付）；
  * CONFIRM 直接确认已付款（只有财务有权限）。
  */
 export type PaymentRegisterMode = 'CONFIRM' | 'SUBMIT';
+
+export class PaymentRegistrationCancelledError extends Error {}
+
 /**
  * 登记付款记录：建单后提交财务审核（或财务直接确认）。幂等键按调用方给的前缀区分，
  * 中途失败重试时已建好的单不会重复。
@@ -159,6 +176,7 @@ export async function registerOrderPayment(
   input: OrderPaymentInput,
   key: string,
   mode: PaymentRegisterMode = 'SUBMIT',
+  files: File[] = [],
 ) {
   return registerPayment(
     {
@@ -168,20 +186,23 @@ export async function registerOrderPayment(
     },
     key,
     mode,
+    files,
   );
 }
 async function registerPayment(
   payload: Record<string, unknown>,
   key: string,
   mode: PaymentRegisterMode,
+  files: File[],
 ) {
-  const draft = await createProcurementFinance({
-    type: 'PAYMENT',
-    idempotencyKey: `${key}:create`,
-    payload,
-  });
+  const draft = await createProcurementFinance(
+    { type: 'PAYMENT', idempotencyKey: `${key}:create`, payload },
+    files,
+  );
   if (draft.status === 'CANCELLED')
-    throw new Error('上次登记未完成已取消，请重新提交');
+    throw new PaymentRegistrationCancelledError(
+      '上次登记未完成已取消，请重新提交',
+    );
   if (draft.status !== 'DRAFT') return draft;
   try {
     return await procurementFinanceAction(draft.id, {
@@ -191,13 +212,15 @@ async function registerPayment(
       payload: {},
     });
   } catch (error) {
-    // 提交没过就把草稿取消，不在采购单下留半截付款；调用方换新键重试
-    await procurementFinanceAction(draft.id, {
+    // 仅在确认草稿已取消时换键。若提交其实已完成，重试会返回原付款。
+    const cancelled = await procurementFinanceAction(draft.id, {
       action: 'CANCEL',
       expectedVersion: draft.version,
       idempotencyKey: `${key}:cancel`,
       payload: { reason: '登记付款未完成，自动取消草稿' },
     }).catch(() => undefined);
+    if (files.length > 0 && cancelled?.status === 'CANCELLED')
+      throw new PaymentRegistrationCancelledError('', { cause: error });
     throw error;
   }
 }
@@ -213,11 +236,13 @@ export async function registerInvoicePayment(
   input: InvoicePaymentInput,
   key: string,
   mode: PaymentRegisterMode = 'SUBMIT',
+  files: File[] = [],
 ) {
   return registerPayment(
     { ...input, sourceType: 'PURCHASE_INVOICE' },
     key,
     mode,
+    files,
   );
 }
 /** 其他付款：不挂采购单（集团内往来款、押金等），币种自选，只记付款事实，不计入任何采购单已付。 */
@@ -230,9 +255,15 @@ export interface OtherPaymentInput extends Omit<
 export async function registerOtherPayment(
   input: OtherPaymentInput,
   key: string,
+  files: File[] = [],
 ) {
   // 其他付款不在财务审核范围内，登记即确认
-  return registerPayment({ ...input, sourceType: 'OTHER' }, key, 'CONFIRM');
+  return registerPayment(
+    { ...input, sourceType: 'OTHER' },
+    key,
+    'CONFIRM',
+    files,
+  );
 }
 export function getProcurementFinanceSummary(
   contractId: string,

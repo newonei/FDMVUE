@@ -20,16 +20,17 @@ import {
 } from 'ant-design-vue';
 import BigNumber from 'bignumber.js';
 
+import { newIdempotencyKey } from '#/api/fdmplatform/idempotency';
 import { getProcurementSettings } from '#/api/fdmplatform/procurement';
 import {
+  PaymentRegistrationCancelledError,
   procurementFinanceAction,
   registerInvoicePayment,
   registerOrderPayment,
   registerOtherPayment,
-  uploadProcurementFinanceFile,
 } from '#/api/fdmplatform/procurement-finance';
 
-import FilePreviewButton from '../../../components/FilePreviewButton.vue';
+import CreationAttachments from '../../../components/CreationAttachments.vue';
 import { errorText, receiptCurrencyOptions } from '../../../data';
 import { localDate } from '../../../purchase/quotes/comparison';
 import {
@@ -103,7 +104,15 @@ const otherCurrency = ref('CNY');
 const currencyText = computed(() =>
   props.other ? otherCurrency.value : (props.currency ?? 'CNY'),
 );
-let key = crypto.randomUUID();
+let editingRecord: ProcurementFinanceRecord | undefined;
+let attempt:
+  | undefined
+  | {
+      files: File[];
+      fingerprint: string;
+      key: string;
+      updated?: ProcurementFinanceRecord;
+    };
 
 const referenceItems = computed(() => {
   const money = (input: unknown) => {
@@ -152,12 +161,13 @@ watch(
   () => props.open,
   async (open) => {
     if (!open) return;
-    key = crypto.randomUUID();
+    attempt = undefined;
     error.value = '';
     files.value = [];
     otherCurrency.value = 'CNY';
     confirmDirectly.value = false;
     const record = props.record;
+    editingRecord = record;
     form.value = record
       ? {
           amount:
@@ -195,43 +205,50 @@ function pickPayer(id: string) {
   const label = payerAccountLabel(payers.value.find((row) => row.id === id));
   if (label) form.value.payerAccount = label;
 }
-function pickFiles(event: Event) {
-  const input = event.target as HTMLInputElement;
-  files.value = [...files.value, ...(input.files ?? [])];
-  input.value = '';
-}
-
-/** 修改被退回的付款：整单保存后重新提交（或财务直接确认），来源和已有回单不变。 */
+/** 修改被退回的付款：保存表单和新附件后重新提交，保留原附件。 */
 async function resubmit(
   record: ProcurementFinanceRecord,
   fields: Record<string, unknown>,
   mode: 'CONFIRM' | 'SUBMIT',
+  current: NonNullable<typeof attempt>,
 ) {
-  const updated = await procurementFinanceAction(record.id, {
-    action: 'UPDATE',
-    expectedVersion: record.version,
-    idempotencyKey: `${key}:update`,
-    payload: {
-      ...fields,
-      name: record.name,
-      sourceType: record.sourceType,
-      contractId: record.invoiceId ? undefined : record.contractId || undefined,
-      orderId: record.invoiceId ? undefined : record.orderId,
-      invoiceId: record.invoiceId,
-      batchNo: record.batchNo,
-      noInvoice: form.value.noInvoice || undefined,
-      evidenceRefs: (record.evidenceRefs as string[] | undefined) ?? [],
-    },
-  });
+  if (!current.updated) {
+    current.updated = await procurementFinanceAction(
+      record.id,
+      {
+        action: 'UPDATE',
+        expectedVersion: record.version,
+        idempotencyKey: `${current.key}:update`,
+        payload: {
+          ...fields,
+          name: record.name,
+          sourceType: record.sourceType,
+          contractId: record.invoiceId
+            ? undefined
+            : record.contractId || undefined,
+          orderId: record.invoiceId ? undefined : record.orderId,
+          invoiceId: record.invoiceId,
+          batchNo: record.batchNo,
+          noInvoice: form.value.noInvoice || undefined,
+          evidenceRefs: (record.evidenceRefs as string[] | undefined) ?? [],
+        },
+      },
+      current.files,
+    );
+    editingRecord = current.updated;
+    files.value = [];
+    current.files = files.value;
+  }
   return procurementFinanceAction(record.id, {
     action: mode,
-    expectedVersion: updated.version,
-    idempotencyKey: `${key}:${mode.toLowerCase()}`,
+    expectedVersion: current.updated.version,
+    idempotencyKey: `${current.key}:${mode.toLowerCase()}`,
     payload: {},
   });
 }
 
 async function save() {
+  if (saving.value) return;
   error.value = paymentFormProblem(form.value, today, props.available);
   if (error.value) return;
   saving.value = true;
@@ -248,8 +265,19 @@ async function save() {
     };
     const mode =
       canConfirm.value && confirmDirectly.value ? 'CONFIRM' : 'SUBMIT';
+    const fingerprint = JSON.stringify([
+      fields,
+      mode,
+      otherCurrency.value,
+      form.value.noInvoice,
+    ]);
+    if (attempt?.fingerprint !== fingerprint || attempt.files !== files.value) {
+      attempt = { fingerprint, files: files.value, key: newIdempotencyKey() };
+    }
+    const { key } = attempt;
     let record: ProcurementFinanceRecord;
-    if (props.record) record = await resubmit(props.record, fields, mode);
+    if (editingRecord)
+      record = await resubmit(editingRecord, fields, mode, attempt);
     else if (props.other)
       // 其他付款不走财务审核，登记即确认
       record = await registerOtherPayment(
@@ -260,6 +288,7 @@ async function save() {
           noInvoice: form.value.noInvoice || undefined,
         },
         key,
+        attempt.files,
       );
     else if (props.invoice)
       record = await registerInvoicePayment(
@@ -270,6 +299,7 @@ async function save() {
         },
         key,
         mode,
+        attempt.files,
       );
     else
       record = await registerOrderPayment(
@@ -282,29 +312,17 @@ async function save() {
         },
         key,
         mode,
+        attempt.files,
       );
-    // 回单在付款确认后追加；某个文件失败不影响已登记的付款
-    const failed: string[] = [];
-    for (const [index, file] of files.value.entries()) {
-      try {
-        const uploaded = await uploadProcurementFinanceFile(record.id, file, {
-          expectedVersion: record.version,
-          idempotencyKey: `${key}:file:${index}`,
-        });
-        record = { ...record, version: uploaded.version };
-      } catch {
-        failed.push(file.name);
-      }
-    }
-    if (failed.length > 0)
-      Modal.warning({
-        title: `付款已保存，${failed.length} 个回单没传上`,
-        content: `${failed.join('、')}，可在付款记录里补传。`,
-      });
     emit('saved', record);
   } catch (error_) {
-    key = crypto.randomUUID();
-    error.value = errorText(error_);
+    if (error_ instanceof PaymentRegistrationCancelledError) {
+      attempt = undefined;
+      error.value = errorText(error_.cause ?? error_);
+    } else {
+      if (!editingRecord && attempt?.files.length === 0) attempt = undefined;
+      error.value = errorText(error_);
+    }
   } finally {
     saving.value = false;
   }
@@ -325,7 +343,9 @@ async function save() {
     "
     width="760px"
     :mask-closable="false"
-    @cancel="emit('close')"
+    :closable="!saving"
+    :keyboard="!saving"
+    @cancel="!saving && emit('close')"
   >
     <div class="payment">
       <Alert
@@ -422,29 +442,6 @@ async function save() {
           <span>备注</span>
           <Input v-model:value="form.remark" placeholder="如：首款 30%、尾款" />
         </label>
-        <div class="full files">
-          <span>银行回单（选填，可之后补传）</span>
-          <div>
-            <input type="file" multiple @change="pickFiles" />
-            <ul v-if="files.length > 0">
-              <li v-for="(file, index) in files" :key="`${file.name}-${index}`">
-                {{ file.name }}
-                <FilePreviewButton
-                  size="small"
-                  :name="file.name"
-                  :file="file"
-                />
-                <Button
-                  type="link"
-                  size="small"
-                  @click="files.splice(index, 1)"
-                >
-                  移除
-                </Button>
-              </li>
-            </ul>
-          </div>
-        </div>
         <label v-if="!invoice && !record?.invoiceId">
           <span><em>*</em>是否收票</span>
           <Select
@@ -457,16 +454,23 @@ async function save() {
           />
         </label>
       </div>
+      <CreationAttachments
+        v-if="open"
+        v-model:files="files"
+        :disabled="saving"
+        title="银行回单 / 付款附件（选填）"
+      />
     </div>
     <template #footer>
       <Checkbox
         v-if="canConfirm"
         v-model:checked="confirmDirectly"
         class="direct"
+        :disabled="saving"
       >
         我是财务，已转账，直接确认已付款
       </Checkbox>
-      <Button @click="emit('close')">取消</Button>
+      <Button :disabled="saving" @click="emit('close')">取消</Button>
       <Button type="primary" :loading="saving" @click="save">
         {{ confirmDirectly && canConfirm ? '确认已付款' : '提交财务审核' }}
       </Button>
@@ -492,8 +496,7 @@ async function save() {
   gap: 10px 14px;
 }
 
-.sheet label,
-.files {
+.sheet label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -531,11 +534,6 @@ async function save() {
 
 .reference-title {
   color: hsl(var(--foreground));
-}
-
-.files ul {
-  padding-left: 18px;
-  margin: 4px 0 0;
 }
 
 em {

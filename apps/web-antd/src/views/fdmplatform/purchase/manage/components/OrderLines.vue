@@ -44,6 +44,7 @@ const columns: LineColumn[] = [
   { key: 'unit', title: '单位', width: 80 },
   { key: 'unitPrice', title: '单价', width: 110, align: 'right' },
   { key: 'amount', title: '有效金额', width: 130, align: 'right' },
+  { key: 'arrivalDate', title: '到货日期', width: 120 },
   { key: 'arrivedQuantity', title: '已到货', width: 100, align: 'right' },
   { key: 'returnedQuantity', title: '已退货', width: 100, align: 'right' },
   {
@@ -102,6 +103,10 @@ const productLines = computed(() =>
       packaging: pick('packaging'),
       unit: pick('unit'),
       amount: procurementLineAmount(line, String(props.view.order.currency)),
+      arrivalDate:
+        props.view.details.lineDates?.[line.id] ||
+        props.view.lineDeliveryDates?.[line.id] ||
+        '—',
     };
   }),
 );

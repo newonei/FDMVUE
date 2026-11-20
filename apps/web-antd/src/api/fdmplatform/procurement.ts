@@ -218,6 +218,8 @@ export interface ProcurementOrderView {
     deliveryDate?: null | string;
     detailColumns?: OrderDetailColumn[];
     documentDate?: string;
+    /** 采购员逐行录入的到货日期，按采购明细行 ID 保存。 */
+    lineDates?: Record<string, string>;
     /** 明细行 id → 补充资料 */
     lineExtras?: Record<string, OrderLineExtra>;
     /** 这张单不需要收票（淘宝、个体等） */

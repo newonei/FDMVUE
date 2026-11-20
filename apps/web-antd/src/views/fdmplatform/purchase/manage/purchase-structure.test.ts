@@ -349,3 +349,37 @@ describe('采购产品结构入口', () => {
     });
   });
 });
+
+describe('采购单详情到货日期', () => {
+  it('默认提供到货日期列，按明细行显示录入日期、报价承诺或空值', () => {
+    const host = mount(OrderLines, {
+      view: {
+        order: {
+          lines: [
+            { id: 'entered', quantity: 1 },
+            { id: 'quoted', quantity: 1 },
+            { id: 'cancelled', quantity: 1, cancelledQuantity: 1 },
+            { id: 'unset', quantity: 1 },
+          ],
+        },
+        details: {
+          deliveryDate: '2026-11-30',
+          lineDates: { entered: '2026-11-21', cancelled: '2026-11-23' },
+        },
+        lineDeliveryDates: { entered: '2026-11-21', quoted: '2026-11-22' },
+      },
+    });
+    const { columns, lines } =
+      host.querySelector<HTMLElement>('[data-lines]')!.dataset;
+    const arrivalColumn = JSON.parse(columns!).find(
+      (column: { key: string }) => column.key === 'arrivalDate',
+    );
+    expect(arrivalColumn).toMatchObject({ title: '到货日期' });
+    expect(arrivalColumn.optional).not.toBe(true);
+    expect(
+      JSON.parse(lines!).map(
+        (line: { arrivalDate: string }) => line.arrivalDate,
+      ),
+    ).toEqual(['2026-11-21', '2026-11-22', '2026-11-23', '—']);
+  });
+});
