@@ -1,3 +1,5 @@
+import type { AxiosRequestConfig } from '@vben/request';
+
 import type { MigrationInfo } from './business-documents';
 import type { ProductAttributes } from './products';
 
@@ -277,10 +279,14 @@ export function renameAttachment(
     { idempotencyKey, name },
   );
 }
-export function downloadAttachment(contractId: string, attachmentId: string) {
+export function downloadAttachment(
+  contractId: string,
+  attachmentId: string,
+  options?: Pick<AxiosRequestConfig, 'onDownloadProgress' | 'signal'>,
+) {
   return requestClient.download<Blob>(
     `${base}/contracts/${encodeURIComponent(contractId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
-    { timeout: LARGE_FILE_TIMEOUT },
+    { timeout: LARGE_FILE_TIMEOUT, ...options },
   );
 }
 export function getMasterSourceTypes(companyId: number) {

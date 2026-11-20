@@ -8,10 +8,11 @@ import type {
   Directory,
 } from '#/api/fdmplatform';
 
-import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 import { Upload } from '@vben/icons';
 import { useUserStore } from '@vben/stores';
+import { downloadFileFromBlobPart } from '@vben/utils';
 
 import {
   Alert,
@@ -63,7 +64,6 @@ const injectedDirectory = inject<Ref<Directory | undefined> | undefined>(
 );
 const directory = computed(() => injectedDirectory?.value);
 const preview = ref<InstanceType<typeof AttachmentPreview>>();
-const previewing = ref<ContractAttachment>();
 interface PendingFile {
   file: File;
   key: string;
@@ -75,7 +75,18 @@ const selectedBytes = computed(() =>
 );
 const fileInput = ref<HTMLInputElement>();
 const uploading = ref(false);
-const downloading = ref('');
+const TRANSFER_IDLE_TIMEOUT = 45_000;
+const transfers = reactive(
+  new Map<
+    string,
+    {
+      action: 'download' | 'preview';
+      controller: AbortController;
+      loaded: number;
+      timeout?: number;
+    }
+  >(),
+);
 const operationError = ref('');
 const progress = ref<{
   done: number;
@@ -91,6 +102,7 @@ const renameKey = ref('');
 watch(uploading, (value) => emit('busy', value), { flush: 'sync' });
 onBeforeUnmount(() => {
   contextSequence++;
+  cancelTransfers();
   emit('busy', false);
 });
 watch(
@@ -101,6 +113,8 @@ watch(
   ],
   () => {
     contextSequence++;
+    cancelTransfers();
+    preview.value?.close();
     selectedFiles.value = [];
     progress.value = undefined;
     operationError.value = '';
@@ -245,32 +259,73 @@ async function saveRename(name: string) {
   message.success('文件名称已修改');
   emit('refresh');
 }
-async function fetchFile(item: ContractAttachment) {
-  downloading.value = item.id;
+function cancelTransfer(id: string) {
+  const transfer = transfers.get(id);
+  if (!transfer) return;
+  window.clearTimeout(transfer.timeout);
+  transfers.delete(id);
+  transfer.controller.abort();
+}
+function cancelTransfers() {
+  for (const id of transfers.keys()) cancelTransfer(id);
+}
+async function fetchFile(
+  item: ContractAttachment,
+  action: 'download' | 'preview',
+) {
+  if (transfers.has(item.id)) return;
+  const transfer = reactive({
+    action,
+    controller: new AbortController(),
+    loaded: 0,
+    timeout: undefined as number | undefined,
+  });
+  transfers.set(item.id, transfer);
+  const { signal } = transfer.controller;
   operationError.value = '';
+  const resetTimeout = () => {
+    window.clearTimeout(transfer.timeout);
+    transfer.timeout = window.setTimeout(() => {
+      cancelTransfer(item.id);
+      operationError.value = `「${item.name}」长时间未收到数据，请重试。`;
+    }, TRANSFER_IDLE_TIMEOUT);
+  };
+  resetTimeout();
   try {
-    return await downloadAttachment(props.contractId, item.id);
+    const blob = await downloadAttachment(props.contractId, item.id, {
+      signal,
+      onDownloadProgress: ({ loaded }) => {
+        if (signal.aborted || loaded <= transfer.loaded) return;
+        transfer.loaded = loaded;
+        resetTimeout();
+      },
+    });
+    if (signal.aborted) return;
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      throw new Error('服务未返回有效文件，请重试。');
+    }
+    if (action === 'preview') preview.value?.show(blob, item.name);
+    else saveFile(blob, item.name);
   } catch (error) {
-    operationError.value = errorText(error);
+    if (!signal.aborted) {
+      const label = action === 'preview' ? '预览' : '下载';
+      operationError.value = `「${item.name}」${label}失败：${errorText(error)}`;
+    }
   } finally {
-    downloading.value = '';
+    window.clearTimeout(transfer.timeout);
+    if (!signal.aborted) transfers.delete(item.id);
   }
 }
-async function show(item: ContractAttachment) {
-  const blob = await fetchFile(item);
-  if (!blob) return;
-  previewing.value = item;
-  preview.value?.show(blob, item.name);
+function saveFile(blob: Blob, fileName: string) {
+  downloadFileFromBlobPart({ source: blob, fileName });
 }
-async function download(item: ContractAttachment) {
-  const blob = await fetchFile(item);
-  if (!blob) return;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = item.name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+function transferLabel(item: ContractAttachment) {
+  const transfer = transfers.get(item.id);
+  if (!transfer) return '';
+  const action = transfer.action === 'preview' ? '正在读取' : '正在下载';
+  return transfer.loaded > 0
+    ? `${action} ${attachmentSize(transfer.loaded)} / ${attachmentSize(Number(item.size))}`
+    : `${action}…`;
 }
 </script>
 
@@ -552,13 +607,14 @@ async function download(item: ContractAttachment) {
         <span v-else-if="column.key === 'createdAt'">
           {{ attachmentTime(record.createdAt) }}
         </span>
-        <Space v-else-if="column.key === 'action'" :size="0">
+        <Space v-else-if="column.key === 'action'" :size="0" wrap>
           <Button
             v-if="previewMimeType(record.name)"
             type="link"
             size="small"
-            :disabled="downloading === record.id"
-            @click="show(record as ContractAttachment)"
+            :disabled="transfers.has(record.id)"
+            :loading="transfers.get(record.id)?.action === 'preview'"
+            @click="fetchFile(record as ContractAttachment, 'preview')"
           >
             预览
           </Button>
@@ -573,18 +629,24 @@ async function download(item: ContractAttachment) {
           <Button
             type="link"
             size="small"
-            :disabled="downloading === record.id"
-            @click="download(record as ContractAttachment)"
+            :disabled="transfers.has(record.id)"
+            :loading="transfers.get(record.id)?.action === 'download'"
+            @click="fetchFile(record as ContractAttachment, 'download')"
           >
             下载
           </Button>
+          <template v-if="transfers.has(record.id)">
+            <span class="text-muted-foreground text-xs" role="status">{{
+              transferLabel(record as ContractAttachment)
+            }}</span>
+            <Button type="link" size="small" @click="cancelTransfer(record.id)">
+              取消
+            </Button>
+          </template>
         </Space>
       </template>
     </Table>
-    <AttachmentPreview
-      ref="preview"
-      @download="previewing && download(previewing)"
-    />
+    <AttachmentPreview ref="preview" @download="saveFile" />
     <RenameFileDialog
       v-model:open="renameOpen"
       :name="renaming?.name"
