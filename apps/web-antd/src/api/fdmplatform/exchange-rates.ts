@@ -43,6 +43,19 @@ export function fetchExchangeRates(date: string, idempotencyKey: string) {
     { timeout: 120_000 },
   );
 }
+export interface ExchangeRateBackfillResult {
+  savedDays: number;
+  failures: { date: string; reason: string }[];
+}
+
+export function backfillExchangeRates(startDate: string, endDate: string) {
+  return requestClient.post<ExchangeRateBackfillResult>(
+    `${base}/backfill`,
+    { startDate, endDate },
+    { silent: true, timeout: 120_000 },
+  );
+}
+
 /** 财务手动修改某日某币种汇率；rateToCny 为空表示恢复来源公布值 */
 export function overrideExchangeRate(body: {
   currency: string;

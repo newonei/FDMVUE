@@ -4,6 +4,32 @@ import BigNumber from 'bignumber.js';
 
 import { formatTemporalField } from '../../date-display';
 
+export const EARLIEST_RATE_DATE = '1999-01-04';
+export const MAX_BACKFILL_DAYS = 31;
+
+export function validateBackfillRange(
+  start: string,
+  end: string,
+  today: string,
+) {
+  if (!start || !end) return '请选择开始日期和结束日期';
+  const startTime = Date.parse(`${start}T00:00:00Z`);
+  const endTime = Date.parse(`${end}T00:00:00Z`);
+  if (
+    !Number.isFinite(startTime) ||
+    !Number.isFinite(endTime) ||
+    new Date(startTime).toISOString().slice(0, 10) !== start ||
+    new Date(endTime).toISOString().slice(0, 10) !== end
+  )
+    return '请选择有效的日期';
+  if (start < EARLIEST_RATE_DATE || end > today)
+    return `日期须在 ${EARLIEST_RATE_DATE} 至 ${today} 之间`;
+  if (start > end) return '开始日期须早于或等于结束日期';
+  if ((endTime - startTime) / 86_400_000 + 1 > MAX_BACKFILL_DAYS)
+    return `每次最多补抓 ${MAX_BACKFILL_DAYS} 天`;
+  return '';
+}
+
 export function conversionInput(
   date?: string,
   currency?: string,
@@ -82,6 +108,7 @@ export function receiptFxDisplay(
 }
 
 const RATE_SOURCE_LABELS: Record<string, string> = {
+  CFETS: '中国外汇交易中心中间价',
   CNY: '人民币',
   ECB: '欧洲央行参考价（外汇局未公布的币种）',
   MANUAL: '财务手动修改',

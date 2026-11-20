@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { ExchangeRateBundle } from '#/api/fdmplatform/exchange-rates';
+import type {
+  ExchangeRateBackfillResult,
+  ExchangeRateBundle,
+} from '#/api/fdmplatform/exchange-rates';
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -27,6 +30,7 @@ import dayjs from 'dayjs';
 
 import { newIdempotencyKey } from '#/api/fdmplatform';
 import {
+  backfillExchangeRates,
   fetchExchangeRates,
   getExchangeRates,
   overrideExchangeRate,
@@ -35,10 +39,13 @@ import {
 import { errorText } from '../../data';
 import {
   conversionDateNote,
+  EARLIEST_RATE_DATE,
+  MAX_BACKFILL_DAYS,
   rateSourceLabel,
   rateText,
   referenceConvert,
   splitCommonRates,
+  validateBackfillRange,
 } from './model';
 import RateTrend from './RateTrend.vue';
 
@@ -51,6 +58,15 @@ const fetching = ref(false);
 const panelError = ref('');
 let sequence = 0;
 let fetchKey = { date: '', key: '' };
+let leaving = false;
+const backfillOpen = ref(false);
+const backfilling = ref(false);
+const backfillStart = ref('');
+const backfillEnd = ref('');
+const backfillToday = ref('');
+const backfillError = ref('');
+const backfillResult = ref<ExchangeRateBackfillResult>();
+const trendRevision = ref(0);
 const showOthers = ref(false);
 /** 走势与换算共用的币种，点常用币种卡片切换 */
 const selected = ref('USD');
@@ -200,10 +216,56 @@ async function load(refresh = false) {
     }
   }
 }
+function clearBackfillResult() {
+  backfillError.value = '';
+  backfillResult.value = undefined;
+}
+function openBackfill() {
+  backfillToday.value = new Date().toLocaleDateString('sv-SE', {
+    timeZone: 'Asia/Shanghai',
+  });
+  const initial = date.value || backfillToday.value;
+  backfillStart.value = initial;
+  backfillEnd.value = initial;
+  clearBackfillResult();
+  backfillOpen.value = true;
+}
+async function submitBackfill() {
+  if (backfilling.value) return;
+  const start = backfillStart.value;
+  const end = backfillEnd.value;
+  clearBackfillResult();
+  backfillError.value = validateBackfillRange(start, end, backfillToday.value);
+  if (backfillError.value) return;
+
+  backfilling.value = true;
+  try {
+    const result = await backfillExchangeRates(start, end);
+    if (leaving) return;
+    backfillResult.value = result;
+    if (result.savedDays > 0) {
+      const currentDate = date.value;
+      if (
+        currentDate >= start &&
+        currentDate <= end &&
+        !result.failures.some((failure) => failure.date === currentDate)
+      ) {
+        void load();
+      } else {
+        trendRevision.value++;
+      }
+    }
+  } catch (error) {
+    if (!leaving) backfillError.value = errorText(error);
+  } finally {
+    backfilling.value = false;
+  }
+}
 onMounted(() => {
   void load();
 });
 onBeforeUnmount(() => {
+  leaving = true;
   sequence++;
 });
 </script>
@@ -238,6 +300,7 @@ onBeforeUnmount(() => {
           >
             抓取并更新此日期
           </Button>
+          <Button @click="openBackfill">批量补抓</Button>
           <Button :disabled="!bundle || loading" @click="openEdit()">
             手动修改汇率
           </Button>
@@ -247,7 +310,7 @@ onBeforeUnmount(() => {
       <Alert
         type="info"
         show-icon
-        message="使用国家外汇管理局公布的人民币汇率中间价（与财务查询页面一致），每小时自动查询更新；外汇局未公布的币种用欧洲央行参考价补充并单独标注。当日尚未公布或休市时采用此前已公布日期。与外汇局页面有出入时，财务可「手动修改汇率」，自动刷新不会覆盖。汇率用于业务折算，不代表银行实际结汇价；已登记回款保留原采用快照。"
+        message="人民币汇率中间价每小时更新。优先查询国家外汇管理局，暂不可用时查询中国外汇交易中心的同口径中间价。外汇局未公布的币种用欧洲央行参考价补充并单独标注。当日尚未公布或休市时采用此前已公布日期。与外汇局页面有出入时，财务可「手动修改汇率」，自动刷新不会覆盖。汇率用于业务折算，不代表银行实际结汇价；已登记回款保留原采用快照。"
       />
       <Card :loading="loading">
         <div v-if="bundle" class="fx-stack">
@@ -300,7 +363,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="tools">
             <section class="tool">
-              <RateTrend :currency="selected" />
+              <RateTrend :currency="selected" :revision="trendRevision" />
             </section>
             <section class="tool converter" aria-label="参考换算">
               <b>参考换算</b>
@@ -406,6 +469,72 @@ onBeforeUnmount(() => {
         <Empty v-else description="尚未读取参考汇率" />
       </Card>
     </div>
+    <Modal
+      v-model:open="backfillOpen"
+      title="批量补抓历史汇率"
+      :closable="!backfilling"
+      :keyboard="!backfilling"
+      :mask-closable="false"
+    >
+      <Form layout="vertical" :disabled="backfilling">
+        <Form.Item label="开始日期" html-for="backfill-start" required>
+          <Input
+            id="backfill-start"
+            v-model:value="backfillStart"
+            type="date"
+            :min="EARLIEST_RATE_DATE"
+            :max="backfillToday"
+            @change="clearBackfillResult"
+          />
+        </Form.Item>
+        <Form.Item label="结束日期" html-for="backfill-end" required>
+          <Input
+            id="backfill-end"
+            v-model:value="backfillEnd"
+            type="date"
+            :min="EARLIEST_RATE_DATE"
+            :max="backfillToday"
+            @change="clearBackfillResult"
+          />
+        </Form.Item>
+      </Form>
+      <p>
+        含起止日期，每次最多 {{ MAX_BACKFILL_DAYS }} 天，成功后直接保存到 FDM。
+      </p>
+      <Alert
+        v-if="backfillError"
+        type="error"
+        show-icon
+        :message="backfillError"
+      />
+      <Alert
+        v-if="backfillResult"
+        :type="backfillResult.failures.length ? 'warning' : 'success'"
+        :message="`已保存 ${backfillResult.savedDays} 天，失败 ${backfillResult.failures.length} 天`"
+        show-icon
+      >
+        <template v-if="backfillResult.failures.length" #description>
+          <ul class="backfill-failures">
+            <li v-for="failure in backfillResult.failures" :key="failure.date">
+              {{ failure.date }} {{ failure.reason }}
+            </li>
+          </ul>
+        </template>
+      </Alert>
+      <template #footer>
+        <Button :disabled="backfilling" @click="backfillOpen = false">
+          {{ backfillResult ? '关闭' : '取消' }}
+        </Button>
+        <Button
+          v-if="!backfillResult || backfillResult.failures.length"
+          type="primary"
+          :loading="backfilling"
+          @click="submitBackfill"
+        >
+          {{ backfillResult ? '重新补抓' : '抓取并保存' }}
+        </Button>
+      </template>
+    </Modal>
     <Modal v-model:open="editOpen" title="手动修改汇率">
       <Form layout="vertical">
         <Form.Item label="日期">{{ bundle?.requestedDate }}</Form.Item>
@@ -470,6 +599,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.backfill-failures {
+  max-height: 180px;
+  padding-left: 20px;
+  margin: 0;
+  overflow-y: auto;
+  list-style: disc;
+}
+
 .fx-stack {
   display: flex;
   flex-direction: column;

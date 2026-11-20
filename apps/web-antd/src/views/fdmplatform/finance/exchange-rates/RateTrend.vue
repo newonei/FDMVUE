@@ -11,7 +11,7 @@ import { errorText } from '../../data';
 import { rateText, trendSummary } from './model';
 
 /** 选中币种的参考汇率走势，只画已保存的每日参考值。 */
-const props = defineProps<{ currency: string }>();
+const props = defineProps<{ currency: string; revision: number }>();
 const days = ref(90);
 const points = ref<ExchangeRatePoint[]>([]);
 const loading = ref(false);
@@ -34,7 +34,9 @@ async function load() {
     if (run === sequence) loading.value = false;
   }
 }
-watch(() => [props.currency, days.value], load, { immediate: true });
+watch(() => [props.currency, days.value, props.revision], load, {
+  immediate: true,
+});
 
 const WIDTH = 600;
 const HEIGHT = 120;

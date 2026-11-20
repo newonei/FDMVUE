@@ -6,7 +6,30 @@ import {
   conversionInput,
   hasReceiptFx,
   receiptFxDisplay,
+  validateBackfillRange,
 } from './model';
+
+describe('validateBackfillRange', () => {
+  const today = '2026-11-19';
+
+  it('accepts a one-day range and counts both dates in the 31-day limit', () => {
+    expect(validateBackfillRange(today, today, today)).toBe('');
+    expect(validateBackfillRange('2026-10-20', today, today)).toBe('');
+    expect(validateBackfillRange('2026-10-19', today, today)).toContain(
+      '31 天',
+    );
+  });
+
+  it('rejects missing, invalid, reversed, future and unsupported dates', () => {
+    expect(validateBackfillRange('', today, today)).toContain('请选择');
+    expect(validateBackfillRange('2026-02-30', today, today)).toContain('有效');
+    expect(validateBackfillRange(today, '2026-11-18', today)).toContain('早于');
+    expect(validateBackfillRange(today, '2026-11-20', today)).toContain(today);
+    expect(validateBackfillRange('1999-01-03', today, today)).toContain(
+      '1999-01-04',
+    );
+  });
+});
 
 describe('contractEquivalent', () => {
   it('converts through CNY with both same-day rates, rounded half up to cents', () => {
@@ -70,5 +93,11 @@ describe('receipt reference exchange rate presentation', () => {
     expect(receiptFxDisplay(snapshot, 'exchangeRateFallback')).toBe(
       '此前公布日',
     );
+    expect(
+      receiptFxDisplay(
+        { ...snapshot, exchangeRateSource: 'CFETS' },
+        'exchangeRateSource',
+      ),
+    ).toBe('中国外汇交易中心中间价');
   });
 });
