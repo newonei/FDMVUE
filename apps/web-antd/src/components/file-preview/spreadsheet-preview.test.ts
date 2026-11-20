@@ -68,6 +68,17 @@ describe('spreadsheet preview lifecycle', () => {
     expect(latest.terminate).toHaveBeenCalledOnce();
   });
 
+  it('hands a 33 MiB XLSX to the worker instead of stopping at the legacy size limit', async () => {
+    const { props } = await mount();
+    props.blob = { ...blob(), size: 33 * 1024 * 1024 } as Blob;
+    await flush();
+    expect(PreviewWorker.instances.at(-1)?.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'open', fileName: '测试.xlsx' }),
+      [expect.any(ArrayBuffer)],
+    );
+    expect(host.textContent).not.toContain('文件超过');
+  });
+
   it('resets the viewport when replacing a scrolled workbook with another first sheet', async () => {
     const { props, worker } = await mount();
     const metadata = (rows: number) => [{ name: '采购', rows, columns: 20, hidden: false,

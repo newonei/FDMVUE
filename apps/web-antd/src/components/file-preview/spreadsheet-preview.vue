@@ -4,7 +4,7 @@ import type { PreviewCell, SheetMetadata } from './spreadsheet-grid';
 
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 
-import { columnLabel, offsetIndex, SPREADSHEET_LIMITS, visibleIndices } from './spreadsheet-grid';
+import { columnLabel, offsetIndex, SPREADSHEET_LIMITS, spreadsheetFileLimit, visibleIndices } from './spreadsheet-grid';
 
 defineOptions({ name: 'SpreadsheetPreview' });
 const props = defineProps<{ blob: Blob; fileName: string }>();
@@ -122,7 +122,8 @@ watch(() => props.blob, async (blob) => {
   sheetIndex.value = 0;
   error.value = '';
   loading.value = true;
-  if (blob.size > SPREADSHEET_LIMITS.fileBytes) { fail('文件超过 25 MB，建议使用版式预览查看完整内容'); return; }
+  const fileLimit = spreadsheetFileLimit(props.fileName);
+  if (blob.size > fileLimit) { fail(`文件超过 ${fileLimit / 1024 / 1024} MB，建议使用版式预览查看完整内容`); return; }
   try {
     worker = new Worker(new URL('./spreadsheet.worker.ts', import.meta.url), { type: 'module' });
     const activeWorker = worker;

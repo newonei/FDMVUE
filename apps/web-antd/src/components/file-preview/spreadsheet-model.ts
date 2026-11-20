@@ -3,16 +3,19 @@ import type { PreviewCell, SheetMetadata, ViewportRequest } from './spreadsheet-
 
 import { read, utils } from 'xlsx';
 
-import { SPREADSHEET_LIMITS, visibleIndices } from './spreadsheet-grid';
+import { SPREADSHEET_LIMITS, spreadsheetFileLimit, visibleIndices } from './spreadsheet-grid';
 import { applySpreadsheetStyles } from './spreadsheet-styles';
 
 const limitMessage = '该表格超出快速预览容量，请使用版式预览查看完整内容';
 
 /** Inspect ZIP metadata before decompressing Office/ODS containers. */
-export function validateSpreadsheetBuffer(buffer: ArrayBuffer) {
-  if (buffer.byteLength > SPREADSHEET_LIMITS.fileBytes) throw new Error(limitMessage);
+export function validateSpreadsheetBuffer(buffer: ArrayBuffer, fileName = '') {
+  if (buffer.byteLength > spreadsheetFileLimit(fileName)) throw new Error(limitMessage);
   const view = new DataView(buffer);
-  if (buffer.byteLength < 4 || view.getUint32(0, true) !== 0x04034b50) return;
+  if (buffer.byteLength < 4 || view.getUint32(0, true) !== 0x04034b50) {
+    if (buffer.byteLength > SPREADSHEET_LIMITS.fileBytes) throw new Error('仅有效的 XLSX 压缩文件支持大表格预览');
+    return;
+  }
   let end = -1;
   for (let offset = buffer.byteLength - 22; offset >= Math.max(0, buffer.byteLength - 65_557); offset--) {
     if (view.getUint32(offset, true) === 0x06054b50 && offset + 22 + view.getUint16(offset + 20, true) === buffer.byteLength) {
@@ -71,7 +74,7 @@ export class SpreadsheetModel {
   readonly sheets: SheetMetadata[];
 
   constructor(buffer: ArrayBuffer, fileName = '') {
-    validateSpreadsheetBuffer(buffer);
+    validateSpreadsheetBuffer(buffer, fileName);
     const isText = /\.(csv|tsv)$/i.test(fileName);
     let input: ArrayBuffer | string = buffer;
     if (isText) {

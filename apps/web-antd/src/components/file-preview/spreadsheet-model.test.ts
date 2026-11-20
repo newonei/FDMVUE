@@ -90,6 +90,21 @@ describe('spreadsheet worker model', () => {
     expect(() => validateSpreadsheetBuffer(buffer)).toThrow('超出快速预览容量');
   });
 
+  it('renders cells from a 33 MiB XLSX and keeps the original limit for other formats', () => {
+    const entries = unzipSync(new Uint8Array(fixture()));
+    entries['xl/media/padded.bin'] = new Uint8Array(33 * 1024 * 1024);
+    const zipped = zipSync(entries, { level: 0 });
+    const buffer = zipped.buffer as ArrayBuffer;
+    expect(() => validateSpreadsheetBuffer(buffer, 'large.xls')).toThrow('超出快速预览容量');
+    const model = new SpreadsheetModel(buffer, 'large.XLSX');
+    expect(model.viewport(viewport)[0]?.text).toBe('采购明细');
+  });
+
+  it('rejects oversized XLSX input and large non-ZIP data with an XLSX extension', () => {
+    expect(() => validateSpreadsheetBuffer(new ArrayBuffer(SPREADSHEET_LIMITS.xlsxFileBytes + 1), 'large.xlsx')).toThrow('超出快速预览容量');
+    expect(() => validateSpreadsheetBuffer(new ArrayBuffer(SPREADSHEET_LIMITS.fileBytes + 1), 'large.xlsx')).toThrow('仅有效的 XLSX 压缩文件');
+  });
+
   it('rejects a forged local expanded size even when the central directory is small', () => {
     const buffer = fixture();
     new DataView(buffer).setUint32(22, SPREADSHEET_LIMITS.expandedBytes + 1, true);

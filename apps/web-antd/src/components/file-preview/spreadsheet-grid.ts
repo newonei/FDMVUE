@@ -59,6 +59,7 @@ export function visibleIndices(offsets: Float64Array, first: number, last: numbe
 
 export const SPREADSHEET_LIMITS = {
   fileBytes: 25 * 1024 * 1024,
+  xlsxFileBytes: 50 * 1024 * 1024,
   expandedBytes: 128 * 1024 * 1024,
   cells: 1_000_000,
   rows: 200_000,
@@ -69,3 +70,9 @@ export const SPREADSHEET_LIMITS = {
   canvasPixels: 8_000_000,
   parseMilliseconds: 15_000,
 } as const;
+
+export function spreadsheetFileLimit(fileName: string) {
+  return /\.xlsx$/i.test(fileName)
+    ? SPREADSHEET_LIMITS.xlsxFileBytes
+    : SPREADSHEET_LIMITS.fileBytes;
+}
