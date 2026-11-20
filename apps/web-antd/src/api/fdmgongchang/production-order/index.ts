@@ -1,9 +1,12 @@
 import type { PageParam, PageResult } from '@vben/request';
 
 import type { FdmgongchangRouteApi } from '../factory';
+import type { FdmgongchangScheduleApi } from '../schedule';
 
 import type { OrderLineExtra } from '#/api/fdmplatform/procurement';
 import type {
+  ProductAttributeOptions,
+  ProductCategoryView,
   ProductColorMode,
   ProductConstructionType,
   ProductStructure,
@@ -555,6 +558,30 @@ export namespace FdmgongchangMaterialPlanApi {
 }
 
 const BASE = '/fdmgongchang/production-order';
+
+export function getOrderProductPage(
+  params: FdmgongchangScheduleApi.ProductQuery,
+) {
+  return requestClient.get<PageResult<FdmgongchangProductionOrderApi.Product>>(
+    `${BASE}/product-picker/page`,
+    { params },
+  );
+}
+
+export function getOrderProductPickerCategories(
+  params: FdmgongchangScheduleApi.ProductFilters,
+) {
+  return requestClient.get<ProductCategoryView>(
+    `${BASE}/product-picker/categories`,
+    { params },
+  );
+}
+
+export function getOrderProductAttributeOptions() {
+  return requestClient.get<ProductAttributeOptions>(
+    `${BASE}/product-picker/attribute-options`,
+  );
+}
 
 export function getOrderableFactories() {
   return requestClient.get<FdmgongchangProductionOrderApi.Factory[]>(

@@ -203,6 +203,7 @@ const options: ProductAttributeOptions = {
     { value: 'NONE', label: '无纹路' },
     { value: 'BK', label: '贝壳纹' },
     { value: 'FH', label: '防滑纹' },
+    { value: 'FH09', label: '贝壳纹' },
   ],
   matTypes: [{ value: 'FLAT', label: '平铺垫' }],
   patterns: [{ value: 'FLOWER', label: '花朵' }],
@@ -692,6 +693,27 @@ describe('产品档案编辑与查看', () => {
       '垫子类型：平铺垫',
     ])
       expect(detail).toContain(text);
+  });
+
+  it('在正反面压花选项中区分同名编码，并按选择保存对应编码', async () => {
+    await mount();
+    for (const field of ['正面压花', '反面压花']) {
+      const select = document.querySelector<HTMLSelectElement>(
+        `select[aria-label="${field}"]`,
+      )!;
+      expect(select.querySelector('option[value="BK"]')?.textContent).toBe(
+        '贝壳纹 · BK',
+      );
+      expect(select.querySelector('option[value="FH09"]')?.textContent).toBe(
+        '贝壳纹 · FH09',
+      );
+    }
+    await choose('正面压花', 'FH09');
+    await choose('反面压花', 'BK');
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({ textureFront: 'FH09', textureBack: 'BK' }),
+    );
   });
 
   it('保留字典外的已存属性，并允许明确清空而不丢失旧颜色原文', async () => {

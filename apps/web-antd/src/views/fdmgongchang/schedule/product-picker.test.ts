@@ -6,7 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ProductPicker from './modules/product-picker-modal.vue';
 
-const mocks = vi.hoisted(() => ({ page: vi.fn(), categories: vi.fn(), platformCategories: vi.fn(), attributes: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  page: vi.fn(), categories: vi.fn(), platformCategories: vi.fn(), attributes: vi.fn(),
+  orderPage: vi.fn(), orderCategories: vi.fn(), orderAttributes: vi.fn(),
+}));
+vi.mock('#/api/fdmgongchang/production-order', () => ({
+  getOrderProductPage: mocks.orderPage,
+  getOrderProductPickerCategories: mocks.orderCategories,
+  getOrderProductAttributeOptions: mocks.orderAttributes,
+}));
 vi.mock('#/api/fdmgongchang/schedule', () => ({
   getScheduleProductPage: mocks.page,
   getScheduleProductCategories: mocks.categories,
@@ -51,7 +59,13 @@ vi.mock('ant-design-vue', () => {
           ...props.customRow(product),
           'data-product': product.id,
           'data-selected': props.rowSelection.selectedRowKeys.includes(product.id),
-        }, product.name), slots.bodyCell?.({ column: { key: 'category' }, record: product }),
+        }, product.name), props.rowSelection.type === 'checkbox' ? h('button', {
+          disabled: props.rowSelection.getCheckboxProps(product).disabled,
+          onClick: () => props.rowSelection.onChange(props.rowSelection.selectedRowKeys.includes(product.id)
+            ? props.rowSelection.selectedRowKeys.filter((key: string) => key !== product.id)
+            : [...props.rowSelection.selectedRowKeys, product.id]),
+        }, `勾选 ${product.id}`) : null,
+        slots.bodyCell?.({ column: { key: 'category' }, record: product }),
         h('span', { 'data-column': 'currentStock' }, slots.bodyCell?.({ column: { key: 'currentStock' }, record: product })),
         h('span', { 'data-column': 'unit' }, slots.bodyCell?.({ column: { key: 'unit' }, record: product }))])),
         h('button', { onClick: () => emit('change', { current: props.pagination.current + 1, pageSize: props.pagination.pageSize }) }, '下一页'),
@@ -77,15 +91,18 @@ async function input(label: string, value: string) {
   const field = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
   field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); await flush();
 }
-async function mount(options: { requiredStage?: string; title?: string } = {}) {
+async function mount(options: { orderSelection?: { excludedIds: ReadonlySet<string>; limit: number }; requiredStage?: string; title?: string } = {}) {
   const open = ref(true);
   const requiredStage = ref(options.requiredStage);
   const selected = vi.fn();
+  const selectedMany = vi.fn();
   const close = vi.fn(() => { open.value = false; });
   const host = document.createElement('div'); document.body.append(host);
-  const app = createApp({ render: () => h(ProductPicker, { open: open.value, requiredStage: requiredStage.value, title: options.title, onClose: close, onSelected: selected }) });
+  const app = createApp({ render: () => h(ProductPicker, {
+    ...options, open: open.value, requiredStage: requiredStage.value, onClose: close, onSelected: selected, onSelectedMany: selectedMany,
+  }) });
   app.mount(host); unmount = () => app.unmount(); await flush();
-  return { open, requiredStage, selected, close };
+  return { open, requiredStage, selected, selectedMany, close };
 }
 
 beforeEach(() => {
@@ -94,6 +111,43 @@ beforeEach(() => {
   mocks.attributes.mockResolvedValue({ stages: [{ value: 'BOARD', label: '发泡板材', group: '半成品' }], colors: [], textures: [], matTypes: [] });
 });
 afterEach(() => { unmount?.(); document.body.innerHTML = ''; vi.resetAllMocks(); });
+
+describe('提生产需求批量选品', () => {
+  beforeEach(() => {
+    mocks.orderPage.mockImplementation(async ({ pageNo }: Api.ProductQuery) => ({
+      list: pageNo === 1 ? [product('existing'), product('first')] : [product('next')], total: 25,
+    }));
+    mocks.orderCategories.mockResolvedValue(categoryView);
+    mocks.orderAttributes.mockResolvedValue({ stages: [], colors: [], textures: [], matTypes: [] });
+  });
+
+  it('使用下单产品接口，禁选已加入项，翻页保留选择且只批量确认一次', async () => {
+    const { selected, selectedMany } = await mount({ orderSelection: { excludedIds: new Set(['existing']), limit: 2 } });
+    expect(mocks.orderCategories).toHaveBeenCalledOnce();
+    expect(mocks.orderAttributes).toHaveBeenCalledOnce();
+    expect(mocks.page).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('当前库存');
+    expect(button('勾选 existing').disabled).toBe(true);
+    button('勾选 first').click(); await flush();
+    button('下一页').click(); await flush();
+    button('勾选 next').click(); await flush();
+    button('加入明细').click(); await flush();
+    expect(selected).not.toHaveBeenCalled();
+    expect(selectedMany).toHaveBeenCalledExactlyOnceWith([product('first'), product('next')]);
+  });
+
+  it('超出可加入的数量时不能确认，取消重开后清空勾选', async () => {
+    const { open, selectedMany } = await mount({ orderSelection: { excludedIds: new Set(), limit: 1 } });
+    button('勾选 first').click(); await flush();
+    button('勾选 existing').click(); await flush();
+    expect(button('加入明细').disabled).toBe(true);
+    button('取消').click(); await flush();
+    open.value = true; await flush();
+    expect(button('加入明细').disabled).toBe(true);
+    expect(document.body.textContent).toContain('已选 0 项');
+    expect(selectedMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('工厂任务产品选择弹窗', () => {
   it('显示本厂账面库存及工序单位，区分零库存与未知库存，保留负数且不限制选料', async () => {

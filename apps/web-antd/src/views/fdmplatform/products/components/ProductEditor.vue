@@ -131,11 +131,15 @@ function retainedOptions(
   return [...options, { value, label }];
 }
 function selectOptions(field: Exclude<ProductionField, 'productStage'>) {
-  return retainedOptions(
-    field === 'matType'
-      ? attributeOptions.value.matTypes
-      : attributeOptions.value.textures,
-    field,
+  if (field === 'matType') {
+    return retainedOptions(attributeOptions.value.matTypes, field);
+  }
+  return retainedOptions(attributeOptions.value.textures, field).map(
+    ({ label, value }) => ({
+      value,
+      label:
+        value === 'NONE' || label === value ? label : `${label} · ${value}`,
+    }),
   );
 }
 const stageOptions = computed(() =>

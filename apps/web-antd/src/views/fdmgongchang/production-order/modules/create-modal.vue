@@ -3,13 +3,14 @@ import type { Dayjs } from 'dayjs';
 
 import type { AuxUsageDraft } from '../../shared/auxiliary-usage';
 import type { RouteDraft } from '../shared';
+import type { BatchDetailPatch } from './batch-detail';
 
 import type { FdmgongchangRouteApi as RouteApi } from '#/api/fdmgongchang/factory';
 import type { FdmgongchangProductionOrderApi as Api } from '#/api/fdmgongchang/production-order';
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 
-import { Alert, AutoComplete, DatePicker, Empty, Input, InputNumber, message, Modal, Select, Spin, Tag } from 'ant-design-vue';
+import { Alert, AutoComplete, Button, Checkbox, DatePicker, Empty, Input, InputNumber, message, Modal, Select, Tag } from 'ant-design-vue';
 import dayjs from 'dayjs';
 
 import {
@@ -18,7 +19,6 @@ import {
   getProductCategories,
   getRouteOptions,
   searchAuxProducts,
-  searchOrderProducts,
 } from '#/api/fdmgongchang/production-order';
 
 import AuxUsageEditor from '../../shared/aux-usage-editor.vue';
@@ -26,6 +26,7 @@ import { auxPayload, auxProblem, toAuxDrafts } from '../../shared/auxiliary-usag
 import { factoryToday } from '../../shared/factory-date';
 import { routeProblem, sortSteps, specText } from '../shared';
 import AiFillPanel from './ai-fill-panel.vue';
+import BatchDetailModal from './batch-detail-modal.vue';
 import RoutePicker from './route-picker.vue';
 
 /**
@@ -67,16 +68,20 @@ interface Line {
 }
 
 const PURPOSES = ['电商备货', '客户订单', '样品', '补货'].map((value) => ({ value }));
+const MAX_ITEMS = 100;
+const ProductPicker = defineAsyncComponent(
+  () => import('../../schedule/modules/product-picker-modal.vue').then((module) => module.default),
+);
 
 const factoryId = ref<number>();
 const requiredDate = ref<Dayjs>();
 const purpose = ref('');
 const remark = ref('');
 const lines = ref<Line[]>([]);
-const keyword = ref('');
-const results = ref<Api.Product[]>([]);
-const searching = ref(false);
-const searched = ref(false);
+const selectedLineKeys = ref(new Set<string>());
+const batchDetailOpen = ref(false);
+const productPickerMounted = ref(false);
+const productPickerOpen = ref(false);
 const submitting = ref(false);
 const error = ref('');
 const routeOptions = ref<RouteApi.Options>();
@@ -90,8 +95,19 @@ const nextKey = () => `l${++lineSeq}`;
 
 const factoryOptions = computed(() => props.factories.map((f) => ({ label: f.name, value: f.id })));
 const pickedIds = computed(() => new Set(lines.value.flatMap((l) => (l.product ? [l.product.id] : []))));
+const availableSlots = computed(() => Math.max(0, MAX_ITEMS - lines.value.length));
 const categoryOptions = computed(() => categories.value.map((value) => ({ label: value, value })));
 const newCount = computed(() => lines.value.filter((l) => l.newProduct).length);
+const selectedLines = computed(() => lines.value.filter((line) => selectedLineKeys.value.has(line.key)));
+const batchDetailLines = computed(() => selectedLines.value.map((line) => ({
+  aux: line.aux,
+  key: line.key,
+  quantity: line.quantity,
+  remark: line.remark,
+  route: line.route,
+  unit: line.product ? line.product.unit : line.newProduct?.unit,
+})));
+const allLinesSelected = computed(() => lines.value.length > 0 && selectedLines.value.length === lines.value.length);
 
 function lineName(l: Line) {
   return l.product ? (l.product.displayName ?? l.product.name) : l.newProduct?.name || '新产品';
@@ -114,6 +130,9 @@ function fromSnapshot(i: Api.Item): Api.Product {
 }
 
 watch(open, (value) => {
+  productPickerOpen.value = false;
+  batchDetailOpen.value = false;
+  selectedLineKeys.value.clear();
   if (!value) return;
   const src = props.copyFrom;
   factoryId.value = src?.factoryId ?? (props.factories.length === 1 ? props.factories[0]?.id : undefined);
@@ -130,9 +149,6 @@ watch(open, (value) => {
     remark: i.remark ?? '',
     route: { routeId: i.routeId ?? undefined, steps: i.processes ?? [] },
   }));
-  keyword.value = '';
-  results.value = [];
-  searched.value = false;
   error.value = '';
   aiNotes.value = [];
   aiSummary.value = '';
@@ -144,39 +160,14 @@ watch(open, (value) => {
   }
 });
 
-let timer: ReturnType<typeof setTimeout> | undefined;
-let seq = 0;
-watch(keyword, (value) => {
-  clearTimeout(timer);
-  const k = value.trim();
-  if (!k) {
-    results.value = [];
-    searched.value = false;
-    return;
-  }
-  timer = setTimeout(async () => {
-    const mine = ++seq;
-    searching.value = true;
-    try {
-      const list = await searchOrderProducts(k);
-      if (mine === seq) {
-        results.value = list;
-        searched.value = true;
-      }
-    } finally {
-      if (mine === seq) searching.value = false;
-    }
-  }, 300);
-});
-onBeforeUnmount(() => clearTimeout(timer));
-
 /** 换工厂时重新取这家工厂的工序和常用路线；本厂没启用的工序从已选工艺里去掉。 */
 let optionsSeq = 0;
 watch(factoryId, async (id) => {
   const mine = ++optionsSeq;
+  batchDetailOpen.value = false;
   routeOptions.value = undefined;
+  routeLoading.value = !!id;
   if (!id) return;
-  routeLoading.value = true;
   try {
     const options = await getRouteOptions(id);
     if (mine !== optionsSeq) return;
@@ -225,17 +216,55 @@ async function defaultRoute(line: Line) {
   }
 }
 
-function add(p: Api.Product) {
-  if (pickedIds.value.has(p.id)) return;
-  lines.value = [
-    ...lines.value,
-    { ai: false, aux: [], candidates: [], key: nextKey(), product: p, quantity: null, remark: '', route: { steps: [] } },
-  ];
-  void defaultRoute(lines.value[lines.value.length - 1]!);
+function openProductPicker() {
+  productPickerMounted.value = true;
+  productPickerOpen.value = true;
+}
+
+function addProducts(products: Api.Product[]) {
+  const unique = new Map(products.filter((product) => !pickedIds.value.has(product.id)).map((product) => [product.id, product]));
+  if (unique.size > availableSlots.value) {
+    message.warning(`一张单最多 ${MAX_ITEMS} 个产品，还可加入 ${availableSlots.value} 个`);
+    return;
+  }
+  productPickerOpen.value = false;
+  if (unique.size === 0) return;
+  const additions: Line[] = [...unique.values()].map((product) => ({
+    ai: false, aux: [], candidates: [], key: nextKey(), product, quantity: null, remark: '', route: { steps: [] },
+  }));
+  appendLines(additions);
+}
+
+function appendLines(additions: Line[]) {
+  if (additions.length === 0) return;
+  const firstNewIndex = lines.value.length;
+  lines.value = [...lines.value, ...additions];
+  for (const line of lines.value.slice(firstNewIndex)) void defaultRoute(line);
 }
 
 function remove(key: string) {
+  selectedLineKeys.value.delete(key);
   lines.value = lines.value.filter((l) => l.key !== key);
+}
+
+function setSelected(lineKey: string, checked: boolean) {
+  if (checked) selectedLineKeys.value.add(lineKey);
+  else selectedLineKeys.value.delete(lineKey);
+}
+
+function selectAll(checked: boolean) {
+  selectedLineKeys.value = new Set(checked ? lines.value.map((line) => line.key) : []);
+}
+
+function applyBatchDetails(changes: BatchDetailPatch[]) {
+  const updates = new Map(changes.map((change) => [change.key, change]));
+  for (const line of selectedLines.value) {
+    const change = updates.get(line.key);
+    if (!change) continue;
+    if (change.route) line.route = { ...change.route, steps: [...change.route.steps] };
+    if (change.quantity !== undefined) line.quantity = change.quantity;
+    if (change.remark !== undefined) line.remark = change.remark;
+  }
 }
 
 /** 新建行改用产品中心里已有的产品。 */
@@ -294,8 +323,7 @@ function applyFill(result: NonNullable<Api.Fill['result']>) {
       fresh++;
     }
   }
-  lines.value = [...lines.value, ...added];
-  for (const line of added) void defaultRoute(line);
+  appendLines(added);
   aiNotes.value = notes;
   aiSummary.value =
     added.length === 0
@@ -426,36 +454,32 @@ async function submit() {
 
       <section class="flex flex-col gap-2">
         <h3 class="m-0 text-sm font-semibold">
-          产品<span class="ml-2 text-xs font-normal text-muted-foreground">从产品中心搜名称、编码或规格，点一下加入</span>
+          产品<span class="ml-2 text-xs font-normal text-muted-foreground">从产品中心勾选多个产品，一次加入明细</span>
         </h3>
-        <Input id="po-product-keyword" v-model:value="keyword" allow-clear placeholder="例如 TPE 瑜伽垫、DZ2401968、183*61" />
-        <Spin :spinning="searching">
-          <ul v-if="results.length > 0" class="m-0 flex max-h-56 list-none flex-col overflow-auto rounded-md border border-border p-0">
-            <li v-for="p in results" :key="p.id">
-              <button
-                :disabled="pickedIds.has(p.id)"
-                class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                @click="add(p)"
-              >
-                <span class="flex min-w-0 flex-col">
-                  <span class="truncate">{{ p.displayName ?? p.name }}</span>
-                  <span class="truncate text-xs text-muted-foreground">{{ p.code }} · {{ specText(p) }}</span>
-                </span>
-                <span class="shrink-0 text-xs text-primary">{{ pickedIds.has(p.id) ? '已加入' : '＋ 加入' }}</span>
-              </button>
-            </li>
-          </ul>
-          <p v-else-if="searched" class="m-0 py-2 text-xs text-muted-foreground">
-            产品中心没有找到「{{ keyword.trim() }}」。新产品请先在「产品中心 → 产品档案」建档。
-          </p>
-        </Spin>
+        <div>
+          <Button :disabled="availableSlots === 0" ghost type="primary" @click="openProductPicker">＋ 从产品中心选择</Button>
+          <span v-if="availableSlots === 0" class="ml-2 text-xs text-muted-foreground">已达到 {{ MAX_ITEMS }} 项上限</span>
+        </div>
       </section>
 
       <section class="flex flex-col gap-2">
-        <h3 class="m-0 text-sm font-semibold">
-          明细（{{ lines.length }}）<span v-if="newCount > 0" class="ml-2 text-xs font-normal text-warning">其中 {{ newCount }} 个是新规格，提交时在产品中心新建</span>
-        </h3>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="m-0 text-sm font-semibold">
+            明细（{{ lines.length }}）<span v-if="newCount > 0" class="ml-2 text-xs font-normal text-warning">其中 {{ newCount }} 个是新规格，提交时在产品中心新建</span>
+          </h3>
+          <div v-if="lines.length" class="flex flex-wrap items-center gap-2">
+            <Checkbox
+              id="po-select-all-lines"
+              :checked="allLinesSelected"
+              :indeterminate="selectedLines.length > 0 && !allLinesSelected"
+              @update:checked="selectAll"
+            >
+              全选
+            </Checkbox>
+            <span class="text-xs text-muted-foreground">已选 {{ selectedLines.length }} 行</span>
+            <Button :disabled="!selectedLines.length || submitting" size="small" @click="batchDetailOpen = true">批量设置</Button>
+          </div>
+        </div>
         <Empty v-if="lines.length === 0" description="还没有加产品" />
         <div
           v-for="l in lines"
@@ -465,18 +489,26 @@ async function submit() {
           class="flex flex-col gap-2 rounded-md border px-3 py-2"
         >
           <div class="grid grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,180px)_auto]">
-            <span v-if="l.product" class="flex min-w-0 flex-col">
-              <span class="truncate">
-                <Tag v-if="l.ai" class="mr-1" color="blue">AI</Tag>{{ l.product.displayName ?? l.product.name }}
+            <div class="flex min-w-0 items-start gap-2">
+              <Checkbox
+                :id="`po-select-line-${l.product?.id ?? l.key}`"
+                :aria-label="`选择明细：${lineName(l)}`"
+                :checked="selectedLineKeys.has(l.key)"
+                @update:checked="(checked) => setSelected(l.key, checked)"
+              />
+              <span v-if="l.product" class="flex min-w-0 flex-col">
+                <span class="truncate">
+                  <Tag v-if="l.ai" class="mr-1" color="blue">AI</Tag>{{ l.product.displayName ?? l.product.name }}
+                </span>
+                <span class="truncate text-xs text-muted-foreground">{{ l.product.code }} · {{ specText(l.product) }}</span>
               </span>
-              <span class="truncate text-xs text-muted-foreground">{{ l.product.code }} · {{ specText(l.product) }}</span>
-            </span>
-            <span v-else class="flex min-w-0 flex-col">
-              <span class="truncate">
-                <Tag class="mr-1" color="orange">新建</Tag>{{ l.newProduct?.name || '新产品' }}
+              <span v-else class="flex min-w-0 flex-col">
+                <span class="truncate">
+                  <Tag class="mr-1" color="orange">新建</Tag>{{ l.newProduct?.name || '新产品' }}
+                </span>
+                <span class="text-xs text-warning">产品中心没有这个规格，提交时自动新建产品档案（编号 XQ 开头），请核对下面的信息</span>
               </span>
-              <span class="text-xs text-warning">产品中心没有这个规格，提交时自动新建产品档案（编号 XQ 开头），请核对下面的信息</span>
-            </span>
+            </div>
             <span class="flex items-center gap-1 text-xs text-muted-foreground">
               <InputNumber
                 :id="`po-qty-${l.product?.id ?? l.key}`"
@@ -565,4 +597,13 @@ async function submit() {
       <p v-if="error" class="m-0 text-sm text-destructive">{{ error }}</p>
     </div>
   </Modal>
+  <BatchDetailModal v-model:open="batchDetailOpen" :lines="batchDetailLines" :options="routeOptions" @apply="applyBatchDetails" />
+  <ProductPicker
+    v-if="productPickerMounted"
+    :open="productPickerOpen"
+    :order-selection="{ excludedIds: pickedIds, limit: availableSlots }"
+    title="从产品中心选择生产产品"
+    @close="productPickerOpen = false"
+    @selected-many="addProducts"
+  />
 </template>

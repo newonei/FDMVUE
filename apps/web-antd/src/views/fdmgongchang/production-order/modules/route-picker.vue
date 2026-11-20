@@ -13,14 +13,16 @@ import { routeProblem, sortSteps } from '../shared';
  * 一个产品要走的工序：先选工厂的常用路线，再点工序勾掉或加回。
  * 工序按生产链顺序排列，不能调换先后；跳过工序后接不上时直接提示。
  */
-const props = defineProps<{ id: string; options?: RouteApi.Options }>();
+const props = defineProps<{ allowEmpty?: boolean; id: string; options?: RouteApi.Options }>();
 const draft = defineModel<RouteDraft>({ required: true });
 
 const processes = computed(() => props.options?.processes ?? []);
 const routeOptions = computed(() =>
   (props.options?.routes ?? []).map((r) => ({ label: r.name, value: r.id as number })),
 );
-const problem = computed(() => (processes.value.length > 0 ? routeProblem(draft.value.steps, processes.value) : ''));
+const problem = computed(() => (processes.value.length > 0 && (!props.allowEmpty || draft.value.steps.length > 0)
+  ? routeProblem(draft.value.steps, processes.value)
+  : ''));
 
 function pickRoute(value: unknown) {
   const route = props.options?.routes.find((r) => r.id === value);
@@ -43,6 +45,7 @@ function toggle(code: string) {
       <span class="text-xs text-muted-foreground">工艺</span>
       <Select
         :id="`${id}-route`"
+        :disabled="allowEmpty && routeOptions.length === 0"
         :options="routeOptions"
         :value="draft.routeId"
         allow-clear
@@ -51,7 +54,7 @@ function toggle(code: string) {
         size="small"
         @change="pickRoute"
       />
-      <span class="text-xs text-muted-foreground">点工序勾掉或加回</span>
+      <span class="text-xs text-muted-foreground">{{ allowEmpty ? '也可直接勾选要走的工序' : '点工序勾掉或加回' }}</span>
     </div>
     <div class="flex flex-wrap items-center gap-1" role="group" :aria-label="`${id} 要走的工序`">
       <template v-for="(p, index) in processes" :key="p.code">

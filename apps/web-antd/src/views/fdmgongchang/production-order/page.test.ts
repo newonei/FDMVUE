@@ -6,6 +6,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import ProductionOrderPage from './index.vue';
 
+const routeOptions = vi.hoisted(() => ({
+  processes: [
+    ['SLICE', '开片', 'SHEET', '片材', ['BOARD']],
+    ['PUNCH', '冲裁', 'PUNCHED', '已冲裁成品', ['SHEET']],
+    ['ENGRAVE', '雕刻', 'ENGRAVED', '已雕刻成品', ['PUNCHED']],
+    ['FOLD', '折叠', 'FOLDED', '已折叠成品', ['ENGRAVED', 'PUNCHED']],
+    ['PACK', '包装', 'PACKED', '已包装成品', ['ENGRAVED', 'PUNCHED', 'FOLDED']],
+  ].map(([code, label, outputStage, outputStageLabel, sources]) => ({
+    code,
+    label,
+    outputStage,
+    outputStageLabel,
+    sources,
+    unit: '件',
+  })),
+  routes: [{ id: 3, name: '单层散装', status: 0, steps: ['SLICE', 'PUNCH'] }],
+}));
+
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
   generate: vi.fn(),
@@ -22,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   fillSubmit: vi.fn(),
   factoryPage: vi.fn(),
   get: vi.fn(),
+  getRouteOptions: vi.fn().mockResolvedValue(routeOptions),
   lastRoute: vi.fn().mockResolvedValue(null),
   materialPlan: vi.fn(),
   previewSupplement: vi.fn(),
@@ -36,7 +55,6 @@ const mocks = vi.hoisted(() => ({
   }),
   myPage: vi.fn(),
   perms: ['fdmgongchang:production-order:create', 'fdmgongchang:production-order:handle'],
-  search: vi.fn(),
   setFactory: vi.fn(),
 }));
 vi.mock('#/api/fdmgongchang/production-order', () => ({
@@ -71,25 +89,8 @@ vi.mock('#/api/fdmgongchang/production-order', () => ({
   }),
   saveItemTarget: mocks.saveTarget,
   searchAuxProducts: vi.fn().mockResolvedValue([]),
-  getRouteOptions: vi.fn().mockResolvedValue({
-    processes: [
-      ['SLICE', '开片', 'SHEET', '片材', ['BOARD']],
-      ['PUNCH', '冲裁', 'PUNCHED', '已冲裁成品', ['SHEET']],
-      ['ENGRAVE', '雕刻', 'ENGRAVED', '已雕刻成品', ['PUNCHED']],
-      ['FOLD', '折叠', 'FOLDED', '已折叠成品', ['ENGRAVED', 'PUNCHED']],
-      ['PACK', '包装', 'PACKED', '已包装成品', ['ENGRAVED', 'PUNCHED', 'FOLDED']],
-    ].map(([code, label, outputStage, outputStageLabel, sources]) => ({
-      code,
-      label,
-      outputStage,
-      outputStageLabel,
-      sources,
-      unit: '件',
-    })),
-    routes: [{ id: 3, name: '单层散装', status: 0, steps: ['SLICE', 'PUNCH'] }],
-  }),
+  getRouteOptions: mocks.getRouteOptions,
   rejectProductionOrder: vi.fn(),
-  searchOrderProducts: mocks.search,
 }));
 vi.mock('#/api/fdmgongchang/stage-stock', () => ({ getStockPage: mocks.stockPage }));
 vi.mock('#/api/fdmgongchang/factory', () => ({
@@ -117,6 +118,14 @@ vi.mock('./modules/item-production-config-modal.vue', () => ({
   default: defineComponent({
     props: ['open', 'orderId', 'itemId'], emits: ['saved', 'update:open'],
     setup: (props, { emit }) => () => props.open ? h('button', { id: 'save-order-config-test', onClick: () => { emit('update:open', false); emit('saved'); } }, `保存生产参数 ${props.orderId}/${props.itemId}`) : null,
+  }),
+}));
+vi.mock('../schedule/modules/product-picker-modal.vue', () => ({
+  default: defineComponent({
+    props: ['open', 'orderSelection'], emits: ['selectedMany'],
+    setup: (props, { emit }) => () => props.open ? h('button', {
+      onClick: () => emit('selectedMany', [product, { ...product, id: 'p2' }, product]),
+    }, '批量加入选中的产品') : null,
   }),
 }));
 vi.mock('@vben/access', () => ({
@@ -182,10 +191,35 @@ const flush = async () => {
   }
 };
 
-function button(text: string) {
-  const el = [...document.querySelectorAll('button')].find((b) => b.textContent?.replaceAll(/\s/g, '') === text);
+function button(text: string, scope: ParentNode = document) {
+  const el = [...scope.querySelectorAll('button')].find((b) => b.textContent?.replaceAll(/\s/g, '') === text);
   if (!el) throw new Error(`找不到按钮：${text}`);
   return el;
+}
+
+function demandRoute(id: string) {
+  return document.querySelector<HTMLElement>(`[aria-label="${id} 要走的工序"]`)!;
+}
+
+function demandDrafts() {
+  const remarks = document.querySelectorAll<HTMLInputElement>('input[placeholder="备注（选填）"]');
+  return ['p1', 'p2'].map((id, index) => ({
+    quantity: document.querySelector<HTMLInputElement>(`#po-qty-${id}`)?.value,
+    remark: remarks[index]?.value,
+    steps: [...demandRoute(`po-route-${id}`).querySelectorAll('button[aria-pressed="true"]')]
+      .map((chip) => chip.textContent?.trim()),
+  }));
+}
+
+function fillInput(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function batchDialog() {
+  const dialog = document.querySelector('#po-batch-quantity')?.closest('[role="dialog"]');
+  expect(dialog?.textContent).toContain('批量设置明细');
+  return dialog!;
 }
 
 function mount() {
@@ -203,6 +237,23 @@ describe('production order page', () => {
     document.body.innerHTML = '';
     vi.clearAllMocks();
   });
+
+  async function openDemandWithProducts() {
+    mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:create');
+    mocks.factories.mockResolvedValue([{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }]);
+    mocks.myPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.factoryPage.mockResolvedValue({ list: [], total: 0 });
+    mocks.getRouteOptions.mockResolvedValueOnce({ ...routeOptions, routes: [] });
+    unmount = mount();
+    await flush();
+    button('＋提生产需求').click();
+    await flush();
+    button('＋从产品中心选择').click();
+    await vi.dynamicImportSettled();
+    await flush();
+    button('批量加入选中的产品').click();
+    await flush();
+  }
 
   it('shows all orders initially and filters pending orders without changing the overview totals', async () => {
     mocks.perms.splice(0, mocks.perms.length, 'fdmgongchang:production-order:create', 'fdmgongchang:production-order:handle');
@@ -237,11 +288,10 @@ describe('production order page', () => {
     expect(document.body.textContent).toContain(order.orderNo);
   });
 
-  it('searches the product catalog and submits an order to the factory', async () => {
+  it('adds products from the catalog in bulk and keeps per-line route and order validation', async () => {
     mocks.factories.mockResolvedValue([{ code: 'HBFDM', deptId: 118, id: 1, name: '黄石工厂' }]);
     mocks.myPage.mockResolvedValue({ list: [], total: 0 });
     mocks.factoryPage.mockResolvedValue({ list: [order], total: 1 });
-    mocks.search.mockResolvedValue([product]);
     mocks.create.mockResolvedValue(9);
     mocks.get.mockResolvedValue(order);
     unmount = mount();
@@ -253,19 +303,17 @@ describe('production order page', () => {
 
     button('＋提生产需求').click();
     await flush();
-    const input = document.querySelector<HTMLInputElement>('#po-product-keyword')!;
-    input.value = 'Mishty';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 350));
+    button('＋从产品中心选择').click();
+    await vi.dynamicImportSettled();
     await flush();
-    expect(mocks.search).toHaveBeenCalledWith('Mishty');
-    [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('＋ 加入'))!.click();
+    button('批量加入选中的产品').click();
     await flush();
-    expect(document.body.textContent).toContain('明细（1）');
+    expect(document.body.textContent).toContain('明细（2）');
 
     // 产品没下过单、工厂只有一条路线时默认用它；工序按生产链排，跳过后接不上时提示
     expect(mocks.lastRoute).toHaveBeenCalledWith(1, 'p1');
-    const chips = () => [...document.querySelectorAll<HTMLButtonElement>('.route-chip')];
+    expect(mocks.lastRoute).toHaveBeenCalledWith(1, 'p2');
+    const chips = () => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="po-route-p1 要走的工序"] .route-chip')];
     expect(chips().filter((c) => c.getAttribute('aria-pressed') === 'true').map((c) => c.textContent?.trim())).toEqual(['开片', '冲裁']);
     chips().find((c) => c.textContent?.trim() === '冲裁')!.click();
     await flush();
@@ -277,6 +325,95 @@ describe('production order page', () => {
     button('提交给工厂').click();
     await flush();
     expect(document.body.textContent).toContain('请选择希望交货的日期');
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('cancels batch edits and fills only blank fields on the selected demand line without a route template', async () => {
+    let resolveHistory!: (route: Api.LastRoute) => void;
+    mocks.lastRoute.mockReturnValueOnce(new Promise<Api.LastRoute>((resolve) => {
+      resolveHistory = resolve;
+    }));
+    await openDemandWithProducts();
+    expect(mocks.lastRoute).toHaveBeenNthCalledWith(1, 1, 'p1');
+    const blank = { quantity: '', remark: '', steps: [] };
+    expect(button('批量设置').disabled).toBe(true);
+    document.querySelector<HTMLInputElement>('#po-select-line-p1')!.click();
+    await flush();
+    button('批量设置').click();
+    await flush();
+
+    const dialog = batchDialog();
+    fillInput(dialog.querySelector<HTMLInputElement>('#po-batch-quantity')!, '40');
+    await flush();
+    expect(dialog.textContent).toMatch(/将修改\s*1\s*行/);
+    expect(demandDrafts()).toEqual([blank, blank]);
+    button('取消', dialog).click();
+    await flush();
+    expect(demandDrafts()).toEqual([blank, blank]);
+
+    fillInput(document.querySelector<HTMLInputElement>('#po-qty-p1')!, '12');
+    fillInput(document.querySelector<HTMLInputElement>('input[placeholder="备注（选填）"]')!, '保留明细备注');
+    const selected = document.querySelector<HTMLInputElement>('#po-select-line-p1')!;
+    if (!selected.checked) selected.click();
+    await flush();
+    button('批量设置').click();
+    await flush();
+    const reopened = batchDialog();
+    fillInput(reopened.querySelector<HTMLInputElement>('#po-batch-quantity')!, '40');
+    button('开片', demandRoute('po-batch-route')).click();
+    await flush();
+    button('冲裁', demandRoute('po-batch-route')).click();
+    await flush();
+    expect(reopened.textContent).toMatch(/将修改\s*1\s*行/);
+    expect(reopened.textContent).not.toMatch(/将覆盖\s*\d+\s*行的已有值/);
+    button('应用到明细', reopened).click();
+    await flush();
+
+    const expected = [{ quantity: '12', remark: '保留明细备注', steps: ['开片', '冲裁'] }, blank];
+    expect(demandDrafts()).toEqual(expected);
+    resolveHistory({ orderNo: order.orderNo, steps: ['PACK'] });
+    await flush();
+    expect(demandDrafts()).toEqual(expected);
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('previews how many selected demand lines would be overwritten before applying to all lines', async () => {
+    await openDemandWithProducts();
+    fillInput(document.querySelector<HTMLInputElement>('#po-qty-p1')!, '12');
+    fillInput(document.querySelector<HTMLInputElement>('input[placeholder="备注（选填）"]')!, '原备注');
+    button('冲裁', demandRoute('po-route-p1')).click();
+    document.querySelector<HTMLInputElement>('#po-select-all-lines')!.click();
+    await flush();
+    expect(document.querySelector<HTMLInputElement>('#po-select-line-p1')?.checked).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('#po-select-line-p2')?.checked).toBe(true);
+    button('批量设置').click();
+    await flush();
+
+    const dialog = batchDialog();
+    fillInput(dialog.querySelector<HTMLInputElement>('#po-batch-quantity')!, '40');
+    fillInput(dialog.querySelector<HTMLInputElement | HTMLTextAreaElement>('#po-batch-remark')!, '统一备注');
+    button('开片', demandRoute('po-batch-route')).click();
+    await flush();
+    const overwrite = dialog.querySelector<HTMLInputElement>('#po-batch-overwrite')!;
+    expect(overwrite.checked).toBe(false);
+    expect(dialog.textContent).toMatch(/将修改\s*1\s*行/);
+    expect(dialog.textContent).not.toMatch(/将覆盖\s*\d+\s*行的已有值/);
+
+    overwrite.click();
+    await flush();
+    expect(dialog.textContent).toMatch(/将修改\s*2\s*行/);
+    expect(dialog.textContent).toMatch(/将覆盖\s*1\s*行的已有值/);
+    expect(demandDrafts()).toEqual([
+      { quantity: '12', remark: '原备注', steps: ['冲裁'] },
+      { quantity: '', remark: '', steps: [] },
+    ]);
+
+    button('应用到明细', dialog).click();
+    await flush();
+    expect(demandDrafts()).toEqual([
+      { quantity: '40', remark: '统一备注', steps: ['开片'] },
+      { quantity: '40', remark: '统一备注', steps: ['开片'] },
+    ]);
     expect(mocks.create).not.toHaveBeenCalled();
   });
 

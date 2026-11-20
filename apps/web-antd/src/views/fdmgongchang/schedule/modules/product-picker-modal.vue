@@ -7,6 +7,11 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { Alert, Button, Empty, Image, Input, Modal, Table } from 'ant-design-vue';
 
 import {
+  getOrderProductAttributeOptions,
+  getOrderProductPage,
+  getOrderProductPickerCategories,
+} from '#/api/fdmgongchang/production-order';
+import {
   getScheduleProductAttributeOptions,
   getScheduleProductCategories,
   getScheduleProductPage,
@@ -15,12 +20,19 @@ import { errorText } from '#/views/fdmplatform/data';
 import { productStageText, productStageValue } from '#/views/fdmplatform/products/attributes';
 import ProductCategoryPanel from '#/views/fdmplatform/products/components/ProductCategoryPanel.vue';
 import ProductStageSelect from '#/views/fdmplatform/products/components/ProductStageSelect.vue';
+import { mergeProductSelection } from '#/views/fdmplatform/products/model';
 
 import { specText } from '../../production-order/shared';
 import { dimensionTextInMm } from '../../shared/dimensions';
 
-const props = defineProps<{ open: boolean; requiredStage?: string; title?: string }>();
-const emit = defineEmits<{ close: []; selected: [product: Api.Product] }>();
+const props = defineProps<{
+  open: boolean;
+  orderSelection?: { excludedIds: ReadonlySet<string>; limit: number };
+  requiredStage?: string;
+  title?: string;
+}>();
+const emit = defineEmits<{ close: []; selected: [product: Api.Product]; selectedMany: [products: Api.Product[]] }>();
+const orderPicker = computed(() => !!props.orderSelection);
 
 const filters = reactive({ keyword: '', material: '', size: '', color: '', shape: '', productStage: '' });
 const attributeOptions = ref<ProductAttributeOptions>({ stages: [], colors: [], textures: [], matTypes: [] });
@@ -33,7 +45,13 @@ const appliedFilters = ref<Api.ProductFilters>({});
 const category = ref<string>();
 const data = ref<Api.Product[]>([]);
 const selected = ref<Api.Product>();
-const selectedKeys = computed(() => selected.value ? [selected.value.id] : []);
+const batch = ref<Api.Product[]>([]);
+const selectedBatch = computed(() => batch.value.filter(canSelect));
+const overLimit = computed(() => selectedBatch.value.length > (props.orderSelection?.limit ?? 0));
+const selectedKeys = computed(() => {
+  if (orderPicker.value) return selectedBatch.value.map((product) => product.id);
+  return selected.value ? [selected.value.id] : [];
+});
 const selectionLabel = computed(() => selected.value
   ? [selected.value.displayName || selected.value.name, selected.value.code].filter(Boolean).join(' · ')
   : '');
@@ -49,6 +67,10 @@ function matchesRequiredStage(product: Api.Product) {
   return !requiredStage.value || productStageValue(product) === requiredStage.value;
 }
 
+function canSelect(product: Api.Product) {
+  return !props.orderSelection?.excludedIds.has(product.id) && matchesRequiredStage(product);
+}
+
 function stockText(value: Api.Product['currentStock']) {
   if (value === null || value === undefined || value === '') return '—';
   const quantity = Number(value);
@@ -59,7 +81,7 @@ async function loadAttributeOptions() {
   const run = ++attributeSequence;
   attributeError.value = '';
   try {
-    const options = await getScheduleProductAttributeOptions();
+    const options = await (orderPicker.value ? getOrderProductAttributeOptions() : getScheduleProductAttributeOptions());
     if (run === attributeSequence) attributeOptions.value = options;
   } catch (error) {
     if (run === attributeSequence) attributeError.value = errorText(error);
@@ -71,7 +93,8 @@ async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const result = await getScheduleProductPage({
+    const getPage = orderPicker.value ? getOrderProductPage : getScheduleProductPage;
+    const result = await getPage({
       ...appliedFilters.value,
       productStage: requiredStage.value || appliedFilters.value.productStage,
       pageNo: pageNo.value,
@@ -126,6 +149,10 @@ function changePage(page: { current?: number; pageSize?: number }) {
 }
 
 function changeSelection(keys: (number | string)[]) {
+  if (orderPicker.value) {
+    if (!loading.value) batch.value = mergeProductSelection(selectedBatch.value, data.value.filter(canSelect), keys.map(String));
+    return;
+  }
   selected.value = data.value.find((item) => item.id === String(keys[0]) && matchesRequiredStage(item));
 }
 
@@ -137,11 +164,16 @@ function confirm(product = selected.value) {
   if (product && !loading.value && matchesRequiredStage(product)) emit('selected', product);
 }
 
+function confirmBatch() {
+  if (!loading.value && !overLimit.value && selectedBatch.value.length > 0) emit('selectedMany', selectedBatch.value);
+}
+
 watch([() => props.open, requiredStage], ([open, stage]) => {
   ++sequence;
   ++attributeSequence;
   loading.value = false;
   selected.value = undefined;
+  batch.value = [];
   if (!open) return;
   // 切换领料工序或重新打开限定选品时，不能沿用上次的分类和搜索条件。
   if (stage || stage !== lastOpenedStage) {
@@ -184,7 +216,7 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
           :value="category"
           :keyword="appliedFilters.keyword"
           :filters="appliedFilters"
-          :load-categories="getScheduleProductCategories"
+          :load-categories="orderPicker ? getOrderProductPickerCategories : getScheduleProductCategories"
           @update:value="chooseCategory"
         />
       </aside>
@@ -211,7 +243,9 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
           <Button type="primary" @click="search">查询</Button>
           <Button @click="resetFilters">重置</Button>
         </div>
-        <div class="picker-hint">按分类筛选后选择一个产品，点击确定；也可双击产品直接选入。当前库存为本厂账面数量。</div>
+        <div class="picker-hint">
+          {{ orderPicker ? '支持跨页勾选；已在明细里的产品不会重复加入。' : '按分类筛选后选择一个产品，点击确定；也可双击产品直接选入。当前库存为本厂账面数量。' }}
+        </div>
         <Alert v-if="attributeError" type="warning" show-icon :message="`生产分类加载失败：${ attributeError}`" />
         <Alert v-if="loadError" type="error" show-icon :message="loadError" />
         <Table
@@ -221,13 +255,13 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
           :loading="loading"
           :scroll="{ x: 800, y: 'min(430px, calc(100vh - 420px))' }"
           :row-selection="{
-            type: 'radio',
+            type: orderPicker ? 'checkbox' : 'radio',
             selectedRowKeys: selectedKeys,
             preserveSelectedRowKeys: true,
             onChange: changeSelection,
-            getCheckboxProps: (record: Api.Product) => ({ disabled: !matchesRequiredStage(record) }),
+            getCheckboxProps: (record: Api.Product) => ({ disabled: loading || !canSelect(record) }),
           }"
-          :custom-row="(record: Api.Product) => ({
+          :custom-row="(record: Api.Product) => (orderPicker ? {} : {
             onClick: () => selectProduct(record),
             onDblclick: () => confirm(record),
           })"
@@ -244,7 +278,7 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
             { title: '产品', key: 'product', width: 280 },
             { title: '分类 / 阶段', key: 'category', dataIndex: 'category', width: 110 },
             { title: '规格', key: 'specification', width: 210 },
-            { title: '当前库存', key: 'currentStock', width: 100, align: 'right' },
+            ...(orderPicker ? [] : [{ title: '当前库存', key: 'currentStock', width: 100, align: 'right' as const }]),
             { title: '单位', key: 'unit', dataIndex: 'unit', width: 60 },
           ]"
           @change="changePage"
@@ -259,6 +293,7 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
               <div class="product-copy">
                 <strong :title="record.displayName || record.name">{{ record.displayName || record.name }}</strong>
                 <span class="product-code">{{ record.code || '—' }}</span>
+                <span v-if="orderSelection?.excludedIds.has(record.id)" class="picker-hint">已加入明细</span>
               </div>
             </div>
             <div v-else-if="column.key === 'category'">
@@ -274,12 +309,17 @@ onBeforeUnmount(() => { ++sequence; ++attributeSequence; });
     </div>
     <template #footer>
       <div class="picker-footer">
-        <div class="selection" :title="selectionLabel || undefined">
+        <div v-if="orderSelection" class="selection">
+          已选 {{ selectedBatch.length }} 项，最多可再加入 {{ orderSelection.limit }} 项
+          <Button v-if="selectedBatch.length" size="small" type="link" @click="batch = []">清空选择</Button>
+        </div>
+        <div v-else class="selection" :title="selectionLabel || undefined">
           {{ selected ? `已选：${selectionLabel}` : '请选择一个产品' }}
         </div>
         <div class="picker-actions">
           <Button @click="emit('close')">取消</Button>
-          <Button type="primary" :disabled="!selected || loading || !matchesRequiredStage(selected)" @click="confirm()">确定</Button>
+          <Button v-if="orderPicker" type="primary" :disabled="!selectedBatch.length || loading || overLimit" @click="confirmBatch">加入明细</Button>
+          <Button v-else type="primary" :disabled="!selected || loading || !matchesRequiredStage(selected)" @click="confirm()">确定</Button>
         </div>
       </div>
     </template>
