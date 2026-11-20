@@ -498,6 +498,43 @@ describe('产品 Excel 导入交互', () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
+  it('外采模板没有来源列时也能在线填写中文颜色', async () => {
+    const preview = previewResult();
+    api.preview.mockResolvedValue({
+      ...preview,
+      rows: preview.rows.map((row) =>
+        row.rowNumber === 7 ? { ...row, productSource: '外采' } : row,
+      ),
+    });
+    const { button, choose, host } = await mountDialog();
+    const file = new File(['external'], '外采产品导入模板.xlsx');
+    await choose(file);
+    await vi.waitFor(() => expect(button('修改')).toBeTruthy());
+    button('修改').click();
+    await nextTick();
+    const editor = host.querySelector('[data-row-editor]')!;
+    const colors = {
+      正面颜色: '软木原色',
+      反面颜色: '炭黑',
+      颜色编码: '软木色',
+    };
+    for (const [label, color] of Object.entries(colors)) {
+      const input = editor.querySelector<HTMLInputElement>(
+        `input[aria-label="${label}"]`,
+      )!;
+      expect(input.maxLength).toBe(100);
+      input.value = color;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await nextTick();
+    button('保存修改').click();
+    await nextTick();
+    button('重新校验').click();
+    await vi.waitFor(() =>
+      expect(api.preview).toHaveBeenLastCalledWith(file, 0, { 7: colors }),
+    );
+  });
+
   it('从色号下拉修正颜色并填写雕刻图案，重新校验前禁止用旧预览导入', async () => {
     const { button, choose, host } = await mountDialog();
     const file = new File(['wrong-color'], 'products.xlsx');

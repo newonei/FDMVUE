@@ -399,7 +399,7 @@ async function downloadTemplate(productSource: ProductImportSource) {
         type="info"
         show-icon
         message="外采必填产品名称、产品型号、产品规格、产品类别和单位，产品编号留空时自动生成。"
-        description="自产单位可留空，默认按「件」导入。尺寸统一用 mm，激光图案和图案生产版本均为选填。"
+        description="外采颜色可直接填写中文名称或色号。自产单位可留空，默认按「件」导入。尺寸统一用 mm，激光图案和图案生产版本均为选填。"
       />
       <template v-if="result">
         <Alert
@@ -618,6 +618,7 @@ async function downloadTemplate(productSource: ProductImportSource) {
   <ProductImportRowEditor
     :open="open && Boolean(editing)"
     :company-id="companyId"
+    :product-source="editing?.productSource"
     :row-number="editing?.rowNumber"
     :cells="editingCells"
     :row-message="editing?.status === 'ERROR' ? editing.message : undefined"

@@ -30,6 +30,7 @@ const props = defineProps<{
   cells?: Record<string, string>;
   companyId: number;
   open: boolean;
+  productSource?: string;
   rowMessage?: string;
   rowNumber?: number;
 }>();
@@ -152,6 +153,9 @@ const stageAliases = new Map([
 const activeSection = ref('product');
 const original = ref<Record<string, string>>({});
 const draft = ref<Record<string, string>>({});
+const external = computed(
+  () => (draft.value['产品来源'] ?? props.productSource)?.trim() === '外采',
+);
 const categories = ref<ProductCategory[]>();
 const attributes = ref<ProductAttributeOptions>();
 const loading = ref(false);
@@ -282,7 +286,8 @@ const rows = computed(() =>
     ...section,
     fields: section.fields.map((field) => {
       const raw = draft.value[field.key] ?? '';
-      const source = field.choices;
+      const externalColor = external.value && field.choices === 'colors';
+      const source = externalColor ? undefined : field.choices;
       const selected = source ? readChoice(source, raw) : undefined;
       const hasUnmatchedValue = Boolean(
         source && raw.trim() && raw.trim() !== '/' && !selected,
@@ -307,6 +312,10 @@ const rows = computed(() =>
           : choices;
       return {
         ...field,
+        choices: source,
+        label: externalColor ? field.key : field.label,
+        max: externalColor ? 100 : field.max,
+        placeholder: externalColor ? '填写颜色名称或色号' : field.placeholder,
         unmatched: hasUnmatchedValue && lookupReady,
         selection: selected ?? (hasUnmatchedValue ? raw : undefined),
         options: hasUnmatchedValue
