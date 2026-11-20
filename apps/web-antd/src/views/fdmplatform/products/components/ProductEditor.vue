@@ -212,18 +212,35 @@ async function save() {
   panelError.value = '';
   try {
     const { spec, ...fieldsWithoutSpec } = form;
+    const product = props.product;
+    const manufacturingFields = manufacturingPayload(manufacturing.value, {
+      deriveLayers: deriveLayers.value,
+    });
     const result = await saveProduct({
       ...fieldsWithoutSpec,
-      ...manufacturingPayload(manufacturing.value, {
-        deriveLayers: deriveLayers.value,
-      }),
+      ...manufacturingFields,
       specification: spec,
       active: active.value,
       companyId: props.companyId,
-      id: props.product?.id,
-      expectedVersion: props.product?.version,
+      id: product?.id,
+      expectedVersion: product?.version,
       idempotencyKey: key.value,
     });
+    const { backThicknessMm, constructionType, frontThicknessMm } =
+      manufacturingFields;
+    if (
+      product &&
+      result.id !== product.id &&
+      constructionType === 'DOUBLE_LAYER' &&
+      (frontThicknessMm !== product.frontThicknessMm ||
+        backThicknessMm !== product.backThicknessMm) &&
+      (frontThicknessMm !== result.frontThicknessMm ||
+        backThicknessMm !== result.backThicknessMm)
+    ) {
+      key.value = newIdempotencyKey();
+      panelError.value = `已匹配 SKU ${result.code}，其正反面层厚与填写值不同。请核对该 SKU 的层厚。`;
+      return;
+    }
     message.success(
       result.selectable
         ? '产品档案已保存，可用于合同选品'

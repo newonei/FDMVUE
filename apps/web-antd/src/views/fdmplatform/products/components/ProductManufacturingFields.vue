@@ -34,22 +34,29 @@ const emit = defineEmits<{ 'update:value': [value: ProductAttributes] }>();
 const automaticLayers = computed(
   () => props.deriveLayers ?? usesColorDerivedLayers(props.value),
 );
-const historicalStructure = computed(
+const manualDoubleLayer = computed(
   () =>
     !automaticLayers.value &&
-    ['DOUBLE_LAYER', 'SINGLE_LAYER'].includes(
-      props.value.constructionType ?? '',
-    ),
+    props.value.layerRule !== COLOR_DERIVED_LAYER_RULE &&
+    props.value.constructionType === 'DOUBLE_LAYER',
 );
-const layers = computed(() =>
-  automaticLayers.value
-    ? {
-        ...props.value,
-        ...colorDerivedLayers(props.value),
-        layerRule: COLOR_DERIVED_LAYER_RULE,
-      }
-    : { ...props.value, layerRule: undefined },
-);
+const layers = computed(() => {
+  if (automaticLayers.value) {
+    return {
+      ...props.value,
+      ...colorDerivedLayers(props.value),
+      layerRule: COLOR_DERIVED_LAYER_RULE,
+    };
+  }
+  return {
+    ...props.value,
+    layerRule: undefined,
+    frontThicknessMm:
+      props.value.constructionType === 'SINGLE_LAYER'
+        ? props.value.finishedThicknessMm
+        : props.value.frontThicknessMm,
+  };
+});
 function update(field: keyof ProductAttributes, value: unknown) {
   emit('update:value', { ...props.value, [field]: value });
 }
@@ -85,7 +92,7 @@ function changeMode(mode: unknown) {
       长宽厚统一填写毫米。{{
         automaticLayers
           ? '新成品配置单色为单层，双色为双层均分；每片开片厚度在名义层厚基础上增加 0.2 mm。'
-          : '当前物料沿用档案制造结构与厚度，不自动套用成品开片规则。'
+          : '当前物料按档案制造结构维护厚度，不自动套用成品开片规则。'
       }}雕刻须明确选择无雕刻或激光雕刻。
     </p>
     <div class="fields">
@@ -103,7 +110,6 @@ function changeMode(mode: unknown) {
           :precision="3"
           :min="0"
           :step="field === 'finishedThicknessMm' ? 0.1 : 1"
-          :disabled="field === 'finishedThicknessMm' && historicalStructure"
           :aria-label="label"
           placeholder="待核实"
           @update:value="(v) => update(field, v)"
@@ -117,6 +123,25 @@ function changeMode(mode: unknown) {
           @update:value="changeMode"
         />
       </Form.Item>
+      <template v-if="manualDoubleLayer">
+        <Form.Item
+          v-for="[field, label] in [
+            ['frontThicknessMm', '正面层厚度（mm）'],
+            ['backThicknessMm', '反面层厚度（mm）'],
+          ] as const"
+          :key="field"
+          :label="label"
+          required
+        >
+          <InputNumber
+            :value="value[field] ?? undefined"
+            :min="0"
+            :step="0.1"
+            :aria-label="label"
+            @update:value="(v) => update(field, v)"
+          />
+        </Form.Item>
+      </template>
       <Form.Item v-if="value.colorMode === 'SINGLE'" label="色号" required>
         <Select
           :value="value.colorCode || undefined"
@@ -157,15 +182,17 @@ function changeMode(mode: unknown) {
       />
       <div class="layer-summary" aria-label="制造结构与厚度">
         <div>制造结构：{{ constructionText(layers) }}</div>
-        <div>成品名义层厚：{{ productNominalLayersText(layers) }}</div>
+        <div v-if="!manualDoubleLayer">
+          成品名义层厚：{{ productNominalLayersText(layers) }}
+        </div>
         <div v-if="productSliceThicknessText(layers)">
           开片厚度：{{ productSliceThicknessText(layers) }}
         </div>
         <div v-if="productThicknessProcessText(layers)">
           {{ productThicknessProcessText(layers) }}
         </div>
-        <p v-if="historicalStructure" class="hint">
-          历史制造结构与名义层厚按原档案保留，调整厚度请通过本单配置生成新 SKU。
+        <p v-if="manualDoubleLayer" class="hint">
+          正面层与反面层厚度之和须等于成品厚度。
         </p>
         <p v-else-if="automaticLayers" class="hint">
           层厚自动计算，无需手填。开片厚度单独显示，不写入成品名义层厚。

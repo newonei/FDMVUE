@@ -463,7 +463,7 @@ describe('产品档案编辑与查看', () => {
     await save();
     expect(api.save).not.toHaveBeenCalled();
   });
-  it('历史同色双层2+4mm只读保留，不静默按颜色改成单层', async () => {
+  it('编辑历史同色双层的正反面层厚，保留双层结构', async () => {
     await mount({
       ...product,
       colorMode: 'SINGLE',
@@ -478,32 +478,35 @@ describe('产品档案编辑与查看', () => {
     expect(document.querySelector('select[aria-label="正面色号"]')).toBeNull();
     expect(document.querySelector('select[aria-label="反面色号"]')).toBeNull();
     expect(document.querySelector('select[aria-label="制造结构"]')).toBeNull();
-    expect(
-      document.querySelector('input[aria-label="正面层厚度（mm）"]'),
-    ).toBeNull();
-    expect(
-      document.querySelector<HTMLInputElement>(
-        'input[aria-label="成品厚度（mm）"]',
-      )!.disabled,
-    ).toBe(true);
-    expect(document.body.textContent).toContain(
-      '历史制造结构与名义层厚按原档案保留',
-    );
-    expect(document.body.textContent).toContain('正面 2 mm + 反面 4 mm');
+    for (const [label, value] of [
+      ['成品厚度（mm）', '6'],
+      ['正面层厚度（mm）', '2'],
+      ['反面层厚度（mm）', '4'],
+    ]) {
+      const input = document.querySelector<HTMLInputElement>(
+        `input[aria-label="${label}"]`,
+      )!;
+      expect(input.disabled).toBe(false);
+      expect(input.value).toBe(value);
+    }
+    await fill('正面层厚度（mm）', '2.25');
+    await fill('反面层厚度（mm）', '3.75');
     await save();
     expect(api.save.mock.calls[0]![0]).toMatchObject({
+      id: product.id,
+      expectedVersion: product.version,
       colorMode: 'SINGLE',
       colorCode: 'P',
       frontColor: 'P',
       backColor: 'P',
       constructionType: 'DOUBLE_LAYER',
       finishedThicknessMm: 6,
-      frontThicknessMm: 2,
-      backThicknessMm: 4,
+      frontThicknessMm: 2.25,
+      backThicknessMm: 3.75,
     });
     expect(document.body.textContent).toContain('双层贴合');
   });
-  it('双层厚度之和不符或双色同色时阻止保存', async () => {
+  it('双层厚度校验通过后才提交修改后的总厚和两面层厚', async () => {
     await mount({
       ...product,
       colorMode: 'DUAL',
@@ -522,6 +525,71 @@ describe('产品档案编辑与查看', () => {
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('之和必须等于成品厚度');
+    await fill('成品厚度（mm）', '7');
+    await fill('正面层厚度（mm）', '3');
+    await fill('反面层厚度（mm）', '');
+    await save();
+    expect(api.save).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('大于 0 的正面层和反面层厚度');
+    await fill('反面层厚度（mm）', '4');
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constructionType: 'DOUBLE_LAYER',
+        finishedThicknessMm: 7,
+        frontThicknessMm: 3,
+        backThicknessMm: 4,
+      }),
+    );
+  });
+  it('历史单层厚度随成品厚度修改并保存', async () => {
+    await mount({
+      ...product,
+      constructionType: 'SINGLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 6,
+    });
+    await fill('成品厚度（mm）', '7');
+    expect(document.body.textContent).toContain('成品名义层厚：单层 7 mm');
+    await save();
+    expect(api.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constructionType: 'SINGLE_LAYER',
+        finishedThicknessMm: 7,
+        frontThicknessMm: 7,
+        backThicknessMm: null,
+      }),
+    );
+  });
+  it('匹配其他 SKU 且层厚不一致时提示冲突并保留填写值', async () => {
+    const source: Product = {
+      ...product,
+      constructionType: 'DOUBLE_LAYER',
+      finishedThicknessMm: 6,
+      frontThicknessMm: 3,
+      backThicknessMm: 3,
+    };
+    api.save.mockResolvedValueOnce({
+      ...source,
+      id: 'p2',
+      code: 'SKU-2',
+      finishedThicknessMm: 8,
+      frontThicknessMm: 4,
+      backThicknessMm: 4,
+    });
+    await mount(source);
+    await fill('成品厚度（mm）', '8');
+    await fill('反面层厚度（mm）', '5');
+    await save();
+    expect(document.body.textContent).toContain(
+      '已匹配 SKU SKU-2，其正反面层厚与填写值不同',
+    );
+    expect(document.querySelector('.product-detail-drawer')).toBeNull();
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="反面层厚度（mm）"]',
+      )?.value,
+    ).toBe('5');
   });
   it('带新规则的产品按颜色和成品厚度只读计算，保存不发送手填名义层字段', async () => {
     await mount({
@@ -542,6 +610,12 @@ describe('产品档案编辑与查看', () => {
     ).toBeNull();
     await choose('颜色方式', 'DUAL');
     await choose('反面色号', 'G');
+    expect(
+      document.querySelector('input[aria-label="正面层厚度（mm）"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('input[aria-label="反面层厚度（mm）"]'),
+    ).toBeNull();
     expect(document.body.textContent).toContain(
       '成品名义层厚：正面 3 mm + 反面 3 mm',
     );
