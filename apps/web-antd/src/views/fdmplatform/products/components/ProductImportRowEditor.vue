@@ -23,6 +23,7 @@ import {
 } from '#/api/fdmplatform/products';
 
 import { errorText } from '../../data';
+import { filterProductColorOption } from '../attributes';
 import { productCategoryGroupName } from '../category-model';
 
 const props = defineProps<{
@@ -41,6 +42,7 @@ const { TabPane } = Tabs;
 type Choices =
   | 'categories'
   | 'colorModes'
+  | 'colors'
   | 'construction'
   | 'matTypes'
   | 'patternModes'
@@ -84,9 +86,9 @@ const sections: { fields: Field[]; key: string; label: string }[] = [
       { key: '正面层厚度(mm)', max: 40 },
       { key: '反面层厚度(mm)', max: 40 },
       { key: '颜色模式', choices: 'colorModes' },
-      { key: '正面颜色', label: '正面色号', max: 100, placeholder: '如 502C' },
-      { key: '反面颜色', label: '反面色号', max: 100, placeholder: '如 502C' },
-      { key: '颜色编码', label: '色号', max: 100, placeholder: '如 502C' },
+      { key: '正面颜色', label: '正面色号', choices: 'colors' },
+      { key: '反面颜色', label: '反面色号', choices: 'colors' },
+      { key: '颜色编码', label: '色号', choices: 'colors' },
       { key: '正面压花', label: '正面纹路', choices: 'textures' },
       { key: '反面压花', label: '反面纹路', choices: 'textures' },
       { key: '雕刻状态', choices: 'patternModes' },
@@ -168,6 +170,7 @@ const options = computed<Record<Choices, ProductAttributeOption[]>>(() => ({
         label: group ? `${group} / ${category.name}` : category.name,
       };
     }),
+  colors: attributes.value?.colors ?? [],
   matTypes: attributes.value?.matTypes ?? [],
   stages: attributes.value?.stages ?? [],
   textures: [
@@ -291,16 +294,17 @@ const rows = computed(() =>
               source &&
               (Object.hasOwn(staticChoices, source) || attributes.value),
             );
-      const known = source
-        ? options.value[source].map((option) => ({
-            ...option,
-            label:
-              ['matTypes', 'textures'].includes(source) &&
-              option.label !== option.value
-                ? `${option.label} · ${option.value}`
-                : option.label,
-          }))
-        : [];
+      const choices = source ? options.value[source] : [];
+      const known =
+        source === 'matTypes' || source === 'textures'
+          ? choices.map((option) => ({
+              ...option,
+              label:
+                option.label === option.value
+                  ? option.label
+                  : `${option.label} · ${option.value}`,
+            }))
+          : choices;
       return {
         ...field,
         unmatched: hasUnmatchedValue && lookupReady,
@@ -366,7 +370,7 @@ function save() {
         :description="lookupError"
       />
       <div class="import-row-toolbar">
-        <span>色号可直接填写。保存后返回预览重新校验。</span>
+        <span>保存后返回预览重新校验。</span>
         <Button size="small" :loading="loading" @click="loadOptions">
           刷新选项
         </Button>
@@ -391,6 +395,11 @@ function save() {
                 :value="field.selection"
                 :options="field.options"
                 :aria-label="field.label ?? field.key"
+                :filter-option="
+                  field.choices === 'colors'
+                    ? filterProductColorOption
+                    : undefined
+                "
                 :placeholder="loading ? '正在加载可选项…' : '请选择'"
                 option-filter-prop="label"
                 show-search

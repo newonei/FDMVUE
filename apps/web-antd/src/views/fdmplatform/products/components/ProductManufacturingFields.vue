@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import type { ProductAttributes } from '#/api/fdmplatform/products';
+import type {
+  ProductAttributeOption,
+  ProductAttributes,
+} from '#/api/fdmplatform/products';
 
 import { computed } from 'vue';
 
 import { Form, Input, InputNumber, Select } from 'ant-design-vue';
 
+import { filterProductColorOption } from '../attributes';
 import {
   COLOR_DERIVED_LAYER_RULE,
   colorDerivedLayers,
@@ -20,6 +24,7 @@ import ProductColorSummary from './ProductColorSummary.vue';
 
 const props = withDefaults(
   defineProps<{
+    colors: ProductAttributeOption[];
     deriveLayers?: boolean;
     value: ProductAttributes;
   }>(),
@@ -47,6 +52,15 @@ const layers = computed(() =>
 );
 function update(field: keyof ProductAttributes, value: unknown) {
   emit('update:value', { ...props.value, [field]: value });
+}
+function colorOptionsFor(field: 'backColor' | 'colorCode' | 'frontColor') {
+  const value = props.value[field];
+  if (!value || props.colors.some((color) => color.value === value))
+    return props.colors;
+  return [
+    { value, label: props.value[`${field}Label`] || value, disabled: true },
+    ...props.colors,
+  ];
 }
 function changeMode(mode: unknown) {
   const colorCode =
@@ -104,13 +118,15 @@ function changeMode(mode: unknown) {
         />
       </Form.Item>
       <Form.Item v-if="value.colorMode === 'SINGLE'" label="色号" required>
-        <Input
-          :value="value.colorCode ?? ''"
-          :maxlength="100"
+        <Select
+          :value="value.colorCode || undefined"
+          :options="colorOptionsFor('colorCode')"
+          :filter-option="filterProductColorOption"
+          show-search
           allow-clear
           aria-label="色号"
-          placeholder="如 502C"
-          @update:value="(v) => update('colorCode', v)"
+          placeholder="搜索色号，如 6225 C"
+          @update:value="(v) => update('colorCode', v ?? '')"
         />
       </Form.Item>
       <template v-if="value.colorMode === 'DUAL'">
@@ -123,13 +139,15 @@ function changeMode(mode: unknown) {
           :label="label"
           required
         >
-          <Input
-            :value="value[field] ?? ''"
-            :maxlength="100"
+          <Select
+            :value="value[field] || undefined"
+            :options="colorOptionsFor(field)"
+            :filter-option="filterProductColorOption"
+            show-search
             allow-clear
             :aria-label="label"
-            placeholder="如 502C"
-            @update:value="(v) => update(field, v)"
+            placeholder="搜索色号，如 6225 C"
+            @update:value="(v) => update(field, v ?? '')"
           />
         </Form.Item>
       </template>

@@ -7,6 +7,25 @@ export type ProductAttributeSource = ProductAttributes & {
   color?: null | string;
 };
 
+function colorSearchText(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^pantone(?:\s+|$)/i, '')
+    .replaceAll(/[.\s]/g, '')
+    .toLowerCase();
+}
+
+export function filterProductColorOption(
+  input: string,
+  option?: { label?: unknown; value?: unknown },
+) {
+  const query = colorSearchText(input);
+  return (
+    colorSearchText(option?.label).includes(query) ||
+    colorSearchText(option?.value).includes(query)
+  );
+}
+
 /** 已维护档案优先；关联物料阶段仅用于查询、展示及生产任务预填。 */
 export function productStageValue(product: ProductAttributeSource) {
   return (

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   action: vi.fn(),
   create: vi.fn(),
+  download: vi.fn(),
   directory: vi.fn(),
   files: vi.fn(),
   counter: 0,
@@ -33,7 +34,7 @@ vi.mock('#/api/fdmplatform/expense', () => ({
 vi.mock('#/api/fdmplatform/procurement-finance', () => ({
   getProcurementFinance: mocks.read,
   getProcurementFinanceFiles: mocks.files,
-  downloadProcurementFinanceFile: vi.fn(),
+  downloadProcurementFinanceFile: mocks.download,
   uploadProcurementFinanceFile: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform/submissions', () => ({
@@ -102,8 +103,11 @@ vi.mock('./ReimbursementForm.vue', () => ({
             sourceKey: 'line-1',
             amount: '100',
             ...(mocks.pending.length > 0
-              ? { evidenceRef: '', evidenceFileIndex: 0 }
-              : { evidenceRef: 'saved-voucher' }),
+              ? {
+                  evidenceRefs: [],
+                  evidenceFileIndexes: mocks.pending.map((_, index) => index),
+                }
+              : { evidenceRefs: ['saved-voucher'] }),
           },
         ],
       });
@@ -168,6 +172,16 @@ vi.mock('../../../components/RecordTable.vue', () => ({
 }));
 vi.mock('../../../documents/RelatedLink.vue', () => ({
   default: defineComponent({ render: () => h('span') }),
+}));
+vi.mock('../../../components/FilePreviewButton.vue', () => ({
+  default: defineComponent({
+    props: {
+      name: { type: String, required: true },
+      load: { type: Function, default: undefined },
+    },
+    setup: (props) => () =>
+      h('button', { onClick: () => props.load?.() }, `预览 ${props.name}`),
+  }),
 }));
 vi.mock('../../../components/CreationAttachments.vue', () => ({
   default: defineComponent({
@@ -361,7 +375,10 @@ beforeEach(() => {
 });
 describe('专用报销表单保存和提交', () => {
   it('一次点击保存报销与行凭证后提交，使用保存后的版本并展示生效状态，成功不误报关闭未保存', async () => {
-    mocks.pending = [new File(['line voucher'], 'taxi.pdf')];
+    mocks.pending = [
+      new File(['line voucher'], 'taxi.pdf'),
+      new File(['pay voucher'], 'payment.png'),
+    ];
     mocks.dirty = true;
     const saved = {
       ...document('DRAFT'),
@@ -396,13 +413,16 @@ describe('专用报销表单保存和提交', () => {
         payload: expect.objectContaining({
           expenses: [
             expect.objectContaining({
-              evidenceFileIndex: 0,
+              evidenceFileIndexes: [0, 1],
               sourceKey: 'line-1',
             }),
           ],
         }),
       }),
-      [expect.objectContaining({ name: 'taxi.pdf' })],
+      [
+        expect.objectContaining({ name: 'taxi.pdf' }),
+        expect.objectContaining({ name: 'payment.png' }),
+      ],
     );
     expect(mocks.action).toHaveBeenCalledWith(
       'reimbursement-1',
@@ -468,11 +488,12 @@ describe('专用报销表单保存和提交', () => {
       expect.objectContaining({ content: expect.stringContaining('尚未保存') }),
     );
   });
-  it('办理按钮依据服务端动作，付款信息缺失不会显示零或开放付款', async () => {
+  it('详情逐份展示凭证，预览按各自文件编号读取，付款信息缺失时禁用付款', async () => {
     mocks.read.mockResolvedValue({
       ...document('SUBMITTED'),
       type: 'REIMBURSEMENT',
       allowedActions: [],
+      expenses: [{ id: 'expense', evidenceRefs: ['receipt', 'payment'] }],
       summary: {
         complete: false,
         paidAmount: null,
@@ -480,11 +501,25 @@ describe('专用报销表单保存和提交', () => {
       },
       name: '报销申请',
     });
+    mocks.files.mockResolvedValue({
+      enabled: true,
+      canUpload: false,
+      items: [
+        { id: 'receipt', name: 'receipt.pdf' },
+        { id: 'payment', name: 'payment.png' },
+      ],
+    });
     const host = await mount({ type: 'REIMBURSEMENT' });
     expect(host.textContent).toContain('付款资料待核实');
     expect(host.textContent).toContain('待核实');
     expect(host.textContent).not.toContain('登记本次付款');
     expect(host.textContent).not.toContain('审核通过');
+    click(host, '预览 receipt.pdf');
+    click(host, '预览 payment.png');
+    expect(mocks.download.mock.calls).toEqual([
+      ['request', 'receipt'],
+      ['request', 'payment'],
+    ]);
   });
   it('保存成功但提交失败时保留最新草稿，重试复用已上传凭据并使用新保存版本', async () => {
     mocks.pending = [new File(['voucher'], 'taxi.pdf')];
@@ -495,7 +530,7 @@ describe('专用报销表单保存和提交', () => {
       id: 'reimbursement-1',
       name: '报销申请',
       version: 7,
-      expenses: [{ evidenceRef: 'saved-voucher' }],
+      expenses: [{ evidenceRefs: ['saved-voucher'] }],
     };
     mocks.create.mockResolvedValue(saved);
     mocks.action.mockRejectedValueOnce(new Error('服务暂时不可用，请重试'));
@@ -524,7 +559,9 @@ describe('专用报销表单保存和提交', () => {
         action: 'UPDATE',
         expectedVersion: 7,
         payload: expect.objectContaining({
-          expenses: [expect.objectContaining({ evidenceRef: 'saved-voucher' })],
+          expenses: [
+            expect.objectContaining({ evidenceRefs: ['saved-voucher'] }),
+          ],
         }),
       }),
       [],

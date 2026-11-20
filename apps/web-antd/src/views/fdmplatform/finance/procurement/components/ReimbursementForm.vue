@@ -83,9 +83,15 @@ const productChoices = reactive<
 >({});
 const total = computed(() => reimbursementTotal(form));
 const pending = computed(() => reimbursementFiles(form));
-const attachmentCount = computed(
-  () =>
-    form.expenses.filter((line) => line.evidenceRef || line.pendingFile).length,
+const attachmentCount = computed(() =>
+  form.expenses.reduce(
+    (count, line) =>
+      count + line.evidenceRefs.length + line.pendingFiles.length,
+    0,
+  ),
+);
+const filesById = computed(
+  () => new Map(props.files.map((file) => [file.id, file])),
 );
 const applicant = computed(() =>
   props.record
@@ -100,14 +106,13 @@ const applicantDept = computed(() =>
 const applicationDate = computed(() =>
   formatDate(props.record?.createdAt ?? localDate()),
 );
+function pendingFileKey(file: File) {
+  return JSON.stringify([file.name, file.size, file.lastModified, file.type]);
+}
 function fingerprint() {
   return JSON.stringify({
     payload: payload(),
-    files: pending.value.map((file) => [
-      file.name,
-      file.size,
-      file.lastModified,
-    ]),
+    files: pending.value.map(pendingFileKey),
   });
 }
 function payload() {
@@ -223,29 +228,37 @@ function clearSource(line: ReimbursementLine) {
   line.orderId = '';
   line.contractItemId = '';
 }
-function chooseFile(event: Event, line: ReimbursementLine) {
+function chooseFiles(event: Event, line: ReimbursementLine) {
   const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
+  const selected = [...(input.files ?? [])];
   input.value = '';
-  if (!file || props.saving) return;
-  const files = form.expenses.flatMap((entry) => {
-    if (entry === line) return [file];
-    return entry.pendingFile ? [entry.pendingFile] : [];
+  if (selected.length === 0 || props.saving) return;
+  const seen = new Set(line.pendingFiles.map(pendingFileKey));
+  const added = selected.filter((file) => {
+    const key = pendingFileKey(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  pageError.value = submissionFilesError(files);
-  if (!pageError.value) line.pendingFile = file;
+  pageError.value = submissionFilesError([...pending.value, ...added]);
+  errorField.value = pageError.value ? `line-${line.localKey}-file` : '';
+  if (!pageError.value) line.pendingFiles.push(...added);
 }
-function existingFile(line: ReimbursementLine, value: unknown) {
-  line.evidenceRef = value ? String(value) : '';
-  line.pendingFile = undefined;
+function existingFileOptions(line: ReimbursementLine) {
+  return props.files
+    .filter((file) => !line.evidenceRefs.includes(file.id))
+    .map((file) => ({ label: file.name, value: file.id }));
 }
-function evidenceFile(line: ReimbursementLine) {
-  return line.evidenceRef
-    ? props.files.find((entry) => entry.id === line.evidenceRef)
-    : undefined;
+function addExistingFile(line: ReimbursementLine, value: unknown) {
+  if (typeof value !== 'string' || line.evidenceRefs.includes(value)) return;
+  line.evidenceRefs.push(value);
+  if (errorField.value === `line-${line.localKey}-file`) {
+    pageError.value = '';
+    errorField.value = '';
+  }
 }
-async function download(line: ReimbursementLine) {
-  const file = evidenceFile(line);
+async function download(fileId: string) {
+  const file = filesById.value.get(fileId);
   if (!props.record || !file) return;
   try {
     downloadBlob(
@@ -535,86 +548,114 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
               class="expense-voucher"
               :data-field="`line-${line.localKey}-file`"
             >
-              <div>
-                <strong>报销凭证 <span class="required-mark">*</span></strong>
-                <p>
-                  {{
-                    line.pendingFile
-                      ? `${line.pendingFile.name} · ${attachmentSize(line.pendingFile.size)}`
-                      : files.find((file) => file.id === line.evidenceRef)
-                          ?.name ||
-                        (line.evidenceRef
-                          ? '已有凭证（保留原引用）'
-                          : `${ATTACHMENT_FORMAT_TEXT}，单份不超过 ${ATTACHMENT_LIMIT_TEXT}`)
-                  }}
-                </p>
-              </div>
-              <div class="voucher-actions">
-                <Tag v-if="line.pendingFile" color="processing">待保存上传</Tag><FilePreviewButton
-                  v-if="line.pendingFile"
-                  type="default"
-                  size="small"
-                  :disabled="saving"
-                  :name="line.pendingFile.name"
-                  :file="line.pendingFile"
-                /><FilePreviewButton
-                  v-if="record && evidenceFile(line) && !line.pendingFile"
-                  type="default"
-                  size="small"
-                  :disabled="saving"
-                  :name="evidenceFile(line)!.name"
-                  :load="
-                    () =>
-                      downloadProcurementFinanceFile(
-                        record!.id,
-                        evidenceFile(line)!.id,
-                      )
-                  "
-                /><Button
-                  v-if="line.evidenceRef && !line.pendingFile"
-                  size="small"
-                  :disabled="
-                    saving ||
-                    !files.some((file) => file.id === line.evidenceRef)
-                  "
-                  @click="download(line)"
-                >
-                  下载凭证
-</Button><label class="upload-control" :class="{ disabled: saving }"><span>{{
-                    line.pendingFile || line.evidenceRef
-                      ? '替换凭证'
+              <div class="voucher-heading">
+                <div>
+                  <strong>报销凭证 <span class="required-mark">*</span></strong>
+                  <p>
+                    可多选，单份不超过 {{ ATTACHMENT_LIMIT_TEXT }}。{{
+                      ATTACHMENT_FORMAT_TEXT
+                    }}。
+                  </p>
+                </div>
+                <label class="upload-control" :class="{ disabled: saving }">
+                  <span>{{
+                    line.evidenceRefs.length || line.pendingFiles.length
+                      ? '继续添加凭证'
                       : '上传凭证'
-                  }}</span><input
+                  }}</span>
+                  <input
                     type="file"
+                    multiple
                     :accept="ATTACHMENT_ACCEPT"
                     :disabled="saving"
                     :aria-label="`上传第 ${index + 1} 项费用凭证`"
-                    @change="chooseFile($event, line)"
-/></label><Button
-                  v-if="line.pendingFile"
-                  size="small"
-                  type="text"
-                  :disabled="saving"
-                  @click="line.pendingFile = undefined"
-                >
-                  撤销选择
-                </Button>
+                    @change="chooseFiles($event, line)"
+                  />
+                </label>
               </div>
+              <ul
+                v-if="line.evidenceRefs.length || line.pendingFiles.length"
+                class="voucher-list"
+              >
+                <li
+                  v-for="(fileId, fileIndex) in line.evidenceRefs"
+                  :key="fileId"
+                  class="voucher-row"
+                >
+                  <span class="voucher-name">{{
+                    filesById.get(fileId)?.name || '已有凭证（保留原引用）'
+                  }}</span>
+                  <div class="voucher-actions">
+                    <template v-if="record && filesById.has(fileId)">
+                      <FilePreviewButton
+                        type="default"
+                        size="small"
+                        :disabled="saving"
+                        :name="filesById.get(fileId)!.name"
+                        :load="
+                          () =>
+                            downloadProcurementFinanceFile(record!.id, fileId)
+                        "
+                      />
+                      <Button
+                        size="small"
+                        :disabled="saving"
+                        @click="download(fileId)"
+                      >
+                        下载
+                      </Button>
+                    </template>
+                    <Button
+                      type="text"
+                      size="small"
+                      :disabled="saving"
+                      :aria-label="`移除凭证 ${filesById.get(fileId)?.name || fileId}`"
+                      @click="line.evidenceRefs.splice(fileIndex, 1)"
+                    >
+                      移除
+                    </Button>
+                  </div>
+                </li>
+                <li
+                  v-for="(file, fileIndex) in line.pendingFiles"
+                  :key="pendingFileKey(file)"
+                  class="voucher-row"
+                >
+                  <span class="voucher-name">
+                    {{ file.name }} · {{ attachmentSize(file.size) }}
+                  </span>
+                  <div class="voucher-actions">
+                    <Tag color="processing">待保存上传</Tag>
+                    <FilePreviewButton
+                      type="default"
+                      size="small"
+                      :disabled="saving"
+                      :name="file.name"
+                      :file="file"
+                    />
+                    <Button
+                      type="text"
+                      size="small"
+                      :disabled="saving"
+                      :aria-label="`移除凭证 ${file.name}`"
+                      @click="line.pendingFiles.splice(fileIndex, 1)"
+                    >
+                      移除
+                    </Button>
+                  </div>
+                </li>
+              </ul>
               <Select
-                v-if="files.length"
-                :value="
-                  line.pendingFile ? undefined : line.evidenceRef || undefined
-                "
+                v-if="existingFileOptions(line).length"
+                mode="multiple"
+                :value="[]"
                 :disabled="saving"
-                :options="
-                  files.map((file) => ({ value: file.id, label: file.name }))
-                "
+                :options="existingFileOptions(line)"
                 show-search
-                allow-clear
                 option-filter-prop="label"
-                placeholder="或选择本单已有附件"
+                placeholder="添加本单已有附件"
                 class="existing-voucher"
-                @change="existingFile(line, $event)"
+                @select="addExistingFile(line, $event)"
               />
               <p
                 v-if="errorField === `line-${line.localKey}-file`"
@@ -938,21 +979,41 @@ defineExpose({ payload, pendingAttachments, isDirty, markSaved });
 }
 
 .expense-voucher {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 12px;
-  align-items: center;
-  justify-content: space-between;
   padding: 14px;
   margin-top: 8px;
   background: var(--expense-soft);
   border-radius: 8px;
 }
 
-.expense-voucher > div:first-child {
+.voucher-heading,
+.voucher-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.voucher-heading > div,
+.voucher-name {
   flex: 1;
   min-width: 160px;
   overflow-wrap: anywhere;
+}
+
+.voucher-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.voucher-row {
+  padding-top: 8px;
+  font-size: 12px;
+  border-top: 1px solid var(--expense-line);
 }
 
 .expense-voucher strong {

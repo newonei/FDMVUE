@@ -131,12 +131,10 @@ function retainedOptions(
   return [...options, { value, label }];
 }
 function selectOptions(field: Exclude<ProductionField, 'productStage'>) {
-  if (field === 'matType')
-    return retainedOptions(attributeOptions.value.matTypes, field);
   return retainedOptions(
-    field.startsWith('texture')
-      ? attributeOptions.value.textures
-      : attributeOptions.value.colors,
+    field === 'matType'
+      ? attributeOptions.value.matTypes
+      : attributeOptions.value.textures,
     field,
   );
 }
@@ -296,6 +294,7 @@ async function save() {
       </Form>
       <ProductManufacturingFields
         v-model:value="manufacturing"
+        :colors="attributeOptions.colors"
         :derive-layers="deriveLayers"
       />
       <Alert
@@ -347,9 +346,6 @@ async function save() {
             />
           </Form.Item>
         </Form>
-        <p class="section-hint">
-          旧产品可保留颜色原文。生产用色请填写色号，压花从已维护选项中选择。
-        </p>
       </section>
       <Checkbox v-model:checked="active">
         启用产品（必要资料完整后可选入合同）

@@ -564,7 +564,8 @@ defineExpose({ payload });
               type="date"
             /><Select
               :disabled="saving"
-              v-model:value="expense.evidenceRef"
+              v-model:value="expense.evidenceRefs"
+              mode="multiple"
               :options="
                 files.map((file) => ({ value: file.id, label: file.name }))
               "

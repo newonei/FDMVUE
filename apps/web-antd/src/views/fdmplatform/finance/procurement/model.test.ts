@@ -47,6 +47,7 @@ describe('采购财务编辑与金额口径', () => {
     expect(source.expenses[0]!.amount).toBe(12);
     expect(source.groups[0]!.allocations[0]!.amount).toBe('12');
     expect(value.expenses[0]!.sourceKey).toBe('stable');
+    expect(value.expenses[0]!.evidenceRefs).toEqual(['file']);
   });
   it('采购请款保留计划期次及代付说明，不混入付款确认日期', () => {
     const body = financePayload(
@@ -93,7 +94,7 @@ describe('采购财务编辑与金额口径', () => {
     expect(body.contractId).toBeUndefined();
     expect(body.orderId).toBeUndefined();
     expect((body.expenses as Record<string, unknown>[])[0]).toMatchObject({
-      evidenceRef: '',
+      evidenceRefs: [],
       category: 'TRANSPORT',
     });
   });

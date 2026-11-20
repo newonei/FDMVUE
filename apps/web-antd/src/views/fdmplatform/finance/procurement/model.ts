@@ -49,7 +49,7 @@ export interface ExpenseDraft {
   category: string;
   amount: string;
   expenseDate: string;
-  evidenceRef: string;
+  evidenceRefs: string[];
   remark: string;
 }
 export interface AllocationDraft {
@@ -121,9 +121,23 @@ export function newExpense(): ExpenseDraft {
     category: 'TRANSPORT',
     amount: '',
     expenseDate: '',
-    evidenceRef: '',
+    evidenceRefs: [],
     remark: '',
   };
+}
+export function expenseEvidenceRefs(
+  expense: Record<string, unknown>,
+): string[] {
+  const refs = Array.isArray(expense.evidenceRefs)
+    ? expense.evidenceRefs
+    : [expense.evidenceRef];
+  return [
+    ...new Set(
+      refs.filter(
+        (ref): ref is string => typeof ref === 'string' && ref.trim() !== '',
+      ),
+    ),
+  ];
 }
 export function newGroup(): GroupDraft {
   return {
@@ -154,7 +168,12 @@ export function financeDraft(
     }),
   );
   result.expenses = (Array.isArray(value.expenses) ? value.expenses : []).map(
-    (row) => ({ ...newExpense(), ...row, amount: String(row.amount ?? '') }),
+    (row) => ({
+      ...newExpense(),
+      ...row,
+      amount: String(row.amount ?? ''),
+      evidenceRefs: expenseEvidenceRefs(row),
+    }),
   );
   result.groups = (Array.isArray(value.groups) ? value.groups : []).map(
     (row) => ({
@@ -229,7 +248,7 @@ export function financePayload(
         id: row.id,
         sourceKey: row.sourceKey,
         category: row.category,
-        evidenceRef: row.evidenceRef,
+        evidenceRefs: [...row.evidenceRefs],
         remark: row.remark,
         amount: row.amount || undefined,
         contractId: row.contractId || undefined,

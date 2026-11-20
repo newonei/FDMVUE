@@ -77,14 +77,14 @@ vi.mock('ant-design-vue', () => {
   });
   const select = defineComponent({
     props: {
-      value: { type: [String, Number], default: '' },
+      value: { type: [String, Number, Array], default: '' },
       disabled: Boolean,
       options: {
         type: Array as PropType<{ label: string; value: number | string }[]>,
         default: () => [],
       },
     },
-    emits: ['update:value', 'change'],
+    emits: ['update:value', 'change', 'select'],
     setup: (props, context) => () =>
       h(
         'select',
@@ -99,6 +99,7 @@ vi.mock('ant-design-vue', () => {
             )?.value;
             context.emit('update:value', value);
             context.emit('change', value);
+            if (value !== undefined) context.emit('select', value);
           },
         },
         [
@@ -166,37 +167,58 @@ async function input(host: HTMLElement, field: string, value: string) {
   element.dispatchEvent(new Event('input', { bubbles: true }));
   await nextTick();
 }
+async function chooseFiles(host: HTMLElement, files: File[]) {
+  const element = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+  expect(element.multiple).toBe(true);
+  Object.defineProperty(element, 'files', { configurable: true, value: files });
+  element.dispatchEvent(new Event('change', { bubbles: true }));
+  await nextTick();
+}
 describe('专用报销编辑器实际交互', () => {
-  it('首次选择凭证直接随草稿输出行索引，保存失败保留输入和File及dirty状态', async () => {
+  it('同一费用可多选、追加和单独移除凭证，保存失败保留待上传文件', async () => {
     const { host, saved, editor, props } = await mountEditor();
     expect(editor.value!.isDirty()).toBe(false);
     await input(host, 'name', '运输报销');
-    const fileInput =
-      host.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const file = new File(['receipt'], 'receipt.pdf');
-    Object.defineProperty(fileInput, 'files', {
-      configurable: true,
-      value: [file],
-    });
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    props.files = [{ id: 'saved', name: 'saved.pdf', size: 10 }];
+    const bill = new File(['bill'], 'bill.pdf');
+    const receipt = new File(['receipt'], 'receipt.pdf');
+    const payment = new File(['payment'], 'payment.png');
+    await chooseFiles(host, [bill, receipt]);
+    await chooseFiles(host, [bill, payment]);
+    expect(editor.value!.pendingAttachments()).toEqual([
+      bill,
+      receipt,
+      payment,
+    ]);
+    const existing =
+      host.querySelector<HTMLSelectElement>('.existing-voucher')!;
+    existing.value = 'saved';
+    existing.dispatchEvent(new Event('change', { bubbles: true }));
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="移除凭证 bill.pdf"]')!
+      .click();
     await nextTick();
+    expect(host.textContent).toContain('3 份凭证');
     button(host, '保存草稿').click();
     expect(saved).toHaveBeenCalledWith(
       expect.objectContaining({
         name: '运输报销',
         expenses: [
-          expect.objectContaining({ evidenceFileIndex: 0, evidenceRef: '' }),
+          expect.objectContaining({
+            evidenceFileIndexes: [0, 1],
+            evidenceRefs: ['saved'],
+          }),
         ],
       }),
     );
-    expect(editor.value!.pendingAttachments()).toEqual([file]);
+    expect(editor.value!.pendingAttachments()).toEqual([receipt, payment]);
     props.saving = true;
     await nextTick();
     props.saving = false;
     await nextTick();
     expect(editor.value!.isDirty()).toBe(true);
     expect(host.textContent).toContain('receipt.pdf');
-    expect(editor.value!.pendingAttachments()).toEqual([file]);
+    expect(editor.value!.pendingAttachments()).toEqual([receipt, payment]);
   });
   it('无需选择处理人即可携带已有凭据提交审批', async () => {
     const { host, submitted } = await mountEditor({
@@ -224,7 +246,7 @@ describe('专用报销编辑器实际交互', () => {
         payerEntityId: 'pay',
         expenses: [
           expect.objectContaining({
-            evidenceRef: 'saved-file',
+            evidenceRefs: ['saved-file'],
             amount: '10.20',
           }),
         ],
@@ -255,7 +277,7 @@ describe('专用报销编辑器实际交互', () => {
       unknown
     >[];
     expect(expenses).toHaveLength(2);
-    expect(expenses[1]).toMatchObject({ amount: '0.10', evidenceRef: '' });
+    expect(expenses[1]).toMatchObject({ amount: '0.10', evidenceRefs: [] });
     expect(host.textContent).toContain('0.20');
     button(host, '删除').click();
     await nextTick();
@@ -281,14 +303,10 @@ describe('专用报销编辑器实际交互', () => {
       ],
     };
     const { host, props, submitted, editor } = await mountEditor(context);
-    const fileInput =
-      host.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(fileInput, 'files', {
-      configurable: true,
-      value: [new File(['receipt'], 'receipt.pdf')],
-    });
-    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-    await nextTick();
+    await chooseFiles(host, [
+      new File(['receipt'], 'receipt.pdf'),
+      new File(['bill'], 'bill.pdf'),
+    ]);
     button(host, '提交审批').click();
     expect(submitted).toHaveBeenCalledTimes(1);
     props.record = {
@@ -308,10 +326,14 @@ describe('专用报销编辑器实际交互', () => {
           id: 'line-on-server',
           sourceKey: 'source-on-server',
           evidenceRef: 'uploaded',
+          evidenceRefs: ['uploaded', 'second'],
         },
       ],
     };
-    props.files = [{ id: 'uploaded', name: 'receipt.pdf', size: 7 }];
+    props.files = [
+      { id: 'uploaded', name: 'receipt.pdf', size: 7 },
+      { id: 'second', name: 'bill.pdf', size: 4 },
+    ];
     await nextTick();
     editor.value!.markSaved();
     expect(editor.value!.pendingAttachments()).toEqual([]);
@@ -321,13 +343,15 @@ describe('专用报销编辑器实际交互', () => {
     )[0]!;
     expect(line).toMatchObject({
       id: 'line-on-server',
-      evidenceRef: 'uploaded',
+      evidenceRefs: ['uploaded', 'second'],
     });
-    expect(line).not.toHaveProperty('evidenceFileIndex');
+    expect(line).not.toHaveProperty('evidenceFileIndexes');
     button(host, '提交审批').click();
     expect(submitted).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        expenses: [expect.objectContaining({ evidenceRef: 'uploaded' })],
+        expenses: [
+          expect.objectContaining({ evidenceRefs: ['uploaded', 'second'] }),
+        ],
       }),
     );
   });

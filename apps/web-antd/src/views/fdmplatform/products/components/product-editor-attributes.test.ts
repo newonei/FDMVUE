@@ -133,8 +133,13 @@ vi.mock('ant-design-vue', () => {
             },
             [
               h('option', { value: '' }, '请选择'),
-              ...props.options.map((item: { label: string; value: string }) =>
-                h('option', { value: item.value }, item.label),
+              ...props.options.map(
+                (item: { disabled?: boolean; label: string; value: string }) =>
+                  h(
+                    'option',
+                    { value: item.value, disabled: item.disabled },
+                    item.label,
+                  ),
               ),
             ],
           ),
@@ -192,6 +197,7 @@ const options: ProductAttributeOptions = {
   colors: [
     { value: 'P', label: '紫色' },
     { value: 'G', label: '灰色' },
+    { value: '502C', label: '502 C' },
   ],
   textures: [
     { value: 'NONE', label: '无纹路' },
@@ -340,7 +346,7 @@ describe('产品档案编辑与查看', () => {
       await flush();
     }
     await choose('颜色方式', 'SINGLE');
-    await fill('色号', ' 502C ');
+    await choose('色号', '502C');
     await choose('正面压花', 'NONE');
     await choose('反面压花', 'NONE');
     await choose('雕刻方式', 'LASER');
@@ -364,7 +370,7 @@ describe('产品档案编辑与查看', () => {
       }),
     );
     expect(document.body.textContent).toContain('1830.5 × 610 × 6 mm');
-    expect(document.body.textContent).toContain('502C');
+    expect(document.body.textContent).toContain('颜色：502 C');
     expect(document.body.textContent).toContain(
       '激光雕刻 · 客户山水-A · 生产版B',
     );
@@ -468,8 +474,8 @@ describe('产品档案编辑与查看', () => {
       frontThicknessMm: 2,
       backThicknessMm: 4,
     });
-    expect(document.querySelector('input[aria-label="正面色号"]')).toBeNull();
-    expect(document.querySelector('input[aria-label="反面色号"]')).toBeNull();
+    expect(document.querySelector('select[aria-label="正面色号"]')).toBeNull();
+    expect(document.querySelector('select[aria-label="反面色号"]')).toBeNull();
     expect(document.querySelector('select[aria-label="制造结构"]')).toBeNull();
     expect(
       document.querySelector('input[aria-label="正面层厚度（mm）"]'),
@@ -510,7 +516,7 @@ describe('产品档案编辑与查看', () => {
     await save();
     expect(api.save).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('必须不同');
-    await fill('反面色号', 'G');
+    await choose('反面色号', 'G');
     await flush();
     await save();
     expect(api.save).not.toHaveBeenCalled();
@@ -534,7 +540,7 @@ describe('产品档案编辑与查看', () => {
       document.querySelector('input[aria-label="正面层厚度（mm）"]'),
     ).toBeNull();
     await choose('颜色方式', 'DUAL');
-    await fill('反面色号', 'G');
+    await choose('反面色号', 'G');
     expect(document.body.textContent).toContain(
       '成品名义层厚：正面 3 mm + 反面 3 mm',
     );
@@ -656,8 +662,8 @@ describe('产品档案编辑与查看', () => {
     await choose('生产分类', 'LAMINATED');
     await choose('垫子类型', 'FLAT');
     await choose('颜色方式', 'DUAL');
-    await fill('正面色号', 'P');
-    await fill('反面色号', 'G');
+    await choose('正面色号', 'P');
+    await choose('反面色号', 'G');
     await choose('正面压花', 'BK');
     await choose('反面压花', 'FH');
     await save();
@@ -702,17 +708,19 @@ describe('产品档案编辑与查看', () => {
       textureFront: 'OLD-TEXTURE',
       textureFrontLabel: '旧纹路',
     });
-    const color = document.querySelector<HTMLInputElement>(
-      'input[aria-label="色号"]',
+    const color = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="色号"]',
     )!;
     expect(color.value).toBe('OLD');
+    expect(color.selectedOptions[0]?.textContent).toBe('旧单色');
+    expect(color.selectedOptions[0]?.disabled).toBe(true);
     const pattern = document.querySelector<HTMLInputElement>(
       'input[aria-label="激光图案"]',
     )!;
     expect(pattern.maxLength).toBe(32);
     expect(pattern.value).toBe(historicPattern);
     await choose('生产分类', '');
-    await fill('色号', '');
+    await choose('色号', '');
     await choose('颜色方式', 'UNKNOWN');
     await choose('正面压花', '');
     await save();

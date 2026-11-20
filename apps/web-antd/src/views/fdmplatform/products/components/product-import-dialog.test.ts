@@ -1,7 +1,10 @@
 /* eslint-disable vue/one-component-per-file -- Small UI adapters exercise the real file and request lifecycle. */
 import type { PropType } from 'vue';
 
-import type { ProductImportResult } from '#/api/fdmplatform/products';
+import type {
+  ProductAttributeOption,
+  ProductImportResult,
+} from '#/api/fdmplatform/products';
 
 import { createApp, defineComponent, h, nextTick, ref } from 'vue';
 
@@ -108,7 +111,36 @@ vi.mock('ant-design-vue', () => {
             : null;
       },
     }),
-    Select: block,
+    Select: defineComponent({
+      props: {
+        value: String,
+        options: {
+          type: Array as PropType<
+            Array<ProductAttributeOption & { disabled?: boolean }>
+          >,
+          default: () => [],
+        },
+      },
+      emits: ['update:value'],
+      setup(props, { attrs, emit }) {
+        return () =>
+          h(
+            'select',
+            {
+              ...attrs,
+              value: props.value ?? '',
+              onChange: (event: Event) =>
+                emit('update:value', (event.target as HTMLSelectElement).value),
+            },
+            [
+              h('option', { value: '' }),
+              ...props.options.map(({ value, label, disabled }) =>
+                h('option', { value, disabled }, label),
+              ),
+            ],
+          );
+      },
+    }),
     Space: block,
     Table: defineComponent({
       props: {
@@ -239,7 +271,7 @@ beforeEach(() => {
   let key = 0;
   api.key.mockImplementation(() => `import-key-${++key}`);
   api.options.mockResolvedValue({
-    colors: [],
+    colors: [{ value: 'BLACK6C', label: 'Black 6C' }],
     matTypes: [],
     stages: [],
     textures: [],
@@ -466,7 +498,7 @@ describe('产品 Excel 导入交互', () => {
     expect(api.submit).not.toHaveBeenCalled();
   });
 
-  it('直接填写新色号和雕刻图案，重新校验前禁止用旧预览导入', async () => {
+  it('从色号下拉修正颜色并填写雕刻图案，重新校验前禁止用旧预览导入', async () => {
     const { button, choose, host } = await mountDialog();
     const file = new File(['wrong-color'], 'products.xlsx');
     await choose(file);
@@ -474,14 +506,18 @@ describe('产品 Excel 导入交互', () => {
     button('修改').click();
     await nextTick();
     const editor = host.querySelector('[data-row-editor]')!;
-    const frontColor = editor.querySelector<HTMLInputElement>(
-      'input[aria-label="正面色号"]',
+    const frontColor = editor.querySelector<HTMLSelectElement>(
+      'select[aria-label="正面色号"]',
     )!;
     expect(frontColor.value).toBe('Excel 原来写错的颜色');
-    expect(editor.querySelector('input[aria-label="反面色号"]')).toBeTruthy();
-    expect(editor.querySelector('input[aria-label="色号"]')).toBeTruthy();
-    frontColor.value = '502C';
-    frontColor.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(frontColor.selectedOptions[0]?.disabled).toBe(true);
+    expect(editor.querySelector('select[aria-label="反面色号"]')).toBeTruthy();
+    expect(editor.querySelector('select[aria-label="色号"]')).toBeTruthy();
+    await vi.waitFor(() =>
+      expect(frontColor.querySelector('option[value="BLACK6C"]')).toBeTruthy(),
+    );
+    frontColor.value = 'BLACK6C';
+    frontColor.dispatchEvent(new Event('change', { bubbles: true }));
     const pattern = editor.querySelector<HTMLInputElement>(
       'input[aria-label="激光图案"]',
     )!;
@@ -513,7 +549,7 @@ describe('产品 Excel 导入交互', () => {
     });
     button('重新校验').click();
     const corrections = {
-      7: { 正面颜色: '502C', 激光图案: '客户山水-A', 单位: '件' },
+      7: { 正面颜色: 'BLACK6C', 激光图案: '客户山水-A', 单位: '件' },
     };
     await vi.waitFor(() => expect(button('导入 2 个有效产品')).toBeTruthy());
     expect(api.preview).toHaveBeenLastCalledWith(file, 0, corrections);

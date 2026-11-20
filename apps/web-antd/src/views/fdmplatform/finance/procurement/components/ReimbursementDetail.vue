@@ -23,6 +23,7 @@ import {
   DINGTALK_STAGE,
   dingTalkApprovalMessage,
   expenseActionNames,
+  expenseEvidenceRefs,
   expenseStatus,
   hasPayableBalance,
 } from '../model';
@@ -40,7 +41,16 @@ const emit = defineEmits<{
   download: [file: ProcurementFinanceFile];
   pay: [];
 }>();
-const expenseRows = computed(() => rows(props.record.expenses));
+const expenseRows = computed(() => {
+  const files = new Map(props.files.map((file) => [file.id, file]));
+  return rows(props.record.expenses).map((expense) => ({
+    expense,
+    vouchers: expenseEvidenceRefs(expense).map((id) => ({
+      id,
+      file: files.get(id),
+    })),
+  }));
+});
 const actions = computed(() =>
   props.record.allowedActions.filter(
     (action) => !['APPROVE', 'REJECT', 'UPDATE'].includes(action),
@@ -50,7 +60,7 @@ const actions = computed(() =>
 const hasBusinessLine = computed(
   () =>
     Boolean(props.record.contractId) ||
-    expenseRows.value.some((line) => line.contractId),
+    expenseRows.value.some(({ expense }) => expense.contractId),
 );
 const canApprove = computed(() =>
   props.record.allowedActions.includes('APPROVE'),
@@ -115,9 +125,6 @@ function money(value: unknown) {
   const amount = new BigNumber(String(value));
   if (!amount.isFinite()) return '待核实';
   return `${props.record.currency || '币种未注明'} ${amount.toFormat(currencyScale(props.record.currency))}`;
-}
-function voucher(value: unknown) {
-  return props.files.find((file) => file.id === value);
 }
 const expenseLabel = expenseCategoryLabel;
 function factName(value: unknown) {
@@ -269,7 +276,7 @@ function factName(value: unknown) {
         <span class="muted">共 {{ expenseRows.length }} 项 · 凭证随明细查阅</span>
       </div>
       <article
-        v-for="(expense, index) in expenseRows"
+        v-for="({ expense, vouchers }, index) in expenseRows"
         :key="String(expense.id || index)"
         class="expense-line"
       >
@@ -307,30 +314,27 @@ function factName(value: unknown) {
               {{ expense.orderCode || '查看关联采购单' }}
             </RelatedLink>
             <span v-if="!expense.contractId && !expense.orderId" class="muted">不关联业务单据</span>
-            <Button
-              v-if="voucher(expense.evidenceRef)"
-              type="link"
-              :disabled="busy"
-              @click="emit('download', voucher(expense.evidenceRef)!)"
-            >
-              {{ voucher(expense.evidenceRef)!.name }}
-            </Button>
-            <FilePreviewButton
-              v-if="voucher(expense.evidenceRef)"
-              :disabled="busy"
-              :name="voucher(expense.evidenceRef)!.name"
-              :load="
-                () =>
-                  downloadProcurementFinanceFile(
-                    record.id,
-                    voucher(expense.evidenceRef)!.id,
-                  )
-              "
-            />
-            <span v-else class="muted">{{
-              expense.evidenceRef ? '凭证信息尚未加载或无权读取' : '未关联凭证'
-            }}</span>
           </Space>
+          <ul v-if="vouchers.length" class="expense-vouchers">
+            <li v-for="{ id, file } in vouchers" :key="id">
+              <template v-if="file">
+                <Button
+                  type="link"
+                  :disabled="busy"
+                  @click="emit('download', file)"
+                >
+                  {{ file.name }}
+                </Button>
+                <FilePreviewButton
+                  :disabled="busy"
+                  :name="file.name"
+                  :load="() => downloadProcurementFinanceFile(record.id, id)"
+                />
+              </template>
+              <span v-else class="muted">凭证信息尚未加载或无权读取</span>
+            </li>
+          </ul>
+          <p v-else class="muted">未关联凭证</p>
         </div>
       </article>
       <p v-if="expenseRows.length === 0" class="muted">
@@ -449,6 +453,25 @@ function factName(value: unknown) {
 .expense-purpose {
   margin: 10px 0;
   overflow-wrap: anywhere;
+}
+
+.expense-vouchers {
+  padding: 0;
+  margin: 8px 0 0;
+  list-style: none;
+}
+
+.expense-vouchers li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.expense-vouchers li > .ant-btn-link:first-child {
+  height: auto;
+  padding-left: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 @media (max-width: 760px) {

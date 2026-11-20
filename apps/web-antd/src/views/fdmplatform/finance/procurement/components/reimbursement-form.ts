@@ -11,7 +11,7 @@ import {
 
 export interface ReimbursementLine extends ExpenseDraft {
   localKey: string;
-  pendingFile?: File;
+  pendingFiles: File[];
 }
 export interface ReimbursementDraft extends FinanceDraft {
   expenseEntityId: string;
@@ -36,6 +36,7 @@ export function reimbursementLine(
     expenseDate: localDate(),
     ...source,
     localKey: key,
+    pendingFiles: [],
   };
 }
 export function reimbursementDraft(
@@ -66,14 +67,12 @@ export function copyReimbursementLine(
     localKey: key,
     id: undefined,
     sourceKey: undefined,
-    evidenceRef: '',
-    pendingFile: undefined,
+    evidenceRefs: [],
+    pendingFiles: [],
   };
 }
 export function reimbursementFiles(draft: ReimbursementDraft) {
-  return draft.expenses.flatMap((line) =>
-    line.pendingFile ? [line.pendingFile] : [],
-  );
+  return draft.expenses.flatMap((line) => line.pendingFiles);
 }
 export function reimbursementPayload(
   draft: ReimbursementDraft,
@@ -85,12 +84,12 @@ export function reimbursementPayload(
     currency: draft.currency.trim().toUpperCase(),
     expenseEntityId: draft.expenseEntityId || undefined,
     expenses: (payload.expenses as Record<string, unknown>[]).map(
-      (line, index) => ({
-        ...line,
-        ...(draft.expenses[index]?.pendingFile
-          ? { evidenceRef: '', evidenceFileIndex: fileIndex++ }
-          : {}),
-      }),
+      (line, index) => {
+        const files = draft.expenses[index]!.pendingFiles;
+        return files.length > 0
+          ? { ...line, evidenceFileIndexes: files.map(() => fileIndex++) }
+          : line;
+      },
     ),
   };
 }
@@ -148,8 +147,12 @@ export function validateReimbursement(
       return fail('remark', '选「其他」时请写清用途');
     if (submit && line.contractId && !line.contractItemId)
       return fail('product', '关联合同时请选择归属产品');
-    if (submit && !line.evidenceRef && !line.pendingFile)
-      return fail('file', '请上传或选择一份报销凭证');
+    if (
+      submit &&
+      line.evidenceRefs.length === 0 &&
+      line.pendingFiles.length === 0
+    )
+      return fail('file', '请上传或选择至少一份报销凭证');
   }
   if (submit) {
     if (!draft.advanceUserName.trim())

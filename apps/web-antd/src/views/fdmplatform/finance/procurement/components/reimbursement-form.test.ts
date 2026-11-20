@@ -64,58 +64,60 @@ describe('报销编辑器金额、来源和行凭证', () => {
     const draft = readyDraft();
     const fileA = new File(['A'], 'first.pdf');
     const fileB = new File(['B'], 'second.pdf');
+    const fileC = new File(['C'], 'third.pdf');
     draft.expenses.push(
       {
         ...draft.expenses[0]!,
         localKey: 'new-a',
-        pendingFile: fileA,
+        pendingFiles: [fileA, fileB],
       },
       {
         ...draft.expenses[0]!,
         localKey: 'new-b',
-        pendingFile: fileB,
+        evidenceRefs: [],
+        pendingFiles: [fileC],
       },
     );
-    expect(reimbursementFiles(draft)).toEqual([fileA, fileB]);
+    expect(reimbursementFiles(draft)).toEqual([fileA, fileB, fileC]);
     expect(reimbursementPayload(draft).expenses).toMatchObject([
-      { evidenceRef: 'saved-voucher' },
-      { evidenceRef: '', evidenceFileIndex: 0 },
-      { evidenceRef: '', evidenceFileIndex: 1 },
+      { evidenceRefs: ['saved-voucher'] },
+      { evidenceRefs: ['saved-voucher'], evidenceFileIndexes: [0, 1] },
+      { evidenceRefs: [], evidenceFileIndexes: [2] },
     ]);
     draft.expenses.splice(1, 1);
-    expect(reimbursementFiles(draft)).toEqual([fileB]);
+    expect(reimbursementFiles(draft)).toEqual([fileC]);
     expect(reimbursementPayload(draft).expenses).toMatchObject([
-      { evidenceRef: 'saved-voucher' },
-      { evidenceRef: '', evidenceFileIndex: 0 },
+      { evidenceRefs: ['saved-voucher'] },
+      { evidenceRefs: [], evidenceFileIndexes: [0] },
     ]);
   });
   it('复制费用清除服务端身份、票据和本地File，保留业务信息', () => {
     const line = readyDraft().expenses[0]!;
     line.id = 'expense-id';
     line.sourceKey = 'source';
-    line.pendingFile = new File(['x'], 'voucher.pdf');
+    line.pendingFiles = [new File(['x'], 'voucher.pdf')];
     line.contractId = 'contract';
     const copied = copyReimbursementLine(line, 'copy');
     expect(copied).toMatchObject({
       localKey: 'copy',
       contractId: 'contract',
       amount: '0.10',
-      evidenceRef: '',
+      evidenceRefs: [],
     });
     expect(copied.id).toBeUndefined();
     expect(copied.sourceKey).toBeUndefined();
-    expect(copied.pendingFile).toBeUndefined();
-    expect(line.pendingFile).toBeDefined();
+    expect(copied.pendingFiles).toEqual([]);
+    expect(line.pendingFiles).toHaveLength(1);
   });
   it('草稿允许缺凭证和收款资料，提交严格校验并定位对应费用行', () => {
     const draft = readyDraft();
-    draft.expenses[0]!.evidenceRef = '';
+    draft.expenses[0]!.evidenceRefs = [];
     draft.payeeName = '';
     expect(validateReimbursement(draft, false, '2026-09-18')).toBeUndefined();
     expect(validateReimbursement(draft, true, '2026-09-18')).toMatchObject({
       field: `line-${draft.expenses[0]!.localKey}-file`,
     });
-    draft.expenses[0]!.pendingFile = new File(['x'], 'voucher.pdf');
+    draft.expenses[0]!.pendingFiles = [new File(['x'], 'voucher.pdf')];
     expect(validateReimbursement(draft, true, '2026-09-18')?.field).toBe(
       'payeeName',
     );
