@@ -64,7 +64,18 @@ describe('business table date rendering', () => {
     expect(host.textContent).toContain('2026-09-21 14:57:55');
     expect(host.textContent).not.toContain('1789973875794');
     expect(host.textContent).toContain('合同附件.pdf');
-    expect(host.textContent).toContain('下载');
+
+    const actions = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="合同附件.pdf的附件操作"]',
+    );
+    expect(actions).not.toBeNull();
+    actions!.click();
+    await vi.waitFor(() => {
+      const menuItems = [...document.querySelectorAll('[role="menuitem"]')];
+      expect(menuItems.map((item) => item.textContent?.trim())).toContain(
+        '下载',
+      );
+    });
   });
 
   it('formats audit, nested event and business dates without converting numeric document IDs', async () => {
