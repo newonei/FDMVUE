@@ -7,6 +7,8 @@ import type {
   PayrollValues,
 } from '#/api/fdmplatform/payroll';
 
+export const payrollRegions = ['洛阳', '黄石', '武汉'] as const;
+
 export const fields = [
   ['seq', '序号'],
   ['region', '所属区域'],
@@ -197,5 +199,14 @@ export async function downloadBlankTemplate(month: string) {
     wch: Math.max(13, label.length * 2 + 2),
   }));
   utils.book_append_sheet(workbook, sheet, '工资核算表');
+  const instructions = utils.aoa_to_sheet([
+    ['字段', '填写说明'],
+    ['所属区域', `填写子公司所属区域，如 ${payrollRegions.join('、')}。`],
+    ['所属公司', '填写该区域内的子公司名称。'],
+    ['部门', '填写员工在钉钉组织架构中的部门名称。'],
+    ['姓名', '填写钉钉组织架构中的员工姓名，系统按姓名和部门核对。'],
+  ]);
+  instructions['!cols'] = [{ wch: 14 }, { wch: 56 }];
+  utils.book_append_sheet(workbook, instructions, '填写说明');
   writeFile(workbook, '工资表空白模板.xlsx');
 }

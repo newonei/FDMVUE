@@ -73,6 +73,7 @@ export interface PayrollMonthlyTotals {
 export interface PayrollOrganization {
   company: string;
   department: string;
+  region?: string;
 }
 
 export interface PayrollAnalyticsOptions {
@@ -109,6 +110,7 @@ interface PayrollYearRange {
 interface PayrollAnalyticsScope {
   company?: string;
   department?: string;
+  region?: string;
 }
 
 export function getPayrollAnalyticsOptions() {
@@ -127,7 +129,7 @@ export function searchPayrollEmployees(
 }
 
 export function getPayrollEmployeeMonths(
-  params: PayrollYearRange & { employeeKey: string },
+  params: PayrollYearRange & { employeeKey: string; region?: string },
 ) {
   return requestClient.get<PayrollEmployeeMonth[]>(
     `${base}/analytics/employee-months`,

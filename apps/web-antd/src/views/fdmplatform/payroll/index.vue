@@ -76,6 +76,7 @@ import {
   latestDeliveries,
   monthLabel,
   monthOffset,
+  payrollRegions,
   statusLabels,
   total,
   validMonth,
@@ -103,7 +104,7 @@ const tabs = [
     id: 'cost',
     label: '人力成本',
     icon: InspectionPanel,
-    description: '按公司和部门分析工资趋势、单位缴费及人均薪资。',
+    description: '按区域、公司和部门分析工资趋势、单位缴费及人均薪资。',
   },
   {
     id: 'departments',
@@ -1597,7 +1598,10 @@ function showNotice(item: PayrollDelivery) {
               <small>Excel .xlsx，最大 5 MB</small>
             </label>
             <p class="helper">
-              请保留模板第 3 行的表头，在 Excel 中计算并保存后导入。
+              「所属区域」填写子公司所在区域，如{{
+                payrollRegions.join('、')
+              }}。 姓名和部门须与钉钉组织架构一致。请保留模板第 3 行的表头，在
+              Excel 中计算并保存后导入。
             </p>
             <p v-if="importLoading" class="helper" role="status">
               正在校验工资表…
@@ -1641,6 +1645,7 @@ function showNotice(item: PayrollDelivery) {
                     <tr>
                       <th>姓名</th>
                       <th>所属区域</th>
+                      <th>所属公司</th>
                       <th>部门</th>
                       <th class="numeric">应发合计</th>
                       <th class="numeric">实发数</th>
@@ -1653,6 +1658,7 @@ function showNotice(item: PayrollDelivery) {
                     >
                       <td>{{ row.name }}</td>
                       <td>{{ row.region || '—' }}</td>
+                      <td>{{ row.company }}</td>
                       <td>{{ row.department }}</td>
                       <td class="numeric">{{ currency(row.gross) }}</td>
                       <td class="numeric">{{ currency(row.net) }}</td>

@@ -98,7 +98,7 @@ export function departmentTotals(
     string,
     Pick<
       PayrollDepartmentMonth,
-      'company' | 'department' | 'gross' | 'net' | 'people'
+      'company' | 'department' | 'gross' | 'net' | 'people' | 'region'
     > & {
       key: string;
       months: number;
@@ -106,7 +106,7 @@ export function departmentTotals(
   >();
   for (const row of rows) {
     if (month && row.month !== month) continue;
-    const key = JSON.stringify([row.company, row.department]);
+    const key = JSON.stringify([row.region ?? '', row.company, row.department]);
     const item = departments.get(key);
     if (item) {
       item.gross += row.gross;

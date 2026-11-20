@@ -32,7 +32,7 @@ import {
   yearList,
   yearsWithMonths,
 } from './analytics-model';
-import { currency, monthLabel, monthOffset } from './model';
+import { currency, monthLabel, monthOffset, payrollRegions } from './model';
 import PayrollAnalysisCharts from './PayrollAnalysisCharts.vue';
 import PayrollChartCard from './PayrollChartCard.vue';
 import PayrollReportTable from './PayrollReportTable.vue';
@@ -43,6 +43,7 @@ const emit = defineEmits<{ detail: [row: PayrollRow, month: string] }>();
 const initialYear = Number(props.reportMonth.slice(0, 4));
 const startYear = ref(initialYear);
 const endYear = ref(initialYear);
+const region = ref<null | string>(null);
 const company = ref('');
 const department = ref('');
 const focusMonth = ref(props.reportMonth.slice(5));
@@ -108,12 +109,27 @@ const startYears = computed(() =>
     endYear.value,
   ).toReversed(),
 );
+const organizations = computed(() => options.value?.organizations ?? []);
+const regions = computed(() => [
+  ...new Set([
+    ...payrollRegions,
+    ...organizations.value.flatMap(({ region }) => (region ? [region] : [])),
+  ]),
+]);
+const hasUnassignedOrganization = computed(() =>
+  organizations.value.some((item) => !item.region),
+);
+const regionalOrganizations = computed(() =>
+  organizations.value.filter(
+    (item) => region.value === null || (item.region ?? '') === region.value,
+  ),
+);
 const companies = computed(() => [
-  ...new Set(options.value?.organizations.map((item) => item.company)),
+  ...new Set(regionalOrganizations.value.map((item) => item.company)),
 ]);
 const departments = computed(() => [
   ...new Set(
-    options.value?.organizations
+    regionalOrganizations.value
       .filter((item) => !company.value || item.company === company.value)
       .map((item) => item.department),
   ),
@@ -121,6 +137,7 @@ const departments = computed(() => [
 const scope = computed(() => ({
   company: company.value || undefined,
   department: department.value || undefined,
+  region: region.value ?? undefined,
 }));
 const selectedMonth = computed(() => `${endYear.value}-${focusMonth.value}`);
 let yearsInitialized = false;
@@ -147,7 +164,7 @@ watch([endYear, options], () => {
     (endYear.value === initialYear ? props.reportMonth.slice(5) : '12');
 });
 
-watch([company, department], () => {
+watch([region, company, department], () => {
   employee.value = undefined;
   searchPage.value = 1;
 });
@@ -200,6 +217,7 @@ const {
   const params = {
     employeeKey: employee.value.employeeKey,
     endYear: employeeEnd.value,
+    region: employee.value.region,
     startYear: employeeStart.value,
   };
   return () => getPayrollEmployeeMonths(params);
@@ -255,8 +273,17 @@ function submitSearch() {
   keyword.value = value;
 }
 
+function clearCompanyAndDepartment() {
+  company.value = '';
+  department.value = '';
+}
+
 function chooseEmployee(item: PayrollEmployeeMatch) {
-  if (employee.value?.employeeKey === item.employeeKey) return;
+  if (
+    employee.value &&
+    employeeMatchKey(employee.value) === employeeMatchKey(item)
+  )
+    return;
   employee.value = item;
   employeeEnd.value = employeeLastYear.value;
   employeeStart.value = Math.max(
@@ -264,6 +291,10 @@ function chooseEmployee(item: PayrollEmployeeMatch) {
     employeeEnd.value - 2,
   );
   employeePane.value = 'records';
+}
+
+function employeeMatchKey(item: PayrollEmployeeMatch) {
+  return JSON.stringify([item.employeeKey, item.region]);
 }
 
 function openEmployeeMonth(month: string) {
@@ -393,6 +424,7 @@ const departmentRows = computed(() =>
   ),
 );
 const departmentColumns = computed(() => [
+  { key: 'region', label: '所属区域' },
   { key: 'company', label: '所属公司' },
   { key: 'department', label: '部门' },
   ...(grouping.value === 'annual' ? [number('months', '有记录月数')] : []),
@@ -413,6 +445,7 @@ const departmentHeading = computed(() =>
 function chooseDepartment(key: string) {
   const match = departmentRows.value.find((row) => row.key === key);
   if (!match) return;
+  region.value = match.region ?? '';
   company.value = match.company;
   department.value = match.department;
   grouping.value = 'monthly';
@@ -466,8 +499,25 @@ function chooseDepartment(key: string) {
             </select>
           </label>
         </template>
+        <label>所属区域
+          <select
+            v-model="region"
+            aria-label="所属区域"
+            @change="clearCompanyAndDepartment"
+          >
+            <option :value="null">全部区域</option>
+            <option v-for="item in regions" :key="item" :value="item">
+              {{ item }}
+            </option>
+            <option v-if="hasUnassignedOrganization" value="">未填写</option>
+          </select>
+        </label>
         <label>所属公司
-          <select v-model="company" @change="department = ''">
+          <select
+            v-model="company"
+            aria-label="所属公司"
+            @change="department = ''"
+          >
             <option value="">全部公司</option>
             <option v-for="item in companies" :key="item" :value="item">
               {{ item }}
@@ -475,7 +525,7 @@ function chooseDepartment(key: string) {
           </select>
         </label>
         <label>部门
-          <select v-model="department">
+          <select v-model="department" aria-label="部门">
             <option value="">全部部门</option>
             <option v-for="item in departments" :key="item" :value="item">
               {{ item }}
@@ -524,7 +574,7 @@ function chooseDepartment(key: string) {
         <div v-if="!keyword" class="analysis-panel state">
           <strong>按姓名查询员工薪资</strong>
           <p>
-            支持搜索已导入的所有年份。出现同名记录时，按公司和部门确认员工。
+            支持搜索已导入的所有年份。出现同名记录时，可按区域、公司和部门确认。
           </p>
         </div>
         <div v-else-if="searchError" class="analysis-panel state" role="alert">
@@ -544,13 +594,17 @@ function chooseDepartment(key: string) {
           <div class="matches">
             <button
               v-for="item in matches.items"
-              :key="item.employeeKey"
+              :key="employeeMatchKey(item)"
               type="button"
-              :aria-pressed="employee?.employeeKey === item.employeeKey"
+              :aria-pressed="
+                employee &&
+                employeeMatchKey(employee) === employeeMatchKey(item)
+              "
               @click="chooseEmployee(item)"
             >
               <strong>{{ item.name }}</strong>
-              <span>{{ item.company }} / {{ item.department }}</span>
+              <span>{{ item.region || '区域未填写' }} / {{ item.company }} /
+                {{ item.department }}</span>
               <small>{{ item.firstMonth }} 至 {{ item.lastMonth }}</small>
             </button>
           </div>
@@ -580,8 +634,8 @@ function chooseDepartment(key: string) {
             <div>
               <h2>{{ employee.name }}的薪酬记录</h2>
               <p>
-                {{ employee.company }} / {{ employee.department }} ·
-                调岗记录按导入时的公司和部门分别查询
+                {{ employee.region || '区域未填写' }} / {{ employee.company }} /
+                {{ employee.department }}
               </p>
             </div>
             <div class="analysis-toolbar">
@@ -731,7 +785,12 @@ function chooseDepartment(key: string) {
                 ? '按应发金额取前 10 个部门'
                 : '按应发金额降序排列'
             "
-            :columns="ranked.map((row) => `${row.company} / ${row.department}`)"
+            :columns="
+              ranked.map(
+                (row) =>
+                  `${row.region || '区域未填写'} / ${row.company} / ${row.department}`,
+              )
+            "
             :series="departmentSeries"
             large-amounts
             type="bar"
