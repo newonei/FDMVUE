@@ -136,7 +136,10 @@ export function taskFocus(task: Api.Task, options?: StockApi.Options): FocusFiel
     add('正面纹路', labels.texture(attrs.textureFront) || join(items.map((item) => labels.texture(item.targetTextureFront))), 'FRONT');
     add('反面纹路', labels.texture(attrs.textureBack) || join(items.map((item) => labels.texture(item.targetTextureBack))), 'BACK');
   }
-  if (task.process === 'ENGRAVE') add('雕刻图案', labels.pattern(attrs.pattern) || join(items.map((item) => labels.pattern(item.targetPattern))));
+  if (task.process === 'ENGRAVE') {
+    const patterns = items.map((item) => labels.pattern(item.targetPattern)).filter(Boolean);
+    add('雕刻图案', labels.pattern(attrs.pattern) || (patterns.length > 0 ? join(patterns) : '按订单图纸'));
+  }
   if (!['EMBOSS'].includes(task.process)) {
     add('成品规格', join(items.map((item) => finishedSize(item))));
     add('成品数量', finishedQuantity(items));

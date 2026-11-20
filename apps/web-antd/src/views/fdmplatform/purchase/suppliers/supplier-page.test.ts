@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   page: vi.fn(),
   overview: vi.fn(),
   download: vi.fn(),
+  downloadTemplate: vi.fn(),
+  upload: vi.fn(),
+}));
+vi.mock('#/api/request', () => ({
+  requestClient: { download: mocks.downloadTemplate, upload: mocks.upload },
 }));
 vi.mock('#/api/fdmplatform/supplier-stats', () => ({
   getSupplierStatsPage: mocks.page,
@@ -51,14 +56,15 @@ vi.mock('ant-design-vue', () => {
   return {
     Alert: defineComponent({
       props: { message: { type: String, default: undefined } },
-      setup: (props) => () => h('p', props.message),
+      setup: (props, ctx) => () =>
+        h('div', props.message ?? ctx.slots.message?.() ?? []),
     }),
     Button: defineComponent({
-      props: { loading: Boolean },
+      props: { disabled: Boolean, loading: Boolean },
       setup: (props, ctx) => () =>
         h(
           'button',
-          { ...ctx.attrs, disabled: props.loading },
+          { ...ctx.attrs, disabled: props.disabled || props.loading },
           ctx.slots.default?.(),
         ),
     }),
@@ -83,6 +89,40 @@ vi.mock('ant-design-vue', () => {
           }),
       }),
     },
+    Modal: defineComponent({
+      props: {
+        cancelButtonProps: { type: Object, default: undefined },
+        cancelText: { type: String, default: undefined },
+        confirmLoading: Boolean,
+        okButtonProps: { type: Object, default: undefined },
+        okText: { type: String, default: undefined },
+        open: Boolean,
+      },
+      emits: ['cancel', 'ok'],
+      setup: (props, ctx) => () =>
+        props.open
+          ? h('section', { role: 'dialog' }, [
+              ctx.slots.default?.(),
+              h(
+                'button',
+                {
+                  ...props.cancelButtonProps,
+                  onClick: () => ctx.emit('cancel'),
+                },
+                props.cancelText,
+              ),
+              h(
+                'button',
+                {
+                  disabled:
+                    props.confirmLoading || props.okButtonProps?.disabled,
+                  onClick: () => ctx.emit('ok'),
+                },
+                props.okText,
+              ),
+            ])
+          : null,
+    }),
     Select: block,
     Tag: block,
     message: { success: vi.fn(), error: vi.fn() },
@@ -124,6 +164,26 @@ vi.mock('ant-design-vue', () => {
                 : null,
             ]),
           ),
+        ]),
+    }),
+    Upload: defineComponent({
+      props: {
+        accept: { type: String, default: undefined },
+        beforeUpload: { type: Function, required: true },
+        disabled: Boolean,
+      },
+      setup: (props, ctx) => () =>
+        h('div', [
+          ctx.slots.default?.(),
+          h('input', {
+            accept: props.accept,
+            disabled: props.disabled,
+            type: 'file',
+            onChange: (event: Event) => {
+              const file = (event.target as HTMLInputElement).files?.[0];
+              if (file) props.beforeUpload(file);
+            },
+          }),
         ]),
     }),
   };
@@ -208,6 +268,19 @@ function button(host: HTMLElement, text: string) {
   expect(found).toBeDefined();
   return found!;
 }
+async function openImport(host: HTMLElement) {
+  button(host, '导入供应商').click();
+  await nextTick();
+  return host.querySelector<HTMLElement>('[role="dialog"]')!;
+}
+async function chooseFile(dialog: HTMLElement, file: File) {
+  const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  input.files = transfer.files;
+  input.dispatchEvent(new Event('change'));
+  await nextTick();
+}
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.page.mockResolvedValue({ list: [row], total: 1 });
@@ -267,5 +340,119 @@ describe('supplier page', () => {
     expect(mocks.download).toHaveBeenCalledWith(
       expect.objectContaining({ fileName: '供应商采购统计-20261008.csv' }),
     );
+  });
+  it('downloads the supplier Excel template', async () => {
+    const source = new Blob(['template']);
+    mocks.downloadTemplate.mockResolvedValueOnce(source);
+    const host = await mount();
+    const dialog = await openImport(host);
+    button(dialog, '下载导入模板').click();
+    await settle();
+
+    expect(mocks.downloadTemplate).toHaveBeenCalledWith(
+      '/fdmplatform/v1/suppliers/import-template',
+      expect.any(Object),
+    );
+    expect(mocks.download).toHaveBeenCalledWith({
+      fileName: '供应商导入模板.xlsx',
+      source,
+    });
+  });
+  it('uploads the chosen file and shows every issue while refreshing after updates', async () => {
+    const issues = Array.from({ length: 25 }, (_, index) => ({
+      row: index + 2,
+      code: index === 0 ? 'DUPLICATE_CODE' : 'INVALID_VALUE',
+      message: index === 0 ? '供应商编码已存在' : `启用状态无效 ${index}`,
+    }));
+    mocks.upload.mockResolvedValueOnce({
+      createdCount: 0,
+      updatedCount: 2,
+      skippedCount: 1,
+      failedCount: 24,
+      issues,
+    });
+    const host = await mount();
+    const dialog = await openImport(host);
+    const file = new File(['sample'], 'suppliers.xlsx');
+    const submit = button(dialog, '导入');
+    expect(submit.disabled).toBe(true);
+    await chooseFile(dialog, file);
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await settle();
+
+    expect(mocks.upload).toHaveBeenCalledWith(
+      '/fdmplatform/v1/suppliers/import',
+      { file },
+      expect.any(Object),
+    );
+    expect(dialog.querySelector('[role="status"]')?.textContent).toMatch(
+      /新增 0，补充\s+2，跳过\s+1，失败 24/,
+    );
+    const details = dialog.querySelector('[aria-label="跳过和失败明细"]')!;
+    expect(details.classList.contains('overflow-y-auto')).toBe(true);
+    expect(
+      [...details.querySelectorAll('li')].map((item) =>
+        item.textContent?.trim(),
+      ),
+    ).toEqual(
+      issues.map(
+        (issue) => `第 ${issue.row} 行 · ${issue.code}：${issue.message}`,
+      ),
+    );
+    expect(mocks.page).toHaveBeenCalledTimes(2);
+    expect(mocks.overview).toHaveBeenCalledTimes(2);
+    expect(submit.disabled).toBe(true);
+    button(dialog, '关闭').click();
+    await nextTick();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    const reopened = await openImport(host);
+    expect(reopened.querySelector('[role="status"]')).toBeNull();
+    expect(button(reopened, '导入').disabled).toBe(true);
+  });
+  it('rejects invalid files, accepts a 10 MB .xls and does not refresh on skips alone', async () => {
+    mocks.upload.mockResolvedValueOnce({
+      createdCount: 0,
+      updatedCount: 0,
+      skippedCount: 1,
+      failedCount: 0,
+      issues: [{ row: 2, code: 'DUPLICATE_CODE', message: '供应商编码已存在' }],
+    });
+    const host = await mount();
+    const dialog = await openImport(host);
+    const submit = button(dialog, '导入');
+    await chooseFile(dialog, new File(['sample'], 'suppliers.csv'));
+    expect(dialog.textContent).toContain('请选择 .xls 或 .xlsx 文件');
+    expect(submit.disabled).toBe(true);
+    await chooseFile(
+      dialog,
+      new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'suppliers.xlsx'),
+    );
+    expect(dialog.textContent).toContain('文件不能超过 10 MB');
+    expect(submit.disabled).toBe(true);
+    expect(mocks.upload).not.toHaveBeenCalled();
+    const file = new File([new Uint8Array(10 * 1024 * 1024)], 'suppliers.XLS');
+    await chooseFile(dialog, file);
+    submit.click();
+    await settle();
+
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    expect(dialog.textContent).toContain('供应商编码已存在');
+    expect(mocks.page).toHaveBeenCalledTimes(1);
+    expect(mocks.overview).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the file selected when the request fails so it can be retried', async () => {
+    mocks.upload.mockRejectedValueOnce({ msg: '非空数据行不能超过 500 行' });
+    const host = await mount();
+    const dialog = await openImport(host);
+    await chooseFile(dialog, new File(['sample'], 'suppliers.xlsx'));
+    const submit = button(dialog, '导入');
+    submit.click();
+    await settle();
+
+    expect(dialog.textContent).toContain('非空数据行不能超过 500 行');
+    expect(dialog.textContent).toContain('已选择：suppliers.xlsx');
+    expect(submit.disabled).toBe(false);
+    expect(mocks.page).toHaveBeenCalledTimes(1);
   });
 });

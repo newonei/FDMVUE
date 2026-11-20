@@ -69,7 +69,9 @@ async function load() {
     item.value = selected;
     targetOptions.value = options;
     routeOptions.value = routes;
-    form.value = productionConfigDraft(selected);
+    const draft = productionConfigDraft(selected);
+    draft.foldingType ??= selected.suggestedFoldingType?.trim() || undefined;
+    form.value = draft;
     route.value = { routeId: selected.routeId ?? undefined, steps: [...(selected.processes ?? [])] };
   } catch (error) {
     if (current === version) loadError.value = errorText(error);
@@ -95,7 +97,6 @@ const problems = computed(() => {
   const structureProblem = productionRouteProblems(form.value, steps);
   if (structureProblem) result.push(structureProblem);
   if (!steps.includes('EMBOSS') && (form.value.textureFront || form.value.textureBack)) result.push('未选择压花工序，请清空正反纹路，或加入压花工序');
-  if (!steps.includes('ENGRAVE') && form.value.pattern) result.push('未选择雕刻工序，请清空雕刻图案，或加入雕刻工序');
   return result;
 });
 const batchProblems = computed(() => {
@@ -126,7 +127,11 @@ async function save() {
   const current = version;
   const payload: Api.ItemProductionConfigReq = {
     itemId: item.value.id,
-    target: productionConfigTarget(item.value.id, { ...form.value, foldingType: route.value.steps.includes('FOLD') ? form.value.foldingType : '' }),
+    target: productionConfigTarget(item.value.id, {
+      ...form.value,
+      pattern: route.value.steps.includes('ENGRAVE') ? form.value.pattern : undefined,
+      foldingType: route.value.steps.includes('FOLD') ? form.value.foldingType : '',
+    }),
     routeId: route.value.routeId ?? null,
     processes: sortSteps([...route.value.steps], routeOptions.value?.processes ?? []),
   };
@@ -219,9 +224,6 @@ const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '�
             <label v-if="route.steps.includes('EMBOSS') || form.textureFront || form.textureBack" for="config-texture-back">反面压花纹路
               <Select id="config-texture-back" v-model:value="form.textureBack" :options="targetOptions?.textures" allow-clear show-search option-filter-prop="label" placeholder="不压花 / 选择纹路" />
             </label>
-            <label for="config-pattern" class="sm:col-span-2">雕刻图案
-              <Select id="config-pattern" v-model:value="form.pattern" :options="targetOptions?.patterns" allow-clear show-search option-filter-prop="label" placeholder="未填写" />
-            </label>
             <p v-if="route.steps.length > 0 && !route.steps.includes('EMBOSS')" class="text-sm text-muted-foreground">本产品不经过压花工序。</p>
           </div>
           <p v-if="automaticLayers" class="mt-3 text-xs text-muted-foreground">这里只填写成品尺寸。单色自动为单层，双色自动均分为两层；开片每片增加 0.2 mm，单色经压花、双色经贴合缩水至成品厚度，保存的层厚仍为成品名义厚度。</p>
@@ -229,9 +231,11 @@ const constructionTypes = [{ label: '待核实', value: 'UNKNOWN' }, { label: '�
           <div class="mt-4 border-t pt-3">
             <div class="mb-2 font-medium">实际生产工艺</div>
             <RoutePicker id="production-config" v-model="route" :options="routeOptions" />
+            <p v-if="route.steps.includes('ENGRAVE') && order?.sourceType === 'PURCHASE_ORDER'" class="mt-2 text-sm text-muted-foreground">雕刻按采购单附件中的图纸执行。</p>
             <label v-if="route.steps.includes('FOLD')" for="config-folding" class="mt-3 flex flex-col gap-1 text-sm">
               折叠要求（下发前必须确认）
-              <AutoComplete id="config-folding" v-model:value="form.foldingType" :maxlength="50" :options="['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map(value => ({ value }))" placeholder="选择或填写，如八折；员工按此要求生产" />
+              <AutoComplete id="config-folding" v-model:value="form.foldingType" :maxlength="50" :options="['二折', '三折', '四折', '五折', '六折', '八折', '九折', '十折', '十二折'].map(value => ({ value }))" placeholder="选择或填写，如八折；员工按此要求生产" />
+              <span v-if="!item.targetFoldingType?.trim() && item.suggestedFoldingType" class="text-xs text-muted-foreground">产品档案建议「{{ item.suggestedFoldingType }}」，请核对后保存。</span>
             </label>
             <p v-else class="mt-2 text-sm text-muted-foreground">本产品不经过折叠工序。</p>
             <p class="config-actual-route mb-0 mt-2 text-sm">{{ routeLabel(route, routeOptions) }}：{{ actualRoute }}</p>

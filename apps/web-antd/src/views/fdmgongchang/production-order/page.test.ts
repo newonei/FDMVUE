@@ -958,8 +958,8 @@ describe('production order page', () => {
     fill('#route-supplement-reason', '拆分时漏选雕刻'); await flush();
     expect(button('预览影响').disabled).toBe(true);
     fill('#route-supplement-folding', '八折'); await flush();
-    expect(button('预览影响').disabled).toBe(true);
-    await select('route-supplement-pattern', '哆啦A梦');
+    expect(button('预览影响').disabled).toBe(false);
+    expect(document.querySelector('#route-supplement-pattern')).toBeNull();
     button('预览影响').click(); await flush();
     expect(document.body.textContent).toContain('后道任务 #61 已领料开工');
     expect(button('确认补发').disabled).toBe(true);
@@ -974,7 +974,7 @@ describe('production order page', () => {
     button('预览影响').click(); await flush();
     const item = accepted.items[0]!;
     mocks.get.mockResolvedValue({ ...accepted, items: [{
-      ...item, processes: proposedRoute, targetFoldingType: '八折', targetPattern: 'DM', steps: [
+      ...item, processes: proposedRoute, targetFoldingType: '八折', steps: [
         ...item.steps!,
         { defectQuantity: 0, goodQuantity: 0, inProgressCount: 0, label: '雕刻', orderCount: 0, outputStage: 'ENGRAVED', planned: true, process: 'ENGRAVE', unit: '件' },
       ],
@@ -985,7 +985,7 @@ describe('production order page', () => {
     expect(mocks.releaseSupplement).toHaveBeenCalledTimes(2);
     expect(mocks.releaseSupplement.mock.calls[0]).toEqual(mocks.releaseSupplement.mock.calls[1]);
     expect(mocks.releaseSupplement).toHaveBeenLastCalledWith(1, {
-      foldingType: '八折', itemId: 91, pattern: 'DM', previewKey: 'current', process: 'ENGRAVE', quantity: 500, reason: '车间核对后道尚未加工',
+      foldingType: '八折', itemId: 91, previewKey: 'current', process: 'ENGRAVE', quantity: 500, reason: '车间核对后道尚未加工',
     });
     expect(mocks.get).toHaveBeenCalledTimes(2);
     expect(document.querySelector('.ant-drawer-body')?.textContent).toContain('雕刻');

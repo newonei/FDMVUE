@@ -52,6 +52,7 @@ import {
   tierColors,
   tierNames,
 } from './model';
+import SupplierImportModal from './SupplierImportModal.vue';
 import SupplierSnapshotPanel from './SupplierSnapshotPanel.vue';
 
 import '../../components/compact-tables.css';
@@ -75,6 +76,7 @@ const exporting = ref(false);
 const pageError = ref('');
 const saving = ref(false);
 const open = ref(false);
+const importOpen = ref(false);
 const editing = ref<MasterRecord>();
 let sequence = 0;
 
@@ -87,6 +89,9 @@ const definition = computed(() => ({
     field('name', '供应商名称'),
     field('code', '供应商编码'),
     field('active', '启用', 'boolean', { default: true }),
+    ...(editing.value
+      ? [field('remark', '供应商资料及备注', 'textarea', { required: false })]
+      : []),
   ],
   initialValues: editing.value ? { ...editing.value } : undefined,
 }));
@@ -280,6 +285,8 @@ async function save(payload: Record<string, unknown>, idempotencyKey: string) {
       ? updateMasterData('SUPPLIER', editing.value.id, {
           ...data,
           expectedVersion: editing.value.version,
+          specification: editing.value.specification,
+          unit: editing.value.unit,
         })
       : saveMasterData(data));
     message.success('供应商已保存');
@@ -407,6 +414,7 @@ onMounted(refresh);
             <Button :loading="loading" @click="refresh">刷新</Button>
             <Button :loading="exporting" @click="exportCsv">导出</Button>
             <Button @click="settingsOpen = true">列设置</Button>
+            <Button @click="importOpen = true">导入供应商</Button>
             <Button type="primary" @click="entityDetail.open()">
               新增供应商
             </Button>
@@ -555,6 +563,7 @@ onMounted(refresh);
         </Table>
       </Card>
     </div>
+    <SupplierImportModal v-model:open="importOpen" @changed="refresh" />
     <ActionDialog
       :open="open"
       :definition="definition"
@@ -706,7 +715,9 @@ onMounted(refresh);
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
   margin-left: auto;
 }
 

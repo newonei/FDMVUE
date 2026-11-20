@@ -19,7 +19,6 @@ const open = defineModel<boolean>('open', { required: true });
 
 const process = ref<string>();
 const foldingType = ref('');
-const pattern = ref<string>();
 const textureFront = ref<string>();
 const textureBack = ref<string>();
 const reason = ref('');
@@ -40,12 +39,11 @@ const sideLabels: Record<string, string> = { BACK: '反面', BOTH: '正反面', 
 const remaining = computed(() => num(props.item.quantity) - num(props.item.completedQuantity));
 const requiresFolding = computed(() => (process.value === 'FOLD' || props.item.processes?.includes('FOLD'))
   && !props.item.targetFoldingType?.trim());
-const requiresPattern = computed(() => process.value === 'ENGRAVE' && !props.item.targetPattern?.trim());
 const showFrontTexture = computed(() => process.value === 'EMBOSS' && !props.item.targetTextureFront?.trim());
 const showBackTexture = computed(() => process.value === 'EMBOSS' && !props.item.targetTextureBack?.trim());
-const needsTargetOptions = computed(() => requiresPattern.value || showFrontTexture.value || showBackTexture.value);
+const needsTargetOptions = computed(() => showFrontTexture.value || showBackTexture.value);
 const canPreview = computed(() => !busy.value && !loadingOptions.value && !!process.value && !!reason.value.trim()
-  && remaining.value > 0 && (!requiresFolding.value || !!foldingType.value.trim()) && (!requiresPattern.value || !!pattern.value));
+  && remaining.value > 0 && (!requiresFolding.value || !!foldingType.value.trim()));
 const canRelease = computed(() => !busy.value && !!previewRequest.value && !!preview.value?.canRelease
   && !!preview.value.previewKey && preview.value.errors.length === 0);
 
@@ -53,7 +51,7 @@ function routeText(route?: string[]) {
   return route?.map((step) => PROCESS_LABELS[step] || step).join(' → ') || '未设置';
 }
 
-watch([process, reason, foldingType, pattern, textureFront, textureBack, remaining], () => {
+watch([process, reason, foldingType, textureFront, textureBack, remaining], () => {
   preview.value = undefined;
   previewRequest.value = undefined;
   operationError.value = '';
@@ -66,7 +64,6 @@ watch(open, async (value, _, onCleanup) => {
   process.value = undefined;
   reason.value = '';
   foldingType.value = '';
-  pattern.value = undefined;
   textureFront.value = undefined;
   textureBack.value = undefined;
   operationError.value = '';
@@ -93,7 +90,7 @@ async function loadTargetOptions() {
   try {
     targetOptions.value = await getTargetOptions();
   } catch (error) {
-    targetOptionError.value = `图案和纹路选项加载失败。${businessError(error).msg}`;
+    targetOptionError.value = `纹路选项加载失败。${businessError(error).msg}`;
   } finally {
     loadingTargetOptions.value = false;
   }
@@ -106,7 +103,6 @@ async function prepare() {
   const request: SupplementApi.Request = {
     foldingType: requiresFolding.value ? foldingType.value.trim() : undefined,
     itemId: props.item.id,
-    pattern: requiresPattern.value ? pattern.value : undefined,
     process: process.value,
     quantity: remaining.value,
     reason: reason.value.trim(),
@@ -177,10 +173,6 @@ async function release() {
         <Select id="route-supplement-process" v-model:value="process" :options="options" :loading="loadingOptions" :disabled="busy || loadingOptions" placeholder="选择需要补上的工序" />
       </label>
       <p v-if="!loadingOptions && !operationError && options.length === 0" class="m-0 text-muted-foreground">当前工厂没有可补入这条工艺的工序。</p>
-      <label v-if="requiresPattern" for="route-supplement-pattern" class="flex flex-col gap-1">
-        雕刻图案（必填）
-        <Select id="route-supplement-pattern" v-model:value="pattern" :options="targetOptions?.patterns" :loading="loadingTargetOptions" :disabled="busy || loadingTargetOptions" allow-clear show-search option-filter-prop="label" placeholder="选择图案" />
-      </label>
       <label v-if="showFrontTexture" for="route-supplement-texture-front" class="flex flex-col gap-1">
         正面压花纹路
         <Select id="route-supplement-texture-front" v-model:value="textureFront" :options="targetOptions?.textures" :loading="loadingTargetOptions" :disabled="busy || loadingTargetOptions" allow-clear show-search option-filter-prop="label" placeholder="不压花 / 选择纹路" />

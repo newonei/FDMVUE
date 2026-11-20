@@ -596,8 +596,6 @@ export function validateOutputs(
       && !(process === 'EMBOSS' && options.allowPlainEmboss === true)) {
       errors.push(`${row}请选择正面或反面纹路。`);
     }
-    if (outputStage === 'ENGRAVED' && !a.pattern)
-      errors.push(`${row}请选择雕刻图案。`);
   });
   return errors;
 }

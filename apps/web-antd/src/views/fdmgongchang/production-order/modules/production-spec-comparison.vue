@@ -29,7 +29,8 @@ const fields = computed(() => {
   };
   const engraving = (mode?: null | string, pattern?: null | string) => {
     if (mode === 'NONE') return '无雕刻';
-    return mode === 'LASER' ? `激光雕刻 · ${pattern || '图案待补'}` : '';
+    if (mode !== 'LASER') return '';
+    return pattern ? `激光雕刻 · ${pattern}` : '激光雕刻 · 按采购单附件';
   };
   const factoryTexture = (code?: null | string, opposite?: null | string) => {
     if (target.processes?.length && !target.processes.includes('EMBOSS')) return 'NONE';

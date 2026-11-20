@@ -40,9 +40,9 @@ describe('saved manufacturing parameters', () => {
     expect(host.textContent).not.toContain('AI 排单不排包装');
   });
   it.each([
-    { processes: ['EMBOSS', 'ENGRAVE'], expected: ['压纹 正 贝壳纹 (SH) / 反 不压花', '图案 未填写'], absent: ['无需压花', '无需雕刻', '不雕刻'] },
-    { processes: ['SLICE', 'CUT'], expected: ['无需压花', '无需雕刻'], absent: ['图案 未填写', '压纹 正'] },
-    { processes: [], expected: ['压纹 正 贝壳纹 (SH) / 反 未填写', '图案 未填写'], absent: ['无需压花', '无需雕刻'] },
+    { processes: ['EMBOSS', 'ENGRAVE'], expected: ['压纹 正 贝壳纹 (SH) / 反 不压花', '按图纸雕刻'], absent: ['无需压花', '无需雕刻', '图案 未填写'] },
+    { processes: ['SLICE', 'CUT'], expected: ['无需压花', '无需雕刻'], absent: ['按图纸雕刻', '压纹 正'] },
+    { processes: [], expected: ['压纹 正 贝壳纹 (SH) / 反 未填写'], absent: ['无需压花', '无需雕刻', '图案 未填写'] },
   ])('distinguishes missing values from processes that are not in route $processes', async ({ processes, expected, absent }) => {
     const item: Api.Item = { id: 1, productId: 'p1', productName: '测试订单产品', quantity: 10, completedQuantity: 0,
       targetConfirmedAt: '2026-11-12', targetColorMode: 'DUAL', targetConstructionType: 'DOUBLE_LAYER',

@@ -17,7 +17,6 @@ import {
   Empty,
   Input,
   InputNumber,
-  message,
   Radio,
   Select,
   Spin,
@@ -995,14 +994,6 @@ const summaryText = computed(() => {
   return `领料 ${formatQty(inputTotal.value)} ${inputUnit.value} → 良品 ${formatQty(goodTotal.value)} ${unit}，残次 ${formatQty(defectTotal.value)} ${unit}${rate === null ? '' : `（残次率 ${formatRate(rate)}）`}`;
 });
 
-function warnNoPatterns() {
-  if (processCode.value === 'ENGRAVE' && props.options.patterns.length === 0) {
-    message.warning(
-      '还没有雕刻图案，请先到 系统管理 → 字典管理 里给「雕刻图案」添加数据',
-    );
-  }
-}
-watch(processCode, warnNoPatterns);
 </script>
 
 <template>

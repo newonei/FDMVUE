@@ -97,7 +97,6 @@ onBeforeUnmount(() => { active = false; });
               </Checkbox>
             </div>
           </Checkbox.Group>
-          <p class="m-0 text-xs text-muted-foreground">下发前请在「修改参数与工艺」里确认每个产品的雕刻图案。</p>
         </template>
         <Alert v-else-if="!loading" type="info" show-icon message="当前订单没有可批量补雕刻的产品。请核对订单状态、下发情况和工艺。" />
         <Alert v-if="saveError" type="error" show-icon :message="saveError" />

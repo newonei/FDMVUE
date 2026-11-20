@@ -148,10 +148,11 @@ describe('production configuration values', () => {
     expect(savedProductionConfigProblems(product({ targetConfirmedAt: '2026-11-17' }))).toEqual([]);
     expect(savedProductionConfigProblems(product({ targetMaterial: null, targetConfirmedAt: '2026-11-17', targetSuggested: { material: 'TPE' } }))).toContain('请选择材质');
   });
-  it('allows unfinished texture/pattern values while rejecting invalid basic dimensions and equal dual colors', () => {
+  it('allows engraving from a drawing without requiring a pattern code', () => {
     const draft = productionConfigDraft(product());
     expect(productionConfigProblems(draft)).toEqual([]);
-    expect(unfinishedProductionParameters(draft, ['EMBOSS', 'ENGRAVE'])).toEqual(['请选择至少一面的压花纹路', '雕刻图案未填写']);
+    expect(unfinishedProductionParameters(draft, ['EMBOSS', 'ENGRAVE'])).toEqual(['请选择至少一面的压花纹路']);
+    expect(unfinishedProductionParameters(draft, ['ENGRAVE'])).toEqual([]);
     draft.textureFront = 'WAVE';
     expect(unfinishedProductionParameters(draft, ['EMBOSS'])).toEqual([]);
     expect(unfinishedProductionParameters(draft, ['PUNCH'])).toEqual([]);
@@ -161,6 +162,40 @@ describe('production configuration values', () => {
 });
 
 describe('production configuration modal', () => {
+  it.each([null, 'DM'])('saves engraving without a pattern picker and preserves the stored code %s', async (pattern) => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({
+      processes: ['ENGRAVE', 'PACK'], sourceLayerRule: 'COLOR_DERIVED_V1', targetPattern: pattern,
+    })));
+    mountModal(); await flush();
+    expect(document.querySelector('#config-pattern')).toBeNull();
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({
+      processes: ['ENGRAVE', 'PACK'], target: expect.objectContaining({ pattern }),
+    }));
+  });
+  it.each([
+    { suggestion: '五折', confirmedAt: null },
+    { suggestion: '八折', confirmedAt: null },
+    { suggestion: '九折', confirmedAt: '2026-11-20' },
+    { suggestion: '十二折', confirmedAt: '2026-11-20' },
+  ])('prefills $suggestion on an existing folding order and only saves on confirmation', async ({ suggestion, confirmedAt }) => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({
+      processes: steps, targetConfirmedAt: confirmedAt, targetFoldingType: null, suggestedFoldingType: suggestion,
+    })));
+    mountModal(); await flush();
+    expect(document.querySelector<HTMLInputElement>('#config-folding')?.value).toBe(suggestion);
+    expect(document.body.textContent).toContain(`产品档案建议「${suggestion}」，请核对后保存。`);
+    expect(saveItemProductionConfig).not.toHaveBeenCalled();
+    button('保存参数与工艺').click(); await flush();
+    expect(saveItemProductionConfig).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ foldingType: suggestion }) }));
+  });
+  it('keeps the saved folding requirement ahead of the suggestion', async () => {
+    vi.mocked(getProductionOrder).mockResolvedValue(order(product({
+      processes: steps, targetFoldingType: '六折', suggestedFoldingType: '八折',
+    })));
+    mountModal(); await flush();
+    expect(document.querySelector<HTMLInputElement>('#config-folding')?.value).toBe('六折');
+  });
   it('shows automatic layers and cutting thickness without editable layer inputs for a new-rule item', async () => {
     vi.mocked(getProductionOrder).mockResolvedValue(order(product({ sourceLayerRule: 'COLOR_DERIVED_V1' })));
     mountModal(); await flush();

@@ -58,9 +58,13 @@ export function productionBatchConfig(
   source: ProductionConfigDraft,
   fields: ProductionBatchField[],
 ): Api.ItemProductionConfigReq {
+  const form = productionBatchDraft(item, source, fields);
   return {
     itemId: item.id,
-    target: productionConfigTarget(item.id, productionBatchDraft(item, source, fields)),
+    target: productionConfigTarget(item.id, {
+      ...form,
+      pattern: item.processes?.includes('ENGRAVE') ? form.pattern : undefined,
+    }),
     routeId: item.routeId ?? null,
     processes: [...(item.processes ?? [])],
   };
@@ -172,7 +176,6 @@ export function productionThicknessRouteNotice(form: ProductionConfigDraft, step
 export function unfinishedProductionParameters(form: ProductionConfigDraft, steps: string[]) {
   const missing: string[] = [];
   if (steps.includes('EMBOSS') && !form.textureFront && !form.textureBack) missing.push('请选择至少一面的压花纹路');
-  if (steps.includes('ENGRAVE') && !form.pattern) missing.push('雕刻图案未填写');
   if (steps.includes('FOLD') && !form.foldingType?.trim()) missing.push('折叠要求未填写，确认后才能下发折叠任务');
   return missing;
 }

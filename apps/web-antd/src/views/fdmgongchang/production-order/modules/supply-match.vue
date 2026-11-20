@@ -83,9 +83,12 @@ function targetText(item: Api.Item) {
   if (item.targetConstructionType === 'DOUBLE_LAYER') parts.push(`正面层 ${item.targetFrontThickness ?? '未维护'}cm + 反面层 ${item.targetBackThickness ?? '未维护'}cm`);
   parts.push(needs(item, 'EMBOSS') === false
     ? '无需压花'
-    : `压纹 正 ${textureText(item, 'FRONT', label(o?.textures, item.targetTextureFront))} / 反 ${textureText(item, 'BACK', label(o?.textures, item.targetTextureBack))}`, needs(item, 'ENGRAVE') === false
-    ? '无需雕刻'
-    : `图案 ${label(o?.patterns, item.targetPattern) || '未填写'}`);
+    : `压纹 正 ${textureText(item, 'FRONT', label(o?.textures, item.targetTextureFront))} / 反 ${textureText(item, 'BACK', label(o?.textures, item.targetTextureBack))}`);
+  const engrave = needs(item, 'ENGRAVE');
+  const pattern = label(o?.patterns, item.targetPattern);
+  if (engrave === false) parts.push('无需雕刻');
+  else if (pattern) parts.push(`图案 ${pattern}`);
+  else if (engrave) parts.push('按图纸雕刻');
   return parts.filter(Boolean).join(' · ');
 }
 

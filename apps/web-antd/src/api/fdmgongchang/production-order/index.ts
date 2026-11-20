@@ -125,6 +125,8 @@ export namespace FdmgongchangProductionOrderApi {
     targetTextureBack?: null | string;
     targetPattern?: null | string;
     targetFoldingType?: null | string;
+    /** 产品档案给出的折叠建议，工厂确认保存后才成为订单参数。 */
+    suggestedFoldingType?: null | string;
     targetConfirmedBy?: null | string;
     targetConfirmedAt?: null | string;
     /** 采购来源的新规则；仅供未确认参数预填。 */
