@@ -69,6 +69,7 @@ import {
   setRowQuantity,
   setRowTotal,
 } from '../entry-model';
+import PurchaseAuxiliaryProduct from './PurchaseAuxiliaryProduct.vue';
 
 const props = defineProps<{
   contractId?: string;
@@ -206,6 +207,7 @@ const ProductPicker = defineAsyncComponent(
 const pickerMounted = ref(false);
 const pickerOpen = ref(false);
 const pickerRow = ref<EntryRow>();
+const auxiliaryOpen = ref(false);
 function openPicker(row?: EntryRow) {
   if (row?.requestItemId) return;
   pickerRow.value = row;
@@ -224,8 +226,7 @@ function productOption(product: Product) {
     label: `${product.code} · ${product.name}${product.specification ? ` · ${product.specification.replaceAll('\n', ' ')}` : ''}`,
   };
 }
-function pickProducts(products: Product[]) {
-  pickerOpen.value = false;
+function addProductOptions(products: Product[]) {
   const options = products.map((product) => productOption(product));
   // 让行内下拉能显示刚选中的产品名称
   productOptions.value = [
@@ -234,6 +235,11 @@ function pickProducts(products: Product[]) {
       (entry) => !options.some((option) => option.value === entry.value),
     ),
   ];
+  return options;
+}
+function pickProducts(products: Product[]) {
+  pickerOpen.value = false;
+  const options = addProductOptions(products);
   // pickerRow 保留到下次打开，关闭动画期间弹窗保持原来的单选 / 多选
   const target = pickerRow.value;
   if (target) {
@@ -244,6 +250,13 @@ function pickProducts(products: Product[]) {
     ...rows.value.filter((row) => row.productId || row.contractItemId),
     ...options.map((option) => productRow(option)),
   ];
+}
+function addAuxiliaryProduct(product: Product) {
+  auxiliaryOpen.value = false;
+  const option = addProductOptions([product])[0]!;
+  const empty = rows.value.find((row) => !row.productId && !row.contractItemId);
+  if (empty) chooseProduct(empty, option.value);
+  else rows.value = [...rows.value, productRow(option)];
 }
 
 /** 批量添加：粘贴 Excel 的「产品编号、数量、单价、到货日期、备注」行；多选产品走产品中心弹窗。 */
@@ -561,8 +574,13 @@ watch(
     error.value = '';
     contract.value = undefined;
     contractReviewOpen.value = false;
+    auxiliaryOpen.value = false;
     sourceRequestId.value = undefined;
-    header.value = { purchaseDate: today, category: PURCHASE_CATEGORIES[0] };
+    header.value = {
+      category: PURCHASE_CATEGORIES[0],
+      contractId: props.contractId,
+      purchaseDate: today,
+    };
     rows.value = [emptyRow(key())];
     supplierNames.value = {};
     supplierResults.value = [];
@@ -779,6 +797,7 @@ async function save(submit = false) {
         <Button size="small" type="primary" ghost @click="openPicker()">
           从产品中心选择
         </Button>
+        <Button size="small" @click="auxiliaryOpen = true">新建辅料</Button>
         <Button size="small" @click="addRow">添加一行</Button>
         <Button size="small" @click="openBulk">粘贴导入</Button>
         <Button
@@ -1105,6 +1124,11 @@ async function save(submit = false) {
       />
     </div>
   </Modal>
+  <PurchaseAuxiliaryProduct
+    v-if="open && auxiliaryOpen"
+    @close="auxiliaryOpen = false"
+    @saved="addAuxiliaryProduct"
+  />
   <ProductPicker
     v-if="pickerMounted"
     allow-incomplete

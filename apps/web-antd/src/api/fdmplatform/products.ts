@@ -396,6 +396,16 @@ export function getProduct(id: string, companyId = 0) {
 export function saveProduct(data: Record<string, unknown>) {
   return requestClient.post<Product>(base, data);
 }
+export function createPurchaseAuxiliaryProduct(data: {
+  categoryId: string;
+  code: string;
+  idempotencyKey: string;
+  name: string;
+  specification: string;
+  unit: string;
+}) {
+  return requestClient.post<Product>(`${base}/purchase-auxiliary`, data);
+}
 export function getProductPrices(params: {
   companyId: number;
   currency?: string;

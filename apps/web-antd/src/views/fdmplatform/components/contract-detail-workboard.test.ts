@@ -259,6 +259,46 @@ vi.mock('../purchase/manage/components/OrderSubDocMenu.vue', () => ({
       ),
   }),
 }));
+vi.mock('../purchase/manage/components/PurchaseOrderEditor.vue', () => ({
+  [Symbol.toStringTag]: 'Module',
+  default: defineComponent({
+    props: {
+      contractId: { type: String, default: undefined },
+      open: Boolean,
+      requestId: { type: String, default: undefined },
+    },
+    emits: ['saved'],
+    setup:
+      (props, { emit }) =>
+      () =>
+        props.open &&
+        h(
+          'button',
+          {
+            'data-entry-contract': props.contractId,
+            'data-entry-request': props.requestId,
+            onClick: () =>
+              emit('saved', {
+                contractId: props.contractId,
+                orderId: 'aux-order',
+                code: 'CG001',
+              }),
+          },
+          '保存辅料采购草稿',
+        ),
+  }),
+}));
+vi.mock('../purchase/manage/index.vue', () => ({
+  [Symbol.toStringTag]: 'Module',
+  default: defineComponent({
+    props: { embeddedOrder: { type: Object, required: true } },
+    setup: (props) => () =>
+      h('div', { 'data-purchase-order': props.embeddedOrder.orderId }),
+  }),
+}));
+vi.mock('#/api/fdmplatform/procurement', () => ({
+  createdOrdersText: () => '已生成采购草稿 CG001',
+}));
 vi.mock('ant-design-vue', () => {
   const block = defineComponent({
     setup: (_, ctx) => () => h('div', ctx.attrs, ctx.slots.default?.()),
@@ -474,6 +514,32 @@ afterEach(() => {
 });
 
 describe('contractDetail workboard integration', () => {
+  it('opens a contract-locked purchase editor without a request and then opens the saved draft', async () => {
+    const { host, props, refresh } = await mountDetail();
+    expect(host.textContent).not.toContain('新建采购单');
+    props.contract = {
+      ...contract(),
+      allowedActions: ['CREATE_PURCHASE_ORDER', 'GENERATE_ORDERS'],
+    };
+    await nextTick();
+
+    expect(host.textContent).not.toContain('采购单（按采购方案生成）');
+    button(host, '新建采购单').click();
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-entry-contract="contract-1"]'),
+      ).toBeTruthy();
+    });
+    expect(host.querySelector('[data-entry-request]')).toBeNull();
+    button(host, '保存辅料采购草稿').click();
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-purchase-order="aux-order"]'),
+      ).toBeTruthy();
+    });
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
   it('activates a saved draft directly and refreshes with the returned contract', async () => {
     const { host, props, updated } = await mountDetail();
     props.contract = {

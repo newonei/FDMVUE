@@ -18,6 +18,7 @@ import type {
 } from '#/api/fdmplatform';
 import type { ShipmentNote } from '#/api/fdmplatform/business-documents';
 import type { ContractFileListing } from '#/api/fdmplatform/contract-files';
+import type { CreatedProcurementOrders } from '#/api/fdmplatform/procurement';
 import type { ProcurementFinanceRecord } from '#/api/fdmplatform/procurement-finance';
 import type { StockIn, StockOut } from '#/api/fdmplatform/warehouse';
 
@@ -49,6 +50,7 @@ import { getContractShipmentNotes } from '#/api/fdmplatform/business-documents';
 import { getContractFiles } from '#/api/fdmplatform/contract-files';
 import { getContractRelatedSummary } from '#/api/fdmplatform/contract-progress';
 import { getCustomsSummary } from '#/api/fdmplatform/customs';
+import { createdOrdersText } from '#/api/fdmplatform/procurement';
 import { downloadContractProductAttachment } from '#/api/fdmplatform/products';
 import { getStockOuts } from '#/api/fdmplatform/warehouse';
 import { FdmResizableDrawer } from '#/components/fdm-resizable-drawer';
@@ -219,12 +221,17 @@ function cancelRelatedReceipt(row: RelatedDocRow) {
 const PurchaseOrderExecution = defineAsyncComponent(
   () => import('../purchase/manage/index.vue'),
 );
+const PurchaseOrderEditor = defineAsyncComponent(
+  () => import('../purchase/manage/components/PurchaseOrderEditor.vue'),
+);
 
 const documentKind = ref<ContractDocumentKind>();
 const documentMode = ref<'create' | 'list'>();
 const documentsOpen = ref(false);
 const workLaunch = ref<WorkboardLaunch>();
 const workRow = ref<DocumentRow>();
+const purchaseOrderEntryOpen = ref(false);
+const purchaseOrder = ref<{ contractId: string; orderId: string }>();
 const attachmentBusy = ref(false);
 const terminating = ref(false);
 const terminateAction = ref<'CANCEL_CONTRACT' | 'CLOSE_CONTRACT'>();
@@ -242,6 +249,7 @@ const childOpen = computed(
     !!financeViewing.value ||
     !!standaloneViewing.value ||
     !!workLaunch.value ||
+    purchaseOrderEntryOpen.value ||
     !!purchaseOrder.value ||
     activating.value ||
     attachmentBusy.value ||
@@ -526,6 +534,8 @@ watch(
     standaloneViewing.value = undefined;
     workLaunch.value = undefined;
     workRow.value = undefined;
+    purchaseOrderEntryOpen.value = false;
+    purchaseOrder.value = undefined;
     terminateAction.value = undefined;
     related.value = undefined;
     if (!props.open) autoRanFor = undefined;
@@ -571,7 +581,6 @@ function openDocuments(kind: ContractDocumentKind, mode?: 'create' | 'list') {
   documentMode.value = mode;
   documentsOpen.value = true;
 }
-const purchaseOrder = ref<{ contractId: string; orderId: string }>();
 function openPurchaseOrder(orderId: string) {
   if (!props.contract || childOpen.value) return;
   purchaseOrder.value = { contractId: props.contract.id, orderId };
@@ -693,8 +702,8 @@ const subDocItems = computed(() => {
     entry('receipt', '回款记录', '合同', 'CREATE_RECEIPT'),
     entry('invoice', '开票记录', '合同', 'CREATE_INVOICE'),
     entry('request', '采购申请单', '采购', 'CREATE_REQUEST'),
-    ...(allowed('GENERATE_ORDERS')
-      ? [entry('orders', '采购单（按采购方案生成）', '采购', 'GENERATE_ORDERS')]
+    ...(allowed('CREATE_PURCHASE_ORDER')
+      ? [entry('direct-order', '新建采购单', '采购', 'CREATE_PURCHASE_ORDER')]
       : []),
     {
       key: 'shipment',
@@ -713,9 +722,24 @@ function pickSubDoc(key: string) {
     openQuickDocument({ action: 'CREATE_INVOICE', kind: 'invoices' });
   else if (key === 'request')
     openQuickDocument({ action: 'CREATE_REQUEST', kind: 'requests' });
-  else if (key === 'orders')
-    openQuickDocument({ action: 'GENERATE_ORDERS', kind: 'orders' });
+  else if (
+    key === 'direct-order' &&
+    !quickActionReason('CREATE_PURCHASE_ORDER')
+  )
+    purchaseOrderEntryOpen.value = true;
   else if (key === 'shipment') openStockOut();
+}
+function purchaseOrderSaved(value: CreatedProcurementOrders) {
+  purchaseOrderEntryOpen.value = false;
+  if (!props.open || value.contractId !== props.contract?.id) return;
+  message.success(
+    `${createdOrdersText(value, '已生成采购草稿')}，请完善并保存资料后提交下单`,
+  );
+  purchaseOrder.value = {
+    contractId: value.contractId,
+    orderId: value.orderId,
+  };
+  relatedDocChanged();
 }
 /** 右侧「摘要」（金智同款）：总金额、未回款、实际回款、待确认、已开票、未开票 */
 const summaryCards = computed(() => {
@@ -1694,11 +1718,18 @@ async function download(file: { id: string; name: string }) {
     @close="standaloneViewing = undefined"
     @updated="relatedDocChanged"
   />
+  <PurchaseOrderEditor
+    v-if="open && purchaseOrderEntryOpen"
+    :open="open"
+    :contract-id="contract?.id"
+    @close="purchaseOrderEntryOpen = false"
+    @saved="purchaseOrderSaved"
+  />
   <PurchaseOrderExecution
     v-if="purchaseOrder && open"
     :embedded-order="purchaseOrder"
     @close="purchaseOrder = undefined"
-    @updated="emit('refresh')"
+    @updated="relatedDocChanged"
   />
   <RecordDetail
     v-if="workLaunch && !workLaunch.action"

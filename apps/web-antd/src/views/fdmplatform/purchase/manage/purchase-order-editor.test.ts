@@ -11,8 +11,10 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   contract: vi.fn(),
   order: vi.fn(),
+  auxiliary: vi.fn(),
 }));
 vi.mock('#/api/fdmplatform', () => ({
+  newIdempotencyKey: () => 'auxiliary-key',
   getDirectory: async () => ({
     companies: [{ companyId: 1, companyName: '公司' }],
   }),
@@ -25,6 +27,12 @@ vi.mock('#/api/fdmplatform/masters', () => ({
   getMasterPage: async () => ({ list: [] }),
 }));
 vi.mock('#/api/fdmplatform/products', () => ({
+  createPurchaseAuxiliaryProduct: mocks.auxiliary,
+  getProductCategoryList: async () => [
+    { id: 'raw', name: '原材料', active: true },
+    { id: 'inactive', name: '其他辅料', active: false },
+    { id: 'aux', name: '包装辅料', active: true },
+  ],
   getProducts: async () => ({ list: [] }),
 }));
 vi.mock('#/api/fdmplatform/procurement', () => ({
@@ -84,8 +92,14 @@ vi.mock('ant-design-vue', () => {
         ),
     }),
     Modal: defineComponent({
-      props: { open: Boolean, closable: Boolean, keyboard: Boolean },
-      emits: ['cancel'],
+      props: {
+        open: Boolean,
+        closable: Boolean,
+        keyboard: Boolean,
+        okText: { type: String, default: '' },
+        okButtonProps: { type: Object, default: undefined },
+      },
+      emits: ['cancel', 'ok'],
       setup: (props, ctx) => () =>
         props.open
           ? h(
@@ -97,6 +111,15 @@ vi.mock('ant-design-vue', () => {
               [
                 ctx.slots.default?.(),
                 ctx.slots.footer?.(),
+                props.okText &&
+                  h(
+                    'button',
+                    {
+                      disabled: props.okButtonProps?.disabled,
+                      onClick: () => ctx.emit('ok'),
+                    },
+                    props.okText,
+                  ),
                 h(
                   'button',
                   {
@@ -110,6 +133,7 @@ vi.mock('ant-design-vue', () => {
           : null,
     }),
     Checkbox: Wrap,
+    Form: Object.assign(Wrap, { Item: Wrap }),
     Input,
     InputNumber: Input,
     Select: Input,
@@ -224,6 +248,76 @@ async function fill(input: HTMLInputElement, value: string) {
 }
 
 describe('采购开单先保存草稿', () => {
+  it('quickly creates an auxiliary SKU, fills it into the locked contract and saves without a request source', async () => {
+    mocks.auxiliary.mockResolvedValue({
+      id: 'sku-label',
+      code: 'LABEL-01',
+      name: '条码标签',
+      category: '包装辅料',
+      specification: '40×25 mm',
+      unit: '张',
+    });
+    const { host } = await mount({ contractId: 'contract-1' });
+    expect(
+      host.querySelector<HTMLInputElement>('#purchase-order-entry-contract')
+        ?.disabled,
+    ).toBe(true);
+    await fill(
+      host.querySelector<HTMLInputElement>('[data-supplier]')!,
+      'supplier-1',
+    );
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行数量"]')!,
+      '100',
+    );
+
+    button(host, '新建辅料').click();
+    await settle();
+    for (const [field, value] of Object.entries({
+      code: 'LABEL-01',
+      name: '条码标签',
+      specification: '40×25 mm',
+      unit: '张',
+    })) {
+      await fill(
+        host.querySelector<HTMLInputElement>(`#purchase-auxiliary-${field}`)!,
+        value,
+      );
+    }
+    button(host, '保存并带入采购单').click();
+    await settle();
+    expect(mocks.auxiliary).toHaveBeenCalledExactlyOnceWith({
+      categoryId: 'aux',
+      code: 'LABEL-01',
+      idempotencyKey: 'auxiliary-key',
+      name: '条码标签',
+      specification: '40×25 mm',
+      unit: '张',
+    });
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行单价"]')!,
+      '0.2',
+    );
+    button(host, '保存草稿并完善资料').click();
+    await settle();
+    expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        contractId: 'contract-1',
+        requestId: undefined,
+        submit: false,
+        lines: [
+          expect.objectContaining({
+            productId: 'sku-label',
+            contractItemId: undefined,
+            requestItemId: undefined,
+            quantity: '100',
+            unitPrice: '0.2',
+          }),
+        ],
+      }),
+    );
+  });
+
   it('编辑同一申请明细的多个任务来源时，各任务只加回本单自己的占用', async () => {
     mocks.contract.mockResolvedValue({
       id: 'contract-1',

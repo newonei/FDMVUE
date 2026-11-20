@@ -15,6 +15,7 @@ export function contractQuickActionReason(
     [
       'ASSIGN_FULFILLMENT',
       'CLAIM_REQUEST',
+      'CREATE_PURCHASE_ORDER',
       'CREATE_QUOTE',
       'CREATE_REQUEST',
       'GENERATE_ORDERS',
