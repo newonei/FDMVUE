@@ -16,7 +16,11 @@ import ReportQuantityFields from './report-quantity-fields.vue';
 import '../../shared/report-spec.css';
 
 const props = defineProps<{ order: Api.Order; plannedSpec?: string }>();
-const emit = defineEmits<{ details: [draft: OrderDraft]; report: [draft: OrderDraft] }>();
+const emit = defineEmits<{
+  details: [draft: OrderDraft];
+  draft: [draft: OrderDraft];
+  report: [draft: OrderDraft];
+}>();
 const job = useJob();
 const draft = ref<OrderDraft>();
 const loadError = ref('');
@@ -49,7 +53,10 @@ watch(
     attempted.value = false;
     try {
       const loaded = await loadOrderDraft(job, props.order.id);
-      if (active) draft.value = loaded;
+      if (active) {
+        draft.value = loaded;
+        emit('draft', loaded);
+      }
     } catch (error) {
       if (active) loadError.value = businessError(error).msg;
     }

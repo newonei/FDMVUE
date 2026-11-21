@@ -39,7 +39,6 @@ import {
   getAccess,
   getAttachments,
   getContract,
-  getNextContractCode,
   newIdempotencyKey,
 } from '#/api/fdmplatform';
 import { getContractBoard } from '#/api/fdmplatform/contract-board';
@@ -61,6 +60,7 @@ import {
 import { errorText, money } from '../../data';
 import { personLabel } from '../../directory';
 import {
+  contractInternalOrderNo,
   DOMESTIC_CURRENCY,
   isSampleBusinessType,
   salesChannelOf,
@@ -75,7 +75,6 @@ import {
 import {
   applyReferencePrices,
   contractCompanyOptions,
-  contractHeaderPayload,
   contractItemsTotal,
   contractLineAmount,
   copyContractLine,
@@ -106,13 +105,11 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; saved: [contract: Contract] }>();
 const access = ref<Access>();
 /** 新建时回填的系统建议订单号；保存时没改过就重新取号，改过就按手填 */
-const suggestedCode = ref('');
 const orderCompanies = computed(() =>
   contractCompanyOptions(access.value?.companies ?? [], props.contract),
 );
 const form = reactive({
   companyId: undefined as number | undefined,
-  code: '',
   name: '',
   customerId: '',
   businessType: (props.defaultBusinessType ?? 'DOMESTIC') as string,
@@ -201,7 +198,7 @@ let recentSequence = 0;
 const recentOptions = computed(() =>
   recentContracts.value.map((row) => ({
     value: row.id,
-    label: `${row.code ?? '未编号'} · ${row.signedDate ?? '日期未填'} · ${row.firstItem ?? '无产品'}${row.itemCount > 1 ? ` 等 ${row.itemCount} 项` : ''}${row.migrated ? '（金智）' : ''}`,
+    label: `${contractInternalOrderNo(row, row.salesChannel ?? 'FOREIGN') || '内部单号待补齐'} · ${row.signedDate ?? '日期未填'} · ${row.firstItem ?? '无产品'}${row.itemCount > 1 ? ` 等 ${row.itemCount} 项` : ''}${row.migrated ? '（金智）' : ''}`,
   })),
 );
 async function loadRecentContracts(customerId: string) {
@@ -273,7 +270,11 @@ function applyCopy(source: Contract) {
     ),
   );
   const skipped = source.items.length - usable.length;
-  priceNotice.value = `已从 ${source.code ?? '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价${domestic.value ? '并填写交期' : ''}。`;
+  const sourceNumber = contractInternalOrderNo(
+    source,
+    salesChannelOf(source.businessType),
+  );
+  priceNotice.value = `已从 ${sourceNumber || '上一单'} 带入 ${usable.length} 项产品和成交价${skipped ? `，${skipped} 项没有对应产品档案未带入` : ''}。请核对数量、单价${domestic.value ? '并填写交期' : ''}。`;
 }
 async function copyRecent() {
   const id = copyChoice.value;
@@ -519,16 +520,6 @@ function lineAmountHint(line: ContractItem) {
     ? `按单价折算为 ${money(actual)}`
     : '';
 }
-async function fillSuggestedCode(run: number) {
-  try {
-    const code = await getNextContractCode();
-    if (run !== editorSequence || !props.open || form.code) return;
-    suggestedCode.value = code;
-    form.code = code;
-  } catch {
-    // 取不到建议编号也能保存：留空时后端自动编号
-  }
-}
 watch(
   () => props.open,
   async (open) => {
@@ -541,7 +532,6 @@ watch(
     resolving.value = false;
     if (!open) return;
     const contract = props.contract;
-    suggestedCode.value = '';
     panelError.value = '';
     priceNotice.value = '';
     attachmentsError.value = '';
@@ -561,7 +551,6 @@ watch(
     expectedVersion.value = contract?.version ?? 0;
     Object.assign(form, {
       companyId: contract?.companyId,
-      code: contract?.code ?? '',
       name: contract?.name ?? '',
       customerId: contract?.customerId ?? '',
       businessType: contract
@@ -608,7 +597,6 @@ watch(
     );
     customerKeyword.value = '';
     void loadCustomers(true);
-    if (!contract) void fillSuggestedCode(run);
     try {
       const currentAccess = await getAccess();
       if (run !== editorSequence || !props.open) return;
@@ -848,7 +836,8 @@ async function save(activate = false) {
     panelError.value = '请补齐合同主体、客户、负责人和签订日期';
     return;
   }
-  if (domestic.value && !form.name.trim()) {
+  const name = form.name.trim();
+  if (!name) {
     panelError.value = '请填写内部单号';
     return;
   }
@@ -915,13 +904,10 @@ async function save(activate = false) {
   saving.value = true;
   panelError.value = '';
   try {
-    const header = contractHeaderPayload(
-      form,
-      props.contract,
-      suggestedCode.value,
-    );
+    const { taxBasis, ...header } = form;
     const payload = {
       ...header,
+      name,
       salesCharges: charges.value,
       ...(itemFileBindings.length > 0 ? { itemFileBindings } : {}),
       companyId: form.companyId,
@@ -937,7 +923,7 @@ async function save(activate = false) {
             line.attachmentIds?.includes(id),
           ),
         ),
-        taxBasis: line.taxBasis || form.taxBasis,
+        taxBasis: line.taxBasis || taxBasis,
         unitPrice: line.unitPrice === '' ? null : line.unitPrice,
         requiredDate: line.requiredDate || null,
       })),
@@ -957,15 +943,6 @@ async function save(activate = false) {
         );
     draftFiles.value = [];
     lineFiles.value = {};
-    if (
-      !props.contract &&
-      suggestedCode.value &&
-      form.code.trim() === suggestedCode.value &&
-      result.code !== suggestedCode.value
-    )
-      message.info(
-        `订单号 ${suggestedCode.value} 刚被别人用了，已改为 ${result.code}`,
-      );
     if (activate && (!props.contract || props.contract.status === 'DRAFT')) {
       try {
         result = await contractAction(
@@ -1004,7 +981,7 @@ async function save(activate = false) {
     :open="open"
     :title="
       contract
-        ? `编辑合同 · ${domestic ? contract.name || contract.code : contract.code}`
+        ? `编辑合同 · ${contractInternalOrderNo(contract, channel) || '内部单号待补齐'}`
         : '新建合同 / 样品'
     "
     width="min(1480px, 98vw)"
@@ -1068,30 +1045,11 @@ async function save(activate = false) {
               option-filter-prop="label"
             />
           </Form.Item>
-          <Form.Item
-            v-if="!domestic"
-            label="订单号"
-            :extra="
-              contract
-                ? '订单号保存后不能修改。'
-                : '已按系统规则自动填好，可以改成自己的单号；保存时检查不能重复，留空则自动编号。'
-            "
-          >
-            <Input
-              v-model:value="form.code"
-              :readonly="Boolean(contract)"
-              :maxlength="64"
-              allow-clear
-              placeholder="留空保存时自动编号"
-            />
-</Form.Item><Form.Item
-            :label="domestic ? '内部单号' : '内部名称（可选）'"
-            :required="domestic"
-          >
+          <Form.Item label="内部单号" required>
             <Input
               v-model:value="form.name"
               :maxlength="1000"
-              :placeholder="domestic ? '填写内部订单号' : '便于识别的补充说明'"
+              placeholder="填写内部订单号"
             />
           </Form.Item>
           <Form.Item v-if="!domestic" label="阿里信保订单">

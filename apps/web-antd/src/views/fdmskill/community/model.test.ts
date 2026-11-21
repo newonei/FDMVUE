@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   archiveFileName,
   assertArchiveDownload,
-  canManageSkill,
+  departmentOptions,
   errorText,
   filterSkills,
   ownsSkill,
@@ -17,19 +17,23 @@ describe('company skill visibility and ownership', () => {
     const entries = [
       skill(),
       skill({ id: 'own-draft', published: false }),
+      skill({
+        id: 'own-private',
+        visibility: { scope: 'PRIVATE', departmentIds: [] },
+      }),
       skill({ id: 'other', ownerId: 9 }),
       skill({ id: 'other-draft', ownerId: 9, published: false }),
     ];
     expect(
-      filterSkills(entries, { query: '', tab: 'square', userId: 7 }).map(
+      filterSkills(entries, { query: '', tab: 'square', userId: '7' }).map(
         (entry) => entry.id,
       ),
     ).toEqual(['entry-1', 'other']);
     expect(
-      filterSkills(entries, { query: '', tab: 'mine', userId: 7 }).map(
+      filterSkills(entries, { query: '', tab: 'mine', userId: '7' }).map(
         (entry) => entry.id,
       ),
-    ).toEqual(['entry-1', 'own-draft']);
+    ).toEqual(['entry-1', 'own-draft', 'own-private']);
     expect(filterSkills(entries, { query: '', tab: 'mine' })).toEqual([]);
   });
 
@@ -60,14 +64,28 @@ describe('company skill visibility and ownership', () => {
   });
 
   it('resolves actual FDM user IDs and never gives anonymous visitors owner actions', () => {
-    expect(userIdentity({ id: 7 })).toBe(7);
-    expect(userIdentity({ userId: '7' })).toBe(7);
+    expect(userIdentity({ id: 7 })).toBe('7');
+    expect(userIdentity({ userId: '7' })).toBe('7');
     expect(userIdentity(null)).toBeUndefined();
     expect(userIdentity({ id: 'bad' })).toBeUndefined();
-    expect(ownsSkill(skill(), 7)).toBe(true);
-    expect(canManageSkill(skill(), 9)).toBe(false);
-    expect(canManageSkill(skill(), undefined)).toBe(false);
-    expect(canManageSkill(skill(), 9, true)).toBe(true);
+    expect(ownsSkill(skill(), '7')).toBe(true);
+    expect(ownsSkill(skill(), '9')).toBe(false);
+    expect(ownsSkill(skill(), undefined)).toBe(false);
+    expect(
+      ownsSkill(skill({ ownerId: '9007199254740993' }), '9007199254740993'),
+    ).toBe(true);
+  });
+
+  it('labels departments by their parent path while retaining their exact IDs', () => {
+    expect(
+      departmentOptions([
+        { id: '1', name: '公司', parentId: null },
+        { id: '9007199254740993', name: '运营部', parentId: '1' },
+      ]),
+    ).toEqual([
+      { value: '1', label: '公司' },
+      { value: '9007199254740993', label: '公司 / 运营部' },
+    ]);
   });
 });
 

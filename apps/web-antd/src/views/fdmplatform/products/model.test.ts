@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   applyReferencePrices,
   contractCompanyOptions,
-  contractHeaderPayload,
   contractLineAmount,
   copyContractLine,
   hasProductVersion,
@@ -125,34 +124,6 @@ describe('contract product selection and pricing', () => {
 });
 
 describe('order company attribute with shared products', () => {
-  it('sends only an edited contract number on creation and preserves the saved number during edits', () => {
-    const form = {
-      code: 'typed-by-user',
-      companyId: 21,
-      name: '新合同',
-      taxBasis: 'TAX_INCLUDED',
-    };
-    expect(contractHeaderPayload(form)).toEqual({
-      code: 'typed-by-user',
-      companyId: 21,
-      name: '新合同',
-    });
-    expect(
-      contractHeaderPayload(
-        { ...form, code: ' HT-20260907-000003 ' },
-        undefined,
-        'HT-20260907-000003',
-      ),
-    ).toEqual({ companyId: 21, name: '新合同' });
-    expect(contractHeaderPayload({ ...form, code: '  ' })).toEqual({
-      companyId: 21,
-      name: '新合同',
-    });
-    expect(contractHeaderPayload(form, { code: 'HT-20260907-000001' })).toEqual(
-      { companyId: 21, name: '新合同', code: 'HT-20260907-000001' },
-    );
-    expect(form.code).toBe('typed-by-user');
-  });
   it('offers every real company independently of role and excludes shared catalog scope zero', () => {
     const companies = [
       { companyId: 0, companyName: '共用资料', roles: [] },

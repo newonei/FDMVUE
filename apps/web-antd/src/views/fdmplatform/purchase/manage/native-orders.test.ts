@@ -730,7 +730,7 @@ describe('purchase extras persistence and unsaved navigation', () => {
       allowedActions: ['SAVE_DETAILS', 'SAVE_EXTRAS', 'EDIT_ORDER'],
     }));
     const { host } = await mount(location);
-    expect(host.textContent).toContain('采购单尚未下单');
+    expect(host.textContent).toContain('确认下单资料后即可导出');
     click(host, '修改附加资料');
     await settle();
     click(host, '保存资料');
@@ -748,7 +748,7 @@ describe('purchase extras persistence and unsaved navigation', () => {
     const { host } = await mount(location);
     click(host, '修改附加资料');
     await settle();
-    click(host, '编辑 / 提交下单');
+    click(host, '编辑 / 提交审核');
     await settle();
     expect(mocks.confirm.mock.calls.at(-1)![0].title).toBe('采购资料尚未保存');
     mocks.confirm.mock.calls.at(-1)![0].onCancel();

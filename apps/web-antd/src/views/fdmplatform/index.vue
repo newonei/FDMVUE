@@ -82,6 +82,7 @@ import {
 import { useRouteOwner } from './documents/useRouteOwner';
 import { receiptFxDisplay } from './finance/exchange-rates/model';
 import ContractEditor from './products/components/ContractEditor.vue';
+import { contractInternalOrderNo, salesChannelOf } from './sales-channel';
 import { detailTabFor, workspaces } from './workspaces';
 
 import './components/compact-tables.css';
@@ -292,7 +293,7 @@ async function clearStockLocation() {
   await router.replace({ query: withoutStockQuery(route.query) });
 }
 const contractColumns = computed(() => [
-  { title: '订单号 / 样品', dataIndex: 'code', key: 'name', width: 260 },
+  { title: '内部单号', dataIndex: 'name', key: 'name', width: 260 },
   {
     title: '客户',
     dataIndex: 'customerName',
@@ -1055,7 +1056,7 @@ onMounted(async () => {
                     />
                     <Input
                       v-model:value="keyword"
-                      placeholder="合同编号、名称或客户"
+                      placeholder="内部单号或客户"
                       allow-clear
                       style="width: 260px"
                       @press-enter="reloadList"
@@ -1118,24 +1119,21 @@ onMounted(async () => {
                       <Button
                         type="link"
                         class="contract-title"
-                        :title="record.code"
+                        :title="record.name"
                         @click="openContractFromList(record as Contract)"
                       >
-                        {{ record.code || '订单号待补齐' }}
+                        {{
+                          contractInternalOrderNo(
+                            record,
+                            salesChannelOf(record.businessType),
+                          ) || '内部单号待补齐'
+                        }}
                       </Button>
                       <div
                         class="contract-code fdm-cell-line"
-                        :title="
-                          [record.name, companyName(record.companyId)]
-                            .filter(Boolean)
-                            .join(' · ')
-                        "
+                        :title="companyName(record.companyId)"
                       >
-                        {{
-                          [record.name, companyName(record.companyId)]
-                            .filter(Boolean)
-                            .join(' · ')
-                        }}
+                        {{ companyName(record.companyId) }}
                       </div>
                     </template>
                     <template

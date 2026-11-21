@@ -19,6 +19,16 @@ export function salesChannelOf(value?: null | string): SalesChannel {
     : 'FOREIGN';
 }
 
+export function contractInternalOrderNo(
+  contract: { code?: null | string; name?: null | string },
+  channel: SalesChannel,
+) {
+  return (
+    contract.name?.trim() ||
+    (channel === 'DOMESTIC' ? contract.code : undefined)
+  );
+}
+
 /** 样品单允许零价；外贸样品是 SAMPLE，内销样品是 DOMESTIC_SAMPLE */
 export function sampleBusinessType(channel: SalesChannel) {
   return channel === 'DOMESTIC' ? 'DOMESTIC_SAMPLE' : 'SAMPLE';

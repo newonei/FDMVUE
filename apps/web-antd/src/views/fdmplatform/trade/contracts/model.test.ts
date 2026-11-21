@@ -237,20 +237,34 @@ describe('contract board model', () => {
     const csv = contractCsv(
       [row({ name: '含,逗号' })],
       () => '陈若彤 · 月迦部',
+      'FOREIGN',
     );
-    expect(csv.startsWith('﻿合同号,')).toBe(true);
+    expect(csv.startsWith('﻿内部单号,客户,')).toBe(true);
     expect(csv).toContain('"含,逗号"');
     expect(csv).toContain('陈若彤 · 月迦部');
   });
 
-  it('exports only the internal number for domestic contracts', () => {
+  it.each(['DOMESTIC', 'FOREIGN'] as const)(
+    'exports the internal number for %s contracts',
+    (channel) => {
+      const csv = contractCsv(
+        [row({ code: 'HT-001', name: 'NX-2026-01' })],
+        () => '',
+        channel,
+      );
+      expect(csv.startsWith('﻿内部单号,客户,')).toBe(true);
+      expect(csv).toContain('NX-2026-01');
+      expect(csv).not.toContain('HT-001');
+    },
+  );
+
+  it('leaves the internal number empty for foreign contracts without one', () => {
     const csv = contractCsv(
-      [row({ code: 'HT-001', name: 'NX-2026-01' })],
+      [row({ code: 'HT-001', name: ' ' })],
       () => '',
-      true,
+      'FOREIGN',
     );
-    expect(csv.startsWith('﻿内部单号,客户,')).toBe(true);
-    expect(csv).toContain('NX-2026-01');
+    expect(csv.split('\n')[1]).toMatch(/^,/);
     expect(csv).not.toContain('HT-001');
   });
 });

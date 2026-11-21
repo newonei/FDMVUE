@@ -20,6 +20,7 @@ import StepHeader from './step-header.vue';
  * 领哪种料、哪个批次、领多少，一眼对得上。贴合要领两种片材：第一种是正面，第二种是反面。
  * 发泡可以按配方领：选配方和锅数，自动带出每种原料要领多少；补领时按单上的配方补齐还差的。
  */
+const props = defineProps<{ embedded?: boolean }>();
 const emit = defineEmits<{ back: []; next: [] }>();
 const job = useJob();
 
@@ -215,6 +216,7 @@ function next() {
 <template>
   <div class="flex min-h-full flex-col">
     <StepHeader
+      v-if="!props.embedded"
       :current="1"
       :subtitle="job.supplement ? (job.order?.status === 'COMPLETED' ? `补登到已完工的 ${job.order?.orderNo ?? ''}，实际多拿的料在这里登记` : `补到 ${job.order?.orderNo ?? ''}，领少了的料在这里再领`) : job.task ? `${job.task.contractCode ? `订单 ${job.task.contractCode}` : '备货'} · ${[job.task.product, outputSpec].filter(Boolean).join(' ')}` : job.process?.code === 'SLICE' ? '独立开片 · 多种板材分别报工' : '独立开单'"
       :title="`${job.process?.label} · 第 1 步 ${job.order?.status === 'COMPLETED' ? '补登领料' : job.supplement ? '补领' : '选择实际领料批次'}`"
@@ -466,7 +468,7 @@ function next() {
         </section>
         <IssueShortages />
         <button :disabled="loading || loadError || prepareStockLoading" class="h-10 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50" type="button" @click="next">
-          下一步：确认领料
+          {{ props.embedded ? '确认本项用料' : '下一步：确认领料' }}
         </button>
       </aside>
     </main>

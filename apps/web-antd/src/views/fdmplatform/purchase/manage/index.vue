@@ -871,7 +871,7 @@ function editorSaved(
     if (mode === 'submitted')
       text = value.pendingApproval
         ? `采购单 ${value.code} 已提交钉钉审批，通过后变成已下单`
-        : `采购单 ${value.code} 已提交下单`;
+        : `采购单 ${value.code} 已下单`;
     message.success(text);
     void loadList();
     void Promise.all([loadDetail(), refreshFacts()]);
@@ -879,7 +879,7 @@ function editorSaved(
   }
   let successText = createdOrdersText(value);
   if (mode === 'draft')
-    successText = `${createdOrdersText(value, '已保存采购草稿')}，请完善并保存资料后提交下单`;
+    successText = `${createdOrdersText(value, '已保存采购草稿')}，可继续完善下单资料`;
   else if (value.pendingApproval)
     successText = `${successText}，已提交钉钉审批，通过后变成已下单`;
   message.success(successText);
@@ -2160,7 +2160,7 @@ watch(financeType, (value, previous) => {
             :disabled="childOpen"
             @click="editCurrentOrder"
           >
-            编辑 / 提交下单
+            编辑 / 提交审核
           </Button>
           <Button
             v-else-if="
@@ -2257,7 +2257,7 @@ watch(financeType, (value, previous) => {
           v-else-if="view && active && String(view.order.status) === 'DRAFT'"
           type="warning"
           show-icon
-          message="采购单尚未下单。可先完善附加资料、上传附件并保存，稍后继续编辑；核对完成后点「编辑 / 提交下单」。草稿不能收货入库、请款付款或收票。"
+          message="草稿可以继续编辑。确认下单资料后即可导出，核对完成后点「编辑 / 提交审核」。"
         />
         <Alert
           v-if="detailLoading && !view"

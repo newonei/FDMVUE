@@ -39,6 +39,7 @@ import PieceStep from './modules/piece-step.vue';
 import ReportStep from './modules/report-step.vue';
 import { defaultReportMaterial, loadOrderDraft } from './order-report';
 import { prefillReportQuantity, reportErrors } from './report-quantity';
+import { applyIssuePlan, issuePayload } from './task-issue';
 import { applyJobTarget, createJob, goodTotal, outputPayload, provideJob } from './use-job';
 
 /**
@@ -176,22 +177,7 @@ async function startTask(
       await openOrder(prepare.inProgressOrderId, false);
       return;
     }
-    const sourceStages = prepare.sourceStages?.length ? prepare.sourceStages : process.sources;
-    job.sourceStage = prepare.sourceStage && sourceStages.includes(prepare.sourceStage) ? prepare.sourceStage : sourceStages[0] ?? '';
-    job.picks = prepare.picks
-      .map((p) => ({ qty: Math.max(0, toNumber(p.quantity) ?? 0), side: p.side, stock: p.stock }));
-    const plannedRecipe = prepare.outputAttrs?.recipeCode ?? task.output?.attrs?.recipeCode;
-    const plannedBatches = toNumber(task.output?.recipeBatches ?? prepare.task.output?.recipeBatches);
-    if (process.code === 'MIX' && plannedRecipe) job.recipe = { code: plannedRecipe, batches: plannedBatches && plannedBatches > 0 ? plannedBatches : 1 };
-    const qty = toNumber(task.quantity) ?? 0;
-    job.auxPicks = prepare.aux
-      .filter((a) => a.stocks.length > 0)
-      .map((a) => ({
-        name: a.productName ?? a.productCode ?? '',
-        qty: Math.max(0, Math.round((toNumber(a.perUnit) ?? 0) * qty * 1000) / 1000),
-        stock: a.stocks[0]!,
-        unit: a.unit ?? '',
-      }));
+    applyIssuePlan(job, prepare);
     job.step = 'pick';
   } finally {
     loading.value = false;
@@ -241,17 +227,7 @@ async function issueOnly() {
           remark: job.supplementRemark.trim() || undefined,
         });
     } else if (job.task) {
-      await issueWorkbenchTask({
-            auxInputs: job.auxPicks.filter((p) => p.qty > 0).map((p) => ({ quantity: p.qty, stockId: p.stock.id })),
-            inputs: job.picks.map((p) => ({ laminationSide: p.side, quantity: p.qty, stockId: p.stock.id })),
-            issueSheetUrls: job.sheets,
-            onBehalfOf: job.onBehalfOf?.id,
-            recipeBatches: job.process?.code === 'MIX' ? job.recipe?.batches : undefined,
-            recipeCode: job.process?.code === 'MIX' ? job.recipe?.code : undefined,
-            requestKey: job.requestKey,
-            sourceStage: job.sourceStage,
-            taskId: job.task.id,
-          });
+      await issueWorkbenchTask(issuePayload(job));
     } else {
       await createWorkbenchOrder(createPayload(false));
     }
@@ -476,6 +452,7 @@ function back() {
         <KeepAlive v-if="!props.process">
           <Home
             v-if="job.step === 'home'"
+            @batch-saved="reloadAfterSave"
             @start-task="startTask"
             @start-actual="startActual"
             @report-order="reportFromList"

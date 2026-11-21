@@ -1,5 +1,18 @@
 import { requestClient } from '#/api/request';
 
+export type SkillVisibilityScope = 'COMPANY' | 'DEPARTMENTS' | 'PRIVATE';
+
+export interface SkillVisibility {
+  departmentIds: string[];
+  scope: SkillVisibilityScope;
+}
+
+export interface SkillDepartment {
+  id: string;
+  name: string;
+  parentId: null | string;
+}
+
 export interface CommunitySkill {
   archiveBytes: number;
   category: string;
@@ -9,7 +22,7 @@ export interface CommunitySkill {
   id: string;
   license: string;
   name: string;
-  ownerId: number;
+  ownerId: number | string;
   published: boolean;
   publisher: string;
   sha256: string;
@@ -17,6 +30,7 @@ export interface CommunitySkill {
   totalBytes: number;
   updatedAt: string;
   version: string;
+  visibility?: SkillVisibility;
 }
 
 export interface CommunityCatalog {
@@ -30,6 +44,7 @@ export interface SkillUpload {
   license: string;
   title?: string;
   version: string;
+  visibility?: SkillVisibility;
 }
 
 const base = '/fdmskill/community';
@@ -44,6 +59,10 @@ export function getCommunityDetail(id: string) {
   );
 }
 
+export function getCommunityDepartments() {
+  return requestClient.get<SkillDepartment[]>(`${base}/departments`);
+}
+
 export function uploadCommunitySkill(data: SkillUpload) {
   return requestClient.upload<CommunitySkill>(
     `${base}/upload`,
@@ -53,8 +72,21 @@ export function uploadCommunitySkill(data: SkillUpload) {
       version: data.version.trim(),
       category: data.category.trim() || '通用',
       license: data.license.trim() || '未声明',
+      ...(data.visibility
+        ? { visibility: JSON.stringify(data.visibility) }
+        : {}),
     },
     { timeout: 5 * 60 * 1000 },
+  );
+}
+
+export function updateCommunityVisibility(
+  id: string,
+  visibility: SkillVisibility,
+) {
+  return requestClient.post<CommunitySkill & { visibility: SkillVisibility }>(
+    `${base}/visibility/${encodeURIComponent(id)}`,
+    visibility,
   );
 }
 

@@ -74,7 +74,7 @@ import { contractConfigurationSummary } from '../products/components/contract-pr
 import ContractEditor from '../products/components/ContractEditor.vue';
 import OrderSubDocMenu from '../purchase/manage/components/OrderSubDocMenu.vue';
 import { linesTitle } from '../purchase/warehouse/model';
-import { salesChannelOf } from '../sales-channel';
+import { contractInternalOrderNo, salesChannelOf } from '../sales-channel';
 import { detailTabFor } from '../workspaces';
 import { contractMainline, contractNextStep } from './contract-mainline';
 import { contractItemPipeline } from './contract-progress';
@@ -351,16 +351,12 @@ const allTasks = computed(() =>
     : 0,
 );
 /** 内销合同没有报关和阿里信保 */
-const domestic = computed(
-  () => salesChannelOf(props.contract?.businessType) === 'DOMESTIC',
-);
-/** 内销只显示内部单号；历史单没填时退回订单号 */
+const channel = computed(() => salesChannelOf(props.contract?.businessType));
+const domestic = computed(() => channel.value === 'DOMESTIC');
 const contractTitle = computed(() => {
   const value = props.contract;
   if (!value) return '';
-  return domestic.value
-    ? value.name || value.code || ''
-    : [value.code, value.name].filter(Boolean).join(' · ');
+  return contractInternalOrderNo(value, channel.value) || '内部单号待补齐';
 });
 const ended = computed(() =>
   ['CANCELLED', 'CLOSED'].includes(props.contract?.status ?? ''),
@@ -733,7 +729,7 @@ function purchaseOrderSaved(value: CreatedProcurementOrders) {
   purchaseOrderEntryOpen.value = false;
   if (!props.open || value.contractId !== props.contract?.id) return;
   message.success(
-    `${createdOrdersText(value, '已生成采购草稿')}，请完善并保存资料后提交下单`,
+    `${createdOrdersText(value, '已生成采购草稿')}，可继续完善下单资料`,
   );
   purchaseOrder.value = {
     contractId: value.contractId,
@@ -980,11 +976,7 @@ async function download(file: { id: string; name: string }) {
                 {{ contract.customerName }}
               </RelatedLink>
             </dd>
-            <template v-if="!domestic">
-              <dt>合同单号</dt>
-              <dd>{{ contract.code || '—' }}</dd>
-            </template>
-            <dt>{{ domestic ? '内部单号' : '内部名称' }}</dt>
+            <dt>内部单号</dt>
             <dd :class="contract.name ? 'internal-name' : 'muted'">
               {{ contract.name || '未填写' }}
             </dd>

@@ -59,7 +59,7 @@ const warning = ref('');
 const reportWarnings = ref<string[]>([]);
 let contextVersion = 0;
 const request = ref<{ fingerprint: string; requestId: string }>();
-interface Draft extends LaminationReportDraft { taskVersion: string; boardItemCode?: string; foldingType: string; operatorUserId?: number }
+interface Draft extends LaminationReportDraft { taskVersion: string; boardItemCode?: string; foldingType: string; goodEdited?: boolean; operatorUserId?: number }
 const drafts = reactive<Record<number, Draft>>({});
 const boardOptions = reactive<Record<number, Api.BatchOptions>>({});
 const boardLoading = reactive<Record<number, boolean>>({});
@@ -103,6 +103,12 @@ async function dispatch() {
   finally { if (version === contextVersion) busy.value = false; }
 }
 const selected = (task: ScheduleApi.Task) => selectedIds.value.includes(task.id);
+function remainingReportQuantity(task: ScheduleApi.Task, planned: unknown) {
+  const expected = toNumber(planned);
+  if (expected === undefined) return undefined;
+  const remaining = roundQty(Math.max(0, expected - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0)));
+  return quantityPrecision(task.unit ?? process.value?.outputUnit) === 0 ? Math.floor(remaining) : remaining;
+}
 function taskDraft(task: ScheduleApi.Task): Draft {
   const taskVersion = JSON.stringify([task.quantity, task.actualQuantity, task.defectQuantity ?? 0,
     task.sliceBoardYield, task.output, task.inputs, task.workerIds, task.activeOrderId, task.status]);
@@ -115,20 +121,42 @@ function taskDraft(task: ScheduleApi.Task): Draft {
   } else if (task.process === 'SLICE') {
     planned = toNumber(task.sliceBoardYield);
   }
-  const remainder = planned === undefined ? undefined : roundQty(Math.max(0,
-    planned - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0)));
-  const remaining = remainder !== undefined && quantityPrecision(task.unit ?? process.value?.outputUnit) === 0
-    ? Math.floor(remainder) : remainder;
   const draft: Draft = {
     taskVersion,
     attrs: task.output?.attrs ?? {},
-    goodQuantity: isTaskCompleted(task) ? undefined : remaining,
+    goodQuantity: isTaskCompleted(task) ? undefined : remainingReportQuantity(task, planned),
     defectQuantity: 0, foldingType: task.output?.foldingType?.trim() ?? '',
     operatorUserId: (task.workerIds ?? '').split(',').filter(Boolean).length === 1 ? Number(task.workerIds) : undefined,
   };
   if (task.process === 'LAMINATE') laminationLayers(draft);
   drafts[task.id] = draft;
   return drafts[task.id]!;
+}
+function selectedBoard(task: ScheduleApi.Task) {
+  const options = boardOptions[task.id];
+  if (!options) return undefined;
+  const code = taskDraft(task).boardItemCode;
+  return options.boards.find((board) => board.itemCode === code);
+}
+function boardSelectOptions(task: ScheduleApi.Task) {
+  return boardOptions[task.id]?.boards.map((board) => {
+    const label = [sizeText(board.attrs, 'mm'), board.itemCode].filter(Boolean).join(' · ');
+    const title = [board.mixPlan?.mouldName, board.label].filter(Boolean).join(' · ');
+    return { label, value: board.itemCode, searchText: `${label} ${title}`, title };
+  }) ?? [];
+}
+function updateReportBoard(task: ScheduleApi.Task, code: string | undefined) {
+  const draft = taskDraft(task);
+  draft.boardItemCode = code;
+  if (draft.goodEdited) return;
+  const board = selectedBoard(task);
+  draft.goodQuantity = remainingReportQuantity(task,
+    board?.mixPlan?.wholeBatchBoards ?? board?.plannedBoards ?? task.output?.mixPlan?.wholeBatchBoards ?? task.quantity);
+}
+function updateReportGood(task: ScheduleApi.Task, value: unknown) {
+  const draft = taskDraft(task);
+  draft.goodQuantity = toNumber(value);
+  if (task.process === 'MIX') draft.goodEdited = true;
 }
 async function loadBoards(task: ScheduleApi.Task) {
   if (props.process !== 'MIX' || boardOptions[task.id] || boardLoading[task.id]) return;
@@ -138,7 +166,8 @@ async function loadBoards(task: ScheduleApi.Task) {
   try {
     const result = await getWorkbenchBatchOptions(props.process, task.id);
     if (version !== contextVersion || snapshot !== job.my) return;
-    boardOptions[task.id] = result; taskDraft(task).boardItemCode = result.defaultBoardItemCode;
+    boardOptions[task.id] = result;
+    updateReportBoard(task, selectedBoard(task)?.itemCode ?? result.defaultBoardItemCode);
   } catch (error) { if (version === contextVersion && snapshot === job.my) boardErrors[task.id] = businessError(error).msg; }
   finally { if (version === contextVersion && snapshot === job.my) boardLoading[task.id] = false; }
 }
@@ -235,7 +264,7 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
     { key: 'good', title: isLamination ? '本次片材良品' : '本次良品', width: 120 },
     { key: 'defect', title: isLamination ? '本次片材残次' : '本次残次品', width: 120 },
     ...(isLamination ? [output] : []),
-    { key: 'progress', title: '计划 / 累计已报', width: 125 },
+    { key: 'progress', title: '计划 / 累计已报', width: isLamination ? 205 : 125 },
     { key: 'focus', title: '成品要求', width: 320 },
     ...(isLamination ? [] : [output]),
   ];
@@ -256,10 +285,41 @@ function coverLines(task: ScheduleApi.Task) {
   });
 }
 const summaryFields = (order: WorkshopOrder) => orderFocus(order, job.options);
-const outputSize = (task: ScheduleApi.Task) => sizeText(task.output?.attrs, 'mm') || '按任务规格';
+const outputSize = (task: ScheduleApi.Task) => sizeText(selectedBoard(task)?.attrs ?? task.output?.attrs, 'mm') || '按任务规格';
 const colorLabel = (color: string) => makeLabels(job.options).color(color);
-const mixSummaryLines = (task: ScheduleApi.Task) => mixPlanLines(task).filter((line) => ['密炼锅数', '整锅可出'].includes(line.label));
-const mixOutputLines = (task: ScheduleApi.Task) => mixPlanLines(task).filter((line) => !['密炼锅数', '整锅可出'].includes(line.label));
+function reportedLaminationLayers(task: ScheduleApi.Task) {
+  const attrs = task.output?.attrs;
+  const counts = task.laminationActuals;
+  return [
+    { side: '正面', color: attrs?.frontColor, good: counts?.frontGoodQuantity, defect: counts?.frontDefectQuantity },
+    { side: '反面', color: attrs?.backColor, good: counts?.backGoodQuantity, defect: counts?.backDefectQuantity },
+  ];
+}
+function adjustedBoards(task: ScheduleApi.Task) {
+  const planned = toNumber(selectedBoard(task)?.plannedBoards);
+  return planned === toNumber(task.quantity) ? undefined : planned;
+}
+function linkedSliceText(task: ScheduleApi.Task) {
+  const { sliceTaskId, sliceQuantity, sliceBoardYield } = selectedBoard(task) ?? {};
+  if (sliceTaskId === null || sliceTaskId === undefined) return '';
+  const parts = [`报工后关联开片任务 #${sliceTaskId}`];
+  if (sliceQuantity !== null && sliceQuantity !== undefined) parts.push(`计划 ${formatQty(sliceQuantity)} 片`);
+  if (sliceBoardYield !== null && sliceBoardYield !== undefined) parts.push(`可开 ${formatQty(sliceBoardYield)} 片`);
+  return parts.join(' · ');
+}
+function sliceBoardInputs(task: ScheduleApi.Task) {
+  return (task.inputs ?? []).filter((input) => input.stage === 'BOARD')
+    .map((input) => [sizeText(input.attrs, 'mm') || input.name, input.code].filter(Boolean).join(' · '))
+    .filter(Boolean).join('；');
+}
+function reportMixPlanLines(task: ScheduleApi.Task) {
+  const board = selectedBoard(task);
+  return board?.mixPlan && task.output
+    ? mixPlanLines({ ...task, output: { ...task.output, mixPlan: board.mixPlan, recipeBatches: board.recipeBatches } })
+    : mixPlanLines(task);
+}
+const mixSummaryLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filter((line) => ['密炼锅数', '整锅可出'].includes(line.label));
+const mixOutputLines = (task: ScheduleApi.Task) => reportMixPlanLines(task).filter((line) => !['密炼锅数', '整锅可出'].includes(line.label));
 </script>
 
 <template>
@@ -305,7 +365,7 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
             <p v-if="props.process === 'MIX' && summaryFields(order as WorkshopOrder).some((field) => field.label === '克重' && field.value === '未填写')" class="m-0 text-xs text-orange-600">克重未填写，请在采购单生产要求中补全。</p>
             <Table
 class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :row-selection="selection(order as WorkshopOrder)"
-              :custom-row="(task: ScheduleApi.Task) => ({ class: 'workshop-task-row', 'data-task-id': task.id })" row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1520 : 1355 }" bordered size="small"
+              :custom-row="(task: ScheduleApi.Task) => ({ class: 'workshop-task-row', 'data-task-id': task.id })" row-key="id" :pagination="false" :scroll="{ x: props.process === 'LAMINATE' ? 1600 : 1355 }" bordered size="small"
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
@@ -329,19 +389,50 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
                 </template>
                 <template v-else-if="column.key === 'output'">
                   <div class="mb-1 flex flex-wrap items-baseline gap-x-2"><span class="text-sm font-medium">{{ WORKSHOP_OUTPUT[props.process] }}</span><span class="text-xs text-muted-foreground">本工序规格 {{ outputSize(task as ScheduleApi.Task) }}</span></div>
-                  <div v-if="props.process === 'SLICE' && task.sliceBoardYield != null" class="text-xs text-muted-foreground">计划用板可开 {{ formatQty(task.sliceBoardYield) }} {{ task.unit }}</div>
+                  <template v-if="props.process === 'SLICE'">
+                    <div v-if="sliceBoardInputs(task as ScheduleApi.Task)" class="break-words text-xs text-muted-foreground">领用板材 {{ sliceBoardInputs(task as ScheduleApi.Task) }}</div>
+                    <div v-if="task.sliceBoardYield != null" class="text-xs text-muted-foreground">计划用板可开 {{ formatQty(task.sliceBoardYield) }} {{ task.unit }}</div>
+                  </template>
                   <template v-if="props.process === 'LAMINATE' && taskDraft(task as ScheduleApi.Task).laminateLayers">
                     <div class="mb-1 font-semibold text-primary">本次贴合良品 {{ formatQty(taskDraft(task as ScheduleApi.Task).goodQuantity) }} {{ task.unit }}</div>
                     <p class="mb-1 text-xs text-muted-foreground">两色好片配对贴合，残次只扣对应颜色，多出的好片保留库存。</p>
                   </template>
-                  <template v-if="props.process === 'MIX'"><Select :id="`board-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).boardItemCode" size="small" class="w-full" :disabled="!selected(task as ScheduleApi.Task) || busy" :loading="boardLoading[task.id]" :options="boardOptions[task.id]?.boards.map((item) => ({ label: item.label, value: item.itemCode })) ?? []" placeholder="勾选任务后选择板材" aria-label="选择报工板材" /><div v-if="boardErrors[task.id]" class="mt-1 text-xs text-red-600">{{ boardErrors[task.id] }} <Button type="link" size="small" @click="loadBoards(task as ScheduleApi.Task)">重试</Button></div></template>
+                  <template v-if="props.process === 'MIX'">
+                    <Select
+                      :id="`board-${order.key}-${task.id}`"
+                      :value="taskDraft(task as ScheduleApi.Task).boardItemCode"
+                      size="small" class="w-full" show-search option-filter-prop="searchText" :dropdown-match-select-width="false"
+                      :disabled="!selected(task as ScheduleApi.Task) || busy" :loading="boardLoading[task.id]"
+                      :options="boardSelectOptions(task as ScheduleApi.Task)" placeholder="勾选任务后选择板材" aria-label="选择报工板材"
+                      @update:value="updateReportBoard(task as ScheduleApi.Task, typeof $event === 'string' ? $event : undefined)"
+                    />
+                    <div v-if="boardErrors[task.id]" class="mt-1 text-xs text-red-600">{{ boardErrors[task.id] }} <Button type="link" size="small" @click="loadBoards(task as ScheduleApi.Task)">重试</Button></div>
+                    <div v-if="boardOptions[task.id]?.boardChangeReason" class="mt-1 text-xs text-muted-foreground">{{ boardOptions[task.id]?.boardChangeReason }}</div>
+                    <div v-if="linkedSliceText(task as ScheduleApi.Task)" class="mt-1 text-xs text-muted-foreground">{{ linkedSliceText(task as ScheduleApi.Task) }}</div>
+                  </template>
                   <div v-else-if="props.process === 'FOLD' && task.output?.foldingType" class="font-semibold">按订单折叠：{{ task.output.foldingType }}</div>
                   <AutoComplete v-else-if="props.process === 'FOLD'" :id="`fold-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).foldingType" size="small" class="w-full" :options="foldingOptions" :disabled="!selected(task as ScheduleApi.Task) || busy" :maxlength="50" placeholder="选择或输入，如八折" aria-label="本次折叠类型" />
                   <div v-if="mixOutputLines(task as ScheduleApi.Task).length" class="mt-1 text-xs leading-4">
                     <div v-for="line in mixOutputLines(task as ScheduleApi.Task)" :key="line.label" class="flex items-baseline gap-1.5"><span class="shrink-0 text-muted-foreground">{{ line.label }}</span><span class="break-words">{{ line.value }}</span></div>
                   </div>
                 </template>
-                <template v-else-if="column.key === 'progress'"><div>计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div><div class="mt-1 text-xs">已报良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div><div class="text-xs text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div></template>
+                <template v-else-if="column.key === 'progress'">
+                  <div v-if="adjustedBoards(task as ScheduleApi.Task) !== undefined" class="text-base text-primary">选板后计划 <b>{{ formatQty(adjustedBoards(task as ScheduleApi.Task)) }}</b> {{ task.unit }}</div>
+                  <div v-else class="text-base">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
+                  <template v-if="props.process === 'LAMINATE'">
+                    <div class="mt-1 text-sm">已贴合 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
+                    <div v-for="layer in reportedLaminationLayers(task as ScheduleApi.Task)" :key="layer.side" class="mt-1 text-xs" data-lamination-progress>
+                      <div :class="layer.side === '正面' ? 'text-blue-700' : 'text-purple-700'">{{ layer.side }} · {{ layer.color ? colorLabel(layer.color) : '颜色未记录' }}</div>
+                      <div class="text-muted-foreground">
+                        正常 {{ layer.good == null ? '未记录' : `${task.laminationActuals?.goodQuantityLowerBound ? '至少 ' : ''}${formatQty(layer.good)} ${task.unit ?? '片'}` }}
+                        · 瑕疵 {{ layer.defect == null ? '未分色' : `${formatQty(layer.defect)} ${task.unit ?? '片'}` }}
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="mt-1 text-sm">已报良品 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div><div class="text-sm text-muted-foreground">已报残次 {{ formatQty(task.defectQuantity) }} {{ task.unit }}</div>
+                  </template>
+                </template>
                 <template v-else-if="column.key === 'operator'"><Select :id="`operator-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).operatorUserId" class="w-full" size="small" :options="operatorOptions" :loading="operatorsLoading" :disabled="!selected(task as ScheduleApi.Task) || busy" allow-clear show-search option-filter-prop="label" placeholder="选实际生产人员" :aria-label="`任务 ${task.id} 实际生产人员`" /><p class="mb-0 mt-1 text-xs text-muted-foreground">录入：{{ my.userName || '当前登录人' }}；计件归所选人员</p></template>
                 <template v-else-if="column.key === 'color'">
                   <div v-for="layer in taskDraft(task as ScheduleApi.Task).laminateLayers" :key="layer.side" class="laminate-color-line text-xs" :class="layer.side === 'FRONT' ? 'text-blue-700' : 'text-purple-700'"><span>{{ layer.side === 'FRONT' ? '正面' : '反面' }} · {{ colorLabel(layer.color) }}</span></div>
@@ -351,7 +442,7 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
                   <template v-if="taskDraft(task as ScheduleApi.Task).laminateLayers">
                     <div v-for="layer in taskDraft(task as ScheduleApi.Task).laminateLayers" :key="layer.side" class="laminate-color-line"><InputNumber :id="`good-${order.key}-${task.id}-${layer.side}`" :value="layer.goodQuantity" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="0" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="片材良品数" :aria-label="`任务 ${task.id} ${layer.side === 'FRONT' ? '正面' : '反面'} ${colorLabel(layer.color)} 本次片材良品`" @change="changeLaminationGood(taskDraft(task as ScheduleApi.Task), layer.side, $event === null || $event === '' ? undefined : Number($event))" /></div>
                   </template>
-                  <InputNumber v-else :id="`good-${order.key}-${task.id}`" v-model:value="taskDraft(task as ScheduleApi.Task).goodQuantity" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="quantityPrecision(task.unit)" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="本次良品数" :aria-label="`任务 ${task.id} 本次完成良品数量`" />
+                  <InputNumber v-else :id="`good-${order.key}-${task.id}`" :value="taskDraft(task as ScheduleApi.Task).goodQuantity" size="small" class="!w-full" :addon-after="task.unit" :min="0" :precision="quantityPrecision(task.unit)" :disabled="!selected(task as ScheduleApi.Task) || busy" placeholder="本次良品数" :aria-label="`任务 ${task.id} 本次完成良品数量`" @update:value="updateReportGood(task as ScheduleApi.Task, $event)" />
                 </template>
                 <template v-else-if="column.key === 'defect'">
                   <template v-if="taskDraft(task as ScheduleApi.Task).laminateLayers">

@@ -243,6 +243,7 @@ export namespace FdmgongchangStageStockApi {
     side: 'BACK' | 'FRONT';
     color: string;
     quantity: Decimal;
+    goodQuantity?: Decimal;
   }
 
   export interface OrderOutput {

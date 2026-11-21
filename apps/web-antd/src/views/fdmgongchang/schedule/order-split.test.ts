@@ -40,6 +40,7 @@ const orders: OrderApi.Order[] = [
 
 function row(overrides: Partial<SplitApi.Row> = {}): SplitApi.Row {
   return { rowKey: '101-SLICE', orderId: 11, orderNo: 'GD-11', itemId: 101, productCode: 'SKU-PURPLE', productName: '紫色瑜伽垫',
+    orderQuantity: 120, remainingQuantity: 100, orderUnit: '条', finishedMaterial: 'TPE', finishedLength: 183, finishedWidth: 61, finishedThickness: 0.6,
     process: 'SLICE', processLabel: '开片', sequence: 1, quantity: 40, unit: '片', status: 'READY', upstreamProcesses: [],
     inputs: [{ stage: 'BOARD', name: '紫色板材', quantity: 3, unit: '张' }],
     output: { stage: 'SHEET', attrs: { material: 'TPE', length: 183, width: 61, thickness: 0.6 }, quantity: 40, unit: '片' }, ...overrides };
@@ -125,7 +126,14 @@ describe('order selection → process preview → release', () => {
     expect(document.body.textContent).toContain('包装车间');
     expect(document.body.textContent).toContain('已冲裁垫');
     expect(document.body.textContent).not.toContain('发泡车间');
-    expect(document.body.textContent).toContain('40 片');
+    const sliceRow = document.querySelector<HTMLTableRowElement>('.split-process-tasks tr[data-row-key="101-SLICE"]')!;
+    expect(sliceRow.cells[0]!.textContent).toContain('订单 120 条');
+    expect(sliceRow.cells[0]!.textContent).toContain('待产 100 条');
+    expect(sliceRow.cells[0]!.textContent).toContain('TPE · 1830×610×6 mm');
+    expect(sliceRow.cells[2]!.textContent).toBe('40 片');
+    const summary = document.querySelector('.split-product-specs tr[data-row-key="101"]')!.textContent;
+    expect(summary).toContain('订单 120 条');
+    expect(summary).toContain('待产 100 条');
     expect(document.body.textContent).toContain('100 件');
     expect(document.body.textContent).toContain('板材库存不足');
     expect(button('确认下发 3 个任务').disabled).toBe(false);
@@ -135,6 +143,31 @@ describe('order selection → process preview → release', () => {
     expect(api.release).toHaveBeenCalledWith({ productionOrderIds: [11, 12], previewKey: 'preview-1', requestId: expect.any(String), note: '尽快备料' });
     expect(api.release.mock.calls[0]![0].requestId).toMatch(/^[\da-f-]{36}$/i);
     expect(released).toHaveBeenCalledWith(7);
+  });
+
+  it('filters tasks by order item even when the product code is shared and keeps the batch totals', async () => {
+    api.preview.mockResolvedValue(preview({
+      rows: [
+        row(),
+        row({ rowKey: '101-PACK', process: 'PACK' }),
+        row({ rowKey: '103-ITEM', orderId: 12, orderNo: 'GD-12', itemId: 103,
+          orderQuantity: '50.5', remainingQuantity: 0, process: null, processLabel: null, quantity: null, status: 'DONE' }),
+      ],
+    }));
+    await mount();
+    button('预览工序任务').click();
+    await flush();
+    const picker = document.querySelector('#split-task-product')!.closest('.ant-select')!;
+    picker.querySelector('.ant-select-selector')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await flush();
+    document.querySelector<HTMLElement>('.ant-select-item-option[title*="GD-12 #103"]')!.click();
+    await flush();
+    const visibleTasks = document.querySelectorAll('.split-process-tasks tr.ant-table-row');
+    expect(visibleTasks).toHaveLength(1);
+    expect(visibleTasks[0]!.textContent).toContain('订单 50.5 条');
+    expect(visibleTasks[0]!.textContent).toContain('待产 0 条');
+    expect(visibleTasks[0]!.textContent).toContain('无需生产');
+    expect(button('确认下发 3 个任务').disabled).toBe(false);
   });
 
   it('keeps missing configuration rows visible and blocks the entire batch', async () => {

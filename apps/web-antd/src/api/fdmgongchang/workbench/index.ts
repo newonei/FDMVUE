@@ -117,6 +117,16 @@ export namespace FdmgongchangWorkbenchApi {
     duplicateAction?: 'APPEND';
   }
 
+  export interface MyBatchReportRow {
+    expectedReportCount: number;
+    finish: boolean;
+    id: number;
+    outputs: FdmgongchangStageStockApi.OrderOutput[];
+    pieceworks: FdmgongchangStageStockApi.Piecework[];
+    requestKey: string;
+    returns: FdmgongchangStageStockApi.OrderReturnReq['lines'];
+  }
+
   export interface My {
     factoryName: string;
     inProgress: Order[];
@@ -161,10 +171,17 @@ export namespace FdmgongchangWorkbenchApi {
   }
 
   export interface BatchOptions {
+    boardChangeReason?: null | string;
     boards: Array<{
       attrs: FdmgongchangStageStockApi.ItemAttrs;
       itemCode: string;
       label: string;
+      mixPlan?: FdmgongchangScheduleApi.MixPlan | null;
+      plannedBoards?: Decimal | null;
+      recipeBatches?: Decimal | null;
+      sliceBoardYield?: Decimal | null;
+      sliceQuantity?: Decimal | null;
+      sliceTaskId?: null | number;
     }>;
     defaultBoardItemCode?: string;
   }
@@ -358,4 +375,31 @@ export function issueWorkbenchTask(
   data: FdmgongchangWorkbenchApi.TaskIssueReq,
 ) {
   return requestClient.post<number>(`${BASE}/task/issue`, data, headers());
+}
+
+export function prepareMyWorkbenchBatch(taskIds: number[]) {
+  return requestClient.get<FdmgongchangWorkbenchApi.TaskPrepare[]>(
+    `${BASE}/task/batch-prepare-mine`,
+    { ...headers(), params: { taskIds: taskIds.join(',') } },
+  );
+}
+
+export function issueMyWorkbenchBatch(
+  rows: FdmgongchangWorkbenchApi.TaskIssueReq[],
+) {
+  return requestClient.post<number[]>(
+    `${BASE}/task/batch-issue-mine`,
+    { rows },
+    headers(),
+  );
+}
+
+export function reportMyWorkbenchBatch(
+  rows: FdmgongchangWorkbenchApi.MyBatchReportRow[],
+) {
+  return requestClient.post<number[]>(
+    `${BASE}/order/batch-report-mine`,
+    { rows },
+    headers(),
+  );
 }

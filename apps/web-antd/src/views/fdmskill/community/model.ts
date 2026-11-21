@@ -1,27 +1,60 @@
-import type { CommunitySkill } from '../../../api/fdmskill/community';
+import type {
+  CommunitySkill,
+  SkillDepartment,
+  SkillVisibility,
+  SkillVisibilityScope,
+} from '../../../api/fdmskill/community';
+
+export const visibilityLabels: Record<SkillVisibilityScope, string> = {
+  COMPANY: '全公司',
+  DEPARTMENTS: '指定部门',
+  PRIVATE: '仅自己',
+};
+
+function positiveId(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+    return String(value);
+  return typeof value === 'string' && /^[1-9]\d*$/.test(value)
+    ? value
+    : undefined;
+}
 
 export function userIdentity(
   info: null | Record<string, unknown> | undefined,
-): number | undefined {
-  const id = Number(info?.id ?? info?.userId);
-  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+): string | undefined {
+  return positiveId(info?.id ?? info?.userId);
 }
 
-export function ownsSkill(entry: CommunitySkill, userId?: number): boolean {
-  return userId !== undefined && entry.ownerId === userId;
+export function ownsSkill(entry: CommunitySkill, userId?: string): boolean {
+  return userId !== undefined && positiveId(entry.ownerId) === userId;
 }
 
-export function canManageSkill(
-  entry: CommunitySkill,
-  userId?: number,
-  administrator = false,
-): boolean {
-  return administrator || ownsSkill(entry, userId);
+export function skillVisibility(entry: CommunitySkill): SkillVisibility {
+  return entry.visibility ?? { scope: 'COMPANY', departmentIds: [] };
+}
+
+export function isSharedSkill(entry: CommunitySkill): boolean {
+  return entry.published && skillVisibility(entry).scope !== 'PRIVATE';
+}
+
+export function departmentOptions(departments: SkillDepartment[]) {
+  const byId = new Map(departments.map((dept) => [dept.id, dept]));
+  return departments.map(({ id, name, parentId }) => {
+    const path = [name];
+    const visited = new Set([id]);
+    let parent = parentId ? byId.get(parentId) : undefined;
+    while (parent && !visited.has(parent.id)) {
+      path.push(parent.name);
+      visited.add(parent.id);
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+    }
+    return { label: path.toReversed().join(' / '), value: id };
+  });
 }
 
 export function filterSkills(
   entries: CommunitySkill[],
-  options: { category?: string; query: string; tab: string; userId?: number },
+  options: { category?: string; query: string; tab: string; userId?: string },
 ) {
   const term = options.query.trim().toLocaleLowerCase();
   return entries
@@ -29,7 +62,7 @@ export function filterSkills(
       (entry) =>
         (options.tab === 'mine'
           ? ownsSkill(entry, options.userId)
-          : entry.published) &&
+          : isSharedSkill(entry)) &&
         (!options.category || entry.category === options.category) &&
         (!term ||
           [entry.title, entry.name, entry.description, entry.publisher]

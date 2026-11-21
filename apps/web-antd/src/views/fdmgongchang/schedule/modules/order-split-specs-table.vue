@@ -6,20 +6,22 @@ import type { FdmgongchangOrderSplitApi as Api } from '#/api/fdmgongchang/schedu
 import { Button, Table } from 'ant-design-vue';
 
 import { colorModeText, parameterText, thicknessText } from '../../production-order/manufacturing';
+import { finishedSpecText, orderQuantityText } from './order-split-display';
 
 defineProps<{ editable?: boolean; rows: Api.Row[] }>();
 const emit = defineEmits<{ edit: [row: Api.Row] }>();
 const columns: TableColumnsType<Api.Row> = [
   { key: 'product', title: '订单 / 产品明细', width: 260 },
-  { key: 'mode', title: '单双色 / 结构 / 成品总厚', width: 175 },
-  { key: 'front', title: '正面颜色 / 本次拆分层厚', width: 230 },
-  { key: 'back', title: '反面颜色 / 本次拆分层厚', width: 230 },
-  { key: 'texture', title: '订单要求的压花纹路', width: 260 },
+  { key: 'quantity', title: '订单数量 / 待产', width: 140 },
+  { key: 'spec', title: '成品规格 / 结构', width: 220 },
+  { key: 'front', title: '正面颜色 / 拆分层厚', width: 175 },
+  { key: 'back', title: '反面颜色 / 拆分层厚', width: 175 },
+  { key: 'texture', title: '订单要求的压花纹路', width: 200 },
 ];
 </script>
 
 <template>
-  <Table class="split-product-specs" :columns="columns" :data-source="rows" :pagination="false" :scroll="{ x: 1135, y: 260 }" :row-key="(row) => `${row.orderId}-${row.itemId}`" size="small">
+  <Table class="split-product-specs" :columns="columns" :data-source="rows" :pagination="false" :scroll="{ x: 1170, y: 260 }" row-key="itemId" size="small">
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'product'">
         <div class="font-mono text-xs">{{ record.orderNo }} · #{{ record.itemId }}</div>
@@ -27,9 +29,13 @@ const columns: TableColumnsType<Api.Row> = [
         <div class="text-xs text-muted-foreground">{{ record.productCode || '未填写编码' }}</div>
         <Button v-if="editable" type="link" size="small" class="!px-0" @click="emit('edit', record as Api.Row)">修改参数与工艺</Button>
       </template>
-      <template v-else-if="column.key === 'mode'">
+      <template v-else-if="column.key === 'quantity'">
+        <div>订单 {{ orderQuantityText(record.orderQuantity, record.orderUnit) }}</div>
+        <div class="font-semibold">待产 {{ orderQuantityText(record.remainingQuantity, record.orderUnit) }}</div>
+      </template>
+      <template v-else-if="column.key === 'spec'">
+        <div>{{ finishedSpecText(record as Api.Row) || '成品规格未填写' }}</div>
         <div>{{ colorModeText(record.colorMode) }} · {{ ({ SINGLE_LAYER: '单层', DOUBLE_LAYER: '双层' } as Record<string, string>)[record.constructionType] || '结构未填写' }}</div>
-        <div>成品总厚 {{ thicknessText(record.finishedThickness) }}</div>
       </template>
       <template v-else-if="column.key === 'front'">
         <div>{{ parameterText(record.frontColor, record.frontColorName) }}</div>

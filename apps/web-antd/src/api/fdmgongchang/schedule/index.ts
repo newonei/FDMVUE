@@ -228,6 +228,13 @@ export namespace FdmgongchangScheduleApi {
     workerNames?: null | string;
     /** 关联工序单的残次合计。 */
     defectQuantity?: Decimal | null;
+    laminationActuals?: null | {
+      backDefectQuantity?: Decimal | null;
+      backGoodQuantity: Decimal;
+      frontDefectQuantity?: Decimal | null;
+      frontGoodQuantity: Decimal;
+      goodQuantityLowerBound: boolean;
+    };
     /** 排单时的数量；接单时按上道良品改小了数量才有。 */
     plannedQuantity?: Decimal | null;
     status?: null | TaskStatus;
@@ -600,6 +607,12 @@ export namespace FdmgongchangOrderSplitApi {
     itemId: number;
     productCode?: null | string;
     productName?: null | string;
+    orderQuantity?: null | number | string;
+    orderUnit?: null | string;
+    remainingQuantity?: null | number | string;
+    finishedMaterial?: null | string;
+    finishedLength?: null | number | string;
+    finishedWidth?: null | number | string;
     process?: null | string;
     processLabel?: null | string;
     sequence?: null | number;

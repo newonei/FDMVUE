@@ -1,7 +1,11 @@
 <script lang="ts" setup>
-import type { CommunitySkill } from '#/api/fdmskill/community';
+import type {
+  CommunitySkill,
+  SkillDepartment,
+  SkillVisibility,
+} from '#/api/fdmskill/community';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import { Page } from '@vben/common-ui';
 import { useUserStore } from '@vben/stores';
@@ -32,30 +36,33 @@ import {
   deleteCommunitySkill,
   downloadCommunityArchive,
   getCommunityCatalog,
+  getCommunityDepartments,
   getCommunityDetail,
   publishCommunitySkill,
+  updateCommunityVisibility,
   uploadCommunitySkill,
 } from '#/api/fdmskill/community';
 
 import {
   archiveFileName,
   assertArchiveDownload,
-  canManageSkill,
+  departmentOptions,
   errorText,
   filterSkills,
   formatBytes,
+  isSharedSkill,
   ownsSkill,
+  skillVisibility,
   uploadError,
   userIdentity,
+  visibilityLabels,
 } from './model';
+import VisibilityFields from './visibility-fields.vue';
 
 defineOptions({ name: 'FdmSkillCommunity' });
 
 const userStore = useUserStore();
 const currentUserId = computed(() => userIdentity(userStore.userInfo));
-const administrator = computed(() =>
-  userStore.userRoles.includes('super_admin'),
-);
 const entries = ref<CommunitySkill[]>([]);
 const tab = ref('square');
 const query = ref('');
@@ -85,11 +92,11 @@ const ownCount = computed(
       .length,
 );
 const publishedCount = computed(
-  () => entries.value.filter((entry) => entry.published).length,
+  () => entries.value.filter(isSharedSkill).length,
 );
 
 function manageable(entry: CommunitySkill) {
-  return canManageSkill(entry, currentUserId.value, administrator.value);
+  return ownsSkill(entry, currentUserId.value);
 }
 
 async function loadCatalog() {
@@ -157,10 +164,16 @@ async function download(entry: CommunitySkill) {
 function changePublished(entry: CommunitySkill) {
   if (!manageable(entry) || busy.value) return;
   const publishing = !entry.published;
+  const scope = skillVisibility(entry).scope;
+  const publicationNotice = {
+    COMPANY: '发布后，全公司同事可以在技能广场查看和下载此技能包。',
+    DEPARTMENTS: '发布后，所选部门的同事可以在技能广场查看和下载此技能包。',
+    PRIVATE: '当前范围为「仅自己」，发布后仍只有你可以查看和下载。',
+  };
   Modal.confirm({
     title: `${publishing ? '发布' : '下架'}「${entry.title || entry.name}」？`,
     content: publishing
-      ? '发布后公司同事可以在技能广场查看和下载此技能包。'
+      ? publicationNotice[scope]
       : '下架后此技能将从技能广场移除，你仍可在「我的技能」管理它。',
     okText: publishing ? '确认发布' : '确认下架',
     onOk: async () => {
@@ -205,6 +218,94 @@ function remove(entry: CommunitySkill) {
   });
 }
 
+const departments = ref<SkillDepartment[]>([]);
+const departmentsLoading = ref(false);
+const departmentsLoaded = ref(false);
+const departmentsError = ref('');
+const departmentChoices = computed(() => departmentOptions(departments.value));
+
+async function loadDepartments() {
+  if (departmentsLoading.value || departmentsLoaded.value) return;
+  departmentsLoading.value = true;
+  departmentsError.value = '';
+  try {
+    departments.value = await getCommunityDepartments();
+    departmentsLoaded.value = true;
+  } catch (error) {
+    departmentsError.value = errorText(error, '部门列表加载失败，请重试');
+  } finally {
+    departmentsLoading.value = false;
+  }
+}
+
+function invalidVisibility(visibility: SkillVisibility): string {
+  if (visibility.scope !== 'DEPARTMENTS') return '';
+  if (!departmentsLoaded.value) return '请先加载部门列表';
+  if (visibility.departmentIds.length === 0) return '请至少选择一个部门';
+  if (visibility.departmentIds.length > 100) return '最多选择 100 个部门';
+  const available = new Set(departments.value.map(({ id }) => id));
+  return visibility.departmentIds.every((id) => available.has(id))
+    ? ''
+    : '请移除不可用的部门并重新选择';
+}
+
+const visibilityTarget = ref<CommunitySkill>();
+const editingVisibility = ref<SkillVisibility>({
+  scope: 'PRIVATE',
+  departmentIds: [],
+});
+const visibilityError = ref('');
+const visibilityOpen = computed({
+  get: () => visibilityTarget.value !== undefined,
+  set: (open) => {
+    if (!open) visibilityTarget.value = undefined;
+  },
+});
+
+function openVisibility(entry: CommunitySkill) {
+  if (!manageable(entry) || busy.value) return;
+  const original = skillVisibility(entry);
+  editingVisibility.value = {
+    scope: original.scope,
+    departmentIds: [...original.departmentIds],
+  };
+  visibilityError.value = '';
+  visibilityTarget.value = entry;
+}
+
+async function saveVisibility() {
+  const target = visibilityTarget.value;
+  if (!target || !manageable(target) || busy.value) return;
+  visibilityError.value = invalidVisibility(editingVisibility.value);
+  if (visibilityError.value) return;
+
+  operationId.value = target.id;
+  operationError.value = '';
+  try {
+    const saved = await updateCommunityVisibility(
+      target.id,
+      editingVisibility.value,
+    );
+    entries.value = entries.value.map((entry) =>
+      ownsSkill(entry, currentUserId.value) && entry.name === target.name
+        ? { ...entry, visibility: saved.visibility }
+        : entry,
+    );
+    replaceEntry(saved);
+    visibilityTarget.value = undefined;
+    await loadCatalog();
+    const refreshed = entries.value.find(
+      (entry) => entry.id === detail.value?.entry.id,
+    );
+    if (refreshed && detail.value) detail.value.entry = refreshed;
+    message.success('可见范围已更新');
+  } catch (error) {
+    visibilityError.value = errorText(error, '保存可见范围失败，请重试');
+  } finally {
+    operationId.value = '';
+  }
+}
+
 const uploadOpen = ref(false);
 const uploading = ref(false);
 const uploadFailure = ref('');
@@ -216,6 +317,19 @@ const form = reactive({
   category: '通用',
   license: '未声明',
 });
+const uploadVisibility = ref<SkillVisibility>({
+  scope: 'PRIVATE',
+  departmentIds: [],
+});
+watch(
+  () =>
+    (uploadOpen.value && uploadVisibility.value.scope === 'DEPARTMENTS') ||
+    (visibilityOpen.value && editingVisibility.value.scope === 'DEPARTMENTS'),
+  (needsDepartments) => {
+    if (needsDepartments) void loadDepartments();
+  },
+);
+
 function openUpload() {
   selectedFile.value = undefined;
   if (fileInput.value) fileInput.value.value = '';
@@ -225,6 +339,7 @@ function openUpload() {
     category: '通用',
     license: '未声明',
   });
+  uploadVisibility.value = { scope: 'PRIVATE', departmentIds: [] };
   uploadFailure.value = '';
   uploadOpen.value = true;
 }
@@ -234,20 +349,27 @@ function chooseFile(event: Event) {
 }
 async function upload() {
   if (uploading.value) return;
-  uploadFailure.value = uploadError(selectedFile.value, form.version);
+  uploadFailure.value =
+    uploadError(selectedFile.value, form.version) ||
+    invalidVisibility(uploadVisibility.value);
   if (uploadFailure.value || !selectedFile.value) return;
   uploading.value = true;
   try {
     const entry = await uploadCommunitySkill({
       ...form,
       file: selectedFile.value,
+      visibility: uploadVisibility.value,
     });
+    if (!entry.visibility)
+      throw new Error('服务器未返回可见范围，请刷新确认草稿后再发布');
     replaceEntry(entry);
     tab.value = 'mine';
     query.value = '';
     category.value = undefined;
     uploadOpen.value = false;
-    message.success('技能包已上传为草稿，检查说明后可发布给公司同事');
+    message.success(
+      `技能包已上传，当前可见范围为「${visibilityLabels[skillVisibility(entry).scope]}」`,
+    );
   } catch (error) {
     uploadFailure.value = errorText(
       error,
@@ -272,7 +394,7 @@ onMounted(loadCatalog);
         type="info"
         show-icon
         message="这里共享包含 SKILL.md 的技能 ZIP 包；npm / Git 插件请在「插件市场」维护。"
-        description="上传后先保存为草稿，由你发布给公司同事。桌面端可在技能广场中安装。"
+        description="上传后先保存为草稿。上传者可设置可见范围、发布、下架或删除。"
       />
       <Alert
         v-if="loadError"
@@ -366,7 +488,9 @@ onMounted(loadCatalog);
                 {{ entry.description }}
               </p>
               <Space wrap class="mb-3">
-                <Tag>{{ entry.category }}</Tag><span class="text-xs text-gray-500">{{ entry.publisher }} ·
+                <Tag>{{ entry.category }}</Tag>
+                <Tag>{{ visibilityLabels[skillVisibility(entry).scope] }}</Tag>
+                <span class="text-xs text-gray-500">{{ entry.publisher }} ·
                   {{ formatBytes(entry.archiveBytes) }}</span>
               </Space>
               <div class="mb-3 text-xs text-gray-500">
@@ -385,6 +509,14 @@ onMounted(loadCatalog);
                   下载技能包
                 </Button>
                 <template v-if="manageable(entry)">
+                  <Button
+                    size="small"
+                    type="link"
+                    :disabled="busy"
+                    @click="openVisibility(entry)"
+                  >
+                    设置可见范围
+                  </Button>
                   <Button
                     size="small"
                     type="link"
@@ -483,6 +615,52 @@ onMounted(loadCatalog);
             :maxlength="200"
           />
         </FormItem>
+        <VisibilityFields
+          v-model="uploadVisibility"
+          :departments="departmentChoices"
+          :loading="departmentsLoading"
+          :error="departmentsError"
+          :disabled="uploading"
+          @retry="loadDepartments"
+        />
+        <div class="text-xs text-gray-500">
+          同一个技能的新版本沿用原有范围。可在「我的技能」统一修改所有版本的范围。
+        </div>
+      </Form>
+    </Modal>
+
+    <Modal
+      v-model:open="visibilityOpen"
+      title="设置可见范围"
+      :mask-closable="!busy"
+      :closable="!busy"
+      :keyboard="!busy"
+      :confirm-loading="busy"
+      :cancel-button-props="{ disabled: busy }"
+      ok-text="保存可见范围"
+      @ok="saveVisibility"
+    >
+      <p class="mb-4 text-sm">
+        此设置适用于「{{
+          visibilityTarget?.title
+        }}」的所有版本，已发布的版本会按新范围共享。
+      </p>
+      <Alert
+        v-if="visibilityError"
+        type="error"
+        show-icon
+        class="mb-4"
+        :message="visibilityError"
+      />
+      <Form layout="vertical">
+        <VisibilityFields
+          v-model="editingVisibility"
+          :departments="departmentChoices"
+          :loading="departmentsLoading"
+          :error="departmentsError"
+          :disabled="busy"
+          @retry="loadDepartments"
+        />
       </Form>
     </Modal>
 
@@ -501,7 +679,12 @@ onMounted(loadCatalog);
         />
         <template v-if="detail">
           <Space wrap class="mb-4">
-            <Tag>{{ detail.entry.category }}</Tag><Tag>{{ detail.entry.version }}</Tag><Tag :color="detail.entry.published ? 'green' : 'orange'">
+            <Tag>{{ detail.entry.category }}</Tag>
+            <Tag>{{ detail.entry.version }}</Tag>
+            <Tag>
+              {{ visibilityLabels[skillVisibility(detail.entry).scope] }}
+            </Tag>
+            <Tag :color="detail.entry.published ? 'green' : 'orange'">
               {{ detail.entry.published ? '已发布' : '草稿' }}
             </Tag>
           </Space>
@@ -533,7 +716,11 @@ onMounted(loadCatalog);
               @click="download(detail.entry)"
             >
               下载技能包
-</Button><template v-if="manageable(detail.entry)">
+            </Button>
+            <template v-if="manageable(detail.entry)">
+              <Button :disabled="busy" @click="openVisibility(detail.entry)">
+                设置可见范围
+              </Button>
               <Button :disabled="busy" @click="changePublished(detail.entry)">
                 {{ detail.entry.published ? '下架' : '发布' }}
 </Button><Button danger :disabled="busy" @click="remove(detail.entry)">

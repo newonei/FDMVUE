@@ -402,7 +402,7 @@ describe('采购开单先保存草稿', () => {
     const { host, saved } = await mount();
     expect(
       [...host.querySelectorAll('button')].some(
-        (item) => item.textContent?.trim() === '提交下单',
+        (item) => item.textContent?.trim() === '提交审核',
       ),
     ).toBe(false);
     button(host, '保存草稿并完善资料').click();
@@ -416,6 +416,80 @@ describe('采购开单先保存草稿', () => {
     );
     expect(saved).toHaveBeenCalledWith(result, 'draft');
   });
+  it('编辑草稿时可以更换来源申请明细，按新明细额度保存', async () => {
+    mocks.contract.mockResolvedValue({
+      id: 'contract-1',
+      companyId: 1,
+      items: [
+        { id: 'item-1', skuName: '瑜伽垫' },
+        { id: 'item-2', skuName: '外箱' },
+      ],
+      requests: [
+        {
+          id: 'request-1',
+          items: [
+            { id: 'ri-1', contractItemId: 'item-1', availableQuantity: 0 },
+            { id: 'ri-2', contractItemId: 'item-2', availableQuantity: 6 },
+          ],
+        },
+      ],
+    });
+    mocks.order.mockResolvedValue({
+      contractId: 'contract-1',
+      companyId: 1,
+      details: { status: 'DRAFT' },
+      order: {
+        id: 'source-order',
+        requestId: 'request-1',
+        supplierId: 'supplier-1',
+        lines: [
+          {
+            id: 'old-line',
+            requestItemId: 'ri-1',
+            assignmentId: 'old-task',
+            contractItemId: 'item-1',
+            quantity: 10,
+            unitPrice: 2,
+            specificationSnapshot: { skuName: '瑜伽垫' },
+          },
+        ],
+      },
+    });
+    const { host } = await mount({
+      editOf: { contractId: 'contract-1', orderId: 'source-order' },
+    });
+    const product = host.querySelector<HTMLInputElement>(
+      'tbody .product-pick input',
+    )!;
+    expect(product.disabled).toBe(false);
+    await fill(product, 'request:ri-2');
+    button(host, '保存草稿').click();
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('本次最多可转 6');
+    await fill(
+      host.querySelector<HTMLInputElement>('[aria-label="第1行数量"]')!,
+      '6',
+    );
+    button(host, '保存草稿').click();
+    await settle();
+    expect(mocks.update).toHaveBeenCalledWith(
+      'contract-1',
+      'source-order',
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            contractItemId: 'item-2',
+            requestItemId: 'ri-2',
+            assignmentId: undefined,
+            id: undefined,
+            quantity: '6',
+          }),
+        ],
+      }),
+      false,
+    );
+  });
+
   it('申请转采购单保留申请来源并保存草稿', async () => {
     const { host, saved } = await mount({
       contractId: 'contract-1',
@@ -633,7 +707,7 @@ describe('采购开单先保存草稿', () => {
   });
   it.each([
     [false, '保存草稿', 'draft'],
-    [true, '提交下单', 'submitted'],
+    [true, '提交审核', 'submitted'],
   ] as const)(
     '编辑草稿 submit=%s 使用明确操作',
     async (submit, label, mode) => {
@@ -672,12 +746,12 @@ describe('采购开单先保存草稿', () => {
     expect(mocks.update).not.toHaveBeenCalled();
     expect(host.textContent).toContain('请填写有效的采购日期');
 
-    button(host, '提交下单').click();
+    button(host, '提交审核').click();
     await settle();
     expect(mocks.update).not.toHaveBeenCalled();
 
     await fill(purchaseDate!, '2026-11-15');
-    button(host, '提交下单').click();
+    button(host, '提交审核').click();
     await settle();
     expect(mocks.update).toHaveBeenCalledWith(
       '',

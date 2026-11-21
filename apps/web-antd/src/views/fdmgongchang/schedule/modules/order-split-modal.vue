@@ -19,6 +19,7 @@ import OrderItemsTable from '../../production-order/modules/order-items-table.vu
 import { dateText, num, specText } from '../../production-order/shared';
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { materialText, PROCESS_LABELS } from '../../shared/schedule';
+import { finishedSpecText, orderQuantityText } from './order-split-display';
 import OrderSplitSpecsTable from './order-split-specs-table.vue';
 
 const props = defineProps<{ orders?: OrderApi.Order[] }>();
@@ -39,6 +40,7 @@ const note = ref('');
 const page = ref(1);
 const previewPage = ref(1);
 const status = ref<string>();
+const selectedItemId = ref<number>();
 const preview = ref<SplitApi.Preview>();
 const previewIds = ref<number[]>([]);
 const requestId = ref('');
@@ -56,12 +58,12 @@ const orderColumns: TableColumnsType<OrderApi.Order> = [
   { key: 'date', title: '交期', width: 130 },
 ];
 const taskColumns: TableColumnsType<SplitApi.Row> = [
-  { key: 'order', title: '订单 / 产品明细', width: 230, fixed: 'left' },
+  { key: 'order', title: '订单产品 / 需求数量', width: 260, fixed: 'left' },
   { key: 'process', title: '工序 / 车间', width: 145 },
+  { key: 'quantity', title: '工序计划数量', width: 120 },
   { key: 'layer', title: '生产层别', width: 120 },
   { key: 'output', title: '实际产出：颜色 / 厚度', width: 245 },
   { key: 'spec', title: '工序生产规格', width: 220 },
-  { key: 'quantity', title: '工序计划数量', width: 120 },
   { key: 'inputs', title: '预计领料 / 上游工序', width: 240 },
   { key: 'status', title: '配置检查 / 提醒', width: 230 },
 ];
@@ -71,7 +73,11 @@ const canPreview = computed(() => selectedIds.value.length > 0 && selectedIds.va
 const canRelease = computed(() => !configOpen.value && !previewing.value && !!preview.value?.canRelease && preview.value.taskCount > 0
   && preview.value.errors.length === 0 && !preview.value.rows.some((row) => row.status === 'BLOCKED'));
 const productSpecs = computed(() => [...new Map((preview.value?.rows ?? [])
-  .map((row) => [`${row.orderId}-${row.itemId}`, row])).values()]);
+  .map((row) => [row.itemId, row])).values()]);
+const productOptions = computed(() => productSpecs.value.map((row) => ({
+  label: [row.productName, row.productCode, `${row.orderNo} #${row.itemId}`].filter(Boolean).join(' · '),
+  value: row.itemId,
+})));
 
 function editItem(orderId: number, itemId: number) {
   if (!canEdit.value || submitting.value || previewing.value) return;
@@ -129,8 +135,10 @@ const shownOrders = computed(() => {
 });
 const shownTasks = computed(() => {
   const search = keyword.value.trim().toLocaleLowerCase();
+  const itemId = selectedItemId.value ?? null;
   return (preview.value?.rows ?? []).filter((row) => (!status.value || row.status === status.value)
-    && (!search || [row.orderNo, row.productName, row.productCode, row.processLabel, row.reason,
+    && (itemId === null || row.itemId === itemId)
+    && (!search || [row.orderNo, row.productName, row.productCode, row.processLabel, row.reason, finishedSpecText(row),
       row.stageColor, row.stageColorName, row.frontColor, row.frontColorName, row.backColor, row.backColorName,
       row.textureFrontName, row.textureBackName, layerText(row),
       row.output && materialText(row.output), row.process && `${PROCESS_LABELS[row.process] ?? row.process}车间`]
@@ -174,10 +182,11 @@ watch(open, (value) => {
   status.value = undefined;
   page.value = 1;
   previewPage.value = 1;
+  selectedItemId.value = undefined;
   previewing.value = false;
   void loadOrders();
 });
-watch([keyword, status], () => { page.value = 1; previewPage.value = 1; });
+watch([keyword, selectedItemId, status], () => { page.value = 1; previewPage.value = 1; });
 onBeforeUnmount(() => { ++version; });
 
 function back() {
@@ -186,6 +195,7 @@ function back() {
   submittedRequest.value = undefined;
   keyword.value = '';
   status.value = undefined;
+  selectedItemId.value = undefined;
 }
 
 /** getRandomValues 同样可用于工厂内网 HTTP，避免依赖仅安全上下文提供的 randomUUID。 */
@@ -214,6 +224,7 @@ async function prepare() {
     requestId.value = newRequestId();
     keyword.value = '';
     status.value = undefined;
+    if (!result.rows.some((row) => row.itemId === selectedItemId.value)) selectedItemId.value = undefined;
     previewPage.value = 1;
   } catch {
     // API 统一提示具体错误，保留所选订单以便重新预览。
@@ -304,11 +315,15 @@ async function release() {
       <template v-else>
         <div class="flex flex-wrap items-center gap-3">
           <strong>{{ preview.orderCount }} 张订单 · {{ preview.itemCount }} 条产品明细 · {{ preview.taskCount }} 个计划任务</strong>
-          <Input id="split-task-search" v-model:value="keyword" allow-clear placeholder="搜订单、产品、车间、规格、提醒" class="max-w-80" />
+          <Select
+            id="split-task-product" v-model:value="selectedItemId" allow-clear show-search option-filter-prop="label"
+            :options="productOptions" placeholder="全部产品明细" aria-label="按订单产品明细筛选工序" class="w-80 max-w-full"
+          />
+          <Input id="split-task-search" v-model:value="keyword" allow-clear placeholder="搜订单、产品、车间、规格、提醒" class="max-w-64" />
           <Select v-model:value="status" allow-clear :options="statusOptions" placeholder="全部检查状态" class="w-48" />
         </div>
         <details class="rounded border border-border px-3 py-2 text-xs">
-          <summary class="cursor-pointer font-medium">本次拆分的订单产品参数（{{ productSpecs.length }} 条明细，展开核对单双色、正反颜色、层厚和纹路）</summary>
+          <summary class="cursor-pointer font-medium">订单产品明细（{{ productSpecs.length }} 条，展开查看数量、成品规格、正反颜色、层厚和纹路）</summary>
           <div class="mt-2"><OrderSplitSpecsTable :rows="productSpecs" :editable="canEdit && !submitting" @edit="editItem($event.orderId, $event.itemId)" /></div>
           <p class="m-0 mt-1 text-muted-foreground">点击「修改参数与工艺」调整订单明细。保存后自动重新预览，核对无误后再下发。</p>
         </details>
@@ -333,20 +348,31 @@ async function release() {
           <ul class="m-0 mt-1 max-h-24 list-disc overflow-auto pl-4"><li v-for="(warning, index) in preview.warnings" :key="index">{{ warning }}</li></ul>
         </details>
         <Table
-          class="split-process-tasks" :columns="taskColumns" :data-source="shownTasks" :scroll="{ x: 1550, y: 420 }"
+          class="split-process-tasks" :columns="taskColumns" :data-source="shownTasks" :scroll="{ x: 1580, y: 420 }"
           :pagination="{ current: previewPage, pageSize: 20, showSizeChanger: false, showTotal: (total: number) => `共 ${total} 行工序检查` }"
           row-key="rowKey" size="small" @change="(p) => previewPage = p.current ?? 1"
         >
+          <template #emptyText>没有符合筛选条件的工序任务</template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'order'">
               <div class="font-mono text-xs">{{ record.orderNo }}</div>
               <div>{{ record.productName || '未填写产品名称' }}</div>
               <div class="text-xs text-muted-foreground">{{ record.productCode || '未填写编码' }} · 明细 #{{ record.itemId }}</div>
+              <div class="text-xs text-muted-foreground">成品 {{ finishedSpecText(record as SplitApi.Row) || '规格未填写' }}</div>
+              <div class="mt-1 flex flex-wrap gap-x-2 text-xs">
+                <span>订单 {{ orderQuantityText(record.orderQuantity, record.orderUnit) }}</span>
+                <span class="font-semibold">待产 {{ orderQuantityText(record.remainingQuantity, record.orderUnit) }}</span>
+              </div>
               <Button v-if="canEdit" class="!px-0" size="small" type="link" :disabled="submitting || previewing" @click="editItem(record.orderId, record.itemId)">修改参数与工艺</Button>
             </template>
             <template v-else-if="column.key === 'process'">
-              <div><template v-if="record.sequence !== null && record.sequence !== undefined">{{ record.sequence }}. </template>{{ record.processLabel || (record.process && PROCESS_LABELS[record.process]) || '工艺待配置' }}</div>
+              <div><template v-if="record.sequence !== null && record.sequence !== undefined">{{ record.sequence }}. </template>{{ record.processLabel || (record.process && PROCESS_LABELS[record.process]) || (record.status === 'DONE' ? '无需再拆分' : '工艺待配置') }}</div>
               <div v-if="record.process" class="text-xs text-muted-foreground">{{ record.processLabel || PROCESS_LABELS[record.process] || record.process }}车间</div>
+            </template>
+            <template v-else-if="column.key === 'quantity'">
+              <span v-if="record.quantity !== null && record.quantity !== undefined" class="font-medium">{{ num(record.quantity) }} {{ record.unit }}</span>
+              <span v-else-if="record.status === 'DONE'">无需生产</span>
+              <span v-else class="text-orange-600">待核算</span>
             </template>
             <template v-else-if="column.key === 'layer'">
               <Tag :color="record.side === 'BACK' ? 'purple' : combined(record as SplitApi.Row) ? 'green' : 'blue'">{{ layerText(record as SplitApi.Row) }}</Tag>
@@ -361,9 +387,6 @@ async function release() {
               <div class="font-medium">{{ thicknessLabel(record as SplitApi.Row) }} {{ thicknessText(record.stageThickness) }}</div>
             </template>
             <template v-else-if="column.key === 'spec'">{{ record.output ? materialText({ ...record.output, quantity: undefined }) : '待补生产规格' }}</template>
-            <template v-else-if="column.key === 'quantity'">
-              <span v-if="record.quantity !== null && record.quantity !== undefined" class="font-medium">{{ num(record.quantity) }} {{ record.unit }}</span><span v-else class="text-orange-600">待核算</span>
-            </template>
             <template v-else-if="column.key === 'inputs'">
               <div v-for="(input, index) in record.inputs" :key="index" class="text-xs">{{ materialText(input) }}</div>
               <div v-if="!record.inputs?.length" class="text-xs text-muted-foreground">无预计领料</div>

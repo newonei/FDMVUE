@@ -21,8 +21,8 @@ describe('lamination report quantities', () => {
     expect(line.goodQuantity).toBe(530);
     expect(line.defectQuantity).toBe(10);
     expect(laminationDefects(line)).toEqual([
-      { side: 'FRONT', color: 'GRAY', quantity: 5 },
-      { side: 'BACK', color: 'BLUE', quantity: 10 },
+      { side: 'FRONT', color: 'GRAY', goodQuantity: 535, quantity: 5 },
+      { side: 'BACK', color: 'BLUE', goodQuantity: 530, quantity: 10 },
     ]);
   });
 
@@ -38,7 +38,7 @@ describe('lamination report quantities', () => {
     expect(laminationLayers(line).map((layer) => layer.side)).toEqual(['FRONT', 'BACK']);
   });
 
-  it('includes per-color losses in the workbench request while keeping draft fields local', () => {
+  it('includes per-color good and defective sheets in the workbench request', () => {
     const job = createJob();
     job.process = { code: 'LAMINATE', label: '贴合', sources: ['CUT'], outputStage: 'LAMINATED', outputLabel: '已复合片材', outputUnit: '片' };
     job.outputs = [draft()];
@@ -47,8 +47,8 @@ describe('lamination report quantities', () => {
     expect(payload.goodQuantity).toBe(500);
     expect(payload.defectQuantity).toBe(40);
     expect(payload.laminateDefects).toEqual([
-      { side: 'FRONT', color: 'GRAY', quantity: 40 },
-      { side: 'BACK', color: 'BLUE', quantity: 0 },
+      { side: 'FRONT', color: 'GRAY', goodQuantity: 500, quantity: 40 },
+      { side: 'BACK', color: 'BLUE', goodQuantity: 540, quantity: 0 },
     ]);
     expect(payload).not.toHaveProperty('laminateLayers');
   });

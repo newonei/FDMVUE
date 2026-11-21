@@ -402,9 +402,7 @@ onBeforeUnmount(resetImage);
             <div class="feedback-row-meta text-muted-foreground">
               <span>FB-{{ record.id }}</span>
               <span>{{ categories[record.category as FeedbackCategory] }}</span>
-              <span v-if="record.attachments.length">
-                {{ record.attachments.length }} 张截图
-              </span>
+              <span v-if="record.attachments.length">{{ record.attachments.length }} 张截图</span>
             </div>
           </template>
           <Tag
@@ -416,9 +414,7 @@ onBeforeUnmount(resetImage);
           <span
             v-else-if="column.key === 'author'"
             :title="`员工编号 ${record.userId}`"
-          >
-            {{ record.userId }}
-          </span>
+            >{{ record.userId }}</span>
           <span v-else-if="column.key === 'createdAt'">{{
             formatDateTime(record.createdAt)
           }}</span>
@@ -502,9 +498,7 @@ onBeforeUnmount(resetImage);
         >
           <h3>
             截图
-            <small class="text-muted-foreground">
-              {{ detail.attachments.length }} 张
-            </small>
+            <small class="text-muted-foreground">{{ detail.attachments.length }} 张</small>
           </h3>
           <div class="feedback-attachment-buttons">
             <Button
@@ -564,12 +558,7 @@ onBeforeUnmount(resetImage);
                 </div>
               </div>
               <div>
-                <label
-                  for="desktop-feedback-reply"
-                  class="feedback-field-label"
-                >
-                  回复员工
-                </label>
+                <label for="desktop-feedback-reply" class="feedback-field-label">回复员工</label>
                 <Textarea
                   id="desktop-feedback-reply"
                   v-model:value="reply"
@@ -596,9 +585,7 @@ onBeforeUnmount(resetImage);
       </template>
       <template #footer>
         <div class="feedback-drawer-footer">
-          <span v-if="canUpdate" class="text-muted-foreground">
-            保存后，员工可在「我的反馈」查看进度和回复。
-          </span>
+          <span v-if="canUpdate" class="text-muted-foreground">保存后，员工可在「我的反馈」查看进度和回复。</span>
           <div>
             <Button :disabled="saving" @click="requestClose">关闭</Button>
             <Button

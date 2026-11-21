@@ -1,5 +1,5 @@
 /* eslint-disable vue/one-component-per-file -- UI adapters exercise the real sharing workflow without browser dependencies. */
-import type { App } from 'vue';
+import type { App, PropType } from 'vue';
 
 import { createApp, defineComponent, h, nextTick } from 'vue';
 
@@ -10,8 +10,10 @@ import { skill } from './test-fixtures';
 
 const mocks = vi.hoisted(() => ({
   catalog: vi.fn(),
+  departments: vi.fn(),
   detail: vi.fn(),
   upload: vi.fn(),
+  setVisibility: vi.fn(),
   publish: vi.fn(),
   remove: vi.fn(),
   download: vi.fn(),
@@ -23,8 +25,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('#/api/fdmskill/community', () => ({
   getCommunityCatalog: mocks.catalog,
+  getCommunityDepartments: mocks.departments,
   getCommunityDetail: mocks.detail,
   uploadCommunitySkill: mocks.upload,
+  updateCommunityVisibility: mocks.setVisibility,
   publishCommunitySkill: mocks.publish,
   deleteCommunitySkill: mocks.remove,
   downloadCommunityArchive: mocks.download,
@@ -111,7 +115,45 @@ vi.mock('ant-design-vue', () => {
     FormItem: block,
     Input: input,
     Modal: modal,
-    Select: block,
+    Select: defineComponent({
+      props: {
+        disabled: Boolean,
+        mode: String,
+        options: Array as PropType<{ label: string; value: string }[]>,
+        value: [String, Array] as PropType<string | string[]>,
+      },
+      emits: ['update:value'],
+      setup: (props, context) => () =>
+        h(
+          'select',
+          {
+            ...context.attrs,
+            multiple: props.mode === 'multiple',
+            disabled: props.disabled,
+            onChange: (event: Event) => {
+              const select = event.target as HTMLSelectElement;
+              context.emit(
+                'update:value',
+                select.multiple
+                  ? [...select.selectedOptions].map(({ value }) => value)
+                  : select.value,
+              );
+            },
+          },
+          props.options?.map(({ label, value }) =>
+            h(
+              'option',
+              {
+                value,
+                selected: Array.isArray(props.value)
+                  ? props.value.includes(value)
+                  : props.value === value,
+              },
+              label,
+            ),
+          ),
+        ),
+    }),
     Space: block,
     Spin: block,
     Tag: block,
@@ -176,6 +218,10 @@ beforeEach(() => {
     entry: skill({ id: 'foreign', ownerId: 9 }),
     readme: '<script>alert("unsafe")</script>\n# 说明',
   });
+  mocks.departments.mockResolvedValue([
+    { id: '10', name: '运营部', parentId: null },
+    { id: '11', name: '电商组', parentId: '10' },
+  ]);
   mocks.download.mockResolvedValue(
     new Blob(['zip'], { type: 'application/zip' }),
   );
@@ -204,15 +250,59 @@ describe('company skill sharing page', () => {
     expect(card('draft').textContent).toContain('已发布');
   });
 
-  it('gives moderation controls to administrators and preserves rows on delete errors', async () => {
+  it('restricts management to uploaders even for administrators and preserves rows on delete errors', async () => {
     mocks.user.userRoles = ['super_admin'];
     await mount();
-    findButton('删除', card('foreign')).click();
+    expect(card('foreign').textContent).not.toContain('设置可见范围');
+    expect(card('foreign').textContent).not.toContain('删除');
+    findButton('我的技能').click();
+    await flush();
+    findButton('删除', card('draft')).click();
     mocks.remove.mockRejectedValueOnce({ data: { msg: '删除被拒绝' } });
     await mocks.confirm.mock.calls[0]![0].onOk();
     await flush();
-    expect(card('foreign')).toBeTruthy();
+    expect(card('draft')).toBeTruthy();
     expect(host.textContent).toContain('删除被拒绝');
+  });
+
+  it('allows an uploader to save several exact departments after loading the department list', async () => {
+    await mount();
+    findButton('我的技能').click();
+    await flush();
+    findButton('设置可见范围', card('draft')).click();
+    await flush();
+    const scope = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="可见范围"]',
+    )!;
+    expect(scope.value).toBe('COMPANY');
+    scope.value = 'DEPARTMENTS';
+    scope.dispatchEvent(new Event('change', { bubbles: true }));
+    await flush();
+    expect(mocks.departments).toHaveBeenCalledOnce();
+    findButton('保存可见范围').click();
+    await flush();
+    expect(mocks.setVisibility).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('请至少选择一个部门');
+    const departments = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="指定部门"]',
+    )!;
+    expect(
+      [...departments.options].map((option) => option.textContent),
+    ).toEqual(['运营部', '运营部 / 电商组']);
+    for (const option of departments.options) option.selected = true;
+    departments.dispatchEvent(new Event('change', { bubbles: true }));
+    const visibility = {
+      scope: 'DEPARTMENTS' as const,
+      departmentIds: ['10', '11'],
+    };
+    const saved = skill({ id: 'draft', published: false, visibility });
+    mocks.setVisibility.mockResolvedValueOnce(saved);
+    mocks.catalog.mockResolvedValueOnce({ revision: 'r2', entries: [saved] });
+    findButton('保存可见范围').click();
+    await flush();
+    expect(mocks.setVisibility).toHaveBeenCalledWith('draft', visibility);
+    expect(card('draft').textContent).toContain('指定部门');
+    expect(host.querySelector('section[aria-label="设置可见范围"]')).toBeNull();
   });
 
   it('uploads selected ZIP as a draft and switches to my skills without publishing', async () => {
@@ -224,7 +314,11 @@ describe('company skill sharing page', () => {
     Object.defineProperty(input, 'files', { value: [file] });
     input.dispatchEvent(new Event('change', { bubbles: true }));
     mocks.upload.mockResolvedValueOnce(
-      skill({ id: 'uploaded', published: false }),
+      skill({
+        id: 'uploaded',
+        published: false,
+        visibility: { scope: 'PRIVATE', departmentIds: [] },
+      }),
     );
     findButton('上传为草稿').click();
     await flush();
@@ -234,6 +328,7 @@ describe('company skill sharing page', () => {
       version: '1.0.0',
       category: '通用',
       license: '未声明',
+      visibility: { scope: 'PRIVATE', departmentIds: [] },
     });
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(card('uploaded')).toBeTruthy();

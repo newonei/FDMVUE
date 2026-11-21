@@ -61,6 +61,7 @@ import RelatedLink from '../../documents/RelatedLink.vue';
 import { useOwnedRoute } from '../../documents/useOwnedRoute';
 import { useRouteOwner } from '../../documents/useRouteOwner';
 import ContractEditor from '../../products/components/ContractEditor.vue';
+import { contractInternalOrderNo } from '../../sales-channel';
 import ContractFilterPanel from './ContractFilterPanel.vue';
 import ContractRowPanel from './ContractRowPanel.vue';
 import {
@@ -246,7 +247,7 @@ function sortable(field: ContractBoardSort) {
 const boardColumns = computed(() =>
   tab.value === 'JINZHI'
     ? [
-        { title: '金智单号', key: 'contract', width: 190, locked: true },
+        { title: '内部单号', key: 'contract', width: 190, locked: true },
         { title: '客户', key: 'customer', width: 190 },
         { title: '签订日期', key: 'signed', width: 110, ...sortable('SIGNED') },
         { title: '产品', key: 'product', width: 230 },
@@ -263,7 +264,7 @@ const boardColumns = computed(() =>
       ]
     : [
         {
-          title: domestic.value ? '内部单号' : '合同',
+          title: '内部单号',
           key: 'contract',
           width: 196,
           locked: true,
@@ -594,7 +595,7 @@ async function exportCsv() {
           contractCsv(
             all,
             (id) => personLabel(directory.value, id),
-            domestic.value,
+            props.salesChannel,
           ),
         ],
         {
@@ -781,13 +782,7 @@ onMounted(async () => {
         <div class="filters">
           <Input.Search
             v-model:value="keyword"
-            :placeholder="
-              tab === 'JINZHI'
-                ? '金智单号 / 客户 / 产品'
-                : domestic
-                  ? '内部单号 / 客户 / 产品'
-                  : '合同号 / 客户 / 产品 / 金智单号'
-            "
+            placeholder="内部单号 / 客户 / 产品"
             allow-clear
             class="search"
             @search="load(true)"
@@ -1013,17 +1008,10 @@ onMounted(async () => {
                 @click="openContract(record.id)"
               >
                 {{
-                  domestic
-                    ? record.name || record.code || '内部单号待补齐'
-                    : record.code || '订单号待补齐'
+                  contractInternalOrderNo(record, salesChannel) ||
+                  '内部单号待补齐'
                 }}
               </button>
-              <span v-if="!domestic" class="sub" :title="record.name">
-                <span v-if="record.name" class="internal-name">{{
-                  record.name
-                }}</span>
-                <template v-else>—</template>
-              </span>
               <span
                 v-if="
                   tab !== 'JINZHI' &&
@@ -1608,12 +1596,6 @@ onMounted(async () => {
 .bad,
 .late {
   color: hsl(var(--destructive));
-}
-
-.sub .internal-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: hsl(var(--primary));
 }
 
 .sub.late {

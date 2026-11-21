@@ -26,10 +26,11 @@ import '../../shared/report-spec.css';
  * 报实际产出：良品与不良品分别登记，规格按本工序计划和已领材料带出；
  * 这批做完了还是先报一部分；做完时可以把没用完的料退回去。
  */
-defineProps<{ orderActions?: boolean }>();
+const props = defineProps<{ embedded?: boolean; orderActions?: boolean }>();
 const emit = defineEmits<{ back: []; next: []; supplement: [] }>();
 
 const job = useJob();
+const idPrefix = computed(() => props.embedded ? `batch-${job.order?.id}-` : '');
 const labels = computed(() => makeLabels(job.options));
 const output = computed(() => stageOf(job, job.process?.outputStage));
 const outputUnit = computed(() => output.value?.unit ?? job.process?.outputUnit ?? job.task?.unit);
@@ -66,6 +67,7 @@ function next() {
 <template>
   <div class="mx-auto flex min-h-full w-full max-w-[720px] flex-col">
     <StepHeader
+      v-if="!props.embedded"
       :title="`${job.process?.label} · 报本工序实际产出`"
       @back="emit('back')"
     />
@@ -91,15 +93,15 @@ function next() {
               v-model="line.attrs"
               :color-choices="job.process?.code === 'LAMINATE' ? inputColors : undefined"
               :fields="editable"
-              :id-prefix="`wb-${line.key}`"
+              :id-prefix="`${idPrefix}wb-${line.key}`"
               :options="job.options!"
               dimension-unit="mm"
             />
           </div>
 
-          <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
+          <LaminationCounters v-if="job.process?.code === 'LAMINATE' && line.attrs.frontColor && line.attrs.backColor" :line="line" :id-prefix="`${idPrefix}laminate-${line.key}`" :options="job.options" :unit="outputUnit" />
           <template v-else>
-            <ReportQuantityFields :line="line" :unit="outputUnit" />
+            <ReportQuantityFields :id-prefix="idPrefix" :line="line" :unit="outputUnit" />
             <p class="m-0 text-base tabular-nums" aria-live="polite">良品 <b>{{ formatQty(line.goodQuantity) }} {{ outputUnit }}</b></p>
             <p v-if="slicing" class="m-0 text-sm text-muted-foreground">{{ sliceHint(job.inputs, job.outputs, line) }}</p>
           </template>
@@ -132,7 +134,7 @@ function next() {
               </span>
             </span>
             <InputNumber
-              :id="`return-${input.id}`"
+              :id="`${idPrefix}return-${input.id}`"
               :aria-label="`${attrSummary(input.stage, input.item, labels, [], 'mm') || input.itemCode} 退回数量`"
               :addon-after="source?.unit"
               :max="(toNumber(input.quantity) ?? 0) - (toNumber(input.returnedQuantity) ?? 0)"
@@ -154,7 +156,7 @@ function next() {
           </template>
         </Alert>
       </div>
-      <footer class="flex flex-col gap-2 px-3 pb-4 sm:px-4">
+      <footer v-if="!props.embedded" class="flex flex-col gap-2 px-3 pb-4 sm:px-4">
         <button class="min-h-12 w-full rounded-md bg-primary text-base font-semibold text-primary-foreground" type="submit">
           {{ job.prepare || job.finish || job.createFinish || goodTotal(job) > 0 ? '下一步：核对本次报工' : '提交本次产出' }}
         </button>

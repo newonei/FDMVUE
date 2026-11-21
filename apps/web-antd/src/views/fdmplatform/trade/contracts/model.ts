@@ -1,3 +1,5 @@
+import type { SalesChannel } from '../../sales-channel';
+
 import type {
   ContractBoardOverview,
   ContractBoardRow,
@@ -10,6 +12,8 @@ import type {
 } from '#/api/fdmplatform/contract-board';
 
 import BigNumber from 'bignumber.js';
+
+import { contractInternalOrderNo } from '../../sales-channel';
 
 /** 流程条：按办理顺序排列；CHECK 只在有数量时出现 */
 export const flowStages = [
@@ -267,14 +271,13 @@ function csvCell(value: unknown) {
   const text = value === null || value === undefined ? '' : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
-/** 内销只认内部单号，不导出合同号 */
 export function contractCsv(
   rows: ContractBoardRow[],
   people: (id: null | number | undefined) => string,
-  domestic = false,
+  channel: SalesChannel,
 ) {
   const header = [
-    ...(domestic ? ['内部单号'] : ['合同号', '订单名称']),
+    '内部单号',
     '客户',
     '签订日期',
     '产品',
@@ -291,7 +294,7 @@ export function contractCsv(
   ];
   const lines = rows.map((row) =>
     [
-      ...(domestic ? [row.name || row.code] : [row.code, row.name]),
+      contractInternalOrderNo(row, channel),
       row.customerName,
       row.signedDate,
       productText(row),

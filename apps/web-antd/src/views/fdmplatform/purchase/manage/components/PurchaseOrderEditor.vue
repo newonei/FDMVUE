@@ -42,7 +42,7 @@ import {
 import { getProducts } from '#/api/fdmplatform/products';
 
 import RemoteMasterSelect from '../../../components/RemoteMasterSelect.vue';
-import { errorText } from '../../../data';
+import { errorText, rows as records } from '../../../data';
 import { navigationRoute } from '../../../documents/navigation';
 import ProductStructureDetails from '../../../products/components/ProductStructureDetails.vue';
 import { productStructure } from '../../../products/structure';
@@ -75,7 +75,7 @@ const props = defineProps<{
   contractId?: string;
   /** 复制这张采购单：带出合同、供应商、表头和明细，另存为新单 */
   copyFrom?: { contractId: string; orderId: string };
-  /** 修改撤回为草稿的这张采购单：带出原单，保存草稿或提交，不拆单、不换合同和公司 */
+  /** 编辑已有采购草稿。 */
   editOf?: { code?: string; contractId: string; orderId: string };
   open: boolean;
   /** 从采购申请开单时带出申请明细与可转数量。 */
@@ -83,7 +83,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  /** 新建、复制先保存为 draft；编辑时可以保存草稿或提交下单。 */
+  /** 新建、复制先保存草稿；编辑时可以保存草稿或提交审核。 */
   saved: [value: CreatedProcurementOrders, mode?: 'draft' | 'submitted'];
 }>();
 
@@ -137,6 +137,16 @@ const saving = ref(false);
 const error = ref('');
 const submitted = ref(false);
 const sourceRequestId = ref<string>();
+const draftRequestProducts = ref<
+  {
+    availableQuantity: string;
+    contractItemId: string;
+    label: string;
+    product: ReturnType<typeof entryProductFields>;
+    requestItemId: string;
+    value: string;
+  }[]
+>([]);
 let idempotencyKey = '';
 let sequence = 0;
 
@@ -209,7 +219,7 @@ const pickerOpen = ref(false);
 const pickerRow = ref<EntryRow>();
 const auxiliaryOpen = ref(false);
 function openPicker(row?: EntryRow) {
-  if (row?.requestItemId) return;
+  if (row?.requestItemId && !props.editOf) return;
   pickerRow.value = row;
   pickerMounted.value = true;
   pickerOpen.value = true;
@@ -377,24 +387,38 @@ async function chooseContract(value: unknown) {
     error.value = errorText(error_);
   }
 }
+function rowProductValue(row: EntryRow) {
+  if (props.editOf && row.requestItemId) return `request:${row.requestItemId}`;
+  return row.contractItemId ? `item:${row.contractItemId}` : row.productId;
+}
 function chooseProduct(row: EntryRow, value: unknown) {
-  if (typeof value !== 'string') return;
-  if (row.requestItemId) return;
-  if (sourceRequestId.value && value.startsWith('item:')) return;
-  // 复制行再次选中原产品仍沿用原单快照；真正换产品时解除来源绑定。
-  if (
-    row.sourceLineId &&
-    value ===
-      (row.contractItemId ? `item:${row.contractItemId}` : row.productId)
-  )
+  if (typeof value !== 'string' || value === rowProductValue(row)) return;
+  if (row.requestItemId && !props.editOf) return;
+  const requested = draftRequestProducts.value.find(
+    (entry) => entry.value === value,
+  );
+  if (requested) {
+    Object.assign(row, {
+      ...requested.product,
+      productId: undefined,
+      contractItemId: requested.contractItemId,
+      requestItemId: requested.requestItemId,
+      availableQuantity: requested.availableQuantity,
+      assignmentId: undefined,
+      lineId: undefined,
+      sourceLineId: undefined,
+    });
     return;
+  }
   if (value.startsWith('item:')) {
+    if (sourceRequestId.value) return;
     const item = contract.value?.items.find(
       (entry) => entry.id === value.slice(5),
     );
     if (!item) return;
     Object.assign(row, {
       ...entryProductFields(item),
+      lineId: undefined,
       sourceLineId: undefined,
       contractItemId: item.id,
       productId: undefined,
@@ -407,6 +431,10 @@ function chooseProduct(row: EntryRow, value: unknown) {
     category: product.category,
     productId: product.value,
     contractItemId: undefined,
+    requestItemId: undefined,
+    assignmentId: undefined,
+    availableQuantity: undefined,
+    lineId: undefined,
     sourceLineId: undefined,
     name: product.name,
     code: product.code,
@@ -537,14 +565,52 @@ async function copyOrder(
   rows.value = copied.rows.length > 0 ? copied.rows : [emptyRow(key())];
   if (edit && typeof view.order.requestId === 'string')
     sourceRequestId.value = view.order.requestId;
-  if (edit && contract.value) {
+  const currentContract = contract.value;
+  if (edit && currentContract && sourceRequestId.value) {
+    const request = currentContract.requests?.find(
+      (entry) => entry.id === sourceRequestId.value,
+    );
+    const requestLines = records(request?.items);
+    const reserved = new Map<string, BigNumber>();
     for (const row of rows.value) {
       if (!row.requestItemId) continue;
-      const line = (contract.value.requests ?? [])
-        .flatMap((entry) => (entry.items ?? []) as Record<string, unknown>[])
-        .find((entry) => entry.id === row.requestItemId);
+      reserved.set(
+        row.requestItemId,
+        (reserved.get(row.requestItemId) ?? new BigNumber(0)).plus(
+          row.quantity ?? 0,
+        ),
+      );
+    }
+    if (request?.status !== 'CANCELLED') {
+      draftRequestProducts.value = requestLines.flatMap((line) => {
+        const item = currentContract.items.find(
+          (entry) => entry.id === line.contractItemId,
+        );
+        if (!line.id || !item || line.reconciliationRequired) return [];
+        const available = new BigNumber(requestAvailableQuantity(line)).plus(
+          reserved.get(line.id) ?? 0,
+        );
+        if (!available.gt(0)) return [];
+        const product = entryProductFields(
+          (line.specificationSnapshot ?? item) as ProcurementProductSnapshot,
+        );
+        return [
+          {
+            availableQuantity: available.toFixed(0),
+            contractItemId: item.id,
+            label: `【申请明细】${product.code ?? ''} ${product.name}`.trim(),
+            product,
+            requestItemId: line.id,
+            value: `request:${line.id}`,
+          },
+        ];
+      });
+    }
+    for (const row of rows.value) {
+      if (!row.requestItemId) continue;
+      const line = requestLines.find((entry) => entry.id === row.requestItemId);
       const source = row.assignmentId
-        ? contract.value.assignments?.find(
+        ? currentContract.assignments?.find(
             (entry) => entry.id === row.assignmentId,
           )
         : line;
@@ -576,6 +642,7 @@ watch(
     contractReviewOpen.value = false;
     auxiliaryOpen.value = false;
     sourceRequestId.value = undefined;
+    draftRequestProducts.value = [];
     header.value = {
       category: PURCHASE_CATEGORIES[0],
       contractId: props.contractId,
@@ -628,7 +695,7 @@ watch(
 function close() {
   if (!saving.value) emit('close');
 }
-/** 新建先保存草稿；编辑草稿时可以明确提交下单。 */
+/** 新建先保存草稿；编辑草稿时可以提交审核。 */
 async function save(submit = false) {
   if (saving.value) return;
   submitted.value = true;
@@ -692,7 +759,7 @@ async function save(submit = false) {
       <Alert
         v-if="!editOf"
         type="info"
-        message="先保存采购草稿，再完善下单资料和上传附件；确认后提交下单。"
+        message="先保存采购草稿，再确认下单资料、上传附件和提交审核。"
         show-icon
       />
       <section class="entry-head" aria-label="基本信息">
@@ -839,19 +906,15 @@ async function save(submit = false) {
               <td class="product">
                 <div class="product-pick">
                   <Select
-                    :value="
-                      row.contractItemId
-                        ? `item:${row.contractItemId}`
-                        : row.productId
-                    "
+                    :value="rowProductValue(row)"
                     show-search
                     :filter-option="false"
                     :options="
-                      sourceRequestId && !row.requestItemId
-                        ? productOptions
+                      sourceRequestId && (editOf || !row.requestItemId)
+                        ? [...draftRequestProducts, ...productOptions]
                         : [...contractItems, ...productOptions]
                     "
-                    :disabled="!!row.requestItemId"
+                    :disabled="!!row.requestItemId && !editOf"
                     :placeholder="row.name || '搜索产品编号、名称'"
                     :dropdown-match-select-width="460"
                     style="width: 100%"
@@ -859,7 +922,7 @@ async function save(submit = false) {
                     @update:value="(value) => chooseProduct(row, value)"
                   />
                   <Button
-                    v-if="!row.requestItemId"
+                    v-if="!row.requestItemId || editOf"
                     size="small"
                     type="link"
                     title="从产品中心按分类选择"
@@ -1066,7 +1129,7 @@ async function save(submit = false) {
       <template v-if="editOf">
         <Button :loading="saving" @click="save(false)">保存草稿</Button>
         <Button type="primary" :loading="saving" @click="save(true)">
-          提交下单
+          提交审核
         </Button>
       </template>
       <Button v-else type="primary" :loading="saving" @click="save()">

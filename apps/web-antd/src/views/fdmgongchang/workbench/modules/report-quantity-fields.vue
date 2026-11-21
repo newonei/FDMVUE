@@ -8,18 +8,20 @@ import { InputNumber } from 'ant-design-vue';
 import { quantityPrecision } from '../../shared/quantity';
 import { changeReportDefect, changeReportTotal } from '../report-quantity';
 
-const props = defineProps<{ line: OutputDraft; unit?: null | string }>();
+const props = defineProps<{ idPrefix?: string; line: OutputDraft; unit?: null | string }>();
 const precision = computed(() => quantityPrecision(props.unit));
+const totalId = computed(() => `${props.idPrefix ?? ''}total-${props.line.key}`);
+const defectId = computed(() => `${props.idPrefix ?? ''}bad-${props.line.key}`);
 </script>
 
 <template>
   <div class="grid grid-cols-2 gap-3">
     <div class="flex min-w-0 flex-col gap-1">
-      <label :for="`total-${line.key}`" class="text-base font-semibold">
+      <label :for="totalId" class="text-base font-semibold">
         本次产量<span class="text-sm font-normal">（含瑕疵）</span>
       </label>
       <InputNumber
-        :id="`total-${line.key}`"
+        :id="totalId"
         :value="line.reportTotal ?? line.goodQuantity"
         :aria-label="`本次产量（含瑕疵）${unit || ''}`"
         :min="0"
@@ -32,9 +34,9 @@ const precision = computed(() => quantityPrecision(props.unit));
       />
     </div>
     <div class="flex min-w-0 flex-col gap-1">
-      <label :for="`bad-${line.key}`" class="text-base font-semibold">瑕疵数量</label>
+      <label :for="defectId" class="text-base font-semibold">瑕疵数量</label>
       <InputNumber
-        :id="`bad-${line.key}`"
+        :id="defectId"
         :value="line.defectQuantity ?? 0"
         :aria-label="`瑕疵数量 ${unit || ''}`"
         :min="0"

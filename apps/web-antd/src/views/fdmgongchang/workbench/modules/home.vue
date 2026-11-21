@@ -6,16 +6,18 @@ import type { FdmgongchangWorkbenchApi as Api } from '#/api/fdmgongchang/workben
 
 import { computed, ref, watch } from 'vue';
 
-import { Empty, Input, Modal, Select } from 'ant-design-vue';
+import { Button, Checkbox, Empty, Input, message, Modal, Select } from 'ant-design-vue';
 
 import { getWorkbenchMates } from '#/api/fdmgongchang/workbench';
 
 import { dimensionTextInMm } from '../../shared/dimensions';
 import { attrSummary, formatQty, makeLabels, toNumber } from '../../stage-stock/model';
 import { useJob } from '../use-job';
+import BatchWorkbench from './batch-workbench.vue';
 import RunningReportRow from './running-report-row.vue';
 
 const emit = defineEmits<{
+  batchSaved: [];
   orderDetails: [draft: OrderDraft];
   reportOrder: [draft: OrderDraft];
   startActual: [process: Api.Process];
@@ -114,6 +116,50 @@ const visibleOrders = computed(() => {
   const orders = section.value === 'running' ? matchingRunning.value : matchingRecent.value;
   return paged(orders).map((order) => ({ order, task: taskOf(order) }));
 });
+const selected = ref<number[]>([]);
+const reportDrafts = new Map<number, OrderDraft>();
+const batchMode = ref<'issue' | 'report'>();
+const batchLimit = 50;
+const pageIds = computed(() => section.value === 'pending'
+  ? visiblePending.value.map((task) => task.id)
+  : visibleOrders.value.map(({ order }) => order.id));
+const checkedOnPage = computed(() => pageIds.value.filter((id) => selected.value.includes(id)).length);
+const selectedTasks = computed(() => pendingTasks.value.filter((task) => selected.value.includes(task.id)));
+const selectedOrders = computed(() => inProgress.value.filter((order) => selected.value.includes(order.id)));
+
+function selectRows(ids: number[], checked: boolean) {
+  const next = checked
+    ? [...new Set([...selected.value, ...ids])]
+    : selected.value.filter((id) => !ids.includes(id));
+  if (next.length > batchLimit) {
+    message.warning(`每批最多选择 ${batchLimit} 项`);
+    return;
+  }
+  selected.value = next;
+}
+
+function batchSaved() {
+  if (batchMode.value === 'issue') {
+    section.value = 'running';
+    keyword.value = '';
+  } else {
+    for (const id of selected.value) reportDrafts.delete(id);
+  }
+  selected.value = [];
+  batchMode.value = undefined;
+  emit('batchSaved');
+}
+
+watch(section, () => { selected.value = []; });
+watch([pendingTasks, inProgress], () => {
+  const rows = section.value === 'pending' ? pendingTasks.value : inProgress.value;
+  const valid = new Set(rows.map((row) => row.id));
+  selected.value = selected.value.filter((id) => valid.has(id));
+  for (const [id, draft] of reportDrafts) {
+    const order = inProgress.value.find((row) => row.id === id);
+    if (!order || (order.reportCount ?? 0) !== (draft.order.reportCount ?? 0)) reportDrafts.delete(id);
+  }
+});
 const planned = (task: FdmgongchangScheduleApi.Task) => task.output?.mixPlan?.wholeBatchBoards ?? task.quantity;
 const remaining = (task: FdmgongchangScheduleApi.Task) => Math.max(0, (toNumber(planned(task)) ?? 0) - (toNumber(task.actualQuantity) ?? 0) - (toNumber(task.defectQuantity) ?? 0));
 const taskUnit = (task: FdmgongchangScheduleApi.Task) => task.output?.unit ?? task.unit ?? processOf(task.process)?.outputUnit;
@@ -148,6 +194,25 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         </button>
       </nav>
       <Input v-model:value="keyword" allow-clear aria-label="搜索我的任务" placeholder="搜索任务、订单号或规格" size="large" class="min-h-11" />
+      <div v-if="section !== 'recent' && (total || selected.length)" class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
+        <div class="flex flex-wrap items-center gap-3">
+          <Checkbox
+            :checked="!!pageIds.length && checkedOnPage === pageIds.length"
+            :disabled="!pageIds.length"
+            :indeterminate="checkedOnPage > 0 && checkedOnPage < pageIds.length"
+            @update:checked="selectRows(pageIds, $event)"
+          >
+全选本页
+</Checkbox>
+          <span class="text-sm tabular-nums text-muted-foreground" aria-live="polite">已选 {{ selected.length }} 项</span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button v-if="selected.length" @click="selected = []">取消勾选</Button>
+          <Button type="primary" :disabled="!selected.length" @click="batchMode = section === 'pending' ? 'issue' : 'report'">
+            {{ section === 'pending' ? '批量领料' : '批量报工' }}
+          </Button>
+        </div>
+      </div>
       <p v-if="section === 'recent'" class="m-0 text-sm text-muted-foreground">最近 3 天的完工记录</p>
       <p v-if="total === 0" class="m-0 rounded-md bg-card px-4 py-6 text-center text-base text-muted-foreground">
         {{ keyword ? '没有找到任务' : section === 'running' ? '还没有开工的任务' : section === 'recent' ? '最近没有完工记录' : '没有待开工任务' }}
@@ -156,6 +221,12 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
       <ul v-else aria-label="任务列表" role="list" class="m-0 list-none divide-y divide-border rounded-lg border border-border bg-card p-0">
         <li v-for="task in visiblePending" :key="task.id" :data-task-id="task.id">
           <div class="flex items-center gap-3 px-3 py-3 sm:px-4">
+            <Checkbox
+              class="shrink-0"
+              :aria-label="`选择任务 #${task.id}`"
+              :checked="selected.includes(task.id)"
+              @update:checked="selectRows([task.id], $event)"
+            />
             <div class="flex min-w-0 flex-1 flex-col gap-1 break-words">
               <b class="text-base leading-snug">{{ processTitle(task.process) }}</b>
               <span v-if="outputSpec(task)" class="text-base leading-snug">{{ outputSpec(task) }}</span>
@@ -171,13 +242,22 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
           </div>
         </li>
         <li v-for="{ order, task } in visibleOrders" :key="`order-${ order.id}`" :data-order-id="order.id">
-          <RunningReportRow
-            v-if="section === 'running'"
-            :order="order"
-            :planned-spec="task && outputSpec(task)"
-            @details="emit('orderDetails', $event)"
-            @report="emit('reportOrder', $event)"
-          />
+          <div v-if="section === 'running'" class="flex items-start">
+            <Checkbox
+              class="ml-3 mt-3 shrink-0 sm:ml-4"
+              :aria-label="`选择工序单 ${order.orderNo}`"
+              :checked="selected.includes(order.id)"
+              @update:checked="selectRows([order.id], $event)"
+            />
+            <RunningReportRow
+              class="min-w-0 flex-1"
+              :order="order"
+              :planned-spec="task && outputSpec(task)"
+              @details="emit('orderDetails', $event)"
+              @draft="reportDrafts.set(order.id, $event)"
+              @report="emit('reportOrder', $event)"
+            />
+          </div>
           <div v-else class="flex items-center gap-3 px-3 py-3 sm:px-4">
             <div class="flex min-w-0 flex-1 flex-col gap-1 break-words">
               <b class="text-base leading-snug">{{ processTitle(order.process) }}</b>
@@ -234,6 +314,15 @@ watch([section, keyword, page], () => { job.homeView = { section: section.value,
         </nav>
         </div>
       </section>
+      <BatchWorkbench
+        v-if="batchMode"
+        :mode="batchMode"
+        :orders="selectedOrders"
+        :report-drafts="reportDrafts"
+        :tasks="selectedTasks"
+        @close="batchMode = undefined"
+        @saved="batchSaved"
+      />
       <Modal
         :open="!!behalf"
         title="替谁报工"

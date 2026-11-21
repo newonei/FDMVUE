@@ -408,6 +408,7 @@ describe('order entry without changing menus', () => {
     await fill(host, '客户', 'customer', 'select');
     await fill(host, '合同主体', '1', 'select');
     await fill(host, '产品分类', 'YOGA', 'select');
+    await fill(host, '内部单号', 'WM-001');
     await addProduct(host);
     const id = host.querySelector<HTMLElement>('[data-row]')!.dataset.row;
     button(host, '本单配置').click();
@@ -439,7 +440,7 @@ describe('order entry without changing menus', () => {
       ),
     );
   });
-  it('saves and activates a contract without delivery requirements or product dates', async () => {
+  it('requires a foreign internal order number for a draft and activation', async () => {
     api.customers.mockResolvedValue({
       list: [
         { id: 'customer', name: '客户甲', type: 'CUSTOMER', active: true },
@@ -456,6 +457,16 @@ describe('order entry without changing menus', () => {
     await fill(host, '合同主体', '1', 'select');
     await fill(host, '产品分类', 'YOGA', 'select');
     await addProduct(host);
+    expect(host.querySelector('[data-label="订单号"]')).toBeNull();
+    await fill(host, '内部单号', '   ');
+    button(host, '保存草稿').click();
+    await nextTick();
+    expect(host.textContent).toContain('请填写内部单号');
+    button(host, '保存并生效').click();
+    await nextTick();
+    expect(api.create).not.toHaveBeenCalled();
+
+    await fill(host, '内部单号', ' WM-002 ');
     api.create.mockResolvedValueOnce({ id: 'contract-1', version: 1 });
     api.confirm.mockResolvedValueOnce({ id: 'contract-1', version: 2 });
     button(host, '保存并生效').click();
@@ -470,11 +481,13 @@ describe('order entry without changing menus', () => {
     );
     expect(api.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        name: 'WM-002',
         deliveryRequirement: '',
         items: [expect.objectContaining({ requiredDate: null })],
       }),
       [],
     );
+    expect(api.create.mock.calls[0]?.[0]).not.toHaveProperty('code');
   });
 
   it('submits the agreed delivery condition when activating a foreign contract', async () => {
@@ -493,6 +506,7 @@ describe('order entry without changing menus', () => {
     await fill(host, '客户', 'customer', 'select');
     await fill(host, '合同主体', '1', 'select');
     await fill(host, '产品分类', 'YOGA', 'select');
+    await fill(host, '内部单号', 'WM-003');
     await fill(host, '交付要求', '收定金后30天交货');
     await addProduct(host);
     api.create.mockRejectedValueOnce(new Error('保留表单用于测试'));
@@ -507,7 +521,7 @@ describe('order entry without changing menus', () => {
 
   it('seeds an inline customer from the search, selects it after save and preserves order fields and product lines', async () => {
     const { host } = await mountEditor();
-    await fill(host, '内部名称（可选）', '保留的订单备注');
+    await fill(host, '内部单号', 'WM-004');
     await addProduct(host);
     const lineId = host.querySelector<HTMLElement>('[data-row]')?.dataset.row;
     await fill(host, '客户', '新客户全称', '[data-search]');
@@ -542,10 +556,9 @@ describe('order entry without changing menus', () => {
         ?.value,
     ).toBe('created-customer');
     expect(
-      host.querySelector<HTMLInputElement>(
-        '[data-label="内部名称（可选）"] input',
-      )?.value,
-    ).toBe('保留的订单备注');
+      host.querySelector<HTMLInputElement>('[data-label="内部单号"] input')
+        ?.value,
+    ).toBe('WM-004');
     expect(host.querySelector<HTMLElement>('[data-row]')?.dataset.row).toBe(
       lineId,
     );
@@ -554,7 +567,7 @@ describe('order entry without changing menus', () => {
 
   it('keeps a failed customer form open and cancels back to the unchanged order', async () => {
     const { host } = await mountEditor();
-    await fill(host, '内部名称（可选）', '尚未保存');
+    await fill(host, '内部单号', 'WM-005');
     button(host, '新增客户并选用').click();
     await nextTick();
     const customer = host.querySelector<HTMLElement>(
@@ -579,10 +592,9 @@ describe('order entry without changing menus', () => {
     button(host, '放弃修改').click();
     await nextTick();
     expect(
-      host.querySelector<HTMLInputElement>(
-        '[data-label="内部名称（可选）"] input',
-      )?.value,
-    ).toBe('尚未保存');
+      host.querySelector<HTMLInputElement>('[data-label="内部单号"] input')
+        ?.value,
+    ).toBe('WM-005');
     expect(button(host, '保存草稿').disabled).toBe(false);
   });
 

@@ -65,5 +65,7 @@ export function changeLaminationDefect(line: LaminationReportDraft, side: Lamina
 export function laminationDefects(line: LaminationReportDraft): Api.LaminationDefect[] | undefined {
   if (!line.laminateLayers?.length) return undefined;
   const layers = laminationLayers(line);
-  return layers.length > 0 ? layers.map(({ side, color, defectQuantity }) => ({ side, color, quantity: quantity(defectQuantity) })) : undefined;
+  return layers.length > 0 ? layers.map(({ side, color, goodQuantity, defectQuantity }) => ({
+    side, color, goodQuantity: quantity(goodQuantity), quantity: quantity(defectQuantity),
+  })) : undefined;
 }
