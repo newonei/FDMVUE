@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        name: 'EmployeeExperienceLibrary',
+        path: 'experience',
+        component: () => import('#/views/fdmmcp/experience/index.vue'),
+        meta: { icon: 'lucide:book-open-check', title: '数字分身经验库' },
+      },
+      {
         name: 'Workspace',
         path: 'workspace',
         component: () => import('#/views/dashboard/workspace/index.vue'),

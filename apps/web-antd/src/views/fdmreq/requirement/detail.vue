@@ -14,6 +14,7 @@ import {
   Empty,
   Form,
   FormItem,
+  message,
   Modal,
   Select,
   Space,
@@ -26,7 +27,6 @@ import {
   Textarea,
   Timeline,
   TimelineItem,
-  message,
 } from 'ant-design-vue';
 
 import {
@@ -39,6 +39,7 @@ import {
   retryRequirement,
   supplementRequirement,
 } from '#/api/fdmreq';
+import { useExperienceIdentity } from '#/views/fdmmcp/experience/identity';
 
 import {
   canReviewVersion,
@@ -54,10 +55,11 @@ import {
   requiresManualHandling,
   safeExternalUrl,
 } from '../status';
+import TaskExperience from './TaskExperience.vue';
 
 defineOptions({ name: 'FdmReqRequirementDetail' });
 
-type FeedbackAction = 'reject' | 'supplement' | 'reanalyze' | 'retry';
+type FeedbackAction = 'reanalyze' | 'reject' | 'retry' | 'supplement';
 const route = useRoute();
 const router = useRouter();
 const { hasAccessByCodes } = useAccess();
@@ -71,6 +73,7 @@ const canDelete = computed(() =>
   hasAccessByCodes(['fdmreq:requirement:delete']),
 );
 const reqNo = computed(() => String(route.query.reqNo || ''));
+const identity = useExperienceIdentity();
 const loading = ref(false);
 const loadError = ref(false);
 const busy = ref(false);
@@ -91,7 +94,7 @@ let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let loadGeneration = 0;
 
 const requirement = computed(() => detail.value?.requirement);
-const versions = computed(() => [...(detail.value?.versions ?? [])].reverse());
+const versions = computed(() => (detail.value?.versions ?? []).toReversed());
 const selectedVersion = computed(() =>
   versions.value.find((item) => item.id === selectedVersionId.value),
 );
@@ -103,10 +106,25 @@ const isCurrentVersion = computed(
 const sections = computed(() =>
   proposalSections(selectedVersion.value?.contentJson),
 );
-const tasks = computed(() => [...(detail.value?.tasks ?? [])].reverse());
-const reports = computed(() => [...(detail.value?.reports ?? [])].reverse());
+const tasks = computed(() => (detail.value?.tasks ?? []).toReversed());
+const reports = computed(() => (detail.value?.reports ?? []).toReversed());
+const acceptedTask = computed(() => {
+  const versionId = requirement.value?.currentVersionId ?? null;
+  return tasks.value.find(
+    (task) => versionId === null || task.versionId === versionId,
+  );
+});
+const acceptedReport = computed(() => {
+  const taskId = acceptedTask.value?.id ?? null;
+  const versionId = requirement.value?.currentVersionId ?? null;
+  return reports.value.find((report) =>
+    taskId === null
+      ? versionId !== null && report.versionId === versionId
+      : report.taskId === taskId,
+  );
+});
 const events = computed(() =>
-  [...(detail.value?.events ?? [])].sort((a, b) => (b.id ?? 0) - (a.id ?? 0)),
+  (detail.value?.events ?? []).toSorted((a, b) => (b.id ?? 0) - (a.id ?? 0)),
 );
 const latestFeedback = computed(() =>
   events.value.find((item) => !!eventMessage(item)),
@@ -135,13 +153,13 @@ const canCancel = computed(
 );
 const stepIndex = computed(() => {
   if (status.value === 'CANCELLED') return -1;
-  if (['COMPLETED', 'ACCEPTED'].includes(status.value)) return 5;
+  if (['ACCEPTED', 'COMPLETED'].includes(status.value)) return 5;
   if (status.value === 'PENDING_ACCEPTANCE') return 4;
-  if (['DEVELOPING', 'TESTING', 'PUSHED_CHECKING'].includes(status.value))
+  if (['DEVELOPING', 'PUSHED_CHECKING', 'TESTING'].includes(status.value))
     return 3;
   if (status.value === 'APPROVED_PENDING_DEV') return 2;
   if (status.value === 'PENDING_CONFIRM') return 1;
-  if (status.value === 'BLOCKED') return tasks.value.length ? 3 : 0;
+  if (status.value === 'BLOCKED') return tasks.value.length > 0 ? 3 : 0;
   return 0;
 });
 const feedbackMeta = computed(
@@ -321,7 +339,8 @@ function taskSummary(task: FdmReqApi.DevTask) {
 }
 
 function reportColor(result?: string) {
-  return result === 'PASS' ? 'success' : result === 'FAIL' ? 'error' : 'orange';
+  if (result === 'PASS') return 'success';
+  return result === 'FAIL' ? 'error' : 'orange';
 }
 function reportLabel(result?: string) {
   return (
@@ -336,17 +355,22 @@ function reportLabel(result?: string) {
   );
 }
 
-watch(reqNo, () => {
-  detail.value = undefined;
-  approvalOpen.value = false;
-  approvalCandidate.value = undefined;
-  feedbackOpen.value = false;
-  completeOpen.value = false;
-  cancelOpen.value = false;
-  selectedVersionId.value = undefined;
-  activeTab.value = 'proposal';
-  void load();
-});
+watch(
+  [reqNo, identity],
+  () => {
+    loadGeneration++;
+    detail.value = undefined;
+    approvalOpen.value = false;
+    approvalCandidate.value = undefined;
+    feedbackOpen.value = false;
+    completeOpen.value = false;
+    cancelOpen.value = false;
+    selectedVersionId.value = undefined;
+    activeTab.value = 'proposal';
+    void load();
+  },
+  { flush: 'sync' },
+);
 onMounted(() => {
   void load();
   refreshTimer = setInterval(() => {
@@ -372,15 +396,14 @@ onBeforeUnmount(() => {
 <template>
   <Page auto-content-height>
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <Button @click="router.push('/fdmreq/requirements')"
-        >← 返回需求中心</Button
-      >
+      <Button @click="router.push('/fdmreq/requirements')">
+        ← 返回需求中心
+      </Button>
       <Space wrap>
         <span class="text-xs text-muted-foreground">{{
           refreshedAt ? `更新于 ${refreshedAt}` : ''
         }}</span>
-        <span class="text-xs text-muted-foreground">自动刷新</span
-        ><Switch
+        <span class="text-xs text-muted-foreground">自动刷新</span><Switch
           v-model:checked="autoRefresh"
           size="small"
           aria-label="自动刷新"
@@ -407,47 +430,56 @@ onBeforeUnmount(() => {
               <div
                 class="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
               >
-                <span>{{ requirement.reqNo }}</span
-                ><span>·</span
-                ><span
-                  >{{
+                <span>{{ requirement.reqNo }}</span><span>·</span><span>{{
                     formatFdmReqTime(requirement.createTime)
-                  }}（北京时间）</span
-                >
+                  }}（北京时间）</span>
               </div>
               <h1 class="req-heading">{{ requirement.title }}</h1>
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <Tag :color="getFdmReqStatusMeta(status).color">{{
-                  getFdmReqStatusMeta(status).label
-                }}</Tag
-                ><span class="text-sm text-muted-foreground">{{
+                <Tag :color="getFdmReqStatusMeta(status).color">
+                  {{ getFdmReqStatusMeta(status).label }}
+</Tag><span class="text-sm text-muted-foreground">{{
                   getFdmReqStatusHint(status)
                 }}</span>
               </div>
             </div>
             <Space wrap>
-              <Button v-if="canSupplement" @click="openFeedback('supplement')"
-                >补充说明</Button
-              >
+              <TaskExperience
+                v-if="
+                  !loadError &&
+                  requirement.reqNo === reqNo &&
+                  ['COMPLETED', 'ACCEPTED'].includes(status)
+                "
+                :key="identity + reqNo"
+                :requirement="requirement"
+                :summary="acceptedTask ? taskSummary(acceptedTask) : ''"
+                :risk="acceptedReport?.residualRisk"
+              />
+              <Button v-if="canSupplement" @click="openFeedback('supplement')">
+                补充说明
+              </Button>
               <Button
                 v-if="canApprove && status === 'BLOCKED'"
                 type="primary"
                 @click="openFeedback('retry')"
-                >处理后重试</Button
               >
+                处理后重试
+              </Button>
               <Button
                 v-if="canApprove && status === 'PENDING_ACCEPTANCE'"
                 type="primary"
                 @click="completeOpen = true"
-                >验收通过</Button
               >
+                验收通过
+              </Button>
               <Button
                 v-if="canCancel"
                 danger
                 type="text"
                 @click="cancelOpen = true"
-                >取消需求</Button
               >
+                取消需求
+              </Button>
             </Space>
           </div>
           <Steps
@@ -545,16 +577,15 @@ onBeforeUnmount(() => {
                 <div
                   class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4"
                 >
-                  <span class="text-xs text-muted-foreground"
-                    >{{ selectedVersion.versionNo }} · 生成于
-                    {{ formatFdmReqTime(selectedVersion.createTime) }}</span
-                  >
+                  <span class="text-xs text-muted-foreground">{{ selectedVersion.versionNo }} · 生成于
+                    {{ formatFdmReqTime(selectedVersion.createTime) }}</span>
                   <Space wrap>
                     <Button
                       v-if="canUpdate && editableStatuses.includes(status)"
                       @click="openFeedback('reanalyze')"
-                      >重新分析</Button
                     >
+                      重新分析
+                    </Button>
                     <Button
                       v-if="
                         canApprove &&
@@ -562,14 +593,16 @@ onBeforeUnmount(() => {
                         isCurrentVersion
                       "
                       @click="openFeedback('reject')"
-                      >退回修改</Button
                     >
+                      退回修改
+                    </Button>
                     <Button
                       v-if="showReview"
                       type="primary"
                       @click="openApproval"
-                      >审核通过，加入待实现</Button
                     >
+                      审核通过，加入待实现
+                    </Button>
                   </Space>
                 </div>
               </template>
@@ -595,10 +628,7 @@ onBeforeUnmount(() => {
                   <span>{{
                     versions.find((item) => item.id === approval.versionId)
                       ?.versionNo || `版本 ${approval.versionId}`
-                  }}</span
-                  ><span>审核人 {{ approval.approverId || '—' }}</span
-                  ><span>{{ formatFdmReqTime(approval.approvedAt) }}</span
-                  ><Tag color="success">审核通过</Tag>
+                  }}</span><span>审核人 {{ approval.approverId || '—' }}</span><span>{{ formatFdmReqTime(approval.approvedAt) }}</span><Tag color="success">审核通过</Tag>
                 </div>
               </div>
             </TabPane>
@@ -624,8 +654,7 @@ onBeforeUnmount(() => {
                   <div
                     class="mb-2 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground"
                   >
-                    <b>{{ eventLabel(event) }}</b
-                    ><span>{{ formatFdmReqTime(event.createTime) }}</span>
+                    <b>{{ eventLabel(event) }}</b><span>{{ formatFdmReqTime(event.createTime) }}</span>
                   </div>
                   <p>{{ eventMessage(event) }}</p>
                 </div>
@@ -670,34 +699,30 @@ onBeforeUnmount(() => {
                       · 已重试 {{ task.retryCount ?? 0 }} 次
                     </div>
                   </div>
-                  <Tag :color="getFdmReqStatusMeta(task.status).color">{{
-                    getFdmReqStatusMeta(task.status).label
-                  }}</Tag>
+                  <Tag :color="getFdmReqStatusMeta(task.status).color">
+                    {{ getFdmReqStatusMeta(task.status).label }}
+                  </Tag>
                 </div>
                 <div class="mb-4 grid gap-3 text-sm md:grid-cols-2">
                   <div>
-                    <span class="text-muted-foreground">最近心跳：</span
-                    >{{
+                    <span class="text-muted-foreground">最近心跳：</span>{{
                       task.heartbeatAt
                         ? formatFdmReqTime(task.heartbeatAt)
                         : '尚未收到'
                     }}
                   </div>
                   <div>
-                    <span class="text-muted-foreground">执行分支：</span
-                    ><code>{{ task.branchName || '待生成' }}</code>
+                    <span class="text-muted-foreground">执行分支：</span><code>{{ task.branchName || '待生成' }}</code>
                   </div>
                   <div
                     v-if="
                       task.id === tasks[0]?.id && detail?.lease?.type === 'DEV'
                     "
                   >
-                    <span class="text-muted-foreground">领取有效期：</span
-                    >{{ formatFdmReqTime(detail?.lease?.expiresAt) }}
+                    <span class="text-muted-foreground">领取有效期：</span>{{ formatFdmReqTime(detail?.lease?.expiresAt) }}
                   </div>
                   <div v-if="task.commitSha">
-                    <span class="text-muted-foreground">提交记录：</span
-                    ><code class="break-all">{{ task.commitSha }}</code>
+                    <span class="text-muted-foreground">提交记录：</span><code class="break-all">{{ task.commitSha }}</code>
                   </div>
                 </div>
                 <Alert
@@ -721,8 +746,7 @@ onBeforeUnmount(() => {
                     target="_blank"
                     rel="noopener noreferrer"
                     class="pr-link"
-                    >{{ pr.repository }} ↗</a
-                  >
+                    >{{ pr.repository }} ↗</a>
                 </div>
                 <details v-if="task.logExcerpt" class="task-log">
                   <summary>执行日志摘要</summary>
@@ -737,17 +761,15 @@ onBeforeUnmount(() => {
                 class="task-card"
               >
                 <div class="mb-3 flex flex-wrap justify-between gap-2">
-                  <span class="text-sm"
-                    >任务
+                  <span class="text-sm">任务
                     {{
                       tasks.find((item) => item.id === report.taskId)?.taskNo ||
                       report.taskId ||
                       '—'
                     }}
-                    · {{ formatFdmReqTime(report.createTime) }}</span
-                  ><Tag :color="reportColor(report.result)">{{
-                    reportLabel(report.result)
-                  }}</Tag>
+                    · {{ formatFdmReqTime(report.createTime) }}</span><Tag :color="reportColor(report.result)">
+                    {{ reportLabel(report.result) }}
+                  </Tag>
                 </div>
                 <div v-if="report.commandsJson" class="mb-3">
                   <h3 class="mb-2 text-xs text-muted-foreground">检查命令</h3>
@@ -800,8 +822,7 @@ onBeforeUnmount(() => {
                   "
                 >
                   <div class="mb-1 flex flex-wrap items-center gap-3">
-                    <strong class="text-sm">{{ eventLabel(event) }}</strong
-                    ><span class="text-xs text-muted-foreground">{{
+                    <strong class="text-sm">{{ eventLabel(event) }}</strong><span class="text-xs text-muted-foreground">{{
                       formatFdmReqTime(event.createTime)
                     }}</span>
                   </div>
@@ -813,10 +834,8 @@ onBeforeUnmount(() => {
                         event.fromStatus
                           ? `${getFdmReqStatusMeta(event.fromStatus).label} → `
                           : ''
-                      }}{{
-                        getFdmReqStatusMeta(event.toStatus).label
-                      }}</template
-                    >
+                      }}{{ getFdmReqStatusMeta(event.toStatus).label }}
+                    </template>
                   </div>
                   <p
                     v-if="eventMessage(event)"
@@ -863,14 +882,16 @@ onBeforeUnmount(() => {
       <p class="mb-4 mt-3 text-sm text-muted-foreground">
         {{ feedbackMeta.hint }}
       </p>
-      <Form layout="vertical"
-        ><FormItem :label="feedbackMeta.label" required
-          ><Textarea
+      <Form layout="vertical">
+        <FormItem :label="feedbackMeta.label" required>
+          <Textarea
             v-model:value="feedbackMessage"
             :rows="5"
             :maxlength="8000"
-            show-count /></FormItem
-      ></Form>
+            show-count
+          />
+        </FormItem>
+      </Form>
     </Modal>
     <Modal
       v-model:open="completeOpen"
@@ -879,10 +900,11 @@ onBeforeUnmount(() => {
       cancel-text="继续检查"
       :confirm-loading="busy"
       @ok="complete"
-      ><p class="my-4">
-        请确认实现效果、测试报告和剩余风险已检查。此操作将需求标记为已完成，不会自动合并代码。
-      </p></Modal
     >
+      <p class="my-4">
+        请确认实现效果、测试报告和剩余风险已检查。此操作将需求标记为已完成，不会自动合并代码。
+      </p>
+    </Modal>
     <Modal
       v-model:open="cancelOpen"
       title="确认取消这个需求？"
@@ -891,103 +913,117 @@ onBeforeUnmount(() => {
       :ok-button-props="{ danger: true }"
       :confirm-loading="busy"
       @ok="cancel"
-      ><p class="my-4">
-        取消后将停止排队，需求描述、方案和历史记录会保留。
-      </p></Modal
     >
+      <p class="my-4">取消后将停止排队，需求描述、方案和历史记录会保留。</p>
+    </Modal>
   </Page>
 </template>
 
 <style scoped>
 .req-heading {
   margin: 0;
-  overflow-wrap: anywhere;
   font-size: 24px;
-  line-height: 1.4;
   font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
+
 .section-heading {
   font-size: 16px;
   font-weight: 600;
 }
+
 .proposal-grid {
   display: grid;
   gap: 16px;
 }
+
 .proposal-section {
   padding: 18px 20px;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
+
 .proposal-section:first-child {
-  background: hsl(var(--primary) / 0.035);
+  background: hsl(var(--primary) / 3.5%);
   border-left: 3px solid hsl(var(--primary));
 }
+
 .proposal-section h3 {
   margin-bottom: 10px;
   font-size: 14px;
   font-weight: 600;
 }
+
 .proposal-section p,
 .feedback-entry p {
   margin: 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
   font-size: 14px;
   line-height: 1.85;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
+
 .readable-block {
   padding: 16px;
-  border-radius: 8px;
-  background: hsl(var(--muted) / 0.55);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: hsl(var(--muted) / 55%);
+  border-radius: 8px;
 }
+
 .feedback-entry {
-  margin-bottom: 12px;
   padding: 16px;
+  margin-bottom: 12px;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
+
 .task-card {
-  margin-bottom: 16px;
   padding: 20px;
+  margin-bottom: 16px;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
+
 .task-log {
   margin-top: 12px;
   font-size: 13px;
 }
+
 .task-log summary {
-  cursor: pointer;
   color: hsl(var(--muted-foreground));
+  cursor: pointer;
 }
+
 .task-log pre {
   max-height: 300px;
-  overflow: auto;
-  margin-top: 12px;
   padding: 14px;
-  border-radius: 6px;
-  background: hsl(var(--muted) / 0.6);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  margin-top: 12px;
+  overflow: auto;
   line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: hsl(var(--muted) / 60%);
+  border-radius: 6px;
 }
+
 .pr-link {
   display: inline-block;
   padding: 7px 12px;
-  border: 1px solid hsl(var(--primary) / 0.25);
-  border-radius: 6px;
-  color: hsl(var(--primary));
   font-size: 13px;
+  color: hsl(var(--primary));
+  border: 1px solid hsl(var(--primary) / 25%);
+  border-radius: 6px;
 }
+
 @media (max-width: 640px) {
   .req-heading {
     font-size: 20px;
   }
+
   .task-card,
   .proposal-section {
     padding: 14px;

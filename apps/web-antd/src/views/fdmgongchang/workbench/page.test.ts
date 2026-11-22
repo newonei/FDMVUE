@@ -480,6 +480,67 @@ describe('workbench page', () => {
     expect(layers(32)).toEqual(['正面 · 2113 正常 至少 90 片 · 瑕疵 未分色', '反面 · 511U 正常 至少 90 片 · 瑕疵 10 片']);
   });
 
+  it('distinguishes reported shortages, fulfilled plans and closed tasks in workshop rows, counts and filters', async () => {
+    const process = { code: 'LAMINATE', label: '贴合', outputLabel: '已复合片材', outputStage: 'LAMINATED', outputUnit: '片', sources: ['CUT'] };
+    const reported = { ...my.tasks[0]!, process: 'LAMINATE', status: 'DONE', quantity: 200,
+      orderCount: 1, completedOrderCount: 1, output: { stage: 'LAMINATED', attrs: { frontColor: '5793', backColor: '2463 C' } } };
+    const shortOrder = 'GD20261120-002';
+    mocks.my.mockResolvedValue({ ...workshop(), processes: [process], workshopProcess: process, workshopTasks: [
+      { ...reported, id: 926, contractCode: shortOrder, actualQuantity: 185, defectQuantity: 15,
+        laminationActuals: { frontGoodQuantity: 185, backGoodQuantity: 186, frontDefectQuantity: 15, backDefectQuantity: 14, goodQuantityLowerBound: false } },
+      { ...reported, id: 927, contractCode: 'HT-FULFILLED', actualQuantity: 200 },
+      { ...reported, id: 928, contractCode: 'HT-FULFILLED', actualQuantity: 201 },
+      { ...reported, id: 929, contractCode: 'HT-CLOSED', status: 'CLOSED', actualQuantity: 0, orderCount: 0, completedOrderCount: 0 },
+      { ...reported, id: 930, contractCode: 'HT-HANDLED', actualQuantity: 190, shortageHandledAt: '2026-11-21 09:00:00', shortageNote: '已补派 10 片' },
+    ] });
+    const visibleOrderKeys = () => [...document.querySelectorAll<HTMLElement>('[data-order-key]')].map((row) => row.dataset.orderKey);
+    const orderText = (key: string) => document.querySelector(`[data-order-key="${key}"]`)!.textContent!;
+    const taskRow = (id: number) => document.querySelector(`[data-task-id="${id}"]`)!;
+    const changeFilter = async (label: string) => {
+      document.querySelector('#workshop-status')!.closest('.ant-select')!.querySelector('.ant-select-selector')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flush();
+      const option = [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')].find((item) => item.textContent === label)!;
+      option.click(); await flush();
+    };
+
+    await mount('LAMINATE');
+    expect(document.body.textContent).toMatch(/待完成任务\s*1/);
+    expect(visibleOrderKeys()).toEqual([shortOrder]);
+    expect(orderText(shortOrder)).toMatch(/待完成\s*1/);
+    expect(orderText(shortOrder)).toMatch(/已完成\s*0/);
+    await expandOrder(shortOrder);
+    expect(taskRow(926).querySelector('.ant-tag')?.textContent).toBe('已报工 · 未达计划');
+    expect(taskRow(926).textContent).toContain('已贴合 185 片');
+    expect(taskRow(926).textContent).toContain('良品缺口 15 片');
+    expect(taskRow(926).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
+
+    await changeFilter('有已完成任务');
+    expect(visibleOrderKeys()).toEqual(['HT-FULFILLED']);
+    expect(orderText('HT-FULFILLED')).toMatch(/已完成\s*2/);
+    await expandOrder('HT-FULFILLED');
+    for (const id of [927, 928]) {
+      expect(taskRow(id).querySelector('.ant-tag')?.textContent).toBe('已完成');
+      expect(taskRow(id).textContent).not.toContain('良品缺口');
+    }
+
+    await changeFilter('全部订单');
+    const visibleOrders = visibleOrderKeys();
+    expect(visibleOrders).toHaveLength(4);
+    expect(visibleOrders).toEqual(
+      expect.arrayContaining([shortOrder, 'HT-CLOSED', 'HT-FULFILLED', 'HT-HANDLED']),
+    );
+    expect(orderText('HT-CLOSED')).toMatch(/已完成\s*0/);
+    expect(orderText('HT-CLOSED')).toMatch(/已关闭\s*1/);
+    await expandOrder('HT-CLOSED');
+    expect(taskRow(929).querySelector('.ant-tag')?.textContent).toBe('已关闭');
+    expect(taskRow(929).querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
+    expect(orderText('HT-HANDLED')).toMatch(/差额已处理\s*1/);
+    await expandOrder('HT-HANDLED');
+    expect(taskRow(930).textContent).toContain('已报工 · 未达计划');
+    expect(taskRow(930).textContent).toContain('良品缺口 10 片');
+  });
+
   it('recalculates the estimate after another report changes the refreshed task progress', async () => {
     const task = { ...my.tasks[0]!, quantity: 100, sliceBoardYield: 108 };
     mocks.my.mockResolvedValue({ ...workshop(), workshopTasks: [task] });

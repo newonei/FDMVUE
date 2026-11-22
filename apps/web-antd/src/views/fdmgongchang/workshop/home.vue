@@ -27,7 +27,7 @@ import { quantityPrecision } from '../shared/quantity';
 import { dateText, PROCESS_LABELS } from '../shared/schedule';
 import { formatQty, makeLabels, roundQty, sizeText, toNumber } from '../stage-stock/model';
 import { useJob } from '../workbench/use-job';
-import { groupWorkshopOrders, isTaskCompleted, mixPlanLines, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT } from './order-model';
+import { groupWorkshopOrders, mixPlanLines, orderFocus, orderMatches, taskFocus, taskOrderNos, uniqueTasks, WORKSHOP_FOCUS, WORKSHOP_OUTPUT, workshopTaskProgress } from './order-model';
 import OrdersTable from './orders-table.vue';
 import RelatedOrderTable from './related-order-table.vue';
 
@@ -48,8 +48,8 @@ const orders = computed(() => groupWorkshopOrders(tasks.value));
 const keyword = ref('');
 const status = ref('ACTIVE');
 const visibleOrders = computed(() => orders.value.filter((order) => orderMatches(order, keyword.value)
-  && (status.value === 'ALL' || order.tasks.some((task) => status.value === 'ACTIVE' ? !isTaskCompleted(task) : isTaskCompleted(task)))));
-const activeCount = computed(() => tasks.value.filter((task) => !isTaskCompleted(task)).length);
+  && (status.value === 'ALL' || (status.value === 'ACTIVE' ? order.counts.pending : order.counts.completed) > 0)));
+const activeCount = computed(() => tasks.value.filter((task) => workshopTaskProgress(task).group === 'pending').length);
 const expandedOrderKeys = ref<string[]>([]);
 const selectedIds = ref<number[]>([]);
 const selectedTasks = computed(() => tasks.value.filter((task) => selectedIds.value.includes(task.id)));
@@ -65,7 +65,8 @@ const boardOptions = reactive<Record<number, Api.BatchOptions>>({});
 const boardLoading = reactive<Record<number, boolean>>({});
 const boardErrors = reactive<Record<number, string>>({});
 const foldingOptions = ['二折', '三折', '四折', '六折', '八折', '十折', '十二折'].map((value) => ({ value }));
-const canReport = (task: ScheduleApi.Task) => !!process.value && !isTaskCompleted(task) && !task.activeOrderId && !submittedIds.value.includes(task.id);
+const reportingEnded = (task: ScheduleApi.Task) => task.status === 'DONE' || task.status === 'CLOSED';
+const canReport = (task: ScheduleApi.Task) => !!process.value && !reportingEnded(task) && !task.activeOrderId && !submittedIds.value.includes(task.id);
 const canAssign = (task: ScheduleApi.Task) => !task.orderCount && !task.activeOrderId && ['CLAIMED', 'OPEN'].includes(task.status ?? 'OPEN');
 const dispatchDisabled = computed(() => selectedTasks.value.length === 0 || selectedTasks.value.some((task) => !canAssign(task)));
 const operators = ref<FdmgongchangFactoryApi.Operator[]>([]);
@@ -124,7 +125,7 @@ function taskDraft(task: ScheduleApi.Task): Draft {
   const draft: Draft = {
     taskVersion,
     attrs: task.output?.attrs ?? {},
-    goodQuantity: isTaskCompleted(task) ? undefined : remainingReportQuantity(task, planned),
+    goodQuantity: reportingEnded(task) ? undefined : remainingReportQuantity(task, planned),
     defectQuantity: 0, foldingType: task.output?.foldingType?.trim() ?? '',
     operatorUserId: (task.workerIds ?? '').split(',').filter(Boolean).length === 1 ? Number(task.workerIds) : undefined,
   };
@@ -192,7 +193,7 @@ async function batchReport() {
   if (busy.value || selectedTasks.value.length === 0) return;
   const rows: Api.BatchReportRow[] = [];
   for (const task of selectedTasks.value) {
-    if (!canReport(task)) { warning.value = `任务 #${task.id} 已领料或已完成，请刷新后查看原工序单。`; return; }
+    if (!canReport(task)) { warning.value = `任务 #${task.id} 当前无法批量报工，请刷新后查看任务状态。`; return; }
     const draft = taskDraft(task);
     const good = Number(draft.goodQuantity ?? 0); const defect = Number(draft.defectQuantity ?? 0);
     if (!Number.isFinite(good) || !Number.isFinite(defect) || good < 0 || defect < 0 || good + defect <= 0) {
@@ -272,11 +273,6 @@ const taskColumns = computed<TableColumnsType<ScheduleApi.Task>>(() => {
 const inProgress = computed(() => my.value.inProgress.filter((order) => order.process === props.process));
 const recentDone = computed(() => (my.value.recentDone ?? []).filter((order) => order.process === props.process));
 const independentProcess = computed(() => my.value.processes.find((item) => item.code === props.process));
-function taskState(task: ScheduleApi.Task) {
-  if (task.status === 'CLOSED') return '已关闭'; if (task.status === 'DONE') return '已完成';
-  if (task.activeOrderId) return '已领料 · 在做';
-  return Number(task.actualQuantity) + Number(task.defectQuantity ?? 0) > 0 ? '部分报工' : '待报工';
-}
 /** 合并发泡任务分给各订单明细的张数。 */
 function coverLines(task: ScheduleApi.Task) {
   return (task.covers ?? []).map((cover) => {
@@ -356,7 +352,14 @@ v-model:expanded-row-keys="expandedOrderKeys" class="workshop-order-table" :colu
           <template v-if="column.key === 'order'"><div class="break-words font-semibold">{{ order.orderNo }}</div><div class="mt-1 text-xs text-muted-foreground">{{ order.customer || '—' }}</div><div v-if="order.items[0]?.promisedDate || order.items[0]?.requiredDate" class="mt-1 text-xs text-muted-foreground">交期 {{ dateText(order.items[0].promisedDate || order.items[0].requiredDate) }}</div></template>
           <template v-else-if="column.key === 'products'"><div v-for="item in order.items.slice(0, 2)" :key="item.itemId" class="line-clamp-1 text-sm" :title="item.productName">{{ item.productName || item.productCode || '未填写产品名称' }}</div><div v-if="order.items.length > 2" class="text-xs text-muted-foreground">等 {{ order.items.length }} 条产品明细，展开查看</div><div v-if="!order.items.length" class="text-xs text-muted-foreground">未关联具体订单产品明细</div></template>
           <template v-else-if="column.key === 'focus'"><div v-for="field in summaryFields(order as WorkshopOrder)" :key="`${field.label}:${field.value}`" class="mb-1 flex gap-2 text-sm"><span class="shrink-0 text-xs text-muted-foreground">{{ field.label }}</span><strong class="break-words" :title="field.value">{{ field.value }}</strong></div></template>
-          <template v-else-if="column.key === 'progress'"><div>共 <b>{{ order.tasks.length }}</b> 项任务</div><div class="mt-1 text-xs text-muted-foreground">待完成 {{ order.tasks.filter((task: ScheduleApi.Task) => !isTaskCompleted(task)).length }} · 已完成 {{ order.tasks.filter(isTaskCompleted).length }}</div></template>
+          <template v-else-if="column.key === 'progress'">
+            <div>共 <b>{{ order.tasks.length }}</b> 项任务</div>
+            <div class="mt-1 text-xs text-muted-foreground">
+              待完成 {{ order.counts.pending }} · 已完成 {{ order.counts.completed }}
+              <span v-if="order.counts.handled"> · 差额已处理 {{ order.counts.handled }}</span>
+              <span v-if="order.counts.closed"> · 已关闭 {{ order.counts.closed }}</span>
+            </div>
+          </template>
           <template v-else-if="column.key === 'actions'"><Button type="link" :aria-expanded="expandedOrderKeys.includes(order.key)" @click="toggleOrder(order as WorkshopOrder)">{{ expandedOrderKeys.includes(order.key) ? '收起订单' : '展开订单' }}</Button></template>
         </template>
         <template #expandedRowRender="{ record: order }">
@@ -369,7 +372,7 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
 >
               <template #bodyCell="{ column, record: task }">
                 <template v-if="column.key === 'task'">
-                  <div class="flex flex-wrap items-center gap-1 font-semibold">#{{ task.id }} <Tag class="!m-0" :color="isTaskCompleted(task as ScheduleApi.Task) ? 'default' : 'blue'">{{ taskState(task as ScheduleApi.Task) }}</Tag><Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag></div>
+                  <div class="flex flex-wrap items-center gap-1 font-semibold">#{{ task.id }} <Tag class="!m-0" :color="task.progress.color">{{ task.progress.label }}</Tag><Tag v-if="task.output?.side" class="!m-0" :color="task.output.side === 'BACK' ? 'purple' : 'blue'">{{ task.output.side === 'FRONT' ? '正面' : task.output.side === 'BACK' ? '反面' : '整体' }}</Tag></div>
                   <div class="mt-0.5 line-clamp-2 text-xs leading-[18px]" :title="task.product">{{ task.relatedOrderItems?.map((item: ScheduleApi.RelatedOrderItem) => item.productName || item.productCode).filter(Boolean).join('、') || task.product || '按任务要求生产' }}</div>
                   <div v-if="taskOrderNos(task as ScheduleApi.Task).length > 1" class="mt-1 text-xs text-orange-600">合并任务 · 勾选同步，只报一次<br />关联 {{ taskOrderNos(task as ScheduleApi.Task).join('、') }}</div>
                   <ul v-if="coverLines(task as ScheduleApi.Task).length > 1" class="mb-0 mt-1 list-none p-0 text-xs text-muted-foreground"><li v-for="line in coverLines(task as ScheduleApi.Task)" :key="line">{{ line }}</li></ul>
@@ -419,6 +422,9 @@ class="workshop-task-table" :columns="taskColumns" :data-source="order.tasks" :r
                 <template v-else-if="column.key === 'progress'">
                   <div v-if="adjustedBoards(task as ScheduleApi.Task) !== undefined" class="text-base text-primary">选板后计划 <b>{{ formatQty(adjustedBoards(task as ScheduleApi.Task)) }}</b> {{ task.unit }}</div>
                   <div v-else class="text-base">计划 <b>{{ formatQty(task.quantity) }}</b> {{ task.unit }}</div>
+                  <div v-if="task.progress.shortage != null" class="mt-1 text-sm font-semibold text-orange-700">
+                    良品缺口 {{ formatQty(task.progress.shortage) }} {{ task.unit }}<span v-if="task.shortageHandledAt"> · 差额已处理</span>
+                  </div>
                   <template v-if="props.process === 'LAMINATE'">
                     <div class="mt-1 text-sm">已贴合 {{ formatQty(task.actualQuantity) }} {{ task.unit }}</div>
                     <div v-for="layer in reportedLaminationLayers(task as ScheduleApi.Task)" :key="layer.side" class="mt-1 text-xs" data-lamination-progress>

@@ -242,6 +242,11 @@ function selectStat(tile: StatTile) {
 }
 
 const allQuickEntries = computed<QuickEntry[]>(() => [
+  {
+    icon: 'lucide:book-open-check',
+    path: '/dashboard/experience',
+    title: '数字分身经验库',
+  },
   ...portals.value.map((department) => ({
     icon: DEPARTMENT_ICONS[department],
     path: PORTAL_PATHS[department],

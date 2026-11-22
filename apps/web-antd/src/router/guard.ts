@@ -1,4 +1,4 @@
-import type { RouteLocationNormalized, Router } from 'vue-router';
+import type { Router } from 'vue-router';
 
 import { LOGIN_PATH } from '@vben/constants';
 import { $t } from '@vben/locales';
@@ -11,25 +11,15 @@ import { message } from 'ant-design-vue';
 import { getSimpleDictDataList } from '#/api/system/dict/data';
 import { accessRoutes, coreRouteNames } from '#/router/routes';
 import { useAuthStore } from '#/store';
+import { rememberCapture } from '#/views/fdmmcp/experience/DesktopCaptureTransfer';
 
 import { generateAccess } from './access';
-import { resolveLegacyFallbackPath } from './legacy-route-redirects';
+import { legacyFallback } from './legacy-route-redirects';
 
 /**
  * 通用守卫配置
  * @param router
  */
-
-/** 菜单挪到新目录后，旧地址找不到页面时跳到新地址（带上原来的查询参数）。 */
-function legacyFallback(
-  to: ReturnType<Router['resolve']> | RouteLocationNormalized,
-) {
-  if (!to.matched.some((r) => r.name === 'FallbackNotFound')) return undefined;
-  const path = resolveLegacyFallbackPath(to.path);
-  return path
-    ? { hash: to.hash, path, query: to.query, replace: true }
-    : undefined;
-}
 
 function setupCommonGuard(router: Router) {
   // 记录已经加载的页面
@@ -105,7 +95,7 @@ function setupAccessGuard(router: Router) {
 
     // 是否已经生成过动态路由
     if (accessStore.isAccessChecked) {
-      return legacyFallback(to) ?? true;
+      return legacyFallback(router, to) ?? true;
     }
 
     // 加载字典数据（不阻塞加载）
@@ -143,13 +133,16 @@ function setupAccessGuard(router: Router) {
     accessStore.setAccessRoutes(accessibleRoutes);
     accessStore.setIsAccessChecked(true);
     userStore.setUserRoles(userRoles);
-    const redirectPath = (from.query.redirect ??
-      (to.path === preferences.app.defaultHomePath
-        ? userInfo?.homePath || preferences.app.defaultHomePath
-        : to.fullPath)) as string;
-
-    const target = router.resolve(decodeURIComponent(redirectPath));
-    const legacy = legacyFallback(target);
+    // Only the redirect created by the login guard is encoded as a whole URL.
+    // Decoding a direct bookmark would turn query values such as %26 into separators.
+    let redirectPath = to.fullPath;
+    if (typeof from.query.redirect === 'string') {
+      redirectPath = decodeURIComponent(from.query.redirect);
+    } else if (to.path === preferences.app.defaultHomePath) {
+      redirectPath = userInfo?.homePath || preferences.app.defaultHomePath;
+    }
+    const target = router.resolve(redirectPath);
+    const legacy = legacyFallback(router, target);
     if (legacy) return legacy;
     return {
       ...target,
@@ -163,6 +156,10 @@ function setupAccessGuard(router: Router) {
  * @param router
  */
 function createRouterGuard(router: Router) {
+  router.beforeEach((to) => {
+    if (rememberCapture(to.path, to.hash))
+      return { path: to.path, query: to.query, replace: true };
+  });
   /** 通用 */
   setupCommonGuard(router);
   /** 权限访问 */

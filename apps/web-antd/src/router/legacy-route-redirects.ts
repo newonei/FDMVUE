@@ -1,3 +1,5 @@
+import type { RouteLocationNormalized, Router } from 'vue-router';
+
 const LEGACY_ROUTE_REDIRECTS = [
   {
     from: '/analytics',
@@ -11,11 +13,13 @@ const LEGACY_ROUTE_REDIRECTS = [
   },
 ] as const;
 
-/**
- * 只在旧地址已经找不到页面时才跳转（不注册成静态路由）：
- * 工厂部门菜单分组的 SQL 执行前旧地址照常可用，执行后旧链接、车间墙上的二维码自动跳到新地址。
- */
+/** Grouping existing server menus changes their page URLs. */
 const LEGACY_FALLBACK_REDIRECTS = [
+  { from: '/system/mcp', to: '/client-config/mcp' },
+  { from: '/fdmai/workbench-key', to: '/client-config/workbench-key' },
+  { from: '/skill-market', to: '/client-config/skill-market' },
+  { from: '/plugin-market', to: '/client-config/plugin-market' },
+  { from: '/desktop-feedback', to: '/client-config/desktop-feedback' },
   {
     from: '/gongchang/production-order',
     to: '/gongchang/production/production-order',
@@ -39,7 +43,22 @@ const LEGACY_FALLBACK_REDIRECTS = [
 ] as const;
 
 function resolveLegacyFallbackPath(path: string) {
-  return LEGACY_FALLBACK_REDIRECTS.find((route) => route.from === path)?.to;
+  const normalized = path.replace(/\/$/, '');
+  return LEGACY_FALLBACK_REDIRECTS.find((route) => route.from === normalized)
+    ?.to;
+}
+
+/** Resolve against the current user's generated menu routes after login. */
+function legacyFallback(
+  router: Router,
+  to: ReturnType<Router['resolve']> | RouteLocationNormalized,
+) {
+  if (to.name !== 'FallbackNotFound') return;
+  const path = resolveLegacyFallbackPath(to.path);
+  if (!path) return;
+  const target = router.resolve(path);
+  if (target.matched.length === 0 || target.name === 'FallbackNotFound') return;
+  return { hash: to.hash, path, query: to.query, replace: true };
 }
 
 function resolveLegacyRoutePath(path: string) {
@@ -51,6 +70,7 @@ function resolveLegacyRoutePath(path: string) {
 export {
   LEGACY_FALLBACK_REDIRECTS,
   LEGACY_ROUTE_REDIRECTS,
+  legacyFallback,
   resolveLegacyFallbackPath,
   resolveLegacyRoutePath,
 };

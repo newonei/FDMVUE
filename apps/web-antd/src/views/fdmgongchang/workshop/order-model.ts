@@ -2,7 +2,7 @@ import type { FdmgongchangScheduleApi as Api } from '#/api/fdmgongchang/schedule
 import type { FdmgongchangStageStockApi as StockApi } from '#/api/fdmgongchang/stage-stock';
 
 import { dimensionTextInMm } from '../shared/dimensions';
-import { formatQty, makeLabels, sizeText, sumQty, toNumber } from '../stage-stock/model';
+import { formatQty, makeLabels, roundQty, sizeText, sumQty, toNumber } from '../stage-stock/model';
 import { relatedProductSearch } from './order-details';
 
 export interface WorkshopOrder {
@@ -10,7 +10,36 @@ export interface WorkshopOrder {
   orderNo: string;
   customer: string;
   items: Api.RelatedOrderItem[];
-  tasks: Api.Task[];
+  tasks: Array<Api.Task & { progress: WorkshopTaskProgress }>;
+  counts: Record<WorkshopTaskProgress['group'], number>;
+}
+
+interface WorkshopTaskProgress {
+  group: 'closed' | 'completed' | 'handled' | 'pending';
+  label: string;
+  color: string;
+  shortage?: number;
+}
+
+export function workshopTaskProgress(task: Api.Task): WorkshopTaskProgress {
+  if (task.status === 'CLOSED') return { group: 'closed', label: '已关闭', color: 'default' };
+  const good = toNumber(task.actualQuantity);
+  if (task.status === 'DONE') {
+    const planned = toNumber(task.quantity);
+    if (planned === undefined || planned <= 0 || good === undefined) {
+      return { group: 'pending', label: '已报工 · 数量待核对', color: 'orange' };
+    }
+    if (good >= planned) return { group: 'completed', label: '已完成', color: 'green' };
+    return {
+      group: task.shortageHandledAt ? 'handled' : 'pending',
+      label: '已报工 · 未达计划',
+      color: 'orange',
+      shortage: roundQty(planned - good),
+    };
+  }
+  if (task.activeOrderId) return { group: 'pending', label: '已领料 · 在做', color: 'blue' };
+  const reported = (good ?? 0) + (toNumber(task.defectQuantity) ?? 0) > 0;
+  return { group: 'pending', label: reported ? '部分报工' : '待报工', color: 'blue' };
 }
 
 export interface FocusField { label: string; value: string; side?: 'BACK' | 'FRONT' }
@@ -40,14 +69,17 @@ export function groupWorkshopOrders(tasks: Api.Task[]): WorkshopOrder[] {
   const groups = new Map<string, WorkshopOrder>();
   for (const task of uniqueTasks(tasks)) {
     const numbers = taskOrderNos(task);
+    const row = { ...task, progress: workshopTaskProgress(task) };
     for (const number of numbers.length > 0 ? numbers : ['']) {
       const key = number || `stock:${task.scheduleId}`;
       let group = groups.get(key);
       if (!group) {
-        group = { key, orderNo: number || `备货任务 · 排单 #${task.scheduleId}`, customer: '', items: [], tasks: [] };
+        group = { key, orderNo: number || `备货任务 · 排单 #${task.scheduleId}`, customer: '', items: [], tasks: [],
+          counts: { closed: 0, completed: 0, handled: 0, pending: 0 } };
         groups.set(key, group);
       }
-      group.tasks.push(task);
+      group.tasks.push(row);
+      group.counts[row.progress.group]++;
       for (const item of (task.relatedOrderItems ?? []).filter((entry) => entry.orderNo === number)) {
         if (!group.items.some((entry) => entry.orderId === item.orderId && entry.itemId === item.itemId)) group.items.push(item);
       }
@@ -60,8 +92,6 @@ export function groupWorkshopOrders(tasks: Api.Task[]): WorkshopOrder[] {
 export function uniqueTasks(tasks: Api.Task[]) {
   return [...new Map(tasks.map((task) => [task.id, task])).values()];
 }
-
-export function isTaskCompleted(task: Api.Task) { return task.status === 'DONE' || task.status === 'CLOSED'; }
 
 export function orderMatches(order: WorkshopOrder, keyword: string) {
   const value = keyword.trim().toLocaleLowerCase();
