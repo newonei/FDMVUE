@@ -6,7 +6,11 @@ import { computed } from 'vue';
 import { headline, RESULT_META, RESULT_ORDER, segments } from './checklist';
 
 /** 一行结果条：比例条、各结论数量、最要紧的问题。右侧按钮由使用方放进 default 插槽。 */
-const props = defineProps<{ list: Checklist; summary?: string }>();
+const props = defineProps<{
+  label?: string;
+  list: Checklist;
+  summary?: string;
+}>();
 const emit = defineEmits<{ select: [] }>();
 const filter = defineModel<DrawerFilter>('filter', { default: 'ALL' });
 
@@ -27,7 +31,7 @@ const allPass = computed(
 
 <template>
   <div class="bar">
-    <span class="bar-title">AI 检查</span>
+    <span class="bar-title">{{ label || 'AI 检查' }}</span>
     <template v-if="list.total > 0">
       <span class="bar-seg" aria-hidden="true">
         <i class="f" :style="{ width: seg.fail }"></i>

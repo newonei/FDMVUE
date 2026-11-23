@@ -619,6 +619,7 @@ onBeforeUnmount(stopDry);
             <div v-if="dryResult" class="aicheck-dry">
               <AiCheckBar
                 v-model:filter="dryFilter"
+                :label="checkpointsOnly ? '采购单审核试跑' : undefined"
                 :list="dryList"
                 :summary="dryResult.task.summary"
               >
@@ -653,6 +654,7 @@ onBeforeUnmount(stopDry);
                 v-if="dryList.total > 0"
                 :list="dryList"
                 :filter="dryFilter"
+                :hide-source="checkpointsOnly"
               />
             </div>
           </section>

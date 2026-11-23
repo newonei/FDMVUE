@@ -18,7 +18,11 @@ import {
 import AiCheckBar from './AiCheckBar.vue';
 import AiCheckChecklist from './AiCheckChecklist.vue';
 import AiCheckDrawer from './AiCheckDrawer.vue';
-import { buildChecklist, defaultExpanded } from './checklist';
+import {
+  buildChecklist,
+  buildConfiguredChecklist,
+  defaultExpanded,
+} from './checklist';
 import { aiStatusText, attachmentSummary, needsReason } from './risk';
 
 /**
@@ -54,17 +58,23 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let polls = 0;
 let seq = 0;
 
-const list = computed(() =>
-  buildChecklist(
-    result.value?.latest?.checks,
-    result.value?.findings ?? [],
-    result.value?.items,
-  ),
+const checkpointsOnly = computed(() => props.docType === 'PURCHASE_ORDER');
+const list = computed(() => {
+  const checks = result.value?.latest?.checks;
+  const findings = result.value?.findings ?? [];
+  const items = result.value?.items ?? [];
+  return checkpointsOnly.value
+    ? buildConfiguredChecklist(checks, findings, items)
+    : buildChecklist(checks, findings, items);
+});
+const summary = computed(() =>
+  checkpointsOnly.value ? undefined : result.value?.latest?.summary,
 );
 const pendingHint = computed(() => {
   if (result.value?.running) return '正在检查，稍后自动刷新';
   if (!result.value?.latest)
     return '单据保存后会自动检查，也可以点「重新检查」';
+  if (checkpointsOnly.value) return '本次未覆盖，点「重新检查」可查看结论';
   return '这次检查没有覆盖（检查后新加的，或 AI 没有运行），点「重新检查」';
 });
 const expanded = computed(() =>
@@ -75,7 +85,7 @@ const notice = computed(() =>
   aiStatusText(result.value?.latest?.aiStatus, props.docType),
 );
 const noCheckpoints = computed(
-  () => props.docType === 'PURCHASE_ORDER' && result.value?.items?.length === 0,
+  () => checkpointsOnly.value && result.value?.items?.length === 0,
 );
 const attachmentInfo = computed(() =>
   attachmentSummary(result.value?.latest?.attachments),
@@ -214,16 +224,24 @@ defineExpose({ reload: () => load(true) });
 </script>
 
 <template>
-  <section v-if="docId" class="ai-check" aria-label="AI 检查">
+  <section
+    v-if="docId"
+    class="ai-check"
+    :aria-label="checkpointsOnly ? '采购单审核' : 'AI 检查'"
+  >
     <AiCheckBar
       v-model:filter="filter"
+      :label="checkpointsOnly ? '采购单审核' : undefined"
       :list="list"
-      :summary="result?.latest?.summary"
+      :summary="summary"
       @select="expandChoice = '1'"
     >
       <span v-if="result?.running" class="ai-check-running">检查中…</span>
+      <span v-else-if="noCheckpoints" class="ai-check-muted">
+        未启用检查点
+      </span>
       <span v-else-if="!result?.latest && !loading" class="ai-check-muted">
-        {{ noCheckpoints ? '未启用检查点' : '单据保存后会自动检查' }}
+        单据保存后会自动检查
       </span>
       <span v-if="checkedAt">{{ checkedAt }}</span>
       <Tooltip title="按单据当前内容重新检查">
@@ -274,10 +292,10 @@ defineExpose({ reload: () => load(true) });
         {{ notice }}
       </div>
       <div
-        v-if="result?.latest?.summary && list.total > 0"
+        v-if="summary && list.total > 0"
         class="ai-check-muted ai-check-notice"
       >
-        AI 结论：{{ result.latest.summary }}
+        AI 结论：{{ summary }}
       </div>
       <div v-if="attachmentInfo.read" class="ai-check-muted ai-check-notice">
         {{ attachmentInfo.read }}
@@ -290,7 +308,12 @@ defineExpose({ reload: () => load(true) });
         {{ line }}
       </div>
       <div
-        v-if="result?.latest && !list.hasChecks && list.total > 0"
+        v-if="
+          !checkpointsOnly &&
+          result?.latest &&
+          !list.hasChecks &&
+          list.total > 0
+        "
         class="ai-check-muted ai-check-notice"
       >
         这次检查是旧版本，只列出了问题；点「重新检查」可看到每个检查点的结论。
@@ -301,14 +324,17 @@ defineExpose({ reload: () => load(true) });
         :list="list"
         :filter="filter"
         :handling="handling"
+        :hide-source="checkpointsOnly"
         :pending-hint="pendingHint"
         actions
         @handle="startHandle"
       />
     </template>
     <AiCheckDrawer
+      :hide-source="checkpointsOnly"
       :list="list"
       :open="drawerOpen"
+      :title="checkpointsOnly ? '采购单审核依据' : undefined"
       @close="drawerOpen = false"
     />
     <Modal

@@ -20,6 +20,7 @@ const props = defineProps<{
   actions?: boolean;
   filter?: DrawerFilter;
   handling?: number;
+  hideSource?: boolean;
   list: Checklist;
   /** 未检查那组的说明 */
   pendingHint?: string;
@@ -28,13 +29,13 @@ const emit = defineEmits<{
   handle: [finding: FdmAiCheckApi.Finding, status: FdmAiCheckApi.FindingStatus];
 }>();
 
-const columns = [
+const columns = computed(() => [
   { title: '结论', key: 'result', width: 112 },
   { title: '检查点', key: 'name', width: 200 },
-  { title: '来源', key: 'source', width: 64 },
+  ...(props.hideSource ? [] : [{ title: '来源', key: 'source', width: 64 }]),
   { title: '说明', key: 'summary', ellipsis: true },
   { title: '问题', key: 'issues', width: 96, align: 'right' as const },
-];
+]);
 
 const rows = computed(() =>
   tableRows(props.list).filter(

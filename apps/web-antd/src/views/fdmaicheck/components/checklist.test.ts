@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildChecklist,
+  buildConfiguredChecklist,
   defaultExpanded,
   filterRows,
   headline,
@@ -158,6 +159,42 @@ describe('aI 检查清单', () => {
       'RULE|PRICE_MISSING',
     ]);
     expect(withFinding.issues.map((r) => r.key)).toEqual(['AI|ATTACH']);
+  });
+
+  it('limits current purchase results to enabled configured points', () => {
+    const items: FdmAiCheckApi.CheckPoint[] = [
+      { source: 'AI', checkCode: 'ATTACH', name: '采购附件金额' },
+      { source: 'RULE', checkCode: 'CONTRACT', name: '采购金额不超过合同约定' },
+      { source: 'AI', checkCode: 'NEW', name: '新增检查点' },
+    ];
+    const list = buildConfiguredChecklist(
+      [
+        verdict('ATTACH', 'FAIL'),
+        verdict('CONTRACT', 'PASS', 'RULE'),
+        verdict('PRICE_MISSING', 'FAIL', 'RULE'),
+        verdict('REMOVED', 'FAIL'),
+      ],
+      [
+        finding(1, 'ATTACH'),
+        finding(2, 'PRICE_MISSING', 'HIGH', 'OPEN', 'RULE'),
+        finding(3, 'REMOVED', 'HIGH'),
+        finding(4, 'CONTRACT', 'HIGH'),
+        finding(5, undefined, 'HIGH'),
+      ],
+      items,
+    );
+
+    expect(list.total).toBe(3);
+    expect(list.openIssues.map(({ name }) => name)).toEqual(['采购附件金额']);
+    expect(list.passed.map(({ key }) => key)).toEqual(['RULE|CONTRACT']);
+    expect(list.pending.map(({ key }) => key)).toEqual(['AI|NEW']);
+    expect(
+      buildConfiguredChecklist(
+        [verdict('ATTACH', 'FAIL')],
+        [finding(1, 'ATTACH')],
+        [],
+      ),
+    ).toMatchObject({ hasChecks: false, total: 0 });
   });
 });
 

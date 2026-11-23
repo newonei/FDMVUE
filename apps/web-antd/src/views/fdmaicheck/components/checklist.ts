@@ -74,6 +74,26 @@ function resultOfFindings(findings: FdmAiCheckApi.Finding[]): RowResult {
   return findings.some((f) => f.severity !== 'INFO') ? 'FAIL' : 'WARN';
 }
 
+/** 当前采购单审核只展示已启用的检查点及对应结论。 */
+export function buildConfiguredChecklist(
+  checks: FdmAiCheckApi.Verdict[] | null | undefined,
+  findings: FdmAiCheckApi.Finding[],
+  items: FdmAiCheckApi.CheckPoint[],
+): Checklist {
+  const configured = new Map(
+    items.map((item) => [keyOf(item.source, item.checkCode), item]),
+  );
+  const currentChecks = (checks ?? []).flatMap((check) => {
+    const item = configured.get(keyOf(check.source, check.checkCode));
+    return item ? [{ ...check, name: item.name, group: item.group }] : [];
+  });
+  const currentFindings = findings.filter(
+    ({ checkCode, source }) =>
+      checkCode && configured.has(keyOf(source, checkCode)),
+  );
+  return buildChecklist(currentChecks, currentFindings, items);
+}
+
 /**
  * 把逐项结论和问题对到一起。问题按「来源 + 编码」归到检查点；对不上的（AI 的其他发现、没登记的规则、
  * 改版前的检查）各自成一行，放在问题里。

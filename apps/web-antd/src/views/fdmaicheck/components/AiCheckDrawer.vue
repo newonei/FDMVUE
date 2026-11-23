@@ -8,7 +8,12 @@ import { Drawer, Input, Radio } from 'ant-design-vue';
 import { filterRows, RESULT_META } from './checklist';
 
 /** 全部依据：逐项列出 AI 和系统规则是怎么判的，可按结论筛选、按名称搜索。 */
-const props = defineProps<{ list: Checklist; open: boolean; title?: string }>();
+const props = defineProps<{
+  hideSource?: boolean;
+  list: Checklist;
+  open: boolean;
+  title?: string;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
 const filter = ref<DrawerFilter>('ALL');
@@ -72,9 +77,9 @@ watch(
             <div class="dr-line">
               <span class="dr-name">{{ row.name }}</span>
               <span class="dr-meta">
-                {{ RESULT_META[row.result].label }} ·
-                {{ row.source === 'RULE' ? '规则' : 'AI'
-                }}{{ row.group ? ` · ${row.group}` : '' }}
+                {{ RESULT_META[row.result].label
+                }}<template v-if="!hideSource">
+                  · {{ row.source === 'RULE' ? '规则' : 'AI' }}</template>{{ row.group ? ` · ${row.group}` : '' }}
               </span>
             </div>
             <p v-for="f in row.findings" :key="f.id" class="dr-text">
@@ -94,7 +99,9 @@ watch(
               class="dr-basis"
             >
               {{
-                row.source === 'RULE' ? '系统规则没有发现问题' : '没有写依据'
+                row.source === 'RULE' && !hideSource
+                  ? '系统规则没有发现问题'
+                  : '没有写依据'
               }}
             </p>
           </div>
